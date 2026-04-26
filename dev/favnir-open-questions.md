@@ -42,8 +42,13 @@
 決めること:
 
 - `Pure + Db = Db` のような基本規則
-- `Emit<A> + Emit<B>` をどう表すか
 - effect の順序や集合性をどう考えるか
+
+決定済み:
+
+- `Emit<A> + Emit<B> = Emit<A | B>`
+  - `Emit` は型パラメータを union で合成する
+  - 複数 event を発火する `flw` の effect は `Emit<A | B>` として畳まれる
 
 理由:
 

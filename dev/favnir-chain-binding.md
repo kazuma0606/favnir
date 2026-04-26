@@ -141,6 +141,39 @@ chain id <- save_user
 
 つまり、表面にはモナドを出さなくても、内部意味論としてはかなりモナド的。
 
+## `chain` vs `|>`
+
+`chain` と `|>` は似ているが、役割が異なる。
+
+| | `|>` | `chain` |
+|---|---|---|
+| 対象 | 無名の中間値 | 名前付き束縛 |
+| 型の変化 | ステップごとに変わる | 論理名は同じ、型は変わってよい |
+| effect | trf に帰属する | 蓄積され、文脈全体に現れる |
+| 用途 | データの流れを表す | 同一概念の段階的変換 |
+
+使い分けの目安:
+
+- 処理の流れを定義したいなら `|>`
+- 同じ概念 (`user`, `order` など) に処理を積み上げたいなら `chain`
+
+```fav
+// |> : ParseCsv → ValidateUser という流れを表す
+bind users <-
+    text
+    |> ParseCsv
+    |> ValidateUser
+
+// chain : user という概念に段階的な変換を積む
+bind user <- row
+chain user <- parse_user    // Row -> User!
+chain user <- normalize     // User -> User
+chain id   <- save_user     // User -> UserId !Db
+```
+
+`chain` の本質的な価値は effect 蓄積にある。
+最終的な `id` の型には、途中のすべての effect と failure が現れる。
+
 ## `chain` と `trf` / `flw`
 
 `chain` は `trf` や `flw` を置き換えるものではない。

@@ -118,25 +118,49 @@ fn map<T, U>(items: List<T>, f: Fn<T, U>) -> List<U> {
 - trait 的な複雑さを持ち込みやすい
 - Favnir の初期価値はそこではない
 
-## 将来の制約機構
+## `cap` による制約アプローチ
 
-もし後で必要なら、constraint は trait としてではなく、compile-time rule として別建てにした方がよい。
+Favnir では trait bound の代わりに `cap` (capability) を使う。
 
-イメージ:
+`cap` は compile-time の明示的な能力記述で、effect とは独立した概念。
 
 ```fav
-fn sort<T>(items: List<T>) -> List<T>
-where T: Ord
+cap Ord<T> {
+    compare: T -> T -> Int
+}
+
+fn sort<T>(items: List<T>, ord: Ord<T>) -> List<T> {
+    ...
+}
 ```
 
-ただし、これは初期仕様には入れない。
+呼び出し側:
 
-Favnir では次の 2 つを分けて考えるべき。
+```fav
+bind sorted <- sort(users, User.ord)
+```
 
-- compile-time constraint
-- runtime capability
+### `cap` の特徴
 
-`Db`, `Io`, `Emit<Event>` は runtime capability / effect の話であり、generic constraint とは別物。
+- capability は値として明示的に渡す
+- 暗黙解決なし
+- trait bound と違い、型システムの複雑化を最小限に抑えられる
+- AI が安全に扱いやすい (何が渡されているか常に明示)
+- テストで差し替えが容易
+
+### `cap` と `where` の違い
+
+`where T: Ord` は implicit resolution を前提にする。
+`cap Ord<T>` を値渡しにすることで、implicit resolution を避けながら同等の表現力を持てる。
+
+初期仕様では `cap` の明示渡しのみ。将来的に `default` の仕組みを足すことは検討可能だが、初期には入れない。
+
+### Favnir での分離
+
+- `Db`, `Io`, `Emit<Event>` = runtime effect (副作用)
+- `Ord`, `Eq`, `Hash`, `Show` = compile-time cap (型に対する能力要求)
+
+この 2 つは混同しない。
 
 ## 実装順
 

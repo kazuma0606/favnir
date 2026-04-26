@@ -518,7 +518,7 @@ fav run <file.fav>
 ```
 
 - `.fav` ファイルをインタープリタで実行する
-- `fn main() -> Unit` をエントリポイントとして呼び出す
+- `fn main() -> Unit !Io ` をエントリポイントとして呼び出す
 - `main` が存在しない場合はエラー
 
 ### `fav check`

@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cargo build:*)",
+      "Bash(./target/debug/fav run:*)",
+      "Bash(./target/debug/fav check:*)",
+      "Bash(echo \"exit: $?\")",
+      "Bash(cd:*)",
+      "Bash(cargo test:*)"
+    ]
+  }
+}

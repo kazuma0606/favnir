@@ -179,6 +179,16 @@ if rows.is_empty() {
 }
 ```
 
+Favnir では `if` は式として扱う方針にする。
+
+```fav
+bind users <- if rows.is_empty() {
+    []
+} else {
+    rows |> ValidateUser
+}
+```
+
 ### `fn`
 
 通常の関数定義。
@@ -286,6 +296,46 @@ fn map<T, U>(items: List<T>, f: T -> U) -> List<U> {
 - クロージャはあり
 - 必要なら後で明示的部分適用を検討
 
+## 式指向
+
+Favnir は式指向の言語として整理する。
+
+方針:
+
+- `if` は式
+- `match` は式
+- block は式
+- 関数適用は式
+- block の最後の式が値になる
+
+例:
+
+```fav
+bind result <- {
+    bind rows <- text |> ParseCsv
+    if rows.is_empty() {
+        []
+    } else {
+        rows |> ValidateUser
+    }
+}
+```
+
+一方で `bind` 自体は式ではなく、束縛構文として扱う。
+
+## block
+
+block は最後の式を返す。
+
+```fav
+{
+    bind x <- 1
+    x + 1
+}
+```
+
+この block 全体の値は `2`。
+
 ## optional / fallible / effect の分離
 
 Favnir ではこの 3 つを分ける。
@@ -352,6 +402,39 @@ emit UserImported { id: user.id }
 
 - `flw` を外部実行単位に載せるための上位構文
 - アプリケーション実行モデル寄り
+
+### `test`
+
+初期仕様では、次のようなテスト構文で十分。
+
+```fav
+test "parse user" {
+    assert(true)
+}
+```
+
+最小セット:
+
+- `test "..." { ... }`
+- `assert(cond)`
+- `fail(message)`
+
+`expect ...` は後で sugar として足せばよい。
+
+### `IO`
+
+標準入出力は `IO` namespace にまとめる。
+
+```fav
+IO.print("hello")
+IO.println("hello")
+```
+
+方針:
+
+- `print` / `println` は pure ではない
+- `IO` 操作は `!Io` effect に属する
+- built-in を散らさず、namespace で整理する
 
 ## 入れない構文
 

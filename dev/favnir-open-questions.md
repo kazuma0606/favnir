@@ -96,6 +96,7 @@
 - `Option`
 - `Result`
 - `map/filter/fold/flat_map`
+- `IO.print` / `IO.println`
 
 理由:
 

@@ -169,10 +169,95 @@ ADT は関数型言語ではかなり中核的な概念。
 
 と組み合わせると非常に強い。
 
+## 8. `type` を統一入口にする考え方
+
+Favnir では、将来的に `type` をユーザー定義型の統一入口として前面に出す考え方が自然。
+
+例:
+
+```fav
+type User = {
+    name: String
+    email: String
+}
+
+type Session =
+    | Guest
+    | Authenticated { user: User }
+```
+
+このときユーザーは両方とも `type` で定義する。  
+一方で compiler / checker は内部的に:
+
+- record 的な型なのか
+- sum type なのか
+- generic な合成型なのか
+
+を ADT として解析できる。
+
+つまり、表面構文は統一しつつ、中身の種類は内部意味論で判定する。
+
+## 9. tooling での活用
+
+この設計は IDE や補完とかなり相性が良い。
+
+たとえば hover で:
+
+```text
+User
+record type
+fields:
+- name: String
+- email: String
+```
+
+```text
+Session
+sum type
+variants:
+- Guest
+- Authenticated { user: User }
+```
+
+のように表示できる。
+
+## 10. 命名支援
+
+型の種類が分かるなら、命名規約も支援できる。
+
+たとえば:
+
+- record type には entity / noun 的な名前を推奨
+- sum type には state / result / mode 的な名前を推奨
+
+hover や lint で次のような支援ができる。
+
+```text
+Type `User` looks like a sum type.
+Consider a state/result-style name for readability.
+```
+
+あるいは逆に:
+
+```text
+Type `SessionState` looks like a record type.
+Consider a noun/entity-style name if this is not a state union.
+```
+
+## 11. 意義
+
+この方針の利点:
+
+- `struct` / `enum` / `union` を表面構文で増やしすぎずに済む
+- それでも tooling 上では型の種類を明確に見せられる
+- 命名や設計の一貫性を静的に支援できる
+- AI 補完にも metadata として活用しやすい
+
 ## 短いまとめ
 
 - 積型 = 複数の値を同時に持つ
 - 和型 = 複数の候補のうち一つを取る
 - ADT = 積型と和型を組み合わせた型
 
-Favnir では、`struct`, `type`, `T?`, `T!`, `match` を支える基礎になる。
+Favnir では、`type`, `T?`, `T!`, `match` を支える基礎になり、  
+将来的には tooling 上で型の種類を可視化する基盤にもなる。

@@ -1,9 +1,7 @@
-// adt_match.fav — type 定義と match 式の例
+// adt_match.fav - type definition, match expression, and Option example
 
-// 方向を表す ADT
 type Direction = | North | South | East | West
 
-// 方向を文字列に変換
 fn direction_name(d: Direction) -> String {
     match d {
         North => "North"
@@ -13,18 +11,18 @@ fn direction_name(d: Direction) -> String {
     }
 }
 
-// Option を使った例
+// Returns none on division by zero, otherwise some(a / b)
 fn safe_divide(a: Int, b: Int) -> Int? {
     if b == 0 {
         Option.none()
     } else {
-        Option.some(a)
+        Option.some(a / b)
     }
 }
 
 public fn main() -> Unit !Io {
-    bind name <- direction_name(North);
+    bind name <- direction_name(North)
     IO.println(name);
-    bind result <- Option.unwrap_or(safe_divide(10, 2), 0);
+    bind result <- Option.unwrap_or(safe_divide(10, 2), 0)
     IO.println(String.upper("done"))
 }

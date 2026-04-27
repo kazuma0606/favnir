@@ -1,4 +1,4 @@
-// hello.fav — 最初の Favnir プログラム
+// hello.fav - minimal Favnir program
 
 public fn main() -> Unit !Io {
     IO.println("Hello, Favnir!")

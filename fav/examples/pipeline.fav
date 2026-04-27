@@ -1,14 +1,12 @@
-// pipeline.fav — trf + |> + flw の例
+// pipeline.fav - trf + flw + |> example
 
-// 文字列を正規化する trf
 trf Trim:  String -> String = |s| { String.trim(s) }
 trf Lower: String -> String = |s| { String.lower(s) }
 
-// flw で合成
+// compose with flw
 flw Normalize = Trim |> Lower
 
-// 入力を正規化して出力する
 public fn main() -> Unit !Io {
-    bind result <- "  Hello, World!  " |> Normalize;
+    bind result <- "  Hello, World!  " |> Normalize
     IO.println(result)
 }

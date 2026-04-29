@@ -8,6 +8,7 @@ use crate::lexer::Span;
 #[derive(Debug, Clone, PartialEq)]
 pub enum Visibility {
     Public,
+    Internal,
     Private,
 }
 
@@ -17,6 +18,13 @@ pub enum Visibility {
 pub enum Effect {
     Pure,
     Io,
+    Db,
+    Network,
+    Trace,
+    /// `Emit<EventType>`
+    Emit(String),
+    /// `Emit<A | B>` — result of composing multiple Emit effects
+    EmitUnion(Vec<String>),
 }
 
 // ── TypeExpr (2-2) ────────────────────────────────────────────────────────────
@@ -96,7 +104,9 @@ pub enum TypeBody {
 /// `type User = { ... }` or `type Session = | Guest | Authenticated { ... }`
 #[derive(Debug, Clone)]
 pub struct TypeDef {
+    pub visibility: Option<Visibility>,
     pub name: String,
+    pub type_params: Vec<String>,   // e.g. ["T", "U"] for type Pair<T, U>
     pub body: TypeBody,
     pub span: Span,
 }
@@ -163,6 +173,7 @@ impl Pattern {
 #[derive(Debug, Clone)]
 pub struct MatchArm {
     pub pattern: Pattern,
+    pub guard: Option<Box<Expr>>,   // v0.5.0: optional `where guard_expr`
     pub body: Expr,
     pub span: Span,
 }
@@ -192,6 +203,9 @@ pub enum Expr {
     /// `match expr { arm+ }`
     Match(Box<Expr>, Vec<MatchArm>, Span),
 
+    /// `collect { stmt* expr }`
+    Collect(Box<Block>, Span),
+
     /// `if cond { ... } else { ... }`
     If(Box<Expr>, Box<Block>, Option<Box<Block>>, Span),
 
@@ -200,6 +214,12 @@ pub enum Expr {
 
     /// binary operators: +, -, *, /, ==, !=, <, >, <=, >=
     BinOp(BinOp, Box<Expr>, Box<Expr>, Span),
+
+    /// `TypeName { field: expr, ... }` — record construction
+    RecordConstruct(String, Vec<(String, Expr)>, Span),
+
+    /// `emit expr` — publish an event
+    EmitExpr(Box<Expr>, Span),
 }
 
 impl Expr {
@@ -214,7 +234,10 @@ impl Expr {
             Expr::Match(_, _, s)         => s,
             Expr::If(_, _, _, s)         => s,
             Expr::Closure(_, _, s)       => s,
-            Expr::BinOp(_, _, _, s)      => s,
+            Expr::BinOp(_, _, _, s)         => s,
+            Expr::RecordConstruct(_, _, s)  => s,
+            Expr::EmitExpr(_, s)            => s,
+            Expr::Collect(_, s)             => s,
         }
     }
 }
@@ -232,6 +255,10 @@ pub enum BinOp {
 pub enum Stmt {
     Bind(BindStmt),
     Expr(Expr),
+    /// `chain x <- expr` — monadic bind with early-exit on failure (v0.5.0)
+    Chain(ChainStmt),
+    /// `yield expr;` — push a value into the enclosing collect block (v0.5.0)
+    Yield(YieldStmt),
 }
 
 // ── BindStmt (2-8) ────────────────────────────────────────────────────────────
@@ -241,6 +268,32 @@ pub struct BindStmt {
     pub pattern: Pattern,
     pub expr: Expr,
     pub span: Span,
+}
+
+// ── ChainStmt / YieldStmt (v0.5.0) ───────────────────────────────────────────
+
+#[derive(Debug, Clone)]
+pub struct ChainStmt {
+    pub name: String,
+    pub expr: Expr,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone)]
+pub struct YieldStmt {
+    pub expr: Expr,
+    pub span: Span,
+}
+
+impl Stmt {
+    pub fn span(&self) -> &Span {
+        match self {
+            Stmt::Bind(b)  => &b.span,
+            Stmt::Expr(e)  => e.span(),
+            Stmt::Chain(c) => &c.span,
+            Stmt::Yield(y) => &y.span,
+        }
+    }
 }
 
 // ── Block ─────────────────────────────────────────────────────────────────────
@@ -260,9 +313,10 @@ pub struct Block {
 pub struct FnDef {
     pub visibility: Option<Visibility>,
     pub name: String,
+    pub type_params: Vec<String>,   // e.g. ["T", "U"] for fn f<T, U>(...)
     pub params: Vec<Param>,
     pub return_ty: TypeExpr,
-    pub effect: Option<Effect>,
+    pub effects: Vec<Effect>,
     pub body: Block,
     pub span: Span,
 }
@@ -273,9 +327,10 @@ pub struct FnDef {
 pub struct TrfDef {
     pub visibility: Option<Visibility>,
     pub name: String,
+    pub type_params: Vec<String>,   // e.g. ["T", "U"] for trf F<T, U>: ...
     pub input_ty: TypeExpr,
     pub output_ty: TypeExpr,
-    pub effect: Option<Effect>,
+    pub effects: Vec<Effect>,
     pub params: Vec<Param>,
     pub body: Block,
     pub span: Span,
@@ -291,6 +346,35 @@ pub struct FlwDef {
     pub span: Span,
 }
 
+// ── CapDef / ImplDef (v0.4.0) ─────────────────────────────────────────────────
+
+/// A single field declaration inside `cap Eq<T> = { equals: T -> T -> Bool }`.
+#[derive(Debug, Clone)]
+pub struct CapField {
+    pub name: String,
+    pub ty: TypeExpr,
+    pub span: Span,
+}
+
+/// `cap Eq<T> = { equals: T -> T -> Bool }` — capability definition.
+#[derive(Debug, Clone)]
+pub struct CapDef {
+    pub visibility: Option<Visibility>,
+    pub name: String,
+    pub type_params: Vec<String>,   // ["T"] for cap Eq<T>
+    pub fields: Vec<CapField>,
+    pub span: Span,
+}
+
+/// `impl Eq<Int> { fn equals(a: Int, b: Int) -> Bool { ... } }` — capability implementation.
+#[derive(Debug, Clone)]
+pub struct ImplDef {
+    pub cap_name: String,
+    pub type_args: Vec<TypeExpr>,   // [Int] for impl Eq<Int>
+    pub methods: Vec<FnDef>,
+    pub span: Span,
+}
+
 // ── Item (2-1) ────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone)]
@@ -299,15 +383,23 @@ pub enum Item {
     FnDef(FnDef),
     TrfDef(TrfDef),
     FlwDef(FlwDef),
+    NamespaceDecl(String, Span),   // namespace data.users
+    UseDecl(Vec<String>, Span),    // use data.users.create → ["data","users","create"]
+    CapDef(CapDef),                // cap Eq<T> = { ... }
+    ImplDef(ImplDef),              // impl Eq<Int> { ... }
 }
 
 impl Item {
     pub fn span(&self) -> &Span {
         match self {
-            Item::TypeDef(t) => &t.span,
-            Item::FnDef(f)   => &f.span,
-            Item::TrfDef(t)  => &t.span,
-            Item::FlwDef(f)  => &f.span,
+            Item::TypeDef(t)          => &t.span,
+            Item::FnDef(f)            => &f.span,
+            Item::TrfDef(t)           => &t.span,
+            Item::FlwDef(f)           => &f.span,
+            Item::NamespaceDecl(_, s) => s,
+            Item::UseDecl(_, s)       => s,
+            Item::CapDef(c)           => &c.span,
+            Item::ImplDef(i)          => &i.span,
         }
     }
 }
@@ -316,5 +408,9 @@ impl Item {
 
 #[derive(Debug, Clone)]
 pub struct Program {
+    /// Declared module path (`namespace data.users`). None = derived from file path.
+    pub namespace: Option<String>,
+    /// Import declarations (`use data.users.create`).
+    pub uses: Vec<Vec<String>>,
     pub items: Vec<Item>,
 }

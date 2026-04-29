@@ -1,0 +1,46 @@
+// main.fav — エントリポイント
+//
+// Run (project mode):
+//   cd examples/multi_file
+//   fav run --db :memory:
+//
+// Check:
+//   fav check
+//
+// Explain:
+//   fav explain
+
+use data.users.create
+use data.users.find
+use data.users.list_all
+use data.users.delete
+use data.users.setup_table
+
+public fn main() -> Unit !Io !Db {
+    // テーブル初期化 (internal fn: 同一プロジェクト内なので使える)
+    bind _ <- setup_table();
+
+    // CREATE
+    bind id_alice <- create("Alice", "alice@example.com");
+    bind id_bob   <- create("Bob",   "bob@example.com");
+
+    IO.println("=== Created ===");
+    IO.println(id_alice);
+    IO.println(id_bob);
+
+    // READ one
+    bind found <- find(id_alice);
+    IO.println("=== find(alice) ===");
+    IO.println(Debug.show(found));
+
+    // READ all
+    bind rows <- list_all();
+    IO.println("=== list_all ===");
+    IO.println(Debug.show(rows));
+
+    // DELETE
+    bind _ <- delete(id_bob);
+    bind after <- list_all();
+    IO.println("=== after delete ===");
+    IO.println(Debug.show(after))
+}

@@ -1,0 +1,4 @@
+[rune]
+name    = "visibility_errors"
+version = "0.1.0"
+src     = "src"

@@ -1,0 +1,21 @@
+// Favnir v0.4.0 — generics example
+// Demonstrates generic functions and generic types.
+
+// A generic identity function: returns its argument unchanged.
+fn identity<T>(x: T) -> T { x }
+
+// A generic pair type holding two values of possibly different types.
+type Pair<A, B> = { first: A second: B }
+
+// A function that wraps two values into a Pair.
+fn make_pair<A, B>(a: A, b: B) -> Pair<A, B> {
+    Pair { first: a second: b }
+}
+
+public fn main() -> Unit {
+    bind n <- identity(42)
+    bind s <- identity("hello")
+    // Display using show capability
+    IO.println(Int.show.show(n));
+    IO.println(s)
+}

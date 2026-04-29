@@ -1,0 +1,104 @@
+// users.fav — User CRUD example with UUID primary keys, Db effect, and Emit
+//
+// Run (file-based SQLite — data persists across runs):
+//   fav run --db users.sqlite examples/users.fav
+//
+// Inspect signatures:
+//   fav explain examples/users.fav
+
+// ── Types ──────────────────────────────────────────────────────────────────────
+
+// User record.  id is a UUID string (e.g. "550e8400-e29b-41d4-a716-446655440000").
+type User = {
+    id:    String
+    name:  String
+    email: String
+}
+
+// ── Schema setup ───────────────────────────────────────────────────────────────
+
+// Creates the users table if it does not exist.
+// id column stores UUID strings as TEXT.
+fn setup_db() -> Int !Db {
+    Db.execute("CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, name TEXT NOT NULL, email TEXT NOT NULL UNIQUE)")
+}
+
+// ── Create ─────────────────────────────────────────────────────────────────────
+
+// Generates a UUID, inserts a new user, emits a UserCreated event,
+// and returns the new user's UUID.
+fn create_user(name: String, email: String) -> String !Db !Emit<UserCreated> {
+    bind id <- Util.uuid();
+    bind _ <- Db.execute("INSERT INTO users (id, name, email) VALUES (?, ?, ?)", id, name, email);
+    emit User { id: id, name: name, email: email };
+    id
+}
+
+// ── Read ───────────────────────────────────────────────────────────────────────
+
+// Returns all users ordered by name.
+// Each row is a Map<String, String> (column name → value).
+fn list_users() -> List<Map<String, String>> !Db {
+    Db.query("SELECT id, name, email FROM users ORDER BY name")
+}
+
+// Returns a single user by UUID, or none if not found.
+fn find_user(id: String) -> Map<String, String>? !Db {
+    Db.query_one("SELECT id, name, email FROM users WHERE id = ?", id)
+}
+
+// ── Update ─────────────────────────────────────────────────────────────────────
+
+// Updates the email address for the given UUID.
+// Returns the number of rows changed (0 = not found, 1 = updated).
+fn update_email(id: String, new_email: String) -> Int !Db {
+    Db.execute("UPDATE users SET email = ? WHERE id = ?", new_email, id)
+}
+
+// ── Delete ─────────────────────────────────────────────────────────────────────
+
+// Deletes the user with the given UUID.
+// Returns the number of rows changed.
+fn delete_user(id: String) -> Int !Db {
+    Db.execute("DELETE FROM users WHERE id = ?", id)
+}
+
+// ── Entry point ────────────────────────────────────────────────────────────────
+
+public fn main() -> Unit !Db !Io !Emit<UserCreated> {
+    bind _ <- setup_db();
+
+    // INSERT — each call generates a fresh UUID
+    bind id_alice <- create_user("Alice", "alice@example.com");
+    bind id_bob   <- create_user("Bob",   "bob@example.com");
+
+    IO.println("=== Created ===");
+    IO.println(Debug.show(id_alice));
+    IO.println(Debug.show(id_bob));
+
+    // SELECT all
+    bind rows <- list_users();
+    IO.println("=== All users ===");
+    IO.println(Debug.show(rows));
+
+    // SELECT one
+    bind found <- find_user(id_alice);
+    IO.println("=== find_user(alice) ===");
+    IO.println(Debug.show(found));
+
+    // UPDATE
+    bind _ <- update_email(id_alice, "alice@new.com");
+    bind updated <- find_user(id_alice);
+    IO.println("=== After update ===");
+    IO.println(Debug.show(updated));
+
+    // DELETE
+    bind _ <- delete_user(id_bob);
+    bind remaining <- list_users();
+    IO.println("=== After delete ===");
+    IO.println(Debug.show(remaining));
+
+    // Emitted events
+    IO.println("=== Events ===");
+    IO.println(Debug.show(Emit.log()))
+}

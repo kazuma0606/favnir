@@ -1,0 +1,44 @@
+// examples/chain.fav — v0.5.0: chain (monadic early exit)
+
+// ── Result propagation ────────────────────────────────────────────────────────
+
+fn parse_int(s: String) -> Int! {
+    Result.ok(42)
+}
+
+fn validate(n: Int) -> Int! {
+    if n > 0 {
+        Result.ok(n)
+    } else {
+        Result.err("must be positive")
+    }
+}
+
+// chain statements inside process: if any step returns err, the whole fn exits early
+fn process(s: String) -> Int! {
+    chain n <- parse_int(s)
+    chain v <- validate(n)
+    Result.ok(v)
+}
+
+// ── Option propagation ────────────────────────────────────────────────────────
+
+fn find_user(id: Int) -> Int? {
+    if id > 0 {
+        Option.some(id)
+    } else {
+        Option.none()
+    }
+}
+
+fn lookup(id: Int) -> Int? {
+    chain user <- find_user(id)
+    Option.some(user)
+}
+
+public fn main() -> Unit !Io {
+    IO.println(Debug.show(process("42")));
+    IO.println(Debug.show(process("-1")));
+    IO.println(Debug.show(lookup(1)));
+    IO.println(Debug.show(lookup(0)))
+}

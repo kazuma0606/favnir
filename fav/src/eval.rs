@@ -1,5 +1,5 @@
 // Favnir Interpreter
-// Tasks: 5-1..5-27
+// Tasks: 5-1..5-27, 3-2..3-11
 
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -161,11 +161,17 @@ pub fn env_lookup(env: &Env, name: &str) -> Option<Value> {
 pub struct RuntimeError {
     pub message: String,
     pub span: Span,
+    /// `Some(v)` signals a `chain` early exit; caught at function-call boundaries.
+    pub escape: Option<Value>,
 }
 
 impl RuntimeError {
     pub fn new(msg: impl Into<String>, span: &Span) -> Self {
-        RuntimeError { message: msg.into(), span: span.clone() }
+        RuntimeError { message: msg.into(), span: span.clone(), escape: None }
+    }
+    /// Create a chain-escape signal carrying `val` (err(e) or none).
+    pub fn chain_escape(val: Value, span: &Span) -> Self {
+        RuntimeError { message: String::new(), span: span.clone(), escape: Some(val) }
     }
 }
 
@@ -311,10 +317,50 @@ fn eval_binop(op: &BinOp, l: Value, r: Value, span: &Span) -> EvalResult {
     }
 }
 
+// ── Db value conversion helpers (3-10, 3-11) ─────────────────────────────────
+
+fn value_to_sql(v: &Value) -> Box<dyn rusqlite::ToSql> {
+    match v {
+        Value::Int(n)    => Box::new(*n),
+        Value::Float(f)  => Box::new(*f),
+        Value::Str(s)    => Box::new(s.clone()),
+        Value::Bool(b)   => Box::new(*b as i64),
+        Value::Unit      => Box::new(rusqlite::types::Null),
+        other            => Box::new(other.repr()),
+    }
+}
+
+fn sqlite_value_to_string(v: rusqlite::types::Value) -> String {
+    match v {
+        rusqlite::types::Value::Null       => "null".into(),
+        rusqlite::types::Value::Integer(n) => n.to_string(),
+        rusqlite::types::Value::Real(f)    => f.to_string(),
+        rusqlite::types::Value::Text(s)    => s,
+        rusqlite::types::Value::Blob(b)    => format!("<blob:{} bytes>", b.len()),
+    }
+}
+
 // ── Built-in functions (5-21..5-25) ───────────────────────────────────────────
 
 fn eval_builtin(ns: &str, method: &str, mut args: Vec<Value>, span: &Span) -> EvalResult {
     match (ns, method) {
+        // ── IO (5-21) ────────────────────────────────────────────────────────
+        // ── Trace (task 4-13/4-14) ──────────────────────────────────────────
+        ("Trace", "print") => {
+            let v = args.into_iter().next().unwrap_or(Value::Unit);
+            eprintln!("[trace] {}", v.display());
+            Ok(v)
+        }
+        ("Trace", "log") => {
+            if args.len() < 2 {
+                return Err(RuntimeError::new("Trace.log requires 2 arguments (label, value)", span));
+            }
+            let label = args.remove(0);
+            let val   = args.remove(0);
+            eprintln!("[trace] {}: {}", label.display(), val.display());
+            Ok(val)
+        }
+
         // ── IO (5-21) ────────────────────────────────────────────────────────
         ("IO", "print") => {
             let s = args.into_iter().next().unwrap_or(Value::Unit);
@@ -582,6 +628,274 @@ fn eval_builtin(ns: &str, method: &str, mut args: Vec<Value>, span: &Span) -> Ev
             Ok(Value::Variant(vname, Some(Box::new(Value::Record(map)))))
         }
 
+        // ── Map (3-15..3-18) ──────────────────────────────────────────────────
+        ("Map", "get") => {
+            if args.len() < 2 {
+                return Err(RuntimeError::new("Map.get requires 2 arguments (map, key)", span));
+            }
+            let key = args.remove(1);
+            let map = args.remove(0);
+            let m = match map {
+                Value::Record(m) => m,
+                Value::Unit      => HashMap::new(),
+                other => return Err(RuntimeError::new(
+                    format!("Map.get expects (Record, String), got ({}, ...)", other.type_name()), span
+                )),
+            };
+            match key {
+                Value::Str(k) => Ok(match m.get(&k) {
+                    Some(v) => Value::Variant("some".into(), Some(Box::new(v.clone()))),
+                    None    => Value::Variant("none".into(), None),
+                }),
+                other => Err(RuntimeError::new(
+                    format!("Map.get: key must be String, got {}", other.type_name()), span
+                )),
+            }
+        }
+        ("Map", "set") => {
+            if args.len() < 3 {
+                return Err(RuntimeError::new("Map.set requires 3 arguments (map, key, value)", span));
+            }
+            let val = args.remove(2);
+            let key = args.remove(1);
+            let map = args.remove(0);
+            let mut m = match map {
+                Value::Record(m) => m,
+                Value::Unit      => HashMap::new(), // treat Unit as empty map
+                other => return Err(RuntimeError::new(
+                    format!("Map.set expects (Record, String, value), got ({}, ...)", other.type_name()), span
+                )),
+            };
+            match key {
+                Value::Str(k) => { m.insert(k, val); Ok(Value::Record(m)) }
+                other => Err(RuntimeError::new(
+                    format!("Map.set: key must be String, got {}", other.type_name()), span
+                )),
+            }
+        }
+        ("Map", "keys") => {
+            match args.into_iter().next() {
+                Some(Value::Record(m)) => {
+                    let mut keys: Vec<Value> = m.into_keys().map(Value::Str).collect();
+                    keys.sort_by(|a, b| a.display().cmp(&b.display()));
+                    Ok(Value::List(keys))
+                }
+                Some(v) => Err(RuntimeError::new(format!("Map.keys expects Record, got {}", v.type_name()), span)),
+                None => Err(RuntimeError::new("Map.keys requires 1 argument", span)),
+            }
+        }
+        ("Map", "values") => {
+            match args.into_iter().next() {
+                Some(Value::Record(m)) => {
+                    let mut pairs: Vec<(String, Value)> = m.into_iter().collect();
+                    pairs.sort_by(|a, b| a.0.cmp(&b.0));
+                    Ok(Value::List(pairs.into_iter().map(|(_, v)| v).collect()))
+                }
+                Some(v) => Err(RuntimeError::new(format!("Map.values expects Record, got {}", v.type_name()), span)),
+                None => Err(RuntimeError::new("Map.values requires 1 argument", span)),
+            }
+        }
+
+        // ── Debug (3-19) ──────────────────────────────────────────────────────
+        ("Debug", "show") => {
+            let v = args.into_iter().next().unwrap_or(Value::Unit);
+            Ok(Value::Str(v.repr()))
+        }
+
+        // ── Util ──────────────────────────────────────────────────────────────
+        ("Util", "uuid") => {
+            Ok(Value::Str(uuid::Uuid::new_v4().to_string()))
+        }
+        ("Util", _) => Err(RuntimeError::new(format!("Util.{} is not implemented", method), span)),
+
+        // ── Emit.log (3-4) ────────────────────────────────────────────────────
+        ("Emit", "log") => {
+            let snapshot: Vec<Value> = emit_log_snapshot()
+                .into_iter()
+                .map(|v| Value::Str(v.repr()))
+                .collect();
+            Ok(Value::List(snapshot))
+        }
+
+        // ── Db (3-7..3-11) ────────────────────────────────────────────────────
+        ("Db", "execute") => {
+            // Db.execute(sql, args...) → Int (rows changed)
+            let sql = match args.first() {
+                Some(Value::Str(s)) => s.clone(),
+                Some(v) => return Err(RuntimeError::new(
+                    format!("Db.execute: first arg must be String, got {}", v.type_name()), span
+                )),
+                None => return Err(RuntimeError::new("Db.execute requires a SQL string", span)),
+            };
+            let params = &args[1..];
+            with_db(span, |conn| {
+                let mut stmt = conn.prepare(&sql)?;
+                let bound: Vec<Box<dyn rusqlite::ToSql>> = params.iter().map(value_to_sql).collect();
+                let refs: Vec<&dyn rusqlite::ToSql> = bound.iter().map(|b| b.as_ref()).collect();
+                let rows = stmt.execute(refs.as_slice())?;
+                Ok(Value::Int(rows as i64))
+            })
+        }
+        ("Db", "query") => {
+            // Db.query(sql, args...) → List<Map<String, String>>
+            let sql = match args.first() {
+                Some(Value::Str(s)) => s.clone(),
+                Some(v) => return Err(RuntimeError::new(
+                    format!("Db.query: first arg must be String, got {}", v.type_name()), span
+                )),
+                None => return Err(RuntimeError::new("Db.query requires a SQL string", span)),
+            };
+            let params = &args[1..];
+            with_db(span, |conn| {
+                let mut stmt = conn.prepare(&sql)?;
+                let bound: Vec<Box<dyn rusqlite::ToSql>> = params.iter().map(value_to_sql).collect();
+                let refs: Vec<&dyn rusqlite::ToSql> = bound.iter().map(|b| b.as_ref()).collect();
+                let col_names: Vec<String> = stmt.column_names().iter().map(|s| s.to_string()).collect();
+                let rows: Result<Vec<Value>, rusqlite::Error> = stmt
+                    .query_map(refs.as_slice(), |row| {
+                        let mut map = HashMap::new();
+                        for (i, name) in col_names.iter().enumerate() {
+                            let v: rusqlite::types::Value = row.get(i)?;
+                            map.insert(name.clone(), Value::Str(sqlite_value_to_string(v)));
+                        }
+                        Ok(Value::Record(map))
+                    })?
+                    .collect();
+                Ok(Value::List(rows?))
+            })
+        }
+        ("Db", "query_one") => {
+            // Db.query_one(sql, args...) → Map<String, String>?
+            let sql = match args.first() {
+                Some(Value::Str(s)) => s.clone(),
+                Some(v) => return Err(RuntimeError::new(
+                    format!("Db.query_one: first arg must be String, got {}", v.type_name()), span
+                )),
+                None => return Err(RuntimeError::new("Db.query_one requires a SQL string", span)),
+            };
+            let params = &args[1..];
+            with_db(span, |conn| {
+                let mut stmt = conn.prepare(&sql)?;
+                let bound: Vec<Box<dyn rusqlite::ToSql>> = params.iter().map(value_to_sql).collect();
+                let refs: Vec<&dyn rusqlite::ToSql> = bound.iter().map(|b| b.as_ref()).collect();
+                let col_names: Vec<String> = stmt.column_names().iter().map(|s| s.to_string()).collect();
+                let mut rows = stmt.query(refs.as_slice())?;
+                match rows.next()? {
+                    None => Ok(Value::Variant("none".into(), None)),
+                    Some(row) => {
+                        let mut map = HashMap::new();
+                        for (i, name) in col_names.iter().enumerate() {
+                            let v: rusqlite::types::Value = row.get(i)?;
+                            map.insert(name.clone(), Value::Str(sqlite_value_to_string(v)));
+                        }
+                        Ok(Value::Variant("some".into(), Some(Box::new(Value::Record(map)))))
+                    }
+                }
+            })
+        }
+        ("Db", _) => Err(RuntimeError::new(
+            format!("Db.{} is not implemented", method), span
+        )),
+
+        // ── Http (3-13, 3-14 via ureq) ───────────────────────────────────────
+        ("Http", "get") => {
+            let url = match args.into_iter().next() {
+                Some(Value::Str(s)) => s,
+                Some(v) => return Err(RuntimeError::new(
+                    format!("Http.get: URL must be String, got {}", v.type_name()), span
+                )),
+                None => return Err(RuntimeError::new("Http.get requires a URL argument", span)),
+            };
+            match ureq::get(&url).call() {
+                Ok(resp) => {
+                    let body = resp.into_string()
+                        .map_err(|e| RuntimeError::new(format!("Http.get read error: {}", e), span))?;
+                    Ok(Value::Variant("ok".into(), Some(Box::new(Value::Str(body)))))
+                }
+                Err(e) => Ok(Value::Variant("err".into(), Some(Box::new(Value::Str(e.to_string()))))),
+            }
+        }
+        ("Http", "post") => {
+            if args.len() < 2 {
+                return Err(RuntimeError::new("Http.post requires 2 arguments (url, body)", span));
+            }
+            let body_val = args.remove(1);
+            let url = match args.remove(0) {
+                Value::Str(s) => s,
+                v => return Err(RuntimeError::new(
+                    format!("Http.post: URL must be String, got {}", v.type_name()), span
+                )),
+            };
+            let body_str = match body_val {
+                Value::Str(s) => s,
+                v => v.display(),
+            };
+            match ureq::post(&url).send_string(&body_str) {
+                Ok(resp) => {
+                    let body = resp.into_string()
+                        .map_err(|e| RuntimeError::new(format!("Http.post read error: {}", e), span))?;
+                    Ok(Value::Variant("ok".into(), Some(Box::new(Value::Str(body)))))
+                }
+                Err(e) => Ok(Value::Variant("err".into(), Some(Box::new(Value::Str(e.to_string()))))),
+            }
+        }
+        ("Http", _) => Err(RuntimeError::new(
+            format!("Http.{} is not implemented", method), span
+        )),
+
+        // ── Built-in cap method dispatch (v0.4.0) ────────────────────────────
+        // ns = "cap_eq_int", "cap_ord_float", etc.  method = "equals"|"compare"|"show"
+        (ns, method) if ns.starts_with("cap_") => {
+            let parts: Vec<&str> = ns.splitn(3, '_').collect(); // ["cap", "eq"|"ord"|"show", ty_lower]
+            if parts.len() < 3 {
+                return Err(RuntimeError::new(format!("malformed cap builtin: {}", ns), span));
+            }
+            let cap = parts[1];
+            let ty  = parts[2];
+            match (cap, ty, method) {
+                // equals — Int, Float, String, Bool
+                ("eq", _, "equals") => {
+                    if args.len() != 2 {
+                        return Err(RuntimeError::new("equals requires 2 arguments", span));
+                    }
+                    Ok(Value::Bool(args[0] == args[1]))
+                }
+                // compare — Int, Float, String
+                ("ord", "int", "compare") => {
+                    match (&args[0], &args[1]) {
+                        (Value::Int(a), Value::Int(b)) => {
+                            Ok(Value::Int(a.cmp(b) as i64))
+                        }
+                        _ => Err(RuntimeError::new("ord.compare expects Int", span)),
+                    }
+                }
+                ("ord", "float", "compare") => {
+                    match (&args[0], &args[1]) {
+                        (Value::Float(a), Value::Float(b)) => {
+                            Ok(Value::Int(a.partial_cmp(b).map(|o| o as i64).unwrap_or(0)))
+                        }
+                        _ => Err(RuntimeError::new("ord.compare expects Float", span)),
+                    }
+                }
+                ("ord", "string", "compare") => {
+                    match (&args[0], &args[1]) {
+                        (Value::Str(a), Value::Str(b)) => {
+                            Ok(Value::Int(a.cmp(b) as i64))
+                        }
+                        _ => Err(RuntimeError::new("ord.compare expects String", span)),
+                    }
+                }
+                // show — Int, Float, String, Bool
+                ("show", _, "show") => {
+                    let v = args.into_iter().next().unwrap_or(Value::Unit);
+                    Ok(Value::Str(v.repr()))
+                }
+                _ => Err(RuntimeError::new(
+                    format!("unknown cap built-in: {}.{}", ns, method), span
+                )),
+            }
+        }
+
         _ => Err(RuntimeError::new(format!("unknown built-in: {}.{}", ns, method), span)),
     }
 }
@@ -602,7 +916,12 @@ pub fn eval_apply(callee: Value, args: Vec<Value>, span: &Span) -> EvalResult {
             for (p, a) in params.iter().zip(args.into_iter()) {
                 env_define(&call_env, p.clone(), a);
             }
-            eval_expr(&body, &call_env)
+            // Catch chain early-exit at function boundary (task 4-5/4-6)
+            match eval_expr(&body, &call_env) {
+                Ok(v)                        => Ok(v),
+                Err(e) if e.escape.is_some() => Ok(e.escape.unwrap()),
+                Err(e)                       => Err(e),
+            }
         }
 
         // flw composition (5-17): pipe arg through each step
@@ -657,6 +976,15 @@ pub fn eval_expr(expr: &Expr, env: &Env) -> EvalResult {
         Expr::FieldAccess(obj_expr, field, span) => {
             let obj = eval_expr(obj_expr, env)?;
             match &obj {
+                Value::Namespace(ns) if ns.starts_with("type:") => {
+                    // Type namespace: look up cap instance (e.g. Int.eq → Eq<Int> record).
+                    let ty_key = &ns["type:".len()..];
+                    if let Some(cap_record) = impl_registry_get(field, ty_key) {
+                        return Ok(cap_record);
+                    }
+                    // Fall back to Builtin for unknown fields on type namespaces.
+                    Ok(Value::Builtin(ns.clone(), field.clone()))
+                }
                 Value::Namespace(ns) => {
                     Ok(Value::Builtin(ns.clone(), field.clone()))
                 }
@@ -701,11 +1029,22 @@ pub fn eval_expr(expr: &Expr, env: &Env) -> EvalResult {
         // Match (5-12)
         Expr::Match(scrutinee_expr, arms, span) => {
             let scrutinee = eval_expr(scrutinee_expr, env)?;
-            for arm in arms {
+            'arm: for arm in arms {
                 if let Some(bindings) = match_pattern(&arm.pattern, &scrutinee) {
                     let arm_env = EnvInner::new_child(env);
                     for (k, v) in bindings {
                         env_define(&arm_env, k, v);
+                    }
+                    // Evaluate pattern guard if present (task 4-15)
+                    if let Some(guard) = &arm.guard {
+                        match eval_expr(guard, &arm_env)? {
+                            Value::Bool(true)  => {}
+                            Value::Bool(false) => continue 'arm,
+                            other => return Err(RuntimeError::new(
+                                format!("pattern guard must be Bool, got {}", other.type_name()),
+                                guard.span(),
+                            )),
+                        }
                     }
                     return eval_expr(&arm.body, &arm_env);
                 }
@@ -746,6 +1085,34 @@ pub fn eval_expr(expr: &Expr, env: &Env) -> EvalResult {
             let r = eval_expr(rhs, env)?;
             eval_binop(op, l, r, span)
         }
+
+        // Record construction: TypeName { field: expr, ... } (3-1)
+        Expr::RecordConstruct(_type_name, fields, _span) => {
+            let mut map = HashMap::new();
+            for (fname, fexpr) in fields {
+                let val = eval_expr(fexpr, env)?;
+                map.insert(fname.clone(), val);
+            }
+            Ok(Value::Record(map))
+        }
+
+        // emit expr (3-3): evaluate inner, push to emit_log, return Unit
+        Expr::EmitExpr(inner, span) => {
+            let v = eval_expr(inner, env)?;
+            emit_log_push(v, span)?;
+            Ok(Value::Unit)
+        }
+
+        // collect { yield expr; ... } (task 4-10)
+        Expr::Collect(block, _span) => {
+            collect_push_frame();
+            let result = eval_block(block, env);
+            let items = collect_pop_frame();
+            match result {
+                Ok(_) => Ok(Value::List(items)),
+                Err(e) => Err(e),  // propagate escapes / errors unchanged
+            }
+        }
     }
 }
 
@@ -777,7 +1144,122 @@ fn eval_stmt(stmt: &Stmt, env: &Env) -> Result<(), RuntimeError> {
             eval_expr(e, env)?;
             Ok(())
         }
+
+        // chain n <- expr  (task 4-4)
+        Stmt::Chain(c) => {
+            let val = eval_expr(&c.expr, env)?;
+            match &val {
+                Value::Variant(n, Some(inner)) if n == "ok" || n == "some" => {
+                    env_define(env, c.name.clone(), *inner.clone());
+                    Ok(())
+                }
+                Value::Variant(n, None) if n == "none" => {
+                    Err(RuntimeError::chain_escape(val, &c.span))
+                }
+                Value::Variant(n, _) if n == "err" => {
+                    Err(RuntimeError::chain_escape(val, &c.span))
+                }
+                _ => Err(RuntimeError::new(
+                    format!("chain: expected Result or Option, got {}", val.type_name()),
+                    &c.span,
+                )),
+            }
+        }
+
+        // yield expr;  (task 4-9)
+        Stmt::Yield(y) => {
+            let val = eval_expr(&y.expr, env)?;
+            collect_yield(val);
+            Ok(())
+        }
     }
+}
+
+// ── Thread-local Db connection (3-6) ──────────────────────────────────────────
+
+// Thread-local storage: each thread (including each test thread) gets its own
+// optional Db connection.  rusqlite::Connection is Send but not Sync; thread_local
+// gives us single-threaded access per thread without needing Mutex.
+thread_local! {
+    static DB_CONN: RefCell<Option<rusqlite::Connection>> = const { RefCell::new(None) };
+}
+
+fn with_db<F, T>(span: &Span, f: F) -> Result<T, RuntimeError>
+where
+    F: FnOnce(&rusqlite::Connection) -> Result<T, rusqlite::Error>,
+{
+    DB_CONN.with(|cell| {
+        let borrow = cell.borrow();
+        match borrow.as_ref() {
+            Some(conn) => f(conn).map_err(|e| RuntimeError::new(format!("Db error: {}", e), span)),
+            None => Err(RuntimeError::new(
+                "Db not initialized — run with --db <path> flag", span,
+            )),
+        }
+    })
+}
+
+// ── Thread-local emit log (3-2) ───────────────────────────────────────────────
+
+thread_local! {
+    static EMIT_LOG: RefCell<Vec<Value>> = const { RefCell::new(Vec::new()) };
+}
+
+// ── Thread-local collect stack (task 4-7) ────────────────────────────────────
+// Each `collect { }` block pushes a frame; `yield` pushes into the top frame.
+
+thread_local! {
+    static COLLECT_STACK: RefCell<Vec<Vec<Value>>> = const { RefCell::new(Vec::new()) };
+}
+
+fn collect_push_frame() {
+    COLLECT_STACK.with(|s| s.borrow_mut().push(Vec::new()));
+}
+
+fn collect_yield(val: Value) {
+    COLLECT_STACK.with(|s| {
+        if let Some(frame) = s.borrow_mut().last_mut() {
+            frame.push(val);
+        }
+    });
+}
+
+fn collect_pop_frame() -> Vec<Value> {
+    COLLECT_STACK.with(|s| s.borrow_mut().pop().unwrap_or_default())
+}
+
+// ── Thread-local impl registry (v0.4.0) ───────────────────────────────────────
+// Maps (cap_name_lower, type_key) → Value::Record of method closures.
+// e.g. ("eq", "Int") → Record { "equals" → Closure }
+
+thread_local! {
+    static IMPL_REGISTRY: RefCell<HashMap<(String, String), Value>> =
+        RefCell::new(HashMap::new());
+}
+
+fn impl_registry_init() {
+    IMPL_REGISTRY.with(|r| r.borrow_mut().clear());
+}
+
+fn impl_registry_insert(cap: String, ty_key: String, val: Value) {
+    IMPL_REGISTRY.with(|r| r.borrow_mut().insert((cap, ty_key), val));
+}
+
+fn impl_registry_get(cap: &str, ty_key: &str) -> Option<Value> {
+    IMPL_REGISTRY.with(|r| r.borrow().get(&(cap.to_string(), ty_key.to_string())).cloned())
+}
+
+fn emit_log_init() {
+    EMIT_LOG.with(|log| log.borrow_mut().clear());
+}
+
+fn emit_log_push(v: Value, _span: &Span) -> Result<(), RuntimeError> {
+    EMIT_LOG.with(|log| log.borrow_mut().push(v));
+    Ok(())
+}
+
+fn emit_log_snapshot() -> Vec<Value> {
+    EMIT_LOG.with(|log| log.borrow().clone())
 }
 
 // ── Interpreter: program-level setup ─────────────────────────────────────────
@@ -787,6 +1269,20 @@ pub struct Interpreter;
 impl Interpreter {
     /// Evaluate a complete program, then call `main`.
     pub fn run(program: &Program) -> EvalResult {
+        emit_log_init();
+        let env = EnvInner::new_root();
+        Self::register_builtins(&env);
+        Self::register_items(program, &env)?;
+        let main_val = env_lookup(&env, "main").ok_or_else(|| {
+            RuntimeError::new("`main` is not defined", &dummy_span())
+        })?;
+        eval_apply(main_val, vec![], &dummy_span())
+    }
+
+    /// Evaluate a complete program with a Db connection, then call `main`.
+    pub fn run_with_db(program: &Program, conn: rusqlite::Connection) -> EvalResult {
+        DB_CONN.with(|cell| *cell.borrow_mut() = Some(conn));
+        emit_log_init();
         let env = EnvInner::new_root();
         Self::register_builtins(&env);
         Self::register_items(program, &env)?;
@@ -808,10 +1304,46 @@ impl Interpreter {
     }
 
     fn register_builtins(env: &Env) {
-        // 4-4: register namespace values so `IO`, `List`, etc. resolve
-        for ns in &["IO", "List", "String", "Option", "Result"] {
+        // Register namespace values so `IO`, `List`, `Db`, etc. resolve
+        for ns in &["IO", "List", "String", "Option", "Result", "Db", "Http", "Map", "Debug", "Emit", "Util", "Trace"] {
             env_define(env, ns.to_string(), Value::Namespace(ns.to_string()));
         }
+
+        // Register primitive type names as type namespaces (for cap access: Int.eq, etc.)
+        for ty in &["Bool", "Int", "Float"] {
+            env_define(env, ty.to_string(), Value::Namespace(format!("type:{}", ty)));
+        }
+
+        // ── Built-in cap instances in the impl registry ───────────────────────
+        impl_registry_init();
+
+        // Register built-in cap instances as Builtin sentinels that dispatch to eval_builtin.
+        // The actual dispatch happens in eval_apply / FieldAccess via the registry.
+        // We store Value::Record of Builtin sentinels so method dispatch works.
+        fn make_eq_record(ty: &str) -> Value {
+            let mut m = HashMap::new();
+            m.insert("equals".into(), Value::Builtin(format!("cap_eq_{}", ty.to_lowercase()), "equals".into()));
+            Value::Record(m)
+        }
+        fn make_ord_record(ty: &str) -> Value {
+            let mut m = HashMap::new();
+            m.insert("compare".into(), Value::Builtin(format!("cap_ord_{}", ty.to_lowercase()), "compare".into()));
+            m.insert("equals".into(),  Value::Builtin(format!("cap_eq_{}", ty.to_lowercase()),  "equals".into()));
+            Value::Record(m)
+        }
+        fn make_show_record(ty: &str) -> Value {
+            let mut m = HashMap::new();
+            m.insert("show".into(), Value::Builtin(format!("cap_show_{}", ty.to_lowercase()), "show".into()));
+            Value::Record(m)
+        }
+
+        for ty in &["Int", "Float", "String"] {
+            impl_registry_insert("eq".into(),   ty.to_string(), make_eq_record(ty));
+            impl_registry_insert("ord".into(),  ty.to_string(), make_ord_record(ty));
+            impl_registry_insert("show".into(), ty.to_string(), make_show_record(ty));
+        }
+        impl_registry_insert("eq".into(),   "Bool".into(), make_eq_record("Bool"));
+        impl_registry_insert("show".into(), "Bool".into(), make_show_record("Bool"));
     }
 
     fn register_items(program: &Program, env: &Env) -> Result<(), RuntimeError> {
@@ -819,10 +1351,14 @@ impl Interpreter {
         // within fn/trf bodies work because the env is mutated in place.
         for item in &program.items {
             match item {
-                Item::TypeDef(td) => Self::register_type_def(td, env),
-                Item::FnDef(fd)   => Self::register_fn_def(fd, env),
-                Item::TrfDef(td)  => Self::register_trf_def(td, env),
-                Item::FlwDef(fd)  => Self::register_flw_def(fd, env),
+                Item::TypeDef(td)            => Self::register_type_def(td, env),
+                Item::FnDef(fd)              => Self::register_fn_def(fd, env),
+                Item::TrfDef(td)             => Self::register_trf_def(td, env),
+                Item::FlwDef(fd)             => Self::register_flw_def(fd, env),
+                Item::CapDef(..)             => {}
+                Item::ImplDef(id)            => Self::register_impl_def(id, env),
+                Item::NamespaceDecl(..)      => {}
+                Item::UseDecl(..)            => {}
             }
         }
         Ok(())
@@ -874,6 +1410,38 @@ impl Interpreter {
             env: Rc::clone(env),
         };
         env_define(env, fd.name.clone(), closure);
+    }
+
+    // v0.4.0: impl definition — evaluate methods and store in impl registry
+    fn register_impl_def(id: &ImplDef, env: &Env) {
+        // Derive the type key string from the first type argument.
+        fn type_expr_str(te: &TypeExpr) -> String {
+            match te {
+                TypeExpr::Named(n, args, _) if args.is_empty() => n.clone(),
+                TypeExpr::Named(n, args, _) => {
+                    let s: Vec<_> = args.iter().map(type_expr_str).collect();
+                    format!("{}<{}>", n, s.join(", "))
+                }
+                TypeExpr::Optional(inner, _) => format!("{}?", type_expr_str(inner)),
+                TypeExpr::Fallible(inner, _) => format!("{}!", type_expr_str(inner)),
+                TypeExpr::Arrow(a, b, _)     => format!("{} -> {}", type_expr_str(a), type_expr_str(b)),
+            }
+        }
+        let Some(first_arg) = id.type_args.first() else { return };
+        let ty_key = type_expr_str(first_arg);
+        let cap_lower = id.cap_name.to_lowercase();
+
+        let mut methods = HashMap::new();
+        for method in &id.methods {
+            let params: Vec<String> = method.params.iter().map(|p| p.name.clone()).collect();
+            let closure = Value::Closure {
+                params,
+                body: Box::new(Expr::Block(Box::new(method.body.clone()))),
+                env: Rc::clone(env),
+            };
+            methods.insert(method.name.clone(), closure);
+        }
+        impl_registry_insert(cap_lower, ty_key, Value::Record(methods));
     }
 
     // 5-16: trf definition
@@ -1248,6 +1816,129 @@ mod tests {
         assert_eq!(eval_fn("fn f() -> Bool { 1 != 2 }", "f", vec![]), Value::Bool(true));
     }
 
+    // ── v0.2.0 eval tests ─────────────────────────────────────────────────────
+
+    // 3-1 / 3-20: record construction evaluates to Value::Record
+    #[test]
+    fn test_record_construct() {
+        let src = r#"
+            type User = { name: String age: Int }
+            fn f() -> User { User { name: "Alice", age: 30 } }
+        "#;
+        let result = eval_fn(src, "f", vec![]);
+        match result {
+            Value::Record(m) => {
+                assert_eq!(m.get("name"), Some(&Value::Str("Alice".into())));
+                assert_eq!(m.get("age"),  Some(&Value::Int(30)));
+            }
+            other => panic!("expected Record, got {:?}", other),
+        }
+    }
+
+    // 3-3 / 3-21: emit expr evaluates inner and returns Unit
+    #[test]
+    fn test_emit_returns_unit() {
+        let src = r#"fn f() -> Unit !Emit<E> { emit "event" }"#;
+        assert_eq!(eval_fn(src, "f", vec![]), Value::Unit);
+    }
+
+    // 3-19 / 3-24: Debug.show converts value to string
+    #[test]
+    fn test_debug_show() {
+        let src = r#"fn f(n: Int) -> String { Debug.show(n) }"#;
+        assert_eq!(eval_fn(src, "f", vec![Value::Int(42)]), Value::Str("42".into()));
+    }
+
+    #[test]
+    fn test_debug_show_bool() {
+        let src = r#"fn f(b: Bool) -> String { Debug.show(b) }"#;
+        assert_eq!(eval_fn(src, "f", vec![Value::Bool(true)]), Value::Str("true".into()));
+    }
+
+    // 3-15..3-18 / 3-24: Map built-ins
+    #[test]
+    fn test_map_set_get() {
+        let src = r#"
+            fn f() -> String? {
+                bind m <- Map.set((), "key", "val");
+                Map.get(m, "key")
+            }
+        "#;
+        // Map.get returns some("val")
+        assert_eq!(
+            eval_fn(src, "f", vec![]),
+            Value::Variant("some".into(), Some(Box::new(Value::Str("val".into()))))
+        );
+    }
+
+    #[test]
+    fn test_map_get_missing() {
+        let src = r#"fn f() -> String? { Map.get((), "missing") }"#;
+        assert_eq!(eval_fn(src, "f", vec![]), Value::Variant("none".into(), None));
+    }
+
+    #[test]
+    fn test_map_keys() {
+        let src = r#"
+            fn f() -> List<String> {
+                bind m <- Map.set(Map.set((), "b", 2), "a", 1);
+                Map.keys(m)
+            }
+        "#;
+        // keys are sorted alphabetically
+        assert_eq!(
+            eval_fn(src, "f", vec![]),
+            Value::List(vec![Value::Str("a".into()), Value::Str("b".into())])
+        );
+    }
+
+    // 3-22: Db built-ins with in-memory SQLite
+    #[test]
+    fn test_db_execute_query() {
+        let src = r#"
+            public fn main() -> Unit !Db {
+                bind _ <- Db.execute("CREATE TABLE t (id INTEGER, name TEXT)");
+                bind _ <- Db.execute("INSERT INTO t VALUES (?, ?)", 1, "Alice");
+                bind _ <- Db.execute("INSERT INTO t VALUES (?, ?)", 2, "Bob");
+                bind rows <- Db.query("SELECT id, name FROM t ORDER BY id");
+                IO.println(Debug.show(rows))
+            }
+        "#;
+        let prog = crate::parser::Parser::parse_str(src, "test").expect("parse error");
+        let conn = rusqlite::Connection::open_in_memory().expect("open db");
+        Interpreter::run_with_db(&prog, conn).expect("runtime error");
+    }
+
+    #[test]
+    fn test_db_query_one_some() {
+        let src = r#"
+            public fn main() -> Unit !Db {
+                bind _ <- Db.execute("CREATE TABLE u (id INTEGER, name TEXT)");
+                bind _ <- Db.execute("INSERT INTO u VALUES (1, 'Alice')");
+                bind row <- Db.query_one("SELECT id, name FROM u WHERE id = ?", 1);
+                IO.println(Debug.show(row))
+            }
+        "#;
+        let prog = crate::parser::Parser::parse_str(src, "test").expect("parse error");
+        let conn = rusqlite::Connection::open_in_memory().expect("open db");
+        Interpreter::run_with_db(&prog, conn).expect("runtime error");
+    }
+
+    #[test]
+    fn test_db_query_one_none() {
+        let src = r#"
+            public fn main() -> Unit !Db {
+                bind _ <- Db.execute("CREATE TABLE v (id INTEGER)");
+                bind row <- Db.query_one("SELECT id FROM v WHERE id = ?", 999);
+                IO.println(Debug.show(row))
+            }
+        "#;
+        let prog = crate::parser::Parser::parse_str(src, "test").expect("parse error");
+        let conn = rusqlite::Connection::open_in_memory().expect("open db");
+        let result = Interpreter::run_with_db(&prog, conn).expect("runtime error");
+        assert_eq!(result, Value::Unit); // main returns Unit
+    }
+
     // IO.println with main
     #[test]
     fn test_main_runs() {
@@ -1256,5 +1947,156 @@ mod tests {
         let result = Interpreter::run(&prog);
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), Value::Unit);
+    }
+
+    // ── Phase 4: cap / impl eval (v0.4.0) ─────────────────────────────────────
+
+    #[test]
+    fn test_eval_identity_generic() {
+        let src = "fn identity<T>(x: T) -> T { x }\npublic fn main() -> Int { identity(42) }";
+        assert_eq!(eval(src), Value::Int(42));
+    }
+
+    #[test]
+    fn test_eval_cap_eq_int() {
+        let src = "public fn main() -> Bool { Int.eq.equals(1, 1) }";
+        assert_eq!(eval(src), Value::Bool(true));
+    }
+
+    #[test]
+    fn test_eval_cap_eq_int_false() {
+        let src = "public fn main() -> Bool { Int.eq.equals(1, 2) }";
+        assert_eq!(eval(src), Value::Bool(false));
+    }
+
+    #[test]
+    fn test_eval_cap_ord_int_compare() {
+        // 1 < 2 → negative
+        let src = "public fn main() -> Int { Int.ord.compare(1, 2) }";
+        let v = eval(src);
+        if let Value::Int(n) = v { assert!(n < 0); } else { panic!("expected Int, got {:?}", v); }
+    }
+
+    #[test]
+    fn test_eval_cap_show_int() {
+        let src = "public fn main() -> String { Int.show.show(42) }";
+        assert_eq!(eval(src), Value::Str("42".into()));
+    }
+
+    #[test]
+    fn test_eval_user_impl() {
+        let src = r#"
+cap Eq<T> = { equals: T -> T -> Bool }
+impl Eq<Bool> {
+    fn equals(a: Bool, b: Bool) -> Bool { a == b }
+}
+public fn main() -> Bool { Bool.eq.equals(true, true) }
+"#;
+        assert_eq!(eval(src), Value::Bool(true));
+    }
+
+    // ── v0.5.0 eval tests ──────────────────────────────────────────────────────
+
+    // task 4-16: chain n <- Result.ok(42) → n = 42, function continues
+    #[test]
+    fn test_eval_chain_ok() {
+        let src = r#"
+public fn main() -> Int! {
+    chain n <- Result.ok(42)
+    Result.ok(n)
+}
+"#;
+        assert_eq!(eval(src), Value::Variant("ok".into(), Some(Box::new(Value::Int(42)))));
+    }
+
+    // task 4-17: chain n <- Result.err("boom") → function returns err("boom") early
+    #[test]
+    fn test_eval_chain_escape_err() {
+        let src = r#"
+public fn main() -> Int! {
+    chain n <- Result.err("boom")
+    Result.ok(n + 1)
+}
+"#;
+        assert_eq!(
+            eval(src),
+            Value::Variant("err".into(), Some(Box::new(Value::Str("boom".into()))))
+        );
+    }
+
+    // task 4-18: chain n <- Option.none() → function returns none early
+    #[test]
+    fn test_eval_chain_escape_none() {
+        let src = r#"
+public fn main() -> Int? {
+    chain n <- Option.none()
+    Option.some(n + 1)
+}
+"#;
+        assert_eq!(eval(src), Value::Variant("none".into(), None));
+    }
+
+    // task 4-19: collect { yield 1; yield 2; () } → [1, 2]
+    #[test]
+    fn test_eval_collect_yield() {
+        let src = r#"
+public fn main() -> List<Int> {
+    collect { yield 1; yield 2; () }
+}
+"#;
+        assert_eq!(eval(src), Value::List(vec![Value::Int(1), Value::Int(2)]));
+    }
+
+    // task 4-20: collect { () } → []
+    #[test]
+    fn test_eval_collect_empty() {
+        let src = r#"
+public fn main() -> List<Int> {
+    collect { () }
+}
+"#;
+        assert_eq!(eval(src), Value::List(vec![]));
+    }
+
+    // task 4-21: guard true → matching arm body is returned
+    #[test]
+    fn test_eval_match_guard_true() {
+        let src = r#"
+public fn main() -> String {
+    match 5 {
+        n where n > 0 => "positive"
+        _ => "nonpositive"
+    }
+}
+"#;
+        assert_eq!(eval(src), Value::Str("positive".into()));
+    }
+
+    // task 4-22: guard false → skip to next arm
+    #[test]
+    fn test_eval_match_guard_false() {
+        let src = r#"
+public fn main() -> String {
+    match 0 {
+        n where n > 0 => "positive"
+        _ => "nonpositive"
+    }
+}
+"#;
+        assert_eq!(eval(src), Value::Str("nonpositive".into()));
+    }
+
+    // task 4-23: pipe match with where guard
+    #[test]
+    fn test_eval_pipe_match() {
+        let src = r#"
+public fn main() -> String {
+    42 |> match {
+        n where n > 0 => "pos"
+        _ => "neg"
+    }
+}
+"#;
+        assert_eq!(eval(src), Value::Str("pos".into()));
     }
 }

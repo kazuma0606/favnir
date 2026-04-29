@@ -1,6 +1,6 @@
 # Favnir ロードマップ
 
-更新日: 2026-04-26
+更新日: 2026-04-29
 
 v0.1.0 から v1.0.0 までの実装方針の概要。
 各バージョンは前のバージョンの完了を前提にして進める。
@@ -39,23 +39,29 @@ v0.1.0 から v1.0.0 までの実装方針の概要。
 
 ### 追加するもの
 
-- `Db` effect の実行対応 (SQLite 等の最小接続)
+- `Db` effect の実行対応 — SQLite + SQL 埋め込み (SQLx スタイル)
+  - `Db.query`, `Db.query_one`, `Db.execute` (パラメータは `?` バインド)
+  - `fav run --db sqlite://./app.db` フラグで接続設定
+  - ORM なし・スキーマ管理なし; SQL を文字列で直接記述する
 - `Emit<Event>` effect の実行対応 (インメモリ event bus)
+  - `emit TypeName { field: expr }` 構文の追加
+  - `Emit<A> + Emit<B> = Emit<A | B>` の合成を型検査に組み込む
 - `Network` effect の実行対応 (HTTP GET/POST の最小対応)
-- `Emit<A> + Emit<B> = Emit<A | B>` の合成を型検査に組み込む
-- `event` / `emit` 構文の追加
-- effect を持つ `flw` の型表示の改善
-- `fav explain <file>` の初期実装 (各 `trf` の effect を表示)
+- レコード構築式の追加 (`TypeName { field: expr, ... }`)
+- 多重 effect 注釈 (`!Db !Emit<UserCreated>`)
+- `fav explain <file>` の初期実装 (各 `trf`/`flw` の type + effect を表示)
 
 ### 完了条件
 
-- `trf SaveUsers: List<User> -> List<UserId> !Db` が実行できる
+- `fav run --db sqlite://:memory: examples/users.fav` で User CRUD が動く
+- `trf CreateUser: UserInput -> Int !Db !Emit<UserCreated>` が型チェックを通る
 - `emit UserCreated { ... }` が動き、`Emit<UserCreated>` が型に現れる
+- `Http.get(url)` が `String!` を返して動く
 - `fav explain` で `flw` の effect chain が表示される
 
 ---
 
-## v0.3.0 — モジュールシステム
+## v0.3.0 — モジュールシステム ✓ 完了: 2026-04-28
 
 **テーマ**: 複数ファイルで構成された Favnir プロジェクトを扱えること
 
@@ -76,7 +82,7 @@ v0.1.0 から v1.0.0 までの実装方針の概要。
 
 ---
 
-## v0.4.0 — ジェネリクス + `cap`
+## v0.4.0 — ジェネリクス + `cap` ✓ 完了: 2026-04-29
 
 **テーマ**: 型引数と capability による抽象化ができること
 
@@ -98,7 +104,7 @@ v0.1.0 から v1.0.0 までの実装方針の概要。
 
 ---
 
-## v0.5.0 — `chain` + パターン強化
+## v0.5.0 — `chain` + パターン強化 ✓ 完了: 2026-04-29
 
 **テーマ**: ローカルな文脈付き合成と `match` の表現力向上
 
@@ -237,7 +243,7 @@ chain id   <- save_user
 | バージョン | テーマ | 主な追加 |
 |---|---|---|
 | v0.1.0 | コア + インタープリタ | `trf`, `flw`, `bind`, `match`, `Pure/Io` |
-| v0.2.0 | effect 完成 | `Db`, `Emit<E>`, `event/emit`, `fav explain` |
+| v0.2.0 | effect 完成 | `Db`(SQLite+SQL埋込), `Emit<E>`, `Network`, `fav explain` |
 | v0.3.0 | モジュール | `namespace`, `use`, `rune`, `fav.toml` |
 | v0.4.0 | ジェネリクス + `cap` | generic型, `cap`, 多相推論 |
 | v0.5.0 | `chain` + パターン強化 | `chain`, `pipe match`, pattern guard, `inspect` |

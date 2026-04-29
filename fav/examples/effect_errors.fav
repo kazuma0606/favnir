@@ -1,0 +1,17 @@
+// effect_errors.fav — demonstrates E007/E008/E009 effect violations
+// Run: fav check examples/effect_errors.fav  (should report 3 errors)
+
+// E007: Db.* without !Db
+fn bad_db(name: String) -> Int {
+    Db.execute("INSERT INTO users (name) VALUES (?)", name)
+}
+
+// E008: Http.* without !Network
+fn bad_http() -> String! {
+    Http.get("https://api.example.com/users")
+}
+
+// E009: emit without !Emit<T>
+fn bad_emit(msg: String) -> Unit {
+    emit msg
+}

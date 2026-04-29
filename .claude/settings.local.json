@@ -6,7 +6,9 @@
       "Bash(./target/debug/fav check:*)",
       "Bash(echo \"exit: $?\")",
       "Bash(cd:*)",
-      "Bash(cargo test:*)"
+      "Bash(cargo test:*)",
+      "Bash(cargo run:*)",
+      "Bash(grep -v \"^warning\\\\|^  \\\\|^$\\\\|^|\\\\|^=\\\\|^help\")"
     ]
   }
 }

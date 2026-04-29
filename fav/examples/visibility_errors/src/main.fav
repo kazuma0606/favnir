@@ -1,0 +1,17 @@
+// main.fav — visibility エラーのデモ
+//
+// 確認方法 (examples/visibility_errors ディレクトリで実行):
+//   fav check
+//
+// 期待されるエラー:
+//   error[E014]: `secret::hidden` is private — only `public` or `internal` symbols can be imported
+
+// OK: public シンボルの import
+use secret.visible
+
+// ERROR (E014): private シンボルを import しようとしている
+use secret.hidden
+
+public fn main() -> Unit !Io {
+    IO.println(visible())
+}

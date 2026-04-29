@@ -1,0 +1,29 @@
+// examples/collect.fav — v0.5.0: collect / yield (list accumulation)
+
+fn small_nums() -> List<Int> {
+    collect {
+        yield 1;
+        yield 2;
+        yield 3;
+        ()
+    }
+}
+
+fn even_nums() -> List<Int> {
+    collect {
+        yield 2;
+        yield 4;
+        yield 6;
+        ()
+    }
+}
+
+fn empty_list() -> List<Int> {
+    collect { () }
+}
+
+public fn main() -> Unit !Io {
+    IO.println(Debug.show(small_nums()));
+    IO.println(Debug.show(even_nums()));
+    IO.println(Debug.show(empty_list()))
+}

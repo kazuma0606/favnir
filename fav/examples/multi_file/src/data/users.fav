@@ -1,0 +1,54 @@
+// data/users.fav — User record + DB operations
+//
+// Visibility demo:
+//   private fn   → このファイル内のみ
+//   internal fn  → 同一 rune (プロジェクト) 内のみ
+//   public fn    → 外部から import 可
+
+namespace data.users
+
+// ── Type ─────────────────────────────────────────────────────────────────────
+
+public type User = {
+    id:    String
+    name:  String
+    email: String
+}
+
+// ── Private helpers ───────────────────────────────────────────────────────────
+
+// private: このファイル内のみ使える
+fn validate_email(email: String) -> Bool {
+    String.len(email) > 0
+}
+
+// ── Internal helpers ──────────────────────────────────────────────────────────
+
+// internal: 同一プロジェクト内の他ファイルからも使える
+internal fn setup_table() -> Int !Db {
+    Db.execute("CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, name TEXT NOT NULL, email TEXT NOT NULL UNIQUE)")
+}
+
+// ── Public API ────────────────────────────────────────────────────────────────
+
+// public: 外部 rune からも import できる
+public fn create(name: String, email: String) -> String !Db {
+    bind id <- Util.uuid();
+    bind _ <- Db.execute(
+        "INSERT INTO users (id, name, email) VALUES (?, ?, ?)",
+        id, name, email
+    );
+    id
+}
+
+public fn find(id: String) -> Map<String, String>? !Db {
+    Db.query_one("SELECT id, name, email FROM users WHERE id = ?", id)
+}
+
+public fn list_all() -> List<Map<String, String>> !Db {
+    Db.query("SELECT id, name, email FROM users ORDER BY name")
+}
+
+public fn delete(id: String) -> Int !Db {
+    Db.execute("DELETE FROM users WHERE id = ?", id)
+}

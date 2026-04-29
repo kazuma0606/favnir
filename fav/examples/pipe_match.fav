@@ -1,0 +1,26 @@
+// examples/pipe_match.fav — v0.5.0: pipe match + where guards
+
+fn classify(n: Int) -> String {
+    n |> match {
+        x where x > 0  => "positive"
+        x where x < 0  => "negative"
+        _               => "zero"
+    }
+}
+
+fn describe_option(o: Int?) -> String {
+    o |> match {
+        some(v) where v > 100 => "large"
+        some(_)               => "small"
+        none                  => "nothing"
+    }
+}
+
+public fn main() -> Unit !Io {
+    IO.println(classify(42));
+    IO.println(classify(-7));
+    IO.println(classify(0));
+    IO.println(describe_option(Option.some(200)));
+    IO.println(describe_option(Option.some(5)));
+    IO.println(describe_option(Option.none()))
+}

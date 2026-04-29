@@ -16,6 +16,11 @@ impl Span {
     pub fn new(file: impl Into<String>, start: usize, end: usize, line: u32, col: u32) -> Self {
         Span { file: file.into(), start, end, line, col }
     }
+
+    /// A zero-position span used when the source location is not available.
+    pub fn dummy() -> Self {
+        Span { file: String::new(), start: 0, end: 0, line: 0, col: 0 }
+    }
 }
 
 // ── TokenKind ────────────────────────────────────────────────────────────────
@@ -32,11 +37,21 @@ pub enum TokenKind {
     If,
     Else,
     Public,
+    Internal,
     Private,
+    Namespace,
+    Use,
+    Cap,
+    Impl,
+    Chain,
+    Yield,
+    Collect,
+    Where,
 
     // Effect keywords
     Pure,
     Io,
+    Emit,   // lowercase `emit` expression keyword
 
     // Symbols
     LArrow,     // <-
@@ -343,10 +358,20 @@ impl Lexer {
             "match"   => TokenKind::Match,
             "if"      => TokenKind::If,
             "else"    => TokenKind::Else,
-            "public"  => TokenKind::Public,
-            "private" => TokenKind::Private,
+            "public"    => TokenKind::Public,
+            "internal"  => TokenKind::Internal,
+            "private"   => TokenKind::Private,
+            "namespace" => TokenKind::Namespace,
+            "use"       => TokenKind::Use,
+            "cap"       => TokenKind::Cap,
+            "impl"      => TokenKind::Impl,
+            "chain"     => TokenKind::Chain,
+            "yield"     => TokenKind::Yield,
+            "collect"   => TokenKind::Collect,
+            "where"     => TokenKind::Where,
             "Pure"    => TokenKind::Pure,
             "Io"      => TokenKind::Io,
+            "emit"    => TokenKind::Emit,
             "true"    => TokenKind::Bool(true),
             "false"   => TokenKind::Bool(false),
             _         => TokenKind::Ident(name),
@@ -455,11 +480,23 @@ mod tests {
     // keywords
     #[test]
     fn test_keywords() {
-        let kinds = lex("type fn trf flw bind match if else public private");
+        let kinds = lex("type fn trf flw bind match if else public internal private namespace use cap impl");
         assert_eq!(kinds, vec![
             TokenKind::Type, TokenKind::Fn, TokenKind::Trf, TokenKind::Flw,
             TokenKind::Bind, TokenKind::Match, TokenKind::If, TokenKind::Else,
-            TokenKind::Public, TokenKind::Private,
+            TokenKind::Public, TokenKind::Internal, TokenKind::Private,
+            TokenKind::Namespace, TokenKind::Use,
+            TokenKind::Cap, TokenKind::Impl,
+            TokenKind::Eof,
+        ]);
+    }
+
+    // v0.5.0 keywords
+    #[test]
+    fn test_v05_keywords() {
+        let kinds = lex("chain yield collect where");
+        assert_eq!(kinds, vec![
+            TokenKind::Chain, TokenKind::Yield, TokenKind::Collect, TokenKind::Where,
             TokenKind::Eof,
         ]);
     }

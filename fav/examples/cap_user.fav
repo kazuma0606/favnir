@@ -1,0 +1,22 @@
+// Favnir v0.4.0 — cap example: user-defined impl
+// Demonstrates implementing the Eq cap for a user-defined type.
+
+type User = { name: String age: Int }
+
+// Implement Eq for User: two users are equal if their names match.
+impl Eq<User> {
+    fn equals(a: User, b: User) -> Bool {
+        a.name == b.name
+    }
+}
+
+public fn main() -> Unit {
+    bind alice  <- User { name: "Alice" age: 30 }
+    bind bob    <- User { name: "Bob"   age: 25 }
+    bind alice2 <- User { name: "Alice" age: 99 }
+    bind same_name <- User.eq.equals(alice, alice2)
+    bind different  <- User.eq.equals(alice, bob)
+    IO.println(Bool.show.show(same_name));
+    IO.println(Bool.show.show(different));
+    ()
+}

@@ -1,0 +1,11 @@
+// examples/csv_to_json.fav — v0.7.0 完了条件デモ
+// CSV を読んで各行の "name" フィールドを JSON 配列に変換して書き出す
+
+public fn main() -> Unit !Io !File {
+    bind csv_src <- File.read("examples/data/sample.csv")
+    bind rows    <- Csv.parse_with_header(csv_src)
+    bind names   <- List.map(rows, |row| Json.str(Option.unwrap_or(Map.get(row, "name"), "?")))
+    bind output  <- Json.encode_pretty(Json.array(names))
+    File.write("examples/data/output.json", output);
+    IO.println("done")
+}

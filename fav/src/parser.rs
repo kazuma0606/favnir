@@ -397,7 +397,8 @@ impl Parser {
                     let next_is_effect = match self.peek2() {
                         Some(TokenKind::Pure) | Some(TokenKind::Io) => true,
                         Some(TokenKind::Ident(n)) => matches!(
-                            n.as_str(), "Db" | "Network" | "Emit"
+                            n.as_str(), "Db" | "Network" | "File" | "Emit"
+                                | "Trace"
                         ),
                         _ => false,
                     };
@@ -514,7 +515,7 @@ impl Parser {
     }
 
     // effect annotation: ("!" effect_term)+   (1-8, 1-9)
-    // effect_term = Pure | Io | Db | Network | Emit<IDENT>
+    // effect_term = Pure | Io | Db | Network | File | Emit<IDENT>
     fn parse_effect_ann(&mut self) -> Result<Vec<Effect>, ParseError> {
         let mut effects = Vec::new();
         while self.peek() == &TokenKind::Bang {
@@ -526,6 +527,7 @@ impl Parser {
                     match name.as_str() {
                         "Db" => { self.advance(); Effect::Db }
                         "Network" => { self.advance(); Effect::Network }
+                        "File" => { self.advance(); Effect::File }
                         "Trace" => { self.advance(); Effect::Trace }
                         "Emit" => {
                             self.advance();
@@ -535,7 +537,7 @@ impl Parser {
                             Effect::Emit(event_name)
                         }
                         other => return Err(ParseError::new(
-                            format!("expected effect name (Pure|Io|Db|Network|Emit<T>), got `{}`", other),
+                            format!("expected effect name (Pure|Io|Db|Network|File|Emit<T>), got `{}`", other),
                             self.peek_span().clone(),
                         )),
                     }
@@ -1381,6 +1383,16 @@ mod tests {
         let p = parse("fn f() -> Unit !Io { () }");
         if let Item::FnDef(f) = &p.items[0] {
             assert!(f.effects.contains(&Effect::Io));
+        }
+    }
+
+    #[test]
+    fn test_parse_file_effect_annotation() {
+        let p = parse("fn f() -> String !File { \"ok\" }");
+        if let Item::FnDef(f) = &p.items[0] {
+            assert!(f.effects.contains(&Effect::File));
+        } else {
+            panic!("expected FnDef");
         }
     }
 

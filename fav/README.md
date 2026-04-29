@@ -13,10 +13,12 @@ cargo build --release
 ## 使い方
 
 ```
-fav run [--db <path>] [file]   — 型チェック後にプログラムを実行
-fav check [file]               — 型チェックのみ（実行しない）
-fav explain [file]             — 全トップレベル項目の型・エフェクトを表示
-fav help                       — ヘルプを表示
+fav run [--db <path>] [file]          — 型チェック後にプログラムを実行
+fav build [-o <out>] [file]           — .fvc アーティファクトをビルド
+fav exec [--db <path>] [--info] <fvc> — .fvc を VM で実行（または情報表示）
+fav check [file]                      — 型チェックのみ（実行しない）
+fav explain [file]                    — 全トップレベル項目の型・エフェクトを表示
+fav help                              — ヘルプを表示
 ```
 
 `file` を省略するとカレントディレクトリから `fav.toml` を探して**プロジェクトモード**で動作します。
@@ -235,6 +237,80 @@ fn debug_fn(x: Int) -> Int !Trace {
 
 ---
 
+## bytecode コンパイルと VM 実行 (v0.6.0)
+
+### fav build — artifact のビルド
+
+```bash
+fav build examples/hello.fav            # hello.fvc を生成
+fav build examples/hello.fav -o out.fvc # 出力先を指定
+```
+
+`.fav` ソースを型チェック後にバイトコードコンパイルし、`.fvc` アーティファクトを生成します。
+型チェックエラーがある場合は非 0 で終了し、`.fvc` は生成しません。
+
+### fav exec — artifact の実行
+
+```bash
+fav exec hello.fvc
+fav exec --db myapp.db hello.fvc    # (v0.7.0 で Db.* 対応予定)
+```
+
+`.fvc` アーティファクトをロードして `main` 関数を VM で実行します。
+
+### fav exec --info — artifact のメタデータ表示
+
+```bash
+fav exec --info hello.fvc
+```
+
+`.fvc` のヘッダ情報・グローバルテーブル・関数テーブル（命令列・定数プール）を表示します。
+出力例:
+
+```
+artifact: hello.fvc
+  format:     .fvc v0.6
+  functions:  1
+  globals:    13
+  bytecode:   18 bytes (total)
+  constants:  1 (total)
+  str table:  22 entries, 0 bytes total, longest 0
+
+globals:
+  [0]  fn      main
+
+functions:
+  [0] main  params=0 locals=0  line=2
+    return_ty: Named("Unit", [])
+    effects:   [Io]
+    constants: [Str("Hello, Favnir!")]
+    code (18 bytes):
+      0000  12 00 00  LOAD_GLOBAL    0
+      ...
+```
+
+### 対応エラーコード (v0.6.0)
+
+| コード | 内容 |
+|--------|------|
+| E032   | アーティファクトファイルが見つからない |
+| E033   | マジックバイト不一致（`.fvc` でない） |
+| E034   | バージョン非互換（異なる VM バージョン） |
+| E035   | `main` 関数がアーティファクトに存在しない |
+
+### ビルドと実行のサイクル
+
+```bash
+# ソース編集 → ビルド → 実行
+fav build examples/chain.fav -o /tmp/chain.fvc
+fav exec /tmp/chain.fvc
+
+# 型チェックのみ（ビルドせず確認）
+fav check examples/chain.fav
+```
+
+---
+
 ## 言語概要
 
 ### エントリポイント
@@ -415,3 +491,5 @@ SQL パラメータには `?` を使い、Favnir の値（`Int`, `Float`, `Strin
 | `examples/chain.fav`                 | `chain` による Result / Option 伝播 (v0.5.0) |
 | `examples/collect.fav`              | `collect / yield` によるリスト構築 (v0.5.0) |
 | `examples/pipe_match.fav`           | `\|> match` + `where` ガードの組み合わせ (v0.5.0) |
+
+> **v0.6.0**: 上記の全サンプルは `fav build` → `fav exec` でも実行できます。

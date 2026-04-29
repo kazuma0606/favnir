@@ -20,6 +20,7 @@ pub enum Effect {
     Io,
     Db,
     Network,
+    File,
     Trace,
     /// `Emit<EventType>`
     Emit(String),

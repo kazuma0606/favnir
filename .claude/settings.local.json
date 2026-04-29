@@ -8,7 +8,9 @@
       "Bash(cd:*)",
       "Bash(cargo test:*)",
       "Bash(cargo run:*)",
-      "Bash(grep -v \"^warning\\\\|^  \\\\|^$\\\\|^|\\\\|^=\\\\|^help\")"
+      "Bash(grep -v \"^warning\\\\|^  \\\\|^$\\\\|^|\\\\|^=\\\\|^help\")",
+      "Bash(grep -v \"//\")",
+      "Bash(grep -n '\"\"List\\\\.push\"\"' src/vm.rs)"
     ]
   }
 }

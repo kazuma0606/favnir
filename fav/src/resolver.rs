@@ -5,7 +5,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use crate::ast::Visibility;
-use crate::checker::{Type, Checker, collect_exports};
+use crate::checker::{Type, Checker};
 use crate::lexer::Span;
 use crate::parser::Parser;
 use crate::toml::FavToml;
@@ -224,7 +224,6 @@ pub fn derive_module_path(file: &Path, src_dir: &Path) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::Write as IoWrite;
     use tempfile::tempdir;
 
     // Returns (Resolver, TempDir) — TempDir must be kept alive for the duration of the test.

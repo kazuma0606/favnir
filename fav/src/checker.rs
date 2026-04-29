@@ -651,7 +651,7 @@ impl Checker {
         self.env.define("IO".into(), Type::Named("IO".into(), vec![]));
 
         // List, String, Option, Result, and v0.2.0 namespace placeholders.
-        for ns in &["List", "String", "Option", "Result", "Db", "Http", "Map", "Debug", "Emit", "Util", "Trace"] {
+        for ns in &["List", "String", "Option", "Result", "Db", "Http", "Map", "Debug", "Emit", "Util", "Trace", "File", "Json", "Csv"] {
             self.env.define(ns.to_string(), Type::Named(ns.to_string(), vec![]));
         }
 
@@ -1182,7 +1182,7 @@ impl Checker {
                         return match v {
                             Variant::Unit(_, _)         => Type::Unit,
                             Variant::Tuple(_, te, _)    => self.resolve_type_expr(te),
-                            Variant::Record(_, fields, _) => {
+                            Variant::Record(_, _fields, _) => {
                                 // Record variant payload — keep as Named for field lookup
                                 Type::Named(type_name.clone(), vec![])
                             }
@@ -1637,7 +1637,7 @@ impl Checker {
             // Namespace placeholders — return Unknown; actual type resolved at Apply time.
             Type::Named(n, _) if matches!(n.as_str(),
                 "IO" | "List" | "String" | "Option" | "Result" |
-                "Db" | "Http" | "Map" | "Debug" | "Emit" | "Util"
+                "Db" | "Http" | "Map" | "Debug" | "Emit" | "Util" | "Trace" | "File" | "Json" | "Csv"
             ) => {
                 Type::Unknown
             }
@@ -1668,6 +1668,16 @@ impl Checker {
             self.type_error(
                 "E008",
                 "Http.* call requires `!Network` effect on enclosing fn/trf",
+                span,
+            );
+        }
+    }
+
+    fn require_file_effect(&mut self, span: &Span) {
+        if !self.has_effect(|e| matches!(e, Effect::File)) {
+            self.type_error(
+                "E036",
+                "File.* call requires `!File` effect on enclosing fn/trf",
                 span,
             );
         }
@@ -1741,7 +1751,7 @@ impl Checker {
                 Some(Type::Option(Box::new(elem)))
             }
             ("List", "map") => {
-                let elem = self.expect_list_arg(&arg_tys, 0, span);
+                let _elem = self.expect_list_arg(&arg_tys, 0, span);
                 // arg1 should be a function T -> U; result is List<U>
                 let out = if let Some(f_ty) = arg_tys.get(1) {
                     f_ty.as_callable().map(|(_, o)| o.clone()).unwrap_or(Type::Unknown)
@@ -1828,6 +1838,28 @@ impl Checker {
             }
             ("Db", _) => { self.require_db_effect(span); Some(Type::Unknown) }
 
+            // File (v0.7.0): require !File effect
+            ("File", "read") => {
+                self.require_file_effect(span);
+                Some(Type::String)
+            }
+            ("File", "read_lines") => {
+                self.require_file_effect(span);
+                Some(Type::List(Box::new(Type::String)))
+            }
+            ("File", "write") | ("File", "write_lines") | ("File", "append") | ("File", "delete") => {
+                self.require_file_effect(span);
+                Some(Type::Unit)
+            }
+            ("File", "exists") => {
+                self.require_file_effect(span);
+                Some(Type::Bool)
+            }
+            ("File", _) => {
+                self.require_file_effect(span);
+                Some(Type::Unknown)
+            }
+
             // Http (2-7): require !Network effect
             ("Http", "get") | ("Http", "post") => {
                 self.require_network_effect(span);
@@ -1843,6 +1875,41 @@ impl Checker {
             ("Map", "keys")   => Some(Type::List(Box::new(Type::Unknown))),
             ("Map", "values") => Some(Type::List(Box::new(Type::Unknown))),
             ("Map", _)        => Some(Type::Unknown),
+
+            // Json (v0.7.0)
+            ("Json", "null")
+            | ("Json", "bool")
+            | ("Json", "int")
+            | ("Json", "float")
+            | ("Json", "str")
+            | ("Json", "array")
+            | ("Json", "object")
+            | ("Json", "parse") => {
+                Some(Type::Named("Json".into(), vec![]))
+            }
+            ("Json", "encode") | ("Json", "encode_pretty") => Some(Type::String),
+            ("Json", "get") | ("Json", "at") => {
+                Some(Type::Option(Box::new(Type::Named("Json".into(), vec![]))))
+            }
+            ("Json", "as_str") => Some(Type::Option(Box::new(Type::String))),
+            ("Json", "as_int") => Some(Type::Option(Box::new(Type::Int))),
+            ("Json", "as_float") => Some(Type::Option(Box::new(Type::Float))),
+            ("Json", "as_bool") => Some(Type::Option(Box::new(Type::Bool))),
+            ("Json", "as_array") => {
+                Some(Type::Option(Box::new(Type::List(Box::new(Type::Named("Json".into(), vec![]))))))
+            }
+            ("Json", "is_null") => Some(Type::Bool),
+            ("Json", "keys") => Some(Type::Option(Box::new(Type::List(Box::new(Type::String))))),
+            ("Json", "length") => Some(Type::Option(Box::new(Type::Int))),
+            ("Json", _) => Some(Type::Unknown),
+
+            // Csv (v0.7.0)
+            ("Csv", "parse") => Some(Type::List(Box::new(Type::List(Box::new(Type::String))))),
+            ("Csv", "parse_with_header") => {
+                Some(Type::List(Box::new(Type::Map(Box::new(Type::String), Box::new(Type::String)))))
+            }
+            ("Csv", "encode") | ("Csv", "encode_with_header") | ("Csv", "from_records") => Some(Type::String),
+            ("Csv", _) => Some(Type::Unknown),
 
             // Debug (2-9)
             ("Debug", "show") => Some(Type::String),
@@ -2253,6 +2320,17 @@ mod tests {
         check_ok(r#"fn f() -> String! !Network { Http.get("http://example.com") }"#);
     }
 
+    #[test]
+    fn test_file_effect_missing() {
+        let errs = check_err(r#"fn f() -> String { File.read("a.txt") }"#);
+        assert!(errs.iter().any(|e| e.contains("E036")), "got: {:?}", errs);
+    }
+
+    #[test]
+    fn test_file_effect_present() {
+        check_ok(r#"fn f() -> Bool !File { File.exists("a.txt") }"#);
+    }
+
     // 2-8: emit without !Emit<T> → E009
     #[test]
     fn test_emit_effect_missing() {
@@ -2291,11 +2369,11 @@ mod tests {
             compose_effects(&[Effect::Db], &[Effect::Network]),
             vec![Effect::Db, Effect::Network]
         );
+        assert_eq!(compose_effects(&[Effect::File], &[Effect::File]), vec![Effect::File]);
     }
 
     // ── 4-11: use resolution tests ────────────────────────────────────────────
 
-    use std::io::Write as IoWrite;
     use std::sync::{Arc, Mutex};
     use tempfile::tempdir;
     use crate::resolver::Resolver;

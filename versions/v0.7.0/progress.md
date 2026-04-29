@@ -1,0 +1,12 @@
+- [x] Phase 1 / VM::call_value
+- [x] Phase 1 / List builtins in VM
+- [x] Phase 2 / String builtins
+- [x] Phase 2 / Map builtins
+- [x] Phase 3 / Option builtins in VM
+- [x] Phase 3 / Result builtins in VM
+- [x] Phase 4 / File effect in AST
+- [x] Phase 4 / File effect in parser/checker
+- [x] Phase 4 / File builtins in VM
+- [x] Phase 5 / Json builtins
+- [x] Phase 6 / Csv builtins
+- [ ] Phase 7 / Tests + sample files

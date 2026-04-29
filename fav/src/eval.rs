@@ -4,6 +4,7 @@
 use std::collections::HashMap;
 use std::rc::Rc;
 use std::cell::RefCell;
+use serde_json::Value as SerdeJsonValue;
 use crate::ast::*;
 use crate::lexer::Span;
 
@@ -109,6 +110,101 @@ impl Value {
             Value::Namespace(_)  => "Namespace",
             Value::Builtin(..)   => "Builtin",
         }
+    }
+}
+
+fn json_variant(name: &str, payload: Option<Value>) -> Value {
+    Value::Variant(name.to_string(), payload.map(Box::new))
+}
+
+fn serde_to_favnir_json(value: SerdeJsonValue) -> Value {
+    match value {
+        SerdeJsonValue::Null => json_variant("json_null", None),
+        SerdeJsonValue::Bool(b) => json_variant("json_bool", Some(Value::Bool(b))),
+        SerdeJsonValue::Number(n) => {
+            if let Some(i) = n.as_i64() {
+                json_variant("json_int", Some(Value::Int(i)))
+            } else {
+                json_variant("json_float", Some(Value::Float(n.as_f64().unwrap_or(0.0))))
+            }
+        }
+        SerdeJsonValue::String(s) => json_variant("json_str", Some(Value::Str(s))),
+        SerdeJsonValue::Array(items) => {
+            json_variant(
+                "json_array",
+                Some(Value::List(items.into_iter().map(serde_to_favnir_json).collect())),
+            )
+        }
+        SerdeJsonValue::Object(map) => {
+            let mut fields = HashMap::new();
+            for (k, v) in map {
+                fields.insert(k, serde_to_favnir_json(v));
+            }
+            json_variant("json_object", Some(Value::Record(fields)))
+        }
+    }
+}
+
+fn favnir_json_to_serde(value: &Value) -> Option<SerdeJsonValue> {
+    match value {
+        Value::Variant(tag, None) if tag == "json_null" => Some(SerdeJsonValue::Null),
+        Value::Variant(tag, Some(payload)) if tag == "json_bool" => match payload.as_ref() {
+            Value::Bool(b) => Some(SerdeJsonValue::Bool(*b)),
+            _ => None,
+        },
+        Value::Variant(tag, Some(payload)) if tag == "json_int" => match payload.as_ref() {
+            Value::Int(i) => Some(SerdeJsonValue::Number((*i).into())),
+            _ => None,
+        },
+        Value::Variant(tag, Some(payload)) if tag == "json_float" => match payload.as_ref() {
+            Value::Float(f) => serde_json::Number::from_f64(*f).map(SerdeJsonValue::Number),
+            _ => None,
+        },
+        Value::Variant(tag, Some(payload)) if tag == "json_str" => match payload.as_ref() {
+            Value::Str(s) => Some(SerdeJsonValue::String(s.clone())),
+            _ => None,
+        },
+        Value::Variant(tag, Some(payload)) if tag == "json_array" => match payload.as_ref() {
+            Value::List(items) => {
+                let mut out = Vec::with_capacity(items.len());
+                for item in items {
+                    out.push(favnir_json_to_serde(item)?);
+                }
+                Some(SerdeJsonValue::Array(out))
+            }
+            _ => None,
+        },
+        Value::Variant(tag, Some(payload)) if tag == "json_object" => match payload.as_ref() {
+            Value::Record(map) => {
+                let mut out = serde_json::Map::new();
+                for (k, v) in map {
+                    out.insert(k.clone(), favnir_json_to_serde(v)?);
+                }
+                Some(SerdeJsonValue::Object(out))
+            }
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+fn value_string(value: Value, context: &str, span: &Span) -> Result<String, RuntimeError> {
+    match value {
+        Value::Str(s) => Ok(s),
+        other => Err(RuntimeError::new(format!("{} expects String, got {}", context, other.type_name()), span)),
+    }
+}
+
+fn value_string_list(value: Value, context: &str, span: &Span) -> Result<Vec<String>, RuntimeError> {
+    match value {
+        Value::List(items) => {
+            let mut out = Vec::with_capacity(items.len());
+            for item in items {
+                out.push(value_string(item, context, span)?);
+            }
+            Ok(out)
+        }
+        other => Err(RuntimeError::new(format!("{} expects List<String>, got {}", context, other.type_name()), span)),
     }
 }
 
@@ -470,6 +566,264 @@ fn eval_builtin(ns: &str, method: &str, mut args: Vec<Value>, span: &Span) -> Ev
                 v => Err(RuntimeError::new(format!("List.fold expects List, got {}", v.type_name()), span)),
             }
         }
+        ("List", "flat_map") => {
+            if args.len() < 2 {
+                return Err(RuntimeError::new("List.flat_map requires 2 arguments", span));
+            }
+            let f = args.remove(1);
+            let list = args.remove(0);
+            match list {
+                Value::List(vs) => {
+                    let mut out = Vec::new();
+                    for v in vs {
+                        match eval_apply(f.clone(), vec![v], span)? {
+                            Value::List(inner) => out.extend(inner),
+                            other => return Err(RuntimeError::new(
+                                format!("List.flat_map: callback must return List, got {}", other.type_name()), span
+                            )),
+                        }
+                    }
+                    Ok(Value::List(out))
+                }
+                v => Err(RuntimeError::new(format!("List.flat_map expects List, got {}", v.type_name()), span)),
+            }
+        }
+        ("List", "zip") => {
+            if args.len() < 2 {
+                return Err(RuntimeError::new("List.zip requires 2 arguments", span));
+            }
+            let ys_val = args.remove(1);
+            let xs_val = args.remove(0);
+            match (xs_val, ys_val) {
+                (Value::List(xs), Value::List(ys)) => {
+                    let pairs: Vec<Value> = xs.into_iter().zip(ys.into_iter()).map(|(x, y)| {
+                        let mut m = HashMap::new();
+                        m.insert("first".to_string(), x);
+                        m.insert("second".to_string(), y);
+                        Value::Record(m)
+                    }).collect();
+                    Ok(Value::List(pairs))
+                }
+                _ => Err(RuntimeError::new("List.zip expects (List, List)", span)),
+            }
+        }
+        ("List", "sort") => {
+            if args.len() < 2 {
+                return Err(RuntimeError::new("List.sort requires 2 arguments", span));
+            }
+            let cmp = args.remove(1);
+            let list = args.remove(0);
+            match list {
+                Value::List(mut vs) => {
+                    let mut err: Option<RuntimeError> = None;
+                    vs.sort_by(|a, b| {
+                        if err.is_some() { return std::cmp::Ordering::Equal; }
+                        match eval_apply(cmp.clone(), vec![a.clone(), b.clone()], span) {
+                            Ok(Value::Int(n)) => {
+                                if n < 0 { std::cmp::Ordering::Less }
+                                else if n > 0 { std::cmp::Ordering::Greater }
+                                else { std::cmp::Ordering::Equal }
+                            }
+                            Ok(other) => {
+                                err = Some(RuntimeError::new(
+                                    format!("List.sort: comparator must return Int, got {}", other.type_name()), span
+                                ));
+                                std::cmp::Ordering::Equal
+                            }
+                            Err(e) => { err = Some(e); std::cmp::Ordering::Equal }
+                        }
+                    });
+                    if let Some(e) = err { return Err(e); }
+                    Ok(Value::List(vs))
+                }
+                v => Err(RuntimeError::new(format!("List.sort expects List, got {}", v.type_name()), span)),
+            }
+        }
+        ("List", "range") => {
+            if args.len() < 2 {
+                return Err(RuntimeError::new("List.range requires 2 arguments (start, end)", span));
+            }
+            let end_val = args.remove(1);
+            let start_val = args.remove(0);
+            match (start_val, end_val) {
+                (Value::Int(s), Value::Int(e)) => {
+                    let out: Vec<Value> = (s..e).map(Value::Int).collect();
+                    Ok(Value::List(out))
+                }
+                _ => Err(RuntimeError::new("List.range expects (Int, Int)", span)),
+            }
+        }
+        ("List", "reverse") => {
+            match args.into_iter().next() {
+                Some(Value::List(mut vs)) => { vs.reverse(); Ok(Value::List(vs)) }
+                Some(v) => Err(RuntimeError::new(format!("List.reverse expects List, got {}", v.type_name()), span)),
+                None => Err(RuntimeError::new("List.reverse requires 1 argument", span)),
+            }
+        }
+        ("List", "concat") => {
+            if args.len() < 2 {
+                return Err(RuntimeError::new("List.concat requires 2 arguments", span));
+            }
+            let ys_val = args.remove(1);
+            let xs_val = args.remove(0);
+            match (xs_val, ys_val) {
+                (Value::List(mut xs), Value::List(ys)) => { xs.extend(ys); Ok(Value::List(xs)) }
+                _ => Err(RuntimeError::new("List.concat expects (List, List)", span)),
+            }
+        }
+        ("List", "take") => {
+            if args.len() < 2 {
+                return Err(RuntimeError::new("List.take requires 2 arguments", span));
+            }
+            let n_val = args.remove(1);
+            let list_val = args.remove(0);
+            match (list_val, n_val) {
+                (Value::List(vs), Value::Int(n)) => {
+                    let n = n.max(0) as usize;
+                    Ok(Value::List(vs.into_iter().take(n).collect()))
+                }
+                _ => Err(RuntimeError::new("List.take expects (List, Int)", span)),
+            }
+        }
+        ("List", "drop") => {
+            if args.len() < 2 {
+                return Err(RuntimeError::new("List.drop requires 2 arguments", span));
+            }
+            let n_val = args.remove(1);
+            let list_val = args.remove(0);
+            match (list_val, n_val) {
+                (Value::List(vs), Value::Int(n)) => {
+                    let n = n.max(0) as usize;
+                    Ok(Value::List(vs.into_iter().skip(n).collect()))
+                }
+                _ => Err(RuntimeError::new("List.drop expects (List, Int)", span)),
+            }
+        }
+        ("List", "enumerate") => {
+            match args.into_iter().next() {
+                Some(Value::List(vs)) => {
+                    let pairs: Vec<Value> = vs.into_iter().enumerate().map(|(i, v)| {
+                        let mut m = HashMap::new();
+                        m.insert("first".to_string(), Value::Int(i as i64));
+                        m.insert("second".to_string(), v);
+                        Value::Record(m)
+                    }).collect();
+                    Ok(Value::List(pairs))
+                }
+                Some(v) => Err(RuntimeError::new(format!("List.enumerate expects List, got {}", v.type_name()), span)),
+                None => Err(RuntimeError::new("List.enumerate requires 1 argument", span)),
+            }
+        }
+        ("List", "find") => {
+            if args.len() < 2 {
+                return Err(RuntimeError::new("List.find requires 2 arguments", span));
+            }
+            let pred = args.remove(1);
+            let list = args.remove(0);
+            match list {
+                Value::List(vs) => {
+                    for v in vs {
+                        match eval_apply(pred.clone(), vec![v.clone()], span)? {
+                            Value::Bool(true) => return Ok(Value::Variant("some".into(), Some(Box::new(v)))),
+                            Value::Bool(false) => {}
+                            other => return Err(RuntimeError::new(
+                                format!("List.find predicate must return Bool, got {}", other.type_name()), span
+                            )),
+                        }
+                    }
+                    Ok(Value::Variant("none".into(), None))
+                }
+                v => Err(RuntimeError::new(format!("List.find expects List, got {}", v.type_name()), span)),
+            }
+        }
+        ("List", "any") => {
+            if args.len() < 2 {
+                return Err(RuntimeError::new("List.any requires 2 arguments", span));
+            }
+            let pred = args.remove(1);
+            let list = args.remove(0);
+            match list {
+                Value::List(vs) => {
+                    for v in vs {
+                        match eval_apply(pred.clone(), vec![v], span)? {
+                            Value::Bool(true) => return Ok(Value::Bool(true)),
+                            Value::Bool(false) => {}
+                            other => return Err(RuntimeError::new(
+                                format!("List.any predicate must return Bool, got {}", other.type_name()), span
+                            )),
+                        }
+                    }
+                    Ok(Value::Bool(false))
+                }
+                v => Err(RuntimeError::new(format!("List.any expects List, got {}", v.type_name()), span)),
+            }
+        }
+        ("List", "all") => {
+            if args.len() < 2 {
+                return Err(RuntimeError::new("List.all requires 2 arguments", span));
+            }
+            let pred = args.remove(1);
+            let list = args.remove(0);
+            match list {
+                Value::List(vs) => {
+                    for v in vs {
+                        match eval_apply(pred.clone(), vec![v], span)? {
+                            Value::Bool(false) => return Ok(Value::Bool(false)),
+                            Value::Bool(true) => {}
+                            other => return Err(RuntimeError::new(
+                                format!("List.all predicate must return Bool, got {}", other.type_name()), span
+                            )),
+                        }
+                    }
+                    Ok(Value::Bool(true))
+                }
+                v => Err(RuntimeError::new(format!("List.all expects List, got {}", v.type_name()), span)),
+            }
+        }
+        ("List", "index_of") => {
+            if args.len() < 2 {
+                return Err(RuntimeError::new("List.index_of requires 2 arguments", span));
+            }
+            let pred = args.remove(1);
+            let list = args.remove(0);
+            match list {
+                Value::List(vs) => {
+                    for (i, v) in vs.into_iter().enumerate() {
+                        match eval_apply(pred.clone(), vec![v], span)? {
+                            Value::Bool(true) => return Ok(Value::Variant("some".into(), Some(Box::new(Value::Int(i as i64))))),
+                            Value::Bool(false) => {}
+                            other => return Err(RuntimeError::new(
+                                format!("List.index_of predicate must return Bool, got {}", other.type_name()), span
+                            )),
+                        }
+                    }
+                    Ok(Value::Variant("none".into(), None))
+                }
+                v => Err(RuntimeError::new(format!("List.index_of expects List, got {}", v.type_name()), span)),
+            }
+        }
+        ("List", "join") => {
+            if args.len() < 2 {
+                return Err(RuntimeError::new("List.join requires 2 arguments (xs, sep)", span));
+            }
+            let sep_val = args.remove(1);
+            let list_val = args.remove(0);
+            match (list_val, sep_val) {
+                (Value::List(vs), Value::Str(sep)) => {
+                    let mut parts = Vec::with_capacity(vs.len());
+                    for v in vs {
+                        match v {
+                            Value::Str(s) => parts.push(s),
+                            other => return Err(RuntimeError::new(
+                                format!("List.join expects List<String>, got List<{}>", other.type_name()), span
+                            )),
+                        }
+                    }
+                    Ok(Value::Str(parts.join(&sep)))
+                }
+                _ => Err(RuntimeError::new("List.join expects (List<String>, String)", span)),
+            }
+        }
 
         // ── String (5-23) ─────────────────────────────────────────────────────
         ("String", "trim") => {
@@ -519,6 +873,173 @@ fn eval_builtin(ns: &str, method: &str, mut args: Vec<Value>, span: &Span) -> Ev
                 Some(Value::Str(s)) => Ok(Value::Bool(s.is_empty())),
                 Some(v) => Err(RuntimeError::new(format!("String.is_empty expects String, got {}", v.type_name()), span)),
                 None => Err(RuntimeError::new("String.is_empty requires 1 argument", span)),
+            }
+        }
+        ("String", "concat") => {
+            if args.len() < 2 {
+                return Err(RuntimeError::new("String.concat requires 2 arguments", span));
+            }
+            let b = args.remove(1);
+            let a = args.remove(0);
+            match (a, b) {
+                (Value::Str(s1), Value::Str(s2)) => Ok(Value::Str(format!("{}{}", s1, s2))),
+                _ => Err(RuntimeError::new("String.concat expects (String, String)", span)),
+            }
+        }
+        ("String", "join") => {
+            if args.len() < 2 {
+                return Err(RuntimeError::new("String.join requires 2 arguments (xs, sep)", span));
+            }
+            let sep_val = args.remove(1);
+            let list_val = args.remove(0);
+            match (list_val, sep_val) {
+                (Value::List(vs), Value::Str(sep)) => {
+                    let mut parts = Vec::with_capacity(vs.len());
+                    for v in vs {
+                        match v {
+                            Value::Str(s) => parts.push(s),
+                            other => return Err(RuntimeError::new(
+                                format!("String.join expects List<String>, got List<{}>", other.type_name()), span
+                            )),
+                        }
+                    }
+                    Ok(Value::Str(parts.join(&sep)))
+                }
+                _ => Err(RuntimeError::new("String.join expects (List<String>, String)", span)),
+            }
+        }
+        ("String", "replace") => {
+            if args.len() < 3 {
+                return Err(RuntimeError::new("String.replace requires 3 arguments (s, from, to)", span));
+            }
+            let to_val = args.remove(2);
+            let from_val = args.remove(1);
+            let s_val = args.remove(0);
+            match (s_val, from_val, to_val) {
+                (Value::Str(s), Value::Str(from), Value::Str(to)) => {
+                    Ok(Value::Str(s.replace(&*from, &*to)))
+                }
+                _ => Err(RuntimeError::new("String.replace expects (String, String, String)", span)),
+            }
+        }
+        ("String", "starts_with") => {
+            if args.len() < 2 {
+                return Err(RuntimeError::new("String.starts_with requires 2 arguments", span));
+            }
+            let prefix = args.remove(1);
+            let s_val = args.remove(0);
+            match (s_val, prefix) {
+                (Value::Str(s), Value::Str(p)) => Ok(Value::Bool(s.starts_with(&*p))),
+                _ => Err(RuntimeError::new("String.starts_with expects (String, String)", span)),
+            }
+        }
+        ("String", "ends_with") => {
+            if args.len() < 2 {
+                return Err(RuntimeError::new("String.ends_with requires 2 arguments", span));
+            }
+            let suffix = args.remove(1);
+            let s_val = args.remove(0);
+            match (s_val, suffix) {
+                (Value::Str(s), Value::Str(suf)) => Ok(Value::Bool(s.ends_with(&*suf))),
+                _ => Err(RuntimeError::new("String.ends_with expects (String, String)", span)),
+            }
+        }
+        ("String", "contains") => {
+            if args.len() < 2 {
+                return Err(RuntimeError::new("String.contains requires 2 arguments", span));
+            }
+            let sub = args.remove(1);
+            let s_val = args.remove(0);
+            match (s_val, sub) {
+                (Value::Str(s), Value::Str(sub)) => Ok(Value::Bool(s.contains(&*sub))),
+                _ => Err(RuntimeError::new("String.contains expects (String, String)", span)),
+            }
+        }
+        ("String", "slice") => {
+            if args.len() < 3 {
+                return Err(RuntimeError::new("String.slice requires 3 arguments (s, start, end)", span));
+            }
+            let end_val = args.remove(2);
+            let start_val = args.remove(1);
+            let s_val = args.remove(0);
+            match (s_val, start_val, end_val) {
+                (Value::Str(s), Value::Int(start), Value::Int(end)) => {
+                    let chars: Vec<char> = s.chars().collect();
+                    let len = chars.len() as i64;
+                    let s2 = start.max(0).min(len) as usize;
+                    let e2 = end.max(0).min(len) as usize;
+                    let e2 = e2.max(s2);
+                    Ok(Value::Str(chars[s2..e2].iter().collect()))
+                }
+                _ => Err(RuntimeError::new("String.slice expects (String, Int, Int)", span)),
+            }
+        }
+        ("String", "repeat") => {
+            if args.len() < 2 {
+                return Err(RuntimeError::new("String.repeat requires 2 arguments", span));
+            }
+            let n_val = args.remove(1);
+            let s_val = args.remove(0);
+            match (s_val, n_val) {
+                (Value::Str(s), Value::Int(n)) if n >= 0 => {
+                    Ok(Value::Str(s.repeat(n as usize)))
+                }
+                (Value::Str(_), Value::Int(_)) => Err(RuntimeError::new("String.repeat requires non-negative count", span)),
+                _ => Err(RuntimeError::new("String.repeat expects (String, Int)", span)),
+            }
+        }
+        ("String", "char_at") => {
+            if args.len() < 2 {
+                return Err(RuntimeError::new("String.char_at requires 2 arguments", span));
+            }
+            let idx_val = args.remove(1);
+            let s_val = args.remove(0);
+            match (s_val, idx_val) {
+                (Value::Str(s), Value::Int(idx)) => {
+                    let result = s.chars().nth(idx as usize)
+                        .map(|c| Value::Variant("some".into(), Some(Box::new(Value::Str(c.to_string())))))
+                        .unwrap_or(Value::Variant("none".into(), None));
+                    Ok(result)
+                }
+                _ => Err(RuntimeError::new("String.char_at expects (String, Int)", span)),
+            }
+        }
+        ("String", "to_int") => {
+            match args.into_iter().next() {
+                Some(Value::Str(s)) => {
+                    let result = s.parse::<i64>()
+                        .map(|n| Value::Variant("some".into(), Some(Box::new(Value::Int(n)))))
+                        .unwrap_or(Value::Variant("none".into(), None));
+                    Ok(result)
+                }
+                Some(v) => Err(RuntimeError::new(format!("String.to_int expects String, got {}", v.type_name()), span)),
+                None => Err(RuntimeError::new("String.to_int requires 1 argument", span)),
+            }
+        }
+        ("String", "to_float") => {
+            match args.into_iter().next() {
+                Some(Value::Str(s)) => {
+                    let result = s.parse::<f64>()
+                        .map(|f| Value::Variant("some".into(), Some(Box::new(Value::Float(f)))))
+                        .unwrap_or(Value::Variant("none".into(), None));
+                    Ok(result)
+                }
+                Some(v) => Err(RuntimeError::new(format!("String.to_float expects String, got {}", v.type_name()), span)),
+                None => Err(RuntimeError::new("String.to_float requires 1 argument", span)),
+            }
+        }
+        ("String", "from_int") => {
+            match args.into_iter().next() {
+                Some(Value::Int(n)) => Ok(Value::Str(n.to_string())),
+                Some(v) => Err(RuntimeError::new(format!("String.from_int expects Int, got {}", v.type_name()), span)),
+                None => Err(RuntimeError::new("String.from_int requires 1 argument", span)),
+            }
+        }
+        ("String", "from_float") => {
+            match args.into_iter().next() {
+                Some(Value::Float(f)) => Ok(Value::Str(f.to_string())),
+                Some(v) => Err(RuntimeError::new(format!("String.from_float expects Float, got {}", v.type_name()), span)),
+                None => Err(RuntimeError::new("String.from_float requires 1 argument", span)),
             }
         }
 
@@ -602,6 +1123,132 @@ fn eval_builtin(ns: &str, method: &str, mut args: Vec<Value>, span: &Span) -> Ev
                 }
                 Value::Variant(tag, _) if tag == "err" => Ok(default),
                 v => Err(RuntimeError::new(format!("Result.unwrap_or expects Result, got {}", v.type_name()), span)),
+            }
+        }
+        ("Option", "and_then") => {
+            if args.len() < 2 {
+                return Err(RuntimeError::new("Option.and_then requires 2 arguments", span));
+            }
+            let f = args.remove(1);
+            let opt = args.remove(0);
+            match opt {
+                Value::Variant(tag, payload) if tag == "some" => {
+                    let inner = payload.map(|v| *v).unwrap_or(Value::Unit);
+                    eval_apply(f, vec![inner], span)
+                }
+                Value::Variant(tag, _) if tag == "none" => {
+                    Ok(Value::Variant("none".into(), None))
+                }
+                v => Err(RuntimeError::new(format!("Option.and_then expects Option, got {}", v.type_name()), span)),
+            }
+        }
+        ("Option", "or_else") => {
+            if args.len() < 2 {
+                return Err(RuntimeError::new("Option.or_else requires 2 arguments", span));
+            }
+            let f = args.remove(1);
+            let opt = args.remove(0);
+            match opt {
+                Value::Variant(tag, payload) if tag == "some" => {
+                    Ok(Value::Variant("some".into(), payload))
+                }
+                Value::Variant(tag, _) if tag == "none" => {
+                    eval_apply(f, vec![Value::Unit], span)
+                }
+                v => Err(RuntimeError::new(format!("Option.or_else expects Option, got {}", v.type_name()), span)),
+            }
+        }
+        ("Option", "is_some") => {
+            match args.into_iter().next() {
+                Some(Value::Variant(tag, _)) => Ok(Value::Bool(tag == "some")),
+                Some(v) => Err(RuntimeError::new(format!("Option.is_some expects Option, got {}", v.type_name()), span)),
+                None => Err(RuntimeError::new("Option.is_some requires 1 argument", span)),
+            }
+        }
+        ("Option", "is_none") => {
+            match args.into_iter().next() {
+                Some(Value::Variant(tag, _)) => Ok(Value::Bool(tag == "none")),
+                Some(v) => Err(RuntimeError::new(format!("Option.is_none expects Option, got {}", v.type_name()), span)),
+                None => Err(RuntimeError::new("Option.is_none requires 1 argument", span)),
+            }
+        }
+        ("Option", "to_result") => {
+            if args.len() < 2 {
+                return Err(RuntimeError::new("Option.to_result requires 2 arguments (option, err_val)", span));
+            }
+            let err_val = args.remove(1);
+            let opt = args.remove(0);
+            match opt {
+                Value::Variant(tag, payload) if tag == "some" => {
+                    let inner = payload.map(|v| *v).unwrap_or(Value::Unit);
+                    Ok(Value::Variant("ok".into(), Some(Box::new(inner))))
+                }
+                Value::Variant(tag, _) if tag == "none" => {
+                    Ok(Value::Variant("err".into(), Some(Box::new(err_val))))
+                }
+                v => Err(RuntimeError::new(format!("Option.to_result expects Option, got {}", v.type_name()), span)),
+            }
+        }
+        ("Result", "map_err") => {
+            if args.len() < 2 {
+                return Err(RuntimeError::new("Result.map_err requires 2 arguments", span));
+            }
+            let f = args.remove(1);
+            let res = args.remove(0);
+            match res {
+                Value::Variant(tag, payload) if tag == "ok" => {
+                    Ok(Value::Variant("ok".into(), payload))
+                }
+                Value::Variant(tag, payload) if tag == "err" => {
+                    let e = payload.map(|v| *v).unwrap_or(Value::Unit);
+                    let mapped = eval_apply(f, vec![e], span)?;
+                    Ok(Value::Variant("err".into(), Some(Box::new(mapped))))
+                }
+                v => Err(RuntimeError::new(format!("Result.map_err expects Result, got {}", v.type_name()), span)),
+            }
+        }
+        ("Result", "and_then") => {
+            if args.len() < 2 {
+                return Err(RuntimeError::new("Result.and_then requires 2 arguments", span));
+            }
+            let f = args.remove(1);
+            let res = args.remove(0);
+            match res {
+                Value::Variant(tag, payload) if tag == "ok" => {
+                    let inner = payload.map(|v| *v).unwrap_or(Value::Unit);
+                    eval_apply(f, vec![inner], span)
+                }
+                Value::Variant(tag, e) if tag == "err" => {
+                    Ok(Value::Variant("err".into(), e))
+                }
+                v => Err(RuntimeError::new(format!("Result.and_then expects Result, got {}", v.type_name()), span)),
+            }
+        }
+        ("Result", "is_ok") => {
+            match args.into_iter().next() {
+                Some(Value::Variant(tag, _)) => Ok(Value::Bool(tag == "ok")),
+                Some(v) => Err(RuntimeError::new(format!("Result.is_ok expects Result, got {}", v.type_name()), span)),
+                None => Err(RuntimeError::new("Result.is_ok requires 1 argument", span)),
+            }
+        }
+        ("Result", "is_err") => {
+            match args.into_iter().next() {
+                Some(Value::Variant(tag, _)) => Ok(Value::Bool(tag == "err")),
+                Some(v) => Err(RuntimeError::new(format!("Result.is_err expects Result, got {}", v.type_name()), span)),
+                None => Err(RuntimeError::new("Result.is_err requires 1 argument", span)),
+            }
+        }
+        ("Result", "to_option") => {
+            match args.into_iter().next() {
+                Some(Value::Variant(tag, payload)) if tag == "ok" => {
+                    let inner = payload.map(|v| *v).unwrap_or(Value::Unit);
+                    Ok(Value::Variant("some".into(), Some(Box::new(inner))))
+                }
+                Some(Value::Variant(tag, _)) if tag == "err" => {
+                    Ok(Value::Variant("none".into(), None))
+                }
+                Some(v) => Err(RuntimeError::new(format!("Result.to_option expects Result, got {}", v.type_name()), span)),
+                None => Err(RuntimeError::new("Result.to_option requires 1 argument", span)),
             }
         }
 
@@ -695,8 +1342,412 @@ fn eval_builtin(ns: &str, method: &str, mut args: Vec<Value>, span: &Span) -> Ev
                 None => Err(RuntimeError::new("Map.values requires 1 argument", span)),
             }
         }
+        ("Map", "has_key") => {
+            if args.len() < 2 {
+                return Err(RuntimeError::new("Map.has_key requires 2 arguments (map, key)", span));
+            }
+            let key = args.remove(1);
+            let map = args.remove(0);
+            match (map, key) {
+                (Value::Record(m), Value::Str(k)) => Ok(Value::Bool(m.contains_key(&k))),
+                (Value::Unit, Value::Str(_)) => Ok(Value::Bool(false)),
+                _ => Err(RuntimeError::new("Map.has_key expects (Map, String)", span)),
+            }
+        }
+        ("Map", "size") => {
+            match args.into_iter().next() {
+                Some(Value::Record(m)) => Ok(Value::Int(m.len() as i64)),
+                Some(Value::Unit) => Ok(Value::Int(0)),
+                Some(v) => Err(RuntimeError::new(format!("Map.size expects Map, got {}", v.type_name()), span)),
+                None => Err(RuntimeError::new("Map.size requires 1 argument", span)),
+            }
+        }
+        ("Map", "is_empty") => {
+            match args.into_iter().next() {
+                Some(Value::Record(m)) => Ok(Value::Bool(m.is_empty())),
+                Some(Value::Unit) => Ok(Value::Bool(true)),
+                Some(v) => Err(RuntimeError::new(format!("Map.is_empty expects Map, got {}", v.type_name()), span)),
+                None => Err(RuntimeError::new("Map.is_empty requires 1 argument", span)),
+            }
+        }
+        ("Map", "merge") => {
+            if args.len() < 2 {
+                return Err(RuntimeError::new("Map.merge requires 2 arguments (base, overrides)", span));
+            }
+            let overrides_val = args.remove(1);
+            let base_val = args.remove(0);
+            let to_map = |v: Value| match v {
+                Value::Record(m) => Ok(m),
+                Value::Unit => Ok(HashMap::new()),
+                other => Err(RuntimeError::new(format!("Map.merge expects Map, got {}", other.type_name()), span)),
+            };
+            let mut base = to_map(base_val)?;
+            let overrides = to_map(overrides_val)?;
+            base.extend(overrides);
+            Ok(Value::Record(base))
+        }
+        ("Map", "from_list") => {
+            match args.into_iter().next() {
+                Some(Value::List(pairs)) => {
+                    let mut m = HashMap::new();
+                    for pair in pairs {
+                        match pair {
+                            Value::Record(ref rec) => {
+                                let k = rec.get("first").cloned().ok_or_else(|| RuntimeError::new("Map.from_list: Pair missing `first`", span))?;
+                                let v = rec.get("second").cloned().ok_or_else(|| RuntimeError::new("Map.from_list: Pair missing `second`", span))?;
+                                match k {
+                                    Value::Str(s) => { m.insert(s, v); }
+                                    other => return Err(RuntimeError::new(format!("Map.from_list: key must be String, got {}", other.type_name()), span)),
+                                }
+                            }
+                            other => return Err(RuntimeError::new(format!("Map.from_list: expected Pair record, got {}", other.type_name()), span)),
+                        }
+                    }
+                    Ok(Value::Record(m))
+                }
+                Some(v) => Err(RuntimeError::new(format!("Map.from_list expects List, got {}", v.type_name()), span)),
+                None => Err(RuntimeError::new("Map.from_list requires 1 argument", span)),
+            }
+        }
+        ("Map", "to_list") => {
+            match args.into_iter().next() {
+                Some(Value::Record(m)) => {
+                    let mut pairs: Vec<(String, Value)> = m.into_iter().collect();
+                    pairs.sort_by(|a, b| a.0.cmp(&b.0));
+                    let list: Vec<Value> = pairs.into_iter().map(|(k, v)| {
+                        let mut rec = HashMap::new();
+                        rec.insert("first".to_string(), Value::Str(k));
+                        rec.insert("second".to_string(), v);
+                        Value::Record(rec)
+                    }).collect();
+                    Ok(Value::List(list))
+                }
+                Some(Value::Unit) => Ok(Value::List(vec![])),
+                Some(v) => Err(RuntimeError::new(format!("Map.to_list expects Map, got {}", v.type_name()), span)),
+                None => Err(RuntimeError::new("Map.to_list requires 1 argument", span)),
+            }
+        }
+        ("Map", "map_values") => {
+            if args.len() < 2 {
+                return Err(RuntimeError::new("Map.map_values requires 2 arguments (map, f)", span));
+            }
+            let f = args.remove(1);
+            let map_val = args.remove(0);
+            match map_val {
+                Value::Record(m) => {
+                    let mut out = HashMap::new();
+                    for (k, v) in m {
+                        out.insert(k, eval_apply(f.clone(), vec![v], span)?);
+                    }
+                    Ok(Value::Record(out))
+                }
+                Value::Unit => Ok(Value::Record(HashMap::new())),
+                v => Err(RuntimeError::new(format!("Map.map_values expects Map, got {}", v.type_name()), span)),
+            }
+        }
+        ("Map", "filter_values") => {
+            if args.len() < 2 {
+                return Err(RuntimeError::new("Map.filter_values requires 2 arguments (map, pred)", span));
+            }
+            let pred = args.remove(1);
+            let map_val = args.remove(0);
+            match map_val {
+                Value::Record(m) => {
+                    let mut out = HashMap::new();
+                    for (k, v) in m {
+                        match eval_apply(pred.clone(), vec![v.clone()], span)? {
+                            Value::Bool(true) => { out.insert(k, v); }
+                            Value::Bool(false) => {}
+                            other => return Err(RuntimeError::new(
+                                format!("Map.filter_values predicate must return Bool, got {}", other.type_name()), span
+                            )),
+                        }
+                    }
+                    Ok(Value::Record(out))
+                }
+                Value::Unit => Ok(Value::Record(HashMap::new())),
+                v => Err(RuntimeError::new(format!("Map.filter_values expects Map, got {}", v.type_name()), span)),
+            }
+        }
 
         // ── Debug (3-19) ──────────────────────────────────────────────────────
+        ("Json", "null") => Ok(json_variant("json_null", None)),
+        ("Json", "bool") => match args.into_iter().next() {
+            Some(Value::Bool(b)) => Ok(json_variant("json_bool", Some(Value::Bool(b)))),
+            Some(v) => Err(RuntimeError::new(format!("Json.bool expects Bool, got {}", v.type_name()), span)),
+            None => Err(RuntimeError::new("Json.bool requires 1 argument", span)),
+        },
+        ("Json", "int") => match args.into_iter().next() {
+            Some(Value::Int(i)) => Ok(json_variant("json_int", Some(Value::Int(i)))),
+            Some(v) => Err(RuntimeError::new(format!("Json.int expects Int, got {}", v.type_name()), span)),
+            None => Err(RuntimeError::new("Json.int requires 1 argument", span)),
+        },
+        ("Json", "float") => match args.into_iter().next() {
+            Some(Value::Float(f)) => Ok(json_variant("json_float", Some(Value::Float(f)))),
+            Some(v) => Err(RuntimeError::new(format!("Json.float expects Float, got {}", v.type_name()), span)),
+            None => Err(RuntimeError::new("Json.float requires 1 argument", span)),
+        },
+        ("Json", "str") => match args.into_iter().next() {
+            Some(Value::Str(s)) => Ok(json_variant("json_str", Some(Value::Str(s)))),
+            Some(v) => Err(RuntimeError::new(format!("Json.str expects String, got {}", v.type_name()), span)),
+            None => Err(RuntimeError::new("Json.str requires 1 argument", span)),
+        },
+        ("Json", "array") => match args.into_iter().next() {
+            Some(Value::List(items)) => Ok(json_variant("json_array", Some(Value::List(items)))),
+            Some(v) => Err(RuntimeError::new(format!("Json.array expects List<Json>, got {}", v.type_name()), span)),
+            None => Err(RuntimeError::new("Json.array requires 1 argument", span)),
+        },
+        ("Json", "object") => match args.into_iter().next() {
+            Some(Value::List(fields)) => {
+                let mut obj = HashMap::new();
+                for field in fields {
+                    let rec = match field {
+                        Value::Record(rec) => rec,
+                        other => return Err(RuntimeError::new(format!("Json.object expects List<JsonField>, got {}", other.type_name()), span)),
+                    };
+                    let key = match rec.get("key") {
+                        Some(Value::Str(s)) => s.clone(),
+                        Some(other) => return Err(RuntimeError::new(format!("JsonField.key must be String, got {}", other.type_name()), span)),
+                        None => return Err(RuntimeError::new("JsonField missing `key`", span)),
+                    };
+                    let value = rec.get("value").cloned().ok_or_else(|| RuntimeError::new("JsonField missing `value`", span))?;
+                    obj.insert(key, value);
+                }
+                Ok(json_variant("json_object", Some(Value::Record(obj))))
+            }
+            Some(v) => Err(RuntimeError::new(format!("Json.object expects List<JsonField>, got {}", v.type_name()), span)),
+            None => Err(RuntimeError::new("Json.object requires 1 argument", span)),
+        },
+        ("Json", "parse") => match args.into_iter().next() {
+            Some(Value::Str(s)) => match serde_json::from_str::<SerdeJsonValue>(&s) {
+                Ok(v) => Ok(Value::Variant("some".into(), Some(Box::new(serde_to_favnir_json(v))))),
+                Err(_) => Ok(Value::Variant("none".into(), None)),
+            },
+            Some(v) => Err(RuntimeError::new(format!("Json.parse expects String, got {}", v.type_name()), span)),
+            None => Err(RuntimeError::new("Json.parse requires 1 argument", span)),
+        },
+        ("Json", "encode") | ("Json", "encode_pretty") => {
+            let json = args.into_iter().next().ok_or_else(|| RuntimeError::new(format!("Json.{} requires 1 argument", method), span))?;
+            let serde = favnir_json_to_serde(&json).ok_or_else(|| RuntimeError::new(format!("Json.{} expects Json", method), span))?;
+            let out = if method == "encode_pretty" { serde_json::to_string_pretty(&serde) } else { serde_json::to_string(&serde) }
+                .map_err(|e| RuntimeError::new(format!("Json.{} failed: {}", method, e), span))?;
+            Ok(Value::Str(out))
+        }
+        ("Json", "get") => {
+            if args.len() != 2 {
+                return Err(RuntimeError::new("Json.get requires 2 arguments", span));
+            }
+            let mut it = args.into_iter();
+            let json = it.next().unwrap();
+            let key = match it.next().unwrap() {
+                Value::Str(s) => s,
+                other => return Err(RuntimeError::new(format!("Json.get expects String key, got {}", other.type_name()), span)),
+            };
+            match json {
+                Value::Variant(tag, Some(payload)) if tag == "json_object" => match *payload {
+                    Value::Record(map) => Ok(match map.get(&key) {
+                        Some(v) => Value::Variant("some".into(), Some(Box::new(v.clone()))),
+                        None => Value::Variant("none".into(), None),
+                    }),
+                    _ => Err(RuntimeError::new("Json.get received malformed json_object payload", span)),
+                },
+                _ => Ok(Value::Variant("none".into(), None)),
+            }
+        }
+        ("Json", "at") => {
+            if args.len() != 2 {
+                return Err(RuntimeError::new("Json.at requires 2 arguments", span));
+            }
+            let mut it = args.into_iter();
+            let json = it.next().unwrap();
+            let idx = match it.next().unwrap() {
+                Value::Int(i) => i,
+                other => return Err(RuntimeError::new(format!("Json.at expects Int index, got {}", other.type_name()), span)),
+            };
+            match json {
+                Value::Variant(tag, Some(payload)) if tag == "json_array" => match *payload {
+                    Value::List(items) if idx >= 0 => Ok(items.get(idx as usize).cloned().map(|v| Value::Variant("some".into(), Some(Box::new(v)))).unwrap_or(Value::Variant("none".into(), None))),
+                    Value::List(_) => Ok(Value::Variant("none".into(), None)),
+                    _ => Err(RuntimeError::new("Json.at received malformed json_array payload", span)),
+                },
+                _ => Ok(Value::Variant("none".into(), None)),
+            }
+        }
+        ("Json", "as_str") => match args.into_iter().next() {
+            Some(Value::Variant(tag, Some(payload))) if tag == "json_str" => Ok(Value::Variant("some".into(), Some(payload))),
+            Some(_) => Ok(Value::Variant("none".into(), None)),
+            None => Err(RuntimeError::new("Json.as_str requires 1 argument", span)),
+        },
+        ("Json", "as_int") => match args.into_iter().next() {
+            Some(Value::Variant(tag, Some(payload))) if tag == "json_int" => Ok(Value::Variant("some".into(), Some(payload))),
+            Some(_) => Ok(Value::Variant("none".into(), None)),
+            None => Err(RuntimeError::new("Json.as_int requires 1 argument", span)),
+        },
+        ("Json", "as_float") => match args.into_iter().next() {
+            Some(Value::Variant(tag, Some(payload))) if tag == "json_float" => Ok(Value::Variant("some".into(), Some(payload))),
+            Some(_) => Ok(Value::Variant("none".into(), None)),
+            None => Err(RuntimeError::new("Json.as_float requires 1 argument", span)),
+        },
+        ("Json", "as_bool") => match args.into_iter().next() {
+            Some(Value::Variant(tag, Some(payload))) if tag == "json_bool" => Ok(Value::Variant("some".into(), Some(payload))),
+            Some(_) => Ok(Value::Variant("none".into(), None)),
+            None => Err(RuntimeError::new("Json.as_bool requires 1 argument", span)),
+        },
+        ("Json", "as_array") => match args.into_iter().next() {
+            Some(Value::Variant(tag, Some(payload))) if tag == "json_array" => Ok(Value::Variant("some".into(), Some(payload))),
+            Some(_) => Ok(Value::Variant("none".into(), None)),
+            None => Err(RuntimeError::new("Json.as_array requires 1 argument", span)),
+        },
+        ("Json", "is_null") => match args.into_iter().next() {
+            Some(Value::Variant(tag, None)) if tag == "json_null" => Ok(Value::Bool(true)),
+            Some(_) => Ok(Value::Bool(false)),
+            None => Err(RuntimeError::new("Json.is_null requires 1 argument", span)),
+        },
+        ("Json", "keys") => match args.into_iter().next() {
+            Some(Value::Variant(tag, Some(payload))) if tag == "json_object" => match *payload {
+                Value::Record(map) => {
+                    let mut keys: Vec<Value> = map.into_keys().map(Value::Str).collect();
+                    keys.sort_by(|a, b| a.display().cmp(&b.display()));
+                    Ok(Value::Variant("some".into(), Some(Box::new(Value::List(keys)))))
+                }
+                _ => Err(RuntimeError::new("Json.keys received malformed json_object payload", span)),
+            },
+            Some(_) => Ok(Value::Variant("none".into(), None)),
+            None => Err(RuntimeError::new("Json.keys requires 1 argument", span)),
+        },
+        ("Json", "length") => match args.into_iter().next() {
+            Some(Value::Variant(tag, Some(payload))) if tag == "json_array" => match *payload {
+                Value::List(items) => Ok(Value::Variant("some".into(), Some(Box::new(Value::Int(items.len() as i64))))),
+                _ => Err(RuntimeError::new("Json.length received malformed json_array payload", span)),
+            },
+            Some(Value::Variant(tag, Some(payload))) if tag == "json_object" => match *payload {
+                Value::Record(map) => Ok(Value::Variant("some".into(), Some(Box::new(Value::Int(map.len() as i64))))),
+                _ => Err(RuntimeError::new("Json.length received malformed json_object payload", span)),
+            },
+            Some(_) => Ok(Value::Variant("none".into(), None)),
+            None => Err(RuntimeError::new("Json.length requires 1 argument", span)),
+        },
+
+        ("Csv", "parse") => {
+            let input = value_string(
+                args.into_iter().next().ok_or_else(|| RuntimeError::new("Csv.parse requires 1 argument", span))?,
+                "Csv.parse",
+                span,
+            )?;
+            let mut rdr = csv::ReaderBuilder::new()
+                .has_headers(false)
+                .from_reader(input.as_bytes());
+            let mut rows = Vec::new();
+            for record in rdr.records() {
+                let record = record.map_err(|e| RuntimeError::new(format!("Csv.parse failed: {}", e), span))?;
+                rows.push(Value::List(record.iter().map(|cell| Value::Str(cell.to_string())).collect()));
+            }
+            Ok(Value::List(rows))
+        }
+        ("Csv", "parse_with_header") => {
+            let input = value_string(
+                args.into_iter().next().ok_or_else(|| RuntimeError::new("Csv.parse_with_header requires 1 argument", span))?,
+                "Csv.parse_with_header",
+                span,
+            )?;
+            let mut rdr = csv::ReaderBuilder::new()
+                .has_headers(true)
+                .from_reader(input.as_bytes());
+            let headers = rdr.headers()
+                .map_err(|e| RuntimeError::new(format!("Csv.parse_with_header failed: {}", e), span))?
+                .clone();
+            let mut rows = Vec::new();
+            for record in rdr.records() {
+                let record = record.map_err(|e| RuntimeError::new(format!("Csv.parse_with_header failed: {}", e), span))?;
+                let mut row = HashMap::new();
+                for (key, value) in headers.iter().zip(record.iter()) {
+                    row.insert(key.to_string(), Value::Str(value.to_string()));
+                }
+                rows.push(Value::Record(row));
+            }
+            Ok(Value::List(rows))
+        }
+        ("Csv", "encode") => {
+            let rows = match args.into_iter().next() {
+                Some(Value::List(rows)) => rows,
+                Some(other) => return Err(RuntimeError::new(format!("Csv.encode expects List<List<String>>, got {}", other.type_name()), span)),
+                None => return Err(RuntimeError::new("Csv.encode requires 1 argument", span)),
+            };
+            let mut writer = csv::WriterBuilder::new().from_writer(vec![]);
+            for row in rows {
+                let fields = value_string_list(row, "Csv.encode", span)?;
+                writer.write_record(fields)
+                    .map_err(|e| RuntimeError::new(format!("Csv.encode failed: {}", e), span))?;
+            }
+            let bytes = writer.into_inner()
+                .map_err(|e| RuntimeError::new(format!("Csv.encode failed: {}", e.into_error()), span))?;
+            let out = String::from_utf8(bytes)
+                .map_err(|e| RuntimeError::new(format!("Csv.encode produced invalid UTF-8: {}", e), span))?;
+            Ok(Value::Str(out))
+        }
+        ("Csv", "encode_with_header") => {
+            if args.len() != 2 {
+                return Err(RuntimeError::new("Csv.encode_with_header requires 2 arguments", span));
+            }
+            let mut it = args.into_iter();
+            let header = value_string_list(it.next().unwrap(), "Csv.encode_with_header", span)?;
+            let rows = match it.next().unwrap() {
+                Value::List(rows) => rows,
+                other => return Err(RuntimeError::new(format!("Csv.encode_with_header expects List<List<String>>, got {}", other.type_name()), span)),
+            };
+            let mut writer = csv::WriterBuilder::new().from_writer(vec![]);
+            writer.write_record(&header)
+                .map_err(|e| RuntimeError::new(format!("Csv.encode_with_header failed: {}", e), span))?;
+            for row in rows {
+                let fields = value_string_list(row, "Csv.encode_with_header", span)?;
+                writer.write_record(fields)
+                    .map_err(|e| RuntimeError::new(format!("Csv.encode_with_header failed: {}", e), span))?;
+            }
+            let bytes = writer.into_inner()
+                .map_err(|e| RuntimeError::new(format!("Csv.encode_with_header failed: {}", e.into_error()), span))?;
+            let out = String::from_utf8(bytes)
+                .map_err(|e| RuntimeError::new(format!("Csv.encode_with_header produced invalid UTF-8: {}", e), span))?;
+            Ok(Value::Str(out))
+        }
+        ("Csv", "from_records") => {
+            let records = match args.into_iter().next() {
+                Some(Value::List(records)) => records,
+                Some(other) => return Err(RuntimeError::new(format!("Csv.from_records expects List<Map<String>>, got {}", other.type_name()), span)),
+                None => return Err(RuntimeError::new("Csv.from_records requires 1 argument", span)),
+            };
+            let mut headers = std::collections::BTreeSet::new();
+            let mut rows = Vec::new();
+            for record in records {
+                match record {
+                    Value::Record(map) => {
+                        for key in map.keys() {
+                            headers.insert(key.clone());
+                        }
+                        rows.push(map);
+                    }
+                    other => return Err(RuntimeError::new(format!("Csv.from_records expects record rows, got {}", other.type_name()), span)),
+                }
+            }
+            let header: Vec<String> = headers.into_iter().collect();
+            let mut writer = csv::WriterBuilder::new().from_writer(vec![]);
+            writer.write_record(&header)
+                .map_err(|e| RuntimeError::new(format!("Csv.from_records failed: {}", e), span))?;
+            for row in rows {
+                let mut values = Vec::with_capacity(header.len());
+                for key in &header {
+                    let value = row.get(key).cloned().unwrap_or(Value::Str(String::new()));
+                    values.push(value_string(value, "Csv.from_records", span)?);
+                }
+                writer.write_record(values)
+                    .map_err(|e| RuntimeError::new(format!("Csv.from_records failed: {}", e), span))?;
+            }
+            let bytes = writer.into_inner()
+                .map_err(|e| RuntimeError::new(format!("Csv.from_records failed: {}", e.into_error()), span))?;
+            let out = String::from_utf8(bytes)
+                .map_err(|e| RuntimeError::new(format!("Csv.from_records produced invalid UTF-8: {}", e), span))?;
+            Ok(Value::Str(out))
+        }
+
         ("Debug", "show") => {
             let v = args.into_iter().next().unwrap_or(Value::Unit);
             Ok(Value::Str(v.repr()))
@@ -718,6 +1769,112 @@ fn eval_builtin(ns: &str, method: &str, mut args: Vec<Value>, span: &Span) -> Ev
         }
 
         // ── Db (3-7..3-11) ────────────────────────────────────────────────────
+        ("File", "read") => {
+            let path = match args.into_iter().next() {
+                Some(Value::Str(s)) => s,
+                Some(other) => return Err(RuntimeError::new(format!("File.read expects String path, got {}", other.type_name()), span)),
+                None => return Err(RuntimeError::new("File.read requires 1 argument", span)),
+            };
+            let content = std::fs::read_to_string(&path)
+                .map_err(|e| RuntimeError::new(format!("File.read failed for `{}`: {}", path, e), span))?;
+            Ok(Value::Str(content))
+        }
+        ("File", "read_lines") => {
+            let path = match args.into_iter().next() {
+                Some(Value::Str(s)) => s,
+                Some(other) => return Err(RuntimeError::new(format!("File.read_lines expects String path, got {}", other.type_name()), span)),
+                None => return Err(RuntimeError::new("File.read_lines requires 1 argument", span)),
+            };
+            let content = std::fs::read_to_string(&path)
+                .map_err(|e| RuntimeError::new(format!("File.read_lines failed for `{}`: {}", path, e), span))?;
+            Ok(Value::List(content.lines().map(|line| Value::Str(line.to_string())).collect()))
+        }
+        ("File", "write") => {
+            if args.len() != 2 {
+                return Err(RuntimeError::new("File.write requires 2 arguments", span));
+            }
+            let mut it = args.into_iter();
+            let path = match it.next().unwrap() {
+                Value::Str(s) => s,
+                other => return Err(RuntimeError::new(format!("File.write expects String path, got {}", other.type_name()), span)),
+            };
+            let content = match it.next().unwrap() {
+                Value::Str(s) => s,
+                other => return Err(RuntimeError::new(format!("File.write expects String content, got {}", other.type_name()), span)),
+            };
+            std::fs::write(&path, content)
+                .map_err(|e| RuntimeError::new(format!("File.write failed for `{}`: {}", path, e), span))?;
+            Ok(Value::Unit)
+        }
+        ("File", "write_lines") => {
+            if args.len() != 2 {
+                return Err(RuntimeError::new("File.write_lines requires 2 arguments", span));
+            }
+            let mut it = args.into_iter();
+            let path = match it.next().unwrap() {
+                Value::Str(s) => s,
+                other => return Err(RuntimeError::new(format!("File.write_lines expects String path, got {}", other.type_name()), span)),
+            };
+            let lines = match it.next().unwrap() {
+                Value::List(items) => {
+                    let mut parts = Vec::with_capacity(items.len());
+                    for item in items {
+                        match item {
+                            Value::Str(s) => parts.push(s),
+                            other => return Err(RuntimeError::new(format!("File.write_lines expects List<String>, got List<{}>", other.type_name()), span)),
+                        }
+                    }
+                    parts
+                }
+                other => return Err(RuntimeError::new(format!("File.write_lines expects List<String>, got {}", other.type_name()), span)),
+            };
+            std::fs::write(&path, lines.join("\n"))
+                .map_err(|e| RuntimeError::new(format!("File.write_lines failed for `{}`: {}", path, e), span))?;
+            Ok(Value::Unit)
+        }
+        ("File", "append") => {
+            use std::io::Write;
+            if args.len() != 2 {
+                return Err(RuntimeError::new("File.append requires 2 arguments", span));
+            }
+            let mut it = args.into_iter();
+            let path = match it.next().unwrap() {
+                Value::Str(s) => s,
+                other => return Err(RuntimeError::new(format!("File.append expects String path, got {}", other.type_name()), span)),
+            };
+            let content = match it.next().unwrap() {
+                Value::Str(s) => s,
+                other => return Err(RuntimeError::new(format!("File.append expects String content, got {}", other.type_name()), span)),
+            };
+            let mut file = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(&path)
+                .map_err(|e| RuntimeError::new(format!("File.append failed for `{}`: {}", path, e), span))?;
+            file.write_all(content.as_bytes())
+                .map_err(|e| RuntimeError::new(format!("File.append failed for `{}`: {}", path, e), span))?;
+            Ok(Value::Unit)
+        }
+        ("File", "exists") => {
+            let path = match args.into_iter().next() {
+                Some(Value::Str(s)) => s,
+                Some(other) => return Err(RuntimeError::new(format!("File.exists expects String path, got {}", other.type_name()), span)),
+                None => return Err(RuntimeError::new("File.exists requires 1 argument", span)),
+            };
+            Ok(Value::Bool(std::path::Path::new(&path).exists()))
+        }
+        ("File", "delete") => {
+            let path = match args.into_iter().next() {
+                Some(Value::Str(s)) => s,
+                Some(other) => return Err(RuntimeError::new(format!("File.delete expects String path, got {}", other.type_name()), span)),
+                None => return Err(RuntimeError::new("File.delete requires 1 argument", span)),
+            };
+            match std::fs::remove_file(&path) {
+                Ok(_) => Ok(Value::Unit),
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Value::Unit),
+                Err(e) => Err(RuntimeError::new(format!("File.delete failed for `{}`: {}", path, e), span)),
+            }
+        }
         ("Db", "execute") => {
             // Db.execute(sql, args...) → Int (rows changed)
             let sql = match args.first() {
@@ -1305,7 +2462,7 @@ impl Interpreter {
 
     fn register_builtins(env: &Env) {
         // Register namespace values so `IO`, `List`, `Db`, etc. resolve
-        for ns in &["IO", "List", "String", "Option", "Result", "Db", "Http", "Map", "Debug", "Emit", "Util", "Trace"] {
+        for ns in &["IO", "List", "String", "Option", "Result", "Db", "Http", "Map", "Debug", "Emit", "Util", "Trace", "File", "Json", "Csv"] {
             env_define(env, ns.to_string(), Value::Namespace(ns.to_string()));
         }
 
@@ -2098,5 +3255,341 @@ public fn main() -> String {
 }
 "#;
         assert_eq!(eval(src), Value::Str("pos".into()));
+    }
+
+    #[test]
+    fn json_parse_encode_roundtrip() {
+        let src = r#"
+type Field = { key: String value: Json }
+
+public fn main() -> String {
+    bind fields <- collect {
+        yield Field { key: "name" value: Json.str("fav") };
+        yield Field { key: "count" value: Json.int(2) };
+        ()
+    }
+    bind obj <- Json.object(fields)
+    bind parsed <- Json.parse(Json.encode(obj))
+    bind json <- Option.unwrap_or(parsed, Json.null())
+    Json.encode(json)
+}
+"#;
+        assert_eq!(eval(src), Value::Str(r#"{"count":2,"name":"fav"}"#.into()));
+    }
+
+    #[test]
+    fn csv_parse_with_header() {
+        let src = r#"
+public fn main() -> String {
+    bind rows <- Csv.parse_with_header("name,count\nfav,2\nvm,3\n")
+    Csv.from_records(rows)
+}
+"#;
+        assert_eq!(eval(src), Value::Str("count,name\n2,fav\n3,vm\n".into()));
+    }
+
+    // ── 7-1: List new functions ───────────────────────────────────────────────
+
+    #[test]
+    fn test_list_range() {
+        let src = r#"
+public fn main() -> List<Int> {
+    List.range(1, 5)
+}
+"#;
+        assert_eq!(
+            eval(src),
+            Value::List(vec![Value::Int(1), Value::Int(2), Value::Int(3), Value::Int(4)])
+        );
+    }
+
+    #[test]
+    fn test_list_reverse() {
+        let src = r#"
+public fn main() -> List<Int> {
+    List.reverse(List.range(1, 4))
+}
+"#;
+        assert_eq!(
+            eval(src),
+            Value::List(vec![Value::Int(3), Value::Int(2), Value::Int(1)])
+        );
+    }
+
+    #[test]
+    fn test_list_concat() {
+        let src = r#"
+public fn main() -> List<Int> {
+    List.concat(List.range(1, 3), List.range(3, 5))
+}
+"#;
+        assert_eq!(
+            eval(src),
+            Value::List(vec![Value::Int(1), Value::Int(2), Value::Int(3), Value::Int(4)])
+        );
+    }
+
+    #[test]
+    fn test_list_take_drop() {
+        let src = r#"
+public fn main() -> List<Int> {
+    bind xs <- List.range(0, 6)
+    List.concat(List.take(xs, 3), List.drop(xs, 4))
+}
+"#;
+        assert_eq!(
+            eval(src),
+            Value::List(vec![Value::Int(0), Value::Int(1), Value::Int(2), Value::Int(4), Value::Int(5)])
+        );
+    }
+
+    #[test]
+    fn test_list_flat_map() {
+        let src = r#"
+public fn main() -> List<Int> {
+    List.flat_map(List.range(1, 4), |x| List.range(0, x))
+}
+"#;
+        // flat_map([1,2,3], |x| range(0,x)) → [0] ++ [0,1] ++ [0,1,2] → [0,0,1,0,1,2]
+        assert_eq!(
+            eval(src),
+            Value::List(vec![
+                Value::Int(0),
+                Value::Int(0), Value::Int(1),
+                Value::Int(0), Value::Int(1), Value::Int(2),
+            ])
+        );
+    }
+
+    #[test]
+    fn test_list_zip() {
+        let src = r#"
+public fn main() -> Int {
+    bind pairs <- List.zip(List.range(1, 4), List.range(10, 13))
+    List.fold(pairs, 0, |acc, p| acc + p.first + p.second)
+}
+"#;
+        // zip([1,2,3], [10,11,12]) → [{1,10},{2,11},{3,12}]
+        // fold sum of all = (1+10) + (2+11) + (3+12) = 11+13+15 = 39
+        assert_eq!(eval(src), Value::Int(39));
+    }
+
+    #[test]
+    fn test_list_sort() {
+        let src = r#"
+public fn main() -> List<Int> {
+    bind xs <- List.concat(List.range(3, 6), List.range(0, 3))
+    List.sort(xs, |a, b| a - b)
+}
+"#;
+        assert_eq!(
+            eval(src),
+            Value::List((0..6).map(Value::Int).collect())
+        );
+    }
+
+    #[test]
+    fn test_list_find_any_all() {
+        let src = r#"
+public fn main() -> Bool {
+    bind xs <- List.range(0, 5)
+    bind found <- Option.is_some(List.find(xs, |x| x > 3))
+    bind has_neg <- List.any(xs, |x| x < 0)
+    bind all_small <- List.all(xs, |x| x < 10)
+    found
+}
+"#;
+        assert_eq!(eval(src), Value::Bool(true));
+    }
+
+    #[test]
+    fn test_list_join() {
+        let src = r#"
+public fn main() -> String {
+    bind parts <- List.map(List.range(1, 4), |n| String.from_int(n))
+    List.join(parts, "-")
+}
+"#;
+        assert_eq!(eval(src), Value::Str("1-2-3".into()));
+    }
+
+    // ── 7-2: Option / Result new functions ───────────────────────────────────
+
+    #[test]
+    fn test_option_and_then() {
+        let src = r#"
+public fn main() -> Int {
+    bind r <- Option.and_then(Option.some(4), |x| Option.some(x + 1))
+    Option.unwrap_or(r, 0)
+}
+"#;
+        assert_eq!(eval(src), Value::Int(5));
+    }
+
+    #[test]
+    fn test_option_and_then_none() {
+        let src = r#"
+public fn main() -> Int {
+    bind r <- Option.and_then(Option.none(), |x| Option.some(x + 1))
+    Option.unwrap_or(r, 99)
+}
+"#;
+        assert_eq!(eval(src), Value::Int(99));
+    }
+
+    #[test]
+    fn test_option_is_some_is_none() {
+        let src = r#"
+public fn main() -> Bool {
+    Option.is_some(Option.some(1))
+}
+"#;
+        assert_eq!(eval(src), Value::Bool(true));
+    }
+
+    #[test]
+    fn test_result_map_and_then() {
+        let src = r#"
+public fn main() -> Int {
+    bind r <- Result.and_then(Result.ok(3), |x| Result.ok(x * 2))
+    bind r2 <- Result.map(r, |x| x + 1)
+    Result.unwrap_or(r2, 0)
+}
+"#;
+        assert_eq!(eval(src), Value::Int(7));
+    }
+
+    #[test]
+    fn test_result_map_err() {
+        let src = r#"
+public fn main() -> String {
+    bind r <- Result.map_err(Result.err("oops"), |e| String.concat("err: ", e))
+    match r {
+        ok(_) => "ok"
+        err(e) => e
+    }
+}
+"#;
+        assert_eq!(eval(src), Value::Str("err: oops".into()));
+    }
+
+    // ── 7-3: String new functions ─────────────────────────────────────────────
+
+    #[test]
+    fn test_string_join() {
+        let src = r#"
+public fn main() -> String {
+    String.join(List.map(List.range(1, 4), |n| String.from_int(n)), ", ")
+}
+"#;
+        assert_eq!(eval(src), Value::Str("1, 2, 3".into()));
+    }
+
+    #[test]
+    fn test_string_replace() {
+        let src = r#"
+public fn main() -> String {
+    String.replace("hello world", "world", "Favnir")
+}
+"#;
+        assert_eq!(eval(src), Value::Str("hello Favnir".into()));
+    }
+
+    #[test]
+    fn test_string_slice() {
+        let src = r#"
+public fn main() -> String {
+    String.slice("abcdef", 2, 5)
+}
+"#;
+        assert_eq!(eval(src), Value::Str("cde".into()));
+    }
+
+    #[test]
+    fn test_string_predicates() {
+        let src = r#"
+public fn main() -> Bool {
+    bind a <- String.starts_with("hello", "he")
+    bind b <- String.ends_with("hello", "lo")
+    bind c <- String.contains("hello", "ell")
+    bind d <- String.is_empty("")
+    a
+}
+"#;
+        assert_eq!(eval(src), Value::Bool(true));
+    }
+
+    #[test]
+    fn test_string_to_from_int() {
+        let src = r#"
+public fn main() -> Int {
+    bind s <- String.from_int(42)
+    Option.unwrap_or(String.to_int(s), 0)
+}
+"#;
+        assert_eq!(eval(src), Value::Int(42));
+    }
+
+    // ── 7-4: Map new functions ────────────────────────────────────────────────
+
+    #[test]
+    fn test_map_merge() {
+        let src = r#"
+public fn main() -> String {
+    bind base     <- Map.set(Map.set((), "a", "1"), "b", "2")
+    bind overrides <- Map.set((), "b", "99")
+    bind merged   <- Map.merge(base, overrides)
+    Option.unwrap_or(Map.get(merged, "b"), "?")
+}
+"#;
+        assert_eq!(eval(src), Value::Str("99".into()));
+    }
+
+    #[test]
+    fn test_map_from_list_to_list() {
+        let src = r#"
+public fn main() -> Int {
+    bind pairs <- List.zip(
+        List.map(List.range(0, 3), |n| String.from_int(n)),
+        List.range(10, 13)
+    )
+    bind m <- Map.from_list(pairs)
+    Map.size(m)
+}
+"#;
+        assert_eq!(eval(src), Value::Int(3));
+    }
+
+    #[test]
+    fn test_map_has_key_is_empty() {
+        let src = r#"
+public fn main() -> Bool {
+    bind m <- Map.set((), "x", 1)
+    bind has <- Map.has_key(m, "x")
+    bind missing <- Map.has_key(m, "y")
+    bind empty <- Map.is_empty(())
+    has
+}
+"#;
+        assert_eq!(eval(src), Value::Bool(true));
+    }
+
+    // ── 7-5: File read/write roundtrip ───────────────────────────────────────
+
+    #[test]
+    fn test_file_read_write_roundtrip() {
+        use tempfile::NamedTempFile;
+        let tmp = NamedTempFile::new().expect("tempfile");
+        let path = tmp.path().to_str().expect("path").replace('\\', "/");
+        let content = "hello from Favnir";
+        let src = format!(
+            r#"
+public fn main() -> String !File {{
+    File.write("{path}", "{content}");
+    File.read("{path}")
+}}
+"#
+        );
+        assert_eq!(eval(&src), Value::Str(content.into()));
     }
 }

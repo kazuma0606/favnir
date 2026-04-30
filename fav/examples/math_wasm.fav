@@ -1,0 +1,25 @@
+public fn add(a: Int, b: Int) -> Int {
+    a + b
+}
+
+public fn abs(n: Int) -> Int {
+    if n < 0 {
+        0 - n
+    } else {
+        n
+    }
+}
+
+public fn factorial(n: Int) -> Int {
+    if n <= 1 {
+        1
+    } else {
+        n * factorial(n - 1)
+    }
+}
+
+public fn main() -> Unit !Io {
+    IO.println_int(add(21, 21));
+    IO.println_int(abs(-5));
+    IO.println_int(factorial(5))
+}

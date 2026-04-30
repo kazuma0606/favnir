@@ -14,7 +14,7 @@ use driver::{cmd_run, cmd_build, cmd_exec, cmd_check, cmd_explain, cmd_test, cmd
 // 笏笏 help text (4-6) 笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏
 
 const HELP: &str = "\
-fav - Favnir language toolchain v0.8.0
+fav - Favnir language toolchain v0.9.0
 
 USAGE:
     fav <COMMAND> [OPTIONS] [FILE]
@@ -23,8 +23,8 @@ COMMANDS:
     run [--db <url>] [file]
                   Parse, type-check, and run a Favnir program.
                   If <file> is omitted, looks for fav.toml and runs src/main.fav.
-    build [-o <file>] [file]
-                  Parse, type-check, and build a .fvc artifact.
+    build [-o <file>] [--target <fvc|wasm>] [file]
+                  Parse, type-check, and build a .fvc artifact or .wasm module.
                   If <file> is omitted, looks for fav.toml and builds src/main.fav.
     exec [--db <path>] [--info] <artifact>
                   Execute a .fvc artifact by running its `main` function.
@@ -56,6 +56,7 @@ SINGLE-FILE EXAMPLES:
     fav run examples/hello.fav
     fav run --db myapp.db examples/users.fav
     fav build -o dist/app.fvc examples/hello.fav
+    fav build --target wasm -o dist/hello.wasm examples/hello.fav
     fav exec dist/app.fvc
     fav exec --info dist/app.fvc
     fav check examples/pipeline.fav
@@ -81,6 +82,10 @@ ERROR CODES:
     E014  Symbol not public (visibility violation)
     E015  Private symbol referenced from another file
     E016  Internal symbol referenced from outside rune
+    W001  WASM codegen: unsupported type
+    W002  WASM codegen: unsupported expression
+    W003  WASM codegen: main signature not supported (must be () -> Unit !Io)
+    W004  --db cannot be used with .wasm artifacts
 ";
 
 fn main() {
@@ -108,6 +113,7 @@ fn main() {
 
         Some("build") => {
             let mut out: Option<&str> = None;
+            let mut target: Option<&str> = None;
             let mut file: Option<&str> = None;
             let mut i = 2usize;
             while i < args.len() {
@@ -119,13 +125,20 @@ fn main() {
                         }));
                         i += 2;
                     }
+                    "--target" => {
+                        target = Some(args.get(i + 1).unwrap_or_else(|| {
+                            eprintln!("error: --target requires a value");
+                            process::exit(1);
+                        }));
+                        i += 2;
+                    }
                     other => {
                         file = Some(other);
                         i += 1;
                     }
                 }
             }
-            cmd_build(file, out);
+            cmd_build(file, out, target);
         }
 
         Some("exec") => {
@@ -221,4 +234,3 @@ fn main() {
         }
     }
 }
-

@@ -597,6 +597,7 @@ mod tests {
             fns: vec![IRFnDef {
                 name: "main".to_string(),
                 param_count: 0,
+                param_tys: vec![],
                 local_count: 0,
                 effects: Vec::new(),
                 return_ty: Type::Unit,
@@ -622,6 +623,7 @@ mod tests {
             fns: vec![IRFnDef {
                 name: "main".to_string(),
                 param_count: 0,
+                param_tys: vec![],
                 local_count: 0,
                 effects: Vec::new(),
                 return_ty: Type::String,
@@ -655,6 +657,7 @@ mod tests {
             fns: vec![IRFnDef {
                 name: "main".to_string(),
                 param_count: 1,
+                param_tys: vec![Type::Unknown],
                 local_count: 1,
                 effects: Vec::new(),
                 return_ty: Type::Int,

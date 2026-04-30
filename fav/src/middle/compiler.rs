@@ -127,6 +127,7 @@ pub fn compile_program(program: &Program) -> IRProgram {
         "List", "Map", "Trace", "Emit", "File", "Json", "Csv", "Db", "Http",
         // test assertion builtins (callable without namespace prefix)
         "assert", "assert_eq", "assert_ne",
+        "IO.println_int", "IO.println_float", "IO.println_bool", "IO.print",
     ] {
         if !ctx.globals.contains_key(*ns) {
             let idx = globals.len() as u16;
@@ -143,6 +144,7 @@ pub fn compile_program(program: &Program) -> IRProgram {
             Item::FnDef(fd) => fns.push(compile_fn_def(
                 &fd.name,
                 &fd.params.iter().map(|p| p.name.clone()).collect::<Vec<_>>(),
+                &fd.params.iter().map(|p| lower_type_expr(&p.ty)).collect::<Vec<_>>(),
                 &fd.effects,
                 &fd.return_ty,
                 &fd.body,
@@ -151,6 +153,7 @@ pub fn compile_program(program: &Program) -> IRProgram {
             Item::TrfDef(td) => fns.push(compile_fn_def(
                 &td.name,
                 &td.params.iter().map(|p| p.name.clone()).collect::<Vec<_>>(),
+                &td.params.iter().map(|p| lower_type_expr(&p.ty)).collect::<Vec<_>>(),
                 &td.effects,
                 &td.output_ty,
                 &td.body,
@@ -162,6 +165,7 @@ pub fn compile_program(program: &Program) -> IRProgram {
                     "Unit".into(), vec![], crate::frontend::lexer::Span::dummy());
                 fns.push(compile_fn_def(
                     &format!("$test:{}", td.name),
+                    &[],
                     &[],
                     &[],
                     &unit_ty,
@@ -207,6 +211,7 @@ fn compile_flw_def(fd: &FlwDef, ctx: &mut CompileCtx) -> IRFnDef {
     IRFnDef {
         name: fd.name.clone(),
         param_count: 1,
+        param_tys: vec![Type::Unknown],
         local_count,
         effects: Vec::new(),
         return_ty: Type::Unknown,
@@ -217,6 +222,7 @@ fn compile_flw_def(fd: &FlwDef, ctx: &mut CompileCtx) -> IRFnDef {
 fn compile_fn_def(
     name: &str,
     params: &[String],
+    param_tys: &[Type],
     effects: &[crate::ast::Effect],
     return_ty: &TypeExpr,
     body: &Block,
@@ -242,6 +248,7 @@ fn compile_fn_def(
     IRFnDef {
         name: name.to_string(),
         param_count: params.len(),
+        param_tys: param_tys.to_vec(),
         local_count,
         effects: effects.to_vec(),
         return_ty: lower_type_expr(return_ty),
@@ -460,6 +467,7 @@ pub fn compile_expr(expr: &Expr, ctx: &mut CompileCtx) -> IRExpr {
             ctx.lifted_fns.push(IRFnDef {
                 name: closure_name,
                 param_count: captures.len() + params.len(),
+                param_tys: vec![Type::Unknown; captures.len() + params.len()],
                 local_count,
                 effects: Vec::new(),
                 return_ty: body_ir.ty().clone(),

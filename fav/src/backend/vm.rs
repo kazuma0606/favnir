@@ -1501,6 +1501,30 @@ fn vm_call_builtin(
             println!("{}", s);
             Ok(VMValue::Unit)
         }
+        "IO.println_int" => match args.as_slice() {
+            [VMValue::Int(n)] => {
+                println!("{}", n);
+                Ok(VMValue::Unit)
+            }
+            [_] => Err("IO.println_int requires an Int argument".to_string()),
+            _ => Err("IO.println_int requires 1 argument".to_string()),
+        },
+        "IO.println_float" => match args.as_slice() {
+            [VMValue::Float(n)] => {
+                println!("{}", n);
+                Ok(VMValue::Unit)
+            }
+            [_] => Err("IO.println_float requires a Float argument".to_string()),
+            _ => Err("IO.println_float requires 1 argument".to_string()),
+        },
+        "IO.println_bool" => match args.as_slice() {
+            [VMValue::Bool(b)] => {
+                println!("{}", if *b { "true" } else { "false" });
+                Ok(VMValue::Unit)
+            }
+            [_] => Err("IO.println_bool requires a Bool argument".to_string()),
+            _ => Err("IO.println_bool requires 1 argument".to_string()),
+        },
         "IO.print" => {
             use std::io::Write;
             let s = match args.into_iter().next() {
@@ -2634,3 +2658,30 @@ mod vm_legacy_coverage_tests;
 #[cfg(test)]
 #[path = "vm_stdlib_tests.rs"]
 mod vm_stdlib_tests;
+
+
+#[cfg(test)]
+mod wasm_phase0_builtin_tests {
+    use super::{vm_call_builtin, VMValue};
+
+    #[test]
+    fn vm_builtin_io_print_variants_return_unit() {
+        let mut emit_log = Vec::new();
+        assert_eq!(
+            vm_call_builtin("IO.print", vec![VMValue::Str("hello".into())], &mut emit_log, None).unwrap(),
+            VMValue::Unit
+        );
+        assert_eq!(
+            vm_call_builtin("IO.println_int", vec![VMValue::Int(42)], &mut emit_log, None).unwrap(),
+            VMValue::Unit
+        );
+        assert_eq!(
+            vm_call_builtin("IO.println_float", vec![VMValue::Float(3.5)], &mut emit_log, None).unwrap(),
+            VMValue::Unit
+        );
+        assert_eq!(
+            vm_call_builtin("IO.println_bool", vec![VMValue::Bool(true)], &mut emit_log, None).unwrap(),
+            VMValue::Unit
+        );
+    }
+}

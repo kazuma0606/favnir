@@ -6,6 +6,8 @@ use std::sync::{Arc, Mutex};
 use crate::backend::artifact::FvcArtifact;
 use crate::backend::codegen::{codegen_program, Opcode};
 use crate::middle::compiler::compile_program;
+use crate::backend::wasm_codegen::wasm_codegen_program;
+use crate::backend::wasm_exec::{wasm_exec_info, wasm_exec_main};
 use crate::frontend::parser::Parser;
 use crate::middle::checker::Checker;
 use crate::value::Value;
@@ -215,24 +217,52 @@ pub fn cmd_run(file: Option<&str>, db_url: Option<&str>) {
     });
 }
 
-pub fn cmd_build(file: Option<&str>, out: Option<&str>) {
+pub fn cmd_build(file: Option<&str>, out: Option<&str>, target: Option<&str>) {
     let (program, path) = load_and_check_program(file);
-    let out_path = out
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from(&path).with_extension("fvc"));
-    let artifact = build_artifact(&program);
+    let target = target.unwrap_or("fvc");
+    match target {
+        "fvc" => {
+            let out_path = out
+                .map(PathBuf::from)
+                .unwrap_or_else(|| PathBuf::from(&path).with_extension("fvc"));
+            let artifact = build_artifact(&program);
 
-    write_artifact_to_path(&artifact, &out_path).unwrap_or_else(|message| {
-        eprintln!("{message}");
-        process::exit(1);
-    });
+            write_artifact_to_path(&artifact, &out_path).unwrap_or_else(|message| {
+                eprintln!("{message}");
+                process::exit(1);
+            });
 
-    println!("built {}", out_path.display());
+            println!("built {}", out_path.display());
+        }
+        "wasm" => {
+            let out_path = out
+                .map(PathBuf::from)
+                .unwrap_or_else(|| PathBuf::from(&path).with_extension("wasm"));
+            let bytes = build_wasm_artifact(&program).unwrap_or_else(|message| {
+                eprintln!("{message}");
+                process::exit(1);
+            });
+            write_wasm_to_path(&bytes, &out_path).unwrap_or_else(|message| {
+                eprintln!("{message}");
+                process::exit(1);
+            });
+            println!("built {} (wasm)", out_path.display());
+        }
+        other => {
+            eprintln!("error: unsupported build target `{}`", other);
+            process::exit(1);
+        }
+    }
 }
 
 fn build_artifact(program: &ast::Program) -> FvcArtifact {
     let ir = compile_program(program);
     codegen_program(&ir)
+}
+
+fn build_wasm_artifact(program: &ast::Program) -> Result<Vec<u8>, String> {
+    let ir = compile_program(program);
+    wasm_codegen_program(&ir).map_err(|e| e.to_string())
 }
 
 fn write_artifact_to_path(artifact: &FvcArtifact, out_path: &Path) -> Result<(), String> {
@@ -256,6 +286,24 @@ fn write_artifact_to_path(artifact: &FvcArtifact, out_path: &Path) -> Result<(),
 }
 
 pub fn cmd_exec(path: &str, show_info: bool, db_path: Option<&str>) {
+    if path.ends_with(".wasm") {
+        let bytes = read_wasm_from_path(Path::new(path)).unwrap_or_else(|message| {
+            eprintln!("{message}");
+            process::exit(1);
+        });
+        match exec_wasm_bytes(&bytes, show_info, db_path) {
+            Ok(Some(info)) => {
+                print!("{info}");
+                return;
+            }
+            Ok(None) => return,
+            Err(message) => {
+                eprintln!("{message}");
+                process::exit(1);
+            }
+        }
+    }
+
     let artifact = read_artifact_from_path(Path::new(path)).unwrap_or_else(|message| {
         eprintln!("{message}");
         process::exit(1);
@@ -272,11 +320,46 @@ pub fn cmd_exec(path: &str, show_info: bool, db_path: Option<&str>) {
     });
 }
 
+fn exec_wasm_bytes(
+    bytes: &[u8],
+    show_info: bool,
+    db_path: Option<&str>,
+) -> Result<Option<String>, String> {
+    if db_path.is_some() {
+        return Err("error[W004]: --db cannot be used with .wasm artifacts".into());
+    }
+    if show_info {
+        return Ok(Some(wasm_exec_info(bytes)));
+    }
+    wasm_exec_main(bytes).map_err(|message| {
+        eprintln!("{message}");
+        message
+    })?;
+    Ok(None)
+}
+
 fn read_artifact_from_path(path: &Path) -> Result<FvcArtifact, String> {
     let mut file = std::fs::File::open(path)
         .map_err(|e| format!("error: cannot open artifact `{}`: {}", path.display(), e))?;
     FvcArtifact::read_from(&mut file)
         .map_err(|e| format!("error: cannot read artifact `{}`: {}", path.display(), e))
+}
+
+fn read_wasm_from_path(path: &Path) -> Result<Vec<u8>, String> {
+    std::fs::read(path)
+        .map_err(|e| format!("error: cannot read wasm artifact `{}`: {}", path.display(), e))
+}
+
+fn write_wasm_to_path(bytes: &[u8], out_path: &Path) -> Result<(), String> {
+    if let Some(parent) = out_path.parent() {
+        if !parent.as_os_str().is_empty() {
+            std::fs::create_dir_all(parent).map_err(|e| {
+                format!("error: cannot create output directory `{}`: {}", parent.display(), e)
+            })?;
+        }
+    }
+    std::fs::write(out_path, bytes)
+        .map_err(|e| format!("error: cannot write wasm artifact `{}`: {}", out_path.display(), e))
 }
 
 fn exec_artifact_main(artifact: &FvcArtifact, db_path: Option<&str>) -> Result<Value, String> {
@@ -995,10 +1078,12 @@ pub fn cmd_test(file: Option<&str>, filter: Option<&str>, fail_fast: bool) {
 mod tests {
     use super::{
         artifact_info_string,
-        build_artifact, exec_artifact_main, exec_artifact_main_with_emits,
-        load_and_check_program, read_artifact_from_path, write_artifact_to_path,
+        build_artifact, build_wasm_artifact, exec_artifact_main, exec_artifact_main_with_emits,
+        exec_wasm_bytes, load_and_check_program, read_artifact_from_path, read_wasm_from_path,
+        write_artifact_to_path, write_wasm_to_path,
     };
     use crate::frontend::parser::Parser;
+    use std::path::PathBuf;
     use tempfile::tempdir;
 
     #[test]
@@ -1290,6 +1375,131 @@ public fn main() -> Unit !Emit<UserCreated> !Trace {
         assert!(info.contains("- emitted events: UserCreated"));
         assert!(info.contains("!Trace: 2"));
         assert!(info.contains("!Emit<UserCreated>: 1"));
+    }
+
+    #[test]
+    fn build_wasm_artifact_runs_main_for_temp_source() {
+        let source = r#"
+public fn main() -> Unit !Io {
+    IO.println("Hello, Favnir!")
+}
+"#;
+        let program = Parser::parse_str(source, "hello_wasm.fav").expect("parse");
+        let bytes = build_wasm_artifact(&program).expect("build wasm");
+        crate::backend::wasm_exec::wasm_exec_main(&bytes).expect("exec wasm");
+    }
+
+    #[test]
+    fn file_path_build_wasm_exec_round_trip_runs_main() {
+        let dir = tempdir().expect("tempdir");
+        let src = dir.path().join("main.fav");
+        std::fs::write(
+            &src,
+            r#"
+public fn main() -> Unit !Io {
+    IO.println("Hello, Favnir!")
+}
+"#,
+        )
+        .expect("write source");
+
+        let src_str = src.to_string_lossy().to_string();
+        let (program, loaded_path) = load_and_check_program(Some(&src_str));
+        assert_eq!(loaded_path, src_str);
+
+        let bytes = build_wasm_artifact(&program).expect("build wasm");
+        let wasm_path = dir.path().join("main.wasm");
+        write_wasm_to_path(&bytes, &wasm_path).expect("write wasm");
+        let restored = read_wasm_from_path(&wasm_path).expect("read wasm");
+
+        crate::backend::wasm_exec::wasm_exec_main(&restored).expect("exec wasm");
+    }
+
+    #[test]
+    fn file_path_build_wasm_info_round_trip_reports_metadata() {
+        let dir = tempdir().expect("tempdir");
+        let src = dir.path().join("main.fav");
+        std::fs::write(
+            &src,
+            r#"
+public fn main() -> Unit !Io {
+    IO.println("Hello, Favnir!")
+}
+"#,
+        )
+        .expect("write source");
+
+        let src_str = src.to_string_lossy().to_string();
+        let (program, _) = load_and_check_program(Some(&src_str));
+        let bytes = build_wasm_artifact(&program).expect("build wasm");
+        let wasm_path = dir.path().join("hello.wasm");
+        write_wasm_to_path(&bytes, &wasm_path).expect("write wasm");
+        let restored = read_wasm_from_path(&wasm_path).expect("read wasm");
+
+        let info = crate::backend::wasm_exec::wasm_exec_info(&restored);
+        assert!(info.contains("artifact: .wasm"));
+        assert!(info.contains("status: valid"));
+        assert!(info.contains("imports: 1"));
+        assert!(info.contains("exports: 2"));
+        assert!(info.contains("memory: exported"));
+    }
+
+    #[test]
+    fn example_hello_wasm_build_and_exec() {
+        let hello = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("examples")
+            .join("hello.fav");
+        let hello_str = hello.to_string_lossy().to_string();
+        let (program, loaded_path) = load_and_check_program(Some(&hello_str));
+        assert_eq!(loaded_path, hello_str);
+
+        let bytes = build_wasm_artifact(&program).expect("build wasm");
+        crate::backend::wasm_exec::wasm_exec_main(&bytes).expect("exec wasm");
+        let info = crate::backend::wasm_exec::wasm_exec_info(&bytes);
+        assert!(info.contains("artifact: .wasm"));
+        assert!(info.contains("memory: exported"));
+    }
+
+    #[test]
+    fn example_math_wasm_build_and_exec() {
+        let math = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("examples")
+            .join("math_wasm.fav");
+        let math_str = math.to_string_lossy().to_string();
+        let (program, loaded_path) = load_and_check_program(Some(&math_str));
+        assert_eq!(loaded_path, math_str);
+
+        let bytes = build_wasm_artifact(&program).expect("build wasm");
+        crate::backend::wasm_exec::wasm_exec_main(&bytes).expect("exec wasm");
+    }
+
+    #[test]
+    fn wasm_exec_bytes_rejects_db_path_with_w004() {
+        let hello = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("examples")
+            .join("hello.fav");
+        let hello_str = hello.to_string_lossy().to_string();
+        let (program, _) = load_and_check_program(Some(&hello_str));
+        let bytes = build_wasm_artifact(&program).expect("build wasm");
+
+        let err = exec_wasm_bytes(&bytes, false, Some("app.db")).unwrap_err();
+        assert!(err.contains("error[W004]"));
+    }
+
+    #[test]
+    fn wasm_exec_bytes_info_returns_metadata() {
+        let hello = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("examples")
+            .join("hello.fav");
+        let hello_str = hello.to_string_lossy().to_string();
+        let (program, _) = load_and_check_program(Some(&hello_str));
+        let bytes = build_wasm_artifact(&program).expect("build wasm");
+
+        let info = exec_wasm_bytes(&bytes, true, None)
+            .expect("info ok")
+            .expect("info text");
+        assert!(info.contains("artifact: .wasm"));
+        assert!(info.contains("memory: exported"));
     }
 
     #[test]

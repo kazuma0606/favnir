@@ -1,9 +1,11 @@
 [package]
 name = "fav"
-version = "0.8.0"
+version = "0.9.0"
 edition = "2024"
 
 [dependencies]
+wasm-encoder = "0.219"
+wasmtime = { version = "30", default-features = false, features = ["cranelift", "runtime"] }
 rusqlite = { version = "0.31", features = ["bundled"] }
 ureq = "2"
 uuid = { version = "1", features = ["v4"] }

@@ -1,0 +1,213 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "Favnir",
+  "scopeName": "source.favnir",
+  "fileTypes": ["fav"],
+  "patterns": [
+    { "include": "#comment" },
+    { "include": "#string" },
+    { "include": "#number" },
+    { "include": "#boolean" },
+    { "include": "#effect" },
+    { "include": "#definition" },
+    { "include": "#keyword" },
+    { "include": "#visibility" },
+    { "include": "#builtin-namespace" },
+    { "include": "#type-name" },
+    { "include": "#constructor" },
+    { "include": "#operator" }
+  ],
+  "repository": {
+
+    "comment": {
+      "name": "comment.line.double-slash.favnir",
+      "match": "//.*$"
+    },
+
+    "string": {
+      "name": "string.quoted.double.favnir",
+      "begin": "\"",
+      "end": "\"",
+      "patterns": [
+        {
+          "name": "constant.character.escape.favnir",
+          "match": "\\\\[ntr\"\\\\]"
+        }
+      ]
+    },
+
+    "number": {
+      "patterns": [
+        {
+          "name": "constant.numeric.float.favnir",
+          "match": "\\b[0-9][0-9_]*\\.[0-9][0-9_]*([eE][+-]?[0-9]+)?\\b"
+        },
+        {
+          "name": "constant.numeric.integer.favnir",
+          "match": "\\b[0-9][0-9_]*\\b"
+        }
+      ]
+    },
+
+    "boolean": {
+      "name": "constant.language.boolean.favnir",
+      "match": "\\b(true|false)\\b"
+    },
+
+    "effect": {
+      "name": "storage.modifier.effect.favnir",
+      "match": "![A-Z][A-Za-z]*(<[^>]*>)?"
+    },
+
+    "definition": {
+      "patterns": [
+        {
+          "comment": "fn name(...)",
+          "match": "\\b(fn)\\s+([a-z_][A-Za-z0-9_]*)",
+          "captures": {
+            "1": { "name": "keyword.declaration.fn.favnir" },
+            "2": { "name": "entity.name.function.favnir" }
+          }
+        },
+        {
+          "comment": "trf Name:",
+          "match": "\\b(trf)\\s+([A-Za-z_][A-Za-z0-9_<>,\\s]*?)\\s*:",
+          "captures": {
+            "1": { "name": "keyword.declaration.trf.favnir" },
+            "2": { "name": "entity.name.function.trf.favnir" }
+          }
+        },
+        {
+          "comment": "flw name:",
+          "match": "\\b(flw)\\s+([a-z_][A-Za-z0-9_]*)",
+          "captures": {
+            "1": { "name": "keyword.declaration.flw.favnir" },
+            "2": { "name": "entity.name.function.flw.favnir" }
+          }
+        },
+        {
+          "comment": "type Name",
+          "match": "\\b(type)\\s+([A-Z][A-Za-z0-9_]*)",
+          "captures": {
+            "1": { "name": "keyword.declaration.type.favnir" },
+            "2": { "name": "entity.name.type.favnir" }
+          }
+        },
+        {
+          "comment": "cap Name",
+          "match": "\\b(cap)\\s+([A-Z][A-Za-z0-9_]*)",
+          "captures": {
+            "1": { "name": "keyword.declaration.cap.favnir" },
+            "2": { "name": "entity.name.type.cap.favnir" }
+          }
+        },
+        {
+          "comment": "impl Cap<T> for T",
+          "match": "\\b(impl)\\b",
+          "captures": {
+            "1": { "name": "keyword.declaration.impl.favnir" }
+          }
+        }
+      ]
+    },
+
+    "keyword": {
+      "patterns": [
+        {
+          "name": "keyword.control.match.favnir",
+          "match": "\\b(match)\\b"
+        },
+        {
+          "name": "keyword.control.conditional.favnir",
+          "match": "\\b(if|else)\\b"
+        },
+        {
+          "name": "keyword.control.where.favnir",
+          "match": "\\b(where)\\b"
+        },
+        {
+          "name": "keyword.control.loop.favnir",
+          "match": "\\b(for|in)\\b"
+        },
+        {
+          "name": "keyword.other.bind.favnir",
+          "match": "\\b(bind)\\b"
+        },
+        {
+          "name": "keyword.other.chain.favnir",
+          "match": "\\b(chain)\\b"
+        },
+        {
+          "name": "keyword.other.yield.favnir",
+          "match": "\\b(yield)\\b"
+        },
+        {
+          "name": "keyword.other.collect.favnir",
+          "match": "\\b(collect)\\b"
+        },
+        {
+          "name": "keyword.other.emit.favnir",
+          "match": "\\b(emit)\\b"
+        },
+        {
+          "name": "keyword.other.namespace.favnir",
+          "match": "\\b(namespace)\\b"
+        },
+        {
+          "name": "keyword.other.use.favnir",
+          "match": "\\b(use)\\b"
+        }
+      ]
+    },
+
+    "visibility": {
+      "name": "keyword.other.visibility.favnir",
+      "match": "\\b(pub|public)\\b"
+    },
+
+    "builtin-namespace": {
+      "name": "support.class.builtin.favnir",
+      "match": "\\b(IO|List|String|Map|Option|Result|File|Json|Csv|Db|Http|Debug|Trace|Emit)(?=\\.)"
+    },
+
+    "type-name": {
+      "name": "support.type.primitive.favnir",
+      "match": "\\b(Int|Float|Bool|Unit)\\b"
+    },
+
+    "constructor": {
+      "name": "support.function.constructor.favnir",
+      "match": "\\b(some|none|ok|err)\\b"
+    },
+
+    "operator": {
+      "patterns": [
+        {
+          "name": "keyword.operator.pipeline.favnir",
+          "match": "\\|>"
+        },
+        {
+          "name": "keyword.operator.bind.favnir",
+          "match": "<-"
+        },
+        {
+          "name": "keyword.operator.arrow.favnir",
+          "match": "->"
+        },
+        {
+          "name": "keyword.operator.comparison.favnir",
+          "match": "==|!=|<=|>=|<|>"
+        },
+        {
+          "name": "keyword.operator.arithmetic.favnir",
+          "match": "[+\\-*/%]"
+        },
+        {
+          "name": "keyword.operator.pipe.favnir",
+          "match": "(?<![|])\\|(?![>|])"
+        }
+      ]
+    }
+
+  }
+}

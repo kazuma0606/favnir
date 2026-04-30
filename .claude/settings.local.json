@@ -10,7 +10,10 @@
       "Bash(cargo run:*)",
       "Bash(grep -v \"^warning\\\\|^  \\\\|^$\\\\|^|\\\\|^=\\\\|^help\")",
       "Bash(grep -v \"//\")",
-      "Bash(grep -n '\"\"List\\\\.push\"\"' src/vm.rs)"
+      "Bash(grep -n '\"\"List\\\\.push\"\"' src/vm.rs)",
+      "Bash(/c/Users/yoshi/favnir/fav/examples/test_any.fav:*)",
+      "Bash(/c/Users/yoshi/favnir/fav/examples/test_run.fav:*)",
+      "Bash(/tmp/type_err.fav:*)"
     ]
   }
 }

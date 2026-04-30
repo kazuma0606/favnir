@@ -1,7 +1,7 @@
 // Favnir Parser
 // Tasks: 3-1..3-23
 
-use crate::lexer::{Lexer, LexError, Span, Token, TokenKind};
+use super::lexer::{Lexer, LexError, Span, Token, TokenKind};
 use crate::ast::*;
 
 // ── ParseError (3-2) ──────────────────────────────────────────────────────────
@@ -190,6 +190,15 @@ impl Parser {
                 }
                 Ok(Item::FlwDef(self.parse_flw_def()?))
             }
+            TokenKind::Test => {
+                if vis.is_some() {
+                    return Err(ParseError::new(
+                        "visibility modifier on `test` is not allowed",
+                        self.peek_span().clone(),
+                    ));
+                }
+                Ok(Item::TestDef(self.parse_test_def()?))
+            }
             TokenKind::Namespace => Err(ParseError::new(
                 "`namespace` must appear before any definitions",
                 self.peek_span().clone(),
@@ -199,7 +208,7 @@ impl Parser {
                 self.peek_span().clone(),
             )),
             other => Err(ParseError::new(
-                format!("expected item (type/fn/trf/flw/cap/impl), got {:?}", other),
+                format!("expected item (type/fn/trf/flw/cap/impl/test), got {:?}", other),
                 self.peek_span().clone(),
             )),
         }
@@ -273,6 +282,22 @@ impl Parser {
             methods,
             span: self.span_from(&start),
         })
+    }
+
+    // ── test_def (v0.8.0) ────────────────────────────────────────────────────
+
+    fn parse_test_def(&mut self) -> Result<TestDef, ParseError> {
+        let start = self.peek_span().clone();
+        self.expect(&TokenKind::Test)?;
+        let name = match self.peek().clone() {
+            TokenKind::Str(s) => { self.advance(); s }
+            _ => return Err(ParseError::new(
+                "expected string literal after `test`",
+                self.peek_span().clone(),
+            )),
+        };
+        let body = self.parse_block()?;
+        Ok(TestDef { name, body, span: self.span_from(&start) })
     }
 
     fn parse_visibility(&mut self) -> Option<Visibility> {

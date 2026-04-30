@@ -1,7 +1,9 @@
 // Favnir AST
 // Tasks: 2-1..2-13
 
-use crate::lexer::Span;
+#![allow(dead_code)]
+
+use crate::frontend::lexer::Span;
 
 // ── Visibility ────────────────────────────────────────────────────────────────
 
@@ -376,6 +378,15 @@ pub struct ImplDef {
     pub span: Span,
 }
 
+// ── TestDef (v0.8.0) ─────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone)]
+pub struct TestDef {
+    pub name: String,   // description string literal
+    pub body: Block,
+    pub span: Span,
+}
+
 // ── Item (2-1) ────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone)]
@@ -388,6 +399,7 @@ pub enum Item {
     UseDecl(Vec<String>, Span),    // use data.users.create → ["data","users","create"]
     CapDef(CapDef),                // cap Eq<T> = { ... }
     ImplDef(ImplDef),              // impl Eq<Int> { ... }
+    TestDef(TestDef),              // test "description" { ... }
 }
 
 impl Item {
@@ -401,6 +413,7 @@ impl Item {
             Item::UseDecl(_, s)       => s,
             Item::CapDef(c)           => &c.span,
             Item::ImplDef(i)          => &i.span,
+            Item::TestDef(t)          => &t.span,
         }
     }
 }

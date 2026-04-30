@@ -1,0 +1,25 @@
+{
+  "name": "favnir-language",
+  "displayName": "Favnir",
+  "description": "Syntax highlighting for the Favnir language (.fav)",
+  "version": "0.7.1",
+  "engines": { "vscode": "^1.75.0" },
+  "categories": ["Programming Languages"],
+  "contributes": {
+    "languages": [
+      {
+        "id": "favnir",
+        "aliases": ["Favnir", "fav"],
+        "extensions": [".fav"],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "favnir",
+        "scopeName": "source.favnir",
+        "path": "./syntaxes/favnir.tmLanguage.json"
+      }
+    ]
+  }
+}

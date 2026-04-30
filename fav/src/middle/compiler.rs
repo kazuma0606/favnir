@@ -4,8 +4,8 @@ use crate::ast::{
     Block, Expr, FieldPattern, FlwDef, Item, Lit, MatchArm, Pattern, Program, Stmt, TypeBody,
     TypeDef, TypeExpr,
 };
-use crate::checker::Type;
-use crate::ir::{IRArm, IRExpr, IRFnDef, IRGlobal, IRGlobalKind, IRPattern, IRProgram, IRStmt};
+use super::checker::Type;
+use super::ir::{IRArm, IRExpr, IRFnDef, IRGlobal, IRGlobalKind, IRPattern, IRProgram, IRStmt};
 
 #[derive(Debug, Default)]
 pub struct CompileCtx {
@@ -111,6 +111,11 @@ pub fn compile_program(program: &Program) -> IRProgram {
                     });
                 }
             }
+            // TestDef: reserve a function index so closures inside compile correctly.
+            // Test functions are not added to globals (user code can't call them).
+            Item::TestDef(_) => {
+                next_fn_idx += 1;
+            }
             _ => {}
         }
     }
@@ -119,7 +124,9 @@ pub fn compile_program(program: &Program) -> IRProgram {
     for ns in &[
         "IO", "Debug", "Result", "Option",
         "Int", "Float", "Bool", "String",
-        "List", "Map", "Trace", "Emit", "File", "Json", "Csv",
+        "List", "Map", "Trace", "Emit", "File", "Json", "Csv", "Db", "Http",
+        // test assertion builtins (callable without namespace prefix)
+        "assert", "assert_eq", "assert_ne",
     ] {
         if !ctx.globals.contains_key(*ns) {
             let idx = globals.len() as u16;
@@ -150,6 +157,18 @@ pub fn compile_program(program: &Program) -> IRProgram {
                 &mut ctx,
             )),
             Item::FlwDef(fd) => fns.push(compile_flw_def(fd, &mut ctx)),
+            Item::TestDef(td) => {
+                let unit_ty = crate::ast::TypeExpr::Named(
+                    "Unit".into(), vec![], crate::frontend::lexer::Span::dummy());
+                fns.push(compile_fn_def(
+                    &format!("$test:{}", td.name),
+                    &[],
+                    &[],
+                    &unit_ty,
+                    &td.body,
+                    &mut ctx,
+                ))
+            }
             _ => {}
         }
     }
@@ -588,11 +607,11 @@ fn lower_type_expr(ty: &TypeExpr) -> Type {
 #[cfg(test)]
 mod tests {
     use super::compile_program;
-    use crate::ir::{IRExpr, IRGlobalKind, IRStmt};
-    use crate::lexer::Lexer;
-    use crate::parser::Parser;
+    use crate::middle::ir::{IRExpr, IRGlobalKind, IRStmt};
+    use crate::frontend::lexer::Lexer;
+    use crate::frontend::parser::Parser;
 
-    fn compile_source(source: &str) -> crate::ir::IRProgram {
+    fn compile_source(source: &str) -> crate::middle::ir::IRProgram {
         let mut lexer = Lexer::new(source, "test.fav");
         let tokens = lexer.tokenize().expect("tokenize");
         let mut parser = Parser::new(tokens);

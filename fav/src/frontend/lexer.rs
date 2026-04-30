@@ -47,6 +47,7 @@ pub enum TokenKind {
     Yield,
     Collect,
     Where,
+    Test,
 
     // Effect keywords
     Pure,
@@ -369,6 +370,7 @@ impl Lexer {
             "yield"     => TokenKind::Yield,
             "collect"   => TokenKind::Collect,
             "where"     => TokenKind::Where,
+            "test"      => TokenKind::Test,
             "Pure"    => TokenKind::Pure,
             "Io"      => TokenKind::Io,
             "emit"    => TokenKind::Emit,

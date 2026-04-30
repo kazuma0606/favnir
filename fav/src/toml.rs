@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 // Favnir fav.toml parser (minimal)
 // Only handles the [rune] section with name / version / src keys.
 

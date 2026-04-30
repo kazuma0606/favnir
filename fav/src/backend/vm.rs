@@ -1,9 +1,11 @@
-use std::collections::HashMap;
+﻿use std::collections::HashMap;
+use std::sync::Mutex;
+use rusqlite::Connection;
 use serde_json::Value as SerdeJsonValue;
 
-use crate::artifact::FvcArtifact;
-use crate::codegen::{Constant, Opcode};
-use crate::eval::Value;
+use super::artifact::FvcArtifact;
+use super::codegen::{Constant, Opcode};
+use crate::value::Value;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct VMError {
@@ -27,7 +29,10 @@ pub struct VM {
     frames: Vec<CallFrame>,
     collect_frames: Vec<Vec<VMValue>>,
     emit_log: Vec<VMValue>,
+    db_path: Option<String>,
 }
+
+static SHARED_DBS: Mutex<Vec<(String, Connection)>> = Mutex::new(Vec::new());
 
 #[derive(Debug, Clone, PartialEq)]
 enum VMValue {
@@ -46,7 +51,12 @@ enum VMValue {
 }
 
 impl VM {
+    #[allow(dead_code)]
     pub fn new(artifact: &FvcArtifact) -> VM {
+        Self::new_with_db_path(artifact, None)
+    }
+
+    pub fn new_with_db_path(artifact: &FvcArtifact, db_path: Option<String>) -> VM {
         let globals = artifact
             .globals
             .iter()
@@ -77,20 +87,46 @@ impl VM {
             frames: Vec::new(),
             collect_frames: Vec::new(),
             emit_log: Vec::new(),
+            db_path,
         }
     }
 
+    #[allow(dead_code)]
     pub fn run(artifact: &FvcArtifact, fn_idx: usize, args: Vec<Value>) -> Result<Value, VMError> {
-        Self::run_with_emits(artifact, fn_idx, args).map(|(value, _)| value)
+        Self::run_with_db_path(artifact, fn_idx, args, None).map(|(value, _)| value)
     }
 
+    pub fn run_with_db_path(
+        artifact: &FvcArtifact,
+        fn_idx: usize,
+        args: Vec<Value>,
+        db_path: Option<&str>,
+    ) -> Result<(Value, Vec<Value>), VMError> {
+        Self::run_with_emits_and_db_path(artifact, fn_idx, args, db_path)
+    }
+
+    #[allow(dead_code)]
     pub fn run_with_emits(
         artifact: &FvcArtifact,
         fn_idx: usize,
         args: Vec<Value>,
     ) -> Result<(Value, Vec<Value>), VMError> {
+        Self::run_with_emits_and_db_path(artifact, fn_idx, args, None)
+    }
+
+    pub fn run_with_emits_and_db_path(
+        artifact: &FvcArtifact,
+        fn_idx: usize,
+        args: Vec<Value>,
+        db_path: Option<&str>,
+    ) -> Result<(Value, Vec<Value>), VMError> {
         let (value, emits) =
-            Self::run_with_vmvalues(artifact, fn_idx, args.into_iter().map(VMValue::from).collect())?;
+            Self::run_with_vmvalues(
+                artifact,
+                fn_idx,
+                args.into_iter().map(VMValue::from).collect(),
+                db_path.map(|s| s.to_string()),
+            )?;
         Ok((
             Value::from(value),
             emits.into_iter().map(Value::from).collect(),
@@ -101,8 +137,9 @@ impl VM {
         artifact: &FvcArtifact,
         fn_idx: usize,
         args: Vec<VMValue>,
+        db_path: Option<String>,
     ) -> Result<(VMValue, Vec<VMValue>), VMError> {
-        let mut vm = VM::new(artifact);
+        let mut vm = VM::new_with_db_path(artifact, db_path);
         let function = artifact.functions.get(fn_idx).ok_or_else(|| VMError {
             message: format!("unknown function index: {fn_idx}"),
             fn_name: "<invalid>".to_string(),
@@ -440,7 +477,7 @@ impl VM {
         }
     }
 
-    fn read_u16(function: &crate::artifact::FvcFunction, frame: &mut CallFrame) -> Result<u16, VMError> {
+    fn read_u16(function: &crate::backend::artifact::FvcFunction, frame: &mut CallFrame) -> Result<u16, VMError> {
         if frame.ip + 1 >= function.code.len() {
             return Err(VMError {
                 message: "unexpected end of bytecode".to_string(),
@@ -484,14 +521,20 @@ impl VM {
     ) -> Result<VMValue, VMError> {
         match callee {
             VMValue::CompiledFn(target_idx) => {
-                let (value, emits) = Self::run_with_vmvalues(artifact, target_idx, args)?;
+                let (value, emits) =
+                    Self::run_with_vmvalues(artifact, target_idx, args, self.db_path.clone())?;
                 self.emit_log.extend(emits);
                 Ok(value)
             }
             VMValue::Closure(target_idx, captures) => {
                 let mut full_args = captures;
                 full_args.extend(args);
-                let (value, emits) = Self::run_with_vmvalues(artifact, target_idx, full_args)?;
+                let (value, emits) = Self::run_with_vmvalues(
+                    artifact,
+                    target_idx,
+                    full_args,
+                    self.db_path.clone(),
+                )?;
                 self.emit_log.extend(emits);
                 Ok(value)
             }
@@ -1142,7 +1185,8 @@ impl VM {
                     )),
                 }
             }
-            _ => vm_call_builtin(name, args, &mut self.emit_log).map_err(|e| self.error(artifact, &e)),
+            _ => vm_call_builtin(name, args, &mut self.emit_log, self.db_path.as_deref())
+                .map_err(|e| self.error(artifact, &e)),
         }
     }
 
@@ -1399,10 +1443,53 @@ fn vm_string_list(value: VMValue, context: &str) -> Result<Vec<String>, String> 
     }
 }
 
+fn vmvalue_to_sql(value: &VMValue) -> rusqlite::types::Value {
+    match value {
+        VMValue::Int(n) => rusqlite::types::Value::Integer(*n),
+        VMValue::Float(f) => rusqlite::types::Value::Real(*f),
+        VMValue::Str(s) => rusqlite::types::Value::Text(s.clone()),
+        VMValue::Bool(b) => rusqlite::types::Value::Integer(if *b { 1 } else { 0 }),
+        VMValue::Unit => rusqlite::types::Value::Null,
+        other => rusqlite::types::Value::Text(vmvalue_repr(other)),
+    }
+}
+
+fn sqlite_value_to_string(value: rusqlite::types::Value) -> String {
+    match value {
+        rusqlite::types::Value::Null => "null".to_string(),
+        rusqlite::types::Value::Integer(n) => n.to_string(),
+        rusqlite::types::Value::Real(f) => f.to_string(),
+        rusqlite::types::Value::Text(s) => s,
+        rusqlite::types::Value::Blob(bytes) => format!("<blob:{} bytes>", bytes.len()),
+    }
+}
+
+fn with_db_path<T, F>(db_path: Option<&str>, f: F) -> Result<T, String>
+where
+    F: FnOnce(&Connection) -> Result<T, String>,
+{
+    let path = db_path.ok_or_else(|| "Db not initialized 窶・run with --db <path> flag".to_string())?;
+    let mut dbs = SHARED_DBS.lock().map_err(|_| "Db mutex poisoned".to_string())?;
+    let entry_idx = if let Some(idx) = dbs.iter().position(|(p, _)| p == path) {
+        idx
+    } else {
+        let conn = if path == ":memory:" {
+            Connection::open_in_memory().map_err(|e| format!("Db open failed: {}", e))?
+        } else {
+            Connection::open(path).map_err(|e| format!("Db open failed for `{}`: {}", path, e))?
+        };
+        dbs.push((path.to_string(), conn));
+        dbs.len() - 1
+    };
+    let (_, conn) = &dbs[entry_idx];
+    f(conn)
+}
+
 fn vm_call_builtin(
     name: &str,
     args: Vec<VMValue>,
     emit_log: &mut Vec<VMValue>,
+    db_path: Option<&str>,
 ) -> Result<VMValue, String> {
     match name {
         "IO.println" => {
@@ -1429,6 +1516,35 @@ fn vm_call_builtin(
             let v = args.into_iter().next()
                 .ok_or_else(|| "Debug.show requires 1 argument".to_string())?;
             Ok(VMValue::Str(vmvalue_repr(&v)))
+        }
+        "assert" => {
+            let v = args.into_iter().next()
+                .ok_or_else(|| "assert requires 1 argument".to_string())?;
+            match v {
+                VMValue::Bool(true)  => Ok(VMValue::Unit),
+                VMValue::Bool(false) => Err("assertion failed".to_string()),
+                other => Err(format!("assert requires Bool, got {}", vmvalue_type_name(&other))),
+            }
+        }
+        "assert_eq" => {
+            let mut it = args.into_iter();
+            let a = it.next().ok_or_else(|| "assert_eq requires 2 arguments".to_string())?;
+            let b = it.next().ok_or_else(|| "assert_eq requires 2 arguments".to_string())?;
+            if vmvalue_repr(&a) == vmvalue_repr(&b) {
+                Ok(VMValue::Unit)
+            } else {
+                Err(format!("assert_eq failed: left={}, right={}", vmvalue_repr(&a), vmvalue_repr(&b)))
+            }
+        }
+        "assert_ne" => {
+            let mut it = args.into_iter();
+            let a = it.next().ok_or_else(|| "assert_ne requires 2 arguments".to_string())?;
+            let b = it.next().ok_or_else(|| "assert_ne requires 2 arguments".to_string())?;
+            if vmvalue_repr(&a) != vmvalue_repr(&b) {
+                Ok(VMValue::Unit)
+            } else {
+                Err(format!("assert_ne failed: both equal to {}", vmvalue_repr(&a)))
+            }
         }
         "Result.ok" => {
             let v = args.into_iter().next()
@@ -2299,6 +2415,108 @@ fn vm_call_builtin(
             let log: Vec<VMValue> = emit_log.iter().map(|v| VMValue::Str(vmvalue_repr(v))).collect();
             Ok(VMValue::List(log))
         }
+        "Db.execute" => {
+            if args.is_empty() {
+                return Err("Db.execute requires a SQL string".to_string());
+            }
+            let mut it = args.into_iter();
+            let sql = vm_string(it.next().expect("sql"), "Db.execute")?;
+            let params: Vec<VMValue> = it.collect();
+            with_db_path(db_path, |conn| {
+                let mut stmt = conn.prepare(&sql).map_err(|e| format!("Db error: {}", e))?;
+                let bound: Vec<rusqlite::types::Value> = params.iter().map(vmvalue_to_sql).collect();
+                let refs: Vec<&dyn rusqlite::ToSql> = bound.iter().map(|b| b as &dyn rusqlite::ToSql).collect();
+                let rows = stmt.execute(refs.as_slice()).map_err(|e| format!("Db error: {}", e))?;
+                Ok(VMValue::Int(rows as i64))
+            })
+        }
+        "Db.query" => {
+            if args.is_empty() {
+                return Err("Db.query requires a SQL string".to_string());
+            }
+            let mut it = args.into_iter();
+            let sql = vm_string(it.next().expect("sql"), "Db.query")?;
+            let params: Vec<VMValue> = it.collect();
+            with_db_path(db_path, |conn| {
+                let mut stmt = conn.prepare(&sql).map_err(|e| format!("Db error: {}", e))?;
+                let bound: Vec<rusqlite::types::Value> = params.iter().map(vmvalue_to_sql).collect();
+                let refs: Vec<&dyn rusqlite::ToSql> = bound.iter().map(|b| b as &dyn rusqlite::ToSql).collect();
+                let col_names: Vec<String> = stmt.column_names().iter().map(|s| s.to_string()).collect();
+                let rows = stmt
+                    .query_map(refs.as_slice(), |row| {
+                        let mut map = HashMap::new();
+                        for (i, name) in col_names.iter().enumerate() {
+                            let value: rusqlite::types::Value = row.get(i)?;
+                            map.insert(name.clone(), VMValue::Str(sqlite_value_to_string(value)));
+                        }
+                        Ok(VMValue::Record(map))
+                    })
+                    .map_err(|e| format!("Db error: {}", e))?
+                    .collect::<Result<Vec<_>, _>>()
+                    .map_err(|e| format!("Db error: {}", e))?;
+                Ok(VMValue::List(rows))
+            })
+        }
+        "Db.query_one" => {
+            if args.is_empty() {
+                return Err("Db.query_one requires a SQL string".to_string());
+            }
+            let mut it = args.into_iter();
+            let sql = vm_string(it.next().expect("sql"), "Db.query_one")?;
+            let params: Vec<VMValue> = it.collect();
+            with_db_path(db_path, |conn| {
+                let mut stmt = conn.prepare(&sql).map_err(|e| format!("Db error: {}", e))?;
+                let bound: Vec<rusqlite::types::Value> = params.iter().map(vmvalue_to_sql).collect();
+                let refs: Vec<&dyn rusqlite::ToSql> = bound.iter().map(|b| b as &dyn rusqlite::ToSql).collect();
+                let col_names: Vec<String> = stmt.column_names().iter().map(|s| s.to_string()).collect();
+                let mut rows = stmt.query(refs.as_slice()).map_err(|e| format!("Db error: {}", e))?;
+                match rows.next().map_err(|e| format!("Db error: {}", e))? {
+                    None => Ok(VMValue::Variant("none".to_string(), None)),
+                    Some(row) => {
+                        let mut map = HashMap::new();
+                        for (i, name) in col_names.iter().enumerate() {
+                            let value: rusqlite::types::Value = row.get(i).map_err(|e| format!("Db error: {}", e))?;
+                            map.insert(name.clone(), VMValue::Str(sqlite_value_to_string(value)));
+                        }
+                        Ok(VMValue::Variant(
+                            "some".to_string(),
+                            Some(Box::new(VMValue::Record(map))),
+                        ))
+                    }
+                }
+            })
+        }
+        "Http.get" => {
+            let url = vm_string(
+                args.into_iter().next().ok_or_else(|| "Http.get requires a URL argument".to_string())?,
+                "Http.get",
+            )?;
+            match ureq::get(&url).call() {
+                Ok(resp) => {
+                    let body = resp.into_string().map_err(|e| format!("Http.get read error: {}", e))?;
+                    Ok(VMValue::Variant("ok".to_string(), Some(Box::new(VMValue::Str(body)))))
+                }
+                Err(e) => Ok(VMValue::Variant("err".to_string(), Some(Box::new(VMValue::Str(e.to_string()))))),
+            }
+        }
+        "Http.post" => {
+            if args.len() < 2 {
+                return Err("Http.post requires 2 arguments (url, body)".to_string());
+            }
+            let mut it = args.into_iter();
+            let url = vm_string(it.next().expect("url"), "Http.post")?;
+            let body = match it.next().expect("body") {
+                VMValue::Str(s) => s,
+                other => vmvalue_repr(&other),
+            };
+            match ureq::post(&url).send_string(&body) {
+                Ok(resp) => {
+                    let body = resp.into_string().map_err(|e| format!("Http.post read error: {}", e))?;
+                    Ok(VMValue::Variant("ok".to_string(), Some(Box::new(VMValue::Str(body)))))
+                }
+                Err(e) => Ok(VMValue::Variant("err".to_string(), Some(Box::new(VMValue::Str(e.to_string()))))),
+            }
+        }
         "File.read" => {
             let path = match args.into_iter().next() {
                 Some(VMValue::Str(s)) => s,
@@ -2410,974 +2628,9 @@ fn vm_call_builtin(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::VM;
-    use crate::artifact::{FvcArtifact, FvcFunction, FvcGlobal};
-    use crate::codegen::{Constant, Opcode};
-    use crate::codegen::codegen_program;
-    use crate::compiler::compile_program;
-    use crate::eval::Value;
-    use crate::lexer::Lexer;
-    use crate::parser::Parser;
-
-    fn simple_artifact(code: Vec<u8>, constants: Vec<Constant>) -> FvcArtifact {
-        FvcArtifact {
-            str_table: vec!["main".to_string(), "Unit".to_string(), "Pure".to_string()],
-            globals: vec![FvcGlobal { name_idx: 0, kind: 0, fn_idx: 0 }],
-            functions: vec![FvcFunction {
-                name_idx: 0,
-                param_count: 0,
-                local_count: 0,
-                source_line: 1,
-                return_ty_str_idx: 1,
-                effect_str_idx: 2,
-                constants,
-                code,
-            }],
-        }
-    }
-
-    #[test]
-    fn vm_runs_const_return_program() {
-        let artifact = simple_artifact(
-            vec![Opcode::Const as u8, 0x00, 0x00, Opcode::Return as u8],
-            vec![Constant::Int(42)],
-        );
-
-        let value = VM::run(&artifact, 0, vec![]).expect("vm run");
-        assert_eq!(value, Value::Int(42));
-    }
-
-    #[test]
-    fn vm_handles_load_and_store_local() {
-        let artifact = simple_artifact(
-            vec![
-                Opcode::ConstTrue as u8,
-                Opcode::StoreLocal as u8, 0x00, 0x00,
-                Opcode::LoadLocal as u8, 0x00, 0x00,
-                Opcode::Return as u8,
-            ],
-            vec![],
-        );
-
-        let value = VM::run(&artifact, 0, vec![]).expect("vm run");
-        assert_eq!(value, Value::Bool(true));
-    }
-
-    #[test]
-    fn vm_calls_global_function_and_returns_result() {
-        let artifact = FvcArtifact {
-            str_table: vec![
-                "main".to_string(),
-                "double".to_string(),
-                "Int".to_string(),
-                "Pure".to_string(),
-            ],
-            globals: vec![
-                FvcGlobal { name_idx: 0, kind: 0, fn_idx: 0 },
-                FvcGlobal { name_idx: 1, kind: 0, fn_idx: 1 },
-            ],
-            functions: vec![
-                FvcFunction {
-                    name_idx: 0,
-                    param_count: 0,
-                    local_count: 0,
-                    source_line: 1,
-                    return_ty_str_idx: 2,
-                    effect_str_idx: 3,
-                    constants: vec![Constant::Int(21)],
-                    code: vec![
-                        Opcode::LoadGlobal as u8, 0x01, 0x00,
-                        Opcode::Const as u8, 0x00, 0x00,
-                        Opcode::Call as u8, 0x01, 0x00,
-                        Opcode::Return as u8,
-                    ],
-                },
-                FvcFunction {
-                    name_idx: 1,
-                    param_count: 1,
-                    local_count: 1,
-                    source_line: 2,
-                    return_ty_str_idx: 2,
-                    effect_str_idx: 3,
-                    constants: vec![],
-                    code: vec![
-                        Opcode::LoadLocal as u8, 0x00, 0x00,
-                        Opcode::LoadLocal as u8, 0x00, 0x00,
-                        Opcode::Add as u8,
-                        Opcode::Return as u8,
-                    ],
-                },
-            ],
-        };
-
-        let value = VM::run(&artifact, 0, vec![]).expect("vm run");
-        assert_eq!(value, Value::Int(42));
-    }
-
-    #[test]
-    fn vm_runs_compiled_program_from_source() {
-        let source = r#"
-trf Double: Int -> Int = |x| { x + x }
-
-public fn main() -> Int {
-    bind result <- 21 |> Double
-    result
-}
-"#;
-
-        let mut lexer = Lexer::new(source, "test.fav");
-        let tokens = lexer.tokenize().expect("tokenize");
-        let mut parser = Parser::new(tokens);
-        let program = parser.parse_program().expect("parse");
-        let ir = compile_program(&program);
-        let artifact = codegen_program(&ir);
-        let main_idx = artifact.fn_idx_by_name("main").expect("main");
-
-        let value = VM::run(&artifact, main_idx, vec![]).expect("vm run");
-        assert_eq!(value, Value::Int(42));
-    }
-
-    #[test]
-    fn vm_runs_compiled_program_with_if_and_record_access() {
-        let source = r#"
-type User = {
-    name: String
-    age: Int
-}
-
-public fn main() -> Int {
-    bind user <- User { name: "A" age: 41 }
-    if user.age > 40 { user.age } else { 0 }
-}
-"#;
-
-        let mut lexer = Lexer::new(source, "test.fav");
-        let tokens = lexer.tokenize().expect("tokenize");
-        let mut parser = Parser::new(tokens);
-        let program = parser.parse_program().expect("parse");
-        let ir = compile_program(&program);
-        let artifact = codegen_program(&ir);
-        let main_idx = artifact.fn_idx_by_name("main").expect("main");
-
-        let value = VM::run(&artifact, main_idx, vec![]).expect("vm run");
-        assert_eq!(value, Value::Int(41));
-    }
-
-    #[test]
-    fn vm_chain_check_unwraps_ok_payload() {
-        let artifact = simple_artifact(
-            vec![
-                Opcode::LoadLocal as u8, 0x00, 0x00,
-                Opcode::ChainCheck as u8, 0x03, 0x00,
-                Opcode::Return as u8,
-                Opcode::ConstUnit as u8,
-                Opcode::Return as u8,
-            ],
-            vec![],
-        );
-        let value = VM::run(
-            &artifact,
-            0,
-            vec![Value::Variant("ok".into(), Some(Box::new(Value::Int(42))))],
-        )
-        .expect("vm run");
-        assert_eq!(value, Value::Int(42));
-    }
-
-    #[test]
-    fn vm_chain_check_escapes_err_variant() {
-        let artifact = simple_artifact(
-            vec![
-                Opcode::LoadLocal as u8, 0x00, 0x00,
-                Opcode::ChainCheck as u8, 0x00, 0x00,
-                Opcode::Return as u8,
-            ],
-            vec![],
-        );
-
-        let value = VM::run(
-            &artifact,
-            0,
-            vec![Value::Variant("err".into(), Some(Box::new(Value::Str("boom".into()))))],
-        )
-        .expect("vm run");
-        assert_eq!(value, Value::Variant("err".into(), Some(Box::new(Value::Str("boom".into())))));
-    }
-
-    #[test]
-    fn vm_collect_yield_builds_list() {
-        let artifact = simple_artifact(
-            vec![
-                Opcode::CollectBegin as u8,
-                Opcode::Const as u8, 0x00, 0x00,
-                Opcode::YieldValue as u8,
-                Opcode::Const as u8, 0x01, 0x00,
-                Opcode::YieldValue as u8,
-                Opcode::CollectEnd as u8,
-                Opcode::Return as u8,
-            ],
-            vec![Constant::Int(1), Constant::Int(2)],
-        );
-
-        let value = VM::run(&artifact, 0, vec![]).expect("vm run");
-        assert_eq!(value, Value::List(vec![Value::Int(1), Value::Int(2)]));
-    }
-
-    #[test]
-    fn vm_match_fail_returns_error() {
-        let artifact = simple_artifact(vec![Opcode::MatchFail as u8], vec![]);
-        let err = VM::run(&artifact, 0, vec![]).expect_err("vm error");
-        assert!(err.message.contains("non-exhaustive match"));
-    }
-
-    #[test]
-    fn vm_jump_if_not_variant_skips_on_mismatch() {
-        let artifact = FvcArtifact {
-            str_table: vec!["main".to_string(), "Unit".to_string(), "Pure".to_string(), "ok".to_string()],
-            globals: vec![FvcGlobal { name_idx: 0, kind: 0, fn_idx: 0 }],
-            functions: vec![FvcFunction {
-                name_idx: 0,
-                param_count: 1,
-                local_count: 1,
-                source_line: 1,
-                return_ty_str_idx: 1,
-                effect_str_idx: 2,
-                constants: vec![Constant::Int(0)],
-                code: vec![
-                    Opcode::LoadLocal as u8, 0x00, 0x00,
-                    Opcode::JumpIfNotVariant as u8, 0x03, 0x00, 0x02, 0x00,
-                    Opcode::GetVariantPayload as u8,
-                    Opcode::Return as u8,
-                    Opcode::Const as u8, 0x00, 0x00,
-                    Opcode::Return as u8,
-                ],
-            }],
-        };
-
-        let value = VM::run(
-            &artifact,
-            0,
-            vec![Value::Variant("err".into(), Some(Box::new(Value::Int(7))))],
-        )
-        .expect("vm run");
-        assert_eq!(value, Value::Int(0));
-    }
-
-    #[test]
-    fn vm_get_variant_payload_returns_inner_value() {
-        let artifact = simple_artifact(
-            vec![
-                Opcode::LoadLocal as u8, 0x00, 0x00,
-                Opcode::GetVariantPayload as u8,
-                Opcode::Return as u8,
-            ],
-            vec![],
-        );
-
-        let value = VM::run(
-            &artifact,
-            0,
-            vec![Value::Variant("ok".into(), Some(Box::new(Value::Int(9))))],
-        )
-        .expect("vm run");
-        assert_eq!(value, Value::Int(9));
-    }
-
-    #[test]
-    fn vm_emit_event_returns_unit_and_records_value() {
-        let artifact = simple_artifact(
-            vec![
-                Opcode::Const as u8, 0x00, 0x00,
-                Opcode::EmitEvent as u8,
-                Opcode::Return as u8,
-            ],
-            vec![Constant::Str("hello".into())],
-        );
-
-        let (value, emits) = VM::run_with_emits(&artifact, 0, vec![]).expect("vm run");
-        assert_eq!(value, Value::Unit);
-        assert_eq!(emits, vec![Value::Str("hello".into())]);
-    }
-
-    #[test]
-    fn vm_load_global_variant_ctor_returns_nullary_variant() {
-        let artifact = FvcArtifact {
-            str_table: vec![
-                "main".to_string(),
-                "North".to_string(),
-                "Direction".to_string(),
-                "Pure".to_string(),
-            ],
-            globals: vec![
-                FvcGlobal { name_idx: 0, kind: 0, fn_idx: 0 },
-                FvcGlobal { name_idx: 1, kind: 2, fn_idx: u32::MAX },
-            ],
-            functions: vec![FvcFunction {
-                name_idx: 0,
-                param_count: 0,
-                local_count: 0,
-                source_line: 1,
-                return_ty_str_idx: 2,
-                effect_str_idx: 3,
-                constants: vec![],
-                code: vec![
-                    Opcode::LoadGlobal as u8, 0x01, 0x00,
-                    Opcode::Return as u8,
-                ],
-            }],
-        };
-
-        let value = VM::run(&artifact, 0, vec![]).expect("vm run");
-        assert_eq!(value, Value::Variant("North".into(), None));
-    }
-
-    #[test]
-    fn vm_chain_check_escapes_none_variant() {
-        // none → CHAIN_CHECK escape_offset=0 → RETURN → returns none
-        let artifact = simple_artifact(
-            vec![
-                Opcode::LoadLocal as u8, 0x00, 0x00,
-                Opcode::ChainCheck as u8, 0x00, 0x00,
-                Opcode::Return as u8,
-            ],
-            vec![],
-        );
-
-        let value = VM::run(
-            &artifact,
-            0,
-            vec![Value::Variant("none".into(), None)],
-        )
-        .expect("vm run");
-        assert_eq!(value, Value::Variant("none".into(), None));
-    }
-
-    #[test]
-    fn vm_collect_empty_yields_empty_list() {
-        // COLLECT_BEGIN; CONST_UNIT; Pop; COLLECT_END; RETURN → List([])
-        let artifact = simple_artifact(
-            vec![
-                Opcode::CollectBegin as u8,
-                Opcode::ConstUnit as u8,
-                Opcode::Pop as u8,
-                Opcode::CollectEnd as u8,
-                Opcode::Return as u8,
-            ],
-            vec![],
-        );
-
-        let value = VM::run(&artifact, 0, vec![]).expect("vm run");
-        assert_eq!(value, Value::List(vec![]));
-    }
-
-    #[test]
-    fn vm_match_guard_true_selects_matching_arm() {
-        let source = r#"
-public fn main() -> String {
-    bind n <- 5
-    n |> match {
-        x where x > 0 => "positive"
-        _ => "other"
-    }
-}
-"#;
-        let mut lexer = Lexer::new(source, "test.fav");
-        let tokens = lexer.tokenize().expect("tokenize");
-        let mut parser = Parser::new(tokens);
-        let program = parser.parse_program().expect("parse");
-        let ir = compile_program(&program);
-        let artifact = codegen_program(&ir);
-        let main_idx = artifact.fn_idx_by_name("main").expect("main");
-
-        let value = VM::run(&artifact, main_idx, vec![]).expect("vm run");
-        assert_eq!(value, Value::Str("positive".into()));
-    }
-
-    #[test]
-    fn vm_match_guard_false_falls_through_to_next_arm() {
-        let source = r#"
-public fn main() -> String {
-    bind n <- -1
-    n |> match {
-        x where x > 0 => "positive"
-        _ => "other"
-    }
-}
-"#;
-        let mut lexer = Lexer::new(source, "test.fav");
-        let tokens = lexer.tokenize().expect("tokenize");
-        let mut parser = Parser::new(tokens);
-        let program = parser.parse_program().expect("parse");
-        let ir = compile_program(&program);
-        let artifact = codegen_program(&ir);
-        let main_idx = artifact.fn_idx_by_name("main").expect("main");
-
-        let value = VM::run(&artifact, main_idx, vec![]).expect("vm run");
-        assert_eq!(value, Value::Str("other".into()));
-    }
-
-    #[test]
-    fn vm_builtin_io_println_returns_unit() {
-        // IO.println("hello") → Unit; also tests GET_FIELD on Builtin
-        let source = r#"
-public fn main() -> Unit !Io {
-    IO.println("hello")
-}
-"#;
-        let mut lexer = Lexer::new(source, "test.fav");
-        let tokens = lexer.tokenize().expect("tokenize");
-        let mut parser = Parser::new(tokens);
-        let program = parser.parse_program().expect("parse");
-        let ir = compile_program(&program);
-        let artifact = codegen_program(&ir);
-        let main_idx = artifact.fn_idx_by_name("main").expect("main");
-        let value = VM::run(&artifact, main_idx, vec![]).expect("vm run");
-        assert_eq!(value, Value::Unit);
-    }
-
-    #[test]
-    fn vm_builtin_debug_show_int() {
-        let source = r#"
-public fn main() -> String {
-    Debug.show(42)
-}
-"#;
-        let mut lexer = Lexer::new(source, "test.fav");
-        let tokens = lexer.tokenize().expect("tokenize");
-        let mut parser = Parser::new(tokens);
-        let program = parser.parse_program().expect("parse");
-        let ir = compile_program(&program);
-        let artifact = codegen_program(&ir);
-        let main_idx = artifact.fn_idx_by_name("main").expect("main");
-        let value = VM::run(&artifact, main_idx, vec![]).expect("vm run");
-        assert_eq!(value, Value::Str("42".into()));
-    }
-
-    #[test]
-    fn vm_builtin_result_ok_err() {
-        let source = r#"
-fn wrap_ok(n: Int) -> Int! { Result.ok(n) }
-fn wrap_err() -> Int! { Result.err("bad") }
-public fn main() -> Unit { () }
-"#;
-        let mut lexer = Lexer::new(source, "test.fav");
-        let tokens = lexer.tokenize().expect("tokenize");
-        let mut parser = Parser::new(tokens);
-        let program = parser.parse_program().expect("parse");
-        let ir = compile_program(&program);
-        let artifact = codegen_program(&ir);
-
-        let ok_idx = artifact.fn_idx_by_name("wrap_ok").expect("wrap_ok");
-        let err_idx = artifact.fn_idx_by_name("wrap_err").expect("wrap_err");
-
-        let ok_val = VM::run(&artifact, ok_idx, vec![Value::Int(7)]).expect("vm run ok");
-        assert_eq!(ok_val, Value::Variant("ok".into(), Some(Box::new(Value::Int(7)))));
-
-        let err_val = VM::run(&artifact, err_idx, vec![]).expect("vm run err");
-        assert_eq!(err_val, Value::Variant("err".into(), Some(Box::new(Value::Str("bad".into())))));
-    }
-
-    #[test]
-    fn vm_builtin_int_show_show() {
-        let source = r#"
-public fn main() -> String {
-    Int.show.show(99)
-}
-"#;
-        let mut lexer = Lexer::new(source, "test.fav");
-        let tokens = lexer.tokenize().expect("tokenize");
-        let mut parser = Parser::new(tokens);
-        let program = parser.parse_program().expect("parse");
-        let ir = compile_program(&program);
-        let artifact = codegen_program(&ir);
-        let main_idx = artifact.fn_idx_by_name("main").expect("main");
-        let value = VM::run(&artifact, main_idx, vec![]).expect("vm run");
-        assert_eq!(value, Value::Str("99".into()));
-    }
-
-    #[test]
-    fn vm_builtin_int_ord_compare() {
-        let source = r#"
-fn cmp(a: Int, b: Int) -> Int { Int.ord.compare(a, b) }
-public fn main() -> Unit { () }
-"#;
-        let mut lexer = Lexer::new(source, "test.fav");
-        let tokens = lexer.tokenize().expect("tokenize");
-        let mut parser = Parser::new(tokens);
-        let program = parser.parse_program().expect("parse");
-        let ir = compile_program(&program);
-        let artifact = codegen_program(&ir);
-        let cmp_idx = artifact.fn_idx_by_name("cmp").expect("cmp");
-
-        let lt = VM::run(&artifact, cmp_idx, vec![Value::Int(1), Value::Int(2)]).expect("vm run");
-        let eq = VM::run(&artifact, cmp_idx, vec![Value::Int(3), Value::Int(3)]).expect("vm run");
-        let gt = VM::run(&artifact, cmp_idx, vec![Value::Int(5), Value::Int(2)]).expect("vm run");
-        assert_eq!(lt, Value::Int(-1));
-        assert_eq!(eq, Value::Int(0));
-        assert_eq!(gt, Value::Int(1));
-    }
-
-    // ── Integration tests (tasks 6-26 to 6-30) ─────────────────────────────────
-
-    // 6-26: chain.fav via VM
-    #[test]
-    fn vm_integration_chain_process_and_lookup() {
-        let source = include_str!("../examples/chain.fav");
-        let mut lexer = Lexer::new(source, "chain.fav");
-        let tokens = lexer.tokenize().expect("tokenize");
-        let mut parser = Parser::new(tokens);
-        let program = parser.parse_program().expect("parse");
-        let ir = compile_program(&program);
-        let artifact = codegen_program(&ir);
-
-        let process_idx = artifact.fn_idx_by_name("process").expect("process");
-        let lookup_idx = artifact.fn_idx_by_name("lookup").expect("lookup");
-
-        let r1 = VM::run(&artifact, process_idx, vec![Value::Str("42".into())]).expect("vm run");
-        assert_eq!(r1, Value::Variant("ok".into(), Some(Box::new(Value::Int(42)))));
-
-        let r2 = VM::run(&artifact, lookup_idx, vec![Value::Int(0)]).expect("vm run");
-        assert_eq!(r2, Value::Variant("none".into(), None));
-    }
-
-    // 6-27: collect.fav via VM
-    #[test]
-    fn vm_integration_collect_small_nums() {
-        let source = include_str!("../examples/collect.fav");
-        let mut lexer = Lexer::new(source, "collect.fav");
-        let tokens = lexer.tokenize().expect("tokenize");
-        let mut parser = Parser::new(tokens);
-        let program = parser.parse_program().expect("parse");
-        let ir = compile_program(&program);
-        let artifact = codegen_program(&ir);
-
-        let fn_idx = artifact.fn_idx_by_name("small_nums").expect("small_nums");
-        let result = VM::run(&artifact, fn_idx, vec![]).expect("vm run");
-        assert_eq!(result, Value::List(vec![Value::Int(1), Value::Int(2), Value::Int(3)]));
-    }
-
-    // 6-28: pipe_match.fav via VM
-    #[test]
-    fn vm_integration_pipe_match_classify() {
-        let source = include_str!("../examples/pipe_match.fav");
-        let mut lexer = Lexer::new(source, "pipe_match.fav");
-        let tokens = lexer.tokenize().expect("tokenize");
-        let mut parser = Parser::new(tokens);
-        let program = parser.parse_program().expect("parse");
-        let ir = compile_program(&program);
-        let artifact = codegen_program(&ir);
-
-        let fn_idx = artifact.fn_idx_by_name("classify").expect("classify");
-        let r = VM::run(&artifact, fn_idx, vec![Value::Int(42)]).expect("vm run");
-        assert_eq!(r, Value::Str("positive".into()));
-    }
-
-    // 6-29: generics.fav via VM — main() runs without error
-    #[test]
-    fn vm_integration_generics_main() {
-        let source = include_str!("../examples/generics.fav");
-        let mut lexer = Lexer::new(source, "generics.fav");
-        let tokens = lexer.tokenize().expect("tokenize");
-        let mut parser = Parser::new(tokens);
-        let program = parser.parse_program().expect("parse");
-        let ir = compile_program(&program);
-        let artifact = codegen_program(&ir);
-
-        let main_idx = artifact.fn_idx_by_name("main").expect("main");
-        VM::run(&artifact, main_idx, vec![]).expect("vm run");
-    }
-
-    // 6-30: cap_sort.fav via VM — min_by(3,7) → 3
-    #[test]
-    fn vm_integration_cap_sort_min_by() {
-        let source = include_str!("../examples/cap_sort.fav");
-        let mut lexer = Lexer::new(source, "cap_sort.fav");
-        let tokens = lexer.tokenize().expect("tokenize");
-        let mut parser = Parser::new(tokens);
-        let program = parser.parse_program().expect("parse");
-        let ir = compile_program(&program);
-        let artifact = codegen_program(&ir);
-
-        let fn_idx = artifact.fn_idx_by_name("min_by").expect("min_by");
-        let result = VM::run(&artifact, fn_idx, vec![Value::Int(3), Value::Int(7)]).expect("vm run");
-        assert_eq!(result, Value::Int(3));
-    }
-
-    #[test]
-    fn vm_integration_list_map_builtin() {
-        let source = r#"
-public fn main() -> List<Int> {
-    bind xs <- collect {
-        yield 1;
-        yield 2;
-        yield 3;
-        ()
-    }
-    List.map(xs, |x| x + 1)
-}
-"#;
-        let mut lexer = Lexer::new(source, "list_map.fav");
-        let tokens = lexer.tokenize().expect("tokenize");
-        let mut parser = Parser::new(tokens);
-        let program = parser.parse_program().expect("parse");
-        let ir = compile_program(&program);
-        let artifact = codegen_program(&ir);
-
-        let main_idx = artifact.fn_idx_by_name("main").expect("main");
-        let result = VM::run(&artifact, main_idx, vec![]).expect("vm run");
-        assert_eq!(result, Value::List(vec![Value::Int(2), Value::Int(3), Value::Int(4)]));
-    }
-
-    #[test]
-    fn vm_integration_list_filter_builtin() {
-        let source = r#"
-public fn main() -> List<Int> {
-    bind xs <- collect {
-        yield 1;
-        yield 2;
-        yield 3;
-        yield 4;
-        ()
-    }
-    List.filter(xs, |x| x > 2)
-}
-"#;
-        let mut lexer = Lexer::new(source, "list_filter.fav");
-        let tokens = lexer.tokenize().expect("tokenize");
-        let mut parser = Parser::new(tokens);
-        let program = parser.parse_program().expect("parse");
-        let ir = compile_program(&program);
-        let artifact = codegen_program(&ir);
-
-        let main_idx = artifact.fn_idx_by_name("main").expect("main");
-        let result = VM::run(&artifact, main_idx, vec![]).expect("vm run");
-        assert_eq!(result, Value::List(vec![Value::Int(3), Value::Int(4)]));
-    }
-
-    #[test]
-    fn vm_integration_list_fold_builtin() {
-        let source = r#"
-public fn main() -> Int {
-    bind xs <- collect {
-        yield 1;
-        yield 2;
-        yield 3;
-        yield 4;
-        ()
-    }
-    List.fold(xs, 0, |acc, x| acc + x)
-}
-"#;
-        let mut lexer = Lexer::new(source, "list_fold.fav");
-        let tokens = lexer.tokenize().expect("tokenize");
-        let mut parser = Parser::new(tokens);
-        let program = parser.parse_program().expect("parse");
-        let ir = compile_program(&program);
-        let artifact = codegen_program(&ir);
-
-        let main_idx = artifact.fn_idx_by_name("main").expect("main");
-        let result = VM::run(&artifact, main_idx, vec![]).expect("vm run");
-        assert_eq!(result, Value::Int(10));
-    }
-
-    #[test]
-    fn vm_integration_option_builtins() {
-        let source = r#"
-public fn main() -> Int {
-    bind x <- Option.some(5)
-    bind y <- Option.map(x, |n| n + 1)
-    bind z <- Option.and_then(y, |n| Option.some(n * 2))
-    Option.unwrap_or(z, 0)
-}
-"#;
-        let mut lexer = Lexer::new(source, "option_builtins.fav");
-        let tokens = lexer.tokenize().expect("tokenize");
-        let mut parser = Parser::new(tokens);
-        let program = parser.parse_program().expect("parse");
-        let ir = compile_program(&program);
-        let artifact = codegen_program(&ir);
-
-        let main_idx = artifact.fn_idx_by_name("main").expect("main");
-        let result = VM::run(&artifact, main_idx, vec![]).expect("vm run");
-        assert_eq!(result, Value::Int(12));
-    }
-
-    #[test]
-    fn vm_integration_result_builtins() {
-        let source = r#"
-public fn main() -> Int {
-    bind x <- Result.ok(5)
-    bind y <- Result.map(x, |n| n + 1)
-    bind z <- Result.and_then(y, |n| Result.ok(n * 2))
-    Result.unwrap_or(z, 0)
-}
-"#;
-        let mut lexer = Lexer::new(source, "result_builtins.fav");
-        let tokens = lexer.tokenize().expect("tokenize");
-        let mut parser = Parser::new(tokens);
-        let program = parser.parse_program().expect("parse");
-        let ir = compile_program(&program);
-        let artifact = codegen_program(&ir);
-
-        let main_idx = artifact.fn_idx_by_name("main").expect("main");
-        let result = VM::run(&artifact, main_idx, vec![]).expect("vm run");
-        assert_eq!(result, Value::Int(12));
-    }
-
-    #[test]
-    fn vm_integration_string_builtins() {
-        let source = r#"
-public fn main() -> String {
-    bind xs <- collect {
-        yield "a";
-        yield "b";
-        yield "c";
-        ()
-    }
-    bind joined <- String.join(xs, "-")
-    bind replaced <- String.replace(joined, "-", ":")
-    bind slice <- String.slice(replaced, 2, 5)
-    String.repeat(slice, 2)
-}
-"#;
-        let mut lexer = Lexer::new(source, "string_builtins.fav");
-        let tokens = lexer.tokenize().expect("tokenize");
-        let mut parser = Parser::new(tokens);
-        let program = parser.parse_program().expect("parse");
-        let ir = compile_program(&program);
-        let artifact = codegen_program(&ir);
-
-        let main_idx = artifact.fn_idx_by_name("main").expect("main");
-        let result = VM::run(&artifact, main_idx, vec![]).expect("vm run");
-        assert_eq!(result, Value::Str("b:cb:c".into()));
-    }
-
-    #[test]
-    fn vm_integration_string_optionish_builtins() {
-        let source = r#"
-public fn main() -> Int {
-    bind n <- String.to_int("42")
-    bind digit <- String.char_at("xy7", 2)
-    bind result <- Option.and_then(n, |value|
-        Option.map(digit, |ch| value + Option.unwrap_or(String.to_int(ch), 0))
-    )
-    Option.unwrap_or(result, -1)
-}
-"#;
-        let mut lexer = Lexer::new(source, "string_optionish_builtins.fav");
-        let tokens = lexer.tokenize().expect("tokenize");
-        let mut parser = Parser::new(tokens);
-        let program = parser.parse_program().expect("parse");
-        let ir = compile_program(&program);
-        let artifact = codegen_program(&ir);
-
-        let main_idx = artifact.fn_idx_by_name("main").expect("main");
-        let result = VM::run(&artifact, main_idx, vec![]).expect("vm run");
-        assert_eq!(result, Value::Int(49));
-    }
-
-    #[test]
-    fn vm_integration_map_builtins() {
-        let source = r#"
-type PairSI = { first: String second: Int }
-
-public fn main() -> Int {
-    bind pairs <- collect {
-        yield PairSI { first: "a" second: 1 };
-        yield PairSI { first: "b" second: 2 };
-        ()
-    }
-    bind base <- Map.from_list(pairs)
-    bind extra <- Map.set(base, "c", 3)
-    bind merged <- Map.merge(extra, Map.set((), "b", 20))
-    bind filtered <- Map.filter_values(merged, |n| n > 2)
-    bind raised <- Map.map_values(filtered, |n| n + 1)
-    bind values <- Map.values(raised)
-    List.fold(values, 0, |acc, x| acc + x)
-}
-"#;
-        let mut lexer = Lexer::new(source, "map_builtins.fav");
-        let tokens = lexer.tokenize().expect("tokenize");
-        let mut parser = Parser::new(tokens);
-        let program = parser.parse_program().expect("parse");
-        let ir = compile_program(&program);
-        let artifact = codegen_program(&ir);
-
-        let main_idx = artifact.fn_idx_by_name("main").expect("main");
-        let result = VM::run(&artifact, main_idx, vec![]).expect("vm run");
-        assert_eq!(result, Value::Int(25));
-    }
-
-    #[test]
-    fn vm_integration_map_shape_builtins() {
-        let source = r#"
-type PairSS = { first: String second: String }
-
-public fn main() -> String {
-    bind pairs <- collect {
-        yield PairSS { first: "x" second: "10" };
-        yield PairSS { first: "y" second: "20" };
-        ()
-    }
-    bind m <- Map.from_list(pairs)
-    bind parts <- collect {
-        yield Debug.show(Map.has_key(m, "x"));
-        yield String.from_int(Map.size(m));
-        yield Debug.show(Map.is_empty(m));
-        yield Debug.show(Map.get(m, "y"));
-        yield Debug.show(Map.to_list(m));
-        ()
-    }
-    String.join(parts, "|")
-}
-"#;
-        let mut lexer = Lexer::new(source, "map_shape_builtins.fav");
-        let tokens = lexer.tokenize().expect("tokenize");
-        let mut parser = Parser::new(tokens);
-        let program = parser.parse_program().expect("parse");
-        let ir = compile_program(&program);
-        let artifact = codegen_program(&ir);
-
-        let main_idx = artifact.fn_idx_by_name("main").expect("main");
-        let result = VM::run(&artifact, main_idx, vec![]).expect("vm run");
-        assert_eq!(
-            result,
-            Value::Str(
-                r#"true|2|false|some("20")|[{ first: "x", second: "10" }, { first: "y", second: "20" }]"#.into()
-            )
-        );
-    }
-
-    #[test]
-    fn vm_integration_json_builtins() {
-        let source = r#"
-public fn main() -> String {
-    bind parsed <- Json.parse("{\"name\":\"fav\",\"items\":[1,2]}")
-    bind json <- Option.unwrap_or(parsed, Json.null())
-    bind name <- Json.get(json, "name")
-    bind items <- Json.get(json, "items")
-    bind item_json <- Option.unwrap_or(items, Json.null())
-    bind item_len <- Json.length(item_json)
-    String.concat(
-        Option.unwrap_or(Json.as_str(Option.unwrap_or(name, Json.null())), "?"),
-        String.from_int(Option.unwrap_or(item_len, 0))
-    )
-}
-"#;
-        let mut lexer = Lexer::new(source, "json_builtins.fav");
-        let tokens = lexer.tokenize().expect("tokenize");
-        let mut parser = Parser::new(tokens);
-        let program = parser.parse_program().expect("parse");
-        let ir = compile_program(&program);
-        let artifact = codegen_program(&ir);
-
-        let main_idx = artifact.fn_idx_by_name("main").expect("main");
-        let result = VM::run(&artifact, main_idx, vec![]).expect("vm run");
-        assert_eq!(result, Value::Str("fav2".into()));
-    }
-
-    #[test]
-    fn vm_integration_json_parse_encode_roundtrip() {
-        let source = r#"
-public fn main() -> String {
-    bind parsed <- Json.parse("{\"ok\":true,\"n\":3}")
-    bind json <- Option.unwrap_or(parsed, Json.null())
-    Json.encode(json)
-}
-"#;
-        let mut lexer = Lexer::new(source, "json_roundtrip.fav");
-        let tokens = lexer.tokenize().expect("tokenize");
-        let mut parser = Parser::new(tokens);
-        let program = parser.parse_program().expect("parse");
-        let ir = compile_program(&program);
-        let artifact = codegen_program(&ir);
-
-        let main_idx = artifact.fn_idx_by_name("main").expect("main");
-        let result = VM::run(&artifact, main_idx, vec![]).expect("vm run");
-        assert_eq!(result, Value::Str(r#"{"n":3,"ok":true}"#.into()));
-    }
-
-    #[test]
-    fn vm_integration_csv_parse_with_header() {
-        let source = r#"
-public fn main() -> String {
-    bind rows <- Csv.parse_with_header("name,count\nfav,2\nvm,3\n")
-    Csv.from_records(rows)
-}
-"#;
-        let mut lexer = Lexer::new(source, "csv_parse_with_header.fav");
-        let tokens = lexer.tokenize().expect("tokenize");
-        let mut parser = Parser::new(tokens);
-        let program = parser.parse_program().expect("parse");
-        let ir = compile_program(&program);
-        let artifact = codegen_program(&ir);
-
-        let main_idx = artifact.fn_idx_by_name("main").expect("main");
-        let result = VM::run(&artifact, main_idx, vec![]).expect("vm run");
-        assert_eq!(result, Value::Str("count,name\n2,fav\n3,vm\n".into()));
-    }
-
-    #[test]
-    fn vm_integration_csv_from_records() {
-        let source = r#"
-type Row = { name: String count: String }
-
-public fn main() -> String {
-    bind rows <- collect {
-        yield Row { name: "fav" count: "2" };
-        yield Row { name: "vm" count: "3" };
-        ()
-    }
-    Csv.from_records(rows)
-}
-"#;
-        let mut lexer = Lexer::new(source, "csv_from_records.fav");
-        let tokens = lexer.tokenize().expect("tokenize");
-        let mut parser = Parser::new(tokens);
-        let program = parser.parse_program().expect("parse");
-        let ir = compile_program(&program);
-        let artifact = codegen_program(&ir);
-
-        let main_idx = artifact.fn_idx_by_name("main").expect("main");
-        let result = VM::run(&artifact, main_idx, vec![]).expect("vm run");
-        assert_eq!(result, Value::Str("count,name\n2,fav\n3,vm\n".into()));
-    }
-
-    #[test]
-    fn vm_calls_variant_ctor_with_payload() {
-        let artifact = FvcArtifact {
-            str_table: vec![
-                "main".to_string(),
-                "some".to_string(),
-                "Option".to_string(),
-                "Pure".to_string(),
-            ],
-            globals: vec![
-                FvcGlobal { name_idx: 0, kind: 0, fn_idx: 0 },
-                FvcGlobal { name_idx: 1, kind: 2, fn_idx: u32::MAX },
-            ],
-            functions: vec![FvcFunction {
-                name_idx: 0,
-                param_count: 0,
-                local_count: 0,
-                source_line: 1,
-                return_ty_str_idx: 2,
-                effect_str_idx: 3,
-                constants: vec![Constant::Int(9)],
-                code: vec![
-                    Opcode::LoadGlobal as u8, 0x01, 0x00,
-                    Opcode::Const as u8, 0x00, 0x00,
-                    Opcode::Call as u8, 0x01, 0x00,
-                    Opcode::Return as u8,
-                ],
-            }],
-        };
-
-        let value = VM::run(&artifact, 0, vec![]).expect("vm run");
-        assert_eq!(
-            value,
-            Value::Variant("some".into(), Some(Box::new(Value::Int(9))))
-        );
-    }
-}
+#[path = "vm_legacy_coverage_tests.rs"]
+mod vm_legacy_coverage_tests;
+
+#[cfg(test)]
+#[path = "vm_stdlib_tests.rs"]
+mod vm_stdlib_tests;

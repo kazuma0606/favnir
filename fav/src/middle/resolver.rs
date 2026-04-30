@@ -5,9 +5,9 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use crate::ast::Visibility;
-use crate::checker::{Type, Checker};
-use crate::lexer::Span;
-use crate::parser::Parser;
+use super::checker::{Type, Checker};
+use crate::frontend::lexer::Span;
+use crate::frontend::parser::Parser;
 use crate::toml::FavToml;
 
 // ── ModuleScope ───────────────────────────────────────────────────────────────

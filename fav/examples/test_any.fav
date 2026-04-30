@@ -1,0 +1,5 @@
+test "list any" {
+    bind xs <- List.range(1, 6)
+    bind result <- List.any(xs, |x| x > 3)
+    assert(result)
+}

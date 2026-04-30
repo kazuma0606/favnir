@@ -1,0 +1,4 @@
+public fn main() -> Bool {
+    bind xs <- List.range(1, 6)
+    List.any(xs, |x| x > 3)
+}

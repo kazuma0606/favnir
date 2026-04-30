@@ -1,7 +1,7 @@
 use crate::ast::{BinOp, Lit};
-use crate::artifact::{FvcArtifact, FvcFunction, FvcGlobal, FvcWriter};
-use crate::ir::{IRArm, IRExpr, IRPattern, IRStmt};
-use crate::ir::{IRGlobalKind, IRProgram};
+use super::artifact::{FvcArtifact, FvcFunction, FvcGlobal, FvcWriter};
+use crate::middle::ir::{IRArm, IRExpr, IRPattern, IRStmt};
+use crate::middle::ir::{IRGlobalKind, IRProgram};
 
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -296,7 +296,7 @@ fn emit_pattern_test(pattern: &IRPattern, fail_jumps: &mut Vec<usize>, cg: &mut 
         IRPattern::Wildcard => {}
         IRPattern::Lit(lit) => {
             cg.emit_opcode(Opcode::Dup);
-            emit_expr(&IRExpr::Lit(lit.clone(), crate::checker::Type::Unknown), cg);
+            emit_expr(&IRExpr::Lit(lit.clone(), crate::middle::checker::Type::Unknown), cg);
             cg.emit_opcode(Opcode::Eq);
             fail_jumps.push(cg.emit_jump(Opcode::JumpIfFalse));
         }
@@ -464,8 +464,8 @@ fn remap_u16_at(code: &mut [u8], offset: usize, str_remap: &[u16]) {
 mod tests {
     use super::{codegen_program, emit_expr, emit_stmt, Codegen, Constant, Opcode};
     use crate::ast::Lit;
-    use crate::checker::Type;
-    use crate::ir::{IRExpr, IRFnDef, IRGlobal, IRGlobalKind, IRProgram, IRStmt};
+    use crate::middle::checker::Type;
+    use crate::middle::ir::{IRExpr, IRFnDef, IRGlobal, IRGlobalKind, IRProgram, IRStmt};
 
     #[test]
     fn const_idx_deduplicates_constants() {
@@ -661,10 +661,10 @@ mod tests {
                 body: IRExpr::Match(
                     Box::new(IRExpr::Local(0, Type::Unknown)),
                     vec![
-                        crate::ir::IRArm {
-                            pattern: crate::ir::IRPattern::Variant(
+                        crate::middle::ir::IRArm {
+                            pattern: crate::middle::ir::IRPattern::Variant(
                                 "ok".to_string(),
-                                Some(Box::new(crate::ir::IRPattern::Bind(0))),
+                                Some(Box::new(crate::middle::ir::IRPattern::Bind(0))),
                             ),
                             guard: None,
                             body: IRExpr::Local(0, Type::Int),

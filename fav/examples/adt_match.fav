@@ -1,17 +1,18 @@
-// adt_match.fav - type definition, match expression, and Option example
-
-type Direction = | North | South | East | West
+type Direction =
+    | North
+    | South
+    | East
+    | West
 
 fn direction_name(d: Direction) -> String {
     match d {
         North => "North"
         South => "South"
-        East  => "East"
-        West  => "West"
+        East => "East"
+        West => "West"
     }
 }
 
-// Returns none on division by zero, otherwise some(a / b)
 fn safe_divide(a: Int, b: Int) -> Int? {
     if b == 0 {
         Option.none()

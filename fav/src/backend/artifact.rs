@@ -1,7 +1,7 @@
 use std::fmt;
 use std::io::{self, Read, Write};
 
-use crate::codegen::Constant;
+use super::codegen::Constant;
 
 const MAGIC: &[u8; 4] = b"FVC\x01";
 const VERSION: u8 = 0x06;
@@ -295,7 +295,7 @@ fn read_constant(r: &mut impl Read) -> Result<Constant, ArtifactError> {
 #[cfg(test)]
 mod tests {
     use super::{ArtifactError, FvcArtifact, FvcFunction, FvcGlobal, FvcWriter};
-    use crate::codegen::Constant;
+    use crate::backend::codegen::Constant;
 
     #[test]
     fn writer_round_trips_artifact() {

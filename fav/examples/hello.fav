@@ -1,5 +1,3 @@
-// hello.fav - minimal Favnir program
-
 public fn main() -> Unit !Io {
     IO.println("Hello, Favnir!")
 }

@@ -5,7 +5,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use crate::ast::*;
-use crate::lexer::Span;
+use crate::frontend::lexer::Span;
 
 // ── Type (4-1) ────────────────────────────────────────────────────────────────
 
@@ -124,59 +124,6 @@ impl Type {
             Type::Arrow(i, o)  => Some((i, o)),
             Type::Fn(params, ret) if !params.is_empty() => Some((&params[0], ret)),
             _ => None,
-        }
-    }
-}
-
-// ── Effect composition (4-2, 2-1, 2-2) ───────────────────────────────────────
-
-/// Merge two effect sets.
-/// General rule: different kinds form a set union; same kind collapses (idempotent).
-/// Emit<A> + Emit<B> = Emit<A | B> (represented as EmitUnion).
-pub fn compose_effects(a: &[Effect], b: &[Effect]) -> Vec<Effect> {
-    let mut result: Vec<Effect> = a.to_vec();
-    for e in b {
-        merge_effect(&mut result, e.clone());
-    }
-    result
-}
-
-fn merge_effect(effects: &mut Vec<Effect>, new: Effect) {
-    match &new {
-        Effect::Pure => {} // Pure is identity — absorb it; don't add
-        Effect::Emit(ev) => {
-            // Any real effect absorbs Pure
-            effects.retain(|e| !matches!(e, Effect::Pure));
-            // Collect existing Emit event names
-            let mut existing: Vec<String> = Vec::new();
-            let mut found = false;
-            for e in effects.iter() {
-                match e {
-                    Effect::Emit(n)       => { existing.push(n.clone()); found = true; }
-                    Effect::EmitUnion(ns) => { existing.extend(ns.clone()); found = true; }
-                    _ => {}
-                }
-            }
-            if found {
-                // Replace all Emit* with a single EmitUnion
-                effects.retain(|e| !matches!(e, Effect::Emit(_) | Effect::EmitUnion(_)));
-                if !existing.contains(ev) { existing.push(ev.clone()); }
-                effects.push(Effect::EmitUnion(existing));
-            } else {
-                effects.push(Effect::Emit(ev.clone()));
-            }
-        }
-        Effect::EmitUnion(evs) => {
-            for ev in evs.clone() {
-                merge_effect(effects, Effect::Emit(ev));
-            }
-        }
-        _ => {
-            // Io / Db / Network: any real effect absorbs Pure; idempotent set add
-            effects.retain(|e| !matches!(e, Effect::Pure));
-            if !effects.contains(&new) {
-                effects.push(new);
-            }
         }
     }
 }
@@ -337,7 +284,6 @@ pub fn unify(t1: &Type, t2: &Type) -> Result<Subst, String> {
 
 /// Registered capability definition: field names → type expressions (in type-param scope).
 pub struct CapScope {
-    pub type_params: Vec<String>,
     /// field name → field type expression (unresolved; requires substituting type_params)
     pub fields: HashMap<String, TypeExpr>,
 }
@@ -418,15 +364,13 @@ pub struct Checker {
     /// Effects declared on the current fn/trf being checked.
     current_effects: Vec<Effect>,
     /// Module resolver (Some = project mode, None = single-file mode).
-    resolver: Option<Arc<Mutex<crate::resolver::Resolver>>>,
+    resolver: Option<Arc<Mutex<crate::middle::resolver::Resolver>>>,
     /// File being checked (for visibility enforcement).
     current_file: Option<PathBuf>,
     /// Imported symbols: name → (type, visibility, source_file).
     imported: HashMap<String, (Type, Visibility, PathBuf)>,
     /// Type parameters in scope for the current fn/trf/type (v0.4.0).
     type_params: HashSet<String>,
-    /// Current unification substitution (v0.4.0).
-    subst: Subst,
     /// Counter for fresh type variable generation (v0.4.0).
     fresh_counter: usize,
     /// Registered capability definitions (v0.4.0).
@@ -452,7 +396,6 @@ impl Checker {
             current_file: None,
             imported: HashMap::new(),
             type_params: HashSet::new(),
-            subst: Subst::empty(),
             fresh_counter: 0,
             caps: HashMap::new(),
             impls: HashMap::new(),
@@ -463,7 +406,7 @@ impl Checker {
     }
 
     pub fn new_with_resolver(
-        resolver: Arc<Mutex<crate::resolver::Resolver>>,
+        resolver: Arc<Mutex<crate::middle::resolver::Resolver>>,
         file: PathBuf,
     ) -> Self {
         Checker {
@@ -475,7 +418,6 @@ impl Checker {
             current_file: Some(file),
             imported: HashMap::new(),
             type_params: HashSet::new(),
-            subst: Subst::empty(),
             fresh_counter: 0,
             caps: HashMap::new(),
             impls: HashMap::new(),
@@ -490,16 +432,6 @@ impl Checker {
         let n = self.fresh_counter;
         self.fresh_counter += 1;
         Type::Var(format!("${}", n))
-    }
-
-    /// Replace each name in `type_params` with a fresh type variable in `ty`.
-    fn instantiate(&mut self, type_params: &[String], ty: &Type) -> Type {
-        if type_params.is_empty() { return ty.clone(); }
-        let mut s = Subst::empty();
-        for name in type_params {
-            s.extend(name.clone(), self.fresh_var());
-        }
-        s.apply(ty)
     }
 
     pub fn check_program(program: &Program) -> Vec<TypeError> {
@@ -546,9 +478,9 @@ impl Checker {
             _ => return,
         };
         drop(guard);
-        if let Some(derived) = crate::resolver::derive_module_path(&file, &src_dir) {
+        if let Some(derived) = crate::middle::resolver::derive_module_path(&file, &src_dir) {
             if derived != declared {
-                let span = crate::lexer::Span::new(
+                let span = crate::frontend::lexer::Span::new(
                     &*file.to_string_lossy(),
                     0, 0, 1, 1,
                 );
@@ -773,7 +705,6 @@ impl Checker {
                 Item::CapDef(cd) => {
                     self.env.define(cd.name.clone(), Type::Named(cd.name.clone(), vec![]));
                     let scope = CapScope {
-                        type_params: cd.type_params.clone(),
                         fields: cd.fields.iter()
                             .map(|f| (f.name.clone(), f.ty.clone()))
                             .collect(),
@@ -798,8 +729,8 @@ impl Checker {
                         );
                     }
                 }
-                // namespace / use are handled before item registration
-                Item::NamespaceDecl(..) | Item::UseDecl(..) => {}
+                // namespace / use / test are handled elsewhere
+                Item::NamespaceDecl(..) | Item::UseDecl(..) | Item::TestDef(..) => {}
             }
         }
     }
@@ -814,6 +745,7 @@ impl Checker {
             Item::FlwDef(fd)  => self.check_flw_def(fd),
             Item::CapDef(cd)  => self.check_cap_def(cd),
             Item::ImplDef(id) => self.check_impl_def(id),
+            Item::TestDef(td) => self.check_test_def(td),
             Item::NamespaceDecl(..) | Item::UseDecl(..) => {}
         }
     }
@@ -884,6 +816,24 @@ impl Checker {
     }
 
     // ── fn_def (4-7) ──────────────────────────────────────────────────────────
+
+    // ── test_def (v0.8.0) ─────────────────────────────────────────────────────
+
+    fn check_test_def(&mut self, td: &TestDef) {
+        // Test bodies run with Io+File effects allowed (assert builtins are pure)
+        let saved_effects = std::mem::replace(
+            &mut self.current_effects,
+            vec![Effect::Io, Effect::File],
+        );
+        self.env.push();
+        // Register assert builtins as visible inside test bodies
+        self.env.define("assert".to_string(), Type::Fn(vec![Type::Bool], Box::new(Type::Unit)));
+        self.env.define("assert_eq".to_string(), Type::Unknown);
+        self.env.define("assert_ne".to_string(), Type::Unknown);
+        self.check_block(&td.body);
+        self.env.pop();
+        self.current_effects = saved_effects;
+    }
 
     fn check_fn_def(&mut self, fd: &FnDef) {
         let saved_effects = std::mem::replace(&mut self.current_effects, fd.effects.clone());
@@ -2049,7 +1999,7 @@ impl Checker {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::parser::Parser;
+    use crate::frontend::parser::Parser;
 
     fn check(src: &str) -> Vec<String> {
         let prog = Parser::parse_str(src, "test").expect("parse error");
@@ -2350,33 +2300,11 @@ mod tests {
         check_ok(r#"trf T: String -> Unit !Emit<E> = |s| { emit s }"#);
     }
 
-    // 4-2 / 2-1 / 2-2: effect composition
-    #[test]
-    fn test_effect_composition() {
-        assert_eq!(compose_effects(&[], &[]), vec![]);
-        assert_eq!(compose_effects(&[Effect::Pure], &[Effect::Io]), vec![Effect::Io]);
-        assert_eq!(compose_effects(&[Effect::Io], &[Effect::Io]), vec![Effect::Io]);
-        assert_eq!(compose_effects(&[], &[Effect::Pure]), vec![]);
-        // Emit merging: Emit<A> + Emit<B> = EmitUnion([A, B])
-        assert_eq!(
-            compose_effects(&[Effect::Emit("A".into())], &[Effect::Emit("B".into())]),
-            vec![Effect::EmitUnion(vec!["A".into(), "B".into()])]
-        );
-        // Idempotency
-        assert_eq!(compose_effects(&[Effect::Db], &[Effect::Db]), vec![Effect::Db]);
-        // Heterogeneous union
-        assert_eq!(
-            compose_effects(&[Effect::Db], &[Effect::Network]),
-            vec![Effect::Db, Effect::Network]
-        );
-        assert_eq!(compose_effects(&[Effect::File], &[Effect::File]), vec![Effect::File]);
-    }
-
     // ── 4-11: use resolution tests ────────────────────────────────────────────
 
     use std::sync::{Arc, Mutex};
     use tempfile::tempdir;
-    use crate::resolver::Resolver;
+    use crate::middle::resolver::Resolver;
     use crate::toml::FavToml;
 
     /// Build a Resolver + temp project with a single .fav file under src/.
@@ -2435,8 +2363,8 @@ mod tests {
     // inner modules, so deep cycle detection only fires at the Resolver level.
     #[test]
     fn test_circular_import_error() {
-        use crate::resolver::ResolveError;
-        use crate::lexer::Span;
+        use crate::middle::resolver::ResolveError;
+        use crate::frontend::lexer::Span;
         let dir = tempdir().unwrap();
         let root = dir.path().to_path_buf();
         std::fs::write(root.join("fav.toml"), "[rune]\nname=\"t\"\nversion=\"0.1.0\"\nsrc=\"src\"\n").unwrap();

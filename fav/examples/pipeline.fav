@@ -1,9 +1,11 @@
-// pipeline.fav - trf + flw + |> example
+trf Trim: String -> String = |s| {
+    String.trim(s)
+}
 
-trf Trim:  String -> String = |s| { String.trim(s) }
-trf Lower: String -> String = |s| { String.lower(s) }
+trf Lower: String -> String = |s| {
+    String.lower(s)
+}
 
-// compose with flw
 flw Normalize = Trim |> Lower
 
 public fn main() -> Unit !Io {

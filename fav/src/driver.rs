@@ -1474,6 +1474,19 @@ public fn main() -> Unit !Io {
     }
 
     #[test]
+    fn example_string_wasm_build_and_exec() {
+        let source_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("examples")
+            .join("string_wasm.fav");
+        let source_str = source_path.to_string_lossy().to_string();
+        let (program, _) = load_and_check_program(Some(&source_str));
+        let bytes = build_wasm_artifact(&program).expect("build wasm");
+        crate::backend::wasm_exec::wasm_exec_main(&bytes).expect("exec wasm");
+        let info = crate::backend::wasm_exec::wasm_exec_info(&bytes);
+        assert!(info.contains("artifact: .wasm"));
+    }
+
+    #[test]
     fn wasm_exec_bytes_rejects_db_path_with_w004() {
         let hello = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("examples")
@@ -1868,4 +1881,107 @@ fn format_effects(effects: &[ast::Effect]) -> String {
         EmitUnion(evs) => format!("!Emit<{}>", evs.join("|")),
         Trace          => "!Trace".into(),
     }).collect::<Vec<_>>().join(" ")
+}
+
+// ── Phase 4: rune dependency management ───────────────────────────────────────
+
+/// `fav install` — resolve path dependencies and write `fav.lock`.
+pub fn cmd_install() {
+    use crate::toml::{FavToml, DependencySpec};
+    use crate::lock::{LockFile, LockedPackage, resolve_path_dep};
+
+    let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let root = FavToml::find_root(&cwd).unwrap_or_else(|| {
+        eprintln!("error: no fav.toml found");
+        std::process::exit(1);
+    });
+    let toml = FavToml::load(&root).unwrap_or_else(|| {
+        eprintln!("error: could not read fav.toml");
+        std::process::exit(1);
+    });
+
+    if toml.dependencies.is_empty() {
+        println!("No dependencies to install.");
+        return;
+    }
+
+    let mut lock = LockFile::new();
+    let mut errors = 0usize;
+
+    for dep in &toml.dependencies {
+        match dep {
+            DependencySpec::Path { name, path } => {
+                let resolved = resolve_path_dep(&root, path);
+                if !resolved.exists() {
+                    eprintln!("error: dependency `{name}` path `{path}` does not exist");
+                    errors += 1;
+                    continue;
+                }
+                let resolved_str = resolved.to_string_lossy().into_owned();
+                println!("  + {name} (path: {resolved_str})");
+                lock.packages.push(LockedPackage {
+                    name: name.clone(),
+                    version: String::new(),
+                    resolved_path: resolved_str,
+                });
+            }
+            DependencySpec::Registry { name, registry, version } => {
+                // Local registry: look for `<registry_name>/<name>-<version>/` relative to root
+                let registry_dir = root.join(registry).join(format!("{name}-{version}"));
+                if !registry_dir.exists() {
+                    eprintln!(
+                        "error: dependency `{name}@{version}` not found in local registry `{registry}`"
+                    );
+                    errors += 1;
+                    continue;
+                }
+                let resolved_str = registry_dir.to_string_lossy().into_owned();
+                println!("  + {name}@{version} (registry: {registry})");
+                lock.packages.push(LockedPackage {
+                    name: name.clone(),
+                    version: version.clone(),
+                    resolved_path: resolved_str,
+                });
+            }
+        }
+    }
+
+    if errors > 0 {
+        eprintln!("error: {errors} dependency/dependencies could not be resolved");
+        std::process::exit(1);
+    }
+
+    lock.save(&root).unwrap_or_else(|e| {
+        eprintln!("error: could not write fav.lock: {e}");
+        std::process::exit(1);
+    });
+    println!("Wrote fav.lock ({} package(s))", lock.packages.len());
+}
+
+/// `fav publish` — validate project and emit a publish manifest stub.
+pub fn cmd_publish() {
+    use crate::toml::FavToml;
+
+    let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let root = FavToml::find_root(&cwd).unwrap_or_else(|| {
+        eprintln!("error: no fav.toml found");
+        std::process::exit(1);
+    });
+    let toml = FavToml::load(&root).unwrap_or_else(|| {
+        eprintln!("error: could not read fav.toml");
+        std::process::exit(1);
+    });
+
+    if toml.name.is_empty() {
+        eprintln!("error: fav.toml is missing `name`");
+        std::process::exit(1);
+    }
+    if toml.version.is_empty() {
+        eprintln!("error: fav.toml is missing `version`");
+        std::process::exit(1);
+    }
+
+    println!("Publishing {}@{}", toml.name, toml.version);
+    println!("(note: remote registry publishing is not yet implemented)");
+    println!("To share locally, copy this project to your local registry directory.");
 }

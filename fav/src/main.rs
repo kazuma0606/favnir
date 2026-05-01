@@ -1,5 +1,6 @@
 ﻿mod ast;
 mod toml;
+mod lock;
 mod value;
 mod fmt;
 mod lint;
@@ -7,14 +8,15 @@ mod frontend;
 mod middle;
 mod backend;
 mod driver;
+mod lsp;
 
 use std::process;
-use driver::{cmd_run, cmd_build, cmd_exec, cmd_check, cmd_explain, cmd_test, cmd_fmt, cmd_lint};
+use driver::{cmd_run, cmd_build, cmd_exec, cmd_check, cmd_explain, cmd_test, cmd_fmt, cmd_lint, cmd_install, cmd_publish};
 
 // 笏笏 help text (4-6) 笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏
 
 const HELP: &str = "\
-fav - Favnir language toolchain v0.9.0
+fav - Favnir language toolchain v1.0.0
 
 USAGE:
     fav <COMMAND> [OPTIONS] [FILE]
@@ -45,6 +47,10 @@ COMMANDS:
                   Run static lint checks (L001-L004) on a .fav file.
                   With --warn-only, always exit 0 (warnings only).
                   If <file> is omitted, lints all .fav files in the project.
+    lsp [--port <n>]
+                  Run the Favnir Language Server scaffold.
+    install       Resolve [dependencies] from fav.toml and write fav.lock.
+    publish       Validate project and prepare for local registry publishing.
     help          Show this help message
 
 OPTIONS (run / exec):
@@ -221,6 +227,39 @@ fn main() {
                 }
             }
             cmd_lint(file.as_deref(), warn_only);
+        }
+
+        Some("install") => {
+            cmd_install();
+        }
+
+        Some("publish") => {
+            cmd_publish();
+        }
+
+        Some("lsp") => {
+            let mut port: Option<u16> = None;
+            let mut i = 2usize;
+            while i < args.len() {
+                match args[i].as_str() {
+                    "--port" => {
+                        let raw = args.get(i + 1).unwrap_or_else(|| {
+                            eprintln!("error: --port requires a number");
+                            process::exit(1);
+                        });
+                        port = Some(raw.parse::<u16>().unwrap_or_else(|_| {
+                            eprintln!("error: --port must be a valid u16");
+                            process::exit(1);
+                        }));
+                        i += 2;
+                    }
+                    other => {
+                        eprintln!("error: unexpected lsp argument `{}`", other);
+                        process::exit(1);
+                    }
+                }
+            }
+            lsp::run_lsp_server(port);
         }
 
         Some(cmd) => {

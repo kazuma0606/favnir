@@ -3,7 +3,7 @@
 
 // ── Span ─────────────────────────────────────────────────────────────────────
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Span {
     pub file: String,
     pub start: usize, // byte offset (start)

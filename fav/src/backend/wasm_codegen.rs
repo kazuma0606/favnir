@@ -3,9 +3,10 @@ use std::collections::HashMap;
 use std::fmt;
 
 use wasm_encoder::{
-    BlockType, CodeSection, ConstExpr, DataSection, EntityType, ExportKind, ExportSection,
-    Function, FunctionSection, ImportSection, Instruction, MemorySection, MemoryType, Module,
-    TypeSection, ValType,
+    BlockType, CodeSection, ConstExpr, DataSection, ElementSection, Elements, EntityType,
+    ExportKind, ExportSection, Function, FunctionSection, GlobalSection, GlobalType,
+    ImportSection, Instruction, MemArg, MemorySection, MemoryType, Module, RefType,
+    TableSection, TableType, TypeSection, ValType,
 };
 
 use crate::ast::Effect;
@@ -54,13 +55,195 @@ pub enum HostImport {
     IoPrintlnBool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WasmLocal {
+    Single(u32),
+    StringPtrLen(u32, u32),
+    /// Closure value stored as (fn_table_idx: i32, env_ptr: i32) pair.
+    FnTableEnv {
+        fn_idx_local: u32,
+        env_ptr_local: u32,
+        wrapper_type_idx: u32,
+    },
+}
+
 #[derive(Debug)]
 pub struct WasmCodegenCtx<'a> {
     pub fn_to_wasm_idx: HashMap<usize, u32>,
     pub builtin_to_wasm_idx: HashMap<String, u32>,
+    pub bump_alloc_fn_idx: u32,
     pub str_to_offset: HashMap<String, u32>,
     pub globals: &'a [crate::middle::ir::IRGlobal],
     pub fns: &'a [crate::middle::ir::IRFnDef],
+    /// Maps closure global_idx → table element index.
+    pub closure_table_idx: HashMap<u16, u32>,
+    /// Maps closure global_idx → wrapper function type index.
+    pub closure_wrapper_type_idx: HashMap<u16, u32>,
+}
+
+const HEAP_PTR_INITIAL: i32 = 65536;
+const HEAP_PTR_GLOBAL_IDX: u32 = 0;
+
+fn build_heap_ptr_global_section() -> GlobalSection {
+    let mut section = GlobalSection::new();
+    section.global(
+        GlobalType {
+            val_type: ValType::I32,
+            mutable: true,
+            shared: false,
+        },
+        &ConstExpr::i32_const(HEAP_PTR_INITIAL),
+    );
+    section
+}
+
+fn build_bump_alloc_function() -> Function {
+    let mut func = Function::new(vec![]);
+    func.instruction(&Instruction::GlobalGet(HEAP_PTR_GLOBAL_IDX));
+    func.instruction(&Instruction::GlobalGet(HEAP_PTR_GLOBAL_IDX));
+    func.instruction(&Instruction::LocalGet(0));
+    func.instruction(&Instruction::I32Add);
+    func.instruction(&Instruction::GlobalSet(HEAP_PTR_GLOBAL_IDX));
+    func.instruction(&Instruction::End);
+    func
+}
+
+/// Collect info about all closures in the program: global_idx → (fn_idx, captures_count).
+fn collect_closure_info(ir: &IRProgram) -> HashMap<u16, (usize, usize)> {
+    let mut map = HashMap::new();
+    for fn_def in &ir.fns {
+        walk_closures_in_expr(&fn_def.body, ir, &mut map);
+    }
+    map
+}
+
+fn walk_closures_in_expr(
+    expr: &IRExpr,
+    ir: &IRProgram,
+    map: &mut HashMap<u16, (usize, usize)>,
+) {
+    match expr {
+        IRExpr::Closure(global_idx, captures, _) => {
+            if let Some(global) = ir.globals.get(*global_idx as usize) {
+                if let IRGlobalKind::Fn(fn_idx) = global.kind {
+                    map.entry(*global_idx).or_insert((fn_idx, captures.len()));
+                }
+            }
+            for cap in captures {
+                walk_closures_in_expr(cap, ir, map);
+            }
+        }
+        IRExpr::Lit(_, _) | IRExpr::Local(_, _) | IRExpr::Global(_, _) => {}
+        IRExpr::Call(callee, args, _) => {
+            walk_closures_in_expr(callee, ir, map);
+            for arg in args {
+                walk_closures_in_expr(arg, ir, map);
+            }
+        }
+        IRExpr::Collect(inner, _) | IRExpr::Emit(inner, _) | IRExpr::FieldAccess(inner, _, _) => {
+            walk_closures_in_expr(inner, ir, map);
+        }
+        IRExpr::Block(stmts, final_expr, _) => {
+            for stmt in stmts {
+                match stmt {
+                    IRStmt::Bind(_, e)
+                    | IRStmt::Chain(_, e)
+                    | IRStmt::Yield(e)
+                    | IRStmt::Expr(e) => walk_closures_in_expr(e, ir, map),
+                }
+            }
+            walk_closures_in_expr(final_expr, ir, map);
+        }
+        IRExpr::If(cond, then_expr, else_expr, _) => {
+            walk_closures_in_expr(cond, ir, map);
+            walk_closures_in_expr(then_expr, ir, map);
+            walk_closures_in_expr(else_expr, ir, map);
+        }
+        IRExpr::Match(subject, arms, _) => {
+            walk_closures_in_expr(subject, ir, map);
+            for arm in arms {
+                if let Some(guard) = &arm.guard {
+                    walk_closures_in_expr(guard, ir, map);
+                }
+                walk_closures_in_expr(&arm.body, ir, map);
+            }
+        }
+        IRExpr::BinOp(_, lhs, rhs, _) => {
+            walk_closures_in_expr(lhs, ir, map);
+            walk_closures_in_expr(rhs, ir, map);
+        }
+        IRExpr::RecordConstruct(fields, _) => {
+            for (_, v) in fields {
+                walk_closures_in_expr(v, ir, map);
+            }
+        }
+    }
+}
+
+/// Find all `Bind(slot, Closure(global_idx, ...))` in a function body.
+/// Returns slot → global_idx.
+fn scan_closure_bound_slots(expr: &IRExpr) -> HashMap<u16, u16> {
+    let mut map = HashMap::new();
+    scan_closure_bound_slots_walk(expr, &mut map);
+    map
+}
+
+fn scan_closure_bound_slots_walk(expr: &IRExpr, map: &mut HashMap<u16, u16>) {
+    match expr {
+        IRExpr::Block(stmts, final_expr, _) => {
+            for stmt in stmts {
+                if let IRStmt::Bind(slot, IRExpr::Closure(global_idx, _, _)) = stmt {
+                    map.insert(*slot, *global_idx);
+                }
+                match stmt {
+                    IRStmt::Bind(_, e)
+                    | IRStmt::Chain(_, e)
+                    | IRStmt::Yield(e)
+                    | IRStmt::Expr(e) => scan_closure_bound_slots_walk(e, map),
+                }
+            }
+            scan_closure_bound_slots_walk(final_expr, map);
+        }
+        IRExpr::If(cond, then_expr, else_expr, _) => {
+            scan_closure_bound_slots_walk(cond, map);
+            scan_closure_bound_slots_walk(then_expr, map);
+            scan_closure_bound_slots_walk(else_expr, map);
+        }
+        _ => {}
+    }
+}
+
+/// Build a closure wrapper function.
+///
+/// The wrapper has signature `(env_ptr: i32, actual_params: i64...) -> return_ty`.
+/// It loads captures from linear memory at `env_ptr + i*8` and then calls the
+/// original lifted closure function.
+fn build_closure_wrapper_function(
+    fn_def: &crate::middle::ir::IRFnDef,
+    captures_count: usize,
+    original_wasm_fn_idx: u32,
+) -> Function {
+    let actual_params_count = fn_def.param_count.saturating_sub(captures_count);
+    let mut func = Function::new(vec![]);
+
+    // Load each capture from env at offset i*8 (env_ptr is local 0)
+    for i in 0..captures_count {
+        func.instruction(&Instruction::LocalGet(0));
+        func.instruction(&Instruction::I64Load(MemArg {
+            offset: (i * 8) as u64,
+            align: 3,
+            memory_index: 0,
+        }));
+    }
+
+    // Push actual params (locals 1..=actual_params_count, each i64)
+    for i in 0..actual_params_count {
+        func.instruction(&Instruction::LocalGet((i + 1) as u32));
+    }
+
+    func.instruction(&Instruction::Call(original_wasm_fn_idx));
+    func.instruction(&Instruction::End);
+    func
 }
 
 fn single_wasm_valtype(ty: &Type) -> Result<Option<ValType>, WasmCodegenError> {
@@ -75,9 +258,13 @@ fn single_wasm_valtype(ty: &Type) -> Result<Option<ValType>, WasmCodegenError> {
 }
 
 fn block_type_for(ty: &Type) -> Result<BlockType, WasmCodegenError> {
-    match single_wasm_valtype(ty)? {
-        Some(val) => Ok(BlockType::Result(val)),
-        None => Ok(BlockType::Empty),
+    let vals = favnir_type_to_wasm_results(ty)?;
+    match vals.as_slice() {
+        [] => Ok(BlockType::Empty),
+        [only] => Ok(BlockType::Result(*only)),
+        _ => Err(WasmCodegenError::UnsupportedExpr(format!(
+            "multi-value block result in wasm MVP: {ty:?}"
+        ))),
     }
 }
 
@@ -193,7 +380,7 @@ pub fn ensure_supported_main_signature(ir: &IRProgram) -> Result<(), WasmCodegen
 pub fn build_type_section(
     ir: &IRProgram,
     imports: &[HostImport],
-) -> Result<(TypeSection, HashMap<usize, u32>), WasmCodegenError> {
+) -> Result<(TypeSection, HashMap<usize, u32>, u32), WasmCodegenError> {
     ensure_supported_main_signature(ir)?;
 
     let mut section = TypeSection::new();
@@ -222,7 +409,10 @@ pub fn build_type_section(
         next_type_idx += 1;
     }
 
-    Ok((section, fn_to_type_idx))
+    let bump_alloc_type_idx = next_type_idx;
+    section.ty().function([ValType::I32], [ValType::I32]);
+
+    Ok((section, fn_to_type_idx, bump_alloc_type_idx))
 }
 
 pub fn favnir_type_to_wasm_results(ty: &Type) -> Result<Vec<ValType>, WasmCodegenError> {
@@ -231,9 +421,7 @@ pub fn favnir_type_to_wasm_results(ty: &Type) -> Result<Vec<ValType>, WasmCodege
         Type::Int => Ok(vec![ValType::I64]),
         Type::Float => Ok(vec![ValType::F64]),
         Type::Bool => Ok(vec![ValType::I32]),
-        Type::String => Err(WasmCodegenError::UnsupportedType(
-            "String as return type".into(),
-        )),
+        Type::String => Ok(vec![ValType::I32, ValType::I32]),
         Type::Unknown => Ok(vec![ValType::I64]),
         Type::Error => Err(WasmCodegenError::UnsupportedType(
             format!("unknown return type: {ty:?}"),
@@ -503,26 +691,107 @@ pub fn collect_used_builtins(ir: &IRProgram) -> std::collections::HashSet<String
     used
 }
 
+fn wasm_local_for_type(ty: &Type, next_local_idx: &mut u32) -> Result<WasmLocal, WasmCodegenError> {
+    match favnir_type_to_wasm_params(ty)?.as_slice() {
+        [] => Err(WasmCodegenError::UnsupportedType(
+            "unit locals are not supported in wasm".into(),
+        )),
+        [_] => {
+            let idx = *next_local_idx;
+            *next_local_idx += 1;
+            Ok(WasmLocal::Single(idx))
+        }
+        [_, _] if matches!(ty, Type::String) => {
+            let ptr = *next_local_idx;
+            let len = *next_local_idx + 1;
+            *next_local_idx += 2;
+            Ok(WasmLocal::StringPtrLen(ptr, len))
+        }
+        _ => Err(WasmCodegenError::UnsupportedType(format!(
+            "unsupported multi-value local type: {ty:?}"
+        ))),
+    }
+}
+
 fn emit_stmt(
     stmt: &IRStmt,
     ctx: &WasmCodegenCtx<'_>,
-    slot_map: &HashMap<u16, u32>,
+    slot_map: &HashMap<u16, WasmLocal>,
     func: &mut Function,
 ) -> Result<(), WasmCodegenError> {
     match stmt {
         IRStmt::Bind(slot, expr) => {
+            // Closure binding: allocate env and set (fn_idx, env_ptr) locals.
+            if let IRExpr::Closure(global_idx, captures, _) = expr {
+                let Some(local) = slot_map.get(slot) else {
+                    return Err(WasmCodegenError::UnsupportedExpr(format!(
+                        "missing wasm local mapping for closure bind slot {slot}"
+                    )));
+                };
+                let WasmLocal::FnTableEnv {
+                    fn_idx_local,
+                    env_ptr_local,
+                    wrapper_type_idx: _,
+                } = *local
+                else {
+                    return Err(WasmCodegenError::UnsupportedExpr(
+                        "closure bind slot must be FnTableEnv".into(),
+                    ));
+                };
+
+                // Allocate env: captures.len() * 8 bytes
+                let env_size = (captures.len() * 8) as i32;
+                func.instruction(&Instruction::I32Const(env_size));
+                func.instruction(&Instruction::Call(ctx.bump_alloc_fn_idx));
+                func.instruction(&Instruction::LocalSet(env_ptr_local));
+
+                // Store each capture into env at offset i*8
+                for (i, capture) in captures.iter().enumerate() {
+                    func.instruction(&Instruction::LocalGet(env_ptr_local));
+                    emit_expr(capture, ctx, slot_map, func)?;
+                    func.instruction(&Instruction::I64Store(MemArg {
+                        offset: (i * 8) as u64,
+                        align: 3,
+                        memory_index: 0,
+                    }));
+                }
+
+                // Set fn_idx_local to the table element index
+                let Some(&table_elem_idx) = ctx.closure_table_idx.get(global_idx) else {
+                    return Err(WasmCodegenError::UnsupportedExpr(format!(
+                        "missing table index for closure global {global_idx}"
+                    )));
+                };
+                func.instruction(&Instruction::I32Const(table_elem_idx as i32));
+                func.instruction(&Instruction::LocalSet(fn_idx_local));
+                return Ok(());
+            }
+
             emit_expr(expr, ctx, slot_map, func)?;
-            let Some(local_idx) = slot_map.get(slot) else {
+            let Some(local) = slot_map.get(slot) else {
                 return Err(WasmCodegenError::UnsupportedExpr(format!(
                     "missing wasm local mapping for bind slot {slot}"
                 )));
             };
-            if single_wasm_valtype(expr.ty())?.is_none() {
-                return Err(WasmCodegenError::UnsupportedExpr(format!(
-                    "cannot bind unit expression into local slot {slot}"
-                )));
+            match local {
+                WasmLocal::Single(local_idx) => {
+                    if single_wasm_valtype(expr.ty())?.is_none() {
+                        return Err(WasmCodegenError::UnsupportedExpr(format!(
+                            "cannot bind unit expression into local slot {slot}"
+                        )));
+                    }
+                    func.instruction(&Instruction::LocalSet(*local_idx));
+                }
+                WasmLocal::StringPtrLen(ptr, len) => {
+                    func.instruction(&Instruction::LocalSet(*len));
+                    func.instruction(&Instruction::LocalSet(*ptr));
+                }
+                WasmLocal::FnTableEnv { .. } => {
+                    return Err(WasmCodegenError::UnsupportedExpr(
+                        "FnTableEnv local used for non-closure binding".into(),
+                    ));
+                }
             }
-            func.instruction(&Instruction::LocalSet(*local_idx));
             Ok(())
         }
         IRStmt::Expr(expr) => {
@@ -544,7 +813,7 @@ fn emit_stmt(
 fn emit_expr(
     expr: &IRExpr,
     ctx: &WasmCodegenCtx<'_>,
-    slot_map: &HashMap<u16, u32>,
+    slot_map: &HashMap<u16, WasmLocal>,
     func: &mut Function,
 ) -> Result<(), WasmCodegenError> {
     match expr {
@@ -574,17 +843,26 @@ fn emit_expr(
             }
         },
         IRExpr::Local(slot, _) => {
-            if matches!(expr.ty(), Type::String) {
-                return Err(WasmCodegenError::UnsupportedExpr(
-                    "string locals are not supported in wasm MVP".into(),
-                ));
-            }
-            let Some(local_idx) = slot_map.get(slot) else {
+            let Some(local) = slot_map.get(slot) else {
                 return Err(WasmCodegenError::UnsupportedExpr(format!(
                     "missing wasm local mapping for slot {slot}"
                 )));
             };
-            func.instruction(&Instruction::LocalGet(*local_idx));
+            match local {
+                WasmLocal::Single(local_idx) => {
+                    func.instruction(&Instruction::LocalGet(*local_idx));
+                }
+                WasmLocal::StringPtrLen(ptr, len) => {
+                    func.instruction(&Instruction::LocalGet(*ptr));
+                    func.instruction(&Instruction::LocalGet(*len));
+                }
+                WasmLocal::FnTableEnv { .. } => {
+                    return Err(WasmCodegenError::UnsupportedExpr(
+                        "closure local cannot be used as a bare value; use in call position only"
+                            .into(),
+                    ));
+                }
+            }
             Ok(())
         }
         IRExpr::Global(_, _) => Err(WasmCodegenError::UnsupportedExpr(
@@ -604,9 +882,31 @@ fn emit_expr(
                 return Ok(());
             }
 
+            // Closure call via call_indirect
+            if let IRExpr::Local(slot, _) = callee.as_ref() {
+                if let Some(WasmLocal::FnTableEnv {
+                    fn_idx_local,
+                    env_ptr_local,
+                    wrapper_type_idx,
+                }) = slot_map.get(slot).copied()
+                {
+                    func.instruction(&Instruction::LocalGet(env_ptr_local));
+                    for arg in args {
+                        emit_expr(arg, ctx, slot_map, func)?;
+                    }
+                    func.instruction(&Instruction::LocalGet(fn_idx_local));
+                    func.instruction(&Instruction::CallIndirect {
+                        type_index: wrapper_type_idx,
+                        table_index: 0,
+                    });
+                    return Ok(());
+                }
+            }
+
             let IRExpr::Global(fn_global_idx, _) = callee.as_ref() else {
                 return Err(WasmCodegenError::UnsupportedExpr(
-                    "only direct global function calls are supported in wasm MVP".into(),
+                    "only direct global function calls or closure calls are supported in wasm MVP"
+                        .into(),
                 ));
             };
             let Some(global) = ctx.globals.get(*fn_global_idx as usize) else {
@@ -714,22 +1014,24 @@ fn build_wasm_function(
     fn_def: &crate::middle::ir::IRFnDef,
     ctx: &WasmCodegenCtx<'_>,
 ) -> Result<Function, WasmCodegenError> {
+    let (slot_map, local_decls) = plan_wasm_locals(fn_def, ctx)?;
+    let mut func = Function::new(local_decls);
+    emit_expr(&fn_def.body, ctx, &slot_map, &mut func)?;
+    func.instruction(&Instruction::End);
+    Ok(func)
+}
+
+fn plan_wasm_locals(
+    fn_def: &crate::middle::ir::IRFnDef,
+    ctx: &WasmCodegenCtx<'_>,
+) -> Result<(HashMap<u16, WasmLocal>, Vec<(u32, ValType)>), WasmCodegenError> {
+    let closure_slots = scan_closure_bound_slots(&fn_def.body);
+
     let mut slot_map = HashMap::new();
     let mut next_local_idx = 0u32;
     for (slot, ty) in fn_def.param_tys.iter().enumerate() {
-        let Some(_) = single_wasm_valtype(ty)? else {
-            return Err(WasmCodegenError::UnsupportedType(format!(
-                "unit parameter not supported in wasm MVP: {}",
-                fn_def.name
-            )));
-        };
-        if favnir_type_to_wasm_params(ty)?.len() != 1 {
-            return Err(WasmCodegenError::UnsupportedType(format!(
-                "multi-value parameter not supported in wasm MVP: {ty:?}"
-            )));
-        }
-        slot_map.insert(slot as u16, next_local_idx);
-        next_local_idx += 1;
+        let local = wasm_local_for_type(ty, &mut next_local_idx)?;
+        slot_map.insert(slot as u16, local);
     }
 
     let mut local_types = HashMap::new();
@@ -742,24 +1044,65 @@ fn build_wasm_function(
         if (slot as usize) < fn_def.param_count {
             continue;
         }
+
+        if let Some(&global_idx) = closure_slots.get(&slot) {
+            let wrapper_type_idx = ctx
+                .closure_wrapper_type_idx
+                .get(&global_idx)
+                .copied()
+                .unwrap_or(0);
+            let fn_idx_local = next_local_idx;
+            let env_ptr_local = next_local_idx + 1;
+            next_local_idx += 2;
+            let local = WasmLocal::FnTableEnv {
+                fn_idx_local,
+                env_ptr_local,
+                wrapper_type_idx,
+            };
+            slot_map.insert(slot, local);
+            local_decls.push((1, ValType::I32));
+            local_decls.push((1, ValType::I32));
+            continue;
+        }
+
         let ty = local_types.get(&slot).expect("slot from key set");
-        let Some(wasm_ty) = single_wasm_valtype(ty)? else {
-            return Err(WasmCodegenError::UnsupportedType(format!(
-                "unit local not supported in wasm MVP: slot {slot}"
-            )));
-        };
-        slot_map.insert(slot, next_local_idx);
-        next_local_idx += 1;
-        local_decls.push((1, wasm_ty));
+        let local = wasm_local_for_type(ty, &mut next_local_idx)?;
+        slot_map.insert(slot, local);
+        append_local_decls(local, ty, &mut local_decls)?;
     }
 
-    let mut func = Function::new(local_decls);
-    emit_expr(&fn_def.body, ctx, &slot_map, &mut func)?;
-    func.instruction(&Instruction::End);
-    Ok(func)
+    Ok((slot_map, local_decls))
+}
+
+fn append_local_decls(
+    local: WasmLocal,
+    ty: &Type,
+    local_decls: &mut Vec<(u32, ValType)>,
+) -> Result<(), WasmCodegenError> {
+    match local {
+        WasmLocal::Single(_) => {
+            let wasm_ty = single_wasm_valtype(ty)?.expect("single local must have value type");
+            local_decls.push((1, wasm_ty));
+        }
+        WasmLocal::StringPtrLen(_, _) => {
+            local_decls.push((1, ValType::I32));
+            local_decls.push((1, ValType::I32));
+        }
+        WasmLocal::FnTableEnv { .. } => {
+            local_decls.push((1, ValType::I32)); // fn_idx
+            local_decls.push((1, ValType::I32)); // env_ptr
+        }
+    }
+    Ok(())
 }
 
 pub fn wasm_codegen_program(ir: &IRProgram) -> Result<Vec<u8>, WasmCodegenError> {
+    // Collect closure info: global_idx → (fn_idx, captures_count)
+    let closure_info = collect_closure_info(ir);
+    let mut sorted_closures: Vec<(u16, (usize, usize))> =
+        closure_info.iter().map(|(&k, &v)| (k, v)).collect();
+    sorted_closures.sort_by_key(|(k, _)| *k);
+
     let used_builtin_names = collect_used_builtins(ir);
     let imports = host_imports()
         .iter()
@@ -767,8 +1110,29 @@ pub fn wasm_codegen_program(ir: &IRProgram) -> Result<Vec<u8>, WasmCodegenError>
         .filter(|(name, _)| used_builtin_names.contains(*name))
         .collect::<Vec<_>>();
     let import_kinds = imports.iter().map(|(_, kind)| *kind).collect::<Vec<_>>();
-    let (type_section, fn_to_type_idx) = build_type_section(ir, &import_kinds)?;
+    let (mut type_section, fn_to_type_idx, bump_alloc_type_idx) =
+        build_type_section(ir, &import_kinds)?;
     let (data_bytes, str_to_offset) = collect_string_literals(ir);
+
+    // Register wrapper types for each closure and build index maps.
+    // Wrapper signature: (env_ptr: i32, actual_params: i64...) -> return_ty
+    let mut next_type_idx =
+        imports.len() as u32 + ir.fns.len() as u32 + 1; // after bump_alloc type
+    let mut closure_wrapper_type_idx: HashMap<u16, u32> = HashMap::new();
+    let mut closure_table_idx: HashMap<u16, u32> = HashMap::new();
+    for (table_elem_idx, (global_idx, (fn_idx, captures_count))) in
+        sorted_closures.iter().enumerate()
+    {
+        let fn_def = &ir.fns[*fn_idx];
+        let actual_params = fn_def.param_count.saturating_sub(*captures_count);
+        let mut wrapper_params = vec![ValType::I32]; // env_ptr
+        wrapper_params.extend(std::iter::repeat(ValType::I64).take(actual_params));
+        let return_results = favnir_type_to_wasm_results(&fn_def.return_ty)?;
+        type_section.ty().function(wrapper_params, return_results);
+        closure_wrapper_type_idx.insert(*global_idx, next_type_idx);
+        closure_table_idx.insert(*global_idx, table_elem_idx as u32);
+        next_type_idx += 1;
+    }
 
     let mut import_section = ImportSection::new();
     let mut builtin_to_wasm_idx = HashMap::new();
@@ -788,13 +1152,19 @@ pub fn wasm_codegen_program(ir: &IRProgram) -> Result<Vec<u8>, WasmCodegenError>
         .enumerate()
         .map(|(idx, _)| (idx, imports.len() as u32 + idx as u32))
         .collect::<HashMap<_, _>>();
+    let bump_alloc_fn_idx = imports.len() as u32 + ir.fns.len() as u32;
+    // Wrapper functions are placed after bump_alloc in the function index space.
+    let wrapper_base_wasm_idx = bump_alloc_fn_idx + 1;
 
     let ctx = WasmCodegenCtx {
         fn_to_wasm_idx,
         builtin_to_wasm_idx,
+        bump_alloc_fn_idx,
         str_to_offset,
         globals: &ir.globals,
         fns: &ir.fns,
+        closure_table_idx,
+        closure_wrapper_type_idx,
     };
 
     let mut function_section = FunctionSection::new();
@@ -806,9 +1176,44 @@ pub fn wasm_codegen_program(ir: &IRProgram) -> Result<Vec<u8>, WasmCodegenError>
         function_section.function(type_idx);
         code_section.function(&build_wasm_function(fn_def, &ctx)?);
     }
+    function_section.function(bump_alloc_type_idx);
+    code_section.function(&build_bump_alloc_function());
+
+    // Emit closure wrapper functions.
+    for (global_idx, (fn_idx, captures_count)) in &sorted_closures {
+        let wrapper_type_idx = *ctx.closure_wrapper_type_idx.get(global_idx).unwrap();
+        function_section.function(wrapper_type_idx);
+        let fn_def = &ir.fns[*fn_idx];
+        let original_wasm_idx = *ctx.fn_to_wasm_idx.get(fn_idx).unwrap();
+        code_section
+            .function(&build_closure_wrapper_function(fn_def, *captures_count, original_wasm_idx));
+    }
+
+    // Table and element sections for closures.
+    let has_closures = !sorted_closures.is_empty();
+    let mut table_section = TableSection::new();
+    let mut element_section = ElementSection::new();
+    if has_closures {
+        table_section.table(TableType {
+            element_type: RefType::FUNCREF,
+            table64: false,
+            minimum: sorted_closures.len() as u64,
+            maximum: None,
+            shared: false,
+        });
+        let wrapper_indices: Vec<u32> = (0..sorted_closures.len() as u32)
+            .map(|i| wrapper_base_wasm_idx + i)
+            .collect();
+        element_section.active(
+            None, // MVP encoding: table 0
+            &ConstExpr::i32_const(0),
+            Elements::Functions(wrapper_indices.as_slice().into()),
+        );
+    }
 
     let mut export_section = ExportSection::new();
     let mut memory_section = MemorySection::new();
+    let global_section = build_heap_ptr_global_section();
     memory_section.memory(MemoryType {
         minimum: 1,
         maximum: None,
@@ -835,19 +1240,23 @@ pub fn wasm_codegen_program(ir: &IRProgram) -> Result<Vec<u8>, WasmCodegenError>
     let has_data = !data_bytes.is_empty();
     let mut data_section = DataSection::new();
     if has_data {
-        data_section.active(
-            0,
-            &ConstExpr::i32_const(0),
-            data_bytes,
-        );
+        data_section.active(0, &ConstExpr::i32_const(0), data_bytes);
     }
 
+    // Assemble module following WASM section ordering spec.
     let mut module = Module::new();
     module.section(&type_section);
     module.section(&import_section);
     module.section(&function_section);
+    if has_closures {
+        module.section(&table_section);
+    }
     module.section(&memory_section);
+    module.section(&global_section);
     module.section(&export_section);
+    if has_closures {
+        module.section(&element_section);
+    }
     module.section(&code_section);
     if has_data {
         module.section(&data_section);
@@ -860,8 +1269,9 @@ mod tests {
     use super::{
         build_type_section, build_wasm_function, collect_local_types, collect_local_types_stmt,
         collect_string_literals, collect_used_builtins, ensure_supported_main_signature,
-        favnir_type_to_wasm_params, favnir_type_to_wasm_results, wasm_codegen_program,
-        HostImport, WasmCodegenCtx, WasmCodegenError,
+        favnir_type_to_wasm_params, favnir_type_to_wasm_results, plan_wasm_locals,
+        wasm_codegen_program, wasm_local_for_type, build_bump_alloc_function,
+        build_heap_ptr_global_section, HostImport, WasmCodegenCtx, WasmCodegenError, WasmLocal,
     };
     use crate::ast::{Effect, Lit};
     use crate::frontend::parser::Parser;
@@ -890,13 +1300,11 @@ mod tests {
     }
 
     #[test]
-    fn wasm_string_return_is_w001() {
-        let err = favnir_type_to_wasm_results(&Type::String).unwrap_err();
+    fn wasm_string_return_is_ptr_len_pair() {
         assert_eq!(
-            err,
-            WasmCodegenError::UnsupportedType("String as return type".into())
+            favnir_type_to_wasm_results(&Type::String).unwrap(),
+            vec![ValType::I32, ValType::I32]
         );
-        assert_eq!(err.code(), "W001");
     }
 
     #[test]
@@ -905,6 +1313,80 @@ mod tests {
             favnir_type_to_wasm_params(&Type::String).unwrap(),
             vec![ValType::I32, ValType::I32]
         );
+    }
+
+    #[test]
+    fn wasm_local_for_string_uses_ptr_len_pair() {
+        let mut next = 0u32;
+        let local = wasm_local_for_type(&Type::String, &mut next).unwrap();
+        assert_eq!(local, WasmLocal::StringPtrLen(0, 1));
+        assert_eq!(next, 2);
+    }
+
+    #[test]
+    fn wasm_local_for_int_uses_single_slot() {
+        let mut next = 4u32;
+        let local = wasm_local_for_type(&Type::Int, &mut next).unwrap();
+        assert_eq!(local, WasmLocal::Single(4));
+        assert_eq!(next, 5);
+    }
+
+    fn make_empty_ctx<'a>(globals: &'a [IRGlobal], fns: &'a [IRFnDef]) -> WasmCodegenCtx<'a> {
+        WasmCodegenCtx {
+            fn_to_wasm_idx: HashMap::new(),
+            builtin_to_wasm_idx: HashMap::new(),
+            bump_alloc_fn_idx: 0,
+            str_to_offset: HashMap::new(),
+            globals,
+            fns,
+            closure_table_idx: HashMap::new(),
+            closure_wrapper_type_idx: HashMap::new(),
+        }
+    }
+
+    #[test]
+    fn plan_wasm_locals_maps_string_param_to_ptr_len_pair() {
+        let ctx = make_empty_ctx(&[], &[]);
+        let (slot_map, local_decls) = plan_wasm_locals(
+            &IRFnDef {
+                name: "greet".into(),
+                param_count: 1,
+                param_tys: vec![Type::String],
+                local_count: 1,
+                effects: vec![],
+                return_ty: Type::Unit,
+                body: IRExpr::Lit(Lit::Unit, Type::Unit),
+            },
+            &ctx,
+        )
+        .unwrap();
+        assert_eq!(slot_map.get(&0), Some(&WasmLocal::StringPtrLen(0, 1)));
+        assert!(local_decls.is_empty());
+    }
+
+    #[test]
+    fn plan_wasm_locals_places_string_local_after_scalar_param() {
+        let ctx = make_empty_ctx(&[], &[]);
+        let (slot_map, local_decls) = plan_wasm_locals(
+            &IRFnDef {
+                name: "main".into(),
+                param_count: 1,
+                param_tys: vec![Type::Int],
+                local_count: 2,
+                effects: vec![],
+                return_ty: Type::Unit,
+                body: IRExpr::Block(
+                    vec![IRStmt::Bind(1, IRExpr::Lit(Lit::Str("hi".into()), Type::String))],
+                    Box::new(IRExpr::Lit(Lit::Unit, Type::Unit)),
+                    Type::Unit,
+                ),
+            },
+            &ctx,
+        )
+        .unwrap();
+        assert_eq!(slot_map.get(&0), Some(&WasmLocal::Single(0)));
+        assert_eq!(slot_map.get(&1), Some(&WasmLocal::StringPtrLen(1, 2)));
+        assert_eq!(local_decls, vec![(1, ValType::I32), (1, ValType::I32)]);
     }
 
     #[test]
@@ -957,12 +1439,16 @@ mod tests {
         let ctx = WasmCodegenCtx {
             fn_to_wasm_idx,
             builtin_to_wasm_idx,
+            bump_alloc_fn_idx: 99,
             str_to_offset,
             globals: &globals,
             fns: &[],
+            closure_table_idx: HashMap::new(),
+            closure_wrapper_type_idx: HashMap::new(),
         };
         assert_eq!(ctx.fn_to_wasm_idx.get(&0), Some(&3));
         assert_eq!(ctx.builtin_to_wasm_idx.get("IO.println"), Some(&1));
+        assert_eq!(ctx.bump_alloc_fn_idx, 99);
         assert_eq!(ctx.str_to_offset.get("hello"), Some(&0));
         assert_eq!(ctx.globals.len(), 1);
     }
@@ -1033,12 +1519,30 @@ mod tests {
                 body: IRExpr::Lit(crate::ast::Lit::Unit, Type::Unit),
             }],
         };
-        let (section, fn_map) =
+        let (section, fn_map, bump_type_idx) =
             build_type_section(&ir, &[HostImport::IoPrintln, HostImport::IoPrintlnInt]).unwrap();
         let mut module = Module::new();
         module.section(&section);
         assert!(!module.finish().is_empty());
         assert_eq!(fn_map.get(&0), Some(&2));
+        assert_eq!(bump_type_idx, 3);
+    }
+
+    #[test]
+    fn heap_ptr_global_section_encodes_mut_i32_at_64k() {
+        let section = build_heap_ptr_global_section();
+        let mut module = Module::new();
+        module.section(&section);
+        let bytes = module.finish();
+        assert!(!bytes.is_empty());
+    }
+
+    #[test]
+    fn bump_alloc_function_encodes() {
+        let func = build_bump_alloc_function();
+        let mut bytes = Vec::new();
+        func.encode(&mut bytes);
+        assert!(!bytes.is_empty());
     }
 
     #[test]
@@ -1047,9 +1551,12 @@ mod tests {
         let ctx = WasmCodegenCtx {
             fn_to_wasm_idx: HashMap::new(),
             builtin_to_wasm_idx: HashMap::new(),
+            bump_alloc_fn_idx: 0,
             str_to_offset: HashMap::new(),
             globals: &globals,
             fns: &[],
+            closure_table_idx: HashMap::new(),
+            closure_wrapper_type_idx: HashMap::new(),
         };
         let func = build_wasm_function(
             &IRFnDef {
@@ -1456,7 +1963,7 @@ public fn main() -> Unit !Io {
     }
 
     #[test]
-    fn wasm_w001_string_return() {
+    fn wasm_string_return_function_module_is_valid() {
         let source = r#"
 public fn greet() -> String {
     "hi"
@@ -1466,10 +1973,66 @@ public fn main() -> Unit !Io {
     IO.println("ok")
 }
 "#;
-        let program = Parser::parse_str(source, "wasm_w001_string_return.fav").expect("parse");
+        let program = Parser::parse_str(source, "wasm_string_return_module.fav").expect("parse");
+        let ir = compile_program(&program);
+        let bytes = wasm_codegen_program(&ir).unwrap();
+        let engine = Engine::default();
+        wasmtime::Module::new(&engine, &bytes).unwrap();
+    }
+
+    #[test]
+    fn wasm_string_identity_function_module_is_valid() {
+        let source = r#"
+public fn id(name: String) -> String {
+    name
+}
+
+public fn main() -> Unit !Io {
+    IO.println(id("Favnir"))
+}
+"#;
+        let program = Parser::parse_str(source, "wasm_string_identity.fav").expect("parse");
+        let ir = compile_program(&program);
+        let bytes = wasm_codegen_program(&ir).unwrap();
+        let engine = Engine::default();
+        wasmtime::Module::new(&engine, &bytes).unwrap();
+    }
+
+    #[test]
+    fn wasm_string_bind_and_print_module_is_valid() {
+        let source = r#"
+public fn main() -> Unit !Io {
+    bind s <- "hi";
+    IO.println(s)
+}
+"#;
+        let program = Parser::parse_str(source, "wasm_string_bind_print.fav").expect("parse");
+        let ir = compile_program(&program);
+        let bytes = wasm_codegen_program(&ir).unwrap();
+        let engine = Engine::default();
+        wasmtime::Module::new(&engine, &bytes).unwrap();
+    }
+
+    #[test]
+    fn wasm_w002_string_if_else_result() {
+        let source = r#"
+public fn choose(flag: Bool) -> String {
+    if flag {
+        "a"
+    } else {
+        "b"
+    }
+}
+
+public fn main() -> Unit !Io {
+    IO.println("ok")
+}
+"#;
+        let program = Parser::parse_str(source, "wasm_w002_string_if_else_result.fav").expect("parse");
         let ir = compile_program(&program);
         let err = wasm_codegen_program(&ir).unwrap_err();
-        assert_eq!(err.code(), "W001");
+        assert_eq!(err.code(), "W002");
+        assert!(err.to_string().contains("multi-value block result"));
     }
 
     #[test]
@@ -1496,5 +2059,82 @@ public fn main() -> Int !Io {
         let ir = compile_program(&program);
         let err = wasm_codegen_program(&ir).unwrap_err();
         assert_eq!(err.code(), "W003");
+    }
+
+    // ── Phase 3: closure tests ──────────────────────────────────────────────
+
+    #[test]
+    fn wasm_closure_codegen_produces_valid_module() {
+        // `bind f <- |x| x + 1; f(5)` — closure with no captures
+        let source = r#"
+public fn main() -> Unit !Io {
+    bind f <- |x| x + 1;
+    IO.println_int(f(5))
+}
+"#;
+        let program = Parser::parse_str(source, "closure_direct.fav").expect("parse");
+        let ir = compile_program(&program);
+        let bytes = wasm_codegen_program(&ir).unwrap();
+        assert!(bytes.starts_with(&[0x00, 0x61, 0x73, 0x6d]));
+        let engine = Engine::default();
+        wasmtime::Module::new(&engine, &bytes).unwrap();
+    }
+
+    #[test]
+    fn wasm_closure_capture_produces_valid_module() {
+        // closure captures an outer variable
+        let source = r#"
+public fn main() -> Unit !Io {
+    bind n <- 10;
+    bind add_n <- |x| x + n;
+    IO.println_int(add_n(5))
+}
+"#;
+        let program = Parser::parse_str(source, "closure_capture.fav").expect("parse");
+        let ir = compile_program(&program);
+        let bytes = wasm_codegen_program(&ir).unwrap();
+        assert!(bytes.starts_with(&[0x00, 0x61, 0x73, 0x6d]));
+        let engine = Engine::default();
+        wasmtime::Module::new(&engine, &bytes).unwrap();
+    }
+
+    #[test]
+    fn wasm_closure_exec_returns_correct_result() {
+        use wasmtime::{Engine, Linker, Store};
+
+        let source = r#"
+public fn main() -> Unit !Io {
+    bind f <- |x| x + 1;
+    IO.println_int(f(5))
+}
+"#;
+        let program = Parser::parse_str(source, "closure_exec.fav").expect("parse");
+        let ir = compile_program(&program);
+        let bytes = wasm_codegen_program(&ir).unwrap();
+
+        let engine = Engine::default();
+        let mut store = Store::new(&engine, ());
+        let module = wasmtime::Module::new(&engine, &bytes).unwrap();
+        let mut linker = Linker::new(&engine);
+
+        let printed: std::sync::Arc<std::sync::Mutex<Option<i64>>> =
+            std::sync::Arc::new(std::sync::Mutex::new(None));
+        let printed_clone = printed.clone();
+        linker
+            .func_wrap("fav_host", "io_println_int", move |v: i64| {
+                *printed_clone.lock().unwrap() = Some(v);
+            })
+            .unwrap();
+        linker
+            .func_wrap("fav_host", "io_println", |_ptr: i32, _len: i32| {})
+            .unwrap();
+
+        let instance = linker.instantiate(&mut store, &module).unwrap();
+        let main = instance
+            .get_typed_func::<(), ()>(&mut store, "main")
+            .unwrap();
+        main.call(&mut store, ()).unwrap();
+
+        assert_eq!(*printed.lock().unwrap(), Some(6)); // f(5) = 5 + 1 = 6
     }
 }

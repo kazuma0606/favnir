@@ -1,9 +1,31 @@
 #![allow(dead_code)]
 
 // Favnir fav.toml parser (minimal)
-// Only handles the [rune] section with name / version / src keys.
+// Handles [rune] and [dependencies] sections.
 
 use std::path::{Path, PathBuf};
+
+/// A single dependency entry in `[dependencies]`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DependencySpec {
+    /// `name = { path = "..." }` — local path dependency.
+    Path { name: String, path: String },
+    /// `name = { registry = "local", version = "..." }` — local registry dependency.
+    Registry {
+        name: String,
+        registry: String,
+        version: String,
+    },
+}
+
+impl DependencySpec {
+    pub fn name(&self) -> &str {
+        match self {
+            DependencySpec::Path { name, .. } => name,
+            DependencySpec::Registry { name, .. } => name,
+        }
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct FavToml {
@@ -11,6 +33,8 @@ pub struct FavToml {
     pub version: String,
     /// Source root directory (relative to fav.toml). Defaults to ".".
     pub src: String,
+    /// Dependencies declared in `[dependencies]`.
+    pub dependencies: Vec<DependencySpec>,
 }
 
 impl FavToml {
@@ -46,37 +70,80 @@ fn parse_fav_toml(content: &str) -> FavToml {
     let mut name = String::new();
     let mut version = String::new();
     let mut src = ".".to_string();
-    let mut in_rune = false;
+    let mut dependencies = Vec::new();
+    let mut section = "";
 
     for line in content.lines() {
         let trimmed = line.trim();
-        // skip comments and blank lines
         if trimmed.is_empty() || trimmed.starts_with('#') {
             continue;
         }
         if trimmed == "[rune]" {
-            in_rune = true;
+            section = "rune";
+            continue;
+        }
+        if trimmed == "[dependencies]" {
+            section = "dependencies";
             continue;
         }
         if trimmed.starts_with('[') {
-            in_rune = false;
+            section = "";
             continue;
         }
-        if !in_rune {
-            continue;
+        match section {
+            "rune" => {
+                if let Some((key, val)) = parse_kv(trimmed) {
+                    match key {
+                        "name"    => name    = val.to_string(),
+                        "version" => version = val.to_string(),
+                        "src"     => src     = val.to_string(),
+                        _         => {}
+                    }
+                }
+            }
+            "dependencies" => {
+                // name = { path = "..." }  or  name = { registry = "local", version = "..." }
+                if let Some(dep) = parse_dep_line(trimmed) {
+                    dependencies.push(dep);
+                }
+            }
+            _ => {}
         }
-        // key = "value"
-        if let Some((key, val)) = parse_kv(trimmed) {
-            match key {
-                "name"    => name    = val.to_string(),
-                "version" => version = val.to_string(),
-                "src"     => src     = val.to_string(),
-                _         => {}
+    }
+
+    FavToml { name, version, src, dependencies }
+}
+
+/// Parse a dependency line: `name = { key = "val", ... }`
+fn parse_dep_line(line: &str) -> Option<DependencySpec> {
+    let (dep_name, rest) = line.split_once('=')?;
+    let dep_name = dep_name.trim().to_string();
+    let inner = rest.trim().trim_start_matches('{').trim_end_matches('}');
+    let mut path_val: Option<String> = None;
+    let mut registry_val: Option<String> = None;
+    let mut version_val: Option<String> = None;
+
+    for part in inner.split(',') {
+        let part = part.trim();
+        if let Some((k, v)) = part.split_once('=') {
+            let k = k.trim();
+            let v = v.trim().trim_matches('"').to_string();
+            match k {
+                "path"     => path_val     = Some(v),
+                "registry" => registry_val = Some(v),
+                "version"  => version_val  = Some(v),
+                _          => {}
             }
         }
     }
 
-    FavToml { name, version, src }
+    if let Some(path) = path_val {
+        Some(DependencySpec::Path { name: dep_name, path })
+    } else if let (Some(registry), Some(version)) = (registry_val, version_val) {
+        Some(DependencySpec::Registry { name: dep_name, registry, version })
+    } else {
+        None
+    }
 }
 
 /// Parse `key = "value"` or `key = value` (unquoted).
@@ -145,5 +212,62 @@ name = "real"
 version = "1.0.0"
 "#);
         assert_eq!(t.name, "real");
+    }
+
+    #[test]
+    fn test_path_dependency_parsed() {
+        let t = parse(r#"
+[rune]
+name = "myapp"
+version = "1.0.0"
+
+[dependencies]
+mylib = { path = "../mylib" }
+"#);
+        assert_eq!(t.dependencies.len(), 1);
+        assert_eq!(
+            t.dependencies[0],
+            DependencySpec::Path {
+                name: "mylib".into(),
+                path: "../mylib".into()
+            }
+        );
+    }
+
+    #[test]
+    fn test_registry_dependency_parsed() {
+        let t = parse(r#"
+[rune]
+name = "myapp"
+version = "1.0.0"
+
+[dependencies]
+utils = { registry = "local", version = "0.1.0" }
+"#);
+        assert_eq!(t.dependencies.len(), 1);
+        assert_eq!(
+            t.dependencies[0],
+            DependencySpec::Registry {
+                name: "utils".into(),
+                registry: "local".into(),
+                version: "0.1.0".into()
+            }
+        );
+    }
+
+    #[test]
+    fn test_multiple_dependencies_parsed() {
+        let t = parse(r#"
+[rune]
+name = "myapp"
+version = "1.0.0"
+
+[dependencies]
+libA = { path = "../libA" }
+libB = { registry = "local", version = "2.0.0" }
+"#);
+        assert_eq!(t.dependencies.len(), 2);
+        assert_eq!(t.dependencies[0].name(), "libA");
+        assert_eq!(t.dependencies[1].name(), "libB");
     }
 }

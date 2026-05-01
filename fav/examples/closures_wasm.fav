@@ -1,0 +1,10 @@
+public fn main() -> Unit !Io {
+    bind add1 <- |x| x + 1;
+    bind double <- |x| x * 2;
+    bind n <- 10;
+    bind add_n <- |x| x + n;
+
+    IO.println_int(add1(5))
+    IO.println_int(double(3))
+    IO.println_int(add_n(7))
+}

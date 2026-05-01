@@ -359,6 +359,7 @@ impl std::fmt::Display for TypeError {
 pub struct Checker {
     env: TyEnv,
     pub errors: Vec<TypeError>,
+    pub type_at: HashMap<Span, Type>,
     /// User-defined type bodies, for field and variant lookup.
     type_defs: HashMap<String, TypeBody>,
     /// Effects declared on the current fn/trf being checked.
@@ -386,10 +387,11 @@ pub struct Checker {
 }
 
 impl Checker {
-    fn new() -> Self {
+    pub fn new() -> Self {
         Checker {
             env: TyEnv::new(),
             errors: Vec::new(),
+            type_at: HashMap::new(),
             type_defs: HashMap::new(),
             current_effects: Vec::new(),
             resolver: None,
@@ -412,6 +414,7 @@ impl Checker {
         Checker {
             env: TyEnv::new(),
             errors: Vec::new(),
+            type_at: HashMap::new(),
             type_defs: HashMap::new(),
             current_effects: Vec::new(),
             resolver: Some(resolver),
@@ -456,6 +459,10 @@ impl Checker {
             self.check_item(item);
         }
         std::mem::take(&mut self.errors)
+    }
+
+    fn remember_type(&mut self, span: &Span, ty: &Type) {
+        self.type_at.insert(span.clone(), ty.clone());
     }
 
     /// W001: warn if `namespace` declaration doesn't match the derived module path.
@@ -1180,17 +1187,21 @@ impl Checker {
     fn check_expr(&mut self, expr: &Expr) -> Type {
         match expr {
             // literals (4-15)
-            Expr::Lit(lit, _) => match lit {
+            Expr::Lit(lit, span) => {
+                let ty = match lit {
                 Lit::Int(_)   => Type::Int,
                 Lit::Float(_) => Type::Float,
                 Lit::Str(_)   => Type::String,
                 Lit::Bool(_)  => Type::Bool,
                 Lit::Unit     => Type::Unit,
-            },
+                };
+                self.remember_type(span, &ty);
+                ty
+            }
 
             // identifier (4-15)
             Expr::Ident(name, span) => {
-                match self.env.lookup(name).cloned() {
+                let ty = match self.env.lookup(name).cloned() {
                     Some(ty) => {
                         self.check_symbol_visibility(name, span);
                         ty
@@ -1199,26 +1210,31 @@ impl Checker {
                         self.type_error("E002", format!("undefined: `{}`", name), span);
                         Type::Error
                     }
-                }
+                };
+                self.remember_type(span, &ty);
+                ty
             }
 
             // field access: expr.field (4-15)
             Expr::FieldAccess(obj, field, span) => {
                 let obj_ty = self.check_expr(obj);
-                self.resolve_field_access(&obj_ty, field, span)
+                let ty = self.resolve_field_access(&obj_ty, field, span);
+                self.remember_type(span, &ty);
+                ty
             }
 
             // function application (4-15)
             Expr::Apply(func, args, span) => {
                 // Check for built-in namespaced calls first.
                 if let Some(ty) = self.check_builtin_apply(func, args, span) {
+                    self.remember_type(span, &ty);
                     return ty;
                 }
 
                 let func_ty = self.check_expr(func);
                 let arg_tys: Vec<Type> = args.iter().map(|a| self.check_expr(a)).collect();
 
-                match &func_ty {
+                let ty = match &func_ty {
                     Type::Fn(params, ret) => {
                         // Collect type variables from params and ret.
                         let mut vars: HashSet<String> = HashSet::new();
@@ -1260,24 +1276,24 @@ impl Checker {
                                 ),
                                 span,
                             );
-                            return Type::Error;
-                        }
-
-                        // Unify each param with corresponding arg type.
-                        let mut subst = Subst::empty();
-                        for (p, a) in inst_params.iter().zip(arg_tys.iter()) {
-                            let ap = subst.apply(p);
-                            let aa = subst.apply(a);
-                            match unify(&ap, &aa) {
-                                Ok(s) => subst = s.compose(subst),
-                                Err(msg) => {
-                                    let code = if msg.contains("infinite type") { "E019" } else { "E018" };
-                                    self.type_error(code, msg, span);
-                                    return Type::Error;
+                            Type::Error
+                        } else {
+                            // Unify each param with corresponding arg type.
+                            let mut subst = Subst::empty();
+                            for (p, a) in inst_params.iter().zip(arg_tys.iter()) {
+                                let ap = subst.apply(p);
+                                let aa = subst.apply(a);
+                                match unify(&ap, &aa) {
+                                    Ok(s) => subst = s.compose(subst),
+                                    Err(msg) => {
+                                        let code = if msg.contains("infinite type") { "E019" } else { "E018" };
+                                        self.type_error(code, msg, span);
+                                        return Type::Error;
+                                    }
                                 }
                             }
+                            subst.apply(&inst_ret)
                         }
-                        subst.apply(&inst_ret)
                     }
                     Type::Arrow(input, output) => {
                         let arg_ty = arg_tys.first().cloned().unwrap_or(Type::Unit);
@@ -1316,7 +1332,9 @@ impl Checker {
                         );
                         Type::Error
                     }
-                }
+                };
+                self.remember_type(span, &ty);
+                ty
             }
 
             // pipeline: a |> b |> c  (4-14)
@@ -2317,7 +2335,7 @@ mod tests {
         let fav_path = src_dir.join(filename.replace('/', std::path::MAIN_SEPARATOR_STR));
         if let Some(p) = fav_path.parent() { std::fs::create_dir_all(p).unwrap(); }
         std::fs::write(&fav_path, src_content).unwrap();
-        let toml = FavToml { name: "t".into(), version: "0.1.0".into(), src: "src".into() };
+        let toml = FavToml { name: "t".into(), version: "0.1.0".into(), src: "src".into(), dependencies: vec![] };
         let resolver = Arc::new(Mutex::new(Resolver::new(Some(toml), Some(root))));
         (resolver, dir)
     }
@@ -2371,7 +2389,7 @@ mod tests {
         let src_dir = root.join("src");
         std::fs::create_dir_all(&src_dir).unwrap();
         std::fs::write(src_dir.join("cycle.fav"), "public fn f() -> Unit { () }").unwrap();
-        let toml = FavToml { name: "t".into(), version: "0.1.0".into(), src: "src".into() };
+        let toml = FavToml { name: "t".into(), version: "0.1.0".into(), src: "src".into(), dependencies: vec![] };
         let mut resolver = Resolver::new(Some(toml), Some(root));
         // Simulate a mid-load state: "cycle" is already in the loading set
         let span = Span::new("test", 0, 0, 1, 1);

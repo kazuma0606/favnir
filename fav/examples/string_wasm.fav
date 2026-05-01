@@ -1,0 +1,7 @@
+public fn greet(name: String) -> String {
+    name
+}
+
+public fn main() -> Unit !Io {
+    IO.println(greet("Favnir"))
+}

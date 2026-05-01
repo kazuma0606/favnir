@@ -249,7 +249,7 @@ mod tests {
         }
         std::fs::write(&fav_path, src_content).unwrap();
 
-        let toml = FavToml { name: "test".into(), version: "0.1.0".into(), src: "src".into() };
+        let toml = FavToml { name: "test".into(), version: "0.1.0".into(), src: "src".into(), dependencies: vec![] };
         let resolver = Resolver::new(Some(toml), Some(root));
         (resolver, dir)   // dir must outlive the test
     }
@@ -329,7 +329,7 @@ mod tests {
     #[test]
     fn test_module_not_found() {
         let dir = tempdir().unwrap();
-        let toml = FavToml { name: "t".into(), version: "0.1.0".into(), src: "src".into() };
+        let toml = FavToml { name: "t".into(), version: "0.1.0".into(), src: "src".into(), dependencies: vec![] };
         let mut r = Resolver::new(Some(toml), Some(dir.path().to_path_buf()));
         let mut errors = Vec::new();
         let span = Span::new("test", 0, 0, 1, 1);

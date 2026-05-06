@@ -60,6 +60,8 @@ impl Formatter {
             Item::FnDef(fd)            => self.fn_def(fd),
             Item::TrfDef(td)           => self.trf_def(td),
             Item::FlwDef(fd)           => self.flw_def(fd),
+            Item::InterfaceDecl(id)    => self.interface_decl(id),
+            Item::InterfaceImplDecl(d) => self.interface_impl_decl(d),
             Item::CapDef(cd)           => self.cap_def(cd),
             Item::ImplDef(id)          => self.impl_def(id),
             Item::TestDef(td)          => self.test_def(td),
@@ -150,6 +152,46 @@ impl Formatter {
 
     fn flw_def(&mut self, fd: &FlwDef) -> String {
         format!("flw {} = {}", fd.name, fd.steps.join(" |> "))
+    }
+
+    fn interface_decl(&mut self, id: &InterfaceDecl) -> String {
+        let vis = fmt_visibility(id.visibility.as_ref());
+        let super_part = id
+            .super_interface
+            .as_ref()
+            .map(|s| format!(" : {}", s))
+            .unwrap_or_default();
+        let methods: Vec<String> = id
+            .methods
+            .iter()
+            .map(|m| format!("    {}: {}", m.name, self.type_expr(&m.ty)))
+            .collect();
+        format!(
+            "{}interface {}{} {{\n{}\n}}",
+            vis,
+            id.name,
+            super_part,
+            methods.join("\n")
+        )
+    }
+
+    fn interface_impl_decl(&mut self, id: &InterfaceImplDecl) -> String {
+        let ifaces = id.interface_names.join(", ");
+        if id.is_auto {
+            format!("impl {} for {}", ifaces, id.type_name)
+        } else {
+            let methods: Vec<String> = id
+                .methods
+                .iter()
+                .map(|(name, expr)| format!("    {} = {}", name, self.expr(expr)))
+                .collect();
+            format!(
+                "impl {} for {} {{\n{}\n}}",
+                ifaces,
+                id.type_name,
+                methods.join("\n")
+            )
+        }
     }
 
     // ── CapDef ────────────────────────────────────────────────────────────────

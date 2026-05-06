@@ -26,7 +26,7 @@ pub enum Effect {
     Trace,
     /// `Emit<EventType>`
     Emit(String),
-    /// `Emit<A | B>` — result of composing multiple Emit effects
+    /// `Emit<A | B>`  Eresult of composing multiple Emit effects
     EmitUnion(Vec<String>),
 }
 
@@ -34,10 +34,10 @@ pub enum Effect {
 
 /// A type expression in source code.
 ///
-/// Named("List", [Named("Row", [], ..)], ..)  →  List<Row>
-/// Optional(Named("User", [], ..), ..)         →  User?
-/// Fallible(Named("User", [], ..), ..)         →  User!
-/// Arrow(A, B, ..)                             →  A -> B
+/// Named("List", [Named("Row", [], ..)], ..)  ↁE List<Row>
+/// Optional(Named("User", [], ..), ..)         ↁE User?
+/// Fallible(Named("User", [], ..), ..)         ↁE User!
+/// Arrow(A, B, ..)                             ↁE A -> B
 #[derive(Debug, Clone)]
 pub enum TypeExpr {
     Named(String, Vec<TypeExpr>, Span),
@@ -110,6 +110,7 @@ pub struct TypeDef {
     pub visibility: Option<Visibility>,
     pub name: String,
     pub type_params: Vec<String>,   // e.g. ["T", "U"] for type Pair<T, U>
+    pub with_interfaces: Vec<String>,
     pub body: TypeBody,
     pub span: Span,
 }
@@ -137,7 +138,7 @@ pub enum Lit {
 // ── Pattern (2-10) ────────────────────────────────────────────────────────────
 
 /// Field pattern inside `{ ... }`.
-/// `{ name }` is shorthand for `{ name: name }` — pattern is None in that case.
+/// `{ name }` is shorthand for `{ name: name }`  Epattern is None in that case.
 #[derive(Debug, Clone)]
 pub struct FieldPattern {
     pub name: String,
@@ -151,7 +152,7 @@ pub enum Pattern {
     Wildcard(Span),
     /// `42`, `"hi"`, `true`, `()`
     Lit(Lit, Span),
-    /// `user`  (plain name — binds the value)
+    /// `user`  (plain name  Ebinds the value)
     Bind(String, Span),
     /// `ok(p)` or `Guest` (no payload)
     Variant(String, Option<Box<Pattern>>, Span),
@@ -218,10 +219,10 @@ pub enum Expr {
     /// binary operators: +, -, *, /, ==, !=, <, >, <=, >=
     BinOp(BinOp, Box<Expr>, Box<Expr>, Span),
 
-    /// `TypeName { field: expr, ... }` — record construction
+    /// `TypeName { field: expr, ... }`  Erecord construction
     RecordConstruct(String, Vec<(String, Expr)>, Span),
 
-    /// `emit expr` — publish an event
+    /// `emit expr`  Epublish an event
     EmitExpr(Box<Expr>, Span),
 }
 
@@ -258,9 +259,9 @@ pub enum BinOp {
 pub enum Stmt {
     Bind(BindStmt),
     Expr(Expr),
-    /// `chain x <- expr` — monadic bind with early-exit on failure (v0.5.0)
+    /// `chain x <- expr`  Emonadic bind with early-exit on failure (v0.5.0)
     Chain(ChainStmt),
-    /// `yield expr;` — push a value into the enclosing collect block (v0.5.0)
+    /// `yield expr;`  Epush a value into the enclosing collect block (v0.5.0)
     Yield(YieldStmt),
 }
 
@@ -359,7 +360,36 @@ pub struct CapField {
     pub span: Span,
 }
 
-/// `cap Eq<T> = { equals: T -> T -> Bool }` — capability definition.
+/// A single method declaration inside an `interface`.
+#[derive(Debug, Clone)]
+pub struct InterfaceMethod {
+    pub name: String,
+    pub ty: TypeExpr,
+    pub span: Span,
+}
+
+/// `interface Show { show: Self -> String }`
+#[derive(Debug, Clone)]
+pub struct InterfaceDecl {
+    pub visibility: Option<Visibility>,
+    pub name: String,
+    pub super_interface: Option<String>,
+    pub methods: Vec<InterfaceMethod>,
+    pub span: Span,
+}
+
+/// `impl Show, Eq for UserRow { ... }` or auto-synthesized `impl Show for UserRow`.
+#[derive(Debug, Clone)]
+pub struct InterfaceImplDecl {
+    pub interface_names: Vec<String>,
+    pub type_name: String,
+    pub type_params: Vec<String>,
+    pub methods: Vec<(String, Expr)>,
+    pub is_auto: bool,
+    pub span: Span,
+}
+
+/// `cap Eq<T> = { equals: T -> T -> Bool }`  Ecapability definition.
 #[derive(Debug, Clone)]
 pub struct CapDef {
     pub visibility: Option<Visibility>,
@@ -369,7 +399,7 @@ pub struct CapDef {
     pub span: Span,
 }
 
-/// `impl Eq<Int> { fn equals(a: Int, b: Int) -> Bool { ... } }` — capability implementation.
+/// `impl Eq<Int> { fn equals(a: Int, b: Int) -> Bool { ... } }`  Ecapability implementation.
 #[derive(Debug, Clone)]
 pub struct ImplDef {
     pub cap_name: String,
@@ -396,7 +426,9 @@ pub enum Item {
     TrfDef(TrfDef),
     FlwDef(FlwDef),
     NamespaceDecl(String, Span),   // namespace data.users
-    UseDecl(Vec<String>, Span),    // use data.users.create → ["data","users","create"]
+    UseDecl(Vec<String>, Span),    // use data.users.create ↁE["data","users","create"]
+    InterfaceDecl(InterfaceDecl),
+    InterfaceImplDecl(InterfaceImplDecl),
     CapDef(CapDef),                // cap Eq<T> = { ... }
     ImplDef(ImplDef),              // impl Eq<Int> { ... }
     TestDef(TestDef),              // test "description" { ... }
@@ -411,6 +443,8 @@ impl Item {
             Item::FlwDef(f)           => &f.span,
             Item::NamespaceDecl(_, s) => s,
             Item::UseDecl(_, s)       => s,
+            Item::InterfaceDecl(d)     => &d.span,
+            Item::InterfaceImplDecl(d) => &d.span,
             Item::CapDef(c)           => &c.span,
             Item::ImplDef(i)          => &i.span,
             Item::TestDef(t)          => &t.span,

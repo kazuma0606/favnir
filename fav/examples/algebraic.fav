@@ -1,0 +1,42 @@
+-- Complex numbers with algebraic structure interfaces.
+-- Hand-written impls for Semigroup (addition), Monoid (zero), and Ring (multiplication).
+
+type Complex = { real: Int  imag: Int }
+
+impl Semigroup for Complex {
+    combine = |a b| Complex { real: a.real + b.real  imag: a.imag + b.imag }
+}
+
+impl Monoid for Complex {
+    empty = Complex { real: 0  imag: 0 }
+}
+
+impl Ring for Complex {
+    multiply = |a b| Complex {
+        real: a.real * b.real - a.imag * b.imag
+        imag: a.real * b.imag + a.imag * b.real
+    }
+}
+
+public fn main() -> Unit !Io {
+    bind z <- Complex { real: 2  imag: 3 }
+
+    -- (2+3i)^2 = (4-9) + (12)i = -5 + 12i
+    bind z2 <- Complex.ring.multiply(z, z)
+    IO.println("(2+3i)^2:")
+    IO.println_int(z2.real)
+    IO.println_int(z2.imag)
+
+    -- (2+3i) + (1+1i) = 3 + 4i
+    bind w <- Complex { real: 1  imag: 1 }
+    bind s <- Complex.semigroup.combine(z, w)
+    IO.println("(2+3i) + (1+1i):")
+    IO.println_int(s.real)
+    IO.println_int(s.imag)
+
+    -- identity: z + zero = z
+    bind zero <- Complex.monoid.empty
+    bind z3 <- Complex.semigroup.combine(z, zero)
+    IO.println_int(z3.real)
+    IO.println_int(z3.imag)
+}

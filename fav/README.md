@@ -14,10 +14,16 @@ cargo build --release
 
 ```
 fav run [--db <path>] [file]          — 型チェック後にプログラムを実行
-fav build [-o <out>] [file]           — .fvc アーティファクトをビルド
+fav build [-o <out>] [--target wasm] [file] — .fvc / .wasm アーティファクトをビルド
 fav exec [--db <path>] [--info] <fvc> — .fvc を VM で実行（または情報表示）
-fav check [file]                      — 型チェックのみ（実行しない）
+fav check [--no-warn] [file]          — 型チェックのみ（--no-warn で W010 等を抑制）
 fav explain [file]                    — 全トップレベル項目の型・エフェクトを表示
+fav fmt [--check] [file]              — コードフォーマット
+fav lint [file]                       — 静的解析（L002/L003/L004）
+fav test [file]                       — テスト実行（*.test.fav）
+fav lsp                               — LSP サーバー起動（stdin/stdout JSON-RPC）
+fav install                           — fav.toml の依存を解決して fav.lock を生成
+fav publish                           — ローカルレジストリへ公開
 fav help                              — ヘルプを表示
 ```
 
@@ -156,6 +162,69 @@ bind ok   <- User.eq.equals(alice, alice2)
 | `Eq`   | Int, Float, String, Bool | `equals: T -> T -> Bool` |
 | `Ord`  | Int, Float, String       | `compare: T -> T -> Int` |
 | `Show` | Int, Float, String, Bool | `show: T -> String`      |
+
+## Interface System (v1.1.0)
+
+v1.1.0 adds `interface` as the primary abstraction mechanism. Legacy `cap` still works for compatibility, but `fav check` now emits `W010` for it.
+
+### Interface declaration
+
+```favnir
+interface Show {
+    show: Self -> String
+}
+
+interface Eq {
+    eq: Self -> Self -> Bool
+}
+
+interface Ord : Eq {
+    compare: Self -> Self -> Int
+}
+```
+
+### Manual implementation
+
+```favnir
+type Point = { x: Int  y: Int }
+
+impl Show for Point {
+    show = |p| "Point"
+}
+```
+
+Runtime call shape stays namespace-oriented:
+
+```favnir
+Point.show.show(p)
+Int.ord.compare(1, 2)
+```
+
+### Auto-synthesis and `with`
+
+```favnir
+type UserRow with Show, Eq = { name: String  age: Int }
+```
+
+This is equivalent in intent to a record declaration plus:
+
+```favnir
+impl Show, Eq for UserRow
+```
+
+### Built-in interfaces
+
+v1.1.0 registers these built-ins in the checker:
+
+- `Show`, `Eq`, `Ord`
+- `Gen`
+- `Semigroup`, `Monoid`, `Group`, `Ring`, `Field`
+
+Examples:
+
+- `examples/interface_basic.fav`
+- `examples/interface_auto.fav`
+- `examples/algebraic.fav`
 
 ---
 
@@ -491,5 +560,8 @@ SQL パラメータには `?` を使い、Favnir の値（`Int`, `Float`, `Strin
 | `examples/chain.fav`                 | `chain` による Result / Option 伝播 (v0.5.0) |
 | `examples/collect.fav`              | `collect / yield` によるリスト構築 (v0.5.0) |
 | `examples/pipe_match.fav`           | `\|> match` + `where` ガードの組み合わせ (v0.5.0) |
+| `examples/interface_basic.fav`      | `interface` / 手書き `impl` の基本例 (v1.1.0) |
+| `examples/interface_auto.fav`       | `with` 糖衣構文と自動合成の例 (v1.1.0) |
+| `examples/algebraic.fav`            | `Ring` interface を使った代数演算の例 (v1.1.0) |
 
 > **v0.6.0**: 上記の全サンプルは `fav build` → `fav exec` でも実行できます。

@@ -56,6 +56,61 @@ fn format_diagnostic(source: &str, error: &crate::middle::checker::TypeError) ->
     )
 }
 
+fn format_warning(source: &str, warning: &crate::middle::checker::TypeWarning) -> String {
+    let span = &warning.span;
+    let line_num = span.line as usize;
+    let col = span.col as usize;
+    let token_len = if span.end > span.start { span.end - span.start } else { 1 };
+
+    let source_line = source.lines().nth(line_num.saturating_sub(1)).unwrap_or("");
+    let line_prefix = line_num.to_string();
+    let padding = " ".repeat(line_prefix.len());
+    let col_offset = " ".repeat(col.saturating_sub(1));
+    let max_len = source_line.len().saturating_sub(col.saturating_sub(1)).max(1);
+    let underline = "^".repeat(token_len.min(max_len).max(1));
+
+    format!(
+        "warning[{}]: {}\n  --> {}:{}:{}\n{} |\n{} | {}\n{} | {}{}",
+        warning.code, warning.message,
+        span.file, span.line, span.col,
+        padding,
+        line_prefix, source_line,
+        padding, col_offset, underline,
+    )
+}
+
+fn render_warnings(
+    source: &str,
+    warnings: &[crate::middle::checker::TypeWarning],
+    no_warn: bool,
+) -> Vec<String> {
+    if no_warn {
+        Vec::new()
+    } else {
+        warnings
+            .iter()
+            .map(|w| format_warning(source, w))
+            .collect()
+    }
+}
+
+fn check_single_file(
+    path: &str,
+) -> (
+    String,
+    Vec<crate::middle::checker::TypeError>,
+    Vec<crate::middle::checker::TypeWarning>,
+) {
+    let source = load_file(path);
+    let program = Parser::parse_str(&source, path).unwrap_or_else(|e| {
+        eprintln!("{}", e);
+        process::exit(1);
+    });
+    let mut checker = Checker::new();
+    let errors = checker.check_with_self(&program);
+    (source, errors, checker.warnings)
+}
+
 // ── file loading ──────────────────────────────────────────────────────────────
 
 fn load_file(path: &str) -> String {
@@ -114,7 +169,10 @@ fn load_all_items(
         // Add this file's items (excluding namespace/use declarations)
         for item in program.items {
             match &item {
-                ast::Item::NamespaceDecl(..) | ast::Item::UseDecl(..) => {}
+                ast::Item::NamespaceDecl(..)
+                | ast::Item::UseDecl(..)
+                | ast::Item::InterfaceDecl(..)
+                | ast::Item::InterfaceImplDecl(..) => {}
                 _ => all_items.push(item),
             }
         }
@@ -894,20 +952,18 @@ fn summarize_function_opcodes(function: &backend::artifact::FvcFunction) -> Stri
 
 // ── fav check ─────────────────────────────────────────────────────────────────
 
-pub fn cmd_check(file: Option<&str>) {
+pub fn cmd_check(file: Option<&str>, no_warn: bool) {
     if let Some(path) = file {
         // Single-file mode
-        let source = load_file(path);
-        let program = Parser::parse_str(&source, path).unwrap_or_else(|e| {
-            eprintln!("{}", e);
-            process::exit(1);
-        });
-        let errors = Checker::check_program(&program);
+        let (source, errors, warnings) = check_single_file(path);
         if errors.is_empty() {
             println!("{}: no errors found", path);
         } else {
             for e in &errors { eprintln!("{}", format_diagnostic(&source, e)); }
             process::exit(1);
+        }
+        for warning in render_warnings(&source, &warnings, no_warn) {
+            eprintln!("{}", warning);
         }
     } else {
         // Project mode
@@ -928,6 +984,7 @@ pub fn cmd_check(file: Option<&str>) {
         }
         let resolver = make_resolver(Some(toml), Some(root));
         let mut total_errors = 0;
+        let mut total_warnings = 0;
         for fav_file in &files {
             let path_str = fav_file.to_string_lossy().to_string();
             let source = load_file(&path_str);
@@ -943,9 +1000,18 @@ pub fn cmd_check(file: Option<&str>) {
                 for e in &errors { eprintln!("{}", format_diagnostic(&source, e)); }
                 total_errors += errors.len();
             }
+            if !no_warn {
+                for w in &checker.warnings {
+                    eprintln!("{}", format_warning(&source, w));
+                }
+                total_warnings += checker.warnings.len();
+            }
         }
         if total_errors > 0 {
             process::exit(1);
+        }
+        if !no_warn && total_warnings > 0 {
+            eprintln!("\ncheck: {} warning{}", total_warnings, if total_warnings == 1 { "" } else { "s" });
         }
     }
 }
@@ -1080,7 +1146,7 @@ mod tests {
         artifact_info_string,
         build_artifact, build_wasm_artifact, exec_artifact_main, exec_artifact_main_with_emits,
         exec_wasm_bytes, load_and_check_program, read_artifact_from_path, read_wasm_from_path,
-        write_artifact_to_path, write_wasm_to_path,
+        render_warnings, check_single_file, write_artifact_to_path, write_wasm_to_path,
     };
     use crate::frontend::parser::Parser;
     use std::path::PathBuf;
@@ -1487,6 +1553,102 @@ public fn main() -> Unit !Io {
     }
 
     #[test]
+    fn example_cap_sort_build_and_exec() {
+        let source_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("examples")
+            .join("cap_sort.fav");
+        let source_str = source_path.to_string_lossy().to_string();
+        let (program, loaded_path) = load_and_check_program(Some(&source_str));
+        assert_eq!(loaded_path, source_str);
+
+        let artifact = build_artifact(&program);
+        exec_artifact_main(&artifact, None).expect("exec artifact");
+    }
+
+    #[test]
+    fn example_cap_user_build_and_exec() {
+        let source_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("examples")
+            .join("cap_user.fav");
+        let source_str = source_path.to_string_lossy().to_string();
+        let (program, loaded_path) = load_and_check_program(Some(&source_str));
+        assert_eq!(loaded_path, source_str);
+
+        let artifact = build_artifact(&program);
+        exec_artifact_main(&artifact, None).expect("exec artifact");
+    }
+
+    #[test]
+    fn example_interface_basic_build_and_exec() {
+        let source_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("examples")
+            .join("interface_basic.fav");
+        let source_str = source_path.to_string_lossy().to_string();
+        let (program, loaded_path) = load_and_check_program(Some(&source_str));
+        assert_eq!(loaded_path, source_str);
+
+        let artifact = build_artifact(&program);
+        exec_artifact_main(&artifact, None).expect("exec artifact");
+    }
+
+    #[test]
+    fn example_interface_auto_build_and_exec() {
+        let source_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("examples")
+            .join("interface_auto.fav");
+        let source_str = source_path.to_string_lossy().to_string();
+        let (program, loaded_path) = load_and_check_program(Some(&source_str));
+        assert_eq!(loaded_path, source_str);
+
+        let artifact = build_artifact(&program);
+        exec_artifact_main(&artifact, None).expect("exec artifact");
+    }
+
+    #[test]
+    fn example_algebraic_build_and_exec() {
+        let source_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("examples")
+            .join("algebraic.fav");
+        let source_str = source_path.to_string_lossy().to_string();
+        let (program, loaded_path) = load_and_check_program(Some(&source_str));
+        assert_eq!(loaded_path, source_str);
+
+        let artifact = build_artifact(&program);
+        exec_artifact_main(&artifact, None).expect("exec artifact");
+    }
+
+    #[test]
+    fn cap_example_check_emits_w010_but_no_errors() {
+        let source_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("examples")
+            .join("cap_user.fav");
+        let source_str = source_path.to_string_lossy().to_string();
+
+        let (source, errors, warnings) = check_single_file(&source_str);
+        assert!(errors.is_empty(), "expected no check errors");
+        assert!(!warnings.is_empty(), "expected deprecated cap warning");
+
+        let rendered = render_warnings(&source, &warnings, false);
+        assert!(rendered.iter().any(|w| w.contains("warning[W010]")));
+        assert!(rendered.iter().any(|w| w.contains("deprecated")));
+    }
+
+    #[test]
+    fn cap_example_check_no_warn_suppresses_warning_output() {
+        let source_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("examples")
+            .join("cap_user.fav");
+        let source_str = source_path.to_string_lossy().to_string();
+
+        let (source, errors, warnings) = check_single_file(&source_str);
+        assert!(errors.is_empty(), "expected no check errors");
+        assert!(!warnings.is_empty(), "expected deprecated cap warning");
+
+        let rendered = render_warnings(&source, &warnings, true);
+        assert!(rendered.is_empty(), "expected --no-warn equivalent to suppress warnings");
+    }
+
+    #[test]
     fn wasm_exec_bytes_rejects_db_path_with_w004() {
         let hello = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("examples")
@@ -1816,6 +1978,25 @@ impl ExplainPrinter {
                 Item::FlwDef(fd) => {
                     println!("{:<col_vis$} {:<col_name$} {:<col_type$} {:<col_eff$} -",
                         "", format!("flw {}", fd.name), fd.steps.join(" |> "), "-");
+                }
+                Item::InterfaceDecl(id) => {
+                    let kind = if let Some(sup) = &id.super_interface {
+                        format!("interface : {}", sup)
+                    } else {
+                        "interface".to_string()
+                    };
+                    println!("{:<col_vis$} {:<col_name$} {:<col_type$} {:<col_eff$} -",
+                        format_visibility(&id.visibility),
+                        format!("interface {}", id.name),
+                        kind,
+                        "-");
+                }
+                Item::InterfaceImplDecl(id) => {
+                    println!("{:<col_vis$} {:<col_name$} {:<col_type$} {:<col_eff$} -",
+                        "",
+                        format!("impl {}", id.interface_names.join(", ")),
+                        id.type_name.clone(),
+                        "-");
                 }
                 Item::CapDef(cd) => {
                     println!("{:<col_vis$} {:<col_name$} {:<col_type$} {:<col_eff$} -",

@@ -1,0 +1,26 @@
+interface Show {
+    show: Self -> String
+}
+
+interface Eq {
+    eq: Self -> Self -> Bool
+}
+
+type Point = { x: Int  y: Int }
+
+impl Show for Point {
+    show = |p| String.concat("Point(", String.concat(String.from_int(p.x), String.concat(", ", String.concat(String.from_int(p.y), ")"))))
+}
+
+impl Eq for Point {
+    eq = |a b| a.x == b.x && a.y == b.y
+}
+
+public fn main() -> Unit !Io {
+    bind p1 <- Point { x: 3  y: 4 }
+    bind p2 <- Point { x: 3  y: 4 }
+    bind p3 <- Point { x: 1  y: 2 }
+    IO.println(Point.show.show(p1))
+    IO.println(Bool.show.show(Point.eq.eq(p1, p2)))
+    IO.println(Bool.show.show(Point.eq.eq(p1, p3)))
+}

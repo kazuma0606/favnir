@@ -70,6 +70,92 @@ public fn greet(name: String) -> Unit !Io {
 - rune boundaries
 - workspace boundaries
 
+## 5a. Interface System (v1.1.0)
+
+`interface` キーワードで型の操作契約を宣言する。旧 `cap` の後継。
+
+### 宣言
+
+```fav
+interface Show {
+    show: Self -> String
+}
+
+interface Eq {
+    eq: Self -> Self -> Bool
+}
+
+interface Ord : Eq {          -- Eq を前提とする
+    compare: Self -> Self -> Int
+}
+```
+
+`Self` は実装対象の型を指す特殊キーワード。
+`interface Ord : Eq` は「Ord を実装するには Eq も必要」を意味する。
+
+### 手書き実装（`impl`）
+
+```fav
+impl Show for Int {
+    show = |x| Int.to_string(x)
+}
+
+impl Eq for UserRow {
+    eq = |a b| a.id == b.id
+}
+```
+
+### 自動合成（body-less `impl`）
+
+```fav
+-- UserRow の全フィールドが Show / Eq を持つ場合のみ有効
+impl Show, Eq for UserRow
+```
+
+### `with` 糖衣構文
+
+```fav
+type UserRow with Show, Eq = { name: String  age: Int }
+```
+
+上記は `type UserRow = { ... }` + `impl Show, Eq for UserRow` と等価。
+
+### 明示的な値渡し（暗黙解決なし）
+
+```fav
+fn sort<T>(items: List<T>, ord: Ord<T>) -> List<T> { ... }
+
+bind sorted <- sort(users, User.ord)
+--                         ^^^^^^^^ Ord<User> の実装値を明示
+```
+
+### 組み込み interface
+
+| interface | 対応型 | メソッド |
+|---|---|---|
+| `Show` | Int / Float / Bool / String | `show: Self -> String` |
+| `Eq` | Int / Float / Bool / String | `eq: Self -> Self -> Bool` |
+| `Ord` | Int / Float / String | `compare: Self -> Self -> Int` |
+| `Gen` | Int / Float / Bool / String | `gen: Int? -> Self` |
+| `Semigroup` | Int / Float | `combine: Self -> Self -> Self` |
+| `Monoid` | Int / Float | `empty: Self` |
+| `Group` | Int / Float | `inverse: Self -> Self` |
+| `Ring` | Int / Float | `multiply: Self -> Self -> Self` |
+| `Field` | Float | `divide: Self -> Self -> Self!` |
+
+### `cap` との後方互換
+
+旧 `cap` キーワードは v1.1.0 でも動作するが、`fav check` が W010 警告を出す。
+`fav check --no-warn` で W010 を抑制できる。
+
+```
+warning[W010]: `cap` is deprecated. Use `interface` instead.
+  --> src/main.fav:1:1
+  |
+1 | cap Show { ... }
+  | ^^^ deprecated keyword
+```
+
 ## 6. Standard Library Surface
 
 - IO
@@ -120,10 +206,15 @@ public fn greet(name: String) -> Unit !Io {
 | E027 | Guard expression is not Bool |
 | E032–E035 | Artifact read/write errors |
 | E036 | File effect missing |
+| E041 | 未定義の interface を `impl` しようとした |
+| E042 | `impl` のメソッド型が interface シグネチャと不一致 |
+| E043 | 値渡し時または `impl` 時に要求 interface が未実装 |
+| E044 | 自動合成時にフィールドが interface を未実装 |
 | W001 | WASM: unsupported type |
 | W002 | WASM: unsupported expression |
 | W003 | WASM: main signature must be `() -> Unit !Io` |
 | W004 | `--db` cannot be used with `.wasm` artifacts |
+| W010 | `cap` キーワードの使用（deprecated、v1.1.0〜） |
 
 ## 9. Backward Compatibility Policy
 
@@ -133,7 +224,7 @@ Starting with v1.0.0, the Favnir language surface is considered stable:
 - **Error codes** E001–E040 and W001–W004 are stable; new codes are always additive.
 - **CLI commands** (`run`, `build`, `exec`, `check`, `fmt`, `lint`, `test`, `explain`, `lsp`, `install`, `publish`) maintain their flag signatures within v1.x.
 - **`.fvc` artifact format** version `0x06` is forward-readable by v1.x `exec`.
-- **WASM codegen**: currently supports `Int`, `Float`, `Bool`, `String`, `Unit` scalars and closures that capture `Int`/`Float`/`Bool` values. `List<T>` and `Map<V>` in WASM are planned for v1.1.0.
+- **WASM codegen**: currently supports `Int`, `Float`, `Bool`, `String`, `Unit` scalars and closures that capture `Int`/`Float`/`Bool` values. `List<T>` and `Map<V>` in WASM are future work.
 
 Breaking changes (if any) will be gated behind a major version bump.
 

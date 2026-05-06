@@ -306,7 +306,7 @@ rows |> validate(UserSchema)
 
 - 書きやすくするための構文
 - 型付き合成を中核にしたものではない
-- Favnir の `stage / flow` ほど意味論の中心ではない
+- Favnir の `stage / seq` ほど意味論の中心ではない
 
 ## テスト
 
@@ -347,7 +347,7 @@ ForgeScript は、
 大きな差分は次の通り。
 
 - ForgeScript は `job` と `app` が中心
-- Favnir は `stage` と `flow` が中心
+- Favnir は `stage` と `seq` が中心
 - ForgeScript の pipe は補助構文
 - Favnir の pipe は型付き合成の中核
 - ForgeScript は `let` ベース

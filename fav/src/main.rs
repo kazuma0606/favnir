@@ -16,7 +16,7 @@ use driver::{cmd_run, cmd_build, cmd_exec, cmd_check, cmd_explain, cmd_test, cmd
 // 笏笏 help text (4-6) 笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏
 
 const HELP: &str = "\
-fav - Favnir language toolchain v1.0.0
+fav - Favnir language toolchain v1.1.0
 
 USAGE:
     fav <COMMAND> [OPTIONS] [FILE]
@@ -31,7 +31,9 @@ COMMANDS:
     exec [--db <path>] [--info] <artifact>
                   Execute a .fvc artifact by running its `main` function.
                   With --info, print artifact metadata instead of executing.
-    check [file]  Parse and type-check (no execution).
+    check [--no-warn] [file]
+                  Parse and type-check (no execution).
+                  With --no-warn, suppress warning output.
                   If <file> is omitted, checks all .fav files in the project.
     explain [file]
                   Show VIS / type / effect signatures of all top-level items.
@@ -173,8 +175,16 @@ fn main() {
         }
 
         Some("check") => {
-            let file = args.get(2).map(|s| s.as_str());
-            cmd_check(file);
+            let mut no_warn = false;
+            let mut file: Option<&str> = None;
+            let mut i = 2usize;
+            while i < args.len() {
+                match args[i].as_str() {
+                    "--no-warn" => { no_warn = true; i += 1; }
+                    other => { file = Some(other); i += 1; }
+                }
+            }
+            cmd_check(file, no_warn);
         }
 
         Some("explain") => {

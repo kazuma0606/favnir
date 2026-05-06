@@ -171,6 +171,7 @@ impl Parser {
             TokenKind::Type   => Ok(Item::TypeDef(self.parse_type_def(vis)?)),
             TokenKind::Fn     => Ok(Item::FnDef(self.parse_fn_def(vis)?)),
             TokenKind::Trf    => Ok(Item::TrfDef(self.parse_trf_def(vis)?)),
+            TokenKind::Interface => Ok(Item::InterfaceDecl(self.parse_interface_decl(vis)?)),
             TokenKind::Cap    => Ok(Item::CapDef(self.parse_cap_def(vis)?)),
             TokenKind::Impl   => {
                 if vis.is_some() {
@@ -179,7 +180,15 @@ impl Parser {
                         self.peek_span().clone(),
                     ));
                 }
-                Ok(Item::ImplDef(self.parse_impl_def()?))
+                let is_cap_style = matches!(
+                    self.tokens.get(self.pos + 2).map(|t| &t.kind),
+                    Some(TokenKind::LAngle)
+                );
+                if is_cap_style {
+                    Ok(Item::ImplDef(self.parse_impl_def()?))
+                } else {
+                    Ok(Item::InterfaceImplDecl(self.parse_interface_impl_decl()?))
+                }
             }
             TokenKind::Flw    => {
                 if vis.is_some() {
@@ -208,7 +217,7 @@ impl Parser {
                 self.peek_span().clone(),
             )),
             other => Err(ParseError::new(
-                format!("expected item (type/fn/trf/flw/cap/impl/test), got {:?}", other),
+                format!("expected item (type/fn/trf/flw/interface/cap/impl/test), got {:?}", other),
                 self.peek_span().clone(),
             )),
         }
@@ -284,6 +293,87 @@ impl Parser {
         })
     }
 
+    fn parse_interface_decl(&mut self, visibility: Option<Visibility>) -> Result<InterfaceDecl, ParseError> {
+        let start = self.peek_span().clone();
+        self.expect(&TokenKind::Interface)?;
+        let (name, _) = self.expect_ident()?;
+
+        let super_interface = if self.peek() == &TokenKind::Colon {
+            self.advance();
+            let (sup, _) = self.expect_ident()?;
+            Some(sup)
+        } else {
+            None
+        };
+
+        self.expect(&TokenKind::LBrace)?;
+        let mut methods = Vec::new();
+        while self.peek() != &TokenKind::RBrace && !self.at_end() {
+            let ms = self.peek_span().clone();
+            let (method_name, _) = self.expect_ident()?;
+            self.expect(&TokenKind::Colon)?;
+            let ty = self.parse_type_expr()?;
+            methods.push(InterfaceMethod {
+                name: method_name,
+                ty,
+                span: self.span_from(&ms),
+            });
+        }
+        self.expect(&TokenKind::RBrace)?;
+
+        Ok(InterfaceDecl {
+            visibility,
+            name,
+            super_interface,
+            methods,
+            span: self.span_from(&start),
+        })
+    }
+
+    fn parse_interface_impl_decl(&mut self) -> Result<InterfaceImplDecl, ParseError> {
+        let start = self.peek_span().clone();
+        self.expect(&TokenKind::Impl)?;
+        let (first_iface, _) = self.expect_ident()?;
+        let mut interface_names = vec![first_iface];
+        while self.peek() == &TokenKind::Comma {
+            self.advance();
+            let (iface, _) = self.expect_ident()?;
+            interface_names.push(iface);
+        }
+        self.expect(&TokenKind::For)?;
+        let (type_name, _) = self.expect_ident()?;
+
+        if self.peek() != &TokenKind::LBrace {
+            return Ok(InterfaceImplDecl {
+                interface_names,
+                type_name,
+                type_params: vec![],
+                methods: vec![],
+                is_auto: true,
+                span: self.span_from(&start),
+            });
+        }
+
+        self.expect(&TokenKind::LBrace)?;
+        let mut methods = Vec::new();
+        while self.peek() != &TokenKind::RBrace && !self.at_end() {
+            let (method_name, _) = self.expect_ident()?;
+            self.expect(&TokenKind::Eq)?;
+            let body = self.parse_expr()?;
+            methods.push((method_name, body));
+        }
+        self.expect(&TokenKind::RBrace)?;
+
+        Ok(InterfaceImplDecl {
+            interface_names,
+            type_name,
+            type_params: vec![],
+            methods,
+            is_auto: false,
+            span: self.span_from(&start),
+        })
+    }
+
     // ── test_def (v0.8.0) ────────────────────────────────────────────────────
 
     fn parse_test_def(&mut self) -> Result<TestDef, ParseError> {
@@ -316,6 +406,19 @@ impl Parser {
         self.expect(&TokenKind::Type)?;
         let (name, _) = self.expect_ident()?;
         let type_params = self.parse_type_params()?;
+        let with_interfaces = if self.peek() == &TokenKind::With {
+            self.advance();
+            let (first, _) = self.expect_ident()?;
+            let mut names = vec![first];
+            while self.peek() == &TokenKind::Comma {
+                self.advance();
+                let (iface, _) = self.expect_ident()?;
+                names.push(iface);
+            }
+            names
+        } else {
+            vec![]
+        };
         self.expect(&TokenKind::Eq)?;
 
         let body = if self.peek() == &TokenKind::LBrace {
@@ -331,7 +434,14 @@ impl Parser {
             ));
         };
 
-        Ok(TypeDef { visibility, name, type_params, body, span: self.span_from(&start) })
+        Ok(TypeDef {
+            visibility,
+            name,
+            type_params,
+            with_interfaces,
+            body,
+            span: self.span_from(&start),
+        })
     }
 
     /// Parse optional type parameters `<T, U, V>`.
@@ -1581,6 +1691,14 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_type_with_interfaces() {
+        let p = parse("type UserRow with Show, Eq = { name: String }");
+        let Item::TypeDef(td) = &p.items[0] else { panic!("expected TypeDef") };
+        assert_eq!(td.name, "UserRow");
+        assert_eq!(td.with_interfaces, vec!["Show", "Eq"]);
+    }
+
+    #[test]
     fn test_parse_generic_trf() {
         let p = parse("trf MapOpt<T, U>: Option<T> -> Option<U> = || { x }");
         let Item::TrfDef(td) = &p.items[0] else { panic!("expected TrfDef") };
@@ -1595,6 +1713,24 @@ mod tests {
         assert_eq!(cd.type_params, vec!["T"]);
         assert_eq!(cd.fields.len(), 1);
         assert_eq!(cd.fields[0].name, "equals");
+    }
+
+    #[test]
+    fn test_parse_interface_decl() {
+        let p = parse("interface Show { show: Self -> String }");
+        let Item::InterfaceDecl(id) = &p.items[0] else { panic!("expected InterfaceDecl") };
+        assert_eq!(id.name, "Show");
+        assert_eq!(id.methods.len(), 1);
+        assert_eq!(id.methods[0].name, "show");
+    }
+
+    #[test]
+    fn test_parse_interface_impl_decl() {
+        let p = parse("impl Show, Eq for UserRow");
+        let Item::InterfaceImplDecl(id) = &p.items[0] else { panic!("expected InterfaceImplDecl") };
+        assert_eq!(id.interface_names, vec!["Show", "Eq"]);
+        assert_eq!(id.type_name, "UserRow");
+        assert!(id.is_auto);
     }
 
     #[test]

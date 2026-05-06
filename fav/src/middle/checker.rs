@@ -28,13 +28,15 @@ pub enum Type {
     Trf(Box<Type>, Box<Type>, Vec<Effect>),
     /// User-defined named type (after lookup)
     Named(String, Vec<Type>),
-    /// Type variable — `T`, `U`, or fresh `$0`, `$1` (v0.4.0)
+    /// Type variable  E`T`, `U`, or fresh `$0`, `$1` (v0.4.0)
     Var(String),
-    /// Capability instance type — `Ord<Int>`, `Eq<String>` (v0.4.0)
+    /// Capability instance type  E`Ord<Int>`, `Eq<String>` (v0.4.0)
     Cap(String, Vec<Type>),
+    /// Interface instance type (v1.1.0)
+    Interface(String, Vec<Type>),
     /// Type is not yet known (monomorphic placeholder / built-in generic)
     Unknown,
-    /// Error recovery — suppress cascading errors
+    /// Error recovery  Esuppress cascading errors
     Error,
 }
 
@@ -58,6 +60,10 @@ impl Type {
                 ai.is_compatible(bi) && ao.is_compatible(bo)
             }
             (Type::Cap(n1, as1), Type::Cap(n2, as2)) => {
+                n1 == n2 && as1.len() == as2.len()
+                    && as1.iter().zip(as2).all(|(a, b)| a.is_compatible(b))
+            }
+            (Type::Interface(n1, as1), Type::Interface(n2, as2)) => {
                 n1 == n2 && as1.len() == as2.len()
                     && as1.iter().zip(as2).all(|(a, b)| a.is_compatible(b))
             }
@@ -96,7 +102,7 @@ impl Type {
                 format!("Trf<{}, {}{}>", i.display(), o.display(), eff)
             }
             Type::Named(n, args) if args.is_empty() => n.clone(),
-            // Named("Option", [T]) → display as T? to match Type::Option(T)
+            // Named("Option", [T]) ↁEdisplay as T? to match Type::Option(T)
             Type::Named(n, args) if n == "Option" && args.len() == 1 => {
                 format!("{}?", args[0].display())
             }
@@ -107,6 +113,11 @@ impl Type {
             Type::Var(name) => name.clone(),
             Type::Cap(name, args) if args.is_empty() => name.clone(),
             Type::Cap(name, args) => {
+                let s: Vec<_> = args.iter().map(|a| a.display()).collect();
+                format!("{}<{}>", name, s.join(", "))
+            }
+            Type::Interface(name, args) if args.is_empty() => name.clone(),
+            Type::Interface(name, args) => {
                 let s: Vec<_> = args.iter().map(|a| a.display()).collect();
                 format!("{}<{}>", name, s.join(", "))
             }
@@ -171,6 +182,7 @@ impl Subst {
             Type::Trf(i, o, fx)  => Type::Trf(Box::new(self.apply(i)), Box::new(self.apply(o)), fx.clone()),
             Type::Named(n, args) => Type::Named(n.clone(), args.iter().map(|a| self.apply(a)).collect()),
             Type::Cap(n, args)   => Type::Cap(n.clone(), args.iter().map(|a| self.apply(a)).collect()),
+            Type::Interface(n, args) => Type::Interface(n.clone(), args.iter().map(|a| self.apply(a)).collect()),
             _                    => ty.clone(),
         }
     }
@@ -204,6 +216,7 @@ pub fn occurs(var: &str, ty: &Type) -> bool {
         Type::Trf(i, o, _)   => occurs(var, i) || occurs(var, o),
         Type::Named(_, args) => args.iter().any(|a| occurs(var, a)),
         Type::Cap(_, args)   => args.iter().any(|a| occurs(var, a)),
+        Type::Interface(_, args) => args.iter().any(|a| occurs(var, a)),
         _                    => false,
     }
 }
@@ -212,7 +225,7 @@ pub fn occurs(var: &str, ty: &Type) -> bool {
 /// Returns a `Subst` that makes `t1` and `t2` equal, or an error string.
 pub fn unify(t1: &Type, t2: &Type) -> Result<Subst, String> {
     match (t1, t2) {
-        // Identical types — no work needed
+        // Identical types  Eno work needed
         (a, b) if a == b => Ok(Subst::empty()),
 
         // Type variables
@@ -258,14 +271,20 @@ pub fn unify(t1: &Type, t2: &Type) -> Result<Subst, String> {
                 Ok(s.compose(acc))
             })
         }
-        // Option<T> ↔ Named("Option", [T]) compatibility (phase 5 transition)
+        (Type::Interface(n1, as1), Type::Interface(n2, as2)) if n1 == n2 && as1.len() == as2.len() => {
+            as1.iter().zip(as2.iter()).try_fold(Subst::empty(), |acc, (a, b)| {
+                let s = unify(&acc.apply(a), &acc.apply(b))?;
+                Ok(s.compose(acc))
+            })
+        }
+        // Option<T> ↁENamed("Option", [T]) compatibility (phase 5 transition)
         (Type::Option(t), Type::Named(n, args)) if n == "Option" && args.len() == 1 => {
             unify(t, &args[0])
         }
         (Type::Named(n, args), Type::Option(t)) if n == "Option" && args.len() == 1 => {
             unify(&args[0], t)
         }
-        // Result<T,E> ↔ Named("Result", [T, E]) compatibility
+        // Result<T,E> ↁENamed("Result", [T, E]) compatibility
         (Type::Result(t, e), Type::Named(n, args)) if n == "Result" && args.len() == 2 => {
             let s1 = unify(t, &args[0])?;
             let s2 = unify(&s1.apply(e), &s1.apply(&args[1]))?;
@@ -282,15 +301,56 @@ pub fn unify(t1: &Type, t2: &Type) -> Result<Subst, String> {
 
 // ── CapScope / ImplScope (v0.4.0) ─────────────────────────────────────────────
 
-/// Registered capability definition: field names → type expressions (in type-param scope).
+/// Registered capability definition: field names ↁEtype expressions (in type-param scope).
 pub struct CapScope {
-    /// field name → field type expression (unresolved; requires substituting type_params)
+    /// field name ↁEfield type expression (unresolved; requires substituting type_params)
     pub fields: HashMap<String, TypeExpr>,
 }
 
-/// Registered implementation: method name → resolved type.
+/// Registered implementation: method name ↁEresolved type.
 pub struct ImplScope {
     pub methods: HashMap<String, Type>,
+}
+
+pub struct InterfaceDef {
+    pub super_interface: Option<String>,
+    pub methods: HashMap<String, Type>,
+}
+
+#[allow(dead_code)]
+pub struct InterfaceImplEntry {
+    pub methods: HashMap<String, Type>,
+    pub is_auto: bool,
+}
+
+pub struct InterfaceRegistry {
+    pub interfaces: HashMap<String, InterfaceDef>,
+    pub impls: HashMap<(String, String), InterfaceImplEntry>,
+}
+
+impl InterfaceRegistry {
+    pub fn new() -> Self {
+        Self { interfaces: HashMap::new(), impls: HashMap::new() }
+    }
+
+    pub fn register_interface(&mut self, name: String, super_interface: Option<String>, methods: HashMap<String, Type>) {
+        self.interfaces.insert(name, InterfaceDef { super_interface, methods });
+    }
+
+    pub fn register_impl(&mut self, interface_name: String, type_name: String, methods: HashMap<String, Type>, is_auto: bool) {
+        self.impls.insert((interface_name, type_name), InterfaceImplEntry { methods, is_auto });
+    }
+
+    pub fn is_implemented(&self, interface_name: &str, type_name: &str) -> bool {
+        self.impls.contains_key(&(interface_name.to_string(), type_name.to_string()))
+    }
+
+    pub fn lookup_method(&self, interface_name: &str, type_name: &str, method_name: &str) -> Option<&Type> {
+        self.impls
+            .get(&(interface_name.to_string(), type_name.to_string()))
+            .and_then(|entry| entry.methods.get(method_name))
+            .or_else(|| self.interfaces.get(interface_name).and_then(|def| def.methods.get(method_name)))
+    }
 }
 
 // ── TyEnv (4-3) ───────────────────────────────────────────────────────────────
@@ -354,11 +414,36 @@ impl std::fmt::Display for TypeError {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct TypeWarning {
+    pub code: &'static str,
+    pub message: String,
+    pub span: Span,
+}
+
+impl TypeWarning {
+    pub fn new(code: &'static str, message: impl Into<String>, span: Span) -> Self {
+        TypeWarning { code, message: message.into(), span }
+    }
+}
+
+impl std::fmt::Display for TypeWarning {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "warning[{}]: {}\n  --> {}:{}:{}",
+            self.code, self.message,
+            self.span.file, self.span.line, self.span.col
+        )
+    }
+}
+
 // ── Checker ───────────────────────────────────────────────────────────────────
 
 pub struct Checker {
     env: TyEnv,
     pub errors: Vec<TypeError>,
+    pub warnings: Vec<TypeWarning>,
     pub type_at: HashMap<Span, Type>,
     /// User-defined type bodies, for field and variant lookup.
     type_defs: HashMap<String, TypeBody>,
@@ -368,7 +453,7 @@ pub struct Checker {
     resolver: Option<Arc<Mutex<crate::middle::resolver::Resolver>>>,
     /// File being checked (for visibility enforcement).
     current_file: Option<PathBuf>,
-    /// Imported symbols: name → (type, visibility, source_file).
+    /// Imported symbols: name ↁE(type, visibility, source_file).
     imported: HashMap<String, (Type, Visibility, PathBuf)>,
     /// Type parameters in scope for the current fn/trf/type (v0.4.0).
     type_params: HashSet<String>,
@@ -376,8 +461,10 @@ pub struct Checker {
     fresh_counter: usize,
     /// Registered capability definitions (v0.4.0).
     caps: HashMap<String, CapScope>,
-    /// Registered implementations: (cap_name, type_key) → scope (v0.4.0).
+    /// Registered implementations: (cap_name, type_key) ↁEscope (v0.4.0).
     impls: HashMap<(String, String), ImplScope>,
+    /// Registered interfaces and their implementations (v1.1.0).
+    interface_registry: InterfaceRegistry,
     /// Expected type-parameter arity for user-defined generic types (v0.4.0).
     type_arity: HashMap<String, usize>,
     /// Chain context: the return type of the enclosing fn when it is Result/Option (v0.5.0).
@@ -391,6 +478,7 @@ impl Checker {
         Checker {
             env: TyEnv::new(),
             errors: Vec::new(),
+            warnings: Vec::new(),
             type_at: HashMap::new(),
             type_defs: HashMap::new(),
             current_effects: Vec::new(),
@@ -400,6 +488,7 @@ impl Checker {
             type_params: HashSet::new(),
             fresh_counter: 0,
             caps: HashMap::new(),
+            interface_registry: InterfaceRegistry::new(),
             impls: HashMap::new(),
             type_arity: HashMap::new(),
             chain_context: None,
@@ -414,6 +503,7 @@ impl Checker {
         Checker {
             env: TyEnv::new(),
             errors: Vec::new(),
+            warnings: Vec::new(),
             type_at: HashMap::new(),
             type_defs: HashMap::new(),
             current_effects: Vec::new(),
@@ -423,6 +513,7 @@ impl Checker {
             type_params: HashSet::new(),
             fresh_counter: 0,
             caps: HashMap::new(),
+            interface_registry: InterfaceRegistry::new(),
             impls: HashMap::new(),
             type_arity: HashMap::new(),
             chain_context: None,
@@ -534,7 +625,7 @@ impl Checker {
                     self.errors.push(TypeError::new(
                         "E013",
                         format!(
-                            "`use {}.{}`: no fav.toml found — cannot resolve modules in single-file mode",
+                            "`use {}.{}`: no fav.toml found  Ecannot resolve modules in single-file mode",
                             mod_path, sym
                         ),
                         Span::dummy(),
@@ -570,7 +661,7 @@ impl Checker {
                 if self.current_file.as_deref() != Some(source_file.as_path()) {
                     self.type_error(
                         "E015",
-                        format!("`{}` is private — cannot be referenced from another file", name),
+                        format!("`{}` is private  Ecannot be referenced from another file", name),
                         span,
                     );
                 }
@@ -580,6 +671,10 @@ impl Checker {
 
     fn type_error(&mut self, code: &'static str, msg: impl Into<String>, span: &Span) {
         self.errors.push(TypeError::new(code, msg, span.clone()));
+    }
+
+    fn type_warning(&mut self, code: &'static str, msg: impl Into<String>, span: &Span) {
+        self.warnings.push(TypeWarning::new(code, msg, span.clone()));
     }
 
     // ── built-in registration (4-4, 4-5) ─────────────────────────────────────
@@ -603,7 +698,9 @@ impl Checker {
         // Eq<T> = { equals: T -> T -> Bool }
         // Ord<T> = { compare: T -> T -> Int  equals: T -> T -> Bool }
         // Show<T> = { show: T -> String }
-        for cap_name in &["Eq", "Ord", "Show"] {
+        // Gen<T> = { gen: Int? -> T }
+        // Semigroup/Monoid/Group/Ring/Field are algebraic interfaces.
+        for cap_name in &["Eq", "Ord", "Show", "Gen", "Semigroup", "Monoid", "Group", "Ring", "Field"] {
             self.env.define(cap_name.to_string(), Type::Named(cap_name.to_string(), vec![]));
         }
 
@@ -642,6 +739,142 @@ impl Checker {
         }
         self.impls.insert(("Eq".into(),   "Bool".into()), mk_eq_scope(bool_ty));
         self.impls.insert(("Show".into(), "Bool".into()), mk_show_scope(bool_ty));
+        self.register_builtin_interfaces();
+    }
+
+    fn register_builtin_interfaces(&mut self) {
+        if self.interface_registry.interfaces.contains_key("Show") {
+            return;
+        }
+
+        let self_named = Type::Named("Self".into(), vec![]);
+
+        let mut show_methods = HashMap::new();
+        show_methods.insert(
+            "show".into(),
+            Type::Fn(vec![self_named.clone()], Box::new(Type::String)),
+        );
+        self.interface_registry
+            .register_interface("Show".into(), None, show_methods);
+
+        let mut eq_methods = HashMap::new();
+        eq_methods.insert(
+            "eq".into(),
+            Type::Fn(
+                vec![self_named.clone(), self_named.clone()],
+                Box::new(Type::Bool),
+            ),
+        );
+        self.interface_registry
+            .register_interface("Eq".into(), None, eq_methods);
+
+        let mut ord_methods = HashMap::new();
+        ord_methods.insert(
+            "compare".into(),
+            Type::Fn(
+                vec![self_named.clone(), self_named.clone()],
+                Box::new(Type::Int),
+            ),
+        );
+        self.interface_registry
+            .register_interface("Ord".into(), Some("Eq".into()), ord_methods);
+
+        let mut gen_methods = HashMap::new();
+        gen_methods.insert(
+            "gen".into(),
+            Type::Fn(
+                vec![Type::Option(Box::new(Type::Int))],
+                Box::new(self_named.clone()),
+            ),
+        );
+        self.interface_registry
+            .register_interface("Gen".into(), None, gen_methods);
+
+        let mut semigroup_methods = HashMap::new();
+        semigroup_methods.insert(
+            "combine".into(),
+            Type::Fn(
+                vec![self_named.clone(), self_named.clone()],
+                Box::new(self_named.clone()),
+            ),
+        );
+        self.interface_registry
+            .register_interface("Semigroup".into(), None, semigroup_methods);
+
+        let mut monoid_methods = HashMap::new();
+        monoid_methods.insert(
+            "empty".into(),
+            Type::Fn(vec![], Box::new(self_named.clone())),
+        );
+        self.interface_registry
+            .register_interface("Monoid".into(), Some("Semigroup".into()), monoid_methods);
+
+        let mut group_methods = HashMap::new();
+        group_methods.insert(
+            "inverse".into(),
+            Type::Fn(vec![self_named.clone()], Box::new(self_named.clone())),
+        );
+        self.interface_registry
+            .register_interface("Group".into(), Some("Monoid".into()), group_methods);
+
+        let mut ring_methods = HashMap::new();
+        ring_methods.insert(
+            "multiply".into(),
+            Type::Fn(
+                vec![self_named.clone(), self_named.clone()],
+                Box::new(self_named.clone()),
+            ),
+        );
+        self.interface_registry
+            .register_interface("Ring".into(), Some("Monoid".into()), ring_methods);
+
+        let mut field_methods = HashMap::new();
+        field_methods.insert(
+            "divide".into(),
+            Type::Fn(
+                vec![self_named.clone(), self_named.clone()],
+                Box::new(Type::Result(
+                    Box::new(self_named.clone()),
+                    Box::new(Type::Named("Error".into(), vec![])),
+                )),
+            ),
+        );
+        self.interface_registry
+            .register_interface("Field".into(), Some("Ring".into()), field_methods);
+
+        for (interface_name, type_name) in [
+            ("Show", "Int"),
+            ("Eq", "Int"),
+            ("Ord", "Int"),
+            ("Gen", "Int"),
+            ("Semigroup", "Int"),
+            ("Monoid", "Int"),
+            ("Group", "Int"),
+            ("Ring", "Int"),
+            ("Show", "Float"),
+            ("Eq", "Float"),
+            ("Ord", "Float"),
+            ("Gen", "Float"),
+            ("Semigroup", "Float"),
+            ("Monoid", "Float"),
+            ("Group", "Float"),
+            ("Ring", "Float"),
+            ("Field", "Float"),
+            ("Show", "String"),
+            ("Eq", "String"),
+            ("Ord", "String"),
+            ("Gen", "String"),
+            ("Show", "Bool"),
+            ("Eq", "Bool"),
+            ("Gen", "Bool"),
+        ] {
+            self.interface_registry.register_impl(
+                interface_name.into(),
+                type_name.into(),
+                HashMap::new(),
+                true,
+            );
+        }
     }
 
     // ── first-pass: register top-level names (4-6..4-9) ─────────────────────
@@ -736,8 +969,12 @@ impl Checker {
                         );
                     }
                 }
-                // namespace / use / test are handled elsewhere
-                Item::NamespaceDecl(..) | Item::UseDecl(..) | Item::TestDef(..) => {}
+                // namespace / use / test / interface are handled elsewhere
+                Item::NamespaceDecl(..)
+                | Item::UseDecl(..)
+                | Item::TestDef(..)
+                | Item::InterfaceDecl(..)
+                | Item::InterfaceImplDecl(..) => {}
             }
         }
     }
@@ -750,6 +987,8 @@ impl Checker {
             Item::FnDef(fd)   => self.check_fn_def(fd),
             Item::TrfDef(td)  => self.check_trf_def(td),
             Item::FlwDef(fd)  => self.check_flw_def(fd),
+            Item::InterfaceDecl(id) => self.check_interface_decl(id),
+            Item::InterfaceImplDecl(id) => self.check_interface_impl_decl(id),
             Item::CapDef(cd)  => self.check_cap_def(cd),
             Item::ImplDef(id) => self.check_impl_def(id),
             Item::TestDef(td) => self.check_test_def(td),
@@ -759,14 +998,207 @@ impl Checker {
 
     // ── type_def (4-6) ────────────────────────────────────────────────────────
 
-    fn check_type_def(&mut self, _td: &TypeDef) {
+    fn check_type_def(&mut self, td: &TypeDef) {
         // Type definitions are structurally valid if they parsed correctly.
         // Field types are resolved lazily during use.
+        for interface_name in &td.with_interfaces {
+            self.synthesize_interface_impl_for_type_def(td, interface_name, &td.span);
+        }
+    }
+
+    fn check_interface_decl(&mut self, id: &InterfaceDecl) {
+        if let Some(super_name) = &id.super_interface {
+            if !self.interface_registry.interfaces.contains_key(super_name) {
+                self.type_error("E041", format!("undefined super interface `{}`", super_name), &id.span);
+                return;
+            }
+        }
+
+        let mut methods = HashMap::new();
+        for method in &id.methods {
+            let ty = self.resolve_type_expr_with_self(&method.ty, Some(&Type::Named("Self".into(), vec![])));
+            methods.insert(method.name.clone(), ty);
+        }
+        self.interface_registry.register_interface(id.name.clone(), id.super_interface.clone(), methods);
+    }
+
+    fn check_interface_impl_decl(&mut self, id: &InterfaceImplDecl) {
+        let self_ty = Type::Named(id.type_name.clone(), vec![]);
+
+        for interface_name in &id.interface_names {
+            let Some(interface_def) = self.interface_registry.interfaces.get(interface_name) else {
+                self.type_error("E041", format!("undefined interface `{}`", interface_name), &id.span);
+                continue;
+            };
+            let super_interface = interface_def.super_interface.clone();
+            let expected_methods = interface_def.methods.clone();
+
+            if let Some(super_name) = &super_interface {
+                let satisfied_by_same_decl = id.interface_names.iter().any(|n| n == super_name);
+                let satisfied_by_prior_impl = self.interface_registry.is_implemented(super_name, &id.type_name);
+                if !satisfied_by_same_decl && !satisfied_by_prior_impl {
+                    self.type_error(
+                        "E043",
+                        format!(
+                            "interface `{}` requires super interface `{}` to be implemented for `{}`",
+                            interface_name, super_name, id.type_name
+                        ),
+                        &id.span,
+                    );
+                }
+            }
+
+            if id.is_auto {
+                self.synthesize_interface_impl_for_type_name(&id.type_name, interface_name, &id.span);
+                continue;
+            }
+
+            let mut provided = HashMap::new();
+            for (method_name, body) in &id.methods {
+                let body_ty = self.check_expr(body);
+                provided.insert(method_name.clone(), body_ty);
+            }
+
+            for expected_name in expected_methods.keys() {
+                if !provided.contains_key(expected_name) {
+                    self.type_error(
+                        "E042",
+                        format!("impl for `{}` is missing method `{}` required by interface `{}`", id.type_name, expected_name, interface_name),
+                        &id.span,
+                    );
+                }
+            }
+
+            for (method_name, body_ty) in &provided {
+                let Some(expected) = expected_methods.get(method_name) else {
+                    self.type_error(
+                        "E042",
+                        format!("method `{}` is not declared in interface `{}`", method_name, interface_name),
+                        &id.span,
+                    );
+                    continue;
+                };
+                let expected = self.substitute_self_in_type(expected, &self_ty);
+                if !body_ty.is_compatible(&expected) {
+                    self.type_error(
+                        "E042",
+                        format!(
+                            "method `{}` for `{}` has type `{}`, expected `{}`",
+                            method_name, id.type_name, body_ty.display(), expected.display()
+                        ),
+                        &id.span,
+                    );
+                }
+            }
+
+            self.interface_registry.register_impl(interface_name.clone(), id.type_name.clone(), provided, false);
+        }
+    }
+
+    fn synthesize_interface_impl_for_type_name(
+        &mut self,
+        type_name: &str,
+        interface_name: &str,
+        span: &Span,
+    ) {
+        let Some(body) = self.type_defs.get(type_name).cloned() else {
+            self.type_error(
+                "E044",
+                format!(
+                    "cannot auto-synthesize interface `{}` for `{}` without a local type definition",
+                    interface_name, type_name
+                ),
+                span,
+            );
+            return;
+        };
+        let td = TypeDef {
+            visibility: None,
+            name: type_name.to_string(),
+            type_params: vec![],
+            with_interfaces: vec![],
+            body,
+            span: span.clone(),
+        };
+        self.synthesize_interface_impl_for_type_def(&td, interface_name, span);
+    }
+
+    fn synthesize_interface_impl_for_type_def(
+        &mut self,
+        td: &TypeDef,
+        interface_name: &str,
+        span: &Span,
+    ) {
+        let Some(interface_def) = self.interface_registry.interfaces.get(interface_name) else {
+            self.type_error(
+                "E041",
+                format!("undefined interface `{}`", interface_name),
+                span,
+            );
+            return;
+        };
+
+        let super_interface = interface_def.super_interface.clone();
+        if let Some(super_name) = &super_interface {
+            if !self.interface_registry.is_implemented(super_name, &td.name) {
+                self.synthesize_interface_impl_for_type_def(td, super_name, span);
+                if !self.interface_registry.is_implemented(super_name, &td.name) {
+                    self.type_error(
+                        "E043",
+                        format!(
+                            "interface `{}` requires super interface `{}` to be implemented for `{}`",
+                            interface_name, super_name, td.name
+                        ),
+                        span,
+                    );
+                    return;
+                }
+            }
+        }
+
+        let fields = match &td.body {
+            TypeBody::Record(fields) => fields,
+            _ => {
+                self.type_error(
+                    "E044",
+                    format!(
+                        "auto-synthesis for interface `{}` is only supported on record types",
+                        interface_name
+                    ),
+                    span,
+                );
+                return;
+            }
+        };
+
+        for field in fields {
+            let field_ty = self.resolve_type_expr(&field.ty);
+            let field_key = field_ty.display();
+            if !self.interface_registry.is_implemented(interface_name, &field_key) {
+                self.type_error(
+                    "E044",
+                    format!(
+                        "field `{}` of `{}` does not implement interface `{}`",
+                        field.name, td.name, interface_name
+                    ),
+                    &field.span,
+                );
+                return;
+            }
+        }
+
+        self.interface_registry.register_impl(
+            interface_name.to_string(),
+            td.name.clone(),
+            HashMap::new(),
+            true,
+        );
     }
 
     // ── cap_def (v0.4.0) ──────────────────────────────────────────────────────
 
     fn check_cap_def(&mut self, cd: &CapDef) {
+        self.type_warning("W010", "`cap` is deprecated. Use `interface` instead.", &cd.span);
         // Validate that each field's type expression is well-formed in type_params scope.
         let saved_tp = std::mem::replace(
             &mut self.type_params,
@@ -781,6 +1213,7 @@ impl Checker {
     // ── impl_def (v0.4.0) ─────────────────────────────────────────────────────
 
     fn check_impl_def(&mut self, id: &ImplDef) {
+        self.type_warning("W010", "`cap`-style `impl` is deprecated. Use `impl Interface for Type` instead.", &id.span);
         // E020: cap must exist.
         if !self.caps.contains_key(&id.cap_name) {
             // Only error if it's not a built-in cap either.
@@ -1119,7 +1552,7 @@ impl Checker {
         let type_name = match scrutinee_ty {
             Type::Named(n, _) => n.clone(),
             Type::Option(inner) => {
-                // some(x) → inner type; none → Unit
+                // some(x) ↁEinner type; none ↁEUnit
                 if variant_name == "some" { return *inner.clone(); }
                 if variant_name == "none" { return Type::Unit; }
                 return Type::Unknown;
@@ -1140,7 +1573,7 @@ impl Checker {
                             Variant::Unit(_, _)         => Type::Unit,
                             Variant::Tuple(_, te, _)    => self.resolve_type_expr(te),
                             Variant::Record(_, _fields, _) => {
-                                // Record variant payload — keep as Named for field lookup
+                                // Record variant payload  Ekeep as Named for field lookup
                                 Type::Named(type_name.clone(), vec![])
                             }
                         };
@@ -1362,7 +1795,7 @@ impl Checker {
                                 self.type_error(
                                     "E003",
                                     format!(
-                                        "pipeline type mismatch: `{}` → `{}` (expected `{}`)",
+                                        "pipeline type mismatch: `{}` ↁE`{}` (expected `{}`)",
                                         current.display(), step_ty.display(), input.display()
                                     ),
                                     span,
@@ -1564,9 +1997,6 @@ impl Checker {
     // ── field access resolution ───────────────────────────────────────────────
 
     fn resolve_field_access(&mut self, obj_ty: &Type, field: &str, span: &Span) -> Type {
-        // Capitalised field name on a type name → cap instance lookup.
-        // e.g. `Int.eq` → look up impl ("Eq", "Int")
-        // Field name is lower-case; cap name is capitalised (Eq, Ord, Show).
         if let Type::Named(ty_name, _) = obj_ty {
             let cap_name = {
                 let mut s = field.to_string();
@@ -1575,10 +2005,19 @@ impl Checker {
                 }
                 s
             };
+            if self.interface_registry.is_implemented(&cap_name, ty_name) {
+                let target_ty = match ty_name.as_str() {
+                    "Bool" => Type::Bool,
+                    "Int" => Type::Int,
+                    "Float" => Type::Float,
+                    "String" => Type::String,
+                    _ => obj_ty.clone(),
+                };
+                return Type::Interface(cap_name, vec![target_ty]);
+            }
             if self.impls.contains_key(&(cap_name.clone(), ty_name.clone())) {
                 return Type::Cap(cap_name, vec![obj_ty.clone()]);
             }
-            // E021: cap exists but no impl for this type.
             if self.caps.contains_key(&cap_name)
                 || matches!(cap_name.as_str(), "Eq" | "Ord" | "Show")
             {
@@ -1590,7 +2029,13 @@ impl Checker {
                 return Type::Error;
             }
         }
-        // Cap instance field access: cap_val.method_name → Fn type
+        if let Type::Interface(interface_name, args) = obj_ty {
+            if let Some(target_ty) = args.first() {
+                if let Some(method_ty) = self.interface_registry.lookup_method(interface_name, &target_ty.display(), field) {
+                    return self.substitute_self_in_type(method_ty, target_ty);
+                }
+            }
+        }
         if let Type::Cap(cap_name, args) = obj_ty {
             if let Some(impl_scope) = args.first().and_then(|a| {
                 let key = (cap_name.clone(), a.display());
@@ -1602,14 +2047,12 @@ impl Checker {
             }
         }
         match obj_ty {
-            // Namespace placeholders — return Unknown; actual type resolved at Apply time.
             Type::Named(n, _) if matches!(n.as_str(),
                 "IO" | "List" | "String" | "Option" | "Result" |
                 "Db" | "Http" | "Map" | "Debug" | "Emit" | "Util" | "Trace" | "File" | "Json" | "Csv"
             ) => {
                 Type::Unknown
             }
-            // User-defined record
             Type::Named(_, _) => self.lookup_field_type(obj_ty, field),
             _ => Type::Unknown,
         }
@@ -1733,7 +2176,7 @@ impl Checker {
                 Some(Type::List(Box::new(elem)))
             }
             ("List", "fold") => {
-                // fold(items, init, f) → type of init
+                // fold(items, init, f) ↁEtype of init
                 let init_ty = arg_tys.get(1).cloned().unwrap_or(Type::Unknown);
                 Some(init_ty)
             }
@@ -1929,30 +2372,36 @@ impl Checker {
     // ── type expression resolution (4-18) ────────────────────────────────────
 
     /// Convert a `TypeExpr` (AST surface) into a `Type` (internal).
-    /// `T?` → `Option<T>`, `T!` → `Result<T, Error>`.
+    /// `T?` ↁE`Option<T>`, `T!` ↁE`Result<T, Error>`.
     pub fn resolve_type_expr(&self, te: &TypeExpr) -> Type {
+        self.resolve_type_expr_with_self(te, None)
+    }
+
+    pub fn resolve_type_expr_with_self(&self, te: &TypeExpr, self_ty: Option<&Type>) -> Type {
         match te {
             TypeExpr::Optional(inner, _) => {
-                Type::Option(Box::new(self.resolve_type_expr(inner)))
+                Type::Option(Box::new(self.resolve_type_expr_with_self(inner, self_ty)))
             }
             TypeExpr::Fallible(inner, _) => {
                 Type::Result(
-                    Box::new(self.resolve_type_expr(inner)),
+                    Box::new(self.resolve_type_expr_with_self(inner, self_ty)),
                     Box::new(Type::Named("Error".into(), vec![])),
                 )
             }
             TypeExpr::Arrow(a, b, _) => {
                 Type::Arrow(
-                    Box::new(self.resolve_type_expr(a)),
-                    Box::new(self.resolve_type_expr(b)),
+                    Box::new(self.resolve_type_expr_with_self(a, self_ty)),
+                    Box::new(self.resolve_type_expr_with_self(b, self_ty)),
                 )
             }
             TypeExpr::Named(name, args, _) => {
-                // If the name is an in-scope type parameter, return a type variable.
+                if name == "Self" && args.is_empty() {
+                    return self_ty.cloned().unwrap_or_else(|| Type::Named("Self".into(), vec![]));
+                }
                 if args.is_empty() && self.type_params.contains(name.as_str()) {
                     return Type::Var(name.clone());
                 }
-                let resolved_args: Vec<Type> = args.iter().map(|a| self.resolve_type_expr(a)).collect();
+                let resolved_args: Vec<Type> = args.iter().map(|a| self.resolve_type_expr_with_self(a, self_ty)).collect();
                 match name.as_str() {
                     "Bool"    => Type::Bool,
                     "Int"     => Type::Int,
@@ -1974,9 +2423,27 @@ impl Checker {
                         Type::Result(Box::new(t), Box::new(e))
                     }
                     "_infer"  => Type::Unknown,
+                    _ if self.interface_registry.interfaces.contains_key(name) => Type::Interface(name.clone(), resolved_args),
                     _         => Type::Named(name.clone(), resolved_args),
                 }
             }
+        }
+    }
+
+    fn substitute_self_in_type(&self, ty: &Type, self_ty: &Type) -> Type {
+        match ty {
+            Type::Named(name, args) if name == "Self" && args.is_empty() => self_ty.clone(),
+            Type::List(t) => Type::List(Box::new(self.substitute_self_in_type(t, self_ty))),
+            Type::Map(k, v) => Type::Map(Box::new(self.substitute_self_in_type(k, self_ty)), Box::new(self.substitute_self_in_type(v, self_ty))),
+            Type::Option(t) => Type::Option(Box::new(self.substitute_self_in_type(t, self_ty))),
+            Type::Result(t, e) => Type::Result(Box::new(self.substitute_self_in_type(t, self_ty)), Box::new(self.substitute_self_in_type(e, self_ty))),
+            Type::Arrow(a, b) => Type::Arrow(Box::new(self.substitute_self_in_type(a, self_ty)), Box::new(self.substitute_self_in_type(b, self_ty))),
+            Type::Fn(params, ret) => Type::Fn(params.iter().map(|p| self.substitute_self_in_type(p, self_ty)).collect(), Box::new(self.substitute_self_in_type(ret, self_ty))),
+            Type::Trf(i, o, fx) => Type::Trf(Box::new(self.substitute_self_in_type(i, self_ty)), Box::new(self.substitute_self_in_type(o, self_ty)), fx.clone()),
+            Type::Cap(name, args) => Type::Cap(name.clone(), args.iter().map(|a| self.substitute_self_in_type(a, self_ty)).collect()),
+            Type::Interface(name, args) => Type::Interface(name.clone(), args.iter().map(|a| self.substitute_self_in_type(a, self_ty)).collect()),
+            Type::Named(name, args) => Type::Named(name.clone(), args.iter().map(|a| self.substitute_self_in_type(a, self_ty)).collect()),
+            _ => ty.clone(),
         }
     }
 
@@ -2038,6 +2505,17 @@ mod tests {
         errs
     }
 
+    fn check_warnings(src: &str) -> Vec<String> {
+        let prog = Parser::parse_str(src, "test").expect("parse error");
+        let mut checker = Checker::new();
+        let _ = checker.check_with_self(&prog);
+        checker
+            .warnings
+            .into_iter()
+            .map(|w| format!("[{}] {}", w.code, w.message))
+            .collect()
+    }
+
     // 4-4, 4-5: built-in types and functions
     #[test]
     fn test_builtin_io_println() {
@@ -2073,7 +2551,7 @@ mod tests {
         check_ok("trf Double: Int -> Int = |n| { n }");
     }
 
-    // 4-9: flw pipeline — compatible
+    // 4-9: flw pipeline  Ecompatible
     #[test]
     fn test_flw_ok() {
         check_ok("
@@ -2083,7 +2561,7 @@ mod tests {
         ");
     }
 
-    // 4-9: flw pipeline — type mismatch
+    // 4-9: flw pipeline  Etype mismatch
     #[test]
     fn test_flw_type_mismatch() {
         let errs = check_err("
@@ -2094,7 +2572,7 @@ mod tests {
         assert!(errs.iter().any(|e| e.contains("E003")));
     }
 
-    // 4-9: flw — undefined step
+    // 4-9: flw  Eundefined step
     #[test]
     fn test_flw_undefined_step() {
         let errs = check_err("flw Bad = NoSuchTrf |> AnotherMissing");
@@ -2107,7 +2585,7 @@ mod tests {
         check_ok("fn f() -> Int { bind x <- 42; x }");
     }
 
-    // 4-11: pattern binding — record
+    // 4-11: pattern binding  Erecord
     #[test]
     fn test_pattern_record_bind() {
         check_ok("
@@ -2211,7 +2689,7 @@ mod tests {
         "#);
     }
 
-    // 2-4: record construction with undefined type → E002
+    // 2-4: record construction with undefined type ↁEE002
     #[test]
     fn test_record_construct_unknown_type() {
         let errs = check_err(r#"fn f() -> Unit { Ghost { x: 1 } }"#);
@@ -2254,7 +2732,7 @@ mod tests {
         "#);
     }
 
-    // 2-6: Db.* without !Db → E007
+    // 2-6: Db.* without !Db ↁEE007
     #[test]
     fn test_db_effect_missing() {
         let errs = check_err(r#"
@@ -2265,13 +2743,13 @@ mod tests {
         assert!(errs.iter().any(|e| e.contains("E007")), "got: {:?}", errs);
     }
 
-    // 2-6: Db.* with !Db → ok
+    // 2-6: Db.* with !Db ↁEok
     #[test]
     fn test_db_effect_present() {
         check_ok(r#"fn f() -> Int !Db { Db.execute("SELECT 1") }"#);
     }
 
-    // 2-7: Http.* without !Network → E008
+    // 2-7: Http.* without !Network ↁEE008
     #[test]
     fn test_network_effect_missing() {
         let errs = check_err(r#"
@@ -2282,7 +2760,7 @@ mod tests {
         assert!(errs.iter().any(|e| e.contains("E008")), "got: {:?}", errs);
     }
 
-    // 2-7: Http.* with !Network → ok
+    // 2-7: Http.* with !Network ↁEok
     #[test]
     fn test_network_effect_present() {
         check_ok(r#"fn f() -> String! !Network { Http.get("http://example.com") }"#);
@@ -2299,14 +2777,14 @@ mod tests {
         check_ok(r#"fn f() -> Bool !File { File.exists("a.txt") }"#);
     }
 
-    // 2-8: emit without !Emit<T> → E009
+    // 2-8: emit without !Emit<T> ↁEE009
     #[test]
     fn test_emit_effect_missing() {
         let errs = check_err(r#"fn f() -> Unit { emit "event" }"#);
         assert!(errs.iter().any(|e| e.contains("E009")), "got: {:?}", errs);
     }
 
-    // 2-8: emit with !Emit<T> → ok
+    // 2-8: emit with !Emit<T> ↁEok
     #[test]
     fn test_emit_effect_present() {
         check_ok(r#"fn f() -> Unit !Emit<OrderPlaced> { emit "order" }"#);
@@ -2376,7 +2854,7 @@ mod tests {
         assert!(errs.iter().any(|e| e.contains("E013")), "expected E013, got: {:?}", errs);
     }
 
-    // 4-11d: circular import gives E012 — tested via Resolver directly because the
+    // 4-11d: circular import gives E012  Etested via Resolver directly because the
     // current architecture calls Checker::check_program_and_export (no resolver) for
     // inner modules, so deep cycle detection only fires at the Resolver level.
     #[test]
@@ -2397,7 +2875,7 @@ mod tests {
         let mut errors: Vec<ResolveError> = Vec::new();
         resolver.load_module("cycle", &mut errors, &span);
         assert!(errors.is_empty(), "unexpected error on first load: {:?}", errors);
-        // Loading the same module again uses cache — no E012 (idempotent)
+        // Loading the same module again uses cache  Eno E012 (idempotent)
         resolver.load_module("cycle", &mut errors, &span);
         assert!(errors.is_empty(), "expected cache hit: {:?}", errors);
         // Simulate a cycle by checking E012 would be reported via resolve_use
@@ -2408,6 +2886,173 @@ mod tests {
     }
 
     // ── Phase 1: Subst / unify / occurs (v0.4.0) ──────────────────────────────
+
+    #[test]
+    fn test_interface_show_int_ok() {
+        check_ok(r#"
+            interface Show { show: Self -> String }
+            impl Show for Int { show = |x| "int" }
+        "#);
+    }
+
+    #[test]
+    fn test_interface_method_type_mismatch_e042() {
+        let errs = check_err(r#"
+            interface Show { show: Self -> String }
+            impl Show for Int { show = |x| 1 }
+        "#);
+        assert!(errs.iter().any(|e| e.contains("E042")), "expected E042, got: {:?}", errs);
+    }
+
+    #[test]
+    fn test_interface_super_missing_e043() {
+        let errs = check_err(r#"
+            interface Eq { eq: Self -> Bool }
+            interface Ord: Eq { compare: Self -> Int }
+            type User = { name: String }
+            impl Ord for User { compare = |x| 0 }
+        "#);
+        assert!(errs.iter().any(|e| e.contains("E043")), "expected E043, got: {:?}", errs);
+    }
+
+    #[test]
+    fn test_interface_unknown_e041() {
+        let errs = check_err(r#"
+            impl UnknownFace for Int { show = |x| "int" }
+        "#);
+        assert!(errs.iter().any(|e| e.contains("E041")), "expected E041, got: {:?}", errs);
+    }
+
+    #[test]
+    fn test_interface_explicit_passing() {
+        check_ok(r#"
+            interface Show { show: Self -> String }
+            impl Show for Int { show = |x| "int" }
+            fn use_show(x: Int, show: Show<Int>) -> String { show.show(x) }
+        "#);
+    }
+
+    #[test]
+    fn test_interface_auto_synthesis_ok() {
+        check_ok(r#"
+            interface Show { show: Self -> String }
+            impl Show for String { show = |x| x }
+            type User with Show = { name: String }
+            fn use_show(x: User, show: Show<User>) -> String { show.show(x) }
+        "#);
+    }
+
+    #[test]
+    fn test_interface_auto_synthesis_fail_e044() {
+        let errs = check_err(r#"
+            interface Show { show: Self -> String }
+            type User with Show = { tags: List<Int> }
+        "#);
+        assert!(errs.iter().any(|e| e.contains("E044")), "expected E044, got: {:?}", errs);
+    }
+
+    #[test]
+    fn test_interface_impl_multi_interface() {
+        check_ok(r#"
+            interface Show { show: Self -> String }
+            interface Eq { eq: Self -> Bool }
+            impl Show for String { show = |x| x }
+            impl Eq for String { eq = |x| true }
+            type User with Show, Eq = { name: String }
+            fn use_all(x: User, show: Show<User>, eq: Eq<User>) -> String { show.show(x) }
+        "#);
+    }
+
+    #[test]
+    fn test_interface_auto_impl_decl_ok() {
+        check_ok(r#"
+            interface Show { show: Self -> String }
+            impl Show for String { show = |x| x }
+            type User = { name: String }
+            impl Show for User
+            fn use_show(x: User, show: Show<User>) -> String { show.show(x) }
+        "#);
+    }
+
+    #[test]
+    fn test_builtin_show_int_registered() {
+        check_ok(r#"
+            fn use_show() -> String { Int.show.show(1) }
+        "#);
+    }
+
+    #[test]
+    fn test_builtin_ord_int_registered() {
+        check_ok(r#"
+            fn use_ord() -> Int { Int.ord.compare(1, 2) }
+        "#);
+    }
+
+    #[test]
+    fn test_builtin_gen_int_registered() {
+        check_ok(r#"
+            fn use_gen(seed: Int?, gen: Gen<Int>) -> Int { gen.gen(seed) }
+        "#);
+    }
+
+    #[test]
+    fn test_gen_interface_auto_synthesis_ok() {
+        check_ok(r#"
+            type User with Gen = { age: Int flag: Bool }
+            fn use_gen(seed: Int?, gen: Gen<User>) -> User { gen.gen(seed) }
+        "#);
+    }
+
+    #[test]
+    fn test_gen_interface_auto_impl_decl_ok() {
+        check_ok(r#"
+            type User = { age: Int flag: Bool }
+            impl Gen for User
+            fn use_gen(seed: Int?, gen: Gen<User>) -> User { gen.gen(seed) }
+        "#);
+    }
+
+    #[test]
+    fn test_gen_auto_synthesis_fail_e044() {
+        let errs = check_err(r#"
+            type User with Gen = { tags: List<Int> }
+        "#);
+        assert!(errs.iter().any(|e| e.contains("E044")), "expected E044, got: {:?}", errs);
+    }
+
+    #[test]
+    fn test_cap_deprecated_warning_w010() {
+        let warnings = check_warnings(r#"
+            cap Show<T> = { show: T -> String }
+        "#);
+        assert!(warnings.iter().any(|w| w.contains("W010")), "expected W010, got: {:?}", warnings);
+    }
+
+    #[test]
+    fn test_cap_style_impl_deprecated_warning_w010() {
+        let warnings = check_warnings(r#"
+            impl Eq<Int> {
+                fn equals(a: Int, b: Int) -> Bool { a == b }
+            }
+        "#);
+        assert!(warnings.iter().any(|w| w.contains("W010")), "expected W010, got: {:?}", warnings);
+    }
+
+    #[test]
+    fn test_field_interface_float_registered() {
+        check_ok(r#"
+            fn use_field(x: Float, y: Float) -> Result<Float, Error> {
+                Float.field.divide(x, y)
+            }
+        "#);
+    }
+
+    #[test]
+    fn test_semigroup_interface_int_registered() {
+        check_ok(r#"
+            fn use_semigroup() -> Int { Int.semigroup.combine(1, 2) }
+        "#);
+    }
 
     #[test]
     fn test_subst_apply_var() {
@@ -2430,7 +3075,7 @@ mod tests {
         let s1 = Subst::singleton("T".into(), Type::Int);
         let s2 = Subst::singleton("U".into(), Type::List(Box::new(Type::Var("T".into()))));
         let composed = s2.compose(s1);
-        // After compose: U → List<Int>, T → Int
+        // After compose: U ↁEList<Int>, T ↁEInt
         assert_eq!(composed.apply(&Type::Var("U".into())),
                    Type::List(Box::new(Type::Int)));
         assert_eq!(composed.apply(&Type::Var("T".into())), Type::Int);
@@ -2493,7 +3138,7 @@ mod tests {
 
     #[test]
     fn test_generic_identity() {
-        // Generic fn with single type param — no type errors.
+        // Generic fn with single type param  Eno type errors.
         let errs = check("fn identity<T>(x: T) -> T { x }");
         assert!(errs.is_empty(), "unexpected errors: {:?}", errs);
     }
@@ -2617,7 +3262,7 @@ fn main() -> Int? {
         check_ok(src);
     }
 
-    // task 3-18: chain outside Result/Option → E024
+    // task 3-18: chain outside Result/Option ↁEE024
     #[test]
     fn test_chain_outside_context() {
         let src = r#"
@@ -2630,7 +3275,7 @@ fn main() -> Int {
         assert!(errs.iter().any(|e| e.contains("E024")), "expected E024, got: {:?}", errs);
     }
 
-    // task 3-20: yield outside collect → E026
+    // task 3-20: yield outside collect ↁEE026
     #[test]
     fn test_yield_outside_collect() {
         let src = r#"
@@ -2654,7 +3299,7 @@ fn main() -> List<Int> {
         check_ok(src);
     }
 
-    // task 3-22: guard with non-Bool → E027
+    // task 3-22: guard with non-Bool ↁEE027
     #[test]
     fn test_guard_non_bool() {
         let src = r#"
@@ -2668,7 +3313,7 @@ fn main() -> Int {
         assert!(errs.iter().any(|e| e.contains("E027")), "expected E027, got: {:?}", errs);
     }
 
-    // task 3-19: chain with non-monadic expr → E025
+    // task 3-19: chain with non-monadic expr ↁEE025
     #[test]
     fn test_chain_type_mismatch() {
         let src = r#"
@@ -2685,7 +3330,7 @@ fn main() -> Int! {
 // ── Module export extraction ───────────────────────────────────────────────────
 
 /// Extract the publicly-visible symbols from a program after type-checking.
-/// Returns a map of symbol name → (resolved Type, Visibility).
+/// Returns a map of symbol name ↁE(resolved Type, Visibility).
 pub fn collect_exports(program: &Program, env: &TyEnv) -> HashMap<String, (Type, Visibility)> {
     let mut exports = HashMap::new();
     for item in &program.items {

@@ -209,7 +209,7 @@ This architecture matches Favnir better than a decorator-heavy design.
 Reasons:
 
 - keeps validation compositional
-- works naturally with `trf` and `flw`
+- works naturally with `stage` and `seq`
 - keeps fail-fast and collect-all explicit
 - avoids embedding HTTP or middleware assumptions into the language core
 - is suitable as a pure Favnir library family

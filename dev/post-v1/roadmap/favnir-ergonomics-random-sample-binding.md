@@ -1,5 +1,10 @@
 ﻿# Favnir Developer Ergonomics Notes
 
+> **廃止メモ（2026-05-03）**:
+> セクション 5〜10（`random` / `sample` ルーン案）は **採用しない**。
+> `Stat.*` への統合が決定済み。詳細は `stat-rune-architecture.md` を参照。
+> セクション 1〜4（`bind` と `match` の局所束縛）は有効な設計として残す。
+
 ## Scope
 
 This note groups three related ergonomics topics:
@@ -231,7 +236,7 @@ Veltra benefits directly from this feature family.
 Notebook users often want to:
 
 - prototype a flow before a real connector exists
-- test a `flw` with representative fake rows
+- test a `seq` with representative fake rows
 - inspect output shape early
 - validate transforms without production data
 

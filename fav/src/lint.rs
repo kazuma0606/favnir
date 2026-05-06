@@ -46,6 +46,7 @@ pub fn lint_program(program: &Program) -> Vec<LintError> {
             Item::FnDef(fd)   => lint_fn_def(fd, &mut errors),
             Item::TrfDef(_)   => {}
             Item::TypeDef(td) => lint_type_def(td, &mut errors),
+            Item::InterfaceDecl(_) | Item::InterfaceImplDecl(_) => {}
             Item::ImplDef(id) => {
                 for m in &id.methods { lint_fn_def(m, &mut errors); }
             }

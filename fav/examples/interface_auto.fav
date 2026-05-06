@@ -1,0 +1,17 @@
+-- `type T with X = { ... }` desugars to:
+--   type T = { ... }  +  impl X for T  (auto-synthesized at compile time)
+-- Auto-synthesis is verified by the type checker; all fields must implement X.
+-- Show is provided by hand to demonstrate runtime output alongside the Eq sugar.
+
+type UserRow with Eq = { name: String  age: Int }
+
+impl Show for UserRow {
+    show = |u| String.concat(u.name, String.concat(" (age ", String.concat(String.from_int(u.age), ")")))
+}
+
+public fn main() -> Unit !Io {
+    bind alice <- UserRow { name: "Alice"  age: 30 }
+    bind bob   <- UserRow { name: "Bob"    age: 25 }
+    IO.println(UserRow.show.show(alice))
+    IO.println(UserRow.show.show(bob))
+}

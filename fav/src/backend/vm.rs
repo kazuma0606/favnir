@@ -1185,8 +1185,17 @@ impl VM {
                     )),
                 }
             }
-            _ => vm_call_builtin(name, args, &mut self.emit_log, self.db_path.as_deref())
-                .map_err(|e| self.error(artifact, &e)),
+            _ => {
+                if let Some(target_idx) = artifact
+                    .globals
+                    .iter()
+                    .position(|g| g.kind == 0 && artifact.str_table.get(g.name_idx as usize).is_some_and(|n| n == name))
+                {
+                    return self.call_value(artifact, VMValue::CompiledFn(artifact.globals[target_idx].fn_idx as usize), args);
+                }
+                vm_call_builtin(name, args, &mut self.emit_log, self.db_path.as_deref())
+                    .map_err(|e| self.error(artifact, &e))
+            }
         }
     }
 

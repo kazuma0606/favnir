@@ -41,8 +41,11 @@ pub enum TokenKind {
     Private,
     Namespace,
     Use,
+    Interface,
+    With,
     Cap,
     Impl,
+    For,
     Chain,
     Yield,
     Collect,
@@ -364,8 +367,11 @@ impl Lexer {
             "private"   => TokenKind::Private,
             "namespace" => TokenKind::Namespace,
             "use"       => TokenKind::Use,
+            "interface" => TokenKind::Interface,
+            "with"      => TokenKind::With,
             "cap"       => TokenKind::Cap,
             "impl"      => TokenKind::Impl,
+            "for"       => TokenKind::For,
             "chain"     => TokenKind::Chain,
             "yield"     => TokenKind::Yield,
             "collect"   => TokenKind::Collect,
@@ -482,13 +488,14 @@ mod tests {
     // keywords
     #[test]
     fn test_keywords() {
-        let kinds = lex("type fn trf flw bind match if else public internal private namespace use cap impl");
+        let kinds = lex("type fn trf flw bind match if else public internal private namespace use interface with cap impl for");
         assert_eq!(kinds, vec![
             TokenKind::Type, TokenKind::Fn, TokenKind::Trf, TokenKind::Flw,
             TokenKind::Bind, TokenKind::Match, TokenKind::If, TokenKind::Else,
             TokenKind::Public, TokenKind::Internal, TokenKind::Private,
             TokenKind::Namespace, TokenKind::Use,
-            TokenKind::Cap, TokenKind::Impl,
+            TokenKind::Interface, TokenKind::With,
+            TokenKind::Cap, TokenKind::Impl, TokenKind::For,
             TokenKind::Eof,
         ]);
     }

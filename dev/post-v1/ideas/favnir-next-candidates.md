@@ -121,7 +121,7 @@ row
 例:
 
 ```fav
-trf ActiveEmails: List<User> -> List<String> = |users| {
+stage ActiveEmails: List<User> -> List<String> = |users| {
     collect {
         for user in users {
             if user.active {
@@ -190,7 +190,7 @@ match user {
 
 理由:
 
-- `fn` / `trf` / file/module 分離で十分代替できる
+- `fn` / `stage` / file/module 分離で十分代替できる
 - 専用構文を増やすコストの方が大きい
 
 ## 仮の優先順位

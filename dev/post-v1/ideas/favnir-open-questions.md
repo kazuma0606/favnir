@@ -48,11 +48,11 @@
 
 - `Emit<A> + Emit<B> = Emit<A | B>`
   - `Emit` は型パラメータを union で合成する
-  - 複数 event を発火する `flw` の effect は `Emit<A | B>` として畳まれる
+  - 複数 event を発火する `seq` の effect は `Emit<A | B>` として畳まれる
 
 理由:
 
-- `stage` と `flow` の型検査に必要
+- `stage` と `seq` の型検査に必要
 - Favnir の特徴そのもの
 
 ### 3. module / namespace / use の解決規則

@@ -1,8 +1,8 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::ast::{
-    Block, Expr, FieldPattern, FlwDef, Item, Lit, MatchArm, Pattern, Program, Stmt, TypeBody,
-    TypeDef, TypeExpr,
+    Block, Expr, FieldPattern, FlwDef, ImplDef, InterfaceDecl, InterfaceImplDecl, Item, Lit,
+    MatchArm, Pattern, Program, Stmt, TypeBody, TypeExpr,
 };
 use super::checker::Type;
 use super::ir::{IRArm, IRExpr, IRFnDef, IRGlobal, IRGlobalKind, IRPattern, IRProgram, IRStmt};
@@ -70,6 +70,7 @@ pub fn compile_program(program: &Program) -> IRProgram {
     let mut globals = Vec::new();
     let mut fns = Vec::new();
     let mut next_fn_idx = 0usize;
+    let interface_method_types = collect_interface_method_types(program);
 
     for item in &program.items {
         match item {
@@ -100,7 +101,16 @@ pub fn compile_program(program: &Program) -> IRProgram {
                 });
                 next_fn_idx += 1;
             }
-            Item::TypeDef(TypeDef { body: TypeBody::Sum(variants), .. }) => {
+            Item::TypeDef(td) => {
+                if !ctx.globals.contains_key(&td.name) {
+                    let idx = globals.len() as u16;
+                    ctx.globals.insert(td.name.clone(), idx);
+                    globals.push(IRGlobal {
+                        name: td.name.clone(),
+                        kind: IRGlobalKind::Builtin,
+                    });
+                }
+                if let TypeBody::Sum(variants) = &td.body {
                 for variant in variants {
                     let idx = globals.len() as u16;
                     let name = variant.name().to_string();
@@ -110,12 +120,45 @@ pub fn compile_program(program: &Program) -> IRProgram {
                         kind: IRGlobalKind::VariantCtor,
                     });
                 }
+                }
             }
-            // TestDef: reserve a function index so closures inside compile correctly.
-            // Test functions are not added to globals (user code can't call them).
+            Item::ImplDef(id) => {
+                if let Some(first_arg) = id.type_args.first() {
+                    let type_key = lower_type_expr(first_arg).display();
+                    let cap_ns = id.cap_name.to_ascii_lowercase();
+                    for method in &id.methods {
+                        let global_name = format!("{}.{}.{}", type_key, cap_ns, method.name);
+                        let idx = globals.len() as u16;
+                        ctx.globals.insert(global_name.clone(), idx);
+                        globals.push(IRGlobal {
+                            name: global_name,
+                            kind: IRGlobalKind::Fn(next_fn_idx),
+                        });
+                        next_fn_idx += 1;
+                    }
+                }
+            }
+            Item::InterfaceImplDecl(id) => {
+                if !id.is_auto {
+                    for interface_name in &id.interface_names {
+                        let iface_ns = interface_name.to_ascii_lowercase();
+                        for (method_name, _) in &id.methods {
+                            let global_name = format!("{}.{}.{}", id.type_name, iface_ns, method_name);
+                            let idx = globals.len() as u16;
+                            ctx.globals.insert(global_name.clone(), idx);
+                            globals.push(IRGlobal {
+                                name: global_name,
+                                kind: IRGlobalKind::Fn(next_fn_idx),
+                            });
+                            next_fn_idx += 1;
+                        }
+                    }
+                }
+            }
             Item::TestDef(_) => {
                 next_fn_idx += 1;
             }
+            Item::InterfaceDecl(_) => {}
             _ => {}
         }
     }
@@ -160,6 +203,12 @@ pub fn compile_program(program: &Program) -> IRProgram {
                 &mut ctx,
             )),
             Item::FlwDef(fd) => fns.push(compile_flw_def(fd, &mut ctx)),
+            Item::ImplDef(id) => {
+                fns.extend(compile_impl_def(id, &mut ctx));
+            }
+            Item::InterfaceImplDecl(id) => {
+                fns.extend(compile_interface_impl_decl(id, &interface_method_types, &mut ctx));
+            }
             Item::TestDef(td) => {
                 let unit_ty = crate::ast::TypeExpr::Named(
                     "Unit".into(), vec![], crate::frontend::lexer::Span::dummy());
@@ -173,6 +222,7 @@ pub fn compile_program(program: &Program) -> IRProgram {
                     &mut ctx,
                 ))
             }
+            Item::InterfaceDecl(_) => {}
             _ => {}
         }
     }
@@ -216,6 +266,179 @@ fn compile_flw_def(fd: &FlwDef, ctx: &mut CompileCtx) -> IRFnDef {
         effects: Vec::new(),
         return_ty: Type::Unknown,
         body: current,
+    }
+}
+
+fn compile_impl_def(id: &ImplDef, ctx: &mut CompileCtx) -> Vec<IRFnDef> {
+    let Some(first_arg) = id.type_args.first() else {
+        return Vec::new();
+    };
+    let type_key = lower_type_expr(first_arg).display();
+    let cap_ns = id.cap_name.to_ascii_lowercase();
+    id.methods
+        .iter()
+        .map(|method| {
+            let global_name = format!("{}.{}.{}", type_key, cap_ns, method.name);
+            compile_fn_def(
+                &global_name,
+                &method.params.iter().map(|p| p.name.clone()).collect::<Vec<_>>(),
+                &method
+                    .params
+                    .iter()
+                    .map(|p| lower_type_expr(&p.ty))
+                    .collect::<Vec<_>>(),
+                &method.effects,
+                &method.return_ty,
+                &method.body,
+                ctx,
+            )
+        })
+        .collect()
+}
+
+fn compile_interface_impl_decl(
+    id: &InterfaceImplDecl,
+    interface_method_types: &HashMap<String, HashMap<String, TypeExpr>>,
+    ctx: &mut CompileCtx,
+) -> Vec<IRFnDef> {
+    if id.is_auto {
+        return Vec::new();
+    }
+
+    let mut out = Vec::new();
+    for interface_name in &id.interface_names {
+        let iface_ns = interface_name.to_ascii_lowercase();
+        for (method_name, body_expr) in &id.methods {
+            let global_name = format!("{}.{}.{}", id.type_name, iface_ns, method_name);
+            let method_ty = interface_method_types
+                .get(interface_name)
+                .and_then(|m| m.get(method_name))
+                .cloned()
+                .or_else(|| builtin_interface_method_type(interface_name, method_name))
+                .unwrap_or_else(|| TypeExpr::Named("Unknown".into(), vec![], crate::frontend::lexer::Span::dummy()));
+
+            let method_ty = substitute_self_in_type_expr(&method_ty, &id.type_name);
+            let (param_tys, return_ty) = split_arrow_type(&method_ty);
+
+            match body_expr {
+                Expr::Closure(params, body, span) => {
+                    let body_block = Block {
+                        stmts: vec![],
+                        expr: body.clone(),
+                        span: span.clone(),
+                    };
+                    out.push(compile_fn_def(
+                        &global_name,
+                        params,
+                        &param_tys.iter().map(lower_type_expr).collect::<Vec<_>>(),
+                        &[],
+                        &return_ty,
+                        &body_block,
+                        ctx,
+                    ));
+                }
+                expr => {
+                    let body_block = Block {
+                        stmts: vec![],
+                        expr: Box::new(expr.clone()),
+                        span: expr.span().clone(),
+                    };
+                    out.push(compile_fn_def(
+                        &global_name,
+                        &[],
+                        &[],
+                        &[],
+                        &return_ty,
+                        &body_block,
+                        ctx,
+                    ));
+                }
+            }
+        }
+    }
+    out
+}
+
+fn collect_interface_method_types(program: &Program) -> HashMap<String, HashMap<String, TypeExpr>> {
+    let mut out = HashMap::new();
+    for item in &program.items {
+        if let Item::InterfaceDecl(InterfaceDecl { name, methods, .. }) = item {
+            let mut map = HashMap::new();
+            for method in methods {
+                map.insert(method.name.clone(), method.ty.clone());
+            }
+            out.insert(name.clone(), map);
+        }
+    }
+    out
+}
+
+fn substitute_self_in_type_expr(ty: &TypeExpr, type_name: &str) -> TypeExpr {
+    match ty {
+        TypeExpr::Named(name, args, span) if name == "Self" => {
+            TypeExpr::Named(type_name.to_string(), vec![], span.clone())
+        }
+        TypeExpr::Named(name, args, span) => TypeExpr::Named(
+            name.clone(),
+            args.iter()
+                .map(|a| substitute_self_in_type_expr(a, type_name))
+                .collect(),
+            span.clone(),
+        ),
+        TypeExpr::Optional(inner, span) => TypeExpr::Optional(
+            Box::new(substitute_self_in_type_expr(inner, type_name)),
+            span.clone(),
+        ),
+        TypeExpr::Fallible(inner, span) => TypeExpr::Fallible(
+            Box::new(substitute_self_in_type_expr(inner, type_name)),
+            span.clone(),
+        ),
+        TypeExpr::Arrow(a, b, span) => TypeExpr::Arrow(
+            Box::new(substitute_self_in_type_expr(a, type_name)),
+            Box::new(substitute_self_in_type_expr(b, type_name)),
+            span.clone(),
+        ),
+    }
+}
+
+fn split_arrow_type(ty: &TypeExpr) -> (Vec<TypeExpr>, TypeExpr) {
+    let mut params = Vec::new();
+    let mut current = ty;
+    loop {
+        match current {
+            TypeExpr::Arrow(a, b, _) => {
+                params.push((**a).clone());
+                current = b;
+            }
+            other => return (params, other.clone()),
+        }
+    }
+}
+
+fn builtin_interface_method_type(interface_name: &str, method_name: &str) -> Option<TypeExpr> {
+    let span = crate::frontend::lexer::Span::dummy();
+    let self_ty = || TypeExpr::Named("Self".into(), vec![], span.clone());
+    let unit_ty = || TypeExpr::Named("Unit".into(), vec![], span.clone());
+    let int_ty = || TypeExpr::Named("Int".into(), vec![], span.clone());
+    let bool_ty = || TypeExpr::Named("Bool".into(), vec![], span.clone());
+    let string_ty = || TypeExpr::Named("String".into(), vec![], span.clone());
+    let error_ty = || TypeExpr::Named("Error".into(), vec![], span.clone());
+    let result_ty = |ok: TypeExpr, err: TypeExpr| {
+        TypeExpr::Named("Result".into(), vec![ok, err], span.clone())
+    };
+    let arrow = |a: TypeExpr, b: TypeExpr| TypeExpr::Arrow(Box::new(a), Box::new(b), span.clone());
+
+    match (interface_name, method_name) {
+        ("Show", "show") => Some(arrow(self_ty(), string_ty())),
+        ("Eq", "eq") => Some(arrow(self_ty(), arrow(self_ty(), bool_ty()))),
+        ("Ord", "compare") => Some(arrow(self_ty(), arrow(self_ty(), int_ty()))),
+        ("Gen", "gen") => Some(arrow(TypeExpr::Optional(Box::new(int_ty()), span.clone()), self_ty())),
+        ("Semigroup", "combine") => Some(arrow(self_ty(), arrow(self_ty(), self_ty()))),
+        ("Monoid", "empty") => Some(arrow(unit_ty(), self_ty())),
+        ("Group", "inverse") => Some(arrow(self_ty(), self_ty())),
+        ("Ring", "multiply") => Some(arrow(self_ty(), arrow(self_ty(), self_ty()))),
+        ("Field", "divide") => Some(arrow(self_ty(), arrow(self_ty(), result_ty(self_ty(), error_ty())))),
+        _ => None,
     }
 }
 

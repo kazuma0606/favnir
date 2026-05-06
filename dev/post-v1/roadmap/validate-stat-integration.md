@@ -22,7 +22,7 @@ The goal is to make it easy to:
 `stat` should generate data.
 `validate` should prove contracts over that data.
 
-The combination should feel natural in `trf`, `flw`, and `test`.
+The combination should feel natural in `stage`, `seq`, and `test`.
 
 ## Shared Assumptions
 
@@ -88,14 +88,14 @@ This is the baseline integration pattern.
 
 ## 2. Fail-Fast Pipeline Validation
 
-For real pipeline use, a `trf` should usually validate once and then continue.
+For real pipeline use, a `stage` should usually validate once and then continue.
 
 ```fav
-trf ValidateUserInput: UserInput -> UserInput! = |input| {
+stageValidateUserInput: UserInput -> UserInput! = |input| {
     Flow.validate(input, UserValidator)
 }
 
-flw ImportUsers =
+seq ImportUsers =
     ParseUsers
     |> ValidateUserInput
     |> SaveUsers
@@ -182,21 +182,21 @@ bind UserRowValidator <- DbValidate.record([
     DbValidate.field("age", Field.range(0, 120))
 ])
 
-trf ParseRows: List<UserRow> -> List<UserRow> = |rows| {
+stageParseRows: List<UserRow> -> List<UserRow> = |rows| {
     rows
 }
 
-trf ValidateRows: List<UserRow> -> List<UserRow]! = |rows| {
+stageValidateRows: List<UserRow> -> List<UserRow>! = |rows| {
     rows
     |> List.map(|row| DbValidate.validate_row(row, UserRowValidator))
     |> Result.collect()
 }
 
-trf SaveRows: List<UserRow> -> Int !Db = |rows| {
+stageSaveRows: List<UserRow> -> Int !Db = |rows| {
     Db.execute("insert ...")
 }
 
-flw ImportUsers =
+seq ImportUsers =
     ParseRows
     |> ValidateRows
     |> SaveRows
@@ -380,6 +380,6 @@ Recommended direction:
 - `validate.field` defines local rules
 - `validate.db` checks storage-facing shapes
 - `validate.flow` checks rich domain/pipeline contracts
-- all four should compose naturally through `trf`, `flw`, `match`, and `test`
+- all four should compose naturally through `stage`, `seq`, `match`, and `test`
 
 Together, they create a compelling Pure Favnir story for testing, ETL, and notebook-driven data workflows.

@@ -11,7 +11,7 @@ The target style is:
 
 - expression-oriented
 - `bind`-first
-- `trf` and `flw` friendly
+- `stage` and `seq` friendly
 - readable in notebooks and tests
 - minimal temporary ceremony
 
@@ -77,19 +77,19 @@ It is:
 - local
 - easy to explain in a graph later
 
-## 3. Validation as a `trf`
+## 3. Validation as a `stage`
 
 Validation should fit naturally into a normal flow pipeline.
 
 ```fav
-trf ValidateSignup: Signup -> Signup! = |form| {
+stageValidateSignup: Signup -> Signup! = |form| {
     Flow.validate(form, SignupValidator)
 }
 ```
 
 This should be the default production-facing pattern.
 
-A validator becomes a reusable `trf`, not a special framework object.
+A validator becomes a reusable `stage`, not a special framework object.
 
 ## 4. Type-Driven Data Generation
 
@@ -185,10 +185,10 @@ bind UserRowValidator <-
 
 This should feel lighter than `Flow`, but still pipeline-friendly.
 
-## 8. DB Validation as a `trf`
+## 8. DB Validation as a `stage`
 
 ```fav
-trf ValidateRows: List<UserRow> -> List<UserRow]! = |rows| {
+stageValidateRows: List<UserRow> -> List<UserRow>! = |rows| {
     rows
     |> List.map(|row| DbValidate.validate_row(row, UserRowValidator))
     |> Result.collect()
@@ -215,21 +215,21 @@ bind UserRowValidator <-
         DbValidate.field("age", Field.range(0, 120))
     ])
 
-trf ParseRows: List<UserRow> -> List<UserRow> = |rows| {
+stageParseRows: List<UserRow> -> List<UserRow> = |rows| {
     rows
 }
 
-trf ValidateRows: List<UserRow> -> List<UserRow]! = |rows| {
+stageValidateRows: List<UserRow> -> List<UserRow>! = |rows| {
     rows
     |> List.map(|row| DbValidate.validate_row(row, UserRowValidator))
     |> Result.collect()
 }
 
-trf SaveRows: List<UserRow> -> Int !Db = |rows| {
+stageSaveRows: List<UserRow> -> Int !Db = |rows| {
     Db.execute("insert ...")
 }
 
-flw ImportUsers =
+seq ImportUsers =
     ParseRows
     |> ValidateRows
     |> SaveRows
@@ -249,19 +249,19 @@ It shows:
 The richer `Flow` layer should feel equally natural.
 
 ```fav
-trf ParseSignup: Json -> Signup! = |json| {
+stageParseSignup: Json -> Signup! = |json| {
     DecodeSignup(json)
 }
 
-trf ValidateSignup: Signup -> Signup! = |form| {
+stageValidateSignup: Signup -> Signup! = |form| {
     Flow.validate(form, SignupValidator)
 }
 
-trf SaveSignup: Signup -> UserId !Db = |form| {
+stageSaveSignup: Signup -> UserId !Db = |form| {
     Db.execute("insert ...")
 }
 
-flw RegisterUser =
+seq RegisterUser =
     ParseSignup
     |> ValidateSignup
     |> SaveSignup
@@ -306,7 +306,7 @@ The recommended Favnir style is:
 
 - define field rules with `bind`
 - build validators with pipelines
-- wrap validators in `trf` for production use
+- wrap validators in `stage` for production use
 - use `validate_all` in tests and notebooks
 - use `Stat.*` to generate or sample data locally
 
@@ -314,7 +314,7 @@ In other words:
 
 - rules are values
 - validators are values
-- validation stages are `trf`
+- validation stages are `stage`
 - synthetic and sampled input are just data sources
 
 ## 14. Summary
@@ -324,7 +324,7 @@ The Favnir-like way to combine `validate` and `stat` is:
 - `Field` rules are small pipelineable values
 - `DbValidate` and `Flow` assemble them into reusable validators
 - `Stat` provides deterministic synthetic or sampled input
-- validation is wrapped into ordinary `trf`
-- complete data workflows are expressed as normal `flw`
+- validation is wrapped into ordinary `stage`
+- complete data workflows are expressed as normal `seq`
 
 This gives the feature set a natural place in the language without adding framework-style ceremony.

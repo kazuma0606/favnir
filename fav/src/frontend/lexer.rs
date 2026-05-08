@@ -31,6 +31,7 @@ pub enum TokenKind {
     Type,
     Fn,
     Trf,
+    Abstract,
     Flw,
     Bind,
     Match,
@@ -43,14 +44,21 @@ pub enum TokenKind {
     Use,
     Interface,
     With,
+    Invariant,
+    Effect,
     Cap,
     Impl,
     For,
+    In,
+    Stage,
+    Seq,
     Chain,
     Yield,
     Collect,
     Where,
     Test,
+    Async,
+    Bench,
 
     // Effect keywords
     Pure,
@@ -63,7 +71,8 @@ pub enum TokenKind {
     Pipe,       // |
     Arrow,      // ->
     Bang,       // !
-    Question,   // ?
+    Question,         // ?
+    QuestionQuestion, // ??
     Colon,      // :
     Comma,      // ,
     Dot,        // .
@@ -92,6 +101,7 @@ pub enum TokenKind {
     Int(i64),
     Float(f64),
     Str(String),
+    FStringRaw(String),
     Bool(bool),
 
     // Identifier
@@ -235,11 +245,24 @@ impl Lexer {
         let c = self.peek().unwrap();
 
         let kind = match c {
+            '$' if self.peek2() == Some('"') => {
+                self.advance();
+                self.advance();
+                TokenKind::FStringRaw(self.lex_fstring_raw(sp, sl, sc)?)
+            }
             '{' => { self.advance(); TokenKind::LBrace }
             '}' => { self.advance(); TokenKind::RBrace }
             '(' => { self.advance(); TokenKind::LParen }
             ')' => { self.advance(); TokenKind::RParen }
-            '?' => { self.advance(); TokenKind::Question }
+            '?' => {
+                self.advance();
+                if self.pos < self.source.len() && self.source[self.pos] == '?' {
+                    self.advance();
+                    TokenKind::QuestionQuestion
+                } else {
+                    TokenKind::Question
+                }
+            }
             ':' => { self.advance(); TokenKind::Colon }
             ',' => { self.advance(); TokenKind::Comma }
             '.' => { self.advance(); TokenKind::Dot }
@@ -357,6 +380,7 @@ impl Lexer {
             "type"    => TokenKind::Type,
             "fn"      => TokenKind::Fn,
             "trf"     => TokenKind::Trf,
+            "abstract"=> TokenKind::Abstract,
             "flw"     => TokenKind::Flw,
             "bind"    => TokenKind::Bind,
             "match"   => TokenKind::Match,
@@ -369,14 +393,21 @@ impl Lexer {
             "use"       => TokenKind::Use,
             "interface" => TokenKind::Interface,
             "with"      => TokenKind::With,
+            "invariant" => TokenKind::Invariant,
+            "effect"    => TokenKind::Effect,
             "cap"       => TokenKind::Cap,
             "impl"      => TokenKind::Impl,
             "for"       => TokenKind::For,
+            "in"        => TokenKind::In,
+            "stage"     => TokenKind::Stage,
+            "seq"       => TokenKind::Seq,
             "chain"     => TokenKind::Chain,
             "yield"     => TokenKind::Yield,
             "collect"   => TokenKind::Collect,
             "where"     => TokenKind::Where,
             "test"      => TokenKind::Test,
+            "async"     => TokenKind::Async,
+            "bench"     => TokenKind::Bench,
             "Pure"    => TokenKind::Pure,
             "Io"      => TokenKind::Io,
             "emit"    => TokenKind::Emit,
@@ -461,6 +492,42 @@ impl Lexer {
         }
         Ok(TokenKind::Str(s))
     }
+
+    fn lex_fstring_raw(&mut self, start_pos: usize, start_line: u32, start_col: u32) -> Result<String, LexError> {
+        let mut out = String::new();
+        let mut depth = 0usize;
+        while let Some(c) = self.peek() {
+            match c {
+                '"' if depth == 0 => {
+                    self.advance();
+                    return Ok(out);
+                }
+                '\\' => {
+                    out.push(self.advance());
+                    if self.peek().is_none() {
+                        return Err(LexError::new(
+                            "unterminated string interpolation escape",
+                            self.span_from(start_pos, start_line, start_col),
+                        ));
+                    }
+                    out.push(self.advance());
+                }
+                '{' => {
+                    depth += 1;
+                    out.push(self.advance());
+                }
+                '}' => {
+                    depth = depth.saturating_sub(1);
+                    out.push(self.advance());
+                }
+                _ => out.push(self.advance()),
+            }
+        }
+        Err(LexError::new(
+            "unterminated string interpolation literal",
+            self.span_from(start_pos, start_line, start_col),
+        ))
+    }
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -488,13 +555,13 @@ mod tests {
     // keywords
     #[test]
     fn test_keywords() {
-        let kinds = lex("type fn trf flw bind match if else public internal private namespace use interface with cap impl for");
+        let kinds = lex("type fn trf abstract flw bind match if else public internal private namespace use interface with invariant effect cap impl for");
         assert_eq!(kinds, vec![
-            TokenKind::Type, TokenKind::Fn, TokenKind::Trf, TokenKind::Flw,
+            TokenKind::Type, TokenKind::Fn, TokenKind::Trf, TokenKind::Abstract, TokenKind::Flw,
             TokenKind::Bind, TokenKind::Match, TokenKind::If, TokenKind::Else,
             TokenKind::Public, TokenKind::Internal, TokenKind::Private,
             TokenKind::Namespace, TokenKind::Use,
-            TokenKind::Interface, TokenKind::With,
+            TokenKind::Interface, TokenKind::With, TokenKind::Invariant, TokenKind::Effect,
             TokenKind::Cap, TokenKind::Impl, TokenKind::For,
             TokenKind::Eof,
         ]);
@@ -582,6 +649,15 @@ mod tests {
         let kinds = lex(r#""\n\t\"\\""#);
         assert_eq!(kinds, vec![
             TokenKind::Str("\n\t\"\\".into()),
+            TokenKind::Eof,
+        ]);
+    }
+
+    #[test]
+    fn test_fstring_raw_token() {
+        let kinds = lex(r#"$"Hello {name}!""#);
+        assert_eq!(kinds, vec![
+            TokenKind::FStringRaw("Hello {name}!".into()),
             TokenKind::Eof,
         ]);
     }

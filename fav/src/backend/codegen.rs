@@ -40,6 +40,7 @@ pub enum Opcode {
     CollectEnd = 0x51,
     YieldValue = 0x52,
     EmitEvent = 0x53,
+    TrackLine = 0x54,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -158,6 +159,17 @@ pub fn emit_expr(expr: &IRExpr, cg: &mut Codegen) {
             cg.emit_opcode(Opcode::LoadGlobal);
             cg.emit_u16(*idx);
         }
+        IRExpr::TrfRef(idx, _) => {
+            cg.emit_opcode(Opcode::LoadGlobal);
+            cg.emit_u16(*idx);
+        }
+        IRExpr::CallTrfLocal { local, arg, .. } => {
+            cg.emit_opcode(Opcode::LoadLocal);
+            cg.emit_u16(*local);
+            emit_expr(arg, cg);
+            cg.emit_opcode(Opcode::Call);
+            cg.emit_u16(1);
+        }
         IRExpr::Call(callee, args, _) => {
             emit_expr(callee, cg);
             for arg in args {
@@ -260,6 +272,11 @@ pub fn emit_stmt(stmt: &IRStmt, cg: &mut Codegen) {
             emit_expr(expr, cg);
             cg.emit_opcode(Opcode::Pop);
         }
+        IRStmt::TrackLine(line) => {
+            cg.emit_opcode(Opcode::TrackLine);
+            // Emit line as u32 (4 bytes LE)
+            cg.code.extend_from_slice(&line.to_le_bytes());
+        }
     }
 }
 
@@ -321,6 +338,7 @@ fn emit_pattern_test(pattern: &IRPattern, fail_jumps: &mut Vec<usize>, cg: &mut 
                 cg.emit_opcode(Opcode::GetField);
                 cg.emit_u16(idx);
                 emit_pattern_test(inner, fail_jumps, cg);
+                cg.emit_opcode(Opcode::Pop);
             }
         }
     }
@@ -386,6 +404,7 @@ pub fn codegen_program(ir: &IRProgram) -> FvcArtifact {
         str_table: writer.str_table,
         globals: writer.globals,
         functions: writer.functions,
+        explain_json: None,
     }
 }
 
@@ -557,6 +576,34 @@ mod tests {
             vec![
                 Opcode::LoadGlobal as u8,
                 0x02,
+                0x00,
+                Opcode::Const as u8,
+                0x00,
+                0x00,
+                Opcode::Call as u8,
+                0x01,
+                0x00,
+            ]
+        );
+        assert_eq!(cg.constants, vec![Constant::Int(7)]);
+    }
+
+    #[test]
+    fn emit_expr_for_call_trf_local_writes_local_arg_and_call_count() {
+        let mut cg = Codegen::new();
+        let expr = IRExpr::CallTrfLocal {
+            local: 3,
+            arg: Box::new(IRExpr::Lit(Lit::Int(7), Type::Int)),
+            ty: Type::Unknown,
+        };
+
+        emit_expr(&expr, &mut cg);
+
+        assert_eq!(
+            cg.code,
+            vec![
+                Opcode::LoadLocal as u8,
+                0x03,
                 0x00,
                 Opcode::Const as u8,
                 0x00,

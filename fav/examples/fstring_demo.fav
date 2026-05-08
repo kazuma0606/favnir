@@ -1,0 +1,5 @@
+public fn main() -> String {
+    bind name <- "Favnir"
+    bind age <- 42
+    $"Hello {name}! Age: {age}"
+}

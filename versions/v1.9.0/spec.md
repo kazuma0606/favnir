@@ -1,0 +1,466 @@
+# Favnir v1.9.0 仕様書 — `for` 式 + `??` 演算子 + `stage`/`seq` エイリアス + ツール仕上げ
+
+作成日: 2026-05-09
+
+> **テーマ**: 言語エルゴノミクスを二つの構文（`for` 式・`??` 演算子）で強化しつつ、
+> `stage`/`seq` キーワードを trf/flw のエイリアスとして先行導入し v2.0.0 への移行路を整備する。
+> ツール面では Coverage HTML 出力と `fav bench` 統計強化を完成させる。
+>
+> **前提**: v1.8.0 完了（509 テスト通過）
+
+---
+
+## 1. スコープ概要
+
+| Phase | テーマ | Done definition |
+|---|---|---|
+| 0 | バージョン更新 | `v1.9.0` がビルドされ HELP テキストに反映される |
+| 1 | `for` 式 | `for x in list { ... }` が Pure/Io コンテキストで動く |
+| 2 | `??` 演算子 | `option_val ?? default` が `Option.unwrap_or` の糖衣として動く |
+| 3 | `stage`/`seq` エイリアス | `stage` = `trf`、`seq` = `flw` として既存コードに影響なく使える |
+| 4 | Coverage HTML 出力 | `--coverage-report <dir>` が HTML ファイルを生成する |
+| 5 | `fav bench` 統計強化 | min/max/p50/stddev が表示される |
+| 6 | テスト・ドキュメント | 全テスト通過、langspec.md 更新 |
+
+---
+
+## 2. Phase 0 — バージョン更新
+
+- `Cargo.toml`: `version = "1.9.0"`
+- `main.rs`: HELP テキスト `v1.9.0`
+
+---
+
+## 3. Phase 1 — `for` 式
+
+### 3-1. 設計方針
+
+`for x in list { body }` を Pure / Io コンテキストのブロック内で使える**文**として導入する。
+v1.9.0 では collect 内の `for`（yield を内包するケース）は対応しない（v2.0.0 以降）。
+
+### 3-2. 構文
+
+```favnir
+// Io コンテキスト内の for 文
+public fn main() -> Unit !Io {
+    for x in List.range(1, 6) {
+        IO.println_int(x)
+    }
+}
+
+// Pure コンテキストでも使用可（副作用なし、Unit を返す）
+fn sum_print(xs: List<Int>) -> Unit {
+    for x in xs {
+        let _ = x  // 副作用なし
+    }
+}
+```
+
+### 3-3. 型規則
+
+```
+for x in expr { body }
+
+expr   : List<T>
+x      : T  （ループ変数、ブロック内にのみ束縛）
+body   : 0 個以上のステートメントのブロック。最後の式は Unit でなければならない。
+result : Unit
+```
+
+- `expr` が `List<T>` 以外の場合は **E065** を発する。
+- `body` の最終式が Unit 以外の場合は **E066** を発する。
+- collect ブロック内の `for` は **E067**（v1.9.0 では未対応）。
+
+### 3-4. デシュガー（セマンティクス）
+
+コンパイラは `for x in list { body }` を以下に変換する:
+
+```
+List.fold(list, Unit, |_, x| { body; Unit })
+```
+
+- `body` の各ステートメントは変換なし。
+- `yield` が body 内にある場合は E067。
+
+### 3-5. AST 変更
+
+```rust
+// ast.rs — Stmt に追加
+pub enum Stmt {
+    // 既存 ...
+    ForIn {
+        var: String,
+        iter: Expr,
+        body: Block,
+        span: Span,
+    },
+}
+```
+
+### 3-6. 字句解析変更
+
+```
+"for" => TokenKind::For
+"in"  => TokenKind::In     // ※ "in" はすでに match arm の `=>` 解析と衝突しないか要確認
+```
+
+`in` は識別子としても使われる可能性があるが、`for` に後続する場合にのみ `In` として扱う。
+パーサーで `TokenKind::For` を見た後だけ `expect(In)` するため、字句解析では素直に予約語として追加する。
+
+### 3-7. エラーコード
+
+| コード | 条件 |
+|---|---|
+| E065 | `for` のイテレータが `List<T>` 以外 |
+| E066 | `for` ボディの最終式が `Unit` 以外 |
+| E067 | `collect` ブロック内で `for` を使用（v1.9.0 未対応） |
+
+---
+
+## 4. Phase 2 — `??` 演算子
+
+### 4-1. 設計方針
+
+`option_expr ?? default_expr` を `Option.unwrap_or(option_expr, default_expr)` の糖衣構文として導入する。
+`null` 合体演算子（TypeScript / C# 等）と同等の読み味を持つ。
+
+### 4-2. 構文
+
+```favnir
+// Option<Int> -> Int
+bind display <- user.age ?? 0
+
+// チェーンも可能
+bind name <- user.nickname ?? user.first_name ?? "Anonymous"
+
+// pipeline と組み合わせる場合は括弧を推奨
+bind n <- (List.find(xs, |x| x > 10)) ?? -1
+```
+
+### 4-3. 型規則
+
+```
+expr1 : Option<T>
+expr2 : T
+──────────────────
+expr1 ?? expr2 : T
+```
+
+- `expr1` が `Option<T>` 以外の場合は **E068** を発する。
+- `expr2` が `T` と互換でない場合は **E069** を発する。
+
+### 4-4. 演算子優先順位
+
+`??` は最も低い二項演算子として扱う（論理演算子 `||` より低い）。
+
+```
+優先順位（高→低）:
+  関数呼び出し、フィールドアクセス
+  単項演算子
+  * / %
+  + -
+  < > <= >= == !=
+  && ||
+  ?? （最低）
+```
+
+### 4-5. AST 変更
+
+```rust
+// ast.rs — BinOp に追加
+pub enum BinOp {
+    // 既存 ...
+    NullCoalesce,  // ??
+}
+```
+
+### 4-6. 字句解析変更
+
+```
+"??" => TokenKind::QuestionQuestion
+```
+
+既存の `?` (Question) の後に `?` が続く場合に `QuestionQuestion` として認識する。
+
+### 4-7. エラーコード
+
+| コード | 条件 |
+|---|---|
+| E068 | `??` の左辺が `Option<T>` 以外 |
+| E069 | `??` の右辺が左辺のアンラップ型と非互換 |
+
+---
+
+## 5. Phase 3 — `stage`/`seq` エイリアス
+
+### 5-1. 設計方針
+
+v2.0.0 では `trf` → `stage`、`flw` → `seq` にリネームする。
+v1.9.0 では**両方同時に動く**よう、`stage`/`seq` を `trf`/`flw` のシノニムとして先行導入する。
+
+- `trf` / `flw` は引き続き動作（v2.0.0 まで非推奨警告なし）
+- `stage` / `seq` も完全に同じセマンティクスで動作
+- `fav check` 出力での表示は宣言時のキーワードをそのまま使う
+- `fav explain` の JSON では `"trf"` / `"flw"` に統一（v2.0.0 で変更）
+
+### 5-2. 字句解析変更
+
+```
+"stage" => TokenKind::Stage   // trf のエイリアス
+"seq"   => TokenKind::Seq     // flw のエイリアス
+```
+
+### 5-3. パーサー変更
+
+```rust
+// parse_item 内
+TokenKind::Trf | TokenKind::Stage => {
+    // trf / stage 共通解析パス
+}
+TokenKind::Flw | TokenKind::Seq => {
+    // flw / seq 共通解析パス
+}
+```
+
+### 5-4. example ファイル
+
+`examples/stage_seq_demo.fav` — `stage` / `seq` キーワードで書いた最小例
+
+```favnir
+// stage は trf のエイリアス（v1.9.0 以降）
+stage Double: Int -> Int = |x| x * 2
+
+// seq は flw のエイリアス（v1.9.0 以降）
+seq Pipeline {
+    Double
+}
+
+public fn main() -> Int {
+    flw Pipeline { 5 }
+}
+```
+
+---
+
+## 6. Phase 4 — Coverage HTML 出力
+
+### 6-1. 設計
+
+v1.8.0 の `--coverage-report <dir>` はテキスト（`coverage.txt`）を出力するのみだった。
+v1.9.0 では同ディレクトリに HTML ファイルを追加出力する。
+
+```
+<dir>/
+  coverage.txt       (v1.8.0 から継続)
+  index.html         (NEW: ファイル一覧 + 全体 % + 関数一覧)
+  <sanitized-name>.html  (NEW: ファイルごとのソース注釈ビュー)
+```
+
+### 6-2. HTML フォーマット
+
+#### `index.html`
+
+```html
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><title>Coverage Report — v1.9.0</title></head>
+<body>
+  <h1>Coverage Report</h1>
+  <p>Generated by fav v1.9.0</p>
+  <table>
+    <tr><th>File</th><th>Lines</th><th>Coverage</th></tr>
+    <tr><td><a href="src_main.html">src/main.fav</a></td><td>18/22</td><td>81.8%</td></tr>
+  </table>
+</body>
+</html>
+```
+
+#### `<file>.html`
+
+ソースの各行に色付けした HTML。カバーされた行は緑、未カバーは赤でハイライト。
+
+```html
+<div class="line covered">  1: public fn main() -> Unit !Io {</div>
+<div class="line uncovered">  8:     helper()  // ← 未カバー</div>
+```
+
+### 6-3. 実装方針
+
+- `driver.rs` に `write_coverage_html(dir, path, source, executed)` を追加。
+- `format_coverage_html_index` / `format_coverage_html_file` ヘルパーを追加。
+- 外部 crate への依存は追加しない（純粋な文字列生成）。
+
+---
+
+## 7. Phase 5 — `fav bench` 統計強化
+
+### 7-1. 現状の出力
+
+v1.8.0:
+```
+bench  fib(10)   613.97 µs/iter  (100  math.bench.fav)
+```
+
+### 7-2. v1.9.0 の出力
+
+```
+bench  fib(10)
+  mean:    614.0 µs/iter
+  min:     601.2 µs
+  max:     643.8 µs
+  stddev:    8.4 µs
+  p50:     612.5 µs
+  iters:   100  (math.bench.fav)
+```
+
+`--compact` フラグで v1.8.0 形式の1行表示に切り替え可能:
+```
+bench  fib(10)   614.0 µs ±8.4  [601–644]  100 iters
+```
+
+### 7-3. 統計計算
+
+```rust
+struct BenchStats {
+    mean_us: f64,
+    min_us: f64,
+    max_us: f64,
+    stddev_us: f64,
+    p50_us: f64,
+    iters: u64,
+}
+
+fn compute_bench_stats(samples_us: &[f64]) -> BenchStats { ... }
+```
+
+各イテレーションの経過時間（µs）を `Vec<f64>` に記録し、完了後に統計計算する。
+
+### 7-4. `--json` 出力フラグ
+
+```
+fav bench math.bench.fav --json
+```
+
+```json
+[
+  {
+    "description": "fib(10)",
+    "mean_us": 614.0,
+    "min_us": 601.2,
+    "max_us": 643.8,
+    "stddev_us": 8.4,
+    "p50_us": 612.5,
+    "iters": 100
+  }
+]
+```
+
+### 7-5. CLI 変更
+
+```
+main.rs: bench コマンドに --compact / --json フラグを追加
+driver.rs: exec_bench_case が Vec<f64> を返すよう変更
+          compute_bench_stats を追加
+          format_bench_result_verbose / format_bench_result_compact を追加
+          cmd_bench に compact: bool, json: bool を追加
+```
+
+---
+
+## 8. Phase 6 — テスト・ドキュメント
+
+### 8-1. テスト要件
+
+#### `for` 式
+
+| テスト名 | 検証内容 |
+|---|---|
+| `for_in_io_context_iterates_list` | `for x in List.range(1, 4) { IO.println_int(x) }` が動く |
+| `for_in_pure_context_unit_result` | Pure fn 内 for が Unit を返す |
+| `for_non_list_iter_errors_e065` | List 以外のイテレータで E065 |
+| `for_in_collect_block_errors_e067` | collect 内の for で E067 |
+
+#### `??` 演算子
+
+| テスト名 | 検証内容 |
+|---|---|
+| `null_coalesce_returns_value_when_some` | `some(42) ?? 0` が `42` を返す |
+| `null_coalesce_returns_default_when_none` | `none ?? 0` が `0` を返す |
+| `null_coalesce_chained` | `none ?? none ?? 1` が `1` を返す |
+| `null_coalesce_lhs_non_option_errors_e068` | `42 ?? 0` で E068 |
+
+#### `stage`/`seq` エイリアス
+
+| テスト名 | 検証内容 |
+|---|---|
+| `stage_keyword_parses_like_trf` | `stage F: Int -> Int = \|x\| x` が parse・型検査を通る |
+| `seq_keyword_parses_like_flw` | `seq P { F }` が parse・型検査を通る |
+| `trf_and_stage_coexist` | 同一ファイルに `trf` と `stage` が共存できる |
+
+#### Coverage HTML
+
+| テスト名 | 検証内容 |
+|---|---|
+| `coverage_html_index_created` | `--coverage-report` でindex.htmlが生成される |
+| `coverage_html_file_created` | ソース注釈HTMLが生成される |
+| `coverage_html_contains_percentage` | HTMLに%が含まれる |
+
+#### `fav bench` 統計
+
+| テスト名 | 検証内容 |
+|---|---|
+| `bench_stats_compute_mean` | サンプルの mean が正しい |
+| `bench_stats_compute_stddev` | stddev が正しい |
+| `bench_stats_compute_p50` | p50 (中央値) が正しい |
+| `bench_compact_format` | --compact が1行形式を出力する |
+
+### 8-2. example ファイル
+
+- `examples/for_demo.fav` — `for` 式の利用例
+- `examples/coalesce_demo.fav` — `??` 演算子の利用例
+- `examples/stage_seq_demo.fav` — `stage`/`seq` キーワードの利用例
+
+### 8-3. ドキュメント更新
+
+- `versions/v1.9.0/langspec.md` を新規作成
+- `README.md` に v1.9.0 セクションを追加
+
+---
+
+## 9. エラーコード一覧（v1.9.0 追加分）
+
+| コード | Phase | 条件 |
+|---|---|---|
+| E065 | 1 | `for` のイテレータが `List<T>` 以外 |
+| E066 | 1 | `for` ボディの最終式が `Unit` 以外 |
+| E067 | 1 | `collect` ブロック内で `for` を使用（未対応） |
+| E068 | 2 | `??` の左辺が `Option<T>` 以外 |
+| E069 | 2 | `??` の右辺が左辺のアンラップ型と非互換 |
+
+---
+
+## 10. 完了条件（Done Definition）
+
+- [ ] `for x in List.range(1, 5) { IO.println_int(x) }` が `fav run` で動く
+- [ ] `user.age ?? 0` が型チェックを通り正しい値を返す
+- [ ] `stage F: Int -> Int = |x| x * 2` が `trf` と同等に動く
+- [ ] `seq P { F }` が `flw` と同等に動く
+- [ ] `fav test --coverage --coverage-report ./out` で `out/index.html` が生成される
+- [ ] `fav bench math.bench.fav` が mean/min/max/stddev/p50 を表示する
+- [ ] `fav bench math.bench.fav --json` が JSON を出力する
+- [ ] v1.8.0 の全テスト（509）が引き続き通る
+- [ ] `cargo build` で警告ゼロ
+- [ ] `Cargo.toml` バージョンが `"1.9.0"`
+
+---
+
+## 11. 先送り一覧（v1.9.0 では対応しない）
+
+| 機能 | 理由 | 対応予定 |
+|---|---|---|
+| `collect` 内の `for`（yield を含む） | 実装複雑度が高い | v2.0.0 |
+| `trf`/`flw` 非推奨警告 | v2.0.0 の破壊的変更と同時 | v2.0.0 |
+| `fav migrate` コマンド | v2.0.0 と同時リリースが適切 | v2.0.0 |
+| tokio 実ランタイム | 大規模依存追加 | 検討中 |
+| 型推論の完全化 (HM) | スコープ外 | v2.x 以降 |
+| `?` postfix operator | `??` で十分かどうか様子見 | 未定 |

@@ -52,6 +52,19 @@ impl Parser {
         Parser::new(tokens).parse_program()
     }
 
+    pub fn parse_str_expr(source: &str, file: &str) -> Result<Expr, ParseError> {
+        let tokens = Lexer::new(source, file).tokenize()?;
+        let mut parser = Parser::new(tokens);
+        let expr = parser.parse_expr()?;
+        if parser.peek() != &TokenKind::Eof {
+            return Err(ParseError::new(
+                format!("unexpected token after expression: {:?}", parser.peek()),
+                parser.peek_span().clone(),
+            ));
+        }
+        Ok(expr)
+    }
+
     // ── helpers ───────────────────────────────────────────────────────────────
 
     fn peek(&self) -> &TokenKind {
@@ -82,6 +95,20 @@ impl Parser {
         } else {
             Err(ParseError::new(
                 format!("expected {:?}, got {:?}", expected, self.peek()),
+                self.peek_span().clone(),
+            ))
+        }
+    }
+
+    /// Consume the current token if it matches any of the given kinds.
+    fn expect_any(&mut self, expected: &[TokenKind]) -> Result<Span, ParseError> {
+        if expected.iter().any(|k| k == self.peek()) {
+            let span = self.peek_span().clone();
+            self.advance();
+            Ok(span)
+        } else {
+            Err(ParseError::new(
+                format!("expected one of {:?}, got {:?}", expected, self.peek()),
                 self.peek_span().clone(),
             ))
         }
@@ -169,9 +196,22 @@ impl Parser {
 
         match self.peek().clone() {
             TokenKind::Type   => Ok(Item::TypeDef(self.parse_type_def(vis)?)),
-            TokenKind::Fn     => Ok(Item::FnDef(self.parse_fn_def(vis)?)),
-            TokenKind::Trf    => Ok(Item::TrfDef(self.parse_trf_def(vis)?)),
+            TokenKind::Fn     => Ok(Item::FnDef(self.parse_fn_def(vis, false)?)),
+            TokenKind::Trf | TokenKind::Stage => Ok(Item::TrfDef(self.parse_trf_def(vis, false)?)),
+            TokenKind::Async  => {
+                self.advance(); // consume 'async'
+                match self.peek().clone() {
+                    TokenKind::Fn  => Ok(Item::FnDef(self.parse_fn_def(vis, true)?)),
+                    TokenKind::Trf | TokenKind::Stage => Ok(Item::TrfDef(self.parse_trf_def(vis, true)?)),
+                    other => Err(ParseError::new(
+                        format!("expected `fn` or `trf`/`stage` after `async`, got {:?}", other),
+                        self.peek_span().clone(),
+                    )),
+                }
+            }
+            TokenKind::Abstract => self.parse_abstract_item(vis),
             TokenKind::Interface => Ok(Item::InterfaceDecl(self.parse_interface_decl(vis)?)),
+            TokenKind::Effect => Ok(Item::EffectDef(self.parse_effect_def(vis)?)),
             TokenKind::Cap    => Ok(Item::CapDef(self.parse_cap_def(vis)?)),
             TokenKind::Impl   => {
                 if vis.is_some() {
@@ -190,14 +230,8 @@ impl Parser {
                     Ok(Item::InterfaceImplDecl(self.parse_interface_impl_decl()?))
                 }
             }
-            TokenKind::Flw    => {
-                if vis.is_some() {
-                    return Err(ParseError::new(
-                        "visibility on flw is not supported",
-                        self.peek_span().clone(),
-                    ));
-                }
-                Ok(Item::FlwDef(self.parse_flw_def()?))
+            TokenKind::Flw | TokenKind::Seq => {
+                self.parse_flw_def_or_binding(vis)
             }
             TokenKind::Test => {
                 if vis.is_some() {
@@ -208,6 +242,15 @@ impl Parser {
                 }
                 Ok(Item::TestDef(self.parse_test_def()?))
             }
+            TokenKind::Bench => {
+                if vis.is_some() {
+                    return Err(ParseError::new(
+                        "visibility modifier on `bench` is not allowed",
+                        self.peek_span().clone(),
+                    ));
+                }
+                Ok(Item::BenchDef(self.parse_bench_def()?))
+            }
             TokenKind::Namespace => Err(ParseError::new(
                 "`namespace` must appear before any definitions",
                 self.peek_span().clone(),
@@ -217,8 +260,32 @@ impl Parser {
                 self.peek_span().clone(),
             )),
             other => Err(ParseError::new(
-                format!("expected item (type/fn/trf/flw/interface/cap/impl/test), got {:?}", other),
+                format!("expected item (type/fn/trf/flw/interface/effect/cap/impl/test), got {:?}", other),
                 self.peek_span().clone(),
+            )),
+        }
+    }
+
+    fn parse_effect_def(&mut self, visibility: Option<Visibility>) -> Result<EffectDef, ParseError> {
+        let start = self.peek_span().clone();
+        self.expect(&TokenKind::Effect)?;
+        let (name, _) = self.expect_ident()?;
+        Ok(EffectDef {
+            visibility,
+            name,
+            span: self.span_from(&start),
+        })
+    }
+
+    fn parse_abstract_item(&mut self, visibility: Option<Visibility>) -> Result<Item, ParseError> {
+        let start = self.peek_span().clone();
+        self.expect(&TokenKind::Abstract)?;
+        match self.peek() {
+            TokenKind::Trf | TokenKind::Stage => Ok(Item::AbstractTrfDef(self.parse_abstract_trf_def(visibility)?)),
+            TokenKind::Flw | TokenKind::Seq   => Ok(Item::AbstractFlwDef(self.parse_abstract_flw_def(visibility)?)),
+            _ => Err(ParseError::new(
+                "expected `trf`/`stage` or `flw`/`seq` after `abstract`",
+                start,
             )),
         }
     }
@@ -282,7 +349,7 @@ impl Parser {
                     self.peek_span().clone(),
                 ));
             }
-            methods.push(self.parse_fn_def(vis)?);
+            methods.push(self.parse_fn_def(vis, false)?);
         }
         self.expect(&TokenKind::RBrace)?;
         Ok(ImplDef {
@@ -390,6 +457,20 @@ impl Parser {
         Ok(TestDef { name, body, span: self.span_from(&start) })
     }
 
+    fn parse_bench_def(&mut self) -> Result<BenchDef, ParseError> {
+        let start = self.peek_span().clone();
+        self.expect(&TokenKind::Bench)?;
+        let description = match self.peek().clone() {
+            TokenKind::Str(s) => { self.advance(); s }
+            _ => return Err(ParseError::new(
+                "expected string literal after `bench`",
+                self.peek_span().clone(),
+            )),
+        };
+        let body = self.parse_block()?;
+        Ok(BenchDef { description, body, span: self.span_from(&start) })
+    }
+
     fn parse_visibility(&mut self) -> Option<Visibility> {
         match self.peek() {
             TokenKind::Public   => { self.advance(); Some(Visibility::Public) }
@@ -423,15 +504,31 @@ impl Parser {
 
         let body = if self.peek() == &TokenKind::LBrace {
             // record body
-            TypeBody::Record(self.parse_record_fields()?)
+            let (fields, invariants) = self.parse_record_body()?;
+            return Ok(TypeDef {
+                visibility,
+                name,
+                type_params,
+                with_interfaces,
+                invariants,
+                body: TypeBody::Record(fields),
+                span: self.span_from(&start),
+            });
         } else if self.peek() == &TokenKind::Pipe {
             // sum body
             TypeBody::Sum(self.parse_sum_variants()?)
         } else {
-            return Err(ParseError::new(
-                "expected '{' (record) or '|' (sum) in type definition",
-                self.peek_span().clone(),
-            ));
+            // type alias: type Name = TypeExpr
+            let target = self.parse_type_expr()?;
+            return Ok(TypeDef {
+                visibility,
+                name,
+                type_params,
+                with_interfaces,
+                invariants: vec![],
+                body: TypeBody::Alias(target),
+                span: self.span_from(&start),
+            });
         };
 
         Ok(TypeDef {
@@ -439,6 +536,7 @@ impl Parser {
             name,
             type_params,
             with_interfaces,
+            invariants: vec![],
             body,
             span: self.span_from(&start),
         })
@@ -462,13 +560,30 @@ impl Parser {
         Ok(params)
     }
 
-    fn parse_record_fields(&mut self) -> Result<Vec<Field>, ParseError> {
+    fn parse_record_body(&mut self) -> Result<(Vec<Field>, Vec<Expr>), ParseError> {
         self.expect(&TokenKind::LBrace)?;
         let mut fields = Vec::new();
+        let mut invariants = Vec::new();
         while self.peek() != &TokenKind::RBrace {
-            fields.push(self.parse_field()?);
+            if self.peek() == &TokenKind::Invariant {
+                self.advance();
+                invariants.push(self.parse_expr()?);
+            } else {
+                fields.push(self.parse_field()?);
+            }
         }
         self.expect(&TokenKind::RBrace)?;
+        Ok((fields, invariants))
+    }
+
+    fn parse_record_fields(&mut self) -> Result<Vec<Field>, ParseError> {
+        let (fields, invariants) = self.parse_record_body()?;
+        if !invariants.is_empty() {
+            return Err(ParseError::new(
+                "`invariant` is only allowed in type definitions",
+                Span::dummy(),
+            ));
+        }
         Ok(fields)
     }
 
@@ -529,12 +644,20 @@ impl Parser {
                     ty = TypeExpr::Optional(Box::new(ty), span);
                 }
                 TokenKind::Bang => {
+                    let bang_line = self.peek_span().line;
                     let next_is_effect = match self.peek2() {
-                        Some(TokenKind::Pure) | Some(TokenKind::Io) => true,
-                        Some(TokenKind::Ident(n)) => matches!(
-                            n.as_str(), "Db" | "Network" | "File" | "Emit"
-                                | "Trace"
-                        ),
+                        Some(TokenKind::Pure) | Some(TokenKind::Io) => {
+                            self.tokens
+                                .get(self.pos + 1)
+                                .map(|t| t.span.line == bang_line)
+                                .unwrap_or(false)
+                        }
+                        Some(TokenKind::Ident(_)) => {
+                            self.tokens
+                                .get(self.pos + 1)
+                                .map(|t| t.span.line == bang_line)
+                                .unwrap_or(false)
+                        }
                         _ => false,
                     };
                     if next_is_effect {
@@ -604,7 +727,7 @@ impl Parser {
 
     // ── fn_def (3-5) ─────────────────────────────────────────────────────────
 
-    fn parse_fn_def(&mut self, visibility: Option<Visibility>) -> Result<FnDef, ParseError> {
+    fn parse_fn_def(&mut self, visibility: Option<Visibility>, is_async: bool) -> Result<FnDef, ParseError> {
         let start = self.peek_span().clone();
         self.expect(&TokenKind::Fn)?;
         let (name, _) = self.expect_ident()?;
@@ -624,6 +747,7 @@ impl Parser {
 
         Ok(FnDef {
             visibility,
+            is_async,
             name,
             type_params,
             params,
@@ -640,13 +764,30 @@ impl Parser {
             let start = self.peek_span().clone();
             let (name, _) = self.expect_ident()?;
             self.expect(&TokenKind::Colon)?;
-            let ty = self.parse_type_expr()?;
+            let ty = self.parse_fn_param_type()?;
             params.push(Param { name, ty, span: self.span_from(&start) });
             if self.peek() == &TokenKind::Comma {
                 self.advance();
             }
         }
         Ok(params)
+    }
+
+    fn parse_fn_param_type(&mut self) -> Result<TypeExpr, ParseError> {
+        let start = self.peek_span().clone();
+        let left = self.parse_type_expr_inner(false)?;
+        if self.peek() == &TokenKind::Arrow {
+            self.advance();
+            let output = self.parse_type_expr_inner(false)?;
+            let effects = self.parse_effect_ann()?;
+            return Ok(TypeExpr::TrfFn {
+                input: Box::new(left),
+                output: Box::new(output),
+                effects,
+                span: self.span_from(&start),
+            });
+        }
+        Ok(left)
     }
 
     // effect annotation: ("!" effect_term)+   (1-8, 1-9)
@@ -671,10 +812,10 @@ impl Parser {
                             self.expect(&TokenKind::RAngle)?;
                             Effect::Emit(event_name)
                         }
-                        other => return Err(ParseError::new(
-                            format!("expected effect name (Pure|Io|Db|Network|File|Emit<T>), got `{}`", other),
-                            self.peek_span().clone(),
-                        )),
+                        other => {
+                            self.advance();
+                            Effect::Unknown(other.to_string())
+                        }
                     }
                 }
                 other => return Err(ParseError::new(
@@ -689,9 +830,9 @@ impl Parser {
 
     // ── trf_def (3-6) ────────────────────────────────────────────────────────
 
-    fn parse_trf_def(&mut self, visibility: Option<Visibility>) -> Result<TrfDef, ParseError> {
+    fn parse_trf_def(&mut self, visibility: Option<Visibility>, is_async: bool) -> Result<TrfDef, ParseError> {
         let start = self.peek_span().clone();
-        self.expect(&TokenKind::Trf)?;
+        self.expect_any(&[TokenKind::Trf, TokenKind::Stage])?;
         let (name, _) = self.expect_ident()?;
         let type_params = self.parse_type_params()?;
         self.expect(&TokenKind::Colon)?;
@@ -712,6 +853,7 @@ impl Parser {
 
         Ok(TrfDef {
             visibility,
+            is_async,
             name,
             type_params,
             input_ty,
@@ -719,6 +861,27 @@ impl Parser {
             effects,
             params,
             body,
+            span: self.span_from(&start),
+        })
+    }
+
+    fn parse_abstract_trf_def(&mut self, visibility: Option<Visibility>) -> Result<AbstractTrfDef, ParseError> {
+        let start = self.peek_span().clone();
+        self.expect_any(&[TokenKind::Trf, TokenKind::Stage])?;
+        let (name, _) = self.expect_ident()?;
+        let type_params = self.parse_type_params()?;
+        self.expect(&TokenKind::Colon)?;
+        let input_ty = self.parse_type_expr_no_arrow()?;
+        self.expect(&TokenKind::Arrow)?;
+        let output_ty = self.parse_type_expr_no_arrow()?;
+        let effects = self.parse_effect_ann()?;
+        Ok(AbstractTrfDef {
+            visibility,
+            name,
+            type_params,
+            input_ty,
+            output_ty,
+            effects,
             span: self.span_from(&start),
         })
     }
@@ -746,9 +909,10 @@ impl Parser {
 
     // ── flw_def (3-7) ────────────────────────────────────────────────────────
 
+    #[allow(dead_code)]
     fn parse_flw_def(&mut self) -> Result<FlwDef, ParseError> {
         let start = self.peek_span().clone();
-        self.expect(&TokenKind::Flw)?;
+        self.expect_any(&[TokenKind::Flw, TokenKind::Seq])?;
         let (name, _) = self.expect_ident()?;
         self.expect(&TokenKind::Eq)?;
 
@@ -761,6 +925,128 @@ impl Parser {
         }
 
         Ok(FlwDef { name, steps, span: self.span_from(&start) })
+    }
+
+    fn parse_abstract_flw_def(&mut self, visibility: Option<Visibility>) -> Result<AbstractFlwDef, ParseError> {
+        let start = self.peek_span().clone();
+        self.expect_any(&[TokenKind::Flw, TokenKind::Seq])?;
+        let (name, _) = self.expect_ident()?;
+        let type_params = self.parse_type_params()?;
+        self.expect(&TokenKind::LBrace)?;
+        let mut slots = Vec::new();
+        while self.peek() != &TokenKind::RBrace && !self.at_end() {
+            slots.push(self.parse_flw_slot()?);
+            if self.peek() == &TokenKind::Semicolon {
+                self.advance();
+            }
+        }
+        self.expect(&TokenKind::RBrace)?;
+        Ok(AbstractFlwDef {
+            visibility,
+            name,
+            type_params,
+            slots,
+            span: self.span_from(&start),
+        })
+    }
+
+    fn parse_flw_slot(&mut self) -> Result<FlwSlot, ParseError> {
+        let start = self.peek_span().clone();
+        let (name, _) = self.expect_ident()?;
+        self.expect(&TokenKind::Colon)?;
+        let first_ty = self.parse_type_expr_no_arrow()?;
+        let (abstract_trf_ty, input_ty, output_ty, effects) = if matches!(self.peek(), TokenKind::Arrow) {
+            self.expect(&TokenKind::Arrow)?;
+            // Slot outputs may be fallible (`T!`) and are followed by either
+            // an effect annotation (`!Db`) or the next slot on a new line.
+            // Use full type parsing here so a trailing `!` stays part of the
+            // output type instead of being misread as the start of `!Effect`.
+            let output_ty = self.parse_type_expr()?;
+            let effects = self.parse_effect_ann()?;
+            (None, first_ty, output_ty, effects)
+        } else {
+            let infer_span = self.span_from(&start);
+            let infer_ty = TypeExpr::Named("_infer".into(), vec![], infer_span);
+            (Some(first_ty), infer_ty.clone(), infer_ty, Vec::new())
+        };
+        Ok(FlwSlot {
+            name,
+            abstract_trf_ty,
+            input_ty,
+            output_ty,
+            effects,
+            span: self.span_from(&start),
+        })
+    }
+
+    fn parse_flw_def_or_binding(&mut self, visibility: Option<Visibility>) -> Result<Item, ParseError> {
+        let start = self.peek_span().clone();
+        self.expect_any(&[TokenKind::Flw, TokenKind::Seq])?;
+        let (name, _) = self.expect_ident()?;
+        self.expect(&TokenKind::Eq)?;
+        let (first, _) = self.expect_ident()?;
+
+        match self.peek() {
+            TokenKind::LBrace | TokenKind::LAngle => {
+                self.parse_flw_binding_rest(visibility, start, name, first)
+            }
+            _ => {
+                let mut steps = vec![first];
+                while self.peek() == &TokenKind::PipeGt {
+                    self.advance();
+                    let (step, _) = self.expect_ident()?;
+                    steps.push(step);
+                }
+                Ok(Item::FlwDef(FlwDef {
+                    name,
+                    steps,
+                    span: self.span_from(&start),
+                }))
+            }
+        }
+    }
+
+    fn parse_flw_binding_rest(
+        &mut self,
+        visibility: Option<Visibility>,
+        start: Span,
+        name: String,
+        template: String,
+    ) -> Result<Item, ParseError> {
+        let type_args = if self.peek() == &TokenKind::LAngle {
+            self.advance();
+            let mut args = vec![self.parse_type_expr()?];
+            while self.peek() == &TokenKind::Comma {
+                self.advance();
+                args.push(self.parse_type_expr()?);
+            }
+            self.expect(&TokenKind::RAngle)?;
+            args
+        } else {
+            vec![]
+        };
+
+        self.expect(&TokenKind::LBrace)?;
+        let mut bindings = Vec::new();
+        while self.peek() != &TokenKind::RBrace && !self.at_end() {
+            let (slot, _) = self.expect_ident()?;
+            self.expect(&TokenKind::LArrow)?;
+            let (imp, _) = self.expect_ident()?;
+            bindings.push((slot, SlotImpl::Global(imp)));
+            if self.peek() == &TokenKind::Semicolon {
+                self.advance();
+            }
+        }
+        self.expect(&TokenKind::RBrace)?;
+
+        Ok(Item::FlwBindingDef(FlwBindingDef {
+            visibility,
+            name,
+            template,
+            type_args,
+            bindings,
+            span: self.span_from(&start),
+        }))
     }
 
     // ── block (3-17) ─────────────────────────────────────────────────────────
@@ -813,6 +1099,16 @@ impl Parser {
                 continue;
             }
 
+            // for-in statement (v1.9.0, trailing ; is optional)
+            if self.peek() == &TokenKind::For {
+                let f = self.parse_for_in_stmt()?;
+                stmts.push(Stmt::ForIn(f));
+                if self.peek() == &TokenKind::Semicolon {
+                    self.advance();
+                }
+                continue;
+            }
+
             // expression — could be a stmt (ends with `;`) or the final expr
             let expr = self.parse_expr()?;
 
@@ -834,9 +1130,25 @@ impl Parser {
         let start = self.peek_span().clone();
         self.expect(&TokenKind::Bind)?;
         let pattern = self.parse_pattern()?;
+        let annotated_ty = if self.peek() == &TokenKind::Colon {
+            match &pattern {
+                Pattern::Bind(_, _) => {
+                    self.advance();
+                    Some(self.parse_type_expr_no_arrow()?)
+                }
+                _ => {
+                    return Err(ParseError::new(
+                        "typed bind is only supported for plain name patterns",
+                        self.peek_span().clone(),
+                    ));
+                }
+            }
+        } else {
+            None
+        };
         self.expect(&TokenKind::LArrow)?;
         let expr = self.parse_expr()?;
-        Ok(BindStmt { pattern, expr, span: self.span_from(&start) })
+        Ok(BindStmt { pattern, annotated_ty, expr, span: self.span_from(&start) })
     }
 
     fn parse_chain_stmt(&mut self) -> Result<ChainStmt, ParseError> {
@@ -854,6 +1166,18 @@ impl Parser {
         let expr = self.parse_expr()?;
         self.expect(&TokenKind::Semicolon)?;
         Ok(YieldStmt { expr, span: self.span_from(&start) })
+    }
+
+    // ── for-in stmt (v1.9.0) ──────────────────────────────────────────────────
+
+    fn parse_for_in_stmt(&mut self) -> Result<ForInStmt, ParseError> {
+        let start = self.peek_span().clone();
+        self.expect(&TokenKind::For)?;
+        let (var, _) = self.expect_ident()?;
+        self.expect(&TokenKind::In)?;
+        let iter = self.parse_expr()?;
+        let body = self.parse_block()?;
+        Ok(ForInStmt { var, iter, body, span: self.span_from(&start) })
     }
 
     // ── pattern (3-9..3-11) ──────────────────────────────────────────────────
@@ -957,6 +1281,13 @@ impl Parser {
                 parts.push(self.parse_comparison()?);
             }
             lhs = Expr::Pipeline(parts, self.span_from(&start));
+        }
+
+        // ?? (null-coalesce) — lowest precedence binary operator (v1.9.0)
+        while self.peek() == &TokenKind::QuestionQuestion {
+            self.advance();
+            let rhs = self.parse_comparison()?;
+            lhs = Expr::BinOp(BinOp::NullCoalesce, Box::new(lhs), Box::new(rhs), self.span_from(&start));
         }
 
         Ok(lhs)
@@ -1092,6 +1423,11 @@ impl Parser {
                 Ok(Expr::Lit(Lit::Str(s), start))
             }
 
+            TokenKind::FStringRaw(raw) => {
+                self.advance();
+                self.parse_fstring_parts(&raw, start)
+            }
+
             // bool literal (3-12)
             TokenKind::Bool(b) => {
                 self.advance();
@@ -1129,6 +1465,9 @@ impl Parser {
             TokenKind::Ident(name) => {
                 self.advance();
                 // If uppercase IDENT followed by `{` → record construction
+                if name == "assert_matches" && self.peek() == &TokenKind::LParen {
+                    return self.parse_assert_matches(start);
+                }
                 if name.chars().next().map(|c| c.is_uppercase()).unwrap_or(false)
                     && self.peek() == &TokenKind::LBrace
                 {
@@ -1192,6 +1531,19 @@ impl Parser {
     }
 
     /// `{ name, email }` or `{ name: pat }` — shared by bare record and record-variant patterns.
+    fn parse_assert_matches(&mut self, start: Span) -> Result<Expr, ParseError> {
+        self.expect(&TokenKind::LParen)?;
+        let expr = self.parse_expr()?;
+        self.expect(&TokenKind::Comma)?;
+        let pattern = self.parse_pattern()?;
+        self.expect(&TokenKind::RParen)?;
+        Ok(Expr::AssertMatches(
+            Box::new(expr),
+            Box::new(pattern),
+            self.span_from(&start),
+        ))
+    }
+
     fn parse_record_field_patterns(&mut self) -> Result<Vec<FieldPattern>, ParseError> {
         self.expect(&TokenKind::LBrace)?;
         let mut fields = Vec::new();
@@ -1211,6 +1563,81 @@ impl Parser {
         }
         self.expect(&TokenKind::RBrace)?;
         Ok(fields)
+    }
+
+    fn parse_fstring_parts(&mut self, raw: &str, base_span: Span) -> Result<Expr, ParseError> {
+        let mut parts = Vec::new();
+        let chars: Vec<char> = raw.chars().collect();
+        let mut i = 0usize;
+        let mut lit = String::new();
+
+        while i < chars.len() {
+            match chars[i] {
+                '\\' => {
+                    if i + 1 >= chars.len() {
+                        lit.push('\\');
+                        i += 1;
+                        continue;
+                    }
+                    match chars[i + 1] {
+                        '{' => lit.push('{'),
+                        '}' => lit.push('}'),
+                        'n' => lit.push('\n'),
+                        't' => lit.push('\t'),
+                        'r' => lit.push('\r'),
+                        '"' => lit.push('"'),
+                        '\\' => lit.push('\\'),
+                        other => {
+                            lit.push('\\');
+                            lit.push(other);
+                        }
+                    }
+                    i += 2;
+                }
+                '{' => {
+                    if !lit.is_empty() {
+                        parts.push(FStringPart::Lit(std::mem::take(&mut lit)));
+                    }
+                    let mut depth = 0usize;
+                    let mut expr_src = String::new();
+                    i += 1;
+                    while i < chars.len() {
+                        match chars[i] {
+                            '{' => {
+                                depth += 1;
+                                expr_src.push('{');
+                            }
+                            '}' if depth == 0 => break,
+                            '}' => {
+                                depth -= 1;
+                                expr_src.push('}');
+                            }
+                            ch => expr_src.push(ch),
+                        }
+                        i += 1;
+                    }
+                    if i >= chars.len() {
+                        return Err(ParseError::new(
+                            "unterminated string interpolation expression",
+                            base_span,
+                        ));
+                    }
+                    let inner = Parser::parse_str_expr(&expr_src, &base_span.file)?;
+                    parts.push(FStringPart::Expr(Box::new(inner)));
+                    i += 1;
+                }
+                ch => {
+                    lit.push(ch);
+                    i += 1;
+                }
+            }
+        }
+
+        if !lit.is_empty() {
+            parts.push(FStringPart::Lit(lit));
+        }
+
+        Ok(Expr::FString(parts, base_span))
     }
 
     // closure params: untyped  |x, y|  (3-16)
@@ -1298,6 +1725,10 @@ mod tests {
         Parser::parse_str(src, "test")
             .expect_err("expected error")
             .message
+    }
+
+    fn parse_expr_ok(src: &str) -> Expr {
+        Parser::parse_str_expr(src, "test").expect("parse expr")
     }
 
     // type_def — record (3-3)
@@ -1420,6 +1851,63 @@ mod tests {
         }
     }
 
+    #[test]
+    fn test_parse_bind_state_annotation() {
+        let p = parse("fn f() -> Unit { bind x: PosInt <- 42; () }");
+        if let Item::FnDef(f) = &p.items[0] {
+            if let Stmt::Bind(b) = &f.body.stmts[0] {
+                match &b.annotated_ty {
+                    Some(TypeExpr::Named(name, _, _)) => assert_eq!(name, "PosInt"),
+                    _ => panic!("expected bind annotation"),
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_parse_fstring_simple() {
+        let expr = parse_expr_ok(r#"$"Hello {name}!""#);
+        match expr {
+            Expr::FString(parts, _) => {
+                assert_eq!(parts.len(), 3);
+                assert!(matches!(&parts[0], FStringPart::Lit(s) if s == "Hello "));
+                assert!(matches!(&parts[1], FStringPart::Expr(_)));
+                assert!(matches!(&parts[2], FStringPart::Lit(s) if s == "!"));
+            }
+            other => panic!("expected fstring, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_parse_fstring_literal_only() {
+        let expr = parse_expr_ok(r#"$"literal only""#);
+        assert!(matches!(expr, Expr::FString(_, _)));
+    }
+
+    #[test]
+    fn test_parse_fstring_escape_brace() {
+        let expr = parse_expr_ok(r#"$"\{value\}""#);
+        match expr {
+            Expr::FString(parts, _) => {
+                assert_eq!(parts.len(), 1);
+                assert!(matches!(&parts[0], FStringPart::Lit(s) if s == "{value}"));
+            }
+            other => panic!("expected fstring, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_parse_assert_matches_expr() {
+        let expr = parse_expr_ok(r#"assert_matches(user, { name, age })"#);
+        match expr {
+            Expr::AssertMatches(expr, pattern, _) => {
+                assert!(matches!(*expr, Expr::Ident(_, _)));
+                assert!(matches!(*pattern, Pattern::Record(_, _)));
+            }
+            other => panic!("expected assert_matches, got {:?}", other),
+        }
+    }
+
     // literals (3-12)
     #[test]
     fn test_parse_literals() {
@@ -1518,6 +2006,47 @@ mod tests {
         let p = parse("fn f() -> Unit !Io { () }");
         if let Item::FnDef(f) = &p.items[0] {
             assert!(f.effects.contains(&Effect::Io));
+        }
+    }
+
+    #[test]
+    fn effect_def_parses() {
+        let p = parse("effect Payment");
+        match &p.items[0] {
+            Item::EffectDef(ed) => {
+                assert_eq!(ed.name, "Payment");
+                assert!(ed.visibility.is_none());
+            }
+            other => panic!("expected EffectDef, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn public_effect_def_parses() {
+        let p = parse("public effect Notification");
+        match &p.items[0] {
+            Item::EffectDef(ed) => {
+                assert_eq!(ed.name, "Notification");
+                assert_eq!(ed.visibility, Some(Visibility::Public));
+            }
+            other => panic!("expected EffectDef, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_parse_fn_param_trf_type() {
+        let p = parse("fn f(save: String -> Int !Db) -> Unit { () }");
+        if let Item::FnDef(f) = &p.items[0] {
+            match &f.params[0].ty {
+                TypeExpr::TrfFn { input, output, effects, .. } => {
+                    assert!(matches!(input.as_ref(), TypeExpr::Named(name, _, _) if name == "String"));
+                    assert!(matches!(output.as_ref(), TypeExpr::Named(name, _, _) if name == "Int"));
+                    assert!(effects.contains(&Effect::Db));
+                }
+                other => panic!("expected TrfFn, got {:?}", other),
+            }
+        } else {
+            panic!("expected FnDef");
         }
     }
 
@@ -1699,6 +2228,28 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_type_single_invariant() {
+        let p = parse("type PosInt = { value: Int invariant value > 0 }");
+        let Item::TypeDef(td) = &p.items[0] else { panic!("expected TypeDef") };
+        assert_eq!(td.invariants.len(), 1);
+        assert!(matches!(td.body, TypeBody::Record(_)));
+    }
+
+    #[test]
+    fn test_parse_type_multi_invariant() {
+        let p = parse("type UserAge = { value: Int invariant value >= 0 invariant value <= 150 }");
+        let Item::TypeDef(td) = &p.items[0] else { panic!("expected TypeDef") };
+        assert_eq!(td.invariants.len(), 2);
+    }
+
+    #[test]
+    fn test_parse_type_string_invariant() {
+        let p = parse("type Email = { value: String invariant String.contains(value, \"@\") }");
+        let Item::TypeDef(td) = &p.items[0] else { panic!("expected TypeDef") };
+        assert_eq!(td.invariants.len(), 1);
+    }
+
+    #[test]
     fn test_parse_generic_trf() {
         let p = parse("trf MapOpt<T, U>: Option<T> -> Option<U> = || { x }");
         let Item::TrfDef(td) = &p.items[0] else { panic!("expected TrfDef") };
@@ -1725,6 +2276,16 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_interface_decl_with_super() {
+        let p = parse("interface Ord : Eq { compare: Self -> Self -> Int }");
+        let Item::InterfaceDecl(id) = &p.items[0] else { panic!("expected InterfaceDecl") };
+        assert_eq!(id.name, "Ord");
+        assert_eq!(id.super_interface, Some("Eq".to_string()));
+        assert_eq!(id.methods.len(), 1);
+        assert_eq!(id.methods[0].name, "compare");
+    }
+
+    #[test]
     fn test_parse_interface_impl_decl() {
         let p = parse("impl Show, Eq for UserRow");
         let Item::InterfaceImplDecl(id) = &p.items[0] else { panic!("expected InterfaceImplDecl") };
@@ -1742,6 +2303,69 @@ mod tests {
         assert_eq!(id.type_args.len(), 1);
         assert_eq!(id.methods.len(), 1);
         assert_eq!(id.methods[0].name, "equals");
+    }
+
+    #[test]
+    fn test_parse_abstract_trf() {
+        let p = parse("abstract trf FetchUser: UserId -> User? !Db");
+        let Item::AbstractTrfDef(td) = &p.items[0] else { panic!("expected AbstractTrfDef") };
+        assert_eq!(td.name, "FetchUser");
+        assert!(td.type_params.is_empty());
+        assert_eq!(td.effects.len(), 1);
+    }
+
+    #[test]
+    fn test_parse_abstract_trf_generic() {
+        let p = parse("abstract trf Fetch<T>: Int -> T? !Db");
+        let Item::AbstractTrfDef(td) = &p.items[0] else { panic!("expected AbstractTrfDef") };
+        assert_eq!(td.name, "Fetch");
+        assert_eq!(td.type_params, vec!["T"]);
+        assert_eq!(td.effects.len(), 1);
+    }
+
+    #[test]
+    fn test_parse_abstract_flw_single_slot() {
+        let p = parse("abstract flw DataPipeline<Row> { parse: String -> List<Row>! }");
+        let Item::AbstractFlwDef(fd) = &p.items[0] else { panic!("expected AbstractFlwDef") };
+        assert_eq!(fd.name, "DataPipeline");
+        assert_eq!(fd.type_params, vec!["Row"]);
+        assert_eq!(fd.slots.len(), 1);
+        assert_eq!(fd.slots[0].name, "parse");
+        assert!(fd.slots[0].abstract_trf_ty.is_none());
+    }
+
+    #[test]
+    fn test_parse_abstract_flw_slot_abstract_trf_shorthand() {
+        let p = parse("abstract flw Pipeline<Row> { fetch: Fetch<Row> }");
+        let Item::AbstractFlwDef(fd) = &p.items[0] else { panic!("expected AbstractFlwDef") };
+        assert_eq!(fd.slots.len(), 1);
+        assert!(matches!(fd.slots[0].abstract_trf_ty, Some(TypeExpr::Named(ref n, _, _)) if n == "Fetch"));
+    }
+
+    #[test]
+    fn test_parse_abstract_flw_multi_slot() {
+        let p = parse("abstract flw DataPipeline<Row> { parse: String -> List<Row>!; save: List<Row> -> Int !Db }");
+        let Item::AbstractFlwDef(fd) = &p.items[0] else { panic!("expected AbstractFlwDef") };
+        assert_eq!(fd.slots.len(), 2);
+        assert_eq!(fd.slots[1].name, "save");
+    }
+
+    #[test]
+    fn test_parse_flw_binding_full() {
+        let p = parse("flw UserImport = DataPipeline<UserRow> { parse <- ParseCsv; save <- SaveUsers }");
+        let Item::FlwBindingDef(fd) = &p.items[0] else { panic!("expected FlwBindingDef") };
+        assert_eq!(fd.name, "UserImport");
+        assert_eq!(fd.template, "DataPipeline");
+        assert_eq!(fd.type_args.len(), 1);
+        assert_eq!(fd.bindings.len(), 2);
+        assert!(matches!(&fd.bindings[0].1, SlotImpl::Global(name) if name == "ParseCsv"));
+    }
+
+    #[test]
+    fn test_parse_flw_binding_partial() {
+        let p = parse("flw PartialImport = DataPipeline<UserRow> { parse <- ParseCsv }");
+        let Item::FlwBindingDef(fd) = &p.items[0] else { panic!("expected FlwBindingDef") };
+        assert_eq!(fd.bindings.len(), 1);
     }
 
     // ── v0.5.0 parser tests ────────────────────────────────────────────────────

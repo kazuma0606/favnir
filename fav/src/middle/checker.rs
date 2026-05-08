@@ -26,6 +26,12 @@ pub enum Type {
     Fn(Vec<Type>, Box<Type>),
     /// `trf` definition: input, output, effects
     Trf(Box<Type>, Box<Type>, Vec<Effect>),
+    /// `abstract trf` definition (v1.3.0)
+    AbstractTrf { input: Box<Type>, output: Box<Type>, effects: Vec<Effect> },
+    /// `abstract flw Name<T> { ... }` template marker (v1.3.0)
+    AbstractFlwTemplate(String),
+    /// Partially bound abstract flw (v1.3.0)
+    PartialFlw { template: String, type_args: Vec<Type>, unbound_slots: Vec<String> },
     /// User-defined named type (after lookup)
     Named(String, Vec<Type>),
     /// Type variable  E`T`, `U`, or fresh `$0`, `$1` (v0.4.0)
@@ -34,6 +40,8 @@ pub enum Type {
     Cap(String, Vec<Type>),
     /// Interface instance type (v1.1.0)
     Interface(String, Vec<Type>),
+    /// `async fn` return type wrapper: `Task<T>` (v1.7.0)
+    Task(Box<Type>),
     /// Type is not yet known (monomorphic placeholder / built-in generic)
     Unknown,
     /// Error recovery  Esuppress cascading errors
@@ -51,6 +59,7 @@ impl Type {
             return true;
         }
         match (self, other) {
+            (Type::Task(a), Type::Task(b)) => a.is_compatible(b),
             (Type::Option(a), Type::Option(b)) => a.is_compatible(b),
             (Type::List(a),   Type::List(b))   => a.is_compatible(b),
             (Type::Result(a1, a2), Type::Result(b1, b2)) => {
@@ -59,6 +68,19 @@ impl Type {
             (Type::Arrow(ai, ao), Type::Arrow(bi, bo)) => {
                 ai.is_compatible(bi) && ao.is_compatible(bo)
             }
+            // Cross-compatibility: impl method bodies use Arrow (lambda checker output)
+            // while builtin interface defs register Fn. Be lenient when input is fuzzy.
+            (Type::Arrow(ai, ao), Type::Fn(_params, ret)) => {
+                let fuzzy = matches!(ai.as_ref(), Type::Unknown | Type::Unit | Type::Error);
+                fuzzy && ao.is_compatible(ret)
+            }
+            (Type::Fn(_params, ret), Type::Arrow(bi, bo)) => {
+                let fuzzy = matches!(bi.as_ref(), Type::Unknown | Type::Unit | Type::Error);
+                fuzzy && ret.is_compatible(bo)
+            }
+            // 0-param Fn is a value (e.g. Monoid.empty): compatible with the return type directly
+            (_, Type::Fn(params, ret)) if params.is_empty() => self.is_compatible(ret),
+            (Type::Fn(params, ret), _) if params.is_empty() => ret.is_compatible(other),
             (Type::Cap(n1, as1), Type::Cap(n2, as2)) => {
                 n1 == n2 && as1.len() == as2.len()
                     && as1.iter().zip(as2).all(|(a, b)| a.is_compatible(b))
@@ -67,6 +89,16 @@ impl Type {
                 n1 == n2 && as1.len() == as2.len()
                     && as1.iter().zip(as2).all(|(a, b)| a.is_compatible(b))
             }
+            (
+                Type::AbstractTrf { input: i1, output: o1, effects: f1 },
+                Type::AbstractTrf { input: i2, output: o2, effects: f2 },
+            ) => i1.is_compatible(i2) && o1.is_compatible(o2) && f1 == f2,
+            (Type::AbstractFlwTemplate(a), Type::AbstractFlwTemplate(b)) => a == b,
+            (
+                Type::PartialFlw { template: t1, type_args: a1, unbound_slots: s1 },
+                Type::PartialFlw { template: t2, type_args: a2, unbound_slots: s2 },
+            ) => t1 == t2 && a1.len() == a2.len() && s1 == s2
+                && a1.iter().zip(a2).all(|(a, b)| a.is_compatible(b)),
             // Named types with the same name: compatible if args match, or if
             // one side has no args (raw/unapplied form from record construction).
             (Type::Named(n1, a1), Type::Named(n2, a2)) if n1 == n2 => {
@@ -101,6 +133,20 @@ impl Type {
                 let eff = if effs.is_empty() { String::new() } else { format!(" {}", effs.join(" ")) };
                 format!("Trf<{}, {}{}>", i.display(), o.display(), eff)
             }
+            Type::AbstractTrf { input, output, effects } => {
+                let effs: Vec<String> = effects.iter().map(|e| format!("!{:?}", e)).collect();
+                let eff = if effs.is_empty() { String::new() } else { format!(" {}", effs.join(" ")) };
+                format!("AbstractTrf<{}, {}{}>", input.display(), output.display(), eff)
+            }
+            Type::AbstractFlwTemplate(name) => format!("AbstractFlw<{}>", name),
+            Type::PartialFlw { template, type_args, unbound_slots } => {
+                let args = if type_args.is_empty() {
+                    String::new()
+                } else {
+                    format!("<{}>", type_args.iter().map(|t| t.display()).collect::<Vec<_>>().join(", "))
+                };
+                format!("PartialFlw<{}{}; {}>", template, args, unbound_slots.join(", "))
+            }
             Type::Named(n, args) if args.is_empty() => n.clone(),
             // Named("Option", [T]) ↁEdisplay as T? to match Type::Option(T)
             Type::Named(n, args) if n == "Option" && args.len() == 1 => {
@@ -121,6 +167,7 @@ impl Type {
                 let s: Vec<_> = args.iter().map(|a| a.display()).collect();
                 format!("{}<{}>", name, s.join(", "))
             }
+            Type::Task(t) => format!("Task<{}>", t.display()),
             Type::Unknown => "_".into(),
             Type::Error   => "?".into(),
         }
@@ -132,6 +179,7 @@ impl Type {
     pub fn as_callable(&self) -> Option<(&Type, &Type)> {
         match self {
             Type::Trf(i, o, _) => Some((i, o)),
+            Type::AbstractTrf { input, output, .. } => Some((input, output)),
             Type::Arrow(i, o)  => Some((i, o)),
             Type::Fn(params, ret) if !params.is_empty() => Some((&params[0], ret)),
             _ => None,
@@ -173,6 +221,7 @@ impl Subst {
                     ty.clone()
                 }
             }
+            Type::Task(t)        => Type::Task(Box::new(self.apply(t))),
             Type::List(t)        => Type::List(Box::new(self.apply(t))),
             Type::Option(t)      => Type::Option(Box::new(self.apply(t))),
             Type::Map(k, v)      => Type::Map(Box::new(self.apply(k)), Box::new(self.apply(v))),
@@ -207,6 +256,7 @@ impl Subst {
 pub fn occurs(var: &str, ty: &Type) -> bool {
     match ty {
         Type::Var(name)      => name == var,
+        Type::Task(t)        => occurs(var, t),
         Type::List(t)        => occurs(var, t),
         Type::Option(t)      => occurs(var, t),
         Type::Map(k, v)      => occurs(var, k) || occurs(var, v),
@@ -248,6 +298,7 @@ pub fn unify(t1: &Type, t2: &Type) -> Result<Subst, String> {
         (Type::Error, _)   | (_, Type::Error)   => Ok(Subst::empty()),
 
         // Structural rules
+        (Type::Task(a),   Type::Task(b))   => unify(a, b),
         (Type::List(a),   Type::List(b))   => unify(a, b),
         (Type::Option(a), Type::Option(b)) => unify(a, b),
         (Type::Map(k1, v1), Type::Map(k2, v2)) => {
@@ -351,6 +402,19 @@ impl InterfaceRegistry {
             .and_then(|entry| entry.methods.get(method_name))
             .or_else(|| self.interfaces.get(interface_name).and_then(|def| def.methods.get(method_name)))
     }
+
+    /// Look up the method type from the interface *declaration* (canonical type, not impl body).
+    /// Used for method dispatch to get the correct callable type with proper param counts.
+    pub fn lookup_declared_method(&self, interface_name: &str, method_name: &str) -> Option<&Type> {
+        self.interfaces.get(interface_name)?.methods.get(method_name)
+    }
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Clone)]
+pub struct FlwBindingInfo {
+    pub template: String,
+    pub bindings: Vec<(String, crate::ast::SlotImpl)>,
 }
 
 // ── TyEnv (4-3) ───────────────────────────────────────────────────────────────
@@ -440,6 +504,34 @@ impl std::fmt::Display for TypeWarning {
 
 // ── Checker ───────────────────────────────────────────────────────────────────
 
+#[derive(Debug, Clone, PartialEq)]
+enum StaticValue {
+    Int(i64),
+    Float(f64),
+    Bool(bool),
+    String(String),
+    Unit,
+}
+
+impl StaticValue {
+    fn from_lit(lit: Lit) -> Self {
+        match lit {
+            Lit::Int(v) => StaticValue::Int(v),
+            Lit::Float(v) => StaticValue::Float(v),
+            Lit::Bool(v) => StaticValue::Bool(v),
+            Lit::Str(v) => StaticValue::String(v),
+            Lit::Unit => StaticValue::Unit,
+        }
+    }
+
+    fn into_string(self) -> Option<String> {
+        match self {
+            StaticValue::String(v) => Some(v),
+            _ => None,
+        }
+    }
+}
+
 pub struct Checker {
     env: TyEnv,
     pub errors: Vec<TypeError>,
@@ -447,6 +539,8 @@ pub struct Checker {
     pub type_at: HashMap<Span, Type>,
     /// User-defined type bodies, for field and variant lookup.
     type_defs: HashMap<String, TypeBody>,
+    /// User-defined invariants by type name.
+    type_invariants: HashMap<String, Vec<Expr>>,
     /// Effects declared on the current fn/trf being checked.
     current_effects: Vec<Effect>,
     /// Module resolver (Some = project mode, None = single-file mode).
@@ -465,12 +559,22 @@ pub struct Checker {
     impls: HashMap<(String, String), ImplScope>,
     /// Registered interfaces and their implementations (v1.1.0).
     interface_registry: InterfaceRegistry,
+    /// Registered abstract trf definitions (v1.3.0).
+    abstract_trf_registry: HashMap<String, AbstractTrfDef>,
+    /// Registered abstract flw template definitions (v1.3.0).
+    abstract_flw_registry: HashMap<String, AbstractFlwDef>,
+    /// User-declared custom effects (v1.5.0).
+    effect_registry: HashSet<String>,
+    /// Explain/check metadata for bound abstract flw values (v1.3.0).
+    flw_binding_info: HashMap<String, FlwBindingInfo>,
     /// Expected type-parameter arity for user-defined generic types (v0.4.0).
     type_arity: HashMap<String, usize>,
     /// Chain context: the return type of the enclosing fn when it is Result/Option (v0.5.0).
     chain_context: Option<Type>,
     /// Whether we are inside a collect { } block (v0.5.0).
     in_collect: bool,
+    /// Type alias definitions: name -> target TypeExpr (v1.7.0).
+    type_aliases: HashMap<String, TypeExpr>,
 }
 
 impl Checker {
@@ -481,6 +585,7 @@ impl Checker {
             warnings: Vec::new(),
             type_at: HashMap::new(),
             type_defs: HashMap::new(),
+            type_invariants: HashMap::new(),
             current_effects: Vec::new(),
             resolver: None,
             current_file: None,
@@ -489,10 +594,15 @@ impl Checker {
             fresh_counter: 0,
             caps: HashMap::new(),
             interface_registry: InterfaceRegistry::new(),
+            abstract_trf_registry: HashMap::new(),
+            abstract_flw_registry: HashMap::new(),
+            effect_registry: HashSet::new(),
+            flw_binding_info: HashMap::new(),
             impls: HashMap::new(),
             type_arity: HashMap::new(),
             chain_context: None,
             in_collect: false,
+            type_aliases: HashMap::new(),
         }
     }
 
@@ -506,6 +616,7 @@ impl Checker {
             warnings: Vec::new(),
             type_at: HashMap::new(),
             type_defs: HashMap::new(),
+            type_invariants: HashMap::new(),
             current_effects: Vec::new(),
             resolver: Some(resolver),
             current_file: Some(file),
@@ -514,10 +625,15 @@ impl Checker {
             fresh_counter: 0,
             caps: HashMap::new(),
             interface_registry: InterfaceRegistry::new(),
+            abstract_trf_registry: HashMap::new(),
+            abstract_flw_registry: HashMap::new(),
+            effect_registry: HashSet::new(),
+            flw_binding_info: HashMap::new(),
             impls: HashMap::new(),
             type_arity: HashMap::new(),
             chain_context: None,
             in_collect: false,
+            type_aliases: HashMap::new(),
         }
     }
 
@@ -685,7 +801,7 @@ impl Checker {
         self.env.define("IO".into(), Type::Named("IO".into(), vec![]));
 
         // List, String, Option, Result, and v0.2.0 namespace placeholders.
-        for ns in &["List", "String", "Option", "Result", "Db", "Http", "Map", "Debug", "Emit", "Util", "Trace", "File", "Json", "Csv"] {
+        for ns in &["List", "String", "Option", "Result", "Db", "Http", "Map", "Debug", "Emit", "Util", "Trace", "File", "Json", "Csv", "Task"] {
             self.env.define(ns.to_string(), Type::Named(ns.to_string(), vec![]));
         }
 
@@ -740,6 +856,15 @@ impl Checker {
         self.impls.insert(("Eq".into(),   "Bool".into()), mk_eq_scope(bool_ty));
         self.impls.insert(("Show".into(), "Bool".into()), mk_show_scope(bool_ty));
         self.register_builtin_interfaces();
+        self.register_stdlib_states();
+    }
+
+    fn register_stdlib_states(&mut self) {
+        for td in crate::std_states::parsed_type_defs() {
+            self.type_defs.insert(td.name.clone(), td.body.clone());
+            self.type_invariants.insert(td.name.clone(), td.invariants.clone());
+            self.env.define(td.name.clone(), Type::Named(td.name.clone(), vec![]));
+        }
     }
 
     fn register_builtin_interfaces(&mut self) {
@@ -882,8 +1007,22 @@ impl Checker {
     fn register_item_signatures(&mut self, program: &Program) {
         for item in &program.items {
             match item {
+                Item::EffectDef(ed) => {
+                    self.effect_registry.insert(ed.name.clone());
+                }
                 Item::TypeDef(td) => {
+                    // Type aliases: store the target TypeExpr for later resolution.
+                    if let TypeBody::Alias(target) = &td.body {
+                        self.type_aliases.insert(td.name.clone(), target.clone());
+                        if !td.type_params.is_empty() {
+                            self.type_arity.insert(td.name.clone(), td.type_params.len());
+                        }
+                        // Define in env so the name resolves
+                        self.env.define(td.name.clone(), Type::Named(td.name.clone(), vec![]));
+                        continue;
+                    }
                     self.type_defs.insert(td.name.clone(), td.body.clone());
+                    self.type_invariants.insert(td.name.clone(), td.invariants.clone());
                     self.env.define(td.name.clone(), Type::Named(td.name.clone(), vec![]));
                     // Track arity for generic type arity checking (E023).
                     if !td.type_params.is_empty() {
@@ -921,8 +1060,13 @@ impl Checker {
                         .map(|p| self.resolve_type_expr(&p.ty))
                         .collect();
                     let ret = self.resolve_type_expr(&fd.return_ty);
+                    let effective_ret = if fd.is_async {
+                        Type::Task(Box::new(ret))
+                    } else {
+                        ret
+                    };
                     self.type_params = saved_tp;
-                    self.env.define(fd.name.clone(), Type::Fn(params, Box::new(ret)));
+                    self.env.define(fd.name.clone(), Type::Fn(params, Box::new(effective_ret)));
                 }
                 Item::TrfDef(td) => {
                     let saved_tp = std::mem::replace(
@@ -937,9 +1081,32 @@ impl Checker {
                         Type::Trf(Box::new(input), Box::new(output), td.effects.clone()),
                     );
                 }
+                Item::AbstractTrfDef(td) => {
+                    self.abstract_trf_registry.insert(td.name.clone(), td.clone());
+                    if !td.type_params.is_empty() {
+                        self.type_arity.insert(td.name.clone(), td.type_params.len());
+                    }
+                    let input  = self.resolve_type_expr(&td.input_ty);
+                    let output = self.resolve_type_expr(&td.output_ty);
+                    self.env.define(
+                        td.name.clone(),
+                        Type::AbstractTrf {
+                            input: Box::new(input),
+                            output: Box::new(output),
+                            effects: td.effects.clone(),
+                        },
+                    );
+                }
                 Item::FlwDef(fd) => {
                     // Compute flw type from its steps; register Unknown for now,
                     // will be refined during check_flw_def.
+                    self.env.define(fd.name.clone(), Type::Unknown);
+                }
+                Item::AbstractFlwDef(fd) => {
+                    self.abstract_flw_registry.insert(fd.name.clone(), fd.clone());
+                    self.env.define(fd.name.clone(), Type::AbstractFlwTemplate(fd.name.clone()));
+                }
+                Item::FlwBindingDef(fd) => {
                     self.env.define(fd.name.clone(), Type::Unknown);
                 }
                 Item::CapDef(cd) => {
@@ -969,10 +1136,11 @@ impl Checker {
                         );
                     }
                 }
-                // namespace / use / test / interface are handled elsewhere
+                // namespace / use / test / bench / interface are handled elsewhere
                 Item::NamespaceDecl(..)
                 | Item::UseDecl(..)
                 | Item::TestDef(..)
+                | Item::BenchDef(..)
                 | Item::InterfaceDecl(..)
                 | Item::InterfaceImplDecl(..) => {}
             }
@@ -986,19 +1154,82 @@ impl Checker {
             Item::TypeDef(td) => self.check_type_def(td),
             Item::FnDef(fd)   => self.check_fn_def(fd),
             Item::TrfDef(td)  => self.check_trf_def(td),
+            Item::AbstractTrfDef(td) => self.check_abstract_trf_def(td),
             Item::FlwDef(fd)  => self.check_flw_def(fd),
+            Item::AbstractFlwDef(fd) => self.check_abstract_flw_def(fd),
+            Item::FlwBindingDef(fd) => self.check_flw_binding_def(fd),
             Item::InterfaceDecl(id) => self.check_interface_decl(id),
             Item::InterfaceImplDecl(id) => self.check_interface_impl_decl(id),
             Item::CapDef(cd)  => self.check_cap_def(cd),
             Item::ImplDef(id) => self.check_impl_def(id),
+            Item::EffectDef(..) => {}
             Item::TestDef(td) => self.check_test_def(td),
+            Item::BenchDef(bd) => self.check_bench_def(bd),
             Item::NamespaceDecl(..) | Item::UseDecl(..) => {}
+        }
+    }
+
+    fn check_effects_declared(&mut self, effects: &[Effect], span: &Span) {
+        const BUILTIN_EFFECTS: &[&str] = &["Pure", "Io", "Db", "Network", "File", "Trace", "Emit"];
+        for effect in effects {
+            if let Effect::Unknown(name) = effect {
+                if !BUILTIN_EFFECTS.contains(&name.as_str()) && !self.effect_registry.contains(name) {
+                    self.type_error(
+                        "E052",
+                        format!(
+                            "undeclared effect `{}`; declare it with `effect {}` at top level",
+                            name, name
+                        ),
+                        span,
+                    );
+                }
+            }
+        }
+    }
+
+    fn check_abstract_trf_def(&mut self, td: &AbstractTrfDef) {
+        self.check_effects_declared(&td.effects, &td.span);
+        self.validate_type_expr_arity(&td.input_ty);
+        self.validate_type_expr_arity(&td.output_ty);
+    }
+
+    fn check_abstract_flw_def(&mut self, fd: &AbstractFlwDef) {
+        for slot in &fd.slots {
+            self.check_effects_declared(&slot.effects, &slot.span);
+            self.validate_type_expr_arity(&slot.input_ty);
+            self.validate_type_expr_arity(&slot.output_ty);
+            if let Some(ty) = &slot.abstract_trf_ty {
+                self.validate_type_expr_arity(ty);
+            }
         }
     }
 
     // ── type_def (4-6) ────────────────────────────────────────────────────────
 
     fn check_type_def(&mut self, td: &TypeDef) {
+        if let TypeBody::Record(fields) = &td.body {
+            self.env.push();
+            for field in fields {
+                let field_ty = self.resolve_type_expr(&field.ty);
+                self.env.define(field.name.clone(), field_ty);
+            }
+            for invariant in &td.invariants {
+                let inv_ty = self.check_expr(invariant);
+                if !inv_ty.is_compatible(&Type::Bool) {
+                    self.type_error(
+                        "E045",
+                        format!(
+                            "`invariant` for type `{}` must be of type Bool, got `{}`",
+                            td.name,
+                            inv_ty.display()
+                        ),
+                        invariant.span(),
+                    );
+                }
+            }
+            self.env.pop();
+        }
+
         // Type definitions are structurally valid if they parsed correctly.
         // Field types are resolved lazily during use.
         for interface_name in &td.with_interfaces {
@@ -1079,7 +1310,27 @@ impl Checker {
                     continue;
                 };
                 let expected = self.substitute_self_in_type(expected, &self_ty);
-                if !body_ty.is_compatible(&expected) {
+                // Lambda bodies are typed as Arrow(Unknown/Unit, ret) — Unknown for 1-param,
+                // Unit as placeholder for multi-param. Be lenient on input type for closures,
+                // but still check that the return type matches.
+                let compatible = if let Type::Arrow(input, ret_ty) = body_ty {
+                    if matches!(input.as_ref(), Type::Unknown | Type::Unit) {
+                        // Extract the final return type, unwrapping curried arrows
+                        fn final_ret(ty: &Type) -> &Type {
+                            match ty {
+                                Type::Arrow(_, out) => final_ret(out),
+                                Type::Fn(_, ret) => ret,
+                                other => other,
+                            }
+                        }
+                        ret_ty.is_compatible(final_ret(&expected))
+                    } else {
+                        body_ty.is_compatible(&expected)
+                    }
+                } else {
+                    body_ty.is_compatible(&expected)
+                };
+                if !compatible {
                     self.type_error(
                         "E042",
                         format!(
@@ -1117,10 +1368,26 @@ impl Checker {
             name: type_name.to_string(),
             type_params: vec![],
             with_interfaces: vec![],
+            invariants: vec![],
             body,
             span: span.clone(),
         };
         self.synthesize_interface_impl_for_type_def(&td, interface_name, span);
+    }
+
+    /// Returns true if `ty` implements `interface_name`, including generic containers:
+    /// List<T> / Option<T> / Result<T,E> are considered to implement an interface
+    /// when their element type(s) do.
+    fn is_type_implementing(&self, interface_name: &str, ty: &Type) -> bool {
+        if self.interface_registry.is_implemented(interface_name, &ty.display()) {
+            return true;
+        }
+        match ty {
+            Type::List(inner)       => self.is_type_implementing(interface_name, inner),
+            Type::Option(inner)     => self.is_type_implementing(interface_name, inner),
+            Type::Result(ok, _err)  => self.is_type_implementing(interface_name, ok),
+            _ => false,
+        }
     }
 
     fn synthesize_interface_impl_for_type_def(
@@ -1173,8 +1440,7 @@ impl Checker {
 
         for field in fields {
             let field_ty = self.resolve_type_expr(&field.ty);
-            let field_key = field_ty.display();
-            if !self.interface_registry.is_implemented(interface_name, &field_key) {
+            if !self.is_type_implementing(interface_name, &field_ty) {
                 self.type_error(
                     "E044",
                     format!(
@@ -1275,7 +1541,21 @@ impl Checker {
         self.current_effects = saved_effects;
     }
 
+    fn check_bench_def(&mut self, bd: &BenchDef) {
+        // Bench bodies may use Io effect only; Db/Network/File are disallowed (E064).
+        let saved_effects = std::mem::replace(
+            &mut self.current_effects,
+            vec![Effect::Io],
+        );
+        self.env.push();
+        self.check_block(&bd.body);
+        self.env.pop();
+        // Check for disallowed effects in bench body (E064 stub — no effect tracking yet).
+        self.current_effects = saved_effects;
+    }
+
     fn check_fn_def(&mut self, fd: &FnDef) {
+        self.check_effects_declared(&fd.effects, &fd.span);
         let saved_effects = std::mem::replace(&mut self.current_effects, fd.effects.clone());
         let saved_tp = std::mem::replace(
             &mut self.type_params,
@@ -1328,6 +1608,7 @@ impl Checker {
     // ── trf_def (4-8) ─────────────────────────────────────────────────────────
 
     fn check_trf_def(&mut self, td: &TrfDef) {
+        self.check_effects_declared(&td.effects, &td.span);
         let saved_effects = std::mem::replace(&mut self.current_effects, td.effects.clone());
         let saved_tp = std::mem::replace(
             &mut self.type_params,
@@ -1437,6 +1718,290 @@ impl Checker {
 
     // ── block (4-17) ──────────────────────────────────────────────────────────
 
+    fn check_flw_binding_def(&mut self, fd: &FlwBindingDef) {
+        let Some(template) = self.abstract_flw_registry.get(&fd.template).cloned() else {
+            self.type_error("E002", format!("undefined: `{}`", fd.template), &fd.span);
+            self.env.define(fd.name.clone(), Type::Error);
+            return;
+        };
+
+        if template.type_params.len() != fd.type_args.len() {
+            self.type_error(
+                "E023",
+                format!(
+                    "wrong number of type arguments for `{}`: expected {}, got {}",
+                    template.name,
+                    template.type_params.len(),
+                    fd.type_args.len()
+                ),
+                &fd.span,
+            );
+            self.env.define(fd.name.clone(), Type::Error);
+            return;
+        }
+
+        let type_subst: HashMap<String, Type> = template
+            .type_params
+            .iter()
+            .cloned()
+            .zip(fd.type_args.iter().map(|arg| self.resolve_type_expr(arg)))
+            .collect();
+        let slot_map: HashMap<String, FlwSlot> = template
+            .slots
+            .iter()
+            .cloned()
+            .map(|slot| (slot.name.clone(), slot))
+            .collect();
+
+        let mut bound_slots = HashSet::new();
+        let mut effect_acc = Vec::new();
+        let mut has_binding_error = false;
+
+        for (slot_name, slot_impl) in &fd.bindings {
+            let Some(slot) = slot_map.get(slot_name) else {
+                self.type_error(
+                    "E049",
+                    format!("unknown slot `{}` in abstract flw `{}`", slot_name, template.name),
+                    &fd.span,
+                );
+                has_binding_error = true;
+                continue;
+            };
+            bound_slots.insert(slot_name.clone());
+
+            let Some((impl_name, impl_ty)) = self.resolve_slot_impl_type(slot_impl, &fd.span) else {
+                has_binding_error = true;
+                continue;
+            };
+
+            let (expected_input, expected_output, expected_effects) =
+                self.resolve_flw_slot_signature_with_subst(slot, &type_subst);
+            let mismatch = match impl_ty.as_callable() {
+                Some((actual_input, actual_output)) => {
+                    !actual_input.is_compatible(&expected_input)
+                        || !actual_output.is_compatible(&expected_output)
+                        || self.callable_effects(&impl_ty) != expected_effects
+                }
+                None => true,
+            };
+
+            if mismatch {
+                let actual_sig = match impl_ty.as_callable() {
+                    Some((input, output)) => {
+                        let effects = self.callable_effects(&impl_ty);
+                        let eff_str = if effects.is_empty() {
+                            String::new()
+                        } else {
+                            format!(
+                                " {}",
+                                effects.iter().map(|e| format!("!{:?}", e)).collect::<Vec<_>>().join(" ")
+                            )
+                        };
+                        format!("{} -> {}{}", input.display(), output.display(), eff_str)
+                    }
+                    None => impl_ty.display(),
+                };
+                let expected_eff_str = if expected_effects.is_empty() {
+                    String::new()
+                } else {
+                    format!(
+                        " {}",
+                        expected_effects
+                            .iter()
+                            .map(|e| format!("!{:?}", e))
+                            .collect::<Vec<_>>()
+                            .join(" ")
+                    )
+                };
+                self.type_error(
+                    "E048",
+                    format!(
+                          "slot `{}` in abstract flw `{}` expects `{}` -> `{}`{}, got `{}` from `{}`",
+                          slot_name,
+                          template.name,
+                          expected_input.display(),
+                          expected_output.display(),
+                          expected_eff_str,
+                          actual_sig,
+                          impl_name
+                      ),
+                      &fd.span,
+                  );
+                has_binding_error = true;
+                continue;
+            }
+
+            effect_acc.extend(expected_effects);
+        }
+
+        self.flw_binding_info.insert(
+            fd.name.clone(),
+            FlwBindingInfo {
+                template: fd.template.clone(),
+                bindings: fd.bindings.clone(),
+            },
+        );
+
+        if has_binding_error {
+            self.env.define(fd.name.clone(), Type::Error);
+            return;
+        }
+
+        let unbound_slots: Vec<String> = template
+            .slots
+            .iter()
+            .filter(|slot| !bound_slots.contains(&slot.name))
+            .map(|slot| slot.name.clone())
+            .collect();
+
+        if unbound_slots.is_empty() {
+            let first_slot = match template.slots.first() {
+                Some(slot) => slot,
+                None => {
+                    self.env.define(fd.name.clone(), Type::Unknown);
+                    return;
+                }
+            };
+            let last_slot = template.slots.last().unwrap();
+            let (input_ty, _, _) = self.resolve_flw_slot_signature_with_subst(first_slot, &type_subst);
+            let (_, output_ty, _) = self.resolve_flw_slot_signature_with_subst(last_slot, &type_subst);
+            self.env.define(
+                fd.name.clone(),
+                Type::Trf(
+                    Box::new(input_ty),
+                    Box::new(output_ty),
+                    self.infer_flw_binding_effects(&effect_acc),
+                ),
+            );
+        } else {
+            self.env.define(
+                fd.name.clone(),
+                Type::PartialFlw {
+                    template: fd.template.clone(),
+                    type_args: fd.type_args.iter().map(|arg| self.resolve_type_expr(arg)).collect(),
+                    unbound_slots,
+                },
+            );
+        }
+    }
+
+    fn resolve_type_expr_with_subst(&self, te: &TypeExpr, subst: &HashMap<String, Type>) -> Type {
+        match te {
+            TypeExpr::Optional(inner, _) => {
+                Type::Option(Box::new(self.resolve_type_expr_with_subst(inner, subst)))
+            }
+            TypeExpr::Fallible(inner, _) => Type::Result(
+                Box::new(self.resolve_type_expr_with_subst(inner, subst)),
+                Box::new(Type::Named("Error".into(), vec![])),
+            ),
+            TypeExpr::Arrow(a, b, _) => Type::Arrow(
+                Box::new(self.resolve_type_expr_with_subst(a, subst)),
+                Box::new(self.resolve_type_expr_with_subst(b, subst)),
+            ),
+            TypeExpr::TrfFn { input, output, effects, .. } => Type::Trf(
+                Box::new(self.resolve_type_expr_with_subst(input, subst)),
+                Box::new(self.resolve_type_expr_with_subst(output, subst)),
+                effects.clone(),
+            ),
+            TypeExpr::Named(name, args, _) if args.is_empty() => {
+                subst.get(name).cloned().unwrap_or_else(|| self.resolve_type_expr(te))
+            }
+            TypeExpr::Named(name, args, _) => {
+                let resolved_args: Vec<Type> = args
+                    .iter()
+                    .map(|arg| self.resolve_type_expr_with_subst(arg, subst))
+                    .collect();
+                if let Some(td) = self.abstract_trf_registry.get(name) {
+                    let type_subst: HashMap<String, Type> = td
+                        .type_params
+                        .iter()
+                        .cloned()
+                        .zip(resolved_args.iter().cloned())
+                        .collect();
+                    return Type::AbstractTrf {
+                        input: Box::new(self.resolve_type_expr_with_subst(&td.input_ty, &type_subst)),
+                        output: Box::new(self.resolve_type_expr_with_subst(&td.output_ty, &type_subst)),
+                        effects: td.effects.clone(),
+                    };
+                }
+                match name.as_str() {
+                    "Bool" => Type::Bool,
+                    "Int" => Type::Int,
+                    "Float" => Type::Float,
+                    "String" => Type::String,
+                    "Unit" => Type::Unit,
+                    "List" if resolved_args.len() == 1 => Type::List(Box::new(resolved_args[0].clone())),
+                    "Map" if resolved_args.len() == 2 => {
+                        Type::Map(Box::new(resolved_args[0].clone()), Box::new(resolved_args[1].clone()))
+                    }
+                    "Option" if resolved_args.len() == 1 => Type::Option(Box::new(resolved_args[0].clone())),
+                    "Result" if resolved_args.len() == 2 => {
+                        Type::Result(Box::new(resolved_args[0].clone()), Box::new(resolved_args[1].clone()))
+                    }
+                    _ => Type::Named(name.clone(), resolved_args),
+                }
+            }
+        }
+    }
+
+    fn callable_effects(&self, ty: &Type) -> Vec<Effect> {
+        match ty {
+            Type::Trf(_, _, effects) => effects.clone(),
+            Type::AbstractTrf { effects, .. } => effects.clone(),
+            _ => Vec::new(),
+        }
+    }
+
+    fn infer_flw_binding_effects(&self, effects: &[Effect]) -> Vec<Effect> {
+        let mut out = Vec::new();
+        for effect in effects {
+            if !out.iter().any(|existing| existing == effect) {
+                out.push(effect.clone());
+            }
+        }
+        out
+    }
+
+    fn resolve_flw_slot_signature_with_subst(
+        &self,
+        slot: &FlwSlot,
+        subst: &HashMap<String, Type>,
+    ) -> (Type, Type, Vec<Effect>) {
+        if let Some(slot_ty) = &slot.abstract_trf_ty {
+            match self.resolve_type_expr_with_subst(slot_ty, subst) {
+                Type::AbstractTrf { input, output, effects } | Type::Trf(input, output, effects) => {
+                    return ((*input).clone(), (*output).clone(), effects);
+                }
+                other => return (other, Type::Unknown, Vec::new()),
+            }
+        }
+        (
+            self.resolve_type_expr_with_subst(&slot.input_ty, subst),
+            self.resolve_type_expr_with_subst(&slot.output_ty, subst),
+            slot.effects.clone(),
+        )
+    }
+
+    fn resolve_slot_impl_type(
+        &mut self,
+        slot_impl: &crate::ast::SlotImpl,
+        span: &Span,
+    ) -> Option<(String, Type)> {
+        match slot_impl {
+            crate::ast::SlotImpl::Global(name) => {
+                let ty = self.env.lookup(name).cloned()?;
+                Some((name.clone(), ty))
+            }
+            crate::ast::SlotImpl::Local(name) => {
+                let ty = self.env.lookup(name).cloned().or_else(|| {
+                    self.type_error("E002", format!("undefined local: `{}`", name), span);
+                    None
+                })?;
+                Some((name.clone(), ty))
+            }
+        }
+    }
+
     fn check_block(&mut self, block: &Block) -> Type {
         self.env.push();
         for stmt in &block.stmts {
@@ -1451,7 +2016,18 @@ impl Checker {
         match stmt {
             Stmt::Bind(b) => {
                 let expr_ty = self.check_expr(&b.expr);
-                self.check_pattern_bindings(&b.pattern, &expr_ty);
+                // Unwrap Task<T> in bind: `bind x <- async_fn()` binds x as T
+                let effective_ty = match expr_ty {
+                    Type::Task(inner) => *inner,
+                    other => other,
+                };
+                if let Some(annotated_ty_expr) = &b.annotated_ty {
+                    let annotated_ty = self.resolve_type_expr(annotated_ty_expr);
+                    self.check_typed_bind_annotation(&b.pattern, &effective_ty, annotated_ty_expr, &annotated_ty, &b.expr);
+                    self.check_pattern_bindings(&b.pattern, &annotated_ty);
+                } else {
+                    self.check_pattern_bindings(&b.pattern, &effective_ty);
+                }
             }
             Stmt::Expr(e) => {
                 self.check_expr(e);
@@ -1481,17 +2057,44 @@ impl Checker {
                 }
                 self.check_expr(&y.expr);
             }
+            // for x in list { body }  (v1.9.0)
+            Stmt::ForIn(f) => {
+                // E067: for inside collect is not supported in v1.9.0
+                if self.in_collect {
+                    self.type_error("E067", "`for` inside `collect` block is not supported in v1.9.0", &f.span);
+                    return;
+                }
+                let iter_ty = self.check_expr(&f.iter);
+                let elem_ty = match iter_ty {
+                    Type::List(inner) => *inner,
+                    Type::Unknown | Type::Error => Type::Unknown,
+                    _ => {
+                        self.type_error("E065", "`for` iterator must be `List<T>`", &f.span);
+                        Type::Unknown
+                    }
+                };
+                self.env.push();
+                self.env.define(f.var.clone(), elem_ty);
+                self.check_block(&f.body);
+                self.env.pop();
+            }
         }
     }
 
     /// Extract the inner type `T` from `Result<T,E>` or `Option<T>` for chain.
+    /// v1.8.0: also unwraps `Task<Result<T,E>>` and `Task<Option<T>>`.
     /// Emits E025 when the expr type doesn't match the chain context.
     fn check_chain_expr_type(&mut self, expr_ty: &Type, ctx: &Type, span: &Span) -> Type {
+        // Unwrap a Task<X> wrapper before checking the inner type (v1.8.0).
+        let effective_ty = match expr_ty {
+            Type::Task(inner) => inner.as_ref(),
+            other => other,
+        };
         let is_result_ctx = matches!(ctx, Type::Result(_, _))
             || matches!(ctx, Type::Named(n, _) if n == "Result");
         let is_option_ctx = matches!(ctx, Type::Option(_))
             || matches!(ctx, Type::Named(n, _) if n == "Option");
-        match expr_ty {
+        match effective_ty {
             Type::Result(inner, _) if is_result_ctx => *inner.clone(),
             Type::Named(n, args) if n == "Result" && args.len() >= 1 && is_result_ctx => {
                 args[0].clone()
@@ -1545,6 +2148,220 @@ impl Checker {
                 }
             }
         }
+    }
+
+    fn check_typed_bind_annotation(
+        &mut self,
+        pattern: &Pattern,
+        expr_ty: &Type,
+        annotated_ty_expr: &TypeExpr,
+        annotated_ty: &Type,
+        expr: &Expr,
+    ) {
+        if expr_ty.is_compatible(annotated_ty) {
+            return;
+        }
+
+        let Pattern::Bind(_, span) = pattern else {
+            self.type_error(
+                "E046",
+                format!(
+                    "typed bind expects `{}`, but expression has type `{}`",
+                    annotated_ty.display(),
+                    expr_ty.display()
+                ),
+                annotated_ty_expr.span(),
+            );
+            return;
+        };
+
+        if let Some((field_name, field_ty, invariants)) = self.single_field_invariant_state(annotated_ty) {
+            if expr_ty.is_compatible(&field_ty) {
+                if let Some(false) = self.evaluate_invariants_for_literal(&field_name, &invariants, expr) {
+                    self.type_error(
+                        "E046",
+                        format!(
+                            "literal does not satisfy invariant for state type `{}`",
+                            annotated_ty.display()
+                        ),
+                        expr.span(),
+                    );
+                }
+                return;
+            }
+        }
+
+        self.type_error(
+            "E046",
+            format!(
+                "typed bind expects `{}`, but expression has type `{}`",
+                annotated_ty.display(),
+                expr_ty.display()
+            ),
+            span,
+        );
+    }
+
+    fn has_invariants(&self, type_name: &str) -> bool {
+        self.type_invariants
+            .get(type_name)
+            .map(|invariants| !invariants.is_empty())
+            .unwrap_or(false)
+    }
+
+    fn single_field_invariant_state(&self, annotated_ty: &Type) -> Option<(String, Type, Vec<Expr>)> {
+        let Type::Named(type_name, _) = annotated_ty else {
+            return None;
+        };
+        if !self.has_invariants(type_name) {
+            return None;
+        }
+        let invariants = self.type_invariants.get(type_name)?;
+        let TypeBody::Record(fields) = self.type_defs.get(type_name)? else {
+            return None;
+        };
+        if fields.len() != 1 {
+            return None;
+        }
+        let field = &fields[0];
+        Some((
+            field.name.clone(),
+            self.resolve_type_expr(&field.ty),
+            invariants.clone(),
+        ))
+    }
+
+    fn evaluate_invariants_for_literal(
+        &self,
+        field_name: &str,
+        invariants: &[Expr],
+        expr: &Expr,
+    ) -> Option<bool> {
+        let lit = match expr {
+            Expr::Lit(lit, _) => lit.clone(),
+            _ => return None,
+        };
+        let mut values = HashMap::new();
+        values.insert(field_name.to_string(), lit);
+        for invariant in invariants {
+            match self.eval_static_expr(invariant, &values)? {
+                StaticValue::Bool(true) => {}
+                StaticValue::Bool(false) => return Some(false),
+                _ => return None,
+            }
+        }
+        Some(true)
+    }
+
+    fn eval_static_expr(&self, expr: &Expr, values: &HashMap<String, Lit>) -> Option<StaticValue> {
+        match expr {
+            Expr::Lit(lit, _) => Some(StaticValue::from_lit(lit.clone())),
+            Expr::Ident(name, _) => values.get(name).cloned().map(StaticValue::from_lit),
+            Expr::BinOp(op, lhs, rhs, _) => {
+                let lhs = self.eval_static_expr(lhs, values)?;
+                let rhs = self.eval_static_expr(rhs, values)?;
+                Self::eval_static_binop(op, lhs, rhs)
+            }
+            Expr::Apply(callee, args, _) => {
+                let Expr::FieldAccess(base, method, _) = &**callee else {
+                    return None;
+                };
+                let Expr::Ident(type_name, _) = &**base else {
+                    return None;
+                };
+                match (type_name.as_str(), method.as_str(), args.as_slice()) {
+                    ("String", "contains", [haystack, needle]) => {
+                        let haystack = self.eval_static_expr(haystack, values)?.into_string()?;
+                        let needle = self.eval_static_expr(needle, values)?.into_string()?;
+                        Some(StaticValue::Bool(haystack.contains(&needle)))
+                    }
+                    ("String", "length", [value]) => {
+                        let value = self.eval_static_expr(value, values)?.into_string()?;
+                        Some(StaticValue::Int(value.len() as i64))
+                    }
+                    ("String", "starts_with", [value, prefix]) => {
+                        let value = self.eval_static_expr(value, values)?.into_string()?;
+                        let prefix = self.eval_static_expr(prefix, values)?.into_string()?;
+                        Some(StaticValue::Bool(value.starts_with(&prefix)))
+                    }
+                    ("String", "is_slug", [value]) => {
+                        let value = self.eval_static_expr(value, values)?.into_string()?;
+                        Some(StaticValue::Bool(Self::is_slug_string(&value)))
+                    }
+                    ("String", "is_url", [value]) => {
+                        let value = self.eval_static_expr(value, values)?.into_string()?;
+                        Some(StaticValue::Bool(
+                            value.starts_with("http://") || value.starts_with("https://"),
+                        ))
+                    }
+                    _ => None,
+                }
+            }
+            _ => None,
+        }
+    }
+
+    fn eval_static_binop(op: &BinOp, lhs: StaticValue, rhs: StaticValue) -> Option<StaticValue> {
+        match op {
+            BinOp::Add => match (lhs, rhs) {
+                (StaticValue::Int(a), StaticValue::Int(b)) => Some(StaticValue::Int(a + b)),
+                (StaticValue::Float(a), StaticValue::Float(b)) => Some(StaticValue::Float(a + b)),
+                _ => None,
+            },
+            BinOp::Sub => match (lhs, rhs) {
+                (StaticValue::Int(a), StaticValue::Int(b)) => Some(StaticValue::Int(a - b)),
+                (StaticValue::Float(a), StaticValue::Float(b)) => Some(StaticValue::Float(a - b)),
+                _ => None,
+            },
+            BinOp::Mul => match (lhs, rhs) {
+                (StaticValue::Int(a), StaticValue::Int(b)) => Some(StaticValue::Int(a * b)),
+                (StaticValue::Float(a), StaticValue::Float(b)) => Some(StaticValue::Float(a * b)),
+                _ => None,
+            },
+            BinOp::Div => match (lhs, rhs) {
+                (StaticValue::Int(a), StaticValue::Int(b)) if b != 0 => Some(StaticValue::Int(a / b)),
+                (StaticValue::Float(a), StaticValue::Float(b)) if b != 0.0 => Some(StaticValue::Float(a / b)),
+                _ => None,
+            },
+            BinOp::Eq => Some(StaticValue::Bool(lhs == rhs)),
+            BinOp::NotEq => Some(StaticValue::Bool(lhs != rhs)),
+            BinOp::Lt => Self::eval_static_compare(lhs, rhs, |o| o < 0),
+            BinOp::Gt => Self::eval_static_compare(lhs, rhs, |o| o > 0),
+            BinOp::LtEq => Self::eval_static_compare(lhs, rhs, |o| o <= 0),
+            BinOp::GtEq => Self::eval_static_compare(lhs, rhs, |o| o >= 0),
+            BinOp::NullCoalesce => None,  // not statically evaluable in general
+        }
+    }
+
+    fn eval_static_compare(
+        lhs: StaticValue,
+        rhs: StaticValue,
+        pred: impl FnOnce(i8) -> bool,
+    ) -> Option<StaticValue> {
+        let ord = match (lhs, rhs) {
+            (StaticValue::Int(a), StaticValue::Int(b)) => match a.cmp(&b) {
+                std::cmp::Ordering::Less => -1,
+                std::cmp::Ordering::Equal => 0,
+                std::cmp::Ordering::Greater => 1,
+            },
+            (StaticValue::Float(a), StaticValue::Float(b)) => match a.partial_cmp(&b)? {
+                std::cmp::Ordering::Less => -1,
+                std::cmp::Ordering::Equal => 0,
+                std::cmp::Ordering::Greater => 1,
+            },
+            (StaticValue::String(a), StaticValue::String(b)) => match a.cmp(&b) {
+                std::cmp::Ordering::Less => -1,
+                std::cmp::Ordering::Equal => 0,
+                std::cmp::Ordering::Greater => 1,
+            },
+            _ => return None,
+        };
+        Some(StaticValue::Bool(pred(ord)))
+    }
+
+    fn is_slug_string(s: &str) -> bool {
+        !s.is_empty()
+            && s.chars().all(|ch| ch.is_ascii_lowercase() || ch.is_ascii_digit() || ch == '-')
     }
 
     /// Determine the payload type of a variant pattern.
@@ -1610,6 +2427,7 @@ impl Checker {
                         }
                     }
                 }
+                TypeBody::Alias(_) => {}
             }
         }
         Type::Unknown
@@ -1683,10 +2501,10 @@ impl Checker {
                                     for p in ps { collect_vars(p, out); }
                                     collect_vars(r, out);
                                 }
-                                Type::Named(_, args) | Type::Cap(_, args) => {
-                                    for a in args { collect_vars(a, out); }
-                                }
-                                _ => {}
+                                  Type::Named(_, args) | Type::Cap(_, args) | Type::Interface(_, args) => {
+                                      for a in args { collect_vars(a, out); }
+                                  }
+                                  _ => {}
                             }
                         }
                         for p in params.iter() { collect_vars(p, &mut vars); }
@@ -1740,11 +2558,28 @@ impl Checker {
                                 span,
                             );
                         }
-                        *output.clone()
+                        // Support curried multi-arg application (e.g. interface methods: eq(a, b))
+                        let mut result = *output.clone();
+                        for extra_arg in arg_tys.iter().skip(1) {
+                            match result {
+                                Type::Arrow(ref next_in, ref next_out) => {
+                                    if !extra_arg.is_compatible(next_in) {
+                                        self.type_error(
+                                            "E001",
+                                            format!("expected `{}`, got `{}`", next_in.display(), extra_arg.display()),
+                                            span,
+                                        );
+                                    }
+                                    result = *next_out.clone();
+                                }
+                                _ => break,
+                            }
+                        }
+                        result
                     }
-                    Type::Trf(input, output, _) => {
-                        let arg_ty = arg_tys.first().cloned().unwrap_or(Type::Unit);
-                        if !arg_ty.is_compatible(input) {
+                      Type::Trf(input, output, _) => {
+                          let arg_ty = arg_tys.first().cloned().unwrap_or(Type::Unit);
+                          if !arg_ty.is_compatible(input) {
                             self.type_error(
                                 "E001",
                                 format!(
@@ -1753,10 +2588,21 @@ impl Checker {
                                 ),
                                 span,
                             );
-                        }
-                        *output.clone()
-                    }
-                    Type::Unknown | Type::Error => Type::Unknown,
+                          }
+                          *output.clone()
+                      }
+                      Type::AbstractTrf { .. } => {
+                          self.type_error(
+                              "E051",
+                              format!(
+                                  "cannot call abstract trf `{}` directly; bind it into an abstract flw slot first",
+                                  func_ty.display()
+                              ),
+                              span,
+                          );
+                          Type::Error
+                      }
+                      Type::Unknown | Type::Error => Type::Unknown,
                     other => {
                         self.type_error(
                             "E001",
@@ -1817,6 +2663,14 @@ impl Checker {
             Expr::Match(scrutinee, arms, span) => {
                 let scrutinee_ty = self.check_expr(scrutinee);
                 self.check_match_arms(arms, &scrutinee_ty, span)
+            }
+
+            Expr::AssertMatches(expr, pattern, _span) => {
+                let expr_ty = self.check_expr(expr);
+                self.env.push();
+                self.check_pattern_bindings(pattern, &expr_ty);
+                self.env.pop();
+                Type::Unit
             }
 
             // if (4-13)
@@ -1887,6 +2741,34 @@ impl Checker {
                         Type::Error
                     }
                 }
+            }
+
+            Expr::FString(parts, span) => {
+                for part in parts {
+                    let FStringPart::Expr(inner) = part else { continue };
+                    if matches!(inner.as_ref(), Expr::FString(_, _)) {
+                        self.type_error(
+                            "E053",
+                            "nested string interpolation is not supported",
+                            span,
+                        );
+                    }
+                    let ty = self.check_expr(inner);
+                    if matches!(ty, Type::Unknown | Type::Error | Type::String | Type::Int | Type::Float | Type::Bool) {
+                        continue;
+                    }
+                    if !self.interface_registry.is_implemented("Show", &ty.display()) {
+                        self.type_error(
+                            "E054",
+                            format!(
+                                "type `{}` does not implement Show; cannot use in string interpolation",
+                                ty.display()
+                            ),
+                            span,
+                        );
+                    }
+                }
+                Type::String
             }
 
             // emit expr (2-5, 2-8)
@@ -1991,6 +2873,31 @@ impl Checker {
                 }
                 Type::Bool
             }
+            // ?? operator (v1.9.0): Option<T> ?? T -> T
+            NullCoalesce => {
+                match l {
+                    Type::Option(inner) => {
+                        let t = *inner.clone();
+                        if !r.is_compatible(&t) {
+                            self.type_error(
+                                "E069",
+                                format!("`??` right-hand side `{}` is incompatible with `Option` inner type `{}`", r.display(), t.display()),
+                                span,
+                            );
+                        }
+                        t
+                    }
+                    Type::Unknown | Type::Error => r.clone(),
+                    _ => {
+                        self.type_error(
+                            "E068",
+                            format!("`??` left-hand side must be `Option<T>`, got `{}`", l.display()),
+                            span,
+                        );
+                        Type::Error
+                    }
+                }
+            }
         }
     }
 
@@ -1998,6 +2905,11 @@ impl Checker {
 
     fn resolve_field_access(&mut self, obj_ty: &Type, field: &str, span: &Span) -> Type {
         if let Type::Named(ty_name, _) = obj_ty {
+            if field == "new" {
+                if let Some(sig) = self.resolve_state_constructor_signature(ty_name) {
+                    return sig;
+                }
+            }
             let cap_name = {
                 let mut s = field.to_string();
                 if let Some(c) = s.get_mut(0..1) {
@@ -2031,7 +2943,20 @@ impl Checker {
         }
         if let Type::Interface(interface_name, args) = obj_ty {
             if let Some(target_ty) = args.first() {
-                if let Some(method_ty) = self.interface_registry.lookup_method(interface_name, &target_ty.display(), field) {
+                let impl_ty = self.interface_registry.lookup_method(interface_name, &target_ty.display(), field);
+                // Lambda bodies use Arrow(Unknown/Unit, ret) as a placeholder type.
+                // For dispatch, prefer the declared method type which has the correct param count.
+                // For non-lambda values (e.g. Monoid.empty = record literal), keep the impl body type.
+                let is_lambda_placeholder = impl_ty.map(|t| matches!(t,
+                    Type::Arrow(input, _) if matches!(input.as_ref(), Type::Unknown | Type::Unit)
+                )).unwrap_or(false);
+                let method_ty = if is_lambda_placeholder {
+                    self.interface_registry.lookup_declared_method(interface_name, field)
+                        .or(impl_ty)
+                } else {
+                    impl_ty
+                };
+                if let Some(method_ty) = method_ty {
                     return self.substitute_self_in_type(method_ty, target_ty);
                 }
             }
@@ -2056,6 +2981,26 @@ impl Checker {
             Type::Named(_, _) => self.lookup_field_type(obj_ty, field),
             _ => Type::Unknown,
         }
+    }
+
+    fn resolve_state_constructor_signature(&self, type_name: &str) -> Option<Type> {
+        if !self.has_invariants(type_name) {
+            return None;
+        }
+        let TypeBody::Record(fields) = self.type_defs.get(type_name)? else {
+            return None;
+        };
+        let params = fields
+            .iter()
+            .map(|field| self.resolve_type_expr(&field.ty))
+            .collect::<Vec<_>>();
+        Some(Type::Fn(
+            params,
+            Box::new(Type::Result(
+                Box::new(Type::Named(type_name.to_string(), vec![])),
+                Box::new(Type::Named("Error".into(), vec![])),
+            )),
+        ))
     }
 
     // ── effect enforcement helpers (2-6, 2-7, 2-8) ───────────────────────────
@@ -2190,6 +3135,8 @@ impl Checker {
             }
             ("String", "length") => Some(Type::Int),
             ("String", "is_empty") => Some(Type::Bool),
+            ("String", "contains") | ("String", "starts_with") | ("String", "ends_with")
+            | ("String", "is_slug") | ("String", "is_url") => Some(Type::Bool),
 
             // Option
             ("Option", "some") => {
@@ -2394,6 +3341,13 @@ impl Checker {
                     Box::new(self.resolve_type_expr_with_self(b, self_ty)),
                 )
             }
+            TypeExpr::TrfFn { input, output, effects, .. } => {
+                Type::Trf(
+                    Box::new(self.resolve_type_expr_with_self(input, self_ty)),
+                    Box::new(self.resolve_type_expr_with_self(output, self_ty)),
+                    effects.clone(),
+                )
+            }
             TypeExpr::Named(name, args, _) => {
                 if name == "Self" && args.is_empty() {
                     return self_ty.cloned().unwrap_or_else(|| Type::Named("Self".into(), vec![]));
@@ -2402,6 +3356,19 @@ impl Checker {
                     return Type::Var(name.clone());
                 }
                 let resolved_args: Vec<Type> = args.iter().map(|a| self.resolve_type_expr_with_self(a, self_ty)).collect();
+                if let Some(td) = self.abstract_trf_registry.get(name) {
+                    let type_subst: HashMap<String, Type> = td
+                        .type_params
+                        .iter()
+                        .cloned()
+                        .zip(resolved_args.iter().cloned())
+                        .collect();
+                    return Type::AbstractTrf {
+                        input: Box::new(self.resolve_type_expr_with_subst(&td.input_ty, &type_subst)),
+                        output: Box::new(self.resolve_type_expr_with_subst(&td.output_ty, &type_subst)),
+                        effects: td.effects.clone(),
+                    };
+                }
                 match name.as_str() {
                     "Bool"    => Type::Bool,
                     "Int"     => Type::Int,
@@ -2422,8 +3389,14 @@ impl Checker {
                         let e = it.next().unwrap_or(Type::Named("Error".into(), vec![]));
                         Type::Result(Box::new(t), Box::new(e))
                     }
+                    "Task"    => Type::Task(Box::new(resolved_args.into_iter().next().unwrap_or(Type::Unknown))),
                     "_infer"  => Type::Unknown,
                     _ if self.interface_registry.interfaces.contains_key(name) => Type::Interface(name.clone(), resolved_args),
+                    // Type alias resolution (v1.7.0)
+                    _ if self.type_aliases.contains_key(name.as_str()) => {
+                        let alias_target = self.type_aliases[name.as_str()].clone();
+                        self.resolve_type_expr_with_self(&alias_target, self_ty)
+                    }
                     _         => Type::Named(name.clone(), resolved_args),
                 }
             }
@@ -2475,6 +3448,10 @@ impl Checker {
                 self.validate_type_expr_arity(a);
                 self.validate_type_expr_arity(b);
             }
+            TypeExpr::TrfFn { input, output, .. } => {
+                self.validate_type_expr_arity(input);
+                self.validate_type_expr_arity(output);
+            }
         }
     }
 }
@@ -2505,6 +3482,14 @@ mod tests {
         errs
     }
 
+    fn inferred_type_of(src: &str, name: &str) -> Type {
+        let prog = Parser::parse_str(src, "test").expect("parse error");
+        let mut checker = Checker::new();
+        let errs = checker.check_with_self(&prog);
+        assert!(errs.is_empty(), "unexpected errors: {:?}", errs);
+        checker.env.lookup(name).cloned().expect("missing inferred type")
+    }
+
     fn check_warnings(src: &str) -> Vec<String> {
         let prog = Parser::parse_str(src, "test").expect("parse error");
         let mut checker = Checker::new();
@@ -2526,10 +3511,124 @@ mod tests {
         "#);
     }
 
+    #[test]
+    fn test_fstring_string_type_ok() {
+        check_ok(r#"fn f(name: String) -> String { $"Hello {name}!" }"#);
+    }
+
+    #[test]
+    fn test_fstring_int_auto_show() {
+        check_ok(r#"fn f(age: Int) -> String { $"Age: {age}" }"#);
+    }
+
+    #[test]
+    fn test_fstring_e054_no_show() {
+        let errs = check_err(r#"
+            type User = { name: String }
+            fn f(user: User) -> String { $"User: {user}" }
+        "#);
+        assert!(errs.iter().any(|e| e.contains("E054")), "expected E054, got: {:?}", errs);
+    }
+
+    #[test]
+    fn test_fstring_e053_nested() {
+        let errs = check_err(r#"fn f() -> String { $"outer {$"inner"}" }"#);
+        assert!(errs.iter().any(|e| e.contains("E053")), "expected E053, got: {:?}", errs);
+    }
+
+    #[test]
+    fn test_assert_matches_record_ok() {
+        check_ok(r#"
+            type User = { name: String age: Int }
+            fn f(user: User) -> Unit {
+                assert_matches(user, { name, age })
+            }
+        "#);
+    }
+
     // 4-6: type definitions
     #[test]
     fn test_type_def_ok() {
         check_ok("type User = { name: String email: String }");
+    }
+
+    #[test]
+    fn test_invariant_type_check_bool() {
+        check_ok("type PosInt = { value: Int invariant value > 0 }");
+    }
+
+    #[test]
+    fn test_invariant_type_check_e045() {
+        let errs = check_err("type Bad = { value: Int invariant value + 1 }");
+        assert!(errs.iter().any(|e| e.contains("E045")), "expected E045, got: {:?}", errs);
+    }
+
+    #[test]
+    fn test_invariant_field_scope() {
+        check_ok("type Email = { value: String invariant String.contains(value, \"@\") }");
+    }
+
+    #[test]
+    fn test_bind_state_annotation_ok() {
+        check_ok("type PosInt = { value: Int invariant value > 0 }\nfn f() -> PosInt { bind x: PosInt <- 42; x }");
+    }
+
+    #[test]
+    fn test_bind_state_annotation_fail_e046() {
+        let errs = check_err("type PosInt = { value: Int invariant value > 0 }\nfn f() -> PosInt { bind x: PosInt <- 0; x }");
+        assert!(errs.iter().any(|e| e.contains("E046")), "expected E046, got: {:?}", errs);
+    }
+
+    #[test]
+    fn test_bind_state_annotation_string_invariant_ok() {
+        check_ok("type Email = { value: String invariant String.contains(value, \"@\") }\nfn f() -> Email { bind x: Email <- \"a@example.com\"; x }");
+    }
+
+    #[test]
+    fn test_invariant_unknown_field_e002() {
+        let errs = check_err("type Broken = { value: Int invariant missing > 0 }");
+        assert!(errs.iter().any(|e| e.contains("E002")), "expected E002, got: {:?}", errs);
+    }
+
+    #[test]
+    fn test_bind_state_annotation_non_literal_ok() {
+        check_ok("type PosInt = { value: Int invariant value > 0 }\nfn f(n: Int) -> PosInt { bind x: PosInt <- n; x }");
+    }
+
+    #[test]
+    fn test_state_constructor_signature_ok() {
+        check_ok("type PosInt = { value: Int invariant value > 0 }\nfn f() -> PosInt! { PosInt.new(5) }");
+    }
+
+    #[test]
+    fn test_stdlib_states_registered_in_checker() {
+        let mut checker = Checker::new();
+        checker.register_builtins();
+        assert!(checker.env.lookup("PosInt").is_some());
+        assert!(checker.env.lookup("Email").is_some());
+        assert!(checker.type_invariants.contains_key("Probability"));
+        assert!(checker.type_invariants.contains_key("Slug"));
+    }
+
+    #[test]
+    fn test_stdlib_state_constructor_signature_posint_ok() {
+        check_ok("fn f() -> PosInt! { PosInt.new(1) }");
+    }
+
+    #[test]
+    fn test_stdlib_state_constructor_signature_email_ok() {
+        check_ok("fn f() -> Email! { Email.new(\"a@b.com\") }");
+    }
+
+    #[test]
+    fn test_stdlib_bind_state_annotation_ok() {
+        check_ok("fn f() -> PosInt { bind x: PosInt <- 25; x }");
+    }
+
+    #[test]
+    fn test_stdlib_bind_state_annotation_fail_e046() {
+        let errs = check_err("fn f() -> PosInt { bind x: PosInt <- 0; x }");
+        assert!(errs.iter().any(|e| e.contains("E046")), "expected E046, got: {:?}", errs);
     }
 
     // 4-7: fn return type mismatch
@@ -2796,6 +3895,49 @@ mod tests {
         check_ok(r#"trf T: String -> Unit !Emit<E> = |s| { emit s }"#);
     }
 
+    #[test]
+    fn effect_def_registered() {
+        let program = Parser::parse_str(
+            "effect Payment\ntrf Charge: Int -> Int !Payment = |x| { x }",
+            "effect_registered.fav",
+        )
+        .expect("parse");
+        let mut checker = Checker::new();
+        let errs = checker.check_with_self(&program);
+        assert!(errs.is_empty(), "unexpected errors: {:?}", errs);
+        assert!(checker.effect_registry.contains("Payment"));
+    }
+
+    #[test]
+    fn effect_custom_in_trf_ok() {
+        check_ok(
+            r#"
+effect Payment
+trf Charge: Int -> Int !Payment = |x| { x }
+"#,
+        );
+    }
+
+    #[test]
+    fn effect_unknown_e052() {
+        let errs = check_err(r#"trf Charge: Int -> Int !Payment = |x| { x }"#);
+        assert!(errs.iter().any(|e| e.contains("E052")), "got: {:?}", errs);
+    }
+
+    #[test]
+    fn effect_builtin_no_error() {
+        check_ok(
+            r#"
+fn f() -> Unit !Io { () }
+trf T: Int -> Int !Db = |x| { x }
+abstract trf Fetch: Int -> Int !Trace
+abstract flw Pipeline {
+    save: Int -> Int !File
+}
+"#,
+        );
+    }
+
     // ── 4-11: use resolution tests ────────────────────────────────────────────
 
     use std::sync::{Arc, Mutex};
@@ -2944,9 +4086,11 @@ mod tests {
 
     #[test]
     fn test_interface_auto_synthesis_fail_e044() {
+        // Use a custom interface that Int does NOT implement → List<Int> also fails E044.
+        // (Int has builtin Show/Eq/Gen, so those would succeed now with generic container support.)
         let errs = check_err(r#"
-            interface Show { show: Self -> String }
-            type User with Show = { tags: List<Int> }
+            interface Serializable { serialize: Self -> String }
+            type User with Serializable = { tags: List<Int> }
         "#);
         assert!(errs.iter().any(|e| e.contains("E044")), "expected E044, got: {:?}", errs);
     }
@@ -3014,8 +4158,10 @@ mod tests {
 
     #[test]
     fn test_gen_auto_synthesis_fail_e044() {
+        // CustomTag has no Gen impl → List<CustomTag> also fails E044.
         let errs = check_err(r#"
-            type User with Gen = { tags: List<Int> }
+            type CustomTag = { label: String  count: Float }
+            type User with Gen = { tags: List<CustomTag> }
         "#);
         assert!(errs.iter().any(|e| e.contains("E044")), "expected E044, got: {:?}", errs);
     }
@@ -3052,6 +4198,54 @@ mod tests {
         check_ok(r#"
             fn use_semigroup() -> Int { Int.semigroup.combine(1, 2) }
         "#);
+    }
+
+    #[test]
+    fn test_type_with_sugar_equivalent_to_explicit_impl() {
+        // type T with Show, Eq { ... } must behave identically to:
+        //   type T { ... }
+        //   impl Show, Eq for T
+        check_ok(r#"
+            type Point with Show, Eq = { x: Int  y: Int }
+            fn use_show(p: Point, show: Show<Point>) -> String { show.show(p) }
+            fn use_eq(a: Point, b: Point, eq: Eq<Point>) -> Bool { eq.eq(a, b) }
+        "#);
+        // Explicit impl form must also pass
+        check_ok(r#"
+            type Point = { x: Int  y: Int }
+            impl Show, Eq for Point
+            fn use_show(p: Point, show: Show<Point>) -> String { show.show(p) }
+            fn use_eq(a: Point, b: Point, eq: Eq<Point>) -> Bool { eq.eq(a, b) }
+        "#);
+    }
+
+    #[test]
+    fn test_list_field_show_synthesis_ok() {
+        // List<Int> field: Int has builtin Show → List<Int> is considered to implement Show
+        check_ok(r#"
+            type Tags = { items: List<Int> }
+            impl Show for Tags
+        "#);
+    }
+
+    #[test]
+    fn test_option_field_show_synthesis_ok() {
+        // Option<String> field: String has builtin Show → Option<String> implements Show
+        check_ok(r#"
+            type Opt = { label: Option<String> }
+            impl Show for Opt
+        "#);
+    }
+
+    #[test]
+    fn test_list_field_custom_interface_e044() {
+        // Custom interface not implemented for Int → List<Int> still fails E044
+        let errs = check_err(r#"
+            interface Serialize { serialize: Self -> String }
+            type Tags = { items: List<Int> }
+            impl Serialize for Tags
+        "#);
+        assert!(errs.iter().any(|e| e.contains("E044")), "expected E044, got: {:?}", errs);
     }
 
     #[test]
@@ -3325,7 +4519,321 @@ fn main() -> Int! {
         let errs = check_err(src);
         assert!(errs.iter().any(|e| e.contains("E025")), "expected E025, got: {:?}", errs);
     }
+
+    #[test]
+    fn test_flw_binding_type_ok() {
+        check_ok(r#"
+abstract flw DataPipeline<Row> {
+    parse: String -> List<Row>!
+    save: List<Row> -> Int !Db
 }
+abstract trf ParseCsv: String -> List<UserRow>!
+abstract trf SaveUsers: List<UserRow> -> Int !Db
+type UserRow = { name: String }
+flw UserImport = DataPipeline<UserRow> { parse <- ParseCsv; save <- SaveUsers }
+"#);
+    }
+
+    #[test]
+    fn test_flw_binding_e048() {
+        let errs = check_err(r#"
+abstract flw DataPipeline<Row> {
+    parse: String -> List<Row>!
+    save: List<Row> -> Int !Db
+}
+abstract trf ParseCsv: String -> List<UserRow>!
+abstract trf SaveUsers: List<OrderRow> -> Int !Db
+type UserRow = { name: String }
+type OrderRow = { id: Int }
+flw UserImport = DataPipeline<UserRow> { parse <- ParseCsv; save <- SaveUsers }
+"#);
+        assert!(errs.iter().any(|e| e.contains("E048")), "expected E048, got: {:?}", errs);
+    }
+
+    #[test]
+    fn test_flw_binding_e049() {
+        let errs = check_err(r#"
+abstract flw DataPipeline<Row> {
+    parse: String -> List<Row>!
+}
+abstract trf ParseCsv: String -> List<UserRow>!
+type UserRow = { name: String }
+flw UserImport = DataPipeline<UserRow> { extra <- ParseCsv }
+"#);
+        assert!(errs.iter().any(|e| e.contains("E049")), "expected E049, got: {:?}", errs);
+    }
+
+    #[test]
+    fn test_flw_binding_effect_inference() {
+        let ty = inferred_type_of(r#"
+abstract flw DataPipeline<Row> {
+    parse: String -> List<Row>! !Network
+    save: List<Row> -> Int !Db
+}
+abstract trf ParseCsv: String -> List<UserRow>! !Network
+abstract trf SaveUsers: List<UserRow> -> Int !Db
+type UserRow = { name: String }
+flw UserImport = DataPipeline<UserRow> { parse <- ParseCsv; save <- SaveUsers }
+"#, "UserImport");
+        match ty {
+            Type::Trf(input, output, effects) => {
+                assert!(input.is_compatible(&Type::String));
+                assert!(output.is_compatible(&Type::Int));
+                assert!(effects.contains(&Effect::Network));
+                assert!(effects.contains(&Effect::Db));
+            }
+            other => panic!("expected Trf, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_flw_partial_type() {
+        let ty = inferred_type_of(r#"
+abstract flw DataPipeline<Row> {
+    parse: String -> List<Row>!
+    validate: Row -> Row!
+    save: List<Row> -> Int !Db
+}
+abstract trf ParseCsv: String -> List<UserRow>!
+type UserRow = { name: String }
+flw PartialImport = DataPipeline<UserRow> { parse <- ParseCsv }
+"#, "PartialImport");
+        match ty {
+            Type::PartialFlw { template, type_args, unbound_slots } => {
+                assert_eq!(template, "DataPipeline");
+                assert_eq!(type_args.len(), 1);
+                assert_eq!(unbound_slots, vec!["validate".to_string(), "save".to_string()]);
+            }
+            other => panic!("expected PartialFlw, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_abstract_trf_direct_call_e051() {
+        let errs = check_err(r#"
+abstract trf FetchUser: Int -> String !Db
+fn main() -> String { FetchUser(1) }
+"#);
+        assert!(errs.iter().any(|e| e.contains("E051")), "expected E051, got: {:?}", errs);
+    }
+
+    #[test]
+    fn test_abstract_trf_generic_binding_ok() {
+        check_ok(r#"
+abstract trf Fetch<T>: Int -> T? !Db
+type User = { name: String }
+abstract trf FetchUser: Int -> User? !Db
+abstract flw Pipeline<Row> {
+    fetch: Fetch<Row>
+}
+flw UserPipeline = Pipeline<User> { fetch <- FetchUser }
+"#);
+    }
+
+    #[test]
+    fn test_abstract_trf_generic_binding_e048() {
+        let errs = check_err(r#"
+abstract trf Fetch<T>: Int -> T? !Db
+type User = { name: String }
+abstract trf FetchBad: String -> User? !Db
+abstract flw Pipeline<Row> {
+    fetch: Fetch<Row>
+}
+flw UserPipeline = Pipeline<User> { fetch <- FetchBad }
+"#);
+        assert!(errs.iter().any(|e| e.contains("E048")), "expected E048, got: {:?}", errs);
+    }
+
+    #[test]
+      fn test_flw_binding_type_params() {
+          check_ok(r#"
+  abstract flw DataPipeline<Row> {
+      parse: String -> List<Row>!
+      save: List<Row> -> Int !Db
+}
+abstract trf ParseInts: String -> List<Int>!
+abstract trf SaveInts: List<Int> -> Int !Db
+  flw IntImport = DataPipeline<Int> { parse <- ParseInts; save <- SaveInts }
+  "#);
+      }
+
+      #[test]
+      fn test_dynamic_injection_type_ok() {
+          let prog = Parser::parse_str(r#"
+abstract flw SavePipeline<Row> {
+    save: Row -> Int !Db
+}
+"#, "test").expect("parse");
+          let mut checker = Checker::new();
+          checker.register_builtins();
+          checker.register_item_signatures(&prog);
+          for item in &prog.items {
+              checker.check_item(item);
+          }
+          checker.env.push();
+          checker.env.define(
+              "save".to_string(),
+              Type::Trf(Box::new(Type::Named("UserRow".into(), vec![])), Box::new(Type::Int), vec![Effect::Db]),
+          );
+          let fd = FlwBindingDef {
+              visibility: None,
+              name: "Injected".into(),
+              template: "SavePipeline".into(),
+              type_args: vec![TypeExpr::Named("UserRow".into(), vec![], Span::dummy())],
+              bindings: vec![("save".into(), crate::ast::SlotImpl::Local("save".into()))],
+              span: Span::dummy(),
+          };
+          checker.check_flw_binding_def(&fd);
+          let ty = checker.env.lookup("Injected").cloned().unwrap_or(Type::Unknown);
+          checker.env.pop();
+
+          assert!(checker.errors.is_empty(), "unexpected errors: {:?}", checker.errors);
+          match ty {
+              Type::Trf(input, output, effects) => {
+                  assert!(input.is_compatible(&Type::Named("UserRow".into(), vec![])));
+                  assert!(output.is_compatible(&Type::Int));
+                  assert!(effects.contains(&Effect::Db));
+              }
+              other => panic!("expected Trf, got {:?}", other),
+          }
+      }
+
+      #[test]
+      fn test_dynamic_injection_type_e048() {
+          let prog = Parser::parse_str(r#"
+abstract flw SavePipeline<Row> {
+    save: Row -> Int !Db
+}
+"#, "test").expect("parse");
+          let mut checker = Checker::new();
+          checker.register_builtins();
+          checker.register_item_signatures(&prog);
+          for item in &prog.items {
+              checker.check_item(item);
+          }
+          checker.env.push();
+          checker.env.define(
+              "save".to_string(),
+              Type::Trf(Box::new(Type::String), Box::new(Type::Int), vec![Effect::Db]),
+          );
+          let fd = FlwBindingDef {
+              visibility: None,
+              name: "Injected".into(),
+              template: "SavePipeline".into(),
+              type_args: vec![TypeExpr::Named("UserRow".into(), vec![], Span::dummy())],
+              bindings: vec![("save".into(), crate::ast::SlotImpl::Local("save".into()))],
+              span: Span::dummy(),
+          };
+          checker.check_flw_binding_def(&fd);
+          checker.env.pop();
+
+          let errs = checker.errors.iter().map(|e| format!("[{}] {}", e.code, e.message)).collect::<Vec<_>>();
+          assert!(errs.iter().any(|e| e.contains("E048")), "expected E048, got: {:?}", errs);
+      }
+
+    // ── v1.7.0: Task<T> async ──────────────────────────────────────────────
+
+    #[test]
+    fn task_async_fn_returns_task_type() {
+        let ty = inferred_type_of(r#"
+async fn fetch_value() -> Int !Io {
+    42
+}
+"#, "fetch_value");
+        // async fn with no params is registered as Fn([], Task<ret>)
+        let inner_ret = match &ty {
+            Type::Fn(_, ret) => ret.as_ref(),
+            Type::Arrow(_, ret) => ret.as_ref(),
+            other => panic!("expected Fn or Arrow, got {:?}", other),
+        };
+        assert!(matches!(inner_ret, Type::Task(inner) if matches!(**inner, Type::Int)),
+            "expected Task<Int>, got {:?}", inner_ret);
+    }
+
+    #[test]
+    fn task_bind_unwraps_task() {
+        check_ok(r#"
+async fn fetch_num() -> Int !Io {
+    42
+}
+public fn main() -> Int !Io {
+    bind n <- fetch_num()
+    n
+}
+"#);
+    }
+
+    #[test]
+    fn task_run_executes_immediately() {
+        check_ok(r#"
+async fn compute() -> Int !Io {
+    10
+}
+public fn main() -> Int !Io {
+    bind v <- compute()
+    Task.run(v)
+}
+"#);
+    }
+
+    #[test]
+    fn task_map_transforms_value() {
+        check_ok(r#"
+async fn get_x() -> Int !Io {
+    5
+}
+public fn main() -> Int !Io {
+    bind x <- get_x()
+    Task.map(x, |n| n * 2)
+}
+"#);
+    }
+
+    #[test]
+    fn task_and_then_chains() {
+        check_ok(r#"
+async fn step1() -> Int !Io {
+    3
+}
+public fn main() -> Int !Io {
+    bind a <- step1()
+    Task.and_then(a, |n| n + 1)
+}
+"#);
+    }
+
+    // ── v1.7.0: Type aliases ───────────────────────────────────────────────
+
+    #[test]
+    fn type_alias_simple() {
+        check_ok(r#"
+type Name = String
+public fn greet(n: Name) -> String {
+    n
+}
+"#);
+    }
+
+    #[test]
+    fn type_alias_compatible_with_target() {
+        check_ok(r#"
+type UserId = Int
+public fn get_id() -> UserId {
+    42
+}
+"#);
+    }
+
+    #[test]
+    fn type_alias_generic() {
+        check_ok(r#"
+type MaybeInt = Option<Int>
+public fn wrap(x: Int) -> MaybeInt {
+    Option.some(x)
+}
+"#);
+    }
+  }
 
 // ── Module export extraction ───────────────────────────────────────────────────
 
@@ -3345,6 +4853,18 @@ pub fn collect_exports(program: &Program, env: &TyEnv) -> HashMap<String, (Type,
                 let vis = td.visibility.clone().unwrap_or(Visibility::Private);
                 if let Some(ty) = env.lookup(&td.name) {
                     exports.insert(td.name.clone(), (ty.clone(), vis));
+                }
+            }
+            Item::AbstractTrfDef(td) => {
+                let vis = td.visibility.clone().unwrap_or(Visibility::Private);
+                if let Some(ty) = env.lookup(&td.name) {
+                    exports.insert(td.name.clone(), (ty.clone(), vis));
+                }
+            }
+            Item::FlwBindingDef(fd) => {
+                let vis = fd.visibility.clone().unwrap_or(Visibility::Private);
+                if let Some(ty) = env.lookup(&fd.name) {
+                    exports.insert(fd.name.clone(), (ty.clone(), vis));
                 }
             }
             Item::TypeDef(td) => {

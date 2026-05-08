@@ -1,0 +1,13 @@
+// async_main_demo.fav — async fn main() entry point (v1.8.0)
+//
+// async fn main() -> Unit !Io is a valid entry point.
+// The runtime unwraps the Task<Unit> transparently.
+
+async fn greet(name: String) -> String !Io {
+    $"Hello, {name}!"
+}
+
+public async fn main() -> Unit !Io {
+    bind msg <- greet("World")
+    IO.println(msg)
+}

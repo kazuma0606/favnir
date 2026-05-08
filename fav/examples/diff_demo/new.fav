@@ -1,0 +1,7 @@
+trf ParseUser: String -> String !Io = |row| { row }
+trf SaveUser: String -> Unit !Db = |row| { () }
+
+public fn main() -> Unit !Io !Db {
+    bind name <- ParseUser("a")
+    SaveUser(name)
+}

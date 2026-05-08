@@ -1,0 +1,13 @@
+type User = {
+    name: String
+    age: Int
+}
+
+public fn main() -> String {
+    bind user <- User { name: "Favnir", age: 42 }
+
+    match user {
+        { name, age } where age >= 18 => name
+        { name: n } => n
+    }
+}

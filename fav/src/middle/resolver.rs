@@ -79,6 +79,13 @@ impl Resolver {
         if self.modules.contains_key(mod_path) {
             return self.modules.get(mod_path);
         }
+        if mod_path == "std.states" {
+            self.modules.insert(
+                mod_path.to_string(),
+                ModuleScope { symbols: crate::std_states::export_scope() },
+            );
+            return self.modules.get(mod_path);
+        }
         if self.loading.contains(mod_path) {
             errors.push(ResolveError::new(
                 "E012",
@@ -336,6 +343,32 @@ mod tests {
         let result = r.load_module("no.such.module", &mut errors, &span);
         assert!(result.is_none());
         assert_eq!(errors[0].code, "E013");
+    }
+
+    #[test]
+    fn test_load_std_states_module_exports_known_symbols() {
+        let mut r = Resolver::new(None, None);
+        let mut errors = Vec::new();
+        let span = Span::new("test", 0, 0, 1, 1);
+        let scope = r.load_module("std.states", &mut errors, &span).unwrap();
+        assert!(errors.is_empty(), "{:?}", errors);
+        assert!(scope.symbols.contains_key("PosInt"));
+        assert!(scope.symbols.contains_key("Email"));
+        let (_, vis) = &scope.symbols["PosInt"];
+        assert_eq!(*vis, Visibility::Public);
+    }
+
+    #[test]
+    fn test_resolve_use_std_states_symbol() {
+        let mut r = Resolver::new(None, None);
+        let mut errors = Vec::new();
+        let span = Span::new("test", 0, 0, 1, 1);
+        let path = vec!["std".to_string(), "states".to_string(), "PosInt".to_string()];
+        let result = r.resolve_use(&path, &mut errors, &span);
+        assert!(errors.is_empty(), "{:?}", errors);
+        let (sym, ty) = result.expect("std.states.PosInt resolves");
+        assert_eq!(sym, "PosInt");
+        assert_eq!(ty, Type::Named("PosInt".into(), vec![]));
     }
 
     #[test]

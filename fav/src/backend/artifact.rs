@@ -30,6 +30,7 @@ pub struct FvcWriter {
     pub str_table: Vec<String>,
     pub globals: Vec<FvcGlobal>,
     pub functions: Vec<FvcFunction>,
+    pub explain_json: Option<String>,
 }
 
 impl FvcWriter {
@@ -93,6 +94,10 @@ impl FvcWriter {
             w.write_all(&function.code)?;
         }
 
+        if let Some(json) = &self.explain_json {
+            write_explain_section(w, json)?;
+        }
+
         Ok(())
     }
 }
@@ -102,6 +107,7 @@ pub struct FvcArtifact {
     pub str_table: Vec<String>,
     pub globals: Vec<FvcGlobal>,
     pub functions: Vec<FvcFunction>,
+    pub explain_json: Option<String>,
 }
 
 impl FvcArtifact {
@@ -179,7 +185,26 @@ impl FvcArtifact {
             });
         }
 
-        Ok(Self { str_table, globals, functions })
+        let mut explain_json = None;
+        loop {
+            let mut tag = [0u8; 4];
+            match r.read_exact(&mut tag) {
+                Ok(()) => {}
+                Err(err) if err.kind() == io::ErrorKind::UnexpectedEof => break,
+                Err(err) => return Err(ArtifactError::IoError(err)),
+            }
+            match &tag {
+                b"EXPL" => {
+                    let len = read_u32(r)? as usize;
+                    let mut buf = vec![0u8; len];
+                    r.read_exact(&mut buf)?;
+                    explain_json = Some(String::from_utf8(buf).map_err(ArtifactError::Utf8Error)?);
+                }
+                _ => return Err(ArtifactError::BadSectionLayout),
+            }
+        }
+
+        Ok(Self { str_table, globals, functions, explain_json })
     }
 
     pub fn fn_idx_by_name(&self, name: &str) -> Option<usize> {
@@ -229,6 +254,12 @@ fn read_u32(r: &mut impl Read) -> Result<u32, ArtifactError> {
     let mut bytes = [0u8; 4];
     r.read_exact(&mut bytes)?;
     Ok(u32::from_le_bytes(bytes))
+}
+
+fn write_explain_section(w: &mut impl Write, json: &str) -> io::Result<()> {
+    w.write_all(b"EXPL")?;
+    write_u32(w, json.len() as u32)?;
+    w.write_all(json.as_bytes())
 }
 
 fn write_constant(w: &mut impl Write, constant: &Constant) -> io::Result<()> {

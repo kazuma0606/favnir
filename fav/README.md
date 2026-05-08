@@ -29,6 +29,25 @@ fav help                              — ヘルプを表示
 
 `file` を省略するとカレントディレクトリから `fav.toml` を探して**プロジェクトモード**で動作します。
 
+## v1.5.0
+
+v1.5.0 では次を追加しています。
+
+- `fav explain diff <from> <to>`
+- `fav graph --focus fn --entry <name> --depth <n>`
+- top-level `effect Name`
+- lint `L005` / `L006` / `L007`
+
+例:
+
+```bash
+fav explain diff examples/diff_demo/old.fav examples/diff_demo/new.fav
+fav explain diff examples/diff_demo/old.fav examples/diff_demo/new.fav --format json
+fav graph examples/hello.fav --focus fn --entry main --depth 2
+fav check examples/custom_effects.fav
+fav lint examples/custom_effects.fav
+```
+
 ### 実行例
 
 ```bash
@@ -225,6 +244,170 @@ Examples:
 - `examples/interface_basic.fav`
 - `examples/interface_auto.fav`
 - `examples/algebraic.fav`
+
+---
+
+## invariant + std.states (v1.2.0)
+
+v1.2.0 adds invariant-bearing record states and a virtual standard module of reusable validated state types.
+
+### Invariant-bearing types
+
+```favnir
+type Email = {
+    value: String
+    invariant String.contains(value, "@")
+    invariant String.length(value) > 3
+}
+```
+
+Every invariant-bearing record type gets a synthetic constructor:
+
+```favnir
+Email.new("user@example.com")  // ok(Email { ... })
+Email.new("bad")               // err("InvariantViolation: Email")
+```
+
+## abstract trf / abstract flw (v1.3.0)
+
+v1.3.0 adds reusable abstract pipeline templates.
+
+### abstract trf
+
+```favnir
+abstract trf FetchUser: Int -> String !Db
+```
+
+An `abstract trf` is a contract only. It participates in checking and template binding, but direct runtime calls are rejected with `E051`.
+
+### abstract flw
+
+```favnir
+abstract flw DataPipeline<Row> {
+    parse: String -> Row
+    save: Row -> String
+}
+```
+
+Slots define the required input/output contract for each step in the template.
+
+### Binding a concrete flow
+
+```favnir
+flw UserImport = DataPipeline<UserRow> {
+    parse <- ParseUser
+    save <- SaveUser
+}
+```
+
+If every slot is bound, the flow becomes executable. If some slots are missing:
+
+- `fav check` emits `W011`
+- `fav run` / `fav build` fail with `E050`
+
+### Examples
+
+- `examples/abstract_flw_basic.fav`
+- `examples/abstract_flw_inject.fav`
+
+## Explain JSON, Bundle, Graph (v1.4.0)
+
+Favnir v1.4.0 adds artifact-oriented inspection and flow graph output.
+
+### `fav explain --format json`
+
+```bash
+fav explain examples/abstract_flw_basic.fav --format json
+fav explain examples/abstract_flw_basic.fav --format json --focus trfs
+```
+
+JSON output includes:
+
+- entry/source metadata
+- `fns`, `trfs`, `flws`, `types`
+- reachability flags
+- `effects_used`
+- `emits`
+- `runes_used`
+
+### `fav bundle`
+
+```bash
+fav bundle examples/bundle_demo.fav -o dist/app.fvc --manifest --explain
+```
+
+Behavior:
+
+- bundles only entry-reachable code
+- writes a manifest with `included` / `excluded`
+- can emit a sibling explain JSON file
+- embeds explain JSON into the `.fvc` artifact
+
+You can read embedded explain metadata back with:
+
+```bash
+fav explain dist/app.fvc --format json
+```
+
+### `fav graph`
+
+```bash
+fav graph examples/abstract_flw_basic.fav
+fav graph examples/abstract_flw_basic.fav --format mermaid
+```
+
+Current graph output focuses on:
+
+- `flw`
+- `abstract flw`
+- bound flow templates
+
+### Generic abstract-trf slot shorthand
+
+Slots in an abstract flow can now reference generic abstract transforms directly:
+
+```favnir
+abstract trf Parse<Row>: String -> Row
+
+abstract flw Pipeline<Row> {
+    parse: Parse<Row>
+    render: Row -> String
+}
+```
+
+See:
+
+- `examples/bundle_demo.fav`
+- `examples/dynamic_inject.fav`
+
+Typed bind is also invariant-aware:
+
+```favnir
+bind age: PosInt <- 25
+```
+
+### std.states
+
+`use std.states.*` exposes common validated states:
+
+- `PosInt`
+- `NonNegInt`
+- `Probability`
+- `PortNumber`
+- `NonEmptyString`
+- `Email`
+- `Url`
+- `Slug`
+
+Examples:
+
+- `examples/invariant_basic.fav`
+- `examples/std_states.fav`
+
+### explain and schema
+
+- `fav explain` now shows an `INVARIANTS` column for record types
+- `fav explain --schema` lowers supported invariants to SQL `CHECK` output
 
 ---
 
@@ -563,5 +746,134 @@ SQL パラメータには `?` を使い、Favnir の値（`Int`, `Float`, `Strin
 | `examples/interface_basic.fav`      | `interface` / 手書き `impl` の基本例 (v1.1.0) |
 | `examples/interface_auto.fav`       | `with` 糖衣構文と自動合成の例 (v1.1.0) |
 | `examples/algebraic.fav`            | `Ring` interface を使った代数演算の例 (v1.1.0) |
+| `examples/invariant_basic.fav`      | `invariant` と `TypeName.new(...)` の基本例 (v1.2.0) |
+| `examples/std_states.fav`           | `std.states` の利用例 (v1.2.0) |
 
 > **v0.6.0**: 上記の全サンプルは `fav build` → `fav exec` でも実行できます。
+## v1.6.0
+
+### FString
+
+```favnir
+bind name <- "Favnir"
+bind age <- 42
+$"Hello {name}! Age: {age}"
+```
+
+### Record Pattern
+
+```favnir
+match user {
+    { name, age } where age >= 18 => name
+    { name: n } => n
+}
+```
+
+### Test / Watch
+
+```text
+fav test --filter "keyword"
+fav watch --cmd check
+```
+
+## v1.8.0
+
+### Task\<T\> parallel API
+
+```favnir
+// Task.all — collect all results
+bind tasks <- collect {
+    yield Task.run(|| compute(1));
+    yield Task.run(|| compute(2));
+}
+bind results <- Task.all(tasks)
+
+// Task.race — first result wins
+bind winner <- Task.race(tasks)
+
+// Task.timeout — Option<T> (always some in v1.8.0)
+bind result <- Task.timeout(Task.run(|| 42), 1000)
+```
+
+### async fn main()
+
+```favnir
+public async fn main() -> Unit !Io {
+    bind msg <- greet("world")
+    IO.println(msg)
+}
+```
+
+### chain + Task\<T\>
+
+`chain x <-` now unwraps `Task<Option<T>>` and `Task<Result<T,E>>` transparently.
+
+### Coverage: function-level report
+
+```
+fav test --coverage
+fav test --coverage --coverage-report ./coverage_out
+```
+
+Per-function breakdown shows covered/total lines and `[full|partial|none]` status.
+`--coverage-report <dir>` writes `<dir>/coverage.txt`.
+
+### fav bench
+
+```favnir
+bench "fib(15)" { fib(15) }
+bench "factorial(10)" { factorial(10) }
+```
+
+```
+fav bench math.bench.fav --iters 500 --filter fib
+```
+
+Output: `µs/iter` per benchmark with configurable iteration count.
+
+---
+
+## v1.7.0
+
+### Task\<T\> async base
+
+```favnir
+async fn fetch_greeting() -> String !Io {
+    "Hello from async!"
+}
+
+public fn main() -> Unit !Io {
+    bind msg <- fetch_greeting()   // msg: String (Task unwrapped)
+    IO.println(msg)
+}
+```
+
+### Type aliases
+
+```favnir
+type UserId   = Int
+type UserName = String
+type MaybeId  = Option<Int>
+```
+
+Aliases are fully compatible with their target types and resolved at
+type-check time with no runtime overhead.
+
+### Coverage
+
+```text
+fav test --coverage
+```
+
+Output:
+```
+coverage: src/main.fav
+  lines covered: 12 / 15 (80.0%)
+  uncovered:     lines 7, 9, 14
+```
+
+### Watch multi-dir
+
+```text
+fav watch --cmd check --dir src --dir tests --debounce 500
+```

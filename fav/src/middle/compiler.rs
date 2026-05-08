@@ -1,15 +1,54 @@
 use std::collections::{HashMap, HashSet};
+use std::cell::Cell;
+
+thread_local! {
+    static COVERAGE_MODE: Cell<bool> = Cell::new(false);
+}
+
+/// Enable coverage-tracking IR emission for the current thread.
+pub fn set_coverage_mode(enabled: bool) {
+    COVERAGE_MODE.with(|c| c.set(enabled));
+}
 
 use crate::ast::{
-    Block, Expr, FieldPattern, FlwDef, ImplDef, InterfaceDecl, InterfaceImplDecl, Item, Lit,
-    MatchArm, Pattern, Program, Stmt, TypeBody, TypeExpr,
+    AbstractFlwDef, AbstractTrfDef, Block, Expr, FieldPattern, FStringPart, FlwBindingDef, FlwDef, FlwSlot, ImplDef,
+    InterfaceDecl, InterfaceImplDecl, Item, Lit, MatchArm, Pattern, Program, Stmt, TypeBody,
+    TypeExpr,
 };
 use super::checker::Type;
 use super::ir::{IRArm, IRExpr, IRFnDef, IRGlobal, IRGlobalKind, IRPattern, IRProgram, IRStmt};
 
+fn collect_abstract_flw_defs(program: &Program) -> HashMap<String, AbstractFlwDef> {
+    let mut out = HashMap::new();
+    for item in &program.items {
+        if let Item::AbstractFlwDef(def) = item {
+            out.insert(def.name.clone(), def.clone());
+        }
+    }
+    out
+}
+
+fn fully_bound_flw_info<'a>(
+    fd: &'a FlwBindingDef,
+    templates: &'a HashMap<String, AbstractFlwDef>,
+) -> Option<&'a AbstractFlwDef> {
+    let template = templates.get(&fd.template)?;
+    let bound: HashSet<&str> = fd.bindings.iter().map(|(slot, _)| slot.as_str()).collect();
+    let all_known = fd
+        .bindings
+        .iter()
+        .all(|(slot, _)| template.slots.iter().any(|s| s.name == *slot));
+    if all_known && bound.len() == template.slots.len() {
+        Some(template)
+    } else {
+        None
+    }
+}
+
 #[derive(Debug, Default)]
 pub struct CompileCtx {
     pub locals: Vec<HashMap<String, u16>>,
+    pub local_tys: Vec<HashMap<String, Type>>,
     pub globals: HashMap<String, u16>,
     pub next_slot: u16,
     pub next_global_idx: u16,
@@ -27,20 +66,30 @@ impl CompileCtx {
 
     pub fn push_scope(&mut self) {
         self.locals.push(HashMap::new());
+        self.local_tys.push(HashMap::new());
     }
 
     pub fn pop_scope(&mut self) {
         self.locals.pop();
+        self.local_tys.pop();
     }
 
     pub fn define_local(&mut self, name: impl Into<String>) -> u16 {
+        self.define_local_with_ty(name, Type::Unknown)
+    }
+
+    pub fn define_local_with_ty(&mut self, name: impl Into<String>, ty: Type) -> u16 {
+        let name = name.into();
         let slot = self.next_slot;
         self.next_slot = self.next_slot.saturating_add(1);
         if self.locals.is_empty() {
             self.push_scope();
         }
         if let Some(scope) = self.locals.last_mut() {
-            scope.insert(name.into(), slot);
+            scope.insert(name.clone(), slot);
+        }
+        if let Some(scope) = self.local_tys.last_mut() {
+            scope.insert(name, ty);
         }
         slot
     }
@@ -49,6 +98,15 @@ impl CompileCtx {
         for scope in self.locals.iter().rev() {
             if let Some(slot) = scope.get(name) {
                 return Some(*slot);
+            }
+        }
+        None
+    }
+
+    pub fn resolve_local_ty(&self, name: &str) -> Option<Type> {
+        for scope in self.local_tys.iter().rev() {
+            if let Some(ty) = scope.get(name) {
+                return Some(ty.clone());
             }
         }
         None
@@ -71,9 +129,57 @@ pub fn compile_program(program: &Program) -> IRProgram {
     let mut fns = Vec::new();
     let mut next_fn_idx = 0usize;
     let interface_method_types = collect_interface_method_types(program);
+    let abstract_flw_defs = collect_abstract_flw_defs(program);
+    let include_std_states = program
+        .uses
+        .iter()
+        .any(|path| path.len() >= 2 && path[0] == "std" && path[1] == "states");
+    let std_state_defs = if include_std_states {
+        crate::std_states::parsed_type_defs()
+    } else {
+        Vec::new()
+    };
+
+    for ns in &[
+        "IO", "Debug", "Result", "Option",
+        "Int", "Float", "Bool", "String",
+        "List", "Map", "Trace", "Emit", "File", "Json", "Csv", "Db", "Http", "Task",
+        "assert", "assert_eq", "assert_ne",
+        "IO.println_int", "IO.println_float", "IO.println_bool", "IO.print",
+    ] {
+        if !ctx.globals.contains_key(*ns) {
+            let idx = globals.len() as u16;
+            ctx.globals.insert(ns.to_string(), idx);
+            globals.push(IRGlobal { name: ns.to_string(), kind: IRGlobalKind::Builtin });
+        }
+    }
+
+    for td in &std_state_defs {
+        if !ctx.globals.contains_key(&td.name) {
+            let idx = globals.len() as u16;
+            ctx.globals.insert(td.name.clone(), idx);
+            globals.push(IRGlobal {
+                name: td.name.clone(),
+                kind: IRGlobalKind::Builtin,
+            });
+        }
+        let ctor_name = format!("{}.new", td.name);
+        let idx = globals.len() as u16;
+        ctx.globals.insert(ctor_name.clone(), idx);
+        globals.push(IRGlobal {
+            name: ctor_name,
+            kind: IRGlobalKind::Fn(next_fn_idx),
+        });
+        next_fn_idx += 1;
+    }
+
+    for td in &std_state_defs {
+        fns.push(compile_type_def_constructor(td, &mut ctx));
+    }
 
     for item in &program.items {
         match item {
+            Item::EffectDef(..) => {}
             Item::FnDef(fd) => {
                 let idx = globals.len() as u16;
                 ctx.globals.insert(fd.name.clone(), idx);
@@ -92,6 +198,14 @@ pub fn compile_program(program: &Program) -> IRProgram {
                 });
                 next_fn_idx += 1;
             }
+            Item::AbstractTrfDef(AbstractTrfDef { name, .. }) => {
+                let idx = globals.len() as u16;
+                ctx.globals.insert(name.clone(), idx);
+                globals.push(IRGlobal {
+                    name: name.clone(),
+                    kind: IRGlobalKind::Builtin,
+                });
+            }
             Item::FlwDef(FlwDef { name, .. }) => {
                 let idx = globals.len() as u16;
                 ctx.globals.insert(name.clone(), idx);
@@ -100,6 +214,32 @@ pub fn compile_program(program: &Program) -> IRProgram {
                     kind: IRGlobalKind::Fn(next_fn_idx),
                 });
                 next_fn_idx += 1;
+            }
+            Item::AbstractFlwDef(AbstractFlwDef { name, .. }) => {
+                let idx = globals.len() as u16;
+                ctx.globals.insert(name.clone(), idx);
+                globals.push(IRGlobal {
+                    name: name.clone(),
+                    kind: IRGlobalKind::Builtin,
+                });
+            }
+            Item::FlwBindingDef(FlwBindingDef { name, .. }) => {
+                let idx = globals.len() as u16;
+                ctx.globals.insert(name.clone(), idx);
+                globals.push(IRGlobal {
+                    name: name.clone(),
+                    kind: match program.items.iter().find_map(|item| match item {
+                        Item::FlwBindingDef(fd) if fd.name == *name => Some(fd),
+                        _ => None,
+                    }) {
+                        Some(fd) if fully_bound_flw_info(fd, &abstract_flw_defs).is_some() => {
+                            let kind = IRGlobalKind::Fn(next_fn_idx);
+                            next_fn_idx += 1;
+                            kind
+                        }
+                        _ => IRGlobalKind::Builtin,
+                    },
+                });
             }
             Item::TypeDef(td) => {
                 if !ctx.globals.contains_key(&td.name) {
@@ -118,8 +258,18 @@ pub fn compile_program(program: &Program) -> IRProgram {
                     globals.push(IRGlobal {
                         name,
                         kind: IRGlobalKind::VariantCtor,
-                    });
+                        });
+                    }
                 }
+                if !td.invariants.is_empty() && matches!(td.body, TypeBody::Record(_)) {
+                    let ctor_name = format!("{}.new", td.name);
+                    let idx = globals.len() as u16;
+                    ctx.globals.insert(ctor_name.clone(), idx);
+                    globals.push(IRGlobal {
+                        name: ctor_name,
+                        kind: IRGlobalKind::Fn(next_fn_idx),
+                    });
+                    next_fn_idx += 1;
                 }
             }
             Item::ImplDef(id) => {
@@ -158,6 +308,9 @@ pub fn compile_program(program: &Program) -> IRProgram {
             Item::TestDef(_) => {
                 next_fn_idx += 1;
             }
+            Item::BenchDef(_) => {
+                next_fn_idx += 1;
+            }
             Item::InterfaceDecl(_) => {}
             _ => {}
         }
@@ -184,6 +337,12 @@ pub fn compile_program(program: &Program) -> IRProgram {
 
     for item in &program.items {
         match item {
+            Item::EffectDef(..) => {}
+            Item::TypeDef(td) => {
+                if !td.invariants.is_empty() && matches!(td.body, TypeBody::Record(_)) {
+                    fns.push(compile_type_def_constructor(td, &mut ctx));
+                }
+            }
             Item::FnDef(fd) => fns.push(compile_fn_def(
                 &fd.name,
                 &fd.params.iter().map(|p| p.name.clone()).collect::<Vec<_>>(),
@@ -203,6 +362,13 @@ pub fn compile_program(program: &Program) -> IRProgram {
                 &mut ctx,
             )),
             Item::FlwDef(fd) => fns.push(compile_flw_def(fd, &mut ctx)),
+            Item::AbstractTrfDef(_) => {}
+            Item::AbstractFlwDef(_) => {}
+            Item::FlwBindingDef(fd) => {
+                if let Some(template) = fully_bound_flw_info(fd, &abstract_flw_defs) {
+                    fns.push(compile_flw_binding_def(fd, template, &mut ctx));
+                }
+            }
             Item::ImplDef(id) => {
                 fns.extend(compile_impl_def(id, &mut ctx));
             }
@@ -222,6 +388,20 @@ pub fn compile_program(program: &Program) -> IRProgram {
                     &mut ctx,
                 ))
             }
+            Item::BenchDef(bd) => {
+                // Bench bodies are compiled with a generated function name for runner use.
+                let unit_ty = crate::ast::TypeExpr::Named(
+                    "Unit".into(), vec![], crate::frontend::lexer::Span::dummy());
+                fns.push(compile_fn_def(
+                    &format!("$bench:{}", bd.description),
+                    &[],
+                    &[],
+                    &[],
+                    &unit_ty,
+                    &bd.body,
+                    &mut ctx,
+                ))
+            }
             Item::InterfaceDecl(_) => {}
             _ => {}
         }
@@ -237,6 +417,7 @@ fn compile_flw_def(fd: &FlwDef, ctx: &mut CompileCtx) -> IRFnDef {
     let saved_next = ctx.next_slot;
     let saved_anon = ctx.anon_counter;
     let saved_locals = std::mem::take(&mut ctx.locals);
+    let saved_local_tys = std::mem::take(&mut ctx.local_tys);
 
     ctx.next_slot = 0;
     ctx.anon_counter = 0;
@@ -255,6 +436,7 @@ fn compile_flw_def(fd: &FlwDef, ctx: &mut CompileCtx) -> IRFnDef {
 
     let local_count = ctx.next_slot as usize;
     ctx.locals = saved_locals;
+    ctx.local_tys = saved_local_tys;
     ctx.next_slot = saved_next;
     ctx.anon_counter = saved_anon;
 
@@ -267,6 +449,291 @@ fn compile_flw_def(fd: &FlwDef, ctx: &mut CompileCtx) -> IRFnDef {
         return_ty: Type::Unknown,
         body: current,
     }
+}
+
+fn lower_type_expr_with_subst(ty: &TypeExpr, subst: &HashMap<String, Type>) -> Type {
+    match ty {
+        TypeExpr::Named(name, args, _) if args.is_empty() => {
+            subst.get(name).cloned().unwrap_or_else(|| lower_type_expr(ty))
+        }
+        TypeExpr::Named(name, args, _) => {
+            let resolved_args: Vec<Type> = args
+                .iter()
+                .map(|arg| lower_type_expr_with_subst(arg, subst))
+                .collect();
+            match name.as_str() {
+                "Bool" => Type::Bool,
+                "Int" => Type::Int,
+                "Float" => Type::Float,
+                "String" => Type::String,
+                "Unit" => Type::Unit,
+                "List" if resolved_args.len() == 1 => Type::List(Box::new(resolved_args[0].clone())),
+                "Map" if resolved_args.len() == 2 => Type::Map(
+                    Box::new(resolved_args[0].clone()),
+                    Box::new(resolved_args[1].clone()),
+                ),
+                "Option" if resolved_args.len() == 1 => Type::Option(Box::new(resolved_args[0].clone())),
+                "Result" if resolved_args.len() == 2 => Type::Result(
+                    Box::new(resolved_args[0].clone()),
+                    Box::new(resolved_args[1].clone()),
+                ),
+                _ => Type::Named(name.clone(), resolved_args),
+            }
+        }
+        TypeExpr::Optional(inner, _) => Type::Option(Box::new(lower_type_expr_with_subst(inner, subst))),
+        TypeExpr::Fallible(inner, _) => Type::Result(
+            Box::new(lower_type_expr_with_subst(inner, subst)),
+            Box::new(Type::String),
+        ),
+        TypeExpr::Arrow(input, output, _) => Type::Arrow(
+            Box::new(lower_type_expr_with_subst(input, subst)),
+            Box::new(lower_type_expr_with_subst(output, subst)),
+        ),
+        TypeExpr::TrfFn { input, output, effects, .. } => Type::Trf(
+            Box::new(lower_type_expr_with_subst(input, subst)),
+            Box::new(lower_type_expr_with_subst(output, subst)),
+            effects.clone(),
+        ),
+    }
+}
+
+fn infer_flw_slot_effects(slots: &[FlwSlot]) -> Vec<crate::ast::Effect> {
+    let mut out = Vec::new();
+    for slot in slots {
+        let slot_effects: Vec<crate::ast::Effect> = if let Some(slot_ty) = &slot.abstract_trf_ty {
+            match lower_type_expr(slot_ty) {
+                Type::AbstractTrf { effects, .. } | Type::Trf(_, _, effects) => effects,
+                _ => slot.effects.clone(),
+            }
+        } else {
+            slot.effects.clone()
+        };
+        for effect in &slot_effects {
+            if !out.iter().any(|existing| existing == effect) {
+                out.push(effect.clone());
+            }
+        }
+    }
+    out
+}
+
+fn lower_flw_slot_signature_with_subst(
+    slot: &FlwSlot,
+    subst: &HashMap<String, Type>,
+) -> (Type, Type, Vec<crate::ast::Effect>) {
+    if let Some(slot_ty) = &slot.abstract_trf_ty {
+        match lower_type_expr_with_subst(slot_ty, subst) {
+            Type::AbstractTrf { input, output, effects } | Type::Trf(input, output, effects) => {
+                return ((*input).clone(), (*output).clone(), effects);
+            }
+            other => return (other, Type::Unknown, Vec::new()),
+        }
+    }
+    (
+        lower_type_expr_with_subst(&slot.input_ty, subst),
+        lower_type_expr_with_subst(&slot.output_ty, subst),
+        slot.effects.clone(),
+    )
+}
+
+fn compile_flw_binding_def(fd: &FlwBindingDef, template: &AbstractFlwDef, ctx: &mut CompileCtx) -> IRFnDef {
+    let saved_next = ctx.next_slot;
+    let saved_anon = ctx.anon_counter;
+    let saved_locals = std::mem::take(&mut ctx.locals);
+    let saved_local_tys = std::mem::take(&mut ctx.local_tys);
+    let mut saved_local_slots = HashMap::new();
+    for scope in &saved_locals {
+        for (name, slot) in scope {
+            saved_local_slots.insert(name.clone(), *slot);
+        }
+    }
+
+    ctx.next_slot = 0;
+    ctx.anon_counter = 0;
+    ctx.push_scope();
+    let input_slot = ctx.define_local("$input");
+
+    let type_subst: HashMap<String, Type> = template
+        .type_params
+        .iter()
+        .cloned()
+        .zip(fd.type_args.iter().map(lower_type_expr))
+        .collect();
+    let binding_map: HashMap<&str, &crate::ast::SlotImpl> = fd
+        .bindings
+        .iter()
+        .map(|(slot, impl_name)| (slot.as_str(), impl_name))
+        .collect();
+
+    let mut current = IRExpr::Local(input_slot, Type::Unknown);
+    for slot in &template.slots {
+        let impl_name = binding_map
+            .get(slot.name.as_str())
+            .copied()
+            .expect("fully bound flw binding must have all slots");
+        current = match impl_name {
+            crate::ast::SlotImpl::Global(name) => {
+                let callee = if let Some(global_idx) = ctx.resolve_global(name) {
+                    IRExpr::TrfRef(global_idx, Type::Unknown)
+                } else {
+                    IRExpr::TrfRef(u16::MAX, Type::Unknown)
+                };
+                IRExpr::Call(Box::new(callee), vec![current], Type::Unknown)
+            }
+            crate::ast::SlotImpl::Local(name) => {
+                let local = saved_local_slots.get(name).copied().unwrap_or(u16::MAX);
+                IRExpr::CallTrfLocal {
+                    local,
+                    arg: Box::new(current),
+                    ty: Type::Unknown,
+                }
+            }
+        };
+    }
+
+    let local_count = ctx.next_slot as usize;
+    ctx.locals = saved_locals;
+    ctx.local_tys = saved_local_tys;
+    ctx.next_slot = saved_next;
+    ctx.anon_counter = saved_anon;
+
+    let first_slot = template.slots.first().expect("fully bound flw template has at least one slot");
+    let last_slot = template.slots.last().unwrap();
+    let (input_ty, _, _) = lower_flw_slot_signature_with_subst(first_slot, &type_subst);
+    let (_, return_ty, _) = lower_flw_slot_signature_with_subst(last_slot, &type_subst);
+    IRFnDef {
+        name: fd.name.clone(),
+        param_count: 1,
+        param_tys: vec![input_ty],
+        local_count,
+        effects: infer_flw_slot_effects(&template.slots),
+        return_ty,
+        body: current,
+    }
+}
+
+fn compile_type_def_constructor(td: &crate::ast::TypeDef, ctx: &mut CompileCtx) -> IRFnDef {
+    let TypeBody::Record(fields) = &td.body else {
+        unreachable!("constructor only generated for record state types");
+    };
+
+    let saved_next = ctx.next_slot;
+    let saved_anon = ctx.anon_counter;
+    let saved_locals = std::mem::take(&mut ctx.locals);
+    let saved_local_tys = std::mem::take(&mut ctx.local_tys);
+
+    ctx.next_slot = 0;
+    ctx.anon_counter = 0;
+    ctx.push_scope();
+    for field in fields {
+        ctx.define_local_with_ty(field.name.clone(), lower_type_expr(&field.ty));
+    }
+
+    let body = build_constructor_body(td, fields, ctx);
+    let local_count = ctx.next_slot as usize;
+
+    ctx.locals = saved_locals;
+    ctx.local_tys = saved_local_tys;
+    ctx.next_slot = saved_next;
+    ctx.anon_counter = saved_anon;
+
+    IRFnDef {
+        name: format!("{}.new", td.name),
+        param_count: fields.len(),
+        param_tys: fields.iter().map(|f| lower_type_expr(&f.ty)).collect(),
+        local_count,
+        effects: Vec::new(),
+        return_ty: Type::Result(
+            Box::new(Type::Named(td.name.clone(), vec![])),
+            Box::new(Type::String),
+        ),
+        body,
+    }
+}
+
+fn build_constructor_body(
+    td: &crate::ast::TypeDef,
+    fields: &[crate::ast::Field],
+    ctx: &mut CompileCtx,
+) -> IRExpr {
+    let record_expr = IRExpr::RecordConstruct(
+        fields
+            .iter()
+            .map(|field| {
+                let slot = ctx
+                    .resolve_local(&field.name)
+                    .expect("constructor field local must exist");
+                (
+                    field.name.clone(),
+                    IRExpr::Local(slot, lower_type_expr(&field.ty)),
+                )
+            })
+            .collect(),
+        Type::Named(td.name.clone(), vec![]),
+    );
+
+    let ok_expr = make_result_ctor_call(ctx, "ok", record_expr, td.name.clone());
+    if td.invariants.is_empty() {
+        return ok_expr;
+    }
+
+    let cond = build_invariant_condition(&td.invariants, ctx);
+    let err_expr = make_result_ctor_call(
+        ctx,
+        "err",
+        IRExpr::Lit(
+            Lit::Str(format!("InvariantViolation: {}", td.name)),
+            Type::String,
+        ),
+        td.name.clone(),
+    );
+    IRExpr::If(
+        Box::new(cond),
+        Box::new(ok_expr),
+        Box::new(err_expr),
+        Type::Result(
+            Box::new(Type::Named(td.name.clone(), vec![])),
+            Box::new(Type::String),
+        ),
+    )
+}
+
+fn build_invariant_condition(invariants: &[Expr], ctx: &mut CompileCtx) -> IRExpr {
+    let mut iter = invariants.iter();
+    let first = compile_expr(iter.next().expect("at least one invariant"), ctx);
+    iter.fold(first, |acc, invariant| {
+        let next = compile_expr(invariant, ctx);
+        IRExpr::If(
+            Box::new(acc),
+            Box::new(next),
+            Box::new(IRExpr::Lit(Lit::Bool(false), Type::Bool)),
+            Type::Bool,
+        )
+    })
+}
+
+fn make_result_ctor_call(
+    ctx: &CompileCtx,
+    method: &str,
+    payload: IRExpr,
+    type_name: String,
+) -> IRExpr {
+    let result_idx = ctx
+        .resolve_global("Result")
+        .expect("Result namespace must be registered");
+    let result_ty = Type::Result(
+        Box::new(Type::Named(type_name, vec![])),
+        Box::new(Type::String),
+    );
+    IRExpr::Call(
+        Box::new(IRExpr::FieldAccess(
+            Box::new(IRExpr::Global(result_idx, Type::Unknown)),
+            method.to_string(),
+            Type::Unknown,
+        )),
+        vec![payload],
+        result_ty,
+    )
 }
 
 fn compile_impl_def(id: &ImplDef, ctx: &mut CompileCtx) -> Vec<IRFnDef> {
@@ -398,6 +865,12 @@ fn substitute_self_in_type_expr(ty: &TypeExpr, type_name: &str) -> TypeExpr {
             Box::new(substitute_self_in_type_expr(b, type_name)),
             span.clone(),
         ),
+        TypeExpr::TrfFn { input, output, effects, span } => TypeExpr::TrfFn {
+            input: Box::new(substitute_self_in_type_expr(input, type_name)),
+            output: Box::new(substitute_self_in_type_expr(output, type_name)),
+            effects: effects.clone(),
+            span: span.clone(),
+        },
     }
 }
 
@@ -454,17 +927,20 @@ fn compile_fn_def(
     let saved_next = ctx.next_slot;
     let saved_anon = ctx.anon_counter;
     let saved_locals = std::mem::take(&mut ctx.locals);
+    let saved_local_tys = std::mem::take(&mut ctx.local_tys);
 
     ctx.next_slot = 0;
     ctx.anon_counter = 0;
     ctx.push_scope();
-    for param in params {
-        ctx.define_local(param.clone());
+    for (idx, param) in params.iter().enumerate() {
+        let ty = param_tys.get(idx).cloned().unwrap_or(Type::Unknown);
+        ctx.define_local_with_ty(param.clone(), ty);
     }
     let body_ir = compile_block(body, ctx);
     let local_count = ctx.next_slot as usize;
 
     ctx.locals = saved_locals;
+    ctx.local_tys = saved_local_tys;
     ctx.next_slot = saved_next;
     ctx.anon_counter = saved_anon;
 
@@ -482,7 +958,12 @@ fn compile_fn_def(
 fn compile_block(block: &Block, ctx: &mut CompileCtx) -> IRExpr {
     ctx.push_scope();
     let mut stmts = Vec::new();
+    let cov = COVERAGE_MODE.with(|c| c.get());
     for stmt in &block.stmts {
+        if cov {
+            let line = stmt.span().line;
+            stmts.push(IRStmt::TrackLine(line));
+        }
         stmts.push(compile_stmt(stmt, ctx));
     }
     let tail = compile_expr(&block.expr, ctx);
@@ -566,6 +1047,14 @@ fn collect_free_vars_expr(expr: &Expr, bound: &mut HashSet<String>, free: &mut H
                 collect_free_vars_expr(expr, bound, free);
             }
         }
+        Expr::FString(parts, _) => {
+            for part in parts {
+                if let FStringPart::Expr(expr) = part {
+                    collect_free_vars_expr(expr, bound, free);
+                }
+            }
+        }
+        Expr::AssertMatches(expr, _, _) => collect_free_vars_expr(expr, bound, free),
         Expr::EmitExpr(inner, _) => collect_free_vars_expr(inner, bound, free),
     }
 }
@@ -588,6 +1077,12 @@ fn collect_free_vars_block(block: &Block, bound: &mut HashSet<String>, free: &mu
                 collect_free_vars_expr(&yield_stmt.expr, &mut local_bound, free);
             }
             Stmt::Expr(expr) => collect_free_vars_expr(expr, &mut local_bound, free),
+            Stmt::ForIn(f) => {
+                collect_free_vars_expr(&f.iter, &mut local_bound, free);
+                let mut inner_bound = local_bound.clone();
+                inner_bound.insert(f.var.clone());
+                collect_free_vars_block(&f.body, &mut inner_bound, free);
+            }
         }
     }
     collect_free_vars_expr(&block.expr, &mut local_bound, free);
@@ -598,7 +1093,7 @@ pub fn compile_expr(expr: &Expr, ctx: &mut CompileCtx) -> IRExpr {
         Expr::Lit(lit, _) => IRExpr::Lit(lit.clone(), lit_type(lit)),
         Expr::Ident(name, _) => {
             if let Some(slot) = ctx.resolve_local(name) {
-                IRExpr::Local(slot, Type::Unknown)
+                IRExpr::Local(slot, ctx.resolve_local_ty(name).unwrap_or(Type::Unknown))
             } else if let Some(idx) = ctx.resolve_global(name) {
                 IRExpr::Global(idx, Type::Unknown)
             } else {
@@ -628,6 +1123,27 @@ pub fn compile_expr(expr: &Expr, ctx: &mut CompileCtx) -> IRExpr {
             let subject = compile_expr(subject, ctx);
             let arms = arms.iter().map(|a| compile_arm(a, ctx)).collect();
             IRExpr::Match(Box::new(subject), arms, Type::Unknown)
+        }
+        Expr::AssertMatches(expr, pattern, _) => {
+            let subject = compile_expr(expr, ctx);
+            let assert_idx = ctx
+                .resolve_global("assert")
+                .expect("assert builtin must be registered");
+            let ok_arm = IRArm {
+                pattern: compile_pattern(pattern, ctx),
+                guard: None,
+                body: IRExpr::Lit(Lit::Unit, Type::Unit),
+            };
+            let fail_arm = IRArm {
+                pattern: IRPattern::Wildcard,
+                guard: None,
+                body: IRExpr::Call(
+                    Box::new(IRExpr::Global(assert_idx, Type::Unknown)),
+                    vec![IRExpr::Lit(Lit::Bool(false), Type::Bool)],
+                    Type::Unit,
+                ),
+            };
+            IRExpr::Match(Box::new(subject), vec![ok_arm, fail_arm], Type::Unit)
         }
         Expr::Collect(block, _) => {
             let inner = compile_block(block, ctx);
@@ -661,6 +1177,7 @@ pub fn compile_expr(expr: &Expr, ctx: &mut CompileCtx) -> IRExpr {
             let saved_next = ctx.next_slot;
             let saved_anon = ctx.anon_counter;
             let saved_locals = std::mem::take(&mut ctx.locals);
+            let saved_local_tys = std::mem::take(&mut ctx.local_tys);
 
             ctx.next_slot = 0;
             ctx.anon_counter = 0;
@@ -675,6 +1192,7 @@ pub fn compile_expr(expr: &Expr, ctx: &mut CompileCtx) -> IRExpr {
             let local_count = ctx.next_slot as usize;
 
             ctx.locals = saved_locals;
+            ctx.local_tys = saved_local_tys;
             ctx.next_slot = saved_next;
             ctx.anon_counter = saved_anon;
 
@@ -727,28 +1245,71 @@ pub fn compile_expr(expr: &Expr, ctx: &mut CompileCtx) -> IRExpr {
                 .collect(),
             Type::Unknown,
         ),
+        Expr::FString(parts, _) => compile_fstring(parts, ctx),
         Expr::EmitExpr(inner, _) => {
             IRExpr::Emit(Box::new(compile_expr(inner, ctx)), Type::Unit)
         }
     }
 }
 
+fn compile_fstring(parts: &[FStringPart], ctx: &mut CompileCtx) -> IRExpr {
+    let string_idx = ctx.resolve_global("String").unwrap_or(u16::MAX);
+    let debug_idx = ctx.resolve_global("Debug").unwrap_or(u16::MAX);
+    let mut acc: Option<IRExpr> = None;
+    for part in parts {
+        let next = match part {
+            FStringPart::Lit(s) => IRExpr::Lit(Lit::Str(s.clone()), Type::String),
+            FStringPart::Expr(expr) => {
+                let inner = compile_expr(expr, ctx);
+                if matches!(inner.ty(), Type::String) {
+                    inner
+                } else {
+                    IRExpr::Call(
+                        Box::new(IRExpr::FieldAccess(
+                            Box::new(IRExpr::Global(debug_idx, Type::Unknown)),
+                            "show".into(),
+                            Type::Unknown,
+                        )),
+                        vec![inner],
+                        Type::String,
+                    )
+                }
+            }
+        };
+        acc = Some(match acc {
+            None => next,
+            Some(prev) => IRExpr::Call(
+                Box::new(IRExpr::FieldAccess(
+                    Box::new(IRExpr::Global(string_idx, Type::Unknown)),
+                    "concat".into(),
+                    Type::Unknown,
+                )),
+                vec![prev, next],
+                Type::String,
+            ),
+        });
+    }
+    acc.unwrap_or_else(|| IRExpr::Lit(Lit::Str(String::new()), Type::String))
+}
+
 pub fn compile_stmt(stmt: &Stmt, ctx: &mut CompileCtx) -> IRStmt {
     match stmt {
         Stmt::Bind(bind) => {
+            let expr_ir = compile_expr(&bind.expr, ctx);
             let slot = match &bind.pattern {
-                Pattern::Bind(name, _) => ctx.define_local(name.clone()),
+                Pattern::Bind(name, _) => ctx.define_local_with_ty(name.clone(), expr_ir.ty().clone()),
                 _ => ctx.define_pattern_slot(),
             };
-            IRStmt::Bind(slot, compile_expr(&bind.expr, ctx))
+            IRStmt::Bind(slot, expr_ir)
         }
         Stmt::Chain(chain) => {
+            let expr_ir = compile_expr(&chain.expr, ctx);
             let slot = if let Some(slot) = ctx.resolve_local(&chain.name) {
                 slot
             } else {
-                ctx.define_local(chain.name.clone())
+                ctx.define_local_with_ty(chain.name.clone(), expr_ir.ty().clone())
             };
-            IRStmt::Chain(slot, compile_expr(&chain.expr, ctx))
+            IRStmt::Chain(slot, expr_ir)
         }
         Stmt::Yield(yield_stmt) => IRStmt::Yield(compile_expr(&yield_stmt.expr, ctx)),
         Stmt::Expr(expr) => IRStmt::Expr(compile_expr(expr, ctx)),
@@ -832,12 +1393,22 @@ fn lower_type_expr(ty: &TypeExpr) -> Type {
         TypeExpr::Arrow(input, output, _) => {
             Type::Arrow(Box::new(lower_type_expr(input)), Box::new(lower_type_expr(output)))
         }
+        TypeExpr::TrfFn { input, output, effects, .. } => Type::Trf(
+            Box::new(lower_type_expr(input)),
+            Box::new(lower_type_expr(output)),
+            effects.clone(),
+        ),
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::compile_program;
+    use super::{
+        compile_flw_binding_def, compile_program, AbstractFlwDef, CompileCtx, FlwBindingDef,
+        FlwSlot,
+    };
+    use crate::ast::TypeExpr;
+    use crate::middle::checker::Type;
     use crate::middle::ir::{IRExpr, IRGlobalKind, IRStmt};
     use crate::frontend::lexer::Lexer;
     use crate::frontend::parser::Parser;
@@ -947,5 +1518,82 @@ public fn main() -> Int {
 
         let closure_fn = ir.fns.iter().find(|f| f.name.starts_with("$closure")).expect("closure fn");
         assert_eq!(closure_fn.param_count, 2);
+    }
+
+    #[test]
+    fn compile_flw_binding_exec_ok() {
+        let ir = compile_source(
+            r#"
+abstract flw DataPipeline<Row> {
+    parse: String -> List<Row>!
+    save: List<Row> -> Int !Db
+}
+abstract trf ParseCsv: String -> List<UserRow>!
+abstract trf SaveUsers: List<UserRow> -> Int !Db
+type UserRow = { name: String }
+flw UserImport = DataPipeline<UserRow> { parse <- ParseCsv; save <- SaveUsers }
+"#,
+        );
+
+        assert!(ir.globals.iter().any(|g| g.name == "UserImport" && matches!(g.kind, IRGlobalKind::Fn(_))));
+        let flw_fn = ir.fns.iter().find(|f| f.name == "UserImport").expect("UserImport fn");
+        assert_eq!(flw_fn.param_count, 1);
+        assert!(matches!(flw_fn.param_tys.as_slice(), [Type::String]));
+        assert!(matches!(flw_fn.return_ty, Type::Int));
+        assert!(flw_fn.effects.contains(&crate::ast::Effect::Db));
+    }
+
+    #[test]
+    fn compile_flw_binding_local_uses_call_trf_local() {
+        let span = crate::frontend::lexer::Span::dummy();
+        let template = AbstractFlwDef {
+            visibility: None,
+            name: "SavePipeline".into(),
+            type_params: vec!["Row".into()],
+            slots: vec![FlwSlot {
+                name: "save".into(),
+                abstract_trf_ty: None,
+                input_ty: TypeExpr::Named("Row".into(), vec![], span.clone()),
+                output_ty: TypeExpr::Named("Int".into(), vec![], span.clone()),
+                effects: vec![crate::ast::Effect::Db],
+                span: span.clone(),
+            }],
+            span: span.clone(),
+        };
+        let fd = FlwBindingDef {
+            visibility: None,
+            name: "Injected".into(),
+            template: "SavePipeline".into(),
+            type_args: vec![TypeExpr::Named("UserRow".into(), vec![], span.clone())],
+            bindings: vec![("save".into(), crate::ast::SlotImpl::Local("save".into()))],
+            span,
+        };
+        let mut ctx = CompileCtx::new();
+        ctx.push_scope();
+        let slot = ctx.define_local("save");
+        let compiled = compile_flw_binding_def(&fd, &template, &mut ctx);
+        match compiled.body {
+            IRExpr::CallTrfLocal { local, .. } => assert_eq!(local, slot),
+            other => panic!("expected CallTrfLocal, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn compile_flw_binding_partial_skips_fn_codegen() {
+        let ir = compile_source(
+            r#"
+abstract flw DataPipeline<Row> {
+    parse: String -> List<Row>!
+    validate: Row -> Row!
+    save: List<Row> -> Int !Db
+}
+abstract trf ParseCsv: String -> List<UserRow>!
+type UserRow = { name: String }
+flw PartialImport = DataPipeline<UserRow> { parse <- ParseCsv }
+"#,
+        );
+
+        assert!(ir.globals.iter().any(|g| g.name == "PartialImport" && matches!(g.kind, IRGlobalKind::Builtin)));
+        assert!(!ir.fns.iter().any(|f| f.name == "PartialImport"));
     }
 }

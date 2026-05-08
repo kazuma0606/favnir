@@ -7,9 +7,13 @@
 //   L002  unused bind binding (name not referenced in subsequent stmts/expr)
 //   L003  fn name is not snake_case
 //   L004  type name is not PascalCase
+//   L005  unused private trf/flw-like top-level item
+//   L006  trf name is not PascalCase
+//   L007  effect name is not PascalCase
 
 use crate::ast::*;
 use crate::frontend::lexer::Span;
+use std::collections::HashSet;
 
 // ── LintError ─────────────────────────────────────────────────────────────────
 
@@ -41,20 +45,193 @@ impl std::fmt::Display for LintError {
 
 pub fn lint_program(program: &Program) -> Vec<LintError> {
     let mut errors = Vec::new();
+    let uses = collect_trf_flw_uses(program);
     for item in &program.items {
         match item {
             Item::FnDef(fd)   => lint_fn_def(fd, &mut errors),
-            Item::TrfDef(_)   => {}
+            Item::TrfDef(td)  => lint_trf_def(td, &uses, &mut errors),
             Item::TypeDef(td) => lint_type_def(td, &mut errors),
             Item::InterfaceDecl(_) | Item::InterfaceImplDecl(_) => {}
+            Item::EffectDef(ed) => lint_effect_def(ed, &mut errors),
+            Item::FlwDef(fd) => lint_flw_like(None, &fd.name, &fd.span, &uses, &mut errors),
+            Item::AbstractTrfDef(td) => lint_flw_like(td.visibility.as_ref(), &td.name, &td.span, &uses, &mut errors),
+            Item::AbstractFlwDef(fd) => lint_flw_like(fd.visibility.as_ref(), &fd.name, &fd.span, &uses, &mut errors),
+            Item::FlwBindingDef(fd) => lint_flw_like(fd.visibility.as_ref(), &fd.name, &fd.span, &uses, &mut errors),
             Item::ImplDef(id) => {
                 for m in &id.methods { lint_fn_def(m, &mut errors); }
             }
             Item::TestDef(td) => lint_block_unused_binds(&td.body, &mut errors),
+            Item::BenchDef(bd) => lint_block_unused_binds(&bd.body, &mut errors),
             _ => {}
         }
     }
     errors
+}
+
+fn lint_trf_def(td: &TrfDef, uses: &HashSet<String>, errors: &mut Vec<LintError>) {
+    lint_flw_like(td.visibility.as_ref(), &td.name, &td.span, uses, errors);
+    if !is_pascal_case(&td.name) {
+        errors.push(LintError::new(
+            "L006",
+            format!("trf name `{}` should be PascalCase", td.name),
+            td.span.clone(),
+        ));
+    }
+}
+
+fn lint_effect_def(ed: &EffectDef, errors: &mut Vec<LintError>) {
+    if !is_pascal_case(&ed.name) {
+        errors.push(LintError::new(
+            "L007",
+            format!("effect name `{}` should be PascalCase", ed.name),
+            ed.span.clone(),
+        ));
+    }
+}
+
+fn lint_flw_like(
+    visibility: Option<&Visibility>,
+    name: &str,
+    span: &Span,
+    uses: &HashSet<String>,
+    errors: &mut Vec<LintError>,
+) {
+    if visibility.is_none() && !uses.contains(name) {
+        errors.push(LintError::new(
+            "L005",
+            format!("private item `{}` is never used", name),
+            span.clone(),
+        ));
+    }
+}
+
+fn collect_trf_flw_uses(program: &Program) -> HashSet<String> {
+    let top_level_names: HashSet<String> = program
+        .items
+        .iter()
+        .filter_map(|item| match item {
+            Item::TrfDef(td) => Some(td.name.clone()),
+            Item::AbstractTrfDef(td) => Some(td.name.clone()),
+            Item::FlwDef(fd) => Some(fd.name.clone()),
+            Item::AbstractFlwDef(fd) => Some(fd.name.clone()),
+            Item::FlwBindingDef(fd) => Some(fd.name.clone()),
+            _ => None,
+        })
+        .collect();
+
+    let mut uses = HashSet::new();
+    for item in &program.items {
+        match item {
+            Item::FnDef(fd) => collect_block_calls(&fd.body, &top_level_names, &mut uses),
+            Item::TrfDef(td) => collect_block_calls(&td.body, &top_level_names, &mut uses),
+            Item::FlwDef(fd) => {
+                for step in &fd.steps {
+                    if top_level_names.contains(step) {
+                        uses.insert(step.clone());
+                    }
+                }
+            }
+            Item::FlwBindingDef(fd) => {
+                if top_level_names.contains(&fd.template) {
+                    uses.insert(fd.template.clone());
+                }
+                for (_, imp) in &fd.bindings {
+                    let name = match imp {
+                        SlotImpl::Global(name) | SlotImpl::Local(name) => name,
+                    };
+                    if top_level_names.contains(name) {
+                        uses.insert(name.clone());
+                    }
+                }
+            }
+            Item::ImplDef(id) => {
+                for m in &id.methods {
+                    collect_block_calls(&m.body, &top_level_names, &mut uses);
+                }
+            }
+            Item::TestDef(td) => collect_block_calls(&td.body, &top_level_names, &mut uses),
+            Item::BenchDef(bd) => collect_block_calls(&bd.body, &top_level_names, &mut uses),
+            Item::InterfaceImplDecl(id) => {
+                for (_, expr) in &id.methods {
+                    collect_expr_calls(expr, &top_level_names, &mut uses);
+                }
+            }
+            _ => {}
+        }
+    }
+    uses
+}
+
+fn collect_block_calls(block: &Block, names: &HashSet<String>, uses: &mut HashSet<String>) {
+    for stmt in &block.stmts {
+        match stmt {
+            Stmt::Bind(b) => collect_expr_calls(&b.expr, names, uses),
+            Stmt::Expr(e) => collect_expr_calls(e, names, uses),
+            Stmt::Chain(c) => collect_expr_calls(&c.expr, names, uses),
+            Stmt::Yield(y) => collect_expr_calls(&y.expr, names, uses),
+        }
+    }
+    collect_expr_calls(&block.expr, names, uses);
+}
+
+fn collect_expr_calls(expr: &Expr, names: &HashSet<String>, uses: &mut HashSet<String>) {
+    match expr {
+        Expr::Ident(name, _) => {
+            if names.contains(name) {
+                uses.insert(name.clone());
+            }
+        }
+        Expr::Apply(callee, args, _) => {
+            collect_expr_calls(callee, names, uses);
+            for arg in args {
+                collect_expr_calls(arg, names, uses);
+            }
+        }
+        Expr::Pipeline(steps, _) => {
+            for step in steps {
+                collect_expr_calls(step, names, uses);
+            }
+        }
+        Expr::FieldAccess(obj, _, _) => collect_expr_calls(obj, names, uses),
+        Expr::BinOp(_, left, right, _) => {
+            collect_expr_calls(left, names, uses);
+            collect_expr_calls(right, names, uses);
+        }
+        Expr::Block(block) => collect_block_calls(block, names, uses),
+        Expr::Match(scrutinee, arms, _) => {
+            collect_expr_calls(scrutinee, names, uses);
+            for arm in arms {
+                if let Some(guard) = &arm.guard {
+                    collect_expr_calls(guard, names, uses);
+                }
+                collect_expr_calls(&arm.body, names, uses);
+            }
+        }
+        Expr::AssertMatches(expr, _, _) => collect_expr_calls(expr, names, uses),
+        Expr::If(cond, then_block, else_block, _) => {
+            collect_expr_calls(cond, names, uses);
+            collect_block_calls(then_block, names, uses);
+            if let Some(else_block) = else_block {
+                collect_block_calls(else_block, names, uses);
+            }
+        }
+        Expr::Closure(_, body, _) => collect_expr_calls(body, names, uses),
+        Expr::Collect(block, _) => collect_block_calls(block, names, uses),
+        Expr::EmitExpr(inner, _) => collect_expr_calls(inner, names, uses),
+        Expr::RecordConstruct(_, fields, _) => {
+            for (_, expr) in fields {
+                collect_expr_calls(expr, names, uses);
+            }
+        }
+        Expr::FString(parts, _) => {
+            for part in parts {
+                if let FStringPart::Expr(expr) = part {
+                    collect_expr_calls(expr, names, uses);
+                }
+            }
+        }
+        Expr::Lit(..) => {}
+    }
 }
 
 // ── L001: pub fn missing return type ─────────────────────────────────────────
@@ -160,6 +337,7 @@ fn lint_expr_sub_blocks(expr: &Expr, errors: &mut Vec<LintError>) {
             lint_expr_sub_blocks(scrutinee, errors);
             for arm in arms { lint_expr_sub_blocks(&arm.body, errors); }
         }
+        Expr::AssertMatches(expr, _, _) => lint_expr_sub_blocks(expr, errors),
         Expr::Apply(f, args, _) => {
             lint_expr_sub_blocks(f, errors);
             for a in args { lint_expr_sub_blocks(a, errors); }
@@ -177,6 +355,13 @@ fn lint_expr_sub_blocks(expr: &Expr, errors: &mut Vec<LintError>) {
         Expr::EmitExpr(inner, _) => lint_expr_sub_blocks(inner, errors),
         Expr::RecordConstruct(_, fields, _) => {
             for (_, e) in fields { lint_expr_sub_blocks(e, errors); }
+        }
+        Expr::FString(parts, _) => {
+            for part in parts {
+                if let FStringPart::Expr(expr) = part {
+                    lint_expr_sub_blocks(expr, errors);
+                }
+            }
         }
         Expr::Lit(..) | Expr::Ident(..) => {}
     }
@@ -201,6 +386,7 @@ fn expr_references(expr: &Expr, name: &str) -> bool {
                         || expr_references(&arm.body, name)
                 })
         }
+        Expr::AssertMatches(expr, _, _) => expr_references(expr, name),
         Expr::If(c, t, e, _) => {
             expr_references(c, name)
                 || block_references(t, name)
@@ -217,6 +403,10 @@ fn expr_references(expr: &Expr, name: &str) -> bool {
         Expr::Collect(b, _) => block_references(b, name),
         Expr::EmitExpr(inner, _) => expr_references(inner, name),
         Expr::RecordConstruct(_, fields, _) => fields.iter().any(|(_, e)| expr_references(e, name)),
+        Expr::FString(parts, _) => parts.iter().any(|part| match part {
+            FStringPart::Lit(_) => false,
+            FStringPart::Expr(expr) => expr_references(expr, name),
+        }),
         Expr::Lit(..) => false,
     }
 }
@@ -312,6 +502,70 @@ fn FooBar(x: Int) -> Int { x }
 type direction = | North | South
 "#);
         assert!(codes.contains(&"L004".to_string()), "expected L004, got {:?}", codes);
+    }
+
+    #[test]
+    fn lint_l005_unused_trf() {
+        let codes = lint(r#"
+trf ParseCsv: String -> Int = |s| { 1 }
+public fn main() -> Int { 0 }
+"#);
+        assert!(codes.contains(&"L005".to_string()), "expected L005, got {:?}", codes);
+    }
+
+    #[test]
+    fn lint_l005_public_trf_ignored() {
+        let codes = lint(r#"
+public trf ParseCsv: String -> Int = |s| { 1 }
+public fn main() -> Int { 0 }
+"#);
+        assert!(!codes.contains(&"L005".to_string()), "unexpected L005: {:?}", codes);
+    }
+
+    #[test]
+    fn lint_l005_unused_flw() {
+        let codes = lint(r#"
+trf ParseCsv: String -> Int = |s| { 1 }
+flw ImportUsers = ParseCsv
+public fn main() -> Int { 0 }
+"#);
+        assert!(codes.contains(&"L005".to_string()), "expected L005, got {:?}", codes);
+    }
+
+    #[test]
+    fn lint_l005_used_trf_no_warning() {
+        let codes = lint(r#"
+trf ParseCsv: String -> Int = |s| { 1 }
+public fn main() -> Int { ParseCsv("x") }
+"#);
+        assert!(!codes.contains(&"L005".to_string()), "unexpected L005: {:?}", codes);
+    }
+
+    #[test]
+    fn lint_l006_trf_not_pascal() {
+        let codes = lint(r#"
+trf parse_csv: String -> Int = |s| { 1 }
+public fn main() -> Int { 0 }
+"#);
+        assert!(codes.contains(&"L006".to_string()), "expected L006, got {:?}", codes);
+    }
+
+    #[test]
+    fn lint_l006_trf_pascal_ok() {
+        let codes = lint(r#"
+trf ParseCsv: String -> Int = |s| { 1 }
+public fn main() -> Int { ParseCsv("x") }
+"#);
+        assert!(!codes.contains(&"L006".to_string()), "unexpected L006: {:?}", codes);
+    }
+
+    #[test]
+    fn lint_l007_effect_not_pascal() {
+        let codes = lint(r#"
+effect payment
+public fn main() -> Unit !payment { () }
+"#);
+        assert!(codes.contains(&"L007".to_string()), "expected L007, got {:?}", codes);
     }
 
     #[test]

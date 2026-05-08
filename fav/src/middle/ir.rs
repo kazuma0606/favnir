@@ -37,6 +37,8 @@ pub enum IRExpr {
     Lit(Lit, Type),
     Local(u16, Type),
     Global(u16, Type),
+    TrfRef(u16, Type),
+    CallTrfLocal { local: u16, arg: Box<IRExpr>, ty: Type },
     Call(Box<IRExpr>, Vec<IRExpr>, Type),
     Block(Vec<IRStmt>, Box<IRExpr>, Type),
     If(Box<IRExpr>, Box<IRExpr>, Box<IRExpr>, Type),
@@ -55,6 +57,8 @@ impl IRExpr {
             IRExpr::Lit(_, ty)
             | IRExpr::Local(_, ty)
             | IRExpr::Global(_, ty)
+            | IRExpr::TrfRef(_, ty)
+            | IRExpr::CallTrfLocal { ty, .. }
             | IRExpr::Call(_, _, ty)
             | IRExpr::Block(_, _, ty)
             | IRExpr::If(_, _, _, ty)
@@ -75,6 +79,8 @@ pub enum IRStmt {
     Chain(u16, IRExpr),
     Yield(IRExpr),
     Expr(IRExpr),
+    /// Coverage tracking: record that line N was executed (v1.7.0).
+    TrackLine(u32),
 }
 
 #[derive(Debug, Clone)]
@@ -105,6 +111,10 @@ pub fn collect_deps(fn_def: &IRFnDef, globals: &[IRGlobal]) -> Vec<String> {
     deps.into_iter().collect()
 }
 
+pub fn collect_calls_in_ir(fn_def: &IRFnDef, globals: &[IRGlobal]) -> Vec<String> {
+    collect_deps(fn_def, globals)
+}
+
 fn collect_expr_deps(expr: &IRExpr, globals: &[IRGlobal], deps: &mut BTreeSet<String>) {
     match expr {
         IRExpr::Lit(_, _) | IRExpr::Local(_, _) => {}
@@ -122,6 +132,23 @@ fn collect_expr_deps(expr: &IRExpr, globals: &[IRGlobal], deps: &mut BTreeSet<St
                     IRGlobalKind::Builtin => {}
                 }
             }
+        }
+
+        IRExpr::TrfRef(idx, _) => {
+            if let Some(g) = globals.get(*idx as usize) {
+                match &g.kind {
+                    IRGlobalKind::Fn(_) | IRGlobalKind::VariantCtor => {
+                        if !g.name.starts_with('$') {
+                            deps.insert(g.name.clone());
+                        }
+                    }
+                    IRGlobalKind::Builtin => {}
+                }
+            }
+        }
+
+        IRExpr::CallTrfLocal { arg, .. } => {
+            collect_expr_deps(arg, globals, deps);
         }
 
         IRExpr::FieldAccess(obj, field, _) => {
@@ -166,7 +193,10 @@ fn collect_expr_deps(expr: &IRExpr, globals: &[IRGlobal], deps: &mut BTreeSet<St
             collect_expr_deps(rhs, globals, deps);
         }
 
-        IRExpr::Closure(_, captures, _) => {
+        IRExpr::Closure(global_idx, captures, _) => {
+            if let Some(g) = globals.get(*global_idx as usize) {
+                deps.insert(g.name.clone());
+            }
             for c in captures { collect_expr_deps(c, globals, deps); }
         }
 
@@ -185,5 +215,6 @@ fn collect_stmt_deps(stmt: &IRStmt, globals: &[IRGlobal], deps: &mut BTreeSet<St
         IRStmt::Bind(_, e) | IRStmt::Chain(_, e) | IRStmt::Yield(e) | IRStmt::Expr(e) => {
             collect_expr_deps(e, globals, deps);
         }
+        IRStmt::TrackLine(_) => {}
     }
 }

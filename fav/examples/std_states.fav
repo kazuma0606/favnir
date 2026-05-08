@@ -1,0 +1,22 @@
+use std.states.Email
+use std.states.PosInt
+
+public fn main() -> Unit !Io {
+    bind age <- PosInt.new(25)
+    match age {
+        ok(v) => IO.println_int(v.value)
+        err(msg) => IO.println(Debug.show(msg))
+    };
+
+    bind email <- Email.new("user@example.com")
+    match email {
+        ok(v) => IO.println(v.value)
+        err(msg) => IO.println(Debug.show(msg))
+    };
+
+    bind bad_email <- Email.new("bad")
+    match bad_email {
+        ok(v) => IO.println(v.value)
+        err(msg) => IO.println(Debug.show(msg))
+    }
+}

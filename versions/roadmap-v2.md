@@ -249,6 +249,10 @@ v1.0.0 完了後の進化の方針。
 - パーサーの Favnir 移植（Rust VM 上で Favnir 製パーサーを実行）
 - 型チェッカーの一部 Favnir 移植
 - `fav explain compiler` — コンパイル工程の可視化
+- **Sum 型への `invariant` 付与を明示的にエラーとする（E047）**
+  - v1.2.0 ではパーサーが構文的に防いでいるため未対応だった（`invariant` は `{}` ブロック内でのみ解析される）
+  - Favnir 製チェッカーでは `TypeBody` への `match` が自然に書けるため、`check_type_def` で明示エラーを追加する
+  - Favnir 製チェッカー自身が `invariant` を使ったテストを書けるというブートストラップの実証にもなる
 
 **ツールチェーン**:
 - v1.x → v2.0.0 移行ガイド（`trf`/`flw`/`cap` を `stage`/`seq`/`interface` に変換する `fav migrate` コマンド）

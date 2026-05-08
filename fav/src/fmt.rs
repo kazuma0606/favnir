@@ -56,16 +56,26 @@ impl Formatter {
         match item {
             Item::NamespaceDecl(ns, _) => format!("namespace {}", ns),
             Item::UseDecl(path, _)     => format!("use {}", path.join(".")),
+            Item::EffectDef(ed)        => self.effect_def(ed),
             Item::TypeDef(td)          => self.type_def(td),
             Item::FnDef(fd)            => self.fn_def(fd),
             Item::TrfDef(td)           => self.trf_def(td),
+            Item::AbstractTrfDef(td)   => self.abstract_trf_def(td),
             Item::FlwDef(fd)           => self.flw_def(fd),
+            Item::AbstractFlwDef(fd)   => self.abstract_flw_def(fd),
+            Item::FlwBindingDef(fd)    => self.flw_binding_def(fd),
             Item::InterfaceDecl(id)    => self.interface_decl(id),
             Item::InterfaceImplDecl(d) => self.interface_impl_decl(d),
             Item::CapDef(cd)           => self.cap_def(cd),
             Item::ImplDef(id)          => self.impl_def(id),
             Item::TestDef(td)          => self.test_def(td),
+            Item::BenchDef(bd)         => self.bench_def(bd),
         }
+    }
+
+    fn effect_def(&mut self, ed: &EffectDef) -> String {
+        let vis = fmt_visibility(ed.visibility.as_ref());
+        format!("{}effect {}", vis, ed.name)
     }
 
     // ── TypeDef ───────────────────────────────────────────────────────────────
@@ -87,6 +97,9 @@ impl Formatter {
                     .map(|v| format!("    | {}", self.variant(v)))
                     .collect();
                 format!("{}type {}{} =\n{}", vis, td.name, params, var_strs.join("\n"))
+            }
+            TypeBody::Alias(target) => {
+                format!("{}type {}{} = {}", vis, td.name, params, self.type_expr(target))
             }
         }
     }
@@ -148,10 +161,46 @@ impl Formatter {
         )
     }
 
+    fn abstract_trf_def(&mut self, td: &AbstractTrfDef) -> String {
+        let vis = fmt_visibility(td.visibility.as_ref());
+        let input = self.type_expr(&td.input_ty);
+        let output = self.type_expr(&td.output_ty);
+        let effects = fmt_effects(&td.effects);
+        format!("{}abstract trf {}: {} -> {}{}", vis, td.name, input, output, effects)
+    }
+
     // ── FlwDef ────────────────────────────────────────────────────────────────
 
     fn flw_def(&mut self, fd: &FlwDef) -> String {
         format!("flw {} = {}", fd.name, fd.steps.join(" |> "))
+    }
+
+    fn abstract_flw_def(&mut self, fd: &AbstractFlwDef) -> String {
+        let vis = fmt_visibility(fd.visibility.as_ref());
+        let params = fmt_type_params(&fd.type_params);
+        let slots: Vec<String> = fd.slots.iter().map(|slot| {
+            format!(
+                "    {}: {} -> {}{}",
+                slot.name,
+                self.type_expr(&slot.input_ty),
+                self.type_expr(&slot.output_ty),
+                fmt_effects(&slot.effects),
+            )
+        }).collect();
+        format!("{}abstract flw {}{} {{\n{}\n}}", vis, fd.name, params, slots.join("\n"))
+    }
+
+    fn flw_binding_def(&mut self, fd: &FlwBindingDef) -> String {
+        let vis = fmt_visibility(fd.visibility.as_ref());
+        let type_args = if fd.type_args.is_empty() {
+            String::new()
+        } else {
+            format!("<{}>", fd.type_args.iter().map(|t| self.type_expr(t)).collect::<Vec<_>>().join(", "))
+        };
+        let bindings: Vec<String> = fd.bindings.iter()
+            .map(|(slot, imp)| format!("    {} <- {}", slot, fmt_slot_impl(imp)))
+            .collect();
+        format!("{}flw {} = {}{} {{\n{}\n}}", vis, fd.name, fd.template, type_args, bindings.join("\n"))
     }
 
     fn interface_decl(&mut self, id: &InterfaceDecl) -> String {
@@ -232,6 +281,11 @@ impl Formatter {
         format!("test {:?} {}", td.name, body)
     }
 
+    fn bench_def(&mut self, bd: &BenchDef) -> String {
+        let body = self.block(&bd.body);
+        format!("bench {:?} {}", bd.description, body)
+    }
+
     // ── Block ─────────────────────────────────────────────────────────────────
 
     fn block(&mut self, block: &Block) -> String {
@@ -265,8 +319,13 @@ impl Formatter {
         match stmt {
             Stmt::Bind(b) => {
                 let pat = self.pattern(&b.pattern);
+                let ann = b
+                    .annotated_ty
+                    .as_ref()
+                    .map(|ty| format!(": {}", self.type_expr(ty)))
+                    .unwrap_or_default();
                 let expr = self.expr(&b.expr);
-                format!("bind {} <- {}", pat, expr)
+                format!("bind {}{} <- {}", pat, ann, expr)
             }
             Stmt::Expr(e) => {
                 format!("{};", self.expr(e))
@@ -327,6 +386,10 @@ impl Formatter {
                 format!("match {} {{\n{}\n{}}}", s, arm_strs.join("\n"), close_pad)
             }
 
+            Expr::AssertMatches(expr, pattern, _) => {
+                format!("assert_matches({}, {})", self.expr(expr), self.pattern(pattern))
+            }
+
             Expr::Collect(block, _) => {
                 let b = self.block(block);
                 format!("collect {}", b)
@@ -362,6 +425,22 @@ impl Formatter {
                     .map(|(k, v)| format!("{}: {}", k, self.expr(v)))
                     .collect();
                 format!("{} {{ {} }}", name, fs.join("  "))
+            }
+
+            Expr::FString(parts, _) => {
+                let mut out = String::from("$\"");
+                for part in parts {
+                    match part {
+                        FStringPart::Lit(s) => out.push_str(&fmt_fstring_lit(s)),
+                        FStringPart::Expr(expr) => {
+                            out.push('{');
+                            out.push_str(&self.expr(expr));
+                            out.push('}');
+                        }
+                    }
+                }
+                out.push('"');
+                out
             }
 
             Expr::EmitExpr(inner, _) => {
@@ -421,6 +500,14 @@ impl Formatter {
             TypeExpr::Arrow(from, to, _) => {
                 format!("{} -> {}", self.type_expr(from), self.type_expr(to))
             }
+            TypeExpr::TrfFn { input, output, effects, .. } => {
+                format!(
+                    "{} -> {}{}",
+                    self.type_expr(input),
+                    self.type_expr(output),
+                    fmt_effects(effects),
+                )
+            }
         }
     }
 }
@@ -444,6 +531,22 @@ fn fmt_type_params(params: &[String]) -> String {
     }
 }
 
+fn fmt_fstring_lit(s: &str) -> String {
+    let mut out = String::new();
+    for ch in s.chars() {
+        match ch {
+            '{' => out.push_str("\\{"),
+            '\n' => out.push_str("\\n"),
+            '\t' => out.push_str("\\t"),
+            '\r' => out.push_str("\\r"),
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            _ => out.push(ch),
+        }
+    }
+    out
+}
+
 fn fmt_effects(effects: &[Effect]) -> String {
     let strs: Vec<String> = effects.iter().filter_map(fmt_effect).collect();
     if strs.is_empty() {
@@ -461,8 +564,15 @@ fn fmt_effect(eff: &Effect) -> Option<String> {
         Effect::Network      => Some("!Network".to_string()),
         Effect::File         => Some("!File".to_string()),
         Effect::Trace        => Some("!Trace".to_string()),
+        Effect::Unknown(name) => Some(format!("!{}", name)),
         Effect::Emit(t)      => Some(format!("!Emit<{}>", t)),
         Effect::EmitUnion(ts) => Some(format!("!Emit<{}>", ts.join("|"))),
+    }
+}
+
+fn fmt_slot_impl(imp: &SlotImpl) -> &str {
+    match imp {
+        SlotImpl::Global(name) | SlotImpl::Local(name) => name.as_str(),
     }
 }
 

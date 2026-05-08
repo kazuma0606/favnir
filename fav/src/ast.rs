@@ -28,6 +28,7 @@ pub enum Effect {
     Emit(String),
     /// `Emit<A | B>`  Eresult of composing multiple Emit effects
     EmitUnion(Vec<String>),
+    Unknown(String),
 }
 
 // ── TypeExpr (2-2) ────────────────────────────────────────────────────────────
@@ -44,6 +45,12 @@ pub enum TypeExpr {
     Optional(Box<TypeExpr>, Span),
     Fallible(Box<TypeExpr>, Span),
     Arrow(Box<TypeExpr>, Box<TypeExpr>, Span),
+    TrfFn {
+        input: Box<TypeExpr>,
+        output: Box<TypeExpr>,
+        effects: Vec<Effect>,
+        span: Span,
+    },
 }
 
 impl TypeExpr {
@@ -53,6 +60,7 @@ impl TypeExpr {
             TypeExpr::Optional(_, s)    => s,
             TypeExpr::Fallible(_, s)    => s,
             TypeExpr::Arrow(_, _, s)    => s,
+            TypeExpr::TrfFn { span, .. } => span,
         }
     }
 }
@@ -102,6 +110,7 @@ impl Variant {
 pub enum TypeBody {
     Record(Vec<Field>),
     Sum(Vec<Variant>),
+    Alias(TypeExpr),
 }
 
 /// `type User = { ... }` or `type Session = | Guest | Authenticated { ... }`
@@ -111,6 +120,7 @@ pub struct TypeDef {
     pub name: String,
     pub type_params: Vec<String>,   // e.g. ["T", "U"] for type Pair<T, U>
     pub with_interfaces: Vec<String>,
+    pub invariants: Vec<Expr>,
     pub body: TypeBody,
     pub span: Span,
 }
@@ -133,6 +143,12 @@ pub enum Lit {
     Str(String),
     Bool(bool),
     Unit,
+}
+
+#[derive(Debug, Clone)]
+pub enum FStringPart {
+    Lit(String),
+    Expr(Box<Expr>),
 }
 
 // ── Pattern (2-10) ────────────────────────────────────────────────────────────
@@ -207,6 +223,9 @@ pub enum Expr {
     /// `match expr { arm+ }`
     Match(Box<Expr>, Vec<MatchArm>, Span),
 
+    /// `assert_matches(expr, pattern)`
+    AssertMatches(Box<Expr>, Box<Pattern>, Span),
+
     /// `collect { stmt* expr }`
     Collect(Box<Block>, Span),
 
@@ -221,6 +240,7 @@ pub enum Expr {
 
     /// `TypeName { field: expr, ... }`  Erecord construction
     RecordConstruct(String, Vec<(String, Expr)>, Span),
+    FString(Vec<FStringPart>, Span),
 
     /// `emit expr`  Epublish an event
     EmitExpr(Box<Expr>, Span),
@@ -236,10 +256,12 @@ impl Expr {
             Expr::FieldAccess(_, _, s)   => s,
             Expr::Block(b)               => &b.span,
             Expr::Match(_, _, s)         => s,
+            Expr::AssertMatches(_, _, s) => s,
             Expr::If(_, _, _, s)         => s,
             Expr::Closure(_, _, s)       => s,
             Expr::BinOp(_, _, _, s)         => s,
             Expr::RecordConstruct(_, _, s)  => s,
+            Expr::FString(_, s)             => s,
             Expr::EmitExpr(_, s)            => s,
             Expr::Collect(_, s)             => s,
         }
@@ -251,6 +273,7 @@ pub enum BinOp {
     Add, Sub, Mul, Div,
     Eq, NotEq,
     Lt, Gt, LtEq, GtEq,
+    NullCoalesce,  // ?? (v1.9.0)
 }
 
 // ── Stmt ──────────────────────────────────────────────────────────────────────
@@ -263,6 +286,18 @@ pub enum Stmt {
     Chain(ChainStmt),
     /// `yield expr;`  Epush a value into the enclosing collect block (v0.5.0)
     Yield(YieldStmt),
+    /// `for x in list { body }` — iteration statement (v1.9.0)
+    ForIn(ForInStmt),
+}
+
+// ── ForInStmt (v1.9.0) ────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone)]
+pub struct ForInStmt {
+    pub var: String,
+    pub iter: Expr,
+    pub body: Block,
+    pub span: Span,
 }
 
 // ── BindStmt (2-8) ────────────────────────────────────────────────────────────
@@ -270,6 +305,7 @@ pub enum Stmt {
 #[derive(Debug, Clone)]
 pub struct BindStmt {
     pub pattern: Pattern,
+    pub annotated_ty: Option<TypeExpr>,
     pub expr: Expr,
     pub span: Span,
 }
@@ -316,6 +352,7 @@ pub struct Block {
 #[derive(Debug, Clone)]
 pub struct FnDef {
     pub visibility: Option<Visibility>,
+    pub is_async: bool,
     pub name: String,
     pub type_params: Vec<String>,   // e.g. ["T", "U"] for fn f<T, U>(...)
     pub params: Vec<Param>,
@@ -330,6 +367,7 @@ pub struct FnDef {
 #[derive(Debug, Clone)]
 pub struct TrfDef {
     pub visibility: Option<Visibility>,
+    pub is_async: bool,
     pub name: String,
     pub type_params: Vec<String>,   // e.g. ["T", "U"] for trf F<T, U>: ...
     pub input_ty: TypeExpr,
@@ -340,6 +378,17 @@ pub struct TrfDef {
     pub span: Span,
 }
 
+#[derive(Debug, Clone)]
+pub struct AbstractTrfDef {
+    pub visibility: Option<Visibility>,
+    pub name: String,
+    pub type_params: Vec<String>,
+    pub input_ty: TypeExpr,
+    pub output_ty: TypeExpr,
+    pub effects: Vec<Effect>,
+    pub span: Span,
+}
+
 // ── FlwDef (2-7) ──────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone)]
@@ -347,6 +396,41 @@ pub struct FlwDef {
     pub name: String,
     /// Ordered list of trf/fn names joined by `|>`.
     pub steps: Vec<String>,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone)]
+pub struct FlwSlot {
+    pub name: String,
+    pub abstract_trf_ty: Option<TypeExpr>,
+    pub input_ty: TypeExpr,
+    pub output_ty: TypeExpr,
+    pub effects: Vec<Effect>,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone)]
+pub struct AbstractFlwDef {
+    pub visibility: Option<Visibility>,
+    pub name: String,
+    pub type_params: Vec<String>,
+    pub slots: Vec<FlwSlot>,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone)]
+pub enum SlotImpl {
+    Global(String),
+    Local(String),
+}
+
+#[derive(Debug, Clone)]
+pub struct FlwBindingDef {
+    pub visibility: Option<Visibility>,
+    pub name: String,
+    pub template: String,
+    pub type_args: Vec<TypeExpr>,
+    pub bindings: Vec<(String, SlotImpl)>,
     pub span: Span,
 }
 
@@ -417,6 +501,22 @@ pub struct TestDef {
     pub span: Span,
 }
 
+// ── BenchDef (v1.8.0) ────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone)]
+pub struct BenchDef {
+    pub description: String,
+    pub body: Block,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone)]
+pub struct EffectDef {
+    pub visibility: Option<Visibility>,
+    pub name: String,
+    pub span: Span,
+}
+
 // ── Item (2-1) ────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone)]
@@ -424,14 +524,19 @@ pub enum Item {
     TypeDef(TypeDef),
     FnDef(FnDef),
     TrfDef(TrfDef),
+    AbstractTrfDef(AbstractTrfDef),
     FlwDef(FlwDef),
+    AbstractFlwDef(AbstractFlwDef),
+    FlwBindingDef(FlwBindingDef),
     NamespaceDecl(String, Span),   // namespace data.users
     UseDecl(Vec<String>, Span),    // use data.users.create ↁE["data","users","create"]
     InterfaceDecl(InterfaceDecl),
     InterfaceImplDecl(InterfaceImplDecl),
     CapDef(CapDef),                // cap Eq<T> = { ... }
     ImplDef(ImplDef),              // impl Eq<Int> { ... }
+    EffectDef(EffectDef),
     TestDef(TestDef),              // test "description" { ... }
+    BenchDef(BenchDef),            // bench "description" { ... }  (v1.8.0)
 }
 
 impl Item {
@@ -440,14 +545,19 @@ impl Item {
             Item::TypeDef(t)          => &t.span,
             Item::FnDef(f)            => &f.span,
             Item::TrfDef(t)           => &t.span,
+            Item::AbstractTrfDef(t)   => &t.span,
             Item::FlwDef(f)           => &f.span,
+            Item::AbstractFlwDef(f)   => &f.span,
+            Item::FlwBindingDef(f)    => &f.span,
             Item::NamespaceDecl(_, s) => s,
             Item::UseDecl(_, s)       => s,
             Item::InterfaceDecl(d)     => &d.span,
             Item::InterfaceImplDecl(d) => &d.span,
             Item::CapDef(c)           => &c.span,
             Item::ImplDef(i)          => &i.span,
+            Item::EffectDef(e)        => &e.span,
             Item::TestDef(t)          => &t.span,
+            Item::BenchDef(b)         => &b.span,
         }
     }
 }

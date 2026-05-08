@@ -1,0 +1,31 @@
+// type_alias_demo.fav — type alias demonstration (v1.7.0)
+//
+// Type aliases create new names for existing types.
+// Aliases are fully compatible with their target type.
+
+type UserId   = Int
+type UserName = String
+type MaybeId  = Option<Int>
+
+type User = {
+    id:   UserId
+    name: UserName
+}
+
+fn make_user(id: UserId, name: UserName) -> User {
+    User { id: id  name: name }
+}
+
+fn lookup_id(id: MaybeId) -> String {
+    match id {
+        Some(n) => $"Found id: {n}"
+        None    => "No id"
+    }
+}
+
+public fn main() -> Unit !Io {
+    bind u <- make_user(1, "Alice")
+    IO.println(u.name);
+    bind result <- lookup_id(Option.some(u.id))
+    IO.println(result)
+}

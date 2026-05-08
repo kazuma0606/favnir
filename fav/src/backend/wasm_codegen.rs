@@ -133,7 +133,10 @@ fn walk_closures_in_expr(
                 walk_closures_in_expr(cap, ir, map);
             }
         }
-        IRExpr::Lit(_, _) | IRExpr::Local(_, _) | IRExpr::Global(_, _) => {}
+        IRExpr::Lit(_, _) | IRExpr::Local(_, _) | IRExpr::Global(_, _) | IRExpr::TrfRef(_, _) => {}
+        IRExpr::CallTrfLocal { arg, .. } => {
+            walk_closures_in_expr(arg, ir, map);
+        }
         IRExpr::Call(callee, args, _) => {
             walk_closures_in_expr(callee, ir, map);
             for arg in args {
@@ -150,6 +153,7 @@ fn walk_closures_in_expr(
                     | IRStmt::Chain(_, e)
                     | IRStmt::Yield(e)
                     | IRStmt::Expr(e) => walk_closures_in_expr(e, ir, map),
+                    IRStmt::TrackLine(_) => {}
                 }
             }
             walk_closures_in_expr(final_expr, ir, map);
@@ -200,6 +204,7 @@ fn scan_closure_bound_slots_walk(expr: &IRExpr, map: &mut HashMap<u16, u16>) {
                     | IRStmt::Chain(_, e)
                     | IRStmt::Yield(e)
                     | IRStmt::Expr(e) => scan_closure_bound_slots_walk(e, map),
+                    IRStmt::TrackLine(_) => {}
                 }
             }
             scan_closure_bound_slots_walk(final_expr, map);
@@ -298,6 +303,7 @@ fn first_known_type<'a>(types: &[&'a Type]) -> &'a Type {
 
 fn resolved_expr_type(expr: &IRExpr, ctx: &WasmCodegenCtx<'_>) -> Type {
     match expr {
+        IRExpr::CallTrfLocal { ty, .. } if matches!(ty, Type::Unknown) => ty.clone(),
         IRExpr::Call(callee, _, ty) if matches!(ty, Type::Unknown) => {
             if let Some(builtin) = builtin_call_name(callee, ctx.globals) {
                 return match builtin.as_str() {
@@ -451,9 +457,12 @@ pub fn favnir_type_to_wasm_params(ty: &Type) -> Result<Vec<ValType>, WasmCodegen
 
 pub fn collect_local_types(expr: &IRExpr, map: &mut HashMap<u16, Type>) {
     match expr {
-        IRExpr::Lit(_, _) | IRExpr::Global(_, _) => {}
+        IRExpr::Lit(_, _) | IRExpr::Global(_, _) | IRExpr::TrfRef(_, _) => {}
         IRExpr::Local(idx, ty) => {
             map.entry(*idx).or_insert_with(|| ty.clone());
+        }
+        IRExpr::CallTrfLocal { arg, .. } => {
+            collect_local_types(arg, map);
         }
         IRExpr::Call(callee, args, _) => {
             collect_local_types(callee, map);
@@ -508,6 +517,7 @@ pub fn collect_local_types_stmt(stmt: &IRStmt, map: &mut HashMap<u16, Type>) {
             collect_local_types(expr, map);
         }
         IRStmt::Yield(expr) | IRStmt::Expr(expr) => collect_local_types(expr, map),
+        IRStmt::TrackLine(_) => {}
     }
 }
 
@@ -550,7 +560,10 @@ fn collect_expr_string_literals(expr: &IRExpr, ordered: &mut Vec<String>) {
                 ordered.push(value.clone());
             }
         }
-        IRExpr::Lit(_, _) | IRExpr::Local(_, _) | IRExpr::Global(_, _) => {}
+        IRExpr::Lit(_, _) | IRExpr::Local(_, _) | IRExpr::Global(_, _) | IRExpr::TrfRef(_, _) => {}
+        IRExpr::CallTrfLocal { arg, .. } => {
+            collect_expr_string_literals(arg, ordered);
+        }
         IRExpr::Call(callee, args, _) => {
             collect_expr_string_literals(callee, ordered);
             for arg in args {
@@ -602,6 +615,7 @@ fn collect_stmt_string_literals(stmt: &IRStmt, ordered: &mut Vec<String>) {
         IRStmt::Bind(_, expr) | IRStmt::Chain(_, expr) | IRStmt::Yield(expr) | IRStmt::Expr(expr) => {
             collect_expr_string_literals(expr, ordered);
         }
+        IRStmt::TrackLine(_) => {}
     }
 }
 
@@ -632,7 +646,10 @@ pub fn collect_used_builtins(ir: &IRProgram) -> std::collections::HashSet<String
             return;
         }
         match expr {
-            IRExpr::Lit(_, _) | IRExpr::Local(_, _) | IRExpr::Global(_, _) => {}
+            IRExpr::Lit(_, _) | IRExpr::Local(_, _) | IRExpr::Global(_, _) | IRExpr::TrfRef(_, _) => {}
+            IRExpr::CallTrfLocal { arg, .. } => {
+                walk_expr(arg, globals, used);
+            }
             IRExpr::Call(callee, args, _) => {
                 walk_expr(callee, globals, used);
                 for arg in args {
@@ -649,6 +666,7 @@ pub fn collect_used_builtins(ir: &IRProgram) -> std::collections::HashSet<String
                         | IRStmt::Chain(_, expr)
                         | IRStmt::Yield(expr)
                         | IRStmt::Expr(expr) => walk_expr(expr, globals, used),
+                        IRStmt::TrackLine(_) => {}
                     }
                 }
                 walk_expr(final_expr, globals, used);
@@ -807,6 +825,7 @@ fn emit_stmt(
         IRStmt::Yield(_) => Err(WasmCodegenError::UnsupportedExpr(
             "yield statement in wasm MVP".into(),
         )),
+        IRStmt::TrackLine(_) => Ok(()), // no-op in WASM
     }
 }
 
@@ -865,6 +884,12 @@ fn emit_expr(
             }
             Ok(())
         }
+        IRExpr::TrfRef(_, _) => Err(WasmCodegenError::UnsupportedExpr(
+            "trf reference value in wasm MVP".into(),
+        )),
+        IRExpr::CallTrfLocal { .. } => Err(WasmCodegenError::UnsupportedExpr(
+            "local slot injected call in wasm MVP".into(),
+        )),
         IRExpr::Global(_, _) => Err(WasmCodegenError::UnsupportedExpr(
             "bare global value expression in wasm MVP".into(),
         )),

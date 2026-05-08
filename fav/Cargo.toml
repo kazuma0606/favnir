@@ -1,6 +1,6 @@
 [package]
 name = "fav"
-version = "1.1.0"
+version = "1.9.0"
 edition = "2024"
 
 [dependencies]
@@ -12,6 +12,8 @@ ureq = "2"
 uuid = { version = "1", features = ["v4"] }
 serde_json = "1"
 csv = "1"
+notify = { version = "6", default-features = false, features = ["macos_kqueue"] }
+walkdir = "2"
 
 [dev-dependencies]
 tempfile = "3"

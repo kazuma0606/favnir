@@ -1,0 +1,21 @@
+// async_demo.fav — Task<T> async pattern demonstration (v1.7.0)
+//
+// async fn wraps its return type in Task<T>.
+// bind x <- async_fn() unwraps the Task at type-check time.
+// At runtime, Task is synchronous and transparent.
+
+async fn fetch_greeting() -> String !Io {
+    "Hello from async!"
+}
+
+async fn fetch_number() -> Int !Io {
+    42
+}
+
+public fn main() -> Unit !Io {
+    bind msg <- fetch_greeting()
+    bind n   <- fetch_number()
+    bind doubled <- Task.map(n, |x| x * 2)
+    IO.println(msg);
+    IO.println_int(doubled)
+}

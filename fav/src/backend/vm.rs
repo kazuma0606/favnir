@@ -1,4 +1,5 @@
-﻿use std::collections::HashMap;
+﻿use std::cell::{Cell, RefCell};
+use std::collections::{HashMap, HashSet};
 use std::sync::Mutex;
 use rusqlite::Connection;
 use serde_json::Value as SerdeJsonValue;
@@ -6,6 +7,61 @@ use serde_json::Value as SerdeJsonValue;
 use super::artifact::FvcArtifact;
 use super::codegen::{Constant, Opcode};
 use crate::value::Value;
+
+thread_local! {
+    /// When set to `true`, all `IO.println` / `IO.print` output is silently
+    /// discarded.  Used by `cmd_test` when `--no-capture` is NOT given so that
+    /// test bodies don't pollute the test-runner output.
+    static SUPPRESS_IO_OUTPUT: Cell<bool> = const { Cell::new(false) };
+
+    /// Coverage tracking: `Some(set)` when coverage is enabled, `None` otherwise.
+    static COVERED_LINES: RefCell<Option<HashSet<u32>>> = RefCell::new(None);
+}
+
+/// Enable coverage tracking for the current thread.
+pub fn enable_coverage() {
+    COVERED_LINES.with(|c| *c.borrow_mut() = Some(HashSet::new()));
+}
+
+/// Disable coverage tracking and return the set of covered line numbers.
+pub fn take_coverage() -> HashSet<u32> {
+    COVERED_LINES.with(|c| c.borrow_mut().take().unwrap_or_default())
+}
+
+/// Set whether IO output should be suppressed for the current thread.
+/// Call `set_suppress_io(true)` before running tests, `set_suppress_io(false)`
+/// after (or in a drop guard).
+pub fn set_suppress_io(suppress: bool) {
+    SUPPRESS_IO_OUTPUT.with(|c| c.set(suppress));
+}
+
+pub struct SuppressIoGuard {
+    prev: bool,
+}
+
+impl SuppressIoGuard {
+    pub fn new(suppress: bool) -> Self {
+        let prev = is_io_suppressed();
+        set_suppress_io(suppress);
+        Self { prev }
+    }
+}
+
+impl Drop for SuppressIoGuard {
+    fn drop(&mut self) {
+        set_suppress_io(self.prev);
+    }
+}
+
+#[inline]
+fn is_io_suppressed() -> bool {
+    SUPPRESS_IO_OUTPUT.with(|c| c.get())
+}
+
+#[cfg(test)]
+pub fn io_output_suppressed_for_tests() -> bool {
+    is_io_suppressed()
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct VMError {
@@ -469,6 +525,22 @@ impl VM {
                         return Ok((ret, vm.emit_log));
                     }
                     vm.stack.push(ret);
+                }
+                x if x == Opcode::TrackLine as u8 => {
+                    if frame.ip + 3 >= function.code.len() {
+                        return Err(vm.error(artifact, "TrackLine: unexpected end of bytecode"));
+                    }
+                    let b0 = function.code[frame.ip];
+                    let b1 = function.code[frame.ip + 1];
+                    let b2 = function.code[frame.ip + 2];
+                    let b3 = function.code[frame.ip + 3];
+                    frame.ip += 4;
+                    let line = u32::from_le_bytes([b0, b1, b2, b3]);
+                    COVERED_LINES.with(|c| {
+                        if let Some(set) = c.borrow_mut().as_mut() {
+                            set.insert(line);
+                        }
+                    });
                 }
                 other => {
                     return Err(vm.error(artifact, &format!("unsupported opcode: 0x{other:02x}")));
@@ -1274,6 +1346,8 @@ fn apply_numeric_binop(
     match (left, right) {
         (VMValue::Int(a), VMValue::Int(b)) => Ok(VMValue::Int(int_op(a, b))),
         (VMValue::Float(a), VMValue::Float(b)) => Ok(VMValue::Float(float_op(a, b))),
+        (VMValue::Int(a), VMValue::Float(b)) => Ok(VMValue::Float(float_op(a as f64, b))),
+        (VMValue::Float(a), VMValue::Int(b)) => Ok(VMValue::Float(float_op(a, b as f64))),
         _ => Err(vm_error_from_frames(
             artifact,
             frames,
@@ -1291,6 +1365,8 @@ fn compare_pair(
     match pair {
         (VMValue::Int(a), VMValue::Int(b)) => Ok(VMValue::Bool(cmp(a as f64, b as f64))),
         (VMValue::Float(a), VMValue::Float(b)) => Ok(VMValue::Bool(cmp(a, b))),
+        (VMValue::Int(a), VMValue::Float(b)) => Ok(VMValue::Bool(cmp(a as f64, b))),
+        (VMValue::Float(a), VMValue::Int(b)) => Ok(VMValue::Bool(cmp(a, b as f64))),
         _ => Err(vm_error_from_frames(
             artifact,
             frames,
@@ -1507,12 +1583,16 @@ fn vm_call_builtin(
                 Some(v) => vmvalue_repr(&v),
                 None => return Err("IO.println requires 1 argument".to_string()),
             };
-            println!("{}", s);
+            if !is_io_suppressed() {
+                println!("{}", s);
+            }
             Ok(VMValue::Unit)
         }
         "IO.println_int" => match args.as_slice() {
             [VMValue::Int(n)] => {
-                println!("{}", n);
+                if !is_io_suppressed() {
+                    println!("{}", n);
+                }
                 Ok(VMValue::Unit)
             }
             [_] => Err("IO.println_int requires an Int argument".to_string()),
@@ -1520,7 +1600,9 @@ fn vm_call_builtin(
         },
         "IO.println_float" => match args.as_slice() {
             [VMValue::Float(n)] => {
-                println!("{}", n);
+                if !is_io_suppressed() {
+                    println!("{}", n);
+                }
                 Ok(VMValue::Unit)
             }
             [_] => Err("IO.println_float requires a Float argument".to_string()),
@@ -1528,7 +1610,9 @@ fn vm_call_builtin(
         },
         "IO.println_bool" => match args.as_slice() {
             [VMValue::Bool(b)] => {
-                println!("{}", if *b { "true" } else { "false" });
+                if !is_io_suppressed() {
+                    println!("{}", if *b { "true" } else { "false" });
+                }
                 Ok(VMValue::Unit)
             }
             [_] => Err("IO.println_bool requires a Bool argument".to_string()),
@@ -1541,8 +1625,10 @@ fn vm_call_builtin(
                 Some(v) => vmvalue_repr(&v),
                 None => return Err("IO.print requires 1 argument".to_string()),
             };
-            print!("{}", s);
-            std::io::stdout().flush().ok();
+            if !is_io_suppressed() {
+                print!("{}", s);
+                std::io::stdout().flush().ok();
+            }
             Ok(VMValue::Unit)
         }
         "Debug.show" => {
@@ -1743,6 +1829,27 @@ fn vm_call_builtin(
             match (s, prefix) {
                 (VMValue::Str(s), VMValue::Str(prefix)) => Ok(VMValue::Bool(s.starts_with(&prefix))),
                 _ => Err("String.starts_with requires (String, String)".to_string()),
+            }
+        }
+        "String.is_url" => {
+            let value = args.into_iter().next()
+                .ok_or_else(|| "String.is_url requires 1 argument".to_string())?;
+            match value {
+                VMValue::Str(s) => Ok(VMValue::Bool(
+                    s.starts_with("http://") || s.starts_with("https://")
+                )),
+                _ => Err("String.is_url requires a String argument".to_string()),
+            }
+        }
+        "String.is_slug" => {
+            let value = args.into_iter().next()
+                .ok_or_else(|| "String.is_slug requires 1 argument".to_string())?;
+            match value {
+                VMValue::Str(s) => Ok(VMValue::Bool(
+                    !s.is_empty()
+                        && s.chars().all(|ch| ch.is_ascii_lowercase() || ch.is_ascii_digit() || ch == '-')
+                )),
+                _ => Err("String.is_slug requires a String argument".to_string()),
             }
         }
         "String.ends_with" => {
@@ -2656,6 +2763,79 @@ fn vm_call_builtin(
                 Err(e) => Err(format!("File.delete failed for `{}`: {}", path, e)),
             }
         }
+        // Task builtins (v1.7.0) — synchronous-only implementation
+        // Task<T> is transparent at runtime: the value IS the T.
+        "Task.run" => {
+            // Task.run(t) — returns the task value immediately
+            match args.into_iter().next() {
+                Some(v) => Ok(v),
+                None => Err("Task.run requires 1 argument".to_string()),
+            }
+        }
+        "Task.map" => {
+            // Task.map(task_val, f) — f(task_val)
+            let mut it = args.into_iter();
+            match (it.next(), it.next()) {
+                (Some(val), Some(f)) => {
+                    match f {
+                        VMValue::CompiledFn(_) | VMValue::Closure(_, _) => {
+                            Err("Task.map: function calling not supported in builtin context".to_string())
+                        }
+                        _ => Ok(val), // identity if f is not callable here
+                    }
+                }
+                _ => Err("Task.map requires 2 arguments".to_string()),
+            }
+        }
+        "Task.and_then" => {
+            // Task.and_then(task_val, f) — same as Task.map for synchronous tasks
+            match args.into_iter().next() {
+                Some(v) => Ok(v),
+                None => Err("Task.and_then requires 2 arguments".to_string()),
+            }
+        }
+        // Task parallel API (v1.8.0) — synchronous transparent implementation
+        "Task.all" => {
+            // Task.all(list_of_tasks) — runs all, returns List of results
+            // v1.8.0: Tasks are transparent values, so this is identity on the list.
+            match args.into_iter().next() {
+                Some(VMValue::List(items)) => {
+                    if items.is_empty() {
+                        return Err("E061: Task.all requires a non-empty list".to_string());
+                    }
+                    Ok(VMValue::List(items))
+                }
+                Some(other) => Err(format!("Task.all: expected List, got {:?}", other)),
+                None => Err("Task.all requires 1 argument (a List of tasks)".to_string()),
+            }
+        }
+        "Task.race" => {
+            // Task.race(list_of_tasks) — returns the first task's result
+            // v1.8.0: returns head element (no true parallelism).
+            match args.into_iter().next() {
+                Some(VMValue::List(mut items)) => {
+                    if items.is_empty() {
+                        return Err("E061: Task.race requires a non-empty list".to_string());
+                    }
+                    Ok(items.remove(0))
+                }
+                Some(other) => Err(format!("Task.race: expected List, got {:?}", other)),
+                None => Err("Task.race requires 1 argument (a List of tasks)".to_string()),
+            }
+        }
+        "Task.timeout" => {
+            // Task.timeout(task, ms) — v1.8.0: always Some(value), no real timeout.
+            let mut it = args.into_iter();
+            match (it.next(), it.next()) {
+                (Some(val), Some(VMValue::Int(_ms))) => {
+                    Ok(VMValue::Variant("some".into(), Some(Box::new(val))))
+                }
+                (Some(val), None) => {
+                    Ok(VMValue::Variant("some".into(), Some(Box::new(val))))
+                }
+                _ => Err("Task.timeout requires 2 arguments: task and timeout_ms (Int)".to_string()),
+            }
+        }
         other => Err(format!("unknown builtin: {}", other)),
     }
 }
@@ -2671,7 +2851,7 @@ mod vm_stdlib_tests;
 
 #[cfg(test)]
 mod wasm_phase0_builtin_tests {
-    use super::{vm_call_builtin, VMValue};
+    use super::{io_output_suppressed_for_tests, set_suppress_io, vm_call_builtin, SuppressIoGuard, VMValue};
 
     #[test]
     fn vm_builtin_io_print_variants_return_unit() {
@@ -2692,5 +2872,61 @@ mod wasm_phase0_builtin_tests {
             vm_call_builtin("IO.println_bool", vec![VMValue::Bool(true)], &mut emit_log, None).unwrap(),
             VMValue::Unit
         );
+    }
+
+    #[test]
+    fn vm_builtin_string_state_helpers() {
+        let mut emit_log = Vec::new();
+        assert_eq!(
+            vm_call_builtin(
+                "String.is_url",
+                vec![VMValue::Str("https://example.com".into())],
+                &mut emit_log,
+                None
+            )
+            .unwrap(),
+            VMValue::Bool(true)
+        );
+        assert_eq!(
+            vm_call_builtin(
+                "String.is_url",
+                vec![VMValue::Str("ftp://example.com".into())],
+                &mut emit_log,
+                None
+            )
+            .unwrap(),
+            VMValue::Bool(false)
+        );
+        assert_eq!(
+            vm_call_builtin(
+                "String.is_slug",
+                vec![VMValue::Str("hello-world-2026".into())],
+                &mut emit_log,
+                None
+            )
+            .unwrap(),
+            VMValue::Bool(true)
+        );
+        assert_eq!(
+            vm_call_builtin(
+                "String.is_slug",
+                vec![VMValue::Str("Hello world".into())],
+                &mut emit_log,
+                None
+            )
+            .unwrap(),
+            VMValue::Bool(false)
+        );
+    }
+
+    #[test]
+    fn suppress_io_guard_restores_previous_state() {
+        set_suppress_io(false);
+        assert!(!io_output_suppressed_for_tests());
+        {
+            let _guard = SuppressIoGuard::new(true);
+            assert!(io_output_suppressed_for_tests());
+        }
+        assert!(!io_output_suppressed_for_tests());
     }
 }

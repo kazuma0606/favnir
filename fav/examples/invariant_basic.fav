@@ -1,0 +1,19 @@
+type Age = {
+    value: Int
+    invariant value >= 0
+    invariant value <= 150
+}
+
+public fn main() -> Unit !Io {
+    bind ok_age <- Age.new(30)
+    match ok_age {
+        ok(age) => IO.println_int(age.value)
+        err(msg) => IO.println(Debug.show(msg))
+    };
+
+    bind bad_age <- Age.new(-1)
+    match bad_age {
+        ok(age) => IO.println_int(age.value)
+        err(msg) => IO.println(Debug.show(msg))
+    }
+}

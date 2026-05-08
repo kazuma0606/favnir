@@ -1,0 +1,27 @@
+type UserRow = {
+    value: Int
+}
+
+abstract trf Parse<Row>: String -> Row
+
+abstract flw Pipeline<Row> {
+    parse: Parse<Row>
+    render: Row -> String
+}
+
+trf ParseUser: String -> UserRow = |text| {
+    UserRow { value: 7 }
+}
+
+trf RenderUser: UserRow -> String = |row| {
+    "user"
+}
+
+flw UserPipeline = Pipeline<UserRow> {
+    parse <- ParseUser
+    render <- RenderUser
+}
+
+public fn main() -> String {
+    UserPipeline("input")
+}

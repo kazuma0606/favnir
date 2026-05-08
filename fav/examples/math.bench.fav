@@ -1,0 +1,33 @@
+// math.bench.fav — benchmark examples (v1.8.0)
+//
+// Run with: fav bench math.bench.fav
+// Filter:   fav bench math.bench.fav --filter fib
+// Iters:    fav bench math.bench.fav --iters 1000
+
+fn fib(n: Int) -> Int {
+    if n < 2 {
+        n
+    } else {
+        fib(n - 1) + fib(n - 2)
+    }
+}
+
+fn factorial(n: Int) -> Int {
+    if n <= 1 { 1 } else { n * factorial(n - 1) }
+}
+
+bench "fib(10)" {
+    fib(10)
+}
+
+bench "fib(15)" {
+    fib(15)
+}
+
+bench "factorial(10)" {
+    factorial(10)
+}
+
+bench "integer arithmetic" {
+    (12345 * 67890) + (11111 - 222)
+}

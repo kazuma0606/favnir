@@ -1,0 +1,23 @@
+type UserRow = {
+    value: Int
+}
+
+trf ParseUser: String -> UserRow = |text| {
+    UserRow { value: 1 }
+}
+
+trf RenderUser: UserRow -> String = |row| {
+    "bundle-ok"
+}
+
+trf DeadStep: String -> String = |text| {
+    "dead"
+}
+
+flw MainFlow =
+    ParseUser
+    |> RenderUser
+
+public fn main() -> String {
+    MainFlow("input")
+}

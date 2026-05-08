@@ -1,0 +1,38 @@
+// task_parallel_demo.fav — Task<T> parallel API demo (v1.8.0)
+//
+// Task.all  : run all tasks, collect results as a List
+// Task.race : run all tasks, return the first result
+// Task.timeout: run a task with a time limit, return Option<T>
+
+fn compute(n: Int) -> Int {
+    n * n
+}
+
+async fn fetch_value(n: Int) -> Int {
+    compute(n)
+}
+
+public fn main() -> Unit !Io {
+    // Task.all — collect all results
+    bind t1 <- fetch_value(3)
+    bind t2 <- fetch_value(4)
+    bind tasks <- Task.all(collect {
+        yield Task.run(|| t1);
+        yield Task.run(|| t2);
+    })
+    IO.println_int(List.length(tasks));
+
+    // Task.race — first wins
+    bind winner <- Task.race(collect {
+        yield Task.run(|| 10);
+        yield Task.run(|| 20);
+    })
+    IO.println_int(winner);
+
+    // Task.timeout — always Some in v1.8.0 (synchronous)
+    bind result <- Task.timeout(Task.run(|| 42), 1000)
+    match result {
+        some(v) => IO.println_int(v)
+        none    => IO.println("timed out")
+    }
+}

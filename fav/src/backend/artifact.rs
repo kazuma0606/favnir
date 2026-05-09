@@ -4,7 +4,7 @@ use std::io::{self, Read, Write};
 use super::codegen::Constant;
 
 const MAGIC: &[u8; 4] = b"FVC\x01";
-const VERSION: u8 = 0x06;
+const VERSION: u8 = 0x20; // v2.0.0
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct FvcGlobal {

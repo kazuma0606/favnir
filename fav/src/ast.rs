@@ -328,10 +328,11 @@ pub struct YieldStmt {
 impl Stmt {
     pub fn span(&self) -> &Span {
         match self {
-            Stmt::Bind(b)  => &b.span,
-            Stmt::Expr(e)  => e.span(),
-            Stmt::Chain(c) => &c.span,
-            Stmt::Yield(y) => &y.span,
+            Stmt::Bind(b)   => &b.span,
+            Stmt::Expr(e)   => e.span(),
+            Stmt::Chain(c)  => &c.span,
+            Stmt::Yield(y)  => &y.span,
+            Stmt::ForIn(f)  => &f.span,
         }
     }
 }

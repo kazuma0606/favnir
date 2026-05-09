@@ -1,0 +1,24 @@
+// coalesce_demo.fav — v1.9.0: ?? null-coalesce operator example
+
+fn find_user(id: Int) -> Option<String> {
+    if id == 1 {
+        Option.some("Alice")
+    } else {
+        Option.none()
+    }
+}
+
+public fn main() -> Unit !Io {
+    bind name1 <- find_user(1) ?? "Unknown"
+    bind name2 <- find_user(99) ?? "Unknown"
+
+    IO.println(name1)  // Alice
+    IO.println(name2)  // Unknown
+
+    // Chained with String.to_int (returns Option<Int>)
+    bind parsed <- String.to_int("42") ?? 0
+    IO.println_int(parsed)  // 42
+
+    bind bad <- String.to_int("not_a_number") ?? -1
+    IO.println_int(bad)  // -1
+}

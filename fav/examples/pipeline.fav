@@ -1,12 +1,12 @@
-trf Trim: String -> String = |s| {
+stage Trim: String -> String = |s| {
     String.trim(s)
 }
 
-trf Lower: String -> String = |s| {
+stage Lower: String -> String = |s| {
     String.lower(s)
 }
 
-flw Normalize = Trim |> Lower
+seq Normalize = Trim |> Lower
 
 public fn main() -> Unit !Io {
     bind result <- "  Hello, World!  " |> Normalize

@@ -28,9 +28,9 @@ pub enum Type {
     Trf(Box<Type>, Box<Type>, Vec<Effect>),
     /// `abstract trf` definition (v1.3.0)
     AbstractTrf { input: Box<Type>, output: Box<Type>, effects: Vec<Effect> },
-    /// `abstract flw Name<T> { ... }` template marker (v1.3.0)
+    /// `abstract seq Name<T> { ... }` template marker (v1.3.0)
     AbstractFlwTemplate(String),
-    /// Partially bound abstract flw (v1.3.0)
+    /// Partially bound abstract seq (v1.3.0)
     PartialFlw { template: String, type_args: Vec<Type>, unbound_slots: Vec<String> },
     /// User-defined named type (after lookup)
     Named(String, Vec<Type>),
@@ -559,13 +559,13 @@ pub struct Checker {
     impls: HashMap<(String, String), ImplScope>,
     /// Registered interfaces and their implementations (v1.1.0).
     interface_registry: InterfaceRegistry,
-    /// Registered abstract trf definitions (v1.3.0).
+    /// Registered abstract stage definitions (v1.3.0).
     abstract_trf_registry: HashMap<String, AbstractTrfDef>,
-    /// Registered abstract flw template definitions (v1.3.0).
+    /// Registered abstract seq template definitions (v1.3.0).
     abstract_flw_registry: HashMap<String, AbstractFlwDef>,
     /// User-declared custom effects (v1.5.0).
     effect_registry: HashSet<String>,
-    /// Explain/check metadata for bound abstract flw values (v1.3.0).
+    /// Explain/check metadata for bound abstract seq values (v1.3.0).
     flw_binding_info: HashMap<String, FlwBindingInfo>,
     /// Expected type-parameter arity for user-defined generic types (v0.4.0).
     type_arity: HashMap<String, usize>,
@@ -1761,7 +1761,7 @@ impl Checker {
             let Some(slot) = slot_map.get(slot_name) else {
                 self.type_error(
                     "E049",
-                    format!("unknown slot `{}` in abstract flw `{}`", slot_name, template.name),
+                    format!("unknown slot `{}` in abstract seq `{}`", slot_name, template.name),
                     &fd.span,
                 );
                 has_binding_error = true;
@@ -1816,7 +1816,7 @@ impl Checker {
                 self.type_error(
                     "E048",
                     format!(
-                          "slot `{}` in abstract flw `{}` expects `{}` -> `{}`{}, got `{}` from `{}`",
+                          "slot `{}` in abstract seq `{}` expects `{}` -> `{}`{}, got `{}` from `{}`",
                           slot_name,
                           template.name,
                           expected_input.display(),
@@ -2595,7 +2595,7 @@ impl Checker {
                           self.type_error(
                               "E051",
                               format!(
-                                  "cannot call abstract trf `{}` directly; bind it into an abstract flw slot first",
+                                  "cannot call abstract stage `{}` directly; bind it into an abstract seq slot first",
                                   func_ty.display()
                               ),
                               span,
@@ -3647,16 +3647,16 @@ mod tests {
     // 4-8: trf type checks
     #[test]
     fn test_trf_ok() {
-        check_ok("trf Double: Int -> Int = |n| { n }");
+        check_ok("stage Double: Int -> Int = |n| { n }");
     }
 
     // 4-9: flw pipeline  Ecompatible
     #[test]
     fn test_flw_ok() {
         check_ok("
-            trf A: String -> Int = |s| { 0 }
-            trf B: Int -> Bool   = |n| { true }
-            flw AB = A |> B
+            stage A: String -> Int = |s| { 0 }
+            stage B: Int -> Bool   = |n| { true }
+            seq AB = A |> B
         ");
     }
 
@@ -3664,9 +3664,9 @@ mod tests {
     #[test]
     fn test_flw_type_mismatch() {
         let errs = check_err("
-            trf A: String -> Int  = |s| { 0 }
-            trf B: Bool   -> Unit = |b| { () }
-            flw Bad = A |> B
+            stage A: String -> Int  = |s| { 0 }
+            stage B: Bool   -> Unit = |b| { () }
+            seq Bad = A |> B
         ");
         assert!(errs.iter().any(|e| e.contains("E003")));
     }
@@ -3674,7 +3674,7 @@ mod tests {
     // 4-9: flw  Eundefined step
     #[test]
     fn test_flw_undefined_step() {
-        let errs = check_err("flw Bad = NoSuchTrf |> AnotherMissing");
+        let errs = check_err("seq Bad = NoSuchTrf |> AnotherMissing");
         assert!(errs.iter().any(|e| e.contains("E002")));
     }
 
@@ -3739,8 +3739,8 @@ mod tests {
     #[test]
     fn test_pipeline_type_mismatch() {
         let errs = check_err("
-            trf A: String -> Int  = |s| { 0 }
-            trf B: Bool   -> Unit = |b| { () }
+            stage A: String -> Int  = |s| { 0 }
+            stage B: Bool   -> Unit = |b| { () }
             fn f() -> Unit { \"hello\" |> A |> B }
         ");
         assert!(errs.iter().any(|e| e.contains("E003") || e.contains("E001")));
@@ -3892,13 +3892,13 @@ mod tests {
     // 2-8: trf with !Emit<T>
     #[test]
     fn test_trf_emit_effect() {
-        check_ok(r#"trf T: String -> Unit !Emit<E> = |s| { emit s }"#);
+        check_ok(r#"stage T: String -> Unit !Emit<E> = |s| { emit s }"#);
     }
 
     #[test]
     fn effect_def_registered() {
         let program = Parser::parse_str(
-            "effect Payment\ntrf Charge: Int -> Int !Payment = |x| { x }",
+            "effect Payment\nstage Charge: Int -> Int !Payment = |x| { x }",
             "effect_registered.fav",
         )
         .expect("parse");
@@ -3913,14 +3913,14 @@ mod tests {
         check_ok(
             r#"
 effect Payment
-trf Charge: Int -> Int !Payment = |x| { x }
+stage Charge: Int -> Int !Payment = |x| { x }
 "#,
         );
     }
 
     #[test]
     fn effect_unknown_e052() {
-        let errs = check_err(r#"trf Charge: Int -> Int !Payment = |x| { x }"#);
+        let errs = check_err(r#"stage Charge: Int -> Int !Payment = |x| { x }"#);
         assert!(errs.iter().any(|e| e.contains("E052")), "got: {:?}", errs);
     }
 
@@ -3929,9 +3929,9 @@ trf Charge: Int -> Int !Payment = |x| { x }
         check_ok(
             r#"
 fn f() -> Unit !Io { () }
-trf T: Int -> Int !Db = |x| { x }
-abstract trf Fetch: Int -> Int !Trace
-abstract flw Pipeline {
+stage T: Int -> Int !Db = |x| { x }
+abstract stage Fetch: Int -> Int !Trace
+abstract seq Pipeline {
     save: Int -> Int !File
 }
 "#,
@@ -4167,11 +4167,13 @@ abstract flw Pipeline {
     }
 
     #[test]
-    fn test_cap_deprecated_warning_w010() {
-        let warnings = check_warnings(r#"
+    fn test_cap_removed_parse_error_e2003() {
+        // v2.0.0: `cap` is removed; parser emits an error with migration hint
+        let result = Parser::parse_str(r#"
             cap Show<T> = { show: T -> String }
-        "#);
-        assert!(warnings.iter().any(|w| w.contains("W010")), "expected W010, got: {:?}", warnings);
+        "#, "test");
+        assert!(result.is_err(), "expected parse error for `cap` in v2.0.0");
+        assert!(result.unwrap_err().message.contains("cap"), "error should mention `cap`");
     }
 
     #[test]
@@ -4345,13 +4347,13 @@ abstract flw Pipeline {
 
     #[test]
     fn test_cap_def_checks() {
-        let errs = check("cap Eq<T> = { equals: T -> T -> Bool }");
+        let errs = check("interface Eq { equals: Self -> Self -> Bool }");
         assert!(errs.is_empty(), "unexpected errors: {:?}", errs);
     }
 
     #[test]
     fn test_impl_def_valid() {
-        let src = "cap Eq<T> = { equals: T -> T -> Bool }\nimpl Eq<Int> { fn equals(a: Int, b: Int) -> Bool { a == b } }";
+        let src = "interface Eq { equals: Self -> Self -> Bool }\nimpl Eq for Int { equals = |a b| a == b }";
         let errs = check(src);
         assert!(errs.is_empty(), "unexpected errors: {:?}", errs);
     }
@@ -4365,17 +4367,16 @@ abstract flw Pipeline {
 
     #[test]
     fn test_impl_method_not_in_cap_error() {
-        let src = "cap Eq<T> = { equals: T -> T -> Bool }\nimpl Eq<Int> { fn bogus(a: Int, b: Int) -> Bool { a == b } }";
+        let src = "interface Eq { equals: Self -> Self -> Bool }\nimpl Eq for Int { bogus = |a b| a == b }";
         let errs = check_err(src);
-        assert!(errs.iter().any(|e| e.contains("E022")), "expected E022, got: {:?}", errs);
+        // E042 is raised for undeclared methods in interface impl
+        assert!(errs.iter().any(|e| e.contains("E042")), "expected E042, got: {:?}", errs);
     }
 
     #[test]
     fn test_e021_no_impl_for_type() {
-        // Accessing a known cap on a type with no impl should produce E021.
-        // String has no Ord impl registered by default in test env.
-        // Use a user-defined cap to guarantee no impl.
-        let src = "cap Printable<T> = { print: T -> String }\nfn main() -> Unit { bind _ <- Int.printable; () }";
+        // Accessing the built-in Eq cap on a type with no impl should produce E021.
+        let src = "type MyData = { x: Int }\nfn main() -> Unit { bind t <- MyData { x: 1 }; bind _ <- t.eq; () }";
         let errs = check_err(src);
         assert!(errs.iter().any(|e| e.contains("E021")), "expected E021, got: {:?}", errs);
     }
@@ -4523,29 +4524,29 @@ fn main() -> Int! {
     #[test]
     fn test_flw_binding_type_ok() {
         check_ok(r#"
-abstract flw DataPipeline<Row> {
+abstract seq DataPipeline<Row> {
     parse: String -> List<Row>!
     save: List<Row> -> Int !Db
 }
-abstract trf ParseCsv: String -> List<UserRow>!
-abstract trf SaveUsers: List<UserRow> -> Int !Db
+abstract stage ParseCsv: String -> List<UserRow>!
+abstract stage SaveUsers: List<UserRow> -> Int !Db
 type UserRow = { name: String }
-flw UserImport = DataPipeline<UserRow> { parse <- ParseCsv; save <- SaveUsers }
+seq UserImport = DataPipeline<UserRow> { parse <- ParseCsv; save <- SaveUsers }
 "#);
     }
 
     #[test]
     fn test_flw_binding_e048() {
         let errs = check_err(r#"
-abstract flw DataPipeline<Row> {
+abstract seq DataPipeline<Row> {
     parse: String -> List<Row>!
     save: List<Row> -> Int !Db
 }
-abstract trf ParseCsv: String -> List<UserRow>!
-abstract trf SaveUsers: List<OrderRow> -> Int !Db
+abstract stage ParseCsv: String -> List<UserRow>!
+abstract stage SaveUsers: List<OrderRow> -> Int !Db
 type UserRow = { name: String }
 type OrderRow = { id: Int }
-flw UserImport = DataPipeline<UserRow> { parse <- ParseCsv; save <- SaveUsers }
+seq UserImport = DataPipeline<UserRow> { parse <- ParseCsv; save <- SaveUsers }
 "#);
         assert!(errs.iter().any(|e| e.contains("E048")), "expected E048, got: {:?}", errs);
     }
@@ -4553,12 +4554,12 @@ flw UserImport = DataPipeline<UserRow> { parse <- ParseCsv; save <- SaveUsers }
     #[test]
     fn test_flw_binding_e049() {
         let errs = check_err(r#"
-abstract flw DataPipeline<Row> {
+abstract seq DataPipeline<Row> {
     parse: String -> List<Row>!
 }
-abstract trf ParseCsv: String -> List<UserRow>!
+abstract stage ParseCsv: String -> List<UserRow>!
 type UserRow = { name: String }
-flw UserImport = DataPipeline<UserRow> { extra <- ParseCsv }
+seq UserImport = DataPipeline<UserRow> { extra <- ParseCsv }
 "#);
         assert!(errs.iter().any(|e| e.contains("E049")), "expected E049, got: {:?}", errs);
     }
@@ -4566,14 +4567,14 @@ flw UserImport = DataPipeline<UserRow> { extra <- ParseCsv }
     #[test]
     fn test_flw_binding_effect_inference() {
         let ty = inferred_type_of(r#"
-abstract flw DataPipeline<Row> {
+abstract seq DataPipeline<Row> {
     parse: String -> List<Row>! !Network
     save: List<Row> -> Int !Db
 }
-abstract trf ParseCsv: String -> List<UserRow>! !Network
-abstract trf SaveUsers: List<UserRow> -> Int !Db
+abstract stage ParseCsv: String -> List<UserRow>! !Network
+abstract stage SaveUsers: List<UserRow> -> Int !Db
 type UserRow = { name: String }
-flw UserImport = DataPipeline<UserRow> { parse <- ParseCsv; save <- SaveUsers }
+seq UserImport = DataPipeline<UserRow> { parse <- ParseCsv; save <- SaveUsers }
 "#, "UserImport");
         match ty {
             Type::Trf(input, output, effects) => {
@@ -4589,14 +4590,14 @@ flw UserImport = DataPipeline<UserRow> { parse <- ParseCsv; save <- SaveUsers }
     #[test]
     fn test_flw_partial_type() {
         let ty = inferred_type_of(r#"
-abstract flw DataPipeline<Row> {
+abstract seq DataPipeline<Row> {
     parse: String -> List<Row>!
     validate: Row -> Row!
     save: List<Row> -> Int !Db
 }
-abstract trf ParseCsv: String -> List<UserRow>!
+abstract stage ParseCsv: String -> List<UserRow>!
 type UserRow = { name: String }
-flw PartialImport = DataPipeline<UserRow> { parse <- ParseCsv }
+seq PartialImport = DataPipeline<UserRow> { parse <- ParseCsv }
 "#, "PartialImport");
         match ty {
             Type::PartialFlw { template, type_args, unbound_slots } => {
@@ -4611,7 +4612,7 @@ flw PartialImport = DataPipeline<UserRow> { parse <- ParseCsv }
     #[test]
     fn test_abstract_trf_direct_call_e051() {
         let errs = check_err(r#"
-abstract trf FetchUser: Int -> String !Db
+abstract stage FetchUser: Int -> String !Db
 fn main() -> String { FetchUser(1) }
 "#);
         assert!(errs.iter().any(|e| e.contains("E051")), "expected E051, got: {:?}", errs);
@@ -4620,26 +4621,26 @@ fn main() -> String { FetchUser(1) }
     #[test]
     fn test_abstract_trf_generic_binding_ok() {
         check_ok(r#"
-abstract trf Fetch<T>: Int -> T? !Db
+abstract stage Fetch<T>: Int -> T? !Db
 type User = { name: String }
-abstract trf FetchUser: Int -> User? !Db
-abstract flw Pipeline<Row> {
+abstract stage FetchUser: Int -> User? !Db
+abstract seq Pipeline<Row> {
     fetch: Fetch<Row>
 }
-flw UserPipeline = Pipeline<User> { fetch <- FetchUser }
+seq UserPipeline = Pipeline<User> { fetch <- FetchUser }
 "#);
     }
 
     #[test]
     fn test_abstract_trf_generic_binding_e048() {
         let errs = check_err(r#"
-abstract trf Fetch<T>: Int -> T? !Db
+abstract stage Fetch<T>: Int -> T? !Db
 type User = { name: String }
-abstract trf FetchBad: String -> User? !Db
-abstract flw Pipeline<Row> {
+abstract stage FetchBad: String -> User? !Db
+abstract seq Pipeline<Row> {
     fetch: Fetch<Row>
 }
-flw UserPipeline = Pipeline<User> { fetch <- FetchBad }
+seq UserPipeline = Pipeline<User> { fetch <- FetchBad }
 "#);
         assert!(errs.iter().any(|e| e.contains("E048")), "expected E048, got: {:?}", errs);
     }
@@ -4647,20 +4648,20 @@ flw UserPipeline = Pipeline<User> { fetch <- FetchBad }
     #[test]
       fn test_flw_binding_type_params() {
           check_ok(r#"
-  abstract flw DataPipeline<Row> {
+  abstract seq DataPipeline<Row> {
       parse: String -> List<Row>!
       save: List<Row> -> Int !Db
 }
-abstract trf ParseInts: String -> List<Int>!
-abstract trf SaveInts: List<Int> -> Int !Db
-  flw IntImport = DataPipeline<Int> { parse <- ParseInts; save <- SaveInts }
+abstract stage ParseInts: String -> List<Int>!
+abstract stage SaveInts: List<Int> -> Int !Db
+  seq IntImport = DataPipeline<Int> { parse <- ParseInts; save <- SaveInts }
   "#);
       }
 
       #[test]
       fn test_dynamic_injection_type_ok() {
           let prog = Parser::parse_str(r#"
-abstract flw SavePipeline<Row> {
+abstract seq SavePipeline<Row> {
     save: Row -> Int !Db
 }
 "#, "test").expect("parse");
@@ -4701,7 +4702,7 @@ abstract flw SavePipeline<Row> {
       #[test]
       fn test_dynamic_injection_type_e048() {
           let prog = Parser::parse_str(r#"
-abstract flw SavePipeline<Row> {
+abstract seq SavePipeline<Row> {
     save: Row -> Int !Db
 }
 "#, "test").expect("parse");
@@ -4830,6 +4831,102 @@ public fn get_id() -> UserId {
 type MaybeInt = Option<Int>
 public fn wrap(x: Int) -> MaybeInt {
     Option.some(x)
+}
+"#);
+    }
+
+    // ── v1.9.0: for-in expression ────────────────────────────────────────────
+
+    #[test]
+    fn for_in_basic_ok() {
+        check_ok(r#"
+public fn main() -> Unit !Io {
+    bind nums <- collect { yield 1; yield 2; yield 3; }
+    for n in nums {
+        IO.println_int(n)
+    }
+}
+"#);
+    }
+
+    #[test]
+    fn for_in_non_list_e065() {
+        let errs = check_err(r#"
+public fn main() -> Unit !Io {
+    for n in 42 {
+        IO.println_int(n)
+    }
+}
+"#);
+        assert!(errs.iter().any(|e| e.contains("E065")), "expected E065, got {:?}", errs);
+    }
+
+    #[test]
+    fn for_in_in_collect_e067() {
+        let errs = check_err(r#"
+public fn main() -> List<Int> {
+    collect {
+        for n in List.range(0, 3) {
+            yield n;
+        }
+    }
+}
+"#);
+        assert!(errs.iter().any(|e| e.contains("E067")), "expected E067, got {:?}", errs);
+    }
+
+    // ── v1.9.0: ?? null-coalesce operator ───────────────────────────────────
+
+    #[test]
+    fn null_coalesce_ok() {
+        check_ok(r#"
+public fn main() -> Int {
+    bind x: Option<Int> <- Option.some(5)
+    x ?? 0
+}
+"#);
+    }
+
+    #[test]
+    fn null_coalesce_lhs_not_option_e068() {
+        let errs = check_err(r#"
+public fn main() -> Int {
+    42 ?? 0
+}
+"#);
+        assert!(errs.iter().any(|e| e.contains("E068")), "expected E068, got {:?}", errs);
+    }
+
+    #[test]
+    fn null_coalesce_type_mismatch_e069() {
+        let errs = check_err(r#"
+public fn main() -> Int {
+    bind x: Option<Int> <- Option.some(5)
+    x ?? "fallback"
+}
+"#);
+        assert!(errs.iter().any(|e| e.contains("E069")), "expected E069, got {:?}", errs);
+    }
+
+    // ── v1.9.0: stage/seq keyword aliases ───────────────────────────────────
+
+    #[test]
+    fn stage_alias_for_trf_ok() {
+        check_ok(r#"
+stage double: Int -> Int = |x| { x * 2 }
+public fn main() -> Int {
+    21 |> double
+}
+"#);
+    }
+
+    #[test]
+    fn seq_alias_for_flw_ok() {
+        check_ok(r#"
+stage add_one: Int -> Int = |x| { x + 1 }
+seq pipeline = add_one
+public fn main() -> Int {
+    5 |> pipeline
 }
 "#);
     }

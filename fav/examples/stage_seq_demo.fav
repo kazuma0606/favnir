@@ -1,0 +1,17 @@
+// stage_seq_demo.fav — v1.9.0: stage/seq keyword aliases for trf/flw
+
+// `stage` is an alias for `trf` (transform stage in a pipeline)
+stage double: Int -> Int = |x| { x * 2 }
+stage add_ten: Int -> Int = |x| { x + 10 }
+stage negate: Int -> Int = |x| { 0 - x }
+
+// `seq` is an alias for `flw` (sequence of stages)
+seq pipeline = double |> add_ten
+
+public fn main() -> Unit !Io {
+    bind result <- 5 |> pipeline
+    IO.println_int(result)  // (5 * 2) + 10 = 20
+
+    bind negated <- 5 |> negate
+    IO.println_int(negated)  // -5
+}

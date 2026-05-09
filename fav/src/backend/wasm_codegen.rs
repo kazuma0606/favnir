@@ -290,6 +290,7 @@ fn infer_binop_type(op: &crate::ast::BinOp, lhs: &Type, rhs: &Type, result: &Typ
         | crate::ast::BinOp::LtEq
         | crate::ast::BinOp::GtEq => Type::Int,
         crate::ast::BinOp::Eq | crate::ast::BinOp::NotEq => Type::Bool,
+        crate::ast::BinOp::NullCoalesce => unreachable!("?? desugared before IR"),
     }
 }
 

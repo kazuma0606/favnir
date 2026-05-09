@@ -141,7 +141,7 @@ public fn main() -> Int { 0 }
     fn test_reachability_effects_required() {
         let program = Parser::parse_str(
             r#"
-trf Save: Int -> Int !Db = |x| { x }
+stage Save: Int -> Int !Db = |x| { x }
 public fn main() -> Int { Save(1) }
 "#,
             "reachability_effects.fav",

@@ -1737,7 +1737,7 @@ public fn main() -> Int {
     #[test]
     fn exec_artifact_main_runs_built_temp_source() {
         let source = r#"
-trf Double: Int -> Int = |x| { x + x }
+stage Double: Int -> Int = |x| { x + x }
 
 public fn main() -> Int {
     21 |> Double
@@ -1753,8 +1753,8 @@ public fn main() -> Int {
     #[test]
     fn exec_artifact_main_runs_named_flw_source() {
         let source = r#"
-trf Inc: Int -> Int = |x| { x + 1 }
-flw Bump = Inc |> Inc
+stage Inc: Int -> Int = |x| { x + 1 }
+seq Bump = Inc |> Inc
 
 public fn main() -> Int {
     1 |> Bump
@@ -2490,7 +2490,7 @@ public fn main() -> PosInt! {
     fn explain_render_shows_abstract_trf_section() {
         let program = Parser::parse_str(
             r#"
-abstract trf FetchUser: Int -> String !Db
+abstract stage FetchUser: Int -> String !Db
 "#,
             "explain_abstract_trf.fav",
         )
@@ -2504,7 +2504,7 @@ abstract trf FetchUser: Int -> String !Db
     fn explain_render_shows_abstract_flw_section() {
         let program = Parser::parse_str(
             r#"
-abstract flw DataPipeline<Row> {
+abstract seq DataPipeline<Row> {
     parse: String -> List<Row>!
     save: List<Row> -> Int !Db
 }
@@ -2524,14 +2524,14 @@ abstract flw DataPipeline<Row> {
         let program = Parser::parse_str(
             r#"
 type UserRow = { name: String }
-abstract flw DataPipeline<Row> {
+abstract seq DataPipeline<Row> {
     parse: String -> List<Row>!
     validate: Row -> Row!
     save: List<Row> -> Int !Db
 }
-abstract trf ParseCsv: String -> List<UserRow>!
-abstract trf SaveUsers: List<UserRow> -> Int !Db
-flw PartialImport = DataPipeline<UserRow> {
+abstract stage ParseCsv: String -> List<UserRow>!
+abstract stage SaveUsers: List<UserRow> -> Int !Db
+seq PartialImport = DataPipeline<UserRow> {
     parse <- ParseCsv
     save <- SaveUsers
 }
@@ -2582,13 +2582,13 @@ public fn main() -> Unit !Io {
         let program = Parser::parse_str(
             r#"
 type UserRow = { name: String }
-abstract trf FetchUser: Int -> UserRow? !Db
-abstract flw Pipeline<Row> {
+abstract stage FetchUser: Int -> UserRow? !Db
+abstract seq Pipeline<Row> {
     fetch: Int -> Row? !Db
 }
-trf ParseUser: Int -> UserRow = |x| { UserRow { name: "a" } }
-flw ImportUsers = ParseUser |> ParseUser
-flw UserFetch = Pipeline<UserRow> { fetch <- FetchUser }
+stage ParseUser: Int -> UserRow = |x| { UserRow { name: "a" } }
+seq ImportUsers = ParseUser |> ParseUser
+seq UserFetch = Pipeline<UserRow> { fetch <- FetchUser }
 public fn main() -> Unit !Io {
     IO.println("ok")
 }
@@ -2616,8 +2616,8 @@ public fn main() -> Unit !Io {
     fn explain_json_focus_trfs() {
         let program = Parser::parse_str(
             r#"
-abstract trf FetchUser: Int -> String !Db
-trf ParseName: Int -> String = |x| { "name" }
+abstract stage FetchUser: Int -> String !Db
+stage ParseName: Int -> String = |x| { "name" }
 "#,
             "explain_json_focus.fav",
         )
@@ -2643,11 +2643,11 @@ trf ParseName: Int -> String = |x| { "name" }
         let program = Parser::parse_str(
             r#"
 type UserRow = { name: String }
-abstract trf FetchUser: Int -> UserRow? !Db
-abstract flw Pipeline<Row> {
+abstract stage FetchUser: Int -> UserRow? !Db
+abstract seq Pipeline<Row> {
     fetch: Int -> Row? !Db
 }
-flw UserFetch = Pipeline<UserRow> { fetch <- FetchUser }
+seq UserFetch = Pipeline<UserRow> { fetch <- FetchUser }
 "#,
             "explain_json_kinds.fav",
         )
@@ -2672,7 +2672,7 @@ flw UserFetch = Pipeline<UserRow> { fetch <- FetchUser }
             r#"
 public effect Payment
 effect Notification
-trf Charge: Int -> Int !Payment = |x| { x }
+stage Charge: Int -> Int !Payment = |x| { x }
 "#,
             "explain_json_custom_effects.fav",
         )
@@ -2847,7 +2847,7 @@ public fn main() -> String {
     #[test]
     fn artifact_info_string_reports_trace_and_emit_summary() {
         let source = r#"
-trf TraceOnce: String -> String !Trace = |x| {
+stage TraceOnce: String -> String !Trace = |x| {
     x
 }
 
@@ -2893,7 +2893,7 @@ public fn main() -> Unit !Emit<UserCreated> {
         std::fs::write(
             &src,
             r#"
-trf Double: Int -> Int = |x| { x + x }
+stage Double: Int -> Int = |x| { x + x }
 
 public fn main() -> Int {
     21 |> Double
@@ -2922,7 +2922,7 @@ public fn main() -> Int {
         std::fs::write(
             &src,
             r#"
-trf TraceOnce: String -> String !Trace = |x| {
+stage TraceOnce: String -> String !Trace = |x| {
     x
 }
 
@@ -3153,14 +3153,14 @@ public fn main() -> Unit !Io {
     fn partial_flw_reports_e050() {
         let program = Parser::parse_str(
             r#"
-abstract flw DataPipeline<Row> {
+abstract seq DataPipeline<Row> {
     parse: String -> List<Row>!
     validate: Row -> Row!
     save: List<Row> -> Int !Db
 }
-abstract trf ParseCsv: String -> List<UserRow>!
+abstract stage ParseCsv: String -> List<UserRow>!
 type UserRow = { name: String }
-flw PartialImport = DataPipeline<UserRow> { parse <- ParseCsv }
+seq PartialImport = DataPipeline<UserRow> { parse <- ParseCsv }
 "#,
             "partial_flw.fav",
         )
@@ -3174,14 +3174,14 @@ flw PartialImport = DataPipeline<UserRow> { parse <- ParseCsv }
     #[test]
     fn partial_flw_check_emits_w011() {
         let source = r#"
-abstract flw DataPipeline<Row> {
+abstract seq DataPipeline<Row> {
     parse: String -> List<Row>!
     validate: Row -> Row!
     save: List<Row> -> Int !Db
 }
-abstract trf ParseCsv: String -> List<UserRow>!
+abstract stage ParseCsv: String -> List<UserRow>!
 type UserRow = { name: String }
-flw PartialImport = DataPipeline<UserRow> { parse <- ParseCsv }
+seq PartialImport = DataPipeline<UserRow> { parse <- ParseCsv }
 "#;
         let program = Parser::parse_str(source, "partial_flw_check.fav").expect("parse");
         let warnings = partial_flw_warnings(&program);
@@ -3246,7 +3246,7 @@ flw PartialImport = DataPipeline<UserRow> { parse <- ParseCsv }
     #[test]
     fn exec_artifact_main_runs_local_callable_param_source() {
         let source = r#"
-trf ParseUser: String -> String = |text| {
+stage ParseUser: String -> String = |text| {
     "user"
 }
 
@@ -3436,14 +3436,14 @@ public fn main() -> Int {
     fn graph_text_shows_flw_structure() {
         let program = Parser::parse_str(
             r#"
-abstract flw DataPipeline<Row> {
+abstract seq DataPipeline<Row> {
     parse: String -> List<Row> !
     validate: Row -> Row !
     save: List<Row> -> Int !Db
 }
 
-flw ImportUsers = ParseCsv |> ValidateUser |> SaveUsers
-flw DefaultImport = DataPipeline<UserRow> {
+seq ImportUsers = ParseCsv |> ValidateUser |> SaveUsers
+seq DefaultImport = DataPipeline<UserRow> {
     parse <- ParseCsv
     validate <- ValidateUser
     save <- SaveUsers
@@ -3454,7 +3454,7 @@ flw DefaultImport = DataPipeline<UserRow> {
         .expect("parse");
 
         let rendered = render_graph_text(&program, "flw");
-        assert!(rendered.contains("abstract flw DataPipeline:"));
+        assert!(rendered.contains("abstract seq DataPipeline:"));
         assert!(rendered.contains("slot parse: String -> List<Row>"));
         assert!(rendered.contains("flw ImportUsers:"));
         assert!(rendered.contains("1. ParseCsv"));
@@ -3466,13 +3466,13 @@ flw DefaultImport = DataPipeline<UserRow> {
     fn graph_mermaid_valid_syntax() {
         let program = Parser::parse_str(
             r#"
-abstract flw DataPipeline<Row> {
+abstract seq DataPipeline<Row> {
     parse: String -> List<Row> !
     validate: Row -> Row !
 }
 
-flw ImportUsers = ParseCsv |> ValidateUser
-flw DefaultImport = DataPipeline<UserRow> {
+seq ImportUsers = ParseCsv |> ValidateUser
+seq DefaultImport = DataPipeline<UserRow> {
     parse <- ParseCsv
     validate <- ValidateUser
 }
@@ -4827,7 +4827,7 @@ fn render_graph_text_with_opts(
                 }
             }
             ast::Item::AbstractFlwDef(def) if focus == "flw" || focus == "all" => {
-                let _ = writeln!(out, "abstract flw {}:", def.name);
+                let _ = writeln!(out, "abstract seq {}:", def.name);
                 for slot in &def.slots {
                     let _ = writeln!(
                         out,
@@ -4902,7 +4902,7 @@ fn render_graph_mermaid_with_opts(
                 }
             }
             ast::Item::AbstractFlwDef(def) if focus == "flw" || focus == "all" => {
-                let _ = writeln!(out, "    {}[\"abstract flw {}\"]", def.name, def.name);
+                let _ = writeln!(out, "    {}[\"abstract seq {}\"]", def.name, def.name);
                 for slot in &def.slots {
                     let slot_node = format!("{}_{}", def.name, slot.name);
                     let _ = writeln!(out, "    {}[\"slot {}\"]", slot_node, slot.name);
@@ -5099,7 +5099,7 @@ impl ExplainPrinter {
                     let _ = writeln!(
                         out,
                         "{:<col_vis$} {:<col_name$} {:<col_type$} {:<col_eff$} {:<col_inv$} -",
-                        vis, format!("abstract trf {}", td.name), sig, effs, "-"
+                        vis, format!("abstract stage {}", td.name), sig, effs, "-"
                     );
                 }
                 Item::FlwDef(fd) => {
@@ -5125,9 +5125,9 @@ impl ExplainPrinter {
                         .join("; ");
                     let vis = format_visibility(&fd.visibility);
                     let name = if fd.type_params.is_empty() {
-                        format!("abstract flw {}", fd.name)
+                        format!("abstract seq {}", fd.name)
                     } else {
-                        format!("abstract flw {}<{}>", fd.name, fd.type_params.join(", "))
+                        format!("abstract seq {}<{}>", fd.name, fd.type_params.join(", "))
                     };
                     let _ = writeln!(
                         out,
@@ -5668,16 +5668,17 @@ fn format_expr_compact(expr: &ast::Expr) -> String {
         }
         Expr::BinOp(op, left, right, _) => {
             let op = match op {
-                BinOp::Add => "+",
-                BinOp::Sub => "-",
-                BinOp::Mul => "*",
-                BinOp::Div => "/",
-                BinOp::Eq => "==",
-                BinOp::NotEq => "!=",
-                BinOp::Lt => "<",
-                BinOp::Gt => ">",
-                BinOp::LtEq => "<=",
-                BinOp::GtEq => ">=",
+                BinOp::Add          => "+",
+                BinOp::Sub          => "-",
+                BinOp::Mul          => "*",
+                BinOp::Div          => "/",
+                BinOp::Eq           => "==",
+                BinOp::NotEq        => "!=",
+                BinOp::Lt           => "<",
+                BinOp::Gt           => ">",
+                BinOp::LtEq         => "<=",
+                BinOp::GtEq         => ">=",
+                BinOp::NullCoalesce => "??",
             };
             format!("{} {} {}", format_expr_compact(left), op, format_expr_compact(right))
         }
@@ -5748,16 +5749,17 @@ fn expr_to_sql(expr: &ast::Expr) -> Option<String> {
             let l = expr_to_sql(left)?;
             let r = expr_to_sql(right)?;
             let op = match op {
-                BinOp::Add => "+",
-                BinOp::Sub => "-",
-                BinOp::Mul => "*",
-                BinOp::Div => "/",
-                BinOp::Eq => "=",
-                BinOp::NotEq => "!=",
-                BinOp::Lt => "<",
-                BinOp::Gt => ">",
-                BinOp::LtEq => "<=",
-                BinOp::GtEq => ">=",
+                BinOp::Add          => "+",
+                BinOp::Sub          => "-",
+                BinOp::Mul          => "*",
+                BinOp::Div          => "/",
+                BinOp::Eq           => "=",
+                BinOp::NotEq        => "!=",
+                BinOp::Lt           => "<",
+                BinOp::Gt           => ">",
+                BinOp::LtEq         => "<=",
+                BinOp::GtEq         => ">=",
+                BinOp::NullCoalesce => return None,
             };
             Some(format!("{l} {op} {r}"))
         }
@@ -6004,4 +6006,184 @@ pub fn cmd_publish() {
     println!("Publishing {}@{}", toml.name, toml.version);
     println!("(note: remote registry publishing is not yet implemented)");
     println!("To share locally, copy this project to your local registry directory.");
+}
+
+// ── fav migrate ───────────────────────────────────────────────────────────────
+
+/// Rewrite a single line, replacing v1.x keywords with v2.0.0 equivalents.
+/// Returns the rewritten line.
+fn migrate_line(line: &str) -> String {
+    // Process replacements in order (longest match first to avoid partial hits).
+    // Use word-boundary-like logic: only replace at start of line or after whitespace.
+    let replacements: &[(&str, &str)] = &[
+        ("abstract trf ", "abstract stage "),
+        ("abstract flw ", "abstract seq "),
+        ("trf ", "stage "),
+        ("flw ", "seq "),
+    ];
+
+    let mut result = line.to_string();
+    for (from, to) in replacements {
+        // Replace at start of line
+        if result.starts_with(from) {
+            result = format!("{}{}", to, &result[from.len()..]);
+            continue;
+        }
+        // Replace after leading whitespace
+        let trimmed = result.trim_start();
+        let indent_len = result.len() - trimmed.len();
+        if trimmed.starts_with(from) {
+            result = format!("{}{}{}", &result[..indent_len], to, &trimmed[from.len()..]);
+        }
+    }
+    result
+}
+
+/// Migrate source text from v1.x to v2.0.0 syntax.
+pub fn migrate_source(src: &str) -> String {
+    src.lines()
+        .map(|line| migrate_line(line))
+        .collect::<Vec<_>>()
+        .join("\n")
+        + if src.ends_with('\n') { "\n" } else { "" }
+}
+
+/// Check whether source text needs migration.
+#[allow(dead_code)]
+pub fn source_needs_migration(src: &str) -> bool {
+    src != migrate_source(src)
+}
+
+/// `fav migrate` — migrate .fav files from v1.x to v2.0.0 syntax.
+///
+/// Modes:
+/// - `--dry-run` (default): show what would change.
+/// - `--in-place`: rewrite files.
+/// - `--check`: exit 1 if any file needs migration (CI use).
+pub fn cmd_migrate(file: Option<&str>, in_place: bool, _dry_run: bool, check: bool, dir: Option<&str>) {
+    let files: Vec<PathBuf> = if let Some(f) = file {
+        vec![PathBuf::from(f)]
+    } else if let Some(d) = dir {
+        collect_fav_files_recursive(&PathBuf::from(d))
+    } else {
+        let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+        if let Some(root) = crate::toml::FavToml::find_root(&cwd) {
+            collect_fav_files_recursive(&root.parent().unwrap_or(&root).to_path_buf())
+        } else {
+            collect_fav_files_recursive(&cwd)
+        }
+    };
+
+    let mut any_needs_migration = false;
+    let mut changed_count = 0usize;
+
+    for path in &files {
+        let src = match std::fs::read_to_string(path) {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("warning: could not read {}: {}", path.display(), e);
+                continue;
+            }
+        };
+
+        let migrated = migrate_source(&src);
+        if migrated == src {
+            continue;
+        }
+
+        any_needs_migration = true;
+        changed_count += 1;
+
+        if check {
+            println!("needs migration: {}", path.display());
+        } else if in_place {
+            match std::fs::write(path, &migrated) {
+                Ok(_) => println!("migrated: {}", path.display()),
+                Err(e) => eprintln!("error writing {}: {}", path.display(), e),
+            }
+        } else {
+            // dry-run: show unified diff-like output
+            println!("--- {}", path.display());
+            println!("+++ {} (migrated)", path.display());
+            for (i, (old, new)) in src.lines().zip(migrated.lines()).enumerate() {
+                if old != new {
+                    println!(" {:4}: - {}", i + 1, old);
+                    println!(" {:4}: + {}", i + 1, new);
+                }
+            }
+            println!();
+        }
+    }
+
+    if changed_count == 0 && !check {
+        println!("All files are already v2.0.0 compatible.");
+    }
+
+    if check && any_needs_migration {
+        std::process::exit(1);
+    }
+}
+
+// ── migrate tests ─────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod migrate_tests {
+    use super::*;
+
+    #[test]
+    fn migrate_trf_to_stage() {
+        assert_eq!(migrate_line("trf Foo: Int -> Int = |x| { x }"), "stage Foo: Int -> Int = |x| { x }");
+    }
+
+    #[test]
+    fn migrate_flw_to_seq() {
+        assert_eq!(migrate_line("flw Pipeline = A |> B"), "seq Pipeline = A |> B");
+    }
+
+    #[test]
+    fn migrate_abstract_trf_to_abstract_stage() {
+        assert_eq!(migrate_line("abstract trf Parse: String -> Int"), "abstract stage Parse: String -> Int");
+    }
+
+    #[test]
+    fn migrate_abstract_flw_to_abstract_seq() {
+        assert_eq!(migrate_line("abstract flw Flow<T> {"), "abstract seq Flow<T> {");
+    }
+
+    #[test]
+    fn migrate_indented_trf() {
+        assert_eq!(migrate_line("    trf Inner: Bool -> Bool = |b| { b }"), "    stage Inner: Bool -> Bool = |b| { b }");
+    }
+
+    #[test]
+    fn migrate_indented_abstract_trf() {
+        assert_eq!(migrate_line("    abstract trf Step: Int -> Int"), "    abstract stage Step: Int -> Int");
+    }
+
+    #[test]
+    fn migrate_leaves_stage_unchanged() {
+        assert_eq!(migrate_line("stage Foo: Int -> Int = |x| { x }"), "stage Foo: Int -> Int = |x| { x }");
+    }
+
+    #[test]
+    fn migrate_leaves_seq_unchanged() {
+        assert_eq!(migrate_line("seq Pipeline = A |> B"), "seq Pipeline = A |> B");
+    }
+
+    #[test]
+    fn migrate_source_multiline() {
+        let src = "trf Foo: Int -> Int = |x| { x }\nflw Bar = Foo\n";
+        let expected = "stage Foo: Int -> Int = |x| { x }\nseq Bar = Foo\n";
+        assert_eq!(migrate_source(src), expected);
+    }
+
+    #[test]
+    fn source_needs_migration_true() {
+        assert!(source_needs_migration("trf Foo: Int -> Int = |x| { x }"));
+    }
+
+    #[test]
+    fn source_needs_migration_false() {
+        assert!(!source_needs_migration("stage Foo: Int -> Int = |x| { x }"));
+    }
 }

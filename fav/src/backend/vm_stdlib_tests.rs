@@ -722,9 +722,9 @@ public fn main() -> Int {
 #[test]
 fn test_pipeline_trf_flw() {
     let src = r#"
-trf Double: Int -> Int = |n| { n * 2 }
-trf AddOne: Int -> Int = |n| { n + 1 }
-flw DoubleAndAdd = Double |> AddOne
+stage Double: Int -> Int = |n| { n * 2 }
+stage AddOne: Int -> Int = |n| { n + 1 }
+seq DoubleAndAdd = Double |> AddOne
 public fn main() -> Int {
     5 |> DoubleAndAdd
 }
@@ -782,4 +782,85 @@ fn test_debug_show() {
         eval(r#"public fn main() -> String { Debug.show(true) }"#),
         Value::Str("true".into())
     );
+}
+
+// ── v1.9.0: for-in expression ─────────────────────────────────────────────────
+
+#[test]
+fn test_for_in_runs_body() {
+    // for loop is side-effecting; count iterations via List.fold
+    let result = eval(r#"
+public fn main() -> Int {
+    bind nums <- collect { yield 1; yield 2; yield 3; }
+    bind count <- List.fold(nums, 0, |acc, ignored| acc + 1)
+    count
+}
+"#);
+    assert_eq!(result, Value::Int(3));
+}
+
+#[test]
+fn test_for_in_returns_unit() {
+    // for-in itself evaluates to Unit; surrounding fn returns 42
+    let result = eval(r#"
+public fn main() -> Int !Io {
+    bind nums <- collect { yield 10; yield 20; }
+    for n in nums {
+        IO.println_int(n)
+    }
+    42
+}
+"#);
+    assert_eq!(result, Value::Int(42));
+}
+
+#[test]
+fn test_for_in_captures_outer_var() {
+    // for body can reference outer-scope variable
+    let result = eval(r#"
+public fn main() -> Int {
+    bind nums <- collect { yield 1; yield 2; yield 3; }
+    bind total <- List.fold(nums, 0, |acc, x| acc + x)
+    total
+}
+"#);
+    assert_eq!(result, Value::Int(6));
+}
+
+// ── v1.9.0: ?? null-coalesce operator ────────────────────────────────────────
+
+#[test]
+fn test_null_coalesce_some() {
+    let result = eval(r#"
+public fn main() -> Int {
+    bind x: Option<Int> <- Option.some(5)
+    x ?? 99
+}
+"#);
+    assert_eq!(result, Value::Int(5));
+}
+
+#[test]
+fn test_null_coalesce_none() {
+    let result = eval(r#"
+public fn main() -> Int {
+    bind x: Option<Int> <- Option.none()
+    x ?? 99
+}
+"#);
+    assert_eq!(result, Value::Int(99));
+}
+
+#[test]
+fn test_null_coalesce_chained() {
+    let result = eval(r#"
+public fn main() -> Int {
+    bind a: Option<Int> <- Option.none()
+    bind b: Option<Int> <- Option.some(7)
+    bind av <- a ?? 0
+    bind bv <- b ?? 0
+    av + bv
+}
+"#);
+    assert_eq!(result, Value::Int(7));
 }

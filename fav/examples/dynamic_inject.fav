@@ -2,22 +2,22 @@ type UserRow = {
     value: Int
 }
 
-abstract trf Parse<Row>: String -> Row
+abstract stage Parse<Row>: String -> Row
 
-abstract flw Pipeline<Row> {
+abstract seq Pipeline<Row> {
     parse: Parse<Row>
     render: Row -> String
 }
 
-trf ParseUser: String -> UserRow = |text| {
+stage ParseUser: String -> UserRow = |text| {
     UserRow { value: 7 }
 }
 
-trf RenderUser: UserRow -> String = |row| {
+stage RenderUser: UserRow -> String = |row| {
     "user"
 }
 
-flw UserPipeline = Pipeline<UserRow> {
+seq UserPipeline = Pipeline<UserRow> {
     parse <- ParseUser
     render <- RenderUser
 }

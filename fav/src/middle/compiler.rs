@@ -1225,6 +1225,18 @@ pub fn compile_expr(expr: &Expr, ctx: &mut CompileCtx) -> IRExpr {
             )
         }
         Expr::BinOp(op, left, right, _) => {
+            if matches!(op, crate::ast::BinOp::NullCoalesce) {
+                // Desugar: lhs ?? rhs  →  Option.unwrap_or(lhs, rhs)
+                let lhs_ir = compile_expr(left, ctx);
+                let rhs_ir = compile_expr(right, ctx);
+                let opt_idx = ctx.resolve_global("Option").unwrap_or(u16::MAX);
+                let unwrap_or = IRExpr::FieldAccess(
+                    Box::new(IRExpr::Global(opt_idx, Type::Unknown)),
+                    "unwrap_or".to_string(),
+                    Type::Unknown,
+                );
+                return IRExpr::Call(Box::new(unwrap_or), vec![lhs_ir, rhs_ir], Type::Unknown);
+            }
             let left = compile_expr(left, ctx);
             let right = compile_expr(right, ctx);
             let ty = match op {
@@ -1313,6 +1325,67 @@ pub fn compile_stmt(stmt: &Stmt, ctx: &mut CompileCtx) -> IRStmt {
         }
         Stmt::Yield(yield_stmt) => IRStmt::Yield(compile_expr(&yield_stmt.expr, ctx)),
         Stmt::Expr(expr) => IRStmt::Expr(compile_expr(expr, ctx)),
+        Stmt::ForIn(f) => {
+            // Desugar: `for x in iter { body }` → `List.fold(iter, Unit, |$acc, x| { body; Unit })`
+            let closure_name = format!("$for_closure{}", ctx.closure_counter);
+            ctx.closure_counter = ctx.closure_counter.saturating_add(1);
+            let params = vec!["$acc".to_string(), f.var.clone()];
+            let mut bound: HashSet<String> = params.iter().cloned().collect();
+            let mut free = HashSet::new();
+            collect_free_vars_block(&f.body, &mut bound, &mut free);
+            let mut captures: Vec<(String, u16)> = free
+                .into_iter()
+                .filter_map(|name| ctx.resolve_local(&name).map(|slot| (name, slot)))
+                .collect();
+            captures.sort_by(|a, b| a.0.cmp(&b.0));
+            let saved_next = ctx.next_slot;
+            let saved_anon = ctx.anon_counter;
+            let saved_locals = std::mem::take(&mut ctx.locals);
+            let saved_local_tys = std::mem::take(&mut ctx.local_tys);
+            ctx.next_slot = 0;
+            ctx.anon_counter = 0;
+            ctx.push_scope();
+            for (name, _) in &captures { ctx.define_local(name.clone()); }
+            for param in &params { ctx.define_local(param.clone()); }
+            let body_ir = compile_block(&f.body, ctx);
+            let local_count = ctx.next_slot as usize;
+            ctx.locals = saved_locals;
+            ctx.local_tys = saved_local_tys;
+            ctx.next_slot = saved_next;
+            ctx.anon_counter = saved_anon;
+            let global_idx = ctx.next_global_idx;
+            ctx.next_global_idx = ctx.next_global_idx.saturating_add(1);
+            let fn_idx = ctx.next_fn_idx;
+            ctx.next_fn_idx += 1;
+            ctx.globals.insert(closure_name.clone(), global_idx);
+            ctx.lifted_globals.push(IRGlobal { name: closure_name.clone(), kind: IRGlobalKind::Fn(fn_idx) });
+            ctx.lifted_fns.push(IRFnDef {
+                name: closure_name,
+                param_count: captures.len() + params.len(),
+                param_tys: vec![Type::Unknown; captures.len() + params.len()],
+                local_count,
+                effects: Vec::new(),
+                return_ty: body_ir.ty().clone(),
+                body: body_ir,
+            });
+            let closure_ir = IRExpr::Closure(
+                global_idx,
+                captures.into_iter().map(|(_, slot)| IRExpr::Local(slot, Type::Unknown)).collect(),
+                Type::Unknown,
+            );
+            let iter_ir = compile_expr(&f.iter, ctx);
+            let list_idx = ctx.resolve_global("List").unwrap_or(u16::MAX);
+            let fold_access = IRExpr::FieldAccess(
+                Box::new(IRExpr::Global(list_idx, Type::Unknown)),
+                "fold".to_string(),
+                Type::Unknown,
+            );
+            IRStmt::Expr(IRExpr::Call(
+                Box::new(fold_access),
+                vec![iter_ir, IRExpr::Lit(Lit::Unit, Type::Unit), closure_ir],
+                Type::Unit,
+            ))
+        }
     }
 }
 
@@ -1429,8 +1502,8 @@ type Direction =
     | North
     | South
 
-trf Inc: Int -> Int = |x| { x + 1 }
-flw Bump = Inc |> Inc
+stage Inc: Int -> Int = |x| { x + 1 }
+seq Bump = Inc |> Inc
 
 public fn main() -> Int {
     bind result <- 1 |> Bump
@@ -1451,7 +1524,7 @@ public fn main() -> Int {
     fn compile_pipeline_lowers_to_nested_calls() {
         let ir = compile_source(
             r#"
-trf Inc: Int -> Int = |x| { x + 1 }
+stage Inc: Int -> Int = |x| { x + 1 }
 
 public fn main() -> Int {
     bind result <- 1 |> Inc |> Inc
@@ -1524,14 +1597,14 @@ public fn main() -> Int {
     fn compile_flw_binding_exec_ok() {
         let ir = compile_source(
             r#"
-abstract flw DataPipeline<Row> {
+abstract seq DataPipeline<Row> {
     parse: String -> List<Row>!
     save: List<Row> -> Int !Db
 }
-abstract trf ParseCsv: String -> List<UserRow>!
-abstract trf SaveUsers: List<UserRow> -> Int !Db
+abstract stage ParseCsv: String -> List<UserRow>!
+abstract stage SaveUsers: List<UserRow> -> Int !Db
 type UserRow = { name: String }
-flw UserImport = DataPipeline<UserRow> { parse <- ParseCsv; save <- SaveUsers }
+seq UserImport = DataPipeline<UserRow> { parse <- ParseCsv; save <- SaveUsers }
 "#,
         );
 
@@ -1582,14 +1655,14 @@ flw UserImport = DataPipeline<UserRow> { parse <- ParseCsv; save <- SaveUsers }
     fn compile_flw_binding_partial_skips_fn_codegen() {
         let ir = compile_source(
             r#"
-abstract flw DataPipeline<Row> {
+abstract seq DataPipeline<Row> {
     parse: String -> List<Row>!
     validate: Row -> Row!
     save: List<Row> -> Int !Db
 }
-abstract trf ParseCsv: String -> List<UserRow>!
+abstract stage ParseCsv: String -> List<UserRow>!
 type UserRow = { name: String }
-flw PartialImport = DataPipeline<UserRow> { parse <- ParseCsv }
+seq PartialImport = DataPipeline<UserRow> { parse <- ParseCsv }
 "#,
         );
 

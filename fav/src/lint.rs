@@ -73,7 +73,7 @@ fn lint_trf_def(td: &TrfDef, uses: &HashSet<String>, errors: &mut Vec<LintError>
     if !is_pascal_case(&td.name) {
         errors.push(LintError::new(
             "L006",
-            format!("trf name `{}` should be PascalCase", td.name),
+            format!("stage name `{}` should be PascalCase", td.name),
             td.span.clone(),
         ));
     }
@@ -165,10 +165,14 @@ fn collect_trf_flw_uses(program: &Program) -> HashSet<String> {
 fn collect_block_calls(block: &Block, names: &HashSet<String>, uses: &mut HashSet<String>) {
     for stmt in &block.stmts {
         match stmt {
-            Stmt::Bind(b) => collect_expr_calls(&b.expr, names, uses),
-            Stmt::Expr(e) => collect_expr_calls(e, names, uses),
-            Stmt::Chain(c) => collect_expr_calls(&c.expr, names, uses),
-            Stmt::Yield(y) => collect_expr_calls(&y.expr, names, uses),
+            Stmt::Bind(b)   => collect_expr_calls(&b.expr, names, uses),
+            Stmt::Expr(e)   => collect_expr_calls(e, names, uses),
+            Stmt::Chain(c)  => collect_expr_calls(&c.expr, names, uses),
+            Stmt::Yield(y)  => collect_expr_calls(&y.expr, names, uses),
+            Stmt::ForIn(f)  => {
+                collect_expr_calls(&f.iter, names, uses);
+                collect_block_calls(&f.body, names, uses);
+            }
         }
     }
     collect_expr_calls(&block.expr, names, uses);
@@ -319,10 +323,14 @@ fn lint_block_unused_binds(block: &Block, errors: &mut Vec<LintError>) {
 
 fn lint_stmt_sub_blocks(stmt: &Stmt, errors: &mut Vec<LintError>) {
     match stmt {
-        Stmt::Bind(b) => lint_expr_sub_blocks(&b.expr, errors),
-        Stmt::Expr(e) => lint_expr_sub_blocks(e, errors),
+        Stmt::Bind(b)  => lint_expr_sub_blocks(&b.expr, errors),
+        Stmt::Expr(e)  => lint_expr_sub_blocks(e, errors),
         Stmt::Chain(c) => lint_expr_sub_blocks(&c.expr, errors),
         Stmt::Yield(y) => lint_expr_sub_blocks(&y.expr, errors),
+        Stmt::ForIn(f) => {
+            lint_expr_sub_blocks(&f.iter, errors);
+            lint_block_unused_binds(&f.body, errors);
+        }
     }
 }
 
@@ -426,6 +434,7 @@ fn stmt_references(stmt: &Stmt, name: &str) -> bool {
         Stmt::Expr(e)    => expr_references(e, name),
         Stmt::Chain(c)   => expr_references(&c.expr, name),
         Stmt::Yield(y)   => expr_references(&y.expr, name),
+        Stmt::ForIn(f)   => expr_references(&f.iter, name) || block_references(&f.body, name),
     }
 }
 
@@ -507,7 +516,7 @@ type direction = | North | South
     #[test]
     fn lint_l005_unused_trf() {
         let codes = lint(r#"
-trf ParseCsv: String -> Int = |s| { 1 }
+stage ParseCsv: String -> Int = |s| { 1 }
 public fn main() -> Int { 0 }
 "#);
         assert!(codes.contains(&"L005".to_string()), "expected L005, got {:?}", codes);
@@ -516,7 +525,7 @@ public fn main() -> Int { 0 }
     #[test]
     fn lint_l005_public_trf_ignored() {
         let codes = lint(r#"
-public trf ParseCsv: String -> Int = |s| { 1 }
+public stage ParseCsv: String -> Int = |s| { 1 }
 public fn main() -> Int { 0 }
 "#);
         assert!(!codes.contains(&"L005".to_string()), "unexpected L005: {:?}", codes);
@@ -525,8 +534,8 @@ public fn main() -> Int { 0 }
     #[test]
     fn lint_l005_unused_flw() {
         let codes = lint(r#"
-trf ParseCsv: String -> Int = |s| { 1 }
-flw ImportUsers = ParseCsv
+stage ParseCsv: String -> Int = |s| { 1 }
+seq ImportUsers = ParseCsv
 public fn main() -> Int { 0 }
 "#);
         assert!(codes.contains(&"L005".to_string()), "expected L005, got {:?}", codes);
@@ -535,7 +544,7 @@ public fn main() -> Int { 0 }
     #[test]
     fn lint_l005_used_trf_no_warning() {
         let codes = lint(r#"
-trf ParseCsv: String -> Int = |s| { 1 }
+stage ParseCsv: String -> Int = |s| { 1 }
 public fn main() -> Int { ParseCsv("x") }
 "#);
         assert!(!codes.contains(&"L005".to_string()), "unexpected L005: {:?}", codes);
@@ -544,7 +553,7 @@ public fn main() -> Int { ParseCsv("x") }
     #[test]
     fn lint_l006_trf_not_pascal() {
         let codes = lint(r#"
-trf parse_csv: String -> Int = |s| { 1 }
+stage parse_csv: String -> Int = |s| { 1 }
 public fn main() -> Int { 0 }
 "#);
         assert!(codes.contains(&"L006".to_string()), "expected L006, got {:?}", codes);
@@ -553,7 +562,7 @@ public fn main() -> Int { 0 }
     #[test]
     fn lint_l006_trf_pascal_ok() {
         let codes = lint(r#"
-trf ParseCsv: String -> Int = |s| { 1 }
+stage ParseCsv: String -> Int = |s| { 1 }
 public fn main() -> Int { ParseCsv("x") }
 "#);
         assert!(!codes.contains(&"L006".to_string()), "unexpected L006: {:?}", codes);

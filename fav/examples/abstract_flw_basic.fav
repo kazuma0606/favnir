@@ -2,23 +2,23 @@ type UserRow = {
     value: Int
 }
 
-abstract trf ParseRow: Int -> UserRow
-abstract trf SaveRow: UserRow -> String
+abstract stage ParseRow: Int -> UserRow
+abstract stage SaveRow: UserRow -> String
 
-abstract flw DataPipeline<Row> {
+abstract seq DataPipeline<Row> {
     parse: Int -> Row
     save: Row -> String
 }
 
-trf ParseUser: Int -> UserRow = |x| {
+stage ParseUser: Int -> UserRow = |x| {
     UserRow { value: x }
 }
 
-trf SaveUser: UserRow -> String = |row| {
+stage SaveUser: UserRow -> String = |row| {
     "saved"
 }
 
-flw UserImport = DataPipeline<UserRow> {
+seq UserImport = DataPipeline<UserRow> {
     parse <- ParseUser
     save <- SaveUser
 }

@@ -1,4 +1,4 @@
-trf ParseUser: String -> Int = |row| { 1 }
+stage ParseUser: String -> Int = |row| { 1 }
 
 public fn main() -> Int {
     ParseUser("a")

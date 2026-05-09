@@ -52,8 +52,8 @@ fn legacy_vm_test_function_apply_and_closure() {
 #[test]
 fn legacy_vm_test_pipeline_and_bind() {
     let src = "
-        trf Double: Int -> Int = |n| { n + n }
-        trf Inc: Int -> Int = |n| { n + 1 }
+        stage Double: Int -> Int = |n| { n + n }
+        stage Inc: Int -> Int = |n| { n + 1 }
         fn f(x: Int) -> Int { bind y <- x |> Double; y |> Inc }
     ";
     assert_eq!(eval_fn(src, "f", vec![Value::Int(3)]), Value::Int(7));

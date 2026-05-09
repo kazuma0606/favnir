@@ -147,7 +147,7 @@ impl Formatter {
         let output = self.type_expr(&td.output_ty);
         let effects = fmt_effects(&td.effects);
         let body = self.block(&td.body);
-        // trf syntax: trf Name<T>: Input -> Output !Effects = |params| { body }
+        // stage syntax: stage Name<T>: Input -> Output !Effects = |params| { body }
         // params are lambda params (just names, types come from input_ty)
         let lambda = if td.params.is_empty() {
             String::new()
@@ -156,7 +156,7 @@ impl Formatter {
             format!("|{}| ", names.join(", "))
         };
         format!(
-            "{}trf {}{}: {} -> {}{} = {}{}",
+            "{}stage {}{}: {} -> {}{} = {}{}",
             vis, td.name, type_params, input, output, effects, lambda, body
         )
     }
@@ -166,13 +166,13 @@ impl Formatter {
         let input = self.type_expr(&td.input_ty);
         let output = self.type_expr(&td.output_ty);
         let effects = fmt_effects(&td.effects);
-        format!("{}abstract trf {}: {} -> {}{}", vis, td.name, input, output, effects)
+        format!("{}abstract stage {}: {} -> {}{}", vis, td.name, input, output, effects)
     }
 
     // ── FlwDef ────────────────────────────────────────────────────────────────
 
     fn flw_def(&mut self, fd: &FlwDef) -> String {
-        format!("flw {} = {}", fd.name, fd.steps.join(" |> "))
+        format!("seq {} = {}", fd.name, fd.steps.join(" |> "))
     }
 
     fn abstract_flw_def(&mut self, fd: &AbstractFlwDef) -> String {
@@ -187,7 +187,7 @@ impl Formatter {
                 fmt_effects(&slot.effects),
             )
         }).collect();
-        format!("{}abstract flw {}{} {{\n{}\n}}", vis, fd.name, params, slots.join("\n"))
+        format!("{}abstract seq {}{} {{\n{}\n}}", vis, fd.name, params, slots.join("\n"))
     }
 
     fn flw_binding_def(&mut self, fd: &FlwBindingDef) -> String {
@@ -200,7 +200,7 @@ impl Formatter {
         let bindings: Vec<String> = fd.bindings.iter()
             .map(|(slot, imp)| format!("    {} <- {}", slot, fmt_slot_impl(imp)))
             .collect();
-        format!("{}flw {} = {}{} {{\n{}\n}}", vis, fd.name, fd.template, type_args, bindings.join("\n"))
+        format!("{}seq {} = {}{} {{\n{}\n}}", vis, fd.name, fd.template, type_args, bindings.join("\n"))
     }
 
     fn interface_decl(&mut self, id: &InterfaceDecl) -> String {
@@ -337,6 +337,11 @@ impl Formatter {
             Stmt::Yield(y) => {
                 let expr = self.expr(&y.expr);
                 format!("yield {};", expr)
+            }
+            Stmt::ForIn(f) => {
+                let iter = self.expr(&f.iter);
+                let body = self.block(&f.body);
+                format!("for {} in {} {}", f.var, iter, body)
             }
         }
     }
@@ -608,8 +613,9 @@ fn fmt_binop(op: &BinOp) -> &'static str {
         BinOp::NotEq => "!=",
         BinOp::Lt    => "<",
         BinOp::Gt    => ">",
-        BinOp::LtEq  => "<=",
-        BinOp::GtEq  => ">=",
+        BinOp::LtEq          => "<=",
+        BinOp::GtEq          => ">=",
+        BinOp::NullCoalesce  => "??",
     }
 }
 
@@ -664,11 +670,11 @@ fn direction_name(d: Direction) -> String {
     #[test]
     fn fmt_trf_flw_is_idempotent() {
         assert_idempotent(r#"
-trf Double: Int -> Int = |x| {
+stage Double: Int -> Int = |x| {
     x + x
 }
 
-flw Quadruple = Double |> Double
+seq Quadruple = Double |> Double
 
 public fn main() -> Int {
     2 |> Quadruple

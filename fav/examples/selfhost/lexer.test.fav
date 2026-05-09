@@ -1,0 +1,66 @@
+// examples/selfhost/lexer.test.fav
+// Tests for the Favnir selfhost lexer (self-contained).
+
+fn tokenize(src: String) -> List<String> {
+    bind len <- String.length(src)
+    bind indices <- List.range(0, len)
+    bind tokens <- List.map(indices, |i| {
+        bind ch <- Option.unwrap_or(String.char_at(src, i), "?")
+        if ch == "+" {
+            "Plus"
+        } else {
+            if ch == "-" {
+                "Minus"
+            } else {
+                if ch == "*" {
+                    "Star"
+                } else {
+                    if ch == "/" {
+                        "Slash"
+                    } else {
+                        if ch == " " {
+                            "Whitespace"
+                        } else {
+                            "Unknown"
+                        }
+                    }
+                }
+            }
+        }
+    })
+    bind eof_marker <- collect { yield "Eof"; }
+    List.concat(tokens, eof_marker)
+}
+
+test "tokenize empty string yields only Eof" {
+    bind tokens <- tokenize("")
+    bind expected <- collect { yield "Eof"; }
+    assert_eq(tokens, expected)
+}
+
+test "tokenize single plus" {
+    bind tokens <- tokenize("+")
+    bind expected <- collect { yield "Plus"; yield "Eof"; }
+    assert_eq(tokens, expected)
+}
+
+test "tokenize arithmetic operators" {
+    bind tokens <- tokenize("+ - * /")
+    bind expected <- collect {
+        yield "Plus";
+        yield "Whitespace";
+        yield "Minus";
+        yield "Whitespace";
+        yield "Star";
+        yield "Whitespace";
+        yield "Slash";
+        yield "Eof";
+    }
+    assert_eq(tokens, expected)
+}
+
+test "tokenize unknown char" {
+    bind tokens <- tokenize("@")
+    bind expected <- collect { yield "Unknown"; yield "Eof"; }
+    assert_eq(tokens, expected)
+}

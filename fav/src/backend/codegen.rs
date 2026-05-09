@@ -214,6 +214,8 @@ pub fn emit_expr(expr: &IRExpr, cg: &mut Codegen) {
                 BinOp::LtEq => Opcode::Le,
                 BinOp::Gt => Opcode::Gt,
                 BinOp::GtEq => Opcode::Ge,
+                // NullCoalesce is desugared in the checker; should not appear in IR BinOp
+                BinOp::NullCoalesce => unreachable!("?? desugared before codegen"),
             });
         }
         IRExpr::Closure(global_idx, captures, _) => {

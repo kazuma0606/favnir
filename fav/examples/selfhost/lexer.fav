@@ -1,0 +1,39 @@
+// examples/selfhost/lexer.fav
+// Favnir v2.0.0 selfhost milestone: a simple lexer written in Favnir.
+// Tokenizes arithmetic operators (+, -, *, /) and whitespace.
+
+public fn tokenize(src: String) -> List<String> {
+    bind len <- String.length(src)
+    bind indices <- List.range(0, len)
+    bind tokens <- List.map(indices, |i| {
+        bind ch <- Option.unwrap_or(String.char_at(src, i), "?")
+        if ch == "+" {
+            "Plus"
+        } else {
+            if ch == "-" {
+                "Minus"
+            } else {
+                if ch == "*" {
+                    "Star"
+                } else {
+                    if ch == "/" {
+                        "Slash"
+                    } else {
+                        if ch == " " {
+                            "Whitespace"
+                        } else {
+                            "Unknown"
+                        }
+                    }
+                }
+            }
+        }
+    })
+    bind eof_marker <- collect { yield "Eof"; }
+    List.concat(tokens, eof_marker)
+}
+
+public fn main() -> Unit !Io {
+    bind tokens <- tokenize("+ - * /")
+    IO.println(Debug.show(tokens))
+}

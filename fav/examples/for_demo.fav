@@ -1,0 +1,28 @@
+// for_demo.fav — v1.9.0: for-in expression example
+
+public fn main() -> Unit !Io {
+    bind nums <- collect {
+        yield 1;
+        yield 2;
+        yield 3;
+        yield 4;
+        yield 5;
+    }
+
+    IO.println("Printing numbers with for-in:")
+    for n in nums {
+        IO.println_int(n)
+    }
+
+    // for-in with a string list
+    bind words <- collect {
+        yield "hello";
+        yield "world";
+        yield "favnir";
+    }
+
+    IO.println("Words:")
+    for w in words {
+        IO.println(w)
+    }
+}

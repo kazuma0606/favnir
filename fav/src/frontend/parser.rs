@@ -101,6 +101,7 @@ impl Parser {
     }
 
     /// Consume the current token if it matches any of the given kinds.
+    #[allow(dead_code)]
     fn expect_any(&mut self, expected: &[TokenKind]) -> Result<Span, ParseError> {
         if expected.iter().any(|k| k == self.peek()) {
             let span = self.peek_span().clone();
@@ -197,14 +198,30 @@ impl Parser {
         match self.peek().clone() {
             TokenKind::Type   => Ok(Item::TypeDef(self.parse_type_def(vis)?)),
             TokenKind::Fn     => Ok(Item::FnDef(self.parse_fn_def(vis, false)?)),
-            TokenKind::Trf | TokenKind::Stage => Ok(Item::TrfDef(self.parse_trf_def(vis, false)?)),
+            TokenKind::Stage => Ok(Item::TrfDef(self.parse_trf_def(vis, false)?)),
+            TokenKind::Trf   => {
+                let span = self.peek_span().clone();
+                self.advance();
+                Err(ParseError::new(
+                    "keyword `trf` has been removed in v2.0.0; use `stage` instead (run `fav migrate` to auto-fix)",
+                    span,
+                ))
+            }
             TokenKind::Async  => {
                 self.advance(); // consume 'async'
                 match self.peek().clone() {
-                    TokenKind::Fn  => Ok(Item::FnDef(self.parse_fn_def(vis, true)?)),
-                    TokenKind::Trf | TokenKind::Stage => Ok(Item::TrfDef(self.parse_trf_def(vis, true)?)),
+                    TokenKind::Fn    => Ok(Item::FnDef(self.parse_fn_def(vis, true)?)),
+                    TokenKind::Stage => Ok(Item::TrfDef(self.parse_trf_def(vis, true)?)),
+                    TokenKind::Trf   => {
+                        let span = self.peek_span().clone();
+                        self.advance();
+                        Err(ParseError::new(
+                            "keyword `trf` has been removed in v2.0.0; use `stage` instead",
+                            span,
+                        ))
+                    }
                     other => Err(ParseError::new(
-                        format!("expected `fn` or `trf`/`stage` after `async`, got {:?}", other),
+                        format!("expected `fn` or `stage` after `async`, got {:?}", other),
                         self.peek_span().clone(),
                     )),
                 }
@@ -212,7 +229,14 @@ impl Parser {
             TokenKind::Abstract => self.parse_abstract_item(vis),
             TokenKind::Interface => Ok(Item::InterfaceDecl(self.parse_interface_decl(vis)?)),
             TokenKind::Effect => Ok(Item::EffectDef(self.parse_effect_def(vis)?)),
-            TokenKind::Cap    => Ok(Item::CapDef(self.parse_cap_def(vis)?)),
+            TokenKind::Cap    => {
+                let span = self.peek_span().clone();
+                self.advance();
+                Err(ParseError::new(
+                    "keyword `cap` has been removed in v2.0.0; use `interface` instead",
+                    span,
+                ))
+            }
             TokenKind::Impl   => {
                 if vis.is_some() {
                     return Err(ParseError::new(
@@ -230,8 +254,16 @@ impl Parser {
                     Ok(Item::InterfaceImplDecl(self.parse_interface_impl_decl()?))
                 }
             }
-            TokenKind::Flw | TokenKind::Seq => {
+            TokenKind::Seq => {
                 self.parse_flw_def_or_binding(vis)
+            }
+            TokenKind::Flw => {
+                let span = self.peek_span().clone();
+                self.advance();
+                Err(ParseError::new(
+                    "keyword `flw` has been removed in v2.0.0; use `seq` instead (run `fav migrate` to auto-fix)",
+                    span,
+                ))
             }
             TokenKind::Test => {
                 if vis.is_some() {
@@ -260,7 +292,7 @@ impl Parser {
                 self.peek_span().clone(),
             )),
             other => Err(ParseError::new(
-                format!("expected item (type/fn/trf/flw/interface/effect/cap/impl/test), got {:?}", other),
+                format!("expected item (type/fn/stage/seq/interface/effect/impl/test), got {:?}", other),
                 self.peek_span().clone(),
             )),
         }
@@ -281,10 +313,26 @@ impl Parser {
         let start = self.peek_span().clone();
         self.expect(&TokenKind::Abstract)?;
         match self.peek() {
-            TokenKind::Trf | TokenKind::Stage => Ok(Item::AbstractTrfDef(self.parse_abstract_trf_def(visibility)?)),
-            TokenKind::Flw | TokenKind::Seq   => Ok(Item::AbstractFlwDef(self.parse_abstract_flw_def(visibility)?)),
+            TokenKind::Stage => Ok(Item::AbstractTrfDef(self.parse_abstract_trf_def(visibility)?)),
+            TokenKind::Seq   => Ok(Item::AbstractFlwDef(self.parse_abstract_flw_def(visibility)?)),
+            TokenKind::Trf   => {
+                let span = self.peek_span().clone();
+                self.advance();
+                Err(ParseError::new(
+                    "keyword `abstract trf` has been removed in v2.0.0; use `abstract stage` instead",
+                    span,
+                ))
+            }
+            TokenKind::Flw   => {
+                let span = self.peek_span().clone();
+                self.advance();
+                Err(ParseError::new(
+                    "keyword `abstract flw` has been removed in v2.0.0; use `abstract seq` instead",
+                    span,
+                ))
+            }
             _ => Err(ParseError::new(
-                "expected `trf`/`stage` or `flw`/`seq` after `abstract`",
+                "expected `stage` or `seq` after `abstract`",
                 start,
             )),
         }
@@ -292,6 +340,7 @@ impl Parser {
 
     // ── cap_def (v0.4.0) ─────────────────────────────────────────────────────
 
+    #[allow(dead_code)]
     fn parse_cap_def(&mut self, visibility: Option<Visibility>) -> Result<CapDef, ParseError> {
         let start = self.peek_span().clone();
         self.expect(&TokenKind::Cap)?;
@@ -832,7 +881,7 @@ impl Parser {
 
     fn parse_trf_def(&mut self, visibility: Option<Visibility>, is_async: bool) -> Result<TrfDef, ParseError> {
         let start = self.peek_span().clone();
-        self.expect_any(&[TokenKind::Trf, TokenKind::Stage])?;
+        self.expect(&TokenKind::Stage)?;
         let (name, _) = self.expect_ident()?;
         let type_params = self.parse_type_params()?;
         self.expect(&TokenKind::Colon)?;
@@ -867,7 +916,7 @@ impl Parser {
 
     fn parse_abstract_trf_def(&mut self, visibility: Option<Visibility>) -> Result<AbstractTrfDef, ParseError> {
         let start = self.peek_span().clone();
-        self.expect_any(&[TokenKind::Trf, TokenKind::Stage])?;
+        self.expect(&TokenKind::Stage)?;
         let (name, _) = self.expect_ident()?;
         let type_params = self.parse_type_params()?;
         self.expect(&TokenKind::Colon)?;
@@ -912,7 +961,7 @@ impl Parser {
     #[allow(dead_code)]
     fn parse_flw_def(&mut self) -> Result<FlwDef, ParseError> {
         let start = self.peek_span().clone();
-        self.expect_any(&[TokenKind::Flw, TokenKind::Seq])?;
+        self.expect(&TokenKind::Seq)?;
         let (name, _) = self.expect_ident()?;
         self.expect(&TokenKind::Eq)?;
 
@@ -929,7 +978,7 @@ impl Parser {
 
     fn parse_abstract_flw_def(&mut self, visibility: Option<Visibility>) -> Result<AbstractFlwDef, ParseError> {
         let start = self.peek_span().clone();
-        self.expect_any(&[TokenKind::Flw, TokenKind::Seq])?;
+        self.expect(&TokenKind::Seq)?;
         let (name, _) = self.expect_ident()?;
         let type_params = self.parse_type_params()?;
         self.expect(&TokenKind::LBrace)?;
@@ -981,7 +1030,7 @@ impl Parser {
 
     fn parse_flw_def_or_binding(&mut self, visibility: Option<Visibility>) -> Result<Item, ParseError> {
         let start = self.peek_span().clone();
-        self.expect_any(&[TokenKind::Flw, TokenKind::Seq])?;
+        self.expect(&TokenKind::Seq)?;
         let (name, _) = self.expect_ident()?;
         self.expect(&TokenKind::Eq)?;
         let (first, _) = self.expect_ident()?;
@@ -1793,7 +1842,7 @@ mod tests {
     // trf_def (3-6)
     #[test]
     fn test_parse_trf_def() {
-        let p = parse("trf ParseCsv: String -> List<Row> = |text| { text }");
+        let p = parse("stage ParseCsv: String -> List<Row> = |text| { text }");
         assert!(matches!(p.items[0], Item::TrfDef(_)));
         if let Item::TrfDef(t) = &p.items[0] {
             assert_eq!(t.name, "ParseCsv");
@@ -1801,23 +1850,39 @@ mod tests {
         }
     }
 
-    // trf_def with effect (3-6, 3-22)
+    // v2.0.0: trf keyword is a parse error
+    #[test]
+    fn test_parse_trf_removed_error() {
+        let result = Parser::parse_str("trf ParseCsv: String -> String = |s| s", "test");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().message.contains("trf"));
+    }
+
+    // stage_def with effect (3-6, 3-22)
     #[test]
     fn test_parse_trf_with_effect() {
-        let p = parse("trf Print: String -> Unit !Io = |s| { () }");
+        let p = parse("stage Print: String -> Unit !Io = |s| { () }");
         if let Item::TrfDef(t) = &p.items[0] {
             assert!(t.effects.contains(&Effect::Io));
         }
     }
 
-    // flw_def (3-7)
+    // seq_def (3-7)
     #[test]
     fn test_parse_flw_def() {
-        let p = parse("flw Import = ParseCsv |> ValidateUser |> SaveUsers");
+        let p = parse("seq Import = ParseCsv |> ValidateUser |> SaveUsers");
         if let Item::FlwDef(f) = &p.items[0] {
             assert_eq!(f.name, "Import");
             assert_eq!(f.steps, vec!["ParseCsv", "ValidateUser", "SaveUsers"]);
         }
+    }
+
+    // v2.0.0: flw keyword is a parse error
+    #[test]
+    fn test_parse_flw_removed_error() {
+        let result = Parser::parse_str("flw Import = ParseCsv |> ValidateUser", "test");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().message.contains("flw"));
     }
 
     // bind_stmt — simple (3-9)
@@ -2081,7 +2146,7 @@ mod tests {
     // 1-8, 1-9: multiple effects including Emit<T>
     #[test]
     fn test_parse_multi_effect() {
-        let p = parse("trf T: Int -> Int !Db !Emit<UserCreated> = |n| { n }");
+        let p = parse("stage T: Int -> Int !Db !Emit<UserCreated> = |n| { n }");
         if let Item::TrfDef(t) = &p.items[0] {
             assert!(t.effects.contains(&Effect::Db));
             assert!(t.effects.contains(&Effect::Emit("UserCreated".into())));
@@ -2251,19 +2316,17 @@ mod tests {
 
     #[test]
     fn test_parse_generic_trf() {
-        let p = parse("trf MapOpt<T, U>: Option<T> -> Option<U> = || { x }");
+        let p = parse("stage MapOpt<T, U>: Option<T> -> Option<U> = || { x }");
         let Item::TrfDef(td) = &p.items[0] else { panic!("expected TrfDef") };
         assert_eq!(td.type_params, vec!["T", "U"]);
     }
 
+    // v2.0.0: cap keyword is a parse error
     #[test]
-    fn test_parse_cap_def() {
-        let p = parse("cap Eq<T> = { equals: T -> T -> Bool }");
-        let Item::CapDef(cd) = &p.items[0] else { panic!("expected CapDef") };
-        assert_eq!(cd.name, "Eq");
-        assert_eq!(cd.type_params, vec!["T"]);
-        assert_eq!(cd.fields.len(), 1);
-        assert_eq!(cd.fields[0].name, "equals");
+    fn test_parse_cap_removed_error() {
+        let result = Parser::parse_str("cap Eq<T> = { equals: T -> T -> Bool }", "test");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().message.contains("cap"));
     }
 
     #[test]
@@ -2296,9 +2359,10 @@ mod tests {
 
     #[test]
     fn test_parse_impl_def() {
-        let src = "cap Eq<T> = { equals: T -> T -> Bool }\nimpl Eq<Int> { fn equals(a: Int, b: Int) -> Bool { a == b } }";
+        // cap-style impl uses impl Name<T> { ... } — still valid in v2.0.0 (interface impls coexist)
+        let src = "impl Eq<Int> { fn equals(a: Int, b: Int) -> Bool { a == b } }";
         let p = parse(src);
-        let Item::ImplDef(id) = &p.items[1] else { panic!("expected ImplDef") };
+        let Item::ImplDef(id) = &p.items[0] else { panic!("expected ImplDef") };
         assert_eq!(id.cap_name, "Eq");
         assert_eq!(id.type_args.len(), 1);
         assert_eq!(id.methods.len(), 1);
@@ -2307,7 +2371,7 @@ mod tests {
 
     #[test]
     fn test_parse_abstract_trf() {
-        let p = parse("abstract trf FetchUser: UserId -> User? !Db");
+        let p = parse("abstract stage FetchUser: UserId -> User? !Db");
         let Item::AbstractTrfDef(td) = &p.items[0] else { panic!("expected AbstractTrfDef") };
         assert_eq!(td.name, "FetchUser");
         assert!(td.type_params.is_empty());
@@ -2315,8 +2379,15 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_abstract_trf_removed_error() {
+        let result = Parser::parse_str("abstract trf FetchUser: Int -> String !Db", "test");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().message.contains("trf"));
+    }
+
+    #[test]
     fn test_parse_abstract_trf_generic() {
-        let p = parse("abstract trf Fetch<T>: Int -> T? !Db");
+        let p = parse("abstract stage Fetch<T>: Int -> T? !Db");
         let Item::AbstractTrfDef(td) = &p.items[0] else { panic!("expected AbstractTrfDef") };
         assert_eq!(td.name, "Fetch");
         assert_eq!(td.type_params, vec!["T"]);
@@ -2325,7 +2396,7 @@ mod tests {
 
     #[test]
     fn test_parse_abstract_flw_single_slot() {
-        let p = parse("abstract flw DataPipeline<Row> { parse: String -> List<Row>! }");
+        let p = parse("abstract seq DataPipeline<Row> { parse: String -> List<Row>! }");
         let Item::AbstractFlwDef(fd) = &p.items[0] else { panic!("expected AbstractFlwDef") };
         assert_eq!(fd.name, "DataPipeline");
         assert_eq!(fd.type_params, vec!["Row"]);
@@ -2335,8 +2406,15 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_abstract_flw_removed_error() {
+        let result = Parser::parse_str("abstract flw DataPipeline<Row> { parse: String -> String }", "test");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().message.contains("flw"));
+    }
+
+    #[test]
     fn test_parse_abstract_flw_slot_abstract_trf_shorthand() {
-        let p = parse("abstract flw Pipeline<Row> { fetch: Fetch<Row> }");
+        let p = parse("abstract seq Pipeline<Row> { fetch: Fetch<Row> }");
         let Item::AbstractFlwDef(fd) = &p.items[0] else { panic!("expected AbstractFlwDef") };
         assert_eq!(fd.slots.len(), 1);
         assert!(matches!(fd.slots[0].abstract_trf_ty, Some(TypeExpr::Named(ref n, _, _)) if n == "Fetch"));
@@ -2344,7 +2422,7 @@ mod tests {
 
     #[test]
     fn test_parse_abstract_flw_multi_slot() {
-        let p = parse("abstract flw DataPipeline<Row> { parse: String -> List<Row>!; save: List<Row> -> Int !Db }");
+        let p = parse("abstract seq DataPipeline<Row> { parse: String -> List<Row>!; save: List<Row> -> Int !Db }");
         let Item::AbstractFlwDef(fd) = &p.items[0] else { panic!("expected AbstractFlwDef") };
         assert_eq!(fd.slots.len(), 2);
         assert_eq!(fd.slots[1].name, "save");
@@ -2352,7 +2430,7 @@ mod tests {
 
     #[test]
     fn test_parse_flw_binding_full() {
-        let p = parse("flw UserImport = DataPipeline<UserRow> { parse <- ParseCsv; save <- SaveUsers }");
+        let p = parse("seq UserImport = DataPipeline<UserRow> { parse <- ParseCsv; save <- SaveUsers }");
         let Item::FlwBindingDef(fd) = &p.items[0] else { panic!("expected FlwBindingDef") };
         assert_eq!(fd.name, "UserImport");
         assert_eq!(fd.template, "DataPipeline");
@@ -2363,7 +2441,7 @@ mod tests {
 
     #[test]
     fn test_parse_flw_binding_partial() {
-        let p = parse("flw PartialImport = DataPipeline<UserRow> { parse <- ParseCsv }");
+        let p = parse("seq PartialImport = DataPipeline<UserRow> { parse <- ParseCsv }");
         let Item::FlwBindingDef(fd) = &p.items[0] else { panic!("expected FlwBindingDef") };
         assert_eq!(fd.bindings.len(), 1);
     }

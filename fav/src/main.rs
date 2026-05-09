@@ -12,12 +12,12 @@ mod lsp;
 mod std_states;
 
 use std::process;
-use driver::{cmd_run, cmd_build, cmd_exec, cmd_check, cmd_explain, cmd_explain_diff, cmd_test, cmd_fmt, cmd_lint, cmd_install, cmd_publish, cmd_bundle, cmd_graph, cmd_watch, cmd_bench};
+use driver::{cmd_run, cmd_build, cmd_exec, cmd_check, cmd_explain, cmd_explain_diff, cmd_test, cmd_fmt, cmd_lint, cmd_install, cmd_publish, cmd_bundle, cmd_graph, cmd_watch, cmd_bench, cmd_migrate};
 
 // 笏笏 help text (4-6) 笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏
 
 const HELP: &str = "\
-fav - Favnir language toolchain v1.9.0
+fav - Favnir language toolchain v2.0.0
 
 USAGE:
     fav <COMMAND> [OPTIONS] [FILE]
@@ -70,6 +70,11 @@ COMMANDS:
                   If <file> is omitted, lints all .fav files in the project.
     lsp [--port <n>]
                   Run the Favnir Language Server scaffold.
+    migrate [--in-place] [--dry-run] [--check] [--dir <path>] [file]
+                  Migrate v1.x code to v2.0.0 syntax (trf→stage, flw→seq).
+                  With --in-place, rewrite files directly.
+                  With --dry-run, show changes without writing.
+                  With --check, exit 1 if any file needs migration (CI use).
     install       Resolve [dependencies] from fav.toml and write fav.lock.
     publish       Validate project and prepare for local registry publishing.
     help          Show this help message
@@ -478,6 +483,31 @@ fn main() {
                 }
             }
             cmd_lint(file.as_deref(), warn_only);
+        }
+
+        Some("migrate") => {
+            let mut in_place = false;
+            let mut dry_run = false;
+            let mut check = false;
+            let mut dir: Option<String> = None;
+            let mut file: Option<String> = None;
+            let mut i = 2usize;
+            while i < args.len() {
+                match args[i].as_str() {
+                    "--in-place" => { in_place = true; i += 1; }
+                    "--dry-run" => { dry_run = true; i += 1; }
+                    "--check" => { check = true; i += 1; }
+                    "--dir" => {
+                        dir = Some(args.get(i + 1).unwrap_or_else(|| {
+                            eprintln!("error: --dir requires a path");
+                            process::exit(1);
+                        }).clone());
+                        i += 2;
+                    }
+                    other => { file = Some(other.to_string()); i += 1; }
+                }
+            }
+            cmd_migrate(file.as_deref(), in_place, dry_run, check, dir.as_deref());
         }
 
         Some("install") => {

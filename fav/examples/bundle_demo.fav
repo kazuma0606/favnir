@@ -2,19 +2,19 @@ type UserRow = {
     value: Int
 }
 
-trf ParseUser: String -> UserRow = |text| {
+stage ParseUser: String -> UserRow = |text| {
     UserRow { value: 1 }
 }
 
-trf RenderUser: UserRow -> String = |row| {
+stage RenderUser: UserRow -> String = |row| {
     "bundle-ok"
 }
 
-trf DeadStep: String -> String = |text| {
+stage DeadStep: String -> String = |text| {
     "dead"
 }
 
-flw MainFlow =
+seq MainFlow =
     ParseUser
     |> RenderUser
 

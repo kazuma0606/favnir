@@ -85,18 +85,18 @@ OPTIONS (run / exec):
                   (exec: parsed and reserved; Db.* builtins coming in v0.7.0)
 
 SINGLE-FILE EXAMPLES:
-    fav run examples/hello.fav
-    fav run --db myapp.db examples/users.fav
-    fav build -o dist/app.fvc examples/hello.fav
-    fav build --target wasm -o dist/hello.wasm examples/hello.fav
+    fav run examples/basic/hello.fav
+    fav run --db myapp.db examples/basic/users.fav
+    fav build -o dist/app.fvc examples/basic/hello.fav
+    fav build --target wasm -o dist/hello.wasm examples/wasm/math_wasm.fav
     fav exec dist/app.fvc
     fav exec --info dist/app.fvc
-    fav check examples/pipeline.fav
-    fav explain examples/users.fav
-    fav explain examples/users.fav --format json --focus trfs
-    fav bundle examples/hello.fav --manifest
-    fav graph examples/abstract_flw_basic.fav --format mermaid
-    fav graph examples/hello.fav --focus fn --entry main --depth 2
+    fav check examples/pipeline/pipeline.fav
+    fav explain examples/basic/users.fav
+    fav explain examples/basic/users.fav --format json --focus trfs
+    fav bundle examples/basic/hello.fav --manifest
+    fav graph examples/pipeline/abstract_seq_basic.fav --format mermaid
+    fav graph examples/basic/hello.fav --focus fn --entry main --depth 2
 
 PROJECT EXAMPLES (requires fav.toml):
     fav run                 # runs src/main.fav

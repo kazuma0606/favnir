@@ -1,0 +1,7 @@
+[rune]
+name = "runes"
+version = "0.1.0"
+src = "."
+
+[runes]
+path = "."

@@ -1,11 +1,12 @@
 // Favnir Type Checker
 // Tasks: 4-1..4-20
 
+use crate::ast::*;
+use crate::frontend::lexer::Span;
+use crate::frontend::parser::Parser;
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
-use crate::ast::*;
-use crate::frontend::lexer::Span;
 
 // ── Type (4-1) ────────────────────────────────────────────────────────────────
 
@@ -27,11 +28,19 @@ pub enum Type {
     /// `trf` definition: input, output, effects
     Trf(Box<Type>, Box<Type>, Vec<Effect>),
     /// `abstract trf` definition (v1.3.0)
-    AbstractTrf { input: Box<Type>, output: Box<Type>, effects: Vec<Effect> },
+    AbstractTrf {
+        input: Box<Type>,
+        output: Box<Type>,
+        effects: Vec<Effect>,
+    },
     /// `abstract seq Name<T> { ... }` template marker (v1.3.0)
     AbstractFlwTemplate(String),
     /// Partially bound abstract seq (v1.3.0)
-    PartialFlw { template: String, type_args: Vec<Type>, unbound_slots: Vec<String> },
+    PartialFlw {
+        template: String,
+        type_args: Vec<Type>,
+        unbound_slots: Vec<String>,
+    },
     /// User-defined named type (after lookup)
     Named(String, Vec<Type>),
     /// Type variable  E`T`, `U`, or fresh `$0`, `$1` (v0.4.0)
@@ -61,7 +70,7 @@ impl Type {
         match (self, other) {
             (Type::Task(a), Type::Task(b)) => a.is_compatible(b),
             (Type::Option(a), Type::Option(b)) => a.is_compatible(b),
-            (Type::List(a),   Type::List(b))   => a.is_compatible(b),
+            (Type::List(a), Type::List(b)) => a.is_compatible(b),
             (Type::Result(a1, a2), Type::Result(b1, b2)) => {
                 a1.is_compatible(b1) && a2.is_compatible(b2)
             }
@@ -82,23 +91,45 @@ impl Type {
             (_, Type::Fn(params, ret)) if params.is_empty() => self.is_compatible(ret),
             (Type::Fn(params, ret), _) if params.is_empty() => ret.is_compatible(other),
             (Type::Cap(n1, as1), Type::Cap(n2, as2)) => {
-                n1 == n2 && as1.len() == as2.len()
+                n1 == n2
+                    && as1.len() == as2.len()
                     && as1.iter().zip(as2).all(|(a, b)| a.is_compatible(b))
             }
             (Type::Interface(n1, as1), Type::Interface(n2, as2)) => {
-                n1 == n2 && as1.len() == as2.len()
+                n1 == n2
+                    && as1.len() == as2.len()
                     && as1.iter().zip(as2).all(|(a, b)| a.is_compatible(b))
             }
             (
-                Type::AbstractTrf { input: i1, output: o1, effects: f1 },
-                Type::AbstractTrf { input: i2, output: o2, effects: f2 },
+                Type::AbstractTrf {
+                    input: i1,
+                    output: o1,
+                    effects: f1,
+                },
+                Type::AbstractTrf {
+                    input: i2,
+                    output: o2,
+                    effects: f2,
+                },
             ) => i1.is_compatible(i2) && o1.is_compatible(o2) && f1 == f2,
             (Type::AbstractFlwTemplate(a), Type::AbstractFlwTemplate(b)) => a == b,
             (
-                Type::PartialFlw { template: t1, type_args: a1, unbound_slots: s1 },
-                Type::PartialFlw { template: t2, type_args: a2, unbound_slots: s2 },
-            ) => t1 == t2 && a1.len() == a2.len() && s1 == s2
-                && a1.iter().zip(a2).all(|(a, b)| a.is_compatible(b)),
+                Type::PartialFlw {
+                    template: t1,
+                    type_args: a1,
+                    unbound_slots: s1,
+                },
+                Type::PartialFlw {
+                    template: t2,
+                    type_args: a2,
+                    unbound_slots: s2,
+                },
+            ) => {
+                t1 == t2
+                    && a1.len() == a2.len()
+                    && s1 == s2
+                    && a1.iter().zip(a2).all(|(a, b)| a.is_compatible(b))
+            }
             // Named types with the same name: compatible if args match, or if
             // one side has no args (raw/unapplied form from record construction).
             (Type::Named(n1, a1), Type::Named(n2, a2)) if n1 == n2 => {
@@ -114,14 +145,14 @@ impl Type {
 
     pub fn display(&self) -> String {
         match self {
-            Type::Bool   => "Bool".into(),
-            Type::Int    => "Int".into(),
-            Type::Float  => "Float".into(),
+            Type::Bool => "Bool".into(),
+            Type::Int => "Int".into(),
+            Type::Float => "Float".into(),
             Type::String => "String".into(),
-            Type::Unit   => "Unit".into(),
-            Type::List(t)    => format!("List<{}>", t.display()),
-            Type::Map(k, v)  => format!("Map<{}, {}>", k.display(), v.display()),
-            Type::Option(t)  => format!("{}?", t.display()),
+            Type::Unit => "Unit".into(),
+            Type::List(t) => format!("List<{}>", t.display()),
+            Type::Map(k, v) => format!("Map<{}, {}>", k.display(), v.display()),
+            Type::Option(t) => format!("{}?", t.display()),
             Type::Result(t, e) => format!("Result<{}, {}>", t.display(), e.display()),
             Type::Arrow(a, b) => format!("{} -> {}", a.display(), b.display()),
             Type::Fn(params, ret) => {
@@ -130,22 +161,55 @@ impl Type {
             }
             Type::Trf(i, o, fx) => {
                 let effs: Vec<String> = fx.iter().map(|e| format!("!{:?}", e)).collect();
-                let eff = if effs.is_empty() { String::new() } else { format!(" {}", effs.join(" ")) };
+                let eff = if effs.is_empty() {
+                    String::new()
+                } else {
+                    format!(" {}", effs.join(" "))
+                };
                 format!("Trf<{}, {}{}>", i.display(), o.display(), eff)
             }
-            Type::AbstractTrf { input, output, effects } => {
+            Type::AbstractTrf {
+                input,
+                output,
+                effects,
+            } => {
                 let effs: Vec<String> = effects.iter().map(|e| format!("!{:?}", e)).collect();
-                let eff = if effs.is_empty() { String::new() } else { format!(" {}", effs.join(" ")) };
-                format!("AbstractTrf<{}, {}{}>", input.display(), output.display(), eff)
+                let eff = if effs.is_empty() {
+                    String::new()
+                } else {
+                    format!(" {}", effs.join(" "))
+                };
+                format!(
+                    "AbstractTrf<{}, {}{}>",
+                    input.display(),
+                    output.display(),
+                    eff
+                )
             }
             Type::AbstractFlwTemplate(name) => format!("AbstractFlw<{}>", name),
-            Type::PartialFlw { template, type_args, unbound_slots } => {
+            Type::PartialFlw {
+                template,
+                type_args,
+                unbound_slots,
+            } => {
                 let args = if type_args.is_empty() {
                     String::new()
                 } else {
-                    format!("<{}>", type_args.iter().map(|t| t.display()).collect::<Vec<_>>().join(", "))
+                    format!(
+                        "<{}>",
+                        type_args
+                            .iter()
+                            .map(|t| t.display())
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    )
                 };
-                format!("PartialFlw<{}{}; {}>", template, args, unbound_slots.join(", "))
+                format!(
+                    "PartialFlw<{}{}; {}>",
+                    template,
+                    args,
+                    unbound_slots.join(", ")
+                )
             }
             Type::Named(n, args) if args.is_empty() => n.clone(),
             // Named("Option", [T]) ↁEdisplay as T? to match Type::Option(T)
@@ -169,7 +233,7 @@ impl Type {
             }
             Type::Task(t) => format!("Task<{}>", t.display()),
             Type::Unknown => "_".into(),
-            Type::Error   => "?".into(),
+            Type::Error => "?".into(),
         }
     }
 
@@ -180,7 +244,7 @@ impl Type {
         match self {
             Type::Trf(i, o, _) => Some((i, o)),
             Type::AbstractTrf { input, output, .. } => Some((input, output)),
-            Type::Arrow(i, o)  => Some((i, o)),
+            Type::Arrow(i, o) => Some((i, o)),
             Type::Fn(params, ret) if !params.is_empty() => Some((&params[0], ret)),
             _ => None,
         }
@@ -198,7 +262,9 @@ pub struct Subst {
 
 impl Subst {
     pub fn empty() -> Self {
-        Subst { map: HashMap::new() }
+        Subst {
+            map: HashMap::new(),
+        }
     }
 
     pub fn singleton(var: String, ty: Type) -> Self {
@@ -221,18 +287,29 @@ impl Subst {
                     ty.clone()
                 }
             }
-            Type::Task(t)        => Type::Task(Box::new(self.apply(t))),
-            Type::List(t)        => Type::List(Box::new(self.apply(t))),
-            Type::Option(t)      => Type::Option(Box::new(self.apply(t))),
-            Type::Map(k, v)      => Type::Map(Box::new(self.apply(k)), Box::new(self.apply(v))),
-            Type::Result(t, e)   => Type::Result(Box::new(self.apply(t)), Box::new(self.apply(e))),
-            Type::Arrow(a, b)    => Type::Arrow(Box::new(self.apply(a)), Box::new(self.apply(b))),
-            Type::Fn(ps, ret)    => Type::Fn(ps.iter().map(|p| self.apply(p)).collect(), Box::new(self.apply(ret))),
-            Type::Trf(i, o, fx)  => Type::Trf(Box::new(self.apply(i)), Box::new(self.apply(o)), fx.clone()),
-            Type::Named(n, args) => Type::Named(n.clone(), args.iter().map(|a| self.apply(a)).collect()),
-            Type::Cap(n, args)   => Type::Cap(n.clone(), args.iter().map(|a| self.apply(a)).collect()),
-            Type::Interface(n, args) => Type::Interface(n.clone(), args.iter().map(|a| self.apply(a)).collect()),
-            _                    => ty.clone(),
+            Type::Task(t) => Type::Task(Box::new(self.apply(t))),
+            Type::List(t) => Type::List(Box::new(self.apply(t))),
+            Type::Option(t) => Type::Option(Box::new(self.apply(t))),
+            Type::Map(k, v) => Type::Map(Box::new(self.apply(k)), Box::new(self.apply(v))),
+            Type::Result(t, e) => Type::Result(Box::new(self.apply(t)), Box::new(self.apply(e))),
+            Type::Arrow(a, b) => Type::Arrow(Box::new(self.apply(a)), Box::new(self.apply(b))),
+            Type::Fn(ps, ret) => Type::Fn(
+                ps.iter().map(|p| self.apply(p)).collect(),
+                Box::new(self.apply(ret)),
+            ),
+            Type::Trf(i, o, fx) => {
+                Type::Trf(Box::new(self.apply(i)), Box::new(self.apply(o)), fx.clone())
+            }
+            Type::Named(n, args) => {
+                Type::Named(n.clone(), args.iter().map(|a| self.apply(a)).collect())
+            }
+            Type::Cap(n, args) => {
+                Type::Cap(n.clone(), args.iter().map(|a| self.apply(a)).collect())
+            }
+            Type::Interface(n, args) => {
+                Type::Interface(n.clone(), args.iter().map(|a| self.apply(a)).collect())
+            }
+            _ => ty.clone(),
         }
     }
 
@@ -255,19 +332,19 @@ impl Subst {
 /// Occurs check: does the variable `var` appear in `ty`?
 pub fn occurs(var: &str, ty: &Type) -> bool {
     match ty {
-        Type::Var(name)      => name == var,
-        Type::Task(t)        => occurs(var, t),
-        Type::List(t)        => occurs(var, t),
-        Type::Option(t)      => occurs(var, t),
-        Type::Map(k, v)      => occurs(var, k) || occurs(var, v),
-        Type::Result(t, e)   => occurs(var, t) || occurs(var, e),
-        Type::Arrow(a, b)    => occurs(var, a) || occurs(var, b),
-        Type::Fn(ps, ret)    => ps.iter().any(|p| occurs(var, p)) || occurs(var, ret),
-        Type::Trf(i, o, _)   => occurs(var, i) || occurs(var, o),
+        Type::Var(name) => name == var,
+        Type::Task(t) => occurs(var, t),
+        Type::List(t) => occurs(var, t),
+        Type::Option(t) => occurs(var, t),
+        Type::Map(k, v) => occurs(var, k) || occurs(var, v),
+        Type::Result(t, e) => occurs(var, t) || occurs(var, e),
+        Type::Arrow(a, b) => occurs(var, a) || occurs(var, b),
+        Type::Fn(ps, ret) => ps.iter().any(|p| occurs(var, p)) || occurs(var, ret),
+        Type::Trf(i, o, _) => occurs(var, i) || occurs(var, o),
         Type::Named(_, args) => args.iter().any(|a| occurs(var, a)),
-        Type::Cap(_, args)   => args.iter().any(|a| occurs(var, a)),
+        Type::Cap(_, args) => args.iter().any(|a| occurs(var, a)),
         Type::Interface(_, args) => args.iter().any(|a| occurs(var, a)),
-        _                    => false,
+        _ => false,
     }
 }
 
@@ -280,26 +357,38 @@ pub fn unify(t1: &Type, t2: &Type) -> Result<Subst, String> {
 
         // Type variables
         (Type::Var(a), t) => {
-            if let Type::Var(b) = t { if a == b { return Ok(Subst::empty()); } }
+            if let Type::Var(b) = t {
+                if a == b {
+                    return Ok(Subst::empty());
+                }
+            }
             if occurs(a, t) {
-                return Err(format!("infinite type: `{}` occurs in `{}`", a, t.display()));
+                return Err(format!(
+                    "infinite type: `{}` occurs in `{}`",
+                    a,
+                    t.display()
+                ));
             }
             Ok(Subst::singleton(a.clone(), t.clone()))
         }
         (t, Type::Var(a)) => {
             if occurs(a, t) {
-                return Err(format!("infinite type: `{}` occurs in `{}`", a, t.display()));
+                return Err(format!(
+                    "infinite type: `{}` occurs in `{}`",
+                    a,
+                    t.display()
+                ));
             }
             Ok(Subst::singleton(a.clone(), t.clone()))
         }
 
         // Unknown / Error are compatible with anything
         (Type::Unknown, _) | (_, Type::Unknown) => Ok(Subst::empty()),
-        (Type::Error, _)   | (_, Type::Error)   => Ok(Subst::empty()),
+        (Type::Error, _) | (_, Type::Error) => Ok(Subst::empty()),
 
         // Structural rules
-        (Type::Task(a),   Type::Task(b))   => unify(a, b),
-        (Type::List(a),   Type::List(b))   => unify(a, b),
+        (Type::Task(a), Type::Task(b)) => unify(a, b),
+        (Type::List(a), Type::List(b)) => unify(a, b),
         (Type::Option(a), Type::Option(b)) => unify(a, b),
         (Type::Map(k1, v1), Type::Map(k2, v2)) => {
             let s1 = unify(k1, k2)?;
@@ -316,17 +405,22 @@ pub fn unify(t1: &Type, t2: &Type) -> Result<Subst, String> {
             let s2 = unify(&s1.apply(b1), &s1.apply(b2))?;
             Ok(s2.compose(s1))
         }
-        (Type::Named(n1, as1), Type::Named(n2, as2)) if n1 == n2 && as1.len() == as2.len() => {
-            as1.iter().zip(as2.iter()).try_fold(Subst::empty(), |acc, (a, b)| {
+        (Type::Named(n1, as1), Type::Named(n2, as2)) if n1 == n2 && as1.len() == as2.len() => as1
+            .iter()
+            .zip(as2.iter())
+            .try_fold(Subst::empty(), |acc, (a, b)| {
                 let s = unify(&acc.apply(a), &acc.apply(b))?;
                 Ok(s.compose(acc))
-            })
-        }
-        (Type::Interface(n1, as1), Type::Interface(n2, as2)) if n1 == n2 && as1.len() == as2.len() => {
-            as1.iter().zip(as2.iter()).try_fold(Subst::empty(), |acc, (a, b)| {
-                let s = unify(&acc.apply(a), &acc.apply(b))?;
-                Ok(s.compose(acc))
-            })
+            }),
+        (Type::Interface(n1, as1), Type::Interface(n2, as2))
+            if n1 == n2 && as1.len() == as2.len() =>
+        {
+            as1.iter()
+                .zip(as2.iter())
+                .try_fold(Subst::empty(), |acc, (a, b)| {
+                    let s = unify(&acc.apply(a), &acc.apply(b))?;
+                    Ok(s.compose(acc))
+                })
         }
         // Option<T> ↁENamed("Option", [T]) compatibility (phase 5 transition)
         (Type::Option(t), Type::Named(n, args)) if n == "Option" && args.len() == 1 => {
@@ -346,7 +440,11 @@ pub fn unify(t1: &Type, t2: &Type) -> Result<Subst, String> {
             let s2 = unify(&s1.apply(&args[1]), &s1.apply(e))?;
             Ok(s2.compose(s1))
         }
-        (t1, t2) => Err(format!("cannot unify `{}` with `{}`", t1.display(), t2.display())),
+        (t1, t2) => Err(format!(
+            "cannot unify `{}` with `{}`",
+            t1.display(),
+            t2.display()
+        )),
     }
 }
 
@@ -381,32 +479,68 @@ pub struct InterfaceRegistry {
 
 impl InterfaceRegistry {
     pub fn new() -> Self {
-        Self { interfaces: HashMap::new(), impls: HashMap::new() }
+        Self {
+            interfaces: HashMap::new(),
+            impls: HashMap::new(),
+        }
     }
 
-    pub fn register_interface(&mut self, name: String, super_interface: Option<String>, methods: HashMap<String, Type>) {
-        self.interfaces.insert(name, InterfaceDef { super_interface, methods });
+    pub fn register_interface(
+        &mut self,
+        name: String,
+        super_interface: Option<String>,
+        methods: HashMap<String, Type>,
+    ) {
+        self.interfaces.insert(
+            name,
+            InterfaceDef {
+                super_interface,
+                methods,
+            },
+        );
     }
 
-    pub fn register_impl(&mut self, interface_name: String, type_name: String, methods: HashMap<String, Type>, is_auto: bool) {
-        self.impls.insert((interface_name, type_name), InterfaceImplEntry { methods, is_auto });
+    pub fn register_impl(
+        &mut self,
+        interface_name: String,
+        type_name: String,
+        methods: HashMap<String, Type>,
+        is_auto: bool,
+    ) {
+        self.impls.insert(
+            (interface_name, type_name),
+            InterfaceImplEntry { methods, is_auto },
+        );
     }
 
     pub fn is_implemented(&self, interface_name: &str, type_name: &str) -> bool {
-        self.impls.contains_key(&(interface_name.to_string(), type_name.to_string()))
+        self.impls
+            .contains_key(&(interface_name.to_string(), type_name.to_string()))
     }
 
-    pub fn lookup_method(&self, interface_name: &str, type_name: &str, method_name: &str) -> Option<&Type> {
+    pub fn lookup_method(
+        &self,
+        interface_name: &str,
+        type_name: &str,
+        method_name: &str,
+    ) -> Option<&Type> {
         self.impls
             .get(&(interface_name.to_string(), type_name.to_string()))
             .and_then(|entry| entry.methods.get(method_name))
-            .or_else(|| self.interfaces.get(interface_name).and_then(|def| def.methods.get(method_name)))
+            .or_else(|| {
+                self.interfaces
+                    .get(interface_name)
+                    .and_then(|def| def.methods.get(method_name))
+            })
     }
 
     /// Look up the method type from the interface *declaration* (canonical type, not impl body).
     /// Used for method dispatch to get the correct callable type with proper param counts.
     pub fn lookup_declared_method(&self, interface_name: &str, method_name: &str) -> Option<&Type> {
-        self.interfaces.get(interface_name)?.methods.get(method_name)
+        self.interfaces
+            .get(interface_name)?
+            .methods
+            .get(method_name)
     }
 }
 
@@ -425,7 +559,9 @@ pub struct TyEnv {
 
 impl TyEnv {
     pub fn new() -> Self {
-        TyEnv { scopes: vec![HashMap::new()] }
+        TyEnv {
+            scopes: vec![HashMap::new()],
+        }
     }
 
     pub fn push(&mut self) {
@@ -463,7 +599,11 @@ pub struct TypeError {
 
 impl TypeError {
     pub fn new(code: &'static str, message: impl Into<String>, span: Span) -> Self {
-        TypeError { code, message: message.into(), span }
+        TypeError {
+            code,
+            message: message.into(),
+            span,
+        }
     }
 }
 
@@ -472,8 +612,7 @@ impl std::fmt::Display for TypeError {
         write!(
             f,
             "error[{}]: {}\n  --> {}:{}:{}",
-            self.code, self.message,
-            self.span.file, self.span.line, self.span.col
+            self.code, self.message, self.span.file, self.span.line, self.span.col
         )
     }
 }
@@ -485,9 +624,32 @@ pub struct TypeWarning {
     pub span: Span,
 }
 
+pub type FavWarning = TypeWarning;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SymbolKind {
+    Function,
+    Type,
+    Stage,
+    Seq,
+    Interface,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LspSymbol {
+    pub name: String,
+    pub kind: SymbolKind,
+    pub detail: String,
+    pub def_span: Span,
+}
+
 impl TypeWarning {
     pub fn new(code: &'static str, message: impl Into<String>, span: Span) -> Self {
-        TypeWarning { code, message: message.into(), span }
+        TypeWarning {
+            code,
+            message: message.into(),
+            span,
+        }
     }
 }
 
@@ -496,8 +658,7 @@ impl std::fmt::Display for TypeWarning {
         write!(
             f,
             "warning[{}]: {}\n  --> {}:{}:{}",
-            self.code, self.message,
-            self.span.file, self.span.line, self.span.col
+            self.code, self.message, self.span.file, self.span.line, self.span.col
         )
     }
 }
@@ -537,8 +698,15 @@ pub struct Checker {
     pub errors: Vec<TypeError>,
     pub warnings: Vec<TypeWarning>,
     pub type_at: HashMap<Span, Type>,
+    pub def_at: HashMap<Span, Span>,
+    pub symbol_index: Vec<LspSymbol>,
+    pub imported_namespaces: HashMap<String, crate::middle::resolver::ModuleScope>,
+    reexport_namespaces: HashMap<String, crate::middle::resolver::ModuleScope>,
+    imported_namespace_paths: HashMap<String, String>,
     /// User-defined type bodies, for field and variant lookup.
     type_defs: HashMap<String, TypeBody>,
+    pub record_fields: HashMap<String, Vec<(String, Type)>>,
+    global_def_spans: HashMap<String, Span>,
     /// User-defined invariants by type name.
     type_invariants: HashMap<String, Vec<Expr>>,
     /// Effects declared on the current fn/trf being checked.
@@ -584,7 +752,14 @@ impl Checker {
             errors: Vec::new(),
             warnings: Vec::new(),
             type_at: HashMap::new(),
+            def_at: HashMap::new(),
+            symbol_index: Vec::new(),
+            imported_namespaces: HashMap::new(),
+            reexport_namespaces: HashMap::new(),
+            imported_namespace_paths: HashMap::new(),
             type_defs: HashMap::new(),
+            record_fields: HashMap::new(),
+            global_def_spans: HashMap::new(),
             type_invariants: HashMap::new(),
             current_effects: Vec::new(),
             resolver: None,
@@ -615,7 +790,14 @@ impl Checker {
             errors: Vec::new(),
             warnings: Vec::new(),
             type_at: HashMap::new(),
+            def_at: HashMap::new(),
+            symbol_index: Vec::new(),
+            imported_namespaces: HashMap::new(),
+            reexport_namespaces: HashMap::new(),
+            imported_namespace_paths: HashMap::new(),
             type_defs: HashMap::new(),
+            record_fields: HashMap::new(),
+            global_def_spans: HashMap::new(),
             type_invariants: HashMap::new(),
             current_effects: Vec::new(),
             resolver: Some(resolver),
@@ -644,35 +826,57 @@ impl Checker {
         Type::Var(format!("${}", n))
     }
 
-    pub fn check_program(program: &Program) -> Vec<TypeError> {
+    pub fn check_program(program: &Program) -> (Vec<TypeError>, Vec<FavWarning>) {
         let mut c = Checker::new();
         c.register_builtins();
         c.resolve_uses(program);
+        c.process_imports(program);
         c.register_item_signatures(program);
         for item in &program.items {
             c.check_item(item);
         }
-        c.errors
+        (c.errors, c.warnings)
     }
 
     /// Check a program using a pre-built Checker (project mode with resolver).
     /// Returns collected errors.
-    pub fn check_with_self(&mut self, program: &Program) -> Vec<TypeError> {
+    pub fn check_with_self(&mut self, program: &Program) -> (Vec<TypeError>, Vec<FavWarning>) {
         self.register_builtins();
         self.resolve_uses(program);
+        self.process_imports(program);
         self.check_namespace_match(program);
         self.register_item_signatures(program);
         for item in &program.items {
             self.check_item(item);
         }
-        std::mem::take(&mut self.errors)
+        (
+            std::mem::take(&mut self.errors),
+            std::mem::take(&mut self.warnings),
+        )
     }
 
     fn remember_type(&mut self, span: &Span, ty: &Type) {
         self.type_at.insert(span.clone(), ty.clone());
     }
 
-    /// W001: warn if `namespace` declaration doesn't match the derived module path.
+    fn remember_global_symbol(
+        &mut self,
+        name: impl Into<String>,
+        kind: SymbolKind,
+        detail: impl Into<String>,
+        def_span: &Span,
+    ) {
+        let name = name.into();
+        self.global_def_spans.insert(name.clone(), def_span.clone());
+        self.symbol_index.push(LspSymbol {
+            name,
+            kind,
+            detail: detail.into(),
+            def_span: def_span.clone(),
+        });
+    }
+
+    /// W012: warn if `namespace` declaration doesn't match the derived module path.
     fn check_namespace_match(&mut self, program: &Program) {
         let declared = match &program.namespace {
             Some(ns) => ns.clone(),
@@ -694,18 +898,17 @@ impl Checker {
         drop(guard);
         if let Some(derived) = crate::middle::resolver::derive_module_path(&file, &src_dir) {
             if derived != declared {
-                let span = crate::frontend::lexer::Span::new(
-                    &*file.to_string_lossy(),
-                    0, 0, 1, 1,
-                );
-                self.errors.push(TypeError::new(
-                    "W001",
+                let span = crate::frontend::lexer::Span::new(&*file.to_string_lossy(), 0, 0, 1, 1);
+                self.type_warning(
+                    "W012",
                     format!(
                         "namespace `{}` does not match file path `{}` (expected `{}`)",
-                        declared, file.display(), derived
+                        declared,
+                        file.display(),
+                        derived
                     ),
-                    span,
-                ));
+                    &span,
+                );
             }
         }
     }
@@ -714,16 +917,35 @@ impl Checker {
     /// `exported_symbols` maps each top-level name to its (Type, Visibility).
     pub fn check_program_and_export(
         program: &Program,
-    ) -> (Vec<TypeError>, HashMap<String, (Type, Visibility)>) {
+    ) -> (
+        Vec<TypeError>,
+        Vec<FavWarning>,
+        HashMap<String, (Type, Visibility)>,
+    ) {
         let mut c = Checker::new();
         c.register_builtins();
         c.resolve_uses(program);
+        c.process_imports(program);
         c.register_item_signatures(program);
         for item in &program.items {
             c.check_item(item);
         }
-        let exports = collect_exports(program, &c.env);
-        (c.errors, exports)
+        let exports = c.collect_export_scope(program);
+        (c.errors, c.warnings, exports)
+    }
+
+    fn collect_export_scope(&self, program: &Program) -> HashMap<String, (Type, Visibility)> {
+        let mut exports = collect_exports(program, &self.env);
+        for scope in self.reexport_namespaces.values() {
+            for (name, (ty, vis)) in &scope.symbols {
+                if *vis != Visibility::Private {
+                    exports
+                        .entry(name.clone())
+                        .or_insert((ty.clone(), Visibility::Public));
+                }
+            }
+        }
+        exports
     }
 
     /// Resolve `use` declarations using the attached resolver.
@@ -758,14 +980,173 @@ impl Checker {
             };
             // Convert resolve errors to type errors
             for re in resolve_errors {
-                self.errors.push(TypeError::new(re.code, re.message, re.span));
+                self.errors
+                    .push(TypeError::new(re.code, re.message, re.span));
             }
             if let Some((sym_name, ty)) = result {
                 self.env.define(sym_name.clone(), ty.clone());
                 // Store import metadata for visibility enforcement
-                let source_file = PathBuf::from(format!("<{}>", use_path[..use_path.len()-1].join(".")));
-                self.imported.insert(sym_name, (ty, Visibility::Public, source_file));
+                let source_file =
+                    PathBuf::from(format!("<{}>", use_path[..use_path.len() - 1].join(".")));
+                self.imported
+                    .insert(sym_name, (ty, Visibility::Public, source_file));
             }
+        }
+    }
+
+    fn process_imports(&mut self, program: &Program) {
+        for item in &program.items {
+            let Item::ImportDecl {
+                path,
+                alias,
+                is_rune,
+                is_public,
+                span,
+            } = item
+            else {
+                continue;
+            };
+            self.process_import_decl(path, alias.as_deref(), *is_rune, *is_public, span);
+        }
+    }
+
+    fn process_import_decl(
+        &mut self,
+        path: &str,
+        alias: Option<&str>,
+        is_rune: bool,
+        is_public: bool,
+        span: &Span,
+    ) {
+        let namespace = alias
+            .map(str::to_string)
+            .unwrap_or_else(|| path.split('/').last().unwrap_or(path).to_string());
+        if let Some(prev) = self.imported_namespace_paths.get(&namespace).cloned() {
+            self.type_error(
+                "E081",
+                format!(
+                    "namespace conflict: '{}' is imported from both \"{}\" and \"{}\"\n  hint: use `as` to resolve:\n    import \"{}\" as {}_1\n    import \"{}\" as {}_2",
+                    namespace, prev, path, prev, namespace, path, namespace
+                ),
+                span,
+            );
+            return;
+        }
+
+        let Some(resolver) = self.resolver.clone() else {
+            self.type_error(
+                "E013",
+                format!(
+                    "`import \"{}\"`: no fav.toml found - cannot resolve imports in single-file mode",
+                    path
+                ),
+                span,
+            );
+            return;
+        };
+
+        let cache_key = format!("{}:{}", if is_rune { "rune" } else { "local" }, path);
+        let (file_path, existing, cached) = {
+            let mut guard = resolver.lock().unwrap();
+            let resolved = if is_rune {
+                guard.resolve_rune_import_file(path)
+            } else {
+                guard.resolve_local_import_file(path)
+            };
+            let Some(file_path) = resolved else {
+                self.type_error(
+                    "E013",
+                    format!("import path \"{}\" could not be resolved", path),
+                    span,
+                );
+                return;
+            };
+            let cached = guard.cached_scope(&cache_key);
+            let existing = if cached.is_none() {
+                guard.begin_loading(&cache_key, path)
+            } else {
+                None
+            };
+            (file_path, existing, cached)
+        };
+
+        if let Some(scope) = cached {
+            self.imported_namespace_paths
+                .insert(namespace.clone(), path.to_string());
+            self.imported_namespaces
+                .insert(namespace.clone(), scope.clone());
+            if is_public {
+                self.reexport_namespaces.insert(namespace, scope);
+            }
+            return;
+        }
+
+        if let Some(origin) = existing {
+            let current = self
+                .current_file
+                .as_ref()
+                .map(|file| file.to_string_lossy().to_string())
+                .unwrap_or_else(|| path.to_string());
+            self.type_error(
+                "E080",
+                format!(
+                    "circular import detected\n  \"{}\" imports \"{}\" which imports \"{}\"",
+                    origin, current, path
+                ),
+                span,
+            );
+            return;
+        }
+
+        let source = match std::fs::read_to_string(&file_path) {
+            Ok(source) => source,
+            Err(_) => {
+                let mut guard = resolver.lock().unwrap();
+                guard.finish_loading(&cache_key);
+                self.type_error(
+                    "E013",
+                    format!("import path \"{}\" could not be loaded", path),
+                    span,
+                );
+                return;
+            }
+        };
+        let file_str = file_path.to_string_lossy().to_string();
+        let program = match Parser::parse_str(&source, &file_str) {
+            Ok(program) => program,
+            Err(err) => {
+                let mut guard = resolver.lock().unwrap();
+                guard.finish_loading(&cache_key);
+                self.type_error(
+                    "E013",
+                    format!(
+                        "parse error in imported module \"{}\": {}",
+                        path, err.message
+                    ),
+                    &err.span,
+                );
+                return;
+            }
+        };
+        let mut child = Checker::new_with_resolver(resolver.clone(), file_path.clone());
+        let (child_errors, _) = child.check_with_self(&program);
+        for error in child_errors {
+            self.errors.push(error);
+        }
+        let scope = crate::middle::resolver::ModuleScope {
+            symbols: child.collect_export_scope(&program),
+        };
+        {
+            let mut guard = resolver.lock().unwrap();
+            guard.cache_scope(cache_key.clone(), scope.clone());
+            guard.finish_loading(&cache_key);
+        }
+        self.imported_namespace_paths
+            .insert(namespace.clone(), path.to_string());
+        self.imported_namespaces
+            .insert(namespace.clone(), scope.clone());
+        if is_public {
+            self.reexport_namespaces.insert(namespace, scope);
         }
     }
 
@@ -777,7 +1158,10 @@ impl Checker {
                 if self.current_file.as_deref() != Some(source_file.as_path()) {
                     self.type_error(
                         "E015",
-                        format!("`{}` is private  Ecannot be referenced from another file", name),
+                        format!(
+                            "`{}` is private  Ecannot be referenced from another file",
+                            name
+                        ),
                         span,
                     );
                 }
@@ -790,7 +1174,8 @@ impl Checker {
     }
 
     fn type_warning(&mut self, code: &'static str, msg: impl Into<String>, span: &Span) {
-        self.warnings.push(TypeWarning::new(code, msg, span.clone()));
+        self.warnings
+            .push(TypeWarning::new(code, msg, span.clone()));
     }
 
     // ── built-in registration (4-4, 4-5) ─────────────────────────────────────
@@ -798,16 +1183,24 @@ impl Checker {
     fn register_builtins(&mut self) {
         // IO namespace functions are handled specially in check_builtin_apply.
         // Register placeholder so "IO" resolves to something.
-        self.env.define("IO".into(), Type::Named("IO".into(), vec![]));
+        self.env
+            .define("IO".into(), Type::Named("IO".into(), vec![]));
 
         // List, String, Option, Result, and v0.2.0 namespace placeholders.
-        for ns in &["List", "String", "Option", "Result", "Db", "Http", "Map", "Debug", "Emit", "Util", "Trace", "File", "Json", "Csv", "Task"] {
-            self.env.define(ns.to_string(), Type::Named(ns.to_string(), vec![]));
+        for ns in &[
+            "Math", "List", "String", "Option", "Result", "Db", "Http", "Map", "Debug", "Emit",
+            "Util", "Trace", "File", "Json", "Csv", "Task",
+        ] {
+            self.env
+                .define(ns.to_string(), Type::Named(ns.to_string(), vec![]));
         }
 
         // Primitive type names as env values (so `Int.eq` etc. resolve).
         for ty_name in &["Bool", "Int", "Float"] {
-            self.env.define(ty_name.to_string(), Type::Named(ty_name.to_string(), vec![]));
+            self.env.define(
+                ty_name.to_string(),
+                Type::Named(ty_name.to_string(), vec![]),
+            );
         }
 
         // ── Built-in cap definitions ──────────────────────────────────────────
@@ -816,25 +1209,47 @@ impl Checker {
         // Show<T> = { show: T -> String }
         // Gen<T> = { gen: Int? -> T }
         // Semigroup/Monoid/Group/Ring/Field are algebraic interfaces.
-        for cap_name in &["Eq", "Ord", "Show", "Gen", "Semigroup", "Monoid", "Group", "Ring", "Field"] {
-            self.env.define(cap_name.to_string(), Type::Named(cap_name.to_string(), vec![]));
+        for cap_name in &[
+            "Eq",
+            "Ord",
+            "Show",
+            "Gen",
+            "Semigroup",
+            "Monoid",
+            "Group",
+            "Ring",
+            "Field",
+        ] {
+            self.env.define(
+                cap_name.to_string(),
+                Type::Named(cap_name.to_string(), vec![]),
+            );
         }
 
         // ── Built-in impl registrations ───────────────────────────────────────
-        let bool_ty  = || Type::Bool;
-        let int_ty   = || Type::Int;
+        let bool_ty = || Type::Bool;
+        let int_ty = || Type::Int;
         let _float_ty = || Type::Float;
-        let str_ty   = || Type::String;
+        let str_ty = || Type::String;
 
         let mk_eq_scope = |t: fn() -> Type| {
             let mut m = HashMap::new();
-            m.insert("equals".into(), Type::Fn(vec![t(), t()], Box::new(bool_ty())));
+            m.insert(
+                "equals".into(),
+                Type::Fn(vec![t(), t()], Box::new(bool_ty())),
+            );
             ImplScope { methods: m }
         };
         let mk_ord_scope = |t: fn() -> Type| {
             let mut m = HashMap::new();
-            m.insert("compare".into(), Type::Fn(vec![t(), t()], Box::new(int_ty())));
-            m.insert("equals".into(),  Type::Fn(vec![t(), t()], Box::new(bool_ty())));
+            m.insert(
+                "compare".into(),
+                Type::Fn(vec![t(), t()], Box::new(int_ty())),
+            );
+            m.insert(
+                "equals".into(),
+                Type::Fn(vec![t(), t()], Box::new(bool_ty())),
+            );
             ImplScope { methods: m }
         };
         let mk_show_scope = |t: fn() -> Type| {
@@ -845,16 +1260,21 @@ impl Checker {
 
         for ty_key in &["Int", "Float", "String"] {
             let t: fn() -> Type = match *ty_key {
-                "Int"    => || Type::Int,
-                "Float"  => || Type::Float,
-                _        => || Type::String,
+                "Int" => || Type::Int,
+                "Float" => || Type::Float,
+                _ => || Type::String,
             };
-            self.impls.insert(("Eq".into(),  ty_key.to_string()), mk_eq_scope(t));
-            self.impls.insert(("Ord".into(), ty_key.to_string()), mk_ord_scope(t));
-            self.impls.insert(("Show".into(),ty_key.to_string()), mk_show_scope(t));
+            self.impls
+                .insert(("Eq".into(), ty_key.to_string()), mk_eq_scope(t));
+            self.impls
+                .insert(("Ord".into(), ty_key.to_string()), mk_ord_scope(t));
+            self.impls
+                .insert(("Show".into(), ty_key.to_string()), mk_show_scope(t));
         }
-        self.impls.insert(("Eq".into(),   "Bool".into()), mk_eq_scope(bool_ty));
-        self.impls.insert(("Show".into(), "Bool".into()), mk_show_scope(bool_ty));
+        self.impls
+            .insert(("Eq".into(), "Bool".into()), mk_eq_scope(bool_ty));
+        self.impls
+            .insert(("Show".into(), "Bool".into()), mk_show_scope(bool_ty));
         self.register_builtin_interfaces();
         self.register_stdlib_states();
     }
@@ -862,8 +1282,10 @@ impl Checker {
     fn register_stdlib_states(&mut self) {
         for td in crate::std_states::parsed_type_defs() {
             self.type_defs.insert(td.name.clone(), td.body.clone());
-            self.type_invariants.insert(td.name.clone(), td.invariants.clone());
-            self.env.define(td.name.clone(), Type::Named(td.name.clone(), vec![]));
+            self.type_invariants
+                .insert(td.name.clone(), td.invariants.clone());
+            self.env
+                .define(td.name.clone(), Type::Named(td.name.clone(), vec![]));
         }
     }
 
@@ -931,16 +1353,22 @@ impl Checker {
             "empty".into(),
             Type::Fn(vec![], Box::new(self_named.clone())),
         );
-        self.interface_registry
-            .register_interface("Monoid".into(), Some("Semigroup".into()), monoid_methods);
+        self.interface_registry.register_interface(
+            "Monoid".into(),
+            Some("Semigroup".into()),
+            monoid_methods,
+        );
 
         let mut group_methods = HashMap::new();
         group_methods.insert(
             "inverse".into(),
             Type::Fn(vec![self_named.clone()], Box::new(self_named.clone())),
         );
-        self.interface_registry
-            .register_interface("Group".into(), Some("Monoid".into()), group_methods);
+        self.interface_registry.register_interface(
+            "Group".into(),
+            Some("Monoid".into()),
+            group_methods,
+        );
 
         let mut ring_methods = HashMap::new();
         ring_methods.insert(
@@ -950,8 +1378,11 @@ impl Checker {
                 Box::new(self_named.clone()),
             ),
         );
-        self.interface_registry
-            .register_interface("Ring".into(), Some("Monoid".into()), ring_methods);
+        self.interface_registry.register_interface(
+            "Ring".into(),
+            Some("Monoid".into()),
+            ring_methods,
+        );
 
         let mut field_methods = HashMap::new();
         field_methods.insert(
@@ -964,8 +1395,11 @@ impl Checker {
                 )),
             ),
         );
-        self.interface_registry
-            .register_interface("Field".into(), Some("Ring".into()), field_methods);
+        self.interface_registry.register_interface(
+            "Field".into(),
+            Some("Ring".into()),
+            field_methods,
+        );
 
         for (interface_name, type_name) in [
             ("Show", "Int"),
@@ -1011,22 +1445,44 @@ impl Checker {
                     self.effect_registry.insert(ed.name.clone());
                 }
                 Item::TypeDef(td) => {
+                    self.remember_global_symbol(
+                        td.name.clone(),
+                        SymbolKind::Type,
+                        td.name.clone(),
+                        &td.span,
+                    );
                     // Type aliases: store the target TypeExpr for later resolution.
                     if let TypeBody::Alias(target) = &td.body {
                         self.type_aliases.insert(td.name.clone(), target.clone());
                         if !td.type_params.is_empty() {
-                            self.type_arity.insert(td.name.clone(), td.type_params.len());
+                            self.type_arity
+                                .insert(td.name.clone(), td.type_params.len());
                         }
                         // Define in env so the name resolves
-                        self.env.define(td.name.clone(), Type::Named(td.name.clone(), vec![]));
+                        self.env
+                            .define(td.name.clone(), Type::Named(td.name.clone(), vec![]));
                         continue;
                     }
                     self.type_defs.insert(td.name.clone(), td.body.clone());
-                    self.type_invariants.insert(td.name.clone(), td.invariants.clone());
-                    self.env.define(td.name.clone(), Type::Named(td.name.clone(), vec![]));
+                    if let TypeBody::Record(fields) = &td.body {
+                        self.record_fields.insert(
+                            td.name.clone(),
+                            fields
+                                .iter()
+                                .map(|field| {
+                                    (field.name.clone(), self.resolve_type_expr(&field.ty))
+                                })
+                                .collect(),
+                        );
+                    }
+                    self.type_invariants
+                        .insert(td.name.clone(), td.invariants.clone());
+                    self.env
+                        .define(td.name.clone(), Type::Named(td.name.clone(), vec![]));
                     // Track arity for generic type arity checking (E023).
                     if !td.type_params.is_empty() {
-                        self.type_arity.insert(td.name.clone(), td.type_params.len());
+                        self.type_arity
+                            .insert(td.name.clone(), td.type_params.len());
                     }
                     // Register variant constructors so they resolve in expressions
                     if let TypeBody::Sum(variants) = &td.body {
@@ -1038,13 +1494,20 @@ impl Checker {
                                 }
                                 Variant::Tuple(name, te, _) => {
                                     let payload = self.resolve_type_expr(te);
-                                    self.env.define(name.clone(), Type::Fn(vec![payload], Box::new(parent.clone())));
+                                    self.env.define(
+                                        name.clone(),
+                                        Type::Fn(vec![payload], Box::new(parent.clone())),
+                                    );
                                 }
                                 Variant::Record(name, fields, _) => {
-                                    let field_tys: Vec<Type> = fields.iter()
+                                    let field_tys: Vec<Type> = fields
+                                        .iter()
                                         .map(|f| self.resolve_type_expr(&f.ty))
                                         .collect();
-                                    self.env.define(name.clone(), Type::Fn(field_tys, Box::new(parent.clone())));
+                                    self.env.define(
+                                        name.clone(),
+                                        Type::Fn(field_tys, Box::new(parent.clone())),
+                                    );
                                 }
                             }
                         }
@@ -1056,37 +1519,60 @@ impl Checker {
                         &mut self.type_params,
                         fd.type_params.iter().cloned().collect(),
                     );
-                    let params: Vec<Type> = fd.params.iter()
+                    let params: Vec<Type> = fd
+                        .params
+                        .iter()
                         .map(|p| self.resolve_type_expr(&p.ty))
                         .collect();
-                    let ret = self.resolve_type_expr(&fd.return_ty);
+                    let ret = fd
+                        .return_ty
+                        .as_ref()
+                        .map(|ty| self.resolve_type_expr(ty))
+                        .unwrap_or(Type::Unknown);
                     let effective_ret = if fd.is_async {
                         Type::Task(Box::new(ret))
                     } else {
                         ret
                     };
+                    let fn_ty = Type::Fn(params.clone(), Box::new(effective_ret.clone()));
+                    self.remember_global_symbol(
+                        fd.name.clone(),
+                        SymbolKind::Function,
+                        fn_ty.display(),
+                        &fd.span,
+                    );
                     self.type_params = saved_tp;
-                    self.env.define(fd.name.clone(), Type::Fn(params, Box::new(effective_ret)));
+                    self.env.define(fd.name.clone(), fn_ty);
                 }
                 Item::TrfDef(td) => {
                     let saved_tp = std::mem::replace(
                         &mut self.type_params,
                         td.type_params.iter().cloned().collect(),
                     );
-                    let input  = self.resolve_type_expr(&td.input_ty);
+                    let input = self.resolve_type_expr(&td.input_ty);
                     let output = self.resolve_type_expr(&td.output_ty);
-                    self.type_params = saved_tp;
-                    self.env.define(
-                        td.name.clone(),
-                        Type::Trf(Box::new(input), Box::new(output), td.effects.clone()),
+                    let trf_ty = Type::Trf(
+                        Box::new(input.clone()),
+                        Box::new(output.clone()),
+                        td.effects.clone(),
                     );
+                    self.remember_global_symbol(
+                        td.name.clone(),
+                        SymbolKind::Stage,
+                        trf_ty.display(),
+                        &td.span,
+                    );
+                    self.type_params = saved_tp;
+                    self.env.define(td.name.clone(), trf_ty);
                 }
                 Item::AbstractTrfDef(td) => {
-                    self.abstract_trf_registry.insert(td.name.clone(), td.clone());
+                    self.abstract_trf_registry
+                        .insert(td.name.clone(), td.clone());
                     if !td.type_params.is_empty() {
-                        self.type_arity.insert(td.name.clone(), td.type_params.len());
+                        self.type_arity
+                            .insert(td.name.clone(), td.type_params.len());
                     }
-                    let input  = self.resolve_type_expr(&td.input_ty);
+                    let input = self.resolve_type_expr(&td.input_ty);
                     let output = self.resolve_type_expr(&td.output_ty);
                     self.env.define(
                         td.name.clone(),
@@ -1098,21 +1584,32 @@ impl Checker {
                     );
                 }
                 Item::FlwDef(fd) => {
+                    self.remember_global_symbol(
+                        fd.name.clone(),
+                        SymbolKind::Seq,
+                        "Seq".to_string(),
+                        &fd.span,
+                    );
                     // Compute flw type from its steps; register Unknown for now,
                     // will be refined during check_flw_def.
                     self.env.define(fd.name.clone(), Type::Unknown);
                 }
                 Item::AbstractFlwDef(fd) => {
-                    self.abstract_flw_registry.insert(fd.name.clone(), fd.clone());
-                    self.env.define(fd.name.clone(), Type::AbstractFlwTemplate(fd.name.clone()));
+                    self.abstract_flw_registry
+                        .insert(fd.name.clone(), fd.clone());
+                    self.env
+                        .define(fd.name.clone(), Type::AbstractFlwTemplate(fd.name.clone()));
                 }
                 Item::FlwBindingDef(fd) => {
                     self.env.define(fd.name.clone(), Type::Unknown);
                 }
                 Item::CapDef(cd) => {
-                    self.env.define(cd.name.clone(), Type::Named(cd.name.clone(), vec![]));
+                    self.env
+                        .define(cd.name.clone(), Type::Named(cd.name.clone(), vec![]));
                     let scope = CapScope {
-                        fields: cd.fields.iter()
+                        fields: cd
+                            .fields
+                            .iter()
                             .map(|f| (f.name.clone(), f.ty.clone()))
                             .collect(),
                     };
@@ -1124,25 +1621,37 @@ impl Checker {
                         let ty_key = self.resolve_type_expr(first_arg).display();
                         let mut methods = HashMap::new();
                         for method in &id.methods {
-                            let params: Vec<Type> = method.params.iter()
+                            let params: Vec<Type> = method
+                                .params
+                                .iter()
                                 .map(|p| self.resolve_type_expr(&p.ty))
                                 .collect();
-                            let ret = self.resolve_type_expr(&method.return_ty);
+                            let ret = method
+                                .return_ty
+                                .as_ref()
+                                .map(|ty| self.resolve_type_expr(ty))
+                                .unwrap_or(Type::Unknown);
                             methods.insert(method.name.clone(), Type::Fn(params, Box::new(ret)));
                         }
-                        self.impls.insert(
-                            (id.cap_name.clone(), ty_key),
-                            ImplScope { methods },
-                        );
+                        self.impls
+                            .insert((id.cap_name.clone(), ty_key), ImplScope { methods });
                     }
                 }
                 // namespace / use / test / bench / interface are handled elsewhere
                 Item::NamespaceDecl(..)
                 | Item::UseDecl(..)
+                | Item::ImportDecl { .. }
                 | Item::TestDef(..)
                 | Item::BenchDef(..)
-                | Item::InterfaceDecl(..)
                 | Item::InterfaceImplDecl(..) => {}
+                Item::InterfaceDecl(decl) => {
+                    self.remember_global_symbol(
+                        decl.name.clone(),
+                        SymbolKind::Interface,
+                        decl.name.clone(),
+                        &decl.span,
+                    );
+                }
             }
         }
     }
@@ -1152,20 +1661,20 @@ impl Checker {
     fn check_item(&mut self, item: &Item) {
         match item {
             Item::TypeDef(td) => self.check_type_def(td),
-            Item::FnDef(fd)   => self.check_fn_def(fd),
-            Item::TrfDef(td)  => self.check_trf_def(td),
+            Item::FnDef(fd) => self.check_fn_def(fd),
+            Item::TrfDef(td) => self.check_trf_def(td),
             Item::AbstractTrfDef(td) => self.check_abstract_trf_def(td),
-            Item::FlwDef(fd)  => self.check_flw_def(fd),
+            Item::FlwDef(fd) => self.check_flw_def(fd),
             Item::AbstractFlwDef(fd) => self.check_abstract_flw_def(fd),
             Item::FlwBindingDef(fd) => self.check_flw_binding_def(fd),
             Item::InterfaceDecl(id) => self.check_interface_decl(id),
             Item::InterfaceImplDecl(id) => self.check_interface_impl_decl(id),
-            Item::CapDef(cd)  => self.check_cap_def(cd),
+            Item::CapDef(cd) => self.check_cap_def(cd),
             Item::ImplDef(id) => self.check_impl_def(id),
             Item::EffectDef(..) => {}
             Item::TestDef(td) => self.check_test_def(td),
             Item::BenchDef(bd) => self.check_bench_def(bd),
-            Item::NamespaceDecl(..) | Item::UseDecl(..) => {}
+            Item::NamespaceDecl(..) | Item::UseDecl(..) | Item::ImportDecl { .. } => {}
         }
     }
 
@@ -1173,7 +1682,8 @@ impl Checker {
         const BUILTIN_EFFECTS: &[&str] = &["Pure", "Io", "Db", "Network", "File", "Trace", "Emit"];
         for effect in effects {
             if let Effect::Unknown(name) = effect {
-                if !BUILTIN_EFFECTS.contains(&name.as_str()) && !self.effect_registry.contains(name) {
+                if !BUILTIN_EFFECTS.contains(&name.as_str()) && !self.effect_registry.contains(name)
+                {
                     self.type_error(
                         "E052",
                         format!(
@@ -1240,17 +1750,26 @@ impl Checker {
     fn check_interface_decl(&mut self, id: &InterfaceDecl) {
         if let Some(super_name) = &id.super_interface {
             if !self.interface_registry.interfaces.contains_key(super_name) {
-                self.type_error("E041", format!("undefined super interface `{}`", super_name), &id.span);
+                self.type_error(
+                    "E041",
+                    format!("undefined super interface `{}`", super_name),
+                    &id.span,
+                );
                 return;
             }
         }
 
         let mut methods = HashMap::new();
         for method in &id.methods {
-            let ty = self.resolve_type_expr_with_self(&method.ty, Some(&Type::Named("Self".into(), vec![])));
+            let ty = self
+                .resolve_type_expr_with_self(&method.ty, Some(&Type::Named("Self".into(), vec![])));
             methods.insert(method.name.clone(), ty);
         }
-        self.interface_registry.register_interface(id.name.clone(), id.super_interface.clone(), methods);
+        self.interface_registry.register_interface(
+            id.name.clone(),
+            id.super_interface.clone(),
+            methods,
+        );
     }
 
     fn check_interface_impl_decl(&mut self, id: &InterfaceImplDecl) {
@@ -1258,7 +1777,11 @@ impl Checker {
 
         for interface_name in &id.interface_names {
             let Some(interface_def) = self.interface_registry.interfaces.get(interface_name) else {
-                self.type_error("E041", format!("undefined interface `{}`", interface_name), &id.span);
+                self.type_error(
+                    "E041",
+                    format!("undefined interface `{}`", interface_name),
+                    &id.span,
+                );
                 continue;
             };
             let super_interface = interface_def.super_interface.clone();
@@ -1266,7 +1789,9 @@ impl Checker {
 
             if let Some(super_name) = &super_interface {
                 let satisfied_by_same_decl = id.interface_names.iter().any(|n| n == super_name);
-                let satisfied_by_prior_impl = self.interface_registry.is_implemented(super_name, &id.type_name);
+                let satisfied_by_prior_impl = self
+                    .interface_registry
+                    .is_implemented(super_name, &id.type_name);
                 if !satisfied_by_same_decl && !satisfied_by_prior_impl {
                     self.type_error(
                         "E043",
@@ -1280,7 +1805,11 @@ impl Checker {
             }
 
             if id.is_auto {
-                self.synthesize_interface_impl_for_type_name(&id.type_name, interface_name, &id.span);
+                self.synthesize_interface_impl_for_type_name(
+                    &id.type_name,
+                    interface_name,
+                    &id.span,
+                );
                 continue;
             }
 
@@ -1294,7 +1823,10 @@ impl Checker {
                 if !provided.contains_key(expected_name) {
                     self.type_error(
                         "E042",
-                        format!("impl for `{}` is missing method `{}` required by interface `{}`", id.type_name, expected_name, interface_name),
+                        format!(
+                            "impl for `{}` is missing method `{}` required by interface `{}`",
+                            id.type_name, expected_name, interface_name
+                        ),
                         &id.span,
                     );
                 }
@@ -1304,7 +1836,10 @@ impl Checker {
                 let Some(expected) = expected_methods.get(method_name) else {
                     self.type_error(
                         "E042",
-                        format!("method `{}` is not declared in interface `{}`", method_name, interface_name),
+                        format!(
+                            "method `{}` is not declared in interface `{}`",
+                            method_name, interface_name
+                        ),
                         &id.span,
                     );
                     continue;
@@ -1335,14 +1870,22 @@ impl Checker {
                         "E042",
                         format!(
                             "method `{}` for `{}` has type `{}`, expected `{}`",
-                            method_name, id.type_name, body_ty.display(), expected.display()
+                            method_name,
+                            id.type_name,
+                            body_ty.display(),
+                            expected.display()
                         ),
                         &id.span,
                     );
                 }
             }
 
-            self.interface_registry.register_impl(interface_name.clone(), id.type_name.clone(), provided, false);
+            self.interface_registry.register_impl(
+                interface_name.clone(),
+                id.type_name.clone(),
+                provided,
+                false,
+            );
         }
     }
 
@@ -1379,13 +1922,16 @@ impl Checker {
     /// List<T> / Option<T> / Result<T,E> are considered to implement an interface
     /// when their element type(s) do.
     fn is_type_implementing(&self, interface_name: &str, ty: &Type) -> bool {
-        if self.interface_registry.is_implemented(interface_name, &ty.display()) {
+        if self
+            .interface_registry
+            .is_implemented(interface_name, &ty.display())
+        {
             return true;
         }
         match ty {
-            Type::List(inner)       => self.is_type_implementing(interface_name, inner),
-            Type::Option(inner)     => self.is_type_implementing(interface_name, inner),
-            Type::Result(ok, _err)  => self.is_type_implementing(interface_name, ok),
+            Type::List(inner) => self.is_type_implementing(interface_name, inner),
+            Type::Option(inner) => self.is_type_implementing(interface_name, inner),
+            Type::Result(ok, _err) => self.is_type_implementing(interface_name, ok),
             _ => false,
         }
     }
@@ -1464,7 +2010,11 @@ impl Checker {
     // ── cap_def (v0.4.0) ──────────────────────────────────────────────────────
 
     fn check_cap_def(&mut self, cd: &CapDef) {
-        self.type_warning("W010", "`cap` is deprecated. Use `interface` instead.", &cd.span);
+        self.type_warning(
+            "W010",
+            "`cap` is deprecated. Use `interface` instead.",
+            &cd.span,
+        );
         // Validate that each field's type expression is well-formed in type_params scope.
         let saved_tp = std::mem::replace(
             &mut self.type_params,
@@ -1479,18 +2029,18 @@ impl Checker {
     // ── impl_def (v0.4.0) ─────────────────────────────────────────────────────
 
     fn check_impl_def(&mut self, id: &ImplDef) {
-        self.type_warning("W010", "`cap`-style `impl` is deprecated. Use `impl Interface for Type` instead.", &id.span);
+        self.type_warning(
+            "W010",
+            "`cap`-style `impl` is deprecated. Use `impl Interface for Type` instead.",
+            &id.span,
+        );
         // E020: cap must exist.
         if !self.caps.contains_key(&id.cap_name) {
             // Only error if it's not a built-in cap either.
             let is_builtin = matches!(id.cap_name.as_str(), "Eq" | "Ord" | "Show");
             if !is_builtin {
                 let span = &id.span;
-                self.type_error(
-                    "E020",
-                    format!("undefined cap `{}`", id.cap_name),
-                    span,
-                );
+                self.type_error("E020", format!("undefined cap `{}`", id.cap_name), span);
                 return;
             }
         }
@@ -1527,13 +2077,14 @@ impl Checker {
 
     fn check_test_def(&mut self, td: &TestDef) {
         // Test bodies run with Io+File effects allowed (assert builtins are pure)
-        let saved_effects = std::mem::replace(
-            &mut self.current_effects,
-            vec![Effect::Io, Effect::File],
-        );
+        let saved_effects =
+            std::mem::replace(&mut self.current_effects, vec![Effect::Io, Effect::File]);
         self.env.push();
         // Register assert builtins as visible inside test bodies
-        self.env.define("assert".to_string(), Type::Fn(vec![Type::Bool], Box::new(Type::Unit)));
+        self.env.define(
+            "assert".to_string(),
+            Type::Fn(vec![Type::Bool], Box::new(Type::Unit)),
+        );
         self.env.define("assert_eq".to_string(), Type::Unknown);
         self.env.define("assert_ne".to_string(), Type::Unknown);
         self.check_block(&td.body);
@@ -1543,10 +2094,7 @@ impl Checker {
 
     fn check_bench_def(&mut self, bd: &BenchDef) {
         // Bench bodies may use Io effect only; Db/Network/File are disallowed (E064).
-        let saved_effects = std::mem::replace(
-            &mut self.current_effects,
-            vec![Effect::Io],
-        );
+        let saved_effects = std::mem::replace(&mut self.current_effects, vec![Effect::Io]);
         self.env.push();
         self.check_block(&bd.body);
         self.env.pop();
@@ -1567,14 +2115,20 @@ impl Checker {
         for p in &fd.params {
             self.validate_type_expr_arity(&p.ty);
         }
-        self.validate_type_expr_arity(&fd.return_ty);
+        if let Some(return_ty) = &fd.return_ty {
+            self.validate_type_expr_arity(return_ty);
+        }
 
         // Set chain context based on return type (v0.5.0).
-        let ret_resolved = self.resolve_type_expr(&fd.return_ty);
+        let ret_resolved = fd
+            .return_ty
+            .as_ref()
+            .map(|ty| self.resolve_type_expr(ty))
+            .unwrap_or(Type::Unknown);
         let saved_chain = self.chain_context.take();
         self.chain_context = match &ret_resolved {
             Type::Result(_, _) => Some(ret_resolved.clone()),
-            Type::Option(_)    => Some(ret_resolved.clone()),
+            Type::Option(_) => Some(ret_resolved.clone()),
             Type::Named(n, _) if n == "Result" || n == "Option" => Some(ret_resolved.clone()),
             _ => None,
         };
@@ -1585,15 +2139,31 @@ impl Checker {
             self.env.define(p.name.clone(), ty);
         }
 
-        let body_ty    = self.check_block(&fd.body);
-        let return_ty  = self.resolve_type_expr(&fd.return_ty);
+        let body_ty = self.check_block(&fd.body);
+        let return_ty = if let Some(return_ty) = &fd.return_ty {
+            self.resolve_type_expr(return_ty)
+        } else {
+            if body_ty == Type::Unknown {
+                self.type_error(
+                    "E074",
+                    format!(
+                        "cannot infer return type for fn `{}`; add explicit return type for recursive functions",
+                        fd.name
+                    ),
+                    &fd.span,
+                );
+            }
+            body_ty.clone()
+        };
 
         if !body_ty.is_compatible(&return_ty) {
             self.type_error(
                 "E001",
                 format!(
                     "fn `{}`: body type `{}` does not match return type `{}`",
-                    fd.name, body_ty.display(), return_ty.display()
+                    fd.name,
+                    body_ty.display(),
+                    return_ty.display()
                 ),
                 &fd.body.span,
             );
@@ -1627,7 +2197,7 @@ impl Checker {
             self.env.define(p.name.clone(), ty);
         }
 
-        let body_ty   = self.check_block(&td.body);
+        let body_ty = self.check_block(&td.body);
         let output_ty = self.resolve_type_expr(&td.output_ty);
 
         if !body_ty.is_compatible(&output_ty) {
@@ -1635,7 +2205,9 @@ impl Checker {
                 "E001",
                 format!(
                     "trf `{}`: body type `{}` does not match output type `{}`",
-                    td.name, body_ty.display(), output_ty.display()
+                    td.name,
+                    body_ty.display(),
+                    output_ty.display()
                 ),
                 &td.body.span,
             );
@@ -1658,11 +2230,7 @@ impl Checker {
         for step_name in &fd.steps {
             match self.env.lookup(step_name).cloned() {
                 None => {
-                    self.type_error(
-                        "E002",
-                        format!("undefined: `{}`", step_name),
-                        &fd.span,
-                    );
+                    self.type_error("E002", format!("undefined: `{}`", step_name), &fd.span);
                     current_output = Some(Type::Error);
                 }
                 Some(ty) => {
@@ -1676,7 +2244,12 @@ impl Checker {
                                         "flw `{}`: `{}` outputs `{}` but `{}` expects `{}`",
                                         fd.name,
                                         // previous step name
-                                        fd.steps[fd.steps.iter().position(|s| s == step_name).unwrap().saturating_sub(1)],
+                                        fd.steps[fd
+                                            .steps
+                                            .iter()
+                                            .position(|s| s == step_name)
+                                            .unwrap()
+                                            .saturating_sub(1)],
                                         prev_out.display(),
                                         step_name,
                                         input.display(),
@@ -1687,14 +2260,16 @@ impl Checker {
                         } else {
                             self.type_error(
                                 "E003",
-                                format!("`{}` is not a trf or fn, cannot be used in flw", step_name),
+                                format!(
+                                    "`{}` is not a trf or fn, cannot be used in flw",
+                                    step_name
+                                ),
                                 &fd.span,
                             );
                         }
                     }
                     // Advance current output.
-                    current_output = ty.as_callable().map(|(_, o)| o.clone())
-                        .or(Some(ty));
+                    current_output = ty.as_callable().map(|(_, o)| o.clone()).or(Some(ty));
                 }
             }
         }
@@ -1704,8 +2279,14 @@ impl Checker {
             if let Some(last_ty) = self.env.lookup(last_name).cloned() {
                 if let Some(first_name) = fd.steps.first() {
                     if let Some(first_ty) = self.env.lookup(first_name).cloned() {
-                        let input  = first_ty.as_callable().map(|(i, _)| i.clone()).unwrap_or(Type::Unknown);
-                        let output = last_ty.as_callable().map(|(_, o)| o.clone()).unwrap_or(Type::Unknown);
+                        let input = first_ty
+                            .as_callable()
+                            .map(|(i, _)| i.clone())
+                            .unwrap_or(Type::Unknown);
+                        let output = last_ty
+                            .as_callable()
+                            .map(|(_, o)| o.clone())
+                            .unwrap_or(Type::Unknown);
                         self.env.define(
                             fd.name.clone(),
                             Type::Trf(Box::new(input), Box::new(output), vec![]),
@@ -1761,7 +2342,10 @@ impl Checker {
             let Some(slot) = slot_map.get(slot_name) else {
                 self.type_error(
                     "E049",
-                    format!("unknown slot `{}` in abstract seq `{}`", slot_name, template.name),
+                    format!(
+                        "unknown slot `{}` in abstract seq `{}`",
+                        slot_name, template.name
+                    ),
                     &fd.span,
                 );
                 has_binding_error = true;
@@ -1769,7 +2353,8 @@ impl Checker {
             };
             bound_slots.insert(slot_name.clone());
 
-            let Some((impl_name, impl_ty)) = self.resolve_slot_impl_type(slot_impl, &fd.span) else {
+            let Some((impl_name, impl_ty)) = self.resolve_slot_impl_type(slot_impl, &fd.span)
+            else {
                 has_binding_error = true;
                 continue;
             };
@@ -1794,7 +2379,11 @@ impl Checker {
                         } else {
                             format!(
                                 " {}",
-                                effects.iter().map(|e| format!("!{:?}", e)).collect::<Vec<_>>().join(" ")
+                                effects
+                                    .iter()
+                                    .map(|e| format!("!{:?}", e))
+                                    .collect::<Vec<_>>()
+                                    .join(" ")
                             )
                         };
                         format!("{} -> {}{}", input.display(), output.display(), eff_str)
@@ -1816,17 +2405,17 @@ impl Checker {
                 self.type_error(
                     "E048",
                     format!(
-                          "slot `{}` in abstract seq `{}` expects `{}` -> `{}`{}, got `{}` from `{}`",
-                          slot_name,
-                          template.name,
-                          expected_input.display(),
-                          expected_output.display(),
-                          expected_eff_str,
-                          actual_sig,
-                          impl_name
-                      ),
-                      &fd.span,
-                  );
+                        "slot `{}` in abstract seq `{}` expects `{}` -> `{}`{}, got `{}` from `{}`",
+                        slot_name,
+                        template.name,
+                        expected_input.display(),
+                        expected_output.display(),
+                        expected_eff_str,
+                        actual_sig,
+                        impl_name
+                    ),
+                    &fd.span,
+                );
                 has_binding_error = true;
                 continue;
             }
@@ -1863,8 +2452,10 @@ impl Checker {
                 }
             };
             let last_slot = template.slots.last().unwrap();
-            let (input_ty, _, _) = self.resolve_flw_slot_signature_with_subst(first_slot, &type_subst);
-            let (_, output_ty, _) = self.resolve_flw_slot_signature_with_subst(last_slot, &type_subst);
+            let (input_ty, _, _) =
+                self.resolve_flw_slot_signature_with_subst(first_slot, &type_subst);
+            let (_, output_ty, _) =
+                self.resolve_flw_slot_signature_with_subst(last_slot, &type_subst);
             self.env.define(
                 fd.name.clone(),
                 Type::Trf(
@@ -1878,7 +2469,11 @@ impl Checker {
                 fd.name.clone(),
                 Type::PartialFlw {
                     template: fd.template.clone(),
-                    type_args: fd.type_args.iter().map(|arg| self.resolve_type_expr(arg)).collect(),
+                    type_args: fd
+                        .type_args
+                        .iter()
+                        .map(|arg| self.resolve_type_expr(arg))
+                        .collect(),
                     unbound_slots,
                 },
             );
@@ -1898,14 +2493,20 @@ impl Checker {
                 Box::new(self.resolve_type_expr_with_subst(a, subst)),
                 Box::new(self.resolve_type_expr_with_subst(b, subst)),
             ),
-            TypeExpr::TrfFn { input, output, effects, .. } => Type::Trf(
+            TypeExpr::TrfFn {
+                input,
+                output,
+                effects,
+                ..
+            } => Type::Trf(
                 Box::new(self.resolve_type_expr_with_subst(input, subst)),
                 Box::new(self.resolve_type_expr_with_subst(output, subst)),
                 effects.clone(),
             ),
-            TypeExpr::Named(name, args, _) if args.is_empty() => {
-                subst.get(name).cloned().unwrap_or_else(|| self.resolve_type_expr(te))
-            }
+            TypeExpr::Named(name, args, _) if args.is_empty() => subst
+                .get(name)
+                .cloned()
+                .unwrap_or_else(|| self.resolve_type_expr(te)),
             TypeExpr::Named(name, args, _) => {
                 let resolved_args: Vec<Type> = args
                     .iter()
@@ -1919,8 +2520,12 @@ impl Checker {
                         .zip(resolved_args.iter().cloned())
                         .collect();
                     return Type::AbstractTrf {
-                        input: Box::new(self.resolve_type_expr_with_subst(&td.input_ty, &type_subst)),
-                        output: Box::new(self.resolve_type_expr_with_subst(&td.output_ty, &type_subst)),
+                        input: Box::new(
+                            self.resolve_type_expr_with_subst(&td.input_ty, &type_subst),
+                        ),
+                        output: Box::new(
+                            self.resolve_type_expr_with_subst(&td.output_ty, &type_subst),
+                        ),
                         effects: td.effects.clone(),
                     };
                 }
@@ -1930,14 +2535,20 @@ impl Checker {
                     "Float" => Type::Float,
                     "String" => Type::String,
                     "Unit" => Type::Unit,
-                    "List" if resolved_args.len() == 1 => Type::List(Box::new(resolved_args[0].clone())),
-                    "Map" if resolved_args.len() == 2 => {
-                        Type::Map(Box::new(resolved_args[0].clone()), Box::new(resolved_args[1].clone()))
+                    "List" if resolved_args.len() == 1 => {
+                        Type::List(Box::new(resolved_args[0].clone()))
                     }
-                    "Option" if resolved_args.len() == 1 => Type::Option(Box::new(resolved_args[0].clone())),
-                    "Result" if resolved_args.len() == 2 => {
-                        Type::Result(Box::new(resolved_args[0].clone()), Box::new(resolved_args[1].clone()))
+                    "Map" if resolved_args.len() == 2 => Type::Map(
+                        Box::new(resolved_args[0].clone()),
+                        Box::new(resolved_args[1].clone()),
+                    ),
+                    "Option" if resolved_args.len() == 1 => {
+                        Type::Option(Box::new(resolved_args[0].clone()))
                     }
+                    "Result" if resolved_args.len() == 2 => Type::Result(
+                        Box::new(resolved_args[0].clone()),
+                        Box::new(resolved_args[1].clone()),
+                    ),
                     _ => Type::Named(name.clone(), resolved_args),
                 }
             }
@@ -1969,7 +2580,12 @@ impl Checker {
     ) -> (Type, Type, Vec<Effect>) {
         if let Some(slot_ty) = &slot.abstract_trf_ty {
             match self.resolve_type_expr_with_subst(slot_ty, subst) {
-                Type::AbstractTrf { input, output, effects } | Type::Trf(input, output, effects) => {
+                Type::AbstractTrf {
+                    input,
+                    output,
+                    effects,
+                }
+                | Type::Trf(input, output, effects) => {
                     return ((*input).clone(), (*output).clone(), effects);
                 }
                 other => return (other, Type::Unknown, Vec::new()),
@@ -2021,9 +2637,25 @@ impl Checker {
                     Type::Task(inner) => *inner,
                     other => other,
                 };
+                if let Pattern::Bind(name, span) = &b.pattern {
+                    if effective_ty == Type::Unknown {
+                        self.type_warning(
+                            "W001",
+                            format!("type of `{}` could not be resolved (Unknown)", name),
+                            span,
+                        );
+                    }
+                }
+                self.check_record_destructure_bind(&b.pattern, &effective_ty, &b.span);
                 if let Some(annotated_ty_expr) = &b.annotated_ty {
                     let annotated_ty = self.resolve_type_expr(annotated_ty_expr);
-                    self.check_typed_bind_annotation(&b.pattern, &effective_ty, annotated_ty_expr, &annotated_ty, &b.expr);
+                    self.check_typed_bind_annotation(
+                        &b.pattern,
+                        &effective_ty,
+                        annotated_ty_expr,
+                        &annotated_ty,
+                        &b.expr,
+                    );
                     self.check_pattern_bindings(&b.pattern, &annotated_ty);
                 } else {
                     self.check_pattern_bindings(&b.pattern, &effective_ty);
@@ -2044,9 +2676,7 @@ impl Checker {
                         );
                         Type::Unknown
                     }
-                    Some(ctx) => {
-                        self.check_chain_expr_type(&expr_ty, ctx, &c.span)
-                    }
+                    Some(ctx) => self.check_chain_expr_type(&expr_ty, ctx, &c.span),
                 };
                 self.env.define(c.name.clone(), inner_ty);
             }
@@ -2061,7 +2691,11 @@ impl Checker {
             Stmt::ForIn(f) => {
                 // E067: for inside collect is not supported in v1.9.0
                 if self.in_collect {
-                    self.type_error("E067", "`for` inside `collect` block is not supported in v1.9.0", &f.span);
+                    self.type_error(
+                        "E067",
+                        "`for` inside `collect` block is not supported in v1.9.0",
+                        &f.span,
+                    );
                     return;
                 }
                 let iter_ty = self.check_expr(&f.iter);
@@ -2090,10 +2724,10 @@ impl Checker {
             Type::Task(inner) => inner.as_ref(),
             other => other,
         };
-        let is_result_ctx = matches!(ctx, Type::Result(_, _))
-            || matches!(ctx, Type::Named(n, _) if n == "Result");
-        let is_option_ctx = matches!(ctx, Type::Option(_))
-            || matches!(ctx, Type::Named(n, _) if n == "Option");
+        let is_result_ctx =
+            matches!(ctx, Type::Result(_, _)) || matches!(ctx, Type::Named(n, _) if n == "Result");
+        let is_option_ctx =
+            matches!(ctx, Type::Option(_)) || matches!(ctx, Type::Named(n, _) if n == "Option");
         match effective_ty {
             Type::Result(inner, _) if is_result_ctx => *inner.clone(),
             Type::Named(n, args) if n == "Result" && args.len() >= 1 && is_result_ctx => {
@@ -2140,12 +2774,54 @@ impl Checker {
 
             Pattern::Record(fields, _) => {
                 for fp in fields {
-                    let field_ty = self.lookup_field_type(ty, &fp.name);
-                    match &fp.pattern {
-                        Some(p) => self.check_pattern_bindings(p, &field_ty),
-                        None    => self.env.define(fp.name.clone(), field_ty),
+                    match fp {
+                        PatternField::Pun(name, _) => {
+                            let field_ty = self.lookup_field_type(ty, name);
+                            self.env.define(name.clone(), field_ty);
+                        }
+                        PatternField::Alias(name, p, _) => {
+                            let field_ty = self.lookup_field_type(ty, name);
+                            self.check_pattern_bindings(p, &field_ty);
+                        }
+                        PatternField::Wildcard(_) => {}
                     }
                 }
+            }
+        }
+    }
+
+    fn check_record_destructure_bind(&mut self, pat: &Pattern, ty: &Type, span: &Span) {
+        let Pattern::Record(fields, _) = pat else {
+            return;
+        };
+        let type_name = match ty {
+            Type::Named(name, _) => name.clone(),
+            _ => {
+                self.type_error("E072", "destructuring bind requires a record type", span);
+                return;
+            }
+        };
+        let Some(body) = self.type_defs.get(&type_name) else {
+            self.type_error("E072", "destructuring bind requires a record type", span);
+            return;
+        };
+        let TypeBody::Record(record_fields) = body else {
+            self.type_error("E072", "destructuring bind requires a record type", span);
+            return;
+        };
+        let record_field_names: HashSet<String> =
+            record_fields.iter().map(|f| f.name.clone()).collect();
+        for field in fields {
+            let name = match field {
+                PatternField::Pun(name, _) | PatternField::Alias(name, _, _) => name,
+                PatternField::Wildcard(_) => continue,
+            };
+            if !record_field_names.contains(name) {
+                self.type_error(
+                    "E073",
+                    format!("record destructuring field `{}` does not exist", name),
+                    field.span(),
+                );
             }
         }
     }
@@ -2175,9 +2851,13 @@ impl Checker {
             return;
         };
 
-        if let Some((field_name, field_ty, invariants)) = self.single_field_invariant_state(annotated_ty) {
+        if let Some((field_name, field_ty, invariants)) =
+            self.single_field_invariant_state(annotated_ty)
+        {
             if expr_ty.is_compatible(&field_ty) {
-                if let Some(false) = self.evaluate_invariants_for_literal(&field_name, &invariants, expr) {
+                if let Some(false) =
+                    self.evaluate_invariants_for_literal(&field_name, &invariants, expr)
+                {
                     self.type_error(
                         "E046",
                         format!(
@@ -2209,7 +2889,10 @@ impl Checker {
             .unwrap_or(false)
     }
 
-    fn single_field_invariant_state(&self, annotated_ty: &Type) -> Option<(String, Type, Vec<Expr>)> {
+    fn single_field_invariant_state(
+        &self,
+        annotated_ty: &Type,
+    ) -> Option<(String, Type, Vec<Expr>)> {
         let Type::Named(type_name, _) = annotated_ty else {
             return None;
         };
@@ -2319,8 +3002,12 @@ impl Checker {
                 _ => None,
             },
             BinOp::Div => match (lhs, rhs) {
-                (StaticValue::Int(a), StaticValue::Int(b)) if b != 0 => Some(StaticValue::Int(a / b)),
-                (StaticValue::Float(a), StaticValue::Float(b)) if b != 0.0 => Some(StaticValue::Float(a / b)),
+                (StaticValue::Int(a), StaticValue::Int(b)) if b != 0 => {
+                    Some(StaticValue::Int(a / b))
+                }
+                (StaticValue::Float(a), StaticValue::Float(b)) if b != 0.0 => {
+                    Some(StaticValue::Float(a / b))
+                }
                 _ => None,
             },
             BinOp::Eq => Some(StaticValue::Bool(lhs == rhs)),
@@ -2329,7 +3016,15 @@ impl Checker {
             BinOp::Gt => Self::eval_static_compare(lhs, rhs, |o| o > 0),
             BinOp::LtEq => Self::eval_static_compare(lhs, rhs, |o| o <= 0),
             BinOp::GtEq => Self::eval_static_compare(lhs, rhs, |o| o >= 0),
-            BinOp::NullCoalesce => None,  // not statically evaluable in general
+            BinOp::And => match (lhs, rhs) {
+                (StaticValue::Bool(a), StaticValue::Bool(b)) => Some(StaticValue::Bool(a && b)),
+                _ => None,
+            },
+            BinOp::Or => match (lhs, rhs) {
+                (StaticValue::Bool(a), StaticValue::Bool(b)) => Some(StaticValue::Bool(a || b)),
+                _ => None,
+            },
+            BinOp::NullCoalesce => None, // not statically evaluable in general
         }
     }
 
@@ -2361,22 +3056,36 @@ impl Checker {
 
     fn is_slug_string(s: &str) -> bool {
         !s.is_empty()
-            && s.chars().all(|ch| ch.is_ascii_lowercase() || ch.is_ascii_digit() || ch == '-')
+            && s.chars()
+                .all(|ch| ch.is_ascii_lowercase() || ch.is_ascii_digit() || ch == '-')
     }
 
     /// Determine the payload type of a variant pattern.
-    fn resolve_variant_payload(&self, variant_name: &str, scrutinee_ty: &Type, _span: &Span) -> Type {
+    fn resolve_variant_payload(
+        &self,
+        variant_name: &str,
+        scrutinee_ty: &Type,
+        _span: &Span,
+    ) -> Type {
         let type_name = match scrutinee_ty {
             Type::Named(n, _) => n.clone(),
             Type::Option(inner) => {
                 // some(x) ↁEinner type; none ↁEUnit
-                if variant_name == "some" { return *inner.clone(); }
-                if variant_name == "none" { return Type::Unit; }
+                if variant_name == "some" {
+                    return *inner.clone();
+                }
+                if variant_name == "none" {
+                    return Type::Unit;
+                }
                 return Type::Unknown;
             }
             Type::Result(ok, err) => {
-                if variant_name == "ok"  { return *ok.clone(); }
-                if variant_name == "err" { return *err.clone(); }
+                if variant_name == "ok" {
+                    return *ok.clone();
+                }
+                if variant_name == "err" {
+                    return *err.clone();
+                }
                 return Type::Unknown;
             }
             _ => return Type::Unknown,
@@ -2387,8 +3096,8 @@ impl Checker {
                 for v in variants {
                     if v.name() == variant_name {
                         return match v {
-                            Variant::Unit(_, _)         => Type::Unit,
-                            Variant::Tuple(_, te, _)    => self.resolve_type_expr(te),
+                            Variant::Unit(_, _) => Type::Unit,
+                            Variant::Tuple(_, te, _) => self.resolve_type_expr(te),
                             Variant::Record(_, _fields, _) => {
                                 // Record variant payload  Ekeep as Named for field lookup
                                 Type::Named(type_name.clone(), vec![])
@@ -2440,11 +3149,11 @@ impl Checker {
             // literals (4-15)
             Expr::Lit(lit, span) => {
                 let ty = match lit {
-                Lit::Int(_)   => Type::Int,
-                Lit::Float(_) => Type::Float,
-                Lit::Str(_)   => Type::String,
-                Lit::Bool(_)  => Type::Bool,
-                Lit::Unit     => Type::Unit,
+                    Lit::Int(_) => Type::Int,
+                    Lit::Float(_) => Type::Float,
+                    Lit::Str(_) => Type::String,
+                    Lit::Bool(_) => Type::Bool,
+                    Lit::Unit => Type::Unit,
                 };
                 self.remember_type(span, &ty);
                 ty
@@ -2452,6 +3161,9 @@ impl Checker {
 
             // identifier (4-15)
             Expr::Ident(name, span) => {
+                if let Some(def_span) = self.global_def_spans.get(name).cloned() {
+                    self.def_at.insert(span.clone(), def_span);
+                }
                 let ty = match self.env.lookup(name).cloned() {
                     Some(ty) => {
                         self.check_symbol_visibility(name, span);
@@ -2468,6 +3180,31 @@ impl Checker {
 
             // field access: expr.field (4-15)
             Expr::FieldAccess(obj, field, span) => {
+                if let Expr::Ident(namespace, _) = obj.as_ref() {
+                    if let Some(scope) = self.imported_namespaces.get(namespace) {
+                        let ty = match scope.symbols.get(field) {
+                            Some((ty, vis)) if *vis != Visibility::Private => ty.clone(),
+                            None => {
+                                self.type_error(
+                                    "E002",
+                                    format!("`{}.{}` is not exported", namespace, field),
+                                    span,
+                                );
+                                Type::Error
+                            }
+                            Some(_) => {
+                                self.type_error(
+                                    "E002",
+                                    format!("`{}.{}` is not exported", namespace, field),
+                                    span,
+                                );
+                                Type::Error
+                            }
+                        };
+                        self.remember_type(span, &ty);
+                        return ty;
+                    }
+                }
                 let obj_ty = self.check_expr(obj);
                 let ty = self.resolve_field_access(&obj_ty, field, span);
                 self.remember_type(span, &ty);
@@ -2491,23 +3228,37 @@ impl Checker {
                         let mut vars: HashSet<String> = HashSet::new();
                         fn collect_vars(ty: &Type, out: &mut HashSet<String>) {
                             match ty {
-                                Type::Var(n) => { out.insert(n.clone()); }
+                                Type::Var(n) => {
+                                    out.insert(n.clone());
+                                }
                                 Type::List(t) | Type::Option(t) => collect_vars(t, out),
-                                Type::Map(k, v) => { collect_vars(k, out); collect_vars(v, out); }
+                                Type::Map(k, v) => {
+                                    collect_vars(k, out);
+                                    collect_vars(v, out);
+                                }
                                 Type::Result(t, e) | Type::Arrow(t, e) => {
-                                    collect_vars(t, out); collect_vars(e, out);
+                                    collect_vars(t, out);
+                                    collect_vars(e, out);
                                 }
                                 Type::Fn(ps, r) => {
-                                    for p in ps { collect_vars(p, out); }
+                                    for p in ps {
+                                        collect_vars(p, out);
+                                    }
                                     collect_vars(r, out);
                                 }
-                                  Type::Named(_, args) | Type::Cap(_, args) | Type::Interface(_, args) => {
-                                      for a in args { collect_vars(a, out); }
-                                  }
-                                  _ => {}
+                                Type::Named(_, args)
+                                | Type::Cap(_, args)
+                                | Type::Interface(_, args) => {
+                                    for a in args {
+                                        collect_vars(a, out);
+                                    }
+                                }
+                                _ => {}
                             }
                         }
-                        for p in params.iter() { collect_vars(p, &mut vars); }
+                        for p in params.iter() {
+                            collect_vars(p, &mut vars);
+                        }
                         collect_vars(ret, &mut vars);
 
                         // Build instantiation substitution.
@@ -2523,7 +3274,8 @@ impl Checker {
                                 "E001",
                                 format!(
                                     "expected {} argument(s), got {}",
-                                    inst_params.len(), arg_tys.len()
+                                    inst_params.len(),
+                                    arg_tys.len()
                                 ),
                                 span,
                             );
@@ -2537,7 +3289,11 @@ impl Checker {
                                 match unify(&ap, &aa) {
                                     Ok(s) => subst = s.compose(subst),
                                     Err(msg) => {
-                                        let code = if msg.contains("infinite type") { "E019" } else { "E018" };
+                                        let code = if msg.contains("infinite type") {
+                                            "E019"
+                                        } else {
+                                            "E018"
+                                        };
                                         self.type_error(code, msg, span);
                                         return Type::Error;
                                     }
@@ -2553,7 +3309,8 @@ impl Checker {
                                 "E001",
                                 format!(
                                     "expected `{}`, got `{}`",
-                                    input.display(), arg_ty.display()
+                                    input.display(),
+                                    arg_ty.display()
                                 ),
                                 span,
                             );
@@ -2566,7 +3323,11 @@ impl Checker {
                                     if !extra_arg.is_compatible(next_in) {
                                         self.type_error(
                                             "E001",
-                                            format!("expected `{}`, got `{}`", next_in.display(), extra_arg.display()),
+                                            format!(
+                                                "expected `{}`, got `{}`",
+                                                next_in.display(),
+                                                extra_arg.display()
+                                            ),
                                             span,
                                         );
                                     }
@@ -2577,22 +3338,23 @@ impl Checker {
                         }
                         result
                     }
-                      Type::Trf(input, output, _) => {
-                          let arg_ty = arg_tys.first().cloned().unwrap_or(Type::Unit);
-                          if !arg_ty.is_compatible(input) {
+                    Type::Trf(input, output, _) => {
+                        let arg_ty = arg_tys.first().cloned().unwrap_or(Type::Unit);
+                        if !arg_ty.is_compatible(input) {
                             self.type_error(
                                 "E001",
                                 format!(
                                     "expected `{}`, got `{}`",
-                                    input.display(), arg_ty.display()
+                                    input.display(),
+                                    arg_ty.display()
                                 ),
                                 span,
                             );
-                          }
-                          *output.clone()
-                      }
-                      Type::AbstractTrf { .. } => {
-                          self.type_error(
+                        }
+                        *output.clone()
+                    }
+                    Type::AbstractTrf { .. } => {
+                        self.type_error(
                               "E051",
                               format!(
                                   "cannot call abstract stage `{}` directly; bind it into an abstract seq slot first",
@@ -2600,9 +3362,9 @@ impl Checker {
                               ),
                               span,
                           );
-                          Type::Error
-                      }
-                      Type::Unknown | Type::Error => Type::Unknown,
+                        Type::Error
+                    }
+                    Type::Unknown | Type::Error => Type::Unknown,
                     other => {
                         self.type_error(
                             "E001",
@@ -2642,7 +3404,9 @@ impl Checker {
                                     "E003",
                                     format!(
                                         "pipeline type mismatch: `{}` ↁE`{}` (expected `{}`)",
-                                        current.display(), step_ty.display(), input.display()
+                                        current.display(),
+                                        step_ty.display(),
+                                        input.display()
                                     ),
                                     span,
                                 );
@@ -2692,7 +3456,8 @@ impl Checker {
                                 "E001",
                                 format!(
                                     "if branches have different types: `{}` vs `{}`",
-                                    then_ty.display(), else_ty.display()
+                                    then_ty.display(),
+                                    else_ty.display()
                                 ),
                                 span,
                             );
@@ -2718,7 +3483,11 @@ impl Checker {
                 self.in_collect = saved_in_collect;
                 self.env.pop();
                 // Represent as Arrow(Unknown, body_ty) for single-param closures
-                let input_ty = if params.len() == 1 { Type::Unknown } else { Type::Unit };
+                let input_ty = if params.len() == 1 {
+                    Type::Unknown
+                } else {
+                    Type::Unit
+                };
                 Type::Arrow(Box::new(input_ty), Box::new(body_ty))
             }
 
@@ -2745,7 +3514,9 @@ impl Checker {
 
             Expr::FString(parts, span) => {
                 for part in parts {
-                    let FStringPart::Expr(inner) = part else { continue };
+                    let FStringPart::Expr(inner) = part else {
+                        continue;
+                    };
                     if matches!(inner.as_ref(), Expr::FString(_, _)) {
                         self.type_error(
                             "E053",
@@ -2754,10 +3525,21 @@ impl Checker {
                         );
                     }
                     let ty = self.check_expr(inner);
-                    if matches!(ty, Type::Unknown | Type::Error | Type::String | Type::Int | Type::Float | Type::Bool) {
+                    if matches!(
+                        ty,
+                        Type::Unknown
+                            | Type::Error
+                            | Type::String
+                            | Type::Int
+                            | Type::Float
+                            | Type::Bool
+                    ) {
                         continue;
                     }
-                    if !self.interface_registry.is_implemented("Show", &ty.display()) {
+                    if !self
+                        .interface_registry
+                        .is_implemented("Show", &ty.display())
+                    {
                         self.type_error(
                             "E054",
                             format!(
@@ -2796,9 +3578,13 @@ impl Checker {
                 self.in_collect = old_in_collect;
                 // Determine element type by unifying all yields.
                 let elem_ty = yield_tys.into_iter().fold(Type::Unknown, |acc, t| {
-                    if matches!(acc, Type::Unknown) { t }
-                    else if acc.is_compatible(&t) { acc }
-                    else { Type::Unknown }
+                    if matches!(acc, Type::Unknown) {
+                        t
+                    } else if acc.is_compatible(&t) {
+                        acc
+                    } else {
+                        Type::Unknown
+                    }
                 });
                 Type::List(Box::new(elem_ty))
             }
@@ -2818,8 +3604,14 @@ impl Checker {
             // v0.5.0: check optional `where guard` (E027)
             if let Some(guard) = &arm.guard {
                 let guard_ty = self.check_expr(guard);
-                if !guard_ty.is_compatible(&Type::Bool) && !matches!(guard_ty, Type::Unknown | Type::Error) {
-                    self.type_error("E027", "pattern guard (where) must be of type Bool", &arm.span);
+                if !guard_ty.is_compatible(&Type::Bool)
+                    && !matches!(guard_ty, Type::Unknown | Type::Error)
+                {
+                    self.type_error(
+                        "E027",
+                        "pattern guard (where) must be of type Bool",
+                        &arm.span,
+                    );
                 }
             }
             let arm_ty = self.check_expr(&arm.body);
@@ -2833,7 +3625,8 @@ impl Checker {
                             "E001",
                             format!(
                                 "match arms have inconsistent types: `{}` vs `{}`",
-                                prev.display(), arm_ty.display()
+                                prev.display(),
+                                arm_ty.display()
                             ),
                             span,
                         );
@@ -2856,48 +3649,88 @@ impl Checker {
                 if !numeric && !l.is_compatible(r) {
                     self.type_error(
                         "E001",
-                        format!("arithmetic on non-numeric types `{}` and `{}`", l.display(), r.display()),
+                        format!(
+                            "arithmetic on non-numeric types `{}` and `{}`",
+                            l.display(),
+                            r.display()
+                        ),
                         span,
                     );
                     return Type::Error;
                 }
-                if matches!(l, Type::Float) || matches!(r, Type::Float) { Type::Float } else { Type::Int }
+                if matches!(l, Type::Float) || matches!(r, Type::Float) {
+                    Type::Float
+                } else {
+                    Type::Int
+                }
+            }
+            And | Or => {
+                let code = if matches!(op, And) { "E070" } else { "E071" };
+                let opname = if matches!(op, And) { "&&" } else { "||" };
+                if !matches!(l, Type::Bool | Type::Unknown | Type::Error) {
+                    self.type_error(
+                        code,
+                        format!(
+                            "left operand of `{}` must be Bool, got `{}`",
+                            opname,
+                            l.display()
+                        ),
+                        span,
+                    );
+                }
+                if !matches!(r, Type::Bool | Type::Unknown | Type::Error) {
+                    self.type_error(
+                        code,
+                        format!(
+                            "right operand of `{}` must be Bool, got `{}`",
+                            opname,
+                            r.display()
+                        ),
+                        span,
+                    );
+                }
+                Type::Bool
             }
             Eq | NotEq | Lt | Gt | LtEq | GtEq => {
                 if !l.is_compatible(r) {
                     self.type_error(
                         "E001",
-                        format!("comparison between incompatible types `{}` and `{}`", l.display(), r.display()),
+                        format!(
+                            "comparison between incompatible types `{}` and `{}`",
+                            l.display(),
+                            r.display()
+                        ),
                         span,
                     );
                 }
                 Type::Bool
             }
             // ?? operator (v1.9.0): Option<T> ?? T -> T
-            NullCoalesce => {
-                match l {
-                    Type::Option(inner) => {
-                        let t = *inner.clone();
-                        if !r.is_compatible(&t) {
-                            self.type_error(
+            NullCoalesce => match l {
+                Type::Option(inner) => {
+                    let t = *inner.clone();
+                    if !r.is_compatible(&t) {
+                        self.type_error(
                                 "E069",
                                 format!("`??` right-hand side `{}` is incompatible with `Option` inner type `{}`", r.display(), t.display()),
                                 span,
                             );
-                        }
-                        t
                     }
-                    Type::Unknown | Type::Error => r.clone(),
-                    _ => {
-                        self.type_error(
-                            "E068",
-                            format!("`??` left-hand side must be `Option<T>`, got `{}`", l.display()),
-                            span,
-                        );
-                        Type::Error
-                    }
+                    t
                 }
-            }
+                Type::Unknown | Type::Error => r.clone(),
+                _ => {
+                    self.type_error(
+                        "E068",
+                        format!(
+                            "`??` left-hand side must be `Option<T>`, got `{}`",
+                            l.display()
+                        ),
+                        span,
+                    );
+                    Type::Error
+                }
+            },
         }
     }
 
@@ -2927,7 +3760,10 @@ impl Checker {
                 };
                 return Type::Interface(cap_name, vec![target_ty]);
             }
-            if self.impls.contains_key(&(cap_name.clone(), ty_name.clone())) {
+            if self
+                .impls
+                .contains_key(&(cap_name.clone(), ty_name.clone()))
+            {
                 return Type::Cap(cap_name, vec![obj_ty.clone()]);
             }
             if self.caps.contains_key(&cap_name)
@@ -2943,7 +3779,11 @@ impl Checker {
         }
         if let Type::Interface(interface_name, args) = obj_ty {
             if let Some(target_ty) = args.first() {
-                let impl_ty = self.interface_registry.lookup_method(interface_name, &target_ty.display(), field);
+                let impl_ty = self.interface_registry.lookup_method(
+                    interface_name,
+                    &target_ty.display(),
+                    field,
+                );
                 // Lambda bodies use Arrow(Unknown/Unit, ret) as a placeholder type.
                 // For dispatch, prefer the declared method type which has the correct param count.
                 // For non-lambda values (e.g. Monoid.empty = record literal), keep the impl body type.
@@ -2951,7 +3791,8 @@ impl Checker {
                     Type::Arrow(input, _) if matches!(input.as_ref(), Type::Unknown | Type::Unit)
                 )).unwrap_or(false);
                 let method_ty = if is_lambda_placeholder {
-                    self.interface_registry.lookup_declared_method(interface_name, field)
+                    self.interface_registry
+                        .lookup_declared_method(interface_name, field)
                         .or(impl_ty)
                 } else {
                     impl_ty
@@ -2972,10 +3813,25 @@ impl Checker {
             }
         }
         match obj_ty {
-            Type::Named(n, _) if matches!(n.as_str(),
-                "IO" | "List" | "String" | "Option" | "Result" |
-                "Db" | "Http" | "Map" | "Debug" | "Emit" | "Util" | "Trace" | "File" | "Json" | "Csv"
-            ) => {
+            Type::Named(n, _)
+                if matches!(
+                    n.as_str(),
+                    "IO" | "List"
+                        | "String"
+                        | "Option"
+                        | "Result"
+                        | "Db"
+                        | "Http"
+                        | "Map"
+                        | "Debug"
+                        | "Emit"
+                        | "Util"
+                        | "Trace"
+                        | "File"
+                        | "Json"
+                        | "Csv"
+                ) =>
+            {
                 Type::Unknown
             }
             Type::Named(_, _) => self.lookup_field_type(obj_ty, field),
@@ -3065,12 +3921,7 @@ impl Checker {
 
     /// If `func` is a known built-in namespace call (IO.println etc.), type-check
     /// the arguments and return the result type.  Returns None if not a built-in.
-    fn check_builtin_apply(
-        &mut self,
-        func: &Expr,
-        args: &[Expr],
-        span: &Span,
-    ) -> Option<Type> {
+    fn check_builtin_apply(&mut self, func: &Expr, args: &[Expr], span: &Span) -> Option<Type> {
         let (ns, method) = match func {
             Expr::FieldAccess(obj, method, _) => {
                 if let Expr::Ident(ns, _) = obj.as_ref() {
@@ -3089,19 +3940,62 @@ impl Checker {
             ("IO", "print") | ("IO", "println") => {
                 if let Some(ty) = arg_tys.first() {
                     if !ty.is_compatible(&Type::String) {
-                        self.type_error("E001", format!("IO.{} expects String, got `{}`", method, ty.display()), span);
+                        self.type_error(
+                            "E001",
+                            format!("IO.{} expects String, got `{}`", method, ty.display()),
+                            span,
+                        );
                     }
                 } else {
                     self.type_error("E001", format!("IO.{} requires one argument", method), span);
                 }
                 Some(Type::Unit)
             }
+            ("IO", "read_line") => Some(Type::String),
+
+            // Math
+            ("Math", "pi") | ("Math", "e") => Some(Type::Float),
+            ("Math", "abs")
+            | ("Math", "min")
+            | ("Math", "max")
+            | ("Math", "clamp")
+            | ("Math", "pow")
+            | ("Math", "floor")
+            | ("Math", "ceil")
+            | ("Math", "round") => Some(Type::Int),
+            ("Math", "abs_float")
+            | ("Math", "min_float")
+            | ("Math", "max_float")
+            | ("Math", "pow_float")
+            | ("Math", "sqrt") => Some(Type::Float),
 
             // List
             ("List", "length") | ("List", "is_empty") => {
                 let _ = self.expect_list_arg(&arg_tys, 0, span);
-                Some(if method == "is_empty" { Type::Bool } else { Type::Int })
+                Some(if method == "is_empty" {
+                    Type::Bool
+                } else {
+                    Type::Int
+                })
             }
+            ("List", "unique") => {
+                let elem = self.expect_list_arg(&arg_tys, 0, span);
+                Some(Type::List(Box::new(elem)))
+            }
+            ("List", "flatten") => match arg_tys.first() {
+                Some(Type::List(inner)) => match inner.as_ref() {
+                    Type::List(elem) => Some(Type::List(elem.clone())),
+                    _ => Some(Type::List(Box::new(Type::Unknown))),
+                },
+                _ => Some(Type::List(Box::new(Type::Unknown))),
+            },
+            ("List", "chunk") => {
+                let elem = self.expect_list_arg(&arg_tys, 0, span);
+                Some(Type::List(Box::new(Type::List(Box::new(elem)))))
+            }
+            ("List", "sum") => Some(Type::Int),
+            ("List", "sum_float") => Some(Type::Float),
+            ("List", "min") | ("List", "max") => Some(Type::Option(Box::new(Type::Int))),
             ("List", "first") | ("List", "last") => {
                 let elem = self.expect_list_arg(&arg_tys, 0, span);
                 Some(Type::Option(Box::new(elem)))
@@ -3110,7 +4004,9 @@ impl Checker {
                 let _elem = self.expect_list_arg(&arg_tys, 0, span);
                 // arg1 should be a function T -> U; result is List<U>
                 let out = if let Some(f_ty) = arg_tys.get(1) {
-                    f_ty.as_callable().map(|(_, o)| o.clone()).unwrap_or(Type::Unknown)
+                    f_ty.as_callable()
+                        .map(|(_, o)| o.clone())
+                        .unwrap_or(Type::Unknown)
                 } else {
                     Type::Unknown
                 };
@@ -3125,18 +4021,23 @@ impl Checker {
                 let init_ty = arg_tys.get(1).cloned().unwrap_or(Type::Unknown);
                 Some(init_ty)
             }
+            ("List", "count") => Some(Type::Int),
 
             // String
-            ("String", "trim") | ("String", "lower") | ("String", "upper") => {
+            ("String", "trim") | ("String", "lower") | ("String", "upper") => Some(Type::String),
+            ("String", "split") => Some(Type::List(Box::new(Type::String))),
+            ("String", "index_of") => Some(Type::Option(Box::new(Type::Int))),
+            ("String", "pad_left") | ("String", "pad_right") | ("String", "reverse") => {
                 Some(Type::String)
             }
-            ("String", "split") => {
-                Some(Type::List(Box::new(Type::String)))
-            }
+            ("String", "lines") | ("String", "words") => Some(Type::List(Box::new(Type::String))),
             ("String", "length") => Some(Type::Int),
             ("String", "is_empty") => Some(Type::Bool),
-            ("String", "contains") | ("String", "starts_with") | ("String", "ends_with")
-            | ("String", "is_slug") | ("String", "is_url") => Some(Type::Bool),
+            ("String", "contains")
+            | ("String", "starts_with")
+            | ("String", "ends_with")
+            | ("String", "is_slug")
+            | ("String", "is_url") => Some(Type::Bool),
 
             // Option
             ("Option", "some") => {
@@ -3145,7 +4046,8 @@ impl Checker {
             }
             ("Option", "none") => Some(Type::Option(Box::new(Type::Unknown))),
             ("Option", "map") => {
-                let out = arg_tys.get(1)
+                let out = arg_tys
+                    .get(1)
                     .and_then(|f| f.as_callable().map(|(_, o)| o.clone()))
                     .unwrap_or(Type::Unknown);
                 Some(Type::Option(Box::new(out)))
@@ -3158,16 +4060,18 @@ impl Checker {
             // Result
             ("Result", "ok") => {
                 let ty = arg_tys.first().cloned().unwrap_or(Type::Unknown);
-                Some(Type::Result(Box::new(ty), Box::new(Type::Named("Error".into(), vec![]))))
-            }
-            ("Result", "err") => {
                 Some(Type::Result(
-                    Box::new(Type::Unknown),
+                    Box::new(ty),
                     Box::new(Type::Named("Error".into(), vec![])),
                 ))
             }
+            ("Result", "err") => Some(Type::Result(
+                Box::new(Type::Unknown),
+                Box::new(Type::Named("Error".into(), vec![])),
+            )),
             ("Result", "map") => {
-                let out = arg_tys.get(1)
+                let out = arg_tys
+                    .get(1)
                     .and_then(|f| f.as_callable().map(|(_, o)| o.clone()))
                     .unwrap_or(Type::Unknown);
                 Some(Type::Result(
@@ -3181,20 +4085,28 @@ impl Checker {
             }
 
             // Db (2-6): require !Db effect
-            ("Db", "execute") => { self.require_db_effect(span); Some(Type::Int) }
+            ("Db", "execute") => {
+                self.require_db_effect(span);
+                Some(Type::Int)
+            }
             ("Db", "query") => {
                 self.require_db_effect(span);
                 Some(Type::List(Box::new(Type::Map(
-                    Box::new(Type::String), Box::new(Type::String),
+                    Box::new(Type::String),
+                    Box::new(Type::String),
                 ))))
             }
             ("Db", "query_one") => {
                 self.require_db_effect(span);
                 Some(Type::Option(Box::new(Type::Map(
-                    Box::new(Type::String), Box::new(Type::String),
+                    Box::new(Type::String),
+                    Box::new(Type::String),
                 ))))
             }
-            ("Db", _) => { self.require_db_effect(span); Some(Type::Unknown) }
+            ("Db", _) => {
+                self.require_db_effect(span);
+                Some(Type::Unknown)
+            }
 
             // File (v0.7.0): require !File effect
             ("File", "read") => {
@@ -3205,7 +4117,10 @@ impl Checker {
                 self.require_file_effect(span);
                 Some(Type::List(Box::new(Type::String)))
             }
-            ("File", "write") | ("File", "write_lines") | ("File", "append") | ("File", "delete") => {
+            ("File", "write")
+            | ("File", "write_lines")
+            | ("File", "append")
+            | ("File", "delete") => {
                 self.require_file_effect(span);
                 Some(Type::Unit)
             }
@@ -3228,11 +4143,11 @@ impl Checker {
             }
 
             // Map (3-15..3-18)
-            ("Map", "get")    => Some(Type::Option(Box::new(Type::Unknown))),
-            ("Map", "set")    => Some(Type::Map(Box::new(Type::Unknown), Box::new(Type::Unknown))),
-            ("Map", "keys")   => Some(Type::List(Box::new(Type::Unknown))),
+            ("Map", "get") => Some(Type::Option(Box::new(Type::Unknown))),
+            ("Map", "set") => Some(Type::Map(Box::new(Type::Unknown), Box::new(Type::Unknown))),
+            ("Map", "keys") => Some(Type::List(Box::new(Type::Unknown))),
             ("Map", "values") => Some(Type::List(Box::new(Type::Unknown))),
-            ("Map", _)        => Some(Type::Unknown),
+            ("Map", _) => Some(Type::Unknown),
 
             // Json (v0.7.0)
             ("Json", "null")
@@ -3242,9 +4157,7 @@ impl Checker {
             | ("Json", "str")
             | ("Json", "array")
             | ("Json", "object")
-            | ("Json", "parse") => {
-                Some(Type::Named("Json".into(), vec![]))
-            }
+            | ("Json", "parse") => Some(Type::Named("Json".into(), vec![])),
             ("Json", "encode") | ("Json", "encode_pretty") => Some(Type::String),
             ("Json", "get") | ("Json", "at") => {
                 Some(Type::Option(Box::new(Type::Named("Json".into(), vec![]))))
@@ -3253,9 +4166,9 @@ impl Checker {
             ("Json", "as_int") => Some(Type::Option(Box::new(Type::Int))),
             ("Json", "as_float") => Some(Type::Option(Box::new(Type::Float))),
             ("Json", "as_bool") => Some(Type::Option(Box::new(Type::Bool))),
-            ("Json", "as_array") => {
-                Some(Type::Option(Box::new(Type::List(Box::new(Type::Named("Json".into(), vec![]))))))
-            }
+            ("Json", "as_array") => Some(Type::Option(Box::new(Type::List(Box::new(
+                Type::Named("Json".into(), vec![]),
+            ))))),
             ("Json", "is_null") => Some(Type::Bool),
             ("Json", "keys") => Some(Type::Option(Box::new(Type::List(Box::new(Type::String))))),
             ("Json", "length") => Some(Type::Option(Box::new(Type::Int))),
@@ -3263,23 +4176,26 @@ impl Checker {
 
             // Csv (v0.7.0)
             ("Csv", "parse") => Some(Type::List(Box::new(Type::List(Box::new(Type::String))))),
-            ("Csv", "parse_with_header") => {
-                Some(Type::List(Box::new(Type::Map(Box::new(Type::String), Box::new(Type::String)))))
+            ("Csv", "parse_with_header") => Some(Type::List(Box::new(Type::Map(
+                Box::new(Type::String),
+                Box::new(Type::String),
+            )))),
+            ("Csv", "encode") | ("Csv", "encode_with_header") | ("Csv", "from_records") => {
+                Some(Type::String)
             }
-            ("Csv", "encode") | ("Csv", "encode_with_header") | ("Csv", "from_records") => Some(Type::String),
             ("Csv", _) => Some(Type::Unknown),
 
             // Debug (2-9)
             ("Debug", "show") => Some(Type::String),
-            ("Debug", _)      => Some(Type::Unknown),
+            ("Debug", _) => Some(Type::Unknown),
 
             // Emit (3-4)
             ("Emit", "log") => Some(Type::List(Box::new(Type::String))),
-            ("Emit", _)     => Some(Type::Unknown),
+            ("Emit", _) => Some(Type::Unknown),
 
             // Util
             ("Util", "uuid") => Some(Type::String),
-            ("Util", _)      => Some(Type::Unknown),
+            ("Util", _) => Some(Type::Unknown),
 
             // Trace (task 3-14): require !Trace effect
             ("Trace", "print") => {
@@ -3304,9 +4220,13 @@ impl Checker {
     fn expect_list_arg(&mut self, arg_tys: &[Type], idx: usize, span: &Span) -> Type {
         match arg_tys.get(idx) {
             Some(Type::List(elem)) => *elem.clone(),
-            Some(Type::Unknown)    => Type::Unknown,
+            Some(Type::Unknown) => Type::Unknown,
             Some(other) => {
-                self.type_error("E001", format!("expected List<_>, got `{}`", other.display()), span);
+                self.type_error(
+                    "E001",
+                    format!("expected List<_>, got `{}`", other.display()),
+                    span,
+                );
                 Type::Error
             }
             None => {
@@ -3329,33 +4249,37 @@ impl Checker {
             TypeExpr::Optional(inner, _) => {
                 Type::Option(Box::new(self.resolve_type_expr_with_self(inner, self_ty)))
             }
-            TypeExpr::Fallible(inner, _) => {
-                Type::Result(
-                    Box::new(self.resolve_type_expr_with_self(inner, self_ty)),
-                    Box::new(Type::Named("Error".into(), vec![])),
-                )
-            }
-            TypeExpr::Arrow(a, b, _) => {
-                Type::Arrow(
-                    Box::new(self.resolve_type_expr_with_self(a, self_ty)),
-                    Box::new(self.resolve_type_expr_with_self(b, self_ty)),
-                )
-            }
-            TypeExpr::TrfFn { input, output, effects, .. } => {
-                Type::Trf(
-                    Box::new(self.resolve_type_expr_with_self(input, self_ty)),
-                    Box::new(self.resolve_type_expr_with_self(output, self_ty)),
-                    effects.clone(),
-                )
-            }
+            TypeExpr::Fallible(inner, _) => Type::Result(
+                Box::new(self.resolve_type_expr_with_self(inner, self_ty)),
+                Box::new(Type::Named("Error".into(), vec![])),
+            ),
+            TypeExpr::Arrow(a, b, _) => Type::Arrow(
+                Box::new(self.resolve_type_expr_with_self(a, self_ty)),
+                Box::new(self.resolve_type_expr_with_self(b, self_ty)),
+            ),
+            TypeExpr::TrfFn {
+                input,
+                output,
+                effects,
+                ..
+            } => Type::Trf(
+                Box::new(self.resolve_type_expr_with_self(input, self_ty)),
+                Box::new(self.resolve_type_expr_with_self(output, self_ty)),
+                effects.clone(),
+            ),
             TypeExpr::Named(name, args, _) => {
                 if name == "Self" && args.is_empty() {
-                    return self_ty.cloned().unwrap_or_else(|| Type::Named("Self".into(), vec![]));
+                    return self_ty
+                        .cloned()
+                        .unwrap_or_else(|| Type::Named("Self".into(), vec![]));
                 }
                 if args.is_empty() && self.type_params.contains(name.as_str()) {
                     return Type::Var(name.clone());
                 }
-                let resolved_args: Vec<Type> = args.iter().map(|a| self.resolve_type_expr_with_self(a, self_ty)).collect();
+                let resolved_args: Vec<Type> = args
+                    .iter()
+                    .map(|a| self.resolve_type_expr_with_self(a, self_ty))
+                    .collect();
                 if let Some(td) = self.abstract_trf_registry.get(name) {
                     let type_subst: HashMap<String, Type> = td
                         .type_params
@@ -3364,40 +4288,52 @@ impl Checker {
                         .zip(resolved_args.iter().cloned())
                         .collect();
                     return Type::AbstractTrf {
-                        input: Box::new(self.resolve_type_expr_with_subst(&td.input_ty, &type_subst)),
-                        output: Box::new(self.resolve_type_expr_with_subst(&td.output_ty, &type_subst)),
+                        input: Box::new(
+                            self.resolve_type_expr_with_subst(&td.input_ty, &type_subst),
+                        ),
+                        output: Box::new(
+                            self.resolve_type_expr_with_subst(&td.output_ty, &type_subst),
+                        ),
                         effects: td.effects.clone(),
                     };
                 }
                 match name.as_str() {
-                    "Bool"    => Type::Bool,
-                    "Int"     => Type::Int,
-                    "Float"   => Type::Float,
-                    "String"  => Type::String,
-                    "Unit"    => Type::Unit,
-                    "List"    => Type::List(Box::new(resolved_args.into_iter().next().unwrap_or(Type::Unknown))),
-                    "Map"     => {
+                    "Bool" => Type::Bool,
+                    "Int" => Type::Int,
+                    "Float" => Type::Float,
+                    "String" => Type::String,
+                    "Unit" => Type::Unit,
+                    "List" => Type::List(Box::new(
+                        resolved_args.into_iter().next().unwrap_or(Type::Unknown),
+                    )),
+                    "Map" => {
                         let mut it = resolved_args.into_iter();
                         let k = it.next().unwrap_or(Type::Unknown);
                         let v = it.next().unwrap_or(Type::Unknown);
                         Type::Map(Box::new(k), Box::new(v))
                     }
-                    "Option"  => Type::Option(Box::new(resolved_args.into_iter().next().unwrap_or(Type::Unknown))),
-                    "Result"  => {
+                    "Option" => Type::Option(Box::new(
+                        resolved_args.into_iter().next().unwrap_or(Type::Unknown),
+                    )),
+                    "Result" => {
                         let mut it = resolved_args.into_iter();
                         let t = it.next().unwrap_or(Type::Unknown);
                         let e = it.next().unwrap_or(Type::Named("Error".into(), vec![]));
                         Type::Result(Box::new(t), Box::new(e))
                     }
-                    "Task"    => Type::Task(Box::new(resolved_args.into_iter().next().unwrap_or(Type::Unknown))),
-                    "_infer"  => Type::Unknown,
-                    _ if self.interface_registry.interfaces.contains_key(name) => Type::Interface(name.clone(), resolved_args),
+                    "Task" => Type::Task(Box::new(
+                        resolved_args.into_iter().next().unwrap_or(Type::Unknown),
+                    )),
+                    "_infer" => Type::Unknown,
+                    _ if self.interface_registry.interfaces.contains_key(name) => {
+                        Type::Interface(name.clone(), resolved_args)
+                    }
                     // Type alias resolution (v1.7.0)
                     _ if self.type_aliases.contains_key(name.as_str()) => {
                         let alias_target = self.type_aliases[name.as_str()].clone();
                         self.resolve_type_expr_with_self(&alias_target, self_ty)
                     }
-                    _         => Type::Named(name.clone(), resolved_args),
+                    _ => Type::Named(name.clone(), resolved_args),
                 }
             }
         }
@@ -3407,15 +4343,49 @@ impl Checker {
         match ty {
             Type::Named(name, args) if name == "Self" && args.is_empty() => self_ty.clone(),
             Type::List(t) => Type::List(Box::new(self.substitute_self_in_type(t, self_ty))),
-            Type::Map(k, v) => Type::Map(Box::new(self.substitute_self_in_type(k, self_ty)), Box::new(self.substitute_self_in_type(v, self_ty))),
+            Type::Map(k, v) => Type::Map(
+                Box::new(self.substitute_self_in_type(k, self_ty)),
+                Box::new(self.substitute_self_in_type(v, self_ty)),
+            ),
             Type::Option(t) => Type::Option(Box::new(self.substitute_self_in_type(t, self_ty))),
-            Type::Result(t, e) => Type::Result(Box::new(self.substitute_self_in_type(t, self_ty)), Box::new(self.substitute_self_in_type(e, self_ty))),
-            Type::Arrow(a, b) => Type::Arrow(Box::new(self.substitute_self_in_type(a, self_ty)), Box::new(self.substitute_self_in_type(b, self_ty))),
-            Type::Fn(params, ret) => Type::Fn(params.iter().map(|p| self.substitute_self_in_type(p, self_ty)).collect(), Box::new(self.substitute_self_in_type(ret, self_ty))),
-            Type::Trf(i, o, fx) => Type::Trf(Box::new(self.substitute_self_in_type(i, self_ty)), Box::new(self.substitute_self_in_type(o, self_ty)), fx.clone()),
-            Type::Cap(name, args) => Type::Cap(name.clone(), args.iter().map(|a| self.substitute_self_in_type(a, self_ty)).collect()),
-            Type::Interface(name, args) => Type::Interface(name.clone(), args.iter().map(|a| self.substitute_self_in_type(a, self_ty)).collect()),
-            Type::Named(name, args) => Type::Named(name.clone(), args.iter().map(|a| self.substitute_self_in_type(a, self_ty)).collect()),
+            Type::Result(t, e) => Type::Result(
+                Box::new(self.substitute_self_in_type(t, self_ty)),
+                Box::new(self.substitute_self_in_type(e, self_ty)),
+            ),
+            Type::Arrow(a, b) => Type::Arrow(
+                Box::new(self.substitute_self_in_type(a, self_ty)),
+                Box::new(self.substitute_self_in_type(b, self_ty)),
+            ),
+            Type::Fn(params, ret) => Type::Fn(
+                params
+                    .iter()
+                    .map(|p| self.substitute_self_in_type(p, self_ty))
+                    .collect(),
+                Box::new(self.substitute_self_in_type(ret, self_ty)),
+            ),
+            Type::Trf(i, o, fx) => Type::Trf(
+                Box::new(self.substitute_self_in_type(i, self_ty)),
+                Box::new(self.substitute_self_in_type(o, self_ty)),
+                fx.clone(),
+            ),
+            Type::Cap(name, args) => Type::Cap(
+                name.clone(),
+                args.iter()
+                    .map(|a| self.substitute_self_in_type(a, self_ty))
+                    .collect(),
+            ),
+            Type::Interface(name, args) => Type::Interface(
+                name.clone(),
+                args.iter()
+                    .map(|a| self.substitute_self_in_type(a, self_ty))
+                    .collect(),
+            ),
+            Type::Named(name, args) => Type::Named(
+                name.clone(),
+                args.iter()
+                    .map(|a| self.substitute_self_in_type(a, self_ty))
+                    .collect(),
+            ),
             _ => ty.clone(),
         }
     }
@@ -3466,6 +4436,7 @@ mod tests {
     fn check(src: &str) -> Vec<String> {
         let prog = Parser::parse_str(src, "test").expect("parse error");
         Checker::check_program(&prog)
+            .0
             .into_iter()
             .map(|e| format!("[{}] {}", e.code, e.message))
             .collect()
@@ -3485,17 +4456,20 @@ mod tests {
     fn inferred_type_of(src: &str, name: &str) -> Type {
         let prog = Parser::parse_str(src, "test").expect("parse error");
         let mut checker = Checker::new();
-        let errs = checker.check_with_self(&prog);
+        let (errs, _) = checker.check_with_self(&prog);
         assert!(errs.is_empty(), "unexpected errors: {:?}", errs);
-        checker.env.lookup(name).cloned().expect("missing inferred type")
+        checker
+            .env
+            .lookup(name)
+            .cloned()
+            .expect("missing inferred type")
     }
 
     fn check_warnings(src: &str) -> Vec<String> {
         let prog = Parser::parse_str(src, "test").expect("parse error");
         let mut checker = Checker::new();
-        let _ = checker.check_with_self(&prog);
-        checker
-            .warnings
+        let (_, warnings) = checker.check_with_self(&prog);
+        warnings
             .into_iter()
             .map(|w| format!("[{}] {}", w.code, w.message))
             .collect()
@@ -3504,11 +4478,13 @@ mod tests {
     // 4-4, 4-5: built-in types and functions
     #[test]
     fn test_builtin_io_println() {
-        check_ok(r#"
+        check_ok(
+            r#"
             public fn main() -> Unit !Io {
                 IO.println("hello")
             }
-        "#);
+        "#,
+        );
     }
 
     #[test]
@@ -3523,27 +4499,39 @@ mod tests {
 
     #[test]
     fn test_fstring_e054_no_show() {
-        let errs = check_err(r#"
+        let errs = check_err(
+            r#"
             type User = { name: String }
             fn f(user: User) -> String { $"User: {user}" }
-        "#);
-        assert!(errs.iter().any(|e| e.contains("E054")), "expected E054, got: {:?}", errs);
+        "#,
+        );
+        assert!(
+            errs.iter().any(|e| e.contains("E054")),
+            "expected E054, got: {:?}",
+            errs
+        );
     }
 
     #[test]
     fn test_fstring_e053_nested() {
         let errs = check_err(r#"fn f() -> String { $"outer {$"inner"}" }"#);
-        assert!(errs.iter().any(|e| e.contains("E053")), "expected E053, got: {:?}", errs);
+        assert!(
+            errs.iter().any(|e| e.contains("E053")),
+            "expected E053, got: {:?}",
+            errs
+        );
     }
 
     #[test]
     fn test_assert_matches_record_ok() {
-        check_ok(r#"
+        check_ok(
+            r#"
             type User = { name: String age: Int }
             fn f(user: User) -> Unit {
                 assert_matches(user, { name, age })
             }
-        "#);
+        "#,
+        );
     }
 
     // 4-6: type definitions
@@ -3560,7 +4548,11 @@ mod tests {
     #[test]
     fn test_invariant_type_check_e045() {
         let errs = check_err("type Bad = { value: Int invariant value + 1 }");
-        assert!(errs.iter().any(|e| e.contains("E045")), "expected E045, got: {:?}", errs);
+        assert!(
+            errs.iter().any(|e| e.contains("E045")),
+            "expected E045, got: {:?}",
+            errs
+        );
     }
 
     #[test]
@@ -3570,34 +4562,52 @@ mod tests {
 
     #[test]
     fn test_bind_state_annotation_ok() {
-        check_ok("type PosInt = { value: Int invariant value > 0 }\nfn f() -> PosInt { bind x: PosInt <- 42; x }");
+        check_ok(
+            "type PosInt = { value: Int invariant value > 0 }\nfn f() -> PosInt { bind x: PosInt <- 42; x }",
+        );
     }
 
     #[test]
     fn test_bind_state_annotation_fail_e046() {
-        let errs = check_err("type PosInt = { value: Int invariant value > 0 }\nfn f() -> PosInt { bind x: PosInt <- 0; x }");
-        assert!(errs.iter().any(|e| e.contains("E046")), "expected E046, got: {:?}", errs);
+        let errs = check_err(
+            "type PosInt = { value: Int invariant value > 0 }\nfn f() -> PosInt { bind x: PosInt <- 0; x }",
+        );
+        assert!(
+            errs.iter().any(|e| e.contains("E046")),
+            "expected E046, got: {:?}",
+            errs
+        );
     }
 
     #[test]
     fn test_bind_state_annotation_string_invariant_ok() {
-        check_ok("type Email = { value: String invariant String.contains(value, \"@\") }\nfn f() -> Email { bind x: Email <- \"a@example.com\"; x }");
+        check_ok(
+            "type Email = { value: String invariant String.contains(value, \"@\") }\nfn f() -> Email { bind x: Email <- \"a@example.com\"; x }",
+        );
     }
 
     #[test]
     fn test_invariant_unknown_field_e002() {
         let errs = check_err("type Broken = { value: Int invariant missing > 0 }");
-        assert!(errs.iter().any(|e| e.contains("E002")), "expected E002, got: {:?}", errs);
+        assert!(
+            errs.iter().any(|e| e.contains("E002")),
+            "expected E002, got: {:?}",
+            errs
+        );
     }
 
     #[test]
     fn test_bind_state_annotation_non_literal_ok() {
-        check_ok("type PosInt = { value: Int invariant value > 0 }\nfn f(n: Int) -> PosInt { bind x: PosInt <- n; x }");
+        check_ok(
+            "type PosInt = { value: Int invariant value > 0 }\nfn f(n: Int) -> PosInt { bind x: PosInt <- n; x }",
+        );
     }
 
     #[test]
     fn test_state_constructor_signature_ok() {
-        check_ok("type PosInt = { value: Int invariant value > 0 }\nfn f() -> PosInt! { PosInt.new(5) }");
+        check_ok(
+            "type PosInt = { value: Int invariant value > 0 }\nfn f() -> PosInt! { PosInt.new(5) }",
+        );
     }
 
     #[test]
@@ -3628,7 +4638,11 @@ mod tests {
     #[test]
     fn test_stdlib_bind_state_annotation_fail_e046() {
         let errs = check_err("fn f() -> PosInt { bind x: PosInt <- 0; x }");
-        assert!(errs.iter().any(|e| e.contains("E046")), "expected E046, got: {:?}", errs);
+        assert!(
+            errs.iter().any(|e| e.contains("E046")),
+            "expected E046, got: {:?}",
+            errs
+        );
     }
 
     // 4-7: fn return type mismatch
@@ -3653,21 +4667,25 @@ mod tests {
     // 4-9: flw pipeline  Ecompatible
     #[test]
     fn test_flw_ok() {
-        check_ok("
+        check_ok(
+            "
             stage A: String -> Int = |s| { 0 }
             stage B: Int -> Bool   = |n| { true }
             seq AB = A |> B
-        ");
+        ",
+        );
     }
 
     // 4-9: flw pipeline  Etype mismatch
     #[test]
     fn test_flw_type_mismatch() {
-        let errs = check_err("
+        let errs = check_err(
+            "
             stage A: String -> Int  = |s| { 0 }
             stage B: Bool   -> Unit = |b| { () }
             seq Bad = A |> B
-        ");
+        ",
+        );
         assert!(errs.iter().any(|e| e.contains("E003")));
     }
 
@@ -3687,16 +4705,19 @@ mod tests {
     // 4-11: pattern binding  Erecord
     #[test]
     fn test_pattern_record_bind() {
-        check_ok("
+        check_ok(
+            "
             type User = { name: String }
             fn f(u: User) -> String { bind { name } <- u; name }
-        ");
+        ",
+        );
     }
 
     // 4-12: match arm types consistent
     #[test]
     fn test_match_consistent_arms() {
-        check_ok("
+        check_ok(
+            "
             type Color = | Red | Blue
             fn f(c: Color) -> Int {
                 match c {
@@ -3704,13 +4725,15 @@ mod tests {
                     Blue => 1
                 }
             }
-        ");
+        ",
+        );
     }
 
     // 4-12: match arm type mismatch
     #[test]
     fn test_match_inconsistent_arms() {
-        let errs = check_err("
+        let errs = check_err(
+            "
             type Color = | Red | Blue
             fn f(c: Color) -> Int {
                 match c {
@@ -3718,7 +4741,8 @@ mod tests {
                     Blue => \"not an int\"
                 }
             }
-        ");
+        ",
+        );
         assert!(errs.iter().any(|e| e.contains("E001")));
     }
 
@@ -3735,15 +4759,60 @@ mod tests {
         check_ok("fn f() -> Int { if true { 1 } else { 2 } }");
     }
 
+    #[test]
+    fn test_logical_and_bool_ok() {
+        check_ok("fn f() -> Bool { true && false }");
+    }
+
+    #[test]
+    fn test_logical_or_bool_ok() {
+        check_ok("fn f() -> Bool { false || true }");
+    }
+
+    #[test]
+    fn test_logical_and_non_bool_e070() {
+        let errs = check_err("fn f() -> Bool { 1 && true }");
+        assert!(errs.iter().any(|e| e.contains("E070")));
+    }
+
+    #[test]
+    fn test_logical_or_non_bool_e071() {
+        let errs = check_err("fn f() -> Bool { true || 1 }");
+        assert!(errs.iter().any(|e| e.contains("E071")));
+    }
+
+    #[test]
+    fn test_logical_and_non_bool_right_e070() {
+        let errs = check_err("fn f() -> Bool { true && 1 }");
+        assert!(errs.iter().any(|e| e.contains("E070")));
+    }
+
+    #[test]
+    fn test_logical_and_precedence() {
+        // `1 == 1 && 2 == 2` should parse as `(1 == 1) && (2 == 2)` — type checks OK
+        check_ok("fn f() -> Bool { 1 == 1 && 2 == 2 }");
+    }
+
+    #[test]
+    fn test_logical_or_precedence() {
+        // `false || 1 == 1` should parse as `false || (1 == 1)` — type checks OK
+        check_ok("fn f() -> Bool { false || 1 == 1 }");
+    }
+
     // 4-14: pipeline type mismatch
     #[test]
     fn test_pipeline_type_mismatch() {
-        let errs = check_err("
+        let errs = check_err(
+            "
             stage A: String -> Int  = |s| { 0 }
             stage B: Bool   -> Unit = |b| { () }
             fn f() -> Unit { \"hello\" |> A |> B }
-        ");
-        assert!(errs.iter().any(|e| e.contains("E003") || e.contains("E001")));
+        ",
+        );
+        assert!(
+            errs.iter()
+                .any(|e| e.contains("E003") || e.contains("E001"))
+        );
     }
 
     // 4-15: undefined identifier
@@ -3782,10 +4851,12 @@ mod tests {
     // 2-4: record construction type-checks against known type
     #[test]
     fn test_record_construct_ok() {
-        check_ok(r#"
+        check_ok(
+            r#"
             type User = { name: String age: Int }
             fn f() -> User { User { name: "Alice", age: 30 } }
-        "#);
+        "#,
+        );
     }
 
     // 2-4: record construction with undefined type ↁEE002
@@ -3804,41 +4875,49 @@ mod tests {
     // Db.* calls resolve to known types
     #[test]
     fn test_db_query_type() {
-        check_ok(r#"
+        check_ok(
+            r#"
             fn f() -> Unit !Db {
                 bind rows <- Db.query("SELECT * FROM users");
                 ()
             }
-        "#);
+        "#,
+        );
     }
 
     // Debug.show returns String
     #[test]
     fn test_debug_show_string() {
-        check_ok(r#"
+        check_ok(
+            r#"
             fn f(n: Int) -> String { Debug.show(n) }
-        "#);
+        "#,
+        );
     }
 
     // Map.get returns Option
     #[test]
     fn test_map_get_option() {
-        check_ok(r#"
+        check_ok(
+            r#"
             fn f() -> Unit {
                 bind result <- Map.get(Map.set(Map.set((), "a", 1), "b", 2), "a");
                 ()
             }
-        "#);
+        "#,
+        );
     }
 
     // 2-6: Db.* without !Db ↁEE007
     #[test]
     fn test_db_effect_missing() {
-        let errs = check_err(r#"
+        let errs = check_err(
+            r#"
             fn f() -> Int {
                 Db.execute("SELECT 1")
             }
-        "#);
+        "#,
+        );
         assert!(errs.iter().any(|e| e.contains("E007")), "got: {:?}", errs);
     }
 
@@ -3851,11 +4930,13 @@ mod tests {
     // 2-7: Http.* without !Network ↁEE008
     #[test]
     fn test_network_effect_missing() {
-        let errs = check_err(r#"
+        let errs = check_err(
+            r#"
             fn f() -> String! {
                 Http.get("http://example.com")
             }
-        "#);
+        "#,
+        );
         assert!(errs.iter().any(|e| e.contains("E008")), "got: {:?}", errs);
     }
 
@@ -3903,7 +4984,7 @@ mod tests {
         )
         .expect("parse");
         let mut checker = Checker::new();
-        let errs = checker.check_with_self(&program);
+        let (errs, _) = checker.check_with_self(&program);
         assert!(errs.is_empty(), "unexpected errors: {:?}", errs);
         assert!(checker.effect_registry.contains("Payment"));
     }
@@ -3940,22 +5021,37 @@ abstract seq Pipeline {
 
     // ── 4-11: use resolution tests ────────────────────────────────────────────
 
-    use std::sync::{Arc, Mutex};
-    use tempfile::tempdir;
     use crate::middle::resolver::Resolver;
     use crate::toml::FavToml;
+    use std::sync::{Arc, Mutex};
+    use tempfile::tempdir;
 
     /// Build a Resolver + temp project with a single .fav file under src/.
-    fn make_project(src_content: &str, filename: &str) -> (Arc<Mutex<Resolver>>, tempfile::TempDir) {
+    fn make_project(
+        src_content: &str,
+        filename: &str,
+    ) -> (Arc<Mutex<Resolver>>, tempfile::TempDir) {
         let dir = tempdir().unwrap();
         let root = dir.path().to_path_buf();
-        std::fs::write(root.join("fav.toml"), "[rune]\nname=\"t\"\nversion=\"0.1.0\"\nsrc=\"src\"\n").unwrap();
+        std::fs::write(
+            root.join("fav.toml"),
+            "[rune]\nname=\"t\"\nversion=\"0.1.0\"\nsrc=\"src\"\n",
+        )
+        .unwrap();
         let src_dir = root.join("src");
         std::fs::create_dir_all(&src_dir).unwrap();
         let fav_path = src_dir.join(filename.replace('/', std::path::MAIN_SEPARATOR_STR));
-        if let Some(p) = fav_path.parent() { std::fs::create_dir_all(p).unwrap(); }
+        if let Some(p) = fav_path.parent() {
+            std::fs::create_dir_all(p).unwrap();
+        }
         std::fs::write(&fav_path, src_content).unwrap();
-        let toml = FavToml { name: "t".into(), version: "0.1.0".into(), src: "src".into(), dependencies: vec![] };
+        let toml = FavToml {
+            name: "t".into(),
+            version: "0.1.0".into(),
+            src: "src".into(),
+            runes_path: None,
+            dependencies: vec![],
+        };
         let resolver = Arc::new(Mutex::new(Resolver::new(Some(toml), Some(root))));
         (resolver, dir)
     }
@@ -3964,6 +5060,7 @@ abstract seq Pipeline {
         let prog = Parser::parse_str(src, file).expect("parse error");
         let mut c = Checker::new_with_resolver(resolver, std::path::PathBuf::from(file));
         c.check_with_self(&prog)
+            .0
             .into_iter()
             .map(|e| format!("[{}] {}", e.code, e.message))
             .collect()
@@ -3984,7 +5081,11 @@ abstract seq Pipeline {
         let (resolver, _dir) = make_project("fn secret() -> Unit { () }", "utils.fav");
         let src = "use utils.secret\npublic fn main() -> Unit { () }";
         let errs = check_with_resolver(src, "main.fav", resolver);
-        assert!(errs.iter().any(|e| e.contains("E014")), "expected E014, got: {:?}", errs);
+        assert!(
+            errs.iter().any(|e| e.contains("E014")),
+            "expected E014, got: {:?}",
+            errs
+        );
     }
 
     // 4-11c: missing symbol gives E013
@@ -3993,7 +5094,11 @@ abstract seq Pipeline {
         let (resolver, _dir) = make_project("public fn real() -> Unit { () }", "stuff.fav");
         let src = "use stuff.ghost\npublic fn main() -> Unit { () }";
         let errs = check_with_resolver(src, "main.fav", resolver);
-        assert!(errs.iter().any(|e| e.contains("E013")), "expected E013, got: {:?}", errs);
+        assert!(
+            errs.iter().any(|e| e.contains("E013")),
+            "expected E013, got: {:?}",
+            errs
+        );
     }
 
     // 4-11d: circular import gives E012  Etested via Resolver directly because the
@@ -4001,22 +5106,36 @@ abstract seq Pipeline {
     // inner modules, so deep cycle detection only fires at the Resolver level.
     #[test]
     fn test_circular_import_error() {
-        use crate::middle::resolver::ResolveError;
         use crate::frontend::lexer::Span;
+        use crate::middle::resolver::ResolveError;
         let dir = tempdir().unwrap();
         let root = dir.path().to_path_buf();
-        std::fs::write(root.join("fav.toml"), "[rune]\nname=\"t\"\nversion=\"0.1.0\"\nsrc=\"src\"\n").unwrap();
+        std::fs::write(
+            root.join("fav.toml"),
+            "[rune]\nname=\"t\"\nversion=\"0.1.0\"\nsrc=\"src\"\n",
+        )
+        .unwrap();
         let src_dir = root.join("src");
         std::fs::create_dir_all(&src_dir).unwrap();
         std::fs::write(src_dir.join("cycle.fav"), "public fn f() -> Unit { () }").unwrap();
-        let toml = FavToml { name: "t".into(), version: "0.1.0".into(), src: "src".into(), dependencies: vec![] };
+        let toml = FavToml {
+            name: "t".into(),
+            version: "0.1.0".into(),
+            src: "src".into(),
+            runes_path: None,
+            dependencies: vec![],
+        };
         let mut resolver = Resolver::new(Some(toml), Some(root));
         // Simulate a mid-load state: "cycle" is already in the loading set
         let span = Span::new("test", 0, 0, 1, 1);
         // First load succeeds
         let mut errors: Vec<ResolveError> = Vec::new();
         resolver.load_module("cycle", &mut errors, &span);
-        assert!(errors.is_empty(), "unexpected error on first load: {:?}", errors);
+        assert!(
+            errors.is_empty(),
+            "unexpected error on first load: {:?}",
+            errors
+        );
         // Loading the same module again uses cache  Eno E012 (idempotent)
         resolver.load_module("cycle", &mut errors, &span);
         assert!(errors.is_empty(), "expected cache hit: {:?}", errors);
@@ -4024,182 +5143,318 @@ abstract seq Pipeline {
         // with a non-existent module (E013), confirming error propagation works
         let path = vec!["nonexistent".to_string(), "sym".to_string()];
         resolver.resolve_use(&path, &mut errors, &span);
-        assert!(errors.iter().any(|e| e.code == "E013"), "expected E013, got: {:?}", errors);
+        assert!(
+            errors.iter().any(|e| e.code == "E013"),
+            "expected E013, got: {:?}",
+            errors
+        );
+    }
+
+    #[test]
+    fn import_resolves_public_symbol() {
+        let (resolver, _dir) = make_project(
+            "public type User = { name: String age: Int }\npublic stage ParseUser: String -> User = |s| { User { name: s age: 30 } }",
+            "models/user.fav",
+        );
+        let src = "import \"models/user\"\npublic fn main() -> Unit { user.ParseUser(\"a\"); () }";
+        let errs = check_with_resolver(src, "main.fav", resolver);
+        assert!(errs.is_empty(), "unexpected errors: {:?}", errs);
+    }
+
+    #[test]
+    fn import_with_alias_resolves() {
+        let (resolver, _dir) = make_project(
+            "public fn ParseUser(s: String) -> String { s }",
+            "models/user.fav",
+        );
+        let src =
+            "import \"models/user\" as m\npublic fn main() -> Unit { m.ParseUser(\"a\"); () }";
+        let errs = check_with_resolver(src, "main.fav", resolver);
+        assert!(errs.is_empty(), "unexpected errors: {:?}", errs);
+    }
+
+    #[test]
+    fn import_e080_circular_import() {
+        let (resolver, _dir) = make_project(
+            "import \"models/post\"\npublic fn user() -> Unit { () }",
+            "models/user.fav",
+        );
+        {
+            let root = resolver.lock().unwrap().root.clone().unwrap();
+            let post = root.join("src").join("models").join("post.fav");
+            std::fs::create_dir_all(post.parent().unwrap()).unwrap();
+            std::fs::write(
+                post,
+                "import \"models/user\"\npublic fn post() -> Unit { () }",
+            )
+            .unwrap();
+        }
+        let src = "import \"models/user\"\npublic fn main() -> Unit { () }";
+        let errs = check_with_resolver(src, "main.fav", resolver);
+        assert!(
+            errs.iter().any(|e| e.contains("E080")),
+            "expected E080, got: {:?}",
+            errs
+        );
+    }
+
+    #[test]
+    fn import_e081_namespace_conflict() {
+        let (resolver, _dir) = make_project("public fn left() -> Unit { () }", "models/user.fav");
+        {
+            let root = resolver.lock().unwrap().root.clone().unwrap();
+            let auth = root.join("src").join("auth").join("user.fav");
+            std::fs::create_dir_all(auth.parent().unwrap()).unwrap();
+            std::fs::write(auth, "public fn right() -> Unit { () }").unwrap();
+        }
+        let src = "import \"models/user\"\nimport \"auth/user\"\npublic fn main() -> Unit { () }";
+        let errs = check_with_resolver(src, "main.fav", resolver);
+        assert!(
+            errs.iter().any(|e| e.contains("E081")),
+            "expected E081, got: {:?}",
+            errs
+        );
     }
 
     // ── Phase 1: Subst / unify / occurs (v0.4.0) ──────────────────────────────
 
     #[test]
     fn test_interface_show_int_ok() {
-        check_ok(r#"
+        check_ok(
+            r#"
             interface Show { show: Self -> String }
             impl Show for Int { show = |x| "int" }
-        "#);
+        "#,
+        );
     }
 
     #[test]
     fn test_interface_method_type_mismatch_e042() {
-        let errs = check_err(r#"
+        let errs = check_err(
+            r#"
             interface Show { show: Self -> String }
             impl Show for Int { show = |x| 1 }
-        "#);
-        assert!(errs.iter().any(|e| e.contains("E042")), "expected E042, got: {:?}", errs);
+        "#,
+        );
+        assert!(
+            errs.iter().any(|e| e.contains("E042")),
+            "expected E042, got: {:?}",
+            errs
+        );
     }
 
     #[test]
     fn test_interface_super_missing_e043() {
-        let errs = check_err(r#"
+        let errs = check_err(
+            r#"
             interface Eq { eq: Self -> Bool }
             interface Ord: Eq { compare: Self -> Int }
             type User = { name: String }
             impl Ord for User { compare = |x| 0 }
-        "#);
-        assert!(errs.iter().any(|e| e.contains("E043")), "expected E043, got: {:?}", errs);
+        "#,
+        );
+        assert!(
+            errs.iter().any(|e| e.contains("E043")),
+            "expected E043, got: {:?}",
+            errs
+        );
     }
 
     #[test]
     fn test_interface_unknown_e041() {
-        let errs = check_err(r#"
+        let errs = check_err(
+            r#"
             impl UnknownFace for Int { show = |x| "int" }
-        "#);
-        assert!(errs.iter().any(|e| e.contains("E041")), "expected E041, got: {:?}", errs);
+        "#,
+        );
+        assert!(
+            errs.iter().any(|e| e.contains("E041")),
+            "expected E041, got: {:?}",
+            errs
+        );
     }
 
     #[test]
     fn test_interface_explicit_passing() {
-        check_ok(r#"
+        check_ok(
+            r#"
             interface Show { show: Self -> String }
             impl Show for Int { show = |x| "int" }
             fn use_show(x: Int, show: Show<Int>) -> String { show.show(x) }
-        "#);
+        "#,
+        );
     }
 
     #[test]
     fn test_interface_auto_synthesis_ok() {
-        check_ok(r#"
+        check_ok(
+            r#"
             interface Show { show: Self -> String }
             impl Show for String { show = |x| x }
             type User with Show = { name: String }
             fn use_show(x: User, show: Show<User>) -> String { show.show(x) }
-        "#);
+        "#,
+        );
     }
 
     #[test]
     fn test_interface_auto_synthesis_fail_e044() {
         // Use a custom interface that Int does NOT implement → List<Int> also fails E044.
         // (Int has builtin Show/Eq/Gen, so those would succeed now with generic container support.)
-        let errs = check_err(r#"
+        let errs = check_err(
+            r#"
             interface Serializable { serialize: Self -> String }
             type User with Serializable = { tags: List<Int> }
-        "#);
-        assert!(errs.iter().any(|e| e.contains("E044")), "expected E044, got: {:?}", errs);
+        "#,
+        );
+        assert!(
+            errs.iter().any(|e| e.contains("E044")),
+            "expected E044, got: {:?}",
+            errs
+        );
     }
 
     #[test]
     fn test_interface_impl_multi_interface() {
-        check_ok(r#"
+        check_ok(
+            r#"
             interface Show { show: Self -> String }
             interface Eq { eq: Self -> Bool }
             impl Show for String { show = |x| x }
             impl Eq for String { eq = |x| true }
             type User with Show, Eq = { name: String }
             fn use_all(x: User, show: Show<User>, eq: Eq<User>) -> String { show.show(x) }
-        "#);
+        "#,
+        );
     }
 
     #[test]
     fn test_interface_auto_impl_decl_ok() {
-        check_ok(r#"
+        check_ok(
+            r#"
             interface Show { show: Self -> String }
             impl Show for String { show = |x| x }
             type User = { name: String }
             impl Show for User
             fn use_show(x: User, show: Show<User>) -> String { show.show(x) }
-        "#);
+        "#,
+        );
     }
 
     #[test]
     fn test_builtin_show_int_registered() {
-        check_ok(r#"
+        check_ok(
+            r#"
             fn use_show() -> String { Int.show.show(1) }
-        "#);
+        "#,
+        );
     }
 
     #[test]
     fn test_builtin_ord_int_registered() {
-        check_ok(r#"
+        check_ok(
+            r#"
             fn use_ord() -> Int { Int.ord.compare(1, 2) }
-        "#);
+        "#,
+        );
     }
 
     #[test]
     fn test_builtin_gen_int_registered() {
-        check_ok(r#"
+        check_ok(
+            r#"
             fn use_gen(seed: Int?, gen: Gen<Int>) -> Int { gen.gen(seed) }
-        "#);
+        "#,
+        );
     }
 
     #[test]
     fn test_gen_interface_auto_synthesis_ok() {
-        check_ok(r#"
+        check_ok(
+            r#"
             type User with Gen = { age: Int flag: Bool }
             fn use_gen(seed: Int?, gen: Gen<User>) -> User { gen.gen(seed) }
-        "#);
+        "#,
+        );
     }
 
     #[test]
     fn test_gen_interface_auto_impl_decl_ok() {
-        check_ok(r#"
+        check_ok(
+            r#"
             type User = { age: Int flag: Bool }
             impl Gen for User
             fn use_gen(seed: Int?, gen: Gen<User>) -> User { gen.gen(seed) }
-        "#);
+        "#,
+        );
     }
 
     #[test]
     fn test_gen_auto_synthesis_fail_e044() {
         // CustomTag has no Gen impl → List<CustomTag> also fails E044.
-        let errs = check_err(r#"
+        let errs = check_err(
+            r#"
             type CustomTag = { label: String  count: Float }
             type User with Gen = { tags: List<CustomTag> }
-        "#);
-        assert!(errs.iter().any(|e| e.contains("E044")), "expected E044, got: {:?}", errs);
+        "#,
+        );
+        assert!(
+            errs.iter().any(|e| e.contains("E044")),
+            "expected E044, got: {:?}",
+            errs
+        );
     }
 
     #[test]
     fn test_cap_removed_parse_error_e2003() {
         // v2.0.0: `cap` is removed; parser emits an error with migration hint
-        let result = Parser::parse_str(r#"
+        let result = Parser::parse_str(
+            r#"
             cap Show<T> = { show: T -> String }
-        "#, "test");
+        "#,
+            "test",
+        );
         assert!(result.is_err(), "expected parse error for `cap` in v2.0.0");
-        assert!(result.unwrap_err().message.contains("cap"), "error should mention `cap`");
+        assert!(
+            result.unwrap_err().message.contains("cap"),
+            "error should mention `cap`"
+        );
     }
 
     #[test]
     fn test_cap_style_impl_deprecated_warning_w010() {
-        let warnings = check_warnings(r#"
+        let warnings = check_warnings(
+            r#"
             impl Eq<Int> {
                 fn equals(a: Int, b: Int) -> Bool { a == b }
             }
-        "#);
-        assert!(warnings.iter().any(|w| w.contains("W010")), "expected W010, got: {:?}", warnings);
+        "#,
+        );
+        assert!(
+            warnings.iter().any(|w| w.contains("W010")),
+            "expected W010, got: {:?}",
+            warnings
+        );
     }
 
     #[test]
     fn test_field_interface_float_registered() {
-        check_ok(r#"
+        check_ok(
+            r#"
             fn use_field(x: Float, y: Float) -> Result<Float, Error> {
                 Float.field.divide(x, y)
             }
-        "#);
+        "#,
+        );
     }
 
     #[test]
     fn test_semigroup_interface_int_registered() {
-        check_ok(r#"
+        check_ok(
+            r#"
             fn use_semigroup() -> Int { Int.semigroup.combine(1, 2) }
-        "#);
+        "#,
+        );
     }
 
     #[test]
@@ -4207,47 +5462,61 @@ abstract seq Pipeline {
         // type T with Show, Eq { ... } must behave identically to:
         //   type T { ... }
         //   impl Show, Eq for T
-        check_ok(r#"
+        check_ok(
+            r#"
             type Point with Show, Eq = { x: Int  y: Int }
             fn use_show(p: Point, show: Show<Point>) -> String { show.show(p) }
             fn use_eq(a: Point, b: Point, eq: Eq<Point>) -> Bool { eq.eq(a, b) }
-        "#);
+        "#,
+        );
         // Explicit impl form must also pass
-        check_ok(r#"
+        check_ok(
+            r#"
             type Point = { x: Int  y: Int }
             impl Show, Eq for Point
             fn use_show(p: Point, show: Show<Point>) -> String { show.show(p) }
             fn use_eq(a: Point, b: Point, eq: Eq<Point>) -> Bool { eq.eq(a, b) }
-        "#);
+        "#,
+        );
     }
 
     #[test]
     fn test_list_field_show_synthesis_ok() {
         // List<Int> field: Int has builtin Show → List<Int> is considered to implement Show
-        check_ok(r#"
+        check_ok(
+            r#"
             type Tags = { items: List<Int> }
             impl Show for Tags
-        "#);
+        "#,
+        );
     }
 
     #[test]
     fn test_option_field_show_synthesis_ok() {
         // Option<String> field: String has builtin Show → Option<String> implements Show
-        check_ok(r#"
+        check_ok(
+            r#"
             type Opt = { label: Option<String> }
             impl Show for Opt
-        "#);
+        "#,
+        );
     }
 
     #[test]
     fn test_list_field_custom_interface_e044() {
         // Custom interface not implemented for Int → List<Int> still fails E044
-        let errs = check_err(r#"
+        let errs = check_err(
+            r#"
             interface Serialize { serialize: Self -> String }
             type Tags = { items: List<Int> }
             impl Serialize for Tags
-        "#);
-        assert!(errs.iter().any(|e| e.contains("E044")), "expected E044, got: {:?}", errs);
+        "#,
+        );
+        assert!(
+            errs.iter().any(|e| e.contains("E044")),
+            "expected E044, got: {:?}",
+            errs
+        );
     }
 
     #[test]
@@ -4260,10 +5529,14 @@ abstract seq Pipeline {
     #[test]
     fn test_subst_apply_nested() {
         let s = Subst::singleton("T".into(), Type::Bool);
-        assert_eq!(s.apply(&Type::List(Box::new(Type::Var("T".into())))),
-                   Type::List(Box::new(Type::Bool)));
-        assert_eq!(s.apply(&Type::Option(Box::new(Type::Var("T".into())))),
-                   Type::Option(Box::new(Type::Bool)));
+        assert_eq!(
+            s.apply(&Type::List(Box::new(Type::Var("T".into())))),
+            Type::List(Box::new(Type::Bool))
+        );
+        assert_eq!(
+            s.apply(&Type::Option(Box::new(Type::Var("T".into())))),
+            Type::Option(Box::new(Type::Bool))
+        );
     }
 
     #[test]
@@ -4272,8 +5545,10 @@ abstract seq Pipeline {
         let s2 = Subst::singleton("U".into(), Type::List(Box::new(Type::Var("T".into()))));
         let composed = s2.compose(s1);
         // After compose: U ↁEList<Int>, T ↁEInt
-        assert_eq!(composed.apply(&Type::Var("U".into())),
-                   Type::List(Box::new(Type::Int)));
+        assert_eq!(
+            composed.apply(&Type::Var("U".into())),
+            Type::List(Box::new(Type::Int))
+        );
         assert_eq!(composed.apply(&Type::Var("T".into())), Type::Int);
     }
 
@@ -4362,7 +5637,11 @@ abstract seq Pipeline {
     fn test_impl_undefined_cap_error() {
         let src = "impl NoSuchCap<Int> { fn foo(x: Int) -> Int { x } }";
         let errs = check_err(src);
-        assert!(errs.iter().any(|e| e.contains("E020")), "expected E020, got: {:?}", errs);
+        assert!(
+            errs.iter().any(|e| e.contains("E020")),
+            "expected E020, got: {:?}",
+            errs
+        );
     }
 
     #[test]
@@ -4370,7 +5649,11 @@ abstract seq Pipeline {
         let src = "interface Eq { equals: Self -> Self -> Bool }\nimpl Eq for Int { bogus = |a b| a == b }";
         let errs = check_err(src);
         // E042 is raised for undeclared methods in interface impl
-        assert!(errs.iter().any(|e| e.contains("E042")), "expected E042, got: {:?}", errs);
+        assert!(
+            errs.iter().any(|e| e.contains("E042")),
+            "expected E042, got: {:?}",
+            errs
+        );
     }
 
     #[test]
@@ -4378,7 +5661,11 @@ abstract seq Pipeline {
         // Accessing the built-in Eq cap on a type with no impl should produce E021.
         let src = "type MyData = { x: Int }\nfn main() -> Unit { bind t <- MyData { x: 1 }; bind _ <- t.eq; () }";
         let errs = check_err(src);
-        assert!(errs.iter().any(|e| e.contains("E021")), "expected E021, got: {:?}", errs);
+        assert!(
+            errs.iter().any(|e| e.contains("E021")),
+            "expected E021, got: {:?}",
+            errs
+        );
     }
 
     #[test]
@@ -4394,7 +5681,11 @@ abstract seq Pipeline {
         // Calling a function with wrong argument type should produce E018.
         let src = "fn add(a: Int, b: Int) -> Int { a }\nfn main() -> Int { add(1, true) }";
         let errs = check_err(src);
-        assert!(errs.iter().any(|e| e.contains("E018")), "expected E018, got: {:?}", errs);
+        assert!(
+            errs.iter().any(|e| e.contains("E018")),
+            "expected E018, got: {:?}",
+            errs
+        );
     }
 
     #[test]
@@ -4417,7 +5708,11 @@ abstract seq Pipeline {
         // Pair<A,B> used with one argument should produce E023.
         let src = "type Pair<A, B> = { first: A second: B }\nfn bad(x: Pair<Int>) -> Int { 0 }";
         let errs = check_err(src);
-        assert!(errs.iter().any(|e| e.contains("E023")), "expected E023, got: {:?}", errs);
+        assert!(
+            errs.iter().any(|e| e.contains("E023")),
+            "expected E023, got: {:?}",
+            errs
+        );
     }
 
     #[test]
@@ -4467,7 +5762,11 @@ fn main() -> Int {
 }
 "#;
         let errs = check_err(src);
-        assert!(errs.iter().any(|e| e.contains("E024")), "expected E024, got: {:?}", errs);
+        assert!(
+            errs.iter().any(|e| e.contains("E024")),
+            "expected E024, got: {:?}",
+            errs
+        );
     }
 
     // task 3-20: yield outside collect ↁEE026
@@ -4480,7 +5779,11 @@ fn main() -> Int {
 }
 "#;
         let errs = check_err(src);
-        assert!(errs.iter().any(|e| e.contains("E026")), "expected E026, got: {:?}", errs);
+        assert!(
+            errs.iter().any(|e| e.contains("E026")),
+            "expected E026, got: {:?}",
+            errs
+        );
     }
 
     // task 3-21: collect { yield 1; yield 2; } has type List<Int>
@@ -4505,10 +5808,72 @@ fn main() -> Int {
 }
 "#;
         let errs = check_err(src);
-        assert!(errs.iter().any(|e| e.contains("E027")), "expected E027, got: {:?}", errs);
+        assert!(
+            errs.iter().any(|e| e.contains("E027")),
+            "expected E027, got: {:?}",
+            errs
+        );
+    }
+
+    #[test]
+    fn test_guard_non_bool_compound() {
+        let errs = check_err("fn f(x: Int) -> Int { match x { n where n + 1 => n _ => 0 } }");
+        assert!(
+            errs.iter().any(|e| e.contains("E027")),
+            "expected E027, got: {:?}",
+            errs
+        );
     }
 
     // task 3-19: chain with non-monadic expr ↁEE025
+    #[test]
+    fn test_e072_destructure_bind_non_record() {
+        let errs = check_err("fn f() -> Int { bind { x } <- 42; x }");
+        assert!(
+            errs.iter().any(|e| e.contains("E072")),
+            "expected E072, got: {:?}",
+            errs
+        );
+    }
+
+    #[test]
+    fn test_e073_destructure_bind_missing_field() {
+        let src = r#"
+type Point = { x: Int }
+fn f() -> Int {
+    bind pt <- Point { x: 1 }
+    bind { x, y } <- pt
+    x
+}
+"#;
+        let errs = check_err(src);
+        assert!(
+            errs.iter().any(|e| e.contains("E073")),
+            "expected E073, got: {:?}",
+            errs
+        );
+    }
+
+    #[test]
+    fn test_e074_infer_recursive_return_type() {
+        let errs = check_err("fn loop(n: Int) = loop(n)");
+        assert!(
+            errs.iter().any(|e| e.contains("E074")),
+            "expected E074, got: {:?}",
+            errs
+        );
+    }
+
+    #[test]
+    fn test_w001_unknown_type_bind() {
+        let warnings = check_warnings(r#"test "warn" { bind x <- assert_eq; () }"#);
+        assert!(
+            warnings.iter().any(|w| w.contains("W001")),
+            "expected W001, got: {:?}",
+            warnings
+        );
+    }
+
     #[test]
     fn test_chain_type_mismatch() {
         let src = r#"
@@ -4518,12 +5883,17 @@ fn main() -> Int! {
 }
 "#;
         let errs = check_err(src);
-        assert!(errs.iter().any(|e| e.contains("E025")), "expected E025, got: {:?}", errs);
+        assert!(
+            errs.iter().any(|e| e.contains("E025")),
+            "expected E025, got: {:?}",
+            errs
+        );
     }
 
     #[test]
     fn test_flw_binding_type_ok() {
-        check_ok(r#"
+        check_ok(
+            r#"
 abstract seq DataPipeline<Row> {
     parse: String -> List<Row>!
     save: List<Row> -> Int !Db
@@ -4532,12 +5902,14 @@ abstract stage ParseCsv: String -> List<UserRow>!
 abstract stage SaveUsers: List<UserRow> -> Int !Db
 type UserRow = { name: String }
 seq UserImport = DataPipeline<UserRow> { parse <- ParseCsv; save <- SaveUsers }
-"#);
+"#,
+        );
     }
 
     #[test]
     fn test_flw_binding_e048() {
-        let errs = check_err(r#"
+        let errs = check_err(
+            r#"
 abstract seq DataPipeline<Row> {
     parse: String -> List<Row>!
     save: List<Row> -> Int !Db
@@ -4547,26 +5919,38 @@ abstract stage SaveUsers: List<OrderRow> -> Int !Db
 type UserRow = { name: String }
 type OrderRow = { id: Int }
 seq UserImport = DataPipeline<UserRow> { parse <- ParseCsv; save <- SaveUsers }
-"#);
-        assert!(errs.iter().any(|e| e.contains("E048")), "expected E048, got: {:?}", errs);
+"#,
+        );
+        assert!(
+            errs.iter().any(|e| e.contains("E048")),
+            "expected E048, got: {:?}",
+            errs
+        );
     }
 
     #[test]
     fn test_flw_binding_e049() {
-        let errs = check_err(r#"
+        let errs = check_err(
+            r#"
 abstract seq DataPipeline<Row> {
     parse: String -> List<Row>!
 }
 abstract stage ParseCsv: String -> List<UserRow>!
 type UserRow = { name: String }
 seq UserImport = DataPipeline<UserRow> { extra <- ParseCsv }
-"#);
-        assert!(errs.iter().any(|e| e.contains("E049")), "expected E049, got: {:?}", errs);
+"#,
+        );
+        assert!(
+            errs.iter().any(|e| e.contains("E049")),
+            "expected E049, got: {:?}",
+            errs
+        );
     }
 
     #[test]
     fn test_flw_binding_effect_inference() {
-        let ty = inferred_type_of(r#"
+        let ty = inferred_type_of(
+            r#"
 abstract seq DataPipeline<Row> {
     parse: String -> List<Row>! !Network
     save: List<Row> -> Int !Db
@@ -4575,7 +5959,9 @@ abstract stage ParseCsv: String -> List<UserRow>! !Network
 abstract stage SaveUsers: List<UserRow> -> Int !Db
 type UserRow = { name: String }
 seq UserImport = DataPipeline<UserRow> { parse <- ParseCsv; save <- SaveUsers }
-"#, "UserImport");
+"#,
+            "UserImport",
+        );
         match ty {
             Type::Trf(input, output, effects) => {
                 assert!(input.is_compatible(&Type::String));
@@ -4589,7 +5975,8 @@ seq UserImport = DataPipeline<UserRow> { parse <- ParseCsv; save <- SaveUsers }
 
     #[test]
     fn test_flw_partial_type() {
-        let ty = inferred_type_of(r#"
+        let ty = inferred_type_of(
+            r#"
 abstract seq DataPipeline<Row> {
     parse: String -> List<Row>!
     validate: Row -> Row!
@@ -4598,12 +5985,21 @@ abstract seq DataPipeline<Row> {
 abstract stage ParseCsv: String -> List<UserRow>!
 type UserRow = { name: String }
 seq PartialImport = DataPipeline<UserRow> { parse <- ParseCsv }
-"#, "PartialImport");
+"#,
+            "PartialImport",
+        );
         match ty {
-            Type::PartialFlw { template, type_args, unbound_slots } => {
+            Type::PartialFlw {
+                template,
+                type_args,
+                unbound_slots,
+            } => {
                 assert_eq!(template, "DataPipeline");
                 assert_eq!(type_args.len(), 1);
-                assert_eq!(unbound_slots, vec!["validate".to_string(), "save".to_string()]);
+                assert_eq!(
+                    unbound_slots,
+                    vec!["validate".to_string(), "save".to_string()]
+                );
             }
             other => panic!("expected PartialFlw, got {:?}", other),
         }
@@ -4611,16 +6007,23 @@ seq PartialImport = DataPipeline<UserRow> { parse <- ParseCsv }
 
     #[test]
     fn test_abstract_trf_direct_call_e051() {
-        let errs = check_err(r#"
+        let errs = check_err(
+            r#"
 abstract stage FetchUser: Int -> String !Db
 fn main() -> String { FetchUser(1) }
-"#);
-        assert!(errs.iter().any(|e| e.contains("E051")), "expected E051, got: {:?}", errs);
+"#,
+        );
+        assert!(
+            errs.iter().any(|e| e.contains("E051")),
+            "expected E051, got: {:?}",
+            errs
+        );
     }
 
     #[test]
     fn test_abstract_trf_generic_binding_ok() {
-        check_ok(r#"
+        check_ok(
+            r#"
 abstract stage Fetch<T>: Int -> T? !Db
 type User = { name: String }
 abstract stage FetchUser: Int -> User? !Db
@@ -4628,12 +6031,14 @@ abstract seq Pipeline<Row> {
     fetch: Fetch<Row>
 }
 seq UserPipeline = Pipeline<User> { fetch <- FetchUser }
-"#);
+"#,
+        );
     }
 
     #[test]
     fn test_abstract_trf_generic_binding_e048() {
-        let errs = check_err(r#"
+        let errs = check_err(
+            r#"
 abstract stage Fetch<T>: Int -> T? !Db
 type User = { name: String }
 abstract stage FetchBad: String -> User? !Db
@@ -4641,13 +6046,19 @@ abstract seq Pipeline<Row> {
     fetch: Fetch<Row>
 }
 seq UserPipeline = Pipeline<User> { fetch <- FetchBad }
-"#);
-        assert!(errs.iter().any(|e| e.contains("E048")), "expected E048, got: {:?}", errs);
+"#,
+        );
+        assert!(
+            errs.iter().any(|e| e.contains("E048")),
+            "expected E048, got: {:?}",
+            errs
+        );
     }
 
     #[test]
-      fn test_flw_binding_type_params() {
-          check_ok(r#"
+    fn test_flw_binding_type_params() {
+        check_ok(
+            r#"
   abstract seq DataPipeline<Row> {
       parse: String -> List<Row>!
       save: List<Row> -> Int !Db
@@ -4655,105 +6066,145 @@ seq UserPipeline = Pipeline<User> { fetch <- FetchBad }
 abstract stage ParseInts: String -> List<Int>!
 abstract stage SaveInts: List<Int> -> Int !Db
   seq IntImport = DataPipeline<Int> { parse <- ParseInts; save <- SaveInts }
-  "#);
-      }
+  "#,
+        );
+    }
 
-      #[test]
-      fn test_dynamic_injection_type_ok() {
-          let prog = Parser::parse_str(r#"
+    #[test]
+    fn test_dynamic_injection_type_ok() {
+        let prog = Parser::parse_str(
+            r#"
 abstract seq SavePipeline<Row> {
     save: Row -> Int !Db
 }
-"#, "test").expect("parse");
-          let mut checker = Checker::new();
-          checker.register_builtins();
-          checker.register_item_signatures(&prog);
-          for item in &prog.items {
-              checker.check_item(item);
-          }
-          checker.env.push();
-          checker.env.define(
-              "save".to_string(),
-              Type::Trf(Box::new(Type::Named("UserRow".into(), vec![])), Box::new(Type::Int), vec![Effect::Db]),
-          );
-          let fd = FlwBindingDef {
-              visibility: None,
-              name: "Injected".into(),
-              template: "SavePipeline".into(),
-              type_args: vec![TypeExpr::Named("UserRow".into(), vec![], Span::dummy())],
-              bindings: vec![("save".into(), crate::ast::SlotImpl::Local("save".into()))],
-              span: Span::dummy(),
-          };
-          checker.check_flw_binding_def(&fd);
-          let ty = checker.env.lookup("Injected").cloned().unwrap_or(Type::Unknown);
-          checker.env.pop();
+"#,
+            "test",
+        )
+        .expect("parse");
+        let mut checker = Checker::new();
+        checker.register_builtins();
+        checker.register_item_signatures(&prog);
+        for item in &prog.items {
+            checker.check_item(item);
+        }
+        checker.env.push();
+        checker.env.define(
+            "save".to_string(),
+            Type::Trf(
+                Box::new(Type::Named("UserRow".into(), vec![])),
+                Box::new(Type::Int),
+                vec![Effect::Db],
+            ),
+        );
+        let fd = FlwBindingDef {
+            visibility: None,
+            name: "Injected".into(),
+            template: "SavePipeline".into(),
+            type_args: vec![TypeExpr::Named("UserRow".into(), vec![], Span::dummy())],
+            bindings: vec![("save".into(), crate::ast::SlotImpl::Local("save".into()))],
+            span: Span::dummy(),
+        };
+        checker.check_flw_binding_def(&fd);
+        let ty = checker
+            .env
+            .lookup("Injected")
+            .cloned()
+            .unwrap_or(Type::Unknown);
+        checker.env.pop();
 
-          assert!(checker.errors.is_empty(), "unexpected errors: {:?}", checker.errors);
-          match ty {
-              Type::Trf(input, output, effects) => {
-                  assert!(input.is_compatible(&Type::Named("UserRow".into(), vec![])));
-                  assert!(output.is_compatible(&Type::Int));
-                  assert!(effects.contains(&Effect::Db));
-              }
-              other => panic!("expected Trf, got {:?}", other),
-          }
-      }
+        assert!(
+            checker.errors.is_empty(),
+            "unexpected errors: {:?}",
+            checker.errors
+        );
+        match ty {
+            Type::Trf(input, output, effects) => {
+                assert!(input.is_compatible(&Type::Named("UserRow".into(), vec![])));
+                assert!(output.is_compatible(&Type::Int));
+                assert!(effects.contains(&Effect::Db));
+            }
+            other => panic!("expected Trf, got {:?}", other),
+        }
+    }
 
-      #[test]
-      fn test_dynamic_injection_type_e048() {
-          let prog = Parser::parse_str(r#"
+    #[test]
+    fn test_dynamic_injection_type_e048() {
+        let prog = Parser::parse_str(
+            r#"
 abstract seq SavePipeline<Row> {
     save: Row -> Int !Db
 }
-"#, "test").expect("parse");
-          let mut checker = Checker::new();
-          checker.register_builtins();
-          checker.register_item_signatures(&prog);
-          for item in &prog.items {
-              checker.check_item(item);
-          }
-          checker.env.push();
-          checker.env.define(
-              "save".to_string(),
-              Type::Trf(Box::new(Type::String), Box::new(Type::Int), vec![Effect::Db]),
-          );
-          let fd = FlwBindingDef {
-              visibility: None,
-              name: "Injected".into(),
-              template: "SavePipeline".into(),
-              type_args: vec![TypeExpr::Named("UserRow".into(), vec![], Span::dummy())],
-              bindings: vec![("save".into(), crate::ast::SlotImpl::Local("save".into()))],
-              span: Span::dummy(),
-          };
-          checker.check_flw_binding_def(&fd);
-          checker.env.pop();
+"#,
+            "test",
+        )
+        .expect("parse");
+        let mut checker = Checker::new();
+        checker.register_builtins();
+        checker.register_item_signatures(&prog);
+        for item in &prog.items {
+            checker.check_item(item);
+        }
+        checker.env.push();
+        checker.env.define(
+            "save".to_string(),
+            Type::Trf(
+                Box::new(Type::String),
+                Box::new(Type::Int),
+                vec![Effect::Db],
+            ),
+        );
+        let fd = FlwBindingDef {
+            visibility: None,
+            name: "Injected".into(),
+            template: "SavePipeline".into(),
+            type_args: vec![TypeExpr::Named("UserRow".into(), vec![], Span::dummy())],
+            bindings: vec![("save".into(), crate::ast::SlotImpl::Local("save".into()))],
+            span: Span::dummy(),
+        };
+        checker.check_flw_binding_def(&fd);
+        checker.env.pop();
 
-          let errs = checker.errors.iter().map(|e| format!("[{}] {}", e.code, e.message)).collect::<Vec<_>>();
-          assert!(errs.iter().any(|e| e.contains("E048")), "expected E048, got: {:?}", errs);
-      }
+        let errs = checker
+            .errors
+            .iter()
+            .map(|e| format!("[{}] {}", e.code, e.message))
+            .collect::<Vec<_>>();
+        assert!(
+            errs.iter().any(|e| e.contains("E048")),
+            "expected E048, got: {:?}",
+            errs
+        );
+    }
 
     // ── v1.7.0: Task<T> async ──────────────────────────────────────────────
 
     #[test]
     fn task_async_fn_returns_task_type() {
-        let ty = inferred_type_of(r#"
+        let ty = inferred_type_of(
+            r#"
 async fn fetch_value() -> Int !Io {
     42
 }
-"#, "fetch_value");
+"#,
+            "fetch_value",
+        );
         // async fn with no params is registered as Fn([], Task<ret>)
         let inner_ret = match &ty {
             Type::Fn(_, ret) => ret.as_ref(),
             Type::Arrow(_, ret) => ret.as_ref(),
             other => panic!("expected Fn or Arrow, got {:?}", other),
         };
-        assert!(matches!(inner_ret, Type::Task(inner) if matches!(**inner, Type::Int)),
-            "expected Task<Int>, got {:?}", inner_ret);
+        assert!(
+            matches!(inner_ret, Type::Task(inner) if matches!(**inner, Type::Int)),
+            "expected Task<Int>, got {:?}",
+            inner_ret
+        );
     }
 
     #[test]
     fn task_bind_unwraps_task() {
-        check_ok(r#"
+        check_ok(
+            r#"
 async fn fetch_num() -> Int !Io {
     42
 }
@@ -4761,12 +6212,14 @@ public fn main() -> Int !Io {
     bind n <- fetch_num()
     n
 }
-"#);
+"#,
+        );
     }
 
     #[test]
     fn task_run_executes_immediately() {
-        check_ok(r#"
+        check_ok(
+            r#"
 async fn compute() -> Int !Io {
     10
 }
@@ -4774,12 +6227,14 @@ public fn main() -> Int !Io {
     bind v <- compute()
     Task.run(v)
 }
-"#);
+"#,
+        );
     }
 
     #[test]
     fn task_map_transforms_value() {
-        check_ok(r#"
+        check_ok(
+            r#"
 async fn get_x() -> Int !Io {
     5
 }
@@ -4787,12 +6242,14 @@ public fn main() -> Int !Io {
     bind x <- get_x()
     Task.map(x, |n| n * 2)
 }
-"#);
+"#,
+        );
     }
 
     #[test]
     fn task_and_then_chains() {
-        check_ok(r#"
+        check_ok(
+            r#"
 async fn step1() -> Int !Io {
     3
 }
@@ -4800,70 +6257,86 @@ public fn main() -> Int !Io {
     bind a <- step1()
     Task.and_then(a, |n| n + 1)
 }
-"#);
+"#,
+        );
     }
 
     // ── v1.7.0: Type aliases ───────────────────────────────────────────────
 
     #[test]
     fn type_alias_simple() {
-        check_ok(r#"
+        check_ok(
+            r#"
 type Name = String
 public fn greet(n: Name) -> String {
     n
 }
-"#);
+"#,
+        );
     }
 
     #[test]
     fn type_alias_compatible_with_target() {
-        check_ok(r#"
+        check_ok(
+            r#"
 type UserId = Int
 public fn get_id() -> UserId {
     42
 }
-"#);
+"#,
+        );
     }
 
     #[test]
     fn type_alias_generic() {
-        check_ok(r#"
+        check_ok(
+            r#"
 type MaybeInt = Option<Int>
 public fn wrap(x: Int) -> MaybeInt {
     Option.some(x)
 }
-"#);
+"#,
+        );
     }
 
     // ── v1.9.0: for-in expression ────────────────────────────────────────────
 
     #[test]
     fn for_in_basic_ok() {
-        check_ok(r#"
+        check_ok(
+            r#"
 public fn main() -> Unit !Io {
     bind nums <- collect { yield 1; yield 2; yield 3; }
     for n in nums {
         IO.println_int(n)
     }
 }
-"#);
+"#,
+        );
     }
 
     #[test]
     fn for_in_non_list_e065() {
-        let errs = check_err(r#"
+        let errs = check_err(
+            r#"
 public fn main() -> Unit !Io {
     for n in 42 {
         IO.println_int(n)
     }
 }
-"#);
-        assert!(errs.iter().any(|e| e.contains("E065")), "expected E065, got {:?}", errs);
+"#,
+        );
+        assert!(
+            errs.iter().any(|e| e.contains("E065")),
+            "expected E065, got {:?}",
+            errs
+        );
     }
 
     #[test]
     fn for_in_in_collect_e067() {
-        let errs = check_err(r#"
+        let errs = check_err(
+            r#"
 public fn main() -> List<Int> {
     collect {
         for n in List.range(0, 3) {
@@ -4871,66 +6344,89 @@ public fn main() -> List<Int> {
         }
     }
 }
-"#);
-        assert!(errs.iter().any(|e| e.contains("E067")), "expected E067, got {:?}", errs);
+"#,
+        );
+        assert!(
+            errs.iter().any(|e| e.contains("E067")),
+            "expected E067, got {:?}",
+            errs
+        );
     }
 
     // ── v1.9.0: ?? null-coalesce operator ───────────────────────────────────
 
     #[test]
     fn null_coalesce_ok() {
-        check_ok(r#"
+        check_ok(
+            r#"
 public fn main() -> Int {
     bind x: Option<Int> <- Option.some(5)
     x ?? 0
 }
-"#);
+"#,
+        );
     }
 
     #[test]
     fn null_coalesce_lhs_not_option_e068() {
-        let errs = check_err(r#"
+        let errs = check_err(
+            r#"
 public fn main() -> Int {
     42 ?? 0
 }
-"#);
-        assert!(errs.iter().any(|e| e.contains("E068")), "expected E068, got {:?}", errs);
+"#,
+        );
+        assert!(
+            errs.iter().any(|e| e.contains("E068")),
+            "expected E068, got {:?}",
+            errs
+        );
     }
 
     #[test]
     fn null_coalesce_type_mismatch_e069() {
-        let errs = check_err(r#"
+        let errs = check_err(
+            r#"
 public fn main() -> Int {
     bind x: Option<Int> <- Option.some(5)
     x ?? "fallback"
 }
-"#);
-        assert!(errs.iter().any(|e| e.contains("E069")), "expected E069, got {:?}", errs);
+"#,
+        );
+        assert!(
+            errs.iter().any(|e| e.contains("E069")),
+            "expected E069, got {:?}",
+            errs
+        );
     }
 
     // ── v1.9.0: stage/seq keyword aliases ───────────────────────────────────
 
     #[test]
     fn stage_alias_for_trf_ok() {
-        check_ok(r#"
+        check_ok(
+            r#"
 stage double: Int -> Int = |x| { x * 2 }
 public fn main() -> Int {
     21 |> double
 }
-"#);
+"#,
+        );
     }
 
     #[test]
     fn seq_alias_for_flw_ok() {
-        check_ok(r#"
+        check_ok(
+            r#"
 stage add_one: Int -> Int = |x| { x + 1 }
 seq pipeline = add_one
 public fn main() -> Int {
     5 |> pipeline
 }
-"#);
+"#,
+        );
     }
-  }
+}
 
 // ── Module export extraction ───────────────────────────────────────────────────
 

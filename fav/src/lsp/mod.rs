@@ -1,12 +1,17 @@
 #![allow(dead_code)]
 
+pub mod completion;
+pub mod definition;
 pub mod diagnostics;
+pub mod doc_comment;
 pub mod document_store;
 pub mod hover;
 pub mod protocol;
 
 use std::io::{self, BufRead, Write};
 
+use completion::handle_completion;
+use definition::handle_definition;
 use diagnostics::errors_to_diagnostics;
 use document_store::DocumentStore;
 use hover::handle_hover;
@@ -36,7 +41,10 @@ impl<W: Write> LspServer<W> {
                         "capabilities": {
                             "textDocumentSync": 1,
                             "hoverProvider": true,
-                            "definitionProvider": false
+                            "completionProvider": {
+                                "triggerCharacters": ["."]
+                            },
+                            "definitionProvider": true
                         }
                     }),
                 )?;
@@ -65,11 +73,22 @@ impl<W: Write> LspServer<W> {
                 self.write_response(request.id.unwrap_or(serde_json::Value::Null), result)?;
                 Ok(false)
             }
+            "textDocument/completion" => {
+                let result = extract_completion_target(&request.params)
+                    .map(|(uri, pos, trigger)| handle_completion(&self.store, &uri, pos, trigger))
+                    .and_then(|items| serde_json::to_value(items).ok())
+                    .unwrap_or_else(|| serde_json::json!([]));
+                self.write_response(request.id.unwrap_or(serde_json::Value::Null), result)?;
+                Ok(false)
+            }
             "textDocument/definition" => {
-                self.write_response(
-                    request.id.unwrap_or(serde_json::Value::Null),
-                    serde_json::Value::Null,
-                )?;
+                let result = extract_hover_target(&request.params)
+                    .and_then(|(uri, pos)| handle_definition(&self.store, &uri, pos))
+                    .map(|location| {
+                        serde_json::to_value(location).unwrap_or(serde_json::Value::Null)
+                    })
+                    .unwrap_or(serde_json::Value::Null);
+                self.write_response(request.id.unwrap_or(serde_json::Value::Null), result)?;
                 Ok(false)
             }
             "shutdown" => {
@@ -93,7 +112,11 @@ impl<W: Write> LspServer<W> {
         }
     }
 
-    fn write_response(&mut self, id: serde_json::Value, result: serde_json::Value) -> io::Result<()> {
+    fn write_response(
+        &mut self,
+        id: serde_json::Value,
+        result: serde_json::Value,
+    ) -> io::Result<()> {
         write_json_message(
             &mut self.writer,
             &serde_json::json!({
@@ -175,8 +198,8 @@ pub fn write_message(writer: &mut impl Write, response: &RpcResponse) -> io::Res
 }
 
 fn write_json_message(writer: &mut impl Write, value: &serde_json::Value) -> io::Result<()> {
-    let body = serde_json::to_vec(value)
-        .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
+    let body =
+        serde_json::to_vec(value).map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
     write!(writer, "Content-Length: {}\r\n\r\n", body.len())?;
     writer.write_all(&body)?;
     writer.flush()
@@ -191,7 +214,11 @@ fn extract_open_doc(params: &serde_json::Value) -> Option<(String, String)> {
 }
 
 fn extract_changed_doc(params: &serde_json::Value) -> Option<(String, String)> {
-    let uri = params.get("textDocument")?.get("uri")?.as_str()?.to_string();
+    let uri = params
+        .get("textDocument")?
+        .get("uri")?
+        .as_str()?
+        .to_string();
     let text = params
         .get("contentChanges")?
         .as_array()?
@@ -203,9 +230,25 @@ fn extract_changed_doc(params: &serde_json::Value) -> Option<(String, String)> {
 }
 
 fn extract_hover_target(params: &serde_json::Value) -> Option<(String, Position)> {
-    let uri = params.get("textDocument")?.get("uri")?.as_str()?.to_string();
+    let uri = params
+        .get("textDocument")?
+        .get("uri")?
+        .as_str()?
+        .to_string();
     let pos = serde_json::from_value::<Position>(params.get("position")?.clone()).ok()?;
     Some((uri, pos))
+}
+
+fn extract_completion_target(
+    params: &serde_json::Value,
+) -> Option<(String, Position, Option<String>)> {
+    let (uri, pos) = extract_hover_target(params)?;
+    let trigger = params
+        .get("context")
+        .and_then(|context| context.get("triggerCharacter"))
+        .and_then(|value| value.as_str())
+        .map(|value| value.to_string());
+    Some((uri, pos, trigger))
 }
 
 fn run_lsp_loop(reader: &mut impl BufRead, writer: &mut impl Write) -> io::Result<()> {
@@ -220,7 +263,7 @@ fn run_lsp_loop(reader: &mut impl BufRead, writer: &mut impl Write) -> io::Resul
 
 #[cfg(test)]
 mod tests {
-    use super::{read_message, run_lsp_loop, write_message, LspServer};
+    use super::{LspServer, read_message, run_lsp_loop, write_message};
     use crate::lsp::protocol::RpcResponse;
 
     #[test]
@@ -263,7 +306,8 @@ mod tests {
             .expect("handle");
         let text = String::from_utf8(out).expect("utf8");
         assert!(text.contains("\"hoverProvider\":true"));
-        assert!(text.contains("\"definitionProvider\":false"));
+        assert!(text.contains("\"definitionProvider\":true"));
+        assert!(text.contains("\"completionProvider\":{\"triggerCharacters\":[\".\"]}"));
     }
 
     #[test]
@@ -420,5 +464,67 @@ mod tests {
         assert!(text.contains("\"code\":\"E000\""));
         assert!(text.contains("\"diagnostics\":[]"));
         assert!(text.contains("```favnir\\nInt\\n```"));
+    }
+
+    #[test]
+    fn completion_request_returns_items() {
+        let mut out = Vec::new();
+        let mut server = LspServer::new(&mut out);
+        server
+            .handle(crate::lsp::protocol::RpcRequest {
+                id: None,
+                method: "textDocument/didOpen".to_string(),
+                params: serde_json::json!({
+                    "textDocument": {
+                        "uri": "file:///main.fav",
+                        "text": "fn double(n: Int) -> Int = n * 2\nfn main() -> Int = do"
+                    }
+                }),
+            })
+            .expect("open");
+        server
+            .handle(crate::lsp::protocol::RpcRequest {
+                id: Some(serde_json::json!(9)),
+                method: "textDocument/completion".to_string(),
+                params: serde_json::json!({
+                    "textDocument": { "uri": "file:///main.fav" },
+                    "position": { "line": 1, "character": 20 }
+                }),
+            })
+            .expect("completion");
+        let text = String::from_utf8(out).expect("utf8");
+        assert!(text.contains("\"label\":\"double\""));
+        assert!(text.contains("\"label\":\"match\""));
+    }
+
+    #[test]
+    fn definition_request_returns_location() {
+        let mut out = Vec::new();
+        let mut server = LspServer::new(&mut out);
+        server
+            .handle(crate::lsp::protocol::RpcRequest {
+                id: None,
+                method: "textDocument/didOpen".to_string(),
+                params: serde_json::json!({
+                    "textDocument": {
+                        "uri": "file:///main.fav",
+                        "text": "fn double(n: Int) -> Int = n * 2\nfn main() -> Int = double(21)"
+                    }
+                }),
+            })
+            .expect("open");
+        server
+            .handle(crate::lsp::protocol::RpcRequest {
+                id: Some(serde_json::json!(10)),
+                method: "textDocument/definition".to_string(),
+                params: serde_json::json!({
+                    "textDocument": { "uri": "file:///main.fav" },
+                    "position": { "line": 1, "character": 20 }
+                }),
+            })
+            .expect("definition");
+        let text = String::from_utf8(out).expect("utf8");
+        assert!(text.contains("\"uri\":\"file:///main.fav\""));
+        assert!(text.contains("\"line\":0"));
     }
 }

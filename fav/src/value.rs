@@ -61,7 +61,10 @@ impl Value {
                 format!("[{}]", items.join(", "))
             }
             Value::Record(m) => {
-                let mut pairs: Vec<_> = m.iter().map(|(k, v)| format!("{}: {}", k, v.repr())).collect();
+                let mut pairs: Vec<_> = m
+                    .iter()
+                    .map(|(k, v)| format!("{}: {}", k, v.repr()))
+                    .collect();
                 pairs.sort();
                 format!("{{ {} }}", pairs.join(", "))
             }
@@ -114,7 +117,10 @@ impl std::fmt::Debug for EnvInner {
 
 impl EnvInner {
     pub fn new_root() -> Env {
-        Rc::new(RefCell::new(EnvInner { bindings: HashMap::new(), parent: None }))
+        Rc::new(RefCell::new(EnvInner {
+            bindings: HashMap::new(),
+            parent: None,
+        }))
     }
 
     pub fn new_child(parent: &Env) -> Env {

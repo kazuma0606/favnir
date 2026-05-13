@@ -70,8 +70,8 @@ pub fn register_host_functions(linker: &mut Linker<()>) -> Result<(), String> {
 
 pub fn wasm_exec_main(bytes: &[u8]) -> Result<(), String> {
     let engine = Engine::default();
-    let module = Module::new(&engine, bytes)
-        .map_err(|e| format!("error: invalid wasm module: {e}"))?;
+    let module =
+        Module::new(&engine, bytes).map_err(|e| format!("error: invalid wasm module: {e}"))?;
     let mut store = Store::new(&engine, ());
     let mut linker = Linker::new(&engine);
     register_host_functions(&mut linker)?;
@@ -109,9 +109,9 @@ pub fn wasm_exec_info(bytes: &[u8]) -> String {
 mod tests {
     use super::{register_host_functions, wasm_exec_info, wasm_exec_main};
     use crate::ast::{Effect, Lit};
+    use crate::backend::wasm_codegen::wasm_codegen_program;
     use crate::middle::checker::Type;
     use crate::middle::ir::{IRExpr, IRFnDef, IRGlobal, IRGlobalKind, IRProgram};
-    use crate::backend::wasm_codegen::wasm_codegen_program;
     use wasmtime::{Engine, Linker, Module};
 
     fn hello_ir() -> IRProgram {

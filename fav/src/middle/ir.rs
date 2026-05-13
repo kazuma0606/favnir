@@ -1,5 +1,5 @@
-use crate::ast::{BinOp, Lit};
 use super::checker::Type;
+use crate::ast::{BinOp, Lit};
 use std::collections::BTreeSet;
 
 #[derive(Debug, Clone)]
@@ -11,7 +11,7 @@ pub struct IRProgram {
 #[derive(Debug, Clone)]
 pub enum IRGlobalKind {
     Fn(usize),
-    Builtin,        // 組み込み（実行時に解決）
+    Builtin, // 組み込み（実行時に解決）
     VariantCtor,
 }
 
@@ -38,7 +38,11 @@ pub enum IRExpr {
     Local(u16, Type),
     Global(u16, Type),
     TrfRef(u16, Type),
-    CallTrfLocal { local: u16, arg: Box<IRExpr>, ty: Type },
+    CallTrfLocal {
+        local: u16,
+        arg: Box<IRExpr>,
+        ty: Type,
+    },
     Call(Box<IRExpr>, Vec<IRExpr>, Type),
     Block(Vec<IRStmt>, Box<IRExpr>, Type),
     If(Box<IRExpr>, Box<IRExpr>, Box<IRExpr>, Type),
@@ -166,11 +170,15 @@ fn collect_expr_deps(expr: &IRExpr, globals: &[IRGlobal], deps: &mut BTreeSet<St
 
         IRExpr::Call(f, args, _) => {
             collect_expr_deps(f, globals, deps);
-            for a in args { collect_expr_deps(a, globals, deps); }
+            for a in args {
+                collect_expr_deps(a, globals, deps);
+            }
         }
 
         IRExpr::Block(stmts, final_expr, _) => {
-            for s in stmts { collect_stmt_deps(s, globals, deps); }
+            for s in stmts {
+                collect_stmt_deps(s, globals, deps);
+            }
             collect_expr_deps(final_expr, globals, deps);
         }
 
@@ -183,7 +191,9 @@ fn collect_expr_deps(expr: &IRExpr, globals: &[IRGlobal], deps: &mut BTreeSet<St
         IRExpr::Match(scrutinee, arms, _) => {
             collect_expr_deps(scrutinee, globals, deps);
             for arm in arms {
-                if let Some(g) = &arm.guard { collect_expr_deps(g, globals, deps); }
+                if let Some(g) = &arm.guard {
+                    collect_expr_deps(g, globals, deps);
+                }
                 collect_expr_deps(&arm.body, globals, deps);
             }
         }
@@ -197,7 +207,9 @@ fn collect_expr_deps(expr: &IRExpr, globals: &[IRGlobal], deps: &mut BTreeSet<St
             if let Some(g) = globals.get(*global_idx as usize) {
                 deps.insert(g.name.clone());
             }
-            for c in captures { collect_expr_deps(c, globals, deps); }
+            for c in captures {
+                collect_expr_deps(c, globals, deps);
+            }
         }
 
         IRExpr::Collect(inner, _) | IRExpr::Emit(inner, _) => {
@@ -205,7 +217,9 @@ fn collect_expr_deps(expr: &IRExpr, globals: &[IRGlobal], deps: &mut BTreeSet<St
         }
 
         IRExpr::RecordConstruct(fields, _) => {
-            for (_, e) in fields { collect_expr_deps(e, globals, deps); }
+            for (_, e) in fields {
+                collect_expr_deps(e, globals, deps);
+            }
         }
     }
 }

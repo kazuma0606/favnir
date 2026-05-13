@@ -14,12 +14,24 @@ pub struct Span {
 
 impl Span {
     pub fn new(file: impl Into<String>, start: usize, end: usize, line: u32, col: u32) -> Self {
-        Span { file: file.into(), start, end, line, col }
+        Span {
+            file: file.into(),
+            start,
+            end,
+            line,
+            col,
+        }
     }
 
     /// A zero-position span used when the source location is not available.
     pub fn dummy() -> Self {
-        Span { file: String::new(), start: 0, end: 0, line: 0, col: 0 }
+        Span {
+            file: String::new(),
+            start: 0,
+            end: 0,
+            line: 0,
+            col: 0,
+        }
     }
 }
 
@@ -42,6 +54,7 @@ pub enum TokenKind {
     Private,
     Namespace,
     Use,
+    Import,
     Interface,
     With,
     Invariant,
@@ -63,39 +76,41 @@ pub enum TokenKind {
     // Effect keywords
     Pure,
     Io,
-    Emit,   // lowercase `emit` expression keyword
+    Emit, // lowercase `emit` expression keyword
 
     // Symbols
-    LArrow,     // <-
-    PipeGt,     // |>
-    Pipe,       // |
-    Arrow,      // ->
-    Bang,       // !
+    LArrow,           // <-
+    PipeGt,           // |>
+    Pipe,             // |
+    PipePipe,         // ||
+    Arrow,            // ->
+    Bang,             // !
     Question,         // ?
     QuestionQuestion, // ??
-    Colon,      // :
-    Comma,      // ,
-    Dot,        // .
-    LBrace,     // {
-    RBrace,     // }
-    LParen,     // (
-    RParen,     // )
-    LAngle,     // <
-    RAngle,     // >
-    Eq,         // =
-    FatArrow,   // =>
-    Underscore, // _
+    AmpAmp,           // &&
+    Colon,            // :
+    Comma,            // ,
+    Dot,              // .
+    LBrace,           // {
+    RBrace,           // }
+    LParen,           // (
+    RParen,           // )
+    LAngle,           // <
+    RAngle,           // >
+    Eq,               // =
+    FatArrow,         // =>
+    Underscore,       // _
 
     // Arithmetic / comparison operators
-    Plus,       // +
-    Minus,      // -
-    Star,       // *
-    Slash,      // /
-    EqEq,       // ==
-    BangEq,     // !=
-    LtEq,       // <=
-    GtEq,       // >=
-    Semicolon,  // ;
+    Plus,      // +
+    Minus,     // -
+    Star,      // *
+    Slash,     // /
+    EqEq,      // ==
+    BangEq,    // !=
+    LtEq,      // <=
+    GtEq,      // >=
+    Semicolon, // ;
 
     // Literals
     Int(i64),
@@ -135,7 +150,10 @@ pub struct LexError {
 
 impl LexError {
     pub fn new(message: impl Into<String>, span: Span) -> Self {
-        LexError { message: message.into(), span }
+        LexError {
+            message: message.into(),
+            span,
+        }
     }
 }
 
@@ -250,10 +268,22 @@ impl Lexer {
                 self.advance();
                 TokenKind::FStringRaw(self.lex_fstring_raw(sp, sl, sc)?)
             }
-            '{' => { self.advance(); TokenKind::LBrace }
-            '}' => { self.advance(); TokenKind::RBrace }
-            '(' => { self.advance(); TokenKind::LParen }
-            ')' => { self.advance(); TokenKind::RParen }
+            '{' => {
+                self.advance();
+                TokenKind::LBrace
+            }
+            '}' => {
+                self.advance();
+                TokenKind::RBrace
+            }
+            '(' => {
+                self.advance();
+                TokenKind::LParen
+            }
+            ')' => {
+                self.advance();
+                TokenKind::RParen
+            }
             '?' => {
                 self.advance();
                 if self.pos < self.source.len() && self.source[self.pos] == '?' {
@@ -263,12 +293,39 @@ impl Lexer {
                     TokenKind::Question
                 }
             }
-            ':' => { self.advance(); TokenKind::Colon }
-            ',' => { self.advance(); TokenKind::Comma }
-            '.' => { self.advance(); TokenKind::Dot }
-            '+' => { self.advance(); TokenKind::Plus }
-            '*' => { self.advance(); TokenKind::Star }
-            ';' => { self.advance(); TokenKind::Semicolon }
+            '&' => {
+                self.advance();
+                if self.peek() == Some('&') {
+                    self.advance();
+                    TokenKind::AmpAmp
+                } else {
+                    return Err(LexError::new("unexpected `&`", self.span_here()));
+                }
+            }
+            ':' => {
+                self.advance();
+                TokenKind::Colon
+            }
+            ',' => {
+                self.advance();
+                TokenKind::Comma
+            }
+            '.' => {
+                self.advance();
+                TokenKind::Dot
+            }
+            '+' => {
+                self.advance();
+                TokenKind::Plus
+            }
+            '*' => {
+                self.advance();
+                TokenKind::Star
+            }
+            ';' => {
+                self.advance();
+                TokenKind::Semicolon
+            }
 
             '=' => {
                 self.advance();
@@ -296,8 +353,14 @@ impl Lexer {
             '<' => {
                 self.advance();
                 match self.peek() {
-                    Some('-') => { self.advance(); TokenKind::LArrow }
-                    Some('=') => { self.advance(); TokenKind::LtEq }
+                    Some('-') => {
+                        self.advance();
+                        TokenKind::LArrow
+                    }
+                    Some('=') => {
+                        self.advance();
+                        TokenKind::LtEq
+                    }
                     _ => TokenKind::LAngle,
                 }
             }
@@ -327,6 +390,9 @@ impl Lexer {
                 if self.peek() == Some('>') {
                     self.advance();
                     TokenKind::PipeGt
+                } else if self.peek() == Some('|') {
+                    self.advance();
+                    TokenKind::PipePipe
                 } else {
                     TokenKind::Pipe
                 }
@@ -343,9 +409,17 @@ impl Lexer {
 
             '_' => {
                 self.advance();
-                if self.peek().map(|ch| ch.is_alphanumeric() || ch == '_').unwrap_or(false) {
+                if self
+                    .peek()
+                    .map(|ch| ch.is_alphanumeric() || ch == '_')
+                    .unwrap_or(false)
+                {
                     let mut name = String::from('_');
-                    while self.peek().map(|ch| ch.is_alphanumeric() || ch == '_').unwrap_or(false) {
+                    while self
+                        .peek()
+                        .map(|ch| ch.is_alphanumeric() || ch == '_')
+                        .unwrap_or(false)
+                    {
                         name.push(self.advance());
                     }
                     TokenKind::Ident(name)
@@ -373,47 +447,52 @@ impl Lexer {
 
     fn lex_ident_or_keyword(&mut self) -> TokenKind {
         let mut name = String::new();
-        while self.peek().map(|c| c.is_alphanumeric() || c == '_').unwrap_or(false) {
+        while self
+            .peek()
+            .map(|c| c.is_alphanumeric() || c == '_')
+            .unwrap_or(false)
+        {
             name.push(self.advance());
         }
         match name.as_str() {
-            "type"    => TokenKind::Type,
-            "fn"      => TokenKind::Fn,
-            "trf"     => TokenKind::Trf,
-            "abstract"=> TokenKind::Abstract,
-            "flw"     => TokenKind::Flw,
-            "bind"    => TokenKind::Bind,
-            "match"   => TokenKind::Match,
-            "if"      => TokenKind::If,
-            "else"    => TokenKind::Else,
-            "public"    => TokenKind::Public,
-            "internal"  => TokenKind::Internal,
-            "private"   => TokenKind::Private,
+            "type" => TokenKind::Type,
+            "fn" => TokenKind::Fn,
+            "trf" => TokenKind::Trf,
+            "abstract" => TokenKind::Abstract,
+            "flw" => TokenKind::Flw,
+            "bind" => TokenKind::Bind,
+            "match" => TokenKind::Match,
+            "if" => TokenKind::If,
+            "else" => TokenKind::Else,
+            "public" => TokenKind::Public,
+            "internal" => TokenKind::Internal,
+            "private" => TokenKind::Private,
             "namespace" => TokenKind::Namespace,
-            "use"       => TokenKind::Use,
+            "use" => TokenKind::Use,
+            "import" => TokenKind::Import,
             "interface" => TokenKind::Interface,
-            "with"      => TokenKind::With,
+            "with" => TokenKind::With,
             "invariant" => TokenKind::Invariant,
-            "effect"    => TokenKind::Effect,
-            "cap"       => TokenKind::Cap,
-            "impl"      => TokenKind::Impl,
-            "for"       => TokenKind::For,
-            "in"        => TokenKind::In,
-            "stage"     => TokenKind::Stage,
-            "seq"       => TokenKind::Seq,
-            "chain"     => TokenKind::Chain,
-            "yield"     => TokenKind::Yield,
-            "collect"   => TokenKind::Collect,
-            "where"     => TokenKind::Where,
-            "test"      => TokenKind::Test,
-            "async"     => TokenKind::Async,
-            "bench"     => TokenKind::Bench,
-            "Pure"    => TokenKind::Pure,
-            "Io"      => TokenKind::Io,
-            "emit"    => TokenKind::Emit,
-            "true"    => TokenKind::Bool(true),
-            "false"   => TokenKind::Bool(false),
-            _         => TokenKind::Ident(name),
+            "effect" => TokenKind::Effect,
+            "cap" => TokenKind::Cap,
+            "impl" => TokenKind::Impl,
+            "for" => TokenKind::For,
+            "in" => TokenKind::In,
+            "stage" => TokenKind::Stage,
+            "seq" => TokenKind::Seq,
+            "chain" => TokenKind::Chain,
+            "yield" => TokenKind::Yield,
+            "collect" => TokenKind::Collect,
+            "where" => TokenKind::Where,
+            "test" => TokenKind::Test,
+            "async" => TokenKind::Async,
+            "bench" => TokenKind::Bench,
+            "Pure" => TokenKind::Pure,
+            "Io" => TokenKind::Io,
+            "emit" => TokenKind::Emit,
+            "true" => TokenKind::Bool(true),
+            "false" => TokenKind::Bool(false),
+            _ => TokenKind::Ident(name),
         }
     }
 
@@ -427,9 +506,7 @@ impl Lexer {
             s.push(self.advance());
         }
 
-        if self.peek() == Some('.')
-            && self.peek2().map(|c| c.is_ascii_digit()).unwrap_or(false)
-        {
+        if self.peek() == Some('.') && self.peek2().map(|c| c.is_ascii_digit()).unwrap_or(false) {
             is_float = true;
             s.push(self.advance()); // '.'
             while self.peek().map(|c| c.is_ascii_digit()).unwrap_or(false) {
@@ -456,7 +533,10 @@ impl Lexer {
         loop {
             match self.peek() {
                 None => {
-                    return Err(LexError::new("unterminated string literal", self.span_here()));
+                    return Err(LexError::new(
+                        "unterminated string literal",
+                        self.span_here(),
+                    ));
                 }
                 Some('"') => {
                     self.advance();
@@ -465,17 +545,29 @@ impl Lexer {
                 Some('\\') => {
                     self.advance();
                     match self.peek() {
-                        Some('n')  => { self.advance(); s.push('\n'); }
-                        Some('t')  => { self.advance(); s.push('\t'); }
-                        Some('r')  => { self.advance(); s.push('\r'); }
-                        Some('"')  => { self.advance(); s.push('"'); }
-                        Some('\\') => { self.advance(); s.push('\\'); }
+                        Some('n') => {
+                            self.advance();
+                            s.push('\n');
+                        }
+                        Some('t') => {
+                            self.advance();
+                            s.push('\t');
+                        }
+                        Some('r') => {
+                            self.advance();
+                            s.push('\r');
+                        }
+                        Some('"') => {
+                            self.advance();
+                            s.push('"');
+                        }
+                        Some('\\') => {
+                            self.advance();
+                            s.push('\\');
+                        }
                         Some(c) => {
                             let span = self.span_here();
-                            return Err(LexError::new(
-                                format!("unknown escape '\\{}'", c),
-                                span,
-                            ));
+                            return Err(LexError::new(format!("unknown escape '\\{}'", c), span));
                         }
                         None => {
                             return Err(LexError::new(
@@ -493,7 +585,12 @@ impl Lexer {
         Ok(TokenKind::Str(s))
     }
 
-    fn lex_fstring_raw(&mut self, start_pos: usize, start_line: u32, start_col: u32) -> Result<String, LexError> {
+    fn lex_fstring_raw(
+        &mut self,
+        start_pos: usize,
+        start_line: u32,
+        start_col: u32,
+    ) -> Result<String, LexError> {
         let mut out = String::new();
         let mut depth = 0usize;
         while let Some(c) = self.peek() {
@@ -555,26 +652,53 @@ mod tests {
     // keywords
     #[test]
     fn test_keywords() {
-        let kinds = lex("type fn trf abstract flw bind match if else public internal private namespace use interface with invariant effect cap impl for");
-        assert_eq!(kinds, vec![
-            TokenKind::Type, TokenKind::Fn, TokenKind::Trf, TokenKind::Abstract, TokenKind::Flw,
-            TokenKind::Bind, TokenKind::Match, TokenKind::If, TokenKind::Else,
-            TokenKind::Public, TokenKind::Internal, TokenKind::Private,
-            TokenKind::Namespace, TokenKind::Use,
-            TokenKind::Interface, TokenKind::With, TokenKind::Invariant, TokenKind::Effect,
-            TokenKind::Cap, TokenKind::Impl, TokenKind::For,
-            TokenKind::Eof,
-        ]);
+        let kinds = lex(
+            "type fn trf abstract flw bind match if else public internal private namespace use import interface with invariant effect cap impl for",
+        );
+        assert_eq!(
+            kinds,
+            vec![
+                TokenKind::Type,
+                TokenKind::Fn,
+                TokenKind::Trf,
+                TokenKind::Abstract,
+                TokenKind::Flw,
+                TokenKind::Bind,
+                TokenKind::Match,
+                TokenKind::If,
+                TokenKind::Else,
+                TokenKind::Public,
+                TokenKind::Internal,
+                TokenKind::Private,
+                TokenKind::Namespace,
+                TokenKind::Use,
+                TokenKind::Import,
+                TokenKind::Interface,
+                TokenKind::With,
+                TokenKind::Invariant,
+                TokenKind::Effect,
+                TokenKind::Cap,
+                TokenKind::Impl,
+                TokenKind::For,
+                TokenKind::Eof,
+            ]
+        );
     }
 
     // v0.5.0 keywords
     #[test]
     fn test_v05_keywords() {
         let kinds = lex("chain yield collect where");
-        assert_eq!(kinds, vec![
-            TokenKind::Chain, TokenKind::Yield, TokenKind::Collect, TokenKind::Where,
-            TokenKind::Eof,
-        ]);
+        assert_eq!(
+            kinds,
+            vec![
+                TokenKind::Chain,
+                TokenKind::Yield,
+                TokenKind::Collect,
+                TokenKind::Where,
+                TokenKind::Eof,
+            ]
+        );
     }
 
     #[test]
@@ -583,106 +707,162 @@ mod tests {
         assert_eq!(kinds, vec![TokenKind::Pure, TokenKind::Io, TokenKind::Eof]);
     }
 
+    #[test]
+    fn import_keyword_is_tokenized() {
+        let toks = lex("import");
+        assert_eq!(toks, vec![TokenKind::Import, TokenKind::Eof]);
+    }
+
     // symbols
     #[test]
     fn test_symbols() {
-        let kinds = lex("<- |> | -> ! ? : , . { } ( ) = _");
-        assert_eq!(kinds, vec![
-            TokenKind::LArrow, TokenKind::PipeGt, TokenKind::Pipe, TokenKind::Arrow,
-            TokenKind::Bang, TokenKind::Question, TokenKind::Colon, TokenKind::Comma,
-            TokenKind::Dot, TokenKind::LBrace, TokenKind::RBrace,
-            TokenKind::LParen, TokenKind::RParen,
-            TokenKind::Eq, TokenKind::Underscore,
-            TokenKind::Eof,
-        ]);
+        let kinds = lex("<- |> | || -> ! ? ?? && : , . { } ( ) = _");
+        assert_eq!(
+            kinds,
+            vec![
+                TokenKind::LArrow,
+                TokenKind::PipeGt,
+                TokenKind::Pipe,
+                TokenKind::PipePipe,
+                TokenKind::Arrow,
+                TokenKind::Bang,
+                TokenKind::Question,
+                TokenKind::QuestionQuestion,
+                TokenKind::AmpAmp,
+                TokenKind::Colon,
+                TokenKind::Comma,
+                TokenKind::Dot,
+                TokenKind::LBrace,
+                TokenKind::RBrace,
+                TokenKind::LParen,
+                TokenKind::RParen,
+                TokenKind::Eq,
+                TokenKind::Underscore,
+                TokenKind::Eof,
+            ]
+        );
     }
 
     #[test]
     fn test_angle_brackets() {
         let kinds = lex("< >");
-        assert_eq!(kinds, vec![TokenKind::LAngle, TokenKind::RAngle, TokenKind::Eof]);
+        assert_eq!(
+            kinds,
+            vec![TokenKind::LAngle, TokenKind::RAngle, TokenKind::Eof]
+        );
     }
 
     #[test]
     fn test_operators() {
         let kinds = lex("+ - * / == != <= >=");
-        assert_eq!(kinds, vec![
-            TokenKind::Plus, TokenKind::Minus, TokenKind::Star, TokenKind::Slash,
-            TokenKind::EqEq, TokenKind::BangEq, TokenKind::LtEq, TokenKind::GtEq,
-            TokenKind::Eof,
-        ]);
+        assert_eq!(
+            kinds,
+            vec![
+                TokenKind::Plus,
+                TokenKind::Minus,
+                TokenKind::Star,
+                TokenKind::Slash,
+                TokenKind::EqEq,
+                TokenKind::BangEq,
+                TokenKind::LtEq,
+                TokenKind::GtEq,
+                TokenKind::Eof,
+            ]
+        );
     }
 
     // integer literals
     #[test]
     fn test_int_literal() {
         let kinds = lex("42 0 1000");
-        assert_eq!(kinds, vec![
-            TokenKind::Int(42), TokenKind::Int(0), TokenKind::Int(1000),
-            TokenKind::Eof,
-        ]);
+        assert_eq!(
+            kinds,
+            vec![
+                TokenKind::Int(42),
+                TokenKind::Int(0),
+                TokenKind::Int(1000),
+                TokenKind::Eof,
+            ]
+        );
     }
 
     // float literals
     #[test]
     fn test_float_literal() {
         let kinds = lex("3.14 0.5");
-        assert_eq!(kinds, vec![
-            TokenKind::Float(3.14), TokenKind::Float(0.5),
-            TokenKind::Eof,
-        ]);
+        assert_eq!(
+            kinds,
+            vec![
+                TokenKind::Float(3.14),
+                TokenKind::Float(0.5),
+                TokenKind::Eof,
+            ]
+        );
     }
 
     // string literals
     #[test]
     fn test_string_literal() {
         let kinds = lex(r#""hello" "world""#);
-        assert_eq!(kinds, vec![
-            TokenKind::Str("hello".into()),
-            TokenKind::Str("world".into()),
-            TokenKind::Eof,
-        ]);
+        assert_eq!(
+            kinds,
+            vec![
+                TokenKind::Str("hello".into()),
+                TokenKind::Str("world".into()),
+                TokenKind::Eof,
+            ]
+        );
     }
 
     #[test]
     fn test_string_escapes() {
         let kinds = lex(r#""\n\t\"\\""#);
-        assert_eq!(kinds, vec![
-            TokenKind::Str("\n\t\"\\".into()),
-            TokenKind::Eof,
-        ]);
+        assert_eq!(
+            kinds,
+            vec![TokenKind::Str("\n\t\"\\".into()), TokenKind::Eof,]
+        );
     }
 
     #[test]
     fn test_fstring_raw_token() {
         let kinds = lex(r#"$"Hello {name}!""#);
-        assert_eq!(kinds, vec![
-            TokenKind::FStringRaw("Hello {name}!".into()),
-            TokenKind::Eof,
-        ]);
+        assert_eq!(
+            kinds,
+            vec![
+                TokenKind::FStringRaw("Hello {name}!".into()),
+                TokenKind::Eof,
+            ]
+        );
     }
 
     // bool literals
     #[test]
     fn test_bool_literal() {
         let kinds = lex("true false");
-        assert_eq!(kinds, vec![
-            TokenKind::Bool(true), TokenKind::Bool(false),
-            TokenKind::Eof,
-        ]);
+        assert_eq!(
+            kinds,
+            vec![
+                TokenKind::Bool(true),
+                TokenKind::Bool(false),
+                TokenKind::Eof,
+            ]
+        );
     }
 
     // identifiers
     #[test]
     fn test_identifiers() {
         let kinds = lex("foo bar_baz _private MyType");
-        assert_eq!(kinds, vec![
-            TokenKind::Ident("foo".into()),
-            TokenKind::Ident("bar_baz".into()),
-            TokenKind::Ident("_private".into()),
-            TokenKind::Ident("MyType".into()),
-            TokenKind::Eof,
-        ]);
+        assert_eq!(
+            kinds,
+            vec![
+                TokenKind::Ident("foo".into()),
+                TokenKind::Ident("bar_baz".into()),
+                TokenKind::Ident("_private".into()),
+                TokenKind::Ident("MyType".into()),
+                TokenKind::Eof,
+            ]
+        );
     }
 
     // underscore as wildcard
@@ -696,23 +876,29 @@ mod tests {
     #[test]
     fn test_comment_skip() {
         let kinds = lex("foo // this is a comment\nbar");
-        assert_eq!(kinds, vec![
-            TokenKind::Ident("foo".into()),
-            TokenKind::Ident("bar".into()),
-            TokenKind::Eof,
-        ]);
+        assert_eq!(
+            kinds,
+            vec![
+                TokenKind::Ident("foo".into()),
+                TokenKind::Ident("bar".into()),
+                TokenKind::Eof,
+            ]
+        );
     }
 
     // whitespace skipping
     #[test]
     fn test_whitespace_skip() {
         let kinds = lex("  foo   \t  bar  \n  baz  ");
-        assert_eq!(kinds, vec![
-            TokenKind::Ident("foo".into()),
-            TokenKind::Ident("bar".into()),
-            TokenKind::Ident("baz".into()),
-            TokenKind::Eof,
-        ]);
+        assert_eq!(
+            kinds,
+            vec![
+                TokenKind::Ident("foo".into()),
+                TokenKind::Ident("bar".into()),
+                TokenKind::Ident("baz".into()),
+                TokenKind::Eof,
+            ]
+        );
     }
 
     // error: unexpected character
@@ -741,9 +927,9 @@ mod tests {
     fn test_span_line_col() {
         let tokens = Lexer::new("foo\nbar", "f.fav").tokenize().unwrap();
         assert_eq!(tokens[0].span.line, 1);
-        assert_eq!(tokens[0].span.col,  1);
+        assert_eq!(tokens[0].span.col, 1);
         assert_eq!(tokens[1].span.line, 2);
-        assert_eq!(tokens[1].span.col,  1);
+        assert_eq!(tokens[1].span.col, 1);
     }
 
     // a realistic snippet
@@ -751,24 +937,27 @@ mod tests {
     fn test_trf_snippet() {
         let src = "trf ParseCsv: String -> List<Row> = |text| { text }";
         let kinds = lex(src);
-        assert_eq!(kinds, vec![
-            TokenKind::Trf,
-            TokenKind::Ident("ParseCsv".into()),
-            TokenKind::Colon,
-            TokenKind::Ident("String".into()),
-            TokenKind::Arrow,
-            TokenKind::Ident("List".into()),
-            TokenKind::LAngle,
-            TokenKind::Ident("Row".into()),
-            TokenKind::RAngle,
-            TokenKind::Eq,
-            TokenKind::Pipe,
-            TokenKind::Ident("text".into()),
-            TokenKind::Pipe,
-            TokenKind::LBrace,
-            TokenKind::Ident("text".into()),
-            TokenKind::RBrace,
-            TokenKind::Eof,
-        ]);
+        assert_eq!(
+            kinds,
+            vec![
+                TokenKind::Trf,
+                TokenKind::Ident("ParseCsv".into()),
+                TokenKind::Colon,
+                TokenKind::Ident("String".into()),
+                TokenKind::Arrow,
+                TokenKind::Ident("List".into()),
+                TokenKind::LAngle,
+                TokenKind::Ident("Row".into()),
+                TokenKind::RAngle,
+                TokenKind::Eq,
+                TokenKind::Pipe,
+                TokenKind::Ident("text".into()),
+                TokenKind::Pipe,
+                TokenKind::LBrace,
+                TokenKind::Ident("text".into()),
+                TokenKind::RBrace,
+                TokenKind::Eof,
+            ]
+        );
     }
 }

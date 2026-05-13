@@ -1,26 +1,26 @@
 use crate::ast;
 use crate::backend;
-use std::path::{Path, PathBuf};
-use std::process;
-use std::sync::{Arc, Mutex};
 use crate::backend::artifact::FvcArtifact;
-use crate::backend::codegen::{codegen_program, Opcode};
-use crate::middle::ir::{IRArm, IRExpr, IRGlobalKind, IRPattern, IRProgram, IRStmt};
-use crate::middle::compiler::compile_program;
+use crate::backend::codegen::{Opcode, codegen_program};
+use crate::backend::vm::{VM, enable_coverage, take_coverage};
 use crate::backend::wasm_codegen::wasm_codegen_program;
 use crate::backend::wasm_exec::{wasm_exec_info, wasm_exec_main};
 use crate::frontend::parser::Parser;
 use crate::middle::checker::Checker;
-use crate::value::Value;
-use crate::toml::FavToml;
-use crate::middle::resolver::Resolver;
-use crate::backend::vm::{VM, enable_coverage, take_coverage};
+use crate::middle::compiler::compile_program;
 use crate::middle::compiler::set_coverage_mode;
+use crate::middle::ir::{IRArm, IRExpr, IRGlobalKind, IRPattern, IRProgram, IRStmt};
+use crate::middle::resolver::Resolver;
+use crate::toml::FavToml;
+use crate::value::Value;
 use notify::{Config, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
-use serde_json::json;
 use serde::Serialize;
+use serde_json::json;
 use std::collections::{BTreeSet, HashSet};
+use std::path::{Path, PathBuf};
+use std::process;
 use std::sync::mpsc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 // ── diagnostic formatting ─────────────────────────────────────────────────────
@@ -39,7 +39,11 @@ fn format_diagnostic(source: &str, error: &crate::middle::checker::TypeError) ->
     let span = &error.span;
     let line_num = span.line as usize;
     let col = span.col as usize;
-    let token_len = if span.end > span.start { span.end - span.start } else { 1 };
+    let token_len = if span.end > span.start {
+        span.end - span.start
+    } else {
+        1
+    };
 
     // Try to extract the source line
     let source_line = source.lines().nth(line_num.saturating_sub(1)).unwrap_or("");
@@ -51,16 +55,25 @@ fn format_diagnostic(source: &str, error: &crate::middle::checker::TypeError) ->
     // Underline: col is 1-based, so offset = col-1 spaces
     let col_offset = " ".repeat(col.saturating_sub(1));
     // Cap underline to not exceed the line length
-    let max_len = source_line.len().saturating_sub(col.saturating_sub(1)).max(1);
+    let max_len = source_line
+        .len()
+        .saturating_sub(col.saturating_sub(1))
+        .max(1);
     let underline = "^".repeat(token_len.min(max_len).max(1));
 
     format!(
         "error[{}]: {}\n  --> {}:{}:{}\n{} |\n{} | {}\n{} | {}{}",
-        error.code, error.message,
-        span.file, span.line, span.col,
+        error.code,
+        error.message,
+        span.file,
+        span.line,
+        span.col,
         padding,
-        line_prefix, source_line,
-        padding, col_offset, underline,
+        line_prefix,
+        source_line,
+        padding,
+        col_offset,
+        underline,
     )
 }
 
@@ -68,22 +81,35 @@ fn format_warning(source: &str, warning: &crate::middle::checker::TypeWarning) -
     let span = &warning.span;
     let line_num = span.line as usize;
     let col = span.col as usize;
-    let token_len = if span.end > span.start { span.end - span.start } else { 1 };
+    let token_len = if span.end > span.start {
+        span.end - span.start
+    } else {
+        1
+    };
 
     let source_line = source.lines().nth(line_num.saturating_sub(1)).unwrap_or("");
     let line_prefix = line_num.to_string();
     let padding = " ".repeat(line_prefix.len());
     let col_offset = " ".repeat(col.saturating_sub(1));
-    let max_len = source_line.len().saturating_sub(col.saturating_sub(1)).max(1);
+    let max_len = source_line
+        .len()
+        .saturating_sub(col.saturating_sub(1))
+        .max(1);
     let underline = "^".repeat(token_len.min(max_len).max(1));
 
     format!(
         "warning[{}]: {}\n  --> {}:{}:{}\n{} |\n{} | {}\n{} | {}{}",
-        warning.code, warning.message,
-        span.file, span.line, span.col,
+        warning.code,
+        warning.message,
+        span.file,
+        span.line,
+        span.col,
         padding,
-        line_prefix, source_line,
-        padding, col_offset, underline,
+        line_prefix,
+        source_line,
+        padding,
+        col_offset,
+        underline,
     )
 }
 
@@ -95,10 +121,7 @@ fn render_warnings(
     if no_warn {
         Vec::new()
     } else {
-        warnings
-            .iter()
-            .map(|w| format_warning(source, w))
-            .collect()
+        warnings.iter().map(|w| format_warning(source, w)).collect()
     }
 }
 
@@ -107,7 +130,7 @@ fn check_single_file(
 ) -> (
     String,
     Vec<crate::middle::checker::TypeError>,
-    Vec<crate::middle::checker::TypeWarning>,
+    Vec<crate::middle::checker::FavWarning>,
 ) {
     let source = load_file(path);
     let program = Parser::parse_str(&source, path).unwrap_or_else(|e| {
@@ -115,8 +138,7 @@ fn check_single_file(
         process::exit(1);
     });
     let mut checker = Checker::new();
-    let errors = checker.check_with_self(&program);
-    let mut warnings = checker.warnings;
+    let (errors, mut warnings) = checker.check_with_self(&program);
     warnings.extend(partial_flw_warnings(&program));
     (source, errors, warnings)
 }
@@ -130,15 +152,111 @@ fn load_file(path: &str) -> String {
     })
 }
 
+pub fn cmd_new(name: &str, template: &str) {
+    if let Err(err) = try_cmd_new(name, template) {
+        eprintln!("error: {}", err);
+        process::exit(1);
+    }
+    println!("created {}", name);
+    println!("next:");
+    println!("  cd {}", name);
+    match template {
+        "lib" => println!("  fav test src/lib.test.fav"),
+        _ => println!("  fav run src/main.fav"),
+    }
+}
+
+fn try_cmd_new(name: &str, template: &str) -> Result<(), String> {
+    let root = PathBuf::from(name);
+    if root.exists() {
+        return Err(format!("destination `{}` already exists", name));
+    }
+    match template {
+        "script" => create_script_project(&root, name),
+        "pipeline" => create_pipeline_project(&root, name),
+        "lib" => create_lib_project(&root, name),
+        other => Err(format!(
+            "unknown template `{other}` (expected script|pipeline|lib)"
+        )),
+    }
+}
+
+fn write_text_file(path: &Path, contents: &str) -> Result<(), String> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| format!("cannot create `{}`: {}", parent.display(), e))?;
+    }
+    std::fs::write(path, contents).map_err(|e| format!("cannot write `{}`: {}", path.display(), e))
+}
+
+fn default_fav_toml(name: &str) -> String {
+    format!(
+        "[project]\nname    = \"{name}\"\nversion = \"0.1.0\"\nedition = \"2026\"\nsrc     = \"src\"\n"
+    )
+}
+
+fn default_rune_toml() -> &'static str {
+    "[dependencies]\n\n[dev-dependencies]\n"
+}
+
+fn create_script_project(root: &Path, name: &str) -> Result<(), String> {
+    write_text_file(&root.join("fav.toml"), &default_fav_toml(name))?;
+    write_text_file(
+        &root.join("src").join("main.fav"),
+        "public fn main() -> Unit !Io {\n    IO.println(greet(\"world\"))\n}\n\nfn greet(name: String) -> String {\n    $\"Hello {name}!\"\n}\n",
+    )?;
+    Ok(())
+}
+
+fn create_pipeline_project(root: &Path, name: &str) -> Result<(), String> {
+    write_text_file(&root.join("fav.toml"), &default_fav_toml(name))?;
+    write_text_file(&root.join("rune.toml"), default_rune_toml())?;
+    write_text_file(
+        &root.join("src").join("main.fav"),
+        "public fn main() -> Unit !Io {\n    IO.println(\"pipeline: ok\")\n}\n",
+    )?;
+    write_text_file(
+        &root.join("src").join("pipeline.fav"),
+        "public seq MainPipeline =\n    ParseStage\n    |> ValidateStage\n    |> SaveStage\n",
+    )?;
+    write_text_file(
+        &root.join("src").join("stages").join("parse.fav"),
+        "public stage ParseStage: String -> String = |input| {\n    input\n}\n",
+    )?;
+    write_text_file(
+        &root.join("src").join("stages").join("validate.fav"),
+        "public stage ValidateStage: String -> String = |input| {\n    input\n}\n",
+    )?;
+    write_text_file(
+        &root.join("src").join("stages").join("save.fav"),
+        "public stage SaveStage: String -> String = |input| {\n    input\n}\n",
+    )?;
+    Ok(())
+}
+
+fn create_lib_project(root: &Path, name: &str) -> Result<(), String> {
+    write_text_file(&root.join("fav.toml"), &default_fav_toml(name))?;
+    write_text_file(&root.join("rune.toml"), default_rune_toml())?;
+    write_text_file(
+        &root.join("src").join("lib.fav"),
+        &format!(
+            "// {name} rune -- public API\n\npublic fn hello() -> String {{\n    \"hello from {name}\"\n}}\n"
+        ),
+    )?;
+    write_text_file(
+        &root.join("src").join("lib.test.fav"),
+        &format!(
+            "test \"hello returns a greeting\" {{\n    assert_eq(hello(), \"hello from {name}\")\n}}\n"
+        ),
+    )?;
+    Ok(())
+}
+
 // ── module loading ────────────────────────────────────────────────────────────
 
 /// Load a program and all its transitive imports, returning a merged list of
 /// items (dependencies first). Used so the evaluator can see all definitions.
-fn load_all_items(
-    entry_path: &str,
-    toml: Option<&FavToml>,
-    root: Option<&Path>,
-) -> Vec<ast::Item> {
+fn load_all_items(entry_path: &str, toml: Option<&FavToml>, root: Option<&Path>) -> Vec<ast::Item> {
     use std::collections::HashSet;
 
     let mut visited: HashSet<String> = HashSet::new();
@@ -151,7 +269,9 @@ fn load_all_items(
         visited: &mut HashSet<String>,
         all_items: &mut Vec<ast::Item>,
     ) {
-        if visited.contains(path) { return; }
+        if visited.contains(path) {
+            return;
+        }
         visited.insert(path.to_string());
 
         let source = std::fs::read_to_string(path).unwrap_or_else(|e| {
@@ -167,13 +287,27 @@ fn load_all_items(
         if let (Some(toml), Some(root)) = (toml, root) {
             let src_dir = toml.src_dir(root);
             for use_path in &program.uses {
-                if use_path.len() < 2 { continue; }
-                let mod_path = use_path[..use_path.len()-1].join(".");
+                if use_path.len() < 2 {
+                    continue;
+                }
+                let mod_path = use_path[..use_path.len() - 1].join(".");
                 if mod_path == "std.states" {
                     continue;
                 }
                 let rel: PathBuf = mod_path.split('.').collect();
                 let dep_file = src_dir.join(rel).with_extension("fav");
+                let dep_str = dep_file.to_string_lossy().to_string();
+                load_rec(&dep_str, Some(toml), Some(root), visited, all_items);
+            }
+            for item in &program.items {
+                let ast::Item::ImportDecl { path, is_rune, .. } = item else {
+                    continue;
+                };
+                let dep_file = if *is_rune {
+                    toml.runes_dir(root).join(path).join(format!("{path}.fav"))
+                } else {
+                    src_dir.join(path).with_extension("fav")
+                };
                 let dep_str = dep_file.to_string_lossy().to_string();
                 load_rec(&dep_str, Some(toml), Some(root), visited, all_items);
             }
@@ -184,6 +318,7 @@ fn load_all_items(
             match &item {
                 ast::Item::NamespaceDecl(..)
                 | ast::Item::UseDecl(..)
+                | ast::Item::ImportDecl { .. }
                 | ast::Item::InterfaceDecl(..)
                 | ast::Item::InterfaceImplDecl(..) => {}
                 _ => all_items.push(item),
@@ -207,8 +342,12 @@ fn find_partial_flw_bindings(program: &ast::Program) -> Vec<(String, Vec<String>
 
     let mut out = Vec::new();
     for item in &program.items {
-        let ast::Item::FlwBindingDef(fd) = item else { continue };
-        let Some(template) = templates.get(&fd.template) else { continue };
+        let ast::Item::FlwBindingDef(fd) = item else {
+            continue;
+        };
+        let Some(template) = templates.get(&fd.template) else {
+            continue;
+        };
         let bound: std::collections::HashSet<&str> =
             fd.bindings.iter().map(|(slot, _)| slot.as_str()).collect();
         let unbound: Vec<String> = template
@@ -229,8 +368,8 @@ fn partial_flw_warnings(program: &ast::Program) -> Vec<crate::middle::checker::T
         .into_iter()
         .filter_map(|(name, slots)| {
             program.items.iter().find_map(|item| match item {
-                ast::Item::FlwBindingDef(fd) if fd.name == name => Some(
-                    crate::middle::checker::TypeWarning::new(
+                ast::Item::FlwBindingDef(fd) if fd.name == name => {
+                    Some(crate::middle::checker::TypeWarning::new(
                         "W011",
                         format!(
                             "`{}` is a partial flw binding with unbound slots: {}",
@@ -238,8 +377,8 @@ fn partial_flw_warnings(program: &ast::Program) -> Vec<crate::middle::checker::T
                             slots.join(", ")
                         ),
                         fd.span.clone(),
-                    ),
-                ),
+                    ))
+                }
                 _ => None,
             })
         })
@@ -326,16 +465,18 @@ fn load_and_check_program(file: Option<&str>) -> (ast::Program, String) {
     let errors = if let Some((ref toml, ref root)) = proj {
         let r = make_resolver(Some(toml.clone()), Some(root.clone()));
         let mut checker = Checker::new_with_resolver(r, PathBuf::from(&path));
-        checker.check_with_self(&program)
+        checker.check_with_self(&program).0
     } else if uses_std_states {
         let r = make_resolver(None, None);
         let mut checker = Checker::new_with_resolver(r, PathBuf::from(&path));
-        checker.check_with_self(&program)
+        checker.check_with_self(&program).0
     } else {
-        Checker::check_program(&program)
+        Checker::check_program(&program).0
     };
     if !errors.is_empty() {
-        for e in &errors { eprintln!("{}", format_diagnostic(&source, e)); }
+        for e in &errors {
+            eprintln!("{}", format_diagnostic(&source, e));
+        }
         process::exit(1);
     }
 
@@ -356,17 +497,19 @@ fn load_and_check_program(file: Option<&str>) -> (ast::Program, String) {
 // ── fav run ───────────────────────────────────────────────────────────────────
 
 pub fn cmd_run(file: Option<&str>, db_url: Option<&str>) {
-    let (run_program, _) = load_and_check_program(file);
+    let (run_program, source_path) = load_and_check_program(file);
     ensure_no_partial_flw(&run_program).unwrap_or_else(|message| {
         eprintln!("{message}");
         process::exit(1);
     });
     let artifact = build_artifact(&run_program);
 
-    exec_artifact_main(&artifact, db_url).unwrap_or_else(|message| {
-        eprintln!("{message}");
-        process::exit(1);
-    });
+    exec_artifact_main_with_source(&artifact, db_url, Some(&source_path)).unwrap_or_else(
+        |message| {
+            eprintln!("{message}");
+            process::exit(1);
+        },
+    );
 }
 
 pub fn cmd_build(file: Option<&str>, out: Option<&str>, target: Option<&str>) {
@@ -425,13 +568,22 @@ fn write_artifact_to_path(artifact: &FvcArtifact, out_path: &Path) -> Result<(),
     if let Some(parent) = out_path.parent() {
         if !parent.as_os_str().is_empty() {
             std::fs::create_dir_all(parent).map_err(|e| {
-                format!("error: cannot create output directory `{}`: {}", parent.display(), e)
+                format!(
+                    "error: cannot create output directory `{}`: {}",
+                    parent.display(),
+                    e
+                )
             })?;
         }
     }
 
-    let mut file = std::fs::File::create(out_path)
-        .map_err(|e| format!("error: cannot create artifact `{}`: {}", out_path.display(), e))?;
+    let mut file = std::fs::File::create(out_path).map_err(|e| {
+        format!(
+            "error: cannot create artifact `{}`: {}",
+            out_path.display(),
+            e
+        )
+    })?;
     backend::artifact::FvcWriter {
         str_table: artifact.str_table.clone(),
         globals: artifact.globals.clone(),
@@ -439,7 +591,13 @@ fn write_artifact_to_path(artifact: &FvcArtifact, out_path: &Path) -> Result<(),
         explain_json: artifact.explain_json.clone(),
     }
     .write_to(&mut file)
-    .map_err(|e| format!("error: cannot write artifact `{}`: {}", out_path.display(), e))
+    .map_err(|e| {
+        format!(
+            "error: cannot write artifact `{}`: {}",
+            out_path.display(),
+            e
+        )
+    })
 }
 
 pub fn cmd_exec(path: &str, show_info: bool, db_path: Option<&str>) {
@@ -499,7 +657,7 @@ fn read_artifact_from_path(path: &Path) -> Result<FvcArtifact, String> {
     let mut file = std::fs::File::open(path)
         .map_err(|e| format!("error: cannot open artifact `{}`: {}", path.display(), e))?;
     FvcArtifact::read_from(&mut file)
-          .map_err(|e| format!("error: cannot read artifact `{}`: {}", path.display(), e))
+        .map_err(|e| format!("error: cannot read artifact `{}`: {}", path.display(), e))
 }
 
 fn explain_json_from_artifact(artifact: &FvcArtifact) -> Result<&str, String> {
@@ -510,29 +668,70 @@ fn explain_json_from_artifact(artifact: &FvcArtifact) -> Result<&str, String> {
 }
 
 fn read_wasm_from_path(path: &Path) -> Result<Vec<u8>, String> {
-    std::fs::read(path)
-        .map_err(|e| format!("error: cannot read wasm artifact `{}`: {}", path.display(), e))
+    std::fs::read(path).map_err(|e| {
+        format!(
+            "error: cannot read wasm artifact `{}`: {}",
+            path.display(),
+            e
+        )
+    })
 }
 
 fn write_wasm_to_path(bytes: &[u8], out_path: &Path) -> Result<(), String> {
     if let Some(parent) = out_path.parent() {
         if !parent.as_os_str().is_empty() {
             std::fs::create_dir_all(parent).map_err(|e| {
-                format!("error: cannot create output directory `{}`: {}", parent.display(), e)
+                format!(
+                    "error: cannot create output directory `{}`: {}",
+                    parent.display(),
+                    e
+                )
             })?;
         }
     }
-    std::fs::write(out_path, bytes)
-        .map_err(|e| format!("error: cannot write wasm artifact `{}`: {}", out_path.display(), e))
+    std::fs::write(out_path, bytes).map_err(|e| {
+        format!(
+            "error: cannot write wasm artifact `{}`: {}",
+            out_path.display(),
+            e
+        )
+    })
+}
+
+fn format_runtime_error(source_file: &str, e: crate::backend::vm::VMError) -> String {
+    if e.stack_trace.is_empty() {
+        return format!("vm error in {} @{}: {}", e.fn_name, e.ip, e.message);
+    }
+    let mut msg = format!("RuntimeError: {}", e.message);
+    for frame in &e.stack_trace {
+        if frame.line == 0 {
+            msg.push_str(&format!("\n  at {} ({})", frame.fn_name, source_file));
+        } else {
+            msg.push_str(&format!(
+                "\n  at {} ({}:{})",
+                frame.fn_name, source_file, frame.line
+            ));
+        }
+    }
+    msg
 }
 
 fn exec_artifact_main(artifact: &FvcArtifact, db_path: Option<&str>) -> Result<Value, String> {
+    exec_artifact_main_with_source(artifact, db_path, None)
+}
+
+fn exec_artifact_main_with_source(
+    artifact: &FvcArtifact,
+    db_path: Option<&str>,
+    source_file: Option<&str>,
+) -> Result<Value, String> {
     let main_idx = artifact
         .fn_idx_by_name("main")
         .ok_or_else(|| "error: artifact does not contain a `main` function".to_string())?;
-    VM::run_with_db_path(artifact, main_idx, vec![], db_path)
+    let display_source = source_file.unwrap_or("<artifact>");
+    VM::run_with_emits_db_path_and_source_file(artifact, main_idx, vec![], db_path, source_file)
         .map(|(value, _)| value)
-        .map_err(|e| format!("vm error in {} @{}: {}", e.fn_name, e.ip, e.message))
+        .map_err(|e| format_runtime_error(display_source, e))
 }
 
 #[cfg(test)]
@@ -540,8 +739,8 @@ fn exec_artifact_main_with_emits(artifact: &FvcArtifact) -> Result<(Value, Vec<V
     let main_idx = artifact
         .fn_idx_by_name("main")
         .ok_or_else(|| "error: artifact does not contain a `main` function".to_string())?;
-    VM::run_with_emits_and_db_path(artifact, main_idx, vec![], None)
-        .map_err(|e| format!("vm error in {} @{}: {}", e.fn_name, e.ip, e.message))
+    VM::run_with_emits_db_path_and_source_file(artifact, main_idx, vec![], None, None)
+        .map_err(|e| format_runtime_error("<artifact>", e))
 }
 
 fn artifact_info_string(artifact: &FvcArtifact) -> String {
@@ -549,7 +748,12 @@ fn artifact_info_string(artifact: &FvcArtifact) -> String {
     let total_bytecode_bytes: usize = artifact.functions.iter().map(|f| f.code.len()).sum();
     let total_constants: usize = artifact.functions.iter().map(|f| f.constants.len()).sum();
     let total_string_bytes: usize = artifact.str_table.iter().map(|s| s.len()).sum();
-    let longest_string: usize = artifact.str_table.iter().map(|s| s.len()).max().unwrap_or(0);
+    let longest_string: usize = artifact
+        .str_table
+        .iter()
+        .map(|s| s.len())
+        .max()
+        .unwrap_or(0);
     let max_locals: u32 = artifact
         .functions
         .iter()
@@ -600,7 +804,10 @@ fn artifact_info_string(artifact: &FvcArtifact) -> String {
             if part == "!Trace" {
                 trace_enabled_functions += 1;
             }
-            if let Some(events) = part.strip_prefix("!Emit<").and_then(|s| s.strip_suffix('>')) {
+            if let Some(events) = part
+                .strip_prefix("!Emit<")
+                .and_then(|s| s.strip_suffix('>'))
+            {
                 for event in events.split('|') {
                     emitted_events.insert(event.to_string());
                 }
@@ -617,16 +824,28 @@ fn artifact_info_string(artifact: &FvcArtifact) -> String {
     out.push_str(&format!("- function globals: {}\n", function_global_count));
     out.push_str(&format!("- variant ctors: {}\n", variant_ctor_count));
     out.push_str(&format!("- synthetic closures: {}\n", closure_count));
-    out.push_str(&format!("- total bytecode bytes: {}\n", total_bytecode_bytes));
+    out.push_str(&format!(
+        "- total bytecode bytes: {}\n",
+        total_bytecode_bytes
+    ));
     out.push_str(&format!("- total constants: {}\n", total_constants));
     out.push_str(&format!("- total string bytes: {}\n", total_string_bytes));
     out.push_str(&format!("- longest string entry: {}\n", longest_string));
     out.push_str(&format!("- string preview: {}\n", string_preview));
     out.push_str(&format!("- max locals in function: {}\n", max_locals));
-    out.push_str(&format!("- reachable functions from entry: {}\n", reachable_function_count));
-    out.push_str(&format!("- reachable globals from entry: {}\n", reachable_global_count));
+    out.push_str(&format!(
+        "- reachable functions from entry: {}\n",
+        reachable_function_count
+    ));
+    out.push_str(&format!(
+        "- reachable globals from entry: {}\n",
+        reachable_global_count
+    ));
     out.push_str(&format!("- total instructions: {}\n", total_instructions));
-    out.push_str(&format!("- distinct opcode kinds: {}\n", opcode_counts.len()));
+    out.push_str(&format!(
+        "- distinct opcode kinds: {}\n",
+        opcode_counts.len()
+    ));
     if hot_opcodes.is_empty() {
         out.push_str("- hot opcodes: <none>\n");
     } else {
@@ -641,7 +860,10 @@ fn artifact_info_string(artifact: &FvcArtifact) -> String {
             out.push_str(&format!("  - {}: {}\n", kind, count));
         }
     }
-    out.push_str(&format!("- trace-enabled functions: {}\n", trace_enabled_functions));
+    out.push_str(&format!(
+        "- trace-enabled functions: {}\n",
+        trace_enabled_functions
+    ));
     if emitted_events.is_empty() {
         out.push_str("- emitted events: <none>\n");
     } else {
@@ -750,9 +972,15 @@ fn normalize_effect_summary(raw: &str) -> Vec<String> {
         return inner
             .split(", ")
             .map(|part| {
-                if let Some(name) = part.strip_prefix("Emit(\"").and_then(|s| s.strip_suffix("\")")) {
+                if let Some(name) = part
+                    .strip_prefix("Emit(\"")
+                    .and_then(|s| s.strip_suffix("\")"))
+                {
                     format!("!Emit<{}>", name)
-                } else if let Some(inner) = part.strip_prefix("EmitUnion([").and_then(|s| s.strip_suffix("])")) {
+                } else if let Some(inner) = part
+                    .strip_prefix("EmitUnion([")
+                    .and_then(|s| s.strip_suffix("])"))
+                {
                     let names = inner
                         .split(", ")
                         .map(|s| s.trim_matches('"'))
@@ -768,7 +996,9 @@ fn normalize_effect_summary(raw: &str) -> Vec<String> {
     raw.split_whitespace().map(|s| s.to_string()).collect()
 }
 
-fn collect_opcode_counts(artifact: &FvcArtifact) -> (usize, std::collections::BTreeMap<String, usize>) {
+fn collect_opcode_counts(
+    artifact: &FvcArtifact,
+) -> (usize, std::collections::BTreeMap<String, usize>) {
     let mut total = 0usize;
     let mut counts = std::collections::BTreeMap::<String, usize>::new();
 
@@ -789,9 +1019,7 @@ fn collect_opcode_counts(artifact: &FvcArtifact) -> (usize, std::collections::BT
     (total, counts)
 }
 
-fn collect_constant_counts(
-    artifact: &FvcArtifact,
-) -> std::collections::BTreeMap<String, usize> {
+fn collect_constant_counts(artifact: &FvcArtifact) -> std::collections::BTreeMap<String, usize> {
     let mut counts = std::collections::BTreeMap::<String, usize>::new();
     for function in &artifact.functions {
         for constant in &function.constants {
@@ -889,12 +1117,7 @@ fn summarize_global_target(artifact: &FvcArtifact, fn_idx: usize) -> String {
 
     format!(
         "fn#{} {} @L{} ({} params) -> {} [{}]",
-        fn_idx,
-        name,
-        function.source_line,
-        function.param_count,
-        ret,
-        eff
+        fn_idx, name, function.source_line, function.param_count, ret, eff
     )
 }
 
@@ -968,6 +1191,8 @@ fn decode_opcode(byte: u8) -> Option<(&'static str, usize)> {
         x if x == Opcode::Sub as u8 => Opcode::Sub,
         x if x == Opcode::Mul as u8 => Opcode::Mul,
         x if x == Opcode::Div as u8 => Opcode::Div,
+        x if x == Opcode::And as u8 => Opcode::And,
+        x if x == Opcode::Or as u8 => Opcode::Or,
         x if x == Opcode::Eq as u8 => Opcode::Eq,
         x if x == Opcode::Ne as u8 => Opcode::Ne,
         x if x == Opcode::Lt as u8 => Opcode::Lt,
@@ -1007,6 +1232,8 @@ fn decode_opcode(byte: u8) -> Option<(&'static str, usize)> {
         Opcode::Sub => ("Sub", 1),
         Opcode::Mul => ("Mul", 1),
         Opcode::Div => ("Div", 1),
+        Opcode::And => ("And", 1),
+        Opcode::Or => ("Or", 1),
         Opcode::Eq => ("Eq", 1),
         Opcode::Ne => ("Ne", 1),
         Opcode::Lt => ("Lt", 1),
@@ -1067,7 +1294,9 @@ pub fn cmd_check(file: Option<&str>, no_warn: bool) {
         if errors.is_empty() {
             println!("{}: no errors found", path);
         } else {
-            for e in &errors { eprintln!("{}", format_diagnostic(&source, e)); }
+            for e in &errors {
+                eprintln!("{}", format_diagnostic(&source, e));
+            }
             process::exit(1);
         }
         for warning in render_warnings(&source, &warnings, no_warn) {
@@ -1097,17 +1326,22 @@ pub fn cmd_check(file: Option<&str>, no_warn: bool) {
             let path_str = fav_file.to_string_lossy().to_string();
             let source = load_file(&path_str);
             let program = match Parser::parse_str(&source, &path_str) {
-                Ok(p)  => p,
-                Err(e) => { eprintln!("{}", e); total_errors += 1; continue; }
+                Ok(p) => p,
+                Err(e) => {
+                    eprintln!("{}", e);
+                    total_errors += 1;
+                    continue;
+                }
             };
             let mut checker = Checker::new_with_resolver(resolver.clone(), fav_file.clone());
-            let errors = checker.check_with_self(&program);
-            let mut warnings = checker.warnings.clone();
+            let (errors, mut warnings) = checker.check_with_self(&program);
             warnings.extend(partial_flw_warnings(&program));
             if errors.is_empty() {
                 println!("{}: ok", path_str);
             } else {
-                for e in &errors { eprintln!("{}", format_diagnostic(&source, e)); }
+                for e in &errors {
+                    eprintln!("{}", format_diagnostic(&source, e));
+                }
                 total_errors += errors.len();
             }
             if !no_warn {
@@ -1121,8 +1355,56 @@ pub fn cmd_check(file: Option<&str>, no_warn: bool) {
             process::exit(1);
         }
         if !no_warn && total_warnings > 0 {
-            eprintln!("\ncheck: {} warning{}", total_warnings, if total_warnings == 1 { "" } else { "s" });
+            eprintln!(
+                "\ncheck: {} warning{}",
+                total_warnings,
+                if total_warnings == 1 { "" } else { "s" }
+            );
         }
+    }
+}
+
+fn try_cmd_check_dir(dir: &Path) -> Result<(), usize> {
+    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    let root = FavToml::find_root(&cwd).unwrap_or_else(|| cwd.clone());
+    let toml = FavToml::load(&root).unwrap_or(FavToml {
+        name: String::new(),
+        version: String::new(),
+        src: ".".into(),
+        runes_path: None,
+        dependencies: vec![],
+    });
+    let files = collect_fav_files_recursive(dir);
+    let resolver = make_resolver(Some(toml), Some(root));
+    let mut total_errors = 0usize;
+    for fav_file in &files {
+        let path_str = fav_file.to_string_lossy().to_string();
+        let source = load_file(&path_str);
+        let program = match Parser::parse_str(&source, &path_str) {
+            Ok(p) => p,
+            Err(e) => {
+                eprintln!("{}", e);
+                total_errors += 1;
+                continue;
+            }
+        };
+        let mut checker = Checker::new_with_resolver(resolver.clone(), fav_file.clone());
+        let (errors, _) = checker.check_with_self(&program);
+        for error in &errors {
+            eprintln!("{}", format_diagnostic(&source, error));
+        }
+        total_errors += errors.len();
+    }
+    if total_errors == 0 {
+        Ok(())
+    } else {
+        Err(total_errors)
+    }
+}
+
+pub fn cmd_check_dir(dir: &str) {
+    if try_cmd_check_dir(Path::new(dir)).is_err() {
+        process::exit(1);
     }
 }
 
@@ -1139,7 +1421,10 @@ fn collect_test_files(dir: &Path) -> Vec<PathBuf> {
                 out.extend(collect_test_files(&path));
             } else {
                 let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
-                if name.ends_with(".test.fav") || name.ends_with(".spec.fav") || name.ends_with(".fav") {
+                if name.ends_with(".test.fav")
+                    || name.ends_with(".spec.fav")
+                    || name.ends_with(".fav")
+                {
                     out.push(path);
                 }
             }
@@ -1182,9 +1467,15 @@ fn format_test_results(results: &[TestResult], filtered: usize, total_ms: u128) 
     let mut out = String::new();
     for result in results {
         if result.passed {
-            out.push_str(&format!("PASS  {}  ({}ms)\n", result.description, result.elapsed_ms));
+            out.push_str(&format!(
+                "PASS  {}  ({}ms)\n",
+                result.description, result.elapsed_ms
+            ));
         } else {
-            out.push_str(&format!("FAIL  {}  ({}ms)\n", result.description, result.elapsed_ms));
+            out.push_str(&format!(
+                "FAIL  {}  ({}ms)\n",
+                result.description, result.elapsed_ms
+            ));
             if let Some(msg) = &result.error_msg {
                 out.push_str(&format!("      {}\n", msg));
             }
@@ -1212,7 +1503,14 @@ fn with_test_output_mode<T>(no_capture: bool, f: impl FnOnce() -> T) -> T {
     }
 }
 
-pub fn cmd_test(file: Option<&str>, filter: Option<&str>, fail_fast: bool, no_capture: bool, coverage: bool, coverage_report_dir: Option<&str>) {
+pub fn cmd_test(
+    file: Option<&str>,
+    filter: Option<&str>,
+    fail_fast: bool,
+    no_capture: bool,
+    coverage: bool,
+    coverage_report_dir: Option<&str>,
+) {
     // Collect (file_path, parsed_program) pairs
     let programs: Vec<(String, ast::Program)> = if let Some(path) = file {
         let source = load_file(path);
@@ -1232,11 +1530,16 @@ pub fn cmd_test(file: Option<&str>, filter: Option<&str>, fail_fast: bool, no_ca
             process::exit(1);
         });
         let src_dir = toml.src_dir(&root);
-        collect_test_files(&src_dir).into_iter().filter_map(|f| {
-            let path_str = f.to_string_lossy().to_string();
-            let src = std::fs::read_to_string(&f).ok()?;
-            Parser::parse_str(&src, &path_str).ok().map(|p| (path_str, p))
-        }).collect()
+        collect_test_files(&src_dir)
+            .into_iter()
+            .filter_map(|f| {
+                let path_str = f.to_string_lossy().to_string();
+                let src = std::fs::read_to_string(&f).ok()?;
+                Parser::parse_str(&src, &path_str)
+                    .ok()
+                    .map(|p| (path_str, p))
+            })
+            .collect()
     };
 
     // Flatten: one entry per test item per file
@@ -1248,7 +1551,11 @@ pub fn cmd_test(file: Option<&str>, filter: Option<&str>, fail_fast: bool, no_ca
         return;
     }
 
-    println!("running {} test{}", total, if total == 1 { "" } else { "s" });
+    println!(
+        "running {} test{}",
+        total,
+        if total == 1 { "" } else { "s" }
+    );
     println!();
 
     if coverage {
@@ -1274,7 +1581,9 @@ pub fn cmd_test(file: Option<&str>, filter: Option<&str>, fail_fast: bool, no_ca
                         error_msg: Some("test function not found in artifact".into()),
                         elapsed_ms: started.elapsed().as_millis(),
                     });
-                    if fail_fast { break; }
+                    if fail_fast {
+                        break;
+                    }
                     continue;
                 }
             };
@@ -1295,7 +1604,9 @@ pub fn cmd_test(file: Option<&str>, filter: Option<&str>, fail_fast: bool, no_ca
                         error_msg: Some(e.message.clone()),
                         elapsed_ms: started.elapsed().as_millis(),
                     });
-                    if fail_fast { break; }
+                    if fail_fast {
+                        break;
+                    }
                 }
             }
             if coverage {
@@ -1315,7 +1626,8 @@ pub fn cmd_test(file: Option<&str>, filter: Option<&str>, fail_fast: bool, no_ca
 
     if coverage {
         // Report coverage across all test source files
-        let source_paths: Vec<String> = tests_to_run.iter()
+        let source_paths: Vec<String> = tests_to_run
+            .iter()
             .map(|(path, _, _)| path.clone())
             .collect::<std::collections::BTreeSet<_>>()
             .into_iter()
@@ -1369,11 +1681,7 @@ fn is_executable_line(source: &str, line: u32) -> bool {
         && !trimmed.starts_with("test ")
 }
 
-pub fn format_coverage_report(
-    file_path: &str,
-    source: &str,
-    executed: &HashSet<u32>,
-) -> String {
+pub fn format_coverage_report(file_path: &str, source: &str, executed: &HashSet<u32>) -> String {
     let total_lines = source.lines().count() as u32;
     let executable: Vec<u32> = (1..=total_lines)
         .filter(|l| is_executable_line(source, *l))
@@ -1385,14 +1693,19 @@ pub fn format_coverage_report(
     } else {
         covered_count as f64 / executable_count as f64 * 100.0
     };
-    let uncovered: Vec<u32> = executable.iter()
+    let uncovered: Vec<u32> = executable
+        .iter()
         .filter(|l| !executed.contains(l))
         .copied()
         .collect();
     let uncovered_str = if uncovered.is_empty() {
         "none".to_string()
     } else {
-        uncovered.iter().map(|l| l.to_string()).collect::<Vec<_>>().join(", ")
+        uncovered
+            .iter()
+            .map(|l| l.to_string())
+            .collect::<Vec<_>>()
+            .join(", ")
     };
     format!(
         "\ncoverage: {}\n  lines covered: {} / {} ({:.1}%)\n  uncovered:     lines {}",
@@ -1405,8 +1718,13 @@ fn collect_tracklines_in_expr(expr: &IRExpr, out: &mut HashSet<u32>) {
         IRExpr::Block(stmts, tail, _) => {
             for stmt in stmts {
                 match stmt {
-                    IRStmt::TrackLine(n) => { out.insert(*n); }
-                    IRStmt::Expr(e) | IRStmt::Bind(_, e) | IRStmt::Chain(_, e) | IRStmt::Yield(e) => {
+                    IRStmt::TrackLine(n) => {
+                        out.insert(*n);
+                    }
+                    IRStmt::Expr(e)
+                    | IRStmt::Bind(_, e)
+                    | IRStmt::Chain(_, e)
+                    | IRStmt::Yield(e) => {
                         collect_tracklines_in_expr(e, out);
                     }
                 }
@@ -1420,7 +1738,9 @@ fn collect_tracklines_in_expr(expr: &IRExpr, out: &mut HashSet<u32>) {
         }
         IRExpr::Call(f, args, _) => {
             collect_tracklines_in_expr(f, out);
-            for a in args { collect_tracklines_in_expr(a, out); }
+            for a in args {
+                collect_tracklines_in_expr(a, out);
+            }
         }
         IRExpr::Match(scrutinee, arms, _) => {
             collect_tracklines_in_expr(scrutinee, out);
@@ -1435,16 +1755,22 @@ fn collect_tracklines_in_expr(expr: &IRExpr, out: &mut HashSet<u32>) {
             collect_tracklines_in_expr(inner, out);
         }
         IRExpr::Closure(_, captures, _) => {
-            for c in captures { collect_tracklines_in_expr(c, out); }
+            for c in captures {
+                collect_tracklines_in_expr(c, out);
+            }
         }
         IRExpr::BinOp(_, l, r, _) => {
             collect_tracklines_in_expr(l, out);
             collect_tracklines_in_expr(r, out);
         }
         IRExpr::RecordConstruct(fields, _) => {
-            for (_, e) in fields { collect_tracklines_in_expr(e, out); }
+            for (_, e) in fields {
+                collect_tracklines_in_expr(e, out);
+            }
         }
-        IRExpr::CallTrfLocal { arg, .. } => { collect_tracklines_in_expr(arg, out); }
+        IRExpr::CallTrfLocal { arg, .. } => {
+            collect_tracklines_in_expr(arg, out);
+        }
         _ => {}
     }
 }
@@ -1454,15 +1780,28 @@ pub fn format_coverage_report_by_fn(ir: &IRProgram, executed: &HashSet<u32>) -> 
     for fn_def in &ir.fns {
         // Skip internal functions ($test:, $bench:, closures starting with $)
         let name = &fn_def.name;
-        if name.starts_with('$') { continue; }
+        if name.starts_with('$') {
+            continue;
+        }
         let mut fn_lines: HashSet<u32> = HashSet::new();
         collect_tracklines_in_expr(&fn_def.body, &mut fn_lines);
-        if fn_lines.is_empty() { continue; }
+        if fn_lines.is_empty() {
+            continue;
+        }
         let total = fn_lines.len();
         let covered = fn_lines.iter().filter(|l| executed.contains(l)).count();
         let pct = covered as f64 / total as f64 * 100.0;
-        let status = if covered == total { "full" } else if covered == 0 { "none" } else { "partial" };
-        lines.push(format!("  fn {:<30} {}/{} ({:.0}%) [{}]", name, covered, total, pct, status));
+        let status = if covered == total {
+            "full"
+        } else if covered == 0 {
+            "none"
+        } else {
+            "partial"
+        };
+        lines.push(format!(
+            "  fn {:<30} {}/{} ({:.0}%) [{}]",
+            name, covered, total, pct, status
+        ));
     }
     if lines.is_empty() {
         return String::new();
@@ -1534,7 +1873,9 @@ fn collect_bench_cases(
             if let ast::Item::BenchDef(bd) = item {
                 total += 1;
                 if let Some(f) = filter {
-                    if !bd.description.contains(f) { continue; }
+                    if !bd.description.contains(f) {
+                        continue;
+                    }
                 }
                 cases.push((path.clone(), bd.description.clone(), prog.clone()));
             }
@@ -1546,7 +1887,8 @@ fn collect_bench_cases(
 fn exec_bench_case(prog: &ast::Program, description: &str, iters: u64) -> Result<f64, String> {
     let fn_name = format!("$bench:{}", description);
     let artifact = build_artifact(prog);
-    let fn_idx = artifact.fn_idx_by_name(&fn_name)
+    let fn_idx = artifact
+        .fn_idx_by_name(&fn_name)
         .ok_or_else(|| format!("bench function not found in artifact: {fn_name}"))?;
     // warmup: 1 iter
     VM::run(&artifact, fn_idx, vec![]).map_err(|e| e.message.clone())?;
@@ -1578,11 +1920,16 @@ pub fn cmd_bench(file: Option<&str>, filter: Option<&str>, iters: u64) {
             process::exit(1);
         });
         let src_dir = toml.src_dir(&root);
-        collect_bench_files(&src_dir).into_iter().filter_map(|f| {
-            let path_str = f.to_string_lossy().to_string();
-            let src = std::fs::read_to_string(&f).ok()?;
-            Parser::parse_str(&src, &path_str).ok().map(|p| (path_str, p))
-        }).collect()
+        collect_bench_files(&src_dir)
+            .into_iter()
+            .filter_map(|f| {
+                let path_str = f.to_string_lossy().to_string();
+                let src = std::fs::read_to_string(&f).ok()?;
+                Parser::parse_str(&src, &path_str)
+                    .ok()
+                    .map(|p| (path_str, p))
+            })
+            .collect()
     };
 
     let (cases, total_discovered) = collect_bench_cases(programs, filter);
@@ -1592,14 +1939,22 @@ pub fn cmd_bench(file: Option<&str>, filter: Option<&str>, iters: u64) {
         return;
     }
 
-    println!("running {} benchmark{} ({} iterations each)", cases.len(), if cases.len() == 1 { "" } else { "s" }, iters);
+    println!(
+        "running {} benchmark{} ({} iterations each)",
+        cases.len(),
+        if cases.len() == 1 { "" } else { "s" },
+        iters
+    );
     println!();
 
     let _suppress = crate::backend::vm::SuppressIoGuard::new(true);
     for (path, desc, prog) in &cases {
         match exec_bench_case(prog, desc, iters) {
             Ok(us_per_iter) => {
-                println!("bench  {:<40}  {:.2} µs/iter  ({}  {})", desc, us_per_iter, iters, path);
+                println!(
+                    "bench  {:<40}  {:.2} µs/iter  ({}  {})",
+                    desc, us_per_iter, iters, path
+                );
             }
             Err(e) => {
                 println!("ERROR  {:<40}  {}", desc, e);
@@ -1669,10 +2024,12 @@ pub fn cmd_watch(file: Option<&str>, cmd: &str, extra_dirs: &[&str], debounce_ms
     });
 
     for dir in &dirs {
-        watcher.watch(dir, RecursiveMode::NonRecursive).unwrap_or_else(|e| {
-            eprintln!("error: could not watch {}: {e}", dir.display());
-            process::exit(1);
-        });
+        watcher
+            .watch(dir, RecursiveMode::NonRecursive)
+            .unwrap_or_else(|e| {
+                eprintln!("error: could not watch {}: {e}", dir.display());
+                process::exit(1);
+            });
     }
 
     let debounce = Duration::from_millis(debounce_ms);
@@ -1696,24 +2053,28 @@ pub fn cmd_watch(file: Option<&str>, cmd: &str, extra_dirs: &[&str], debounce_ms
 
 #[cfg(test)]
 mod tests {
-        use super::{
-            artifact_info_string,
-            build_artifact, build_wasm_artifact, exec_artifact_main, exec_artifact_main_with_emits,
-            build_manifest_json, cmd_bundle, ensure_no_partial_flw, exec_wasm_bytes, filter_ir_program, format_invariants, load_all_items, load_and_check_program, make_resolver,
-            partial_flw_warnings, collect_test_cases, collect_watch_paths, format_test_results, TestResult,
-            diff_explain_json, explain_json_from_artifact, read_artifact_from_path, read_wasm_from_path, render_diff_json, render_diff_text, render_warnings, check_single_file,
-            render_graph_mermaid, render_graph_mermaid_with_opts, render_graph_text, render_graph_text_with_opts, write_artifact_to_path, write_wasm_to_path, ExplainPrinter,
-            format_coverage_report, format_coverage_report_by_fn, collect_watch_paths_from_dir,
-            collect_bench_cases, cmd_bench,
-        };
-      use crate::ast;
-      use crate::frontend::parser::Parser;
-      use crate::middle::checker::Checker;
-      use crate::middle::compiler::compile_program;
-      use crate::middle::reachability::{reachability_analysis, ReachabilityResult};
-      use crate::toml::FavToml;
-      use std::path::PathBuf;
-      use tempfile::tempdir;
+    use super::{
+        ExplainPrinter, TestResult, artifact_info_string, build_artifact, build_manifest_json,
+        build_wasm_artifact, check_single_file, cmd_bundle, collect_bench_cases,
+        collect_test_cases, collect_watch_paths, collect_watch_paths_from_dir, create_lib_project,
+        create_pipeline_project, create_script_project, diff_explain_json, ensure_no_partial_flw,
+        exec_artifact_main, exec_artifact_main_with_emits, exec_wasm_bytes,
+        explain_json_from_artifact, filter_ir_program, format_coverage_report,
+        format_coverage_report_by_fn, format_invariants, format_test_results, load_all_items,
+        load_and_check_program, make_resolver, partial_flw_warnings, read_artifact_from_path,
+        read_wasm_from_path, render_diff_json, render_diff_text, render_graph_mermaid,
+        render_graph_mermaid_with_opts, render_graph_text, render_graph_text_with_opts,
+        render_warnings, try_cmd_check_dir, try_cmd_new, write_artifact_to_path,
+        write_wasm_to_path,
+    };
+    use crate::ast;
+    use crate::frontend::parser::Parser;
+    use crate::middle::checker::Checker;
+    use crate::middle::compiler::compile_program;
+    use crate::middle::reachability::{ReachabilityResult, reachability_analysis};
+    use crate::toml::FavToml;
+    use std::path::{Path, PathBuf};
+    use tempfile::tempdir;
 
     #[test]
     fn build_and_read_artifact_round_trip_for_temp_source() {
@@ -1872,7 +2233,9 @@ public fn main() -> PosInt! {
             value,
             crate::value::Value::Variant(
                 "err".into(),
-                Some(Box::new(crate::value::Value::Str("InvariantViolation: PosInt".into())))
+                Some(Box::new(crate::value::Value::Str(
+                    "InvariantViolation: PosInt".into()
+                )))
             )
         );
     }
@@ -1899,7 +2262,9 @@ public fn main() -> UserAge! {
             value,
             crate::value::Value::Variant(
                 "err".into(),
-                Some(Box::new(crate::value::Value::Str("InvariantViolation: UserAge".into())))
+                Some(Box::new(crate::value::Value::Str(
+                    "InvariantViolation: UserAge".into()
+                )))
             )
         );
     }
@@ -1920,10 +2285,7 @@ public fn main() -> Int! {
         let value = exec_artifact_main(&artifact, None).expect("exec artifact");
         assert_eq!(
             value,
-            crate::value::Value::Variant(
-                "ok".into(),
-                Some(Box::new(crate::value::Value::Int(5)))
-            )
+            crate::value::Value::Variant("ok".into(), Some(Box::new(crate::value::Value::Int(5))))
         );
     }
 
@@ -1982,7 +2344,11 @@ public fn main() -> Unit {
         let program = Parser::parse_str(source, "assert_matches_fail_exec.fav").expect("parse");
         let artifact = build_artifact(&program);
         let err = exec_artifact_main(&artifact, None).expect_err("assert_matches should fail");
-        assert!(err.contains("assertion failed"), "unexpected error: {}", err);
+        assert!(
+            err.contains("assertion failed"),
+            "unexpected error: {}",
+            err
+        );
     }
 
     #[test]
@@ -2015,7 +2381,8 @@ test "keyword alpha" { () }
 test "beta" { () }
 "#;
         let prog = Parser::parse_str(src, "filter_test.fav").expect("parse");
-        let (tests, total) = collect_test_cases(vec![("filter_test.fav".into(), prog)], Some("keyword"));
+        let (tests, total) =
+            collect_test_cases(vec![("filter_test.fav".into(), prog)], Some("keyword"));
         assert_eq!(total, 2);
         assert_eq!(tests.len(), 1);
         assert_eq!(tests[0].1, "keyword alpha");
@@ -2028,7 +2395,8 @@ test "alpha" { () }
 test "beta" { () }
 "#;
         let prog = Parser::parse_str(src, "filter_test_2.fav").expect("parse");
-        let (tests, total) = collect_test_cases(vec![("filter_test_2.fav".into(), prog)], Some("zzz"));
+        let (tests, total) =
+            collect_test_cases(vec![("filter_test_2.fav".into(), prog)], Some("zzz"));
         assert_eq!(total, 2);
         assert!(tests.is_empty());
     }
@@ -2036,7 +2404,9 @@ test "beta" { () }
     #[test]
     fn test_output_mode_suppresses_by_default_and_restores() {
         crate::backend::vm::set_suppress_io(false);
-        let seen_inside = super::with_test_output_mode(false, || crate::backend::vm::io_output_suppressed_for_tests());
+        let seen_inside = super::with_test_output_mode(false, || {
+            crate::backend::vm::io_output_suppressed_for_tests()
+        });
         assert!(seen_inside);
         assert!(!crate::backend::vm::io_output_suppressed_for_tests());
     }
@@ -2044,9 +2414,106 @@ test "beta" { () }
     #[test]
     fn test_output_mode_respects_no_capture() {
         crate::backend::vm::set_suppress_io(false);
-        let seen_inside = super::with_test_output_mode(true, || crate::backend::vm::io_output_suppressed_for_tests());
+        let seen_inside = super::with_test_output_mode(true, || {
+            crate::backend::vm::io_output_suppressed_for_tests()
+        });
         assert!(!seen_inside);
         assert!(!crate::backend::vm::io_output_suppressed_for_tests());
+    }
+
+    #[test]
+    fn fav_new_script_creates_files() {
+        let _cwd_guard = CWD_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        let dir = tempdir().expect("tempdir");
+        let prev = std::env::current_dir().expect("cwd");
+        std::env::set_current_dir(dir.path()).expect("set cwd");
+        create_script_project(Path::new("_test_script"), "_test_script").expect("create script");
+        assert!(dir.path().join("_test_script").join("fav.toml").exists());
+        assert!(
+            dir.path()
+                .join("_test_script")
+                .join("src")
+                .join("main.fav")
+                .exists()
+        );
+        std::env::set_current_dir(prev).expect("restore cwd");
+    }
+
+    #[test]
+    fn fav_new_pipeline_creates_files() {
+        let _cwd_guard = CWD_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        let dir = tempdir().expect("tempdir");
+        let prev = std::env::current_dir().expect("cwd");
+        std::env::set_current_dir(dir.path()).expect("set cwd");
+        create_pipeline_project(Path::new("_test_pipeline"), "_test_pipeline")
+            .expect("create pipeline");
+        assert!(dir.path().join("_test_pipeline").join("rune.toml").exists());
+        assert!(
+            dir.path()
+                .join("_test_pipeline")
+                .join("src")
+                .join("pipeline.fav")
+                .exists()
+        );
+        assert!(
+            dir.path()
+                .join("_test_pipeline")
+                .join("src")
+                .join("stages")
+                .join("parse.fav")
+                .exists()
+        );
+        std::env::set_current_dir(prev).expect("restore cwd");
+    }
+
+    #[test]
+    fn fav_new_lib_creates_files() {
+        let _cwd_guard = CWD_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        let dir = tempdir().expect("tempdir");
+        let prev = std::env::current_dir().expect("cwd");
+        std::env::set_current_dir(dir.path()).expect("set cwd");
+        create_lib_project(Path::new("_test_lib"), "_test_lib").expect("create lib");
+        assert!(
+            dir.path()
+                .join("_test_lib")
+                .join("src")
+                .join("lib.fav")
+                .exists()
+        );
+        assert!(
+            dir.path()
+                .join("_test_lib")
+                .join("src")
+                .join("lib.test.fav")
+                .exists()
+        );
+        std::env::set_current_dir(prev).expect("restore cwd");
+    }
+
+    #[test]
+    fn fav_new_fails_on_existing_dir() {
+        let _cwd_guard = CWD_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        let dir = tempdir().expect("tempdir");
+        let prev = std::env::current_dir().expect("cwd");
+        std::env::set_current_dir(dir.path()).expect("set cwd");
+        // Create the directory first so it already exists
+        std::fs::create_dir("_existing_proj").expect("mkdir");
+        let result = try_cmd_new("_existing_proj", "script");
+        std::env::set_current_dir(prev).expect("restore cwd");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("already exists"));
+    }
+
+    #[test]
+    fn fav_new_invalid_template_fails() {
+        let _cwd_guard = CWD_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        let dir = tempdir().expect("tempdir");
+        let prev = std::env::current_dir().expect("cwd");
+        std::env::set_current_dir(dir.path()).expect("set cwd");
+        let result = try_cmd_new("_no_such_tpl_proj", "nonexistent");
+        std::env::set_current_dir(prev).expect("restore cwd");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("unknown template"));
     }
 
     /// Serialize tests that mutate the process-wide current directory so they
@@ -2062,17 +2529,26 @@ test "beta" { () }
         std::fs::write(
             root.join("fav.toml"),
             "[rune]\nname = \"watch-test\"\nversion = \"0.1.0\"\nsrc = \"src\"\n",
-        ).expect("write fav.toml");
+        )
+        .expect("write fav.toml");
         let src_dir = root.join("src");
         std::fs::create_dir_all(src_dir.join("nested")).expect("create src");
         std::fs::write(src_dir.join("main.fav"), "fn main() -> Unit { () }").expect("write main");
-        std::fs::write(src_dir.join("nested").join("util.fav"), "fn util() -> Unit { () }").expect("write util");
+        std::fs::write(
+            src_dir.join("nested").join("util.fav"),
+            "fn util() -> Unit { () }",
+        )
+        .expect("write util");
         let saved = std::env::current_dir().expect("cwd");
         std::env::set_current_dir(root).expect("chdir");
         let paths = collect_watch_paths(None);
         std::env::set_current_dir(saved).expect("restore cwd");
         assert_eq!(paths.len(), 2);
-        assert!(paths.iter().all(|p| p.extension().and_then(|e| e.to_str()) == Some("fav")));
+        assert!(
+            paths
+                .iter()
+                .all(|p| p.extension().and_then(|e| e.to_str()) == Some("fav"))
+        );
     }
 
     #[test]
@@ -2083,7 +2559,8 @@ test "beta" { () }
         std::fs::write(
             root.join("fav.toml"),
             "[rune]\nname = \"watch-test\"\nversion = \"0.1.0\"\nsrc = \"src\"\n",
-        ).expect("write fav.toml");
+        )
+        .expect("write fav.toml");
         let src_dir = root.join("src");
         std::fs::create_dir_all(&src_dir).expect("create src");
         std::fs::write(src_dir.join("main.fav"), "fn main() -> Unit { () }").expect("write main");
@@ -2098,18 +2575,59 @@ test "beta" { () }
     }
 
     #[test]
+    fn check_dir_finds_errors_in_all_files() {
+        let dir = tempfile::tempdir().expect("tmpdir");
+        let root = dir.path();
+        std::fs::write(
+            root.join("fav.toml"),
+            "[rune]\nname=\"t\"\nversion=\"0.1.0\"\nsrc=\"src\"\n",
+        )
+        .expect("write fav.toml");
+        let src = root.join("src");
+        std::fs::create_dir_all(&src).expect("mkdir src");
+        std::fs::write(src.join("a.fav"), "fn a() -> Int { true }").expect("write a");
+        std::fs::write(src.join("b.fav"), "fn b() -> Int { false }").expect("write b");
+        assert!(try_cmd_check_dir(&src).is_err());
+    }
+
+    #[test]
+    fn check_dir_exits_0_for_clean_dir() {
+        let dir = tempfile::tempdir().expect("tmpdir");
+        let root = dir.path();
+        std::fs::write(
+            root.join("fav.toml"),
+            "[rune]\nname=\"t\"\nversion=\"0.1.0\"\nsrc=\"src\"\n",
+        )
+        .expect("write fav.toml");
+        let src = root.join("src");
+        std::fs::create_dir_all(&src).expect("mkdir src");
+        std::fs::write(src.join("a.fav"), "fn a() -> Int { 1 }").expect("write a");
+        std::fs::write(src.join("b.fav"), "fn b() -> Bool { true }").expect("write b");
+        assert!(try_cmd_check_dir(&src).is_ok());
+    }
+
+    #[test]
     fn example_fstring_demo_build_and_exec() {
-        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples").join("fstring_demo.fav");
+        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("examples")
+            .join("features")
+            .join("fstring_demo.fav");
         let path_str = path.to_string_lossy().to_string();
         let (program, _) = load_and_check_program(Some(&path_str));
         let artifact = build_artifact(&program);
         let value = exec_artifact_main(&artifact, None).expect("exec artifact");
-        assert_eq!(value, crate::value::Value::Str("Hello Favnir! Age: 42".into()));
+        assert_eq!(
+            value,
+            crate::value::Value::Str("Hello Favnir! Age: 42".into())
+        );
     }
 
     #[test]
     fn example_record_match_build_and_exec() {
-        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples").join("record_match.fav");
+        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("examples")
+            .join("features")
+            .join("record_match.fav");
         let path_str = path.to_string_lossy().to_string();
         let (program, _) = load_and_check_program(Some(&path_str));
         let artifact = build_artifact(&program);
@@ -2136,8 +2654,55 @@ test "beta" { () }
         let program = Parser::parse_str(&source_text, &src_str).expect("parse main.fav");
         let resolver = make_resolver(Some(toml.clone()), Some(root.to_path_buf()));
         let mut checker = Checker::new_with_resolver(resolver, PathBuf::from(&src_str));
-        let errors = checker.check_with_self(&program);
-        assert!(errors.is_empty(), "unexpected project-mode errors: {:?}", errors);
+        let (errors, _) = checker.check_with_self(&program);
+        assert!(
+            errors.is_empty(),
+            "unexpected project-mode errors: {:?}",
+            errors
+        );
+
+        let merged = ast::Program {
+            namespace: program.namespace.clone(),
+            uses: program.uses.clone(),
+            items: load_all_items(&src_str, Some(&toml), Some(&root.to_path_buf())),
+        };
+        let artifact = build_artifact(&merged);
+        exec_artifact_main(&artifact, None).expect("exec artifact")
+    }
+
+    fn exec_project_main_source_with_runes(source: &str) -> crate::value::Value {
+        let dir = tempdir().expect("tempdir");
+        let root = dir.path();
+        let runes_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("repo root")
+            .join("runes");
+        let runes_path = runes_root.to_string_lossy().replace('\\', "/");
+        std::fs::write(
+            root.join("fav.toml"),
+            format!(
+                "[rune]\nname = \"validate-test\"\nversion = \"0.1.0\"\nsrc = \"src\"\n[runes]\npath = \"{}\"\n",
+                runes_path
+            ),
+        )
+        .expect("write fav.toml");
+        let src_dir = root.join("src");
+        std::fs::create_dir_all(&src_dir).expect("create src");
+        let src = src_dir.join("main.fav");
+        std::fs::write(&src, source).expect("write main.fav");
+
+        let toml = FavToml::load(root).expect("load fav.toml");
+        let source_text = std::fs::read_to_string(&src).expect("read main.fav");
+        let src_str = src.to_string_lossy().to_string();
+        let program = Parser::parse_str(&source_text, &src_str).expect("parse main.fav");
+        let resolver = make_resolver(Some(toml.clone()), Some(root.to_path_buf()));
+        let mut checker = Checker::new_with_resolver(resolver, PathBuf::from(&src_str));
+        let (errors, _) = checker.check_with_self(&program);
+        assert!(
+            errors.is_empty(),
+            "unexpected project-mode errors: {:?}",
+            errors
+        );
 
         let merged = ast::Program {
             namespace: program.namespace.clone(),
@@ -2187,7 +2752,9 @@ public fn main() -> PosInt! {
             value,
             crate::value::Value::Variant(
                 "err".into(),
-                Some(Box::new(crate::value::Value::Str("InvariantViolation: PosInt".into())))
+                Some(Box::new(crate::value::Value::Str(
+                    "InvariantViolation: PosInt".into()
+                )))
             )
         );
     }
@@ -2231,7 +2798,9 @@ public fn main() -> Email! {
             value,
             crate::value::Value::Variant(
                 "err".into(),
-                Some(Box::new(crate::value::Value::Str("InvariantViolation: Email".into())))
+                Some(Box::new(crate::value::Value::Str(
+                    "InvariantViolation: Email".into()
+                )))
             )
         );
     }
@@ -2270,7 +2839,9 @@ public fn main() -> Probability! {
             high_value,
             crate::value::Value::Variant(
                 "err".into(),
-                Some(Box::new(crate::value::Value::Str("InvariantViolation: Probability".into())))
+                Some(Box::new(crate::value::Value::Str(
+                    "InvariantViolation: Probability".into()
+                )))
             )
         );
 
@@ -2287,7 +2858,9 @@ public fn main() -> Probability! {
             low_value,
             crate::value::Value::Variant(
                 "err".into(),
-                Some(Box::new(crate::value::Value::Str("InvariantViolation: Probability".into())))
+                Some(Box::new(crate::value::Value::Str(
+                    "InvariantViolation: Probability".into()
+                )))
             )
         );
 
@@ -2323,7 +2896,9 @@ public fn main() -> PortNumber! {
             port_err,
             crate::value::Value::Variant(
                 "err".into(),
-                Some(Box::new(crate::value::Value::Str("InvariantViolation: PortNumber".into())))
+                Some(Box::new(crate::value::Value::Str(
+                    "InvariantViolation: PortNumber".into()
+                )))
             )
         );
     }
@@ -2359,7 +2934,10 @@ public fn main() -> Slug! {
 "#,
         );
         let mut slug_record = std::collections::HashMap::new();
-        slug_record.insert("value".into(), crate::value::Value::Str("hello-world".into()));
+        slug_record.insert(
+            "value".into(),
+            crate::value::Value::Str("hello-world".into()),
+        );
         assert_eq!(
             slug_ok,
             crate::value::Value::Variant(
@@ -2381,7 +2959,9 @@ public fn main() -> Slug! {
             slug_err,
             crate::value::Value::Variant(
                 "err".into(),
-                Some(Box::new(crate::value::Value::Str("InvariantViolation: Slug".into())))
+                Some(Box::new(crate::value::Value::Str(
+                    "InvariantViolation: Slug".into()
+                )))
             )
         );
 
@@ -2395,7 +2975,10 @@ public fn main() -> Url! {
 "#,
         );
         let mut url_record = std::collections::HashMap::new();
-        url_record.insert("value".into(), crate::value::Value::Str("https://example.com".into()));
+        url_record.insert(
+            "value".into(),
+            crate::value::Value::Str("https://example.com".into()),
+        );
         assert_eq!(
             url_ok,
             crate::value::Value::Variant(
@@ -2417,9 +3000,247 @@ public fn main() -> Url! {
             url_err,
             crate::value::Value::Variant(
                 "err".into(),
-                Some(Box::new(crate::value::Value::Str("InvariantViolation: Url".into())))
+                Some(Box::new(crate::value::Value::Str(
+                    "InvariantViolation: Url".into()
+                )))
             )
         );
+    }
+
+    #[test]
+    fn validate_rune_required_ok() {
+        let value = exec_project_main_source_with_runes(
+            r#"
+import rune "validate"
+
+public fn main() -> String! {
+    validate.Required("hello")
+}
+"#,
+        );
+        assert_eq!(
+            value,
+            crate::value::Value::Variant(
+                "ok".into(),
+                Some(Box::new(crate::value::Value::Str("hello".into())))
+            )
+        );
+    }
+
+    #[test]
+    fn validate_rune_required_err() {
+        let value = exec_project_main_source_with_runes(
+            r#"
+import rune "validate"
+
+public fn main() -> String! {
+    validate.Required("")
+}
+"#,
+        );
+        let mut record = std::collections::HashMap::new();
+        record.insert("path".into(), crate::value::Value::Str("".into()));
+        record.insert("code".into(), crate::value::Value::Str("required".into()));
+        record.insert(
+            "message".into(),
+            crate::value::Value::Str("Field is required".into()),
+        );
+        assert_eq!(
+            value,
+            crate::value::Value::Variant(
+                "err".into(),
+                Some(Box::new(crate::value::Value::Record(record)))
+            )
+        );
+    }
+
+    #[test]
+    fn validate_rune_min_len_err() {
+        let value = exec_project_main_source_with_runes(
+            r#"
+import rune "validate"
+
+public fn main() -> String! {
+    validate.MinLen(3)("hi")
+}
+"#,
+        );
+        let mut record = std::collections::HashMap::new();
+        record.insert("path".into(), crate::value::Value::Str("".into()));
+        record.insert("code".into(), crate::value::Value::Str("min_len".into()));
+        record.insert(
+            "message".into(),
+            crate::value::Value::Str("Minimum length is 3".into()),
+        );
+        assert_eq!(
+            value,
+            crate::value::Value::Variant(
+                "err".into(),
+                Some(Box::new(crate::value::Value::Record(record)))
+            )
+        );
+    }
+
+    #[test]
+    fn validate_rune_min_len_ok() {
+        let value = exec_project_main_source_with_runes(
+            r#"
+import rune "validate"
+
+public fn main() -> String! {
+    validate.MinLen(3)("abc")
+}
+"#,
+        );
+        assert_eq!(
+            value,
+            crate::value::Value::Variant(
+                "ok".into(),
+                Some(Box::new(crate::value::Value::Str("abc".into())))
+            )
+        );
+    }
+
+    #[test]
+    fn validate_rune_email_ok() {
+        let value = exec_project_main_source_with_runes(
+            r#"
+import rune "validate"
+
+public fn main() -> String! {
+    validate.Email("user@example.com")
+}
+"#,
+        );
+        assert_eq!(
+            value,
+            crate::value::Value::Variant(
+                "ok".into(),
+                Some(Box::new(crate::value::Value::Str(
+                    "user@example.com".into()
+                )))
+            )
+        );
+    }
+
+    #[test]
+    fn validate_rune_email_err() {
+        let value = exec_project_main_source_with_runes(
+            r#"
+import rune "validate"
+
+public fn main() -> String! {
+    validate.Email("notanemail")
+}
+"#,
+        );
+        let mut record = std::collections::HashMap::new();
+        record.insert("path".into(), crate::value::Value::Str("".into()));
+        record.insert("code".into(), crate::value::Value::Str("email".into()));
+        record.insert(
+            "message".into(),
+            crate::value::Value::Str("Invalid email format".into()),
+        );
+        assert_eq!(
+            value,
+            crate::value::Value::Variant(
+                "err".into(),
+                Some(Box::new(crate::value::Value::Record(record)))
+            )
+        );
+    }
+
+    #[test]
+    fn validate_rune_int_range_ok() {
+        let value = exec_project_main_source_with_runes(
+            r#"
+import rune "validate"
+
+public fn main() -> Int! {
+    validate.IntRange(1)(100)(50)
+}
+"#,
+        );
+        assert_eq!(
+            value,
+            crate::value::Value::Variant("ok".into(), Some(Box::new(crate::value::Value::Int(50))))
+        );
+    }
+
+    #[test]
+    fn validate_rune_int_range_err() {
+        let value = exec_project_main_source_with_runes(
+            r#"
+import rune "validate"
+
+public fn main() -> Int! {
+    validate.IntRange(1)(100)(0)
+}
+"#,
+        );
+        let mut record = std::collections::HashMap::new();
+        record.insert("path".into(), crate::value::Value::Str("".into()));
+        record.insert("code".into(), crate::value::Value::Str("range".into()));
+        record.insert(
+            "message".into(),
+            crate::value::Value::Str("Value must be between 1 and 100".into()),
+        );
+        assert_eq!(
+            value,
+            crate::value::Value::Variant(
+                "err".into(),
+                Some(Box::new(crate::value::Value::Record(record)))
+            )
+        );
+    }
+
+    #[test]
+    fn validate_rune_all_pass_ok() {
+        let value = exec_project_main_source_with_runes(
+            r#"
+import rune "validate"
+
+public fn main() -> String! {
+    bind r1 <- validate.Required("hello")
+    bind r2 <- validate.MinLen(2)("hello")
+    bind r3 <- validate.MaxLen(10)("hello")
+    bind results <- collect {
+        yield r1;
+        yield r2;
+        yield r3;
+    }
+    validate.all_pass("hello")(results)
+}
+"#,
+        );
+        assert_eq!(
+            value,
+            crate::value::Value::Variant(
+                "ok".into(),
+                Some(Box::new(crate::value::Value::Str("hello".into())))
+            )
+        );
+    }
+
+    #[test]
+    fn validate_rune_all_pass_collects_errors() {
+        let value = exec_project_main_source_with_runes(
+            r#"
+import rune "validate"
+
+public fn main() -> Bool {
+    bind r1 <- validate.Required("")
+    bind r2 <- validate.MinLen(2)("")
+    bind results <- collect {
+        yield r1;
+        yield r2;
+    }
+    bind result <- validate.all_pass("")(results)
+    Result.is_err(result)
+}
+"#,
+        );
+        assert_eq!(value, crate::value::Value::Bool(true));
     }
 
     #[test]
@@ -2606,10 +3427,34 @@ public fn main() -> Unit !Io {
             None,
         );
         let value: serde_json::Value = serde_json::from_str(&rendered).expect("valid json");
-        assert!(value["fns"].as_array().expect("fns").iter().any(|v| v["name"] == "main"));
-        assert!(value["trfs"].as_array().expect("trfs").iter().any(|v| v["name"] == "FetchUser"));
-        assert!(value["flws"].as_array().expect("flws").iter().any(|v| v["name"] == "Pipeline"));
-        assert!(value["types"].as_array().expect("types").iter().any(|v| v["name"] == "UserRow"));
+        assert!(
+            value["fns"]
+                .as_array()
+                .expect("fns")
+                .iter()
+                .any(|v| v["name"] == "main")
+        );
+        assert!(
+            value["trfs"]
+                .as_array()
+                .expect("trfs")
+                .iter()
+                .any(|v| v["name"] == "FetchUser")
+        );
+        assert!(
+            value["flws"]
+                .as_array()
+                .expect("flws")
+                .iter()
+                .any(|v| v["name"] == "Pipeline")
+        );
+        assert!(
+            value["types"]
+                .as_array()
+                .expect("types")
+                .iter()
+                .any(|v| v["name"] == "UserRow")
+        );
     }
 
     #[test]
@@ -2661,9 +3506,27 @@ seq UserFetch = Pipeline<UserRow> { fetch <- FetchUser }
             None,
         );
         let value: serde_json::Value = serde_json::from_str(&rendered).expect("valid json");
-        assert!(value["trfs"].as_array().expect("trfs").iter().any(|v| v["kind"] == "abstract_trf"));
-        assert!(value["flws"].as_array().expect("flws").iter().any(|v| v["kind"] == "abstract_flw"));
-        assert!(value["flws"].as_array().expect("flws").iter().any(|v| v["kind"] == "flw_binding"));
+        assert!(
+            value["trfs"]
+                .as_array()
+                .expect("trfs")
+                .iter()
+                .any(|v| v["kind"] == "abstract_trf")
+        );
+        assert!(
+            value["flws"]
+                .as_array()
+                .expect("flws")
+                .iter()
+                .any(|v| v["kind"] == "abstract_flw")
+        );
+        assert!(
+            value["flws"]
+                .as_array()
+                .expect("flws")
+                .iter()
+                .any(|v| v["kind"] == "flw_binding")
+        );
     }
 
     #[test]
@@ -2688,9 +3551,23 @@ stage Charge: Int -> Int !Payment = |x| { x }
         );
         let value: serde_json::Value = serde_json::from_str(&rendered).expect("valid json");
         let effects = value["custom_effects"].as_array().expect("custom_effects");
-        assert!(effects.iter().any(|v| v["name"] == "Payment" && v["public"] == true));
-        assert!(effects.iter().any(|v| v["name"] == "Notification" && v["public"] == false));
-        assert!(value["effects_used"].as_array().expect("effects_used").iter().any(|v| v == "Payment"));
+        assert!(
+            effects
+                .iter()
+                .any(|v| v["name"] == "Payment" && v["public"] == true)
+        );
+        assert!(
+            effects
+                .iter()
+                .any(|v| v["name"] == "Notification" && v["public"] == false)
+        );
+        assert!(
+            value["effects_used"]
+                .as_array()
+                .expect("effects_used")
+                .iter()
+                .any(|v| v == "Payment")
+        );
     }
 
     #[test]
@@ -2718,7 +3595,10 @@ public fn main() -> Int { 0 }
         let main = fns.iter().find(|v| v["name"] == "main").expect("main");
         let helper = fns.iter().find(|v| v["name"] == "helper").expect("helper");
         assert_eq!(main["reachable_from_entry"], serde_json::Value::Bool(true));
-        assert_eq!(helper["reachable_from_entry"], serde_json::Value::Bool(false));
+        assert_eq!(
+            helper["reachable_from_entry"],
+            serde_json::Value::Bool(false)
+        );
     }
 
     #[test]
@@ -3020,6 +3900,7 @@ public fn main() -> Unit !Io {
     fn example_hello_wasm_build_and_exec() {
         let hello = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("examples")
+            .join("basic")
             .join("hello.fav");
         let hello_str = hello.to_string_lossy().to_string();
         let (program, loaded_path) = load_and_check_program(Some(&hello_str));
@@ -3036,6 +3917,7 @@ public fn main() -> Unit !Io {
     fn example_math_wasm_build_and_exec() {
         let math = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("examples")
+            .join("wasm")
             .join("math_wasm.fav");
         let math_str = math.to_string_lossy().to_string();
         let (program, loaded_path) = load_and_check_program(Some(&math_str));
@@ -3049,6 +3931,7 @@ public fn main() -> Unit !Io {
     fn example_string_wasm_build_and_exec() {
         let source_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("examples")
+            .join("wasm")
             .join("string_wasm.fav");
         let source_str = source_path.to_string_lossy().to_string();
         let (program, _) = load_and_check_program(Some(&source_str));
@@ -3088,6 +3971,7 @@ public fn main() -> Unit !Io {
     fn example_interface_basic_build_and_exec() {
         let source_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("examples")
+            .join("types")
             .join("interface_basic.fav");
         let source_str = source_path.to_string_lossy().to_string();
         let (program, loaded_path) = load_and_check_program(Some(&source_str));
@@ -3101,6 +3985,7 @@ public fn main() -> Unit !Io {
     fn example_interface_auto_build_and_exec() {
         let source_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("examples")
+            .join("types")
             .join("interface_auto.fav");
         let source_str = source_path.to_string_lossy().to_string();
         let (program, loaded_path) = load_and_check_program(Some(&source_str));
@@ -3114,6 +3999,7 @@ public fn main() -> Unit !Io {
     fn example_algebraic_build_and_exec() {
         let source_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("examples")
+            .join("types")
             .join("algebraic.fav");
         let source_str = source_path.to_string_lossy().to_string();
         let (program, loaded_path) = load_and_check_program(Some(&source_str));
@@ -3127,6 +4013,7 @@ public fn main() -> Unit !Io {
     fn example_invariant_basic_build_and_exec() {
         let source_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("examples")
+            .join("types")
             .join("invariant_basic.fav");
         let source_str = source_path.to_string_lossy().to_string();
         let (program, loaded_path) = load_and_check_program(Some(&source_str));
@@ -3140,6 +4027,7 @@ public fn main() -> Unit !Io {
     fn example_std_states_build_and_exec() {
         let source_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("examples")
+            .join("types")
             .join("std_states.fav");
         let source_str = source_path.to_string_lossy().to_string();
         let (program, loaded_path) = load_and_check_program(Some(&source_str));
@@ -3195,7 +4083,8 @@ seq PartialImport = DataPipeline<UserRow> { parse <- ParseCsv }
     fn example_abstract_flw_basic_build_and_exec() {
         let source_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("examples")
-            .join("abstract_flw_basic.fav");
+            .join("pipeline")
+            .join("abstract_seq_basic.fav");
         let source_str = source_path.to_string_lossy().to_string();
 
         let (program, _) = load_and_check_program(Some(&source_str));
@@ -3208,7 +4097,8 @@ seq PartialImport = DataPipeline<UserRow> { parse <- ParseCsv }
     fn example_abstract_flw_inject_build_and_exec() {
         let source_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("examples")
-            .join("abstract_flw_inject.fav");
+            .join("pipeline")
+            .join("abstract_seq_inject.fav");
         let source_str = source_path.to_string_lossy().to_string();
 
         let (program, _) = load_and_check_program(Some(&source_str));
@@ -3221,6 +4111,7 @@ seq PartialImport = DataPipeline<UserRow> { parse <- ParseCsv }
     fn example_dynamic_inject_build_and_exec() {
         let source_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("examples")
+            .join("pipeline")
             .join("dynamic_inject.fav");
         let source_str = source_path.to_string_lossy().to_string();
 
@@ -3234,6 +4125,7 @@ seq PartialImport = DataPipeline<UserRow> { parse <- ParseCsv }
     fn example_bundle_demo_build_and_exec() {
         let source_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("examples")
+            .join("pipeline")
             .join("bundle_demo.fav");
         let source_str = source_path.to_string_lossy().to_string();
 
@@ -3292,38 +4184,41 @@ public fn main() -> Int {
     #[test]
     fn bundle_manifest_json_has_reachability() {
         let reachability = ReachabilityResult {
-            included: ["main".to_string(), "SaveUsers".to_string()].into_iter().collect(),
+            included: ["main".to_string(), "SaveUsers".to_string()]
+                .into_iter()
+                .collect(),
             excluded: ["DeadFn".to_string()].into_iter().collect(),
             effects_required: vec!["Io".into(), "Db".into()],
             emits: vec!["UserCreated".into()],
         };
         let artifact_path = PathBuf::from("dist/app.fvc");
-        let manifest = build_manifest_json(
-            "src/main.fav",
-            &artifact_path,
-            123,
-            "main",
-            &reachability,
-        );
+        let manifest =
+            build_manifest_json("src/main.fav", &artifact_path, 123, "main", &reachability);
         let value: serde_json::Value = serde_json::from_str(&manifest).expect("json");
         assert_eq!(value["entry"], "main");
         assert_eq!(value["artifact"]["format"], "fvc");
         assert_eq!(value["artifact"]["size_bytes"], 123);
-        assert!(value["reachability"]["included"]
-            .as_array()
-            .expect("included array")
-            .iter()
-            .any(|v| v == "main"));
-        assert!(value["reachability"]["excluded"]
-            .as_array()
-            .expect("excluded array")
-            .iter()
-            .any(|v| v == "DeadFn"));
-        assert!(value["reachability"]["effects_required"]
-            .as_array()
-            .expect("effects array")
-            .iter()
-            .any(|v| v == "Db"));
+        assert!(
+            value["reachability"]["included"]
+                .as_array()
+                .expect("included array")
+                .iter()
+                .any(|v| v == "main")
+        );
+        assert!(
+            value["reachability"]["excluded"]
+                .as_array()
+                .expect("excluded array")
+                .iter()
+                .any(|v| v == "DeadFn")
+        );
+        assert!(
+            value["reachability"]["effects_required"]
+                .as_array()
+                .expect("effects array")
+                .iter()
+                .any(|v| v == "Db")
+        );
     }
 
     #[test]
@@ -3360,37 +4255,43 @@ public fn main() -> Int !Io {
         assert!(artifact.fn_idx_by_name("main").is_some());
         assert!(artifact.fn_idx_by_name("helper").is_none());
 
-        let manifest: serde_json::Value = serde_json::from_str(
-            &std::fs::read_to_string(&manifest_path).expect("read manifest"),
-        )
-        .expect("manifest json");
+        let manifest: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&manifest_path).expect("read manifest"))
+                .expect("manifest json");
         assert_eq!(manifest["entry"], "main");
-        assert!(manifest["reachability"]["included"]
-            .as_array()
-            .expect("included array")
-            .iter()
-            .any(|v| v == "main"));
-        assert!(manifest["reachability"]["excluded"]
-            .as_array()
-            .expect("excluded array")
-            .iter()
-            .any(|v| v == "helper"));
+        assert!(
+            manifest["reachability"]["included"]
+                .as_array()
+                .expect("included array")
+                .iter()
+                .any(|v| v == "main")
+        );
+        assert!(
+            manifest["reachability"]["excluded"]
+                .as_array()
+                .expect("excluded array")
+                .iter()
+                .any(|v| v == "helper")
+        );
 
-        let explain: serde_json::Value = serde_json::from_str(
-            &std::fs::read_to_string(&explain_path).expect("read explain"),
-        )
-        .expect("explain json");
+        let explain: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&explain_path).expect("read explain"))
+                .expect("explain json");
         assert_eq!(explain["entry"], "main");
-        assert!(explain["fns"]
-            .as_array()
-            .expect("fns array")
-            .iter()
-            .any(|v| v["name"] == "main"));
-        assert!(!explain["fns"]
-            .as_array()
-            .expect("fns array")
-            .iter()
-            .any(|v| v["name"] == "helper"));
+        assert!(
+            explain["fns"]
+                .as_array()
+                .expect("fns array")
+                .iter()
+                .any(|v| v["name"] == "main")
+        );
+        assert!(
+            !explain["fns"]
+                .as_array()
+                .expect("fns array")
+                .iter()
+                .any(|v| v["name"] == "helper")
+        );
     }
 
     #[test]
@@ -3420,16 +4321,20 @@ public fn main() -> Int {
         let explain = explain_json_from_artifact(&artifact).expect("embedded explain");
         let value: serde_json::Value = serde_json::from_str(explain).expect("json");
         assert_eq!(value["entry"], "main");
-        assert!(value["fns"]
-            .as_array()
-            .expect("fns array")
-            .iter()
-            .any(|v| v["name"] == "main"));
-        assert!(!value["fns"]
-            .as_array()
-            .expect("fns array")
-            .iter()
-            .any(|v| v["name"] == "helper"));
+        assert!(
+            value["fns"]
+                .as_array()
+                .expect("fns array")
+                .iter()
+                .any(|v| v["name"] == "main")
+        );
+        assert!(
+            !value["fns"]
+                .as_array()
+                .expect("fns array")
+                .iter()
+                .any(|v| v["name"] == "helper")
+        );
     }
 
     #[test]
@@ -3562,13 +4467,17 @@ public fn main() -> Int { a() }
 
     #[test]
     fn explain_diff_no_changes() {
-        let program = Parser::parse_str(
-            "public fn main() -> Int { 1 }",
-            "diff_same.fav",
-        )
-        .expect("parse");
+        let program =
+            Parser::parse_str("public fn main() -> Int { 1 }", "diff_same.fav").expect("parse");
         let ir = crate::middle::compiler::compile_program(&program);
-        let rendered = ExplainPrinter::new().render_json(&program, Some(&ir), false, "all", "diff_same.fav", None);
+        let rendered = ExplainPrinter::new().render_json(
+            &program,
+            Some(&ir),
+            false,
+            "all",
+            "diff_same.fav",
+            None,
+        );
         let value: serde_json::Value = serde_json::from_str(&rendered).expect("json");
         let diff = diff_explain_json("a", &value, "b", &value);
         assert_eq!(render_diff_text(&diff), "No changes detected.\n");
@@ -3591,7 +4500,11 @@ public fn main() -> Int { a() }
             "effects_used": []
         });
         let diff = diff_explain_json("old", &before, "new", &after);
-        assert!(diff.breaking_changes.iter().any(|c| c.contains("removed fn `helper`")));
+        assert!(
+            diff.breaking_changes
+                .iter()
+                .any(|c| c.contains("removed fn `helper`"))
+        );
         let rendered = render_diff_text(&diff);
         assert!(rendered.contains("- helper"));
     }
@@ -3618,7 +4531,13 @@ public fn main() -> Int { a() }
         assert_eq!(value["from_label"], "old");
         assert_eq!(value["to_label"], "new");
         assert!(value["fn_changes"]["changed"].is_array());
-        assert!(value["effects_added"].as_array().expect("effects_added").iter().any(|v| v == "Payment"));
+        assert!(
+            value["effects_added"]
+                .as_array()
+                .expect("effects_added")
+                .iter()
+                .any(|v| v == "Payment")
+        );
     }
 
     #[test]
@@ -3649,13 +4568,17 @@ public fn main() -> Int { a() }
         assert!(!warnings.is_empty(), "expected deprecated cap warning");
 
         let rendered = render_warnings(&source, &warnings, true);
-        assert!(rendered.is_empty(), "expected --no-warn equivalent to suppress warnings");
+        assert!(
+            rendered.is_empty(),
+            "expected --no-warn equivalent to suppress warnings"
+        );
     }
 
     #[test]
     fn wasm_exec_bytes_rejects_db_path_with_w004() {
         let hello = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("examples")
+            .join("basic")
             .join("hello.fav");
         let hello_str = hello.to_string_lossy().to_string();
         let (program, _) = load_and_check_program(Some(&hello_str));
@@ -3669,6 +4592,7 @@ public fn main() -> Int { a() }
     fn wasm_exec_bytes_info_returns_metadata() {
         let hello = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("examples")
+            .join("basic")
             .join("hello.fav");
         let hello_str = hello.to_string_lossy().to_string();
         let (program, _) = load_and_check_program(Some(&hello_str));
@@ -3728,8 +4652,7 @@ public fn main() -> Bool !File {{
     File.exists("{}")
 }}
 "#,
-                output_path,
-                output_path
+                output_path, output_path
             ),
         )
         .expect("write source");
@@ -3739,15 +4662,18 @@ public fn main() -> Bool !File {{
         let artifact = build_artifact(&program);
         let value = exec_artifact_main(&artifact, None).expect("exec artifact");
         assert_eq!(value, crate::value::Value::Bool(true));
-        assert_eq!(std::fs::read_to_string(output).expect("read output"), "alpha\nbeta");
+        assert_eq!(
+            std::fs::read_to_string(output).expect("read output"),
+            "alpha\nbeta"
+        );
     }
 
     // ── v1.7.0: coverage tracking ─────────────────────────────────────────
 
     #[test]
     fn coverage_tracks_executed_lines() {
-        use crate::middle::compiler::set_coverage_mode;
         use crate::backend::vm::{enable_coverage, take_coverage};
+        use crate::middle::compiler::set_coverage_mode;
 
         let source = r#"
 public fn main() -> Int {
@@ -3777,7 +4703,10 @@ public fn main() -> Int {
         executed.insert(3);
 
         let report = format_coverage_report("test.fav", source, &executed);
-        assert!(report.contains("test.fav"), "report should contain filename");
+        assert!(
+            report.contains("test.fav"),
+            "report should contain filename"
+        );
         assert!(report.contains("%"), "report should contain percentage");
     }
 
@@ -3796,9 +4725,21 @@ public fn main() -> Int {
         let dir_str = dir.path().to_string_lossy().to_string();
         let paths = collect_watch_paths_from_dir(&dir_str);
 
-        assert!(paths.iter().any(|p| p.file_name().map(|n| n == "a.fav").unwrap_or(false)));
-        assert!(paths.iter().any(|p| p.file_name().map(|n| n == "b.fav").unwrap_or(false)));
-        assert!(!paths.iter().any(|p| p.extension().map(|e| e == "txt").unwrap_or(false)));
+        assert!(
+            paths
+                .iter()
+                .any(|p| p.file_name().map(|n| n == "a.fav").unwrap_or(false))
+        );
+        assert!(
+            paths
+                .iter()
+                .any(|p| p.file_name().map(|n| n == "b.fav").unwrap_or(false))
+        );
+        assert!(
+            !paths
+                .iter()
+                .any(|p| p.extension().map(|e| e == "txt").unwrap_or(false))
+        );
     }
 
     #[test]
@@ -3816,8 +4757,16 @@ public fn main() -> Int {
         paths.extend(collect_watch_paths_from_dir(&d2));
 
         assert_eq!(paths.len(), 2);
-        assert!(paths.iter().any(|p| p.file_name().map(|n| n == "x.fav").unwrap_or(false)));
-        assert!(paths.iter().any(|p| p.file_name().map(|n| n == "y.fav").unwrap_or(false)));
+        assert!(
+            paths
+                .iter()
+                .any(|p| p.file_name().map(|n| n == "x.fav").unwrap_or(false))
+        );
+        assert!(
+            paths
+                .iter()
+                .any(|p| p.file_name().map(|n| n == "y.fav").unwrap_or(false))
+        );
     }
 
     // ── v1.8.0: Task<T> parallel API ─────────────────────────────────────────
@@ -3837,8 +4786,12 @@ public fn main() -> Int {
 }
 "#;
         let program = Parser::parse_str(source, "task_all.fav").expect("parse");
-        let errors = crate::middle::checker::Checker::check_program(&program);
-        assert!(errors.is_empty(), "Task.all should type-check: {:?}", errors);
+        let (errors, _) = crate::middle::checker::Checker::check_program(&program);
+        assert!(
+            errors.is_empty(),
+            "Task.all should type-check: {:?}",
+            errors
+        );
     }
 
     #[test]
@@ -3854,8 +4807,12 @@ public fn main() -> Int {
 }
 "#;
         let program = Parser::parse_str(source, "task_race.fav").expect("parse");
-        let errors = crate::middle::checker::Checker::check_program(&program);
-        assert!(errors.is_empty(), "Task.race should type-check: {:?}", errors);
+        let (errors, _) = crate::middle::checker::Checker::check_program(&program);
+        assert!(
+            errors.is_empty(),
+            "Task.race should type-check: {:?}",
+            errors
+        );
     }
 
     #[test]
@@ -3869,7 +4826,11 @@ public fn main() -> Option<Int> {
 "#;
         let program = Parser::parse_str(source, "task_timeout.fav").expect("parse");
         let result = exec_artifact_main(&build_artifact(&program), None);
-        assert!(result.is_ok(), "Task.timeout should succeed: {:?}", result.err());
+        assert!(
+            result.is_ok(),
+            "Task.timeout should succeed: {:?}",
+            result.err()
+        );
     }
 
     // ── v1.8.0: async fn main ────────────────────────────────────────────────
@@ -3879,8 +4840,12 @@ public fn main() -> Option<Int> {
         // async fn main() -> Unit !Io should type-check without errors
         let source = r#"public async fn main() -> Unit !Io { IO.println("hi") }"#;
         let program = Parser::parse_str(source, "async_main.fav").expect("parse");
-        let errors = crate::middle::checker::Checker::check_program(&program);
-        assert!(errors.is_empty(), "async fn main should type-check: {:?}", errors);
+        let (errors, _) = crate::middle::checker::Checker::check_program(&program);
+        assert!(
+            errors.is_empty(),
+            "async fn main should type-check: {:?}",
+            errors
+        );
     }
 
     #[test]
@@ -3890,7 +4855,11 @@ public fn main() -> Option<Int> {
         let artifact = build_artifact(&program);
         let _suppress = crate::backend::vm::SuppressIoGuard::new(true);
         let result = exec_artifact_main(&artifact, None);
-        assert!(result.is_ok(), "async fn main should execute: {:?}", result.err());
+        assert!(
+            result.is_ok(),
+            "async fn main should execute: {:?}",
+            result.err()
+        );
     }
 
     // ── v1.8.0: chain + Task<T> ──────────────────────────────────────────────
@@ -3908,8 +4877,12 @@ public fn main() -> Option<Int> {
 }
 "#;
         let program = Parser::parse_str(source, "chain_task.fav").expect("parse");
-        let errors = crate::middle::checker::Checker::check_program(&program);
-        assert!(errors.is_empty(), "chain + Task<Option<T>> should type-check: {:?}", errors);
+        let (errors, _) = crate::middle::checker::Checker::check_program(&program);
+        assert!(
+            errors.is_empty(),
+            "chain + Task<Option<T>> should type-check: {:?}",
+            errors
+        );
     }
 
     // ── v1.8.0: coverage by function ─────────────────────────────────────────
@@ -3927,8 +4900,11 @@ public fn main() -> Int { add(1, 2) }
         let all_lines: HashSet<u32> = (1..=20).collect();
         let report = format_coverage_report_by_fn(&ir, &all_lines);
         // Should mention user functions (not $-prefixed internals)
-        assert!(report.contains("add") || report.contains("main") || report.is_empty(),
-            "report should contain fn names or be empty: {}", report);
+        assert!(
+            report.contains("add") || report.contains("main") || report.is_empty(),
+            "report should contain fn names or be empty: {}",
+            report
+        );
     }
 
     #[test]
@@ -3943,7 +4919,10 @@ public fn main() -> Int { add(1, 2) }
         std::fs::write(&out_path, &full_report).expect("write");
         assert!(out_path.exists(), "coverage.txt should exist");
         let content = std::fs::read_to_string(&out_path).expect("read");
-        assert!(content.contains("test.fav"), "report should contain filename");
+        assert!(
+            content.contains("test.fav"),
+            "report should contain filename"
+        );
     }
 
     // ── v1.8.0: fav bench ────────────────────────────────────────────────────
@@ -3977,8 +4956,12 @@ public fn main() -> Int { add(1, 2) }
         let program = Parser::parse_str(source, "bench_timing.fav").expect("parse");
         let artifact = build_artifact(&program);
         // Verify the bench function is in the artifact
-        assert!(artifact.fn_idx_by_name("$bench:simple arithmetic").is_some(),
-            "bench function should be compiled into artifact");
+        assert!(
+            artifact
+                .fn_idx_by_name("$bench:simple arithmetic")
+                .is_some(),
+            "bench function should be compiled into artifact"
+        );
     }
 }
 
@@ -4080,20 +5063,31 @@ pub fn cmd_lint(file: Option<&str>, warn_only: bool) {
                 let col = lint.span.col as usize;
                 let token_len = if lint.span.end > lint.span.start {
                     lint.span.end - lint.span.start
-                } else { 1 };
+                } else {
+                    1
+                };
                 let source_line = source.lines().nth(line_num.saturating_sub(1)).unwrap_or("");
                 let line_prefix = line_num.to_string();
                 let padding = " ".repeat(line_prefix.len());
                 let col_offset = " ".repeat(col.saturating_sub(1));
-                let max_len = source_line.len().saturating_sub(col.saturating_sub(1)).max(1);
+                let max_len = source_line
+                    .len()
+                    .saturating_sub(col.saturating_sub(1))
+                    .max(1);
                 let underline = "^".repeat(token_len.min(max_len).max(1));
                 eprintln!(
                     "lint[{}]: {}\n  --> {}:{}:{}\n{} |\n{} | {}\n{} | {}{}",
-                    lint.code, lint.message,
-                    lint.span.file, lint.span.line, lint.span.col,
+                    lint.code,
+                    lint.message,
+                    lint.span.file,
+                    lint.span.line,
+                    lint.span.col,
                     padding,
-                    line_prefix, source_line,
-                    padding, col_offset, underline,
+                    line_prefix,
+                    source_line,
+                    padding,
+                    col_offset,
+                    underline,
                 );
             }
             total_warnings += lints.len();
@@ -4101,7 +5095,11 @@ pub fn cmd_lint(file: Option<&str>, warn_only: bool) {
     }
 
     if total_warnings > 0 {
-        eprintln!("\nlint: {} warning{}", total_warnings, if total_warnings == 1 { "" } else { "s" });
+        eprintln!(
+            "\nlint: {} warning{}",
+            total_warnings,
+            if total_warnings == 1 { "" } else { "s" }
+        );
         if !warn_only {
             process::exit(1);
         }
@@ -4125,9 +5123,9 @@ pub fn cmd_explain(file: Option<&str>, schema: bool, format: &str, focus: &str) 
                 match explain_json_from_artifact(&artifact) {
                     Ok(json) => print!("{json}"),
                     Err(message) => {
-                    eprintln!("{message}");
-                    process::exit(1);
-                }
+                        eprintln!("{message}");
+                        process::exit(1);
+                    }
                 }
             } else {
                 print!("{}", artifact_info_string(&artifact));
@@ -4160,9 +5158,13 @@ pub fn cmd_explain(file: Option<&str>, schema: bool, format: &str, focus: &str) 
             eprintln!("{}", e);
             process::exit(1);
         });
-        let errors = Checker::check_program(&program);
+        let (errors, _) = Checker::check_program(&program);
         if !errors.is_empty() {
-            eprintln!("warning: {} type error(s) in `{}` — output may be incomplete", errors.len(), path);
+            eprintln!(
+                "warning: {} type error(s) in `{}` — output may be incomplete",
+                errors.len(),
+                path
+            );
         }
         if paths.len() > 1 {
             println!("\n=== {} ===", path);
@@ -4173,16 +5175,18 @@ pub fn cmd_explain(file: Option<&str>, schema: bool, format: &str, focus: &str) 
         } else {
             None
         };
-        let include_stdlib_states = program
-            .uses
-            .iter()
-            .any(|use_path| use_path.len() >= 2 && use_path[..use_path.len() - 1].join(".") == "std.states");
+        let include_stdlib_states = program.uses.iter().any(|use_path| {
+            use_path.len() >= 2 && use_path[..use_path.len() - 1].join(".") == "std.states"
+        });
         if schema {
-            print!("{}", ExplainPrinter::new().render_schema(&program, include_stdlib_states));
+            print!(
+                "{}",
+                ExplainPrinter::new().render_schema(&program, include_stdlib_states)
+            );
         } else if format == "json" {
-            let reachability = ir
-                .as_ref()
-                .map(|ir_program| crate::middle::reachability::reachability_analysis("main", ir_program));
+            let reachability = ir.as_ref().map(|ir_program| {
+                crate::middle::reachability::reachability_analysis("main", ir_program)
+            });
             print!(
                 "{}",
                 ExplainPrinter::new().render_json(
@@ -4337,10 +5341,16 @@ fn diff_category(from: &serde_json::Value, to: &serde_json::Value, key: &str) ->
         }
     }
 
-    CategoryDiff { added, removed, changed }
+    CategoryDiff {
+        added,
+        removed,
+        changed,
+    }
 }
 
-fn keyed_entries(items: Option<&Vec<serde_json::Value>>) -> std::collections::BTreeMap<String, serde_json::Value> {
+fn keyed_entries(
+    items: Option<&Vec<serde_json::Value>>,
+) -> std::collections::BTreeMap<String, serde_json::Value> {
     let mut map = std::collections::BTreeMap::new();
     if let Some(items) = items {
         for item in items {
@@ -4376,7 +5386,11 @@ fn diff_entry(from: &serde_json::Value, to: &serde_json::Value) -> Vec<String> {
     diffs
 }
 
-fn diff_string_list(from: &serde_json::Value, to: &serde_json::Value, key: &str) -> (Vec<String>, Vec<String>) {
+fn diff_string_list(
+    from: &serde_json::Value,
+    to: &serde_json::Value,
+    key: &str,
+) -> (Vec<String>, Vec<String>) {
     let from_set: std::collections::BTreeSet<String> = from
         .get(key)
         .and_then(|v| v.as_array())
@@ -4404,7 +5418,18 @@ fn detect_breaking_changes(category: &str, diff: &CategoryDiff) -> Vec<String> {
         }
     }
     for changed in &diff.changed {
-        if changed.diffs.iter().any(|d| matches!(d.as_str(), "params changed" | "return_type changed" | "input_type changed" | "output_type changed" | "effects changed" | "fields changed" | "variants changed")) {
+        if changed.diffs.iter().any(|d| {
+            matches!(
+                d.as_str(),
+                "params changed"
+                    | "return_type changed"
+                    | "input_type changed"
+                    | "output_type changed"
+                    | "effects changed"
+                    | "fields changed"
+                    | "variants changed"
+            )
+        }) {
             out.push(format!("changed {} `{}`", category, changed.name));
         }
     }
@@ -4431,18 +5456,51 @@ fn render_diff_text(diff: &ExplainDiff) -> String {
         return "No changes detected.\n".to_string();
     }
     let mut out = String::new();
-    let _ = writeln!(out, "[summary] from={} to={}", diff.from_label, diff.to_label);
-    let _ = writeln!(out, "  added/removed/changed fns: {}/{}/{}", diff.fn_changes.added.len(), diff.fn_changes.removed.len(), diff.fn_changes.changed.len());
-    let _ = writeln!(out, "  added/removed/changed trfs: {}/{}/{}", diff.trf_changes.added.len(), diff.trf_changes.removed.len(), diff.trf_changes.changed.len());
-    let _ = writeln!(out, "  added/removed/changed flws: {}/{}/{}", diff.flw_changes.added.len(), diff.flw_changes.removed.len(), diff.flw_changes.changed.len());
-    let _ = writeln!(out, "  added/removed/changed types: {}/{}/{}", diff.type_changes.added.len(), diff.type_changes.removed.len(), diff.type_changes.changed.len());
+    let _ = writeln!(
+        out,
+        "[summary] from={} to={}",
+        diff.from_label, diff.to_label
+    );
+    let _ = writeln!(
+        out,
+        "  added/removed/changed fns: {}/{}/{}",
+        diff.fn_changes.added.len(),
+        diff.fn_changes.removed.len(),
+        diff.fn_changes.changed.len()
+    );
+    let _ = writeln!(
+        out,
+        "  added/removed/changed trfs: {}/{}/{}",
+        diff.trf_changes.added.len(),
+        diff.trf_changes.removed.len(),
+        diff.trf_changes.changed.len()
+    );
+    let _ = writeln!(
+        out,
+        "  added/removed/changed flws: {}/{}/{}",
+        diff.flw_changes.added.len(),
+        diff.flw_changes.removed.len(),
+        diff.flw_changes.changed.len()
+    );
+    let _ = writeln!(
+        out,
+        "  added/removed/changed types: {}/{}/{}",
+        diff.type_changes.added.len(),
+        diff.type_changes.removed.len(),
+        diff.type_changes.changed.len()
+    );
     if !diff.breaking_changes.is_empty() {
         let _ = writeln!(out, "  breaking_changes:");
         for change in &diff.breaking_changes {
             let _ = writeln!(out, "    - {}", change);
         }
     }
-    for (label, category) in [("fns", &diff.fn_changes), ("trfs", &diff.trf_changes), ("flws", &diff.flw_changes), ("types", &diff.type_changes)] {
+    for (label, category) in [
+        ("fns", &diff.fn_changes),
+        ("trfs", &diff.trf_changes),
+        ("flws", &diff.flw_changes),
+        ("types", &diff.type_changes),
+    ] {
         if category.added.is_empty() && category.removed.is_empty() && category.changed.is_empty() {
             continue;
         }
@@ -4473,9 +5531,10 @@ fn remap_ir_pattern(pattern: &IRPattern) -> IRPattern {
         IRPattern::Wildcard => IRPattern::Wildcard,
         IRPattern::Lit(lit) => IRPattern::Lit(lit.clone()),
         IRPattern::Bind(slot) => IRPattern::Bind(*slot),
-        IRPattern::Variant(name, inner) => {
-            IRPattern::Variant(name.clone(), inner.as_ref().map(|p| Box::new(remap_ir_pattern(p))))
-        }
+        IRPattern::Variant(name, inner) => IRPattern::Variant(
+            name.clone(),
+            inner.as_ref().map(|p| Box::new(remap_ir_pattern(p))),
+        ),
         IRPattern::Record(fields) => IRPattern::Record(
             fields
                 .iter()
@@ -4485,10 +5544,7 @@ fn remap_ir_pattern(pattern: &IRPattern) -> IRPattern {
     }
 }
 
-fn remap_ir_arm(
-    arm: &IRArm,
-    global_idx_map: &std::collections::HashMap<u16, u16>,
-) -> IRArm {
+fn remap_ir_arm(arm: &IRArm, global_idx_map: &std::collections::HashMap<u16, u16>) -> IRArm {
     IRArm {
         pattern: remap_ir_pattern(&arm.pattern),
         guard: arm
@@ -4499,10 +5555,7 @@ fn remap_ir_arm(
     }
 }
 
-fn remap_ir_stmt(
-    stmt: &IRStmt,
-    global_idx_map: &std::collections::HashMap<u16, u16>,
-) -> IRStmt {
+fn remap_ir_stmt(stmt: &IRStmt, global_idx_map: &std::collections::HashMap<u16, u16>) -> IRStmt {
     match stmt {
         IRStmt::Bind(slot, expr) => IRStmt::Bind(*slot, remap_ir_expr(expr, global_idx_map)),
         IRStmt::Chain(slot, expr) => IRStmt::Chain(*slot, remap_ir_expr(expr, global_idx_map)),
@@ -4512,10 +5565,7 @@ fn remap_ir_stmt(
     }
 }
 
-fn remap_ir_expr(
-    expr: &IRExpr,
-    global_idx_map: &std::collections::HashMap<u16, u16>,
-) -> IRExpr {
+fn remap_ir_expr(expr: &IRExpr, global_idx_map: &std::collections::HashMap<u16, u16>) -> IRExpr {
     match expr {
         IRExpr::Lit(lit, ty) => IRExpr::Lit(lit.clone(), ty.clone()),
         IRExpr::Local(slot, ty) => IRExpr::Local(*slot, ty.clone()),
@@ -4540,7 +5590,8 @@ fn remap_ir_expr(
             ty.clone(),
         ),
         IRExpr::Block(stmts, tail, ty) => IRExpr::Block(
-            stmts.iter()
+            stmts
+                .iter()
                 .map(|stmt| remap_ir_stmt(stmt, global_idx_map))
                 .collect(),
             Box::new(remap_ir_expr(tail, global_idx_map)),
@@ -4629,7 +5680,10 @@ fn filter_ir_program(ir: &IRProgram, included: &std::collections::HashSet<String
 
     for global in &mut new_globals {
         if let IRGlobalKind::Fn(old_fn_idx) = global.kind.clone() {
-            let new_idx = old_fn_idx_to_new.get(&old_fn_idx).copied().unwrap_or(old_fn_idx);
+            let new_idx = old_fn_idx_to_new
+                .get(&old_fn_idx)
+                .copied()
+                .unwrap_or(old_fn_idx);
             global.kind = IRGlobalKind::Fn(new_idx);
         }
     }
@@ -4718,7 +5772,8 @@ pub fn cmd_bundle(file: &str, out: Option<&str>, entry: &str, manifest: bool, ex
     if manifest {
         let size = std::fs::metadata(&out_path).map(|m| m.len()).unwrap_or(0);
         let manifest_path = out_path.with_extension("manifest.json");
-        let manifest_json = build_manifest_json(&source_path, &out_path, size, entry, &reachability);
+        let manifest_json =
+            build_manifest_json(&source_path, &out_path, size, entry, &reachability);
         std::fs::write(&manifest_path, manifest_json).unwrap_or_else(|e| {
             eprintln!(
                 "error: cannot write manifest `{}`: {}",
@@ -4759,7 +5814,13 @@ pub fn cmd_bundle(file: &str, out: Option<&str>, entry: &str, manifest: bool, ex
     println!("bundled {}", out_path.display());
 }
 
-pub fn cmd_graph(file: &str, _format: &str, _focus: Option<&str>, entry: Option<&str>, depth: Option<usize>) {
+pub fn cmd_graph(
+    file: &str,
+    _format: &str,
+    _focus: Option<&str>,
+    entry: Option<&str>,
+    depth: Option<usize>,
+) {
     let source = load_file(file);
     let program = Parser::parse_str(&source, file).unwrap_or_else(|e| {
         eprintln!("{e}");
@@ -4800,7 +5861,12 @@ fn render_graph_text_with_opts(
             .fns
             .iter()
             .filter(|f| !f.name.starts_with('$'))
-            .map(|f| (f.name.clone(), crate::middle::ir::collect_deps(f, &ir.globals)))
+            .map(|f| {
+                (
+                    f.name.clone(),
+                    crate::middle::ir::collect_deps(f, &ir.globals),
+                )
+            })
             .collect();
         let selected = select_fn_graph_nodes(&calls_map, entry, max_depth);
         for name in &selected.order {
@@ -4874,7 +5940,12 @@ fn render_graph_mermaid_with_opts(
             .fns
             .iter()
             .filter(|f| !f.name.starts_with('$'))
-            .map(|f| (f.name.clone(), crate::middle::ir::collect_deps(f, &ir.globals)))
+            .map(|f| {
+                (
+                    f.name.clone(),
+                    crate::middle::ir::collect_deps(f, &ir.globals),
+                )
+            })
             .collect();
         let selected = select_fn_graph_nodes(&calls_map, entry, max_depth);
         for name in &selected.order {
@@ -4982,7 +6053,9 @@ fn sanitize_mermaid_id(name: &str) -> String {
 struct ExplainPrinter;
 
 impl ExplainPrinter {
-    fn new() -> Self { ExplainPrinter }
+    fn new() -> Self {
+        ExplainPrinter
+    }
 
     fn print(
         &self,
@@ -4999,15 +6072,15 @@ impl ExplainPrinter {
         ir: Option<&crate::middle::ir::IRProgram>,
         include_stdlib_states: bool,
     ) -> String {
-        use ast::*;
         use crate::middle::ir::collect_deps;
+        use ast::*;
         use std::fmt::Write as _;
 
-        let col_vis   = 10usize;
-        let col_name  = 26usize;
-        let col_type  = 36usize;
-        let col_eff   = 20usize;
-        let col_inv   = 34usize;
+        let col_vis = 10usize;
+        let col_name = 26usize;
+        let col_type = 36usize;
+        let col_eff = 20usize;
+        let col_inv = 34usize;
         let mut out = String::new();
 
         let _ = writeln!(
@@ -5023,11 +6096,19 @@ impl ExplainPrinter {
 
         // Build a map: fn_name → deps string (from IR if available)
         let deps_map: std::collections::HashMap<String, String> = if let Some(ir) = ir {
-            ir.fns.iter()
+            ir.fns
+                .iter()
                 .filter(|f| !f.name.starts_with('$'))
                 .map(|f| {
                     let deps = collect_deps(f, &ir.globals);
-                    (f.name.clone(), if deps.is_empty() { "-".to_string() } else { deps.join(", ") })
+                    (
+                        f.name.clone(),
+                        if deps.is_empty() {
+                            "-".to_string()
+                        } else {
+                            deps.join(", ")
+                        },
+                    )
                 })
                 .collect()
         } else {
@@ -5038,15 +6119,16 @@ impl ExplainPrinter {
             match item {
                 Item::TypeDef(td) => {
                     let kind = match &td.body {
-                        TypeBody::Record(_)  => "record",
-                        TypeBody::Sum(_)     => "sum",
-                        TypeBody::Alias(_)   => "alias",
+                        TypeBody::Record(_) => "record",
+                        TypeBody::Sum(_) => "sum",
+                        TypeBody::Alias(_) => "alias",
                     };
                     let vis = format_visibility(&td.visibility);
                     let _ = writeln!(
                         out,
                         "{:<col_vis$} {:<col_name$} {:<col_type$} {:<col_eff$} {:<col_inv$} -",
-                        vis, td.name,
+                        vis,
+                        td.name,
                         format!("type ({kind})"),
                         "-",
                         format_invariants(&td.invariants),
@@ -5064,53 +6146,80 @@ impl ExplainPrinter {
                     );
                 }
                 Item::FnDef(fd) => {
-                    let params: Vec<String> = fd.params.iter()
-                        .map(|p| format_type_expr(&p.ty))
-                        .collect();
-                    let sig = format!("({}) -> {}", params.join(", "), format_type_expr(&fd.return_ty));
+                    let params: Vec<String> =
+                        fd.params.iter().map(|p| format_type_expr(&p.ty)).collect();
+                    let sig = format!(
+                        "({}) -> {}",
+                        params.join(", "),
+                        format_optional_type_expr(&fd.return_ty)
+                    );
                     let effs = format_effects(&fd.effects);
                     let vis = format_visibility(&fd.visibility);
                     let deps = deps_map.get(&fd.name).map(|s| s.as_str()).unwrap_or("-");
                     let _ = writeln!(
                         out,
                         "{:<col_vis$} {:<col_name$} {:<col_type$} {:<col_eff$} {:<col_inv$} {}",
-                        vis, format!("fn {}", fd.name), sig, effs, "-", deps
+                        vis,
+                        format!("fn {}", fd.name),
+                        sig,
+                        effs,
+                        "-",
+                        deps
                     );
                 }
                 Item::TrfDef(td) => {
-                    let sig = format!("{} -> {}",
+                    let sig = format!(
+                        "{} -> {}",
                         format_type_expr(&td.input_ty),
-                        format_type_expr(&td.output_ty));
+                        format_type_expr(&td.output_ty)
+                    );
                     let effs = format_effects(&td.effects);
                     let vis = format_visibility(&td.visibility);
                     let deps = deps_map.get(&td.name).map(|s| s.as_str()).unwrap_or("-");
                     let _ = writeln!(
                         out,
                         "{:<col_vis$} {:<col_name$} {:<col_type$} {:<col_eff$} {:<col_inv$} {}",
-                        vis, format!("trf {}", td.name), sig, effs, "-", deps
+                        vis,
+                        format!("trf {}", td.name),
+                        sig,
+                        effs,
+                        "-",
+                        deps
                     );
                 }
                 Item::AbstractTrfDef(td) => {
-                    let sig = format!("{} -> {}",
+                    let sig = format!(
+                        "{} -> {}",
                         format_type_expr(&td.input_ty),
-                        format_type_expr(&td.output_ty));
+                        format_type_expr(&td.output_ty)
+                    );
                     let effs = format_effects(&td.effects);
                     let vis = format_visibility(&td.visibility);
                     let _ = writeln!(
                         out,
                         "{:<col_vis$} {:<col_name$} {:<col_type$} {:<col_eff$} {:<col_inv$} -",
-                        vis, format!("abstract stage {}", td.name), sig, effs, "-"
+                        vis,
+                        format!("abstract stage {}", td.name),
+                        sig,
+                        effs,
+                        "-"
                     );
                 }
                 Item::FlwDef(fd) => {
                     let _ = writeln!(
                         out,
                         "{:<col_vis$} {:<col_name$} {:<col_type$} {:<col_eff$} {:<col_inv$} -",
-                        "", format!("flw {}", fd.name), fd.steps.join(" |> "), "-", "-"
+                        "",
+                        format!("flw {}", fd.name),
+                        fd.steps.join(" |> "),
+                        "-",
+                        "-"
                     );
                 }
                 Item::AbstractFlwDef(fd) => {
-                    let slots = fd.slots.iter()
+                    let slots = fd
+                        .slots
+                        .iter()
                         .map(|slot| {
                             let effs = format_effects(&slot.effects);
                             format!(
@@ -5118,7 +6227,11 @@ impl ExplainPrinter {
                                 slot.name,
                                 format_type_expr(&slot.input_ty),
                                 format_type_expr(&slot.output_ty),
-                                if effs == "-" { String::new() } else { format!(" {}", effs) }
+                                if effs == "-" {
+                                    String::new()
+                                } else {
+                                    format!(" {}", effs)
+                                }
                             )
                         })
                         .collect::<Vec<_>>()
@@ -5139,9 +6252,18 @@ impl ExplainPrinter {
                     let type_args = if fd.type_args.is_empty() {
                         String::new()
                     } else {
-                        format!("<{}>", fd.type_args.iter().map(|a| format_type_expr(a)).collect::<Vec<_>>().join(", "))
+                        format!(
+                            "<{}>",
+                            fd.type_args
+                                .iter()
+                                .map(|a| format_type_expr(a))
+                                .collect::<Vec<_>>()
+                                .join(", ")
+                        )
                     };
-                    let bindings = fd.bindings.iter()
+                    let bindings = fd
+                        .bindings
+                        .iter()
                         .map(|(slot, imp)| format!("{} <- {}", slot, slot_impl_name(imp)))
                         .collect::<Vec<_>>()
                         .join("; ");
@@ -5195,32 +6317,46 @@ impl ExplainPrinter {
                     );
                 }
                 Item::ImplDef(id) => {
-                    let args: Vec<String> = id.type_args.iter()
-                        .map(|a| format_type_expr(a))
-                        .collect();
+                    let args: Vec<String> =
+                        id.type_args.iter().map(|a| format_type_expr(a)).collect();
                     let _ = writeln!(
                         out,
                         "{:<col_vis$} {:<col_name$} {:<col_type$} {:<col_eff$} {:<col_inv$} -",
-                        "", format!("impl {}", id.cap_name), format!("<{}>", args.join(", ")), "-", "-"
+                        "",
+                        format!("impl {}", id.cap_name),
+                        format!("<{}>", args.join(", ")),
+                        "-",
+                        "-"
                     );
                 }
                 Item::TestDef(td) => {
-                    let deps = deps_map.get(&format!("$test:{}", td.name))
-                        .map(|s| s.as_str()).unwrap_or("-");
+                    let deps = deps_map
+                        .get(&format!("$test:{}", td.name))
+                        .map(|s| s.as_str())
+                        .unwrap_or("-");
                     let _ = writeln!(
                         out,
                         "{:<col_vis$} {:<col_name$} {:<col_type$} {:<col_eff$} {:<col_inv$} {}",
-                        "", format!("test {:?}", td.name), "() -> Unit", "-", "-", deps
+                        "",
+                        format!("test {:?}", td.name),
+                        "() -> Unit",
+                        "-",
+                        "-",
+                        deps
                     );
                 }
                 Item::BenchDef(bd) => {
                     let _ = writeln!(
                         out,
                         "{:<col_vis$} {:<col_name$} {:<col_type$} {:<col_eff$} {:<col_inv$} -",
-                        "", format!("bench {:?}", bd.description), "() -> Unit", "-", "-"
+                        "",
+                        format!("bench {:?}", bd.description),
+                        "() -> Unit",
+                        "-",
+                        "-"
                     );
                 }
-                Item::NamespaceDecl(..) | Item::UseDecl(..) => {}
+                Item::NamespaceDecl(..) | Item::UseDecl(..) | Item::ImportDecl { .. } => {}
             }
         }
 
@@ -5380,7 +6516,12 @@ impl ExplainPrinter {
             ir.fns
                 .iter()
                 .filter(|f| !f.name.starts_with('$'))
-                .map(|f| (f.name.clone(), crate::middle::ir::collect_deps(f, &ir.globals)))
+                .map(|f| {
+                    (
+                        f.name.clone(),
+                        crate::middle::ir::collect_deps(f, &ir.globals),
+                    )
+                })
                 .collect()
         } else {
             std::collections::HashMap::new()
@@ -5405,7 +6546,7 @@ impl ExplainPrinter {
                             "name": fd.name,
                             "kind": "fn",
                             "params": fd.params.iter().map(|p| format_type_expr(&p.ty)).collect::<Vec<_>>(),
-                            "return_type": format_type_expr(&fd.return_ty),
+                            "return_type": format_optional_type_expr(&fd.return_ty),
                             "effects": fd.effects.iter().map(effect_json_name).collect::<Vec<_>>(),
                             "calls": calls_map.get(&fd.name).cloned().unwrap_or_default(),
                             "reachable_from_entry": reachability.map(|r| r.included.contains(&fd.name)).unwrap_or(true)
@@ -5584,7 +6725,9 @@ impl ExplainPrinter {
         let mut out = String::new();
         let mut wrote_any = false;
         let mut emit_type = |td: &ast::TypeDef, stdlib: bool, out: &mut String| {
-            let TypeBody::Record(fields) = &td.body else { return; };
+            let TypeBody::Record(fields) = &td.body else {
+                return;
+            };
             if wrote_any {
                 let _ = writeln!(out);
             }
@@ -5610,7 +6753,11 @@ impl ExplainPrinter {
                 .collect::<Vec<_>>();
             for inv in &td.invariants {
                 if invariant_to_sql(inv).is_none() {
-                    let _ = writeln!(out, "    -- [unsupported invariant: {}]", format_expr_compact(inv));
+                    let _ = writeln!(
+                        out,
+                        "    -- [unsupported invariant: {}]",
+                        format_expr_compact(inv)
+                    );
                 }
             }
             if supported.is_empty() {
@@ -5663,26 +6810,41 @@ fn format_expr_compact(expr: &ast::Expr) -> String {
         Expr::Ident(name, _) => name.clone(),
         Expr::FieldAccess(obj, field, _) => format!("{}.{}", format_expr_compact(obj), field),
         Expr::Apply(callee, args, _) => {
-            let args = args.iter().map(format_expr_compact).collect::<Vec<_>>().join(", ");
+            let args = args
+                .iter()
+                .map(format_expr_compact)
+                .collect::<Vec<_>>()
+                .join(", ");
             format!("{}({args})", format_expr_compact(callee))
         }
         Expr::BinOp(op, left, right, _) => {
             let op = match op {
-                BinOp::Add          => "+",
-                BinOp::Sub          => "-",
-                BinOp::Mul          => "*",
-                BinOp::Div          => "/",
-                BinOp::Eq           => "==",
-                BinOp::NotEq        => "!=",
-                BinOp::Lt           => "<",
-                BinOp::Gt           => ">",
-                BinOp::LtEq         => "<=",
-                BinOp::GtEq         => ">=",
+                BinOp::Add => "+",
+                BinOp::Sub => "-",
+                BinOp::Mul => "*",
+                BinOp::Div => "/",
+                BinOp::And => "&&",
+                BinOp::Or => "||",
+                BinOp::Eq => "==",
+                BinOp::NotEq => "!=",
+                BinOp::Lt => "<",
+                BinOp::Gt => ">",
+                BinOp::LtEq => "<=",
+                BinOp::GtEq => ">=",
                 BinOp::NullCoalesce => "??",
             };
-            format!("{} {} {}", format_expr_compact(left), op, format_expr_compact(right))
+            format!(
+                "{} {} {}",
+                format_expr_compact(left),
+                op,
+                format_expr_compact(right)
+            )
         }
-        Expr::Pipeline(parts, _) => parts.iter().map(format_expr_compact).collect::<Vec<_>>().join(" |> "),
+        Expr::Pipeline(parts, _) => parts
+            .iter()
+            .map(format_expr_compact)
+            .collect::<Vec<_>>()
+            .join(" |> "),
         Expr::RecordConstruct(name, fields, _) => {
             let fields = fields
                 .iter()
@@ -5693,7 +6855,9 @@ fn format_expr_compact(expr: &ast::Expr) -> String {
         }
         Expr::If(cond, ..) => format!("if {} {{ ... }}", format_expr_compact(cond)),
         Expr::Match(subject, ..) => format!("match {} {{ ... }}", format_expr_compact(subject)),
-        Expr::AssertMatches(expr, ..) => format!("assert_matches({}, ...)", format_expr_compact(expr)),
+        Expr::AssertMatches(expr, ..) => {
+            format!("assert_matches({}, ...)", format_expr_compact(expr))
+        }
         Expr::Block(_) => "{ ... }".into(),
         Expr::Closure(params, _, _) => format!("|{}| ...", params.join(", ")),
         Expr::Collect(_, _) => "collect { ... }".into(),
@@ -5749,49 +6913,55 @@ fn expr_to_sql(expr: &ast::Expr) -> Option<String> {
             let l = expr_to_sql(left)?;
             let r = expr_to_sql(right)?;
             let op = match op {
-                BinOp::Add          => "+",
-                BinOp::Sub          => "-",
-                BinOp::Mul          => "*",
-                BinOp::Div          => "/",
-                BinOp::Eq           => "=",
-                BinOp::NotEq        => "!=",
-                BinOp::Lt           => "<",
-                BinOp::Gt           => ">",
-                BinOp::LtEq         => "<=",
-                BinOp::GtEq         => ">=",
+                BinOp::Add => "+",
+                BinOp::Sub => "-",
+                BinOp::Mul => "*",
+                BinOp::Div => "/",
+                BinOp::And => "&&",
+                BinOp::Or => "||",
+                BinOp::Eq => "=",
+                BinOp::NotEq => "!=",
+                BinOp::Lt => "<",
+                BinOp::Gt => ">",
+                BinOp::LtEq => "<=",
+                BinOp::GtEq => ">=",
                 BinOp::NullCoalesce => return None,
             };
             Some(format!("{l} {op} {r}"))
         }
         Expr::Apply(callee, args, _) => match callee.as_ref() {
-            Expr::FieldAccess(obj, field, _) => match (obj.as_ref(), field.as_str(), args.as_slice()) {
-                (Expr::Ident(ns, _), "contains", [value, needle]) if ns == "String" => {
-                    let value = expr_to_sql(value)?;
-                    let needle = match needle {
-                        Expr::Lit(Lit::Str(s), _) => s.clone(),
-                        _ => return None,
-                    };
-                    Some(format!("{value} LIKE '%{}%'", needle.replace('\'', "''")))
+            Expr::FieldAccess(obj, field, _) => {
+                match (obj.as_ref(), field.as_str(), args.as_slice()) {
+                    (Expr::Ident(ns, _), "contains", [value, needle]) if ns == "String" => {
+                        let value = expr_to_sql(value)?;
+                        let needle = match needle {
+                            Expr::Lit(Lit::Str(s), _) => s.clone(),
+                            _ => return None,
+                        };
+                        Some(format!("{value} LIKE '%{}%'", needle.replace('\'', "''")))
+                    }
+                    (Expr::Ident(ns, _), "starts_with", [value, prefix]) if ns == "String" => {
+                        let value = expr_to_sql(value)?;
+                        let prefix = match prefix {
+                            Expr::Lit(Lit::Str(s), _) => s.clone(),
+                            _ => return None,
+                        };
+                        Some(format!("{value} LIKE '{}%'", prefix.replace('\'', "''")))
+                    }
+                    (Expr::Ident(ns, _), "length", [value]) if ns == "String" => {
+                        let value = expr_to_sql(value)?;
+                        Some(format!("length({value})"))
+                    }
+                    (Expr::Ident(ns, _), "is_url", [value]) if ns == "String" => {
+                        let value = expr_to_sql(value)?;
+                        Some(format!(
+                            "({value} LIKE 'http://%' OR {value} LIKE 'https://%')"
+                        ))
+                    }
+                    (Expr::Ident(ns, _), "is_slug", [_value]) if ns == "String" => None,
+                    _ => None,
                 }
-                (Expr::Ident(ns, _), "starts_with", [value, prefix]) if ns == "String" => {
-                    let value = expr_to_sql(value)?;
-                    let prefix = match prefix {
-                        Expr::Lit(Lit::Str(s), _) => s.clone(),
-                        _ => return None,
-                    };
-                    Some(format!("{value} LIKE '{}%'", prefix.replace('\'', "''")))
-                }
-                (Expr::Ident(ns, _), "length", [value]) if ns == "String" => {
-                    let value = expr_to_sql(value)?;
-                    Some(format!("length({value})"))
-                }
-                (Expr::Ident(ns, _), "is_url", [value]) if ns == "String" => {
-                    let value = expr_to_sql(value)?;
-                    Some(format!("({value} LIKE 'http://%' OR {value} LIKE 'https://%')"))
-                }
-                (Expr::Ident(ns, _), "is_slug", [_value]) if ns == "String" => None,
-                _ => None,
-            },
+            }
             _ => None,
         },
         Expr::FieldAccess(_, _, _)
@@ -5841,10 +7011,10 @@ fn to_snake_case(name: &str) -> String {
 
 fn format_visibility(vis: &Option<ast::Visibility>) -> &'static str {
     match vis {
-        Some(ast::Visibility::Public)   => "public",
+        Some(ast::Visibility::Public) => "public",
         Some(ast::Visibility::Internal) => "internal",
-        Some(ast::Visibility::Private)  => "private",
-        None                            => "",
+        Some(ast::Visibility::Private) => "private",
+        None => "",
     }
 }
 
@@ -5859,12 +7029,32 @@ fn format_type_expr(te: &ast::TypeExpr) -> String {
         Optional(inner, _) => format!("{}?", format_type_expr(inner)),
         Fallible(inner, _) => format!("{}!", format_type_expr(inner)),
         Arrow(a, b, _) => format!("{} -> {}", format_type_expr(a), format_type_expr(b)),
-        TrfFn { input, output, effects, .. } => {
+        TrfFn {
+            input,
+            output,
+            effects,
+            ..
+        } => {
             let effs = format_effects(effects);
-            let effs = if effs == "Pure" { String::new() } else { format!(" {}", effs) };
-            format!("{} -> {}{}", format_type_expr(input), format_type_expr(output), effs)
+            let effs = if effs == "Pure" {
+                String::new()
+            } else {
+                format!(" {}", effs)
+            };
+            format!(
+                "{} -> {}{}",
+                format_type_expr(input),
+                format_type_expr(output),
+                effs
+            )
         }
     }
+}
+
+fn format_optional_type_expr(te: &Option<ast::TypeExpr>) -> String {
+    te.as_ref()
+        .map(format_type_expr)
+        .unwrap_or_else(|| "_".to_string())
 }
 
 fn format_effects(effects: &[ast::Effect]) -> String {
@@ -5872,17 +7062,21 @@ fn format_effects(effects: &[ast::Effect]) -> String {
     if effects.is_empty() {
         return "Pure".into();
     }
-    effects.iter().map(|e| match e {
-        Pure           => "!Pure".into(),
-        Io             => "!Io".into(),
-        Db             => "!Db".into(),
-        Network        => "!Network".into(),
-        File           => "!File".into(),
-        Unknown(name)  => format!("!{}", name),
-        Emit(ev)       => format!("!Emit<{}>", ev),
-        EmitUnion(evs) => format!("!Emit<{}>", evs.join("|")),
-        Trace          => "!Trace".into(),
-      }).collect::<Vec<_>>().join(" ")
+    effects
+        .iter()
+        .map(|e| match e {
+            Pure => "!Pure".into(),
+            Io => "!Io".into(),
+            Db => "!Db".into(),
+            Network => "!Network".into(),
+            File => "!File".into(),
+            Unknown(name) => format!("!{}", name),
+            Emit(ev) => format!("!Emit<{}>", ev),
+            EmitUnion(evs) => format!("!Emit<{}>", evs.join("|")),
+            Trace => "!Trace".into(),
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 fn effect_json_name(effect: &ast::Effect) -> String {
@@ -5909,8 +7103,8 @@ fn slot_impl_name(imp: &ast::SlotImpl) -> &str {
 
 /// `fav install` — resolve path dependencies and write `fav.lock`.
 pub fn cmd_install() {
-    use crate::toml::{FavToml, DependencySpec};
     use crate::lock::{LockFile, LockedPackage, resolve_path_dep};
+    use crate::toml::{DependencySpec, FavToml};
 
     let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
     let root = FavToml::find_root(&cwd).unwrap_or_else(|| {
@@ -5947,7 +7141,11 @@ pub fn cmd_install() {
                     resolved_path: resolved_str,
                 });
             }
-            DependencySpec::Registry { name, registry, version } => {
+            DependencySpec::Registry {
+                name,
+                registry,
+                version,
+            } => {
                 // Local registry: look for `<registry_name>/<name>-<version>/` relative to root
                 let registry_dir = root.join(registry).join(format!("{name}-{version}"));
                 if !registry_dir.exists() {
@@ -6060,7 +7258,13 @@ pub fn source_needs_migration(src: &str) -> bool {
 /// - `--dry-run` (default): show what would change.
 /// - `--in-place`: rewrite files.
 /// - `--check`: exit 1 if any file needs migration (CI use).
-pub fn cmd_migrate(file: Option<&str>, in_place: bool, _dry_run: bool, check: bool, dir: Option<&str>) {
+pub fn cmd_migrate(
+    file: Option<&str>,
+    in_place: bool,
+    _dry_run: bool,
+    check: bool,
+    dir: Option<&str>,
+) {
     let files: Vec<PathBuf> = if let Some(f) = file {
         vec![PathBuf::from(f)]
     } else if let Some(d) = dir {
@@ -6132,42 +7336,66 @@ mod migrate_tests {
 
     #[test]
     fn migrate_trf_to_stage() {
-        assert_eq!(migrate_line("trf Foo: Int -> Int = |x| { x }"), "stage Foo: Int -> Int = |x| { x }");
+        assert_eq!(
+            migrate_line("trf Foo: Int -> Int = |x| { x }"),
+            "stage Foo: Int -> Int = |x| { x }"
+        );
     }
 
     #[test]
     fn migrate_flw_to_seq() {
-        assert_eq!(migrate_line("flw Pipeline = A |> B"), "seq Pipeline = A |> B");
+        assert_eq!(
+            migrate_line("flw Pipeline = A |> B"),
+            "seq Pipeline = A |> B"
+        );
     }
 
     #[test]
     fn migrate_abstract_trf_to_abstract_stage() {
-        assert_eq!(migrate_line("abstract trf Parse: String -> Int"), "abstract stage Parse: String -> Int");
+        assert_eq!(
+            migrate_line("abstract trf Parse: String -> Int"),
+            "abstract stage Parse: String -> Int"
+        );
     }
 
     #[test]
     fn migrate_abstract_flw_to_abstract_seq() {
-        assert_eq!(migrate_line("abstract flw Flow<T> {"), "abstract seq Flow<T> {");
+        assert_eq!(
+            migrate_line("abstract flw Flow<T> {"),
+            "abstract seq Flow<T> {"
+        );
     }
 
     #[test]
     fn migrate_indented_trf() {
-        assert_eq!(migrate_line("    trf Inner: Bool -> Bool = |b| { b }"), "    stage Inner: Bool -> Bool = |b| { b }");
+        assert_eq!(
+            migrate_line("    trf Inner: Bool -> Bool = |b| { b }"),
+            "    stage Inner: Bool -> Bool = |b| { b }"
+        );
     }
 
     #[test]
     fn migrate_indented_abstract_trf() {
-        assert_eq!(migrate_line("    abstract trf Step: Int -> Int"), "    abstract stage Step: Int -> Int");
+        assert_eq!(
+            migrate_line("    abstract trf Step: Int -> Int"),
+            "    abstract stage Step: Int -> Int"
+        );
     }
 
     #[test]
     fn migrate_leaves_stage_unchanged() {
-        assert_eq!(migrate_line("stage Foo: Int -> Int = |x| { x }"), "stage Foo: Int -> Int = |x| { x }");
+        assert_eq!(
+            migrate_line("stage Foo: Int -> Int = |x| { x }"),
+            "stage Foo: Int -> Int = |x| { x }"
+        );
     }
 
     #[test]
     fn migrate_leaves_seq_unchanged() {
-        assert_eq!(migrate_line("seq Pipeline = A |> B"), "seq Pipeline = A |> B");
+        assert_eq!(
+            migrate_line("seq Pipeline = A |> B"),
+            "seq Pipeline = A |> B"
+        );
     }
 
     #[test]

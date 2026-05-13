@@ -1,5 +1,5 @@
 use crate::ast::Effect;
-use crate::middle::ir::{collect_calls_in_ir, IRGlobalKind, IRProgram};
+use crate::middle::ir::{IRGlobalKind, IRProgram, collect_calls_in_ir};
 use std::collections::{BTreeSet, HashMap, HashSet};
 
 #[derive(Debug, Clone)]

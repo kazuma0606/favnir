@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 
+use crate::ast::Visibility;
 use crate::ast::{Item, TypeDef};
 use crate::frontend::parser::Parser;
-use crate::ast::Visibility;
 use crate::middle::checker::Type;
 
 const STD_STATES_SOURCE: &str = r#"
@@ -38,8 +38,8 @@ public type Slug = {
 "#;
 
 pub fn parsed_type_defs() -> Vec<TypeDef> {
-    let program = Parser::parse_str(STD_STATES_SOURCE, "<std.states>")
-        .expect("std.states source must parse");
+    let program =
+        Parser::parse_str(STD_STATES_SOURCE, "<std.states>").expect("std.states source must parse");
     program
         .items
         .into_iter()
@@ -53,6 +53,11 @@ pub fn parsed_type_defs() -> Vec<TypeDef> {
 pub fn export_scope() -> HashMap<String, (Type, Visibility)> {
     parsed_type_defs()
         .into_iter()
-        .map(|td| (td.name.clone(), (Type::Named(td.name, vec![]), Visibility::Public)))
+        .map(|td| {
+            (
+                td.name.clone(),
+                (Type::Named(td.name, vec![]), Visibility::Public),
+            )
+        })
         .collect()
 }

@@ -4,8 +4,8 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
+use super::checker::{Checker, Type};
 use crate::ast::Visibility;
-use super::checker::{Type, Checker};
 use crate::frontend::lexer::Span;
 use crate::frontend::parser::Parser;
 use crate::toml::FavToml;
@@ -30,7 +30,11 @@ pub struct ResolveError {
 
 impl ResolveError {
     fn new(code: &'static str, msg: impl Into<String>, span: Span) -> Self {
-        ResolveError { code, message: msg.into(), span }
+        ResolveError {
+            code,
+            message: msg.into(),
+            span,
+        }
     }
 }
 
@@ -39,8 +43,7 @@ impl std::fmt::Display for ResolveError {
         write!(
             f,
             "error[{}]: {}\n  --> {}:{}:{}",
-            self.code, self.message,
-            self.span.file, self.span.line, self.span.col
+            self.code, self.message, self.span.file, self.span.line, self.span.col
         )
     }
 }
@@ -56,6 +59,7 @@ pub struct Resolver {
     modules: HashMap<String, ModuleScope>,
     /// Cycle detection: set of module paths currently being loaded.
     loading: HashSet<String>,
+    loading_names: HashMap<String, String>,
 }
 
 impl Resolver {
@@ -65,6 +69,7 @@ impl Resolver {
             root,
             modules: HashMap::new(),
             loading: HashSet::new(),
+            loading_names: HashMap::new(),
         }
     }
 
@@ -82,7 +87,9 @@ impl Resolver {
         if mod_path == "std.states" {
             self.modules.insert(
                 mod_path.to_string(),
-                ModuleScope { symbols: crate::std_states::export_scope() },
+                ModuleScope {
+                    symbols: crate::std_states::export_scope(),
+                },
             );
             return self.modules.get(mod_path);
         }
@@ -101,7 +108,10 @@ impl Resolver {
             None => {
                 errors.push(ResolveError::new(
                     "E013",
-                    format!("module `{}` not found (no fav.toml or src dir configured)", mod_path),
+                    format!(
+                        "module `{}` not found (no fav.toml or src dir configured)",
+                        mod_path
+                    ),
                     span.clone(),
                 ));
                 return None;
@@ -113,7 +123,11 @@ impl Resolver {
             Err(_) => {
                 errors.push(ResolveError::new(
                     "E013",
-                    format!("module `{}` not found: `{}` does not exist", mod_path, file.display()),
+                    format!(
+                        "module `{}` not found: `{}` does not exist",
+                        mod_path,
+                        file.display()
+                    ),
                     span.clone(),
                 ));
                 return None;
@@ -125,7 +139,7 @@ impl Resolver {
         // Parse
         let file_str = file.to_string_lossy().to_string();
         let program = match Parser::parse_str(&source, &file_str) {
-            Ok(p)  => p,
+            Ok(p) => p,
             Err(e) => {
                 errors.push(ResolveError::new(
                     "E013",
@@ -138,7 +152,7 @@ impl Resolver {
         };
 
         // Type-check and extract exports
-        let (type_errors, exports) = Checker::check_program_and_export(&program);
+        let (type_errors, _, exports) = Checker::check_program_and_export(&program);
         // Surface type errors from the dependency as resolve errors
         for te in type_errors {
             errors.push(ResolveError::new(te.code, te.message, te.span));
@@ -168,7 +182,10 @@ impl Resolver {
             // `use foo` with no module — nothing to load
             errors.push(ResolveError::new(
                 "E013",
-                format!("`use {}` needs at least two segments (module.symbol)", sym_name),
+                format!(
+                    "`use {}` needs at least two segments (module.symbol)",
+                    sym_name
+                ),
                 span.clone(),
             ));
             return None;
@@ -210,6 +227,52 @@ impl Resolver {
         let rel: PathBuf = mod_path.split('.').collect();
         Some(root.join(src).join(rel).with_extension("fav"))
     }
+
+    pub fn resolve_local_import_file(&self, import_path: &str) -> Option<PathBuf> {
+        let root = self.root.as_ref()?;
+        let rel = PathBuf::from(import_path);
+        Some(
+            self.toml
+                .as_ref()
+                .map(|t| t.src_dir(root))
+                .unwrap_or_else(|| root.clone())
+                .join(rel)
+                .with_extension("fav"),
+        )
+    }
+
+    pub fn resolve_rune_import_file(&self, import_path: &str) -> Option<PathBuf> {
+        let root = self.root.as_ref()?;
+        let base = self
+            .toml
+            .as_ref()
+            .map(|t| t.runes_dir(root))
+            .unwrap_or_else(|| root.join("runes"));
+        Some(base.join(import_path).join(format!("{import_path}.fav")))
+    }
+
+    pub fn cached_scope(&self, key: &str) -> Option<ModuleScope> {
+        self.modules.get(key).cloned()
+    }
+
+    pub fn cache_scope(&mut self, key: impl Into<String>, scope: ModuleScope) {
+        self.modules.insert(key.into(), scope);
+    }
+
+    pub fn begin_loading(&mut self, key: &str, display_name: &str) -> Option<String> {
+        if self.loading.contains(key) {
+            return self.loading_names.get(key).cloned();
+        }
+        self.loading.insert(key.to_string());
+        self.loading_names
+            .insert(key.to_string(), display_name.to_string());
+        None
+    }
+
+    pub fn finish_loading(&mut self, key: &str) {
+        self.loading.remove(key);
+        self.loading_names.remove(key);
+    }
 }
 
 // ── helpers ───────────────────────────────────────────────────────────────────
@@ -248,25 +311,28 @@ mod tests {
         std::fs::create_dir_all(&src_dir).unwrap();
         // Write the .fav file at src/<mod_path_filename>
         // Use Path to normalise slashes on Windows
-        let fav_path: PathBuf = src_dir.join(
-            mod_path_filename.replace('/', std::path::MAIN_SEPARATOR_STR)
-        );
+        let fav_path: PathBuf =
+            src_dir.join(mod_path_filename.replace('/', std::path::MAIN_SEPARATOR_STR));
         if let Some(parent) = fav_path.parent() {
             std::fs::create_dir_all(parent).unwrap();
         }
         std::fs::write(&fav_path, src_content).unwrap();
 
-        let toml = FavToml { name: "test".into(), version: "0.1.0".into(), src: "src".into(), dependencies: vec![] };
+        let toml = FavToml {
+            name: "test".into(),
+            version: "0.1.0".into(),
+            src: "src".into(),
+            runes_path: None,
+            dependencies: vec![],
+        };
         let resolver = Resolver::new(Some(toml), Some(root));
-        (resolver, dir)   // dir must outlive the test
+        (resolver, dir) // dir must outlive the test
     }
 
     #[test]
     fn test_load_module_public_fn() {
-        let (mut r, _dir) = make_resolver_with_file(
-            "public fn greet() -> Unit { () }",
-            "greetings.fav",
-        );
+        let (mut r, _dir) =
+            make_resolver_with_file("public fn greet() -> Unit { () }", "greetings.fav");
         let mut errors = Vec::new();
         let span = Span::new("test", 0, 0, 1, 1);
         let scope = r.load_module("greetings", &mut errors, &span).unwrap();
@@ -278,10 +344,7 @@ mod tests {
 
     #[test]
     fn test_load_module_private_not_exported() {
-        let (mut r, _dir) = make_resolver_with_file(
-            "fn secret() -> Unit { () }",
-            "secret.fav",
-        );
+        let (mut r, _dir) = make_resolver_with_file("fn secret() -> Unit { () }", "secret.fav");
         let mut errors = Vec::new();
         let span = Span::new("test", 0, 0, 1, 1);
         let scope = r.load_module("secret", &mut errors, &span).unwrap();
@@ -292,10 +355,8 @@ mod tests {
 
     #[test]
     fn test_resolve_use_public() {
-        let (mut r, _dir) = make_resolver_with_file(
-            "public fn add(a: Int, b: Int) -> Int { a }",
-            "math/ops.fav",
-        );
+        let (mut r, _dir) =
+            make_resolver_with_file("public fn add(a: Int, b: Int) -> Int { a }", "math/ops.fav");
         let mut errors = Vec::new();
         let span = Span::new("test", 0, 0, 1, 1);
         let path = vec!["math".to_string(), "ops".to_string(), "add".to_string()];
@@ -307,10 +368,7 @@ mod tests {
 
     #[test]
     fn test_resolve_use_private_error() {
-        let (mut r, _dir) = make_resolver_with_file(
-            "fn hidden() -> Unit { () }",
-            "utils.fav",
-        );
+        let (mut r, _dir) = make_resolver_with_file("fn hidden() -> Unit { () }", "utils.fav");
         let mut errors = Vec::new();
         let span = Span::new("test", 0, 0, 1, 1);
         let path = vec!["utils".to_string(), "hidden".to_string()];
@@ -321,10 +379,7 @@ mod tests {
 
     #[test]
     fn test_resolve_use_missing_symbol() {
-        let (mut r, _dir) = make_resolver_with_file(
-            "public fn real() -> Unit { () }",
-            "stuff.fav",
-        );
+        let (mut r, _dir) = make_resolver_with_file("public fn real() -> Unit { () }", "stuff.fav");
         let mut errors = Vec::new();
         let span = Span::new("test", 0, 0, 1, 1);
         let path = vec!["stuff".to_string(), "ghost".to_string()];
@@ -336,7 +391,13 @@ mod tests {
     #[test]
     fn test_module_not_found() {
         let dir = tempdir().unwrap();
-        let toml = FavToml { name: "t".into(), version: "0.1.0".into(), src: "src".into(), dependencies: vec![] };
+        let toml = FavToml {
+            name: "t".into(),
+            version: "0.1.0".into(),
+            src: "src".into(),
+            runes_path: None,
+            dependencies: vec![],
+        };
         let mut r = Resolver::new(Some(toml), Some(dir.path().to_path_buf()));
         let mut errors = Vec::new();
         let span = Span::new("test", 0, 0, 1, 1);
@@ -363,7 +424,11 @@ mod tests {
         let mut r = Resolver::new(None, None);
         let mut errors = Vec::new();
         let span = Span::new("test", 0, 0, 1, 1);
-        let path = vec!["std".to_string(), "states".to_string(), "PosInt".to_string()];
+        let path = vec![
+            "std".to_string(),
+            "states".to_string(),
+            "PosInt".to_string(),
+        ];
         let result = r.resolve_use(&path, &mut errors, &span);
         assert!(errors.is_empty(), "{:?}", errors);
         let (sym, ty) = result.expect("std.states.PosInt resolves");
@@ -375,6 +440,9 @@ mod tests {
     fn test_derive_module_path() {
         let src = Path::new("/proj/src");
         let file = Path::new("/proj/src/data/users.fav");
-        assert_eq!(derive_module_path(file, src), Some("data.users".to_string()));
+        assert_eq!(
+            derive_module_path(file, src),
+            Some("data.users".to_string())
+        );
     }
 }

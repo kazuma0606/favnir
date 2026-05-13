@@ -1,5 +1,5 @@
-use std::collections::{HashMap, HashSet};
 use std::cell::Cell;
+use std::collections::{HashMap, HashSet};
 
 thread_local! {
     static COVERAGE_MODE: Cell<bool> = Cell::new(false);
@@ -10,13 +10,13 @@ pub fn set_coverage_mode(enabled: bool) {
     COVERAGE_MODE.with(|c| c.set(enabled));
 }
 
-use crate::ast::{
-    AbstractFlwDef, AbstractTrfDef, Block, Expr, FieldPattern, FStringPart, FlwBindingDef, FlwDef, FlwSlot, ImplDef,
-    InterfaceDecl, InterfaceImplDecl, Item, Lit, MatchArm, Pattern, Program, Stmt, TypeBody,
-    TypeExpr,
-};
 use super::checker::Type;
 use super::ir::{IRArm, IRExpr, IRFnDef, IRGlobal, IRGlobalKind, IRPattern, IRProgram, IRStmt};
+use crate::ast::{
+    AbstractFlwDef, AbstractTrfDef, BindStmt, Block, Expr, FStringPart, FlwBindingDef, FlwDef,
+    FlwSlot, ImplDef, InterfaceDecl, InterfaceImplDecl, Item, Lit, MatchArm, Pattern, PatternField,
+    Program, Stmt, TypeBody, TypeExpr,
+};
 
 fn collect_abstract_flw_defs(program: &Program) -> HashMap<String, AbstractFlwDef> {
     let mut out = HashMap::new();
@@ -141,16 +141,40 @@ pub fn compile_program(program: &Program) -> IRProgram {
     };
 
     for ns in &[
-        "IO", "Debug", "Result", "Option",
-        "Int", "Float", "Bool", "String",
-        "List", "Map", "Trace", "Emit", "File", "Json", "Csv", "Db", "Http", "Task",
-        "assert", "assert_eq", "assert_ne",
-        "IO.println_int", "IO.println_float", "IO.println_bool", "IO.print",
+        "IO",
+        "Debug",
+        "Result",
+        "Option",
+        "Math",
+        "Int",
+        "Float",
+        "Bool",
+        "String",
+        "List",
+        "Map",
+        "Trace",
+        "Emit",
+        "File",
+        "Json",
+        "Csv",
+        "Db",
+        "Http",
+        "Task",
+        "assert",
+        "assert_eq",
+        "assert_ne",
+        "IO.println_int",
+        "IO.println_float",
+        "IO.println_bool",
+        "IO.print",
     ] {
         if !ctx.globals.contains_key(*ns) {
             let idx = globals.len() as u16;
             ctx.globals.insert(ns.to_string(), idx);
-            globals.push(IRGlobal { name: ns.to_string(), kind: IRGlobalKind::Builtin });
+            globals.push(IRGlobal {
+                name: ns.to_string(),
+                kind: IRGlobalKind::Builtin,
+            });
         }
     }
 
@@ -180,6 +204,7 @@ pub fn compile_program(program: &Program) -> IRProgram {
     for item in &program.items {
         match item {
             Item::EffectDef(..) => {}
+            Item::ImportDecl { .. } => {}
             Item::FnDef(fd) => {
                 let idx = globals.len() as u16;
                 ctx.globals.insert(fd.name.clone(), idx);
@@ -251,13 +276,13 @@ pub fn compile_program(program: &Program) -> IRProgram {
                     });
                 }
                 if let TypeBody::Sum(variants) = &td.body {
-                for variant in variants {
-                    let idx = globals.len() as u16;
-                    let name = variant.name().to_string();
-                    ctx.globals.insert(name.clone(), idx);
-                    globals.push(IRGlobal {
-                        name,
-                        kind: IRGlobalKind::VariantCtor,
+                    for variant in variants {
+                        let idx = globals.len() as u16;
+                        let name = variant.name().to_string();
+                        ctx.globals.insert(name.clone(), idx);
+                        globals.push(IRGlobal {
+                            name,
+                            kind: IRGlobalKind::VariantCtor,
                         });
                     }
                 }
@@ -293,7 +318,8 @@ pub fn compile_program(program: &Program) -> IRProgram {
                     for interface_name in &id.interface_names {
                         let iface_ns = interface_name.to_ascii_lowercase();
                         for (method_name, _) in &id.methods {
-                            let global_name = format!("{}.{}.{}", id.type_name, iface_ns, method_name);
+                            let global_name =
+                                format!("{}.{}.{}", id.type_name, iface_ns, method_name);
                             let idx = globals.len() as u16;
                             ctx.globals.insert(global_name.clone(), idx);
                             globals.push(IRGlobal {
@@ -318,17 +344,39 @@ pub fn compile_program(program: &Program) -> IRProgram {
 
     // 組み込み名前空間をグローバルテーブルに登録する（ユーザー定義名と衝突しない場合のみ）
     for ns in &[
-        "IO", "Debug", "Result", "Option",
-        "Int", "Float", "Bool", "String",
-        "List", "Map", "Trace", "Emit", "File", "Json", "Csv", "Db", "Http",
+        "IO",
+        "Debug",
+        "Result",
+        "Option",
+        "Int",
+        "Float",
+        "Bool",
+        "String",
+        "List",
+        "Map",
+        "Trace",
+        "Emit",
+        "File",
+        "Json",
+        "Csv",
+        "Db",
+        "Http",
         // test assertion builtins (callable without namespace prefix)
-        "assert", "assert_eq", "assert_ne",
-        "IO.println_int", "IO.println_float", "IO.println_bool", "IO.print",
+        "assert",
+        "assert_eq",
+        "assert_ne",
+        "IO.println_int",
+        "IO.println_float",
+        "IO.println_bool",
+        "IO.print",
     ] {
         if !ctx.globals.contains_key(*ns) {
             let idx = globals.len() as u16;
             ctx.globals.insert(ns.to_string(), idx);
-            globals.push(IRGlobal { name: ns.to_string(), kind: IRGlobalKind::Builtin });
+            globals.push(IRGlobal {
+                name: ns.to_string(),
+                kind: IRGlobalKind::Builtin,
+            });
         }
     }
 
@@ -338,6 +386,7 @@ pub fn compile_program(program: &Program) -> IRProgram {
     for item in &program.items {
         match item {
             Item::EffectDef(..) => {}
+            Item::ImportDecl { .. } => {}
             Item::TypeDef(td) => {
                 if !td.invariants.is_empty() && matches!(td.body, TypeBody::Record(_)) {
                     fns.push(compile_type_def_constructor(td, &mut ctx));
@@ -346,18 +395,24 @@ pub fn compile_program(program: &Program) -> IRProgram {
             Item::FnDef(fd) => fns.push(compile_fn_def(
                 &fd.name,
                 &fd.params.iter().map(|p| p.name.clone()).collect::<Vec<_>>(),
-                &fd.params.iter().map(|p| lower_type_expr(&p.ty)).collect::<Vec<_>>(),
+                &fd.params
+                    .iter()
+                    .map(|p| lower_type_expr(&p.ty))
+                    .collect::<Vec<_>>(),
                 &fd.effects,
-                &fd.return_ty,
+                fd.return_ty.as_ref(),
                 &fd.body,
                 &mut ctx,
             )),
             Item::TrfDef(td) => fns.push(compile_fn_def(
                 &td.name,
                 &td.params.iter().map(|p| p.name.clone()).collect::<Vec<_>>(),
-                &td.params.iter().map(|p| lower_type_expr(&p.ty)).collect::<Vec<_>>(),
+                &td.params
+                    .iter()
+                    .map(|p| lower_type_expr(&p.ty))
+                    .collect::<Vec<_>>(),
                 &td.effects,
-                &td.output_ty,
+                Some(&td.output_ty),
                 &td.body,
                 &mut ctx,
             )),
@@ -373,17 +428,24 @@ pub fn compile_program(program: &Program) -> IRProgram {
                 fns.extend(compile_impl_def(id, &mut ctx));
             }
             Item::InterfaceImplDecl(id) => {
-                fns.extend(compile_interface_impl_decl(id, &interface_method_types, &mut ctx));
+                fns.extend(compile_interface_impl_decl(
+                    id,
+                    &interface_method_types,
+                    &mut ctx,
+                ));
             }
             Item::TestDef(td) => {
                 let unit_ty = crate::ast::TypeExpr::Named(
-                    "Unit".into(), vec![], crate::frontend::lexer::Span::dummy());
+                    "Unit".into(),
+                    vec![],
+                    crate::frontend::lexer::Span::dummy(),
+                );
                 fns.push(compile_fn_def(
                     &format!("$test:{}", td.name),
                     &[],
                     &[],
                     &[],
-                    &unit_ty,
+                    Some(&unit_ty),
                     &td.body,
                     &mut ctx,
                 ))
@@ -391,13 +453,16 @@ pub fn compile_program(program: &Program) -> IRProgram {
             Item::BenchDef(bd) => {
                 // Bench bodies are compiled with a generated function name for runner use.
                 let unit_ty = crate::ast::TypeExpr::Named(
-                    "Unit".into(), vec![], crate::frontend::lexer::Span::dummy());
+                    "Unit".into(),
+                    vec![],
+                    crate::frontend::lexer::Span::dummy(),
+                );
                 fns.push(compile_fn_def(
                     &format!("$bench:{}", bd.description),
                     &[],
                     &[],
                     &[],
-                    &unit_ty,
+                    Some(&unit_ty),
                     &bd.body,
                     &mut ctx,
                 ))
@@ -453,9 +518,10 @@ fn compile_flw_def(fd: &FlwDef, ctx: &mut CompileCtx) -> IRFnDef {
 
 fn lower_type_expr_with_subst(ty: &TypeExpr, subst: &HashMap<String, Type>) -> Type {
     match ty {
-        TypeExpr::Named(name, args, _) if args.is_empty() => {
-            subst.get(name).cloned().unwrap_or_else(|| lower_type_expr(ty))
-        }
+        TypeExpr::Named(name, args, _) if args.is_empty() => subst
+            .get(name)
+            .cloned()
+            .unwrap_or_else(|| lower_type_expr(ty)),
         TypeExpr::Named(name, args, _) => {
             let resolved_args: Vec<Type> = args
                 .iter()
@@ -467,12 +533,16 @@ fn lower_type_expr_with_subst(ty: &TypeExpr, subst: &HashMap<String, Type>) -> T
                 "Float" => Type::Float,
                 "String" => Type::String,
                 "Unit" => Type::Unit,
-                "List" if resolved_args.len() == 1 => Type::List(Box::new(resolved_args[0].clone())),
+                "List" if resolved_args.len() == 1 => {
+                    Type::List(Box::new(resolved_args[0].clone()))
+                }
                 "Map" if resolved_args.len() == 2 => Type::Map(
                     Box::new(resolved_args[0].clone()),
                     Box::new(resolved_args[1].clone()),
                 ),
-                "Option" if resolved_args.len() == 1 => Type::Option(Box::new(resolved_args[0].clone())),
+                "Option" if resolved_args.len() == 1 => {
+                    Type::Option(Box::new(resolved_args[0].clone()))
+                }
                 "Result" if resolved_args.len() == 2 => Type::Result(
                     Box::new(resolved_args[0].clone()),
                     Box::new(resolved_args[1].clone()),
@@ -480,7 +550,9 @@ fn lower_type_expr_with_subst(ty: &TypeExpr, subst: &HashMap<String, Type>) -> T
                 _ => Type::Named(name.clone(), resolved_args),
             }
         }
-        TypeExpr::Optional(inner, _) => Type::Option(Box::new(lower_type_expr_with_subst(inner, subst))),
+        TypeExpr::Optional(inner, _) => {
+            Type::Option(Box::new(lower_type_expr_with_subst(inner, subst)))
+        }
         TypeExpr::Fallible(inner, _) => Type::Result(
             Box::new(lower_type_expr_with_subst(inner, subst)),
             Box::new(Type::String),
@@ -489,7 +561,12 @@ fn lower_type_expr_with_subst(ty: &TypeExpr, subst: &HashMap<String, Type>) -> T
             Box::new(lower_type_expr_with_subst(input, subst)),
             Box::new(lower_type_expr_with_subst(output, subst)),
         ),
-        TypeExpr::TrfFn { input, output, effects, .. } => Type::Trf(
+        TypeExpr::TrfFn {
+            input,
+            output,
+            effects,
+            ..
+        } => Type::Trf(
             Box::new(lower_type_expr_with_subst(input, subst)),
             Box::new(lower_type_expr_with_subst(output, subst)),
             effects.clone(),
@@ -523,7 +600,12 @@ fn lower_flw_slot_signature_with_subst(
 ) -> (Type, Type, Vec<crate::ast::Effect>) {
     if let Some(slot_ty) = &slot.abstract_trf_ty {
         match lower_type_expr_with_subst(slot_ty, subst) {
-            Type::AbstractTrf { input, output, effects } | Type::Trf(input, output, effects) => {
+            Type::AbstractTrf {
+                input,
+                output,
+                effects,
+            }
+            | Type::Trf(input, output, effects) => {
                 return ((*input).clone(), (*output).clone(), effects);
             }
             other => return (other, Type::Unknown, Vec::new()),
@@ -536,7 +618,11 @@ fn lower_flw_slot_signature_with_subst(
     )
 }
 
-fn compile_flw_binding_def(fd: &FlwBindingDef, template: &AbstractFlwDef, ctx: &mut CompileCtx) -> IRFnDef {
+fn compile_flw_binding_def(
+    fd: &FlwBindingDef,
+    template: &AbstractFlwDef,
+    ctx: &mut CompileCtx,
+) -> IRFnDef {
     let saved_next = ctx.next_slot;
     let saved_anon = ctx.anon_counter;
     let saved_locals = std::mem::take(&mut ctx.locals);
@@ -597,7 +683,10 @@ fn compile_flw_binding_def(fd: &FlwBindingDef, template: &AbstractFlwDef, ctx: &
     ctx.next_slot = saved_next;
     ctx.anon_counter = saved_anon;
 
-    let first_slot = template.slots.first().expect("fully bound flw template has at least one slot");
+    let first_slot = template
+        .slots
+        .first()
+        .expect("fully bound flw template has at least one slot");
     let last_slot = template.slots.last().unwrap();
     let (input_ty, _, _) = lower_flw_slot_signature_with_subst(first_slot, &type_subst);
     let (_, return_ty, _) = lower_flw_slot_signature_with_subst(last_slot, &type_subst);
@@ -748,14 +837,18 @@ fn compile_impl_def(id: &ImplDef, ctx: &mut CompileCtx) -> Vec<IRFnDef> {
             let global_name = format!("{}.{}.{}", type_key, cap_ns, method.name);
             compile_fn_def(
                 &global_name,
-                &method.params.iter().map(|p| p.name.clone()).collect::<Vec<_>>(),
+                &method
+                    .params
+                    .iter()
+                    .map(|p| p.name.clone())
+                    .collect::<Vec<_>>(),
                 &method
                     .params
                     .iter()
                     .map(|p| lower_type_expr(&p.ty))
                     .collect::<Vec<_>>(),
                 &method.effects,
-                &method.return_ty,
+                method.return_ty.as_ref(),
                 &method.body,
                 ctx,
             )
@@ -782,7 +875,13 @@ fn compile_interface_impl_decl(
                 .and_then(|m| m.get(method_name))
                 .cloned()
                 .or_else(|| builtin_interface_method_type(interface_name, method_name))
-                .unwrap_or_else(|| TypeExpr::Named("Unknown".into(), vec![], crate::frontend::lexer::Span::dummy()));
+                .unwrap_or_else(|| {
+                    TypeExpr::Named(
+                        "Unknown".into(),
+                        vec![],
+                        crate::frontend::lexer::Span::dummy(),
+                    )
+                });
 
             let method_ty = substitute_self_in_type_expr(&method_ty, &id.type_name);
             let (param_tys, return_ty) = split_arrow_type(&method_ty);
@@ -799,7 +898,7 @@ fn compile_interface_impl_decl(
                         params,
                         &param_tys.iter().map(lower_type_expr).collect::<Vec<_>>(),
                         &[],
-                        &return_ty,
+                        Some(&return_ty),
                         &body_block,
                         ctx,
                     ));
@@ -815,7 +914,7 @@ fn compile_interface_impl_decl(
                         &[],
                         &[],
                         &[],
-                        &return_ty,
+                        Some(&return_ty),
                         &body_block,
                         ctx,
                     ));
@@ -865,7 +964,12 @@ fn substitute_self_in_type_expr(ty: &TypeExpr, type_name: &str) -> TypeExpr {
             Box::new(substitute_self_in_type_expr(b, type_name)),
             span.clone(),
         ),
-        TypeExpr::TrfFn { input, output, effects, span } => TypeExpr::TrfFn {
+        TypeExpr::TrfFn {
+            input,
+            output,
+            effects,
+            span,
+        } => TypeExpr::TrfFn {
             input: Box::new(substitute_self_in_type_expr(input, type_name)),
             output: Box::new(substitute_self_in_type_expr(output, type_name)),
             effects: effects.clone(),
@@ -896,21 +1000,26 @@ fn builtin_interface_method_type(interface_name: &str, method_name: &str) -> Opt
     let bool_ty = || TypeExpr::Named("Bool".into(), vec![], span.clone());
     let string_ty = || TypeExpr::Named("String".into(), vec![], span.clone());
     let error_ty = || TypeExpr::Named("Error".into(), vec![], span.clone());
-    let result_ty = |ok: TypeExpr, err: TypeExpr| {
-        TypeExpr::Named("Result".into(), vec![ok, err], span.clone())
-    };
+    let result_ty =
+        |ok: TypeExpr, err: TypeExpr| TypeExpr::Named("Result".into(), vec![ok, err], span.clone());
     let arrow = |a: TypeExpr, b: TypeExpr| TypeExpr::Arrow(Box::new(a), Box::new(b), span.clone());
 
     match (interface_name, method_name) {
         ("Show", "show") => Some(arrow(self_ty(), string_ty())),
         ("Eq", "eq") => Some(arrow(self_ty(), arrow(self_ty(), bool_ty()))),
         ("Ord", "compare") => Some(arrow(self_ty(), arrow(self_ty(), int_ty()))),
-        ("Gen", "gen") => Some(arrow(TypeExpr::Optional(Box::new(int_ty()), span.clone()), self_ty())),
+        ("Gen", "gen") => Some(arrow(
+            TypeExpr::Optional(Box::new(int_ty()), span.clone()),
+            self_ty(),
+        )),
         ("Semigroup", "combine") => Some(arrow(self_ty(), arrow(self_ty(), self_ty()))),
         ("Monoid", "empty") => Some(arrow(unit_ty(), self_ty())),
         ("Group", "inverse") => Some(arrow(self_ty(), self_ty())),
         ("Ring", "multiply") => Some(arrow(self_ty(), arrow(self_ty(), self_ty()))),
-        ("Field", "divide") => Some(arrow(self_ty(), arrow(self_ty(), result_ty(self_ty(), error_ty())))),
+        ("Field", "divide") => Some(arrow(
+            self_ty(),
+            arrow(self_ty(), result_ty(self_ty(), error_ty())),
+        )),
         _ => None,
     }
 }
@@ -920,7 +1029,7 @@ fn compile_fn_def(
     params: &[String],
     param_tys: &[Type],
     effects: &[crate::ast::Effect],
-    return_ty: &TypeExpr,
+    return_ty: Option<&TypeExpr>,
     body: &Block,
     ctx: &mut CompileCtx,
 ) -> IRFnDef {
@@ -950,7 +1059,9 @@ fn compile_fn_def(
         param_tys: param_tys.to_vec(),
         local_count,
         effects: effects.to_vec(),
-        return_ty: lower_type_expr(return_ty),
+        return_ty: return_ty
+            .map(lower_type_expr)
+            .unwrap_or_else(|| body_ir.ty().clone()),
         body: body_ir,
     }
 }
@@ -964,7 +1075,7 @@ fn compile_block(block: &Block, ctx: &mut CompileCtx) -> IRExpr {
             let line = stmt.span().line;
             stmts.push(IRStmt::TrackLine(line));
         }
-        stmts.push(compile_stmt(stmt, ctx));
+        compile_stmt_into(stmt, ctx, &mut stmts);
     }
     let tail = compile_expr(&block.expr, ctx);
     ctx.pop_scope();
@@ -981,10 +1092,12 @@ fn pattern_binds(pattern: &Pattern, out: &mut HashSet<String>) {
         Pattern::Variant(_, None, _) | Pattern::Wildcard(_) | Pattern::Lit(_, _) => {}
         Pattern::Record(fields, _) => {
             for field in fields {
-                if let Some(inner) = &field.pattern {
-                    pattern_binds(inner, out);
-                } else {
-                    out.insert(field.name.clone());
+                match field {
+                    PatternField::Pun(name, _) => {
+                        out.insert(name.clone());
+                    }
+                    PatternField::Alias(_, inner, _) => pattern_binds(inner, out),
+                    PatternField::Wildcard(_) => {}
                 }
             }
         }
@@ -1113,11 +1226,22 @@ pub fn compile_expr(expr: &Expr, ctx: &mut CompileCtx) -> IRExpr {
             args.iter().map(|a| compile_expr(a, ctx)).collect(),
             Type::Unknown,
         ),
-        Expr::FieldAccess(obj, field, _) => IRExpr::FieldAccess(
-            Box::new(compile_expr(obj, ctx)),
-            field.clone(),
-            Type::Unknown,
-        ),
+        Expr::FieldAccess(obj, field, _) => {
+            if let Expr::Ident(namespace, _) = obj.as_ref() {
+                let namespace_is_bound = ctx.resolve_local(namespace).is_some()
+                    || ctx.resolve_global(namespace).is_some();
+                if !namespace_is_bound {
+                    if let Some(idx) = ctx.resolve_global(field) {
+                        return IRExpr::Global(idx, Type::Unknown);
+                    }
+                }
+            }
+            IRExpr::FieldAccess(
+                Box::new(compile_expr(obj, ctx)),
+                field.clone(),
+                Type::Unknown,
+            )
+        }
         Expr::Block(block) => compile_block(block, ctx),
         Expr::Match(subject, arms, _) => {
             let subject = compile_expr(subject, ctx);
@@ -1245,7 +1369,9 @@ pub fn compile_expr(expr: &Expr, ctx: &mut CompileCtx) -> IRExpr {
                 | crate::ast::BinOp::Lt
                 | crate::ast::BinOp::Gt
                 | crate::ast::BinOp::LtEq
-                | crate::ast::BinOp::GtEq => Type::Bool,
+                | crate::ast::BinOp::GtEq
+                | crate::ast::BinOp::And
+                | crate::ast::BinOp::Or => Type::Bool,
                 _ => left.ty().clone(),
             };
             IRExpr::BinOp(op.clone(), Box::new(left), Box::new(right), ty)
@@ -1258,9 +1384,7 @@ pub fn compile_expr(expr: &Expr, ctx: &mut CompileCtx) -> IRExpr {
             Type::Unknown,
         ),
         Expr::FString(parts, _) => compile_fstring(parts, ctx),
-        Expr::EmitExpr(inner, _) => {
-            IRExpr::Emit(Box::new(compile_expr(inner, ctx)), Type::Unit)
-        }
+        Expr::EmitExpr(inner, _) => IRExpr::Emit(Box::new(compile_expr(inner, ctx)), Type::Unit),
     }
 }
 
@@ -1304,16 +1428,99 @@ fn compile_fstring(parts: &[FStringPart], ctx: &mut CompileCtx) -> IRExpr {
     acc.unwrap_or_else(|| IRExpr::Lit(Lit::Str(String::new()), Type::String))
 }
 
-pub fn compile_stmt(stmt: &Stmt, ctx: &mut CompileCtx) -> IRStmt {
+fn compile_stmt_into(stmt: &Stmt, ctx: &mut CompileCtx, out: &mut Vec<IRStmt>) {
     match stmt {
-        Stmt::Bind(bind) => {
-            let expr_ir = compile_expr(&bind.expr, ctx);
-            let slot = match &bind.pattern {
-                Pattern::Bind(name, _) => ctx.define_local_with_ty(name.clone(), expr_ir.ty().clone()),
-                _ => ctx.define_pattern_slot(),
-            };
-            IRStmt::Bind(slot, expr_ir)
-        }
+        Stmt::Bind(bind) => match &bind.pattern {
+            Pattern::Record(fields, _) => {
+                let expr_ir = compile_expr(&bind.expr, ctx);
+                let tmp_name = format!("$pat{}", ctx.anon_counter);
+                ctx.anon_counter = ctx.anon_counter.saturating_add(1);
+                let tmp_slot = ctx.define_local_with_ty(tmp_name.clone(), expr_ir.ty().clone());
+                out.push(IRStmt::Bind(tmp_slot, expr_ir));
+                for field in fields {
+                    match field {
+                        PatternField::Pun(name, span) => {
+                            let field_expr = Expr::FieldAccess(
+                                Box::new(Expr::Ident(tmp_name.clone(), span.clone())),
+                                name.clone(),
+                                span.clone(),
+                            );
+                            let nested = BindStmt {
+                                pattern: Pattern::Bind(name.clone(), span.clone()),
+                                annotated_ty: None,
+                                expr: field_expr,
+                                span: span.clone(),
+                            };
+                            compile_stmt_into(&Stmt::Bind(nested), ctx, out);
+                        }
+                        PatternField::Alias(field_name, pattern, span) => {
+                            let field_expr = Expr::FieldAccess(
+                                Box::new(Expr::Ident(tmp_name.clone(), span.clone())),
+                                field_name.clone(),
+                                span.clone(),
+                            );
+                            let nested = BindStmt {
+                                pattern: (**pattern).clone(),
+                                annotated_ty: None,
+                                expr: field_expr,
+                                span: span.clone(),
+                            };
+                            compile_stmt_into(&Stmt::Bind(nested), ctx, out);
+                        }
+                        PatternField::Wildcard(_) => {}
+                    }
+                }
+            }
+            Pattern::Variant(name, Some(inner), span) => {
+                let expr_ir = compile_expr(&bind.expr, ctx);
+                let tmp_name = format!("$pat{}", ctx.anon_counter);
+                ctx.anon_counter = ctx.anon_counter.saturating_add(1);
+                let tmp_slot = ctx.define_local_with_ty(tmp_name.clone(), expr_ir.ty().clone());
+                out.push(IRStmt::Bind(tmp_slot, expr_ir));
+
+                let payload_name = format!("$pat{}", ctx.anon_counter);
+                ctx.anon_counter = ctx.anon_counter.saturating_add(1);
+                let match_expr = Expr::Match(
+                    Box::new(Expr::Ident(tmp_name.clone(), span.clone())),
+                    vec![
+                        MatchArm {
+                            pattern: Pattern::Variant(
+                                name.clone(),
+                                Some(Box::new(Pattern::Bind(payload_name.clone(), span.clone()))),
+                                span.clone(),
+                            ),
+                            guard: None,
+                            body: Expr::Ident(payload_name.clone(), span.clone()),
+                            span: span.clone(),
+                        },
+                        MatchArm {
+                            pattern: Pattern::Wildcard(span.clone()),
+                            guard: None,
+                            body: Expr::Lit(Lit::Unit, span.clone()),
+                            span: span.clone(),
+                        },
+                    ],
+                    span.clone(),
+                );
+                let nested = BindStmt {
+                    pattern: (**inner).clone(),
+                    annotated_ty: None,
+                    expr: match_expr,
+                    span: span.clone(),
+                };
+                compile_stmt_into(&Stmt::Bind(nested), ctx, out);
+            }
+            Pattern::Bind(name, _) => {
+                let expr_ir = compile_expr(&bind.expr, ctx);
+                let slot = ctx.define_local_with_ty(name.clone(), expr_ir.ty().clone());
+                out.push(IRStmt::Bind(slot, expr_ir));
+            }
+            _ => {
+                let expr_ir = compile_expr(&bind.expr, ctx);
+                let slot = ctx.define_pattern_slot();
+                out.push(IRStmt::Bind(slot, expr_ir));
+            }
+        },
         Stmt::Chain(chain) => {
             let expr_ir = compile_expr(&chain.expr, ctx);
             let slot = if let Some(slot) = ctx.resolve_local(&chain.name) {
@@ -1321,10 +1528,10 @@ pub fn compile_stmt(stmt: &Stmt, ctx: &mut CompileCtx) -> IRStmt {
             } else {
                 ctx.define_local_with_ty(chain.name.clone(), expr_ir.ty().clone())
             };
-            IRStmt::Chain(slot, expr_ir)
+            out.push(IRStmt::Chain(slot, expr_ir));
         }
-        Stmt::Yield(yield_stmt) => IRStmt::Yield(compile_expr(&yield_stmt.expr, ctx)),
-        Stmt::Expr(expr) => IRStmt::Expr(compile_expr(expr, ctx)),
+        Stmt::Yield(yield_stmt) => out.push(IRStmt::Yield(compile_expr(&yield_stmt.expr, ctx))),
+        Stmt::Expr(expr) => out.push(IRStmt::Expr(compile_expr(expr, ctx))),
         Stmt::ForIn(f) => {
             // Desugar: `for x in iter { body }` → `List.fold(iter, Unit, |$acc, x| { body; Unit })`
             let closure_name = format!("$for_closure{}", ctx.closure_counter);
@@ -1345,8 +1552,12 @@ pub fn compile_stmt(stmt: &Stmt, ctx: &mut CompileCtx) -> IRStmt {
             ctx.next_slot = 0;
             ctx.anon_counter = 0;
             ctx.push_scope();
-            for (name, _) in &captures { ctx.define_local(name.clone()); }
-            for param in &params { ctx.define_local(param.clone()); }
+            for (name, _) in &captures {
+                ctx.define_local(name.clone());
+            }
+            for param in &params {
+                ctx.define_local(param.clone());
+            }
             let body_ir = compile_block(&f.body, ctx);
             let local_count = ctx.next_slot as usize;
             ctx.locals = saved_locals;
@@ -1358,7 +1569,10 @@ pub fn compile_stmt(stmt: &Stmt, ctx: &mut CompileCtx) -> IRStmt {
             let fn_idx = ctx.next_fn_idx;
             ctx.next_fn_idx += 1;
             ctx.globals.insert(closure_name.clone(), global_idx);
-            ctx.lifted_globals.push(IRGlobal { name: closure_name.clone(), kind: IRGlobalKind::Fn(fn_idx) });
+            ctx.lifted_globals.push(IRGlobal {
+                name: closure_name.clone(),
+                kind: IRGlobalKind::Fn(fn_idx),
+            });
             ctx.lifted_fns.push(IRFnDef {
                 name: closure_name,
                 param_count: captures.len() + params.len(),
@@ -1370,7 +1584,10 @@ pub fn compile_stmt(stmt: &Stmt, ctx: &mut CompileCtx) -> IRStmt {
             });
             let closure_ir = IRExpr::Closure(
                 global_idx,
-                captures.into_iter().map(|(_, slot)| IRExpr::Local(slot, Type::Unknown)).collect(),
+                captures
+                    .into_iter()
+                    .map(|(_, slot)| IRExpr::Local(slot, Type::Unknown))
+                    .collect(),
                 Type::Unknown,
             );
             let iter_ir = compile_expr(&f.iter, ctx);
@@ -1380,11 +1597,11 @@ pub fn compile_stmt(stmt: &Stmt, ctx: &mut CompileCtx) -> IRStmt {
                 "fold".to_string(),
                 Type::Unknown,
             );
-            IRStmt::Expr(IRExpr::Call(
+            out.push(IRStmt::Expr(IRExpr::Call(
                 Box::new(fold_access),
                 vec![iter_ir, IRExpr::Lit(Lit::Unit, Type::Unit), closure_ir],
                 Type::Unit,
-            ))
+            )));
         }
     }
 }
@@ -1395,7 +1612,11 @@ fn compile_arm(arm: &MatchArm, ctx: &mut CompileCtx) -> IRArm {
     let guard = arm.guard.as_ref().map(|g| compile_expr(g, ctx));
     let body = compile_expr(&arm.body, ctx);
     ctx.pop_scope();
-    IRArm { pattern, guard, body }
+    IRArm {
+        pattern,
+        guard,
+        body,
+    }
 }
 
 pub fn compile_pattern(pat: &Pattern, ctx: &mut CompileCtx) -> IRPattern {
@@ -1403,20 +1624,31 @@ pub fn compile_pattern(pat: &Pattern, ctx: &mut CompileCtx) -> IRPattern {
         Pattern::Wildcard(_) => IRPattern::Wildcard,
         Pattern::Lit(lit, _) => IRPattern::Lit(lit.clone()),
         Pattern::Bind(name, _) => IRPattern::Bind(ctx.define_local(name.clone())),
-        Pattern::Variant(name, inner, _) => IRPattern::Variant(
-            name.clone(),
-            inner.as_ref().map(|p| Box::new(compile_pattern(p, ctx))),
-        ),
+        Pattern::Variant(name, inner, _) => {
+            let normalized = match name.as_str() {
+                "Ok" => "ok",
+                "Err" => "err",
+                "Some" => "some",
+                "None" => "none",
+                other => other,
+            };
+            IRPattern::Variant(
+                normalized.to_string(),
+                inner.as_ref().map(|p| Box::new(compile_pattern(p, ctx))),
+            )
+        }
         Pattern::Record(fields, _) => IRPattern::Record(
             fields
                 .iter()
-                .map(|FieldPattern { name, pattern, .. }| {
-                    let pat = if let Some(inner) = pattern {
-                        compile_pattern(inner, ctx)
-                    } else {
-                        IRPattern::Bind(ctx.define_local(name.clone()))
-                    };
-                    (name.clone(), pat)
+                .filter_map(|field| match field {
+                    PatternField::Pun(name, _) => Some((
+                        name.clone(),
+                        IRPattern::Bind(ctx.define_local(name.clone())),
+                    )),
+                    PatternField::Alias(name, pattern, _) => {
+                        Some((name.clone(), compile_pattern(pattern, ctx)))
+                    }
+                    PatternField::Wildcard(_) => None,
                 })
                 .collect(),
         ),
@@ -1437,11 +1669,14 @@ fn lower_type_expr(ty: &TypeExpr) -> Type {
     match ty {
         TypeExpr::Named(name, args, _) => match (name.as_str(), args.as_slice()) {
             ("List", [inner]) => Type::List(Box::new(lower_type_expr(inner))),
-            ("Map", [k, v]) => Type::Map(Box::new(lower_type_expr(k)), Box::new(lower_type_expr(v))),
-            ("Option", [inner]) => Type::Option(Box::new(lower_type_expr(inner))),
-            ("Result", [ok, err]) => {
-                Type::Result(Box::new(lower_type_expr(ok)), Box::new(lower_type_expr(err)))
+            ("Map", [k, v]) => {
+                Type::Map(Box::new(lower_type_expr(k)), Box::new(lower_type_expr(v)))
             }
+            ("Option", [inner]) => Type::Option(Box::new(lower_type_expr(inner))),
+            ("Result", [ok, err]) => Type::Result(
+                Box::new(lower_type_expr(ok)),
+                Box::new(lower_type_expr(err)),
+            ),
             _ if args.is_empty() => match name.as_str() {
                 "Bool" => Type::Bool,
                 "Int" => Type::Int,
@@ -1449,7 +1684,12 @@ fn lower_type_expr(ty: &TypeExpr) -> Type {
                 "String" => Type::String,
                 "Unit" => Type::Unit,
                 _ => {
-                    if name.chars().next().map(|c| c.is_uppercase()).unwrap_or(false) {
+                    if name
+                        .chars()
+                        .next()
+                        .map(|c| c.is_uppercase())
+                        .unwrap_or(false)
+                    {
                         Type::Var(name.clone())
                     } else {
                         Type::Named(name.clone(), Vec::new())
@@ -1459,14 +1699,19 @@ fn lower_type_expr(ty: &TypeExpr) -> Type {
             _ => Type::Named(name.clone(), args.iter().map(lower_type_expr).collect()),
         },
         TypeExpr::Optional(inner, _) => Type::Option(Box::new(lower_type_expr(inner))),
-        TypeExpr::Fallible(inner, _) => Type::Result(
-            Box::new(lower_type_expr(inner)),
-            Box::new(Type::String),
-        ),
-        TypeExpr::Arrow(input, output, _) => {
-            Type::Arrow(Box::new(lower_type_expr(input)), Box::new(lower_type_expr(output)))
+        TypeExpr::Fallible(inner, _) => {
+            Type::Result(Box::new(lower_type_expr(inner)), Box::new(Type::String))
         }
-        TypeExpr::TrfFn { input, output, effects, .. } => Type::Trf(
+        TypeExpr::Arrow(input, output, _) => Type::Arrow(
+            Box::new(lower_type_expr(input)),
+            Box::new(lower_type_expr(output)),
+        ),
+        TypeExpr::TrfFn {
+            input,
+            output,
+            effects,
+            ..
+        } => Type::Trf(
             Box::new(lower_type_expr(input)),
             Box::new(lower_type_expr(output)),
             effects.clone(),
@@ -1477,14 +1722,14 @@ fn lower_type_expr(ty: &TypeExpr) -> Type {
 #[cfg(test)]
 mod tests {
     use super::{
-        compile_flw_binding_def, compile_program, AbstractFlwDef, CompileCtx, FlwBindingDef,
-        FlwSlot,
+        AbstractFlwDef, CompileCtx, FlwBindingDef, FlwSlot, compile_flw_binding_def,
+        compile_program,
     };
     use crate::ast::TypeExpr;
-    use crate::middle::checker::Type;
-    use crate::middle::ir::{IRExpr, IRGlobalKind, IRStmt};
     use crate::frontend::lexer::Lexer;
     use crate::frontend::parser::Parser;
+    use crate::middle::checker::Type;
+    use crate::middle::ir::{IRExpr, IRGlobalKind, IRStmt};
 
     fn compile_source(source: &str) -> crate::middle::ir::IRProgram {
         let mut lexer = Lexer::new(source, "test.fav");
@@ -1513,11 +1758,31 @@ public fn main() -> Int {
         );
 
         assert_eq!(ir.fns.len(), 3);
-        assert!(ir.globals.iter().any(|g| g.name == "Inc" && matches!(g.kind, IRGlobalKind::Fn(_))));
-        assert!(ir.globals.iter().any(|g| g.name == "main" && matches!(g.kind, IRGlobalKind::Fn(_))));
-        assert!(ir.globals.iter().any(|g| g.name == "Bump" && matches!(g.kind, IRGlobalKind::Fn(_))));
-        assert!(ir.globals.iter().any(|g| g.name == "North" && matches!(g.kind, IRGlobalKind::VariantCtor)));
-        assert!(ir.globals.iter().any(|g| g.name == "South" && matches!(g.kind, IRGlobalKind::VariantCtor)));
+        assert!(
+            ir.globals
+                .iter()
+                .any(|g| g.name == "Inc" && matches!(g.kind, IRGlobalKind::Fn(_)))
+        );
+        assert!(
+            ir.globals
+                .iter()
+                .any(|g| g.name == "main" && matches!(g.kind, IRGlobalKind::Fn(_)))
+        );
+        assert!(
+            ir.globals
+                .iter()
+                .any(|g| g.name == "Bump" && matches!(g.kind, IRGlobalKind::Fn(_)))
+        );
+        assert!(
+            ir.globals
+                .iter()
+                .any(|g| g.name == "North" && matches!(g.kind, IRGlobalKind::VariantCtor))
+        );
+        assert!(
+            ir.globals
+                .iter()
+                .any(|g| g.name == "South" && matches!(g.kind, IRGlobalKind::VariantCtor))
+        );
     }
 
     #[test]
@@ -1563,8 +1828,16 @@ public fn main() -> Int {
         );
 
         assert_eq!(ir.fns.len(), 2);
-        assert!(ir.globals.iter().any(|g| g.name == "main" && matches!(g.kind, IRGlobalKind::Fn(0))));
-        assert!(ir.globals.iter().any(|g| g.name.starts_with("$closure") && matches!(g.kind, IRGlobalKind::Fn(1))));
+        assert!(
+            ir.globals
+                .iter()
+                .any(|g| g.name == "main" && matches!(g.kind, IRGlobalKind::Fn(0)))
+        );
+        assert!(
+            ir.globals
+                .iter()
+                .any(|g| g.name.starts_with("$closure") && matches!(g.kind, IRGlobalKind::Fn(1)))
+        );
     }
 
     #[test]
@@ -1589,7 +1862,11 @@ public fn main() -> Int {
         assert_eq!(captures.len(), 1);
         assert!(matches!(captures[0], IRExpr::Local(_, _)));
 
-        let closure_fn = ir.fns.iter().find(|f| f.name.starts_with("$closure")).expect("closure fn");
+        let closure_fn = ir
+            .fns
+            .iter()
+            .find(|f| f.name.starts_with("$closure"))
+            .expect("closure fn");
         assert_eq!(closure_fn.param_count, 2);
     }
 
@@ -1608,8 +1885,16 @@ seq UserImport = DataPipeline<UserRow> { parse <- ParseCsv; save <- SaveUsers }
 "#,
         );
 
-        assert!(ir.globals.iter().any(|g| g.name == "UserImport" && matches!(g.kind, IRGlobalKind::Fn(_))));
-        let flw_fn = ir.fns.iter().find(|f| f.name == "UserImport").expect("UserImport fn");
+        assert!(
+            ir.globals
+                .iter()
+                .any(|g| g.name == "UserImport" && matches!(g.kind, IRGlobalKind::Fn(_)))
+        );
+        let flw_fn = ir
+            .fns
+            .iter()
+            .find(|f| f.name == "UserImport")
+            .expect("UserImport fn");
         assert_eq!(flw_fn.param_count, 1);
         assert!(matches!(flw_fn.param_tys.as_slice(), [Type::String]));
         assert!(matches!(flw_fn.return_ty, Type::Int));
@@ -1666,7 +1951,11 @@ seq PartialImport = DataPipeline<UserRow> { parse <- ParseCsv }
 "#,
         );
 
-        assert!(ir.globals.iter().any(|g| g.name == "PartialImport" && matches!(g.kind, IRGlobalKind::Builtin)));
+        assert!(
+            ir.globals
+                .iter()
+                .any(|g| g.name == "PartialImport" && matches!(g.kind, IRGlobalKind::Builtin))
+        );
         assert!(!ir.fns.iter().any(|f| f.name == "PartialImport"));
     }
 }

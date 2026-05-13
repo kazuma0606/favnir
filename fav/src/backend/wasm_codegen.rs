@@ -4,9 +4,9 @@ use std::fmt;
 
 use wasm_encoder::{
     BlockType, CodeSection, ConstExpr, DataSection, ElementSection, Elements, EntityType,
-    ExportKind, ExportSection, Function, FunctionSection, GlobalSection, GlobalType,
-    ImportSection, Instruction, MemArg, MemorySection, MemoryType, Module, RefType,
-    TableSection, TableType, TypeSection, ValType,
+    ExportKind, ExportSection, Function, FunctionSection, GlobalSection, GlobalType, ImportSection,
+    Instruction, MemArg, MemorySection, MemoryType, Module, RefType, TableSection, TableType,
+    TypeSection, ValType,
 };
 
 use crate::ast::Effect;
@@ -37,10 +37,16 @@ impl fmt::Display for WasmCodegenError {
                 write!(f, "error[W001]: WASM codegen unsupported type: {message}")
             }
             WasmCodegenError::UnsupportedExpr(message) => {
-                write!(f, "error[W002]: WASM codegen unsupported expression: {message}")
+                write!(
+                    f,
+                    "error[W002]: WASM codegen unsupported expression: {message}"
+                )
             }
             WasmCodegenError::UnsupportedMainSignature => {
-                write!(f, "error[W003]: WASM codegen requires `public fn main() -> Unit !Io`")
+                write!(
+                    f,
+                    "error[W003]: WASM codegen requires `public fn main() -> Unit !Io`"
+                )
             }
         }
     }
@@ -117,11 +123,7 @@ fn collect_closure_info(ir: &IRProgram) -> HashMap<u16, (usize, usize)> {
     map
 }
 
-fn walk_closures_in_expr(
-    expr: &IRExpr,
-    ir: &IRProgram,
-    map: &mut HashMap<u16, (usize, usize)>,
-) {
+fn walk_closures_in_expr(expr: &IRExpr, ir: &IRProgram, map: &mut HashMap<u16, (usize, usize)>) {
     match expr {
         IRExpr::Closure(global_idx, captures, _) => {
             if let Some(global) = ir.globals.get(*global_idx as usize) {
@@ -289,7 +291,10 @@ fn infer_binop_type(op: &crate::ast::BinOp, lhs: &Type, rhs: &Type, result: &Typ
         | crate::ast::BinOp::Gt
         | crate::ast::BinOp::LtEq
         | crate::ast::BinOp::GtEq => Type::Int,
-        crate::ast::BinOp::Eq | crate::ast::BinOp::NotEq => Type::Bool,
+        crate::ast::BinOp::Eq
+        | crate::ast::BinOp::NotEq
+        | crate::ast::BinOp::And
+        | crate::ast::BinOp::Or => Type::Bool,
         crate::ast::BinOp::NullCoalesce => unreachable!("?? desugared before IR"),
     }
 }
@@ -308,10 +313,7 @@ fn resolved_expr_type(expr: &IRExpr, ctx: &WasmCodegenCtx<'_>) -> Type {
         IRExpr::Call(callee, _, ty) if matches!(ty, Type::Unknown) => {
             if let Some(builtin) = builtin_call_name(callee, ctx.globals) {
                 return match builtin.as_str() {
-                    "IO.println"
-                    | "IO.print"
-                    | "IO.println_int"
-                    | "IO.println_float"
+                    "IO.println" | "IO.print" | "IO.println_int" | "IO.println_float"
                     | "IO.println_bool" => Type::Unit,
                     _ => ty.clone(),
                 };
@@ -340,12 +342,7 @@ fn resolved_expr_type(expr: &IRExpr, ctx: &WasmCodegenCtx<'_>) -> Type {
         IRExpr::BinOp(op, lhs, rhs, ty) if matches!(ty, Type::Unknown) => {
             let lhs_ty = resolved_expr_type(lhs, ctx);
             let rhs_ty = resolved_expr_type(rhs, ctx);
-            let inferred = infer_binop_type(
-                op,
-                &lhs_ty,
-                &rhs_ty,
-                ty,
-            );
+            let inferred = infer_binop_type(op, &lhs_ty, &rhs_ty, ty);
             inferred
         }
         _ => expr.ty().clone(),
@@ -406,9 +403,9 @@ pub fn build_type_section(
             params.extend(favnir_type_to_wasm_params(ty)?);
         }
         let results = favnir_type_to_wasm_results(&fn_def.return_ty).map_err(|err| match err {
-            WasmCodegenError::UnsupportedType(message) => WasmCodegenError::UnsupportedType(
-                format!("{} (in fn {})", message, fn_def.name),
-            ),
+            WasmCodegenError::UnsupportedType(message) => {
+                WasmCodegenError::UnsupportedType(format!("{} (in fn {})", message, fn_def.name))
+            }
             other => other,
         })?;
         section.ty().function(params, results);
@@ -430,9 +427,9 @@ pub fn favnir_type_to_wasm_results(ty: &Type) -> Result<Vec<ValType>, WasmCodege
         Type::Bool => Ok(vec![ValType::I32]),
         Type::String => Ok(vec![ValType::I32, ValType::I32]),
         Type::Unknown => Ok(vec![ValType::I64]),
-        Type::Error => Err(WasmCodegenError::UnsupportedType(
-            format!("unknown return type: {ty:?}"),
-        )),
+        Type::Error => Err(WasmCodegenError::UnsupportedType(format!(
+            "unknown return type: {ty:?}"
+        ))),
         other => Err(WasmCodegenError::UnsupportedType(format!(
             "unsupported return type: {other:?}"
         ))),
@@ -447,9 +444,9 @@ pub fn favnir_type_to_wasm_params(ty: &Type) -> Result<Vec<ValType>, WasmCodegen
         Type::Bool => Ok(vec![ValType::I32]),
         Type::String => Ok(vec![ValType::I32, ValType::I32]),
         Type::Unknown => Ok(vec![ValType::I64]),
-        Type::Error => Err(WasmCodegenError::UnsupportedType(
-            format!("unknown parameter type: {ty:?}"),
-        )),
+        Type::Error => Err(WasmCodegenError::UnsupportedType(format!(
+            "unknown parameter type: {ty:?}"
+        ))),
         other => Err(WasmCodegenError::UnsupportedType(format!(
             "unsupported parameter type: {other:?}"
         ))),
@@ -471,7 +468,9 @@ pub fn collect_local_types(expr: &IRExpr, map: &mut HashMap<u16, Type>) {
                 collect_local_types(arg, map);
             }
         }
-        IRExpr::Collect(callee, _) | IRExpr::Emit(callee, _) | IRExpr::FieldAccess(callee, _, _) => {
+        IRExpr::Collect(callee, _)
+        | IRExpr::Emit(callee, _)
+        | IRExpr::FieldAccess(callee, _, _) => {
             collect_local_types(callee, map);
         }
         IRExpr::Block(stmts, final_expr, _) => {
@@ -550,8 +549,7 @@ fn builtin_call_name(expr: &IRExpr, globals: &[crate::middle::ir::IRGlobal]) -> 
         return None;
     };
     let global = globals.get(*idx as usize)?;
-    matches!(global.kind, IRGlobalKind::Builtin)
-        .then(|| format!("{}.{}", global.name, field))
+    matches!(global.kind, IRGlobalKind::Builtin).then(|| format!("{}.{}", global.name, field))
 }
 
 fn collect_expr_string_literals(expr: &IRExpr, ordered: &mut Vec<String>) {
@@ -613,7 +611,10 @@ fn collect_expr_string_literals(expr: &IRExpr, ordered: &mut Vec<String>) {
 
 fn collect_stmt_string_literals(stmt: &IRStmt, ordered: &mut Vec<String>) {
     match stmt {
-        IRStmt::Bind(_, expr) | IRStmt::Chain(_, expr) | IRStmt::Yield(expr) | IRStmt::Expr(expr) => {
+        IRStmt::Bind(_, expr)
+        | IRStmt::Chain(_, expr)
+        | IRStmt::Yield(expr)
+        | IRStmt::Expr(expr) => {
             collect_expr_string_literals(expr, ordered);
         }
         IRStmt::TrackLine(_) => {}
@@ -647,7 +648,10 @@ pub fn collect_used_builtins(ir: &IRProgram) -> std::collections::HashSet<String
             return;
         }
         match expr {
-            IRExpr::Lit(_, _) | IRExpr::Local(_, _) | IRExpr::Global(_, _) | IRExpr::TrfRef(_, _) => {}
+            IRExpr::Lit(_, _)
+            | IRExpr::Local(_, _)
+            | IRExpr::Global(_, _)
+            | IRExpr::TrfRef(_, _) => {}
             IRExpr::CallTrfLocal { arg, .. } => {
                 walk_expr(arg, globals, used);
             }
@@ -657,7 +661,9 @@ pub fn collect_used_builtins(ir: &IRProgram) -> std::collections::HashSet<String
                     walk_expr(arg, globals, used);
                 }
             }
-            IRExpr::Collect(inner, _) | IRExpr::Emit(inner, _) | IRExpr::FieldAccess(inner, _, _) => {
+            IRExpr::Collect(inner, _)
+            | IRExpr::Emit(inner, _)
+            | IRExpr::FieldAccess(inner, _, _) => {
                 walk_expr(inner, globals, used);
             }
             IRExpr::Block(stmts, final_expr, _) => {
@@ -968,11 +974,7 @@ fn emit_expr(
             emit_expr(cond, ctx, slot_map, func)?;
             let then_ty = resolved_expr_type(then_expr, ctx);
             let else_ty = resolved_expr_type(else_expr, ctx);
-            let merge_ty = first_known_type(&[
-                ty,
-                &then_ty,
-                &else_ty,
-            ]);
+            let merge_ty = first_known_type(&[ty, &then_ty, &else_ty]);
             func.instruction(&Instruction::If(block_type_for(merge_ty)?));
             emit_expr(then_expr, ctx, slot_map, func)?;
             func.instruction(&Instruction::Else);
@@ -1142,8 +1144,7 @@ pub fn wasm_codegen_program(ir: &IRProgram) -> Result<Vec<u8>, WasmCodegenError>
 
     // Register wrapper types for each closure and build index maps.
     // Wrapper signature: (env_ptr: i32, actual_params: i64...) -> return_ty
-    let mut next_type_idx =
-        imports.len() as u32 + ir.fns.len() as u32 + 1; // after bump_alloc type
+    let mut next_type_idx = imports.len() as u32 + ir.fns.len() as u32 + 1; // after bump_alloc type
     let mut closure_wrapper_type_idx: HashMap<u16, u32> = HashMap::new();
     let mut closure_table_idx: HashMap<u16, u32> = HashMap::new();
     for (table_elem_idx, (global_idx, (fn_idx, captures_count))) in
@@ -1211,8 +1212,11 @@ pub fn wasm_codegen_program(ir: &IRProgram) -> Result<Vec<u8>, WasmCodegenError>
         function_section.function(wrapper_type_idx);
         let fn_def = &ir.fns[*fn_idx];
         let original_wasm_idx = *ctx.fn_to_wasm_idx.get(fn_idx).unwrap();
-        code_section
-            .function(&build_closure_wrapper_function(fn_def, *captures_count, original_wasm_idx));
+        code_section.function(&build_closure_wrapper_function(
+            fn_def,
+            *captures_count,
+            original_wasm_idx,
+        ));
     }
 
     // Table and element sections for closures.
@@ -1248,14 +1252,14 @@ pub fn wasm_codegen_program(ir: &IRProgram) -> Result<Vec<u8>, WasmCodegenError>
         page_size_log2: None,
     });
     export_section.export("memory", ExportKind::Memory, 0);
-    if let Some(main_fn_idx) = ir
-        .globals
-        .iter()
-        .find(|g| g.name == "main")
-        .and_then(|g| match g.kind {
-            IRGlobalKind::Fn(idx) => Some(idx),
-            _ => None,
-        })
+    if let Some(main_fn_idx) =
+        ir.globals
+            .iter()
+            .find(|g| g.name == "main")
+            .and_then(|g| match g.kind {
+                IRGlobalKind::Fn(idx) => Some(idx),
+                _ => None,
+            })
     {
         let wasm_idx = *ctx.fn_to_wasm_idx.get(&main_fn_idx).ok_or_else(|| {
             WasmCodegenError::UnsupportedExpr("missing wasm function index for main".into())
@@ -1293,11 +1297,11 @@ pub fn wasm_codegen_program(ir: &IRProgram) -> Result<Vec<u8>, WasmCodegenError>
 #[cfg(test)]
 mod tests {
     use super::{
-        build_type_section, build_wasm_function, collect_local_types, collect_local_types_stmt,
-        collect_string_literals, collect_used_builtins, ensure_supported_main_signature,
-        favnir_type_to_wasm_params, favnir_type_to_wasm_results, plan_wasm_locals,
-        wasm_codegen_program, wasm_local_for_type, build_bump_alloc_function,
-        build_heap_ptr_global_section, HostImport, WasmCodegenCtx, WasmCodegenError, WasmLocal,
+        HostImport, WasmCodegenCtx, WasmCodegenError, WasmLocal, build_bump_alloc_function,
+        build_heap_ptr_global_section, build_type_section, build_wasm_function,
+        collect_local_types, collect_local_types_stmt, collect_string_literals,
+        collect_used_builtins, ensure_supported_main_signature, favnir_type_to_wasm_params,
+        favnir_type_to_wasm_results, plan_wasm_locals, wasm_codegen_program, wasm_local_for_type,
     };
     use crate::ast::{Effect, Lit};
     use crate::frontend::parser::Parser;
@@ -1402,7 +1406,10 @@ mod tests {
                 effects: vec![],
                 return_ty: Type::Unit,
                 body: IRExpr::Block(
-                    vec![IRStmt::Bind(1, IRExpr::Lit(Lit::Str("hi".into()), Type::String))],
+                    vec![IRStmt::Bind(
+                        1,
+                        IRExpr::Lit(Lit::Str("hi".into()), Type::String),
+                    )],
                     Box::new(IRExpr::Lit(Lit::Unit, Type::Unit)),
                     Type::Unit,
                 ),
@@ -1442,10 +1449,7 @@ mod tests {
     #[test]
     fn collect_local_types_stmt_tracks_chain_slot() {
         let mut map = HashMap::new();
-        collect_local_types_stmt(
-            &IRStmt::Chain(7, IRExpr::Local(3, Type::Bool)),
-            &mut map,
-        );
+        collect_local_types_stmt(&IRStmt::Chain(7, IRExpr::Local(3, Type::Bool)), &mut map);
         assert_eq!(map.get(&7), Some(&Type::Bool));
         assert_eq!(map.get(&3), Some(&Type::Bool));
     }
@@ -1683,7 +1687,10 @@ mod tests {
                 effects: vec![Effect::Io],
                 return_ty: Type::Unit,
                 body: IRExpr::Block(
-                    vec![IRStmt::Expr(IRExpr::Lit(Lit::Str("hello".into()), Type::String))],
+                    vec![IRStmt::Expr(IRExpr::Lit(
+                        Lit::Str("hello".into()),
+                        Type::String,
+                    ))],
                     Box::new(IRExpr::Lit(Lit::Str("world".into()), Type::String)),
                     Type::String,
                 ),
@@ -1771,12 +1778,10 @@ mod tests {
     #[test]
     fn wasm_codegen_program_emits_valid_module_for_if_returning_int() {
         let ir = IRProgram {
-            globals: vec![
-                IRGlobal {
-                    name: "main".into(),
-                    kind: IRGlobalKind::Fn(0),
-                },
-            ],
+            globals: vec![IRGlobal {
+                name: "main".into(),
+                kind: IRGlobalKind::Fn(0),
+            }],
             fns: vec![IRFnDef {
                 name: "main".into(),
                 param_count: 0,
@@ -2054,7 +2059,8 @@ public fn main() -> Unit !Io {
     IO.println("ok")
 }
 "#;
-        let program = Parser::parse_str(source, "wasm_w002_string_if_else_result.fav").expect("parse");
+        let program =
+            Parser::parse_str(source, "wasm_w002_string_if_else_result.fav").expect("parse");
         let ir = compile_program(&program);
         let err = wasm_codegen_program(&ir).unwrap_err();
         assert_eq!(err.code(), "W002");

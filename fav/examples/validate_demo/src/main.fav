@@ -1,0 +1,24 @@
+import rune "validate"
+
+public fn main() -> Unit !Io {
+    bind r1 <- validate.Required("Alice")
+    IO.println($"Required('Alice'): {Debug.show(r1)}");
+
+    bind r2 <- validate.Required("")
+    IO.println($"Required(''): {Debug.show(r2)}");
+
+    bind r3 <- validate.MinLen(3)("hi")
+    IO.println($"MinLen(3)('hi'): {Debug.show(r3)}");
+
+    bind r4 <- validate.Email("alice@example.com")
+    IO.println($"Email('alice@example.com'): {Debug.show(r4)}");
+
+    bind r5 <- validate.Email("notanemail")
+    IO.println($"Email('notanemail'): {Debug.show(r5)}");
+
+    bind v1 <- validate.Required("hi")
+    bind v2 <- validate.MinLen(5)("hi")
+    bind v3 <- validate.MaxLen(10)("hi")
+    bind combined <- validate.all_pass("hi")(collect { yield v1; yield v2; yield v3; })
+    IO.println($"all_pass('hi', [Required,MinLen5,MaxLen10]): {Debug.show(combined)}")
+}

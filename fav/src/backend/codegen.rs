@@ -1,5 +1,5 @@
-use crate::ast::{BinOp, Lit};
 use super::artifact::{FvcArtifact, FvcFunction, FvcGlobal, FvcWriter};
+use crate::ast::{BinOp, Lit};
 use crate::middle::ir::{IRArm, IRExpr, IRPattern, IRStmt};
 use crate::middle::ir::{IRGlobalKind, IRProgram};
 
@@ -27,6 +27,8 @@ pub enum Opcode {
     Le = 0x27,
     Gt = 0x28,
     Ge = 0x29,
+    And = 0x2A,
+    Or = 0x2B,
     Jump = 0x30,
     JumpIfFalse = 0x31,
     MatchFail = 0x32,
@@ -214,6 +216,8 @@ pub fn emit_expr(expr: &IRExpr, cg: &mut Codegen) {
                 BinOp::LtEq => Opcode::Le,
                 BinOp::Gt => Opcode::Gt,
                 BinOp::GtEq => Opcode::Ge,
+                BinOp::And => Opcode::And,
+                BinOp::Or => Opcode::Or,
                 // NullCoalesce is desugared in the checker; should not appear in IR BinOp
                 BinOp::NullCoalesce => unreachable!("?? desugared before codegen"),
             });
@@ -315,7 +319,10 @@ fn emit_pattern_test(pattern: &IRPattern, fail_jumps: &mut Vec<usize>, cg: &mut 
         IRPattern::Wildcard => {}
         IRPattern::Lit(lit) => {
             cg.emit_opcode(Opcode::Dup);
-            emit_expr(&IRExpr::Lit(lit.clone(), crate::middle::checker::Type::Unknown), cg);
+            emit_expr(
+                &IRExpr::Lit(lit.clone(), crate::middle::checker::Type::Unknown),
+                cg,
+            );
             cg.emit_opcode(Opcode::Eq);
             fail_jumps.push(cg.emit_jump(Opcode::JumpIfFalse));
         }
@@ -366,7 +373,11 @@ pub fn codegen_program(ir: &IRProgram) -> FvcArtifact {
             IRGlobalKind::Builtin => (1u8, u32::MAX),
             IRGlobalKind::VariantCtor => (2u8, u32::MAX),
         };
-        writer.add_global(FvcGlobal { name_idx, kind, fn_idx });
+        writer.add_global(FvcGlobal {
+            name_idx,
+            kind,
+            fn_idx,
+        });
     }
 
     for f in &ir.fns {
@@ -453,6 +464,8 @@ fn remap_string_operands(code: &mut [u8], str_remap: &[u16]) {
                 || x == Opcode::Le as u8
                 || x == Opcode::Gt as u8
                 || x == Opcode::Ge as u8
+                || x == Opcode::And as u8
+                || x == Opcode::Or as u8
                 || x == Opcode::MatchFail as u8
                 || x == Opcode::GetVariantPayload as u8
                 || x == Opcode::CollectBegin as u8
@@ -483,7 +496,7 @@ fn remap_u16_at(code: &mut [u8], offset: usize, str_remap: &[u16]) {
 
 #[cfg(test)]
 mod tests {
-    use super::{codegen_program, emit_expr, emit_stmt, Codegen, Constant, Opcode};
+    use super::{Codegen, Constant, Opcode, codegen_program, emit_expr, emit_stmt};
     use crate::ast::Lit;
     use crate::middle::checker::Type;
     use crate::middle::ir::{IRExpr, IRFnDef, IRGlobal, IRGlobalKind, IRProgram, IRStmt};
@@ -659,7 +672,10 @@ mod tests {
         assert_eq!(artifact.globals.len(), 1);
         assert_eq!(artifact.functions.len(), 1);
         assert!(artifact.fn_idx_by_name("main").is_some());
-        assert_eq!(artifact.functions[0].code, vec![Opcode::ConstUnit as u8, Opcode::Return as u8]);
+        assert_eq!(
+            artifact.functions[0].code,
+            vec![Opcode::ConstUnit as u8, Opcode::Return as u8]
+        );
     }
 
     #[test]
@@ -678,7 +694,10 @@ mod tests {
                 return_ty: Type::String,
                 body: IRExpr::FieldAccess(
                     Box::new(IRExpr::RecordConstruct(
-                        vec![("name".to_string(), IRExpr::Lit(Lit::Str("A".into()), Type::String))],
+                        vec![(
+                            "name".to_string(),
+                            IRExpr::Lit(Lit::Str("A".into()), Type::String),
+                        )],
                         Type::Unknown,
                     )),
                     "name".to_string(),
@@ -712,16 +731,14 @@ mod tests {
                 return_ty: Type::Int,
                 body: IRExpr::Match(
                     Box::new(IRExpr::Local(0, Type::Unknown)),
-                    vec![
-                        crate::middle::ir::IRArm {
-                            pattern: crate::middle::ir::IRPattern::Variant(
-                                "ok".to_string(),
-                                Some(Box::new(crate::middle::ir::IRPattern::Bind(0))),
-                            ),
-                            guard: None,
-                            body: IRExpr::Local(0, Type::Int),
-                        },
-                    ],
+                    vec![crate::middle::ir::IRArm {
+                        pattern: crate::middle::ir::IRPattern::Variant(
+                            "ok".to_string(),
+                            Some(Box::new(crate::middle::ir::IRPattern::Bind(0))),
+                        ),
+                        guard: None,
+                        body: IRExpr::Local(0, Type::Int),
+                    }],
                     Type::Int,
                 ),
             }],

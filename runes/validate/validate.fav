@@ -1,0 +1,79 @@
+public type ValidationError = {
+    path: String
+    code: String
+    message: String
+}
+
+public stage Required: String -> String! = |s| {
+    if String.is_empty(s) {
+        Result.err(ValidationError {
+            path: ""
+            code: "required"
+            message: "Field is required"
+        })
+    } else {
+        Result.ok(s)
+    }
+}
+
+public fn MinLen(min: Int) = |s| {
+    if String.length(s) < min {
+        Result.err(ValidationError {
+            path: ""
+            code: "min_len"
+            message: $"Minimum length is {min}"
+        })
+    } else {
+        Result.ok(s)
+    }
+}
+
+public fn MaxLen(max: Int) = |s| {
+    if String.length(s) > max {
+        Result.err(ValidationError {
+            path: ""
+            code: "max_len"
+            message: $"Maximum length is {max}"
+        })
+    } else {
+        Result.ok(s)
+    }
+}
+
+public stage Email: String -> String! = |s| {
+    if String.contains(s, "@") && String.contains(s, ".") {
+        Result.ok(s)
+    } else {
+        Result.err(ValidationError {
+            path: ""
+            code: "email"
+            message: "Invalid email format"
+        })
+    }
+}
+
+public fn IntRange(min: Int) = |max| |n| {
+    if n < min || n > max {
+        Result.err(ValidationError {
+            path: ""
+            code: "range"
+            message: $"Value must be between {min} and {max}"
+        })
+    } else {
+        Result.ok(n)
+    }
+}
+
+public fn all_pass(value: String) = |results| {
+    bind errors <- List.flat_map(results, |r|
+        r |> match {
+            Err(e) => collect { yield e; }
+            Ok(_)  => collect { }
+        }
+    )
+    if List.length(errors) == 0 {
+        Result.ok(value)
+    } else {
+        Result.err(errors)
+    }
+}

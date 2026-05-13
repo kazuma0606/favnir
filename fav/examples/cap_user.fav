@@ -1,0 +1,18 @@
+type User = { name: String score: Int }
+
+impl Ord<User> {
+    fn compare(a: User, b: User) -> Int {
+        b.score - a.score
+    }
+
+    fn equals(a: User, b: User) -> Bool {
+        a.score == b.score
+    }
+}
+
+public fn main() -> Unit !Io {
+    bind alice <- User { name: "Alice", score: 90 }
+    bind bob <- User { name: "Bob", score: 75 }
+    bind winner <- if User.ord.compare(alice, bob) <= 0 { alice } else { bob }
+    IO.println(winner.name)
+}

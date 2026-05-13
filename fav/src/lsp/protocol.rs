@@ -45,3 +45,31 @@ pub struct MarkupContent {
 pub struct Hover {
     pub contents: MarkupContent,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CompletionItem {
+    pub label: String,
+    pub kind: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+    #[serde(rename = "insertText", skip_serializing_if = "Option::is_none")]
+    pub insert_text: Option<String>,
+    #[serde(rename = "insertTextFormat", skip_serializing_if = "Option::is_none")]
+    pub insert_text_format: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub documentation: Option<MarkupContent>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct Location {
+    pub uri: String,
+    pub range: Range,
+}
+
+pub mod completion_kind {
+    pub const FUNCTION: u32 = 3;
+    pub const FIELD: u32 = 5;
+    pub const CLASS: u32 = 7;
+    pub const KEYWORD: u32 = 14;
+    pub const SNIPPET: u32 = 15;
+}

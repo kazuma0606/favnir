@@ -56,10 +56,10 @@ pub enum TypeExpr {
 impl TypeExpr {
     pub fn span(&self) -> &Span {
         match self {
-            TypeExpr::Named(_, _, s)    => s,
-            TypeExpr::Optional(_, s)    => s,
-            TypeExpr::Fallible(_, s)    => s,
-            TypeExpr::Arrow(_, _, s)    => s,
+            TypeExpr::Named(_, _, s) => s,
+            TypeExpr::Optional(_, s) => s,
+            TypeExpr::Fallible(_, s) => s,
+            TypeExpr::Arrow(_, _, s) => s,
             TypeExpr::TrfFn { span, .. } => span,
         }
     }
@@ -89,16 +89,16 @@ pub enum Variant {
 impl Variant {
     pub fn name(&self) -> &str {
         match self {
-            Variant::Unit(n, _)      => n,
-            Variant::Tuple(n, _, _)  => n,
+            Variant::Unit(n, _) => n,
+            Variant::Tuple(n, _, _) => n,
             Variant::Record(n, _, _) => n,
         }
     }
 
     pub fn span(&self) -> &Span {
         match self {
-            Variant::Unit(_, s)      => s,
-            Variant::Tuple(_, _, s)  => s,
+            Variant::Unit(_, s) => s,
+            Variant::Tuple(_, _, s) => s,
             Variant::Record(_, _, s) => s,
         }
     }
@@ -118,7 +118,7 @@ pub enum TypeBody {
 pub struct TypeDef {
     pub visibility: Option<Visibility>,
     pub name: String,
-    pub type_params: Vec<String>,   // e.g. ["T", "U"] for type Pair<T, U>
+    pub type_params: Vec<String>, // e.g. ["T", "U"] for type Pair<T, U>
     pub with_interfaces: Vec<String>,
     pub invariants: Vec<Expr>,
     pub body: TypeBody,
@@ -156,10 +156,20 @@ pub enum FStringPart {
 /// Field pattern inside `{ ... }`.
 /// `{ name }` is shorthand for `{ name: name }`  Epattern is None in that case.
 #[derive(Debug, Clone)]
-pub struct FieldPattern {
-    pub name: String,
-    pub pattern: Option<Pattern>,
-    pub span: Span,
+pub enum PatternField {
+    Pun(String, Span),
+    Alias(String, Box<Pattern>, Span),
+    Wildcard(Span),
+}
+
+impl PatternField {
+    pub fn span(&self) -> &Span {
+        match self {
+            PatternField::Pun(_, span)
+            | PatternField::Alias(_, _, span)
+            | PatternField::Wildcard(span) => span,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -173,17 +183,17 @@ pub enum Pattern {
     /// `ok(p)` or `Guest` (no payload)
     Variant(String, Option<Box<Pattern>>, Span),
     /// `{ name, email }` or `{ name: p }`
-    Record(Vec<FieldPattern>, Span),
+    Record(Vec<PatternField>, Span),
 }
 
 impl Pattern {
     pub fn span(&self) -> &Span {
         match self {
-            Pattern::Wildcard(s)       => s,
-            Pattern::Lit(_, s)         => s,
-            Pattern::Bind(_, s)        => s,
-            Pattern::Variant(_, _, s)  => s,
-            Pattern::Record(_, s)      => s,
+            Pattern::Wildcard(s) => s,
+            Pattern::Lit(_, s) => s,
+            Pattern::Bind(_, s) => s,
+            Pattern::Variant(_, _, s) => s,
+            Pattern::Record(_, s) => s,
         }
     }
 }
@@ -193,7 +203,7 @@ impl Pattern {
 #[derive(Debug, Clone)]
 pub struct MatchArm {
     pub pattern: Pattern,
-    pub guard: Option<Box<Expr>>,   // v0.5.0: optional `where guard_expr`
+    pub guard: Option<Box<Expr>>, // v0.5.0: optional `where guard_expr`
     pub body: Expr,
     pub span: Span,
 }
@@ -249,31 +259,40 @@ pub enum Expr {
 impl Expr {
     pub fn span(&self) -> &Span {
         match self {
-            Expr::Lit(_, s)              => s,
-            Expr::Ident(_, s)            => s,
-            Expr::Pipeline(_, s)         => s,
-            Expr::Apply(_, _, s)         => s,
-            Expr::FieldAccess(_, _, s)   => s,
-            Expr::Block(b)               => &b.span,
-            Expr::Match(_, _, s)         => s,
+            Expr::Lit(_, s) => s,
+            Expr::Ident(_, s) => s,
+            Expr::Pipeline(_, s) => s,
+            Expr::Apply(_, _, s) => s,
+            Expr::FieldAccess(_, _, s) => s,
+            Expr::Block(b) => &b.span,
+            Expr::Match(_, _, s) => s,
             Expr::AssertMatches(_, _, s) => s,
-            Expr::If(_, _, _, s)         => s,
-            Expr::Closure(_, _, s)       => s,
-            Expr::BinOp(_, _, _, s)         => s,
-            Expr::RecordConstruct(_, _, s)  => s,
-            Expr::FString(_, s)             => s,
-            Expr::EmitExpr(_, s)            => s,
-            Expr::Collect(_, s)             => s,
+            Expr::If(_, _, _, s) => s,
+            Expr::Closure(_, _, s) => s,
+            Expr::BinOp(_, _, _, s) => s,
+            Expr::RecordConstruct(_, _, s) => s,
+            Expr::FString(_, s) => s,
+            Expr::EmitExpr(_, s) => s,
+            Expr::Collect(_, s) => s,
         }
     }
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum BinOp {
-    Add, Sub, Mul, Div,
-    Eq, NotEq,
-    Lt, Gt, LtEq, GtEq,
-    NullCoalesce,  // ?? (v1.9.0)
+    Add,
+    Sub,
+    Mul,
+    Div,
+    Eq,
+    NotEq,
+    Lt,
+    Gt,
+    LtEq,
+    GtEq,
+    And,
+    Or,
+    NullCoalesce, // ?? (v1.9.0)
 }
 
 // ── Stmt ──────────────────────────────────────────────────────────────────────
@@ -286,7 +305,7 @@ pub enum Stmt {
     Chain(ChainStmt),
     /// `yield expr;`  Epush a value into the enclosing collect block (v0.5.0)
     Yield(YieldStmt),
-    /// `for x in list { body }` — iteration statement (v1.9.0)
+    /// `for x in list { body }`  Eiteration statement (v1.9.0)
     ForIn(ForInStmt),
 }
 
@@ -328,11 +347,11 @@ pub struct YieldStmt {
 impl Stmt {
     pub fn span(&self) -> &Span {
         match self {
-            Stmt::Bind(b)   => &b.span,
-            Stmt::Expr(e)   => e.span(),
-            Stmt::Chain(c)  => &c.span,
-            Stmt::Yield(y)  => &y.span,
-            Stmt::ForIn(f)  => &f.span,
+            Stmt::Bind(b) => &b.span,
+            Stmt::Expr(e) => e.span(),
+            Stmt::Chain(c) => &c.span,
+            Stmt::Yield(y) => &y.span,
+            Stmt::ForIn(f) => &f.span,
         }
     }
 }
@@ -355,9 +374,9 @@ pub struct FnDef {
     pub visibility: Option<Visibility>,
     pub is_async: bool,
     pub name: String,
-    pub type_params: Vec<String>,   // e.g. ["T", "U"] for fn f<T, U>(...)
+    pub type_params: Vec<String>, // e.g. ["T", "U"] for fn f<T, U>(...)
     pub params: Vec<Param>,
-    pub return_ty: TypeExpr,
+    pub return_ty: Option<TypeExpr>,
     pub effects: Vec<Effect>,
     pub body: Block,
     pub span: Span,
@@ -370,7 +389,7 @@ pub struct TrfDef {
     pub visibility: Option<Visibility>,
     pub is_async: bool,
     pub name: String,
-    pub type_params: Vec<String>,   // e.g. ["T", "U"] for trf F<T, U>: ...
+    pub type_params: Vec<String>, // e.g. ["T", "U"] for trf F<T, U>: ...
     pub input_ty: TypeExpr,
     pub output_ty: TypeExpr,
     pub effects: Vec<Effect>,
@@ -479,7 +498,7 @@ pub struct InterfaceImplDecl {
 pub struct CapDef {
     pub visibility: Option<Visibility>,
     pub name: String,
-    pub type_params: Vec<String>,   // ["T"] for cap Eq<T>
+    pub type_params: Vec<String>, // ["T"] for cap Eq<T>
     pub fields: Vec<CapField>,
     pub span: Span,
 }
@@ -488,7 +507,7 @@ pub struct CapDef {
 #[derive(Debug, Clone)]
 pub struct ImplDef {
     pub cap_name: String,
-    pub type_args: Vec<TypeExpr>,   // [Int] for impl Eq<Int>
+    pub type_args: Vec<TypeExpr>, // [Int] for impl Eq<Int>
     pub methods: Vec<FnDef>,
     pub span: Span,
 }
@@ -497,7 +516,7 @@ pub struct ImplDef {
 
 #[derive(Debug, Clone)]
 pub struct TestDef {
-    pub name: String,   // description string literal
+    pub name: String, // description string literal
     pub body: Block,
     pub span: Span,
 }
@@ -529,36 +548,44 @@ pub enum Item {
     FlwDef(FlwDef),
     AbstractFlwDef(AbstractFlwDef),
     FlwBindingDef(FlwBindingDef),
-    NamespaceDecl(String, Span),   // namespace data.users
-    UseDecl(Vec<String>, Span),    // use data.users.create ↁE["data","users","create"]
+    NamespaceDecl(String, Span), // namespace data.users
+    UseDecl(Vec<String>, Span),  // use data.users.create ↁE["data","users","create"]
+    ImportDecl {
+        path: String,
+        alias: Option<String>,
+        is_rune: bool,
+        is_public: bool,
+        span: Span,
+    },
     InterfaceDecl(InterfaceDecl),
     InterfaceImplDecl(InterfaceImplDecl),
-    CapDef(CapDef),                // cap Eq<T> = { ... }
-    ImplDef(ImplDef),              // impl Eq<Int> { ... }
+    CapDef(CapDef),   // cap Eq<T> = { ... }
+    ImplDef(ImplDef), // impl Eq<Int> { ... }
     EffectDef(EffectDef),
-    TestDef(TestDef),              // test "description" { ... }
-    BenchDef(BenchDef),            // bench "description" { ... }  (v1.8.0)
+    TestDef(TestDef),   // test "description" { ... }
+    BenchDef(BenchDef), // bench "description" { ... }  (v1.8.0)
 }
 
 impl Item {
     pub fn span(&self) -> &Span {
         match self {
-            Item::TypeDef(t)          => &t.span,
-            Item::FnDef(f)            => &f.span,
-            Item::TrfDef(t)           => &t.span,
-            Item::AbstractTrfDef(t)   => &t.span,
-            Item::FlwDef(f)           => &f.span,
-            Item::AbstractFlwDef(f)   => &f.span,
-            Item::FlwBindingDef(f)    => &f.span,
+            Item::TypeDef(t) => &t.span,
+            Item::FnDef(f) => &f.span,
+            Item::TrfDef(t) => &t.span,
+            Item::AbstractTrfDef(t) => &t.span,
+            Item::FlwDef(f) => &f.span,
+            Item::AbstractFlwDef(f) => &f.span,
+            Item::FlwBindingDef(f) => &f.span,
             Item::NamespaceDecl(_, s) => s,
-            Item::UseDecl(_, s)       => s,
-            Item::InterfaceDecl(d)     => &d.span,
+            Item::UseDecl(_, s) => s,
+            Item::ImportDecl { span, .. } => span,
+            Item::InterfaceDecl(d) => &d.span,
             Item::InterfaceImplDecl(d) => &d.span,
-            Item::CapDef(c)           => &c.span,
-            Item::ImplDef(i)          => &i.span,
-            Item::EffectDef(e)        => &e.span,
-            Item::TestDef(t)          => &t.span,
-            Item::BenchDef(b)         => &b.span,
+            Item::CapDef(c) => &c.span,
+            Item::ImplDef(i) => &i.span,
+            Item::EffectDef(e) => &e.span,
+            Item::TestDef(t) => &t.span,
+            Item::BenchDef(b) => &b.span,
         }
     }
 }

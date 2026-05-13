@@ -1,0 +1,7 @@
+fn min_by<T>(a: T, b: T, ord: Ord<T>) -> T {
+    if ord.compare(a, b) <= 0 { a } else { b }
+}
+
+public fn main() -> Unit !Io {
+    IO.println_int(min_by(3, 5, Int.ord))
+}

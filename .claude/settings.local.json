@@ -13,7 +13,10 @@
       "Bash(grep -n '\"\"List\\\\.push\"\"' src/vm.rs)",
       "Bash(/c/Users/yoshi/favnir/fav/examples/test_any.fav:*)",
       "Bash(/c/Users/yoshi/favnir/fav/examples/test_run.fav:*)",
-      "Bash(/tmp/type_err.fav:*)"
+      "Bash(/tmp/type_err.fav:*)",
+      "Bash(grep -v \"Compiling\\\\|Finished\\\\|^$\")",
+      "Bash(/c/Users/yoshi/favnir/fav/target/debug/fav.exe run:*)",
+      "Bash(grep -v \"//\\\\|test\\\\|///\")"
     ]
   }
 }

@@ -27,20 +27,32 @@ fn eval_with_db(src: &str, db_path: &std::path::Path) -> Value {
     let artifact = codegen_program(&ir);
     let main_idx = artifact.fn_idx_by_name("main").expect("main not found");
     let db_path = db_path.to_string_lossy().into_owned();
-    VM::run_with_db_path(&artifact, main_idx, vec![], Some(&db_path)).expect("runtime error").0
+    VM::run_with_db_path(&artifact, main_idx, vec![], Some(&db_path))
+        .expect("runtime error")
+        .0
 }
 
 #[test]
 fn legacy_vm_test_literals() {
     assert_eq!(eval_fn("fn f() -> Int { 42 }", "f", vec![]), Value::Int(42));
-    assert_eq!(eval_fn("fn f() -> Bool { true }", "f", vec![]), Value::Bool(true));
-    assert_eq!(eval_fn("fn f() -> String { \"hi\" }", "f", vec![]), Value::Str("hi".into()));
+    assert_eq!(
+        eval_fn("fn f() -> Bool { true }", "f", vec![]),
+        Value::Bool(true)
+    );
+    assert_eq!(
+        eval_fn("fn f() -> String { \"hi\" }", "f", vec![]),
+        Value::Str("hi".into())
+    );
 }
 
 #[test]
 fn legacy_vm_test_function_apply_and_closure() {
     assert_eq!(
-        eval_fn("fn add(a: Int, b: Int) -> Int { a + b }", "add", vec![Value::Int(3), Value::Int(4)]),
+        eval_fn(
+            "fn add(a: Int, b: Int) -> Int { a + b }",
+            "add",
+            vec![Value::Int(3), Value::Int(4)]
+        ),
         Value::Int(7)
     );
     assert_eq!(
@@ -60,7 +72,6 @@ fn legacy_vm_test_pipeline_and_bind() {
 }
 
 #[test]
-#[ignore = "record destructuring still needs dedicated VM parity"]
 fn legacy_vm_test_bind_record_destruct() {
     let src = "
         type Point = { x: Int y: Int }
@@ -76,7 +87,6 @@ fn legacy_vm_test_bind_record_destruct() {
 }
 
 #[test]
-#[ignore = "variant destructuring still needs dedicated VM parity"]
 fn legacy_vm_test_bind_variant_destruct() {
     let src = "
         type Wrap = | Val(Int)
@@ -102,8 +112,22 @@ fn legacy_vm_test_match_and_if() {
             }
         }
     ";
-    assert_eq!(eval_fn(src, "pick", vec![Value::Variant("Green".into(), None), Value::Bool(true)]), Value::Int(1));
-    assert_eq!(eval_fn(src, "pick", vec![Value::Variant("Green".into(), None), Value::Bool(false)]), Value::Int(9));
+    assert_eq!(
+        eval_fn(
+            src,
+            "pick",
+            vec![Value::Variant("Green".into(), None), Value::Bool(true)]
+        ),
+        Value::Int(1)
+    );
+    assert_eq!(
+        eval_fn(
+            src,
+            "pick",
+            vec![Value::Variant("Green".into(), None), Value::Bool(false)]
+        ),
+        Value::Int(9)
+    );
 }
 
 #[test]
@@ -141,7 +165,10 @@ fn legacy_vm_test_db_execute_query() {
             IO.println(Debug.show(rows))
         }
     "#;
-    let db_path = std::env::temp_dir().join(format!("favnir-legacy-vm-db-{}.sqlite3", uuid::Uuid::new_v4()));
+    let db_path = std::env::temp_dir().join(format!(
+        "favnir-legacy-vm-db-{}.sqlite3",
+        uuid::Uuid::new_v4()
+    ));
     let result = eval_with_db(src, &db_path);
     assert_eq!(result, Value::Unit);
 }

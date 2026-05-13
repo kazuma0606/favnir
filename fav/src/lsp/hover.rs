@@ -7,25 +7,49 @@ pub fn handle_hover(store: &DocumentStore, uri: &str, pos: Position) -> Option<H
     let doc = store.get(uri)?;
     let offset = position_to_char_offset(&doc.source, pos)?;
 
-    let (_, ty) = doc
+    let (span, ty) = doc
         .type_at
         .iter()
         .filter(|(span, _)| span_contains(span, offset))
         .min_by_key(|(span, _)| span.end.saturating_sub(span.start))?;
 
+    let type_block = format!("```favnir\n{}\n```", display_type(ty));
+    let value = match doc_comment_for_span(doc, span, offset) {
+        Some(text) if !text.is_empty() => format!("{}\n\n{}", text, type_block),
+        _ => type_block,
+    };
+
     Some(Hover {
         contents: MarkupContent {
             kind: "markdown".to_string(),
-            value: format!("```favnir\n{}\n```", display_type(ty)),
+            value,
         },
     })
+}
+
+fn doc_comment_for_span(
+    doc: &crate::lsp::document_store::CheckedDoc,
+    span: &Span,
+    offset: usize,
+) -> Option<String> {
+    if let Some(def_span) = doc.def_at.get(span) {
+        if let Some(symbol) = doc.symbols.iter().find(|sym| sym.def_span == *def_span) {
+            return doc.doc_comments.get(&symbol.name).cloned();
+        }
+    }
+
+    doc.symbols
+        .iter()
+        .filter(|sym| span_contains(&sym.def_span, offset))
+        .min_by_key(|sym| sym.def_span.end.saturating_sub(sym.def_span.start))
+        .and_then(|sym| doc.doc_comments.get(&sym.name).cloned())
 }
 
 fn display_type(ty: &Type) -> String {
     ty.display()
 }
 
-fn span_contains(span: &Span, offset: usize) -> bool {
+pub(crate) fn span_contains(span: &Span, offset: usize) -> bool {
     if span.start == span.end {
         offset == span.start
     } else {
@@ -33,23 +57,27 @@ fn span_contains(span: &Span, offset: usize) -> bool {
     }
 }
 
-fn position_to_char_offset(source: &str, pos: Position) -> Option<usize> {
-    let target_line = pos.line as usize;
-    let target_char = pos.character as usize;
+pub(crate) fn position_to_char_offset(source: &str, pos: Position) -> Option<usize> {
+    let mut line = 0u32;
+    let mut character = 0u32;
 
-    let mut offset = 0usize;
-    for (line_idx, line) in source.split('\n').enumerate() {
-        if line_idx == target_line {
-            let line_len = line.chars().count();
-            if target_char > line_len {
-                return None;
-            }
-            return Some(offset + target_char);
+    for (idx, ch) in source.char_indices() {
+        if line == pos.line && character == pos.character {
+            return Some(idx);
         }
-        offset += line.chars().count() + 1;
+        if ch == '\n' {
+            line += 1;
+            character = 0;
+        } else {
+            character += 1;
+        }
     }
 
-    None
+    if line == pos.line && character == pos.character {
+        Some(source.len())
+    } else {
+        None
+    }
 }
 
 #[cfg(test)]
@@ -88,5 +116,26 @@ mod tests {
             },
         );
         assert!(hover.is_none());
+    }
+
+    #[test]
+    fn hover_includes_doc_comment_for_symbol_use() {
+        let mut store = DocumentStore::new();
+        store.open_or_change(
+            "file:///main.fav",
+            "// Returns double of n.\nfn double(n: Int) -> Int = n * 2\nfn main() -> Int = double(21)"
+                .to_string(),
+        );
+        let hover = handle_hover(
+            &store,
+            "file:///main.fav",
+            Position {
+                line: 2,
+                character: 20,
+            },
+        )
+        .expect("hover");
+        assert!(hover.contents.value.contains("Returns double of n."));
+        assert!(hover.contents.value.contains("Int"));
     }
 }

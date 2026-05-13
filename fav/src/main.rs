@@ -1,23 +1,27 @@
-﻿mod ast;
-mod toml;
-mod lock;
-mod value;
-mod fmt;
-mod lint;
-mod frontend;
-mod middle;
+mod ast;
 mod backend;
 mod driver;
+mod fmt;
+mod frontend;
+mod lint;
+mod lock;
 mod lsp;
+mod middle;
 mod std_states;
+mod toml;
+mod value;
 
+use driver::{
+    cmd_bench, cmd_build, cmd_bundle, cmd_check, cmd_exec, cmd_explain, cmd_explain_diff, cmd_fmt,
+    cmd_graph, cmd_install, cmd_lint, cmd_migrate, cmd_new, cmd_publish, cmd_run, cmd_test,
+    cmd_watch,
+};
 use std::process;
-use driver::{cmd_run, cmd_build, cmd_exec, cmd_check, cmd_explain, cmd_explain_diff, cmd_test, cmd_fmt, cmd_lint, cmd_install, cmd_publish, cmd_bundle, cmd_graph, cmd_watch, cmd_bench, cmd_migrate};
 
 // 笏笏 help text (4-6) 笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏
 
 const HELP: &str = "\
-fav - Favnir language toolchain v2.0.0
+fav - Favnir language toolchain v2.7.0
 
 USAGE:
     fav <COMMAND> [OPTIONS] [FILE]
@@ -32,9 +36,10 @@ COMMANDS:
     exec [--db <path>] [--info] <artifact>
                   Execute a .fvc artifact by running its `main` function.
                   With --info, print artifact metadata instead of executing.
-    check [--no-warn] [file]
+    check [--no-warn] [--dir <path>] [file]
                   Parse and type-check (no execution).
                   With --no-warn, suppress warning output.
+                  With --dir, check all .fav files under the given directory.
                   If <file> is omitted, checks all .fav files in the project.
     explain [--schema] [--format <text|json>] [--focus <all|fns|trfs|flws|types>] [file]
                   Show VIS / type / effect signatures of all top-level items.
@@ -56,6 +61,8 @@ COMMANDS:
                   Run bench blocks in .fav / .bench.fav files.
                   --iters sets iteration count (default: 100).
                   If <file> is omitted, runs all bench blocks in the project.
+    new <name> [--template <script|pipeline|lib>]
+                  Create a new project scaffold (default template: script).
     watch [--cmd <check|test|run>] [--dir <path>] [--debounce <ms>] [file]
                   Watch .fav files and re-run the selected command on change.
                   --dir can be specified multiple times to watch extra directories.
@@ -101,6 +108,7 @@ SINGLE-FILE EXAMPLES:
 PROJECT EXAMPLES (requires fav.toml):
     fav run                 # runs src/main.fav
     fav check               # checks all src/**/*.fav
+    fav check --dir src     # checks all .fav files under src/
     fav watch --cmd check   # watches project .fav files and re-runs checks
     fav explain             # explains all src/**/*.fav
 
@@ -128,6 +136,11 @@ ERROR CODES:
 fn main() {
     let args: Vec<String> = std::env::args().collect();
 
+    if args.len() == 1 {
+        print_welcome();
+        return;
+    }
+
     match args.get(1).map(|s| s.as_str()) {
         Some("help") | Some("--help") | Some("-h") => {
             print!("{}", HELP);
@@ -138,10 +151,14 @@ fn main() {
             let mut db_path: Option<String> = None;
             let mut file_idx = 2usize;
             if args.get(2).map(|s| s.as_str()) == Some("--db") {
-                db_path = Some(args.get(3).unwrap_or_else(|| {
-                    eprintln!("error: --db requires a path argument");
-                    process::exit(1);
-                }).clone());
+                db_path = Some(
+                    args.get(3)
+                        .unwrap_or_else(|| {
+                            eprintln!("error: --db requires a path argument");
+                            process::exit(1);
+                        })
+                        .clone(),
+                );
                 file_idx = 4;
             }
             let file = args.get(file_idx).map(|s| s.as_str());
@@ -185,15 +202,25 @@ fn main() {
             let mut i = 2usize;
             while i < args.len() {
                 match args[i].as_str() {
-                    "--info" => { show_info = true; i += 1; }
+                    "--info" => {
+                        show_info = true;
+                        i += 1;
+                    }
                     "--db" => {
-                        db_path = Some(args.get(i + 1).unwrap_or_else(|| {
-                            eprintln!("error: --db requires a path argument");
-                            process::exit(1);
-                        }).clone());
+                        db_path = Some(
+                            args.get(i + 1)
+                                .unwrap_or_else(|| {
+                                    eprintln!("error: --db requires a path argument");
+                                    process::exit(1);
+                                })
+                                .clone(),
+                        );
                         i += 2;
                     }
-                    other => { artifact = Some(other); i += 1; }
+                    other => {
+                        artifact = Some(other);
+                        i += 1;
+                    }
                 }
             }
             let artifact = artifact.unwrap_or_else(|| {
@@ -206,14 +233,32 @@ fn main() {
         Some("check") => {
             let mut no_warn = false;
             let mut file: Option<&str> = None;
+            let mut dir: Option<&str> = None;
             let mut i = 2usize;
             while i < args.len() {
                 match args[i].as_str() {
-                    "--no-warn" => { no_warn = true; i += 1; }
-                    other => { file = Some(other); i += 1; }
+                    "--no-warn" => {
+                        no_warn = true;
+                        i += 1;
+                    }
+                    "--dir" => {
+                        dir = Some(args.get(i + 1).map(|s| s.as_str()).unwrap_or_else(|| {
+                            eprintln!("error: --dir requires a value");
+                            process::exit(1);
+                        }));
+                        i += 2;
+                    }
+                    other => {
+                        file = Some(other);
+                        i += 1;
+                    }
                 }
             }
-            cmd_check(file, no_warn);
+            if let Some(dir) = dir {
+                driver::cmd_check_dir(dir);
+            } else {
+                cmd_check(file, no_warn);
+            }
         }
 
         Some("explain") => {
@@ -224,10 +269,13 @@ fn main() {
                 while i < args.len() {
                     match args[i].as_str() {
                         "--format" => {
-                            format = args.get(i + 1).unwrap_or_else(|| {
-                                eprintln!("error: --format requires a value");
-                                process::exit(1);
-                            }).clone();
+                            format = args
+                                .get(i + 1)
+                                .unwrap_or_else(|| {
+                                    eprintln!("error: --format requires a value");
+                                    process::exit(1);
+                                })
+                                .clone();
                             i += 2;
                         }
                         other => {
@@ -250,22 +298,34 @@ fn main() {
             let mut i = 2usize;
             while i < args.len() {
                 match args[i].as_str() {
-                    "--schema" => { schema = true; i += 1; }
+                    "--schema" => {
+                        schema = true;
+                        i += 1;
+                    }
                     "--format" => {
-                        format = args.get(i + 1).unwrap_or_else(|| {
-                            eprintln!("error: --format requires a value");
-                            process::exit(1);
-                        }).clone();
+                        format = args
+                            .get(i + 1)
+                            .unwrap_or_else(|| {
+                                eprintln!("error: --format requires a value");
+                                process::exit(1);
+                            })
+                            .clone();
                         i += 2;
                     }
                     "--focus" => {
-                        focus = args.get(i + 1).unwrap_or_else(|| {
-                            eprintln!("error: --focus requires a value");
-                            process::exit(1);
-                        }).clone();
+                        focus = args
+                            .get(i + 1)
+                            .unwrap_or_else(|| {
+                                eprintln!("error: --focus requires a value");
+                                process::exit(1);
+                            })
+                            .clone();
                         i += 2;
                     }
-                    other => { file = Some(other); i += 1; }
+                    other => {
+                        file = Some(other);
+                        i += 1;
+                    }
                 }
             }
             cmd_explain(file, schema, &format, &focus);
@@ -288,15 +348,27 @@ fn main() {
                         i += 2;
                     }
                     "--entry" => {
-                        entry = args.get(i + 1).unwrap_or_else(|| {
-                            eprintln!("error: --entry requires a name");
-                            process::exit(1);
-                        }).clone();
+                        entry = args
+                            .get(i + 1)
+                            .unwrap_or_else(|| {
+                                eprintln!("error: --entry requires a name");
+                                process::exit(1);
+                            })
+                            .clone();
                         i += 2;
                     }
-                    "--manifest" => { manifest = true; i += 1; }
-                    "--explain" => { explain = true; i += 1; }
-                    other => { file = Some(other); i += 1; }
+                    "--manifest" => {
+                        manifest = true;
+                        i += 1;
+                    }
+                    "--explain" => {
+                        explain = true;
+                        i += 1;
+                    }
+                    other => {
+                        file = Some(other);
+                        i += 1;
+                    }
                 }
             }
             let file = file.unwrap_or_else(|| {
@@ -316,24 +388,35 @@ fn main() {
             while i < args.len() {
                 match args[i].as_str() {
                     "--format" => {
-                        format = args.get(i + 1).unwrap_or_else(|| {
-                            eprintln!("error: --format requires a value");
-                            process::exit(1);
-                        }).clone();
+                        format = args
+                            .get(i + 1)
+                            .unwrap_or_else(|| {
+                                eprintln!("error: --format requires a value");
+                                process::exit(1);
+                            })
+                            .clone();
                         i += 2;
                     }
                     "--focus" => {
-                        focus = Some(args.get(i + 1).unwrap_or_else(|| {
-                            eprintln!("error: --focus requires a value");
-                            process::exit(1);
-                        }).clone());
+                        focus = Some(
+                            args.get(i + 1)
+                                .unwrap_or_else(|| {
+                                    eprintln!("error: --focus requires a value");
+                                    process::exit(1);
+                                })
+                                .clone(),
+                        );
                         i += 2;
                     }
                     "--entry" => {
-                        entry = Some(args.get(i + 1).unwrap_or_else(|| {
-                            eprintln!("error: --entry requires a value");
-                            process::exit(1);
-                        }).clone());
+                        entry = Some(
+                            args.get(i + 1)
+                                .unwrap_or_else(|| {
+                                    eprintln!("error: --entry requires a value");
+                                    process::exit(1);
+                                })
+                                .clone(),
+                        );
                         i += 2;
                     }
                     "--depth" => {
@@ -347,7 +430,10 @@ fn main() {
                         }));
                         i += 2;
                     }
-                    other => { file = Some(other); i += 1; }
+                    other => {
+                        file = Some(other);
+                        i += 1;
+                    }
                 }
             }
             let file = file.unwrap_or_else(|| {
@@ -368,26 +454,53 @@ fn main() {
             while i < args.len() {
                 match args[i].as_str() {
                     "--filter" => {
-                        filter = Some(args.get(i + 1).unwrap_or_else(|| {
-                            eprintln!("error: --filter requires a pattern argument");
-                            process::exit(1);
-                        }).clone());
+                        filter = Some(
+                            args.get(i + 1)
+                                .unwrap_or_else(|| {
+                                    eprintln!("error: --filter requires a pattern argument");
+                                    process::exit(1);
+                                })
+                                .clone(),
+                        );
                         i += 2;
                     }
-                    "--fail-fast" => { fail_fast = true; i += 1; }
-                    "--no-capture" => { no_capture = true; i += 1; }
-                    "--coverage" => { coverage = true; i += 1; }
+                    "--fail-fast" => {
+                        fail_fast = true;
+                        i += 1;
+                    }
+                    "--no-capture" => {
+                        no_capture = true;
+                        i += 1;
+                    }
+                    "--coverage" => {
+                        coverage = true;
+                        i += 1;
+                    }
                     "--coverage-report" => {
-                        coverage_report_dir = Some(args.get(i + 1).unwrap_or_else(|| {
-                            eprintln!("error: --coverage-report requires a directory");
-                            process::exit(1);
-                        }).clone());
+                        coverage_report_dir = Some(
+                            args.get(i + 1)
+                                .unwrap_or_else(|| {
+                                    eprintln!("error: --coverage-report requires a directory");
+                                    process::exit(1);
+                                })
+                                .clone(),
+                        );
                         i += 2;
                     }
-                    other => { file = Some(other.to_string()); i += 1; }
+                    other => {
+                        file = Some(other.to_string());
+                        i += 1;
+                    }
                 }
             }
-            cmd_test(file.as_deref(), filter.as_deref(), fail_fast, no_capture, coverage, coverage_report_dir.as_deref());
+            cmd_test(
+                file.as_deref(),
+                filter.as_deref(),
+                fail_fast,
+                no_capture,
+                coverage,
+                coverage_report_dir.as_deref(),
+            );
         }
 
         Some("bench") => {
@@ -398,10 +511,14 @@ fn main() {
             while i < args.len() {
                 match args[i].as_str() {
                     "--filter" => {
-                        filter = Some(args.get(i + 1).unwrap_or_else(|| {
-                            eprintln!("error: --filter requires a pattern argument");
-                            process::exit(1);
-                        }).clone());
+                        filter = Some(
+                            args.get(i + 1)
+                                .unwrap_or_else(|| {
+                                    eprintln!("error: --filter requires a pattern argument");
+                                    process::exit(1);
+                                })
+                                .clone(),
+                        );
                         i += 2;
                     }
                     "--iters" => {
@@ -415,7 +532,10 @@ fn main() {
                         });
                         i += 2;
                     }
-                    other => { file = Some(other.to_string()); i += 1; }
+                    other => {
+                        file = Some(other.to_string());
+                        i += 1;
+                    }
                 }
             }
             cmd_bench(file.as_deref(), filter.as_deref(), iters);
@@ -430,17 +550,23 @@ fn main() {
             while i < args.len() {
                 match args[i].as_str() {
                     "--cmd" => {
-                        cmd = args.get(i + 1).unwrap_or_else(|| {
-                            eprintln!("error: --cmd requires a value");
-                            process::exit(1);
-                        }).clone();
+                        cmd = args
+                            .get(i + 1)
+                            .unwrap_or_else(|| {
+                                eprintln!("error: --cmd requires a value");
+                                process::exit(1);
+                            })
+                            .clone();
                         i += 2;
                     }
                     "--dir" => {
-                        let d = args.get(i + 1).unwrap_or_else(|| {
-                            eprintln!("error: --dir requires a path");
-                            process::exit(1);
-                        }).clone();
+                        let d = args
+                            .get(i + 1)
+                            .unwrap_or_else(|| {
+                                eprintln!("error: --dir requires a path");
+                                process::exit(1);
+                            })
+                            .clone();
                         dirs.push(d);
                         i += 2;
                     }
@@ -452,11 +578,39 @@ fn main() {
                         debounce_ms = raw.parse::<u64>().unwrap_or(80);
                         i += 2;
                     }
-                    other => { file = Some(other.to_string()); i += 1; }
+                    other => {
+                        file = Some(other.to_string());
+                        i += 1;
+                    }
                 }
             }
             let dir_refs: Vec<&str> = dirs.iter().map(|s| s.as_str()).collect();
             cmd_watch(file.as_deref(), &cmd, &dir_refs, debounce_ms);
+        }
+
+        Some("new") => {
+            let name = args.get(2).unwrap_or_else(|| {
+                eprintln!("error: new requires a project name");
+                process::exit(1);
+            });
+            let mut template = "script";
+            let mut i = 3usize;
+            while i < args.len() {
+                match args[i].as_str() {
+                    "--template" => {
+                        template = args.get(i + 1).unwrap_or_else(|| {
+                            eprintln!("error: --template requires a value");
+                            process::exit(1);
+                        });
+                        i += 2;
+                    }
+                    other => {
+                        eprintln!("error: unexpected argument to new: {}", other);
+                        process::exit(1);
+                    }
+                }
+            }
+            cmd_new(name, template);
         }
 
         Some("fmt") => {
@@ -465,8 +619,14 @@ fn main() {
             let mut i = 2usize;
             while i < args.len() {
                 match args[i].as_str() {
-                    "--check" => { check = true; i += 1; }
-                    other => { file = Some(other.to_string()); i += 1; }
+                    "--check" => {
+                        check = true;
+                        i += 1;
+                    }
+                    other => {
+                        file = Some(other.to_string());
+                        i += 1;
+                    }
                 }
             }
             cmd_fmt(file.as_deref(), check);
@@ -478,8 +638,14 @@ fn main() {
             let mut i = 2usize;
             while i < args.len() {
                 match args[i].as_str() {
-                    "--warn-only" => { warn_only = true; i += 1; }
-                    other => { file = Some(other.to_string()); i += 1; }
+                    "--warn-only" => {
+                        warn_only = true;
+                        i += 1;
+                    }
+                    other => {
+                        file = Some(other.to_string());
+                        i += 1;
+                    }
                 }
             }
             cmd_lint(file.as_deref(), warn_only);
@@ -494,17 +660,33 @@ fn main() {
             let mut i = 2usize;
             while i < args.len() {
                 match args[i].as_str() {
-                    "--in-place" => { in_place = true; i += 1; }
-                    "--dry-run" => { dry_run = true; i += 1; }
-                    "--check" => { check = true; i += 1; }
+                    "--in-place" => {
+                        in_place = true;
+                        i += 1;
+                    }
+                    "--dry-run" => {
+                        dry_run = true;
+                        i += 1;
+                    }
+                    "--check" => {
+                        check = true;
+                        i += 1;
+                    }
                     "--dir" => {
-                        dir = Some(args.get(i + 1).unwrap_or_else(|| {
-                            eprintln!("error: --dir requires a path");
-                            process::exit(1);
-                        }).clone());
+                        dir = Some(
+                            args.get(i + 1)
+                                .unwrap_or_else(|| {
+                                    eprintln!("error: --dir requires a path");
+                                    process::exit(1);
+                                })
+                                .clone(),
+                        );
                         i += 2;
                     }
-                    other => { file = Some(other.to_string()); i += 1; }
+                    other => {
+                        file = Some(other.to_string());
+                        i += 1;
+                    }
                 }
             }
             cmd_migrate(file.as_deref(), in_place, dry_run, check, dir.as_deref());
@@ -549,8 +731,31 @@ fn main() {
             process::exit(1);
         }
 
-        None => {
-            print!("{}", HELP);
-        }
+        None => print_welcome(),
     }
+}
+
+fn print_welcome() {
+    use supports_color::{Stream, on};
+    let no_color = std::env::var_os("NO_COLOR").is_some();
+    if !no_color && on(Stream::Stdout).is_some() {
+        let image_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .map(|p| p.join("versions").join("favnir.png"));
+        if let Some(path) = image_path {
+            if path.exists() {
+                let _ = viuer::print_from_file(
+                    &path,
+                    &viuer::Config {
+                        transparent: true,
+                        ..Default::default()
+                    },
+                );
+                println!();
+            }
+        }
+        println!("Favnir v2.7.0 - The pipeline-first language");
+        println!();
+    }
+    print!("{}", HELP);
 }

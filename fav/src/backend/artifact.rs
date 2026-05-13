@@ -150,7 +150,11 @@ impl FvcArtifact {
             let mut kind = [0u8; 1];
             r.read_exact(&mut kind)?;
             let fn_idx = read_u32(r)?;
-            globals.push(FvcGlobal { name_idx, kind: kind[0], fn_idx });
+            globals.push(FvcGlobal {
+                name_idx,
+                kind: kind[0],
+                fn_idx,
+            });
         }
 
         let mut functions = Vec::with_capacity(fn_count);
@@ -204,7 +208,12 @@ impl FvcArtifact {
             }
         }
 
-        Ok(Self { str_table, globals, functions, explain_json })
+        Ok(Self {
+            str_table,
+            globals,
+            functions,
+            explain_json,
+        })
     }
 
     pub fn fn_idx_by_name(&self, name: &str) -> Option<usize> {
@@ -230,7 +239,9 @@ impl fmt::Display for ArtifactError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             ArtifactError::BadMagic(magic) => write!(f, "bad artifact magic: {magic:?}"),
-            ArtifactError::BadVersion(version) => write!(f, "unsupported artifact version: {version}"),
+            ArtifactError::BadVersion(version) => {
+                write!(f, "unsupported artifact version: {version}")
+            }
             ArtifactError::BadSectionLayout => write!(f, "artifact section layout is inconsistent"),
             ArtifactError::IoError(err) => write!(f, "{err}"),
             ArtifactError::Utf8Error(err) => write!(f, "{err}"),
@@ -335,7 +346,11 @@ mod tests {
         let unit_idx = writer.intern("Unit");
         let io_idx = writer.intern("Io");
 
-        writer.add_global(FvcGlobal { name_idx: main_idx, kind: 0, fn_idx: 0 });
+        writer.add_global(FvcGlobal {
+            name_idx: main_idx,
+            kind: 0,
+            fn_idx: 0,
+        });
         writer.add_function(FvcFunction {
             name_idx: main_idx,
             param_count: 0,

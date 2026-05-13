@@ -1,0 +1,171 @@
+// Self-contained test file for `fav test validate/validate.test.fav`.
+// The runtime import path is covered by Rust integration tests in driver.rs.
+
+type ValidationError = {
+    path: String
+    code: String
+    message: String
+}
+
+stage Required: String -> String! = |s| {
+    if String.is_empty(s) {
+        Result.err(ValidationError {
+            path: ""
+            code: "required"
+            message: "Field is required"
+        })
+    } else {
+        Result.ok(s)
+    }
+}
+
+fn MinLen(min: Int) = |s| {
+    if String.length(s) < min {
+        Result.err(ValidationError {
+            path: ""
+            code: "min_len"
+            message: $"Minimum length is {min}"
+        })
+    } else {
+        Result.ok(s)
+    }
+}
+
+fn MaxLen(max: Int) = |s| {
+    if String.length(s) > max {
+        Result.err(ValidationError {
+            path: ""
+            code: "max_len"
+            message: $"Maximum length is {max}"
+        })
+    } else {
+        Result.ok(s)
+    }
+}
+
+stage Email: String -> String! = |s| {
+    if String.contains(s, "@") && String.contains(s, ".") {
+        Result.ok(s)
+    } else {
+        Result.err(ValidationError {
+            path: ""
+            code: "email"
+            message: "Invalid email format"
+        })
+    }
+}
+
+fn IntRange(min: Int) = |max| |n| {
+    if n < min || n > max {
+        Result.err(ValidationError {
+            path: ""
+            code: "range"
+            message: $"Value must be between {min} and {max}"
+        })
+    } else {
+        Result.ok(n)
+    }
+}
+
+fn all_pass(value: String) = |results| {
+    bind errors <- List.flat_map(results, |r|
+        r |> match {
+            Err(e) => collect { yield e; }
+            Ok(_)  => collect { }
+        }
+    )
+    if List.length(errors) == 0 {
+        Result.ok(value)
+    } else {
+        Result.err(errors)
+    }
+}
+
+test "Required: empty -> Err" {
+    bind result <- Required("")
+    assert_eq(Result.is_err(result), true)
+}
+
+test "Required: non-empty -> Ok" {
+    bind result <- Required("hello")
+    assert_eq(Result.is_ok(result), true)
+}
+
+test "MinLen: shorter -> Err" {
+    bind result <- MinLen(3)("hi")
+    assert_eq(Result.is_err(result), true)
+}
+
+test "MinLen: equal -> Ok" {
+    bind result <- MinLen(3)("abc")
+    assert_eq(Result.is_ok(result), true)
+}
+
+test "MinLen: longer -> Ok" {
+    bind result <- MinLen(3)("hello")
+    assert_eq(Result.is_ok(result), true)
+}
+
+test "MaxLen: longer -> Err" {
+    bind result <- MaxLen(3)("toolong")
+    assert_eq(Result.is_err(result), true)
+}
+
+test "MaxLen: equal -> Ok" {
+    bind result <- MaxLen(3)("abc")
+    assert_eq(Result.is_ok(result), true)
+}
+
+test "Email: valid -> Ok" {
+    bind result <- Email("user@example.com")
+    assert_eq(Result.is_ok(result), true)
+}
+
+test "Email: missing at -> Err" {
+    bind result <- Email("notanemail")
+    assert_eq(Result.is_err(result), true)
+}
+
+test "Email: missing dot -> Err" {
+    bind result <- Email("user@nodot")
+    assert_eq(Result.is_err(result), true)
+}
+
+test "IntRange: in range -> Ok" {
+    bind result <- IntRange(1)(100)(50)
+    assert_eq(Result.is_ok(result), true)
+}
+
+test "IntRange: below min -> Err" {
+    bind result <- IntRange(1)(100)(0)
+    assert_eq(Result.is_err(result), true)
+}
+
+test "IntRange: above max -> Err" {
+    bind result <- IntRange(1)(100)(101)
+    assert_eq(Result.is_err(result), true)
+}
+
+test "all_pass: all Ok -> Ok" {
+    bind r1 <- Required("hello")
+    bind r2 <- MinLen(2)("hello")
+    bind r3 <- MaxLen(10)("hello")
+    bind results <- collect {
+        yield r1;
+        yield r2;
+        yield r3;
+    }
+    bind result <- all_pass("hello")(results)
+    assert_eq(Result.is_ok(result), true)
+}
+
+test "all_pass: errors -> Err" {
+    bind r1 <- Required("")
+    bind r2 <- MinLen(2)("")
+    bind results <- collect {
+        yield r1;
+        yield r2;
+    }
+    bind result <- all_pass("")(results)
+    assert_eq(Result.is_err(result), true)
+}

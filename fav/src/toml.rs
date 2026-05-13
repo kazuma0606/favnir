@@ -33,6 +33,8 @@ pub struct FavToml {
     pub version: String,
     /// Source root directory (relative to fav.toml). Defaults to ".".
     pub src: String,
+    /// Optional rune library root directory (relative to fav.toml). Defaults to `runes`.
+    pub runes_path: Option<String>,
     /// Dependencies declared in `[dependencies]`.
     pub dependencies: Vec<DependencySpec>,
 }
@@ -64,12 +66,17 @@ impl FavToml {
     pub fn src_dir(&self, root: &Path) -> PathBuf {
         root.join(&self.src)
     }
+
+    pub fn runes_dir(&self, root: &Path) -> PathBuf {
+        root.join(self.runes_path.as_deref().unwrap_or("runes"))
+    }
 }
 
 fn parse_fav_toml(content: &str) -> FavToml {
     let mut name = String::new();
     let mut version = String::new();
     let mut src = ".".to_string();
+    let mut runes_path = None;
     let mut dependencies = Vec::new();
     let mut section = "";
 
@@ -86,6 +93,10 @@ fn parse_fav_toml(content: &str) -> FavToml {
             section = "dependencies";
             continue;
         }
+        if trimmed == "[runes]" {
+            section = "runes";
+            continue;
+        }
         if trimmed.starts_with('[') {
             section = "";
             continue;
@@ -94,10 +105,17 @@ fn parse_fav_toml(content: &str) -> FavToml {
             "rune" => {
                 if let Some((key, val)) = parse_kv(trimmed) {
                     match key {
-                        "name"    => name    = val.to_string(),
+                        "name" => name = val.to_string(),
                         "version" => version = val.to_string(),
-                        "src"     => src     = val.to_string(),
-                        _         => {}
+                        "src" => src = val.to_string(),
+                        _ => {}
+                    }
+                }
+            }
+            "runes" => {
+                if let Some((key, val)) = parse_kv(trimmed) {
+                    if key == "path" {
+                        runes_path = Some(val.to_string());
                     }
                 }
             }
@@ -111,7 +129,13 @@ fn parse_fav_toml(content: &str) -> FavToml {
         }
     }
 
-    FavToml { name, version, src, dependencies }
+    FavToml {
+        name,
+        version,
+        src,
+        runes_path,
+        dependencies,
+    }
 }
 
 /// Parse a dependency line: `name = { key = "val", ... }`
@@ -129,18 +153,25 @@ fn parse_dep_line(line: &str) -> Option<DependencySpec> {
             let k = k.trim();
             let v = v.trim().trim_matches('"').to_string();
             match k {
-                "path"     => path_val     = Some(v),
+                "path" => path_val = Some(v),
                 "registry" => registry_val = Some(v),
-                "version"  => version_val  = Some(v),
-                _          => {}
+                "version" => version_val = Some(v),
+                _ => {}
             }
         }
     }
 
     if let Some(path) = path_val {
-        Some(DependencySpec::Path { name: dep_name, path })
+        Some(DependencySpec::Path {
+            name: dep_name,
+            path,
+        })
     } else if let (Some(registry), Some(version)) = (registry_val, version_val) {
-        Some(DependencySpec::Registry { name: dep_name, registry, version })
+        Some(DependencySpec::Registry {
+            name: dep_name,
+            registry,
+            version,
+        })
     } else {
         None
     }
@@ -166,12 +197,14 @@ mod tests {
 
     #[test]
     fn test_all_fields() {
-        let t = parse(r#"
+        let t = parse(
+            r#"
 [rune]
 name    = "myapp"
 version = "0.1.0"
 src     = "src"
-"#);
+"#,
+        );
         assert_eq!(t.name, "myapp");
         assert_eq!(t.version, "0.1.0");
         assert_eq!(t.src, "src");
@@ -179,51 +212,73 @@ src     = "src"
 
     #[test]
     fn test_src_default() {
-        let t = parse(r#"
+        let t = parse(
+            r#"
 [rune]
 name    = "myapp"
 version = "0.1.0"
-"#);
+"#,
+        );
         assert_eq!(t.src, ".");
     }
 
     #[test]
     fn test_comment_lines_skipped() {
-        let t = parse(r#"
+        let t = parse(
+            r#"
 # this is a comment
 [rune]
 # another comment
 name = "hello"
 version = "0.2.0"
 src = "source"
-"#);
+"#,
+        );
         assert_eq!(t.name, "hello");
         assert_eq!(t.src, "source");
     }
 
     #[test]
+    fn test_runes_path_parsed() {
+        let t = parse(
+            r#"
+[rune]
+name = "hello"
+version = "0.2.0"
+[runes]
+path = "libs/runes"
+"#,
+        );
+        assert_eq!(t.runes_path.as_deref(), Some("libs/runes"));
+    }
+
+    #[test]
     fn test_other_section_ignored() {
-        let t = parse(r#"
+        let t = parse(
+            r#"
 [other]
 name = "should-be-ignored"
 
 [rune]
 name = "real"
 version = "1.0.0"
-"#);
+"#,
+        );
         assert_eq!(t.name, "real");
     }
 
     #[test]
     fn test_path_dependency_parsed() {
-        let t = parse(r#"
+        let t = parse(
+            r#"
 [rune]
 name = "myapp"
 version = "1.0.0"
 
 [dependencies]
 mylib = { path = "../mylib" }
-"#);
+"#,
+        );
         assert_eq!(t.dependencies.len(), 1);
         assert_eq!(
             t.dependencies[0],
@@ -236,14 +291,16 @@ mylib = { path = "../mylib" }
 
     #[test]
     fn test_registry_dependency_parsed() {
-        let t = parse(r#"
+        let t = parse(
+            r#"
 [rune]
 name = "myapp"
 version = "1.0.0"
 
 [dependencies]
 utils = { registry = "local", version = "0.1.0" }
-"#);
+"#,
+        );
         assert_eq!(t.dependencies.len(), 1);
         assert_eq!(
             t.dependencies[0],
@@ -257,7 +314,8 @@ utils = { registry = "local", version = "0.1.0" }
 
     #[test]
     fn test_multiple_dependencies_parsed() {
-        let t = parse(r#"
+        let t = parse(
+            r#"
 [rune]
 name = "myapp"
 version = "1.0.0"
@@ -265,7 +323,8 @@ version = "1.0.0"
 [dependencies]
 libA = { path = "../libA" }
 libB = { registry = "local", version = "2.0.0" }
-"#);
+"#,
+        );
         assert_eq!(t.dependencies.len(), 2);
         assert_eq!(t.dependencies[0].name(), "libA");
         assert_eq!(t.dependencies[1].name(), "libB");

@@ -1,0 +1,409 @@
+// selfhost/parser/main.fav
+// Favnir v3.0.0 selfhost milestone: combined lex + parse demo.
+// Lexes a source string then parses the first expression.
+// Self-contained: lexer and parser both inlined.
+
+// ── Token / AST types ─────────────────────────────────────────────────────────
+
+public type Token = {
+    kind: String
+    text: String
+    pos:  Int
+}
+
+type ScanResult = {
+    tok:      Token
+    next_pos: Int
+}
+
+public type ParseResult = {
+    node: String
+    rest: List<Token>
+    ok:   Bool
+}
+
+// ── Lexer (inlined from selfhost/lexer/lexer.fav) ────────────────────────────
+
+fn is_space(ch: String) -> Bool {
+    if ch == " " { true } else {
+    if ch == "\t" { true } else {
+    if ch == "\n" { true } else {
+    if ch == "\r" { true } else {
+    false
+    }}}}
+}
+
+fn is_alpha(ch: String) -> Bool {
+    String.contains("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_", ch)
+}
+
+fn is_digit(ch: String) -> Bool {
+    String.contains("0123456789", ch)
+}
+
+fn is_ident_char(ch: String) -> Bool {
+    if is_alpha(ch) { true } else { is_digit(ch) }
+}
+
+fn scan_ident_len(src: String, start: Int, cur: Int) -> Int {
+    bind src_len <- String.length(src)
+    if cur >= src_len {
+        cur - start
+    } else {
+        bind ch <- Option.unwrap_or(String.char_at(src, cur), "")
+        if is_ident_char(ch) {
+            scan_ident_len(src, start, cur + 1)
+        } else {
+            cur - start
+        }
+    }
+}
+
+fn scan_int_len(src: String, start: Int, cur: Int) -> Int {
+    bind src_len <- String.length(src)
+    if cur >= src_len {
+        cur - start
+    } else {
+        bind ch <- Option.unwrap_or(String.char_at(src, cur), "")
+        if is_digit(ch) {
+            scan_int_len(src, start, cur + 1)
+        } else {
+            cur - start
+        }
+    }
+}
+
+fn scan_string_end(src: String, pos: Int) -> Int {
+    bind src_len <- String.length(src)
+    if pos >= src_len {
+        pos
+    } else {
+        bind ch <- Option.unwrap_or(String.char_at(src, pos), "")
+        if ch == "\"" {
+            pos + 1
+        } else {
+            if ch == "\\" {
+                scan_string_end(src, pos + 2)
+            } else {
+                scan_string_end(src, pos + 1)
+            }
+        }
+    }
+}
+
+fn scan_line_end(src: String, pos: Int) -> Int {
+    bind src_len <- String.length(src)
+    if pos >= src_len {
+        pos
+    } else {
+        bind ch <- Option.unwrap_or(String.char_at(src, pos), "")
+        if ch == "\n" {
+            pos
+        } else {
+            scan_line_end(src, pos + 1)
+        }
+    }
+}
+
+fn kw_group1(text: String) -> String {
+    if text == "fn"        { "Kw_fn"        } else {
+    if text == "public"    { "Kw_public"    } else {
+    if text == "bind"      { "Kw_bind"      } else {
+    if text == "if"        { "Kw_if"        } else {
+    if text == "else"      { "Kw_else"      } else {
+    if text == "match"     { "Kw_match"     } else {
+    if text == "type"      { "Kw_type"      } else {
+    if text == "stage"     { "Kw_stage"     } else {
+    if text == "seq"       { "Kw_seq"       } else {
+    if text == "interface" { "Kw_interface" } else {
+    if text == "impl"      { "Kw_impl"      } else {
+    if text == "for"       { "Kw_for"       } else {
+    ""
+    }}}}}}}}}}}}
+}
+
+fn kw_group2(text: String) -> String {
+    if text == "in"       { "Kw_in"       } else {
+    if text == "collect"  { "Kw_collect"  } else {
+    if text == "yield"    { "Kw_yield"    } else {
+    if text == "test"     { "Kw_test"     } else {
+    if text == "bench"    { "Kw_bench"    } else {
+    if text == "async"    { "Kw_async"    } else {
+    if text == "effect"   { "Kw_effect"   } else {
+    if text == "abstract" { "Kw_abstract" } else {
+    if text == "import"   { "Kw_import"   } else {
+    if text == "as"       { "Kw_as"       } else {
+    if text == "with"     { "Kw_with"     } else {
+    if text == "true"     { "Kw_true"     } else {
+    if text == "false"    { "Kw_false"    } else {
+    ""
+    }}}}}}}}}}}}}
+}
+
+fn keyword_or_ident(text: String) -> String {
+    bind r1 <- kw_group1(text)
+    if r1 != "" { r1 } else {
+    bind r2 <- kw_group2(text)
+    if r2 != "" { r2 } else {
+    "Ident"
+    }}
+}
+
+fn sck_group1(ch: String) -> String {
+    if ch == "+"  { "Plus"     } else {
+    if ch == "-"  { "Minus"    } else {
+    if ch == "*"  { "Star"     } else {
+    if ch == "/"  { "Slash"    } else {
+    if ch == "="  { "Eq"       } else {
+    if ch == "("  { "LParen"   } else {
+    if ch == ")"  { "RParen"   } else {
+    if ch == "{"  { "LBrace"   } else {
+    if ch == "}"  { "RBrace"   } else {
+    if ch == "["  { "LBracket" } else {
+    if ch == "]"  { "RBracket" } else {
+    if ch == ","  { "Comma"    } else {
+    ""
+    }}}}}}}}}}}}
+}
+
+fn sck_group2(ch: String) -> String {
+    if ch == ";"  { "Semi"     } else {
+    if ch == ":"  { "Colon"    } else {
+    if ch == "."  { "Dot"      } else {
+    if ch == "<"  { "Lt"       } else {
+    if ch == ">"  { "Gt"       } else {
+    if ch == "|"  { "Pipe"     } else {
+    if ch == "!"  { "Bang"     } else {
+    if ch == "?"  { "Question" } else {
+    if ch == "@"  { "At"       } else {
+    if ch == "$"  { "Dollar"   } else {
+    if ch == "#"  { "Hash"     } else {
+    if ch == "^"  { "Caret"    } else {
+    ""
+    }}}}}}}}}}}}
+}
+
+fn single_char_kind(ch: String) -> String {
+    bind r1 <- sck_group1(ch)
+    if r1 != "" { r1 } else {
+    bind r2 <- sck_group2(ch)
+    if r2 != "" { r2 } else {
+    "Unknown"
+    }}
+}
+
+fn scan_one(src: String, pos: Int) -> ScanResult {
+    bind ch  <- Option.unwrap_or(String.char_at(src, pos), "")
+    bind ch2 <- Option.unwrap_or(String.char_at(src, pos + 1), "")
+    if is_space(ch) {
+        ScanResult { tok: Token { kind: "Skip"  text: ""  pos: pos }  next_pos: pos + 1 }
+    } else {
+    if ch == "/" && ch2 == "/" {
+        bind end_pos <- scan_line_end(src, pos + 2)
+        ScanResult { tok: Token { kind: "Skip"  text: ""  pos: pos }  next_pos: end_pos }
+    } else {
+    if ch == "-" && ch2 == ">" {
+        ScanResult { tok: Token { kind: "Arrow"      text: "->"  pos: pos }  next_pos: pos + 2 }
+    } else {
+    if ch == "<" && ch2 == "-" {
+        ScanResult { tok: Token { kind: "LArrow"     text: "<-"  pos: pos }  next_pos: pos + 2 }
+    } else {
+    if ch == "|" && ch2 == ">" {
+        ScanResult { tok: Token { kind: "PipeArrow"  text: "|>"  pos: pos }  next_pos: pos + 2 }
+    } else {
+    if ch == "=" && ch2 == ">" {
+        ScanResult { tok: Token { kind: "FatArrow"   text: "=>"  pos: pos }  next_pos: pos + 2 }
+    } else {
+    if ch == "=" && ch2 == "=" {
+        ScanResult { tok: Token { kind: "EqEq"       text: "=="  pos: pos }  next_pos: pos + 2 }
+    } else {
+    if ch == "!" && ch2 == "=" {
+        ScanResult { tok: Token { kind: "BangEq"     text: "!="  pos: pos }  next_pos: pos + 2 }
+    } else {
+    if ch == "<" && ch2 == "=" {
+        ScanResult { tok: Token { kind: "LtEq"       text: "<="  pos: pos }  next_pos: pos + 2 }
+    } else {
+    if ch == ">" && ch2 == "=" {
+        ScanResult { tok: Token { kind: "GtEq"       text: ">="  pos: pos }  next_pos: pos + 2 }
+    } else {
+    if ch == "?" && ch2 == "?" {
+        ScanResult { tok: Token { kind: "QQ"         text: "??"  pos: pos }  next_pos: pos + 2 }
+    } else {
+    if ch == ":" && ch2 == ":" {
+        ScanResult { tok: Token { kind: "ColonColon" text: "::"  pos: pos }  next_pos: pos + 2 }
+    } else {
+    if ch == "&" && ch2 == "&" {
+        ScanResult { tok: Token { kind: "AndAnd"     text: "&&"  pos: pos }  next_pos: pos + 2 }
+    } else {
+    if ch == "|" && ch2 == "|" {
+        ScanResult { tok: Token { kind: "OrOr"       text: "||"  pos: pos }  next_pos: pos + 2 }
+    } else {
+    if is_alpha(ch) {
+        bind ident_len <- scan_ident_len(src, pos, pos + 1)
+        bind text <- String.slice(src, pos, pos + ident_len)
+        bind kind <- keyword_or_ident(text)
+        ScanResult { tok: Token { kind: kind  text: text  pos: pos }  next_pos: pos + ident_len }
+    } else {
+    if is_digit(ch) {
+        bind int_len <- scan_int_len(src, pos, pos + 1)
+        bind text <- String.slice(src, pos, pos + int_len)
+        ScanResult { tok: Token { kind: "Int"  text: text  pos: pos }  next_pos: pos + int_len }
+    } else {
+    if ch == "\"" {
+        bind end_pos <- scan_string_end(src, pos + 1)
+        bind text <- String.slice(src, pos, end_pos)
+        ScanResult { tok: Token { kind: "Str"  text: text  pos: pos }  next_pos: end_pos }
+    } else {
+        bind kind <- single_char_kind(ch)
+        ScanResult { tok: Token { kind: kind  text: ch  pos: pos }  next_pos: pos + 1 }
+    }}}}}}}}}}}}}}}}}
+}
+
+fn scan_from(src: String, pos: Int) -> List<Token> {
+    bind src_len <- String.length(src)
+    if pos >= src_len {
+        collect { yield Token { kind: "Eof"  text: ""  pos: pos }; }
+    } else {
+        bind r <- scan_one(src, pos)
+        if r.tok.kind == "Skip" {
+            scan_from(src, r.next_pos)
+        } else {
+            bind rest <- scan_from(src, r.next_pos)
+            bind head <- collect { yield r.tok; }
+            List.concat(head, rest)
+        }
+    }
+}
+
+fn lex(src: String) -> List<Token> {
+    scan_from(src, 0)
+}
+
+// ── Parser (inlined from selfhost/parser/parser.fav) ─────────────────────────
+
+fn eof_tok() -> Token {
+    Token { kind: "Eof"  text: ""  pos: 0 }
+}
+
+fn fail_r(tokens: List<Token>) -> ParseResult {
+    ParseResult { node: ""  rest: tokens  ok: false }
+}
+
+fn ok_r(node: String, rest: List<Token>) -> ParseResult {
+    ParseResult { node: node  rest: rest  ok: true }
+}
+
+fn binop_node(op: String, lhs: String, rhs: String) -> String {
+    String.concat("(BinOp ", String.concat(op, String.concat(" ", String.concat(lhs, String.concat(" ", String.concat(rhs, ")"))))))
+}
+
+fn parse_primary(tokens: List<Token>) -> ParseResult {
+    bind first <- Option.unwrap_or(List.first(tokens), eof_tok())
+    bind rest1 <- List.drop(tokens, 1)
+    if first.kind == "Int" {
+        ok_r(String.concat("(Int ", String.concat(first.text, ")")), rest1)
+    } else {
+    if first.kind == "Str" {
+        ok_r(String.concat("(Str ", String.concat(first.text, ")")), rest1)
+    } else {
+    if first.kind == "Kw_true" {
+        ok_r("(Bool true)", rest1)
+    } else {
+    if first.kind == "Kw_false" {
+        ok_r("(Bool false)", rest1)
+    } else {
+    if first.kind == "Ident" {
+        ok_r(String.concat("(Ident ", String.concat(first.text, ")")), rest1)
+    } else {
+        fail_r(tokens)
+    }}}}}}
+
+fn mul_op(kind: String) -> String {
+    if kind == "Star"  { "*" } else {
+    if kind == "Slash" { "/" } else {
+    ""
+    }}
+}
+
+fn parse_mul_rest(lhs: String, tokens: List<Token>) -> ParseResult {
+    bind next <- Option.unwrap_or(List.first(tokens), eof_tok())
+    bind op   <- mul_op(next.kind)
+    if op != "" {
+        bind rest1 <- List.drop(tokens, 1)
+        bind rhs_r <- parse_primary(rest1)
+        if rhs_r.ok {
+            bind node <- binop_node(op, lhs, rhs_r.node)
+            parse_mul_rest(node, rhs_r.rest)
+        } else {
+            rhs_r
+        }
+    } else {
+        ok_r(lhs, tokens)
+    }
+}
+
+fn parse_multiplicative(tokens: List<Token>) -> ParseResult {
+    bind lhs_r <- parse_primary(tokens)
+    if lhs_r.ok {
+        parse_mul_rest(lhs_r.node, lhs_r.rest)
+    } else {
+        lhs_r
+    }
+}
+
+fn add_op(kind: String) -> String {
+    if kind == "Plus"  { "+" } else {
+    if kind == "Minus" { "-" } else {
+    ""
+    }}
+}
+
+fn parse_add_rest(lhs: String, tokens: List<Token>) -> ParseResult {
+    bind next <- Option.unwrap_or(List.first(tokens), eof_tok())
+    bind op   <- add_op(next.kind)
+    if op != "" {
+        bind rest1 <- List.drop(tokens, 1)
+        bind rhs_r <- parse_multiplicative(rest1)
+        if rhs_r.ok {
+            bind node <- binop_node(op, lhs, rhs_r.node)
+            parse_add_rest(node, rhs_r.rest)
+        } else {
+            rhs_r
+        }
+    } else {
+        ok_r(lhs, tokens)
+    }
+}
+
+fn parse_additive(tokens: List<Token>) -> ParseResult {
+    bind lhs_r <- parse_multiplicative(tokens)
+    if lhs_r.ok {
+        parse_add_rest(lhs_r.node, lhs_r.rest)
+    } else {
+        lhs_r
+    }
+}
+
+fn parse_expr(tokens: List<Token>) -> ParseResult {
+    parse_additive(tokens)
+}
+
+// ── Demo entry point ──────────────────────────────────────────────────────────
+
+public fn main() -> Unit !Io {
+    bind src1 <- "1 + 2 * 3"
+    bind t1   <- lex(src1)
+    bind r1   <- parse_expr(t1)
+    IO.print("source: ");
+    IO.println(src1);
+    IO.print("ast:    ");
+    IO.println(r1.node);
+
+    bind src2 <- "x - y * 4 + z"
+    bind t2   <- lex(src2)
+    bind r2   <- parse_expr(t2)
+    IO.print("source: ");
+    IO.println(src2);
+    IO.print("ast:    ");
+    IO.println(r2.node)
+}

@@ -1505,6 +1505,7 @@ mod tests {
                 return_ty: Type::Unit,
                 body: IRExpr::Lit(crate::ast::Lit::Unit, Type::Unit),
             }],
+            type_metas: std::collections::HashMap::new(),
         };
         ensure_supported_main_signature(&ir).unwrap();
     }
@@ -1525,6 +1526,7 @@ mod tests {
                 return_ty: Type::Int,
                 body: IRExpr::Lit(crate::ast::Lit::Int(1), Type::Int),
             }],
+            type_metas: std::collections::HashMap::new(),
         };
         assert_eq!(
             ensure_supported_main_signature(&ir).unwrap_err(),
@@ -1548,6 +1550,7 @@ mod tests {
                 return_ty: Type::Unit,
                 body: IRExpr::Lit(crate::ast::Lit::Unit, Type::Unit),
             }],
+            type_metas: std::collections::HashMap::new(),
         };
         let (section, fn_map, bump_type_idx) =
             build_type_section(&ir, &[HostImport::IoPrintln, HostImport::IoPrintlnInt]).unwrap();
@@ -1642,6 +1645,7 @@ mod tests {
                     Type::Unit,
                 ),
             }],
+            type_metas: std::collections::HashMap::new(),
         };
 
         let bytes = wasm_codegen_program(&ir).unwrap();
@@ -1670,6 +1674,7 @@ mod tests {
                     Type::Unit,
                 ),
             }],
+            type_metas: std::collections::HashMap::new(),
         };
         let err = wasm_codegen_program(&ir).unwrap_err();
         assert_eq!(err.code(), "W002");
@@ -1695,6 +1700,7 @@ mod tests {
                     Type::String,
                 ),
             }],
+            type_metas: std::collections::HashMap::new(),
         };
         let (bytes, offsets) = collect_string_literals(&ir);
         assert_eq!(bytes, b"helloworld");
@@ -1732,6 +1738,7 @@ mod tests {
                     Type::Unit,
                 ),
             }],
+            type_metas: std::collections::HashMap::new(),
         };
         let used = collect_used_builtins(&ir);
         assert!(used.contains("IO.println"));
@@ -1768,6 +1775,7 @@ mod tests {
                     Type::Unit,
                 ),
             }],
+            type_metas: std::collections::HashMap::new(),
         };
 
         let bytes = wasm_codegen_program(&ir).unwrap();
@@ -1800,6 +1808,7 @@ mod tests {
                     Type::Unit,
                 ),
             }],
+            type_metas: std::collections::HashMap::new(),
         };
 
         let bytes = wasm_codegen_program(&ir).unwrap();
@@ -1820,6 +1829,7 @@ mod tests {
                     kind: IRGlobalKind::Fn(1),
                 },
             ],
+            type_metas: std::collections::HashMap::new(),
             fns: vec![
                 IRFnDef {
                     name: "factorial".into(),

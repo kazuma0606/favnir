@@ -1,0 +1,322 @@
+// selfhost/parser/parser.test.fav
+// Tests for the Favnir v3.0.0 selfhost parser.
+// Self-contained: all type/function definitions inlined.
+
+public type Token = {
+    kind: String
+    text: String
+    pos:  Int
+}
+
+public type ParseResult = {
+    node: String
+    rest: List<Token>
+    ok:   Bool
+}
+
+fn eof_tok() -> Token {
+    Token { kind: "Eof"  text: ""  pos: 0 }
+}
+
+fn fail_r(tokens: List<Token>) -> ParseResult {
+    ParseResult { node: ""  rest: tokens  ok: false }
+}
+
+fn ok_r(node: String, rest: List<Token>) -> ParseResult {
+    ParseResult { node: node  rest: rest  ok: true }
+}
+
+fn binop_node(op: String, lhs: String, rhs: String) -> String {
+    String.concat("(BinOp ", String.concat(op, String.concat(" ", String.concat(lhs, String.concat(" ", String.concat(rhs, ")"))))))
+}
+
+fn parse_primary(tokens: List<Token>) -> ParseResult {
+    bind first <- Option.unwrap_or(List.first(tokens), eof_tok())
+    bind rest1 <- List.drop(tokens, 1)
+    if first.kind == "Int" {
+        ok_r(String.concat("(Int ", String.concat(first.text, ")")), rest1)
+    } else {
+    if first.kind == "Str" {
+        ok_r(String.concat("(Str ", String.concat(first.text, ")")), rest1)
+    } else {
+    if first.kind == "Kw_true" {
+        ok_r("(Bool true)", rest1)
+    } else {
+    if first.kind == "Kw_false" {
+        ok_r("(Bool false)", rest1)
+    } else {
+    if first.kind == "Ident" {
+        ok_r(String.concat("(Ident ", String.concat(first.text, ")")), rest1)
+    } else {
+        fail_r(tokens)
+    }}}}}}
+
+fn mul_op(kind: String) -> String {
+    if kind == "Star"  { "*" } else {
+    if kind == "Slash" { "/" } else {
+    ""
+    }}
+}
+
+fn parse_mul_rest(lhs: String, tokens: List<Token>) -> ParseResult {
+    bind next <- Option.unwrap_or(List.first(tokens), eof_tok())
+    bind op   <- mul_op(next.kind)
+    if op != "" {
+        bind rest1 <- List.drop(tokens, 1)
+        bind rhs_r <- parse_primary(rest1)
+        if rhs_r.ok {
+            bind node <- binop_node(op, lhs, rhs_r.node)
+            parse_mul_rest(node, rhs_r.rest)
+        } else {
+            rhs_r
+        }
+    } else {
+        ok_r(lhs, tokens)
+    }
+}
+
+fn parse_multiplicative(tokens: List<Token>) -> ParseResult {
+    bind lhs_r <- parse_primary(tokens)
+    if lhs_r.ok {
+        parse_mul_rest(lhs_r.node, lhs_r.rest)
+    } else {
+        lhs_r
+    }
+}
+
+fn add_op(kind: String) -> String {
+    if kind == "Plus"  { "+" } else {
+    if kind == "Minus" { "-" } else {
+    ""
+    }}
+}
+
+fn parse_add_rest(lhs: String, tokens: List<Token>) -> ParseResult {
+    bind next <- Option.unwrap_or(List.first(tokens), eof_tok())
+    bind op   <- add_op(next.kind)
+    if op != "" {
+        bind rest1 <- List.drop(tokens, 1)
+        bind rhs_r <- parse_multiplicative(rest1)
+        if rhs_r.ok {
+            bind node <- binop_node(op, lhs, rhs_r.node)
+            parse_add_rest(node, rhs_r.rest)
+        } else {
+            rhs_r
+        }
+    } else {
+        ok_r(lhs, tokens)
+    }
+}
+
+fn parse_additive(tokens: List<Token>) -> ParseResult {
+    bind lhs_r <- parse_multiplicative(tokens)
+    if lhs_r.ok {
+        parse_add_rest(lhs_r.node, lhs_r.rest)
+    } else {
+        lhs_r
+    }
+}
+
+fn parse_expr(tokens: List<Token>) -> ParseResult {
+    parse_additive(tokens)
+}
+
+// ── helpers ───────────────────────────────────────────────────────────────────
+
+fn tok(kind: String, text: String) -> Token {
+    Token { kind: kind  text: text  pos: 0 }
+}
+
+fn eof_list() -> List<Token> {
+    collect { yield tok("Eof", ""); }
+}
+
+fn single(kind: String, text: String) -> List<Token> {
+    bind eof <- eof_list()
+    bind head <- collect { yield tok(kind, text); }
+    List.concat(head, eof)
+}
+
+// ── literal tests ─────────────────────────────────────────────────────────────
+
+test "parse integer literal" {
+    bind r <- parse_expr(single("Int", "42"))
+    assert_eq(r.ok, true);
+    assert_eq(r.node, "(Int 42)")
+}
+
+test "parse zero" {
+    bind r <- parse_expr(single("Int", "0"))
+    assert_eq(r.ok, true);
+    assert_eq(r.node, "(Int 0)")
+}
+
+test "parse string literal" {
+    bind r <- parse_expr(single("Str", "\"hi\""))
+    assert_eq(r.ok, true);
+    assert_eq(r.node, "(Str \"hi\")")
+}
+
+test "parse bool true" {
+    bind r <- parse_expr(single("Kw_true", "true"))
+    assert_eq(r.ok, true);
+    assert_eq(r.node, "(Bool true)")
+}
+
+test "parse bool false" {
+    bind r <- parse_expr(single("Kw_false", "false"))
+    assert_eq(r.ok, true);
+    assert_eq(r.node, "(Bool false)")
+}
+
+test "parse identifier" {
+    bind r <- parse_expr(single("Ident", "foo"))
+    assert_eq(r.ok, true);
+    assert_eq(r.node, "(Ident foo)")
+}
+
+// ── addition tests ────────────────────────────────────────────────────────────
+
+test "parse 1 + 2" {
+    bind tokens <- collect {
+        yield tok("Int",  "1");
+        yield tok("Plus", "+");
+        yield tok("Int",  "2");
+        yield tok("Eof",  "");
+    }
+    bind r <- parse_expr(tokens)
+    assert_eq(r.ok, true);
+    assert_eq(r.node, "(BinOp + (Int 1) (Int 2))")
+}
+
+test "parse 5 - 3" {
+    bind tokens <- collect {
+        yield tok("Int",   "5");
+        yield tok("Minus", "-");
+        yield tok("Int",   "3");
+        yield tok("Eof",   "");
+    }
+    bind r <- parse_expr(tokens)
+    assert_eq(r.ok, true);
+    assert_eq(r.node, "(BinOp - (Int 5) (Int 3))")
+}
+
+test "parse left-assoc a + b + c" {
+    bind tokens <- collect {
+        yield tok("Int",  "1");
+        yield tok("Plus", "+");
+        yield tok("Int",  "2");
+        yield tok("Plus", "+");
+        yield tok("Int",  "3");
+        yield tok("Eof",  "");
+    }
+    bind r <- parse_expr(tokens)
+    assert_eq(r.ok, true);
+    assert_eq(r.node, "(BinOp + (BinOp + (Int 1) (Int 2)) (Int 3))")
+}
+
+// ── multiplication tests ──────────────────────────────────────────────────────
+
+test "parse 2 * 3" {
+    bind tokens <- collect {
+        yield tok("Int",  "2");
+        yield tok("Star", "*");
+        yield tok("Int",  "3");
+        yield tok("Eof",  "");
+    }
+    bind r <- parse_expr(tokens)
+    assert_eq(r.ok, true);
+    assert_eq(r.node, "(BinOp * (Int 2) (Int 3))")
+}
+
+test "parse 8 / 4" {
+    bind tokens <- collect {
+        yield tok("Int",   "8");
+        yield tok("Slash", "/");
+        yield tok("Int",   "4");
+        yield tok("Eof",   "");
+    }
+    bind r <- parse_expr(tokens)
+    assert_eq(r.ok, true);
+    assert_eq(r.node, "(BinOp / (Int 8) (Int 4))")
+}
+
+// ── precedence tests ──────────────────────────────────────────────────────────
+
+test "mul binds tighter than add: 1 + 2 * 3" {
+    bind tokens <- collect {
+        yield tok("Int",  "1");
+        yield tok("Plus", "+");
+        yield tok("Int",  "2");
+        yield tok("Star", "*");
+        yield tok("Int",  "3");
+        yield tok("Eof",  "");
+    }
+    bind r <- parse_expr(tokens)
+    assert_eq(r.ok, true);
+    assert_eq(r.node, "(BinOp + (Int 1) (BinOp * (Int 2) (Int 3)))")
+}
+
+test "mul binds tighter: a * b + c * d" {
+    bind tokens <- collect {
+        yield tok("Ident", "a");
+        yield tok("Star",  "*");
+        yield tok("Ident", "b");
+        yield tok("Plus",  "+");
+        yield tok("Ident", "c");
+        yield tok("Star",  "*");
+        yield tok("Ident", "d");
+        yield tok("Eof",   "");
+    }
+    bind r <- parse_expr(tokens)
+    assert_eq(r.ok, true);
+    assert_eq(r.node, "(BinOp + (BinOp * (Ident a) (Ident b)) (BinOp * (Ident c) (Ident d)))")
+}
+
+// ── ident in arithmetic ───────────────────────────────────────────────────────
+
+test "parse x + 1" {
+    bind tokens <- collect {
+        yield tok("Ident", "x");
+        yield tok("Plus",  "+");
+        yield tok("Int",   "1");
+        yield tok("Eof",   "");
+    }
+    bind r <- parse_expr(tokens)
+    assert_eq(r.ok, true);
+    assert_eq(r.node, "(BinOp + (Ident x) (Int 1))")
+}
+
+// ── failure cases ─────────────────────────────────────────────────────────────
+
+test "empty token list fails" {
+    bind r <- parse_expr(eof_list())
+    assert_eq(r.ok, false)
+}
+
+test "operator-only fails" {
+    bind r <- parse_expr(single("Plus", "+"))
+    assert_eq(r.ok, false)
+}
+
+// ── rest tokens ───────────────────────────────────────────────────────────────
+
+test "rest contains Eof after single int" {
+    bind r <- parse_expr(single("Int", "7"))
+    assert_eq(r.ok, true);
+    bind first_rest <- Option.unwrap_or(List.first(r.rest), eof_tok())
+    assert_eq(first_rest.kind, "Eof")
+}
+
+test "rest is empty-ish after consuming all" {
+    bind tokens <- collect {
+        yield tok("Int",  "1");
+        yield tok("Plus", "+");
+        yield tok("Int",  "2");
+        yield tok("Eof",  "");
+    }
+    bind r <- parse_expr(tokens)
+    assert_eq(r.ok, true);
+    bind remaining <- List.length(r.rest)
+    assert_eq(remaining, 1)
+}

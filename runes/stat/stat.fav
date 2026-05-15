@@ -1,0 +1,68 @@
+// stat rune — random sampling and statistics (v2.8.0)
+
+public type ProfileReport = {
+    total: Int
+    min_v: Int
+    max_v: Int
+}
+
+// Basic generators
+
+public fn sample_int() -> Int !Random = Random.int(0, 100)
+
+public fn sample_float() -> Float !Random = Random.float()
+
+public fn sample_bool() -> Bool !Random = Random.int(0, 1) == 1
+
+// Uniform distribution (curried): uniform(min)(max)
+
+public fn uniform(min: Int) -> Int -> Int !Random = |max| {
+    Random.int(min, max)
+}
+
+// List selection
+
+public fn choice_str(xs: List<String>) -> String !Random = {
+    if List.length(xs) == 0 {
+        ""
+    } else {
+        Option.unwrap_or(List.first(List.drop(xs, Random.int(0, List.length(xs) - 1))), "")
+    }
+}
+
+public fn choice_int(xs: List<Int>) -> Int !Random = {
+    if List.length(xs) == 0 {
+        0
+    } else {
+        Option.unwrap_or(List.first(List.drop(xs, Random.int(0, List.length(xs) - 1))), 0)
+    }
+}
+
+// List generation
+
+public fn list_int(n: Int) -> List<Int> !Random = {
+    List.map(List.range(0, n), |ignored| Random.int(0, 100))
+}
+
+public fn list_float(n: Int) -> List<Float> !Random = {
+    List.map(List.range(0, n), |ignored| Random.float())
+}
+
+// Profiling
+
+public fn profile_int(xs: List<Int>) -> ProfileReport = {
+    bind total <- List.length(xs)
+    bind min_v <- Option.unwrap_or(List.fold(xs, Option.none(), |acc, x|
+        match acc {
+            Some(cur) => if x < cur { Option.some(x) } else { Option.some(cur) }
+            None      => Option.some(x)
+        }
+    ), 0)
+    bind max_v <- Option.unwrap_or(List.fold(xs, Option.none(), |acc, x|
+        match acc {
+            Some(cur) => if x > cur { Option.some(x) } else { Option.some(cur) }
+            None      => Option.some(x)
+        }
+    ), 0)
+    ProfileReport { total: total  min_v: min_v  max_v: max_v }
+}

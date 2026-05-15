@@ -1,0 +1,24 @@
+public fn get(url: String) -> Result<HttpResponse, HttpError> !Network {
+    Http.get_raw(url)
+}
+
+public fn post(url: String, body: String) -> Result<HttpResponse, HttpError> !Network {
+    Http.post_raw(url, body, "text/plain")
+}
+
+public fn post_json(url: String, body: String) -> Result<HttpResponse, HttpError> !Network {
+    Http.post_raw(url, body, "application/json")
+}
+
+public fn get_body(url: String) -> Result<String, HttpError> !Network {
+    bind result <- Http.get_raw(url)
+    Result.map(result, |resp| resp.body)
+}
+
+public fn ok(status: Int, body: String) -> HttpResponse {
+    HttpResponse { status: status, body: body, content_type: "text/plain" }
+}
+
+public fn error_response(status: Int, message: String) -> HttpResponse {
+    HttpResponse { status: status, body: message, content_type: "text/plain" }
+}

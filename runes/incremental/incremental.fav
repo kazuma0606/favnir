@@ -1,0 +1,36 @@
+public fn last(name: String) -> Option<String> !Checkpoint {
+    Checkpoint.last(name)
+}
+
+public fn save(name: String, value: String) -> Unit !Checkpoint {
+    Checkpoint.save(name, value)
+}
+
+public fn reset(name: String) -> Unit !Checkpoint {
+    Checkpoint.reset(name)
+}
+
+public fn meta(name: String) -> CheckpointMeta !Checkpoint {
+    Checkpoint.meta(name)
+}
+
+public fn run_since(
+    name: String,
+    fetch_fn: String -> List<Map<String, String>>
+) -> List<Map<String, String>> !Checkpoint !Io {
+    bind last_value <- Checkpoint.last(name)
+    bind since <- Option.unwrap_or(last_value, "1970-01-01T00:00:00Z")
+    bind rows <- fetch_fn(since)
+    bind now <- IO.timestamp()
+    Checkpoint.save(name, now);
+    rows
+}
+
+public fn upsert(
+    conn: DbHandle,
+    type_name: String,
+    row: Map<String, String>,
+    key_field: String
+) -> Unit !Db {
+    DB.upsert_raw(conn, type_name, row, key_field)
+}

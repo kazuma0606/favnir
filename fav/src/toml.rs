@@ -28,6 +28,12 @@ impl DependencySpec {
 }
 
 #[derive(Debug, Clone)]
+pub struct CheckpointConfig {
+    pub backend: String,
+    pub path: String,
+}
+
+#[derive(Debug, Clone)]
 pub struct FavToml {
     pub name: String,
     pub version: String,
@@ -37,6 +43,8 @@ pub struct FavToml {
     pub runes_path: Option<String>,
     /// Dependencies declared in `[dependencies]`.
     pub dependencies: Vec<DependencySpec>,
+    /// Optional checkpoint backend configuration.
+    pub checkpoint: Option<CheckpointConfig>,
 }
 
 impl FavToml {
@@ -78,6 +86,7 @@ fn parse_fav_toml(content: &str) -> FavToml {
     let mut src = ".".to_string();
     let mut runes_path = None;
     let mut dependencies = Vec::new();
+    let mut checkpoint = None;
     let mut section = "";
 
     for line in content.lines() {
@@ -91,6 +100,10 @@ fn parse_fav_toml(content: &str) -> FavToml {
         }
         if trimmed == "[dependencies]" {
             section = "dependencies";
+            continue;
+        }
+        if trimmed == "[checkpoint]" {
+            section = "checkpoint";
             continue;
         }
         if trimmed == "[runes]" {
@@ -125,6 +138,20 @@ fn parse_fav_toml(content: &str) -> FavToml {
                     dependencies.push(dep);
                 }
             }
+            "checkpoint" => {
+                let mut current = checkpoint.take().unwrap_or(CheckpointConfig {
+                    backend: "file".into(),
+                    path: ".fav_checkpoints".into(),
+                });
+                if let Some((key, val)) = parse_kv(trimmed) {
+                    match key {
+                        "backend" => current.backend = val.to_string(),
+                        "path" => current.path = val.to_string(),
+                        _ => {}
+                    }
+                }
+                checkpoint = Some(current);
+            }
             _ => {}
         }
     }
@@ -135,6 +162,7 @@ fn parse_fav_toml(content: &str) -> FavToml {
         src,
         runes_path,
         dependencies,
+        checkpoint,
     }
 }
 

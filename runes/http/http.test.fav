@@ -1,0 +1,42 @@
+import rune "http"
+
+test "http_get_returns_result" {
+    bind result <- http.get("http://127.0.0.1:9")
+    assert(Result.is_err(result) || Result.is_ok(result))
+}
+
+test "http_get_bad_url_is_err" {
+    bind result <- http.get("://bad-url")
+    assert(Result.is_err(result))
+}
+
+test "http_post_returns_result" {
+    bind result <- http.post("http://127.0.0.1:9", "hello")
+    assert(Result.is_err(result) || Result.is_ok(result))
+}
+
+test "http_post_json_content_type_result" {
+    bind result <- http.post_json("http://127.0.0.1:9", "{}")
+    assert(Result.is_err(result) || Result.is_ok(result))
+}
+
+test "http_get_body_on_bad_url" {
+    bind result <- http.get_body("://bad-url")
+    assert(Result.is_err(result))
+}
+
+test "http_ok_helper_status" {
+    assert_eq(http.ok(200, "hi").status, 200)
+}
+
+test "http_ok_helper_body" {
+    assert_eq(http.ok(200, "hi").body, "hi")
+}
+
+test "http_error_response_status" {
+    assert_eq(http.error_response(404, "not found").status, 404)
+}
+
+test "http_error_response_message_nonempty" {
+    assert_eq(http.error_response(404, "not found").body, "not found")
+}

@@ -1,0 +1,29 @@
+fn deep24(x: String) -> String {
+    if x == "a0" { "A0" } else {
+    if x == "b1" { "B1" } else {
+    if x == "c2" { "C2" } else {
+    if x == "d3" { "D3" } else {
+    if x == "e4" { "E4" } else {
+    if x == "f5" { "F5" } else {
+    if x == "g6" { "G6" } else {
+    if x == "h7" { "H7" } else {
+    if x == "i8" { "I8" } else {
+    if x == "j9" { "J9" } else {
+    if x == "k10" { "K10" } else {
+    if x == "l11" { "L11" } else {
+    if x == "m12" { "M12" } else {
+    if x == "n13" { "N13" } else {
+    if x == "o14" { "O14" } else {
+    if x == "p15" { "P15" } else {
+    if x == "q16" { "Q16" } else {
+    if x == "r17" { "R17" } else {
+    if x == "s18" { "S18" } else {
+    if x == "t19" { "T19" } else {
+    if x == "u20" { "U20" } else {
+    if x == "v21" { "V21" } else {
+    if x == "w22" { "W22" } else {
+    if x == "x23" { "X23" } else {
+    "?"
+}}}}}}}}}}}}}}}}}}}}}}}}
+}
+public fn main() -> Unit !Io { IO.println("ok") }

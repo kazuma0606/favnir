@@ -66,8 +66,14 @@ pub fn reachability_analysis(entry: &str, program: &IRProgram) -> ReachabilityRe
                 Effect::Network => {
                     effects_required.insert("Network".to_string());
                 }
+                Effect::Rpc => {
+                    effects_required.insert("Rpc".to_string());
+                }
                 Effect::File => {
                     effects_required.insert("File".to_string());
+                }
+                Effect::Checkpoint => {
+                    effects_required.insert("Checkpoint".to_string());
                 }
                 Effect::Unknown(name) => {
                     effects_required.insert(name.clone());

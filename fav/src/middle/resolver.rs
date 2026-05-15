@@ -95,7 +95,7 @@ impl Resolver {
         }
         if self.loading.contains(mod_path) {
             errors.push(ResolveError::new(
-                "E012",
+                "E0112",
                 format!("circular import: `{}`", mod_path),
                 span.clone(),
             ));
@@ -107,7 +107,7 @@ impl Resolver {
             Some(p) => p,
             None => {
                 errors.push(ResolveError::new(
-                    "E013",
+                    "E0213",
                     format!(
                         "module `{}` not found (no fav.toml or src dir configured)",
                         mod_path
@@ -122,7 +122,7 @@ impl Resolver {
             Ok(s) => s,
             Err(_) => {
                 errors.push(ResolveError::new(
-                    "E013",
+                    "E0213",
                     format!(
                         "module `{}` not found: `{}` does not exist",
                         mod_path,
@@ -142,7 +142,7 @@ impl Resolver {
             Ok(p) => p,
             Err(e) => {
                 errors.push(ResolveError::new(
-                    "E013",
+                    "E0213",
                     format!("parse error in module `{}`: {}", mod_path, e.message),
                     span.clone(),
                 ));
@@ -181,7 +181,7 @@ impl Resolver {
         if mod_path.is_empty() {
             // `use foo` with no module — nothing to load
             errors.push(ResolveError::new(
-                "E013",
+                "E0213",
                 format!(
                     "`use {}` needs at least two segments (module.symbol)",
                     sym_name
@@ -196,7 +196,7 @@ impl Resolver {
         match scope.symbols.get(&sym_name) {
             None => {
                 errors.push(ResolveError::new(
-                    "E013",
+                    "E0213",
                     format!("`{}` is not defined in module `{}`", sym_name, mod_path),
                     span.clone(),
                 ));
@@ -204,7 +204,7 @@ impl Resolver {
             }
             Some((_, vis)) if *vis == Visibility::Private => {
                 errors.push(ResolveError::new(
-                    "E014",
+                    "E0214",
                     format!(
                         "`{}::{}` is private — only `public` or `internal` symbols can be imported",
                         mod_path, sym_name
@@ -324,6 +324,7 @@ mod tests {
             src: "src".into(),
             runes_path: None,
             dependencies: vec![],
+            checkpoint: None,
         };
         let resolver = Resolver::new(Some(toml), Some(root));
         (resolver, dir) // dir must outlive the test
@@ -374,7 +375,7 @@ mod tests {
         let path = vec!["utils".to_string(), "hidden".to_string()];
         let result = r.resolve_use(&path, &mut errors, &span);
         assert!(result.is_none());
-        assert_eq!(errors[0].code, "E014");
+        assert_eq!(errors[0].code, "E0214");
     }
 
     #[test]
@@ -385,7 +386,7 @@ mod tests {
         let path = vec!["stuff".to_string(), "ghost".to_string()];
         let result = r.resolve_use(&path, &mut errors, &span);
         assert!(result.is_none());
-        assert_eq!(errors[0].code, "E013");
+        assert_eq!(errors[0].code, "E0213");
     }
 
     #[test]
@@ -397,13 +398,14 @@ mod tests {
             src: "src".into(),
             runes_path: None,
             dependencies: vec![],
+            checkpoint: None,
         };
         let mut r = Resolver::new(Some(toml), Some(dir.path().to_path_buf()));
         let mut errors = Vec::new();
         let span = Span::new("test", 0, 0, 1, 1);
         let result = r.load_module("no.such.module", &mut errors, &span);
         assert!(result.is_none());
-        assert_eq!(errors[0].code, "E013");
+        assert_eq!(errors[0].code, "E0213");
     }
 
     #[test]

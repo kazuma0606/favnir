@@ -1,66 +1,527 @@
-// examples/selfhost/lexer.test.fav
-// Tests for the Favnir selfhost lexer (self-contained).
+// selfhost/lexer/lexer.test.fav
+// Tests for the Favnir v3.0.0 selfhost lexer.
+// Note: nested if-else depth kept ≤ 23 per function to avoid stack overflow.
 
-fn tokenize(src: String) -> List<String> {
-    bind len <- String.length(src)
-    bind indices <- List.range(0, len)
-    bind tokens <- List.map(indices, |i| {
-        bind ch <- Option.unwrap_or(String.char_at(src, i), "?")
-        if ch == "+" {
-            "Plus"
+public type Token = {
+    kind: String
+    text: String
+    pos:  Int
+}
+
+type ScanResult = {
+    tok:      Token
+    next_pos: Int
+}
+
+fn is_space(ch: String) -> Bool {
+    if ch == " " { true } else {
+    if ch == "\t" { true } else {
+    if ch == "\n" { true } else {
+    if ch == "\r" { true } else {
+    false
+    }}}}
+}
+
+fn is_alpha(ch: String) -> Bool {
+    String.contains("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_", ch)
+}
+
+fn is_digit(ch: String) -> Bool {
+    String.contains("0123456789", ch)
+}
+
+fn is_ident_char(ch: String) -> Bool {
+    if is_alpha(ch) { true } else { is_digit(ch) }
+}
+
+fn scan_ident_len(src: String, start: Int, cur: Int) -> Int {
+    bind src_len <- String.length(src)
+    if cur >= src_len {
+        cur - start
+    } else {
+        bind ch <- Option.unwrap_or(String.char_at(src, cur), "")
+        if is_ident_char(ch) {
+            scan_ident_len(src, start, cur + 1)
         } else {
-            if ch == "-" {
-                "Minus"
+            cur - start
+        }
+    }
+}
+
+fn scan_int_len(src: String, start: Int, cur: Int) -> Int {
+    bind src_len <- String.length(src)
+    if cur >= src_len {
+        cur - start
+    } else {
+        bind ch <- Option.unwrap_or(String.char_at(src, cur), "")
+        if is_digit(ch) {
+            scan_int_len(src, start, cur + 1)
+        } else {
+            cur - start
+        }
+    }
+}
+
+fn scan_string_end(src: String, pos: Int) -> Int {
+    bind src_len <- String.length(src)
+    if pos >= src_len {
+        pos
+    } else {
+        bind ch <- Option.unwrap_or(String.char_at(src, pos), "")
+        if ch == "\"" {
+            pos + 1
+        } else {
+            if ch == "\\" {
+                scan_string_end(src, pos + 2)
             } else {
-                if ch == "*" {
-                    "Star"
-                } else {
-                    if ch == "/" {
-                        "Slash"
-                    } else {
-                        if ch == " " {
-                            "Whitespace"
-                        } else {
-                            "Unknown"
-                        }
-                    }
-                }
+                scan_string_end(src, pos + 1)
             }
         }
-    })
-    bind eof_marker <- collect { yield "Eof"; }
-    List.concat(tokens, eof_marker)
+    }
 }
 
-test "tokenize empty string yields only Eof" {
-    bind tokens <- tokenize("")
-    bind expected <- collect { yield "Eof"; }
-    assert_eq(tokens, expected)
+fn scan_line_end(src: String, pos: Int) -> Int {
+    bind src_len <- String.length(src)
+    if pos >= src_len {
+        pos
+    } else {
+        bind ch <- Option.unwrap_or(String.char_at(src, pos), "")
+        if ch == "\n" {
+            pos
+        } else {
+            scan_line_end(src, pos + 1)
+        }
+    }
 }
 
-test "tokenize single plus" {
-    bind tokens <- tokenize("+")
-    bind expected <- collect { yield "Plus"; yield "Eof"; }
-    assert_eq(tokens, expected)
+fn kw_group1(text: String) -> String {
+    if text == "fn"        { "Kw_fn"        } else {
+    if text == "public"    { "Kw_public"    } else {
+    if text == "bind"      { "Kw_bind"      } else {
+    if text == "if"        { "Kw_if"        } else {
+    if text == "else"      { "Kw_else"      } else {
+    if text == "match"     { "Kw_match"     } else {
+    if text == "type"      { "Kw_type"      } else {
+    if text == "stage"     { "Kw_stage"     } else {
+    if text == "seq"       { "Kw_seq"       } else {
+    if text == "interface" { "Kw_interface" } else {
+    if text == "impl"      { "Kw_impl"      } else {
+    if text == "for"       { "Kw_for"       } else {
+    ""
+    }}}}}}}}}}}}
 }
 
-test "tokenize arithmetic operators" {
-    bind tokens <- tokenize("+ - * /")
+fn kw_group2(text: String) -> String {
+    if text == "in"       { "Kw_in"       } else {
+    if text == "collect"  { "Kw_collect"  } else {
+    if text == "yield"    { "Kw_yield"    } else {
+    if text == "test"     { "Kw_test"     } else {
+    if text == "bench"    { "Kw_bench"    } else {
+    if text == "async"    { "Kw_async"    } else {
+    if text == "effect"   { "Kw_effect"   } else {
+    if text == "abstract" { "Kw_abstract" } else {
+    if text == "import"   { "Kw_import"   } else {
+    if text == "as"       { "Kw_as"       } else {
+    if text == "with"     { "Kw_with"     } else {
+    if text == "true"     { "Kw_true"     } else {
+    if text == "false"    { "Kw_false"    } else {
+    ""
+    }}}}}}}}}}}}}
+}
+
+fn keyword_or_ident(text: String) -> String {
+    bind r1 <- kw_group1(text)
+    if r1 != "" { r1 } else {
+    bind r2 <- kw_group2(text)
+    if r2 != "" { r2 } else {
+    "Ident"
+    }}
+}
+
+fn sck_group1(ch: String) -> String {
+    if ch == "+"  { "Plus"      } else {
+    if ch == "-"  { "Minus"     } else {
+    if ch == "*"  { "Star"      } else {
+    if ch == "/"  { "Slash"     } else {
+    if ch == "="  { "Eq"        } else {
+    if ch == "("  { "LParen"    } else {
+    if ch == ")"  { "RParen"    } else {
+    if ch == "{"  { "LBrace"    } else {
+    if ch == "}"  { "RBrace"    } else {
+    if ch == "["  { "LBracket"  } else {
+    if ch == "]"  { "RBracket"  } else {
+    if ch == ","  { "Comma"     } else {
+    ""
+    }}}}}}}}}}}}
+}
+
+fn sck_group2(ch: String) -> String {
+    if ch == ";"  { "Semi"      } else {
+    if ch == ":"  { "Colon"     } else {
+    if ch == "."  { "Dot"       } else {
+    if ch == "<"  { "Lt"        } else {
+    if ch == ">"  { "Gt"        } else {
+    if ch == "|"  { "Pipe"      } else {
+    if ch == "!"  { "Bang"      } else {
+    if ch == "?"  { "Question"  } else {
+    if ch == "@"  { "At"        } else {
+    if ch == "$"  { "Dollar"    } else {
+    if ch == "#"  { "Hash"      } else {
+    if ch == "^"  { "Caret"     } else {
+    ""
+    }}}}}}}}}}}}
+}
+
+fn single_char_kind(ch: String) -> String {
+    bind r1 <- sck_group1(ch)
+    if r1 != "" { r1 } else {
+    bind r2 <- sck_group2(ch)
+    if r2 != "" { r2 } else {
+    "Unknown"
+    }}
+}
+
+fn scan_one(src: String, pos: Int) -> ScanResult {
+    bind ch  <- Option.unwrap_or(String.char_at(src, pos), "")
+    bind ch2 <- Option.unwrap_or(String.char_at(src, pos + 1), "")
+    if is_space(ch) {
+        ScanResult { tok: Token { kind: "Skip"  text: ""  pos: pos }  next_pos: pos + 1 }
+    } else {
+    if ch == "/" && ch2 == "/" {
+        bind end_pos <- scan_line_end(src, pos + 2)
+        ScanResult { tok: Token { kind: "Skip"  text: ""  pos: pos }  next_pos: end_pos }
+    } else {
+    if ch == "-" && ch2 == ">" {
+        ScanResult { tok: Token { kind: "Arrow"      text: "->"  pos: pos }  next_pos: pos + 2 }
+    } else {
+    if ch == "<" && ch2 == "-" {
+        ScanResult { tok: Token { kind: "LArrow"     text: "<-"  pos: pos }  next_pos: pos + 2 }
+    } else {
+    if ch == "|" && ch2 == ">" {
+        ScanResult { tok: Token { kind: "PipeArrow"  text: "|>"  pos: pos }  next_pos: pos + 2 }
+    } else {
+    if ch == "=" && ch2 == ">" {
+        ScanResult { tok: Token { kind: "FatArrow"   text: "=>"  pos: pos }  next_pos: pos + 2 }
+    } else {
+    if ch == "=" && ch2 == "=" {
+        ScanResult { tok: Token { kind: "EqEq"       text: "=="  pos: pos }  next_pos: pos + 2 }
+    } else {
+    if ch == "!" && ch2 == "=" {
+        ScanResult { tok: Token { kind: "BangEq"     text: "!="  pos: pos }  next_pos: pos + 2 }
+    } else {
+    if ch == "<" && ch2 == "=" {
+        ScanResult { tok: Token { kind: "LtEq"       text: "<="  pos: pos }  next_pos: pos + 2 }
+    } else {
+    if ch == ">" && ch2 == "=" {
+        ScanResult { tok: Token { kind: "GtEq"       text: ">="  pos: pos }  next_pos: pos + 2 }
+    } else {
+    if ch == "?" && ch2 == "?" {
+        ScanResult { tok: Token { kind: "QQ"          text: "??"  pos: pos }  next_pos: pos + 2 }
+    } else {
+    if ch == ":" && ch2 == ":" {
+        ScanResult { tok: Token { kind: "ColonColon"  text: "::"  pos: pos }  next_pos: pos + 2 }
+    } else {
+    if ch == "&" && ch2 == "&" {
+        ScanResult { tok: Token { kind: "AndAnd"      text: "&&"  pos: pos }  next_pos: pos + 2 }
+    } else {
+    if ch == "|" && ch2 == "|" {
+        ScanResult { tok: Token { kind: "OrOr"        text: "||"  pos: pos }  next_pos: pos + 2 }
+    } else {
+    if is_alpha(ch) {
+        bind ident_len <- scan_ident_len(src, pos, pos + 1)
+        bind text <- String.slice(src, pos, pos + ident_len)
+        bind kind <- keyword_or_ident(text)
+        ScanResult { tok: Token { kind: kind  text: text  pos: pos }  next_pos: pos + ident_len }
+    } else {
+    if is_digit(ch) {
+        bind int_len <- scan_int_len(src, pos, pos + 1)
+        bind text <- String.slice(src, pos, pos + int_len)
+        ScanResult { tok: Token { kind: "Int"  text: text  pos: pos }  next_pos: pos + int_len }
+    } else {
+    if ch == "\"" {
+        bind end_pos <- scan_string_end(src, pos + 1)
+        bind text <- String.slice(src, pos, end_pos)
+        ScanResult { tok: Token { kind: "Str"  text: text  pos: pos }  next_pos: end_pos }
+    } else {
+        bind kind <- single_char_kind(ch)
+        ScanResult { tok: Token { kind: kind  text: ch  pos: pos }  next_pos: pos + 1 }
+    }}}}}}}}}}}}}}}}}
+}
+
+fn scan_from(src: String, pos: Int) -> List<Token> {
+    bind src_len <- String.length(src)
+    if pos >= src_len {
+        collect { yield Token { kind: "Eof"  text: ""  pos: pos }; }
+    } else {
+        bind r <- scan_one(src, pos)
+        if r.tok.kind == "Skip" {
+            scan_from(src, r.next_pos)
+        } else {
+            bind rest <- scan_from(src, r.next_pos)
+            bind head <- collect { yield r.tok; }
+            List.concat(head, rest)
+        }
+    }
+}
+
+fn lex(src: String) -> List<Token> {
+    scan_from(src, 0)
+}
+
+fn default_tok() -> Token {
+    Token { kind: "None"  text: ""  pos: 0 }
+}
+
+fn first_kind(src: String) -> String {
+    bind tokens <- lex(src)
+    bind first <- Option.unwrap_or(List.first(tokens), default_tok())
+    first.kind
+}
+
+fn kinds(src: String) -> List<String> {
+    bind tokens <- lex(src)
+    List.map(tokens, |t| t.kind)
+}
+
+// ── empty / EOF ───────────────────────────────────────────────────────────────
+
+test "empty string yields only Eof" {
+    bind tokens <- lex("")
+    assert_eq(List.length(tokens), 1);
+    bind first <- Option.unwrap_or(List.first(tokens), default_tok())
+    assert_eq(first.kind, "Eof")
+}
+
+// ── keywords ──────────────────────────────────────────────────────────────────
+
+test "keyword fn" { assert_eq(first_kind("fn"), "Kw_fn") }
+test "keyword public" { assert_eq(first_kind("public"), "Kw_public") }
+test "keyword bind" { assert_eq(first_kind("bind"), "Kw_bind") }
+test "keyword if" { assert_eq(first_kind("if"), "Kw_if") }
+test "keyword else" { assert_eq(first_kind("else"), "Kw_else") }
+test "keyword match" { assert_eq(first_kind("match"), "Kw_match") }
+test "keyword type" { assert_eq(first_kind("type"), "Kw_type") }
+test "keyword stage" { assert_eq(first_kind("stage"), "Kw_stage") }
+test "keyword seq" { assert_eq(first_kind("seq"), "Kw_seq") }
+test "keyword interface" { assert_eq(first_kind("interface"), "Kw_interface") }
+test "keyword impl" { assert_eq(first_kind("impl"), "Kw_impl") }
+test "keyword for" { assert_eq(first_kind("for"), "Kw_for") }
+test "keyword in" { assert_eq(first_kind("in"), "Kw_in") }
+test "keyword collect" { assert_eq(first_kind("collect"), "Kw_collect") }
+test "keyword yield" { assert_eq(first_kind("yield"), "Kw_yield") }
+test "keyword true" { assert_eq(first_kind("true"), "Kw_true") }
+test "keyword false" { assert_eq(first_kind("false"), "Kw_false") }
+test "keyword abstract" { assert_eq(first_kind("abstract"), "Kw_abstract") }
+test "keyword import" { assert_eq(first_kind("import"), "Kw_import") }
+test "keyword as" { assert_eq(first_kind("as"), "Kw_as") }
+
+// ── identifiers ───────────────────────────────────────────────────────────────
+
+test "plain identifier" { assert_eq(first_kind("hello"), "Ident") }
+test "identifier with digits" { assert_eq(first_kind("x1"), "Ident") }
+test "identifier with underscore" { assert_eq(first_kind("my_var"), "Ident") }
+
+test "identifier text preserved" {
+    bind tokens <- lex("fooBar")
+    bind first <- Option.unwrap_or(List.first(tokens), default_tok())
+    assert_eq(first.text, "fooBar")
+}
+
+test "uppercase identifier" { assert_eq(first_kind("MyType"), "Ident") }
+
+// ── integer literals ──────────────────────────────────────────────────────────
+
+test "single digit" { assert_eq(first_kind("0"), "Int") }
+
+test "multi digit integer" {
+    bind tokens <- lex("123")
+    bind first <- Option.unwrap_or(List.first(tokens), default_tok())
+    assert_eq(first.kind, "Int");
+    assert_eq(first.text, "123")
+}
+
+test "integer text preserved" {
+    bind tokens <- lex("42")
+    bind first <- Option.unwrap_or(List.first(tokens), default_tok())
+    assert_eq(first.text, "42")
+}
+
+// ── string literals ───────────────────────────────────────────────────────────
+
+test "empty string literal" { assert_eq(first_kind("\"\""), "Str") }
+
+test "string literal with content" {
+    bind tokens <- lex("\"hello\"")
+    bind first <- Option.unwrap_or(List.first(tokens), default_tok())
+    assert_eq(first.kind, "Str")
+}
+
+// ── multi-char operators ──────────────────────────────────────────────────────
+
+test "arrow ->" { assert_eq(first_kind("->"), "Arrow") }
+test "larrow <-" { assert_eq(first_kind("<-"), "LArrow") }
+test "pipe arrow |>" { assert_eq(first_kind("|>"), "PipeArrow") }
+test "fat arrow =>" { assert_eq(first_kind("=>"), "FatArrow") }
+test "eq eq ==" { assert_eq(first_kind("=="), "EqEq") }
+test "bang eq !=" { assert_eq(first_kind("!="), "BangEq") }
+test "lt eq <=" { assert_eq(first_kind("<="), "LtEq") }
+test "gt eq >=" { assert_eq(first_kind(">="), "GtEq") }
+test "null coalesce ??" { assert_eq(first_kind("??"), "QQ") }
+test "double colon ::" { assert_eq(first_kind("::"), "ColonColon") }
+test "and &&" { assert_eq(first_kind("&&"), "AndAnd") }
+test "or ||" { assert_eq(first_kind("||"), "OrOr") }
+
+// ── single-char operators ─────────────────────────────────────────────────────
+
+test "plus +" { assert_eq(first_kind("+"), "Plus") }
+test "minus -" { assert_eq(first_kind("-"), "Minus") }
+test "star *" { assert_eq(first_kind("*"), "Star") }
+test "slash /" { assert_eq(first_kind("/"), "Slash") }
+test "eq =" { assert_eq(first_kind("="), "Eq") }
+test "lparen (" { assert_eq(first_kind("("), "LParen") }
+test "rparen )" { assert_eq(first_kind(")"), "RParen") }
+test "lbrace {" { assert_eq(first_kind("{"), "LBrace") }
+test "rbrace }" { assert_eq(first_kind("}"), "RBrace") }
+test "comma ," { assert_eq(first_kind(","), "Comma") }
+test "semi ;" { assert_eq(first_kind(";"), "Semi") }
+test "colon :" { assert_eq(first_kind(":"), "Colon") }
+test "dot ." { assert_eq(first_kind("."), "Dot") }
+test "lt <" { assert_eq(first_kind("<"), "Lt") }
+test "gt >" { assert_eq(first_kind(">"), "Gt") }
+
+// ── whitespace / comment skipping ────────────────────────────────────────────
+
+test "leading whitespace skipped" { assert_eq(first_kind("  fn"), "Kw_fn") }
+
+test "trailing whitespace does not add token" {
+    bind ks <- kinds("fn ")
+    bind expected <- collect { yield "Kw_fn"; yield "Eof"; }
+    assert_eq(ks, expected)
+}
+
+test "comment skipped" {
+    bind ks <- kinds("// comment\nfn")
+    bind expected <- collect { yield "Kw_fn"; yield "Eof"; }
+    assert_eq(ks, expected)
+}
+
+test "whitespace between tokens skipped" {
+    bind ks <- kinds("fn   x")
+    bind expected <- collect { yield "Kw_fn"; yield "Ident"; yield "Eof"; }
+    assert_eq(ks, expected)
+}
+
+// ── position tracking ────────────────────────────────────────────────────────
+
+test "first token pos is 0" {
+    bind tokens <- lex("fn")
+    bind first <- Option.unwrap_or(List.first(tokens), default_tok())
+    assert_eq(first.pos, 0)
+}
+
+// ── integration: multi-token sequences ───────────────────────────────────────
+
+test "fn signature tokens" {
+    bind ks <- kinds("fn double(n: Int) -> Int")
+    bind expected <- collect {
+        yield "Kw_fn";
+        yield "Ident";
+        yield "LParen";
+        yield "Ident";
+        yield "Colon";
+        yield "Ident";
+        yield "RParen";
+        yield "Arrow";
+        yield "Ident";
+        yield "Eof";
+    }
+    assert_eq(ks, expected)
+}
+
+test "bind statement tokens" {
+    bind ks <- kinds("bind x <- 42")
+    bind expected <- collect {
+        yield "Kw_bind";
+        yield "Ident";
+        yield "LArrow";
+        yield "Int";
+        yield "Eof";
+    }
+    assert_eq(ks, expected)
+}
+
+test "arithmetic tokens" {
+    bind ks <- kinds("a + b * c")
+    bind expected <- collect {
+        yield "Ident";
+        yield "Plus";
+        yield "Ident";
+        yield "Star";
+        yield "Ident";
+        yield "Eof";
+    }
+    assert_eq(ks, expected)
+}
+
+test "comparison tokens" {
+    bind ks <- kinds("x == y")
+    bind expected <- collect {
+        yield "Ident";
+        yield "EqEq";
+        yield "Ident";
+        yield "Eof";
+    }
+    assert_eq(ks, expected)
+}
+
+test "stage pipeline tokens" {
+    bind ks <- kinds("seq S = A |> B")
+    bind expected <- collect {
+        yield "Kw_seq";
+        yield "Ident";
+        yield "Eq";
+        yield "Ident";
+        yield "PipeArrow";
+        yield "Ident";
+        yield "Eof";
+    }
+    assert_eq(ks, expected)
+}
+
+test "type annotation with angle brackets" {
+    bind ks <- kinds("List<Int>")
+    bind expected <- collect {
+        yield "Ident";
+        yield "Lt";
+        yield "Ident";
+        yield "Gt";
+        yield "Eof";
+    }
+    assert_eq(ks, expected)
+}
+
+test "record construction tokens" {
+    bind ks <- kinds("Point { x: 1 }")
+    bind expected <- collect {
+        yield "Ident";
+        yield "LBrace";
+        yield "Ident";
+        yield "Colon";
+        yield "Int";
+        yield "RBrace";
+        yield "Eof";
+    }
+    assert_eq(ks, expected)
+}
+
+test "arithmetic operators all present" {
+    bind ks <- kinds("+ - * /")
     bind expected <- collect {
         yield "Plus";
-        yield "Whitespace";
         yield "Minus";
-        yield "Whitespace";
         yield "Star";
-        yield "Whitespace";
         yield "Slash";
         yield "Eof";
     }
-    assert_eq(tokens, expected)
-}
-
-test "tokenize unknown char" {
-    bind tokens <- tokenize("@")
-    bind expected <- collect { yield "Unknown"; yield "Eof"; }
-    assert_eq(tokens, expected)
+    assert_eq(ks, expected)
 }

@@ -1,0 +1,113 @@
+// runes/gen/gen.test.fav — gen rune tests (v3.5.0)
+// Standalone: redefines gen helpers inline; bypasses checker effect system.
+
+type Pt = { x: Int y: Int }
+type LabeledNum = { value: Int label: String }
+
+// ── local helpers (mirror gen.fav) ───────────────────────────────────────────
+
+fn int_val(min: Int, max: Int) -> Int = Random.int(min, max)
+
+fn string_val_n(len: Int) -> String = Gen.string_val(len)
+
+fn choice_item(items: List<String>) -> String = {
+    if List.length(items) == 0 {
+        ""
+    } else {
+        bind idx <- Random.int(0, List.length(items) - 1)
+        Option.unwrap_or(List.first(List.drop(items, idx)), "")
+    }
+}
+
+fn one_raw(type_name: String) -> Map<String, String> = Gen.one_raw(type_name)
+
+fn list_raw(type_name: String, n: Int) -> List<Map<String, String>> = Gen.list_raw(type_name, n)
+
+fn simulate_raw(type_name: String, n: Int, noise: Float) -> List<Map<String, String>> = Gen.simulate_raw(type_name, n, noise)
+
+// ── int_val ──────────────────────────────────────────────────────────────────
+
+test "int_val fixed range returns exact value" {
+    bind n <- int_val(42, 42)
+    assert_eq(n, 42)
+}
+
+test "int_val zero range returns zero" {
+    bind n <- int_val(0, 0)
+    assert_eq(n, 0)
+}
+
+// ── string_val ───────────────────────────────────────────────────────────────
+
+test "string_val returns correct length" {
+    bind s <- string_val_n(10)
+    assert_eq(String.length(s), 10)
+}
+
+test "string_val length zero returns empty" {
+    bind s <- string_val_n(0)
+    assert_eq(String.length(s), 0)
+}
+
+// ── choice ───────────────────────────────────────────────────────────────────
+
+test "choice empty list returns empty string" {
+    bind items <- collect { }
+    bind result <- choice_item(items)
+    assert_eq(result, "")
+}
+
+test "choice single element returns that element" {
+    bind items <- collect { yield "only"; }
+    bind result <- choice_item(items)
+    assert_eq(result, "only")
+}
+
+// ── one_raw ──────────────────────────────────────────────────────────────────
+
+test "one_raw returns map with all fields" {
+    bind row <- one_raw("Pt")
+    assert_eq(Map.size(row), 2)
+}
+
+test "one_raw has_key for each field" {
+    bind row <- one_raw("LabeledNum")
+    assert_eq(Map.has_key(row, "value"), true)
+}
+
+// ── list_raw ─────────────────────────────────────────────────────────────────
+
+test "list_raw returns correct number of rows" {
+    Random.seed(42);
+    bind rows <- list_raw("Pt", 7)
+    assert_eq(List.length(rows), 7)
+}
+
+test "list_raw zero returns empty list" {
+    bind rows <- list_raw("Pt", 0)
+    assert_eq(List.length(rows), 0)
+}
+
+// ── simulate_raw ─────────────────────────────────────────────────────────────
+
+test "simulate_raw returns correct number of rows" {
+    Random.seed(1);
+    bind rows <- simulate_raw("Pt", 5, 0.5)
+    assert_eq(List.length(rows), 5)
+}
+
+// ── profile_raw ───────────────────────────────────────────────────────────────
+
+test "profile_raw total matches input list length" {
+    Random.seed(42);
+    bind rows <- list_raw("Pt", 10)
+    bind prof <- Gen.profile_raw("Pt", rows)
+    assert_eq(prof.total, 10)
+}
+
+test "profile_raw full noise all invalid" {
+    Random.seed(42);
+    bind rows <- simulate_raw("Pt", 10, 1.0)
+    bind prof <- Gen.profile_raw("Pt", rows)
+    assert_eq(prof.invalid, 10)
+}

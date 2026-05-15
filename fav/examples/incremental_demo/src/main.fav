@@ -1,0 +1,13 @@
+import rune "incremental"
+
+public fn main() -> Unit !Io !Checkpoint {
+    bind rows <- incremental.run_since("demo_run", |since|
+        collect {
+            yield Map.set(Map.set((), "id", "1"), "since", since);
+            ()
+        }
+    )
+    IO.println($"Fetched {List.length(rows)} row(s)");
+    bind meta <- incremental.meta("demo_run")
+    IO.println($"Checkpoint updated at {meta.updated_at}")
+}

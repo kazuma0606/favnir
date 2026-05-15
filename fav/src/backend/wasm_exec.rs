@@ -143,6 +143,7 @@ mod tests {
                     Type::Unit,
                 ),
             }],
+            type_metas: std::collections::HashMap::new(),
         }
     }
 

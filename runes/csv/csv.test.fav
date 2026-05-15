@@ -1,0 +1,91 @@
+type SchemaError = {
+    field: String
+    expected: String
+    got: String
+}
+
+type CsvOptions = {
+    delimiter: String
+    has_header: Bool
+}
+
+type User = {
+    id: Int
+    name: String
+    age: Option<Int>
+}
+
+type PosRow = {
+    #[col(0)] id: Int
+    #[col(1)] name: String
+}
+
+fn parse<T>(text: String) -> Result<List<T>, SchemaError> {
+    chain raw <- Csv.parse_raw(text, ",", true)
+    Schema.adapt(raw, type_name_of<T>())
+}
+
+fn parse_positional<T>(text: String) -> Result<List<T>, SchemaError> {
+    chain raw <- Csv.parse_raw(text, ",", false)
+    Schema.adapt(raw, type_name_of<T>())
+}
+
+fn write<T>(rows: List<T>) -> String {
+    Schema.to_csv(rows, type_name_of<T>())
+}
+
+fn parse_with_opts<T>(text: String, opts: CsvOptions) -> Result<List<T>, SchemaError> {
+    chain raw <- Csv.parse_raw(text, opts.delimiter, opts.has_header)
+    Schema.adapt(raw, type_name_of<T>())
+}
+
+test "test_parse_header_csv" {
+    bind rows <- parse<User>("id,name,age\n1,Alice,20\n2,Bob,\n")
+    match rows {
+        Ok(users) => assert_eq(List.length(users), 2)
+        Err(_)    => assert_eq(0, 2)
+    }
+}
+
+test "test_parse_positional_csv" {
+    bind rows <- parse_positional<PosRow>("1,Alice\n2,Bob\n")
+    match rows {
+        Ok(users) => {
+            bind first <- Option.unwrap_or(List.first(users), PosRow { id: 0 name: "" })
+            assert_eq(first.name, "Alice")
+        }
+        Err(_) => assert_eq("", "Alice")
+    }
+}
+
+test "test_write_csv" {
+    bind rows <- collect {
+        yield User { id: 1 name: "Alice" age: Option.some(20) };
+        yield User { id: 2 name: "Bob" age: Option.none() };
+        ()
+    }
+    bind text <- write<User>(rows)
+    assert_eq(String.contains(text, "id,name,age"), true)
+}
+
+test "test_parse_type_mismatch_returns_err" {
+    bind rows <- parse<User>("id,name,age\nx,Alice,20\n")
+    assert_eq(Result.is_err(rows), true)
+}
+
+test "test_parse_option_field" {
+    bind rows <- parse<User>("id,name,age\n1,Alice,\n")
+    match rows {
+        Ok(users) => {
+            bind first <- Option.unwrap_or(List.first(users), User { id: 0 name: "" age: Option.none() })
+            assert_eq(Option.is_none(first.age), true)
+        }
+        Err(_) => assert_eq(false, true)
+    }
+}
+
+test "test_chain_integration" {
+    bind rows <- parse<User>("id,name,age\n1,Alice,20\n")
+    bind result <- Result.map(rows, |users| List.length(users))
+    assert_eq(Result.unwrap_or(result, 0), 1)
+}

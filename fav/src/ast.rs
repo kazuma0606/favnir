@@ -22,7 +22,9 @@ pub enum Effect {
     Io,
     Db,
     Network,
+    Rpc,
     File,
+    Checkpoint,
     Trace,
     /// `Emit<EventType>`
     Emit(String),
@@ -68,9 +70,17 @@ impl TypeExpr {
 // ── Field ─────────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone)]
+pub struct FieldAttr {
+    pub name: String,
+    pub arg: Option<String>,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone)]
 pub struct Field {
     pub name: String,
     pub ty: TypeExpr,
+    pub attrs: Vec<FieldAttr>,
     pub span: Span,
 }
 
@@ -224,6 +234,9 @@ pub enum Expr {
     /// `f(a, b)`
     Apply(Box<Expr>, Vec<Expr>, Span),
 
+    /// `f<T, U>`
+    TypeApply(Box<Expr>, Vec<TypeExpr>, Span),
+
     /// `expr.field`
     FieldAccess(Box<Expr>, String, Span),
 
@@ -263,6 +276,7 @@ impl Expr {
             Expr::Ident(_, s) => s,
             Expr::Pipeline(_, s) => s,
             Expr::Apply(_, _, s) => s,
+            Expr::TypeApply(_, _, s) => s,
             Expr::FieldAccess(_, _, s) => s,
             Expr::Block(b) => &b.span,
             Expr::Match(_, _, s) => s,

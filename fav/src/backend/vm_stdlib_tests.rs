@@ -1,11 +1,12 @@
 // vm_stdlib_tests.rs — VM-based stdlib coverage tests (v0.7.0 parity)
 // Replaces the eval.rs-based stdlib tests that were removed when eval.rs was deleted.
 
-use super::VM;
+use super::{CheckpointBackend, VM, set_checkpoint_backend};
 use crate::backend::codegen::codegen_program;
 use crate::frontend::parser::Parser;
 use crate::middle::compiler::compile_program;
 use crate::value::Value;
+use tempfile::tempdir;
 
 fn eval(src: &str) -> Value {
     let prog = Parser::parse_str(src, "test").expect("parse error");
@@ -872,6 +873,230 @@ public fn main() -> Bool {
 // ── 基本言語機能 ──────────────────────────────────────────────────────────────
 
 #[test]
+fn csv_parse_raw_header() {
+    let src = r#"
+public fn main() -> Int {
+    bind rows <- Csv.parse_raw("id,name\n1,Alice\n2,Bob", ",", true)
+    match rows {
+        Ok(ok_rows)  => List.length(ok_rows)
+        Err(_)       => 0
+    }
+}
+"#;
+    assert_eq!(eval(src), Value::Int(2));
+}
+
+#[test]
+fn csv_parse_raw_no_header() {
+    let src = r#"
+public fn main() -> String {
+    bind rows <- Csv.parse_raw("1,Alice", ",", false)
+    match rows {
+        Ok(ok_rows) => {
+            bind first <- Option.unwrap_or(List.first(ok_rows), ())
+            Option.unwrap_or(Map.get(first, "1"), "")
+        }
+        Err(_) => ""
+    }
+}
+"#;
+    assert_eq!(eval(src), Value::Str("Alice".into()));
+}
+
+#[test]
+fn csv_write_raw_produces_correct_text() {
+    let src = r#"
+public fn main() -> String {
+    bind row1 <- Map.set(Map.set((), "id", "1"), "name", "Alice")
+    bind row2 <- Map.set(Map.set((), "id", "2"), "name", "Bob")
+    bind rows <- List.push(List.push(List.range(0, 0), row1), row2)
+    Csv.write_raw(rows, ",")
+}
+"#;
+    assert_eq!(eval(src), Value::Str("id,name\n1,Alice\n2,Bob\n".into()));
+}
+
+#[test]
+fn schema_adapt_int_field() {
+    let src = r#"
+type User = { id: Int name: String }
+public fn main() -> Int {
+    bind raw <- List.push(List.range(0, 0), Map.set(Map.set((), "id", "7"), "name", "Alice"))
+    bind rows <- Schema.adapt(raw, "User")
+    match rows {
+        Ok(ok_rows) => {
+            bind user <- Option.unwrap_or(List.first(ok_rows), User { id: 0 name: "" })
+            user.id
+        }
+        Err(_) => 0
+    }
+}
+"#;
+    assert_eq!(eval(src), Value::Int(7));
+}
+
+#[test]
+fn schema_adapt_float_field() {
+    let src = r#"
+type Row = { value: Float }
+public fn main() -> Float {
+    bind raw <- List.push(List.range(0, 0), Map.set((), "value", "3.5"))
+    bind rows <- Schema.adapt(raw, "Row")
+    match rows {
+        Ok(ok_rows) => {
+            bind row <- Option.unwrap_or(List.first(ok_rows), Row { value: 0.0 })
+            row.value
+        }
+        Err(_) => 0.0
+    }
+}
+"#;
+    assert_eq!(eval(src), Value::Float(3.5));
+}
+
+#[test]
+fn schema_adapt_bool_field() {
+    let src = r#"
+type Flag = { active: Bool }
+public fn main() -> Bool {
+    bind raw <- List.push(List.range(0, 0), Map.set((), "active", "true"))
+    bind rows <- Schema.adapt(raw, "Flag")
+    match rows {
+        Ok(ok_rows) => {
+            bind row <- Option.unwrap_or(List.first(ok_rows), Flag { active: false })
+            row.active
+        }
+        Err(_) => false
+    }
+}
+"#;
+    assert_eq!(eval(src), Value::Bool(true));
+}
+
+#[test]
+fn schema_adapt_option_field_none() {
+    let src = r#"
+type User = { name: String age: Option<Int> }
+public fn main() -> Bool {
+    bind raw <- List.push(List.range(0, 0), Map.set(Map.set((), "name", "Alice"), "age", ""))
+    bind rows <- Schema.adapt(raw, "User")
+    match rows {
+        Ok(ok_rows) => {
+            bind row <- Option.unwrap_or(List.first(ok_rows), User { name: "" age: Option.none() })
+            Option.is_none(row.age)
+        }
+        Err(_) => false
+    }
+}
+"#;
+    assert_eq!(eval(src), Value::Bool(true));
+}
+
+#[test]
+fn schema_adapt_option_field_some() {
+    let src = r#"
+type User = { name: String age: Option<Int> }
+public fn main() -> Int {
+    bind raw <- List.push(List.range(0, 0), Map.set(Map.set((), "name", "Alice"), "age", "42"))
+    bind rows <- Schema.adapt(raw, "User")
+    match rows {
+        Ok(ok_rows) => {
+            bind row <- Option.unwrap_or(List.first(ok_rows), User { name: "" age: Option.none() })
+            Option.unwrap_or(row.age, 0)
+        }
+        Err(_) => 0
+    }
+}
+"#;
+    assert_eq!(eval(src), Value::Int(42));
+}
+
+#[test]
+fn schema_adapt_type_mismatch_returns_err() {
+    let src = r#"
+type User = { age: Int }
+public fn main() -> Bool {
+    bind raw <- List.push(List.range(0, 0), Map.set((), "age", "abc"))
+    Result.is_err(Schema.adapt(raw, "User"))
+}
+"#;
+    assert_eq!(eval(src), Value::Bool(true));
+}
+
+#[test]
+fn json_parse_raw_basic_object() {
+    let src = r#"
+public fn main() -> String {
+    bind raw <- Json.parse_raw("{\"name\":\"Alice\",\"age\":20}")
+    bind map <- Result.unwrap_or(raw, ())
+    Option.unwrap_or(Map.get(map, "name"), "")
+}
+"#;
+    assert_eq!(eval(src), Value::Str("Alice".into()));
+}
+
+#[test]
+fn json_parse_array_raw_basic() {
+    let src = r#"
+public fn main() -> Int {
+    bind raw <- Json.parse_array_raw("[{\"id\":1},{\"id\":2}]")
+    match raw {
+        Ok(rows) => List.length(rows)
+        Err(_)   => 0
+    }
+}
+"#;
+    assert_eq!(eval(src), Value::Int(2));
+}
+
+#[test]
+fn json_write_raw_produces_object() {
+    let src = r#"
+public fn main() -> String {
+    Json.write_raw(Map.set(Map.set((), "id", "1"), "name", "Alice"))
+}
+"#;
+    // JSON object key order is not guaranteed (HashMap); accept both orderings.
+    let result = eval(src);
+    assert!(
+        result == Value::Str("{\"id\":\"1\",\"name\":\"Alice\"}".into())
+            || result == Value::Str("{\"name\":\"Alice\",\"id\":\"1\"}".into()),
+        "unexpected json output: {result:?}"
+    );
+}
+
+#[test]
+fn json_write_array_raw_produces_array() {
+    let src = r#"
+public fn main() -> String {
+    bind row1 <- Map.set((), "id", "1")
+    bind row2 <- Map.set((), "id", "2")
+    bind rows <- List.push(List.push(List.range(0, 0), row1), row2)
+    Json.write_array_raw(rows)
+}
+"#;
+    assert_eq!(
+        eval(src),
+        Value::Str("[{\"id\":\"1\"},{\"id\":\"2\"}]".into())
+    );
+}
+
+#[test]
+fn schema_adapt_one_from_json() {
+    let src = r#"
+type Config = { host: String port: Int }
+public fn main() -> Int {
+    bind raw <- Json.parse_raw("{\"host\":\"localhost\",\"port\":8080}")
+    bind map <- Result.unwrap_or(raw, ())
+    bind config <- Schema.adapt_one(map, "Config")
+    bind ok <- Result.unwrap_or(config, Config { host: "" port: 0 })
+    ok.port
+}
+"#;
+    assert_eq!(eval(src), Value::Int(8080));
+}
+
+#[test]
 fn test_arithmetic() {
     assert_eq!(
         eval("public fn main() -> Int { 3 + 4 * 2 }"),
@@ -1394,4 +1619,696 @@ public fn main() -> Int {
 "#,
     );
     assert_eq!(result, Value::Int(7));
+}
+
+// ── DB.* (v3.3.0) ─────────────────────────────────────────────────────────────
+
+#[test]
+fn db_sqlite_connect_and_close() {
+    let result = eval(
+        r#"
+public fn main() -> Int {
+    bind conn_result <- DB.connect("sqlite::memory:")
+    match conn_result {
+        Ok(_) => 1
+        Err(_) => 0
+    }
+}
+"#,
+    );
+    assert_eq!(result, Value::Int(1));
+}
+
+#[test]
+fn db_sqlite_create_and_insert() {
+    let result = eval(
+        r#"
+public fn main() -> Int {
+    bind conn_result <- DB.connect("sqlite::memory:")
+    match conn_result {
+        Ok(conn) => {
+            bind _ <- DB.execute_raw(conn, "CREATE TABLE t (id INTEGER, name TEXT)")
+            bind ins <- DB.execute_raw(conn, "INSERT INTO t VALUES (1, 'Alice')")
+            match ins {
+                Ok(n) => n
+                Err(_) => 0
+            }
+        }
+        Err(_) => 0
+    }
+}
+"#,
+    );
+    assert_eq!(result, Value::Int(1));
+}
+
+#[test]
+fn db_sqlite_query_returns_rows() {
+    let result = eval(
+        r#"
+public fn main() -> Int {
+    bind conn_result <- DB.connect("sqlite::memory:")
+    match conn_result {
+        Ok(conn) => {
+            bind _ <- DB.execute_raw(conn, "CREATE TABLE users (id INTEGER, name TEXT)")
+            bind _ <- DB.execute_raw(conn, "INSERT INTO users VALUES (1, 'Alice')")
+            bind _ <- DB.execute_raw(conn, "INSERT INTO users VALUES (2, 'Bob')")
+            bind rows_result <- DB.query_raw(conn, "SELECT id, name FROM users")
+            match rows_result {
+                Ok(rows) => List.length(rows)
+                Err(_) => 0
+            }
+        }
+        Err(_) => 0
+    }
+}
+"#,
+    );
+    assert_eq!(result, Value::Int(2));
+}
+
+#[test]
+fn db_sqlite_query_params_bind() {
+    let result = eval(
+        r#"
+public fn main() -> String {
+    bind conn_result <- DB.connect("sqlite::memory:")
+    match conn_result {
+        Ok(conn) => {
+            bind _ <- DB.execute_raw(conn, "CREATE TABLE items (id INTEGER, label TEXT)")
+            bind _ <- DB.execute_raw(conn, "INSERT INTO items VALUES (1, 'hello')")
+            bind _ <- DB.execute_raw(conn, "INSERT INTO items VALUES (2, 'world')")
+            bind params <- List.push(List.range(0, 0), "1")
+            bind rows_result <- DB.query_raw_params(conn, "SELECT label FROM items WHERE id = ?", params)
+            match rows_result {
+                Ok(rows) => {
+                    bind first <- Option.unwrap_or(List.first(rows), ())
+                    Option.unwrap_or(Map.get(first, "label"), "")
+                }
+                Err(_) => "error"
+            }
+        }
+        Err(_) => "connect_error"
+    }
+}
+"#,
+    );
+    assert_eq!(result, Value::Str("hello".into()));
+}
+
+#[test]
+fn db_sqlite_execute_returns_affected_rows() {
+    let result = eval(
+        r#"
+public fn main() -> Int {
+    bind conn_result <- DB.connect("sqlite::memory:")
+    match conn_result {
+        Ok(conn) => {
+            bind _ <- DB.execute_raw(conn, "CREATE TABLE nums (v INTEGER)")
+            bind _ <- DB.execute_raw(conn, "INSERT INTO nums VALUES (1)")
+            bind _ <- DB.execute_raw(conn, "INSERT INTO nums VALUES (2)")
+            bind upd <- DB.execute_raw(conn, "UPDATE nums SET v = 99")
+            match upd {
+                Ok(n) => n
+                Err(_) => 0
+            }
+        }
+        Err(_) => 0
+    }
+}
+"#,
+    );
+    assert_eq!(result, Value::Int(2));
+}
+
+#[test]
+fn db_sqlite_transaction_commit() {
+    let result = eval(
+        r#"
+public fn main() -> Int {
+    bind conn_result <- DB.connect("sqlite::memory:")
+    match conn_result {
+        Ok(conn) => {
+            bind _ <- DB.execute_raw(conn, "CREATE TABLE events (id INTEGER)")
+            bind tx_result <- DB.begin_tx(conn)
+            match tx_result {
+                Ok(tx) => {
+                    bind _ <- DB.execute_in_tx(tx, "INSERT INTO events VALUES (1)")
+                    bind _ <- DB.commit_tx(tx)
+                    bind rows_result <- DB.query_raw(conn, "SELECT id FROM events")
+                    match rows_result {
+                        Ok(rows) => List.length(rows)
+                        Err(_) => 0
+                    }
+                }
+                Err(_) => 0
+            }
+        }
+        Err(_) => 0
+    }
+}
+"#,
+    );
+    assert_eq!(result, Value::Int(1));
+}
+
+#[test]
+fn db_sqlite_transaction_rollback() {
+    let result = eval(
+        r#"
+public fn main() -> Int {
+    bind conn_result <- DB.connect("sqlite::memory:")
+    match conn_result {
+        Ok(conn) => {
+            bind _ <- DB.execute_raw(conn, "CREATE TABLE events (id INTEGER)")
+            bind tx_result <- DB.begin_tx(conn)
+            match tx_result {
+                Ok(tx) => {
+                    bind _ <- DB.execute_in_tx(tx, "INSERT INTO events VALUES (1)")
+                    bind _ <- DB.rollback_tx(tx)
+                    bind rows_result <- DB.query_raw(conn, "SELECT id FROM events")
+                    match rows_result {
+                        Ok(rows) => List.length(rows)
+                        Err(_) => 0
+                    }
+                }
+                Err(_) => 0
+            }
+        }
+        Err(_) => 0
+    }
+}
+"#,
+    );
+    assert_eq!(result, Value::Int(0));
+}
+
+// ── Env.* (v3.3.0) ────────────────────────────────────────────────────────────
+
+#[test]
+fn env_get_or_returns_default_when_missing() {
+    let result = eval(
+        r#"
+public fn main() -> String {
+    Env.get_or("__FAVNIR_MISSING_VAR_XYZ__", "default_value")
+}
+"#,
+    );
+    assert_eq!(result, Value::Str("default_value".into()));
+}
+
+#[test]
+fn env_get_or_returns_value_when_set() {
+    // Safety: single-threaded test context; variable is isolated by unique name
+    unsafe {
+        std::env::set_var("FAVNIR_TEST_ENV_VAR_3_3", "test_value");
+    }
+    let result = eval(
+        r#"
+public fn main() -> String {
+    Env.get_or("FAVNIR_TEST_ENV_VAR_3_3", "fallback")
+}
+"#,
+    );
+    assert_eq!(result, Value::Str("test_value".into()));
+}
+
+// ── Random.seed + Gen.* (v3.5.0) ─────────────────────────────────────────────
+
+#[test]
+fn random_seed_makes_deterministic() {
+    let src = r#"
+public fn main() -> Int {
+    Random.seed(42);
+    Random.int(1, 1000000)
+}
+"#;
+    assert_eq!(eval(src), eval(src));
+}
+
+#[test]
+fn gen_string_val_returns_correct_length() {
+    let result = eval(
+        r#"
+public fn main() -> Int {
+    String.length(Gen.string_val(8))
+}
+"#,
+    );
+    assert_eq!(result, Value::Int(8));
+}
+
+#[test]
+fn gen_one_raw_returns_map_with_fields() {
+    let result = eval(
+        r#"
+type Point = { x: Int y: Int }
+
+public fn main() -> Int {
+    bind row <- Gen.one_raw("Point");
+    Map.size(row)
+}
+"#,
+    );
+    assert_eq!(result, Value::Int(2));
+}
+
+#[test]
+fn gen_list_raw_returns_n_rows() {
+    let result = eval(
+        r#"
+type Widget = { id: Int label: String }
+
+public fn main() -> Int {
+    bind rows <- Gen.list_raw("Widget", 5);
+    List.length(rows)
+}
+"#,
+    );
+    assert_eq!(result, Value::Int(5));
+}
+
+#[test]
+fn gen_list_raw_zero_rows() {
+    let result = eval(
+        r#"
+type Tag = { code: String }
+
+public fn main() -> Int {
+    bind rows <- Gen.list_raw("Tag", 0);
+    List.length(rows)
+}
+"#,
+    );
+    assert_eq!(result, Value::Int(0));
+}
+
+#[test]
+fn gen_simulate_raw_returns_n_rows() {
+    let result = eval(
+        r#"
+type Datum = { value: Int }
+
+public fn main() -> Int {
+    Random.seed(1);
+    bind rows <- Gen.simulate_raw("Datum", 20, 0.5);
+    List.length(rows)
+}
+"#,
+    );
+    assert_eq!(result, Value::Int(20));
+}
+
+#[test]
+fn gen_profile_raw_total_matches_input() {
+    let result = eval(
+        r#"
+type Score = { points: Int label: String }
+
+public fn main() -> Int {
+    Random.seed(42);
+    bind rows <- Gen.list_raw("Score", 10);
+    bind prof <- Gen.profile_raw("Score", rows);
+    prof.total
+}
+"#,
+    );
+    assert_eq!(result, Value::Int(10));
+}
+
+#[test]
+fn gen_profile_raw_with_full_noise_all_invalid() {
+    // noise=1.0 means all Int fields are corrupted to "NaN" → all rows invalid
+    let result = eval(
+        r#"
+type Num = { value: Int }
+
+public fn main() -> Int {
+    Random.seed(42);
+    bind rows <- Gen.simulate_raw("Num", 10, 1.0);
+    bind prof <- Gen.profile_raw("Num", rows);
+    prof.invalid
+}
+"#,
+    );
+    assert_eq!(result, Value::Int(10));
+}
+
+#[test]
+fn checkpoint_last_returns_none_initially() {
+    let dir = tempdir().expect("tempdir");
+    set_checkpoint_backend(CheckpointBackend::File {
+        dir: dir.path().join(".fav_checkpoints"),
+    });
+    let result = eval(
+        r#"
+public fn main() -> Bool !Checkpoint {
+    bind value <- Checkpoint.last("vm_cp_none")
+    Option.is_none(value)
+}
+"#,
+    );
+    assert_eq!(result, Value::Bool(true));
+}
+
+#[test]
+fn checkpoint_save_and_meta_roundtrip() {
+    let dir = tempdir().expect("tempdir");
+    set_checkpoint_backend(CheckpointBackend::File {
+        dir: dir.path().join(".fav_checkpoints"),
+    });
+    let result = eval(
+        r#"
+public fn main() -> String !Checkpoint {
+    Checkpoint.save("vm_cp_save", "hello");
+    bind meta <- Checkpoint.meta("vm_cp_save")
+    meta.value
+}
+"#,
+    );
+    assert_eq!(result, Value::Str("hello".into()));
+}
+
+#[test]
+fn checkpoint_reset_clears_saved_value() {
+    let dir = tempdir().expect("tempdir");
+    set_checkpoint_backend(CheckpointBackend::File {
+        dir: dir.path().join(".fav_checkpoints"),
+    });
+    let result = eval(
+        r#"
+public fn main() -> Bool !Checkpoint {
+    Checkpoint.save("vm_cp_reset", "hello");
+    Checkpoint.reset("vm_cp_reset");
+    bind value <- Checkpoint.last("vm_cp_reset")
+    Option.is_none(value)
+}
+"#,
+    );
+    assert_eq!(result, Value::Bool(true));
+}
+
+#[test]
+fn io_timestamp_returns_iso_utc_length() {
+    let result = eval(
+        r#"
+public fn main() -> Int !Io {
+    String.length(IO.timestamp())
+}
+"#,
+    );
+    assert_eq!(result, Value::Int(20));
+}
+
+#[test]
+fn db_upsert_raw_is_idempotent() {
+    let result = eval(
+        r#"
+public fn main() -> Int !Db {
+    bind conn_result <- DB.connect("sqlite::memory:")
+    match conn_result {
+        Ok(conn) => {
+            bind _ <- DB.execute_raw(conn, "CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT)")
+            bind row <- Map.set(Map.set((), "id", "1"), "name", "Alice")
+            DB.upsert_raw(conn, "users", row, "id");
+            DB.upsert_raw(conn, "users", row, "id");
+            bind rows_result <- DB.query_raw(conn, "SELECT id, name FROM users")
+            match rows_result {
+                Ok(rows) => List.length(rows)
+                Err(_) => 0
+            }
+        }
+        Err(_) => 0
+    }
+}
+"#,
+    );
+    assert_eq!(result, Value::Int(1));
+}
+
+#[test]
+fn db_upsert_raw_updates_existing_row() {
+    let result = eval(
+        r#"
+public fn main() -> String !Db {
+    bind conn_result <- DB.connect("sqlite::memory:")
+    match conn_result {
+        Ok(conn) => {
+            bind _ <- DB.execute_raw(conn, "CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT)")
+            bind row1 <- Map.set(Map.set((), "id", "1"), "name", "Alice")
+            bind row2 <- Map.set(Map.set((), "id", "1"), "name", "Bob")
+            DB.upsert_raw(conn, "users", row1, "id");
+            DB.upsert_raw(conn, "users", row2, "id");
+            bind rows_result <- DB.query_raw(conn, "SELECT name FROM users WHERE id = 1")
+            match rows_result {
+                Ok(rows) => {
+                    bind first <- Option.unwrap_or(List.first(rows), Map.set((), "name", ""))
+                    Option.unwrap_or(Map.get(first, "name"), "")
+                }
+                Err(_) => ""
+            }
+        }
+        Err(_) => ""
+    }
+}
+"#,
+    );
+    assert_eq!(result, Value::Str("Bob".into()));
+}
+
+#[test]
+fn http_get_raw_returns_err_on_bad_url() {
+    let result = eval(
+        r#"
+public fn main() -> Bool !Network {
+    bind result <- Http.get_raw("://bad-url")
+    Result.is_err(result)
+}
+"#,
+    );
+    assert_eq!(result, Value::Bool(true));
+}
+
+#[test]
+fn http_post_raw_sends_body() {
+    use std::thread;
+
+    let server = tiny_http::Server::http("127.0.0.1:0").expect("server");
+    let port = server.server_addr().to_ip().expect("ip").port();
+    let handle = thread::spawn(move || {
+        let mut request = server.recv().expect("request");
+        let mut body = String::new();
+        request.as_reader().read_to_string(&mut body).expect("body");
+        request
+            .respond(tiny_http::Response::from_string(body))
+            .expect("respond");
+    });
+    let src = format!(
+        r#"
+public fn main() -> String !Network {{
+    bind result <- Http.post_raw("http://127.0.0.1:{port}/echo", "hello", "text/plain")
+    match result {{
+        Ok(resp) => resp.body
+        Err(err) => err.message
+    }}
+}}
+"#
+    );
+    let value = eval(&src);
+    handle.join().expect("join");
+    assert_eq!(value, Value::Str("hello".into()));
+}
+
+#[test]
+fn parquet_write_then_read_roundtrip() {
+    let dir = tempdir().expect("tempdir");
+    let path = dir
+        .path()
+        .join("roundtrip.parquet")
+        .display()
+        .to_string()
+        .replace('\\', "\\\\");
+    let src = format!(
+        r#"
+type Product = {{ id: Int name: String }}
+
+public fn main() -> Int {{
+    bind rows <- collect {{
+        yield Map.set(Map.set((), "id", "1"), "name", "Alice");
+        yield Map.set(Map.set((), "id", "2"), "name", "Bob");
+        ()
+    }}
+    bind write_result <- Parquet.write_raw("{path}", "Product", rows)
+    match write_result {{
+        Err(_) => 0
+        Ok(_) => {{
+            bind read_result <- Parquet.read_raw("{path}")
+            match read_result {{
+                Ok(loaded) => List.length(loaded)
+                Err(_) => 0
+            }}
+        }}
+    }}
+}}
+"#
+    );
+    assert_eq!(eval(&src), Value::Int(2));
+}
+
+#[test]
+fn parquet_read_returns_err_on_missing_file() {
+    let dir = tempdir().expect("tempdir");
+    let path = dir
+        .path()
+        .join("missing.parquet")
+        .display()
+        .to_string()
+        .replace('\\', "\\\\");
+    let src = format!(
+        r#"
+public fn main() -> Bool {{
+    bind result <- Parquet.read_raw("{path}")
+    Result.is_err(result)
+}}
+"#
+    );
+    assert_eq!(eval(&src), Value::Bool(true));
+}
+
+#[test]
+fn parquet_write_empty_rows_ok() {
+    let dir = tempdir().expect("tempdir");
+    let path = dir
+        .path()
+        .join("empty.parquet")
+        .display()
+        .to_string()
+        .replace('\\', "\\\\");
+    let src = format!(
+        r#"
+type Product = {{ id: Int name: String }}
+
+public fn main() -> Bool {{
+    bind empty <- collect {{ () }}
+    bind result <- Parquet.write_raw("{path}", "Product", empty)
+    Result.is_ok(result)
+}}
+"#
+    );
+    assert_eq!(eval(&src), Value::Bool(true));
+}
+
+#[test]
+fn grpc_encode_decode_roundtrip() {
+    let result = eval(
+        r#"
+type User = { id: Int name: String active: Bool }
+
+public fn main() -> String {
+    bind row0 <- Map.set((), "id", "1")
+    bind row1 <- Map.set(row0, "name", "Alice")
+    bind row2 <- Map.set(row1, "active", "true")
+    bind encoded <- Grpc.encode_raw("User", row2)
+    bind decoded <- Grpc.decode_raw("User", encoded)
+    Option.unwrap_or(Map.get(decoded, "name"), "")
+}
+"#,
+    );
+    assert_eq!(result, Value::Str("Alice".into()));
+}
+
+#[test]
+fn grpc_encode_int_field() {
+    let result = eval(
+        r#"
+type User = { id: Int }
+
+public fn main() -> String {
+    bind row <- Map.set((), "id", "42")
+    bind encoded <- Grpc.encode_raw("User", row)
+    bind decoded <- Grpc.decode_raw("User", encoded)
+    Option.unwrap_or(Map.get(decoded, "id"), "")
+}
+"#,
+    );
+    assert_eq!(result, Value::Str("42".into()));
+}
+
+#[test]
+fn grpc_encode_string_field() {
+    let result = eval(
+        r#"
+type User = { name: String }
+
+public fn main() -> String {
+    bind row <- Map.set((), "name", "Alice")
+    bind encoded <- Grpc.encode_raw("User", row)
+    bind decoded <- Grpc.decode_raw("User", encoded)
+    Option.unwrap_or(Map.get(decoded, "name"), "")
+}
+"#,
+    );
+    assert_eq!(result, Value::Str("Alice".into()));
+}
+
+#[test]
+fn grpc_encode_grpc_frame_roundtrip() {
+    let payload = b"favnir grpc".to_vec();
+    let framed = super::encode_grpc_frame(&payload);
+    let decoded = super::decode_grpc_frame(&framed).expect("frame decode");
+    assert_eq!(decoded, payload);
+}
+
+#[test]
+fn grpc_call_raw_returns_err_on_bad_host() {
+    let result = eval(
+        r#"
+public fn main() -> Bool !Rpc {
+    bind payload <- Map.set((), "id", "1")
+    bind result <- Grpc.call_raw("127.0.0.1:9", "/UserService/GetUser", payload)
+    Result.is_err(result)
+}
+"#,
+    );
+    assert_eq!(result, Value::Bool(true));
+}
+
+#[test]
+fn grpc_call_stream_raw_returns_list_on_bad_host() {
+    let result = eval(
+        r#"
+public fn main() -> Int !Rpc {
+    bind payload <- Map.set((), "id", "1")
+    bind rows <- Grpc.call_stream_raw("127.0.0.1:9", "/UserService/ListUsers", payload)
+    List.length(rows)
+}
+"#,
+    );
+    assert_eq!(result, Value::Int(0));
+}
+
+#[test]
+fn rpc_error_code_field_accessible() {
+    let result = eval(
+        r#"
+public fn main() -> Int {
+    bind err <- RpcError { code: 2, message: "bad host" }
+    err.code
+}
+"#,
+    );
+    assert_eq!(result, Value::Int(2));
+}
+
+#[test]
+fn rpc_error_message_field_accessible() {
+    let result = eval(
+        r#"
+public fn main() -> String {
+    bind err <- RpcError { code: 2, message: "bad host" }
+    err.message
+}
+"#,
+    );
+    assert_eq!(result, Value::Str("bad host".into()));
 }

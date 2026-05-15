@@ -45,7 +45,7 @@ impl DocumentStore {
             }
             Err(err) => CheckedDoc {
                 source,
-                errors: vec![TypeError::new("E000", err.message, err.span)],
+                errors: vec![TypeError::new("E0500", err.message, err.span)],
                 type_at: HashMap::new(),
                 symbols: Vec::new(),
                 def_at: HashMap::new(),
@@ -84,7 +84,7 @@ mod tests {
         docs.open_or_change("file:///broken.fav", "fn main(".to_string());
         let doc = docs.get("file:///broken.fav").expect("checked doc");
         assert_eq!(doc.errors.len(), 1);
-        assert_eq!(doc.errors[0].code, "E000");
+        assert_eq!(doc.errors[0].code, "E0500");
         assert!(doc.type_at.is_empty());
         assert!(doc.symbols.is_empty());
     }

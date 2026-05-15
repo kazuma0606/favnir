@@ -1,0 +1,62 @@
+type SchemaError = {
+    field: String
+    expected: String
+    got: String
+}
+
+type Config = {
+    host: String
+    port: Int
+}
+
+fn parse<T>(text: String) -> Result<T, SchemaError> {
+    chain raw <- Json.parse_raw(text)
+    Schema.adapt_one(raw, type_name_of<T>())
+}
+
+fn parse_list<T>(text: String) -> Result<List<T>, SchemaError> {
+    chain raw <- Json.parse_array_raw(text)
+    Schema.adapt(raw, type_name_of<T>())
+}
+
+fn write<T>(value: T) -> String {
+    Schema.to_json(value, type_name_of<T>())
+}
+
+fn write_list<T>(rows: List<T>) -> String {
+    Schema.to_json_array(rows, type_name_of<T>())
+}
+
+test "test_parse_object" {
+    bind result <- parse<Config>("{\"host\":\"localhost\",\"port\":8080}")
+    bind cfg <- Result.unwrap_or(result, Config { host: "" port: 0 })
+    assert_eq(cfg.port, 8080)
+}
+
+test "test_parse_list" {
+    bind result <- parse_list<Config>("[{\"host\":\"a\",\"port\":1},{\"host\":\"b\",\"port\":2}]")
+    match result {
+        Ok(rows) => assert_eq(List.length(rows), 2)
+        Err(_)   => assert_eq(0, 2)
+    }
+}
+
+test "test_write_object" {
+    bind text <- write<Config>(Config { host: "localhost" port: 8080 })
+    assert_eq(String.contains(text, "\"host\":\"localhost\""), true)
+}
+
+test "test_write_list" {
+    bind rows <- collect {
+        yield Config { host: "a" port: 1 };
+        yield Config { host: "b" port: 2 };
+        ()
+    }
+    bind text <- write_list<Config>(rows)
+    assert_eq(String.contains(text, "\"port\":2"), true)
+}
+
+test "test_parse_error_invalid_json" {
+    bind result <- parse<Config>("{ bad json }")
+    assert_eq(Result.is_err(result), true)
+}

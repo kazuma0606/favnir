@@ -1,0 +1,23 @@
+public type CsvOptions = {
+    delimiter: String
+    has_header: Bool
+}
+
+public fn parse<T>(text: String) -> Result<List<T>, SchemaError> {
+    chain raw <- Csv.parse_raw(text, ",", true)
+    Schema.adapt(raw, type_name_of<T>())
+}
+
+public fn parse_positional<T>(text: String) -> Result<List<T>, SchemaError> {
+    chain raw <- Csv.parse_raw(text, ",", false)
+    Schema.adapt(raw, type_name_of<T>())
+}
+
+public fn write<T>(rows: List<T>) -> String {
+    Schema.to_csv(rows, type_name_of<T>())
+}
+
+public fn parse_with_opts<T>(text: String, opts: CsvOptions) -> Result<List<T>, SchemaError> {
+    chain raw <- Csv.parse_raw(text, opts.delimiter, opts.has_header)
+    Schema.adapt(raw, type_name_of<T>())
+}

@@ -1,0 +1,74 @@
+import rune "grpc"
+
+type User = { id: Int name: String score: Float active: Bool }
+
+fn sample_user() -> Map<String, String> {
+    bind row0 <- Map.set((), "id", "1")
+    bind row1 <- Map.set(row0, "name", "Alice")
+    bind row2 <- Map.set(row1, "score", "4.5")
+    Map.set(row2, "active", "true")
+}
+
+test "grpc_encode_decode_roundtrip" {
+    bind encoded <- grpc.encode("User", sample_user())
+    bind decoded <- grpc.decode("User", encoded)
+    assert_eq(Option.unwrap_or(Map.get(decoded, "id"), ""), "1")
+}
+
+test "grpc_encode_int_field_preserved" {
+    bind encoded <- grpc.encode("User", sample_user())
+    bind decoded <- grpc.decode("User", encoded)
+    assert_eq(Option.unwrap_or(Map.get(decoded, "id"), ""), "1")
+}
+
+test "grpc_encode_string_field_preserved" {
+    bind encoded <- grpc.encode("User", sample_user())
+    bind decoded <- grpc.decode("User", encoded)
+    assert_eq(Option.unwrap_or(Map.get(decoded, "name"), ""), "Alice")
+}
+
+test "grpc_encode_float_field_preserved" {
+    bind encoded <- grpc.encode("User", sample_user())
+    bind decoded <- grpc.decode("User", encoded)
+    assert_eq(Option.unwrap_or(Map.get(decoded, "score"), ""), "4.5")
+}
+
+test "grpc_encode_bool_field_preserved" {
+    bind encoded <- grpc.encode("User", sample_user())
+    bind decoded <- grpc.decode("User", encoded)
+    assert_eq(Option.unwrap_or(Map.get(decoded, "active"), ""), "true")
+}
+
+test "grpc_call_bad_host_is_err" {
+    bind result <- grpc.call("127.0.0.1:9", "/UserService/GetUser", sample_user())
+    assert(Result.is_err(result))
+}
+
+test "grpc_call_stream_bad_host_returns_empty" {
+    bind rows <- grpc.call_stream("127.0.0.1:9", "/UserService/ListUsers", sample_user())
+    assert_eq(List.length(rows), 0)
+}
+
+test "grpc_ok_is_ok_result" {
+    assert(Result.is_ok(grpc.ok(sample_user())))
+}
+
+test "grpc_err_is_err_result" {
+    assert(Result.is_err(grpc.err(2, "bad host")))
+}
+
+test "grpc_err_code_preserved" {
+    bind result <- grpc.err(2, "bad host")
+    match result {
+        Err(err) => assert_eq(err.code, 2)
+        Ok(_) => assert(false)
+    }
+}
+
+test "grpc_err_message_preserved" {
+    bind result <- grpc.err(2, "bad host")
+    match result {
+        Err(err) => assert_eq(err.message, "bad host")
+        Ok(_) => assert(false)
+    }
+}

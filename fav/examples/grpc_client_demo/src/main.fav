@@ -1,0 +1,10 @@
+import rune "grpc"
+
+public fn main() -> Unit !Io !Rpc {
+    bind req <- Map.set((), "id", "1")
+    bind result <- grpc.call("127.0.0.1:50051", "/UserService/GetUser", req)
+    match result {
+        Ok(row) => IO.println(Option.unwrap_or(Map.get(row, "name"), ""))
+        Err(err) => IO.println(err.message)
+    }
+}

@@ -22,7 +22,7 @@ fn span_to_range(span: &Span, source: &str, code: &str) -> Range {
     let start_line = span.line.saturating_sub(1);
     let start_char = span.col.saturating_sub(1).min(line_len);
 
-    let end_char = if code == "E000" {
+    let end_char = if code == "E0500" {
         start_char.saturating_add(1).min(line_len)
     } else {
         line_len.max(start_char.saturating_add(1))
@@ -49,14 +49,14 @@ mod tests {
     #[test]
     fn converts_checker_error_to_zero_origin_diagnostic() {
         let errors = vec![TypeError::new(
-            "E018",
+            "E0218",
             "type mismatch",
             Span::new("test.fav", 0, 0, 2, 5),
         )];
         let diags = errors_to_diagnostics(&errors, "fn main() -> Int {\n    true\n}");
         assert_eq!(diags.len(), 1);
         assert_eq!(diags[0].severity, 1);
-        assert_eq!(diags[0].code, "E018");
+        assert_eq!(diags[0].code, "E0218");
         assert_eq!(diags[0].range.start.line, 1);
         assert_eq!(diags[0].range.start.character, 4);
     }
@@ -64,7 +64,7 @@ mod tests {
     #[test]
     fn parse_error_e000_gets_single_char_range() {
         let errors = vec![TypeError::new(
-            "E000",
+            "E0500",
             "parse error",
             Span::new("test.fav", 0, 0, 1, 4),
         )];

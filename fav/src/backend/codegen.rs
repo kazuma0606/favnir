@@ -417,6 +417,7 @@ pub fn codegen_program(ir: &IRProgram) -> FvcArtifact {
         str_table: writer.str_table,
         globals: writer.globals,
         functions: writer.functions,
+        type_metas: ir.type_metas.clone(),
         explain_json: None,
     }
 }
@@ -665,6 +666,7 @@ mod tests {
                 return_ty: Type::Unit,
                 body: IRExpr::Lit(Lit::Unit, Type::Unit),
             }],
+            type_metas: std::collections::HashMap::new(),
         };
 
         let artifact = codegen_program(&ir);
@@ -704,6 +706,7 @@ mod tests {
                     Type::String,
                 ),
             }],
+            type_metas: std::collections::HashMap::new(),
         };
 
         let artifact = codegen_program(&ir);
@@ -742,6 +745,7 @@ mod tests {
                     Type::Int,
                 ),
             }],
+            type_metas: std::collections::HashMap::new(),
         };
 
         let artifact = codegen_program(&ir);

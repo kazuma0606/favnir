@@ -1,0 +1,8 @@
+- [x] Phase 0: version / dependencies
+- [x] Phase 1: checker / compiler registration
+- [x] Phase 2: VM builtins
+- [x] Phase 3: `http` rune
+- [x] Phase 4: `http.test.fav`
+- [x] Phase 5: `parquet` rune
+- [x] Phase 6: driver + `fav build --graphql`
+- [x] Phase 7: examples + docs

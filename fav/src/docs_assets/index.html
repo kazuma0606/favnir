@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Favnir Docs</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div>
+      <h1>Favnir Docs</h1>
+      <p>Local reference UI powered by explain JSON.</p>
+    </div>
+    <input id="search" type="search" placeholder="Search stdlib or project symbols">
+  </header>
+
+  <main class="layout">
+    <aside class="sidebar">
+      <section>
+        <h2>Stdlib</h2>
+        <div id="stdlib-tree"></div>
+      </section>
+      <section id="project-section" class="hidden">
+        <h2>Project</h2>
+        <div id="project-tree"></div>
+      </section>
+    </aside>
+
+    <section class="detail">
+      <div id="detail-empty" class="empty">
+        Select an item from the left pane to inspect its signature.
+      </div>
+      <div id="detail-view"></div>
+    </section>
+  </main>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

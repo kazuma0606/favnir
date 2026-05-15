@@ -5,3 +5,7 @@ src = "."
 
 [runes]
 path = "."
+
+[checkpoint]
+backend = "file"
+path = "../fav/.fav_checkpoints"

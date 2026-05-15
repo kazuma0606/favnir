@@ -1,0 +1,32 @@
+// examples/gen_demo/main.fav — synthetic data generation (v3.5.0)
+// Demonstrates: Gen.list_raw, Gen.simulate_raw, Gen.profile_raw, Random.seed
+
+type User = {
+    id:     Int
+    name:   String
+    age:    Int
+    region: String
+}
+
+public fn main() -> Unit !Io !Random {
+    // 1. Generate clean synthetic data (seed for reproducibility)
+    Random.seed(42);
+    bind users <- Gen.list_raw("User", 5);
+    IO.println("=== Clean synthetic rows ===");
+    for row in users {
+        bind id_val <- Option.unwrap_or(Map.get(row, "id"), "?");
+        bind nm <- Option.unwrap_or(Map.get(row, "name"), "?");
+        IO.println($"  id={id_val} name={nm}");
+    }
+
+    // 2. Simulate noisy data (10% corruption)
+    Random.seed(42);
+    bind dirty <- Gen.simulate_raw("User", 20, 0.1);
+    IO.println($"\n=== Simulated rows (10% noise, {List.length(dirty)} total) ===");
+
+    // 3. Profile the noisy data
+    bind prof <- Gen.profile_raw("User", dirty);
+    IO.println($"  total:   {prof.total}");
+    IO.println($"  valid:   {prof.valid}");
+    IO.println($"  invalid: {prof.invalid}");
+}

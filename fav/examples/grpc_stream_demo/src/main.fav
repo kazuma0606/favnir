@@ -1,0 +1,7 @@
+import rune "grpc"
+
+public fn main() -> Int !Rpc {
+    bind req <- Map.set((), "cursor", "0")
+    bind rows <- grpc.call_stream("127.0.0.1:9", "/EventService/ListEvents", req)
+    List.length(rows)
+}

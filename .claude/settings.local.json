@@ -16,7 +16,13 @@
       "Bash(/tmp/type_err.fav:*)",
       "Bash(grep -v \"Compiling\\\\|Finished\\\\|^$\")",
       "Bash(/c/Users/yoshi/favnir/fav/target/debug/fav.exe run:*)",
-      "Bash(grep -v \"//\\\\|test\\\\|///\")"
+      "Bash(grep -v \"//\\\\|test\\\\|///\")",
+      "Bash(grep -rn \"\"E0[0-9][0-9]\"\" C:/Users/yoshi/favnir/fav/src/)",
+      "Bash(for f:*)",
+      "Bash(do)",
+      "Bash(sed -i -e 's/\"\"E000\"\"/\"\"E0500\"\"/g' -e 's/\"\"E012\"\"/\"\"E0112\"\"/g' -e 's/\"\"E013\"\"/\"\"E0213\"\"/g' -e 's/\"\"E014\"\"/\"\"E0214\"\"/g' -e 's/\"\"E018\"\"/\"\"E0218\"\"/g' \"$f\")",
+      "Bash(echo \"done: $f\")",
+      "Bash(done)"
     ]
   }
 }

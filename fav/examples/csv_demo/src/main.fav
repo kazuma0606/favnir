@@ -1,0 +1,22 @@
+import rune "csv"
+
+type User = {
+    id: Int
+    name: String
+    age: Int
+}
+
+public fn main() -> Unit !Io !File {
+    bind text <- File.read("users.csv")
+    bind result <- csv.parse<User>(text)
+    match result {
+        Ok(users) => {
+            IO.println($"Loaded {List.length(users)} users");
+            bind out <- csv.write<User>(users)
+            IO.println(out)
+        }
+        Err(err) => {
+            IO.println($"CSV error: {Debug.show(err)}")
+        }
+    }
+}

@@ -328,7 +328,7 @@ mod tests {
             .expect("handle");
         let text = String::from_utf8(out).expect("utf8");
         assert!(text.contains("textDocument/publishDiagnostics"));
-        assert!(text.contains("\"code\":\"E000\""));
+        assert!(text.contains("\"code\":\"E0500\""));
     }
 
     #[test]
@@ -461,7 +461,7 @@ mod tests {
         let mut out = Vec::new();
         run_lsp_loop(&mut reader, &mut out).expect("loop");
         let text = String::from_utf8(out).expect("utf8");
-        assert!(text.contains("\"code\":\"E000\""));
+        assert!(text.contains("\"code\":\"E0500\""));
         assert!(text.contains("\"diagnostics\":[]"));
         assert!(text.contains("```favnir\\nInt\\n```"));
     }

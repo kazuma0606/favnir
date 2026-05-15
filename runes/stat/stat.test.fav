@@ -1,0 +1,112 @@
+// stat rune tests (v2.8.0) — standalone form (inline definitions)
+
+type ProfileReport = {
+    total: Int
+    min_v: Int
+    max_v: Int
+}
+
+fn uniform(min: Int) -> Int -> Int !Random = |max| {
+    Random.int(min, max)
+}
+
+fn choice_str(xs: List<String>) -> String !Random = {
+    if List.length(xs) == 0 {
+        ""
+    } else {
+        Option.unwrap_or(List.first(List.drop(xs, Random.int(0, List.length(xs) - 1))), "")
+    }
+}
+
+fn choice_int(xs: List<Int>) -> Int !Random = {
+    if List.length(xs) == 0 {
+        0
+    } else {
+        Option.unwrap_or(List.first(List.drop(xs, Random.int(0, List.length(xs) - 1))), 0)
+    }
+}
+
+fn list_int(n: Int) -> List<Int> !Random = {
+    List.map(List.range(0, n), |ignored| Random.int(0, 100))
+}
+
+fn list_float(n: Int) -> List<Float> !Random = {
+    List.map(List.range(0, n), |ignored| Random.float())
+}
+
+fn profile_int(xs: List<Int>) -> ProfileReport = {
+    bind total <- List.length(xs)
+    bind min_v <- Option.unwrap_or(List.fold(xs, Option.none(), |acc, x|
+        match acc {
+            Some(cur) => if x < cur { Option.some(x) } else { Option.some(cur) }
+            None      => Option.some(x)
+        }
+    ), 0)
+    bind max_v <- Option.unwrap_or(List.fold(xs, Option.none(), |acc, x|
+        match acc {
+            Some(cur) => if x > cur { Option.some(x) } else { Option.some(cur) }
+            None      => Option.some(x)
+        }
+    ), 0)
+    ProfileReport { total: total  min_v: min_v  max_v: max_v }
+}
+
+// --- uniform ---
+
+test "uniform min==max always returns that value" {
+    bind n <- uniform(7)(7)
+    assert_eq(n, 7)
+}
+
+test "uniform(0)(0) returns 0" {
+    bind n <- uniform(0)(0)
+    assert_eq(n, 0)
+}
+
+// --- choice_str ---
+
+test "choice_str single element" {
+    bind xs <- collect { yield "only"; }
+    bind s <- choice_str(xs)
+    assert_eq(s, "only")
+}
+
+// --- choice_int ---
+
+test "choice_int single element" {
+    bind xs <- collect { yield 42; }
+    bind n <- choice_int(xs)
+    assert_eq(n, 42)
+}
+
+// --- list_int ---
+
+test "list_int returns correct length" {
+    bind xs <- list_int(5)
+    assert_eq(List.length(xs), 5)
+}
+
+test "list_int length 0 returns empty list" {
+    bind xs <- list_int(0)
+    assert_eq(List.length(xs), 0)
+}
+
+// --- list_float ---
+
+test "list_float returns correct length" {
+    bind xs <- list_float(3)
+    assert_eq(List.length(xs), 3)
+}
+
+// --- profile_int ---
+
+test "profile_int total count" {
+    bind xs <- list_int(4)
+    bind report <- profile_int(xs)
+    assert_eq(report.total, 4)
+}
+
+test "profile_int empty list" {
+    bind report <- profile_int(collect { })
+    assert_eq(report.total, 0)
+}

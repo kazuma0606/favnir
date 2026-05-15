@@ -741,14 +741,71 @@ impl Parser {
 
     fn parse_field(&mut self) -> Result<Field, ParseError> {
         let start = self.peek_span().clone();
+        let attrs = self.parse_field_attrs()?;
         let (name, _) = self.expect_ident()?;
         self.expect(&TokenKind::Colon)?;
         let ty = self.parse_type_expr()?;
         Ok(Field {
             name,
             ty,
+            attrs,
             span: self.span_from(&start),
         })
+    }
+
+    fn parse_field_attrs(&mut self) -> Result<Vec<FieldAttr>, ParseError> {
+        let mut attrs = Vec::new();
+        while self.peek() == &TokenKind::Hash {
+            let start = self.peek_span().clone();
+            self.expect(&TokenKind::Hash)?;
+            self.expect(&TokenKind::LBracket)?;
+            let (name, _) = self.expect_ident()?;
+            let arg = if self.peek() == &TokenKind::LParen {
+                self.advance();
+                let arg = match self.peek().clone() {
+                    TokenKind::Int(n) => {
+                        self.advance();
+                        n.to_string()
+                    }
+                    TokenKind::Str(s) => {
+                        self.advance();
+                        s
+                    }
+                    TokenKind::Ident(s) => {
+                        self.advance();
+                        s
+                    }
+                    other => {
+                        return Err(ParseError::new(
+                            format!("expected attribute argument, got {:?}", other),
+                            self.peek_span().clone(),
+                        ));
+                    }
+                };
+                self.expect(&TokenKind::RParen)?;
+                Some(arg)
+            } else {
+                None
+            };
+            self.expect(&TokenKind::RBracket)?;
+            attrs.push(FieldAttr {
+                name,
+                arg,
+                span: self.span_from(&start),
+            });
+        }
+        Ok(attrs)
+    }
+
+    fn parse_type_arg_list(&mut self) -> Result<Vec<TypeExpr>, ParseError> {
+        self.expect(&TokenKind::LAngle)?;
+        let mut args = vec![self.parse_type_expr()?];
+        while self.peek() == &TokenKind::Comma {
+            self.advance();
+            args.push(self.parse_type_expr()?);
+        }
+        self.expect(&TokenKind::RAngle)?;
+        Ok(args)
     }
 
     fn parse_sum_variants(&mut self) -> Result<Vec<Variant>, ParseError> {
@@ -982,7 +1039,7 @@ impl Parser {
     }
 
     // effect annotation: ("!" effect_term)+   (1-8, 1-9)
-    // effect_term = Pure | Io | Db | Network | File | Emit<IDENT>
+    // effect_term = Pure | Io | Db | Network | Rpc | File | Checkpoint | Emit<IDENT>
     fn parse_effect_ann(&mut self) -> Result<Vec<Effect>, ParseError> {
         let mut effects = Vec::new();
         while self.peek() == &TokenKind::Bang {
@@ -1005,9 +1062,17 @@ impl Parser {
                         self.advance();
                         Effect::Network
                     }
+                    "Rpc" => {
+                        self.advance();
+                        Effect::Rpc
+                    }
                     "File" => {
                         self.advance();
                         Effect::File
+                    }
+                    "Checkpoint" => {
+                        self.advance();
+                        Effect::Checkpoint
                     }
                     "Trace" => {
                         self.advance();
@@ -1696,6 +1761,21 @@ impl Parser {
                     let (field, _) = self.expect_ident()?;
                     let span = self.span_from(&start);
                     expr = Expr::FieldAccess(Box::new(expr), field, span);
+                }
+                TokenKind::LAngle => {
+                    let saved_pos = self.pos;
+                    if let Ok(type_args) = self.parse_type_arg_list() {
+                        if self.peek() == &TokenKind::LParen {
+                            let span = self.span_from(&start);
+                            expr = Expr::TypeApply(Box::new(expr), type_args, span);
+                        } else {
+                            self.pos = saved_pos;
+                            break;
+                        }
+                    } else {
+                        self.pos = saved_pos;
+                        break;
+                    }
                 }
                 // function call: expr(args)
                 TokenKind::LParen => {
@@ -2496,6 +2576,71 @@ mod tests {
         let p = parse("fn f() -> String { user.name }");
         if let Item::FnDef(f) = &p.items[0] {
             assert!(matches!(*f.body.expr, Expr::FieldAccess(_, _, _)));
+        }
+    }
+
+    #[test]
+    fn parse_field_with_col_attr() {
+        let p = parse("type Row = { #[col(0)] id: Int }");
+        let Item::TypeDef(td) = &p.items[0] else {
+            panic!("expected TypeDef")
+        };
+        let TypeBody::Record(fields) = &td.body else {
+            panic!("expected record type")
+        };
+        assert_eq!(fields.len(), 1);
+        assert_eq!(fields[0].attrs.len(), 1);
+        assert_eq!(fields[0].attrs[0].name, "col");
+        assert_eq!(fields[0].attrs[0].arg.as_deref(), Some("0"));
+    }
+
+    #[test]
+    fn parse_type_with_multiple_col_attrs() {
+        let p = parse("type Row = { #[col(0)] id: Int #[col(1)] name: String }");
+        let Item::TypeDef(td) = &p.items[0] else {
+            panic!("expected TypeDef")
+        };
+        let TypeBody::Record(fields) = &td.body else {
+            panic!("expected record type")
+        };
+        assert_eq!(fields.len(), 2);
+        assert_eq!(fields[0].attrs[0].arg.as_deref(), Some("0"));
+        assert_eq!(fields[1].attrs[0].arg.as_deref(), Some("1"));
+    }
+
+    #[test]
+    fn parse_type_apply_on_namespaced_call() {
+        let p = parse("fn f(text: String) -> Unit { csv.parse<User>(text) }");
+        let Item::FnDef(f) = &p.items[0] else {
+            panic!("expected FnDef")
+        };
+        match f.body.expr.as_ref() {
+            Expr::Apply(callee, args, _) => {
+                assert_eq!(args.len(), 1);
+                match callee.as_ref() {
+                    Expr::TypeApply(inner, type_args, _) => {
+                        assert_eq!(type_args.len(), 1);
+                        assert!(matches!(inner.as_ref(), Expr::FieldAccess(_, _, _)));
+                    }
+                    other => panic!("expected TypeApply callee, got {:?}", other),
+                }
+            }
+            other => panic!("expected Apply expr, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parse_type_name_of_call() {
+        let p = parse("fn f() -> String { type_name_of<Row>() }");
+        let Item::FnDef(f) = &p.items[0] else {
+            panic!("expected FnDef")
+        };
+        match f.body.expr.as_ref() {
+            Expr::Apply(callee, args, _) => {
+                assert!(args.is_empty());
+                assert!(matches!(callee.as_ref(), Expr::TypeApply(_, _, _)));
+            }
+            other => panic!("expected Apply expr, got {:?}", other),
         }
     }
 

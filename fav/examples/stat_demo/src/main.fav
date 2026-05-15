@@ -1,0 +1,28 @@
+import rune "stat"
+
+public fn main() -> Unit !Io !Random = {
+    bind n <- stat.sample_int()
+    IO.println($"sample_int: {n}");
+
+    bind f <- stat.sample_float()
+    IO.println($"sample_float: {Debug.show(f)}");
+
+    bind b <- stat.sample_bool()
+    IO.println($"sample_bool: {Debug.show(b)}");
+
+    bind u <- stat.uniform(1)(10)
+    IO.println($"uniform(1)(10): {u}");
+
+    bind color <- stat.choice_str(collect {
+        yield "red";
+        yield "green";
+        yield "blue";
+    })
+    IO.println($"choice_str: {color}");
+
+    bind xs <- stat.list_int(5)
+    IO.println($"list_int(5): {Debug.show(xs)}");
+
+    bind report <- stat.profile_int(xs)
+    IO.println($"profile total={report.total} min={report.min_v} max={report.max_v}")
+}

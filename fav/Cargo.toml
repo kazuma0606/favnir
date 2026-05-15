@@ -1,6 +1,6 @@
 [package]
 name = "fav"
-version = "2.7.0"
+version = "3.9.0"
 edition = "2024"
 
 [dependencies]
@@ -11,11 +11,25 @@ rusqlite = { version = "0.31", features = ["bundled"] }
 ureq = "2"
 uuid = { version = "1", features = ["v4"] }
 serde_json = "1"
+base64 = "0.22"
+rand = { version = "0.8", features = ["small_rng"] }
 csv = "1"
 notify = { version = "6", default-features = false, features = ["macos_kqueue"] }
 walkdir = "2"
 viuer = "0.7"
 supports-color = "3"
+open = "5"
+postgres = { version = "0.19", optional = true }
+chrono = { version = "=0.4.38", default-features = false, features = ["clock"] }
+tiny_http = "0.12"
+tonic = { version = "0.11", features = ["transport"] }
+tokio = { version = "1", features = ["full"] }
+prost = "0.12"
+parquet = "52"
+arrow = { version = "52", features = ["ipc"] }
+
+[features]
+postgres_integration = ["dep:postgres"]
 
 [dev-dependencies]
 tempfile = "3"

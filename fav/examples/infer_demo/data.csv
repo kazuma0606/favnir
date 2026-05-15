@@ -1,0 +1,5 @@
+id,name,value,region,notes
+1,Alice,3.14,EU,
+2,Bob,2.71,US,hello
+3,Carol,1.41,,
+4,Dave,0.57,JP,testing

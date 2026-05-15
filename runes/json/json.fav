@@ -1,0 +1,17 @@
+public fn parse<T>(text: String) -> Result<T, SchemaError> {
+    chain raw <- Json.parse_raw(text)
+    Schema.adapt_one(raw, type_name_of<T>())
+}
+
+public fn parse_list<T>(text: String) -> Result<List<T>, SchemaError> {
+    chain raw <- Json.parse_array_raw(text)
+    Schema.adapt(raw, type_name_of<T>())
+}
+
+public fn write<T>(value: T) -> String {
+    Schema.to_json(value, type_name_of<T>())
+}
+
+public fn write_list<T>(rows: List<T>) -> String {
+    Schema.to_json_array(rows, type_name_of<T>())
+}

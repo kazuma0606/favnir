@@ -1,0 +1,4 @@
+[rune]
+name    = "stream_demo"
+version = "0.1.0"
+src     = "src"

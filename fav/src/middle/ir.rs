@@ -1,11 +1,25 @@
 use super::checker::Type;
 use crate::ast::{BinOp, Lit};
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap};
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct FieldMeta {
+    pub name: String,
+    pub ty: String,
+    pub col_index: Option<usize>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct TypeMeta {
+    pub type_name: String,
+    pub fields: Vec<FieldMeta>,
+}
 
 #[derive(Debug, Clone)]
 pub struct IRProgram {
     pub globals: Vec<IRGlobal>,
     pub fns: Vec<IRFnDef>,
+    pub type_metas: HashMap<String, TypeMeta>,
 }
 
 #[derive(Debug, Clone)]

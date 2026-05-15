@@ -1,0 +1,50 @@
+// stream_demo: demonstrates Stream<T> lazy sequences (v2.9.0)
+
+public fn main() -> Unit !Io {
+    // --- Stream.from + take + collect ---
+    bind s1 <- Stream.from(List.range(0, 10))
+    bind t1 <- Stream.take(s1, 5)
+    bind xs <- Stream.to_list(t1)
+    IO.println("first 5 of range(0,10):")
+    for x in xs {
+        IO.println_int(x);
+    }
+
+    // --- Stream.map ---
+    bind s2 <- Stream.from(List.range(1, 4))
+    bind m2 <- Stream.map(s2, |x| x * x)
+    bind squares <- Stream.to_list(m2)
+    IO.println("squares of [1,2,3]:")
+    for x in squares {
+        IO.println_int(x);
+    }
+
+    // --- Stream.filter ---
+    bind s3 <- Stream.from(List.range(1, 11))
+    bind f3 <- Stream.filter(s3, |x| x > 5)
+    bind evens <- Stream.to_list(f3)
+    IO.println("elements > 5 from range(1,11):")
+    for x in evens {
+        IO.println_int(x);
+    }
+
+    // --- Stream.gen (infinite) + take ---
+    bind s4 <- Stream.gen(1, |x| x * 2)
+    bind t4 <- Stream.take(s4, 6)
+    bind powers <- Stream.to_list(t4)
+    IO.println("powers of 2 (first 6):")
+    for x in powers {
+        IO.println_int(x);
+    }
+
+    // --- collect { for x in list { yield ...; } } ---
+    bind collected <- collect {
+        for x in List.range(1, 6) {
+            yield x * 3;
+        }
+    }
+    IO.println("multiples of 3 via collect+for:")
+    for x in collected {
+        IO.println_int(x);
+    }
+}

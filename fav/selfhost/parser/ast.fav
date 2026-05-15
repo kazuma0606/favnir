@@ -1,0 +1,35 @@
+// selfhost/parser/ast.fav
+// AST type definitions for the Favnir v3.0.0 selfhost parser.
+//
+// AST nodes are encoded as S-expression strings to avoid recursive types.
+// Grammar subset covered by parser.fav:
+//
+//   expr       ::= additive
+//   additive   ::= multiplicative (('+' | '-') multiplicative)*
+//   multiplicative ::= primary (('*' | '/') primary)*
+//   primary    ::= INT | STR | 'true' | 'false' | IDENT
+//
+// S-expression encoding examples:
+//   "(Int 42)"            — integer literal 42
+//   "(Str \"hello\")"     — string literal
+//   "(Bool true)"         — boolean true
+//   "(Ident foo)"         — identifier
+//   "(BinOp + A B)"       — binary operation A + B
+//   "(Error <msg>)"       — parse error
+//
+// ParseResult carries:
+//   node — S-expr string for the parsed node ("" on failure)
+//   rest — remaining unconsumed List<Token>
+//   ok   — true on success, false on error
+
+public type Token = {
+    kind: String
+    text: String
+    pos:  Int
+}
+
+public type ParseResult = {
+    node: String
+    rest: List<Token>
+    ok:   Bool
+}

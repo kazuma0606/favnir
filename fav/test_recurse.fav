@@ -1,0 +1,7 @@
+fn count_down(n: Int) -> Int {
+    if n <= 0 { 0 } else { count_down(n - 1) }
+}
+public fn main() -> Unit !Io {
+    bind r <- count_down(25)
+    IO.println(Debug.show(r))
+}

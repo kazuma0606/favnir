@@ -1,0 +1,31 @@
+public fn serve(port: Int, service_name: String) -> Unit !Io !Rpc {
+    Grpc.serve_raw(port, service_name)
+}
+
+public fn call(host: String, method: String, payload: Map<String, String>) -> Result<Map<String, String>, RpcError> !Rpc {
+    Grpc.call_raw(host, method, payload)
+}
+
+public fn serve_stream(port: Int, service_name: String) -> Unit !Io !Rpc {
+    Grpc.serve_stream_raw(port, service_name)
+}
+
+public fn call_stream(host: String, method: String, payload: Map<String, String>) -> List<Map<String, String>> !Rpc {
+    Grpc.call_stream_raw(host, method, payload)
+}
+
+public fn encode(type_name: String, row: Map<String, String>) -> String {
+    Grpc.encode_raw(type_name, row)
+}
+
+public fn decode(type_name: String, encoded: String) -> Map<String, String> {
+    Grpc.decode_raw(type_name, encoded)
+}
+
+public fn ok(payload: Map<String, String>) -> Result<Map<String, String>, RpcError> {
+    Result.ok(payload)
+}
+
+public fn err(code: Int, message: String) -> Result<Map<String, String>, RpcError> {
+    Result.err(RpcError { code: code, message: message })
+}

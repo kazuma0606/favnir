@@ -1,0 +1,171 @@
+// runes/db/db.test.fav — DB rune tests (v3.3.0)
+// Self-contained: redefines helper fns; uses SQLite in-memory only.
+
+type DbError = {
+    code: String
+    message: String
+}
+
+type User = {
+    id: Int
+    name: String
+    age: Int
+}
+
+// ── helpers ────────────────────────────────────────────────────────────────────
+
+fn connect(conn_str: String) -> Result<DbHandle, DbError> {
+    DB.connect(conn_str)
+}
+
+fn execute(handle: DbHandle, sql: String) -> Result<Int, DbError> {
+    DB.execute_raw(handle, sql)
+}
+
+fn execute_params(handle: DbHandle, sql: String, params: List<String>) -> Result<Int, DbError> {
+    DB.execute_raw_params(handle, sql, params)
+}
+
+fn query_raw(handle: DbHandle, sql: String) -> Result<List<Map<String, String>>, DbError> {
+    DB.query_raw(handle, sql)
+}
+
+fn query_params_raw(handle: DbHandle, sql: String, params: List<String>) -> Result<List<Map<String, String>>, DbError> {
+    DB.query_raw_params(handle, sql, params)
+}
+
+// ── tests ─────────────────────────────────────────────────────────────────────
+
+test "test_connect_sqlite_memory" {
+    bind result <- connect("sqlite::memory:")
+    assert_eq(Result.is_ok(result), true)
+}
+
+test "test_create_table_and_insert" {
+    bind conn_result <- connect("sqlite::memory:")
+    match conn_result {
+        Ok(conn) => {
+            bind _ <- execute(conn, "CREATE TABLE users (id INTEGER, name TEXT, age INTEGER)")
+            bind ins_result <- execute(conn, "INSERT INTO users VALUES (1, 'Alice', 30)")
+            assert_eq(Result.is_ok(ins_result), true)
+        }
+        Err(_) => assert_eq(false, true)
+    }
+}
+
+test "test_query_returns_typed_rows" {
+    bind conn_result <- connect("sqlite::memory:")
+    match conn_result {
+        Ok(conn) => {
+            bind _ <- execute(conn, "CREATE TABLE users (id INTEGER, name TEXT, age INTEGER)")
+            bind _ <- execute(conn, "INSERT INTO users VALUES (1, 'Alice', 30)")
+            bind _ <- execute(conn, "INSERT INTO users VALUES (2, 'Bob', 25)")
+            bind rows_result <- query_raw(conn, "SELECT id, name, age FROM users")
+            match rows_result {
+                Ok(rows) => assert_eq(List.length(rows), 2)
+                Err(_) => assert_eq(false, true)
+            }
+        }
+        Err(_) => assert_eq(false, true)
+    }
+}
+
+test "test_query_params_bind" {
+    bind conn_result <- connect("sqlite::memory:")
+    match conn_result {
+        Ok(conn) => {
+            bind _ <- execute(conn, "CREATE TABLE items (id INTEGER, label TEXT)")
+            bind _ <- execute(conn, "INSERT INTO items VALUES (1, 'hello')")
+            bind _ <- execute(conn, "INSERT INTO items VALUES (2, 'world')")
+            bind params <- collect { yield "1"; () }
+            bind rows_result <- query_params_raw(conn, "SELECT label FROM items WHERE id = ?", params)
+            match rows_result {
+                Ok(rows) => assert_eq(List.length(rows), 1)
+                Err(_) => assert_eq(false, true)
+            }
+        }
+        Err(_) => assert_eq(false, true)
+    }
+}
+
+test "test_execute_returns_affected_rows" {
+    bind conn_result <- connect("sqlite::memory:")
+    match conn_result {
+        Ok(conn) => {
+            bind _ <- execute(conn, "CREATE TABLE nums (v INTEGER)")
+            bind _ <- execute(conn, "INSERT INTO nums VALUES (1)")
+            bind _ <- execute(conn, "INSERT INTO nums VALUES (2)")
+            bind upd_result <- execute(conn, "UPDATE nums SET v = 99")
+            match upd_result {
+                Ok(n) => assert_eq(n, 2)
+                Err(_) => assert_eq(false, true)
+            }
+        }
+        Err(_) => assert_eq(false, true)
+    }
+}
+
+test "test_transaction_commit" {
+    bind conn_result <- connect("sqlite::memory:")
+    match conn_result {
+        Ok(conn) => {
+            bind _ <- execute(conn, "CREATE TABLE events (id INTEGER)")
+            bind tx_result <- DB.begin_tx(conn)
+            match tx_result {
+                Ok(tx) => {
+                    bind _ <- DB.execute_in_tx(tx, "INSERT INTO events VALUES (1)")
+                    bind _ <- DB.commit_tx(tx)
+                    bind rows_result <- query_raw(conn, "SELECT id FROM events")
+                    match rows_result {
+                        Ok(rows) => assert_eq(List.length(rows), 1)
+                        Err(_) => assert_eq(false, true)
+                    }
+                }
+                Err(_) => assert_eq(false, true)
+            }
+        }
+        Err(_) => assert_eq(false, true)
+    }
+}
+
+test "test_transaction_rollback_on_error" {
+    bind conn_result <- connect("sqlite::memory:")
+    match conn_result {
+        Ok(conn) => {
+            bind _ <- execute(conn, "CREATE TABLE events (id INTEGER)")
+            bind tx_result <- DB.begin_tx(conn)
+            match tx_result {
+                Ok(tx) => {
+                    bind _ <- DB.execute_in_tx(tx, "INSERT INTO events VALUES (1)")
+                    bind _ <- DB.rollback_tx(tx)
+                    bind rows_result <- query_raw(conn, "SELECT id FROM events")
+                    match rows_result {
+                        Ok(rows) => assert_eq(List.length(rows), 0)
+                        Err(_) => assert_eq(false, true)
+                    }
+                }
+                Err(_) => assert_eq(false, true)
+            }
+        }
+        Err(_) => assert_eq(false, true)
+    }
+}
+
+test "test_schema_mismatch_returns_err" {
+    bind conn_result <- connect("sqlite::memory:")
+    match conn_result {
+        Ok(conn) => {
+            bind _ <- execute(conn, "CREATE TABLE users (id TEXT, name TEXT, age TEXT)")
+            bind _ <- execute(conn, "INSERT INTO users VALUES ('abc', 'Alice', '30')")
+            bind rows_result <- query_raw(conn, "SELECT id, name, age FROM users")
+            match rows_result {
+                Ok(rows) => {
+                    bind adapted <- Schema.adapt(rows, "User")
+                    assert_eq(Result.is_err(adapted), true)
+                }
+                Err(_) => assert_eq(false, true)
+            }
+        }
+        Err(_) => assert_eq(false, true)
+    }
+}

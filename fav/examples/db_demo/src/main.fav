@@ -1,0 +1,47 @@
+import rune "db"
+
+type User = {
+    id:   Int
+    name: String
+    age:  Int
+}
+
+public fn main() -> Unit !Io !Db {
+    bind conn_result <- db.connect("sqlite::memory:")
+    match conn_result {
+        Ok(conn) => {
+            bind _ <- db.execute(conn,
+                "CREATE TABLE users (id INTEGER, name TEXT, age INTEGER)")
+
+            bind _ <- db.execute_params(conn,
+                "INSERT INTO users VALUES (?, ?, ?)",
+                collect { yield "1"; yield "Alice"; yield "30"; () })
+
+            bind _ <- db.execute_params(conn,
+                "INSERT INTO users VALUES (?, ?, ?)",
+                collect { yield "2"; yield "Bob"; yield "25"; () })
+
+            bind rows_result <- db.query(conn, "SELECT id, name, age FROM users")
+            match rows_result {
+                Ok(rows) => IO.println($"Found {List.length(rows)} users")
+                Err(e)   => IO.println($"Query error: {e.message}")
+            }
+
+            bind tx_result <- DB.begin_tx(conn)
+            match tx_result {
+                Ok(tx) => {
+                    bind _ <- DB.execute_in_tx(tx, "INSERT INTO users VALUES (3, 'Carol', 28)")
+                    bind _ <- DB.commit_tx(tx)
+                    IO.println("Transaction committed")
+                }
+                Err(e) => IO.println($"Transaction error: {e.message}")
+            }
+
+            bind env_url <- Env.get_or("DB_URL", "sqlite::memory:")
+            IO.println($"DB_URL env: {env_url}")
+
+            db.close(conn)
+        }
+        Err(e) => IO.println($"Connection error: {e.message}")
+    }
+}

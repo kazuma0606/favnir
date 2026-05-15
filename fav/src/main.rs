@@ -1,6 +1,8 @@
 mod ast;
 mod backend;
+mod docs_server;
 mod driver;
+mod error_catalog;
 mod fmt;
 mod frontend;
 mod lint;
@@ -12,16 +14,18 @@ mod toml;
 mod value;
 
 use driver::{
-    cmd_bench, cmd_build, cmd_bundle, cmd_check, cmd_exec, cmd_explain, cmd_explain_diff, cmd_fmt,
-    cmd_graph, cmd_install, cmd_lint, cmd_migrate, cmd_new, cmd_publish, cmd_run, cmd_test,
-    cmd_watch,
+    cmd_bench, cmd_build, cmd_bundle, cmd_check, cmd_check_with_sample, cmd_checkpoint_list,
+    cmd_checkpoint_reset, cmd_checkpoint_set, cmd_checkpoint_show, cmd_docs, cmd_exec, cmd_explain,
+    cmd_explain_compiler, cmd_explain_diff, cmd_explain_error, cmd_explain_error_list, cmd_fmt,
+    cmd_graph, cmd_infer, cmd_infer_proto, cmd_install, cmd_lint, cmd_migrate, cmd_new,
+    cmd_publish, cmd_run, cmd_test, cmd_watch,
 };
 use std::process;
 
 // 笏笏 help text (4-6) 笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏
 
 const HELP: &str = "\
-fav - Favnir language toolchain v2.7.0
+fav - Favnir language toolchain v3.9.0
 
 USAGE:
     fav <COMMAND> [OPTIONS] [FILE]
@@ -30,22 +34,33 @@ COMMANDS:
     run [--db <url>] [file]
                   Parse, type-check, and run a Favnir program.
                   If <file> is omitted, looks for fav.toml and runs src/main.fav.
-    build [-o <file>] [--target <fvc|wasm>] [file]
+    build [-o <file>] [--target <fvc|wasm>] [--graphql] [--proto] [file]
                   Parse, type-check, and build a .fvc artifact or .wasm module.
+                  With --graphql, generate GraphQL SDL from type/interface declarations.
+                  With --proto, generate Protobuf schema from type/interface declarations.
                   If <file> is omitted, looks for fav.toml and builds src/main.fav.
     exec [--db <path>] [--info] <artifact>
                   Execute a .fvc artifact by running its `main` function.
                   With --info, print artifact metadata instead of executing.
-    check [--no-warn] [--dir <path>] [file]
+    check [--no-warn] [--dir <path>] [--sample <N>] [file]
                   Parse and type-check (no execution).
                   With --no-warn, suppress warning output.
                   With --dir, check all .fav files under the given directory.
+                  With --sample N, generate N synthetic rows for the first type and
+                  verify the pipeline runs without errors (requires a file argument).
                   If <file> is omitted, checks all .fav files in the project.
-    explain [--schema] [--format <text|json>] [--focus <all|fns|trfs|flws|types>] [file]
+    explain [--schema] [--format <text|json>] [--focus <all|fns|stages|seqs|types>] [file]
                   Show VIS / type / effect signatures of all top-level items.
                   With --schema, print SQL CREATE TABLE / CHECK output instead.
                   With --format json, emit structured explain JSON.
                   If <file> is omitted, explains all files in the project.
+    docs [file] [--port <n>] [--no-open]
+                  Start a local docs server backed by explain JSON and stdlib metadata.
+                  If <file> is omitted, serves stdlib-only docs.
+    checkpoint <list|show|reset|set> [args]
+                  Manage incremental processing checkpoints.
+    explain compiler
+                  Show the 5-step Favnir compilation pipeline summary.
     explain diff [--format <text|json>] <from> <to>
                   Compare explain metadata across .fav / .json / .fvc inputs.
     bundle [-o <file>] [--entry <name>] [--manifest] [--explain] <file>
@@ -71,8 +86,16 @@ COMMANDS:
                   Format a .fav file in-place (canonical style).
                   With --check, exit 1 if any file would change.
                   If <file> is omitted, formats all .fav files in the project.
+    infer [csv_path] [table_name] [--db <conn_str>] [--out <path>] [--name <TypeName>] [--proto <file>]
+                  Infer Favnir type definitions from a CSV file or DB table schema.
+                  With --proto, infer Favnir definitions from a .proto file.
+                  Without --db, infers from csv_path (positional arg).
+                  With --db, infers from the given DB connection string.
+                  Optionally specify a table name to infer only that table.
+                  --out writes output to a file; --out <dir>/ writes one file per table.
+                  --name sets the type name for CSV inference (default: Row).
     lint [--warn-only] [file]
-                  Run static lint checks (L001-L004) on a .fav file.
+                  Run static lint checks (L001-L008) on a .fav file.
                   With --warn-only, always exit 0 (warnings only).
                   If <file> is omitted, lints all .fav files in the project.
     lsp [--port <n>]
@@ -82,6 +105,10 @@ COMMANDS:
                   With --in-place, rewrite files directly.
                   With --dry-run, show changes without writing.
                   With --check, exit 1 if any file needs migration (CI use).
+    explain-error <code>
+                  Show details for a specific error code (e.g. E0213).
+    explain-error --list
+                  List all known error codes with titles.
     install       Resolve [dependencies] from fav.toml and write fav.lock.
     publish       Validate project and prepare for local registry publishing.
     help          Show this help message
@@ -100,7 +127,8 @@ SINGLE-FILE EXAMPLES:
     fav exec --info dist/app.fvc
     fav check examples/pipeline/pipeline.fav
     fav explain examples/basic/users.fav
-    fav explain examples/basic/users.fav --format json --focus trfs
+    fav explain examples/basic/users.fav --format json --focus stages
+    fav docs examples/basic/users.fav --port 7777 --no-open
     fav bundle examples/basic/hello.fav --manifest
     fav graph examples/pipeline/abstract_seq_basic.fav --format mermaid
     fav graph examples/basic/hello.fav --focus fn --entry main --depth 2
@@ -112,21 +140,13 @@ PROJECT EXAMPLES (requires fav.toml):
     fav watch --cmd check   # watches project .fav files and re-runs checks
     fav explain             # explains all src/**/*.fav
 
-ERROR CODES:
-    E001  Type mismatch
-    E002  Undefined identifier
-    E003  Pipeline / flw connection error
-    E004  Effect violation
-    E005  Arity mismatch
-    E006  Pattern match error
-    E007  Db effect missing
-    E008  Network effect missing
-    E009  Emit effect missing
-    E012  Circular import
-    E013  Module or symbol not found
-    E014  Symbol not public (visibility violation)
-    E015  Private symbol referenced from another file
-    E016  Internal symbol referenced from outside rune
+ERROR CODES (v3.4.0 — E0xxx body):
+    E01xx  Syntax / structure errors
+    E02xx  Type errors (mismatch, undefined, arity)
+    E03xx  Effect errors (undeclared, propagation)
+    E05xx  Module errors (import, namespace)
+    E09xx  Deprecated keywords (trf→stage, flw→seq, cap→interface)
+    Use `fav explain-error <code>` for details on a specific error.
     W001  WASM codegen: unsupported type
     W002  WASM codegen: unsupported expression
     W003  WASM codegen: main signature not supported (must be () -> Unit !Io)
@@ -134,6 +154,19 @@ ERROR CODES:
 ";
 
 fn main() {
+    // Spawn a thread with a larger stack (64 MB) to support deep recursion in
+    // the Favnir VM and the type-checker (especially for self-hosted code).
+    let builder = std::thread::Builder::new().stack_size(64 * 1024 * 1024);
+    let handler = builder
+        .spawn(|| main_impl())
+        .expect("failed to spawn main thread");
+    match handler.join() {
+        Ok(()) => {}
+        Err(_) => std::process::exit(1),
+    }
+}
+
+fn main_impl() {
     let args: Vec<String> = std::env::args().collect();
 
     if args.len() == 1 {
@@ -144,6 +177,10 @@ fn main() {
     match args.get(1).map(|s| s.as_str()) {
         Some("help") | Some("--help") | Some("-h") => {
             print!("{}", HELP);
+        }
+
+        Some("--version") | Some("-V") => {
+            println!("favnir {}", env!("CARGO_PKG_VERSION"));
         }
 
         Some("run") => {
@@ -172,6 +209,14 @@ fn main() {
             let mut i = 2usize;
             while i < args.len() {
                 match args[i].as_str() {
+                    "--graphql" => {
+                        target = Some("graphql");
+                        i += 1;
+                    }
+                    "--proto" => {
+                        target = Some("proto");
+                        i += 1;
+                    }
                     "-o" => {
                         out = Some(args.get(i + 1).unwrap_or_else(|| {
                             eprintln!("error: -o requires a file path");
@@ -234,6 +279,7 @@ fn main() {
             let mut no_warn = false;
             let mut file: Option<&str> = None;
             let mut dir: Option<&str> = None;
+            let mut sample: Option<usize> = None;
             let mut i = 2usize;
             while i < args.len() {
                 match args[i].as_str() {
@@ -248,13 +294,31 @@ fn main() {
                         }));
                         i += 2;
                     }
+                    "--sample" => {
+                        let n_str = args.get(i + 1).unwrap_or_else(|| {
+                            eprintln!("error: --sample requires a number");
+                            process::exit(1);
+                        });
+                        sample = Some(n_str.parse().unwrap_or_else(|_| {
+                            eprintln!("error: --sample value must be a positive integer");
+                            process::exit(1);
+                        }));
+                        i += 2;
+                    }
                     other => {
                         file = Some(other);
                         i += 1;
                     }
                 }
             }
-            if let Some(dir) = dir {
+            if let Some(n) = sample {
+                if let Some(f) = file {
+                    cmd_check_with_sample(f, n);
+                } else {
+                    eprintln!("error: --sample requires a file argument");
+                    process::exit(1);
+                }
+            } else if let Some(dir) = dir {
                 driver::cmd_check_dir(dir);
             } else {
                 cmd_check(file, no_warn);
@@ -262,6 +326,10 @@ fn main() {
         }
 
         Some("explain") => {
+            if args.get(2).map(|s| s.as_str()) == Some("compiler") {
+                cmd_explain_compiler();
+                return;
+            }
             if args.get(2).map(|s| s.as_str()) == Some("diff") {
                 let mut format = String::from("text");
                 let mut paths = Vec::new();
@@ -330,6 +398,70 @@ fn main() {
             }
             cmd_explain(file, schema, &format, &focus);
         }
+
+        Some("docs") => {
+            let mut port = 7777u16;
+            let mut no_open = false;
+            let mut file: Option<&str> = None;
+            let mut i = 2usize;
+            while i < args.len() {
+                match args[i].as_str() {
+                    "--port" => {
+                        let raw = args.get(i + 1).unwrap_or_else(|| {
+                            eprintln!("error: --port requires a number");
+                            process::exit(1);
+                        });
+                        port = raw.parse::<u16>().unwrap_or_else(|_| {
+                            eprintln!("error: --port must be a valid u16");
+                            process::exit(1);
+                        });
+                        i += 2;
+                    }
+                    "--no-open" => {
+                        no_open = true;
+                        i += 1;
+                    }
+                    other => {
+                        file = Some(other);
+                        i += 1;
+                    }
+                }
+            }
+            cmd_docs(file, port, no_open);
+        }
+
+        Some("checkpoint") => match args.get(2).map(|s| s.as_str()) {
+            Some("list") => cmd_checkpoint_list(),
+            Some("show") => {
+                let name = args.get(3).map(|s| s.as_str()).unwrap_or_else(|| {
+                    eprintln!("error: checkpoint show requires <name>");
+                    process::exit(1);
+                });
+                cmd_checkpoint_show(name);
+            }
+            Some("reset") => {
+                let name = args.get(3).map(|s| s.as_str()).unwrap_or_else(|| {
+                    eprintln!("error: checkpoint reset requires <name>");
+                    process::exit(1);
+                });
+                cmd_checkpoint_reset(name);
+            }
+            Some("set") => {
+                let name = args.get(3).map(|s| s.as_str()).unwrap_or_else(|| {
+                    eprintln!("error: checkpoint set requires <name> <value>");
+                    process::exit(1);
+                });
+                let value = args.get(4).map(|s| s.as_str()).unwrap_or_else(|| {
+                    eprintln!("error: checkpoint set requires <name> <value>");
+                    process::exit(1);
+                });
+                cmd_checkpoint_set(name, value);
+            }
+            _ => {
+                eprintln!("error: checkpoint requires one of list|show|reset|set");
+                process::exit(1);
+            }
+        },
 
         Some("bundle") => {
             let mut out: Option<&str> = None;
@@ -651,6 +783,84 @@ fn main() {
             cmd_lint(file.as_deref(), warn_only);
         }
 
+        Some("infer") => {
+            let mut proto_path: Option<String> = None;
+            let mut csv_path: Option<String> = None;
+            let mut table_name: Option<String> = None;
+            let mut db_conn: Option<String> = None;
+            let mut out_path: Option<String> = None;
+            let mut type_name: Option<String> = None;
+            let mut i = 2usize;
+            while i < args.len() {
+                match args[i].as_str() {
+                    "--proto" => {
+                        proto_path = Some(
+                            args.get(i + 1)
+                                .unwrap_or_else(|| {
+                                    eprintln!("error: --proto requires a file path");
+                                    process::exit(1);
+                                })
+                                .clone(),
+                        );
+                        i += 2;
+                    }
+                    "--db" => {
+                        db_conn = Some(
+                            args.get(i + 1)
+                                .unwrap_or_else(|| {
+                                    eprintln!("error: --db requires a connection string");
+                                    process::exit(1);
+                                })
+                                .clone(),
+                        );
+                        i += 2;
+                    }
+                    "--out" => {
+                        out_path = Some(
+                            args.get(i + 1)
+                                .unwrap_or_else(|| {
+                                    eprintln!("error: --out requires a path");
+                                    process::exit(1);
+                                })
+                                .clone(),
+                        );
+                        i += 2;
+                    }
+                    "--name" => {
+                        type_name = Some(
+                            args.get(i + 1)
+                                .unwrap_or_else(|| {
+                                    eprintln!("error: --name requires a type name");
+                                    process::exit(1);
+                                })
+                                .clone(),
+                        );
+                        i += 2;
+                    }
+                    other => {
+                        // First positional: csv_path (or table if --db already set)
+                        if db_conn.is_some() && csv_path.is_none() {
+                            table_name = Some(other.to_string());
+                        } else {
+                            csv_path = Some(other.to_string());
+                        }
+                        i += 1;
+                    }
+                }
+            }
+            if let Some(proto_path) = proto_path {
+                cmd_infer_proto(&proto_path, out_path.as_deref());
+                return;
+            }
+            cmd_infer(
+                csv_path.as_deref(),
+                db_conn.as_deref(),
+                table_name.as_deref(),
+                out_path.as_deref(),
+                type_name.as_deref(),
+            );
+        }
+
         Some("migrate") => {
             let mut in_place = false;
             let mut dry_run = false;
@@ -690,6 +900,32 @@ fn main() {
                 }
             }
             cmd_migrate(file.as_deref(), in_place, dry_run, check, dir.as_deref());
+        }
+
+        Some("explain-error") => {
+            let mut list = false;
+            let mut code: Option<&str> = None;
+            let mut i = 2usize;
+            while i < args.len() {
+                match args[i].as_str() {
+                    "--list" => {
+                        list = true;
+                        i += 1;
+                    }
+                    other => {
+                        code = Some(other);
+                        i += 1;
+                    }
+                }
+            }
+            if list {
+                cmd_explain_error_list();
+            } else if let Some(c) = code {
+                cmd_explain_error(c);
+            } else {
+                eprintln!("error: explain-error requires a code (e.g. E0213) or --list");
+                process::exit(1);
+            }
         }
 
         Some("install") => {
@@ -754,7 +990,7 @@ fn print_welcome() {
                 println!();
             }
         }
-        println!("Favnir v2.7.0 - The pipeline-first language");
+        println!("Favnir v3.9.0 - The pipeline-first language");
         println!();
     }
     print!("{}", HELP);

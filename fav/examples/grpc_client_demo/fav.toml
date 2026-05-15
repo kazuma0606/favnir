@@ -1,0 +1,5 @@
+[project]
+name    = "grpc_client_demo"
+version = "0.1.0"
+edition = "2026"
+src     = "src"

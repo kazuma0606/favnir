@@ -1,0 +1,17 @@
+import rune "grpc"
+
+type GetUserRequest = { id: Int }
+type GetUserResponse = { id: Int name: String email: String }
+
+public fn handle_get_user(req: RpcRequest) -> Result<Map<String, String>, RpcError> {
+    bind id <- Option.unwrap_or(Map.get(req.payload, "id"), "0")
+    bind row0 <- Map.set((), "id", id)
+    bind row1 <- Map.set(row0, "name", "Alice")
+    bind row2 <- Map.set(row1, "email", "alice@example.com")
+    grpc.ok(row2)
+}
+
+public fn main() -> Unit !Io !Rpc {
+    IO.println("gRPC server on :50051")
+    grpc.serve(50051, "UserService")
+}

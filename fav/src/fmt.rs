@@ -463,6 +463,12 @@ impl Formatter {
                 format!("{}({})", f, as_.join(", "))
             }
 
+            Expr::TypeApply(func, type_args, _) => {
+                let f = self.expr(func);
+                let as_: Vec<String> = type_args.iter().map(|a| self.type_expr(a)).collect();
+                format!("{}<{}>", f, as_.join(", "))
+            }
+
             Expr::FieldAccess(obj, field, _) => {
                 format!("{}.{}", self.expr(obj), field)
             }
@@ -676,7 +682,9 @@ fn fmt_effect(eff: &Effect) -> Option<String> {
         Effect::Io => Some("!Io".to_string()),
         Effect::Db => Some("!Db".to_string()),
         Effect::Network => Some("!Network".to_string()),
+        Effect::Rpc => Some("!Rpc".to_string()),
         Effect::File => Some("!File".to_string()),
+        Effect::Checkpoint => Some("!Checkpoint".to_string()),
         Effect::Trace => Some("!Trace".to_string()),
         Effect::Unknown(name) => Some(format!("!{}", name)),
         Effect::Emit(t) => Some(format!("!Emit<{}>", t)),

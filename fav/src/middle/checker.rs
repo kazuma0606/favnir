@@ -51,6 +51,8 @@ pub enum Type {
     Interface(String, Vec<Type>),
     /// `async fn` return type wrapper: `Task<T>` (v1.7.0)
     Task(Box<Type>),
+    /// `Stream<T>` lazy sequence (v2.9.0)
+    Stream(Box<Type>),
     /// Type is not yet known (monomorphic placeholder / built-in generic)
     Unknown,
     /// Error recovery  Esuppress cascading errors
@@ -69,12 +71,17 @@ impl Type {
         }
         match (self, other) {
             (Type::Task(a), Type::Task(b)) => a.is_compatible(b),
+            (Type::Stream(a), Type::Stream(b)) => a.is_compatible(b),
             (Type::Option(a), Type::Option(b)) => a.is_compatible(b),
             (Type::List(a), Type::List(b)) => a.is_compatible(b),
             (Type::Result(a1, a2), Type::Result(b1, b2)) => {
                 a1.is_compatible(b1) && a2.is_compatible(b2)
             }
             (Type::Arrow(ai, ao), Type::Arrow(bi, bo)) => {
+                ai.is_compatible(bi) && ao.is_compatible(bo)
+            }
+            (Type::Arrow(ai, ao), Type::Trf(bi, bo, _))
+            | (Type::Trf(ai, ao, _), Type::Arrow(bi, bo)) => {
                 ai.is_compatible(bi) && ao.is_compatible(bo)
             }
             // Cross-compatibility: impl method bodies use Arrow (lambda checker output)
@@ -232,6 +239,7 @@ impl Type {
                 format!("{}<{}>", name, s.join(", "))
             }
             Type::Task(t) => format!("Task<{}>", t.display()),
+            Type::Stream(t) => format!("Stream<{}>", t.display()),
             Type::Unknown => "_".into(),
             Type::Error => "?".into(),
         }
@@ -288,6 +296,7 @@ impl Subst {
                 }
             }
             Type::Task(t) => Type::Task(Box::new(self.apply(t))),
+            Type::Stream(t) => Type::Stream(Box::new(self.apply(t))),
             Type::List(t) => Type::List(Box::new(self.apply(t))),
             Type::Option(t) => Type::Option(Box::new(self.apply(t))),
             Type::Map(k, v) => Type::Map(Box::new(self.apply(k)), Box::new(self.apply(v))),
@@ -334,6 +343,7 @@ pub fn occurs(var: &str, ty: &Type) -> bool {
     match ty {
         Type::Var(name) => name == var,
         Type::Task(t) => occurs(var, t),
+        Type::Stream(t) => occurs(var, t),
         Type::List(t) => occurs(var, t),
         Type::Option(t) => occurs(var, t),
         Type::Map(k, v) => occurs(var, k) || occurs(var, v),
@@ -388,6 +398,7 @@ pub fn unify(t1: &Type, t2: &Type) -> Result<Subst, String> {
 
         // Structural rules
         (Type::Task(a), Type::Task(b)) => unify(a, b),
+        (Type::Stream(a), Type::Stream(b)) => unify(a, b),
         (Type::List(a), Type::List(b)) => unify(a, b),
         (Type::Option(a), Type::Option(b)) => unify(a, b),
         (Type::Map(k1, v1), Type::Map(k2, v2)) => {
@@ -401,6 +412,12 @@ pub fn unify(t1: &Type, t2: &Type) -> Result<Subst, String> {
             Ok(s2.compose(s1))
         }
         (Type::Arrow(a1, b1), Type::Arrow(a2, b2)) => {
+            let s1 = unify(a1, a2)?;
+            let s2 = unify(&s1.apply(b1), &s1.apply(b2))?;
+            Ok(s2.compose(s1))
+        }
+        (Type::Arrow(a1, b1), Type::Trf(a2, b2, _))
+        | (Type::Trf(a1, b1, _), Type::Arrow(a2, b2)) => {
             let s1 = unify(a1, a2)?;
             let s2 = unify(&s1.apply(b1), &s1.apply(b2))?;
             Ok(s2.compose(s1))
@@ -961,7 +978,7 @@ impl Checker {
                     let sym = use_path.last().cloned().unwrap_or_default();
                     let mod_path = use_path[..use_path.len().saturating_sub(1)].join(".");
                     self.errors.push(TypeError::new(
-                        "E013",
+                        "E0213",
                         format!(
                             "`use {}.{}`: no fav.toml found  Ecannot resolve modules in single-file mode",
                             mod_path, sym
@@ -1023,7 +1040,7 @@ impl Checker {
             .unwrap_or_else(|| path.split('/').last().unwrap_or(path).to_string());
         if let Some(prev) = self.imported_namespace_paths.get(&namespace).cloned() {
             self.type_error(
-                "E081",
+                "E0581",
                 format!(
                     "namespace conflict: '{}' is imported from both \"{}\" and \"{}\"\n  hint: use `as` to resolve:\n    import \"{}\" as {}_1\n    import \"{}\" as {}_2",
                     namespace, prev, path, prev, namespace, path, namespace
@@ -1035,7 +1052,7 @@ impl Checker {
 
         let Some(resolver) = self.resolver.clone() else {
             self.type_error(
-                "E013",
+                "E0213",
                 format!(
                     "`import \"{}\"`: no fav.toml found - cannot resolve imports in single-file mode",
                     path
@@ -1055,7 +1072,7 @@ impl Checker {
             };
             let Some(file_path) = resolved else {
                 self.type_error(
-                    "E013",
+                    "E0213",
                     format!("import path \"{}\" could not be resolved", path),
                     span,
                 );
@@ -1088,7 +1105,7 @@ impl Checker {
                 .map(|file| file.to_string_lossy().to_string())
                 .unwrap_or_else(|| path.to_string());
             self.type_error(
-                "E080",
+                "E0580",
                 format!(
                     "circular import detected\n  \"{}\" imports \"{}\" which imports \"{}\"",
                     origin, current, path
@@ -1104,7 +1121,7 @@ impl Checker {
                 let mut guard = resolver.lock().unwrap();
                 guard.finish_loading(&cache_key);
                 self.type_error(
-                    "E013",
+                    "E0213",
                     format!("import path \"{}\" could not be loaded", path),
                     span,
                 );
@@ -1118,7 +1135,7 @@ impl Checker {
                 let mut guard = resolver.lock().unwrap();
                 guard.finish_loading(&cache_key);
                 self.type_error(
-                    "E013",
+                    "E0213",
                     format!(
                         "parse error in imported module \"{}\": {}",
                         path, err.message
@@ -1157,7 +1174,7 @@ impl Checker {
             if *vis == Visibility::Private {
                 if self.current_file.as_deref() != Some(source_file.as_path()) {
                     self.type_error(
-                        "E015",
+                        "E0215",
                         format!(
                             "`{}` is private  Ecannot be referenced from another file",
                             name
@@ -1188,12 +1205,338 @@ impl Checker {
 
         // List, String, Option, Result, and v0.2.0 namespace placeholders.
         for ns in &[
-            "Math", "List", "String", "Option", "Result", "Db", "Http", "Map", "Debug", "Emit",
-            "Util", "Trace", "File", "Json", "Csv", "Task",
+            "Math",
+            "List",
+            "String",
+            "Option",
+            "Result",
+            "Db",
+            "Http",
+            "Map",
+            "Debug",
+            "Emit",
+            "Util",
+            "Trace",
+            "File",
+            "Json",
+            "Csv",
+            "Schema",
+            "Task",
+            "Random",
+            "Stream",
+            "DB",
+            "Env",
+            "Gen",
+            "Checkpoint",
+            "Parquet",
+            "Grpc",
         ] {
             self.env
                 .define(ns.to_string(), Type::Named(ns.to_string(), vec![]));
         }
+        self.env.define(
+            "SchemaError".into(),
+            Type::Named("SchemaError".into(), vec![]),
+        );
+        let schema_fields = vec![
+            Field {
+                name: "field".into(),
+                ty: TypeExpr::Named("String".into(), vec![], Span::dummy()),
+                attrs: vec![],
+                span: Span::dummy(),
+            },
+            Field {
+                name: "expected".into(),
+                ty: TypeExpr::Named("String".into(), vec![], Span::dummy()),
+                attrs: vec![],
+                span: Span::dummy(),
+            },
+            Field {
+                name: "got".into(),
+                ty: TypeExpr::Named("String".into(), vec![], Span::dummy()),
+                attrs: vec![],
+                span: Span::dummy(),
+            },
+        ];
+        self.type_defs.insert(
+            "SchemaError".into(),
+            TypeBody::Record(schema_fields.clone()),
+        );
+        self.record_fields.insert(
+            "SchemaError".into(),
+            schema_fields
+                .iter()
+                .map(|field| (field.name.clone(), self.resolve_type_expr(&field.ty)))
+                .collect(),
+        );
+
+        // DbError (v3.3.0)
+        self.env
+            .define("DbError".into(), Type::Named("DbError".into(), vec![]));
+        let db_error_fields = vec![
+            Field {
+                name: "code".into(),
+                ty: TypeExpr::Named("String".into(), vec![], Span::dummy()),
+                attrs: vec![],
+                span: Span::dummy(),
+            },
+            Field {
+                name: "message".into(),
+                ty: TypeExpr::Named("String".into(), vec![], Span::dummy()),
+                attrs: vec![],
+                span: Span::dummy(),
+            },
+        ];
+        self.type_defs
+            .insert("DbError".into(), TypeBody::Record(db_error_fields.clone()));
+        self.record_fields.insert(
+            "DbError".into(),
+            db_error_fields
+                .iter()
+                .map(|field| (field.name.clone(), self.resolve_type_expr(&field.ty)))
+                .collect(),
+        );
+        // DbHandle / TxHandle as opaque named types
+        self.env
+            .define("DbHandle".into(), Type::Named("DbHandle".into(), vec![]));
+        self.env
+            .define("TxHandle".into(), Type::Named("TxHandle".into(), vec![]));
+
+        // GenProfile (v3.5.0)
+        self.env.define(
+            "GenProfile".into(),
+            Type::Named("GenProfile".into(), vec![]),
+        );
+        let gen_profile_fields = vec![
+            Field {
+                name: "total".into(),
+                ty: TypeExpr::Named("Int".into(), vec![], Span::dummy()),
+                attrs: vec![],
+                span: Span::dummy(),
+            },
+            Field {
+                name: "valid".into(),
+                ty: TypeExpr::Named("Int".into(), vec![], Span::dummy()),
+                attrs: vec![],
+                span: Span::dummy(),
+            },
+            Field {
+                name: "invalid".into(),
+                ty: TypeExpr::Named("Int".into(), vec![], Span::dummy()),
+                attrs: vec![],
+                span: Span::dummy(),
+            },
+            Field {
+                name: "rate".into(),
+                ty: TypeExpr::Named("Float".into(), vec![], Span::dummy()),
+                attrs: vec![],
+                span: Span::dummy(),
+            },
+        ];
+        self.type_defs.insert(
+            "GenProfile".into(),
+            TypeBody::Record(gen_profile_fields.clone()),
+        );
+        self.record_fields.insert(
+            "GenProfile".into(),
+            gen_profile_fields
+                .iter()
+                .map(|field| (field.name.clone(), self.resolve_type_expr(&field.ty)))
+                .collect(),
+        );
+
+        self.env.define(
+            "CheckpointMeta".into(),
+            Type::Named("CheckpointMeta".into(), vec![]),
+        );
+        let checkpoint_meta_fields = vec![
+            Field {
+                name: "name".into(),
+                ty: TypeExpr::Named("String".into(), vec![], Span::dummy()),
+                attrs: vec![],
+                span: Span::dummy(),
+            },
+            Field {
+                name: "value".into(),
+                ty: TypeExpr::Named("String".into(), vec![], Span::dummy()),
+                attrs: vec![],
+                span: Span::dummy(),
+            },
+            Field {
+                name: "updated_at".into(),
+                ty: TypeExpr::Named("String".into(), vec![], Span::dummy()),
+                attrs: vec![],
+                span: Span::dummy(),
+            },
+        ];
+        self.type_defs.insert(
+            "CheckpointMeta".into(),
+            TypeBody::Record(checkpoint_meta_fields.clone()),
+        );
+        self.record_fields.insert(
+            "CheckpointMeta".into(),
+            checkpoint_meta_fields
+                .iter()
+                .map(|field| (field.name.clone(), self.resolve_type_expr(&field.ty)))
+                .collect(),
+        );
+
+        self.env.define(
+            "HttpResponse".into(),
+            Type::Named("HttpResponse".into(), vec![]),
+        );
+        let http_response_fields = vec![
+            Field {
+                name: "status".into(),
+                ty: TypeExpr::Named("Int".into(), vec![], Span::dummy()),
+                attrs: vec![],
+                span: Span::dummy(),
+            },
+            Field {
+                name: "body".into(),
+                ty: TypeExpr::Named("String".into(), vec![], Span::dummy()),
+                attrs: vec![],
+                span: Span::dummy(),
+            },
+            Field {
+                name: "content_type".into(),
+                ty: TypeExpr::Named("String".into(), vec![], Span::dummy()),
+                attrs: vec![],
+                span: Span::dummy(),
+            },
+        ];
+        self.type_defs.insert(
+            "HttpResponse".into(),
+            TypeBody::Record(http_response_fields.clone()),
+        );
+        self.record_fields.insert(
+            "HttpResponse".into(),
+            http_response_fields
+                .iter()
+                .map(|field| (field.name.clone(), self.resolve_type_expr(&field.ty)))
+                .collect(),
+        );
+
+        self.env
+            .define("HttpError".into(), Type::Named("HttpError".into(), vec![]));
+        let http_error_fields = vec![
+            Field {
+                name: "code".into(),
+                ty: TypeExpr::Named("Int".into(), vec![], Span::dummy()),
+                attrs: vec![],
+                span: Span::dummy(),
+            },
+            Field {
+                name: "message".into(),
+                ty: TypeExpr::Named("String".into(), vec![], Span::dummy()),
+                attrs: vec![],
+                span: Span::dummy(),
+            },
+            Field {
+                name: "status".into(),
+                ty: TypeExpr::Named("Int".into(), vec![], Span::dummy()),
+                attrs: vec![],
+                span: Span::dummy(),
+            },
+        ];
+        self.type_defs.insert(
+            "HttpError".into(),
+            TypeBody::Record(http_error_fields.clone()),
+        );
+        self.record_fields.insert(
+            "HttpError".into(),
+            http_error_fields
+                .iter()
+                .map(|field| (field.name.clone(), self.resolve_type_expr(&field.ty)))
+                .collect(),
+        );
+
+        self.env.define(
+            "ParquetError".into(),
+            Type::Named("ParquetError".into(), vec![]),
+        );
+        let parquet_error_fields = vec![Field {
+            name: "message".into(),
+            ty: TypeExpr::Named("String".into(), vec![], Span::dummy()),
+            attrs: vec![],
+            span: Span::dummy(),
+        }];
+        self.type_defs.insert(
+            "ParquetError".into(),
+            TypeBody::Record(parquet_error_fields.clone()),
+        );
+        self.record_fields.insert(
+            "ParquetError".into(),
+            parquet_error_fields
+                .iter()
+                .map(|field| (field.name.clone(), self.resolve_type_expr(&field.ty)))
+                .collect(),
+        );
+
+        self.env
+            .define("RpcError".into(), Type::Named("RpcError".into(), vec![]));
+        let rpc_error_fields = vec![
+            Field {
+                name: "code".into(),
+                ty: TypeExpr::Named("Int".into(), vec![], Span::dummy()),
+                attrs: vec![],
+                span: Span::dummy(),
+            },
+            Field {
+                name: "message".into(),
+                ty: TypeExpr::Named("String".into(), vec![], Span::dummy()),
+                attrs: vec![],
+                span: Span::dummy(),
+            },
+        ];
+        self.type_defs.insert(
+            "RpcError".into(),
+            TypeBody::Record(rpc_error_fields.clone()),
+        );
+        self.record_fields.insert(
+            "RpcError".into(),
+            rpc_error_fields
+                .iter()
+                .map(|field| (field.name.clone(), self.resolve_type_expr(&field.ty)))
+                .collect(),
+        );
+
+        self.env.define(
+            "RpcRequest".into(),
+            Type::Named("RpcRequest".into(), vec![]),
+        );
+        let rpc_request_fields = vec![
+            Field {
+                name: "method".into(),
+                ty: TypeExpr::Named("String".into(), vec![], Span::dummy()),
+                attrs: vec![],
+                span: Span::dummy(),
+            },
+            Field {
+                name: "payload".into(),
+                ty: TypeExpr::Named(
+                    "Map".into(),
+                    vec![
+                        TypeExpr::Named("String".into(), vec![], Span::dummy()),
+                        TypeExpr::Named("String".into(), vec![], Span::dummy()),
+                    ],
+                    Span::dummy(),
+                ),
+                attrs: vec![],
+                span: Span::dummy(),
+            },
+        ];
+        self.type_defs.insert(
+            "RpcRequest".into(),
+            TypeBody::Record(rpc_request_fields.clone()),
+        );
+        self.record_fields.insert(
+            "RpcRequest".into(),
+            rpc_request_fields
+                .iter()
+                .map(|field| (field.name.clone(), self.resolve_type_expr(&field.ty)))
+                .collect(),
+        );
 
         // Primitive type names as env values (so `Int.eq` etc. resolve).
         for ty_name in &["Bool", "Int", "Float"] {
@@ -1679,13 +2022,24 @@ impl Checker {
     }
 
     fn check_effects_declared(&mut self, effects: &[Effect], span: &Span) {
-        const BUILTIN_EFFECTS: &[&str] = &["Pure", "Io", "Db", "Network", "File", "Trace", "Emit"];
+        const BUILTIN_EFFECTS: &[&str] = &[
+            "Pure",
+            "Io",
+            "Db",
+            "Network",
+            "Rpc",
+            "File",
+            "Checkpoint",
+            "Trace",
+            "Emit",
+            "Random",
+        ];
         for effect in effects {
             if let Effect::Unknown(name) = effect {
                 if !BUILTIN_EFFECTS.contains(&name.as_str()) && !self.effect_registry.contains(name)
                 {
                     self.type_error(
-                        "E052",
+                        "E0252",
                         format!(
                             "undeclared effect `{}`; declare it with `effect {}` at top level",
                             name, name
@@ -1718,6 +2072,9 @@ impl Checker {
 
     fn check_type_def(&mut self, td: &TypeDef) {
         if let TypeBody::Record(fields) = &td.body {
+            for field in fields {
+                self.validate_field_attrs(field);
+            }
             self.env.push();
             for field in fields {
                 let field_ty = self.resolve_type_expr(&field.ty);
@@ -1727,7 +2084,7 @@ impl Checker {
                 let inv_ty = self.check_expr(invariant);
                 if !inv_ty.is_compatible(&Type::Bool) {
                     self.type_error(
-                        "E045",
+                        "E0245",
                         format!(
                             "`invariant` for type `{}` must be of type Bool, got `{}`",
                             td.name,
@@ -1747,11 +2104,40 @@ impl Checker {
         }
     }
 
+    fn validate_field_attrs(&mut self, field: &Field) {
+        for attr in &field.attrs {
+            if attr.name != "col" {
+                continue;
+            }
+            let Some(arg) = attr.arg.as_deref() else {
+                self.type_error(
+                    "E0503",
+                    format!(
+                        "`#[col(...)]` on field `{}` requires an integer argument",
+                        field.name
+                    ),
+                    &attr.span,
+                );
+                continue;
+            };
+            if arg.parse::<usize>().is_err() {
+                self.type_error(
+                    "E0503",
+                    format!(
+                        "`#[col({})]` on field `{}` must use a non-negative integer index",
+                        arg, field.name
+                    ),
+                    &attr.span,
+                );
+            }
+        }
+    }
+
     fn check_interface_decl(&mut self, id: &InterfaceDecl) {
         if let Some(super_name) = &id.super_interface {
             if !self.interface_registry.interfaces.contains_key(super_name) {
                 self.type_error(
-                    "E041",
+                    "E0241",
                     format!("undefined super interface `{}`", super_name),
                     &id.span,
                 );
@@ -1778,7 +2164,7 @@ impl Checker {
         for interface_name in &id.interface_names {
             let Some(interface_def) = self.interface_registry.interfaces.get(interface_name) else {
                 self.type_error(
-                    "E041",
+                    "E0241",
                     format!("undefined interface `{}`", interface_name),
                     &id.span,
                 );
@@ -1794,7 +2180,7 @@ impl Checker {
                     .is_implemented(super_name, &id.type_name);
                 if !satisfied_by_same_decl && !satisfied_by_prior_impl {
                     self.type_error(
-                        "E043",
+                        "E0243",
                         format!(
                             "interface `{}` requires super interface `{}` to be implemented for `{}`",
                             interface_name, super_name, id.type_name
@@ -1822,7 +2208,7 @@ impl Checker {
             for expected_name in expected_methods.keys() {
                 if !provided.contains_key(expected_name) {
                     self.type_error(
-                        "E042",
+                        "E0242",
                         format!(
                             "impl for `{}` is missing method `{}` required by interface `{}`",
                             id.type_name, expected_name, interface_name
@@ -1835,7 +2221,7 @@ impl Checker {
             for (method_name, body_ty) in &provided {
                 let Some(expected) = expected_methods.get(method_name) else {
                     self.type_error(
-                        "E042",
+                        "E0242",
                         format!(
                             "method `{}` is not declared in interface `{}`",
                             method_name, interface_name
@@ -1867,7 +2253,7 @@ impl Checker {
                 };
                 if !compatible {
                     self.type_error(
-                        "E042",
+                        "E0242",
                         format!(
                             "method `{}` for `{}` has type `{}`, expected `{}`",
                             method_name,
@@ -1897,7 +2283,7 @@ impl Checker {
     ) {
         let Some(body) = self.type_defs.get(type_name).cloned() else {
             self.type_error(
-                "E044",
+                "E0244",
                 format!(
                     "cannot auto-synthesize interface `{}` for `{}` without a local type definition",
                     interface_name, type_name
@@ -1944,7 +2330,7 @@ impl Checker {
     ) {
         let Some(interface_def) = self.interface_registry.interfaces.get(interface_name) else {
             self.type_error(
-                "E041",
+                "E0241",
                 format!("undefined interface `{}`", interface_name),
                 span,
             );
@@ -1957,7 +2343,7 @@ impl Checker {
                 self.synthesize_interface_impl_for_type_def(td, super_name, span);
                 if !self.interface_registry.is_implemented(super_name, &td.name) {
                     self.type_error(
-                        "E043",
+                        "E0243",
                         format!(
                             "interface `{}` requires super interface `{}` to be implemented for `{}`",
                             interface_name, super_name, td.name
@@ -1973,7 +2359,7 @@ impl Checker {
             TypeBody::Record(fields) => fields,
             _ => {
                 self.type_error(
-                    "E044",
+                    "E0244",
                     format!(
                         "auto-synthesis for interface `{}` is only supported on record types",
                         interface_name
@@ -1988,7 +2374,7 @@ impl Checker {
             let field_ty = self.resolve_type_expr(&field.ty);
             if !self.is_type_implementing(interface_name, &field_ty) {
                 self.type_error(
-                    "E044",
+                    "E0244",
                     format!(
                         "field `{}` of `{}` does not implement interface `{}`",
                         field.name, td.name, interface_name
@@ -2040,7 +2426,7 @@ impl Checker {
             let is_builtin = matches!(id.cap_name.as_str(), "Eq" | "Ord" | "Show");
             if !is_builtin {
                 let span = &id.span;
-                self.type_error("E020", format!("undefined cap `{}`", id.cap_name), span);
+                self.type_error("E0220", format!("undefined cap `{}`", id.cap_name), span);
                 return;
             }
         }
@@ -2058,7 +2444,7 @@ impl Checker {
         for method in &id.methods {
             if !expected_fields.is_empty() && !expected_fields.contains(&method.name) {
                 self.type_error(
-                    "E022",
+                    "E0222",
                     format!(
                         "impl `{}`: method `{}` is not declared in cap `{}`",
                         id.cap_name, method.name, id.cap_name
@@ -2145,7 +2531,7 @@ impl Checker {
         } else {
             if body_ty == Type::Unknown {
                 self.type_error(
-                    "E074",
+                    "E0274",
                     format!(
                         "cannot infer return type for fn `{}`; add explicit return type for recursive functions",
                         fd.name
@@ -2158,7 +2544,7 @@ impl Checker {
 
         if !body_ty.is_compatible(&return_ty) {
             self.type_error(
-                "E001",
+                "E0101",
                 format!(
                     "fn `{}`: body type `{}` does not match return type `{}`",
                     fd.name,
@@ -2202,7 +2588,7 @@ impl Checker {
 
         if !body_ty.is_compatible(&output_ty) {
             self.type_error(
-                "E001",
+                "E0101",
                 format!(
                     "trf `{}`: body type `{}` does not match output type `{}`",
                     td.name,
@@ -2230,7 +2616,7 @@ impl Checker {
         for step_name in &fd.steps {
             match self.env.lookup(step_name).cloned() {
                 None => {
-                    self.type_error("E002", format!("undefined: `{}`", step_name), &fd.span);
+                    self.type_error("E0102", format!("undefined: `{}`", step_name), &fd.span);
                     current_output = Some(Type::Error);
                 }
                 Some(ty) => {
@@ -2239,7 +2625,7 @@ impl Checker {
                         if let Some((input, _output)) = ty.as_callable() {
                             if !prev_out.is_compatible(input) {
                                 self.type_error(
-                                    "E003",
+                                    "E0103",
                                     format!(
                                         "flw `{}`: `{}` outputs `{}` but `{}` expects `{}`",
                                         fd.name,
@@ -2259,7 +2645,7 @@ impl Checker {
                             }
                         } else {
                             self.type_error(
-                                "E003",
+                                "E0103",
                                 format!(
                                     "`{}` is not a trf or fn, cannot be used in flw",
                                     step_name
@@ -2301,14 +2687,14 @@ impl Checker {
 
     fn check_flw_binding_def(&mut self, fd: &FlwBindingDef) {
         let Some(template) = self.abstract_flw_registry.get(&fd.template).cloned() else {
-            self.type_error("E002", format!("undefined: `{}`", fd.template), &fd.span);
+            self.type_error("E0102", format!("undefined: `{}`", fd.template), &fd.span);
             self.env.define(fd.name.clone(), Type::Error);
             return;
         };
 
         if template.type_params.len() != fd.type_args.len() {
             self.type_error(
-                "E023",
+                "E0223",
                 format!(
                     "wrong number of type arguments for `{}`: expected {}, got {}",
                     template.name,
@@ -2341,7 +2727,7 @@ impl Checker {
         for (slot_name, slot_impl) in &fd.bindings {
             let Some(slot) = slot_map.get(slot_name) else {
                 self.type_error(
-                    "E049",
+                    "E0249",
                     format!(
                         "unknown slot `{}` in abstract seq `{}`",
                         slot_name, template.name
@@ -2403,7 +2789,7 @@ impl Checker {
                     )
                 };
                 self.type_error(
-                    "E048",
+                    "E0248",
                     format!(
                         "slot `{}` in abstract seq `{}` expects `{}` -> `{}`{}, got `{}` from `{}`",
                         slot_name,
@@ -2610,7 +2996,7 @@ impl Checker {
             }
             crate::ast::SlotImpl::Local(name) => {
                 let ty = self.env.lookup(name).cloned().or_else(|| {
-                    self.type_error("E002", format!("undefined local: `{}`", name), span);
+                    self.type_error("E0102", format!("undefined local: `{}`", name), span);
                     None
                 })?;
                 Some((name.clone(), ty))
@@ -2670,7 +3056,7 @@ impl Checker {
                 let inner_ty = match &self.chain_context.clone() {
                     None => {
                         self.type_error(
-                            "E024",
+                            "E0224",
                             "chain used outside a Result/Option-returning function",
                             &c.span,
                         );
@@ -2683,27 +3069,18 @@ impl Checker {
             // yield expr;  (v0.5.0)
             Stmt::Yield(y) => {
                 if !self.in_collect {
-                    self.type_error("E026", "yield used outside a collect block", &y.span);
+                    self.type_error("E0226", "yield used outside a collect block", &y.span);
                 }
                 self.check_expr(&y.expr);
             }
-            // for x in list { body }  (v1.9.0)
+            // for x in list { body }  (v1.9.0; collect-inside supported since v2.9.0)
             Stmt::ForIn(f) => {
-                // E067: for inside collect is not supported in v1.9.0
-                if self.in_collect {
-                    self.type_error(
-                        "E067",
-                        "`for` inside `collect` block is not supported in v1.9.0",
-                        &f.span,
-                    );
-                    return;
-                }
                 let iter_ty = self.check_expr(&f.iter);
                 let elem_ty = match iter_ty {
                     Type::List(inner) => *inner,
                     Type::Unknown | Type::Error => Type::Unknown,
                     _ => {
-                        self.type_error("E065", "`for` iterator must be `List<T>`", &f.span);
+                        self.type_error("E0365", "`for` iterator must be `List<T>`", &f.span);
                         Type::Unknown
                     }
                 };
@@ -2740,7 +3117,7 @@ impl Checker {
             Type::Error | Type::Unknown => Type::Unknown,
             _ => {
                 self.type_error(
-                    "E025",
+                    "E0225",
                     format!(
                         "chain expression has type `{}`, expected `Result<_,_>` or `Option<_>`",
                         expr_ty.display()
@@ -2797,16 +3174,16 @@ impl Checker {
         let type_name = match ty {
             Type::Named(name, _) => name.clone(),
             _ => {
-                self.type_error("E072", "destructuring bind requires a record type", span);
+                self.type_error("E0372", "destructuring bind requires a record type", span);
                 return;
             }
         };
         let Some(body) = self.type_defs.get(&type_name) else {
-            self.type_error("E072", "destructuring bind requires a record type", span);
+            self.type_error("E0372", "destructuring bind requires a record type", span);
             return;
         };
         let TypeBody::Record(record_fields) = body else {
-            self.type_error("E072", "destructuring bind requires a record type", span);
+            self.type_error("E0372", "destructuring bind requires a record type", span);
             return;
         };
         let record_field_names: HashSet<String> =
@@ -2818,7 +3195,7 @@ impl Checker {
             };
             if !record_field_names.contains(name) {
                 self.type_error(
-                    "E073",
+                    "E0373",
                     format!("record destructuring field `{}` does not exist", name),
                     field.span(),
                 );
@@ -2840,7 +3217,7 @@ impl Checker {
 
         let Pattern::Bind(_, span) = pattern else {
             self.type_error(
-                "E046",
+                "E0246",
                 format!(
                     "typed bind expects `{}`, but expression has type `{}`",
                     annotated_ty.display(),
@@ -2859,7 +3236,7 @@ impl Checker {
                     self.evaluate_invariants_for_literal(&field_name, &invariants, expr)
                 {
                     self.type_error(
-                        "E046",
+                        "E0246",
                         format!(
                             "literal does not satisfy invariant for state type `{}`",
                             annotated_ty.display()
@@ -2872,7 +3249,7 @@ impl Checker {
         }
 
         self.type_error(
-            "E046",
+            "E0246",
             format!(
                 "typed bind expects `{}`, but expression has type `{}`",
                 annotated_ty.display(),
@@ -3170,9 +3547,23 @@ impl Checker {
                         ty
                     }
                     None => {
-                        self.type_error("E002", format!("undefined: `{}`", name), span);
+                        self.type_error("E0102", format!("undefined: `{}`", name), span);
                         Type::Error
                     }
+                };
+                self.remember_type(span, &ty);
+                ty
+            }
+
+            Expr::TypeApply(func, type_args, span) => {
+                let ty = if let Expr::Ident(name, _) = func.as_ref() {
+                    if name == "type_name_of" {
+                        Type::Fn(vec![], Box::new(Type::String))
+                    } else {
+                        instantiate_explicit_type_args(self.check_expr(func), type_args, self)
+                    }
+                } else {
+                    instantiate_explicit_type_args(self.check_expr(func), type_args, self)
                 };
                 self.remember_type(span, &ty);
                 ty
@@ -3186,7 +3577,7 @@ impl Checker {
                             Some((ty, vis)) if *vis != Visibility::Private => ty.clone(),
                             None => {
                                 self.type_error(
-                                    "E002",
+                                    "E0102",
                                     format!("`{}.{}` is not exported", namespace, field),
                                     span,
                                 );
@@ -3194,7 +3585,7 @@ impl Checker {
                             }
                             Some(_) => {
                                 self.type_error(
-                                    "E002",
+                                    "E0102",
                                     format!("`{}.{}` is not exported", namespace, field),
                                     span,
                                 );
@@ -3271,7 +3662,7 @@ impl Checker {
 
                         if inst_params.len() != arg_tys.len() {
                             self.type_error(
-                                "E001",
+                                "E0101",
                                 format!(
                                     "expected {} argument(s), got {}",
                                     inst_params.len(),
@@ -3290,9 +3681,9 @@ impl Checker {
                                     Ok(s) => subst = s.compose(subst),
                                     Err(msg) => {
                                         let code = if msg.contains("infinite type") {
-                                            "E019"
+                                            "E0219"
                                         } else {
-                                            "E018"
+                                            "E0218"
                                         };
                                         self.type_error(code, msg, span);
                                         return Type::Error;
@@ -3306,7 +3697,7 @@ impl Checker {
                         let arg_ty = arg_tys.first().cloned().unwrap_or(Type::Unit);
                         if !arg_ty.is_compatible(input) {
                             self.type_error(
-                                "E001",
+                                "E0101",
                                 format!(
                                     "expected `{}`, got `{}`",
                                     input.display(),
@@ -3322,7 +3713,7 @@ impl Checker {
                                 Type::Arrow(ref next_in, ref next_out) => {
                                     if !extra_arg.is_compatible(next_in) {
                                         self.type_error(
-                                            "E001",
+                                            "E0101",
                                             format!(
                                                 "expected `{}`, got `{}`",
                                                 next_in.display(),
@@ -3342,7 +3733,7 @@ impl Checker {
                         let arg_ty = arg_tys.first().cloned().unwrap_or(Type::Unit);
                         if !arg_ty.is_compatible(input) {
                             self.type_error(
-                                "E001",
+                                "E0101",
                                 format!(
                                     "expected `{}`, got `{}`",
                                     input.display(),
@@ -3355,7 +3746,7 @@ impl Checker {
                     }
                     Type::AbstractTrf { .. } => {
                         self.type_error(
-                              "E051",
+                              "E0251",
                               format!(
                                   "cannot call abstract stage `{}` directly; bind it into an abstract seq slot first",
                                   func_ty.display()
@@ -3367,7 +3758,7 @@ impl Checker {
                     Type::Unknown | Type::Error => Type::Unknown,
                     other => {
                         self.type_error(
-                            "E001",
+                            "E0101",
                             format!("`{}` is not callable", other.display()),
                             span,
                         );
@@ -3392,7 +3783,7 @@ impl Checker {
                         }
                         None => {
                             self.type_error(
-                                "E003",
+                                "E0103",
                                 format!("`{}` is not callable in pipeline", step_ty.display()),
                                 span,
                             );
@@ -3401,7 +3792,7 @@ impl Checker {
                         Some((input, output)) => {
                             if !current.is_compatible(input) {
                                 self.type_error(
-                                    "E003",
+                                    "E0103",
                                     format!(
                                         "pipeline type mismatch: `{}` ↁE`{}` (expected `{}`)",
                                         current.display(),
@@ -3442,7 +3833,7 @@ impl Checker {
                 let cond_ty = self.check_expr(cond);
                 if !cond_ty.is_compatible(&Type::Bool) {
                     self.type_error(
-                        "E001",
+                        "E0101",
                         format!("if condition must be Bool, got `{}`", cond_ty.display()),
                         span,
                     );
@@ -3453,7 +3844,7 @@ impl Checker {
                         let else_ty = self.check_block(else_b);
                         if !then_ty.is_compatible(&else_ty) {
                             self.type_error(
-                                "E001",
+                                "E0101",
                                 format!(
                                     "if branches have different types: `{}` vs `{}`",
                                     then_ty.display(),
@@ -3506,7 +3897,7 @@ impl Checker {
                 match self.type_defs.get(type_name) {
                     Some(_) => Type::Named(type_name.clone(), vec![]),
                     None => {
-                        self.type_error("E002", format!("undefined type `{}`", type_name), span);
+                        self.type_error("E0102", format!("undefined type `{}`", type_name), span);
                         Type::Error
                     }
                 }
@@ -3519,7 +3910,7 @@ impl Checker {
                     };
                     if matches!(inner.as_ref(), Expr::FString(_, _)) {
                         self.type_error(
-                            "E053",
+                            "E0253",
                             "nested string interpolation is not supported",
                             span,
                         );
@@ -3541,7 +3932,7 @@ impl Checker {
                         .is_implemented("Show", &ty.display())
                     {
                         self.type_error(
-                            "E054",
+                            "E0254",
                             format!(
                                 "type `{}` does not implement Show; cannot use in string interpolation",
                                 ty.display()
@@ -3564,15 +3955,8 @@ impl Checker {
             Expr::Collect(block, _span) => {
                 let old_in_collect = self.in_collect;
                 self.in_collect = true;
-                // Collect the types of all yield stmts in this block.
-                let mut yield_tys: Vec<Type> = Vec::new();
-                for stmt in &block.stmts {
-                    if let Stmt::Yield(y) = stmt {
-                        yield_tys.push(self.check_expr(&y.expr));
-                    } else {
-                        self.check_stmt(stmt);
-                    }
-                }
+                // Collect yield types recursively (v2.9.0: for-in bodies included).
+                let yield_tys = self.collect_yield_types(&block.stmts);
                 // Also type-check the tail expression (usually Unit / ()).
                 self.check_expr(&block.expr);
                 self.in_collect = old_in_collect;
@@ -3589,6 +3973,37 @@ impl Checker {
                 Type::List(Box::new(elem_ty))
             }
         }
+    }
+
+    // ── collect_yield_types helper (v2.9.0) ──────────────────────────────────
+
+    /// Recursively collect yield expression types from a statement list.
+    /// Descends into `for` bodies so that `collect { for x in list { yield x; } }` works.
+    fn collect_yield_types(&mut self, stmts: &[Stmt]) -> Vec<Type> {
+        let mut tys = Vec::new();
+        for stmt in stmts {
+            match stmt {
+                Stmt::Yield(y) => {
+                    tys.push(self.check_expr(&y.expr));
+                }
+                Stmt::ForIn(f) => {
+                    let iter_ty = self.check_expr(&f.iter);
+                    let elem_ty = match iter_ty {
+                        Type::List(inner) => *inner,
+                        Type::Unknown | Type::Error => Type::Unknown,
+                        _ => Type::Unknown,
+                    };
+                    self.env.push();
+                    self.env.define(f.var.clone(), elem_ty);
+                    tys.extend(self.collect_yield_types(&f.body.stmts));
+                    self.env.pop();
+                }
+                other => {
+                    self.check_stmt(other);
+                }
+            }
+        }
+        tys
     }
 
     // ── match arm consistency (4-12) ─────────────────────────────────────────
@@ -3608,7 +4023,7 @@ impl Checker {
                     && !matches!(guard_ty, Type::Unknown | Type::Error)
                 {
                     self.type_error(
-                        "E027",
+                        "E0227",
                         "pattern guard (where) must be of type Bool",
                         &arm.span,
                     );
@@ -3622,7 +4037,7 @@ impl Checker {
                 Some(prev) => {
                     if !prev.is_compatible(&arm_ty) {
                         self.type_error(
-                            "E001",
+                            "E0101",
                             format!(
                                 "match arms have inconsistent types: `{}` vs `{}`",
                                 prev.display(),
@@ -3648,7 +4063,7 @@ impl Checker {
                     && matches!(r, Type::Int | Type::Float | Type::Unknown | Type::Error);
                 if !numeric && !l.is_compatible(r) {
                     self.type_error(
-                        "E001",
+                        "E0101",
                         format!(
                             "arithmetic on non-numeric types `{}` and `{}`",
                             l.display(),
@@ -3665,7 +4080,7 @@ impl Checker {
                 }
             }
             And | Or => {
-                let code = if matches!(op, And) { "E070" } else { "E071" };
+                let code = if matches!(op, And) { "E0370" } else { "E0371" };
                 let opname = if matches!(op, And) { "&&" } else { "||" };
                 if !matches!(l, Type::Bool | Type::Unknown | Type::Error) {
                     self.type_error(
@@ -3694,7 +4109,7 @@ impl Checker {
             Eq | NotEq | Lt | Gt | LtEq | GtEq => {
                 if !l.is_compatible(r) {
                     self.type_error(
-                        "E001",
+                        "E0101",
                         format!(
                             "comparison between incompatible types `{}` and `{}`",
                             l.display(),
@@ -3711,7 +4126,7 @@ impl Checker {
                     let t = *inner.clone();
                     if !r.is_compatible(&t) {
                         self.type_error(
-                                "E069",
+                                "E0369",
                                 format!("`??` right-hand side `{}` is incompatible with `Option` inner type `{}`", r.display(), t.display()),
                                 span,
                             );
@@ -3721,7 +4136,7 @@ impl Checker {
                 Type::Unknown | Type::Error => r.clone(),
                 _ => {
                     self.type_error(
-                        "E068",
+                        "E0368",
                         format!(
                             "`??` left-hand side must be `Option<T>`, got `{}`",
                             l.display()
@@ -3770,7 +4185,7 @@ impl Checker {
                 || matches!(cap_name.as_str(), "Eq" | "Ord" | "Show")
             {
                 self.type_error(
-                    "E021",
+                    "E0221",
                     format!("no impl of `{}` for type `{}`", cap_name, ty_name),
                     span,
                 );
@@ -3830,6 +4245,10 @@ impl Checker {
                         | "File"
                         | "Json"
                         | "Csv"
+                        | "Checkpoint"
+                        | "Parquet"
+                        | "Grpc"
+                        | "Stream"
                 ) =>
             {
                 Type::Unknown
@@ -3868,7 +4287,7 @@ impl Checker {
     fn require_db_effect(&mut self, span: &Span) {
         if !self.has_effect(|e| matches!(e, Effect::Db)) {
             self.type_error(
-                "E007",
+                "E0107",
                 "Db.* call requires `!Db` effect on enclosing fn/trf",
                 span,
             );
@@ -3878,8 +4297,28 @@ impl Checker {
     fn require_network_effect(&mut self, span: &Span) {
         if !self.has_effect(|e| matches!(e, Effect::Network)) {
             self.type_error(
-                "E008",
+                "E0108",
                 "Http.* call requires `!Network` effect on enclosing fn/trf",
+                span,
+            );
+        }
+    }
+
+    fn require_rpc_effect(&mut self, span: &Span) {
+        if !self.has_effect(|e| matches!(e, Effect::Rpc)) {
+            self.type_error(
+                "E0310",
+                "Grpc.* call requires `!Rpc` effect on enclosing fn/trf",
+                span,
+            );
+        }
+    }
+
+    fn require_io_effect(&mut self, span: &Span) {
+        if !self.has_effect(|e| matches!(e, Effect::Io)) {
+            self.type_error(
+                "E0106",
+                "call requires `!Io` effect on enclosing fn/trf",
                 span,
             );
         }
@@ -3888,8 +4327,18 @@ impl Checker {
     fn require_file_effect(&mut self, span: &Span) {
         if !self.has_effect(|e| matches!(e, Effect::File)) {
             self.type_error(
-                "E036",
+                "E0136",
                 "File.* call requires `!File` effect on enclosing fn/trf",
+                span,
+            );
+        }
+    }
+
+    fn require_checkpoint_effect(&mut self, span: &Span) {
+        if !self.has_effect(|e| matches!(e, Effect::Checkpoint)) {
+            self.type_error(
+                "E0308",
+                "Checkpoint.* call requires `!Checkpoint` effect on enclosing fn/trf",
                 span,
             );
         }
@@ -3899,7 +4348,7 @@ impl Checker {
         let has_emit = self.has_effect(|e| matches!(e, Effect::Emit(_) | Effect::EmitUnion(_)));
         if !has_emit {
             self.type_error(
-                "E009",
+                "E0109",
                 "`emit` requires `!Emit<T>` effect on enclosing fn/trf",
                 span,
             );
@@ -3910,7 +4359,7 @@ impl Checker {
     fn require_trace_effect(&mut self, span: &Span) {
         if !self.has_effect(|e| matches!(e, Effect::Trace)) {
             self.type_error(
-                "E010",
+                "E0110",
                 "Trace.* call requires `!Trace` effect on enclosing fn/trf",
                 span,
             );
@@ -3922,6 +4371,10 @@ impl Checker {
     /// If `func` is a known built-in namespace call (IO.println etc.), type-check
     /// the arguments and return the result type.  Returns None if not a built-in.
     fn check_builtin_apply(&mut self, func: &Expr, args: &[Expr], span: &Span) -> Option<Type> {
+        let func = match func {
+            Expr::TypeApply(inner, _, _) => inner.as_ref(),
+            other => other,
+        };
         let (ns, method) = match func {
             Expr::FieldAccess(obj, method, _) => {
                 if let Expr::Ident(ns, _) = obj.as_ref() {
@@ -3941,17 +4394,22 @@ impl Checker {
                 if let Some(ty) = arg_tys.first() {
                     if !ty.is_compatible(&Type::String) {
                         self.type_error(
-                            "E001",
+                            "E0101",
                             format!("IO.{} expects String, got `{}`", method, ty.display()),
                             span,
                         );
                     }
                 } else {
-                    self.type_error("E001", format!("IO.{} requires one argument", method), span);
+                    self.type_error(
+                        "E0101",
+                        format!("IO.{} requires one argument", method),
+                        span,
+                    );
                 }
                 Some(Type::Unit)
             }
             ("IO", "read_line") => Some(Type::String),
+            ("IO", "timestamp") => Some(Type::String),
 
             // Math
             ("Math", "pi") | ("Math", "e") => Some(Type::Float),
@@ -4060,24 +4518,22 @@ impl Checker {
             // Result
             ("Result", "ok") => {
                 let ty = arg_tys.first().cloned().unwrap_or(Type::Unknown);
-                Some(Type::Result(
-                    Box::new(ty),
-                    Box::new(Type::Named("Error".into(), vec![])),
-                ))
+                Some(Type::Result(Box::new(ty), Box::new(Type::Unknown)))
             }
             ("Result", "err") => Some(Type::Result(
                 Box::new(Type::Unknown),
-                Box::new(Type::Named("Error".into(), vec![])),
+                Box::new(Type::Unknown),
             )),
             ("Result", "map") => {
                 let out = arg_tys
                     .get(1)
                     .and_then(|f| f.as_callable().map(|(_, o)| o.clone()))
                     .unwrap_or(Type::Unknown);
-                Some(Type::Result(
-                    Box::new(out),
-                    Box::new(Type::Named("Error".into(), vec![])),
-                ))
+                let err_ty = match arg_tys.first() {
+                    Some(Type::Result(_, err)) => (**err).clone(),
+                    _ => Type::Named("Error".into(), vec![]),
+                };
+                Some(Type::Result(Box::new(out), Box::new(err_ty)))
             }
             ("Result", "unwrap_or") => {
                 let default_ty = arg_tys.get(1).cloned().unwrap_or(Type::Unknown);
@@ -4108,6 +4564,83 @@ impl Checker {
                 Some(Type::Unknown)
             }
 
+            // DB.* (v3.3.0) — uppercase namespace, require !Db effect
+            ("DB", "connect") => {
+                self.require_db_effect(span);
+                Some(Type::Result(
+                    Box::new(Type::Named("DbHandle".into(), vec![])),
+                    Box::new(Type::Named("DbError".into(), vec![])),
+                ))
+            }
+            ("DB", "close") => {
+                self.require_db_effect(span);
+                Some(Type::Unit)
+            }
+            ("DB", "query_raw") | ("DB", "query_in_tx") => {
+                self.require_db_effect(span);
+                Some(Type::Result(
+                    Box::new(Type::List(Box::new(Type::Map(
+                        Box::new(Type::String),
+                        Box::new(Type::String),
+                    )))),
+                    Box::new(Type::Named("DbError".into(), vec![])),
+                ))
+            }
+            ("DB", "execute_raw") | ("DB", "execute_in_tx") => {
+                self.require_db_effect(span);
+                Some(Type::Result(
+                    Box::new(Type::Int),
+                    Box::new(Type::Named("DbError".into(), vec![])),
+                ))
+            }
+            ("DB", "query_raw_params") => {
+                self.require_db_effect(span);
+                Some(Type::Result(
+                    Box::new(Type::List(Box::new(Type::Map(
+                        Box::new(Type::String),
+                        Box::new(Type::String),
+                    )))),
+                    Box::new(Type::Named("DbError".into(), vec![])),
+                ))
+            }
+            ("DB", "execute_raw_params") => {
+                self.require_db_effect(span);
+                Some(Type::Result(
+                    Box::new(Type::Int),
+                    Box::new(Type::Named("DbError".into(), vec![])),
+                ))
+            }
+            ("DB", "begin_tx") => {
+                self.require_db_effect(span);
+                Some(Type::Result(
+                    Box::new(Type::Named("TxHandle".into(), vec![])),
+                    Box::new(Type::Named("DbError".into(), vec![])),
+                ))
+            }
+            ("DB", "commit_tx") | ("DB", "rollback_tx") => {
+                self.require_db_effect(span);
+                Some(Type::Result(
+                    Box::new(Type::Unit),
+                    Box::new(Type::Named("DbError".into(), vec![])),
+                ))
+            }
+            ("DB", "upsert_raw") => {
+                self.require_db_effect(span);
+                Some(Type::Unit)
+            }
+            ("DB", _) => {
+                self.require_db_effect(span);
+                Some(Type::Unknown)
+            }
+
+            // Env.* (v3.3.0)
+            ("Env", "get") => Some(Type::Result(
+                Box::new(Type::String),
+                Box::new(Type::Named("DbError".into(), vec![])),
+            )),
+            ("Env", "get_or") => Some(Type::String),
+            ("Env", _) => Some(Type::Unknown),
+
             // File (v0.7.0): require !File effect
             ("File", "read") => {
                 self.require_file_effect(span);
@@ -4133,6 +4666,19 @@ impl Checker {
                 Some(Type::Unknown)
             }
 
+            ("Checkpoint", "last") => {
+                self.require_checkpoint_effect(span);
+                Some(Type::Option(Box::new(Type::String)))
+            }
+            ("Checkpoint", "save") | ("Checkpoint", "reset") => {
+                self.require_checkpoint_effect(span);
+                Some(Type::Unit)
+            }
+            ("Checkpoint", "meta") => {
+                self.require_checkpoint_effect(span);
+                Some(Type::Named("CheckpointMeta".into(), vec![]))
+            }
+
             // Http (2-7): require !Network effect
             ("Http", "get") | ("Http", "post") => {
                 self.require_network_effect(span);
@@ -4141,6 +4687,59 @@ impl Checker {
                     Box::new(Type::Named("Error".into(), vec![])),
                 ))
             }
+            ("Http", "get_raw") | ("Http", "post_raw") => {
+                self.require_network_effect(span);
+                Some(Type::Result(
+                    Box::new(Type::Named("HttpResponse".into(), vec![])),
+                    Box::new(Type::Named("HttpError".into(), vec![])),
+                ))
+            }
+            ("Http", "serve_raw") => {
+                self.require_network_effect(span);
+                self.require_io_effect(span);
+                Some(Type::Unit)
+            }
+
+            ("Grpc", "serve_raw") => {
+                self.require_rpc_effect(span);
+                self.require_io_effect(span);
+                Some(Type::Unit)
+            }
+            ("Grpc", "serve_stream_raw") => {
+                self.require_rpc_effect(span);
+                self.require_io_effect(span);
+                Some(Type::Unit)
+            }
+            ("Grpc", "call_raw") => {
+                self.require_rpc_effect(span);
+                Some(Type::Result(
+                    Box::new(Type::Map(Box::new(Type::String), Box::new(Type::String))),
+                    Box::new(Type::Named("RpcError".into(), vec![])),
+                ))
+            }
+            ("Grpc", "call_stream_raw") => {
+                self.require_rpc_effect(span);
+                Some(Type::List(Box::new(Type::Map(
+                    Box::new(Type::String),
+                    Box::new(Type::String),
+                ))))
+            }
+            ("Grpc", "encode_raw") => Some(Type::String),
+            ("Grpc", "decode_raw") => {
+                Some(Type::Map(Box::new(Type::String), Box::new(Type::String)))
+            }
+
+            ("Parquet", "write_raw") => Some(Type::Result(
+                Box::new(Type::Unit),
+                Box::new(Type::Named("ParquetError".into(), vec![])),
+            )),
+            ("Parquet", "read_raw") => Some(Type::Result(
+                Box::new(Type::List(Box::new(Type::Map(
+                    Box::new(Type::String),
+                    Box::new(Type::String),
+                )))),
+                Box::new(Type::Named("ParquetError".into(), vec![])),
+            )),
 
             // Map (3-15..3-18)
             ("Map", "get") => Some(Type::Option(Box::new(Type::Unknown))),
@@ -4158,6 +4757,18 @@ impl Checker {
             | ("Json", "array")
             | ("Json", "object")
             | ("Json", "parse") => Some(Type::Named("Json".into(), vec![])),
+            ("Json", "parse_raw") => Some(Type::Result(
+                Box::new(Type::Map(Box::new(Type::String), Box::new(Type::String))),
+                Box::new(Type::Named("SchemaError".into(), vec![])),
+            )),
+            ("Json", "parse_array_raw") => Some(Type::Result(
+                Box::new(Type::List(Box::new(Type::Map(
+                    Box::new(Type::String),
+                    Box::new(Type::String),
+                )))),
+                Box::new(Type::Named("SchemaError".into(), vec![])),
+            )),
+            ("Json", "write_raw") | ("Json", "write_array_raw") => Some(Type::String),
             ("Json", "encode") | ("Json", "encode_pretty") => Some(Type::String),
             ("Json", "get") | ("Json", "at") => {
                 Some(Type::Option(Box::new(Type::Named("Json".into(), vec![]))))
@@ -4180,10 +4791,31 @@ impl Checker {
                 Box::new(Type::String),
                 Box::new(Type::String),
             )))),
+            ("Csv", "parse_raw") => Some(Type::Result(
+                Box::new(Type::List(Box::new(Type::Map(
+                    Box::new(Type::String),
+                    Box::new(Type::String),
+                )))),
+                Box::new(Type::Named("SchemaError".into(), vec![])),
+            )),
+            ("Csv", "write_raw") => Some(Type::String),
             ("Csv", "encode") | ("Csv", "encode_with_header") | ("Csv", "from_records") => {
                 Some(Type::String)
             }
             ("Csv", _) => Some(Type::Unknown),
+
+            ("Schema", "adapt") => Some(Type::Result(
+                Box::new(Type::List(Box::new(Type::Unknown))),
+                Box::new(Type::Named("SchemaError".into(), vec![])),
+            )),
+            ("Schema", "adapt_one") => Some(Type::Result(
+                Box::new(Type::Unknown),
+                Box::new(Type::Named("SchemaError".into(), vec![])),
+            )),
+            ("Schema", "to_csv") | ("Schema", "to_json") | ("Schema", "to_json_array") => {
+                Some(Type::String)
+            }
+            ("Schema", _) => Some(Type::Unknown),
 
             // Debug (2-9)
             ("Debug", "show") => Some(Type::String),
@@ -4213,6 +4845,35 @@ impl Checker {
                 Some(Type::Unknown)
             }
 
+            // Stream (v2.9.0)
+            ("Stream", "from") => Some(Type::Unknown),
+            ("Stream", "of") => Some(Type::Stream(Box::new(Type::Unknown))),
+            ("Stream", "map") => Some(Type::Stream(Box::new(Type::Unknown))),
+            ("Stream", "filter") => Some(Type::Stream(Box::new(Type::Unknown))),
+            ("Stream", "take") => Some(Type::Stream(Box::new(Type::Unknown))),
+            ("Stream", "to_list") => Some(Type::List(Box::new(Type::Unknown))),
+            ("Stream", _) => Some(Type::Unknown),
+
+            // Random.seed (v3.5.0)
+            ("Random", "seed") => Some(Type::Unit),
+            ("Random", "int") => Some(Type::Int),
+            ("Random", "float") => Some(Type::Float),
+            ("Random", _) => Some(Type::Unknown),
+
+            // Gen.* (v3.5.0)
+            ("Gen", "string_val") => Some(Type::String),
+            ("Gen", "one_raw") => Some(Type::Map(Box::new(Type::String), Box::new(Type::String))),
+            ("Gen", "list_raw") => Some(Type::List(Box::new(Type::Map(
+                Box::new(Type::String),
+                Box::new(Type::String),
+            )))),
+            ("Gen", "simulate_raw") => Some(Type::List(Box::new(Type::Map(
+                Box::new(Type::String),
+                Box::new(Type::String),
+            )))),
+            ("Gen", "profile_raw") => Some(Type::Named("GenProfile".into(), vec![])),
+            ("Gen", _) => Some(Type::Unknown),
+
             _ => None,
         }
     }
@@ -4223,14 +4884,14 @@ impl Checker {
             Some(Type::Unknown) => Type::Unknown,
             Some(other) => {
                 self.type_error(
-                    "E001",
+                    "E0101",
                     format!("expected List<_>, got `{}`", other.display()),
                     span,
                 );
                 Type::Error
             }
             None => {
-                self.type_error("E001", "missing List argument", span);
+                self.type_error("E0101", "missing List argument", span);
                 Type::Error
             }
         }
@@ -4324,6 +4985,9 @@ impl Checker {
                     "Task" => Type::Task(Box::new(
                         resolved_args.into_iter().next().unwrap_or(Type::Unknown),
                     )),
+                    "Stream" => Type::Stream(Box::new(
+                        resolved_args.into_iter().next().unwrap_or(Type::Unknown),
+                    )),
                     "_infer" => Type::Unknown,
                     _ if self.interface_registry.interfaces.contains_key(name) => {
                         Type::Interface(name.clone(), resolved_args)
@@ -4343,6 +5007,7 @@ impl Checker {
         match ty {
             Type::Named(name, args) if name == "Self" && args.is_empty() => self_ty.clone(),
             Type::List(t) => Type::List(Box::new(self.substitute_self_in_type(t, self_ty))),
+            Type::Stream(t) => Type::Stream(Box::new(self.substitute_self_in_type(t, self_ty))),
             Type::Map(k, v) => Type::Map(
                 Box::new(self.substitute_self_in_type(k, self_ty)),
                 Box::new(self.substitute_self_in_type(v, self_ty)),
@@ -4398,7 +5063,7 @@ impl Checker {
                     let got = args.len();
                     if got != expected && got != 0 {
                         self.type_error(
-                            "E023",
+                            "E0223",
                             format!(
                                 "type `{}` expects {} type argument(s), got {}",
                                 name, expected, got
@@ -4423,6 +5088,85 @@ impl Checker {
                 self.validate_type_expr_arity(output);
             }
         }
+    }
+}
+
+fn collect_type_vars_ordered(ty: &Type, out: &mut Vec<String>) {
+    match ty {
+        Type::Var(name) => {
+            if !out.contains(name) {
+                out.push(name.clone());
+            }
+        }
+        Type::List(inner) | Type::Option(inner) | Type::Task(inner) | Type::Stream(inner) => {
+            collect_type_vars_ordered(inner, out);
+        }
+        Type::Map(k, v) | Type::Result(k, v) | Type::Arrow(k, v) => {
+            collect_type_vars_ordered(k, out);
+            collect_type_vars_ordered(v, out);
+        }
+        Type::Fn(params, ret) => {
+            for param in params {
+                collect_type_vars_ordered(param, out);
+            }
+            collect_type_vars_ordered(ret, out);
+        }
+        Type::Trf(input, output, _) => {
+            collect_type_vars_ordered(input, out);
+            collect_type_vars_ordered(output, out);
+        }
+        Type::Named(_, args) | Type::Cap(_, args) | Type::Interface(_, args) => {
+            for arg in args {
+                collect_type_vars_ordered(arg, out);
+            }
+        }
+        Type::AbstractTrf { input, output, .. } => {
+            collect_type_vars_ordered(input, out);
+            collect_type_vars_ordered(output, out);
+        }
+        Type::AbstractFlwTemplate(_)
+        | Type::PartialFlw { .. }
+        | Type::Bool
+        | Type::Int
+        | Type::Float
+        | Type::String
+        | Type::Unit
+        | Type::Unknown
+        | Type::Error => {}
+    }
+}
+
+fn instantiate_explicit_type_args(
+    func_ty: Type,
+    type_args: &[TypeExpr],
+    checker: &mut Checker,
+) -> Type {
+    let mut names = Vec::new();
+    collect_type_vars_ordered(&func_ty, &mut names);
+    let mut subst = Subst::empty();
+    for (name, arg) in names.into_iter().zip(type_args.iter()) {
+        subst.extend(name, checker.resolve_type_expr(arg));
+    }
+    match func_ty {
+        Type::Fn(params, ret) => Type::Fn(
+            params.iter().map(|p| subst.apply(p)).collect(),
+            Box::new(subst.apply(&ret)),
+        ),
+        Type::Trf(input, output, effects) => Type::Trf(
+            Box::new(subst.apply(&input)),
+            Box::new(subst.apply(&output)),
+            effects,
+        ),
+        Type::AbstractTrf {
+            input,
+            output,
+            effects,
+        } => Type::AbstractTrf {
+            input: Box::new(subst.apply(&input)),
+            output: Box::new(subst.apply(&output)),
+            effects,
+        },
+        other => other,
     }
 }
 
@@ -4506,7 +5250,7 @@ mod tests {
         "#,
         );
         assert!(
-            errs.iter().any(|e| e.contains("E054")),
+            errs.iter().any(|e| e.contains("E0254")),
             "expected E054, got: {:?}",
             errs
         );
@@ -4516,7 +5260,7 @@ mod tests {
     fn test_fstring_e053_nested() {
         let errs = check_err(r#"fn f() -> String { $"outer {$"inner"}" }"#);
         assert!(
-            errs.iter().any(|e| e.contains("E053")),
+            errs.iter().any(|e| e.contains("E0253")),
             "expected E053, got: {:?}",
             errs
         );
@@ -4541,6 +5285,21 @@ mod tests {
     }
 
     #[test]
+    fn test_col_attr_ok() {
+        check_ok("type Row = { #[col(0)] id: Int #[col(1)] name: String }");
+    }
+
+    #[test]
+    fn test_col_attr_invalid_index_e0503() {
+        let errs = check_err("type Row = { #[col(foo)] id: Int }");
+        assert!(
+            errs.iter().any(|e| e.contains("E0503")),
+            "expected E0503, got: {:?}",
+            errs
+        );
+    }
+
+    #[test]
     fn test_invariant_type_check_bool() {
         check_ok("type PosInt = { value: Int invariant value > 0 }");
     }
@@ -4549,7 +5308,7 @@ mod tests {
     fn test_invariant_type_check_e045() {
         let errs = check_err("type Bad = { value: Int invariant value + 1 }");
         assert!(
-            errs.iter().any(|e| e.contains("E045")),
+            errs.iter().any(|e| e.contains("E0245")),
             "expected E045, got: {:?}",
             errs
         );
@@ -4573,7 +5332,7 @@ mod tests {
             "type PosInt = { value: Int invariant value > 0 }\nfn f() -> PosInt { bind x: PosInt <- 0; x }",
         );
         assert!(
-            errs.iter().any(|e| e.contains("E046")),
+            errs.iter().any(|e| e.contains("E0246")),
             "expected E046, got: {:?}",
             errs
         );
@@ -4590,7 +5349,7 @@ mod tests {
     fn test_invariant_unknown_field_e002() {
         let errs = check_err("type Broken = { value: Int invariant missing > 0 }");
         assert!(
-            errs.iter().any(|e| e.contains("E002")),
+            errs.iter().any(|e| e.contains("E0102")),
             "expected E002, got: {:?}",
             errs
         );
@@ -4639,7 +5398,7 @@ mod tests {
     fn test_stdlib_bind_state_annotation_fail_e046() {
         let errs = check_err("fn f() -> PosInt { bind x: PosInt <- 0; x }");
         assert!(
-            errs.iter().any(|e| e.contains("E046")),
+            errs.iter().any(|e| e.contains("E0246")),
             "expected E046, got: {:?}",
             errs
         );
@@ -4649,7 +5408,7 @@ mod tests {
     #[test]
     fn test_fn_return_mismatch() {
         let errs = check_err("fn f() -> Int { \"not an int\" }");
-        assert!(errs[0].contains("E001"));
+        assert!(errs[0].contains("E0101"));
     }
 
     // 4-7: fn return type matches
@@ -4686,14 +5445,14 @@ mod tests {
             seq Bad = A |> B
         ",
         );
-        assert!(errs.iter().any(|e| e.contains("E003")));
+        assert!(errs.iter().any(|e| e.contains("E0103")));
     }
 
     // 4-9: flw  Eundefined step
     #[test]
     fn test_flw_undefined_step() {
         let errs = check_err("seq Bad = NoSuchTrf |> AnotherMissing");
-        assert!(errs.iter().any(|e| e.contains("E002")));
+        assert!(errs.iter().any(|e| e.contains("E0102")));
     }
 
     // 4-10: bind infers type
@@ -4743,14 +5502,14 @@ mod tests {
             }
         ",
         );
-        assert!(errs.iter().any(|e| e.contains("E001")));
+        assert!(errs.iter().any(|e| e.contains("E0101")));
     }
 
     // 4-13: if branch type mismatch
     #[test]
     fn test_if_branch_mismatch() {
         let errs = check_err("fn f() -> Int { if true { 1 } else { \"wrong\" } }");
-        assert!(errs.iter().any(|e| e.contains("E001")));
+        assert!(errs.iter().any(|e| e.contains("E0101")));
     }
 
     // 4-13: if branches match
@@ -4772,19 +5531,19 @@ mod tests {
     #[test]
     fn test_logical_and_non_bool_e070() {
         let errs = check_err("fn f() -> Bool { 1 && true }");
-        assert!(errs.iter().any(|e| e.contains("E070")));
+        assert!(errs.iter().any(|e| e.contains("E0370")));
     }
 
     #[test]
     fn test_logical_or_non_bool_e071() {
         let errs = check_err("fn f() -> Bool { true || 1 }");
-        assert!(errs.iter().any(|e| e.contains("E071")));
+        assert!(errs.iter().any(|e| e.contains("E0371")));
     }
 
     #[test]
     fn test_logical_and_non_bool_right_e070() {
         let errs = check_err("fn f() -> Bool { true && 1 }");
-        assert!(errs.iter().any(|e| e.contains("E070")));
+        assert!(errs.iter().any(|e| e.contains("E0370")));
     }
 
     #[test]
@@ -4811,7 +5570,7 @@ mod tests {
         );
         assert!(
             errs.iter()
-                .any(|e| e.contains("E003") || e.contains("E001"))
+                .any(|e| e.contains("E0103") || e.contains("E0101"))
         );
     }
 
@@ -4819,7 +5578,7 @@ mod tests {
     #[test]
     fn test_undefined_ident() {
         let errs = check_err("fn f() -> Int { undefined_var }");
-        assert!(errs.iter().any(|e| e.contains("E002")));
+        assert!(errs.iter().any(|e| e.contains("E0102")));
     }
 
     // 4-16: closure infers body type
@@ -4863,7 +5622,7 @@ mod tests {
     #[test]
     fn test_record_construct_unknown_type() {
         let errs = check_err(r#"fn f() -> Unit { Ghost { x: 1 } }"#);
-        assert!(errs.iter().any(|e| e.contains("E002")));
+        assert!(errs.iter().any(|e| e.contains("E0102")));
     }
 
     // 2-5: emit expr returns Unit
@@ -4918,7 +5677,7 @@ mod tests {
             }
         "#,
         );
-        assert!(errs.iter().any(|e| e.contains("E007")), "got: {:?}", errs);
+        assert!(errs.iter().any(|e| e.contains("E0107")), "got: {:?}", errs);
     }
 
     // 2-6: Db.* with !Db ↁEok
@@ -4937,7 +5696,7 @@ mod tests {
             }
         "#,
         );
-        assert!(errs.iter().any(|e| e.contains("E008")), "got: {:?}", errs);
+        assert!(errs.iter().any(|e| e.contains("E0108")), "got: {:?}", errs);
     }
 
     // 2-7: Http.* with !Network ↁEok
@@ -4949,7 +5708,7 @@ mod tests {
     #[test]
     fn test_file_effect_missing() {
         let errs = check_err(r#"fn f() -> String { File.read("a.txt") }"#);
-        assert!(errs.iter().any(|e| e.contains("E036")), "got: {:?}", errs);
+        assert!(errs.iter().any(|e| e.contains("E0136")), "got: {:?}", errs);
     }
 
     #[test]
@@ -4961,7 +5720,7 @@ mod tests {
     #[test]
     fn test_emit_effect_missing() {
         let errs = check_err(r#"fn f() -> Unit { emit "event" }"#);
-        assert!(errs.iter().any(|e| e.contains("E009")), "got: {:?}", errs);
+        assert!(errs.iter().any(|e| e.contains("E0109")), "got: {:?}", errs);
     }
 
     // 2-8: emit with !Emit<T> ↁEok
@@ -5002,7 +5761,7 @@ stage Charge: Int -> Int !Payment = |x| { x }
     #[test]
     fn effect_unknown_e052() {
         let errs = check_err(r#"stage Charge: Int -> Int !Payment = |x| { x }"#);
-        assert!(errs.iter().any(|e| e.contains("E052")), "got: {:?}", errs);
+        assert!(errs.iter().any(|e| e.contains("E0252")), "got: {:?}", errs);
     }
 
     #[test]
@@ -5051,6 +5810,7 @@ abstract seq Pipeline {
             src: "src".into(),
             runes_path: None,
             dependencies: vec![],
+            checkpoint: None,
         };
         let resolver = Arc::new(Mutex::new(Resolver::new(Some(toml), Some(root))));
         (resolver, dir)
@@ -5082,7 +5842,7 @@ abstract seq Pipeline {
         let src = "use utils.secret\npublic fn main() -> Unit { () }";
         let errs = check_with_resolver(src, "main.fav", resolver);
         assert!(
-            errs.iter().any(|e| e.contains("E014")),
+            errs.iter().any(|e| e.contains("E0214")),
             "expected E014, got: {:?}",
             errs
         );
@@ -5095,7 +5855,7 @@ abstract seq Pipeline {
         let src = "use stuff.ghost\npublic fn main() -> Unit { () }";
         let errs = check_with_resolver(src, "main.fav", resolver);
         assert!(
-            errs.iter().any(|e| e.contains("E013")),
+            errs.iter().any(|e| e.contains("E0213")),
             "expected E013, got: {:?}",
             errs
         );
@@ -5124,6 +5884,7 @@ abstract seq Pipeline {
             src: "src".into(),
             runes_path: None,
             dependencies: vec![],
+            checkpoint: None,
         };
         let mut resolver = Resolver::new(Some(toml), Some(root));
         // Simulate a mid-load state: "cycle" is already in the loading set
@@ -5144,7 +5905,7 @@ abstract seq Pipeline {
         let path = vec!["nonexistent".to_string(), "sym".to_string()];
         resolver.resolve_use(&path, &mut errors, &span);
         assert!(
-            errors.iter().any(|e| e.code == "E013"),
+            errors.iter().any(|e| e.code == "E0213"),
             "expected E013, got: {:?}",
             errors
         );
@@ -5192,7 +5953,7 @@ abstract seq Pipeline {
         let src = "import \"models/user\"\npublic fn main() -> Unit { () }";
         let errs = check_with_resolver(src, "main.fav", resolver);
         assert!(
-            errs.iter().any(|e| e.contains("E080")),
+            errs.iter().any(|e| e.contains("E0580")),
             "expected E080, got: {:?}",
             errs
         );
@@ -5210,7 +5971,7 @@ abstract seq Pipeline {
         let src = "import \"models/user\"\nimport \"auth/user\"\npublic fn main() -> Unit { () }";
         let errs = check_with_resolver(src, "main.fav", resolver);
         assert!(
-            errs.iter().any(|e| e.contains("E081")),
+            errs.iter().any(|e| e.contains("E0581")),
             "expected E081, got: {:?}",
             errs
         );
@@ -5237,7 +5998,7 @@ abstract seq Pipeline {
         "#,
         );
         assert!(
-            errs.iter().any(|e| e.contains("E042")),
+            errs.iter().any(|e| e.contains("E0242")),
             "expected E042, got: {:?}",
             errs
         );
@@ -5254,7 +6015,7 @@ abstract seq Pipeline {
         "#,
         );
         assert!(
-            errs.iter().any(|e| e.contains("E043")),
+            errs.iter().any(|e| e.contains("E0243")),
             "expected E043, got: {:?}",
             errs
         );
@@ -5268,7 +6029,7 @@ abstract seq Pipeline {
         "#,
         );
         assert!(
-            errs.iter().any(|e| e.contains("E041")),
+            errs.iter().any(|e| e.contains("E0241")),
             "expected E041, got: {:?}",
             errs
         );
@@ -5308,7 +6069,7 @@ abstract seq Pipeline {
         "#,
         );
         assert!(
-            errs.iter().any(|e| e.contains("E044")),
+            errs.iter().any(|e| e.contains("E0244")),
             "expected E044, got: {:?}",
             errs
         );
@@ -5399,7 +6160,7 @@ abstract seq Pipeline {
         "#,
         );
         assert!(
-            errs.iter().any(|e| e.contains("E044")),
+            errs.iter().any(|e| e.contains("E0244")),
             "expected E044, got: {:?}",
             errs
         );
@@ -5513,7 +6274,7 @@ abstract seq Pipeline {
         "#,
         );
         assert!(
-            errs.iter().any(|e| e.contains("E044")),
+            errs.iter().any(|e| e.contains("E0244")),
             "expected E044, got: {:?}",
             errs
         );
@@ -5638,7 +6399,7 @@ abstract seq Pipeline {
         let src = "impl NoSuchCap<Int> { fn foo(x: Int) -> Int { x } }";
         let errs = check_err(src);
         assert!(
-            errs.iter().any(|e| e.contains("E020")),
+            errs.iter().any(|e| e.contains("E0220")),
             "expected E020, got: {:?}",
             errs
         );
@@ -5650,7 +6411,7 @@ abstract seq Pipeline {
         let errs = check_err(src);
         // E042 is raised for undeclared methods in interface impl
         assert!(
-            errs.iter().any(|e| e.contains("E042")),
+            errs.iter().any(|e| e.contains("E0242")),
             "expected E042, got: {:?}",
             errs
         );
@@ -5662,7 +6423,7 @@ abstract seq Pipeline {
         let src = "type MyData = { x: Int }\nfn main() -> Unit { bind t <- MyData { x: 1 }; bind _ <- t.eq; () }";
         let errs = check_err(src);
         assert!(
-            errs.iter().any(|e| e.contains("E021")),
+            errs.iter().any(|e| e.contains("E0221")),
             "expected E021, got: {:?}",
             errs
         );
@@ -5682,7 +6443,7 @@ abstract seq Pipeline {
         let src = "fn add(a: Int, b: Int) -> Int { a }\nfn main() -> Int { add(1, true) }";
         let errs = check_err(src);
         assert!(
-            errs.iter().any(|e| e.contains("E018")),
+            errs.iter().any(|e| e.contains("E0218")),
             "expected E018, got: {:?}",
             errs
         );
@@ -5709,7 +6470,7 @@ abstract seq Pipeline {
         let src = "type Pair<A, B> = { first: A second: B }\nfn bad(x: Pair<Int>) -> Int { 0 }";
         let errs = check_err(src);
         assert!(
-            errs.iter().any(|e| e.contains("E023")),
+            errs.iter().any(|e| e.contains("E0223")),
             "expected E023, got: {:?}",
             errs
         );
@@ -5763,7 +6524,7 @@ fn main() -> Int {
 "#;
         let errs = check_err(src);
         assert!(
-            errs.iter().any(|e| e.contains("E024")),
+            errs.iter().any(|e| e.contains("E0224")),
             "expected E024, got: {:?}",
             errs
         );
@@ -5780,7 +6541,7 @@ fn main() -> Int {
 "#;
         let errs = check_err(src);
         assert!(
-            errs.iter().any(|e| e.contains("E026")),
+            errs.iter().any(|e| e.contains("E0226")),
             "expected E026, got: {:?}",
             errs
         );
@@ -5809,7 +6570,7 @@ fn main() -> Int {
 "#;
         let errs = check_err(src);
         assert!(
-            errs.iter().any(|e| e.contains("E027")),
+            errs.iter().any(|e| e.contains("E0227")),
             "expected E027, got: {:?}",
             errs
         );
@@ -5819,7 +6580,7 @@ fn main() -> Int {
     fn test_guard_non_bool_compound() {
         let errs = check_err("fn f(x: Int) -> Int { match x { n where n + 1 => n _ => 0 } }");
         assert!(
-            errs.iter().any(|e| e.contains("E027")),
+            errs.iter().any(|e| e.contains("E0227")),
             "expected E027, got: {:?}",
             errs
         );
@@ -5830,7 +6591,7 @@ fn main() -> Int {
     fn test_e072_destructure_bind_non_record() {
         let errs = check_err("fn f() -> Int { bind { x } <- 42; x }");
         assert!(
-            errs.iter().any(|e| e.contains("E072")),
+            errs.iter().any(|e| e.contains("E0372")),
             "expected E072, got: {:?}",
             errs
         );
@@ -5848,7 +6609,7 @@ fn f() -> Int {
 "#;
         let errs = check_err(src);
         assert!(
-            errs.iter().any(|e| e.contains("E073")),
+            errs.iter().any(|e| e.contains("E0373")),
             "expected E073, got: {:?}",
             errs
         );
@@ -5858,7 +6619,7 @@ fn f() -> Int {
     fn test_e074_infer_recursive_return_type() {
         let errs = check_err("fn loop(n: Int) = loop(n)");
         assert!(
-            errs.iter().any(|e| e.contains("E074")),
+            errs.iter().any(|e| e.contains("E0274")),
             "expected E074, got: {:?}",
             errs
         );
@@ -5884,7 +6645,7 @@ fn main() -> Int! {
 "#;
         let errs = check_err(src);
         assert!(
-            errs.iter().any(|e| e.contains("E025")),
+            errs.iter().any(|e| e.contains("E0225")),
             "expected E025, got: {:?}",
             errs
         );
@@ -5922,7 +6683,7 @@ seq UserImport = DataPipeline<UserRow> { parse <- ParseCsv; save <- SaveUsers }
 "#,
         );
         assert!(
-            errs.iter().any(|e| e.contains("E048")),
+            errs.iter().any(|e| e.contains("E0248")),
             "expected E048, got: {:?}",
             errs
         );
@@ -5941,7 +6702,7 @@ seq UserImport = DataPipeline<UserRow> { extra <- ParseCsv }
 "#,
         );
         assert!(
-            errs.iter().any(|e| e.contains("E049")),
+            errs.iter().any(|e| e.contains("E0249")),
             "expected E049, got: {:?}",
             errs
         );
@@ -6014,7 +6775,7 @@ fn main() -> String { FetchUser(1) }
 "#,
         );
         assert!(
-            errs.iter().any(|e| e.contains("E051")),
+            errs.iter().any(|e| e.contains("E0251")),
             "expected E051, got: {:?}",
             errs
         );
@@ -6049,7 +6810,7 @@ seq UserPipeline = Pipeline<User> { fetch <- FetchBad }
 "#,
         );
         assert!(
-            errs.iter().any(|e| e.contains("E048")),
+            errs.iter().any(|e| e.contains("E0248")),
             "expected E048, got: {:?}",
             errs
         );
@@ -6170,7 +6931,7 @@ abstract seq SavePipeline<Row> {
             .map(|e| format!("[{}] {}", e.code, e.message))
             .collect::<Vec<_>>();
         assert!(
-            errs.iter().any(|e| e.contains("E048")),
+            errs.iter().any(|e| e.contains("E0248")),
             "expected E048, got: {:?}",
             errs
         );
@@ -6327,15 +7088,16 @@ public fn main() -> Unit !Io {
 "#,
         );
         assert!(
-            errs.iter().any(|e| e.contains("E065")),
+            errs.iter().any(|e| e.contains("E0365")),
             "expected E065, got {:?}",
             errs
         );
     }
 
     #[test]
-    fn for_in_in_collect_e067() {
-        let errs = check_err(
+    fn for_in_in_collect_allowed_v2_9() {
+        // E067 was removed in v2.9.0: for inside collect is now supported
+        check_ok(
             r#"
 public fn main() -> List<Int> {
     collect {
@@ -6345,11 +7107,6 @@ public fn main() -> List<Int> {
     }
 }
 "#,
-        );
-        assert!(
-            errs.iter().any(|e| e.contains("E067")),
-            "expected E067, got {:?}",
-            errs
         );
     }
 
@@ -6377,7 +7134,7 @@ public fn main() -> Int {
 "#,
         );
         assert!(
-            errs.iter().any(|e| e.contains("E068")),
+            errs.iter().any(|e| e.contains("E0368")),
             "expected E068, got {:?}",
             errs
         );
@@ -6394,7 +7151,7 @@ public fn main() -> Int {
 "#,
         );
         assert!(
-            errs.iter().any(|e| e.contains("E069")),
+            errs.iter().any(|e| e.contains("E0369")),
             "expected E069, got {:?}",
             errs
         );
@@ -6422,6 +7179,37 @@ stage add_one: Int -> Int = |x| { x + 1 }
 seq pipeline = add_one
 public fn main() -> Int {
     5 |> pipeline
+}
+"#,
+        );
+    }
+
+    // ── v2.9.0: Stream<T> type ───────────────────────────────────────────────
+
+    #[test]
+    fn stream_type_annotation_ok() {
+        check_ok(
+            r#"
+public fn main() -> Unit {
+    bind s <- Stream.from(0, |n| n + 1)
+    bind xs <- Stream.to_list(Stream.take(s, 3))
+    IO.println_int(List.length(xs))
+}
+"#,
+        );
+    }
+
+    #[test]
+    fn collect_for_in_no_e067() {
+        // v2.9.0: for inside collect is allowed (E067 removed)
+        check_ok(
+            r#"
+public fn main() -> List<Int> {
+    collect {
+        for n in List.range(0, 5) {
+            yield n * 2;
+        }
+    }
 }
 "#,
         );

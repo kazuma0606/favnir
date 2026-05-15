@@ -1,0 +1,20 @@
+import rune "json"
+
+type Config = {
+    host: String
+    port: Int
+}
+
+public fn main() -> Unit !Io !File {
+    bind text <- File.read("config.json")
+    bind result <- json.parse<Config>(text)
+    match result {
+        Ok(config) => {
+            IO.println($"Connecting to {config.host}:{config.port}");
+            IO.println(json.write<Config>(config))
+        }
+        Err(err) => {
+            IO.println($"JSON error: {Debug.show(err)}")
+        }
+    }
+}

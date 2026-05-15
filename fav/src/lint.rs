@@ -10,6 +10,7 @@
 //   L005  unused private trf/flw-like top-level item
 //   L006  trf name is not PascalCase
 //   L007  effect name is not PascalCase
+//   L008  hardcoded db credential in DB.connect string literal
 
 use crate::ast::*;
 use crate::frontend::lexer::Span;
@@ -51,7 +52,10 @@ pub fn lint_program(program: &Program) -> Vec<LintError> {
     let uses = collect_trf_flw_uses(program);
     for item in &program.items {
         match item {
-            Item::FnDef(fd) => lint_fn_def(fd, &mut errors),
+            Item::FnDef(fd) => {
+                lint_fn_def(fd, &mut errors);
+                lint_block_l008(&fd.body, &mut errors);
+            }
             Item::TrfDef(td) => lint_trf_def(td, &uses, &mut errors),
             Item::TypeDef(td) => lint_type_def(td, &mut errors),
             Item::InterfaceDecl(_) | Item::InterfaceImplDecl(_) => {}
@@ -81,6 +85,7 @@ pub fn lint_program(program: &Program) -> Vec<LintError> {
             Item::ImplDef(id) => {
                 for m in &id.methods {
                     lint_fn_def(m, &mut errors);
+                    lint_block_l008(&m.body, &mut errors);
                 }
             }
             Item::TestDef(td) => lint_block_unused_binds(&td.body, &mut errors),
@@ -110,6 +115,95 @@ fn lint_effect_def(ed: &EffectDef, errors: &mut Vec<LintError>) {
             format!("effect name `{}` should be PascalCase", ed.name),
             ed.span.clone(),
         ));
+    }
+}
+
+// ── L008: hardcoded db credential ────────────────────────────────────────────
+
+fn lint_block_l008(block: &Block, errors: &mut Vec<LintError>) {
+    for stmt in &block.stmts {
+        match stmt {
+            Stmt::Bind(b) => lint_expr_l008(&b.expr, errors),
+            Stmt::Expr(e) => lint_expr_l008(e, errors),
+            Stmt::Chain(c) => lint_expr_l008(&c.expr, errors),
+            Stmt::Yield(y) => lint_expr_l008(&y.expr, errors),
+            Stmt::ForIn(f) => {
+                lint_expr_l008(&f.iter, errors);
+                lint_block_l008(&f.body, errors);
+            }
+        }
+    }
+    lint_expr_l008(&block.expr, errors);
+}
+
+fn lint_expr_l008(expr: &Expr, errors: &mut Vec<LintError>) {
+    match expr {
+        Expr::Apply(callee, args, span) => {
+            // Detect DB.connect("postgres://user:pass@host/db")
+            if let Expr::FieldAccess(obj, method, _) = callee.as_ref() {
+                if let Expr::Ident(ns, _) = obj.as_ref() {
+                    if (ns == "DB" || ns == "db") && method == "connect" {
+                        if let Some(first_arg) = args.first() {
+                            if let Expr::Lit(Lit::Str(s), _) = first_arg {
+                                if s.contains("://") && s.contains('@') {
+                                    errors.push(LintError::new(
+                                        "L008",
+                                        "hardcoded db credential: connection string contains password; use Env.get(\"DB_URL\") instead".to_string(),
+                                        span.clone(),
+                                    ));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            lint_expr_l008(callee, errors);
+            for arg in args {
+                lint_expr_l008(arg, errors);
+            }
+        }
+        Expr::TypeApply(callee, _, _) => lint_expr_l008(callee, errors),
+        Expr::Pipeline(steps, _) => {
+            for step in steps {
+                lint_expr_l008(step, errors);
+            }
+        }
+        Expr::FieldAccess(obj, _, _) => lint_expr_l008(obj, errors),
+        Expr::BinOp(_, left, right, _) => {
+            lint_expr_l008(left, errors);
+            lint_expr_l008(right, errors);
+        }
+        Expr::Block(block) => lint_block_l008(block, errors),
+        Expr::Match(scrutinee, arms, _) => {
+            lint_expr_l008(scrutinee, errors);
+            for arm in arms {
+                lint_expr_l008(&arm.body, errors);
+            }
+        }
+        Expr::If(cond, then_block, else_block, _) => {
+            lint_expr_l008(cond, errors);
+            lint_block_l008(then_block, errors);
+            if let Some(eb) = else_block {
+                lint_block_l008(eb, errors);
+            }
+        }
+        Expr::Closure(_, body, _) => lint_expr_l008(body, errors),
+        Expr::Collect(block, _) => lint_block_l008(block, errors),
+        Expr::EmitExpr(inner, _) => lint_expr_l008(inner, errors),
+        Expr::RecordConstruct(_, fields, _) => {
+            for (_, e) in fields {
+                lint_expr_l008(e, errors);
+            }
+        }
+        Expr::FString(parts, _) => {
+            for part in parts {
+                if let FStringPart::Expr(e) = part {
+                    lint_expr_l008(e, errors);
+                }
+            }
+        }
+        Expr::AssertMatches(e, _, _) => lint_expr_l008(e, errors),
+        Expr::Ident(..) | Expr::Lit(..) => {}
     }
 }
 
@@ -215,6 +309,7 @@ fn collect_expr_calls(expr: &Expr, names: &HashSet<String>, uses: &mut HashSet<S
                 collect_expr_calls(arg, names, uses);
             }
         }
+        Expr::TypeApply(callee, _, _) => collect_expr_calls(callee, names, uses),
         Expr::Pipeline(steps, _) => {
             for step in steps {
                 collect_expr_calls(step, names, uses);
@@ -379,6 +474,7 @@ fn lint_expr_sub_blocks(expr: &Expr, errors: &mut Vec<LintError>) {
                 lint_expr_sub_blocks(a, errors);
             }
         }
+        Expr::TypeApply(f, _, _) => lint_expr_sub_blocks(f, errors),
         Expr::Pipeline(steps, _) => {
             for s in steps {
                 lint_expr_sub_blocks(s, errors);
@@ -416,6 +512,7 @@ fn expr_references(expr: &Expr, name: &str) -> bool {
         Expr::Apply(f, args, _) => {
             expr_references(f, name) || args.iter().any(|a| expr_references(a, name))
         }
+        Expr::TypeApply(f, _, _) => expr_references(f, name),
         Expr::Pipeline(steps, _) => steps.iter().any(|s| expr_references(s, name)),
         Expr::FieldAccess(obj, _, _) => expr_references(obj, name),
         Expr::BinOp(_, l, r, _) => expr_references(l, name) || expr_references(r, name),
@@ -721,5 +818,37 @@ public fn main() -> Unit !Io {
 "#,
         );
         assert!(codes.is_empty(), "expected no lint errors, got {:?}", codes);
+    }
+
+    #[test]
+    fn lint_l008_postgres_url_with_password() {
+        let codes = lint(
+            r#"
+public fn main() -> Unit {
+    bind _ <- DB.connect("postgres://user:secret@localhost:5432/mydb")
+}
+"#,
+        );
+        assert!(
+            codes.contains(&"L008".to_string()),
+            "expected L008, got {:?}",
+            codes
+        );
+    }
+
+    #[test]
+    fn lint_l008_sqlite_no_warning() {
+        let codes = lint(
+            r#"
+public fn main() -> Unit {
+    bind _ <- DB.connect("sqlite::memory:")
+}
+"#,
+        );
+        assert!(
+            !codes.contains(&"L008".to_string()),
+            "unexpected L008: {:?}",
+            codes
+        );
     }
 }

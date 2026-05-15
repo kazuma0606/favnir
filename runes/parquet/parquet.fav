@@ -1,0 +1,28 @@
+public fn write(
+    path: String,
+    type_name: String,
+    rows: List<Map<String, String>>
+) -> Result<Unit, ParquetError> {
+    Parquet.write_raw(path, type_name, rows)
+}
+
+public fn read(path: String) -> Result<List<Map<String, String>>, ParquetError> {
+    Parquet.read_raw(path)
+}
+
+public fn append(
+    path: String,
+    type_name: String,
+    rows: List<Map<String, String>>
+) -> Result<Unit, ParquetError> {
+    bind existing_result <- read(path)
+    match existing_result {
+        Ok(existing) => write(path, type_name, List.concat(existing, rows))
+        Err(_)       => write(path, type_name, rows)
+    }
+}
+
+public fn row_count(path: String) -> Result<Int, ParquetError> {
+    bind rows_result <- read(path)
+    Result.map(rows_result, |rows| List.length(rows))
+}

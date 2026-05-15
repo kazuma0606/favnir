@@ -1,0 +1,109 @@
+import rune "incremental"
+
+test "checkpoint_last_returns_none_initially" {
+    incremental.reset("cp_test_initial");
+    bind value <- incremental.last("cp_test_initial")
+    assert_eq(Option.is_none(value), true)
+}
+
+test "checkpoint_save_and_last" {
+    incremental.reset("cp_test_save");
+    incremental.save("cp_test_save", "2026-05-15T00:00:00Z");
+    bind value <- incremental.last("cp_test_save")
+    assert_eq(Option.unwrap_or(value, ""), "2026-05-15T00:00:00Z")
+}
+
+test "checkpoint_reset_clears_value" {
+    incremental.save("cp_test_reset", "x");
+    incremental.reset("cp_test_reset");
+    bind value <- incremental.last("cp_test_reset")
+    assert_eq(Option.is_none(value), true)
+}
+
+test "checkpoint_meta_name_matches" {
+    incremental.reset("cp_test_meta_name");
+    bind meta <- incremental.meta("cp_test_meta_name")
+    assert_eq(meta.name, "cp_test_meta_name")
+}
+
+test "checkpoint_meta_value_after_save" {
+    incremental.save("cp_test_meta_value", "saved");
+    bind meta <- incremental.meta("cp_test_meta_value")
+    assert_eq(meta.value, "saved")
+}
+
+test "checkpoint_meta_updated_at_nonempty" {
+    incremental.save("cp_test_meta_time", "saved");
+    bind meta <- incremental.meta("cp_test_meta_time")
+    assert_eq(String.is_empty(meta.updated_at), false)
+}
+
+test "incremental_last_wrapper" {
+    incremental.save("cp_test_wrapper_last", "wrapped");
+    bind value <- incremental.last("cp_test_wrapper_last")
+    assert_eq(Option.unwrap_or(value, ""), "wrapped")
+}
+
+test "incremental_save_wrapper" {
+    incremental.reset("cp_test_wrapper_save");
+    incremental.save("cp_test_wrapper_save", "ok");
+    bind value <- Checkpoint.last("cp_test_wrapper_save")
+    assert_eq(Option.unwrap_or(value, ""), "ok")
+}
+
+test "incremental_reset_wrapper" {
+    incremental.save("cp_test_wrapper_reset", "ok");
+    incremental.reset("cp_test_wrapper_reset");
+    bind value <- Checkpoint.last("cp_test_wrapper_reset")
+    assert_eq(Option.is_none(value), true)
+}
+
+test "db_upsert_raw_idempotent" {
+    bind conn_result <- DB.connect("sqlite::memory:")
+    match conn_result {
+        Ok(conn) => {
+            bind _ <- DB.execute_raw(conn, "CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT)")
+            bind row <- Map.set(Map.set((), "id", "1"), "name", "Alice")
+            incremental.upsert(conn, "users", row, "id");
+            incremental.upsert(conn, "users", row, "id");
+            bind rows_result <- DB.query_raw(conn, "SELECT id, name FROM users")
+            match rows_result {
+                Ok(rows) => assert_eq(List.length(rows), 1)
+                Err(_) => assert_eq(false, true)
+            }
+        }
+        Err(_) => assert_eq(false, true)
+    }
+}
+
+test "db_upsert_raw_updates_field" {
+    bind conn_result <- DB.connect("sqlite::memory:")
+    match conn_result {
+        Ok(conn) => {
+            bind _ <- DB.execute_raw(conn, "CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT)")
+            bind row1 <- Map.set(Map.set((), "id", "1"), "name", "Alice")
+            bind row2 <- Map.set(Map.set((), "id", "1"), "name", "Bob")
+            incremental.upsert(conn, "users", row1, "id");
+            incremental.upsert(conn, "users", row2, "id");
+            bind rows_result <- DB.query_raw(conn, "SELECT name FROM users WHERE id = 1")
+            match rows_result {
+                Ok(rows) => {
+                    bind first <- Option.unwrap_or(List.first(rows), Map.set((), "name", ""))
+                    assert_eq(Option.unwrap_or(Map.get(first, "name"), ""), "Bob")
+                }
+                Err(_) => assert_eq(false, true)
+            }
+        }
+        Err(_) => assert_eq(false, true)
+    }
+}
+
+test "io_timestamp_nonempty" {
+    bind now <- IO.timestamp()
+    assert_eq(String.is_empty(now), false)
+}
+
+test "io_timestamp_format" {
+    bind now <- IO.timestamp()
+    assert_eq(String.length(now), 20)
+}

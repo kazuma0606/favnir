@@ -11,7 +11,10 @@ pub fn set_coverage_mode(enabled: bool) {
 }
 
 use super::checker::Type;
-use super::ir::{IRArm, IRExpr, IRFnDef, IRGlobal, IRGlobalKind, IRPattern, IRProgram, IRStmt};
+use super::ir::{
+    FieldMeta, IRArm, IRExpr, IRFnDef, IRGlobal, IRGlobalKind, IRPattern, IRProgram, IRStmt,
+    TypeMeta,
+};
 use crate::ast::{
     AbstractFlwDef, AbstractTrfDef, BindStmt, Block, Expr, FStringPart, FlwBindingDef, FlwDef,
     FlwSlot, ImplDef, InterfaceDecl, InterfaceImplDecl, Item, Lit, MatchArm, Pattern, PatternField,
@@ -127,6 +130,7 @@ pub fn compile_program(program: &Program) -> IRProgram {
     let mut ctx = CompileCtx::new();
     let mut globals = Vec::new();
     let mut fns = Vec::new();
+    let mut type_metas = HashMap::new();
     let mut next_fn_idx = 0usize;
     let interface_method_types = collect_interface_method_types(program);
     let abstract_flw_defs = collect_abstract_flw_defs(program);
@@ -157,9 +161,18 @@ pub fn compile_program(program: &Program) -> IRProgram {
         "File",
         "Json",
         "Csv",
+        "Schema",
+        "Checkpoint",
         "Db",
+        "DB",
+        "Env",
         "Http",
+        "Grpc",
+        "Parquet",
         "Task",
+        "Random",
+        "Stream",
+        "Gen",
         "assert",
         "assert_eq",
         "assert_ne",
@@ -199,6 +212,24 @@ pub fn compile_program(program: &Program) -> IRProgram {
 
     for td in &std_state_defs {
         fns.push(compile_type_def_constructor(td, &mut ctx));
+    }
+
+    for ty_name in &[
+        "CheckpointMeta",
+        "HttpResponse",
+        "HttpError",
+        "RpcError",
+        "RpcRequest",
+        "ParquetError",
+    ] {
+        if !ctx.globals.contains_key(*ty_name) {
+            let idx = globals.len() as u16;
+            ctx.globals.insert((*ty_name).into(), idx);
+            globals.push(IRGlobal {
+                name: (*ty_name).into(),
+                kind: IRGlobalKind::Builtin,
+            });
+        }
     }
 
     for item in &program.items {
@@ -267,6 +298,9 @@ pub fn compile_program(program: &Program) -> IRProgram {
                 });
             }
             Item::TypeDef(td) => {
+                if let Some(meta) = build_type_meta(td) {
+                    type_metas.insert(td.name.clone(), meta);
+                }
                 if !ctx.globals.contains_key(&td.name) {
                     let idx = globals.len() as u16;
                     ctx.globals.insert(td.name.clone(), idx);
@@ -359,8 +393,15 @@ pub fn compile_program(program: &Program) -> IRProgram {
         "File",
         "Json",
         "Csv",
+        "Schema",
         "Db",
+        "DB",
+        "Env",
         "Http",
+        "Parquet",
+        "Random",
+        "Stream",
+        "Gen",
         // test assertion builtins (callable without namespace prefix)
         "assert",
         "assert_eq",
@@ -394,6 +435,7 @@ pub fn compile_program(program: &Program) -> IRProgram {
             }
             Item::FnDef(fd) => fns.push(compile_fn_def(
                 &fd.name,
+                &fd.type_params,
                 &fd.params.iter().map(|p| p.name.clone()).collect::<Vec<_>>(),
                 &fd.params
                     .iter()
@@ -406,6 +448,7 @@ pub fn compile_program(program: &Program) -> IRProgram {
             )),
             Item::TrfDef(td) => fns.push(compile_fn_def(
                 &td.name,
+                &td.type_params,
                 &td.params.iter().map(|p| p.name.clone()).collect::<Vec<_>>(),
                 &td.params
                     .iter()
@@ -445,6 +488,7 @@ pub fn compile_program(program: &Program) -> IRProgram {
                     &[],
                     &[],
                     &[],
+                    &[],
                     Some(&unit_ty),
                     &td.body,
                     &mut ctx,
@@ -462,6 +506,7 @@ pub fn compile_program(program: &Program) -> IRProgram {
                     &[],
                     &[],
                     &[],
+                    &[],
                     Some(&unit_ty),
                     &bd.body,
                     &mut ctx,
@@ -475,7 +520,33 @@ pub fn compile_program(program: &Program) -> IRProgram {
     globals.extend(ctx.lifted_globals.clone());
     fns.extend(ctx.lifted_fns.clone());
 
-    IRProgram { globals, fns }
+    IRProgram {
+        globals,
+        fns,
+        type_metas,
+    }
+}
+
+fn build_type_meta(td: &crate::ast::TypeDef) -> Option<TypeMeta> {
+    let crate::ast::TypeBody::Record(fields) = &td.body else {
+        return None;
+    };
+    Some(TypeMeta {
+        type_name: td.name.clone(),
+        fields: fields
+            .iter()
+            .map(|field| FieldMeta {
+                name: field.name.clone(),
+                ty: lower_type_expr(&field.ty).display(),
+                col_index: field
+                    .attrs
+                    .iter()
+                    .find(|attr| attr.name == "col")
+                    .and_then(|attr| attr.arg.as_ref())
+                    .and_then(|arg| arg.parse::<usize>().ok()),
+            })
+            .collect(),
+    })
 }
 
 fn compile_flw_def(fd: &FlwDef, ctx: &mut CompileCtx) -> IRFnDef {
@@ -837,6 +908,7 @@ fn compile_impl_def(id: &ImplDef, ctx: &mut CompileCtx) -> Vec<IRFnDef> {
             let global_name = format!("{}.{}.{}", type_key, cap_ns, method.name);
             compile_fn_def(
                 &global_name,
+                &method.type_params,
                 &method
                     .params
                     .iter()
@@ -895,6 +967,7 @@ fn compile_interface_impl_decl(
                     };
                     out.push(compile_fn_def(
                         &global_name,
+                        &[],
                         params,
                         &param_tys.iter().map(lower_type_expr).collect::<Vec<_>>(),
                         &[],
@@ -911,6 +984,7 @@ fn compile_interface_impl_decl(
                     };
                     out.push(compile_fn_def(
                         &global_name,
+                        &[],
                         &[],
                         &[],
                         &[],
@@ -1026,6 +1100,7 @@ fn builtin_interface_method_type(interface_name: &str, method_name: &str) -> Opt
 
 fn compile_fn_def(
     name: &str,
+    type_params: &[String],
     params: &[String],
     param_tys: &[Type],
     effects: &[crate::ast::Effect],
@@ -1045,6 +1120,9 @@ fn compile_fn_def(
         let ty = param_tys.get(idx).cloned().unwrap_or(Type::Unknown);
         ctx.define_local_with_ty(param.clone(), ty);
     }
+    for type_param in type_params {
+        ctx.define_local_with_ty(format!("$type_{}", type_param), Type::String);
+    }
     let body_ir = compile_block(body, ctx);
     let local_count = ctx.next_slot as usize;
 
@@ -1055,8 +1133,12 @@ fn compile_fn_def(
 
     IRFnDef {
         name: name.to_string(),
-        param_count: params.len(),
-        param_tys: param_tys.to_vec(),
+        param_count: params.len() + type_params.len(),
+        param_tys: param_tys
+            .iter()
+            .cloned()
+            .chain(std::iter::repeat_n(Type::String, type_params.len()))
+            .collect(),
         local_count,
         effects: effects.to_vec(),
         return_ty: return_ty
@@ -1123,6 +1205,7 @@ fn collect_free_vars_expr(expr: &Expr, bound: &mut HashSet<String>, free: &mut H
                 collect_free_vars_expr(arg, bound, free);
             }
         }
+        Expr::TypeApply(expr, _, _) => collect_free_vars_expr(expr, bound, free),
         Expr::FieldAccess(obj, _, _) => collect_free_vars_expr(obj, bound, free),
         Expr::Block(block) => collect_free_vars_block(block, bound, free),
         Expr::Match(subject, arms, _) => {
@@ -1221,11 +1304,39 @@ pub fn compile_expr(expr: &Expr, ctx: &mut CompileCtx) -> IRExpr {
                 IRExpr::Call(Box::new(callee), vec![acc], Type::Unknown)
             })
         }
-        Expr::Apply(callee, args, _) => IRExpr::Call(
-            Box::new(compile_expr(callee, ctx)),
-            args.iter().map(|a| compile_expr(a, ctx)).collect(),
-            Type::Unknown,
-        ),
+        Expr::Apply(callee, args, _) => {
+            if let Expr::TypeApply(inner, type_args, _) = callee.as_ref() {
+                if let Expr::Ident(name, _) = inner.as_ref() {
+                    if name == "type_name_of" && args.is_empty() {
+                        if let Some(TypeExpr::Named(type_name, _, _)) = type_args.first() {
+                            if let Some(slot) = ctx.resolve_local(&format!("$type_{}", type_name)) {
+                                return IRExpr::Local(slot, Type::String);
+                            }
+                        }
+                        let ty_name = type_args
+                            .first()
+                            .map(|ty| lower_type_expr(ty).display())
+                            .unwrap_or_default();
+                        return IRExpr::Lit(Lit::Str(ty_name), Type::String);
+                    }
+                }
+            }
+            let callee_ir = match callee.as_ref() {
+                Expr::TypeApply(inner, _, _) => compile_expr(inner, ctx),
+                _ => compile_expr(callee, ctx),
+            };
+            let mut compiled_args: Vec<IRExpr> =
+                args.iter().map(|a| compile_expr(a, ctx)).collect();
+            if let Expr::TypeApply(_, type_args, _) = callee.as_ref() {
+                compiled_args.extend(
+                    type_args.iter().map(|ty| {
+                        IRExpr::Lit(Lit::Str(lower_type_expr(ty).display()), Type::String)
+                    }),
+                );
+            }
+            IRExpr::Call(Box::new(callee_ir), compiled_args, Type::Unknown)
+        }
+        Expr::TypeApply(expr, _, _) => compile_expr(expr, ctx),
         Expr::FieldAccess(obj, field, _) => {
             if let Expr::Ident(namespace, _) = obj.as_ref() {
                 let namespace_is_bound = ctx.resolve_local(namespace).is_some()

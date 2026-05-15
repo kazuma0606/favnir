@@ -91,8 +91,11 @@ pub enum TokenKind {
     Colon,            // :
     Comma,            // ,
     Dot,              // .
+    Hash,             // #
     LBrace,           // {
     RBrace,           // }
+    LBracket,         // [
+    RBracket,         // ]
     LParen,           // (
     RParen,           // )
     LAngle,           // <
@@ -313,6 +316,18 @@ impl Lexer {
             '.' => {
                 self.advance();
                 TokenKind::Dot
+            }
+            '#' => {
+                self.advance();
+                TokenKind::Hash
+            }
+            '[' => {
+                self.advance();
+                TokenKind::LBracket
+            }
+            ']' => {
+                self.advance();
+                TokenKind::RBracket
             }
             '+' => {
                 self.advance();
@@ -716,7 +731,7 @@ mod tests {
     // symbols
     #[test]
     fn test_symbols() {
-        let kinds = lex("<- |> | || -> ! ? ?? && : , . { } ( ) = _");
+        let kinds = lex("<- |> | || -> ! ? ?? && : , . # [ ] { } ( ) = _");
         assert_eq!(
             kinds,
             vec![
@@ -732,6 +747,9 @@ mod tests {
                 TokenKind::Colon,
                 TokenKind::Comma,
                 TokenKind::Dot,
+                TokenKind::Hash,
+                TokenKind::LBracket,
+                TokenKind::RBracket,
                 TokenKind::LBrace,
                 TokenKind::RBrace,
                 TokenKind::LParen,

@@ -25,7 +25,7 @@ use std::process;
 // 笏笏 help text (4-6) 笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏
 
 const HELP: &str = "\
-fav - Favnir language toolchain v3.9.0
+fav - Favnir language toolchain v4.0.0
 
 USAGE:
     fav <COMMAND> [OPTIONS] [FILE]

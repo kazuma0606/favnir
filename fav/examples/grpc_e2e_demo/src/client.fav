@@ -1,0 +1,13 @@
+// grpc_e2e_demo — client side
+// Sends an echo request to the server started by main.fav
+
+import rune "grpc"
+
+public fn main() -> Unit !Io !Rpc {
+    bind payload <- Map.set((), "field1", "hello from Favnir")
+    bind result  <- grpc.call("127.0.0.1:50052", "/EchoService/Echo", payload)
+    result |> match {
+        Ok(resp)  => IO.println(Option.unwrap_or(Map.get(resp, "field1"), "(no response)"))
+        Err(err)  => IO.println(err.message)
+    }
+}

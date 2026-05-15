@@ -5,6 +5,7 @@ use arrow::array::{
 use arrow::datatypes::{DataType, Field as ArrowField, Schema as ArrowSchema};
 use arrow::record_batch::RecordBatch;
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
+use bytes::Bytes;
 use chrono::Utc;
 use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
 use parquet::arrow::arrow_writer::ArrowWriter;
@@ -2242,7 +2243,7 @@ impl VM {
                         ));
                     }
                 };
-                let service_name = match it.next().expect("service_name") {
+                let _service_name = match it.next().expect("service_name") {
                     VMValue::Str(name) => name,
                     other => {
                         return Err(self.error(
@@ -2254,8 +2255,39 @@ impl VM {
                         ));
                     }
                 };
-                grpc_spawn_placeholder_server(port, &service_name, false)
+                let (req_tx, req_rx) =
+                    std::sync::mpsc::channel::<GrpcRequestMsg>();
+                grpc_serve_impl(port, req_tx)
                     .map_err(|e| self.error(artifact, &format!("Grpc.serve_raw failed: {}", e)))?;
+                loop {
+                    let (handler_name, proto_bytes, res_tx) = match req_rx.recv() {
+                        Ok(msg) => msg,
+                        Err(_) => break,
+                    };
+                    let fn_idx = match artifact.fn_idx_by_name(&handler_name) {
+                        Some(idx) => idx,
+                        None => {
+                            let _ = res_tx.send(Err(format!(
+                                "Grpc.serve_raw: unknown handler `{}`",
+                                handler_name
+                            )));
+                            continue;
+                        }
+                    };
+                    let req_value = match proto_bytes_to_string_map(&proto_bytes) {
+                        Ok(row) => VMValue::Record(
+                            row.into_iter().map(|(k, v)| (k, VMValue::Str(v))).collect(),
+                        ),
+                        Err(e) => {
+                            let _ = res_tx.send(Err(format!("proto decode failed: {}", e)));
+                            continue;
+                        }
+                    };
+                    let result = self.invoke_function(artifact, fn_idx, vec![req_value]);
+                    let resp =
+                        grpc_vm_value_to_proto_bytes(result.map_err(|e| e.message));
+                    let _ = res_tx.send(resp.map(|b| encode_grpc_frame(&b)));
+                }
                 Ok(VMValue::Unit)
             }
             "Grpc.serve_stream_raw" => {
@@ -2275,7 +2307,7 @@ impl VM {
                         ));
                     }
                 };
-                let service_name = match it.next().expect("service_name") {
+                let _service_name = match it.next().expect("service_name") {
                     VMValue::Str(name) => name,
                     other => {
                         return Err(self.error(
@@ -2287,9 +2319,65 @@ impl VM {
                         ));
                     }
                 };
-                grpc_spawn_placeholder_server(port, &service_name, true).map_err(|e| {
+                let (req_tx, req_rx) =
+                    std::sync::mpsc::channel::<GrpcRequestMsg>();
+                grpc_serve_impl(port, req_tx).map_err(|e| {
                     self.error(artifact, &format!("Grpc.serve_stream_raw failed: {}", e))
                 })?;
+                loop {
+                    let (handler_name, proto_bytes, res_tx) = match req_rx.recv() {
+                        Ok(msg) => msg,
+                        Err(_) => break,
+                    };
+                    let fn_idx = match artifact.fn_idx_by_name(&handler_name) {
+                        Some(idx) => idx,
+                        None => {
+                            let _ = res_tx.send(Err(format!(
+                                "Grpc.serve_stream_raw: unknown handler `{}`",
+                                handler_name
+                            )));
+                            continue;
+                        }
+                    };
+                    let req_value = match proto_bytes_to_string_map(&proto_bytes) {
+                        Ok(row) => VMValue::Record(
+                            row.into_iter().map(|(k, v)| (k, VMValue::Str(v))).collect(),
+                        ),
+                        Err(e) => {
+                            let _ = res_tx.send(Err(format!("proto decode failed: {}", e)));
+                            continue;
+                        }
+                    };
+                    let result = self.invoke_function(artifact, fn_idx, vec![req_value]);
+                    let frames = match result {
+                        Ok(VMValue::List(items)) => {
+                            let mut combined: Vec<u8> = Vec::new();
+                            let mut ok = true;
+                            for item in items {
+                                match grpc_vm_value_to_proto_bytes(Ok(item)) {
+                                    Ok(b) => {
+                                        combined.extend_from_slice(&encode_grpc_frame(&b));
+                                    }
+                                    Err(e) => {
+                                        let _ = res_tx.send(Err(e));
+                                        ok = false;
+                                        break;
+                                    }
+                                }
+                            }
+                            if !ok {
+                                continue;
+                            }
+                            Ok(combined)
+                        }
+                        Ok(other) => Err(format!(
+                            "Grpc.serve_stream_raw handler must return List, got {}",
+                            vmvalue_type_name(&other)
+                        )),
+                        Err(e) => Err(e.message),
+                    };
+                    let _ = res_tx.send(frames);
+                }
                 Ok(VMValue::Unit)
             }
             _ => {
@@ -3079,7 +3167,6 @@ fn encode_grpc_frame(payload: &[u8]) -> Vec<u8> {
     out
 }
 
-#[allow(dead_code)]
 fn decode_grpc_frame(data: &[u8]) -> Result<Vec<u8>, String> {
     if data.len() < 5 {
         return Err(format!("gRPC frame too short: {} bytes", data.len()));
@@ -3368,23 +3455,156 @@ fn proto_bytes_to_string_map(bytes: &[u8]) -> Result<HashMap<String, String>, St
     Ok(out)
 }
 
-fn grpc_spawn_placeholder_server(
+/// Type alias for messages sent from the h2 server thread to the VM dispatch loop.
+/// `(handler_fn_name, proto_bytes, response_sender)`
+type GrpcRequestMsg = (
+    String,
+    Vec<u8>,
+    std::sync::mpsc::SyncSender<Result<Vec<u8>, String>>,
+);
+
+/// Spawn a background tokio thread running an h2/gRPC server on `port`.
+/// Each incoming request is forwarded to `req_tx`; the VM loop replies via the
+/// per-request `SyncSender` embedded in the message.
+fn grpc_serve_impl(
     port: i64,
-    service_name: &str,
-    streaming: bool,
+    req_tx: std::sync::mpsc::Sender<GrpcRequestMsg>,
 ) -> Result<(), String> {
     let port_u16 = u16::try_from(port).map_err(|_| format!("invalid gRPC port {}", port))?;
-    let service_name = service_name.to_string();
     std::thread::spawn(move || {
-        let _runtime = tokio::runtime::Builder::new_multi_thread()
+        let rt = tokio::runtime::Builder::new_multi_thread()
             .enable_all()
-            .build();
-        let _server = tonic::transport::Server::builder();
-        let _ = (port_u16, service_name, streaming, _server);
-        std::thread::park();
+            .build()
+            .expect("tokio runtime build failed");
+        rt.block_on(async move {
+            let listener =
+                tokio::net::TcpListener::bind(format!("0.0.0.0:{}", port_u16))
+                    .await
+                    .expect("gRPC bind failed");
+            eprintln!("Listening on 0.0.0.0:{port_u16} (gRPC / HTTP2)");
+            loop {
+                let (socket, _) = match listener.accept().await {
+                    Ok(s) => s,
+                    Err(_) => continue,
+                };
+                let req_tx = req_tx.clone();
+                tokio::spawn(async move {
+                    let mut conn = match h2::server::handshake(socket).await {
+                        Ok(c) => c,
+                        Err(_) => return,
+                    };
+                    while let Some(result) = conn.accept().await {
+                        let (request, respond) = match result {
+                            Ok(r) => r,
+                            Err(_) => return,
+                        };
+                        let req_tx = req_tx.clone();
+                        tokio::spawn(async move {
+                            grpc_handle_h2_request(request, respond, req_tx).await;
+                        });
+                    }
+                });
+            }
+        });
     });
-    eprintln!("Listening on 0.0.0.0:{port_u16} (gRPC / HTTP2)");
     Ok(())
+}
+
+/// Async handler for a single h2 gRPC request: reads body, dispatches to VM
+/// via channel, sends response back over h2.
+async fn grpc_handle_h2_request(
+    request: http::Request<h2::RecvStream>,
+    mut respond: h2::server::SendResponse<Bytes>,
+    req_tx: std::sync::mpsc::Sender<GrpcRequestMsg>,
+) {
+    // Derive handler name: "/ServiceName/MethodName" -> "handle_method_name"
+    let path = request.uri().path().to_string();
+    let method_part = path.rsplit('/').next().unwrap_or("unknown").to_string();
+    let handler_name = format!("handle_{}", pascal_to_snake(&method_part));
+
+    // Read all DATA frames from the request body
+    let mut body = request.into_body();
+    let mut body_bytes: Vec<u8> = Vec::new();
+    while let Some(chunk) = body.data().await {
+        match chunk {
+            Ok(data) => {
+                let n = data.len();
+                body_bytes.extend_from_slice(&data);
+                let _ = body.flow_control().release_capacity(n);
+            }
+            Err(_) => return,
+        }
+    }
+
+    // Strip gRPC framing (5-byte prefix); fall back to raw bytes if malformed
+    let proto_bytes = decode_grpc_frame(&body_bytes).unwrap_or(body_bytes);
+
+    // Send request to VM dispatch loop and wait for response
+    let (res_tx, res_rx) =
+        std::sync::mpsc::sync_channel::<Result<Vec<u8>, String>>(1);
+    if req_tx.send((handler_name, proto_bytes, res_tx)).is_err() {
+        return;
+    }
+    let resp_data =
+        match tokio::task::spawn_blocking(move || res_rx.recv()).await {
+            Ok(Ok(Ok(b))) => b,
+            _ => return,
+        };
+
+    // Send HTTP/2 response
+    let http_resp = http::Response::builder()
+        .status(200)
+        .header("content-type", "application/grpc")
+        .body(())
+        .unwrap();
+    let mut send = match respond.send_response(http_resp, false) {
+        Ok(s) => s,
+        Err(_) => return,
+    };
+    let _ = send.send_data(Bytes::from(resp_data), false);
+    let mut trailers = http::HeaderMap::new();
+    trailers.insert(
+        http::header::HeaderName::from_static("grpc-status"),
+        http::HeaderValue::from_static("0"),
+    );
+    let _ = send.send_trailers(trailers);
+}
+
+/// Convert a VM function result into proto bytes for a gRPC response.
+fn grpc_vm_value_to_proto_bytes(result: Result<VMValue, String>) -> Result<Vec<u8>, String> {
+    match result {
+        Ok(VMValue::Record(map)) => {
+            let str_map = schema_record_to_string_map(&map);
+            Ok(string_map_to_proto_bytes(&str_map))
+        }
+        Ok(other) => Err(format!(
+            "gRPC handler must return Map<String,String>, got {}",
+            vmvalue_type_name(&other)
+        )),
+        Err(e) => Err(e),
+    }
+}
+
+/// Extract the TCP address from a gRPC host string.
+/// "http://host:port" -> "host:port", "host:port" -> "host:port"
+fn grpc_tcp_addr(host: &str) -> String {
+    if let Some(rest) = host.strip_prefix("http://") {
+        rest.trim_end_matches('/').to_string()
+    } else if let Some(rest) = host.strip_prefix("https://") {
+        rest.trim_end_matches('/').to_string()
+    } else {
+        host.to_string()
+    }
+}
+
+/// Build a full URI for a gRPC method call.
+fn grpc_method_uri(host: &str, method: &str) -> String {
+    let base = if host.starts_with("http://") || host.starts_with("https://") {
+        host.trim_end_matches('/').to_string()
+    } else {
+        format!("http://{}", host)
+    };
+    format!("{}/{}", base, method.trim_start_matches('/'))
 }
 
 fn is_option_type_name(ty: &str) -> bool {
@@ -6032,29 +6252,131 @@ fn vm_call_builtin(
             };
             let proto_bytes = string_map_to_proto_bytes(&payload);
             let frame = encode_grpc_frame(&proto_bytes);
-            let endpoint = if host.starts_with("http://") || host.starts_with("https://") {
-                host.clone()
-            } else {
-                format!("http://{}", host)
-            };
+            let tcp_addr = grpc_tcp_addr(&host);
+            let uri_str = grpc_method_uri(&host, &method);
             let result = std::thread::spawn(move || -> Result<VMValue, String> {
-                let runtime = tokio::runtime::Builder::new_current_thread()
+                let rt = tokio::runtime::Builder::new_current_thread()
                     .enable_all()
                     .build()
                     .map_err(|e| format!("Grpc.call_raw tokio build failed: {}", e))?;
-                runtime.block_on(async move {
-                    let _ = frame;
-                    let _ = method;
-                    match tonic::transport::Channel::from_shared(endpoint) {
-                        Ok(channel) => match channel.connect().await {
-                            Ok(_connected) => Ok(err_vm(rpc_error_vm(
-                                12,
-                                "Grpc.call_raw connected but unary HTTP/2 exchange is not available in the legacy VM yet",
-                            ))),
-                            Err(err) => Ok(err_vm(rpc_error_vm(14, err.to_string()))),
-                        },
-                        Err(err) => Ok(err_vm(rpc_error_vm(14, err.to_string()))),
+                rt.block_on(async move {
+                    let tcp = match tokio::net::TcpStream::connect(&tcp_addr).await {
+                        Ok(s) => s,
+                        Err(e) => {
+                            return Ok(err_vm(rpc_error_vm(
+                                14,
+                                format!("connection failed: {}", e),
+                            )))
+                        }
+                    };
+                    let (mut h2_client, h2_conn) =
+                        match h2::client::handshake(tcp).await {
+                            Ok(r) => r,
+                            Err(e) => {
+                                return Ok(err_vm(rpc_error_vm(
+                                    14,
+                                    format!("h2 handshake failed: {}", e),
+                                )))
+                            }
+                        };
+                    tokio::spawn(async move { let _ = h2_conn.await; });
+                    let request = match http::Request::builder()
+                        .method("POST")
+                        .uri(uri_str.as_str())
+                        .header("content-type", "application/grpc")
+                        .header("te", "trailers")
+                        .body(())
+                    {
+                        Ok(r) => r,
+                        Err(e) => return Err(format!("request build failed: {}", e)),
+                    };
+                    let (response_future, mut send_stream) =
+                        match h2_client.send_request(request, false) {
+                            Ok(r) => r,
+                            Err(e) => {
+                                return Ok(err_vm(rpc_error_vm(
+                                    14,
+                                    format!("send_request failed: {}", e),
+                                )))
+                            }
+                        };
+                    if let Err(e) =
+                        send_stream.send_data(Bytes::from(frame), true)
+                    {
+                        return Ok(err_vm(rpc_error_vm(
+                            14,
+                            format!("send_data failed: {}", e),
+                        )));
                     }
+                    let response = match response_future.await {
+                        Ok(r) => r,
+                        Err(e) => {
+                            return Ok(err_vm(rpc_error_vm(
+                                14,
+                                format!("response failed: {}", e),
+                            )))
+                        }
+                    };
+                    if !response.status().is_success() {
+                        return Ok(err_vm(rpc_error_vm(
+                            14,
+                            format!("HTTP {}", response.status()),
+                        )));
+                    }
+                    let mut body = response.into_body();
+                    let mut resp_bytes: Vec<u8> = Vec::new();
+                    while let Some(chunk) = body.data().await {
+                        match chunk {
+                            Ok(data) => {
+                                let n = data.len();
+                                resp_bytes.extend_from_slice(&data);
+                                let _ = body.flow_control().release_capacity(n);
+                            }
+                            Err(e) => {
+                                return Ok(err_vm(rpc_error_vm(
+                                    14,
+                                    format!("body read failed: {}", e),
+                                )))
+                            }
+                        }
+                    }
+                    // Check gRPC status from trailers
+                    if let Ok(Some(trailers)) = body.trailers().await {
+                        if let Some(grpc_status) = trailers.get("grpc-status") {
+                            if grpc_status.as_bytes() != b"0" {
+                                let msg = trailers
+                                    .get("grpc-message")
+                                    .and_then(|v| v.to_str().ok())
+                                    .unwrap_or("gRPC error")
+                                    .to_string();
+                                let code: i64 = grpc_status
+                                    .to_str()
+                                    .ok()
+                                    .and_then(|s| s.parse().ok())
+                                    .unwrap_or(2);
+                                return Ok(err_vm(rpc_error_vm(code, msg)));
+                            }
+                        }
+                    }
+                    let proto =
+                        match decode_grpc_frame(&resp_bytes) {
+                            Ok(b) => b,
+                            Err(e) => {
+                                return Err(format!("decode_grpc_frame failed: {}", e))
+                            }
+                        };
+                    let row = match proto_bytes_to_string_map(&proto) {
+                        Ok(m) => m,
+                        Err(e) => {
+                            return Err(format!(
+                                "proto_bytes_to_string_map failed: {}",
+                                e
+                            ))
+                        }
+                    };
+                    Ok(ok_vm(VMValue::Record(
+                        row.into_iter().map(|(k, v)| (k, VMValue::Str(v))).collect(),
+                    )))
                 })
             })
             .join()
@@ -6079,39 +6401,74 @@ fn vm_call_builtin(
             };
             let proto_bytes = string_map_to_proto_bytes(&payload);
             let frame = encode_grpc_frame(&proto_bytes);
-            let endpoint = if host.starts_with("http://") || host.starts_with("https://") {
-                host.clone()
-            } else {
-                format!("http://{}", host)
-            };
+            let tcp_addr = grpc_tcp_addr(&host);
+            let uri_str = grpc_method_uri(&host, &method);
             let result = std::thread::spawn(move || -> Result<VMValue, String> {
-                let runtime = tokio::runtime::Builder::new_current_thread()
+                let rt = tokio::runtime::Builder::new_current_thread()
                     .enable_all()
                     .build()
                     .map_err(|e| format!("Grpc.call_stream_raw tokio build failed: {}", e))?;
-                runtime.block_on(async move {
-                    let _ = method;
-                    match tonic::transport::Channel::from_shared(endpoint) {
-                        Ok(channel) => match channel.connect().await {
-                            Ok(_connected) => {
-                                let rows = decode_all_grpc_frames(&frame)?
-                                    .into_iter()
-                                    .map(|bytes| {
-                                        proto_bytes_to_string_map(&bytes).map(|row| {
-                                            VMValue::Record(
-                                                row.into_iter()
-                                                    .map(|(k, v)| (k, VMValue::Str(v)))
-                                                    .collect(),
-                                            )
-                                        })
-                                    })
-                                    .collect::<Result<Vec<_>, _>>()?;
-                                Ok(VMValue::List(rows))
-                            }
-                            Err(_) => Ok(VMValue::List(vec![])),
-                        },
-                        Err(_) => Ok(VMValue::List(vec![])),
+                rt.block_on(async move {
+                    let tcp = match tokio::net::TcpStream::connect(&tcp_addr).await {
+                        Ok(s) => s,
+                        Err(_) => return Ok(VMValue::List(vec![])),
+                    };
+                    let (mut h2_client, h2_conn) =
+                        match h2::client::handshake(tcp).await {
+                            Ok(r) => r,
+                            Err(_) => return Ok(VMValue::List(vec![])),
+                        };
+                    tokio::spawn(async move { let _ = h2_conn.await; });
+                    let request = match http::Request::builder()
+                        .method("POST")
+                        .uri(uri_str.as_str())
+                        .header("content-type", "application/grpc")
+                        .header("te", "trailers")
+                        .body(())
+                    {
+                        Ok(r) => r,
+                        Err(_) => return Ok(VMValue::List(vec![])),
+                    };
+                    let (response_future, mut send_stream) =
+                        match h2_client.send_request(request, false) {
+                            Ok(r) => r,
+                            Err(_) => return Ok(VMValue::List(vec![])),
+                        };
+                    if send_stream
+                        .send_data(Bytes::from(frame), true)
+                        .is_err()
+                    {
+                        return Ok(VMValue::List(vec![]));
                     }
+                    let response = match response_future.await {
+                        Ok(r) => r,
+                        Err(_) => return Ok(VMValue::List(vec![])),
+                    };
+                    let mut body = response.into_body();
+                    let mut resp_bytes: Vec<u8> = Vec::new();
+                    while let Some(chunk) = body.data().await {
+                        match chunk {
+                            Ok(data) => {
+                                let n = data.len();
+                                resp_bytes.extend_from_slice(&data);
+                                let _ = body.flow_control().release_capacity(n);
+                            }
+                            Err(_) => return Ok(VMValue::List(vec![])),
+                        }
+                    }
+                    let rows = decode_all_grpc_frames(&resp_bytes)?
+                        .into_iter()
+                        .map(|bytes| {
+                            proto_bytes_to_string_map(&bytes).map(|row| {
+                                VMValue::Record(
+                                    row.into_iter()
+                                        .map(|(k, v)| (k, VMValue::Str(v)))
+                                        .collect(),
+                                )
+                            })
+                        })
+                        .collect::<Result<Vec<_>, _>>()?;
+                    Ok(VMValue::List(rows))
                 })
             })
             .join()

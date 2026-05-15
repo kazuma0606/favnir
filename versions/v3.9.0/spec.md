@@ -53,6 +53,11 @@ HTTP/2 のボディとして送信する。
 4. 結果 → `map_to_proto_bytes` → `encode_grpc_frame` → HTTP/2 レスポンス
 5. `std::sync::mpsc` チャネルで VM スレッドとのハンドラ呼び出しを同期
 
+> **実装状態（v3.9.0 実際）**: `grpc_spawn_placeholder_server` を呼び出し、tonic Server builder を生成して
+> `eprintln!("Listening on 0.0.0.0:{port} (gRPC / HTTP2)")` を出力するが、
+> リクエスト受信・ハンドラ呼び出し・レスポンス返送は未実装（スレッドは `park()` で停止）。
+> VM ハンドラ dispatch と mpsc 同期は将来バージョンで実装予定。
+
 ### 変更: `Grpc.call_raw(host: String, method: String, payload: Map<String, String>) -> Result<Map<String, String>, RpcError> !Rpc`
 
 **v3.8.0**: `ureq` HTTP/1.1 POST + JSON ボディ
@@ -63,6 +68,11 @@ HTTP/2 のボディとして送信する。
 2. `Channel::from_static(host).connect().await`
 3. `map_to_proto_bytes` → `encode_grpc_frame` → HTTP/2 リクエスト送信
 4. レスポンス受信 → `decode_grpc_frame` → `proto_bytes_to_map` → `Result<Map, RpcError>`
+
+> **実装状態（v3.9.0 実際）**: tonic Channel での接続試行まで実装済み。
+> 接続失敗 → `err_vm(rpc_error_vm(14, ...))` を返す（テスト互換）。
+> 接続成功時はリクエスト未送信で error code 12 スタブを返す（実際の RPC 未実装）。
+> `string_map_to_proto_bytes` / `encode_grpc_frame` でフレームは生成するが `let _ = frame;` で破棄。
 
 ### 追加: `Grpc.serve_stream_raw(port: Int, service_name: String) -> Unit !Rpc !Io`
 

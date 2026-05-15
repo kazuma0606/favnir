@@ -1,0 +1,27 @@
+// grpc_e2e_demo — demonstrates a real HTTP/2 gRPC round-trip using v4.0.0
+//
+// This example shows the "pipe match" and "pattern guard" features alongside
+// the new Grpc.serve_raw / Grpc.call_raw implementation backed by real HTTP/2.
+//
+// Run the server:   fav run examples/grpc_e2e_demo/src/main.fav
+// In another shell: fav run examples/grpc_e2e_demo/src/client.fav
+
+import rune "grpc"
+
+type EchoRequest  = { message: String }
+type EchoResponse = { echo: String }
+
+// ── Handler ───────────────────────────────────────────────────────────────────
+
+// Called for /EchoService/Echo  →  handle_echo
+public fn handle_echo(req: Map<String, String>) -> Map<String, String> {
+    bind msg <- Option.unwrap_or(Map.get(req, "field1"), "(empty)")
+    Map.set((), "field1", msg)
+}
+
+// ── Entry point ───────────────────────────────────────────────────────────────
+
+public fn main() -> Unit !Io !Rpc {
+    IO.println("gRPC echo server on :50052 (HTTP/2, real dispatch)")
+    Grpc.serve_raw(50052, "EchoService")
+}

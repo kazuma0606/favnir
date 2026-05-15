@@ -2312,3 +2312,97 @@ public fn main() -> String {
     );
     assert_eq!(result, Value::Str("bad host".into()));
 }
+
+/// End-to-end test: Grpc.serve_raw actually dispatches to a handler function.
+/// Starts a real h2 server in a VM background thread, sends one gRPC request,
+/// and verifies the handler echoes the payload back.
+#[test]
+fn grpc_serve_raw_dispatches_handler() {
+    use crate::backend::codegen::codegen_program;
+    use crate::frontend::parser::Parser;
+    use crate::middle::compiler::compile_program;
+
+    // Grab a free OS port, then immediately release it for the server to claim
+    let free_port = {
+        let l = std::net::TcpListener::bind("127.0.0.1:0").expect("bind free port");
+        l.local_addr().unwrap().port()
+    };
+
+    let src = format!(
+        r#"
+public fn handle_echo(req: Map<String, String>) -> Map<String, String> {{
+    req
+}}
+
+public fn main() -> Unit !Io !Rpc {{
+    Grpc.serve_raw({free_port}, "EchoService")
+}}
+"#
+    );
+
+    // Run the server VM in a detached thread (it loops forever until the
+    // channel disconnects, which happens when the thread exits at test end)
+    std::thread::spawn(move || {
+        let prog = Parser::parse_str(&src, "test").expect("parse");
+        let ir = compile_program(&prog);
+        let artifact = codegen_program(&ir);
+        let main_idx = artifact.fn_idx_by_name("main").expect("main");
+        VM::run(&artifact, main_idx, vec![]).ok();
+    });
+
+    // Give the async server time to bind and start accepting
+    std::thread::sleep(std::time::Duration::from_millis(400));
+
+    // Build a request payload: {"id": "42"}
+    let mut payload = std::collections::HashMap::new();
+    payload.insert("id".to_string(), "42".to_string());
+    let proto = super::string_map_to_proto_bytes(&payload);
+    let frame = super::encode_grpc_frame(&proto);
+
+    // Send the request and collect the response body using the h2 client
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    let resp_bytes = rt.block_on(async move {
+        let tcp = tokio::net::TcpStream::connect(format!("127.0.0.1:{free_port}"))
+            .await
+            .expect("connect to gRPC server");
+        let (mut h2_client, h2_conn) =
+            h2::client::handshake(tcp).await.expect("h2 handshake");
+        tokio::spawn(async move { let _ = h2_conn.await; });
+
+        let request = http::Request::builder()
+            .method("POST")
+            .uri(format!("http://127.0.0.1:{free_port}/EchoService/Echo").as_str())
+            .header("content-type", "application/grpc")
+            .header("te", "trailers")
+            .body(())
+            .unwrap();
+        let (response_future, mut send_stream) =
+            h2_client.send_request(request, false).expect("send_request");
+        send_stream
+            .send_data(bytes::Bytes::from(frame), true)
+            .expect("send_data");
+
+        let response = response_future.await.expect("response");
+        let mut body = response.into_body();
+        let mut resp: Vec<u8> = Vec::new();
+        while let Some(chunk) = body.data().await {
+            let data = chunk.expect("chunk");
+            let n = data.len();
+            resp.extend_from_slice(&data);
+            body.flow_control().release_capacity(n).ok();
+        }
+        resp
+    });
+
+    // Decode and verify: the echo handler should return field1 = "42"
+    let proto_resp = super::decode_grpc_frame(&resp_bytes).expect("decode response frame");
+    let row = super::proto_bytes_to_string_map(&proto_resp).expect("proto_bytes_to_string_map");
+    assert_eq!(
+        row.get("field1").map(|s| s.as_str()),
+        Some("42"),
+        "echo handler must return the same payload"
+    );
+}

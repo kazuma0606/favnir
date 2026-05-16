@@ -22,7 +22,9 @@
       "Bash(do)",
       "Bash(sed -i -e 's/\"\"E000\"\"/\"\"E0500\"\"/g' -e 's/\"\"E012\"\"/\"\"E0112\"\"/g' -e 's/\"\"E013\"\"/\"\"E0213\"\"/g' -e 's/\"\"E014\"\"/\"\"E0214\"\"/g' -e 's/\"\"E018\"\"/\"\"E0218\"\"/g' \"$f\")",
       "Bash(echo \"done: $f\")",
-      "Bash(done)"
+      "Bash(done)",
+      "Bash(taskkill /F /IM \"fav-18aa1375978f43bc.exe\")",
+      "Bash(taskkill /F /IM \"fav.exe\")"
     ]
   }
 }

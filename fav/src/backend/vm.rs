@@ -491,6 +491,22 @@ pub struct VM {
 
 static SHARED_DBS: Mutex<Vec<(String, Connection)>> = Mutex::new(Vec::new());
 
+// ── DuckDB connection store (v4.3.0) ─────────────────────────────────────────
+// Global static (not thread_local): Rust does NOT call Drop on global statics,
+// so duckdb::Connection::drop (which hangs on Windows joining worker threads)
+// is never invoked automatically. Connections are closed explicitly via close_raw.
+static DUCKDB_CONNS: std::sync::OnceLock<Mutex<HashMap<u64, duckdb::Connection>>> =
+    std::sync::OnceLock::new();
+static DUCKDB_NEXT_ID: std::sync::atomic::AtomicU64 =
+    std::sync::atomic::AtomicU64::new(1);
+
+fn duckdb_store() -> std::sync::MutexGuard<'static, HashMap<u64, duckdb::Connection>> {
+    DUCKDB_CONNS
+        .get_or_init(|| Mutex::new(HashMap::new()))
+        .lock()
+        .unwrap()
+}
+
 /// Lazy stream representation for `Stream<T>` (v2.9.0)
 #[derive(Debug, Clone)]
 enum VMStream {
@@ -3928,6 +3944,60 @@ fn sqlite_query_raw_params(
                 .get(i)
                 .map_err(|e| format!("E0602: db query failed: {}", e))?;
             map.insert(name.clone(), VMValue::Str(sqlite_value_to_string(val)));
+        }
+        rows_out.push(VMValue::Record(map));
+    }
+    Ok(rows_out)
+}
+
+// ── DuckDB helpers (v4.3.0) ──────────────────────────────────────────────────
+
+fn duckdb_value_to_string(val: duckdb::types::Value) -> String {
+    use duckdb::types::Value;
+    match val {
+        Value::Null => String::new(),
+        Value::Boolean(b) => b.to_string(),
+        Value::TinyInt(i) => i.to_string(),
+        Value::SmallInt(i) => i.to_string(),
+        Value::Int(i) => i.to_string(),
+        Value::BigInt(i) => i.to_string(),
+        Value::HugeInt(i) => i.to_string(),
+        Value::UTinyInt(i) => i.to_string(),
+        Value::USmallInt(i) => i.to_string(),
+        Value::UInt(i) => i.to_string(),
+        Value::UBigInt(i) => i.to_string(),
+        Value::Float(f) => f.to_string(),
+        Value::Double(f) => f.to_string(),
+        Value::Text(s) => s,
+        Value::Blob(b) => format!("<blob:{}>", b.len()),
+        _ => String::new(),
+    }
+}
+
+fn duckdb_query_raw(conn: &duckdb::Connection, sql: &str) -> Result<Vec<VMValue>, String> {
+    let mut stmt = conn
+        .prepare(sql)
+        .map_err(|e| format!("DuckDB query failed: {}", e))?;
+    // Execute the query first; column info is only available after execution.
+    let mut rows = stmt
+        .query([])
+        .map_err(|e| format!("DuckDB query failed: {}", e))?;
+    // Collect column names from the executed statement (via Rows::as_ref).
+    let col_names: Vec<String> = rows
+        .as_ref()
+        .map(|s| s.column_names())
+        .unwrap_or_default();
+    let mut rows_out = Vec::new();
+    while let Some(row) = rows
+        .next()
+        .map_err(|e| format!("DuckDB row fetch failed: {}", e))?
+    {
+        let mut map = HashMap::new();
+        for (i, name) in col_names.iter().enumerate() {
+            let val: duckdb::types::Value = row
+                .get(i)
+                .map_err(|e| format!("DuckDB column get failed: {}", e))?;
+            map.insert(name.clone(), VMValue::Str(duckdb_value_to_string(val)));
         }
         rows_out.push(VMValue::Record(map));
     }
@@ -7893,6 +7963,102 @@ fn vm_call_builtin(
                 Ok(ok_vm(VMValue::Record(raw)))
             } else {
                 Ok(err_vm(VMValue::List(errors)))
+            }
+        }
+
+        // ── DuckDb.* (v4.3.0) — embedded OLAP engine ───────────────────────
+        "DuckDb.open_raw" => {
+            if args.len() != 1 {
+                return Err("DuckDb.open_raw requires 1 argument".to_string());
+            }
+            let path = vm_string(args.into_iter().next().unwrap(), "DuckDb.open_raw")?;
+            let config = duckdb::Config::default()
+                .enable_autoload_extension(false)
+                .map_err(|e| format!("DuckDB config error: {}", e))?;
+            match duckdb::Connection::open_with_flags(&path, config) {
+                Ok(conn) => {
+                    let id = DUCKDB_NEXT_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    duckdb_store().insert(id, conn);
+                    Ok(ok_vm(VMValue::DbHandle(id)))
+                }
+                Err(e) => Ok(err_vm(db_error_vm(
+                    "OPEN_ERROR",
+                    &format!("DuckDB open error: {}", e),
+                ))),
+            }
+        }
+
+        "DuckDb.query_raw" => {
+            if args.len() != 2 {
+                return Err("DuckDb.query_raw requires 2 arguments".to_string());
+            }
+            let mut it = args.into_iter();
+            let handle_id = match it.next().unwrap() {
+                VMValue::DbHandle(id) => id,
+                other => {
+                    return Err(format!(
+                        "DuckDb.query_raw expects DbHandle, got {}",
+                        vmvalue_type_name(&other)
+                    ))
+                }
+            };
+            let sql = vm_string(it.next().unwrap(), "DuckDb.query_raw")?;
+            let result = {
+                let store = duckdb_store();
+                let conn = store
+                    .get(&handle_id)
+                    .ok_or_else(|| "DuckDb.query_raw: invalid DbHandle".to_string())?;
+                duckdb_query_raw(conn, &sql)
+            };
+            match result {
+                Ok(rows) => Ok(ok_vm(VMValue::List(rows))),
+                Err(e) => Ok(err_vm(db_error_vm("QUERY_ERROR", &e))),
+            }
+        }
+
+        "DuckDb.execute_raw" => {
+            if args.len() != 2 {
+                return Err("DuckDb.execute_raw requires 2 arguments".to_string());
+            }
+            let mut it = args.into_iter();
+            let handle_id = match it.next().unwrap() {
+                VMValue::DbHandle(id) => id,
+                other => {
+                    return Err(format!(
+                        "DuckDb.execute_raw expects DbHandle, got {}",
+                        vmvalue_type_name(&other)
+                    ))
+                }
+            };
+            let sql = vm_string(it.next().unwrap(), "DuckDb.execute_raw")?;
+            let exec_result = {
+                let store = duckdb_store();
+                let conn = store
+                    .get(&handle_id)
+                    .ok_or_else(|| "DuckDb.execute_raw: invalid DbHandle".to_string())?;
+                conn.execute(&sql, [])
+                    .map(|n| n as i64)
+                    .map_err(|e| format!("DuckDB execute failed: {}", e))
+            };
+            match exec_result {
+                Ok(n) => Ok(ok_vm(VMValue::Int(n))),
+                Err(e) => Ok(err_vm(db_error_vm("EXECUTE_ERROR", &e))),
+            }
+        }
+
+        "DuckDb.close_raw" => {
+            if args.len() != 1 {
+                return Err("DuckDb.close_raw requires 1 argument".to_string());
+            }
+            match args.into_iter().next().unwrap() {
+                VMValue::DbHandle(id) => {
+                    duckdb_store().remove(&id);
+                    Ok(VMValue::Unit)
+                }
+                other => Err(format!(
+                    "DuckDb.close_raw expects DbHandle, got {}",
+                    vmvalue_type_name(&other)
+                )),
             }
         }
 

@@ -1,0 +1,37 @@
+// runes/duckdb/query.fav — DuckDB query operations (v4.3.0)
+
+// open: DuckDB データベースを開く（":memory:" でインメモリ）
+public fn open(path: String) -> Result<DbHandle, DbError> !Db {
+    DuckDb.open_raw(path)
+}
+
+// close: 接続を閉じる
+public fn close(conn: DbHandle) -> Unit !Db {
+    DuckDb.close_raw(conn)
+}
+
+// query: SQL を実行して全行を返す
+public fn query(conn: DbHandle, sql: String) -> Result<List<Map<String, String>>, DbError> !Db {
+    DuckDb.query_raw(conn, sql)
+}
+
+// query_one: 最初の 1 行だけを返す（0 行は DbError）
+public fn query_one(conn: DbHandle, sql: String) -> Result<Map<String, String>, DbError> !Db {
+    match DuckDb.query_raw(conn, sql) {
+        Ok(rows) => match List.first(rows) {
+            Some(row) => Result.ok(row)
+            None      => Result.err(DbError { code: "NOT_FOUND" message: "query returned no rows" })
+        }
+        Err(e) => Result.err(e)
+    }
+}
+
+// execute: DDL / DML を実行して影響行数を返す
+public fn execute(conn: DbHandle, sql: String) -> Result<Int, DbError> !Db {
+    DuckDb.execute_raw(conn, sql)
+}
+
+// explain: クエリ実行計画を返す
+public fn explain(conn: DbHandle, sql: String) -> Result<List<Map<String, String>>, DbError> !Db {
+    DuckDb.query_raw(conn, String.concat("EXPLAIN ", sql))
+}

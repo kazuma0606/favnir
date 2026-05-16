@@ -1,0 +1,59 @@
+import "duckdb"
+
+type DbError = {
+    code:    String
+    message: String
+}
+
+public fn main() -> Unit !Io !Db {
+    bind conn_result <- duckdb.open(":memory:")
+    match conn_result {
+        Ok(conn) => {
+            // 1. Create table and insert data
+            bind _ <- duckdb.execute(conn,
+                "CREATE TABLE sales (customer VARCHAR, product VARCHAR, amount DOUBLE)")
+            bind _ <- duckdb.execute(conn,
+                "INSERT INTO sales VALUES ('Alice', 'Widget', 120.0)")
+            bind _ <- duckdb.execute(conn,
+                "INSERT INTO sales VALUES ('Bob', 'Gadget', 200.0)")
+            bind _ <- duckdb.execute(conn,
+                "INSERT INTO sales VALUES ('Alice', 'Gadget', 80.0)")
+
+            // 2. GROUP BY aggregation
+            bind agg_result <- duckdb.query(conn,
+                "SELECT customer, SUM(amount) AS total FROM sales GROUP BY customer ORDER BY total DESC")
+            match agg_result {
+                Ok(rows) => IO.println($"Aggregated {List.length(rows)} customers")
+                Err(e)   => IO.println($"Aggregate error: {e.message}")
+            }
+
+            // 3. Write Parquet, read back
+            bind wp_result <- duckdb.write_parquet(conn,
+                "SELECT * FROM sales",
+                "tmp/duckdb_demo_sales.parquet")
+            match wp_result {
+                Ok(_) => {
+                    bind rp_result <- duckdb.read_parquet(conn,
+                        "tmp/duckdb_demo_sales.parquet")
+                    match rp_result {
+                        Ok(rows) => IO.println($"Read back {List.length(rows)} parquet rows")
+                        Err(e)   => IO.println($"Read parquet error: {e.message}")
+                    }
+                }
+                Err(e) => IO.println($"Write parquet error: {e.message}")
+            }
+
+            // 4. EXPLAIN a query
+            bind exp_result <- duckdb.explain(conn,
+                "SELECT customer, SUM(amount) FROM sales GROUP BY customer")
+            match exp_result {
+                Ok(rows) => IO.println($"Explain returned {List.length(rows)} plan rows")
+                Err(e)   => IO.println($"Explain error: {e.message}")
+            }
+
+            // 5. Close connection
+            duckdb.close(conn)
+        }
+        Err(e) => IO.println($"Open error: {e.message}")
+    }
+}

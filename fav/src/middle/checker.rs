@@ -4712,6 +4712,40 @@ impl Checker {
                 Some(Type::Unknown)
             }
 
+            // DuckDb.* (v4.3.0) — embedded OLAP, require !Db effect
+            ("DuckDb", "open_raw") => {
+                self.require_db_effect(span);
+                Some(Type::Result(
+                    Box::new(Type::Named("DbHandle".into(), vec![])),
+                    Box::new(Type::Named("DbError".into(), vec![])),
+                ))
+            }
+            ("DuckDb", "query_raw") => {
+                self.require_db_effect(span);
+                Some(Type::Result(
+                    Box::new(Type::List(Box::new(Type::Map(
+                        Box::new(Type::String),
+                        Box::new(Type::String),
+                    )))),
+                    Box::new(Type::Named("DbError".into(), vec![])),
+                ))
+            }
+            ("DuckDb", "execute_raw") => {
+                self.require_db_effect(span);
+                Some(Type::Result(
+                    Box::new(Type::Int),
+                    Box::new(Type::Named("DbError".into(), vec![])),
+                ))
+            }
+            ("DuckDb", "close_raw") => {
+                self.require_db_effect(span);
+                Some(Type::Unit)
+            }
+            ("DuckDb", _) => {
+                self.require_db_effect(span);
+                Some(Type::Unknown)
+            }
+
             // Env.* (v3.3.0)
             ("Env", "get") => Some(Type::Result(
                 Box::new(Type::String),

@@ -1,0 +1,3 @@
+// runes/duckdb/duckdb.fav — DuckDB Rune public API (v4.3.0)
+use query.{ open, close, query, query_one, execute, explain }
+use io.{ read_parquet, read_csv, write_parquet, write_csv }

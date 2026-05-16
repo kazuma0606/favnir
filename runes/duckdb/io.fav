@@ -1,0 +1,29 @@
+// runes/duckdb/io.fav — DuckDB Parquet / CSV IO (v4.3.0)
+
+// read_parquet: Parquet ファイルを SQL で読む
+public fn read_parquet(conn: DbHandle, path: String) -> Result<List<Map<String, String>>, DbError> !Db {
+    DuckDb.query_raw(conn,
+        String.concat("SELECT * FROM read_parquet('", String.concat(path, "')")))
+}
+
+// read_csv: CSV ファイルを自動スキーマ検出で読む
+public fn read_csv(conn: DbHandle, path: String) -> Result<List<Map<String, String>>, DbError> !Db {
+    DuckDb.query_raw(conn,
+        String.concat("SELECT * FROM read_csv_auto('", String.concat(path, "')")))
+}
+
+// write_parquet: SQL の結果を Parquet に書き出す
+public fn write_parquet(conn: DbHandle, sql: String, path: String) -> Result<Int, DbError> !Db {
+    DuckDb.execute_raw(conn,
+        String.concat(
+            String.concat("COPY (", String.concat(sql, ") TO '")),
+            String.concat(path, "' (FORMAT PARQUET)")))
+}
+
+// write_csv: SQL の結果を CSV に書き出す
+public fn write_csv(conn: DbHandle, sql: String, path: String) -> Result<Int, DbError> !Db {
+    DuckDb.execute_raw(conn,
+        String.concat(
+            String.concat("COPY (", String.concat(sql, ") TO '")),
+            String.concat(path, "' (FORMAT CSV, HEADER TRUE)")))
+}

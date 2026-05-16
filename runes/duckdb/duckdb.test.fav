@@ -1,0 +1,172 @@
+// runes/duckdb/duckdb.test.fav — DuckDB rune tests (v4.3.0)
+// Uses :memory: for most tests; parquet/csv tests write to ../fav/tmp/
+
+type DbError = {
+    code: String
+    message: String
+}
+
+// ── helpers ────────────────────────────────────────────────────────────────────
+
+fn duck_open(path: String) -> Result<DbHandle, DbError> !Db {
+    DuckDb.open_raw(path)
+}
+
+fn duck_execute(conn: DbHandle, sql: String) -> Result<Int, DbError> !Db {
+    DuckDb.execute_raw(conn, sql)
+}
+
+fn duck_query(conn: DbHandle, sql: String) -> Result<List<Map<String, String>>, DbError> !Db {
+    DuckDb.query_raw(conn, sql)
+}
+
+// ── tests ─────────────────────────────────────────────────────────────────────
+
+test "test_open_memory" {
+    bind result <- duck_open(":memory:")
+    assert_eq(Result.is_ok(result), true)
+}
+
+test "test_execute_create_table" {
+    bind conn_result <- duck_open(":memory:")
+    match conn_result {
+        Ok(conn) => {
+            bind result <- duck_execute(conn, "CREATE TABLE t (id INTEGER, name VARCHAR)")
+            assert_eq(Result.is_ok(result), true)
+        }
+        Err(_) => assert(false)
+    }
+}
+
+test "test_query_returns_rows" {
+    bind conn_result <- duck_open(":memory:")
+    match conn_result {
+        Ok(conn) => {
+            bind _ <- duck_execute(conn, "CREATE TABLE t (id INTEGER, name VARCHAR)")
+            bind _ <- duck_execute(conn, "INSERT INTO t VALUES (1, 'Alice')")
+            bind _ <- duck_execute(conn, "INSERT INTO t VALUES (2, 'Bob')")
+            bind rows_result <- duck_query(conn, "SELECT id, name FROM t ORDER BY id")
+            match rows_result {
+                Ok(rows) => assert_eq(List.length(rows), 2)
+                Err(_)   => assert(false)
+            }
+        }
+        Err(_) => assert(false)
+    }
+}
+
+test "test_query_one_found" {
+    bind conn_result <- duck_open(":memory:")
+    match conn_result {
+        Ok(conn) => {
+            bind _ <- duck_execute(conn, "CREATE TABLE t (id INTEGER, name VARCHAR)")
+            bind _ <- duck_execute(conn, "INSERT INTO t VALUES (1, 'Alice')")
+            bind rows_result <- duck_query(conn, "SELECT name FROM t WHERE id = 1")
+            match rows_result {
+                Ok(rows) => assert_eq(List.length(rows), 1)
+                Err(_)   => assert(false)
+            }
+        }
+        Err(_) => assert(false)
+    }
+}
+
+test "test_query_one_not_found" {
+    bind conn_result <- duck_open(":memory:")
+    match conn_result {
+        Ok(conn) => {
+            bind _ <- duck_execute(conn, "CREATE TABLE t (id INTEGER)")
+            bind rows_result <- duck_query(conn, "SELECT id FROM t WHERE id = 999")
+            match rows_result {
+                Ok(rows) => assert_eq(List.length(rows), 0)
+                Err(_)   => assert(false)
+            }
+        }
+        Err(_) => assert(false)
+    }
+}
+
+test "test_explain_returns_result" {
+    bind conn_result <- duck_open(":memory:")
+    match conn_result {
+        Ok(conn) => {
+            bind _ <- duck_execute(conn, "CREATE TABLE t (id INTEGER)")
+            bind result <- duck_query(conn, "EXPLAIN SELECT * FROM t")
+            assert_eq(Result.is_ok(result), true)
+        }
+        Err(_) => assert(false)
+    }
+}
+
+test "test_write_parquet_and_read_back" {
+    bind conn_result <- duck_open(":memory:")
+    match conn_result {
+        Ok(conn) => {
+            bind _ <- duck_execute(conn, "CREATE TABLE sales (id INTEGER, amount DOUBLE)")
+            bind _ <- duck_execute(conn, "INSERT INTO sales VALUES (1, 10.0)")
+            bind _ <- duck_execute(conn, "INSERT INTO sales VALUES (2, 20.0)")
+            bind w_result <- duck_execute(conn,
+                "COPY (SELECT * FROM sales) TO '../fav/tmp/test_duckdb_sales.parquet' (FORMAT PARQUET)")
+            match w_result {
+                Ok(_) => {
+                    bind r_result <- duck_query(conn,
+                        "SELECT * FROM read_parquet('../fav/tmp/test_duckdb_sales.parquet')")
+                    match r_result {
+                        Ok(rows) => assert_eq(List.length(rows), 2)
+                        Err(_)   => assert(false)
+                    }
+                }
+                Err(_) => assert(false)
+            }
+        }
+        Err(_) => assert(false)
+    }
+}
+
+test "test_read_csv_auto" {
+    bind conn_result <- duck_open(":memory:")
+    match conn_result {
+        Ok(conn) => {
+            bind w_result <- duck_execute(conn,
+                "COPY (SELECT 1 AS id, 'Alice' AS name) TO '../fav/tmp/test_duckdb_csv.csv' (FORMAT CSV, HEADER TRUE)")
+            match w_result {
+                Ok(_) => {
+                    bind r_result <- duck_query(conn,
+                        "SELECT * FROM read_csv_auto('../fav/tmp/test_duckdb_csv.csv')")
+                    match r_result {
+                        Ok(rows) => assert_eq(List.length(rows), 1)
+                        Err(_)   => assert(false)
+                    }
+                }
+                Err(_) => assert(false)
+            }
+        }
+        Err(_) => assert(false)
+    }
+}
+
+test "test_write_csv" {
+    bind conn_result <- duck_open(":memory:")
+    match conn_result {
+        Ok(conn) => {
+            bind _ <- duck_execute(conn, "CREATE TABLE t (id INTEGER, val VARCHAR)")
+            bind _ <- duck_execute(conn, "INSERT INTO t VALUES (1, 'a')")
+            bind _ <- duck_execute(conn, "INSERT INTO t VALUES (2, 'b')")
+            bind result <- duck_execute(conn,
+                "COPY (SELECT * FROM t) TO '../fav/tmp/test_duckdb_out.csv' (FORMAT CSV, HEADER TRUE)")
+            assert_eq(Result.is_ok(result), true)
+        }
+        Err(_) => assert(false)
+    }
+}
+
+test "test_bad_sql_returns_err" {
+    bind conn_result <- duck_open(":memory:")
+    match conn_result {
+        Ok(conn) => {
+            bind result <- duck_query(conn, "SELECT * FROM nonexistent_table_xyz")
+            assert_eq(Result.is_err(result), true)
+        }
+        Err(_) => assert(false)
+    }
+}

@@ -2569,3 +2569,88 @@ public fn main() -> Bool !Rpc {
     );
     assert_eq!(result, Value::Bool(true));
 }
+
+// ── DuckDb.* (v4.3.0) ────────────────────────────────────────────────────────
+
+#[test]
+fn duckdb_open_memory_succeeds() {
+    let result = eval(
+        r#"
+type DbError = { code: String message: String }
+
+public fn main() -> Bool !Db {
+    bind r <- DuckDb.open_raw(":memory:")
+    Result.is_ok(r)
+}
+"#,
+    );
+    assert_eq!(result, Value::Bool(true));
+}
+
+#[test]
+fn duckdb_execute_create_table_succeeds() {
+    let result = eval(
+        r#"
+type DbError = { code: String message: String }
+
+public fn main() -> Bool !Db {
+    bind conn_result <- DuckDb.open_raw(":memory:")
+    match conn_result {
+        Ok(conn) => {
+            bind r <- DuckDb.execute_raw(conn, "CREATE TABLE t (id INTEGER, name VARCHAR)")
+            Result.is_ok(r)
+        }
+        Err(_) => false
+    }
+}
+"#,
+    );
+    assert_eq!(result, Value::Bool(true));
+}
+
+#[test]
+fn duckdb_query_returns_inserted_row() {
+    let result = eval(
+        r#"
+type DbError = { code: String message: String }
+
+public fn main() -> Int !Db {
+    bind conn_result <- DuckDb.open_raw(":memory:")
+    match conn_result {
+        Ok(conn) => {
+            bind _ <- DuckDb.execute_raw(conn, "CREATE TABLE t (id INTEGER, name VARCHAR)")
+            bind _ <- DuckDb.execute_raw(conn, "INSERT INTO t VALUES (1, 'Alice')")
+            bind rows_result <- DuckDb.query_raw(conn, "SELECT id, name FROM t")
+            match rows_result {
+                Ok(rows) => List.length(rows)
+                Err(_)   => -1
+            }
+        }
+        Err(_) => -2
+    }
+}
+"#,
+    );
+    assert_eq!(result, Value::Int(1));
+}
+
+#[test]
+fn duckdb_query_bad_sql_returns_err() {
+    let result = eval(
+        r#"
+type DbError = { code: String message: String }
+
+public fn main() -> Bool !Db {
+    bind conn_result <- DuckDb.open_raw(":memory:")
+    match conn_result {
+        Ok(conn) => {
+            bind r <- DuckDb.query_raw(conn, "SELECT * FROM no_such_table_xyz_abc")
+            Result.is_err(r)
+        }
+        Err(_) => false
+    }
+}
+"#,
+    );
+    assert_eq!(result, Value::Bool(true));
+}

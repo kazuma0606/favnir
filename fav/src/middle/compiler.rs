@@ -174,6 +174,7 @@ pub fn compile_program(program: &Program) -> IRProgram {
         "Stream",
         "Gen",
         "Validate",
+        "DuckDb",
         "assert",
         "assert_eq",
         "assert_ne",
@@ -405,6 +406,7 @@ pub fn compile_program(program: &Program) -> IRProgram {
         "Stream",
         "Gen",
         "Validate",
+        "DuckDb",
         // test assertion builtins (callable without namespace prefix)
         "assert",
         "assert_eq",

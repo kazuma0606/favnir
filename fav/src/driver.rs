@@ -11707,3 +11707,66 @@ public fn main() -> Bool !Network {
         assert_eq!(value, crate::value::Value::Bool(true));
     }
 }
+
+// ── v4.3.0: DuckDB Rune integration tests ─────────────────────────────────────
+
+#[cfg(test)]
+mod duckdb_rune_tests {
+    use super::tests::{exec_project_main_source_with_runes, run_fav_test_file_with_runes};
+
+    #[test]
+    fn duckdb_rune_test_file_passes() {
+        let results = run_fav_test_file_with_runes("runes/duckdb/duckdb.test.fav");
+        let failures: Vec<_> = results.iter().filter(|(_, ok, _)| !ok).collect();
+        assert!(
+            failures.is_empty(),
+            "duckdb.test.fav failures: {:?}",
+            failures
+        );
+    }
+
+    #[test]
+    fn duckdb_open_in_favnir_source() {
+        let value = exec_project_main_source_with_runes(
+            r#"
+import "duckdb"
+
+type DbError = { code: String message: String }
+
+public fn main() -> Bool !Db {
+    bind r <- duckdb.open(":memory:")
+    Result.is_ok(r)
+}
+"#,
+        );
+        assert_eq!(value, crate::value::Value::Bool(true));
+    }
+
+    #[test]
+    fn duckdb_query_in_favnir_source() {
+        let value = exec_project_main_source_with_runes(
+            r#"
+import "duckdb"
+
+type DbError = { code: String message: String }
+
+public fn main() -> Int !Db {
+    bind conn_result <- duckdb.open(":memory:")
+    match conn_result {
+        Ok(conn) => {
+            bind _ <- duckdb.execute(conn, "CREATE TABLE t (id INTEGER, name VARCHAR)")
+            bind _ <- duckdb.execute(conn, "INSERT INTO t VALUES (1, 'Alice')")
+            bind rows_result <- duckdb.query(conn, "SELECT * FROM t")
+            match rows_result {
+                Ok(rows) => List.length(rows)
+                Err(_)   => -1
+            }
+        }
+        Err(_) => -2
+    }
+}
+"#,
+        );
+        assert_eq!(value, crate::value::Value::Int(1));
+    }
+}

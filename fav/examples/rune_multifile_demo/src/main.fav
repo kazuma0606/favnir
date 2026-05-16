@@ -1,0 +1,23 @@
+// examples/rune_multifile_demo/src/main.fav
+// v4.1.0: ディレクトリ rune をインポートするデモ
+//
+// このデモが動作するには runes/math/ ディレクトリ rune が必要です。
+// fav.toml の [runes] path を適切に設定してください。
+//
+// runes/math/
+//   math.fav         ← public API
+//   arithmetic.fav   ← 内部モジュール
+//   stats.fav        ← 内部モジュール
+
+import "math"
+
+public fn main() -> Unit !Io {
+    // ディレクトリ rune の public API を使用
+    bind doubled <- math.double(21)
+    bind total   <- math.sum(List.of(1, 2, 3, 4, 5))
+    bind avg     <- math.average(List.of(10, 20, 30))
+
+    IO.println("double(21)        = " ++ Int.to_string(doubled))
+    IO.println("sum(1..5)         = " ++ Int.to_string(total))
+    IO.println("average(10,20,30) = " ++ Float.to_string(avg))
+}

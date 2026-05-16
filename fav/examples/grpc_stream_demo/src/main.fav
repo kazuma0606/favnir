@@ -1,4 +1,4 @@
-import rune "grpc"
+import "grpc"
 
 public fn main() -> Int !Rpc {
     bind req <- Map.set((), "cursor", "0")

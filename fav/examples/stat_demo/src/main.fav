@@ -1,4 +1,4 @@
-import rune "stat"
+import "stat"
 
 public fn main() -> Unit !Io !Random = {
     bind n <- stat.sample_int()

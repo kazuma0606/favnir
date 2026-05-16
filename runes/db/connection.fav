@@ -1,0 +1,9 @@
+// runes/db/connection.fav — DB connection management (v4.1.0)
+
+public fn connect(conn_str: String) -> Result<DbHandle, DbError> !Db {
+    DB.connect(conn_str)
+}
+
+public fn close(handle: DbHandle) -> Unit !Db {
+    DB.close(handle)
+}

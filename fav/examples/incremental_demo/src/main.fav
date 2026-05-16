@@ -1,4 +1,4 @@
-import rune "incremental"
+import "incremental"
 
 public fn main() -> Unit !Io !Checkpoint {
     bind rows <- incremental.run_since("demo_run", |since|

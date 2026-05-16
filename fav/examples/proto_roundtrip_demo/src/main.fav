@@ -1,4 +1,4 @@
-import rune "grpc"
+import "grpc"
 
 type User = { id: Int name: String active: Bool }
 

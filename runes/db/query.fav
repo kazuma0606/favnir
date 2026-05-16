@@ -1,0 +1,17 @@
+// runes/db/query.fav — DB query and execute operations (v4.1.0)
+
+public fn query(handle: DbHandle, sql: String) -> Result<List<Map<String, String>>, DbError> !Db {
+    DB.query_raw(handle, sql)
+}
+
+public fn query_params(handle: DbHandle, sql: String, params: List<String>) -> Result<List<Map<String, String>>, DbError> !Db {
+    DB.query_raw_params(handle, sql, params)
+}
+
+public fn execute(handle: DbHandle, sql: String) -> Result<Int, DbError> !Db {
+    DB.execute_raw(handle, sql)
+}
+
+public fn execute_params(handle: DbHandle, sql: String, params: List<String>) -> Result<Int, DbError> !Db {
+    DB.execute_raw_params(handle, sql, params)
+}

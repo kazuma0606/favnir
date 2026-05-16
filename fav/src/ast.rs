@@ -551,6 +551,17 @@ pub struct EffectDef {
     pub span: Span,
 }
 
+// ── RuneUseNames (v4.1.0) ────────────────────────────────────────────────────
+
+/// Which names to import from a sibling rune module file.
+#[derive(Debug, Clone, PartialEq)]
+pub enum RuneUseNames {
+    /// `use connection.{ connect, close }`
+    Specific(Vec<String>),
+    /// `use query.*`
+    Wildcard,
+}
+
 // ── Item (2-1) ────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone)]
@@ -564,6 +575,12 @@ pub enum Item {
     FlwBindingDef(FlwBindingDef),
     NamespaceDecl(String, Span), // namespace data.users
     UseDecl(Vec<String>, Span),  // use data.users.create ↁE["data","users","create"]
+    /// `use connection.{ connect, close }` or `use query.*` — rune-internal file import (v4.1.0)
+    RuneUse {
+        module: String,
+        names: RuneUseNames,
+        span: Span,
+    },
     ImportDecl {
         path: String,
         alias: Option<String>,
@@ -592,6 +609,7 @@ impl Item {
             Item::FlwBindingDef(f) => &f.span,
             Item::NamespaceDecl(_, s) => s,
             Item::UseDecl(_, s) => s,
+            Item::RuneUse { span, .. } => span,
             Item::ImportDecl { span, .. } => span,
             Item::InterfaceDecl(d) => &d.span,
             Item::InterfaceImplDecl(d) => &d.span,

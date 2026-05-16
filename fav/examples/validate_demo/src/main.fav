@@ -1,4 +1,4 @@
-import rune "validate"
+import "validate"
 
 public fn main() -> Unit !Io {
     bind r1 <- validate.Required("Alice")

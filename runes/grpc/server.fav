@@ -1,0 +1,9 @@
+// runes/grpc/server.fav — gRPC server helpers (v4.1.0)
+
+public fn serve(port: Int, service_name: String) -> Unit !Io !Rpc {
+    Grpc.serve_raw(port, service_name)
+}
+
+public fn serve_stream(port: Int, service_name: String) -> Unit !Io !Rpc {
+    Grpc.serve_stream_raw(port, service_name)
+}

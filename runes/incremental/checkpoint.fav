@@ -1,0 +1,17 @@
+// runes/incremental/checkpoint.fav — Checkpoint state management (v4.1.0)
+
+public fn last(name: String) -> Option<String> !Checkpoint {
+    Checkpoint.last(name)
+}
+
+public fn save(name: String, value: String) -> Unit !Checkpoint {
+    Checkpoint.save(name, value)
+}
+
+public fn reset(name: String) -> Unit !Checkpoint {
+    Checkpoint.reset(name)
+}
+
+public fn meta(name: String) -> CheckpointMeta !Checkpoint {
+    Checkpoint.meta(name)
+}

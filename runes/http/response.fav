@@ -1,0 +1,9 @@
+// runes/http/response.fav — HTTP response builders (v4.1.0)
+
+public fn ok(status: Int, body: String) -> HttpResponse {
+    HttpResponse { status: status, body: body, content_type: "text/plain" }
+}
+
+public fn error_response(status: Int, message: String) -> HttpResponse {
+    HttpResponse { status: status, body: message, content_type: "text/plain" }
+}

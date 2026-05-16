@@ -6,7 +6,7 @@
 // Run the server:   fav run examples/grpc_e2e_demo/src/main.fav
 // In another shell: fav run examples/grpc_e2e_demo/src/client.fav
 
-import rune "grpc"
+import "grpc"
 
 type EchoRequest  = { message: String }
 type EchoResponse = { echo: String }

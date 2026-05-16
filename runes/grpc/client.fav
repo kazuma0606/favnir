@@ -1,0 +1,9 @@
+// runes/grpc/client.fav — gRPC client helpers (v4.1.0)
+
+public fn call(host: String, method: String, payload: Map<String, String>) -> Result<Map<String, String>, RpcError> !Rpc {
+    Grpc.call_raw(host, method, payload)
+}
+
+public fn call_stream(host: String, method: String, payload: Map<String, String>) -> List<Map<String, String>> !Rpc {
+    Grpc.call_stream_raw(host, method, payload)
+}

@@ -1145,6 +1145,35 @@ impl Checker {
                 return;
             }
         };
+        // For directory runes (v4.1.0): merge items from sibling files
+        // referenced by `use X.{ ... }` / `use X.*` in the entrypoint.
+        let program = if is_rune {
+            let dir = file_path.parent().unwrap_or(std::path::Path::new("."));
+            let mut all_items = program.items.clone();
+            let mut seen: std::collections::HashSet<std::path::PathBuf> =
+                std::collections::HashSet::new();
+            seen.insert(file_path.clone());
+            for item in &program.items {
+                if let Item::RuneUse { module, .. } = item {
+                    let sib = dir.join(format!("{module}.fav"));
+                    if seen.insert(sib.clone()) && sib.exists() {
+                        if let Ok(src) = std::fs::read_to_string(&sib) {
+                            let sib_str = sib.to_string_lossy().to_string();
+                            if let Ok(sib_prog) = Parser::parse_str(&src, &sib_str) {
+                                all_items.extend(sib_prog.items);
+                            }
+                        }
+                    }
+                }
+            }
+            Program {
+                namespace: program.namespace,
+                uses: program.uses,
+                items: all_items,
+            }
+        } else {
+            program
+        };
         let mut child = Checker::new_with_resolver(resolver.clone(), file_path.clone());
         let (child_errors, _) = child.check_with_self(&program);
         for error in child_errors {
@@ -1983,6 +2012,7 @@ impl Checker {
                 // namespace / use / test / bench / interface are handled elsewhere
                 Item::NamespaceDecl(..)
                 | Item::UseDecl(..)
+                | Item::RuneUse { .. }
                 | Item::ImportDecl { .. }
                 | Item::TestDef(..)
                 | Item::BenchDef(..)
@@ -2017,7 +2047,7 @@ impl Checker {
             Item::EffectDef(..) => {}
             Item::TestDef(td) => self.check_test_def(td),
             Item::BenchDef(bd) => self.check_bench_def(bd),
-            Item::NamespaceDecl(..) | Item::UseDecl(..) | Item::ImportDecl { .. } => {}
+            Item::NamespaceDecl(..) | Item::UseDecl(..) | Item::RuneUse { .. } | Item::ImportDecl { .. } => {}
         }
     }
 

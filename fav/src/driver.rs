@@ -304,16 +304,34 @@ fn load_all_items(entry_path: &str, toml: Option<&FavToml>, root: Option<&Path>)
                 load_rec(&dep_str, Some(toml), Some(root), visited, all_items);
             }
             for item in &program.items {
-                let ast::Item::ImportDecl { path, is_rune, .. } = item else {
-                    continue;
-                };
-                let dep_file = if *is_rune {
-                    toml.runes_dir(root).join(path).join(format!("{path}.fav"))
-                } else {
-                    src_dir.join(path).with_extension("fav")
-                };
-                let dep_str = dep_file.to_string_lossy().to_string();
-                load_rec(&dep_str, Some(toml), Some(root), visited, all_items);
+                match item {
+                    ast::Item::ImportDecl { path, is_rune, .. } => {
+                        let dep_file = if *is_rune {
+                            // Check for directory rune first (v4.1.0)
+                            let dir = toml.runes_dir(root).join(path);
+                            if dir.is_dir() {
+                                dir.join(format!("{path}.fav"))
+                            } else {
+                                toml.runes_dir(root).join(format!("{path}.fav"))
+                            }
+                        } else {
+                            src_dir.join(path).with_extension("fav")
+                        };
+                        let dep_str = dep_file.to_string_lossy().to_string();
+                        load_rec(&dep_str, Some(toml), Some(root), visited, all_items);
+                    }
+                    ast::Item::RuneUse { module, .. } => {
+                        // Load sibling file within the same rune directory (v4.1.0)
+                        let current_dir = std::path::Path::new(path).parent()
+                            .unwrap_or(std::path::Path::new("."));
+                        let mod_file = current_dir.join(format!("{module}.fav"));
+                        if mod_file.exists() {
+                            let dep_str = mod_file.to_string_lossy().to_string();
+                            load_rec(&dep_str, Some(toml), Some(root), visited, all_items);
+                        }
+                    }
+                    _ => {}
+                }
             }
         }
 
@@ -322,6 +340,7 @@ fn load_all_items(entry_path: &str, toml: Option<&FavToml>, root: Option<&Path>)
             match &item {
                 ast::Item::NamespaceDecl(..)
                 | ast::Item::UseDecl(..)
+                | ast::Item::RuneUse { .. }
                 | ast::Item::ImportDecl { .. }
                 | ast::Item::InterfaceDecl(..)
                 | ast::Item::InterfaceImplDecl(..) => {}
@@ -4535,7 +4554,7 @@ public fn main() -> Url! {
     fn validate_rune_required_ok() {
         let value = exec_project_main_source_with_runes(
             r#"
-import rune "validate"
+import "validate"
 
 public fn main() -> String! {
     validate.Required("hello")
@@ -4555,7 +4574,7 @@ public fn main() -> String! {
     fn validate_rune_required_err() {
         let value = exec_project_main_source_with_runes(
             r#"
-import rune "validate"
+import "validate"
 
 public fn main() -> String! {
     validate.Required("")
@@ -4582,7 +4601,7 @@ public fn main() -> String! {
     fn validate_rune_min_len_err() {
         let value = exec_project_main_source_with_runes(
             r#"
-import rune "validate"
+import "validate"
 
 public fn main() -> String! {
     validate.MinLen(3)("hi")
@@ -4609,7 +4628,7 @@ public fn main() -> String! {
     fn validate_rune_min_len_ok() {
         let value = exec_project_main_source_with_runes(
             r#"
-import rune "validate"
+import "validate"
 
 public fn main() -> String! {
     validate.MinLen(3)("abc")
@@ -4629,7 +4648,7 @@ public fn main() -> String! {
     fn validate_rune_email_ok() {
         let value = exec_project_main_source_with_runes(
             r#"
-import rune "validate"
+import "validate"
 
 public fn main() -> String! {
     validate.Email("user@example.com")
@@ -4651,7 +4670,7 @@ public fn main() -> String! {
     fn validate_rune_email_err() {
         let value = exec_project_main_source_with_runes(
             r#"
-import rune "validate"
+import "validate"
 
 public fn main() -> String! {
     validate.Email("notanemail")
@@ -4678,7 +4697,7 @@ public fn main() -> String! {
     fn validate_rune_int_range_ok() {
         let value = exec_project_main_source_with_runes(
             r#"
-import rune "validate"
+import "validate"
 
 public fn main() -> Int! {
     validate.IntRange(1)(100)(50)
@@ -4695,7 +4714,7 @@ public fn main() -> Int! {
     fn validate_rune_int_range_err() {
         let value = exec_project_main_source_with_runes(
             r#"
-import rune "validate"
+import "validate"
 
 public fn main() -> Int! {
     validate.IntRange(1)(100)(0)
@@ -4722,7 +4741,7 @@ public fn main() -> Int! {
     fn validate_rune_all_pass_ok() {
         let value = exec_project_main_source_with_runes(
             r#"
-import rune "validate"
+import "validate"
 
 public fn main() -> String! {
     bind r1 <- validate.Required("hello")
@@ -4750,7 +4769,7 @@ public fn main() -> String! {
     fn validate_rune_all_pass_collects_errors() {
         let value = exec_project_main_source_with_runes(
             r#"
-import rune "validate"
+import "validate"
 
 public fn main() -> Bool {
     bind r1 <- validate.Required("")
@@ -4773,7 +4792,7 @@ public fn main() -> Bool {
     fn stat_rune_random_int_min_equals_max() {
         let value = exec_project_main_source_with_runes(
             r#"
-import rune "stat"
+import "stat"
 
 public fn main() -> Int !Random = Random.int(7, 7)
 "#,
@@ -4785,7 +4804,7 @@ public fn main() -> Int !Random = Random.int(7, 7)
     fn stat_rune_uniform_deterministic() {
         let value = exec_project_main_source_with_runes(
             r#"
-import rune "stat"
+import "stat"
 
 public fn main() -> Int !Random = stat.uniform(5)(5)
 "#,
@@ -4797,7 +4816,7 @@ public fn main() -> Int !Random = stat.uniform(5)(5)
     fn stat_rune_choice_str_single() {
         let value = exec_project_main_source_with_runes(
             r#"
-import rune "stat"
+import "stat"
 
 public fn main() -> String !Random = {
     bind xs <- collect { yield "only"; }
@@ -4812,7 +4831,7 @@ public fn main() -> String !Random = {
     fn stat_rune_choice_int_single() {
         let value = exec_project_main_source_with_runes(
             r#"
-import rune "stat"
+import "stat"
 
 public fn main() -> Int !Random = {
     bind xs <- collect { yield 42; }
@@ -4827,7 +4846,7 @@ public fn main() -> Int !Random = {
     fn stat_rune_list_int_length() {
         let value = exec_project_main_source_with_runes(
             r#"
-import rune "stat"
+import "stat"
 
 public fn main() -> Int !Random = {
     bind xs <- stat.list_int(4)
@@ -4842,7 +4861,7 @@ public fn main() -> Int !Random = {
     fn stat_rune_list_float_length() {
         let value = exec_project_main_source_with_runes(
             r#"
-import rune "stat"
+import "stat"
 
 public fn main() -> Int !Random = {
     bind xs <- stat.list_float(3)
@@ -4857,7 +4876,7 @@ public fn main() -> Int !Random = {
     fn stat_rune_profile_int_total() {
         let value = exec_project_main_source_with_runes(
             r#"
-import rune "stat"
+import "stat"
 
 public fn main() -> Int = {
     bind xs <- collect {
@@ -4877,7 +4896,7 @@ public fn main() -> Int = {
     fn stat_rune_sample_bool_returns_bool() {
         let value = exec_project_main_source_with_runes(
             r#"
-import rune "stat"
+import "stat"
 
 public fn main() -> Bool !Random = {
     bind b <- stat.sample_bool()
@@ -4896,7 +4915,7 @@ public fn main() -> Bool !Random = {
     fn csv_rune_parse_and_write_roundtrip() {
         let value = exec_project_main_source_with_runes(
             r#"
-import rune "csv"
+import "csv"
 
 type User = { id: Int name: String age: Int }
 
@@ -4919,7 +4938,7 @@ public fn main() -> String {
     fn csv_rune_schema_error_propagates() {
         let value = exec_project_main_source_with_runes(
             r#"
-import rune "csv"
+import "csv"
 
 type User = { id: Int name: String }
 
@@ -4936,7 +4955,7 @@ public fn main() -> Bool {
     fn col_annotation_maps_by_position() {
         let value = exec_project_main_source_with_runes(
             r#"
-import rune "csv"
+import "csv"
 
 type User = {
     #[col(0)] id: Int
@@ -4962,7 +4981,7 @@ public fn main() -> String {
     fn option_field_maps_empty_to_none() {
         let value = exec_project_main_source_with_runes(
             r#"
-import rune "csv"
+import "csv"
 
 type User = { id: Int name: String age: Option<Int> }
 
@@ -4995,7 +5014,7 @@ public fn main() -> Bool {
     fn json_rune_parse_and_write_roundtrip() {
         let value = exec_project_main_source_with_runes(
             r#"
-import rune "json"
+import "json"
 
 type Config = { host: String port: Int }
 
@@ -5016,7 +5035,7 @@ public fn main() -> String {
     fn json_rune_parse_list() {
         let value = exec_project_main_source_with_runes(
             r#"
-import rune "json"
+import "json"
 
 type Config = { host: String port: Int }
 
@@ -5036,7 +5055,7 @@ public fn main() -> Int {
     fn json_schema_error_on_type_mismatch() {
         let value = exec_project_main_source_with_runes(
             r#"
-import rune "json"
+import "json"
 
 type Config = { host: String port: Int }
 
@@ -5053,7 +5072,7 @@ public fn main() -> Bool {
     fn json_rune_write_list() {
         let value = exec_project_main_source_with_runes(
             r#"
-import rune "json"
+import "json"
 
 type Config = { host: String port: Int }
 
@@ -8434,7 +8453,7 @@ impl ExplainPrinter {
                         "-"
                     );
                 }
-                Item::NamespaceDecl(..) | Item::UseDecl(..) | Item::ImportDecl { .. } => {}
+                Item::NamespaceDecl(..) | Item::UseDecl(..) | Item::RuneUse { .. } | Item::ImportDecl { .. } => {}
             }
         }
 
@@ -10223,7 +10242,7 @@ public fn main() -> Unit !Io {
     fn db_rune_connect_and_query() {
         let value = exec_project_main_source_with_runes(
             r#"
-import rune "db"
+import "db"
 
 type User = { id: Int  name: String  age: Int }
 
@@ -10252,7 +10271,7 @@ public fn main() -> Int !Db {
     fn db_rune_query_params_bind() {
         let value = exec_project_main_source_with_runes(
             r#"
-import rune "db"
+import "db"
 
 public fn main() -> String !Db {
     bind conn_result <- db.connect("sqlite::memory:")
@@ -10280,7 +10299,7 @@ public fn main() -> String !Db {
     fn db_rune_transaction_commit() {
         let value = exec_project_main_source_with_runes(
             r#"
-import rune "db"
+import "db"
 
 public fn main() -> Int !Db {
     bind conn_result <- db.connect("sqlite::memory:")
@@ -10313,7 +10332,7 @@ public fn main() -> Int !Db {
     fn db_rune_transaction_rollback() {
         let value = exec_project_main_source_with_runes(
             r#"
-import rune "db"
+import "db"
 
 public fn main() -> Int !Db {
     bind conn_result <- db.connect("sqlite::memory:")
@@ -10346,7 +10365,7 @@ public fn main() -> Int !Db {
     fn db_rune_schema_mismatch_returns_err() {
         let value = exec_project_main_source_with_runes(
             r#"
-import rune "db"
+import "db"
 
 type Item = { id: Int  label: String }
 
@@ -10493,7 +10512,7 @@ public fn main() -> Int {
     fn checkpoint_last_none_in_favnir_source() {
         let value = exec_project_main_source_with_runes(
             r#"
-import rune "incremental"
+import "incremental"
 
 public fn main() -> Bool !Checkpoint {
     incremental.reset("driver_cp_none");
@@ -10509,7 +10528,7 @@ public fn main() -> Bool !Checkpoint {
     fn checkpoint_save_and_read_in_favnir_source() {
         let value = exec_project_main_source_with_runes(
             r#"
-import rune "incremental"
+import "incremental"
 
 public fn main() -> String !Checkpoint {
     incremental.reset("driver_cp_save");
@@ -10526,7 +10545,7 @@ public fn main() -> String !Checkpoint {
     fn db_upsert_raw_in_favnir_source() {
         let value = exec_project_main_source_with_runes(
             r#"
-import rune "incremental"
+import "incremental"
 
 public fn main() -> String !Db {
     bind conn_result <- DB.connect("sqlite::memory:")
@@ -10558,7 +10577,7 @@ public fn main() -> String !Db {
     fn incremental_run_since_in_favnir_source() {
         let value = exec_project_main_source_with_runes(
             r#"
-import rune "incremental"
+import "incremental"
 
 public fn main() -> Int !Checkpoint !Io {
     incremental.reset("driver_run_since");
@@ -10603,7 +10622,7 @@ public fn main() -> Int !Checkpoint !Io {
     fn http_ok_helper_in_favnir_source() {
         let value = exec_project_main_source_with_runes(
             r#"
-import rune "http"
+import "http"
 
 public fn main() -> Int {
     http.ok(201, "created").status
@@ -10617,7 +10636,7 @@ public fn main() -> Int {
     fn http_get_body_in_favnir_source() {
         let value = exec_project_main_source_with_runes(
             r#"
-import rune "http"
+import "http"
 
 public fn main() -> Bool !Network {
     bind result <- http.get_body("://bad-url")
@@ -10643,7 +10662,7 @@ public fn main() -> Bool !Network {
     fn parquet_write_read_roundtrip_in_favnir_source() {
         let value = exec_project_main_source_with_runes(
             r#"
-import rune "parquet"
+import "parquet"
 
 type Product = { id: Int name: String }
 
@@ -10709,7 +10728,7 @@ interface UserQuerySchema {
     fn grpc_encode_decode_in_favnir_source() {
         let value = exec_project_main_source_with_runes(
             r#"
-import rune "grpc"
+import "grpc"
 
 type User = { id: Int name: String }
 
@@ -10729,7 +10748,7 @@ public fn main() -> String {
     fn grpc_ok_helper_in_favnir_source() {
         let value = exec_project_main_source_with_runes(
             r#"
-import rune "grpc"
+import "grpc"
 
 public fn main() -> Bool {
     bind row <- Map.set((), "id", "1")
@@ -10744,7 +10763,7 @@ public fn main() -> Bool {
     fn grpc_err_helper_in_favnir_source() {
         let value = exec_project_main_source_with_runes(
             r#"
-import rune "grpc"
+import "grpc"
 
 public fn main() -> String {
     bind result <- grpc.err(2, "bad host")
@@ -10762,7 +10781,7 @@ public fn main() -> String {
     fn grpc_call_bad_host_in_favnir_source() {
         let value = exec_project_main_source_with_runes(
             r#"
-import rune "grpc"
+import "grpc"
 
 public fn main() -> Bool !Rpc {
     bind row <- Map.set((), "id", "1")
@@ -10817,7 +10836,7 @@ public fn main() -> Unit !Io !Rpc {
     fn grpc_rune_call_stream_in_favnir_source() {
         let value = exec_project_main_source_with_runes(
             r#"
-import rune "grpc"
+import "grpc"
 
 public fn main() -> Int !Rpc {
     bind payload <- Map.set((), "id", "1")
@@ -10887,5 +10906,209 @@ service UserService {
         assert!(rendered.contains("id: Int"));
         assert!(rendered.contains("interface UserService {"));
         assert!(rendered.contains("get_user: User -> Result<User, RpcError>"));
+    }
+}
+
+// ── v4.1.0: Directory rune + RuneUse integration tests ───────────────────────
+
+#[cfg(test)]
+mod rune_multifile_tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    /// Helper: create a temp project with a custom runes directory.
+    fn make_project_with_rune_dir(
+        main_src: &str,
+        rune_files: &[(&str, &str)], // (relative path within runes/, content)
+    ) -> (tempfile::TempDir, PathBuf) {
+        let dir = tempdir().expect("tempdir");
+        let root = dir.path().to_path_buf();
+
+        let runes_dir = root.join("runes");
+        std::fs::create_dir_all(&runes_dir).expect("create runes/");
+
+        let runes_path = runes_dir.to_string_lossy().replace('\\', "/");
+        std::fs::write(
+            root.join("fav.toml"),
+            format!(
+                "[rune]\nname = \"test\"\nversion = \"0.1.0\"\nsrc = \"src\"\n[runes]\npath = \"{}\"\n",
+                runes_path
+            ),
+        )
+        .expect("write fav.toml");
+
+        let src_dir = root.join("src");
+        std::fs::create_dir_all(&src_dir).expect("create src/");
+        let main_path = src_dir.join("main.fav");
+        std::fs::write(&main_path, main_src).expect("write main.fav");
+
+        for (rel_path, content) in rune_files {
+            let full = runes_dir.join(rel_path);
+            if let Some(parent) = full.parent() {
+                std::fs::create_dir_all(parent).expect("create rune subdir");
+            }
+            std::fs::write(&full, content).expect("write rune file");
+        }
+
+        (dir, main_path)
+    }
+
+    fn exec_project(main_path: &PathBuf, root: &Path) -> crate::value::Value {
+        let toml = FavToml::load(root).expect("load fav.toml");
+        let src_str = main_path.to_string_lossy().to_string();
+        let source_text = std::fs::read_to_string(main_path).expect("read main.fav");
+        let program = Parser::parse_str(&source_text, &src_str).expect("parse main.fav");
+
+        let merged = ast::Program {
+            namespace: program.namespace.clone(),
+            uses: program.uses.clone(),
+            items: load_all_items(&src_str, Some(&toml), Some(root)),
+        };
+        let artifact = build_artifact(&merged);
+        exec_artifact_main(&artifact, None).expect("exec")
+    }
+
+    #[test]
+    fn rune_directory_load_basic() {
+        // Entry point and internal module are both loaded
+        let (dir, main_path) = make_project_with_rune_dir(
+            r#"
+import "math"
+public fn main() -> Int !Io {
+    math.double(21)
+}
+"#,
+            &[
+                (
+                    "math/math.fav",
+                    r#"
+use helpers.{ double_impl }
+
+public fn double(n: Int) -> Int {
+    double_impl(n)
+}
+"#,
+                ),
+                (
+                    "math/helpers.fav",
+                    r#"
+public fn double_impl(n: Int) -> Int {
+    n + n
+}
+"#,
+                ),
+            ],
+        );
+        let root = dir.path().to_path_buf();
+        let result = exec_project(&main_path, &root);
+        assert_eq!(result, crate::value::Value::Int(42));
+    }
+
+    #[test]
+    fn rune_directory_wildcard_use() {
+        // `use X.*` imports all public fns from the sibling file
+        let (dir, main_path) = make_project_with_rune_dir(
+            r#"
+import "calc"
+public fn main() -> Int !Io {
+    calc.add(10, 32)
+}
+"#,
+            &[
+                (
+                    "calc/calc.fav",
+                    r#"
+use ops.*
+
+public fn add(a: Int, b: Int) -> Int {
+    add_impl(a, b)
+}
+"#,
+                ),
+                (
+                    "calc/ops.fav",
+                    r#"
+public fn add_impl(a: Int, b: Int) -> Int {
+    a + b
+}
+"#,
+                ),
+            ],
+        );
+        let root = dir.path().to_path_buf();
+        let result = exec_project(&main_path, &root);
+        assert_eq!(result, crate::value::Value::Int(42));
+    }
+
+    #[test]
+    fn rune_single_file_backward_compat() {
+        // Single-file rune (no directory) must still work unchanged
+        let (dir, main_path) = make_project_with_rune_dir(
+            r#"
+import "greet"
+public fn main() -> Int !Io {
+    greet.answer()
+}
+"#,
+            &[(
+                "greet.fav",
+                r#"
+public fn answer() -> Int {
+    42
+}
+"#,
+            )],
+        );
+        let root = dir.path().to_path_buf();
+        let result = exec_project(&main_path, &root);
+        assert_eq!(result, crate::value::Value::Int(42));
+    }
+
+    #[test]
+    fn rune_directory_takes_priority_over_single_file() {
+        // When both runes/math/ and runes/math.fav exist, directory wins
+        let (dir, main_path) = make_project_with_rune_dir(
+            r#"
+import "math"
+public fn main() -> Int !Io {
+    math.value()
+}
+"#,
+            &[
+                // directory rune returns 99
+                ("math/math.fav", "public fn value() -> Int { 99 }"),
+                // single-file rune returns 1 (should be shadowed)
+                ("math.fav", "public fn value() -> Int { 1 }"),
+            ],
+        );
+        let root = dir.path().to_path_buf();
+        let result = exec_project(&main_path, &root);
+        assert_eq!(result, crate::value::Value::Int(99));
+    }
+
+    #[test]
+    fn rune_use_missing_module_is_silent() {
+        // If the referenced sibling file doesn't exist, load_rec silently skips it
+        // (no panic — user gets an "undefined" error at type-check time instead)
+        let (dir, main_path) = make_project_with_rune_dir(
+            r#"
+import "mymod"
+public fn main() -> Int !Io {
+    mymod.greet()
+}
+"#,
+            &[(
+                "mymod/mymod.fav",
+                // references nonexistent sibling — the use is skipped, greet is defined inline
+                r#"
+use nonexistent.{ foo }
+
+public fn greet() -> Int { 7 }
+"#,
+            )],
+        );
+        let root = dir.path().to_path_buf();
+        let result = exec_project(&main_path, &root);
+        assert_eq!(result, crate::value::Value::Int(7));
     }
 }

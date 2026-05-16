@@ -1,0 +1,13 @@
+// runes/parquet/rawio.fav — Parquet raw I/O primitives (v4.1.0)
+
+public fn write(
+    path: String,
+    type_name: String,
+    rows: List<Map<String, String>>
+) -> Result<Unit, ParquetError> {
+    Parquet.write_raw(path, type_name, rows)
+}
+
+public fn read(path: String) -> Result<List<Map<String, String>>, ParquetError> {
+    Parquet.read_raw(path)
+}

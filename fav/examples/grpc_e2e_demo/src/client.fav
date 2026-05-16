@@ -1,7 +1,7 @@
 // grpc_e2e_demo — client side
 // Sends an echo request to the server started by main.fav
 
-import rune "grpc"
+import "grpc"
 
 public fn main() -> Unit !Io !Rpc {
     bind payload <- Map.set((), "field1", "hello from Favnir")

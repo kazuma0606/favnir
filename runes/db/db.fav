@@ -1,26 +1,5 @@
-// runes/db/db.fav — Favnir db rune (v3.3.0)
-// Thin wrappers over DB.* VM primitives.
+// runes/db/db.fav — Favnir db rune public API (v4.1.0)
+// Directory rune: connection management + query/execute operations.
 
-public fn connect(conn_str: String) -> Result<DbHandle, DbError> !Db {
-    DB.connect(conn_str)
-}
-
-public fn query(handle: DbHandle, sql: String) -> Result<List<Map<String, String>>, DbError> !Db {
-    DB.query_raw(handle, sql)
-}
-
-public fn query_params(handle: DbHandle, sql: String, params: List<String>) -> Result<List<Map<String, String>>, DbError> !Db {
-    DB.query_raw_params(handle, sql, params)
-}
-
-public fn execute(handle: DbHandle, sql: String) -> Result<Int, DbError> !Db {
-    DB.execute_raw(handle, sql)
-}
-
-public fn execute_params(handle: DbHandle, sql: String, params: List<String>) -> Result<Int, DbError> !Db {
-    DB.execute_raw_params(handle, sql, params)
-}
-
-public fn close(handle: DbHandle) -> Unit !Db {
-    DB.close(handle)
-}
+use connection.{ connect, close }
+use query.{ query, query_params, execute, execute_params }

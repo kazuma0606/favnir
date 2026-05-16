@@ -1,4 +1,4 @@
-import rune "grpc"
+import "grpc"
 
 type GetUserRequest = { id: Int }
 type GetUserResponse = { id: Int name: String email: String }

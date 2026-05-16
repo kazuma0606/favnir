@@ -1,4 +1,4 @@
-import rune "http"
+import "http"
 
 test "http_get_returns_result" {
     bind result <- http.get("http://127.0.0.1:9")

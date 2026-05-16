@@ -1,4 +1,4 @@
-import rune "incremental"
+import "incremental"
 
 test "checkpoint_last_returns_none_initially" {
     incremental.reset("cp_test_initial");

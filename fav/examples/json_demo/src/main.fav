@@ -1,4 +1,4 @@
-import rune "json"
+import "json"
 
 type Config = {
     host: String

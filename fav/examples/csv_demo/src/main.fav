@@ -1,4 +1,4 @@
-import rune "csv"
+import "csv"
 
 type User = {
     id: Int

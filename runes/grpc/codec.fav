@@ -1,0 +1,17 @@
+// runes/grpc/codec.fav — gRPC proto encode/decode + result helpers (v4.1.0)
+
+public fn encode(type_name: String, row: Map<String, String>) -> String {
+    Grpc.encode_raw(type_name, row)
+}
+
+public fn decode(type_name: String, encoded: String) -> Map<String, String> {
+    Grpc.decode_raw(type_name, encoded)
+}
+
+public fn ok(payload: Map<String, String>) -> Result<Map<String, String>, RpcError> {
+    Result.ok(payload)
+}
+
+public fn err(code: Int, message: String) -> Result<Map<String, String>, RpcError> {
+    Result.err(RpcError { code: code, message: message })
+}

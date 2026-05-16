@@ -1,4 +1,4 @@
-import rune "parquet"
+import "parquet"
 
 type Product = { id: Int name: String }
 

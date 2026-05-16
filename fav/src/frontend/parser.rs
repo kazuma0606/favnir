@@ -157,8 +157,10 @@ impl Parser {
         };
 
         // 2. use declarations (zero or more)
+        // Skip `use X.{ ... }` and `use X.*` patterns — those are rune-internal
+        // imports parsed as items, not namespace-path uses.
         let mut uses = Vec::new();
-        while self.peek() == &TokenKind::Use {
+        while self.peek() == &TokenKind::Use && !self.is_rune_use_pattern() {
             uses.push(self.parse_use_decl()?);
         }
 
@@ -190,6 +192,19 @@ impl Parser {
         self.expect(&TokenKind::Namespace)?;
         let parts = self.parse_module_path()?;
         Ok(parts.join("."))
+    }
+
+    /// Returns true when the upcoming tokens match `use Ident . { ...` or `use Ident . *`,
+    /// i.e. the rune-internal import syntax rather than a namespace path.
+    fn is_rune_use_pattern(&self) -> bool {
+        // tokens at pos: Use
+        // pos+1: Ident (module name)
+        // pos+2: Dot
+        // pos+3: LBrace or Star
+        let t2 = self.tokens.get(self.pos + 2).map(|t| &t.kind);
+        let t3 = self.tokens.get(self.pos + 3).map(|t| &t.kind);
+        matches!(t2, Some(TokenKind::Dot))
+            && matches!(t3, Some(TokenKind::LBrace) | Some(TokenKind::Star))
     }
 
     fn parse_use_decl(&mut self) -> Result<Vec<String>, ParseError> {
@@ -309,10 +324,32 @@ impl Parser {
                 "`namespace` must appear before any definitions",
                 self.peek_span().clone(),
             )),
-            TokenKind::Use => Err(ParseError::new(
-                "`use` must appear before any definitions",
-                self.peek_span().clone(),
-            )),
+            TokenKind::Use => {
+                // `use X.{ a, b }` or `use X.*` — rune-internal file import
+                let span = self.peek_span().clone();
+                self.advance(); // consume 'use'
+                let (module, _) = self.expect_ident()?;
+                self.expect(&TokenKind::Dot)?;
+                let names = if self.peek() == &TokenKind::Star {
+                    self.advance();
+                    RuneUseNames::Wildcard
+                } else {
+                    self.expect(&TokenKind::LBrace)?;
+                    let mut names = vec![];
+                    while !matches!(self.peek(), TokenKind::RBrace | TokenKind::Eof) {
+                        let (name, _) = self.expect_ident()?;
+                        names.push(name);
+                        if self.peek() == &TokenKind::Comma {
+                            self.advance();
+                        } else {
+                            break;
+                        }
+                    }
+                    self.expect(&TokenKind::RBrace)?;
+                    RuneUseNames::Specific(names)
+                };
+                Ok(Item::RuneUse { module, names, span })
+            }
             other => Err(ParseError::new(
                 format!(
                     "expected item (type/fn/stage/seq/interface/effect/impl/test), got {:?}",
@@ -326,7 +363,8 @@ impl Parser {
     fn parse_import_decl(&mut self, is_public: bool) -> Result<Item, ParseError> {
         let start = self.peek_span().clone();
         self.expect(&TokenKind::Import)?;
-        let is_rune = if self.peek_ident_text("rune") {
+        // `rune` keyword is accepted but no longer required — kept for backward compatibility
+        let explicit_rune = if self.peek_ident_text("rune") {
             self.advance();
             true
         } else {
@@ -344,6 +382,8 @@ impl Parser {
                 ));
             }
         };
+        // A bare name (no `/` or `.`) is a rune import: `import "db"` == `import rune "db"`
+        let is_rune = explicit_rune || (!path.contains('/') && !path.contains('.'));
         let alias = if self.peek_ident_text("as") {
             self.advance();
             let (alias, _) = self.expect_ident()?;
@@ -3060,12 +3100,33 @@ mod tests {
     }
 
     #[test]
-    fn parse_rune_import() {
+    fn parse_rune_import_bare_name() {
+        // bare name (no slash) → rune
+        let p = parse("import \"validate\"\nfn main() -> Unit { () }");
+        let Item::ImportDecl { is_rune, .. } = &p.items[0] else {
+            panic!("expected import");
+        };
+        assert!(*is_rune);
+    }
+
+    #[test]
+    fn parse_rune_import_explicit_keyword() {
+        // explicit `rune` keyword still accepted for backward compatibility
         let p = parse("import rune \"validate\"\nfn main() -> Unit { () }");
         let Item::ImportDecl { is_rune, .. } = &p.items[0] else {
             panic!("expected import");
         };
         assert!(*is_rune);
+    }
+
+    #[test]
+    fn parse_local_import_with_slash() {
+        // path with slash → local file, not a rune
+        let p = parse("import \"models/user\"\nfn main() -> Unit { () }");
+        let Item::ImportDecl { is_rune, .. } = &p.items[0] else {
+            panic!("expected import");
+        };
+        assert!(!*is_rune);
     }
 
     #[test]
@@ -3115,5 +3176,46 @@ mod tests {
             "expected Match after pipe desugar, got {:?}",
             f.body.expr
         );
+    }
+
+    // ── v4.1.0 RuneUse parser tests ───────────────────────────────────────────
+
+    #[test]
+    fn parse_rune_use_specific() {
+        let p = parse("use connection.{ connect, close }\nfn f() -> Unit { () }");
+        let Item::RuneUse { module, names, .. } = &p.items[0] else {
+            panic!("expected RuneUse, got {:?}", &p.items[0]);
+        };
+        assert_eq!(module, "connection");
+        assert_eq!(names, &RuneUseNames::Specific(vec!["connect".into(), "close".into()]));
+    }
+
+    #[test]
+    fn parse_rune_use_wildcard() {
+        let p = parse("use query.*\nfn f() -> Unit { () }");
+        let Item::RuneUse { module, names, .. } = &p.items[0] else {
+            panic!("expected RuneUse, got {:?}", &p.items[0]);
+        };
+        assert_eq!(module, "query");
+        assert_eq!(names, &RuneUseNames::Wildcard);
+    }
+
+    #[test]
+    fn parse_rune_use_single_name() {
+        let p = parse("use migration.{ up }\nfn f() -> Unit { () }");
+        let Item::RuneUse { module, names, .. } = &p.items[0] else {
+            panic!("expected RuneUse");
+        };
+        assert_eq!(module, "migration");
+        assert_eq!(names, &RuneUseNames::Specific(vec!["up".into()]));
+    }
+
+    #[test]
+    fn parse_rune_use_does_not_consume_namespace_use() {
+        // Traditional `use a.b.c` (namespace path) should still land in program.uses,
+        // NOT be parsed as Item::RuneUse.
+        let p = parse("use data.users\nfn f() -> Unit { () }");
+        assert_eq!(p.uses, vec![vec!["data".to_string(), "users".to_string()]]);
+        assert!(p.items.iter().all(|i| !matches!(i, Item::RuneUse { .. })));
     }
 }

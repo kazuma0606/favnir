@@ -56,20 +56,25 @@ impl Formatter {
         match item {
             Item::NamespaceDecl(ns, _) => format!("namespace {}", ns),
             Item::UseDecl(path, _) => format!("use {}", path.join(".")),
+            Item::RuneUse { module, names, .. } => {
+                let ns = match names {
+                    RuneUseNames::Specific(ns) => format!("{{ {} }}", ns.join(", ")),
+                    RuneUseNames::Wildcard => "*".to_string(),
+                };
+                format!("use {}.{}", module, ns)
+            }
             Item::ImportDecl {
                 path,
                 alias,
-                is_rune,
                 is_public,
                 ..
             } => {
                 let public = if *is_public { "public " } else { "" };
-                let rune = if *is_rune { "rune " } else { "" };
                 let alias = alias
                     .as_ref()
                     .map(|alias| format!(" as {}", alias))
                     .unwrap_or_default();
-                format!(r#"{public}import {rune}"{path}"{alias}"#)
+                format!(r#"{public}import "{path}"{alias}"#)
             }
             Item::EffectDef(ed) => self.effect_def(ed),
             Item::TypeDef(td) => self.type_def(td),

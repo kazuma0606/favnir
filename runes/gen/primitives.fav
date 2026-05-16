@@ -1,0 +1,26 @@
+// runes/gen/primitives.fav — Primitive value generators (v4.1.0)
+
+public fn int_val(min: Int, max: Int) -> Int !Random {
+    Random.int(min, max)
+}
+
+public fn float_val() -> Float !Random {
+    Random.float()
+}
+
+public fn bool_val() -> Bool !Random {
+    Random.int(0, 1) == 1
+}
+
+public fn string_val(len: Int) -> String !Random {
+    Gen.string_val(len)
+}
+
+public fn choice(items: List<String>) -> Option<String> !Random {
+    if List.length(items) == 0 {
+        Option.none()
+    } else {
+        bind idx <- Random.int(0, List.length(items) - 1)
+        List.first(List.drop(items, idx))
+    }
+}

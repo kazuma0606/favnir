@@ -1,4 +1,4 @@
-import rune "http"
+import "http"
 
 public fn main() -> Unit !Io !Network {
     bind result <- http.get("http://127.0.0.1:9")

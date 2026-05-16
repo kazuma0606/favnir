@@ -1,14 +1,7 @@
-public fn write(
-    path: String,
-    type_name: String,
-    rows: List<Map<String, String>>
-) -> Result<Unit, ParquetError> {
-    Parquet.write_raw(path, type_name, rows)
-}
+// runes/parquet/parquet.fav — Favnir parquet rune public API (v4.1.0)
+// Directory rune: raw I/O primitives + higher-level operations.
 
-public fn read(path: String) -> Result<List<Map<String, String>>, ParquetError> {
-    Parquet.read_raw(path)
-}
+use rawio.{ write, read }
 
 public fn append(
     path: String,

@@ -173,6 +173,7 @@ pub fn compile_program(program: &Program) -> IRProgram {
         "Random",
         "Stream",
         "Gen",
+        "Validate",
         "assert",
         "assert_eq",
         "assert_ne",
@@ -221,6 +222,7 @@ pub fn compile_program(program: &Program) -> IRProgram {
         "RpcError",
         "RpcRequest",
         "ParquetError",
+        "ValidationError",
     ] {
         if !ctx.globals.contains_key(*ty_name) {
             let idx = globals.len() as u16;
@@ -402,6 +404,7 @@ pub fn compile_program(program: &Program) -> IRProgram {
         "Random",
         "Stream",
         "Gen",
+        "Validate",
         // test assertion builtins (callable without namespace prefix)
         "assert",
         "assert_eq",

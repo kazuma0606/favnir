@@ -34,6 +34,12 @@ pub struct CheckpointConfig {
 }
 
 #[derive(Debug, Clone)]
+pub struct DatabaseConfig {
+    pub url: String,
+    pub migrations: Option<String>,
+}
+
+#[derive(Debug, Clone)]
 pub struct FavToml {
     pub name: String,
     pub version: String,
@@ -45,6 +51,8 @@ pub struct FavToml {
     pub dependencies: Vec<DependencySpec>,
     /// Optional checkpoint backend configuration.
     pub checkpoint: Option<CheckpointConfig>,
+    /// Optional database configuration.
+    pub database: Option<DatabaseConfig>,
 }
 
 impl FavToml {
@@ -87,6 +95,7 @@ fn parse_fav_toml(content: &str) -> FavToml {
     let mut runes_path = None;
     let mut dependencies = Vec::new();
     let mut checkpoint = None;
+    let mut database = None;
     let mut section = "";
 
     for line in content.lines() {
@@ -104,6 +113,10 @@ fn parse_fav_toml(content: &str) -> FavToml {
         }
         if trimmed == "[checkpoint]" {
             section = "checkpoint";
+            continue;
+        }
+        if trimmed == "[database]" {
+            section = "database";
             continue;
         }
         if trimmed == "[runes]" {
@@ -152,6 +165,20 @@ fn parse_fav_toml(content: &str) -> FavToml {
                 }
                 checkpoint = Some(current);
             }
+            "database" => {
+                let mut current = database.take().unwrap_or(DatabaseConfig {
+                    url: String::new(),
+                    migrations: None,
+                });
+                if let Some((key, val)) = parse_kv(trimmed) {
+                    match key {
+                        "url" => current.url = val.to_string(),
+                        "migrations" => current.migrations = Some(val.to_string()),
+                        _ => {}
+                    }
+                }
+                database = Some(current);
+            }
             _ => {}
         }
     }
@@ -163,6 +190,7 @@ fn parse_fav_toml(content: &str) -> FavToml {
         runes_path,
         dependencies,
         checkpoint,
+        database,
     }
 }
 

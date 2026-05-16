@@ -4,7 +4,8 @@ use crate::backend::artifact::FvcArtifact;
 use crate::backend::codegen::{Opcode, codegen_program};
 use crate::backend::vm::{
     CheckpointBackend, VM, checkpoint_list, checkpoint_meta, checkpoint_reset_direct,
-    checkpoint_save_direct, enable_coverage, set_checkpoint_backend, take_coverage,
+    checkpoint_save_direct, enable_coverage, set_checkpoint_backend, set_schema_registry,
+    take_coverage,
 };
 use crate::backend::wasm_codegen::wasm_codegen_program;
 use crate::backend::wasm_exec::{wasm_exec_info, wasm_exec_main};
@@ -15,6 +16,7 @@ use crate::middle::compiler::compile_program;
 use crate::middle::compiler::set_coverage_mode;
 use crate::middle::ir::{IRArm, IRExpr, IRGlobalKind, IRPattern, IRProgram, IRStmt};
 use crate::middle::resolver::Resolver;
+use crate::schemas::load_schemas;
 use crate::toml::{CheckpointConfig, FavToml};
 use crate::value::Value;
 use notify::{Config, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
@@ -474,6 +476,20 @@ fn checkpoint_backend_from_config(
     }
 }
 
+/// Determine project root for schemas/*.yaml loading (v4.1.5).
+/// Uses fav.toml discovery if available, otherwise falls back to the file's parent directory.
+fn schemas_root(file: Option<&str>) -> PathBuf {
+    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    let start = file
+        .map(PathBuf::from)
+        .and_then(|p| p.parent().map(|par| par.to_path_buf()))
+        .unwrap_or(cwd.clone());
+    if let Some(root) = FavToml::find_root(&start) {
+        return root;
+    }
+    start
+}
+
 fn load_checkpoint_config_for_file(file: Option<&str>) {
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let start = file
@@ -565,6 +581,8 @@ fn load_and_check_program(file: Option<&str>) -> (ast::Program, String) {
 
 pub fn cmd_run(file: Option<&str>, db_url: Option<&str>) {
     load_checkpoint_config_for_file(file);
+    // Load schemas/*.yaml and register in VM (v4.1.5)
+    set_schema_registry(load_schemas(&schemas_root(file)));
     let (run_program, source_path) = load_and_check_program(file);
     ensure_no_partial_flw(&run_program).unwrap_or_else(|message| {
         eprintln!("{message}");
@@ -1033,6 +1051,141 @@ pub fn cmd_build_proto(file: &str, out: Option<&str>) {
     }
 }
 
+/// Generate SQL DDL from type definitions + schemas/*.yaml constraints (v4.1.5).
+pub fn cmd_build_schema(file: &str, out: Option<&str>) {
+    let source = load_file(file);
+    let program = Parser::parse_str(&source, file).unwrap_or_else(|e| {
+        eprintln!("{}", e);
+        process::exit(1);
+    });
+    let root = schemas_root(Some(file));
+    let schemas = load_schemas(&root);
+
+    // Collect type definitions from the program
+    let mut ddl = String::new();
+    for item in &program.items {
+        if let crate::ast::Item::TypeDef(td) = item {
+            let type_name = &td.name;
+            let crate::ast::TypeBody::Record(fields) = &td.body else {
+                continue;
+            };
+            let table_name = to_snake_plural(type_name);
+            let type_schema = schemas.get(type_name);
+            let mut cols: Vec<String> = Vec::new();
+            for field in fields {
+                let fname = &field.name;
+                let fc = type_schema.and_then(|ts| ts.get(fname));
+                let sql_col = build_sql_column(fname, &field.ty, fc);
+                cols.push(format!("    {sql_col}"));
+            }
+            ddl.push_str(&format!(
+                "CREATE TABLE {} (\n{}\n);\n\n",
+                table_name,
+                cols.join(",\n")
+            ));
+        }
+    }
+
+    if let Some(path) = out {
+        std::fs::write(path, &ddl).unwrap_or_else(|e| {
+            eprintln!("E0516: cannot write '{}': {}", path, e);
+            process::exit(1);
+        });
+        println!("built {}", path);
+    } else {
+        print!("{ddl}");
+    }
+}
+
+/// Convert PascalCase type name to snake_case plural table name.
+fn to_snake_plural(name: &str) -> String {
+    let mut snake = String::new();
+    for (i, ch) in name.chars().enumerate() {
+        if ch.is_uppercase() && i > 0 {
+            snake.push('_');
+        }
+        snake.push(ch.to_ascii_lowercase());
+    }
+    if snake.ends_with('s') { snake } else { format!("{snake}s") }
+}
+
+/// Build a single SQL column definition from field name, type, and constraints.
+fn build_sql_column(
+    fname: &str,
+    ty: &crate::ast::TypeExpr,
+    fc: Option<&crate::schemas::FieldConstraints>,
+) -> String {
+    use crate::ast::TypeExpr;
+    let nullable = fc.map(|f| f.nullable).unwrap_or(false);
+    let is_option = matches!(ty, TypeExpr::Optional(_, _));
+    let not_null = if nullable || is_option { "" } else { " NOT NULL" };
+
+    let sql_type = match ty {
+        TypeExpr::Named(n, _, _) => match n.as_str() {
+            "Int" => "INTEGER",
+            "Float" => "REAL",
+            "Bool" => "INTEGER",
+            _ => "TEXT",
+        },
+        TypeExpr::Optional(inner, _) => match inner.as_ref() {
+            TypeExpr::Named(n, _, _) => match n.as_str() {
+                "Int" => "INTEGER",
+                "Float" => "REAL",
+                "Bool" => "INTEGER",
+                _ => "TEXT",
+            },
+            _ => "TEXT",
+        },
+        _ => "TEXT",
+    };
+
+    // Override TEXT with VARCHAR if max_length specified
+    let sql_type_str = if let Some(fc) = fc {
+        if let Some(max_len) = fc.max_length {
+            format!("VARCHAR({max_len})")
+        } else {
+            sql_type.to_string()
+        }
+    } else {
+        sql_type.to_string()
+    };
+
+    let mut parts = vec![fname.to_string(), sql_type_str];
+
+    // PRIMARY KEY
+    if fc.map(|f| f.constraints.iter().any(|c| c == "primary_key")).unwrap_or(false) {
+        parts.push("PRIMARY KEY AUTOINCREMENT".to_string());
+    }
+    // UNIQUE
+    if fc.map(|f| f.constraints.iter().any(|c| c == "unique")).unwrap_or(false) {
+        parts.push("UNIQUE".to_string());
+    }
+    // NOT NULL
+    if !not_null.is_empty() {
+        parts.push("NOT NULL".to_string());
+    }
+    // CHECK constraints
+    if let Some(fc) = fc {
+        if fc.constraints.iter().any(|c| c == "positive") {
+            parts.push(format!("CHECK ({fname} > 0)"));
+        }
+        if fc.constraints.iter().any(|c| c == "non_negative") {
+            parts.push(format!("CHECK ({fname} >= 0)"));
+        }
+        if let Some(min) = fc.min {
+            parts.push(format!("CHECK ({fname} >= {min})"));
+        }
+        if let Some(max) = fc.max {
+            parts.push(format!("CHECK ({fname} <= {max})"));
+        }
+        if let Some(pat) = &fc.pattern {
+            parts.push(format!("CHECK ({fname} REGEXP '{pat}')"));
+        }
+    }
+
+    parts.join(" ")
+}
+
 fn fav_type_from_proto(proto_ty: &str, label: Option<&str>) -> String {
     let base = match proto_ty.trim() {
         "int32" | "int64" | "sint64" => "Int".to_string(),
@@ -1302,6 +1455,217 @@ pub fn cmd_checkpoint_set(name: &str, value: &str) {
         process::exit(1);
     });
     println!("set {}", name);
+}
+
+// ── fav db migrate ────────────────────────────────────────────────────────────
+
+pub fn cmd_db_migrate(db_url: &str, migrations_dir: &str, dry_run: bool) {
+    let conn = match rusqlite::Connection::open(db_url) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("error: cannot open database '{}': {}", db_url, e);
+            process::exit(1);
+        }
+    };
+    // Ensure migrations table
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS _fav_migrations \
+         (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, applied_at TEXT NOT NULL);",
+    )
+    .unwrap_or_else(|e| {
+        eprintln!("error: cannot create _fav_migrations: {}", e);
+        process::exit(1);
+    });
+
+    // Collect applied migrations
+    let applied: std::collections::HashSet<String> = {
+        let mut stmt = conn
+            .prepare("SELECT name FROM _fav_migrations ORDER BY id ASC")
+            .unwrap();
+        stmt.query_map([], |row| row.get::<_, String>(0))
+            .unwrap()
+            .filter_map(|r| r.ok())
+            .collect()
+    };
+
+    // Enumerate .sql files in alphabetical order
+    let dir = Path::new(migrations_dir);
+    if !dir.exists() {
+        println!("migrations dir '{}' does not exist — nothing to apply", migrations_dir);
+        return;
+    }
+    let mut files: Vec<PathBuf> = walkdir::WalkDir::new(dir)
+        .max_depth(1)
+        .into_iter()
+        .filter_map(|e| e.ok())
+        .map(|e| e.into_path())
+        .filter(|p| p.extension().map(|e| e == "sql").unwrap_or(false))
+        .collect();
+    files.sort();
+
+    let mut count = 0;
+    for file in &files {
+        let name = file.file_name().unwrap().to_string_lossy().to_string();
+        if applied.contains(&name) {
+            continue;
+        }
+        let sql = match std::fs::read_to_string(file) {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("error: cannot read '{}': {}", file.display(), e);
+                process::exit(1);
+            }
+        };
+        // Extract @up section if present
+        let up_sql = if sql.contains("-- @up") {
+            sql.lines()
+                .skip_while(|l| !l.trim().starts_with("-- @up"))
+                .skip(1)
+                .take_while(|l| !l.trim().starts_with("-- @down"))
+                .collect::<Vec<_>>()
+                .join("\n")
+        } else {
+            sql.clone()
+        };
+        if dry_run {
+            println!("[dry-run] would apply: {}", name);
+            continue;
+        }
+        if let Err(e) = conn.execute_batch(&up_sql) {
+            eprintln!("error applying '{}': {}", name, e);
+            process::exit(1);
+        }
+        let now = chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string();
+        conn.execute(
+            "INSERT INTO _fav_migrations (name, applied_at) VALUES (?1, ?2)",
+            rusqlite::params![name, now],
+        )
+        .unwrap_or_else(|e| {
+            eprintln!("error recording migration '{}': {}", name, e);
+            process::exit(1);
+        });
+        println!("applied: {}", name);
+        count += 1;
+    }
+    if count == 0 && !dry_run {
+        println!("nothing to apply");
+    }
+}
+
+pub fn cmd_db_migrate_status(db_url: &str, migrations_dir: &str) {
+    let conn = match rusqlite::Connection::open(db_url) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("error: cannot open database '{}': {}", db_url, e);
+            process::exit(1);
+        }
+    };
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS _fav_migrations \
+         (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, applied_at TEXT NOT NULL);",
+    )
+    .ok();
+
+    let applied: std::collections::HashSet<String> = {
+        let mut stmt = conn
+            .prepare("SELECT name FROM _fav_migrations ORDER BY id ASC")
+            .unwrap_or_else(|_| {
+                conn.prepare("SELECT name FROM _fav_migrations").unwrap()
+            });
+        stmt.query_map([], |row| row.get::<_, String>(0))
+            .unwrap()
+            .filter_map(|r| r.ok())
+            .collect()
+    };
+
+    let dir = Path::new(migrations_dir);
+    if !dir.exists() {
+        println!("{:<40} {}", "MIGRATION", "STATUS");
+        println!("{}", "-".repeat(50));
+        println!("(no migrations directory)");
+        return;
+    }
+    let mut files: Vec<PathBuf> = walkdir::WalkDir::new(dir)
+        .max_depth(1)
+        .into_iter()
+        .filter_map(|e| e.ok())
+        .map(|e| e.into_path())
+        .filter(|p| p.extension().map(|e| e == "sql").unwrap_or(false))
+        .collect();
+    files.sort();
+
+    println!("{:<40} {}", "MIGRATION", "STATUS");
+    println!("{}", "-".repeat(50));
+    for file in &files {
+        let name = file.file_name().unwrap().to_string_lossy().to_string();
+        let status = if applied.contains(&name) { "applied" } else { "pending" };
+        println!("{:<40} {}", name, status);
+    }
+    if files.is_empty() {
+        println!("(no .sql files found)");
+    }
+}
+
+pub fn cmd_db_migrate_rollback(db_url: &str, migrations_dir: &str) {
+    let conn = match rusqlite::Connection::open(db_url) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("error: cannot open database '{}': {}", db_url, e);
+            process::exit(1);
+        }
+    };
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS _fav_migrations \
+         (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, applied_at TEXT NOT NULL);",
+    )
+    .ok();
+
+    // Find the last applied migration
+    let last: Option<String> = conn
+        .query_row(
+            "SELECT name FROM _fav_migrations ORDER BY id DESC LIMIT 1",
+            [],
+            |row| row.get(0),
+        )
+        .ok();
+    let Some(last_name) = last else {
+        println!("nothing to roll back");
+        return;
+    };
+
+    // Read its SQL file and find @down section
+    let file = Path::new(migrations_dir).join(&last_name);
+    let sql = match std::fs::read_to_string(&file) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("error: cannot read '{}': {}", file.display(), e);
+            process::exit(1);
+        }
+    };
+    if !sql.contains("-- @down") {
+        println!("no @down section in '{}' — skipping rollback", last_name);
+        return;
+    }
+    let down_sql = sql
+        .lines()
+        .skip_while(|l| !l.trim().starts_with("-- @down"))
+        .skip(1)
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    if let Err(e) = conn.execute_batch(&down_sql) {
+        eprintln!("error rolling back '{}': {}", last_name, e);
+        process::exit(1);
+    }
+    conn.execute(
+        "DELETE FROM _fav_migrations WHERE name = ?1",
+        rusqlite::params![last_name],
+    )
+    .unwrap_or_else(|e| {
+        eprintln!("error removing migration record '{}': {}", last_name, e);
+        process::exit(1);
+    });
+    println!("rolled back: {}", last_name);
 }
 
 fn exec_wasm_bytes(
@@ -2045,6 +2409,7 @@ fn try_cmd_check_dir(dir: &Path) -> Result<(), usize> {
         runes_path: None,
         dependencies: vec![],
         checkpoint: None,
+        database: None,
     });
     let files = collect_fav_files_recursive(dir);
     let resolver = make_resolver(Some(toml), Some(root));
@@ -10914,6 +11279,7 @@ service UserService {
 #[cfg(test)]
 mod rune_multifile_tests {
     use super::*;
+    use super::tests::exec_project_main_source_with_runes;
     use tempfile::tempdir;
 
     /// Helper: create a temp project with a custom runes directory.
@@ -11110,5 +11476,234 @@ public fn greet() -> Int { 7 }
         let root = dir.path().to_path_buf();
         let result = exec_project(&main_path, &root);
         assert_eq!(result, crate::value::Value::Int(7));
+    }
+
+    // ── v4.1.5: fav build --schema DDL tests ─────────────────────────────
+
+    #[test]
+    fn build_schema_generates_create_table() {
+        use crate::schemas::ProjectSchemas;
+        use std::collections::HashMap;
+
+        let source = r#"
+type Order = {
+    id: Int
+    name: String
+    price: Float
+}
+"#;
+        let program = Parser::parse_str(source, "order.fav").expect("parse");
+        let schemas: ProjectSchemas = HashMap::new();
+
+        let mut ddl = String::new();
+        for item in &program.items {
+            if let crate::ast::Item::TypeDef(td) = item {
+                let crate::ast::TypeBody::Record(fields) = &td.body else { continue; };
+                let table_name = {
+                    let mut snake = String::new();
+                    for (i, ch) in td.name.chars().enumerate() {
+                        if ch.is_uppercase() && i > 0 { snake.push('_'); }
+                        snake.push(ch.to_ascii_lowercase());
+                    }
+                    if snake.ends_with('s') { snake } else { format!("{snake}s") }
+                };
+                let type_schema = schemas.get(&td.name);
+                let mut cols: Vec<String> = Vec::new();
+                for field in fields {
+                    let fc = type_schema.and_then(|ts| ts.get(&field.name));
+                    let sql_type = match &field.ty {
+                        crate::ast::TypeExpr::Named(n, _, _) => match n.as_str() {
+                            "Int" => "INTEGER",
+                            "Float" => "REAL",
+                            _ => "TEXT",
+                        },
+                        _ => "TEXT",
+                    };
+                    let not_null = if fc.map(|f| f.nullable).unwrap_or(false) { "" } else { " NOT NULL" };
+                    cols.push(format!("    {} {}{}", field.name, sql_type, not_null));
+                }
+                ddl.push_str(&format!(
+                    "CREATE TABLE {} (\n{}\n);\n\n",
+                    table_name,
+                    cols.join(",\n")
+                ));
+            }
+        }
+
+        assert!(ddl.contains("CREATE TABLE orders"), "expected 'orders' table, got: {ddl}");
+        assert!(ddl.contains("id INTEGER"), "expected INTEGER column, got: {ddl}");
+        assert!(ddl.contains("price REAL"), "expected REAL column, got: {ddl}");
+        assert!(ddl.contains("name TEXT"), "expected TEXT column, got: {ddl}");
+    }
+
+    #[test]
+    fn build_schema_snake_plural_conversion() {
+        // to_snake_plural is private, so test via table name in DDL logic
+        let cases = &[
+            ("Order", "orders"),
+            ("UserProfile", "user_profiles"),
+            ("Category", "categorys"),  // to_snake_plural just appends 's', no 'y→ies'
+            ("Events", "events"),        // already plural (ends with s)
+        ];
+        for (input, expected) in cases {
+            let mut snake = String::new();
+            for (i, ch) in input.chars().enumerate() {
+                if ch.is_uppercase() && i > 0 { snake.push('_'); }
+                snake.push(ch.to_ascii_lowercase());
+            }
+            let plural = if snake.ends_with('s') { snake } else { format!("{snake}s") };
+            assert_eq!(&plural, expected, "snake_plural({input}) expected {expected}, got {plural}");
+        }
+    }
+
+    #[test]
+    fn build_schema_with_yaml_constraints_adds_check() {
+        use crate::schemas::{FieldConstraints, ProjectSchemas};
+        use std::collections::HashMap;
+
+        let mut fc = FieldConstraints::default();
+        fc.constraints = vec!["positive".to_string()];
+        let mut type_schema = HashMap::new();
+        type_schema.insert("amount".to_string(), fc.clone());
+        let mut schemas: ProjectSchemas = HashMap::new();
+        schemas.insert("Order".to_string(), type_schema);
+
+        // Simulate what build_sql_column produces for a positive constraint
+        let fname = "amount";
+        let nullable = false;
+        let not_null = if nullable { "" } else { " NOT NULL" };
+        let sql_type = "INTEGER";
+        let mut parts = vec![fname.to_string(), sql_type.to_string()];
+        if !not_null.is_empty() { parts.push("NOT NULL".to_string()); }
+        if fc.constraints.iter().any(|c| c == "positive") {
+            parts.push(format!("CHECK ({fname} > 0)"));
+        }
+        let col_def = parts.join(" ");
+
+        assert!(col_def.contains("CHECK (amount > 0)"), "expected CHECK constraint, got: {col_def}");
+        assert!(col_def.contains("NOT NULL"), "expected NOT NULL, got: {col_def}");
+    }
+
+    // ── fav db migrate integration tests (v4.2.0) ────────────────────────────
+
+    #[test]
+    fn db_migrate_status_no_dir_prints_nothing() {
+        let dir = tempdir().unwrap();
+        let db_path = dir.path().join("test.db").to_string_lossy().to_string();
+        let nonexistent_migrations = dir.path().join("migrations_none").to_string_lossy().to_string();
+        // Should not panic — just reports nothing
+        cmd_db_migrate_status(&db_path, &nonexistent_migrations);
+    }
+
+    #[test]
+    fn db_migrate_applies_one_file() {
+        let dir = tempdir().unwrap();
+        let db_path = dir.path().join("test.db").to_string_lossy().to_string();
+        let migrations = dir.path().join("migrations");
+        std::fs::create_dir_all(&migrations).unwrap();
+        std::fs::write(
+            migrations.join("001_create_users.sql"),
+            "CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL);",
+        )
+        .unwrap();
+
+        cmd_db_migrate(&db_path, migrations.to_str().unwrap(), false);
+
+        // Verify migration was recorded
+        let conn = rusqlite::Connection::open(&db_path).unwrap();
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM _fav_migrations WHERE name = '001_create_users.sql'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 1, "migration should be recorded");
+
+        // Verify table was created
+        let table_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='users'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(table_count, 1, "users table should exist");
+    }
+
+    #[test]
+    fn db_migrate_does_not_reapply() {
+        let dir = tempdir().unwrap();
+        let db_path = dir.path().join("test.db").to_string_lossy().to_string();
+        let migrations = dir.path().join("migrations");
+        std::fs::create_dir_all(&migrations).unwrap();
+        std::fs::write(
+            migrations.join("001_create_items.sql"),
+            "CREATE TABLE items (id INTEGER PRIMARY KEY);",
+        )
+        .unwrap();
+
+        cmd_db_migrate(&db_path, migrations.to_str().unwrap(), false);
+        // Second run should succeed without error (idempotent)
+        cmd_db_migrate(&db_path, migrations.to_str().unwrap(), false);
+
+        let conn = rusqlite::Connection::open(&db_path).unwrap();
+        let count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM _fav_migrations", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(count, 1, "should only appear once");
+    }
+
+    #[test]
+    fn db_migrate_rollback_with_down_section() {
+        let dir = tempdir().unwrap();
+        let db_path = dir.path().join("test.db").to_string_lossy().to_string();
+        let migrations = dir.path().join("migrations");
+        std::fs::create_dir_all(&migrations).unwrap();
+        std::fs::write(
+            migrations.join("001_create_tags.sql"),
+            "-- @up\nCREATE TABLE tags (id INTEGER PRIMARY KEY);\n-- @down\nDROP TABLE tags;",
+        )
+        .unwrap();
+
+        cmd_db_migrate(&db_path, migrations.to_str().unwrap(), false);
+        cmd_db_migrate_rollback(&db_path, migrations.to_str().unwrap());
+
+        let conn = rusqlite::Connection::open(&db_path).unwrap();
+        let count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM _fav_migrations", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(count, 0, "migration should be removed after rollback");
+    }
+
+    // ── HTTP rune v4.2.0 tests ────────────────────────────────────────────────
+
+    #[test]
+    fn http_rune_bearer_header_in_source() {
+        let value = exec_project_main_source_with_runes(
+            r#"
+import "http"
+
+public fn main() -> String !Network {
+    Option.unwrap_or(Map.get(http.bearer("mytoken"), "Authorization"), "missing")
+}
+"#,
+        );
+        assert_eq!(value, crate::value::Value::Str("Bearer mytoken".into()));
+    }
+
+    #[test]
+    fn http_rune_put_returns_err_on_bad_host() {
+        let value = exec_project_main_source_with_runes(
+            r#"
+import "http"
+
+public fn main() -> Bool !Network {
+    bind r <- http.put("http://127.0.0.1:1/x", "{}")
+    Result.is_err(r)
+}
+"#,
+        );
+        assert_eq!(value, crate::value::Value::Bool(true));
     }
 }

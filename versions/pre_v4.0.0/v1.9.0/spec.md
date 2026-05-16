@@ -441,16 +441,16 @@ driver.rs: exec_bench_case が Vec<f64> を返すよう変更
 
 ## 10. 完了条件（Done Definition）
 
-- [ ] `for x in List.range(1, 5) { IO.println_int(x) }` が `fav run` で動く
-- [ ] `user.age ?? 0` が型チェックを通り正しい値を返す
-- [ ] `stage F: Int -> Int = |x| x * 2` が `trf` と同等に動く
-- [ ] `seq P { F }` が `flw` と同等に動く
-- [ ] `fav test --coverage --coverage-report ./out` で `out/index.html` が生成される
-- [ ] `fav bench math.bench.fav` が mean/min/max/stddev/p50 を表示する
-- [ ] `fav bench math.bench.fav --json` が JSON を出力する
-- [ ] v1.8.0 の全テスト（509）が引き続き通る
-- [ ] `cargo build` で警告ゼロ
-- [ ] `Cargo.toml` バージョンが `"1.9.0"`
+- [x] `for x in List.range(1, 5) { IO.println_int(x) }` が `fav run` で動く
+- [x] `user.age ?? 0` が型チェックを通り正しい値を返す
+- [x] `stage F: Int -> Int = |x| x * 2` が `trf` と同等に動く
+- [x] `seq P { F }` が `flw` と同等に動く
+- [x] `fav test --coverage --coverage-report ./out` で `out/index.html` が生成される
+- [x] `fav bench math.bench.fav` が mean/min/max/stddev/p50 を表示する
+- [x] `fav bench math.bench.fav --json` が JSON を出力する
+- [x] v1.8.0 の全テスト（509）が引き続き通る
+- [x] `cargo build` で警告ゼロ
+- [x] `Cargo.toml` バージョンが `"1.9.0"`
 
 ---
 

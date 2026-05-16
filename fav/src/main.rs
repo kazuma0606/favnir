@@ -9,23 +9,25 @@ mod lint;
 mod lock;
 mod lsp;
 mod middle;
+mod schemas;
 mod std_states;
 mod toml;
 mod value;
 
 use driver::{
-    cmd_bench, cmd_build, cmd_bundle, cmd_check, cmd_check_with_sample, cmd_checkpoint_list,
-    cmd_checkpoint_reset, cmd_checkpoint_set, cmd_checkpoint_show, cmd_docs, cmd_exec, cmd_explain,
-    cmd_explain_compiler, cmd_explain_diff, cmd_explain_error, cmd_explain_error_list, cmd_fmt,
-    cmd_graph, cmd_infer, cmd_infer_proto, cmd_install, cmd_lint, cmd_migrate, cmd_new,
-    cmd_publish, cmd_run, cmd_test, cmd_watch,
+    cmd_bench, cmd_build, cmd_build_schema, cmd_bundle, cmd_check, cmd_check_with_sample,
+    cmd_checkpoint_list, cmd_checkpoint_reset, cmd_checkpoint_set, cmd_checkpoint_show,
+    cmd_db_migrate, cmd_db_migrate_rollback, cmd_db_migrate_status, cmd_docs, cmd_exec,
+    cmd_explain, cmd_explain_compiler, cmd_explain_diff, cmd_explain_error,
+    cmd_explain_error_list, cmd_fmt, cmd_graph, cmd_infer, cmd_infer_proto, cmd_install, cmd_lint,
+    cmd_migrate, cmd_new, cmd_publish, cmd_run, cmd_test, cmd_watch,
 };
 use std::process;
 
 // 笏笏 help text (4-6) 笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏
 
 const HELP: &str = "\
-fav - Favnir language toolchain v4.0.0
+fav - Favnir language toolchain v4.2.0
 
 USAGE:
     fav <COMMAND> [OPTIONS] [FILE]
@@ -217,6 +219,10 @@ fn main_impl() {
                         target = Some("proto");
                         i += 1;
                     }
+                    "--schema" => {
+                        target = Some("schema");
+                        i += 1;
+                    }
                     "-o" => {
                         out = Some(args.get(i + 1).unwrap_or_else(|| {
                             eprintln!("error: -o requires a file path");
@@ -237,7 +243,15 @@ fn main_impl() {
                     }
                 }
             }
-            cmd_build(file, out, target);
+            if matches!(target, Some("schema")) {
+                let f = file.unwrap_or_else(|| {
+                    eprintln!("error: build --schema requires a source file");
+                    process::exit(1);
+                });
+                cmd_build_schema(f, out);
+            } else {
+                cmd_build(file, out, target);
+            }
         }
 
         Some("exec") => {
@@ -459,6 +473,28 @@ fn main_impl() {
             }
             _ => {
                 eprintln!("error: checkpoint requires one of list|show|reset|set");
+                process::exit(1);
+            }
+        },
+
+        Some("db") => match args.get(2).map(|s| s.as_str()) {
+            Some("migrate") => {
+                let db_url = args.get(3).map(|s| s.as_str()).unwrap_or_else(|| {
+                    eprintln!("error: db migrate requires <db-url>");
+                    process::exit(1);
+                });
+                let migrations_dir = args.get(4).map(|s| s.as_str()).unwrap_or("migrations");
+                if args.iter().any(|a| a == "--status") {
+                    cmd_db_migrate_status(db_url, migrations_dir);
+                } else if args.iter().any(|a| a == "--rollback") {
+                    cmd_db_migrate_rollback(db_url, migrations_dir);
+                } else {
+                    let dry_run = args.iter().any(|a| a == "--dry-run");
+                    cmd_db_migrate(db_url, migrations_dir, dry_run);
+                }
+            }
+            _ => {
+                eprintln!("error: db requires 'migrate'");
                 process::exit(1);
             }
         },
@@ -990,7 +1026,7 @@ fn print_welcome() {
                 println!();
             }
         }
-        println!("Favnir v3.9.0 - The pipeline-first language");
+        println!("Favnir v4.2.0 - The pipeline-first language");
         println!();
     }
     print!("{}", HELP);

@@ -1,0 +1,8 @@
+amount:
+  constraints: [positive]
+  min: 0.01
+customer_name:
+  max_length: 64
+  min_length: 1
+status:
+  pattern: "^(pending|shipped|delivered)$"

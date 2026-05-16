@@ -1,5 +1,8 @@
-// runes/http/http.fav — Favnir http rune public API (v4.1.0)
-// Directory rune: HTTP request helpers + response builders.
+// runes/http/http.fav — Favnir http rune public API (v4.2.0)
+// Directory rune: HTTP request helpers + response builders + extended client + retry + auth.
 
 use request.{ get, post, post_json, get_body }
 use response.{ ok, error_response }
+use client.{ put, delete, patch, get_with_headers, post_with_headers }
+use retry.{ with_retry, retry_get, retry_post }
+use auth.{ bearer, basic, api_key }

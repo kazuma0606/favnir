@@ -413,12 +413,12 @@ v2.0.0 で `IMPL_REGISTRY` を削除し、`InterfaceRegistry` に一本化する
 
 ## 11. 完了条件（Done Definition）
 
-- [ ] `interface Show { show: Self -> String }` と `impl Show for Int { show = |x| ... }` が動く
-- [ ] `impl Show, Eq for UserRow`（本体なし）が全フィールドから自動合成される
-- [ ] `type UserRow with Show, Eq { ... }` が上記のシンタックスシュガーとして機能する
-- [ ] `fn sort<T>(items: List<T>, ord: Ord<T>) -> List<T>` の呼び出しで未実装時に E043 が出る
-- [ ] `interface Gen { gen: Int? -> Self }` が定義され、`Int/Float/Bool/String` の impl が内部登録される
-- [ ] `interface Field : Ring { divide: ... }` が定義され、`Float` の impl が内部登録される
-- [ ] `cap` で書かれた既存コードに W010 警告が出るが、動作は継続する
-- [ ] v1.0.0 の 321 テストが全て通る
-- [ ] 新規 interface テストが全て通る
+- [x] `interface Show { show: Self -> String }` と `impl Show for Int { show = |x| ... }` が動く
+- [x] `impl Show, Eq for UserRow`（本体なし）が全フィールドから自動合成される
+- [x] `type UserRow with Show, Eq { ... }` が上記のシンタックスシュガーとして機能する
+- [x] `fn sort<T>(items: List<T>, ord: Ord<T>) -> List<T>` の呼び出しで未実装時に E043 が出る
+- [x] `interface Gen { gen: Int? -> Self }` が定義され、`Int/Float/Bool/String` の impl が内部登録される
+- [x] `interface Field : Ring { divide: ... }` が定義され、`Float` の impl が内部登録される
+- [x] `cap` で書かれた既存コードに W010 警告が出るが、動作は継続する
+- [x] v1.0.0 の 321 テストが全て通る
+- [x] 新規 interface テストが全て通る

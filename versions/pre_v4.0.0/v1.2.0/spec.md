@@ -399,11 +399,11 @@ IO.println(e.value)                           -- "user@example.com"
 
 ## 11. 完了条件（Done Definition）
 
-- [ ] `type Email { value: String  invariant String.contains(value, "@") }` が定義できる
-- [ ] `Email.new("bad")` が `Err` を返す
-- [ ] `Email.new("a@b.com")` が `Ok(Email { value: "a@b.com" })` を返す
-- [ ] `use std.states.PosInt` で `bind age: PosInt <- 25` が chain コンテキストで動く
-- [ ] `invariant value + 1`（非 Bool）で E045 が出る
-- [ ] `fav explain` で `Email` の invariant 一覧が表示される
-- [ ] v1.1.0 の全テストが通ること
-- [ ] 新規 invariant テストが全て通ること
+- [x] `type Email { value: String  invariant String.contains(value, "@") }` が定義できる
+- [x] `Email.new("bad")` が `Err` を返す
+- [x] `Email.new("a@b.com")` が `Ok(Email { value: "a@b.com" })` を返す
+- [x] `use std.states.PosInt` で `bind age: PosInt <- 25` が chain コンテキストで動く
+- [x] `invariant value + 1`（非 Bool）で E045 が出る
+- [x] `fav explain` で `Email` の invariant 一覧が表示される
+- [x] v1.1.0 の全テストが通ること
+- [x] 新規 invariant テストが全て通ること

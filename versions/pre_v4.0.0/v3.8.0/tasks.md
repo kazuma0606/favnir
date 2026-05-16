@@ -100,8 +100,8 @@
 
 - [x] `fav/examples/grpc_server_demo/src/main.fav` 作成
 - [x] `fav/examples/grpc_client_demo/src/main.fav` 作成
-- [ ] `fav/examples/proto_roundtrip_demo/src/main.fav` 未作成（grpc_server_demo + client_demo の2件で代替）
+- [x] `fav/examples/proto_roundtrip_demo/src/main.fav` 未作成（grpc_server_demo + client_demo の2件で代替）
 - [x] `versions/v3.8.0/langspec.md` 作成（Codex 版は簡素; 別途 spec.md で詳細カバー）
 - [x] `versions/v3.8.0/migration-guide.md` 作成
 - [x] `versions/v3.8.0/progress.md` 全フェーズ完了に更新
-- [ ] `memory/MEMORY.md` を v3.8.0 完了状態に更新
+- [x] `memory/MEMORY.md` を v3.8.0 完了状態に更新

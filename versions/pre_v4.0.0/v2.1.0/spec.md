@@ -400,21 +400,21 @@ v2.1.0 は加算リリース。v2.0.0 のコードはそのまま動く。
 
 ## 10. 完了条件
 
-- [ ] `Math.sqrt(2.0)` が正しい値を返す
-- [ ] `List.unique([1, 2, 1, 3])` が `[1, 2, 3]` を返す
-- [ ] `String.pad_left("42", 5, "0")` が `"00042"` を返す
-- [ ] `IO.read_line()` が標準入力から 1 行読める
-- [ ] `true && false` が `false` を返す
-- [ ] `false || true` が `true` を返す
-- [ ] `&&`/`||` の辺が `Bool` でない場合に E070/E071 が出る
-- [ ] `fav new my-tool` でプロジェクト雛形が生成される
-- [ ] `fav new my-pipeline --template pipeline` で stage/seq 構成が生成される
-- [ ] `fav new my-rune --template lib` で lib 構成が生成される
-- [ ] `fav`（引数なし）でドラゴンアイコンとウェルカムメッセージが表示される
-- [ ] `NO_COLOR` 環境では絵文字フォールバックになる
-- [ ] 既存テストが全て通る
-- [ ] `cargo build` で警告ゼロ
-- [ ] `Cargo.toml` バージョンが `"2.1.0"`
+- [x] `Math.sqrt(2.0)` が正しい値を返す
+- [x] `List.unique([1, 2, 1, 3])` が `[1, 2, 3]` を返す
+- [x] `String.pad_left("42", 5, "0")` が `"00042"` を返す
+- [x] `IO.read_line()` が標準入力から 1 行読める
+- [x] `true && false` が `false` を返す
+- [x] `false || true` が `true` を返す
+- [x] `&&`/`||` の辺が `Bool` でない場合に E070/E071 が出る
+- [x] `fav new my-tool` でプロジェクト雛形が生成される
+- [x] `fav new my-pipeline --template pipeline` で stage/seq 構成が生成される
+- [x] `fav new my-rune --template lib` で lib 構成が生成される
+- [x] `fav`（引数なし）でドラゴンアイコンとウェルカムメッセージが表示される
+- [x] `NO_COLOR` 環境では絵文字フォールバックになる
+- [x] 既存テストが全て通る
+- [x] `cargo build` で警告ゼロ
+- [x] `Cargo.toml` バージョンが `"2.1.0"`
 
 ---
 

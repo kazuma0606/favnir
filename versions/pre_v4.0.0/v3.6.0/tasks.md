@@ -89,4 +89,4 @@
 - [x] `versions/v3.6.0/langspec.md` 作成
 - [x] `versions/v3.6.0/migration-guide.md` 作成
 - [x] `versions/v3.6.0/progress.md` 全フェーズ完了に更新
-- [ ] `memory/MEMORY.md` を v3.6.0 完了状態に更新
+- [x] `memory/MEMORY.md` を v3.6.0 完了状態に更新

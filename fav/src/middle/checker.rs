@@ -4,6 +4,7 @@
 use crate::ast::*;
 use crate::frontend::lexer::Span;
 use crate::frontend::parser::Parser;
+use crate::schemas::{FieldConstraints, ProjectSchemas};
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -74,6 +75,7 @@ impl Type {
             (Type::Stream(a), Type::Stream(b)) => a.is_compatible(b),
             (Type::Option(a), Type::Option(b)) => a.is_compatible(b),
             (Type::List(a), Type::List(b)) => a.is_compatible(b),
+            (Type::Map(a1, a2), Type::Map(b1, b2)) => a1.is_compatible(b1) && a2.is_compatible(b2),
             (Type::Result(a1, a2), Type::Result(b1, b2)) => {
                 a1.is_compatible(b1) && a2.is_compatible(b2)
             }
@@ -760,6 +762,8 @@ pub struct Checker {
     in_collect: bool,
     /// Type alias definitions: name -> target TypeExpr (v1.7.0).
     type_aliases: HashMap<String, TypeExpr>,
+    /// Type constraint schemas loaded from schemas/*.yaml (v4.1.5).
+    pub schemas: ProjectSchemas,
 }
 
 impl Checker {
@@ -795,6 +799,7 @@ impl Checker {
             chain_context: None,
             in_collect: false,
             type_aliases: HashMap::new(),
+            schemas: HashMap::new(),
         }
     }
 
@@ -833,6 +838,7 @@ impl Checker {
             chain_context: None,
             in_collect: false,
             type_aliases: HashMap::new(),
+            schemas: HashMap::new(),
         }
     }
 
@@ -1562,6 +1568,43 @@ impl Checker {
         self.record_fields.insert(
             "RpcRequest".into(),
             rpc_request_fields
+                .iter()
+                .map(|field| (field.name.clone(), self.resolve_type_expr(&field.ty)))
+                .collect(),
+        );
+
+        // ValidationError (v4.1.5)
+        self.env.define(
+            "ValidationError".into(),
+            Type::Named("ValidationError".into(), vec![]),
+        );
+        let validation_error_fields = vec![
+            Field {
+                name: "field".into(),
+                ty: TypeExpr::Named("String".into(), vec![], Span::dummy()),
+                attrs: vec![],
+                span: Span::dummy(),
+            },
+            Field {
+                name: "constraint".into(),
+                ty: TypeExpr::Named("String".into(), vec![], Span::dummy()),
+                attrs: vec![],
+                span: Span::dummy(),
+            },
+            Field {
+                name: "value".into(),
+                ty: TypeExpr::Named("String".into(), vec![], Span::dummy()),
+                attrs: vec![],
+                span: Span::dummy(),
+            },
+        ];
+        self.type_defs.insert(
+            "ValidationError".into(),
+            TypeBody::Record(validation_error_fields.clone()),
+        );
+        self.record_fields.insert(
+            "ValidationError".into(),
+            validation_error_fields
                 .iter()
                 .map(|field| (field.name.clone(), self.resolve_type_expr(&field.ty)))
                 .collect(),
@@ -3921,8 +3964,14 @@ impl Checker {
 
             // record construction: TypeName { field: expr, ... } (2-4)
             Expr::RecordConstruct(type_name, fields, span) => {
-                for (_fname, fexpr) in fields {
+                for (fname, fexpr) in fields {
                     self.check_expr(fexpr);
+                    // Constraint check against schemas/*.yaml (v4.1.5)
+                    if let Some(type_schema) = self.schemas.get(type_name).cloned() {
+                        if let Some(fc) = type_schema.get(fname).cloned() {
+                            self.check_field_constraints(fname, fexpr, &fc, span);
+                        }
+                    }
                 }
                 match self.type_defs.get(type_name) {
                     Some(_) => Type::Named(type_name.clone(), vec![]),
@@ -4512,7 +4561,7 @@ impl Checker {
             ("List", "count") => Some(Type::Int),
 
             // String
-            ("String", "trim") | ("String", "lower") | ("String", "upper") => Some(Type::String),
+            ("String", "trim") | ("String", "lower") | ("String", "upper") | ("String", "base64_encode") => Some(Type::String),
             ("String", "split") => Some(Type::List(Box::new(Type::String))),
             ("String", "index_of") => Some(Type::Option(Box::new(Type::Int))),
             ("String", "pad_left") | ("String", "pad_right") | ("String", "reverse") => {
@@ -4717,7 +4766,13 @@ impl Checker {
                     Box::new(Type::Named("Error".into(), vec![])),
                 ))
             }
-            ("Http", "get_raw") | ("Http", "post_raw") => {
+            ("Http", "get_raw")
+            | ("Http", "post_raw")
+            | ("Http", "put_raw")
+            | ("Http", "delete_raw")
+            | ("Http", "patch_raw")
+            | ("Http", "get_raw_headers")
+            | ("Http", "post_raw_headers") => {
                 self.require_network_effect(span);
                 Some(Type::Result(
                     Box::new(Type::Named("HttpResponse".into(), vec![])),
@@ -4740,7 +4795,7 @@ impl Checker {
                 self.require_io_effect(span);
                 Some(Type::Unit)
             }
-            ("Grpc", "call_raw") => {
+            ("Grpc", "call_raw") | ("Grpc", "call_typed_raw") => {
                 self.require_rpc_effect(span);
                 Some(Type::Result(
                     Box::new(Type::Map(Box::new(Type::String), Box::new(Type::String))),
@@ -4904,7 +4959,182 @@ impl Checker {
             ("Gen", "profile_raw") => Some(Type::Named("GenProfile".into(), vec![])),
             ("Gen", _) => Some(Type::Unknown),
 
+            // Validate.run_raw(type_name, raw_map) (v4.1.5)
+            ("Validate", "run_raw") => Some(Type::Result(
+                Box::new(Type::Unknown),
+                Box::new(Type::List(Box::new(Type::Named(
+                    "ValidationError".into(),
+                    vec![],
+                )))),
+            )),
+            ("Validate", _) => Some(Type::Unknown),
+
+            // Dynamic T.validate — type name that has a schema entry
+            (type_name, "validate") if self.schemas.contains_key(type_name) => {
+                Some(Type::Result(
+                    Box::new(Type::Named(type_name.to_string(), vec![])),
+                    Box::new(Type::List(Box::new(Type::Named(
+                        "ValidationError".into(),
+                        vec![],
+                    )))),
+                ))
+            }
+
             _ => None,
+        }
+    }
+
+    /// Check a single record field expression against its FieldConstraints.
+    /// Only literal values are checked; variables and function calls are skipped.
+    fn check_field_constraints(
+        &mut self,
+        field: &str,
+        expr: &Expr,
+        fc: &FieldConstraints,
+        span: &Span,
+    ) {
+        match expr {
+            Expr::Lit(Lit::Int(n), _) => {
+                let n = *n;
+                if fc.constraints.iter().any(|c| c == "positive") && n <= 0 {
+                    self.type_error(
+                        "E0510",
+                        format!("field '{}' must be positive (got {})", field, n),
+                        span,
+                    );
+                }
+                if fc.constraints.iter().any(|c| c == "non_negative") && n < 0 {
+                    self.type_error(
+                        "E0510",
+                        format!("field '{}' must be non-negative (got {})", field, n),
+                        span,
+                    );
+                }
+                if let Some(min) = fc.min {
+                    if (n as f64) < min {
+                        self.type_error(
+                            "E0511",
+                            format!("field '{}' must be >= {} (got {})", field, min, n),
+                            span,
+                        );
+                    }
+                }
+                if let Some(max) = fc.max {
+                    if (n as f64) > max {
+                        self.type_error(
+                            "E0511",
+                            format!("field '{}' must be <= {} (got {})", field, max, n),
+                            span,
+                        );
+                    }
+                }
+            }
+            Expr::Lit(Lit::Float(f), _) => {
+                let f = *f;
+                if fc.constraints.iter().any(|c| c == "positive") && f <= 0.0 {
+                    self.type_error(
+                        "E0510",
+                        format!("field '{}' must be positive (got {})", field, f),
+                        span,
+                    );
+                }
+                if fc.constraints.iter().any(|c| c == "non_negative") && f < 0.0 {
+                    self.type_error(
+                        "E0510",
+                        format!("field '{}' must be non-negative (got {})", field, f),
+                        span,
+                    );
+                }
+                if let Some(min) = fc.min {
+                    if f < min {
+                        self.type_error(
+                            "E0511",
+                            format!("field '{}' must be >= {} (got {})", field, min, f),
+                            span,
+                        );
+                    }
+                }
+                if let Some(max) = fc.max {
+                    if f > max {
+                        self.type_error(
+                            "E0511",
+                            format!("field '{}' must be <= {} (got {})", field, max, f),
+                            span,
+                        );
+                    }
+                }
+            }
+            Expr::Lit(Lit::Str(s), _) => {
+                if let Some(max_len) = fc.max_length {
+                    if s.len() > max_len {
+                        self.type_error(
+                            "E0513",
+                            format!(
+                                "field '{}' exceeds max_length {} (got {})",
+                                field,
+                                max_len,
+                                s.len()
+                            ),
+                            span,
+                        );
+                    }
+                }
+                if let Some(min_len) = fc.min_length {
+                    if s.len() < min_len {
+                        self.type_error(
+                            "E0513",
+                            format!(
+                                "field '{}' below min_length {} (got {})",
+                                field,
+                                min_len,
+                                s.len()
+                            ),
+                            span,
+                        );
+                    }
+                }
+                if let Some(pat) = &fc.pattern.clone() {
+                    match regex::Regex::new(pat) {
+                        Ok(re) if !re.is_match(s) => {
+                            self.type_error(
+                                "E0512",
+                                format!(
+                                    "field '{}' does not match pattern '{}' (got '{}')",
+                                    field, pat, s
+                                ),
+                                span,
+                            );
+                        }
+                        Err(_) => {
+                            self.type_error(
+                                "E0512",
+                                format!("field '{}': invalid regex pattern '{}'", field, pat),
+                                span,
+                            );
+                        }
+                        Ok(_) => {}
+                    }
+                }
+            }
+            // Unary negation is parsed as BinOp(Sub, Lit::Int(0), operand)
+            Expr::BinOp(BinOp::Sub, lhs, rhs, _) => {
+                if let Expr::Lit(Lit::Int(0), _) = lhs.as_ref() {
+                    match rhs.as_ref() {
+                        Expr::Lit(Lit::Int(n), _) => {
+                            let neg = -(*n);
+                            let fake_expr = Expr::Lit(Lit::Int(neg), span.clone());
+                            self.check_field_constraints(field, &fake_expr, fc, span);
+                        }
+                        Expr::Lit(Lit::Float(f), _) => {
+                            let fake_expr = Expr::Lit(Lit::Float(-f), span.clone());
+                            self.check_field_constraints(field, &fake_expr, fc, span);
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            // Variables, function calls, etc. — skip (runtime validation only)
+            _ => {}
         }
     }
 
@@ -5841,6 +6071,7 @@ abstract seq Pipeline {
             runes_path: None,
             dependencies: vec![],
             checkpoint: None,
+            database: None,
         };
         let resolver = Arc::new(Mutex::new(Resolver::new(Some(toml), Some(root))));
         (resolver, dir)
@@ -5915,6 +6146,7 @@ abstract seq Pipeline {
             runes_path: None,
             dependencies: vec![],
             checkpoint: None,
+            database: None,
         };
         let mut resolver = Resolver::new(Some(toml), Some(root));
         // Simulate a mid-load state: "cycle" is already in the loading set
@@ -7242,6 +7474,126 @@ public fn main() -> List<Int> {
     }
 }
 "#,
+        );
+    }
+
+    // ── v4.1.5: Compile-time schema constraint checking ────────────────────
+
+    fn check_with_schemas(src: &str, schemas: crate::schemas::ProjectSchemas) -> Vec<String> {
+        let prog = Parser::parse_str(src, "test").expect("parse error");
+        let mut checker = Checker::new();
+        checker.register_builtins();
+        checker.schemas = schemas;
+        let (errs, _) = checker.check_with_self(&prog);
+        errs.into_iter()
+            .map(|e| format!("[{}] {}", e.code, e.message))
+            .collect()
+    }
+
+    #[test]
+    fn schema_constraint_positive_violation_on_literal() {
+        use crate::schemas::{FieldConstraints, ProjectSchemas};
+        use std::collections::HashMap;
+
+        let mut fc = FieldConstraints::default();
+        fc.constraints = vec!["positive".to_string()];
+        let mut type_schema = HashMap::new();
+        type_schema.insert("amount".to_string(), fc);
+        let mut schemas: ProjectSchemas = HashMap::new();
+        schemas.insert("Order".to_string(), type_schema);
+
+        let src = r#"
+type Order = { amount: Int }
+public fn main() -> Order {
+    Order { amount: -5 }
+}
+"#;
+        let errs = check_with_schemas(src, schemas);
+        assert!(
+            errs.iter().any(|e| e.contains("E0510")),
+            "expected E0510 positive violation, got: {:?}",
+            errs
+        );
+    }
+
+    #[test]
+    fn schema_constraint_max_length_violation_on_literal() {
+        use crate::schemas::{FieldConstraints, ProjectSchemas};
+        use std::collections::HashMap;
+
+        let mut fc = FieldConstraints::default();
+        fc.max_length = Some(3);
+        let mut type_schema = HashMap::new();
+        type_schema.insert("code".to_string(), fc);
+        let mut schemas: ProjectSchemas = HashMap::new();
+        schemas.insert("Item".to_string(), type_schema);
+
+        let src = r#"
+type Item = { code: String }
+public fn main() -> Item {
+    Item { code: "TOOLONG" }
+}
+"#;
+        let errs = check_with_schemas(src, schemas);
+        assert!(
+            errs.iter().any(|e| e.contains("E0513")),
+            "expected E0513 max_length violation, got: {:?}",
+            errs
+        );
+    }
+
+    #[test]
+    fn schema_constraint_min_violation_on_literal() {
+        use crate::schemas::{FieldConstraints, ProjectSchemas};
+        use std::collections::HashMap;
+
+        let mut fc = FieldConstraints::default();
+        fc.min = Some(0.0);
+        let mut type_schema = HashMap::new();
+        type_schema.insert("score".to_string(), fc);
+        let mut schemas: ProjectSchemas = HashMap::new();
+        schemas.insert("Score".to_string(), type_schema);
+
+        let src = r#"
+type Score = { score: Float }
+public fn main() -> Score {
+    Score { score: -1.0 }
+}
+"#;
+        let errs = check_with_schemas(src, schemas);
+        assert!(
+            errs.iter().any(|e| e.contains("E0511")),
+            "expected E0511 min violation, got: {:?}",
+            errs
+        );
+    }
+
+    #[test]
+    fn schema_constraint_no_violation_passes() {
+        use crate::schemas::{FieldConstraints, ProjectSchemas};
+        use std::collections::HashMap;
+
+        let mut fc = FieldConstraints::default();
+        fc.constraints = vec!["positive".to_string()];
+        let mut type_schema = HashMap::new();
+        type_schema.insert("amount".to_string(), fc);
+        let mut schemas: ProjectSchemas = HashMap::new();
+        schemas.insert("Order".to_string(), type_schema);
+
+        let src = r#"
+type Order = { amount: Int }
+public fn main() -> Order {
+    Order { amount: 42 }
+}
+"#;
+        let errs = check_with_schemas(src, schemas);
+        let constraint_errs: Vec<_> = errs.iter()
+            .filter(|e| e.contains("E051"))
+            .collect();
+        assert!(
+            constraint_errs.is_empty(),
+            "unexpected constraint errors: {:?}",
+            constraint_errs
         );
     }
 }

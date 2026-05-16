@@ -2406,3 +2406,166 @@ public fn main() -> Unit !Io !Rpc {{
         "echo handler must return the same payload"
     );
 }
+
+// ── Validate (v4.1.5) ────────────────────────────────────────────────────────
+
+#[test]
+fn validate_run_raw_no_schema_returns_ok() {
+    // Without a registered schema, run_raw returns ok with empty record.
+    use crate::backend::vm::set_schema_registry;
+    use std::collections::HashMap;
+    set_schema_registry(HashMap::new());
+
+    let result = eval(r#"
+type RawBag = { x: String }
+public fn main() -> Bool {
+    Result.is_ok(Validate.run_raw("NoSuchType", RawBag { x: "1" }))
+}
+"#);
+    assert_eq!(result, Value::Bool(true));
+}
+
+#[test]
+fn validate_run_raw_positive_violation() {
+    use crate::backend::vm::set_schema_registry;
+    use crate::schemas::{FieldConstraints, ProjectSchemas};
+    use std::collections::HashMap;
+
+    let mut fc = FieldConstraints::default();
+    fc.constraints = vec!["positive".to_string()];
+    let mut type_schema = HashMap::new();
+    type_schema.insert("amount".to_string(), fc);
+    let mut schemas: ProjectSchemas = HashMap::new();
+    schemas.insert("Order".to_string(), type_schema);
+    set_schema_registry(schemas);
+
+    let result = eval(r#"
+type RawOrder = { amount: String }
+public fn main() -> Bool {
+    Result.is_err(Validate.run_raw("Order", RawOrder { amount: "-5" }))
+}
+"#);
+    assert_eq!(result, Value::Bool(true));
+
+    set_schema_registry(HashMap::new());
+}
+
+#[test]
+fn validate_run_raw_max_length_violation() {
+    use crate::backend::vm::set_schema_registry;
+    use crate::schemas::{FieldConstraints, ProjectSchemas};
+    use std::collections::HashMap;
+
+    let mut fc = FieldConstraints::default();
+    fc.max_length = Some(3);
+    let mut type_schema = HashMap::new();
+    type_schema.insert("code".to_string(), fc);
+    let mut schemas: ProjectSchemas = HashMap::new();
+    schemas.insert("Item".to_string(), type_schema);
+    set_schema_registry(schemas);
+
+    let result = eval(r#"
+type RawItem = { code: String }
+public fn main() -> Bool {
+    Result.is_err(Validate.run_raw("Item", RawItem { code: "TOOLONG" }))
+}
+"#);
+    assert_eq!(result, Value::Bool(true));
+
+    set_schema_registry(HashMap::new());
+}
+
+#[test]
+fn validate_run_raw_valid_passes() {
+    use crate::backend::vm::set_schema_registry;
+    use crate::schemas::{FieldConstraints, ProjectSchemas};
+    use std::collections::HashMap;
+
+    let mut fc = FieldConstraints::default();
+    fc.min = Some(0.0);
+    fc.max = Some(100.0);
+    let mut type_schema = HashMap::new();
+    type_schema.insert("score".to_string(), fc);
+    let mut schemas: ProjectSchemas = HashMap::new();
+    schemas.insert("TestResult".to_string(), type_schema);
+    set_schema_registry(schemas);
+
+    let result = eval(r#"
+type RawResult = { score: String }
+public fn main() -> Bool {
+    Result.is_ok(Validate.run_raw("TestResult", RawResult { score: "50" }))
+}
+"#);
+    assert_eq!(result, Value::Bool(true));
+
+    set_schema_registry(HashMap::new());
+}
+
+// ── HTTP v4.2.0 new primitives ────────────────────────────────────────────────
+
+#[test]
+fn http_put_raw_returns_err_on_bad_host() {
+    let result = eval(
+        r#"
+public fn main() -> Bool !Network {
+    bind r <- Http.put_raw("http://127.0.0.1:1/x", "{}", "application/json")
+    Result.is_err(r)
+}
+"#,
+    );
+    assert_eq!(result, Value::Bool(true));
+}
+
+#[test]
+fn http_delete_raw_returns_err_on_bad_host() {
+    let result = eval(
+        r#"
+public fn main() -> Bool !Network {
+    bind r <- Http.delete_raw("http://127.0.0.1:1/x")
+    Result.is_err(r)
+}
+"#,
+    );
+    assert_eq!(result, Value::Bool(true));
+}
+
+#[test]
+fn http_patch_raw_returns_err_on_bad_host() {
+    let result = eval(
+        r#"
+public fn main() -> Bool !Network {
+    bind r <- Http.patch_raw("http://127.0.0.1:1/x", "{}", "application/json")
+    Result.is_err(r)
+}
+"#,
+    );
+    assert_eq!(result, Value::Bool(true));
+}
+
+#[test]
+fn string_base64_encode_produces_correct_output() {
+    let result = eval(
+        r#"
+public fn main() -> String {
+    String.base64_encode("hello")
+}
+"#,
+    );
+    // base64("hello") = "aGVsbG8="
+    assert_eq!(result, Value::Str("aGVsbG8=".into()));
+}
+
+#[test]
+fn grpc_call_typed_raw_returns_err_on_bad_host() {
+    let result = eval(
+        r#"
+type User = { id: Int name: String }
+
+public fn main() -> Bool !Rpc {
+    bind r <- Grpc.call_typed_raw("User", "127.0.0.1:9", "/UserService/GetUser", Map.set((), "id", "1"))
+    Result.is_err(r)
+}
+"#,
+    );
+    assert_eq!(result, Value::Bool(true));
+}

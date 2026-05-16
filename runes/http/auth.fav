@@ -1,0 +1,15 @@
+// runes/http/auth.fav — HTTP auth header helpers (v4.2.0)
+
+public fn bearer(token: String) -> Map<String, String> {
+    Map.set((), "Authorization", String.concat("Bearer ", token))
+}
+
+public fn basic(username: String, password: String) -> Map<String, String> {
+    Map.set((), "Authorization",
+        String.concat("Basic ",
+            String.base64_encode(String.concat(String.concat(username, ":"), password))))
+}
+
+public fn api_key(key: String) -> Map<String, String> {
+    Map.set((), "X-Api-Key", key)
+}

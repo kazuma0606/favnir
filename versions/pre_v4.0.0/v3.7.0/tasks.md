@@ -105,4 +105,4 @@
 - [x] `versions/v3.7.0/langspec.md` 作成（Codex 版は簡素; 上書き更新済み）
 - [x] `versions/v3.7.0/migration-guide.md` 作成
 - [x] `versions/v3.7.0/progress.md` 全フェーズ完了に更新
-- [ ] `memory/MEMORY.md` を v3.7.0 完了状態に更新
+- [x] `memory/MEMORY.md` を v3.7.0 完了状態に更新

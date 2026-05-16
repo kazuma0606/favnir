@@ -20,6 +20,7 @@ use std::sync::Mutex;
 use super::artifact::FvcArtifact;
 use super::codegen::{Constant, Opcode};
 use crate::middle::ir::TypeMeta;
+use crate::schemas::ProjectSchemas;
 use crate::value::Value;
 
 thread_local! {
@@ -47,6 +48,9 @@ thread_local! {
     static CHECKPOINT_BACKEND: RefCell<CheckpointBackend> = RefCell::new(CheckpointBackend::File {
         dir: PathBuf::from(".fav_checkpoints"),
     });
+
+    /// Type constraint schemas loaded from schemas/*.yaml (v4.1.5).
+    static SCHEMA_REGISTRY: RefCell<ProjectSchemas> = RefCell::new(HashMap::new());
 }
 
 /// Internal DB connection wrapper.
@@ -66,6 +70,11 @@ pub struct CheckpointMetaRecord {
     pub name: String,
     pub value: String,
     pub updated_at: String,
+}
+
+/// Register project schemas for runtime validation (v4.1.5).
+pub fn set_schema_registry(schemas: ProjectSchemas) {
+    SCHEMA_REGISTRY.with(|s| *s.borrow_mut() = schemas);
 }
 
 /// Enable coverage tracking for the current thread.
@@ -3455,6 +3464,61 @@ fn proto_bytes_to_string_map(bytes: &[u8]) -> Result<HashMap<String, String>, St
     Ok(out)
 }
 
+/// Decode proto bytes to a string map, resolving field numbers to names via type_metas.
+/// Falls back to "field{n}" when the type or field is not found.
+fn proto_bytes_to_named_map(
+    bytes: &[u8],
+    type_name: &str,
+    type_metas: &HashMap<String, TypeMeta>,
+) -> Result<HashMap<String, String>, String> {
+    let fields: Vec<String> = type_metas
+        .get(type_name)
+        .map(|tm| tm.fields.iter().map(|f| f.name.clone()).collect())
+        .unwrap_or_default();
+
+    let mut out = HashMap::new();
+    let mut pos = 0usize;
+    while pos < bytes.len() {
+        let key = decode_varint(bytes, &mut pos)?;
+        let field_no = (key >> 3) as usize;
+        let wire_type = (key & 0x07) as u8;
+        let field_name = if field_no >= 1 && field_no <= fields.len() {
+            fields[field_no - 1].clone()
+        } else {
+            format!("field{}", field_no)
+        };
+        match wire_type {
+            0 => {
+                let value = decode_varint(bytes, &mut pos)?.to_string();
+                out.insert(field_name, value);
+            }
+            1 => {
+                if pos + 8 > bytes.len() {
+                    return Err("unexpected EOF while reading double".to_string());
+                }
+                let mut buf = [0u8; 8];
+                buf.copy_from_slice(&bytes[pos..pos + 8]);
+                pos += 8;
+                out.insert(field_name, f64::from_le_bytes(buf).to_string());
+            }
+            2 => {
+                let len = decode_varint(bytes, &mut pos)? as usize;
+                if pos + len > bytes.len() {
+                    return Err("unexpected EOF while reading string field".to_string());
+                }
+                let value = String::from_utf8(bytes[pos..pos + len].to_vec())
+                    .map_err(|e| format!("Grpc raw response invalid UTF-8: {}", e))?;
+                pos += len;
+                out.insert(field_name, value);
+            }
+            other => {
+                skip_proto_value(bytes, &mut pos, other)?;
+            }
+        }
+    }
+    Ok(out)
+}
+
 /// Type alias for messages sent from the h2 server thread to the VM dispatch loop.
 /// `(handler_fn_name, proto_bytes, response_sender)`
 type GrpcRequestMsg = (
@@ -6201,6 +6265,192 @@ fn vm_call_builtin(
                 }
             }
         }
+        "Http.put_raw" => {
+            if args.len() != 3 {
+                return Err("Http.put_raw requires 3 arguments".to_string());
+            }
+            let mut it = args.into_iter();
+            let url = vm_string(it.next().unwrap(), "Http.put_raw url")?;
+            let body = vm_string(it.next().unwrap(), "Http.put_raw body")?;
+            let content_type = vm_string(it.next().unwrap(), "Http.put_raw content_type")?;
+            match ureq::put(&url)
+                .set("Content-Type", &content_type)
+                .send_string(&body)
+            {
+                Ok(resp) => {
+                    let status = resp.status() as i64;
+                    let response_content_type = resp
+                        .header("Content-Type")
+                        .unwrap_or("application/octet-stream")
+                        .to_string();
+                    let response_body = resp
+                        .into_string()
+                        .map_err(|e| format!("Http.put_raw read error: {}", e))?;
+                    Ok(ok_vm(http_response_vm(status, response_body, response_content_type)))
+                }
+                Err(ureq::Error::Status(status, resp)) => {
+                    let body = resp.into_string().unwrap_or_default();
+                    Ok(err_vm(http_error_vm(2, body, status as i64)))
+                }
+                Err(ureq::Error::Transport(err)) => {
+                    let msg = err.to_string();
+                    let code = if msg.to_ascii_lowercase().contains("timed out") { 1 } else { 0 };
+                    Ok(err_vm(http_error_vm(code, msg, 0)))
+                }
+            }
+        }
+        "Http.delete_raw" => {
+            if args.len() != 1 {
+                return Err("Http.delete_raw requires 1 argument".to_string());
+            }
+            let url = vm_string(args.into_iter().next().unwrap(), "Http.delete_raw url")?;
+            match ureq::delete(&url).call() {
+                Ok(resp) => {
+                    let status = resp.status() as i64;
+                    let response_content_type = resp
+                        .header("Content-Type")
+                        .unwrap_or("application/octet-stream")
+                        .to_string();
+                    let response_body = resp
+                        .into_string()
+                        .map_err(|e| format!("Http.delete_raw read error: {}", e))?;
+                    Ok(ok_vm(http_response_vm(status, response_body, response_content_type)))
+                }
+                Err(ureq::Error::Status(status, resp)) => {
+                    let body = resp.into_string().unwrap_or_default();
+                    Ok(err_vm(http_error_vm(2, body, status as i64)))
+                }
+                Err(ureq::Error::Transport(err)) => {
+                    let msg = err.to_string();
+                    let code = if msg.to_ascii_lowercase().contains("timed out") { 1 } else { 0 };
+                    Ok(err_vm(http_error_vm(code, msg, 0)))
+                }
+            }
+        }
+        "Http.patch_raw" => {
+            if args.len() != 3 {
+                return Err("Http.patch_raw requires 3 arguments".to_string());
+            }
+            let mut it = args.into_iter();
+            let url = vm_string(it.next().unwrap(), "Http.patch_raw url")?;
+            let body = vm_string(it.next().unwrap(), "Http.patch_raw body")?;
+            let content_type = vm_string(it.next().unwrap(), "Http.patch_raw content_type")?;
+            match ureq::request("PATCH", &url)
+                .set("Content-Type", &content_type)
+                .send_string(&body)
+            {
+                Ok(resp) => {
+                    let status = resp.status() as i64;
+                    let response_content_type = resp
+                        .header("Content-Type")
+                        .unwrap_or("application/octet-stream")
+                        .to_string();
+                    let response_body = resp
+                        .into_string()
+                        .map_err(|e| format!("Http.patch_raw read error: {}", e))?;
+                    Ok(ok_vm(http_response_vm(status, response_body, response_content_type)))
+                }
+                Err(ureq::Error::Status(status, resp)) => {
+                    let body = resp.into_string().unwrap_or_default();
+                    Ok(err_vm(http_error_vm(2, body, status as i64)))
+                }
+                Err(ureq::Error::Transport(err)) => {
+                    let msg = err.to_string();
+                    let code = if msg.to_ascii_lowercase().contains("timed out") { 1 } else { 0 };
+                    Ok(err_vm(http_error_vm(code, msg, 0)))
+                }
+            }
+        }
+        "Http.get_raw_headers" => {
+            if args.len() != 2 {
+                return Err("Http.get_raw_headers requires 2 arguments".to_string());
+            }
+            let mut it = args.into_iter();
+            let url = vm_string(it.next().unwrap(), "Http.get_raw_headers url")?;
+            let headers = match it.next().unwrap() {
+                VMValue::Record(m) => schema_record_to_string_map(&m),
+                other => return Err(format!(
+                    "Http.get_raw_headers expects Map<String,String> headers, got {}",
+                    vmvalue_type_name(&other)
+                )),
+            };
+            let mut req = ureq::get(&url);
+            for (k, v) in &headers {
+                req = req.set(k, v);
+            }
+            match req.call() {
+                Ok(resp) => {
+                    let status = resp.status() as i64;
+                    let response_content_type = resp
+                        .header("Content-Type")
+                        .unwrap_or("application/octet-stream")
+                        .to_string();
+                    let response_body = resp
+                        .into_string()
+                        .map_err(|e| format!("Http.get_raw_headers read error: {}", e))?;
+                    Ok(ok_vm(http_response_vm(status, response_body, response_content_type)))
+                }
+                Err(ureq::Error::Status(status, resp)) => {
+                    let body = resp.into_string().unwrap_or_default();
+                    Ok(err_vm(http_error_vm(2, body, status as i64)))
+                }
+                Err(ureq::Error::Transport(err)) => {
+                    let msg = err.to_string();
+                    let code = if msg.to_ascii_lowercase().contains("timed out") { 1 } else { 0 };
+                    Ok(err_vm(http_error_vm(code, msg, 0)))
+                }
+            }
+        }
+        "Http.post_raw_headers" => {
+            if args.len() != 4 {
+                return Err("Http.post_raw_headers requires 4 arguments".to_string());
+            }
+            let mut it = args.into_iter();
+            let url = vm_string(it.next().unwrap(), "Http.post_raw_headers url")?;
+            let body = vm_string(it.next().unwrap(), "Http.post_raw_headers body")?;
+            let content_type = vm_string(it.next().unwrap(), "Http.post_raw_headers content_type")?;
+            let headers = match it.next().unwrap() {
+                VMValue::Record(m) => schema_record_to_string_map(&m),
+                other => return Err(format!(
+                    "Http.post_raw_headers expects Map<String,String> headers, got {}",
+                    vmvalue_type_name(&other)
+                )),
+            };
+            let mut req = ureq::post(&url).set("Content-Type", &content_type);
+            for (k, v) in &headers {
+                req = req.set(k, v);
+            }
+            match req.send_string(&body) {
+                Ok(resp) => {
+                    let status = resp.status() as i64;
+                    let response_content_type = resp
+                        .header("Content-Type")
+                        .unwrap_or("application/octet-stream")
+                        .to_string();
+                    let response_body = resp
+                        .into_string()
+                        .map_err(|e| format!("Http.post_raw_headers read error: {}", e))?;
+                    Ok(ok_vm(http_response_vm(status, response_body, response_content_type)))
+                }
+                Err(ureq::Error::Status(status, resp)) => {
+                    let body = resp.into_string().unwrap_or_default();
+                    Ok(err_vm(http_error_vm(2, body, status as i64)))
+                }
+                Err(ureq::Error::Transport(err)) => {
+                    let msg = err.to_string();
+                    let code = if msg.to_ascii_lowercase().contains("timed out") { 1 } else { 0 };
+                    Ok(err_vm(http_error_vm(code, msg, 0)))
+                }
+            }
+        }
+        "String.base64_encode" => {
+            if args.len() != 1 {
+                return Err("String.base64_encode requires 1 argument".to_string());
+            }
+            let s = vm_string(args.into_iter().next().unwrap(), "String.base64_encode")?;
+            use base64::Engine;
+            Ok(VMValue::Str(base64::engine::general_purpose::STANDARD.encode(s.as_bytes())))
+        }
         "Grpc.encode_raw" => {
             if args.len() != 2 {
                 return Err("Grpc.encode_raw requires 2 arguments".to_string());
@@ -6473,6 +6723,140 @@ fn vm_call_builtin(
             })
             .join()
             .map_err(|_| "Grpc.call_stream_raw thread panicked".to_string())??;
+            Ok(result)
+        }
+        "Grpc.call_typed_raw" => {
+            if args.len() != 4 {
+                return Err("Grpc.call_typed_raw requires 4 arguments".to_string());
+            }
+            let mut it = args.into_iter();
+            let response_type = vm_string(it.next().unwrap(), "Grpc.call_typed_raw response_type")?;
+            let host = vm_string(it.next().unwrap(), "Grpc.call_typed_raw host")?;
+            let method = vm_string(it.next().unwrap(), "Grpc.call_typed_raw method")?;
+            let payload = match it.next().unwrap() {
+                VMValue::Record(map) => schema_record_to_string_map(&map),
+                other => {
+                    return Err(format!(
+                        "Grpc.call_typed_raw expects Map<String,String> payload, got {}",
+                        vmvalue_type_name(&other)
+                    ));
+                }
+            };
+            let proto_bytes = string_map_to_proto_bytes(&payload);
+            let frame = encode_grpc_frame(&proto_bytes);
+            let tcp_addr = grpc_tcp_addr(&host);
+            let uri_str = grpc_method_uri(&host, &method);
+            let type_metas_clone = type_metas.clone();
+            let result = std::thread::spawn(move || -> Result<VMValue, String> {
+                let rt = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .map_err(|e| format!("Grpc.call_typed_raw tokio build failed: {}", e))?;
+                rt.block_on(async move {
+                    let tcp = match tokio::net::TcpStream::connect(&tcp_addr).await {
+                        Ok(s) => s,
+                        Err(e) => {
+                            return Ok(err_vm(rpc_error_vm(
+                                14,
+                                format!("connection failed: {}", e),
+                            )))
+                        }
+                    };
+                    let (mut h2_client, h2_conn) =
+                        match h2::client::handshake(tcp).await {
+                            Ok(r) => r,
+                            Err(e) => {
+                                return Ok(err_vm(rpc_error_vm(
+                                    14,
+                                    format!("h2 handshake failed: {}", e),
+                                )))
+                            }
+                        };
+                    tokio::spawn(async move { let _ = h2_conn.await; });
+                    let request = match http::Request::builder()
+                        .method("POST")
+                        .uri(uri_str.as_str())
+                        .header("content-type", "application/grpc")
+                        .header("te", "trailers")
+                        .body(())
+                    {
+                        Ok(r) => r,
+                        Err(e) => return Err(format!("request build failed: {}", e)),
+                    };
+                    let (response_future, mut send_stream) =
+                        match h2_client.send_request(request, false) {
+                            Ok(r) => r,
+                            Err(e) => {
+                                return Ok(err_vm(rpc_error_vm(
+                                    14,
+                                    format!("send_request failed: {}", e),
+                                )))
+                            }
+                        };
+                    if let Err(e) = send_stream.send_data(Bytes::from(frame), true) {
+                        return Ok(err_vm(rpc_error_vm(14, format!("send_data failed: {}", e))));
+                    }
+                    let response = match response_future.await {
+                        Ok(r) => r,
+                        Err(e) => {
+                            return Ok(err_vm(rpc_error_vm(14, format!("response failed: {}", e))))
+                        }
+                    };
+                    if !response.status().is_success() {
+                        return Ok(err_vm(rpc_error_vm(
+                            14,
+                            format!("HTTP {}", response.status()),
+                        )));
+                    }
+                    let mut body = response.into_body();
+                    let mut resp_bytes: Vec<u8> = Vec::new();
+                    while let Some(chunk) = body.data().await {
+                        match chunk {
+                            Ok(data) => {
+                                let n = data.len();
+                                resp_bytes.extend_from_slice(&data);
+                                let _ = body.flow_control().release_capacity(n);
+                            }
+                            Err(e) => {
+                                return Ok(err_vm(rpc_error_vm(
+                                    14,
+                                    format!("body read failed: {}", e),
+                                )))
+                            }
+                        }
+                    }
+                    if let Ok(Some(trailers)) = body.trailers().await {
+                        if let Some(grpc_status) = trailers.get("grpc-status") {
+                            if grpc_status.as_bytes() != b"0" {
+                                let msg = trailers
+                                    .get("grpc-message")
+                                    .and_then(|v| v.to_str().ok())
+                                    .unwrap_or("gRPC error")
+                                    .to_string();
+                                let code: i64 = grpc_status
+                                    .to_str()
+                                    .ok()
+                                    .and_then(|s| s.parse().ok())
+                                    .unwrap_or(2);
+                                return Ok(err_vm(rpc_error_vm(code, msg)));
+                            }
+                        }
+                    }
+                    let proto = match decode_grpc_frame(&resp_bytes) {
+                        Ok(b) => b,
+                        Err(e) => return Err(format!("decode_grpc_frame failed: {}", e)),
+                    };
+                    let row = match proto_bytes_to_named_map(&proto, &response_type, &type_metas_clone) {
+                        Ok(m) => m,
+                        Err(e) => return Err(format!("proto_bytes_to_named_map failed: {}", e)),
+                    };
+                    Ok(ok_vm(VMValue::Record(
+                        row.into_iter().map(|(k, v)| (k, VMValue::Str(v))).collect(),
+                    )))
+                })
+            })
+            .join()
+            .map_err(|_| "Grpc.call_typed_raw thread panicked".to_string())??;
             Ok(result)
         }
         "File.read" => {
@@ -7380,6 +7764,135 @@ fn vm_call_builtin(
                     rows.into_iter().map(VMValue::Record).collect(),
                 ))),
                 Err(err) => Ok(err_vm(parquet_error_vm(err))),
+            }
+        }
+
+        // ── Validate.* (v4.1.5) ───────────────────────────────────────────────
+        "Validate.run_raw" => {
+            if args.len() != 2 {
+                return Err("Validate.run_raw requires 2 arguments (type_name, raw_map)".to_string());
+            }
+            let mut it = args.into_iter();
+            let type_name = vm_string(it.next().unwrap(), "Validate.run_raw type_name")?;
+            let raw = match it.next().unwrap() {
+                VMValue::Record(m) => m,
+                other => {
+                    return Err(format!(
+                        "Validate.run_raw: second argument must be a Map/Record, got {}",
+                        vmvalue_type_name(&other)
+                    ));
+                }
+            };
+
+            let schemas = SCHEMA_REGISTRY.with(|s| s.borrow().clone());
+            let Some(type_schema) = schemas.get(&type_name) else {
+                // No schema registered — return empty ok record
+                return Ok(ok_vm(VMValue::Record(HashMap::new())));
+            };
+
+            let mut errors: Vec<VMValue> = vec![];
+
+            for (field_name, fc) in type_schema {
+                let raw_val = raw.get(field_name.as_str()).and_then(|v| {
+                    if let VMValue::Str(s) = v { Some(s.clone()) } else { None }
+                });
+
+                match raw_val {
+                    None if !fc.nullable => {
+                        let mut e = HashMap::new();
+                        e.insert("field".into(), VMValue::Str(field_name.clone()));
+                        e.insert("constraint".into(), VMValue::Str("required".into()));
+                        e.insert("value".into(), VMValue::Str(String::new()));
+                        errors.push(VMValue::Record(e));
+                    }
+                    Some(ref val_str) => {
+                        // positive / non_negative for numeric fields
+                        if fc.constraints.iter().any(|c| c == "positive") {
+                            if let Ok(n) = val_str.parse::<f64>() {
+                                if n <= 0.0 {
+                                    let mut e = HashMap::new();
+                                    e.insert("field".into(), VMValue::Str(field_name.clone()));
+                                    e.insert("constraint".into(), VMValue::Str("positive".into()));
+                                    e.insert("value".into(), VMValue::Str(val_str.clone()));
+                                    errors.push(VMValue::Record(e));
+                                }
+                            }
+                        }
+                        if fc.constraints.iter().any(|c| c == "non_negative") {
+                            if let Ok(n) = val_str.parse::<f64>() {
+                                if n < 0.0 {
+                                    let mut e = HashMap::new();
+                                    e.insert("field".into(), VMValue::Str(field_name.clone()));
+                                    e.insert("constraint".into(), VMValue::Str("non_negative".into()));
+                                    e.insert("value".into(), VMValue::Str(val_str.clone()));
+                                    errors.push(VMValue::Record(e));
+                                }
+                            }
+                        }
+                        // min / max
+                        if let Some(min) = fc.min {
+                            if let Ok(n) = val_str.parse::<f64>() {
+                                if n < min {
+                                    let mut e = HashMap::new();
+                                    e.insert("field".into(), VMValue::Str(field_name.clone()));
+                                    e.insert("constraint".into(), VMValue::Str(format!("min:{}", min)));
+                                    e.insert("value".into(), VMValue::Str(val_str.clone()));
+                                    errors.push(VMValue::Record(e));
+                                }
+                            }
+                        }
+                        if let Some(max) = fc.max {
+                            if let Ok(n) = val_str.parse::<f64>() {
+                                if n > max {
+                                    let mut e = HashMap::new();
+                                    e.insert("field".into(), VMValue::Str(field_name.clone()));
+                                    e.insert("constraint".into(), VMValue::Str(format!("max:{}", max)));
+                                    e.insert("value".into(), VMValue::Str(val_str.clone()));
+                                    errors.push(VMValue::Record(e));
+                                }
+                            }
+                        }
+                        // max_length / min_length
+                        if let Some(max_len) = fc.max_length {
+                            if val_str.len() > max_len {
+                                let mut e = HashMap::new();
+                                e.insert("field".into(), VMValue::Str(field_name.clone()));
+                                e.insert("constraint".into(), VMValue::Str("max_length".into()));
+                                e.insert("value".into(), VMValue::Str(val_str.clone()));
+                                errors.push(VMValue::Record(e));
+                            }
+                        }
+                        if let Some(min_len) = fc.min_length {
+                            if val_str.len() < min_len {
+                                let mut e = HashMap::new();
+                                e.insert("field".into(), VMValue::Str(field_name.clone()));
+                                e.insert("constraint".into(), VMValue::Str("min_length".into()));
+                                e.insert("value".into(), VMValue::Str(val_str.clone()));
+                                errors.push(VMValue::Record(e));
+                            }
+                        }
+                        // pattern
+                        if let Some(ref pat) = fc.pattern {
+                            if let Ok(re) = regex::Regex::new(pat) {
+                                if !re.is_match(val_str) {
+                                    let mut e = HashMap::new();
+                                    e.insert("field".into(), VMValue::Str(field_name.clone()));
+                                    e.insert("constraint".into(), VMValue::Str("pattern".into()));
+                                    e.insert("value".into(), VMValue::Str(val_str.clone()));
+                                    errors.push(VMValue::Record(e));
+                                }
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+
+            if errors.is_empty() {
+                // Reconstruct record from raw map
+                Ok(ok_vm(VMValue::Record(raw)))
+            } else {
+                Ok(err_vm(VMValue::List(errors)))
             }
         }
 

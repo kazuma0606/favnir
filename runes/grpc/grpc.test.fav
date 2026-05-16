@@ -72,3 +72,9 @@ test "grpc_err_message_preserved" {
         Ok(_) => assert(false)
     }
 }
+
+
+test "grpc_call_typed_bad_host_is_err" {
+    bind result <- grpc.call_typed("User", "127.0.0.1:9", "/UserService/GetUser", Map.set((), "id", "1"))
+    assert(Result.is_err(result))
+}

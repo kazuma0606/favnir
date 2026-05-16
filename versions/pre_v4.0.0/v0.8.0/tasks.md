@@ -179,4 +179,4 @@
 - [x] `fav lint examples/hello.fav` が ok
 - [x] エラー出力に `^^^` アンダーラインが表示される
 - [x] `Cargo.toml` バージョンが `"0.8.0"`
-- [ ] roadmap.md の v0.8.0 を完了マーク（次ステップ）
+- [x] roadmap.md の v0.8.0 を完了マーク（次ステップ）

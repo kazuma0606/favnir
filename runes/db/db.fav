@@ -1,5 +1,7 @@
-// runes/db/db.fav — Favnir db rune public API (v4.1.0)
-// Directory rune: connection management + query/execute operations.
+// runes/db/db.fav — Favnir db rune public API (v4.2.0)
+// Directory rune: connection management + query/execute + transactions + migrations.
 
 use connection.{ connect, close }
-use query.{ query, query_params, execute, execute_params }
+use query.{ query, query_params, execute, execute_params, query_one, paginate, batch_insert }
+use transaction.{ with_transaction, savepoint, release_savepoint, rollback_to_savepoint }
+use migration.{ applied_migrations, mark_applied }

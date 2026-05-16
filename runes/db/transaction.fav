@@ -1,0 +1,38 @@
+// runes/db/transaction.fav — Transaction and savepoint helpers (v4.2.0)
+
+// with_transaction: begin → f(tx) → commit on Ok / rollback on Err
+public fn with_transaction(
+    handle: DbHandle,
+    f: TxHandle -> Result<List<Map<String, String>>, DbError>
+) -> Result<List<Map<String, String>>, DbError> !Db {
+    match DB.begin_tx(handle) {
+        Ok(tx) => {
+            match f(tx) {
+                Ok(rows) => match DB.commit_tx(tx) {
+                    Ok(_)  => Result.ok(rows)
+                    Err(e) => Result.err(e)
+                }
+                Err(e) => match DB.rollback_tx(tx) {
+                    Ok(_)  => Result.err(e)
+                    Err(_) => Result.err(e)
+                }
+            }
+        }
+        Err(e) => Result.err(e)
+    }
+}
+
+// savepoint: execute SAVEPOINT <name>
+public fn savepoint(handle: DbHandle, name: String) -> Result<Int, DbError> !Db {
+    DB.execute_raw(handle, String.concat("SAVEPOINT ", name))
+}
+
+// release_savepoint: execute RELEASE SAVEPOINT <name>
+public fn release_savepoint(handle: DbHandle, name: String) -> Result<Int, DbError> !Db {
+    DB.execute_raw(handle, String.concat("RELEASE SAVEPOINT ", name))
+}
+
+// rollback_to_savepoint: execute ROLLBACK TO SAVEPOINT <name>
+public fn rollback_to_savepoint(handle: DbHandle, name: String) -> Result<Int, DbError> !Db {
+    DB.execute_raw(handle, String.concat("ROLLBACK TO SAVEPOINT ", name))
+}

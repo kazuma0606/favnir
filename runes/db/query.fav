@@ -1,4 +1,4 @@
-// runes/db/query.fav — DB query and execute operations (v4.1.0)
+// runes/db/query.fav — DB query and execute operations (v4.2.0)
 
 public fn query(handle: DbHandle, sql: String) -> Result<List<Map<String, String>>, DbError> !Db {
     DB.query_raw(handle, sql)
@@ -14,4 +14,49 @@ public fn execute(handle: DbHandle, sql: String) -> Result<Int, DbError> !Db {
 
 public fn execute_params(handle: DbHandle, sql: String, params: List<String>) -> Result<Int, DbError> !Db {
     DB.execute_raw_params(handle, sql, params)
+}
+
+// query_one: 結果の最初の行だけを返す（0行は DbError）
+public fn query_one(handle: DbHandle, sql: String) -> Result<Map<String, String>, DbError> !Db {
+    match DB.query_raw(handle, sql) {
+        Ok(rows) => match List.first(rows) {
+            Some(row) => Result.ok(row)
+            None      => Result.err(DbError { code: "NOT_FOUND" message: "query returned no rows" })
+        }
+        Err(e) => Result.err(e)
+    }
+}
+
+// paginate: LIMIT/OFFSET を自動付与
+public fn paginate(
+    handle: DbHandle,
+    sql: String,
+    page: Int,
+    size: Int
+) -> Result<List<Map<String, String>>, DbError> !Db {
+    DB.query_raw(handle,
+        String.concat(
+            String.concat(
+                String.concat(String.concat(sql, " LIMIT "), Debug.show(size)),
+                " OFFSET "),
+            Debug.show(page * size)))
+}
+
+// batch_insert: List<List<String>> の各行で execute_params を反復実行
+public fn batch_insert(
+    handle: DbHandle,
+    sql_template: String,
+    rows: List<List<String>>
+) -> Result<Int, DbError> !Db {
+    List.fold_left(rows, Result.ok(0), |acc, params| {
+        match acc {
+            Err(e) => Result.err(e)
+            Ok(n)  => {
+                match DB.execute_raw_params(handle, sql_template, params) {
+                    Ok(count) => Result.ok(n + count)
+                    Err(e)    => Result.err(e)
+                }
+            }
+        }
+    })
 }

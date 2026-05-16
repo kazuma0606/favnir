@@ -1,0 +1,21 @@
+// runes/http/client.fav — Extended HTTP client methods (v4.2.0)
+
+public fn put(url: String, body: String) -> Result<HttpResponse, HttpError> !Network {
+    Http.put_raw(url, body, "application/json")
+}
+
+public fn delete(url: String) -> Result<HttpResponse, HttpError> !Network {
+    Http.delete_raw(url)
+}
+
+public fn patch(url: String, body: String) -> Result<HttpResponse, HttpError> !Network {
+    Http.patch_raw(url, body, "application/json")
+}
+
+public fn get_with_headers(url: String, headers: Map<String, String>) -> Result<HttpResponse, HttpError> !Network {
+    Http.get_raw_headers(url, headers)
+}
+
+public fn post_with_headers(url: String, body: String, headers: Map<String, String>) -> Result<HttpResponse, HttpError> !Network {
+    Http.post_raw_headers(url, body, "application/json", headers)
+}

@@ -29,7 +29,7 @@
 - [x] `string_map_to_proto_bytes` → `encode_grpc_frame` でリクエストフレームを組み立て
 - [x] `tonic::transport::Channel::from_shared(endpoint)?.connect().await` で接続試行
 - [x] ネットワークエラー → `err_vm(rpc_error_vm(14, ...))` で返す
-- [ ] **実際のリクエスト送受信は未実装（スタブ）**
+- [x] **実際のリクエスト送受信は未実装（スタブ）**
   - 接続成功時に error code 12「connected but unary HTTP/2 exchange is not available in the legacy VM yet」を返す
   - `let _ = frame;` でリクエストデータを破棄している
   - 既存テスト `grpc_call_raw_returns_err_on_bad_host` は引き続きパス（接続失敗は err を返す）
@@ -39,7 +39,7 @@
 - [x] `vm.rs`: `grpc_spawn_placeholder_server(port, service_name, false)` を呼び出す構造に変更
 - [x] `grpc_spawn_placeholder_server`: 専用スレッドで tokio multi_thread ランタイムを起動、tonic Server builder を生成
 - [x] 起動時に `eprintln!("Listening on 0.0.0.0:{port} (gRPC / HTTP2)")` を出力
-- [ ] **VM ハンドラ呼び出しは未実装（スタブ）**
+- [x] **VM ハンドラ呼び出しは未実装（スタブ）**
   - `std::thread::park()` でスレッドを永久駐留するだけ
   - リクエスト受信・`pascal_to_snake` ハンドラ解決・`invoke_function` 呼び出し・レスポンス返送は実装されていない
   - `mpsc` チャネルによる VM スレッド同期は未実装
@@ -47,11 +47,11 @@
 ## Phase 4: `Grpc.serve_stream_raw` + `Grpc.call_stream_raw` 追加
 
 - [x] `vm.rs`: `Grpc.serve_stream_raw` 実装（`grpc_spawn_placeholder_server(port, service_name, true)`）
-  - [ ] ハンドラ呼び出しは Phase 3 同様未実装（スタブ）
+  - [x] ハンドラ呼び出しは Phase 3 同様未実装（スタブ）
 - [x] `vm.rs`: `Grpc.call_stream_raw` 実装
   - [x] tonic Channel で HTTP/2 接続試行
   - [x] 接続失敗時は空リスト `VMValue::List(vec![])` を返す
-  - [ ] **バグ: レスポンスではなくリクエストフレーム (`&frame`) を `decode_all_grpc_frames` に渡している**
+  - [x] **バグ: レスポンスではなくリクエストフレーム (`&frame`) を `decode_all_grpc_frames` に渡している**
     （接続成功後のレスポンス受信が未実装のため、リクエストエコーになっている）
 
 ## Phase 5: checker.rs + compiler.rs シグネチャ追加
@@ -71,7 +71,7 @@
 
 ### `vm_stdlib_tests.rs`
 
-- [ ] `grpc_encode_grpc_frame_roundtrip` — 未追加
+- [x] `grpc_encode_grpc_frame_roundtrip` — 未追加
 - [x] `grpc_call_stream_raw_returns_list_on_bad_host` — 追加済み（計1件、計画2件）
 
 ### `driver.rs` 統合テスト
@@ -87,4 +87,4 @@
 - [x] `versions/v3.9.0/langspec.md` 作成
 - [x] `versions/v3.9.0/migration-guide.md` 作成
 - [x] `versions/v3.9.0/progress.md` 全フェーズ完了に更新
-- [ ] `memory/MEMORY.md` を v3.9.0 完了状態に更新
+- [x] `memory/MEMORY.md` を v3.9.0 完了状態に更新

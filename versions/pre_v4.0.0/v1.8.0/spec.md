@@ -343,17 +343,17 @@ fav bench --filter "keyword"       // ベンチ名フィルタ
 
 ## 9. 完了条件（Done Definition）
 
-- [ ] `Task.all([t1, t2])` が型チェックを通り実行できる
-- [ ] `Task.race([t1, t2])` が型チェックを通り実行できる
-- [ ] `Task.timeout(t, 5000)` が型チェックを通り `Option<T>` を返す
-- [ ] `async fn main() -> Unit !Io` が `fav run` で実行できる
-- [ ] `chain x <- async_fn()` で `Task<T!>` が一括処理される
-- [ ] `fav test --coverage` の出力に関数名と行カバレッジが含まれる
-- [ ] `fav test --coverage-report <dir>` でテキストレポートが書き出される
-- [ ] `fav bench` で `bench` ブロックが計測・表示される
-- [ ] v1.7.0 の全テスト（498）が引き続き通る
-- [ ] `cargo build` で警告ゼロ
-- [ ] `Cargo.toml` バージョンが `"1.8.0"`
+- [x] `Task.all([t1, t2])` が型チェックを通り実行できる
+- [x] `Task.race([t1, t2])` が型チェックを通り実行できる
+- [x] `Task.timeout(t, 5000)` が型チェックを通り `Option<T>` を返す
+- [x] `async fn main() -> Unit !Io` が `fav run` で実行できる
+- [x] `chain x <- async_fn()` で `Task<T!>` が一括処理される
+- [x] `fav test --coverage` の出力に関数名と行カバレッジが含まれる
+- [x] `fav test --coverage-report <dir>` でテキストレポートが書き出される
+- [x] `fav bench` で `bench` ブロックが計測・表示される
+- [x] v1.7.0 の全テスト（498）が引き続き通る
+- [x] `cargo build` で警告ゼロ
+- [x] `Cargo.toml` バージョンが `"1.8.0"`
 
 ---
 

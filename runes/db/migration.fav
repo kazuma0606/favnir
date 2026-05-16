@@ -1,0 +1,24 @@
+// runes/db/migration.fav — Migration tracking helpers (v4.2.0)
+
+// ensure_migrations_table: create _fav_migrations table if not exists (private)
+fn ensure_migrations_table(handle: DbHandle) -> Result<Int, DbError> !Db {
+    DB.execute_raw(handle,
+        "CREATE TABLE IF NOT EXISTS _fav_migrations (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, applied_at TEXT NOT NULL)")
+}
+
+// applied_migrations: list migration names in application order
+public fn applied_migrations(handle: DbHandle) -> Result<List<Map<String, String>>, DbError> !Db {
+    bind _ <- ensure_migrations_table(handle)
+    DB.query_raw(handle, "SELECT name FROM _fav_migrations ORDER BY id ASC")
+}
+
+// mark_applied: record that a migration has been applied
+public fn mark_applied(handle: DbHandle, name: String) -> Result<Int, DbError> !Db {
+    bind _ <- ensure_migrations_table(handle)
+    DB.execute_raw(handle,
+        String.concat(
+            String.concat(
+                String.concat("INSERT INTO _fav_migrations (name, applied_at) VALUES ('", name),
+                "', '"),
+            String.concat(IO.timestamp(), "')")))
+}

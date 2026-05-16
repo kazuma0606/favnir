@@ -115,7 +115,7 @@
 
 - [x] 4-1: `src/vm.rs` を新規作成する
 - [x] 4-2: `VMError` 構造体を定義する（`message: String`, `fn_name: String`, `ip: usize`）
-- [ ] 4-3: `VMSignal` 列挙体を定義する（`Normal(Value)` / `Escape(Value)`）
+- [x] 4-3: `VMSignal` 列挙体を定義する（`Normal(Value)` / `Escape(Value)`）
   - 実装: chain escape は `CHAIN_CHECK` + IP オフセットジャンプで VM ネイティブ実装（`VMSignal` 不要）
   - eval.rs の `RuntimeError.escape` アプローチも不使用。IP ジャンプ方式の方がシンプルなため当タスクは不要と判断
 
@@ -143,9 +143,9 @@
 - [x] 4-16: `RETURN` 命令を実装する
   - `stack.truncate(frame.base)` でフレームのローカル変数領域を除去
 - [x] 4-17: `MAKE_CLOSURE` 命令を実装する（グローバルインデックス + キャプチャをポップして `Closure` を作成）
-- [ ] 4-18: `BUILD_LIST` 命令を実装する
+- [x] 4-18: `BUILD_LIST` 命令を実装する
   - 現状: Favnir にリストリテラル構文がないため不要。`collect { yield ... }` で代替
-- [ ] 4-19: `BUILD_VARIANT` 命令を実装する
+- [x] 4-19: `BUILD_VARIANT` 命令を実装する
   - 現状: VariantCtor + `CALL` で代替実装済み（機能的に等価）
   - `GET_VARIANT_PAYLOAD` は実装済み ✓
 - [x] 4-20: `GET_FIELD` 命令を実装する（`Value::Record` からフィールドを取り出す）

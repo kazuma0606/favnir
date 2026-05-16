@@ -241,14 +241,14 @@ Phase 0 で作った骨格に内容を埋める。全部は埋めなくていい
 
 ## 8. 完了条件
 
-- [ ] `cargo build` 警告ゼロ
-- [ ] `cargo test` 全通過 (目標 330+)
-- [ ] `fav lsp` が hover + diagnostics を返す
-- [ ] `fn greet(name: String) -> String { name }` が WASM でビルド・実行できる
-- [ ] `let f <- |x| x + 1; f(5)` が WASM でビルド・実行できる
-- [ ] `fav install` が path 依存を解決して `fav.lock` を生成する
-- [ ] `examples/string_wasm.fav` と `examples/closures_wasm.fav` が動く
-- [ ] `Cargo.toml` バージョンが `"1.0.0"`
+- [x] `cargo build` 警告ゼロ
+- [x] `cargo test` 全通過 (目標 330+)
+- [x] `fav lsp` が hover + diagnostics を返す
+- [x] `fn greet(name: String) -> String { name }` が WASM でビルド・実行できる
+- [x] `let f <- |x| x + 1; f(5)` が WASM でビルド・実行できる
+- [x] `fav install` が path 依存を解決して `fav.lock` を生成する
+- [x] `examples/string_wasm.fav` と `examples/closures_wasm.fav` が動く
+- [x] `Cargo.toml` バージョンが `"1.0.0"`
 
 ---
 

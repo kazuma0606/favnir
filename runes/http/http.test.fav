@@ -40,3 +40,32 @@ test "http_error_response_status" {
 test "http_error_response_message_nonempty" {
     assert_eq(http.error_response(404, "not found").body, "not found")
 }
+
+// v4.2.0 tests
+test "http_put_bad_host_is_err" {
+    bind result <- http.put("http://127.0.0.1:9", "{}")
+    assert(Result.is_err(result))
+}
+
+test "http_delete_bad_host_is_err" {
+    bind result <- http.delete("http://127.0.0.1:9")
+    assert(Result.is_err(result))
+}
+
+test "http_patch_bad_host_is_err" {
+    bind result <- http.patch("http://127.0.0.1:9", "{}")
+    assert(Result.is_err(result))
+}
+
+test "http_bearer_returns_map_with_auth_key" {
+    assert_eq(Option.is_some(Map.get(http.bearer("tok"), "Authorization")), true)
+}
+
+test "http_api_key_returns_map_with_key" {
+    assert_eq(Option.is_some(Map.get(http.api_key("abc"), "X-Api-Key")), true)
+}
+
+test "http_retry_get_bad_host_is_err" {
+    bind result <- http.retry_get("http://127.0.0.1:9", 1)
+    assert(Result.is_err(result))
+}

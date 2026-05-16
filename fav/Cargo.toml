@@ -1,6 +1,6 @@
 [package]
 name = "fav"
-version = "4.1.0"
+version = "4.2.0"
 edition = "2024"
 
 [dependencies]
@@ -30,6 +30,8 @@ bytes = "1"
 http = "0.2"
 parquet = "52"
 arrow = { version = "52", features = ["ipc"] }
+serde_yaml = "0.9"
+regex = "1"
 
 [features]
 postgres_integration = ["dep:postgres"]

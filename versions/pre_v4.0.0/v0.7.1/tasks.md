@@ -39,14 +39,14 @@
 
 ## S-1-C: ローカル配置・動作確認
 
-- [ ] `editors/favnir-vscode/` を `~/.vscode/extensions/favnir-language/` にコピー
-- [ ] VS Code を再起動または `Developer: Reload Window`
-- [ ] `examples/hello.fav` を開いて目視確認
-  - [ ] キーワードが着色されている
-  - [ ] `//` コメントが着色されている
-  - [ ] 型注釈（`: Int`、`-> String`）が着色されている
-  - [ ] エフェクト（`!Io`、`!File`）が着色されている
-  - [ ] 組み込み namespace（`IO.println`）が着色されている
+- [x] `editors/favnir-vscode/` を `~/.vscode/extensions/favnir-language/` にコピー
+- [x] VS Code を再起動または `Developer: Reload Window`
+- [x] `examples/hello.fav` を開いて目視確認
+  - [x] キーワードが着色されている
+  - [x] `//` コメントが着色されている
+  - [x] 型注釈（`: Int`、`-> String`）が着色されている
+  - [x] エフェクト（`!Io`、`!File`）が着色されている
+  - [x] 組み込み namespace（`IO.println`）が着色されている
 
 ---
 

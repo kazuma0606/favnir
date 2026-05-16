@@ -556,12 +556,12 @@ abstract flw Pipeline<Row> {
 
 ## 11. 完了条件（Done Definition）
 
-- [ ] `fav explain main.fav --format json` が仕様スキーマに準拠した JSON を出力する
-- [ ] `fav bundle main.fav -o dist/app.fvc --explain` が `.fvc` + `manifest.json` + `explain.json` を生成する
-- [ ] `included` / `excluded` が正確に到達可能性を反映する
-- [ ] `effects_required` が到達可能な関数の effects を網羅する
-- [ ] `fav explain dist/app.fvc` が artifact から explain を出力する
-- [ ] `fav graph` が abstract flw の構造を text/mermaid で出力する
-- [ ] `fn f(save: A -> B) -> flw X -> Y { ... }` が型検査・実行できる
-- [ ] `abstract trf Fetch<T>: Id -> T? !Db` が定義でき、スロット型として使える
-- [ ] v1.3.0 の全テストが引き続き通る
+- [x] `fav explain main.fav --format json` が仕様スキーマに準拠した JSON を出力する
+- [x] `fav bundle main.fav -o dist/app.fvc --explain` が `.fvc` + `manifest.json` + `explain.json` を生成する
+- [x] `included` / `excluded` が正確に到達可能性を反映する
+- [x] `effects_required` が到達可能な関数の effects を網羅する
+- [x] `fav explain dist/app.fvc` が artifact から explain を出力する
+- [x] `fav graph` が abstract flw の構造を text/mermaid で出力する
+- [x] `fn f(save: A -> B) -> flw X -> Y { ... }` が型検査・実行できる
+- [x] `abstract trf Fetch<T>: Id -> T? !Db` が定義でき、スロット型として使える
+- [x] v1.3.0 の全テストが引き続き通る

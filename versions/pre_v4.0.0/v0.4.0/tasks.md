@@ -145,10 +145,10 @@
 
 ### check_flw_def の更新（generic trf 対応）
 
-- [ ] 3-14-flw: `register_item_signatures` / `check_flw_def` で、各 step の型を `unify` しながら合成する処理が `Type::Var` を含む場合も正しく動作することを確認する
+- [x] 3-14-flw: `register_item_signatures` / `check_flw_def` で、各 step の型を `unify` しながら合成する処理が `Type::Var` を含む場合も正しく動作することを確認する
   - 入力: step trf の型が `Trf(Var("T"), Var("U"), ...)` を含む場合
   - 出力: `flw` の型 = `Arrow(Var("$0"), Var("$1"))` を env に登録する（使用時に単一化）
-- [ ] 3-15-flw: `test_flw_generic_compose` — generic trf 2 つを合成した flw の型チェックテスト
+- [x] 3-15-flw: `test_flw_generic_compose` — generic trf 2 つを合成した flw の型チェックテスト
 
 ### check_apply の更新（型変数の単一化）
 
@@ -174,7 +174,7 @@
 
 ### エラーコードの追加
 
-- [ ] 3-26: E017 — 未解決の型変数（fresh var が代入なしに残った場合）
+- [x] 3-26: E017 — 未解決の型変数（fresh var が代入なしに残った場合）
 - [x] 3-27: E018 — 型単一化の失敗
 - [x] 3-28: E019 — occurs check の失敗（無限型、現在は E018 で報告）
 - [x] 3-29: E020 — 未定義の cap

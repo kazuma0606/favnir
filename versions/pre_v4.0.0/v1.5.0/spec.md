@@ -420,20 +420,20 @@ fav lint src/main.fav --warn-only
 
 ## 8. 完了条件（Done Definition）
 
-- [ ] `fav explain diff old.json new.json` が差分を text で出力する
-- [ ] `fav explain diff old.fav new.fav --format json` が差分 JSON を出力する
-- [ ] 破壊的変更が `breaking_changes` に正確に分類される
-- [ ] `fav graph src/main.fav --focus fn` が fn 呼び出し依存ツリーを出力する
-- [ ] `fav graph src/main.fav --focus fn --format mermaid` が mermaid 形式を出力する
-- [ ] `effect Payment` がパースされチェッカーに登録される
-- [ ] 未宣言エフェクトを使った型注釈で E052 が発生する
-- [ ] 組み込みエフェクト（`Io`, `Db`, `File`, `Trace`, `Emit`）は宣言不要
-- [ ] 未参照の private trf/flw に L005 が発生する
-- [ ] trf 名の非 PascalCase に L006 が発生する
-- [ ] effect 名の非 PascalCase に L007 が発生する
-- [ ] v1.4.0 の全テスト（441）が引き続き通る
-- [ ] `cargo build` で警告ゼロ
-- [ ] `Cargo.toml` バージョンが `"1.5.0"`
+- [x] `fav explain diff old.json new.json` が差分を text で出力する
+- [x] `fav explain diff old.fav new.fav --format json` が差分 JSON を出力する
+- [x] 破壊的変更が `breaking_changes` に正確に分類される
+- [x] `fav graph src/main.fav --focus fn` が fn 呼び出し依存ツリーを出力する
+- [x] `fav graph src/main.fav --focus fn --format mermaid` が mermaid 形式を出力する
+- [x] `effect Payment` がパースされチェッカーに登録される
+- [x] 未宣言エフェクトを使った型注釈で E052 が発生する
+- [x] 組み込みエフェクト（`Io`, `Db`, `File`, `Trace`, `Emit`）は宣言不要
+- [x] 未参照の private trf/flw に L005 が発生する
+- [x] trf 名の非 PascalCase に L006 が発生する
+- [x] effect 名の非 PascalCase に L007 が発生する
+- [x] v1.4.0 の全テスト（441）が引き続き通る
+- [x] `cargo build` で警告ゼロ
+- [x] `Cargo.toml` バージョンが `"1.5.0"`
 
 ---
 

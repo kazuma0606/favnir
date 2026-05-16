@@ -507,18 +507,18 @@ fn run_watch_command(file: Option<&str>, cmd: &str) {
 
 ## 8. 完了条件（Done Definition）
 
-- [ ] `$"Hello {name}!"` が文字列 `"Hello Alice!"` を生成する
-- [ ] 非 String 補間式に `Debug.show` が自動適用される
-- [ ] Show 未実装型の補間で E054 が発生する
-- [ ] `match user { { name, age } -> ... }` がパース・実行できる
-- [ ] 存在しないフィールドのレコード分解で E056 が発生する
-- [ ] `fav test --filter "keyword"` で説明が一致するテストだけ実行される
-- [ ] テスト結果に passed/failed/filtered/時間 が表示される
-- [ ] `assert_matches(value, some(_))` が型検査・実行できる
-- [ ] `fav watch --cmd check` が `.fav` ファイル変更を検出して再実行する
-- [ ] v1.5.0 の全テスト（462）が引き続き通る
-- [ ] `cargo build` で警告ゼロ
-- [ ] `Cargo.toml` バージョンが `"1.6.0"`
+- [x] `$"Hello {name}!"` が文字列 `"Hello Alice!"` を生成する
+- [x] 非 String 補間式に `Debug.show` が自動適用される
+- [x] Show 未実装型の補間で E054 が発生する
+- [x] `match user { { name, age } -> ... }` がパース・実行できる
+- [x] 存在しないフィールドのレコード分解で E056 が発生する
+- [x] `fav test --filter "keyword"` で説明が一致するテストだけ実行される
+- [x] テスト結果に passed/failed/filtered/時間 が表示される
+- [x] `assert_matches(value, some(_))` が型検査・実行できる
+- [x] `fav watch --cmd check` が `.fav` ファイル変更を検出して再実行する
+- [x] v1.5.0 の全テスト（462）が引き続き通る
+- [x] `cargo build` で警告ゼロ
+- [x] `Cargo.toml` バージョンが `"1.6.0"`
 
 ---
 

@@ -1,6 +1,6 @@
-// runes/grpc/grpc.fav — Favnir grpc rune public API (v4.1.0)
+// runes/grpc/grpc.fav — Favnir grpc rune public API (v4.2.0)
 // Directory rune: server + client + codec.
 
 use server.{ serve, serve_stream }
-use client.{ call, call_stream }
+use client.{ call, call_stream, call_typed }
 use codec.{ encode, decode, ok, err }

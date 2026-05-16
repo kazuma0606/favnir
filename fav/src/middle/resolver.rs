@@ -325,6 +325,7 @@ mod tests {
             runes_path: None,
             dependencies: vec![],
             checkpoint: None,
+            database: None,
         };
         let resolver = Resolver::new(Some(toml), Some(root));
         (resolver, dir) // dir must outlive the test
@@ -399,6 +400,7 @@ mod tests {
             runes_path: None,
             dependencies: vec![],
             checkpoint: None,
+            database: None,
         };
         let mut r = Resolver::new(Some(toml), Some(dir.path().to_path_buf()));
         let mut errors = Vec::new();

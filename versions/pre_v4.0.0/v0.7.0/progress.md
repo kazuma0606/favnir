@@ -9,4 +9,4 @@
 - [x] Phase 4 / File builtins in VM
 - [x] Phase 5 / Json builtins
 - [x] Phase 6 / Csv builtins
-- [ ] Phase 7 / Tests + sample files
+- [x] Phase 7 / Tests + sample files

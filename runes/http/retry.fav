@@ -1,0 +1,31 @@
+// runes/http/retry.fav — HTTP retry helpers (v4.2.0)
+
+// attempt: private helper for with_retry (top-level to avoid inner-fn restriction)
+fn attempt(n: Int, f: Unit -> Result<HttpResponse, HttpError>) -> Result<HttpResponse, HttpError> !Network {
+    match f(()) {
+        Ok(resp) => Result.ok(resp)
+        Err(e) => {
+            if n <= 1 {
+                Result.err(e)
+            } else {
+                attempt(n - 1, f)
+            }
+        }
+    }
+}
+
+// with_retry: call f() up to max_attempts times; return last result
+public fn with_retry(
+    max_attempts: Int,
+    f: Unit -> Result<HttpResponse, HttpError>
+) -> Result<HttpResponse, HttpError> !Network {
+    attempt(max_attempts, f)
+}
+
+public fn retry_get(url: String, max_attempts: Int) -> Result<HttpResponse, HttpError> !Network {
+    Http.get_raw(url)
+}
+
+public fn retry_post(url: String, body: String, max_attempts: Int) -> Result<HttpResponse, HttpError> !Network {
+    Http.post_raw(url, body, "application/json")
+}

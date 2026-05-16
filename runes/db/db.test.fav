@@ -34,6 +34,27 @@ fn query_params_raw(handle: DbHandle, sql: String, params: List<String>) -> Resu
     DB.query_raw_params(handle, sql, params)
 }
 
+// query_one helper: returns first row or NOT_FOUND error (v4.2.0)
+fn query_one(handle: DbHandle, sql: String) -> Result<Map<String, String>, DbError> !Db {
+    match DB.query_raw(handle, sql) {
+        Ok(rows) => match List.first(rows) {
+            Some(row) => Result.ok(row)
+            None      => Result.err(DbError { code: "NOT_FOUND" message: "query returned no rows" })
+        }
+        Err(e) => Result.err(e)
+    }
+}
+
+// paginate helper: LIMIT/OFFSET query (v4.2.0)
+fn paginate(handle: DbHandle, sql: String, page: Int, size: Int) -> Result<List<Map<String, String>>, DbError> !Db {
+    DB.query_raw(handle,
+        String.concat(
+            String.concat(
+                String.concat(String.concat(sql, " LIMIT "), Debug.show(size)),
+                " OFFSET "),
+            Debug.show(page * size)))
+}
+
 // ── tests ─────────────────────────────────────────────────────────────────────
 
 test "test_connect_sqlite_memory" {
@@ -164,6 +185,85 @@ test "test_schema_mismatch_returns_err" {
                     assert_eq(Result.is_err(adapted), true)
                 }
                 Err(_) => assert_eq(false, true)
+            }
+        }
+        Err(_) => assert_eq(false, true)
+    }
+}
+
+// ── v4.2.0 tests ──────────────────────────────────────────────────────────────
+
+test "test_query_one_returns_first_row" {
+    bind conn_result <- connect("sqlite::memory:")
+    match conn_result {
+        Ok(conn) => {
+            bind _ <- execute(conn, "CREATE TABLE names (n TEXT)")
+            bind _ <- execute(conn, "INSERT INTO names VALUES ('Alice')")
+            bind row_result <- query_one(conn, "SELECT n FROM names")
+            assert_eq(Result.is_ok(row_result), true)
+        }
+        Err(_) => assert_eq(false, true)
+    }
+}
+
+test "test_query_one_returns_err_on_empty" {
+    bind conn_result <- connect("sqlite::memory:")
+    match conn_result {
+        Ok(conn) => {
+            bind _ <- execute(conn, "CREATE TABLE empty_t (n TEXT)")
+            bind row_result <- query_one(conn, "SELECT n FROM empty_t")
+            assert_eq(Result.is_err(row_result), true)
+        }
+        Err(_) => assert_eq(false, true)
+    }
+}
+
+test "test_paginate_returns_subset" {
+    bind conn_result <- connect("sqlite::memory:")
+    match conn_result {
+        Ok(conn) => {
+            bind _ <- execute(conn, "CREATE TABLE nums (v INTEGER)")
+            bind _ <- execute(conn, "INSERT INTO nums VALUES (1)")
+            bind _ <- execute(conn, "INSERT INTO nums VALUES (2)")
+            bind _ <- execute(conn, "INSERT INTO nums VALUES (3)")
+            bind page_result <- paginate(conn, "SELECT v FROM nums ORDER BY v", 0, 2)
+            match page_result {
+                Ok(rows) => assert_eq(List.length(rows), 2)
+                Err(_)   => assert_eq(false, true)
+            }
+        }
+        Err(_) => assert_eq(false, true)
+    }
+}
+
+test "test_paginate_second_page" {
+    bind conn_result <- connect("sqlite::memory:")
+    match conn_result {
+        Ok(conn) => {
+            bind _ <- execute(conn, "CREATE TABLE pts (v INTEGER)")
+            bind _ <- execute(conn, "INSERT INTO pts VALUES (1)")
+            bind _ <- execute(conn, "INSERT INTO pts VALUES (2)")
+            bind _ <- execute(conn, "INSERT INTO pts VALUES (3)")
+            bind page_result <- paginate(conn, "SELECT v FROM pts ORDER BY v", 1, 2)
+            match page_result {
+                Ok(rows) => assert_eq(List.length(rows), 1)
+                Err(_)   => assert_eq(false, true)
+            }
+        }
+        Err(_) => assert_eq(false, true)
+    }
+}
+
+test "test_migration_table_created" {
+    bind conn_result <- connect("sqlite::memory:")
+    match conn_result {
+        Ok(conn) => {
+            bind _ <- execute(conn,
+                "CREATE TABLE IF NOT EXISTS _fav_migrations (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, applied_at TEXT NOT NULL)")
+            bind rows_result <- query_raw(conn, "SELECT name FROM _fav_migrations ORDER BY id ASC")
+            match rows_result {
+                Ok(rows) => assert_eq(List.length(rows), 0)
+                Err(_)   => assert_eq(false, true)
             }
         }
         Err(_) => assert_eq(false, true)

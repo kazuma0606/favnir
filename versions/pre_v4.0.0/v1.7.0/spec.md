@@ -360,17 +360,17 @@ walkdir = "2"  # 追加（既存なら不要）
 
 ## 8. 完了条件（Done Definition）
 
-- [ ] `async fn f() -> String` が `Task<String>` を返す型を持つ
-- [ ] `bind x <- async_fn()` で `Task<T>` が解除できる
-- [ ] `Task.run(t)` が即時実行できる
-- [ ] `type UserId = Int` が型検査・実行に通る
-- [ ] `UserId` と `Int` が型互換
-- [ ] `fav test --coverage` が実行後にカバレッジ率を出力する
-- [ ] `fav watch --dir src --dir tests` が両ディレクトリを監視する
-- [ ] `fav watch --debounce 200` でデバウンス時間が変更できる
-- [ ] v1.6.0 の全テスト（483）が引き続き通る
-- [ ] `cargo build` で警告ゼロ
-- [ ] `Cargo.toml` バージョンが `"1.7.0"`
+- [x] `async fn f() -> String` が `Task<String>` を返す型を持つ
+- [x] `bind x <- async_fn()` で `Task<T>` が解除できる
+- [x] `Task.run(t)` が即時実行できる
+- [x] `type UserId = Int` が型検査・実行に通る
+- [x] `UserId` と `Int` が型互換
+- [x] `fav test --coverage` が実行後にカバレッジ率を出力する
+- [x] `fav watch --dir src --dir tests` が両ディレクトリを監視する
+- [x] `fav watch --debounce 200` でデバウンス時間が変更できる
+- [x] v1.6.0 の全テスト（483）が引き続き通る
+- [x] `cargo build` で警告ゼロ
+- [x] `Cargo.toml` バージョンが `"1.7.0"`
 
 ---
 

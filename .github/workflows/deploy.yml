@@ -15,6 +15,8 @@ permissions:
 env:
   AWS_REGION: ap-northeast-1
   CARGO_TERM_COLOR: always
+  # Clear Windows MSVC flags for Linux build
+  CXXFLAGS: ""
 
 jobs:
   deploy-site:
@@ -29,6 +31,33 @@ jobs:
         with:
           role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            fav/target
+            crates/favnir-wasm/target
+          key: ${{ runner.os }}-wasm-${{ hashFiles('fav/Cargo.lock', 'crates/favnir-wasm/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-wasm-
+
+      - name: Install wasm-pack
+        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+
+      - name: Build WASM
+        run: |
+          wasm-pack build crates/favnir-wasm \
+            --target web \
+            --out-dir ../../site/public/wasm \
+            --out-name favnir \
+            --release
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -45,13 +74,20 @@ jobs:
         working-directory: site
         run: npm run build
 
-      - name: Sync to S3 — immutable assets
+      - name: Sync to S3 — immutable assets (JS/CSS/WASM)
         run: |
           aws s3 sync site/out/ s3://${{ secrets.SITE_BUCKET_NAME }}/ \
             --delete \
             --cache-control "public, max-age=31536000, immutable" \
             --exclude "*.html" \
             --exclude "*.json"
+
+      - name: Sync to S3 — WASM binary with correct MIME type
+        run: |
+          aws s3 cp site/out/wasm/favnir_bg.wasm \
+            s3://${{ secrets.SITE_BUCKET_NAME }}/wasm/favnir_bg.wasm \
+            --cache-control "public, max-age=3600" \
+            --content-type "application/wasm"
 
       - name: Sync to S3 — HTML and JSON
         run: |

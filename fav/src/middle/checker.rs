@@ -1265,6 +1265,10 @@ impl Checker {
             "Checkpoint",
             "Parquet",
             "Grpc",
+            "Validate",
+            "DuckDb",
+            "Crypto",
+            "Auth",
         ] {
             self.env
                 .define(ns.to_string(), Type::Named(ns.to_string(), vec![]));
@@ -2106,6 +2110,9 @@ impl Checker {
             "Trace",
             "Emit",
             "Random",
+            "Auth",
+            "Env",
+            "DuckDb",
         ];
         for effect in effects {
             if let Effect::Unknown(name) = effect {
@@ -2535,9 +2542,17 @@ impl Checker {
     // ── test_def (v0.8.0) ─────────────────────────────────────────────────────
 
     fn check_test_def(&mut self, td: &TestDef) {
-        // Test bodies run with Io+File effects allowed (assert builtins are pure)
-        let saved_effects =
-            std::mem::replace(&mut self.current_effects, vec![Effect::Io, Effect::File]);
+        // Test bodies run with Io+File+Auth+DuckDb effects allowed (assert builtins are pure)
+        let saved_effects = std::mem::replace(
+            &mut self.current_effects,
+            vec![
+                Effect::Io,
+                Effect::File,
+                Effect::Unknown("Auth".to_string()),
+                Effect::Unknown("DuckDb".to_string()),
+                Effect::Unknown("Env".to_string()),
+            ],
+        );
         self.env.push();
         // Register assert builtins as visible inside test bodies
         self.env.define(
@@ -4393,6 +4408,34 @@ impl Checker {
         }
     }
 
+    fn require_auth_effect(&mut self, span: &Span) {
+        let has = self.has_effect(|e| match e {
+            Effect::Unknown(name) => name == "Auth",
+            _ => false,
+        });
+        if !has {
+            self.type_error(
+                "E0311",
+                "Crypto.* call requires `!Auth` effect on enclosing fn/trf",
+                span,
+            );
+        }
+    }
+
+    fn require_env_effect(&mut self, span: &Span) {
+        let has = self.has_effect(|e| match e {
+            Effect::Unknown(name) => name == "Env",
+            _ => false,
+        });
+        if !has {
+            self.type_error(
+                "E0312",
+                "Env.* call requires `!Env` effect on enclosing fn/trf",
+                span,
+            );
+        }
+    }
+
     fn require_io_effect(&mut self, span: &Span) {
         if !self.has_effect(|e| matches!(e, Effect::Io)) {
             self.type_error(
@@ -4746,13 +4789,40 @@ impl Checker {
                 Some(Type::Unknown)
             }
 
-            // Env.* (v3.3.0)
+            // Env.* (v4.7.0)
             ("Env", "get") => Some(Type::Result(
                 Box::new(Type::String),
                 Box::new(Type::Named("DbError".into(), vec![])),
             )),
             ("Env", "get_or") => Some(Type::String),
-            ("Env", _) => Some(Type::Unknown),
+            ("Env", "get_raw") => {
+                self.require_env_effect(span);
+                Some(Type::Option(Box::new(Type::String)))
+            }
+            ("Env", "require_raw") => {
+                self.require_env_effect(span);
+                Some(Type::Result(Box::new(Type::String), Box::new(Type::String)))
+            }
+            ("Env", "get_int_raw") => {
+                self.require_env_effect(span);
+                Some(Type::Result(Box::new(Type::Int), Box::new(Type::String)))
+            }
+            ("Env", "get_bool_raw") => {
+                self.require_env_effect(span);
+                Some(Type::Result(Box::new(Type::Bool), Box::new(Type::String)))
+            }
+            ("Env", "load_dotenv_raw") => {
+                self.require_env_effect(span);
+                Some(Type::Result(Box::new(Type::Unit), Box::new(Type::String)))
+            }
+            ("Env", "all_raw") => {
+                self.require_env_effect(span);
+                Some(Type::Map(Box::new(Type::String), Box::new(Type::String)))
+            }
+            ("Env", _) => {
+                self.require_env_effect(span);
+                Some(Type::Unknown)
+            }
 
             // File (v0.7.0): require !File effect
             ("File", "read") => {
@@ -4991,6 +5061,29 @@ impl Checker {
                 Box::new(Type::String),
             )))),
             ("Gen", "profile_raw") => Some(Type::Named("GenProfile".into(), vec![])),
+            // Gen 2.0 (v4.4.0)
+            ("Gen", "hint_one_raw") => Some(Type::Result(
+                Box::new(Type::Map(Box::new(Type::String), Box::new(Type::String))),
+                Box::new(Type::String),
+            )),
+            ("Gen", "hint_list_raw") => Some(Type::Result(
+                Box::new(Type::List(Box::new(Type::Map(
+                    Box::new(Type::String),
+                    Box::new(Type::String),
+                )))),
+                Box::new(Type::String),
+            )),
+            ("Gen", "set_yaml_config_raw") => Some(Type::Unit),
+            ("Gen", "to_csv_raw") => Some(Type::Result(Box::new(Type::Unit), Box::new(Type::String))),
+            ("Gen", "to_parquet_raw") => Some(Type::Result(Box::new(Type::Unit), Box::new(Type::String))),
+            ("Gen", "load_into_raw") => Some(Type::Result(Box::new(Type::Int), Box::new(Type::String))),
+            ("Gen", "edge_cases_raw") => Some(Type::Result(
+                Box::new(Type::List(Box::new(Type::Map(
+                    Box::new(Type::String),
+                    Box::new(Type::String),
+                )))),
+                Box::new(Type::String),
+            )),
             ("Gen", _) => Some(Type::Unknown),
 
             // Validate.run_raw(type_name, raw_map) (v4.1.5)
@@ -5002,6 +5095,52 @@ impl Checker {
                 )))),
             )),
             ("Validate", _) => Some(Type::Unknown),
+
+            // Crypto.* (v4.5.0) — cryptographic primitives, require !Auth effect
+            ("Crypto", "jwt_verify_raw") => {
+                self.require_auth_effect(span);
+                Some(Type::Result(
+                    Box::new(Type::Map(Box::new(Type::String), Box::new(Type::String))),
+                    Box::new(Type::String),
+                ))
+            }
+            ("Crypto", "jwt_decode_raw") => {
+                self.require_auth_effect(span);
+                Some(Type::Result(
+                    Box::new(Type::Map(Box::new(Type::String), Box::new(Type::String))),
+                    Box::new(Type::String),
+                ))
+            }
+            ("Crypto", "jwt_sign_raw") => {
+                self.require_auth_effect(span);
+                Some(Type::Result(Box::new(Type::String), Box::new(Type::String)))
+            }
+            ("Crypto", "hmac_sha256_raw") => {
+                self.require_auth_effect(span);
+                Some(Type::String)
+            }
+            ("Crypto", "sha256_raw") => {
+                self.require_auth_effect(span);
+                Some(Type::String)
+            }
+            ("Crypto", "random_hex_raw") => {
+                self.require_auth_effect(span);
+                Some(Type::String)
+            }
+            ("Crypto", _) => {
+                self.require_auth_effect(span);
+                Some(Type::Unknown)
+            }
+
+            // Auth.* (v4.5.0) — auth config helpers
+            ("Auth", "get_mode_raw") => Some(Type::String),
+            ("Auth", _) => Some(Type::Unknown),
+
+            // Log.* (v4.6.0) — structured logging + metrics (no effect check)
+            ("Log", "emit_raw") => Some(Type::Unit),
+            ("Log", "metric_raw") => Some(Type::Unit),
+            ("Log", "map_to_json_raw") => Some(Type::String),
+            ("Log", _) => Some(Type::Unit),
 
             // Dynamic T.validate — type name that has a schema entry
             (type_name, "validate") if self.schemas.contains_key(type_name) => {
@@ -6106,6 +6245,9 @@ abstract seq Pipeline {
             dependencies: vec![],
             checkpoint: None,
             database: None,
+            auth: None,
+            log: None,
+            env: None,
         };
         let resolver = Arc::new(Mutex::new(Resolver::new(Some(toml), Some(root))));
         (resolver, dir)
@@ -6181,6 +6323,9 @@ abstract seq Pipeline {
             dependencies: vec![],
             checkpoint: None,
             database: None,
+            auth: None,
+            log: None,
+            env: None,
         };
         let mut resolver = Resolver::new(Some(toml), Some(root));
         // Simulate a mid-load state: "cycle" is already in the loading set

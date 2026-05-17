@@ -7,15 +7,23 @@ use arrow::record_batch::RecordBatch;
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use bytes::Bytes;
 use chrono::Utc;
+use hmac::{Hmac, Mac};
+use jsonwebtoken::{
+    Algorithm, DecodingKey, EncodingKey, Header, Validation, decode, encode,
+};
 use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
 use parquet::arrow::arrow_writer::ArrowWriter;
+use rand::RngCore;
 use rusqlite::Connection;
 use serde_json::Value as SerdeJsonValue;
+use sha2::{Digest, Sha256};
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
 use std::fs::File;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
+
+type HmacSha256 = Hmac<Sha256>;
 
 use super::artifact::FvcArtifact;
 use super::codegen::{Constant, Opcode};
@@ -44,6 +52,14 @@ thread_local! {
     /// Seeded RNG for deterministic generation (v3.5.0).
     /// When `Some`, Random.int / Random.float / Gen.* use this instead of thread_rng.
     static SEEDED_RNG: RefCell<Option<rand::rngs::SmallRng>> = const { RefCell::new(None) };
+
+    /// Sequential ID counters for hint generation (v4.4.0).
+    /// Key = "TypeName.field_name", value = next counter value.
+    /// Reset when Random.seed is called.
+    static HINT_ID_COUNTER: RefCell<HashMap<String, u64>> = RefCell::new(HashMap::new());
+
+    /// Per-type YAML generation config (v4.4.0).
+    static GEN_YAML_CONFIG: RefCell<HashMap<String, GenYamlConfig>> = RefCell::new(HashMap::new());
 
     static CHECKPOINT_BACKEND: RefCell<CheckpointBackend> = RefCell::new(CheckpointBackend::File {
         dir: PathBuf::from(".fav_checkpoints"),
@@ -75,6 +91,241 @@ pub struct CheckpointMetaRecord {
 /// Register project schemas for runtime validation (v4.1.5).
 pub fn set_schema_registry(schemas: ProjectSchemas) {
     SCHEMA_REGISTRY.with(|s| *s.borrow_mut() = schemas);
+}
+
+thread_local! {
+    /// Auth mode from fav.toml [auth] section (v4.5.0).
+    static AUTH_MODE: RefCell<String> = RefCell::new("jwt".to_string());
+}
+
+/// Set the auth mode (called from cmd_run when fav.toml has [auth] section).
+pub fn set_auth_mode(mode: &str) {
+    AUTH_MODE.with(|m| *m.borrow_mut() = mode.to_string());
+}
+
+// ── Env config (v4.7.0) ───────────────────────────────────────────────────────
+
+/// Env configuration from fav.toml [env] section.
+#[derive(Debug, Clone)]
+pub struct EnvConfig {
+    pub dotenv: Option<String>,
+    pub prefix: String,
+}
+
+impl Default for EnvConfig {
+    fn default() -> Self {
+        EnvConfig { dotenv: None, prefix: String::new() }
+    }
+}
+
+thread_local! {
+    static ENV_CONFIG: RefCell<EnvConfig> = RefCell::new(EnvConfig::default());
+}
+
+/// Set the env config (called from cmd_run).
+pub fn set_env_config(cfg: EnvConfig) {
+    ENV_CONFIG.with(|c| *c.borrow_mut() = cfg);
+}
+
+/// Resolve a key by applying the configured prefix.
+fn env_resolve_key(key: &str) -> String {
+    ENV_CONFIG.with(|c| {
+        let cfg = c.borrow();
+        if cfg.prefix.is_empty() {
+            key.to_string()
+        } else {
+            format!("{}{}", cfg.prefix, key)
+        }
+    })
+}
+
+/// Parse a .env file's content into (key, value) pairs.
+/// Skips blank lines and `#` comments; strips surrounding quotes from values.
+pub(crate) fn parse_dotenv_content(content: &str) -> Vec<(String, String)> {
+    content
+        .lines()
+        .filter_map(|line| {
+            let line = line.trim();
+            if line.is_empty() || line.starts_with('#') {
+                return None;
+            }
+            let (k, v) = line.split_once('=')?;
+            let key = k.trim().to_string();
+            if key.is_empty() {
+                return None;
+            }
+            let val = v.trim().trim_matches('"').trim_matches('\'').to_string();
+            Some((key, val))
+        })
+        .collect()
+}
+
+// ── Log config (v4.6.0) ───────────────────────────────────────────────────────
+
+/// Log configuration from fav.toml [log] section.
+#[derive(Debug, Clone)]
+pub struct LogConfig {
+    pub level: String,    // "debug" | "info" | "warn" | "error"
+    pub format: String,   // "json" | "text"
+    pub output: String,   // "stdout" | "stderr"
+    pub service: String,
+}
+
+impl Default for LogConfig {
+    fn default() -> Self {
+        LogConfig {
+            level: "info".to_string(),
+            format: "text".to_string(),
+            output: "stdout".to_string(),
+            service: String::new(),
+        }
+    }
+}
+
+thread_local! {
+    static LOG_CONFIG: RefCell<LogConfig> = RefCell::new(LogConfig::default());
+    static LOG_CODES: RefCell<std::collections::HashMap<String, String>> =
+        RefCell::new(std::collections::HashMap::new());
+}
+
+/// Set the log config (called from cmd_run).
+pub fn set_log_config(cfg: LogConfig) {
+    LOG_CONFIG.with(|c| *c.borrow_mut() = cfg);
+}
+
+/// Set custom log codes loaded from logs/*.yaml.
+pub fn set_log_codes(codes: std::collections::HashMap<String, String>) {
+    LOG_CODES.with(|c| *c.borrow_mut() = codes);
+}
+
+/// Returns true if `emit_level` passes the configured level filter.
+fn log_level_passes(emit_level: &str) -> bool {
+    LOG_CONFIG.with(|c| {
+        let cfg = c.borrow();
+        match cfg.level.as_str() {
+            "error" => emit_level == "ERROR",
+            "warn"  => matches!(emit_level, "ERROR" | "WARN"),
+            "info"  => matches!(emit_level, "ERROR" | "WARN" | "INFO" | "SUCCESS"),
+            _       => true, // "debug" — all pass
+        }
+    })
+}
+
+/// Format a UTC timestamp as "[2026-05-17 10:30:00]".
+fn log_timestamp_text() -> String {
+    let now = Utc::now();
+    format!(
+        "[{:04}-{:02}-{:02} {:02}:{:02}:{:02}]",
+        now.format("%Y"),
+        now.format("%m"),
+        now.format("%d"),
+        now.format("%H"),
+        now.format("%M"),
+        now.format("%S"),
+    )
+}
+
+/// Format a UTC timestamp as "2026-05-17T10:30:00Z".
+fn log_timestamp_iso() -> String {
+    Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string()
+}
+
+/// Unix epoch milliseconds.
+fn log_timestamp_millis() -> u64 {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64
+}
+
+/// Parse ctx_json and render as "key=val  key2=val2" for text format.
+fn log_ctx_to_text(ctx_json: &str) -> String {
+    let ctx_json = ctx_json.trim();
+    if ctx_json == "{}" || ctx_json.is_empty() {
+        return String::new();
+    }
+    match serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(ctx_json) {
+        Ok(map) => {
+            let parts: Vec<String> = map
+                .iter()
+                .map(|(k, v)| {
+                    let val = match v {
+                        serde_json::Value::String(s) => s.clone(),
+                        other => other.to_string(),
+                    };
+                    format!("{}={}", k, val)
+                })
+                .collect();
+            if parts.is_empty() {
+                String::new()
+            } else {
+                format!("  {}", parts.join("  "))
+            }
+        }
+        Err(_) => format!("  {}", ctx_json),
+    }
+}
+
+/// Format a log line in text format.
+fn log_format_text(level: &str, code: &str, message: &str, ctx_json: &str) -> String {
+    let ts = log_timestamp_text();
+    let ctx = log_ctx_to_text(ctx_json);
+    format!("{} {:<7} {:<6} {}{}", ts, level, code, message, ctx)
+}
+
+/// Format a log line in JSON format.
+fn log_format_json(level: &str, code: &str, message: &str, ctx_json: &str, service: &str) -> String {
+    let ts = log_timestamp_iso();
+    let ctx: serde_json::Value = serde_json::from_str(ctx_json)
+        .unwrap_or(serde_json::Value::Object(serde_json::Map::new()));
+    let mut obj = serde_json::Map::new();
+    obj.insert("ts".to_string(), serde_json::Value::String(ts));
+    obj.insert("level".to_string(), serde_json::Value::String(level.to_string()));
+    obj.insert("code".to_string(), serde_json::Value::String(code.to_string()));
+    obj.insert("msg".to_string(), serde_json::Value::String(message.to_string()));
+    if !service.is_empty() {
+        obj.insert("service".to_string(), serde_json::Value::String(service.to_string()));
+    }
+    obj.insert("ctx".to_string(), ctx);
+    serde_json::Value::Object(obj).to_string()
+}
+
+/// Format a metric in CloudWatch EMF format.
+fn log_metric_emf(name: &str, value: i64, unit: &str) -> String {
+    let ts = log_timestamp_millis();
+    let mut outer = serde_json::Map::new();
+    let mut aws = serde_json::Map::new();
+    aws.insert("Timestamp".to_string(), serde_json::Value::Number(ts.into()));
+    let metric_obj = serde_json::json!([{
+        "Namespace": "favnir",
+        "Dimensions": [[]],
+        "Metrics": [{"Name": name, "Unit": unit}]
+    }]);
+    aws.insert("CloudWatchMetrics".to_string(), metric_obj);
+    outer.insert("_aws".to_string(), serde_json::Value::Object(aws));
+    outer.insert(name.to_string(), serde_json::Value::Number(value.into()));
+    serde_json::Value::Object(outer).to_string()
+}
+
+/// Internal helper: emit a log line regardless of rune context (used by VM error paths).
+pub fn log_auto_emit(level: &str, code: &str, message: &str) {
+    if !log_level_passes(level) {
+        return;
+    }
+    LOG_CONFIG.with(|c| {
+        let cfg = c.borrow();
+        let line = if cfg.format == "json" {
+            log_format_json(level, code, message, "{}", &cfg.service)
+        } else {
+            log_format_text(level, code, message, "{}")
+        };
+        if cfg.output == "stderr" {
+            eprintln!("{}", line);
+        } else {
+            println!("{}", line);
+        }
+    });
 }
 
 /// Enable coverage tracking for the current thread.
@@ -4004,6 +4255,21 @@ fn duckdb_query_raw(conn: &duckdb::Connection, sql: &str) -> Result<Vec<VMValue>
     Ok(rows_out)
 }
 
+// ── Gen 2.0 — YAML config structs (v4.4.0) ────────────────────────────────────
+
+#[derive(Default, Clone)]
+struct GenFieldConfig {
+    values: Vec<String>,
+    min: Option<f64>,
+    max: Option<f64>,
+    null_rate: f64,
+}
+
+#[derive(Default, Clone)]
+struct GenYamlConfig {
+    fields: HashMap<String, GenFieldConfig>,
+}
+
 // ── Gen helpers (v3.5.0) ─────────────────────────────────────────────────────
 
 fn seeded_rand_int(lo: i64, hi: i64) -> i64 {
@@ -4084,6 +4350,160 @@ fn gen_one_row(type_name: &str, type_metas: &HashMap<String, TypeMeta>) -> Resul
     let mut map = HashMap::new();
     for field in &meta.fields {
         let val = gen_value_for_type(&field.ty);
+        map.insert(field.name.clone(), VMValue::Str(val));
+    }
+    Ok(VMValue::Record(map))
+}
+
+// ── Gen 2.0 — hint-based generation (v4.4.0) ──────────────────────────────────
+
+const JA_LAST_NAMES: &[&str] = &[
+    "田中", "鈴木", "佐藤", "高橋", "伊藤", "渡辺", "山本", "中村", "小林", "加藤",
+];
+const JA_FIRST_NAMES: &[&str] = &[
+    "太郎", "花子", "一郎", "京子", "健二", "恵子", "誠", "裕子", "明", "直子",
+];
+const STATUSES: &[&str] = &["active", "inactive", "pending"];
+const DESCRIPTIONS: &[&str] = &[
+    "標準的な商品です。",
+    "人気の高いアイテムです。",
+    "新商品です。",
+    "定番の品です。",
+];
+
+fn hint_counter_next(key: &str) -> u64 {
+    HINT_ID_COUNTER.with(|c| {
+        let mut map = c.borrow_mut();
+        let entry = map.entry(key.to_string()).or_insert(0);
+        *entry += 1;
+        *entry
+    })
+}
+
+fn hint_reset_counters() {
+    HINT_ID_COUNTER.with(|c| c.borrow_mut().clear());
+}
+
+/// Convert a serde_json::Value (JWT claims payload) into a VM claims map.
+/// All values are stringified: numbers → decimal string, bools → "true"/"false", etc.
+fn json_value_to_vm_claims_map(value: &SerdeJsonValue) -> HashMap<String, VMValue> {
+    let mut map = HashMap::new();
+    if let SerdeJsonValue::Object(obj) = value {
+        for (k, v) in obj {
+            let s = match v {
+                SerdeJsonValue::String(s) => s.clone(),
+                SerdeJsonValue::Number(n) => n.to_string(),
+                SerdeJsonValue::Bool(b) => if *b { "true".to_string() } else { "false".to_string() },
+                other => other.to_string(),
+            };
+            map.insert(k.clone(), VMValue::Str(s));
+        }
+    }
+    map
+}
+
+fn gen_hint_value_for_field(type_name: &str, field_name: &str, ty: &str) -> String {
+    // Check YAML config overrides first
+    let yaml_cfg = GEN_YAML_CONFIG.with(|c| {
+        c.borrow()
+            .get(type_name)
+            .and_then(|cfg| cfg.fields.get(field_name).cloned())
+    });
+
+    let fname = field_name.to_lowercase();
+
+    if let Some(ref cfg) = yaml_cfg {
+        if !cfg.values.is_empty() {
+            let idx = seeded_rand_int(0, (cfg.values.len() - 1) as i64) as usize;
+            return cfg.values[idx].clone();
+        }
+        if (ty == "Int" || ty == "Float") && (cfg.min.is_some() || cfg.max.is_some()) {
+            let min = cfg.min.unwrap_or(0.0);
+            let max = cfg.max.unwrap_or(1000.0);
+            return if ty == "Int" {
+                seeded_rand_int(min as i64, max as i64).to_string()
+            } else {
+                format!("{:.2}", min + seeded_rand_float() * (max - min))
+            };
+        }
+    }
+
+    let counter_key = format!("{}.{}", type_name, field_name);
+
+    if fname == "uuid" || fname.ends_with("_uuid") {
+        uuid::Uuid::new_v4().to_string()
+    } else if fname == "id" || fname.ends_with("_id") {
+        hint_counter_next(&counter_key).to_string()
+    } else if fname == "email" || fname.ends_with("_email") {
+        let n = hint_counter_next(&counter_key);
+        format!("user{}@example.com", n)
+    } else if fname == "first_name" || fname == "given_name" {
+        let i = seeded_rand_int(0, (JA_FIRST_NAMES.len() - 1) as i64) as usize;
+        JA_FIRST_NAMES[i].to_string()
+    } else if fname == "last_name" || fname == "family_name" {
+        let i = seeded_rand_int(0, (JA_LAST_NAMES.len() - 1) as i64) as usize;
+        JA_LAST_NAMES[i].to_string()
+    } else if fname == "name" || fname.ends_with("_name") || fname == "full_name" {
+        let li = seeded_rand_int(0, (JA_LAST_NAMES.len() - 1) as i64) as usize;
+        let fi = seeded_rand_int(0, (JA_FIRST_NAMES.len() - 1) as i64) as usize;
+        format!("{} {}", JA_LAST_NAMES[li], JA_FIRST_NAMES[fi])
+    } else if fname == "phone" || fname.ends_with("_phone") {
+        let a = seeded_rand_int(1000, 9999);
+        let b = seeded_rand_int(1000, 9999);
+        format!("090-{}-{}", a, b)
+    } else if fname.ends_with("_at")
+        || fname.ends_with("_datetime")
+        || fname == "created_at"
+        || fname == "updated_at"
+    {
+        let offset_secs = seeded_rand_int(-(365 * 2 * 24 * 3600), 365 * 2 * 24 * 3600);
+        let dt = Utc::now() + chrono::Duration::seconds(offset_secs);
+        dt.format("%Y-%m-%dT%H:%M:%SZ").to_string()
+    } else if fname.ends_with("_date") || fname == "birth_date" || fname == "date" {
+        let offset_days = seeded_rand_int(-(365 * 50), 365 * 50);
+        let dt = Utc::now() + chrono::Duration::days(offset_days);
+        dt.format("%Y-%m-%d").to_string()
+    } else if fname == "price"
+        || fname == "amount"
+        || fname.ends_with("_fee")
+        || fname.ends_with("_price")
+        || fname.ends_with("_amount")
+    {
+        format!("{}.00", seeded_rand_int(100, 99999))
+    } else if fname == "age" {
+        seeded_rand_int(0, 130).to_string()
+    } else if fname == "count" || fname.ends_with("_count") {
+        seeded_rand_int(1, 999).to_string()
+    } else if fname == "url" || fname.ends_with("_url") {
+        let n = hint_counter_next(&counter_key);
+        format!("https://example.com/item/{}", n)
+    } else if fname == "zip" || fname == "postal_code" {
+        format!("{}-{}", seeded_rand_int(100, 999), seeded_rand_int(1000, 9999))
+    } else if fname == "address" {
+        format!("東京都千代田区{}丁目", seeded_rand_int(1, 30))
+    } else if fname == "description" || fname == "body" || fname == "content" {
+        let i = seeded_rand_int(0, (DESCRIPTIONS.len() - 1) as i64) as usize;
+        DESCRIPTIONS[i].to_string()
+    } else if fname == "status" {
+        let i = seeded_rand_int(0, (STATUSES.len() - 1) as i64) as usize;
+        STATUSES[i].to_string()
+    } else if fname == "flag" || fname.starts_with("is_") || fname.starts_with("has_") {
+        if seeded_rand_int(0, 1) == 0 { "false" } else { "true" }.to_string()
+    } else {
+        gen_value_for_type(ty)
+    }
+}
+
+fn gen_hint_one_row(
+    type_name: &str,
+    type_metas: &HashMap<String, TypeMeta>,
+) -> Result<VMValue, String> {
+    let meta = type_metas
+        .get(type_name)
+        .ok_or_else(|| format!("Gen.hint_one_raw: unknown type '{type_name}'"))?;
+    let mut map = HashMap::new();
+    for field in &meta.fields {
+        let val = gen_hint_value_for_field(type_name, &field.name, &field.ty);
         map.insert(field.name.clone(), VMValue::Str(val));
     }
     Ok(VMValue::Record(map))
@@ -7196,6 +7616,7 @@ fn vm_call_builtin(
             SEEDED_RNG.with(|r| {
                 *r.borrow_mut() = Some(rand::rngs::SmallRng::seed_from_u64(n as u64));
             });
+            hint_reset_counters();
             Ok(VMValue::Unit)
         }
 
@@ -7325,6 +7746,634 @@ fn vm_call_builtin(
             profile_map.insert("invalid".to_string(), VMValue::Int(invalid as i64));
             profile_map.insert("rate".to_string(), VMValue::Float(rate));
             Ok(VMValue::Record(profile_map))
+        }
+
+        // ── Gen.* v4.4.0 additions ──────────────────────────────────────────
+        "Gen.hint_one_raw" => {
+            let type_name = vm_string(
+                args.into_iter()
+                    .next()
+                    .ok_or_else(|| "Gen.hint_one_raw requires 1 argument".to_string())?,
+                "Gen.hint_one_raw",
+            )?;
+            match gen_hint_one_row(&type_name, type_metas) {
+                Ok(row) => Ok(ok_vm(row)),
+                Err(e) => Ok(err_vm(VMValue::Str(e))),
+            }
+        }
+        "Gen.hint_list_raw" => {
+            let mut it = args.into_iter();
+            let type_name = vm_string(
+                it.next()
+                    .ok_or_else(|| "Gen.hint_list_raw requires 2 arguments".to_string())?,
+                "Gen.hint_list_raw",
+            )?;
+            let n = vm_int(
+                it.next()
+                    .ok_or_else(|| "Gen.hint_list_raw requires 2 arguments".to_string())?,
+                "Gen.hint_list_raw",
+            )? as usize;
+            let rows: Result<Vec<VMValue>, String> =
+                (0..n).map(|_| gen_hint_one_row(&type_name, type_metas)).collect();
+            match rows {
+                Ok(list) => Ok(ok_vm(VMValue::List(list))),
+                Err(e) => Ok(err_vm(VMValue::Str(e))),
+            }
+        }
+        "Gen.set_yaml_config_raw" => {
+            let mut it = args.into_iter();
+            let type_name = vm_string(
+                it.next()
+                    .ok_or_else(|| "Gen.set_yaml_config_raw requires 2 arguments".to_string())?,
+                "Gen.set_yaml_config_raw",
+            )?;
+            let path_val = vm_string(
+                it.next()
+                    .ok_or_else(|| "Gen.set_yaml_config_raw requires 2 arguments".to_string())?,
+                "Gen.set_yaml_config_raw",
+            )?;
+            let content = std::fs::read_to_string(&path_val)
+                .map_err(|e| format!("Gen.set_yaml_config_raw: cannot read '{}': {}", path_val, e))?;
+            // Parse YAML: expect top-level map of field_name -> config
+            let yaml: serde_yaml::Value = serde_yaml::from_str(&content)
+                .map_err(|e| format!("Gen.set_yaml_config_raw: invalid YAML: {}", e))?;
+            let mut cfg = GenYamlConfig::default();
+            if let serde_yaml::Value::Mapping(top) = &yaml {
+                if let Some(fields_val) = top.get("fields") {
+                    if let serde_yaml::Value::Mapping(fields) = fields_val {
+                        for (k, v) in fields {
+                            let field_name = k.as_str().unwrap_or("").to_string();
+                            let mut fc = GenFieldConfig::default();
+                            if let serde_yaml::Value::Mapping(m) = v {
+                                if let Some(serde_yaml::Value::Sequence(vals)) = m.get("values") {
+                                    fc.values = vals
+                                        .iter()
+                                        .filter_map(|x| x.as_str().map(|s| s.to_string()))
+                                        .collect();
+                                }
+                                if let Some(mn) = m.get("min") {
+                                    fc.min = mn.as_f64();
+                                }
+                                if let Some(mx) = m.get("max") {
+                                    fc.max = mx.as_f64();
+                                }
+                                if let Some(nr) = m.get("null_rate") {
+                                    fc.null_rate = nr.as_f64().unwrap_or(0.0);
+                                }
+                            }
+                            cfg.fields.insert(field_name, fc);
+                        }
+                    }
+                }
+            }
+            GEN_YAML_CONFIG.with(|c| c.borrow_mut().insert(type_name, cfg));
+            Ok(VMValue::Unit)
+        }
+        "Gen.to_csv_raw" => {
+            let mut it = args.into_iter();
+            let path_val = vm_string(
+                it.next()
+                    .ok_or_else(|| "Gen.to_csv_raw requires 2 arguments".to_string())?,
+                "Gen.to_csv_raw",
+            )?;
+            let data_val = it
+                .next()
+                .ok_or_else(|| "Gen.to_csv_raw requires 2 arguments".to_string())?;
+            let rows = match data_val {
+                VMValue::List(rows) => rows,
+                _ => return Ok(err_vm(VMValue::Str("Gen.to_csv_raw: second argument must be a list".to_string()))),
+            };
+            // Collect headers from first row
+            let headers: Vec<String> = if let Some(VMValue::Record(first)) = rows.first() {
+                let mut keys: Vec<String> = first.keys().cloned().collect();
+                keys.sort();
+                keys
+            } else {
+                vec![]
+            };
+            let mut wtr = csv::Writer::from_path(&path_val)
+                .map_err(|e| format!("Gen.to_csv_raw: cannot open '{}': {}", path_val, e))?;
+            wtr.write_record(&headers)
+                .map_err(|e| format!("Gen.to_csv_raw: write error: {}", e))?;
+            for row in &rows {
+                if let VMValue::Record(map) = row {
+                    let record: Vec<String> = headers
+                        .iter()
+                        .map(|h| match map.get(h) {
+                            Some(VMValue::Str(s)) => s.clone(),
+                            Some(v) => format!("{:?}", v),
+                            None => String::new(),
+                        })
+                        .collect();
+                    wtr.write_record(&record)
+                        .map_err(|e| format!("Gen.to_csv_raw: write error: {}", e))?;
+                }
+            }
+            wtr.flush().map_err(|e| format!("Gen.to_csv_raw: flush error: {}", e))?;
+            Ok(ok_vm(VMValue::Unit))
+        }
+        "Gen.to_parquet_raw" => {
+            let mut it = args.into_iter();
+            let path_val = vm_string(
+                it.next()
+                    .ok_or_else(|| "Gen.to_parquet_raw requires 2 arguments".to_string())?,
+                "Gen.to_parquet_raw",
+            )?;
+            let data_val = it
+                .next()
+                .ok_or_else(|| "Gen.to_parquet_raw requires 2 arguments".to_string())?;
+            let rows = match data_val {
+                VMValue::List(rows) => rows,
+                _ => return Ok(err_vm(VMValue::Str("Gen.to_parquet_raw: second argument must be a list".to_string()))),
+            };
+            // Delegate to the existing Parquet.write_raw logic by collecting string columns
+            use arrow::array::{ArrayRef, StringArray};
+            use arrow::datatypes::{DataType, Field, Schema};
+            use arrow::record_batch::RecordBatch;
+            use parquet::arrow::ArrowWriter;
+            use std::sync::Arc;
+            let headers: Vec<String> = if let Some(VMValue::Record(first)) = rows.first() {
+                let mut keys: Vec<String> = first.keys().cloned().collect();
+                keys.sort();
+                keys
+            } else {
+                vec![]
+            };
+            let schema = Arc::new(Schema::new(
+                headers
+                    .iter()
+                    .map(|h| Field::new(h.as_str(), DataType::Utf8, true))
+                    .collect::<Vec<_>>(),
+            ));
+            let columns: Vec<ArrayRef> = headers
+                .iter()
+                .map(|h| {
+                    let vals: Vec<Option<&str>> = rows
+                        .iter()
+                        .map(|row| {
+                            if let VMValue::Record(map) = row {
+                                map.get(h).and_then(|v| if let VMValue::Str(s) = v { Some(s.as_str()) } else { None })
+                            } else {
+                                None
+                            }
+                        })
+                        .collect();
+                    Arc::new(StringArray::from(vals)) as ArrayRef
+                })
+                .collect();
+            let batch = RecordBatch::try_new(schema.clone(), columns)
+                .map_err(|e| format!("Gen.to_parquet_raw: arrow error: {}", e))?;
+            let file = std::fs::File::create(&path_val)
+                .map_err(|e| format!("Gen.to_parquet_raw: cannot create '{}': {}", path_val, e))?;
+            let mut writer = ArrowWriter::try_new(file, schema, None)
+                .map_err(|e| format!("Gen.to_parquet_raw: parquet writer error: {}", e))?;
+            writer
+                .write(&batch)
+                .map_err(|e| format!("Gen.to_parquet_raw: write error: {}", e))?;
+            writer
+                .close()
+                .map_err(|e| format!("Gen.to_parquet_raw: close error: {}", e))?;
+            Ok(ok_vm(VMValue::Unit))
+        }
+        "Gen.load_into_raw" => {
+            // Gen.load_into_raw(handle, table_name, rows) — load generated data into DuckDB
+            let mut it = args.into_iter();
+            let handle = match it
+                .next()
+                .ok_or_else(|| "Gen.load_into_raw requires 3 arguments".to_string())?
+            {
+                VMValue::DbHandle(id) => id,
+                VMValue::Int(n) => n as u64,
+                other => {
+                    return Err(format!(
+                        "Gen.load_into_raw: first argument must be DbHandle or Int, got {}",
+                        vmvalue_type_name(&other)
+                    ))
+                }
+            };
+            let table_name = vm_string(
+                it.next()
+                    .ok_or_else(|| "Gen.load_into_raw requires 3 arguments".to_string())?,
+                "Gen.load_into_raw",
+            )?;
+            let data_val = it
+                .next()
+                .ok_or_else(|| "Gen.load_into_raw requires 3 arguments".to_string())?;
+            let rows = match data_val {
+                VMValue::List(rows) => rows,
+                _ => return Ok(err_vm(VMValue::Str("Gen.load_into_raw: third argument must be a list".to_string()))),
+            };
+            if rows.is_empty() {
+                return Ok(ok_vm(VMValue::Int(0)));
+            }
+            let headers: Vec<String> = if let Some(VMValue::Record(first)) = rows.first() {
+                let mut keys: Vec<String> = first.keys().cloned().collect();
+                keys.sort();
+                keys
+            } else {
+                vec![]
+            };
+            let inserted: Result<i64, String> = (|| {
+                let mut store = duckdb_store();
+                let conn = store
+                    .get_mut(&handle)
+                    .ok_or_else(|| format!("Gen.load_into_raw: invalid handle {handle}"))?;
+                // Create table if not exists (all TEXT columns)
+                let col_defs: String =
+                    headers.iter().map(|h| format!("{h} TEXT")).collect::<Vec<_>>().join(", ");
+                conn.execute_batch(&format!(
+                    "CREATE TABLE IF NOT EXISTS {table_name} ({col_defs})"
+                ))
+                .map_err(|e| format!("Gen.load_into_raw: create table error: {}", e))?;
+                let placeholders: String =
+                    headers.iter().map(|_| "?").collect::<Vec<_>>().join(", ");
+                let sql = format!("INSERT INTO {table_name} VALUES ({placeholders})");
+                let mut stmt = conn
+                    .prepare(&sql)
+                    .map_err(|e| format!("Gen.load_into_raw: prepare error: {}", e))?;
+                let mut count = 0i64;
+                for row in &rows {
+                    if let VMValue::Record(record_map) = row {
+                        let vals: Vec<duckdb::types::Value> = headers
+                            .iter()
+                            .map(|h| {
+                                let s = match record_map.get(h) {
+                                    Some(VMValue::Str(s)) => s.clone(),
+                                    Some(v) => format!("{:?}", v),
+                                    None => String::new(),
+                                };
+                                duckdb::types::Value::Text(s)
+                            })
+                            .collect();
+                        let params = duckdb::params_from_iter(vals.iter());
+                        stmt.execute(params)
+                            .map_err(|e| format!("Gen.load_into_raw: insert error: {}", e))?;
+                        count += 1;
+                    }
+                }
+                Ok(count)
+            })();
+            match inserted {
+                Ok(n) => Ok(ok_vm(VMValue::Int(n))),
+                Err(e) => Ok(err_vm(VMValue::Str(e))),
+            }
+        }
+        "Gen.edge_cases_raw" => {
+            let type_name = vm_string(
+                args.into_iter()
+                    .next()
+                    .ok_or_else(|| "Gen.edge_cases_raw requires 1 argument".to_string())?,
+                "Gen.edge_cases_raw",
+            )?;
+            let meta = match type_metas.get(&type_name) {
+                Some(m) => m,
+                None => {
+                    return Ok(err_vm(VMValue::Str(format!(
+                        "Gen.edge_cases_raw: unknown type '{type_name}'"
+                    ))))
+                }
+            };
+            // Generate boundary rows: all-min, all-max, all-empty, all-null-like
+            let mut results: Vec<VMValue> = Vec::new();
+            // Row 1: minimum values
+            {
+                let mut map = HashMap::new();
+                for field in &meta.fields {
+                    let val = match field.ty.as_str() {
+                        "Int" => "0".to_string(),
+                        "Float" => "0.0".to_string(),
+                        "Bool" => "false".to_string(),
+                        _ => String::new(),
+                    };
+                    map.insert(field.name.clone(), VMValue::Str(val));
+                }
+                results.push(VMValue::Record(map));
+            }
+            // Row 2: maximum values
+            {
+                let mut map = HashMap::new();
+                for field in &meta.fields {
+                    let val = match field.ty.as_str() {
+                        "Int" => i64::MAX.to_string(),
+                        "Float" => f64::MAX.to_string(),
+                        "Bool" => "true".to_string(),
+                        _ => "z".repeat(255),
+                    };
+                    map.insert(field.name.clone(), VMValue::Str(val));
+                }
+                results.push(VMValue::Record(map));
+            }
+            // Row 3: empty string values
+            {
+                let mut map = HashMap::new();
+                for field in &meta.fields {
+                    map.insert(field.name.clone(), VMValue::Str(String::new()));
+                }
+                results.push(VMValue::Record(map));
+            }
+            // Row 4: whitespace values
+            {
+                let mut map = HashMap::new();
+                for field in &meta.fields {
+                    map.insert(field.name.clone(), VMValue::Str("   ".to_string()));
+                }
+                results.push(VMValue::Record(map));
+            }
+            Ok(ok_vm(VMValue::List(results)))
+        }
+
+        // ── Crypto.* (v4.5.0) — cryptographic primitives ──────────────────
+        "Crypto.jwt_verify_raw" => {
+            let mut it = args.into_iter();
+            let token = vm_string(
+                it.next().ok_or_else(|| "Crypto.jwt_verify_raw requires 3 arguments".to_string())?,
+                "Crypto.jwt_verify_raw",
+            )?;
+            let secret = vm_string(
+                it.next().ok_or_else(|| "Crypto.jwt_verify_raw requires 3 arguments".to_string())?,
+                "Crypto.jwt_verify_raw",
+            )?;
+            let alg_str = vm_string(
+                it.next().ok_or_else(|| "Crypto.jwt_verify_raw requires 3 arguments".to_string())?,
+                "Crypto.jwt_verify_raw",
+            )?;
+            let result: Result<HashMap<String, VMValue>, String> = (|| {
+                match alg_str.as_str() {
+                    "HS256" => {
+                        let key = DecodingKey::from_secret(secret.as_bytes());
+                        let validation = Validation::new(Algorithm::HS256);
+                        let data = decode::<SerdeJsonValue>(&token, &key, &validation)
+                            .map_err(|e| format!("jwt verify failed: {}", e))?;
+                        Ok(json_value_to_vm_claims_map(&data.claims))
+                    }
+                    "RS256" => {
+                        let key = DecodingKey::from_rsa_pem(secret.as_bytes())
+                            .map_err(|e| format!("invalid RSA PEM: {}", e))?;
+                        let validation = Validation::new(Algorithm::RS256);
+                        let data = decode::<SerdeJsonValue>(&token, &key, &validation)
+                            .map_err(|e| format!("jwt verify failed: {}", e))?;
+                        Ok(json_value_to_vm_claims_map(&data.claims))
+                    }
+                    other => Err(format!("unsupported algorithm: {}", other)),
+                }
+            })();
+            match result {
+                Ok(map) => Ok(ok_vm(VMValue::Record(map))),
+                Err(e) => Ok(err_vm(VMValue::Str(e))),
+            }
+        }
+
+        "Crypto.jwt_decode_raw" => {
+            let token = vm_string(
+                args.into_iter()
+                    .next()
+                    .ok_or_else(|| "Crypto.jwt_decode_raw requires 1 argument".to_string())?,
+                "Crypto.jwt_decode_raw",
+            )?;
+            // Decode without signature verification (v9 API)
+            let mut validation = Validation::new(Algorithm::HS256);
+            validation.insecure_disable_signature_validation();
+            validation.validate_exp = false;
+            let dummy_key = DecodingKey::from_secret(b"");
+            match decode::<SerdeJsonValue>(&token, &dummy_key, &validation) {
+                Ok(data) => Ok(ok_vm(VMValue::Record(json_value_to_vm_claims_map(&data.claims)))),
+                Err(e) => Ok(err_vm(VMValue::Str(format!("jwt decode failed: {}", e)))),
+            }
+        }
+
+        "Crypto.jwt_sign_raw" => {
+            let mut it = args.into_iter();
+            let claims_json = vm_string(
+                it.next().ok_or_else(|| "Crypto.jwt_sign_raw requires 3 arguments".to_string())?,
+                "Crypto.jwt_sign_raw",
+            )?;
+            let secret = vm_string(
+                it.next().ok_or_else(|| "Crypto.jwt_sign_raw requires 3 arguments".to_string())?,
+                "Crypto.jwt_sign_raw",
+            )?;
+            let _alg = vm_string(
+                it.next().ok_or_else(|| "Crypto.jwt_sign_raw requires 3 arguments".to_string())?,
+                "Crypto.jwt_sign_raw",
+            )?;
+            let claims: SerdeJsonValue = match serde_json::from_str(&claims_json) {
+                Ok(v) => v,
+                Err(e) => return Ok(err_vm(VMValue::Str(format!("invalid claims JSON: {}", e)))),
+            };
+            let header = Header::new(Algorithm::HS256);
+            let key = EncodingKey::from_secret(secret.as_bytes());
+            match encode(&header, &claims, &key) {
+                Ok(token) => Ok(ok_vm(VMValue::Str(token))),
+                Err(e) => Ok(err_vm(VMValue::Str(format!("jwt sign failed: {}", e)))),
+            }
+        }
+
+        "Crypto.hmac_sha256_raw" => {
+            let mut it = args.into_iter();
+            let key = vm_string(
+                it.next().ok_or_else(|| "Crypto.hmac_sha256_raw requires 2 arguments".to_string())?,
+                "Crypto.hmac_sha256_raw",
+            )?;
+            let data = vm_string(
+                it.next().ok_or_else(|| "Crypto.hmac_sha256_raw requires 2 arguments".to_string())?,
+                "Crypto.hmac_sha256_raw",
+            )?;
+            let mut mac = HmacSha256::new_from_slice(key.as_bytes())
+                .map_err(|e| format!("Crypto.hmac_sha256_raw: {}", e))?;
+            mac.update(data.as_bytes());
+            let result = mac.finalize().into_bytes();
+            let hex: String = result.iter().map(|b| format!("{:02x}", b)).collect();
+            Ok(VMValue::Str(hex))
+        }
+
+        "Crypto.sha256_raw" => {
+            let data = vm_string(
+                args.into_iter()
+                    .next()
+                    .ok_or_else(|| "Crypto.sha256_raw requires 1 argument".to_string())?,
+                "Crypto.sha256_raw",
+            )?;
+            let mut hasher = Sha256::new();
+            hasher.update(data.as_bytes());
+            let result = hasher.finalize();
+            let hex: String = result.iter().map(|b| format!("{:02x}", b)).collect();
+            Ok(VMValue::Str(hex))
+        }
+
+        "Crypto.random_hex_raw" => {
+            let n = match args.into_iter().next() {
+                Some(VMValue::Int(n)) => n as usize,
+                Some(other) => {
+                    return Err(format!(
+                        "Crypto.random_hex_raw: expected Int, got {}",
+                        vmvalue_type_name(&other)
+                    ))
+                }
+                None => return Err("Crypto.random_hex_raw requires 1 argument".to_string()),
+            };
+            let mut bytes = vec![0u8; n];
+            rand::rngs::OsRng.fill_bytes(&mut bytes);
+            let hex: String = bytes.iter().map(|b| format!("{:02x}", b)).collect();
+            Ok(VMValue::Str(hex))
+        }
+
+        // ── Auth.* (v4.5.0) — auth config helpers ──────────────────────────
+        "Auth.get_mode_raw" => {
+            Ok(VMValue::Str(AUTH_MODE.with(|m| m.borrow().clone())))
+        }
+
+        // ── Log.* (v4.6.0) — structured logging + metrics ──────────────────
+        "Log.emit_raw" => {
+            // args: (level, code, message, ctx_json)
+            let mut it = args.into_iter();
+            let level   = vm_string(it.next().ok_or("Log.emit_raw: missing level")?,   "Log.emit_raw")?;
+            let code    = vm_string(it.next().ok_or("Log.emit_raw: missing code")?,    "Log.emit_raw")?;
+            let message = vm_string(it.next().ok_or("Log.emit_raw: missing message")?, "Log.emit_raw")?;
+            let ctx_json= vm_string(it.next().ok_or("Log.emit_raw: missing ctx")?,     "Log.emit_raw")?;
+            if log_level_passes(&level) {
+                LOG_CONFIG.with(|c| {
+                    let cfg = c.borrow();
+                    let line = if cfg.format == "json" {
+                        log_format_json(&level, &code, &message, &ctx_json, &cfg.service)
+                    } else {
+                        log_format_text(&level, &code, &message, &ctx_json)
+                    };
+                    if cfg.output == "stderr" {
+                        eprintln!("{}", line);
+                    } else {
+                        println!("{}", line);
+                    }
+                });
+            }
+            Ok(VMValue::Unit)
+        }
+
+        "Log.metric_raw" => {
+            // args: (name, value: Int, unit)
+            let mut it = args.into_iter();
+            let name  = vm_string(it.next().ok_or("Log.metric_raw: missing name")?,  "Log.metric_raw")?;
+            let value = match it.next().ok_or("Log.metric_raw: missing value")? {
+                VMValue::Int(n) => n,
+                other => return Err(format!("Log.metric_raw: expected Int, got {:?}", other)),
+            };
+            let unit  = vm_string(it.next().ok_or("Log.metric_raw: missing unit")?,  "Log.metric_raw")?;
+            LOG_CONFIG.with(|c| {
+                let cfg = c.borrow();
+                let line = if cfg.format == "json" {
+                    log_metric_emf(&name, value, &unit)
+                } else {
+                    let ts = log_timestamp_text();
+                    format!("{} {:<7} {}={} {}", ts, "METRIC", name, value, unit)
+                };
+                if cfg.output == "stderr" {
+                    eprintln!("{}", line);
+                } else {
+                    println!("{}", line);
+                }
+            });
+            Ok(VMValue::Unit)
+        }
+
+        "Log.map_to_json_raw" => {
+            // args: (ctx: Map<String,String> as VMValue::Record)
+            let ctx = match args.into_iter().next() {
+                Some(VMValue::Record(map)) => map,
+                Some(VMValue::Unit) => std::collections::HashMap::new(),
+                _ => std::collections::HashMap::new(),
+            };
+            let mut obj = serde_json::Map::new();
+            for (k, v) in &ctx {
+                let val = match v {
+                    VMValue::Str(s) => serde_json::Value::String(s.clone()),
+                    VMValue::Int(n) => serde_json::Value::Number((*n).into()),
+                    VMValue::Bool(b) => serde_json::Value::Bool(*b),
+                    other => serde_json::Value::String(format!("{:?}", other)),
+                };
+                obj.insert(k.clone(), val);
+            }
+            Ok(VMValue::Str(serde_json::Value::Object(obj).to_string()))
+        }
+
+        // ── Env.* (v4.7.0) ─────────────────────────────────────────────────
+        "Env.get_raw" => {
+            let key = vm_string(
+                args.into_iter().next().ok_or("Env.get_raw: missing key")?,
+                "Env.get_raw",
+            )?;
+            let resolved = env_resolve_key(&key);
+            match std::env::var(&resolved) {
+                Ok(val) => Ok(VMValue::Variant("some".to_string(), Some(Box::new(VMValue::Str(val))))),
+                Err(_)  => Ok(VMValue::Variant("none".to_string(), None)),
+            }
+        }
+
+        "Env.require_raw" => {
+            let key = vm_string(
+                args.into_iter().next().ok_or("Env.require_raw: missing key")?,
+                "Env.require_raw",
+            )?;
+            let resolved = env_resolve_key(&key);
+            match std::env::var(&resolved) {
+                Ok(val) => Ok(ok_vm(VMValue::Str(val))),
+                Err(_)  => Ok(err_vm(VMValue::Str(format!("ENV_MISSING: {}", resolved)))),
+            }
+        }
+
+        "Env.get_int_raw" => {
+            let key = vm_string(
+                args.into_iter().next().ok_or("Env.get_int_raw: missing key")?,
+                "Env.get_int_raw",
+            )?;
+            let resolved = env_resolve_key(&key);
+            match std::env::var(&resolved) {
+                Err(_) => Ok(err_vm(VMValue::Str(format!("ENV_MISSING: {}", resolved)))),
+                Ok(val) => match val.trim().parse::<i64>() {
+                    Ok(n)  => Ok(ok_vm(VMValue::Int(n))),
+                    Err(_) => Ok(err_vm(VMValue::Str(format!("ENV_PARSE_INT: {}={}", resolved, val)))),
+                },
+            }
+        }
+
+        "Env.get_bool_raw" => {
+            let key = vm_string(
+                args.into_iter().next().ok_or("Env.get_bool_raw: missing key")?,
+                "Env.get_bool_raw",
+            )?;
+            let resolved = env_resolve_key(&key);
+            match std::env::var(&resolved) {
+                Err(_) => Ok(err_vm(VMValue::Str(format!("ENV_MISSING: {}", resolved)))),
+                Ok(val) => match val.trim().to_lowercase().as_str() {
+                    "true"  | "1" | "yes" | "on"  => Ok(ok_vm(VMValue::Bool(true))),
+                    "false" | "0" | "no"  | "off" => Ok(ok_vm(VMValue::Bool(false))),
+                    _ => Ok(err_vm(VMValue::Str(format!("ENV_PARSE_BOOL: {}={}", resolved, val)))),
+                },
+            }
+        }
+
+        "Env.load_dotenv_raw" => {
+            let path = vm_string(
+                args.into_iter().next().ok_or("Env.load_dotenv_raw: missing path")?,
+                "Env.load_dotenv_raw",
+            )?;
+            match std::fs::read_to_string(&path) {
+                Err(_) => Ok(err_vm(VMValue::Str(format!("ENV_DOTENV_NOT_FOUND: {}", path)))),
+                Ok(content) => {
+                    for (key, val) in parse_dotenv_content(&content) {
+                        if std::env::var(&key).is_err() {
+                            // SAFETY: single-threaded VM context; no other threads read env at this point
+                            unsafe { std::env::set_var(&key, &val); }
+                        }
+                    }
+                    Ok(ok_vm(VMValue::Unit))
+                }
+            }
+        }
+
+        "Env.all_raw" => {
+            let map: std::collections::BTreeMap<String, VMValue> = std::env::vars()
+                .map(|(k, v)| (k, VMValue::Str(v)))
+                .collect();
+            let hash: std::collections::HashMap<String, VMValue> = map.into_iter().collect();
+            Ok(VMValue::Record(hash))
         }
 
         // ── DB.* (v3.3.0) ──────────────────────────────────────────────────

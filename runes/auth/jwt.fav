@@ -1,0 +1,30 @@
+// jwt.fav — JWT verification, decoding, and signing helpers (v4.5.0)
+
+// verify_jwt: verify HS256 signature (or decode-only if mode = "cognito")
+public fn verify_jwt(token: String, secret: String) -> Result<Map<String, String>, String> !Auth {
+    match Auth.get_mode_raw() {
+        "cognito" => Crypto.jwt_decode_raw(token)
+        "none"    => Crypto.jwt_decode_raw(token)
+        _         => Crypto.jwt_verify_raw(token, secret, "HS256")
+    }
+}
+
+// verify_jwt_rs256: verify RS256 signature using RSA public key PEM
+public fn verify_jwt_rs256(token: String, public_key_pem: String) -> Result<Map<String, String>, String> !Auth {
+    Crypto.jwt_verify_raw(token, public_key_pem, "RS256")
+}
+
+// decode_claims: decode without signature verification (Cognito / ALB use case)
+public fn decode_claims(token: String) -> Result<Map<String, String>, String> !Auth {
+    Crypto.jwt_decode_raw(token)
+}
+
+// from_cognito_header: decode ALB X-Amzn-Oidc-Data header (pre-verified by ALB)
+public fn from_cognito_header(header_value: String) -> Result<Map<String, String>, String> !Auth {
+    Crypto.jwt_decode_raw(header_value)
+}
+
+// sign_hs256: generate a test JWT token signed with HS256
+public fn sign_hs256(claims_json: String, secret: String) -> Result<String, String> !Auth {
+    Crypto.jwt_sign_raw(claims_json, secret, "HS256")
+}

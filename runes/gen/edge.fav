@@ -1,0 +1,5 @@
+// runes/gen/edge.fav — Edge-case data generation (v4.4.0)
+
+public fn edge_cases(type_name: String) -> Result<List<Map<String, String>>, String> {
+    Gen.edge_cases_raw(type_name)
+}

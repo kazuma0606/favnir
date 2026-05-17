@@ -1,7 +1,7 @@
 // vm_stdlib_tests.rs — VM-based stdlib coverage tests (v0.7.0 parity)
 // Replaces the eval.rs-based stdlib tests that were removed when eval.rs was deleted.
 
-use super::{CheckpointBackend, VM, set_checkpoint_backend};
+use super::{CheckpointBackend, EnvConfig, LogConfig, VM, set_checkpoint_backend, set_env_config, set_log_config};
 use crate::backend::codegen::codegen_program;
 use crate::frontend::parser::Parser;
 use crate::middle::compiler::compile_program;
@@ -1954,6 +1954,254 @@ public fn main() -> Int {
     assert_eq!(result, Value::Int(10));
 }
 
+// ── Gen 2.0 (v4.4.0) ─────────────────────────────────────────────────────────
+
+#[test]
+fn gen_hint_one_raw_returns_ok_with_fields() {
+    let result = eval(
+        r#"
+type Person = { name: String age: Int email: String }
+
+public fn main() -> Int {
+    bind result <- Gen.hint_one_raw("Person");
+    match result {
+        Ok(row) => Map.size(row)
+        Err(_) => -1
+    }
+}
+"#,
+    );
+    assert_eq!(result, Value::Int(3));
+}
+
+#[test]
+fn gen_hint_list_raw_returns_correct_count() {
+    let result = eval(
+        r#"
+type Item = { id: Int name: String }
+
+public fn main() -> Int {
+    bind result <- Gen.hint_list_raw("Item", 8);
+    match result {
+        Ok(rows) => List.length(rows)
+        Err(_) => -1
+    }
+}
+"#,
+    );
+    assert_eq!(result, Value::Int(8));
+}
+
+#[test]
+fn gen_edge_cases_raw_returns_four_rows() {
+    let result = eval(
+        r#"
+type Score = { points: Int label: String }
+
+public fn main() -> Int {
+    bind result <- Gen.edge_cases_raw("Score");
+    match result {
+        Ok(rows) => List.length(rows)
+        Err(_) => -1
+    }
+}
+"#,
+    );
+    assert_eq!(result, Value::Int(4));
+}
+
+#[test]
+fn gen_edge_cases_raw_unknown_type_returns_err() {
+    let result = eval(
+        r#"
+public fn main() -> Bool {
+    bind result <- Gen.edge_cases_raw("NoSuchType");
+    match result {
+        Ok(_) => false
+        Err(_) => true
+    }
+}
+"#,
+    );
+    assert_eq!(result, Value::Bool(true));
+}
+
+// ── Crypto.* (v4.5.0) ────────────────────────────────────────────────────────
+
+#[test]
+fn crypto_jwt_sign_and_verify_roundtrip() {
+    let result = eval(
+        r#"
+public fn main() -> Bool !Auth {
+    bind tok <- Crypto.jwt_sign_raw("{\"sub\":\"alice\",\"role\":\"admin\",\"exp\":9999999999}", "mysecret", "HS256");
+    match tok {
+        Ok(token) => {
+            bind claims <- Crypto.jwt_verify_raw(token, "mysecret", "HS256");
+            match claims {
+                Ok(m) => Option.unwrap_or(Map.get(m, "sub"), "") == "alice"
+                Err(_) => false
+            }
+        }
+        Err(_) => false
+    }
+}
+"#,
+    );
+    assert_eq!(result, Value::Bool(true));
+}
+
+#[test]
+fn crypto_jwt_verify_invalid_signature_returns_err() {
+    let result = eval(
+        r#"
+public fn main() -> Bool !Auth {
+    bind tok <- Crypto.jwt_sign_raw("{\"sub\":\"bob\",\"exp\":9999999999}", "secret1", "HS256");
+    match tok {
+        Ok(token) => {
+            bind claims <- Crypto.jwt_verify_raw(token, "wrong_secret", "HS256");
+            match claims {
+                Ok(_) => false
+                Err(_) => true
+            }
+        }
+        Err(_) => false
+    }
+}
+"#,
+    );
+    assert_eq!(result, Value::Bool(true));
+}
+
+#[test]
+fn crypto_jwt_decode_no_verify() {
+    let result = eval(
+        r#"
+public fn main() -> Bool !Auth {
+    bind tok <- Crypto.jwt_sign_raw("{\"sub\":\"charlie\",\"exp\":9999999999}", "anysecret", "HS256");
+    match tok {
+        Ok(token) => {
+            bind claims <- Crypto.jwt_decode_raw(token);
+            match claims {
+                Ok(m) => Option.unwrap_or(Map.get(m, "sub"), "") == "charlie"
+                Err(_) => false
+            }
+        }
+        Err(_) => false
+    }
+}
+"#,
+    );
+    assert_eq!(result, Value::Bool(true));
+}
+
+#[test]
+fn crypto_hmac_sha256_known_value() {
+    // HMAC-SHA256 result should be 64 hex chars
+    let result = eval(
+        r#"
+public fn main() -> Int !Auth {
+    String.length(Crypto.hmac_sha256_raw("key", "The quick brown fox jumps over the lazy dog"))
+}
+"#,
+    );
+    assert_eq!(result, Value::Int(64));
+}
+
+#[test]
+fn crypto_sha256_known_value() {
+    let result = eval(
+        r#"
+public fn main() -> Bool !Auth {
+    Crypto.sha256_raw("hello") == "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
+}
+"#,
+    );
+    assert_eq!(result, Value::Bool(true));
+}
+
+#[test]
+fn crypto_random_hex_length() {
+    let result = eval(
+        r#"
+public fn main() -> Int !Auth {
+    String.length(Crypto.random_hex_raw(16))
+}
+"#,
+    );
+    assert_eq!(result, Value::Int(32));
+}
+
+// ── Log.* (v4.6.0) ───────────────────────────────────────────────────────────
+
+#[test]
+fn log_emit_text_format_runs() {
+    set_log_config(LogConfig { level: "info".into(), format: "text".into(), output: "stdout".into(), service: String::new() });
+    let result = eval(r#"public fn main() -> Unit !Io { Log.emit_raw("INFO", "I000", "started", "{}") }"#);
+    assert_eq!(result, Value::Unit);
+}
+
+#[test]
+fn log_emit_json_format_runs() {
+    set_log_config(LogConfig { level: "info".into(), format: "json".into(), output: "stdout".into(), service: "test".into() });
+    let result = eval(r#"public fn main() -> Unit !Io { Log.emit_raw("SUCCESS", "S000", "done", "{}") }"#);
+    assert_eq!(result, Value::Unit);
+    // reset
+    set_log_config(LogConfig::default());
+}
+
+#[test]
+fn log_emit_level_filter_suppresses() {
+    // level=error: INFO should be suppressed (still returns Unit)
+    set_log_config(LogConfig { level: "error".into(), format: "text".into(), output: "stdout".into(), service: String::new() });
+    let result = eval(r#"public fn main() -> Unit !Io { Log.emit_raw("INFO", "I000", "suppressed", "{}") }"#);
+    assert_eq!(result, Value::Unit);
+    set_log_config(LogConfig::default());
+}
+
+#[test]
+fn log_emit_level_filter_passes() {
+    // level=info: ERROR should pass
+    set_log_config(LogConfig { level: "info".into(), format: "text".into(), output: "stdout".into(), service: String::new() });
+    let result = eval(r#"public fn main() -> Unit !Io { Log.emit_raw("ERROR", "LE010", "db error", "{}") }"#);
+    assert_eq!(result, Value::Unit);
+    set_log_config(LogConfig::default());
+}
+
+#[test]
+fn log_metric_text_runs() {
+    set_log_config(LogConfig::default());
+    let result = eval(r#"public fn main() -> Unit !Io { Log.metric_raw("rows", 1000, "Count") }"#);
+    assert_eq!(result, Value::Unit);
+}
+
+#[test]
+fn log_metric_json_runs() {
+    set_log_config(LogConfig { level: "info".into(), format: "json".into(), output: "stdout".into(), service: String::new() });
+    let result = eval(r#"public fn main() -> Unit !Io { Log.metric_raw("rows", 1500, "Count") }"#);
+    assert_eq!(result, Value::Unit);
+    set_log_config(LogConfig::default());
+}
+
+#[test]
+fn log_emit_ctx_json_runs() {
+    set_log_config(LogConfig::default());
+    let result = eval(r#"public fn main() -> Unit !Io { Log.emit_raw("INFO", "I010", "processing", "{\"batch\":\"1\"}") }"#);
+    assert_eq!(result, Value::Unit);
+}
+
+#[test]
+fn log_map_to_json_raw_returns_json() {
+    let result = eval(r#"
+public fn main() -> String !Io {
+    Log.map_to_json_raw(Map.set((), "key", "val"))
+}
+"#);
+    match result {
+        Value::Str(s) => assert!(s.contains("key") && s.contains("val"), "JSON should contain key/val: {}", s),
+        other => panic!("expected Str, got {:?}", other),
+    }
+}
+
 #[test]
 fn checkpoint_last_returns_none_initially() {
     let dir = tempdir().expect("tempdir");
@@ -2652,5 +2900,146 @@ public fn main() -> Bool !Db {
 }
 "#,
     );
+    assert_eq!(result, Value::Bool(true));
+}
+
+// ── Env.* (v4.7.0) ─────────────────────────────────────────────────────────
+
+#[test]
+fn env_get_raw_returns_some() {
+    unsafe { std::env::set_var("FAV_TEST_ENV_47_A", "hello_env"); }
+    set_env_config(EnvConfig::default());
+    let result = eval(
+        r#"
+public fn main() -> Bool !Env {
+    match Env.get_raw("FAV_TEST_ENV_47_A") {
+        Some(_) => true
+        None    => false
+    }
+}
+"#,
+    );
+    assert_eq!(result, Value::Bool(true));
+}
+
+#[test]
+fn env_get_raw_returns_none() {
+    set_env_config(EnvConfig::default());
+    let result = eval(
+        r#"
+public fn main() -> Bool !Env {
+    match Env.get_raw("__FAV_TEST_ENV_47_MISSING_NONE__") {
+        Some(_) => false
+        None    => true
+    }
+}
+"#,
+    );
+    assert_eq!(result, Value::Bool(true));
+}
+
+#[test]
+fn env_require_raw_ok() {
+    unsafe { std::env::set_var("FAV_TEST_ENV_47_B", "required_val"); }
+    set_env_config(EnvConfig::default());
+    let result = eval(
+        r#"
+public fn main() -> Bool !Env {
+    match Env.require_raw("FAV_TEST_ENV_47_B") {
+        Ok(_)  => true
+        Err(_) => false
+    }
+}
+"#,
+    );
+    assert_eq!(result, Value::Bool(true));
+}
+
+#[test]
+fn env_require_raw_err() {
+    set_env_config(EnvConfig::default());
+    let result = eval(
+        r#"
+public fn main() -> Bool !Env {
+    match Env.require_raw("__FAV_TEST_ENV_47_MISSING_REQ__") {
+        Ok(_)  => false
+        Err(e) => String.contains(e, "ENV_MISSING")
+    }
+}
+"#,
+    );
+    assert_eq!(result, Value::Bool(true));
+}
+
+#[test]
+fn env_get_int_raw_ok() {
+    unsafe { std::env::set_var("FAV_TEST_ENV_47_INT", "42"); }
+    set_env_config(EnvConfig::default());
+    let result = eval(
+        r#"
+public fn main() -> Bool !Env {
+    match Env.get_int_raw("FAV_TEST_ENV_47_INT") {
+        Ok(n)  => n == 42
+        Err(_) => false
+    }
+}
+"#,
+    );
+    assert_eq!(result, Value::Bool(true));
+}
+
+#[test]
+fn env_get_int_raw_parse_err() {
+    unsafe { std::env::set_var("FAV_TEST_ENV_47_BADINT", "not_a_number"); }
+    set_env_config(EnvConfig::default());
+    let result = eval(
+        r#"
+public fn main() -> Bool !Env {
+    match Env.get_int_raw("FAV_TEST_ENV_47_BADINT") {
+        Ok(_)  => false
+        Err(e) => String.contains(e, "ENV_PARSE_INT")
+    }
+}
+"#,
+    );
+    assert_eq!(result, Value::Bool(true));
+}
+
+#[test]
+fn env_get_bool_raw_true() {
+    unsafe { std::env::set_var("FAV_TEST_ENV_47_BOOL_T", "true"); }
+    set_env_config(EnvConfig::default());
+    let result = eval(
+        r#"
+public fn main() -> Bool !Env {
+    match Env.get_bool_raw("FAV_TEST_ENV_47_BOOL_T") {
+        Ok(b)  => b
+        Err(_) => false
+    }
+}
+"#,
+    );
+    assert_eq!(result, Value::Bool(true));
+}
+
+#[test]
+fn env_load_dotenv_raw_ok() {
+    set_env_config(EnvConfig::default());
+    let dir = tempdir().expect("tempdir");
+    let env_path = dir.path().join("test.env");
+    std::fs::write(&env_path, "FAV_TEST_ENV_47_DOTENV=dotenv_loaded\n").expect("write .env");
+    let path_str = env_path.to_string_lossy().replace('\\', "/");
+    let src = format!(
+        r#"
+public fn main() -> Bool !Env {{
+    match Env.load_dotenv_raw("{}") {{
+        Ok(_)  => true
+        Err(_) => false
+    }}
+}}
+"#,
+        path_str
+    );
+    let result = eval(&src);
     assert_eq!(result, Value::Bool(true));
 }

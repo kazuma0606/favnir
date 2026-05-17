@@ -1,0 +1,13 @@
+// main.fav — Log Rune demo (v4.6.0)
+import rune "log"
+
+public fn main() -> Unit !Io {
+    log.info(log.app_started(), "Demo started")
+    log.info("I010", "Processing 1500 rows")
+    log.success_ctx(log.pipeline_done(), "Pipeline complete", Map.set(Map.set((), "rows", "1500"), "table", "orders"))
+    log.warn_ctx(log.retrying(), "Retrying failed request", Map.set((), "attempt", "2"))
+    log.error_ctx(log.db_error(), "Connection failed", Map.set((), "error", "timeout after 30s"))
+    log.metric("processed_rows", 1500)
+    log.metric_with_unit("duration_ms", 342, "Milliseconds")
+    log.info(log.app_stopped(), "Demo finished")
+}

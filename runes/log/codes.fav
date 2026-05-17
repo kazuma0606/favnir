@@ -1,0 +1,14 @@
+// codes.fav — Built-in log code constants (v4.6.0)
+
+public fn app_started()   -> String { "I000" }
+public fn app_stopped()   -> String { "I001" }
+public fn processing()    -> String { "I010" }
+public fn completed()     -> String { "S000" }
+public fn pipeline_done() -> String { "S010" }
+public fn retrying()      -> String { "W001" }
+public fn slow_op()       -> String { "W002" }
+public fn db_error()      -> String { "LE010" }
+public fn net_error()     -> String { "LE020" }
+public fn auth_error()    -> String { "LE030" }
+public fn rpc_error()     -> String { "LE040" }
+public fn aws_error()     -> String { "LE050" }

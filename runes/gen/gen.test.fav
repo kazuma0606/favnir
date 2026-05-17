@@ -1,4 +1,4 @@
-// runes/gen/gen.test.fav — gen rune tests (v3.5.0)
+// runes/gen/gen.test.fav — gen rune tests (v4.4.0)
 // Standalone: redefines gen helpers inline; bypasses checker effect system.
 
 type Pt = { x: Int y: Int }
@@ -110,4 +110,146 @@ test "profile_raw full noise all invalid" {
     bind rows <- simulate_raw("Pt", 10, 1.0)
     bind prof <- Gen.profile_raw("Pt", rows)
     assert_eq(prof.invalid, 10)
+}
+
+// ── hint_one_raw ──────────────────────────────────────────────────────────────
+
+test "hint_one_raw returns ok with correct field count" {
+    bind result <- Gen.hint_one_raw("Pt")
+    match result {
+        Ok(row) => assert_eq(Map.size(row), 2)
+        Err(_) => assert_eq(0, 1)
+    }
+}
+
+test "hint_one_raw LabeledNum has label field" {
+    bind result <- Gen.hint_one_raw("LabeledNum")
+    match result {
+        Ok(row) => assert_eq(Map.has_key(row, "label"), true)
+        Err(_) => assert_eq(0, 1)
+    }
+}
+
+// ── hint_list_raw ─────────────────────────────────────────────────────────────
+
+test "hint_list_raw returns correct count" {
+    bind result <- Gen.hint_list_raw("Pt", 5)
+    match result {
+        Ok(rows) => assert_eq(List.length(rows), 5)
+        Err(_) => assert_eq(0, 1)
+    }
+}
+
+test "hint_list_raw zero returns empty list" {
+    bind result <- Gen.hint_list_raw("Pt", 0)
+    match result {
+        Ok(rows) => assert_eq(List.length(rows), 0)
+        Err(_) => assert_eq(0, 1)
+    }
+}
+
+// ── edge_cases_raw ────────────────────────────────────────────────────────────
+
+test "edge_cases_raw returns 4 rows" {
+    bind result <- Gen.edge_cases_raw("Pt")
+    match result {
+        Ok(rows) => assert_eq(List.length(rows), 4)
+        Err(_) => assert_eq(0, 1)
+    }
+}
+
+test "edge_cases_raw unknown type returns err" {
+    bind result <- Gen.edge_cases_raw("NoSuchType")
+    match result {
+        Ok(_) => assert_eq(0, 1)
+        Err(_) => assert_eq(1, 1)
+    }
+}
+
+// ── Order type: hint_one_raw / hint_list_raw / output ─────────────────────────
+
+type Order = { id: Int customer_name: String email: String amount: Float created_at: String }
+
+test "hint_one Order email contains at-sign" {
+    bind result <- Gen.hint_one_raw("Order")
+    match result {
+        Ok(row) => assert_eq(String.contains(Option.unwrap_or(Map.get(row, "email"), "no-email"), "@"), true)
+        Err(_) => assert_eq(0, 1)
+    }
+}
+
+test "hint_one Order id field exists" {
+    bind result <- Gen.hint_one_raw("Order")
+    match result {
+        Ok(row) => assert_eq(Map.has_key(row, "id"), true)
+        Err(_) => assert_eq(0, 1)
+    }
+}
+
+test "hint_one Order customer_name field exists" {
+    bind result <- Gen.hint_one_raw("Order")
+    match result {
+        Ok(row) => assert_eq(Map.has_key(row, "customer_name"), true)
+        Err(_) => assert_eq(0, 1)
+    }
+}
+
+test "hint_list Order returns 7 rows" {
+    bind result <- Gen.hint_list_raw("Order", 7)
+    match result {
+        Ok(rows) => assert_eq(List.length(rows), 7)
+        Err(_) => assert_eq(0, 1)
+    }
+}
+
+test "hint_list Order first row has email key" {
+    bind result <- Gen.hint_list_raw("Order", 3)
+    match result {
+        Ok(rows) => match List.first(rows) {
+            Some(row) => assert_eq(Map.has_key(row, "email"), true)
+            None => assert_eq(0, 1)
+        }
+        Err(_) => assert_eq(0, 1)
+    }
+}
+
+test "to_csv_raw writes Order data to file" {
+    bind hint_r <- Gen.hint_list_raw("Order", 10)
+    match hint_r {
+        Ok(rows) => match Gen.to_csv_raw("../fav/tmp/gen_order_test.csv", rows) {
+            Ok(_) => assert_eq(1, 1)
+            Err(_) => assert_eq(0, 1)
+        }
+        Err(_) => assert_eq(0, 1)
+    }
+}
+
+test "to_parquet_raw writes Order data to file" {
+    bind hint_r <- Gen.hint_list_raw("Order", 10)
+    match hint_r {
+        Ok(rows) => match Gen.to_parquet_raw("../fav/tmp/gen_order_test.parquet", rows) {
+            Ok(_) => assert_eq(1, 1)
+            Err(_) => assert_eq(0, 1)
+        }
+        Err(_) => assert_eq(0, 1)
+    }
+}
+
+test "edge_cases_raw first row x is zero" {
+    bind result <- Gen.edge_cases_raw("Pt")
+    match result {
+        Ok(rows) => match List.first(rows) {
+            Some(row) => assert_eq(Option.unwrap_or(Map.get(row, "x"), "MISSING"), "0")
+            None => assert_eq(0, 1)
+        }
+        Err(_) => assert_eq(0, 1)
+    }
+}
+
+test "edge_cases_raw List.first returns Some" {
+    bind result <- Gen.edge_cases_raw("Pt")
+    match result {
+        Ok(rows) => assert_eq(Option.is_some(List.first(rows)), true)
+        Err(_) => assert_eq(0, 1)
+    }
 }

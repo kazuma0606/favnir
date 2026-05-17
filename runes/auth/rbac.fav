@@ -1,0 +1,38 @@
+// rbac.fav — Role-based access control helpers (v4.5.0)
+
+// require_role: return Ok if claims contain the required role, Err otherwise
+public fn require_role(claims: Map<String, String>, required_role: String) -> Result<Unit, String> {
+    match Option.unwrap_or(Map.get(claims, "role"), "") == required_role {
+        true  => Result.ok(())
+        false => Result.err(String.concat("role required: ", required_role))
+    }
+}
+
+// require_any_role: Ok if any of the listed roles matches claims["role"]
+public fn require_any_role(claims: Map<String, String>, roles: List<String>) -> Result<Unit, String> {
+    match List.any(roles, |r| r == Option.unwrap_or(Map.get(claims, "role"), "")) {
+        true  => Result.ok(())
+        false => Result.err("none of the required roles matched")
+    }
+}
+
+// has_permission: true if claims["permissions"] (comma-separated) contains permission
+public fn has_permission(claims: Map<String, String>, permission: String) -> Bool {
+    List.any(String.split(Option.unwrap_or(Map.get(claims, "permissions"), ""), ","), |p| p == permission)
+}
+
+// sub: extract "sub" claim
+public fn sub(claims: Map<String, String>) -> Result<String, String> {
+    match Map.get(claims, "sub") {
+        Some(v) => Result.ok(v)
+        None    => Result.err("missing claim: sub")
+    }
+}
+
+// role: extract "role" claim
+public fn role(claims: Map<String, String>) -> Result<String, String> {
+    match Map.get(claims, "role") {
+        Some(v) => Result.ok(v)
+        None    => Result.err("missing claim: role")
+    }
+}

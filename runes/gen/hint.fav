@@ -1,0 +1,13 @@
+// runes/gen/hint.fav — Field-name-hint based realistic data generation (v4.4.0)
+
+public fn hint_one(type_name: String) -> Result<Map<String, String>, String> !Random {
+    Gen.hint_one_raw(type_name)
+}
+
+public fn hint_list(type_name: String, n: Int) -> Result<List<Map<String, String>>, String> !Random {
+    Gen.hint_list_raw(type_name, n)
+}
+
+public fn set_yaml(type_name: String, path: String) -> Unit {
+    Gen.set_yaml_config_raw(type_name, path)
+}

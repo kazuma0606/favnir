@@ -1,0 +1,12 @@
+[package]
+name = "log_demo"
+version = "0.1.0"
+
+[runes]
+path = "../../runes"
+
+[log]
+level = "info"
+format = "text"
+output = "stdout"
+service = "log-demo"

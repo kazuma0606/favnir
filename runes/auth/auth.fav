@@ -1,0 +1,7 @@
+// auth.fav — Auth Rune barrel file (v4.5.0)
+// Re-exports all public API from sub-modules.
+
+use jwt.{ verify_jwt, verify_jwt_rs256, decode_claims, from_cognito_header, sign_hs256 }
+use rbac.{ require_role, require_any_role, has_permission, sub, role }
+use apikey.{ generate_api_key, hmac_tag, verify_by_tag }
+use oauth2.{ authorization_url, exchange_code, refresh_token }

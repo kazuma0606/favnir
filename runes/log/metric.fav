@@ -1,0 +1,11 @@
+// metric.fav — Metrics output (v4.6.0)
+// text format: "METRIC  name=value unit"
+// json format: CloudWatch EMF
+
+public fn metric(name: String, value: Int) -> Unit !Io {
+    Log.metric_raw(name, value, "Count")
+}
+
+public fn metric_with_unit(name: String, value: Int, unit: String) -> Unit !Io {
+    Log.metric_raw(name, value, unit)
+}

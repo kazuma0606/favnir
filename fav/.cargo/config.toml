@@ -1,2 +1,5 @@
 [env]
-CXXFLAGS = "/EHsc /utf-8"
+# 日本語 Windows（MSVC + CP932 ロケール）で DuckDB の C++ ソースが文字化けするのを防ぐフラグ。
+# force = false のため、シェル側で CXXFLAGS が設定済みの場合はそちらを優先する。
+# Linux / WSL ユーザーは ~/.bashrc に `export CXXFLAGS=` を追加することでこの設定を無効化できる。
+CXXFLAGS = { value = "/EHsc /utf-8", force = false }

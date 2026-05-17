@@ -1,0 +1,17 @@
+// apikey.fav — API key generation and verification (v4.5.0)
+
+// generate_api_key: generate a prefixed API key using cryptographically secure random bytes
+// Format: {prefix}_{32-byte random hex}
+public fn generate_api_key(prefix: String) -> String !Auth {
+    String.concat(prefix, String.concat("_", Crypto.random_hex_raw(32)))
+}
+
+// hmac_tag: compute HMAC-SHA256 tag for an API key (store this, not the key itself)
+public fn hmac_tag(key: String, secret: String) -> String !Auth {
+    Crypto.hmac_sha256_raw(secret, key)
+}
+
+// verify_by_tag: verify a presented key by recomputing the tag and comparing
+public fn verify_by_tag(key: String, secret: String, stored_tag: String) -> Bool !Auth {
+    Crypto.hmac_sha256_raw(secret, key) == stored_tag
+}

@@ -1,0 +1,4 @@
+// log.fav — Log Rune public API (v4.6.0)
+use emitter.{ info, success, warn, error, info_ctx, success_ctx, warn_ctx, error_ctx }
+use metric.{ metric, metric_with_unit }
+use codes.{ app_started, app_stopped, processing, completed, pipeline_done, retrying, slow_op, db_error, net_error, auth_error, rpc_error, aws_error }

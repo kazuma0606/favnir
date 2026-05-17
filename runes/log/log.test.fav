@@ -1,0 +1,72 @@
+// log.test.fav — Log Rune tests (v4.6.0)
+
+import rune "log"
+
+test "info emits without crash" {
+    log.info("I000", "test info message")
+    assert(true)
+}
+
+test "success emits without crash" {
+    log.success("S000", "test success message")
+    assert(true)
+}
+
+test "warn emits without crash" {
+    log.warn("W001", "test warn message")
+    assert(true)
+}
+
+test "error emits without crash" {
+    log.error("LE010", "test error message")
+    assert(true)
+}
+
+test "info_ctx emits without crash" {
+    log.info_ctx("I010", "processing started", Map.set((), "batch", "1"))
+    assert(true)
+}
+
+test "success_ctx with context" {
+    log.success_ctx("S010", "pipeline done", Map.set(Map.set((), "rows", "1500"), "table", "orders"))
+    assert(true)
+}
+
+test "warn_ctx with context" {
+    log.warn_ctx("W001", "retrying", Map.set((), "attempt", "2"))
+    assert(true)
+}
+
+test "error_ctx with context" {
+    log.error_ctx("LE010", "db failed", Map.set((), "error", "connection refused"))
+    assert(true)
+}
+
+test "metric emits without crash" {
+    log.metric("processed_rows", 1000)
+    assert(true)
+}
+
+test "metric_with_unit emits without crash" {
+    log.metric_with_unit("duration_ms", 150, "Milliseconds")
+    assert(true)
+}
+
+test "app_started returns I000" {
+    assert(log.app_started() == "I000")
+}
+
+test "pipeline_done returns S010" {
+    assert(log.pipeline_done() == "S010")
+}
+
+test "db_error returns LE010" {
+    assert(log.db_error() == "LE010")
+}
+
+test "multiple logs in sequence" {
+    log.info(log.app_started(), "Demo started")
+    log.success_ctx(log.pipeline_done(), "Done", Map.set((), "n", "42"))
+    log.metric("rows", 42)
+    assert(true)
+}

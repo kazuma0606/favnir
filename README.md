@@ -80,6 +80,30 @@ seq UserImport = ParseCsv |> ValidateRow |> SaveToDb
 
 ---
 
+## 対応プラットフォーム
+
+| OS | 状態 | 備考 |
+|----|------|------|
+| Windows (MSVC) | ✓ サポート | 日本語環境は下記の追加設定が必要 |
+| Linux / WSL | ✓ サポート | 追加設定不要 |
+| macOS | 非対応 | 開発者が Mac を持っていないため未対応。将来対応予定 |
+
+### Windows 日本語環境（CP932 ロケール）
+
+`.cargo/config.toml` に `CXXFLAGS = "/EHsc /utf-8"` が設定済みです（`force = false`）。
+PowerShell・Git Bash いずれからビルドしても自動的に適用されます。追加設定は不要です。
+
+### Linux / WSL
+
+`.cargo/config.toml` の `CXXFLAGS` は `force = false` のため、シェル側で空値を設定すれば無効化されます。
+WSL の `~/.bashrc` に以下を追加してください：
+
+```bash
+export CXXFLAGS=
+```
+
+---
+
 ## クイックスタート
 
 ```bash

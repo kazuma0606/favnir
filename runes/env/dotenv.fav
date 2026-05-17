@@ -1,0 +1,14 @@
+// dotenv.fav — .env file loading (v4.7.0)
+
+// load_dotenv: Loads a .env file. Returns Err if the file cannot be read.
+public fn load_dotenv(path: String) -> Result<Unit, String> !Env {
+    Env.load_dotenv_raw(path)
+}
+
+// load_dotenv_or_ignore: Loads a .env file, silently ignoring errors.
+public fn load_dotenv_or_ignore(path: String) -> Unit !Env {
+    match Env.load_dotenv_raw(path) {
+        Ok(_)  => ()
+        Err(_) => ()
+    }
+}

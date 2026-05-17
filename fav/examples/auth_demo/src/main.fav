@@ -1,0 +1,57 @@
+// auth_demo/src/main.fav — Auth Rune demonstration (v4.5.0)
+
+import rune "auth"
+
+public fn main() -> Unit !Auth !Io {
+    // Demo 1: JWT sign and verify
+    IO.println("=== Demo 1: JWT sign & verify ===")
+    bind tok_r <- auth.sign_hs256("{\"sub\":\"alice\",\"role\":\"data_engineer\",\"exp\":9999999999}", "demo-secret")
+    match tok_r {
+        Ok(token) => {
+            IO.println(String.concat("Token: ", token))
+            bind claims_r <- auth.verify_jwt(token, "demo-secret")
+            match claims_r {
+                Ok(claims) => {
+                    IO.println(String.concat("sub: ", Option.unwrap_or(Map.get(claims, "sub"), "?")))
+                    IO.println(String.concat("role: ", Option.unwrap_or(Map.get(claims, "role"), "?")))
+                    // Demo 2: verify role
+                    IO.println("=== Demo 2: require_role ===")
+                    match auth.require_role(claims, "data_engineer") {
+                        Ok(_)  => IO.println("role check passed: data_engineer OK")
+                        Err(e) => IO.println(String.concat("role check failed: ", e))
+                    }
+                    match auth.require_role(claims, "admin") {
+                        Ok(_)  => IO.println("role check passed: admin OK")
+                        Err(e) => IO.println(String.concat("role check failed: ", e))
+                    }
+                }
+                Err(e) => IO.println(String.concat("verify failed: ", e))
+            }
+        }
+        Err(e) => IO.println(String.concat("sign failed: ", e))
+    }
+
+    // Demo 3: API key generation and verification
+    IO.println("=== Demo 3: API key ===")
+    IO.println(String.concat("Key: ", auth.generate_api_key("fav")))
+    IO.println(String.concat("Tag: ", auth.hmac_tag("fav_demo_key_123", "store-secret")))
+    match auth.verify_by_tag("fav_demo_key_123", "store-secret", auth.hmac_tag("fav_demo_key_123", "store-secret")) {
+        true  => IO.println("verify_by_tag: OK")
+        false => IO.println("verify_by_tag: FAILED")
+    }
+
+    // Demo 4: OAuth2 authorization URL
+    IO.println("=== Demo 4: OAuth2 authorization URL ===")
+    IO.println(auth.authorization_url(
+        "https://accounts.google.com/o/oauth2/v2/auth",
+        "my-client-id",
+        "https://myapp.example.com/callback",
+        "openid email profile",
+        "random-state-value"
+    ))
+
+    // Demo 5: Hashing
+    IO.println("=== Demo 5: SHA-256 & HMAC-SHA256 ===")
+    IO.println(String.concat("SHA256: ", Crypto.sha256_raw("hello favnir")))
+    IO.println(String.concat("HMAC:   ", Crypto.hmac_sha256_raw("secret-key", "hello favnir")))
+}

@@ -1,0 +1,19 @@
+// main.fav — Env Rune demo (v4.7.0)
+import rune "env"
+import rune "log"
+
+public fn main() -> Unit !Env !Io {
+    log.info(log.app_started(), "env_demo started")
+    env.load_dotenv_or_ignore(".env")
+    log.info("I010", String.concat("Service: ", env.get("SERVICE_NAME", "unknown")))
+    match env.require("DATABASE_URL") {
+        Err(e)  => log.error(log.db_error(), e)
+        Ok(url) => log.info("I010", String.concat("DB: ", url))
+    }
+    match env.require_int("PORT") {
+        Err(_) => log.warn("W001", "PORT not set, using default 8080")
+        Ok(_)  => log.info("I010", "PORT configured")
+    }
+    log.info("I010", String.concat("Debug: ", String.from_bool(env.get_bool("DEBUG", false))))
+    log.info(log.app_stopped(), "env_demo finished")
+}

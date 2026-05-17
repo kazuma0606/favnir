@@ -1,0 +1,10 @@
+[package]
+name = "env_demo"
+version = "0.1.0"
+
+[runes]
+path = "../../runes"
+
+[env]
+dotenv = ".env"
+prefix = ""

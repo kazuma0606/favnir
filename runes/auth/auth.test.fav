@@ -1,0 +1,107 @@
+// auth.test.fav — Auth Rune tests (v4.5.0)
+
+import rune "auth"
+
+test "jwt sign and verify roundtrip" {
+    bind tok <- Crypto.jwt_sign_raw("{\"sub\":\"alice\",\"role\":\"admin\",\"exp\":9999999999}", "test-secret", "HS256")
+    match tok {
+        Ok(token) => {
+            bind claims <- Crypto.jwt_verify_raw(token, "test-secret", "HS256")
+            match claims {
+                Ok(m) => assert(Option.unwrap_or(Map.get(m, "sub"), "") == "alice")
+                Err(e) => assert(false)
+            }
+        }
+        Err(_) => assert(false)
+    }
+}
+
+test "jwt verify wrong secret returns err" {
+    bind tok <- Crypto.jwt_sign_raw("{\"sub\":\"bob\",\"exp\":9999999999}", "secret1", "HS256")
+    match tok {
+        Ok(token) => {
+            bind claims <- Crypto.jwt_verify_raw(token, "wrong_secret", "HS256")
+            match claims {
+                Ok(_) => assert(false)
+                Err(_) => assert(true)
+            }
+        }
+        Err(_) => assert(false)
+    }
+}
+
+test "jwt decode no verify returns claims" {
+    bind tok <- Crypto.jwt_sign_raw("{\"sub\":\"charlie\",\"exp\":9999999999}", "anysecret", "HS256")
+    match tok {
+        Ok(token) => {
+            bind claims <- Crypto.jwt_decode_raw(token)
+            match claims {
+                Ok(m) => assert(Option.unwrap_or(Map.get(m, "sub"), "") == "charlie")
+                Err(_) => assert(false)
+            }
+        }
+        Err(_) => assert(false)
+    }
+}
+
+test "hmac sha256 returns 64 char hex" {
+    assert(String.length(Crypto.hmac_sha256_raw("key", "hello world")) == 64)
+}
+
+test "sha256 returns 64 char hex" {
+    assert(String.length(Crypto.sha256_raw("hello world")) == 64)
+}
+
+test "random hex 16 returns 32 chars" {
+    assert(String.length(Crypto.random_hex_raw(16)) == 32)
+}
+
+test "require_role match returns ok" {
+    match auth.require_role(Map.set(Map.set((), "role", "admin"), "sub", "u1"), "admin") {
+        Ok(_)  => assert(true)
+        Err(_) => assert(false)
+    }
+}
+
+test "require_role mismatch returns err" {
+    match auth.require_role(Map.set(Map.set((), "role", "user"), "sub", "u2"), "admin") {
+        Ok(_)  => assert(false)
+        Err(_) => assert(true)
+    }
+}
+
+test "require_any_role match returns ok" {
+    match auth.require_any_role(Map.set((), "role", "editor"), String.split("admin,editor", ",")) {
+        Ok(_)  => assert(true)
+        Err(_) => assert(false)
+    }
+}
+
+test "require_any_role all mismatch returns err" {
+    match auth.require_any_role(Map.set((), "role", "viewer"), String.split("admin,editor", ",")) {
+        Ok(_)  => assert(false)
+        Err(_) => assert(true)
+    }
+}
+
+test "has_permission found returns true" {
+    assert(auth.has_permission(Map.set((), "permissions", "read,write,delete"), "write"))
+}
+
+test "generate_api_key has prefix" {
+    assert(String.starts_with(auth.generate_api_key("fav"), "fav_"))
+}
+
+test "hmac_tag and verify_by_tag roundtrip" {
+    assert(auth.verify_by_tag("my-api-key-123", "store-secret", auth.hmac_tag("my-api-key-123", "store-secret")))
+}
+
+test "authorization_url contains client_id" {
+    assert(String.contains(auth.authorization_url(
+        "https://accounts.example.com/auth",
+        "client-123",
+        "https://app.example.com/callback",
+        "openid email",
+        "state-abc"
+    ), "client_id="))
+}

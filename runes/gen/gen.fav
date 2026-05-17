@@ -1,5 +1,8 @@
-// runes/gen/gen.fav — Favnir gen rune public API (v4.1.0)
+// runes/gen/gen.fav — Favnir gen rune public API (v4.4.0)
 // Directory rune: primitive value generators + type-driven structured generation.
 
 use primitives.{ int_val, float_val, bool_val, string_val, choice }
 use structured.{ one, list, simulate, profile }
+use hint.{ hint_one, hint_list, set_yaml }
+use output.{ to_csv, to_parquet, load_into }
+use edge.{ edge_cases }

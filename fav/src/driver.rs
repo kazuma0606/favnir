@@ -3,9 +3,10 @@ use crate::backend;
 use crate::backend::artifact::FvcArtifact;
 use crate::backend::codegen::{Opcode, codegen_program};
 use crate::backend::vm::{
-    CheckpointBackend, VM, checkpoint_list, checkpoint_meta, checkpoint_reset_direct,
-    checkpoint_save_direct, enable_coverage, set_checkpoint_backend, set_schema_registry,
-    take_coverage,
+    CheckpointBackend, EnvConfig, LogConfig, VM, checkpoint_list, checkpoint_meta,
+    checkpoint_reset_direct, checkpoint_save_direct, enable_coverage, parse_dotenv_content,
+    set_auth_mode, set_checkpoint_backend, set_env_config, set_log_codes, set_log_config,
+    set_schema_registry, take_coverage,
 };
 use crate::backend::wasm_codegen::wasm_codegen_program;
 use crate::backend::wasm_exec::{wasm_exec_info, wasm_exec_main};
@@ -490,6 +491,37 @@ fn schemas_root(file: Option<&str>) -> PathBuf {
     start
 }
 
+/// Load custom log codes from logs/*.yaml in the project root (v4.6.0).
+fn load_log_codes(root: &std::path::Path) -> std::collections::HashMap<String, String> {
+    let logs_dir = root.join("logs");
+    let mut codes = std::collections::HashMap::new();
+    let entries = match std::fs::read_dir(&logs_dir) {
+        Ok(e) => e,
+        Err(_) => return codes,
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().and_then(|e| e.to_str()) != Some("yaml") {
+            continue;
+        }
+        if let Ok(content) = std::fs::read_to_string(&path) {
+            if let Ok(yaml) = serde_yaml::from_str::<serde_yaml::Value>(&content) {
+                if let Some(map) = yaml.as_mapping() {
+                    for (k, v) in map {
+                        if let (Some(code), Some(msg)) = (
+                            k.as_str(),
+                            v.get("message").and_then(|m| m.as_str()),
+                        ) {
+                            codes.insert(code.to_string(), msg.to_string());
+                        }
+                    }
+                }
+            }
+        }
+    }
+    codes
+}
+
 fn load_checkpoint_config_for_file(file: Option<&str>) {
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let start = file
@@ -583,6 +615,50 @@ pub fn cmd_run(file: Option<&str>, db_url: Option<&str>) {
     load_checkpoint_config_for_file(file);
     // Load schemas/*.yaml and register in VM (v4.1.5)
     set_schema_registry(load_schemas(&schemas_root(file)));
+    // Load [auth] + [log] from fav.toml (v4.5.0 / v4.6.0)
+    if let Some(f) = file {
+        if let Some(root) = crate::toml::FavToml::find_root(
+            std::path::Path::new(f)
+                .parent()
+                .unwrap_or(std::path::Path::new(".")),
+        ) {
+            if let Some(toml) = crate::toml::FavToml::load(&root) {
+                if let Some(auth) = toml.auth.as_ref() {
+                    set_auth_mode(&auth.mode);
+                }
+                if let Some(lc) = toml.log.as_ref() {
+                    set_log_config(LogConfig {
+                        level:   lc.level.clone(),
+                        format:  lc.format.clone(),
+                        output:  lc.output.clone(),
+                        service: lc.service.clone(),
+                    });
+                }
+                // Load logs/*.yaml custom codes
+                set_log_codes(load_log_codes(&root));
+                // Apply [env] config (v4.7.0)
+                if let Some(ref ec) = toml.env {
+                    if let Some(ref dotenv_path) = ec.dotenv {
+                        let dp = root.join(dotenv_path);
+                        if dp.exists() {
+                            if let Ok(content) = std::fs::read_to_string(&dp) {
+                                for (k, v) in parse_dotenv_content(&content) {
+                                    if std::env::var(&k).is_err() {
+                                        // SAFETY: single-threaded startup; no other threads read env here
+                                        unsafe { std::env::set_var(&k, &v); }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    set_env_config(EnvConfig {
+                        dotenv: ec.dotenv.clone(),
+                        prefix: ec.prefix.clone(),
+                    });
+                }
+            }
+        }
+    }
     let (run_program, source_path) = load_and_check_program(file);
     ensure_no_partial_flw(&run_program).unwrap_or_else(|message| {
         eprintln!("{message}");
@@ -2410,6 +2486,9 @@ fn try_cmd_check_dir(dir: &Path) -> Result<(), usize> {
         dependencies: vec![],
         checkpoint: None,
         database: None,
+        auth: None,
+        log: None,
+        env: None,
     });
     let files = collect_fav_files_recursive(dir);
     let resolver = make_resolver(Some(toml), Some(root));
@@ -10849,6 +10928,162 @@ public fn main() -> Int {
         assert_eq!(value, crate::value::Value::Int(12));
     }
 
+    // ── Gen 2.0 integration tests (v4.4.0) ───────────────────────────────────
+
+    #[test]
+    fn gen_hint_one_raw_field_count_in_favnir_source() {
+        let value = exec_project_main_source_with_runes(
+            r#"
+type User = { id: Int name: String email: String age: Int }
+
+public fn main() -> Int {
+    bind result <- Gen.hint_one_raw("User");
+    match result {
+        Ok(row) => Map.size(row)
+        Err(_) => -1
+    }
+}
+"#,
+        );
+        assert_eq!(value, crate::value::Value::Int(4));
+    }
+
+    #[test]
+    fn gen_hint_list_raw_count_in_favnir_source() {
+        let value = exec_project_main_source_with_runes(
+            r#"
+type Order = { order_id: Int status: String created_at: String }
+
+public fn main() -> Int {
+    bind result <- Gen.hint_list_raw("Order", 6);
+    match result {
+        Ok(rows) => List.length(rows)
+        Err(_) => -1
+    }
+}
+"#,
+        );
+        assert_eq!(value, crate::value::Value::Int(6));
+    }
+
+    #[test]
+    fn gen_edge_cases_raw_returns_four_in_favnir_source() {
+        let value = exec_project_main_source_with_runes(
+            r#"
+type Metric = { value: Int label: String }
+
+public fn main() -> Int {
+    bind result <- Gen.edge_cases_raw("Metric");
+    match result {
+        Ok(rows) => List.length(rows)
+        Err(_) => -1
+    }
+}
+"#,
+        );
+        assert_eq!(value, crate::value::Value::Int(4));
+    }
+
+    #[test]
+    fn gen_to_csv_raw_creates_file() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("test_gen.csv");
+        let path_str = path.to_str().unwrap().replace('\\', "/");
+        let src = format!(
+            r#"
+type Row = {{ name: String age: Int }}
+
+public fn main() -> Bool {{
+    bind rows <- Gen.hint_list_raw("Row", 3);
+    match rows {{
+        Ok(data) => {{
+            bind r <- Gen.to_csv_raw("{}", data);
+            match r {{
+                Ok(_) => true
+                Err(_) => false
+            }}
+        }}
+        Err(_) => false
+    }}
+}}
+"#,
+            path_str
+        );
+        let value = exec_project_main_source_with_runes(&src);
+        assert_eq!(value, crate::value::Value::Bool(true));
+        assert!(path.exists(), "CSV file should have been created");
+    }
+
+    #[test]
+    fn gen_hint_email_contains_at_in_favnir_source() {
+        let value = exec_project_main_source_with_runes(
+            r#"
+type Customer = { id: Int name: String email: String }
+
+public fn main() -> Bool {
+    bind result <- Gen.hint_one_raw("Customer");
+    match result {
+        Ok(row) => String.contains(Option.unwrap_or(Map.get(row, "email"), ""), "@")
+        Err(_) => false
+    }
+}
+"#,
+        );
+        assert_eq!(value, crate::value::Value::Bool(true));
+    }
+
+    #[test]
+    fn gen_to_csv_with_hints_in_favnir_source() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("hints_test.csv");
+        let path_str = path.to_str().unwrap().replace('\\', "/");
+        let src = format!(
+            r#"
+type Product = {{ id: Int name: String price: Float }}
+
+public fn main() -> Bool {{
+    bind hints_r <- Gen.hint_list_raw("Product", 5);
+    match hints_r {{
+        Ok(rows) => match Gen.to_csv_raw("{}", rows) {{
+            Ok(_) => true
+            Err(_) => false
+        }}
+        Err(_) => false
+    }}
+}}
+"#,
+            path_str
+        );
+        let value = exec_project_main_source_with_runes(&src);
+        assert_eq!(value, crate::value::Value::Bool(true));
+        assert!(path.exists(), "CSV file should have been created");
+    }
+
+    #[test]
+    fn gen_load_into_duckdb_in_favnir_source() {
+        let value = exec_project_main_source_with_runes(
+            r#"
+type Sale = { id: Int name: String amount: Float }
+
+public fn main() -> Bool !Db {
+    bind conn_r <- DuckDb.open_raw(":memory:");
+    bind hints_r <- Gen.hint_list_raw("Sale", 5);
+    match conn_r {
+        Ok(conn) => match hints_r {
+            Ok(rows) => match Gen.load_into_raw(conn, "sales", rows) {
+                Ok(_) => true
+                Err(_) => false
+            }
+            Err(_) => false
+        }
+        Err(_) => false
+    }
+}
+"#,
+        );
+        assert_eq!(value, crate::value::Value::Bool(true));
+    }
+
     #[test]
     fn random_seed_determinism_in_favnir_source() {
         let src = r#"
@@ -11768,5 +12003,223 @@ public fn main() -> Int !Db {
 "#,
         );
         assert_eq!(value, crate::value::Value::Int(1));
+    }
+
+    // ── Auth rune integration tests (v4.5.0) ─────────────────────────────────
+
+    #[test]
+    fn auth_rune_test_file_passes() {
+        let results = run_fav_test_file_with_runes("runes/auth/auth.test.fav");
+        let failures: Vec<_> = results.iter().filter(|(_, ok, _)| !ok).collect();
+        assert!(failures.is_empty(), "auth.test.fav failures: {:?}", failures);
+    }
+
+    #[test]
+    fn jwt_verify_in_favnir_source() {
+        let value = exec_project_main_source_with_runes(
+            r#"
+public fn main() -> Bool !Auth {
+    bind tok <- Crypto.jwt_sign_raw("{\"sub\":\"user1\",\"role\":\"admin\",\"exp\":9999999999}", "test-secret", "HS256");
+    match tok {
+        Ok(token) => {
+            bind claims <- Crypto.jwt_verify_raw(token, "test-secret", "HS256");
+            match claims {
+                Ok(m) => Option.unwrap_or(Map.get(m, "role"), "") == "admin"
+                Err(_) => false
+            }
+        }
+        Err(_) => false
+    }
+}
+"#,
+        );
+        assert_eq!(value, crate::value::Value::Bool(true));
+    }
+
+    #[test]
+    fn require_role_in_favnir_source() {
+        let value = exec_project_main_source_with_runes(
+            r#"
+import rune "auth"
+
+public fn main() -> Bool {
+    match auth.require_role(Map.set(Map.set((), "role", "admin"), "sub", "u1"), "admin") {
+        Ok(_) => true
+        Err(_) => false
+    }
+}
+"#,
+        );
+        assert_eq!(value, crate::value::Value::Bool(true));
+    }
+
+    #[test]
+    fn api_key_generate_verify_in_favnir_source() {
+        let value = exec_project_main_source_with_runes(
+            r#"
+public fn main() -> Bool !Auth {
+    String.length(Crypto.random_hex_raw(16)) == 32 && String.length(Crypto.hmac_sha256_raw("store-secret", Crypto.random_hex_raw(8))) == 64
+}
+"#,
+        );
+        assert_eq!(value, crate::value::Value::Bool(true));
+    }
+
+    #[test]
+    fn oauth2_authorization_url_in_favnir_source() {
+        let value = exec_project_main_source_with_runes(
+            r#"
+import rune "auth"
+
+public fn main() -> Bool {
+    String.contains(auth.authorization_url(
+        "https://accounts.example.com/auth",
+        "my-client-id",
+        "https://app.example.com/callback",
+        "openid email",
+        "state-xyz"
+    ), "client_id=")
+}
+"#,
+        );
+        assert_eq!(value, crate::value::Value::Bool(true));
+    }
+
+    #[test]
+    fn log_info_in_favnir_source() {
+        let value = exec_project_main_source_with_runes(
+            r#"
+import rune "log"
+
+public fn main() -> Unit !Io {
+    log.info("I000", "hello from log rune")
+}
+"#,
+        );
+        assert_eq!(value, crate::value::Value::Unit);
+    }
+
+    #[test]
+    fn log_error_ctx_in_favnir_source() {
+        let value = exec_project_main_source_with_runes(
+            r#"
+import rune "log"
+
+public fn main() -> Unit !Io {
+    log.error_ctx("LE010", "db failed", Map.set((), "error", "timeout"))
+}
+"#,
+        );
+        assert_eq!(value, crate::value::Value::Unit);
+    }
+
+    #[test]
+    fn log_metric_in_favnir_source() {
+        let value = exec_project_main_source_with_runes(
+            r#"
+import rune "log"
+
+public fn main() -> Unit !Io {
+    log.metric("processed_rows", 1000)
+}
+"#,
+        );
+        assert_eq!(value, crate::value::Value::Unit);
+    }
+
+    #[test]
+    fn log_metric_with_unit_in_favnir_source() {
+        let value = exec_project_main_source_with_runes(
+            r#"
+import rune "log"
+
+public fn main() -> Unit !Io {
+    log.metric_with_unit("duration_ms", 150, "Milliseconds")
+}
+"#,
+        );
+        assert_eq!(value, crate::value::Value::Unit);
+    }
+
+    #[test]
+    fn log_codes_in_favnir_source() {
+        let value = exec_project_main_source_with_runes(
+            r#"
+import rune "log"
+
+public fn main() -> Bool {
+    log.app_started() == "I000"
+}
+"#,
+        );
+        assert_eq!(value, crate::value::Value::Bool(true));
+    }
+
+    #[test]
+    fn env_get_in_favnir_source() {
+        let value = exec_project_main_source_with_runes(
+            r#"
+import rune "env"
+
+public fn main() -> Bool !Env {
+    env.get("__FAV_ENV_INT_TEST_47_MISSING__", "fallback") == "fallback"
+}
+"#,
+        );
+        assert_eq!(value, crate::value::Value::Bool(true));
+    }
+
+    #[test]
+    fn env_require_missing_in_favnir_source() {
+        let value = exec_project_main_source_with_runes(
+            r#"
+import rune "env"
+
+public fn main() -> Bool !Env {
+    match env.require("__FAV_ENV_INT_TEST_47_REQ_MISSING__") {
+        Ok(_)  => false
+        Err(e) => String.contains(e, "ENV_MISSING")
+    }
+}
+"#,
+        );
+        assert_eq!(value, crate::value::Value::Bool(true));
+    }
+
+    #[test]
+    fn env_get_int_in_favnir_source() {
+        let value = exec_project_main_source_with_runes(
+            r#"
+import rune "env"
+
+public fn main() -> Bool !Env {
+    env.get_int("__FAV_ENV_INT_TEST_47_MISSING__", 99) == 99
+}
+"#,
+        );
+        assert_eq!(value, crate::value::Value::Bool(true));
+    }
+
+    #[test]
+    fn env_get_bool_in_favnir_source() {
+        let value = exec_project_main_source_with_runes(
+            r#"
+import rune "env"
+
+public fn main() -> Bool !Env {
+    env.get_bool("__FAV_ENV_INT_TEST_47_MISSING__", false) == false
+}
+"#,
+        );
+        assert_eq!(value, crate::value::Value::Bool(true));
+    }
+
+    #[test]
+    fn env_rune_test_file_passes() {
+        let results = run_fav_test_file_with_runes("runes/env/env.test.fav");
+        for (name, passed, msg) in &results {
+            assert!(passed, "test '{}' failed: {:?}", name, msg);
+        }
+        assert!(!results.is_empty(), "no tests found");
     }
 }

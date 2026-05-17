@@ -1,0 +1,73 @@
+// examples/gen2_demo/src/main.fav — Gen Rune 2.0 demo (v4.4.0)
+import rune "gen"
+import rune "duckdb"
+
+type Sale = { id: Int customer_name: String email: String amount: Float created_at: String status: String }
+
+public fn main() -> Unit !Io !Random !Db {
+    // Demo 1: one_with_hints — フィールド名でリアルなデータを 1 件生成
+    Io.println("=== Demo 1: hint_one ===")
+    bind hint1_r <- gen.hint_one("Sale")
+    match hint1_r {
+        Ok(row) => {
+            Io.println(String.concat("  email: ", Option.unwrap_or(Map.get(row, "email"), "")))
+            Io.println(String.concat("  customer_name: ", Option.unwrap_or(Map.get(row, "customer_name"), "")))
+        }
+        Err(e) => Io.println(String.concat("  error: ", e))
+    }
+
+    // Demo 2: hint_list — 5 件生成
+    Io.println("=== Demo 2: hint_list (5 rows) ===")
+    bind hint5_r <- gen.hint_list("Sale", 5)
+    match hint5_r {
+        Ok(rows) => Io.println(String.concat("  generated rows: ", String.from_int(List.length(rows))))
+        Err(e)   => Io.println(String.concat("  error: ", e))
+    }
+
+    // Demo 3: to_csv — 1000 行 CSV 生成
+    Io.println("=== Demo 3: to_csv (1000 rows) ===")
+    bind csv5_r <- gen.hint_list("Sale", 1000)
+    match csv5_r {
+        Ok(csv_rows) => match gen.to_csv("tmp/sales.csv", csv_rows) {
+            Ok(_) => Io.println("  wrote tmp/sales.csv")
+            Err(e) => Io.println(String.concat("  error: ", e))
+        }
+        Err(e) => Io.println(String.concat("  hint error: ", e))
+    }
+
+    // Demo 4: to_parquet — 1000 行 Parquet 生成
+    Io.println("=== Demo 4: to_parquet (1000 rows) ===")
+    bind par5_r <- gen.hint_list("Sale", 1000)
+    match par5_r {
+        Ok(par_rows) => match gen.to_parquet("tmp/sales.parquet", par_rows) {
+            Ok(_) => Io.println("  wrote tmp/sales.parquet")
+            Err(e) => Io.println(String.concat("  error: ", e))
+        }
+        Err(e) => Io.println(String.concat("  hint error: ", e))
+    }
+
+    // Demo 5: DuckDB に INSERT
+    Io.println("=== Demo 5: load_into DuckDB ===")
+    bind conn_r <- duckdb.open(":memory:")
+    match conn_r {
+        Ok(conn) => {
+            bind data_r <- gen.hint_list("Sale", 100)
+            match data_r {
+                Ok(data) => match gen.load_into(conn, "sales", data) {
+                    Ok(n) => Io.println(String.concat("  inserted rows: ", String.from_int(n)))
+                    Err(e) => Io.println(String.concat("  load error: ", e))
+                }
+                Err(e) => Io.println(String.concat("  hint error: ", e))
+            }
+        }
+        Err(e) => Io.println(String.concat("  db error: ", e.message))
+    }
+
+    // Demo 6: edge_cases
+    Io.println("=== Demo 6: edge_cases ===")
+    bind edge_r <- gen.edge_cases("Sale")
+    match edge_r {
+        Ok(edges) => Io.println(String.concat("  edge case count: ", String.from_int(List.length(edges))))
+        Err(e)    => Io.println(String.concat("  error: ", e))
+    }
+}

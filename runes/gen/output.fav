@@ -1,0 +1,13 @@
+// runes/gen/output.fav — Streaming output: CSV / Parquet / DuckDB (v4.4.0)
+
+public fn to_csv(path: String, rows: List<Map<String, String>>) -> Result<Unit, String> !Io {
+    Gen.to_csv_raw(path, rows)
+}
+
+public fn to_parquet(path: String, rows: List<Map<String, String>>) -> Result<Unit, String> !Io {
+    Gen.to_parquet_raw(path, rows)
+}
+
+public fn load_into(conn: DbHandle, table_name: String, rows: List<Map<String, String>>) -> Result<Int, String> !Db {
+    Gen.load_into_raw(conn, table_name, rows)
+}

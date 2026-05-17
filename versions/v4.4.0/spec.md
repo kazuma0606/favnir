@@ -87,10 +87,10 @@ Gen.set_yaml_config_raw(type_name, yaml_path)       -> Result<Unit, String>
 | `last_name` / `family_name` | 姓のみ（"田中"） |
 | `email` / `*_email` | `xxx@example.com` 形式 |
 | `phone` / `*_phone` | 電話番号形式 |
-| `*_at` / `created_at` / `updated_at` | ISO 8601 日時（"2026-03-15T10:23:44Z"） |
-| `*_date` / `birth_date` | 日付（"2026-03-15"） |
+| `*_at` / `created_at` / `updated_at` | ISO 8601 日時（現在時刻を起算点に ±2年の範囲でランダム生成） |
+| `*_date` / `birth_date` | 日付（現在日付を起算点に ±50年の範囲でランダム生成） |
 | `price` / `amount` / `*_fee` / `*_price` | 正の実数（"1280.00"〜"98000.00"） |
-| `age` | 20〜80 の整数文字列 |
+| `age` | 0〜130 の整数文字列 |
 | `count` / `*_count` | 正の整数（"1"〜"999"） |
 | `url` / `*_url` | `https://example.com/xxx` 形式 |
 | `zip` / `postal_code` | 郵便番号形式（"100-0001"） |

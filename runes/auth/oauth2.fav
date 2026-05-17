@@ -1,0 +1,40 @@
+// oauth2.fav — OAuth2 authorization helpers (v4.5.0)
+
+// authorization_url: build an OAuth2 authorization endpoint URL (pure function)
+public fn authorization_url(
+    endpoint: String,
+    client_id: String,
+    redirect_uri: String,
+    scope: String,
+    state: String
+) -> String {
+    String.concat(endpoint,
+        String.concat("?client_id=",
+            String.concat(client_id,
+                String.concat("&redirect_uri=",
+                    String.concat(redirect_uri,
+                        String.concat("&scope=",
+                            String.concat(scope,
+                                String.concat("&state=", state))))))))
+}
+
+// exchange_code: exchange authorization code for tokens (stub — requires !Network)
+public fn exchange_code(
+    token_endpoint: String,
+    client_id: String,
+    client_secret: String,
+    code: String,
+    redirect_uri: String
+) -> Result<Map<String, String>, String> !Auth !Network {
+    Result.err("exchange_code: not implemented in v4.5.0")
+}
+
+// refresh_token: refresh an access token (stub — requires !Network)
+public fn refresh_token(
+    token_endpoint: String,
+    client_id: String,
+    client_secret: String,
+    refresh_token_val: String
+) -> Result<Map<String, String>, String> !Auth !Network {
+    Result.err("refresh_token: not implemented in v4.5.0")
+}

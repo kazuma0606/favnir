@@ -32,10 +32,10 @@ fn gen_hint_value_for_field(field_name: &str, field_type: &Type, rng: &mut Small
     // 5. first_name / given_name → 名のみ
     // 6. last_name / family_name → 姓のみ
     // 7. phone / *_phone → "090-XXXX-XXXX"
-    // 8. *_at (created_at等) / *_datetime → ISO 8601 日時
-    // 9. *_date / birth_date → "YYYY-MM-DD"
+    // 8. *_at (created_at等) / *_datetime → ISO 8601 日時（現在時刻 ± ランダムオフセット）
+    // 9. *_date / birth_date → "YYYY-MM-DD"（現在日付を起算点にランダム生成）
     // 10. price / amount / *_fee / *_price → 正の実数
-    // 11. age → 20〜80 の整数
+    // 11. age → 0〜130 の整数
     // 12. count / *_count → 1〜999 の整数
     // 13. url / *_url → "https://example.com/item/{n}"
     // 14. zip / postal_code → "XXX-XXXX"

@@ -1,0 +1,35 @@
+// emit.fav — Structured log emission (v4.6.0)
+
+// Basic logging (no context)
+public fn info(code: String, message: String) -> Unit !Io {
+    Log.emit_raw("INFO", code, message, "{}")
+}
+
+public fn success(code: String, message: String) -> Unit !Io {
+    Log.emit_raw("SUCCESS", code, message, "{}")
+}
+
+public fn warn(code: String, message: String) -> Unit !Io {
+    Log.emit_raw("WARN", code, message, "{}")
+}
+
+public fn error(code: String, message: String) -> Unit !Io {
+    Log.emit_raw("ERROR", code, message, "{}")
+}
+
+// Context-bearing logging (ctx: Map<String, String>)
+public fn info_ctx(code: String, message: String, ctx: Map<String, String>) -> Unit !Io {
+    Log.emit_raw("INFO", code, message, Log.map_to_json_raw(ctx))
+}
+
+public fn success_ctx(code: String, message: String, ctx: Map<String, String>) -> Unit !Io {
+    Log.emit_raw("SUCCESS", code, message, Log.map_to_json_raw(ctx))
+}
+
+public fn warn_ctx(code: String, message: String, ctx: Map<String, String>) -> Unit !Io {
+    Log.emit_raw("WARN", code, message, Log.map_to_json_raw(ctx))
+}
+
+public fn error_ctx(code: String, message: String, ctx: Map<String, String>) -> Unit !Io {
+    Log.emit_raw("ERROR", code, message, Log.map_to_json_raw(ctx))
+}

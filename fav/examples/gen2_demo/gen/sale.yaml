@@ -1,0 +1,11 @@
+fields:
+  amount:
+    distribution: pareto
+    min: 100
+    max: 500000
+  created_at:
+    range: last_90_days
+  customer_name:
+    locale: ja
+  status:
+    values: ["active", "completed", "cancelled", "refunded"]

@@ -40,6 +40,42 @@ pub struct DatabaseConfig {
 }
 
 #[derive(Debug, Clone)]
+pub struct AuthConfig {
+    pub mode: String, // "jwt" | "cognito" | "none"; default "jwt"
+}
+
+#[derive(Debug, Clone)]
+pub struct LogConfig {
+    pub level: String,    // "debug" | "info" | "warn" | "error"; default "info"
+    pub format: String,   // "json" | "text"; default "text"
+    pub output: String,   // "stdout" | "stderr"; default "stdout"
+    pub service: String,  // service name for JSON output
+}
+
+impl Default for LogConfig {
+    fn default() -> Self {
+        LogConfig {
+            level: "info".to_string(),
+            format: "text".to_string(),
+            output: "stdout".to_string(),
+            service: String::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct EnvConfig {
+    pub dotenv: Option<String>,
+    pub prefix: String,
+}
+
+impl Default for EnvConfig {
+    fn default() -> Self {
+        EnvConfig { dotenv: None, prefix: String::new() }
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct FavToml {
     pub name: String,
     pub version: String,
@@ -53,6 +89,12 @@ pub struct FavToml {
     pub checkpoint: Option<CheckpointConfig>,
     /// Optional database configuration.
     pub database: Option<DatabaseConfig>,
+    /// Optional auth configuration.
+    pub auth: Option<AuthConfig>,
+    /// Optional log configuration.
+    pub log: Option<LogConfig>,
+    /// Optional env configuration.
+    pub env: Option<EnvConfig>,
 }
 
 impl FavToml {
@@ -96,6 +138,9 @@ fn parse_fav_toml(content: &str) -> FavToml {
     let mut dependencies = Vec::new();
     let mut checkpoint = None;
     let mut database = None;
+    let mut auth = None;
+    let mut log = None;
+    let mut env_cfg: Option<EnvConfig> = None;
     let mut section = "";
 
     for line in content.lines() {
@@ -121,6 +166,18 @@ fn parse_fav_toml(content: &str) -> FavToml {
         }
         if trimmed == "[runes]" {
             section = "runes";
+            continue;
+        }
+        if trimmed == "[auth]" {
+            section = "auth";
+            continue;
+        }
+        if trimmed == "[log]" {
+            section = "log";
+            continue;
+        }
+        if trimmed == "[env]" {
+            section = "env";
             continue;
         }
         if trimmed.starts_with('[') {
@@ -179,6 +236,41 @@ fn parse_fav_toml(content: &str) -> FavToml {
                 }
                 database = Some(current);
             }
+            "auth" => {
+                let mut current = auth.take().unwrap_or(AuthConfig {
+                    mode: "jwt".into(),
+                });
+                if let Some((key, val)) = parse_kv(trimmed) {
+                    if key == "mode" {
+                        current.mode = val.to_string();
+                    }
+                }
+                auth = Some(current);
+            }
+            "log" => {
+                let mut current: LogConfig = log.take().unwrap_or_default();
+                if let Some((key, val)) = parse_kv(trimmed) {
+                    match key {
+                        "level"   => current.level   = val.to_string(),
+                        "format"  => current.format  = val.to_string(),
+                        "output"  => current.output  = val.to_string(),
+                        "service" => current.service = val.to_string(),
+                        _ => {}
+                    }
+                }
+                log = Some(current);
+            }
+            "env" => {
+                let mut current: EnvConfig = env_cfg.take().unwrap_or_default();
+                if let Some((key, val)) = parse_kv(trimmed) {
+                    match key {
+                        "dotenv" => current.dotenv = Some(val.to_string()),
+                        "prefix" => current.prefix = val.to_string(),
+                        _ => {}
+                    }
+                }
+                env_cfg = Some(current);
+            }
             _ => {}
         }
     }
@@ -191,6 +283,9 @@ fn parse_fav_toml(content: &str) -> FavToml {
         dependencies,
         checkpoint,
         database,
+        auth,
+        log,
+        env: env_cfg,
     }
 }
 

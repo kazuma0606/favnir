@@ -1,0 +1,38 @@
+---
+title: "IO"
+order: 1
+category: "標準ライブラリ"
+description: "標準入出力 — IO.println / IO.print / IO.read_line"
+---
+
+# IO
+
+`!Io` エフェクトが必要です。
+
+## 関数一覧
+
+| 関数 | シグネチャ | 説明 |
+|------|-----------|------|
+| `IO.println` | `String -> Unit !Io` | 改行付き出力 |
+| `IO.print` | `String -> Unit !Io` | 改行なし出力 |
+| `IO.read_line` | `Unit -> String !Io` | 標準入力から 1 行読む |
+| `IO.eprintln` | `String -> Unit !Io` | stderr に出力 |
+
+## 使用例
+
+```favnir
+public fn main() -> Unit !Io {
+  IO.println("Hello, World!")
+  IO.print("名前: ")
+  let name = IO.read_line()
+  IO.println($"こんにちは、{name}！")
+}
+```
+
+## f-string
+
+```favnir
+let x = 42
+let msg = $"値は {x} です"
+IO.println(msg)
+```

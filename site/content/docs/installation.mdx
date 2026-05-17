@@ -1,0 +1,66 @@
+---
+title: "インストール"
+order: 2
+category: "はじめに"
+description: "Favnir のインストール方法"
+---
+
+# インストール
+
+## 前提条件
+
+- Rust 1.80 以上
+- Cargo（Rust に付属）
+
+## cargo install
+
+```bash
+cargo install --git https://github.com/yoshiask/favnir fav
+```
+
+インストール後、バージョンを確認します:
+
+```bash
+fav --version
+# Favnir v5.0.0
+```
+
+## 新しいプロジェクトを作成
+
+```bash
+fav new my-pipeline
+cd my-pipeline
+```
+
+プロジェクト構成:
+
+```
+my-pipeline/
+  fav.toml          ← プロジェクト設定
+  src/
+    main.fav        ← エントリポイント
+  runes/            ← 使用する Rune
+```
+
+## fav.toml
+
+```toml
+[rune]
+name    = "my-pipeline"
+version = "0.1.0"
+
+[dependencies]
+# aws = "^1.0.0"   # Rune Registry からインストール
+```
+
+## コマンド一覧
+
+| コマンド | 説明 |
+|---------|------|
+| `fav run src/main.fav` | プログラムを実行 |
+| `fav check src/main.fav` | 型チェックのみ |
+| `fav test` | テストブロックを実行 |
+| `fav deploy` | Lambda / ECS にデプロイ |
+| `fav explain-error E0213` | エラーコードを調べる |
+| `fav mcp` | MCP サーバーを起動 |
+| `fav lsp` | LSP サーバーを起動 |

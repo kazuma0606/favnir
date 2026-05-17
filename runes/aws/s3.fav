@@ -1,0 +1,21 @@
+// S3 Rune — object storage operations (v4.11.0)
+
+public fn get_object(bucket: String, key: String) -> Result<String, String> !AWS {
+    AWS.s3_get_object_raw(bucket, key)
+}
+
+public fn put_object(bucket: String, key: String, body: String) -> Result<Unit, String> !AWS {
+    AWS.s3_put_object_raw(bucket, key, body)
+}
+
+public fn delete_object(bucket: String, key: String) -> Result<Unit, String> !AWS {
+    AWS.s3_delete_object_raw(bucket, key)
+}
+
+public fn list_objects(bucket: String, prefix: String) -> Result<List<String>, String> !AWS {
+    AWS.s3_list_objects_raw(bucket, prefix)
+}
+
+public fn bucket_exists(bucket: String) -> Result<Bool, String> !AWS {
+    AWS.s3_head_bucket_raw(bucket)
+}

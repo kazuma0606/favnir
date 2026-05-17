@@ -1,0 +1,93 @@
+---
+title: "型システム"
+order: 1
+category: "言語仕様"
+description: "Favnir の型システム — プリミティブ・Record・List・Option・Result"
+---
+
+# 型システム
+
+## プリミティブ型
+
+| 型 | 説明 | 例 |
+|----|------|----|
+| `Int` | 64bit 整数 | `42`, `-1` |
+| `Float` | 64bit 浮動小数点 | `3.14`, `-0.5` |
+| `String` | UTF-8 文字列 | `"hello"` |
+| `Bool` | 真偽値 | `true`, `false` |
+| `Unit` | 値なし（副作用のある関数の戻り値） | `()` |
+
+## Record 型
+
+```favnir
+type Point = { x: Int  y: Int }
+type User  = { name: String  age: Int  email: Option<String> }
+
+let p = Point { x: 3  y: 4 }
+IO.println(p.x)   // 3
+```
+
+## List 型
+
+```favnir
+let nums: List<Int> = [1, 2, 3, 4, 5]
+let doubled = List.map(nums, |n| n * 2)   // [2, 4, 6, 8, 10]
+let evens   = List.filter(nums, |n| n % 2 == 0)  // [2, 4]
+let sum     = List.fold(nums, 0, |acc, n| acc + n)  // 15
+```
+
+## Option 型
+
+値が存在しないかもしれないことを型で表現します:
+
+```favnir
+fn find_user(id: Int) -> Option<User> {
+  if id == 1
+    then some(User { name: "田中"  age: 30  email: none })
+    else none
+}
+
+match find_user(1) {
+  Some(u) => IO.println(u.name)
+  None    => IO.println("ユーザーが見つかりません")
+}
+
+// null 合体演算子
+let name = find_user(1) ?? User { name: "Unknown"  age: 0  email: none }
+```
+
+## Result 型
+
+成功か失敗かを型で表現します:
+
+```favnir
+fn parse_int(s: String) -> Result<Int, String> {
+  // ...
+}
+
+match parse_int("42") {
+  Ok(n)  => IO.println($"数値: {n}")
+  Err(e) => IO.println($"エラー: {e}")
+}
+
+// bind でチェーン
+bind n <- parse_int("42")
+IO.println(n)
+```
+
+## ジェネリック型
+
+```favnir
+fn first<T>(list: List<T>) -> Option<T> {
+  if List.len(list) == 0
+    then none
+    else some(List.get(list, 0))
+}
+```
+
+## 型エイリアス
+
+```favnir
+type UserId = Int
+type UserMap = Map<String, User>
+```

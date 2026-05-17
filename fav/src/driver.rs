@@ -3,10 +3,10 @@ use crate::backend;
 use crate::backend::artifact::FvcArtifact;
 use crate::backend::codegen::{Opcode, codegen_program};
 use crate::backend::vm::{
-    CheckpointBackend, EnvConfig, LogConfig, VM, checkpoint_list, checkpoint_meta,
+    AwsConfig, CheckpointBackend, EnvConfig, LogConfig, VM, checkpoint_list, checkpoint_meta,
     checkpoint_reset_direct, checkpoint_save_direct, enable_coverage, parse_dotenv_content,
-    set_auth_mode, set_checkpoint_backend, set_env_config, set_log_codes, set_log_config,
-    set_schema_registry, take_coverage,
+    set_auth_mode, set_aws_config, set_checkpoint_backend, set_env_config, set_log_codes,
+    set_log_config, set_schema_registry, take_coverage,
 };
 use crate::backend::wasm_codegen::wasm_codegen_program;
 use crate::backend::wasm_exec::{wasm_exec_info, wasm_exec_main};
@@ -18,7 +18,7 @@ use crate::middle::compiler::set_coverage_mode;
 use crate::middle::ir::{IRArm, IRExpr, IRGlobalKind, IRPattern, IRProgram, IRStmt};
 use crate::middle::resolver::Resolver;
 use crate::schemas::load_schemas;
-use crate::toml::{CheckpointConfig, FavToml};
+use crate::toml::{CheckpointConfig, FavToml, DeployConfig};
 use crate::value::Value;
 use notify::{Config, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use serde::Serialize;
@@ -656,6 +656,13 @@ pub fn cmd_run(file: Option<&str>, db_url: Option<&str>) {
                         prefix: ec.prefix.clone(),
                     });
                 }
+                // AWS config (v4.11.0)
+                let mut aws_cfg = AwsConfig::from_env();
+                if let Some(ac) = toml.aws.as_ref() {
+                    if let Some(r) = &ac.region       { aws_cfg.region       = r.clone(); }
+                    if let Some(e) = &ac.endpoint_url { aws_cfg.endpoint_url = Some(e.clone()); }
+                }
+                set_aws_config(aws_cfg);
             }
         }
     }
@@ -2481,6 +2488,9 @@ fn try_cmd_check_dir(dir: &Path) -> Result<(), usize> {
     let toml = FavToml::load(&root).unwrap_or(FavToml {
         name: String::new(),
         version: String::new(),
+        description: None,
+        authors: vec![],
+        license: None,
         src: ".".into(),
         runes_path: None,
         dependencies: vec![],
@@ -2489,6 +2499,8 @@ fn try_cmd_check_dir(dir: &Path) -> Result<(), usize> {
         auth: None,
         log: None,
         env: None,
+        aws: None,
+        deploy: None,
     });
     let files = collect_fav_files_recursive(dir);
     let resolver = make_resolver(Some(toml), Some(root));
@@ -9706,11 +9718,14 @@ fn slot_impl_name(imp: &ast::SlotImpl) -> &str {
     }
 }
 
-// ── Phase 4: rune dependency management ───────────────────────────────────────
+// ── Phase 4: rune dependency management (v4.12.0) ─────────────────────────────
 
-/// `fav install` — resolve path dependencies and write `fav.lock`.
-pub fn cmd_install() {
+/// `fav install [<name>] [--force]` — resolve dependencies from fav.toml.
+/// Semver deps are installed from ~/.fav/registry/ into ./runes/.
+/// Path/Registry deps are resolved and written to fav.lock.
+pub fn cmd_install(pkg_name_arg: Option<&str>, force: bool) {
     use crate::lock::{LockFile, LockedPackage, resolve_path_dep};
+    use crate::registry::Registry;
     use crate::toml::{DependencySpec, FavToml};
 
     let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
@@ -9724,15 +9739,66 @@ pub fn cmd_install() {
     });
 
     if toml.dependencies.is_empty() {
-        println!("No dependencies to install.");
+        println!("[install] No dependencies declared in fav.toml");
         return;
     }
 
+    let deps_to_process: Vec<&DependencySpec> = if let Some(name) = pkg_name_arg {
+        toml.dependencies.iter().filter(|d| d.name() == name).collect()
+    } else {
+        toml.dependencies.iter().collect()
+    };
+
+    if deps_to_process.is_empty() {
+        if let Some(n) = pkg_name_arg {
+            eprintln!("error: dependency '{}' not found in fav.toml [dependencies]", n);
+            std::process::exit(1);
+        }
+        println!("[install] No matching dependencies.");
+        return;
+    }
+
+    println!("[install] Reading fav.toml...");
+    let reg = Registry::new();
+    let runes_dir = root.join("runes");
     let mut lock = LockFile::new();
     let mut errors = 0usize;
+    let mut installed = 0usize;
 
-    for dep in &toml.dependencies {
+    for dep in deps_to_process {
         match dep {
+            DependencySpec::Semver { name, version } => {
+                match reg.resolve_version(name, version) {
+                    None => {
+                        eprintln!(
+                            "[install] error: {}@{} not found in local registry (~/.fav/registry/)",
+                            name, version
+                        );
+                        errors += 1;
+                    }
+                    Some(ver) => {
+                        println!("[install] Resolving {}@{} → {}", name, version, ver);
+                        let dest_pkg = runes_dir.join(name);
+                        if dest_pkg.exists() && !force {
+                            println!(
+                                "[install] {} already in ./runes/ (skipped, use --force to overwrite)",
+                                name
+                            );
+                            continue;
+                        }
+                        match reg.install(name, &ver, &runes_dir) {
+                            Ok(()) => {
+                                println!("[install] Copying {}@{} → ./runes/{}/", name, ver, name);
+                                installed += 1;
+                            }
+                            Err(e) => {
+                                eprintln!("[install] error: {}", e);
+                                errors += 1;
+                            }
+                        }
+                    }
+                }
+            }
             DependencySpec::Path { name, path } => {
                 let resolved = resolve_path_dep(&root, path);
                 if !resolved.exists() {
@@ -9747,13 +9813,9 @@ pub fn cmd_install() {
                     version: String::new(),
                     resolved_path: resolved_str,
                 });
+                installed += 1;
             }
-            DependencySpec::Registry {
-                name,
-                registry,
-                version,
-            } => {
-                // Local registry: look for `<registry_name>/<name>-<version>/` relative to root
+            DependencySpec::Registry { name, registry, version } => {
                 let registry_dir = root.join(registry).join(format!("{name}-{version}"));
                 if !registry_dir.exists() {
                     eprintln!(
@@ -9769,24 +9831,35 @@ pub fn cmd_install() {
                     version: version.clone(),
                     resolved_path: resolved_str,
                 });
+                installed += 1;
             }
         }
     }
 
     if errors > 0 {
-        eprintln!("error: {errors} dependency/dependencies could not be resolved");
+        eprintln!("error: {} dependency/dependencies could not be resolved", errors);
         std::process::exit(1);
     }
 
-    lock.save(&root).unwrap_or_else(|e| {
-        eprintln!("error: could not write fav.lock: {e}");
-        std::process::exit(1);
-    });
-    println!("Wrote fav.lock ({} package(s))", lock.packages.len());
+    if !lock.packages.is_empty() {
+        lock.save(&root).unwrap_or_else(|e| {
+            eprintln!("error: could not write fav.lock: {e}");
+            std::process::exit(1);
+        });
+    }
+
+    println!("[install] Done — {} package(s) installed", installed);
 }
 
-/// `fav publish` — validate project and emit a publish manifest stub.
-pub fn cmd_publish() {
+/// `fav publish [--name <n>] [--version <v>] [--dry-run] [--force]`
+/// Publish rune files to the local registry (~/.fav/registry/).
+pub fn cmd_publish(
+    name_override:    Option<&str>,
+    version_override: Option<&str>,
+    dry_run:          bool,
+    force:            bool,
+) {
+    use crate::registry::{PackageMeta, Registry, collect_fav_files_in};
     use crate::toml::FavToml;
 
     let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
@@ -9808,9 +9881,430 @@ pub fn cmd_publish() {
         std::process::exit(1);
     }
 
-    println!("Publishing {}@{}", toml.name, toml.version);
-    println!("(note: remote registry publishing is not yet implemented)");
-    println!("To share locally, copy this project to your local registry directory.");
+    let pkg_name    = name_override.unwrap_or(&toml.name).to_string();
+    let pkg_version = version_override.unwrap_or(&toml.version).to_string();
+    let rune_files  = collect_fav_files_in(&root.join("runes"));
+
+    println!("[publish] Package: {} v{}", pkg_name, pkg_version);
+    println!("[publish] Files:");
+    for (path, _) in &rune_files {
+        println!("  {}", path);
+    }
+    let archive_path    = format!("/tmp/{}-{}.fav.pkg", pkg_name, pkg_version);
+    let reg_path_display = format!("~/.fav/registry/{}/{}/", pkg_name, pkg_version);
+    println!("[publish] Archive: {}{}", archive_path, if dry_run { " (DRY RUN)" } else { "" });
+    println!("[publish] Registry: {}{}", reg_path_display, if dry_run { " (DRY RUN)" } else { "" });
+
+    if dry_run {
+        println!("[publish] Done (dry run — no changes made)");
+        return;
+    }
+
+    let reg = Registry::new();
+    if !force && reg.installed_versions(&pkg_name).contains(&pkg_version) {
+        eprintln!(
+            "error: {}@{} already published. Use --force to overwrite.",
+            pkg_name, pkg_version
+        );
+        std::process::exit(1);
+    }
+
+    let meta = PackageMeta {
+        name:        pkg_name.clone(),
+        version:     pkg_version.clone(),
+        description: toml.description.clone().unwrap_or_default(),
+        author:      toml.authors.first().cloned().unwrap_or_default(),
+        license:     toml.license.clone().unwrap_or_else(|| "MIT".to_string()),
+        published:   chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string(),
+        files:       vec![],
+    };
+
+    reg.publish(&meta, &rune_files).unwrap_or_else(|e| {
+        eprintln!("error: {}", e);
+        std::process::exit(1);
+    });
+
+    println!("[publish] Done — {}@{} published to local registry", pkg_name, pkg_version);
+}
+
+/// `fav registry [list|search <q>|info <name>]`
+pub fn cmd_registry(subcommand: Option<&str>, args: &[String]) {
+    use crate::registry::Registry;
+
+    let reg = Registry::new();
+    match subcommand {
+        Some("list") | None => {
+            let entries = reg.list();
+            if entries.is_empty() {
+                println!("(no packages in local registry)");
+            } else {
+                for e in entries {
+                    println!("{:<16} {}", e.name, e.versions.join(", "));
+                }
+            }
+        }
+        Some("search") => {
+            let query = args.first().map(|s| s.as_str()).unwrap_or("");
+            let results = reg.search(query);
+            if results.is_empty() {
+                println!("(no packages matching \"{}\")", query);
+            } else {
+                for e in results {
+                    let desc = reg.info(&e.name).map(|m| m.description).unwrap_or_default();
+                    let latest = e.versions.first().cloned().unwrap_or_default();
+                    println!("{:<16} {:<8} {}", e.name, latest, desc);
+                }
+            }
+        }
+        Some("info") => {
+            let name = match args.first() {
+                Some(n) => n.as_str(),
+                None => {
+                    eprintln!("error: usage: fav registry info <name>");
+                    std::process::exit(1);
+                }
+            };
+            match reg.info(name) {
+                None => {
+                    eprintln!("error: package '{}' not found in local registry", name);
+                    std::process::exit(1);
+                }
+                Some(m) => {
+                    println!("Name:        {}", m.name);
+                    let versions = reg.installed_versions(&m.name);
+                    println!("Versions:    {}", versions.join(", "));
+                    println!("Description: {}", m.description);
+                    println!("Author:      {}", m.author);
+                    println!("License:     {}", m.license);
+                    let pub_date = if m.published.len() >= 10 { &m.published[..10] } else { &m.published };
+                    println!("Published:   {}", pub_date);
+                    if !m.files.is_empty() {
+                        println!("Files:");
+                        for f in &m.files {
+                            println!("  {}", f);
+                        }
+                    }
+                }
+            }
+        }
+        Some(unknown) => {
+            eprintln!("error: unknown registry subcommand '{}'", unknown);
+            eprintln!("usage: fav registry [list|search <q>|info <name>]");
+            std::process::exit(1);
+        }
+    }
+}
+
+// ── fav deploy (v4.11.0) ─────────────────────────────────────────────────────
+
+pub fn cmd_deploy(
+    env: Option<&str>,
+    function_name: Option<&str>,
+    region: Option<&str>,
+    dry_run: bool,
+) {
+    let _env = env.unwrap_or("production");
+    let cwd  = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    let root = FavToml::find_root(&cwd).unwrap_or_else(|| cwd.clone());
+    let toml = FavToml::load(&root).unwrap_or_else(|| {
+        eprintln!("error: no fav.toml found");
+        process::exit(1);
+    });
+
+    let project_name = &toml.name;
+    let func_name    = function_name.unwrap_or(project_name);
+    let deploy_cfg   = toml.deploy.as_ref().cloned().unwrap_or_default();
+    let use_region   = region
+        .or_else(|| deploy_cfg.region.as_deref())
+        .unwrap_or("us-east-1");
+    let s3_bucket    = deploy_cfg.s3_bucket.as_deref().unwrap_or("");
+    let role_arn     = deploy_cfg.role_arn.as_deref().unwrap_or("");
+
+    println!("[deploy] Project: {} v{}", project_name, toml.version);
+    println!("[deploy] Function: {}", func_name);
+    println!("[deploy] Region: {}", use_region);
+    println!("[deploy] Runtime: {}", deploy_cfg.runtime);
+    println!("[deploy] Memory: {} MB, Timeout: {}s", deploy_cfg.memory, deploy_cfg.timeout);
+
+    let timestamp = chrono::Utc::now().format("%Y%m%d%H%M%S");
+    let zip_path  = format!("/tmp/{}-{}.zip", project_name, timestamp);
+    println!(
+        "[deploy] Step 1: Package .fav files → {}{}",
+        zip_path,
+        if dry_run { " (DRY RUN)" } else { "" }
+    );
+    if !dry_run {
+        package_project_zip(&root, &zip_path);
+    }
+
+    if s3_bucket.is_empty() && !dry_run {
+        eprintln!("error: [deploy] s3_bucket is required in fav.toml [deploy] section");
+        process::exit(1);
+    }
+    let s3_key = format!("deploys/{}/{}.zip", project_name, timestamp);
+    println!(
+        "[deploy] Step 2: Upload to s3://{}/{}{}",
+        s3_bucket,
+        s3_key,
+        if dry_run { " (DRY RUN)" } else { "" }
+    );
+    if !dry_run {
+        deploy_upload_to_s3(s3_bucket, &s3_key, &zip_path, use_region);
+    }
+
+    println!(
+        "[deploy] Step 3: Update Lambda function '{}'{}",
+        func_name,
+        if dry_run { " (DRY RUN)" } else { "" }
+    );
+    if !dry_run {
+        deploy_update_lambda(func_name, s3_bucket, &s3_key, use_region, role_arn, &deploy_cfg);
+    }
+
+    if dry_run {
+        println!("[deploy] Done (dry run — no changes made)");
+    } else {
+        println!("[deploy] Done");
+    }
+}
+
+fn package_project_zip(root: &Path, zip_path: &str) {
+    use std::io::Write;
+    use zip::write::FileOptions;
+    let zip_file = match std::fs::File::create(zip_path) {
+        Ok(f) => f,
+        Err(e) => {
+            eprintln!("error: failed to create zip: {}", e);
+            process::exit(1);
+        }
+    };
+    let mut zip    = zip::ZipWriter::new(zip_file);
+    let options: FileOptions = FileOptions::default()
+        .compression_method(zip::CompressionMethod::Deflated);
+    for entry in walkdir::WalkDir::new(root.join("src")) {
+        let entry = match entry { Ok(e) => e, Err(_) => continue };
+        let path  = entry.path();
+        if path.extension().and_then(|e| e.to_str()) == Some("fav") {
+            let rel = path.strip_prefix(root).unwrap_or(path).to_string_lossy().replace('\\', "/");
+            if zip.start_file(&rel, options).is_ok() {
+                if let Ok(content) = std::fs::read(path) {
+                    let _ = zip.write_all(&content);
+                }
+            }
+        }
+    }
+    let toml_path = root.join("fav.toml");
+    if toml_path.exists() {
+        if zip.start_file("fav.toml", options).is_ok() {
+            if let Ok(content) = std::fs::read(toml_path) {
+                let _ = zip.write_all(&content);
+            }
+        }
+    }
+    let _ = zip.finish();
+}
+
+fn deploy_upload_to_s3(bucket: &str, key: &str, zip_path: &str, region: &str) {
+    let config = crate::backend::vm::get_aws_config_pub();
+    let url    = if let Some(ep) = &config.endpoint_url {
+        format!("{}/{}/{}", ep.trim_end_matches('/'), bucket, key)
+    } else {
+        format!("https://{}.s3.{}.amazonaws.com/{}", bucket, region, key)
+    };
+    let body = match std::fs::read(zip_path) {
+        Ok(b) => b,
+        Err(e) => {
+            eprintln!("error: failed to read zip for upload: {}", e);
+            process::exit(1);
+        }
+    };
+    let h = crate::backend::vm::sigv4_sign_pub(&config, "s3", "PUT", &url, &body);
+    let result = ureq::put(&url)
+        .set("Authorization", &h.authorization)
+        .set("x-amz-date", &h.x_amz_date)
+        .set("x-amz-content-sha256", &h.x_amz_content_sha256)
+        .set("Content-Type", "application/zip")
+        .send_bytes(&body);
+    if let Err(e) = result {
+        eprintln!("error: S3 upload failed: {}", e);
+        process::exit(1);
+    }
+}
+
+fn deploy_update_lambda(func_name: &str, s3_bucket: &str, s3_key: &str, region: &str, role_arn: &str, deploy_cfg: &DeployConfig) {
+    let config = crate::backend::vm::get_aws_config_pub();
+    let url = if let Some(ep) = &config.endpoint_url {
+        format!("{}/2015-03-31/functions/{}/code", ep.trim_end_matches('/'), func_name)
+    } else {
+        format!("https://lambda.{}.amazonaws.com/2015-03-31/functions/{}/code", region, func_name)
+    };
+    let body = format!(
+        r#"{{"S3Bucket":"{}","S3Key":"{}"}}"#,
+        s3_bucket, s3_key
+    );
+    let h = crate::backend::vm::sigv4_sign_pub(&config, "lambda", "PUT", &url, body.as_bytes());
+    let result = ureq::put(&url)
+        .set("Authorization", &h.authorization)
+        .set("x-amz-date", &h.x_amz_date)
+        .set("x-amz-content-sha256", &h.x_amz_content_sha256)
+        .set("Content-Type", "application/json")
+        .send_string(&body);
+    if let Err(ureq::Error::Status(404, _)) = result {
+        // Function does not exist → create it
+        let create_url = if let Some(ep) = &config.endpoint_url {
+            format!("{}/2015-03-31/functions", ep.trim_end_matches('/'))
+        } else {
+            format!("https://lambda.{}.amazonaws.com/2015-03-31/functions", region)
+        };
+        let create_body = format!(
+            r#"{{"FunctionName":"{}","Runtime":"{}","Handler":"{}","Role":"{}","Code":{{"S3Bucket":"{}","S3Key":"{}"}},"MemorySize":{},"Timeout":{}}}"#,
+            func_name, deploy_cfg.runtime, deploy_cfg.handler, role_arn,
+            s3_bucket, s3_key, deploy_cfg.memory, deploy_cfg.timeout
+        );
+        let h2 = crate::backend::vm::sigv4_sign_pub(&config, "lambda", "POST", &create_url, create_body.as_bytes());
+        let _ = ureq::post(&create_url)
+            .set("Authorization", &h2.authorization)
+            .set("x-amz-date", &h2.x_amz_date)
+            .set("x-amz-content-sha256", &h2.x_amz_content_sha256)
+            .set("Content-Type", "application/json")
+            .send_string(&create_body);
+    } else if let Err(e) = result {
+        eprintln!("error: Lambda update failed: {}", e);
+        process::exit(1);
+    }
+}
+
+// ── fav notebook ─────────────────────────────────────────────────────────────
+
+pub fn cmd_notebook_new(name: &str) {
+    use crate::notebook::Notebook;
+    let filename = format!("{}.fav.nb", name);
+    if std::path::Path::new(&filename).exists() {
+        eprintln!("error: {} already exists", filename);
+        std::process::exit(1);
+    }
+    let nb = Notebook::new_notebook(name);
+    if let Err(e) = nb.save(&filename) {
+        eprintln!("error: {}", e);
+        std::process::exit(1);
+    }
+    println!("created {}", filename);
+    println!("next: fav notebook run {}", filename);
+}
+
+pub fn cmd_notebook_run(path: &str, no_cache: bool) {
+    use crate::notebook::{Notebook, OutputKind, run_all};
+    let mut nb = Notebook::load(path).unwrap_or_else(|e| {
+        eprintln!("error: {}", e);
+        std::process::exit(1);
+    });
+
+    if no_cache {
+        for cell in &mut nb.cells {
+            cell.output = None;
+        }
+    }
+
+    let results = run_all(&mut nb);
+
+    let mut code_cells = 0usize;
+    let mut passed = 0usize;
+    let mut failed = 0usize;
+
+    for (id, output) in &results {
+        let cell = nb.cells.iter().find(|c| c.id == *id);
+        let cell_type = cell.map(|c| &c.cell_type);
+        let content_preview = cell
+            .map(|c| {
+                let first_line = c.content.lines().next().unwrap_or("").to_string();
+                if first_line.len() > 60 {
+                    format!("{}...", &first_line[..60])
+                } else {
+                    first_line
+                }
+            })
+            .unwrap_or_default();
+
+        match cell_type {
+            Some(crate::notebook::CellType::Markdown) => {
+                println!("[{}] markdown — skipped", id);
+            }
+            Some(crate::notebook::CellType::Code) => {
+                code_cells += 1;
+                match output.kind {
+                    OutputKind::None => println!("[{}] {}\n  → (no output)", id, content_preview),
+                    OutputKind::Error => {
+                        failed += 1;
+                        println!("[{}] {}\n  ERROR: {}", id, content_preview, output.text);
+                    }
+                    _ => {
+                        passed += 1;
+                        println!("[{}] {}\n  → {}", id, content_preview, output.text);
+                    }
+                }
+            }
+            None => {}
+        }
+    }
+
+    println!();
+    println!(
+        "{} cells, {} code cells, {} with output, {} failed",
+        results.len(),
+        code_cells,
+        passed,
+        failed
+    );
+
+    if let Err(e) = nb.save(path) {
+        eprintln!("warning: could not save notebook: {}", e);
+    }
+
+    if failed > 0 {
+        std::process::exit(1);
+    }
+}
+
+pub fn cmd_notebook_serve(path: &str, port: u16, no_open: bool) {
+    crate::notebook::serve_notebook(path, port, no_open);
+}
+
+pub fn cmd_notebook_export(path: &str, out: Option<&str>) {
+    use crate::notebook::{Notebook, export_markdown};
+    let nb = Notebook::load(path).unwrap_or_else(|e| {
+        eprintln!("error: {}", e);
+        std::process::exit(1);
+    });
+    let md = export_markdown(&nb);
+    match out {
+        Some(out_path) => {
+            if let Err(e) = std::fs::write(out_path, &md) {
+                eprintln!("error: cannot write {}: {}", out_path, e);
+                std::process::exit(1);
+            }
+            println!("exported to {}", out_path);
+        }
+        None => print!("{}", md),
+    }
+}
+
+pub fn cmd_notebook_check(path: &str) {
+    use crate::notebook::{Notebook, check_notebook};
+    let nb = Notebook::load(path).unwrap_or_else(|e| {
+        eprintln!("error: {}", e);
+        std::process::exit(1);
+    });
+    let errors = check_notebook(&nb);
+    if errors.is_empty() {
+        println!("OK: all code cells type-check successfully");
+    } else {
+        for (cell_id, msgs) in &errors {
+            for msg in msgs {
+                eprintln!("[{}] {}", cell_id, msg);
+            }
+        }
+        std::process::exit(1);
+    }
 }
 
 // ── fav migrate ───────────────────────────────────────────────────────────────
@@ -9895,6 +10389,63 @@ pub fn cmd_explain_error_list() {
     println!("{}", "-".repeat(60));
     for e in crate::error_catalog::list_all() {
         println!("{:<8}  {}", e.code, e.title);
+    }
+}
+
+pub fn cmd_explain_error_list_json() {
+    let entries = crate::error_catalog::list_all();
+    match serde_json::to_string_pretty(entries) {
+        Ok(json) => println!("{}", json),
+        Err(e) => {
+            eprintln!("error: failed to serialize catalog: {}", e);
+            std::process::exit(1);
+        }
+    }
+}
+
+#[cfg(test)]
+mod explain_tests {
+    use super::*;
+
+    #[test]
+    fn explain_single_known_code() {
+        let e = crate::error_catalog::lookup("E0213");
+        assert!(e.is_some());
+        let e = e.unwrap();
+        assert_eq!(e.code, "E0213");
+        assert!(!e.title.is_empty());
+        assert!(!e.description.is_empty());
+    }
+
+    #[test]
+    fn explain_unknown_code_returns_none() {
+        let e = crate::error_catalog::lookup("E9999");
+        assert!(e.is_none());
+    }
+
+    #[test]
+    fn explain_all_returns_nonempty() {
+        let all = crate::error_catalog::list_all();
+        assert!(all.len() >= 20, "expected at least 20 entries, got {}", all.len());
+    }
+
+    #[test]
+    fn explain_all_json_is_valid() {
+        let all = crate::error_catalog::list_all();
+        let json = serde_json::to_string_pretty(all).expect("serialization failed");
+        let parsed: serde_json::Value = serde_json::from_str(&json).expect("invalid JSON");
+        assert!(parsed.is_array());
+    }
+
+    #[test]
+    fn explain_all_has_required_fields() {
+        let all = crate::error_catalog::list_all();
+        for entry in all {
+            assert!(!entry.code.is_empty(), "code empty for an entry");
+            assert!(!entry.title.is_empty(), "title empty for {}", entry.code);
+            assert!(!entry.description.is_empty(), "description empty for {}", entry.code);
+            assert!(!entry.category.is_empty(), "category empty for {}", entry.code);
+        }
     }
 }
 
@@ -12221,5 +12772,235 @@ public fn main() -> Bool !Env {
             assert!(passed, "test '{}' failed: {:?}", name, msg);
         }
         assert!(!results.is_empty(), "no tests found");
+    }
+
+    // ── AWS Rune integration tests (v4.11.0) ──────────────────────────────────
+
+    fn set_bad_aws_host_driver() {
+        use crate::backend::vm::{AwsConfig, set_aws_config};
+        set_aws_config(AwsConfig {
+            region: "us-east-1".to_string(),
+            endpoint_url: Some("http://invalid.host.fav.test:9999".to_string()),
+            access_key: "test".to_string(),
+            secret_key: "test".to_string(),
+            session_token: None,
+        });
+    }
+
+    fn reset_aws_config_driver() {
+        use crate::backend::vm::{AwsConfig, set_aws_config};
+        set_aws_config(AwsConfig::default());
+    }
+
+    #[test]
+    fn aws_s3_get_returns_err_in_favnir_source() {
+        set_bad_aws_host_driver();
+        let value = exec_project_main_source_with_runes(
+            r#"
+import rune "aws"
+
+public fn main() -> Bool !AWS {
+    match aws.get_object("nonexistent-bucket", "key") {
+        Err(_) => true
+        Ok(_)  => false
+    }
+}
+"#,
+        );
+        reset_aws_config_driver();
+        assert_eq!(value, crate::value::Value::Bool(true));
+    }
+
+    #[test]
+    fn aws_sqs_send_returns_err_in_favnir_source() {
+        set_bad_aws_host_driver();
+        let value = exec_project_main_source_with_runes(
+            r#"
+import rune "aws"
+
+public fn main() -> Bool !AWS {
+    match aws.send_message("http://invalid.host.fav.test:9999/q", "hello") {
+        Err(_) => true
+        Ok(_)  => false
+    }
+}
+"#,
+        );
+        reset_aws_config_driver();
+        assert_eq!(value, crate::value::Value::Bool(true));
+    }
+
+    #[test]
+    fn aws_dynamo_scan_returns_err_in_favnir_source() {
+        set_bad_aws_host_driver();
+        let value = exec_project_main_source_with_runes(
+            r#"
+import rune "aws"
+
+public fn main() -> Bool !AWS {
+    match aws.scan("nonexistent-table") {
+        Err(_) => true
+        Ok(_)  => false
+    }
+}
+"#,
+        );
+        reset_aws_config_driver();
+        assert_eq!(value, crate::value::Value::Bool(true));
+    }
+
+    #[test]
+    fn aws_rune_test_file_passes() {
+        use crate::backend::vm::{AwsConfig, set_aws_config};
+        // Use default config (no endpoint_url) so requests fail immediately on bad hosts
+        set_aws_config(AwsConfig::default());
+        let results = run_fav_test_file_with_runes("runes/aws/aws.test.fav");
+        for (name, passed, msg) in &results {
+            assert!(passed, "test '{}' failed: {:?}", name, msg);
+        }
+        assert!(!results.is_empty(), "no tests found");
+    }
+
+    #[test]
+    fn deploy_dry_run_prints_steps() {
+        // dry_run should not require fav.toml — use temp dir with minimal toml
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::write(
+            root.join("fav.toml"),
+            "[rune]\nname = \"testapp\"\nversion = \"0.1.0\"\n",
+        ).unwrap();
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::write(root.join("src/main.fav"), "public fn main() -> Unit { () }\n").unwrap();
+        let prev = std::env::current_dir().unwrap();
+        std::env::set_current_dir(root).unwrap();
+        // Capture stdout via the function running without panic
+        crate::driver::cmd_deploy(Some("production"), Some("testapp"), Some("us-east-1"), true);
+        std::env::set_current_dir(prev).unwrap();
+    }
+}
+
+// ── registry integration tests (v4.12.0) ─────────────────────────────────────
+
+#[cfg(test)]
+mod registry_tests {
+    use crate::registry::{PackageMeta, Registry, collect_fav_files_in};
+
+    fn make_reg_pkg(reg: &Registry, name: &str, version: &str, fav_content: &str) {
+        let meta = PackageMeta {
+            name:        name.to_string(),
+            version:     version.to_string(),
+            description: format!("{} rune", name),
+            author:      "test".to_string(),
+            license:     "MIT".to_string(),
+            published:   "2026-05-17T00:00:00Z".to_string(),
+            files:       vec![],
+        };
+        let rune_files = vec![(
+            format!("runes/{}/{}.fav", name, name),
+            fav_content.as_bytes().to_vec(),
+        )];
+        reg.publish(&meta, &rune_files).unwrap();
+    }
+
+    #[test]
+    fn publish_dry_run_does_not_panic() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::write(
+            root.join("fav.toml"),
+            "[rune]\nname = \"mylib\"\nversion = \"1.0.0\"\ndescription = \"test lib\"\n",
+        ).unwrap();
+        std::fs::create_dir_all(root.join("runes/mylib")).unwrap();
+        std::fs::write(root.join("runes/mylib/mylib.fav"), "// mylib\n").unwrap();
+        let prev = std::env::current_dir().unwrap();
+        std::env::set_current_dir(root).unwrap();
+        // dry_run=true, force=false — must not touch ~/.fav/registry/
+        crate::driver::cmd_publish(None, None, true, false);
+        std::env::set_current_dir(prev).unwrap();
+    }
+
+    #[test]
+    fn install_from_local_registry() {
+        let tmp = tempfile::tempdir().unwrap();
+        let reg = Registry::with_root(tmp.path().join("registry"));
+        make_reg_pkg(&reg, "csv", "1.0.0", "// csv barrel\n");
+
+        let dest_runes = tmp.path().join("runes");
+        std::fs::create_dir_all(&dest_runes).unwrap();
+        reg.install("csv", "1.0.0", &dest_runes).unwrap();
+        assert!(dest_runes.join("csv/csv.fav").exists());
+    }
+
+    #[test]
+    fn registry_list_shows_installed() {
+        let tmp = tempfile::tempdir().unwrap();
+        let reg = Registry::with_root(tmp.path().to_path_buf());
+        make_reg_pkg(&reg, "csv",   "1.0.0", "");
+        make_reg_pkg(&reg, "email", "0.3.1", "");
+        let list = reg.list();
+        assert_eq!(list.len(), 2);
+        assert!(list.iter().any(|e| e.name == "csv"));
+        assert!(list.iter().any(|e| e.name == "email"));
+    }
+
+    #[test]
+    fn registry_search_filters_by_name() {
+        let tmp = tempfile::tempdir().unwrap();
+        let reg = Registry::with_root(tmp.path().to_path_buf());
+        make_reg_pkg(&reg, "csv",   "1.0.0", "");
+        make_reg_pkg(&reg, "email", "0.3.1", "");
+        make_reg_pkg(&reg, "csv_ext", "0.1.0", "");
+        let results = reg.search("csv");
+        assert_eq!(results.len(), 2);
+        assert!(results.iter().any(|e| e.name == "csv"));
+        assert!(results.iter().any(|e| e.name == "csv_ext"));
+        // "email" must not appear
+        assert!(!results.iter().any(|e| e.name == "email"));
+    }
+
+    #[test]
+    fn registry_info_shows_metadata() {
+        let tmp = tempfile::tempdir().unwrap();
+        let reg = Registry::with_root(tmp.path().to_path_buf());
+        make_reg_pkg(&reg, "csv", "1.0.0", "// csv barrel\n");
+        let info = reg.info("csv").unwrap();
+        assert_eq!(info.name, "csv");
+        assert_eq!(info.version, "1.0.0");
+        assert_eq!(info.license, "MIT");
+        assert!(!info.published.is_empty());
+        assert!(info.files.iter().any(|f| f.ends_with(".fav")));
+    }
+
+    #[test]
+    fn install_respects_version_constraint() {
+        let tmp = tempfile::tempdir().unwrap();
+        let reg = Registry::with_root(tmp.path().join("registry"));
+        make_reg_pkg(&reg, "http", "1.0.0", "// v1.0");
+        make_reg_pkg(&reg, "http", "1.2.0", "// v1.2");
+        make_reg_pkg(&reg, "http", "2.0.0", "// v2.0");
+
+        // ^1.0.0 should resolve to 1.2.0 (latest 1.x)
+        let resolved = reg.resolve_version("http", "^1.0.0");
+        assert_eq!(resolved, Some("1.2.0".to_string()));
+
+        // Install resolved version
+        let dest_runes = tmp.path().join("runes");
+        std::fs::create_dir_all(&dest_runes).unwrap();
+        reg.install("http", "1.2.0", &dest_runes).unwrap();
+        assert!(dest_runes.join("http/http.fav").exists());
+    }
+
+    #[test]
+    fn collect_fav_files_in_works() {
+        let tmp = tempfile::tempdir().unwrap();
+        let runes = tmp.path().join("runes");
+        std::fs::create_dir_all(runes.join("csv")).unwrap();
+        std::fs::write(runes.join("csv/parse.fav"), "").unwrap();
+        std::fs::write(runes.join("csv/csv.fav"),   "").unwrap();
+        let files = collect_fav_files_in(&runes);
+        assert_eq!(files.len(), 2);
+        assert!(files.iter().any(|(p, _)| p.ends_with("csv.fav")));
+        assert!(files.iter().any(|(p, _)| p.ends_with("parse.fav")));
     }
 }

@@ -1,0 +1,6 @@
+// AWS Rune — barrel module (v4.11.0)
+// Exports all S3, SQS, and DynamoDB functions under the `aws` namespace.
+
+use s3.*
+use sqs.*
+use dynamodb.*

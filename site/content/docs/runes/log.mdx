@@ -1,0 +1,53 @@
+---
+title: "Log Rune"
+order: 4
+category: "Rune"
+description: "構造化ログ・ログコード体系・CloudWatch EMF メトリクス"
+---
+
+# Log Rune
+
+エフェクト: `!Io`
+
+```favnir
+import rune "log"
+```
+
+## ログ出力
+
+```favnir
+public fn main() -> Unit !Io {
+  log.info("I000", "パイプライン開始", ())
+  // 処理...
+  log.success("S100", "完了", Map.set((), "inserted", "1500"))
+}
+```
+
+## ログレベル
+
+| 関数 | コードプレフィックス | 用途 |
+|------|---------------------|------|
+| `log.info` | `I` | 情報ログ |
+| `log.success` | `S` | 成功ログ |
+| `log.warn` | `W` | 警告ログ |
+| `log.error` | `LE` | エラーログ |
+
+## メトリクス
+
+```favnir
+log.metric("processed_rows", 1500, "Count")
+log.metric("pipeline_duration", 3200, "Milliseconds")
+```
+
+`format = "json"` のとき **CloudWatch EMF** 形式で出力され、
+ログストリームからメトリクスが自動抽出されます。
+
+## fav.toml 設定
+
+```toml
+[log]
+level   = "info"        # debug | info | warn | error
+format  = "json"        # json | text
+output  = "stdout"
+service = "my-pipeline"
+```

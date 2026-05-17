@@ -248,7 +248,20 @@ impl Resolver {
             .as_ref()
             .map(|t| t.runes_dir(root))
             .unwrap_or_else(|| root.join("runes"));
-        Some(base.join(import_path).join(format!("{import_path}.fav")))
+        let local = base.join(import_path).join(format!("{import_path}.fav"));
+
+        // Fallback to local registry when the project-local path does not exist
+        if !local.exists() {
+            let reg = crate::registry::Registry::new();
+            if let Some(rune_dir) = reg.rune_path(import_path) {
+                let barrel = rune_dir.join(format!("{import_path}.fav"));
+                if barrel.exists() {
+                    return Some(barrel);
+                }
+            }
+        }
+
+        Some(local)
     }
 
     pub fn cached_scope(&self, key: &str) -> Option<ModuleScope> {
@@ -321,6 +334,9 @@ mod tests {
         let toml = FavToml {
             name: "test".into(),
             version: "0.1.0".into(),
+            description: None,
+            authors: vec![],
+            license: None,
             src: "src".into(),
             runes_path: None,
             dependencies: vec![],
@@ -329,6 +345,8 @@ mod tests {
             auth: None,
             log: None,
             env: None,
+            aws: None,
+            deploy: None,
         };
         let resolver = Resolver::new(Some(toml), Some(root));
         (resolver, dir) // dir must outlive the test
@@ -399,6 +417,9 @@ mod tests {
         let toml = FavToml {
             name: "t".into(),
             version: "0.1.0".into(),
+            description: None,
+            authors: vec![],
+            license: None,
             src: "src".into(),
             runes_path: None,
             dependencies: vec![],
@@ -407,6 +428,8 @@ mod tests {
             auth: None,
             log: None,
             env: None,
+            aws: None,
+            deploy: None,
         };
         let mut r = Resolver::new(Some(toml), Some(dir.path().to_path_buf()));
         let mut errors = Vec::new();

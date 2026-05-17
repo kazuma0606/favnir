@@ -1,0 +1,49 @@
+---
+title: "List"
+order: 2
+category: "標準ライブラリ"
+description: "List<T> — map / filter / fold / any / len / get"
+---
+
+# List
+
+## 関数一覧
+
+| 関数 | シグネチャ | 説明 |
+|------|-----------|------|
+| `List.len` | `List<T> -> Int` | 要素数 |
+| `List.get` | `List<T>, Int -> T` | インデックスアクセス |
+| `List.map` | `List<T>, T -> U -> List<U>` | 変換 |
+| `List.filter` | `List<T>, T -> Bool -> List<T>` | フィルタ |
+| `List.fold` | `List<T>, U, (U, T) -> U -> U` | 集約 |
+| `List.any` | `List<T>, T -> Bool -> Bool` | いずれかが条件を満たすか |
+| `List.all` | `List<T>, T -> Bool -> Bool` | すべてが条件を満たすか |
+| `List.find` | `List<T>, T -> Bool -> Option<T>` | 条件を満たす最初の要素 |
+| `List.append` | `List<T>, T -> List<T>` | 末尾に追加 |
+| `List.concat` | `List<T>, List<T> -> List<T>` | 結合 |
+| `List.reverse` | `List<T> -> List<T>` | 逆順 |
+| `List.take` | `List<T>, Int -> List<T>` | 先頭 N 件 |
+| `List.drop` | `List<T>, Int -> List<T>` | 先頭 N 件を除く |
+| `List.zip` | `List<T>, List<U> -> List<(T, U)>` | ペアにする |
+| `List.flat_map` | `List<T>, T -> List<U> -> List<U>` | flatten + map |
+
+## 使用例
+
+```favnir
+let nums = [1, 2, 3, 4, 5]
+
+let doubled = List.map(nums, |n| n * 2)
+// [2, 4, 6, 8, 10]
+
+let evens = List.filter(nums, |n| n % 2 == 0)
+// [2, 4]
+
+let sum = List.fold(nums, 0, |acc, n| acc + n)
+// 15
+
+let has_three = List.any(nums, |n| n == 3)
+// true
+
+let first_even = List.find(nums, |n| n % 2 == 0)
+// Some(2)
+```

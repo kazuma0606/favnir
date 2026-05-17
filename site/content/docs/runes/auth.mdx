@@ -1,0 +1,54 @@
+---
+title: "Auth Rune"
+order: 3
+category: "Rune"
+description: "JWT 検証・RBAC・OAuth2・API キー — Auth Rune"
+---
+
+# Auth Rune
+
+エフェクト: `!Auth`
+
+```favnir
+import rune "auth"
+```
+
+## JWT 検証
+
+```favnir
+type Claims = { sub: String  role: String  exp: Int }
+
+public fn handle_request(token: String) -> Result<Claims, String> !Auth {
+  auth.verify_jwt<Claims>(token, Env.get_or("JWT_SECRET", ""))
+}
+```
+
+## RBAC（ロールベースアクセス制御）
+
+```favnir
+public fn admin_only(claims: Claims) -> Result<Unit, String> !Auth {
+  auth.require_role(claims, "admin")
+}
+
+public fn any_engineer(claims: Claims) -> Result<Unit, String> !Auth {
+  auth.require_any_role(claims, ["admin", "data_engineer"])
+}
+```
+
+## API キー生成・検証
+
+```favnir
+// API キー生成
+let key = auth.generate_api_key(32)
+
+// 検証
+bind _ <- auth.verify_api_key(provided_key, stored_key_hash)
+```
+
+## fav.toml 設定
+
+```toml
+[auth]
+mode = "jwt"       # ローカル: Rust で署名検証
+# mode = "cognito" # AWS 本番: ALB ヘッダーを信頼
+```

@@ -1,7 +1,9 @@
-/// Static catalog of all Favnir error codes (v3.0.0 E0xxx body).
+/// Static catalog of all Favnir error codes.
+#[derive(serde::Serialize)]
 pub struct ErrorEntry {
     pub code: &'static str,
     pub title: &'static str,
+    pub category: &'static str,
     pub description: &'static str,
     pub example: &'static str,
     pub fix: &'static str,
@@ -12,6 +14,7 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
     ErrorEntry {
         code: "E0101",
         title: "undefined seq step / stage",
+        category: "pipeline",
         description: "A stage referenced in a seq definition does not exist.",
         example: "seq Bad = NonExistentStage |> OtherStage  // E0101: NonExistentStage undefined",
         fix: "Check the stage name for typos, or define the stage before using it in a seq.",
@@ -19,6 +22,7 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
     ErrorEntry {
         code: "E0102",
         title: "undefined identifier in seq",
+        category: "pipeline",
         description: "An identifier used in a seq or pipeline could not be resolved.",
         example: "seq S = Unknown |> Transform  // E0102: Unknown is not defined",
         fix: "Define the missing stage or function, or fix the typo.",
@@ -26,6 +30,7 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
     ErrorEntry {
         code: "E0103",
         title: "type mismatch in seq chain",
+        category: "pipeline",
         description: "The output type of one stage does not match the input type of the next.",
         example: "stage A: Int -> String = ...\nstage B: Int -> Int = ...\nseq Bad = A |> B  // E0103: String -> Int mismatch",
         fix: "Make sure the output type of each stage matches the input type of the next stage.",
@@ -33,6 +38,7 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
     ErrorEntry {
         code: "E0107",
         title: "duplicate type definition",
+        category: "pipeline",
         description: "A type with this name was already defined in the same scope.",
         example: "type Point = { x: Int }\ntype Point = { y: Int }  // E0107",
         fix: "Remove or rename the duplicate type definition.",
@@ -40,6 +46,7 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
     ErrorEntry {
         code: "E0108",
         title: "duplicate function definition",
+        category: "pipeline",
         description: "A function with this name was already defined.",
         example: "fn foo() -> Int { 1 }\nfn foo() -> Int { 2 }  // E0108",
         fix: "Remove or rename the duplicate function.",
@@ -47,6 +54,7 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
     ErrorEntry {
         code: "E0109",
         title: "duplicate stage definition",
+        category: "pipeline",
         description: "A stage with this name was already defined.",
         example: "stage Double: Int -> Int = |x| x * 2\nstage Double: Int -> Int = |x| x + x  // E0109",
         fix: "Remove or rename the duplicate stage.",
@@ -54,6 +62,7 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
     ErrorEntry {
         code: "E0110",
         title: "duplicate seq definition",
+        category: "pipeline",
         description: "A seq with this name was already defined.",
         example: "seq Pipeline = A |> B\nseq Pipeline = C |> D  // E0110",
         fix: "Remove or rename the duplicate seq.",
@@ -61,6 +70,7 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
     ErrorEntry {
         code: "E0112",
         title: "abstract seq field not implemented",
+        category: "pipeline",
         description: "An abstract seq requires a field that was not provided in the implementation.",
         example: "interface I { process: Int -> Int }\n// impl missing `process` field → E0112",
         fix: "Provide all required fields in the interface implementation.",
@@ -68,6 +78,7 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
     ErrorEntry {
         code: "E0136",
         title: "variant constructor arity mismatch",
+        category: "types",
         description: "A variant was constructed with the wrong number of fields.",
         example: "type Color = | Red | Green\nbind c <- Red(42)  // E0136: Red takes no payload",
         fix: "Check the variant definition and use the correct number of arguments.",
@@ -76,6 +87,7 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
     ErrorEntry {
         code: "E0213",
         title: "type mismatch",
+        category: "types",
         description: "A value of one type was used where a different type was expected.",
         example: "fn double(n: Int) -> Int {\n    \"not a number\"  // E0213: expected Int, got String\n}",
         fix: "Make sure the expression type matches the expected type. Use `fav check` for full context.",
@@ -83,6 +95,7 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
     ErrorEntry {
         code: "E0214",
         title: "undefined type",
+        category: "types",
         description: "A type name was used that has not been defined.",
         example: "fn f(x: UnknownType) -> Int { 0 }  // E0214: UnknownType is not defined",
         fix: "Define the type, import it, or fix the typo.",
@@ -90,6 +103,7 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
     ErrorEntry {
         code: "E0215",
         title: "wrong argument count",
+        category: "types",
         description: "A function was called with the wrong number of arguments.",
         example: "fn add(a: Int, b: Int) -> Int { a + b }\nadd(1)  // E0215: expected 2 args, got 1",
         fix: "Pass the correct number of arguments to the function.",
@@ -97,6 +111,7 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
     ErrorEntry {
         code: "E0218",
         title: "field not found",
+        category: "types",
         description: "A field was accessed on a record type that does not have that field.",
         example: "type Point = { x: Int }\nbind p <- Point { x: 1 }\np.y  // E0218: no field `y` on Point",
         fix: "Check the field name for typos, or add the field to the type definition.",
@@ -104,6 +119,7 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
     ErrorEntry {
         code: "E0219",
         title: "field access on non-record",
+        category: "types",
         description: "A field was accessed on a value that is not a record type.",
         example: "bind n <- 42\nn.value  // E0219: Int is not a record",
         fix: "Only record types support field access. Check that the value is a record.",
@@ -111,6 +127,7 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
     ErrorEntry {
         code: "E0220",
         title: "undefined interface (cap)",
+        category: "types",
         description: "An interface name used in `impl` or type constraint was not found.",
         example: "impl Printable for MyType { ... }  // E0220: Printable not defined",
         fix: "Define the interface with `interface Printable { ... }` or fix the typo.",
@@ -118,6 +135,7 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
     ErrorEntry {
         code: "E0221",
         title: "interface not implemented",
+        category: "types",
         description: "A type was used where an interface implementation is required, but the impl is missing.",
         example: "interface Show { show: Self -> String }\nfn print<T with Show>(v: T) -> Unit !Io { ... }\nprint(42)  // E0221: Int does not implement Show",
         fix: "Add `impl Show for Int { show = |n| String.from_int(n) }`.",
@@ -125,6 +143,7 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
     ErrorEntry {
         code: "E0222",
         title: "undefined function or variable",
+        category: "types",
         description: "A name was referenced that has not been defined in scope.",
         example: "fn f() -> Int { undeclared_var }  // E0222",
         fix: "Define the variable with `bind`, or declare the function before using it.",
@@ -132,6 +151,7 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
     ErrorEntry {
         code: "E0223",
         title: "match arm type mismatch",
+        category: "types",
         description: "Different arms of a match expression return different types.",
         example: "match x {\n    1 => \"one\"  // String\n    _ => 0      // Int — E0223\n}",
         fix: "Make all match arms return the same type.",
@@ -139,6 +159,7 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
     ErrorEntry {
         code: "E0224",
         title: "non-exhaustive match",
+        category: "types",
         description: "A match expression does not cover all possible cases.",
         example: "type Dir = | North | South\nmatch d {\n    North => 1\n    // missing South → E0224\n}",
         fix: "Add the missing case(s) or add a wildcard arm `_ => ...`.",
@@ -146,6 +167,7 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
     ErrorEntry {
         code: "E0225",
         title: "invalid binary operand types",
+        category: "types",
         description: "A binary operator was applied to incompatible types.",
         example: "\"hello\" + 42  // E0225: cannot add String and Int",
         fix: "Make sure both operands have the correct type for the operator.",
@@ -153,6 +175,7 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
     ErrorEntry {
         code: "E0226",
         title: "if branch type mismatch",
+        category: "types",
         description: "The then and else branches of an if expression return different types.",
         example: "if cond { 1 } else { \"one\" }  // E0226: Int vs String",
         fix: "Make both branches return the same type.",
@@ -160,6 +183,7 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
     ErrorEntry {
         code: "E0227",
         title: "invariant type error",
+        category: "types",
         description: "An invariant expression in a type definition has a non-Bool type.",
         example: "type PosInt = { value: Int  invariant value  // E0227: invariant must be Bool }",
         fix: "Invariant expressions must evaluate to Bool. Use a comparison: `invariant value > 0`.",
@@ -167,6 +191,7 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
     ErrorEntry {
         code: "E0241",
         title: "interface method return type mismatch",
+        category: "types",
         description: "An interface implementation provides a method with a wrong return type.",
         example: "interface Eq { eq: (Self, Self) -> Bool }\nimpl Eq for Foo { eq = |a, b| 0  // E0241: expected Bool, got Int }",
         fix: "Make the method return the type declared in the interface.",
@@ -174,6 +199,7 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
     ErrorEntry {
         code: "E0242",
         title: "interface method parameter type mismatch",
+        category: "types",
         description: "An interface implementation provides a method with wrong parameter types.",
         example: "interface Map { map: (Self, Int -> Int) -> Self }\nimpl Map for Foo { map = |x| x  // E0242: wrong param types }",
         fix: "Make the method parameters match the types declared in the interface.",
@@ -181,6 +207,7 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
     ErrorEntry {
         code: "E0243",
         title: "interface method not found in impl",
+        category: "types",
         description: "An interface method was referenced but not defined in the impl block.",
         example: "interface Show { show: Self -> String }\nimpl Show for Foo { /* missing `show` */ }  // E0243",
         fix: "Provide all required methods in the impl block.",
@@ -188,6 +215,7 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
     ErrorEntry {
         code: "E0244",
         title: "impl target type not found",
+        category: "types",
         description: "The type named in an `impl ... for TypeName` block does not exist.",
         example: "impl Show for Ghost { ... }  // E0244: Ghost is not defined",
         fix: "Define the type before implementing an interface for it, or fix the typo.",
@@ -195,6 +223,7 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
     ErrorEntry {
         code: "E0245",
         title: "duplicate impl",
+        category: "types",
         description: "An interface is already implemented for this type.",
         example: "impl Show for Foo { ... }\nimpl Show for Foo { ... }  // E0245",
         fix: "Remove the duplicate impl block.",
@@ -202,6 +231,7 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
     ErrorEntry {
         code: "E0251",
         title: "recursive type without indirection",
+        category: "types",
         description: "A type references itself without a pointer or Option wrapper, creating infinite size.",
         example: "type Tree = { left: Tree  right: Tree }  // E0251: infinite size",
         fix: "Wrap recursive fields in Option<T>: `left: Option<Tree>`.",
@@ -209,6 +239,7 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
     ErrorEntry {
         code: "E0253",
         title: "f-string interpolation error",
+        category: "types",
         description: "An f-string interpolation contains a syntax error.",
         example: "bind s <- $\"Hello {  }!\"  // E0253: empty interpolation",
         fix: "Place a valid expression inside `{...}` in the f-string.",
@@ -216,6 +247,7 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
     ErrorEntry {
         code: "E0254",
         title: "f-string expression type error",
+        category: "types",
         description: "An expression inside an f-string cannot be converted to a string.",
         example: "type T = { x: Int }\nbind t <- T { x: 1 }\n$\"value: {t}\"  // E0254: T does not implement Show",
         fix: "Use `Debug.show(t)` or implement Show for the type.",
@@ -223,14 +255,48 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
     ErrorEntry {
         code: "E0274",
         title: "stage in non-pipeline context",
+        category: "pipeline",
         description: "A stage was used as a value in a non-pipeline expression.",
         example: "stage Double: Int -> Int = |x| x * 2\nbind x <- Double  // E0274: stage used as value",
         fix: "Stages can only be used in seq definitions or with `|>`. Use a plain function instead.",
     },
     // ── E03xx: エフェクト ────────────────────────────────────────────────
     ErrorEntry {
+        code: "E0310",
+        title: "undeclared !Db effect",
+        category: "effects",
+        description: "A database operation was used in a function that does not declare `!Db`.",
+        example: "fn query() -> String {\n    DB.query_raw(conn, \"SELECT 1\")  // E0310: !Db not declared\n}",
+        fix: "Add `!Db` to the function signature: `fn query() -> String !Db`.",
+    },
+    ErrorEntry {
+        code: "E0311",
+        title: "undeclared !Auth effect",
+        category: "effects",
+        description: "An auth operation was used in a function that does not declare `!Auth`.",
+        example: "fn verify(token: String) -> Bool {\n    auth.verify_jwt(token, secret)  // E0311: !Auth not declared\n}",
+        fix: "Add `!Auth` to the function signature: `fn verify(token: String) -> Bool !Auth`.",
+    },
+    ErrorEntry {
+        code: "E0312",
+        title: "undeclared !Env effect",
+        category: "effects",
+        description: "An environment variable operation was used without declaring `!Env`.",
+        example: "fn cfg() -> String {\n    Env.require_raw(\"API_KEY\")  // E0312: !Env not declared\n}",
+        fix: "Add `!Env` to the function signature: `fn cfg() -> String !Env`.",
+    },
+    ErrorEntry {
+        code: "E0313",
+        title: "undeclared !AWS effect",
+        category: "effects",
+        description: "An AWS SDK operation was used in a function that does not declare `!AWS`.",
+        example: "fn upload(key: String) -> Unit {\n    AWS.s3_put_object_raw(...)  // E0313: !AWS not declared\n}",
+        fix: "Add `!AWS` to the function signature: `fn upload(key: String) -> Unit !AWS`.",
+    },
+    ErrorEntry {
         code: "E0365",
         title: "for-in iterator type error",
+        category: "effects",
         description: "The expression in `for x in expr` is not a List<T>.",
         example: "for x in 42 { ... }  // E0365: 42 is not iterable",
         fix: "The right-hand side of `for ... in` must be a List<T>.",
@@ -238,6 +304,7 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
     ErrorEntry {
         code: "E0368",
         title: "null-coalesce left operand not Option",
+        category: "types",
         description: "The left side of `??` is not an Option<T>.",
         example: "42 ?? 0  // E0368: Int is not Option",
         fix: "The left operand of `??` must be Option<T>. Wrap it in `some(...)` if needed.",
@@ -245,6 +312,7 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
     ErrorEntry {
         code: "E0369",
         title: "null-coalesce type mismatch",
+        category: "types",
         description: "The default value in `??` has a different type than the unwrapped Option value.",
         example: "some(1) ?? \"default\"  // E0369: Int vs String",
         fix: "Make sure the default value has the same type as the Option's inner type.",
@@ -252,6 +320,7 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
     ErrorEntry {
         code: "E0370",
         title: "undeclared effect",
+        category: "effects",
         description: "A function uses an effect (Io, Db, etc.) that is not declared in its signature.",
         example: "fn greet(name: String) -> Unit {\n    IO.println(name)  // E0370: !Io not declared\n}",
         fix: "Add the effect to the function signature: `fn greet(name: String) -> Unit !Io`.",
@@ -259,6 +328,7 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
     ErrorEntry {
         code: "E0371",
         title: "effect not allowed in context",
+        category: "effects",
         description: "An effect was used in a context that does not permit it.",
         example: "// pure function calling impure\nfn pure_fn() -> Int {\n    IO.println(\"hi\")  // E0371\n    42\n}",
         fix: "Declare the effect in the function signature, or refactor to avoid the effect.",
@@ -266,6 +336,7 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
     ErrorEntry {
         code: "E0373",
         title: "async/Task effect error",
+        category: "effects",
         description: "An async function or Task<T> was used incorrectly.",
         example: "async fn f() -> Int { 42 }  // used where Task<Int> not expected",
         fix: "Use `bind` to unwrap a Task<T>, or adjust the return type annotation.",
@@ -274,6 +345,7 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
     ErrorEntry {
         code: "E0500",
         title: "generic error",
+        category: "modules",
         description: "An unclassified error occurred during compilation.",
         example: "(varies)",
         fix: "Check the error message and source location for details.",
@@ -281,6 +353,7 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
     ErrorEntry {
         code: "E0501",
         title: "schema field missing",
+        category: "modules",
         description: "A CSV or JSON field required by the target schema was not present.",
         example: "type User = { id: Int  name: String }\n// input row missing `name`  // E0501",
         fix: "Ensure the input includes the required field, or make the field optional with Option<T>.",
@@ -288,6 +361,7 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
     ErrorEntry {
         code: "E0502",
         title: "schema type mismatch",
+        category: "modules",
         description: "A CSV or JSON field could not be converted to the target schema field type.",
         example: "type User = { age: Int }\n// row has age = \"abc\"  // E0502",
         fix: "Provide a value that matches the field type, or change the schema to match the input.",
@@ -295,6 +369,7 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
     ErrorEntry {
         code: "E0503",
         title: "invalid col index",
+        category: "modules",
         description: "A `#[col(n)]` field attribute used an invalid column index.",
         example: "type Row = { #[col(\"x\")] id: Int }  // E0503",
         fix: "Use a non-negative integer column index such as `#[col(0)]`.",
@@ -302,6 +377,7 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
     ErrorEntry {
         code: "E0504",
         title: "json parse error",
+        category: "modules",
         description: "JSON input could not be parsed into the expected raw object or array form.",
         example: "json.parse<User>(\"{ bad json }\")  // E0504",
         fix: "Pass valid flat JSON object/array input.",
@@ -309,14 +385,16 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
     ErrorEntry {
         code: "E0505",
         title: "csv parse error",
+        category: "modules",
         description: "CSV input could not be parsed into the expected row structure.",
         example: "csv.parse<User>(\"id,name\\n1,\\\"unterminated\")  // E0505",
         fix: "Pass valid CSV input with a consistent delimiter and row shape.",
     },
-    // ── E06xx: データベース ──────────────────────────────────────────────
+    // ── E06xx: データベース / ランタイム ─────────────────────────────────
     ErrorEntry {
         code: "E0601",
         title: "db connection failed",
+        category: "runtime",
         description: "The connection string is invalid or the database cannot be reached.",
         example: "db.connect(\"sqlite:/bad/path\")  // E0601",
         fix: "Check the connection string format. SQLite: `sqlite:path/to/db` or `sqlite::memory:`. PostgreSQL: `postgres://user:pass@host/db`.",
@@ -324,6 +402,7 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
     ErrorEntry {
         code: "E0602",
         title: "db query failed",
+        category: "runtime",
         description: "An SQL statement caused a runtime error (syntax error, constraint violation, etc.).",
         example: "db.execute(conn, \"INSERT INTO missing_table VALUES (1)\")  // E0602",
         fix: "Check the SQL statement for syntax errors and ensure the referenced table/column exists.",
@@ -331,6 +410,7 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
     ErrorEntry {
         code: "E0603",
         title: "db transaction failed",
+        category: "runtime",
         description: "A transaction could not be started, committed, or rolled back.",
         example: "DB.begin_tx(handle)  // E0603 — already in transaction",
         fix: "Ensure only one transaction is active per connection at a time.",
@@ -338,6 +418,7 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
     ErrorEntry {
         code: "E0604",
         title: "db schema mismatch",
+        category: "runtime",
         description: "A database column could not be mapped to the target Favnir field type.",
         example: "type User = { age: Int }\n// DB column `age` returns `\"abc\"`  // E0604",
         fix: "Ensure the DB column type matches the Favnir field type, or use Option<T> for nullable columns.",
@@ -345,6 +426,7 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
     ErrorEntry {
         code: "E0605",
         title: "db driver unsupported",
+        category: "runtime",
         description: "The connection string uses a database driver that is not compiled in.",
         example: "db.connect(\"mysql://...\")  // E0605",
         fix: "Use `sqlite:` or `postgres://` connection strings. Enable the `postgres_integration` feature for PostgreSQL.",
@@ -352,6 +434,7 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
     ErrorEntry {
         code: "E0580",
         title: "circular import",
+        category: "modules",
         description: "Two or more files import each other, creating a cycle.",
         example: "// a.fav: import \"b\"\n// b.fav: import \"a\"  → E0580",
         fix: "Refactor to break the cycle. Move shared types to a third file.",
@@ -359,6 +442,7 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
     ErrorEntry {
         code: "E0581",
         title: "namespace conflict",
+        category: "modules",
         description: "Two imports produce the same namespace, making names ambiguous.",
         example: "import \"models/user\"\nimport \"auth/user\"  // E0581: both become `user`",
         fix: "Use `as` to give one import a different alias:\n  import \"auth/user\" as auth_user",
@@ -367,6 +451,7 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
     ErrorEntry {
         code: "E0901",
         title: "deprecated keyword `trf`",
+        category: "deprecated",
         description: "`trf` was renamed to `stage` in v2.0.0.",
         example: "trf Double: Int -> Int = |x| x * 2  // E0901",
         fix: "Replace `trf` with `stage`. Run `fav migrate` to do this automatically.",
@@ -374,6 +459,7 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
     ErrorEntry {
         code: "E0902",
         title: "deprecated keyword `flw`",
+        category: "deprecated",
         description: "`flw` was renamed to `seq` in v2.0.0.",
         example: "flw Pipeline = A |> B  // E0902",
         fix: "Replace `flw` with `seq`. Run `fav migrate` to do this automatically.",
@@ -381,6 +467,7 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
     ErrorEntry {
         code: "E0903",
         title: "deprecated keyword `cap`",
+        category: "deprecated",
         description: "`cap` was renamed to `interface` in v2.0.0.",
         example: "cap Show { show: Self -> String }  // E0903",
         fix: "Replace `cap` with `interface`. Note: syntax has changed. See migration guide.",

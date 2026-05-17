@@ -103,6 +103,315 @@ pub fn set_auth_mode(mode: &str) {
     AUTH_MODE.with(|m| *m.borrow_mut() = mode.to_string());
 }
 
+// ── AWS config (v4.11.0) ─────────────────────────────────────────────────────
+
+/// AWS configuration from fav.toml [aws] section or environment variables.
+#[derive(Debug, Clone)]
+pub struct AwsConfig {
+    pub region: String,
+    pub endpoint_url: Option<String>,
+    pub access_key: String,
+    pub secret_key: String,
+    pub session_token: Option<String>,
+}
+
+impl Default for AwsConfig {
+    fn default() -> Self {
+        AwsConfig {
+            region: "us-east-1".to_string(),
+            endpoint_url: None,
+            access_key: "test".to_string(),
+            secret_key: "test".to_string(),
+            session_token: None,
+        }
+    }
+}
+
+impl AwsConfig {
+    pub fn from_env() -> Self {
+        AwsConfig {
+            region: std::env::var("AWS_REGION")
+                .or_else(|_| std::env::var("AWS_DEFAULT_REGION"))
+                .unwrap_or_else(|_| "us-east-1".to_string()),
+            endpoint_url: std::env::var("AWS_ENDPOINT_URL").ok(),
+            access_key: std::env::var("AWS_ACCESS_KEY_ID")
+                .unwrap_or_else(|_| "test".to_string()),
+            secret_key: std::env::var("AWS_SECRET_ACCESS_KEY")
+                .unwrap_or_else(|_| "test".to_string()),
+            session_token: std::env::var("AWS_SESSION_TOKEN").ok(),
+        }
+    }
+}
+
+thread_local! {
+    static AWS_CONFIG: std::cell::RefCell<AwsConfig> =
+        std::cell::RefCell::new(AwsConfig::default());
+}
+
+pub fn set_aws_config(cfg: AwsConfig) {
+    AWS_CONFIG.with(|c| *c.borrow_mut() = cfg);
+}
+
+fn get_aws_config() -> AwsConfig {
+    AWS_CONFIG.with(|c| c.borrow().clone())
+}
+
+/// Public accessor for use from driver.rs (deploy command).
+pub fn get_aws_config_pub() -> AwsConfig {
+    get_aws_config()
+}
+
+// ── SigV4 helpers (v4.11.0) ──────────────────────────────────────────────────
+
+fn sha256_hex_bytes(data: &[u8]) -> String {
+    use sha2::{Digest, Sha256};
+    let mut h = Sha256::new();
+    h.update(data);
+    h.finalize().iter().map(|b| format!("{:02x}", b)).collect()
+}
+
+fn hmac_sha256_bytes(key: &[u8], data: &[u8]) -> Vec<u8> {
+    use hmac::{Hmac, Mac};
+    use sha2::Sha256;
+    type HmacSha256 = Hmac<Sha256>;
+    let mut mac = HmacSha256::new_from_slice(key).expect("hmac key");
+    mac.update(data);
+    mac.finalize().into_bytes().to_vec()
+}
+
+fn sigv4_signing_key(secret: &str, date: &str, region: &str, service: &str) -> Vec<u8> {
+    let k_secret = format!("AWS4{}", secret);
+    let k_date    = hmac_sha256_bytes(k_secret.as_bytes(), date.as_bytes());
+    let k_region  = hmac_sha256_bytes(&k_date, region.as_bytes());
+    let k_service = hmac_sha256_bytes(&k_region, service.as_bytes());
+    hmac_sha256_bytes(&k_service, b"aws4_request")
+}
+
+pub struct SignedHeaders {
+    pub authorization: String,
+    pub x_amz_date: String,
+    pub x_amz_content_sha256: String,
+    pub x_amz_security_token: Option<String>,
+}
+
+fn sigv4_sign(config: &AwsConfig, service: &str, method: &str, url: &str, body: &[u8]) -> SignedHeaders {
+    let body_hash = sha256_hex_bytes(body);
+    // LocalStack: skip real signing
+    if config.endpoint_url.is_some() {
+        return SignedHeaders {
+            authorization: "AWS4-HMAC-SHA256 Credential=test/20240101/us-east-1/s3/aws4_request, SignedHeaders=host;x-amz-date, Signature=dummy".into(),
+            x_amz_date: "20240101T000000Z".into(),
+            x_amz_content_sha256: body_hash,
+            x_amz_security_token: None,
+        };
+    }
+    let now = chrono::Utc::now();
+    let amz_date   = now.format("%Y%m%dT%H%M%SZ").to_string();
+    let date_stamp = now.format("%Y%m%d").to_string();
+    // Parse host from URL (simple extraction)
+    let host = url
+        .trim_start_matches("https://")
+        .trim_start_matches("http://")
+        .split('/')
+        .next()
+        .unwrap_or("");
+    let path = {
+        let after_scheme = if url.contains("://") { url.splitn(2, "://").nth(1).unwrap_or(url) } else { url };
+        let after_host = after_scheme.splitn(2, '/').nth(1).map(|s| format!("/{}", s)).unwrap_or_else(|| "/".to_string());
+        after_host
+    };
+    let (path_only, query) = if path.contains('?') {
+        let mut it = path.splitn(2, '?');
+        (it.next().unwrap_or("/").to_string(), it.next().unwrap_or("").to_string())
+    } else {
+        (path, String::new())
+    };
+    let canonical_headers = format!(
+        "host:{}\nx-amz-content-sha256:{}\nx-amz-date:{}\n",
+        host, body_hash, amz_date
+    );
+    let signed_headers = "host;x-amz-content-sha256;x-amz-date";
+    let canonical_request = format!(
+        "{}\n{}\n{}\n{}\n{}\n{}",
+        method, path_only, query, canonical_headers, signed_headers, body_hash
+    );
+    let credential_scope = format!("{}/{}/{}/aws4_request", date_stamp, config.region, service);
+    let string_to_sign = format!(
+        "AWS4-HMAC-SHA256\n{}\n{}\n{}",
+        amz_date, credential_scope, sha256_hex_bytes(canonical_request.as_bytes())
+    );
+    let signing_key = sigv4_signing_key(&config.secret_key, &date_stamp, &config.region, service);
+    let signature: String = hmac_sha256_bytes(&signing_key, string_to_sign.as_bytes())
+        .iter().map(|b| format!("{:02x}", b)).collect();
+    let authorization = format!(
+        "AWS4-HMAC-SHA256 Credential={}/{}, SignedHeaders={}, Signature={}",
+        config.access_key, credential_scope, signed_headers, signature
+    );
+    SignedHeaders {
+        authorization,
+        x_amz_date: amz_date,
+        x_amz_content_sha256: body_hash,
+        x_amz_security_token: config.session_token.clone(),
+    }
+}
+
+/// Public wrapper for driver.rs (deploy command).
+pub fn sigv4_sign_pub(config: &AwsConfig, service: &str, method: &str, url: &str, body: &[u8]) -> SignedHeaders {
+    sigv4_sign(config, service, method, url, body)
+}
+
+fn aws_get(config: &AwsConfig, service: &str, url: &str) -> Result<String, String> {
+    let h = sigv4_sign(config, service, "GET", url, b"");
+    let mut req = ureq::get(url)
+        .set("Authorization", &h.authorization)
+        .set("x-amz-date", &h.x_amz_date)
+        .set("x-amz-content-sha256", &h.x_amz_content_sha256);
+    if let Some(token) = &h.x_amz_security_token {
+        req = req.set("x-amz-security-token", token);
+    }
+    req.call()
+        .map_err(|e| e.to_string())
+        .and_then(|r| r.into_string().map_err(|e| e.to_string()))
+}
+
+fn aws_put(config: &AwsConfig, service: &str, url: &str, body: &str) -> Result<(), String> {
+    let body_bytes = body.as_bytes();
+    let h = sigv4_sign(config, service, "PUT", url, body_bytes);
+    let mut req = ureq::put(url)
+        .set("Authorization", &h.authorization)
+        .set("x-amz-date", &h.x_amz_date)
+        .set("x-amz-content-sha256", &h.x_amz_content_sha256);
+    if let Some(token) = &h.x_amz_security_token {
+        req = req.set("x-amz-security-token", token);
+    }
+    req.send_string(body)
+        .map(|_| ())
+        .map_err(|e| e.to_string())
+}
+
+fn aws_delete(config: &AwsConfig, service: &str, url: &str) -> Result<(), String> {
+    let h = sigv4_sign(config, service, "DELETE", url, b"");
+    let mut req = ureq::delete(url)
+        .set("Authorization", &h.authorization)
+        .set("x-amz-date", &h.x_amz_date)
+        .set("x-amz-content-sha256", &h.x_amz_content_sha256);
+    if let Some(token) = &h.x_amz_security_token {
+        req = req.set("x-amz-security-token", token);
+    }
+    match req.call() {
+        Ok(_) | Err(ureq::Error::Status(204, _)) | Err(ureq::Error::Status(200, _)) => Ok(()),
+        Err(e) => Err(e.to_string()),
+    }
+}
+
+fn aws_head(config: &AwsConfig, service: &str, url: &str) -> Result<bool, String> {
+    let h = sigv4_sign(config, service, "HEAD", url, b"");
+    let builder = ureq::request("HEAD", url)
+        .set("Authorization", &h.authorization)
+        .set("x-amz-date", &h.x_amz_date)
+        .set("x-amz-content-sha256", &h.x_amz_content_sha256);
+    let builder = if let Some(token) = &h.x_amz_security_token {
+        builder.set("x-amz-security-token", token)
+    } else { builder };
+    match builder.call() {
+        Ok(_) => Ok(true),
+        Err(ureq::Error::Status(404, _)) => Ok(false),
+        Err(e) => Err(e.to_string()),
+    }
+}
+
+fn aws_post(config: &AwsConfig, service: &str, url: &str, body: &str, content_type: &str, amz_target: Option<&str>) -> Result<String, String> {
+    let body_bytes = body.as_bytes();
+    let h = sigv4_sign(config, service, "POST", url, body_bytes);
+    let mut req = ureq::post(url)
+        .set("Authorization", &h.authorization)
+        .set("x-amz-date", &h.x_amz_date)
+        .set("x-amz-content-sha256", &h.x_amz_content_sha256)
+        .set("Content-Type", content_type);
+    if let Some(target) = amz_target {
+        req = req.set("X-Amz-Target", target);
+    }
+    if let Some(token) = &h.x_amz_security_token {
+        req = req.set("x-amz-security-token", token);
+    }
+    req.send_string(body)
+        .map_err(|e| e.to_string())
+        .and_then(|r| r.into_string().map_err(|e| e.to_string()))
+}
+
+fn extract_xml_tags(xml: &str, tag: &str) -> Vec<String> {
+    let open  = format!("<{}>", tag);
+    let close = format!("</{}>", tag);
+    let mut results = Vec::new();
+    let mut start = 0;
+    while let Some(pos) = xml[start..].find(&open) {
+        let abs = start + pos + open.len();
+        if let Some(end) = xml[abs..].find(&close) {
+            results.push(xml[abs..abs + end].to_string());
+            start = abs + end + close.len();
+        } else {
+            break;
+        }
+    }
+    results
+}
+
+fn map_to_dynamo_item(m: &std::collections::HashMap<String, VMValue>) -> String {
+    let mut parts = Vec::new();
+    for (k, v) in m {
+        let s = match v {
+            VMValue::Str(s)  => s.clone(),
+            VMValue::Int(n)  => n.to_string(),
+            VMValue::Bool(b) => b.to_string(),
+            other => format!("{:?}", other),
+        };
+        let escaped = s.replace('\\', "\\\\").replace('"', "\\\"");
+        parts.push(format!(r#""{}":{{"S":"{}"}}"#, k, escaped));
+    }
+    format!("{{{}}}", parts.join(","))
+}
+
+fn dynamo_item_to_map(item: &serde_json::Value) -> std::collections::HashMap<String, VMValue> {
+    let mut m = std::collections::HashMap::new();
+    if let serde_json::Value::Object(obj) = item {
+        for (k, v) in obj {
+            let s = v.get("S").and_then(|s| s.as_str()).unwrap_or("").to_string();
+            m.insert(k.clone(), VMValue::Str(s));
+        }
+    }
+    m
+}
+
+fn dynamo_list_response(resp: &str) -> VMValue {
+    match serde_json::from_str::<serde_json::Value>(resp) {
+        Ok(v) => {
+            let items = v.get("Items")
+                .and_then(|i| i.as_array())
+                .map(|arr| {
+                    arr.iter().map(|item| VMValue::Record(dynamo_item_to_map(item))).collect()
+                })
+                .unwrap_or_default();
+            ok_vm(VMValue::List(items))
+        }
+        Err(e) => err_vm(VMValue::Str(e.to_string())),
+    }
+}
+
+fn url_encode(s: &str) -> String {
+    let mut out = String::new();
+    for b in s.bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(b as char);
+            }
+            _ => {
+                out.push_str(&format!("%{:02X}", b));
+            }
+        }
+    }
+    out
+}
+
 // ── Env config (v4.7.0) ───────────────────────────────────────────────────────
 
 /// Env configuration from fav.toml [env] section.
@@ -9109,6 +9418,295 @@ fn vm_call_builtin(
                     vmvalue_type_name(&other)
                 )),
             }
+        }
+
+        // ── AWS S3 (v4.11.0) ─────────────────────────────────────────────
+        "AWS.s3_get_object_raw" => {
+            let mut it = args.into_iter();
+            let bucket = vm_string(it.next().ok_or("s3_get_object_raw: missing bucket")?, "AWS.s3_get_object_raw")?;
+            let key    = vm_string(it.next().ok_or("s3_get_object_raw: missing key")?, "AWS.s3_get_object_raw")?;
+            let config = get_aws_config();
+            let base = if let Some(ep) = &config.endpoint_url {
+                format!("{}/{}", ep.trim_end_matches('/'), bucket)
+            } else {
+                format!("https://{}.s3.{}.amazonaws.com", bucket, config.region)
+            };
+            let url = format!("{}/{}", base, key);
+            Ok(match aws_get(&config, "s3", &url) {
+                Ok(body) => ok_vm(VMValue::Str(body)),
+                Err(e)   => err_vm(VMValue::Str(e)),
+            })
+        }
+
+        "AWS.s3_put_object_raw" => {
+            let mut it = args.into_iter();
+            let bucket = vm_string(it.next().ok_or("s3_put_object_raw: missing bucket")?, "AWS.s3_put_object_raw")?;
+            let key    = vm_string(it.next().ok_or("s3_put_object_raw: missing key")?,    "AWS.s3_put_object_raw")?;
+            let body   = vm_string(it.next().ok_or("s3_put_object_raw: missing body")?,   "AWS.s3_put_object_raw")?;
+            let config = get_aws_config();
+            let base = if let Some(ep) = &config.endpoint_url {
+                format!("{}/{}", ep.trim_end_matches('/'), bucket)
+            } else {
+                format!("https://{}.s3.{}.amazonaws.com", bucket, config.region)
+            };
+            let url = format!("{}/{}", base, key);
+            Ok(match aws_put(&config, "s3", &url, &body) {
+                Ok(())  => ok_vm(VMValue::Unit),
+                Err(e)  => err_vm(VMValue::Str(e)),
+            })
+        }
+
+        "AWS.s3_delete_object_raw" => {
+            let mut it = args.into_iter();
+            let bucket = vm_string(it.next().ok_or("s3_delete_object_raw: missing bucket")?, "AWS.s3_delete_object_raw")?;
+            let key    = vm_string(it.next().ok_or("s3_delete_object_raw: missing key")?,    "AWS.s3_delete_object_raw")?;
+            let config = get_aws_config();
+            let base = if let Some(ep) = &config.endpoint_url {
+                format!("{}/{}", ep.trim_end_matches('/'), bucket)
+            } else {
+                format!("https://{}.s3.{}.amazonaws.com", bucket, config.region)
+            };
+            let url = format!("{}/{}", base, key);
+            Ok(match aws_delete(&config, "s3", &url) {
+                Ok(())  => ok_vm(VMValue::Unit),
+                Err(e)  => err_vm(VMValue::Str(e)),
+            })
+        }
+
+        "AWS.s3_list_objects_raw" => {
+            let mut it = args.into_iter();
+            let bucket = vm_string(it.next().ok_or("s3_list_objects_raw: missing bucket")?, "AWS.s3_list_objects_raw")?;
+            let prefix = vm_string(it.next().ok_or("s3_list_objects_raw: missing prefix")?, "AWS.s3_list_objects_raw")?;
+            let config = get_aws_config();
+            let base = if let Some(ep) = &config.endpoint_url {
+                format!("{}/{}", ep.trim_end_matches('/'), bucket)
+            } else {
+                format!("https://{}.s3.{}.amazonaws.com", bucket, config.region)
+            };
+            let url = format!("{}?list-type=2&prefix={}", base, url_encode(&prefix));
+            Ok(match aws_get(&config, "s3", &url) {
+                Ok(xml) => {
+                    let keys: Vec<VMValue> = extract_xml_tags(&xml, "Key")
+                        .into_iter().map(VMValue::Str).collect();
+                    ok_vm(VMValue::List(keys))
+                }
+                Err(e) => err_vm(VMValue::Str(e)),
+            })
+        }
+
+        "AWS.s3_head_bucket_raw" => {
+            let mut it = args.into_iter();
+            let bucket = vm_string(it.next().ok_or("s3_head_bucket_raw: missing bucket")?, "AWS.s3_head_bucket_raw")?;
+            let config = get_aws_config();
+            let url = if let Some(ep) = &config.endpoint_url {
+                format!("{}/{}", ep.trim_end_matches('/'), bucket)
+            } else {
+                format!("https://{}.s3.{}.amazonaws.com", bucket, config.region)
+            };
+            Ok(match aws_head(&config, "s3", &url) {
+                Ok(b)  => ok_vm(VMValue::Bool(b)),
+                Err(e) => err_vm(VMValue::Str(e)),
+            })
+        }
+
+        // ── AWS SQS (v4.11.0) ─────────────────────────────────────────────
+        "AWS.sqs_send_message_raw" => {
+            let mut it = args.into_iter();
+            let queue_url = vm_string(it.next().ok_or("sqs_send_message_raw: missing queue_url")?, "AWS.sqs_send_message_raw")?;
+            let body      = vm_string(it.next().ok_or("sqs_send_message_raw: missing body")?,      "AWS.sqs_send_message_raw")?;
+            let config = get_aws_config();
+            let form = format!(
+                "Action=SendMessage&MessageBody={}&Version=2012-11-05",
+                url_encode(&body)
+            );
+            Ok(match aws_post(&config, "sqs", &queue_url, &form, "application/x-www-form-urlencoded", None) {
+                Ok(xml) => {
+                    let ids = extract_xml_tags(&xml, "MessageId");
+                    let id = ids.into_iter().next().unwrap_or_default();
+                    ok_vm(VMValue::Str(id))
+                }
+                Err(e) => err_vm(VMValue::Str(e)),
+            })
+        }
+
+        "AWS.sqs_receive_messages_raw" => {
+            let mut it = args.into_iter();
+            let queue_url = vm_string(it.next().ok_or("sqs_receive_messages_raw: missing queue_url")?, "AWS.sqs_receive_messages_raw")?;
+            let max = match it.next().ok_or("sqs_receive_messages_raw: missing max")? {
+                VMValue::Int(n) => n,
+                _ => 1,
+            };
+            let config = get_aws_config();
+            let form = format!("Action=ReceiveMessage&MaxNumberOfMessages={}&Version=2012-11-05", max);
+            Ok(match aws_post(&config, "sqs", &queue_url, &form, "application/x-www-form-urlencoded", None) {
+                Ok(xml) => {
+                    let messages = extract_xml_tags(&xml, "Message");
+                    let items: Vec<VMValue> = messages.into_iter().map(|msg| {
+                        let mut map = std::collections::HashMap::new();
+                        let ids    = extract_xml_tags(&msg, "MessageId");
+                        let bodies = extract_xml_tags(&msg, "Body");
+                        let handles = extract_xml_tags(&msg, "ReceiptHandle");
+                        map.insert("message_id".to_string(),    VMValue::Str(ids.into_iter().next().unwrap_or_default()));
+                        map.insert("body".to_string(),          VMValue::Str(bodies.into_iter().next().unwrap_or_default()));
+                        map.insert("receipt_handle".to_string(), VMValue::Str(handles.into_iter().next().unwrap_or_default()));
+                        VMValue::Record(map)
+                    }).collect();
+                    ok_vm(VMValue::List(items))
+                }
+                Err(e) => err_vm(VMValue::Str(e)),
+            })
+        }
+
+        "AWS.sqs_delete_message_raw" => {
+            let mut it = args.into_iter();
+            let queue_url      = vm_string(it.next().ok_or("sqs_delete_message_raw: missing queue_url")?,      "AWS.sqs_delete_message_raw")?;
+            let receipt_handle = vm_string(it.next().ok_or("sqs_delete_message_raw: missing receipt_handle")?, "AWS.sqs_delete_message_raw")?;
+            let config = get_aws_config();
+            let form = format!(
+                "Action=DeleteMessage&ReceiptHandle={}&Version=2012-11-05",
+                url_encode(&receipt_handle)
+            );
+            Ok(match aws_post(&config, "sqs", &queue_url, &form, "application/x-www-form-urlencoded", None) {
+                Ok(_)  => ok_vm(VMValue::Unit),
+                Err(e) => err_vm(VMValue::Str(e)),
+            })
+        }
+
+        "AWS.sqs_get_queue_url_raw" => {
+            let mut it = args.into_iter();
+            let queue_name = vm_string(it.next().ok_or("sqs_get_queue_url_raw: missing queue_name")?, "AWS.sqs_get_queue_url_raw")?;
+            let config = get_aws_config();
+            let base = if let Some(ep) = &config.endpoint_url {
+                ep.trim_end_matches('/').to_string()
+            } else {
+                format!("https://sqs.{}.amazonaws.com", config.region)
+            };
+            let form = format!("Action=GetQueueUrl&QueueName={}&Version=2012-11-05", url_encode(&queue_name));
+            Ok(match aws_post(&config, "sqs", &base, &form, "application/x-www-form-urlencoded", None) {
+                Ok(xml) => {
+                    let urls = extract_xml_tags(&xml, "QueueUrl");
+                    let url = urls.into_iter().next().unwrap_or_default();
+                    ok_vm(VMValue::Str(url))
+                }
+                Err(e) => err_vm(VMValue::Str(e)),
+            })
+        }
+
+        // ── AWS DynamoDB (v4.11.0) ────────────────────────────────────────
+        "AWS.dynamo_get_item_raw" => {
+            let mut it = args.into_iter();
+            let table = vm_string(it.next().ok_or("dynamo_get_item_raw: missing table")?, "AWS.dynamo_get_item_raw")?;
+            let key_map = match it.next().ok_or("dynamo_get_item_raw: missing key")? {
+                VMValue::Record(m) => m,
+                _ => return Err("dynamo_get_item_raw: key must be a Map".to_string()),
+            };
+            let config = get_aws_config();
+            let url = if let Some(ep) = &config.endpoint_url {
+                ep.trim_end_matches('/').to_string()
+            } else {
+                format!("https://dynamodb.{}.amazonaws.com", config.region)
+            };
+            let key_json = map_to_dynamo_item(&key_map);
+            let body = format!(r#"{{"TableName":"{}","Key":{}}}"#, table, key_json);
+            Ok(match aws_post(&config, "dynamodb", &url, &body, "application/x-amz-json-1.0", Some("DynamoDB_20120810.GetItem")) {
+                Ok(resp) => {
+                    match serde_json::from_str::<serde_json::Value>(&resp) {
+                        Ok(v) => {
+                            if let Some(item) = v.get("Item") {
+                                let m = dynamo_item_to_map(item);
+                                ok_vm(VMValue::Variant("some".into(), Some(Box::new(VMValue::Record(m)))))
+                            } else {
+                                ok_vm(VMValue::Variant("none".into(), None))
+                            }
+                        }
+                        Err(e) => err_vm(VMValue::Str(e.to_string())),
+                    }
+                }
+                Err(e) => err_vm(VMValue::Str(e)),
+            })
+        }
+
+        "AWS.dynamo_put_item_raw" => {
+            let mut it = args.into_iter();
+            let table = vm_string(it.next().ok_or("dynamo_put_item_raw: missing table")?, "AWS.dynamo_put_item_raw")?;
+            let item_map = match it.next().ok_or("dynamo_put_item_raw: missing item")? {
+                VMValue::Record(m) => m,
+                _ => return Err("dynamo_put_item_raw: item must be a Map".to_string()),
+            };
+            let config = get_aws_config();
+            let url = if let Some(ep) = &config.endpoint_url {
+                ep.trim_end_matches('/').to_string()
+            } else {
+                format!("https://dynamodb.{}.amazonaws.com", config.region)
+            };
+            let item_json = map_to_dynamo_item(&item_map);
+            let body = format!(r#"{{"TableName":"{}","Item":{}}}"#, table, item_json);
+            Ok(match aws_post(&config, "dynamodb", &url, &body, "application/x-amz-json-1.0", Some("DynamoDB_20120810.PutItem")) {
+                Ok(_)  => ok_vm(VMValue::Unit),
+                Err(e) => err_vm(VMValue::Str(e)),
+            })
+        }
+
+        "AWS.dynamo_delete_item_raw" => {
+            let mut it = args.into_iter();
+            let table = vm_string(it.next().ok_or("dynamo_delete_item_raw: missing table")?, "AWS.dynamo_delete_item_raw")?;
+            let key_map = match it.next().ok_or("dynamo_delete_item_raw: missing key")? {
+                VMValue::Record(m) => m,
+                _ => return Err("dynamo_delete_item_raw: key must be a Map".to_string()),
+            };
+            let config = get_aws_config();
+            let url = if let Some(ep) = &config.endpoint_url {
+                ep.trim_end_matches('/').to_string()
+            } else {
+                format!("https://dynamodb.{}.amazonaws.com", config.region)
+            };
+            let key_json = map_to_dynamo_item(&key_map);
+            let body = format!(r#"{{"TableName":"{}","Key":{}}}"#, table, key_json);
+            Ok(match aws_post(&config, "dynamodb", &url, &body, "application/x-amz-json-1.0", Some("DynamoDB_20120810.DeleteItem")) {
+                Ok(_)  => ok_vm(VMValue::Unit),
+                Err(e) => err_vm(VMValue::Str(e)),
+            })
+        }
+
+        "AWS.dynamo_query_raw" => {
+            let mut it = args.into_iter();
+            let table     = vm_string(it.next().ok_or("dynamo_query_raw: missing table")?,     "AWS.dynamo_query_raw")?;
+            let condition = vm_string(it.next().ok_or("dynamo_query_raw: missing condition")?,  "AWS.dynamo_query_raw")?;
+            let vals_map  = match it.next().ok_or("dynamo_query_raw: missing values")? {
+                VMValue::Record(m) => m,
+                _ => return Err("dynamo_query_raw: values must be a Map".to_string()),
+            };
+            let config = get_aws_config();
+            let url = if let Some(ep) = &config.endpoint_url {
+                ep.trim_end_matches('/').to_string()
+            } else {
+                format!("https://dynamodb.{}.amazonaws.com", config.region)
+            };
+            let expr_vals = map_to_dynamo_item(&vals_map);
+            let body = format!(
+                r#"{{"TableName":"{}","KeyConditionExpression":"{}","ExpressionAttributeValues":{}}}"#,
+                table, condition, expr_vals
+            );
+            Ok(match aws_post(&config, "dynamodb", &url, &body, "application/x-amz-json-1.0", Some("DynamoDB_20120810.Query")) {
+                Ok(resp) => dynamo_list_response(&resp),
+                Err(e)   => err_vm(VMValue::Str(e)),
+            })
+        }
+
+        "AWS.dynamo_scan_raw" => {
+            let mut it = args.into_iter();
+            let table = vm_string(it.next().ok_or("dynamo_scan_raw: missing table")?, "AWS.dynamo_scan_raw")?;
+            let config = get_aws_config();
+            let url = if let Some(ep) = &config.endpoint_url {
+                ep.trim_end_matches('/').to_string()
+            } else {
+                format!("https://dynamodb.{}.amazonaws.com", config.region)
+            };
+            let body = format!(r#"{{"TableName":"{}"}}"#, table);
+            Ok(match aws_post(&config, "dynamodb", &url, &body, "application/x-amz-json-1.0", Some("DynamoDB_20120810.Scan")) {
+                Ok(resp) => dynamo_list_response(&resp),
+                Err(e)   => err_vm(VMValue::Str(e)),
+            })
         }
 
         other => Err(format!("unknown builtin: {}", other)),

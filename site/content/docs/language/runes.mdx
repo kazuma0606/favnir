@@ -1,0 +1,89 @@
+---
+title: "Rune"
+order: 4
+category: "言語仕様"
+description: "import rune・use・マルチファイル Rune モジュール"
+---
+
+# Rune
+
+Rune は Favnir の外部モジュールシステムです。
+標準 Rune は `import rune "name"` の 1 行で使えます。
+
+## 基本的な使い方
+
+```favnir
+import rune "aws"
+import rune "duckdb"
+
+public fn main() -> Unit !Io !AWS !Db {
+  bind rows <- aws.s3.read_csv<Order>("bucket", "data.csv")
+  bind conn <- duckdb.open(":memory:")
+  // ...
+}
+```
+
+## Rune 内部の use
+
+Rune はディレクトリ単位のマルチファイルモジュールです:
+
+```
+runes/
+  mylib/
+    mylib.fav      ← public API（エントリポイント）
+    internal.fav   ← 内部モジュール
+    helpers.fav
+```
+
+```favnir
+// mylib/mylib.fav
+use internal.{ connect, disconnect }
+use helpers.{ format_result }
+
+public fn query(sql: String) -> Result<List<Row>, String> !Db {
+  // ...
+}
+```
+
+## Rune の依存定義
+
+```toml
+# fav.toml
+[dependencies]
+csv = "^1.0.0"   # Rune Registry からインストール
+```
+
+```bash
+fav install        # fav.toml の全依存をインストール
+fav install csv    # 単一パッケージをインストール
+```
+
+## Rune を公開する
+
+```toml
+# fav.toml
+[rune]
+name        = "my-csv-helper"
+version     = "1.0.0"
+description = "CSV ヘルパー Rune"
+authors     = ["your-name"]
+license     = "MIT"
+```
+
+```bash
+fav publish          # レジストリに公開
+fav publish --dry-run  # 確認のみ
+```
+
+## 標準 Rune 一覧
+
+| Rune | エフェクト | 主な機能 |
+|------|-----------|---------|
+| `aws` | `!AWS` | S3 / SQS / DynamoDB |
+| `db` | `!Db` | SQLite / PostgreSQL |
+| `duckdb` | `!Db` | OLAP / Parquet |
+| `http` | `!Network` | REST クライアント |
+| `auth` | `!Auth` | JWT / RBAC |
+| `log` | `!Io` | 構造化ログ |
+| `env` | `!Env` | 環境変数 |
+| `gen` | — | テストデータ生成 |

@@ -178,6 +178,7 @@ pub fn compile_program(program: &Program) -> IRProgram {
         "Crypto",
         "Auth",
         "Log",
+        "AWS",
         "assert",
         "assert_eq",
         "assert_ne",

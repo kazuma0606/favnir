@@ -16,6 +16,8 @@ pub enum DependencySpec {
         registry: String,
         version: String,
     },
+    /// `name = "^1.0.0"` — semver constraint resolved against the local registry.
+    Semver { name: String, version: String },
 }
 
 impl DependencySpec {
@@ -23,6 +25,7 @@ impl DependencySpec {
         match self {
             DependencySpec::Path { name, .. } => name,
             DependencySpec::Registry { name, .. } => name,
+            DependencySpec::Semver { name, .. } => name,
         }
     }
 }
@@ -75,10 +78,52 @@ impl Default for EnvConfig {
     }
 }
 
+// ── AWS config (v4.11.0) ──────────────────────────────────────────────────────
+
+#[derive(Debug, Clone)]
+pub struct AwsTomlConfig {
+    pub region: Option<String>,
+    pub endpoint_url: Option<String>,
+    pub profile: Option<String>,
+}
+
+// ── Deploy config (v4.11.0) ───────────────────────────────────────────────────
+
+#[derive(Debug, Clone)]
+pub struct DeployConfig {
+    pub runtime: String,
+    pub handler: String,
+    pub memory: u32,
+    pub timeout: u32,
+    pub s3_bucket: Option<String>,
+    pub role_arn: Option<String>,
+    pub region: Option<String>,
+}
+
+impl Default for DeployConfig {
+    fn default() -> Self {
+        DeployConfig {
+            runtime: "provided.al2".to_string(),
+            handler: "bootstrap".to_string(),
+            memory: 256,
+            timeout: 30,
+            s3_bucket: None,
+            role_arn: None,
+            region: None,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct FavToml {
     pub name: String,
     pub version: String,
+    /// Package description (for fav publish).
+    pub description: Option<String>,
+    /// Package authors (for fav publish).
+    pub authors: Vec<String>,
+    /// Package license (for fav publish).
+    pub license: Option<String>,
     /// Source root directory (relative to fav.toml). Defaults to ".".
     pub src: String,
     /// Optional rune library root directory (relative to fav.toml). Defaults to `runes`.
@@ -95,6 +140,10 @@ pub struct FavToml {
     pub log: Option<LogConfig>,
     /// Optional env configuration.
     pub env: Option<EnvConfig>,
+    /// Optional AWS configuration (v4.11.0).
+    pub aws: Option<AwsTomlConfig>,
+    /// Optional deploy configuration (v4.11.0).
+    pub deploy: Option<DeployConfig>,
 }
 
 impl FavToml {
@@ -133,6 +182,9 @@ impl FavToml {
 fn parse_fav_toml(content: &str) -> FavToml {
     let mut name = String::new();
     let mut version = String::new();
+    let mut description: Option<String> = None;
+    let mut authors: Vec<String> = Vec::new();
+    let mut license: Option<String> = None;
     let mut src = ".".to_string();
     let mut runes_path = None;
     let mut dependencies = Vec::new();
@@ -141,6 +193,8 @@ fn parse_fav_toml(content: &str) -> FavToml {
     let mut auth = None;
     let mut log = None;
     let mut env_cfg: Option<EnvConfig> = None;
+    let mut aws_cfg: Option<AwsTomlConfig> = None;
+    let mut deploy_cfg: Option<DeployConfig> = None;
     let mut section = "";
 
     for line in content.lines() {
@@ -180,6 +234,14 @@ fn parse_fav_toml(content: &str) -> FavToml {
             section = "env";
             continue;
         }
+        if trimmed == "[aws]" {
+            section = "aws";
+            continue;
+        }
+        if trimmed == "[deploy]" || trimmed == "[[deploy.env]]" {
+            section = "deploy";
+            continue;
+        }
         if trimmed.starts_with('[') {
             section = "";
             continue;
@@ -188,9 +250,12 @@ fn parse_fav_toml(content: &str) -> FavToml {
             "rune" => {
                 if let Some((key, val)) = parse_kv(trimmed) {
                     match key {
-                        "name" => name = val.to_string(),
-                        "version" => version = val.to_string(),
-                        "src" => src = val.to_string(),
+                        "name"        => name        = val.to_string(),
+                        "version"     => version     = val.to_string(),
+                        "description" => description = Some(val.to_string()),
+                        "license"     => license     = Some(val.to_string()),
+                        "authors"     => authors     = val.split(',').map(|s| s.trim().to_string()).collect(),
+                        "src"         => src         = val.to_string(),
                         _ => {}
                     }
                 }
@@ -271,6 +336,38 @@ fn parse_fav_toml(content: &str) -> FavToml {
                 }
                 env_cfg = Some(current);
             }
+            "aws" => {
+                let mut current = aws_cfg.take().unwrap_or(AwsTomlConfig {
+                    region: None,
+                    endpoint_url: None,
+                    profile: None,
+                });
+                if let Some((key, val)) = parse_kv(trimmed) {
+                    match key {
+                        "region"       => current.region       = Some(val.to_string()),
+                        "endpoint_url" => current.endpoint_url = Some(val.to_string()),
+                        "profile"      => current.profile      = Some(val.to_string()),
+                        _ => {}
+                    }
+                }
+                aws_cfg = Some(current);
+            }
+            "deploy" => {
+                let mut current: DeployConfig = deploy_cfg.take().unwrap_or_default();
+                if let Some((key, val)) = parse_kv(trimmed) {
+                    match key {
+                        "runtime"   => current.runtime   = val.to_string(),
+                        "handler"   => current.handler   = val.to_string(),
+                        "memory"    => current.memory    = val.parse().unwrap_or(256),
+                        "timeout"   => current.timeout   = val.parse().unwrap_or(30),
+                        "s3_bucket" => current.s3_bucket = Some(val.to_string()),
+                        "role_arn"  => current.role_arn  = Some(val.to_string()),
+                        "region"    => current.region    = Some(val.to_string()),
+                        _ => {}
+                    }
+                }
+                deploy_cfg = Some(current);
+            }
             _ => {}
         }
     }
@@ -278,6 +375,9 @@ fn parse_fav_toml(content: &str) -> FavToml {
     FavToml {
         name,
         version,
+        description,
+        authors,
+        license,
         src,
         runes_path,
         dependencies,
@@ -286,14 +386,24 @@ fn parse_fav_toml(content: &str) -> FavToml {
         auth,
         log,
         env: env_cfg,
+        aws: aws_cfg,
+        deploy: deploy_cfg,
     }
 }
 
-/// Parse a dependency line: `name = { key = "val", ... }`
+/// Parse a dependency line: `name = "^1.0.0"` or `name = { key = "val", ... }`
 fn parse_dep_line(line: &str) -> Option<DependencySpec> {
     let (dep_name, rest) = line.split_once('=')?;
     let dep_name = dep_name.trim().to_string();
-    let inner = rest.trim().trim_start_matches('{').trim_end_matches('}');
+    let rhs = rest.trim();
+
+    // Plain string form: `name = "1.0.0"` or `name = "^1.0.0"`
+    if rhs.starts_with('"') && rhs.ends_with('"') && !rhs.contains('{') {
+        let version = rhs.trim_matches('"').to_string();
+        return Some(DependencySpec::Semver { name: dep_name, version });
+    }
+
+    let inner = rhs.trim_start_matches('{').trim_end_matches('}');
     let mut path_val: Option<String> = None;
     let mut registry_val: Option<String> = None;
     let mut version_val: Option<String> = None;

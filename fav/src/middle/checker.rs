@@ -2113,6 +2113,7 @@ impl Checker {
             "Auth",
             "Env",
             "DuckDb",
+            "AWS",
         ];
         for effect in effects {
             if let Effect::Unknown(name) = effect {
@@ -2551,6 +2552,7 @@ impl Checker {
                 Effect::Unknown("Auth".to_string()),
                 Effect::Unknown("DuckDb".to_string()),
                 Effect::Unknown("Env".to_string()),
+                Effect::Unknown("AWS".to_string()),
             ],
         );
         self.env.push();
@@ -4422,6 +4424,20 @@ impl Checker {
         }
     }
 
+    fn require_aws_effect(&mut self, span: &Span) {
+        let has = self.has_effect(|e| match e {
+            Effect::Unknown(name) => name == "AWS",
+            _ => false,
+        });
+        if !has {
+            self.type_error(
+                "E0313",
+                "AWS operations require the `!AWS` effect",
+                &span.clone(),
+            );
+        }
+    }
+
     fn require_env_effect(&mut self, span: &Span) {
         let has = self.has_effect(|e| match e {
             Effect::Unknown(name) => name == "Env",
@@ -5141,6 +5157,95 @@ impl Checker {
             ("Log", "metric_raw") => Some(Type::Unit),
             ("Log", "map_to_json_raw") => Some(Type::String),
             ("Log", _) => Some(Type::Unit),
+
+            // AWS.* (v4.11.0) — S3 / SQS / DynamoDB primitives, require !AWS effect
+            ("AWS", "s3_get_object_raw") => {
+                self.require_aws_effect(span);
+                Some(Type::Result(Box::new(Type::String), Box::new(Type::String)))
+            }
+            ("AWS", "s3_put_object_raw") => {
+                self.require_aws_effect(span);
+                Some(Type::Result(Box::new(Type::Unit), Box::new(Type::String)))
+            }
+            ("AWS", "s3_delete_object_raw") => {
+                self.require_aws_effect(span);
+                Some(Type::Result(Box::new(Type::Unit), Box::new(Type::String)))
+            }
+            ("AWS", "s3_list_objects_raw") => {
+                self.require_aws_effect(span);
+                Some(Type::Result(
+                    Box::new(Type::List(Box::new(Type::String))),
+                    Box::new(Type::String),
+                ))
+            }
+            ("AWS", "s3_head_bucket_raw") => {
+                self.require_aws_effect(span);
+                Some(Type::Result(Box::new(Type::Bool), Box::new(Type::String)))
+            }
+            ("AWS", "sqs_send_message_raw") => {
+                self.require_aws_effect(span);
+                Some(Type::Result(Box::new(Type::String), Box::new(Type::String)))
+            }
+            ("AWS", "sqs_receive_messages_raw") => {
+                self.require_aws_effect(span);
+                Some(Type::Result(
+                    Box::new(Type::List(Box::new(Type::Map(
+                        Box::new(Type::String),
+                        Box::new(Type::String),
+                    )))),
+                    Box::new(Type::String),
+                ))
+            }
+            ("AWS", "sqs_delete_message_raw") => {
+                self.require_aws_effect(span);
+                Some(Type::Result(Box::new(Type::Unit), Box::new(Type::String)))
+            }
+            ("AWS", "sqs_get_queue_url_raw") => {
+                self.require_aws_effect(span);
+                Some(Type::Result(Box::new(Type::String), Box::new(Type::String)))
+            }
+            ("AWS", "dynamo_get_item_raw") => {
+                self.require_aws_effect(span);
+                Some(Type::Result(
+                    Box::new(Type::Option(Box::new(Type::Map(
+                        Box::new(Type::String),
+                        Box::new(Type::String),
+                    )))),
+                    Box::new(Type::String),
+                ))
+            }
+            ("AWS", "dynamo_put_item_raw") => {
+                self.require_aws_effect(span);
+                Some(Type::Result(Box::new(Type::Unit), Box::new(Type::String)))
+            }
+            ("AWS", "dynamo_delete_item_raw") => {
+                self.require_aws_effect(span);
+                Some(Type::Result(Box::new(Type::Unit), Box::new(Type::String)))
+            }
+            ("AWS", "dynamo_query_raw") => {
+                self.require_aws_effect(span);
+                Some(Type::Result(
+                    Box::new(Type::List(Box::new(Type::Map(
+                        Box::new(Type::String),
+                        Box::new(Type::String),
+                    )))),
+                    Box::new(Type::String),
+                ))
+            }
+            ("AWS", "dynamo_scan_raw") => {
+                self.require_aws_effect(span);
+                Some(Type::Result(
+                    Box::new(Type::List(Box::new(Type::Map(
+                        Box::new(Type::String),
+                        Box::new(Type::String),
+                    )))),
+                    Box::new(Type::String),
+                ))
+            }
+            ("AWS", _) => {
+                self.require_aws_effect(span);
+                Some(Type::Unknown)
+            }
 
             // Dynamic T.validate — type name that has a schema entry
             (type_name, "validate") if self.schemas.contains_key(type_name) => {
@@ -6240,6 +6345,9 @@ abstract seq Pipeline {
         let toml = FavToml {
             name: "t".into(),
             version: "0.1.0".into(),
+            description: None,
+            authors: vec![],
+            license: None,
             src: "src".into(),
             runes_path: None,
             dependencies: vec![],
@@ -6248,6 +6356,8 @@ abstract seq Pipeline {
             auth: None,
             log: None,
             env: None,
+            aws: None,
+            deploy: None,
         };
         let resolver = Arc::new(Mutex::new(Resolver::new(Some(toml), Some(root))));
         (resolver, dir)
@@ -6318,6 +6428,9 @@ abstract seq Pipeline {
         let toml = FavToml {
             name: "t".into(),
             version: "0.1.0".into(),
+            description: None,
+            authors: vec![],
+            license: None,
             src: "src".into(),
             runes_path: None,
             dependencies: vec![],
@@ -6326,6 +6439,8 @@ abstract seq Pipeline {
             auth: None,
             log: None,
             env: None,
+            aws: None,
+            deploy: None,
         };
         let mut resolver = Resolver::new(Some(toml), Some(root));
         // Simulate a mid-load state: "cycle" is already in the loading set

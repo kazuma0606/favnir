@@ -1,0 +1,44 @@
+---
+title: "Result"
+order: 4
+category: "標準ライブラリ"
+description: "Result<T, E> — ok / err / map / and_then / unwrap_or"
+---
+
+# Result
+
+成功（`Ok(T)`）か失敗（`Err(E)`）かを型で表現します。
+
+## 関数一覧
+
+| 関数 | シグネチャ | 説明 |
+|------|-----------|------|
+| `Result.ok` | `T -> Result<T, E>` | 成功値を包む |
+| `Result.err` | `E -> Result<T, E>` | エラー値を包む |
+| `Result.map` | `Result<T,E>, T -> U -> Result<U,E>` | Ok の値を変換 |
+| `Result.map_err` | `Result<T,E>, E -> F -> Result<T,F>` | Err の値を変換 |
+| `Result.and_then` | `Result<T,E>, T -> Result<U,E> -> Result<U,E>` | チェーン |
+| `Result.unwrap_or` | `Result<T,E>, T -> T` | Ok の値または既定値 |
+| `Result.is_ok` | `Result<T,E> -> Bool` | Ok かどうか |
+| `Result.is_err` | `Result<T,E> -> Bool` | Err かどうか |
+
+## bind でのアンラップ
+
+```favnir
+// bind は Err を即座に伝播する（早期リターン）
+public fn pipeline() -> Result<Unit, String> !Db {
+  bind conn <- db.connect("sqlite::memory:")
+  bind rows <- db.query(conn, "SELECT * FROM orders")
+  Result.ok(())
+}
+```
+
+## チェーン
+
+```favnir
+Result.ok("42")
+  |> Result.and_then(|s| parse_int(s))
+  |> Result.map(|n| n * 2)
+  |> Result.unwrap_or(0)
+// 84
+```

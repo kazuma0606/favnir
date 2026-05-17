@@ -1,0 +1,85 @@
+---
+title: "エフェクト型"
+order: 2
+category: "言語仕様"
+description: "Favnir のエフェクト型システム — 副作用を型で表現する"
+---
+
+# エフェクト型
+
+Favnir では副作用を関数シグネチャに明示します。
+エフェクトを宣言しない関数は **純粋関数** として扱われ、テスト容易性が保証されます。
+
+## エフェクト一覧
+
+| エフェクト | 説明 |
+|-----------|------|
+| `!Io` | 標準入出力（`IO.println` など） |
+| `!File` | ファイルシステム読み書き |
+| `!Db` | データベース操作（SQLite・PostgreSQL・DuckDB） |
+| `!Network` | HTTP リクエスト |
+| `!AWS` | AWS SDK 操作（S3・SQS・DynamoDB） |
+| `!Auth` | 認証・認可操作（JWT 検証・RBAC） |
+| `!Env` | 環境変数アクセス |
+
+## 基本的な使い方
+
+```favnir
+// エフェクトなし: 純粋関数
+fn add(a: Int, b: Int) -> Int { a + b }
+
+// !Io: 標準出力
+public fn main() -> Unit !Io {
+  IO.println(add(1, 2))
+}
+
+// 複数エフェクト
+public fn pipeline() -> Unit !Io !AWS !Db {
+  bind rows <- aws.s3.read_csv<Order>("bucket", "orders.csv")
+  bind conn <- db.connect("sqlite::memory:")
+  // ...
+}
+```
+
+## エフェクトの伝播
+
+エフェクトを持つ関数を呼び出す側は、同じエフェクトを宣言する必要があります:
+
+```favnir
+fn fetch_user(id: Int) -> Result<User, String> !Db {
+  db.query_one(conn, $"SELECT * FROM users WHERE id = {id}")
+}
+
+// fetch_user を呼ぶ側も !Db が必要
+public fn handle_request(id: Int) -> Unit !Io !Db {
+  match fetch_user(id) {
+    Ok(u)  => IO.println(u.name)
+    Err(e) => IO.println($"エラー: {e}")
+  }
+}
+```
+
+## テストでのエフェクト
+
+テストブロックは `!Io / !File / !Db / !Auth / !AWS` をデフォルトで許可します:
+
+```favnir
+test "pipeline result" {
+  bind conn <- duckdb.open(":memory:")
+  bind result <- duckdb.query<Summary>(conn, "SELECT 1 AS total")
+  assert List.len(result) == 1
+}
+```
+
+## エフェクトエラー
+
+宣言していないエフェクトを使うとコンパイルエラーになります:
+
+```favnir
+// E0370: !Io not declared
+fn greet(name: String) -> Unit {
+  IO.println(name)  // エラー: !Io を宣言していない
+}
+```
+
+→ [E0370 の詳細](/errors/E0370/)

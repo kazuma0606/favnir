@@ -1,2 +1,8 @@
 fav/target/
 fav/users.sqlite
+mock/
+# Terraform
+infra/site/.terraform/
+infra/site/*.tfstate
+infra/site/*.tfstate.backup
+infra/site/.terraform.lock.hcl

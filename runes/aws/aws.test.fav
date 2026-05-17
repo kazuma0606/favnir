@@ -1,0 +1,24 @@
+// AWS Rune tests — bad-host error handling (v4.11.0)
+
+import rune "aws"
+
+test "s3 get returns error on bad host" {
+    match aws.get_object("nonexistent-bucket-fav-test", "key") {
+        Err(_) => true
+        Ok(_)  => false
+    }
+}
+
+test "sqs send returns error on bad host" {
+    match aws.send_message("https://invalid.host.fav.test/queue", "hello") {
+        Err(_) => true
+        Ok(_)  => false
+    }
+}
+
+test "dynamo scan returns error on bad host" {
+    match aws.scan("nonexistent-table-fav-test") {
+        Err(_) => true
+        Ok(_)  => false
+    }
+}

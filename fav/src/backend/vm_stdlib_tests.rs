@@ -3043,3 +3043,160 @@ public fn main() -> Bool !Env {{
     let result = eval(&src);
     assert_eq!(result, Value::Bool(true));
 }
+
+// ── AWS stdlib tests (v4.11.0) ────────────────────────────────────────────────
+
+fn set_bad_aws_host() {
+    use crate::backend::vm::{AwsConfig, set_aws_config};
+    set_aws_config(AwsConfig {
+        region: "us-east-1".to_string(),
+        endpoint_url: Some("http://invalid.host.fav.test:9999".to_string()),
+        access_key: "test".to_string(),
+        secret_key: "test".to_string(),
+        session_token: None,
+    });
+}
+
+fn reset_aws_config() {
+    use crate::backend::vm::{AwsConfig, set_aws_config};
+    set_aws_config(AwsConfig::default());
+}
+
+#[test]
+fn aws_s3_get_object_raw_returns_err_on_bad_host() {
+    set_bad_aws_host();
+    let result = eval(r#"
+public fn main() -> Bool {
+    match AWS.s3_get_object_raw("bucket", "key") {
+        Err(_) => true
+        Ok(_)  => false
+    }
+}
+"#);
+    reset_aws_config();
+    assert_eq!(result, Value::Bool(true));
+}
+
+#[test]
+fn aws_s3_put_object_raw_returns_err_on_bad_host() {
+    set_bad_aws_host();
+    let result = eval(r#"
+public fn main() -> Bool {
+    match AWS.s3_put_object_raw("bucket", "key", "body") {
+        Err(_) => true
+        Ok(_)  => false
+    }
+}
+"#);
+    reset_aws_config();
+    assert_eq!(result, Value::Bool(true));
+}
+
+#[test]
+fn aws_s3_list_objects_raw_returns_err_on_bad_host() {
+    set_bad_aws_host();
+    let result = eval(r#"
+public fn main() -> Bool {
+    match AWS.s3_list_objects_raw("bucket", "") {
+        Err(_) => true
+        Ok(_)  => false
+    }
+}
+"#);
+    reset_aws_config();
+    assert_eq!(result, Value::Bool(true));
+}
+
+#[test]
+fn aws_sqs_send_message_raw_returns_err_on_bad_host() {
+    set_bad_aws_host();
+    let result = eval(r#"
+public fn main() -> Bool {
+    match AWS.sqs_send_message_raw("http://invalid.host.fav.test:9999/q", "hello") {
+        Err(_) => true
+        Ok(_)  => false
+    }
+}
+"#);
+    reset_aws_config();
+    assert_eq!(result, Value::Bool(true));
+}
+
+#[test]
+fn aws_sqs_receive_messages_raw_returns_err_on_bad_host() {
+    set_bad_aws_host();
+    let result = eval(r#"
+public fn main() -> Bool {
+    match AWS.sqs_receive_messages_raw("http://invalid.host.fav.test:9999/q", 1) {
+        Err(_) => true
+        Ok(_)  => false
+    }
+}
+"#);
+    reset_aws_config();
+    assert_eq!(result, Value::Bool(true));
+}
+
+#[test]
+fn aws_dynamo_get_item_raw_returns_err_on_bad_host() {
+    set_bad_aws_host();
+    let result = eval(r#"
+public fn main() -> Bool {
+    bind key <- Map.set((), "id", "1")
+    match AWS.dynamo_get_item_raw("table", key) {
+        Err(_) => true
+        Ok(_)  => false
+    }
+}
+"#);
+    reset_aws_config();
+    assert_eq!(result, Value::Bool(true));
+}
+
+#[test]
+fn aws_dynamo_put_item_raw_returns_err_on_bad_host() {
+    set_bad_aws_host();
+    let result = eval(r#"
+public fn main() -> Bool {
+    bind item <- Map.set((), "id", "1")
+    match AWS.dynamo_put_item_raw("table", item) {
+        Err(_) => true
+        Ok(_)  => false
+    }
+}
+"#);
+    reset_aws_config();
+    assert_eq!(result, Value::Bool(true));
+}
+
+#[test]
+fn aws_dynamo_scan_raw_returns_err_on_bad_host() {
+    set_bad_aws_host();
+    let result = eval(r#"
+public fn main() -> Bool {
+    match AWS.dynamo_scan_raw("table") {
+        Err(_) => true
+        Ok(_)  => false
+    }
+}
+"#);
+    reset_aws_config();
+    assert_eq!(result, Value::Bool(true));
+}
+
+#[test]
+fn aws_config_respects_endpoint_url() {
+    use crate::backend::vm::{AwsConfig, set_aws_config, get_aws_config_pub};
+    let ep = "http://localhost:4566";
+    set_aws_config(AwsConfig {
+        region: "ap-northeast-1".to_string(),
+        endpoint_url: Some(ep.to_string()),
+        access_key: "test".to_string(),
+        secret_key: "test".to_string(),
+        session_token: None,
+    });
+    let cfg = get_aws_config_pub();
+    assert_eq!(cfg.endpoint_url.as_deref(), Some(ep));
+    assert_eq!(cfg.region, "ap-northeast-1");
+    set_aws_config(AwsConfig::default());
+}

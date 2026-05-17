@@ -1,0 +1,100 @@
+---
+title: "クイックスタート"
+order: 3
+category: "はじめに"
+description: "5 分で最初の Favnir パイプラインを動かす"
+---
+
+# クイックスタート
+
+## Hello World
+
+```favnir
+public fn main() -> Unit !Io {
+  IO.println("Hello, Favnir!")
+}
+```
+
+```bash
+fav run src/main.fav
+# Hello, Favnir!
+```
+
+## 型と関数
+
+```favnir
+type User = { name: String  age: Int }
+
+fn greet(u: User) -> String {
+  $"こんにちは、{u.name}さん（{u.age}歳）"
+}
+
+public fn main() -> Unit !Io {
+  let user = User { name: "田中" age: 30 }
+  IO.println(greet(user))
+}
+```
+
+## Result と Option
+
+```favnir
+fn divide(a: Int, b: Int) -> Result<Int, String> {
+  if b == 0
+    then Result.err("ゼロ除算")
+    else Result.ok(a / b)
+}
+
+public fn main() -> Unit !Io {
+  match divide(10, 2) {
+    Ok(v)  => IO.println($"結果: {v}")
+    Err(e) => IO.println($"エラー: {e}")
+  }
+}
+```
+
+## DuckDB でデータ分析
+
+```favnir
+import rune "duckdb"
+
+type Order = { customer: String  amount: Float }
+type Summary = { customer: String  total: Float }
+
+public fn main() -> Unit !Io !Db {
+  bind conn   <- duckdb.open(":memory:")
+  bind result <- duckdb.query<Summary>(conn,
+    "SELECT customer, SUM(amount) AS total
+     FROM 'data/orders.parquet'
+     GROUP BY customer ORDER BY total DESC")
+  IO.println(result)
+}
+```
+
+## AWS S3 からデータを読む
+
+```favnir
+import rune "aws"
+
+type Row = { id: Int  value: String }
+
+public fn main() -> Unit !Io !AWS {
+  bind rows <- aws.s3.read_csv<Row>("my-bucket", "data/input.csv")
+  IO.println($"読み込み: {List.len(rows)} 件")
+}
+```
+
+LocalStack で開発する場合:
+
+```bash
+# Docker で LocalStack を起動
+docker run -d -p 4566:4566 localstack/localstack
+
+# 環境変数でエンドポイントを切り替え
+AWS_ENDPOINT_URL=http://localhost:4566 fav run src/main.fav
+```
+
+## 次のステップ
+
+- [型システム](/docs/language/types/) — Record・List・Option・Result
+- [エフェクト型](/docs/language/effects/) — 副作用の管理
+- [AWS Rune](/runes/aws/) — S3/SQS/DynamoDB

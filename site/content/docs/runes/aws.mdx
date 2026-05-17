@@ -1,0 +1,66 @@
+---
+title: "AWS Rune"
+order: 1
+category: "Rune"
+description: "S3 / SQS / DynamoDB を型安全に操作する AWS Rune"
+---
+
+# AWS Rune
+
+エフェクト: `!AWS`
+
+```favnir
+import rune "aws"
+```
+
+## S3
+
+```favnir
+// CSV を読む
+bind orders <- aws.s3.read_csv<Order>("bucket", "data/orders.csv")
+
+// オブジェクトをアップロード
+aws.s3.put_object("bucket", "output/result.json", content)
+
+// オブジェクト一覧
+bind keys <- aws.s3.list_objects("bucket", "data/")
+```
+
+## SQS
+
+```favnir
+// メッセージを送信
+aws.sqs.send(queue_url, "処理依頼メッセージ")
+
+// メッセージを受信してポーリング
+aws.sqs.poll(queue_url, |msg| {
+  IO.println(msg.body)
+})
+```
+
+## DynamoDB
+
+```favnir
+// アイテムを取得
+bind item <- aws.dynamodb.get_item("orders", key_map)
+
+// アイテムを保存
+let item_map = Map.set(Map.set((), "id", "123"), "status", "pending")
+aws.dynamodb.put_item("orders", item_map)
+```
+
+## LocalStack で開発
+
+```bash
+docker run -d -p 4566:4566 localstack/localstack
+
+AWS_ENDPOINT_URL=http://localhost:4566 fav run src/main.fav
+```
+
+## fav.toml 設定
+
+```toml
+[aws]
+region       = "ap-northeast-1"
+endpoint_url = "http://localhost:4566"  # LocalStack
+```

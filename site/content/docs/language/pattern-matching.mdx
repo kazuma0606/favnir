@@ -1,0 +1,83 @@
+---
+title: "パターンマッチ"
+order: 3
+category: "言語仕様"
+description: "match 式・Option・Result・バリアント型のパターンマッチ"
+---
+
+# パターンマッチ
+
+## 基本的な match 式
+
+```favnir
+let x = 42
+match x {
+  0    => "ゼロ"
+  1    => "いち"
+  n    => $"その他: {n}"
+}
+```
+
+## Option のマッチ
+
+```favnir
+let opt: Option<Int> = some(42)
+
+match opt {
+  Some(n) => $"値は {n}"
+  None    => "値なし"
+}
+```
+
+## Result のマッチ
+
+```favnir
+match db.query(conn, "SELECT 1") {
+  Ok(rows) => rows
+  Err(e)   => {
+    IO.println($"エラー: {e}")
+    []
+  }
+}
+```
+
+## バリアント型
+
+```favnir
+type Shape =
+  | Circle(Float)
+  | Rectangle(Float, Float)
+  | Triangle(Float, Float, Float)
+
+fn area(s: Shape) -> Float {
+  match s {
+    Circle(r)        => 3.14159 * r * r
+    Rectangle(w, h)  => w * h
+    Triangle(a, b, c) =>
+      let s = (a + b + c) / 2.0
+      Float.sqrt(s * (s - a) * (s - b) * (s - c))
+  }
+}
+```
+
+## ネストしたパターン
+
+```favnir
+type Response = { status: Int  body: Option<String> }
+
+match response {
+  { status: 200  body: Some(data) } => data
+  { status: 404  body: _ }          => "Not Found"
+  { status: s    body: _ }          => $"Error {s}"
+}
+```
+
+## ワイルドカード
+
+```favnir
+match event {
+  "click"   => handle_click()
+  "hover"   => handle_hover()
+  _         => ()    // その他は無視
+}
+```

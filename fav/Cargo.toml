@@ -1,6 +1,6 @@
 [package]
 name = "fav"
-version = "4.8.0"
+version = "5.0.0"
 edition = "2024"
 
 [dependencies]
@@ -36,6 +36,7 @@ notify = "6"
 jsonwebtoken = "9"
 hmac = "0.12"
 sha2 = "0.10"
+zip = { version = "0.6", default-features = false, features = ["deflate"] }
 
 
 [features]

@@ -1,0 +1,48 @@
+---
+title: "イントロダクション"
+order: 1
+category: "はじめに"
+description: "Favnir はデータエンジニアのための型安全なパイプライン専用言語です"
+---
+
+# Favnir とは
+
+Favnir はデータエンジニアのための型安全なパイプライン専用言語です。
+
+## 設計思想
+
+**エフェクト型** — 副作用（IO・DB・AWS・Auth）をすべて型で表現します。
+純粋関数と副作用関数をコンパイル時に区別することで、テスト容易性と推論可能性を高めます。
+
+```favnir
+// 純粋関数: エフェクトなし
+fn double(n: Int) -> Int { n * 2 }
+
+// 副作用あり: !Io を宣言
+public fn main() -> Unit !Io {
+  IO.println(double(21))
+}
+```
+
+**Rune エコシステム** — AWS・DuckDB・HTTP・Auth など 8 つの標準 Rune を内蔵。
+`import rune "aws"` の 1 行で AWS S3/SQS/DynamoDB を型安全に操作できます。
+
+**AWS ネイティブ** — LocalStack（Docker）で開発し、`AWS_ENDPOINT_URL` の切り替えだけで本番 AWS に接続します。
+
+## Favnir の特徴
+
+| 機能 | 説明 |
+|------|------|
+| 静的型チェック | `fav check` でコンパイル時に全エラーを検出 |
+| エフェクト型 | `!Io / !Db / !AWS / !Auth / !Env` を関数シグネチャに明示 |
+| Rune | 外部モジュールシステム（マルチファイル対応） |
+| LSP | VS Code でリアルタイム補完・型チェック |
+| MCP | Claude などの AI アシスタントと統合 |
+| Notebook | インタラクティブなデータ探索 |
+| fav deploy | Lambda / ECS に直接デプロイ |
+
+## 次のステップ
+
+- [インストール](/docs/installation/) — Favnir をインストールする
+- [クイックスタート](/docs/quickstart/) — 最初のパイプラインを書く
+- [型システム](/docs/language/types/) — 型システムを学ぶ

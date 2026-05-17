@@ -8,7 +8,10 @@ mod frontend;
 mod lint;
 mod lock;
 mod lsp;
+mod mcp;
 mod middle;
+mod notebook;
+mod registry;
 mod schemas;
 mod std_states;
 mod toml;
@@ -17,17 +20,18 @@ mod value;
 use driver::{
     cmd_bench, cmd_build, cmd_build_schema, cmd_bundle, cmd_check, cmd_check_with_sample,
     cmd_checkpoint_list, cmd_checkpoint_reset, cmd_checkpoint_set, cmd_checkpoint_show,
-    cmd_db_migrate, cmd_db_migrate_rollback, cmd_db_migrate_status, cmd_docs, cmd_exec,
-    cmd_explain, cmd_explain_compiler, cmd_explain_diff, cmd_explain_error,
-    cmd_explain_error_list, cmd_fmt, cmd_graph, cmd_infer, cmd_infer_proto, cmd_install, cmd_lint,
-    cmd_migrate, cmd_new, cmd_publish, cmd_run, cmd_test, cmd_watch,
+    cmd_db_migrate, cmd_db_migrate_rollback, cmd_db_migrate_status, cmd_deploy, cmd_docs,
+    cmd_exec, cmd_explain, cmd_explain_compiler, cmd_explain_diff, cmd_explain_error,
+    cmd_explain_error_list, cmd_explain_error_list_json, cmd_fmt, cmd_graph, cmd_infer,
+    cmd_infer_proto, cmd_install, cmd_lint,
+    cmd_migrate, cmd_new, cmd_publish, cmd_registry, cmd_run, cmd_test, cmd_watch,
 };
 use std::process;
 
 // 笏笏 help text (4-6) 笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏
 
 const HELP: &str = "\
-fav - Favnir language toolchain v4.8.0
+fav - Favnir language toolchain v4.12.0
 
 USAGE:
     fav <COMMAND> [OPTIONS] [FILE]
@@ -102,6 +106,17 @@ COMMANDS:
                   If <file> is omitted, lints all .fav files in the project.
     lsp [--port <n>]
                   Run the Favnir Language Server scaffold.
+    mcp           Start MCP server (JSON-RPC over stdin/stdout, protocol 2024-11-05).
+    notebook new <name>
+                  Create a new notebook (<name>.fav.nb).
+    notebook run [--no-cache] <file>
+                  Execute all code cells and save outputs.
+    notebook serve [--port <n>] [--no-open] <file>
+                  Start interactive browser UI (default port 8888).
+    notebook export [--out <path>] <file>
+                  Export notebook to Markdown.
+    notebook check <file>
+                  Type-check all code cells without executing.
     migrate [--in-place] [--dry-run] [--check] [--dir <path>] [file]
                   Migrate v1.x code to v2.0.0 syntax (trf→stage, flw→seq).
                   With --in-place, rewrite files directly.
@@ -109,10 +124,18 @@ COMMANDS:
                   With --check, exit 1 if any file needs migration (CI use).
     explain-error <code>
                   Show details for a specific error code (e.g. E0213).
-    explain-error --list
+    explain-error --list [--format <text|json>]
                   List all known error codes with titles.
-    install       Resolve [dependencies] from fav.toml and write fav.lock.
-    publish       Validate project and prepare for local registry publishing.
+                  With --format json, emit structured JSON (for site generation).
+    deploy [--env <name>] [--function <name>] [--region <r>] [--dry-run]
+                  Deploy to AWS Lambda (packages .fav files and uploads to S3/Lambda).
+    install [<name>] [--force]
+                  Install [dependencies] from fav.toml into ./runes/ (Semver deps)
+                  or write fav.lock (path/registry deps). Optionally install a single dep by name.
+    publish [--name <n>] [--version <v>] [--dry-run] [--force]
+                  Publish runes to the local registry (~/.fav/registry/).
+    registry [list|search <q>|info <name>]
+                  Manage the local Rune registry.
     help          Show this help message
 
 OPTIONS (run / exec):
@@ -940,6 +963,7 @@ fn main_impl() {
 
         Some("explain-error") => {
             let mut list = false;
+            let mut format = "text";
             let mut code: Option<&str> = None;
             let mut i = 2usize;
             while i < args.len() {
@@ -948,6 +972,15 @@ fn main_impl() {
                         list = true;
                         i += 1;
                     }
+                    "--format" => {
+                        if i + 1 < args.len() {
+                            format = args[i + 1].as_str();
+                            i += 2;
+                        } else {
+                            eprintln!("error: --format requires a value (text|json)");
+                            process::exit(1);
+                        }
+                    }
                     other => {
                         code = Some(other);
                         i += 1;
@@ -955,7 +988,11 @@ fn main_impl() {
                 }
             }
             if list {
-                cmd_explain_error_list();
+                if format == "json" {
+                    cmd_explain_error_list_json();
+                } else {
+                    cmd_explain_error_list();
+                }
             } else if let Some(c) = code {
                 cmd_explain_error(c);
             } else {
@@ -965,11 +1002,189 @@ fn main_impl() {
         }
 
         Some("install") => {
-            cmd_install();
+            let mut pkg_name: Option<String> = None;
+            let mut force = false;
+            let mut i = 2usize;
+            while i < args.len() {
+                match args[i].as_str() {
+                    "--force" => { force = true; i += 1; }
+                    other if !other.starts_with('-') => { pkg_name = Some(other.to_string()); i += 1; }
+                    other => {
+                        eprintln!("error: unexpected install argument `{}`", other);
+                        process::exit(1);
+                    }
+                }
+            }
+            cmd_install(pkg_name.as_deref(), force);
         }
 
         Some("publish") => {
-            cmd_publish();
+            let mut name_override:    Option<String> = None;
+            let mut version_override: Option<String> = None;
+            let mut dry_run = false;
+            let mut force   = false;
+            let mut i = 2usize;
+            while i < args.len() {
+                match args[i].as_str() {
+                    "--name" => {
+                        name_override = args.get(i + 1).cloned();
+                        i += 2;
+                    }
+                    "--version" => {
+                        version_override = args.get(i + 1).cloned();
+                        i += 2;
+                    }
+                    "--dry-run" => { dry_run = true; i += 1; }
+                    "--force"   => { force   = true; i += 1; }
+                    other => {
+                        eprintln!("error: unexpected publish argument `{}`", other);
+                        process::exit(1);
+                    }
+                }
+            }
+            cmd_publish(name_override.as_deref(), version_override.as_deref(), dry_run, force);
+        }
+
+        Some("registry") => {
+            let subcommand = args.get(2).map(|s| s.as_str());
+            let sub_args: Vec<String> = args.iter().skip(3).cloned().collect();
+            cmd_registry(subcommand, &sub_args);
+        }
+
+        Some("deploy") => {
+            let mut env: Option<String>           = None;
+            let mut function_name: Option<String> = None;
+            let mut region: Option<String>        = None;
+            let mut dry_run                       = false;
+            let mut i = 2usize;
+            while i < args.len() {
+                match args[i].as_str() {
+                    "--env" => {
+                        env = Some(args.get(i + 1).unwrap_or_else(|| {
+                            eprintln!("error: --env requires a value");
+                            process::exit(1);
+                        }).clone());
+                        i += 2;
+                    }
+                    "--function" => {
+                        function_name = Some(args.get(i + 1).unwrap_or_else(|| {
+                            eprintln!("error: --function requires a value");
+                            process::exit(1);
+                        }).clone());
+                        i += 2;
+                    }
+                    "--region" => {
+                        region = Some(args.get(i + 1).unwrap_or_else(|| {
+                            eprintln!("error: --region requires a value");
+                            process::exit(1);
+                        }).clone());
+                        i += 2;
+                    }
+                    "--dry-run" => {
+                        dry_run = true;
+                        i += 1;
+                    }
+                    other => {
+                        eprintln!("error: unexpected deploy argument `{}`", other);
+                        process::exit(1);
+                    }
+                }
+            }
+            cmd_deploy(env.as_deref(), function_name.as_deref(), region.as_deref(), dry_run);
+        }
+
+        Some("mcp") => {
+            mcp::run_mcp_server();
+        }
+
+        Some("notebook") => {
+            match args.get(2).map(|s| s.as_str()) {
+                Some("new") => {
+                    let name = args.get(3).map(|s| s.as_str()).unwrap_or_else(|| {
+                        eprintln!("error: notebook new requires <name>");
+                        process::exit(1);
+                    });
+                    driver::cmd_notebook_new(name);
+                }
+                Some("run") => {
+                    let no_cache = args.iter().any(|a| a == "--no-cache");
+                    let file = args.iter().skip(3).find(|a| !a.starts_with('-')).map(|s| s.as_str()).unwrap_or_else(|| {
+                        eprintln!("error: notebook run requires <file>");
+                        process::exit(1);
+                    });
+                    driver::cmd_notebook_run(file, no_cache);
+                }
+                Some("serve") => {
+                    let mut port = 8888u16;
+                    let mut no_open = false;
+                    let mut file: Option<&str> = None;
+                    let mut i = 3usize;
+                    while i < args.len() {
+                        match args[i].as_str() {
+                            "--port" => {
+                                let raw = args.get(i + 1).unwrap_or_else(|| {
+                                    eprintln!("error: --port requires a number");
+                                    process::exit(1);
+                                });
+                                port = raw.parse::<u16>().unwrap_or_else(|_| {
+                                    eprintln!("error: --port must be a valid u16");
+                                    process::exit(1);
+                                });
+                                i += 2;
+                            }
+                            "--no-open" => {
+                                no_open = true;
+                                i += 1;
+                            }
+                            other => {
+                                file = Some(other);
+                                i += 1;
+                            }
+                        }
+                    }
+                    let file = file.unwrap_or_else(|| {
+                        eprintln!("error: notebook serve requires <file>");
+                        process::exit(1);
+                    });
+                    driver::cmd_notebook_serve(file, port, no_open);
+                }
+                Some("export") => {
+                    let mut out: Option<&str> = None;
+                    let mut file: Option<&str> = None;
+                    let mut i = 3usize;
+                    while i < args.len() {
+                        match args[i].as_str() {
+                            "--out" => {
+                                out = Some(args.get(i + 1).unwrap_or_else(|| {
+                                    eprintln!("error: --out requires a path");
+                                    process::exit(1);
+                                }));
+                                i += 2;
+                            }
+                            other => {
+                                file = Some(other);
+                                i += 1;
+                            }
+                        }
+                    }
+                    let file = file.unwrap_or_else(|| {
+                        eprintln!("error: notebook export requires <file>");
+                        process::exit(1);
+                    });
+                    driver::cmd_notebook_export(file, out);
+                }
+                Some("check") => {
+                    let file = args.get(3).map(|s| s.as_str()).unwrap_or_else(|| {
+                        eprintln!("error: notebook check requires <file>");
+                        process::exit(1);
+                    });
+                    driver::cmd_notebook_check(file);
+                }
+                _ => {
+                    eprintln!("error: notebook requires new|run|serve|export|check");
+                    process::exit(1);
+                }
+            }
         }
 
         Some("lsp") => {
@@ -1026,7 +1241,7 @@ fn print_welcome() {
                 println!();
             }
         }
-        println!("Favnir v4.2.0 - The pipeline-first language");
+        println!("Favnir v5.0.0 - The pipeline-first language");
         println!();
     }
     print!("{}", HELP);

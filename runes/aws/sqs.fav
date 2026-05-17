@@ -1,0 +1,17 @@
+// SQS Rune — message queue operations (v4.11.0)
+
+public fn send_message(queue_url: String, body: String) -> Result<String, String> !AWS {
+    AWS.sqs_send_message_raw(queue_url, body)
+}
+
+public fn receive_messages(queue_url: String, max: Int) -> Result<List<Map<String, String>>, String> !AWS {
+    AWS.sqs_receive_messages_raw(queue_url, max)
+}
+
+public fn delete_message(queue_url: String, receipt_handle: String) -> Result<Unit, String> !AWS {
+    AWS.sqs_delete_message_raw(queue_url, receipt_handle)
+}
+
+public fn get_queue_url(queue_name: String) -> Result<String, String> !AWS {
+    AWS.sqs_get_queue_url_raw(queue_name)
+}

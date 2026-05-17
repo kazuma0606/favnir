@@ -1,0 +1,57 @@
+---
+title: "DuckDB Rune"
+order: 2
+category: "Rune"
+description: "組み込み OLAP エンジン — Parquet / CSV を SQL でクエリ"
+---
+
+# DuckDB Rune
+
+エフェクト: `!Db`
+
+サーバー不要の組み込み OLAP エンジンです。Parquet・CSV・JSON を SQL で直接クエリできます。
+
+```favnir
+import rune "duckdb"
+```
+
+## インメモリクエリ
+
+```favnir
+type Summary = { customer: String  total: Float }
+
+public fn main() -> Unit !Io !Db {
+  bind conn   <- duckdb.open(":memory:")
+  bind result <- duckdb.query<Summary>(conn,
+    "SELECT customer, SUM(amount) AS total
+     FROM 'data/orders.parquet'
+     GROUP BY customer ORDER BY total DESC LIMIT 10")
+  IO.println(result)
+}
+```
+
+## CSV → Parquet 変換
+
+```favnir
+public fn convert() -> Unit !Io !Db {
+  bind conn <- duckdb.open(":memory:")
+  duckdb.execute(conn,
+    "COPY (SELECT * FROM read_csv_auto('input.csv'))
+     TO 'output.parquet' (FORMAT PARQUET)")
+}
+```
+
+## S3 と組み合わせ
+
+```favnir
+import rune "aws"
+import rune "duckdb"
+
+public fn pipeline() -> Unit !Io !AWS !Db {
+  bind orders <- aws.s3.read_csv<Order>("bucket", "input.csv")
+  bind conn   <- duckdb.open(":memory:")
+  bind result <- duckdb.query<Summary>(conn,
+    "SELECT customer, SUM(amount) AS total FROM orders GROUP BY 1")
+  aws.s3.put_object("bucket", "output/summary.json", result)
+}
+```

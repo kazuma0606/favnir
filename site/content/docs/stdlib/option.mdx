@@ -1,0 +1,50 @@
+---
+title: "Option"
+order: 5
+category: "標準ライブラリ"
+description: "Option<T> — some / none / unwrap_or / map / and_then"
+---
+
+# Option
+
+値が存在しないかもしれないことを型で表現します。
+null の代わりに使います。
+
+## 関数一覧
+
+| 関数 | シグネチャ | 説明 |
+|------|-----------|------|
+| `some` | `T -> Option<T>` | 値を包む |
+| `none` | `Option<T>` | 空の Option |
+| `Option.unwrap_or` | `Option<T>, T -> T` | 値または既定値 |
+| `Option.map` | `Option<T>, T -> U -> Option<U>` | 値を変換 |
+| `Option.and_then` | `Option<T>, T -> Option<U> -> Option<U>` | チェーン |
+| `Option.is_some` | `Option<T> -> Bool` | 値があるか |
+| `Option.is_none` | `Option<T> -> Bool` | 値がないか |
+| `Option.filter` | `Option<T>, T -> Bool -> Option<T>` | 条件フィルタ |
+
+## 使用例
+
+```favnir
+let opt: Option<Int> = some(42)
+
+// ?? 演算子（null 合体）
+let val = opt ?? 0    // 42
+
+// Option.unwrap_or
+let val = Option.unwrap_or(opt, 0)   // 42
+
+// パターンマッチ
+match opt {
+  Some(n) => $"値は {n}"
+  None    => "値なし"
+}
+
+// map でチェーン
+let doubled = Option.map(opt, |n| n * 2)   // Some(84)
+```
+
+## Option vs Result
+
+- `Option<T>` — 値があるかないか（エラー情報不要な場合）
+- `Result<T, E>` — 成功か失敗か（エラー情報が必要な場合）

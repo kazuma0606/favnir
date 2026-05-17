@@ -1,0 +1,47 @@
+---
+title: "Map"
+order: 3
+category: "標準ライブラリ"
+description: "Map<K, V> — get / set / keys / values / contains"
+---
+
+# Map
+
+## 関数一覧
+
+| 関数 | シグネチャ | 説明 |
+|------|-----------|------|
+| `Map.get` | `Map(K,V), K -> Option(V)` | 値の取得 |
+| `Map.set` | `Map(K,V), K, V -> Map(K,V)` | 値の設定（不変） |
+| `Map.contains` | `Map(K,V), K -> Bool` | キーの存在確認 |
+| `Map.keys` | `Map(K,V) -> List(K)` | キー一覧 |
+| `Map.values` | `Map(K,V) -> List(V)` | 値一覧 |
+| `Map.remove` | `Map(K,V), K -> Map(K,V)` | キーの削除 |
+| `Map.len` | `Map(K,V) -> Int` | 要素数 |
+| `Map.merge` | `Map(K,V), Map(K,V) -> Map(K,V)` | 2 つのマップを結合 |
+
+## 使用例
+
+```favnir
+// 空のマップから構築
+let m = Map.set(Map.set((), "key1", 100), "key2", 200)
+
+// 値の取得
+match Map.get(m, "key1") {
+  Some(v) => IO.println($"値: {v}")
+  None    => IO.println("キーが存在しない")
+}
+
+// キー一覧
+let keys = Map.keys(m)  // ["key1", "key2"]
+```
+
+## Map(String, String) の用途
+
+VM primitives（`AWS.*_raw` など）は `Map(String, String)` を返します。
+`Map.get` で特定フィールドを取り出す際は `Option(String)` が返ります:
+
+```favnir
+bind raw <- AWS.dynamo_get_item_raw(config, table, key_map)
+let name = Map.get(raw, "name") ?? "Unknown"
+```

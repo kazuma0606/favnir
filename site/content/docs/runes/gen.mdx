@@ -1,0 +1,50 @@
+---
+title: "Gen Rune"
+order: 6
+category: "Rune"
+description: "シード指定の再現可能なテストデータ生成"
+---
+
+# Gen Rune
+
+エフェクトなし（純粋関数）
+
+```favnir
+import rune "gen"
+```
+
+## 基本的なデータ生成
+
+```favnir
+type Order = { id: Int  customer_name: String  email: String  amount: Float }
+
+// シード 42 でデータ生成（再現可能）
+let order = gen.one<Order>(42)
+// { id: 1, customer_name: "田中 太郎", email: "tanaka@example.com", amount: 12800.0 }
+```
+
+## フィールド名ヒント
+
+| フィールド名パターン | 生成される値 |
+|---------------------|-------------|
+| `*_name` / `name` | 人名（日/英） |
+| `email` / `*_email` | `xxx@example.com` 形式 |
+| `*_at` / `*_date` | ISO 8601 日時 |
+| `id` / `*_id` | 連番または UUID |
+| `amount` / `price` / `*_fee` | 正の実数 |
+
+## リスト生成
+
+```favnir
+let orders = gen.many<Order>(100, 42)  // 100 件生成（シード 42）
+```
+
+## テストでの使用
+
+```favnir
+test "pipeline processes orders" {
+  let orders = gen.many<Order>(50, 0)
+  let result = process_orders(orders)
+  assert List.len(result) > 0
+}
+```

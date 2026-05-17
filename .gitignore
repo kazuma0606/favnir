@@ -6,3 +6,4 @@ infra/site/.terraform/
 infra/site/*.tfstate
 infra/site/*.tfstate.backup
 infra/site/.terraform.lock.hcl
+crates/favnir-wasm/target/

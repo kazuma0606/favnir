@@ -251,6 +251,7 @@ impl Resolver {
         let local = base.join(import_path).join(format!("{import_path}.fav"));
 
         // Fallback to local registry when the project-local path does not exist
+        #[cfg(not(target_arch = "wasm32"))]
         if !local.exists() {
             let reg = crate::registry::Registry::new();
             if let Some(rune_dir) = reg.rune_path(import_path) {

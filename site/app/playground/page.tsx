@@ -42,7 +42,7 @@ declare global {
 }
 
 export default function PlaygroundPage() {
-  const [code, setCode] = useState(EXAMPLE_CODE)
+  const [code, setCode] = useState('')
   const [diagnostics, setDiagnostics] = useState<Diagnostic[]>([])
   const [output, setOutput] = useState<string[]>([])
   const [wasmReady, setWasmReady] = useState(false)
@@ -50,6 +50,12 @@ export default function PlaygroundPage() {
   const [running, setRunning] = useState(false)
   const [activePanel, setActivePanel] = useState<'diagnostics' | 'output'>('diagnostics')
   const readyRef = useRef(false)
+
+  // Set example code client-side only to avoid SSR/hydration mismatch
+  // (EXAMPLE_CODE contains -> and <- which get HTML-escaped server-side)
+  useEffect(() => {
+    setCode(EXAMPLE_CODE)
+  }, [])
 
   useEffect(() => {
     const script = document.createElement('script')
@@ -204,6 +210,7 @@ export default function PlaygroundPage() {
               onChange={(e) => setCode(e.target.value)}
               className="flex-1 resize-none bg-card p-4 font-mono text-sm text-foreground/90 focus:outline-none leading-relaxed"
               spellCheck={false}
+              suppressHydrationWarning
             />
           </div>
 

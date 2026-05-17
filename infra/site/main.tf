@@ -55,6 +55,31 @@ resource "aws_cloudfront_origin_access_control" "site" {
 }
 
 # ---------------------------------------------------------------------------
+# CloudFront Function — rewrite trailing-slash paths to index.html
+# (required for Next.js trailingSlash static export on S3 without website hosting)
+# ---------------------------------------------------------------------------
+
+resource "aws_cloudfront_function" "url_rewrite" {
+  name    = "favnir-url-rewrite"
+  runtime = "cloudfront-js-2.0"
+  comment = "Rewrite /path/ to /path/index.html for Next.js static export"
+  publish = true
+
+  code = <<-EOF
+    function handler(event) {
+      var request = event.request;
+      var uri = request.uri;
+      if (uri.endsWith('/')) {
+        request.uri = uri + 'index.html';
+      } else if (!uri.includes('.')) {
+        request.uri = uri + '/index.html';
+      }
+      return request;
+    }
+  EOF
+}
+
+# ---------------------------------------------------------------------------
 # CloudFront distribution
 # ---------------------------------------------------------------------------
 
@@ -82,6 +107,11 @@ resource "aws_cloudfront_distribution" "site" {
     cache_policy_id            = "658327ea-f89d-4fab-a63d-7e88639e58f6" # CachingOptimized
     origin_request_policy_id   = "88a5eaf4-2fd4-4709-b370-b4c650ea3fcf" # CORS-S3Origin
     response_headers_policy_id = "67f7725c-6f97-4210-82d7-5512b31e9d03" # SecurityHeadersPolicy
+
+    function_association {
+      event_type   = "viewer-request"
+      function_arn = aws_cloudfront_function.url_rewrite.arn
+    }
   }
 
   # Ordered behavior — WASM files (application/wasm MIME type via S3 metadata)
@@ -96,11 +126,13 @@ resource "aws_cloudfront_distribution" "site" {
     cache_policy_id = "658327ea-f89d-4fab-a63d-7e88639e58f6" # CachingOptimized
   }
 
-  # SPA-style 404 → index.html (handles Next.js trailingSlash static export)
+  # 403/404 from S3 → serve 404 page
+  # Note: the CloudFront Function rewrites paths before S3 lookup,
+  # so legitimate pages never hit these error responses.
   custom_error_response {
     error_code            = 403
-    response_code         = 200
-    response_page_path    = "/index.html"
+    response_code         = 404
+    response_page_path    = "/404.html"
     error_caching_min_ttl = 10
   }
 

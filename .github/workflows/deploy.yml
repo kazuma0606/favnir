@@ -74,19 +74,24 @@ jobs:
         working-directory: site
         run: npm run build
 
-      - name: Sync to S3 — immutable assets (JS/CSS/WASM)
+      - name: Sync to S3 — immutable assets (Next.js hashed JS/CSS)
         run: |
-          aws s3 sync site/out/ s3://${{ secrets.SITE_BUCKET_NAME }}/ \
+          aws s3 sync site/out/_next/ s3://${{ secrets.SITE_BUCKET_NAME }}/_next/ \
             --delete \
-            --cache-control "public, max-age=31536000, immutable" \
-            --exclude "*.html" \
-            --exclude "*.json"
+            --cache-control "public, max-age=31536000, immutable"
+
+      - name: Sync to S3 — WASM glue JS (short cache, content changes on each deploy)
+        run: |
+          aws s3 sync site/out/wasm/ s3://${{ secrets.SITE_BUCKET_NAME }}/wasm/ \
+            --delete \
+            --cache-control "public, max-age=0, must-revalidate" \
+            --exclude "*.wasm"
 
       - name: Sync to S3 — WASM binary with correct MIME type
         run: |
           aws s3 cp site/out/wasm/favnir_bg.wasm \
             s3://${{ secrets.SITE_BUCKET_NAME }}/wasm/favnir_bg.wasm \
-            --cache-control "public, max-age=3600" \
+            --cache-control "public, max-age=0, must-revalidate" \
             --content-type "application/wasm"
 
       - name: Sync to S3 — HTML and JSON

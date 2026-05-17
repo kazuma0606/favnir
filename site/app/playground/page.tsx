@@ -92,14 +92,19 @@ export default function PlaygroundPage() {
   }
 
   const handleRun = async () => {
-    if (!window.__favnirCompile) return
     setRunning(true)
     setActivePanel('output')
     await new Promise(r => setTimeout(r, 0))
 
+    if (!window.__favnirCompile) {
+      setOutput(['[エラー] WASM コンパイラがまだ読み込まれていません。\nページをリロードして再試行してください。'])
+      setRunning(false)
+      return
+    }
+
     const bytes = window.__favnirCompile(code)
     if (!bytes) {
-      setOutput(['実行エラー: このプログラムはブラウザ実行非対応です。\n（構造体・クロージャ・文字列操作を含むプログラムにはサーバー実行が必要です）'])
+      setOutput(['[実行不可] このプログラムはブラウザ実行非対応です。\n対応: Int/Float/Bool/String/Unit 型のみ使用する関数\n非対応: 構造体・クロージャ・List/Map 操作'])
       setRunning(false)
       return
     }

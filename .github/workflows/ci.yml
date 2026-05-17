@@ -14,6 +14,9 @@ jobs:
   rust:
     name: Rust — build & test
     runs-on: ubuntu-latest
+    env:
+      # fav/.cargo/config.toml sets CXXFLAGS for Windows MSVC; clear it on Linux
+      CXXFLAGS: ""
     steps:
       - uses: actions/checkout@v4
 

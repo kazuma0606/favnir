@@ -2,6 +2,7 @@ import { notFound } from 'next/navigation'
 import { getAllDocs, getDocBySlug } from '@/lib/docs'
 import { MDXRemote } from 'next-mdx-remote/rsc'
 import type { Metadata } from 'next'
+import { CodeBlock } from '@/components/docs/code-block'
 
 interface Props {
   params: Promise<{ slug: string[] }>
@@ -22,6 +23,11 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   }
 }
 
+const mdxComponents = {
+  // Replace <code> in MDX fenced blocks with Shiki-highlighted CodeBlock
+  code: CodeBlock,
+}
+
 export default async function DocPage({ params }: Props) {
   const { slug } = await params
   const doc = getDocBySlug(slug.join('/'))
@@ -34,7 +40,7 @@ export default async function DocPage({ params }: Props) {
         <p className="text-lg text-muted-foreground mb-8">{doc.frontmatter.description}</p>
       )}
       <hr className="border-border mb-8" />
-      <MDXRemote source={doc.content} />
+      <MDXRemote source={doc.content} components={mdxComponents} />
     </>
   )
 }

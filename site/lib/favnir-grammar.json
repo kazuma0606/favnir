@@ -1,0 +1,87 @@
+{
+  "id": "fav",
+  "name": "Favnir",
+  "scopeName": "source.fav",
+  "aliases": ["favnir"],
+  "fileTypes": ["fav"],
+  "patterns": [
+    { "include": "#comment" },
+    { "include": "#string" },
+    { "include": "#fstring" },
+    { "include": "#effect" },
+    { "include": "#keyword" },
+    { "include": "#builtin-type" },
+    { "include": "#builtin-namespace" },
+    { "include": "#number" },
+    { "include": "#boolean" },
+    { "include": "#operator" },
+    { "include": "#type-name" },
+    { "include": "#function-def" }
+  ],
+  "repository": {
+    "comment": {
+      "name": "comment.line.double-slash.fav",
+      "match": "//.*$"
+    },
+    "string": {
+      "name": "string.quoted.double.fav",
+      "begin": "\"",
+      "end": "\"",
+      "patterns": [
+        { "name": "constant.character.escape.fav", "match": "\\\\." }
+      ]
+    },
+    "fstring": {
+      "name": "string.quoted.double.fav",
+      "begin": "f\"",
+      "end": "\"",
+      "patterns": [
+        {
+          "name": "variable.other.fav",
+          "match": "\\{[^}]*\\}"
+        },
+        { "name": "constant.character.escape.fav", "match": "\\\\." }
+      ]
+    },
+    "effect": {
+      "name": "keyword.other.effect.fav",
+      "match": "!(?:Io|AWS|S3|Sqs|DynamoDB|Db|Http|Grpc|Log|Env|Gen|Auth|Error)\\b"
+    },
+    "keyword": {
+      "name": "keyword.control.fav",
+      "match": "\\b(fn|type|match|if|else|public|import|rune|bind|for|in|use|collect|yield|chain|interface|impl)\\b"
+    },
+    "builtin-type": {
+      "name": "support.type.fav",
+      "match": "\\b(Int|Float|Bool|String|Unit|List|Map|Option|Result|Task)\\b"
+    },
+    "builtin-namespace": {
+      "name": "support.function.fav",
+      "match": "\\b(IO|Debug|Math|List|Map|String|Int|Float|Bool|Option|Result|Task|AWS|S3|Sqs|DynamoDB|Http|Env|Log|Gen|Auth)(?=\\.)"
+    },
+    "number": {
+      "name": "constant.numeric.fav",
+      "match": "\\b\\d+(\\.\\d+)?\\b"
+    },
+    "boolean": {
+      "name": "constant.language.fav",
+      "match": "\\b(true|false)\\b"
+    },
+    "operator": {
+      "patterns": [
+        { "name": "keyword.operator.arrow.fav", "match": "->|=>|<-" },
+        { "name": "keyword.operator.comparison.fav", "match": "==|!=|<=|>=|<|>" },
+        { "name": "keyword.operator.logical.fav", "match": "&&|\\|\\|" },
+        { "name": "keyword.operator.fav", "match": "[+\\-*/%]" }
+      ]
+    },
+    "type-name": {
+      "name": "entity.name.type.fav",
+      "match": "\\b([A-Z][a-zA-Z0-9_]*)\\b"
+    },
+    "function-def": {
+      "name": "entity.name.function.fav",
+      "match": "\\b(?<=fn\\s)([a-z_][a-zA-Z0-9_]*)\\b"
+    }
+  }
+}

@@ -1,0 +1,9 @@
+type Point = { x: Int  y: Int }
+
+fn distance(a: Point, b: Point) -> Float {
+  Float.sqrt(Int.to_float((a.x - b.x) * (a.x - b.x) + (a.y - b.y) * (a.y - b.y)))
+}
+
+public fn main() -> Unit !Io {
+  IO.println($"distance: {distance(Point { x: 0  y: 0 }, Point { x: 3  y: 4 })}")
+}

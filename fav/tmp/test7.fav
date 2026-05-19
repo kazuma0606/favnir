@@ -1,0 +1,5 @@
+fn add(a: Int, b: Int) -> Int { a + b }
+
+public fn main() -> Unit !Io {
+  IO.println($"1 + 2 = {add(1, 2)}")
+}

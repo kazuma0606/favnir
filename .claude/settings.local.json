@@ -24,7 +24,12 @@
       "Bash(echo \"done: $f\")",
       "Bash(done)",
       "Bash(taskkill /F /IM \"fav-18aa1375978f43bc.exe\")",
-      "Bash(taskkill /F /IM \"fav.exe\")"
+      "Bash(taskkill /F /IM \"fav.exe\")",
+      "Bash(npm run:*)",
+      "Bash(./fav/target/debug/fav check:*)",
+      "Bash(aws logs:*)",
+      "Bash(MSYS_NO_PATHCONV=1 aws logs describe-log-streams --log-group-name \"/aws/lambda/favnir-registry\" --region ap-northeast-1 2>&1)",
+      "Bash(aws lambda:*)"
     ]
   }
 }

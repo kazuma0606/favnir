@@ -4904,6 +4904,7 @@ impl Checker {
                 self.require_io_effect(span);
                 Some(Type::Unit)
             }
+            ("Http", "check_basic_auth") => Some(Type::Bool),
 
             ("Grpc", "serve_raw") => {
                 self.require_rpc_effect(span);

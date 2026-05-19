@@ -1,7 +1,7 @@
 # Favnir v5.0.0 タスクリスト — AWS 本番稼働 + リファレンスサイト
 
 作成日: 2026-05-17
-完了日: -
+完了日: 2026-05-19
 
 実装順序: Phase C（リファレンスサイト）→ Phase B（WASM）→ Phase A（CI/CD）→ Phase D（Dogfooding）
 
@@ -158,14 +158,44 @@
 
 ---
 
-## Phase D: Dogfooding — 未着手
+## Phase D: Dogfooding — rune-registry Lambda HTTP サービス ✅ COMPLETE
 
-- [ ] `rune-registry/fav.toml` を作成
-- [ ] `rune-registry/src/main.fav` を作成（HTTP サーバー起動）
-- [ ] `rune-registry/src/handlers.fav` を作成（list / info / publish エンドポイント）
-- [ ] `rune-registry/src/storage.fav` を作成（S3 + DynamoDB 操作）
-- [ ] `fav deploy --env prod` で ECS にデプロイされる
-- [ ] `fav install csv` が AWS 上の Registry から動作する
+### 実際の構成（計画から変更あり）
+- **エンドポイント**: API Gateway HTTP API（Lambda Function URL NONE auth がこのアカウントで非対応のため変更）
+- **API URL**: `https://32qp3qwhdh.execute-api.ap-northeast-1.amazonaws.com/`
+- **Lambda runtime**: カスタム bootstrap スクリプト（`fav run` を呼び出し）
+- **ストレージ**: S3（パッケージ）+ DynamoDB（メタデータ）
+- **認証**: HTTP Basic Auth — `admin:adminuser`
+
+### Phase D-0: VM 拡張 ✅ COMPLETE
+
+- [x] `Http.check_basic_auth(auth_header, username, password) -> Bool` を vm.rs + checker.rs に追加
+- [x] fix: `sigv4_sign()` に `x-amz-security-token` を canonical headers + signed headers に追加
+  - Lambda 一時 credentials では session token の署名が S3 で必須
+
+### Phase D-1: Favnir ソース ✅ COMPLETE
+
+- [x] `rune-registry/src/main.fav` — GET /runes, GET /runes/{name}, POST /runes/{name}
+- [x] DynamoDB + S3 を使った publish/get/list 実装
+- [x] Basic 認証（401 レスポンス含む）
+
+### Phase D-2: コンテナ + インフラ ✅ COMPLETE
+
+- [x] `rune-registry/Dockerfile`（`rust:1.88-slim` マルチステージ）
+- [x] `rune-registry/bootstrap`（Lambda custom runtime ポーリングスクリプト）
+- [x] `infra/registry/`（ECR / DynamoDB / S3 / IAM / API Gateway HTTP API / Lambda）
+- [x] `docker buildx build --provenance=false` で Lambda 互換 manifest 形式
+
+### Phase D-3: CI/CD ✅ COMPLETE
+
+- [x] `.github/workflows/deploy-registry.yml`
+
+### Phase D-4: 動作確認 ✅ COMPLETE
+
+- [x] `GET /runes` → `[]` → publish 後 `[{...}]`
+- [x] `POST /runes/csv` (valid auth) → `published`
+- [x] `POST /runes/csv` (wrong auth) → `Unauthorized`
+- [x] `GET /runes/csv` → `{"name":"csv","version":"0.1.0","description":"CSV Rune"}`
 
 ---
 
@@ -179,7 +209,7 @@
 - [x] Playground でブラウザ内型チェック + WASM 実行が動く
 - [x] CI が master push で動く
 - [x] deploy が master push で動く
-- [ ] Phase D: Dogfooding（rune-registry Favnir HTTP サービス）
+- [x] Phase D: Dogfooding（rune-registry Favnir Lambda HTTP サービス）
 
 ---
 
@@ -196,3 +226,9 @@
 - **`.gitignore`**: `infra/site/.terraform/` を除外済み（685MB の provider バイナリ対策）
 - **wasm-pack は事前インストール必要**: `cargo install wasm-pack`
 - **WASM MIME タイプ**: S3 + CloudFront では `application/wasm` が自動設定される
+- **`Http.serve_raw` ループ**: Lambda では 1 リクエスト = 1 プロセス起動。ただし `while true` ループで複数リクエストをハンドルする設計にしておく（Lambda Web Adapter が同一プロセスを再利用するため）
+- **`Http.serve_raw` ワイルドカード**: `"*"` を path に指定するとすべてのパスにマッチ
+- **`Http.check_basic_auth`**: `Authorization: Basic <base64(user:pass)>` をパース・検証する VM ビルトイン
+- **rune-registry DynamoDB テーブル名**: `favnir-rune-registry`（Terraform で作成）
+- **rune-registry S3 バケット名**: `favnir-rune-packages`（Terraform で作成）
+- **Lambda Web Adapter**: `AWS_LAMBDA_EXEC_WRAPPER=/opt/bootstrap` が必要（adapter イメージから COPY）

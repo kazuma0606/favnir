@@ -19,6 +19,7 @@ while true; do
   BODY=$(printf '%s' "$EVENT" | jq -r '.body // ""')
   AUTH=$(printf '%s' "$EVENT" \
     | jq -r '(.headers.authorization // .headers.Authorization // "")')
+  QUERY_VERSION=$(printf '%s' "$EVENT" | jq -r '.queryStringParameters.version // ""')
 
   # ── Run Favnir handler ───────────────────────────────────────────────────
   # stdout → Favnir's IO.println JSON output; stderr → CloudWatch Logs
@@ -27,17 +28,28 @@ while true; do
     FAV_PATH="$REQ_PATH" \
     FAV_BODY="$BODY" \
     FAV_AUTH="$AUTH" \
+    FAV_QUERY_VERSION="$QUERY_VERSION" \
     /usr/local/bin/fav run /app/src/main.fav 2>/dev/null
   ) || OUTPUT=''
 
   # ── Convert Favnir map JSON → Lambda Function URL response ───────────────
-  # Favnir outputs: {"status":"200","body":"...","content_type":"..."}
-  # Lambda expects: {"statusCode":200,"headers":{...},"body":"..."}
-  RESP=$(printf '%s' "$OUTPUT" | jq -c \
-    '{statusCode:(.status|tonumber),
-      headers:{"Content-Type":.content_type},
-      body:.body}' 2>/dev/null) \
-    || RESP='{"statusCode":500,"headers":{"Content-Type":"text/plain"},"body":"internal error"}'
+  # Favnir outputs: {"status":"200","body":"...","content_type":"...","is_base64":"true"|"false"}
+  # Lambda expects: {"statusCode":200,"headers":{...},"body":"...","isBase64Encoded":true}
+  IS_B64=$(printf '%s' "$OUTPUT" | jq -r '.is_base64 // "false"' 2>/dev/null)
+  if [ "$IS_B64" = "true" ]; then
+    RESP=$(printf '%s' "$OUTPUT" | jq -c \
+      '{statusCode:(.status|tonumber),
+        headers:{"Content-Type":.content_type},
+        body:.body,
+        isBase64Encoded:true}' 2>/dev/null) \
+      || RESP='{"statusCode":500,"headers":{"Content-Type":"text/plain"},"body":"internal error"}'
+  else
+    RESP=$(printf '%s' "$OUTPUT" | jq -c \
+      '{statusCode:(.status|tonumber),
+        headers:{"Content-Type":.content_type},
+        body:.body}' 2>/dev/null) \
+      || RESP='{"statusCode":500,"headers":{"Content-Type":"text/plain"},"body":"internal error"}'
+  fi
 
   # ── Post response ────────────────────────────────────────────────────────
   curl -sS -X POST \

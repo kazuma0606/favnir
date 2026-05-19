@@ -1,0 +1,8 @@
+[rune]
+name        = "incremental"
+version     = "0.1.0"
+description = "Incremental pipeline processing: checkpoint state and resumable execution"
+entry       = "incremental.fav"
+effects     = ["!Io"]
+
+[dependencies]

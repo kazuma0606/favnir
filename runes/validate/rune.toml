@@ -1,0 +1,8 @@
+[rune]
+name        = "validate"
+version     = "0.1.0"
+description = "Input validation: type-safe field validators and error reporting"
+entry       = "validate.fav"
+effects     = []
+
+[dependencies]

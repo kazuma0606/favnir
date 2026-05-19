@@ -1,0 +1,8 @@
+[rune]
+name        = "grpc"
+version     = "0.1.0"
+description = "gRPC: server, client, and codec (protobuf encode/decode)"
+entry       = "grpc.fav"
+effects     = ["!Http"]
+
+[dependencies]

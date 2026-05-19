@@ -1,0 +1,8 @@
+[rune]
+name        = "db"
+version     = "0.1.0"
+description = "SQL database: connection management, query/execute, transactions, migrations"
+entry       = "db.fav"
+effects     = ["!Db"]
+
+[dependencies]

@@ -1,0 +1,8 @@
+[rune]
+name        = "csv"
+version     = "0.1.0"
+description = "CSV parse and write with type-safe schema adaptation"
+entry       = "csv.fav"
+effects     = []
+
+[dependencies]

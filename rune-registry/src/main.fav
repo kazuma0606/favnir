@@ -31,14 +31,23 @@ fn get_rune_db(name: String) -> Result<Option<Map<String, String>>, String> !AWS
   AWS.dynamo_get_item_raw(db_table(), Map.set((), "name", name))
 }
 
-fn save_rune(name: String, version: String, description: String, body: String) -> Result<Unit, String> !AWS {
-  bind put_res <- AWS.dynamo_put_item_raw(
-    db_table(),
-    Map.set(Map.set(Map.set((), "name", name), "version", version), "description", description)
-  );
-  match put_res {
+fn save_rune(name: String, version: String, description: String, zip_b64: String) -> Result<Unit, String> !AWS {
+  bind decoded <- String.base64_decode(zip_b64);
+  match decoded {
     Err(e) => Result.err(e)
-    Ok(_)  => AWS.s3_put_object_raw(pkg_bucket(), name, body)
+    Ok(bytes) => {
+      bind put_db <- AWS.dynamo_put_item_raw(
+        db_table(),
+        Map.set(Map.set(Map.set((), "name", name), "version", version), "description", description)
+      );
+      match put_db {
+        Err(e) => Result.err(e)
+        Ok(_)  => {
+          bind s3_key <- String.concat(String.concat(name, "/"), String.concat(version, ".zip"));
+          AWS.s3_put_bytes_raw(pkg_bucket(), s3_key, bytes)
+        }
+      }
+    }
   }
 }
 
@@ -71,12 +80,18 @@ fn handle_publish(name: String, body: String, auth: String) -> Map<String, Strin
       Ok(fields) => {
         bind version_opt     <- Map.get(fields, "version");
         bind description_opt <- Map.get(fields, "description");
+        bind zip_opt         <- Map.get(fields, "zip");
         bind version     <- match version_opt     { None => "0.1.0"  Some(v) => v };
         bind description <- match description_opt { None => ""       Some(d) => d };
-        bind saved <- save_rune(name, version, description, body);
-        match saved {
-          Err(e) => resp_text(500, e)
-          Ok(_)  => resp_text(201, "published")
+        match zip_opt {
+          None          => resp_text(400, "missing zip field")
+          Some(zip_b64) => {
+            bind saved <- save_rune(name, version, description, zip_b64);
+            match saved {
+              Err(e) => resp_text(500, e)
+              Ok(_)  => resp_text(201, "published")
+            }
+          }
         }
       }
     }
@@ -85,23 +100,84 @@ fn handle_publish(name: String, body: String, auth: String) -> Map<String, Strin
   }
 }
 
+fn handle_versions(name: String) -> Map<String, String> !AWS {
+  bind prefix <- String.concat(name, "/");
+  bind list_res <- AWS.s3_list_objects_raw(pkg_bucket(), prefix);
+  match list_res {
+    Err(e)   => resp_text(500, e)
+    Ok(keys) => {
+      bind prefix_len <- String.length(prefix);
+      bind suffix_len <- String.length(".zip");
+      bind versions <- List.map(keys, |k| {
+        bind total <- String.length(k);
+        String.slice(k, prefix_len, total - suffix_len)
+      });
+      bind items <- List.map(versions, |v| Map.set((), "version", v));
+      resp_json(Json.write_array_raw(items))
+    }
+  }
+}
+
+fn handle_download(name: String, version: String) -> Map<String, String> !AWS {
+  bind s3_key <- String.concat(String.concat(name, "/"), String.concat(version, ".zip"));
+  bind get_res <- AWS.s3_get_object_base64_raw(pkg_bucket(), s3_key);
+  match get_res {
+    Err(_)  => resp_text(404, "version not found")
+    Ok(b64) =>
+      Map.set(Map.set(Map.set(Map.set((), "status", 200), "body", b64), "content_type", "application/zip"), "is_base64", "true")
+  }
+}
+
 // ── Router ──────────────────────────────────────────────────────────────────
 
 fn route(req: Map<String, String>) -> Map<String, String> !AWS {
-  bind method_opt <- Map.get(req, "method");
-  bind path_opt   <- Map.get(req, "path");
-  bind auth_opt   <- Map.get(req, "authorization");
-  bind body_opt   <- Map.get(req, "body");
-  bind method <- match method_opt { None => "GET"  Some(m) => m };
-  bind path   <- match path_opt   { None => "/"    Some(p) => p };
-  bind auth   <- match auth_opt   { None => ""     Some(a) => a };
-  bind body   <- match body_opt   { None => ""     Some(b) => b };
+  bind method_opt       <- Map.get(req, "method");
+  bind path_opt         <- Map.get(req, "path");
+  bind auth_opt         <- Map.get(req, "authorization");
+  bind body_opt         <- Map.get(req, "body");
+  bind query_ver_opt    <- Map.get(req, "query_version");
+  bind method    <- match method_opt    { None => "GET"  Some(m) => m };
+  bind path      <- match path_opt      { None => "/"    Some(p) => p };
+  bind auth      <- match auth_opt      { None => ""     Some(a) => a };
+  bind body      <- match body_opt      { None => ""     Some(b) => b };
+  bind query_ver <- match query_ver_opt { None => ""     Some(v) => v };
   if method == "GET" {
     if path == "/runes" {
       handle_list()
     } else {
       if String.starts_with(path, "/runes/") {
-        handle_get(String.slice(path, 7, String.length(path)))
+        bind rest <- String.slice(path, 7, String.length(path));
+        match String.index_of(rest, "/") {
+          None => handle_get(rest)
+          Some(slash_pos) => {
+            bind rune_name <- String.slice(rest, 0, slash_pos);
+            bind sub       <- String.slice(rest, slash_pos + 1, String.length(rest));
+            if sub == "versions" {
+              handle_versions(rune_name)
+            } else {
+              if sub == "download" {
+                if query_ver == "" {
+                  bind db_res <- get_rune_db(rune_name);
+                  match db_res {
+                    Err(e)  => resp_text(500, e)
+                    Ok(opt) => match opt {
+                      None       => resp_text(404, "rune not found")
+                      Some(item) => {
+                        bind ver_opt <- Map.get(item, "version");
+                        bind ver <- match ver_opt { None => "0.1.0"  Some(v) => v };
+                        handle_download(rune_name, ver)
+                      }
+                    }
+                  }
+                } else {
+                  handle_download(rune_name, query_ver)
+                }
+              } else {
+                resp_text(404, "not found")
+              }
+            }
+          }
+        }
       } else {
         resp_text(404, "not found")
       }
@@ -109,7 +185,12 @@ fn route(req: Map<String, String>) -> Map<String, String> !AWS {
   } else {
     if method == "POST" {
       if String.starts_with(path, "/runes/") {
-        handle_publish(String.slice(path, 7, String.length(path)), body, auth)
+        bind rest <- String.slice(path, 7, String.length(path));
+        bind rune_name <- match String.index_of(rest, "/") {
+          None            => rest
+          Some(slash_pos) => String.slice(rest, 0, slash_pos)
+        };
+        handle_publish(rune_name, body, auth)
       } else {
         resp_text(404, "not found")
       }
@@ -124,14 +205,22 @@ fn route(req: Map<String, String>) -> Map<String, String> !AWS {
 // prints the response map as JSON to stdout (bootstrap transforms to Lambda format).
 
 public fn main() -> Unit !Io !Env !AWS {
-  bind method_r <- Env.require_raw("FAV_METHOD");
-  bind path_r   <- Env.require_raw("FAV_PATH");
-  bind body_r   <- Env.require_raw("FAV_BODY");
-  bind auth_r   <- Env.require_raw("FAV_AUTH");
-  bind method <- match method_r { Err(_) => "GET"  Ok(m) => m };
-  bind path   <- match path_r   { Err(_) => "/"    Ok(p) => p };
-  bind body   <- match body_r   { Err(_) => ""     Ok(b) => b };
-  bind auth   <- match auth_r   { Err(_) => ""     Ok(a) => a };
-  bind res <- route(Map.set(Map.set(Map.set(Map.set((), "method", method), "path", path), "body", body), "authorization", auth));
+  bind method_r    <- Env.require_raw("FAV_METHOD");
+  bind path_r      <- Env.require_raw("FAV_PATH");
+  bind body_r      <- Env.require_raw("FAV_BODY");
+  bind auth_r      <- Env.require_raw("FAV_AUTH");
+  bind query_ver_r <- Env.require_raw("FAV_QUERY_VERSION");
+  bind method    <- match method_r    { Err(_) => "GET"  Ok(m) => m };
+  bind path      <- match path_r      { Err(_) => "/"    Ok(p) => p };
+  bind body      <- match body_r      { Err(_) => ""     Ok(b) => b };
+  bind auth      <- match auth_r      { Err(_) => ""     Ok(a) => a };
+  bind query_ver <- match query_ver_r { Err(_) => ""     Ok(v) => v };
+  bind res <- route(
+    Map.set(
+      Map.set(Map.set(Map.set(Map.set((), "method", method), "path", path), "body", body),
+        "authorization", auth),
+      "query_version", query_ver
+    )
+  );
   IO.println(Json.write_raw(res))
 }

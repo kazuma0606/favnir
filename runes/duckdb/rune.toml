@@ -1,0 +1,8 @@
+[rune]
+name        = "duckdb"
+version     = "0.1.0"
+description = "DuckDB: in-process OLAP queries, Parquet/CSV I/O"
+entry       = "duckdb.fav"
+effects     = ["!DuckDb", "!Io"]
+
+[dependencies]

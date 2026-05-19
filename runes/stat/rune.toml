@@ -1,0 +1,8 @@
+[rune]
+name        = "stat"
+version     = "0.1.0"
+description = "Statistics and random sampling: mean, variance, percentiles, distributions"
+entry       = "stat.fav"
+effects     = []
+
+[dependencies]

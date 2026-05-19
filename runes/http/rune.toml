@@ -1,0 +1,8 @@
+[rune]
+name        = "http"
+version     = "0.1.0"
+description = "HTTP client and server: request helpers, response builders, retry, auth"
+entry       = "http.fav"
+effects     = ["!Http"]
+
+[dependencies]

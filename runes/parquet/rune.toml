@@ -1,0 +1,8 @@
+[rune]
+name        = "parquet"
+version     = "0.1.0"
+description = "Parquet file I/O: read and write columnar data with schema support"
+entry       = "parquet.fav"
+effects     = ["!Io"]
+
+[dependencies]

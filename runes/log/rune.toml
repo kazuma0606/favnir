@@ -1,0 +1,8 @@
+[rune]
+name        = "log"
+version     = "0.1.0"
+description = "Structured logging: info, warn, error, success with context and metrics"
+entry       = "log.fav"
+effects     = ["!Io"]
+
+[dependencies]

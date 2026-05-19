@@ -4642,6 +4642,10 @@ impl Checker {
 
             // String
             ("String", "trim") | ("String", "lower") | ("String", "upper") | ("String", "base64_encode") => Some(Type::String),
+            ("String", "base64_decode") => Some(Type::Result(
+                Box::new(Type::List(Box::new(Type::Int))),
+                Box::new(Type::String),
+            )),
             ("String", "split") => Some(Type::List(Box::new(Type::String))),
             ("String", "index_of") => Some(Type::Option(Box::new(Type::Int))),
             ("String", "pad_left") | ("String", "pad_right") | ("String", "reverse") => {
@@ -5185,7 +5189,15 @@ impl Checker {
                 self.require_aws_effect(span);
                 Some(Type::Result(Box::new(Type::String), Box::new(Type::String)))
             }
+            ("AWS", "s3_get_object_base64_raw") => {
+                self.require_aws_effect(span);
+                Some(Type::Result(Box::new(Type::String), Box::new(Type::String)))
+            }
             ("AWS", "s3_put_object_raw") => {
+                self.require_aws_effect(span);
+                Some(Type::Result(Box::new(Type::Unit), Box::new(Type::String)))
+            }
+            ("AWS", "s3_put_bytes_raw") => {
                 self.require_aws_effect(span);
                 Some(Type::Result(Box::new(Type::Unit), Box::new(Type::String)))
             }

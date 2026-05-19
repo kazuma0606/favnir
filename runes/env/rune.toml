@@ -1,0 +1,8 @@
+[rune]
+name        = "env"
+version     = "0.1.0"
+description = "Environment variable access: get, require, typed helpers, dotenv loading"
+entry       = "env.fav"
+effects     = ["!Env"]
+
+[dependencies]

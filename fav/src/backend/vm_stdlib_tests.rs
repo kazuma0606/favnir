@@ -3317,6 +3317,55 @@ fn test_string_chars_unicode() {
     );
 }
 
+// ── Phase B: String.base64_decode (v5.2.0) ───────────────────────────────────
+
+#[test]
+fn test_string_base64_decode() {
+    // "hello" in base64 = "aGVsbG8=" → 5 bytes
+    assert_eq!(
+        eval(r#"
+public fn main() -> Int {
+    bind res <- String.base64_decode("aGVsbG8=");
+    match res {
+        Err(_) => -1
+        Ok(bytes) => List.length(bytes)
+    }
+}"#),
+        Value::Int(5)
+    );
+}
+
+#[test]
+fn test_string_base64_decode_invalid() {
+    assert_eq!(
+        eval(r#"
+public fn main() -> Int {
+    bind res <- String.base64_decode("not!!valid%%");
+    match res {
+        Err(_) => 0
+        Ok(_)  => 1
+    }
+}"#),
+        Value::Int(0)
+    );
+}
+
+#[test]
+fn test_string_base64_roundtrip() {
+    // encode "favnir" then decode and check length == 6
+    assert_eq!(
+        eval(r#"
+public fn main() -> Int {
+    bind decoded <- String.base64_decode(String.base64_encode("favnir"));
+    match decoded {
+        Err(_)  => -1
+        Ok(bs)  => List.length(bs)
+    }
+}"#),
+        Value::Int(6)
+    );
+}
+
 // ── Phase A: recursive sum type (v5.1.0) ─────────────────────────────────────
 
 #[test]

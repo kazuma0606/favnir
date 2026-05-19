@@ -301,6 +301,40 @@ fn aws_put(config: &AwsConfig, service: &str, url: &str, body: &str) -> Result<(
         .map_err(|e| e.to_string())
 }
 
+fn aws_get_bytes(config: &AwsConfig, service: &str, url: &str) -> Result<Vec<u8>, String> {
+    use std::io::Read;
+    let h = sigv4_sign(config, service, "GET", url, b"");
+    let mut req = ureq::get(url)
+        .set("Authorization", &h.authorization)
+        .set("x-amz-date", &h.x_amz_date)
+        .set("x-amz-content-sha256", &h.x_amz_content_sha256);
+    if let Some(token) = &h.x_amz_security_token {
+        req = req.set("x-amz-security-token", token);
+    }
+    req.call()
+        .map_err(|e| e.to_string())
+        .and_then(|r| {
+            let mut buf = Vec::new();
+            r.into_reader().read_to_end(&mut buf).map_err(|e| e.to_string())?;
+            Ok(buf)
+        })
+}
+
+fn aws_put_bytes(config: &AwsConfig, service: &str, url: &str, body: &[u8]) -> Result<(), String> {
+    let h = sigv4_sign(config, service, "PUT", url, body);
+    let mut req = ureq::put(url)
+        .set("Authorization", &h.authorization)
+        .set("x-amz-date", &h.x_amz_date)
+        .set("x-amz-content-sha256", &h.x_amz_content_sha256)
+        .set("Content-Type", "application/octet-stream");
+    if let Some(token) = &h.x_amz_security_token {
+        req = req.set("x-amz-security-token", token);
+    }
+    req.send_bytes(body)
+        .map(|_| ())
+        .map_err(|e| e.to_string())
+}
+
 fn aws_delete(config: &AwsConfig, service: &str, url: &str) -> Result<(), String> {
     let h = sigv4_sign(config, service, "DELETE", url, b"");
     let mut req = ureq::delete(url)
@@ -7443,6 +7477,22 @@ fn vm_call_builtin(
             use base64::Engine;
             Ok(VMValue::Str(base64::engine::general_purpose::STANDARD.encode(s.as_bytes())))
         }
+        "String.base64_decode" => {
+            if args.len() != 1 {
+                return Err("String.base64_decode requires 1 argument".to_string());
+            }
+            let s = vm_string(args.into_iter().next().unwrap(), "String.base64_decode")?;
+            use base64::Engine;
+            match base64::engine::general_purpose::STANDARD.decode(s.as_bytes()) {
+                Ok(bytes) => {
+                    let list: Vec<VMValue> = bytes.into_iter()
+                        .map(|b| VMValue::Int(b as i64))
+                        .collect();
+                    Ok(ok_vm(VMValue::List(list)))
+                }
+                Err(e) => Ok(err_vm(VMValue::Str(e.to_string()))),
+            }
+        }
         "Grpc.encode_raw" => {
             if args.len() != 2 {
                 return Err("Grpc.encode_raw requires 2 arguments".to_string());
@@ -9644,6 +9694,49 @@ fn vm_call_builtin(
             };
             let url = format!("{}/{}", base, key);
             Ok(match aws_put(&config, "s3", &url, &body) {
+                Ok(())  => ok_vm(VMValue::Unit),
+                Err(e)  => err_vm(VMValue::Str(e)),
+            })
+        }
+
+        "AWS.s3_get_object_base64_raw" => {
+            let mut it = args.into_iter();
+            let bucket = vm_string(it.next().ok_or("s3_get_object_base64_raw: missing bucket")?, "AWS.s3_get_object_base64_raw")?;
+            let key    = vm_string(it.next().ok_or("s3_get_object_base64_raw: missing key")?,    "AWS.s3_get_object_base64_raw")?;
+            let config = get_aws_config();
+            let base = if let Some(ep) = &config.endpoint_url {
+                format!("{}/{}", ep.trim_end_matches('/'), bucket)
+            } else {
+                format!("https://{}.s3.{}.amazonaws.com", bucket, config.region)
+            };
+            let url = format!("{}/{}", base, key);
+            use base64::Engine;
+            Ok(match aws_get_bytes(&config, "s3", &url) {
+                Ok(bytes) => ok_vm(VMValue::Str(base64::engine::general_purpose::STANDARD.encode(&bytes))),
+                Err(e)    => err_vm(VMValue::Str(e)),
+            })
+        }
+
+        "AWS.s3_put_bytes_raw" => {
+            let mut it = args.into_iter();
+            let bucket    = vm_string(it.next().ok_or("s3_put_bytes_raw: missing bucket")?, "AWS.s3_put_bytes_raw")?;
+            let key       = vm_string(it.next().ok_or("s3_put_bytes_raw: missing key")?,    "AWS.s3_put_bytes_raw")?;
+            let bytes_val = it.next().ok_or("s3_put_bytes_raw: missing bytes")?;
+            let bytes: Vec<u8> = match &bytes_val {
+                VMValue::List(lst) => lst.iter().map(|v| match v {
+                    VMValue::Int(n) => (n & 0xFF) as u8,
+                    _ => 0u8,
+                }).collect(),
+                _ => return Err(format!("s3_put_bytes_raw: bytes must be List<Int>, got {}", vmvalue_type_name(&bytes_val))),
+            };
+            let config = get_aws_config();
+            let base = if let Some(ep) = &config.endpoint_url {
+                format!("{}/{}", ep.trim_end_matches('/'), bucket)
+            } else {
+                format!("https://{}.s3.{}.amazonaws.com", bucket, config.region)
+            };
+            let url = format!("{}/{}", base, key);
+            Ok(match aws_put_bytes(&config, "s3", &url, &bytes) {
                 Ok(())  => ok_vm(VMValue::Unit),
                 Err(e)  => err_vm(VMValue::Str(e)),
             })

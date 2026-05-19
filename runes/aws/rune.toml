@@ -1,0 +1,8 @@
+[rune]
+name        = "aws"
+version     = "0.1.0"
+description = "AWS SDK: S3, SQS, DynamoDB operations with SigV4 signing"
+entry       = "aws.fav"
+effects     = ["!AWS"]
+
+[dependencies]

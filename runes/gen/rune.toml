@@ -1,0 +1,8 @@
+[rune]
+name        = "gen"
+version     = "0.1.0"
+description = "Value generators: random primitives and type-driven structured data generation"
+entry       = "gen.fav"
+effects     = []
+
+[dependencies]

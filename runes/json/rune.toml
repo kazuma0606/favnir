@@ -1,0 +1,8 @@
+[rune]
+name        = "json"
+version     = "0.1.0"
+description = "JSON parse and write with type-safe schema adaptation"
+entry       = "json.fav"
+effects     = []
+
+[dependencies]

@@ -1,0 +1,8 @@
+[rune]
+name        = "auth"
+version     = "0.1.0"
+description = "Authentication helpers: API key validation, Basic auth, JWT, bcrypt"
+entry       = "auth.fav"
+effects     = ["!Crypto"]
+
+[dependencies]

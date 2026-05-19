@@ -862,11 +862,15 @@ impl Parser {
         let (name, _) = self.expect_ident()?;
 
         if self.peek() == &TokenKind::LParen {
-            // Tuple variant: ok(User)
+            // Tuple variant: ok(User) or Add(Expr, Expr)
             self.advance();
-            let ty = self.parse_type_expr()?;
+            let mut tys = vec![self.parse_type_expr()?];
+            while self.peek() == &TokenKind::Comma {
+                self.advance();
+                tys.push(self.parse_type_expr()?);
+            }
             self.expect(&TokenKind::RParen)?;
-            Ok(Variant::Tuple(name, ty, self.span_from(&start)))
+            Ok(Variant::Tuple(name, tys, self.span_from(&start)))
         } else if self.peek() == &TokenKind::LBrace {
             // Record variant: Authenticated { user: User }
             let fields = self.parse_record_fields()?;
@@ -1588,15 +1592,42 @@ impl Parser {
                 let name = name;
                 self.advance();
                 if self.peek() == &TokenKind::LParen {
-                    // tuple variant with payload: ok(pat)
+                    // tuple variant with payload: ok(pat) or Add(a, b)
                     self.advance();
-                    let inner = self.parse_pattern()?;
-                    self.expect(&TokenKind::RParen)?;
-                    Ok(Pattern::Variant(
-                        name,
-                        Some(Box::new(inner)),
-                        self.span_from(&start),
-                    ))
+                    let first = self.parse_pattern()?;
+                    if self.peek() == &TokenKind::Comma {
+                        // multi-arg: synthesize Record pattern with positional fields _0, _1, ...
+                        let mut pats = vec![first];
+                        while self.peek() == &TokenKind::Comma {
+                            self.advance();
+                            pats.push(self.parse_pattern()?);
+                        }
+                        self.expect(&TokenKind::RParen)?;
+                        let fields = pats
+                            .into_iter()
+                            .enumerate()
+                            .map(|(i, p)| {
+                                PatternField::Alias(
+                                    format!("_{}", i),
+                                    Box::new(p),
+                                    self.span_from(&start),
+                                )
+                            })
+                            .collect();
+                        let inner = Pattern::Record(fields, self.span_from(&start));
+                        Ok(Pattern::Variant(
+                            name,
+                            Some(Box::new(inner)),
+                            self.span_from(&start),
+                        ))
+                    } else {
+                        self.expect(&TokenKind::RParen)?;
+                        Ok(Pattern::Variant(
+                            name,
+                            Some(Box::new(first)),
+                            self.span_from(&start),
+                        ))
+                    }
                 } else if self.peek() == &TokenKind::LBrace {
                     // record variant: Authenticated { user } or Authenticated { user: pat }
                     // Represented as Variant(name, Some(Record(fields)))

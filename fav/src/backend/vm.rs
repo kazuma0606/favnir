@@ -1810,8 +1810,13 @@ impl VM {
                     0 => None,
                     1 => Some(Box::new(args.into_iter().next().expect("single payload"))),
                     _ => {
-                        return Err(self
-                            .error(artifact, "variant constructor call expects 0 or 1 argument"));
+                        // Multi-arg tuple variant: wrap args into a positional record
+                        let map: std::collections::HashMap<String, VMValue> = args
+                            .into_iter()
+                            .enumerate()
+                            .map(|(i, v)| (format!("_{}", i), v))
+                            .collect();
+                        Some(Box::new(VMValue::Record(map)))
                     }
                 };
                 Ok(VMValue::Variant(name, payload))
@@ -5062,6 +5067,65 @@ fn vm_call_builtin(
             }
             Ok(VMValue::Str(current_timestamp_string()))
         }
+
+        // ── File I/O primitives (v5.1.0) ─────────────────────────────────────
+        "IO.read_file_raw" => {
+            let v = args.into_iter().next().ok_or_else(|| "IO.read_file_raw requires 1 argument".to_string())?;
+            let path = match v {
+                VMValue::Str(s) => s,
+                _ => return Err("IO.read_file_raw requires a String path".to_string()),
+            };
+            match std::fs::read_to_string(&path) {
+                Ok(content) => Ok(ok_vm(VMValue::Str(content))),
+                Err(e) => Ok(err_vm(VMValue::Str(e.to_string()))),
+            }
+        }
+        "IO.write_file_raw" => {
+            let mut it = args.into_iter();
+            let path = match it.next().ok_or_else(|| "IO.write_file_raw requires 2 arguments".to_string())? {
+                VMValue::Str(s) => s,
+                _ => return Err("IO.write_file_raw: path must be a String".to_string()),
+            };
+            let content = match it.next().ok_or_else(|| "IO.write_file_raw requires 2 arguments".to_string())? {
+                VMValue::Str(s) => s,
+                _ => return Err("IO.write_file_raw: content must be a String".to_string()),
+            };
+            match std::fs::write(&path, content.as_bytes()) {
+                Ok(()) => Ok(ok_vm(VMValue::Unit)),
+                Err(e) => Ok(err_vm(VMValue::Str(e.to_string()))),
+            }
+        }
+        "IO.write_bytes_raw" => {
+            let mut it = args.into_iter();
+            let path = match it.next().ok_or_else(|| "IO.write_bytes_raw requires 2 arguments".to_string())? {
+                VMValue::Str(s) => s,
+                _ => return Err("IO.write_bytes_raw: path must be a String".to_string()),
+            };
+            let bytes_val = it.next().ok_or_else(|| "IO.write_bytes_raw requires 2 arguments".to_string())?;
+            let bytes: Vec<u8> = match bytes_val {
+                VMValue::List(list) => list
+                    .into_iter()
+                    .map(|v| match v {
+                        VMValue::Int(n) => Ok((n & 0xFF) as u8),
+                        _ => Err("IO.write_bytes_raw: list elements must be Int".to_string()),
+                    })
+                    .collect::<Result<Vec<u8>, String>>()?,
+                _ => return Err("IO.write_bytes_raw: bytes must be a List<Int>".to_string()),
+            };
+            match std::fs::write(&path, &bytes) {
+                Ok(()) => Ok(ok_vm(VMValue::Unit)),
+                Err(e) => Ok(err_vm(VMValue::Str(e.to_string()))),
+            }
+        }
+        "IO.file_exists_raw" => {
+            let v = args.into_iter().next().ok_or_else(|| "IO.file_exists_raw requires 1 argument".to_string())?;
+            let path = match v {
+                VMValue::Str(s) => s,
+                _ => return Err("IO.file_exists_raw requires a String path".to_string()),
+            };
+            Ok(VMValue::Bool(std::path::Path::new(&path).is_file()))
+        }
+
         "Debug.show" => {
             let v = args
                 .into_iter()
@@ -5207,6 +5271,67 @@ fn vm_call_builtin(
                 _ => Err("Int.eq.equals requires two Int arguments".to_string()),
             }
         }
+        // ── Bit operations (v5.1.0) ──────────────────────────────────────────
+        "Int.shl" => {
+            let mut it = args.into_iter();
+            let x = it.next().ok_or_else(|| "Int.shl requires 2 arguments".to_string())?;
+            let n = it.next().ok_or_else(|| "Int.shl requires 2 arguments".to_string())?;
+            match (x, n) {
+                (VMValue::Int(x), VMValue::Int(n)) => Ok(VMValue::Int(x << n)),
+                _ => Err("Int.shl requires two Int arguments".to_string()),
+            }
+        }
+        "Int.shr" => {
+            let mut it = args.into_iter();
+            let x = it.next().ok_or_else(|| "Int.shr requires 2 arguments".to_string())?;
+            let n = it.next().ok_or_else(|| "Int.shr requires 2 arguments".to_string())?;
+            match (x, n) {
+                (VMValue::Int(x), VMValue::Int(n)) => Ok(VMValue::Int(x >> n)),
+                _ => Err("Int.shr requires two Int arguments".to_string()),
+            }
+        }
+        "Int.band" => {
+            let mut it = args.into_iter();
+            let x = it.next().ok_or_else(|| "Int.band requires 2 arguments".to_string())?;
+            let y = it.next().ok_or_else(|| "Int.band requires 2 arguments".to_string())?;
+            match (x, y) {
+                (VMValue::Int(x), VMValue::Int(y)) => Ok(VMValue::Int(x & y)),
+                _ => Err("Int.band requires two Int arguments".to_string()),
+            }
+        }
+        "Int.bor" => {
+            let mut it = args.into_iter();
+            let x = it.next().ok_or_else(|| "Int.bor requires 2 arguments".to_string())?;
+            let y = it.next().ok_or_else(|| "Int.bor requires 2 arguments".to_string())?;
+            match (x, y) {
+                (VMValue::Int(x), VMValue::Int(y)) => Ok(VMValue::Int(x | y)),
+                _ => Err("Int.bor requires two Int arguments".to_string()),
+            }
+        }
+        "Int.bxor" => {
+            let mut it = args.into_iter();
+            let x = it.next().ok_or_else(|| "Int.bxor requires 2 arguments".to_string())?;
+            let y = it.next().ok_or_else(|| "Int.bxor requires 2 arguments".to_string())?;
+            match (x, y) {
+                (VMValue::Int(x), VMValue::Int(y)) => Ok(VMValue::Int(x ^ y)),
+                _ => Err("Int.bxor requires two Int arguments".to_string()),
+            }
+        }
+        "Int.bnot" => {
+            let v = args.into_iter().next().ok_or_else(|| "Int.bnot requires 1 argument".to_string())?;
+            match v {
+                VMValue::Int(x) => Ok(VMValue::Int(!x)),
+                _ => Err("Int.bnot requires an Int argument".to_string()),
+            }
+        }
+        "Int.to_byte" => {
+            let v = args.into_iter().next().ok_or_else(|| "Int.to_byte requires 1 argument".to_string())?;
+            match v {
+                VMValue::Int(x) => Ok(VMValue::Int(x & 0xFF)),
+                _ => Err("Int.to_byte requires an Int argument".to_string()),
+            }
+        }
+
         "String.concat" => {
             let mut it = args.into_iter();
             let a = it
@@ -5631,6 +5756,20 @@ fn vm_call_builtin(
             match v {
                 VMValue::Float(n) => Ok(VMValue::Str(n.to_string())),
                 _ => Err("String.from_float requires a Float argument".to_string()),
+            }
+        }
+        "String.chars" => {
+            let v = args
+                .into_iter()
+                .next()
+                .ok_or_else(|| "String.chars requires 1 argument".to_string())?;
+            match v {
+                VMValue::Str(s) => {
+                    let chars: Vec<VMValue> =
+                        s.chars().map(|c| VMValue::Str(c.to_string())).collect();
+                    Ok(VMValue::List(chars))
+                }
+                _ => Err("String.chars requires a String argument".to_string()),
             }
         }
         "List.length" => {

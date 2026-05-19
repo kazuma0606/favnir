@@ -9202,8 +9202,15 @@ impl ExplainPrinter {
                                         ast::Variant::Unit(name, _) => {
                                             json!({"name": name, "payload": serde_json::Value::Null})
                                         }
-                                        ast::Variant::Tuple(name, ty, _) => {
-                                            json!({"name": name, "payload": format_type_expr(ty)})
+                                        ast::Variant::Tuple(name, tys, _) => {
+                                            let payload = if tys.len() == 1 {
+                                                serde_json::Value::String(format_type_expr(&tys[0]))
+                                            } else {
+                                                serde_json::Value::Array(
+                                                    tys.iter().map(|ty| serde_json::Value::String(format_type_expr(ty))).collect()
+                                                )
+                                            };
+                                            json!({"name": name, "payload": payload})
                                         }
                                         ast::Variant::Record(name, fields, _) => {
                                             json!({

@@ -90,8 +90,8 @@ pub struct Field {
 pub enum Variant {
     /// `Guest`
     Unit(String, Span),
-    /// `ok(User)`
-    Tuple(String, TypeExpr, Span),
+    /// `ok(User)` or `Add(Expr, Expr)`
+    Tuple(String, Vec<TypeExpr>, Span),
     /// `Authenticated { user: User }`
     Record(String, Vec<Field>, Span),
 }

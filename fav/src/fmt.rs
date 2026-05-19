@@ -145,7 +145,10 @@ impl Formatter {
     fn variant(&mut self, v: &Variant) -> String {
         match v {
             Variant::Unit(name, _) => name.clone(),
-            Variant::Tuple(name, ty, _) => format!("{}({})", name, self.type_expr(ty)),
+            Variant::Tuple(name, tys, _) => {
+                let args: Vec<String> = tys.iter().map(|ty| self.type_expr(ty)).collect();
+                format!("{}({})", name, args.join(", "))
+            }
             Variant::Record(name, fields, _) => {
                 let fs: Vec<String> = fields
                     .iter()

@@ -3200,3 +3200,142 @@ fn aws_config_respects_endpoint_url() {
     assert_eq!(cfg.region, "ap-northeast-1");
     set_aws_config(AwsConfig::default());
 }
+
+// ── Phase B: file I/O primitives (v5.1.0) ────────────────────────────────────
+
+#[test]
+fn test_io_read_write_file() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("test.txt").to_str().unwrap().replace('\\', "/");
+    let src = format!(
+        r#"
+public fn main() -> String !Io {{
+    bind _ <- IO.write_file_raw("{path}", "hello favnir");
+    match IO.read_file_raw("{path}") {{
+        ok(s) => s
+        err(e) => e
+    }}
+}}
+"#
+    );
+    assert_eq!(eval(&src), Value::Str("hello favnir".into()));
+}
+
+#[test]
+fn test_io_write_bytes() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("bytes.bin").to_str().unwrap().replace('\\', "/");
+    let src = format!(
+        r#"
+public fn main() -> Bool !Io {{
+    bind bytes <- List.range(65, 68)
+    bind _ <- IO.write_bytes_raw("{path}", bytes);
+    IO.file_exists_raw("{path}")
+}}
+"#
+    );
+    assert_eq!(eval(&src), Value::Bool(true));
+}
+
+#[test]
+fn test_io_file_exists() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("exists.txt").to_str().unwrap().replace('\\', "/");
+    let src_before = format!(r#"public fn main() -> Bool !Io {{ IO.file_exists_raw("{path}") }}"#);
+    assert_eq!(eval(&src_before), Value::Bool(false));
+
+    std::fs::write(&path, b"x").unwrap();
+    let src_after = format!(r#"public fn main() -> Bool !Io {{ IO.file_exists_raw("{path}") }}"#);
+    assert_eq!(eval(&src_after), Value::Bool(true));
+}
+
+// ── Phase C: bit operations (v5.1.0) ─────────────────────────────────────────
+
+#[test]
+fn test_int_shl_shr() {
+    assert_eq!(eval("public fn main() -> Int { Int.shl(1, 4) }"), Value::Int(16));
+    assert_eq!(eval("public fn main() -> Int { Int.shr(16, 2) }"), Value::Int(4));
+    // arithmetic right shift: sign-extending
+    assert_eq!(eval("public fn main() -> Int { Int.shr(-8, 1) }"), Value::Int(-4));
+}
+
+#[test]
+fn test_int_band_bor_bxor() {
+    // 255 & 15 = 15
+    assert_eq!(eval("public fn main() -> Int { Int.band(255, 15) }"), Value::Int(15));
+    // 240 | 15 = 255
+    assert_eq!(eval("public fn main() -> Int { Int.bor(240, 15) }"), Value::Int(255));
+    // 255 ^ 15 = 240
+    assert_eq!(eval("public fn main() -> Int { Int.bxor(255, 15) }"), Value::Int(240));
+}
+
+#[test]
+fn test_int_bnot() {
+    // !0 = -1 (all bits set); band with 255 = 255
+    assert_eq!(eval("public fn main() -> Int { Int.band(Int.bnot(0), 255) }"), Value::Int(255));
+}
+
+#[test]
+fn test_int_to_byte() {
+    // 300 & 255 = 44
+    assert_eq!(eval("public fn main() -> Int { Int.to_byte(300) }"), Value::Int(44));
+    assert_eq!(eval("public fn main() -> Int { Int.to_byte(255) }"), Value::Int(255));
+    assert_eq!(eval("public fn main() -> Int { Int.to_byte(0) }"), Value::Int(0));
+}
+
+// ── Phase E: String.chars (v5.1.0) ───────────────────────────────────────────
+
+#[test]
+fn test_string_chars() {
+    assert_eq!(
+        eval(r#"public fn main() -> Int { List.length(String.chars("hello")) }"#),
+        Value::Int(5)
+    );
+    assert_eq!(
+        eval(r#"public fn main() -> String { Option.unwrap_or(List.first(String.chars("abc")), "") }"#),
+        Value::Str("a".into())
+    );
+}
+
+#[test]
+fn test_string_chars_empty() {
+    assert_eq!(
+        eval(r#"public fn main() -> Int { List.length(String.chars("")) }"#),
+        Value::Int(0)
+    );
+}
+
+#[test]
+fn test_string_chars_unicode() {
+    assert_eq!(
+        eval(r#"public fn main() -> Int { List.length(String.chars("日本語")) }"#),
+        Value::Int(3)
+    );
+    assert_eq!(
+        eval(r#"public fn main() -> String { Option.unwrap_or(List.first(String.chars("日本語")), "") }"#),
+        Value::Str("日".into())
+    );
+}
+
+// ── Phase A: recursive sum type (v5.1.0) ─────────────────────────────────────
+
+#[test]
+fn test_recursive_sum_type_construction_and_match() {
+    let src = r#"
+type Expr =
+    | Lit(Int)
+    | Add(Expr, Expr)
+
+public fn eval(e: Expr) -> Int {
+    match e {
+        Lit(n) => n
+        Add(a, b) => eval(a) + eval(b)
+    }
+}
+
+public fn main() -> Int {
+    eval(Add(Add(Lit(1), Lit(2)), Lit(3)))
+}
+"#;
+    assert_eq!(eval(src), Value::Int(6));
+}

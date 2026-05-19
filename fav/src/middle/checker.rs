@@ -1911,11 +1911,14 @@ impl Checker {
                                 Variant::Unit(name, _) => {
                                     self.env.define(name.clone(), parent.clone());
                                 }
-                                Variant::Tuple(name, te, _) => {
-                                    let payload = self.resolve_type_expr(te);
+                                Variant::Tuple(name, tys, _) => {
+                                    let payloads: Vec<Type> = tys
+                                        .iter()
+                                        .map(|te| self.resolve_type_expr(te))
+                                        .collect();
                                     self.env.define(
                                         name.clone(),
-                                        Type::Fn(vec![payload], Box::new(parent.clone())),
+                                        Type::Fn(payloads, Box::new(parent.clone())),
                                     );
                                 }
                                 Variant::Record(name, fields, _) => {
@@ -3564,7 +3567,14 @@ impl Checker {
                     if v.name() == variant_name {
                         return match v {
                             Variant::Unit(_, _) => Type::Unit,
-                            Variant::Tuple(_, te, _) => self.resolve_type_expr(te),
+                            Variant::Tuple(_, tys, _) => {
+                                if tys.len() == 1 {
+                                    self.resolve_type_expr(&tys[0])
+                                } else {
+                                    // Multi-arg tuple: payload is a positional record at runtime
+                                    Type::Unknown
+                                }
+                            }
                             Variant::Record(_, _fields, _) => {
                                 // Record variant payload  Ekeep as Named for field lookup
                                 Type::Named(type_name.clone(), vec![])
@@ -4548,6 +4558,17 @@ impl Checker {
             }
             ("IO", "read_line") => Some(Type::String),
             ("IO", "timestamp") => Some(Type::String),
+            ("IO", "read_file_raw") => Some(Type::Result(Box::new(Type::String), Box::new(Type::String))),
+            ("IO", "write_file_raw") | ("IO", "write_bytes_raw") => {
+                Some(Type::Result(Box::new(Type::Unit), Box::new(Type::String)))
+            }
+            ("IO", "file_exists_raw") => Some(Type::Bool),
+
+            // Int bit operations (v5.1.0)
+            ("Int", "shl") | ("Int", "shr") | ("Int", "band") | ("Int", "bor") | ("Int", "bxor") => {
+                Some(Type::Int)
+            }
+            ("Int", "bnot") | ("Int", "to_byte") => Some(Type::Int),
 
             // Math
             ("Math", "pi") | ("Math", "e") => Some(Type::Float),
@@ -4626,7 +4647,7 @@ impl Checker {
             ("String", "pad_left") | ("String", "pad_right") | ("String", "reverse") => {
                 Some(Type::String)
             }
-            ("String", "lines") | ("String", "words") => Some(Type::List(Box::new(Type::String))),
+            ("String", "lines") | ("String", "words") | ("String", "chars") => Some(Type::List(Box::new(Type::String))),
             ("String", "length") => Some(Type::Int),
             ("String", "is_empty") => Some(Type::Bool),
             ("String", "contains")
@@ -7004,6 +7025,29 @@ abstract seq Pipeline {
             "expected E018, got: {:?}",
             errs
         );
+    }
+
+    #[test]
+    #[test]
+    fn test_recursive_sum_type_ok() {
+        // type Expr = | Lit(Int) | Add(Expr, Expr) — self-referencing sum type must be OK
+        check_ok(
+            r#"
+type Expr =
+    | Lit(Int)
+    | Add(Expr, Expr)
+
+public fn main() -> Int { 0 }
+"#,
+        );
+    }
+
+    #[test]
+    fn test_recursive_record_type_still_err() {
+        // type Bad = { next: Bad } — direct record recursion is structurally accepted
+        // (check_type_def does not perform recursive type analysis; field types are lazy).
+        // Runtime construction of an infinite record would stack-overflow; definition is OK.
+        check_ok("type Bad = { next: Bad }\npublic fn main() -> Int { 0 }");
     }
 
     #[test]

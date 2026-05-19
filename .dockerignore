@@ -1,0 +1,20 @@
+# Rust build artifacts (largest offender — often 5-10 GB)
+fav/target/
+crates/*/target/
+
+# Node.js artifacts
+site/node_modules/
+site/.next/
+
+# Git history
+.git/
+
+# Version archives, infra, rune packages (not needed in image)
+versions/
+infra/
+runes/
+
+# Local dev files
+*.local
+*.env
+.DS_Store

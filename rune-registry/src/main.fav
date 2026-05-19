@@ -1,0 +1,137 @@
+// Rune Registry — Favnir HTTP service (dogfooding v5.0.0)
+// Endpoints:
+//   GET  /runes          — list all runes
+//   GET  /runes/{name}   — get rune info
+//   POST /runes/{name}   — publish/update rune (requires admin auth)
+
+// ── Response helpers ────────────────────────────────────────────────────────
+
+fn resp(status: Int, body: String, ct: String) -> Map<String, String> {
+  Map.set(Map.set(Map.set((), "status", status), "body", body), "content_type", ct)
+}
+
+fn resp_json(body: String) -> Map<String, String> {
+  resp(200, body, "application/json")
+}
+
+fn resp_text(status: Int, body: String) -> Map<String, String> {
+  resp(status, body, "text/plain")
+}
+
+// ── Storage ─────────────────────────────────────────────────────────────────
+
+fn db_table() -> String { "favnir-rune-registry" }
+fn pkg_bucket() -> String { "favnir-rune-packages" }
+
+fn list_runes() -> Result<List<Map<String, String>>, String> !AWS {
+  AWS.dynamo_scan_raw(db_table())
+}
+
+fn get_rune_db(name: String) -> Result<Option<Map<String, String>>, String> !AWS {
+  AWS.dynamo_get_item_raw(db_table(), Map.set((), "name", name))
+}
+
+fn save_rune(name: String, version: String, description: String, body: String) -> Result<Unit, String> !AWS {
+  bind put_res <- AWS.dynamo_put_item_raw(
+    db_table(),
+    Map.set(Map.set(Map.set((), "name", name), "version", version), "description", description)
+  );
+  match put_res {
+    Err(e) => Result.err(e)
+    Ok(_)  => AWS.s3_put_object_raw(pkg_bucket(), name, body)
+  }
+}
+
+// ── Handlers ────────────────────────────────────────────────────────────────
+
+fn handle_list() -> Map<String, String> !AWS {
+  bind scan <- list_runes();
+  match scan {
+    Err(e)    => resp_text(500, e)
+    Ok(items) => resp_json(Json.write_array_raw(items))
+  }
+}
+
+fn handle_get(name: String) -> Map<String, String> !AWS {
+  bind result <- get_rune_db(name);
+  match result {
+    Err(e)  => resp_text(500, e)
+    Ok(opt) => match opt {
+      None       => resp_text(404, "rune not found")
+      Some(item) => resp_json(Json.write_raw(item))
+    }
+  }
+}
+
+fn handle_publish(name: String, body: String, auth: String) -> Map<String, String> !AWS {
+  if Http.check_basic_auth(auth, "admin", "adminuser") {
+    bind fields_res <- Json.parse_raw(body);
+    match fields_res {
+      Err(_)     => resp_text(400, "invalid JSON body")
+      Ok(fields) => {
+        bind version_opt     <- Map.get(fields, "version");
+        bind description_opt <- Map.get(fields, "description");
+        bind version     <- match version_opt     { None => "0.1.0"  Some(v) => v };
+        bind description <- match description_opt { None => ""       Some(d) => d };
+        bind saved <- save_rune(name, version, description, body);
+        match saved {
+          Err(e) => resp_text(500, e)
+          Ok(_)  => resp_text(201, "published")
+        }
+      }
+    }
+  } else {
+    resp_text(401, "Unauthorized")
+  }
+}
+
+// ── Router ──────────────────────────────────────────────────────────────────
+
+fn route(req: Map<String, String>) -> Map<String, String> !AWS {
+  bind method_opt <- Map.get(req, "method");
+  bind path_opt   <- Map.get(req, "path");
+  bind auth_opt   <- Map.get(req, "authorization");
+  bind body_opt   <- Map.get(req, "body");
+  bind method <- match method_opt { None => "GET"  Some(m) => m };
+  bind path   <- match path_opt   { None => "/"    Some(p) => p };
+  bind auth   <- match auth_opt   { None => ""     Some(a) => a };
+  bind body   <- match body_opt   { None => ""     Some(b) => b };
+  if method == "GET" {
+    if path == "/runes" {
+      handle_list()
+    } else {
+      if String.starts_with(path, "/runes/") {
+        handle_get(String.slice(path, 7, String.length(path)))
+      } else {
+        resp_text(404, "not found")
+      }
+    }
+  } else {
+    if method == "POST" {
+      if String.starts_with(path, "/runes/") {
+        handle_publish(String.slice(path, 7, String.length(path)), body, auth)
+      } else {
+        resp_text(404, "not found")
+      }
+    } else {
+      resp_text(405, "method not allowed")
+    }
+  }
+}
+
+// ── Main — Lambda custom runtime ────────────────────────────────────────────
+// Reads request fields from env vars set by bootstrap, calls route(),
+// prints the response map as JSON to stdout (bootstrap transforms to Lambda format).
+
+public fn main() -> Unit !Io !Env !AWS {
+  bind method_r <- Env.require_raw("FAV_METHOD");
+  bind path_r   <- Env.require_raw("FAV_PATH");
+  bind body_r   <- Env.require_raw("FAV_BODY");
+  bind auth_r   <- Env.require_raw("FAV_AUTH");
+  bind method <- match method_r { Err(_) => "GET"  Ok(m) => m };
+  bind path   <- match path_r   { Err(_) => "/"    Ok(p) => p };
+  bind body   <- match body_r   { Err(_) => ""     Ok(b) => b };
+  bind auth   <- match auth_r   { Err(_) => ""     Ok(a) => a };
+  bind res <- route(Map.set(Map.set(Map.set(Map.set((), "method", method), "path", path), "body", body), "authorization", auth));
+  IO.println(Json.write_raw(res))
+}

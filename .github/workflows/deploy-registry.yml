@@ -1,0 +1,72 @@
+name: Deploy Registry
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'rune-registry/**'
+      - 'fav/**'
+      - 'infra/registry/**'
+      - '.github/workflows/deploy-registry.yml'
+
+concurrency:
+  group: deploy-registry
+  cancel-in-progress: false
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: ap-northeast-1
+
+jobs:
+  deploy-registry:
+    name: Build & deploy rune-registry Lambda
+    runs-on: ubuntu-latest
+    environment: production
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to ECR
+        id: ecr-login
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Get ECR repository URL
+        id: ecr-repo
+        run: |
+          REPO_URL=$(aws ecr describe-repositories \
+            --repository-names favnir-registry \
+            --query 'repositories[0].repositoryUri' \
+            --output text)
+          echo "url=${REPO_URL}" >> $GITHUB_OUTPUT
+
+      - name: Build and push container image
+        env:
+          IMAGE_URI: ${{ steps.ecr-repo.outputs.url }}:${{ github.sha }}
+          IMAGE_LATEST: ${{ steps.ecr-repo.outputs.url }}:latest
+        run: |
+          docker build \
+            --file rune-registry/Dockerfile \
+            --tag "${IMAGE_URI}" \
+            --tag "${IMAGE_LATEST}" \
+            .
+          docker push "${IMAGE_URI}"
+          docker push "${IMAGE_LATEST}"
+          echo "IMAGE_URI=${IMAGE_URI}" >> $GITHUB_ENV
+
+      - name: Update Lambda function image
+        run: |
+          aws lambda update-function-code \
+            --function-name favnir-registry \
+            --image-uri "${IMAGE_URI}"
+          aws lambda wait function-updated \
+            --function-name favnir-registry
+          echo "Lambda updated to ${IMAGE_URI}"

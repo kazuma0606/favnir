@@ -1,0 +1,6 @@
+name = "rune-registry"
+version = "0.1.0"
+description = "Favnir Rune Registry HTTP service"
+
+[server]
+port = 8080

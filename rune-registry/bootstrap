@@ -1,0 +1,47 @@
+#!/bin/bash
+# Lambda Custom Runtime bootstrap for Favnir rune-registry
+# Polls the Lambda Runtime API, runs `fav run` per invocation, posts the response.
+set -euo pipefail
+
+BASE="http://${AWS_LAMBDA_RUNTIME_API}/2018-06-01/runtime"
+
+while true; do
+  # ── Get next invocation ──────────────────────────────────────────────────
+  HDR=$(mktemp)
+  EVENT=$(curl -sS -D "$HDR" "${BASE}/invocation/next")
+  REQUEST_ID=$(grep -i '^lambda-runtime-aws-request-id:' "$HDR" \
+    | tr -d '\r' | sed 's/[^:]*: //')
+  rm -f "$HDR"
+
+  # ── Extract request fields from Lambda Function URL event ────────────────
+  METHOD=$(printf '%s' "$EVENT" | jq -r '.requestContext.http.method // "GET"')
+  REQ_PATH=$(printf '%s' "$EVENT" | jq -r '.requestContext.http.path // "/"')
+  BODY=$(printf '%s' "$EVENT" | jq -r '.body // ""')
+  AUTH=$(printf '%s' "$EVENT" \
+    | jq -r '(.headers.authorization // .headers.Authorization // "")')
+
+  # ── Run Favnir handler ───────────────────────────────────────────────────
+  # stdout → Favnir's IO.println JSON output; stderr → CloudWatch Logs
+  OUTPUT=$(
+    FAV_METHOD="$METHOD" \
+    FAV_PATH="$REQ_PATH" \
+    FAV_BODY="$BODY" \
+    FAV_AUTH="$AUTH" \
+    /usr/local/bin/fav run /app/src/main.fav 2>/dev/null
+  ) || OUTPUT=''
+
+  # ── Convert Favnir map JSON → Lambda Function URL response ───────────────
+  # Favnir outputs: {"status":"200","body":"...","content_type":"..."}
+  # Lambda expects: {"statusCode":200,"headers":{...},"body":"..."}
+  RESP=$(printf '%s' "$OUTPUT" | jq -c \
+    '{statusCode:(.status|tonumber),
+      headers:{"Content-Type":.content_type},
+      body:.body}' 2>/dev/null) \
+    || RESP='{"statusCode":500,"headers":{"Content-Type":"text/plain"},"body":"internal error"}'
+
+  # ── Post response ────────────────────────────────────────────────────────
+  curl -sS -X POST \
+    -H 'Content-Type: application/json' \
+    -d "$RESP" \
+    "${BASE}/invocation/${REQUEST_ID}/response" > /dev/null
+done

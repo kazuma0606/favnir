@@ -226,11 +226,23 @@ fn sigv4_sign(config: &AwsConfig, service: &str, method: &str, url: &str, body: 
     } else {
         (path, String::new())
     };
-    let canonical_headers = format!(
-        "host:{}\nx-amz-content-sha256:{}\nx-amz-date:{}\n",
-        host, body_hash, amz_date
-    );
-    let signed_headers = "host;x-amz-content-sha256;x-amz-date";
+    let (canonical_headers, signed_headers) = if let Some(token) = &config.session_token {
+        (
+            format!(
+                "host:{}\nx-amz-content-sha256:{}\nx-amz-date:{}\nx-amz-security-token:{}\n",
+                host, body_hash, amz_date, token
+            ),
+            "host;x-amz-content-sha256;x-amz-date;x-amz-security-token".to_string(),
+        )
+    } else {
+        (
+            format!(
+                "host:{}\nx-amz-content-sha256:{}\nx-amz-date:{}\n",
+                host, body_hash, amz_date
+            ),
+            "host;x-amz-content-sha256;x-amz-date".to_string(),
+        )
+    };
     let canonical_request = format!(
         "{}\n{}\n{}\n{}\n{}\n{}",
         method, path_only, query, canonical_headers, signed_headers, body_hash
@@ -2717,6 +2729,16 @@ impl VM {
                 let method = request.method().as_str().to_string();
                 let path = request.url().to_string();
                 let mut body = String::new();
+                let headers_map: HashMap<String, VMValue> = request
+                    .headers()
+                    .iter()
+                    .map(|h| {
+                        (
+                            h.field.as_str().to_string().to_lowercase(),
+                            VMValue::Str(h.value.as_str().to_string()),
+                        )
+                    })
+                    .collect();
                 let mut reader = request.as_reader();
                 std::io::Read::read_to_string(&mut reader, &mut body).map_err(|e| {
                     self.error(artifact, &format!("Http.serve_raw body read failed: {}", e))
@@ -2727,7 +2749,8 @@ impl VM {
                         let route_method = map.get("method").map(vm_scalar_to_plain_string);
                         let route_path = map.get("path").map(vm_scalar_to_plain_string);
                         route_method.as_deref().unwrap_or("") == method
-                            && route_path.as_deref().unwrap_or("") == path
+                            && (route_path.as_deref().unwrap_or("") == path
+                                || route_path.as_deref().unwrap_or("") == "*")
                     }
                     _ => false,
                 });
@@ -2743,10 +2766,15 @@ impl VM {
                     let args = match function.param_count {
                         0 => vec![],
                         1 => {
+                            let authorization = headers_map
+                                .get("authorization")
+                                .and_then(|v| if let VMValue::Str(s) = v { Some(s.clone()) } else { None })
+                                .unwrap_or_default();
                             let mut req = HashMap::new();
                             req.insert("method".to_string(), VMValue::Str(method.clone()));
                             req.insert("path".to_string(), VMValue::Str(path.clone()));
                             req.insert("body".to_string(), VMValue::Str(body.clone()));
+                            req.insert("authorization".to_string(), VMValue::Str(authorization));
                             vec![VMValue::Record(req)]
                         }
                         3 => vec![
@@ -7159,6 +7187,32 @@ fn vm_call_builtin(
                     Ok(err_vm(http_error_vm(code, msg, 0)))
                 }
             }
+        }
+        "Http.check_basic_auth" => {
+            if args.len() != 3 {
+                return Err("Http.check_basic_auth requires 3 arguments".to_string());
+            }
+            let mut it = args.into_iter();
+            let auth_header = vm_string(it.next().unwrap(), "Http.check_basic_auth auth_header")?;
+            let expected_user = vm_string(it.next().unwrap(), "Http.check_basic_auth username")?;
+            let expected_pass = vm_string(it.next().unwrap(), "Http.check_basic_auth password")?;
+            let ok = if let Some(encoded) = auth_header.strip_prefix("Basic ") {
+                use base64::Engine as _;
+                match base64::engine::general_purpose::STANDARD.decode(encoded.trim()) {
+                    Ok(decoded) => {
+                        if let Ok(s) = std::str::from_utf8(&decoded) {
+                            let expected = format!("{}:{}", expected_user, expected_pass);
+                            s == expected
+                        } else {
+                            false
+                        }
+                    }
+                    Err(_) => false,
+                }
+            } else {
+                false
+            };
+            Ok(VMValue::Bool(ok))
         }
         "Http.get_raw_headers" => {
             if args.len() != 2 {

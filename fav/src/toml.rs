@@ -446,6 +446,40 @@ fn parse_kv(line: &str) -> Option<(&str, &str)> {
     Some((key, val))
 }
 
+// ── rune_modules helpers ──────────────────────────────────────────────────────
+
+/// Determine the entry `.fav` file for an installed rune in `rune_dir`.
+///
+/// Reads `<rune_dir>/rune.toml` and extracts the `entry` field from `[rune]`.
+/// Falls back to `<rune_dir>/<name>.fav` when the file is absent or entry is empty.
+pub fn rune_entry_file(rune_dir: &Path, name: &str) -> PathBuf {
+    if let Ok(content) = std::fs::read_to_string(rune_dir.join("rune.toml")) {
+        let mut in_rune = false;
+        for line in content.lines() {
+            let t = line.trim();
+            if t == "[rune]" {
+                in_rune = true;
+                continue;
+            }
+            if t.starts_with('[') {
+                in_rune = false;
+                continue;
+            }
+            if in_rune {
+                if let Some((k, v)) = t.split_once('=') {
+                    if k.trim() == "entry" {
+                        let entry = v.trim().trim_matches('"');
+                        if !entry.is_empty() {
+                            return rune_dir.join(entry);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    rune_dir.join(format!("{}.fav", name))
+}
+
 // ── tests ─────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -589,5 +623,39 @@ libB = { registry = "local", version = "2.0.0" }
         assert_eq!(t.dependencies.len(), 2);
         assert_eq!(t.dependencies[0].name(), "libA");
         assert_eq!(t.dependencies[1].name(), "libB");
+    }
+
+    #[test]
+    fn test_rune_entry_file_with_entry_field() {
+        let dir = tempfile::tempdir().unwrap();
+        let rune_dir = dir.path().join("csv");
+        std::fs::create_dir_all(&rune_dir).unwrap();
+        std::fs::write(
+            rune_dir.join("rune.toml"),
+            "[rune]\nname = \"csv\"\nversion = \"0.1.0\"\nentry = \"csv.fav\"\n",
+        )
+        .unwrap();
+        let result = rune_entry_file(&rune_dir, "csv");
+        assert_eq!(result, rune_dir.join("csv.fav"));
+    }
+
+    #[test]
+    fn test_rune_entry_file_fallback_when_no_rune_toml() {
+        let dir = tempfile::tempdir().unwrap();
+        let rune_dir = dir.path().join("csv");
+        std::fs::create_dir_all(&rune_dir).unwrap();
+        // No rune.toml
+        let result = rune_entry_file(&rune_dir, "csv");
+        assert_eq!(result, rune_dir.join("csv.fav"));
+    }
+
+    #[test]
+    fn test_rune_entry_file_fallback_when_entry_empty() {
+        let dir = tempfile::tempdir().unwrap();
+        let rune_dir = dir.path().join("mylib");
+        std::fs::create_dir_all(&rune_dir).unwrap();
+        std::fs::write(rune_dir.join("rune.toml"), "[rune]\nname = \"mylib\"\n").unwrap();
+        let result = rune_entry_file(&rune_dir, "mylib");
+        assert_eq!(result, rune_dir.join("mylib.fav"));
     }
 }

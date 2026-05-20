@@ -242,6 +242,19 @@ impl Resolver {
     }
 
     pub fn resolve_rune_import_file(&self, import_path: &str) -> Option<PathBuf> {
+        // 1. rune_modules/ — installed by `rune install` (highest priority, v5.4.0)
+        //    Works in both project mode (root is Some) and standalone mode (root is None).
+        let rune_modules_base = if let Some(root) = self.root.as_ref() {
+            root.join("rune_modules")
+        } else {
+            std::env::current_dir().ok()?.join("rune_modules")
+        };
+        let rune_modules_dir = rune_modules_base.join(import_path);
+        if rune_modules_dir.is_dir() {
+            return Some(crate::toml::rune_entry_file(&rune_modules_dir, import_path));
+        }
+
+        // 2. fav.toml runes_path / ./runes/ (legacy — project mode only)
         let root = self.root.as_ref()?;
         let base = self
             .toml
@@ -250,7 +263,7 @@ impl Resolver {
             .unwrap_or_else(|| root.join("runes"));
         let local = base.join(import_path).join(format!("{import_path}.fav"));
 
-        // Fallback to local registry when the project-local path does not exist
+        // 3. Local registry fallback
         #[cfg(not(target_arch = "wasm32"))]
         if !local.exists() {
             let reg = crate::registry::Registry::new();
@@ -468,6 +481,69 @@ mod tests {
         let (sym, ty) = result.expect("std.states.PosInt resolves");
         assert_eq!(sym, "PosInt");
         assert_eq!(ty, Type::Named("PosInt".into(), vec![]));
+    }
+
+    #[test]
+    fn test_resolve_rune_from_rune_modules() {
+        let dir = tempdir().unwrap();
+        let root = dir.path().to_path_buf();
+        // Set up rune_modules/csv/csv.fav
+        let rune_dir = root.join("rune_modules").join("csv");
+        std::fs::create_dir_all(&rune_dir).unwrap();
+        std::fs::write(rune_dir.join("csv.fav"), "public fn parse() -> Unit { () }").unwrap();
+        std::fs::write(
+            rune_dir.join("rune.toml"),
+            "[rune]\nname = \"csv\"\nversion = \"0.1.0\"\nentry = \"csv.fav\"\n",
+        )
+        .unwrap();
+        let resolver = Resolver::new(None, Some(root.clone()));
+        let result = resolver.resolve_rune_import_file("csv");
+        assert_eq!(result, Some(rune_dir.join("csv.fav")));
+    }
+
+    #[test]
+    fn test_resolve_rune_entry_from_rune_toml() {
+        let dir = tempdir().unwrap();
+        let root = dir.path().to_path_buf();
+        let rune_dir = root.join("rune_modules").join("csv");
+        std::fs::create_dir_all(&rune_dir).unwrap();
+        std::fs::write(rune_dir.join("main.fav"), "public fn parse() -> Unit { () }").unwrap();
+        std::fs::write(
+            rune_dir.join("rune.toml"),
+            "[rune]\nname = \"csv\"\nversion = \"0.1.0\"\nentry = \"main.fav\"\n",
+        )
+        .unwrap();
+        let resolver = Resolver::new(None, Some(root.clone()));
+        let result = resolver.resolve_rune_import_file("csv");
+        assert_eq!(result, Some(rune_dir.join("main.fav")));
+    }
+
+    #[test]
+    fn test_resolve_rune_fallback_to_runes_dir() {
+        let dir = tempdir().unwrap();
+        let root = dir.path().to_path_buf();
+        // No rune_modules/ — falls back to runes/
+        let toml = FavToml {
+            name: "test".into(),
+            version: "0.1.0".into(),
+            description: None,
+            authors: vec![],
+            license: None,
+            src: "src".into(),
+            runes_path: None,
+            dependencies: vec![],
+            checkpoint: None,
+            database: None,
+            auth: None,
+            log: None,
+            env: None,
+            aws: None,
+            deploy: None,
+        };
+        let resolver = Resolver::new(Some(toml), Some(root.clone()));
+        let result = resolver.resolve_rune_import_file("csv");
+        // Should return the runes/ path (may not exist, but path is correct)
+        assert_eq!(result, Some(root.join("runes").join("csv").join("csv.fav")));
     }
 
     #[test]

@@ -308,17 +308,23 @@ fn load_all_items(entry_path: &str, toml: Option<&FavToml>, root: Option<&Path>)
             }
             for item in &program.items {
                 match item {
-                    ast::Item::ImportDecl { path, is_rune, .. } => {
+                    ast::Item::ImportDecl { path: import_name, is_rune, .. } => {
                         let dep_file = if *is_rune {
-                            // Check for directory rune first (v4.1.0)
-                            let dir = toml.runes_dir(root).join(path);
-                            if dir.is_dir() {
-                                dir.join(format!("{path}.fav"))
+                            // 1. rune_modules/ first (v5.4.0)
+                            let rune_dir = root.join("rune_modules").join(import_name.as_str());
+                            if rune_dir.is_dir() {
+                                crate::toml::rune_entry_file(&rune_dir, import_name)
                             } else {
-                                toml.runes_dir(root).join(format!("{path}.fav"))
+                                // 2. traditional runes/ path (v4.1.0 fallback)
+                                let dir = toml.runes_dir(root).join(import_name.as_str());
+                                if dir.is_dir() {
+                                    dir.join(format!("{import_name}.fav"))
+                                } else {
+                                    toml.runes_dir(root).join(format!("{import_name}.fav"))
+                                }
                             }
                         } else {
-                            src_dir.join(path).with_extension("fav")
+                            src_dir.join(import_name).with_extension("fav")
                         };
                         let dep_str = dep_file.to_string_lossy().to_string();
                         load_rec(&dep_str, Some(toml), Some(root), visited, all_items);
@@ -334,6 +340,22 @@ fn load_all_items(entry_path: &str, toml: Option<&FavToml>, root: Option<&Path>)
                         }
                     }
                     _ => {}
+                }
+            }
+        } else {
+            // Standalone mode (no fav.toml): resolve rune imports from rune_modules/
+            // relative to the source file's directory (v5.4.0).
+            let source_dir = std::path::Path::new(path)
+                .parent()
+                .unwrap_or(std::path::Path::new("."));
+            for item in &program.items {
+                if let ast::Item::ImportDecl { path: import_name, is_rune: true, .. } = item {
+                    let rune_dir = source_dir.join("rune_modules").join(import_name.as_str());
+                    if rune_dir.is_dir() {
+                        let entry = crate::toml::rune_entry_file(&rune_dir, import_name);
+                        let dep_str = entry.to_string_lossy().to_string();
+                        load_rec(&dep_str, None, None, visited, all_items);
+                    }
                 }
             }
         }
@@ -563,6 +585,14 @@ fn make_resolver(toml: Option<FavToml>, root: Option<PathBuf>) -> Arc<Mutex<Reso
     Arc::new(Mutex::new(Resolver::new(toml, root)))
 }
 
+/// Returns true if the program contains any `import rune` declarations.
+fn has_rune_imports(program: &ast::Program) -> bool {
+    program
+        .items
+        .iter()
+        .any(|item| matches!(item, ast::Item::ImportDecl { is_rune: true, .. }))
+}
+
 fn load_and_check_program(file: Option<&str>) -> (ast::Program, String) {
     let (path, proj) = find_entry(file);
     let source = load_file(&path);
@@ -576,12 +606,14 @@ fn load_and_check_program(file: Option<&str>) -> (ast::Program, String) {
         .uses
         .iter()
         .any(|path| path.len() >= 2 && path[0] == "std" && path[1] == "states");
+    let needs_resolver = uses_std_states || has_rune_imports(&program);
 
     let errors = if let Some((ref toml, ref root)) = proj {
         let r = make_resolver(Some(toml.clone()), Some(root.clone()));
         let mut checker = Checker::new_with_resolver(r, PathBuf::from(&path));
         checker.check_with_self(&program).0
-    } else if uses_std_states {
+    } else if needs_resolver {
+        // Standalone with rune imports or std.states: use resolver with CWD-based rune_modules/.
         let r = make_resolver(None, None);
         let mut checker = Checker::new_with_resolver(r, PathBuf::from(&path));
         checker.check_with_self(&program).0
@@ -597,6 +629,14 @@ fn load_and_check_program(file: Option<&str>) -> (ast::Program, String) {
 
     let merged = if let Some((ref toml, ref root)) = proj {
         let items = load_all_items(&path, Some(toml), Some(root));
+        ast::Program {
+            namespace: program.namespace.clone(),
+            uses: program.uses.clone(),
+            items,
+        }
+    } else if has_rune_imports(&program) {
+        // Standalone: merge rune items from rune_modules/ (v5.4.0).
+        let items = load_all_items(&path, None, None);
         ast::Program {
             namespace: program.namespace.clone(),
             uses: program.uses.clone(),

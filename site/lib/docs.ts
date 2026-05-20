@@ -62,7 +62,7 @@ export function getDocBySlug(slug: string): Doc | null {
 
 export function buildSidebar(): SidebarCategory[] {
   const docs = getAllDocs()
-  const categoryOrder = ['はじめに', '言語仕様', '標準ライブラリ', 'Rune']
+  const categoryOrder = ['はじめに', '言語仕様', '標準ライブラリ', 'Rune', 'Rune CLI']
   const map = new Map<string, { title: string; slug: string; order: number }[]>()
 
   for (const doc of docs) {

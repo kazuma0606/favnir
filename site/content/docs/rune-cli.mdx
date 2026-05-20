@@ -1,0 +1,164 @@
+---
+title: "Rune CLI"
+order: 1
+category: "Rune CLI"
+description: "rune コマンドで Rune パッケージをインストール・管理する"
+---
+
+# Rune CLI
+
+`rune` コマンドは Favnir の公式パッケージマネージャーです。
+Rune Registry からパッケージをインストールし、プロジェクトの依存関係を管理します。
+
+## インストール
+
+`fav` バイナリに同梱されています。追加のインストールは不要です。
+
+```bash
+# fav rune <コマンド> として使う
+fav rune install csv
+
+# または rune を fav のシンボリックリンクとして配置すると直接呼べる
+rune install csv
+```
+
+## コマンド一覧
+
+| コマンド | 説明 |
+|---------|------|
+| `rune install <name>` | Rune をインストール |
+| `rune uninstall <name>` | Rune をアンインストール |
+| `rune list` | インストール済み Rune を表示 |
+| `rune info <name>` | Rune の詳細を表示 |
+| `rune search <query>` | Rune を検索 |
+| `rune update` | すべての Rune を最新バージョンに更新 |
+| `rune publish` | カレントディレクトリの Rune を公開 |
+
+## rune install
+
+```bash
+rune install csv
+rune install csv@0.2.0   # バージョン指定
+```
+
+Rune は `./rune_modules/<name>/` にインストールされます。
+`fav.toml` の `[dependencies]` セクションに依存関係が自動追記されます。
+
+```toml
+[dependencies]
+csv = "0.1.0"
+```
+
+## rune uninstall
+
+```bash
+rune uninstall csv
+```
+
+`./rune_modules/csv/` ディレクトリを削除し、`fav.toml` の依存関係エントリも削除します。
+
+## rune list
+
+```bash
+rune list
+```
+
+```
+csv       0.1.0
+json      0.1.0
+duckdb    0.1.0
+```
+
+## rune info
+
+```bash
+rune info csv
+```
+
+```
+name:        csv
+version:     0.1.0
+description: CSV 読み書き
+```
+
+## rune search
+
+```bash
+rune search data
+```
+
+Registry に登録されている Rune をキーワードで検索します。
+
+## rune update
+
+```bash
+rune update
+```
+
+`fav.toml` の `[dependencies]` に記載されたすべての Rune を最新バージョンに更新します。
+
+## rune publish
+
+```bash
+cd runes/my-rune
+rune publish
+```
+
+カレントディレクトリの `rune.toml` を読み込み、`.fav` ファイルと `rune.toml` を zip 化して
+Rune Registry に公開します。初回は認証情報（ユーザー名とパスワード）を求められます。
+
+## rune.toml フォーマット
+
+インストールされた各 Rune のディレクトリには `rune.toml` が含まれます。
+
+```toml
+[rune]
+name        = "csv"
+version     = "0.1.0"
+description = "CSV 読み書き"
+entry       = "csv.fav"   # エントリポイント（省略時は <name>.fav）
+```
+
+### entry フィールド
+
+`entry` フィールドでエントリポイントとなる `.fav` ファイルを指定します。
+省略した場合は `<name>.fav` が使われます。
+
+```
+rune_modules/
+  csv/
+    rune.toml      ← entry = "csv.fav"
+    csv.fav        ← エントリポイント
+    internal.fav   ← 内部モジュール
+```
+
+## import 解決順序
+
+`import rune "csv"` と書いた場合、以下の順で解決されます:
+
+1. `./rune_modules/csv/` — `rune install` でインストールしたパッケージ（最優先）
+2. `./runes/csv/` — 従来のローカル Rune ディレクトリ
+3. `~/.fav/registry/csv/` — ローカルキャッシュ
+
+## スタンドアロンスクリプトでの使用
+
+`fav.toml` がないスクリプトでも、スクリプトと同じディレクトリに `rune_modules/` があれば
+Rune をインポートできます。
+
+```bash
+# スクリプトのディレクトリで rune install
+cd /path/to/scripts
+rune install csv
+
+# fav.toml なしで実行
+fav run main.fav
+```
+
+```favnir
+import rune "csv"
+
+public fn main() -> Unit !Io {
+  bind rows <- csv.read_file<Row>("data.csv")
+  IO.println(rows)
+}
+```

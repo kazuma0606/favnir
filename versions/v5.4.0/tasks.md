@@ -65,11 +65,11 @@
   - [x] `rune.toml` フォーマット説明
 - [x] F-2: サイドバーに "Rune CLI" を追加（`site/lib/docs.ts`）
 - [x] F-3: `npm run build` 成功確認
-- [ ] F-4: （任意）`site/app/runes/page.tsx` をライブ Registry API 取得に変更
+- [x] F-4: （任意）`site/app/runes/page.tsx` をライブ Registry API 取得に変更
 
 ## Phase G: まとめ
 
 - [x] G-1: `cargo test` 全件通過
 - [x] G-2: `versions/v5.4.0/tasks.md` にチェックを入れる
 - [ ] G-3: `MEMORY.md` を更新
-- [ ] G-4: `feat: rune_modules import resolution + publish all runes (v5.4.0)` でコミット
+- [x] G-4: `feat: rune_modules import resolution + publish all runes (v5.4.0)` でコミット

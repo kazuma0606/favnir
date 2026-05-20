@@ -9769,7 +9769,7 @@ fn vm_call_builtin(
             } else {
                 format!("https://{}.s3.{}.amazonaws.com", bucket, config.region)
             };
-            let url = format!("{}?list-type=2&prefix={}", base, url_encode(&prefix));
+            let url = format!("{}/?list-type=2&prefix={}", base, url_encode(&prefix));
             Ok(match aws_get(&config, "s3", &url) {
                 Ok(xml) => {
                     let keys: Vec<VMValue> = extract_xml_tags(&xml, "Key")

@@ -5772,6 +5772,28 @@ fn vm_call_builtin(
                 _ => Err("String.to_float requires a String argument".to_string()),
             }
         }
+        "String.from_chars" => {
+            let v = args
+                .into_iter()
+                .next()
+                .ok_or_else(|| "String.from_chars requires 1 argument".to_string())?;
+            match v {
+                VMValue::List(chars) => {
+                    let mut result = String::new();
+                    for c in chars {
+                        match c {
+                            VMValue::Str(s) => result.push_str(&s),
+                            other => return Err(format!(
+                                "String.from_chars: each element must be String, got {}",
+                                vmvalue_type_name(&other)
+                            )),
+                        }
+                    }
+                    Ok(VMValue::Str(result))
+                }
+                _ => Err("String.from_chars requires a List<String> argument".to_string()),
+            }
+        }
         "String.from_int" => {
             let v = args
                 .into_iter()
@@ -6280,6 +6302,35 @@ fn vm_call_builtin(
             match v {
                 VMValue::Record(m) => Ok(VMValue::Bool(m.is_empty())),
                 _ => Err("Map.is_empty requires a Map argument".to_string()),
+            }
+        }
+        "Map.remove" => {
+            let mut it = args.into_iter();
+            let map = it
+                .next()
+                .ok_or_else(|| "Map.remove requires 2 arguments".to_string())?;
+            let key = it
+                .next()
+                .ok_or_else(|| "Map.remove requires 2 arguments".to_string())?;
+            match (map, key) {
+                (VMValue::Record(mut m), VMValue::Str(k)) => {
+                    m.remove(&k);
+                    Ok(VMValue::Record(m))
+                }
+                _ => Err("Map.remove requires (Map, String)".to_string()),
+            }
+        }
+        "Map.contains_key" => {
+            let mut it = args.into_iter();
+            let map = it
+                .next()
+                .ok_or_else(|| "Map.contains_key requires 2 arguments".to_string())?;
+            let key = it
+                .next()
+                .ok_or_else(|| "Map.contains_key requires 2 arguments".to_string())?;
+            match (map, key) {
+                (VMValue::Record(m), VMValue::Str(k)) => Ok(VMValue::Bool(m.contains_key(&k))),
+                _ => Err("Map.contains_key requires (Map, String)".to_string()),
             }
         }
         "Map.merge" => {

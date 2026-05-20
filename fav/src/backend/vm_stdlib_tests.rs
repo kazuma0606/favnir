@@ -693,6 +693,63 @@ public fn main() -> Int {
     );
 }
 
+#[test]
+fn test_map_remove() {
+    assert_eq!(
+        eval(
+            r#"
+public fn main() -> Int {
+    bind m <- Map.set(Map.set((), "a", 1), "b", 2)
+    bind m2 <- Map.remove(m, "a")
+    Map.size(m2)
+}
+"#
+        ),
+        Value::Int(1)
+    );
+}
+
+#[test]
+fn test_map_contains_key() {
+    assert_eq!(
+        eval(
+            r#"
+public fn main() -> Bool {
+    bind m <- Map.set((), "x", 42)
+    Map.contains_key(m, "x")
+}
+"#
+        ),
+        Value::Bool(true)
+    );
+    assert_eq!(
+        eval(
+            r#"
+public fn main() -> Bool {
+    bind m <- Map.set((), "x", 42)
+    Map.contains_key(m, "y")
+}
+"#
+        ),
+        Value::Bool(false)
+    );
+}
+
+#[test]
+fn test_string_from_chars() {
+    assert_eq!(
+        eval(
+            r#"
+public fn main() -> String {
+    bind chars <- String.chars("hello")
+    String.from_chars(chars)
+}
+"#
+        ),
+        Value::Str("hello".to_string())
+    );
+}
+
 // ── Option ───────────────────────────────────────────────────────────────────
 
 #[test]

@@ -4639,6 +4639,50 @@ impl Checker {
                 Some(init_ty)
             }
             ("List", "count") => Some(Type::Int),
+            ("List", "flat_map") => {
+                let _elem = self.expect_list_arg(&arg_tys, 0, span);
+                let out = if let Some(f_ty) = arg_tys.get(1) {
+                    f_ty.as_callable()
+                        .map(|(_, o)| match o {
+                            Type::List(inner) => *inner.clone(),
+                            _ => Type::Unknown,
+                        })
+                        .unwrap_or(Type::Unknown)
+                } else {
+                    Type::Unknown
+                };
+                Some(Type::List(Box::new(out)))
+            }
+            ("List", "sort") => {
+                let elem = self.expect_list_arg(&arg_tys, 0, span);
+                Some(Type::List(Box::new(elem)))
+            }
+            ("List", "find") => {
+                let elem = self.expect_list_arg(&arg_tys, 0, span);
+                Some(Type::Option(Box::new(elem)))
+            }
+            ("List", "any") | ("List", "all") => {
+                let _ = self.expect_list_arg(&arg_tys, 0, span);
+                Some(Type::Bool)
+            }
+            ("List", "index_of") => {
+                let _ = self.expect_list_arg(&arg_tys, 0, span);
+                Some(Type::Option(Box::new(Type::Int)))
+            }
+            ("List", "zip") => {
+                let _ = self.expect_list_arg(&arg_tys, 0, span);
+                let _ = self.expect_list_arg(&arg_tys, 1, span);
+                Some(Type::List(Box::new(Type::Unknown)))
+            }
+            ("List", "range") => Some(Type::List(Box::new(Type::Int))),
+            ("List", "reverse") | ("List", "concat") => {
+                let elem = self.expect_list_arg(&arg_tys, 0, span);
+                Some(Type::List(Box::new(elem)))
+            }
+            ("List", "take") | ("List", "drop") => {
+                let elem = self.expect_list_arg(&arg_tys, 0, span);
+                Some(Type::List(Box::new(elem)))
+            }
 
             // String
             ("String", "trim") | ("String", "lower") | ("String", "upper") | ("String", "base64_encode") => Some(Type::String),
@@ -4659,6 +4703,11 @@ impl Checker {
             | ("String", "ends_with")
             | ("String", "is_slug")
             | ("String", "is_url") => Some(Type::Bool),
+            ("String", "concat") | ("String", "replace") | ("String", "slice")
+            | ("String", "repeat") | ("String", "from_chars") => Some(Type::String),
+            ("String", "char_at") => Some(Type::Option(Box::new(Type::String))),
+            ("String", "to_int") => Some(Type::Option(Box::new(Type::Int))),
+            ("String", "to_float") => Some(Type::Option(Box::new(Type::Float))),
 
             // Option
             ("Option", "some") => {
@@ -4676,6 +4725,30 @@ impl Checker {
             ("Option", "unwrap_or") => {
                 let default_ty = arg_tys.get(1).cloned().unwrap_or(Type::Unknown);
                 Some(default_ty)
+            }
+            ("Option", "and_then") => {
+                // closure already returns Option<U>; return its type directly
+                let out = arg_tys
+                    .get(1)
+                    .and_then(|f| f.as_callable().map(|(_, o)| o.clone()))
+                    .unwrap_or(Type::Unknown);
+                Some(out)
+            }
+            ("Option", "or_else") => {
+                let inner = match arg_tys.first() {
+                    Some(Type::Option(t)) => *t.clone(),
+                    _ => Type::Unknown,
+                };
+                Some(Type::Option(Box::new(inner)))
+            }
+            ("Option", "is_some") | ("Option", "is_none") => Some(Type::Bool),
+            ("Option", "to_result") => {
+                let ok_ty = match arg_tys.first() {
+                    Some(Type::Option(t)) => *t.clone(),
+                    _ => Type::Unknown,
+                };
+                let err_ty = arg_tys.get(1).cloned().unwrap_or(Type::Unknown);
+                Some(Type::Result(Box::new(ok_ty), Box::new(err_ty)))
             }
 
             // Result
@@ -4701,6 +4774,33 @@ impl Checker {
             ("Result", "unwrap_or") => {
                 let default_ty = arg_tys.get(1).cloned().unwrap_or(Type::Unknown);
                 Some(default_ty)
+            }
+            ("Result", "and_then") => {
+                // closure already returns Result<U, E>; return its type directly
+                let out = arg_tys
+                    .get(1)
+                    .and_then(|f| f.as_callable().map(|(_, o)| o.clone()))
+                    .unwrap_or(Type::Unknown);
+                Some(out)
+            }
+            ("Result", "map_err") => {
+                let ok_ty = match arg_tys.first() {
+                    Some(Type::Result(ok, _)) => *ok.clone(),
+                    _ => Type::Unknown,
+                };
+                let new_err = arg_tys
+                    .get(1)
+                    .and_then(|f| f.as_callable().map(|(_, o)| o.clone()))
+                    .unwrap_or(Type::Unknown);
+                Some(Type::Result(Box::new(ok_ty), Box::new(new_err)))
+            }
+            ("Result", "is_ok") | ("Result", "is_err") => Some(Type::Bool),
+            ("Result", "to_option") => {
+                let ok_ty = match arg_tys.first() {
+                    Some(Type::Result(ok, _)) => *ok.clone(),
+                    _ => Type::Unknown,
+                };
+                Some(Type::Option(Box::new(ok_ty)))
             }
 
             // Db (2-6): require !Db effect
@@ -4972,11 +5072,20 @@ impl Checker {
                 Box::new(Type::Named("ParquetError".into(), vec![])),
             )),
 
-            // Map (3-15..3-18)
+            // Map (3-15..3-18, v5.5.0 强化)
             ("Map", "get") => Some(Type::Option(Box::new(Type::Unknown))),
             ("Map", "set") => Some(Type::Map(Box::new(Type::Unknown), Box::new(Type::Unknown))),
             ("Map", "keys") => Some(Type::List(Box::new(Type::Unknown))),
             ("Map", "values") => Some(Type::List(Box::new(Type::Unknown))),
+            ("Map", "size") => Some(Type::Int),
+            ("Map", "is_empty") => Some(Type::Bool),
+            ("Map", "contains_key") => Some(Type::Bool),
+            ("Map", "remove") => Some(Type::Map(Box::new(Type::Unknown), Box::new(Type::Unknown))),
+            ("Map", "merge") => Some(Type::Map(Box::new(Type::Unknown), Box::new(Type::Unknown))),
+            ("Map", "map_values") => Some(Type::Map(Box::new(Type::Unknown), Box::new(Type::Unknown))),
+            ("Map", "filter_values") => Some(Type::Map(Box::new(Type::Unknown), Box::new(Type::Unknown))),
+            ("Map", "to_list") => Some(Type::List(Box::new(Type::Unknown))),
+            ("Map", "from_list") => Some(Type::Map(Box::new(Type::Unknown), Box::new(Type::Unknown))),
             ("Map", _) => Some(Type::Unknown),
 
             // Json (v0.7.0)
@@ -7040,7 +7149,6 @@ abstract seq Pipeline {
     }
 
     #[test]
-    #[test]
     fn test_recursive_sum_type_ok() {
         // type Expr = | Lit(Int) | Add(Expr, Expr) — self-referencing sum type must be OK
         check_ok(
@@ -7946,6 +8054,53 @@ public fn main() -> Order {
             "unexpected constraint errors: {:?}",
             constraint_errs
         );
+    }
+
+    // ── v5.5.0 stdlib type signature tests ───────────────────────────────────
+
+    #[test]
+    fn test_list_flat_map_type() {
+        check_ok("fn f(xs: List<Int>) -> List<Int> { List.flat_map(xs, |x| List.range(0, x)) }");
+    }
+
+    #[test]
+    fn test_list_sort_type() {
+        check_ok("fn f(xs: List<Int>) -> List<Int> { List.sort(xs, |a, b| a - b) }");
+    }
+
+    #[test]
+    fn test_list_zip_type() {
+        check_ok("fn f(xs: List<Int>, ys: List<String>) -> List<Unknown> { List.zip(xs, ys) }");
+    }
+
+    #[test]
+    fn test_option_and_then_type() {
+        check_ok("fn f(o: Option<Int>) -> Option<String> { Option.and_then(o, |x| Option.some(\"ok\")) }");
+    }
+
+    #[test]
+    fn test_result_and_then_type() {
+        check_ok("fn f(r: Result<Int, String>) -> Result<String, String> { Result.and_then(r, |x| Result.ok(\"ok\")) }");
+    }
+
+    #[test]
+    fn test_result_map_err_type() {
+        check_ok("fn f(r: Result<Int, String>) -> Result<Int, Int> { Result.map_err(r, |e| 0) }");
+    }
+
+    #[test]
+    fn test_map_remove_type() {
+        check_ok("fn f(m: Map<String, Int>) -> Map<String, Int> { Map.remove(m, \"key\") }");
+    }
+
+    #[test]
+    fn test_map_contains_key_type() {
+        check_ok("fn f(m: Map<String, Int>) -> Bool { Map.contains_key(m, \"key\") }");
+    }
+
+    #[test]
+    fn test_string_from_chars_type() {
+        check_ok("fn f(cs: List<String>) -> String { String.from_chars(cs) }");
     }
 }
 

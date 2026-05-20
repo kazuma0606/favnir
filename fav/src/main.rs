@@ -12,6 +12,7 @@ mod mcp;
 mod middle;
 mod notebook;
 mod registry;
+mod rune_cmd;
 mod schemas;
 mod std_states;
 mod toml;
@@ -26,6 +27,7 @@ use driver::{
     cmd_infer_proto, cmd_install, cmd_lint,
     cmd_migrate, cmd_new, cmd_publish, cmd_registry, cmd_run, cmd_test, cmd_watch,
 };
+use rune_cmd::cmd_rune;
 use std::process;
 
 // 笏笏 help text (4-6) 笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏
@@ -193,6 +195,17 @@ fn main() {
 
 fn main_impl() {
     let args: Vec<String> = std::env::args().collect();
+
+    // When invoked as `rune` (symlink / copy), treat all args as `fav rune <args>`.
+    let exe_stem = args
+        .first()
+        .and_then(|p| std::path::Path::new(p).file_stem())
+        .and_then(|s| s.to_str())
+        .unwrap_or("fav");
+    if exe_stem == "rune" {
+        cmd_rune(&args[1..]);
+        return;
+    }
 
     if args.len() == 1 {
         print_welcome();
@@ -1049,6 +1062,11 @@ fn main_impl() {
             let subcommand = args.get(2).map(|s| s.as_str());
             let sub_args: Vec<String> = args.iter().skip(3).cloned().collect();
             cmd_registry(subcommand, &sub_args);
+        }
+
+        Some("rune") => {
+            let sub_args: Vec<String> = args[2..].to_vec();
+            cmd_rune(&sub_args);
         }
 
         Some("deploy") => {

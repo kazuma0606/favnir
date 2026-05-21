@@ -13051,3 +13051,78 @@ mod registry_tests {
         assert!(files.iter().any(|(p, _)| p.ends_with("parse.fav")));
     }
 }
+
+// ── Self-hosted compiler tests (v6.0.0) ──────────────────────────────────────
+
+#[cfg(test)]
+mod self_tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    fn self_dir() -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("self")
+    }
+
+    #[test]
+    fn self_hosted_lexer_type_checks() {
+        let path = self_dir().join("lexer.fav");
+        let path_str = path.to_string_lossy().to_string();
+        let (_src, errors, _warnings) = check_single_file(&path_str);
+        assert!(
+            errors.is_empty(),
+            "self/lexer.fav type errors: {:?}",
+            errors
+        );
+    }
+
+    #[test]
+    fn self_hosted_parser_type_checks() {
+        let path = self_dir().join("parser.fav");
+        let path_str = path.to_string_lossy().to_string();
+        let (_src, errors, _warnings) = check_single_file(&path_str);
+        assert!(
+            errors.is_empty(),
+            "self/parser.fav type errors: {:?}",
+            errors
+        );
+    }
+
+
+    #[test]
+    fn self_hosted_checker_type_checks() {
+        let path = self_dir().join("checker.fav");
+        let path_str = path.to_string_lossy().to_string();
+        let (_src, errors, _warnings) = check_single_file(&path_str);
+        assert!(
+            errors.is_empty(),
+            "self/checker.fav type errors: {:?}",
+            errors
+        );
+    }
+
+
+    #[test]
+    fn self_hosted_codegen_type_checks() {
+        let path = self_dir().join("codegen.fav");
+        let path_str = path.to_string_lossy().to_string();
+        let (_src, errors, _warnings) = check_single_file(&path_str);
+        assert!(
+            errors.is_empty(),
+            "self/codegen.fav type errors: {:?}",
+            errors
+        );
+    }
+
+
+    #[test]
+    fn self_hosted_compiler_type_checks() {
+        let path = self_dir().join("compiler.fav");
+        let path_str = path.to_string_lossy().to_string();
+        let (_src, errors, _warnings) = check_single_file(&path_str);
+        assert!(
+            errors.is_empty(),
+            "self/compiler.fav type errors: {:?}",
+            errors
+        );
+    }
+}

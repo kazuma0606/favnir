@@ -1,0 +1,576 @@
+// Favnir self-hosted bytecode compiler
+// Phase E: compile(Program) -> Result<List<Int>, String>
+
+// ── Mirrored AST types (from parser.fav) ─────────────────────────────────────
+
+type Lit =
+  | LInt(Int)
+  | LFloat(Float)
+  | LStr(String)
+  | LBool(Bool)
+  | LUnit
+
+type Op =
+  | OpAdd
+  | OpSub
+  | OpMul
+  | OpDiv
+  | OpMod
+  | OpEq
+  | OpNeq
+  | OpLt
+  | OpGt
+  | OpLtEq
+  | OpGtEq
+  | OpAnd
+  | OpOr
+
+type Pat =
+  | PWild
+  | PVar(String)
+  | PInt(Int)
+  | PFloat(Float)
+  | PStr(String)
+  | PBool(Bool)
+  | PUnit
+  | PVariant(String)
+  | PVariantP(String, Pat)
+
+type Expr =
+  | ELit(Lit)
+  | EVar(String)
+  | EBinOp(Op, Expr, Expr)
+  | ECall(String, String, Expr)
+  | EIf(Expr, Expr, Expr)
+  | EAccess(Expr, String)
+  | ELambda(String, Expr)
+  | EMatch(Expr, Expr)
+  | EBlock(Expr, Expr)
+  | ERecordLit(String, Expr)
+  | EArgList(Expr, Expr)
+  | EArgNil
+  | EArm(Pat, Expr, Expr)
+  | EArmNil
+  | EBind(String, Expr, Expr)
+  | EField(String, Expr, Expr)
+  | EFieldNil
+
+type TypeExpr =
+  | TeSimple(String)
+  | TeList(TypeExpr)
+  | TeOption(TypeExpr)
+  | TeResult(TypeExpr, TypeExpr)
+  | TeMap(TypeExpr, TypeExpr)
+  | TeFn(TypeExpr, TypeExpr)
+
+type Param = {
+    name: String
+    ty: TypeExpr
+}
+
+type FnDef = {
+    is_public: Bool
+    name: String
+    params: List<Param>
+    ret: TypeExpr
+    body: Expr
+}
+
+type VariantDef = {
+    name: String
+    payload: Option<TypeExpr>
+}
+
+type TypeDef = {
+    name: String
+    is_record: Bool
+    variants: List<VariantDef>
+    fields: List<Param>
+}
+
+type TestDef = {
+    name: String
+    body: Expr
+}
+
+type Item =
+  | IFn(FnDef)
+  | IType(TypeDef)
+  | ITest(TestDef)
+
+type Program = {
+    items: List<Item>
+}
+
+// ── Bytecode opcodes ──────────────────────────────────────────────────────────
+
+type Bc =
+  | BcConst
+  | BcConstUnit
+  | BcConstTrue
+  | BcConstFalse
+  | BcLoadLocal
+  | BcStoreLocal
+  | BcLoadGlobal
+  | BcPop
+  | BcCall
+  | BcReturn
+  | BcAdd
+  | BcSub
+  | BcMul
+  | BcDiv
+  | BcEq
+  | BcNe
+  | BcLt
+  | BcLe
+  | BcGt
+  | BcGe
+  | BcAnd
+  | BcOr
+  | BcJump
+  | BcJumpIfFalse
+  | BcGetField
+  | BcBuildRecord
+  | BcMakeClosure
+
+fn bc_byte(op: Bc) -> Int {
+    match op {
+        BcConst => 1
+        BcConstUnit => 2
+        BcConstTrue => 3
+        BcConstFalse => 4
+        BcLoadLocal => 16
+        BcStoreLocal => 17
+        BcLoadGlobal => 18
+        BcPop => 19
+        BcCall => 21
+        BcReturn => 22
+        BcAdd => 32
+        BcSub => 33
+        BcMul => 34
+        BcDiv => 35
+        BcEq => 36
+        BcNe => 37
+        BcLt => 38
+        BcLe => 39
+        BcGt => 40
+        BcGe => 41
+        BcAnd => 42
+        BcOr => 43
+        BcJump => 48
+        BcJumpIfFalse => 49
+        BcGetField => 64
+        BcBuildRecord => 65
+        BcMakeClosure => 66
+    }
+}
+
+// ── Constant pool ─────────────────────────────────────────────────────────────
+
+type ConstVal =
+  | CVInt(Int)
+  | CVFloat(Float)
+  | CVStr(String)
+  | CVName(String)
+
+// ── Codegen context ───────────────────────────────────────────────────────────
+
+type KVPair = {
+    first: String
+    second: String
+}
+
+type CodegenCtx = {
+    code: List<Int>
+    consts: List<ConstVal>
+    locals: List<KVPair>
+    next_local: Int
+}
+
+type ConstAdd = {
+    ctx: CodegenCtx
+    idx: Int
+}
+
+// ── Context helpers ───────────────────────────────────────────────────────────
+
+fn empty_ints() -> List<Int> {
+    List.drop_while(List.singleton(0), |v| true)
+}
+
+fn empty_kvs() -> List<KVPair> {
+    List.drop_while(List.singleton(KVPair { first: "", second: "" }), |v| true)
+}
+
+fn empty_consts() -> List<ConstVal> {
+    List.drop_while(List.singleton(CVInt(0)), |v| true)
+}
+
+fn new_ctx() -> CodegenCtx {
+    bind code <- empty_ints()
+    bind consts <- empty_consts()
+    bind locals <- empty_kvs()
+    CodegenCtx { code: code, consts: consts, locals: locals, next_local: 0 }
+}
+
+// Create a sub-context with empty code but shared consts/locals
+fn ctx_fork(ctx: CodegenCtx) -> CodegenCtx {
+    bind fresh <- empty_ints()
+    CodegenCtx { code: fresh, consts: ctx.consts, locals: ctx.locals, next_local: ctx.next_local }
+}
+
+// Merge: take base.code, sub.consts (sub has more up-to-date const pool)
+fn ctx_merge(base: CodegenCtx, sub: CodegenCtx) -> CodegenCtx {
+    CodegenCtx { code: base.code, consts: sub.consts, locals: base.locals, next_local: base.next_local }
+}
+
+// ── Emit helpers ──────────────────────────────────────────────────────────────
+
+fn emit_byte(ctx: CodegenCtx, b: Int) -> CodegenCtx {
+    CodegenCtx { code: List.push(ctx.code, b), consts: ctx.consts, locals: ctx.locals, next_local: ctx.next_local }
+}
+
+fn emit_opcode(ctx: CodegenCtx, op: Bc) -> CodegenCtx {
+    emit_byte(ctx, bc_byte(op))
+}
+
+fn u16_lo(n: Int) -> Int {
+    Int.band(n, 255)
+}
+
+fn u16_hi(n: Int) -> Int {
+    Int.band(Int.shr(n, 8), 255)
+}
+
+fn emit_u16(ctx: CodegenCtx, n: Int) -> CodegenCtx {
+    bind ctx1 <- emit_byte(ctx, u16_lo(n))
+    emit_byte(ctx1, u16_hi(n))
+}
+
+fn append_code(ctx: CodegenCtx, extra: List<Int>) -> CodegenCtx {
+    CodegenCtx { code: List.concat(ctx.code, extra), consts: ctx.consts, locals: ctx.locals, next_local: ctx.next_local }
+}
+
+fn add_const(ctx: CodegenCtx, cv: ConstVal) -> ConstAdd {
+    bind idx <- List.length(ctx.consts)
+    bind new_consts <- List.push(ctx.consts, cv)
+    bind new_ctx <- CodegenCtx { code: ctx.code, consts: new_consts, locals: ctx.locals, next_local: ctx.next_local }
+    ConstAdd { ctx: new_ctx, idx: idx }
+}
+
+// ── Local variable management ─────────────────────────────────────────────────
+
+fn local_lookup(locals: List<KVPair>, name: String) -> Option<Int> {
+    match List.first(locals) {
+        None => Option.none()
+        Some(kv) => {
+            if kv.first == name {
+                String.to_int(kv.second)
+            } else {
+                local_lookup(List.drop(locals, 1), name)
+            }
+        }
+    }
+}
+
+fn local_add(ctx: CodegenCtx, name: String) -> CodegenCtx {
+    bind idx_str <- Int.to_string(ctx.next_local)
+    bind kv <- KVPair { first: name, second: idx_str }
+    bind new_locals <- List.push(ctx.locals, kv)
+    CodegenCtx { code: ctx.code, consts: ctx.consts, locals: new_locals, next_local: ctx.next_local + 1 }
+}
+
+// ── Compile literal ───────────────────────────────────────────────────────────
+
+fn compile_lit(lit: Lit, ctx: CodegenCtx) -> CodegenCtx {
+    match lit {
+        LBool(b) => {
+            if b { emit_opcode(ctx, BcConstTrue) }
+            else { emit_opcode(ctx, BcConstFalse) }
+        }
+        LUnit => emit_opcode(ctx, BcConstUnit)
+        LInt(n) => {
+            bind ca <- add_const(ctx, CVInt(n))
+            bind ctx1 <- emit_opcode(ca.ctx, BcConst)
+            emit_u16(ctx1, ca.idx)
+        }
+        LFloat(f) => {
+            bind ca <- add_const(ctx, CVFloat(f))
+            bind ctx1 <- emit_opcode(ca.ctx, BcConst)
+            emit_u16(ctx1, ca.idx)
+        }
+        LStr(s) => {
+            bind ca <- add_const(ctx, CVStr(s))
+            bind ctx1 <- emit_opcode(ca.ctx, BcConst)
+            emit_u16(ctx1, ca.idx)
+        }
+    }
+}
+
+// ── Binary operator mapping ───────────────────────────────────────────────────
+
+fn binop_bc(op: Op) -> Bc {
+    match op {
+        OpAdd => BcAdd
+        OpSub => BcSub
+        OpMul => BcMul
+        OpDiv => BcDiv
+        OpMod => BcDiv
+        OpEq => BcEq
+        OpNeq => BcNe
+        OpLt => BcLt
+        OpGt => BcGt
+        OpLtEq => BcLe
+        OpGtEq => BcGe
+        OpAnd => BcAnd
+        OpOr => BcOr
+    }
+}
+
+// ── Count argument list ───────────────────────────────────────────────────────
+
+fn count_args(args: Expr) -> Int {
+    match args {
+        EArgNil => 0
+        EArgList(_, rest) => count_args(rest) + 1
+        _ => 0
+    }
+}
+
+// ── if compilation helpers ────────────────────────────────────────────────────
+
+fn compile_if_assemble(ctx_c: CodegenCtx, ctx_t: CodegenCtx, ctx_e: CodegenCtx) -> Result<CodegenCtx, String> {
+    bind then_len <- List.length(ctx_t.code)
+    bind else_len <- List.length(ctx_e.code)
+    bind base <- ctx_merge(ctx_c, ctx_e)
+    bind ctx1 <- emit_opcode(base, BcJumpIfFalse)
+    bind ctx2 <- emit_u16(ctx1, then_len + 3)
+    bind ctx3 <- append_code(ctx2, ctx_t.code)
+    bind ctx4 <- emit_opcode(ctx3, BcJump)
+    bind ctx5 <- emit_u16(ctx4, else_len)
+    Result.ok(append_code(ctx5, ctx_e.code))
+}
+
+fn compile_if_then_done(ctx_c: CodegenCtx, ctx_t: CodegenCtx, else_e: Expr, env: List<KVPair>) -> Result<CodegenCtx, String> {
+    bind sub_else <- ctx_fork(ctx_merge(ctx_c, ctx_t))
+    Result.and_then(compile_expr(else_e, sub_else, env), |ctx_e|
+    compile_if_assemble(ctx_c, ctx_t, ctx_e))
+}
+
+fn compile_if(cond: Expr, then_e: Expr, else_e: Expr, ctx: CodegenCtx, env: List<KVPair>) -> Result<CodegenCtx, String> {
+    Result.and_then(compile_expr(cond, ctx, env), |ctx_c|
+    compile_if_cond_done(ctx_c, then_e, else_e, env))
+}
+
+fn compile_if_cond_done(ctx_c: CodegenCtx, then_e: Expr, else_e: Expr, env: List<KVPair>) -> Result<CodegenCtx, String> {
+    bind sub_then <- ctx_fork(ctx_c)
+    Result.and_then(compile_expr(then_e, sub_then, env), |ctx_t|
+    compile_if_then_done(ctx_c, ctx_t, else_e, env))
+}
+
+// ── Call and access helpers ───────────────────────────────────────────────────
+
+fn compile_call_cont(full_name: String, argc: Int, ctx1: CodegenCtx) -> Result<CodegenCtx, String> {
+    bind ca <- add_const(ctx1, CVName(full_name))
+    bind ctx2 <- emit_opcode(ca.ctx, BcCall)
+    bind ctx3 <- emit_u16(ctx2, ca.idx)
+    Result.ok(emit_u16(ctx3, argc))
+}
+
+fn compile_access_cont(field: String, ctx1: CodegenCtx) -> Result<CodegenCtx, String> {
+    bind ca <- add_const(ctx1, CVName(field))
+    bind ctx2 <- emit_opcode(ca.ctx, BcGetField)
+    Result.ok(emit_u16(ctx2, ca.idx))
+}
+
+fn compile_record_cont(tname: String, n: Int, ctx1: CodegenCtx) -> Result<CodegenCtx, String> {
+    bind ca <- add_const(ctx1, CVName(tname))
+    bind ctx2 <- emit_opcode(ca.ctx, BcBuildRecord)
+    bind ctx3 <- emit_u16(ctx2, ca.idx)
+    Result.ok(emit_u16(ctx3, n))
+}
+
+fn compile_bind_cont(name: String, cont_e: Expr, ctx1: CodegenCtx, env: List<KVPair>) -> Result<CodegenCtx, String> {
+    bind idx <- ctx1.next_local
+    bind ctx2 <- local_add(ctx1, name)
+    bind ctx3 <- emit_opcode(ctx2, BcStoreLocal)
+    bind ctx4 <- emit_u16(ctx3, idx)
+    compile_expr(cont_e, ctx4, env)
+}
+
+fn compile_lambda_cont(outer_ctx: CodegenCtx, body_ctx: CodegenCtx) -> Result<CodegenCtx, String> {
+    bind merged <- ctx_merge(outer_ctx, body_ctx)
+    bind ctx1 <- emit_opcode(merged, BcMakeClosure)
+    Result.ok(ctx1)
+}
+
+// ── Argument list compilation ─────────────────────────────────────────────────
+
+fn compile_args(args: Expr, ctx: CodegenCtx, env: List<KVPair>) -> Result<CodegenCtx, String> {
+    match args {
+        EArgNil => Result.ok(ctx)
+        EArgList(head, tail) => {
+            Result.and_then(compile_expr(head, ctx, env), |ctx1|
+            compile_args(tail, ctx1, env))
+        }
+        _ => Result.err("expected argument list")
+    }
+}
+
+// ── Compile expression ────────────────────────────────────────────────────────
+
+fn compile_expr(expr: Expr, ctx: CodegenCtx, env: List<KVPair>) -> Result<CodegenCtx, String> {
+    match expr {
+        ELit(lit) => Result.ok(compile_lit(lit, ctx))
+        EVar(name) => {
+            match local_lookup(ctx.locals, name) {
+                Some(idx) => {
+                    bind ctx1 <- emit_opcode(ctx, BcLoadLocal)
+                    Result.ok(emit_u16(ctx1, idx))
+                }
+                None => {
+                    bind ca <- add_const(ctx, CVName(name))
+                    bind ctx1 <- emit_opcode(ca.ctx, BcLoadGlobal)
+                    Result.ok(emit_u16(ctx1, ca.idx))
+                }
+            }
+        }
+        EBinOp(op, left, right) => {
+            Result.and_then(compile_expr(left, ctx, env), |ctx1|
+            Result.and_then(compile_expr(right, ctx1, env), |ctx2|
+            Result.ok(emit_opcode(ctx2, binop_bc(op)))))
+        }
+        EIf(cond, then_e, else_e) => compile_if(cond, then_e, else_e, ctx, env)
+        EBind(name, val_e, cont_e) => {
+            Result.and_then(compile_expr(val_e, ctx, env), |ctx1|
+            compile_bind_cont(name, cont_e, ctx1, env))
+        }
+        ECall(ns, fname, args) => {
+            bind argc <- count_args(args)
+            bind full_name <- String.concat(ns, String.concat(".", fname))
+            Result.and_then(compile_args(args, ctx, env), |ctx1|
+            compile_call_cont(full_name, argc, ctx1))
+        }
+        EAccess(obj, field) => {
+            Result.and_then(compile_expr(obj, ctx, env), |ctx1|
+            compile_access_cont(field, ctx1))
+        }
+        EBlock(head, tail) => {
+            Result.and_then(compile_expr(head, ctx, env), |ctx1|
+            compile_expr(tail, ctx1, env))
+        }
+        EMatch(scrut, _arms) => {
+            Result.and_then(compile_expr(scrut, ctx, env), |ctx1|
+            Result.ok(ctx1))
+        }
+        ELambda(param, body) => {
+            bind sub_ctx <- ctx_fork(ctx)
+            bind sub_with_param <- local_add(sub_ctx, param)
+            Result.and_then(compile_expr(body, sub_with_param, env), |body_ctx|
+            compile_lambda_cont(ctx, body_ctx))
+        }
+        ERecordLit(tname, fields) => {
+            bind n <- count_args(fields)
+            Result.and_then(compile_args(fields, ctx, env), |ctx1|
+            compile_record_cont(tname, n, ctx1))
+        }
+        EArgList(head, tail) => {
+            Result.and_then(compile_expr(head, ctx, env), |ctx1|
+            compile_expr(tail, ctx1, env))
+        }
+        EArgNil => Result.ok(ctx)
+        EArm(_pat, _body, rest) => compile_expr(rest, ctx, env)
+        EArmNil => Result.ok(ctx)
+        EField(_fname, val_e, rest) => {
+            Result.and_then(compile_expr(val_e, ctx, env), |ctx1|
+            compile_expr(rest, ctx1, env))
+        }
+        EFieldNil => Result.ok(ctx)
+    }
+}
+
+// ── Compile function definition ───────────────────────────────────────────────
+
+fn compile_params(params: List<Param>, ctx: CodegenCtx) -> CodegenCtx {
+    match List.first(params) {
+        None => ctx
+        Some(p) => {
+            bind ctx1 <- local_add(ctx, p.name)
+            compile_params(List.drop(params, 1), ctx1)
+        }
+    }
+}
+
+fn empty_env() -> List<KVPair> {
+    List.drop_while(List.singleton(KVPair { first: "", second: "" }), |v| true)
+}
+
+fn compile_fn_def_ret(ctx_done: CodegenCtx) -> Result<List<Int>, String> {
+    bind ctx_ret <- emit_opcode(ctx_done, BcReturn)
+    Result.ok(ctx_ret.code)
+}
+
+fn compile_fn_def(fn_def: FnDef) -> Result<List<Int>, String> {
+    bind ctx0 <- new_ctx()
+    bind ctx1 <- compile_params(fn_def.params, ctx0)
+    bind env0 <- empty_env()
+    Result.and_then(compile_expr(fn_def.body, ctx1, env0), |ctx_done|
+    compile_fn_def_ret(ctx_done))
+}
+
+// ── Compile all items ─────────────────────────────────────────────────────────
+
+fn compile_items(items: List<Item>, acc: List<Int>) -> Result<List<Int>, String> {
+    match List.first(items) {
+        None => Result.ok(acc)
+        Some(item) => {
+            match item {
+                IFn(fn_def) => {
+                    Result.and_then(compile_fn_def(fn_def), |code|
+                    compile_items(List.drop(items, 1), List.concat(acc, code)))
+                }
+                IType(_) => compile_items(List.drop(items, 1), acc)
+                ITest(_) => compile_items(List.drop(items, 1), acc)
+            }
+        }
+    }
+}
+
+public fn compile(prog: Program) -> Result<List<Int>, String> {
+    bind init <- empty_ints()
+    compile_items(prog.items, init)
+}
+
+// ── Tests ─────────────────────────────────────────────────────────────────────
+
+test "bc_byte BcConst is 1" {
+    bc_byte(BcConst) == 1
+}
+
+test "bc_byte BcAdd is 32" {
+    bc_byte(BcAdd) == 32
+}
+
+test "bc_byte BcReturn is 22" {
+    bc_byte(BcReturn) == 22
+}
+
+test "u16_lo of 258 is 2" {
+    u16_lo(258) == 2
+}
+
+test "u16_hi of 258 is 1" {
+    u16_hi(258) == 1
+}
+
+test "compile int literal emits 3 bytes" {
+    List.length(compile_lit(LInt(42), new_ctx()).code) == 3
+}
+
+test "compile true emits 1 byte" {
+    List.length(compile_lit(LBool(true), new_ctx()).code) == 1
+}
+
+test "compile unit emits 1 byte" {
+    List.length(compile_lit(LUnit, new_ctx()).code) == 1
+}

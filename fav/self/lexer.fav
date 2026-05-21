@@ -1,0 +1,425 @@
+// Favnir self-hosted lexer
+// Phase B: Token type + lex(String) -> Result<List<Token>, String>
+
+// ── Token ────────────────────────────────────────────────────────────────────
+
+type Token =
+  | TkInt(Int)
+  | TkFloat(Float)
+  | TkStr(String)
+  | TkIdent(String)
+  | TkTrue
+  | TkFalse
+  | TkFn
+  | TkType
+  | TkIf
+  | TkElse
+  | TkMatch
+  | TkBind
+  | TkImport
+  | TkPublic
+  | TkReturn
+  | TkFor
+  | TkIn
+  | TkTest
+  | TkBench
+  | TkPlus
+  | TkMinus
+  | TkStar
+  | TkSlash
+  | TkPercent
+  | TkEqEq
+  | TkBangEq
+  | TkLtEq
+  | TkGtEq
+  | TkAmpAmp
+  | TkPipePipe
+  | TkArrow
+  | TkBackArrow
+  | TkFatArrow
+  | TkPipeGt
+  | TkEq
+  | TkBang
+  | TkLt
+  | TkGt
+  | TkPipe
+  | TkDot
+  | TkComma
+  | TkColon
+  | TkSemicolon
+  | TkLParen
+  | TkRParen
+  | TkLBrace
+  | TkRBrace
+  | TkLBracket
+  | TkRBracket
+  | TkEof
+
+// ── Return type for sub-scanners ──────────────────────────────────────────────
+
+type ScanResult = {
+    tok: Token
+    rest: List<String>
+}
+
+// ── Character helpers ─────────────────────────────────────────────────────────
+
+fn is_digit(c: String) -> Bool {
+    String.contains("0123456789", c)
+}
+
+fn is_alpha(c: String) -> Bool {
+    String.contains("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_", c)
+}
+
+fn is_alnum(c: String) -> Bool {
+    is_alpha(c) || is_digit(c)
+}
+
+fn is_whitespace(c: String) -> Bool {
+    c == " " || c == "\t" || c == "\r" || c == "\n"
+}
+
+// ── Keyword lookup ────────────────────────────────────────────────────────────
+
+fn keyword_token(s: String) -> Option<Token> {
+    if s == "fn" { Option.some(TkFn) }
+    else {
+    if s == "type" { Option.some(TkType) }
+    else {
+    if s == "if" { Option.some(TkIf) }
+    else {
+    if s == "else" { Option.some(TkElse) }
+    else {
+    if s == "match" { Option.some(TkMatch) }
+    else {
+    if s == "bind" { Option.some(TkBind) }
+    else {
+    if s == "import" { Option.some(TkImport) }
+    else {
+    if s == "public" { Option.some(TkPublic) }
+    else {
+    if s == "return" { Option.some(TkReturn) }
+    else {
+    if s == "for" { Option.some(TkFor) }
+    else {
+    if s == "in" { Option.some(TkIn) }
+    else {
+    if s == "test" { Option.some(TkTest) }
+    else {
+    if s == "bench" { Option.some(TkBench) }
+    else {
+    if s == "true" { Option.some(TkTrue) }
+    else {
+    if s == "false" { Option.some(TkFalse) }
+    else { Option.none() }
+    }}}}}}}}}}}}}}
+}
+
+// ── scan_string_chars: consume chars after opening quote ──────────────────────
+
+fn scan_string_chars(chars: List<String>, acc: List<String>) -> Result<ScanResult, String> {
+    match List.first(chars) {
+        None => Result.err("unterminated string literal")
+        Some(c) => {
+            bind tail <- List.drop(chars, 1)
+            if c == "\"" {
+                bind s <- String.from_chars(acc)
+                Result.ok(ScanResult { tok: TkStr(s), rest: tail })
+            } else {
+            if c == "\\" {
+                match List.first(tail) {
+                    None => Result.err("unterminated escape sequence")
+                    Some(esc) => {
+                        bind after_esc <- List.drop(tail, 1)
+                        bind ch <- if esc == "n" { "\n" }
+                                   else {
+                                   if esc == "t" { "\t" }
+                                   else {
+                                   if esc == "r" { "\r" }
+                                   else {
+                                   if esc == "\"" { "\"" }
+                                   else {
+                                   if esc == "\\" { "\\" }
+                                   else { esc }
+                                   }}}}
+                        scan_string_chars(after_esc, List.push(acc, ch))
+                    }
+                }
+            } else {
+                scan_string_chars(tail, List.push(acc, c))
+            }}
+        }
+    }
+}
+
+// ── scan_number ───────────────────────────────────────────────────────────────
+
+fn build_int_token(digits: List<String>, rest: List<String>) -> Result<ScanResult, String> {
+    bind s <- String.from_chars(digits)
+    match String.to_int(s) {
+        None => Result.err(String.concat("invalid integer: ", s))
+        Some(n) => Result.ok(ScanResult { tok: TkInt(n), rest: rest })
+    }
+}
+
+fn scan_number(chars: List<String>) -> Result<ScanResult, String> {
+    bind int_chars <- List.take_while(chars, |c| is_digit(c))
+    bind after_int <- List.drop_while(chars, |c| is_digit(c))
+    match List.first(after_int) {
+        Some(".") => {
+            bind after_dot <- List.drop(after_int, 1)
+            match List.first(after_dot) {
+                Some(d) => {
+                    if is_digit(d) {
+                        bind frac_chars <- List.take_while(after_dot, |c| is_digit(c))
+                        bind after_frac <- List.drop_while(after_dot, |c| is_digit(c))
+                        bind s <- String.from_chars(List.concat(int_chars, List.concat(List.singleton("."), frac_chars)))
+                        match String.to_float(s) {
+                            None => Result.err(String.concat("invalid float: ", s))
+                            Some(f) => Result.ok(ScanResult { tok: TkFloat(f), rest: after_frac })
+                        }
+                    } else { build_int_token(int_chars, after_int) }
+                }
+                _ => build_int_token(int_chars, after_int)
+            }
+        }
+        _ => build_int_token(int_chars, after_int)
+    }
+}
+
+// ── skip_line_comment ─────────────────────────────────────────────────────────
+
+fn skip_line_comment(chars: List<String>) -> List<String> {
+    List.drop_while(chars, |c| c != "\n")
+}
+
+// ── next_char_is helper ──────────────────────────────────────────────────────
+
+fn next_char_is(chars: List<String>, expected: String) -> Bool {
+    match List.first(chars) {
+        Some(c) => c == expected
+        None => false
+    }
+}
+
+// ── single_char_token ─────────────────────────────────────────────────────────
+
+fn single_char_token(c: String) -> Option<Token> {
+    if c == "+" { Option.some(TkPlus) }
+    else {
+    if c == "-" { Option.some(TkMinus) }
+    else {
+    if c == "*" { Option.some(TkStar) }
+    else {
+    if c == "/" { Option.some(TkSlash) }
+    else {
+    if c == "%" { Option.some(TkPercent) }
+    else {
+    if c == "=" { Option.some(TkEq) }
+    else {
+    if c == "<" { Option.some(TkLt) }
+    else {
+    if c == ">" { Option.some(TkGt) }
+    else {
+    if c == "!" { Option.some(TkBang) }
+    else {
+    if c == "|" { Option.some(TkPipe) }
+    else {
+    if c == "." { Option.some(TkDot) }
+    else {
+    if c == "," { Option.some(TkComma) }
+    else {
+    if c == ":" { Option.some(TkColon) }
+    else {
+    if c == ";" { Option.some(TkSemicolon) }
+    else {
+    if c == "(" { Option.some(TkLParen) }
+    else {
+    if c == ")" { Option.some(TkRParen) }
+    else {
+    if c == "{" { Option.some(TkLBrace) }
+    else {
+    if c == "}" { Option.some(TkRBrace) }
+    else {
+    if c == "[" { Option.some(TkLBracket) }
+    else {
+    if c == "]" { Option.some(TkRBracket) }
+    else { Option.none() }
+    }}}}}}}}}}}}}}}}}}}
+}
+
+// ── scan_op: two-char and single-char operators ───────────────────────────────
+
+fn scan_op(c: String, tail: List<String>, acc: List<Token>) -> Result<List<Token>, String> {
+    if c == "-" && next_char_is(tail, ">") {
+        scan(List.drop(tail, 1), List.push(acc, TkArrow))
+    } else {
+    if c == "<" && next_char_is(tail, "-") {
+        scan(List.drop(tail, 1), List.push(acc, TkBackArrow))
+    } else {
+    if c == "=" && next_char_is(tail, "=") {
+        scan(List.drop(tail, 1), List.push(acc, TkEqEq))
+    } else {
+    if c == "=" && next_char_is(tail, ">") {
+        scan(List.drop(tail, 1), List.push(acc, TkFatArrow))
+    } else {
+    if c == "!" && next_char_is(tail, "=") {
+        scan(List.drop(tail, 1), List.push(acc, TkBangEq))
+    } else {
+    if c == "<" && next_char_is(tail, "=") {
+        scan(List.drop(tail, 1), List.push(acc, TkLtEq))
+    } else {
+    if c == ">" && next_char_is(tail, "=") {
+        scan(List.drop(tail, 1), List.push(acc, TkGtEq))
+    } else {
+    if c == "&" && next_char_is(tail, "&") {
+        scan(List.drop(tail, 1), List.push(acc, TkAmpAmp))
+    } else {
+    if c == "|" && next_char_is(tail, "|") {
+        scan(List.drop(tail, 1), List.push(acc, TkPipePipe))
+    } else {
+    if c == "|" && next_char_is(tail, ">") {
+        scan(List.drop(tail, 1), List.push(acc, TkPipeGt))
+    } else {
+        match single_char_token(c) {
+            Some(t) => scan(tail, List.push(acc, t))
+            None => Result.err(String.concat("unexpected character: ", c))
+        }
+    }}}}}}}}}}
+}
+
+// ── Main scan loop ────────────────────────────────────────────────────────────
+
+fn scan(chars: List<String>, acc: List<Token>) -> Result<List<Token>, String> {
+    bind trimmed <- List.drop_while(chars, |c| is_whitespace(c))
+    match List.first(trimmed) {
+        None => Result.ok(List.push(acc, TkEof))
+        Some(c) => {
+            bind tail <- List.drop(trimmed, 1)
+            if c == "/" && next_char_is(tail, "/") {
+                scan(skip_line_comment(List.drop(tail, 1)), acc)
+            } else {
+            if c == "\"" {
+                bind str_acc <- List.drop_while(List.singleton(""), |x| true)
+                Result.and_then(
+                    scan_string_chars(tail, str_acc),
+                    |r| scan(r.rest, List.push(acc, r.tok))
+                )
+            } else {
+            if is_digit(c) {
+                Result.and_then(
+                    scan_number(trimmed),
+                    |r| scan(r.rest, List.push(acc, r.tok))
+                )
+            } else {
+            if is_alpha(c) {
+                bind word_chars <- List.take_while(trimmed, |ch| is_alnum(ch))
+                bind rest <- List.drop_while(trimmed, |ch| is_alnum(ch))
+                bind word <- String.from_chars(word_chars)
+                bind tok <- match keyword_token(word) {
+                    Some(t) => t
+                    None => TkIdent(word)
+                }
+                scan(rest, List.push(acc, tok))
+            } else {
+                scan_op(c, tail, acc)
+            }}}}}
+    }
+}
+
+// ── Public API ────────────────────────────────────────────────────────────────
+
+public fn lex(src: String) -> Result<List<Token>, String> {
+    bind chars <- String.chars(src)
+    bind init_acc <- List.drop_while(List.singleton(TkEof), |x| true)
+    scan(chars, init_acc)
+}
+
+// ── Tests ─────────────────────────────────────────────────────────────────────
+
+test "lex empty string returns [TkEof]" {
+    match lex("") {
+        Err(_) => false
+        Ok(toks) => List.length(toks) == 1
+    }
+}
+
+test "lex integer literal" {
+    match lex("42") {
+        Err(_) => false
+        Ok(toks) => {
+            match List.first(toks) {
+                Some(TkInt(42)) => true
+                _ => false
+            }
+        }
+    }
+}
+
+test "lex identifier" {
+    match lex("hello") {
+        Err(_) => false
+        Ok(toks) => {
+            match List.first(toks) {
+                Some(TkIdent("hello")) => true
+                _ => false
+            }
+        }
+    }
+}
+
+test "lex keyword fn" {
+    match lex("fn") {
+        Err(_) => false
+        Ok(toks) => {
+            match List.first(toks) {
+                Some(TkFn) => true
+                _ => false
+            }
+        }
+    }
+}
+
+test "lex arrow operator" {
+    match lex("->") {
+        Err(_) => false
+        Ok(toks) => {
+            match List.first(toks) {
+                Some(TkArrow) => true
+                _ => false
+            }
+        }
+    }
+}
+
+test "lex string literal" {
+    match lex("\"hello\"") {
+        Err(_) => false
+        Ok(toks) => {
+            match List.first(toks) {
+                Some(TkStr("hello")) => true
+                _ => false
+            }
+        }
+    }
+}
+
+test "lex simple expression token count" {
+    match lex("1 + 2") {
+        Err(_) => false
+        Ok(toks) => List.length(toks) == 4
+    }
+}
+
+test "lex line comment is skipped" {
+    match lex("// comment\n42") {
+        Err(_) => false
+        Ok(toks) => {
+            match List.first(toks) {
+                Some(TkInt(42)) => true
+                _ => false
+            }
+        }
+    }
+}

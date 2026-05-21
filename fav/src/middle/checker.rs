@@ -4563,6 +4563,10 @@ impl Checker {
                 Some(Type::Result(Box::new(Type::Unit), Box::new(Type::String)))
             }
             ("IO", "file_exists_raw") => Some(Type::Bool),
+            ("IO", "argv") => Some(Type::List(Box::new(Type::String))),
+
+            // Int/Float to string (v6.0.0)
+            ("Int", "to_string") | ("Float", "to_string") => Some(Type::String),
 
             // Int bit operations (v5.1.0)
             ("Int", "shl") | ("Int", "shr") | ("Int", "band") | ("Int", "bor") | ("Int", "bxor") => {
@@ -4681,6 +4685,14 @@ impl Checker {
             }
             ("List", "take") | ("List", "drop") => {
                 let elem = self.expect_list_arg(&arg_tys, 0, span);
+                Some(Type::List(Box::new(elem)))
+            }
+            ("List", "take_while") | ("List", "drop_while") => {
+                let elem = self.expect_list_arg(&arg_tys, 0, span);
+                Some(Type::List(Box::new(elem)))
+            }
+            ("List", "singleton") => {
+                let elem = arg_tys.first().cloned().unwrap_or(Type::Unknown);
                 Some(Type::List(Box::new(elem)))
             }
 

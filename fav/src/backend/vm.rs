@@ -1916,6 +1916,57 @@ impl VM {
                     _ => Err(self.error(artifact, "List.filter requires a List as first argument")),
                 }
             }
+            "List.take_while" => {
+                if args.len() != 2 {
+                    return Err(self.error(artifact, "List.take_while requires 2 arguments"));
+                }
+                let mut it = args.into_iter();
+                let list = it.next().expect("list");
+                let func = it.next().expect("func");
+                match list {
+                    VMValue::List(xs) => {
+                        let mut out = Vec::new();
+                        for x in xs {
+                            match self.call_value(artifact, func.clone(), vec![x.clone()])? {
+                                VMValue::Bool(true) => out.push(x),
+                                VMValue::Bool(false) => break,
+                                other => {
+                                    return Err(self.error(
+                                        artifact,
+                                        &format!(
+                                            "List.take_while predicate must return Bool, got {}",
+                                            vmvalue_type_name(&other)
+                                        ),
+                                    ));
+                                }
+                            }
+                        }
+                        Ok(VMValue::List(out))
+                    }
+                    _ => Err(self.error(artifact, "List.take_while requires a List as first argument")),
+                }
+            }
+            "List.drop_while" => {
+                if args.len() != 2 {
+                    return Err(self.error(artifact, "List.drop_while requires 2 arguments"));
+                }
+                let mut it = args.into_iter();
+                let list = it.next().expect("list");
+                let func = it.next().expect("func");
+                match list {
+                    VMValue::List(xs) => {
+                        let mut rest = xs.into_iter().peekable();
+                        while let Some(x) = rest.peek() {
+                            match self.call_value(artifact, func.clone(), vec![x.clone()])? {
+                                VMValue::Bool(true) => { rest.next(); }
+                                _ => break,
+                            }
+                        }
+                        Ok(VMValue::List(rest.collect()))
+                    }
+                    _ => Err(self.error(artifact, "List.drop_while requires a List as first argument")),
+                }
+            }
             "List.fold" => {
                 if args.len() != 3 {
                     return Err(self.error(artifact, "List.fold requires 3 arguments"));
@@ -5159,6 +5210,14 @@ fn vm_call_builtin(
             };
             Ok(VMValue::Bool(std::path::Path::new(&path).is_file()))
         }
+        "IO.argv" => {
+            let argv: Vec<VMValue> = std::env::args()
+                .skip_while(|a| a != "--")
+                .skip(1)
+                .map(|a| VMValue::Str(a))
+                .collect();
+            Ok(VMValue::List(argv))
+        }
 
         "Debug.show" => {
             let v = args
@@ -5238,7 +5297,7 @@ fn vm_call_builtin(
             Ok(VMValue::Variant("some".to_string(), Some(Box::new(v))))
         }
         "Option.none" => Ok(VMValue::Variant("none".to_string(), None)),
-        "Int.show.show" | "Float.show.show" => {
+        "Int.to_string" | "Float.to_string" | "Int.show.show" | "Float.show.show" => {
             let v = args
                 .into_iter()
                 .next()
@@ -5873,6 +5932,13 @@ fn vm_call_builtin(
                 }),
                 _ => Err("List.last requires a List argument".to_string()),
             }
+        }
+        "List.singleton" => {
+            let v = args
+                .into_iter()
+                .next()
+                .ok_or_else(|| "List.singleton requires 1 argument".to_string())?;
+            Ok(VMValue::List(vec![v]))
         }
         "List.push" => {
             let mut it = args.into_iter();

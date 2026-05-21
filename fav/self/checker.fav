@@ -1,0 +1,513 @@
+// Favnir self-hosted type checker
+// Phase D: infer(Expr, Env) -> Result<String, String>
+
+// ── Mirrored AST types (from parser.fav) ─────────────────────────────────────
+
+type Lit =
+  | LInt(Int)
+  | LFloat(Float)
+  | LStr(String)
+  | LBool(Bool)
+  | LUnit
+
+type Op =
+  | OpAdd
+  | OpSub
+  | OpMul
+  | OpDiv
+  | OpMod
+  | OpEq
+  | OpNeq
+  | OpLt
+  | OpGt
+  | OpLtEq
+  | OpGtEq
+  | OpAnd
+  | OpOr
+
+type Pat =
+  | PWild
+  | PVar(String)
+  | PInt(Int)
+  | PFloat(Float)
+  | PStr(String)
+  | PBool(Bool)
+  | PUnit
+  | PVariant(String)
+  | PVariantP(String, Pat)
+
+type Expr =
+  | ELit(Lit)
+  | EVar(String)
+  | EBinOp(Op, Expr, Expr)
+  | ECall(String, String, Expr)
+  | EIf(Expr, Expr, Expr)
+  | EAccess(Expr, String)
+  | ELambda(String, Expr)
+  | EMatch(Expr, Expr)
+  | EBlock(Expr, Expr)
+  | ERecordLit(String, Expr)
+  | EArgList(Expr, Expr)
+  | EArgNil
+  | EArm(Pat, Expr, Expr)
+  | EArmNil
+  | EBind(String, Expr, Expr)
+  | EField(String, Expr, Expr)
+  | EFieldNil
+
+type TypeExpr =
+  | TeSimple(String)
+  | TeList(TypeExpr)
+  | TeOption(TypeExpr)
+  | TeResult(TypeExpr, TypeExpr)
+  | TeMap(TypeExpr, TypeExpr)
+  | TeFn(TypeExpr, TypeExpr)
+
+type Param = {
+    name: String
+    ty: TypeExpr
+}
+
+type FnDef = {
+    is_public: Bool
+    name: String
+    params: List<Param>
+    ret: TypeExpr
+    body: Expr
+}
+
+type VariantDef = {
+    name: String
+    payload: Option<TypeExpr>
+}
+
+type TypeDef = {
+    name: String
+    is_record: Bool
+    variants: List<VariantDef>
+    fields: List<Param>
+}
+
+type TestDef = {
+    name: String
+    body: Expr
+}
+
+type Item =
+  | IFn(FnDef)
+  | IType(TypeDef)
+  | ITest(TestDef)
+
+type Program = {
+    items: List<Item>
+}
+
+// ── Type sum type ─────────────────────────────────────────────────────────────
+
+type Type =
+  | TyInt
+  | TyFloat
+  | TyBool
+  | TyString
+  | TyUnit
+  | TyList(Type)
+  | TyOption(Type)
+  | TyResult(Type, Type)
+  | TyMap(Type, Type)
+  | TyFn(Type, Type)
+  | TyUnknown
+
+fn type_to_str(ty: Type) -> String {
+    match ty {
+        TyInt => "Int"
+        TyFloat => "Float"
+        TyBool => "Bool"
+        TyString => "String"
+        TyUnit => "Unit"
+        TyList(t) => String.concat("List<", String.concat(type_to_str(t), ">"))
+        TyOption(t) => String.concat("Option<", String.concat(type_to_str(t), ">"))
+        TyResult(a, b) => "Result"
+        TyMap(k, v) => "Map"
+        TyFn(a, b) => "Fn"
+        TyUnknown => "Unknown"
+    }
+}
+
+fn str_to_type(s: String) -> Type {
+    if s == "Int" { TyInt }
+    else {
+    if s == "Float" { TyFloat }
+    else {
+    if s == "Bool" { TyBool }
+    else {
+    if s == "String" { TyString }
+    else {
+    if s == "Unit" { TyUnit }
+    else { TyUnknown }
+    }}}}
+}
+
+// ── Environment (association list) ────────────────────────────────────────────
+
+type KVPair = {
+    first: String
+    second: String
+}
+
+type CheckState = {
+    env: List<KVPair>
+    errors: List<String>
+}
+
+fn env_empty() -> List<KVPair> {
+    List.take_while(List.singleton(KVPair { first: "", second: "" }), |v| false)
+}
+
+fn env_insert(env: List<KVPair>, name: String, ty: String) -> List<KVPair> {
+    List.push(env, KVPair { first: name, second: ty })
+}
+
+fn env_lookup(env: List<KVPair>, name: String) -> Option<String> {
+    match List.first(env) {
+        None => Option.none()
+        Some(pair) => {
+            if pair.first == name { Option.some(pair.second) }
+            else { env_lookup(List.drop(env, 1), name) }
+        }
+    }
+}
+
+// ── TypeExpr to string ────────────────────────────────────────────────────────
+
+fn type_expr_to_str(te: TypeExpr) -> String {
+    match te {
+        TeSimple(name) => name
+        TeList(inner) => String.concat("List<", String.concat(type_expr_to_str(inner), ">"))
+        TeOption(inner) => String.concat("Option<", String.concat(type_expr_to_str(inner), ">"))
+        TeResult(a, b) => "Result"
+        TeMap(k, v) => "Map"
+        TeFn(a, b) => "Fn"
+    }
+}
+
+// ── Literal inference ─────────────────────────────────────────────────────────
+
+fn infer_lit(lit: Lit) -> String {
+    match lit {
+        LInt(n) => "Int"
+        LFloat(f) => "Float"
+        LStr(s) => "String"
+        LBool(b) => "Bool"
+        LUnit => "Unit"
+    }
+}
+
+// ── Binary operator type inference ────────────────────────────────────────────
+
+fn is_arith_op(op: Op) -> Bool {
+    match op {
+        OpAdd => true
+        OpSub => true
+        OpMul => true
+        OpDiv => true
+        OpMod => true
+        _ => false
+    }
+}
+
+fn is_cmp_op(op: Op) -> Bool {
+    match op {
+        OpEq => true
+        OpNeq => true
+        OpLt => true
+        OpGt => true
+        OpLtEq => true
+        OpGtEq => true
+        _ => false
+    }
+}
+
+fn infer_op(op: Op, lty: String, rty: String) -> Result<String, String> {
+    if is_arith_op(op) {
+        if lty == "Int" && rty == "Int" { Result.ok("Int") }
+        else {
+        if lty == "Float" && rty == "Float" { Result.ok("Float") }
+        else {
+        if lty == "Unknown" || rty == "Unknown" { Result.ok("Unknown") }
+        else { Result.err(String.concat("type mismatch in arithmetic: ", String.concat(lty, String.concat(" vs ", rty)))) }
+        }}
+    } else {
+    if is_cmp_op(op) {
+        Result.ok("Bool")
+    } else {
+        if lty == "Bool" && rty == "Bool" { Result.ok("Bool") }
+        else {
+        if lty == "Unknown" || rty == "Unknown" { Result.ok("Bool") }
+        else { Result.err("logical operator requires Bool operands") }
+        }
+    }}
+}
+
+// ── Per-namespace builtin return types ────────────────────────────────────────
+
+fn str_fn(fname: String) -> String {
+    if fname == "concat" { "String" }
+    else { if fname == "length" { "Int" }
+    else { if fname == "contains" { "Bool" }
+    else { if fname == "slice" { "String" }
+    else { if fname == "to_int" { "Option" }
+    else { if fname == "to_float" { "Option" }
+    else { if fname == "chars" { "List" }
+    else { if fname == "from_chars" { "String" }
+    else { "Unknown" }
+    }}}}}}}
+}
+
+fn list_fn(fname: String) -> String {
+    if fname == "push" { "List" }
+    else { if fname == "length" { "Int" }
+    else { if fname == "first" { "Option" }
+    else { if fname == "concat" { "List" }
+    else { if fname == "drop" { "List" }
+    else { if fname == "take" { "List" }
+    else { if fname == "singleton" { "List" }
+    else { if fname == "any" { "Bool" }
+    else { if fname == "all" { "Bool" }
+    else { if fname == "map" { "List" }
+    else { if fname == "filter" { "List" }
+    else { if fname == "range" { "List" }
+    else { if fname == "take_while" { "List" }
+    else { if fname == "drop_while" { "List" }
+    else { "List" }
+    }}}}}}}}}}}}}
+}
+
+fn opt_fn(fname: String) -> String {
+    if fname == "some" { "Option" }
+    else { if fname == "none" { "Option" }
+    else { if fname == "and_then" { "Option" }
+    else { "Unknown" }
+    }}
+}
+
+fn res_fn(fname: String) -> String {
+    if fname == "ok" { "Result" }
+    else { if fname == "err" { "Result" }
+    else { if fname == "and_then" { "Result" }
+    else { "Unknown" }
+    }}
+}
+
+fn map_fn(fname: String) -> String {
+    if fname == "get" { "Option" }
+    else { if fname == "set" { "Map" }
+    else { if fname == "keys" { "List" }
+    else { if fname == "values" { "List" }
+    else { if fname == "from_list" { "Map" }
+    else { "Unknown" }
+    }}}}
+}
+
+fn builtin_ret_ty(ns: String, fname: String) -> String {
+    if ns == "String" { str_fn(fname) }
+    else { if ns == "List" { list_fn(fname) }
+    else { if ns == "Option" { opt_fn(fname) }
+    else { if ns == "Result" { res_fn(fname) }
+    else { if ns == "Map" { map_fn(fname) }
+    else { if ns == "Int" {
+        if fname == "to_string" { "String" }
+        else { "Unknown" }
+    }
+    else { if ns == "IO" {
+        if fname == "argv" { "List" }
+        else { "Unknown" }
+    }
+    else { "Unknown" }
+    }}}}}}
+}
+
+// ── Pattern environment extension ─────────────────────────────────────────────
+
+fn env_from_pat(pat: Pat, env: List<KVPair>) -> List<KVPair> {
+    match pat {
+        PVar(name) => env_insert(env, name, "Unknown")
+        PVariantP(cname, inner) => env_from_pat(inner, env)
+        _ => env
+    }
+}
+
+// ── Build param env ───────────────────────────────────────────────────────────
+
+fn build_param_env(params: List<Param>, env: List<KVPair>) -> List<KVPair> {
+    match List.first(params) {
+        None => env
+        Some(p) => {
+            bind new_env <- env_insert(env, p.name, type_expr_to_str(p.ty))
+            build_param_env(List.drop(params, 1), new_env)
+        }
+    }
+}
+
+// ── Match arms inference ──────────────────────────────────────────────────────
+
+fn infer_arms(arms: Expr, env: List<KVPair>) -> Result<String, String> {
+    match arms {
+        EArmNil => Result.ok("Unit")
+        EArm(pat, body, rest) => {
+            bind pat_env <- env_from_pat(pat, env)
+            Result.and_then(infer_expr(body, pat_env), |bty|
+            match rest {
+                EArmNil => Result.ok(bty)
+                _ => Result.and_then(infer_arms(rest, env), |rty|
+                    if bty == rty || bty == "Unknown" || rty == "Unknown" {
+                        Result.ok(bty)
+                    } else {
+                        Result.ok("Unknown")
+                    })
+            })
+        }
+        _ => Result.err("expected arm list in match")
+    }
+}
+
+// ── Call inference ────────────────────────────────────────────────────────────
+
+fn infer_call(ns: String, fname: String, args: Expr, env: List<KVPair>) -> Result<String, String> {
+    if ns == "" {
+        match env_lookup(env, fname) {
+            Some(ty) => Result.ok(ty)
+            None => Result.ok("Unknown")
+        }
+    } else {
+        Result.ok(builtin_ret_ty(ns, fname))
+    }
+}
+
+// ── Expression inference ──────────────────────────────────────────────────────
+
+fn infer_expr(expr: Expr, env: List<KVPair>) -> Result<String, String> {
+    match expr {
+        ELit(lit) => Result.ok(infer_lit(lit))
+        EVar(name) => {
+            match env_lookup(env, name) {
+                Some(ty) => Result.ok(ty)
+                None => Result.ok("Unknown")
+            }
+        }
+        EBinOp(op, left, right) => Result.and_then(infer_expr(left, env), |lty|
+            Result.and_then(infer_expr(right, env), |rty|
+            infer_op(op, lty, rty)))
+        EIf(cond, then_e, else_e) => Result.and_then(infer_expr(cond, env), |cty|
+            Result.and_then(infer_expr(then_e, env), |tty|
+            Result.and_then(infer_expr(else_e, env), |ety|
+            if tty == ety || tty == "Unknown" || ety == "Unknown" {
+                Result.ok(tty)
+            } else {
+                Result.ok("Unknown")
+            })))
+        EMatch(scrut, arms) => Result.and_then(infer_expr(scrut, env), |sty|
+            infer_arms(arms, env))
+        ECall(ns, fname, args) => infer_call(ns, fname, args, env)
+        ELambda(param, body) => {
+            bind lam_env <- env_insert(env, param, "Unknown")
+            Result.and_then(infer_expr(body, lam_env), |bty|
+            Result.ok("Fn"))
+        }
+        EBind(vname, val_e, cont_e) => Result.and_then(infer_expr(val_e, env), |vty|
+            infer_expr(cont_e, env_insert(env, vname, vty)))
+        ERecordLit(tname, fields) => Result.ok(tname)
+        EAccess(obj_e, field) => Result.and_then(infer_expr(obj_e, env), |oty|
+            Result.ok("Unknown"))
+        EBlock(a, b) => Result.and_then(infer_expr(a, env), |aty|
+            infer_expr(b, env))
+        EArgList(head, tail) => Result.and_then(infer_expr(head, env), |hty|
+            infer_expr(tail, env))
+        EArgNil => Result.ok("Unit")
+        EArm(pat, body, rest) => infer_arms(EArm(pat, body, rest), env)
+        EArmNil => Result.ok("Unit")
+        EField(fname, val_e, rest) => Result.and_then(infer_expr(val_e, env), |vty|
+            infer_expr(rest, env))
+        EFieldNil => Result.ok("Unit")
+    }
+}
+
+// ── Function definition checker ───────────────────────────────────────────────
+
+fn check_fn_def(fd: FnDef, env: List<KVPair>) -> Result<String, String> {
+    bind param_env <- build_param_env(fd.params, env)
+    Result.and_then(infer_expr(fd.body, param_env), |body_ty|
+    Result.ok(fd.name))
+}
+
+// ── Item / program checker ────────────────────────────────────────────────────
+
+fn check_item(item: Item, env: List<KVPair>) -> Result<String, String> {
+    match item {
+        IFn(fd) => check_fn_def(fd, env)
+        IType(td) => Result.ok(td.name)
+        ITest(td) => {
+            bind test_env <- env_empty()
+            Result.and_then(infer_expr(td.body, test_env), |ty|
+            Result.ok(td.name))
+        }
+    }
+}
+
+fn check_items(items: List<Item>, env: List<KVPair>) -> Result<String, String> {
+    match List.first(items) {
+        None => Result.ok("ok")
+        Some(item) => Result.and_then(check_item(item, env), |name|
+            check_items(List.drop(items, 1), env))
+    }
+}
+
+public fn check(prog: Program) -> Result<String, String> {
+    bind init_env <- env_empty()
+    check_items(prog.items, init_env)
+}
+
+// ── Tests ─────────────────────────────────────────────────────────────────────
+
+test "infer_lit int" {
+    infer_lit(LInt(42)) == "Int"
+}
+
+test "infer_lit bool" {
+    infer_lit(LBool(true)) == "Bool"
+}
+
+test "infer_lit string" {
+    infer_lit(LStr("hello")) == "String"
+}
+
+test "infer_expr literal int" {
+    bind env <- env_empty()
+    match infer_expr(ELit(LInt(1)), env) {
+        Err(e) => false
+        Ok(ty) => ty == "Int"
+    }
+}
+
+test "infer_expr addition" {
+    bind env <- env_empty()
+    match infer_expr(EBinOp(OpAdd, ELit(LInt(1)), ELit(LInt(2))), env) {
+        Err(e) => false
+        Ok(ty) => ty == "Int"
+    }
+}
+
+test "infer_expr variable lookup" {
+    bind env <- env_insert(env_empty(), "x", "Bool")
+    match infer_expr(EVar("x"), env) {
+        Err(e) => false
+        Ok(ty) => ty == "Bool"
+    }
+}
+
+test "type_to_str round trip" {
+    type_to_str(TyInt) == "Int" && type_to_str(TyBool) == "Bool" && type_to_str(TyString) == "String"
+}
+
+test "builtin ret ty" {
+    builtin_ret_ty("String", "concat") == "String" && builtin_ret_ty("List", "length") == "Int"
+}

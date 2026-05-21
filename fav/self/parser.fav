@@ -1,0 +1,1016 @@
+// Favnir self-hosted parser
+// Phase C: AST types + parse(List<Token>) -> Result<Program, String>
+
+// ── Token (mirrored from lexer.fav) ──────────────────────────────────────────
+
+type Token =
+  | TkInt(Int)
+  | TkFloat(Float)
+  | TkStr(String)
+  | TkIdent(String)
+  | TkTrue
+  | TkFalse
+  | TkFn
+  | TkType
+  | TkIf
+  | TkElse
+  | TkMatch
+  | TkBind
+  | TkImport
+  | TkPublic
+  | TkReturn
+  | TkFor
+  | TkIn
+  | TkTest
+  | TkBench
+  | TkPlus
+  | TkMinus
+  | TkStar
+  | TkSlash
+  | TkPercent
+  | TkEqEq
+  | TkBangEq
+  | TkLtEq
+  | TkGtEq
+  | TkAmpAmp
+  | TkPipePipe
+  | TkArrow
+  | TkBackArrow
+  | TkFatArrow
+  | TkPipeGt
+  | TkEq
+  | TkBang
+  | TkLt
+  | TkGt
+  | TkPipe
+  | TkDot
+  | TkComma
+  | TkColon
+  | TkSemicolon
+  | TkLParen
+  | TkRParen
+  | TkLBrace
+  | TkRBrace
+  | TkLBracket
+  | TkRBracket
+  | TkEof
+
+// ── Literal ───────────────────────────────────────────────────────────────────
+
+type Lit =
+  | LInt(Int)
+  | LFloat(Float)
+  | LStr(String)
+  | LBool(Bool)
+  | LUnit
+
+// ── Binary operator ───────────────────────────────────────────────────────────
+
+type Op =
+  | OpAdd
+  | OpSub
+  | OpMul
+  | OpDiv
+  | OpMod
+  | OpEq
+  | OpNeq
+  | OpLt
+  | OpGt
+  | OpLtEq
+  | OpGtEq
+  | OpAnd
+  | OpOr
+
+// ── Pattern ───────────────────────────────────────────────────────────────────
+
+type Pat =
+  | PWild
+  | PVar(String)
+  | PInt(Int)
+  | PFloat(Float)
+  | PStr(String)
+  | PBool(Bool)
+  | PUnit
+  | PVariant(String)
+  | PVariantP(String, Pat)
+
+// ── Expr (self-recursive, lists encoded as linked-list variants) ──────────────
+//
+//  EArgList(head, tail) — linked list of call arguments
+//  EArgNil              — empty argument list
+//  EArm(pat, body, rest) — linked list of match arms
+//  EArmNil              — empty arm list
+//  EBind(name, val, cont) — bind statement in block
+//  EField(name, val, rest) — linked list of record literal fields
+//  EFieldNil            — empty field list
+
+type Expr =
+  | ELit(Lit)
+  | EVar(String)
+  | EBinOp(Op, Expr, Expr)
+  | ECall(String, String, Expr)
+  | EIf(Expr, Expr, Expr)
+  | EAccess(Expr, String)
+  | ELambda(String, Expr)
+  | EMatch(Expr, Expr)
+  | EBlock(Expr, Expr)
+  | ERecordLit(String, Expr)
+  | EArgList(Expr, Expr)
+  | EArgNil
+  | EArm(Pat, Expr, Expr)
+  | EArmNil
+  | EBind(String, Expr, Expr)
+  | EField(String, Expr, Expr)
+  | EFieldNil
+
+// ── TypeExpr ──────────────────────────────────────────────────────────────────
+
+type TypeExpr =
+  | TeSimple(String)
+  | TeList(TypeExpr)
+  | TeOption(TypeExpr)
+  | TeResult(TypeExpr, TypeExpr)
+  | TeMap(TypeExpr, TypeExpr)
+  | TeFn(TypeExpr, TypeExpr)
+
+// ── Top-level definitions ─────────────────────────────────────────────────────
+
+type Param = {
+    name: String
+    ty: TypeExpr
+}
+
+type FnDef = {
+    is_public: Bool
+    name: String
+    params: List<Param>
+    ret: TypeExpr
+    body: Expr
+}
+
+type VariantDef = {
+    name: String
+    payload: Option<TypeExpr>
+}
+
+type TypeDef = {
+    name: String
+    is_record: Bool
+    variants: List<VariantDef>
+    fields: List<Param>
+}
+
+type TestDef = {
+    name: String
+    body: Expr
+}
+
+type Item =
+  | IFn(FnDef)
+  | IType(TypeDef)
+  | ITest(TestDef)
+
+type Program = {
+    items: List<Item>
+}
+
+// ── Parse result types ────────────────────────────────────────────────────────
+
+type ExprParse = {
+    expr: Expr
+    rest: List<Token>
+}
+
+type PatParse = {
+    pat: Pat
+    rest: List<Token>
+}
+
+type TypeExprParse = {
+    ty: TypeExpr
+    rest: List<Token>
+}
+
+type ParamParse = {
+    param: Param
+    rest: List<Token>
+}
+
+type ParamsParse = {
+    params: List<Param>
+    rest: List<Token>
+}
+
+type FnDefParse = {
+    fn_def: FnDef
+    rest: List<Token>
+}
+
+type VariantDefParse = {
+    variant: VariantDef
+    rest: List<Token>
+}
+
+type VariantsParse = {
+    variants: List<VariantDef>
+    rest: List<Token>
+}
+
+type TypeDefParse = {
+    type_def: TypeDef
+    rest: List<Token>
+}
+
+type ItemParse = {
+    item: Item
+    rest: List<Token>
+}
+
+type ItemsParse = {
+    items: List<Item>
+    rest: List<Token>
+}
+
+// ── ParseState helpers ────────────────────────────────────────────────────────
+
+fn peek(toks: List<Token>) -> Option<Token> {
+    List.first(toks)
+}
+
+fn advance(toks: List<Token>) -> List<Token> {
+    List.drop(toks, 1)
+}
+
+// ── Token equality ────────────────────────────────────────────────────────────
+
+fn token_eq(a: Token, b: Token) -> Bool {
+    match a {
+        TkInt(n) => { match b { TkInt(m) => n == m _ => false } }
+        TkFloat(f) => { match b { TkFloat(g) => f == g _ => false } }
+        TkStr(s) => { match b { TkStr(t) => s == t _ => false } }
+        TkIdent(s) => { match b { TkIdent(t) => s == t _ => false } }
+        TkTrue => { match b { TkTrue => true _ => false } }
+        TkFalse => { match b { TkFalse => true _ => false } }
+        TkFn => { match b { TkFn => true _ => false } }
+        TkType => { match b { TkType => true _ => false } }
+        TkIf => { match b { TkIf => true _ => false } }
+        TkElse => { match b { TkElse => true _ => false } }
+        TkMatch => { match b { TkMatch => true _ => false } }
+        TkBind => { match b { TkBind => true _ => false } }
+        TkImport => { match b { TkImport => true _ => false } }
+        TkPublic => { match b { TkPublic => true _ => false } }
+        TkReturn => { match b { TkReturn => true _ => false } }
+        TkFor => { match b { TkFor => true _ => false } }
+        TkIn => { match b { TkIn => true _ => false } }
+        TkTest => { match b { TkTest => true _ => false } }
+        TkBench => { match b { TkBench => true _ => false } }
+        TkPlus => { match b { TkPlus => true _ => false } }
+        TkMinus => { match b { TkMinus => true _ => false } }
+        TkStar => { match b { TkStar => true _ => false } }
+        TkSlash => { match b { TkSlash => true _ => false } }
+        TkPercent => { match b { TkPercent => true _ => false } }
+        TkEqEq => { match b { TkEqEq => true _ => false } }
+        TkBangEq => { match b { TkBangEq => true _ => false } }
+        TkLtEq => { match b { TkLtEq => true _ => false } }
+        TkGtEq => { match b { TkGtEq => true _ => false } }
+        TkAmpAmp => { match b { TkAmpAmp => true _ => false } }
+        TkPipePipe => { match b { TkPipePipe => true _ => false } }
+        TkArrow => { match b { TkArrow => true _ => false } }
+        TkBackArrow => { match b { TkBackArrow => true _ => false } }
+        TkFatArrow => { match b { TkFatArrow => true _ => false } }
+        TkPipeGt => { match b { TkPipeGt => true _ => false } }
+        TkEq => { match b { TkEq => true _ => false } }
+        TkBang => { match b { TkBang => true _ => false } }
+        TkLt => { match b { TkLt => true _ => false } }
+        TkGt => { match b { TkGt => true _ => false } }
+        TkPipe => { match b { TkPipe => true _ => false } }
+        TkDot => { match b { TkDot => true _ => false } }
+        TkComma => { match b { TkComma => true _ => false } }
+        TkColon => { match b { TkColon => true _ => false } }
+        TkSemicolon => { match b { TkSemicolon => true _ => false } }
+        TkLParen => { match b { TkLParen => true _ => false } }
+        TkRParen => { match b { TkRParen => true _ => false } }
+        TkLBrace => { match b { TkLBrace => true _ => false } }
+        TkRBrace => { match b { TkRBrace => true _ => false } }
+        TkLBracket => { match b { TkLBracket => true _ => false } }
+        TkRBracket => { match b { TkRBracket => true _ => false } }
+        TkEof => { match b { TkEof => true _ => false } }
+    }
+}
+
+fn expect_tok(toks: List<Token>, expected: Token) -> Result<List<Token>, String> {
+    match peek(toks) {
+        None => Result.err("unexpected end of input")
+        Some(t) => {
+            if token_eq(t, expected) {
+                Result.ok(advance(toks))
+            } else {
+                Result.err("unexpected token")
+            }
+        }
+    }
+}
+
+// ── Pattern parser ────────────────────────────────────────────────────────────
+
+fn parse_pat(toks: List<Token>) -> Result<PatParse, String> {
+    match peek(toks) {
+        None => Result.err("expected pattern")
+        Some(TkIdent(name)) => {
+            bind rest1 <- advance(toks)
+            match peek(rest1) {
+                Some(TkLParen) => {
+                    bind rest2 <- advance(rest1)
+                    Result.and_then(parse_pat(rest2), |inner|
+                    Result.and_then(expect_tok(inner.rest, TkRParen), |rest3|
+                    Result.ok(PatParse { pat: PVariantP(name, inner.pat), rest: rest3 })))
+                }
+                _ => {
+                    if String.contains("ABCDEFGHIJKLMNOPQRSTUVWXYZ", String.slice(name, 0, 1)) {
+                        Result.ok(PatParse { pat: PVariant(name), rest: rest1 })
+                    } else {
+                        Result.ok(PatParse { pat: PVar(name), rest: rest1 })
+                    }
+                }
+            }
+        }
+        Some(TkInt(n)) => Result.ok(PatParse { pat: PInt(n), rest: advance(toks) })
+        Some(TkFloat(f)) => Result.ok(PatParse { pat: PFloat(f), rest: advance(toks) })
+        Some(TkStr(s)) => Result.ok(PatParse { pat: PStr(s), rest: advance(toks) })
+        Some(TkTrue) => Result.ok(PatParse { pat: PBool(true), rest: advance(toks) })
+        Some(TkFalse) => Result.ok(PatParse { pat: PBool(false), rest: advance(toks) })
+        Some(TkLParen) => {
+            Result.and_then(expect_tok(toks, TkLParen), |rest1|
+            Result.and_then(expect_tok(rest1, TkRParen), |rest2|
+            Result.ok(PatParse { pat: PUnit, rest: rest2 })))
+        }
+        _ => Result.ok(PatParse { pat: PWild, rest: advance(toks) })
+    }
+}
+
+// ── TypeExpr parser ───────────────────────────────────────────────────────────
+
+fn parse_type_expr(toks: List<Token>) -> Result<TypeExprParse, String> {
+    match peek(toks) {
+        None => Result.err("expected type")
+        Some(TkIdent(name)) => {
+            bind rest1 <- advance(toks)
+            match peek(rest1) {
+                Some(TkLt) => {
+                    bind rest2 <- advance(rest1)
+                    Result.and_then(parse_type_expr(rest2), |inner|
+                    Result.and_then(expect_tok(inner.rest, TkGt), |rest3|
+                    if name == "List" {
+                        Result.ok(TypeExprParse { ty: TeList(inner.ty), rest: rest3 })
+                    } else {
+                    if name == "Option" {
+                        Result.ok(TypeExprParse { ty: TeOption(inner.ty), rest: rest3 })
+                    } else {
+                        Result.ok(TypeExprParse { ty: TeSimple(name), rest: rest3 })
+                    }}))
+                }
+                _ => Result.ok(TypeExprParse { ty: TeSimple(name), rest: rest1 })
+            }
+        }
+        _ => Result.err("expected type name")
+    }
+}
+
+// ── Match arm list parser ─────────────────────────────────────────────────────
+
+fn parse_arms(toks: List<Token>, acc: Expr) -> Result<ExprParse, String> {
+    match peek(toks) {
+        Some(TkRBrace) => Result.ok(ExprParse { expr: acc, rest: toks })
+        Some(TkEof) => Result.err("unterminated match")
+        _ => Result.and_then(parse_pat(toks), |pat_p|
+            Result.and_then(expect_tok(pat_p.rest, TkFatArrow), |rest1|
+            Result.and_then(parse_expr(rest1), |body_p|
+            parse_arms(
+                match peek(body_p.rest) {
+                    Some(TkComma) => advance(body_p.rest)
+                    _ => body_p.rest
+                },
+                EArm(pat_p.pat, body_p.expr, acc)
+            ))))
+    }
+}
+
+// ── Argument list parser ──────────────────────────────────────────────────────
+
+fn parse_args(toks: List<Token>, acc: Expr) -> Result<ExprParse, String> {
+    match peek(toks) {
+        Some(TkRParen) => Result.ok(ExprParse { expr: acc, rest: toks })
+        Some(TkEof) => Result.err("unterminated argument list")
+        _ => Result.and_then(parse_expr(toks), |arg_p|
+            parse_args(
+                match peek(arg_p.rest) {
+                    Some(TkComma) => advance(arg_p.rest)
+                    _ => arg_p.rest
+                },
+                EArgList(arg_p.expr, acc)
+            ))
+    }
+}
+
+// ── Record field list parser ──────────────────────────────────────────────────
+
+fn parse_fields(toks: List<Token>, acc: Expr) -> Result<ExprParse, String> {
+    match peek(toks) {
+        Some(TkRBrace) => Result.ok(ExprParse { expr: acc, rest: toks })
+        Some(TkEof) => Result.err("unterminated record")
+        _ => {
+            match peek(toks) {
+                Some(TkIdent(fname)) => {
+                    bind rest1 <- advance(toks)
+                    Result.and_then(expect_tok(rest1, TkColon), |rest2|
+                    Result.and_then(parse_expr(rest2), |val_p|
+                    parse_fields(
+                        match peek(val_p.rest) {
+                            Some(TkComma) => advance(val_p.rest)
+                            _ => val_p.rest
+                        },
+                        EField(fname, val_p.expr, acc)
+                    )))
+                }
+                _ => Result.err("expected field name")
+            }
+        }
+    }
+}
+
+// ── Block parser (bind stmts + final expr) ────────────────────────────────────
+
+fn parse_block_inner(toks: List<Token>) -> Result<ExprParse, String> {
+    match peek(toks) {
+        Some(TkBind) => {
+            bind rest1 <- advance(toks)
+            match peek(rest1) {
+                Some(TkIdent(vname)) => {
+                    bind rest2 <- advance(rest1)
+                    Result.and_then(expect_tok(rest2, TkBackArrow), |rest3|
+                    Result.and_then(parse_expr(rest3), |val_p|
+                    Result.and_then(parse_block_inner(
+                        match peek(val_p.rest) {
+                            Some(TkSemicolon) => advance(val_p.rest)
+                            _ => val_p.rest
+                        }
+                    ), |cont_p|
+                    Result.ok(ExprParse {
+                        expr: EBind(vname, val_p.expr, cont_p.expr)
+                        rest: cont_p.rest
+                    }))))
+                }
+                _ => Result.err("expected identifier after bind")
+            }
+        }
+        _ => parse_expr(toks)
+    }
+}
+
+// ── Primary expression parser ─────────────────────────────────────────────────
+
+fn parse_primary(toks: List<Token>) -> Result<ExprParse, String> {
+    match peek(toks) {
+        None => Result.err("unexpected end of input")
+        Some(TkInt(n)) => Result.ok(ExprParse { expr: ELit(LInt(n)), rest: advance(toks) })
+        Some(TkFloat(f)) => Result.ok(ExprParse { expr: ELit(LFloat(f)), rest: advance(toks) })
+        Some(TkStr(s)) => Result.ok(ExprParse { expr: ELit(LStr(s)), rest: advance(toks) })
+        Some(TkTrue) => Result.ok(ExprParse { expr: ELit(LBool(true)), rest: advance(toks) })
+        Some(TkFalse) => Result.ok(ExprParse { expr: ELit(LBool(false)), rest: advance(toks) })
+        Some(TkLParen) => {
+            bind rest1 <- advance(toks)
+            match peek(rest1) {
+                Some(TkRParen) => Result.ok(ExprParse { expr: ELit(LUnit), rest: advance(rest1) })
+                _ => Result.and_then(parse_expr(rest1), |inner|
+                    Result.and_then(expect_tok(inner.rest, TkRParen), |rest2|
+                    Result.ok(ExprParse { expr: inner.expr, rest: rest2 })))
+            }
+        }
+        Some(TkIf) => {
+            bind rest1 <- advance(toks)
+            Result.and_then(parse_expr(rest1), |cond_p|
+            Result.and_then(expect_tok(cond_p.rest, TkLBrace), |rest2|
+            Result.and_then(parse_block_inner(rest2), |then_p|
+            Result.and_then(expect_tok(then_p.rest, TkRBrace), |rest3|
+            Result.and_then(expect_tok(rest3, TkElse), |rest4|
+            Result.and_then(expect_tok(rest4, TkLBrace), |rest5|
+            Result.and_then(parse_block_inner(rest5), |else_p|
+            Result.and_then(expect_tok(else_p.rest, TkRBrace), |rest6|
+            Result.ok(ExprParse {
+                expr: EIf(cond_p.expr, then_p.expr, else_p.expr)
+                rest: rest6
+            })))))))))
+        }
+        Some(TkMatch) => {
+            bind rest1 <- advance(toks)
+            Result.and_then(parse_expr(rest1), |scrut_p|
+            Result.and_then(expect_tok(scrut_p.rest, TkLBrace), |rest2|
+            Result.and_then(parse_arms(rest2, EArmNil), |arms_p|
+            Result.and_then(expect_tok(arms_p.rest, TkRBrace), |rest3|
+            Result.ok(ExprParse {
+                expr: EMatch(scrut_p.expr, arms_p.expr)
+                rest: rest3
+            })))))
+        }
+        Some(TkPipe) => {
+            bind rest1 <- advance(toks)
+            match peek(rest1) {
+                Some(TkIdent(param)) => {
+                    bind rest2 <- advance(rest1)
+                    Result.and_then(expect_tok(rest2, TkPipe), |rest3|
+                    Result.and_then(parse_expr(rest3), |body_p|
+                    Result.ok(ExprParse {
+                        expr: ELambda(param, body_p.expr)
+                        rest: body_p.rest
+                    })))
+                }
+                _ => Result.err("expected lambda parameter")
+            }
+        }
+        Some(TkLBrace) => {
+            bind rest1 <- advance(toks)
+            Result.and_then(parse_block_inner(rest1), |inner|
+            Result.and_then(expect_tok(inner.rest, TkRBrace), |rest2|
+            Result.ok(ExprParse { expr: inner.expr, rest: rest2 })))
+        }
+        Some(TkIdent(name)) => {
+            bind rest1 <- advance(toks)
+            match peek(rest1) {
+                Some(TkDot) => {
+                    bind rest2 <- advance(rest1)
+                    match peek(rest2) {
+                        Some(TkIdent(fname)) => {
+                            bind rest3 <- advance(rest2)
+                            match peek(rest3) {
+                                Some(TkLParen) => {
+                                    bind rest4 <- advance(rest3)
+                                    Result.and_then(parse_args(rest4, EArgNil), |args_p|
+                                    Result.and_then(expect_tok(args_p.rest, TkRParen), |rest5|
+                                    parse_postfix(ECall(name, fname, args_p.expr), rest5)))
+                                }
+                                _ => parse_postfix(EAccess(EVar(name), fname), rest3)
+                            }
+                        }
+                        _ => Result.err("expected field name after dot")
+                    }
+                }
+                Some(TkLParen) => {
+                    bind rest2 <- advance(rest1)
+                    Result.and_then(parse_args(rest2, EArgNil), |args_p|
+                    Result.and_then(expect_tok(args_p.rest, TkRParen), |rest3|
+                    parse_postfix(ECall("", name, args_p.expr), rest3)))
+                }
+                Some(TkLBrace) => {
+                    bind rest2 <- advance(rest1)
+                    Result.and_then(parse_fields(rest2, EFieldNil), |fields_p|
+                    Result.and_then(expect_tok(fields_p.rest, TkRBrace), |rest3|
+                    Result.ok(ExprParse {
+                        expr: ERecordLit(name, fields_p.expr)
+                        rest: rest3
+                    })))
+                }
+                _ => parse_postfix(EVar(name), rest1)
+            }
+        }
+        _ => Result.err("unexpected token in expression")
+    }
+}
+
+fn parse_postfix(expr: Expr, toks: List<Token>) -> Result<ExprParse, String> {
+    match peek(toks) {
+        Some(TkDot) => {
+            bind rest1 <- advance(toks)
+            match peek(rest1) {
+                Some(TkIdent(field)) => {
+                    bind rest2 <- advance(rest1)
+                    parse_postfix(EAccess(expr, field), rest2)
+                }
+                _ => Result.err("expected field name after dot")
+            }
+        }
+        _ => Result.ok(ExprParse { expr: expr, rest: toks })
+    }
+}
+
+// ── Binary operator precedence parsing ───────────────────────────────────────
+
+fn parse_mul(toks: List<Token>) -> Result<ExprParse, String> {
+    Result.and_then(parse_primary(toks), |lhs| parse_mul_rest(lhs.expr, lhs.rest))
+}
+
+fn parse_mul_rest(lhs: Expr, toks: List<Token>) -> Result<ExprParse, String> {
+    match peek(toks) {
+        Some(TkStar) => Result.and_then(
+            parse_primary(advance(toks)),
+            |rhs| parse_mul_rest(EBinOp(OpMul, lhs, rhs.expr), rhs.rest)
+        )
+        Some(TkSlash) => Result.and_then(
+            parse_primary(advance(toks)),
+            |rhs| parse_mul_rest(EBinOp(OpDiv, lhs, rhs.expr), rhs.rest)
+        )
+        Some(TkPercent) => Result.and_then(
+            parse_primary(advance(toks)),
+            |rhs| parse_mul_rest(EBinOp(OpMod, lhs, rhs.expr), rhs.rest)
+        )
+        _ => Result.ok(ExprParse { expr: lhs, rest: toks })
+    }
+}
+
+fn parse_add(toks: List<Token>) -> Result<ExprParse, String> {
+    Result.and_then(parse_mul(toks), |lhs| parse_add_rest(lhs.expr, lhs.rest))
+}
+
+fn parse_add_rest(lhs: Expr, toks: List<Token>) -> Result<ExprParse, String> {
+    match peek(toks) {
+        Some(TkPlus) => Result.and_then(
+            parse_mul(advance(toks)),
+            |rhs| parse_add_rest(EBinOp(OpAdd, lhs, rhs.expr), rhs.rest)
+        )
+        Some(TkMinus) => Result.and_then(
+            parse_mul(advance(toks)),
+            |rhs| parse_add_rest(EBinOp(OpSub, lhs, rhs.expr), rhs.rest)
+        )
+        _ => Result.ok(ExprParse { expr: lhs, rest: toks })
+    }
+}
+
+fn parse_cmp(toks: List<Token>) -> Result<ExprParse, String> {
+    Result.and_then(parse_add(toks), |lhs| parse_cmp_rest(lhs.expr, lhs.rest))
+}
+
+fn parse_cmp_rest(lhs: Expr, toks: List<Token>) -> Result<ExprParse, String> {
+    match peek(toks) {
+        Some(TkEqEq) => Result.and_then(
+            parse_add(advance(toks)),
+            |rhs| Result.ok(ExprParse { expr: EBinOp(OpEq, lhs, rhs.expr), rest: rhs.rest })
+        )
+        Some(TkBangEq) => Result.and_then(
+            parse_add(advance(toks)),
+            |rhs| Result.ok(ExprParse { expr: EBinOp(OpNeq, lhs, rhs.expr), rest: rhs.rest })
+        )
+        Some(TkLt) => Result.and_then(
+            parse_add(advance(toks)),
+            |rhs| Result.ok(ExprParse { expr: EBinOp(OpLt, lhs, rhs.expr), rest: rhs.rest })
+        )
+        Some(TkGt) => Result.and_then(
+            parse_add(advance(toks)),
+            |rhs| Result.ok(ExprParse { expr: EBinOp(OpGt, lhs, rhs.expr), rest: rhs.rest })
+        )
+        Some(TkLtEq) => Result.and_then(
+            parse_add(advance(toks)),
+            |rhs| Result.ok(ExprParse { expr: EBinOp(OpLtEq, lhs, rhs.expr), rest: rhs.rest })
+        )
+        Some(TkGtEq) => Result.and_then(
+            parse_add(advance(toks)),
+            |rhs| Result.ok(ExprParse { expr: EBinOp(OpGtEq, lhs, rhs.expr), rest: rhs.rest })
+        )
+        _ => Result.ok(ExprParse { expr: lhs, rest: toks })
+    }
+}
+
+fn parse_and(toks: List<Token>) -> Result<ExprParse, String> {
+    Result.and_then(parse_cmp(toks), |lhs| parse_and_rest(lhs.expr, lhs.rest))
+}
+
+fn parse_and_rest(lhs: Expr, toks: List<Token>) -> Result<ExprParse, String> {
+    match peek(toks) {
+        Some(TkAmpAmp) => Result.and_then(
+            parse_cmp(advance(toks)),
+            |rhs| parse_and_rest(EBinOp(OpAnd, lhs, rhs.expr), rhs.rest)
+        )
+        _ => Result.ok(ExprParse { expr: lhs, rest: toks })
+    }
+}
+
+fn parse_or(toks: List<Token>) -> Result<ExprParse, String> {
+    Result.and_then(parse_and(toks), |lhs| parse_or_rest(lhs.expr, lhs.rest))
+}
+
+fn parse_or_rest(lhs: Expr, toks: List<Token>) -> Result<ExprParse, String> {
+    match peek(toks) {
+        Some(TkPipePipe) => Result.and_then(
+            parse_and(advance(toks)),
+            |rhs| parse_or_rest(EBinOp(OpOr, lhs, rhs.expr), rhs.rest)
+        )
+        _ => Result.ok(ExprParse { expr: lhs, rest: toks })
+    }
+}
+
+fn parse_expr(toks: List<Token>) -> Result<ExprParse, String> {
+    parse_or(toks)
+}
+
+// ── Parameter parser ──────────────────────────────────────────────────────────
+
+fn parse_param(toks: List<Token>) -> Result<ParamParse, String> {
+    match peek(toks) {
+        Some(TkIdent(pname)) => {
+            bind rest1 <- advance(toks)
+            Result.and_then(expect_tok(rest1, TkColon), |rest2|
+            Result.and_then(parse_type_expr(rest2), |ty_p|
+            Result.ok(ParamParse { param: Param { name: pname, ty: ty_p.ty }, rest: ty_p.rest })))
+        }
+        _ => Result.err("expected parameter name")
+    }
+}
+
+fn parse_params_acc(toks: List<Token>, acc: List<Param>) -> Result<ParamsParse, String> {
+    match peek(toks) {
+        Some(TkRParen) => Result.ok(ParamsParse { params: acc, rest: toks })
+        Some(TkEof) => Result.err("unterminated parameter list")
+        _ => Result.and_then(parse_param(toks), |p|
+            parse_params_acc(
+                match peek(p.rest) {
+                    Some(TkComma) => advance(p.rest)
+                    _ => p.rest
+                },
+                List.push(acc, p.param)
+            ))
+    }
+}
+
+fn parse_params(toks: List<Token>) -> Result<ParamsParse, String> {
+    bind empty <- List.take_while(List.singleton(Param { name: "", ty: TeSimple("") }), |v| false)
+    parse_params_acc(toks, empty)
+}
+
+// ── Function definition parser ────────────────────────────────────────────────
+
+fn parse_fn_def(toks: List<Token>, is_pub: Bool) -> Result<FnDefParse, String> {
+    Result.and_then(expect_tok(toks, TkFn), |rest1|
+    match peek(rest1) {
+        Some(TkIdent(fname)) => {
+            bind rest2 <- advance(rest1)
+            Result.and_then(expect_tok(rest2, TkLParen), |rest3|
+            Result.and_then(parse_params(rest3), |params_p|
+            Result.and_then(expect_tok(params_p.rest, TkRParen), |rest4|
+            Result.and_then(expect_tok(rest4, TkArrow), |rest5|
+            Result.and_then(parse_type_expr(rest5), |ret_p|
+            Result.and_then(expect_tok(ret_p.rest, TkLBrace), |rest6|
+            Result.and_then(parse_block_inner(rest6), |body_p|
+            Result.and_then(expect_tok(body_p.rest, TkRBrace), |rest7|
+            Result.ok(FnDefParse {
+                fn_def: FnDef {
+                    is_public: is_pub
+                    name: fname
+                    params: params_p.params
+                    ret: ret_p.ty
+                    body: body_p.expr
+                }
+                rest: rest7
+            })))))))))
+        }
+        _ => Result.err("expected function name")
+    })
+}
+
+// ── Variant definition parser ─────────────────────────────────────────────────
+
+fn parse_variant(toks: List<Token>) -> Result<VariantDefParse, String> {
+    Result.and_then(expect_tok(toks, TkPipe), |rest1|
+    match peek(rest1) {
+        Some(TkIdent(vname)) => {
+            bind rest2 <- advance(rest1)
+            match peek(rest2) {
+                Some(TkLParen) => {
+                    bind rest3 <- advance(rest2)
+                    Result.and_then(parse_type_expr(rest3), |ty_p|
+                    Result.and_then(expect_tok(ty_p.rest, TkRParen), |rest4|
+                    Result.ok(VariantDefParse {
+                        variant: VariantDef { name: vname, payload: Option.some(ty_p.ty) }
+                        rest: rest4
+                    })))
+                }
+                _ => Result.ok(VariantDefParse {
+                    variant: VariantDef { name: vname, payload: Option.none() }
+                    rest: rest2
+                })
+            }
+        }
+        _ => Result.err("expected variant name after |")
+    })
+}
+
+fn parse_variants_acc(toks: List<Token>, acc: List<VariantDef>) -> Result<VariantsParse, String> {
+    match peek(toks) {
+        Some(TkPipe) => Result.and_then(parse_variant(toks), |v|
+            parse_variants_acc(v.rest, List.push(acc, v.variant)))
+        _ => Result.ok(VariantsParse { variants: acc, rest: toks })
+    }
+}
+
+fn parse_variants(toks: List<Token>) -> Result<VariantsParse, String> {
+    bind empty <- List.take_while(List.singleton(VariantDef { name: "", payload: Option.none() }), |v| false)
+    parse_variants_acc(toks, empty)
+}
+
+// ── Type definition parser ────────────────────────────────────────────────────
+
+fn parse_type_def(toks: List<Token>) -> Result<TypeDefParse, String> {
+    Result.and_then(expect_tok(toks, TkType), |rest1|
+    match peek(rest1) {
+        Some(TkIdent(tname)) => {
+            bind rest2 <- advance(rest1)
+            Result.and_then(expect_tok(rest2, TkEq), |rest3|
+            match peek(rest3) {
+                Some(TkPipe) => {
+                    bind empty_params <- List.take_while(List.singleton(Param { name: "", ty: TeSimple("") }), |v| false)
+                    Result.and_then(parse_variants(rest3), |vs|
+                    Result.ok(TypeDefParse {
+                        type_def: TypeDef {
+                            name: tname
+                            is_record: false
+                            variants: vs.variants
+                            fields: empty_params
+                        }
+                        rest: vs.rest
+                    }))
+                }
+                Some(TkLBrace) => {
+                    bind rest4 <- advance(rest3)
+                    bind empty_variants <- List.take_while(List.singleton(VariantDef { name: "", payload: Option.none() }), |v| false)
+                    Result.and_then(parse_params(rest4), |fields_p|
+                    Result.and_then(expect_tok(fields_p.rest, TkRBrace), |rest5|
+                    Result.ok(TypeDefParse {
+                        type_def: TypeDef {
+                            name: tname
+                            is_record: true
+                            variants: empty_variants
+                            fields: fields_p.params
+                        }
+                        rest: rest5
+                    })))
+                }
+                _ => Result.err("expected = | variants or = { fields } in type definition")
+            })
+        }
+        _ => Result.err("expected type name")
+    })
+}
+
+// ── Top-level item parser ─────────────────────────────────────────────────────
+
+fn parse_item(toks: List<Token>) -> Result<ItemParse, String> {
+    match peek(toks) {
+        Some(TkPublic) => {
+            bind rest1 <- advance(toks)
+            match peek(rest1) {
+                Some(TkFn) => Result.and_then(parse_fn_def(rest1, true), |fd|
+                    Result.ok(ItemParse { item: IFn(fd.fn_def), rest: fd.rest }))
+                _ => Result.err("expected fn after public")
+            }
+        }
+        Some(TkFn) => Result.and_then(parse_fn_def(toks, false), |fd|
+            Result.ok(ItemParse { item: IFn(fd.fn_def), rest: fd.rest }))
+        Some(TkType) => Result.and_then(parse_type_def(toks), |td|
+            Result.ok(ItemParse { item: IType(td.type_def), rest: td.rest }))
+        Some(TkTest) => {
+            bind rest1 <- advance(toks)
+            match peek(rest1) {
+                Some(TkStr(tname)) => {
+                    bind rest2 <- advance(rest1)
+                    Result.and_then(expect_tok(rest2, TkLBrace), |rest3|
+                    Result.and_then(parse_block_inner(rest3), |body_p|
+                    Result.and_then(expect_tok(body_p.rest, TkRBrace), |rest4|
+                    Result.ok(ItemParse {
+                        item: ITest(TestDef { name: tname, body: body_p.expr })
+                        rest: rest4
+                    }))))
+                }
+                _ => Result.err("expected test name string")
+            }
+        }
+        _ => Result.err("expected fn, type, public, or test")
+    }
+}
+
+fn parse_items_acc(toks: List<Token>, acc: List<Item>) -> Result<ItemsParse, String> {
+    match peek(toks) {
+        Some(TkEof) => Result.ok(ItemsParse { items: acc, rest: toks })
+        None => Result.ok(ItemsParse { items: acc, rest: toks })
+        _ => Result.and_then(parse_item(toks), |item_p|
+            parse_items_acc(item_p.rest, List.push(acc, item_p.item)))
+    }
+}
+
+// ── Public API ────────────────────────────────────────────────────────────────
+
+public fn parse_tokens(toks: List<Token>) -> Result<Program, String> {
+    bind empty <- List.take_while(List.singleton(IFn(FnDef {
+        is_public: false
+        name: ""
+        params: List.take_while(List.singleton(Param { name: "", ty: TeSimple("") }), |v| false)
+        ret: TeSimple("")
+        body: ELit(LUnit)
+    })), |v| false)
+    Result.and_then(parse_items_acc(toks, empty), |items_p|
+    Result.ok(Program { items: items_p.items }))
+}
+
+// ── Tests ─────────────────────────────────────────────────────────────────────
+
+test "parse integer literal" {
+    match parse_expr(List.singleton(TkInt(42))) {
+        Err(e) => false
+        Ok(p) => {
+            match p.expr {
+                ELit(LInt(42)) => true
+                _ => false
+            }
+        }
+    }
+}
+
+test "parse addition 1 + 2" {
+    bind toks <- List.concat(
+        List.concat(List.singleton(TkInt(1)), List.singleton(TkPlus)),
+        List.singleton(TkInt(2))
+    )
+    match parse_expr(toks) {
+        Err(e) => false
+        Ok(p) => {
+            match p.expr {
+                EBinOp(OpAdd, ELit(LInt(1)), ELit(LInt(2))) => true
+                _ => false
+            }
+        }
+    }
+}
+
+test "parse mul before add: 2 * 3 + 1" {
+    bind toks <- List.concat(
+        List.concat(
+            List.concat(List.singleton(TkInt(2)), List.singleton(TkStar)),
+            List.concat(List.singleton(TkInt(3)), List.singleton(TkPlus))
+        ),
+        List.singleton(TkInt(1))
+    )
+    match parse_expr(toks) {
+        Err(e) => false
+        Ok(p) => {
+            match p.expr {
+                EBinOp(OpAdd, EBinOp(OpMul, ELit(LInt(2)), ELit(LInt(3))), ELit(LInt(1))) => true
+                _ => false
+            }
+        }
+    }
+}
+
+test "parse identifier" {
+    match parse_expr(List.singleton(TkIdent("foo"))) {
+        Err(e) => false
+        Ok(p) => {
+            match p.expr {
+                EVar("foo") => true
+                _ => false
+            }
+        }
+    }
+}
+
+test "parse equality" {
+    bind toks <- List.concat(
+        List.concat(List.singleton(TkInt(1)), List.singleton(TkEqEq)),
+        List.singleton(TkInt(1))
+    )
+    match parse_expr(toks) {
+        Err(e) => false
+        Ok(p) => {
+            match p.expr {
+                EBinOp(OpEq, ELit(LInt(1)), ELit(LInt(1))) => true
+                _ => false
+            }
+        }
+    }
+}
+
+test "parse fn def: fn id(x: Int) -> Int { x }" {
+    bind toks <- List.concat(
+        List.concat(
+            List.concat(
+                List.concat(List.singleton(TkFn), List.singleton(TkIdent("id"))),
+                List.concat(List.singleton(TkLParen), List.singleton(TkIdent("x")))
+            ),
+            List.concat(
+                List.concat(List.singleton(TkColon), List.singleton(TkIdent("Int"))),
+                List.concat(List.singleton(TkRParen), List.singleton(TkArrow))
+            )
+        ),
+        List.concat(
+            List.concat(List.singleton(TkIdent("Int")), List.singleton(TkLBrace)),
+            List.concat(
+                List.concat(List.singleton(TkIdent("x")), List.singleton(TkRBrace)),
+                List.singleton(TkEof)
+            )
+        )
+    )
+    match parse_tokens(toks) {
+        Err(e) => false
+        Ok(prog) => {
+            match List.first(prog.items) {
+                Some(IFn(fd)) => fd.name == "id"
+                _ => false
+            }
+        }
+    }
+}

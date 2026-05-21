@@ -1,0 +1,170 @@
+---
+title: "テスト・ベンチマーク"
+order: 5
+category: "言語仕様"
+description: "Favnir のテスト構文 — test / bench ブロック、fav test コマンド"
+---
+
+# テスト・ベンチマーク
+
+Favnir はテストとベンチマークを言語レベルでサポートしています。外部ライブラリ不要で、`.fav` ファイルの中に直接 `test` / `bench` ブロックを書けます。
+
+## test ブロック
+
+```favnir
+test "description" {
+    <Bool を返す式>
+}
+```
+
+テストは `Bool` 値を返す式です。`true` なら PASS、`false` なら FAIL です。
+
+### 例
+
+```favnir
+fn add(a: Int, b: Int) -> Int { a + b }
+
+test "add returns correct result" {
+    add(1, 2) == 3
+}
+
+test "add with negatives" {
+    add(-1, 1) == 0
+}
+```
+
+### match を使ったテスト
+
+`Result` や `Option` を返す関数のテストには `match` を使います。
+
+```favnir
+fn safe_div(a: Int, b: Int) -> Option<Int> {
+    if b == 0 { Option.none() }
+    else { Option.some(a / b) }
+}
+
+test "safe_div returns Some when divisor is nonzero" {
+    match safe_div(10, 2) {
+        Some(5) => true
+        _ => false
+    }
+}
+
+test "safe_div returns None when divisor is zero" {
+    match safe_div(10, 0) {
+        None => true
+        _ => false
+    }
+}
+```
+
+### bind を使ったテスト
+
+複数のステップが必要なテストには `bind` を使います。
+
+```favnir
+test "list operations" {
+    bind xs <- List.range(1, 4)
+    bind ys <- List.map(xs, |x| x * 2)
+    List.length(ys) == 3
+}
+```
+
+## fav test コマンド
+
+### 単一ファイルのテスト
+
+```bash
+fav test myfile.fav
+```
+
+### ディレクトリ全体のテスト
+
+```bash
+fav test src/
+```
+
+### オプション
+
+| オプション | 説明 |
+|-----------|------|
+| `--filter <pattern>` | テスト名に pattern を含むものだけ実行 |
+| `--fail-fast` | 最初の失敗で停止 |
+| `--no-capture` | 標準出力をキャプチャせずに表示 |
+| `--coverage` | カバレッジレポートを出力 |
+
+```bash
+# "list" を含むテストだけ実行
+fav test src/ --filter list
+
+# 最初の失敗で停止
+fav test src/ --fail-fast
+```
+
+## テスト出力フォーマット
+
+```
+running 3 tests in myfile.fav
+
+  PASS  add returns correct result
+  PASS  add with negatives
+  FAIL  safe_div returns Some when divisor is nonzero
+
+test result: FAIL — 2 passed, 1 failed
+```
+
+テストが全件 PASS の場合:
+
+```
+running 3 tests in myfile.fav
+
+  PASS  add returns correct result
+  PASS  add with negatives
+  PASS  safe_div returns None when divisor is zero
+
+test result: ok — 3 passed, 0 failed
+```
+
+## bench ブロック
+
+ベンチマークは `bench` キーワードで定義します。
+
+```favnir
+bench "description" {
+    <繰り返し実行したい式>
+}
+```
+
+### 例
+
+```favnir
+bench "list range 1000" {
+    List.range(0, 1000)
+}
+
+bench "string concat 100 times" {
+    List.fold(List.range(0, 100), "", |acc, _| String.concat(acc, "x"))
+}
+```
+
+## fav bench コマンド
+
+```bash
+fav bench myfile.fav
+```
+
+### 出力フォーマット
+
+```
+running 2 benchmarks in myfile.fav
+
+  list range 1000          1,234 ns/iter  (±  12 ns)
+  string concat 100 times  5,678 ns/iter  (± 123 ns)
+```
+
+## テストのベストプラクティス
+
+- テストは1つの関数・動作に絞る（1テスト1アサーション）
+- テスト名は「何を確認するか」を日本語または英語で明確に
+- `Result.err` や `Option.none` のケースも必ずテストする
+- 境界値（0、空リスト、最大値など）をテストに含める

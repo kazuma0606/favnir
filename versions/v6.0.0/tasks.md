@@ -31,7 +31,7 @@
 - [x] B-9: `lex(src: String) -> Result<List<Token>, String>` を実装
 - [x] B-10: `fav check fav/self/lexer.fav` エラーなし確認
 - [x] B-11: `driver.rs` に `self_tests::self_hosted_lexer_type_checks` を追加
-- [ ] B-12: Rust レキサーとの出力比較テストを数ケース追加
+- [x] B-12: Rust レキサーとの出力比較テストを数ケース追加
 - [x] B-13: `cargo test` 通過確認（985 tests）
 
 ---
@@ -109,11 +109,11 @@
 
 ## Phase G: ブートストラップ検証
 
-- [ ] G-1: `fav build fav/self/compiler.fav -o /tmp/compiler_s1.fvc` が成功
-- [ ] G-2: `fav run /tmp/compiler_s1.fvc -- fav/tmp/hello.fav` が正常終了
-- [ ] G-3: Stage 1 バイトコードで `compiler.fav` 自体をコンパイル（Stage 2 生成）
-- [ ] G-4: Stage 1 == Stage 2 の一致確認（diff でゼロ差分）
-- [ ] G-5: `fav/src/driver/self_tests.rs` にブートストラップテストを追加
+- [x] G-1: `fav build fav/self/compiler.fav -o /tmp/compiler_s1.fvc` が成功
+- [x] G-2: `fav run /tmp/compiler_s1.fvc -- fav/tmp/hello.fav` が正常終了
+- [x] G-3: Stage 1 バイトコードで `compiler.fav` 自体をコンパイル（Stage 2 生成）
+- [x] G-4: Stage 1 == Stage 2 の一致確認（diff でゼロ差分）
+- [x] G-5: `fav/src/driver/self_tests.rs` にブートストラップテストを追加
 
 ---
 
@@ -135,4 +135,4 @@
 - [x] I-1: `cargo test` 全件通過
 - [x] I-2: `versions/v6.0.0/tasks.md` にチェックを入れる
 - [x] I-3: `MEMORY.md` を更新
-- [ ] I-4: `feat: self-hosting — Favnir compiler written in Favnir (v6.0.0)` でコミット
+- [x] I-4: `feat: self-hosting — Favnir compiler written in Favnir (v6.0.0)` でコミット

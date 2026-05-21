@@ -1468,6 +1468,10 @@ impl VM {
                         VMValue::Variant(tag, payload) if tag == expected => {
                             vm.stack.push(VMValue::Variant(tag, payload));
                         }
+                        VMValue::VariantCtor(name) if name == expected => {
+                            // Zero-arg variant: matches as Variant with no payload
+                            vm.stack.push(VMValue::Variant(name, None));
+                        }
                         other => {
                             vm.stack.push(other);
                             let Some(next_ip) = frame.ip.checked_add(offset) else {

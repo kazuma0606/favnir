@@ -43,6 +43,9 @@ pub enum Opcode {
     YieldValue = 0x52,
     EmitEvent = 0x53,
     TrackLine = 0x54,
+    /// Swap top two stack items.  Used by emit_match to remove the scrutinee
+    /// after the arm body has been evaluated.
+    Swap = 0x55,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -288,23 +291,56 @@ pub fn emit_stmt(stmt: &IRStmt, cg: &mut Codegen) {
 
 fn emit_match(scrutinee: &IRExpr, arms: &[IRArm], cg: &mut Codegen) {
     emit_expr(scrutinee, cg);
+    // Stack: [..., scrutinee]
     let mut end_jumps = Vec::new();
 
     for arm in arms {
         cg.emit_opcode(Opcode::Dup);
-        let mut fail_jumps = Vec::new();
-        emit_pattern_test(&arm.pattern, &mut fail_jumps, cg);
+        // Stack: [..., scrutinee, arm_copy]
+        // fail_jumps: (jump_instruction_pos, stack_depth_above_scrutinee_at_fail)
+        // depth=1 because arm_copy is on the stack above the scrutinee.
+        let mut fail_jumps: Vec<(usize, usize)> = Vec::new();
+        let depth_after = emit_pattern_test(&arm.pattern, &mut fail_jumps, cg, 1);
+
+        // SUCCESS PATH: pop all pattern-test items (arm_copy + test copies + payloads)
+        // so the stack is clean — only scrutinee remains — before evaluating the body.
+        // Any Bind patterns have already stored their values in local slots via StoreLocal.
+        for _ in 0..depth_after {
+            cg.emit_opcode(Opcode::Pop);
+        }
+        // Stack: [..., scrutinee]
 
         if let Some(guard) = &arm.guard {
             emit_expr(guard, cg);
-            fail_jumps.push(cg.emit_jump(Opcode::JumpIfFalse));
+            // Stack: [..., scrutinee, guard_bool]
+            // JumpIfFalse pops the bool; on fail the stack is [..., scrutinee] (excess=0).
+            fail_jumps.push((cg.emit_jump(Opcode::JumpIfFalse), 0));
         }
 
         emit_expr(&arm.body, cg);
+        // Stack: [..., scrutinee, body_result]
+        // Remove the scrutinee cleanly via Swap+Pop so the match expression produces
+        // exactly one value at a consistent stack depth.
+        cg.emit_opcode(Opcode::Swap);
+        // Stack: [..., body_result, scrutinee]
+        cg.emit_opcode(Opcode::Pop);
+        // Stack: [..., body_result]
         end_jumps.push(cg.emit_jump(Opcode::Jump));
 
-        for jump in fail_jumps {
-            cg.patch_jump(jump);
+        // FAIL PATH: for each fail_jump, emit a cleanup block that pops `excess` items
+        // to restore the scrutinee to the stack top, then jumps to the next arm.
+        let mut cleanup_end_jumps: Vec<usize> = Vec::new();
+        for (fail_jump, excess) in &fail_jumps {
+            cg.patch_jump(*fail_jump);
+            for _ in 0..*excess {
+                cg.emit_opcode(Opcode::Pop);
+            }
+            // Stack: [..., scrutinee]
+            cleanup_end_jumps.push(cg.emit_jump(Opcode::Jump));
+        }
+        // All cleanup jumps land here = start of the next arm (or MatchFail).
+        for j in cleanup_end_jumps {
+            cg.patch_jump(j);
         }
     }
 
@@ -312,11 +348,18 @@ fn emit_match(scrutinee: &IRExpr, arms: &[IRArm], cg: &mut Codegen) {
     for jump in end_jumps {
         cg.patch_jump(jump);
     }
+    // After end_jumps: stack = [..., body_result].
+    // The scrutinee was already removed by Swap+Pop in the winning arm.
 }
 
-fn emit_pattern_test(pattern: &IRPattern, fail_jumps: &mut Vec<usize>, cg: &mut Codegen) {
+fn emit_pattern_test(
+    pattern: &IRPattern,
+    fail_jumps: &mut Vec<(usize, usize)>,
+    cg: &mut Codegen,
+    depth: usize,
+) -> usize {
     match pattern {
-        IRPattern::Wildcard => {}
+        IRPattern::Wildcard => depth,
         IRPattern::Lit(lit) => {
             cg.emit_opcode(Opcode::Dup);
             emit_expr(
@@ -324,31 +367,42 @@ fn emit_pattern_test(pattern: &IRPattern, fail_jumps: &mut Vec<usize>, cg: &mut 
                 cg,
             );
             cg.emit_opcode(Opcode::Eq);
-            fail_jumps.push(cg.emit_jump(Opcode::JumpIfFalse));
+            // JumpIfFalse pops the bool; stack depth restored to `depth` on fail
+            fail_jumps.push((cg.emit_jump(Opcode::JumpIfFalse), depth));
+            depth
         }
         IRPattern::Bind(slot) => {
             cg.emit_opcode(Opcode::Dup);
             cg.emit_opcode(Opcode::StoreLocal);
             cg.emit_u16(*slot);
+            depth
         }
         IRPattern::Variant(name, inner) => {
             let idx = cg.intern_str(name);
             cg.emit_opcode(Opcode::Dup);
-            fail_jumps.push(cg.emit_variant_jump(idx));
+            // On fail: the Dup'd copy stays on the stack → depth+1
+            fail_jumps.push((cg.emit_variant_jump(idx), depth + 1));
             if let Some(inner) = inner {
                 cg.emit_opcode(Opcode::GetVariantPayload);
-                emit_pattern_test(inner, fail_jumps, cg);
+                // GetVariantPayload replaces the Dup'd copy with payload; net depth unchanged
+                emit_pattern_test(inner, fail_jumps, cg, depth + 1)
+            } else {
+                depth + 1
             }
         }
         IRPattern::Record(fields) => {
+            let mut d = depth;
             for (name, inner) in fields {
                 let idx = cg.intern_str(name);
                 cg.emit_opcode(Opcode::Dup);
                 cg.emit_opcode(Opcode::GetField);
                 cg.emit_u16(idx);
-                emit_pattern_test(inner, fail_jumps, cg);
+                // Dup+GetField: net +1 (record copy consumed, field value pushed)
+                d = emit_pattern_test(inner, fail_jumps, cg, d + 1);
                 cg.emit_opcode(Opcode::Pop);
+                d -= 1;
             }
+            d
         }
     }
 }
@@ -472,12 +526,16 @@ fn remap_string_operands(code: &mut [u8], str_remap: &[u16]) {
                 || x == Opcode::CollectBegin as u8
                 || x == Opcode::CollectEnd as u8
                 || x == Opcode::YieldValue as u8
-                || x == Opcode::EmitEvent as u8 =>
+                || x == Opcode::EmitEvent as u8
+                || x == Opcode::Swap as u8 =>
             {
                 ip += 1;
             }
             x if x == Opcode::MakeClosure as u8 => {
                 ip += 5;
+            }
+            x if x == Opcode::TrackLine as u8 => {
+                ip += 5; // 1-byte opcode + 4-byte u32 line number
             }
             _ => break,
         }

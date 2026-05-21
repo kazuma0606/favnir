@@ -44,6 +44,10 @@ thread_local! {
     /// being printed to stdout.  Used by integration tests to inspect output.
     static IO_CAPTURE: RefCell<Option<String>> = RefCell::new(None);
 
+    /// Test argv override: when `Some`, `IO.argv` returns these values instead
+    /// of reading from `std::env::args()`.  Used by bootstrap tests.
+    static TEST_ARGV: RefCell<Option<Vec<String>>> = RefCell::new(None);
+
     /// DB connection store: maps handle ID → connection wrapper.
     /// Transactions are tracked as (conn_id, in_tx flag).
     static DB_CONNECTIONS: RefCell<HashMap<u64, DbConnWrapper>> = RefCell::new(HashMap::new());
@@ -704,6 +708,20 @@ pub fn start_io_capture() {
 #[allow(dead_code)]
 pub fn take_io_captured() -> String {
     IO_CAPTURE.with(|c| c.borrow_mut().take().unwrap_or_default())
+}
+
+/// Set a test-only argv override so `IO.argv` returns these values.
+#[allow(dead_code)]
+#[cfg(test)]
+pub fn set_test_argv(args: Vec<String>) {
+    TEST_ARGV.with(|t| *t.borrow_mut() = Some(args));
+}
+
+/// Clear the test argv override.
+#[allow(dead_code)]
+#[cfg(test)]
+pub fn clear_test_argv() {
+    TEST_ARGV.with(|t| *t.borrow_mut() = None);
 }
 
 /// Set whether IO output should be suppressed for the current thread.
@@ -1780,6 +1798,16 @@ impl VM {
                             set.insert(line);
                         }
                     });
+                }
+                x if x == Opcode::Swap as u8 => {
+                    let a = vm.stack.pop().ok_or_else(|| {
+                        vm.error(artifact, "stack underflow on swap")
+                    })?;
+                    let b = vm.stack.pop().ok_or_else(|| {
+                        vm.error(artifact, "stack underflow on swap")
+                    })?;
+                    vm.stack.push(a);
+                    vm.stack.push(b);
                 }
                 other => {
                     return Err(vm.error(artifact, &format!("unsupported opcode: 0x{other:02x}")));
@@ -5215,11 +5243,17 @@ fn vm_call_builtin(
             Ok(VMValue::Bool(std::path::Path::new(&path).is_file()))
         }
         "IO.argv" => {
-            let argv: Vec<VMValue> = std::env::args()
-                .skip_while(|a| a != "--")
-                .skip(1)
-                .map(|a| VMValue::Str(a))
-                .collect();
+            let argv: Vec<VMValue> = TEST_ARGV.with(|t| {
+                if let Some(ref args) = *t.borrow() {
+                    args.iter().map(|a| VMValue::Str(a.clone())).collect()
+                } else {
+                    std::env::args()
+                        .skip_while(|a| a != "--")
+                        .skip(1)
+                        .map(|a| VMValue::Str(a))
+                        .collect()
+                }
+            });
             Ok(VMValue::List(argv))
         }
 

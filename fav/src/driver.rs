@@ -2369,6 +2369,7 @@ fn decode_opcode(byte: u8) -> Option<(&'static str, usize)> {
         x if x == Opcode::YieldValue as u8 => Opcode::YieldValue,
         x if x == Opcode::EmitEvent as u8 => Opcode::EmitEvent,
         x if x == Opcode::TrackLine as u8 => Opcode::TrackLine,
+        x if x == Opcode::Swap as u8 => Opcode::Swap,
         _ => return None,
     };
 
@@ -2410,6 +2411,7 @@ fn decode_opcode(byte: u8) -> Option<(&'static str, usize)> {
         Opcode::YieldValue => ("YieldValue", 1),
         Opcode::EmitEvent => ("EmitEvent", 1),
         Opcode::TrackLine => ("TrackLine", 5), // 1 byte opcode + 4 bytes u32 line
+        Opcode::Swap => ("Swap", 1),
     };
 
     Some((name, width))
@@ -13307,6 +13309,58 @@ public fn main() -> Bool !Io {
         assert_eq!(
             stage1_out, stage2_out,
             "Bootstrap: Stage 1 and Stage 2 outputs must be identical"
+        );
+        assert!(
+            !stage1_out.is_empty(),
+            "Bootstrap: Stage 1 output must be non-empty"
+        );
+    }
+
+    /// D-4: Stage 1 compiles hello.fav and produces non-zero bytecode output.
+    /// Verifies that the Favnir-written compiler generates correct bytecode when
+    /// given a real Favnir source file as input.
+    #[test]
+    fn bootstrap_stage1_compiles_hello_fav_correctly() {
+        let compiler_path = self_dir().join("compiler.fav");
+        let hello_path = self_dir().parent().unwrap().join("tmp").join("hello.fav");
+        let compiler_src = std::fs::read_to_string(&compiler_path).expect("compiler.fav");
+        let hello_abs = hello_path.to_string_lossy().to_string();
+
+        let program = crate::frontend::parser::Parser::parse_str(&compiler_src, "compiler.fav")
+            .expect("parse compiler.fav");
+        let artifact = build_artifact(&program);
+
+        let builder = std::thread::Builder::new().stack_size(64 * 1024 * 1024);
+        let output = builder
+            .spawn(move || {
+                crate::backend::vm::set_test_argv(vec![hello_abs]);
+                crate::backend::vm::start_io_capture();
+                let _ = exec_artifact_main(&artifact, None);
+                let out = crate::backend::vm::take_io_captured();
+                crate::backend::vm::clear_test_argv();
+                out
+            })
+            .expect("spawn")
+            .join()
+            .expect("join");
+
+        // The compiler prints "compiled: N" followed by N bytes on separate lines.
+        assert!(
+            output.contains("compiled:"),
+            "Stage 1 output must contain 'compiled:' line, got: {:?}",
+            output
+        );
+        // Extract the byte count from the "compiled: N" line.
+        let byte_count: usize = output
+            .lines()
+            .find(|l| l.starts_with("compiled:"))
+            .and_then(|l| l.split(':').nth(1))
+            .and_then(|s| s.trim().parse().ok())
+            .expect("could not parse byte count from compiler output");
+        assert!(
+            byte_count > 0,
+            "Stage 1 must produce non-zero bytecode for hello.fav, got {} bytes",
+            byte_count
         );
     }
 }

@@ -536,6 +536,28 @@ fn token_eq(a: Token, b: Token) -> Bool {
     }
 }
 
+fn token_to_string(t: Token) -> String {
+    match t {
+        TkInt(n) => String.concat("int:", Int.to_string(n))
+        TkFloat(f) => "float"
+        TkStr(s) => String.concat("str:", s)
+        TkIdent(s) => String.concat("ident:", s)
+        TkTrue => "true" TkFalse => "false" TkFn => "fn" TkType => "type"
+        TkIf => "if" TkElse => "else" TkMatch => "match" TkBind => "bind"
+        TkImport => "import" TkPublic => "public" TkReturn => "return"
+        TkFor => "for" TkIn => "in" TkTest => "test" TkBench => "bench"
+        TkPlus => "+" TkMinus => "-" TkStar => "*" TkSlash => "/"
+        TkPercent => "%" TkEqEq => "==" TkBangEq => "!="
+        TkLtEq => "<=" TkGtEq => ">=" TkAmpAmp => "&&" TkPipePipe => "||"
+        TkArrow => "->" TkBackArrow => "<-" TkFatArrow => "=>" TkPipeGt => "|>"
+        TkEq => "=" TkBang => "!" TkLt => "<" TkGt => ">"
+        TkPipe => "|" TkDot => "." TkComma => "," TkColon => ":"
+        TkSemicolon => ";" TkLParen => "(" TkRParen => ")"
+        TkLBrace => "{" TkRBrace => "}" TkLBracket => "[" TkRBracket => "]"
+        TkEof => "EOF"
+    }
+}
+
 fn expect_tok(toks: List<Token>, expected: Token) -> Result<List<Token>, String> {
     match peek(toks) {
         None => Result.err("unexpected end of input")
@@ -543,9 +565,20 @@ fn expect_tok(toks: List<Token>, expected: Token) -> Result<List<Token>, String>
             if token_eq(t, expected) {
                 Result.ok(advance(toks))
             } else {
-                Result.err("unexpected token")
+                Result.err(String.concat("unexpected token: got ", String.concat(token_to_string(t), String.concat(", expected ", token_to_string(expected)))))
             }
         }
+    }
+}
+
+fn skip_extra_pat_args(toks: List<Token>) -> Result<List<Token>, String> {
+    match peek(toks) {
+        Some(TkComma) => {
+            bind rest1 <- advance(toks)
+            Result.and_then(parse_pat(rest1), |pp|
+            skip_extra_pat_args(pp.rest))
+        }
+        _ => Result.ok(toks)
     }
 }
 
@@ -558,8 +591,9 @@ fn parse_pat(toks: List<Token>) -> Result<PatParse, String> {
                 Some(TkLParen) => {
                     bind rest2 <- advance(rest1)
                     Result.and_then(parse_pat(rest2), |inner|
-                    Result.and_then(expect_tok(inner.rest, TkRParen), |rest3|
-                    Result.ok(PatParse { pat: PVariantP(name, inner.pat), rest: rest3 })))
+                    Result.and_then(skip_extra_pat_args(inner.rest), |rest_mid|
+                    Result.and_then(expect_tok(rest_mid, TkRParen), |rest3|
+                    Result.ok(PatParse { pat: PVariantP(name, inner.pat), rest: rest3 }))))
                 }
                 _ => {
                     if String.contains("ABCDEFGHIJKLMNOPQRSTUVWXYZ", String.slice(name, 0, 1)) {
@@ -584,6 +618,17 @@ fn parse_pat(toks: List<Token>) -> Result<PatParse, String> {
     }
 }
 
+fn skip_extra_type_args(toks: List<Token>) -> Result<List<Token>, String> {
+    match peek(toks) {
+        Some(TkComma) => {
+            bind rest1 <- advance(toks)
+            Result.and_then(parse_type_expr(rest1), |tp|
+            skip_extra_type_args(tp.rest))
+        }
+        _ => Result.ok(toks)
+    }
+}
+
 fn parse_type_expr(toks: List<Token>) -> Result<TypeExprParse, String> {
     match peek(toks) {
         None => Result.err("expected type")
@@ -593,7 +638,8 @@ fn parse_type_expr(toks: List<Token>) -> Result<TypeExprParse, String> {
                 Some(TkLt) => {
                     bind rest2 <- advance(rest1)
                     Result.and_then(parse_type_expr(rest2), |inner|
-                    Result.and_then(expect_tok(inner.rest, TkGt), |rest3|
+                    Result.and_then(skip_extra_type_args(inner.rest), |rest_after|
+                    Result.and_then(expect_tok(rest_after, TkGt), |rest3|
                     if name == "List" {
                         Result.ok(TypeExprParse { ty: TeList(inner.ty), rest: rest3 })
                     } else {
@@ -601,7 +647,7 @@ fn parse_type_expr(toks: List<Token>) -> Result<TypeExprParse, String> {
                         Result.ok(TypeExprParse { ty: TeOption(inner.ty), rest: rest3 })
                     } else {
                         Result.ok(TypeExprParse { ty: TeSimple(name), rest: rest3 })
-                    }}))
+                    }})))
                 }
                 _ => Result.ok(TypeExprParse { ty: TeSimple(name), rest: rest1 })
             }
@@ -801,13 +847,17 @@ fn parse_primary(toks: List<Token>) -> Result<ExprParse, String> {
                     parse_postfix(ECall("", name, args_p.expr), rest3)))
                 }
                 Some(TkLBrace) => {
-                    bind rest2 <- advance(rest1)
-                    Result.and_then(parse_fields(rest2, EFieldNil), |fields_p|
-                    Result.and_then(expect_tok(fields_p.rest, TkRBrace), |rest3|
-                    Result.ok(ExprParse {
-                        expr: ERecordLit(name, fields_p.expr)
-                        rest: rest3
-                    })))
+                    if String.contains("ABCDEFGHIJKLMNOPQRSTUVWXYZ", String.slice(name, 0, 1)) {
+                        bind rest2 <- advance(rest1)
+                        Result.and_then(parse_fields(rest2, EFieldNil), |fields_p|
+                        Result.and_then(expect_tok(fields_p.rest, TkRBrace), |rest3|
+                        Result.ok(ExprParse {
+                            expr: ERecordLit(name, fields_p.expr)
+                            rest: rest3
+                        })))
+                    } else {
+                        parse_postfix(EVar(name), rest1)
+                    }
                 }
                 _ => parse_postfix(EVar(name), rest1)
             }
@@ -937,6 +987,7 @@ fn parse_param(toks: List<Token>) -> Result<ParamParse, String> {
 fn parse_params_acc(toks: List<Token>, acc: List<Param>) -> Result<ParamsParse, String> {
     match peek(toks) {
         Some(TkRParen) => Result.ok(ParamsParse { params: acc, rest: toks })
+        Some(TkRBrace) => Result.ok(ParamsParse { params: acc, rest: toks })
         Some(TkEof) => Result.err("unterminated parameter list")
         _ => Result.and_then(parse_param(toks), |p|
             parse_params_acc(
@@ -991,11 +1042,12 @@ fn parse_variant(toks: List<Token>) -> Result<VariantDefParse, String> {
                 Some(TkLParen) => {
                     bind rest3 <- advance(rest2)
                     Result.and_then(parse_type_expr(rest3), |ty_p|
-                    Result.and_then(expect_tok(ty_p.rest, TkRParen), |rest4|
+                    Result.and_then(skip_extra_type_args(ty_p.rest), |rest_mid|
+                    Result.and_then(expect_tok(rest_mid, TkRParen), |rest4|
                     Result.ok(VariantDefParse {
                         variant: VariantDef { name: vname, payload: Option.some(ty_p.ty) }
                         rest: rest4
-                    })))
+                    }))))
                 }
                 _ => Result.ok(VariantDefParse {
                     variant: VariantDef { name: vname, payload: Option.none() }
@@ -1124,10 +1176,12 @@ fn parse_tokens(toks: List<Token>) -> Result<Program, String> {
 type Bc =
   | BcConst | BcConstUnit | BcConstTrue | BcConstFalse
   | BcLoadLocal | BcStoreLocal | BcLoadGlobal | BcPop
-  | BcCall | BcReturn
+  | BcDup | BcSwap | BcMatchFail
+  | BcCallNamed | BcReturn
   | BcAdd | BcSub | BcMul | BcDiv
   | BcEq | BcNe | BcLt | BcLe | BcGt | BcGe | BcAnd | BcOr
-  | BcJump | BcJumpIfFalse | BcGetField | BcBuildRecord | BcMakeClosure
+  | BcJump | BcJumpIfFalse | BcJumpIfNotVariantC
+  | BcGetField | BcBuildRecord | BcMakeClosure | BcGetVariantPayload
 
 type ConstVal =
   | CVInt(Int)
@@ -1152,6 +1206,42 @@ type ConstAdd = {
     idx: Int
 }
 
+// Per-function compiled result
+type FnEntry = {
+    fname: String
+    arity: Int
+    local_count: Int
+    code: List<Int>
+    consts: List<ConstVal>
+    ret_ty: String
+    is_public: Bool
+}
+
+// Full compiled artifact (ready to serialize)
+type Artifact = {
+    fns: List<FnEntry>
+}
+
+// String interning table for artifact serialization
+type StrTable = {
+    strs: List<String>
+}
+
+type InternResult = {
+    table: StrTable
+    idx: Int
+}
+
+// State accumulated while serializing each function
+type SerState = {
+    str_table: StrTable
+    type_bytes: List<Int>
+    global_bytes: List<Int>
+    fn_bytes: List<Int>
+    fn_idx: Int
+    global_count: Int
+}
+
 // ════════════════════════════════════════════════════════════════════════════
 // CODEGEN
 // ════════════════════════════════════════════════════════════════════════════
@@ -1166,7 +1256,7 @@ fn bc_byte(op: Bc) -> Int {
         BcStoreLocal => 17
         BcLoadGlobal => 18
         BcPop => 19
-        BcCall => 21
+        BcCallNamed => 86
         BcReturn => 22
         BcAdd => 32
         BcSub => 33
@@ -1180,11 +1270,16 @@ fn bc_byte(op: Bc) -> Int {
         BcGe => 41
         BcAnd => 42
         BcOr => 43
+        BcDup => 20
+        BcSwap => 85
+        BcMatchFail => 50
         BcJump => 48
         BcJumpIfFalse => 49
+        BcJumpIfNotVariantC => 87
         BcGetField => 64
         BcBuildRecord => 65
         BcMakeClosure => 66
+        BcGetVariantPayload => 67
     }
 }
 
@@ -1315,6 +1410,8 @@ fn count_args(args: Expr) -> Int {
     match args {
         EArgNil => 0
         EArgList(_, rest) => count_args(rest) + 1
+        EFieldNil => 0
+        EField(_, _, rest) => count_args(rest) + 1
         _ => 0
     }
 }
@@ -1350,7 +1447,7 @@ fn compile_if(cond: Expr, then_e: Expr, else_e: Expr, ctx: CodegenCtx, env: List
 
 fn compile_call_cont(full_name: String, argc: Int, ctx1: CodegenCtx) -> Result<CodegenCtx, String> {
     bind ca <- add_const(ctx1, CVName(full_name))
-    bind ctx2 <- emit_opcode(ca.ctx, BcCall)
+    bind ctx2 <- emit_opcode(ca.ctx, BcCallNamed)
     bind ctx3 <- emit_u16(ctx2, ca.idx)
     Result.ok(emit_u16(ctx3, argc))
 }
@@ -1387,6 +1484,11 @@ fn compile_args(args: Expr, ctx: CodegenCtx, env: List<KVPair>) -> Result<Codege
         EArgNil => Result.ok(ctx)
         EArgList(head, tail) => {
             Result.and_then(compile_expr(head, ctx, env), |ctx1|
+            compile_args(tail, ctx1, env))
+        }
+        EFieldNil => Result.ok(ctx)
+        EField(_fname, val_e, tail) => {
+            Result.and_then(compile_expr(val_e, ctx, env), |ctx1|
             compile_args(tail, ctx1, env))
         }
         _ => Result.err("expected argument list")
@@ -1477,27 +1579,66 @@ fn empty_env() -> List<KVPair> {
     List.drop_while(List.singleton(KVPair { first: "", second: "" }), |v| true)
 }
 
-fn compile_fn_def_ret(ctx_done: CodegenCtx) -> Result<List<Int>, String> {
-    bind ctx_ret <- emit_opcode(ctx_done, BcReturn)
-    Result.ok(ctx_ret.code)
+fn type_expr_to_str(ty: TypeExpr) -> String {
+    match ty {
+        TeSimple(name) => name
+        TeList(inner) => String.concat("List<", String.concat(type_expr_to_str(inner), ">"))
+        TeOption(inner) => String.concat("Option<", String.concat(type_expr_to_str(inner), ">"))
+        TeResult(ok_t, err_t) => String.concat("Result<", String.concat(type_expr_to_str(ok_t), String.concat(", ", String.concat(type_expr_to_str(err_t), ">"))))
+        TeMap(k_t, v_t) => String.concat("Map<", String.concat(type_expr_to_str(k_t), String.concat(", ", String.concat(type_expr_to_str(v_t), ">"))))
+        TeFn(from_t, to_t) => String.concat("Fn<", String.concat(type_expr_to_str(from_t), String.concat(" -> ", String.concat(type_expr_to_str(to_t), ">"))))
+    }
 }
 
-fn compile_fn_def(fn_def: FnDef) -> Result<List<Int>, String> {
+fn make_fn_entry(fn_def: FnDef, ctx_ret: CodegenCtx, arity: Int, ret_ty: String) -> FnEntry {
+    FnEntry {
+        fname: fn_def.name
+        arity: arity
+        local_count: ctx_ret.next_local
+        code: ctx_ret.code
+        consts: ctx_ret.consts
+        ret_ty: ret_ty
+        is_public: fn_def.is_public
+    }
+}
+
+fn finish_fn_def(fn_def: FnDef, ctx_done: CodegenCtx, arity: Int, ret_ty: String) -> Result<FnEntry, String> {
+    bind ctx_ret <- emit_opcode(ctx_done, BcReturn)
+    Result.ok(make_fn_entry(fn_def, ctx_ret, arity, ret_ty))
+}
+
+fn compile_fn_def(fn_def: FnDef) -> Result<FnEntry, String> {
     bind ctx0 <- new_ctx()
     bind ctx1 <- compile_params(fn_def.params, ctx0)
     bind env0 <- empty_env()
+    bind arity <- List.length(fn_def.params)
+    bind ret_ty <- type_expr_to_str(fn_def.ret)
     Result.and_then(compile_expr(fn_def.body, ctx1, env0), |ctx_done|
-    compile_fn_def_ret(ctx_done))
+    finish_fn_def(fn_def, ctx_done, arity, ret_ty))
 }
 
-fn compile_items(items: List<Item>, acc: List<Int>) -> Result<List<Int>, String> {
+fn empty_fns() -> List<FnEntry> {
+    List.drop_while(
+        List.singleton(FnEntry {
+            fname: ""
+            arity: 0
+            local_count: 0
+            code: empty_ints()
+            consts: empty_consts()
+            ret_ty: ""
+            is_public: false
+        }),
+        |v| true)
+}
+
+fn compile_items(items: List<Item>, acc: List<FnEntry>) -> Result<List<FnEntry>, String> {
     match List.first(items) {
         None => Result.ok(acc)
         Some(item) => {
             match item {
                 IFn(fn_def) => {
-                    Result.and_then(compile_fn_def(fn_def), |code|
-                    compile_items(List.drop(items, 1), List.concat(acc, code)))
+                    Result.and_then(compile_fn_def(fn_def), |entry|
+                    compile_items(List.drop(items, 1), List.push(acc, entry)))
                 }
                 IType(_) => compile_items(List.drop(items, 1), acc)
                 ITest(_) => compile_items(List.drop(items, 1), acc)
@@ -1506,48 +1647,197 @@ fn compile_items(items: List<Item>, acc: List<Int>) -> Result<List<Int>, String>
     }
 }
 
-fn compile(prog: Program) -> Result<List<Int>, String> {
-    bind init <- empty_ints()
-    compile_items(prog.items, init)
+fn compile(prog: Program) -> Result<Artifact, String> {
+    bind init <- empty_fns()
+    Result.and_then(compile_items(prog.items, init), |fns|
+    Result.ok(Artifact { fns: fns }))
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// SERIALIZATION
+// ════════════════════════════════════════════════════════════════════════════
+
+fn empty_str_list() -> List<String> {
+    List.drop_while(List.singleton("__init__"), |v| true)
+}
+
+fn str_find_idx(strs: List<String>, target: String, idx: Int) -> Option<Int> {
+    match List.first(strs) {
+        None => Option.none()
+        Some(s) => {
+            if s == target { Option.some(idx) }
+            else { str_find_idx(List.drop(strs, 1), target, idx + 1) }
+        }
+    }
+}
+
+fn intern(table: StrTable, s: String) -> InternResult {
+    match str_find_idx(table.strs, s, 0) {
+        Some(idx) => InternResult { table: table, idx: idx }
+        None => {
+            bind idx <- List.length(table.strs)
+            bind new_strs <- List.push(table.strs, s)
+            InternResult { table: StrTable { strs: new_strs }, idx: idx }
+        }
+    }
+}
+
+fn write_u32_le(n: Int) -> List<Int> {
+    bind b0 <- Int.band(n, 255)
+    bind b1 <- Int.band(Int.shr(n, 8), 255)
+    bind b2 <- Int.band(Int.shr(n, 16), 255)
+    bind b3 <- Int.band(Int.shr(n, 24), 255)
+    List.push(List.push(List.push(List.singleton(b0), b1), b2), b3)
+}
+
+fn write_u16_le(n: Int) -> List<Int> {
+    List.push(List.singleton(Int.band(n, 255)), Int.band(Int.shr(n, 8), 255))
+}
+
+fn write_i64_le(n: Int) -> List<Int> {
+    bind b0 <- Int.band(n, 255)
+    bind b1 <- Int.band(Int.shr(n, 8), 255)
+    bind b2 <- Int.band(Int.shr(n, 16), 255)
+    bind b3 <- Int.band(Int.shr(n, 24), 255)
+    bind b4 <- Int.band(Int.shr(n, 32), 255)
+    bind b5 <- Int.band(Int.shr(n, 40), 255)
+    bind b6 <- Int.band(Int.shr(n, 48), 255)
+    bind b7 <- Int.band(Int.shr(n, 56), 255)
+    List.push(List.push(List.push(List.push(
+        List.push(List.push(List.push(List.singleton(b0), b1), b2), b3),
+        b4), b5), b6), b7)
+}
+
+fn write_str_bytes(s: String) -> List<Int> {
+    bind bs <- String.to_bytes(s)
+    bind len_bytes <- write_u32_le(List.length(bs))
+    List.concat(len_bytes, bs)
+}
+
+fn write_str_table(strs: List<String>, acc: List<Int>) -> List<Int> {
+    match List.first(strs) {
+        None => acc
+        Some(s) => {
+            bind entry <- write_str_bytes(s)
+            write_str_table(List.drop(strs, 1), List.concat(acc, entry))
+        }
+    }
+}
+
+fn serialize_const_val(cv: ConstVal) -> List<Int> {
+    match cv {
+        CVInt(n) => List.concat(List.singleton(1), write_i64_le(n))
+        CVFloat(_) => List.singleton(2)
+        CVStr(s) => List.concat(List.singleton(3), write_str_bytes(s))
+        CVName(s) => {
+            bind bs <- String.to_bytes(s)
+            bind len_bytes <- write_u16_le(List.length(bs))
+            List.concat(List.singleton(4), List.concat(len_bytes, bs))
+        }
+    }
+}
+
+fn serialize_consts(consts: List<ConstVal>, acc: List<Int>) -> List<Int> {
+    match List.first(consts) {
+        None => acc
+        Some(cv) => {
+            bind cv_bytes <- serialize_const_val(cv)
+            serialize_consts(List.drop(consts, 1), List.concat(acc, cv_bytes))
+        }
+    }
+}
+
+fn ser_init_state() -> SerState {
+    SerState {
+        str_table: StrTable { strs: empty_str_list() }
+        type_bytes: empty_ints()
+        global_bytes: empty_ints()
+        fn_bytes: empty_ints()
+        fn_idx: 0
+        global_count: 0
+    }
+}
+
+fn process_fn_entry(entry: FnEntry, state: SerState) -> SerState {
+    bind ir_name <- intern(state.str_table, entry.fname)
+    bind ir_ret <- intern(ir_name.table, entry.ret_ty)
+    bind ir_eff <- intern(ir_ret.table, "")
+    bind type_entry <- List.concat(write_u32_le(ir_ret.idx), write_u32_le(ir_eff.idx))
+    bind new_type_bytes <- List.concat(state.type_bytes, type_entry)
+    bind new_global_bytes <-
+        if entry.is_public {
+            List.concat(state.global_bytes,
+                List.concat(write_u32_le(ir_name.idx),
+                List.concat(List.singleton(0),
+                write_u32_le(state.fn_idx))))
+        } else {
+            state.global_bytes
+        }
+    bind new_global_count <-
+        if entry.is_public { state.global_count + 1 }
+        else { state.global_count }
+    bind const_bytes <- serialize_consts(entry.consts, empty_ints())
+    bind fn_entry_bytes <- List.concat(
+        write_u32_le(ir_name.idx),
+        List.concat(write_u32_le(entry.arity),
+        List.concat(write_u32_le(entry.local_count),
+        List.concat(write_u32_le(0),
+        List.concat(write_u32_le(ir_ret.idx),
+        List.concat(write_u32_le(ir_eff.idx),
+        List.concat(write_u32_le(List.length(entry.consts)),
+        List.concat(const_bytes,
+        List.concat(write_u32_le(List.length(entry.code)),
+        entry.code)))))))))
+    SerState {
+        str_table: ir_eff.table
+        type_bytes: new_type_bytes
+        global_bytes: new_global_bytes
+        fn_bytes: List.concat(state.fn_bytes, fn_entry_bytes)
+        fn_idx: state.fn_idx + 1
+        global_count: new_global_count
+    }
+}
+
+fn process_fn_entries(entries: List<FnEntry>, state: SerState) -> SerState {
+    match List.first(entries) {
+        None => state
+        Some(entry) => {
+            bind new_state <- process_fn_entry(entry, state)
+            process_fn_entries(List.drop(entries, 1), new_state)
+        }
+    }
+}
+
+fn serialize_artifact(artifact: Artifact) -> List<Int> {
+    bind state <- process_fn_entries(artifact.fns, ser_init_state())
+    bind fn_count <- List.length(artifact.fns)
+    bind str_count <- List.length(state.str_table.strs)
+    bind str_bytes <- write_str_table(state.str_table.strs, empty_ints())
+    // magic = b"FVC\x01" = [70, 86, 67, 1]
+    bind magic <- List.push(List.push(List.push(List.singleton(70), 86), 67), 1)
+    // version section = [0x20, 0, 0, 0]
+    bind ver <- List.push(List.push(List.push(List.singleton(32), 0), 0), 0)
+    bind header <- List.concat(
+        List.concat(magic, ver),
+        List.concat(
+            List.concat(write_u32_le(str_count), write_u32_le(fn_count)),
+            write_u32_le(state.global_count)))
+    List.concat(header,
+        List.concat(str_bytes,
+        List.concat(state.type_bytes,
+        List.concat(state.global_bytes,
+        state.fn_bytes))))
 }
 
 // ════════════════════════════════════════════════════════════════════════════
 // PIPELINE
 // ════════════════════════════════════════════════════════════════════════════
 
-fn compile_file(path: String) -> Result<List<Int>, String> {
+fn compile_file(path: String) -> Result<Artifact, String> {
     Result.and_then(IO.read_file_raw(path), |src|
     Result.and_then(lex(src), |toks|
     Result.and_then(parse_tokens(toks), |prog|
     compile(prog))))
-}
-
-fn tok_name(t: Token) -> String {
-    match t {
-        TkFn => "TkFn"
-        TkPublic => "TkPublic"
-        TkType => "TkType"
-        TkTest => "TkTest"
-        TkIdent(s) => String.concat("TkIdent(", String.concat(s, ")"))
-        TkInt(n) => String.concat("TkInt(", String.concat(Int.to_string(n), ")"))
-        TkEof => "TkEof"
-        TkLParen => "TkLParen"
-        TkRParen => "TkRParen"
-        TkLBrace => "TkLBrace"
-        TkRBrace => "TkRBrace"
-        TkArrow => "TkArrow"
-        _ => "Other"
-    }
-}
-
-fn print_toks(toks: List<Token>) -> Bool {
-    match List.first(toks) {
-        None => true
-        Some(t) => {
-            bind _ <- IO.println(tok_name(t))
-            print_toks(List.drop(toks, 1))
-        }
-    }
 }
 
 fn print_bytes(bytes: List<Int>) -> Bool {
@@ -1568,54 +1858,15 @@ public fn main() -> Bool {
             false
         }
         Some(path) => {
-            bind _ <- IO.println(String.concat("DBG path: ", path))
-            match IO.read_file_raw(path) {
+            match compile_file(path) {
                 Err(e) => {
-                    bind _ <- IO.println(String.concat("DBG read err: ", e))
+                    bind _ <- IO.println(String.concat("error: ", e))
                     false
                 }
-                Ok(src) => {
-                    bind _ <- IO.println(String.concat("DBG src len: ", Int.to_string(String.length(src))))
-                    match lex(src) {
-                        Err(le) => {
-                            bind _ <- IO.println(String.concat("DBG lex err: ", le))
-                            false
-                        }
-                        Ok(toks) => {
-                            bind _ <- IO.println(String.concat("DBG tok count: ", Int.to_string(List.length(toks))))
-                            bind _ <- print_toks(toks)
-                            bind hardcoded_result <- match lex("fn add() -> Int { 1 }") {
-                                Err(_) => "lex failed"
-                                Ok(htoks) => {
-                                    bind _ <- print_toks(htoks)
-                                    match parse_tokens(htoks) {
-                                        Err(e) => String.concat("parse failed: ", e)
-                                        Ok(_) => "parse OK"
-                                    }
-                                }
-                            }
-                            bind _ <- IO.println(String.concat("DBG hardcoded: ", hardcoded_result))
-                            match parse_tokens(toks) {
-                                Err(pe) => {
-                                    bind _ <- IO.println(String.concat("DBG parse err: ", pe))
-                                    false
-                                }
-                                Ok(prog) => {
-                                    bind _ <- IO.println(String.concat("DBG items: ", Int.to_string(List.length(prog.items))))
-                                    match compile(prog) {
-                                        Err(ce) => {
-                                            bind _ <- IO.println(String.concat("DBG compile err: ", ce))
-                                            false
-                                        }
-                                        Ok(bytes) => {
-                                            bind _ <- IO.println(String.concat("compiled: ", Int.to_string(List.length(bytes))))
-                                            print_bytes(bytes)
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
+                Ok(artifact) => {
+                    bind bytes <- serialize_artifact(artifact)
+                    bind _ <- IO.println(String.concat("compiled: ", Int.to_string(List.length(bytes))))
+                    print_bytes(bytes)
                 }
             }
         }
@@ -1656,7 +1907,7 @@ test "full pipeline on simple fn produces non-empty bytecode" {
                 Ok(prog) => {
                     match compile(prog) {
                         Err(_) => false
-                        Ok(bytes) => List.length(bytes) > 0
+                        Ok(artifact) => List.length(artifact.fns) > 0
                     }
                 }
             }

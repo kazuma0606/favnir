@@ -4708,6 +4708,7 @@ impl Checker {
                 Some(Type::String)
             }
             ("String", "lines") | ("String", "words") | ("String", "chars") => Some(Type::List(Box::new(Type::String))),
+            ("String", "to_bytes") => Some(Type::List(Box::new(Type::Int))),
             ("String", "length") => Some(Type::Int),
             ("String", "is_empty") => Some(Type::Bool),
             ("String", "contains")

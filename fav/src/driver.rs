@@ -2370,6 +2370,8 @@ fn decode_opcode(byte: u8) -> Option<(&'static str, usize)> {
         x if x == Opcode::EmitEvent as u8 => Opcode::EmitEvent,
         x if x == Opcode::TrackLine as u8 => Opcode::TrackLine,
         x if x == Opcode::Swap as u8 => Opcode::Swap,
+        x if x == Opcode::CallNamed as u8 => Opcode::CallNamed,
+        x if x == Opcode::JumpIfNotVariantC as u8 => Opcode::JumpIfNotVariantC,
         _ => return None,
     };
 
@@ -2412,6 +2414,11 @@ fn decode_opcode(byte: u8) -> Option<(&'static str, usize)> {
         Opcode::EmitEvent => ("EmitEvent", 1),
         Opcode::TrackLine => ("TrackLine", 5), // 1 byte opcode + 4 bytes u32 line
         Opcode::Swap => ("Swap", 1),
+        Opcode::CallNamed => ("CallNamed", 5), // 1 byte opcode + 2-byte name_const_idx + 2-byte argc
+        Opcode::JumpIfNotVariantC => ("JumpIfNotVariantC", 5), // 1 byte opcode + 2-byte const_idx + 2-byte offset
+        Opcode::GetFieldC => ("GetFieldC", 3),     // 1 byte opcode + 2-byte const_idx
+        Opcode::BuildRecordC => ("BuildRecordC", 5), // 1 byte opcode + 2-byte n + 2-byte base_const_idx
+        Opcode::MakeClosureN => ("MakeClosureN", 5), // 1 byte opcode + 2-byte name_const_idx + 2-byte capture_count
     };
 
     Some((name, width))
@@ -13361,6 +13368,376 @@ public fn main() -> Bool !Io {
             byte_count > 0,
             "Stage 1 must produce non-zero bytecode for hello.fav, got {} bytes",
             byte_count
+        );
+    }
+
+    /// A-2: Compare bytes emitted by compiler.fav for hello.fav against Rust codegen bytes.
+    /// Run with: cargo test bootstrap_a2 -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn bootstrap_a2_bytecode_compare() {
+        let compiler_path = self_dir().join("compiler.fav");
+        let hello_path = self_dir().parent().unwrap().join("tmp").join("hello.fav");
+        let compiler_src = std::fs::read_to_string(&compiler_path).expect("compiler.fav");
+        let hello_abs = hello_path.to_string_lossy().to_string();
+
+        let program = crate::frontend::parser::Parser::parse_str(&compiler_src, "compiler.fav")
+            .expect("parse compiler.fav");
+        let artifact = build_artifact(&program);
+
+        let builder = std::thread::Builder::new().stack_size(64 * 1024 * 1024);
+        let fav_output = builder
+            .spawn(move || {
+                crate::backend::vm::set_test_argv(vec![hello_abs]);
+                crate::backend::vm::start_io_capture();
+                let _ = exec_artifact_main(&artifact, None);
+                let out = crate::backend::vm::take_io_captured();
+                crate::backend::vm::clear_test_argv();
+                out
+            })
+            .expect("spawn")
+            .join()
+            .expect("join");
+
+        // Parse the bytes from compiler.fav output (lines after "compiled: N")
+        let mut fav_bytes: Vec<u8> = Vec::new();
+        let mut after_compiled = false;
+        for line in fav_output.lines() {
+            if line.starts_with("compiled:") {
+                after_compiled = true;
+                continue;
+            }
+            if after_compiled {
+                if let Ok(b) = line.trim().parse::<i64>() {
+                    fav_bytes.push((b & 0xFF) as u8);
+                }
+            }
+        }
+
+        // Get Rust codegen bytes for hello.fav (concatenated code of all functions)
+        let hello_src = std::fs::read_to_string(&hello_path).expect("hello.fav");
+        let hello_prog =
+            crate::frontend::parser::Parser::parse_str(&hello_src, "hello.fav")
+                .expect("parse hello.fav");
+        let hello_artifact = build_artifact(&hello_prog);
+        let rust_bytes: Vec<u8> = hello_artifact
+            .functions
+            .iter()
+            .flat_map(|f| f.code.iter().copied())
+            .collect();
+
+        println!("\n=== A-2: Bytecode comparison for hello.fav ===");
+        println!("compiler.fav bytes ({}):", fav_bytes.len());
+        for chunk in fav_bytes.chunks(16) {
+            println!("  {}", chunk.iter().map(|b| format!("{b:02x}")).collect::<Vec<_>>().join(" "));
+        }
+        println!("Rust codegen bytes ({}):", rust_bytes.len());
+        for (i, f) in hello_artifact.functions.iter().enumerate() {
+            let name = hello_artifact.str_table.get(f.name_idx as usize).map(|s| s.as_str()).unwrap_or("?");
+            println!("  fn[{i}] '{name}' ({} bytes): {}", f.code.len(),
+                f.code.iter().map(|b| format!("{b:02x}")).collect::<Vec<_>>().join(" "));
+        }
+        println!("Bytes match: {}", fav_bytes == rust_bytes);
+        if fav_bytes != rust_bytes {
+            for (i, (a, b)) in fav_bytes.iter().zip(rust_bytes.iter()).enumerate() {
+                if a != b {
+                    println!("  First diff at byte {i}: fav={a:02x} rust={b:02x}");
+                    break;
+                }
+            }
+        }
+    }
+
+    /// D-1: Stage 2 — run compiler.fav on compiler.fav itself with a 256MB stack.
+    /// Verifies that the Favnir compiler can self-compile (Stage 2 of bootstrap).
+    /// Run with: cargo test bootstrap_d1 -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn bootstrap_d1_self_compile_256mb() {
+        let compiler_path = self_dir().join("compiler.fav");
+        let compiler_src = std::fs::read_to_string(&compiler_path).expect("compiler.fav");
+        let compiler_abs = compiler_path.to_string_lossy().to_string();
+
+        let program = crate::frontend::parser::Parser::parse_str(&compiler_src, "compiler.fav")
+            .expect("parse compiler.fav");
+        let artifact = build_artifact(&program);
+
+        let builder = std::thread::Builder::new().stack_size(64 * 1024 * 1024);
+        let join_result = builder
+            .spawn(move || {
+                crate::backend::vm::set_test_argv(vec![compiler_abs]);
+                crate::backend::vm::start_io_capture();
+                let result = exec_artifact_main(&artifact, None);
+                let out = crate::backend::vm::take_io_captured();
+                crate::backend::vm::clear_test_argv();
+                (result.map(|_| ()), out)
+            })
+            .expect("spawn")
+            .join();
+        let (vm_result, captured) = match join_result {
+            Ok(pair) => pair,
+            Err(e) => {
+                let msg = e.downcast_ref::<String>().map(|s| s.as_str())
+                    .or_else(|| e.downcast_ref::<&str>().copied())
+                    .unwrap_or("<non-string panic>");
+                panic!("D-1 thread panicked: {msg}");
+            }
+        };
+
+        println!("\n=== D-1: Self-compile (iterative VM, 64MB stack) ===");
+        println!("VM result ok: {}", vm_result.is_ok());
+        if let Err(ref e) = vm_result {
+            println!("VM error: {e}");
+        }
+        println!("Captured output (first 200 chars): {}", &captured[..captured.len().min(200)]);
+        let tail_start = captured.len().saturating_sub(3000);
+        println!("Captured output (last 3000 chars): {}", &captured[tail_start..]);
+        if captured.contains("compiled:") {
+            let byte_count: usize = captured
+                .lines()
+                .find(|l| l.starts_with("compiled:"))
+                .and_then(|l| l.split(':').nth(1))
+                .and_then(|s| s.trim().parse().ok())
+                .unwrap_or(0);
+            println!("Stage 2 produced {} bytes", byte_count);
+            assert!(byte_count > 0, "Stage 2 must produce non-zero artifact");
+        } else {
+            panic!("Stage 2 did not produce 'compiled:' output. VM ok={}", vm_result.is_ok());
+        }
+    }
+
+    /// Helper: run an artifact's main() with given argv, capture output, parse compiled bytes.
+    fn run_compiler_artifact_on(
+        artifact: std::sync::Arc<crate::backend::artifact::FvcArtifact>,
+        input_path: String,
+    ) -> (bool, Vec<u8>, String) {
+        let builder = std::thread::Builder::new().stack_size(64 * 1024 * 1024);
+        let (ok, captured) = builder
+            .spawn(move || {
+                crate::backend::vm::set_test_argv(vec![input_path]);
+                crate::backend::vm::start_io_capture();
+                let result = exec_artifact_main(&artifact, None);
+                let out = crate::backend::vm::take_io_captured();
+                crate::backend::vm::clear_test_argv();
+                (result.is_ok(), out)
+            })
+            .expect("spawn")
+            .join()
+            .expect("join");
+        let bytes = parse_compiled_bytes(&captured);
+        (ok, bytes, captured)
+    }
+
+    /// Parse decimal-per-line bytes from compiler.fav output after "compiled: N" line.
+    fn parse_compiled_bytes(output: &str) -> Vec<u8> {
+        let mut after = false;
+        let mut bytes = Vec::new();
+        for line in output.lines() {
+            if line.starts_with("compiled:") {
+                after = true;
+                continue;
+            }
+            if after {
+                if let Ok(b) = line.trim().parse::<i64>() {
+                    bytes.push((b & 0xFF) as u8);
+                }
+            }
+        }
+        bytes
+    }
+
+    /// E-3: Full 3-stage bootstrap verification.
+    /// Stage1: Rust VM + compiler.fav source → hello.fav → bytecode_A
+    /// Stage2: Rust VM + compiler.fav source → compiler.fav → compiler_artifact
+    /// Stage3: Rust VM + compiler_artifact → hello.fav → bytecode_B
+    /// Assert: bytecode_A == bytecode_B
+    /// Run with: cargo test bootstrap_full_self_hosting -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn bootstrap_full_self_hosting() {
+        use crate::backend::artifact::FvcArtifact;
+        use std::sync::Arc;
+
+        let compiler_path = self_dir().join("compiler.fav");
+        let hello_path = self_dir().parent().unwrap().join("tmp").join("hello.fav");
+        let compiler_src = std::fs::read_to_string(&compiler_path).expect("compiler.fav");
+        let compiler_abs = compiler_path.to_string_lossy().to_string();
+        let hello_abs = hello_path.to_string_lossy().to_string();
+
+        // Build the Rust-compiled artifact from compiler.fav source
+        let program = crate::frontend::parser::Parser::parse_str(&compiler_src, "compiler.fav")
+            .expect("parse compiler.fav");
+        let rust_compiled_artifact = Arc::new(build_artifact(&program));
+
+        println!("\n=== Stage 1: compiler.fav → hello.fav → bytecode_A ===");
+        let (s1_ok, bytecode_a, _s1_out) =
+            run_compiler_artifact_on(Arc::clone(&rust_compiled_artifact), hello_abs.clone());
+        println!("Stage 1 ok: {s1_ok}, bytecode_A length: {}", bytecode_a.len());
+        assert!(s1_ok, "Stage 1 (compile hello.fav) failed");
+        assert!(!bytecode_a.is_empty(), "Stage 1 produced empty bytecode_A");
+
+        println!("\n=== Stage 2: compiler.fav → compiler.fav → compiler_artifact ===");
+        let (s2_ok, artifact_bytes, _s2_out) =
+            run_compiler_artifact_on(Arc::clone(&rust_compiled_artifact), compiler_abs);
+        println!("Stage 2 ok: {s2_ok}, artifact bytes: {}", artifact_bytes.len());
+        assert!(s2_ok, "Stage 2 (self-compile) failed");
+        assert!(!artifact_bytes.is_empty(), "Stage 2 produced empty artifact");
+
+        // Load the Stage 2 artifact bytes as FvcArtifact
+        let compiler_artifact = Arc::new(
+            FvcArtifact::read_from(&mut artifact_bytes.as_slice())
+                .expect("Stage 2 artifact bytes must parse as valid FvcArtifact"),
+        );
+        println!(
+            "Stage 2 artifact loaded: {} functions, {} strings",
+            compiler_artifact.functions.len(),
+            compiler_artifact.str_table.len()
+        );
+        assert!(
+            compiler_artifact.fn_idx_by_name("main").is_some(),
+            "Stage 2 artifact must have a 'main' function"
+        );
+
+        println!("\n=== Stage 3: compiler_artifact → hello.fav → bytecode_B ===");
+        let (s3_ok, bytecode_b, s3_out) =
+            run_compiler_artifact_on(compiler_artifact, hello_abs);
+        println!("Stage 3 ok: {s3_ok}, bytecode_B length: {}", bytecode_b.len());
+        if bytecode_b.is_empty() {
+            let preview = &s3_out[..s3_out.len().min(500)];
+            panic!("Stage 3 produced empty bytecode_B. Full output:\n{preview}");
+        }
+
+        println!("\n=== Bootstrap result ===");
+        println!("bytecode_A ({} bytes): {:02x?}", bytecode_a.len(), &bytecode_a[..bytecode_a.len().min(32)]);
+        println!("bytecode_B ({} bytes): {:02x?}", bytecode_b.len(), &bytecode_b[..bytecode_b.len().min(32)]);
+        let matched = bytecode_a == bytecode_b;
+        println!("bytecode_A == bytecode_B: {matched}");
+        if !matched {
+            for (i, (a, b)) in bytecode_a.iter().zip(bytecode_b.iter()).enumerate() {
+                if a != b {
+                    println!("First diff at byte {i}: A={a:02x} B={b:02x}");
+                    break;
+                }
+            }
+            if bytecode_a.len() != bytecode_b.len() {
+                println!("Length mismatch: A={} B={}", bytecode_a.len(), bytecode_b.len());
+            }
+        }
+        assert_eq!(bytecode_a, bytecode_b, "Bootstrap failed: bytecode_A != bytecode_B");
+    }
+
+    /// A-3: Try to compile compiler.fav using compiler.fav itself (Stage 2 trial).
+    /// Run with: cargo test bootstrap_a3 -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn bootstrap_a3_self_compile_trial() {
+        let compiler_path = self_dir().join("compiler.fav");
+        let compiler_src = std::fs::read_to_string(&compiler_path).expect("compiler.fav");
+        let compiler_abs = compiler_path.to_string_lossy().to_string();
+
+        let program = crate::frontend::parser::Parser::parse_str(&compiler_src, "compiler.fav")
+            .expect("parse compiler.fav");
+        let artifact = build_artifact(&program);
+
+        let builder = std::thread::Builder::new().stack_size(64 * 1024 * 1024);
+        let (vm_result, captured) = builder
+            .spawn(move || {
+                crate::backend::vm::set_test_argv(vec![compiler_abs]);
+                crate::backend::vm::start_io_capture();
+                let result = exec_artifact_main(&artifact, None);
+                let out = crate::backend::vm::take_io_captured();
+                crate::backend::vm::clear_test_argv();
+                (result.map(|_| ()), out)
+            })
+            .expect("spawn")
+            .join()
+            .expect("join");
+
+        println!("\n=== A-3: Self-compile trial (compiler.fav → compiler.fav) ===");
+        println!("VM result ok: {}", vm_result.is_ok());
+        if let Err(ref e) = vm_result {
+            println!("VM error: {e}");
+        }
+        println!("--- captured output ---");
+        println!("{captured}");
+        println!("--- end output ---");
+        if captured.contains("compiled:") {
+            let byte_count: usize = captured
+                .lines()
+                .find(|l| l.starts_with("compiled:"))
+                .and_then(|l| l.split(':').nth(1))
+                .and_then(|s| s.trim().parse().ok())
+                .unwrap_or(0);
+            println!("Self-compile produced {} bytes", byte_count);
+        }
+    }
+
+    /// C-2: Verify that compiler.fav's serialized artifact can be parsed by FvcWriter::read_from.
+    /// Checks format compatibility between the Favnir serializer and the Rust deserializer.
+    #[test]
+    fn bootstrap_c2_artifact_roundtrip() {
+        let compiler_path = self_dir().join("compiler.fav");
+        let hello_path = self_dir().parent().unwrap().join("tmp").join("hello.fav");
+        let compiler_src = std::fs::read_to_string(&compiler_path).expect("compiler.fav");
+        let hello_abs = hello_path.to_string_lossy().to_string();
+
+        // Stage 1: run compiler.fav on hello.fav → capture printed bytes
+        let program = crate::frontend::parser::Parser::parse_str(&compiler_src, "compiler.fav")
+            .expect("parse compiler.fav");
+        let compiler_artifact = build_artifact(&program);
+
+        let builder = std::thread::Builder::new().stack_size(64 * 1024 * 1024);
+        let output = builder
+            .spawn(move || {
+                crate::backend::vm::set_test_argv(vec![hello_abs]);
+                crate::backend::vm::start_io_capture();
+                let _ = exec_artifact_main(&compiler_artifact, None);
+                let out = crate::backend::vm::take_io_captured();
+                crate::backend::vm::clear_test_argv();
+                out
+            })
+            .expect("spawn")
+            .join()
+            .expect("join");
+
+        assert!(output.contains("compiled:"), "Expected 'compiled:' in output, got: {:?}", output);
+
+        // Decode the byte values printed after "compiled: N"
+        let mut fav_bytes: Vec<u8> = Vec::new();
+        let mut after_compiled = false;
+        for line in output.lines() {
+            if line.starts_with("compiled:") {
+                after_compiled = true;
+                continue;
+            }
+            if after_compiled {
+                if let Ok(b) = line.trim().parse::<i64>() {
+                    fav_bytes.push((b & 0xFF) as u8);
+                }
+            }
+        }
+        assert!(!fav_bytes.is_empty(), "C-2: Expected non-empty artifact bytes from Stage 1");
+
+        // Parse those bytes as a Rust FvcWriter artifact
+        let mut cursor = std::io::Cursor::new(&fav_bytes);
+        let loaded = crate::backend::artifact::FvcArtifact::read_from(&mut cursor)
+            .expect("C-2: FvcArtifact::read_from must parse compiler.fav's artifact output");
+
+        // Verify the expected function names are in the string table
+        assert!(
+            loaded.str_table.iter().any(|s| s == "add"),
+            "C-2: str_table must contain 'add', got: {:?}",
+            loaded.str_table
+        );
+        assert!(
+            loaded.str_table.iter().any(|s| s == "main"),
+            "C-2: str_table must contain 'main', got: {:?}",
+            loaded.str_table
+        );
+        assert_eq!(
+            loaded.functions.len(),
+            2,
+            "C-2: hello.fav must compile to exactly 2 functions (add + main)"
         );
     }
 }

@@ -93,6 +93,38 @@ fn test_list_take_drop() {
 }
 
 #[test]
+fn test_list_take_while() {
+    assert_eq!(
+        eval(
+            r#"
+public fn main() -> Int {
+    bind xs <- List.range(0, 10)
+    bind taken <- List.take_while(xs, |x| x < 5)
+    List.length(taken)
+}
+"#
+        ),
+        Value::Int(5)
+    );
+}
+
+#[test]
+fn test_list_drop_while() {
+    assert_eq!(
+        eval(
+            r#"
+public fn main() -> Int {
+    bind xs <- List.range(0, 10)
+    bind rest <- List.drop_while(xs, |x| x < 5)
+    List.length(rest)
+}
+"#
+        ),
+        Value::Int(5)
+    );
+}
+
+#[test]
 fn test_list_flat_map() {
     assert_eq!(
         eval(

@@ -46,6 +46,22 @@ pub enum Opcode {
     /// Swap top two stack items.  Used by emit_match to remove the scrutinee
     /// after the arm body has been evaluated.
     Swap = 0x55,
+    /// Call a function by name stored in the per-function constants pool.
+    /// Operands: name_const_idx (u16 LE) + argc (u16 LE).
+    /// Used by the Favnir self-hosted compiler output.
+    CallNamed = 0x56,
+    /// Jump-if-not-variant using per-function constant pool.
+    /// Operands: const_idx (u16 LE) + offset (u16 LE).
+    /// Pops top of stack; if its variant tag matches constants[const_idx] pushes back and
+    /// continues; otherwise pushes back and jumps forward by offset bytes.
+    /// Used by the Favnir self-hosted compiler's match codegen.
+    JumpIfNotVariantC = 0x57,
+    /// Like GetField but reads field name from per-function constants pool (CVName).
+    GetFieldC = 0x58,
+    /// Like BuildRecord but reads N field names from constants[base_idx..base_idx+N] (CVName entries).
+    BuildRecordC = 0x59,
+    /// Like MakeClosure but looks up function by name (CVName) in artifact globals.
+    MakeClosureN = 0x5A,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -536,6 +552,21 @@ fn remap_string_operands(code: &mut [u8], str_remap: &[u16]) {
             }
             x if x == Opcode::TrackLine as u8 => {
                 ip += 5; // 1-byte opcode + 4-byte u32 line number
+            }
+            x if x == Opcode::CallNamed as u8 => {
+                ip += 5; // 1-byte opcode + 2-byte name_const_idx + 2-byte argc
+            }
+            x if x == Opcode::JumpIfNotVariantC as u8 => {
+                ip += 5; // 1-byte opcode + 2-byte const_idx + 2-byte offset (no remap)
+            }
+            x if x == Opcode::GetFieldC as u8 => {
+                ip += 3; // 1-byte opcode + 2-byte const_idx (no remap needed)
+            }
+            x if x == Opcode::BuildRecordC as u8 => {
+                ip += 5; // 1-byte opcode + 2-byte n + 2-byte base_const_idx (no remap)
+            }
+            x if x == Opcode::MakeClosureN as u8 => {
+                ip += 5; // 1-byte opcode + 2-byte name_const_idx + 2-byte capture_count (no remap)
             }
             _ => break,
         }

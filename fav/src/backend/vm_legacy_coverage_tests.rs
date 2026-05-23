@@ -5,6 +5,7 @@ use crate::middle::compiler::compile_program;
 use crate::value::Value;
 use std::collections::HashMap;
 
+
 fn eval(src: &str) -> Value {
     let prog = Parser::parse_str(src, "test").expect("parse error");
     let ir = compile_program(&prog);

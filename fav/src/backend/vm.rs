@@ -21,7 +21,7 @@ use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
 use std::fs::File;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 type HmacSha256 = Hmac<Sha256>;
 
@@ -441,7 +441,7 @@ fn dynamo_list_response(resp: &str) -> VMValue {
                     arr.iter().map(|item| VMValue::Record(dynamo_item_to_map(item))).collect()
                 })
                 .unwrap_or_default();
-            ok_vm(VMValue::List(items))
+            ok_vm(VMValue::List(FavList::new(items)))
         }
         Err(e) => err_vm(VMValue::Str(e.to_string())),
     }
@@ -1152,6 +1152,45 @@ enum VMStream {
     Take { inner: Box<VMStream>, n: i64 },
 }
 
+/// Shared list with start offset enabling O(1) `List.drop` from the front.
+/// Cloning is O(1) (Arc refcount bump). Mutation materialises a new Vec.
+#[derive(Debug, Clone)]
+struct FavList(Arc<Vec<VMValue>>, usize);
+
+impl FavList {
+    #[inline]
+    fn new(v: Vec<VMValue>) -> Self { FavList(Arc::new(v), 0) }
+    /// O(1) drop from the front — just advances the offset.
+    #[inline]
+    fn drop_front(&self, n: usize) -> FavList {
+        FavList(self.0.clone(), (self.1 + n).min(self.0.len()))
+    }
+    /// O(n) take — creates a new backing Vec.
+    #[inline]
+    fn take_front(&self, n: usize) -> FavList {
+        FavList::new(self.0[self.1..].iter().take(n).cloned().collect())
+    }
+    /// Materialise the virtual slice into an owned Vec (O(n)).
+    #[inline]
+    fn to_vec(&self) -> Vec<VMValue> { self.0[self.1..].iter().cloned().collect() }
+}
+
+impl std::ops::Deref for FavList {
+    type Target = [VMValue];
+    #[inline]
+    fn deref(&self) -> &[VMValue] { &self.0[self.1..] }
+}
+
+impl PartialEq for FavList {
+    fn eq(&self, other: &Self) -> bool { self.0[self.1..] == other.0[other.1..] }
+}
+
+impl IntoIterator for FavList {
+    type Item = VMValue;
+    type IntoIter = std::vec::IntoIter<VMValue>;
+    fn into_iter(self) -> Self::IntoIter { self.to_vec().into_iter() }
+}
+
 #[derive(Debug, Clone)]
 enum VMValue {
     Bool(bool),
@@ -1159,7 +1198,7 @@ enum VMValue {
     Float(f64),
     Str(String),
     Unit,
-    List(Vec<VMValue>),
+    List(FavList),
     Record(HashMap<String, VMValue>),
     Variant(String, Option<Box<VMValue>>),
     VariantCtor(String),
@@ -1317,14 +1356,25 @@ impl VM {
         fn_idx: usize,
         args: Vec<VMValue>,
     ) -> Result<VMValue, VMError> {
+        let caller_depth = self.frames.len();
+        self.push_compiled_frame(artifact, fn_idx, args)?;
+        self.resume(artifact, caller_depth)
+    }
+
+    /// Push a compiled function frame onto the call stack without running resume.
+    /// Used by Call/CallNamed opcodes in the resume loop to avoid Rust recursion.
+    fn push_compiled_frame(
+        &mut self,
+        artifact: &FvcArtifact,
+        fn_idx: usize,
+        args: Vec<VMValue>,
+    ) -> Result<(), VMError> {
         let function = artifact.functions.get(fn_idx).ok_or_else(|| VMError {
             message: format!("unknown function index: {fn_idx}"),
             fn_name: "<invalid>".to_string(),
             ip: 0,
             stack_trace: vec![],
         })?;
-
-        let caller_depth = self.frames.len();
         let base = self.stack.len();
         self.stack.extend(args);
         let required = function.local_count as usize;
@@ -1338,8 +1388,70 @@ impl VM {
             n_locals: required,
             line: 0,
         });
+        Ok(())
+    }
 
-        self.resume(artifact, caller_depth)
+    /// Tail-call optimization: when the frame just pushed is a *self-recursive* tail call
+    /// (callee == caller, i.e., the parent's effective next instruction is Return, possibly
+    /// via Jump chains), replace the parent frame rather than stacking them.
+    /// Restricted to self-recursion so that non-recursive call chains preserve stack traces.
+    #[inline]
+    fn try_apply_tco(&mut self, artifact: &FvcArtifact) {
+        let frames_len = self.frames.len();
+        if frames_len < 2 {
+            return;
+        }
+        let parent_idx = frames_len - 2;
+        // Only TCO self-recursive calls (same function) to preserve stack traces.
+        if self.frames[parent_idx].fn_idx != self.frames[frames_len - 1].fn_idx {
+            return;
+        }
+        let parent_next_ip = self.frames[parent_idx].ip;
+        let parent_fn_code = &artifact.functions[self.frames[parent_idx].fn_idx].code;
+
+        // Follow unconditional Jumps to find the effective next instruction.
+        // Tail calls inside if/else branches emit Call + Jump → end_label, then Return.
+        let mut ip = parent_next_ip;
+        let is_tail_call = loop {
+            if ip >= parent_fn_code.len() {
+                break false;
+            }
+            let byte = parent_fn_code[ip];
+            if byte == crate::backend::codegen::Opcode::Return as u8 {
+                break true;
+            } else if byte == crate::backend::codegen::Opcode::Jump as u8 {
+                // Jump encodes a u16 forward offset; target = ip + 3 + offset
+                if ip + 2 >= parent_fn_code.len() {
+                    break false;
+                }
+                let lo = parent_fn_code[ip + 1];
+                let hi = parent_fn_code[ip + 2];
+                let offset = u16::from_le_bytes([lo, hi]) as usize;
+                ip = ip + 3 + offset;
+            } else {
+                break false;
+            }
+        };
+        if !is_tail_call {
+            return;
+        }
+
+        // Replace parent frame with new frame:
+        // stack layout: [0..parent_base] | parent's locals | [new_base..] new frame's locals
+        let parent_base = self.frames[parent_idx].base;
+        let new_base = self.frames[frames_len - 1].base;
+
+        // Move new frame's stack segment down to parent_base, discarding parent's locals
+        let new_locals: Vec<VMValue> = self.stack.drain(new_base..).collect();
+        self.stack.truncate(parent_base);
+        self.stack.extend(new_locals);
+
+        // Swap parent and new frame so parent is last, then pop it
+        self.frames.swap(parent_idx, frames_len - 1);
+        self.frames.pop();
+
+        // Update the (formerly new) frame's base to parent_base
+        self.frames.last_mut().unwrap().base = parent_base;
     }
 
     fn resume(&mut self, artifact: &FvcArtifact, caller_depth: usize) -> Result<VMValue, VMError> {
@@ -1584,6 +1696,128 @@ impl VM {
                         }
                     }
                 }
+                x if x == Opcode::GetFieldC as u8 => {
+                    let const_idx = Self::read_u16(function, frame)? as usize;
+                    let field_name = match function.constants.get(const_idx) {
+                        Some(crate::backend::codegen::Constant::Name(name)) => name.clone(),
+                        _ => {
+                            return Err(vm.error(
+                                artifact,
+                                &format!("GetFieldC: constant[{const_idx}] is not a Name"),
+                            ));
+                        }
+                    };
+                    let value = vm
+                        .stack
+                        .pop()
+                        .ok_or_else(|| vm.error(artifact, "stack underflow on get_field_c"))?;
+                    match value {
+                        VMValue::Record(map) => {
+                            let field = map.get(&field_name).cloned().ok_or_else(|| {
+                                vm.error(
+                                    artifact,
+                                    &format!("missing record field `{field_name}`"),
+                                )
+                            })?;
+                            vm.stack.push(field);
+                        }
+                        VMValue::Builtin(ns) => {
+                            let full = format!("{}.{}", ns, field_name);
+                            let value = match full.as_str() {
+                                "Math.pi" => VMValue::Float(std::f64::consts::PI),
+                                "Math.e" => VMValue::Float(std::f64::consts::E),
+                                _ => VMValue::Builtin(full),
+                            };
+                            vm.stack.push(value);
+                        }
+                        _ => {
+                            return Err(
+                                vm.error(artifact, "get_field_c requires a record or builtin value")
+                            );
+                        }
+                    }
+                }
+                x if x == Opcode::BuildRecordC as u8 => {
+                    let n = Self::read_u16(function, frame)? as usize;
+                    let base_const_idx = Self::read_u16(function, frame)? as usize;
+                    let mut field_names = Vec::with_capacity(n);
+                    for i in 0..n {
+                        let ci = base_const_idx + i;
+                        match function.constants.get(ci) {
+                            Some(crate::backend::codegen::Constant::Name(name)) => {
+                                field_names.push(name.clone());
+                            }
+                            _ => {
+                                return Err(vm.error(
+                                    artifact,
+                                    &format!("BuildRecordC: constant[{ci}] is not a Name"),
+                                ));
+                            }
+                        }
+                    }
+                    let mut values = Vec::with_capacity(n);
+                    for _ in 0..n {
+                        values.push(vm.stack.pop().ok_or_else(|| {
+                            vm.error(artifact, "stack underflow on build_record_c")
+                        })?);
+                    }
+                    values.reverse();
+                    let mut map = HashMap::with_capacity(n);
+                    for (name, value) in field_names.into_iter().zip(values.into_iter()) {
+                        map.insert(name, value);
+                    }
+                    vm.stack.push(VMValue::Record(map));
+                }
+                x if x == Opcode::MakeClosureN as u8 => {
+                    let name_const_idx = Self::read_u16(function, frame)? as usize;
+                    let capture_count = Self::read_u16(function, frame)? as usize;
+                    let fn_name = match function.constants.get(name_const_idx) {
+                        Some(crate::backend::codegen::Constant::Name(name)) => name.clone(),
+                        _ => {
+                            return Err(vm.error(
+                                artifact,
+                                &format!(
+                                    "MakeClosureN: constant[{name_const_idx}] is not a Name"
+                                ),
+                            ));
+                        }
+                    };
+                    let mut captures = Vec::with_capacity(capture_count);
+                    for _ in 0..capture_count {
+                        captures.push(vm.stack.pop().ok_or_else(|| {
+                            vm.error(artifact, "stack underflow on make_closure_n")
+                        })?);
+                    }
+                    captures.reverse();
+                    // Look up fn_name in artifact.globals via str_table
+                    let target_pos = artifact.globals.iter().position(|g| {
+                        g.kind == 0
+                            && artifact
+                                .str_table
+                                .get(g.name_idx as usize)
+                                .is_some_and(|n| n == &fn_name)
+                    });
+                    let target_pos = target_pos.ok_or_else(|| {
+                        vm.error(
+                            artifact,
+                            &format!("MakeClosureN: function `{fn_name}` not found in globals"),
+                        )
+                    })?;
+                    let target = vm.globals.get(target_pos).cloned().ok_or_else(|| {
+                        vm.error(artifact, "MakeClosureN: global index out of bounds")
+                    })?;
+                    match target {
+                        VMValue::CompiledFn(fn_idx) => {
+                            vm.stack.push(VMValue::Closure(fn_idx, captures));
+                        }
+                        _ => {
+                            return Err(vm.error(
+                                artifact,
+                                "MakeClosureN requires a function global target",
+                            ));
+                        }
+                    }
+                }
                 x if x == Opcode::GetVariantPayload as u8 => {
                     let value = vm.stack.pop().ok_or_else(|| {
                         vm.error(artifact, "stack underflow on get_variant_payload")
@@ -1608,7 +1842,7 @@ impl VM {
                         .collect_frames
                         .pop()
                         .ok_or_else(|| vm.error(artifact, "collect_end without collect_begin"))?;
-                    vm.stack.push(VMValue::List(values));
+                    vm.stack.push(VMValue::List(FavList::new(values)));
                 }
                 x if x == Opcode::YieldValue as u8 => {
                     let Some(value) = vm.stack.pop() else {
@@ -1644,8 +1878,189 @@ impl VM {
                     }
                     args.reverse();
                     vm.stack.remove(callee_pos);
-                    let result = vm.call_value(artifact, callee, args)?;
-                    vm.stack.push(result);
+                    // Iterative dispatch: push frame for compiled fns/closures instead of
+                    // calling invoke_function recursively (avoids Rust stack overflow on
+                    // deeply recursive Favnir programs).
+                    match callee {
+                        VMValue::CompiledFn(fn_idx) => {
+                            vm.push_compiled_frame(artifact, fn_idx, args)?;
+                            vm.try_apply_tco(artifact);
+                        }
+                        VMValue::Closure(fn_idx, captures) => {
+                            let mut full_args = captures;
+                            full_args.extend(args);
+                            vm.push_compiled_frame(artifact, fn_idx, full_args)?;
+                            vm.try_apply_tco(artifact);
+                        }
+                        other => {
+                            let result = vm.call_value(artifact, other, args)?;
+                            vm.stack.push(result);
+                        }
+                    }
+                }
+                x if x == Opcode::CallNamed as u8 => {
+                    // Self-hosted compiler output: call function by name stored in constants pool.
+                    let name_const_idx = Self::read_u16(function, frame)? as usize;
+                    let arg_count = Self::read_u16(function, frame)? as usize;
+                    let fn_name = match function.constants.get(name_const_idx) {
+                        Some(crate::backend::codegen::Constant::Name(name)) => name.clone(),
+                        _ => {
+                            return Err(vm.error(
+                                artifact,
+                                &format!("CallNamed: constant[{name_const_idx}] is not a Name"),
+                            ));
+                        }
+                    };
+                    let mut args = Vec::with_capacity(arg_count);
+                    for _ in 0..arg_count {
+                        args.push(vm.stack.pop().ok_or_else(|| {
+                            vm.error(artifact, "stack underflow on CallNamed")
+                        })?);
+                    }
+                    args.reverse();
+                    // Resolve and dispatch iteratively to avoid Rust recursion.
+                    if let Some(fn_idx) = artifact.fn_idx_by_name(&fn_name) {
+                        // User-defined function: push frame directly (+ TCO if tail call)
+                        vm.push_compiled_frame(artifact, fn_idx, args)?;
+                        vm.try_apply_tco(artifact);
+                    } else {
+                        // Builtin: handle Result/Option monadic combinators inline to
+                        // avoid recursive resume calls on deeply-chained Result.and_then.
+                        match fn_name.as_str() {
+                            "Result.and_then" => {
+                                let func = args.pop().expect("Result.and_then: missing func");
+                                let result_val =
+                                    args.pop().expect("Result.and_then: missing result");
+                                match result_val {
+                                    VMValue::Variant(ref tag, _) if tag == "Ok" => {
+                                        let inner = match result_val {
+                                            VMValue::Variant(_, payload) => payload
+                                                .map(|p| *p)
+                                                .unwrap_or(VMValue::Unit),
+                                            _ => unreachable!(),
+                                        };
+                                        match func {
+                                            VMValue::CompiledFn(fn_idx) => {
+                                                vm.push_compiled_frame(
+                                                    artifact, fn_idx, vec![inner],
+                                                )?;
+                                                vm.try_apply_tco(artifact);
+                                            }
+                                            VMValue::Closure(fn_idx, captures) => {
+                                                let mut full_args = captures;
+                                                full_args.push(inner);
+                                                vm.push_compiled_frame(
+                                                    artifact, fn_idx, full_args,
+                                                )?;
+                                                vm.try_apply_tco(artifact);
+                                            }
+                                            other => {
+                                                let r = vm.call_value(
+                                                    artifact, other, vec![inner],
+                                                )?;
+                                                vm.stack.push(r);
+                                            }
+                                        }
+                                    }
+                                    VMValue::Variant(ref tag, _) if tag == "Err" => {
+                                        vm.stack.push(result_val);
+                                    }
+                                    _ => {
+                                        return Err(vm.error(
+                                            artifact,
+                                            "Result.and_then: expected a Result value",
+                                        ));
+                                    }
+                                }
+                            }
+                            "Option.and_then" => {
+                                let func = args.pop().expect("Option.and_then: missing func");
+                                let opt_val =
+                                    args.pop().expect("Option.and_then: missing option");
+                                match opt_val {
+                                    VMValue::Variant(ref tag, _) if tag == "Some" => {
+                                        let inner = match opt_val {
+                                            VMValue::Variant(_, payload) => payload
+                                                .map(|p| *p)
+                                                .unwrap_or(VMValue::Unit),
+                                            _ => unreachable!(),
+                                        };
+                                        match func {
+                                            VMValue::CompiledFn(fn_idx) => {
+                                                vm.push_compiled_frame(
+                                                    artifact, fn_idx, vec![inner],
+                                                )?;
+                                                vm.try_apply_tco(artifact);
+                                            }
+                                            VMValue::Closure(fn_idx, captures) => {
+                                                let mut full_args = captures;
+                                                full_args.push(inner);
+                                                vm.push_compiled_frame(
+                                                    artifact, fn_idx, full_args,
+                                                )?;
+                                                vm.try_apply_tco(artifact);
+                                            }
+                                            other => {
+                                                let r = vm.call_value(
+                                                    artifact, other, vec![inner],
+                                                )?;
+                                                vm.stack.push(r);
+                                            }
+                                        }
+                                    }
+                                    VMValue::Variant(ref tag, _) if tag == "None" => {
+                                        vm.stack.push(VMValue::Variant(
+                                            "None".to_string(),
+                                            None,
+                                        ));
+                                    }
+                                    _ => {
+                                        return Err(vm.error(
+                                            artifact,
+                                            "Option.and_then: expected an Option value",
+                                        ));
+                                    }
+                                }
+                            }
+                            _ => {
+                                let result =
+                                    vm.call_builtin(artifact, &fn_name, args)?;
+                                vm.stack.push(result);
+                            }
+                        }
+                    }
+                }
+                x if x == Opcode::JumpIfNotVariantC as u8 => {
+                    // Self-hosted compiler match codegen: variant name in per-function constants.
+                    let const_idx = Self::read_u16(function, frame)? as usize;
+                    let offset = Self::read_u16(function, frame)? as usize;
+                    let expected = match function.constants.get(const_idx) {
+                        Some(crate::backend::codegen::Constant::Name(name)) => name.clone(),
+                        _ => {
+                            return Err(vm.error(
+                                artifact,
+                                &format!("JumpIfNotVariantC: constant[{const_idx}] is not a Name"),
+                            ));
+                        }
+                    };
+                    let Some(value) = vm.stack.pop() else {
+                        return Err(vm.error(artifact, "stack underflow on JumpIfNotVariantC"));
+                    };
+                    match value {
+                        VMValue::Variant(tag, payload) if tag == expected => {
+                            vm.stack.push(VMValue::Variant(tag, payload));
+                        }
+                        VMValue::VariantCtor(name) if name == expected => {
+                            vm.stack.push(VMValue::Variant(name, None));
+                        }
+                        other => {
+                            vm.stack.push(other);
+                            let Some(next_ip) = frame.ip.checked_add(offset) else {
+                                return Err(vm.error(artifact, "JumpIfNotVariantC jump overflow"));
+                            };
+                            frame.ip = next_ip;
+                        }
+                    }
                 }
                 x if x == Opcode::Add as u8 => {
                     let (left, right) = vm.pop_pair(artifact)?;
@@ -1907,12 +2322,12 @@ impl VM {
                 let list = it.next().expect("list");
                 let func = it.next().expect("func");
                 match list {
-                    VMValue::List(xs) => {
-                        let mut out = Vec::with_capacity(xs.len());
-                        for x in xs {
+                    VMValue::List(fl) => {
+                        let mut out = Vec::with_capacity(fl.len());
+                        for x in fl {
                             out.push(self.call_value(artifact, func.clone(), vec![x])?);
                         }
-                        Ok(VMValue::List(out))
+                        Ok(VMValue::List(FavList::new(out)))
                     }
                     _ => Err(self.error(artifact, "List.map requires a List as first argument")),
                 }
@@ -1925,9 +2340,9 @@ impl VM {
                 let list = it.next().expect("list");
                 let func = it.next().expect("func");
                 match list {
-                    VMValue::List(xs) => {
+                    VMValue::List(fl) => {
                         let mut out = Vec::new();
-                        for x in xs {
+                        for x in fl {
                             let keep = self.call_value(artifact, func.clone(), vec![x.clone()])?;
                             match keep {
                                 VMValue::Bool(true) => out.push(x),
@@ -1943,7 +2358,7 @@ impl VM {
                                 }
                             }
                         }
-                        Ok(VMValue::List(out))
+                        Ok(VMValue::List(FavList::new(out)))
                     }
                     _ => Err(self.error(artifact, "List.filter requires a List as first argument")),
                 }
@@ -1956,9 +2371,9 @@ impl VM {
                 let list = it.next().expect("list");
                 let func = it.next().expect("func");
                 match list {
-                    VMValue::List(xs) => {
+                    VMValue::List(fl) => {
                         let mut out = Vec::new();
-                        for x in xs {
+                        for x in fl {
                             match self.call_value(artifact, func.clone(), vec![x.clone()])? {
                                 VMValue::Bool(true) => out.push(x),
                                 VMValue::Bool(false) => break,
@@ -1973,7 +2388,7 @@ impl VM {
                                 }
                             }
                         }
-                        Ok(VMValue::List(out))
+                        Ok(VMValue::List(FavList::new(out)))
                     }
                     _ => Err(self.error(artifact, "List.take_while requires a List as first argument")),
                 }
@@ -1986,15 +2401,15 @@ impl VM {
                 let list = it.next().expect("list");
                 let func = it.next().expect("func");
                 match list {
-                    VMValue::List(xs) => {
-                        let mut rest = xs.into_iter().peekable();
+                    VMValue::List(fl) => {
+                        let mut rest = fl.into_iter().peekable();
                         while let Some(x) = rest.peek() {
                             match self.call_value(artifact, func.clone(), vec![x.clone()])? {
                                 VMValue::Bool(true) => { rest.next(); }
                                 _ => break,
                             }
                         }
-                        Ok(VMValue::List(rest.collect()))
+                        Ok(VMValue::List(FavList::new(rest.collect())))
                     }
                     _ => Err(self.error(artifact, "List.drop_while requires a List as first argument")),
                 }
@@ -2008,8 +2423,8 @@ impl VM {
                 let mut acc = it.next().expect("init");
                 let func = it.next().expect("func");
                 match list {
-                    VMValue::List(xs) => {
-                        for x in xs {
+                    VMValue::List(fl) => {
+                        for x in fl {
                             acc = self.call_value(artifact, func.clone(), vec![acc, x])?;
                         }
                         Ok(acc)
@@ -2025,9 +2440,9 @@ impl VM {
                 let list = it.next().expect("list");
                 let func = it.next().expect("func");
                 match list {
-                    VMValue::List(xs) => {
+                    VMValue::List(fl) => {
                         let mut out: Vec<VMValue> = Vec::new();
-                        for x in xs {
+                        for x in fl {
                             match self.call_value(artifact, func.clone(), vec![x])? {
                                 VMValue::List(inner) => out.extend(inner),
                                 other => {
@@ -2041,7 +2456,7 @@ impl VM {
                                 }
                             }
                         }
-                        Ok(VMValue::List(out))
+                        Ok(VMValue::List(FavList::new(out)))
                     }
                     _ => {
                         Err(self.error(artifact, "List.flat_map requires a List as first argument"))
@@ -2056,7 +2471,8 @@ impl VM {
                 let list = it.next().expect("list");
                 let cmp = it.next().expect("cmp");
                 match list {
-                    VMValue::List(mut xs) => {
+                    VMValue::List(fl) => {
+                        let mut xs = fl.to_vec();
                         let mut sort_err: Option<VMError> = None;
                         xs.sort_by(|a, b| {
                             if sort_err.is_some() {
@@ -2092,7 +2508,7 @@ impl VM {
                         if let Some(e) = sort_err {
                             return Err(e);
                         }
-                        Ok(VMValue::List(xs))
+                        Ok(VMValue::List(FavList::new(xs)))
                     }
                     _ => Err(self.error(artifact, "List.sort requires a List as first argument")),
                 }
@@ -2105,8 +2521,8 @@ impl VM {
                 let list = it.next().expect("list");
                 let pred = it.next().expect("pred");
                 match list {
-                    VMValue::List(xs) => {
-                        for x in xs {
+                    VMValue::List(fl) => {
+                        for x in fl {
                             match self.call_value(artifact, pred.clone(), vec![x.clone()])? {
                                 VMValue::Bool(true) => {
                                     return Ok(VMValue::Variant("some".into(), Some(Box::new(x))));
@@ -2136,8 +2552,8 @@ impl VM {
                 let list = it.next().expect("list");
                 let pred = it.next().expect("pred");
                 match list {
-                    VMValue::List(xs) => {
-                        for x in xs {
+                    VMValue::List(fl) => {
+                        for x in fl {
                             match self.call_value(artifact, pred.clone(), vec![x])? {
                                 VMValue::Bool(true) => return Ok(VMValue::Bool(true)),
                                 VMValue::Bool(false) => {}
@@ -2165,8 +2581,8 @@ impl VM {
                 let list = it.next().expect("list");
                 let pred = it.next().expect("pred");
                 match list {
-                    VMValue::List(xs) => {
-                        for x in xs {
+                    VMValue::List(fl) => {
+                        for x in fl {
                             match self.call_value(artifact, pred.clone(), vec![x])? {
                                 VMValue::Bool(false) => return Ok(VMValue::Bool(false)),
                                 VMValue::Bool(true) => {}
@@ -2194,9 +2610,9 @@ impl VM {
                 let list = it.next().expect("list");
                 let pred = it.next().expect("pred");
                 match list {
-                    VMValue::List(xs) => {
+                    VMValue::List(fl) => {
                         let mut count = 0i64;
-                        for x in xs {
+                        for x in fl {
                             match self.call_value(artifact, pred.clone(), vec![x])? {
                                 VMValue::Bool(true) => count += 1,
                                 VMValue::Bool(false) => {}
@@ -2224,8 +2640,8 @@ impl VM {
                 let list = it.next().expect("list");
                 let pred = it.next().expect("pred");
                 match list {
-                    VMValue::List(xs) => {
-                        for (i, x) in xs.into_iter().enumerate() {
+                    VMValue::List(fl) => {
+                        for (i, x) in fl.into_iter().enumerate() {
                             match self.call_value(artifact, pred.clone(), vec![x])? {
                                 VMValue::Bool(true) => {
                                     return Ok(VMValue::Variant(
@@ -2691,7 +3107,7 @@ impl VM {
                     .next()
                     .ok_or_else(|| self.error(artifact, "Stream.from requires 1 argument"))?;
                 match list {
-                    VMValue::List(xs) => Ok(VMValue::Stream(Box::new(VMStream::Of(xs)))),
+                    VMValue::List(fl) => Ok(VMValue::Stream(Box::new(VMStream::Of(fl.to_vec())))),
                     other => Err(self.error(
                         artifact,
                         &format!(
@@ -2790,7 +3206,7 @@ impl VM {
                 match stream {
                     VMValue::Stream(s) => {
                         let items = self.materialize_stream(artifact, *s)?;
-                        Ok(VMValue::List(items))
+                        Ok(VMValue::List(FavList::new(items)))
                     }
                     other => Err(self.error(
                         artifact,
@@ -2819,7 +3235,7 @@ impl VM {
                     }
                 };
                 let routes = match it.next().expect("routes") {
-                    VMValue::List(routes) => routes,
+                    VMValue::List(fl) => fl,
                     other => {
                         return Err(self.error(
                             artifact,
@@ -3085,10 +3501,10 @@ impl VM {
                     };
                     let result = self.invoke_function(artifact, fn_idx, vec![req_value]);
                     let frames = match result {
-                        Ok(VMValue::List(items)) => {
+                        Ok(VMValue::List(fl)) => {
                             let mut combined: Vec<u8> = Vec::new();
                             let mut ok = true;
-                            for item in items {
+                            for item in fl {
                                 match grpc_vm_value_to_proto_bytes(Ok(item)) {
                                     Ok(b) => {
                                         combined.extend_from_slice(&encode_grpc_frame(&b));
@@ -3233,7 +3649,7 @@ impl From<Value> for VMValue {
             Value::Float(v) => VMValue::Float(v),
             Value::Str(v) => VMValue::Str(v),
             Value::Unit => VMValue::Unit,
-            Value::List(values) => VMValue::List(values.into_iter().map(VMValue::from).collect()),
+            Value::List(values) => VMValue::List(FavList::new(values.into_iter().map(VMValue::from).collect())),
             Value::Record(map) => VMValue::Record(
                 map.into_iter()
                     .map(|(k, v)| (k, VMValue::from(v)))
@@ -3255,7 +3671,7 @@ impl From<VMValue> for Value {
             VMValue::Float(v) => Value::Float(v),
             VMValue::Str(v) => Value::Str(v),
             VMValue::Unit => Value::Unit,
-            VMValue::List(values) => Value::List(values.into_iter().map(Value::from).collect()),
+            VMValue::List(fl) => Value::List(fl.into_iter().map(Value::from).collect()),
             VMValue::Record(map) => {
                 Value::Record(map.into_iter().map(|(k, v)| (k, Value::from(v))).collect())
             }
@@ -3371,8 +3787,8 @@ fn vmvalue_repr(v: &VMValue) -> String {
         }
         VMValue::Str(s) => format!("\"{}\"", s),
         VMValue::Unit => "()".to_string(),
-        VMValue::List(vs) => {
-            let items: Vec<_> = vs.iter().map(vmvalue_repr).collect();
+        VMValue::List(fl) => {
+            let items: Vec<_> = fl.iter().map(vmvalue_repr).collect();
             format!("[{}]", items.join(", "))
         }
         VMValue::Record(m) => {
@@ -3436,9 +3852,9 @@ fn serde_to_vm_json(value: SerdeJsonValue) -> VMValue {
         SerdeJsonValue::String(s) => json_variant_vm("json_str", Some(VMValue::Str(s))),
         SerdeJsonValue::Array(items) => json_variant_vm(
             "json_array",
-            Some(VMValue::List(
+            Some(VMValue::List(FavList::new(
                 items.into_iter().map(serde_to_vm_json).collect(),
-            )),
+            ))),
         ),
         SerdeJsonValue::Object(map) => {
             let mut fields = HashMap::new();
@@ -3470,9 +3886,9 @@ fn vm_json_to_serde(value: &VMValue) -> Option<SerdeJsonValue> {
             _ => None,
         },
         VMValue::Variant(tag, Some(payload)) if tag == "json_array" => match payload.as_ref() {
-            VMValue::List(items) => {
-                let mut out = Vec::with_capacity(items.len());
-                for item in items {
+            VMValue::List(fl) => {
+                let mut out = Vec::with_capacity(fl.len());
+                for item in fl.iter() {
                     out.push(vm_json_to_serde(item)?);
                 }
                 Some(SerdeJsonValue::Array(out))
@@ -3529,9 +3945,9 @@ fn vm_float(value: VMValue, context: &str) -> Result<f64, String> {
 
 fn vm_string_list(value: VMValue, context: &str) -> Result<Vec<String>, String> {
     match value {
-        VMValue::List(items) => {
-            let mut out = Vec::with_capacity(items.len());
-            for item in items {
+        VMValue::List(fl) => {
+            let mut out = Vec::with_capacity(fl.len());
+            for item in fl {
                 out.push(vm_string(item, context)?);
             }
             Ok(out)
@@ -3665,7 +4081,7 @@ fn schema_rows_from_vm(
     context: &str,
 ) -> Result<Vec<HashMap<String, VMValue>>, String> {
     match value {
-        VMValue::List(rows) => rows
+        VMValue::List(fl) => fl
             .into_iter()
             .map(|row| match row {
                 VMValue::Record(map) => Ok(map),
@@ -3746,7 +4162,7 @@ fn schema_adapt_rows(
         }
         out.push(VMValue::Record(record));
     }
-    ok_vm(VMValue::List(out))
+    ok_vm(VMValue::List(FavList::new(out)))
 }
 
 fn schema_to_json_value(
@@ -5220,7 +5636,7 @@ fn vm_call_builtin(
             };
             let bytes_val = it.next().ok_or_else(|| "IO.write_bytes_raw requires 2 arguments".to_string())?;
             let bytes: Vec<u8> = match bytes_val {
-                VMValue::List(list) => list
+                VMValue::List(fl) => fl
                     .into_iter()
                     .map(|v| match v {
                         VMValue::Int(n) => Ok((n & 0xFF) as u8),
@@ -5254,7 +5670,7 @@ fn vm_call_builtin(
                         .collect()
                 }
             });
-            Ok(VMValue::List(argv))
+            Ok(VMValue::List(FavList::new(argv)))
         }
 
         "Debug.show" => {
@@ -5535,11 +5951,11 @@ fn vm_call_builtin(
                 .next()
                 .ok_or_else(|| "String.split requires 2 arguments".to_string())?;
             match (s, d) {
-                (VMValue::Str(s), VMValue::Str(delim)) => Ok(VMValue::List(
+                (VMValue::Str(s), VMValue::Str(delim)) => Ok(VMValue::List(FavList::new(
                     s.split(&*delim)
                         .map(|p| VMValue::Str(p.to_string()))
                         .collect(),
-                )),
+                ))),
                 _ => Err("String.split requires (String, String)".to_string()),
             }
         }
@@ -5552,9 +5968,9 @@ fn vm_call_builtin(
                 .next()
                 .ok_or_else(|| "String.join requires 2 arguments".to_string())?;
             match (xs, sep) {
-                (VMValue::List(values), VMValue::Str(sep)) => {
-                    let mut parts = Vec::with_capacity(values.len());
-                    for value in values {
+                (VMValue::List(fl), VMValue::Str(sep)) => {
+                    let mut parts = Vec::with_capacity(fl.len());
+                    for value in fl {
                         match value {
                             VMValue::Str(s) => parts.push(s),
                             _ => {
@@ -5682,11 +6098,11 @@ fn vm_call_builtin(
                 .next()
                 .ok_or_else(|| "String.lines requires 1 argument".to_string())?;
             match v {
-                VMValue::Str(s) => Ok(VMValue::List(
+                VMValue::Str(s) => Ok(VMValue::List(FavList::new(
                     s.lines()
                         .map(|line| VMValue::Str(line.to_string()))
                         .collect(),
-                )),
+                ))),
                 _ => Err("String.lines requires a String argument".to_string()),
             }
         }
@@ -5696,11 +6112,11 @@ fn vm_call_builtin(
                 .next()
                 .ok_or_else(|| "String.words requires 1 argument".to_string())?;
             match v {
-                VMValue::Str(s) => Ok(VMValue::List(
+                VMValue::Str(s) => Ok(VMValue::List(FavList::new(
                     s.split_whitespace()
                         .map(|word| VMValue::Str(word.to_string()))
                         .collect(),
-                )),
+                ))),
                 _ => Err("String.words requires a String argument".to_string()),
             }
         }
@@ -5875,9 +6291,9 @@ fn vm_call_builtin(
                 .next()
                 .ok_or_else(|| "String.from_chars requires 1 argument".to_string())?;
             match v {
-                VMValue::List(chars) => {
+                VMValue::List(fl) => {
                     let mut result = String::new();
-                    for c in chars {
+                    for c in fl {
                         match c {
                             VMValue::Str(s) => result.push_str(&s),
                             other => return Err(format!(
@@ -5920,9 +6336,23 @@ fn vm_call_builtin(
                 VMValue::Str(s) => {
                     let chars: Vec<VMValue> =
                         s.chars().map(|c| VMValue::Str(c.to_string())).collect();
-                    Ok(VMValue::List(chars))
+                    Ok(VMValue::List(FavList::new(chars)))
                 }
                 _ => Err("String.chars requires a String argument".to_string()),
+            }
+        }
+        "String.to_bytes" => {
+            let v = args
+                .into_iter()
+                .next()
+                .ok_or_else(|| "String.to_bytes requires 1 argument".to_string())?;
+            match v {
+                VMValue::Str(s) => {
+                    let bytes: Vec<VMValue> =
+                        s.as_bytes().iter().map(|&b| VMValue::Int(b as i64)).collect();
+                    Ok(VMValue::List(FavList::new(bytes)))
+                }
+                _ => Err("String.to_bytes requires a String argument".to_string()),
             }
         }
         "List.length" => {
@@ -5931,7 +6361,7 @@ fn vm_call_builtin(
                 .next()
                 .ok_or_else(|| "List.length requires 1 argument".to_string())?;
             match v {
-                VMValue::List(xs) => Ok(VMValue::Int(xs.len() as i64)),
+                VMValue::List(fl) => Ok(VMValue::Int(fl.len() as i64)),
                 _ => Err("List.length requires a List argument".to_string()),
             }
         }
@@ -5941,7 +6371,7 @@ fn vm_call_builtin(
                 .next()
                 .ok_or_else(|| "List.is_empty requires 1 argument".to_string())?;
             match v {
-                VMValue::List(xs) => Ok(VMValue::Bool(xs.is_empty())),
+                VMValue::List(fl) => Ok(VMValue::Bool(fl.is_empty())),
                 _ => Err("List.is_empty requires a List argument".to_string()),
             }
         }
@@ -5951,7 +6381,7 @@ fn vm_call_builtin(
                 .next()
                 .ok_or_else(|| "List.first requires 1 argument".to_string())?;
             match v {
-                VMValue::List(xs) => Ok(match xs.into_iter().next() {
+                VMValue::List(fl) => Ok(match fl.first().cloned() {
                     Some(first) => VMValue::Variant("some".to_string(), Some(Box::new(first))),
                     None => VMValue::Variant("none".to_string(), None),
                 }),
@@ -5964,7 +6394,7 @@ fn vm_call_builtin(
                 .next()
                 .ok_or_else(|| "List.last requires 1 argument".to_string())?;
             match v {
-                VMValue::List(mut xs) => Ok(match xs.pop() {
+                VMValue::List(fl) => Ok(match fl.last().cloned() {
                     Some(last) => VMValue::Variant("some".to_string(), Some(Box::new(last))),
                     None => VMValue::Variant("none".to_string(), None),
                 }),
@@ -5976,7 +6406,7 @@ fn vm_call_builtin(
                 .into_iter()
                 .next()
                 .ok_or_else(|| "List.singleton requires 1 argument".to_string())?;
-            Ok(VMValue::List(vec![v]))
+            Ok(VMValue::List(FavList::new(vec![v])))
         }
         "List.push" => {
             let mut it = args.into_iter();
@@ -5987,9 +6417,10 @@ fn vm_call_builtin(
                 .next()
                 .ok_or_else(|| "List.push requires 2 arguments".to_string())?;
             match list {
-                VMValue::List(mut xs) => {
+                VMValue::List(fl) => {
+                    let mut xs = fl.to_vec();
                     xs.push(item);
-                    Ok(VMValue::List(xs))
+                    Ok(VMValue::List(FavList::new(xs)))
                 }
                 _ => Err("List.push requires a List as first argument".to_string()),
             }
@@ -6003,10 +6434,10 @@ fn vm_call_builtin(
                 .next()
                 .ok_or_else(|| "List.zip requires 2 arguments".to_string())?;
             match (xs, ys) {
-                (VMValue::List(xs), VMValue::List(ys)) => {
-                    let pairs: Vec<VMValue> = xs
+                (VMValue::List(fla), VMValue::List(flb)) => {
+                    let pairs: Vec<VMValue> = fla
                         .into_iter()
-                        .zip(ys.into_iter())
+                        .zip(flb.into_iter())
                         .map(|(x, y)| {
                             let mut m = HashMap::new();
                             m.insert("first".to_string(), x);
@@ -6014,7 +6445,7 @@ fn vm_call_builtin(
                             VMValue::Record(m)
                         })
                         .collect();
-                    Ok(VMValue::List(pairs))
+                    Ok(VMValue::List(FavList::new(pairs)))
                 }
                 _ => Err("List.zip expects (List, List)".to_string()),
             }
@@ -6029,15 +6460,16 @@ fn vm_call_builtin(
                 .ok_or_else(|| "List.range requires 2 arguments".to_string())?;
             match (start, end) {
                 (VMValue::Int(s), VMValue::Int(e)) => {
-                    Ok(VMValue::List((s..e).map(VMValue::Int).collect()))
+                    Ok(VMValue::List(FavList::new((s..e).map(VMValue::Int).collect())))
                 }
                 _ => Err("List.range expects (Int, Int)".to_string()),
             }
         }
         "List.reverse" => match args.into_iter().next() {
-            Some(VMValue::List(mut xs)) => {
+            Some(VMValue::List(fl)) => {
+                let mut xs = fl.to_vec();
                 xs.reverse();
-                Ok(VMValue::List(xs))
+                Ok(VMValue::List(FavList::new(xs)))
             }
             _ => Err("List.reverse expects List".to_string()),
         },
@@ -6050,9 +6482,10 @@ fn vm_call_builtin(
                 .next()
                 .ok_or_else(|| "List.concat requires 2 arguments".to_string())?;
             match (xs, ys) {
-                (VMValue::List(mut xs), VMValue::List(ys)) => {
-                    xs.extend(ys);
-                    Ok(VMValue::List(xs))
+                (VMValue::List(fla), VMValue::List(flb)) => {
+                    let mut xs = fla.to_vec();
+                    xs.extend(flb.into_iter());
+                    Ok(VMValue::List(FavList::new(xs)))
                 }
                 _ => Err("List.concat expects (List, List)".to_string()),
             }
@@ -6066,9 +6499,7 @@ fn vm_call_builtin(
                 .next()
                 .ok_or_else(|| "List.take requires 2 arguments".to_string())?;
             match (list, n) {
-                (VMValue::List(xs), VMValue::Int(n)) => Ok(VMValue::List(
-                    xs.into_iter().take(n.max(0) as usize).collect(),
-                )),
+                (VMValue::List(fl), VMValue::Int(n)) => Ok(VMValue::List(fl.take_front(n.max(0) as usize))),
                 _ => Err("List.take expects (List, Int)".to_string()),
             }
         }
@@ -6081,15 +6512,14 @@ fn vm_call_builtin(
                 .next()
                 .ok_or_else(|| "List.drop requires 2 arguments".to_string())?;
             match (list, n) {
-                (VMValue::List(xs), VMValue::Int(n)) => Ok(VMValue::List(
-                    xs.into_iter().skip(n.max(0) as usize).collect(),
-                )),
+                // O(1): just advance the offset — no element copies.
+                (VMValue::List(fl), VMValue::Int(n)) => Ok(VMValue::List(fl.drop_front(n.max(0) as usize))),
                 _ => Err("List.drop expects (List, Int)".to_string()),
             }
         }
         "List.enumerate" => match args.into_iter().next() {
-            Some(VMValue::List(xs)) => {
-                let pairs: Vec<VMValue> = xs
+            Some(VMValue::List(fl)) => {
+                let pairs: Vec<VMValue> = fl
                     .into_iter()
                     .enumerate()
                     .map(|(i, v)| {
@@ -6099,7 +6529,7 @@ fn vm_call_builtin(
                         VMValue::Record(m)
                     })
                     .collect();
-                Ok(VMValue::List(pairs))
+                Ok(VMValue::List(FavList::new(pairs)))
             }
             _ => Err("List.enumerate expects List".to_string()),
         },
@@ -6112,9 +6542,9 @@ fn vm_call_builtin(
                 .next()
                 .ok_or_else(|| "List.join requires 2 arguments".to_string())?;
             match (list, sep) {
-                (VMValue::List(xs), VMValue::Str(sep)) => {
-                    let mut parts = Vec::with_capacity(xs.len());
-                    for v in xs {
+                (VMValue::List(fl), VMValue::Str(sep)) => {
+                    let mut parts = Vec::with_capacity(fl.len());
+                    for v in fl {
                         match v {
                             VMValue::Str(s) => parts.push(s),
                             other => {
@@ -6136,16 +6566,16 @@ fn vm_call_builtin(
                 .next()
                 .ok_or_else(|| "List.unique requires 1 argument".to_string())?;
             match v {
-                VMValue::List(xs) => {
+                VMValue::List(fl) => {
                     let mut seen = HashSet::new();
-                    let mut out = Vec::with_capacity(xs.len());
-                    for item in xs {
+                    let mut out = Vec::with_capacity(fl.len());
+                    for item in fl {
                         let key = vmvalue_repr(&item);
                         if seen.insert(key) {
                             out.push(item);
                         }
                     }
-                    Ok(VMValue::List(out))
+                    Ok(VMValue::List(FavList::new(out)))
                 }
                 _ => Err("List.unique requires a List argument".to_string()),
             }
@@ -6156,15 +6586,15 @@ fn vm_call_builtin(
                 .next()
                 .ok_or_else(|| "List.flatten requires 1 argument".to_string())?;
             match v {
-                VMValue::List(xs) => {
+                VMValue::List(fl) => {
                     let mut out = Vec::new();
-                    for inner in xs {
+                    for inner in fl {
                         match inner {
-                            VMValue::List(items) => out.extend(items),
+                            VMValue::List(inner_fl) => out.extend(inner_fl),
                             _ => return Err("List.flatten requires List<List<T>>".to_string()),
                         }
                     }
-                    Ok(VMValue::List(out))
+                    Ok(VMValue::List(FavList::new(out)))
                 }
                 _ => Err("List.flatten requires a List argument".to_string()),
             }
@@ -6178,13 +6608,13 @@ fn vm_call_builtin(
                 .next()
                 .ok_or_else(|| "List.chunk requires 2 arguments".to_string())?;
             match (list, n) {
-                (VMValue::List(xs), VMValue::Int(n)) if n > 0 => {
+                (VMValue::List(fl), VMValue::Int(n)) if n > 0 => {
                     let size = n as usize;
-                    let chunks = xs
+                    let chunks = fl
                         .chunks(size)
-                        .map(|chunk| VMValue::List(chunk.to_vec()))
+                        .map(|chunk| VMValue::List(FavList::new(chunk.to_vec())))
                         .collect();
-                    Ok(VMValue::List(chunks))
+                    Ok(VMValue::List(FavList::new(chunks)))
                 }
                 (VMValue::List(_), VMValue::Int(_)) => {
                     Err("List.chunk requires a positive chunk size".to_string())
@@ -6198,9 +6628,9 @@ fn vm_call_builtin(
                 .next()
                 .ok_or_else(|| "List.sum requires 1 argument".to_string())?;
             match v {
-                VMValue::List(xs) => {
+                VMValue::List(fl) => {
                     let mut sum = 0i64;
-                    for item in xs {
+                    for item in fl {
                         match item {
                             VMValue::Int(n) => sum += n,
                             _ => return Err("List.sum requires List<Int>".to_string()),
@@ -6217,9 +6647,9 @@ fn vm_call_builtin(
                 .next()
                 .ok_or_else(|| "List.sum_float requires 1 argument".to_string())?;
             match v {
-                VMValue::List(xs) => {
+                VMValue::List(fl) => {
                     let mut sum = 0.0f64;
-                    for item in xs {
+                    for item in fl {
                         match item {
                             VMValue::Float(n) => sum += n,
                             _ => return Err("List.sum_float requires List<Float>".to_string()),
@@ -6236,9 +6666,9 @@ fn vm_call_builtin(
                 .next()
                 .ok_or_else(|| "List.min requires 1 argument".to_string())?;
             match v {
-                VMValue::List(xs) => {
+                VMValue::List(fl) => {
                     let mut min: Option<i64> = None;
-                    for item in xs {
+                    for item in fl {
                         match item {
                             VMValue::Int(n) => min = Some(min.map(|m| m.min(n)).unwrap_or(n)),
                             _ => return Err("List.min requires List<Int>".to_string()),
@@ -6260,9 +6690,9 @@ fn vm_call_builtin(
                 .next()
                 .ok_or_else(|| "List.max requires 1 argument".to_string())?;
             match v {
-                VMValue::List(xs) => {
+                VMValue::List(fl) => {
                     let mut max: Option<i64> = None;
-                    for item in xs {
+                    for item in fl {
                         match item {
                             VMValue::Int(n) => max = Some(max.map(|m| m.max(n)).unwrap_or(n)),
                             _ => return Err("List.max requires List<Int>".to_string()),
@@ -6354,7 +6784,7 @@ fn vm_call_builtin(
                         (VMValue::Str(x), VMValue::Str(y)) => x.cmp(y),
                         _ => std::cmp::Ordering::Equal,
                     });
-                    Ok(VMValue::List(keys))
+                    Ok(VMValue::List(FavList::new(keys)))
                 }
                 _ => Err("Map.keys requires a Record (map) argument".to_string()),
             }
@@ -6368,9 +6798,9 @@ fn vm_call_builtin(
                 VMValue::Record(m) => {
                     let mut pairs: Vec<_> = m.iter().collect();
                     pairs.sort_by(|a, b| a.0.cmp(b.0));
-                    Ok(VMValue::List(
+                    Ok(VMValue::List(FavList::new(
                         pairs.into_iter().map(|(_, v)| v.clone()).collect(),
-                    ))
+                    )))
                 }
                 _ => Err("Map.values requires a Record (map) argument".to_string()),
             }
@@ -6461,9 +6891,9 @@ fn vm_call_builtin(
                 .next()
                 .ok_or_else(|| "Map.from_list requires 1 argument".to_string())?;
             match v {
-                VMValue::List(xs) => {
-                    let mut out = HashMap::with_capacity(xs.len());
-                    for pair in xs {
+                VMValue::List(fl) => {
+                    let mut out = HashMap::with_capacity(fl.len());
+                    for pair in fl {
                         match pair {
                             VMValue::Record(mut fields) => {
                                 let first = fields.remove("first");
@@ -6501,7 +6931,7 @@ fn vm_call_builtin(
                 VMValue::Record(m) => {
                     let mut pairs: Vec<_> = m.into_iter().collect();
                     pairs.sort_by(|a, b| a.0.cmp(&b.0));
-                    Ok(VMValue::List(
+                    Ok(VMValue::List(FavList::new(
                         pairs
                             .into_iter()
                             .map(|(k, v)| {
@@ -6511,7 +6941,7 @@ fn vm_call_builtin(
                                 VMValue::Record(fields)
                             })
                             .collect(),
-                    ))
+                    )))
                 }
                 _ => Err("Map.to_list requires a Map argument".to_string()),
             }
@@ -6550,8 +6980,8 @@ fn vm_call_builtin(
             None => Err("Json.str requires 1 argument".to_string()),
         },
         "Json.array" => match args.into_iter().next() {
-            Some(VMValue::List(items)) => {
-                Ok(json_variant_vm("json_array", Some(VMValue::List(items))))
+            Some(VMValue::List(fl)) => {
+                Ok(json_variant_vm("json_array", Some(VMValue::List(fl))))
             }
             Some(other) => Err(format!(
                 "Json.array expects List<Json>, got {}",
@@ -6609,7 +7039,7 @@ fn vm_call_builtin(
         },
         "Json.parse_array_raw" => match args.into_iter().next() {
             Some(VMValue::Str(text)) => match parse_json_array_raw(&text) {
-                Ok(rows) => Ok(ok_vm(VMValue::List(rows))),
+                Ok(rows) => Ok(ok_vm(VMValue::List(FavList::new(rows)))),
                 Err(message) => Ok(err_vm(schema_error_vm("", "valid json array", message))),
             },
             Some(other) => Err(format!(
@@ -6780,7 +7210,7 @@ fn vm_call_builtin(
                     keys.sort_by(|a, b| vmvalue_repr(a).cmp(&vmvalue_repr(b)));
                     Ok(VMValue::Variant(
                         "some".to_string(),
-                        Some(Box::new(VMValue::List(keys))),
+                        Some(Box::new(VMValue::List(FavList::new(keys)))),
                     ))
                 }
                 _ => Err("Json.keys received malformed json_object payload".to_string()),
@@ -6819,14 +7249,14 @@ fn vm_call_builtin(
             let mut rows = Vec::new();
             for record in rdr.records() {
                 let record = record.map_err(|e| format!("Csv.parse failed: {}", e))?;
-                rows.push(VMValue::List(
+                rows.push(VMValue::List(FavList::new(
                     record
                         .iter()
                         .map(|cell| VMValue::Str(cell.to_string()))
                         .collect(),
-                ));
+                )));
             }
-            Ok(VMValue::List(rows))
+            Ok(VMValue::List(FavList::new(rows)))
         }
         "Csv.parse_raw" => {
             if args.len() != 3 {
@@ -6879,7 +7309,7 @@ fn vm_call_builtin(
                 }
                 rows.push(VMValue::Record(row));
             }
-            Ok(ok_vm(VMValue::List(rows)))
+            Ok(ok_vm(VMValue::List(FavList::new(rows))))
         }
         "Csv.parse_with_header" => {
             let input = vm_string(
@@ -6904,7 +7334,7 @@ fn vm_call_builtin(
                 }
                 rows.push(VMValue::Record(row));
             }
-            Ok(VMValue::List(rows))
+            Ok(VMValue::List(FavList::new(rows)))
         }
         "Csv.encode" => {
             let rows = match args.into_iter().next() {
@@ -7209,7 +7639,7 @@ fn vm_call_builtin(
                 .iter()
                 .map(|v| VMValue::Str(vmvalue_repr(v)))
                 .collect();
-            Ok(VMValue::List(log))
+            Ok(VMValue::List(FavList::new(log)))
         }
         "Db.execute" => {
             if args.is_empty() {
@@ -7257,7 +7687,7 @@ fn vm_call_builtin(
                     .map_err(|e| format!("Db error: {}", e))?
                     .collect::<Result<Vec<_>, _>>()
                     .map_err(|e| format!("Db error: {}", e))?;
-                Ok(VMValue::List(rows))
+                Ok(VMValue::List(FavList::new(rows)))
             })
         }
         "Db.query_one" => {
@@ -7643,7 +8073,7 @@ fn vm_call_builtin(
                     let list: Vec<VMValue> = bytes.into_iter()
                         .map(|b| VMValue::Int(b as i64))
                         .collect();
-                    Ok(ok_vm(VMValue::List(list)))
+                    Ok(ok_vm(VMValue::List(FavList::new(list))))
                 }
                 Err(e) => Ok(err_vm(VMValue::Str(e.to_string()))),
             }
@@ -7858,12 +8288,12 @@ fn vm_call_builtin(
                 rt.block_on(async move {
                     let tcp = match tokio::net::TcpStream::connect(&tcp_addr).await {
                         Ok(s) => s,
-                        Err(_) => return Ok(VMValue::List(vec![])),
+                        Err(_) => return Ok(VMValue::List(FavList::new(vec![]))),
                     };
                     let (mut h2_client, h2_conn) =
                         match h2::client::handshake(tcp).await {
                             Ok(r) => r,
-                            Err(_) => return Ok(VMValue::List(vec![])),
+                            Err(_) => return Ok(VMValue::List(FavList::new(vec![]))),
                         };
                     tokio::spawn(async move { let _ = h2_conn.await; });
                     let request = match http::Request::builder()
@@ -7874,22 +8304,22 @@ fn vm_call_builtin(
                         .body(())
                     {
                         Ok(r) => r,
-                        Err(_) => return Ok(VMValue::List(vec![])),
+                        Err(_) => return Ok(VMValue::List(FavList::new(vec![]))),
                     };
                     let (response_future, mut send_stream) =
                         match h2_client.send_request(request, false) {
                             Ok(r) => r,
-                            Err(_) => return Ok(VMValue::List(vec![])),
+                            Err(_) => return Ok(VMValue::List(FavList::new(vec![]))),
                         };
                     if send_stream
                         .send_data(Bytes::from(frame), true)
                         .is_err()
                     {
-                        return Ok(VMValue::List(vec![]));
+                        return Ok(VMValue::List(FavList::new(vec![])));
                     }
                     let response = match response_future.await {
                         Ok(r) => r,
-                        Err(_) => return Ok(VMValue::List(vec![])),
+                        Err(_) => return Ok(VMValue::List(FavList::new(vec![]))),
                     };
                     let mut body = response.into_body();
                     let mut resp_bytes: Vec<u8> = Vec::new();
@@ -7900,7 +8330,7 @@ fn vm_call_builtin(
                                 resp_bytes.extend_from_slice(&data);
                                 let _ = body.flow_control().release_capacity(n);
                             }
-                            Err(_) => return Ok(VMValue::List(vec![])),
+                            Err(_) => return Ok(VMValue::List(FavList::new(vec![]))),
                         }
                     }
                     let rows = decode_all_grpc_frames(&resp_bytes)?
@@ -7915,7 +8345,7 @@ fn vm_call_builtin(
                             })
                         })
                         .collect::<Result<Vec<_>, _>>()?;
-                    Ok(VMValue::List(rows))
+                    Ok(VMValue::List(FavList::new(rows)))
                 })
             })
             .join()
@@ -8084,12 +8514,12 @@ fn vm_call_builtin(
             };
             let content = std::fs::read_to_string(&path)
                 .map_err(|e| format!("File.read_lines failed for `{}`: {}", path, e))?;
-            Ok(VMValue::List(
+            Ok(VMValue::List(FavList::new(
                 content
                     .lines()
                     .map(|line| VMValue::Str(line.to_string()))
                     .collect(),
-            ))
+            )))
         }
         "File.write" => {
             if args.len() != 2 {
@@ -8273,11 +8703,11 @@ fn vm_call_builtin(
             // Task.race(list_of_tasks) — returns the first task's result
             // v1.8.0: returns head element (no true parallelism).
             match args.into_iter().next() {
-                Some(VMValue::List(mut items)) => {
+                Some(VMValue::List(items)) => {
                     if items.is_empty() {
                         return Err("E061: Task.race requires a non-empty list".to_string());
                     }
-                    Ok(items.remove(0))
+                    Ok(items.first().cloned().unwrap())
                 }
                 Some(other) => Err(format!("Task.race: expected List, got {:?}", other)),
                 None => Err("Task.race requires 1 argument (a List of tasks)".to_string()),
@@ -8361,7 +8791,7 @@ fn vm_call_builtin(
             let rows: Result<Vec<VMValue>, String> = (0..n)
                 .map(|_| gen_one_row(&type_name, type_metas))
                 .collect();
-            Ok(VMValue::List(rows?))
+            Ok(VMValue::List(FavList::new(rows?)))
         }
         "Gen.simulate_raw" => {
             let mut it = args.into_iter();
@@ -8399,7 +8829,7 @@ fn vm_call_builtin(
                     Ok(VMValue::Record(map))
                 })
                 .collect();
-            Ok(VMValue::List(rows?))
+            Ok(VMValue::List(FavList::new(rows?)))
         }
         "Gen.profile_raw" => {
             let mut it = args.into_iter();
@@ -8483,7 +8913,7 @@ fn vm_call_builtin(
             let rows: Result<Vec<VMValue>, String> =
                 (0..n).map(|_| gen_hint_one_row(&type_name, type_metas)).collect();
             match rows {
-                Ok(list) => Ok(ok_vm(VMValue::List(list))),
+                Ok(list) => Ok(ok_vm(VMValue::List(FavList::new(list)))),
                 Err(e) => Ok(err_vm(VMValue::Str(e))),
             }
         }
@@ -8562,7 +8992,7 @@ fn vm_call_builtin(
                 .map_err(|e| format!("Gen.to_csv_raw: cannot open '{}': {}", path_val, e))?;
             wtr.write_record(&headers)
                 .map_err(|e| format!("Gen.to_csv_raw: write error: {}", e))?;
-            for row in &rows {
+            for row in rows.iter() {
                 if let VMValue::Record(map) = row {
                     let record: Vec<String> = headers
                         .iter()
@@ -8699,7 +9129,7 @@ fn vm_call_builtin(
                     .prepare(&sql)
                     .map_err(|e| format!("Gen.load_into_raw: prepare error: {}", e))?;
                 let mut count = 0i64;
-                for row in &rows {
+                for row in rows.iter() {
                     if let VMValue::Record(record_map) = row {
                         let vals: Vec<duckdb::types::Value> = headers
                             .iter()
@@ -8786,7 +9216,7 @@ fn vm_call_builtin(
                 }
                 results.push(VMValue::Record(map));
             }
-            Ok(ok_vm(VMValue::List(results)))
+            Ok(ok_vm(VMValue::List(FavList::new(results))))
         }
 
         // ── Crypto.* (v4.5.0) — cryptographic primitives ──────────────────
@@ -9159,7 +9589,7 @@ fn vm_call_builtin(
                     .ok_or_else(|| "DB.query_raw: invalid DbHandle".to_string())?;
                 sqlite_query_raw(&wrapper.conn, &sql)
             })?;
-            Ok(ok_vm(VMValue::List(rows)))
+            Ok(ok_vm(VMValue::List(FavList::new(rows))))
         }
 
         "DB.execute_raw" => {
@@ -9225,7 +9655,7 @@ fn vm_call_builtin(
                     .ok_or_else(|| "DB.query_raw_params: invalid DbHandle".to_string())?;
                 sqlite_query_raw_params(&wrapper.conn, &sql, &params)
             })?;
-            Ok(ok_vm(VMValue::List(rows)))
+            Ok(ok_vm(VMValue::List(FavList::new(rows))))
         }
 
         "DB.execute_raw_params" => {
@@ -9462,7 +9892,7 @@ fn vm_call_builtin(
                     .ok_or_else(|| "DB.query_in_tx: invalid TxHandle".to_string())?;
                 sqlite_query_raw(&wrapper.conn, &sql)
             })?;
-            Ok(ok_vm(VMValue::List(rows)))
+            Ok(ok_vm(VMValue::List(FavList::new(rows))))
         }
 
         "DB.execute_in_tx" => {
@@ -9586,9 +10016,9 @@ fn vm_call_builtin(
             }
             let path = vm_string(args.into_iter().next().unwrap(), "Parquet.read_raw path")?;
             match parquet_read_rows(&path) {
-                Ok(rows) => Ok(ok_vm(VMValue::List(
+                Ok(rows) => Ok(ok_vm(VMValue::List(FavList::new(
                     rows.into_iter().map(VMValue::Record).collect(),
-                ))),
+                )))),
                 Err(err) => Ok(err_vm(parquet_error_vm(err))),
             }
         }
@@ -9718,7 +10148,7 @@ fn vm_call_builtin(
                 // Reconstruct record from raw map
                 Ok(ok_vm(VMValue::Record(raw)))
             } else {
-                Ok(err_vm(VMValue::List(errors)))
+                Ok(err_vm(VMValue::List(FavList::new(errors))))
             }
         }
 
@@ -9767,7 +10197,7 @@ fn vm_call_builtin(
                 duckdb_query_raw(conn, &sql)
             };
             match result {
-                Ok(rows) => Ok(ok_vm(VMValue::List(rows))),
+                Ok(rows) => Ok(ok_vm(VMValue::List(FavList::new(rows)))),
                 Err(e) => Ok(err_vm(db_error_vm("QUERY_ERROR", &e))),
             }
         }
@@ -9929,7 +10359,7 @@ fn vm_call_builtin(
                 Ok(xml) => {
                     let keys: Vec<VMValue> = extract_xml_tags(&xml, "Key")
                         .into_iter().map(VMValue::Str).collect();
-                    ok_vm(VMValue::List(keys))
+                    ok_vm(VMValue::List(FavList::new(keys)))
                 }
                 Err(e) => err_vm(VMValue::Str(e)),
             })
@@ -9992,7 +10422,7 @@ fn vm_call_builtin(
                         map.insert("receipt_handle".to_string(), VMValue::Str(handles.into_iter().next().unwrap_or_default()));
                         VMValue::Record(map)
                     }).collect();
-                    ok_vm(VMValue::List(items))
+                    ok_vm(VMValue::List(FavList::new(items)))
                 }
                 Err(e) => err_vm(VMValue::Str(e)),
             })

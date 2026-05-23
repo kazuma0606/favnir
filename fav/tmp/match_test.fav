@@ -1,0 +1,21 @@
+type Tok =
+  | TkA
+  | TkB
+  | TkC
+
+fn test_match(v: Option<Tok>) -> String {
+    match v {
+        Some(TkA) => "got A"
+        Some(TkB) => "got B"
+        Some(TkC) => "got C"
+        _ => "other"
+    }
+}
+
+public fn main() -> Bool {
+    bind r1 <- IO.println(test_match(Option.some(TkA)))
+    bind r2 <- IO.println(test_match(Option.some(TkB)))
+    bind r3 <- IO.println(test_match(Option.some(TkC)))
+    bind r4 <- IO.println(test_match(Option.none()))
+    true
+}

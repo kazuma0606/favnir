@@ -101,3 +101,23 @@ Additional aligned target completed in v6.2.0:
 - [x] E-1: Keep `self_hosted_compiler_type_checks` as a mandatory gate for self-host changes.
 - [x] E-2: Keep `bootstrap_full_self_hosting` as a mandatory gate for compiler pipeline changes.
 - [x] E-3: Add at least one regression test for a previously mismatched Rust/self-host semantic edge.
+
+### F. Post-bootstrap hardening
+
+Goal for this section:
+reduce the remaining "borrowed" bootstrap behavior and strengthen self-host confidence within v6.2.0.
+
+- [x] F-1: Reduce or eliminate the current `collect { helper(...) }` bootstrap exception if feasible within v6.2.0.
+- [x] F-2: Expand parser/checker regression coverage for remaining self-host-sensitive semantic edges.
+  Added nested variant guard and broader self-host-sensitive runtime regressions.
+- [x] F-3: Add a short contract note for the self-host internal AST encodings used by `compiler.fav`.
+  Recorded in `self_host_ast_contract.md`.
+- [x] F-4: Strengthen bootstrap comparison beyond the current primary `hello.fav` path with one or more additional source shapes.
+  Added `bootstrap_full_self_hosting_on_match_collect_source`.
+
+Planned execution order:
+
+1. `collect` helper dependency review and reduction
+2. semantic edge regression expansion
+3. self-host AST contract note
+4. broader bootstrap comparison inputs

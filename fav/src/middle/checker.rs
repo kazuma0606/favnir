@@ -2594,9 +2594,6 @@ impl Checker {
         for item in &program.items {
             match item {
                 Item::FnDef(fd) => self.collect_helpers_in_block(&fd.body),
-                Item::TrfDef(td) => self.collect_helpers_in_block(&td.body),
-                Item::TestDef(td) => self.collect_helpers_in_block(&td.body),
-                Item::BenchDef(bd) => self.collect_helpers_in_block(&bd.body),
                 _ => {}
             }
         }
@@ -6331,6 +6328,24 @@ mod tests {
             fn f(v: Outer) -> Int {
                 match v {
                     Boxed(A(x)) => x
+                    Boxed(B(y)) => y
+                    Empty => 0
+                }
+            }
+        ",
+        );
+    }
+
+    #[test]
+    fn test_match_nested_variant_guard_ok() {
+        check_ok(
+            "
+            type Inner = | A(Int) | B(Int)
+            type Outer = | Boxed(Inner) | Empty
+            fn f(v: Outer) -> Int {
+                match v {
+                    Boxed(A(x)) where x > 10 => x
+                    Boxed(A(x)) => x + 1
                     Boxed(B(y)) => y
                     Empty => 0
                 }

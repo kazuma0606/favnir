@@ -35,3 +35,9 @@
 - [x] F-2: Update `versions/v6.2.0/tasks.md`
 - [x] F-3: Update `memory/MEMORY.md`
 - [x] F-4: Commit as `feat: full bootstrap verified - Favnir compiler bootstraps itself (v6.2.0)`
+
+## Phase G
+- [x] G-1: Reduce the `collect { helper(...) }` bootstrap exception scope
+- [x] G-2: Add regressions for nested variant guards and related semantic edges
+- [x] G-3: Broaden bootstrap comparison with `match` / `collect` / record-heavy input
+- [x] G-4: Document the self-host internal AST contract used by bootstrap-sensitive code

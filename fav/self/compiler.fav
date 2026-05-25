@@ -1826,7 +1826,7 @@ fn local_add(ctx: CodegenCtx, name: String) -> CodegenCtx {
 fn pattern_bind_locals(pat: Pat, ctx: CodegenCtx) -> CodegenCtx {
     match pat {
         PVar(name) => local_add(ctx, name)
-        PVariantP(_, inner) => pattern_bind_locals(inner, ctx)
+        PVariantP(parts) => pattern_bind_locals(parts._1, ctx)
         _ => ctx
     }
 }
@@ -1892,14 +1892,17 @@ fn push_name_unique(names: List<String>, name: String) -> List<String> {
 fn pat_bound_names(pat: Pat, acc: List<String>) -> List<String> {
     match pat {
         PVar(name) => List.push(acc, name)
-        PVariantP(_name, inner) => pat_bound_names(inner, acc)
+        PVariantP(parts) => pat_bound_names(parts._1, acc)
         _ => acc
     }
 }
 
 fn free_names_arms(arms: Expr, bound: List<String>, acc: List<String>) -> List<String> {
     match arms {
-        EArm(pat, body, rest) => {
+        EArm(parts) => {
+            bind pat <- parts._0
+            bind body <- parts._1
+            bind rest <- parts._2
             bind arm_bound <- pat_bound_names(pat, bound)
             bind acc1 <- free_names_expr(body, arm_bound, acc)
             free_names_arms(rest, bound, acc1)
@@ -1945,14 +1948,16 @@ fn free_names_expr(expr: Expr, bound: List<String>, acc: List<String>) -> List<S
             free_names_expr(tail, bound, acc1)
         }
         EArgNil => acc
-        EArm(_pat, _body, _rest) => acc
+        EArm(_parts) => acc
         EArmNil => acc
         EBind(name, val_e, cont_e) => {
             bind acc1 <- free_names_expr(val_e, bound, acc)
             bind cont_bound <- List.push(bound, name)
             free_names_expr(cont_e, cont_bound, acc1)
         }
-        EField(_fname, val_e, rest) => {
+        EField(parts) => {
+            bind val_e <- parts._1
+            bind rest <- parts._2
             bind acc1 <- free_names_expr(val_e, bound, acc)
             free_names_expr(rest, bound, acc1)
         }
@@ -2136,7 +2141,7 @@ fn count_args(args: Expr) -> Int {
 
 fn reverse_match_arms_loop(arms: Expr, acc: Expr) -> Expr {
     match arms {
-        EArm(pat, body, rest) => reverse_match_arms_loop(rest, EArm(pat, body, acc))
+        EArm(parts) => reverse_match_arms_loop(parts._2, EArm(parts._0, parts._1, acc))
         EArmNil => acc
         _ => acc
     }
@@ -2202,7 +2207,9 @@ fn add_field_name_consts(fields: Expr, ctx: CodegenCtx) -> ConstAdd {
 
 fn add_field_name_consts_loop(fields: Expr, ctx: CodegenCtx) -> CodegenCtx {
     match fields {
-        EField(fname, _val_e, rest) => {
+        EField(parts) => {
+            bind fname <- parts._0
+            bind rest <- parts._2
             bind ctx1 <- add_field_name_consts_loop(rest, ctx)
             bind ca <- add_const(ctx1, CVName(fname))
             ca.ctx
@@ -2214,7 +2221,9 @@ fn add_field_name_consts_loop(fields: Expr, ctx: CodegenCtx) -> CodegenCtx {
 
 fn compile_record_fields(fields: Expr, ctx: CodegenCtx, env: List<KVPair>) -> Result<CodegenCtx, String> {
     match fields {
-        EField(fname, val_e, rest) => {
+        EField(parts) => {
+            bind val_e <- parts._1
+            bind rest <- parts._2
             Result.and_then(compile_record_fields(rest, ctx, env), |ctx1|
             compile_expr(val_e, ctx1, env))
         }
@@ -2292,67 +2301,73 @@ fn compile_pattern_dispatch(pat: Pat, ctx: CodegenCtx, success_code: List<Int>, 
                 fail_offset: fail_offset
             })
         }
-        PVariantP(name, PWild) => {
-            compile_pattern_dispatch(PVariant(name), ctx, success_code, fail_code)
-        }
-        PVariantP(name, PVar(inner_name)) => {
-            match local_lookup(ctx.locals, inner_name) {
-                None => Result.err(String.concat("unknown pattern local: ", inner_name))
-                Some(slot) => {
-                    bind ca <- add_const(ctx, CVName(name))
-                    bind success_path <- List.concat(
-                        code_op(BcGetVariantPayload),
-                        List.concat(
-                            code_op(BcDup),
-                            List.concat(
-                                code_op_u16(BcStoreLocal, slot),
-                                List.concat(code_op(BcPop), success_code))))
-                    bind fail_path <- List.concat(code_op(BcPop), fail_code)
-                    bind ctx1 <- emit_opcode(ca.ctx, BcDup)
-                    bind ctx2 <- emit_opcode(ctx1, BcJumpIfNotVariantC)
-                    bind ctx3 <- emit_u16(ctx2, ca.idx)
-                    bind ctx4 <- emit_u16(ctx3, List.length(success_path) + 3)
-                    bind ctx5 <- append_code(ctx4, success_path)
-                    bind ctx6 <- emit_opcode(ctx5, BcJump)
-                    bind ctx7 <- emit_u16(ctx6, List.length(fail_path))
-                    bind code <- List.concat(ctx7.code, fail_path)
-                    bind fail_offset <- List.length(code) - List.length(fail_path)
-                    Result.ok(PatDispatch {
-                        ctx: CodegenCtx { code: code, consts: ctx7.consts, locals: ctx.locals, next_local: ctx.next_local, lifted: ctx7.lifted, next_lambda: ctx7.next_lambda, lambda_prefix: ctx.lambda_prefix }
-                        fail_offset: fail_offset
-                    })
+        PVariantP(parts) => {
+            bind name <- parts._0
+            bind inner <- parts._1
+            match inner {
+                PWild => {
+                    compile_pattern_dispatch(PVariant(name), ctx, success_code, fail_code)
+                }
+                PVar(inner_name) => {
+                    match local_lookup(ctx.locals, inner_name) {
+                        None => Result.err(String.concat("unknown pattern local: ", inner_name))
+                        Some(slot) => {
+                            bind ca <- add_const(ctx, CVName(name))
+                            bind success_path <- List.concat(
+                                code_op(BcGetVariantPayload),
+                                List.concat(
+                                    code_op(BcDup),
+                                    List.concat(
+                                        code_op_u16(BcStoreLocal, slot),
+                                        List.concat(code_op(BcPop), success_code))))
+                            bind fail_path <- List.concat(code_op(BcPop), fail_code)
+                            bind ctx1 <- emit_opcode(ca.ctx, BcDup)
+                            bind ctx2 <- emit_opcode(ctx1, BcJumpIfNotVariantC)
+                            bind ctx3 <- emit_u16(ctx2, ca.idx)
+                            bind ctx4 <- emit_u16(ctx3, List.length(success_path) + 3)
+                            bind ctx5 <- append_code(ctx4, success_path)
+                            bind ctx6 <- emit_opcode(ctx5, BcJump)
+                            bind ctx7 <- emit_u16(ctx6, List.length(fail_path))
+                            bind code <- List.concat(ctx7.code, fail_path)
+                            bind fail_offset <- List.length(code) - List.length(fail_path)
+                            Result.ok(PatDispatch {
+                                ctx: CodegenCtx { code: code, consts: ctx7.consts, locals: ctx.locals, next_local: ctx.next_local, lifted: ctx7.lifted, next_lambda: ctx7.next_lambda, lambda_prefix: ctx.lambda_prefix }
+                                fail_offset: fail_offset
+                            })
+                        }
+                    }
+                }
+                _ => {
+                    bind inner_success <- List.concat(code_op(BcPop), success_code)
+                    bind outer_fail_path <- List.concat(code_op(BcPop), fail_code)
+                    Result.and_then(
+                        compile_pattern_dispatch(inner, ctx_fork(ctx), inner_success, outer_fail_path),
+                        |inner_pd| {
+                            bind inner_fail_path <- List.drop(inner_pd.ctx.code, inner_pd.fail_offset)
+                            bind ca <- add_const(CodegenCtx {
+                                code: empty_ints()
+                                consts: inner_pd.ctx.consts
+                                locals: ctx.locals
+                                next_local: ctx.next_local
+                                lifted: inner_pd.ctx.lifted
+                                next_lambda: inner_pd.ctx.next_lambda
+                                lambda_prefix: ctx.lambda_prefix
+                            }, CVName(name))
+                            bind ctx1 <- emit_opcode(ca.ctx, BcDup)
+                            bind ctx2 <- emit_opcode(ctx1, BcJumpIfNotVariantC)
+                            bind ctx3 <- emit_u16(ctx2, ca.idx)
+                            bind success_path <- List.concat(code_op(BcGetVariantPayload), inner_pd.ctx.code)
+                            bind jump_len <- inner_pd.fail_offset + 1
+                            bind ctx4 <- emit_u16(ctx3, jump_len)
+                            bind code <- List.concat(ctx4.code, success_path)
+                            bind fail_offset <- List.length(code) - List.length(inner_fail_path)
+                            Result.ok(PatDispatch {
+                                ctx: CodegenCtx { code: code, consts: ctx4.consts, locals: ctx.locals, next_local: ctx.next_local, lifted: ctx4.lifted, next_lambda: ctx4.next_lambda, lambda_prefix: ctx.lambda_prefix }
+                                fail_offset: fail_offset
+                            })
+                        })
                 }
             }
-        }
-        PVariantP(name, inner) => {
-            bind inner_success <- List.concat(code_op(BcPop), success_code)
-            bind outer_fail_path <- List.concat(code_op(BcPop), fail_code)
-            Result.and_then(
-                compile_pattern_dispatch(inner, ctx_fork(ctx), inner_success, outer_fail_path),
-                |inner_pd| {
-                    bind inner_fail_path <- List.drop(inner_pd.ctx.code, inner_pd.fail_offset)
-                    bind ca <- add_const(CodegenCtx {
-                        code: empty_ints()
-                        consts: inner_pd.ctx.consts
-                        locals: ctx.locals
-                        next_local: ctx.next_local
-                        lifted: inner_pd.ctx.lifted
-                        next_lambda: inner_pd.ctx.next_lambda
-                        lambda_prefix: ctx.lambda_prefix
-                    }, CVName(name))
-                    bind ctx1 <- emit_opcode(ca.ctx, BcDup)
-                    bind ctx2 <- emit_opcode(ctx1, BcJumpIfNotVariantC)
-                    bind ctx3 <- emit_u16(ctx2, ca.idx)
-                    bind success_path <- List.concat(code_op(BcGetVariantPayload), inner_pd.ctx.code)
-                    bind jump_len <- inner_pd.fail_offset + 1
-                    bind ctx4 <- emit_u16(ctx3, jump_len)
-                    bind code <- List.concat(ctx4.code, success_path)
-                    bind fail_offset <- List.length(code) - List.length(inner_fail_path)
-                    Result.ok(PatDispatch {
-                        ctx: CodegenCtx { code: code, consts: ctx4.consts, locals: ctx.locals, next_local: ctx.next_local, lifted: ctx4.lifted, next_lambda: ctx4.next_lambda, lambda_prefix: ctx.lambda_prefix }
-                        fail_offset: fail_offset
-                    })
-                })
         }
     }
 }
@@ -2404,7 +2419,10 @@ fn compile_match_arm(pat: Pat, body: Expr, fail_code: List<Int>, ctx: CodegenCtx
 
 fn compile_match_arms(arms: Expr, ctx: CodegenCtx, env: List<KVPair>) -> Result<CodegenCtx, String> {
     match arms {
-        EArm(pat, body, rest) => {
+        EArm(parts) => {
+            bind pat <- parts._0
+            bind body <- parts._1
+            bind rest <- parts._2
             bind fail_seed <- ctx_fork(ctx)
             Result.and_then(compile_match_arms(rest, fail_seed, env), |fail_ctx|
             compile_match_arm(

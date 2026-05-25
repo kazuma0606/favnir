@@ -11354,6 +11354,33 @@ public fn main() -> Unit !Io {
     }
 
     #[test]
+    fn nested_variant_guard_falls_through_to_later_arm() {
+        let src = r#"
+type Inner = | A(Int) | B(Int)
+type Outer = | Boxed(Inner) | Empty
+
+fn classify(v: Outer) -> Int {
+    match v {
+        Boxed(A(x)) where x > 10 => x
+        Boxed(A(x)) => x + 10
+        Boxed(B(x)) => x
+        Empty => 0
+    }
+}
+
+public fn main() -> Unit !Io {
+    IO.println(Debug.show(classify(Boxed(A(5)))))
+}
+"#;
+        let output = run_fav_source_get_output(src);
+        assert_eq!(
+            output.trim(),
+            "15",
+            "expected failed guard on nested variant to fall through to a later matching arm"
+        );
+    }
+
+    #[test]
     fn record_field_arguments_preserve_multi_arg_call_order() {
         let src = r#"
 type Pair = { left: Int right: Int }
@@ -13999,6 +14026,75 @@ public fn main() -> Bool !Io {
         assert_eq!(
             bytecode_a, bytecode_b,
             "Bootstrap failed: bytecode_A != bytecode_B"
+        );
+    }
+
+    #[test]
+    #[ignore]
+    fn bootstrap_full_self_hosting_on_match_collect_source() {
+        use crate::backend::artifact::FvcArtifact;
+        use std::sync::Arc;
+
+        let compiler_path = self_dir().join("compiler.fav");
+        let compiler_src = std::fs::read_to_string(&compiler_path).expect("compiler.fav");
+        let compiler_abs = compiler_path.to_string_lossy().to_string();
+
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let input = tmp.path().join("match_collect_input.fav");
+        std::fs::write(
+            &input,
+            concat!(
+                "type Inner = | A(Int) | B(Int)\n",
+                "type Outer = | Boxed(Inner) | Empty\n",
+                "type Pair = { left: Int, right: Int }\n\n",
+                "fn classify(v: Outer) -> Int {\n",
+                "    match v {\n",
+                "        Boxed(A(x)) => x + 10\n",
+                "        Boxed(B(x)) => x\n",
+                "        Empty => 0\n",
+                "    }\n",
+                "}\n\n",
+                "fn add3(a: Int, b: Int, c: Int) -> Int { a + b + c }\n",
+                "fn project_sum(p: Pair, extra: Int) -> Int { add3(p.left, p.right, extra) }\n\n",
+                "fn main() -> Int {\n",
+                "    bind xs <- collect { yield 1; yield 2; () }\n",
+                "    bind pair <- Pair { left: 2, right: 3 }\n",
+                "    List.length(xs) + classify(Boxed(A(5))) + project_sum(pair, 4)\n",
+                "}\n"
+            ),
+        )
+        .expect("write match_collect_input.fav");
+        let input_abs = input.to_string_lossy().to_string();
+
+        let program = crate::frontend::parser::Parser::parse_str(&compiler_src, "compiler.fav")
+            .expect("parse compiler.fav");
+        let rust_compiled_artifact = Arc::new(build_artifact(&program));
+
+        let (s1_ok, bytecode_a, _s1_out, s1_value) =
+            run_compiler_artifact_on(Arc::clone(&rust_compiled_artifact), input_abs.clone());
+        assert!(s1_ok, "Stage 1 (compile match_collect_input.fav) failed: {s1_value}");
+        assert!(!bytecode_a.is_empty(), "Stage 1 produced empty bytecode_A");
+
+        let (s2_ok, artifact_bytes, s2_out, s2_value) =
+            run_compiler_artifact_on(Arc::clone(&rust_compiled_artifact), compiler_abs);
+        if !s2_ok || artifact_bytes.is_empty() {
+            panic!("Stage 2 (self-compile) failed: {s2_value}\n{s2_out}");
+        }
+
+        let compiler_artifact = Arc::new(
+            FvcArtifact::from_bytes(&artifact_bytes)
+                .expect("Stage 2 artifact bytes must parse as valid FvcArtifact"),
+        );
+
+        let (s3_ok, bytecode_b, s3_out, s3_value) =
+            run_compiler_artifact_on(compiler_artifact, input_abs);
+        if !s3_ok || bytecode_b.is_empty() {
+            panic!("Stage 3 failed: {s3_value}\n{s3_out}");
+        }
+
+        assert_eq!(
+            bytecode_a, bytecode_b,
+            "Bootstrap comparison failed on match/collect-heavy source"
         );
     }
 

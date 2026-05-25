@@ -49,10 +49,10 @@ pub struct AuthConfig {
 
 #[derive(Debug, Clone)]
 pub struct LogConfig {
-    pub level: String,    // "debug" | "info" | "warn" | "error"; default "info"
-    pub format: String,   // "json" | "text"; default "text"
-    pub output: String,   // "stdout" | "stderr"; default "stdout"
-    pub service: String,  // service name for JSON output
+    pub level: String,   // "debug" | "info" | "warn" | "error"; default "info"
+    pub format: String,  // "json" | "text"; default "text"
+    pub output: String,  // "stdout" | "stderr"; default "stdout"
+    pub service: String, // service name for JSON output
 }
 
 impl Default for LogConfig {
@@ -74,7 +74,10 @@ pub struct EnvConfig {
 
 impl Default for EnvConfig {
     fn default() -> Self {
-        EnvConfig { dotenv: None, prefix: String::new() }
+        EnvConfig {
+            dotenv: None,
+            prefix: String::new(),
+        }
     }
 }
 
@@ -250,12 +253,14 @@ fn parse_fav_toml(content: &str) -> FavToml {
             "rune" => {
                 if let Some((key, val)) = parse_kv(trimmed) {
                     match key {
-                        "name"        => name        = val.to_string(),
-                        "version"     => version     = val.to_string(),
+                        "name" => name = val.to_string(),
+                        "version" => version = val.to_string(),
                         "description" => description = Some(val.to_string()),
-                        "license"     => license     = Some(val.to_string()),
-                        "authors"     => authors     = val.split(',').map(|s| s.trim().to_string()).collect(),
-                        "src"         => src         = val.to_string(),
+                        "license" => license = Some(val.to_string()),
+                        "authors" => {
+                            authors = val.split(',').map(|s| s.trim().to_string()).collect()
+                        }
+                        "src" => src = val.to_string(),
                         _ => {}
                     }
                 }
@@ -302,9 +307,7 @@ fn parse_fav_toml(content: &str) -> FavToml {
                 database = Some(current);
             }
             "auth" => {
-                let mut current = auth.take().unwrap_or(AuthConfig {
-                    mode: "jwt".into(),
-                });
+                let mut current = auth.take().unwrap_or(AuthConfig { mode: "jwt".into() });
                 if let Some((key, val)) = parse_kv(trimmed) {
                     if key == "mode" {
                         current.mode = val.to_string();
@@ -316,9 +319,9 @@ fn parse_fav_toml(content: &str) -> FavToml {
                 let mut current: LogConfig = log.take().unwrap_or_default();
                 if let Some((key, val)) = parse_kv(trimmed) {
                     match key {
-                        "level"   => current.level   = val.to_string(),
-                        "format"  => current.format  = val.to_string(),
-                        "output"  => current.output  = val.to_string(),
+                        "level" => current.level = val.to_string(),
+                        "format" => current.format = val.to_string(),
+                        "output" => current.output = val.to_string(),
                         "service" => current.service = val.to_string(),
                         _ => {}
                     }
@@ -344,9 +347,9 @@ fn parse_fav_toml(content: &str) -> FavToml {
                 });
                 if let Some((key, val)) = parse_kv(trimmed) {
                     match key {
-                        "region"       => current.region       = Some(val.to_string()),
+                        "region" => current.region = Some(val.to_string()),
                         "endpoint_url" => current.endpoint_url = Some(val.to_string()),
-                        "profile"      => current.profile      = Some(val.to_string()),
+                        "profile" => current.profile = Some(val.to_string()),
                         _ => {}
                     }
                 }
@@ -356,13 +359,13 @@ fn parse_fav_toml(content: &str) -> FavToml {
                 let mut current: DeployConfig = deploy_cfg.take().unwrap_or_default();
                 if let Some((key, val)) = parse_kv(trimmed) {
                     match key {
-                        "runtime"   => current.runtime   = val.to_string(),
-                        "handler"   => current.handler   = val.to_string(),
-                        "memory"    => current.memory    = val.parse().unwrap_or(256),
-                        "timeout"   => current.timeout   = val.parse().unwrap_or(30),
+                        "runtime" => current.runtime = val.to_string(),
+                        "handler" => current.handler = val.to_string(),
+                        "memory" => current.memory = val.parse().unwrap_or(256),
+                        "timeout" => current.timeout = val.parse().unwrap_or(30),
                         "s3_bucket" => current.s3_bucket = Some(val.to_string()),
-                        "role_arn"  => current.role_arn  = Some(val.to_string()),
-                        "region"    => current.region    = Some(val.to_string()),
+                        "role_arn" => current.role_arn = Some(val.to_string()),
+                        "region" => current.region = Some(val.to_string()),
                         _ => {}
                     }
                 }
@@ -400,7 +403,10 @@ fn parse_dep_line(line: &str) -> Option<DependencySpec> {
     // Plain string form: `name = "1.0.0"` or `name = "^1.0.0"`
     if rhs.starts_with('"') && rhs.ends_with('"') && !rhs.contains('{') {
         let version = rhs.trim_matches('"').to_string();
-        return Some(DependencySpec::Semver { name: dep_name, version });
+        return Some(DependencySpec::Semver {
+            name: dep_name,
+            version,
+        });
     }
 
     let inner = rhs.trim_start_matches('{').trim_end_matches('}');

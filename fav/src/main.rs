@@ -21,11 +21,10 @@ mod value;
 use driver::{
     cmd_bench, cmd_build, cmd_build_schema, cmd_bundle, cmd_check, cmd_check_with_sample,
     cmd_checkpoint_list, cmd_checkpoint_reset, cmd_checkpoint_set, cmd_checkpoint_show,
-    cmd_db_migrate, cmd_db_migrate_rollback, cmd_db_migrate_status, cmd_deploy, cmd_docs,
-    cmd_exec, cmd_explain, cmd_explain_compiler, cmd_explain_diff, cmd_explain_error,
-    cmd_explain_error_list, cmd_explain_error_list_json, cmd_fmt, cmd_graph, cmd_infer,
-    cmd_infer_proto, cmd_install, cmd_lint,
-    cmd_migrate, cmd_new, cmd_publish, cmd_registry, cmd_run, cmd_test, cmd_watch,
+    cmd_db_migrate, cmd_db_migrate_rollback, cmd_db_migrate_status, cmd_deploy, cmd_docs, cmd_exec,
+    cmd_explain, cmd_explain_compiler, cmd_explain_diff, cmd_explain_error, cmd_explain_error_list,
+    cmd_explain_error_list_json, cmd_fmt, cmd_graph, cmd_infer, cmd_infer_proto, cmd_install,
+    cmd_lint, cmd_migrate, cmd_new, cmd_publish, cmd_registry, cmd_run, cmd_test, cmd_watch,
 };
 use rune_cmd::cmd_rune;
 use std::process;
@@ -180,10 +179,12 @@ ERROR CODES (v3.4.0 — E0xxx body):
     W004  --db cannot be used with .wasm artifacts
 ";
 
+const SELF_HOST_STACK_SIZE: usize = 256 * 1024 * 1024;
+
 fn main() {
-    // Spawn a thread with a larger stack (64 MB) to support deep recursion in
-    // the Favnir VM and the type-checker (especially for self-hosted code).
-    let builder = std::thread::Builder::new().stack_size(64 * 1024 * 1024);
+    // Self-hosted compiler runs recurse deeply through the parser, checker,
+    // and VM, so keep the main worker stack aligned with bootstrap tests.
+    let builder = std::thread::Builder::new().stack_size(SELF_HOST_STACK_SIZE);
     let handler = builder
         .spawn(|| main_impl())
         .expect("failed to spawn main thread");
@@ -1020,8 +1021,14 @@ fn main_impl() {
             let mut i = 2usize;
             while i < args.len() {
                 match args[i].as_str() {
-                    "--force" => { force = true; i += 1; }
-                    other if !other.starts_with('-') => { pkg_name = Some(other.to_string()); i += 1; }
+                    "--force" => {
+                        force = true;
+                        i += 1;
+                    }
+                    other if !other.starts_with('-') => {
+                        pkg_name = Some(other.to_string());
+                        i += 1;
+                    }
                     other => {
                         eprintln!("error: unexpected install argument `{}`", other);
                         process::exit(1);
@@ -1032,10 +1039,10 @@ fn main_impl() {
         }
 
         Some("publish") => {
-            let mut name_override:    Option<String> = None;
+            let mut name_override: Option<String> = None;
             let mut version_override: Option<String> = None;
             let mut dry_run = false;
-            let mut force   = false;
+            let mut force = false;
             let mut i = 2usize;
             while i < args.len() {
                 match args[i].as_str() {
@@ -1047,15 +1054,26 @@ fn main_impl() {
                         version_override = args.get(i + 1).cloned();
                         i += 2;
                     }
-                    "--dry-run" => { dry_run = true; i += 1; }
-                    "--force"   => { force   = true; i += 1; }
+                    "--dry-run" => {
+                        dry_run = true;
+                        i += 1;
+                    }
+                    "--force" => {
+                        force = true;
+                        i += 1;
+                    }
                     other => {
                         eprintln!("error: unexpected publish argument `{}`", other);
                         process::exit(1);
                     }
                 }
             }
-            cmd_publish(name_override.as_deref(), version_override.as_deref(), dry_run, force);
+            cmd_publish(
+                name_override.as_deref(),
+                version_override.as_deref(),
+                dry_run,
+                force,
+            );
         }
 
         Some("registry") => {
@@ -1070,32 +1088,44 @@ fn main_impl() {
         }
 
         Some("deploy") => {
-            let mut env: Option<String>           = None;
+            let mut env: Option<String> = None;
             let mut function_name: Option<String> = None;
-            let mut region: Option<String>        = None;
-            let mut dry_run                       = false;
+            let mut region: Option<String> = None;
+            let mut dry_run = false;
             let mut i = 2usize;
             while i < args.len() {
                 match args[i].as_str() {
                     "--env" => {
-                        env = Some(args.get(i + 1).unwrap_or_else(|| {
-                            eprintln!("error: --env requires a value");
-                            process::exit(1);
-                        }).clone());
+                        env = Some(
+                            args.get(i + 1)
+                                .unwrap_or_else(|| {
+                                    eprintln!("error: --env requires a value");
+                                    process::exit(1);
+                                })
+                                .clone(),
+                        );
                         i += 2;
                     }
                     "--function" => {
-                        function_name = Some(args.get(i + 1).unwrap_or_else(|| {
-                            eprintln!("error: --function requires a value");
-                            process::exit(1);
-                        }).clone());
+                        function_name = Some(
+                            args.get(i + 1)
+                                .unwrap_or_else(|| {
+                                    eprintln!("error: --function requires a value");
+                                    process::exit(1);
+                                })
+                                .clone(),
+                        );
                         i += 2;
                     }
                     "--region" => {
-                        region = Some(args.get(i + 1).unwrap_or_else(|| {
-                            eprintln!("error: --region requires a value");
-                            process::exit(1);
-                        }).clone());
+                        region = Some(
+                            args.get(i + 1)
+                                .unwrap_or_else(|| {
+                                    eprintln!("error: --region requires a value");
+                                    process::exit(1);
+                                })
+                                .clone(),
+                        );
                         i += 2;
                     }
                     "--dry-run" => {
@@ -1108,102 +1138,110 @@ fn main_impl() {
                     }
                 }
             }
-            cmd_deploy(env.as_deref(), function_name.as_deref(), region.as_deref(), dry_run);
+            cmd_deploy(
+                env.as_deref(),
+                function_name.as_deref(),
+                region.as_deref(),
+                dry_run,
+            );
         }
 
         Some("mcp") => {
             mcp::run_mcp_server();
         }
 
-        Some("notebook") => {
-            match args.get(2).map(|s| s.as_str()) {
-                Some("new") => {
-                    let name = args.get(3).map(|s| s.as_str()).unwrap_or_else(|| {
-                        eprintln!("error: notebook new requires <name>");
-                        process::exit(1);
-                    });
-                    driver::cmd_notebook_new(name);
-                }
-                Some("run") => {
-                    let no_cache = args.iter().any(|a| a == "--no-cache");
-                    let file = args.iter().skip(3).find(|a| !a.starts_with('-')).map(|s| s.as_str()).unwrap_or_else(|| {
+        Some("notebook") => match args.get(2).map(|s| s.as_str()) {
+            Some("new") => {
+                let name = args.get(3).map(|s| s.as_str()).unwrap_or_else(|| {
+                    eprintln!("error: notebook new requires <name>");
+                    process::exit(1);
+                });
+                driver::cmd_notebook_new(name);
+            }
+            Some("run") => {
+                let no_cache = args.iter().any(|a| a == "--no-cache");
+                let file = args
+                    .iter()
+                    .skip(3)
+                    .find(|a| !a.starts_with('-'))
+                    .map(|s| s.as_str())
+                    .unwrap_or_else(|| {
                         eprintln!("error: notebook run requires <file>");
                         process::exit(1);
                     });
-                    driver::cmd_notebook_run(file, no_cache);
-                }
-                Some("serve") => {
-                    let mut port = 8888u16;
-                    let mut no_open = false;
-                    let mut file: Option<&str> = None;
-                    let mut i = 3usize;
-                    while i < args.len() {
-                        match args[i].as_str() {
-                            "--port" => {
-                                let raw = args.get(i + 1).unwrap_or_else(|| {
-                                    eprintln!("error: --port requires a number");
-                                    process::exit(1);
-                                });
-                                port = raw.parse::<u16>().unwrap_or_else(|_| {
-                                    eprintln!("error: --port must be a valid u16");
-                                    process::exit(1);
-                                });
-                                i += 2;
-                            }
-                            "--no-open" => {
-                                no_open = true;
-                                i += 1;
-                            }
-                            other => {
-                                file = Some(other);
-                                i += 1;
-                            }
-                        }
-                    }
-                    let file = file.unwrap_or_else(|| {
-                        eprintln!("error: notebook serve requires <file>");
-                        process::exit(1);
-                    });
-                    driver::cmd_notebook_serve(file, port, no_open);
-                }
-                Some("export") => {
-                    let mut out: Option<&str> = None;
-                    let mut file: Option<&str> = None;
-                    let mut i = 3usize;
-                    while i < args.len() {
-                        match args[i].as_str() {
-                            "--out" => {
-                                out = Some(args.get(i + 1).unwrap_or_else(|| {
-                                    eprintln!("error: --out requires a path");
-                                    process::exit(1);
-                                }));
-                                i += 2;
-                            }
-                            other => {
-                                file = Some(other);
-                                i += 1;
-                            }
-                        }
-                    }
-                    let file = file.unwrap_or_else(|| {
-                        eprintln!("error: notebook export requires <file>");
-                        process::exit(1);
-                    });
-                    driver::cmd_notebook_export(file, out);
-                }
-                Some("check") => {
-                    let file = args.get(3).map(|s| s.as_str()).unwrap_or_else(|| {
-                        eprintln!("error: notebook check requires <file>");
-                        process::exit(1);
-                    });
-                    driver::cmd_notebook_check(file);
-                }
-                _ => {
-                    eprintln!("error: notebook requires new|run|serve|export|check");
-                    process::exit(1);
-                }
+                driver::cmd_notebook_run(file, no_cache);
             }
-        }
+            Some("serve") => {
+                let mut port = 8888u16;
+                let mut no_open = false;
+                let mut file: Option<&str> = None;
+                let mut i = 3usize;
+                while i < args.len() {
+                    match args[i].as_str() {
+                        "--port" => {
+                            let raw = args.get(i + 1).unwrap_or_else(|| {
+                                eprintln!("error: --port requires a number");
+                                process::exit(1);
+                            });
+                            port = raw.parse::<u16>().unwrap_or_else(|_| {
+                                eprintln!("error: --port must be a valid u16");
+                                process::exit(1);
+                            });
+                            i += 2;
+                        }
+                        "--no-open" => {
+                            no_open = true;
+                            i += 1;
+                        }
+                        other => {
+                            file = Some(other);
+                            i += 1;
+                        }
+                    }
+                }
+                let file = file.unwrap_or_else(|| {
+                    eprintln!("error: notebook serve requires <file>");
+                    process::exit(1);
+                });
+                driver::cmd_notebook_serve(file, port, no_open);
+            }
+            Some("export") => {
+                let mut out: Option<&str> = None;
+                let mut file: Option<&str> = None;
+                let mut i = 3usize;
+                while i < args.len() {
+                    match args[i].as_str() {
+                        "--out" => {
+                            out = Some(args.get(i + 1).unwrap_or_else(|| {
+                                eprintln!("error: --out requires a path");
+                                process::exit(1);
+                            }));
+                            i += 2;
+                        }
+                        other => {
+                            file = Some(other);
+                            i += 1;
+                        }
+                    }
+                }
+                let file = file.unwrap_or_else(|| {
+                    eprintln!("error: notebook export requires <file>");
+                    process::exit(1);
+                });
+                driver::cmd_notebook_export(file, out);
+            }
+            Some("check") => {
+                let file = args.get(3).map(|s| s.as_str()).unwrap_or_else(|| {
+                    eprintln!("error: notebook check requires <file>");
+                    process::exit(1);
+                });
+                driver::cmd_notebook_check(file);
+            }
+            _ => {
+                eprintln!("error: notebook requires new|run|serve|export|check");
+                process::exit(1);
+            }
+        },
 
         Some("lsp") => {
             let mut port: Option<u16> = None;

@@ -119,6 +119,10 @@ pub struct FvcArtifact {
 }
 
 impl FvcArtifact {
+    pub fn from_bytes(bytes: &[u8]) -> Result<Self, ArtifactError> {
+        Self::read_from(&mut bytes.as_ref())
+    }
+
     pub fn read_from(r: &mut impl Read) -> Result<Self, ArtifactError> {
         let mut magic = [0u8; 4];
         r.read_exact(&mut magic)?;
@@ -230,12 +234,24 @@ impl FvcArtifact {
     }
 
     pub fn fn_idx_by_name(&self, name: &str) -> Option<usize> {
-        self.functions.iter().position(|f| {
-            self.str_table
-                .get(f.name_idx as usize)
-                .map(|s| s == name)
-                .unwrap_or(false)
-        })
+        self.functions
+            .iter()
+            .position(|f| {
+                self.str_table
+                    .get(f.name_idx as usize)
+                    .map(|s| s == name)
+                    .unwrap_or(false)
+            })
+            .or_else(|| {
+                name.strip_prefix('.').and_then(|trimmed| {
+                    self.functions.iter().position(|f| {
+                        self.str_table
+                            .get(f.name_idx as usize)
+                            .map(|s| s == trimmed)
+                            .unwrap_or(false)
+                    })
+                })
+            })
     }
 }
 
@@ -464,7 +480,7 @@ mod tests {
 
         let mut bytes = Vec::new();
         writer.write_to(&mut bytes).expect("write");
-        let artifact = FvcArtifact::read_from(&mut bytes.as_slice()).expect("read");
+        let artifact = FvcArtifact::from_bytes(&bytes).expect("read");
 
         assert_eq!(artifact.str_table, writer.str_table);
         assert_eq!(artifact.globals, writer.globals);
@@ -474,8 +490,58 @@ mod tests {
     }
 
     #[test]
+    fn from_bytes_matches_read_from() {
+        let mut writer = FvcWriter::new();
+        let main_idx = writer.intern("main");
+        let unit_idx = writer.intern("Unit");
+        let io_idx = writer.intern("Io");
+        writer.add_function(FvcFunction {
+            name_idx: main_idx,
+            param_count: 0,
+            local_count: 0,
+            source_line: 1,
+            return_ty_str_idx: unit_idx,
+            effect_str_idx: io_idx,
+            constants: vec![Constant::Int(7)],
+            code: vec![0x01, 0x16],
+        });
+
+        let mut bytes = Vec::new();
+        writer.write_to(&mut bytes).expect("write");
+
+        let via_bytes = FvcArtifact::from_bytes(&bytes).expect("from_bytes");
+        let via_reader = FvcArtifact::read_from(&mut bytes.as_slice()).expect("read_from");
+        assert_eq!(via_bytes, via_reader);
+    }
+
+    #[test]
+    fn fn_idx_by_name_accepts_legacy_leading_dot() {
+        let mut writer = FvcWriter::new();
+        let add_idx = writer.intern("add");
+        let unit_idx = writer.intern("Unit");
+        let io_idx = writer.intern("Io");
+        writer.add_function(FvcFunction {
+            name_idx: add_idx,
+            param_count: 0,
+            local_count: 0,
+            source_line: 1,
+            return_ty_str_idx: unit_idx,
+            effect_str_idx: io_idx,
+            constants: vec![],
+            code: vec![0x16],
+        });
+
+        let mut bytes = Vec::new();
+        writer.write_to(&mut bytes).expect("write");
+        let artifact = FvcArtifact::from_bytes(&bytes).expect("from_bytes");
+
+        assert_eq!(artifact.fn_idx_by_name("add"), Some(0));
+        assert_eq!(artifact.fn_idx_by_name(".add"), Some(0));
+    }
+
+    #[test]
     fn bad_magic_is_rejected() {
-        let err = FvcArtifact::read_from(&mut b"NOPE".as_slice()).expect_err("bad magic");
+        let err = FvcArtifact::from_bytes(b"NOPE").expect_err("bad magic");
         assert!(matches!(err, ArtifactError::BadMagic(_)));
     }
 }

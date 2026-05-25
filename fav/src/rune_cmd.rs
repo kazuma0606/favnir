@@ -4,10 +4,9 @@ use std::collections::BTreeMap;
 use std::io::Write as IoWrite;
 use std::path::{Path, PathBuf};
 
-use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
+use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 
-const REGISTRY_URL: &str =
-    "https://32qp3qwhdh.execute-api.ap-northeast-1.amazonaws.com";
+const REGISTRY_URL: &str = "https://32qp3qwhdh.execute-api.ap-northeast-1.amazonaws.com";
 
 // ── Registry HTTP helpers ─────────────────────────────────────────────────────
 
@@ -90,15 +89,19 @@ fn read_rune_meta(path: &Path) -> Option<RuneMeta> {
             if let Some((k, v)) = t.split_once('=') {
                 let v = v.trim().trim_matches('"');
                 match k.trim() {
-                    "name"        => meta.name        = v.to_string(),
-                    "version"     => meta.version     = v.to_string(),
+                    "name" => meta.name = v.to_string(),
+                    "version" => meta.version = v.to_string(),
                     "description" => meta.description = v.to_string(),
                     _ => {}
                 }
             }
         }
     }
-    if meta.name.is_empty() { None } else { Some(meta) }
+    if meta.name.is_empty() {
+        None
+    } else {
+        Some(meta)
+    }
 }
 
 /// Read [dependencies] section: returns BTreeMap<name, version>.
@@ -120,7 +123,7 @@ fn read_deps(path: &Path) -> BTreeMap<String, String> {
         }
         if in_deps {
             if let Some((k, v)) = t.split_once('=') {
-                let name    = k.trim().to_string();
+                let name = k.trim().to_string();
                 let version = v.trim().trim_matches('"').to_string();
                 if !name.is_empty() && !version.is_empty() {
                     deps.insert(name, version);
@@ -190,8 +193,7 @@ fn remove_dep(path: &Path, name: &str) {
 fn unzip_to_dir(bytes: &[u8], dest: &Path) -> Result<(), String> {
     use std::io::Read;
     let cursor = std::io::Cursor::new(bytes);
-    let mut archive = zip::ZipArchive::new(cursor)
-        .map_err(|e| format!("invalid zip: {}", e))?;
+    let mut archive = zip::ZipArchive::new(cursor).map_err(|e| format!("invalid zip: {}", e))?;
     std::fs::create_dir_all(dest).map_err(|e| format!("mkdir error: {}", e))?;
     for i in 0..archive.len() {
         let mut entry = archive.by_index(i).map_err(|e| e.to_string())?;
@@ -214,8 +216,8 @@ fn zip_fav_files(dir: &Path) -> Result<Vec<u8>, String> {
     use walkdir::WalkDir;
     let buf = std::io::Cursor::new(Vec::new());
     let mut zip = zip::ZipWriter::new(buf);
-    let options = zip::write::FileOptions::default()
-        .compression_method(zip::CompressionMethod::Deflated);
+    let options =
+        zip::write::FileOptions::default().compression_method(zip::CompressionMethod::Deflated);
     for entry in WalkDir::new(dir).into_iter().filter_map(|e| e.ok()) {
         let path = entry.path();
         let is_fav = path.extension().and_then(|e| e.to_str()) == Some("fav");
@@ -235,20 +237,23 @@ fn zip_fav_files(dir: &Path) -> Result<Vec<u8>, String> {
 // ── JSON helpers ──────────────────────────────────────────────────────────────
 
 fn json_str(obj: &serde_json::Value, key: &str) -> String {
-    obj.get(key).and_then(|v| v.as_str()).unwrap_or("").to_string()
+    obj.get(key)
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string()
 }
 
 // ── Entry point ───────────────────────────────────────────────────────────────
 
 pub fn cmd_rune(args: &[String]) {
     match args.first().map(|s| s.as_str()) {
-        Some("install")             => cmd_rune_install(&args[1..]),
-        Some("uninstall")           => cmd_rune_uninstall(&args[1..]),
-        Some("list")                => cmd_rune_list(),
-        Some("info")                => cmd_rune_info(&args[1..]),
-        Some("search")              => cmd_rune_search(&args[1..]),
-        Some("update")              => cmd_rune_update(&args[1..]),
-        Some("publish")             => cmd_rune_publish(),
+        Some("install") => cmd_rune_install(&args[1..]),
+        Some("uninstall") => cmd_rune_uninstall(&args[1..]),
+        Some("list") => cmd_rune_list(),
+        Some("info") => cmd_rune_info(&args[1..]),
+        Some("search") => cmd_rune_search(&args[1..]),
+        Some("update") => cmd_rune_update(&args[1..]),
+        Some("publish") => cmd_rune_publish(),
         Some("help") | Some("-h") | Some("--help") => print_rune_help(),
         _ => {
             eprintln!("Usage: rune <install|uninstall|list|info|search|update|publish>");
@@ -259,7 +264,8 @@ pub fn cmd_rune(args: &[String]) {
 }
 
 fn print_rune_help() {
-    print!("\
+    print!(
+        "\
 rune - Favnir package manager
 
 COMMANDS:
@@ -278,7 +284,8 @@ EXAMPLES:
     rune info parquet
     rune search par
     rune publish
-");
+"
+    );
 }
 
 // ── install ───────────────────────────────────────────────────────────────────
@@ -317,23 +324,21 @@ fn install_one(name: &str, version: Option<&str>) {
                     eprintln!("error: {}", e);
                     std::process::exit(1);
                 }
-                Ok(body) => {
-                    match serde_json::from_str::<serde_json::Value>(&body) {
-                        Err(_) => {
-                            eprintln!("error: invalid response from registry");
+                Ok(body) => match serde_json::from_str::<serde_json::Value>(&body) {
+                    Err(_) => {
+                        eprintln!("error: invalid response from registry");
+                        std::process::exit(1);
+                    }
+                    Ok(obj) => {
+                        let v = json_str(&obj, "version");
+                        if v.is_empty() {
+                            eprintln!("error: rune '{}' not found", name);
                             std::process::exit(1);
                         }
-                        Ok(obj) => {
-                            let v = json_str(&obj, "version");
-                            if v.is_empty() {
-                                eprintln!("error: rune '{}' not found", name);
-                                std::process::exit(1);
-                            }
-                            println!("{}", v);
-                            v
-                        }
+                        println!("{}", v);
+                        v
                     }
-                }
+                },
             }
         }
     };
@@ -378,7 +383,7 @@ fn cmd_rune_uninstall(args: &[String]) {
         let dest = PathBuf::from("rune_modules").join(name);
         if dest.exists() {
             match std::fs::remove_dir_all(&dest) {
-                Ok(_)  => println!("Removed {}", name),
+                Ok(_) => println!("Removed {}", name),
                 Err(e) => eprintln!("error removing {}: {}", name, e),
             }
         } else {
@@ -412,7 +417,11 @@ fn cmd_rune_list() {
     for entry in entries {
         let path = entry.path();
         if path.is_dir() {
-            let name = path.file_name().unwrap_or_default().to_string_lossy().to_string();
+            let name = path
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .to_string();
             let toml_path = path.join("rune.toml");
             let (version, description) = if let Some(meta) = read_rune_meta(&toml_path) {
                 (meta.version, meta.description)
@@ -556,7 +565,7 @@ fn cmd_rune_publish() {
     .to_string();
 
     let creds = BASE64.encode("admin:adminuser");
-    let auth  = format!("Basic {}", creds);
+    let auth = format!("Basic {}", creds);
 
     match registry_post(&format!("/runes/{}", meta.name), &body, &auth) {
         Err(e) => {
@@ -590,13 +599,16 @@ mod tests {
     #[test]
     fn test_read_rune_meta() {
         let dir = TempDir::new().unwrap();
-        let path = make_rune_toml(&dir, r#"
+        let path = make_rune_toml(
+            &dir,
+            r#"
 [rune]
 name = "csv"
 version = "0.2.0"
 description = "CSV parsing"
 entry = "main.fav"
-"#);
+"#,
+        );
         let meta = read_rune_meta(&path).unwrap();
         assert_eq!(meta.name, "csv");
         assert_eq!(meta.version, "0.2.0");
@@ -613,11 +625,14 @@ entry = "main.fav"
     #[test]
     fn test_read_deps() {
         let dir = TempDir::new().unwrap();
-        let path = make_rune_toml(&dir, r#"
+        let path = make_rune_toml(
+            &dir,
+            r#"
 [dependencies]
 csv = "0.2.0"
 parquet = "0.1.0"
-"#);
+"#,
+        );
         let deps = read_deps(&path);
         assert_eq!(deps.get("csv").map(|s| s.as_str()), Some("0.2.0"));
         assert_eq!(deps.get("parquet").map(|s| s.as_str()), Some("0.1.0"));
@@ -649,13 +664,16 @@ parquet = "0.1.0"
     #[test]
     fn test_write_deps_preserves_rune_section() {
         let dir = TempDir::new().unwrap();
-        let path = make_rune_toml(&dir, r#"[rune]
+        let path = make_rune_toml(
+            &dir,
+            r#"[rune]
 name = "myapp"
 version = "1.0.0"
 
 [dependencies]
 csv = "0.1.0"
-"#);
+"#,
+        );
         add_dep(&path, "parquet", "0.1.0");
         let content = std::fs::read_to_string(&path).unwrap();
         assert!(content.contains("[rune]"));

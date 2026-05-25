@@ -760,6 +760,8 @@ pub struct Checker {
     chain_context: Option<Type>,
     /// Whether we are inside a collect { } block (v0.5.0).
     in_collect: bool,
+    /// Functions directly invoked as collect helpers: collect { helper(...) }.
+    collect_helpers: HashSet<String>,
     /// Type alias definitions: name -> target TypeExpr (v1.7.0).
     type_aliases: HashMap<String, TypeExpr>,
     /// Type constraint schemas loaded from schemas/*.yaml (v4.1.5).
@@ -798,6 +800,7 @@ impl Checker {
             type_arity: HashMap::new(),
             chain_context: None,
             in_collect: false,
+            collect_helpers: HashSet::new(),
             type_aliases: HashMap::new(),
             schemas: HashMap::new(),
         }
@@ -837,6 +840,7 @@ impl Checker {
             type_arity: HashMap::new(),
             chain_context: None,
             in_collect: false,
+            collect_helpers: HashSet::new(),
             type_aliases: HashMap::new(),
             schemas: HashMap::new(),
         }
@@ -854,6 +858,7 @@ impl Checker {
         c.register_builtins();
         c.resolve_uses(program);
         c.process_imports(program);
+        c.register_collect_helpers(program);
         c.register_item_signatures(program);
         for item in &program.items {
             c.check_item(item);
@@ -868,6 +873,7 @@ impl Checker {
         self.resolve_uses(program);
         self.process_imports(program);
         self.check_namespace_match(program);
+        self.register_collect_helpers(program);
         self.register_item_signatures(program);
         for item in &program.items {
             self.check_item(item);
@@ -949,6 +955,7 @@ impl Checker {
         c.register_builtins();
         c.resolve_uses(program);
         c.process_imports(program);
+        c.register_collect_helpers(program);
         c.register_item_signatures(program);
         for item in &program.items {
             c.check_item(item);
@@ -1912,10 +1919,8 @@ impl Checker {
                                     self.env.define(name.clone(), parent.clone());
                                 }
                                 Variant::Tuple(name, tys, _) => {
-                                    let payloads: Vec<Type> = tys
-                                        .iter()
-                                        .map(|te| self.resolve_type_expr(te))
-                                        .collect();
+                                    let payloads: Vec<Type> =
+                                        tys.iter().map(|te| self.resolve_type_expr(te)).collect();
                                     self.env.define(
                                         name.clone(),
                                         Type::Fn(payloads, Box::new(parent.clone())),
@@ -2097,7 +2102,10 @@ impl Checker {
             Item::EffectDef(..) => {}
             Item::TestDef(td) => self.check_test_def(td),
             Item::BenchDef(bd) => self.check_bench_def(bd),
-            Item::NamespaceDecl(..) | Item::UseDecl(..) | Item::RuneUse { .. } | Item::ImportDecl { .. } => {}
+            Item::NamespaceDecl(..)
+            | Item::UseDecl(..)
+            | Item::RuneUse { .. }
+            | Item::ImportDecl { .. } => {}
         }
     }
 
@@ -2581,6 +2589,102 @@ impl Checker {
         self.current_effects = saved_effects;
     }
 
+    fn register_collect_helpers(&mut self, program: &Program) {
+        self.collect_helpers.clear();
+        for item in &program.items {
+            match item {
+                Item::FnDef(fd) => self.collect_helpers_in_block(&fd.body),
+                Item::TrfDef(td) => self.collect_helpers_in_block(&td.body),
+                Item::TestDef(td) => self.collect_helpers_in_block(&td.body),
+                Item::BenchDef(bd) => self.collect_helpers_in_block(&bd.body),
+                _ => {}
+            }
+        }
+    }
+
+    fn collect_helpers_in_block(&mut self, block: &Block) {
+        for stmt in &block.stmts {
+            self.collect_helpers_in_stmt(stmt);
+        }
+        self.collect_helpers_in_expr(&block.expr);
+    }
+
+    fn collect_helpers_in_stmt(&mut self, stmt: &Stmt) {
+        match stmt {
+            Stmt::Bind(b) => self.collect_helpers_in_expr(&b.expr),
+            Stmt::Expr(expr) => self.collect_helpers_in_expr(expr),
+            Stmt::Chain(c) => self.collect_helpers_in_expr(&c.expr),
+            Stmt::Yield(y) => self.collect_helpers_in_expr(&y.expr),
+            Stmt::ForIn(f) => {
+                self.collect_helpers_in_expr(&f.iter);
+                self.collect_helpers_in_block(&f.body);
+            }
+        }
+    }
+
+    fn collect_helpers_in_expr(&mut self, expr: &Expr) {
+        match expr {
+            Expr::Lit(_, _) | Expr::Ident(_, _) => {}
+            Expr::Pipeline(exprs, _) => {
+                for expr in exprs {
+                    self.collect_helpers_in_expr(expr);
+                }
+            }
+            Expr::Apply(callee, args, _) => {
+                self.collect_helpers_in_expr(callee);
+                for arg in args {
+                    self.collect_helpers_in_expr(arg);
+                }
+            }
+            Expr::TypeApply(expr, _, _) => self.collect_helpers_in_expr(expr),
+            Expr::FieldAccess(expr, _, _) => self.collect_helpers_in_expr(expr),
+            Expr::Block(block) => self.collect_helpers_in_block(block),
+            Expr::Match(scrutinee, arms, _) => {
+                self.collect_helpers_in_expr(scrutinee);
+                for arm in arms {
+                    if let Some(guard) = &arm.guard {
+                        self.collect_helpers_in_expr(guard);
+                    }
+                    self.collect_helpers_in_expr(&arm.body);
+                }
+            }
+            Expr::AssertMatches(expr, _, _) => self.collect_helpers_in_expr(expr),
+            Expr::Collect(block, _) => {
+                if let Expr::Apply(callee, _, _) = block.expr.as_ref() {
+                    if let Expr::Ident(name, _) = callee.as_ref() {
+                        self.collect_helpers.insert(name.clone());
+                    }
+                }
+                self.collect_helpers_in_block(block);
+            }
+            Expr::If(cond, then_block, else_block, _) => {
+                self.collect_helpers_in_expr(cond);
+                self.collect_helpers_in_block(then_block);
+                if let Some(block) = else_block {
+                    self.collect_helpers_in_block(block);
+                }
+            }
+            Expr::Closure(_, body, _) => self.collect_helpers_in_expr(body),
+            Expr::BinOp(_, lhs, rhs, _) => {
+                self.collect_helpers_in_expr(lhs);
+                self.collect_helpers_in_expr(rhs);
+            }
+            Expr::RecordConstruct(_, fields, _) => {
+                for (_, expr) in fields {
+                    self.collect_helpers_in_expr(expr);
+                }
+            }
+            Expr::FString(parts, _) => {
+                for part in parts {
+                    if let FStringPart::Expr(expr) = part {
+                        self.collect_helpers_in_expr(expr);
+                    }
+                }
+            }
+            Expr::EmitExpr(expr, _) => self.collect_helpers_in_expr(expr),
+        }
+    }
+
     fn check_fn_def(&mut self, fd: &FnDef) {
         self.check_effects_declared(&fd.effects, &fd.span);
         let saved_effects = std::mem::replace(&mut self.current_effects, fd.effects.clone());
@@ -2618,7 +2722,10 @@ impl Checker {
             self.env.define(p.name.clone(), ty);
         }
 
+        let saved_in_collect = self.in_collect;
+        self.in_collect = saved_in_collect || self.collect_helpers.contains(&fd.name);
         let body_ty = self.check_block(&fd.body);
+        self.in_collect = saved_in_collect;
         let return_ty = if let Some(return_ty) = &fd.return_ty {
             self.resolve_type_expr(return_ty)
         } else {
@@ -4558,7 +4665,9 @@ impl Checker {
             }
             ("IO", "read_line") => Some(Type::String),
             ("IO", "timestamp") => Some(Type::String),
-            ("IO", "read_file_raw") => Some(Type::Result(Box::new(Type::String), Box::new(Type::String))),
+            ("IO", "read_file_raw") => {
+                Some(Type::Result(Box::new(Type::String), Box::new(Type::String)))
+            }
             ("IO", "write_file_raw") | ("IO", "write_bytes_raw") => {
                 Some(Type::Result(Box::new(Type::Unit), Box::new(Type::String)))
             }
@@ -4569,9 +4678,11 @@ impl Checker {
             ("Int", "to_string") | ("Float", "to_string") => Some(Type::String),
 
             // Int bit operations (v5.1.0)
-            ("Int", "shl") | ("Int", "shr") | ("Int", "band") | ("Int", "bor") | ("Int", "bxor") => {
-                Some(Type::Int)
-            }
+            ("Int", "shl")
+            | ("Int", "shr")
+            | ("Int", "band")
+            | ("Int", "bor")
+            | ("Int", "bxor") => Some(Type::Int),
             ("Int", "bnot") | ("Int", "to_byte") => Some(Type::Int),
 
             // Math
@@ -4697,7 +4808,10 @@ impl Checker {
             }
 
             // String
-            ("String", "trim") | ("String", "lower") | ("String", "upper") | ("String", "base64_encode") => Some(Type::String),
+            ("String", "trim")
+            | ("String", "lower")
+            | ("String", "upper")
+            | ("String", "base64_encode") => Some(Type::String),
             ("String", "base64_decode") => Some(Type::Result(
                 Box::new(Type::List(Box::new(Type::Int))),
                 Box::new(Type::String),
@@ -4707,7 +4821,9 @@ impl Checker {
             ("String", "pad_left") | ("String", "pad_right") | ("String", "reverse") => {
                 Some(Type::String)
             }
-            ("String", "lines") | ("String", "words") | ("String", "chars") => Some(Type::List(Box::new(Type::String))),
+            ("String", "lines") | ("String", "words") | ("String", "chars") => {
+                Some(Type::List(Box::new(Type::String)))
+            }
             ("String", "to_bytes") => Some(Type::List(Box::new(Type::Int))),
             ("String", "length") => Some(Type::Int),
             ("String", "is_empty") => Some(Type::Bool),
@@ -4716,8 +4832,11 @@ impl Checker {
             | ("String", "ends_with")
             | ("String", "is_slug")
             | ("String", "is_url") => Some(Type::Bool),
-            ("String", "concat") | ("String", "replace") | ("String", "slice")
-            | ("String", "repeat") | ("String", "from_chars") => Some(Type::String),
+            ("String", "concat")
+            | ("String", "replace")
+            | ("String", "slice")
+            | ("String", "repeat")
+            | ("String", "from_chars") => Some(Type::String),
             ("String", "char_at") => Some(Type::Option(Box::new(Type::String))),
             ("String", "to_int") => Some(Type::Option(Box::new(Type::Int))),
             ("String", "to_float") => Some(Type::Option(Box::new(Type::Float))),
@@ -5095,10 +5214,16 @@ impl Checker {
             ("Map", "contains_key") => Some(Type::Bool),
             ("Map", "remove") => Some(Type::Map(Box::new(Type::Unknown), Box::new(Type::Unknown))),
             ("Map", "merge") => Some(Type::Map(Box::new(Type::Unknown), Box::new(Type::Unknown))),
-            ("Map", "map_values") => Some(Type::Map(Box::new(Type::Unknown), Box::new(Type::Unknown))),
-            ("Map", "filter_values") => Some(Type::Map(Box::new(Type::Unknown), Box::new(Type::Unknown))),
+            ("Map", "map_values") => {
+                Some(Type::Map(Box::new(Type::Unknown), Box::new(Type::Unknown)))
+            }
+            ("Map", "filter_values") => {
+                Some(Type::Map(Box::new(Type::Unknown), Box::new(Type::Unknown)))
+            }
             ("Map", "to_list") => Some(Type::List(Box::new(Type::Unknown))),
-            ("Map", "from_list") => Some(Type::Map(Box::new(Type::Unknown), Box::new(Type::Unknown))),
+            ("Map", "from_list") => {
+                Some(Type::Map(Box::new(Type::Unknown), Box::new(Type::Unknown)))
+            }
             ("Map", _) => Some(Type::Unknown),
 
             // Json (v0.7.0)
@@ -5238,9 +5363,15 @@ impl Checker {
                 Box::new(Type::String),
             )),
             ("Gen", "set_yaml_config_raw") => Some(Type::Unit),
-            ("Gen", "to_csv_raw") => Some(Type::Result(Box::new(Type::Unit), Box::new(Type::String))),
-            ("Gen", "to_parquet_raw") => Some(Type::Result(Box::new(Type::Unit), Box::new(Type::String))),
-            ("Gen", "load_into_raw") => Some(Type::Result(Box::new(Type::Int), Box::new(Type::String))),
+            ("Gen", "to_csv_raw") => {
+                Some(Type::Result(Box::new(Type::Unit), Box::new(Type::String)))
+            }
+            ("Gen", "to_parquet_raw") => {
+                Some(Type::Result(Box::new(Type::Unit), Box::new(Type::String)))
+            }
+            ("Gen", "load_into_raw") => {
+                Some(Type::Result(Box::new(Type::Int), Box::new(Type::String)))
+            }
             ("Gen", "edge_cases_raw") => Some(Type::Result(
                 Box::new(Type::List(Box::new(Type::Map(
                     Box::new(Type::String),
@@ -5404,15 +5535,13 @@ impl Checker {
             }
 
             // Dynamic T.validate — type name that has a schema entry
-            (type_name, "validate") if self.schemas.contains_key(type_name) => {
-                Some(Type::Result(
-                    Box::new(Type::Named(type_name.to_string(), vec![])),
-                    Box::new(Type::List(Box::new(Type::Named(
-                        "ValidationError".into(),
-                        vec![],
-                    )))),
-                ))
-            }
+            (type_name, "validate") if self.schemas.contains_key(type_name) => Some(Type::Result(
+                Box::new(Type::Named(type_name.to_string(), vec![])),
+                Box::new(Type::List(Box::new(Type::Named(
+                    "ValidationError".into(),
+                    vec![],
+                )))),
+            )),
 
             _ => None,
         }
@@ -8059,9 +8188,7 @@ public fn main() -> Order {
 }
 "#;
         let errs = check_with_schemas(src, schemas);
-        let constraint_errs: Vec<_> = errs.iter()
-            .filter(|e| e.contains("E051"))
-            .collect();
+        let constraint_errs: Vec<_> = errs.iter().filter(|e| e.contains("E051")).collect();
         assert!(
             constraint_errs.is_empty(),
             "unexpected constraint errors: {:?}",
@@ -8088,12 +8215,16 @@ public fn main() -> Order {
 
     #[test]
     fn test_option_and_then_type() {
-        check_ok("fn f(o: Option<Int>) -> Option<String> { Option.and_then(o, |x| Option.some(\"ok\")) }");
+        check_ok(
+            "fn f(o: Option<Int>) -> Option<String> { Option.and_then(o, |x| Option.some(\"ok\")) }",
+        );
     }
 
     #[test]
     fn test_result_and_then_type() {
-        check_ok("fn f(r: Result<Int, String>) -> Result<String, String> { Result.and_then(r, |x| Result.ok(\"ok\")) }");
+        check_ok(
+            "fn f(r: Result<Int, String>) -> Result<String, String> { Result.and_then(r, |x| Result.ok(\"ok\")) }",
+        );
     }
 
     #[test]

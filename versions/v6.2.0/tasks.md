@@ -46,3 +46,58 @@ Observed final state:
 - [x] Update `versions/v6.2.0/tasks.md`
 - [x] Update `memory/MEMORY.md`
 - [x] Commit only the v6.2.0 bootstrap completion changes
+
+## Additional v6.2.0 tasks
+
+Goal for these additions:
+move Favnir from "bootstrap verified" toward "self-hosted authority"
+without forcing unsafe or specialist-heavy runtime work out of Rust.
+
+### A. Semantic gap audit
+
+- [x] A-1: Produce a gap memo for Rust checker vs `compiler.fav` semantics.
+- [x] A-2: List every current bootstrap-support exception, including `collect { helper(...) }` handling.
+- [x] A-3: Classify each gap as:
+  self-host candidate, Rust-kernel candidate, or intentionally shared behavior.
+
+### B. Self-host authority expansion
+
+- [x] B-1: Pick 1 parser/checker semantic area that can move toward self-host ownership without touching the VM.
+- [x] B-2: Add focused tests that fail when Rust and self-host diverge for that area.
+- [x] B-3: Implement the selected semantic alignment in `compiler.fav` and/or supporting Rust glue.
+
+Recommended first targets:
+
+- pattern and match behavior
+- block / collect / yield semantics
+- call argument lowering and record payload access
+
+Selected first target:
+
+- [x] block / collect / yield semantics
+
+Additional aligned target completed in v6.2.0:
+
+- [x] pattern / match behavior
+  nested variant pattern fallback and arm-local bindings are now covered by focused regression tests
+- [x] call argument lowering and record payload access
+  multi-argument calls using record field access are now covered by focused checker and runtime regressions
+
+### C. Trusted-kernel boundary
+
+- [x] C-1: Write a short note defining the Rust trusted kernel for Favnir.
+- [x] C-2: Explicitly keep the following areas in Rust unless specialist review exists:
+  cryptography, security-sensitive primitives, low-level binary boundaries, network protocol robustness, memory-sensitive runtime internals.
+- [x] C-3: Mark non-goals for v6.2.0 so "self-host progress" is not confused with "rewrite everything in Favnir".
+
+### D. Contract documentation
+
+- [x] D-1: Document the artifact format contract used between `compiler.fav` and the Rust VM.
+- [x] D-2: Document the opcode / IR assumptions required by bootstrap.
+- [x] D-3: Identify which parts are language-level contracts vs implementation details.
+
+### E. Validation hardening
+
+- [x] E-1: Keep `self_hosted_compiler_type_checks` as a mandatory gate for self-host changes.
+- [x] E-2: Keep `bootstrap_full_self_hosting` as a mandatory gate for compiler pipeline changes.
+- [x] E-3: Add at least one regression test for a previously mismatched Rust/self-host semantic edge.

@@ -6295,6 +6295,17 @@ mod tests {
         );
     }
 
+    #[test]
+    fn test_record_field_arguments_in_multi_arg_call_ok() {
+        check_ok(
+            "
+            type Pair = { left: Int right: Int }
+            fn add3(a: Int, b: Int, c: Int) -> Int { a + b + c }
+            fn f(p: Pair) -> Int { add3(p.left, p.right, 4) }
+        ",
+        );
+    }
+
     // 4-12: match arm types consistent
     #[test]
     fn test_match_consistent_arms() {
@@ -6305,6 +6316,23 @@ mod tests {
                 match c {
                     Red  => 0
                     Blue => 1
+                }
+            }
+        ",
+        );
+    }
+
+    #[test]
+    fn test_match_nested_variant_patterns_ok() {
+        check_ok(
+            "
+            type Inner = | A(Int) | B(Int)
+            type Outer = | Boxed(Inner) | Empty
+            fn f(v: Outer) -> Int {
+                match v {
+                    Boxed(A(x)) => x
+                    Boxed(B(y)) => y
+                    Empty => 0
                 }
             }
         ",
@@ -7422,6 +7450,22 @@ fn main() -> List<Int> {
     }
 
     // task 3-22: guard with non-Bool ↁEE027
+    #[test]
+    fn test_collect_helper_with_yield_ok() {
+        let src = r#"
+fn emit_values() -> Bool {
+    yield 1;
+    yield 2;
+    true
+}
+
+fn main() -> List<Int> {
+    collect { emit_values() }
+}
+"#;
+        check_ok(src);
+    }
+
     #[test]
     fn test_guard_non_bool() {
         let src = r#"

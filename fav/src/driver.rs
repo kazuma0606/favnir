@@ -11304,6 +11304,82 @@ public fn main() -> Unit !Io {
     }
 
     #[test]
+    fn collect_helper_yield_executes_inside_collect() {
+        let src = r#"
+fn emit_values() -> Bool {
+    yield 1;
+    yield 2;
+    true
+}
+
+public fn main() -> Unit !Io {
+    bind xs <- collect { emit_values() }
+    IO.println(Debug.show(List.length(xs)))
+}
+"#;
+        let output = run_fav_source_get_output(src);
+        assert_eq!(output.trim(), "2", "expected helper yields to be collected");
+    }
+
+    #[test]
+    fn nested_variant_match_falls_through_and_keeps_locals() {
+        let src = r#"
+type Inner = | A(Int) | B(Int)
+type Outer = | Boxed(Inner) | Empty
+
+fn classify(v: Outer) -> Int {
+    match v {
+        Boxed(A(x)) => {
+            bind y <- x + 1
+            y
+        }
+        Boxed(B(x)) => {
+            bind y <- x + 10
+            y
+        }
+        Empty => 0
+    }
+}
+
+public fn main() -> Unit !Io {
+    IO.println(Debug.show(classify(Boxed(B(5)))))
+}
+"#;
+        let output = run_fav_source_get_output(src);
+        assert_eq!(
+            output.trim(),
+            "15",
+            "expected nested variant match to fall through and preserve local binds"
+        );
+    }
+
+    #[test]
+    fn record_field_arguments_preserve_multi_arg_call_order() {
+        let src = r#"
+type Pair = { left: Int right: Int }
+
+fn add3(a: Int, b: Int, c: Int) -> Int {
+    a + b + c
+}
+
+fn project_sum(p: Pair, extra: Int) -> Int {
+    add3(p.left, p.right, extra)
+}
+
+public fn main() -> Unit !Io {
+    bind pair <- Pair { left: 2 right: 3 }
+    IO.println(Debug.show(project_sum(pair, 4)))
+}
+"#;
+        let output = run_fav_source_get_output(src);
+        assert_eq!(
+            output.trim(),
+            "9",
+            "expected record field arguments to preserve multi-arg call lowering order"
+        );
+    }
+
+    #[test]
     fn selfhost_parser_produces_binop_ast() {
         let src = r#"
 public type Token = { kind: String  text: String  pos: Int }

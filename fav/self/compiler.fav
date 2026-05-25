@@ -18,6 +18,7 @@ type Token =
   | TkIf
   | TkElse
   | TkMatch
+  | TkWhere
   | TkBind
   | TkImport
   | TkPublic
@@ -96,6 +97,8 @@ fn keyword_token(s: String) -> Option<Token> {
     else {
     if s == "match" { Option.some(TkMatch) }
     else {
+    if s == "where" { Option.some(TkWhere) }
+    else {
     if s == "bind" { Option.some(TkBind) }
     else {
     if s == "import" { Option.some(TkImport) }
@@ -120,7 +123,7 @@ fn keyword_token(s: String) -> Option<Token> {
     else {
     if s == "false" { Option.some(TkFalse) }
     else { Option.none() }
-    }}}}}}}}}}}}}}}}
+    }}}}}}}}}}}}}}}}}
 }
 
 fn scan_string_chars(chars: List<String>, acc: List<String>) -> Result<ScanResult, String> {
@@ -421,7 +424,7 @@ type Expr =
   | ERecordLit(String, Expr)
   | EArgList(Expr, Expr)
   | EArgNil
-  | EArm(Pat, Expr, Expr)
+  | EArm(Pat, Expr, Expr, Expr)
   | EArmNil
   | EBind(String, Expr, Expr)
   | ECollect(Expr)
@@ -580,6 +583,7 @@ fn token_eq(a: Token, b: Token) -> Bool {
         TkArrow => { match b { TkArrow => true _ => false } }
         TkBackArrow => { match b { TkBackArrow => true _ => false } }
         TkFatArrow => { match b { TkFatArrow => true _ => false } }
+        TkWhere => { match b { TkWhere => true _ => false } }
         TkPipeGt => { match b { TkPipeGt => true _ => false } }
         TkEq => { match b { TkEq => true _ => false } }
         TkBang => { match b { TkBang => true _ => false } }
@@ -607,7 +611,7 @@ fn token_to_string(t: Token) -> String {
         TkStr(s) => String.concat("str:", s)
         TkIdent(s) => String.concat("ident:", s)
         TkTrue => "true" TkFalse => "false" TkFn => "fn" TkType => "type"
-        TkIf => "if" TkElse => "else" TkMatch => "match" TkBind => "bind"
+        TkIf => "if" TkElse => "else" TkMatch => "match" TkWhere => "where" TkBind => "bind"
         TkImport => "import" TkPublic => "public" TkReturn => "return"
         TkFor => "for" TkIn => "in" TkTest => "test" TkBench => "bench"
         TkPlus => "+" TkMinus => "-" TkStar => "*" TkSlash => "/"
@@ -752,6 +756,19 @@ fn parse_type_expr(toks: List<Token>) -> Result<TypeExprParse, String> {
     }
 }
 
+fn parse_arm_guard(toks: List<Token>) -> Result<ExprParse, String> {
+    match peek(toks) {
+        Some(TkWhere) => {
+            bind rest1 <- advance(toks)
+            match parse_expr(rest1) {
+                Err(e) => Result.err(e)
+                Ok(guard_p) => Result.ok(ExprParse { expr: guard_p.expr, rest: guard_p.rest })
+            }
+        }
+        _ => Result.ok(ExprParse { expr: ELit(LBool(true)), rest: toks })
+    }
+}
+
 fn parse_arms(toks: List<Token>, acc: Expr) -> Result<ExprParse, String> {
     match peek(toks) {
         Some(TkRBrace) => Result.ok(ExprParse { expr: reverse_match_arms(acc), rest: toks })
@@ -760,19 +777,24 @@ fn parse_arms(toks: List<Token>, acc: Expr) -> Result<ExprParse, String> {
             match parse_pat(toks) {
                 Err(e) => Result.err(e)
                 Ok(pat_p) => {
-                    match expect_tok(pat_p.rest, TkFatArrow) {
+                    match parse_arm_guard(pat_p.rest) {
                         Err(e) => Result.err(e)
-                        Ok(rest1) => {
-                            match parse_expr(rest1) {
+                        Ok(guard_p) => {
+                            match expect_tok(guard_p.rest, TkFatArrow) {
                                 Err(e) => Result.err(e)
-                                Ok(body_p) => {
-                                    parse_arms(
-                                        match peek(body_p.rest) {
-                                            Some(TkComma) => advance(body_p.rest)
-                                            _ => body_p.rest
-                                        },
-                                        EArm(pat_p.pat, body_p.expr, acc)
-                                    )
+                                Ok(rest1) => {
+                                    match parse_expr(rest1) {
+                                        Err(e) => Result.err(e)
+                                        Ok(body_p) => {
+                                            parse_arms(
+                                                match peek(body_p.rest) {
+                                                    Some(TkComma) => advance(body_p.rest)
+                                                    _ => body_p.rest
+                                                },
+                                                EArm(pat_p.pat, guard_p.expr, body_p.expr, acc)
+                                            )
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -838,6 +860,7 @@ fn parse_fields(toks: List<Token>, acc: Expr) -> Result<ExprParse, String> {
 
 fn parse_block_inner(toks: List<Token>) -> Result<ExprParse, String> {
     match peek(toks) {
+        Some(TkRBrace) => Result.ok(ExprParse { expr: ELit(LUnit), rest: toks })
         Some(TkBind) => {
             bind rest1 <- advance(toks)
             match peek(rest1) {
@@ -867,6 +890,62 @@ fn parse_block_inner(toks: List<Token>) -> Result<ExprParse, String> {
                     }
                 }
                 _ => Result.err("expected identifier after bind")
+            }
+        }
+        Some(TkFor) => {
+            bind rest1 <- advance(toks)
+            match peek(rest1) {
+                Some(TkIdent(vname)) => {
+                    bind rest2 <- advance(rest1)
+                    match expect_tok(rest2, TkIn) {
+                        Err(e) => Result.err(e)
+                        Ok(rest3) => {
+                            match parse_expr(rest3) {
+                                Err(e) => Result.err(e)
+                                Ok(iter_p) => {
+                                    match expect_tok(iter_p.rest, TkLBrace) {
+                                        Err(e) => Result.err(e)
+                                        Ok(rest4) => {
+                                            match parse_block_inner(rest4) {
+                                                Err(e) => Result.err(e)
+                                                Ok(body_p) => {
+                                                    match expect_tok(body_p.rest, TkRBrace) {
+                                                        Err(e) => Result.err(e)
+                                                        Ok(rest5) => {
+                                                            match parse_block_inner(
+                                                                match peek(rest5) {
+                                                                    Some(TkSemicolon) => advance(rest5)
+                                                                    _ => rest5
+                                                                }
+                                                            ) {
+                                                                Err(e) => Result.err(e)
+                                                                Ok(cont_p) => Result.ok(ExprParse {
+                                                                    expr: EBind(
+                                                                        "$for_ignore",
+                                                                        ECall(
+                                                                            "List",
+                                                                            "map",
+                                                                            EArgList(
+                                                                                ELambda(vname, body_p.expr),
+                                                                                EArgList(
+                                                                                    iter_p.expr,
+                                                                                    EArgNil))),
+                                                                        cont_p.expr)
+                                                                    rest: cont_p.rest
+                                                                })
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                _ => Result.err("expected identifier after for")
             }
         }
         Some(TkYield) => {
@@ -1901,11 +1980,13 @@ fn free_names_arms(arms: Expr, bound: List<String>, acc: List<String>) -> List<S
     match arms {
         EArm(parts) => {
             bind pat <- parts._0
-            bind body <- parts._1
-            bind rest <- parts._2
+            bind guard <- parts._1
+            bind body <- parts._2
+            bind rest <- parts._3
             bind arm_bound <- pat_bound_names(pat, bound)
-            bind acc1 <- free_names_expr(body, arm_bound, acc)
-            free_names_arms(rest, bound, acc1)
+            bind acc1 <- free_names_expr(guard, arm_bound, acc)
+            bind acc2 <- free_names_expr(body, arm_bound, acc1)
+            free_names_arms(rest, bound, acc2)
         }
         EArmNil => acc
         _ => acc
@@ -1919,31 +2000,44 @@ fn free_names_expr(expr: Expr, bound: List<String>, acc: List<String>) -> List<S
             if name_in_list(bound, name) { acc }
             else { List.push(acc, name) }
         }
-        EBinOp(_op, left, right) => {
+        EBinOp(parts) => {
+            bind left <- parts._1
+            bind right <- parts._2
             bind acc1 <- free_names_expr(left, bound, acc)
             free_names_expr(right, bound, acc1)
         }
-        ECall(_ns, _fname, args) => free_names_expr(args, bound, acc)
-        EIf(cond, then_e, else_e) => {
+        ECall(parts) => free_names_expr(parts._2, bound, acc)
+        EIf(parts) => {
+            bind cond <- parts._0
+            bind then_e <- parts._1
+            bind else_e <- parts._2
             bind acc1 <- free_names_expr(cond, bound, acc)
             bind acc2 <- free_names_expr(then_e, bound, acc1)
             free_names_expr(else_e, bound, acc2)
         }
-        EAccess(obj, _field) => free_names_expr(obj, bound, acc)
-        ELambda(param, body) => {
+        EAccess(parts) => free_names_expr(parts._0, bound, acc)
+        ELambda(parts) => {
+            bind param <- parts._0
+            bind body <- parts._1
             bind inner_bound <- List.push(bound, param)
             free_names_expr(body, inner_bound, acc)
         }
-        EMatch(scrut, arms) => {
+        EMatch(parts) => {
+            bind scrut <- parts._0
+            bind arms <- parts._1
             bind acc1 <- free_names_expr(scrut, bound, acc)
             free_names_arms(arms, bound, acc1)
         }
-        EBlock(head, tail) => {
+        EBlock(parts) => {
+            bind head <- parts._0
+            bind tail <- parts._1
             bind acc1 <- free_names_expr(head, bound, acc)
             free_names_expr(tail, bound, acc1)
         }
-        ERecordLit(_tname, fields) => free_names_expr(fields, bound, acc)
-        EArgList(head, tail) => {
+        ERecordLit(parts) => free_names_expr(parts._1, bound, acc)
+        EArgList(parts) => {
+            bind head <- parts._0
+            bind tail <- parts._1
             bind acc1 <- free_names_expr(head, bound, acc)
             free_names_expr(tail, bound, acc1)
         }
@@ -1955,6 +2049,8 @@ fn free_names_expr(expr: Expr, bound: List<String>, acc: List<String>) -> List<S
             bind cont_bound <- List.push(bound, name)
             free_names_expr(cont_e, cont_bound, acc1)
         }
+        ECollect(body) => free_names_expr(body, bound, acc)
+        EYield(val_e) => free_names_expr(val_e, bound, acc)
         EField(parts) => {
             bind val_e <- parts._1
             bind rest <- parts._2
@@ -2051,9 +2147,11 @@ fn result_and_then_match_expr(value_expr: Expr, param: String, body: Expr) -> Ex
         value_expr,
         EArm(
             PVariantP("Ok", PVar(param)),
+            ELit(LBool(true)),
             body,
             EArm(
                 PVariantP("Err", PVar(err_name)),
+                ELit(LBool(true)),
                 result_err_expr(err_name),
                 EArmNil)))
 }
@@ -2141,7 +2239,7 @@ fn count_args(args: Expr) -> Int {
 
 fn reverse_match_arms_loop(arms: Expr, acc: Expr) -> Expr {
     match arms {
-        EArm(parts) => reverse_match_arms_loop(parts._2, EArm(parts._0, parts._1, acc))
+        EArm(parts) => reverse_match_arms_loop(parts._3, EArm(parts._0, parts._1, parts._2, acc))
         EArmNil => acc
         _ => acc
     }
@@ -2377,6 +2475,17 @@ fn compile_match_body_finish(body_ctx: CodegenCtx) -> CodegenCtx {
     emit_opcode(body1, BcPop)
 }
 
+fn compile_match_guard_assemble(guard_ctx: CodegenCtx, body_ctx: CodegenCtx, fail_code: List<Int>) -> CodegenCtx {
+    bind body_len <- List.length(body_ctx.code)
+    bind fail_len <- List.length(fail_code)
+    bind ctx1 <- emit_opcode(guard_ctx, BcJumpIfFalse)
+    bind ctx2 <- emit_u16(ctx1, body_len + 3)
+    bind ctx3 <- append_code(ctx2, body_ctx.code)
+    bind ctx4 <- emit_opcode(ctx3, BcJump)
+    bind ctx5 <- emit_u16(ctx4, fail_len)
+    append_code(ctx5, fail_code)
+}
+
 fn compile_match_dispatch_finish(pat: Pat, body2: CodegenCtx, bound_ctx: CodegenCtx, ctx: CodegenCtx, fail_code: List<Int>) -> Result<CodegenCtx, String> {
     bind next_local <- if body2.next_local > bound_ctx.next_local { body2.next_local } else { bound_ctx.next_local }
     bind next_local2 <- if next_local > ctx.next_local { next_local } else { ctx.next_local }
@@ -2410,23 +2519,61 @@ fn compile_match_body_result(pat: Pat, body_ctx: CodegenCtx, bound_ctx: CodegenC
     compile_match_dispatch_finish(pat, body2, bound_ctx, ctx, fail_code)
 }
 
-fn compile_match_arm(pat: Pat, body: Expr, fail_code: List<Int>, ctx: CodegenCtx, env: List<KVPair>) -> Result<CodegenCtx, String> {
+fn compile_match_guard_result(pat: Pat, guard: Expr, body_ctx: CodegenCtx, bound_ctx: CodegenCtx, ctx: CodegenCtx, fail_code: List<Int>, env: List<KVPair>) -> Result<CodegenCtx, String> {
+    bind body2 <- compile_match_body_finish(body_ctx)
+    Result.and_then(
+        compile_expr(
+            guard,
+            CodegenCtx {
+                code: empty_ints()
+                consts: body2.consts
+                locals: bound_ctx.locals
+                next_local: bound_ctx.next_local
+                lifted: body2.lifted
+                next_lambda: body2.next_lambda
+                lambda_prefix: body2.lambda_prefix
+            },
+            env),
+        |guard_ctx| {
+            bind next_local <- if body2.next_local > guard_ctx.next_local { body2.next_local } else { guard_ctx.next_local }
+            bind guard_body <- compile_match_guard_assemble(
+                guard_ctx,
+                CodegenCtx {
+                    code: body2.code
+                    consts: guard_ctx.consts
+                    locals: body2.locals
+                    next_local: next_local
+                    lifted: guard_ctx.lifted
+                    next_lambda: guard_ctx.next_lambda
+                    lambda_prefix: guard_ctx.lambda_prefix
+                },
+                fail_code)
+            compile_match_dispatch_finish(pat, guard_body, bound_ctx, ctx, fail_code)
+        })
+}
+
+fn compile_match_arm(pat: Pat, guard: Expr, body: Expr, fail_code: List<Int>, ctx: CodegenCtx, env: List<KVPair>) -> Result<CodegenCtx, String> {
     bind bound_ctx <- pattern_bind_locals(pat, ctx)
     bind body_seed <- ctx_fork(bound_ctx)
     Result.and_then(compile_expr(body, body_seed, env), |body_ctx|
-    compile_match_body_result(pat, body_ctx, bound_ctx, ctx, fail_code))
+    match guard {
+        ELit(LBool(true)) => compile_match_body_result(pat, body_ctx, bound_ctx, ctx, fail_code)
+        _ => compile_match_guard_result(pat, guard, body_ctx, bound_ctx, ctx, fail_code, env)
+    })
 }
 
 fn compile_match_arms(arms: Expr, ctx: CodegenCtx, env: List<KVPair>) -> Result<CodegenCtx, String> {
     match arms {
         EArm(parts) => {
             bind pat <- parts._0
-            bind body <- parts._1
-            bind rest <- parts._2
+            bind guard <- parts._1
+            bind body <- parts._2
+            bind rest <- parts._3
             bind fail_seed <- ctx_fork(ctx)
             Result.and_then(compile_match_arms(rest, fail_seed, env), |fail_ctx|
             compile_match_arm(
                 pat,
+                guard,
                 body,
                 fail_ctx.code,
                 CodegenCtx {
@@ -2635,7 +2782,7 @@ fn compile_expr(expr: Expr, ctx: CodegenCtx, env: List<KVPair>) -> Result<Codege
             compile_expr(tail, ctx1, env))
         }
         EArgNil => Result.ok(ctx)
-        EArm(parts) => compile_expr(parts._2, ctx, env)
+        EArm(parts) => compile_expr(parts._3, ctx, env)
         EArmNil => Result.ok(ctx)
         EField(parts) => {
             bind val_e <- parts._1

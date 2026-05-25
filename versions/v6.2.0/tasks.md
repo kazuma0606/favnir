@@ -121,3 +121,23 @@ Planned execution order:
 2. semantic edge regression expansion
 3. self-host AST contract note
 4. broader bootstrap comparison inputs
+
+### G. Remaining self-host authority follow-ups
+
+Goal for this section:
+increase self-host confidence within v6.2.0 without widening the Rust trusted kernel
+or forcing a risky compiler rewrite late in the version.
+
+- [x] G-1: Add negative regression coverage for the narrowed `collect { helper(...) }` exception.
+  Confirmed the exception does not extend through `trf`, `test`, `bench`, indirect calls, or non-tail helper usage.
+- [x] G-2: Add one more bootstrap comparison input that stresses closure capture and `for`-inside-`collect`.
+  Added `bootstrap_full_self_hosting_on_closure_collect_source` and a faster self-host artifact regression for closure capture + `for`-inside-`collect` execution.
+- [x] G-3: Expand focused self-host-sensitive regressions around lowering helpers.
+  Target areas such as `free_names`, `collect_capture_names`, `compile_args`, and `compile_match_arms`.
+  Progress so far: added closure-capture + `for`-inside-`collect` self-host regressions, nested-variant later-arm and guarded-arm regressions, a multi-capture closure regression that exercises capture selection with unused locals mixed in, a guarded-match bootstrap comparison, and a nested-call regression that mixes closure bodies with record-field arguments.
+
+Recommended execution order:
+
+1. negative `collect` helper boundary regressions
+2. closure/capture bootstrap comparison input
+3. additional lowering regressions

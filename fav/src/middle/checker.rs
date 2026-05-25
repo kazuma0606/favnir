@@ -7482,6 +7482,113 @@ fn main() -> List<Int> {
     }
 
     #[test]
+    fn test_collect_helper_with_yield_not_allowed_via_stage() {
+        let src = r#"
+stage EmitValues: Unit -> Bool = |unit| {
+    yield 1;
+    true
+}
+
+fn main() -> List<Int> {
+    collect { EmitValues(()) }
+}
+"#;
+        let errs = check_err(src);
+        assert!(
+            errs.iter().any(|e| e.contains("E0226")),
+            "expected E0226, got: {:?}",
+            errs
+        );
+    }
+
+    #[test]
+    fn test_collect_helper_with_yield_not_allowed_via_test_body() {
+        let src = r#"
+fn emit_values() -> Bool {
+    yield 1;
+    true
+}
+
+test "collect helper in test body is not authorized" {
+    collect { emit_values() }
+}
+"#;
+        let errs = check_err(src);
+        assert!(
+            errs.iter().any(|e| e.contains("E0226")),
+            "expected E0226, got: {:?}",
+            errs
+        );
+    }
+
+    #[test]
+    fn test_collect_helper_with_yield_not_allowed_via_bench_body() {
+        let src = r#"
+fn emit_values() -> Bool {
+    yield 1;
+    true
+}
+
+bench "collect helper in bench body is not authorized" {
+    collect { emit_values() }
+}
+"#;
+        let errs = check_err(src);
+        assert!(
+            errs.iter().any(|e| e.contains("E0226")),
+            "expected E0226, got: {:?}",
+            errs
+        );
+    }
+
+    #[test]
+    fn test_collect_helper_with_yield_not_allowed_via_indirect_call() {
+        let src = r#"
+fn emit_values() -> Bool {
+    yield 1;
+    true
+}
+
+fn wrapper() -> Bool {
+    emit_values()
+}
+
+fn main() -> List<Int> {
+    collect { wrapper() }
+}
+"#;
+        let errs = check_err(src);
+        assert!(
+            errs.iter().any(|e| e.contains("E0226")),
+            "expected E0226, got: {:?}",
+            errs
+        );
+    }
+
+    #[test]
+    fn test_collect_helper_with_yield_not_allowed_as_non_tail_collect_expr() {
+        let src = r#"
+fn emit_values() -> Bool {
+    yield 1;
+    true
+}
+
+fn main() -> List<Int> {
+    collect {
+        emit_values();
+        ()
+    }
+}
+"#;
+        let errs = check_err(src);
+        assert!(
+            errs.iter().any(|e| e.contains("E0226")),
+            "expected E0226, got: {:?}",
+            errs
+        );
+    }
+
+    #[test]
     fn test_guard_non_bool() {
         let src = r#"
 fn main() -> Int {

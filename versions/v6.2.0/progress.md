@@ -41,3 +41,8 @@
 - [x] G-2: Add regressions for nested variant guards and related semantic edges
 - [x] G-3: Broaden bootstrap comparison with `match` / `collect` / record-heavy input
 - [x] G-4: Document the self-host internal AST contract used by bootstrap-sensitive code
+
+## Phase H
+- [x] H-1: Add negative regressions for the narrowed `collect { helper(...) }` exception
+- [x] H-2: Add bootstrap comparison for closure capture + `for`-inside-`collect`
+- [x] H-3: Expand self-host artifact regressions for capture selection, nested match fallthrough, guarded match arms, and nested call lowering

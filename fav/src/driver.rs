@@ -14100,6 +14100,138 @@ public fn main() -> Bool !Io {
 
     #[test]
     #[ignore]
+    fn bootstrap_full_self_hosting_on_closure_collect_source() {
+        use crate::backend::artifact::FvcArtifact;
+        use std::sync::Arc;
+
+        let compiler_path = self_dir().join("compiler.fav");
+        let compiler_src = std::fs::read_to_string(&compiler_path).expect("compiler.fav");
+        let compiler_abs = compiler_path.to_string_lossy().to_string();
+
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let input = tmp.path().join("closure_collect_input.fav");
+        std::fs::write(
+            &input,
+            concat!(
+                "fn add3(a: Int, b: Int, c: Int) -> Int { a + b + c }\n",
+                "fn main() -> Int {\n",
+                "    bind offset <- 3\n",
+                "    bind adder <- |x| x + offset\n",
+                "    bind xs <- collect {\n",
+                "        for n in List.range(0, 3) {\n",
+                "            yield add3(n, offset, 1);\n",
+                "        }\n",
+                "    }\n",
+                "    bind count <- List.length(xs)\n",
+                "    add3(count, offset, add3(1, count, 2))\n",
+                "}\n"
+            ),
+        )
+        .expect("write closure_collect_input.fav");
+        let input_abs = input.to_string_lossy().to_string();
+
+        let program = crate::frontend::parser::Parser::parse_str(&compiler_src, "compiler.fav")
+            .expect("parse compiler.fav");
+        let rust_compiled_artifact = Arc::new(build_artifact(&program));
+
+        let (s1_ok, bytecode_a, s1_out, s1_value) =
+            run_compiler_artifact_on(Arc::clone(&rust_compiled_artifact), input_abs.clone());
+        if !s1_ok || bytecode_a.is_empty() {
+            panic!(
+                "Stage 1 (compile closure_collect_input.fav) failed or produced empty bytecode: ok={s1_ok} return={s1_value}\n{s1_out}"
+            );
+        }
+
+        let (s2_ok, artifact_bytes, s2_out, s2_value) =
+            run_compiler_artifact_on(Arc::clone(&rust_compiled_artifact), compiler_abs);
+        if !s2_ok || artifact_bytes.is_empty() {
+            panic!("Stage 2 (self-compile) failed: {s2_value}\n{s2_out}");
+        }
+
+        let compiler_artifact = Arc::new(
+            FvcArtifact::from_bytes(&artifact_bytes)
+                .expect("Stage 2 artifact bytes must parse as valid FvcArtifact"),
+        );
+
+        let (s3_ok, bytecode_b, s3_out, s3_value) =
+            run_compiler_artifact_on(compiler_artifact, input_abs);
+        if !s3_ok || bytecode_b.is_empty() {
+            panic!("Stage 3 failed: {s3_value}\n{s3_out}");
+        }
+
+        assert_eq!(
+            bytecode_a, bytecode_b,
+            "Bootstrap comparison failed on closure/capture/collect-heavy source"
+        );
+    }
+
+    #[test]
+    #[ignore]
+    fn bootstrap_full_self_hosting_on_guarded_match_source() {
+        use crate::backend::artifact::FvcArtifact;
+        use std::sync::Arc;
+
+        let compiler_path = self_dir().join("compiler.fav");
+        let compiler_src = std::fs::read_to_string(&compiler_path).expect("compiler.fav");
+        let compiler_abs = compiler_path.to_string_lossy().to_string();
+
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let input = tmp.path().join("guarded_match_input.fav");
+        std::fs::write(
+            &input,
+            concat!(
+                "type Inner = | A(Int) | B(Int)\n",
+                "type Outer = | Boxed(Inner) | Empty\n\n",
+                "fn classify(v: Outer) -> Int {\n",
+                "    match v {\n",
+                "        Boxed(A(x)) where x > 10 => x\n",
+                "        Boxed(A(x)) => x + 10\n",
+                "        Boxed(B(x)) => x\n",
+                "        Empty => 0\n",
+                "    }\n",
+                "}\n\n",
+                "fn main() -> Int {\n",
+                "    classify(Boxed(A(5))) + classify(Boxed(B(2)))\n",
+                "}\n"
+            ),
+        )
+        .expect("write guarded_match_input.fav");
+        let input_abs = input.to_string_lossy().to_string();
+
+        let program = crate::frontend::parser::Parser::parse_str(&compiler_src, "compiler.fav")
+            .expect("parse compiler.fav");
+        let rust_compiled_artifact = Arc::new(build_artifact(&program));
+
+        let (s1_ok, bytecode_a, _s1_out, s1_value) =
+            run_compiler_artifact_on(Arc::clone(&rust_compiled_artifact), input_abs.clone());
+        assert!(s1_ok, "Stage 1 (compile guarded_match_input.fav) failed: {s1_value}");
+        assert!(!bytecode_a.is_empty(), "Stage 1 produced empty bytecode_A");
+
+        let (s2_ok, artifact_bytes, s2_out, s2_value) =
+            run_compiler_artifact_on(Arc::clone(&rust_compiled_artifact), compiler_abs);
+        if !s2_ok || artifact_bytes.is_empty() {
+            panic!("Stage 2 (self-compile) failed: {s2_value}\n{s2_out}");
+        }
+
+        let compiler_artifact = Arc::new(
+            FvcArtifact::from_bytes(&artifact_bytes)
+                .expect("Stage 2 artifact bytes must parse as valid FvcArtifact"),
+        );
+
+        let (s3_ok, bytecode_b, s3_out, s3_value) =
+            run_compiler_artifact_on(compiler_artifact, input_abs);
+        if !s3_ok || bytecode_b.is_empty() {
+            panic!("Stage 3 failed: {s3_value}\n{s3_out}");
+        }
+
+        assert_eq!(
+            bytecode_a, bytecode_b,
+            "Bootstrap comparison failed on guarded nested-match source"
+        );
+    }
+
+    #[test]
+    #[ignore]
     fn bootstrap_d3_stage2_artifact_lexes_minimal_source() {
         let compiler_artifact = build_stage2_compiler_artifact();
         let source = "fn main() -> Bool { true }\n".to_string();
@@ -14576,6 +14708,172 @@ public fn main() -> Bool !Io {
         );
     }
 
+    #[test]
+    fn bootstrap_d2_executes_closure_capture_for_in_collect_program() {
+        use std::sync::Arc;
+
+        let compiler_path = self_dir().join("compiler.fav");
+        let compiler_src = std::fs::read_to_string(&compiler_path).expect("compiler.fav");
+        let program = crate::frontend::parser::Parser::parse_str(&compiler_src, "compiler.fav")
+            .expect("parse compiler.fav");
+        let compiler_artifact = Arc::new(build_artifact(&program));
+
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let input = tmp.path().join("closure_collect_exec_input.fav");
+        std::fs::write(
+            &input,
+            concat!(
+                "fn add3(a: Int, b: Int, c: Int) -> Int { a + b + c }\n",
+                "fn main() -> Int {\n",
+                "    bind offset <- 3\n",
+                "    bind adder <- |x| x + offset\n",
+                "    bind xs <- collect {\n",
+                "        for n in List.range(0, 3) {\n",
+                "            yield add3(n, offset, 1);\n",
+                "        }\n",
+                "    }\n",
+                "    bind count <- List.length(xs)\n",
+                "    add3(count, offset, add3(1, count, 2))\n",
+                "}\n"
+            ),
+        )
+        .expect("write closure_collect_exec_input.fav");
+
+        let (ok, artifact_bytes, captured, value_dbg) = run_compiler_artifact_on(
+            Arc::clone(&compiler_artifact),
+            input.to_string_lossy().to_string(),
+        );
+        assert!(
+            ok,
+            "closure/collect compile failed: {value_dbg}\n{captured}"
+        );
+        assert!(
+            !artifact_bytes.is_empty(),
+            "closure/collect compile produced empty artifact:\n{captured}"
+        );
+
+        let loaded = crate::backend::artifact::FvcArtifact::from_bytes(&artifact_bytes)
+            .expect("closure/collect output must parse as FvcArtifact");
+        assert!(
+            loaded.functions.len() >= 3,
+            "closure/collect compile must emit at least main + captured lambda + for lambda, got {}",
+            loaded.functions.len()
+        );
+        let value = exec_artifact_main(&loaded, None).expect("exec closure/collect artifact");
+        assert_eq!(
+            value,
+            crate::value::Value::Int(12),
+            "closure capture + for-in-collect program must execute correctly through the self-hosted artifact"
+        );
+    }
+
+    #[test]
+    fn bootstrap_d2_executes_multi_capture_filter_closure() {
+        use std::sync::Arc;
+
+        let compiler_path = self_dir().join("compiler.fav");
+        let compiler_src = std::fs::read_to_string(&compiler_path).expect("compiler.fav");
+        let program = crate::frontend::parser::Parser::parse_str(&compiler_src, "compiler.fav")
+            .expect("parse compiler.fav");
+        let compiler_artifact = Arc::new(build_artifact(&program));
+
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let input = tmp.path().join("multi_capture_filter_input.fav");
+        std::fs::write(
+            &input,
+            concat!(
+                "fn main() -> Bool {\n",
+                "    bind low <- 1\n",
+                "    bind unused <- 99\n",
+                "    bind high <- 4\n",
+                "    bind xs <- List.range(0, 6)\n",
+                "    bind ys <- List.filter(xs, |x| x > low && x < high)\n",
+                "    List.length(ys) == 2\n",
+                "}\n"
+            ),
+        )
+        .expect("write multi_capture_filter_input.fav");
+
+        let (ok, artifact_bytes, captured, value_dbg) = run_compiler_artifact_on(
+            Arc::clone(&compiler_artifact),
+            input.to_string_lossy().to_string(),
+        );
+        assert!(
+            ok,
+            "multi-capture filter compile failed: {value_dbg}\n{captured}"
+        );
+        assert!(
+            !artifact_bytes.is_empty(),
+            "multi-capture filter compile produced empty artifact:\n{captured}"
+        );
+
+        let loaded = crate::backend::artifact::FvcArtifact::from_bytes(&artifact_bytes)
+            .expect("multi-capture filter output must parse as FvcArtifact");
+        assert!(
+            loaded.functions.len() >= 2,
+            "multi-capture filter compile must emit at least main + lambda, got {}",
+            loaded.functions.len()
+        );
+        let value =
+            exec_artifact_main(&loaded, None).expect("exec multi-capture filter artifact");
+        assert_eq!(
+            value,
+            crate::value::Value::Bool(true),
+            "multi-capture filter closure must preserve capture selection and order through the self-hosted artifact"
+        );
+    }
+
+    #[test]
+    fn bootstrap_d2_executes_nested_call_with_record_fields_in_closure() {
+        use std::sync::Arc;
+
+        let compiler_path = self_dir().join("compiler.fav");
+        let compiler_src = std::fs::read_to_string(&compiler_path).expect("compiler.fav");
+        let program = crate::frontend::parser::Parser::parse_str(&compiler_src, "compiler.fav")
+            .expect("parse compiler.fav");
+        let compiler_artifact = Arc::new(build_artifact(&program));
+
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let input = tmp.path().join("nested_call_record_closure_input.fav");
+        std::fs::write(
+            &input,
+            concat!(
+                "type Pair = { left: Int, right: Int }\n\n",
+                "fn add3(a: Int, b: Int, c: Int) -> Int { a + b + c }\n\n",
+                "fn main() -> Bool {\n",
+                "    bind pair <- Pair { left: 2, right: 5 }\n",
+                "    bind xs <- List.range(1, 4)\n",
+                "    bind ys <- List.map(xs, |x| add3(pair.left, x, pair.right))\n",
+                "    List.length(ys) == 3 && List.length(List.filter(ys, |n| n > 7 && n < 11)) == 3\n",
+                "}\n"
+            ),
+        )
+        .expect("write nested_call_record_closure_input.fav");
+
+        let (ok, artifact_bytes, captured, value_dbg) = run_compiler_artifact_on(
+            Arc::clone(&compiler_artifact),
+            input.to_string_lossy().to_string(),
+        );
+        assert!(
+            ok,
+            "nested call + record-field closure compile failed: {value_dbg}\n{captured}"
+        );
+        assert!(
+            !artifact_bytes.is_empty(),
+            "nested call + record-field closure compile produced empty artifact:\n{captured}"
+        );
+
+        let loaded = crate::backend::artifact::FvcArtifact::from_bytes(&artifact_bytes)
+            .expect("nested call + record-field closure output must parse as FvcArtifact");
+        let value = exec_artifact_main(&loaded, None)
+            .expect("exec nested call + record-field closure artifact");
+        assert_eq!(
+            value,
+            crate::value::Value::Bool(true),
+            "nested calls with record fields inside closure bodies must preserve argument lowering through the self-hosted artifact"
+        );
+    }
+
     fn nested_and_then_expr(depth: usize) -> String {
         let mut expr = "0".to_string();
         for i in (0..depth).rev() {
@@ -15032,6 +15330,117 @@ public fn main() -> Bool !Io {
             value,
             crate::value::Value::Bool(true),
             "nested variant payload match must execute through self-hosted artifacts"
+        );
+    }
+
+    #[test]
+    fn bootstrap_d2_executes_nested_variant_fallthrough_to_later_arm() {
+        use std::sync::Arc;
+
+        let compiler_path = self_dir().join("compiler.fav");
+        let compiler_src = std::fs::read_to_string(&compiler_path).expect("compiler.fav");
+        let program = crate::frontend::parser::Parser::parse_str(&compiler_src, "compiler.fav")
+            .expect("parse compiler.fav");
+        let compiler_artifact = Arc::new(build_artifact(&program));
+
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let input = tmp.path().join("nested_variant_fallthrough_input.fav");
+        std::fs::write(
+            &input,
+            concat!(
+                "type Inner = | A(Int) | B(Int)\n",
+                "type Outer = | Boxed(Inner) | Empty\n\n",
+                "fn classify(v: Outer) -> Int {\n",
+                "    match v {\n",
+                "        Boxed(A(x)) => x + 10\n",
+                "        Boxed(B(x)) => x\n",
+                "        Empty => 0\n",
+                "    }\n",
+                "}\n\n",
+                "fn main() -> Bool {\n",
+                "    classify(Boxed(B(5))) == 5\n",
+                "}\n"
+            ),
+        )
+        .expect("write nested_variant_fallthrough_input.fav");
+
+        let (ok, artifact_bytes, captured, value_dbg) = run_compiler_artifact_on(
+            Arc::clone(&compiler_artifact),
+            input.to_string_lossy().to_string(),
+        );
+        assert!(
+            ok,
+            "nested variant fallthrough compile failed: {value_dbg}\n{captured}"
+        );
+        assert!(
+            !artifact_bytes.is_empty(),
+            "nested variant fallthrough compile produced empty artifact:\n{captured}"
+        );
+
+        let loaded = crate::backend::artifact::FvcArtifact::from_bytes(&artifact_bytes)
+            .expect("nested variant fallthrough output must parse as FvcArtifact");
+        let value =
+            exec_artifact_main(&loaded, None).expect("exec nested variant fallthrough artifact");
+        assert_eq!(
+            value,
+            crate::value::Value::Bool(true),
+            "nested variant mismatch must fall through to a later arm through the self-hosted artifact"
+        );
+    }
+
+    #[test]
+    fn bootstrap_d2_executes_nested_variant_guard_fallthrough() {
+        use std::sync::Arc;
+
+        let compiler_path = self_dir().join("compiler.fav");
+        let compiler_src = std::fs::read_to_string(&compiler_path).expect("compiler.fav");
+        let program = crate::frontend::parser::Parser::parse_str(&compiler_src, "compiler.fav")
+            .expect("parse compiler.fav");
+        let compiler_artifact = Arc::new(build_artifact(&program));
+
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let input = tmp.path().join("nested_variant_guard_input.fav");
+        std::fs::write(
+            &input,
+            concat!(
+                "type Inner = | A(Int) | B(Int)\n",
+                "type Outer = | Boxed(Inner) | Empty\n\n",
+                "fn classify(v: Outer) -> Int {\n",
+                "    match v {\n",
+                "        Boxed(A(x)) where x > 10 => x\n",
+                "        Boxed(A(x)) => x + 10\n",
+                "        Boxed(B(x)) => x\n",
+                "        Empty => 0\n",
+                "    }\n",
+                "}\n\n",
+                "fn main() -> Bool {\n",
+                "    classify(Boxed(A(5))) == 15\n",
+                "}\n"
+            ),
+        )
+        .expect("write nested_variant_guard_input.fav");
+
+        let (ok, artifact_bytes, captured, value_dbg) = run_compiler_artifact_on(
+            Arc::clone(&compiler_artifact),
+            input.to_string_lossy().to_string(),
+        );
+        assert!(
+            ok,
+            "nested variant guard compile failed: {value_dbg}\n{captured}"
+        );
+        assert!(
+            !artifact_bytes.is_empty(),
+            "nested variant guard compile produced empty artifact:\n{captured}"
+        );
+
+        let loaded = crate::backend::artifact::FvcArtifact::from_bytes(&artifact_bytes)
+            .expect("nested variant guard output must parse as FvcArtifact");
+        let value =
+            exec_artifact_main(&loaded, None).expect("exec nested variant guard artifact");
+        assert_eq!(
+            value,
+            crate::value::Value::Bool(true),
+            "nested variant guard must fall through to a later arm through the self-hosted artifact"
         );
     }
 

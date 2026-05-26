@@ -16,9 +16,9 @@ pub mod value;
 #[path = "backend/wasm_codegen.rs"]
 pub mod wasm_codegen;
 
+use frontend::parser::Parser;
 use middle::checker::Checker;
 use middle::compiler::compile_program;
-use frontend::parser::Parser;
 
 /// A single diagnostic produced by the type checker.
 #[derive(serde::Serialize)]

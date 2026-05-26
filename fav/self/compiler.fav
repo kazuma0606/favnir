@@ -18,6 +18,7 @@ type Token =
   | TkIf
   | TkElse
   | TkMatch
+  | TkWhere
   | TkBind
   | TkImport
   | TkPublic
@@ -26,6 +27,8 @@ type Token =
   | TkIn
   | TkTest
   | TkBench
+  | TkCollect
+  | TkYield
   | TkPlus
   | TkMinus
   | TkStar
@@ -94,6 +97,8 @@ fn keyword_token(s: String) -> Option<Token> {
     else {
     if s == "match" { Option.some(TkMatch) }
     else {
+    if s == "where" { Option.some(TkWhere) }
+    else {
     if s == "bind" { Option.some(TkBind) }
     else {
     if s == "import" { Option.some(TkImport) }
@@ -110,11 +115,15 @@ fn keyword_token(s: String) -> Option<Token> {
     else {
     if s == "bench" { Option.some(TkBench) }
     else {
+    if s == "collect" { Option.some(TkCollect) }
+    else {
+    if s == "yield" { Option.some(TkYield) }
+    else {
     if s == "true" { Option.some(TkTrue) }
     else {
     if s == "false" { Option.some(TkFalse) }
     else { Option.none() }
-    }}}}}}}}}}}}}}
+    }}}}}}}}}}}}}}}}}
 }
 
 fn scan_string_chars(chars: List<String>, acc: List<String>) -> Result<ScanResult, String> {
@@ -123,7 +132,7 @@ fn scan_string_chars(chars: List<String>, acc: List<String>) -> Result<ScanResul
         Some(c) => {
             bind tail <- List.drop(chars, 1)
             if c == "\"" {
-                bind s <- String.from_chars(acc)
+                bind s <- String.from_chars(List.reverse(acc))
                 Result.ok(ScanResult { tok: TkStr(s), rest: tail })
             } else {
             if c == "\\" {
@@ -142,11 +151,11 @@ fn scan_string_chars(chars: List<String>, acc: List<String>) -> Result<ScanResul
                                    if esc == "\\" { "\\" }
                                    else { esc }
                                    }}}}
-                        scan_string_chars(after_esc, List.push(acc, ch))
+                        scan_string_chars(after_esc, List.concat(List.singleton(ch), acc))
                     }
                 }
             } else {
-                scan_string_chars(tail, List.push(acc, c))
+                scan_string_chars(tail, List.concat(List.singleton(c), acc))
             }}
         }
     }
@@ -240,65 +249,80 @@ fn single_char_token(c: String) -> Option<Token> {
     }}}}}}}}}}}}}}}}}}}
 }
 
-fn scan_op(c: String, tail: List<String>, acc: List<Token>) -> Result<List<Token>, String> {
+fn scan_op(c: String, tail: List<String>) -> Result<ScanResult, String> {
     if c == "-" && next_char_is(tail, ">") {
-        scan(List.drop(tail, 1), List.push(acc, TkArrow))
+        Result.ok(ScanResult { tok: TkArrow, rest: List.drop(tail, 1) })
     } else {
     if c == "<" && next_char_is(tail, "-") {
-        scan(List.drop(tail, 1), List.push(acc, TkBackArrow))
+        Result.ok(ScanResult { tok: TkBackArrow, rest: List.drop(tail, 1) })
     } else {
     if c == "=" && next_char_is(tail, "=") {
-        scan(List.drop(tail, 1), List.push(acc, TkEqEq))
+        Result.ok(ScanResult { tok: TkEqEq, rest: List.drop(tail, 1) })
     } else {
     if c == "=" && next_char_is(tail, ">") {
-        scan(List.drop(tail, 1), List.push(acc, TkFatArrow))
+        Result.ok(ScanResult { tok: TkFatArrow, rest: List.drop(tail, 1) })
     } else {
     if c == "!" && next_char_is(tail, "=") {
-        scan(List.drop(tail, 1), List.push(acc, TkBangEq))
+        Result.ok(ScanResult { tok: TkBangEq, rest: List.drop(tail, 1) })
     } else {
     if c == "<" && next_char_is(tail, "=") {
-        scan(List.drop(tail, 1), List.push(acc, TkLtEq))
+        Result.ok(ScanResult { tok: TkLtEq, rest: List.drop(tail, 1) })
     } else {
     if c == ">" && next_char_is(tail, "=") {
-        scan(List.drop(tail, 1), List.push(acc, TkGtEq))
+        Result.ok(ScanResult { tok: TkGtEq, rest: List.drop(tail, 1) })
     } else {
     if c == "&" && next_char_is(tail, "&") {
-        scan(List.drop(tail, 1), List.push(acc, TkAmpAmp))
+        Result.ok(ScanResult { tok: TkAmpAmp, rest: List.drop(tail, 1) })
     } else {
     if c == "|" && next_char_is(tail, "|") {
-        scan(List.drop(tail, 1), List.push(acc, TkPipePipe))
+        Result.ok(ScanResult { tok: TkPipePipe, rest: List.drop(tail, 1) })
     } else {
     if c == "|" && next_char_is(tail, ">") {
-        scan(List.drop(tail, 1), List.push(acc, TkPipeGt))
+        Result.ok(ScanResult { tok: TkPipeGt, rest: List.drop(tail, 1) })
     } else {
         match single_char_token(c) {
-            Some(t) => scan(tail, List.push(acc, t))
+            Some(t) => Result.ok(ScanResult { tok: t, rest: tail })
             None => Result.err(String.concat("unexpected character: ", c))
         }
     }}}}}}}}}}
 }
 
-fn scan(chars: List<String>, acc: List<Token>) -> Result<List<Token>, String> {
+fn scan_collect(chars: List<String>) -> Bool {
     bind trimmed <- List.drop_while(chars, |c| is_whitespace(c))
     match List.first(trimmed) {
-        None => Result.ok(List.push(acc, TkEof))
+        None => {
+            yield Result.ok(TkEof);
+            true
+        }
         Some(c) => {
             bind tail <- List.drop(trimmed, 1)
             if c == "/" && next_char_is(tail, "/") {
-                scan(skip_line_comment(List.drop(tail, 1)), acc)
+                scan_collect(skip_line_comment(List.drop(tail, 1)))
             } else {
             if c == "\"" {
                 bind str_acc <- List.drop_while(List.singleton(""), |x| true)
-                Result.and_then(
-                    scan_string_chars(tail, str_acc),
-                    |r| scan(r.rest, List.push(acc, r.tok))
-                )
+                match scan_string_chars(tail, str_acc) {
+                    Err(e) => {
+                        yield Result.err(e);
+                        true
+                    }
+                    Ok(r) => {
+                        yield Result.ok(r.tok);
+                        scan_collect(r.rest)
+                    }
+                }
             } else {
             if is_digit(c) {
-                Result.and_then(
-                    scan_number(trimmed),
-                    |r| scan(r.rest, List.push(acc, r.tok))
-                )
+                match scan_number(trimmed) {
+                    Err(e) => {
+                        yield Result.err(e);
+                        true
+                    }
+                    Ok(r) => {
+                        yield Result.ok(r.tok);
+                        scan_collect(r.rest)
+                    }
+                }
             } else {
             if is_alpha(c) {
                 bind word_chars <- List.take_while(trimmed, |ch| is_alnum(ch))
@@ -308,17 +332,56 @@ fn scan(chars: List<String>, acc: List<Token>) -> Result<List<Token>, String> {
                     Some(t) => t
                     None => TkIdent(word)
                 }
-                scan(rest, List.push(acc, tok))
+                yield Result.ok(tok);
+                scan_collect(rest)
             } else {
-                scan_op(c, tail, acc)
-            }}}}}
+                match scan_op(c, tail) {
+                    Err(e) => {
+                        yield Result.err(e);
+                        true
+                    }
+                    Ok(r) => {
+                        yield Result.ok(r.tok);
+                        scan_collect(r.rest)
+                    }
+                }
+            }}}}
+        }
+    }
+}
+
+fn scan_entries(chars: List<String>) -> List<Result<Token, String>> {
+    collect {
+        scan_collect(chars)
+    }
+}
+
+fn first_scan_error(entries: List<Result<Token, String>>) -> Option<String> {
+    match List.first(entries) {
+        None => Option.none()
+        Some(entry) => {
+            match entry {
+                Err(e) => Option.some(e)
+                Ok(_) => first_scan_error(List.drop(entries, 1))
+            }
+        }
+    }
+}
+
+fn unwrap_scan_entry(entry: Result<Token, String>) -> Token {
+    match entry {
+        Ok(tok) => tok
+        Err(_) => TkEof
     }
 }
 
 fn lex(src: String) -> Result<List<Token>, String> {
     bind chars <- String.chars(src)
-    bind init_acc <- List.drop_while(List.singleton(TkEof), |x| true)
-    scan(chars, init_acc)
+    bind entries <- scan_entries(chars)
+    match first_scan_error(entries) {
+        Some(e) => Result.err(e)
+        None => Result.ok(List.map(entries, |entry| unwrap_scan_entry(entry)))
+    }
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -361,9 +424,11 @@ type Expr =
   | ERecordLit(String, Expr)
   | EArgList(Expr, Expr)
   | EArgNil
-  | EArm(Pat, Expr, Expr)
+  | EArm(Pat, Expr, Expr, Expr)
   | EArmNil
   | EBind(String, Expr, Expr)
+  | ECollect(Expr)
+  | EYield(Expr)
   | EField(String, Expr, Expr)
   | EFieldNil
 
@@ -502,6 +567,8 @@ fn token_eq(a: Token, b: Token) -> Bool {
         TkIn => { match b { TkIn => true _ => false } }
         TkTest => { match b { TkTest => true _ => false } }
         TkBench => { match b { TkBench => true _ => false } }
+        TkCollect => { match b { TkCollect => true _ => false } }
+        TkYield => { match b { TkYield => true _ => false } }
         TkPlus => { match b { TkPlus => true _ => false } }
         TkMinus => { match b { TkMinus => true _ => false } }
         TkStar => { match b { TkStar => true _ => false } }
@@ -516,6 +583,7 @@ fn token_eq(a: Token, b: Token) -> Bool {
         TkArrow => { match b { TkArrow => true _ => false } }
         TkBackArrow => { match b { TkBackArrow => true _ => false } }
         TkFatArrow => { match b { TkFatArrow => true _ => false } }
+        TkWhere => { match b { TkWhere => true _ => false } }
         TkPipeGt => { match b { TkPipeGt => true _ => false } }
         TkEq => { match b { TkEq => true _ => false } }
         TkBang => { match b { TkBang => true _ => false } }
@@ -543,7 +611,7 @@ fn token_to_string(t: Token) -> String {
         TkStr(s) => String.concat("str:", s)
         TkIdent(s) => String.concat("ident:", s)
         TkTrue => "true" TkFalse => "false" TkFn => "fn" TkType => "type"
-        TkIf => "if" TkElse => "else" TkMatch => "match" TkBind => "bind"
+        TkIf => "if" TkElse => "else" TkMatch => "match" TkWhere => "where" TkBind => "bind"
         TkImport => "import" TkPublic => "public" TkReturn => "return"
         TkFor => "for" TkIn => "in" TkTest => "test" TkBench => "bench"
         TkPlus => "+" TkMinus => "-" TkStar => "*" TkSlash => "/"
@@ -575,8 +643,10 @@ fn skip_extra_pat_args(toks: List<Token>) -> Result<List<Token>, String> {
     match peek(toks) {
         Some(TkComma) => {
             bind rest1 <- advance(toks)
-            Result.and_then(parse_pat(rest1), |pp|
-            skip_extra_pat_args(pp.rest))
+            match parse_pat(rest1) {
+                Ok(pp) => skip_extra_pat_args(pp.rest)
+                Err(e) => Result.err(e)
+            }
         }
         _ => Result.ok(toks)
     }
@@ -590,10 +660,20 @@ fn parse_pat(toks: List<Token>) -> Result<PatParse, String> {
             match peek(rest1) {
                 Some(TkLParen) => {
                     bind rest2 <- advance(rest1)
-                    Result.and_then(parse_pat(rest2), |inner|
-                    Result.and_then(skip_extra_pat_args(inner.rest), |rest_mid|
-                    Result.and_then(expect_tok(rest_mid, TkRParen), |rest3|
-                    Result.ok(PatParse { pat: PVariantP(name, inner.pat), rest: rest3 }))))
+                    match parse_pat(rest2) {
+                        Err(e) => Result.err(e)
+                        Ok(inner) => {
+                            match skip_extra_pat_args(inner.rest) {
+                                Err(e) => Result.err(e)
+                                Ok(rest_mid) => {
+                                    match expect_tok(rest_mid, TkRParen) {
+                                        Err(e) => Result.err(e)
+                                        Ok(rest3) => Result.ok(PatParse { pat: PVariantP(name, inner.pat), rest: rest3 })
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
                 _ => {
                     if String.contains("ABCDEFGHIJKLMNOPQRSTUVWXYZ", String.slice(name, 0, 1)) {
@@ -610,9 +690,15 @@ fn parse_pat(toks: List<Token>) -> Result<PatParse, String> {
         Some(TkTrue) => Result.ok(PatParse { pat: PBool(true), rest: advance(toks) })
         Some(TkFalse) => Result.ok(PatParse { pat: PBool(false), rest: advance(toks) })
         Some(TkLParen) => {
-            Result.and_then(expect_tok(toks, TkLParen), |rest1|
-            Result.and_then(expect_tok(rest1, TkRParen), |rest2|
-            Result.ok(PatParse { pat: PUnit, rest: rest2 })))
+            match expect_tok(toks, TkLParen) {
+                Err(e) => Result.err(e)
+                Ok(rest1) => {
+                    match expect_tok(rest1, TkRParen) {
+                        Err(e) => Result.err(e)
+                        Ok(rest2) => Result.ok(PatParse { pat: PUnit, rest: rest2 })
+                    }
+                }
+            }
         }
         _ => Result.ok(PatParse { pat: PWild, rest: advance(toks) })
     }
@@ -622,8 +708,10 @@ fn skip_extra_type_args(toks: List<Token>) -> Result<List<Token>, String> {
     match peek(toks) {
         Some(TkComma) => {
             bind rest1 <- advance(toks)
-            Result.and_then(parse_type_expr(rest1), |tp|
-            skip_extra_type_args(tp.rest))
+            match parse_type_expr(rest1) {
+                Ok(tp) => skip_extra_type_args(tp.rest)
+                Err(e) => Result.err(e)
+            }
         }
         _ => Result.ok(toks)
     }
@@ -637,17 +725,29 @@ fn parse_type_expr(toks: List<Token>) -> Result<TypeExprParse, String> {
             match peek(rest1) {
                 Some(TkLt) => {
                     bind rest2 <- advance(rest1)
-                    Result.and_then(parse_type_expr(rest2), |inner|
-                    Result.and_then(skip_extra_type_args(inner.rest), |rest_after|
-                    Result.and_then(expect_tok(rest_after, TkGt), |rest3|
-                    if name == "List" {
-                        Result.ok(TypeExprParse { ty: TeList(inner.ty), rest: rest3 })
-                    } else {
-                    if name == "Option" {
-                        Result.ok(TypeExprParse { ty: TeOption(inner.ty), rest: rest3 })
-                    } else {
-                        Result.ok(TypeExprParse { ty: TeSimple(name), rest: rest3 })
-                    }})))
+                    match parse_type_expr(rest2) {
+                        Err(e) => Result.err(e)
+                        Ok(inner) => {
+                            match skip_extra_type_args(inner.rest) {
+                                Err(e) => Result.err(e)
+                                Ok(rest_after) => {
+                                    match expect_tok(rest_after, TkGt) {
+                                        Err(e) => Result.err(e)
+                                        Ok(rest3) => {
+                                            if name == "List" {
+                                                Result.ok(TypeExprParse { ty: TeList(inner.ty), rest: rest3 })
+                                            } else {
+                                            if name == "Option" {
+                                                Result.ok(TypeExprParse { ty: TeOption(inner.ty), rest: rest3 })
+                                            } else {
+                                                Result.ok(TypeExprParse { ty: TeSimple(name), rest: rest3 })
+                                            }}
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
                 _ => Result.ok(TypeExprParse { ty: TeSimple(name), rest: rest1 })
             }
@@ -656,20 +756,52 @@ fn parse_type_expr(toks: List<Token>) -> Result<TypeExprParse, String> {
     }
 }
 
+fn parse_arm_guard(toks: List<Token>) -> Result<ExprParse, String> {
+    match peek(toks) {
+        Some(TkWhere) => {
+            bind rest1 <- advance(toks)
+            match parse_expr(rest1) {
+                Err(e) => Result.err(e)
+                Ok(guard_p) => Result.ok(ExprParse { expr: guard_p.expr, rest: guard_p.rest })
+            }
+        }
+        _ => Result.ok(ExprParse { expr: ELit(LBool(true)), rest: toks })
+    }
+}
+
 fn parse_arms(toks: List<Token>, acc: Expr) -> Result<ExprParse, String> {
     match peek(toks) {
-        Some(TkRBrace) => Result.ok(ExprParse { expr: acc, rest: toks })
+        Some(TkRBrace) => Result.ok(ExprParse { expr: reverse_match_arms(acc), rest: toks })
         Some(TkEof) => Result.err("unterminated match")
-        _ => Result.and_then(parse_pat(toks), |pat_p|
-            Result.and_then(expect_tok(pat_p.rest, TkFatArrow), |rest1|
-            Result.and_then(parse_expr(rest1), |body_p|
-            parse_arms(
-                match peek(body_p.rest) {
-                    Some(TkComma) => advance(body_p.rest)
-                    _ => body_p.rest
-                },
-                EArm(pat_p.pat, body_p.expr, acc)
-            ))))
+        _ => {
+            match parse_pat(toks) {
+                Err(e) => Result.err(e)
+                Ok(pat_p) => {
+                    match parse_arm_guard(pat_p.rest) {
+                        Err(e) => Result.err(e)
+                        Ok(guard_p) => {
+                            match expect_tok(guard_p.rest, TkFatArrow) {
+                                Err(e) => Result.err(e)
+                                Ok(rest1) => {
+                                    match parse_expr(rest1) {
+                                        Err(e) => Result.err(e)
+                                        Ok(body_p) => {
+                                            parse_arms(
+                                                match peek(body_p.rest) {
+                                                    Some(TkComma) => advance(body_p.rest)
+                                                    _ => body_p.rest
+                                                },
+                                                EArm(pat_p.pat, guard_p.expr, body_p.expr, acc)
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -677,14 +809,20 @@ fn parse_args(toks: List<Token>, acc: Expr) -> Result<ExprParse, String> {
     match peek(toks) {
         Some(TkRParen) => Result.ok(ExprParse { expr: acc, rest: toks })
         Some(TkEof) => Result.err("unterminated argument list")
-        _ => Result.and_then(parse_expr(toks), |arg_p|
-            parse_args(
-                match peek(arg_p.rest) {
-                    Some(TkComma) => advance(arg_p.rest)
-                    _ => arg_p.rest
-                },
-                EArgList(arg_p.expr, acc)
-            ))
+        _ => {
+            match parse_expr(toks) {
+                Err(e) => Result.err(e)
+                Ok(arg_p) => {
+                    parse_args(
+                        match peek(arg_p.rest) {
+                            Some(TkComma) => advance(arg_p.rest)
+                            _ => arg_p.rest
+                        },
+                        EArgList(arg_p.expr, acc)
+                    )
+                }
+            }
+        }
     }
 }
 
@@ -696,15 +834,23 @@ fn parse_fields(toks: List<Token>, acc: Expr) -> Result<ExprParse, String> {
             match peek(toks) {
                 Some(TkIdent(fname)) => {
                     bind rest1 <- advance(toks)
-                    Result.and_then(expect_tok(rest1, TkColon), |rest2|
-                    Result.and_then(parse_expr(rest2), |val_p|
-                    parse_fields(
-                        match peek(val_p.rest) {
-                            Some(TkComma) => advance(val_p.rest)
-                            _ => val_p.rest
-                        },
-                        EField(fname, val_p.expr, acc)
-                    )))
+                    match expect_tok(rest1, TkColon) {
+                        Err(e) => Result.err(e)
+                        Ok(rest2) => {
+                            match parse_expr(rest2) {
+                                Err(e) => Result.err(e)
+                                Ok(val_p) => {
+                                    parse_fields(
+                                        match peek(val_p.rest) {
+                                            Some(TkComma) => advance(val_p.rest)
+                                            _ => val_p.rest
+                                        },
+                                        EField(fname, val_p.expr, acc)
+                                    )
+                                }
+                            }
+                        }
+                    }
                 }
                 _ => Result.err("expected field name")
             }
@@ -714,25 +860,112 @@ fn parse_fields(toks: List<Token>, acc: Expr) -> Result<ExprParse, String> {
 
 fn parse_block_inner(toks: List<Token>) -> Result<ExprParse, String> {
     match peek(toks) {
+        Some(TkRBrace) => Result.ok(ExprParse { expr: ELit(LUnit), rest: toks })
         Some(TkBind) => {
             bind rest1 <- advance(toks)
             match peek(rest1) {
                 Some(TkIdent(vname)) => {
                     bind rest2 <- advance(rest1)
-                    Result.and_then(expect_tok(rest2, TkBackArrow), |rest3|
-                    Result.and_then(parse_expr(rest3), |val_p|
-                    Result.and_then(parse_block_inner(
-                        match peek(val_p.rest) {
-                            Some(TkSemicolon) => advance(val_p.rest)
-                            _ => val_p.rest
+                    match expect_tok(rest2, TkBackArrow) {
+                        Err(e) => Result.err(e)
+                        Ok(rest3) => {
+                            match parse_expr(rest3) {
+                                Err(e) => Result.err(e)
+                                Ok(val_p) => {
+                                    match parse_block_inner(
+                                        match peek(val_p.rest) {
+                                            Some(TkSemicolon) => advance(val_p.rest)
+                                            _ => val_p.rest
+                                        }
+                                    ) {
+                                        Err(e) => Result.err(e)
+                                        Ok(cont_p) => Result.ok(ExprParse {
+                                            expr: EBind(vname, val_p.expr, cont_p.expr)
+                                            rest: cont_p.rest
+                                        })
+                                    }
+                                }
+                            }
                         }
-                    ), |cont_p|
-                    Result.ok(ExprParse {
-                        expr: EBind(vname, val_p.expr, cont_p.expr)
-                        rest: cont_p.rest
-                    }))))
+                    }
                 }
                 _ => Result.err("expected identifier after bind")
+            }
+        }
+        Some(TkFor) => {
+            bind rest1 <- advance(toks)
+            match peek(rest1) {
+                Some(TkIdent(vname)) => {
+                    bind rest2 <- advance(rest1)
+                    match expect_tok(rest2, TkIn) {
+                        Err(e) => Result.err(e)
+                        Ok(rest3) => {
+                            match parse_expr(rest3) {
+                                Err(e) => Result.err(e)
+                                Ok(iter_p) => {
+                                    match expect_tok(iter_p.rest, TkLBrace) {
+                                        Err(e) => Result.err(e)
+                                        Ok(rest4) => {
+                                            match parse_block_inner(rest4) {
+                                                Err(e) => Result.err(e)
+                                                Ok(body_p) => {
+                                                    match expect_tok(body_p.rest, TkRBrace) {
+                                                        Err(e) => Result.err(e)
+                                                        Ok(rest5) => {
+                                                            match parse_block_inner(
+                                                                match peek(rest5) {
+                                                                    Some(TkSemicolon) => advance(rest5)
+                                                                    _ => rest5
+                                                                }
+                                                            ) {
+                                                                Err(e) => Result.err(e)
+                                                                Ok(cont_p) => Result.ok(ExprParse {
+                                                                    expr: EBind(
+                                                                        "$for_ignore",
+                                                                        ECall(
+                                                                            "List",
+                                                                            "map",
+                                                                            EArgList(
+                                                                                ELambda(vname, body_p.expr),
+                                                                                EArgList(
+                                                                                    iter_p.expr,
+                                                                                    EArgNil))),
+                                                                        cont_p.expr)
+                                                                    rest: cont_p.rest
+                                                                })
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                _ => Result.err("expected identifier after for")
+            }
+        }
+        Some(TkYield) => {
+            bind rest1 <- advance(toks)
+            match parse_expr(rest1) {
+                Err(e) => Result.err(e)
+                Ok(yield_p) => {
+                    match peek(yield_p.rest) {
+                        Some(TkSemicolon) => {
+                            match parse_block_inner(advance(yield_p.rest)) {
+                                Err(e) => Result.err(e)
+                                Ok(cont_p) => Result.ok(ExprParse {
+                                    expr: EBlock(EYield(yield_p.expr), cont_p.expr)
+                                    rest: cont_p.rest
+                                })
+                            }
+                        }
+                        _ => Result.ok(ExprParse { expr: EYield(yield_p.expr), rest: yield_p.rest })
+                    }
+                }
             }
         }
         _ => parse_expr(toks)
@@ -767,57 +1000,138 @@ fn parse_primary(toks: List<Token>) -> Result<ExprParse, String> {
             bind rest1 <- advance(toks)
             match peek(rest1) {
                 Some(TkRParen) => Result.ok(ExprParse { expr: ELit(LUnit), rest: advance(rest1) })
-                _ => Result.and_then(parse_expr(rest1), |inner|
-                    Result.and_then(expect_tok(inner.rest, TkRParen), |rest2|
-                    Result.ok(ExprParse { expr: inner.expr, rest: rest2 })))
+                _ => {
+                    match parse_expr(rest1) {
+                        Err(e) => Result.err(e)
+                        Ok(inner) => {
+                            match expect_tok(inner.rest, TkRParen) {
+                                Err(e) => Result.err(e)
+                                Ok(rest2) => Result.ok(ExprParse { expr: inner.expr, rest: rest2 })
+                            }
+                        }
+                    }
+                }
             }
         }
         Some(TkIf) => {
             bind rest1 <- advance(toks)
-            Result.and_then(parse_expr(rest1), |cond_p|
-            Result.and_then(expect_tok(cond_p.rest, TkLBrace), |rest2|
-            Result.and_then(parse_block_inner(rest2), |then_p|
-            Result.and_then(expect_tok(then_p.rest, TkRBrace), |rest3|
-            Result.and_then(expect_tok(rest3, TkElse), |rest4|
-            Result.and_then(expect_tok(rest4, TkLBrace), |rest5|
-            Result.and_then(parse_block_inner(rest5), |else_p|
-            Result.and_then(expect_tok(else_p.rest, TkRBrace), |rest6|
-            Result.ok(ExprParse {
-                expr: EIf(cond_p.expr, then_p.expr, else_p.expr)
-                rest: rest6
-            })))))))))
+            match parse_expr(rest1) {
+                Err(e) => Result.err(e)
+                Ok(cond_p) => {
+                    match expect_tok(cond_p.rest, TkLBrace) {
+                        Err(e) => Result.err(e)
+                        Ok(rest2) => {
+                            match parse_block_inner(rest2) {
+                                Err(e) => Result.err(e)
+                                Ok(then_p) => {
+                                    match expect_tok(then_p.rest, TkRBrace) {
+                                        Err(e) => Result.err(e)
+                                        Ok(rest3) => {
+                                            match expect_tok(rest3, TkElse) {
+                                                Err(e) => Result.err(e)
+                                                Ok(rest4) => {
+                                                    match expect_tok(rest4, TkLBrace) {
+                                                        Err(e) => Result.err(e)
+                                                        Ok(rest5) => {
+                                                            match parse_block_inner(rest5) {
+                                                                Err(e) => Result.err(e)
+                                                                Ok(else_p) => {
+                                                                    match expect_tok(else_p.rest, TkRBrace) {
+                                                                        Err(e) => Result.err(e)
+                                                                        Ok(rest6) => Result.ok(ExprParse {
+                                                                            expr: EIf(cond_p.expr, then_p.expr, else_p.expr)
+                                                                            rest: rest6
+                                                                        })
+                                                                    }
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
         Some(TkMatch) => {
             bind rest1 <- advance(toks)
-            Result.and_then(parse_expr(rest1), |scrut_p|
-            Result.and_then(expect_tok(scrut_p.rest, TkLBrace), |rest2|
-            Result.and_then(parse_arms(rest2, EArmNil), |arms_p|
-            Result.and_then(expect_tok(arms_p.rest, TkRBrace), |rest3|
-            Result.ok(ExprParse {
-                expr: EMatch(scrut_p.expr, arms_p.expr)
-                rest: rest3
-            })))))
+            match parse_expr(rest1) {
+                Err(e) => Result.err(e)
+                Ok(scrut_p) => {
+                    match expect_tok(scrut_p.rest, TkLBrace) {
+                        Err(e) => Result.err(e)
+                        Ok(rest2) => {
+                            match parse_arms(rest2, EArmNil) {
+                                Err(e) => Result.err(e)
+                                Ok(arms_p) => {
+                                    match expect_tok(arms_p.rest, TkRBrace) {
+                                        Err(e) => Result.err(e)
+                                        Ok(rest3) => Result.ok(ExprParse {
+                                            expr: EMatch(scrut_p.expr, arms_p.expr)
+                                            rest: rest3
+                                        })
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
         Some(TkPipe) => {
             bind rest1 <- advance(toks)
             match peek(rest1) {
                 Some(TkIdent(param)) => {
                     bind rest2 <- advance(rest1)
-                    Result.and_then(expect_tok(rest2, TkPipe), |rest3|
-                    Result.and_then(parse_expr(rest3), |body_p|
-                    Result.ok(ExprParse {
-                        expr: ELambda(param, body_p.expr)
-                        rest: body_p.rest
-                    })))
+                    match expect_tok(rest2, TkPipe) {
+                        Err(e) => Result.err(e)
+                        Ok(rest3) => {
+                            match parse_expr(rest3) {
+                                Err(e) => Result.err(e)
+                                Ok(body_p) => Result.ok(ExprParse {
+                                    expr: ELambda(param, body_p.expr)
+                                    rest: body_p.rest
+                                })
+                            }
+                        }
+                    }
                 }
                 _ => Result.err("expected lambda parameter")
             }
         }
         Some(TkLBrace) => {
             bind rest1 <- advance(toks)
-            Result.and_then(parse_block_inner(rest1), |inner|
-            Result.and_then(expect_tok(inner.rest, TkRBrace), |rest2|
-            Result.ok(ExprParse { expr: inner.expr, rest: rest2 })))
+            match parse_block_inner(rest1) {
+                Err(e) => Result.err(e)
+                Ok(inner) => {
+                    match expect_tok(inner.rest, TkRBrace) {
+                        Err(e) => Result.err(e)
+                        Ok(rest2) => Result.ok(ExprParse { expr: inner.expr, rest: rest2 })
+                    }
+                }
+            }
+        }
+        Some(TkCollect) => {
+            bind rest1 <- advance(toks)
+            match expect_tok(rest1, TkLBrace) {
+                Err(e) => Result.err(e)
+                Ok(rest2) => {
+                    match parse_block_inner(rest2) {
+                        Err(e) => Result.err(e)
+                        Ok(inner) => {
+                            match expect_tok(inner.rest, TkRBrace) {
+                                Err(e) => Result.err(e)
+                                Ok(rest3) => Result.ok(ExprParse { expr: ECollect(inner.expr), rest: rest3 })
+                            }
+                        }
+                    }
+                }
+            }
         }
         Some(TkIdent(name)) => {
             bind rest1 <- advance(toks)
@@ -830,9 +1144,15 @@ fn parse_primary(toks: List<Token>) -> Result<ExprParse, String> {
                             match peek(rest3) {
                                 Some(TkLParen) => {
                                     bind rest4 <- advance(rest3)
-                                    Result.and_then(parse_args(rest4, EArgNil), |args_p|
-                                    Result.and_then(expect_tok(args_p.rest, TkRParen), |rest5|
-                                    parse_postfix(ECall(name, fname, args_p.expr), rest5)))
+                                    match parse_args(rest4, EArgNil) {
+                                        Err(e) => Result.err(e)
+                                        Ok(args_p) => {
+                                            match expect_tok(args_p.rest, TkRParen) {
+                                                Err(e) => Result.err(e)
+                                                Ok(rest5) => parse_postfix(ECall(name, fname, args_p.expr), rest5)
+                                            }
+                                        }
+                                    }
                                 }
                                 _ => parse_postfix(EAccess(EVar(name), fname), rest3)
                             }
@@ -842,19 +1162,31 @@ fn parse_primary(toks: List<Token>) -> Result<ExprParse, String> {
                 }
                 Some(TkLParen) => {
                     bind rest2 <- advance(rest1)
-                    Result.and_then(parse_args(rest2, EArgNil), |args_p|
-                    Result.and_then(expect_tok(args_p.rest, TkRParen), |rest3|
-                    parse_postfix(ECall("", name, args_p.expr), rest3)))
+                    match parse_args(rest2, EArgNil) {
+                        Err(e) => Result.err(e)
+                        Ok(args_p) => {
+                            match expect_tok(args_p.rest, TkRParen) {
+                                Err(e) => Result.err(e)
+                                Ok(rest3) => parse_postfix(ECall("", name, args_p.expr), rest3)
+                            }
+                        }
+                    }
                 }
                 Some(TkLBrace) => {
                     if String.contains("ABCDEFGHIJKLMNOPQRSTUVWXYZ", String.slice(name, 0, 1)) {
                         bind rest2 <- advance(rest1)
-                        Result.and_then(parse_fields(rest2, EFieldNil), |fields_p|
-                        Result.and_then(expect_tok(fields_p.rest, TkRBrace), |rest3|
-                        Result.ok(ExprParse {
-                            expr: ERecordLit(name, fields_p.expr)
-                            rest: rest3
-                        })))
+                        match parse_fields(rest2, EFieldNil) {
+                            Err(e) => Result.err(e)
+                            Ok(fields_p) => {
+                                match expect_tok(fields_p.rest, TkRBrace) {
+                                    Err(e) => Result.err(e)
+                                    Ok(rest3) => Result.ok(ExprParse {
+                                        expr: ERecordLit(name, fields_p.expr)
+                                        rest: rest3
+                                    })
+                                }
+                            }
+                        }
                     } else {
                         parse_postfix(EVar(name), rest1)
                     }
@@ -867,103 +1199,144 @@ fn parse_primary(toks: List<Token>) -> Result<ExprParse, String> {
 }
 
 fn parse_mul(toks: List<Token>) -> Result<ExprParse, String> {
-    Result.and_then(parse_primary(toks), |lhs| parse_mul_rest(lhs.expr, lhs.rest))
+    match parse_primary(toks) {
+        Ok(lhs) => parse_mul_rest(lhs.expr, lhs.rest)
+        Err(e) => Result.err(e)
+    }
 }
 
 fn parse_mul_rest(lhs: Expr, toks: List<Token>) -> Result<ExprParse, String> {
     match peek(toks) {
-        Some(TkStar) => Result.and_then(
-            parse_primary(advance(toks)),
-            |rhs| parse_mul_rest(EBinOp(OpMul, lhs, rhs.expr), rhs.rest)
-        )
-        Some(TkSlash) => Result.and_then(
-            parse_primary(advance(toks)),
-            |rhs| parse_mul_rest(EBinOp(OpDiv, lhs, rhs.expr), rhs.rest)
-        )
-        Some(TkPercent) => Result.and_then(
-            parse_primary(advance(toks)),
-            |rhs| parse_mul_rest(EBinOp(OpMod, lhs, rhs.expr), rhs.rest)
-        )
+        Some(TkStar) => {
+            match parse_primary(advance(toks)) {
+                Ok(rhs) => parse_mul_rest(EBinOp(OpMul, lhs, rhs.expr), rhs.rest)
+                Err(e) => Result.err(e)
+            }
+        }
+        Some(TkSlash) => {
+            match parse_primary(advance(toks)) {
+                Ok(rhs) => parse_mul_rest(EBinOp(OpDiv, lhs, rhs.expr), rhs.rest)
+                Err(e) => Result.err(e)
+            }
+        }
+        Some(TkPercent) => {
+            match parse_primary(advance(toks)) {
+                Ok(rhs) => parse_mul_rest(EBinOp(OpMod, lhs, rhs.expr), rhs.rest)
+                Err(e) => Result.err(e)
+            }
+        }
         _ => Result.ok(ExprParse { expr: lhs, rest: toks })
     }
 }
 
 fn parse_add(toks: List<Token>) -> Result<ExprParse, String> {
-    Result.and_then(parse_mul(toks), |lhs| parse_add_rest(lhs.expr, lhs.rest))
+    match parse_mul(toks) {
+        Ok(lhs) => parse_add_rest(lhs.expr, lhs.rest)
+        Err(e) => Result.err(e)
+    }
 }
 
 fn parse_add_rest(lhs: Expr, toks: List<Token>) -> Result<ExprParse, String> {
     match peek(toks) {
-        Some(TkPlus) => Result.and_then(
-            parse_mul(advance(toks)),
-            |rhs| parse_add_rest(EBinOp(OpAdd, lhs, rhs.expr), rhs.rest)
-        )
-        Some(TkMinus) => Result.and_then(
-            parse_mul(advance(toks)),
-            |rhs| parse_add_rest(EBinOp(OpSub, lhs, rhs.expr), rhs.rest)
-        )
+        Some(TkPlus) => {
+            match parse_mul(advance(toks)) {
+                Ok(rhs) => parse_add_rest(EBinOp(OpAdd, lhs, rhs.expr), rhs.rest)
+                Err(e) => Result.err(e)
+            }
+        }
+        Some(TkMinus) => {
+            match parse_mul(advance(toks)) {
+                Ok(rhs) => parse_add_rest(EBinOp(OpSub, lhs, rhs.expr), rhs.rest)
+                Err(e) => Result.err(e)
+            }
+        }
         _ => Result.ok(ExprParse { expr: lhs, rest: toks })
     }
 }
 
 fn parse_cmp(toks: List<Token>) -> Result<ExprParse, String> {
-    Result.and_then(parse_add(toks), |lhs| parse_cmp_rest(lhs.expr, lhs.rest))
+    match parse_add(toks) {
+        Ok(lhs) => parse_cmp_rest(lhs.expr, lhs.rest)
+        Err(e) => Result.err(e)
+    }
 }
 
 fn parse_cmp_rest(lhs: Expr, toks: List<Token>) -> Result<ExprParse, String> {
     match peek(toks) {
-        Some(TkEqEq) => Result.and_then(
-            parse_add(advance(toks)),
-            |rhs| Result.ok(ExprParse { expr: EBinOp(OpEq, lhs, rhs.expr), rest: rhs.rest })
-        )
-        Some(TkBangEq) => Result.and_then(
-            parse_add(advance(toks)),
-            |rhs| Result.ok(ExprParse { expr: EBinOp(OpNeq, lhs, rhs.expr), rest: rhs.rest })
-        )
-        Some(TkLt) => Result.and_then(
-            parse_add(advance(toks)),
-            |rhs| Result.ok(ExprParse { expr: EBinOp(OpLt, lhs, rhs.expr), rest: rhs.rest })
-        )
-        Some(TkGt) => Result.and_then(
-            parse_add(advance(toks)),
-            |rhs| Result.ok(ExprParse { expr: EBinOp(OpGt, lhs, rhs.expr), rest: rhs.rest })
-        )
-        Some(TkLtEq) => Result.and_then(
-            parse_add(advance(toks)),
-            |rhs| Result.ok(ExprParse { expr: EBinOp(OpLtEq, lhs, rhs.expr), rest: rhs.rest })
-        )
-        Some(TkGtEq) => Result.and_then(
-            parse_add(advance(toks)),
-            |rhs| Result.ok(ExprParse { expr: EBinOp(OpGtEq, lhs, rhs.expr), rest: rhs.rest })
-        )
+        Some(TkEqEq) => {
+            match parse_add(advance(toks)) {
+                Ok(rhs) => Result.ok(ExprParse { expr: EBinOp(OpEq, lhs, rhs.expr), rest: rhs.rest })
+                Err(e) => Result.err(e)
+            }
+        }
+        Some(TkBangEq) => {
+            match parse_add(advance(toks)) {
+                Ok(rhs) => Result.ok(ExprParse { expr: EBinOp(OpNeq, lhs, rhs.expr), rest: rhs.rest })
+                Err(e) => Result.err(e)
+            }
+        }
+        Some(TkLt) => {
+            match parse_add(advance(toks)) {
+                Ok(rhs) => Result.ok(ExprParse { expr: EBinOp(OpLt, lhs, rhs.expr), rest: rhs.rest })
+                Err(e) => Result.err(e)
+            }
+        }
+        Some(TkGt) => {
+            match parse_add(advance(toks)) {
+                Ok(rhs) => Result.ok(ExprParse { expr: EBinOp(OpGt, lhs, rhs.expr), rest: rhs.rest })
+                Err(e) => Result.err(e)
+            }
+        }
+        Some(TkLtEq) => {
+            match parse_add(advance(toks)) {
+                Ok(rhs) => Result.ok(ExprParse { expr: EBinOp(OpLtEq, lhs, rhs.expr), rest: rhs.rest })
+                Err(e) => Result.err(e)
+            }
+        }
+        Some(TkGtEq) => {
+            match parse_add(advance(toks)) {
+                Ok(rhs) => Result.ok(ExprParse { expr: EBinOp(OpGtEq, lhs, rhs.expr), rest: rhs.rest })
+                Err(e) => Result.err(e)
+            }
+        }
         _ => Result.ok(ExprParse { expr: lhs, rest: toks })
     }
 }
 
 fn parse_and(toks: List<Token>) -> Result<ExprParse, String> {
-    Result.and_then(parse_cmp(toks), |lhs| parse_and_rest(lhs.expr, lhs.rest))
+    match parse_cmp(toks) {
+        Ok(lhs) => parse_and_rest(lhs.expr, lhs.rest)
+        Err(e) => Result.err(e)
+    }
 }
 
 fn parse_and_rest(lhs: Expr, toks: List<Token>) -> Result<ExprParse, String> {
     match peek(toks) {
-        Some(TkAmpAmp) => Result.and_then(
-            parse_cmp(advance(toks)),
-            |rhs| parse_and_rest(EBinOp(OpAnd, lhs, rhs.expr), rhs.rest)
-        )
+        Some(TkAmpAmp) => {
+            match parse_cmp(advance(toks)) {
+                Ok(rhs) => parse_and_rest(EBinOp(OpAnd, lhs, rhs.expr), rhs.rest)
+                Err(e) => Result.err(e)
+            }
+        }
         _ => Result.ok(ExprParse { expr: lhs, rest: toks })
     }
 }
 
 fn parse_or(toks: List<Token>) -> Result<ExprParse, String> {
-    Result.and_then(parse_and(toks), |lhs| parse_or_rest(lhs.expr, lhs.rest))
+    match parse_and(toks) {
+        Ok(lhs) => parse_or_rest(lhs.expr, lhs.rest)
+        Err(e) => Result.err(e)
+    }
 }
 
 fn parse_or_rest(lhs: Expr, toks: List<Token>) -> Result<ExprParse, String> {
     match peek(toks) {
-        Some(TkPipePipe) => Result.and_then(
-            parse_and(advance(toks)),
-            |rhs| parse_or_rest(EBinOp(OpOr, lhs, rhs.expr), rhs.rest)
-        )
+        Some(TkPipePipe) => {
+            match parse_and(advance(toks)) {
+                Ok(rhs) => parse_or_rest(EBinOp(OpOr, lhs, rhs.expr), rhs.rest)
+                Err(e) => Result.err(e)
+            }
+        }
         _ => Result.ok(ExprParse { expr: lhs, rest: toks })
     }
 }
@@ -976,9 +1349,15 @@ fn parse_param(toks: List<Token>) -> Result<ParamParse, String> {
     match peek(toks) {
         Some(TkIdent(pname)) => {
             bind rest1 <- advance(toks)
-            Result.and_then(expect_tok(rest1, TkColon), |rest2|
-            Result.and_then(parse_type_expr(rest2), |ty_p|
-            Result.ok(ParamParse { param: Param { name: pname, ty: ty_p.ty }, rest: ty_p.rest })))
+            match expect_tok(rest1, TkColon) {
+                Err(e) => Result.err(e)
+                Ok(rest2) => {
+                    match parse_type_expr(rest2) {
+                        Err(e) => Result.err(e)
+                        Ok(ty_p) => Result.ok(ParamParse { param: Param { name: pname, ty: ty_p.ty }, rest: ty_p.rest })
+                    }
+                }
+            }
         }
         _ => Result.err("expected parameter name")
     }
@@ -989,14 +1368,20 @@ fn parse_params_acc(toks: List<Token>, acc: List<Param>) -> Result<ParamsParse, 
         Some(TkRParen) => Result.ok(ParamsParse { params: acc, rest: toks })
         Some(TkRBrace) => Result.ok(ParamsParse { params: acc, rest: toks })
         Some(TkEof) => Result.err("unterminated parameter list")
-        _ => Result.and_then(parse_param(toks), |p|
-            parse_params_acc(
-                match peek(p.rest) {
-                    Some(TkComma) => advance(p.rest)
-                    _ => p.rest
-                },
-                List.push(acc, p.param)
-            ))
+        _ => {
+            match parse_param(toks) {
+                Err(e) => Result.err(e)
+                Ok(p) => {
+                    parse_params_acc(
+                        match peek(p.rest) {
+                            Some(TkComma) => advance(p.rest)
+                            _ => p.rest
+                        },
+                        List.push(acc, p.param)
+                    )
+                }
+            }
+        }
     }
 }
 
@@ -1005,64 +1390,132 @@ fn parse_params(toks: List<Token>) -> Result<ParamsParse, String> {
     parse_params_acc(toks, empty)
 }
 
-fn parse_fn_def(toks: List<Token>, is_pub: Bool) -> Result<FnDefParse, String> {
-    Result.and_then(expect_tok(toks, TkFn), |rest1|
-    match peek(rest1) {
-        Some(TkIdent(fname)) => {
-            bind rest2 <- advance(rest1)
-            Result.and_then(expect_tok(rest2, TkLParen), |rest3|
-            Result.and_then(parse_params(rest3), |params_p|
-            Result.and_then(expect_tok(params_p.rest, TkRParen), |rest4|
-            Result.and_then(expect_tok(rest4, TkArrow), |rest5|
-            Result.and_then(parse_type_expr(rest5), |ret_p|
-            Result.and_then(expect_tok(ret_p.rest, TkLBrace), |rest6|
-            Result.and_then(parse_block_inner(rest6), |body_p|
-            Result.and_then(expect_tok(body_p.rest, TkRBrace), |rest7|
-            Result.ok(FnDefParse {
-                fn_def: FnDef {
-                    is_public: is_pub
-                    name: fname
-                    params: params_p.params
-                    ret: ret_p.ty
-                    body: body_p.expr
+fn parse_fn_def_finish(is_pub: Bool, fname: String, params_p: ParamsParse, ret_p: TypeExprParse, body_p: ExprParse) -> Result<FnDefParse, String> {
+    match expect_tok(body_p.rest, TkRBrace) {
+        Err(e) => Result.err(e)
+        Ok(rest7) => Result.ok(FnDefParse {
+            fn_def: FnDef {
+                is_public: is_pub
+                name: fname
+                params: params_p.params
+                ret: ret_p.ty
+                body: body_p.expr
+            }
+            rest: rest7
+        })
+    }
+}
+
+fn parse_fn_def_after_body(is_pub: Bool, fname: String, params_p: ParamsParse, ret_p: TypeExprParse, rest6: List<Token>) -> Result<FnDefParse, String> {
+    match parse_block_inner(rest6) {
+        Err(e) => Result.err(e)
+        Ok(body_p) => parse_fn_def_finish(is_pub, fname, params_p, ret_p, body_p)
+    }
+}
+
+fn parse_fn_def_after_ret(is_pub: Bool, fname: String, params_p: ParamsParse, ret_p: TypeExprParse) -> Result<FnDefParse, String> {
+    match expect_tok(ret_p.rest, TkLBrace) {
+        Err(e) => Result.err(e)
+        Ok(rest6) => parse_fn_def_after_body(is_pub, fname, params_p, ret_p, rest6)
+    }
+}
+
+fn parse_fn_def_after_params(is_pub: Bool, fname: String, params_p: ParamsParse) -> Result<FnDefParse, String> {
+    match expect_tok(params_p.rest, TkRParen) {
+        Err(e) => Result.err(e)
+        Ok(rest4) => {
+            match expect_tok(rest4, TkArrow) {
+                Err(e) => Result.err(e)
+                Ok(rest5) => {
+                    match parse_type_expr(rest5) {
+                        Err(e) => Result.err(e)
+                        Ok(ret_p) => parse_fn_def_after_ret(is_pub, fname, params_p, ret_p)
+                    }
                 }
-                rest: rest7
-            })))))))))
+            }
         }
-        _ => Result.err("expected function name")
-    })
+    }
+}
+
+fn parse_fn_def_after_name(rest2: List<Token>, is_pub: Bool, fname: String) -> Result<FnDefParse, String> {
+    match expect_tok(rest2, TkLParen) {
+        Err(e) => Result.err(e)
+        Ok(rest3) => {
+            match parse_params(rest3) {
+                Err(e) => Result.err(e)
+                Ok(params_p) => parse_fn_def_after_params(is_pub, fname, params_p)
+            }
+        }
+    }
+}
+
+fn parse_fn_def(toks: List<Token>, is_pub: Bool) -> Result<FnDefParse, String> {
+    match expect_tok(toks, TkFn) {
+        Err(e) => Result.err(e)
+        Ok(rest1) => {
+            match peek(rest1) {
+                Some(TkIdent(fname)) => {
+                    bind rest2 <- advance(rest1)
+                    parse_fn_def_after_name(rest2, is_pub, fname)
+                }
+                _ => Result.err("expected function name")
+            }
+        }
+    }
+}
+
+fn parse_variant_payload(vname: String, rest3: List<Token>) -> Result<VariantDefParse, String> {
+    match parse_type_expr(rest3) {
+        Err(e) => Result.err(e)
+        Ok(ty_p) => {
+            match skip_extra_type_args(ty_p.rest) {
+                Err(e) => Result.err(e)
+                Ok(rest_mid) => {
+                    match expect_tok(rest_mid, TkRParen) {
+                        Err(e) => Result.err(e)
+                        Ok(rest4) => Result.ok(VariantDefParse {
+                            variant: VariantDef { name: vname, payload: Option.some(ty_p.ty) }
+                            rest: rest4
+                        })
+                    }
+                }
+            }
+        }
+    }
 }
 
 fn parse_variant(toks: List<Token>) -> Result<VariantDefParse, String> {
-    Result.and_then(expect_tok(toks, TkPipe), |rest1|
-    match peek(rest1) {
-        Some(TkIdent(vname)) => {
-            bind rest2 <- advance(rest1)
-            match peek(rest2) {
-                Some(TkLParen) => {
-                    bind rest3 <- advance(rest2)
-                    Result.and_then(parse_type_expr(rest3), |ty_p|
-                    Result.and_then(skip_extra_type_args(ty_p.rest), |rest_mid|
-                    Result.and_then(expect_tok(rest_mid, TkRParen), |rest4|
-                    Result.ok(VariantDefParse {
-                        variant: VariantDef { name: vname, payload: Option.some(ty_p.ty) }
-                        rest: rest4
-                    }))))
+    match expect_tok(toks, TkPipe) {
+        Err(e) => Result.err(e)
+        Ok(rest1) => {
+            match peek(rest1) {
+                Some(TkIdent(vname)) => {
+                    bind rest2 <- advance(rest1)
+                    match peek(rest2) {
+                        Some(TkLParen) => {
+                            bind rest3 <- advance(rest2)
+                            parse_variant_payload(vname, rest3)
+                        }
+                        _ => Result.ok(VariantDefParse {
+                            variant: VariantDef { name: vname, payload: Option.none() }
+                            rest: rest2
+                        })
+                    }
                 }
-                _ => Result.ok(VariantDefParse {
-                    variant: VariantDef { name: vname, payload: Option.none() }
-                    rest: rest2
-                })
+                _ => Result.err("expected variant name after |")
             }
         }
-        _ => Result.err("expected variant name after |")
-    })
+    }
 }
 
 fn parse_variants_acc(toks: List<Token>, acc: List<VariantDef>) -> Result<VariantsParse, String> {
     match peek(toks) {
-        Some(TkPipe) => Result.and_then(parse_variant(toks), |v|
-            parse_variants_acc(v.rest, List.push(acc, v.variant)))
+        Some(TkPipe) => {
+            match parse_variant(toks) {
+                Err(e) => Result.err(e)
+                Ok(v) => parse_variants_acc(v.rest, List.push(acc, v.variant))
+            }
+        }
         _ => Result.ok(VariantsParse { variants: acc, rest: toks })
     }
 }
@@ -1072,46 +1525,88 @@ fn parse_variants(toks: List<Token>) -> Result<VariantsParse, String> {
     parse_variants_acc(toks, empty)
 }
 
-fn parse_type_def(toks: List<Token>) -> Result<TypeDefParse, String> {
-    Result.and_then(expect_tok(toks, TkType), |rest1|
-    match peek(rest1) {
-        Some(TkIdent(tname)) => {
-            bind rest2 <- advance(rest1)
-            Result.and_then(expect_tok(rest2, TkEq), |rest3|
-            match peek(rest3) {
-                Some(TkPipe) => {
-                    bind empty_params <- List.take_while(List.singleton(Param { name: "", ty: TeSimple("") }), |v| false)
-                    Result.and_then(parse_variants(rest3), |vs|
-                    Result.ok(TypeDefParse {
-                        type_def: TypeDef {
-                            name: tname
-                            is_record: false
-                            variants: vs.variants
-                            fields: empty_params
-                        }
-                        rest: vs.rest
-                    }))
-                }
-                Some(TkLBrace) => {
-                    bind rest4 <- advance(rest3)
-                    bind empty_variants <- List.take_while(List.singleton(VariantDef { name: "", payload: Option.none() }), |v| false)
-                    Result.and_then(parse_params(rest4), |fields_p|
-                    Result.and_then(expect_tok(fields_p.rest, TkRBrace), |rest5|
-                    Result.ok(TypeDefParse {
-                        type_def: TypeDef {
-                            name: tname
-                            is_record: true
-                            variants: empty_variants
-                            fields: fields_p.params
-                        }
-                        rest: rest5
-                    })))
-                }
-                _ => Result.err("expected = | variants or = { fields } in type definition")
-            })
+fn parse_type_def_variant_branch(tname: String, rest3: List<Token>) -> Result<TypeDefParse, String> {
+    bind empty_params <- List.take_while(List.singleton(Param { name: "", ty: TeSimple("") }), |v| false)
+    match parse_variants(rest3) {
+        Err(e) => Result.err(e)
+        Ok(vs) => Result.ok(TypeDefParse {
+            type_def: TypeDef {
+                name: tname
+                is_record: false
+                variants: vs.variants
+                fields: empty_params
+            }
+            rest: vs.rest
+        })
+    }
+}
+
+fn parse_type_def_record_branch(tname: String, rest3: List<Token>) -> Result<TypeDefParse, String> {
+    bind rest4 <- advance(rest3)
+    bind empty_variants <- List.take_while(List.singleton(VariantDef { name: "", payload: Option.none() }), |v| false)
+    match parse_params(rest4) {
+        Err(e) => Result.err(e)
+        Ok(fields_p) => {
+            match expect_tok(fields_p.rest, TkRBrace) {
+                Err(e) => Result.err(e)
+                Ok(rest5) => Result.ok(TypeDefParse {
+                    type_def: TypeDef {
+                        name: tname
+                        is_record: true
+                        variants: empty_variants
+                        fields: fields_p.params
+                    }
+                    rest: rest5
+                })
+            }
         }
-        _ => Result.err("expected type name")
-    })
+    }
+}
+
+fn parse_type_def_after_eq(tname: String, rest3: List<Token>) -> Result<TypeDefParse, String> {
+    match peek(rest3) {
+        Some(TkPipe) => parse_type_def_variant_branch(tname, rest3)
+        Some(TkLBrace) => parse_type_def_record_branch(tname, rest3)
+        _ => Result.err("expected = | variants or = { fields } in type definition")
+    }
+}
+
+fn parse_type_def(toks: List<Token>) -> Result<TypeDefParse, String> {
+    match expect_tok(toks, TkType) {
+        Err(e) => Result.err(e)
+        Ok(rest1) => {
+            match peek(rest1) {
+                Some(TkIdent(tname)) => {
+                    bind rest2 <- advance(rest1)
+                    match expect_tok(rest2, TkEq) {
+                        Err(e) => Result.err(e)
+                        Ok(rest3) => parse_type_def_after_eq(tname, rest3)
+                    }
+                }
+                _ => Result.err("expected type name")
+            }
+        }
+    }
+}
+
+fn parse_test_item_after_name(tname: String, rest2: List<Token>) -> Result<ItemParse, String> {
+    match expect_tok(rest2, TkLBrace) {
+        Err(e) => Result.err(e)
+        Ok(rest3) => {
+            match parse_block_inner(rest3) {
+                Err(e) => Result.err(e)
+                Ok(body_p) => {
+                    match expect_tok(body_p.rest, TkRBrace) {
+                        Err(e) => Result.err(e)
+                        Ok(rest4) => Result.ok(ItemParse {
+                            item: ITest(TestDef { name: tname, body: body_p.expr })
+                            rest: rest4
+                        })
+                    }
+                }
+            }
+        }
+    }
 }
 
 fn parse_item(toks: List<Token>) -> Result<ItemParse, String> {
@@ -1119,27 +1614,33 @@ fn parse_item(toks: List<Token>) -> Result<ItemParse, String> {
         Some(TkPublic) => {
             bind rest1 <- advance(toks)
             match peek(rest1) {
-                Some(TkFn) => Result.and_then(parse_fn_def(rest1, true), |fd|
-                    Result.ok(ItemParse { item: IFn(fd.fn_def), rest: fd.rest }))
+                Some(TkFn) => {
+                    match parse_fn_def(rest1, true) {
+                        Err(e) => Result.err(e)
+                        Ok(fd) => Result.ok(ItemParse { item: IFn(fd.fn_def), rest: fd.rest })
+                    }
+                }
                 _ => Result.err("expected fn after public")
             }
         }
-        Some(TkFn) => Result.and_then(parse_fn_def(toks, false), |fd|
-            Result.ok(ItemParse { item: IFn(fd.fn_def), rest: fd.rest }))
-        Some(TkType) => Result.and_then(parse_type_def(toks), |td|
-            Result.ok(ItemParse { item: IType(td.type_def), rest: td.rest }))
+        Some(TkFn) => {
+            match parse_fn_def(toks, false) {
+                Err(e) => Result.err(e)
+                Ok(fd) => Result.ok(ItemParse { item: IFn(fd.fn_def), rest: fd.rest })
+            }
+        }
+        Some(TkType) => {
+            match parse_type_def(toks) {
+                Err(e) => Result.err(e)
+                Ok(td) => Result.ok(ItemParse { item: IType(td.type_def), rest: td.rest })
+            }
+        }
         Some(TkTest) => {
             bind rest1 <- advance(toks)
             match peek(rest1) {
                 Some(TkStr(tname)) => {
                     bind rest2 <- advance(rest1)
-                    Result.and_then(expect_tok(rest2, TkLBrace), |rest3|
-                    Result.and_then(parse_block_inner(rest3), |body_p|
-                    Result.and_then(expect_tok(body_p.rest, TkRBrace), |rest4|
-                    Result.ok(ItemParse {
-                        item: ITest(TestDef { name: tname, body: body_p.expr })
-                        rest: rest4
-                    }))))
+                    parse_test_item_after_name(tname, rest2)
                 }
                 _ => Result.err("expected test name string")
             }
@@ -1152,8 +1653,12 @@ fn parse_items_acc(toks: List<Token>, acc: List<Item>) -> Result<ItemsParse, Str
     match peek(toks) {
         Some(TkEof) => Result.ok(ItemsParse { items: acc, rest: toks })
         None => Result.ok(ItemsParse { items: acc, rest: toks })
-        _ => Result.and_then(parse_item(toks), |item_p|
-            parse_items_acc(item_p.rest, List.push(acc, item_p.item)))
+        _ => {
+            match parse_item(toks) {
+                Err(e) => Result.err(e)
+                Ok(item_p) => parse_items_acc(item_p.rest, List.push(acc, item_p.item))
+            }
+        }
     }
 }
 
@@ -1165,8 +1670,10 @@ fn parse_tokens(toks: List<Token>) -> Result<Program, String> {
         ret: TeSimple("")
         body: ELit(LUnit)
     })), |v| false)
-    Result.and_then(parse_items_acc(toks, empty), |items_p|
-    Result.ok(Program { items: items_p.items }))
+    match parse_items_acc(toks, empty) {
+        Err(e) => Result.err(e)
+        Ok(items_p) => Result.ok(Program { items: items_p.items })
+    }
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -1177,11 +1684,12 @@ type Bc =
   | BcConst | BcConstUnit | BcConstTrue | BcConstFalse
   | BcLoadLocal | BcStoreLocal | BcLoadGlobal | BcPop
   | BcDup | BcSwap | BcMatchFail
-  | BcCallNamed | BcReturn
+  | BcCall | BcCallNamed | BcReturn
+  | BcCollectBegin | BcCollectEnd | BcYieldValue
   | BcAdd | BcSub | BcMul | BcDiv
   | BcEq | BcNe | BcLt | BcLe | BcGt | BcGe | BcAnd | BcOr
   | BcJump | BcJumpIfFalse | BcJumpIfNotVariantC
-  | BcGetField | BcBuildRecord | BcMakeClosure | BcGetVariantPayload
+  | BcGetField | BcBuildRecord | BcMakeClosure | BcMakeClosureN | BcGetVariantPayload
 
 type ConstVal =
   | CVInt(Int)
@@ -1199,11 +1707,24 @@ type CodegenCtx = {
     consts: List<ConstVal>
     locals: List<KVPair>
     next_local: Int
+    lifted: List<FnEntry>
+    next_lambda: Int
+    lambda_prefix: String
 }
 
 type ConstAdd = {
     ctx: CodegenCtx
     idx: Int
+}
+
+type PatDispatch = {
+    ctx: CodegenCtx
+    fail_offset: Int
+}
+
+type LambdaNameResult = {
+    name: String
+    next_lambda: Int
 }
 
 // Per-function compiled result
@@ -1256,8 +1777,12 @@ fn bc_byte(op: Bc) -> Int {
         BcStoreLocal => 17
         BcLoadGlobal => 18
         BcPop => 19
+        BcCall => 21
         BcCallNamed => 86
         BcReturn => 22
+        BcCollectBegin => 80
+        BcCollectEnd => 81
+        BcYieldValue => 82
         BcAdd => 32
         BcSub => 33
         BcMul => 34
@@ -1279,6 +1804,7 @@ fn bc_byte(op: Bc) -> Int {
         BcGetField => 64
         BcBuildRecord => 65
         BcMakeClosure => 66
+        BcMakeClosureN => 90
         BcGetVariantPayload => 67
     }
 }
@@ -1299,20 +1825,22 @@ fn new_ctx() -> CodegenCtx {
     bind code <- empty_ints()
     bind consts <- empty_consts()
     bind locals <- empty_kvs()
-    CodegenCtx { code: code, consts: consts, locals: locals, next_local: 0 }
+    bind lifted <- empty_fns()
+    CodegenCtx { code: code, consts: consts, locals: locals, next_local: 0, lifted: lifted, next_lambda: 0, lambda_prefix: "" }
 }
 
 fn ctx_fork(ctx: CodegenCtx) -> CodegenCtx {
     bind fresh <- empty_ints()
-    CodegenCtx { code: fresh, consts: ctx.consts, locals: ctx.locals, next_local: ctx.next_local }
+    CodegenCtx { code: fresh, consts: ctx.consts, locals: ctx.locals, next_local: ctx.next_local, lifted: ctx.lifted, next_lambda: ctx.next_lambda, lambda_prefix: ctx.lambda_prefix }
 }
 
 fn ctx_merge(base: CodegenCtx, sub: CodegenCtx) -> CodegenCtx {
-    CodegenCtx { code: base.code, consts: sub.consts, locals: base.locals, next_local: base.next_local }
+    bind next_local <- if base.next_local > sub.next_local { base.next_local } else { sub.next_local }
+    CodegenCtx { code: base.code, consts: sub.consts, locals: base.locals, next_local: next_local, lifted: sub.lifted, next_lambda: sub.next_lambda, lambda_prefix: sub.lambda_prefix }
 }
 
 fn emit_byte(ctx: CodegenCtx, b: Int) -> CodegenCtx {
-    CodegenCtx { code: List.push(ctx.code, b), consts: ctx.consts, locals: ctx.locals, next_local: ctx.next_local }
+    CodegenCtx { code: List.push(ctx.code, b), consts: ctx.consts, locals: ctx.locals, next_local: ctx.next_local, lifted: ctx.lifted, next_lambda: ctx.next_lambda, lambda_prefix: ctx.lambda_prefix }
 }
 
 fn emit_opcode(ctx: CodegenCtx, op: Bc) -> CodegenCtx {
@@ -1333,13 +1861,25 @@ fn emit_u16(ctx: CodegenCtx, n: Int) -> CodegenCtx {
 }
 
 fn append_code(ctx: CodegenCtx, extra: List<Int>) -> CodegenCtx {
-    CodegenCtx { code: List.concat(ctx.code, extra), consts: ctx.consts, locals: ctx.locals, next_local: ctx.next_local }
+    CodegenCtx { code: List.concat(ctx.code, extra), consts: ctx.consts, locals: ctx.locals, next_local: ctx.next_local, lifted: ctx.lifted, next_lambda: ctx.next_lambda, lambda_prefix: ctx.lambda_prefix }
+}
+
+fn code_op(op: Bc) -> List<Int> {
+    List.singleton(bc_byte(op))
+}
+
+fn code_u16(n: Int) -> List<Int> {
+    List.push(List.singleton(u16_lo(n)), u16_hi(n))
+}
+
+fn code_op_u16(op: Bc, n: Int) -> List<Int> {
+    List.concat(code_op(op), code_u16(n))
 }
 
 fn add_const(ctx: CodegenCtx, cv: ConstVal) -> ConstAdd {
     bind idx <- List.length(ctx.consts)
     bind new_consts <- List.push(ctx.consts, cv)
-    bind new_ctx <- CodegenCtx { code: ctx.code, consts: new_consts, locals: ctx.locals, next_local: ctx.next_local }
+    bind new_ctx <- CodegenCtx { code: ctx.code, consts: new_consts, locals: ctx.locals, next_local: ctx.next_local, lifted: ctx.lifted, next_lambda: ctx.next_lambda, lambda_prefix: ctx.lambda_prefix }
     ConstAdd { ctx: new_ctx, idx: idx }
 }
 
@@ -1360,7 +1900,289 @@ fn local_add(ctx: CodegenCtx, name: String) -> CodegenCtx {
     bind idx_str <- Int.to_string(ctx.next_local)
     bind kv <- KVPair { first: name, second: idx_str }
     bind new_locals <- List.push(ctx.locals, kv)
-    CodegenCtx { code: ctx.code, consts: ctx.consts, locals: new_locals, next_local: ctx.next_local + 1 }
+    CodegenCtx { code: ctx.code, consts: ctx.consts, locals: new_locals, next_local: ctx.next_local + 1, lifted: ctx.lifted, next_lambda: ctx.next_lambda, lambda_prefix: ctx.lambda_prefix }
+}
+
+fn pattern_bind_locals(pat: Pat, ctx: CodegenCtx) -> CodegenCtx {
+    match pat {
+        PVar(name) => local_add(ctx, name)
+        PVariantP(parts) => pattern_bind_locals(parts._1, ctx)
+        _ => ctx
+    }
+}
+
+fn set_lifted(ctx: CodegenCtx, lifted: List<FnEntry>, next_lambda: Int) -> CodegenCtx {
+    CodegenCtx {
+        code: ctx.code
+        consts: ctx.consts
+        locals: ctx.locals
+        next_local: ctx.next_local
+        lifted: lifted
+        next_lambda: next_lambda
+        lambda_prefix: ctx.lambda_prefix
+    }
+}
+
+fn set_lambda_prefix(ctx: CodegenCtx, lambda_prefix: String) -> CodegenCtx {
+    CodegenCtx {
+        code: ctx.code
+        consts: ctx.consts
+        locals: ctx.locals
+        next_local: ctx.next_local
+        lifted: ctx.lifted
+        next_lambda: ctx.next_lambda
+        lambda_prefix: lambda_prefix
+    }
+}
+
+fn local_name_by_slot(locals: List<KVPair>, slot: Int) -> Option<String> {
+    match List.first(locals) {
+        None => Option.none()
+        Some(kv) => {
+            match String.to_int(kv.second) {
+                Some(idx) => {
+                    if idx == slot { Option.some(kv.first) }
+                    else { local_name_by_slot(List.drop(locals, 1), slot) }
+                }
+                None => local_name_by_slot(List.drop(locals, 1), slot)
+            }
+        }
+    }
+}
+
+fn empty_names() -> List<String> {
+    List.drop_while(List.singleton(""), |v| true)
+}
+
+fn name_in_list(names: List<String>, target: String) -> Bool {
+    match List.first(names) {
+        None => false
+        Some(name) => {
+            if name == target { true }
+            else { name_in_list(List.drop(names, 1), target) }
+        }
+    }
+}
+
+fn push_name_unique(names: List<String>, name: String) -> List<String> {
+    if name_in_list(names, name) { names }
+    else { List.push(names, name) }
+}
+
+fn pat_bound_names(pat: Pat, acc: List<String>) -> List<String> {
+    match pat {
+        PVar(name) => List.push(acc, name)
+        PVariantP(parts) => pat_bound_names(parts._1, acc)
+        _ => acc
+    }
+}
+
+fn free_names_arms(arms: Expr, bound: List<String>, acc: List<String>) -> List<String> {
+    match arms {
+        EArm(parts) => {
+            bind pat <- parts._0
+            bind guard <- parts._1
+            bind body <- parts._2
+            bind rest <- parts._3
+            bind arm_bound <- pat_bound_names(pat, bound)
+            bind acc1 <- free_names_expr(guard, arm_bound, acc)
+            bind acc2 <- free_names_expr(body, arm_bound, acc1)
+            free_names_arms(rest, bound, acc2)
+        }
+        EArmNil => acc
+        _ => acc
+    }
+}
+
+fn free_names_expr(expr: Expr, bound: List<String>, acc: List<String>) -> List<String> {
+    match expr {
+        ELit(_) => acc
+        EVar(name) => {
+            if name_in_list(bound, name) { acc }
+            else { List.push(acc, name) }
+        }
+        EBinOp(parts) => {
+            bind left <- parts._1
+            bind right <- parts._2
+            bind acc1 <- free_names_expr(left, bound, acc)
+            free_names_expr(right, bound, acc1)
+        }
+        ECall(parts) => free_names_expr(parts._2, bound, acc)
+        EIf(parts) => {
+            bind cond <- parts._0
+            bind then_e <- parts._1
+            bind else_e <- parts._2
+            bind acc1 <- free_names_expr(cond, bound, acc)
+            bind acc2 <- free_names_expr(then_e, bound, acc1)
+            free_names_expr(else_e, bound, acc2)
+        }
+        EAccess(parts) => free_names_expr(parts._0, bound, acc)
+        ELambda(parts) => {
+            bind param <- parts._0
+            bind body <- parts._1
+            bind inner_bound <- List.push(bound, param)
+            free_names_expr(body, inner_bound, acc)
+        }
+        EMatch(parts) => {
+            bind scrut <- parts._0
+            bind arms <- parts._1
+            bind acc1 <- free_names_expr(scrut, bound, acc)
+            free_names_arms(arms, bound, acc1)
+        }
+        EBlock(parts) => {
+            bind head <- parts._0
+            bind tail <- parts._1
+            bind acc1 <- free_names_expr(head, bound, acc)
+            free_names_expr(tail, bound, acc1)
+        }
+        ERecordLit(parts) => free_names_expr(parts._1, bound, acc)
+        EArgList(parts) => {
+            bind head <- parts._0
+            bind tail <- parts._1
+            bind acc1 <- free_names_expr(head, bound, acc)
+            free_names_expr(tail, bound, acc1)
+        }
+        EArgNil => acc
+        EArm(_parts) => acc
+        EArmNil => acc
+        EBind(name, val_e, cont_e) => {
+            bind acc1 <- free_names_expr(val_e, bound, acc)
+            bind cont_bound <- List.push(bound, name)
+            free_names_expr(cont_e, cont_bound, acc1)
+        }
+        ECollect(body) => free_names_expr(body, bound, acc)
+        EYield(val_e) => free_names_expr(val_e, bound, acc)
+        EField(parts) => {
+            bind val_e <- parts._1
+            bind rest <- parts._2
+            bind acc1 <- free_names_expr(val_e, bound, acc)
+            free_names_expr(rest, bound, acc1)
+        }
+        EFieldNil => acc
+    }
+}
+
+fn collect_capture_names(locals: List<KVPair>, slot: Int, max: Int, acc: List<String>) -> List<String> {
+    if slot >= max { acc }
+    else {
+        match local_name_by_slot(locals, slot) {
+            Some(name) => collect_capture_names(locals, slot + 1, max, List.push(acc, name))
+            None => collect_capture_names(locals, slot + 1, max, acc)
+        }
+    }
+}
+
+fn capture_names(ctx: CodegenCtx) -> List<String> {
+    bind acc <- empty_names()
+    collect_capture_names(ctx.locals, 0, ctx.next_local, acc)
+}
+
+fn collect_used_capture_names(used: List<String>, locals: List<KVPair>, acc: List<String>) -> List<String> {
+    match List.first(used) {
+        None => acc
+        Some(name) => {
+            match local_lookup(locals, name) {
+                Some(_idx) => {
+                    if name_in_list(acc, name) {
+                        collect_used_capture_names(List.drop(used, 1), locals, acc)
+                    } else {
+                        collect_used_capture_names(List.drop(used, 1), locals, List.push(acc, name))
+                    }
+                }
+                None => collect_used_capture_names(List.drop(used, 1), locals, acc)
+            }
+        }
+    }
+}
+
+fn capture_names_for_lambda(param: String, body: Expr, ctx: CodegenCtx) -> List<String> {
+    bind seed <- empty_names()
+    bind bound <- List.singleton(param)
+    bind used <- free_names_expr(body, bound, seed)
+    bind acc <- empty_names()
+    collect_used_capture_names(used, ctx.locals, acc)
+}
+
+fn load_captures(names: List<String>, ctx: CodegenCtx) -> Result<CodegenCtx, String> {
+    match List.first(names) {
+        None => Result.ok(ctx)
+        Some(name) => {
+            match local_lookup(ctx.locals, name) {
+                None => Result.err(String.concat("missing capture local: ", name))
+                Some(slot) => {
+                    bind ctx1 <- emit_opcode(ctx, BcLoadLocal)
+                    bind ctx2 <- emit_u16(ctx1, slot)
+                    load_captures(List.drop(names, 1), ctx2)
+                }
+            }
+        }
+    }
+}
+
+fn locals_from_names(names: List<String>, ctx: CodegenCtx) -> CodegenCtx {
+    match List.first(names) {
+        None => ctx
+        Some(name) => {
+            bind ctx1 <- local_add(ctx, name)
+            locals_from_names(List.drop(names, 1), ctx1)
+        }
+    }
+}
+
+fn new_lambda_name(ctx: CodegenCtx) -> LambdaNameResult {
+    LambdaNameResult {
+        name: String.concat(
+            String.concat(ctx.lambda_prefix, "__lambda_"),
+            Int.to_string(ctx.next_lambda))
+        next_lambda: ctx.next_lambda + 1
+    }
+}
+
+fn result_err_expr(err_name: String) -> Expr {
+    ECall("", "Err", EArgList(EVar(err_name), EArgNil))
+}
+
+fn result_and_then_match_expr(value_expr: Expr, param: String, body: Expr) -> Expr {
+    bind err_name <- "__result_and_then_err"
+    EMatch(
+        value_expr,
+        EArm(
+            PVariantP("Ok", PVar(param)),
+            ELit(LBool(true)),
+            body,
+            EArm(
+                PVariantP("Err", PVar(err_name)),
+                ELit(LBool(true)),
+                result_err_expr(err_name),
+                EArmNil)))
+}
+
+fn compile_result_and_then_expr(args: Expr, ctx: CodegenCtx, env: List<KVPair>) -> Result<CodegenCtx, String> {
+    match args {
+        EArgList(head, tail) => {
+            match head {
+                ELambda(param, body) => {
+                    match tail {
+                        EArgList(value_expr, EArgNil) => compile_expr(
+                            result_and_then_match_expr(value_expr, param, body),
+                            ctx,
+                            env)
+                        _ => Result.err("internal: Result.and_then expects two arguments")
+                    }
+                }
+                _ => {
+                    match tail {
+                        EArgList(ELambda(param, body), EArgNil) => compile_expr(
+                            result_and_then_match_expr(head, param, body),
+                            ctx,
+                            env)
+                        _ => Result.err("internal: Result.and_then expects value and lambda")
+                    }
+                }
+            }
+        }
+        _ => Result.err("internal: Result.and_then expects argument list")
+    }
 }
 
 fn compile_lit(lit: Lit, ctx: CodegenCtx) -> CodegenCtx {
@@ -1409,11 +2231,23 @@ fn binop_bc(op: Op) -> Bc {
 fn count_args(args: Expr) -> Int {
     match args {
         EArgNil => 0
-        EArgList(_, rest) => count_args(rest) + 1
+        EArgList(parts) => count_args(parts._1) + 1
         EFieldNil => 0
-        EField(_, _, rest) => count_args(rest) + 1
+        EField(parts) => count_args(parts._2) + 1
         _ => 0
     }
+}
+
+fn reverse_match_arms_loop(arms: Expr, acc: Expr) -> Expr {
+    match arms {
+        EArm(parts) => reverse_match_arms_loop(parts._3, EArm(parts._0, parts._1, parts._2, acc))
+        EArmNil => acc
+        _ => acc
+    }
+}
+
+fn reverse_match_arms(arms: Expr) -> Expr {
+    reverse_match_arms_loop(arms, EArmNil)
 }
 
 fn compile_if_assemble(ctx_c: CodegenCtx, ctx_t: CodegenCtx, ctx_e: CodegenCtx) -> Result<CodegenCtx, String> {
@@ -1452,17 +2286,324 @@ fn compile_call_cont(full_name: String, argc: Int, ctx1: CodegenCtx) -> Result<C
     Result.ok(emit_u16(ctx3, argc))
 }
 
+fn compile_value_call_cont(slot: Int, argc: Int, ctx1: CodegenCtx) -> Result<CodegenCtx, String> {
+    bind ctx2 <- emit_opcode(ctx1, BcCall)
+    Result.ok(emit_u16(ctx2, argc))
+}
+
 fn compile_access_cont(field: String, ctx1: CodegenCtx) -> Result<CodegenCtx, String> {
     bind ca <- add_const(ctx1, CVName(field))
     bind ctx2 <- emit_opcode(ca.ctx, BcGetField)
     Result.ok(emit_u16(ctx2, ca.idx))
 }
 
-fn compile_record_cont(tname: String, n: Int, ctx1: CodegenCtx) -> Result<CodegenCtx, String> {
-    bind ca <- add_const(ctx1, CVName(tname))
-    bind ctx2 <- emit_opcode(ca.ctx, BcBuildRecord)
-    bind ctx3 <- emit_u16(ctx2, ca.idx)
-    Result.ok(emit_u16(ctx3, n))
+fn compile_record_cont(base_idx: Int, n: Int, ctx1: CodegenCtx) -> Result<CodegenCtx, String> {
+    bind ctx2 <- emit_opcode(ctx1, BcBuildRecord)
+    bind ctx3 <- emit_u16(ctx2, n)
+    Result.ok(emit_u16(ctx3, base_idx))
+}
+
+fn add_field_name_consts(fields: Expr, ctx: CodegenCtx) -> ConstAdd {
+    bind base_idx <- List.length(ctx.consts)
+    bind final_ctx <- add_field_name_consts_loop(fields, ctx)
+    ConstAdd { ctx: final_ctx, idx: base_idx }
+}
+
+fn add_field_name_consts_loop(fields: Expr, ctx: CodegenCtx) -> CodegenCtx {
+    match fields {
+        EField(parts) => {
+            bind fname <- parts._0
+            bind rest <- parts._2
+            bind ctx1 <- add_field_name_consts_loop(rest, ctx)
+            bind ca <- add_const(ctx1, CVName(fname))
+            ca.ctx
+        }
+        EFieldNil => ctx
+        _ => ctx
+    }
+}
+
+fn compile_record_fields(fields: Expr, ctx: CodegenCtx, env: List<KVPair>) -> Result<CodegenCtx, String> {
+    match fields {
+        EField(parts) => {
+            bind val_e <- parts._1
+            bind rest <- parts._2
+            Result.and_then(compile_record_fields(rest, ctx, env), |ctx1|
+            compile_expr(val_e, ctx1, env))
+        }
+        EFieldNil => Result.ok(ctx)
+        _ => Result.err("expected record field list")
+    }
+}
+
+fn compile_record_after_fields(fields: Expr, n: Int, ctx1: CodegenCtx) -> Result<CodegenCtx, String> {
+    bind ca <- add_field_name_consts(fields, ctx1)
+    compile_record_cont(ca.idx, n, ca.ctx)
+}
+
+fn compile_pattern_lit(lit: Lit, ctx: CodegenCtx, success_code: List<Int>, fail_code: List<Int>) -> Result<PatDispatch, String> {
+    bind ctx1 <- emit_opcode(ctx, BcDup)
+    bind ctx2 <- compile_lit(lit, ctx1)
+    bind ctx3 <- emit_opcode(ctx2, BcEq)
+    bind false_off <- List.length(success_code) + 3
+    bind ctx4 <- emit_opcode(ctx3, BcJumpIfFalse)
+    bind ctx5 <- emit_u16(ctx4, false_off)
+    bind ctx6 <- append_code(ctx5, success_code)
+    bind ctx7 <- emit_opcode(ctx6, BcJump)
+    bind ctx8 <- emit_u16(ctx7, List.length(fail_code))
+    bind code <- List.concat(ctx8.code, fail_code)
+    bind fail_offset <- List.length(code) - List.length(fail_code)
+    Result.ok(PatDispatch {
+        ctx: CodegenCtx { code: code, consts: ctx8.consts, locals: ctx.locals, next_local: ctx.next_local, lifted: ctx8.lifted, next_lambda: ctx8.next_lambda, lambda_prefix: ctx.lambda_prefix }
+        fail_offset: fail_offset
+    })
+}
+
+fn normalize_variant_tag(name: String) -> String {
+    if name == "Ok" { "ok" }
+    else { if name == "Err" { "err" }
+    else { if name == "Some" { "some" }
+    else { if name == "None" { "none" }
+    else { name } } } }
+}
+
+fn compile_pattern_dispatch(pat: Pat, ctx: CodegenCtx, success_code: List<Int>, fail_code: List<Int>) -> Result<PatDispatch, String> {
+    match pat {
+        PWild => {
+            Result.ok(PatDispatch {
+                ctx: CodegenCtx { code: success_code, consts: ctx.consts, locals: ctx.locals, next_local: ctx.next_local, lifted: ctx.lifted, next_lambda: ctx.next_lambda, lambda_prefix: ctx.lambda_prefix }
+                fail_offset: List.length(success_code)
+            })
+        }
+        PVar(name) => {
+            match local_lookup(ctx.locals, name) {
+                None => Result.err(String.concat("unknown pattern local: ", name))
+                Some(slot) => {
+                    bind code <- List.concat(
+                        code_op(BcDup),
+                        List.concat(code_op_u16(BcStoreLocal, slot), success_code))
+                    Result.ok(PatDispatch {
+                        ctx: CodegenCtx { code: code, consts: ctx.consts, locals: ctx.locals, next_local: ctx.next_local, lifted: ctx.lifted, next_lambda: ctx.next_lambda, lambda_prefix: ctx.lambda_prefix }
+                        fail_offset: List.length(code)
+                    })
+                }
+            }
+        }
+        PInt(n) => compile_pattern_lit(LInt(n), ctx, success_code, fail_code)
+        PFloat(f) => compile_pattern_lit(LFloat(f), ctx, success_code, fail_code)
+        PStr(s) => compile_pattern_lit(LStr(s), ctx, success_code, fail_code)
+        PBool(b) => compile_pattern_lit(LBool(b), ctx, success_code, fail_code)
+        PUnit => compile_pattern_lit(LUnit, ctx, success_code, fail_code)
+        PVariant(name) => {
+            bind ca <- add_const(ctx, CVName(normalize_variant_tag(name)))
+            bind ctx1 <- emit_opcode(ca.ctx, BcDup)
+            bind success_path <- List.concat(code_op(BcPop), success_code)
+            bind fail_path <- List.concat(code_op(BcPop), fail_code)
+            bind jump_len <- List.length(success_path) + 3
+            bind ctx2 <- emit_opcode(ctx1, BcJumpIfNotVariantC)
+            bind ctx3 <- emit_u16(ctx2, ca.idx)
+            bind ctx4 <- emit_u16(ctx3, jump_len)
+            bind ctx5 <- append_code(ctx4, success_path)
+            bind ctx6 <- emit_opcode(ctx5, BcJump)
+            bind ctx7 <- emit_u16(ctx6, List.length(fail_path))
+            bind code <- List.concat(ctx7.code, fail_path)
+            bind fail_offset <- List.length(code) - List.length(fail_path)
+            Result.ok(PatDispatch {
+                ctx: CodegenCtx { code: code, consts: ctx7.consts, locals: ctx.locals, next_local: ctx.next_local, lifted: ctx7.lifted, next_lambda: ctx7.next_lambda, lambda_prefix: ctx.lambda_prefix }
+                fail_offset: fail_offset
+            })
+        }
+        PVariantP(parts) => {
+            bind name <- parts._0
+            bind inner <- parts._1
+            match inner {
+                PWild => {
+                    compile_pattern_dispatch(PVariant(name), ctx, success_code, fail_code)
+                }
+                PVar(inner_name) => {
+                    match local_lookup(ctx.locals, inner_name) {
+                        None => Result.err(String.concat("unknown pattern local: ", inner_name))
+                        Some(slot) => {
+                            bind ca <- add_const(ctx, CVName(normalize_variant_tag(name)))
+                            bind success_path <- List.concat(
+                                code_op(BcGetVariantPayload),
+                                List.concat(
+                                    code_op(BcDup),
+                                    List.concat(
+                                        code_op_u16(BcStoreLocal, slot),
+                                        List.concat(code_op(BcPop), success_code))))
+                            bind fail_path <- List.concat(code_op(BcPop), fail_code)
+                            bind ctx1 <- emit_opcode(ca.ctx, BcDup)
+                            bind ctx2 <- emit_opcode(ctx1, BcJumpIfNotVariantC)
+                            bind ctx3 <- emit_u16(ctx2, ca.idx)
+                            bind ctx4 <- emit_u16(ctx3, List.length(success_path) + 3)
+                            bind ctx5 <- append_code(ctx4, success_path)
+                            bind ctx6 <- emit_opcode(ctx5, BcJump)
+                            bind ctx7 <- emit_u16(ctx6, List.length(fail_path))
+                            bind code <- List.concat(ctx7.code, fail_path)
+                            bind fail_offset <- List.length(code) - List.length(fail_path)
+                            Result.ok(PatDispatch {
+                                ctx: CodegenCtx { code: code, consts: ctx7.consts, locals: ctx.locals, next_local: ctx.next_local, lifted: ctx7.lifted, next_lambda: ctx7.next_lambda, lambda_prefix: ctx.lambda_prefix }
+                                fail_offset: fail_offset
+                            })
+                        }
+                    }
+                }
+                _ => {
+                    bind inner_success <- List.concat(code_op(BcPop), success_code)
+                    bind outer_fail_path <- List.concat(code_op(BcPop), fail_code)
+                    Result.and_then(
+                        compile_pattern_dispatch(inner, ctx_fork(ctx), inner_success, outer_fail_path),
+                        |inner_pd| {
+                            bind inner_fail_path <- List.drop(inner_pd.ctx.code, inner_pd.fail_offset)
+                            bind ca <- add_const(CodegenCtx {
+                                code: empty_ints()
+                                consts: inner_pd.ctx.consts
+                                locals: ctx.locals
+                                next_local: ctx.next_local
+                                lifted: inner_pd.ctx.lifted
+                                next_lambda: inner_pd.ctx.next_lambda
+                                lambda_prefix: ctx.lambda_prefix
+                            }, CVName(normalize_variant_tag(name)))
+                            bind ctx1 <- emit_opcode(ca.ctx, BcDup)
+                            bind ctx2 <- emit_opcode(ctx1, BcJumpIfNotVariantC)
+                            bind ctx3 <- emit_u16(ctx2, ca.idx)
+                            bind success_path <- List.concat(code_op(BcGetVariantPayload), inner_pd.ctx.code)
+                            bind jump_len <- inner_pd.fail_offset + 1
+                            bind ctx4 <- emit_u16(ctx3, jump_len)
+                            bind code <- List.concat(ctx4.code, success_path)
+                            bind fail_offset <- List.length(code) - List.length(inner_fail_path)
+                            Result.ok(PatDispatch {
+                                ctx: CodegenCtx { code: code, consts: ctx4.consts, locals: ctx.locals, next_local: ctx.next_local, lifted: ctx4.lifted, next_lambda: ctx4.next_lambda, lambda_prefix: ctx.lambda_prefix }
+                                fail_offset: fail_offset
+                            })
+                        })
+                }
+            }
+        }
+    }
+}
+
+fn compile_match_body_finish(body_ctx: CodegenCtx) -> CodegenCtx {
+    bind body1 <- emit_opcode(body_ctx, BcSwap)
+    emit_opcode(body1, BcPop)
+}
+
+fn compile_match_guard_assemble(guard_ctx: CodegenCtx, body_ctx: CodegenCtx, fail_code: List<Int>) -> CodegenCtx {
+    bind body_len <- List.length(body_ctx.code)
+    bind fail_len <- List.length(fail_code)
+    bind ctx1 <- emit_opcode(guard_ctx, BcJumpIfFalse)
+    bind ctx2 <- emit_u16(ctx1, body_len + 3)
+    bind ctx3 <- append_code(ctx2, body_ctx.code)
+    bind ctx4 <- emit_opcode(ctx3, BcJump)
+    bind ctx5 <- emit_u16(ctx4, fail_len)
+    append_code(ctx5, fail_code)
+}
+
+fn compile_match_dispatch_finish(pat: Pat, body2: CodegenCtx, bound_ctx: CodegenCtx, ctx: CodegenCtx, fail_code: List<Int>) -> Result<CodegenCtx, String> {
+    bind next_local <- if body2.next_local > bound_ctx.next_local { body2.next_local } else { bound_ctx.next_local }
+    bind next_local2 <- if next_local > ctx.next_local { next_local } else { ctx.next_local }
+    Result.and_then(
+        compile_pattern_dispatch(
+            pat,
+            CodegenCtx {
+                code: empty_ints()
+                consts: body2.consts
+                locals: bound_ctx.locals
+                next_local: bound_ctx.next_local
+                lifted: body2.lifted
+                next_lambda: body2.next_lambda
+                lambda_prefix: body2.lambda_prefix
+            },
+            body2.code,
+            fail_code),
+        |pat_pd| Result.ok(CodegenCtx {
+            code: pat_pd.ctx.code
+            consts: pat_pd.ctx.consts
+            locals: ctx.locals
+            next_local: next_local2
+            lifted: pat_pd.ctx.lifted
+            next_lambda: pat_pd.ctx.next_lambda
+            lambda_prefix: pat_pd.ctx.lambda_prefix
+        }))
+}
+
+fn compile_match_body_result(pat: Pat, body_ctx: CodegenCtx, bound_ctx: CodegenCtx, ctx: CodegenCtx, fail_code: List<Int>) -> Result<CodegenCtx, String> {
+    bind body2 <- compile_match_body_finish(body_ctx)
+    compile_match_dispatch_finish(pat, body2, bound_ctx, ctx, fail_code)
+}
+
+fn compile_match_guard_result(pat: Pat, guard: Expr, body_ctx: CodegenCtx, bound_ctx: CodegenCtx, ctx: CodegenCtx, fail_code: List<Int>, env: List<KVPair>) -> Result<CodegenCtx, String> {
+    bind body2 <- compile_match_body_finish(body_ctx)
+    Result.and_then(
+        compile_expr(
+            guard,
+            CodegenCtx {
+                code: empty_ints()
+                consts: body2.consts
+                locals: bound_ctx.locals
+                next_local: bound_ctx.next_local
+                lifted: body2.lifted
+                next_lambda: body2.next_lambda
+                lambda_prefix: body2.lambda_prefix
+            },
+            env),
+        |guard_ctx| {
+            bind next_local <- if body2.next_local > guard_ctx.next_local { body2.next_local } else { guard_ctx.next_local }
+            bind guard_body <- compile_match_guard_assemble(
+                guard_ctx,
+                CodegenCtx {
+                    code: body2.code
+                    consts: guard_ctx.consts
+                    locals: body2.locals
+                    next_local: next_local
+                    lifted: guard_ctx.lifted
+                    next_lambda: guard_ctx.next_lambda
+                    lambda_prefix: guard_ctx.lambda_prefix
+                },
+                fail_code)
+            compile_match_dispatch_finish(pat, guard_body, bound_ctx, ctx, fail_code)
+        })
+}
+
+fn compile_match_arm(pat: Pat, guard: Expr, body: Expr, fail_code: List<Int>, ctx: CodegenCtx, env: List<KVPair>) -> Result<CodegenCtx, String> {
+    bind bound_ctx <- pattern_bind_locals(pat, ctx)
+    bind body_seed <- ctx_fork(bound_ctx)
+    Result.and_then(compile_expr(body, body_seed, env), |body_ctx|
+    match guard {
+        ELit(LBool(true)) => compile_match_body_result(pat, body_ctx, bound_ctx, ctx, fail_code)
+        _ => compile_match_guard_result(pat, guard, body_ctx, bound_ctx, ctx, fail_code, env)
+    })
+}
+
+fn compile_match_arms(arms: Expr, ctx: CodegenCtx, env: List<KVPair>) -> Result<CodegenCtx, String> {
+    match arms {
+        EArm(parts) => {
+            bind pat <- parts._0
+            bind guard <- parts._1
+            bind body <- parts._2
+            bind rest <- parts._3
+            bind fail_seed <- ctx_fork(ctx)
+            Result.and_then(compile_match_arms(rest, fail_seed, env), |fail_ctx|
+            compile_match_arm(
+                pat,
+                guard,
+                body,
+                fail_ctx.code,
+                CodegenCtx {
+                    code: empty_ints()
+                    consts: fail_ctx.consts
+                    locals: ctx.locals
+                    next_local: fail_ctx.next_local
+                    lifted: fail_ctx.lifted
+                    next_lambda: fail_ctx.next_lambda
+                    lambda_prefix: fail_ctx.lambda_prefix
+                },
+                env))
+        }
+        EArmNil => Result.ok(emit_opcode(ctx, BcMatchFail))
+        _ => Result.err("expected match arms")
+    }
 }
 
 fn compile_bind_cont(name: String, cont_e: Expr, ctx1: CodegenCtx, env: List<KVPair>) -> Result<CodegenCtx, String> {
@@ -1473,23 +2614,73 @@ fn compile_bind_cont(name: String, cont_e: Expr, ctx1: CodegenCtx, env: List<KVP
     compile_expr(cont_e, ctx4, env)
 }
 
-fn compile_lambda_cont(outer_ctx: CodegenCtx, body_ctx: CodegenCtx) -> Result<CodegenCtx, String> {
-    bind merged <- ctx_merge(outer_ctx, body_ctx)
-    bind ctx1 <- emit_opcode(merged, BcMakeClosure)
-    Result.ok(ctx1)
+fn lambda_fn_entry(name: String, arity: Int, body_ctx: CodegenCtx) -> FnEntry {
+    FnEntry {
+        fname: name
+        arity: arity
+        local_count: body_ctx.next_local
+        code: body_ctx.code
+        consts: body_ctx.consts
+        ret_ty: ""
+        is_public: false
+    }
+}
+
+fn append_fn_entries(left: List<FnEntry>, right: List<FnEntry>) -> List<FnEntry> {
+    List.concat(left, right)
+}
+
+fn compile_lambda_after_captures(ctx_caps: CodegenCtx, captures: List<String>, lambda_name: String, body_ctx: CodegenCtx) -> Result<CodegenCtx, String> {
+    bind ca <- add_const(ctx_caps, CVName(lambda_name))
+    bind ctx1 <- emit_opcode(ca.ctx, BcMakeClosureN)
+    bind ctx2 <- emit_u16(ctx1, ca.idx)
+    bind ctx3 <- emit_u16(ctx2, List.length(captures))
+    bind lifted1 <- List.push(ctx3.lifted, lambda_fn_entry(lambda_name, List.length(captures) + 1, body_ctx))
+    Result.ok(set_lifted(ctx3, lifted1, ctx3.next_lambda))
+}
+
+fn compile_lambda_cont(outer_ctx: CodegenCtx, captures: List<String>, lambda_name: String, body_ctx: CodegenCtx) -> Result<CodegenCtx, String> {
+    bind outer1 <- set_lifted(outer_ctx, append_fn_entries(outer_ctx.lifted, body_ctx.lifted), body_ctx.next_lambda)
+    Result.and_then(load_captures(captures, outer1), |ctx_caps|
+    compile_lambda_after_captures(ctx_caps, captures, lambda_name, body_ctx))
+}
+
+fn compile_lambda_body_result(body_ctx0: CodegenCtx, ctx: CodegenCtx, captures: List<String>, lambda_name: String, next_lambda: Int) -> Result<CodegenCtx, String> {
+    bind body_ret <- emit_opcode(body_ctx0, BcReturn)
+    bind body_ctx <- set_lifted(body_ret, body_ret.lifted, body_ret.next_lambda)
+    bind outer_seed <- set_lifted(ctx, ctx.lifted, next_lambda)
+    compile_lambda_cont(outer_seed, captures, lambda_name, body_ctx)
+}
+
+fn compile_lambda_expr(param: String, body: Expr, ctx: CodegenCtx, env: List<KVPair>) -> Result<CodegenCtx, String> {
+    bind captures <- capture_names_for_lambda(param, body, ctx)
+    bind name_pair <- new_lambda_name(ctx)
+    bind lambda_name <- name_pair.name
+    bind next_lambda <- name_pair.next_lambda
+    bind lambda_seed0 <- new_ctx()
+    bind lambda_seed1a <- set_lambda_prefix(lambda_seed0, ctx.lambda_prefix)
+    bind lambda_seed1 <- set_lifted(lambda_seed1a, empty_fns(), next_lambda)
+    bind lambda_seed2 <- locals_from_names(captures, lambda_seed1)
+    bind lambda_seed3 <- local_add(lambda_seed2, param)
+    Result.and_then(compile_expr(body, lambda_seed3, env), |body_ctx0|
+    compile_lambda_body_result(body_ctx0, ctx, captures, lambda_name, next_lambda))
 }
 
 fn compile_args(args: Expr, ctx: CodegenCtx, env: List<KVPair>) -> Result<CodegenCtx, String> {
     match args {
         EArgNil => Result.ok(ctx)
-        EArgList(head, tail) => {
-            Result.and_then(compile_expr(head, ctx, env), |ctx1|
-            compile_args(tail, ctx1, env))
+        EArgList(parts) => {
+            bind head <- parts._0
+            bind tail <- parts._1
+            Result.and_then(compile_args(tail, ctx, env), |ctx1|
+            compile_expr(head, ctx1, env))
         }
         EFieldNil => Result.ok(ctx)
-        EField(_fname, val_e, tail) => {
-            Result.and_then(compile_expr(val_e, ctx, env), |ctx1|
-            compile_args(tail, ctx1, env))
+        EField(parts) => {
+            bind val_e <- parts._1
+            bind tail <- parts._2
+            Result.and_then(compile_args(tail, ctx, env), |ctx1|
+            compile_expr(val_e, ctx1, env))
         }
         _ => Result.err("expected argument list")
     }
@@ -1511,53 +2702,118 @@ fn compile_expr(expr: Expr, ctx: CodegenCtx, env: List<KVPair>) -> Result<Codege
                 }
             }
         }
-        EBinOp(op, left, right) => {
+        EBinOp(parts) => {
+            bind op <- parts._0
+            bind left <- parts._1
+            bind right <- parts._2
             Result.and_then(compile_expr(left, ctx, env), |ctx1|
             Result.and_then(compile_expr(right, ctx1, env), |ctx2|
             Result.ok(emit_opcode(ctx2, binop_bc(op)))))
         }
-        EIf(cond, then_e, else_e) => compile_if(cond, then_e, else_e, ctx, env)
-        EBind(name, val_e, cont_e) => {
+        EIf(parts) => compile_if(parts._0, parts._1, parts._2, ctx, env)
+        EBind(parts) => {
+            bind name <- parts._0
+            bind val_e <- parts._1
+            bind cont_e <- parts._2
             Result.and_then(compile_expr(val_e, ctx, env), |ctx1|
             compile_bind_cont(name, cont_e, ctx1, env))
         }
-        ECall(ns, fname, args) => {
-            bind argc <- count_args(args)
-            bind full_name <- String.concat(ns, String.concat(".", fname))
-            Result.and_then(compile_args(args, ctx, env), |ctx1|
-            compile_call_cont(full_name, argc, ctx1))
+        ECollect(body) => {
+            bind ctx1 <- emit_opcode(ctx, BcCollectBegin)
+            Result.and_then(compile_expr(body, ctx1, env), |ctx2|
+            Result.ok(emit_opcode(ctx2, BcCollectEnd)))
         }
-        EAccess(obj, field) => {
+        EYield(val_e) => {
+            Result.and_then(compile_expr(val_e, ctx, env), |ctx1|
+            Result.ok(emit_opcode(ctx1, BcYieldValue)))
+        }
+        ECall(parts) => {
+            bind ns <- parts._0
+            bind fname <- parts._1
+            bind args <- parts._2
+            if ns == "Result" && fname == "and_then" {
+                compile_result_and_then_expr(args, ctx, env)
+            } else {
+                bind argc <- count_args(args)
+                if ns == "" {
+                    match local_lookup(ctx.locals, fname) {
+                        Some(slot) => {
+                            Result.and_then(compile_expr(EVar(fname), ctx, env), |ctx1|
+                            Result.and_then(compile_args(args, ctx1, env), |ctx2|
+                            compile_value_call_cont(slot, argc, ctx2)))
+                        }
+                        None => {
+                            Result.and_then(compile_args(args, ctx, env), |ctx1|
+                            compile_call_cont(fname, argc, ctx1))
+                        }
+                    }
+                } else {
+                    bind full_name <- String.concat(ns, String.concat(".", fname))
+                    Result.and_then(compile_args(args, ctx, env), |ctx1|
+                    compile_call_cont(full_name, argc, ctx1))
+                }
+            }
+        }
+        EAccess(parts) => {
+            bind obj <- parts._0
+            bind field <- parts._1
             Result.and_then(compile_expr(obj, ctx, env), |ctx1|
             compile_access_cont(field, ctx1))
         }
-        EBlock(head, tail) => {
+        EBlock(parts) => {
+            bind head <- parts._0
+            bind tail <- parts._1
             Result.and_then(compile_expr(head, ctx, env), |ctx1|
             compile_expr(tail, ctx1, env))
         }
-        EMatch(scrut, _arms) => {
+        EMatch(parts) => {
+            bind scrut <- parts._0
+            bind arms <- parts._1
             Result.and_then(compile_expr(scrut, ctx, env), |ctx1|
-            Result.ok(ctx1))
+            Result.and_then(
+                compile_match_arms(
+                    arms,
+                    CodegenCtx {
+                        code: empty_ints()
+                        consts: ctx1.consts
+                        locals: ctx1.locals
+                        next_local: ctx1.next_local
+                        lifted: ctx1.lifted
+                        next_lambda: ctx1.next_lambda
+                        lambda_prefix: ctx1.lambda_prefix
+                    },
+                    env),
+                |arms_ctx| Result.ok(CodegenCtx {
+                    code: List.concat(ctx1.code, arms_ctx.code)
+                    consts: arms_ctx.consts
+                    locals: ctx1.locals
+                    next_local: arms_ctx.next_local
+                    lifted: arms_ctx.lifted
+                    next_lambda: arms_ctx.next_lambda
+                    lambda_prefix: arms_ctx.lambda_prefix
+                })))
         }
-        ELambda(param, body) => {
-            bind sub_ctx <- ctx_fork(ctx)
-            bind sub_with_param <- local_add(sub_ctx, param)
-            Result.and_then(compile_expr(body, sub_with_param, env), |body_ctx|
-            compile_lambda_cont(ctx, body_ctx))
+        ELambda(parts) => {
+            compile_lambda_expr(parts._0, parts._1, ctx, env)
         }
-        ERecordLit(tname, fields) => {
+        ERecordLit(parts) => {
+            bind fields <- parts._1
             bind n <- count_args(fields)
-            Result.and_then(compile_args(fields, ctx, env), |ctx1|
-            compile_record_cont(tname, n, ctx1))
+            Result.and_then(compile_record_fields(fields, ctx, env), |ctx1|
+            compile_record_after_fields(fields, n, ctx1))
         }
-        EArgList(head, tail) => {
+        EArgList(parts) => {
+            bind head <- parts._0
+            bind tail <- parts._1
             Result.and_then(compile_expr(head, ctx, env), |ctx1|
             compile_expr(tail, ctx1, env))
         }
         EArgNil => Result.ok(ctx)
-        EArm(_pat, _body, rest) => compile_expr(rest, ctx, env)
+        EArm(parts) => compile_expr(parts._3, ctx, env)
         EArmNil => Result.ok(ctx)
-        EField(_fname, val_e, rest) => {
+        EField(parts) => {
+            bind val_e <- parts._1
+            bind rest <- parts._2
             Result.and_then(compile_expr(val_e, ctx, env), |ctx1|
             compile_expr(rest, ctx1, env))
         }
@@ -1602,13 +2858,15 @@ fn make_fn_entry(fn_def: FnDef, ctx_ret: CodegenCtx, arity: Int, ret_ty: String)
     }
 }
 
-fn finish_fn_def(fn_def: FnDef, ctx_done: CodegenCtx, arity: Int, ret_ty: String) -> Result<FnEntry, String> {
+fn finish_fn_def(fn_def: FnDef, ctx_done: CodegenCtx, arity: Int, ret_ty: String) -> Result<List<FnEntry>, String> {
     bind ctx_ret <- emit_opcode(ctx_done, BcReturn)
-    Result.ok(make_fn_entry(fn_def, ctx_ret, arity, ret_ty))
+    bind entries <- List.push(ctx_ret.lifted, make_fn_entry(fn_def, ctx_ret, arity, ret_ty))
+    Result.ok(entries)
 }
 
-fn compile_fn_def(fn_def: FnDef) -> Result<FnEntry, String> {
-    bind ctx0 <- new_ctx()
+fn compile_fn_def(fn_def: FnDef) -> Result<List<FnEntry>, String> {
+    bind ctx0a <- new_ctx()
+    bind ctx0 <- set_lambda_prefix(ctx0a, String.concat(fn_def.name, "$"))
     bind ctx1 <- compile_params(fn_def.params, ctx0)
     bind env0 <- empty_env()
     bind arity <- List.length(fn_def.params)
@@ -1637,8 +2895,8 @@ fn compile_items(items: List<Item>, acc: List<FnEntry>) -> Result<List<FnEntry>,
         Some(item) => {
             match item {
                 IFn(fn_def) => {
-                    Result.and_then(compile_fn_def(fn_def), |entry|
-                    compile_items(List.drop(items, 1), List.push(acc, entry)))
+                    Result.and_then(compile_fn_def(fn_def), |entries|
+                    compile_items(List.drop(items, 1), List.concat(acc, entries)))
                 }
                 IType(_) => compile_items(List.drop(items, 1), acc)
                 ITest(_) => compile_items(List.drop(items, 1), acc)
@@ -1833,11 +3091,27 @@ fn serialize_artifact(artifact: Artifact) -> List<Int> {
 // PIPELINE
 // ════════════════════════════════════════════════════════════════════════════
 
-fn compile_file(path: String) -> Result<Artifact, String> {
-    Result.and_then(IO.read_file_raw(path), |src|
-    Result.and_then(lex(src), |toks|
+fn compile_file_after_prog(prog: Program) -> Result<Artifact, String> {
+    bind _ <- IO.println("phase:compile")
+    compile(prog)
+}
+
+fn compile_file_after_parse(toks: List<Token>) -> Result<Artifact, String> {
+    bind _ <- IO.println("phase:parse")
     Result.and_then(parse_tokens(toks), |prog|
-    compile(prog))))
+    compile_file_after_prog(prog))
+}
+
+fn compile_file_after_lex(src: String) -> Result<Artifact, String> {
+    bind _ <- IO.println("phase:lex")
+    Result.and_then(lex(src), |toks|
+    compile_file_after_parse(toks))
+}
+
+fn compile_file(path: String) -> Result<Artifact, String> {
+    bind _ <- IO.println("phase:read")
+    Result.and_then(IO.read_file_raw(path), |src|
+    compile_file_after_lex(src))
 }
 
 fn print_bytes(bytes: List<Int>) -> Bool {

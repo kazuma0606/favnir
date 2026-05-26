@@ -7,20 +7,20 @@ use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone)]
 pub struct PackageMeta {
-    pub name:        String,
-    pub version:     String,
+    pub name: String,
+    pub version: String,
     pub description: String,
-    pub author:      String,
-    pub license:     String,
-    pub published:   String,
-    pub files:       Vec<String>,
+    pub author: String,
+    pub license: String,
+    pub published: String,
+    pub files: Vec<String>,
 }
 
 // ── PackageEntry ──────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone)]
 pub struct PackageEntry {
-    pub name:     String,
+    pub name: String,
     pub versions: Vec<String>, // descending semver order
 }
 
@@ -33,7 +33,9 @@ pub struct Registry {
 impl Registry {
     /// Create a registry using the default path (~/.fav/registry/).
     pub fn new() -> Self {
-        Self { root: registry_root() }
+        Self {
+            root: registry_root(),
+        }
     }
 
     /// Create a registry with an explicit root (for testing).
@@ -84,7 +86,9 @@ impl Registry {
             .filter_map(|e| {
                 let name = e.file_name().into_string().ok()?;
                 let versions = self.installed_versions(&name);
-                if versions.is_empty() { return None; }
+                if versions.is_empty() {
+                    return None;
+                }
                 Some(PackageEntry { name, versions })
             })
             .collect();
@@ -94,7 +98,10 @@ impl Registry {
 
     /// Search packages by name substring.
     pub fn search(&self, query: &str) -> Vec<PackageEntry> {
-        self.list().into_iter().filter(|e| e.name.contains(query)).collect()
+        self.list()
+            .into_iter()
+            .filter(|e| e.name.contains(query))
+            .collect()
     }
 
     /// Get metadata for the latest version of a package.
@@ -120,8 +127,7 @@ impl Registry {
 
         // Write fav.pkg.toml
         let toml_content = format_pkg_toml(meta);
-        std::fs::write(dest.join("fav.pkg.toml"), toml_content)
-            .map_err(|e| e.to_string())?;
+        std::fs::write(dest.join("fav.pkg.toml"), toml_content).map_err(|e| e.to_string())?;
 
         // Write rune files
         for (rel_path, content) in rune_files {
@@ -138,7 +144,10 @@ impl Registry {
     pub fn install(&self, name: &str, version: &str, dest_runes_dir: &Path) -> Result<(), String> {
         let src = self.root.join(name).join(version).join("runes").join(name);
         if !src.exists() {
-            return Err(format!("{}@{} not found in registry (expected {:?})", name, version, src));
+            return Err(format!(
+                "{}@{} not found in registry (expected {:?})",
+                name, version, src
+            ));
         }
         let dest_pkg = dest_runes_dir.join(name);
         copy_dir_all(&src, &dest_pkg).map_err(|e| e.to_string())?;
@@ -191,29 +200,37 @@ fn format_pkg_toml(meta: &PackageMeta) -> String {
 }
 
 fn parse_pkg_toml(content: &str, name_fallback: &str, version_fallback: &str) -> PackageMeta {
-    let mut name        = name_fallback.to_string();
-    let mut version     = version_fallback.to_string();
+    let mut name = name_fallback.to_string();
+    let mut version = version_fallback.to_string();
     let mut description = String::new();
-    let mut author      = String::new();
-    let mut license     = String::new();
-    let mut published   = String::new();
+    let mut author = String::new();
+    let mut license = String::new();
+    let mut published = String::new();
     for line in content.lines() {
         let trimmed = line.trim();
         if let Some((k, v)) = trimmed.split_once('=') {
             let k = k.trim();
             let v = v.trim().trim_matches('"');
             match k {
-                "name"        => name        = v.to_string(),
-                "version"     => version     = v.to_string(),
+                "name" => name = v.to_string(),
+                "version" => version = v.to_string(),
                 "description" => description = v.to_string(),
-                "author"      => author      = v.to_string(),
-                "license"     => license     = v.to_string(),
-                "published"   => published   = v.to_string(),
+                "author" => author = v.to_string(),
+                "license" => license = v.to_string(),
+                "published" => published = v.to_string(),
                 _ => {}
             }
         }
     }
-    PackageMeta { name, version, description, author, license, published, files: vec![] }
+    PackageMeta {
+        name,
+        version,
+        description,
+        author,
+        license,
+        published,
+        files: vec![],
+    }
 }
 
 fn collect_rune_files(runes_dir: &Path) -> Vec<String> {
@@ -286,13 +303,13 @@ mod tests {
 
     fn make_pkg(reg: &Registry, name: &str, version: &str, files: &[(&str, &str)]) {
         let meta = PackageMeta {
-            name:        name.to_string(),
-            version:     version.to_string(),
+            name: name.to_string(),
+            version: version.to_string(),
             description: format!("{} rune", name),
-            author:      "test".to_string(),
-            license:     "MIT".to_string(),
-            published:   "2026-05-17T00:00:00Z".to_string(),
-            files:       vec![],
+            author: "test".to_string(),
+            license: "MIT".to_string(),
+            published: "2026-05-17T00:00:00Z".to_string(),
+            files: vec![],
         };
         let rune_files: Vec<(String, Vec<u8>)> = files
             .iter()
@@ -305,15 +322,31 @@ mod tests {
     fn registry_resolve_exact_version() {
         let tmp = TempDir::new().unwrap();
         let reg = Registry::with_root(tmp.path().to_path_buf());
-        make_pkg(&reg, "csv", "1.0.0", &[("runes/csv/csv.fav", "// csv rune")]);
-        make_pkg(&reg, "csv", "1.1.0", &[("runes/csv/csv.fav", "// csv rune v2")]);
+        make_pkg(
+            &reg,
+            "csv",
+            "1.0.0",
+            &[("runes/csv/csv.fav", "// csv rune")],
+        );
+        make_pkg(
+            &reg,
+            "csv",
+            "1.1.0",
+            &[("runes/csv/csv.fav", "// csv rune v2")],
+        );
         // Both versions should be installed
         let found = reg.installed_versions("csv");
         assert!(found.contains(&"1.0.0".to_string()));
         assert!(found.contains(&"1.1.0".to_string()));
         // Exact resolve picks the precise version requested
-        assert_eq!(reg.resolve_version("csv", "1.0.0"), Some("1.0.0".to_string()));
-        assert_eq!(reg.resolve_version("csv", "1.1.0"), Some("1.1.0".to_string()));
+        assert_eq!(
+            reg.resolve_version("csv", "1.0.0"),
+            Some("1.0.0".to_string())
+        );
+        assert_eq!(
+            reg.resolve_version("csv", "1.1.0"),
+            Some("1.1.0".to_string())
+        );
         // Non-existent version returns None
         assert_eq!(reg.resolve_version("csv", "9.9.9"), None);
     }
@@ -326,7 +359,10 @@ mod tests {
         make_pkg(&reg, "http", "1.2.0", &[("runes/http/http.fav", "")]);
         make_pkg(&reg, "http", "2.0.0", &[("runes/http/http.fav", "")]);
         // ^1.0.0 should pick latest 1.x
-        assert_eq!(reg.resolve_version("http", "^1.0.0"), Some("1.2.0".to_string()));
+        assert_eq!(
+            reg.resolve_version("http", "^1.0.0"),
+            Some("1.2.0".to_string())
+        );
     }
 
     #[test]
@@ -337,7 +373,10 @@ mod tests {
         make_pkg(&reg, "auth", "0.3.5", &[("runes/auth/auth.fav", "")]);
         make_pkg(&reg, "auth", "0.4.0", &[("runes/auth/auth.fav", "")]);
         // ^0.3.0 must NOT pick 0.4.0
-        assert_eq!(reg.resolve_version("auth", "^0.3.0"), Some("0.3.5".to_string()));
+        assert_eq!(
+            reg.resolve_version("auth", "^0.3.0"),
+            Some("0.3.5".to_string())
+        );
     }
 
     #[test]
@@ -363,10 +402,15 @@ mod tests {
     fn registry_publish_creates_files() {
         let tmp = TempDir::new().unwrap();
         let reg = Registry::with_root(tmp.path().to_path_buf());
-        make_pkg(&reg, "csv", "1.0.0", &[
-            ("runes/csv/parse.fav", "// parse"),
-            ("runes/csv/csv.fav",   "// barrel"),
-        ]);
+        make_pkg(
+            &reg,
+            "csv",
+            "1.0.0",
+            &[
+                ("runes/csv/parse.fav", "// parse"),
+                ("runes/csv/csv.fav", "// barrel"),
+            ],
+        );
         assert!(tmp.path().join("csv/1.0.0/fav.pkg.toml").exists());
         assert!(tmp.path().join("csv/1.0.0/runes/csv/parse.fav").exists());
         assert!(tmp.path().join("csv/1.0.0/runes/csv/csv.fav").exists());
@@ -376,9 +420,12 @@ mod tests {
     fn registry_install_copies_rune() {
         let tmp = TempDir::new().unwrap();
         let reg = Registry::with_root(tmp.path().to_path_buf());
-        make_pkg(&reg, "csv", "1.0.0", &[
-            ("runes/csv/csv.fav", "// csv barrel"),
-        ]);
+        make_pkg(
+            &reg,
+            "csv",
+            "1.0.0",
+            &[("runes/csv/csv.fav", "// csv barrel")],
+        );
         let dest_runes = tmp.path().join("project/runes");
         std::fs::create_dir_all(&dest_runes).unwrap();
         reg.install("csv", "1.0.0", &dest_runes).unwrap();
@@ -389,7 +436,7 @@ mod tests {
     fn registry_list_returns_all() {
         let tmp = TempDir::new().unwrap();
         let reg = Registry::with_root(tmp.path().to_path_buf());
-        make_pkg(&reg, "csv",   "1.0.0", &[("runes/csv/csv.fav",     "")]);
+        make_pkg(&reg, "csv", "1.0.0", &[("runes/csv/csv.fav", "")]);
         make_pkg(&reg, "email", "0.3.1", &[("runes/email/email.fav", "")]);
         let list = reg.list();
         assert_eq!(list.len(), 2);

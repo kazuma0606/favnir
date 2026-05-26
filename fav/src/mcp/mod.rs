@@ -112,11 +112,7 @@ impl<W: Write> McpServer<W> {
         self.send_result(id, serde_json::json!({ "resources": resource_list() }));
     }
 
-    fn handle_resources_read(
-        &mut self,
-        id: Option<serde_json::Value>,
-        params: &serde_json::Value,
-    ) {
+    fn handle_resources_read(&mut self, id: Option<serde_json::Value>, params: &serde_json::Value) {
         let uri = match params.get("uri").and_then(|v| v.as_str()) {
             Some(u) => u.to_string(),
             None => {
@@ -261,7 +257,7 @@ fn tool_favnir_run(source: &str) -> serde_json::Value {
             return tool_error(format!(
                 "Parse error at line {}: {}",
                 e.span.line, e.message
-            ))
+            ));
         }
         Ok(p) => p,
     };
@@ -292,7 +288,7 @@ fn tool_favnir_test(source: &str) -> serde_json::Value {
             return tool_error(format!(
                 "Parse error at line {}: {}",
                 e.span.line, e.message
-            ))
+            ));
         }
         Ok(p) => p,
     };
@@ -363,13 +359,28 @@ fn tool_favnir_test(source: &str) -> serde_json::Value {
 
 fn tool_favnir_list_runes() -> serde_json::Value {
     let runes = [
-        ("db",   "connect, query, execute, query_one, paginate, batch_insert, with_transaction, savepoint, release_savepoint, rollback_to_savepoint, applied_migrations, mark_applied"),
-        ("http", "get, post, put, delete, patch, get_with_headers, post_with_headers"),
+        (
+            "db",
+            "connect, query, execute, query_one, paginate, batch_insert, with_transaction, savepoint, release_savepoint, rollback_to_savepoint, applied_migrations, mark_applied",
+        ),
+        (
+            "http",
+            "get, post, put, delete, patch, get_with_headers, post_with_headers",
+        ),
         ("grpc", "call, call_typed"),
-        ("gen",  "one, list, hint_one, hint_list, to_csv, to_parquet, load_into, edge_cases, set_yaml"),
-        ("auth", "jwt_sign, jwt_verify, jwt_decode, hmac_sha256, sha256, get_mode"),
-        ("env",  "get, get_opt, require, get_int, require_int, get_bool, require_bool, load_dotenv, load_dotenv_or_ignore"),
-        ("log",  "info, warn, error, debug, metric, map_to_json"),
+        (
+            "gen",
+            "one, list, hint_one, hint_list, to_csv, to_parquet, load_into, edge_cases, set_yaml",
+        ),
+        (
+            "auth",
+            "jwt_sign, jwt_verify, jwt_decode, hmac_sha256, sha256, get_mode",
+        ),
+        (
+            "env",
+            "get, get_opt, require, get_int, require_int, get_bool, require_bool, load_dotenv, load_dotenv_or_ignore",
+        ),
+        ("log", "info, warn, error, debug, metric, map_to_json"),
     ];
     let text = runes
         .iter()
@@ -390,7 +401,8 @@ fn tool_favnir_rune_docs(rune: &str) -> serde_json::Value {
         }
     }
     let docs = match rune {
-        "db" => "## db Rune\n\n\
+        "db" => {
+            "## db Rune\n\n\
 ### connect(url: String) -> Result<DbHandle, String> !Io\n\
 Establish a database connection.\n\n\
 ### query(conn: DbHandle, sql: String, params: List<String>) -> Result<List<Map<String,String>>, String> !Io\n\
@@ -400,8 +412,10 @@ Execute an INSERT/UPDATE/DELETE.\n\n\
 ### query_one(conn: DbHandle, sql: String, params: List<String>) -> Result<Map<String,String>, String> !Io\n\
 Execute a SELECT expecting exactly one row.\n\n\
 ### with_transaction(conn: DbHandle, f: (DbHandle) -> Result<A, String>) -> Result<A, String> !Io\n\
-Run f inside a transaction; rollback on error.",
-        "http" => "## http Rune\n\n\
+Run f inside a transaction; rollback on error."
+        }
+        "http" => {
+            "## http Rune\n\n\
 ### get(url: String) -> Result<String, String> !Io\n\
 HTTP GET request.\n\n\
 ### post(url: String, body: String) -> Result<String, String> !Io\n\
@@ -409,8 +423,10 @@ HTTP POST request.\n\n\
 ### put(url: String, body: String) -> Result<String, String> !Io\n\
 HTTP PUT request.\n\n\
 ### delete(url: String) -> Result<String, String> !Io\n\
-HTTP DELETE request.",
-        "log" => "## log Rune\n\n\
+HTTP DELETE request."
+        }
+        "log" => {
+            "## log Rune\n\n\
 ### info(code: String, message: String, ctx: Map<String,String>) -> Unit !Io\n\
 Log at INFO level.\n\n\
 ### warn(code: String, message: String, ctx: Map<String,String>) -> Unit !Io\n\
@@ -418,8 +434,10 @@ Log at WARN level.\n\n\
 ### error(code: String, message: String, ctx: Map<String,String>) -> Unit !Io\n\
 Log at ERROR level.\n\n\
 ### metric(name: String, value: Float, unit: String) -> Unit !Io\n\
-Emit a metric data point.",
-        "gen" => "## gen Rune\n\n\
+Emit a metric data point."
+        }
+        "gen" => {
+            "## gen Rune\n\n\
 ### one(type_name: String) -> Result<Map<String,String>, String>\n\
 Generate one synthetic record for the given type.\n\n\
 ### list(type_name: String, n: Int) -> Result<List<Map<String,String>>, String>\n\
@@ -427,15 +445,19 @@ Generate N synthetic records.\n\n\
 ### hint_one(type_name: String) -> Result<Map<String,String>, String>\n\
 Generate a hint-based realistic record using field name patterns.\n\n\
 ### to_csv(path: String, rows: List<Map<String,String>>) -> Result<Unit, String> !File\n\
-Write rows to a CSV file.",
-        "auth" => "## auth Rune\n\n\
+Write rows to a CSV file."
+        }
+        "auth" => {
+            "## auth Rune\n\n\
 ### jwt_sign(payload: Map<String,String>, secret: String) -> Result<String, String> !Auth\n\
 Sign a JWT token.\n\n\
 ### jwt_verify(token: String, secret: String) -> Result<Bool, String> !Auth\n\
 Verify a JWT token signature.\n\n\
 ### hmac_sha256(message: String, secret: String) -> String !Auth\n\
-Compute HMAC-SHA256 hex digest.",
-        "env" => "## env Rune\n\n\
+Compute HMAC-SHA256 hex digest."
+        }
+        "env" => {
+            "## env Rune\n\n\
 ### get(key: String, default: String) -> String !Env\n\
 Get an environment variable with a fallback default.\n\n\
 ### require(key: String) -> Result<String, String> !Env\n\
@@ -443,17 +465,20 @@ Get an environment variable or return an error.\n\n\
 ### get_int(key: String, default: Int) -> Int !Env\n\
 Get an env var parsed as Int.\n\n\
 ### load_dotenv(path: String) -> Result<Unit, String> !Env\n\
-Load a .env file into the environment.",
-        "grpc" => "## grpc Rune\n\n\
+Load a .env file into the environment."
+        }
+        "grpc" => {
+            "## grpc Rune\n\n\
 ### call(host: String, method: String, payload: Map<String,String>) -> Result<Map<String,String>, String> !Io\n\
 Call a gRPC method with a Map payload.\n\n\
 ### call_typed(response_type: String, host: String, method: String, payload: Map<String,String>) -> Result<Map<String,String>, String> !Io\n\
-Call a gRPC method and decode the response using the given type name.",
+Call a gRPC method and decode the response using the given type name."
+        }
         other => {
             return tool_error(format!(
                 "Unknown rune: {}. Available: db, http, grpc, gen, auth, env, log",
                 other
-            ))
+            ));
         }
     };
     tool_text(docs)
@@ -585,11 +610,7 @@ fn collect_project_fav_files() -> Vec<String> {
     files
 }
 
-fn collect_fav_files_rec(
-    dir: &std::path::Path,
-    root: &std::path::Path,
-    out: &mut Vec<String>,
-) {
+fn collect_fav_files_rec(dir: &std::path::Path, root: &std::path::Path, out: &mut Vec<String>) {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return;
     };
@@ -755,7 +776,9 @@ mod tests {
             params: serde_json::json!({ "name": name, "arguments": args }),
         });
         let resp = last_response(&out);
-        resp.get("result").cloned().unwrap_or(serde_json::Value::Null)
+        resp.get("result")
+            .cloned()
+            .unwrap_or(serde_json::Value::Null)
     }
 
     #[test]
@@ -768,7 +791,10 @@ mod tests {
             params: serde_json::json!({}),
         });
         let text = String::from_utf8(out).unwrap();
-        assert!(text.contains("\"protocolVersion\":\"2024-11-05\""), "got: {text}");
+        assert!(
+            text.contains("\"protocolVersion\":\"2024-11-05\""),
+            "got: {text}"
+        );
         assert!(text.contains("\"tools\":{}"), "got: {text}");
         assert!(text.contains("favnir-mcp"), "got: {text}");
     }
@@ -840,7 +866,10 @@ mod tests {
         let result = call_tool("favnir_test", serde_json::json!({ "source": src }));
         let text = result["content"][0]["text"].as_str().unwrap_or("");
         assert!(text.contains("passed"), "got: {text}");
-        assert!(result.get("isError").is_none(), "unexpected isError, text: {text}");
+        assert!(
+            result.get("isError").is_none(),
+            "unexpected isError, text: {text}"
+        );
     }
 
     #[test]
@@ -865,10 +894,7 @@ mod tests {
 
     #[test]
     fn tools_call_favnir_rune_docs_db() {
-        let result = call_tool(
-            "favnir_rune_docs",
-            serde_json::json!({ "rune": "db" }),
-        );
+        let result = call_tool("favnir_rune_docs", serde_json::json!({ "rune": "db" }));
         let text = result["content"][0]["text"].as_str().unwrap_or("");
         assert!(text.contains("db"), "got: {text}");
         assert!(result.get("isError").is_none());

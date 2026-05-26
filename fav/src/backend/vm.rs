@@ -8,9 +8,7 @@ use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use bytes::Bytes;
 use chrono::Utc;
 use hmac::{Hmac, Mac};
-use jsonwebtoken::{
-    Algorithm, DecodingKey, EncodingKey, Header, Validation, decode, encode,
-};
+use jsonwebtoken::{Algorithm, DecodingKey, EncodingKey, Header, Validation, decode, encode};
 use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
 use parquet::arrow::arrow_writer::ArrowWriter;
 use rand::RngCore;
@@ -138,8 +136,7 @@ impl AwsConfig {
                 .or_else(|_| std::env::var("AWS_DEFAULT_REGION"))
                 .unwrap_or_else(|_| "us-east-1".to_string()),
             endpoint_url: std::env::var("AWS_ENDPOINT_URL").ok(),
-            access_key: std::env::var("AWS_ACCESS_KEY_ID")
-                .unwrap_or_else(|_| "test".to_string()),
+            access_key: std::env::var("AWS_ACCESS_KEY_ID").unwrap_or_else(|_| "test".to_string()),
             secret_key: std::env::var("AWS_SECRET_ACCESS_KEY")
                 .unwrap_or_else(|_| "test".to_string()),
             session_token: std::env::var("AWS_SESSION_TOKEN").ok(),
@@ -185,8 +182,8 @@ fn hmac_sha256_bytes(key: &[u8], data: &[u8]) -> Vec<u8> {
 
 fn sigv4_signing_key(secret: &str, date: &str, region: &str, service: &str) -> Vec<u8> {
     let k_secret = format!("AWS4{}", secret);
-    let k_date    = hmac_sha256_bytes(k_secret.as_bytes(), date.as_bytes());
-    let k_region  = hmac_sha256_bytes(&k_date, region.as_bytes());
+    let k_date = hmac_sha256_bytes(k_secret.as_bytes(), date.as_bytes());
+    let k_region = hmac_sha256_bytes(&k_date, region.as_bytes());
     let k_service = hmac_sha256_bytes(&k_region, service.as_bytes());
     hmac_sha256_bytes(&k_service, b"aws4_request")
 }
@@ -198,7 +195,13 @@ pub struct SignedHeaders {
     pub x_amz_security_token: Option<String>,
 }
 
-fn sigv4_sign(config: &AwsConfig, service: &str, method: &str, url: &str, body: &[u8]) -> SignedHeaders {
+fn sigv4_sign(
+    config: &AwsConfig,
+    service: &str,
+    method: &str,
+    url: &str,
+    body: &[u8],
+) -> SignedHeaders {
     let body_hash = sha256_hex_bytes(body);
     // LocalStack: skip real signing
     if config.endpoint_url.is_some() {
@@ -210,7 +213,7 @@ fn sigv4_sign(config: &AwsConfig, service: &str, method: &str, url: &str, body: 
         };
     }
     let now = chrono::Utc::now();
-    let amz_date   = now.format("%Y%m%dT%H%M%SZ").to_string();
+    let amz_date = now.format("%Y%m%dT%H%M%SZ").to_string();
     let date_stamp = now.format("%Y%m%d").to_string();
     // Parse host from URL (simple extraction)
     let host = url
@@ -220,13 +223,24 @@ fn sigv4_sign(config: &AwsConfig, service: &str, method: &str, url: &str, body: 
         .next()
         .unwrap_or("");
     let path = {
-        let after_scheme = if url.contains("://") { url.splitn(2, "://").nth(1).unwrap_or(url) } else { url };
-        let after_host = after_scheme.splitn(2, '/').nth(1).map(|s| format!("/{}", s)).unwrap_or_else(|| "/".to_string());
+        let after_scheme = if url.contains("://") {
+            url.splitn(2, "://").nth(1).unwrap_or(url)
+        } else {
+            url
+        };
+        let after_host = after_scheme
+            .splitn(2, '/')
+            .nth(1)
+            .map(|s| format!("/{}", s))
+            .unwrap_or_else(|| "/".to_string());
         after_host
     };
     let (path_only, query) = if path.contains('?') {
         let mut it = path.splitn(2, '?');
-        (it.next().unwrap_or("/").to_string(), it.next().unwrap_or("").to_string())
+        (
+            it.next().unwrap_or("/").to_string(),
+            it.next().unwrap_or("").to_string(),
+        )
     } else {
         (path, String::new())
     };
@@ -254,11 +268,15 @@ fn sigv4_sign(config: &AwsConfig, service: &str, method: &str, url: &str, body: 
     let credential_scope = format!("{}/{}/{}/aws4_request", date_stamp, config.region, service);
     let string_to_sign = format!(
         "AWS4-HMAC-SHA256\n{}\n{}\n{}",
-        amz_date, credential_scope, sha256_hex_bytes(canonical_request.as_bytes())
+        amz_date,
+        credential_scope,
+        sha256_hex_bytes(canonical_request.as_bytes())
     );
     let signing_key = sigv4_signing_key(&config.secret_key, &date_stamp, &config.region, service);
     let signature: String = hmac_sha256_bytes(&signing_key, string_to_sign.as_bytes())
-        .iter().map(|b| format!("{:02x}", b)).collect();
+        .iter()
+        .map(|b| format!("{:02x}", b))
+        .collect();
     let authorization = format!(
         "AWS4-HMAC-SHA256 Credential={}/{}, SignedHeaders={}, Signature={}",
         config.access_key, credential_scope, signed_headers, signature
@@ -272,7 +290,13 @@ fn sigv4_sign(config: &AwsConfig, service: &str, method: &str, url: &str, body: 
 }
 
 /// Public wrapper for driver.rs (deploy command).
-pub fn sigv4_sign_pub(config: &AwsConfig, service: &str, method: &str, url: &str, body: &[u8]) -> SignedHeaders {
+pub fn sigv4_sign_pub(
+    config: &AwsConfig,
+    service: &str,
+    method: &str,
+    url: &str,
+    body: &[u8],
+) -> SignedHeaders {
     sigv4_sign(config, service, method, url, body)
 }
 
@@ -300,9 +324,7 @@ fn aws_put(config: &AwsConfig, service: &str, url: &str, body: &str) -> Result<(
     if let Some(token) = &h.x_amz_security_token {
         req = req.set("x-amz-security-token", token);
     }
-    req.send_string(body)
-        .map(|_| ())
-        .map_err(|e| e.to_string())
+    req.send_string(body).map(|_| ()).map_err(|e| e.to_string())
 }
 
 fn aws_get_bytes(config: &AwsConfig, service: &str, url: &str) -> Result<Vec<u8>, String> {
@@ -315,13 +337,13 @@ fn aws_get_bytes(config: &AwsConfig, service: &str, url: &str) -> Result<Vec<u8>
     if let Some(token) = &h.x_amz_security_token {
         req = req.set("x-amz-security-token", token);
     }
-    req.call()
-        .map_err(|e| e.to_string())
-        .and_then(|r| {
-            let mut buf = Vec::new();
-            r.into_reader().read_to_end(&mut buf).map_err(|e| e.to_string())?;
-            Ok(buf)
-        })
+    req.call().map_err(|e| e.to_string()).and_then(|r| {
+        let mut buf = Vec::new();
+        r.into_reader()
+            .read_to_end(&mut buf)
+            .map_err(|e| e.to_string())?;
+        Ok(buf)
+    })
 }
 
 fn aws_put_bytes(config: &AwsConfig, service: &str, url: &str, body: &[u8]) -> Result<(), String> {
@@ -334,9 +356,7 @@ fn aws_put_bytes(config: &AwsConfig, service: &str, url: &str, body: &[u8]) -> R
     if let Some(token) = &h.x_amz_security_token {
         req = req.set("x-amz-security-token", token);
     }
-    req.send_bytes(body)
-        .map(|_| ())
-        .map_err(|e| e.to_string())
+    req.send_bytes(body).map(|_| ()).map_err(|e| e.to_string())
 }
 
 fn aws_delete(config: &AwsConfig, service: &str, url: &str) -> Result<(), String> {
@@ -362,7 +382,9 @@ fn aws_head(config: &AwsConfig, service: &str, url: &str) -> Result<bool, String
         .set("x-amz-content-sha256", &h.x_amz_content_sha256);
     let builder = if let Some(token) = &h.x_amz_security_token {
         builder.set("x-amz-security-token", token)
-    } else { builder };
+    } else {
+        builder
+    };
     match builder.call() {
         Ok(_) => Ok(true),
         Err(ureq::Error::Status(404, _)) => Ok(false),
@@ -370,7 +392,14 @@ fn aws_head(config: &AwsConfig, service: &str, url: &str) -> Result<bool, String
     }
 }
 
-fn aws_post(config: &AwsConfig, service: &str, url: &str, body: &str, content_type: &str, amz_target: Option<&str>) -> Result<String, String> {
+fn aws_post(
+    config: &AwsConfig,
+    service: &str,
+    url: &str,
+    body: &str,
+    content_type: &str,
+    amz_target: Option<&str>,
+) -> Result<String, String> {
     let body_bytes = body.as_bytes();
     let h = sigv4_sign(config, service, "POST", url, body_bytes);
     let mut req = ureq::post(url)
@@ -390,7 +419,7 @@ fn aws_post(config: &AwsConfig, service: &str, url: &str, body: &str, content_ty
 }
 
 fn extract_xml_tags(xml: &str, tag: &str) -> Vec<String> {
-    let open  = format!("<{}>", tag);
+    let open = format!("<{}>", tag);
     let close = format!("</{}>", tag);
     let mut results = Vec::new();
     let mut start = 0;
@@ -410,8 +439,8 @@ fn map_to_dynamo_item(m: &std::collections::HashMap<String, VMValue>) -> String 
     let mut parts = Vec::new();
     for (k, v) in m {
         let s = match v {
-            VMValue::Str(s)  => s.clone(),
-            VMValue::Int(n)  => n.to_string(),
+            VMValue::Str(s) => s.clone(),
+            VMValue::Int(n) => n.to_string(),
             VMValue::Bool(b) => b.to_string(),
             other => format!("{:?}", other),
         };
@@ -425,7 +454,11 @@ fn dynamo_item_to_map(item: &serde_json::Value) -> std::collections::HashMap<Str
     let mut m = std::collections::HashMap::new();
     if let serde_json::Value::Object(obj) = item {
         for (k, v) in obj {
-            let s = v.get("S").and_then(|s| s.as_str()).unwrap_or("").to_string();
+            let s = v
+                .get("S")
+                .and_then(|s| s.as_str())
+                .unwrap_or("")
+                .to_string();
             m.insert(k.clone(), VMValue::Str(s));
         }
     }
@@ -435,10 +468,13 @@ fn dynamo_item_to_map(item: &serde_json::Value) -> std::collections::HashMap<Str
 fn dynamo_list_response(resp: &str) -> VMValue {
     match serde_json::from_str::<serde_json::Value>(resp) {
         Ok(v) => {
-            let items = v.get("Items")
+            let items = v
+                .get("Items")
                 .and_then(|i| i.as_array())
                 .map(|arr| {
-                    arr.iter().map(|item| VMValue::Record(dynamo_item_to_map(item))).collect()
+                    arr.iter()
+                        .map(|item| VMValue::Record(dynamo_item_to_map(item)))
+                        .collect()
                 })
                 .unwrap_or_default();
             ok_vm(VMValue::List(FavList::new(items)))
@@ -473,7 +509,10 @@ pub struct EnvConfig {
 
 impl Default for EnvConfig {
     fn default() -> Self {
-        EnvConfig { dotenv: None, prefix: String::new() }
+        EnvConfig {
+            dotenv: None,
+            prefix: String::new(),
+        }
     }
 }
 
@@ -524,9 +563,9 @@ pub(crate) fn parse_dotenv_content(content: &str) -> Vec<(String, String)> {
 /// Log configuration from fav.toml [log] section.
 #[derive(Debug, Clone)]
 pub struct LogConfig {
-    pub level: String,    // "debug" | "info" | "warn" | "error"
-    pub format: String,   // "json" | "text"
-    pub output: String,   // "stdout" | "stderr"
+    pub level: String,  // "debug" | "info" | "warn" | "error"
+    pub format: String, // "json" | "text"
+    pub output: String, // "stdout" | "stderr"
     pub service: String,
 }
 
@@ -563,9 +602,9 @@ fn log_level_passes(emit_level: &str) -> bool {
         let cfg = c.borrow();
         match cfg.level.as_str() {
             "error" => emit_level == "ERROR",
-            "warn"  => matches!(emit_level, "ERROR" | "WARN"),
-            "info"  => matches!(emit_level, "ERROR" | "WARN" | "INFO" | "SUCCESS"),
-            _       => true, // "debug" — all pass
+            "warn" => matches!(emit_level, "ERROR" | "WARN"),
+            "info" => matches!(emit_level, "ERROR" | "WARN" | "INFO" | "SUCCESS"),
+            _ => true, // "debug" — all pass
         }
     })
 }
@@ -634,17 +673,35 @@ fn log_format_text(level: &str, code: &str, message: &str, ctx_json: &str) -> St
 }
 
 /// Format a log line in JSON format.
-fn log_format_json(level: &str, code: &str, message: &str, ctx_json: &str, service: &str) -> String {
+fn log_format_json(
+    level: &str,
+    code: &str,
+    message: &str,
+    ctx_json: &str,
+    service: &str,
+) -> String {
     let ts = log_timestamp_iso();
-    let ctx: serde_json::Value = serde_json::from_str(ctx_json)
-        .unwrap_or(serde_json::Value::Object(serde_json::Map::new()));
+    let ctx: serde_json::Value =
+        serde_json::from_str(ctx_json).unwrap_or(serde_json::Value::Object(serde_json::Map::new()));
     let mut obj = serde_json::Map::new();
     obj.insert("ts".to_string(), serde_json::Value::String(ts));
-    obj.insert("level".to_string(), serde_json::Value::String(level.to_string()));
-    obj.insert("code".to_string(), serde_json::Value::String(code.to_string()));
-    obj.insert("msg".to_string(), serde_json::Value::String(message.to_string()));
+    obj.insert(
+        "level".to_string(),
+        serde_json::Value::String(level.to_string()),
+    );
+    obj.insert(
+        "code".to_string(),
+        serde_json::Value::String(code.to_string()),
+    );
+    obj.insert(
+        "msg".to_string(),
+        serde_json::Value::String(message.to_string()),
+    );
     if !service.is_empty() {
-        obj.insert("service".to_string(), serde_json::Value::String(service.to_string()));
+        obj.insert(
+            "service".to_string(),
+            serde_json::Value::String(service.to_string()),
+        );
     }
     obj.insert("ctx".to_string(), ctx);
     serde_json::Value::Object(obj).to_string()
@@ -655,7 +712,10 @@ fn log_metric_emf(name: &str, value: i64, unit: &str) -> String {
     let ts = log_timestamp_millis();
     let mut outer = serde_json::Map::new();
     let mut aws = serde_json::Map::new();
-    aws.insert("Timestamp".to_string(), serde_json::Value::Number(ts.into()));
+    aws.insert(
+        "Timestamp".to_string(),
+        serde_json::Value::Number(ts.into()),
+    );
     let metric_obj = serde_json::json!([{
         "Namespace": "favnir",
         "Dimensions": [[]],
@@ -1121,8 +1181,7 @@ static SHARED_DBS: Mutex<Vec<(String, Connection)>> = Mutex::new(Vec::new());
 // is never invoked automatically. Connections are closed explicitly via close_raw.
 static DUCKDB_CONNS: std::sync::OnceLock<Mutex<HashMap<u64, duckdb::Connection>>> =
     std::sync::OnceLock::new();
-static DUCKDB_NEXT_ID: std::sync::atomic::AtomicU64 =
-    std::sync::atomic::AtomicU64::new(1);
+static DUCKDB_NEXT_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
 
 fn duckdb_store() -> std::sync::MutexGuard<'static, HashMap<u64, duckdb::Connection>> {
     DUCKDB_CONNS
@@ -1159,7 +1218,9 @@ struct FavList(Arc<Vec<VMValue>>, usize);
 
 impl FavList {
     #[inline]
-    fn new(v: Vec<VMValue>) -> Self { FavList(Arc::new(v), 0) }
+    fn new(v: Vec<VMValue>) -> Self {
+        FavList(Arc::new(v), 0)
+    }
     /// O(1) drop from the front — just advances the offset.
     #[inline]
     fn drop_front(&self, n: usize) -> FavList {
@@ -1172,23 +1233,31 @@ impl FavList {
     }
     /// Materialise the virtual slice into an owned Vec (O(n)).
     #[inline]
-    fn to_vec(&self) -> Vec<VMValue> { self.0[self.1..].iter().cloned().collect() }
+    fn to_vec(&self) -> Vec<VMValue> {
+        self.0[self.1..].iter().cloned().collect()
+    }
 }
 
 impl std::ops::Deref for FavList {
     type Target = [VMValue];
     #[inline]
-    fn deref(&self) -> &[VMValue] { &self.0[self.1..] }
+    fn deref(&self) -> &[VMValue] {
+        &self.0[self.1..]
+    }
 }
 
 impl PartialEq for FavList {
-    fn eq(&self, other: &Self) -> bool { self.0[self.1..] == other.0[other.1..] }
+    fn eq(&self, other: &Self) -> bool {
+        self.0[self.1..] == other.0[other.1..]
+    }
 }
 
 impl IntoIterator for FavList {
     type Item = VMValue;
     type IntoIter = std::vec::IntoIter<VMValue>;
-    fn into_iter(self) -> Self::IntoIter { self.to_vec().into_iter() }
+    fn into_iter(self) -> Self::IntoIter {
+        self.to_vec().into_iter()
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -1503,11 +1572,29 @@ impl VM {
                 }
                 x if x == Opcode::LoadGlobal as u8 => {
                     let idx = Self::read_u16(function, frame)? as usize;
-                    let value = vm
-                        .globals
-                        .get(idx)
-                        .cloned()
-                        .ok_or_else(|| vm.error(artifact, "global index out of bounds"))?;
+                    let value = match function.constants.get(idx) {
+                        Some(crate::backend::codegen::Constant::Name(name)) => {
+                            if let Some(fn_idx) = artifact.fn_idx_by_name(name) {
+                                VMValue::CompiledFn(fn_idx)
+                            } else if is_known_builtin_namespace(name) {
+                                VMValue::Builtin(name.clone())
+                            } else if looks_like_variant_ctor(name) {
+                                VMValue::VariantCtor(name.clone())
+                            } else {
+                                vm.globals.get(idx).cloned().ok_or_else(|| {
+                                    vm.error(
+                                        artifact,
+                                        &format!("unknown global or builtin: {name}"),
+                                    )
+                                })?
+                            }
+                        }
+                        _ => vm
+                            .globals
+                            .get(idx)
+                            .cloned()
+                            .ok_or_else(|| vm.error(artifact, "global index out of bounds"))?,
+                    };
                     vm.stack.push(value);
                 }
                 x if x == Opcode::Pop as u8 => {
@@ -1613,11 +1700,13 @@ impl VM {
                 }
                 x if x == Opcode::GetField as u8 => {
                     let idx = Self::read_u16(function, frame)? as usize;
-                    let field_name = artifact
-                        .str_table
-                        .get(idx)
-                        .cloned()
-                        .ok_or_else(|| vm.error(artifact, "field name index out of bounds"))?;
+                    let field_name =
+                        match function.constants.get(idx) {
+                            Some(crate::backend::codegen::Constant::Name(name)) => name.clone(),
+                            _ => artifact.str_table.get(idx).cloned().ok_or_else(|| {
+                                vm.error(artifact, "field name index out of bounds")
+                            })?,
+                        };
                     let value = vm
                         .stack
                         .pop()
@@ -1646,14 +1735,39 @@ impl VM {
                 x if x == Opcode::BuildRecord as u8 => {
                     let field_count = Self::read_u16(function, frame)? as usize;
                     let names_idx = Self::read_u16(function, frame)? as usize;
-                    let names = artifact.str_table.get(names_idx).cloned().ok_or_else(|| {
-                        vm.error(artifact, "record field names index out of bounds")
-                    })?;
-                    let field_names: Vec<&str> = if names.is_empty() {
-                        Vec::new()
-                    } else {
-                        names.split('\u{1f}').collect()
-                    };
+                    let field_names: Vec<String> =
+                        if let Some(crate::backend::codegen::Constant::Name(_)) =
+                            function.constants.get(names_idx)
+                        {
+                            let mut names = Vec::with_capacity(field_count);
+                            for i in 0..field_count {
+                                let ci = names_idx + i;
+                                match function.constants.get(ci) {
+                                    Some(crate::backend::codegen::Constant::Name(name)) => {
+                                        names.push(name.clone());
+                                    }
+                                    _ => {
+                                        return Err(vm.error(
+                                            artifact,
+                                            &format!(
+                                                "BuildRecord compat: constant[{ci}] is not a Name"
+                                            ),
+                                        ));
+                                    }
+                                }
+                            }
+                            names
+                        } else {
+                            let names =
+                                artifact.str_table.get(names_idx).cloned().ok_or_else(|| {
+                                    vm.error(artifact, "record field names index out of bounds")
+                                })?;
+                            if names.is_empty() {
+                                Vec::new()
+                            } else {
+                                names.split('\u{1f}').map(|s| s.to_string()).collect()
+                            }
+                        };
                     if field_names.len() != field_count {
                         return Err(vm.error(artifact, "record field name count mismatch"));
                     }
@@ -1666,7 +1780,7 @@ impl VM {
                     values.reverse();
                     let mut map = HashMap::with_capacity(field_count);
                     for (name, value) in field_names.into_iter().zip(values.into_iter()) {
-                        map.insert(name.to_string(), value);
+                        map.insert(name, value);
                     }
                     vm.stack.push(VMValue::Record(map));
                 }
@@ -1714,10 +1828,7 @@ impl VM {
                     match value {
                         VMValue::Record(map) => {
                             let field = map.get(&field_name).cloned().ok_or_else(|| {
-                                vm.error(
-                                    artifact,
-                                    &format!("missing record field `{field_name}`"),
-                                )
+                                vm.error(artifact, &format!("missing record field `{field_name}`"))
                             })?;
                             vm.stack.push(field);
                         }
@@ -1731,9 +1842,10 @@ impl VM {
                             vm.stack.push(value);
                         }
                         _ => {
-                            return Err(
-                                vm.error(artifact, "get_field_c requires a record or builtin value")
-                            );
+                            return Err(vm.error(
+                                artifact,
+                                "get_field_c requires a record or builtin value",
+                            ));
                         }
                     }
                 }
@@ -1776,9 +1888,7 @@ impl VM {
                         _ => {
                             return Err(vm.error(
                                 artifact,
-                                &format!(
-                                    "MakeClosureN: constant[{name_const_idx}] is not a Name"
-                                ),
+                                &format!("MakeClosureN: constant[{name_const_idx}] is not a Name"),
                             ));
                         }
                     };
@@ -1789,34 +1899,13 @@ impl VM {
                         })?);
                     }
                     captures.reverse();
-                    // Look up fn_name in artifact.globals via str_table
-                    let target_pos = artifact.globals.iter().position(|g| {
-                        g.kind == 0
-                            && artifact
-                                .str_table
-                                .get(g.name_idx as usize)
-                                .is_some_and(|n| n == &fn_name)
-                    });
-                    let target_pos = target_pos.ok_or_else(|| {
+                    let fn_idx = artifact.fn_idx_by_name(&fn_name).ok_or_else(|| {
                         vm.error(
                             artifact,
                             &format!("MakeClosureN: function `{fn_name}` not found in globals"),
                         )
                     })?;
-                    let target = vm.globals.get(target_pos).cloned().ok_or_else(|| {
-                        vm.error(artifact, "MakeClosureN: global index out of bounds")
-                    })?;
-                    match target {
-                        VMValue::CompiledFn(fn_idx) => {
-                            vm.stack.push(VMValue::Closure(fn_idx, captures));
-                        }
-                        _ => {
-                            return Err(vm.error(
-                                artifact,
-                                "MakeClosureN requires a function global target",
-                            ));
-                        }
-                    }
+                    vm.stack.push(VMValue::Closure(fn_idx, captures));
                 }
                 x if x == Opcode::GetVariantPayload as u8 => {
                     let value = vm.stack.pop().ok_or_else(|| {
@@ -1913,9 +2002,11 @@ impl VM {
                     };
                     let mut args = Vec::with_capacity(arg_count);
                     for _ in 0..arg_count {
-                        args.push(vm.stack.pop().ok_or_else(|| {
-                            vm.error(artifact, "stack underflow on CallNamed")
-                        })?);
+                        args.push(
+                            vm.stack.pop().ok_or_else(|| {
+                                vm.error(artifact, "stack underflow on CallNamed")
+                            })?,
+                        );
                     }
                     args.reverse();
                     // Resolve and dispatch iteratively to avoid Rust recursion.
@@ -1923,7 +2014,7 @@ impl VM {
                         // User-defined function: push frame directly (+ TCO if tail call)
                         vm.push_compiled_frame(artifact, fn_idx, args)?;
                         vm.try_apply_tco(artifact);
-                    } else {
+                    } else if is_known_builtin_namespace(&fn_name) {
                         // Builtin: handle Result/Option monadic combinators inline to
                         // avoid recursive resume calls on deeply-chained Result.and_then.
                         match fn_name.as_str() {
@@ -1934,15 +2025,17 @@ impl VM {
                                 match result_val {
                                     VMValue::Variant(ref tag, _) if tag == "Ok" => {
                                         let inner = match result_val {
-                                            VMValue::Variant(_, payload) => payload
-                                                .map(|p| *p)
-                                                .unwrap_or(VMValue::Unit),
+                                            VMValue::Variant(_, payload) => {
+                                                payload.map(|p| *p).unwrap_or(VMValue::Unit)
+                                            }
                                             _ => unreachable!(),
                                         };
                                         match func {
                                             VMValue::CompiledFn(fn_idx) => {
                                                 vm.push_compiled_frame(
-                                                    artifact, fn_idx, vec![inner],
+                                                    artifact,
+                                                    fn_idx,
+                                                    vec![inner],
                                                 )?;
                                                 vm.try_apply_tco(artifact);
                                             }
@@ -1955,9 +2048,8 @@ impl VM {
                                                 vm.try_apply_tco(artifact);
                                             }
                                             other => {
-                                                let r = vm.call_value(
-                                                    artifact, other, vec![inner],
-                                                )?;
+                                                let r =
+                                                    vm.call_value(artifact, other, vec![inner])?;
                                                 vm.stack.push(r);
                                             }
                                         }
@@ -1975,20 +2067,21 @@ impl VM {
                             }
                             "Option.and_then" => {
                                 let func = args.pop().expect("Option.and_then: missing func");
-                                let opt_val =
-                                    args.pop().expect("Option.and_then: missing option");
+                                let opt_val = args.pop().expect("Option.and_then: missing option");
                                 match opt_val {
                                     VMValue::Variant(ref tag, _) if tag == "Some" => {
                                         let inner = match opt_val {
-                                            VMValue::Variant(_, payload) => payload
-                                                .map(|p| *p)
-                                                .unwrap_or(VMValue::Unit),
+                                            VMValue::Variant(_, payload) => {
+                                                payload.map(|p| *p).unwrap_or(VMValue::Unit)
+                                            }
                                             _ => unreachable!(),
                                         };
                                         match func {
                                             VMValue::CompiledFn(fn_idx) => {
                                                 vm.push_compiled_frame(
-                                                    artifact, fn_idx, vec![inner],
+                                                    artifact,
+                                                    fn_idx,
+                                                    vec![inner],
                                                 )?;
                                                 vm.try_apply_tco(artifact);
                                             }
@@ -2001,18 +2094,14 @@ impl VM {
                                                 vm.try_apply_tco(artifact);
                                             }
                                             other => {
-                                                let r = vm.call_value(
-                                                    artifact, other, vec![inner],
-                                                )?;
+                                                let r =
+                                                    vm.call_value(artifact, other, vec![inner])?;
                                                 vm.stack.push(r);
                                             }
                                         }
                                     }
                                     VMValue::Variant(ref tag, _) if tag == "None" => {
-                                        vm.stack.push(VMValue::Variant(
-                                            "None".to_string(),
-                                            None,
-                                        ));
+                                        vm.stack.push(VMValue::Variant("None".to_string(), None));
                                     }
                                     _ => {
                                         return Err(vm.error(
@@ -2023,11 +2112,18 @@ impl VM {
                                 }
                             }
                             _ => {
-                                let result =
-                                    vm.call_builtin(artifact, &fn_name, args)?;
+                                let result = vm.call_builtin(artifact, &fn_name, args)?;
                                 vm.stack.push(result);
                             }
                         }
+                    } else if looks_like_variant_ctor(&fn_name) {
+                        let result = vm.call_value(artifact, VMValue::VariantCtor(fn_name), args)?;
+                        vm.stack.push(result);
+                    } else {
+                        return Err(vm.error(
+                            artifact,
+                            &format!("unknown global or builtin: {fn_name}"),
+                        ));
                     }
                 }
                 x if x == Opcode::JumpIfNotVariantC as u8 => {
@@ -2215,12 +2311,14 @@ impl VM {
                     });
                 }
                 x if x == Opcode::Swap as u8 => {
-                    let a = vm.stack.pop().ok_or_else(|| {
-                        vm.error(artifact, "stack underflow on swap")
-                    })?;
-                    let b = vm.stack.pop().ok_or_else(|| {
-                        vm.error(artifact, "stack underflow on swap")
-                    })?;
+                    let a = vm
+                        .stack
+                        .pop()
+                        .ok_or_else(|| vm.error(artifact, "stack underflow on swap"))?;
+                    let b = vm
+                        .stack
+                        .pop()
+                        .ok_or_else(|| vm.error(artifact, "stack underflow on swap"))?;
                     vm.stack.push(a);
                     vm.stack.push(b);
                 }
@@ -2390,7 +2488,10 @@ impl VM {
                         }
                         Ok(VMValue::List(FavList::new(out)))
                     }
-                    _ => Err(self.error(artifact, "List.take_while requires a List as first argument")),
+                    _ => Err(self.error(
+                        artifact,
+                        "List.take_while requires a List as first argument",
+                    )),
                 }
             }
             "List.drop_while" => {
@@ -2405,13 +2506,18 @@ impl VM {
                         let mut rest = fl.into_iter().peekable();
                         while let Some(x) = rest.peek() {
                             match self.call_value(artifact, func.clone(), vec![x.clone()])? {
-                                VMValue::Bool(true) => { rest.next(); }
+                                VMValue::Bool(true) => {
+                                    rest.next();
+                                }
                                 _ => break,
                             }
                         }
                         Ok(VMValue::List(FavList::new(rest.collect())))
                     }
-                    _ => Err(self.error(artifact, "List.drop_while requires a List as first argument")),
+                    _ => Err(self.error(
+                        artifact,
+                        "List.drop_while requires a List as first argument",
+                    )),
                 }
             }
             "List.fold" => {
@@ -3306,7 +3412,13 @@ impl VM {
                         1 => {
                             let authorization = headers_map
                                 .get("authorization")
-                                .and_then(|v| if let VMValue::Str(s) = v { Some(s.clone()) } else { None })
+                                .and_then(|v| {
+                                    if let VMValue::Str(s) = v {
+                                        Some(s.clone())
+                                    } else {
+                                        None
+                                    }
+                                })
                                 .unwrap_or_default();
                             let mut req = HashMap::new();
                             req.insert("method".to_string(), VMValue::Str(method.clone()));
@@ -3406,8 +3518,7 @@ impl VM {
                         ));
                     }
                 };
-                let (req_tx, req_rx) =
-                    std::sync::mpsc::channel::<GrpcRequestMsg>();
+                let (req_tx, req_rx) = std::sync::mpsc::channel::<GrpcRequestMsg>();
                 grpc_serve_impl(port, req_tx)
                     .map_err(|e| self.error(artifact, &format!("Grpc.serve_raw failed: {}", e)))?;
                 loop {
@@ -3435,8 +3546,7 @@ impl VM {
                         }
                     };
                     let result = self.invoke_function(artifact, fn_idx, vec![req_value]);
-                    let resp =
-                        grpc_vm_value_to_proto_bytes(result.map_err(|e| e.message));
+                    let resp = grpc_vm_value_to_proto_bytes(result.map_err(|e| e.message));
                     let _ = res_tx.send(resp.map(|b| encode_grpc_frame(&b)));
                 }
                 Ok(VMValue::Unit)
@@ -3470,8 +3580,7 @@ impl VM {
                         ));
                     }
                 };
-                let (req_tx, req_rx) =
-                    std::sync::mpsc::channel::<GrpcRequestMsg>();
+                let (req_tx, req_rx) = std::sync::mpsc::channel::<GrpcRequestMsg>();
                 grpc_serve_impl(port, req_tx).map_err(|e| {
                     self.error(artifact, &format!("Grpc.serve_stream_raw failed: {}", e))
                 })?;
@@ -3649,7 +3758,9 @@ impl From<Value> for VMValue {
             Value::Float(v) => VMValue::Float(v),
             Value::Str(v) => VMValue::Str(v),
             Value::Unit => VMValue::Unit,
-            Value::List(values) => VMValue::List(FavList::new(values.into_iter().map(VMValue::from).collect())),
+            Value::List(values) => VMValue::List(FavList::new(
+                values.into_iter().map(VMValue::from).collect(),
+            )),
             Value::Record(map) => VMValue::Record(
                 map.into_iter()
                     .map(|(k, v)| (k, VMValue::from(v)))
@@ -4683,10 +4794,9 @@ fn grpc_serve_impl(
             .build()
             .expect("tokio runtime build failed");
         rt.block_on(async move {
-            let listener =
-                tokio::net::TcpListener::bind(format!("0.0.0.0:{}", port_u16))
-                    .await
-                    .expect("gRPC bind failed");
+            let listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{}", port_u16))
+                .await
+                .expect("gRPC bind failed");
             eprintln!("Listening on 0.0.0.0:{port_u16} (gRPC / HTTP2)");
             loop {
                 let (socket, _) = match listener.accept().await {
@@ -4746,16 +4856,14 @@ async fn grpc_handle_h2_request(
     let proto_bytes = decode_grpc_frame(&body_bytes).unwrap_or(body_bytes);
 
     // Send request to VM dispatch loop and wait for response
-    let (res_tx, res_rx) =
-        std::sync::mpsc::sync_channel::<Result<Vec<u8>, String>>(1);
+    let (res_tx, res_rx) = std::sync::mpsc::sync_channel::<Result<Vec<u8>, String>>(1);
     if req_tx.send((handler_name, proto_bytes, res_tx)).is_err() {
         return;
     }
-    let resp_data =
-        match tokio::task::spawn_blocking(move || res_rx.recv()).await {
-            Ok(Ok(Ok(b))) => b,
-            _ => return,
-        };
+    let resp_data = match tokio::task::spawn_blocking(move || res_rx.recv()).await {
+        Ok(Ok(Ok(b))) => b,
+        _ => return,
+    };
 
     // Send HTTP/2 response
     let http_resp = http::Response::builder()
@@ -4789,6 +4897,53 @@ fn grpc_vm_value_to_proto_bytes(result: Result<VMValue, String>) -> Result<Vec<u
         )),
         Err(e) => Err(e),
     }
+}
+
+fn is_known_builtin_namespace(name: &str) -> bool {
+    let namespace = name.split('.').next().unwrap_or(name);
+    matches!(
+        namespace,
+        "IO" | "Debug"
+            | "Result"
+            | "Option"
+            | "Math"
+            | "Int"
+            | "Float"
+            | "Bool"
+            | "String"
+            | "List"
+            | "Map"
+            | "Trace"
+            | "Emit"
+            | "File"
+            | "Json"
+            | "Csv"
+            | "Schema"
+            | "Checkpoint"
+            | "Db"
+            | "DB"
+            | "Env"
+            | "Http"
+            | "Grpc"
+            | "Parquet"
+            | "Task"
+            | "Random"
+            | "Stream"
+            | "Gen"
+            | "Validate"
+            | "DuckDb"
+            | "Crypto"
+            | "Auth"
+            | "Log"
+            | "AWS"
+    )
+}
+
+fn looks_like_variant_ctor(name: &str) -> bool {
+    name.chars()
+        .next()
+        .map(|c| c.is_ascii_uppercase())
+        .unwrap_or(false)
 }
 
 /// Extract the TCP address from a gRPC host string.
@@ -5109,10 +5264,7 @@ fn duckdb_query_raw(conn: &duckdb::Connection, sql: &str) -> Result<Vec<VMValue>
         .query([])
         .map_err(|e| format!("DuckDB query failed: {}", e))?;
     // Collect column names from the executed statement (via Rows::as_ref).
-    let col_names: Vec<String> = rows
-        .as_ref()
-        .map(|s| s.column_names())
-        .unwrap_or_default();
+    let col_names: Vec<String> = rows.as_ref().map(|s| s.column_names()).unwrap_or_default();
     let mut rows_out = Vec::new();
     while let Some(row) = rows
         .next()
@@ -5268,7 +5420,13 @@ fn json_value_to_vm_claims_map(value: &SerdeJsonValue) -> HashMap<String, VMValu
             let s = match v {
                 SerdeJsonValue::String(s) => s.clone(),
                 SerdeJsonValue::Number(n) => n.to_string(),
-                SerdeJsonValue::Bool(b) => if *b { "true".to_string() } else { "false".to_string() },
+                SerdeJsonValue::Bool(b) => {
+                    if *b {
+                        "true".to_string()
+                    } else {
+                        "false".to_string()
+                    }
+                }
                 other => other.to_string(),
             };
             map.insert(k.clone(), VMValue::Str(s));
@@ -5353,7 +5511,11 @@ fn gen_hint_value_for_field(type_name: &str, field_name: &str, ty: &str) -> Stri
         let n = hint_counter_next(&counter_key);
         format!("https://example.com/item/{}", n)
     } else if fname == "zip" || fname == "postal_code" {
-        format!("{}-{}", seeded_rand_int(100, 999), seeded_rand_int(1000, 9999))
+        format!(
+            "{}-{}",
+            seeded_rand_int(100, 999),
+            seeded_rand_int(1000, 9999)
+        )
     } else if fname == "address" {
         format!("東京都千代田区{}丁目", seeded_rand_int(1, 30))
     } else if fname == "description" || fname == "body" || fname == "content" {
@@ -5363,7 +5525,12 @@ fn gen_hint_value_for_field(type_name: &str, field_name: &str, ty: &str) -> Stri
         let i = seeded_rand_int(0, (STATUSES.len() - 1) as i64) as usize;
         STATUSES[i].to_string()
     } else if fname == "flag" || fname.starts_with("is_") || fname.starts_with("has_") {
-        if seeded_rand_int(0, 1) == 0 { "false" } else { "true" }.to_string()
+        if seeded_rand_int(0, 1) == 0 {
+            "false"
+        } else {
+            "true"
+        }
+        .to_string()
     } else {
         gen_value_for_type(ty)
     }
@@ -5603,7 +5770,10 @@ fn vm_call_builtin(
 
         // ── File I/O primitives (v5.1.0) ─────────────────────────────────────
         "IO.read_file_raw" => {
-            let v = args.into_iter().next().ok_or_else(|| "IO.read_file_raw requires 1 argument".to_string())?;
+            let v = args
+                .into_iter()
+                .next()
+                .ok_or_else(|| "IO.read_file_raw requires 1 argument".to_string())?;
             let path = match v {
                 VMValue::Str(s) => s,
                 _ => return Err("IO.read_file_raw requires a String path".to_string()),
@@ -5615,11 +5785,17 @@ fn vm_call_builtin(
         }
         "IO.write_file_raw" => {
             let mut it = args.into_iter();
-            let path = match it.next().ok_or_else(|| "IO.write_file_raw requires 2 arguments".to_string())? {
+            let path = match it
+                .next()
+                .ok_or_else(|| "IO.write_file_raw requires 2 arguments".to_string())?
+            {
                 VMValue::Str(s) => s,
                 _ => return Err("IO.write_file_raw: path must be a String".to_string()),
             };
-            let content = match it.next().ok_or_else(|| "IO.write_file_raw requires 2 arguments".to_string())? {
+            let content = match it
+                .next()
+                .ok_or_else(|| "IO.write_file_raw requires 2 arguments".to_string())?
+            {
                 VMValue::Str(s) => s,
                 _ => return Err("IO.write_file_raw: content must be a String".to_string()),
             };
@@ -5630,11 +5806,16 @@ fn vm_call_builtin(
         }
         "IO.write_bytes_raw" => {
             let mut it = args.into_iter();
-            let path = match it.next().ok_or_else(|| "IO.write_bytes_raw requires 2 arguments".to_string())? {
+            let path = match it
+                .next()
+                .ok_or_else(|| "IO.write_bytes_raw requires 2 arguments".to_string())?
+            {
                 VMValue::Str(s) => s,
                 _ => return Err("IO.write_bytes_raw: path must be a String".to_string()),
             };
-            let bytes_val = it.next().ok_or_else(|| "IO.write_bytes_raw requires 2 arguments".to_string())?;
+            let bytes_val = it
+                .next()
+                .ok_or_else(|| "IO.write_bytes_raw requires 2 arguments".to_string())?;
             let bytes: Vec<u8> = match bytes_val {
                 VMValue::List(fl) => fl
                     .into_iter()
@@ -5651,7 +5832,10 @@ fn vm_call_builtin(
             }
         }
         "IO.file_exists_raw" => {
-            let v = args.into_iter().next().ok_or_else(|| "IO.file_exists_raw requires 1 argument".to_string())?;
+            let v = args
+                .into_iter()
+                .next()
+                .ok_or_else(|| "IO.file_exists_raw requires 1 argument".to_string())?;
             let path = match v {
                 VMValue::Str(s) => s,
                 _ => return Err("IO.file_exists_raw requires a String path".to_string()),
@@ -5821,8 +6005,12 @@ fn vm_call_builtin(
         // ── Bit operations (v5.1.0) ──────────────────────────────────────────
         "Int.shl" => {
             let mut it = args.into_iter();
-            let x = it.next().ok_or_else(|| "Int.shl requires 2 arguments".to_string())?;
-            let n = it.next().ok_or_else(|| "Int.shl requires 2 arguments".to_string())?;
+            let x = it
+                .next()
+                .ok_or_else(|| "Int.shl requires 2 arguments".to_string())?;
+            let n = it
+                .next()
+                .ok_or_else(|| "Int.shl requires 2 arguments".to_string())?;
             match (x, n) {
                 (VMValue::Int(x), VMValue::Int(n)) => Ok(VMValue::Int(x << n)),
                 _ => Err("Int.shl requires two Int arguments".to_string()),
@@ -5830,8 +6018,12 @@ fn vm_call_builtin(
         }
         "Int.shr" => {
             let mut it = args.into_iter();
-            let x = it.next().ok_or_else(|| "Int.shr requires 2 arguments".to_string())?;
-            let n = it.next().ok_or_else(|| "Int.shr requires 2 arguments".to_string())?;
+            let x = it
+                .next()
+                .ok_or_else(|| "Int.shr requires 2 arguments".to_string())?;
+            let n = it
+                .next()
+                .ok_or_else(|| "Int.shr requires 2 arguments".to_string())?;
             match (x, n) {
                 (VMValue::Int(x), VMValue::Int(n)) => Ok(VMValue::Int(x >> n)),
                 _ => Err("Int.shr requires two Int arguments".to_string()),
@@ -5839,8 +6031,12 @@ fn vm_call_builtin(
         }
         "Int.band" => {
             let mut it = args.into_iter();
-            let x = it.next().ok_or_else(|| "Int.band requires 2 arguments".to_string())?;
-            let y = it.next().ok_or_else(|| "Int.band requires 2 arguments".to_string())?;
+            let x = it
+                .next()
+                .ok_or_else(|| "Int.band requires 2 arguments".to_string())?;
+            let y = it
+                .next()
+                .ok_or_else(|| "Int.band requires 2 arguments".to_string())?;
             match (x, y) {
                 (VMValue::Int(x), VMValue::Int(y)) => Ok(VMValue::Int(x & y)),
                 _ => Err("Int.band requires two Int arguments".to_string()),
@@ -5848,8 +6044,12 @@ fn vm_call_builtin(
         }
         "Int.bor" => {
             let mut it = args.into_iter();
-            let x = it.next().ok_or_else(|| "Int.bor requires 2 arguments".to_string())?;
-            let y = it.next().ok_or_else(|| "Int.bor requires 2 arguments".to_string())?;
+            let x = it
+                .next()
+                .ok_or_else(|| "Int.bor requires 2 arguments".to_string())?;
+            let y = it
+                .next()
+                .ok_or_else(|| "Int.bor requires 2 arguments".to_string())?;
             match (x, y) {
                 (VMValue::Int(x), VMValue::Int(y)) => Ok(VMValue::Int(x | y)),
                 _ => Err("Int.bor requires two Int arguments".to_string()),
@@ -5857,22 +6057,32 @@ fn vm_call_builtin(
         }
         "Int.bxor" => {
             let mut it = args.into_iter();
-            let x = it.next().ok_or_else(|| "Int.bxor requires 2 arguments".to_string())?;
-            let y = it.next().ok_or_else(|| "Int.bxor requires 2 arguments".to_string())?;
+            let x = it
+                .next()
+                .ok_or_else(|| "Int.bxor requires 2 arguments".to_string())?;
+            let y = it
+                .next()
+                .ok_or_else(|| "Int.bxor requires 2 arguments".to_string())?;
             match (x, y) {
                 (VMValue::Int(x), VMValue::Int(y)) => Ok(VMValue::Int(x ^ y)),
                 _ => Err("Int.bxor requires two Int arguments".to_string()),
             }
         }
         "Int.bnot" => {
-            let v = args.into_iter().next().ok_or_else(|| "Int.bnot requires 1 argument".to_string())?;
+            let v = args
+                .into_iter()
+                .next()
+                .ok_or_else(|| "Int.bnot requires 1 argument".to_string())?;
             match v {
                 VMValue::Int(x) => Ok(VMValue::Int(!x)),
                 _ => Err("Int.bnot requires an Int argument".to_string()),
             }
         }
         "Int.to_byte" => {
-            let v = args.into_iter().next().ok_or_else(|| "Int.to_byte requires 1 argument".to_string())?;
+            let v = args
+                .into_iter()
+                .next()
+                .ok_or_else(|| "Int.to_byte requires 1 argument".to_string())?;
             match v {
                 VMValue::Int(x) => Ok(VMValue::Int(x & 0xFF)),
                 _ => Err("Int.to_byte requires an Int argument".to_string()),
@@ -6296,10 +6506,12 @@ fn vm_call_builtin(
                     for c in fl {
                         match c {
                             VMValue::Str(s) => result.push_str(&s),
-                            other => return Err(format!(
-                                "String.from_chars: each element must be String, got {}",
-                                vmvalue_type_name(&other)
-                            )),
+                            other => {
+                                return Err(format!(
+                                    "String.from_chars: each element must be String, got {}",
+                                    vmvalue_type_name(&other)
+                                ));
+                            }
                         }
                     }
                     Ok(VMValue::Str(result))
@@ -6348,8 +6560,11 @@ fn vm_call_builtin(
                 .ok_or_else(|| "String.to_bytes requires 1 argument".to_string())?;
             match v {
                 VMValue::Str(s) => {
-                    let bytes: Vec<VMValue> =
-                        s.as_bytes().iter().map(|&b| VMValue::Int(b as i64)).collect();
+                    let bytes: Vec<VMValue> = s
+                        .as_bytes()
+                        .iter()
+                        .map(|&b| VMValue::Int(b as i64))
+                        .collect();
                     Ok(VMValue::List(FavList::new(bytes)))
                 }
                 _ => Err("String.to_bytes requires a String argument".to_string()),
@@ -6459,9 +6674,9 @@ fn vm_call_builtin(
                 .next()
                 .ok_or_else(|| "List.range requires 2 arguments".to_string())?;
             match (start, end) {
-                (VMValue::Int(s), VMValue::Int(e)) => {
-                    Ok(VMValue::List(FavList::new((s..e).map(VMValue::Int).collect())))
-                }
+                (VMValue::Int(s), VMValue::Int(e)) => Ok(VMValue::List(FavList::new(
+                    (s..e).map(VMValue::Int).collect(),
+                ))),
                 _ => Err("List.range expects (Int, Int)".to_string()),
             }
         }
@@ -6499,7 +6714,9 @@ fn vm_call_builtin(
                 .next()
                 .ok_or_else(|| "List.take requires 2 arguments".to_string())?;
             match (list, n) {
-                (VMValue::List(fl), VMValue::Int(n)) => Ok(VMValue::List(fl.take_front(n.max(0) as usize))),
+                (VMValue::List(fl), VMValue::Int(n)) => {
+                    Ok(VMValue::List(fl.take_front(n.max(0) as usize)))
+                }
                 _ => Err("List.take expects (List, Int)".to_string()),
             }
         }
@@ -6513,7 +6730,9 @@ fn vm_call_builtin(
                 .ok_or_else(|| "List.drop requires 2 arguments".to_string())?;
             match (list, n) {
                 // O(1): just advance the offset — no element copies.
-                (VMValue::List(fl), VMValue::Int(n)) => Ok(VMValue::List(fl.drop_front(n.max(0) as usize))),
+                (VMValue::List(fl), VMValue::Int(n)) => {
+                    Ok(VMValue::List(fl.drop_front(n.max(0) as usize)))
+                }
                 _ => Err("List.drop expects (List, Int)".to_string()),
             }
         }
@@ -6980,9 +7199,7 @@ fn vm_call_builtin(
             None => Err("Json.str requires 1 argument".to_string()),
         },
         "Json.array" => match args.into_iter().next() {
-            Some(VMValue::List(fl)) => {
-                Ok(json_variant_vm("json_array", Some(VMValue::List(fl))))
-            }
+            Some(VMValue::List(fl)) => Ok(json_variant_vm("json_array", Some(VMValue::List(fl)))),
             Some(other) => Err(format!(
                 "Json.array expects List<Json>, got {}",
                 vmvalue_type_name(&other)
@@ -7871,7 +8088,11 @@ fn vm_call_builtin(
                     let response_body = resp
                         .into_string()
                         .map_err(|e| format!("Http.put_raw read error: {}", e))?;
-                    Ok(ok_vm(http_response_vm(status, response_body, response_content_type)))
+                    Ok(ok_vm(http_response_vm(
+                        status,
+                        response_body,
+                        response_content_type,
+                    )))
                 }
                 Err(ureq::Error::Status(status, resp)) => {
                     let body = resp.into_string().unwrap_or_default();
@@ -7879,7 +8100,11 @@ fn vm_call_builtin(
                 }
                 Err(ureq::Error::Transport(err)) => {
                     let msg = err.to_string();
-                    let code = if msg.to_ascii_lowercase().contains("timed out") { 1 } else { 0 };
+                    let code = if msg.to_ascii_lowercase().contains("timed out") {
+                        1
+                    } else {
+                        0
+                    };
                     Ok(err_vm(http_error_vm(code, msg, 0)))
                 }
             }
@@ -7899,7 +8124,11 @@ fn vm_call_builtin(
                     let response_body = resp
                         .into_string()
                         .map_err(|e| format!("Http.delete_raw read error: {}", e))?;
-                    Ok(ok_vm(http_response_vm(status, response_body, response_content_type)))
+                    Ok(ok_vm(http_response_vm(
+                        status,
+                        response_body,
+                        response_content_type,
+                    )))
                 }
                 Err(ureq::Error::Status(status, resp)) => {
                     let body = resp.into_string().unwrap_or_default();
@@ -7907,7 +8136,11 @@ fn vm_call_builtin(
                 }
                 Err(ureq::Error::Transport(err)) => {
                     let msg = err.to_string();
-                    let code = if msg.to_ascii_lowercase().contains("timed out") { 1 } else { 0 };
+                    let code = if msg.to_ascii_lowercase().contains("timed out") {
+                        1
+                    } else {
+                        0
+                    };
                     Ok(err_vm(http_error_vm(code, msg, 0)))
                 }
             }
@@ -7933,7 +8166,11 @@ fn vm_call_builtin(
                     let response_body = resp
                         .into_string()
                         .map_err(|e| format!("Http.patch_raw read error: {}", e))?;
-                    Ok(ok_vm(http_response_vm(status, response_body, response_content_type)))
+                    Ok(ok_vm(http_response_vm(
+                        status,
+                        response_body,
+                        response_content_type,
+                    )))
                 }
                 Err(ureq::Error::Status(status, resp)) => {
                     let body = resp.into_string().unwrap_or_default();
@@ -7941,7 +8178,11 @@ fn vm_call_builtin(
                 }
                 Err(ureq::Error::Transport(err)) => {
                     let msg = err.to_string();
-                    let code = if msg.to_ascii_lowercase().contains("timed out") { 1 } else { 0 };
+                    let code = if msg.to_ascii_lowercase().contains("timed out") {
+                        1
+                    } else {
+                        0
+                    };
                     Ok(err_vm(http_error_vm(code, msg, 0)))
                 }
             }
@@ -7980,10 +8221,12 @@ fn vm_call_builtin(
             let url = vm_string(it.next().unwrap(), "Http.get_raw_headers url")?;
             let headers = match it.next().unwrap() {
                 VMValue::Record(m) => schema_record_to_string_map(&m),
-                other => return Err(format!(
-                    "Http.get_raw_headers expects Map<String,String> headers, got {}",
-                    vmvalue_type_name(&other)
-                )),
+                other => {
+                    return Err(format!(
+                        "Http.get_raw_headers expects Map<String,String> headers, got {}",
+                        vmvalue_type_name(&other)
+                    ));
+                }
             };
             let mut req = ureq::get(&url);
             for (k, v) in &headers {
@@ -7999,7 +8242,11 @@ fn vm_call_builtin(
                     let response_body = resp
                         .into_string()
                         .map_err(|e| format!("Http.get_raw_headers read error: {}", e))?;
-                    Ok(ok_vm(http_response_vm(status, response_body, response_content_type)))
+                    Ok(ok_vm(http_response_vm(
+                        status,
+                        response_body,
+                        response_content_type,
+                    )))
                 }
                 Err(ureq::Error::Status(status, resp)) => {
                     let body = resp.into_string().unwrap_or_default();
@@ -8007,7 +8254,11 @@ fn vm_call_builtin(
                 }
                 Err(ureq::Error::Transport(err)) => {
                     let msg = err.to_string();
-                    let code = if msg.to_ascii_lowercase().contains("timed out") { 1 } else { 0 };
+                    let code = if msg.to_ascii_lowercase().contains("timed out") {
+                        1
+                    } else {
+                        0
+                    };
                     Ok(err_vm(http_error_vm(code, msg, 0)))
                 }
             }
@@ -8022,10 +8273,12 @@ fn vm_call_builtin(
             let content_type = vm_string(it.next().unwrap(), "Http.post_raw_headers content_type")?;
             let headers = match it.next().unwrap() {
                 VMValue::Record(m) => schema_record_to_string_map(&m),
-                other => return Err(format!(
-                    "Http.post_raw_headers expects Map<String,String> headers, got {}",
-                    vmvalue_type_name(&other)
-                )),
+                other => {
+                    return Err(format!(
+                        "Http.post_raw_headers expects Map<String,String> headers, got {}",
+                        vmvalue_type_name(&other)
+                    ));
+                }
             };
             let mut req = ureq::post(&url).set("Content-Type", &content_type);
             for (k, v) in &headers {
@@ -8041,7 +8294,11 @@ fn vm_call_builtin(
                     let response_body = resp
                         .into_string()
                         .map_err(|e| format!("Http.post_raw_headers read error: {}", e))?;
-                    Ok(ok_vm(http_response_vm(status, response_body, response_content_type)))
+                    Ok(ok_vm(http_response_vm(
+                        status,
+                        response_body,
+                        response_content_type,
+                    )))
                 }
                 Err(ureq::Error::Status(status, resp)) => {
                     let body = resp.into_string().unwrap_or_default();
@@ -8049,7 +8306,11 @@ fn vm_call_builtin(
                 }
                 Err(ureq::Error::Transport(err)) => {
                     let msg = err.to_string();
-                    let code = if msg.to_ascii_lowercase().contains("timed out") { 1 } else { 0 };
+                    let code = if msg.to_ascii_lowercase().contains("timed out") {
+                        1
+                    } else {
+                        0
+                    };
                     Ok(err_vm(http_error_vm(code, msg, 0)))
                 }
             }
@@ -8060,7 +8321,9 @@ fn vm_call_builtin(
             }
             let s = vm_string(args.into_iter().next().unwrap(), "String.base64_encode")?;
             use base64::Engine;
-            Ok(VMValue::Str(base64::engine::general_purpose::STANDARD.encode(s.as_bytes())))
+            Ok(VMValue::Str(
+                base64::engine::general_purpose::STANDARD.encode(s.as_bytes()),
+            ))
         }
         "String.base64_decode" => {
             if args.len() != 1 {
@@ -8070,9 +8333,8 @@ fn vm_call_builtin(
             use base64::Engine;
             match base64::engine::general_purpose::STANDARD.decode(s.as_bytes()) {
                 Ok(bytes) => {
-                    let list: Vec<VMValue> = bytes.into_iter()
-                        .map(|b| VMValue::Int(b as i64))
-                        .collect();
+                    let list: Vec<VMValue> =
+                        bytes.into_iter().map(|b| VMValue::Int(b as i64)).collect();
                     Ok(ok_vm(VMValue::List(FavList::new(list))))
                 }
                 Err(e) => Ok(err_vm(VMValue::Str(e.to_string()))),
@@ -8143,20 +8405,21 @@ fn vm_call_builtin(
                             return Ok(err_vm(rpc_error_vm(
                                 14,
                                 format!("connection failed: {}", e),
-                            )))
+                            )));
                         }
                     };
-                    let (mut h2_client, h2_conn) =
-                        match h2::client::handshake(tcp).await {
-                            Ok(r) => r,
-                            Err(e) => {
-                                return Ok(err_vm(rpc_error_vm(
-                                    14,
-                                    format!("h2 handshake failed: {}", e),
-                                )))
-                            }
-                        };
-                    tokio::spawn(async move { let _ = h2_conn.await; });
+                    let (mut h2_client, h2_conn) = match h2::client::handshake(tcp).await {
+                        Ok(r) => r,
+                        Err(e) => {
+                            return Ok(err_vm(rpc_error_vm(
+                                14,
+                                format!("h2 handshake failed: {}", e),
+                            )));
+                        }
+                    };
+                    tokio::spawn(async move {
+                        let _ = h2_conn.await;
+                    });
                     let request = match http::Request::builder()
                         .method("POST")
                         .uri(uri_str.as_str())
@@ -8174,24 +8437,16 @@ fn vm_call_builtin(
                                 return Ok(err_vm(rpc_error_vm(
                                     14,
                                     format!("send_request failed: {}", e),
-                                )))
+                                )));
                             }
                         };
-                    if let Err(e) =
-                        send_stream.send_data(Bytes::from(frame), true)
-                    {
-                        return Ok(err_vm(rpc_error_vm(
-                            14,
-                            format!("send_data failed: {}", e),
-                        )));
+                    if let Err(e) = send_stream.send_data(Bytes::from(frame), true) {
+                        return Ok(err_vm(rpc_error_vm(14, format!("send_data failed: {}", e))));
                     }
                     let response = match response_future.await {
                         Ok(r) => r,
                         Err(e) => {
-                            return Ok(err_vm(rpc_error_vm(
-                                14,
-                                format!("response failed: {}", e),
-                            )))
+                            return Ok(err_vm(rpc_error_vm(14, format!("response failed: {}", e))));
                         }
                     };
                     if !response.status().is_success() {
@@ -8213,7 +8468,7 @@ fn vm_call_builtin(
                                 return Ok(err_vm(rpc_error_vm(
                                     14,
                                     format!("body read failed: {}", e),
-                                )))
+                                )));
                             }
                         }
                     }
@@ -8235,21 +8490,13 @@ fn vm_call_builtin(
                             }
                         }
                     }
-                    let proto =
-                        match decode_grpc_frame(&resp_bytes) {
-                            Ok(b) => b,
-                            Err(e) => {
-                                return Err(format!("decode_grpc_frame failed: {}", e))
-                            }
-                        };
+                    let proto = match decode_grpc_frame(&resp_bytes) {
+                        Ok(b) => b,
+                        Err(e) => return Err(format!("decode_grpc_frame failed: {}", e)),
+                    };
                     let row = match proto_bytes_to_string_map(&proto) {
                         Ok(m) => m,
-                        Err(e) => {
-                            return Err(format!(
-                                "proto_bytes_to_string_map failed: {}",
-                                e
-                            ))
-                        }
+                        Err(e) => return Err(format!("proto_bytes_to_string_map failed: {}", e)),
                     };
                     Ok(ok_vm(VMValue::Record(
                         row.into_iter().map(|(k, v)| (k, VMValue::Str(v))).collect(),
@@ -8290,12 +8537,13 @@ fn vm_call_builtin(
                         Ok(s) => s,
                         Err(_) => return Ok(VMValue::List(FavList::new(vec![]))),
                     };
-                    let (mut h2_client, h2_conn) =
-                        match h2::client::handshake(tcp).await {
-                            Ok(r) => r,
-                            Err(_) => return Ok(VMValue::List(FavList::new(vec![]))),
-                        };
-                    tokio::spawn(async move { let _ = h2_conn.await; });
+                    let (mut h2_client, h2_conn) = match h2::client::handshake(tcp).await {
+                        Ok(r) => r,
+                        Err(_) => return Ok(VMValue::List(FavList::new(vec![]))),
+                    };
+                    tokio::spawn(async move {
+                        let _ = h2_conn.await;
+                    });
                     let request = match http::Request::builder()
                         .method("POST")
                         .uri(uri_str.as_str())
@@ -8311,10 +8559,7 @@ fn vm_call_builtin(
                             Ok(r) => r,
                             Err(_) => return Ok(VMValue::List(FavList::new(vec![]))),
                         };
-                    if send_stream
-                        .send_data(Bytes::from(frame), true)
-                        .is_err()
-                    {
+                    if send_stream.send_data(Bytes::from(frame), true).is_err() {
                         return Ok(VMValue::List(FavList::new(vec![])));
                     }
                     let response = match response_future.await {
@@ -8338,9 +8583,7 @@ fn vm_call_builtin(
                         .map(|bytes| {
                             proto_bytes_to_string_map(&bytes).map(|row| {
                                 VMValue::Record(
-                                    row.into_iter()
-                                        .map(|(k, v)| (k, VMValue::Str(v)))
-                                        .collect(),
+                                    row.into_iter().map(|(k, v)| (k, VMValue::Str(v))).collect(),
                                 )
                             })
                         })
@@ -8386,20 +8629,21 @@ fn vm_call_builtin(
                             return Ok(err_vm(rpc_error_vm(
                                 14,
                                 format!("connection failed: {}", e),
-                            )))
+                            )));
                         }
                     };
-                    let (mut h2_client, h2_conn) =
-                        match h2::client::handshake(tcp).await {
-                            Ok(r) => r,
-                            Err(e) => {
-                                return Ok(err_vm(rpc_error_vm(
-                                    14,
-                                    format!("h2 handshake failed: {}", e),
-                                )))
-                            }
-                        };
-                    tokio::spawn(async move { let _ = h2_conn.await; });
+                    let (mut h2_client, h2_conn) = match h2::client::handshake(tcp).await {
+                        Ok(r) => r,
+                        Err(e) => {
+                            return Ok(err_vm(rpc_error_vm(
+                                14,
+                                format!("h2 handshake failed: {}", e),
+                            )));
+                        }
+                    };
+                    tokio::spawn(async move {
+                        let _ = h2_conn.await;
+                    });
                     let request = match http::Request::builder()
                         .method("POST")
                         .uri(uri_str.as_str())
@@ -8417,7 +8661,7 @@ fn vm_call_builtin(
                                 return Ok(err_vm(rpc_error_vm(
                                     14,
                                     format!("send_request failed: {}", e),
-                                )))
+                                )));
                             }
                         };
                     if let Err(e) = send_stream.send_data(Bytes::from(frame), true) {
@@ -8426,7 +8670,7 @@ fn vm_call_builtin(
                     let response = match response_future.await {
                         Ok(r) => r,
                         Err(e) => {
-                            return Ok(err_vm(rpc_error_vm(14, format!("response failed: {}", e))))
+                            return Ok(err_vm(rpc_error_vm(14, format!("response failed: {}", e))));
                         }
                     };
                     if !response.status().is_success() {
@@ -8448,7 +8692,7 @@ fn vm_call_builtin(
                                 return Ok(err_vm(rpc_error_vm(
                                     14,
                                     format!("body read failed: {}", e),
-                                )))
+                                )));
                             }
                         }
                     }
@@ -8473,10 +8717,13 @@ fn vm_call_builtin(
                         Ok(b) => b,
                         Err(e) => return Err(format!("decode_grpc_frame failed: {}", e)),
                     };
-                    let row = match proto_bytes_to_named_map(&proto, &response_type, &type_metas_clone) {
-                        Ok(m) => m,
-                        Err(e) => return Err(format!("proto_bytes_to_named_map failed: {}", e)),
-                    };
+                    let row =
+                        match proto_bytes_to_named_map(&proto, &response_type, &type_metas_clone) {
+                            Ok(m) => m,
+                            Err(e) => {
+                                return Err(format!("proto_bytes_to_named_map failed: {}", e));
+                            }
+                        };
                     Ok(ok_vm(VMValue::Record(
                         row.into_iter().map(|(k, v)| (k, VMValue::Str(v))).collect(),
                     )))
@@ -8910,8 +9157,9 @@ fn vm_call_builtin(
                     .ok_or_else(|| "Gen.hint_list_raw requires 2 arguments".to_string())?,
                 "Gen.hint_list_raw",
             )? as usize;
-            let rows: Result<Vec<VMValue>, String> =
-                (0..n).map(|_| gen_hint_one_row(&type_name, type_metas)).collect();
+            let rows: Result<Vec<VMValue>, String> = (0..n)
+                .map(|_| gen_hint_one_row(&type_name, type_metas))
+                .collect();
             match rows {
                 Ok(list) => Ok(ok_vm(VMValue::List(FavList::new(list)))),
                 Err(e) => Ok(err_vm(VMValue::Str(e))),
@@ -8929,8 +9177,9 @@ fn vm_call_builtin(
                     .ok_or_else(|| "Gen.set_yaml_config_raw requires 2 arguments".to_string())?,
                 "Gen.set_yaml_config_raw",
             )?;
-            let content = std::fs::read_to_string(&path_val)
-                .map_err(|e| format!("Gen.set_yaml_config_raw: cannot read '{}': {}", path_val, e))?;
+            let content = std::fs::read_to_string(&path_val).map_err(|e| {
+                format!("Gen.set_yaml_config_raw: cannot read '{}': {}", path_val, e)
+            })?;
             // Parse YAML: expect top-level map of field_name -> config
             let yaml: serde_yaml::Value = serde_yaml::from_str(&content)
                 .map_err(|e| format!("Gen.set_yaml_config_raw: invalid YAML: {}", e))?;
@@ -8978,7 +9227,11 @@ fn vm_call_builtin(
                 .ok_or_else(|| "Gen.to_csv_raw requires 2 arguments".to_string())?;
             let rows = match data_val {
                 VMValue::List(rows) => rows,
-                _ => return Ok(err_vm(VMValue::Str("Gen.to_csv_raw: second argument must be a list".to_string()))),
+                _ => {
+                    return Ok(err_vm(VMValue::Str(
+                        "Gen.to_csv_raw: second argument must be a list".to_string(),
+                    )));
+                }
             };
             // Collect headers from first row
             let headers: Vec<String> = if let Some(VMValue::Record(first)) = rows.first() {
@@ -9006,7 +9259,8 @@ fn vm_call_builtin(
                         .map_err(|e| format!("Gen.to_csv_raw: write error: {}", e))?;
                 }
             }
-            wtr.flush().map_err(|e| format!("Gen.to_csv_raw: flush error: {}", e))?;
+            wtr.flush()
+                .map_err(|e| format!("Gen.to_csv_raw: flush error: {}", e))?;
             Ok(ok_vm(VMValue::Unit))
         }
         "Gen.to_parquet_raw" => {
@@ -9021,7 +9275,11 @@ fn vm_call_builtin(
                 .ok_or_else(|| "Gen.to_parquet_raw requires 2 arguments".to_string())?;
             let rows = match data_val {
                 VMValue::List(rows) => rows,
-                _ => return Ok(err_vm(VMValue::Str("Gen.to_parquet_raw: second argument must be a list".to_string()))),
+                _ => {
+                    return Ok(err_vm(VMValue::Str(
+                        "Gen.to_parquet_raw: second argument must be a list".to_string(),
+                    )));
+                }
             };
             // Delegate to the existing Parquet.write_raw logic by collecting string columns
             use arrow::array::{ArrayRef, StringArray};
@@ -9049,7 +9307,13 @@ fn vm_call_builtin(
                         .iter()
                         .map(|row| {
                             if let VMValue::Record(map) = row {
-                                map.get(h).and_then(|v| if let VMValue::Str(s) = v { Some(s.as_str()) } else { None })
+                                map.get(h).and_then(|v| {
+                                    if let VMValue::Str(s) = v {
+                                        Some(s.as_str())
+                                    } else {
+                                        None
+                                    }
+                                })
                             } else {
                                 None
                             }
@@ -9085,7 +9349,7 @@ fn vm_call_builtin(
                     return Err(format!(
                         "Gen.load_into_raw: first argument must be DbHandle or Int, got {}",
                         vmvalue_type_name(&other)
-                    ))
+                    ));
                 }
             };
             let table_name = vm_string(
@@ -9098,7 +9362,11 @@ fn vm_call_builtin(
                 .ok_or_else(|| "Gen.load_into_raw requires 3 arguments".to_string())?;
             let rows = match data_val {
                 VMValue::List(rows) => rows,
-                _ => return Ok(err_vm(VMValue::Str("Gen.load_into_raw: third argument must be a list".to_string()))),
+                _ => {
+                    return Ok(err_vm(VMValue::Str(
+                        "Gen.load_into_raw: third argument must be a list".to_string(),
+                    )));
+                }
             };
             if rows.is_empty() {
                 return Ok(ok_vm(VMValue::Int(0)));
@@ -9116,8 +9384,11 @@ fn vm_call_builtin(
                     .get_mut(&handle)
                     .ok_or_else(|| format!("Gen.load_into_raw: invalid handle {handle}"))?;
                 // Create table if not exists (all TEXT columns)
-                let col_defs: String =
-                    headers.iter().map(|h| format!("{h} TEXT")).collect::<Vec<_>>().join(", ");
+                let col_defs: String = headers
+                    .iter()
+                    .map(|h| format!("{h} TEXT"))
+                    .collect::<Vec<_>>()
+                    .join(", ");
                 conn.execute_batch(&format!(
                     "CREATE TABLE IF NOT EXISTS {table_name} ({col_defs})"
                 ))
@@ -9167,7 +9438,7 @@ fn vm_call_builtin(
                 None => {
                     return Ok(err_vm(VMValue::Str(format!(
                         "Gen.edge_cases_raw: unknown type '{type_name}'"
-                    ))))
+                    ))));
                 }
             };
             // Generate boundary rows: all-min, all-max, all-empty, all-null-like
@@ -9223,36 +9494,37 @@ fn vm_call_builtin(
         "Crypto.jwt_verify_raw" => {
             let mut it = args.into_iter();
             let token = vm_string(
-                it.next().ok_or_else(|| "Crypto.jwt_verify_raw requires 3 arguments".to_string())?,
+                it.next()
+                    .ok_or_else(|| "Crypto.jwt_verify_raw requires 3 arguments".to_string())?,
                 "Crypto.jwt_verify_raw",
             )?;
             let secret = vm_string(
-                it.next().ok_or_else(|| "Crypto.jwt_verify_raw requires 3 arguments".to_string())?,
+                it.next()
+                    .ok_or_else(|| "Crypto.jwt_verify_raw requires 3 arguments".to_string())?,
                 "Crypto.jwt_verify_raw",
             )?;
             let alg_str = vm_string(
-                it.next().ok_or_else(|| "Crypto.jwt_verify_raw requires 3 arguments".to_string())?,
+                it.next()
+                    .ok_or_else(|| "Crypto.jwt_verify_raw requires 3 arguments".to_string())?,
                 "Crypto.jwt_verify_raw",
             )?;
-            let result: Result<HashMap<String, VMValue>, String> = (|| {
-                match alg_str.as_str() {
-                    "HS256" => {
-                        let key = DecodingKey::from_secret(secret.as_bytes());
-                        let validation = Validation::new(Algorithm::HS256);
-                        let data = decode::<SerdeJsonValue>(&token, &key, &validation)
-                            .map_err(|e| format!("jwt verify failed: {}", e))?;
-                        Ok(json_value_to_vm_claims_map(&data.claims))
-                    }
-                    "RS256" => {
-                        let key = DecodingKey::from_rsa_pem(secret.as_bytes())
-                            .map_err(|e| format!("invalid RSA PEM: {}", e))?;
-                        let validation = Validation::new(Algorithm::RS256);
-                        let data = decode::<SerdeJsonValue>(&token, &key, &validation)
-                            .map_err(|e| format!("jwt verify failed: {}", e))?;
-                        Ok(json_value_to_vm_claims_map(&data.claims))
-                    }
-                    other => Err(format!("unsupported algorithm: {}", other)),
+            let result: Result<HashMap<String, VMValue>, String> = (|| match alg_str.as_str() {
+                "HS256" => {
+                    let key = DecodingKey::from_secret(secret.as_bytes());
+                    let validation = Validation::new(Algorithm::HS256);
+                    let data = decode::<SerdeJsonValue>(&token, &key, &validation)
+                        .map_err(|e| format!("jwt verify failed: {}", e))?;
+                    Ok(json_value_to_vm_claims_map(&data.claims))
                 }
+                "RS256" => {
+                    let key = DecodingKey::from_rsa_pem(secret.as_bytes())
+                        .map_err(|e| format!("invalid RSA PEM: {}", e))?;
+                    let validation = Validation::new(Algorithm::RS256);
+                    let data = decode::<SerdeJsonValue>(&token, &key, &validation)
+                        .map_err(|e| format!("jwt verify failed: {}", e))?;
+                    Ok(json_value_to_vm_claims_map(&data.claims))
+                }
+                other => Err(format!("unsupported algorithm: {}", other)),
             })();
             match result {
                 Ok(map) => Ok(ok_vm(VMValue::Record(map))),
@@ -9273,7 +9545,9 @@ fn vm_call_builtin(
             validation.validate_exp = false;
             let dummy_key = DecodingKey::from_secret(b"");
             match decode::<SerdeJsonValue>(&token, &dummy_key, &validation) {
-                Ok(data) => Ok(ok_vm(VMValue::Record(json_value_to_vm_claims_map(&data.claims)))),
+                Ok(data) => Ok(ok_vm(VMValue::Record(json_value_to_vm_claims_map(
+                    &data.claims,
+                )))),
                 Err(e) => Ok(err_vm(VMValue::Str(format!("jwt decode failed: {}", e)))),
             }
         }
@@ -9281,15 +9555,18 @@ fn vm_call_builtin(
         "Crypto.jwt_sign_raw" => {
             let mut it = args.into_iter();
             let claims_json = vm_string(
-                it.next().ok_or_else(|| "Crypto.jwt_sign_raw requires 3 arguments".to_string())?,
+                it.next()
+                    .ok_or_else(|| "Crypto.jwt_sign_raw requires 3 arguments".to_string())?,
                 "Crypto.jwt_sign_raw",
             )?;
             let secret = vm_string(
-                it.next().ok_or_else(|| "Crypto.jwt_sign_raw requires 3 arguments".to_string())?,
+                it.next()
+                    .ok_or_else(|| "Crypto.jwt_sign_raw requires 3 arguments".to_string())?,
                 "Crypto.jwt_sign_raw",
             )?;
             let _alg = vm_string(
-                it.next().ok_or_else(|| "Crypto.jwt_sign_raw requires 3 arguments".to_string())?,
+                it.next()
+                    .ok_or_else(|| "Crypto.jwt_sign_raw requires 3 arguments".to_string())?,
                 "Crypto.jwt_sign_raw",
             )?;
             let claims: SerdeJsonValue = match serde_json::from_str(&claims_json) {
@@ -9307,11 +9584,13 @@ fn vm_call_builtin(
         "Crypto.hmac_sha256_raw" => {
             let mut it = args.into_iter();
             let key = vm_string(
-                it.next().ok_or_else(|| "Crypto.hmac_sha256_raw requires 2 arguments".to_string())?,
+                it.next()
+                    .ok_or_else(|| "Crypto.hmac_sha256_raw requires 2 arguments".to_string())?,
                 "Crypto.hmac_sha256_raw",
             )?;
             let data = vm_string(
-                it.next().ok_or_else(|| "Crypto.hmac_sha256_raw requires 2 arguments".to_string())?,
+                it.next()
+                    .ok_or_else(|| "Crypto.hmac_sha256_raw requires 2 arguments".to_string())?,
                 "Crypto.hmac_sha256_raw",
             )?;
             let mut mac = HmacSha256::new_from_slice(key.as_bytes())
@@ -9343,7 +9622,7 @@ fn vm_call_builtin(
                     return Err(format!(
                         "Crypto.random_hex_raw: expected Int, got {}",
                         vmvalue_type_name(&other)
-                    ))
+                    ));
                 }
                 None => return Err("Crypto.random_hex_raw requires 1 argument".to_string()),
             };
@@ -9354,18 +9633,28 @@ fn vm_call_builtin(
         }
 
         // ── Auth.* (v4.5.0) — auth config helpers ──────────────────────────
-        "Auth.get_mode_raw" => {
-            Ok(VMValue::Str(AUTH_MODE.with(|m| m.borrow().clone())))
-        }
+        "Auth.get_mode_raw" => Ok(VMValue::Str(AUTH_MODE.with(|m| m.borrow().clone()))),
 
         // ── Log.* (v4.6.0) — structured logging + metrics ──────────────────
         "Log.emit_raw" => {
             // args: (level, code, message, ctx_json)
             let mut it = args.into_iter();
-            let level   = vm_string(it.next().ok_or("Log.emit_raw: missing level")?,   "Log.emit_raw")?;
-            let code    = vm_string(it.next().ok_or("Log.emit_raw: missing code")?,    "Log.emit_raw")?;
-            let message = vm_string(it.next().ok_or("Log.emit_raw: missing message")?, "Log.emit_raw")?;
-            let ctx_json= vm_string(it.next().ok_or("Log.emit_raw: missing ctx")?,     "Log.emit_raw")?;
+            let level = vm_string(
+                it.next().ok_or("Log.emit_raw: missing level")?,
+                "Log.emit_raw",
+            )?;
+            let code = vm_string(
+                it.next().ok_or("Log.emit_raw: missing code")?,
+                "Log.emit_raw",
+            )?;
+            let message = vm_string(
+                it.next().ok_or("Log.emit_raw: missing message")?,
+                "Log.emit_raw",
+            )?;
+            let ctx_json = vm_string(
+                it.next().ok_or("Log.emit_raw: missing ctx")?,
+                "Log.emit_raw",
+            )?;
             if log_level_passes(&level) {
                 LOG_CONFIG.with(|c| {
                     let cfg = c.borrow();
@@ -9387,12 +9676,18 @@ fn vm_call_builtin(
         "Log.metric_raw" => {
             // args: (name, value: Int, unit)
             let mut it = args.into_iter();
-            let name  = vm_string(it.next().ok_or("Log.metric_raw: missing name")?,  "Log.metric_raw")?;
+            let name = vm_string(
+                it.next().ok_or("Log.metric_raw: missing name")?,
+                "Log.metric_raw",
+            )?;
             let value = match it.next().ok_or("Log.metric_raw: missing value")? {
                 VMValue::Int(n) => n,
                 other => return Err(format!("Log.metric_raw: expected Int, got {:?}", other)),
             };
-            let unit  = vm_string(it.next().ok_or("Log.metric_raw: missing unit")?,  "Log.metric_raw")?;
+            let unit = vm_string(
+                it.next().ok_or("Log.metric_raw: missing unit")?,
+                "Log.metric_raw",
+            )?;
             LOG_CONFIG.with(|c| {
                 let cfg = c.borrow();
                 let line = if cfg.format == "json" {
@@ -9438,66 +9733,88 @@ fn vm_call_builtin(
             )?;
             let resolved = env_resolve_key(&key);
             match std::env::var(&resolved) {
-                Ok(val) => Ok(VMValue::Variant("some".to_string(), Some(Box::new(VMValue::Str(val))))),
-                Err(_)  => Ok(VMValue::Variant("none".to_string(), None)),
+                Ok(val) => Ok(VMValue::Variant(
+                    "some".to_string(),
+                    Some(Box::new(VMValue::Str(val))),
+                )),
+                Err(_) => Ok(VMValue::Variant("none".to_string(), None)),
             }
         }
 
         "Env.require_raw" => {
             let key = vm_string(
-                args.into_iter().next().ok_or("Env.require_raw: missing key")?,
+                args.into_iter()
+                    .next()
+                    .ok_or("Env.require_raw: missing key")?,
                 "Env.require_raw",
             )?;
             let resolved = env_resolve_key(&key);
             match std::env::var(&resolved) {
                 Ok(val) => Ok(ok_vm(VMValue::Str(val))),
-                Err(_)  => Ok(err_vm(VMValue::Str(format!("ENV_MISSING: {}", resolved)))),
+                Err(_) => Ok(err_vm(VMValue::Str(format!("ENV_MISSING: {}", resolved)))),
             }
         }
 
         "Env.get_int_raw" => {
             let key = vm_string(
-                args.into_iter().next().ok_or("Env.get_int_raw: missing key")?,
+                args.into_iter()
+                    .next()
+                    .ok_or("Env.get_int_raw: missing key")?,
                 "Env.get_int_raw",
             )?;
             let resolved = env_resolve_key(&key);
             match std::env::var(&resolved) {
                 Err(_) => Ok(err_vm(VMValue::Str(format!("ENV_MISSING: {}", resolved)))),
                 Ok(val) => match val.trim().parse::<i64>() {
-                    Ok(n)  => Ok(ok_vm(VMValue::Int(n))),
-                    Err(_) => Ok(err_vm(VMValue::Str(format!("ENV_PARSE_INT: {}={}", resolved, val)))),
+                    Ok(n) => Ok(ok_vm(VMValue::Int(n))),
+                    Err(_) => Ok(err_vm(VMValue::Str(format!(
+                        "ENV_PARSE_INT: {}={}",
+                        resolved, val
+                    )))),
                 },
             }
         }
 
         "Env.get_bool_raw" => {
             let key = vm_string(
-                args.into_iter().next().ok_or("Env.get_bool_raw: missing key")?,
+                args.into_iter()
+                    .next()
+                    .ok_or("Env.get_bool_raw: missing key")?,
                 "Env.get_bool_raw",
             )?;
             let resolved = env_resolve_key(&key);
             match std::env::var(&resolved) {
                 Err(_) => Ok(err_vm(VMValue::Str(format!("ENV_MISSING: {}", resolved)))),
                 Ok(val) => match val.trim().to_lowercase().as_str() {
-                    "true"  | "1" | "yes" | "on"  => Ok(ok_vm(VMValue::Bool(true))),
-                    "false" | "0" | "no"  | "off" => Ok(ok_vm(VMValue::Bool(false))),
-                    _ => Ok(err_vm(VMValue::Str(format!("ENV_PARSE_BOOL: {}={}", resolved, val)))),
+                    "true" | "1" | "yes" | "on" => Ok(ok_vm(VMValue::Bool(true))),
+                    "false" | "0" | "no" | "off" => Ok(ok_vm(VMValue::Bool(false))),
+                    _ => Ok(err_vm(VMValue::Str(format!(
+                        "ENV_PARSE_BOOL: {}={}",
+                        resolved, val
+                    )))),
                 },
             }
         }
 
         "Env.load_dotenv_raw" => {
             let path = vm_string(
-                args.into_iter().next().ok_or("Env.load_dotenv_raw: missing path")?,
+                args.into_iter()
+                    .next()
+                    .ok_or("Env.load_dotenv_raw: missing path")?,
                 "Env.load_dotenv_raw",
             )?;
             match std::fs::read_to_string(&path) {
-                Err(_) => Ok(err_vm(VMValue::Str(format!("ENV_DOTENV_NOT_FOUND: {}", path)))),
+                Err(_) => Ok(err_vm(VMValue::Str(format!(
+                    "ENV_DOTENV_NOT_FOUND: {}",
+                    path
+                )))),
                 Ok(content) => {
                     for (key, val) in parse_dotenv_content(&content) {
                         if std::env::var(&key).is_err() {
                             // SAFETY: single-threaded VM context; no other threads read env at this point
-                            unsafe { std::env::set_var(&key, &val); }
+                            unsafe {
+                                std::env::set_var(&key, &val);
+                            }
                         }
                     }
                     Ok(ok_vm(VMValue::Unit))
@@ -10026,7 +10343,9 @@ fn vm_call_builtin(
         // ── Validate.* (v4.1.5) ───────────────────────────────────────────────
         "Validate.run_raw" => {
             if args.len() != 2 {
-                return Err("Validate.run_raw requires 2 arguments (type_name, raw_map)".to_string());
+                return Err(
+                    "Validate.run_raw requires 2 arguments (type_name, raw_map)".to_string()
+                );
             }
             let mut it = args.into_iter();
             let type_name = vm_string(it.next().unwrap(), "Validate.run_raw type_name")?;
@@ -10050,7 +10369,11 @@ fn vm_call_builtin(
 
             for (field_name, fc) in type_schema {
                 let raw_val = raw.get(field_name.as_str()).and_then(|v| {
-                    if let VMValue::Str(s) = v { Some(s.clone()) } else { None }
+                    if let VMValue::Str(s) = v {
+                        Some(s.clone())
+                    } else {
+                        None
+                    }
                 });
 
                 match raw_val {
@@ -10079,7 +10402,10 @@ fn vm_call_builtin(
                                 if n < 0.0 {
                                     let mut e = HashMap::new();
                                     e.insert("field".into(), VMValue::Str(field_name.clone()));
-                                    e.insert("constraint".into(), VMValue::Str("non_negative".into()));
+                                    e.insert(
+                                        "constraint".into(),
+                                        VMValue::Str("non_negative".into()),
+                                    );
                                     e.insert("value".into(), VMValue::Str(val_str.clone()));
                                     errors.push(VMValue::Record(e));
                                 }
@@ -10091,7 +10417,10 @@ fn vm_call_builtin(
                                 if n < min {
                                     let mut e = HashMap::new();
                                     e.insert("field".into(), VMValue::Str(field_name.clone()));
-                                    e.insert("constraint".into(), VMValue::Str(format!("min:{}", min)));
+                                    e.insert(
+                                        "constraint".into(),
+                                        VMValue::Str(format!("min:{}", min)),
+                                    );
                                     e.insert("value".into(), VMValue::Str(val_str.clone()));
                                     errors.push(VMValue::Record(e));
                                 }
@@ -10102,7 +10431,10 @@ fn vm_call_builtin(
                                 if n > max {
                                     let mut e = HashMap::new();
                                     e.insert("field".into(), VMValue::Str(field_name.clone()));
-                                    e.insert("constraint".into(), VMValue::Str(format!("max:{}", max)));
+                                    e.insert(
+                                        "constraint".into(),
+                                        VMValue::Str(format!("max:{}", max)),
+                                    );
                                     e.insert("value".into(), VMValue::Str(val_str.clone()));
                                     errors.push(VMValue::Record(e));
                                 }
@@ -10185,7 +10517,7 @@ fn vm_call_builtin(
                     return Err(format!(
                         "DuckDb.query_raw expects DbHandle, got {}",
                         vmvalue_type_name(&other)
-                    ))
+                    ));
                 }
             };
             let sql = vm_string(it.next().unwrap(), "DuckDb.query_raw")?;
@@ -10213,7 +10545,7 @@ fn vm_call_builtin(
                     return Err(format!(
                         "DuckDb.execute_raw expects DbHandle, got {}",
                         vmvalue_type_name(&other)
-                    ))
+                    ));
                 }
             };
             let sql = vm_string(it.next().unwrap(), "DuckDb.execute_raw")?;
@@ -10251,8 +10583,14 @@ fn vm_call_builtin(
         // ── AWS S3 (v4.11.0) ─────────────────────────────────────────────
         "AWS.s3_get_object_raw" => {
             let mut it = args.into_iter();
-            let bucket = vm_string(it.next().ok_or("s3_get_object_raw: missing bucket")?, "AWS.s3_get_object_raw")?;
-            let key    = vm_string(it.next().ok_or("s3_get_object_raw: missing key")?, "AWS.s3_get_object_raw")?;
+            let bucket = vm_string(
+                it.next().ok_or("s3_get_object_raw: missing bucket")?,
+                "AWS.s3_get_object_raw",
+            )?;
+            let key = vm_string(
+                it.next().ok_or("s3_get_object_raw: missing key")?,
+                "AWS.s3_get_object_raw",
+            )?;
             let config = get_aws_config();
             let base = if let Some(ep) = &config.endpoint_url {
                 format!("{}/{}", ep.trim_end_matches('/'), bucket)
@@ -10262,15 +10600,24 @@ fn vm_call_builtin(
             let url = format!("{}/{}", base, key);
             Ok(match aws_get(&config, "s3", &url) {
                 Ok(body) => ok_vm(VMValue::Str(body)),
-                Err(e)   => err_vm(VMValue::Str(e)),
+                Err(e) => err_vm(VMValue::Str(e)),
             })
         }
 
         "AWS.s3_put_object_raw" => {
             let mut it = args.into_iter();
-            let bucket = vm_string(it.next().ok_or("s3_put_object_raw: missing bucket")?, "AWS.s3_put_object_raw")?;
-            let key    = vm_string(it.next().ok_or("s3_put_object_raw: missing key")?,    "AWS.s3_put_object_raw")?;
-            let body   = vm_string(it.next().ok_or("s3_put_object_raw: missing body")?,   "AWS.s3_put_object_raw")?;
+            let bucket = vm_string(
+                it.next().ok_or("s3_put_object_raw: missing bucket")?,
+                "AWS.s3_put_object_raw",
+            )?;
+            let key = vm_string(
+                it.next().ok_or("s3_put_object_raw: missing key")?,
+                "AWS.s3_put_object_raw",
+            )?;
+            let body = vm_string(
+                it.next().ok_or("s3_put_object_raw: missing body")?,
+                "AWS.s3_put_object_raw",
+            )?;
             let config = get_aws_config();
             let base = if let Some(ep) = &config.endpoint_url {
                 format!("{}/{}", ep.trim_end_matches('/'), bucket)
@@ -10279,15 +10626,22 @@ fn vm_call_builtin(
             };
             let url = format!("{}/{}", base, key);
             Ok(match aws_put(&config, "s3", &url, &body) {
-                Ok(())  => ok_vm(VMValue::Unit),
-                Err(e)  => err_vm(VMValue::Str(e)),
+                Ok(()) => ok_vm(VMValue::Unit),
+                Err(e) => err_vm(VMValue::Str(e)),
             })
         }
 
         "AWS.s3_get_object_base64_raw" => {
             let mut it = args.into_iter();
-            let bucket = vm_string(it.next().ok_or("s3_get_object_base64_raw: missing bucket")?, "AWS.s3_get_object_base64_raw")?;
-            let key    = vm_string(it.next().ok_or("s3_get_object_base64_raw: missing key")?,    "AWS.s3_get_object_base64_raw")?;
+            let bucket = vm_string(
+                it.next()
+                    .ok_or("s3_get_object_base64_raw: missing bucket")?,
+                "AWS.s3_get_object_base64_raw",
+            )?;
+            let key = vm_string(
+                it.next().ok_or("s3_get_object_base64_raw: missing key")?,
+                "AWS.s3_get_object_base64_raw",
+            )?;
             let config = get_aws_config();
             let base = if let Some(ep) = &config.endpoint_url {
                 format!("{}/{}", ep.trim_end_matches('/'), bucket)
@@ -10297,22 +10651,38 @@ fn vm_call_builtin(
             let url = format!("{}/{}", base, key);
             use base64::Engine;
             Ok(match aws_get_bytes(&config, "s3", &url) {
-                Ok(bytes) => ok_vm(VMValue::Str(base64::engine::general_purpose::STANDARD.encode(&bytes))),
-                Err(e)    => err_vm(VMValue::Str(e)),
+                Ok(bytes) => ok_vm(VMValue::Str(
+                    base64::engine::general_purpose::STANDARD.encode(&bytes),
+                )),
+                Err(e) => err_vm(VMValue::Str(e)),
             })
         }
 
         "AWS.s3_put_bytes_raw" => {
             let mut it = args.into_iter();
-            let bucket    = vm_string(it.next().ok_or("s3_put_bytes_raw: missing bucket")?, "AWS.s3_put_bytes_raw")?;
-            let key       = vm_string(it.next().ok_or("s3_put_bytes_raw: missing key")?,    "AWS.s3_put_bytes_raw")?;
+            let bucket = vm_string(
+                it.next().ok_or("s3_put_bytes_raw: missing bucket")?,
+                "AWS.s3_put_bytes_raw",
+            )?;
+            let key = vm_string(
+                it.next().ok_or("s3_put_bytes_raw: missing key")?,
+                "AWS.s3_put_bytes_raw",
+            )?;
             let bytes_val = it.next().ok_or("s3_put_bytes_raw: missing bytes")?;
             let bytes: Vec<u8> = match &bytes_val {
-                VMValue::List(lst) => lst.iter().map(|v| match v {
-                    VMValue::Int(n) => (n & 0xFF) as u8,
-                    _ => 0u8,
-                }).collect(),
-                _ => return Err(format!("s3_put_bytes_raw: bytes must be List<Int>, got {}", vmvalue_type_name(&bytes_val))),
+                VMValue::List(lst) => lst
+                    .iter()
+                    .map(|v| match v {
+                        VMValue::Int(n) => (n & 0xFF) as u8,
+                        _ => 0u8,
+                    })
+                    .collect(),
+                _ => {
+                    return Err(format!(
+                        "s3_put_bytes_raw: bytes must be List<Int>, got {}",
+                        vmvalue_type_name(&bytes_val)
+                    ));
+                }
             };
             let config = get_aws_config();
             let base = if let Some(ep) = &config.endpoint_url {
@@ -10322,15 +10692,21 @@ fn vm_call_builtin(
             };
             let url = format!("{}/{}", base, key);
             Ok(match aws_put_bytes(&config, "s3", &url, &bytes) {
-                Ok(())  => ok_vm(VMValue::Unit),
-                Err(e)  => err_vm(VMValue::Str(e)),
+                Ok(()) => ok_vm(VMValue::Unit),
+                Err(e) => err_vm(VMValue::Str(e)),
             })
         }
 
         "AWS.s3_delete_object_raw" => {
             let mut it = args.into_iter();
-            let bucket = vm_string(it.next().ok_or("s3_delete_object_raw: missing bucket")?, "AWS.s3_delete_object_raw")?;
-            let key    = vm_string(it.next().ok_or("s3_delete_object_raw: missing key")?,    "AWS.s3_delete_object_raw")?;
+            let bucket = vm_string(
+                it.next().ok_or("s3_delete_object_raw: missing bucket")?,
+                "AWS.s3_delete_object_raw",
+            )?;
+            let key = vm_string(
+                it.next().ok_or("s3_delete_object_raw: missing key")?,
+                "AWS.s3_delete_object_raw",
+            )?;
             let config = get_aws_config();
             let base = if let Some(ep) = &config.endpoint_url {
                 format!("{}/{}", ep.trim_end_matches('/'), bucket)
@@ -10339,15 +10715,21 @@ fn vm_call_builtin(
             };
             let url = format!("{}/{}", base, key);
             Ok(match aws_delete(&config, "s3", &url) {
-                Ok(())  => ok_vm(VMValue::Unit),
-                Err(e)  => err_vm(VMValue::Str(e)),
+                Ok(()) => ok_vm(VMValue::Unit),
+                Err(e) => err_vm(VMValue::Str(e)),
             })
         }
 
         "AWS.s3_list_objects_raw" => {
             let mut it = args.into_iter();
-            let bucket = vm_string(it.next().ok_or("s3_list_objects_raw: missing bucket")?, "AWS.s3_list_objects_raw")?;
-            let prefix = vm_string(it.next().ok_or("s3_list_objects_raw: missing prefix")?, "AWS.s3_list_objects_raw")?;
+            let bucket = vm_string(
+                it.next().ok_or("s3_list_objects_raw: missing bucket")?,
+                "AWS.s3_list_objects_raw",
+            )?;
+            let prefix = vm_string(
+                it.next().ok_or("s3_list_objects_raw: missing prefix")?,
+                "AWS.s3_list_objects_raw",
+            )?;
             let config = get_aws_config();
             let base = if let Some(ep) = &config.endpoint_url {
                 format!("{}/{}", ep.trim_end_matches('/'), bucket)
@@ -10358,7 +10740,9 @@ fn vm_call_builtin(
             Ok(match aws_get(&config, "s3", &url) {
                 Ok(xml) => {
                     let keys: Vec<VMValue> = extract_xml_tags(&xml, "Key")
-                        .into_iter().map(VMValue::Str).collect();
+                        .into_iter()
+                        .map(VMValue::Str)
+                        .collect();
                     ok_vm(VMValue::List(FavList::new(keys)))
                 }
                 Err(e) => err_vm(VMValue::Str(e)),
@@ -10367,7 +10751,10 @@ fn vm_call_builtin(
 
         "AWS.s3_head_bucket_raw" => {
             let mut it = args.into_iter();
-            let bucket = vm_string(it.next().ok_or("s3_head_bucket_raw: missing bucket")?, "AWS.s3_head_bucket_raw")?;
+            let bucket = vm_string(
+                it.next().ok_or("s3_head_bucket_raw: missing bucket")?,
+                "AWS.s3_head_bucket_raw",
+            )?;
             let config = get_aws_config();
             let url = if let Some(ep) = &config.endpoint_url {
                 format!("{}/{}", ep.trim_end_matches('/'), bucket)
@@ -10375,7 +10762,7 @@ fn vm_call_builtin(
                 format!("https://{}.s3.{}.amazonaws.com", bucket, config.region)
             };
             Ok(match aws_head(&config, "s3", &url) {
-                Ok(b)  => ok_vm(VMValue::Bool(b)),
+                Ok(b) => ok_vm(VMValue::Bool(b)),
                 Err(e) => err_vm(VMValue::Str(e)),
             })
         }
@@ -10383,90 +10770,169 @@ fn vm_call_builtin(
         // ── AWS SQS (v4.11.0) ─────────────────────────────────────────────
         "AWS.sqs_send_message_raw" => {
             let mut it = args.into_iter();
-            let queue_url = vm_string(it.next().ok_or("sqs_send_message_raw: missing queue_url")?, "AWS.sqs_send_message_raw")?;
-            let body      = vm_string(it.next().ok_or("sqs_send_message_raw: missing body")?,      "AWS.sqs_send_message_raw")?;
+            let queue_url = vm_string(
+                it.next().ok_or("sqs_send_message_raw: missing queue_url")?,
+                "AWS.sqs_send_message_raw",
+            )?;
+            let body = vm_string(
+                it.next().ok_or("sqs_send_message_raw: missing body")?,
+                "AWS.sqs_send_message_raw",
+            )?;
             let config = get_aws_config();
             let form = format!(
                 "Action=SendMessage&MessageBody={}&Version=2012-11-05",
                 url_encode(&body)
             );
-            Ok(match aws_post(&config, "sqs", &queue_url, &form, "application/x-www-form-urlencoded", None) {
-                Ok(xml) => {
-                    let ids = extract_xml_tags(&xml, "MessageId");
-                    let id = ids.into_iter().next().unwrap_or_default();
-                    ok_vm(VMValue::Str(id))
-                }
-                Err(e) => err_vm(VMValue::Str(e)),
-            })
+            Ok(
+                match aws_post(
+                    &config,
+                    "sqs",
+                    &queue_url,
+                    &form,
+                    "application/x-www-form-urlencoded",
+                    None,
+                ) {
+                    Ok(xml) => {
+                        let ids = extract_xml_tags(&xml, "MessageId");
+                        let id = ids.into_iter().next().unwrap_or_default();
+                        ok_vm(VMValue::Str(id))
+                    }
+                    Err(e) => err_vm(VMValue::Str(e)),
+                },
+            )
         }
 
         "AWS.sqs_receive_messages_raw" => {
             let mut it = args.into_iter();
-            let queue_url = vm_string(it.next().ok_or("sqs_receive_messages_raw: missing queue_url")?, "AWS.sqs_receive_messages_raw")?;
+            let queue_url = vm_string(
+                it.next()
+                    .ok_or("sqs_receive_messages_raw: missing queue_url")?,
+                "AWS.sqs_receive_messages_raw",
+            )?;
             let max = match it.next().ok_or("sqs_receive_messages_raw: missing max")? {
                 VMValue::Int(n) => n,
                 _ => 1,
             };
             let config = get_aws_config();
-            let form = format!("Action=ReceiveMessage&MaxNumberOfMessages={}&Version=2012-11-05", max);
-            Ok(match aws_post(&config, "sqs", &queue_url, &form, "application/x-www-form-urlencoded", None) {
-                Ok(xml) => {
-                    let messages = extract_xml_tags(&xml, "Message");
-                    let items: Vec<VMValue> = messages.into_iter().map(|msg| {
-                        let mut map = std::collections::HashMap::new();
-                        let ids    = extract_xml_tags(&msg, "MessageId");
-                        let bodies = extract_xml_tags(&msg, "Body");
-                        let handles = extract_xml_tags(&msg, "ReceiptHandle");
-                        map.insert("message_id".to_string(),    VMValue::Str(ids.into_iter().next().unwrap_or_default()));
-                        map.insert("body".to_string(),          VMValue::Str(bodies.into_iter().next().unwrap_or_default()));
-                        map.insert("receipt_handle".to_string(), VMValue::Str(handles.into_iter().next().unwrap_or_default()));
-                        VMValue::Record(map)
-                    }).collect();
-                    ok_vm(VMValue::List(FavList::new(items)))
-                }
-                Err(e) => err_vm(VMValue::Str(e)),
-            })
+            let form = format!(
+                "Action=ReceiveMessage&MaxNumberOfMessages={}&Version=2012-11-05",
+                max
+            );
+            Ok(
+                match aws_post(
+                    &config,
+                    "sqs",
+                    &queue_url,
+                    &form,
+                    "application/x-www-form-urlencoded",
+                    None,
+                ) {
+                    Ok(xml) => {
+                        let messages = extract_xml_tags(&xml, "Message");
+                        let items: Vec<VMValue> = messages
+                            .into_iter()
+                            .map(|msg| {
+                                let mut map = std::collections::HashMap::new();
+                                let ids = extract_xml_tags(&msg, "MessageId");
+                                let bodies = extract_xml_tags(&msg, "Body");
+                                let handles = extract_xml_tags(&msg, "ReceiptHandle");
+                                map.insert(
+                                    "message_id".to_string(),
+                                    VMValue::Str(ids.into_iter().next().unwrap_or_default()),
+                                );
+                                map.insert(
+                                    "body".to_string(),
+                                    VMValue::Str(bodies.into_iter().next().unwrap_or_default()),
+                                );
+                                map.insert(
+                                    "receipt_handle".to_string(),
+                                    VMValue::Str(handles.into_iter().next().unwrap_or_default()),
+                                );
+                                VMValue::Record(map)
+                            })
+                            .collect();
+                        ok_vm(VMValue::List(FavList::new(items)))
+                    }
+                    Err(e) => err_vm(VMValue::Str(e)),
+                },
+            )
         }
 
         "AWS.sqs_delete_message_raw" => {
             let mut it = args.into_iter();
-            let queue_url      = vm_string(it.next().ok_or("sqs_delete_message_raw: missing queue_url")?,      "AWS.sqs_delete_message_raw")?;
-            let receipt_handle = vm_string(it.next().ok_or("sqs_delete_message_raw: missing receipt_handle")?, "AWS.sqs_delete_message_raw")?;
+            let queue_url = vm_string(
+                it.next()
+                    .ok_or("sqs_delete_message_raw: missing queue_url")?,
+                "AWS.sqs_delete_message_raw",
+            )?;
+            let receipt_handle = vm_string(
+                it.next()
+                    .ok_or("sqs_delete_message_raw: missing receipt_handle")?,
+                "AWS.sqs_delete_message_raw",
+            )?;
             let config = get_aws_config();
             let form = format!(
                 "Action=DeleteMessage&ReceiptHandle={}&Version=2012-11-05",
                 url_encode(&receipt_handle)
             );
-            Ok(match aws_post(&config, "sqs", &queue_url, &form, "application/x-www-form-urlencoded", None) {
-                Ok(_)  => ok_vm(VMValue::Unit),
-                Err(e) => err_vm(VMValue::Str(e)),
-            })
+            Ok(
+                match aws_post(
+                    &config,
+                    "sqs",
+                    &queue_url,
+                    &form,
+                    "application/x-www-form-urlencoded",
+                    None,
+                ) {
+                    Ok(_) => ok_vm(VMValue::Unit),
+                    Err(e) => err_vm(VMValue::Str(e)),
+                },
+            )
         }
 
         "AWS.sqs_get_queue_url_raw" => {
             let mut it = args.into_iter();
-            let queue_name = vm_string(it.next().ok_or("sqs_get_queue_url_raw: missing queue_name")?, "AWS.sqs_get_queue_url_raw")?;
+            let queue_name = vm_string(
+                it.next()
+                    .ok_or("sqs_get_queue_url_raw: missing queue_name")?,
+                "AWS.sqs_get_queue_url_raw",
+            )?;
             let config = get_aws_config();
             let base = if let Some(ep) = &config.endpoint_url {
                 ep.trim_end_matches('/').to_string()
             } else {
                 format!("https://sqs.{}.amazonaws.com", config.region)
             };
-            let form = format!("Action=GetQueueUrl&QueueName={}&Version=2012-11-05", url_encode(&queue_name));
-            Ok(match aws_post(&config, "sqs", &base, &form, "application/x-www-form-urlencoded", None) {
-                Ok(xml) => {
-                    let urls = extract_xml_tags(&xml, "QueueUrl");
-                    let url = urls.into_iter().next().unwrap_or_default();
-                    ok_vm(VMValue::Str(url))
-                }
-                Err(e) => err_vm(VMValue::Str(e)),
-            })
+            let form = format!(
+                "Action=GetQueueUrl&QueueName={}&Version=2012-11-05",
+                url_encode(&queue_name)
+            );
+            Ok(
+                match aws_post(
+                    &config,
+                    "sqs",
+                    &base,
+                    &form,
+                    "application/x-www-form-urlencoded",
+                    None,
+                ) {
+                    Ok(xml) => {
+                        let urls = extract_xml_tags(&xml, "QueueUrl");
+                        let url = urls.into_iter().next().unwrap_or_default();
+                        ok_vm(VMValue::Str(url))
+                    }
+                    Err(e) => err_vm(VMValue::Str(e)),
+                },
+            )
         }
 
         // ── AWS DynamoDB (v4.11.0) ────────────────────────────────────────
         "AWS.dynamo_get_item_raw" => {
             let mut it = args.into_iter();
-            let table = vm_string(it.next().ok_or("dynamo_get_item_raw: missing table")?, "AWS.dynamo_get_item_raw")?;
+            let table = vm_string(
+                it.next().ok_or("dynamo_get_item_raw: missing table")?,
+                "AWS.dynamo_get_item_raw",
+            )?;
             let key_map = match it.next().ok_or("dynamo_get_item_raw: missing key")? {
                 VMValue::Record(m) => m,
                 _ => return Err("dynamo_get_item_raw: key must be a Map".to_string()),
@@ -10479,27 +10945,40 @@ fn vm_call_builtin(
             };
             let key_json = map_to_dynamo_item(&key_map);
             let body = format!(r#"{{"TableName":"{}","Key":{}}}"#, table, key_json);
-            Ok(match aws_post(&config, "dynamodb", &url, &body, "application/x-amz-json-1.0", Some("DynamoDB_20120810.GetItem")) {
-                Ok(resp) => {
-                    match serde_json::from_str::<serde_json::Value>(&resp) {
+            Ok(
+                match aws_post(
+                    &config,
+                    "dynamodb",
+                    &url,
+                    &body,
+                    "application/x-amz-json-1.0",
+                    Some("DynamoDB_20120810.GetItem"),
+                ) {
+                    Ok(resp) => match serde_json::from_str::<serde_json::Value>(&resp) {
                         Ok(v) => {
                             if let Some(item) = v.get("Item") {
                                 let m = dynamo_item_to_map(item);
-                                ok_vm(VMValue::Variant("some".into(), Some(Box::new(VMValue::Record(m)))))
+                                ok_vm(VMValue::Variant(
+                                    "some".into(),
+                                    Some(Box::new(VMValue::Record(m))),
+                                ))
                             } else {
                                 ok_vm(VMValue::Variant("none".into(), None))
                             }
                         }
                         Err(e) => err_vm(VMValue::Str(e.to_string())),
-                    }
-                }
-                Err(e) => err_vm(VMValue::Str(e)),
-            })
+                    },
+                    Err(e) => err_vm(VMValue::Str(e)),
+                },
+            )
         }
 
         "AWS.dynamo_put_item_raw" => {
             let mut it = args.into_iter();
-            let table = vm_string(it.next().ok_or("dynamo_put_item_raw: missing table")?, "AWS.dynamo_put_item_raw")?;
+            let table = vm_string(
+                it.next().ok_or("dynamo_put_item_raw: missing table")?,
+                "AWS.dynamo_put_item_raw",
+            )?;
             let item_map = match it.next().ok_or("dynamo_put_item_raw: missing item")? {
                 VMValue::Record(m) => m,
                 _ => return Err("dynamo_put_item_raw: item must be a Map".to_string()),
@@ -10512,15 +10991,27 @@ fn vm_call_builtin(
             };
             let item_json = map_to_dynamo_item(&item_map);
             let body = format!(r#"{{"TableName":"{}","Item":{}}}"#, table, item_json);
-            Ok(match aws_post(&config, "dynamodb", &url, &body, "application/x-amz-json-1.0", Some("DynamoDB_20120810.PutItem")) {
-                Ok(_)  => ok_vm(VMValue::Unit),
-                Err(e) => err_vm(VMValue::Str(e)),
-            })
+            Ok(
+                match aws_post(
+                    &config,
+                    "dynamodb",
+                    &url,
+                    &body,
+                    "application/x-amz-json-1.0",
+                    Some("DynamoDB_20120810.PutItem"),
+                ) {
+                    Ok(_) => ok_vm(VMValue::Unit),
+                    Err(e) => err_vm(VMValue::Str(e)),
+                },
+            )
         }
 
         "AWS.dynamo_delete_item_raw" => {
             let mut it = args.into_iter();
-            let table = vm_string(it.next().ok_or("dynamo_delete_item_raw: missing table")?, "AWS.dynamo_delete_item_raw")?;
+            let table = vm_string(
+                it.next().ok_or("dynamo_delete_item_raw: missing table")?,
+                "AWS.dynamo_delete_item_raw",
+            )?;
             let key_map = match it.next().ok_or("dynamo_delete_item_raw: missing key")? {
                 VMValue::Record(m) => m,
                 _ => return Err("dynamo_delete_item_raw: key must be a Map".to_string()),
@@ -10533,17 +11024,32 @@ fn vm_call_builtin(
             };
             let key_json = map_to_dynamo_item(&key_map);
             let body = format!(r#"{{"TableName":"{}","Key":{}}}"#, table, key_json);
-            Ok(match aws_post(&config, "dynamodb", &url, &body, "application/x-amz-json-1.0", Some("DynamoDB_20120810.DeleteItem")) {
-                Ok(_)  => ok_vm(VMValue::Unit),
-                Err(e) => err_vm(VMValue::Str(e)),
-            })
+            Ok(
+                match aws_post(
+                    &config,
+                    "dynamodb",
+                    &url,
+                    &body,
+                    "application/x-amz-json-1.0",
+                    Some("DynamoDB_20120810.DeleteItem"),
+                ) {
+                    Ok(_) => ok_vm(VMValue::Unit),
+                    Err(e) => err_vm(VMValue::Str(e)),
+                },
+            )
         }
 
         "AWS.dynamo_query_raw" => {
             let mut it = args.into_iter();
-            let table     = vm_string(it.next().ok_or("dynamo_query_raw: missing table")?,     "AWS.dynamo_query_raw")?;
-            let condition = vm_string(it.next().ok_or("dynamo_query_raw: missing condition")?,  "AWS.dynamo_query_raw")?;
-            let vals_map  = match it.next().ok_or("dynamo_query_raw: missing values")? {
+            let table = vm_string(
+                it.next().ok_or("dynamo_query_raw: missing table")?,
+                "AWS.dynamo_query_raw",
+            )?;
+            let condition = vm_string(
+                it.next().ok_or("dynamo_query_raw: missing condition")?,
+                "AWS.dynamo_query_raw",
+            )?;
+            let vals_map = match it.next().ok_or("dynamo_query_raw: missing values")? {
                 VMValue::Record(m) => m,
                 _ => return Err("dynamo_query_raw: values must be a Map".to_string()),
             };
@@ -10558,15 +11064,27 @@ fn vm_call_builtin(
                 r#"{{"TableName":"{}","KeyConditionExpression":"{}","ExpressionAttributeValues":{}}}"#,
                 table, condition, expr_vals
             );
-            Ok(match aws_post(&config, "dynamodb", &url, &body, "application/x-amz-json-1.0", Some("DynamoDB_20120810.Query")) {
-                Ok(resp) => dynamo_list_response(&resp),
-                Err(e)   => err_vm(VMValue::Str(e)),
-            })
+            Ok(
+                match aws_post(
+                    &config,
+                    "dynamodb",
+                    &url,
+                    &body,
+                    "application/x-amz-json-1.0",
+                    Some("DynamoDB_20120810.Query"),
+                ) {
+                    Ok(resp) => dynamo_list_response(&resp),
+                    Err(e) => err_vm(VMValue::Str(e)),
+                },
+            )
         }
 
         "AWS.dynamo_scan_raw" => {
             let mut it = args.into_iter();
-            let table = vm_string(it.next().ok_or("dynamo_scan_raw: missing table")?, "AWS.dynamo_scan_raw")?;
+            let table = vm_string(
+                it.next().ok_or("dynamo_scan_raw: missing table")?,
+                "AWS.dynamo_scan_raw",
+            )?;
             let config = get_aws_config();
             let url = if let Some(ep) = &config.endpoint_url {
                 ep.trim_end_matches('/').to_string()
@@ -10574,10 +11092,19 @@ fn vm_call_builtin(
                 format!("https://dynamodb.{}.amazonaws.com", config.region)
             };
             let body = format!(r#"{{"TableName":"{}"}}"#, table);
-            Ok(match aws_post(&config, "dynamodb", &url, &body, "application/x-amz-json-1.0", Some("DynamoDB_20120810.Scan")) {
-                Ok(resp) => dynamo_list_response(&resp),
-                Err(e)   => err_vm(VMValue::Str(e)),
-            })
+            Ok(
+                match aws_post(
+                    &config,
+                    "dynamodb",
+                    &url,
+                    &body,
+                    "application/x-amz-json-1.0",
+                    Some("DynamoDB_20120810.Scan"),
+                ) {
+                    Ok(resp) => dynamo_list_response(&resp),
+                    Err(e) => err_vm(VMValue::Str(e)),
+                },
+            )
         }
 
         other => Err(format!("unknown builtin: {}", other)),

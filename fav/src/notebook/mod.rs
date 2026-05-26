@@ -58,8 +58,8 @@ pub enum OutputKind {
 
 impl Notebook {
     pub fn load(path: &str) -> Result<Self, String> {
-        let content = std::fs::read_to_string(path)
-            .map_err(|e| format!("cannot read {path}: {e}"))?;
+        let content =
+            std::fs::read_to_string(path).map_err(|e| format!("cannot read {path}: {e}"))?;
         serde_json::from_str(&content).map_err(|e| format!("invalid notebook JSON: {e}"))
     }
 
@@ -165,7 +165,7 @@ fn execute_code_cell(cells: &[Cell], idx: usize) -> CellOutput {
             return CellOutput {
                 kind: OutputKind::Error,
                 text: format!("E0500 at line {}: {}", e.span.line, e.message),
-            }
+            };
         }
         Ok(p) => p,
     };
@@ -271,7 +271,7 @@ pub fn run_cell(notebook: &mut Notebook, cell_id: &str) -> CellOutput {
             return CellOutput {
                 kind: OutputKind::Error,
                 text: format!("cell '{}' not found", cell_id),
-            }
+            };
         }
     };
     let output = execute_code_cell(&notebook.cells, idx);
@@ -596,7 +596,11 @@ fn http_response(stream: &mut TcpStream, status: u16, content_type: &str, body: 
     let _ = write!(
         stream,
         "HTTP/1.1 {} {}\r\nContent-Type: {}\r\nContent-Length: {}\r\nAccess-Control-Allow-Origin: *\r\nConnection: close\r\n\r\n{}",
-        status, status_text, content_type, body.len(), body
+        status,
+        status_text,
+        content_type,
+        body.len(),
+        body
     );
     let _ = stream.flush();
 }
@@ -795,7 +799,13 @@ mod tests {
             }],
         };
         let out = run_cell(&mut nb, "c001");
-        assert_eq!(out.kind, OutputKind::Value, "expected Value, got {:?}: {}", out.kind, out.text);
+        assert_eq!(
+            out.kind,
+            OutputKind::Value,
+            "expected Value, got {:?}: {}",
+            out.kind,
+            out.text
+        );
         assert_eq!(out.text, "42");
     }
 
@@ -812,14 +822,25 @@ mod tests {
             }],
         };
         let out = run_cell(&mut nb, "c001");
-        assert_eq!(out.kind, OutputKind::Error, "expected Error, got {:?}", out.kind);
+        assert_eq!(
+            out.kind,
+            OutputKind::Error,
+            "expected Error, got {:?}",
+            out.kind
+        );
     }
 
     #[test]
     fn run_cell_uses_context_from_previous() {
         let mut nb = make_notebook(); // c002=add fn, c003=main calls add
         let out = run_cell(&mut nb, "c003");
-        assert_eq!(out.kind, OutputKind::Value, "got {:?}: {}", out.kind, out.text);
+        assert_eq!(
+            out.kind,
+            OutputKind::Value,
+            "got {:?}: {}",
+            out.kind,
+            out.text
+        );
         assert_eq!(out.text, "5");
     }
 
@@ -858,7 +879,11 @@ mod tests {
             }],
         };
         let out = run_cell(&mut nb, "c001");
-        assert_eq!(out.kind, OutputKind::None, "Unit should produce None output");
+        assert_eq!(
+            out.kind,
+            OutputKind::None,
+            "Unit should produce None output"
+        );
     }
 
     #[test]
@@ -874,7 +899,11 @@ mod tests {
         let mut nb = make_notebook();
         run_cell(&mut nb, "c003");
         let md = export_markdown(&nb);
-        assert!(md.contains("```\n5\n```"), "expected output block with 5, got:\n{}", md);
+        assert!(
+            md.contains("```\n5\n```"),
+            "expected output block with 5, got:\n{}",
+            md
+        );
     }
 
     #[test]
@@ -923,7 +952,10 @@ mod tests {
         row.insert("age".to_string(), Value::Int(30));
         let items = vec![Value::Record(row)];
         let table = format_table(&items);
-        assert!(table.contains("| age | name |") || table.contains("| name | age |"), "got: {table}");
+        assert!(
+            table.contains("| age | name |") || table.contains("| name | age |"),
+            "got: {table}"
+        );
         assert!(table.contains("Alice"));
         assert!(table.contains("30"));
     }

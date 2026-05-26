@@ -507,7 +507,11 @@ mod tests {
         let root = dir.path().to_path_buf();
         let rune_dir = root.join("rune_modules").join("csv");
         std::fs::create_dir_all(&rune_dir).unwrap();
-        std::fs::write(rune_dir.join("main.fav"), "public fn parse() -> Unit { () }").unwrap();
+        std::fs::write(
+            rune_dir.join("main.fav"),
+            "public fn parse() -> Unit { () }",
+        )
+        .unwrap();
         std::fs::write(
             rune_dir.join("rune.toml"),
             "[rune]\nname = \"csv\"\nversion = \"0.1.0\"\nentry = \"main.fav\"\n",

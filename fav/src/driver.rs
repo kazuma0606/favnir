@@ -18,7 +18,7 @@ use crate::middle::compiler::set_coverage_mode;
 use crate::middle::ir::{IRArm, IRExpr, IRGlobalKind, IRPattern, IRProgram, IRStmt};
 use crate::middle::resolver::Resolver;
 use crate::schemas::load_schemas;
-use crate::toml::{CheckpointConfig, FavToml, DeployConfig};
+use crate::toml::{CheckpointConfig, DeployConfig, FavToml};
 use crate::value::Value;
 use notify::{Config, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use serde::Serialize;
@@ -29,6 +29,8 @@ use std::process;
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
+
+const SELF_HOST_STACK_SIZE: usize = 256 * 1024 * 1024;
 
 // ── diagnostic formatting ─────────────────────────────────────────────────────
 
@@ -308,7 +310,11 @@ fn load_all_items(entry_path: &str, toml: Option<&FavToml>, root: Option<&Path>)
             }
             for item in &program.items {
                 match item {
-                    ast::Item::ImportDecl { path: import_name, is_rune, .. } => {
+                    ast::Item::ImportDecl {
+                        path: import_name,
+                        is_rune,
+                        ..
+                    } => {
                         let dep_file = if *is_rune {
                             // 1. rune_modules/ first (v5.4.0)
                             let rune_dir = root.join("rune_modules").join(import_name.as_str());
@@ -331,7 +337,8 @@ fn load_all_items(entry_path: &str, toml: Option<&FavToml>, root: Option<&Path>)
                     }
                     ast::Item::RuneUse { module, .. } => {
                         // Load sibling file within the same rune directory (v4.1.0)
-                        let current_dir = std::path::Path::new(path).parent()
+                        let current_dir = std::path::Path::new(path)
+                            .parent()
                             .unwrap_or(std::path::Path::new("."));
                         let mod_file = current_dir.join(format!("{module}.fav"));
                         if mod_file.exists() {
@@ -349,7 +356,12 @@ fn load_all_items(entry_path: &str, toml: Option<&FavToml>, root: Option<&Path>)
                 .parent()
                 .unwrap_or(std::path::Path::new("."));
             for item in &program.items {
-                if let ast::Item::ImportDecl { path: import_name, is_rune: true, .. } = item {
+                if let ast::Item::ImportDecl {
+                    path: import_name,
+                    is_rune: true,
+                    ..
+                } = item
+                {
                     let rune_dir = source_dir.join("rune_modules").join(import_name.as_str());
                     if rune_dir.is_dir() {
                         let entry = crate::toml::rune_entry_file(&rune_dir, import_name);
@@ -530,10 +542,9 @@ fn load_log_codes(root: &std::path::Path) -> std::collections::HashMap<String, S
             if let Ok(yaml) = serde_yaml::from_str::<serde_yaml::Value>(&content) {
                 if let Some(map) = yaml.as_mapping() {
                     for (k, v) in map {
-                        if let (Some(code), Some(msg)) = (
-                            k.as_str(),
-                            v.get("message").and_then(|m| m.as_str()),
-                        ) {
+                        if let (Some(code), Some(msg)) =
+                            (k.as_str(), v.get("message").and_then(|m| m.as_str()))
+                        {
                             codes.insert(code.to_string(), msg.to_string());
                         }
                     }
@@ -668,9 +679,9 @@ pub fn cmd_run(file: Option<&str>, db_url: Option<&str>) {
                 }
                 if let Some(lc) = toml.log.as_ref() {
                     set_log_config(LogConfig {
-                        level:   lc.level.clone(),
-                        format:  lc.format.clone(),
-                        output:  lc.output.clone(),
+                        level: lc.level.clone(),
+                        format: lc.format.clone(),
+                        output: lc.output.clone(),
                         service: lc.service.clone(),
                     });
                 }
@@ -685,7 +696,9 @@ pub fn cmd_run(file: Option<&str>, db_url: Option<&str>) {
                                 for (k, v) in parse_dotenv_content(&content) {
                                     if std::env::var(&k).is_err() {
                                         // SAFETY: single-threaded startup; no other threads read env here
-                                        unsafe { std::env::set_var(&k, &v); }
+                                        unsafe {
+                                            std::env::set_var(&k, &v);
+                                        }
                                     }
                                 }
                             }
@@ -699,8 +712,12 @@ pub fn cmd_run(file: Option<&str>, db_url: Option<&str>) {
                 // AWS config (v4.11.0)
                 let mut aws_cfg = AwsConfig::from_env();
                 if let Some(ac) = toml.aws.as_ref() {
-                    if let Some(r) = &ac.region       { aws_cfg.region       = r.clone(); }
-                    if let Some(e) = &ac.endpoint_url { aws_cfg.endpoint_url = Some(e.clone()); }
+                    if let Some(r) = &ac.region {
+                        aws_cfg.region = r.clone();
+                    }
+                    if let Some(e) = &ac.endpoint_url {
+                        aws_cfg.endpoint_url = Some(e.clone());
+                    }
                 }
                 set_aws_config(aws_cfg);
             }
@@ -1229,7 +1246,11 @@ fn to_snake_plural(name: &str) -> String {
         }
         snake.push(ch.to_ascii_lowercase());
     }
-    if snake.ends_with('s') { snake } else { format!("{snake}s") }
+    if snake.ends_with('s') {
+        snake
+    } else {
+        format!("{snake}s")
+    }
 }
 
 /// Build a single SQL column definition from field name, type, and constraints.
@@ -1241,7 +1262,11 @@ fn build_sql_column(
     use crate::ast::TypeExpr;
     let nullable = fc.map(|f| f.nullable).unwrap_or(false);
     let is_option = matches!(ty, TypeExpr::Optional(_, _));
-    let not_null = if nullable || is_option { "" } else { " NOT NULL" };
+    let not_null = if nullable || is_option {
+        ""
+    } else {
+        " NOT NULL"
+    };
 
     let sql_type = match ty {
         TypeExpr::Named(n, _, _) => match n.as_str() {
@@ -1276,11 +1301,17 @@ fn build_sql_column(
     let mut parts = vec![fname.to_string(), sql_type_str];
 
     // PRIMARY KEY
-    if fc.map(|f| f.constraints.iter().any(|c| c == "primary_key")).unwrap_or(false) {
+    if fc
+        .map(|f| f.constraints.iter().any(|c| c == "primary_key"))
+        .unwrap_or(false)
+    {
         parts.push("PRIMARY KEY AUTOINCREMENT".to_string());
     }
     // UNIQUE
-    if fc.map(|f| f.constraints.iter().any(|c| c == "unique")).unwrap_or(false) {
+    if fc
+        .map(|f| f.constraints.iter().any(|c| c == "unique"))
+        .unwrap_or(false)
+    {
         parts.push("UNIQUE".to_string());
     }
     // NOT NULL
@@ -1614,7 +1645,10 @@ pub fn cmd_db_migrate(db_url: &str, migrations_dir: &str, dry_run: bool) {
     // Enumerate .sql files in alphabetical order
     let dir = Path::new(migrations_dir);
     if !dir.exists() {
-        println!("migrations dir '{}' does not exist — nothing to apply", migrations_dir);
+        println!(
+            "migrations dir '{}' does not exist — nothing to apply",
+            migrations_dir
+        );
         return;
     }
     let mut files: Vec<PathBuf> = walkdir::WalkDir::new(dir)
@@ -1692,9 +1726,7 @@ pub fn cmd_db_migrate_status(db_url: &str, migrations_dir: &str) {
     let applied: std::collections::HashSet<String> = {
         let mut stmt = conn
             .prepare("SELECT name FROM _fav_migrations ORDER BY id ASC")
-            .unwrap_or_else(|_| {
-                conn.prepare("SELECT name FROM _fav_migrations").unwrap()
-            });
+            .unwrap_or_else(|_| conn.prepare("SELECT name FROM _fav_migrations").unwrap());
         stmt.query_map([], |row| row.get::<_, String>(0))
             .unwrap()
             .filter_map(|r| r.ok())
@@ -1721,7 +1753,11 @@ pub fn cmd_db_migrate_status(db_url: &str, migrations_dir: &str) {
     println!("{}", "-".repeat(50));
     for file in &files {
         let name = file.file_name().unwrap().to_string_lossy().to_string();
-        let status = if applied.contains(&name) { "applied" } else { "pending" };
+        let status = if applied.contains(&name) {
+            "applied"
+        } else {
+            "pending"
+        };
         println!("{:<40} {}", name, status);
     }
     if files.is_empty() {
@@ -2416,7 +2452,7 @@ fn decode_opcode(byte: u8) -> Option<(&'static str, usize)> {
         Opcode::Swap => ("Swap", 1),
         Opcode::CallNamed => ("CallNamed", 5), // 1 byte opcode + 2-byte name_const_idx + 2-byte argc
         Opcode::JumpIfNotVariantC => ("JumpIfNotVariantC", 5), // 1 byte opcode + 2-byte const_idx + 2-byte offset
-        Opcode::GetFieldC => ("GetFieldC", 3),     // 1 byte opcode + 2-byte const_idx
+        Opcode::GetFieldC => ("GetFieldC", 3),                 // 1 byte opcode + 2-byte const_idx
         Opcode::BuildRecordC => ("BuildRecordC", 5), // 1 byte opcode + 2-byte n + 2-byte base_const_idx
         Opcode::MakeClosureN => ("MakeClosureN", 5), // 1 byte opcode + 2-byte name_const_idx + 2-byte capture_count
     };
@@ -8958,7 +8994,10 @@ impl ExplainPrinter {
                         "-"
                     );
                 }
-                Item::NamespaceDecl(..) | Item::UseDecl(..) | Item::RuneUse { .. } | Item::ImportDecl { .. } => {}
+                Item::NamespaceDecl(..)
+                | Item::UseDecl(..)
+                | Item::RuneUse { .. }
+                | Item::ImportDecl { .. } => {}
             }
         }
 
@@ -9800,14 +9839,20 @@ pub fn cmd_install(pkg_name_arg: Option<&str>, force: bool) {
     }
 
     let deps_to_process: Vec<&DependencySpec> = if let Some(name) = pkg_name_arg {
-        toml.dependencies.iter().filter(|d| d.name() == name).collect()
+        toml.dependencies
+            .iter()
+            .filter(|d| d.name() == name)
+            .collect()
     } else {
         toml.dependencies.iter().collect()
     };
 
     if deps_to_process.is_empty() {
         if let Some(n) = pkg_name_arg {
-            eprintln!("error: dependency '{}' not found in fav.toml [dependencies]", n);
+            eprintln!(
+                "error: dependency '{}' not found in fav.toml [dependencies]",
+                n
+            );
             std::process::exit(1);
         }
         println!("[install] No matching dependencies.");
@@ -9823,38 +9868,36 @@ pub fn cmd_install(pkg_name_arg: Option<&str>, force: bool) {
 
     for dep in deps_to_process {
         match dep {
-            DependencySpec::Semver { name, version } => {
-                match reg.resolve_version(name, version) {
-                    None => {
-                        eprintln!(
-                            "[install] error: {}@{} not found in local registry (~/.fav/registry/)",
-                            name, version
+            DependencySpec::Semver { name, version } => match reg.resolve_version(name, version) {
+                None => {
+                    eprintln!(
+                        "[install] error: {}@{} not found in local registry (~/.fav/registry/)",
+                        name, version
+                    );
+                    errors += 1;
+                }
+                Some(ver) => {
+                    println!("[install] Resolving {}@{} → {}", name, version, ver);
+                    let dest_pkg = runes_dir.join(name);
+                    if dest_pkg.exists() && !force {
+                        println!(
+                            "[install] {} already in ./runes/ (skipped, use --force to overwrite)",
+                            name
                         );
-                        errors += 1;
+                        continue;
                     }
-                    Some(ver) => {
-                        println!("[install] Resolving {}@{} → {}", name, version, ver);
-                        let dest_pkg = runes_dir.join(name);
-                        if dest_pkg.exists() && !force {
-                            println!(
-                                "[install] {} already in ./runes/ (skipped, use --force to overwrite)",
-                                name
-                            );
-                            continue;
+                    match reg.install(name, &ver, &runes_dir) {
+                        Ok(()) => {
+                            println!("[install] Copying {}@{} → ./runes/{}/", name, ver, name);
+                            installed += 1;
                         }
-                        match reg.install(name, &ver, &runes_dir) {
-                            Ok(()) => {
-                                println!("[install] Copying {}@{} → ./runes/{}/", name, ver, name);
-                                installed += 1;
-                            }
-                            Err(e) => {
-                                eprintln!("[install] error: {}", e);
-                                errors += 1;
-                            }
+                        Err(e) => {
+                            eprintln!("[install] error: {}", e);
+                            errors += 1;
                         }
                     }
                 }
-            }
+            },
             DependencySpec::Path { name, path } => {
                 let resolved = resolve_path_dep(&root, path);
                 if !resolved.exists() {
@@ -9871,7 +9914,11 @@ pub fn cmd_install(pkg_name_arg: Option<&str>, force: bool) {
                 });
                 installed += 1;
             }
-            DependencySpec::Registry { name, registry, version } => {
+            DependencySpec::Registry {
+                name,
+                registry,
+                version,
+            } => {
                 let registry_dir = root.join(registry).join(format!("{name}-{version}"));
                 if !registry_dir.exists() {
                     eprintln!(
@@ -9893,7 +9940,10 @@ pub fn cmd_install(pkg_name_arg: Option<&str>, force: bool) {
     }
 
     if errors > 0 {
-        eprintln!("error: {} dependency/dependencies could not be resolved", errors);
+        eprintln!(
+            "error: {} dependency/dependencies could not be resolved",
+            errors
+        );
         std::process::exit(1);
     }
 
@@ -9910,10 +9960,10 @@ pub fn cmd_install(pkg_name_arg: Option<&str>, force: bool) {
 /// `fav publish [--name <n>] [--version <v>] [--dry-run] [--force]`
 /// Publish rune files to the local registry (~/.fav/registry/).
 pub fn cmd_publish(
-    name_override:    Option<&str>,
+    name_override: Option<&str>,
     version_override: Option<&str>,
-    dry_run:          bool,
-    force:            bool,
+    dry_run: bool,
+    force: bool,
 ) {
     use crate::registry::{PackageMeta, Registry, collect_fav_files_in};
     use crate::toml::FavToml;
@@ -9937,19 +9987,27 @@ pub fn cmd_publish(
         std::process::exit(1);
     }
 
-    let pkg_name    = name_override.unwrap_or(&toml.name).to_string();
+    let pkg_name = name_override.unwrap_or(&toml.name).to_string();
     let pkg_version = version_override.unwrap_or(&toml.version).to_string();
-    let rune_files  = collect_fav_files_in(&root.join("runes"));
+    let rune_files = collect_fav_files_in(&root.join("runes"));
 
     println!("[publish] Package: {} v{}", pkg_name, pkg_version);
     println!("[publish] Files:");
     for (path, _) in &rune_files {
         println!("  {}", path);
     }
-    let archive_path    = format!("/tmp/{}-{}.fav.pkg", pkg_name, pkg_version);
+    let archive_path = format!("/tmp/{}-{}.fav.pkg", pkg_name, pkg_version);
     let reg_path_display = format!("~/.fav/registry/{}/{}/", pkg_name, pkg_version);
-    println!("[publish] Archive: {}{}", archive_path, if dry_run { " (DRY RUN)" } else { "" });
-    println!("[publish] Registry: {}{}", reg_path_display, if dry_run { " (DRY RUN)" } else { "" });
+    println!(
+        "[publish] Archive: {}{}",
+        archive_path,
+        if dry_run { " (DRY RUN)" } else { "" }
+    );
+    println!(
+        "[publish] Registry: {}{}",
+        reg_path_display,
+        if dry_run { " (DRY RUN)" } else { "" }
+    );
 
     if dry_run {
         println!("[publish] Done (dry run — no changes made)");
@@ -9966,13 +10024,13 @@ pub fn cmd_publish(
     }
 
     let meta = PackageMeta {
-        name:        pkg_name.clone(),
-        version:     pkg_version.clone(),
+        name: pkg_name.clone(),
+        version: pkg_version.clone(),
         description: toml.description.clone().unwrap_or_default(),
-        author:      toml.authors.first().cloned().unwrap_or_default(),
-        license:     toml.license.clone().unwrap_or_else(|| "MIT".to_string()),
-        published:   chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string(),
-        files:       vec![],
+        author: toml.authors.first().cloned().unwrap_or_default(),
+        license: toml.license.clone().unwrap_or_else(|| "MIT".to_string()),
+        published: chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string(),
+        files: vec![],
     };
 
     reg.publish(&meta, &rune_files).unwrap_or_else(|e| {
@@ -9980,7 +10038,10 @@ pub fn cmd_publish(
         std::process::exit(1);
     });
 
-    println!("[publish] Done — {}@{} published to local registry", pkg_name, pkg_version);
+    println!(
+        "[publish] Done — {}@{} published to local registry",
+        pkg_name, pkg_version
+    );
 }
 
 /// `fav registry [list|search <q>|info <name>]`
@@ -10032,7 +10093,11 @@ pub fn cmd_registry(subcommand: Option<&str>, args: &[String]) {
                     println!("Description: {}", m.description);
                     println!("Author:      {}", m.author);
                     println!("License:     {}", m.license);
-                    let pub_date = if m.published.len() >= 10 { &m.published[..10] } else { &m.published };
+                    let pub_date = if m.published.len() >= 10 {
+                        &m.published[..10]
+                    } else {
+                        &m.published
+                    };
                     println!("Published:   {}", pub_date);
                     if !m.files.is_empty() {
                         println!("Files:");
@@ -10060,7 +10125,7 @@ pub fn cmd_deploy(
     dry_run: bool,
 ) {
     let _env = env.unwrap_or("production");
-    let cwd  = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let root = FavToml::find_root(&cwd).unwrap_or_else(|| cwd.clone());
     let toml = FavToml::load(&root).unwrap_or_else(|| {
         eprintln!("error: no fav.toml found");
@@ -10068,22 +10133,25 @@ pub fn cmd_deploy(
     });
 
     let project_name = &toml.name;
-    let func_name    = function_name.unwrap_or(project_name);
-    let deploy_cfg   = toml.deploy.as_ref().cloned().unwrap_or_default();
-    let use_region   = region
+    let func_name = function_name.unwrap_or(project_name);
+    let deploy_cfg = toml.deploy.as_ref().cloned().unwrap_or_default();
+    let use_region = region
         .or_else(|| deploy_cfg.region.as_deref())
         .unwrap_or("us-east-1");
-    let s3_bucket    = deploy_cfg.s3_bucket.as_deref().unwrap_or("");
-    let role_arn     = deploy_cfg.role_arn.as_deref().unwrap_or("");
+    let s3_bucket = deploy_cfg.s3_bucket.as_deref().unwrap_or("");
+    let role_arn = deploy_cfg.role_arn.as_deref().unwrap_or("");
 
     println!("[deploy] Project: {} v{}", project_name, toml.version);
     println!("[deploy] Function: {}", func_name);
     println!("[deploy] Region: {}", use_region);
     println!("[deploy] Runtime: {}", deploy_cfg.runtime);
-    println!("[deploy] Memory: {} MB, Timeout: {}s", deploy_cfg.memory, deploy_cfg.timeout);
+    println!(
+        "[deploy] Memory: {} MB, Timeout: {}s",
+        deploy_cfg.memory, deploy_cfg.timeout
+    );
 
     let timestamp = chrono::Utc::now().format("%Y%m%d%H%M%S");
-    let zip_path  = format!("/tmp/{}-{}.zip", project_name, timestamp);
+    let zip_path = format!("/tmp/{}-{}.zip", project_name, timestamp);
     println!(
         "[deploy] Step 1: Package .fav files → {}{}",
         zip_path,
@@ -10114,7 +10182,14 @@ pub fn cmd_deploy(
         if dry_run { " (DRY RUN)" } else { "" }
     );
     if !dry_run {
-        deploy_update_lambda(func_name, s3_bucket, &s3_key, use_region, role_arn, &deploy_cfg);
+        deploy_update_lambda(
+            func_name,
+            s3_bucket,
+            &s3_key,
+            use_region,
+            role_arn,
+            &deploy_cfg,
+        );
     }
 
     if dry_run {
@@ -10134,14 +10209,21 @@ fn package_project_zip(root: &Path, zip_path: &str) {
             process::exit(1);
         }
     };
-    let mut zip    = zip::ZipWriter::new(zip_file);
-    let options: FileOptions = FileOptions::default()
-        .compression_method(zip::CompressionMethod::Deflated);
+    let mut zip = zip::ZipWriter::new(zip_file);
+    let options: FileOptions =
+        FileOptions::default().compression_method(zip::CompressionMethod::Deflated);
     for entry in walkdir::WalkDir::new(root.join("src")) {
-        let entry = match entry { Ok(e) => e, Err(_) => continue };
-        let path  = entry.path();
+        let entry = match entry {
+            Ok(e) => e,
+            Err(_) => continue,
+        };
+        let path = entry.path();
         if path.extension().and_then(|e| e.to_str()) == Some("fav") {
-            let rel = path.strip_prefix(root).unwrap_or(path).to_string_lossy().replace('\\', "/");
+            let rel = path
+                .strip_prefix(root)
+                .unwrap_or(path)
+                .to_string_lossy()
+                .replace('\\', "/");
             if zip.start_file(&rel, options).is_ok() {
                 if let Ok(content) = std::fs::read(path) {
                     let _ = zip.write_all(&content);
@@ -10162,7 +10244,7 @@ fn package_project_zip(root: &Path, zip_path: &str) {
 
 fn deploy_upload_to_s3(bucket: &str, key: &str, zip_path: &str, region: &str) {
     let config = crate::backend::vm::get_aws_config_pub();
-    let url    = if let Some(ep) = &config.endpoint_url {
+    let url = if let Some(ep) = &config.endpoint_url {
         format!("{}/{}/{}", ep.trim_end_matches('/'), bucket, key)
     } else {
         format!("https://{}.s3.{}.amazonaws.com/{}", bucket, region, key)
@@ -10187,17 +10269,28 @@ fn deploy_upload_to_s3(bucket: &str, key: &str, zip_path: &str, region: &str) {
     }
 }
 
-fn deploy_update_lambda(func_name: &str, s3_bucket: &str, s3_key: &str, region: &str, role_arn: &str, deploy_cfg: &DeployConfig) {
+fn deploy_update_lambda(
+    func_name: &str,
+    s3_bucket: &str,
+    s3_key: &str,
+    region: &str,
+    role_arn: &str,
+    deploy_cfg: &DeployConfig,
+) {
     let config = crate::backend::vm::get_aws_config_pub();
     let url = if let Some(ep) = &config.endpoint_url {
-        format!("{}/2015-03-31/functions/{}/code", ep.trim_end_matches('/'), func_name)
+        format!(
+            "{}/2015-03-31/functions/{}/code",
+            ep.trim_end_matches('/'),
+            func_name
+        )
     } else {
-        format!("https://lambda.{}.amazonaws.com/2015-03-31/functions/{}/code", region, func_name)
+        format!(
+            "https://lambda.{}.amazonaws.com/2015-03-31/functions/{}/code",
+            region, func_name
+        )
     };
-    let body = format!(
-        r#"{{"S3Bucket":"{}","S3Key":"{}"}}"#,
-        s3_bucket, s3_key
-    );
+    let body = format!(r#"{{"S3Bucket":"{}","S3Key":"{}"}}"#, s3_bucket, s3_key);
     let h = crate::backend::vm::sigv4_sign_pub(&config, "lambda", "PUT", &url, body.as_bytes());
     let result = ureq::put(&url)
         .set("Authorization", &h.authorization)
@@ -10210,14 +10303,29 @@ fn deploy_update_lambda(func_name: &str, s3_bucket: &str, s3_key: &str, region: 
         let create_url = if let Some(ep) = &config.endpoint_url {
             format!("{}/2015-03-31/functions", ep.trim_end_matches('/'))
         } else {
-            format!("https://lambda.{}.amazonaws.com/2015-03-31/functions", region)
+            format!(
+                "https://lambda.{}.amazonaws.com/2015-03-31/functions",
+                region
+            )
         };
         let create_body = format!(
             r#"{{"FunctionName":"{}","Runtime":"{}","Handler":"{}","Role":"{}","Code":{{"S3Bucket":"{}","S3Key":"{}"}},"MemorySize":{},"Timeout":{}}}"#,
-            func_name, deploy_cfg.runtime, deploy_cfg.handler, role_arn,
-            s3_bucket, s3_key, deploy_cfg.memory, deploy_cfg.timeout
+            func_name,
+            deploy_cfg.runtime,
+            deploy_cfg.handler,
+            role_arn,
+            s3_bucket,
+            s3_key,
+            deploy_cfg.memory,
+            deploy_cfg.timeout
         );
-        let h2 = crate::backend::vm::sigv4_sign_pub(&config, "lambda", "POST", &create_url, create_body.as_bytes());
+        let h2 = crate::backend::vm::sigv4_sign_pub(
+            &config,
+            "lambda",
+            "POST",
+            &create_url,
+            create_body.as_bytes(),
+        );
         let _ = ureq::post(&create_url)
             .set("Authorization", &h2.authorization)
             .set("x-amz-date", &h2.x_amz_date)
@@ -10482,7 +10590,11 @@ mod explain_tests {
     #[test]
     fn explain_all_returns_nonempty() {
         let all = crate::error_catalog::list_all();
-        assert!(all.len() >= 20, "expected at least 20 entries, got {}", all.len());
+        assert!(
+            all.len() >= 20,
+            "expected at least 20 entries, got {}",
+            all.len()
+        );
     }
 
     #[test]
@@ -10499,8 +10611,16 @@ mod explain_tests {
         for entry in all {
             assert!(!entry.code.is_empty(), "code empty for an entry");
             assert!(!entry.title.is_empty(), "title empty for {}", entry.code);
-            assert!(!entry.description.is_empty(), "description empty for {}", entry.code);
-            assert!(!entry.category.is_empty(), "category empty for {}", entry.code);
+            assert!(
+                !entry.description.is_empty(),
+                "description empty for {}",
+                entry.code
+            );
+            assert!(
+                !entry.category.is_empty(),
+                "category empty for {}",
+                entry.code
+            );
         }
     }
 }
@@ -10951,7 +11071,7 @@ mod migrate_tests {
     fn run_fav_source_get_output(source: &str) -> String {
         use crate::frontend::parser::Parser;
         let source = source.to_string();
-        let builder = std::thread::Builder::new().stack_size(64 * 1024 * 1024);
+        let builder = std::thread::Builder::new().stack_size(SELF_HOST_STACK_SIZE);
         let handle = builder
             .spawn(move || {
                 let program = Parser::parse_str(&source, "test_inline.fav").expect("parse");
@@ -11180,6 +11300,109 @@ public fn main() -> Unit !Io {
         assert!(
             output.contains("Int") && output.contains("Plus") && output.contains("Eof"),
             "expected Int, Plus, Eof in output, got: {output}"
+        );
+    }
+
+    #[test]
+    fn collect_helper_yield_executes_inside_collect() {
+        let src = r#"
+fn emit_values() -> Bool {
+    yield 1;
+    yield 2;
+    true
+}
+
+public fn main() -> Unit !Io {
+    bind xs <- collect { emit_values() }
+    IO.println(Debug.show(List.length(xs)))
+}
+"#;
+        let output = run_fav_source_get_output(src);
+        assert_eq!(output.trim(), "2", "expected helper yields to be collected");
+    }
+
+    #[test]
+    fn nested_variant_match_falls_through_and_keeps_locals() {
+        let src = r#"
+type Inner = | A(Int) | B(Int)
+type Outer = | Boxed(Inner) | Empty
+
+fn classify(v: Outer) -> Int {
+    match v {
+        Boxed(A(x)) => {
+            bind y <- x + 1
+            y
+        }
+        Boxed(B(x)) => {
+            bind y <- x + 10
+            y
+        }
+        Empty => 0
+    }
+}
+
+public fn main() -> Unit !Io {
+    IO.println(Debug.show(classify(Boxed(B(5)))))
+}
+"#;
+        let output = run_fav_source_get_output(src);
+        assert_eq!(
+            output.trim(),
+            "15",
+            "expected nested variant match to fall through and preserve local binds"
+        );
+    }
+
+    #[test]
+    fn nested_variant_guard_falls_through_to_later_arm() {
+        let src = r#"
+type Inner = | A(Int) | B(Int)
+type Outer = | Boxed(Inner) | Empty
+
+fn classify(v: Outer) -> Int {
+    match v {
+        Boxed(A(x)) where x > 10 => x
+        Boxed(A(x)) => x + 10
+        Boxed(B(x)) => x
+        Empty => 0
+    }
+}
+
+public fn main() -> Unit !Io {
+    IO.println(Debug.show(classify(Boxed(A(5)))))
+}
+"#;
+        let output = run_fav_source_get_output(src);
+        assert_eq!(
+            output.trim(),
+            "15",
+            "expected failed guard on nested variant to fall through to a later matching arm"
+        );
+    }
+
+    #[test]
+    fn record_field_arguments_preserve_multi_arg_call_order() {
+        let src = r#"
+type Pair = { left: Int right: Int }
+
+fn add3(a: Int, b: Int, c: Int) -> Int {
+    a + b + c
+}
+
+fn project_sum(p: Pair, extra: Int) -> Int {
+    add3(p.left, p.right, extra)
+}
+
+public fn main() -> Unit !Io {
+    bind pair <- Pair { left: 2 right: 3 }
+    IO.println(Debug.show(project_sum(pair, 4)))
+}
+"#;
+        let output = run_fav_source_get_output(src);
+        assert_eq!(
+            output.trim(),
+            "9",
+            "expected record field arguments to preserve multi-arg call lowering order"
         );
     }
 
@@ -12120,8 +12343,8 @@ service UserService {
 
 #[cfg(test)]
 mod rune_multifile_tests {
-    use super::*;
     use super::tests::exec_project_main_source_with_runes;
+    use super::*;
     use tempfile::tempdir;
 
     /// Helper: create a temp project with a custom runes directory.
@@ -12340,14 +12563,22 @@ type Order = {
         let mut ddl = String::new();
         for item in &program.items {
             if let crate::ast::Item::TypeDef(td) = item {
-                let crate::ast::TypeBody::Record(fields) = &td.body else { continue; };
+                let crate::ast::TypeBody::Record(fields) = &td.body else {
+                    continue;
+                };
                 let table_name = {
                     let mut snake = String::new();
                     for (i, ch) in td.name.chars().enumerate() {
-                        if ch.is_uppercase() && i > 0 { snake.push('_'); }
+                        if ch.is_uppercase() && i > 0 {
+                            snake.push('_');
+                        }
                         snake.push(ch.to_ascii_lowercase());
                     }
-                    if snake.ends_with('s') { snake } else { format!("{snake}s") }
+                    if snake.ends_with('s') {
+                        snake
+                    } else {
+                        format!("{snake}s")
+                    }
                 };
                 let type_schema = schemas.get(&td.name);
                 let mut cols: Vec<String> = Vec::new();
@@ -12361,7 +12592,11 @@ type Order = {
                         },
                         _ => "TEXT",
                     };
-                    let not_null = if fc.map(|f| f.nullable).unwrap_or(false) { "" } else { " NOT NULL" };
+                    let not_null = if fc.map(|f| f.nullable).unwrap_or(false) {
+                        ""
+                    } else {
+                        " NOT NULL"
+                    };
                     cols.push(format!("    {} {}{}", field.name, sql_type, not_null));
                 }
                 ddl.push_str(&format!(
@@ -12372,10 +12607,22 @@ type Order = {
             }
         }
 
-        assert!(ddl.contains("CREATE TABLE orders"), "expected 'orders' table, got: {ddl}");
-        assert!(ddl.contains("id INTEGER"), "expected INTEGER column, got: {ddl}");
-        assert!(ddl.contains("price REAL"), "expected REAL column, got: {ddl}");
-        assert!(ddl.contains("name TEXT"), "expected TEXT column, got: {ddl}");
+        assert!(
+            ddl.contains("CREATE TABLE orders"),
+            "expected 'orders' table, got: {ddl}"
+        );
+        assert!(
+            ddl.contains("id INTEGER"),
+            "expected INTEGER column, got: {ddl}"
+        );
+        assert!(
+            ddl.contains("price REAL"),
+            "expected REAL column, got: {ddl}"
+        );
+        assert!(
+            ddl.contains("name TEXT"),
+            "expected TEXT column, got: {ddl}"
+        );
     }
 
     #[test]
@@ -12384,17 +12631,26 @@ type Order = {
         let cases = &[
             ("Order", "orders"),
             ("UserProfile", "user_profiles"),
-            ("Category", "categorys"),  // to_snake_plural just appends 's', no 'y→ies'
-            ("Events", "events"),        // already plural (ends with s)
+            ("Category", "categorys"), // to_snake_plural just appends 's', no 'y→ies'
+            ("Events", "events"),      // already plural (ends with s)
         ];
         for (input, expected) in cases {
             let mut snake = String::new();
             for (i, ch) in input.chars().enumerate() {
-                if ch.is_uppercase() && i > 0 { snake.push('_'); }
+                if ch.is_uppercase() && i > 0 {
+                    snake.push('_');
+                }
                 snake.push(ch.to_ascii_lowercase());
             }
-            let plural = if snake.ends_with('s') { snake } else { format!("{snake}s") };
-            assert_eq!(&plural, expected, "snake_plural({input}) expected {expected}, got {plural}");
+            let plural = if snake.ends_with('s') {
+                snake
+            } else {
+                format!("{snake}s")
+            };
+            assert_eq!(
+                &plural, expected,
+                "snake_plural({input}) expected {expected}, got {plural}"
+            );
         }
     }
 
@@ -12416,14 +12672,22 @@ type Order = {
         let not_null = if nullable { "" } else { " NOT NULL" };
         let sql_type = "INTEGER";
         let mut parts = vec![fname.to_string(), sql_type.to_string()];
-        if !not_null.is_empty() { parts.push("NOT NULL".to_string()); }
+        if !not_null.is_empty() {
+            parts.push("NOT NULL".to_string());
+        }
         if fc.constraints.iter().any(|c| c == "positive") {
             parts.push(format!("CHECK ({fname} > 0)"));
         }
         let col_def = parts.join(" ");
 
-        assert!(col_def.contains("CHECK (amount > 0)"), "expected CHECK constraint, got: {col_def}");
-        assert!(col_def.contains("NOT NULL"), "expected NOT NULL, got: {col_def}");
+        assert!(
+            col_def.contains("CHECK (amount > 0)"),
+            "expected CHECK constraint, got: {col_def}"
+        );
+        assert!(
+            col_def.contains("NOT NULL"),
+            "expected NOT NULL, got: {col_def}"
+        );
     }
 
     // ── fav db migrate integration tests (v4.2.0) ────────────────────────────
@@ -12432,7 +12696,11 @@ type Order = {
     fn db_migrate_status_no_dir_prints_nothing() {
         let dir = tempdir().unwrap();
         let db_path = dir.path().join("test.db").to_string_lossy().to_string();
-        let nonexistent_migrations = dir.path().join("migrations_none").to_string_lossy().to_string();
+        let nonexistent_migrations = dir
+            .path()
+            .join("migrations_none")
+            .to_string_lossy()
+            .to_string();
         // Should not panic — just reports nothing
         cmd_db_migrate_status(&db_path, &nonexistent_migrations);
     }
@@ -12618,7 +12886,11 @@ public fn main() -> Int !Db {
     fn auth_rune_test_file_passes() {
         let results = run_fav_test_file_with_runes("runes/auth/auth.test.fav");
         let failures: Vec<_> = results.iter().filter(|(_, ok, _)| !ok).collect();
-        assert!(failures.is_empty(), "auth.test.fav failures: {:?}", failures);
+        assert!(
+            failures.is_empty(),
+            "auth.test.fav failures: {:?}",
+            failures
+        );
     }
 
     #[test]
@@ -12925,9 +13197,14 @@ public fn main() -> Bool !AWS {
         std::fs::write(
             root.join("fav.toml"),
             "[rune]\nname = \"testapp\"\nversion = \"0.1.0\"\n",
-        ).unwrap();
+        )
+        .unwrap();
         std::fs::create_dir_all(root.join("src")).unwrap();
-        std::fs::write(root.join("src/main.fav"), "public fn main() -> Unit { () }\n").unwrap();
+        std::fs::write(
+            root.join("src/main.fav"),
+            "public fn main() -> Unit { () }\n",
+        )
+        .unwrap();
         let prev = std::env::current_dir().unwrap();
         std::env::set_current_dir(root).unwrap();
         // Capture stdout via the function running without panic
@@ -12944,13 +13221,13 @@ mod registry_tests {
 
     fn make_reg_pkg(reg: &Registry, name: &str, version: &str, fav_content: &str) {
         let meta = PackageMeta {
-            name:        name.to_string(),
-            version:     version.to_string(),
+            name: name.to_string(),
+            version: version.to_string(),
             description: format!("{} rune", name),
-            author:      "test".to_string(),
-            license:     "MIT".to_string(),
-            published:   "2026-05-17T00:00:00Z".to_string(),
-            files:       vec![],
+            author: "test".to_string(),
+            license: "MIT".to_string(),
+            published: "2026-05-17T00:00:00Z".to_string(),
+            files: vec![],
         };
         let rune_files = vec![(
             format!("runes/{}/{}.fav", name, name),
@@ -12966,7 +13243,8 @@ mod registry_tests {
         std::fs::write(
             root.join("fav.toml"),
             "[rune]\nname = \"mylib\"\nversion = \"1.0.0\"\ndescription = \"test lib\"\n",
-        ).unwrap();
+        )
+        .unwrap();
         std::fs::create_dir_all(root.join("runes/mylib")).unwrap();
         std::fs::write(root.join("runes/mylib/mylib.fav"), "// mylib\n").unwrap();
         let prev = std::env::current_dir().unwrap();
@@ -12992,7 +13270,7 @@ mod registry_tests {
     fn registry_list_shows_installed() {
         let tmp = tempfile::tempdir().unwrap();
         let reg = Registry::with_root(tmp.path().to_path_buf());
-        make_reg_pkg(&reg, "csv",   "1.0.0", "");
+        make_reg_pkg(&reg, "csv", "1.0.0", "");
         make_reg_pkg(&reg, "email", "0.3.1", "");
         let list = reg.list();
         assert_eq!(list.len(), 2);
@@ -13004,7 +13282,7 @@ mod registry_tests {
     fn registry_search_filters_by_name() {
         let tmp = tempfile::tempdir().unwrap();
         let reg = Registry::with_root(tmp.path().to_path_buf());
-        make_reg_pkg(&reg, "csv",   "1.0.0", "");
+        make_reg_pkg(&reg, "csv", "1.0.0", "");
         make_reg_pkg(&reg, "email", "0.3.1", "");
         make_reg_pkg(&reg, "csv_ext", "0.1.0", "");
         let results = reg.search("csv");
@@ -13053,7 +13331,7 @@ mod registry_tests {
         let runes = tmp.path().join("runes");
         std::fs::create_dir_all(runes.join("csv")).unwrap();
         std::fs::write(runes.join("csv/parse.fav"), "").unwrap();
-        std::fs::write(runes.join("csv/csv.fav"),   "").unwrap();
+        std::fs::write(runes.join("csv/csv.fav"), "").unwrap();
         let files = collect_fav_files_in(&runes);
         assert_eq!(files.len(), 2);
         assert!(files.iter().any(|(p, _)| p.ends_with("csv.fav")));
@@ -13096,7 +13374,6 @@ mod self_tests {
         );
     }
 
-
     #[test]
     fn self_hosted_checker_type_checks() {
         let path = self_dir().join("checker.fav");
@@ -13109,7 +13386,6 @@ mod self_tests {
         );
     }
 
-
     #[test]
     fn self_hosted_codegen_type_checks() {
         let path = self_dir().join("codegen.fav");
@@ -13121,7 +13397,6 @@ mod self_tests {
             errors
         );
     }
-
 
     #[test]
     fn self_hosted_compiler_type_checks() {
@@ -13137,8 +13412,7 @@ mod self_tests {
 
     #[test]
     fn self_hosted_lexer_matches_rust_for_arithmetic() {
-        let lexer_src =
-            std::fs::read_to_string(self_dir().join("lexer.fav")).expect("lexer.fav");
+        let lexer_src = std::fs::read_to_string(self_dir().join("lexer.fav")).expect("lexer.fav");
         let driver = r#"
 fn tok_str(t: Token) -> String {
     match t {
@@ -13183,8 +13457,11 @@ public fn main() -> Bool !Io {
     }
 }
 "#;
-        let combined = format!("{}
-{}", lexer_src, driver);
+        let combined = format!(
+            "{}
+{}",
+            lexer_src, driver
+        );
         let output = run_favnir_source(&combined);
         let kinds: Vec<&str> = output.trim().lines().collect();
         assert_eq!(
@@ -13196,8 +13473,7 @@ public fn main() -> Bool !Io {
 
     #[test]
     fn self_hosted_lexer_matches_rust_for_keywords() {
-        let lexer_src =
-            std::fs::read_to_string(self_dir().join("lexer.fav")).expect("lexer.fav");
+        let lexer_src = std::fs::read_to_string(self_dir().join("lexer.fav")).expect("lexer.fav");
         let driver = r#"
 fn tok_str(t: Token) -> String {
     match t {
@@ -13226,8 +13502,11 @@ public fn main() -> Bool !Io {
     }
 }
 "#;
-        let combined = format!("{}
-{}", lexer_src, driver);
+        let combined = format!(
+            "{}
+{}",
+            lexer_src, driver
+        );
         let output = run_favnir_source(&combined);
         let kinds: Vec<&str> = output.trim().lines().collect();
         assert_eq!(
@@ -13245,9 +13524,8 @@ public fn main() -> Bool !Io {
         use tempfile::tempdir;
         let path = self_dir().join("compiler.fav");
         let source = std::fs::read_to_string(&path).expect("compiler.fav");
-        let program =
-            crate::frontend::parser::Parser::parse_str(&source, &path.to_string_lossy())
-                .expect("parse compiler.fav");
+        let program = crate::frontend::parser::Parser::parse_str(&source, &path.to_string_lossy())
+            .expect("parse compiler.fav");
         let artifact = build_artifact(&program);
         let dir = tempdir().expect("tempdir");
         let out = dir.path().join("compiler_s1.fvc");
@@ -13265,11 +13543,10 @@ public fn main() -> Bool !Io {
     fn bootstrap_stage1_exec_terminates_normally() {
         let path = self_dir().join("compiler.fav");
         let source = std::fs::read_to_string(&path).expect("compiler.fav");
-        let program =
-            crate::frontend::parser::Parser::parse_str(&source, &path.to_string_lossy())
-                .expect("parse compiler.fav");
+        let program = crate::frontend::parser::Parser::parse_str(&source, &path.to_string_lossy())
+            .expect("parse compiler.fav");
         let artifact = build_artifact(&program);
-        let builder = std::thread::Builder::new().stack_size(64 * 1024 * 1024);
+        let builder = std::thread::Builder::new().stack_size(SELF_HOST_STACK_SIZE);
         let output = builder
             .spawn(move || {
                 crate::backend::vm::start_io_capture();
@@ -13299,7 +13576,7 @@ public fn main() -> Bool !Io {
             let program =
                 crate::frontend::parser::Parser::parse_str(src, "compiler.fav").expect("parse");
             let artifact = build_artifact(&program);
-            let builder = std::thread::Builder::new().stack_size(64 * 1024 * 1024);
+            let builder = std::thread::Builder::new().stack_size(SELF_HOST_STACK_SIZE);
             builder
                 .spawn(move || {
                     crate::backend::vm::start_io_capture();
@@ -13337,7 +13614,7 @@ public fn main() -> Bool !Io {
             .expect("parse compiler.fav");
         let artifact = build_artifact(&program);
 
-        let builder = std::thread::Builder::new().stack_size(64 * 1024 * 1024);
+        let builder = std::thread::Builder::new().stack_size(SELF_HOST_STACK_SIZE);
         let output = builder
             .spawn(move || {
                 crate::backend::vm::set_test_argv(vec![hello_abs]);
@@ -13385,7 +13662,7 @@ public fn main() -> Bool !Io {
             .expect("parse compiler.fav");
         let artifact = build_artifact(&program);
 
-        let builder = std::thread::Builder::new().stack_size(64 * 1024 * 1024);
+        let builder = std::thread::Builder::new().stack_size(SELF_HOST_STACK_SIZE);
         let fav_output = builder
             .spawn(move || {
                 crate::backend::vm::set_test_argv(vec![hello_abs]);
@@ -13416,9 +13693,8 @@ public fn main() -> Bool !Io {
 
         // Get Rust codegen bytes for hello.fav (concatenated code of all functions)
         let hello_src = std::fs::read_to_string(&hello_path).expect("hello.fav");
-        let hello_prog =
-            crate::frontend::parser::Parser::parse_str(&hello_src, "hello.fav")
-                .expect("parse hello.fav");
+        let hello_prog = crate::frontend::parser::Parser::parse_str(&hello_src, "hello.fav")
+            .expect("parse hello.fav");
         let hello_artifact = build_artifact(&hello_prog);
         let rust_bytes: Vec<u8> = hello_artifact
             .functions
@@ -13429,13 +13705,31 @@ public fn main() -> Bool !Io {
         println!("\n=== A-2: Bytecode comparison for hello.fav ===");
         println!("compiler.fav bytes ({}):", fav_bytes.len());
         for chunk in fav_bytes.chunks(16) {
-            println!("  {}", chunk.iter().map(|b| format!("{b:02x}")).collect::<Vec<_>>().join(" "));
+            println!(
+                "  {}",
+                chunk
+                    .iter()
+                    .map(|b| format!("{b:02x}"))
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            );
         }
         println!("Rust codegen bytes ({}):", rust_bytes.len());
         for (i, f) in hello_artifact.functions.iter().enumerate() {
-            let name = hello_artifact.str_table.get(f.name_idx as usize).map(|s| s.as_str()).unwrap_or("?");
-            println!("  fn[{i}] '{name}' ({} bytes): {}", f.code.len(),
-                f.code.iter().map(|b| format!("{b:02x}")).collect::<Vec<_>>().join(" "));
+            let name = hello_artifact
+                .str_table
+                .get(f.name_idx as usize)
+                .map(|s| s.as_str())
+                .unwrap_or("?");
+            println!(
+                "  fn[{i}] '{name}' ({} bytes): {}",
+                f.code.len(),
+                f.code
+                    .iter()
+                    .map(|b| format!("{b:02x}"))
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            );
         }
         println!("Bytes match: {}", fav_bytes == rust_bytes);
         if fav_bytes != rust_bytes {
@@ -13462,7 +13756,7 @@ public fn main() -> Bool !Io {
             .expect("parse compiler.fav");
         let artifact = build_artifact(&program);
 
-        let builder = std::thread::Builder::new().stack_size(64 * 1024 * 1024);
+        let builder = std::thread::Builder::new().stack_size(SELF_HOST_STACK_SIZE);
         let join_result = builder
             .spawn(move || {
                 crate::backend::vm::set_test_argv(vec![compiler_abs]);
@@ -13477,7 +13771,9 @@ public fn main() -> Bool !Io {
         let (vm_result, captured) = match join_result {
             Ok(pair) => pair,
             Err(e) => {
-                let msg = e.downcast_ref::<String>().map(|s| s.as_str())
+                let msg = e
+                    .downcast_ref::<String>()
+                    .map(|s| s.as_str())
                     .or_else(|| e.downcast_ref::<&str>().copied())
                     .unwrap_or("<non-string panic>");
                 panic!("D-1 thread panicked: {msg}");
@@ -13489,9 +13785,15 @@ public fn main() -> Bool !Io {
         if let Err(ref e) = vm_result {
             println!("VM error: {e}");
         }
-        println!("Captured output (first 200 chars): {}", &captured[..captured.len().min(200)]);
+        println!(
+            "Captured output (first 200 chars): {}",
+            &captured[..captured.len().min(200)]
+        );
         let tail_start = captured.len().saturating_sub(3000);
-        println!("Captured output (last 3000 chars): {}", &captured[tail_start..]);
+        println!(
+            "Captured output (last 3000 chars): {}",
+            &captured[tail_start..]
+        );
         if captured.contains("compiled:") {
             let byte_count: usize = captured
                 .lines()
@@ -13502,7 +13804,10 @@ public fn main() -> Bool !Io {
             println!("Stage 2 produced {} bytes", byte_count);
             assert!(byte_count > 0, "Stage 2 must produce non-zero artifact");
         } else {
-            panic!("Stage 2 did not produce 'compiled:' output. VM ok={}", vm_result.is_ok());
+            panic!(
+                "Stage 2 did not produce 'compiled:' output. VM ok={}",
+                vm_result.is_ok()
+            );
         }
     }
 
@@ -13510,22 +13815,26 @@ public fn main() -> Bool !Io {
     fn run_compiler_artifact_on(
         artifact: std::sync::Arc<crate::backend::artifact::FvcArtifact>,
         input_path: String,
-    ) -> (bool, Vec<u8>, String) {
-        let builder = std::thread::Builder::new().stack_size(64 * 1024 * 1024);
-        let (ok, captured) = builder
+    ) -> (bool, Vec<u8>, String, String) {
+        let builder = std::thread::Builder::new().stack_size(SELF_HOST_STACK_SIZE);
+        let (ok, captured, value_dbg) = builder
             .spawn(move || {
                 crate::backend::vm::set_test_argv(vec![input_path]);
                 crate::backend::vm::start_io_capture();
                 let result = exec_artifact_main(&artifact, None);
                 let out = crate::backend::vm::take_io_captured();
                 crate::backend::vm::clear_test_argv();
-                (result.is_ok(), out)
+                let value_dbg = match &result {
+                    Ok(value) => format!("{value:?}"),
+                    Err(err) => err.clone(),
+                };
+                (result.is_ok(), out, value_dbg)
             })
             .expect("spawn")
             .join()
             .expect("join");
         let bytes = parse_compiled_bytes(&captured);
-        (ok, bytes, captured)
+        (ok, bytes, captured, value_dbg)
     }
 
     /// Parse decimal-per-line bytes from compiler.fav output after "compiled: N" line.
@@ -13544,6 +13853,70 @@ public fn main() -> Bool !Io {
             }
         }
         bytes
+    }
+
+    fn build_stage2_compiler_artifact() -> std::sync::Arc<crate::backend::artifact::FvcArtifact> {
+        use crate::backend::artifact::FvcArtifact;
+        use std::sync::Arc;
+
+        let compiler_path = self_dir().join("compiler.fav");
+        let compiler_src = std::fs::read_to_string(&compiler_path).expect("compiler.fav");
+        let compiler_abs = compiler_path.to_string_lossy().to_string();
+        let program = crate::frontend::parser::Parser::parse_str(&compiler_src, "compiler.fav")
+            .expect("parse compiler.fav");
+        let rust_compiled_artifact = Arc::new(build_artifact(&program));
+        let (ok, artifact_bytes, captured, value_dbg) =
+            run_compiler_artifact_on(rust_compiled_artifact, compiler_abs);
+        assert!(ok, "Stage 2 artifact build failed: {value_dbg}\n{captured}");
+        assert!(
+            !artifact_bytes.is_empty(),
+            "Stage 2 artifact build produced empty bytes:\n{captured}"
+        );
+        Arc::new(
+            FvcArtifact::from_bytes(&artifact_bytes)
+                .expect("Stage 2 artifact bytes must parse as FvcArtifact"),
+        )
+    }
+
+    fn exec_artifact_fn(
+        artifact: &crate::backend::artifact::FvcArtifact,
+        fn_name: &str,
+        args: Vec<crate::value::Value>,
+    ) -> Result<crate::value::Value, String> {
+        let fn_idx = artifact
+            .fn_idx_by_name(fn_name)
+            .ok_or_else(|| format!("missing function in artifact: {fn_name}"))?;
+        crate::backend::vm::VM::run(artifact, fn_idx, args)
+            .map_err(|e| format_runtime_error("<artifact>", e))
+    }
+
+    fn print_named_function_meta(
+        label: &str,
+        artifact: &crate::backend::artifact::FvcArtifact,
+        fn_name: &str,
+    ) {
+        let idx = artifact
+            .fn_idx_by_name(fn_name)
+            .unwrap_or_else(|| panic!("missing function in {label}: {fn_name}"));
+        let function = &artifact.functions[idx];
+        println!(
+            "{label} {fn_name} idx={} params={} locals={} consts={} code={}",
+            idx,
+            function.param_count,
+            function.local_count,
+            function.constants.len(),
+            function.code.len()
+        );
+    }
+
+    fn unwrap_ok_variant(value: crate::value::Value, context: &str) -> crate::value::Value {
+        match value {
+            crate::value::Value::Variant(tag, Some(payload)) if tag == "ok" => *payload,
+            crate::value::Value::Variant(tag, Some(payload)) if tag == "Ok" => *payload,
+            crate::value::Value::Variant(tag, Some(payload)) if tag == "some" => *payload,
+            crate::value::Value::Variant(tag, Some(payload)) if tag == "Some" => *payload,
+            other => panic!("{context} returned non-ok result: {other:?}"),
+        }
     }
 
     /// E-3: Full 3-stage bootstrap verification.
@@ -13570,22 +13943,34 @@ public fn main() -> Bool !Io {
         let rust_compiled_artifact = Arc::new(build_artifact(&program));
 
         println!("\n=== Stage 1: compiler.fav → hello.fav → bytecode_A ===");
-        let (s1_ok, bytecode_a, _s1_out) =
+        let (s1_ok, bytecode_a, _s1_out, s1_value) =
             run_compiler_artifact_on(Arc::clone(&rust_compiled_artifact), hello_abs.clone());
-        println!("Stage 1 ok: {s1_ok}, bytecode_A length: {}", bytecode_a.len());
+        println!(
+            "Stage 1 ok: {s1_ok}, return: {s1_value}, bytecode_A length: {}",
+            bytecode_a.len()
+        );
         assert!(s1_ok, "Stage 1 (compile hello.fav) failed");
         assert!(!bytecode_a.is_empty(), "Stage 1 produced empty bytecode_A");
 
         println!("\n=== Stage 2: compiler.fav → compiler.fav → compiler_artifact ===");
-        let (s2_ok, artifact_bytes, _s2_out) =
+        let (s2_ok, artifact_bytes, s2_out, s2_value) =
             run_compiler_artifact_on(Arc::clone(&rust_compiled_artifact), compiler_abs);
-        println!("Stage 2 ok: {s2_ok}, artifact bytes: {}", artifact_bytes.len());
+        println!(
+            "Stage 2 ok: {s2_ok}, return: {s2_value}, artifact bytes: {}",
+            artifact_bytes.len()
+        );
+        if !s2_ok || artifact_bytes.is_empty() {
+            println!("Stage 2 output:\n{s2_out}");
+        }
         assert!(s2_ok, "Stage 2 (self-compile) failed");
-        assert!(!artifact_bytes.is_empty(), "Stage 2 produced empty artifact");
+        assert!(
+            !artifact_bytes.is_empty(),
+            "Stage 2 produced empty artifact"
+        );
 
         // Load the Stage 2 artifact bytes as FvcArtifact
         let compiler_artifact = Arc::new(
-            FvcArtifact::read_from(&mut artifact_bytes.as_slice())
+            FvcArtifact::from_bytes(&artifact_bytes)
                 .expect("Stage 2 artifact bytes must parse as valid FvcArtifact"),
         );
         println!(
@@ -13599,17 +13984,28 @@ public fn main() -> Bool !Io {
         );
 
         println!("\n=== Stage 3: compiler_artifact → hello.fav → bytecode_B ===");
-        let (s3_ok, bytecode_b, s3_out) =
+        let (s3_ok, bytecode_b, s3_out, s3_value) =
             run_compiler_artifact_on(compiler_artifact, hello_abs);
-        println!("Stage 3 ok: {s3_ok}, bytecode_B length: {}", bytecode_b.len());
+        println!(
+            "Stage 3 ok: {s3_ok}, return: {s3_value}, bytecode_B length: {}",
+            bytecode_b.len()
+        );
         if bytecode_b.is_empty() {
             let preview = &s3_out[..s3_out.len().min(500)];
             panic!("Stage 3 produced empty bytecode_B. Full output:\n{preview}");
         }
 
         println!("\n=== Bootstrap result ===");
-        println!("bytecode_A ({} bytes): {:02x?}", bytecode_a.len(), &bytecode_a[..bytecode_a.len().min(32)]);
-        println!("bytecode_B ({} bytes): {:02x?}", bytecode_b.len(), &bytecode_b[..bytecode_b.len().min(32)]);
+        println!(
+            "bytecode_A ({} bytes): {:02x?}",
+            bytecode_a.len(),
+            &bytecode_a[..bytecode_a.len().min(32)]
+        );
+        println!(
+            "bytecode_B ({} bytes): {:02x?}",
+            bytecode_b.len(),
+            &bytecode_b[..bytecode_b.len().min(32)]
+        );
         let matched = bytecode_a == bytecode_b;
         println!("bytecode_A == bytecode_B: {matched}");
         if !matched {
@@ -13620,10 +14016,484 @@ public fn main() -> Bool !Io {
                 }
             }
             if bytecode_a.len() != bytecode_b.len() {
-                println!("Length mismatch: A={} B={}", bytecode_a.len(), bytecode_b.len());
+                println!(
+                    "Length mismatch: A={} B={}",
+                    bytecode_a.len(),
+                    bytecode_b.len()
+                );
             }
         }
-        assert_eq!(bytecode_a, bytecode_b, "Bootstrap failed: bytecode_A != bytecode_B");
+        assert_eq!(
+            bytecode_a, bytecode_b,
+            "Bootstrap failed: bytecode_A != bytecode_B"
+        );
+    }
+
+    #[test]
+    #[ignore]
+    fn bootstrap_full_self_hosting_on_match_collect_source() {
+        use crate::backend::artifact::FvcArtifact;
+        use std::sync::Arc;
+
+        let compiler_path = self_dir().join("compiler.fav");
+        let compiler_src = std::fs::read_to_string(&compiler_path).expect("compiler.fav");
+        let compiler_abs = compiler_path.to_string_lossy().to_string();
+
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let input = tmp.path().join("match_collect_input.fav");
+        std::fs::write(
+            &input,
+            concat!(
+                "type Inner = | A(Int) | B(Int)\n",
+                "type Outer = | Boxed(Inner) | Empty\n",
+                "type Pair = { left: Int, right: Int }\n\n",
+                "fn classify(v: Outer) -> Int {\n",
+                "    match v {\n",
+                "        Boxed(A(x)) => x + 10\n",
+                "        Boxed(B(x)) => x\n",
+                "        Empty => 0\n",
+                "    }\n",
+                "}\n\n",
+                "fn add3(a: Int, b: Int, c: Int) -> Int { a + b + c }\n",
+                "fn project_sum(p: Pair, extra: Int) -> Int { add3(p.left, p.right, extra) }\n\n",
+                "fn main() -> Int {\n",
+                "    bind xs <- collect { yield 1; yield 2; () }\n",
+                "    bind pair <- Pair { left: 2, right: 3 }\n",
+                "    List.length(xs) + classify(Boxed(A(5))) + project_sum(pair, 4)\n",
+                "}\n"
+            ),
+        )
+        .expect("write match_collect_input.fav");
+        let input_abs = input.to_string_lossy().to_string();
+
+        let program = crate::frontend::parser::Parser::parse_str(&compiler_src, "compiler.fav")
+            .expect("parse compiler.fav");
+        let rust_compiled_artifact = Arc::new(build_artifact(&program));
+
+        let (s1_ok, bytecode_a, _s1_out, s1_value) =
+            run_compiler_artifact_on(Arc::clone(&rust_compiled_artifact), input_abs.clone());
+        assert!(s1_ok, "Stage 1 (compile match_collect_input.fav) failed: {s1_value}");
+        assert!(!bytecode_a.is_empty(), "Stage 1 produced empty bytecode_A");
+
+        let (s2_ok, artifact_bytes, s2_out, s2_value) =
+            run_compiler_artifact_on(Arc::clone(&rust_compiled_artifact), compiler_abs);
+        if !s2_ok || artifact_bytes.is_empty() {
+            panic!("Stage 2 (self-compile) failed: {s2_value}\n{s2_out}");
+        }
+
+        let compiler_artifact = Arc::new(
+            FvcArtifact::from_bytes(&artifact_bytes)
+                .expect("Stage 2 artifact bytes must parse as valid FvcArtifact"),
+        );
+
+        let (s3_ok, bytecode_b, s3_out, s3_value) =
+            run_compiler_artifact_on(compiler_artifact, input_abs);
+        if !s3_ok || bytecode_b.is_empty() {
+            panic!("Stage 3 failed: {s3_value}\n{s3_out}");
+        }
+
+        assert_eq!(
+            bytecode_a, bytecode_b,
+            "Bootstrap comparison failed on match/collect-heavy source"
+        );
+    }
+
+    #[test]
+    #[ignore]
+    fn bootstrap_full_self_hosting_on_closure_collect_source() {
+        use crate::backend::artifact::FvcArtifact;
+        use std::sync::Arc;
+
+        let compiler_path = self_dir().join("compiler.fav");
+        let compiler_src = std::fs::read_to_string(&compiler_path).expect("compiler.fav");
+        let compiler_abs = compiler_path.to_string_lossy().to_string();
+
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let input = tmp.path().join("closure_collect_input.fav");
+        std::fs::write(
+            &input,
+            concat!(
+                "fn add3(a: Int, b: Int, c: Int) -> Int { a + b + c }\n",
+                "fn main() -> Int {\n",
+                "    bind offset <- 3\n",
+                "    bind adder <- |x| x + offset\n",
+                "    bind xs <- collect {\n",
+                "        for n in List.range(0, 3) {\n",
+                "            yield add3(n, offset, 1);\n",
+                "        }\n",
+                "    }\n",
+                "    bind count <- List.length(xs)\n",
+                "    add3(count, offset, add3(1, count, 2))\n",
+                "}\n"
+            ),
+        )
+        .expect("write closure_collect_input.fav");
+        let input_abs = input.to_string_lossy().to_string();
+
+        let program = crate::frontend::parser::Parser::parse_str(&compiler_src, "compiler.fav")
+            .expect("parse compiler.fav");
+        let rust_compiled_artifact = Arc::new(build_artifact(&program));
+
+        let (s1_ok, bytecode_a, s1_out, s1_value) =
+            run_compiler_artifact_on(Arc::clone(&rust_compiled_artifact), input_abs.clone());
+        if !s1_ok || bytecode_a.is_empty() {
+            panic!(
+                "Stage 1 (compile closure_collect_input.fav) failed or produced empty bytecode: ok={s1_ok} return={s1_value}\n{s1_out}"
+            );
+        }
+
+        let (s2_ok, artifact_bytes, s2_out, s2_value) =
+            run_compiler_artifact_on(Arc::clone(&rust_compiled_artifact), compiler_abs);
+        if !s2_ok || artifact_bytes.is_empty() {
+            panic!("Stage 2 (self-compile) failed: {s2_value}\n{s2_out}");
+        }
+
+        let compiler_artifact = Arc::new(
+            FvcArtifact::from_bytes(&artifact_bytes)
+                .expect("Stage 2 artifact bytes must parse as valid FvcArtifact"),
+        );
+
+        let (s3_ok, bytecode_b, s3_out, s3_value) =
+            run_compiler_artifact_on(compiler_artifact, input_abs);
+        if !s3_ok || bytecode_b.is_empty() {
+            panic!("Stage 3 failed: {s3_value}\n{s3_out}");
+        }
+
+        assert_eq!(
+            bytecode_a, bytecode_b,
+            "Bootstrap comparison failed on closure/capture/collect-heavy source"
+        );
+    }
+
+    #[test]
+    #[ignore]
+    fn bootstrap_full_self_hosting_on_guarded_match_source() {
+        use crate::backend::artifact::FvcArtifact;
+        use std::sync::Arc;
+
+        let compiler_path = self_dir().join("compiler.fav");
+        let compiler_src = std::fs::read_to_string(&compiler_path).expect("compiler.fav");
+        let compiler_abs = compiler_path.to_string_lossy().to_string();
+
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let input = tmp.path().join("guarded_match_input.fav");
+        std::fs::write(
+            &input,
+            concat!(
+                "type Inner = | A(Int) | B(Int)\n",
+                "type Outer = | Boxed(Inner) | Empty\n\n",
+                "fn classify(v: Outer) -> Int {\n",
+                "    match v {\n",
+                "        Boxed(A(x)) where x > 10 => x\n",
+                "        Boxed(A(x)) => x + 10\n",
+                "        Boxed(B(x)) => x\n",
+                "        Empty => 0\n",
+                "    }\n",
+                "}\n\n",
+                "fn main() -> Int {\n",
+                "    classify(Boxed(A(5))) + classify(Boxed(B(2)))\n",
+                "}\n"
+            ),
+        )
+        .expect("write guarded_match_input.fav");
+        let input_abs = input.to_string_lossy().to_string();
+
+        let program = crate::frontend::parser::Parser::parse_str(&compiler_src, "compiler.fav")
+            .expect("parse compiler.fav");
+        let rust_compiled_artifact = Arc::new(build_artifact(&program));
+
+        let (s1_ok, bytecode_a, _s1_out, s1_value) =
+            run_compiler_artifact_on(Arc::clone(&rust_compiled_artifact), input_abs.clone());
+        assert!(s1_ok, "Stage 1 (compile guarded_match_input.fav) failed: {s1_value}");
+        assert!(!bytecode_a.is_empty(), "Stage 1 produced empty bytecode_A");
+
+        let (s2_ok, artifact_bytes, s2_out, s2_value) =
+            run_compiler_artifact_on(Arc::clone(&rust_compiled_artifact), compiler_abs);
+        if !s2_ok || artifact_bytes.is_empty() {
+            panic!("Stage 2 (self-compile) failed: {s2_value}\n{s2_out}");
+        }
+
+        let compiler_artifact = Arc::new(
+            FvcArtifact::from_bytes(&artifact_bytes)
+                .expect("Stage 2 artifact bytes must parse as valid FvcArtifact"),
+        );
+
+        let (s3_ok, bytecode_b, s3_out, s3_value) =
+            run_compiler_artifact_on(compiler_artifact, input_abs);
+        if !s3_ok || bytecode_b.is_empty() {
+            panic!("Stage 3 failed: {s3_value}\n{s3_out}");
+        }
+
+        assert_eq!(
+            bytecode_a, bytecode_b,
+            "Bootstrap comparison failed on guarded nested-match source"
+        );
+    }
+
+    #[test]
+    #[ignore]
+    fn bootstrap_d3_stage2_artifact_lexes_minimal_source() {
+        let compiler_artifact = build_stage2_compiler_artifact();
+        let source = "fn main() -> Bool { true }\n".to_string();
+        let value = exec_artifact_fn(
+            &compiler_artifact,
+            "lex",
+            vec![crate::value::Value::Str(source.clone())],
+        )
+        .expect("Stage 2 artifact lex(minimal) should run");
+        println!("lex(minimal) => {value:?}");
+    }
+
+    #[test]
+    #[ignore]
+    fn bootstrap_d3_stage2_artifact_lexes_hello_source() {
+        let compiler_artifact = build_stage2_compiler_artifact();
+        let hello_path = self_dir().parent().unwrap().join("tmp").join("hello.fav");
+        let source = std::fs::read_to_string(&hello_path).expect("hello.fav");
+        let value = exec_artifact_fn(
+            &compiler_artifact,
+            "lex",
+            vec![crate::value::Value::Str(source)],
+        );
+        match value {
+            Ok(v) => println!("lex(hello) => {v:?}"),
+            Err(err) => panic!("Stage 2 artifact lex(hello) failed:\n{err}"),
+        }
+    }
+
+    #[test]
+    #[ignore]
+    fn bootstrap_d3_stage2_artifact_parses_hello_source() {
+        let compiler_artifact = build_stage2_compiler_artifact();
+        let hello_path = self_dir().parent().unwrap().join("tmp").join("hello.fav");
+        let source = std::fs::read_to_string(&hello_path).expect("hello.fav");
+        let toks = unwrap_ok_variant(
+            exec_artifact_fn(
+                &compiler_artifact,
+                "lex",
+                vec![crate::value::Value::Str(source)],
+            )
+            .expect("Stage 2 artifact lex(hello) should run"),
+            "Stage 2 artifact lex(hello)",
+        );
+        let prog = exec_artifact_fn(&compiler_artifact, "parse_tokens", vec![toks]);
+        match prog {
+            Ok(v) => println!("parse_tokens(hello) => {v:?}"),
+            Err(err) => panic!("Stage 2 artifact parse_tokens(hello) failed:\n{err}"),
+        }
+    }
+
+    #[test]
+    #[ignore]
+    fn bootstrap_d3_stage2_artifact_debugs_ident_path() {
+        let compiler_artifact = build_stage2_compiler_artifact();
+        let ident = exec_artifact_fn(
+            &compiler_artifact,
+            "debug_ident_token",
+            vec![crate::value::Value::Str("main".into())],
+        )
+        .expect("debug_ident_token should run");
+        let keyword_or_ident = exec_artifact_fn(
+            &compiler_artifact,
+            "debug_keyword_or_ident",
+            vec![crate::value::Value::Str("main".into())],
+        )
+        .expect("debug_keyword_or_ident should run");
+        let keyword = exec_artifact_fn(
+            &compiler_artifact,
+            "keyword_token",
+            vec![crate::value::Value::Str("main".into())],
+        )
+        .expect("keyword_token should run");
+        let none_to_true = exec_artifact_fn(&compiler_artifact, "debug_match_none_to_true", vec![])
+            .expect("debug_match_none_to_true should run");
+        let none_to_ident_const = exec_artifact_fn(
+            &compiler_artifact,
+            "debug_match_none_to_ident_const",
+            vec![],
+        )
+        .expect("debug_match_none_to_ident_const should run");
+        println!("debug_ident_token => {ident:?}");
+        println!("debug_keyword_or_ident => {keyword_or_ident:?}");
+        println!("keyword_token => {keyword:?}");
+        println!("debug_match_none_to_true => {none_to_true:?}");
+        println!("debug_match_none_to_ident_const => {none_to_ident_const:?}");
+    }
+
+    #[test]
+    #[ignore]
+    fn bootstrap_d3_stage2_artifact_executes_nested_variant_payload_match() {
+        let compiler_artifact = build_stage2_compiler_artifact();
+        let value = exec_artifact_fn(&compiler_artifact, "debug_nested_some_ident_match", vec![]);
+        match value {
+            Ok(v) => println!("debug_nested_some_ident_match => {v:?}"),
+            Err(err) => panic!("debug_nested_some_ident_match failed:\n{err}"),
+        }
+    }
+
+    #[test]
+    #[ignore]
+    fn bootstrap_d3_compare_stage2_compiler_artifact_to_rust_artifact() {
+        use std::sync::Arc;
+
+        let compiler_path = self_dir().join("compiler.fav");
+        let compiler_src = std::fs::read_to_string(&compiler_path).expect("compiler.fav");
+        let compiler_abs = compiler_path.to_string_lossy().to_string();
+        let program = crate::frontend::parser::Parser::parse_str(&compiler_src, "compiler.fav")
+            .expect("parse compiler.fav");
+
+        let rust_artifact = build_artifact(&program);
+        let (ok, artifact_bytes, captured, value_dbg) =
+            run_compiler_artifact_on(Arc::new(rust_artifact.clone()), compiler_abs);
+        assert!(ok, "Stage 2 artifact build failed: {value_dbg}\n{captured}");
+        let stage2_artifact = crate::backend::artifact::FvcArtifact::from_bytes(&artifact_bytes)
+            .expect("Stage 2 artifact bytes must parse");
+
+        println!(
+            "rust: {} strings, {} globals, {} functions",
+            rust_artifact.str_table.len(),
+            rust_artifact.globals.len(),
+            rust_artifact.functions.len()
+        );
+        println!(
+            "stage2: {} strings, {} globals, {} functions",
+            stage2_artifact.str_table.len(),
+            stage2_artifact.globals.len(),
+            stage2_artifact.functions.len()
+        );
+
+        assert_eq!(
+            rust_artifact.functions.len(),
+            stage2_artifact.functions.len(),
+            "function count mismatch"
+        );
+
+        for (idx, (rf, sf)) in rust_artifact
+            .functions
+            .iter()
+            .zip(stage2_artifact.functions.iter())
+            .enumerate()
+        {
+            let rname = rust_artifact
+                .str_table
+                .get(rf.name_idx as usize)
+                .map(|s| s.as_str())
+                .unwrap_or("?");
+            let sname = stage2_artifact
+                .str_table
+                .get(sf.name_idx as usize)
+                .map(|s| s.as_str())
+                .unwrap_or("?");
+            if rname != sname
+                || rf.param_count != sf.param_count
+                || rf.local_count != sf.local_count
+                || rf.return_ty_str_idx != sf.return_ty_str_idx
+                || rf.effect_str_idx != sf.effect_str_idx
+                || rf.constants != sf.constants
+                || rf.code != sf.code
+            {
+                println!("first mismatch at fn[{idx}] rust={rname} stage2={sname}");
+                println!(
+                    "  params/local rust={}/{} stage2={}/{}",
+                    rf.param_count, rf.local_count, sf.param_count, sf.local_count
+                );
+                println!(
+                    "  ret/effect rust={}/{} stage2={}/{}",
+                    rf.return_ty_str_idx,
+                    rf.effect_str_idx,
+                    sf.return_ty_str_idx,
+                    sf.effect_str_idx
+                );
+                println!("  rust consts: {:?}", rf.constants);
+                println!("  stage2 consts: {:?}", sf.constants);
+                println!("  rust code: {:?}", rf.code);
+                println!("  stage2 code: {:?}", sf.code);
+                panic!("stage2 artifact diverges from rust artifact");
+            }
+        }
+    }
+
+    #[test]
+    #[ignore]
+    fn bootstrap_d3_compare_parse_primary_between_rust_and_stage2() {
+        use std::sync::Arc;
+
+        let compiler_path = self_dir().join("compiler.fav");
+        let compiler_src = std::fs::read_to_string(&compiler_path).expect("compiler.fav");
+        let compiler_abs = compiler_path.to_string_lossy().to_string();
+        let program = crate::frontend::parser::Parser::parse_str(&compiler_src, "compiler.fav")
+            .expect("parse compiler.fav");
+
+        let rust_artifact = build_artifact(&program);
+        let (ok, artifact_bytes, captured, value_dbg) =
+            run_compiler_artifact_on(Arc::new(rust_artifact.clone()), compiler_abs);
+        assert!(ok, "Stage 2 artifact build failed: {value_dbg}\n{captured}");
+        let stage2_artifact = crate::backend::artifact::FvcArtifact::from_bytes(&artifact_bytes)
+            .expect("Stage 2 artifact bytes must parse");
+
+        let rust_idx = rust_artifact
+            .fn_idx_by_name("parse_primary")
+            .expect("rust parse_primary");
+        let stage2_idx = stage2_artifact
+            .fn_idx_by_name("parse_primary")
+            .expect("stage2 parse_primary");
+
+        let rust_fn = &rust_artifact.functions[rust_idx];
+        let stage2_fn = &stage2_artifact.functions[stage2_idx];
+
+        println!("rust parse_primary idx={rust_idx}");
+        println!("stage2 parse_primary idx={stage2_idx}");
+        println!(
+            "rust params={} locals={} consts={} code={}",
+            rust_fn.param_count,
+            rust_fn.local_count,
+            rust_fn.constants.len(),
+            rust_fn.code.len()
+        );
+        println!(
+            "stage2 params={} locals={} consts={} code={}",
+            stage2_fn.param_count,
+            stage2_fn.local_count,
+            stage2_fn.constants.len(),
+            stage2_fn.code.len()
+        );
+        println!("rust consts: {:?}", rust_fn.constants);
+        println!("stage2 consts: {:?}", stage2_fn.constants);
+        println!("rust code: {:?}", rust_fn.code);
+        println!("stage2 code: {:?}", stage2_fn.code);
+    }
+
+    #[test]
+    #[ignore]
+    fn bootstrap_d3_compare_parser_function_shapes_between_rust_and_stage2() {
+        use std::sync::Arc;
+
+        let compiler_path = self_dir().join("compiler.fav");
+        let compiler_src = std::fs::read_to_string(&compiler_path).expect("compiler.fav");
+        let compiler_abs = compiler_path.to_string_lossy().to_string();
+        let program = crate::frontend::parser::Parser::parse_str(&compiler_src, "compiler.fav")
+            .expect("parse compiler.fav");
+
+        let rust_artifact = build_artifact(&program);
+        let (ok, artifact_bytes, captured, value_dbg) =
+            run_compiler_artifact_on(Arc::new(rust_artifact.clone()), compiler_abs);
+        assert!(ok, "Stage 2 artifact build failed: {value_dbg}\n{captured}");
+        let stage2_artifact = crate::backend::artifact::FvcArtifact::from_bytes(&artifact_bytes)
+            .expect("Stage 2 artifact bytes must parse");
+
+        for fn_name in [
+            "parse_primary",
+            "parse_postfix",
+            "parse_call_args",
+            "parse_match_arms",
+            "parse_expr",
+            "parse_block_inner",
+            "compile_expr",
+            "compile_if",
+        ] {
+            print_named_function_meta("rust", &rust_artifact, fn_name);
+            print_named_function_meta("stage2", &stage2_artifact, fn_name);
+        }
     }
 
     /// A-3: Try to compile compiler.fav using compiler.fav itself (Stage 2 trial).
@@ -13639,7 +14509,7 @@ public fn main() -> Bool !Io {
             .expect("parse compiler.fav");
         let artifact = build_artifact(&program);
 
-        let builder = std::thread::Builder::new().stack_size(64 * 1024 * 1024);
+        let builder = std::thread::Builder::new().stack_size(SELF_HOST_STACK_SIZE);
         let (vm_result, captured) = builder
             .spawn(move || {
                 crate::backend::vm::set_test_argv(vec![compiler_abs]);
@@ -13672,7 +14542,7 @@ public fn main() -> Bool !Io {
         }
     }
 
-    /// C-2: Verify that compiler.fav's serialized artifact can be parsed by FvcWriter::read_from.
+    /// C-2: Verify that compiler.fav's serialized artifact can be parsed by Rust and matches codegen.
     /// Checks format compatibility between the Favnir serializer and the Rust deserializer.
     #[test]
     fn bootstrap_c2_artifact_roundtrip() {
@@ -13686,7 +14556,7 @@ public fn main() -> Bool !Io {
             .expect("parse compiler.fav");
         let compiler_artifact = build_artifact(&program);
 
-        let builder = std::thread::Builder::new().stack_size(64 * 1024 * 1024);
+        let builder = std::thread::Builder::new().stack_size(SELF_HOST_STACK_SIZE);
         let output = builder
             .spawn(move || {
                 crate::backend::vm::set_test_argv(vec![hello_abs]);
@@ -13700,7 +14570,11 @@ public fn main() -> Bool !Io {
             .join()
             .expect("join");
 
-        assert!(output.contains("compiled:"), "Expected 'compiled:' in output, got: {:?}", output);
+        assert!(
+            output.contains("compiled:"),
+            "Expected 'compiled:' in output, got: {:?}",
+            output
+        );
 
         // Decode the byte values printed after "compiled: N"
         let mut fav_bytes: Vec<u8> = Vec::new();
@@ -13716,43 +14590,1066 @@ public fn main() -> Bool !Io {
                 }
             }
         }
-        assert!(!fav_bytes.is_empty(), "C-2: Expected non-empty artifact bytes from Stage 1");
-
-        // Parse those bytes as a Rust FvcWriter artifact
-        let mut cursor = std::io::Cursor::new(&fav_bytes);
-        let loaded = crate::backend::artifact::FvcArtifact::read_from(&mut cursor)
-            .expect("C-2: FvcArtifact::read_from must parse compiler.fav's artifact output");
-
-        // Verify the expected function names are in the string table
         assert!(
-            loaded.str_table.iter().any(|s| s == "add"),
-            "C-2: str_table must contain 'add', got: {:?}",
-            loaded.str_table
+            !fav_bytes.is_empty(),
+            "C-2: Expected non-empty artifact bytes from Stage 1"
         );
-        assert!(
-            loaded.str_table.iter().any(|s| s == "main"),
-            "C-2: str_table must contain 'main', got: {:?}",
-            loaded.str_table
-        );
+
+        let loaded = crate::backend::artifact::FvcArtifact::from_bytes(&fav_bytes)
+            .expect("C-2: FvcArtifact::from_bytes must parse compiler.fav's artifact output");
+
         assert_eq!(
             loaded.functions.len(),
             2,
-            "C-2: hello.fav must compile to exactly 2 functions (add + main)"
+            "C-2: hello.fav must compile to 2 functions"
+        );
+        assert_eq!(loaded.fn_idx_by_name("add"), Some(0));
+        assert_eq!(loaded.fn_idx_by_name("main"), Some(1));
+
+        let add_fn = &loaded.functions[0];
+        assert_eq!(add_fn.param_count, 2, "C-2: add must keep arity 2");
+        assert_eq!(
+            add_fn.code,
+            vec![16, 0, 0, 16, 1, 0, 32, 22],
+            "C-2: add bytecode must round-trip exactly"
+        );
+
+        let main_fn = &loaded.functions[1];
+        assert!(
+            main_fn
+                .code
+                .contains(&(crate::backend::codegen::Opcode::CallNamed as u8)),
+            "C-2: self-hosted artifact must preserve CallNamed in main"
+        );
+
+        let value =
+            exec_artifact_main(&loaded, None).expect("C-2: loaded hello artifact should run");
+        assert_eq!(
+            value,
+            crate::value::Value::Bool(true),
+            "C-2: loaded hello artifact must evaluate to true"
         );
     }
-}
-    fn run_favnir_source(source: &str) -> String {
-        use crate::frontend::parser::Parser;
-        let source = source.to_string();
-        let builder = std::thread::Builder::new().stack_size(64 * 1024 * 1024);
-        let handle = builder
-            .spawn(move || {
-                let program = Parser::parse_str(&source, "test_inline.fav").expect("parse");
-                let artifact = build_artifact(&program);
-                crate::backend::vm::start_io_capture();
-                exec_artifact_main(&artifact, None).expect("exec");
-                crate::backend::vm::take_io_captured()
-            })
-            .expect("spawn");
-        handle.join().expect("thread join")
+
+    #[test]
+    fn bootstrap_d2_compiles_small_lambda_program() {
+        use std::sync::Arc;
+
+        let compiler_path = self_dir().join("compiler.fav");
+        let compiler_src = std::fs::read_to_string(&compiler_path).expect("compiler.fav");
+        let program = crate::frontend::parser::Parser::parse_str(&compiler_src, "compiler.fav")
+            .expect("parse compiler.fav");
+        let compiler_artifact = Arc::new(build_artifact(&program));
+
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let input = tmp.path().join("lambda_input.fav");
+        std::fs::write(
+            &input,
+            "fn main() -> Int {\n    bind f <- |x| x + 1\n    0\n}\n",
+        )
+        .expect("write lambda_input.fav");
+
+        let (ok, artifact_bytes, captured, value_dbg) =
+            run_compiler_artifact_on(
+                Arc::clone(&compiler_artifact),
+                input.to_string_lossy().to_string(),
+            );
+        assert!(ok, "small lambda compile failed: {value_dbg}\n{captured}");
+        assert!(
+            !artifact_bytes.is_empty(),
+            "small lambda compile produced empty artifact:\n{captured}"
+        );
+        let loaded = crate::backend::artifact::FvcArtifact::from_bytes(&artifact_bytes)
+            .expect("small lambda output must parse as FvcArtifact");
+        assert!(
+            loaded.functions.len() >= 2,
+            "small lambda compile must emit at least main + lambda, got {}",
+            loaded.functions.len()
+        );
+        assert!(
+            loaded.fn_idx_by_name("main").is_some(),
+            "small lambda compile must emit main"
+        );
     }
+
+    #[test]
+    fn bootstrap_d2_compiles_capturing_lambda_program() {
+        use std::sync::Arc;
+
+        let compiler_path = self_dir().join("compiler.fav");
+        let compiler_src = std::fs::read_to_string(&compiler_path).expect("compiler.fav");
+        let program = crate::frontend::parser::Parser::parse_str(&compiler_src, "compiler.fav")
+            .expect("parse compiler.fav");
+        let compiler_artifact = Arc::new(build_artifact(&program));
+
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let input = tmp.path().join("lambda_capture_input.fav");
+        std::fs::write(
+            &input,
+            "fn main() -> Int {\n    bind y <- 1\n    bind xs <- List.singleton(2)\n    bind zs <- List.map(xs, |x| x + y)\n    0\n}\n",
+        )
+        .expect("write lambda_capture_input.fav");
+
+        let (ok, artifact_bytes, captured, value_dbg) = run_compiler_artifact_on(
+            Arc::clone(&compiler_artifact),
+            input.to_string_lossy().to_string(),
+        );
+        assert!(ok, "capturing lambda compile failed: {value_dbg}\n{captured}");
+        assert!(
+            !artifact_bytes.is_empty(),
+            "capturing lambda compile produced empty artifact:\n{captured}"
+        );
+        let loaded = crate::backend::artifact::FvcArtifact::from_bytes(&artifact_bytes)
+            .expect("capturing lambda output must parse as FvcArtifact");
+        assert!(
+            loaded.functions.len() >= 2,
+            "capturing lambda compile must emit at least main + lambda, got {}",
+            loaded.functions.len()
+        );
+    }
+
+    #[test]
+    fn bootstrap_d2_executes_closure_capture_for_in_collect_program() {
+        use std::sync::Arc;
+
+        let compiler_path = self_dir().join("compiler.fav");
+        let compiler_src = std::fs::read_to_string(&compiler_path).expect("compiler.fav");
+        let program = crate::frontend::parser::Parser::parse_str(&compiler_src, "compiler.fav")
+            .expect("parse compiler.fav");
+        let compiler_artifact = Arc::new(build_artifact(&program));
+
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let input = tmp.path().join("closure_collect_exec_input.fav");
+        std::fs::write(
+            &input,
+            concat!(
+                "fn add3(a: Int, b: Int, c: Int) -> Int { a + b + c }\n",
+                "fn main() -> Int {\n",
+                "    bind offset <- 3\n",
+                "    bind adder <- |x| x + offset\n",
+                "    bind xs <- collect {\n",
+                "        for n in List.range(0, 3) {\n",
+                "            yield add3(n, offset, 1);\n",
+                "        }\n",
+                "    }\n",
+                "    bind count <- List.length(xs)\n",
+                "    add3(count, offset, add3(1, count, 2))\n",
+                "}\n"
+            ),
+        )
+        .expect("write closure_collect_exec_input.fav");
+
+        let (ok, artifact_bytes, captured, value_dbg) = run_compiler_artifact_on(
+            Arc::clone(&compiler_artifact),
+            input.to_string_lossy().to_string(),
+        );
+        assert!(
+            ok,
+            "closure/collect compile failed: {value_dbg}\n{captured}"
+        );
+        assert!(
+            !artifact_bytes.is_empty(),
+            "closure/collect compile produced empty artifact:\n{captured}"
+        );
+
+        let loaded = crate::backend::artifact::FvcArtifact::from_bytes(&artifact_bytes)
+            .expect("closure/collect output must parse as FvcArtifact");
+        assert!(
+            loaded.functions.len() >= 3,
+            "closure/collect compile must emit at least main + captured lambda + for lambda, got {}",
+            loaded.functions.len()
+        );
+        let value = exec_artifact_main(&loaded, None).expect("exec closure/collect artifact");
+        assert_eq!(
+            value,
+            crate::value::Value::Int(12),
+            "closure capture + for-in-collect program must execute correctly through the self-hosted artifact"
+        );
+    }
+
+    #[test]
+    fn bootstrap_d2_executes_multi_capture_filter_closure() {
+        use std::sync::Arc;
+
+        let compiler_path = self_dir().join("compiler.fav");
+        let compiler_src = std::fs::read_to_string(&compiler_path).expect("compiler.fav");
+        let program = crate::frontend::parser::Parser::parse_str(&compiler_src, "compiler.fav")
+            .expect("parse compiler.fav");
+        let compiler_artifact = Arc::new(build_artifact(&program));
+
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let input = tmp.path().join("multi_capture_filter_input.fav");
+        std::fs::write(
+            &input,
+            concat!(
+                "fn main() -> Bool {\n",
+                "    bind low <- 1\n",
+                "    bind unused <- 99\n",
+                "    bind high <- 4\n",
+                "    bind xs <- List.range(0, 6)\n",
+                "    bind ys <- List.filter(xs, |x| x > low && x < high)\n",
+                "    List.length(ys) == 2\n",
+                "}\n"
+            ),
+        )
+        .expect("write multi_capture_filter_input.fav");
+
+        let (ok, artifact_bytes, captured, value_dbg) = run_compiler_artifact_on(
+            Arc::clone(&compiler_artifact),
+            input.to_string_lossy().to_string(),
+        );
+        assert!(
+            ok,
+            "multi-capture filter compile failed: {value_dbg}\n{captured}"
+        );
+        assert!(
+            !artifact_bytes.is_empty(),
+            "multi-capture filter compile produced empty artifact:\n{captured}"
+        );
+
+        let loaded = crate::backend::artifact::FvcArtifact::from_bytes(&artifact_bytes)
+            .expect("multi-capture filter output must parse as FvcArtifact");
+        assert!(
+            loaded.functions.len() >= 2,
+            "multi-capture filter compile must emit at least main + lambda, got {}",
+            loaded.functions.len()
+        );
+        let value =
+            exec_artifact_main(&loaded, None).expect("exec multi-capture filter artifact");
+        assert_eq!(
+            value,
+            crate::value::Value::Bool(true),
+            "multi-capture filter closure must preserve capture selection and order through the self-hosted artifact"
+        );
+    }
+
+    #[test]
+    fn bootstrap_d2_executes_local_captured_closure_call() {
+        use std::sync::Arc;
+
+        let compiler_path = self_dir().join("compiler.fav");
+        let compiler_src = std::fs::read_to_string(&compiler_path).expect("compiler.fav");
+        let program = crate::frontend::parser::Parser::parse_str(&compiler_src, "compiler.fav")
+            .expect("parse compiler.fav");
+        let compiler_artifact = Arc::new(build_artifact(&program));
+
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let input = tmp.path().join("local_closure_call_input.fav");
+        std::fs::write(
+            &input,
+            concat!(
+                "fn main() -> Int {\n",
+                "    bind y <- 2\n",
+                "    bind f <- |x| x + y\n",
+                "    f(10)\n",
+                "}\n"
+            ),
+        )
+        .expect("write local_closure_call_input.fav");
+
+        let (ok, artifact_bytes, captured, value_dbg) = run_compiler_artifact_on(
+            Arc::clone(&compiler_artifact),
+            input.to_string_lossy().to_string(),
+        );
+        assert!(
+            ok,
+            "local captured closure call compile failed: {value_dbg}\n{captured}"
+        );
+        assert!(
+            !artifact_bytes.is_empty(),
+            "local captured closure call compile produced empty artifact:\n{captured}"
+        );
+
+        let loaded = crate::backend::artifact::FvcArtifact::from_bytes(&artifact_bytes)
+            .expect("local captured closure call output must parse as FvcArtifact");
+        let value = exec_artifact_main(&loaded, None)
+            .expect("exec local captured closure call artifact");
+        assert_eq!(
+            value,
+            crate::value::Value::Int(12),
+            "local captured closure call syntax must execute through the self-hosted artifact"
+        );
+    }
+
+    #[test]
+    fn bootstrap_d2_executes_nested_call_with_record_fields_in_closure() {
+        use std::sync::Arc;
+
+        let compiler_path = self_dir().join("compiler.fav");
+        let compiler_src = std::fs::read_to_string(&compiler_path).expect("compiler.fav");
+        let program = crate::frontend::parser::Parser::parse_str(&compiler_src, "compiler.fav")
+            .expect("parse compiler.fav");
+        let compiler_artifact = Arc::new(build_artifact(&program));
+
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let input = tmp.path().join("nested_call_record_closure_input.fav");
+        std::fs::write(
+            &input,
+            concat!(
+                "type Pair = { left: Int, right: Int }\n\n",
+                "fn add3(a: Int, b: Int, c: Int) -> Int { a + b + c }\n\n",
+                "fn main() -> Bool {\n",
+                "    bind pair <- Pair { left: 2, right: 5 }\n",
+                "    bind xs <- List.range(1, 4)\n",
+                "    bind ys <- List.map(xs, |x| add3(pair.left, x, pair.right))\n",
+                "    List.length(ys) == 3 && List.length(List.filter(ys, |n| n > 7 && n < 11)) == 3\n",
+                "}\n"
+            ),
+        )
+        .expect("write nested_call_record_closure_input.fav");
+
+        let (ok, artifact_bytes, captured, value_dbg) = run_compiler_artifact_on(
+            Arc::clone(&compiler_artifact),
+            input.to_string_lossy().to_string(),
+        );
+        assert!(
+            ok,
+            "nested call + record-field closure compile failed: {value_dbg}\n{captured}"
+        );
+        assert!(
+            !artifact_bytes.is_empty(),
+            "nested call + record-field closure compile produced empty artifact:\n{captured}"
+        );
+
+        let loaded = crate::backend::artifact::FvcArtifact::from_bytes(&artifact_bytes)
+            .expect("nested call + record-field closure output must parse as FvcArtifact");
+        let value = exec_artifact_main(&loaded, None)
+            .expect("exec nested call + record-field closure artifact");
+        assert_eq!(
+            value,
+            crate::value::Value::Bool(true),
+            "nested calls with record fields inside closure bodies must preserve argument lowering through the self-hosted artifact"
+        );
+    }
+
+    fn nested_and_then_expr(depth: usize) -> String {
+        let mut expr = "0".to_string();
+        for i in (0..depth).rev() {
+            expr = format!(
+                "Result.and_then(foo{}, |v{}| {})",
+                i, i, expr
+            );
+        }
+        expr
+    }
+
+    #[test]
+    fn bootstrap_d2_compiles_nested_and_then_lambdas() {
+        use std::sync::Arc;
+
+        let compiler_path = self_dir().join("compiler.fav");
+        let compiler_src = std::fs::read_to_string(&compiler_path).expect("compiler.fav");
+        let program = crate::frontend::parser::Parser::parse_str(&compiler_src, "compiler.fav")
+            .expect("parse compiler.fav");
+        let compiler_artifact = Arc::new(build_artifact(&program));
+
+        let tmp = tempfile::tempdir().expect("tempdir");
+        for depth in [40usize, 120usize] {
+            let input = tmp.path().join(format!("nested_and_then_input_{depth}.fav"));
+            let body = nested_and_then_expr(depth);
+            let src = format!("fn main() -> Int {{\n    {}\n}}\n", body);
+            std::fs::write(&input, src).expect("write nested_and_then_input.fav");
+
+            let (ok, artifact_bytes, captured, value_dbg) = run_compiler_artifact_on(
+                Arc::clone(&compiler_artifact),
+                input.to_string_lossy().to_string(),
+            );
+            assert!(
+                ok,
+                "nested and_then compile failed at depth {depth}: {value_dbg}\n{captured}"
+            );
+            assert!(
+                !artifact_bytes.is_empty(),
+                "nested and_then compile produced empty artifact at depth {depth}:\n{captured}"
+            );
+        }
+    }
+
+    #[test]
+    fn bootstrap_d2_executes_drop_while_with_original_arg_order() {
+        use std::sync::Arc;
+
+        let compiler_path = self_dir().join("compiler.fav");
+        let compiler_src = std::fs::read_to_string(&compiler_path).expect("compiler.fav");
+        let program = crate::frontend::parser::Parser::parse_str(&compiler_src, "compiler.fav")
+            .expect("parse compiler.fav");
+        let compiler_artifact = Arc::new(build_artifact(&program));
+
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let input = tmp.path().join("drop_while_input.fav");
+        let source = concat!(
+            "fn main() -> Bool {\n",
+            "    bind xs <- List.push(List.push(List.singleton(\"\"), \"a\"), \"b\")\n",
+            "    bind trimmed <- List.drop_while(xs, |s| s == \"\")\n",
+            "    List.length(trimmed) == 2\n",
+            "}\n"
+        );
+        std::fs::write(&input, source)
+        .expect("write drop_while_input.fav");
+
+        let (ok, artifact_bytes, captured, value_dbg) = run_compiler_artifact_on(
+            Arc::clone(&compiler_artifact),
+            input.to_string_lossy().to_string(),
+        );
+        assert!(ok, "drop_while compile failed: {value_dbg}\n{captured}");
+        assert!(
+            !artifact_bytes.is_empty(),
+            "drop_while compile produced empty artifact:\n{captured}"
+        );
+
+        let loaded = crate::backend::artifact::FvcArtifact::from_bytes(&artifact_bytes)
+            .expect("drop_while output must parse as FvcArtifact");
+        let value = exec_artifact_main(&loaded, None).expect("exec drop_while artifact");
+        if value != crate::value::Value::Bool(true) {
+            let rust_program =
+                crate::frontend::parser::Parser::parse_str(source, "drop_while_input.fav")
+                    .expect("parse rust drop_while source");
+            let rust_artifact = build_artifact(&rust_program);
+            println!("-- rust artifact --");
+            for (idx, function) in rust_artifact.functions.iter().enumerate() {
+                let name = rust_artifact
+                    .str_table
+                    .get(function.name_idx as usize)
+                    .map(|s| s.as_str())
+                    .unwrap_or("?");
+                println!(
+                    "fn[{idx}] {name} arity={} locals={} code={:?}",
+                    function.param_count, function.local_count, function.code
+                );
+            }
+            println!("-- self-hosted artifact --");
+            for (idx, function) in loaded.functions.iter().enumerate() {
+                let name = loaded
+                    .str_table
+                    .get(function.name_idx as usize)
+                    .map(|s| s.as_str())
+                    .unwrap_or("?");
+                println!(
+                    "fn[{idx}] {name} arity={} locals={} code={:?} consts={:?}",
+                    function.param_count,
+                    function.local_count,
+                    function.code,
+                    function.constants
+                );
+            }
+        }
+        assert_eq!(
+            value,
+            crate::value::Value::Bool(true),
+            "drop_while self-hosted artifact must preserve argument order"
+        );
+    }
+
+    #[test]
+    fn bootstrap_d2_executes_simple_named_list_calls() {
+        use std::sync::Arc;
+
+        let compiler_path = self_dir().join("compiler.fav");
+        let compiler_src = std::fs::read_to_string(&compiler_path).expect("compiler.fav");
+        let program = crate::frontend::parser::Parser::parse_str(&compiler_src, "compiler.fav")
+            .expect("parse compiler.fav");
+        let compiler_artifact = Arc::new(build_artifact(&program));
+
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let input = tmp.path().join("named_list_calls_input.fav");
+        std::fs::write(
+            &input,
+            concat!(
+                "fn main() -> Bool {\n",
+                "    List.length(List.push(List.push(List.singleton(\"\"), \"a\"), \"b\")) == 3\n",
+                "}\n"
+            ),
+        )
+        .expect("write named_list_calls_input.fav");
+
+        let (ok, artifact_bytes, captured, value_dbg) = run_compiler_artifact_on(
+            Arc::clone(&compiler_artifact),
+            input.to_string_lossy().to_string(),
+        );
+        assert!(ok, "named list call compile failed: {value_dbg}\n{captured}");
+        assert!(
+            !artifact_bytes.is_empty(),
+            "named list call compile produced empty artifact:\n{captured}"
+        );
+
+        let loaded = crate::backend::artifact::FvcArtifact::from_bytes(&artifact_bytes)
+            .expect("named list call output must parse as FvcArtifact");
+        let value = exec_artifact_main(&loaded, None).expect("exec named list call artifact");
+        if value != crate::value::Value::Bool(true) {
+            let debug_input = tmp.path().join("named_list_calls_len_input.fav");
+            std::fs::write(
+                &debug_input,
+                concat!(
+                    "fn main() -> Int {\n",
+                    "    List.length(List.push(List.push(List.singleton(\"\"), \"a\"), \"b\"))\n",
+                    "}\n"
+                ),
+            )
+            .expect("write named_list_calls_len_input.fav");
+            let (ok2, artifact_bytes2, captured2, value_dbg2) = run_compiler_artifact_on(
+                Arc::clone(&compiler_artifact),
+                debug_input.to_string_lossy().to_string(),
+            );
+            println!("debug len compile ok={ok2} value_dbg={value_dbg2} captured={captured2}");
+            if ok2 && !artifact_bytes2.is_empty() {
+                let loaded2 = crate::backend::artifact::FvcArtifact::from_bytes(&artifact_bytes2)
+                    .expect("named list len output must parse as FvcArtifact");
+                let value2 =
+                    exec_artifact_main(&loaded2, None).expect("exec named list len artifact");
+                println!("debug len value={value2:?}");
+            }
+        }
+        assert_eq!(
+            value,
+            crate::value::Value::Bool(true),
+            "named list calls must execute through self-hosted artifacts"
+        );
+    }
+
+    #[test]
+    fn bootstrap_d2_executes_variant_constructor_calls() {
+        use std::sync::Arc;
+
+        let compiler_path = self_dir().join("compiler.fav");
+        let compiler_src = std::fs::read_to_string(&compiler_path).expect("compiler.fav");
+        let program = crate::frontend::parser::Parser::parse_str(&compiler_src, "compiler.fav")
+            .expect("parse compiler.fav");
+        let compiler_artifact = Arc::new(build_artifact(&program));
+
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let input = tmp.path().join("variant_ctor_input.fav");
+        std::fs::write(
+            &input,
+            concat!(
+                "type Token =\n",
+                "  | TkIdent(String)\n\n",
+                "fn main() -> Bool {\n",
+                "    match TkIdent(\"hello\") {\n",
+                "        TkIdent(name) => name == \"hello\"\n",
+                "        _ => false\n",
+                "    }\n",
+                "}\n"
+            ),
+        )
+        .expect("write variant_ctor_input.fav");
+
+        let (ok, artifact_bytes, captured, value_dbg) =
+            run_compiler_artifact_on(compiler_artifact, input.to_string_lossy().to_string());
+        assert!(ok, "variant constructor compile failed: {value_dbg}\n{captured}");
+        assert!(
+            !artifact_bytes.is_empty(),
+            "variant constructor compile produced empty artifact:\n{captured}"
+        );
+
+        let loaded = crate::backend::artifact::FvcArtifact::from_bytes(&artifact_bytes)
+            .expect("variant constructor output must parse as FvcArtifact");
+        let value = exec_artifact_main(&loaded, None).expect("exec variant constructor artifact");
+        assert_eq!(
+            value,
+            crate::value::Value::Bool(true),
+            "variant constructor calls must execute through self-hosted artifacts"
+        );
+    }
+
+    #[test]
+    fn bootstrap_d2_executes_multi_field_record_literals() {
+        use std::sync::Arc;
+
+        let compiler_path = self_dir().join("compiler.fav");
+        let compiler_src = std::fs::read_to_string(&compiler_path).expect("compiler.fav");
+        let program = crate::frontend::parser::Parser::parse_str(&compiler_src, "compiler.fav")
+            .expect("parse compiler.fav");
+        let compiler_artifact = Arc::new(build_artifact(&program));
+
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let input = tmp.path().join("record_literal_input.fav");
+        std::fs::write(
+            &input,
+            concat!(
+                "type User = { id: Int, name: String, active: Bool }\n\n",
+                "fn main() -> Bool {\n",
+                "    bind user <- User { id: 7, name: \"neo\", active: true }\n",
+                "    user.id == 7 && user.name == \"neo\" && user.active == true\n",
+                "}\n"
+            ),
+        )
+        .expect("write record_literal_input.fav");
+
+        let (ok, artifact_bytes, captured, value_dbg) = run_compiler_artifact_on(
+            Arc::clone(&compiler_artifact),
+            input.to_string_lossy().to_string(),
+        );
+        assert!(ok, "record literal compile failed: {value_dbg}\n{captured}");
+        assert!(
+            !artifact_bytes.is_empty(),
+            "record literal compile produced empty artifact:\n{captured}"
+        );
+
+        let loaded = crate::backend::artifact::FvcArtifact::from_bytes(&artifact_bytes)
+            .expect("record literal output must parse as FvcArtifact");
+        let value = exec_artifact_main(&loaded, None).expect("exec record literal artifact");
+        assert_eq!(
+            value,
+            crate::value::Value::Bool(true),
+            "multi-field record literals must preserve field/value alignment"
+        );
+    }
+
+    #[test]
+    fn bootstrap_d2_executes_multi_param_functions_in_declared_order() {
+        use std::sync::Arc;
+
+        let compiler_path = self_dir().join("compiler.fav");
+        let compiler_src = std::fs::read_to_string(&compiler_path).expect("compiler.fav");
+        let program = crate::frontend::parser::Parser::parse_str(&compiler_src, "compiler.fav")
+            .expect("parse compiler.fav");
+        let compiler_artifact = Arc::new(build_artifact(&program));
+
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let input = tmp.path().join("multi_param_input.fav");
+        std::fs::write(
+            &input,
+            concat!(
+                "fn sub(left: Int, right: Int) -> Int {\n",
+                "    left - right\n",
+                "}\n\n",
+                "fn main() -> Bool {\n",
+                "    sub(10, 3) == 7\n",
+                "}\n"
+            ),
+        )
+        .expect("write multi_param_input.fav");
+
+        let (ok, artifact_bytes, captured, value_dbg) = run_compiler_artifact_on(
+            Arc::clone(&compiler_artifact),
+            input.to_string_lossy().to_string(),
+        );
+        assert!(ok, "multi-param compile failed: {value_dbg}\n{captured}");
+        assert!(
+            !artifact_bytes.is_empty(),
+            "multi-param compile produced empty artifact:\n{captured}"
+        );
+
+        let loaded = crate::backend::artifact::FvcArtifact::from_bytes(&artifact_bytes)
+            .expect("multi-param output must parse as FvcArtifact");
+        let value = exec_artifact_main(&loaded, None).expect("exec multi-param artifact");
+        assert_eq!(
+            value,
+            crate::value::Value::Bool(true),
+            "declared parameter order must be preserved through self-hosted parsing"
+        );
+    }
+
+    #[test]
+    fn bootstrap_d2_executes_result_and_then_chain() {
+        use std::sync::Arc;
+
+        let compiler_path = self_dir().join("compiler.fav");
+        let compiler_src = std::fs::read_to_string(&compiler_path).expect("compiler.fav");
+        let program = crate::frontend::parser::Parser::parse_str(&compiler_src, "compiler.fav")
+            .expect("parse compiler.fav");
+        let compiler_artifact = Arc::new(build_artifact(&program));
+
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let input = tmp.path().join("result_and_then_input.fav");
+        std::fs::write(
+            &input,
+            concat!(
+                "fn main() -> Bool {\n",
+                "    match Result.and_then(Result.ok(\"x\"), |v| Result.ok(String.concat(v, \"y\"))) {\n",
+                "        Ok(s) => s == \"xy\"\n",
+                "        Err(_) => false\n",
+                "    }\n",
+                "}\n"
+            ),
+        )
+        .expect("write result_and_then_input.fav");
+
+        let (ok, artifact_bytes, captured, value_dbg) = run_compiler_artifact_on(
+            Arc::clone(&compiler_artifact),
+            input.to_string_lossy().to_string(),
+        );
+        assert!(ok, "result.and_then compile failed: {value_dbg}\n{captured}");
+        assert!(
+            !artifact_bytes.is_empty(),
+            "result.and_then compile produced empty artifact:\n{captured}"
+        );
+
+        let loaded = crate::backend::artifact::FvcArtifact::from_bytes(&artifact_bytes)
+            .expect("result.and_then output must parse as FvcArtifact");
+        let value = exec_artifact_main(&loaded, None).expect("exec result.and_then artifact");
+        assert_eq!(
+            value,
+            crate::value::Value::Bool(true),
+            "result.and_then must execute through self-hosted artifacts"
+        );
+    }
+
+    #[test]
+    fn bootstrap_d2_executes_none_match_arm() {
+        use std::sync::Arc;
+
+        let compiler_path = self_dir().join("compiler.fav");
+        let compiler_src = std::fs::read_to_string(&compiler_path).expect("compiler.fav");
+        let program = crate::frontend::parser::Parser::parse_str(&compiler_src, "compiler.fav")
+            .expect("parse compiler.fav");
+        let compiler_artifact = Arc::new(build_artifact(&program));
+
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let input = tmp.path().join("none_match_input.fav");
+        std::fs::write(
+            &input,
+            concat!(
+                "fn main() -> Bool {\n",
+                "    match Option.none() {\n",
+                "        Some(_) => false\n",
+                "        None => true\n",
+                "    }\n",
+                "}\n"
+            ),
+        )
+        .expect("write none_match_input.fav");
+
+        let (ok, artifact_bytes, captured, value_dbg) = run_compiler_artifact_on(
+            Arc::clone(&compiler_artifact),
+            input.to_string_lossy().to_string(),
+        );
+        assert!(ok, "none-match compile failed: {value_dbg}\n{captured}");
+        assert!(
+            !artifact_bytes.is_empty(),
+            "none-match compile produced empty artifact:\n{captured}"
+        );
+
+        let loaded = crate::backend::artifact::FvcArtifact::from_bytes(&artifact_bytes)
+            .expect("none-match output must parse as FvcArtifact");
+        let value = exec_artifact_main(&loaded, None).expect("exec none-match artifact");
+        assert_eq!(
+            value,
+            crate::value::Value::Bool(true),
+            "none-match arm must execute through self-hosted artifacts"
+        );
+    }
+
+    #[test]
+    fn bootstrap_d2_executes_nested_variant_payload_match() {
+        use std::sync::Arc;
+
+        let compiler_path = self_dir().join("compiler.fav");
+        let compiler_src = std::fs::read_to_string(&compiler_path).expect("compiler.fav");
+        let program = crate::frontend::parser::Parser::parse_str(&compiler_src, "compiler.fav")
+            .expect("parse compiler.fav");
+        let compiler_artifact = Arc::new(build_artifact(&program));
+
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let input = tmp.path().join("nested_variant_payload_input.fav");
+        std::fs::write(
+            &input,
+            concat!(
+                "type Token =\n",
+                "  | TkIdent(String)\n\n",
+                "fn main() -> Bool {\n",
+                "    match Option.some(TkIdent(\"main\")) {\n",
+                "        Some(TkIdent(name)) => name == \"main\"\n",
+                "        _ => false\n",
+                "    }\n",
+                "}\n"
+            ),
+        )
+        .expect("write nested_variant_payload_input.fav");
+
+        let (ok, artifact_bytes, captured, value_dbg) = run_compiler_artifact_on(
+            Arc::clone(&compiler_artifact),
+            input.to_string_lossy().to_string(),
+        );
+        assert!(
+            ok,
+            "nested variant payload compile failed: {value_dbg}\n{captured}"
+        );
+        assert!(
+            !artifact_bytes.is_empty(),
+            "nested variant payload compile produced empty artifact:\n{captured}"
+        );
+
+        let loaded = crate::backend::artifact::FvcArtifact::from_bytes(&artifact_bytes)
+            .expect("nested variant payload output must parse as FvcArtifact");
+        let value =
+            exec_artifact_main(&loaded, None).expect("exec nested variant payload artifact");
+        assert_eq!(
+            value,
+            crate::value::Value::Bool(true),
+            "nested variant payload match must execute through self-hosted artifacts"
+        );
+    }
+
+    #[test]
+    fn bootstrap_d2_executes_nested_variant_fallthrough_to_later_arm() {
+        use std::sync::Arc;
+
+        let compiler_path = self_dir().join("compiler.fav");
+        let compiler_src = std::fs::read_to_string(&compiler_path).expect("compiler.fav");
+        let program = crate::frontend::parser::Parser::parse_str(&compiler_src, "compiler.fav")
+            .expect("parse compiler.fav");
+        let compiler_artifact = Arc::new(build_artifact(&program));
+
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let input = tmp.path().join("nested_variant_fallthrough_input.fav");
+        std::fs::write(
+            &input,
+            concat!(
+                "type Inner = | A(Int) | B(Int)\n",
+                "type Outer = | Boxed(Inner) | Empty\n\n",
+                "fn classify(v: Outer) -> Int {\n",
+                "    match v {\n",
+                "        Boxed(A(x)) => x + 10\n",
+                "        Boxed(B(x)) => x\n",
+                "        Empty => 0\n",
+                "    }\n",
+                "}\n\n",
+                "fn main() -> Bool {\n",
+                "    classify(Boxed(B(5))) == 5\n",
+                "}\n"
+            ),
+        )
+        .expect("write nested_variant_fallthrough_input.fav");
+
+        let (ok, artifact_bytes, captured, value_dbg) = run_compiler_artifact_on(
+            Arc::clone(&compiler_artifact),
+            input.to_string_lossy().to_string(),
+        );
+        assert!(
+            ok,
+            "nested variant fallthrough compile failed: {value_dbg}\n{captured}"
+        );
+        assert!(
+            !artifact_bytes.is_empty(),
+            "nested variant fallthrough compile produced empty artifact:\n{captured}"
+        );
+
+        let loaded = crate::backend::artifact::FvcArtifact::from_bytes(&artifact_bytes)
+            .expect("nested variant fallthrough output must parse as FvcArtifact");
+        let value =
+            exec_artifact_main(&loaded, None).expect("exec nested variant fallthrough artifact");
+        assert_eq!(
+            value,
+            crate::value::Value::Bool(true),
+            "nested variant mismatch must fall through to a later arm through the self-hosted artifact"
+        );
+    }
+
+    #[test]
+    fn bootstrap_d2_executes_nested_variant_guard_fallthrough() {
+        use std::sync::Arc;
+
+        let compiler_path = self_dir().join("compiler.fav");
+        let compiler_src = std::fs::read_to_string(&compiler_path).expect("compiler.fav");
+        let program = crate::frontend::parser::Parser::parse_str(&compiler_src, "compiler.fav")
+            .expect("parse compiler.fav");
+        let compiler_artifact = Arc::new(build_artifact(&program));
+
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let input = tmp.path().join("nested_variant_guard_input.fav");
+        std::fs::write(
+            &input,
+            concat!(
+                "type Inner = | A(Int) | B(Int)\n",
+                "type Outer = | Boxed(Inner) | Empty\n\n",
+                "fn classify(v: Outer) -> Int {\n",
+                "    match v {\n",
+                "        Boxed(A(x)) where x > 10 => x\n",
+                "        Boxed(A(x)) => x + 10\n",
+                "        Boxed(B(x)) => x\n",
+                "        Empty => 0\n",
+                "    }\n",
+                "}\n\n",
+                "fn main() -> Bool {\n",
+                "    classify(Boxed(A(5))) == 15\n",
+                "}\n"
+            ),
+        )
+        .expect("write nested_variant_guard_input.fav");
+
+        let (ok, artifact_bytes, captured, value_dbg) = run_compiler_artifact_on(
+            Arc::clone(&compiler_artifact),
+            input.to_string_lossy().to_string(),
+        );
+        assert!(
+            ok,
+            "nested variant guard compile failed: {value_dbg}\n{captured}"
+        );
+        assert!(
+            !artifact_bytes.is_empty(),
+            "nested variant guard compile produced empty artifact:\n{captured}"
+        );
+
+        let loaded = crate::backend::artifact::FvcArtifact::from_bytes(&artifact_bytes)
+            .expect("nested variant guard output must parse as FvcArtifact");
+        let value =
+            exec_artifact_main(&loaded, None).expect("exec nested variant guard artifact");
+        assert_eq!(
+            value,
+            crate::value::Value::Bool(true),
+            "nested variant guard must fall through to a later arm through the self-hosted artifact"
+        );
+    }
+
+    #[test]
+    #[ignore]
+    fn bootstrap_diag_self_host_lexes_compiler_source() {
+        use std::sync::Arc;
+        let builder = std::thread::Builder::new().stack_size(SELF_HOST_STACK_SIZE);
+        builder
+            .spawn(move || {
+                let compiler_path = self_dir().join("compiler.fav");
+                let compiler_src = std::fs::read_to_string(&compiler_path).expect("compiler.fav");
+                let program =
+                    crate::frontend::parser::Parser::parse_str(&compiler_src, "compiler.fav")
+                        .expect("parse compiler.fav");
+                let compiler_artifact = Arc::new(build_artifact(&program));
+
+                let value = unwrap_ok_variant(
+                    exec_artifact_fn(
+                        &compiler_artifact,
+                        "lex",
+                        vec![crate::value::Value::Str(compiler_src.clone())],
+                    )
+                    .expect("lex compiler.fav"),
+                    "lex compiler.fav",
+                );
+                match value {
+                    crate::value::Value::List(items) => {
+                        println!("lex(compiler.fav) token_count={}", items.len());
+                    }
+                    other => panic!("lex compiler.fav returned non-list payload: {other:?}"),
+                }
+            })
+            .expect("spawn")
+            .join()
+            .expect("join");
+    }
+
+    #[test]
+    #[ignore]
+    fn bootstrap_diag_self_host_lexes_compiler_prefixes() {
+        use std::sync::Arc;
+        use std::time::Instant;
+
+        let builder = std::thread::Builder::new().stack_size(SELF_HOST_STACK_SIZE);
+        builder
+            .spawn(move || {
+                let compiler_path = self_dir().join("compiler.fav");
+                let compiler_src = std::fs::read_to_string(&compiler_path).expect("compiler.fav");
+                let program =
+                    crate::frontend::parser::Parser::parse_str(&compiler_src, "compiler.fav")
+                        .expect("parse compiler.fav");
+                let compiler_artifact = Arc::new(build_artifact(&program));
+
+                let line_caps = [64usize, 128, 256, 512, 768, 1024];
+                for cap in line_caps {
+                    let prefix = compiler_src
+                        .lines()
+                        .take(cap)
+                        .collect::<Vec<_>>()
+                        .join("\n");
+                    let started = Instant::now();
+                    let result = exec_artifact_fn(
+                        &compiler_artifact,
+                        "lex",
+                        vec![crate::value::Value::Str(prefix)],
+                    );
+                    println!("prefix_lines={cap} elapsed_ms={}", started.elapsed().as_millis());
+                    result.unwrap_or_else(|err| panic!("lex prefix_lines={cap} failed:\n{err}"));
+                }
+            })
+            .expect("spawn")
+            .join()
+            .expect("join");
+    }
+
+    #[test]
+    #[ignore]
+    fn bootstrap_diag_self_host_parses_compiler_source() {
+        use std::sync::Arc;
+        let builder = std::thread::Builder::new().stack_size(SELF_HOST_STACK_SIZE);
+        builder
+            .spawn(move || {
+                let compiler_path = self_dir().join("compiler.fav");
+                let compiler_src = std::fs::read_to_string(&compiler_path).expect("compiler.fav");
+                let program =
+                    crate::frontend::parser::Parser::parse_str(&compiler_src, "compiler.fav")
+                        .expect("parse compiler.fav");
+                let compiler_artifact = Arc::new(build_artifact(&program));
+
+                let toks = unwrap_ok_variant(
+                    exec_artifact_fn(
+                        &compiler_artifact,
+                        "lex",
+                        vec![crate::value::Value::Str(compiler_src.clone())],
+                    )
+                    .expect("lex compiler.fav"),
+                    "lex compiler.fav",
+                );
+                let _prog = unwrap_ok_variant(
+                    exec_artifact_fn(&compiler_artifact, "parse_tokens", vec![toks])
+                        .expect("parse_tokens compiler.fav"),
+                    "parse_tokens compiler.fav",
+                );
+            })
+            .expect("spawn")
+            .join()
+            .expect("join");
+    }
+
+    #[test]
+    #[ignore]
+    fn bootstrap_diag_self_host_compiles_compiler_source() {
+        use std::sync::Arc;
+        let builder = std::thread::Builder::new().stack_size(SELF_HOST_STACK_SIZE);
+        builder
+            .spawn(move || {
+                let compiler_path = self_dir().join("compiler.fav");
+                let compiler_src = std::fs::read_to_string(&compiler_path).expect("compiler.fav");
+                let program =
+                    crate::frontend::parser::Parser::parse_str(&compiler_src, "compiler.fav")
+                        .expect("parse compiler.fav");
+                let compiler_artifact = Arc::new(build_artifact(&program));
+
+                let toks = unwrap_ok_variant(
+                    exec_artifact_fn(
+                        &compiler_artifact,
+                        "lex",
+                        vec![crate::value::Value::Str(compiler_src.clone())],
+                    )
+                    .expect("lex compiler.fav"),
+                    "lex compiler.fav",
+                );
+                let prog = unwrap_ok_variant(
+                    exec_artifact_fn(&compiler_artifact, "parse_tokens", vec![toks])
+                        .expect("parse_tokens compiler.fav"),
+                    "parse_tokens compiler.fav",
+                );
+                let _artifact = unwrap_ok_variant(
+                    exec_artifact_fn(&compiler_artifact, "compile", vec![prog])
+                        .expect("compile compiler.fav"),
+                    "compile compiler.fav",
+                );
+            })
+            .expect("spawn")
+            .join()
+            .expect("join");
+    }
+}
+fn run_favnir_source(source: &str) -> String {
+    use crate::frontend::parser::Parser;
+    let source = source.to_string();
+    let builder = std::thread::Builder::new().stack_size(SELF_HOST_STACK_SIZE);
+    let handle = builder
+        .spawn(move || {
+            let program = Parser::parse_str(&source, "test_inline.fav").expect("parse");
+            let artifact = build_artifact(&program);
+            crate::backend::vm::start_io_capture();
+            exec_artifact_main(&artifact, None).expect("exec");
+            crate::backend::vm::take_io_captured()
+        })
+        .expect("spawn");
+    handle.join().expect("thread join")
+}

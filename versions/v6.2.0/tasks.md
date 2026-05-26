@@ -1,91 +1,175 @@
-# Favnir v6.2.0 タスクリスト — 真のブートストラップ
+# Favnir v6.2.0 Tasks
 
-作成日: 2026-05-22
+Date: 2026-05-25
 
-## 概要
+## Goal
+Verify full self-host bootstrap for the Favnir compiler.
 
-v6.1.0 で Favnir 製コンパイラ（compiler.fav）が hello.fav を非ゼロのバイト列にコンパイルできることを確認した。
-v6.2.0 では完全な 3 ステージ ブートストラップを完成させる。
+Bootstrap target:
 
-### ブートストラップの定義
+```text
+Stage 1: Rust VM loads compiler.fav and compiles hello.fav -> bytecode_A
+Stage 2: Rust VM loads compiler.fav and compiles compiler.fav -> compiler_artifact
+Stage 3: Rust VM loads compiler_artifact and compiles hello.fav -> bytecode_B
 
-```
-Stage 1 : Rust VM が compiler.fav（ソース）を実行 → hello.fav をコンパイル → bytecode_A
-Stage 2 : Rust VM が compiler.fav（ソース）を実行 → compiler.fav 自身をコンパイル → compiler_artifact
-Stage 3 : Rust VM が compiler_artifact を実行 → hello.fav をコンパイル → bytecode_B
-
-完了条件: bytecode_A == bytecode_B
+Success condition: bytecode_A == bytecode_B
 ```
 
-### 現状の課題
+## Key work completed
 
-1. **出力フォーマット不足**: compiler.fav は現在 `List<Int>` の生バイト列のみ出力。
-   Rust VM が実行するには関数テーブル・文字列テーブルを含む `FvcArtifact` 形式が必要。
-2. **自己コンパイル未確認**: compiler.fav が compiler.fav 自身を入力として処理できるか不明。
-3. **Stage 3 実行基盤なし**: 生成した artifact バイト列を Rust VM にロードして実行するパスが未実装。
+- [x] Define and stabilize the self-host artifact format used by `compiler.fav`.
+- [x] Implement Rust-side `FvcArtifact::from_bytes(...)` loading.
+- [x] Repair self-host codegen so `compiler.fav` can compile itself.
+- [x] Fix self-host match lowering issues:
+  `next_local` propagation and nested variant pattern fail-path handling.
+- [x] Remove fragile self-host reliance on multi-arg variant destructuring in hot codegen paths by switching to payload field access.
+- [x] Keep `scan_collect`-based lexing in `self/compiler.fav` while teaching the Rust checker to allow direct `collect { helper(...) }` helpers that yield.
+- [x] Verify `cargo test bootstrap_full_self_hosting -- --ignored --nocapture`.
+- [x] Verify full `cargo test`.
 
----
+## Validation snapshot
 
-## Phase A: 現状把握
+- [x] `cargo test self_hosted_compiler_type_checks -- --nocapture`
+- [x] `cargo test bootstrap_full_self_hosting -- --ignored --nocapture`
+- [x] `cargo test`
 
-- [x] A-1: `FvcArtifact` のシリアライズ形式を確認（`codegen.rs` / `vm.rs` の `.fvc` 読み書き実装）
-- [x] A-2: compiler.fav が hello.fav に対して生成する 24 バイトの内容を解析
-  - Rust codegen が生成するバイト列と比較し、一致しているか確認
-  - **発見**: 呼び出し規約ミスマッチ → `CallNamed = 0x56` で解決
-- [x] A-3: compiler.fav を入力として compiler.fav を実行（Stage 2 試行）
-  - **発見**: スタックオーバーフロー（1600行のファイルで再帰パーサが限界）
-- [x] A-4: 調査結果をまとめ、Phase B〜E の実装方針を確定する
+Observed final state:
 
----
+- [x] Stage 1 succeeded
+- [x] Stage 2 succeeded
+- [x] Stage 3 succeeded
+- [x] `bytecode_A == bytecode_B`
+- [x] Test suite green: `1009 passed, 0 failed, 16 ignored`
 
-## Phase B: アーティファクト形式の拡張（compiler.fav 側）
+## Remaining repo bookkeeping
 
-compiler.fav が出力する `List<Int>` を、Rust VM が直接ロードできる
-シリアライズ済み FvcArtifact 形式に拡張する。
+- [x] Update `versions/v6.2.0/tasks.md`
+- [x] Update `memory/MEMORY.md`
+- [x] Commit only the v6.2.0 bootstrap completion changes
 
-- [x] B-1: `FnEntry` 型を compiler.fav に追加（name: String, arity: Int, code: List<Int>）
-- [x] B-2: `Artifact` 型を追加（fns: List<FnEntry>, str_table: List<String>）
-- [x] B-3: `compile()` の返値を `List<Int>` → `Artifact` に変更
-- [x] B-4: `serialize_artifact(a: Artifact) -> List<Int>` を実装（FvcArtifact 形式）
-- [x] B-5: `main()` で `print_bytes` 経由でバイト列を stdout に出力（Rust テストが受け取る）
-- [x] B-6: `fav check fav/self/compiler.fav` エラーなし確認 (995 tests passing)
-- [x] B-7: `fav run compiler.fav -- hello.fav` が "compiled: 201" + 201 バイトを出力することを確認
+## Additional v6.2.0 tasks
 
----
+Goal for these additions:
+move Favnir from "bootstrap verified" toward "self-hosted authority"
+without forcing unsafe or specialist-heavy runtime work out of Rust.
 
-## Phase C: Rust 側ローダー確認・追加
+### A. Semantic gap audit
 
-- [ ] C-1: `FvcArtifact::from_bytes(bytes: &[u8])` が存在するか確認
-  - 存在しなければ実装（`to_bytes()` の逆変換）
-- [ ] C-2: compiler.fav の serialize_artifact 出力と Rust の from_bytes が互換であることをユニットテストで確認
-  - hello.fav を compiler.fav でコンパイル → バイト列 → from_bytes → Rust codegen の Artifact と比較
+- [x] A-1: Produce a gap memo for Rust checker vs `compiler.fav` semantics.
+- [x] A-2: List every current bootstrap-support exception, including `collect { helper(...) }` handling.
+- [x] A-3: Classify each gap as:
+  self-host candidate, Rust-kernel candidate, or intentionally shared behavior.
 
----
+### B. Self-host authority expansion
 
-## Phase D: 自己コンパイル対応（Stage 2 の完成）
+- [x] B-1: Pick 1 parser/checker semantic area that can move toward self-host ownership without touching the VM.
+- [x] B-2: Add focused tests that fail when Rust and self-host diverge for that area.
+- [x] B-3: Implement the selected semantic alignment in `compiler.fav` and/or supporting Rust glue.
 
-compiler.fav が compiler.fav 自身をコンパイルできるようにする。
+Recommended first targets:
 
-- [ ] D-1: Stage 2 試行（A-3 の結果を受けて対応）
-  - compiler.fav が使っている Favnir 構文のうち、compiler.fav の codegen が未対応のものを列挙
-- [ ] D-2: 不足している codegen 機能を compiler.fav に追加（例: stage 呼び出し、再帰、大きなリスト等）
-- [ ] D-3: `fav run compiler.fav -- compiler.fav compiler.fvc` が完走する
-- [ ] D-4: `compiler.fvc` が正常なアーティファクトとして Rust VM にロードできることを確認
+- pattern and match behavior
+- block / collect / yield semantics
+- call argument lowering and record payload access
 
----
+Selected first target:
 
-## Phase E: Stage 3 実行・一致検証
+- [x] block / collect / yield semantics
 
-- [ ] E-1: Stage 3 の実行パスを Rust テストとして実装
-  - `compiler.fvc` をロード → Rust VM で実行 → hello.fav をコンパイル → bytecode_B を取得
-- [ ] E-2: bytecode_A（Stage 1）と bytecode_B（Stage 3）の一致を assert
-- [ ] E-3: `cargo test bootstrap_full_self_hosting` が通ることを確認
+Additional aligned target completed in v6.2.0:
 
----
+- [x] pattern / match behavior
+  nested variant pattern fallback and arm-local bindings are now covered by focused regression tests
+- [x] call argument lowering and record payload access
+  multi-argument calls using record field access are now covered by focused checker and runtime regressions
 
-## Phase F: まとめ
+### C. Trusted-kernel boundary
 
-- [ ] F-1: `cargo test` 全件通過
-- [ ] F-2: `versions/v6.2.0/tasks.md` にチェックを入れる
-- [ ] F-3: `MEMORY.md` を更新
-- [ ] F-4: `feat: full bootstrap verified — Favnir compiler bootstraps itself (v6.2.0)` でコミット
+- [x] C-1: Write a short note defining the Rust trusted kernel for Favnir.
+- [x] C-2: Explicitly keep the following areas in Rust unless specialist review exists:
+  cryptography, security-sensitive primitives, low-level binary boundaries, network protocol robustness, memory-sensitive runtime internals.
+- [x] C-3: Mark non-goals for v6.2.0 so "self-host progress" is not confused with "rewrite everything in Favnir".
+
+### D. Contract documentation
+
+- [x] D-1: Document the artifact format contract used between `compiler.fav` and the Rust VM.
+- [x] D-2: Document the opcode / IR assumptions required by bootstrap.
+- [x] D-3: Identify which parts are language-level contracts vs implementation details.
+
+### E. Validation hardening
+
+- [x] E-1: Keep `self_hosted_compiler_type_checks` as a mandatory gate for self-host changes.
+- [x] E-2: Keep `bootstrap_full_self_hosting` as a mandatory gate for compiler pipeline changes.
+- [x] E-3: Add at least one regression test for a previously mismatched Rust/self-host semantic edge.
+
+### F. Post-bootstrap hardening
+
+Goal for this section:
+reduce the remaining "borrowed" bootstrap behavior and strengthen self-host confidence within v6.2.0.
+
+- [x] F-1: Reduce or eliminate the current `collect { helper(...) }` bootstrap exception if feasible within v6.2.0.
+- [x] F-2: Expand parser/checker regression coverage for remaining self-host-sensitive semantic edges.
+  Added nested variant guard and broader self-host-sensitive runtime regressions.
+- [x] F-3: Add a short contract note for the self-host internal AST encodings used by `compiler.fav`.
+  Recorded in `self_host_ast_contract.md`.
+- [x] F-4: Strengthen bootstrap comparison beyond the current primary `hello.fav` path with one or more additional source shapes.
+  Added `bootstrap_full_self_hosting_on_match_collect_source`.
+
+Planned execution order:
+
+1. `collect` helper dependency review and reduction
+2. semantic edge regression expansion
+3. self-host AST contract note
+4. broader bootstrap comparison inputs
+
+### G. Remaining self-host authority follow-ups
+
+Goal for this section:
+increase self-host confidence within v6.2.0 without widening the Rust trusted kernel
+or forcing a risky compiler rewrite late in the version.
+
+- [x] G-1: Add negative regression coverage for the narrowed `collect { helper(...) }` exception.
+  Confirmed the exception does not extend through `trf`, `test`, `bench`, indirect calls, or non-tail helper usage.
+- [x] G-2: Add one more bootstrap comparison input that stresses closure capture and `for`-inside-`collect`.
+  Added `bootstrap_full_self_hosting_on_closure_collect_source` and a faster self-host artifact regression for closure capture + `for`-inside-`collect` execution.
+- [x] G-3: Expand focused self-host-sensitive regressions around lowering helpers.
+  Target areas such as `free_names`, `collect_capture_names`, `compile_args`, and `compile_match_arms`.
+  Progress so far: added closure-capture + `for`-inside-`collect` self-host regressions, nested-variant later-arm and guarded-arm regressions, a multi-capture closure regression that exercises capture selection with unused locals mixed in, a guarded-match bootstrap comparison, and a nested-call regression that mixes closure bodies with record-field arguments.
+
+### H. Current-version finish work
+
+Goal for this section:
+close out the remaining v6.2.0 worktree state cleanly and leave the self-host hardening
+in a stable handoff condition.
+
+- [x] H-1: Decide how to handle the remaining `fav/tmp` generated-file modifications.
+  Treat the current `gen_order_test.*` and `test_append.parquet` diffs as throwaway test outputs for v6.2.0 and keep them out of version commits unless a later fixture-refresh task explicitly targets them.
+- [x] H-2: Re-run a concise v6.2.0 validation slice after the worktree is clean.
+  Focused self-host regressions and the guarded/closure bootstrap comparisons were re-run serially; parallel ignored runs were observed to exhaust memory in this environment.
+- [x] H-3: Update v6.2.0 notes if the generated-file handling or final validation policy changes.
+  `tasks.md` and `progress.md` now record the throwaway-output decision and the serial-validation policy for heavy ignored bootstrap tests.
+
+Recommended execution order:
+
+1. generated-file decision and cleanup
+2. serial validation rerun
+3. final note alignment
+
+### I. Additional v6.2.0 extension candidates
+
+Goal for this section:
+keep improving self-host confidence within v6.2.0 only where the work still fits the
+current version boundary and does not require a larger architectural shift.
+
+- [x] I-1: Decide whether the throwaway `fav/tmp` outputs should be explicitly restored before closing the branch.
+  For v6.2.0 they remain classified as throwaway test outputs rather than part of the compiler hardening deliverable.
+- [x] I-2: Add one more self-host artifact regression for a still-missing mixed-shape case if a clear gap is found.
+  Closed the local captured-closure call syntax gap by emitting generic `Call` for local function values in `compiler.fav` and added a focused self-host artifact regression.
+- [x] I-3: If no further meaningful gap remains, record v6.2.0 as functionally closed for self-host hardening.
+  v6.2.0 is considered functionally closed once focused self-host regressions, the guarded/closure bootstrap comparisons, and the local captured-closure call regression all pass; any further expansion should start from a new version task rather than extending this branch indefinitely.
+
+Recommended execution order:
+
+1. decide whether any real self-host gap remains
+2. add exactly one more regression only if it closes a real gap
+3. otherwise record the version as closed

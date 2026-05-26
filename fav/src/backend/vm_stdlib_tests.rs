@@ -1,7 +1,10 @@
 // vm_stdlib_tests.rs — VM-based stdlib coverage tests (v0.7.0 parity)
 // Replaces the eval.rs-based stdlib tests that were removed when eval.rs was deleted.
 
-use super::{CheckpointBackend, EnvConfig, LogConfig, VM, set_checkpoint_backend, set_env_config, set_log_config};
+use super::{
+    CheckpointBackend, EnvConfig, LogConfig, VM, set_checkpoint_backend, set_env_config,
+    set_log_config,
+};
 use crate::backend::codegen::codegen_program;
 use crate::frontend::parser::Parser;
 use crate::middle::compiler::compile_program;
@@ -2224,15 +2227,27 @@ public fn main() -> Int !Auth {
 
 #[test]
 fn log_emit_text_format_runs() {
-    set_log_config(LogConfig { level: "info".into(), format: "text".into(), output: "stdout".into(), service: String::new() });
-    let result = eval(r#"public fn main() -> Unit !Io { Log.emit_raw("INFO", "I000", "started", "{}") }"#);
+    set_log_config(LogConfig {
+        level: "info".into(),
+        format: "text".into(),
+        output: "stdout".into(),
+        service: String::new(),
+    });
+    let result =
+        eval(r#"public fn main() -> Unit !Io { Log.emit_raw("INFO", "I000", "started", "{}") }"#);
     assert_eq!(result, Value::Unit);
 }
 
 #[test]
 fn log_emit_json_format_runs() {
-    set_log_config(LogConfig { level: "info".into(), format: "json".into(), output: "stdout".into(), service: "test".into() });
-    let result = eval(r#"public fn main() -> Unit !Io { Log.emit_raw("SUCCESS", "S000", "done", "{}") }"#);
+    set_log_config(LogConfig {
+        level: "info".into(),
+        format: "json".into(),
+        output: "stdout".into(),
+        service: "test".into(),
+    });
+    let result =
+        eval(r#"public fn main() -> Unit !Io { Log.emit_raw("SUCCESS", "S000", "done", "{}") }"#);
     assert_eq!(result, Value::Unit);
     // reset
     set_log_config(LogConfig::default());
@@ -2241,8 +2256,15 @@ fn log_emit_json_format_runs() {
 #[test]
 fn log_emit_level_filter_suppresses() {
     // level=error: INFO should be suppressed (still returns Unit)
-    set_log_config(LogConfig { level: "error".into(), format: "text".into(), output: "stdout".into(), service: String::new() });
-    let result = eval(r#"public fn main() -> Unit !Io { Log.emit_raw("INFO", "I000", "suppressed", "{}") }"#);
+    set_log_config(LogConfig {
+        level: "error".into(),
+        format: "text".into(),
+        output: "stdout".into(),
+        service: String::new(),
+    });
+    let result = eval(
+        r#"public fn main() -> Unit !Io { Log.emit_raw("INFO", "I000", "suppressed", "{}") }"#,
+    );
     assert_eq!(result, Value::Unit);
     set_log_config(LogConfig::default());
 }
@@ -2250,8 +2272,15 @@ fn log_emit_level_filter_suppresses() {
 #[test]
 fn log_emit_level_filter_passes() {
     // level=info: ERROR should pass
-    set_log_config(LogConfig { level: "info".into(), format: "text".into(), output: "stdout".into(), service: String::new() });
-    let result = eval(r#"public fn main() -> Unit !Io { Log.emit_raw("ERROR", "LE010", "db error", "{}") }"#);
+    set_log_config(LogConfig {
+        level: "info".into(),
+        format: "text".into(),
+        output: "stdout".into(),
+        service: String::new(),
+    });
+    let result = eval(
+        r#"public fn main() -> Unit !Io { Log.emit_raw("ERROR", "LE010", "db error", "{}") }"#,
+    );
     assert_eq!(result, Value::Unit);
     set_log_config(LogConfig::default());
 }
@@ -2265,7 +2294,12 @@ fn log_metric_text_runs() {
 
 #[test]
 fn log_metric_json_runs() {
-    set_log_config(LogConfig { level: "info".into(), format: "json".into(), output: "stdout".into(), service: String::new() });
+    set_log_config(LogConfig {
+        level: "info".into(),
+        format: "json".into(),
+        output: "stdout".into(),
+        service: String::new(),
+    });
     let result = eval(r#"public fn main() -> Unit !Io { Log.metric_raw("rows", 1500, "Count") }"#);
     assert_eq!(result, Value::Unit);
     set_log_config(LogConfig::default());
@@ -2274,19 +2308,27 @@ fn log_metric_json_runs() {
 #[test]
 fn log_emit_ctx_json_runs() {
     set_log_config(LogConfig::default());
-    let result = eval(r#"public fn main() -> Unit !Io { Log.emit_raw("INFO", "I010", "processing", "{\"batch\":\"1\"}") }"#);
+    let result = eval(
+        r#"public fn main() -> Unit !Io { Log.emit_raw("INFO", "I010", "processing", "{\"batch\":\"1\"}") }"#,
+    );
     assert_eq!(result, Value::Unit);
 }
 
 #[test]
 fn log_map_to_json_raw_returns_json() {
-    let result = eval(r#"
+    let result = eval(
+        r#"
 public fn main() -> String !Io {
     Log.map_to_json_raw(Map.set((), "key", "val"))
 }
-"#);
+"#,
+    );
     match result {
-        Value::Str(s) => assert!(s.contains("key") && s.contains("val"), "JSON should contain key/val: {}", s),
+        Value::Str(s) => assert!(
+            s.contains("key") && s.contains("val"),
+            "JSON should contain key/val: {}",
+            s
+        ),
         other => panic!("expected Str, got {:?}", other),
     }
 }
@@ -2705,9 +2747,10 @@ public fn main() -> Unit !Io !Rpc {{
         let tcp = tokio::net::TcpStream::connect(format!("127.0.0.1:{free_port}"))
             .await
             .expect("connect to gRPC server");
-        let (mut h2_client, h2_conn) =
-            h2::client::handshake(tcp).await.expect("h2 handshake");
-        tokio::spawn(async move { let _ = h2_conn.await; });
+        let (mut h2_client, h2_conn) = h2::client::handshake(tcp).await.expect("h2 handshake");
+        tokio::spawn(async move {
+            let _ = h2_conn.await;
+        });
 
         let request = http::Request::builder()
             .method("POST")
@@ -2716,8 +2759,9 @@ public fn main() -> Unit !Io !Rpc {{
             .header("te", "trailers")
             .body(())
             .unwrap();
-        let (response_future, mut send_stream) =
-            h2_client.send_request(request, false).expect("send_request");
+        let (response_future, mut send_stream) = h2_client
+            .send_request(request, false)
+            .expect("send_request");
         send_stream
             .send_data(bytes::Bytes::from(frame), true)
             .expect("send_data");
@@ -2753,12 +2797,14 @@ fn validate_run_raw_no_schema_returns_ok() {
     use std::collections::HashMap;
     set_schema_registry(HashMap::new());
 
-    let result = eval(r#"
+    let result = eval(
+        r#"
 type RawBag = { x: String }
 public fn main() -> Bool {
     Result.is_ok(Validate.run_raw("NoSuchType", RawBag { x: "1" }))
 }
-"#);
+"#,
+    );
     assert_eq!(result, Value::Bool(true));
 }
 
@@ -2776,12 +2822,14 @@ fn validate_run_raw_positive_violation() {
     schemas.insert("Order".to_string(), type_schema);
     set_schema_registry(schemas);
 
-    let result = eval(r#"
+    let result = eval(
+        r#"
 type RawOrder = { amount: String }
 public fn main() -> Bool {
     Result.is_err(Validate.run_raw("Order", RawOrder { amount: "-5" }))
 }
-"#);
+"#,
+    );
     assert_eq!(result, Value::Bool(true));
 
     set_schema_registry(HashMap::new());
@@ -2801,12 +2849,14 @@ fn validate_run_raw_max_length_violation() {
     schemas.insert("Item".to_string(), type_schema);
     set_schema_registry(schemas);
 
-    let result = eval(r#"
+    let result = eval(
+        r#"
 type RawItem = { code: String }
 public fn main() -> Bool {
     Result.is_err(Validate.run_raw("Item", RawItem { code: "TOOLONG" }))
 }
-"#);
+"#,
+    );
     assert_eq!(result, Value::Bool(true));
 
     set_schema_registry(HashMap::new());
@@ -2827,12 +2877,14 @@ fn validate_run_raw_valid_passes() {
     schemas.insert("TestResult".to_string(), type_schema);
     set_schema_registry(schemas);
 
-    let result = eval(r#"
+    let result = eval(
+        r#"
 type RawResult = { score: String }
 public fn main() -> Bool {
     Result.is_ok(Validate.run_raw("TestResult", RawResult { score: "50" }))
 }
-"#);
+"#,
+    );
     assert_eq!(result, Value::Bool(true));
 
     set_schema_registry(HashMap::new());
@@ -2996,7 +3048,9 @@ public fn main() -> Bool !Db {
 
 #[test]
 fn env_get_raw_returns_some() {
-    unsafe { std::env::set_var("FAV_TEST_ENV_47_A", "hello_env"); }
+    unsafe {
+        std::env::set_var("FAV_TEST_ENV_47_A", "hello_env");
+    }
     set_env_config(EnvConfig::default());
     let result = eval(
         r#"
@@ -3029,7 +3083,9 @@ public fn main() -> Bool !Env {
 
 #[test]
 fn env_require_raw_ok() {
-    unsafe { std::env::set_var("FAV_TEST_ENV_47_B", "required_val"); }
+    unsafe {
+        std::env::set_var("FAV_TEST_ENV_47_B", "required_val");
+    }
     set_env_config(EnvConfig::default());
     let result = eval(
         r#"
@@ -3062,7 +3118,9 @@ public fn main() -> Bool !Env {
 
 #[test]
 fn env_get_int_raw_ok() {
-    unsafe { std::env::set_var("FAV_TEST_ENV_47_INT", "42"); }
+    unsafe {
+        std::env::set_var("FAV_TEST_ENV_47_INT", "42");
+    }
     set_env_config(EnvConfig::default());
     let result = eval(
         r#"
@@ -3079,7 +3137,9 @@ public fn main() -> Bool !Env {
 
 #[test]
 fn env_get_int_raw_parse_err() {
-    unsafe { std::env::set_var("FAV_TEST_ENV_47_BADINT", "not_a_number"); }
+    unsafe {
+        std::env::set_var("FAV_TEST_ENV_47_BADINT", "not_a_number");
+    }
     set_env_config(EnvConfig::default());
     let result = eval(
         r#"
@@ -3096,7 +3156,9 @@ public fn main() -> Bool !Env {
 
 #[test]
 fn env_get_bool_raw_true() {
-    unsafe { std::env::set_var("FAV_TEST_ENV_47_BOOL_T", "true"); }
+    unsafe {
+        std::env::set_var("FAV_TEST_ENV_47_BOOL_T", "true");
+    }
     set_env_config(EnvConfig::default());
     let result = eval(
         r#"
@@ -3154,14 +3216,16 @@ fn reset_aws_config() {
 #[test]
 fn aws_s3_get_object_raw_returns_err_on_bad_host() {
     set_bad_aws_host();
-    let result = eval(r#"
+    let result = eval(
+        r#"
 public fn main() -> Bool {
     match AWS.s3_get_object_raw("bucket", "key") {
         Err(_) => true
         Ok(_)  => false
     }
 }
-"#);
+"#,
+    );
     reset_aws_config();
     assert_eq!(result, Value::Bool(true));
 }
@@ -3169,14 +3233,16 @@ public fn main() -> Bool {
 #[test]
 fn aws_s3_put_object_raw_returns_err_on_bad_host() {
     set_bad_aws_host();
-    let result = eval(r#"
+    let result = eval(
+        r#"
 public fn main() -> Bool {
     match AWS.s3_put_object_raw("bucket", "key", "body") {
         Err(_) => true
         Ok(_)  => false
     }
 }
-"#);
+"#,
+    );
     reset_aws_config();
     assert_eq!(result, Value::Bool(true));
 }
@@ -3184,14 +3250,16 @@ public fn main() -> Bool {
 #[test]
 fn aws_s3_list_objects_raw_returns_err_on_bad_host() {
     set_bad_aws_host();
-    let result = eval(r#"
+    let result = eval(
+        r#"
 public fn main() -> Bool {
     match AWS.s3_list_objects_raw("bucket", "") {
         Err(_) => true
         Ok(_)  => false
     }
 }
-"#);
+"#,
+    );
     reset_aws_config();
     assert_eq!(result, Value::Bool(true));
 }
@@ -3199,14 +3267,16 @@ public fn main() -> Bool {
 #[test]
 fn aws_sqs_send_message_raw_returns_err_on_bad_host() {
     set_bad_aws_host();
-    let result = eval(r#"
+    let result = eval(
+        r#"
 public fn main() -> Bool {
     match AWS.sqs_send_message_raw("http://invalid.host.fav.test:9999/q", "hello") {
         Err(_) => true
         Ok(_)  => false
     }
 }
-"#);
+"#,
+    );
     reset_aws_config();
     assert_eq!(result, Value::Bool(true));
 }
@@ -3214,14 +3284,16 @@ public fn main() -> Bool {
 #[test]
 fn aws_sqs_receive_messages_raw_returns_err_on_bad_host() {
     set_bad_aws_host();
-    let result = eval(r#"
+    let result = eval(
+        r#"
 public fn main() -> Bool {
     match AWS.sqs_receive_messages_raw("http://invalid.host.fav.test:9999/q", 1) {
         Err(_) => true
         Ok(_)  => false
     }
 }
-"#);
+"#,
+    );
     reset_aws_config();
     assert_eq!(result, Value::Bool(true));
 }
@@ -3229,7 +3301,8 @@ public fn main() -> Bool {
 #[test]
 fn aws_dynamo_get_item_raw_returns_err_on_bad_host() {
     set_bad_aws_host();
-    let result = eval(r#"
+    let result = eval(
+        r#"
 public fn main() -> Bool {
     bind key <- Map.set((), "id", "1")
     match AWS.dynamo_get_item_raw("table", key) {
@@ -3237,7 +3310,8 @@ public fn main() -> Bool {
         Ok(_)  => false
     }
 }
-"#);
+"#,
+    );
     reset_aws_config();
     assert_eq!(result, Value::Bool(true));
 }
@@ -3245,7 +3319,8 @@ public fn main() -> Bool {
 #[test]
 fn aws_dynamo_put_item_raw_returns_err_on_bad_host() {
     set_bad_aws_host();
-    let result = eval(r#"
+    let result = eval(
+        r#"
 public fn main() -> Bool {
     bind item <- Map.set((), "id", "1")
     match AWS.dynamo_put_item_raw("table", item) {
@@ -3253,7 +3328,8 @@ public fn main() -> Bool {
         Ok(_)  => false
     }
 }
-"#);
+"#,
+    );
     reset_aws_config();
     assert_eq!(result, Value::Bool(true));
 }
@@ -3261,21 +3337,23 @@ public fn main() -> Bool {
 #[test]
 fn aws_dynamo_scan_raw_returns_err_on_bad_host() {
     set_bad_aws_host();
-    let result = eval(r#"
+    let result = eval(
+        r#"
 public fn main() -> Bool {
     match AWS.dynamo_scan_raw("table") {
         Err(_) => true
         Ok(_)  => false
     }
 }
-"#);
+"#,
+    );
     reset_aws_config();
     assert_eq!(result, Value::Bool(true));
 }
 
 #[test]
 fn aws_config_respects_endpoint_url() {
-    use crate::backend::vm::{AwsConfig, set_aws_config, get_aws_config_pub};
+    use crate::backend::vm::{AwsConfig, get_aws_config_pub, set_aws_config};
     let ep = "http://localhost:4566";
     set_aws_config(AwsConfig {
         region: "ap-northeast-1".to_string(),
@@ -3295,7 +3373,12 @@ fn aws_config_respects_endpoint_url() {
 #[test]
 fn test_io_read_write_file() {
     let dir = tempdir().unwrap();
-    let path = dir.path().join("test.txt").to_str().unwrap().replace('\\', "/");
+    let path = dir
+        .path()
+        .join("test.txt")
+        .to_str()
+        .unwrap()
+        .replace('\\', "/");
     let src = format!(
         r#"
 public fn main() -> String !Io {{
@@ -3313,7 +3396,12 @@ public fn main() -> String !Io {{
 #[test]
 fn test_io_write_bytes() {
     let dir = tempdir().unwrap();
-    let path = dir.path().join("bytes.bin").to_str().unwrap().replace('\\', "/");
+    let path = dir
+        .path()
+        .join("bytes.bin")
+        .to_str()
+        .unwrap()
+        .replace('\\', "/");
     let src = format!(
         r#"
 public fn main() -> Bool !Io {{
@@ -3329,7 +3417,12 @@ public fn main() -> Bool !Io {{
 #[test]
 fn test_io_file_exists() {
     let dir = tempdir().unwrap();
-    let path = dir.path().join("exists.txt").to_str().unwrap().replace('\\', "/");
+    let path = dir
+        .path()
+        .join("exists.txt")
+        .to_str()
+        .unwrap()
+        .replace('\\', "/");
     let src_before = format!(r#"public fn main() -> Bool !Io {{ IO.file_exists_raw("{path}") }}"#);
     assert_eq!(eval(&src_before), Value::Bool(false));
 
@@ -3342,34 +3435,64 @@ fn test_io_file_exists() {
 
 #[test]
 fn test_int_shl_shr() {
-    assert_eq!(eval("public fn main() -> Int { Int.shl(1, 4) }"), Value::Int(16));
-    assert_eq!(eval("public fn main() -> Int { Int.shr(16, 2) }"), Value::Int(4));
+    assert_eq!(
+        eval("public fn main() -> Int { Int.shl(1, 4) }"),
+        Value::Int(16)
+    );
+    assert_eq!(
+        eval("public fn main() -> Int { Int.shr(16, 2) }"),
+        Value::Int(4)
+    );
     // arithmetic right shift: sign-extending
-    assert_eq!(eval("public fn main() -> Int { Int.shr(-8, 1) }"), Value::Int(-4));
+    assert_eq!(
+        eval("public fn main() -> Int { Int.shr(-8, 1) }"),
+        Value::Int(-4)
+    );
 }
 
 #[test]
 fn test_int_band_bor_bxor() {
     // 255 & 15 = 15
-    assert_eq!(eval("public fn main() -> Int { Int.band(255, 15) }"), Value::Int(15));
+    assert_eq!(
+        eval("public fn main() -> Int { Int.band(255, 15) }"),
+        Value::Int(15)
+    );
     // 240 | 15 = 255
-    assert_eq!(eval("public fn main() -> Int { Int.bor(240, 15) }"), Value::Int(255));
+    assert_eq!(
+        eval("public fn main() -> Int { Int.bor(240, 15) }"),
+        Value::Int(255)
+    );
     // 255 ^ 15 = 240
-    assert_eq!(eval("public fn main() -> Int { Int.bxor(255, 15) }"), Value::Int(240));
+    assert_eq!(
+        eval("public fn main() -> Int { Int.bxor(255, 15) }"),
+        Value::Int(240)
+    );
 }
 
 #[test]
 fn test_int_bnot() {
     // !0 = -1 (all bits set); band with 255 = 255
-    assert_eq!(eval("public fn main() -> Int { Int.band(Int.bnot(0), 255) }"), Value::Int(255));
+    assert_eq!(
+        eval("public fn main() -> Int { Int.band(Int.bnot(0), 255) }"),
+        Value::Int(255)
+    );
 }
 
 #[test]
 fn test_int_to_byte() {
     // 300 & 255 = 44
-    assert_eq!(eval("public fn main() -> Int { Int.to_byte(300) }"), Value::Int(44));
-    assert_eq!(eval("public fn main() -> Int { Int.to_byte(255) }"), Value::Int(255));
-    assert_eq!(eval("public fn main() -> Int { Int.to_byte(0) }"), Value::Int(0));
+    assert_eq!(
+        eval("public fn main() -> Int { Int.to_byte(300) }"),
+        Value::Int(44)
+    );
+    assert_eq!(
+        eval("public fn main() -> Int { Int.to_byte(255) }"),
+        Value::Int(255)
+    );
+    assert_eq!(
+        eval("public fn main() -> Int { Int.to_byte(0) }"),
+        Value::Int(0)
+    );
 }
 
 // ── Phase E: String.chars (v5.1.0) ───────────────────────────────────────────
@@ -3381,7 +3504,9 @@ fn test_string_chars() {
         Value::Int(5)
     );
     assert_eq!(
-        eval(r#"public fn main() -> String { Option.unwrap_or(List.first(String.chars("abc")), "") }"#),
+        eval(
+            r#"public fn main() -> String { Option.unwrap_or(List.first(String.chars("abc")), "") }"#
+        ),
         Value::Str("a".into())
     );
 }
@@ -3401,7 +3526,9 @@ fn test_string_chars_unicode() {
         Value::Int(3)
     );
     assert_eq!(
-        eval(r#"public fn main() -> String { Option.unwrap_or(List.first(String.chars("日本語")), "") }"#),
+        eval(
+            r#"public fn main() -> String { Option.unwrap_or(List.first(String.chars("日本語")), "") }"#
+        ),
         Value::Str("日".into())
     );
 }
@@ -3412,14 +3539,16 @@ fn test_string_chars_unicode() {
 fn test_string_base64_decode() {
     // "hello" in base64 = "aGVsbG8=" → 5 bytes
     assert_eq!(
-        eval(r#"
+        eval(
+            r#"
 public fn main() -> Int {
     bind res <- String.base64_decode("aGVsbG8=");
     match res {
         Err(_) => -1
         Ok(bytes) => List.length(bytes)
     }
-}"#),
+}"#
+        ),
         Value::Int(5)
     );
 }
@@ -3427,14 +3556,16 @@ public fn main() -> Int {
 #[test]
 fn test_string_base64_decode_invalid() {
     assert_eq!(
-        eval(r#"
+        eval(
+            r#"
 public fn main() -> Int {
     bind res <- String.base64_decode("not!!valid%%");
     match res {
         Err(_) => 0
         Ok(_)  => 1
     }
-}"#),
+}"#
+        ),
         Value::Int(0)
     );
 }
@@ -3443,15 +3574,58 @@ public fn main() -> Int {
 fn test_string_base64_roundtrip() {
     // encode "favnir" then decode and check length == 6
     assert_eq!(
-        eval(r#"
+        eval(
+            r#"
 public fn main() -> Int {
     bind decoded <- String.base64_decode(String.base64_encode("favnir"));
     match decoded {
         Err(_)  => -1
         Ok(bs)  => List.length(bs)
     }
-}"#),
+}"#
+        ),
         Value::Int(6)
+    );
+}
+
+// ── String.to_bytes (v6.2.0) ─────────────────────────────────────────────────
+
+#[test]
+fn test_string_to_bytes_ascii() {
+    assert_eq!(
+        eval(r#"public fn main() -> Int { List.length(String.to_bytes("abc")) }"#),
+        Value::Int(3)
+    );
+}
+
+#[test]
+fn test_string_to_bytes_values() {
+    // "A" = 0x41 = 65
+    assert_eq!(
+        eval(
+            r#"public fn main() -> Int {
+    bind bs <- List.first(String.to_bytes("A"));
+    Option.unwrap_or(bs, -1)
+}"#
+        ),
+        Value::Int(65)
+    );
+}
+
+#[test]
+fn test_string_to_bytes_empty() {
+    assert_eq!(
+        eval(r#"public fn main() -> Int { List.length(String.to_bytes("")) }"#),
+        Value::Int(0)
+    );
+}
+
+#[test]
+fn test_string_to_bytes_multibyte() {
+    // "é" is 2 bytes in UTF-8 (0xC3 0xA9)
+    assert_eq!(
+        eval(r#"public fn main() -> Int { List.length(String.to_bytes("é")) }"#),
+        Value::Int(2)
     );
 }
 

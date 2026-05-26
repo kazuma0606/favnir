@@ -348,7 +348,11 @@ impl Parser {
                     self.expect(&TokenKind::RBrace)?;
                     RuneUseNames::Specific(names)
                 };
-                Ok(Item::RuneUse { module, names, span })
+                Ok(Item::RuneUse {
+                    module,
+                    names,
+                    span,
+                })
             }
             other => Err(ParseError::new(
                 format!(
@@ -3218,7 +3222,10 @@ mod tests {
             panic!("expected RuneUse, got {:?}", &p.items[0]);
         };
         assert_eq!(module, "connection");
-        assert_eq!(names, &RuneUseNames::Specific(vec!["connect".into(), "close".into()]));
+        assert_eq!(
+            names,
+            &RuneUseNames::Specific(vec!["connect".into(), "close".into()])
+        );
     }
 
     #[test]

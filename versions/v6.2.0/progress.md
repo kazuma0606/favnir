@@ -46,3 +46,7 @@
 - [x] H-1: Add negative regressions for the narrowed `collect { helper(...) }` exception
 - [x] H-2: Add bootstrap comparison for closure capture + `for`-inside-`collect`
 - [x] H-3: Expand self-host artifact regressions for capture selection, nested match fallthrough, guarded match arms, and nested call lowering
+
+## Phase I
+- [x] I-1: Classify the remaining `fav/tmp` diffs as throwaway test outputs for v6.2.0
+- [x] I-2: Re-run the focused self-host validation slice serially and note the memory issue with parallel ignored runs

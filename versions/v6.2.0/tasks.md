@@ -136,6 +136,25 @@ or forcing a risky compiler rewrite late in the version.
   Target areas such as `free_names`, `collect_capture_names`, `compile_args`, and `compile_match_arms`.
   Progress so far: added closure-capture + `for`-inside-`collect` self-host regressions, nested-variant later-arm and guarded-arm regressions, a multi-capture closure regression that exercises capture selection with unused locals mixed in, a guarded-match bootstrap comparison, and a nested-call regression that mixes closure bodies with record-field arguments.
 
+### H. Current-version finish work
+
+Goal for this section:
+close out the remaining v6.2.0 worktree state cleanly and leave the self-host hardening
+in a stable handoff condition.
+
+- [x] H-1: Decide how to handle the remaining `fav/tmp` generated-file modifications.
+  Treat the current `gen_order_test.*` and `test_append.parquet` diffs as throwaway test outputs for v6.2.0 and keep them out of version commits unless a later fixture-refresh task explicitly targets them.
+- [x] H-2: Re-run a concise v6.2.0 validation slice after the worktree is clean.
+  Focused self-host regressions and the guarded/closure bootstrap comparisons were re-run serially; parallel ignored runs were observed to exhaust memory in this environment.
+- [x] H-3: Update v6.2.0 notes if the generated-file handling or final validation policy changes.
+  `tasks.md` and `progress.md` now record the throwaway-output decision and the serial-validation policy for heavy ignored bootstrap tests.
+
+Recommended execution order:
+
+1. generated-file decision and cleanup
+2. serial validation rerun
+3. final note alignment
+
 Recommended execution order:
 
 1. negative `collect` helper boundary regressions

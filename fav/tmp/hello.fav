@@ -1,5 +1,6 @@
 fn add(a: Int, b: Int) -> Int { a + b }
 
 public fn main() -> Bool {
-    add(1, 2) == 3
+    bind x <- add(3, 4)
+    x == 7
 }

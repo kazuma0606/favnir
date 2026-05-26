@@ -15637,6 +15637,122 @@ public fn main() -> Bool !Io {
             .join()
             .expect("join");
     }
+
+    /// v6.3.0: compiler.fav compiles a stage/seq program and the result executes correctly.
+    /// Verifies that stage/seq lowering in the self-hosted compiler produces correct bytecode.
+    #[test]
+    fn bootstrap_stage_seq_self_host_executes_correctly() {
+        use std::sync::Arc;
+
+        let compiler_path = self_dir().join("compiler.fav");
+        let compiler_src = std::fs::read_to_string(&compiler_path).expect("compiler.fav");
+        let program = crate::frontend::parser::Parser::parse_str(&compiler_src, "compiler.fav")
+            .expect("parse compiler.fav");
+        let compiler_artifact = Arc::new(build_artifact(&program));
+
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let input = tmp.path().join("pipeline_test.fav");
+        std::fs::write(
+            &input,
+            concat!(
+                "stage Double: Int -> Int = |n| { n * 2 }\n",
+                "stage AddOne: Int -> Int = |n| { n + 1 }\n",
+                "seq DoubleThenAdd = Double |> AddOne\n\n",
+                "public fn main() -> Bool {\n",
+                "    bind result <- DoubleThenAdd(5)\n",
+                "    result == 11\n",
+                "}\n"
+            ),
+        )
+        .expect("write pipeline_test.fav");
+
+        let (ok, artifact_bytes, captured, value_dbg) = run_compiler_artifact_on(
+            Arc::clone(&compiler_artifact),
+            input.to_string_lossy().to_string(),
+        );
+        assert!(ok, "stage/seq compile failed: {value_dbg}\n{captured}");
+        assert!(
+            !artifact_bytes.is_empty(),
+            "stage/seq compile produced empty artifact:\n{captured}"
+        );
+
+        let loaded = crate::backend::artifact::FvcArtifact::from_bytes(&artifact_bytes)
+            .expect("stage/seq output must parse as FvcArtifact");
+        let value = exec_artifact_main(&loaded, None).expect("exec stage/seq artifact");
+        assert_eq!(
+            value,
+            crate::value::Value::Bool(true),
+            "DoubleThenAdd(5) must equal 11"
+        );
+    }
+
+    /// v6.3.0: Full 3-stage bootstrap comparison on stage/seq source.
+    /// Run with: cargo test bootstrap_stage_seq_matches_rust_compiler -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn bootstrap_stage_seq_matches_rust_compiler() {
+        use crate::backend::artifact::FvcArtifact;
+        use std::sync::Arc;
+
+        let compiler_path = self_dir().join("compiler.fav");
+        let compiler_src = std::fs::read_to_string(&compiler_path).expect("compiler.fav");
+        let compiler_abs = compiler_path.to_string_lossy().to_string();
+
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let input = tmp.path().join("pipeline_test.fav");
+        std::fs::write(
+            &input,
+            concat!(
+                "stage Double: Int -> Int = |n| { n * 2 }\n",
+                "stage AddOne: Int -> Int = |n| { n + 1 }\n",
+                "seq DoubleThenAdd = Double |> AddOne\n\n",
+                "public fn main() -> Bool {\n",
+                "    bind result <- DoubleThenAdd(5)\n",
+                "    result == 11\n",
+                "}\n"
+            ),
+        )
+        .expect("write pipeline_test.fav");
+        let input_abs = input.to_string_lossy().to_string();
+
+        // Stage 1: Rust artifact compiles pipeline_test.fav → bytecode_A
+        let program = crate::frontend::parser::Parser::parse_str(&compiler_src, "compiler.fav")
+            .expect("parse compiler.fav");
+        let rust_compiled_artifact = Arc::new(build_artifact(&program));
+
+        let (s1_ok, bytecode_a, s1_out, s1_value) =
+            run_compiler_artifact_on(Arc::clone(&rust_compiled_artifact), input_abs.clone());
+        assert!(
+            s1_ok && !bytecode_a.is_empty(),
+            "Stage 1 (compile pipeline_test.fav) failed: {s1_value}\n{s1_out}"
+        );
+
+        // Stage 2: Rust artifact self-compiles compiler.fav → compiler_artifact
+        let (s2_ok, artifact_bytes, s2_out, s2_value) =
+            run_compiler_artifact_on(Arc::clone(&rust_compiled_artifact), compiler_abs);
+        assert!(
+            s2_ok && !artifact_bytes.is_empty(),
+            "Stage 2 (self-compile) failed: {s2_value}\n{s2_out}"
+        );
+
+        let compiler_artifact = Arc::new(
+            FvcArtifact::from_bytes(&artifact_bytes)
+                .expect("Stage 2 artifact must parse as FvcArtifact"),
+        );
+
+        // Stage 3: compiler_artifact compiles pipeline_test.fav → bytecode_B
+        let (s3_ok, bytecode_b, s3_out, s3_value) =
+            run_compiler_artifact_on(compiler_artifact, input_abs);
+        assert!(
+            s3_ok && !bytecode_b.is_empty(),
+            "Stage 3 (self-host compile pipeline_test.fav) failed: {s3_value}\n{s3_out}"
+        );
+
+        assert_eq!(
+            bytecode_a, bytecode_b,
+            "stage/seq: self-host compiler output diverges from Rust compiler"
+        );
+    }
 }
 fn run_favnir_source(source: &str) -> String {
     use crate::frontend::parser::Parser;

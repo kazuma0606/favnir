@@ -59,6 +59,9 @@ type Token =
   | TkRBrace
   | TkLBracket
   | TkRBracket
+  | TkStage
+  | TkSeq
+  | TkAbstract
   | TkEof
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -122,8 +125,14 @@ fn keyword_token(s: String) -> Option<Token> {
     if s == "true" { Option.some(TkTrue) }
     else {
     if s == "false" { Option.some(TkFalse) }
+    else {
+    if s == "stage" { Option.some(TkStage) }
+    else {
+    if s == "seq" { Option.some(TkSeq) }
+    else {
+    if s == "abstract" { Option.some(TkAbstract) }
     else { Option.none() }
-    }}}}}}}}}}}}}}}}}
+    }}}}}}}}}}}}}}}}}}}}
 }
 
 fn scan_string_chars(chars: List<String>, acc: List<String>) -> Result<ScanResult, String> {
@@ -470,10 +479,29 @@ type TestDef = {
     body: Expr
 }
 
+type StageDef = {
+    is_public:   Bool
+    is_abstract: Bool
+    name:        String
+    param_ty:    TypeExpr
+    ret_ty:      TypeExpr
+    effects:     List<String>
+    body:        Option<Expr>
+}
+
+type SeqDef = {
+    is_public:   Bool
+    is_abstract: Bool
+    name:        String
+    stages:      List<String>
+}
+
 type Item =
   | IFn(FnDef)
   | IType(TypeDef)
   | ITest(TestDef)
+  | IStage(StageDef)
+  | ISeq(SeqDef)
 
 type Program = {
     items: List<Item>
@@ -535,6 +563,26 @@ type ItemParse = {
 
 type ItemsParse = {
     items: List<Item>
+    rest: List<Token>
+}
+
+type StageDefParse = {
+    stage_def: StageDef
+    rest: List<Token>
+}
+
+type SeqDefParse = {
+    seq_def: SeqDef
+    rest: List<Token>
+}
+
+type EffectsParse = {
+    effects: List<String>
+    rest: List<Token>
+}
+
+type PipelineNamesParse = {
+    stages: List<String>
     rest: List<Token>
 }
 
@@ -600,6 +648,9 @@ fn token_eq(a: Token, b: Token) -> Bool {
         TkRBrace => { match b { TkRBrace => true _ => false } }
         TkLBracket => { match b { TkLBracket => true _ => false } }
         TkRBracket => { match b { TkRBracket => true _ => false } }
+        TkStage => { match b { TkStage => true _ => false } }
+        TkSeq => { match b { TkSeq => true _ => false } }
+        TkAbstract => { match b { TkAbstract => true _ => false } }
         TkEof => { match b { TkEof => true _ => false } }
     }
 }
@@ -622,6 +673,7 @@ fn token_to_string(t: Token) -> String {
         TkPipe => "|" TkDot => "." TkComma => "," TkColon => ":"
         TkSemicolon => ";" TkLParen => "(" TkRParen => ")"
         TkLBrace => "{" TkRBrace => "}" TkLBracket => "[" TkRBracket => "]"
+        TkStage => "stage" TkSeq => "seq" TkAbstract => "abstract"
         TkEof => "EOF"
     }
 }
@@ -1609,6 +1661,136 @@ fn parse_test_item_after_name(tname: String, rest2: List<Token>) -> Result<ItemP
     }
 }
 
+fn empty_string_list() -> List<String> {
+    List.drop_while(List.singleton(""), |v| true)
+}
+
+fn parse_effects_acc(toks: List<Token>, acc: List<String>) -> EffectsParse {
+    match peek(toks) {
+        Some(TkBang) => {
+            bind rest1 <- advance(toks)
+            match peek(rest1) {
+                Some(TkIdent(ename)) => {
+                    bind rest2 <- advance(rest1)
+                    parse_effects_acc(rest2, List.push(acc, ename))
+                }
+                _ => EffectsParse { effects: acc, rest: toks }
+            }
+        }
+        _ => EffectsParse { effects: acc, rest: toks }
+    }
+}
+
+fn parse_seq_pipeline_acc(toks: List<Token>, acc: List<String>) -> Result<PipelineNamesParse, String> {
+    match peek(toks) {
+        Some(TkIdent(sname)) => {
+            bind rest1 <- advance(toks)
+            match peek(rest1) {
+                Some(TkPipeGt) => {
+                    bind rest2 <- advance(rest1)
+                    parse_seq_pipeline_acc(rest2, List.push(acc, sname))
+                }
+                _ => Result.ok(PipelineNamesParse { stages: List.push(acc, sname), rest: rest1 })
+            }
+        }
+        _ => Result.err("expected stage name in seq pipeline")
+    }
+}
+
+fn parse_stage_def_with_body(sname: String, is_pub: Bool, param_ty: TypeExpr, ret_ty: TypeExpr, effects: List<String>, rest4: List<Token>) -> Result<StageDefParse, String> {
+    match parse_expr(rest4) {
+        Err(e) => Result.err(e)
+        Ok(body_p) => {
+            bind sd <- StageDef {
+                is_public: is_pub  is_abstract: false
+                name: sname  param_ty: param_ty  ret_ty: ret_ty
+                effects: effects  body: Option.some(body_p.expr)
+            }
+            Result.ok(StageDefParse { stage_def: sd  rest: body_p.rest })
+        }
+    }
+}
+
+fn parse_stage_def_effects_done(sname: String, is_pub: Bool, is_abstract: Bool, param_ty: TypeExpr, ret_ty: TypeExpr, effs_p: EffectsParse) -> Result<StageDefParse, String> {
+    if is_abstract {
+        bind sd <- StageDef {
+            is_public: is_pub  is_abstract: true
+            name: sname  param_ty: param_ty  ret_ty: ret_ty
+            effects: effs_p.effects  body: Option.none()
+        }
+        Result.ok(StageDefParse { stage_def: sd  rest: effs_p.rest })
+    } else {
+        match expect_tok(effs_p.rest, TkEq) {
+            Err(e) => Result.err(e)
+            Ok(rest4) => parse_stage_def_with_body(sname, is_pub, param_ty, ret_ty, effs_p.effects, rest4)
+        }
+    }
+}
+
+fn parse_stage_def_ret_done(sname: String, is_pub: Bool, is_abstract: Bool, param_ty: TypeExpr, ret_p: TypeExprParse) -> Result<StageDefParse, String> {
+    bind empty_effs <- empty_string_list()
+    bind effs_p <- parse_effects_acc(ret_p.rest, empty_effs)
+    parse_stage_def_effects_done(sname, is_pub, is_abstract, param_ty, ret_p.ty, effs_p)
+}
+
+fn parse_stage_def_param_done(sname: String, is_pub: Bool, is_abstract: Bool, param_p: TypeExprParse) -> Result<StageDefParse, String> {
+    match expect_tok(param_p.rest, TkArrow) {
+        Err(e) => Result.err(e)
+        Ok(rest3) => {
+            match parse_type_expr(rest3) {
+                Err(e) => Result.err(e)
+                Ok(ret_p) => parse_stage_def_ret_done(sname, is_pub, is_abstract, param_p.ty, ret_p)
+            }
+        }
+    }
+}
+
+fn parse_stage_def(toks: List<Token>, is_pub: Bool, is_abstract: Bool) -> Result<StageDefParse, String> {
+    match peek(toks) {
+        Some(TkIdent(sname)) => {
+            bind rest1 <- advance(toks)
+            match expect_tok(rest1, TkColon) {
+                Err(e) => Result.err(e)
+                Ok(rest2) => {
+                    match parse_type_expr(rest2) {
+                        Err(e) => Result.err(e)
+                        Ok(param_p) => parse_stage_def_param_done(sname, is_pub, is_abstract, param_p)
+                    }
+                }
+            }
+        }
+        _ => Result.err("expected stage name")
+    }
+}
+
+fn parse_seq_def(toks: List<Token>, is_pub: Bool, is_abstract: Bool) -> Result<SeqDefParse, String> {
+    match peek(toks) {
+        Some(TkIdent(sname)) => {
+            bind rest1 <- advance(toks)
+            if is_abstract {
+                bind empty_stages <- empty_string_list()
+                bind sd <- SeqDef { is_public: is_pub  is_abstract: true  name: sname  stages: empty_stages }
+                Result.ok(SeqDefParse { seq_def: sd  rest: rest1 })
+            } else {
+                match expect_tok(rest1, TkEq) {
+                    Err(e) => Result.err(e)
+                    Ok(rest2) => {
+                        bind empty_stages <- empty_string_list()
+                        match parse_seq_pipeline_acc(rest2, empty_stages) {
+                            Err(e) => Result.err(e)
+                            Ok(pipe_p) => {
+                                bind sd <- SeqDef { is_public: is_pub  is_abstract: false  name: sname  stages: pipe_p.stages }
+                                Result.ok(SeqDefParse { seq_def: sd  rest: pipe_p.rest })
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        _ => Result.err("expected seq name")
+    }
+}
+
 fn parse_item(toks: List<Token>) -> Result<ItemParse, String> {
     match peek(toks) {
         Some(TkPublic) => {
@@ -1620,7 +1802,21 @@ fn parse_item(toks: List<Token>) -> Result<ItemParse, String> {
                         Ok(fd) => Result.ok(ItemParse { item: IFn(fd.fn_def), rest: fd.rest })
                     }
                 }
-                _ => Result.err("expected fn after public")
+                Some(TkStage) => {
+                    bind rest2 <- advance(rest1)
+                    match parse_stage_def(rest2, true, false) {
+                        Err(e) => Result.err(e)
+                        Ok(sd) => Result.ok(ItemParse { item: IStage(sd.stage_def), rest: sd.rest })
+                    }
+                }
+                Some(TkSeq) => {
+                    bind rest2 <- advance(rest1)
+                    match parse_seq_def(rest2, true, false) {
+                        Err(e) => Result.err(e)
+                        Ok(sd) => Result.ok(ItemParse { item: ISeq(sd.seq_def), rest: sd.rest })
+                    }
+                }
+                _ => Result.err("expected fn, stage, or seq after public")
             }
         }
         Some(TkFn) => {
@@ -1645,7 +1841,41 @@ fn parse_item(toks: List<Token>) -> Result<ItemParse, String> {
                 _ => Result.err("expected test name string")
             }
         }
-        _ => Result.err("expected fn, type, public, or test")
+        Some(TkStage) => {
+            bind rest1 <- advance(toks)
+            match parse_stage_def(rest1, false, false) {
+                Err(e) => Result.err(e)
+                Ok(sd) => Result.ok(ItemParse { item: IStage(sd.stage_def), rest: sd.rest })
+            }
+        }
+        Some(TkSeq) => {
+            bind rest1 <- advance(toks)
+            match parse_seq_def(rest1, false, false) {
+                Err(e) => Result.err(e)
+                Ok(sd) => Result.ok(ItemParse { item: ISeq(sd.seq_def), rest: sd.rest })
+            }
+        }
+        Some(TkAbstract) => {
+            bind rest1 <- advance(toks)
+            match peek(rest1) {
+                Some(TkStage) => {
+                    bind rest2 <- advance(rest1)
+                    match parse_stage_def(rest2, false, true) {
+                        Err(e) => Result.err(e)
+                        Ok(sd) => Result.ok(ItemParse { item: IStage(sd.stage_def), rest: sd.rest })
+                    }
+                }
+                Some(TkSeq) => {
+                    bind rest2 <- advance(rest1)
+                    match parse_seq_def(rest2, false, true) {
+                        Err(e) => Result.err(e)
+                        Ok(sd) => Result.ok(ItemParse { item: ISeq(sd.seq_def), rest: sd.rest })
+                    }
+                }
+                _ => Result.err("expected stage or seq after abstract")
+            }
+        }
+        _ => Result.err("expected fn, type, public, stage, seq, abstract, or test")
     }
 }
 
@@ -2889,6 +3119,59 @@ fn empty_fns() -> List<FnEntry> {
         |v| true)
 }
 
+fn compile_stage_body(stage_def: StageDef, body: Expr) -> Result<List<FnEntry>, String> {
+    match body {
+        ELambda(pname, inner) => {
+            bind fn_def <- FnDef {
+                is_public: stage_def.is_public
+                name: stage_def.name
+                params: List.singleton(Param { name: pname  ty: stage_def.param_ty })
+                ret: stage_def.ret_ty
+                body: inner
+            }
+            compile_fn_def(fn_def)
+        }
+        _ => Result.err(String.concat("stage body must be a lambda: ", stage_def.name))
+    }
+}
+
+fn compile_stage_def(stage_def: StageDef) -> Result<List<FnEntry>, String> {
+    match stage_def.body {
+        None => {
+            bind empty <- empty_fns()
+            Result.ok(empty)
+        }
+        Some(body) => compile_stage_body(stage_def, body)
+    }
+}
+
+fn build_pipe_call(stages: List<String>, input_expr: Expr) -> Expr {
+    match List.first(stages) {
+        None => input_expr
+        Some(sname) => {
+            bind rest <- List.drop(stages, 1)
+            build_pipe_call(rest, ECall("", sname, EArgList(input_expr, EArgNil)))
+        }
+    }
+}
+
+fn compile_seq_def(seq_def: SeqDef) -> Result<List<FnEntry>, String> {
+    if seq_def.is_abstract {
+        bind empty <- empty_fns()
+        Result.ok(empty)
+    } else {
+        bind body <- build_pipe_call(seq_def.stages, EVar("$input"))
+        bind fn_def <- FnDef {
+            is_public: seq_def.is_public
+            name: seq_def.name
+            params: List.singleton(Param { name: "$input"  ty: TeSimple("Any") })
+            ret: TeSimple("Any")
+            body: body
+        }
+        compile_fn_def(fn_def)
+    }
+}
+
 fn compile_items(items: List<Item>, acc: List<FnEntry>) -> Result<List<FnEntry>, String> {
     match List.first(items) {
         None => Result.ok(acc)
@@ -2900,6 +3183,14 @@ fn compile_items(items: List<Item>, acc: List<FnEntry>) -> Result<List<FnEntry>,
                 }
                 IType(_) => compile_items(List.drop(items, 1), acc)
                 ITest(_) => compile_items(List.drop(items, 1), acc)
+                IStage(stage_def) => {
+                    Result.and_then(compile_stage_def(stage_def), |entries|
+                    compile_items(List.drop(items, 1), List.concat(acc, entries)))
+                }
+                ISeq(seq_def) => {
+                    Result.and_then(compile_seq_def(seq_def), |entries|
+                    compile_items(List.drop(items, 1), List.concat(acc, entries)))
+                }
             }
         }
     }
@@ -3182,6 +3473,135 @@ test "full pipeline on simple fn produces non-empty bytecode" {
                     match compile(prog) {
                         Err(_) => false
                         Ok(artifact) => List.length(artifact.fns) > 0
+                    }
+                }
+            }
+        }
+    }
+}
+
+test "lex stage keyword" {
+    match lex("stage") {
+        Err(_) => false
+        Ok(toks) => {
+            match List.first(toks) {
+                Some(TkStage) => true
+                _ => false
+            }
+        }
+    }
+}
+
+test "lex seq keyword" {
+    match lex("seq") {
+        Err(_) => false
+        Ok(toks) => {
+            match List.first(toks) {
+                Some(TkSeq) => true
+                _ => false
+            }
+        }
+    }
+}
+
+test "lex abstract keyword" {
+    match lex("abstract") {
+        Err(_) => false
+        Ok(toks) => {
+            match List.first(toks) {
+                Some(TkAbstract) => true
+                _ => false
+            }
+        }
+    }
+}
+
+test "parse stage def" {
+    bind src <- "stage Double: Int -> Int = |n| { n * 2 }"
+    match lex(src) {
+        Err(_) => false
+        Ok(toks) => {
+            match parse_tokens(toks) {
+                Err(_) => false
+                Ok(prog) => List.length(prog.items) == 1
+            }
+        }
+    }
+}
+
+test "parse seq def" {
+    bind src <- "stage Double: Int -> Int = |n| { n * 2 } stage AddOne: Int -> Int = |n| { n + 1 } seq Pipeline = Double |> AddOne"
+    match lex(src) {
+        Err(_) => false
+        Ok(toks) => {
+            match parse_tokens(toks) {
+                Err(_) => false
+                Ok(prog) => List.length(prog.items) == 3
+            }
+        }
+    }
+}
+
+test "compile stage def produces fn entry" {
+    bind src <- "stage Double: Int -> Int = |n| { n * 2 }"
+    match lex(src) {
+        Err(_) => false
+        Ok(toks) => {
+            match parse_tokens(toks) {
+                Err(_) => false
+                Ok(prog) => {
+                    match compile(prog) {
+                        Err(_) => false
+                        Ok(artifact) => List.length(artifact.fns) == 1
+                    }
+                }
+            }
+        }
+    }
+}
+
+test "compile seq def produces fn entries" {
+    bind src <- "stage Double: Int -> Int = |n| { n * 2 } stage AddOne: Int -> Int = |n| { n + 1 } seq Pipeline = Double |> AddOne"
+    match lex(src) {
+        Err(_) => false
+        Ok(toks) => {
+            match parse_tokens(toks) {
+                Err(_) => false
+                Ok(prog) => {
+                    match compile(prog) {
+                        Err(_) => false
+                        Ok(artifact) => List.length(artifact.fns) == 3
+                    }
+                }
+            }
+        }
+    }
+}
+
+test "parse abstract stage" {
+    bind src <- "abstract stage Transform: Int -> Int"
+    match lex(src) {
+        Err(_) => false
+        Ok(toks) => {
+            match parse_tokens(toks) {
+                Err(_) => false
+                Ok(prog) => List.length(prog.items) == 1
+            }
+        }
+    }
+}
+
+test "compile abstract stage produces no fn entry" {
+    bind src <- "abstract stage Transform: Int -> Int"
+    match lex(src) {
+        Err(_) => false
+        Ok(toks) => {
+            match parse_tokens(toks) {
+                Err(_) => false
+                Ok(prog) => {
+                    match compile(prog) {
+                        Err(_) => false
+                        Ok(artifact) => List.length(artifact.fns) == 0
                     }
                 }
             }

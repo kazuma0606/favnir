@@ -77,7 +77,7 @@ type Row = { id: Int  value: String }
 
 public fn main() -> Unit !Io !AWS {
   bind rows <- aws.s3.read_csv<Row>("my-bucket", "data/input.csv")
-  IO.println($"読み込み: {List.len(rows)} 件")
+  IO.println($"読み込み: {List.length(rows)} 件")
 }
 ```
 

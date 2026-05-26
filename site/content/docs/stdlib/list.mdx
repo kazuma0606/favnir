@@ -2,7 +2,7 @@
 title: "List"
 order: 2
 category: "標準ライブラリ"
-description: "List<T> — map / filter / fold / any / len / get"
+description: "List<T> — map / filter / fold / any / length / first"
 ---
 
 # List
@@ -11,8 +11,8 @@ description: "List<T> — map / filter / fold / any / len / get"
 
 | 関数 | シグネチャ | 説明 |
 |------|-----------|------|
-| `List.len` | `List<T> -> Int` | 要素数 |
-| `List.get` | `List<T>, Int -> T` | インデックスアクセス |
+| `List.length` | `List<T> -> Int` | 要素数 |
+| `List.first` | `List<T> -> Option<T>` | 先頭要素（なければ None） |
 | `List.map` | `List<T>, T -> U -> List<U>` | 変換 |
 | `List.filter` | `List<T>, T -> Bool -> List<T>` | フィルタ |
 | `List.fold` | `List<T>, U, (U, T) -> U -> U` | 集約 |
@@ -30,20 +30,22 @@ description: "List<T> — map / filter / fold / any / len / get"
 ## 使用例
 
 ```favnir
-bind nums       <- [1, 2, 3, 4, 5]
+// nums は外部データ（DuckDB クエリ結果など）から取得した List<Int>
+fn demo(nums: List<Int>) -> Unit !Io {
+  bind doubled    <- List.map(nums, |n| n * 2)
+  // 各要素が2倍のリスト
 
-bind doubled    <- List.map(nums, |n| n * 2)
-// [2, 4, 6, 8, 10]
+  bind evens      <- List.filter(nums, |n| n % 2 == 0)
+  // 偶数のみのリスト
 
-bind evens      <- List.filter(nums, |n| n % 2 == 0)
-// [2, 4]
+  bind sum        <- List.fold(nums, 0, |acc, n| acc + n)
+  // 合計値
 
-bind sum        <- List.fold(nums, 0, |acc, n| acc + n)
-// 15
+  bind has_three  <- List.any(nums, |n| n == 3)
+  // 3 が含まれるか
 
-bind has_three  <- List.any(nums, |n| n == 3)
-// true
-
-bind first_even <- List.find(nums, |n| n % 2 == 0)
-// some(2)
+  bind first_even <- List.find(nums, |n| n % 2 == 0)
+  // Option.some(最初の偶数) または Option.none
+  IO.println_int(sum)
+}
 ```

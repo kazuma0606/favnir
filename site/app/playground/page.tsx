@@ -5,26 +5,18 @@ import { Header } from '@/components/landing/header'
 import { Footer } from '@/components/landing/footer'
 import { Button } from '@/components/ui/button'
 
-const EXAMPLE_CODE = `// Favnir Playground — ブラウザ内で型チェックと実行
-// bind x <- expr; で変数を束縛します
+const EXAMPLE_CODE = `// Favnir Playground — stage/seq パイプライン
+// stage: 型付きの処理ステップを定義します
+// seq:   ステップを |> で結合してパイプラインを作ります
 
-fn max(a: Int, b: Int) -> Int {
-  if a > b { a } else { b }
-}
+stage Double: Int -> Int = |n| { n * 2 }
+stage AddOne: Int -> Int = |n| { n + 1 }
+stage Square: Int -> Int = |n| { n * n }
 
-fn min(a: Int, b: Int) -> Int {
-  if a < b { a } else { b }
-}
-
-fn clamp(value: Int, lo: Int, hi: Int) -> Int {
-  max(lo, min(value, hi))
-}
+seq Transform = Double |> AddOne |> Square
 
 public fn main() -> Unit !Io {
-  bind x <- clamp(150, 0, 100);
-  bind y <- clamp(-50, 0, 100);
-  IO.println_int(x);
-  IO.println_int(y)
+  IO.println_int(Transform(3))
 }`
 
 interface Diagnostic {
@@ -104,7 +96,7 @@ export default function PlaygroundPage() {
 
     const bytes = window.__favnirCompile(code)
     if (!bytes) {
-      setOutput(['[実行不可] このプログラムはブラウザ実行非対応です。\n対応: Int/Float/Bool/String/Unit 型のみ使用する関数\n非対応: 構造体・クロージャ・List/Map 操作'])
+      setOutput(['[実行不可] このプログラムはブラウザ実行非対応です。\n対応: Int/Float/Bool/String/Unit/List<Int> 型、stage/seq パイプライン\n非対応: match 式・Option/Result 型・ユーザー定義型'])
       setRunning(false)
       return
     }

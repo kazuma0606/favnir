@@ -2,7 +2,7 @@
 title: "Option"
 order: 5
 category: "標準ライブラリ"
-description: "Option<T> — some / none / unwrap_or / map / and_then"
+description: "Option<T> — Option.some / Option.none / unwrap_or / map / and_then"
 ---
 
 # Option
@@ -14,8 +14,8 @@ null の代わりに使います。
 
 | 関数 | シグネチャ | 説明 |
 |------|-----------|------|
-| `some` | `T -> Option<T>` | 値を包む（`Some(v)` を返す） |
-| `none` | `Option<T>` | 空の Option（`None`） |
+| `Option.some` | `T -> Option<T>` | 値を包む（`Some(v)` を返す） |
+| `Option.none` | `Option<T>` | 空の Option（`None`） |
 | `Option.unwrap_or` | `Option<T>, T -> T` | 値または既定値 |
 | `Option.map` | `Option<T>, T -> U -> Option<U>` | 値を変換 |
 | `Option.and_then` | `Option<T>, T -> Option<U> -> Option<U>` | チェーン |
@@ -26,7 +26,7 @@ null の代わりに使います。
 ## 使用例
 
 ```favnir
-bind opt <- some(42)
+bind opt <- Option.some(42)
 
 // Option.unwrap_or
 bind val <- Option.unwrap_or(opt, 0)   // 42
@@ -38,7 +38,7 @@ match opt {
 }
 
 // map でチェーン
-bind doubled <- Option.map(opt, |n| n * 2)   // some(84)
+bind doubled <- Option.map(opt, |n| n * 2)   // Option.some(84)
 ```
 
 ## Option vs Result

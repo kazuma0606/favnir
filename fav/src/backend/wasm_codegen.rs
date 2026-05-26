@@ -85,6 +85,10 @@ pub struct WasmCodegenCtx<'a> {
     pub closure_table_idx: HashMap<u16, u32>,
     /// Maps closure global_idx → wrapper function type index.
     pub closure_wrapper_type_idx: HashMap<u16, u32>,
+    /// Indices for built-in list helper functions (always present).
+    pub list_singleton_fn_idx: u32,
+    pub list_length_fn_idx: u32,
+    pub list_is_empty_fn_idx: u32,
 }
 
 const HEAP_PTR_INITIAL: i32 = 65536;
@@ -110,6 +114,125 @@ fn build_bump_alloc_function() -> Function {
     func.instruction(&Instruction::LocalGet(0));
     func.instruction(&Instruction::I32Add);
     func.instruction(&Instruction::GlobalSet(HEAP_PTR_GLOBAL_IDX));
+    func.instruction(&Instruction::End);
+    func
+}
+
+// ── List helper functions ─────────────────────────────────────────────────────
+//
+// List cells are 16 bytes each:
+//   offset 0: tag  (i32)  — 0 = Nil, 1 = Cons
+//   offset 4: next (i32)  — pointer to next cell (0 for Nil)
+//   offset 8: val  (i64)  — element value (0 for Nil)
+//
+// All scalar element types (Int/Bool) are widened to i64 before storage.
+
+/// `list_singleton(val: i64) -> i32`  — allocates a one-element list.
+fn build_list_singleton_fn(bump_alloc_fn_idx: u32) -> Function {
+    // param 0: val (i64)
+    // local 1: nil_ptr (i32)
+    // local 2: cons_ptr (i32)
+    let mut func = Function::new(vec![(1, ValType::I32), (1, ValType::I32)]);
+
+    // ── allocate Nil cell (16 bytes) ──────────────────────────────────────
+    func.instruction(&Instruction::I32Const(16));
+    func.instruction(&Instruction::Call(bump_alloc_fn_idx));
+    func.instruction(&Instruction::LocalSet(1)); // nil_ptr
+
+    // tag = 0
+    func.instruction(&Instruction::LocalGet(1));
+    func.instruction(&Instruction::I32Const(0));
+    func.instruction(&Instruction::I32Store(MemArg { offset: 0, align: 2, memory_index: 0 }));
+    // next = 0
+    func.instruction(&Instruction::LocalGet(1));
+    func.instruction(&Instruction::I32Const(0));
+    func.instruction(&Instruction::I32Store(MemArg { offset: 4, align: 2, memory_index: 0 }));
+    // val = 0
+    func.instruction(&Instruction::LocalGet(1));
+    func.instruction(&Instruction::I64Const(0));
+    func.instruction(&Instruction::I64Store(MemArg { offset: 8, align: 3, memory_index: 0 }));
+
+    // ── allocate Cons cell (16 bytes) ─────────────────────────────────────
+    func.instruction(&Instruction::I32Const(16));
+    func.instruction(&Instruction::Call(bump_alloc_fn_idx));
+    func.instruction(&Instruction::LocalSet(2)); // cons_ptr
+
+    // tag = 1
+    func.instruction(&Instruction::LocalGet(2));
+    func.instruction(&Instruction::I32Const(1));
+    func.instruction(&Instruction::I32Store(MemArg { offset: 0, align: 2, memory_index: 0 }));
+    // next = nil_ptr
+    func.instruction(&Instruction::LocalGet(2));
+    func.instruction(&Instruction::LocalGet(1));
+    func.instruction(&Instruction::I32Store(MemArg { offset: 4, align: 2, memory_index: 0 }));
+    // val = param val
+    func.instruction(&Instruction::LocalGet(2));
+    func.instruction(&Instruction::LocalGet(0));
+    func.instruction(&Instruction::I64Store(MemArg { offset: 8, align: 3, memory_index: 0 }));
+
+    func.instruction(&Instruction::LocalGet(2)); // return cons_ptr
+    func.instruction(&Instruction::End);
+    func
+}
+
+/// `list_length(ptr: i32) -> i64`  — counts elements.
+fn build_list_length_fn() -> Function {
+    // param 0: ptr (i32)
+    // local 1: acc (i64)
+    // local 2: cur (i32)
+    // local 3: tag (i32)
+    let mut func = Function::new(vec![
+        (1, ValType::I64),
+        (1, ValType::I32),
+        (1, ValType::I32),
+    ]);
+
+    // acc = 0
+    func.instruction(&Instruction::I64Const(0));
+    func.instruction(&Instruction::LocalSet(1));
+    // cur = ptr
+    func.instruction(&Instruction::LocalGet(0));
+    func.instruction(&Instruction::LocalSet(2));
+
+    // block { loop { ... br_if 1 to exit ... br 0 to continue } }
+    func.instruction(&Instruction::Block(BlockType::Empty));
+    func.instruction(&Instruction::Loop(BlockType::Empty));
+
+    // tag = mem[cur]
+    func.instruction(&Instruction::LocalGet(2));
+    func.instruction(&Instruction::I32Load(MemArg { offset: 0, align: 2, memory_index: 0 }));
+    func.instruction(&Instruction::LocalSet(3));
+    // if tag == 0 (Nil): break
+    func.instruction(&Instruction::LocalGet(3));
+    func.instruction(&Instruction::I32Eqz);
+    func.instruction(&Instruction::BrIf(1)); // exit block
+
+    // acc += 1
+    func.instruction(&Instruction::LocalGet(1));
+    func.instruction(&Instruction::I64Const(1));
+    func.instruction(&Instruction::I64Add);
+    func.instruction(&Instruction::LocalSet(1));
+    // cur = mem[cur + 4]  (next_ptr)
+    func.instruction(&Instruction::LocalGet(2));
+    func.instruction(&Instruction::I32Load(MemArg { offset: 4, align: 2, memory_index: 0 }));
+    func.instruction(&Instruction::LocalSet(2));
+
+    func.instruction(&Instruction::Br(0)); // restart loop
+    func.instruction(&Instruction::End);   // end loop
+    func.instruction(&Instruction::End);   // end block
+
+    func.instruction(&Instruction::LocalGet(1)); // return acc
+    func.instruction(&Instruction::End);
+    func
+}
+
+/// `list_is_empty(ptr: i32) -> i32`  — returns 1 if Nil, 0 if Cons.
+fn build_list_is_empty_fn() -> Function {
+    // param 0: ptr (i32)
+    let mut func = Function::new(vec![]);
+    func.instruction(&Instruction::LocalGet(0));
+    func.instruction(&Instruction::I32Load(MemArg { offset: 0, align: 2, memory_index: 0 }));
+    func.instruction(&Instruction::I32Eqz); // tag == 0 → 1 (true), else 0 (false)
     func.instruction(&Instruction::End);
     func
 }
@@ -426,6 +549,8 @@ pub fn favnir_type_to_wasm_results(ty: &Type) -> Result<Vec<ValType>, WasmCodege
         Type::Float => Ok(vec![ValType::F64]),
         Type::Bool => Ok(vec![ValType::I32]),
         Type::String => Ok(vec![ValType::I32, ValType::I32]),
+        // List values are heap pointers (i32).
+        Type::List(_) => Ok(vec![ValType::I32]),
         Type::Unknown => Ok(vec![ValType::I64]),
         Type::Error => Err(WasmCodegenError::UnsupportedType(format!(
             "unknown return type: {ty:?}"
@@ -443,6 +568,8 @@ pub fn favnir_type_to_wasm_params(ty: &Type) -> Result<Vec<ValType>, WasmCodegen
         Type::Float => Ok(vec![ValType::F64]),
         Type::Bool => Ok(vec![ValType::I32]),
         Type::String => Ok(vec![ValType::I32, ValType::I32]),
+        // List values are heap pointers (i32).
+        Type::List(_) => Ok(vec![ValType::I32]),
         Type::Unknown => Ok(vec![ValType::I64]),
         Type::Error => Err(WasmCodegenError::UnsupportedType(format!(
             "unknown parameter type: {ty:?}"
@@ -902,6 +1029,30 @@ fn emit_expr(
         )),
         IRExpr::Call(callee, args, _) => {
             if let Some(builtin) = builtin_call_name(callee, ctx.globals) {
+                // Handle List builtins inline before generic host-import dispatch.
+                match builtin.as_str() {
+                    "List.singleton" if args.len() == 1 => {
+                        emit_expr(&args[0], ctx, slot_map, func)?;
+                        // Widen Bool (i32) to i64 for the singleton helper.
+                        if matches!(args[0].ty(), Type::Bool) {
+                            func.instruction(&Instruction::I64ExtendI32S);
+                        }
+                        func.instruction(&Instruction::Call(ctx.list_singleton_fn_idx));
+                        return Ok(());
+                    }
+                    "List.length" if args.len() == 1 => {
+                        emit_expr(&args[0], ctx, slot_map, func)?;
+                        func.instruction(&Instruction::Call(ctx.list_length_fn_idx));
+                        return Ok(());
+                    }
+                    "List.is_empty" if args.len() == 1 => {
+                        emit_expr(&args[0], ctx, slot_map, func)?;
+                        func.instruction(&Instruction::Call(ctx.list_is_empty_fn_idx));
+                        return Ok(());
+                    }
+                    _ => {}
+                }
+
                 for arg in args {
                     emit_expr(arg, ctx, slot_map, func)?;
                 }
@@ -1142,9 +1293,21 @@ pub fn wasm_codegen_program(ir: &IRProgram) -> Result<Vec<u8>, WasmCodegenError>
         build_type_section(ir, &import_kinds)?;
     let (data_bytes, str_to_offset) = collect_string_literals(ir);
 
+    // Add type entries for the 3 built-in list helpers (after bump_alloc type).
+    // list_singleton: (i64) -> i32
+    type_section.ty().function([ValType::I64], [ValType::I32]);
+    // list_length: (i32) -> i64
+    type_section.ty().function([ValType::I32], [ValType::I64]);
+    // list_is_empty: (i32) -> i32
+    type_section.ty().function([ValType::I32], [ValType::I32]);
+    let list_singleton_type_idx = bump_alloc_type_idx + 1;
+    let list_length_type_idx = bump_alloc_type_idx + 2;
+    let list_is_empty_type_idx = bump_alloc_type_idx + 3;
+
     // Register wrapper types for each closure and build index maps.
     // Wrapper signature: (env_ptr: i32, actual_params: i64...) -> return_ty
-    let mut next_type_idx = imports.len() as u32 + ir.fns.len() as u32 + 1; // after bump_alloc type
+    // 3 list helper types are inserted before closures, so start at bump_alloc + 4.
+    let mut next_type_idx = imports.len() as u32 + ir.fns.len() as u32 + 4; // after bump_alloc + 3 list helpers
     let mut closure_wrapper_type_idx: HashMap<u16, u32> = HashMap::new();
     let mut closure_table_idx: HashMap<u16, u32> = HashMap::new();
     for (table_elem_idx, (global_idx, (fn_idx, captures_count))) in
@@ -1180,8 +1343,12 @@ pub fn wasm_codegen_program(ir: &IRProgram) -> Result<Vec<u8>, WasmCodegenError>
         .map(|(idx, _)| (idx, imports.len() as u32 + idx as u32))
         .collect::<HashMap<_, _>>();
     let bump_alloc_fn_idx = imports.len() as u32 + ir.fns.len() as u32;
-    // Wrapper functions are placed after bump_alloc in the function index space.
-    let wrapper_base_wasm_idx = bump_alloc_fn_idx + 1;
+    // List helpers are placed right after bump_alloc.
+    let list_singleton_fn_idx = bump_alloc_fn_idx + 1;
+    let list_length_fn_idx = bump_alloc_fn_idx + 2;
+    let list_is_empty_fn_idx = bump_alloc_fn_idx + 3;
+    // Wrapper functions are placed after the list helpers.
+    let wrapper_base_wasm_idx = bump_alloc_fn_idx + 4;
 
     let ctx = WasmCodegenCtx {
         fn_to_wasm_idx,
@@ -1192,6 +1359,9 @@ pub fn wasm_codegen_program(ir: &IRProgram) -> Result<Vec<u8>, WasmCodegenError>
         fns: &ir.fns,
         closure_table_idx,
         closure_wrapper_type_idx,
+        list_singleton_fn_idx,
+        list_length_fn_idx,
+        list_is_empty_fn_idx,
     };
 
     let mut function_section = FunctionSection::new();
@@ -1205,6 +1375,14 @@ pub fn wasm_codegen_program(ir: &IRProgram) -> Result<Vec<u8>, WasmCodegenError>
     }
     function_section.function(bump_alloc_type_idx);
     code_section.function(&build_bump_alloc_function());
+
+    // Emit built-in list helper functions.
+    function_section.function(list_singleton_type_idx);
+    code_section.function(&build_list_singleton_fn(bump_alloc_fn_idx));
+    function_section.function(list_length_type_idx);
+    code_section.function(&build_list_length_fn());
+    function_section.function(list_is_empty_type_idx);
+    code_section.function(&build_list_is_empty_fn());
 
     // Emit closure wrapper functions.
     for (global_idx, (fn_idx, captures_count)) in &sorted_closures {
@@ -1244,8 +1422,9 @@ pub fn wasm_codegen_program(ir: &IRProgram) -> Result<Vec<u8>, WasmCodegenError>
     let mut export_section = ExportSection::new();
     let mut memory_section = MemorySection::new();
     let global_section = build_heap_ptr_global_section();
+    // 2 pages (128 KB): page 0 for string literals, page 1 for bump-alloc heap (starts at 65536).
     memory_section.memory(MemoryType {
-        minimum: 1,
+        minimum: 2,
         maximum: None,
         memory64: false,
         shared: false,
@@ -1371,6 +1550,9 @@ mod tests {
             fns,
             closure_table_idx: HashMap::new(),
             closure_wrapper_type_idx: HashMap::new(),
+            list_singleton_fn_idx: 1,
+            list_length_fn_idx: 2,
+            list_is_empty_fn_idx: 3,
         }
     }
 
@@ -1475,6 +1657,9 @@ mod tests {
             fns: &[],
             closure_table_idx: HashMap::new(),
             closure_wrapper_type_idx: HashMap::new(),
+            list_singleton_fn_idx: 100,
+            list_length_fn_idx: 101,
+            list_is_empty_fn_idx: 102,
         };
         assert_eq!(ctx.fn_to_wasm_idx.get(&0), Some(&3));
         assert_eq!(ctx.builtin_to_wasm_idx.get("IO.println"), Some(&1));
@@ -1590,6 +1775,9 @@ mod tests {
             fns: &[],
             closure_table_idx: HashMap::new(),
             closure_wrapper_type_idx: HashMap::new(),
+            list_singleton_fn_idx: 1,
+            list_length_fn_idx: 2,
+            list_is_empty_fn_idx: 3,
         };
         let func = build_wasm_function(
             &IRFnDef {

@@ -13,6 +13,9 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SITE_DIR="$ROOT/site"
 INFRA_DIR="$ROOT/infra/site"
 
+echo "==> Building WASM..."
+bash "$ROOT/scripts/build-wasm.sh" --release
+
 echo "==> Building site..."
 cd "$SITE_DIR"
 npm ci --prefer-offline

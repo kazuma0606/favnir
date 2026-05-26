@@ -67,7 +67,7 @@ public fn handle_request(id: Int) -> Unit !Io !Db {
 test "pipeline result" {
   bind conn <- duckdb.open(":memory:")
   bind result <- duckdb.query<Summary>(conn, "SELECT 1 AS total")
-  assert List.len(result) == 1
+  List.length(result) == 1
 }
 ```
 

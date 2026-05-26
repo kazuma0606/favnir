@@ -30,10 +30,13 @@ IO.println(p.x)   // 3
 ## List 型
 
 ```favnir
-bind nums    <- [1, 2, 3, 4, 5]
-bind doubled <- List.map(nums, |n| n * 2)   // [2, 4, 6, 8, 10]
-bind evens   <- List.filter(nums, |n| n % 2 == 0)  // [2, 4]
-bind sum     <- List.fold(nums, 0, |acc, n| acc + n)  // 15
+// List は外部データ（クエリ結果など）や List.map 等で構築します
+fn demo(nums: List<Int>) -> Unit !Io {
+  bind doubled <- List.map(nums, |n| n * 2)   // 各要素を2倍
+  bind evens   <- List.filter(nums, |n| n % 2 == 0)  // 偶数のみ
+  bind sum     <- List.fold(nums, 0, |acc, n| acc + n)  // 合計
+  IO.println_int(sum)
+}
 ```
 
 ## Option 型
@@ -42,7 +45,7 @@ bind sum     <- List.fold(nums, 0, |acc, n| acc + n)  // 15
 
 ```favnir
 fn find_user(id: Int) -> Option<User> {
-  if id == 1 { some(User { name: "田中"  age: 30  email: none }) } else { none }
+  if id == 1 { Option.some(User { name: "田中"  age: 30  email: Option.none }) } else { Option.none }
 }
 
 match find_user(1) {
@@ -51,7 +54,7 @@ match find_user(1) {
 }
 
 // Option.unwrap_or で既定値
-bind name <- Option.unwrap_or(find_user(1), User { name: "Unknown"  age: 0  email: none })
+bind name <- Option.unwrap_or(find_user(1), User { name: "Unknown"  age: 0  email: Option.none })
 ```
 
 ## Result 型
@@ -77,7 +80,7 @@ IO.println(Result.unwrap_or(result, 0))
 
 ```favnir
 fn first<T>(list: List<T>) -> Option<T> {
-  if List.len(list) == 0 { none } else { some(List.get(list, 0)) }
+  if List.length(list) == 0 { Option.none } else { List.first(list) }
 }
 ```
 

@@ -63,7 +63,7 @@ seq UserImport = ParseCsv |> ValidateRow |> SaveToDb
 
 ## 現在の状態
 
-**v6.2.0（2026-05-25）— セルフホスト Bootstrap 検証済み**
+**v6.4.0（2026-05-27）— Playground 改善・WASM List 対応**
 
 | 機能 | 状態 |
 |---|---|
@@ -81,9 +81,9 @@ seq UserImport = ParseCsv |> ValidateRow |> SaveToDb
 | `stage` / `seq` / `\|>` パイプライン構文 | 完了 |
 | `abstract stage` / `abstract seq`（依存注入） | 完了 |
 
-テスト: **1032 件すべて通過**
+テスト: **1033 件すべて通過**
 
-Bootstrap 検証:
+Bootstrap 検証（v6.2.0 で確立・v6.3.0 以降も維持）:
 ```
 Stage 1: Rust VM で compiler.fav → hello.fav → bytecode_A
 Stage 2: Rust VM で compiler.fav → compiler.fav → compiler_artifact
@@ -169,7 +169,9 @@ seq OrderReport = LoadOrders |> Summarize
 | v4.1〜v4.12 | Rune エコシステム（DB・HTTP・AWS・LSP・MCP） | 完了 |
 | v5.0.0 | AWS 本番稼働 + CI/CD + リファレンスサイト | 完了 |
 | v6.0.0〜v6.2.0 | セルフホスト完成 + Bootstrap 検証 | 完了 |
-| v6.3〜v6.x | Playground・ドキュメント・ECS デプロイ・OSS 公開準備 | 計画中 |
+| v6.3.0 | compiler.fav への stage/seq/\|> 対応（self-host 完全化） | 完了 |
+| v6.4.0 | Playground 改善・WASM List 対応・build-wasm パイプライン | 完了 |
+| v6.5〜v6.x | ドキュメント補完・T.validate・ECS デプロイ・OSS 公開準備 | 計画中 |
 | **v7.0.0** | **Schema Authority（外部データを型で守る）** | 計画中 |
 
 詳細: [`versions/roadmap-v7.md`](versions/roadmap-v7.md)
@@ -197,7 +199,8 @@ Favnir は **ハイブリッドセルフホスト** を採用しています。
 - **Rust** — VM・バイトコード実行・セキュリティ（骨格）
 - **Favnir** — コンパイラロジック・ルーンライブラリ（知能）
 
-v6.2.0 で Bootstrap 検証が完了しました。
+v6.2.0 で Bootstrap 検証が完了し、v6.3.0 で `compiler.fav` が
+`stage`/`seq`/`|>` 構文の処理にも対応しました。
 `fav/self/compiler.fav` が Rust VM 上で自分自身をコンパイルし、
 生成したバイトコードが Rust コンパイラの出力と一致することが確認されています。
 

@@ -45,6 +45,6 @@ bind orders <- gen.many<Order>(100, 42)  // 100 件生成（シード 42）
 test "pipeline processes orders" {
   bind orders <- gen.many<Order>(50, 0)
   bind result <- process_orders(orders)
-  assert List.len(result) > 0
+  List.length(result) > 0
 }
 ```

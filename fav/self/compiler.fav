@@ -1684,7 +1684,7 @@ type Bc =
   | BcConst | BcConstUnit | BcConstTrue | BcConstFalse
   | BcLoadLocal | BcStoreLocal | BcLoadGlobal | BcPop
   | BcDup | BcSwap | BcMatchFail
-  | BcCallNamed | BcReturn
+  | BcCall | BcCallNamed | BcReturn
   | BcCollectBegin | BcCollectEnd | BcYieldValue
   | BcAdd | BcSub | BcMul | BcDiv
   | BcEq | BcNe | BcLt | BcLe | BcGt | BcGe | BcAnd | BcOr
@@ -1777,6 +1777,7 @@ fn bc_byte(op: Bc) -> Int {
         BcStoreLocal => 17
         BcLoadGlobal => 18
         BcPop => 19
+        BcCall => 21
         BcCallNamed => 86
         BcReturn => 22
         BcCollectBegin => 80
@@ -2285,6 +2286,11 @@ fn compile_call_cont(full_name: String, argc: Int, ctx1: CodegenCtx) -> Result<C
     Result.ok(emit_u16(ctx3, argc))
 }
 
+fn compile_value_call_cont(slot: Int, argc: Int, ctx1: CodegenCtx) -> Result<CodegenCtx, String> {
+    bind ctx2 <- emit_opcode(ctx1, BcCall)
+    Result.ok(emit_u16(ctx2, argc))
+}
+
 fn compile_access_cont(field: String, ctx1: CodegenCtx) -> Result<CodegenCtx, String> {
     bind ca <- add_const(ctx1, CVName(field))
     bind ctx2 <- emit_opcode(ca.ctx, BcGetField)
@@ -2721,10 +2727,23 @@ fn compile_expr(expr: Expr, ctx: CodegenCtx, env: List<KVPair>) -> Result<Codege
                 compile_result_and_then_expr(args, ctx, env)
             } else {
                 bind argc <- count_args(args)
-                bind full_name <- if ns == "" { fname }
-                                  else { String.concat(ns, String.concat(".", fname)) }
-                Result.and_then(compile_args(args, ctx, env), |ctx1|
-                compile_call_cont(full_name, argc, ctx1))
+                if ns == "" {
+                    match local_lookup(ctx.locals, fname) {
+                        Some(slot) => {
+                            Result.and_then(compile_expr(EVar(fname), ctx, env), |ctx1|
+                            Result.and_then(compile_args(args, ctx1, env), |ctx2|
+                            compile_value_call_cont(slot, argc, ctx2)))
+                        }
+                        None => {
+                            Result.and_then(compile_args(args, ctx, env), |ctx1|
+                            compile_call_cont(fname, argc, ctx1))
+                        }
+                    }
+                } else {
+                    bind full_name <- String.concat(ns, String.concat(".", fname))
+                    Result.and_then(compile_args(args, ctx, env), |ctx1|
+                    compile_call_cont(full_name, argc, ctx1))
+                }
             }
         }
         EAccess(parts) => {

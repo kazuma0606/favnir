@@ -155,8 +155,21 @@ Recommended execution order:
 2. serial validation rerun
 3. final note alignment
 
+### I. Additional v6.2.0 extension candidates
+
+Goal for this section:
+keep improving self-host confidence within v6.2.0 only where the work still fits the
+current version boundary and does not require a larger architectural shift.
+
+- [x] I-1: Decide whether the throwaway `fav/tmp` outputs should be explicitly restored before closing the branch.
+  For v6.2.0 they remain classified as throwaway test outputs rather than part of the compiler hardening deliverable.
+- [x] I-2: Add one more self-host artifact regression for a still-missing mixed-shape case if a clear gap is found.
+  Closed the local captured-closure call syntax gap by emitting generic `Call` for local function values in `compiler.fav` and added a focused self-host artifact regression.
+- [x] I-3: If no further meaningful gap remains, record v6.2.0 as functionally closed for self-host hardening.
+  v6.2.0 is considered functionally closed once focused self-host regressions, the guarded/closure bootstrap comparisons, and the local captured-closure call regression all pass; any further expansion should start from a new version task rather than extending this branch indefinitely.
+
 Recommended execution order:
 
-1. negative `collect` helper boundary regressions
-2. closure/capture bootstrap comparison input
-3. additional lowering regressions
+1. decide whether any real self-host gap remains
+2. add exactly one more regression only if it closes a real gap
+3. otherwise record the version as closed

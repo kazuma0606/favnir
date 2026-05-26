@@ -50,3 +50,8 @@
 ## Phase I
 - [x] I-1: Classify the remaining `fav/tmp` diffs as throwaway test outputs for v6.2.0
 - [x] I-2: Re-run the focused self-host validation slice serially and note the memory issue with parallel ignored runs
+
+## Phase J
+- [x] J-1: Close the remaining local captured-closure call syntax gap in the self-host compiler
+- [x] J-2: Add a focused self-host artifact regression for local captured-closure call syntax
+- [x] J-3: Mark v6.2.0 self-host hardening as functionally closed

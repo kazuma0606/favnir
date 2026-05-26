@@ -14824,6 +14824,54 @@ public fn main() -> Bool !Io {
     }
 
     #[test]
+    fn bootstrap_d2_executes_local_captured_closure_call() {
+        use std::sync::Arc;
+
+        let compiler_path = self_dir().join("compiler.fav");
+        let compiler_src = std::fs::read_to_string(&compiler_path).expect("compiler.fav");
+        let program = crate::frontend::parser::Parser::parse_str(&compiler_src, "compiler.fav")
+            .expect("parse compiler.fav");
+        let compiler_artifact = Arc::new(build_artifact(&program));
+
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let input = tmp.path().join("local_closure_call_input.fav");
+        std::fs::write(
+            &input,
+            concat!(
+                "fn main() -> Int {\n",
+                "    bind y <- 2\n",
+                "    bind f <- |x| x + y\n",
+                "    f(10)\n",
+                "}\n"
+            ),
+        )
+        .expect("write local_closure_call_input.fav");
+
+        let (ok, artifact_bytes, captured, value_dbg) = run_compiler_artifact_on(
+            Arc::clone(&compiler_artifact),
+            input.to_string_lossy().to_string(),
+        );
+        assert!(
+            ok,
+            "local captured closure call compile failed: {value_dbg}\n{captured}"
+        );
+        assert!(
+            !artifact_bytes.is_empty(),
+            "local captured closure call compile produced empty artifact:\n{captured}"
+        );
+
+        let loaded = crate::backend::artifact::FvcArtifact::from_bytes(&artifact_bytes)
+            .expect("local captured closure call output must parse as FvcArtifact");
+        let value = exec_artifact_main(&loaded, None)
+            .expect("exec local captured closure call artifact");
+        assert_eq!(
+            value,
+            crate::value::Value::Int(12),
+            "local captured closure call syntax must execute through the self-hosted artifact"
+        );
+    }
+
+    #[test]
     fn bootstrap_d2_executes_nested_call_with_record_fields_in_closure() {
         use std::sync::Arc;
 

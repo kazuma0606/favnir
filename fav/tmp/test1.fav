@@ -1,4 +1,0 @@
-public fn main() -> Unit !Io {
-  let p1 = 42
-  IO.println(p1)
-}

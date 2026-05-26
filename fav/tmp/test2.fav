@@ -1,3 +1,0 @@
-public fn main() -> Unit !Io {
-  IO.println(42)
-}

@@ -3588,6 +3588,47 @@ public fn main() -> Int {
     );
 }
 
+// ── String.to_bytes (v6.2.0) ─────────────────────────────────────────────────
+
+#[test]
+fn test_string_to_bytes_ascii() {
+    assert_eq!(
+        eval(r#"public fn main() -> Int { List.length(String.to_bytes("abc")) }"#),
+        Value::Int(3)
+    );
+}
+
+#[test]
+fn test_string_to_bytes_values() {
+    // "A" = 0x41 = 65
+    assert_eq!(
+        eval(
+            r#"public fn main() -> Int {
+    bind bs <- List.first(String.to_bytes("A"));
+    Option.unwrap_or(bs, -1)
+}"#
+        ),
+        Value::Int(65)
+    );
+}
+
+#[test]
+fn test_string_to_bytes_empty() {
+    assert_eq!(
+        eval(r#"public fn main() -> Int { List.length(String.to_bytes("")) }"#),
+        Value::Int(0)
+    );
+}
+
+#[test]
+fn test_string_to_bytes_multibyte() {
+    // "é" is 2 bytes in UTF-8 (0xC3 0xA9)
+    assert_eq!(
+        eval(r#"public fn main() -> Int { List.length(String.to_bytes("é")) }"#),
+        Value::Int(2)
+    );
+}
+
 // ── Phase A: recursive sum type (v5.1.0) ─────────────────────────────────────
 
 #[test]

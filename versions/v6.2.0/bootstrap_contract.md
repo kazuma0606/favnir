@@ -110,6 +110,8 @@ Evidence:
 The bootstrap path specifically relies on these opcode meanings matching across self-host and Rust:
 
 - `CallNamed`
+- `JumpIfNotVariantC`
+- `MakeClosureN`
 - `GetField`
 - `BuildRecord`
 - `CollectBegin`
@@ -134,6 +136,11 @@ Current byte assignments used by bootstrap:
 - `CollectEnd = 0x51`
 - `YieldValue = 0x52`
 - `CallNamed = 0x56`
+- `JumpIfNotVariantC = 0x57`
+- `MakeClosureN = 0x5A`
+
+Note: `GetFieldC (0x58)` and `BuildRecordC (0x59)` exist in the Rust VM but are not
+currently emitted by `compiler.fav` and are therefore not bootstrap-contract-relevant.
 
 These byte values are implementation-level, but they are contract-relevant as long as Rust VM directly executes the produced artifact bytes.
 

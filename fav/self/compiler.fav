@@ -2359,6 +2359,14 @@ fn compile_pattern_lit(lit: Lit, ctx: CodegenCtx, success_code: List<Int>, fail_
     })
 }
 
+fn normalize_variant_tag(name: String) -> String {
+    if name == "Ok" { "ok" }
+    else { if name == "Err" { "err" }
+    else { if name == "Some" { "some" }
+    else { if name == "None" { "none" }
+    else { name } } } }
+}
+
 fn compile_pattern_dispatch(pat: Pat, ctx: CodegenCtx, success_code: List<Int>, fail_code: List<Int>) -> Result<PatDispatch, String> {
     match pat {
         PWild => {
@@ -2387,7 +2395,7 @@ fn compile_pattern_dispatch(pat: Pat, ctx: CodegenCtx, success_code: List<Int>, 
         PBool(b) => compile_pattern_lit(LBool(b), ctx, success_code, fail_code)
         PUnit => compile_pattern_lit(LUnit, ctx, success_code, fail_code)
         PVariant(name) => {
-            bind ca <- add_const(ctx, CVName(name))
+            bind ca <- add_const(ctx, CVName(normalize_variant_tag(name)))
             bind ctx1 <- emit_opcode(ca.ctx, BcDup)
             bind success_path <- List.concat(code_op(BcPop), success_code)
             bind fail_path <- List.concat(code_op(BcPop), fail_code)
@@ -2416,7 +2424,7 @@ fn compile_pattern_dispatch(pat: Pat, ctx: CodegenCtx, success_code: List<Int>, 
                     match local_lookup(ctx.locals, inner_name) {
                         None => Result.err(String.concat("unknown pattern local: ", inner_name))
                         Some(slot) => {
-                            bind ca <- add_const(ctx, CVName(name))
+                            bind ca <- add_const(ctx, CVName(normalize_variant_tag(name)))
                             bind success_path <- List.concat(
                                 code_op(BcGetVariantPayload),
                                 List.concat(
@@ -2456,7 +2464,7 @@ fn compile_pattern_dispatch(pat: Pat, ctx: CodegenCtx, success_code: List<Int>, 
                                 lifted: inner_pd.ctx.lifted
                                 next_lambda: inner_pd.ctx.next_lambda
                                 lambda_prefix: ctx.lambda_prefix
-                            }, CVName(name))
+                            }, CVName(normalize_variant_tag(name)))
                             bind ctx1 <- emit_opcode(ca.ctx, BcDup)
                             bind ctx2 <- emit_opcode(ctx1, BcJumpIfNotVariantC)
                             bind ctx3 <- emit_u16(ctx2, ca.idx)

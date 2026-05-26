@@ -1682,10 +1682,10 @@ impl VM {
                         return Err(vm.error(artifact, "stack underflow on variant check"));
                     };
                     match value {
-                        VMValue::Variant(tag, payload) if variant_tag_matches(&tag, &expected) => {
+                        VMValue::Variant(tag, payload) if tag == expected => {
                             vm.stack.push(VMValue::Variant(tag, payload));
                         }
-                        VMValue::VariantCtor(name) if variant_tag_matches(&name, &expected) => {
+                        VMValue::VariantCtor(name) if name == expected => {
                             // Zero-arg variant: matches as Variant with no payload
                             vm.stack.push(VMValue::Variant(name, None));
                         }
@@ -2143,10 +2143,10 @@ impl VM {
                         return Err(vm.error(artifact, "stack underflow on JumpIfNotVariantC"));
                     };
                     match value {
-                        VMValue::Variant(tag, payload) if variant_tag_matches(&tag, &expected) => {
+                        VMValue::Variant(tag, payload) if tag == expected => {
                             vm.stack.push(VMValue::Variant(tag, payload));
                         }
-                        VMValue::VariantCtor(name) if variant_tag_matches(&name, &expected) => {
+                        VMValue::VariantCtor(name) if name == expected => {
                             vm.stack.push(VMValue::Variant(name, None));
                         }
                         other => {
@@ -4944,16 +4944,6 @@ fn looks_like_variant_ctor(name: &str) -> bool {
         .next()
         .map(|c| c.is_ascii_uppercase())
         .unwrap_or(false)
-}
-
-fn variant_tag_matches(actual: &str, expected: &str) -> bool {
-    if actual == expected {
-        return true;
-    }
-    matches!(
-        (actual, expected),
-        ("some", "Some") | ("none", "None") | ("ok", "Ok") | ("err", "Err")
-    )
 }
 
 /// Extract the TCP address from a gRPC host string.

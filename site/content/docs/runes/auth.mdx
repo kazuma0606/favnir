@@ -39,7 +39,7 @@ public fn any_engineer(claims: Claims) -> Result<Unit, String> !Auth {
 
 ```favnir
 // API キー生成
-let key = auth.generate_api_key(32)
+bind key <- auth.generate_api_key(32)
 
 // 検証
 bind _ <- auth.verify_api_key(provided_key, stored_key_hash)

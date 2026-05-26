@@ -23,17 +23,17 @@ description: "Favnir の型システム — プリミティブ・Record・List�
 type Point = { x: Int  y: Int }
 type User  = { name: String  age: Int  email: Option<String> }
 
-let p = Point { x: 3  y: 4 }
+bind p <- Point { x: 3  y: 4 }
 IO.println(p.x)   // 3
 ```
 
 ## List 型
 
 ```favnir
-let nums: List<Int> = [1, 2, 3, 4, 5]
-let doubled = List.map(nums, |n| n * 2)   // [2, 4, 6, 8, 10]
-let evens   = List.filter(nums, |n| n % 2 == 0)  // [2, 4]
-let sum     = List.fold(nums, 0, |acc, n| acc + n)  // 15
+bind nums    <- [1, 2, 3, 4, 5]
+bind doubled <- List.map(nums, |n| n * 2)   // [2, 4, 6, 8, 10]
+bind evens   <- List.filter(nums, |n| n % 2 == 0)  // [2, 4]
+bind sum     <- List.fold(nums, 0, |acc, n| acc + n)  // 15
 ```
 
 ## Option 型
@@ -42,9 +42,7 @@ let sum     = List.fold(nums, 0, |acc, n| acc + n)  // 15
 
 ```favnir
 fn find_user(id: Int) -> Option<User> {
-  if id == 1
-    then some(User { name: "田中"  age: 30  email: none })
-    else none
+  if id == 1 { some(User { name: "田中"  age: 30  email: none }) } else { none }
 }
 
 match find_user(1) {
@@ -52,8 +50,8 @@ match find_user(1) {
   None    => IO.println("ユーザーが見つかりません")
 }
 
-// null 合体演算子
-let name = find_user(1) ?? User { name: "Unknown"  age: 0  email: none }
+// Option.unwrap_or で既定値
+bind name <- Option.unwrap_or(find_user(1), User { name: "Unknown"  age: 0  email: none })
 ```
 
 ## Result 型
@@ -70,18 +68,16 @@ match parse_int("42") {
   Err(e) => IO.println($"エラー: {e}")
 }
 
-// bind でチェーン
-bind n <- parse_int("42")
-IO.println(n)
+// and_then でチェーン
+bind result <- Result.and_then(parse_int("42"), |n| Result.ok(n + 1))
+IO.println(Result.unwrap_or(result, 0))
 ```
 
 ## ジェネリック型
 
 ```favnir
 fn first<T>(list: List<T>) -> Option<T> {
-  if List.len(list) == 0
-    then none
-    else some(List.get(list, 0))
+  if List.len(list) == 0 { none } else { some(List.get(list, 0)) }
 }
 ```
 

@@ -30,20 +30,20 @@ description: "List<T> — map / filter / fold / any / len / get"
 ## 使用例
 
 ```favnir
-let nums = [1, 2, 3, 4, 5]
+bind nums       <- [1, 2, 3, 4, 5]
 
-let doubled = List.map(nums, |n| n * 2)
+bind doubled    <- List.map(nums, |n| n * 2)
 // [2, 4, 6, 8, 10]
 
-let evens = List.filter(nums, |n| n % 2 == 0)
+bind evens      <- List.filter(nums, |n| n % 2 == 0)
 // [2, 4]
 
-let sum = List.fold(nums, 0, |acc, n| acc + n)
+bind sum        <- List.fold(nums, 0, |acc, n| acc + n)
 // 15
 
-let has_three = List.any(nums, |n| n == 3)
+bind has_three  <- List.any(nums, |n| n == 3)
 // true
 
-let first_even = List.find(nums, |n| n % 2 == 0)
-// Some(2)
+bind first_even <- List.find(nums, |n| n % 2 == 0)
+// some(2)
 ```

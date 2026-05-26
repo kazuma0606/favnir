@@ -49,7 +49,7 @@
     },
     "keyword": {
       "name": "keyword.control.fav",
-      "match": "\\b(fn|type|match|if|else|public|import|rune|bind|for|in|use|collect|yield|chain|interface|impl)\\b"
+      "match": "\\b(fn|type|match|if|else|public|import|rune|bind|for|in|use|collect|yield|chain|interface|impl|test|bench|stage|seq|abstract|trf)\\b"
     },
     "builtin-type": {
       "name": "support.type.fav",

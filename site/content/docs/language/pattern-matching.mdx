@@ -10,7 +10,7 @@ description: "match 式・Option・Result・バリアント型のパターンマ
 ## 基本的な match 式
 
 ```favnir
-let x = 42
+bind x <- 42
 match x {
   0    => "ゼロ"
   1    => "いち"
@@ -21,7 +21,7 @@ match x {
 ## Option のマッチ
 
 ```favnir
-let opt: Option<Int> = some(42)
+bind opt <- some(42)
 
 match opt {
   Some(n) => $"値は {n}"
@@ -53,9 +53,10 @@ fn area(s: Shape) -> Float {
   match s {
     Circle(r)        => 3.14159 * r * r
     Rectangle(w, h)  => w * h
-    Triangle(a, b, c) =>
-      let s = (a + b + c) / 2.0
+    Triangle(a, b, c) => {
+      bind s <- (a + b + c) / 2.0
       Float.sqrt(s * (s - a) * (s - b) * (s - c))
+    }
   }
 }
 ```

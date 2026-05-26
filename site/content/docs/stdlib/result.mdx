@@ -36,9 +36,8 @@ public fn pipeline() -> Result<Unit, String> !Db {
 ## チェーン
 
 ```favnir
-Result.ok("42")
-  |> Result.and_then(|s| parse_int(s))
-  |> Result.map(|n| n * 2)
-  |> Result.unwrap_or(0)
+// and_then / map でチェーン
+bind result <- Result.and_then(parse_int("42"), |n| Result.ok(n * 2))
+Result.unwrap_or(result, 0)
 // 84
 ```

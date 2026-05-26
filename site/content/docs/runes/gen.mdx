@@ -19,7 +19,7 @@ import rune "gen"
 type Order = { id: Int  customer_name: String  email: String  amount: Float }
 
 // シード 42 でデータ生成（再現可能）
-let order = gen.one<Order>(42)
+bind order <- gen.one<Order>(42)
 // { id: 1, customer_name: "田中 太郎", email: "tanaka@example.com", amount: 12800.0 }
 ```
 
@@ -36,15 +36,15 @@ let order = gen.one<Order>(42)
 ## リスト生成
 
 ```favnir
-let orders = gen.many<Order>(100, 42)  // 100 件生成（シード 42）
+bind orders <- gen.many<Order>(100, 42)  // 100 件生成（シード 42）
 ```
 
 ## テストでの使用
 
 ```favnir
 test "pipeline processes orders" {
-  let orders = gen.many<Order>(50, 0)
-  let result = process_orders(orders)
+  bind orders <- gen.many<Order>(50, 0)
+  bind result <- process_orders(orders)
   assert List.len(result) > 0
 }
 ```

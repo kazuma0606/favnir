@@ -45,7 +45,7 @@ aws.sqs.poll(queue_url, |msg| {
 bind item <- aws.dynamodb.get_item("orders", key_map)
 
 // アイテムを保存
-let item_map = Map.set(Map.set((), "id", "123"), "status", "pending")
+bind item_map <- Map.set(Map.set((), "id", "123"), "status", "pending")
 aws.dynamodb.put_item("orders", item_map)
 ```
 

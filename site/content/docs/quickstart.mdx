@@ -30,7 +30,7 @@ fn greet(u: User) -> String {
 }
 
 public fn main() -> Unit !Io {
-  let user = User { name: "田中" age: 30 }
+  bind user <- User { name: "田中"  age: 30 }
   IO.println(greet(user))
 }
 ```
@@ -39,9 +39,7 @@ public fn main() -> Unit !Io {
 
 ```favnir
 fn divide(a: Int, b: Int) -> Result<Int, String> {
-  if b == 0
-    then Result.err("ゼロ除算")
-    else Result.ok(a / b)
+  if b == 0 { Result.err("ゼロ除算") } else { Result.ok(a / b) }
 }
 
 public fn main() -> Unit !Io {

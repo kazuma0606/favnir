@@ -1,0 +1,4 @@
+[rune]
+name    = "sql"
+version = "0.1.0"
+description = "Type-safe SQL query builder for Favnir"

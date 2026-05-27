@@ -1,0 +1,320 @@
+// runes/sql/query.fav — Type-safe SQL query builder (v7.2.0)
+//
+// Usage:
+//   bind q  <- Sql.from("users")
+//   bind q  <- Sql.where(q, "active = ?", ["true"])
+//   bind q  <- Sql.limit(q, 100)
+//   bind q  <- Sql.order_by(q, "name", "asc")
+//   bind rows <- Sql.run_raw(handle, q)  // !DbRead
+//
+//   bind n <- Sql.insert_into(handle, "users", ["name", "email"], [["Alice", "alice@example.com"]]) // !DbWrite
+
+// ── SqlQuery: immutable query builder ────────────────────────────────────────
+
+type SqlQuery = {
+    table:         String
+    select_clause: String
+    where_clauses: List<String>
+    params:        List<String>
+    joins:         List<String>
+    order_clause:  String
+    limit_val:     Option<Int>
+    offset_val:    Option<Int>
+}
+
+// ── Constructor ───────────────────────────────────────────────────────────────
+
+// Start a new query from a table name.
+public fn from(table: String) -> SqlQuery {
+    SqlQuery {
+        table:         table
+        select_clause: ""
+        where_clauses: List.empty()
+        params:        List.empty()
+        joins:         List.empty()
+        order_clause:  ""
+        limit_val:     Option.none()
+        offset_val:    Option.none()
+    }
+}
+
+// ── Builder functions (pure) ──────────────────────────────────────────────────
+
+// Override the SELECT clause (default is "*").
+public fn select(q: SqlQuery, cols: String) -> SqlQuery {
+    SqlQuery {
+        table:         q.table
+        select_clause: cols
+        where_clauses: q.where_clauses
+        params:        q.params
+        joins:         q.joins
+        order_clause:  q.order_clause
+        limit_val:     q.limit_val
+        offset_val:    q.offset_val
+    }
+}
+
+// Append a WHERE condition with bound parameters.
+// Example: Sql.where(q, "active = ?", ["true"])
+public fn add_where(q: SqlQuery, cond: String, new_params: List<String>) -> SqlQuery {
+    SqlQuery {
+        table:         q.table
+        select_clause: q.select_clause
+        where_clauses: List.concat(q.where_clauses, List.singleton(cond))
+        params:        List.concat(q.params, new_params)
+        joins:         q.joins
+        order_clause:  q.order_clause
+        limit_val:     q.limit_val
+        offset_val:    q.offset_val
+    }
+}
+
+// Add an INNER JOIN clause.
+// Example: Sql.join(q, "orders", "users.id = orders.user_id")
+public fn join(q: SqlQuery, join_table: String, on_cond: String) -> SqlQuery {
+    bind clause <- String.concat(
+        String.concat(
+            String.concat("INNER JOIN ", join_table),
+            " ON "),
+        on_cond)
+    SqlQuery {
+        table:         q.table
+        select_clause: q.select_clause
+        where_clauses: q.where_clauses
+        params:        q.params
+        joins:         List.concat(q.joins, List.singleton(clause))
+        order_clause:  q.order_clause
+        limit_val:     q.limit_val
+        offset_val:    q.offset_val
+    }
+}
+
+// Add a LEFT JOIN clause.
+public fn left_join(q: SqlQuery, join_table: String, on_cond: String) -> SqlQuery {
+    bind clause <- String.concat(
+        String.concat(
+            String.concat("LEFT JOIN ", join_table),
+            " ON "),
+        on_cond)
+    SqlQuery {
+        table:         q.table
+        select_clause: q.select_clause
+        where_clauses: q.where_clauses
+        params:        q.params
+        joins:         List.concat(q.joins, List.singleton(clause))
+        order_clause:  q.order_clause
+        limit_val:     q.limit_val
+        offset_val:    q.offset_val
+    }
+}
+
+// Set ORDER BY. dir should be "asc" or "desc".
+public fn order_by(q: SqlQuery, col: String, dir: String) -> SqlQuery {
+    bind clause <- String.concat(String.concat(col, " "), String.upper(dir))
+    SqlQuery {
+        table:         q.table
+        select_clause: q.select_clause
+        where_clauses: q.where_clauses
+        params:        q.params
+        joins:         q.joins
+        order_clause:  clause
+        limit_val:     q.limit_val
+        offset_val:    q.offset_val
+    }
+}
+
+// Set LIMIT.
+public fn limit(q: SqlQuery, n: Int) -> SqlQuery {
+    SqlQuery {
+        table:         q.table
+        select_clause: q.select_clause
+        where_clauses: q.where_clauses
+        params:        q.params
+        joins:         q.joins
+        order_clause:  q.order_clause
+        limit_val:     Option.some(n)
+        offset_val:    q.offset_val
+    }
+}
+
+// Set OFFSET.
+public fn offset(q: SqlQuery, n: Int) -> SqlQuery {
+    SqlQuery {
+        table:         q.table
+        select_clause: q.select_clause
+        where_clauses: q.where_clauses
+        params:        q.params
+        joins:         q.joins
+        order_clause:  q.order_clause
+        limit_val:     q.limit_val
+        offset_val:    Option.some(n)
+    }
+}
+
+// ── SQL generation ────────────────────────────────────────────────────────────
+
+fn build_select(q: SqlQuery) -> String {
+    if q.select_clause == "" {
+        "SELECT *"
+    } else {
+        String.concat("SELECT ", q.select_clause)
+    }
+}
+
+fn build_joins(q: SqlQuery) -> String {
+    if List.length(q.joins) == 0 {
+        ""
+    } else {
+        String.concat(" ", String.join(q.joins, " "))
+    }
+}
+
+fn build_where(q: SqlQuery) -> String {
+    if List.length(q.where_clauses) == 0 {
+        ""
+    } else {
+        String.concat(" WHERE ", String.join(q.where_clauses, " AND "))
+    }
+}
+
+fn build_order(q: SqlQuery) -> String {
+    if q.order_clause == "" {
+        ""
+    } else {
+        String.concat(" ORDER BY ", q.order_clause)
+    }
+}
+
+fn build_limit(q: SqlQuery) -> String {
+    match q.limit_val {
+        Some(n) => String.concat(" LIMIT ", Int.to_string(n))
+        None    => ""
+    }
+}
+
+fn build_offset(q: SqlQuery) -> String {
+    match q.offset_val {
+        Some(n) => String.concat(" OFFSET ", Int.to_string(n))
+        None    => ""
+    }
+}
+
+// Render the SqlQuery to a SQL string (without executing).
+// Useful for debugging or logging.
+public fn to_sql(q: SqlQuery) -> String {
+    bind sel     <- build_select(q)
+    bind from    <- String.concat(" FROM ", q.table)
+    bind joins   <- build_joins(q)
+    bind whr     <- build_where(q)
+    bind order   <- build_order(q)
+    bind lim     <- build_limit(q)
+    bind off     <- build_offset(q)
+    String.concat(
+        String.concat(
+            String.concat(
+                String.concat(
+                    String.concat(
+                        String.concat(sel, from),
+                        joins),
+                    whr),
+                order),
+            lim),
+        off)
+}
+
+// ── Execution functions (!DbRead / !DbWrite) ──────────────────────────────────
+
+// Execute the query and return raw rows as List<Map<String, String>>.
+public fn run_raw(handle: DbHandle, q: SqlQuery) -> Result<List<Map<String, String>>, DbError> !DbRead {
+    DB.query_raw_params(handle, to_sql(q), q.params)
+}
+
+// Execute a COUNT(*) variant and return the row count.
+public fn count_raw(handle: DbHandle, q: SqlQuery) -> Result<Int, DbError> !DbRead {
+    bind count_q <- select(q, "COUNT(*) as n")
+    match DB.query_raw_params(handle, to_sql(count_q), count_q.params) {
+        Err(e)   => Result.err(e)
+        Ok(rows) => match List.first(rows) {
+            None      => Result.ok(0)
+            Some(row) => match Map.get(row, "n") {
+                None    => Result.ok(0)
+                Some(v) => match String.to_int(v) {
+                    Some(n) => Result.ok(n)
+                    None    => Result.ok(0)
+                }
+            }
+        }
+    }
+}
+
+// ── Write helpers ─────────────────────────────────────────────────────────────
+
+// Build a VALUES placeholder string for N rows of M columns.
+// e.g. rows_count=2, cols_count=2 -> "(?, ?), (?, ?)"
+fn build_values_placeholders(rows_count: Int, cols_count: Int) -> String {
+    bind row_placeholder <- String.concat(
+        String.concat("(", String.join(List.map(List.range(0, cols_count), |_i| "?"), ", ")),
+        ")")
+    String.join(List.map(List.range(0, rows_count), |_i| row_placeholder), ", ")
+}
+
+// Flatten a list of rows into a single params list.
+fn flatten_rows(rows: List<List<String>>) -> List<String> {
+    List.flat_map(rows, |row| row)
+}
+
+// INSERT INTO <table> (<cols>) VALUES (?, ?)...
+// Returns the number of inserted rows.
+public fn insert_into(
+    handle: DbHandle,
+    table:  String,
+    cols:   List<String>,
+    rows:   List<List<String>>
+) -> Result<Int, DbError> !DbWrite {
+    if List.length(rows) == 0 {
+        Result.ok(0)
+    } else {
+        bind cols_clause <- String.join(cols, ", ")
+        bind vals_clause <- build_values_placeholders(List.length(rows), List.length(cols))
+        bind sql <- String.concat(
+            String.concat(
+                String.concat(
+                    String.concat("INSERT INTO ", table),
+                    " ("),
+                String.concat(cols_clause, ") VALUES ")),
+            vals_clause)
+        bind params <- flatten_rows(rows)
+        DB.execute_raw_params(handle, sql, params)
+    }
+}
+
+// UPDATE <table> SET col = ? WHERE <cond>
+public fn update_where(
+    handle:     DbHandle,
+    table:      String,
+    set_clause: String,
+    params:     List<String>,
+    where_cond: String
+) -> Result<Int, DbError> !DbWrite {
+    bind sql <- String.concat(
+        String.concat(
+            String.concat(
+                String.concat("UPDATE ", table),
+                " SET "),
+            String.concat(set_clause, " WHERE ")),
+        where_cond)
+    DB.execute_raw_params(handle, sql, params)
+}
+
+// DELETE FROM <table> WHERE <cond>
+public fn delete_where(
+    handle:     DbHandle,
+    table:      String,
+    where_cond: String,
+    params:     List<String>
+) -> Result<Int, DbError> !DbWrite {
+    bind sql <- String.concat(
+        String.concat("DELETE FROM ", table),
+        String.concat(" WHERE ", where_cond))
+    DB.execute_raw_params(handle, sql, params)
+}

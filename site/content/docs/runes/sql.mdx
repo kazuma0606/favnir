@@ -1,0 +1,256 @@
+---
+title: "SQL Rune"
+order: 9
+category: "Rune"
+description: "型安全な SQL クエリビルダ — イミュータブルなビルダパターンで SQL を組み立てる"
+---
+
+# SQL Rune
+
+エフェクト: `!DbRead` / `!DbWrite`（DB Rune と共通）
+
+`sql` Rune は型安全なクエリビルダです。`SqlQuery` レコードをイミュータブルに組み立て、
+`Sql.run_raw` で実行します。生の SQL 文字列を直接書く代わりに、型チェッカーが
+フィールド名・型・エフェクトを検証します。
+
+## インストール
+
+```
+fav rune add sql
+```
+
+`rune_modules/sql/` に配置されます。
+
+## 基本的な使い方
+
+```favnir
+use sql
+
+stage FetchActiveUsers: DbHandle -> List<Map<String, String>> !DbRead = |handle| {
+    bind q  <- Sql.from("users")
+    bind q  <- Sql.add_where(q, "active = ?", List.singleton("true"))
+    bind q  <- Sql.order_by(q, "name", "asc")
+    bind q  <- Sql.limit(q, 100)
+    match Sql.run_raw(handle, q) {
+        Err(e)   => List.empty()
+        Ok(rows) => rows
+    }
+}
+```
+
+## SqlQuery 型
+
+```favnir
+type SqlQuery = {
+    table:         String
+    select_clause: String
+    where_clauses: List<String>
+    params:        List<String>
+    joins:         List<String>
+    order_clause:  String
+    limit_val:     Option<Int>
+    offset_val:    Option<Int>
+}
+```
+
+`SqlQuery` はすべてのフィールドがイミュータブルです。各ビルダ関数は新しい `SqlQuery` を返します。
+
+## ビルダ関数（純粋）
+
+### `Sql.from`
+
+```favnir
+public fn from(table: String) -> SqlQuery
+```
+
+クエリを開始します。`SELECT *` がデフォルトです。
+
+```favnir
+bind q <- Sql.from("orders")
+```
+
+### `Sql.select`
+
+```favnir
+public fn select(q: SqlQuery, cols: String) -> SqlQuery
+```
+
+SELECT 句を上書きします。
+
+```favnir
+bind q <- Sql.select(q, "id, name, email")
+```
+
+### `Sql.add_where`
+
+```favnir
+public fn add_where(q: SqlQuery, cond: String, params: List<String>) -> SqlQuery
+```
+
+WHERE 条件を追加します。複数回呼ぶと `AND` で結合されます。
+パラメータは `?` プレースホルダにバインドされます（SQLインジェクション防止）。
+
+```favnir
+bind q <- Sql.add_where(q, "status = ?", List.singleton("active"))
+bind q <- Sql.add_where(q, "age > ?",    List.singleton("18"))
+// WHERE status = ? AND age > ?
+```
+
+### `Sql.join` / `Sql.left_join`
+
+```favnir
+public fn join(q: SqlQuery, join_table: String, on_cond: String) -> SqlQuery
+public fn left_join(q: SqlQuery, join_table: String, on_cond: String) -> SqlQuery
+```
+
+JOIN 句を追加します。
+
+```favnir
+bind q <- Sql.join(q, "orders", "users.id = orders.user_id")
+bind q <- Sql.left_join(q, "profiles", "users.id = profiles.user_id")
+```
+
+### `Sql.order_by`
+
+```favnir
+public fn order_by(q: SqlQuery, col: String, dir: String) -> SqlQuery
+```
+
+`dir` は `"asc"` または `"desc"`。内部で `String.upper` に変換します。
+
+```favnir
+bind q <- Sql.order_by(q, "created_at", "desc")
+```
+
+### `Sql.limit` / `Sql.offset`
+
+```favnir
+public fn limit(q: SqlQuery, n: Int) -> SqlQuery
+public fn offset(q: SqlQuery, n: Int) -> SqlQuery
+```
+
+ページネーション用。
+
+```favnir
+bind q <- Sql.limit(q, 20)
+bind q <- Sql.offset(q, 40)   // 3ページ目
+```
+
+### `Sql.to_sql`
+
+```favnir
+public fn to_sql(q: SqlQuery) -> String
+```
+
+`SqlQuery` を SQL 文字列に変換します（実行しない）。デバッグ・ログ用。
+
+```favnir
+bind q   <- Sql.from("users")
+bind q   <- Sql.add_where(q, "active = ?", List.singleton("true"))
+bind sql <- Sql.to_sql(q)
+// "SELECT * FROM users WHERE active = ?"
+```
+
+## 実行関数
+
+### `Sql.run_raw` — `!DbRead`
+
+```favnir
+public fn run_raw(handle: DbHandle, q: SqlQuery)
+    -> Result<List<Map<String, String>>, DbError> !DbRead
+```
+
+クエリを実行し、行を `Map<String, String>` のリストとして返します。
+
+### `Sql.count_raw` — `!DbRead`
+
+```favnir
+public fn count_raw(handle: DbHandle, q: SqlQuery)
+    -> Result<Int, DbError> !DbRead
+```
+
+`COUNT(*) as n` クエリを実行し、行数を返します。
+
+```favnir
+bind q <- Sql.from("users")
+bind q <- Sql.add_where(q, "active = ?", List.singleton("true"))
+match Sql.count_raw(handle, q) {
+    Err(e) => 0
+    Ok(n)  => n
+}
+```
+
+## 書き込み関数
+
+### `Sql.insert_into` — `!DbWrite`
+
+```favnir
+public fn insert_into(
+    handle: DbHandle,
+    table:  String,
+    cols:   List<String>,
+    rows:   List<List<String>>
+) -> Result<Int, DbError> !DbWrite
+```
+
+複数行を一括挿入します。返り値は挿入行数。
+
+```favnir
+bind cols <- List.concat(List.singleton("name"), List.singleton("email"))
+bind row  <- List.concat(List.singleton("Alice"), List.singleton("alice@example.com"))
+bind rows <- List.singleton(row)
+match Sql.insert_into(handle, "users", cols, rows) {
+    Err(e) => 0
+    Ok(n)  => n
+}
+```
+
+### `Sql.update_where` — `!DbWrite`
+
+```favnir
+public fn update_where(
+    handle:     DbHandle,
+    table:      String,
+    set_clause: String,
+    params:     List<String>,
+    where_cond: String
+) -> Result<Int, DbError> !DbWrite
+```
+
+```favnir
+bind params <- List.concat(List.singleton("inactive"), List.singleton("42"))
+match Sql.update_where(handle, "users", "status = ?", params, "id = ?") {
+    Err(e) => 0
+    Ok(n)  => n
+}
+```
+
+### `Sql.delete_where` — `!DbWrite`
+
+```favnir
+public fn delete_where(
+    handle:     DbHandle,
+    table:      String,
+    where_cond: String,
+    params:     List<String>
+) -> Result<Int, DbError> !DbWrite
+```
+
+```favnir
+match Sql.delete_where(handle, "users", "id = ?", List.singleton("42")) {
+    Err(e) => 0
+    Ok(n)  => n
+}
+```
+
+## エフェクト追跡
+
+SQL Rune は DB Rune のエフェクトをそのまま伝播します。
+
+| 関数 | エフェクト |
+|------|-----------|
+| `run_raw` / `count_raw` | `!DbRead` |
+| `insert_into` / `update_where` / `delete_where` | `!DbWrite` |
+| `from` / `select` / `add_where` / `join` / `order_by` 等 | なし（純粋） |
+
+`fav explain --lineage` は `!DbRead` / `!DbWrite` を Source / Sink として検出します。

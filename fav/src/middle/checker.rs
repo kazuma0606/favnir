@@ -4813,6 +4813,11 @@ impl Checker {
                 let _ = self.expect_list_arg(&arg_tys, 1, span);
                 Some(Type::List(Box::new(Type::Unknown)))
             }
+            ("List", "partition") => {
+                let elem = self.expect_list_arg(&arg_tys, 0, span);
+                // Returns List<List<A>>: [matching, non-matching]
+                Some(Type::List(Box::new(Type::List(Box::new(elem)))))
+            }
             ("List", "range") => Some(Type::List(Box::new(Type::Int))),
             ("List", "reverse") | ("List", "concat") => {
                 let elem = self.expect_list_arg(&arg_tys, 0, span);
@@ -4826,6 +4831,7 @@ impl Checker {
                 let elem = self.expect_list_arg(&arg_tys, 0, span);
                 Some(Type::List(Box::new(elem)))
             }
+            ("List", "empty") => Some(Type::List(Box::new(Type::Unknown))),
             ("List", "singleton") => {
                 let elem = arg_tys.first().cloned().unwrap_or(Type::Unknown);
                 Some(Type::List(Box::new(elem)))
@@ -4860,7 +4866,10 @@ impl Checker {
             | ("String", "replace")
             | ("String", "slice")
             | ("String", "repeat")
-            | ("String", "from_chars") => Some(Type::String),
+            | ("String", "from_chars")
+            | ("String", "to_upper")
+            | ("String", "to_lower") => Some(Type::String),
+            ("String", "join") => Some(Type::String),
             ("String", "char_at") => Some(Type::Option(Box::new(Type::String))),
             ("String", "to_int") => Some(Type::Option(Box::new(Type::Int))),
             ("String", "to_float") => Some(Type::Option(Box::new(Type::Float))),

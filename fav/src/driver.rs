@@ -15776,6 +15776,197 @@ fn run_favnir_source(source: &str) -> String {
     handle.join().expect("thread join")
 }
 
+// ── SQL Rune tests ─────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod sql_rune_tests {
+    use crate::frontend::parser::Parser;
+    use crate::middle::checker::Checker;
+    use crate::backend::vm::VM;
+    use crate::middle::compiler::compile_program;
+    use crate::backend::codegen::codegen_program;
+    use crate::value::Value;
+
+    fn run_inline(src: &str) -> Value {
+        let prog = Parser::parse_str(src, "test.fav").expect("parse");
+        let (errors, _) = Checker::check_program(&prog);
+        assert!(errors.is_empty(), "type errors: {:?}", errors.iter().map(|e| &e.message).collect::<Vec<_>>());
+        let ir = compile_program(&prog);
+        let artifact = codegen_program(&ir);
+        let fn_idx = artifact.fn_idx_by_name("main").expect("main function not found");
+        VM::run(&artifact, fn_idx, vec![]).expect("run")
+    }
+
+    // Inline the SQL Rune types & helpers for pure tests (no DB needed)
+    const SQL_PREAMBLE: &str = r#"
+type SqlQuery = {
+    table:         String
+    select_clause: String
+    where_clauses: List<String>
+    params:        List<String>
+    joins:         List<String>
+    order_clause:  String
+    limit_val:     Option<Int>
+    offset_val:    Option<Int>
+}
+
+fn sql_from(table: String) -> SqlQuery {
+    SqlQuery {
+        table:         table
+        select_clause: ""
+        where_clauses: List.empty()
+        params:        List.empty()
+        joins:         List.empty()
+        order_clause:  ""
+        limit_val:     Option.none()
+        offset_val:    Option.none()
+    }
+}
+fn sql_select(q: SqlQuery, cols: String) -> SqlQuery {
+    SqlQuery {
+        table: q.table  select_clause: cols  where_clauses: q.where_clauses
+        params: q.params  joins: q.joins  order_clause: q.order_clause
+        limit_val: q.limit_val  offset_val: q.offset_val
+    }
+}
+fn sql_add_where(q: SqlQuery, cond: String, new_params: List<String>) -> SqlQuery {
+    SqlQuery {
+        table: q.table  select_clause: q.select_clause
+        where_clauses: List.concat(q.where_clauses, List.singleton(cond))
+        params: List.concat(q.params, new_params)
+        joins: q.joins  order_clause: q.order_clause
+        limit_val: q.limit_val  offset_val: q.offset_val
+    }
+}
+fn sql_join(q: SqlQuery, join_table: String, on_cond: String) -> SqlQuery {
+    bind clause <- String.concat(String.concat(String.concat("INNER JOIN ", join_table), " ON "), on_cond)
+    SqlQuery {
+        table: q.table  select_clause: q.select_clause
+        where_clauses: q.where_clauses  params: q.params
+        joins: List.concat(q.joins, List.singleton(clause))
+        order_clause: q.order_clause  limit_val: q.limit_val  offset_val: q.offset_val
+    }
+}
+fn sql_order_by(q: SqlQuery, col: String, dir: String) -> SqlQuery {
+    bind clause <- String.concat(String.concat(col, " "), String.upper(dir))
+    SqlQuery {
+        table: q.table  select_clause: q.select_clause
+        where_clauses: q.where_clauses  params: q.params  joins: q.joins
+        order_clause: clause  limit_val: q.limit_val  offset_val: q.offset_val
+    }
+}
+fn sql_limit(q: SqlQuery, n: Int) -> SqlQuery {
+    SqlQuery {
+        table: q.table  select_clause: q.select_clause
+        where_clauses: q.where_clauses  params: q.params  joins: q.joins
+        order_clause: q.order_clause  limit_val: Option.some(n)  offset_val: q.offset_val
+    }
+}
+fn sql_offset(q: SqlQuery, n: Int) -> SqlQuery {
+    SqlQuery {
+        table: q.table  select_clause: q.select_clause
+        where_clauses: q.where_clauses  params: q.params  joins: q.joins
+        order_clause: q.order_clause  limit_val: q.limit_val  offset_val: Option.some(n)
+    }
+}
+fn sql_build_select(q: SqlQuery) -> String {
+    if q.select_clause == "" { "SELECT *" }
+    else { String.concat("SELECT ", q.select_clause) }
+}
+fn sql_build_joins(q: SqlQuery) -> String {
+    if List.length(q.joins) == 0 { "" }
+    else { String.concat(" ", String.join(q.joins, " ")) }
+}
+fn sql_build_where(q: SqlQuery) -> String {
+    if List.length(q.where_clauses) == 0 { "" }
+    else { String.concat(" WHERE ", String.join(q.where_clauses, " AND ")) }
+}
+fn sql_build_order(q: SqlQuery) -> String {
+    if q.order_clause == "" { "" }
+    else { String.concat(" ORDER BY ", q.order_clause) }
+}
+fn sql_build_limit(q: SqlQuery) -> String {
+    match q.limit_val {
+        Some(n) => String.concat(" LIMIT ", Int.to_string(n))
+        None    => ""
+    }
+}
+fn sql_build_offset(q: SqlQuery) -> String {
+    match q.offset_val {
+        Some(n) => String.concat(" OFFSET ", Int.to_string(n))
+        None    => ""
+    }
+}
+fn sql_to_sql(q: SqlQuery) -> String {
+    bind sel  <- sql_build_select(q)
+    bind frm  <- String.concat(" FROM ", q.table)
+    bind jns  <- sql_build_joins(q)
+    bind whr  <- sql_build_where(q)
+    bind ord  <- sql_build_order(q)
+    bind lim  <- sql_build_limit(q)
+    bind off  <- sql_build_offset(q)
+    String.concat(String.concat(String.concat(String.concat(String.concat(String.concat(sel, frm), jns), whr), ord), lim), off)
+}
+"#;
+
+    fn make_str_src(body: &str) -> String {
+        format!("{}\npublic fn main() -> String {{\n    {}\n}}\n", SQL_PREAMBLE, body)
+    }
+
+    // C-1: basic SELECT * FROM table
+    #[test]
+    fn sql_from_basic() {
+        let src = make_str_src(r#"sql_to_sql(sql_from("users"))"#);
+        assert_eq!(run_inline(&src), Value::Str("SELECT * FROM users".to_string()));
+    }
+
+    // C-2: WHERE clause
+    #[test]
+    fn sql_add_where_test() {
+        let src = make_str_src(
+            r#"sql_to_sql(sql_add_where(sql_from("users"), "active = ?", List.singleton("true")))"#
+        );
+        assert_eq!(
+            run_inline(&src),
+            Value::Str("SELECT * FROM users WHERE active = ?".to_string())
+        );
+    }
+
+    // C-3: LIMIT + OFFSET
+    #[test]
+    fn sql_limit_offset_test() {
+        let src = make_str_src(r#"sql_to_sql(sql_offset(sql_limit(sql_from("users"), 10), 20))"#);
+        assert_eq!(
+            run_inline(&src),
+            Value::Str("SELECT * FROM users LIMIT 10 OFFSET 20".to_string())
+        );
+    }
+
+    // C-4: ORDER BY
+    #[test]
+    fn sql_order_by_test() {
+        let src = make_str_src(r#"sql_to_sql(sql_order_by(sql_from("users"), "name", "asc"))"#);
+        assert_eq!(
+            run_inline(&src),
+            Value::Str("SELECT * FROM users ORDER BY name ASC".to_string())
+        );
+    }
+
+    // C-5: JOIN
+    #[test]
+    fn sql_join_test() {
+        let src = make_str_src(
+            r#"sql_to_sql(sql_join(sql_from("users"), "orders", "users.id = orders.user_id"))"#
+        );
+        let result = run_inline(&src);
+        if let Value::Str(s) = &result {
+            assert!(s.contains("INNER JOIN orders ON users.id = orders.user_id"), "got: {s}");
+        } else {
+            panic!("expected Str, got {:?}", result);
+        }
+    }
+}
+
 // ── fav explain --lineage ──────────────────────────────────────────────────────
 
 /// Per-stage/fn entry in a lineage report.

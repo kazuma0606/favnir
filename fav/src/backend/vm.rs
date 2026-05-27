@@ -2747,6 +2747,40 @@ impl VM {
                     _ => Err(self.error(artifact, "List.count requires a List as first argument")),
                 }
             }
+            "List.partition" => {
+                if args.len() != 2 {
+                    return Err(self.error(artifact, "List.partition requires 2 arguments"));
+                }
+                let mut it = args.into_iter();
+                let list = it.next().expect("list");
+                let pred = it.next().expect("pred");
+                match list {
+                    VMValue::List(fl) => {
+                        let mut matching = Vec::new();
+                        let mut non_matching = Vec::new();
+                        for x in fl {
+                            match self.call_value(artifact, pred.clone(), vec![x.clone()])? {
+                                VMValue::Bool(true) => matching.push(x),
+                                VMValue::Bool(false) => non_matching.push(x),
+                                other => {
+                                    return Err(self.error(
+                                        artifact,
+                                        &format!(
+                                            "List.partition predicate must return Bool, got {}",
+                                            vmvalue_type_name(&other)
+                                        ),
+                                    ));
+                                }
+                            }
+                        }
+                        Ok(VMValue::List(FavList::new(vec![
+                            VMValue::List(FavList::new(matching)),
+                            VMValue::List(FavList::new(non_matching)),
+                        ])))
+                    }
+                    _ => Err(self.error(artifact, "List.partition requires a List as first argument")),
+                }
+            }
             "List.index_of" => {
                 if args.len() != 2 {
                     return Err(self.error(artifact, "List.index_of requires 2 arguments"));
@@ -6272,7 +6306,7 @@ fn vm_call_builtin(
                 _ => Err("String.trim requires a String argument".to_string()),
             }
         }
-        "String.upper" => {
+        "String.upper" | "String.to_upper" => {
             let v = args
                 .into_iter()
                 .next()
@@ -6282,7 +6316,7 @@ fn vm_call_builtin(
                 _ => Err("String.upper requires a String argument".to_string()),
             }
         }
-        "String.lower" => {
+        "String.lower" | "String.to_lower" => {
             let v = args
                 .into_iter()
                 .next()
@@ -6756,6 +6790,7 @@ fn vm_call_builtin(
                 _ => Err("List.last requires a List argument".to_string()),
             }
         }
+        "List.empty" => Ok(VMValue::List(FavList::new(vec![]))),
         "List.singleton" => {
             let v = args
                 .into_iter()

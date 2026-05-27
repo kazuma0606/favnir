@@ -3938,3 +3938,54 @@ public fn main() -> Int {
 "#;
     assert_eq!(eval(src), Value::Int(6));
 }
+
+// ── v7.2.0 stdlib additions ───────────────────────────────────────────────────
+
+#[test]
+fn test_list_partition_basic() {
+    // partition([1,2,3,4,5], |x| x > 2) -> [[3,4,5], [1,2]]
+    let src = r#"
+public fn main() -> Int {
+    bind parts <- List.partition(List.range(1, 6), |x| x > 2)
+    bind matching <- Option.unwrap_or(List.first(parts), List.empty())
+    List.length(matching)
+}
+"#;
+    assert_eq!(eval(src), Value::Int(3));
+}
+
+#[test]
+fn test_list_partition_non_matching() {
+    let src = r#"
+public fn main() -> Int {
+    bind parts <- List.partition(List.range(1, 6), |x| x > 2)
+    bind non_matching <- Option.unwrap_or(List.last(parts), List.empty())
+    List.length(non_matching)
+}
+"#;
+    assert_eq!(eval(src), Value::Int(2));
+}
+
+#[test]
+fn test_string_join_checker() {
+    // String.join was in vm.rs but missing from checker — verify it type-checks
+    let src = r#"
+public fn main() -> String {
+    bind xs <- List.concat(List.concat(List.singleton("a"), List.singleton("b")), List.singleton("c"))
+    String.join(xs, "-")
+}
+"#;
+    assert_eq!(eval(src), Value::Str("a-b-c".to_string()));
+}
+
+#[test]
+fn test_string_to_upper() {
+    let src = r#"public fn main() -> String { String.to_upper("hello") }"#;
+    assert_eq!(eval(src), Value::Str("HELLO".to_string()));
+}
+
+#[test]
+fn test_string_to_lower() {
+    let src = r#"public fn main() -> String { String.to_lower("WORLD") }"#;
+    assert_eq!(eval(src), Value::Str("world".to_string()));
+}

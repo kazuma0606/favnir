@@ -1,0 +1,173 @@
+---
+title: "型安全な SQL クエリ"
+order: 2
+category: "ガイド"
+description: "SQL Rune を使ってインジェクション不可・エフェクト追跡済みのクエリパイプラインを構築する"
+---
+
+# 型安全な SQL クエリ
+
+このガイドでは `sql` Rune を使い、型チェッカーとエフェクトシステムで保護されたデータパイプラインを構築します。
+
+## 問題：生の SQL 文字列
+
+```favnir
+// 危険 — 型チェックなし、インジェクションリスク
+stage FetchUsers: DbHandle -> List<Map<String, String>> !DbRead = |handle| {
+    match DB.query_raw(handle, "SELECT * FROM users WHERE active = 'true'") {
+        Err(e)   => List.empty()
+        Ok(rows) => rows
+    }
+}
+```
+
+生の SQL には 3 つの問題があります：
+1. 文字列結合によるSQLインジェクションのリスク
+2. コンパイル時の構文チェックなし
+3. クエリの読み書き意図がエフェクトで表現されない
+
+## 解決：SQL Rune
+
+```favnir
+use sql
+
+stage FetchActiveUsers: DbHandle -> List<Map<String, String>> !DbRead = |handle| {
+    bind q <- Sql.from("users")
+    bind q <- Sql.add_where(q, "active = ?", List.singleton("true"))
+    bind q <- Sql.order_by(q, "name", "asc")
+    bind q <- Sql.limit(q, 100)
+    match Sql.run_raw(handle, q) {
+        Err(e)   => List.empty()
+        Ok(rows) => rows
+    }
+}
+```
+
+- `?` プレースホルダでパラメータを分離 → SQLインジェクション不可
+- `!DbRead` が自動的に推論・伝播
+- `SqlQuery` は型チェッカーが各フィールドを検証
+
+## ステップ 1：Rune を追加
+
+```
+fav rune add sql
+```
+
+## ステップ 2：段階的なクエリ構築
+
+`SqlQuery` はイミュータブルです。`bind q <- ...` で上書きしながら組み立てます。
+
+```favnir
+bind q <- Sql.from("orders")
+bind q <- Sql.select(q, "id, user_id, total, status")
+bind q <- Sql.join(q, "users", "orders.user_id = users.id")
+bind q <- Sql.add_where(q, "orders.status = ?", List.singleton("pending"))
+bind q <- Sql.add_where(q, "orders.total > ?",  List.singleton("1000"))
+bind q <- Sql.order_by(q, "orders.created_at", "desc")
+bind q <- Sql.limit(q, 50)
+```
+
+生成される SQL：
+
+```sql
+SELECT id, user_id, total, status
+FROM orders
+INNER JOIN users ON orders.user_id = users.id
+WHERE orders.status = ? AND orders.total > ?
+ORDER BY orders.created_at DESC
+LIMIT 50
+```
+
+## ステップ 3：デバッグ
+
+`Sql.to_sql` で SQL 文字列を確認できます（実行しない）。
+
+```favnir
+bind sql <- Sql.to_sql(q)
+// → "SELECT id, user_id, total, status FROM orders INNER JOIN users ON orders.user_id = users.id WHERE orders.status = ? AND orders.total > ? ORDER BY orders.created_at DESC LIMIT 50"
+```
+
+## ステップ 4：COUNT クエリ
+
+同じ `SqlQuery` を `count_raw` に渡すだけです。
+
+```favnir
+stage CountPendingOrders: DbHandle -> Int !DbRead = |handle| {
+    bind q <- Sql.from("orders")
+    bind q <- Sql.add_where(q, "status = ?", List.singleton("pending"))
+    match Sql.count_raw(handle, q) {
+        Err(e) => 0
+        Ok(n)  => n
+    }
+}
+```
+
+## ステップ 5：書き込み
+
+INSERT / UPDATE / DELETE は `!DbWrite` エフェクトが自動で付きます。
+
+```favnir
+stage CreateUser: DbHandle -> Int !DbWrite = |handle| {
+    bind cols <- List.concat(List.singleton("name"), List.singleton("email"))
+    bind row  <- List.concat(List.singleton("Alice"), List.singleton("alice@example.com"))
+    match Sql.insert_into(handle, "users", cols, List.singleton(row)) {
+        Err(e) => 0
+        Ok(n)  => n
+    }
+}
+```
+
+## ステップ 6：リネージ分析
+
+```
+fav explain --lineage pipeline.fav
+```
+
+```
+Sources:
+  (none)
+
+Sinks:
+  pipeline.fav:12  !DbRead  (Sql.run_raw)
+  pipeline.fav:28  !DbWrite (Sql.insert_into)
+
+Transformations:
+  FetchActiveUsers  pipeline.fav:5
+  CreateUser        pipeline.fav:22
+```
+
+`!DbRead` が Source として、`!DbWrite` が Sink として検出されます。
+チームのコードレビューで読み書き分離が一目で確認できます。
+
+## パターン集
+
+### ページネーション
+
+```favnir
+fn page_query(table: String, page: Int, per_page: Int) -> SqlQuery {
+    bind q      <- Sql.from(table)
+    bind q      <- Sql.limit(q, per_page)
+    bind offset <- Int.mul(Int.sub(page, 1), per_page)
+    Sql.offset(q, offset)
+}
+```
+
+### 条件付き WHERE
+
+```favnir
+fn maybe_filter_status(q: SqlQuery, status: Option<String>) -> SqlQuery {
+    match status {
+        None    => q
+        Some(s) => Sql.add_where(q, "status = ?", List.singleton(s))
+    }
+}
+```
+
+### 複数テーブル JOIN
+
+```favnir
+bind q <- Sql.from("orders")
+bind q <- Sql.join(q, "users",    "orders.user_id = users.id")
+bind q <- Sql.join(q, "products", "orders.product_id = products.id")
+bind q <- Sql.select(q, "orders.id, users.name, products.title, orders.total")
+```

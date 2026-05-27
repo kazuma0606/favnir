@@ -162,3 +162,75 @@ public fn main() -> Unit !Io {
   IO.println(rows)
 }
 ```
+
+---
+
+## fav deploy
+
+コンパイル済みの Favnir プログラムをクラウドにデプロイします。
+
+```bash
+# Lambda にデプロイ
+fav deploy --target lambda
+
+# ドライランで確認
+fav deploy --target lambda --dry-run
+```
+
+デプロイ設定は `fav.toml` の `[deploy]` セクションで管理します。
+
+```toml
+[deploy]
+target   = "lambda"
+function = "my-pipeline"
+region   = "ap-northeast-1"
+memory   = 256
+timeout  = 30
+```
+
+### `fav deploy` の動作
+
+1. `fav build --release` でバイトコードにコンパイル
+2. Favnir ランタイム（`fav` バイナリ）と一緒に zip 化
+3. Lambda 関数として更新（または新規作成）
+
+> **Note**: ECS/Fargate 対応は v6.7.0 で実装予定です。
+> 現在は `--target lambda` のみサポートしています。
+
+---
+
+## fav build --schema
+
+スキーマ定義（`schemas/*.yaml`）から CREATE TABLE 文（DDL）を生成します。
+
+```bash
+# 単一スキーマから DDL 生成（PostgreSQL）
+fav build --schema schemas/orders.yaml --dialect postgres
+
+# SQLite 向け
+fav build --schema schemas/orders.yaml --dialect sqlite
+
+# ディレクトリ指定（全スキーマを一括変換）
+fav build --schema schemas/ --out migrations/001_init.sql
+```
+
+出力例（PostgreSQL）:
+
+```sql
+CREATE TABLE orders (
+  id            BIGINT           NOT NULL CHECK (id > 0),
+  customer_name VARCHAR(100)     NOT NULL,
+  email         TEXT             NOT NULL,
+  amount        DOUBLE PRECISION NOT NULL CHECK (amount > 0),
+  note          TEXT
+);
+```
+
+### 対応ダイアレクト
+
+| `--dialect` | 説明 |
+|-------------|------|
+| `postgres` | PostgreSQL |
+| `sqlite` | SQLite |
+
+スキーマの書き方は [スキーマと制約](/docs/language/schema/) を参照してください。

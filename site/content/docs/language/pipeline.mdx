@@ -1,0 +1,183 @@
+---
+title: "パイプライン（stage / seq）"
+order: 6
+category: "言語仕様"
+description: "stage・seq・|> によるデータパイプラインの定義と依存注入"
+---
+
+# パイプライン（stage / seq）
+
+Favnir では `stage`（変換ステージ）と `seq`（パイプライン）が言語プリミティブです。
+関数合成の慣習ではなく、コンパイラが構造を理解できる「アーキテクチャの単位」として扱われます。
+
+## stage — 型契約とエフェクトを持つ変換
+
+`stage` は入力型・出力型・エフェクトを宣言した変換の単位です。
+
+```favnir
+// stage Name: 入力型 -> 出力型 [!Effect] = |引数| { 本体 }
+stage ParseCsv:  String      -> List<Row> !Io = |path| {
+  // CSV を読み込んで Row のリストを返す
+  IO.read_lines(path)
+}
+
+stage ValidateRow: Row -> Row = |row| {
+  // 純粋な変換（エフェクトなし）
+  Row { customer: row.customer  amount: row.amount }
+}
+
+stage SaveToDb: Row -> Int !Db = |row| {
+  db.execute($"INSERT INTO orders VALUES ('{row.customer}', {row.amount})")
+}
+```
+
+### エフェクトのない stage は純粋関数
+
+エフェクトを宣言しない `stage` は純粋関数として扱われます。
+テストで副作用なしに呼び出せます。
+
+```favnir
+stage Double: Int -> Int = |n| { n * 2 }
+stage AddOne: Int -> Int = |n| { n + 1 }
+
+test "Double then AddOne" {
+  Double(3) == 6
+}
+```
+
+## seq — 名前を持つパイプライン構造
+
+`seq` は `|>` でステージを合成し、名前を付けたパイプラインを定義します。
+
+```favnir
+seq UserImport = ParseCsv |> ValidateRow |> SaveToDb
+// UserImport : String -> Int  !Io !Db
+```
+
+`seq` は「関数合成の結果」ではなく **名前を持つアーキテクチャの単位** です。
+コンパイラがパイプライン構造を理解し、エフェクトの静的追跡や `fav explain` による可視化が可能になります。
+
+### エフェクトの自動合成
+
+`seq` のエフェクトは構成要素のエフェクトの union になります。
+
+```favnir
+stage LoadFromS3: String -> List<Row> !AWS = |key| { /* ... */ }
+stage Transform:  List<Row> -> List<Row>   = |rows| { /* ... */ }
+stage WriteToDb:  List<Row> -> Int    !Db  = |rows| { /* ... */ }
+
+seq ETLPipeline = LoadFromS3 |> Transform |> WriteToDb
+// ETLPipeline : String -> Int  !AWS !Db
+```
+
+### 呼び出し方
+
+`seq` で定義したパイプラインは通常の関数と同じように呼び出せます。
+
+```favnir
+public fn main() -> Unit !Io !AWS !Db {
+  bind count <- ETLPipeline("data/orders.parquet")
+  IO.println($"処理件数: {count}")
+}
+```
+
+## |> 演算子
+
+`|>` は型チェック付きのパイプ合成演算子です。
+左のステージの **出力型** と右のステージの **入力型** が一致することをコンパイル時に検証します。
+
+```favnir
+stage A: Int    -> String = |n| { $"{n}" }
+stage B: String -> Bool   = |s| { s == "42" }
+
+seq Check = A |> B   // Int -> Bool
+
+// 型が合わない場合はコンパイルエラー
+stage C: Float -> Bool = |f| { f > 0.0 }
+// seq Bad = A |> C   // エラー: String -> Float 型不一致
+```
+
+## abstract stage — 依存注入スロット
+
+`abstract stage` は実装を持たない「スロット」を宣言します。
+テスト時やデプロイ環境に応じて実装を差し替えられます。
+
+```favnir
+// スロット宣言
+abstract stage Notify: String -> Unit !Io
+
+// 実装 A: メール通知
+stage EmailNotify: String -> Unit !Io = |msg| {
+  IO.println($"[EMAIL] {msg}")
+}
+
+// 実装 B: Slack 通知
+stage SlackNotify: String -> Unit !Io = |msg| {
+  IO.println($"[SLACK] {msg}")
+}
+```
+
+## abstract seq — 複数スロットを持つ抽象パイプライン
+
+`abstract seq` は複数のスロットを持つパイプラインのテンプレートを定義します。
+
+```favnir
+type Row = { id: Int  value: String }
+
+abstract seq DataPipeline<Row> {
+  parse:    String     -> List<Row> !Io
+  validate: Row        -> Row
+  save:     List<Row>  -> Int  !Db
+}
+```
+
+### スロットを埋めて具体的な seq を作る
+
+```favnir
+stage ParseCsv:    String     -> List<Row> !Io = |path| { /* ... */ }
+stage ValidateRow: Row        -> Row            = |row|  { /* ... */ }
+stage SaveToDb:    List<Row>  -> Int       !Db  = |rows| { /* ... */ }
+
+seq UserImport = DataPipeline<Row> {
+  parse    <- ParseCsv
+  validate <- ValidateRow
+  save     <- SaveToDb
+}
+```
+
+### テストでのスロット差し替え
+
+本番用 DB スロットをモックに差し替えてテストできます。
+
+```favnir
+stage MockSave: List<Row> -> Int = |rows| { List.length(rows) }
+
+seq TestPipeline = DataPipeline<Row> {
+  parse    <- ParseCsv
+  validate <- ValidateRow
+  save     <- MockSave   // DB 不要
+}
+
+test "pipeline validates rows" {
+  bind count <- TestPipeline("tests/fixtures/sample.csv")
+  count > 0
+}
+```
+
+## fav explain — パイプライン構造の可視化
+
+```bash
+fav explain src/pipeline.fav
+```
+
+```
+VIS  NAME          TYPE                     EFFECTS      DEPS
+───────────────────────────────────────────────────────────────────
+     UserImport    String -> Int            !Io !Db
+  ↳  ParseCsv      String -> List<Row>      !Io
+  ↳  ValidateRow   Row -> Row
+  ↳  SaveToDb      List<Row> -> Int         !Db
+```
+
+`seq` の構造がそのまま設計図として出力されます。
+エフェクト列を見ることで「どのステージで I/O・DB が発生するか」が一目でわかります。

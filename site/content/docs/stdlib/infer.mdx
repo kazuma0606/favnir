@@ -1,0 +1,213 @@
+---
+title: "fav infer"
+order: 6
+category: "標準ライブラリ"
+description: "CSV・DB・Proto から Favnir 型定義を自動生成する"
+---
+
+# fav infer
+
+外部データソースのスキーマを解析し、Favnir の型定義を自動生成します。
+生成された型はそのままコードに貼り付けて使えます。
+
+## CSV からの型推論
+
+```bash
+fav infer --csv data/orders.csv
+```
+
+入力 CSV（先頭数行を解析）:
+
+```
+id,customer_name,email,amount
+1,田中 太郎,tanaka@example.com,12800.0
+2,佐藤 花子,sato@example.com,5400.0
+```
+
+出力:
+
+```favnir
+type Order = {
+  id:            Int
+  customer_name: String
+  email:         String
+  amount:        Float
+}
+```
+
+列名・値のパターンからフィールドの型を推論します。
+整数のみの列は `Int`、小数点を含む列は `Float`、それ以外は `String` になります。
+
+## データベースからの型推論
+
+テーブルのスキーマ情報を取得して型定義を生成します。
+
+```bash
+# PostgreSQL
+fav infer --db "postgresql://localhost/mydb" --table orders
+
+# SQLite
+fav infer --db "sqlite://./dev.db" --table users
+
+# DuckDB（ファイルパス）
+fav infer --db "duckdb://./analytics.ddb" --table events
+```
+
+出力例（PostgreSQL の `orders` テーブル）:
+
+```favnir
+type Order = {
+  id:            Int
+  customer_name: String
+  email:         String
+  amount:        Float
+  created_at:    String
+}
+```
+
+DB のカラム型と Favnir 型の対応:
+
+| DB 型 | Favnir 型 |
+|------|----------|
+| `INTEGER` / `BIGINT` | `Int` |
+| `REAL` / `DOUBLE` / `NUMERIC` | `Float` |
+| `TEXT` / `VARCHAR` / `CHAR` | `String` |
+| `BOOLEAN` | `Bool` |
+| `TIMESTAMP` / `DATE` | `String` |
+| `NULL` 許容カラム | `String`（制約 `nullable: true` 付き） |
+
+## Proto からの型推論
+
+Protocol Buffers の `.proto` ファイルから型定義を生成します。
+
+```bash
+fav infer --proto schemas/user.proto
+```
+
+入力:
+
+```proto
+message User {
+  int64 id = 1;
+  string name = 2;
+  string email = 3;
+}
+```
+
+出力:
+
+```favnir
+type User = {
+  id:    Int
+  name:  String
+  email: String
+}
+```
+
+## スキーマファイルへの出力
+
+`--out` でスキーマ YAML に出力します。
+生成されたスキーマに制約ヒントを手動で追記することで、`T.validate` によるランタイム検証が有効になります。
+
+```bash
+fav infer --csv data/orders.csv --out schemas/order.yaml
+```
+
+生成される `schemas/order.yaml`:
+
+```yaml
+type: Order
+fields:
+  id:
+    type: Int
+    constraints: {}
+  customer_name:
+    type: String
+    constraints: {}
+  email:
+    type: String
+    constraints: {}
+  amount:
+    type: Float
+    constraints: {}
+```
+
+制約を手動で追記:
+
+```yaml
+type: Order
+fields:
+  id:
+    type: Int
+    constraints:
+      positive: true
+  customer_name:
+    type: String
+    constraints:
+      max_length: 100
+  email:
+    type: String
+    constraints:
+      pattern: "^[^@]+@[^@]+$"
+  amount:
+    type: Float
+    constraints:
+      positive: true
+```
+
+## 生成型をコードで使う
+
+```favnir
+import rune "duckdb"
+
+// fav infer --csv data/orders.csv で生成した型をそのまま使う
+type Order = {
+  id:            Int
+  customer_name: String
+  email:         String
+  amount:        Float
+}
+
+stage LoadOrders: String -> List<Order> !Db = |path| {
+  bind conn <- duckdb.open(":memory:")
+  duckdb.query<Order>(conn, $"SELECT * FROM '{path}'")
+}
+
+public fn main() -> Unit !Io !Db {
+  bind orders <- LoadOrders("data/orders.csv")
+  IO.println($"読み込み: {List.length(orders)} 件")
+}
+```
+
+### スキーマを使ったランタイム検証
+
+`fav infer --out schemas/order.yaml` でスキーマ雛形を生成し、制約を追記すると
+`Validate.rows_raw` で読み込み後に一括検証できます:
+
+```favnir
+import rune "duckdb"
+
+type Order = { id: Int  customer_name: String  amount: Float }
+
+public fn main() -> Unit !Io !Db {
+  bind conn   <- duckdb.open(":memory:")
+  bind rows   <- duckdb.query<Order>(conn, "SELECT * FROM 'orders.csv'")
+  match Validate.rows_raw("Order", rows) {
+    Ok(valid)  => IO.println($"{List.length(valid)} 件取得（制約検証済み）")
+    Err(errs)  => IO.println($"データ品質エラー検出")
+  }
+}
+```
+
+詳細は [スキーマと制約](/docs/language/schema/) を参照してください。
+
+## オプション一覧
+
+| オプション | 説明 |
+|---------|------|
+| `--csv <path>` | CSV ファイルから推論 |
+| `--db <conn>` | DB 接続文字列から推論 |
+| `--table <name>` | 対象テーブル名（`--db` と併用） |
+| `--proto <path>` | `.proto` ファイルから推論 |
+| `--out <path>` | 出力先（省略時は標準出力） |
+| `--type-name <name>` | 生成する型名を指定（省略時はファイル名から推定） |

@@ -1,0 +1,161 @@
+---
+title: "スキーマと制約"
+order: 7
+category: "言語仕様"
+description: "schemas/*.yaml による型制約の宣言と fav build --schema による DDL 生成"
+---
+
+# スキーマと制約
+
+Favnir の型システムは「構造の正しさ」をコンパイル時に保証します。
+`schemas/*.yaml` を使うと、さらに「値の正しさ」をランタイムにも保証できます。
+
+## スキーマとは
+
+`schemas/` ディレクトリに配置する YAML ファイルで、Favnir 型に「値の制約」を付加します。
+
+```
+project/
+  schemas/
+    orders.yaml   ← Order 型の制約
+    users.yaml    ← User 型の制約
+  src/
+    main.fav
+```
+
+## 基本構文
+
+```yaml
+# schemas/orders.yaml
+type: Order
+fields:
+  id:
+    type: Int
+    constraints:
+      positive: true
+  customer_name:
+    type: String
+    constraints:
+      max_length: 100
+  email:
+    type: String
+    constraints:
+      pattern: "^[^@]+@[^@]+$"
+  amount:
+    type: Float
+    constraints:
+      positive: true
+  note:
+    type: String
+    constraints:
+      nullable: true
+      max_length: 500
+```
+
+対応する Favnir 型:
+
+```favnir
+type Order = {
+  id:            Int
+  customer_name: String
+  email:         String
+  amount:        Float
+  note:          String
+}
+```
+
+## 制約一覧
+
+| 制約キー | 対象型 | 説明 |
+|---------|-------|------|
+| `positive: true` | Int / Float | 0 より大きい値のみ許容 |
+| `non_negative: true` | Int / Float | 0 以上の値のみ許容 |
+| `max_length: N` | String | 最大 N 文字 |
+| `min_length: N` | String | 最小 N 文字 |
+| `pattern: "regex"` | String | 正規表現にマッチすること |
+| `nullable: true` | 任意 | null 値を許容 |
+| `one_of: [...]` | String | 列挙値のいずれかであること |
+
+### one_of の例
+
+```yaml
+fields:
+  status:
+    type: String
+    constraints:
+      one_of: ["pending", "active", "cancelled"]
+```
+
+## T.validate — ランタイム検証
+
+スキーマ定義の制約を実行時に検証します。
+
+```favnir
+type Order = { id: Int  customer_name: String  email: String  amount: Float }
+
+bind raw <- Order { id: 1  customer_name: "田中"  email: "tanaka@example.com"  amount: 12800.0 }
+match Order.validate(raw) {
+  Ok(order)   => IO.println($"注文 ID: {order.id}")
+  Err(errors) => IO.println($"バリデーションエラー: {List.length(errors)} 件")
+}
+```
+
+`Order.validate(record)` はスキーマに登録された全制約を検査し、
+`Result<Order, List<ValidationError>>` を返します。
+
+### リストの一括検証
+
+クエリ結果など複数行を一括で検証する場合は `Validate.rows_raw` を使います:
+
+```favnir
+import rune "duckdb"
+
+type Order = { id: Int  customer_name: String  amount: Float }
+
+public fn main() -> Unit !Io !Db {
+  bind conn   <- duckdb.open(":memory:")
+  bind rows   <- duckdb.query<Order>(conn, "SELECT * FROM 'orders.csv'")
+  match Validate.rows_raw("Order", rows) {
+    Ok(valid_rows) => IO.println($"{List.length(valid_rows)} 件すべて有効")
+    Err(errors)    => IO.println($"バリデーションエラー検出")
+  }
+}
+```
+
+## fav build --schema — DDL 生成
+
+スキーマファイルから CREATE TABLE 文を生成します。
+
+```bash
+# PostgreSQL 向け DDL
+fav build --schema schemas/orders.yaml --dialect postgres
+
+# SQLite 向け DDL
+fav build --schema schemas/orders.yaml --dialect sqlite
+
+# ディレクトリ指定（全スキーマを一括変換）
+fav build --schema schemas/ --out migrations/001_init.sql
+```
+
+出力例（PostgreSQL）:
+
+```sql
+CREATE TABLE orders (
+  id            BIGINT      NOT NULL CHECK (id > 0),
+  customer_name VARCHAR(100) NOT NULL,
+  email         TEXT        NOT NULL,
+  amount        DOUBLE PRECISION NOT NULL CHECK (amount > 0),
+  note          TEXT
+);
+```
+
+## fav infer との連携
+
+`fav infer` で外部データから型とスキーマの雛形を自動生成できます。
+
+```bash
+# CSV から型定義とスキーマ雛形を生成
+fav infer --csv data/orders.csv --out schemas/order.yaml
+```
+
+詳細は [`fav infer`](/docs/stdlib/infer/) を参照。

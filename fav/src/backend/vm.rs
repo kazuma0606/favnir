@@ -3160,8 +3160,8 @@ impl VM {
                     VMValue::Variant(tag, payload) if tag == "ok" => {
                         Ok(VMValue::Bool(payload.is_some()))
                     }
-                    VMValue::Variant(tag, payload) if tag == "err" => {
-                        Ok(VMValue::Bool(false && payload.is_some()))
+                    VMValue::Variant(tag, _) if tag == "err" => {
+                        Ok(VMValue::Bool(false))
                     }
                     other => Err(self.error(
                         artifact,
@@ -3177,8 +3177,8 @@ impl VM {
                     return Err(self.error(artifact, "Result.is_err requires 1 argument"));
                 }
                 match args.into_iter().next().expect("result") {
-                    VMValue::Variant(tag, payload) if tag == "ok" => {
-                        Ok(VMValue::Bool(false && payload.is_some()))
+                    VMValue::Variant(tag, _) if tag == "ok" => {
+                        Ok(VMValue::Bool(false))
                     }
                     VMValue::Variant(tag, payload) if tag == "err" => {
                         Ok(VMValue::Bool(payload.is_some()))

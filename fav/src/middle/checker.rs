@@ -4509,6 +4509,7 @@ impl Checker {
         }
     }
 
+    #[allow(dead_code)] // reserved for stricter !DbWrite enforcement (v7.x)
     fn require_db_write_effect(&mut self, span: &Span) {
         if !self.has_effect(|e| matches!(e, Effect::Db | Effect::DbWrite | Effect::DbAdmin)) {
             self.type_error(
@@ -4519,6 +4520,7 @@ impl Checker {
         }
     }
 
+    #[allow(dead_code)] // reserved for stricter !DbAdmin enforcement (v7.x)
     fn require_db_admin_effect(&mut self, span: &Span) {
         if !self.has_effect(|e| matches!(e, Effect::Db | Effect::DbAdmin)) {
             self.type_error(

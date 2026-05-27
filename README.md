@@ -63,7 +63,7 @@ seq UserImport = ParseCsv |> ValidateRow |> SaveToDb
 
 ## 現在の状態
 
-**v6.6.0（2026-05-27）— T.validate 完成**
+**v7.0.0（2026-05-27）— Schema Authority 完成**
 
 | 機能 | 状態 |
 |---|---|
@@ -80,8 +80,10 @@ seq UserImport = ParseCsv |> ValidateRow |> SaveToDb
 | `fav explain` / `fav bundle` / `fav graph` | 完了 |
 | `stage` / `seq` / `\|>` パイプライン構文 | 完了 |
 | `abstract stage` / `abstract seq`（依存注入） | 完了 |
+| `!DbRead` / `!DbWrite` / `!DbAdmin` エフェクト細分化 | 完了 |
+| Schema Authority（fav infer → schemas → T.validate） | 完了 |
 
-テスト: **1043 件すべて通過**
+テスト: **1044 件すべて通過**
 
 Bootstrap 検証（v6.2.0 で確立・v6.3.0 以降も維持）:
 ```
@@ -173,8 +175,10 @@ seq OrderReport = LoadOrders |> Summarize
 | v6.4.0 | Playground 改善・WASM List 対応・build-wasm パイプライン | 完了 |
 | v6.5.0 | サイトドキュメント補完（stage/seq/schema/infer） | 完了 |
 | v6.6.0 | T.validate 完成（one_of・TypeName.validate・Validate.rows_raw） | 完了 |
-| v6.8〜v6.x | Rune エコシステム補完・OSS 公開準備 | 計画中 |
-| **v7.0.0** | **Schema Authority（外部データを型で守る）** | 計画中 |
+| v6.8.0 | Rune エコシステム補完（db/http docs） | 完了 |
+| v6.9.0 | OSS 公開準備（LICENSE / CONTRIBUTING / CI clippy） | 完了 |
+| **v7.0.0** | **Schema Authority（`!DbRead`/`!DbWrite`/`!DbAdmin` + ガイド）** | **完了** |
+| v7.1.0 | fav explain --lineage（データリネージ） | 計画中 |
 | v7.x | fav deploy ECS/Fargate（v7.0 完了後） | 計画中 |
 
 詳細: [`versions/roadmap-v7.md`](versions/roadmap-v7.md)

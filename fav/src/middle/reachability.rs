@@ -63,6 +63,15 @@ pub fn reachability_analysis(entry: &str, program: &IRProgram) -> ReachabilityRe
                 Effect::Db => {
                     effects_required.insert("Db".to_string());
                 }
+                Effect::DbRead => {
+                    effects_required.insert("DbRead".to_string());
+                }
+                Effect::DbWrite => {
+                    effects_required.insert("DbWrite".to_string());
+                }
+                Effect::DbAdmin => {
+                    effects_required.insert("DbAdmin".to_string());
+                }
                 Effect::Network => {
                     effects_required.insert("Network".to_string());
                 }

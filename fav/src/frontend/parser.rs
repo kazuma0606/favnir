@@ -1102,6 +1102,18 @@ impl Parser {
                     Effect::Io
                 }
                 TokenKind::Ident(ref name) => match name.as_str() {
+                    "DbRead" => {
+                        self.advance();
+                        Effect::DbRead
+                    }
+                    "DbWrite" => {
+                        self.advance();
+                        Effect::DbWrite
+                    }
+                    "DbAdmin" => {
+                        self.advance();
+                        Effect::DbAdmin
+                    }
                     "Db" => {
                         self.advance();
                         Effect::Db
@@ -2582,6 +2594,18 @@ mod tests {
         let p = parse("fn f() -> Unit !Io { () }");
         if let Item::FnDef(f) = &p.items[0] {
             assert!(f.effects.contains(&Effect::Io));
+        }
+    }
+
+    #[test]
+    fn test_parse_db_read_write_admin_effects() {
+        let p = parse("fn f() -> Unit !DbRead !DbWrite !DbAdmin { () }");
+        if let Item::FnDef(f) = &p.items[0] {
+            assert!(f.effects.contains(&Effect::DbRead));
+            assert!(f.effects.contains(&Effect::DbWrite));
+            assert!(f.effects.contains(&Effect::DbAdmin));
+        } else {
+            panic!("expected FnDef");
         }
     }
 

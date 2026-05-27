@@ -1,0 +1,267 @@
+---
+title: "データパイプラインを型で守る"
+order: 1
+category: "ガイド"
+description: "fav infer → schemas → T.validate → エフェクト追跡による Schema Authority の全体ワークフロー"
+---
+
+# データパイプラインを型で守る
+
+Favnir の **Schema Authority** は、外部データ（CSV / DB / S3 / API）を
+コンパイル時と実行時の両方で型安全に扱うための仕組みです。
+
+```
+外部データ（CSV / DB / S3 / API）
+    ↓  fav infer    → Favnir 型定義を自動生成
+    ↓  schemas/*.yaml → 制約を付与
+    ↓  fav check    → コンパイル時検査
+    ↓  T.validate   → ランタイム検査
+型安全なデータパイプライン
+```
+
+---
+
+## ステップ 1 — fav infer で型定義を生成する
+
+CSV・DB・Proto から Favnir の型定義を自動生成します。
+
+```bash
+# CSV から型定義を生成しスキーマ雛形も出力
+fav infer --csv data/orders.csv --out schemas/order.yaml
+```
+
+入力 CSV:
+
+```
+id,customer_name,email,amount,status
+1,田中 太郎,tanaka@example.com,12800.0,active
+2,佐藤 花子,sato@example.com,5400.0,pending
+```
+
+生成された型定義（標準出力）:
+
+```favnir
+type Order = {
+  id:            Int
+  customer_name: String
+  email:         String
+  amount:        Float
+  status:        String
+}
+```
+
+生成された `schemas/order.yaml`（雛形）:
+
+```yaml
+Order:
+  id:
+    type: Int
+    constraints: {}
+  customer_name:
+    type: String
+    constraints: {}
+  email:
+    type: String
+    constraints: {}
+  amount:
+    type: Float
+    constraints: {}
+  status:
+    type: String
+    constraints: {}
+```
+
+---
+
+## ステップ 2 — schemas/*.yaml に制約を付与する
+
+生成された雛形に「値の制約」を手動で追記します。
+
+```yaml
+Order:
+  id:
+    type: Int
+    constraints:
+      positive: true
+  customer_name:
+    type: String
+    constraints:
+      max_length: 100
+  email:
+    type: String
+    constraints:
+      pattern: "^[^@]+@[^@]+$"
+  amount:
+    type: Float
+    constraints:
+      positive: true
+  status:
+    type: String
+    constraints:
+      one_of: ["pending", "active", "cancelled"]
+```
+
+対応している制約一覧:
+
+| 制約キー | 対象型 | 説明 |
+|---------|-------|------|
+| `positive: true` | Int / Float | 0 より大きい値のみ |
+| `non_negative: true` | Int / Float | 0 以上の値のみ |
+| `max_length: N` | String | 最大 N 文字 |
+| `min_length: N` | String | 最小 N 文字 |
+| `pattern: "regex"` | String | 正規表現にマッチ |
+| `nullable: true` | 任意 | null を許容 |
+| `one_of: [...]` | String | 列挙値のいずれか |
+
+---
+
+## ステップ 3 — T.validate でランタイム検証する
+
+`schemas/order.yaml` が存在すれば、`Order.validate(record)` がすべての制約を検査します。
+
+```favnir
+type Order = { id: Int  customer_name: String  email: String  amount: Float  status: String }
+
+bind raw <- Order {
+  id: 1
+  customer_name: "田中 太郎"
+  email: "tanaka@example.com"
+  amount: 12800.0
+  status: "active"
+}
+
+match Order.validate(raw) {
+  Ok(order)   => IO.println($"注文 ID: {order.id} — 検証済み")
+  Err(errors) => IO.println($"バリデーションエラー: {List.length(errors)} 件")
+}
+```
+
+複数行を一括検証する場合は `Validate.rows_raw`:
+
+```favnir
+import rune "duckdb"
+
+type Order = { id: Int  customer_name: String  amount: Float  status: String }
+
+public fn main() -> Unit !Io !Db {
+  bind conn <- duckdb.open(":memory:")
+  bind rows <- duckdb.query<Order>(conn, "SELECT * FROM 'data/orders.csv'")
+  match Validate.rows_raw("Order", rows) {
+    Ok(valid) => IO.println($"{List.length(valid)} 件すべて制約を満たしています")
+    Err(_)    => IO.println("データ品質エラーを検出しました")
+  }
+}
+```
+
+---
+
+## ステップ 4 — エフェクト細分化で読み書きを型で分離する
+
+v7.0.0 から DB エフェクトが 3 段階に細分化されました。
+
+```favnir
+// !DbRead — SELECT のみ許可
+fn list_orders(handle: DbHandle) -> Result<List<Order>, DbError> !DbRead {
+  db.query(handle, "SELECT * FROM orders")
+}
+
+// !DbWrite — INSERT / UPDATE / DELETE を許可
+fn create_order(handle: DbHandle, order: Order) -> Result<Int, DbError> !DbWrite {
+  db.execute_params(handle,
+    "INSERT INTO orders (customer_name, amount, status) VALUES ($1, $2, $3)",
+    [order.customer_name, Float.to_string(order.amount), order.status])
+}
+
+// !DbAdmin — DDL（CREATE / DROP / ALTER）を許可
+fn setup_tables(handle: DbHandle) -> Result<Int, DbError> !DbAdmin {
+  db.execute(handle,
+    "CREATE TABLE IF NOT EXISTS orders (id SERIAL PRIMARY KEY, customer_name TEXT, amount FLOAT, status TEXT)")
+}
+```
+
+`fav explain` でエフェクトを確認:
+
+```bash
+fav explain pipeline.fav
+```
+
+```
+NAME           TYPE                              EFFECTS
+OrderPipeline  String -> List<Order>             !DbRead !Io
+SaveOrders     List<Order> -> Int                !DbWrite
+InitSchema     Unit -> Unit                      !DbAdmin !Io
+```
+
+### エフェクトの互換性
+
+| 宣言したエフェクト | 呼び出せる Db 関数 |
+|-----------------|------------------|
+| `!Db` | query / execute / DDL（すべて）|
+| `!DbRead` | query / query_one / paginate のみ |
+| `!DbWrite` | execute / batch_insert / with_transaction |
+| `!DbAdmin` | execute（DDL）/ mark_applied |
+
+---
+
+## 完全なパイプライン例
+
+CSV の読み込みから DB への保存まで、Schema Authority を活用した完全な例です。
+
+```favnir
+import rune "duckdb"
+import rune "db"
+
+type Order = { id: Int  customer_name: String  amount: Float  status: String }
+type Summary = { customer_name: String  total: Float }
+
+// ステップ 1: CSV を読み込んで検証
+stage LoadAndValidate: String -> List<Order> !Db !Io = |path| {
+  bind conn <- duckdb.open(":memory:")
+  bind rows <- duckdb.query<Order>(conn, $"SELECT * FROM '{path}'")
+  match Validate.rows_raw("Order", rows) {
+    Ok(valid) => valid
+    Err(_)    => {
+      IO.println("バリデーションエラー — 処理を中断")
+      []
+    }
+  }
+}
+
+// ステップ 2: 集計（純粋変換、エフェクトなし）
+stage Summarize: List<Order> -> List<Summary> = |orders| {
+  List.map(orders, |o| Summary { customer_name: o.customer_name  total: o.amount })
+}
+
+// ステップ 3: DB に保存（!DbWrite）
+stage SaveSummary: List<Summary> -> Int !DbWrite = |summaries| {
+  bind handle <- db.connect("postgresql://localhost/mydb")
+  List.fold_left(summaries, 0, |count, s| {
+    match db.execute_params(handle,
+      "INSERT INTO summaries (customer_name, total) VALUES ($1, $2)",
+      [s.customer_name, Float.to_string(s.total)])
+    {
+      Ok(n)  => count + n
+      Err(_) => count
+    }
+  })
+}
+
+// パイプライン: CSV → 検証 → 集計 → DB 保存
+seq OrderReport = LoadAndValidate |> Summarize |> SaveSummary
+```
+
+`fav explain` の出力:
+
+```
+NAME          TYPE                     EFFECTS
+OrderReport   String -> Int            !Db !DbWrite !Io
+```
+
+---
+
+## 関連ドキュメント
+
+- [スキーマと制約](/docs/language/schema/) — `schemas/*.yaml` の詳細
+- [fav infer](/docs/stdlib/infer/) — 型定義の自動生成
+- [DB Rune](/docs/runes/db/) — `!DbRead` / `!DbWrite` / `!DbAdmin` の関数一覧
+- [パイプライン構文](/docs/language/pipeline/) — stage / seq / `|>`

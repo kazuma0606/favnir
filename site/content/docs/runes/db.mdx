@@ -7,9 +7,34 @@ description: "PostgreSQL / SQLite — クエリ・トランザクション・ペ
 
 # DB Rune
 
-エフェクト: `!Db`
+エフェクト: `!DbRead` / `!DbWrite` / `!DbAdmin`（後方互換: `!Db`）
 
 PostgreSQL・SQLite などのリレーショナル DB に接続してクエリを実行します。
+
+## エフェクト細分化（v7.0.0）
+
+v7.0.0 から DB エフェクトが 3 段階に細分化されました。
+`!Db` は後方互換のために引き続き有効で、3 つのエフェクトすべてを含みます。
+
+| エフェクト | 対象操作 | 使用関数 |
+|-----------|---------|---------|
+| `!DbRead` | SELECT | `query` / `query_one` / `query_params` / `paginate` |
+| `!DbWrite` | INSERT / UPDATE / DELETE | `execute` / `execute_params` / `batch_insert` / `with_transaction` / savepoint 系 |
+| `!DbAdmin` | CREATE / DROP / ALTER | `mark_applied`（`_fav_migrations` テーブル管理） |
+| `!Db` | すべて（後方互換） | — |
+
+```favnir
+// 読み取り専用 — !DbRead のみ宣言
+fn get_orders(handle: DbHandle) -> Result<List<Map<String, String>>, DbError> !DbRead {
+  db.query(handle, "SELECT * FROM orders WHERE status = 'active'")
+}
+
+// 書き込み — !DbWrite を宣言
+fn cancel_order(handle: DbHandle, id: Int) -> Result<Int, DbError> !DbWrite {
+  db.execute_params(handle, "UPDATE orders SET status = 'cancelled' WHERE id = $1",
+    [Int.to_string(id)])
+}
+```
 
 ```favnir
 import rune "db"

@@ -2114,6 +2114,9 @@ impl Checker {
             "Pure",
             "Io",
             "Db",
+            "DbRead",
+            "DbWrite",
+            "DbAdmin",
             "Network",
             "Rpc",
             "File",
@@ -4495,10 +4498,32 @@ impl Checker {
     }
 
     fn require_db_effect(&mut self, span: &Span) {
-        if !self.has_effect(|e| matches!(e, Effect::Db)) {
+        if !self.has_effect(|e| {
+            matches!(e, Effect::Db | Effect::DbRead | Effect::DbWrite | Effect::DbAdmin)
+        }) {
             self.type_error(
                 "E0107",
-                "Db.* call requires `!Db` effect on enclosing fn/trf",
+                "Db.* call requires `!Db`, `!DbRead`, `!DbWrite`, or `!DbAdmin` effect on enclosing fn/trf",
+                span,
+            );
+        }
+    }
+
+    fn require_db_write_effect(&mut self, span: &Span) {
+        if !self.has_effect(|e| matches!(e, Effect::Db | Effect::DbWrite | Effect::DbAdmin)) {
+            self.type_error(
+                "E0108",
+                "DB write call requires `!DbWrite`, `!DbAdmin`, or `!Db` effect on enclosing fn/trf",
+                span,
+            );
+        }
+    }
+
+    fn require_db_admin_effect(&mut self, span: &Span) {
+        if !self.has_effect(|e| matches!(e, Effect::Db | Effect::DbAdmin)) {
+            self.type_error(
+                "E0109",
+                "DB admin call (DDL) requires `!DbAdmin` or `!Db` effect on enclosing fn/trf",
                 span,
             );
         }

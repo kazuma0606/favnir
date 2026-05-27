@@ -4,6 +4,29 @@ Favnir のバージョン履歴。形式は [Keep a Changelog](https://keepachan
 
 ---
 
+## [v7.0.0] — 2026-05-27
+
+### Added
+- `Effect::DbRead` / `Effect::DbWrite` / `Effect::DbAdmin` を型システムに追加（`ast.rs`）
+- `parser.rs`：`!DbRead` / `!DbWrite` / `!DbAdmin` のパースに対応
+- `checker.rs`：BUILTIN_EFFECTS 更新、`require_db_write_effect` / `require_db_admin_effect` 追加
+- `reachability.rs`：3 エフェクトのリーチャビリティ追跡に対応
+- `fmt.rs` / `driver.rs`：3 エフェクトの表示・JSON 出力に対応
+- `runes/db/query.fav`：query 系 → `!DbRead`、execute 系 → `!DbWrite` に更新
+- `runes/db/transaction.fav`：`!Db` → `!DbWrite` に更新
+- `runes/db/migration.fav`：`applied_migrations` → `!DbRead`、`mark_applied` / `ensure_migrations_table` → `!DbAdmin` に更新
+- `site/content/docs/guides/schema-authority.mdx`：Schema Authority 全体ワークフローガイド新規作成
+- `site/content/docs/runes/db.mdx`：エフェクト細分化テーブル追記
+
+### Changed
+- `require_db_effect`：後方互換化（`Db | DbRead | DbWrite | DbAdmin` をすべて受け入れる）
+
+### Notes
+- テスト: 1044 件（パーサーテスト +1）
+- 後方互換: 既存の `!Db` を使ったコードは変更なしに動く
+
+---
+
 ## [v6.9.0] — 2026-05-27
 
 ### Added

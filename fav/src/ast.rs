@@ -21,6 +21,9 @@ pub enum Effect {
     Pure,
     Io,
     Db,
+    DbRead,   // SELECT 系（v7.0.0）
+    DbWrite,  // INSERT/UPDATE/DELETE 系（v7.0.0）
+    DbAdmin,  // DDL（CREATE/DROP/ALTER）系（v7.0.0）
     Network,
     Rpc,
     File,

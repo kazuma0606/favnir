@@ -39,6 +39,7 @@
 #![allow(clippy::useless_asref)]
 #![allow(clippy::useless_conversion)]
 #![allow(clippy::while_let_loop)]
+#![allow(clippy::explicit_counter_loop)]
 #![allow(clippy::write_literal)]
 
 pub mod ast;

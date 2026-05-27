@@ -1,0 +1,128 @@
+---
+title: "cache Rune"
+order: 13
+category: "Rune"
+description: "インプロセス KV キャッシュ — TTL 管理・プレフィックス無効化"
+---
+
+# cache Rune
+
+エフェクト: `!Cache`
+
+`cache` Rune はインプロセスのキーバリューキャッシュを提供します。
+開発環境ではスレッドローカルの HashMap をバックエンドとして使用します。
+`CACHE_BACKEND=redis` 環境変数を設定することで Redis に切り替えられます（将来対応）。
+
+## インストール
+
+```
+fav rune add cache
+```
+
+## 基本的な使い方
+
+```favnir
+use cache
+
+stage GetUser: Int -> String !Cache = |user_id| {
+    bind key <- String.concat("user:", Int.to_string(user_id))
+    Cache.get_or(key, "unknown")
+}
+
+stage CacheUser: Int -> Unit !Cache = |user_id| {
+    bind key  <- String.concat("user:", Int.to_string(user_id))
+    bind name <- fetch_user_name(user_id)
+    Cache.set_ttl(key, name, 300)
+}
+```
+
+## API リファレンス
+
+### `Cache.get`
+
+```favnir
+public fn get(key: String) -> Option<String> !Cache
+```
+
+キーを検索します。存在すれば `Some(value)`、なければ `None`。
+
+```favnir
+match Cache.get("session:abc123") {
+    None    => "expired"
+    Some(v) => v
+}
+```
+
+### `Cache.get_or`
+
+```favnir
+public fn get_or(key: String, default: String) -> String !Cache
+```
+
+キーが存在しない場合はデフォルト値を返します。
+
+```favnir
+bind lang <- Cache.get_or("user:42:lang", "ja")
+```
+
+### `Cache.set`
+
+```favnir
+public fn set(key: String, value: String) -> Unit !Cache
+```
+
+TTL なしで保存します。
+
+### `Cache.set_ttl`
+
+```favnir
+public fn set_ttl(key: String, value: String, ttl_secs: Int) -> Unit !Cache
+```
+
+TTL（秒）を指定して保存します。インプロセスストアでは TTL は advisory（ヒントのみ）です。
+
+```favnir
+bind _ <- Cache.set_ttl("rate:user:42", "1", 60)
+```
+
+### `Cache.del`
+
+```favnir
+public fn del(key: String) -> Unit !Cache
+```
+
+1つのキーを削除します。
+
+### `Cache.invalidate_prefix`
+
+```favnir
+public fn invalidate_prefix(prefix: String) -> Int !Cache
+```
+
+指定プレフィックスで始まるすべてのキーを削除し、削除件数を返します。
+
+```favnir
+// ユーザー 42 のキャッシュを全削除
+bind n <- Cache.invalidate_prefix("user:42:")
+```
+
+## パターン: キャッシュスルー
+
+```favnir
+fn get_config(key: String) -> String !Cache = {
+    match Cache.get(key) {
+        Some(v) => v
+        None    => {
+            bind v <- load_from_db(key)
+            bind _ <- Cache.set_ttl(key, v, 600)
+            v
+        }
+    }
+}
+```
+
+## エフェクト一覧
+
+| 関数 | エフェクト |
+|------|-----------|
+| `get` / `get_or` / `set` / `set_ttl` / `del` / `invalidate_prefix` | `!Cache` |

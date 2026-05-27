@@ -1,0 +1,49 @@
+// runes/cache/cache.fav — In-process key-value cache (v7.3.0)
+//
+// Usage:
+//   bind _   <- Cache.set("user:42", "Alice")           // !Cache
+//   bind v   <- Cache.get("user:42")                    // !Cache  -> Option<String>
+//   bind s   <- Cache.get_or("user:42", "unknown")      // !Cache  -> String
+//   bind _   <- Cache.set_ttl("token:x", "abc", 300)    // !Cache
+//   bind _   <- Cache.del("user:42")                    // !Cache
+//   bind n   <- Cache.invalidate_prefix("user:")        // !Cache  -> Int
+
+// ── Get ───────────────────────────────────────────────────────────────────────
+
+// Look up a key. Returns Some(value) or None.
+public fn get(key: String) -> Option<String> !Cache {
+    Cache.get_raw(key)
+}
+
+// Look up a key, returning default if absent.
+public fn get_or(key: String, default: String) -> String !Cache {
+    match Cache.get_raw(key) {
+        None    => default
+        Some(v) => v
+    }
+}
+
+// ── Set ───────────────────────────────────────────────────────────────────────
+
+// Store a value with no expiry.
+public fn set(key: String, value: String) -> Unit !Cache {
+    Cache.set_raw(key, value, 0)
+}
+
+// Store a value with a TTL in seconds (TTL is advisory in the in-process store).
+public fn set_ttl(key: String, value: String, ttl_secs: Int) -> Unit !Cache {
+    Cache.set_raw(key, value, ttl_secs)
+}
+
+// ── Delete ────────────────────────────────────────────────────────────────────
+
+// Delete a single key.
+public fn del(key: String) -> Unit !Cache {
+    Cache.del_raw(key)
+}
+
+// Delete all keys that start with the given prefix.
+// Returns the number of deleted entries.
+public fn invalidate_prefix(prefix: String) -> Int !Cache {
+    Cache.del_prefix_raw(prefix)
+}

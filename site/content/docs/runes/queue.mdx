@@ -1,0 +1,139 @@
+---
+title: "queue Rune"
+order: 12
+category: "Rune"
+description: "メッセージキュー操作 — 送信・受信・Ack/Nack（SQS バックエンド）"
+---
+
+# queue Rune
+
+エフェクト: `!Queue`
+
+`queue` Rune は AWS SQS をバックエンドとしたメッセージキュー操作を提供します。
+`Queue.send_raw` / `Queue.recv_raw` などの VM primitive の上に、バッチ送信や
+ack 管理などの高レベル操作を Favnir 層で実装しています。
+
+## インストール
+
+```
+fav rune add queue
+```
+
+## 前提
+
+AWS 認証情報が環境変数で設定されていること：
+
+```bash
+export AWS_ACCESS_KEY_ID=...
+export AWS_SECRET_ACCESS_KEY=...
+export AWS_REGION=ap-northeast-1
+# ローカル開発 (LocalStack):
+export AWS_ENDPOINT_URL=http://localhost:4566
+```
+
+## 基本的な使い方
+
+```favnir
+use queue
+
+stage EnqueueOrders: List<String> -> Int !Queue = |queue_url| {
+    bind orders <- List.map(some_orders, |o| o.id)
+    match Queue.send_batch(queue_url, orders) {
+        Err(e) => 0
+        Ok(n)  => n
+    }
+}
+```
+
+## API リファレンス
+
+### `Queue.send`
+
+```favnir
+public fn send(url: String, body: String) -> Result<Unit, String> !Queue
+```
+
+1件のメッセージを送信します。
+
+```favnir
+bind _ <- Queue.send(queue_url, "order:42")
+```
+
+### `Queue.send_batch`
+
+```favnir
+public fn send_batch(url: String, messages: List<String>) -> Result<Int, String> !Queue
+```
+
+複数のメッセージを順次送信し、成功件数を返します。最初のエラーで停止します。
+
+```favnir
+match Queue.send_batch(queue_url, message_list) {
+    Err(e) => 0
+    Ok(n)  => n   // 送信成功件数
+}
+```
+
+### `Queue.recv`
+
+```favnir
+public fn recv(url: String, max: Int) -> Result<List<String>, String> !Queue
+```
+
+最大 `max` 件のメッセージを受信し、ボディ文字列のリストを返します。
+
+```favnir
+match Queue.recv(queue_url, 10) {
+    Err(e)    => List.empty()
+    Ok(msgs)  => msgs
+}
+```
+
+### `Queue.ack`
+
+```favnir
+public fn ack(url: String, receipt: String) -> Result<Unit, String> !Queue
+```
+
+メッセージの処理完了を通知し、キューから削除します（SQS: DeleteMessage）。
+
+### `Queue.nack`
+
+```favnir
+public fn nack(url: String, receipt: String) -> Result<Unit, String> !Queue
+```
+
+処理失敗を通知し、メッセージを再処理可能状態に戻します。
+
+## パターン: ワーカーループ
+
+```favnir
+stage ProcessBatch: String -> Int !Queue = |queue_url| {
+    match Queue.recv(queue_url, 10) {
+        Err(_)   => 0
+        Ok(msgs) => process_messages(queue_url, msgs, 0)
+    }
+}
+
+fn process_messages(url: String, msgs: List<String>, count: Int) -> Int !Queue {
+    match List.head(msgs) {
+        None      => count
+        Some(msg) => match do_work(msg) {
+            Err(_)   => {
+                bind _ <- Queue.nack(url, msg)
+                process_messages(url, List.tail(msgs), count)
+            }
+            Ok(_)    => {
+                bind _ <- Queue.ack(url, msg)
+                process_messages(url, List.tail(msgs), Int.add(count, 1))
+            }
+        }
+    }
+}
+```
+
+## エフェクト一覧
+
+| 関数 | エフェクト |
+|------|-----------|
+| `send` / `send_batch` / `recv` / `ack` / `nack` | `!Queue` |

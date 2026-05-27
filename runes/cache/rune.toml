@@ -1,0 +1,4 @@
+[rune]
+name        = "cache"
+version     = "0.1.0"
+description = "In-process key-value cache with optional TTL"

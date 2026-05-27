@@ -1,0 +1,111 @@
+// runes/fs/fs.fav — File system utilities (v7.3.0)
+//
+// Usage:
+//   bind content <- Fs.read("data/input.csv")     // !IO
+//   bind _       <- Fs.write("out.txt", content)   // !IO
+//   bind files   <- Fs.list_dir("data/")           // !IO
+//   bind csvs    <- Fs.glob("data/", ".csv")        // !IO
+//   bind all     <- Fs.walk("data/")               // !IO
+
+// ── Basic file I/O ────────────────────────────────────────────────────────────
+
+// Read file contents as a String.
+public fn read(path: String) -> Result<String, String> !IO {
+    IO.read_file_raw(path)
+}
+
+// Write content to a file (overwrites if exists).
+public fn write(path: String, content: String) -> Result<Unit, String> !IO {
+    IO.write_file_raw(path, content)
+}
+
+// ── Directory and metadata ────────────────────────────────────────────────────
+
+// List entries in a directory (names only, sorted).
+public fn list_dir(path: String) -> Result<List<String>, String> !IO {
+    match IO.list_dir_raw(path) {
+        Err(e)     => Result.err(e)
+        Ok(names)  => Result.ok(names)
+    }
+}
+
+// True if the path exists as a file or directory.
+public fn exists(path: String) -> Bool !IO {
+    IO.file_exists_raw(path)
+}
+
+// True if the path exists and is a directory.
+public fn is_dir(path: String) -> Bool !IO {
+    bind stat <- IO.file_stat_raw(path)
+    match Map.get(stat, "is_dir") {
+        None    => false
+        Some(v) => v == "true"
+    }
+}
+
+// File size in bytes. Returns None if the path does not exist.
+public fn size(path: String) -> Option<Int> !IO {
+    bind stat <- IO.file_stat_raw(path)
+    match Map.get(stat, "exists") {
+        None    => Option.none()
+        Some(e) => if e == "true" {
+            match Map.get(stat, "size") {
+                None    => Option.none()
+                Some(s) => String.to_int(s)
+            }
+        } else {
+            Option.none()
+        }
+    }
+}
+
+// ── Glob (extension filter) ──────────────────────────────────────────────────
+
+// List files in dir whose names end with the given suffix (e.g. ".csv").
+// Not a full glob — matches by suffix only.
+public fn glob(dir: String, suffix: String) -> Result<List<String>, String> !IO {
+    match IO.list_dir_raw(dir) {
+        Err(e)    => Result.err(e)
+        Ok(names) => {
+            bind sep      <- "/"
+            bind filtered <- List.filter(names, |name| String.ends_with(name, suffix))
+            bind paths    <- List.map(filtered, |name| String.concat(String.concat(dir, sep), name))
+            Result.ok(paths)
+        }
+    }
+}
+
+// ── Walk (recursive directory traversal) ────────────────────────────────────
+
+// Collect full paths from a single directory entry.
+fn walk_entry(dir: String, name: String) -> Result<List<String>, String> !IO {
+    bind full_path <- String.concat(String.concat(dir, "/"), name)
+    bind stat      <- IO.file_stat_raw(full_path)
+    match Map.get(stat, "is_dir") {
+        None    => Result.ok(List.singleton(full_path))
+        Some(v) => if v == "true" {
+            walk(full_path)
+        } else {
+            Result.ok(List.singleton(full_path))
+        }
+    }
+}
+
+// Collect all child results into a flat list, stopping on first error.
+fn walk_collect(dir: String, names: List<String>, acc: List<String>) -> Result<List<String>, String> !IO {
+    match List.head(names) {
+        None       => Result.ok(acc)
+        Some(name) => match walk_entry(dir, name) {
+            Err(e)     => Result.err(e)
+            Ok(paths)  => walk_collect(dir, List.tail(names), List.concat(acc, paths))
+        }
+    }
+}
+
+// Recursively list all file paths under dir.
+public fn walk(dir: String) -> Result<List<String>, String> !IO {
+    match IO.list_dir_raw(dir) {
+        Err(e)    => Result.err(e)
+        Ok(names) => walk_collect(dir, names, List.empty())
+    }
+}

@@ -2113,6 +2113,7 @@ impl Checker {
         const BUILTIN_EFFECTS: &[&str] = &[
             "Pure",
             "Io",
+            "IO",
             "Db",
             "DbRead",
             "DbWrite",
@@ -2128,6 +2129,8 @@ impl Checker {
             "Env",
             "DuckDb",
             "AWS",
+            "Queue",
+            "Cache",
         ];
         for effect in effects {
             if let Effect::Unknown(name) = effect {
@@ -4696,7 +4699,31 @@ impl Checker {
                 Some(Type::Result(Box::new(Type::Unit), Box::new(Type::String)))
             }
             ("IO", "file_exists_raw") => Some(Type::Bool),
+            ("IO", "list_dir_raw") => {
+                Some(Type::Result(Box::new(Type::List(Box::new(Type::String))), Box::new(Type::String)))
+            }
+            ("IO", "file_stat_raw") => {
+                Some(Type::Map(Box::new(Type::String), Box::new(Type::String)))
+            }
             ("IO", "argv") => Some(Type::List(Box::new(Type::String))),
+
+            // Cache primitives (v7.3.0)
+            ("Cache", "get_raw") => Some(Type::Option(Box::new(Type::String))),
+            ("Cache", "set_raw") => Some(Type::Unit),
+            ("Cache", "del_raw") => Some(Type::Unit),
+            ("Cache", "exists_raw") => Some(Type::Bool),
+            ("Cache", "del_prefix_raw") => Some(Type::Int),
+
+            // Queue primitives (v7.3.0)
+            ("Queue", "send_raw") => {
+                Some(Type::Result(Box::new(Type::Unit), Box::new(Type::String)))
+            }
+            ("Queue", "recv_raw") => {
+                Some(Type::Result(Box::new(Type::List(Box::new(Type::String))), Box::new(Type::String)))
+            }
+            ("Queue", "ack_raw") | ("Queue", "delete_raw") => {
+                Some(Type::Result(Box::new(Type::Unit), Box::new(Type::String)))
+            }
 
             // Int/Float to string (v6.0.0)
             ("Int", "to_string") | ("Float", "to_string") => Some(Type::String),

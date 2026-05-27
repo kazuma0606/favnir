@@ -1,0 +1,4 @@
+[rune]
+name        = "queue"
+version     = "0.1.0"
+description = "Message queue — send, receive, ack (SQS backend)"

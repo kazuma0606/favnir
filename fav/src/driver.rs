@@ -16446,3 +16446,210 @@ seq Pipeline = ReadOrders
         assert!(text.contains("Pipeline"));
     }
 }
+
+// ── fs rune tests (v7.3.0) ────────────────────────────────────────────────────
+#[cfg(test)]
+mod fs_rune_tests {
+    use crate::frontend::parser::Parser;
+    use crate::middle::checker::Checker;
+    use crate::backend::vm::VM;
+    use crate::middle::compiler::compile_program;
+    use crate::backend::codegen::codegen_program;
+    use crate::value::Value;
+
+    fn run_inline(src: &str) -> Value {
+        let prog = Parser::parse_str(src, "test.fav").expect("parse");
+        let (errors, _) = Checker::check_program(&prog);
+        assert!(errors.is_empty(), "type errors: {:?}", errors.iter().map(|e| &e.message).collect::<Vec<_>>());
+        let ir = compile_program(&prog);
+        let artifact = codegen_program(&ir);
+        let fn_idx = artifact.fn_idx_by_name("main").expect("main function not found");
+        VM::run(&artifact, fn_idx, vec![]).expect("run")
+    }
+
+    #[test]
+    fn fs_file_exists_test() {
+        // IO.file_exists_raw: Cargo.toml is present in the fav crate root
+        let src = r#"
+public fn main() -> Bool !IO {
+    IO.file_exists_raw("Cargo.toml")
+}
+"#;
+        assert_eq!(run_inline(src), Value::Bool(true));
+    }
+
+    #[test]
+    fn fs_list_dir_raw_test() {
+        // IO.list_dir_raw: list src/ directory — should have entries
+        let src = r#"
+public fn main() -> Int !IO {
+    match IO.list_dir_raw("src") {
+        Err(_)    => 0
+        Ok(names) => List.length(names)
+    }
+}
+"#;
+        match run_inline(src) {
+            Value::Int(n) => assert!(n > 0, "expected entries in src/, got {}", n),
+            other => panic!("expected Int, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn fs_file_stat_raw_test() {
+        // IO.file_stat_raw on Cargo.toml: exists=true, is_dir=false
+        let src = r#"
+public fn main() -> String !IO {
+    bind stat <- IO.file_stat_raw("Cargo.toml")
+    match Map.get(stat, "exists") {
+        None    => "missing"
+        Some(v) => v
+    }
+}
+"#;
+        assert_eq!(run_inline(src), Value::Str("true".to_string()));
+    }
+}
+
+// ── slack rune tests (v7.3.0) ─────────────────────────────────────────────────
+#[cfg(test)]
+mod slack_rune_tests {
+    use crate::frontend::parser::Parser;
+    use crate::middle::checker::Checker;
+    use crate::backend::vm::VM;
+    use crate::middle::compiler::compile_program;
+    use crate::backend::codegen::codegen_program;
+    use crate::value::Value;
+
+    fn run_inline(src: &str) -> Value {
+        let prog = Parser::parse_str(src, "test.fav").expect("parse");
+        let (errors, _) = Checker::check_program(&prog);
+        assert!(errors.is_empty(), "type errors: {:?}", errors.iter().map(|e| &e.message).collect::<Vec<_>>());
+        let ir = compile_program(&prog);
+        let artifact = codegen_program(&ir);
+        let fn_idx = artifact.fn_idx_by_name("main").expect("main function not found");
+        VM::run(&artifact, fn_idx, vec![]).expect("run")
+    }
+
+    fn build_section(text: &str) -> String {
+        format!("{{\"type\":\"section\",\"text\":{{\"type\":\"mrkdwn\",\"text\":\"{}\"}}}}", text)
+    }
+
+    fn build_header(text: &str) -> String {
+        format!("{{\"type\":\"header\",\"text\":{{\"type\":\"plain_text\",\"text\":\"{}\"}}}}", text)
+    }
+
+    #[test]
+    fn slack_build_section_test() {
+        let src = r#"
+fn build_section(text: String) -> String {
+    String.concat(
+        String.concat(
+            String.concat(
+                "{\"type\":\"section\",\"text\":{\"type\":\"mrkdwn\",\"text\":\"",
+                text),
+            "\"}}"),
+        "")
+}
+public fn main() -> String {
+    build_section("hello world")
+}
+"#;
+        let result = run_inline(src);
+        let expected = build_section("hello world");
+        assert_eq!(result, Value::Str(expected));
+    }
+
+    #[test]
+    fn slack_build_header_test() {
+        let src = r#"
+fn build_header(text: String) -> String {
+    String.concat(
+        String.concat(
+            "{\"type\":\"header\",\"text\":{\"type\":\"plain_text\",\"text\":\"",
+            text),
+        "\"}}")
+}
+public fn main() -> String {
+    build_header("Deploy Report")
+}
+"#;
+        let result = run_inline(src);
+        let expected = build_header("Deploy Report");
+        assert_eq!(result, Value::Str(expected));
+    }
+
+    #[test]
+    fn slack_build_message_test() {
+        let src = r#"
+public fn main() -> String {
+    bind divider <- "{\"type\":\"divider\"}"
+    bind blocks  <- List.singleton(divider)
+    bind inner   <- String.join(blocks, ",")
+    String.concat(String.concat("{\"blocks\":[", inner), "]}")
+}
+"#;
+        let result = run_inline(src);
+        assert_eq!(result, Value::Str("{\"blocks\":[{\"type\":\"divider\"}]}".to_string()));
+    }
+}
+
+// ── cache rune tests (v7.3.0) ─────────────────────────────────────────────────
+#[cfg(test)]
+mod cache_rune_tests {
+    use crate::frontend::parser::Parser;
+    use crate::middle::checker::Checker;
+    use crate::backend::vm::VM;
+    use crate::middle::compiler::compile_program;
+    use crate::backend::codegen::codegen_program;
+    use crate::value::Value;
+
+    fn run_inline(src: &str) -> Value {
+        let prog = Parser::parse_str(src, "test.fav").expect("parse");
+        let (errors, _) = Checker::check_program(&prog);
+        assert!(errors.is_empty(), "type errors: {:?}", errors.iter().map(|e| &e.message).collect::<Vec<_>>());
+        let ir = compile_program(&prog);
+        let artifact = codegen_program(&ir);
+        let fn_idx = artifact.fn_idx_by_name("main").expect("main function not found");
+        VM::run(&artifact, fn_idx, vec![]).expect("run")
+    }
+
+    #[test]
+    fn cache_set_get_test() {
+        let src = r#"
+public fn main() -> String !Cache {
+    bind _ <- Cache.set_raw("test_key_sg", "hello_cache", 0)
+    match Cache.get_raw("test_key_sg") {
+        None    => "missing"
+        Some(v) => v
+    }
+}
+"#;
+        assert_eq!(run_inline(src), Value::Str("hello_cache".to_string()));
+    }
+
+    #[test]
+    fn cache_del_test() {
+        let src = r#"
+public fn main() -> Bool !Cache {
+    bind _ <- Cache.set_raw("test_key_del", "value", 0)
+    bind _ <- Cache.del_raw("test_key_del")
+    Cache.exists_raw("test_key_del")
+}
+"#;
+        assert_eq!(run_inline(src), Value::Bool(false));
+    }
+
+    #[test]
+    fn cache_get_or_test() {
+        let src = r#"
+public fn main() -> String !Cache {
+    match Cache.get_raw("nonexistent_xyz") {
+        None    => "default_val"
+        Some(v) => v
+    }
+}
+"#;
+        assert_eq!(run_inline(src), Value::Str("default_val".to_string()));
+    }
+}

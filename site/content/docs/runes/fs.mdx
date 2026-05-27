@@ -1,0 +1,138 @@
+---
+title: "fs Rune"
+order: 10
+category: "Rune"
+description: "ファイルシステム操作 — 読み書き・ディレクトリ一覧・glob・再帰 walk"
+---
+
+# fs Rune
+
+エフェクト: `!IO`
+
+`fs` Rune はファイルシステム操作を型安全にラップします。`IO.read_file_raw` など
+既存の VM primitive の上に、glob・walk・stat といった高レベル操作を Favnir 層で実装しています。
+
+## インストール
+
+```
+fav rune add fs
+```
+
+## 基本的な使い方
+
+```favnir
+use fs
+
+stage ReadCsvFiles: String -> List<String> !IO = |dir| {
+    match Fs.glob(dir, ".csv") {
+        Err(_)    => List.empty()
+        Ok(paths) => paths
+    }
+}
+```
+
+## API リファレンス
+
+### `Fs.read`
+
+```favnir
+public fn read(path: String) -> Result<String, String> !IO
+```
+
+ファイルを文字列として読み込みます。
+
+```favnir
+match Fs.read("data/config.json") {
+    Err(e)       => IO.println(e)
+    Ok(content)  => IO.println(content)
+}
+```
+
+### `Fs.write`
+
+```favnir
+public fn write(path: String, content: String) -> Result<Unit, String> !IO
+```
+
+ファイルに文字列を書き込みます（上書き）。
+
+```favnir
+bind _ <- Fs.write("output/result.csv", csv_content)
+```
+
+### `Fs.list_dir`
+
+```favnir
+public fn list_dir(path: String) -> Result<List<String>, String> !IO
+```
+
+ディレクトリのエントリ名一覧を返します（ソート済み、パス含まず）。
+
+```favnir
+match Fs.list_dir("data/") {
+    Err(e)    => List.empty()
+    Ok(names) => names
+}
+```
+
+### `Fs.exists`
+
+```favnir
+public fn exists(path: String) -> Bool !IO
+```
+
+ファイルまたはディレクトリが存在すれば `true`。
+
+### `Fs.is_dir`
+
+```favnir
+public fn is_dir(path: String) -> Bool !IO
+```
+
+パスが存在しディレクトリであれば `true`。
+
+### `Fs.size`
+
+```favnir
+public fn size(path: String) -> Option<Int> !IO
+```
+
+ファイルサイズをバイト単位で返します。パスが存在しない場合は `None`。
+
+### `Fs.glob`
+
+```favnir
+public fn glob(dir: String, suffix: String) -> Result<List<String>, String> !IO
+```
+
+`dir` 内のファイルのうち `suffix` で終わるものをフルパスで返します。
+フル glob パターンではなく、拡張子マッチによる簡易実装です。
+
+```favnir
+// data/*.csv を列挙
+match Fs.glob("data/", ".csv") {
+    Err(e)    => List.empty()
+    Ok(paths) => paths   // ["data/orders.csv", "data/users.csv", ...]
+}
+```
+
+### `Fs.walk`
+
+```favnir
+public fn walk(dir: String) -> Result<List<String>, String> !IO
+```
+
+ディレクトリを再帰的にたどり、すべてのファイルパスを返します。
+
+```favnir
+match Fs.walk("pipeline/") {
+    Err(e)    => List.empty()
+    Ok(paths) => List.filter(paths, |p| String.ends_with(p, ".fav"))
+}
+```
+
+## エフェクト一覧
+
+| 関数 | エフェクト |
+|------|-----------|
+| `read` / `write` / `list_dir` / `exists` / `is_dir` / `size` / `glob` / `walk` | `!IO` |

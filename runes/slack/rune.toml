@@ -1,0 +1,4 @@
+[rune]
+name        = "slack"
+version     = "0.1.0"
+description = "Slack Webhook notifications and Block Kit message builder"

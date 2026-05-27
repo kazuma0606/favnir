@@ -586,6 +586,12 @@ thread_local! {
         RefCell::new(std::collections::HashMap::new());
 }
 
+// ── In-process cache store (v7.3.0) ─────────────────────────────────────────
+thread_local! {
+    static CACHE_STORE: RefCell<std::collections::HashMap<String, String>> =
+        RefCell::new(std::collections::HashMap::new());
+}
+
 /// Set the log config (called from cmd_run).
 pub fn set_log_config(cfg: LogConfig) {
     LOG_CONFIG.with(|c| *c.borrow_mut() = cfg);
@@ -6016,6 +6022,59 @@ fn vm_call_builtin(
             };
             Ok(VMValue::Bool(std::path::Path::new(&path).is_file()))
         }
+        "IO.list_dir_raw" => {
+            let v = args
+                .into_iter()
+                .next()
+                .ok_or_else(|| "IO.list_dir_raw requires 1 argument".to_string())?;
+            let path = match v {
+                VMValue::Str(s) => s,
+                _ => return Err("IO.list_dir_raw requires a String path".to_string()),
+            };
+            match std::fs::read_dir(&path) {
+                Ok(entries) => {
+                    let mut names: Vec<VMValue> = Vec::new();
+                    for entry in entries.flatten() {
+                        if let Some(name) = entry.file_name().to_str() {
+                            names.push(VMValue::Str(name.to_string()));
+                        }
+                    }
+                    names.sort_by(|a, b| {
+                        let sa = if let VMValue::Str(s) = a { s.as_str() } else { "" };
+                        let sb = if let VMValue::Str(s) = b { s.as_str() } else { "" };
+                        sa.cmp(sb)
+                    });
+                    Ok(ok_vm(VMValue::List(FavList::new(names))))
+                }
+                Err(e) => Ok(err_vm(VMValue::Str(format!("IO.list_dir_raw: {}", e)))),
+            }
+        }
+        "IO.file_stat_raw" => {
+            let v = args
+                .into_iter()
+                .next()
+                .ok_or_else(|| "IO.file_stat_raw requires 1 argument".to_string())?;
+            let path = match v {
+                VMValue::Str(s) => s,
+                _ => return Err("IO.file_stat_raw requires a String path".to_string()),
+            };
+            let p = std::path::Path::new(&path);
+            let mut map = std::collections::HashMap::new();
+            let exists = p.exists();
+            map.insert("exists".to_string(), VMValue::Str(if exists { "true" } else { "false" }.to_string()));
+            if exists {
+                let is_dir = p.is_dir();
+                map.insert("is_dir".to_string(), VMValue::Str(if is_dir { "true" } else { "false" }.to_string()));
+                let size_str = std::fs::metadata(p)
+                    .map(|m| m.len().to_string())
+                    .unwrap_or_else(|_| "0".to_string());
+                map.insert("size".to_string(), VMValue::Str(size_str));
+            } else {
+                map.insert("is_dir".to_string(), VMValue::Str("false".to_string()));
+                map.insert("size".to_string(), VMValue::Str("0".to_string()));
+            }
+            Ok(VMValue::Record(map))
+        }
         "IO.argv" => {
             let argv: Vec<VMValue> = TEST_ARGV.with(|t| {
                 if let Some(ref args) = *t.borrow() {
@@ -11217,6 +11276,132 @@ fn vm_call_builtin(
                     Err(e) => err_vm(VMValue::Str(e)),
                 },
             )
+        }
+
+        // ── Cache primitives (v7.3.0) ─────────────────────────────────────
+        "Cache.get_raw" => {
+            let key = match args.into_iter().next() {
+                Some(VMValue::Str(s)) => s,
+                _ => return Err("Cache.get_raw requires a String key".to_string()),
+            };
+            let val = CACHE_STORE.with(|c| c.borrow().get(&key).cloned());
+            Ok(match val {
+                Some(v) => VMValue::Variant("some".to_string(), Some(Box::new(VMValue::Str(v)))),
+                None => VMValue::Variant("none".to_string(), None),
+            })
+        }
+        "Cache.set_raw" => {
+            let mut it = args.into_iter();
+            let key = match it.next() {
+                Some(VMValue::Str(s)) => s,
+                _ => return Err("Cache.set_raw: key must be a String".to_string()),
+            };
+            let value = match it.next() {
+                Some(VMValue::Str(s)) => s,
+                _ => return Err("Cache.set_raw: value must be a String".to_string()),
+            };
+            // ttl_secs is accepted but not enforced (in-process store)
+            CACHE_STORE.with(|c| c.borrow_mut().insert(key, value));
+            Ok(VMValue::Unit)
+        }
+        "Cache.del_raw" => {
+            let key = match args.into_iter().next() {
+                Some(VMValue::Str(s)) => s,
+                _ => return Err("Cache.del_raw requires a String key".to_string()),
+            };
+            CACHE_STORE.with(|c| c.borrow_mut().remove(&key));
+            Ok(VMValue::Unit)
+        }
+        "Cache.exists_raw" => {
+            let key = match args.into_iter().next() {
+                Some(VMValue::Str(s)) => s,
+                _ => return Err("Cache.exists_raw requires a String key".to_string()),
+            };
+            let exists = CACHE_STORE.with(|c| c.borrow().contains_key(&key));
+            Ok(VMValue::Bool(exists))
+        }
+        "Cache.del_prefix_raw" => {
+            let prefix = match args.into_iter().next() {
+                Some(VMValue::Str(s)) => s,
+                _ => return Err("Cache.del_prefix_raw requires a String prefix".to_string()),
+            };
+            let count = CACHE_STORE.with(|c| {
+                let mut store = c.borrow_mut();
+                let keys: Vec<String> = store.keys()
+                    .filter(|k| k.starts_with(&prefix))
+                    .cloned()
+                    .collect();
+                let n = keys.len();
+                for k in keys { store.remove(&k); }
+                n
+            });
+            Ok(VMValue::Int(count as i64))
+        }
+
+        // ── Queue primitives (v7.3.0) — thin SQS wrappers ─────────────────
+        "Queue.send_raw" => {
+            let mut it = args.into_iter();
+            let queue_url = vm_string(
+                it.next().ok_or("Queue.send_raw: missing queue_url")?,
+                "Queue.send_raw",
+            )?;
+            let body = vm_string(
+                it.next().ok_or("Queue.send_raw: missing body")?,
+                "Queue.send_raw",
+            )?;
+            let config = get_aws_config();
+            let form = format!(
+                "Action=SendMessage&MessageBody={}&Version=2012-11-05",
+                url_encode(&body)
+            );
+            Ok(match aws_post(&config, "sqs", &queue_url, &form, "application/x-www-form-urlencoded", None) {
+                Ok(_) => ok_vm(VMValue::Unit),
+                Err(e) => err_vm(VMValue::Str(e)),
+            })
+        }
+        "Queue.recv_raw" => {
+            let mut it = args.into_iter();
+            let queue_url = vm_string(
+                it.next().ok_or("Queue.recv_raw: missing queue_url")?,
+                "Queue.recv_raw",
+            )?;
+            let max = match it.next() {
+                Some(VMValue::Int(n)) => n,
+                _ => 1,
+            };
+            let config = get_aws_config();
+            let form = format!(
+                "Action=ReceiveMessage&MaxNumberOfMessages={}&AttributeName=All&Version=2012-11-05",
+                max
+            );
+            Ok(match aws_post(&config, "sqs", &queue_url, &form, "application/x-www-form-urlencoded", None) {
+                Ok(xml) => {
+                    let bodies = extract_xml_tags(&xml, "Body");
+                    let items: Vec<VMValue> = bodies.into_iter().map(VMValue::Str).collect();
+                    ok_vm(VMValue::List(FavList::new(items)))
+                }
+                Err(e) => err_vm(VMValue::Str(e)),
+            })
+        }
+        "Queue.ack_raw" | "Queue.delete_raw" => {
+            let mut it = args.into_iter();
+            let queue_url = vm_string(
+                it.next().ok_or("Queue.ack_raw: missing queue_url")?,
+                "Queue.ack_raw",
+            )?;
+            let receipt = vm_string(
+                it.next().ok_or("Queue.ack_raw: missing receipt_handle")?,
+                "Queue.ack_raw",
+            )?;
+            let config = get_aws_config();
+            let form = format!(
+                "Action=DeleteMessage&ReceiptHandle={}&Version=2012-11-05",
+                url_encode(&receipt)
+            );
+            Ok(match aws_post(&config, "sqs", &queue_url, &form, "application/x-www-form-urlencoded", None) {
+                Ok(_) => ok_vm(VMValue::Unit),
+                Err(e) => err_vm(VMValue::Str(e)),
+            })
         }
 
         other => Err(format!("unknown builtin: {}", other)),

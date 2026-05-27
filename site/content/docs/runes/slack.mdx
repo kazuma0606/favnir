@@ -1,0 +1,120 @@
+---
+title: "slack Rune"
+order: 11
+category: "Rune"
+description: "Slack Webhook 通知と Block Kit メッセージビルダー"
+---
+
+# slack Rune
+
+エフェクト: `!Network`
+
+`slack` Rune は Slack Incoming Webhook への通知を型安全に扱います。
+`Http.post_raw` の上に、シンプルなテキスト通知と Block Kit メッセージビルダーを提供します。
+
+## インストール
+
+```
+fav rune add slack
+```
+
+## Webhook URL の設定
+
+Slack App の管理画面で Incoming Webhooks を有効にして URL を取得します。
+`!Network` エフェクトが付いた stage や関数から呼び出します。
+
+## 基本的な使い方
+
+```favnir
+use slack
+
+stage NotifyDeploy: String -> Unit !Network = |webhook_url| {
+    match Slack.notify(webhook_url, "Deploy succeeded!") {
+        Err(e) => IO.println(e)
+        Ok(_)  => ()
+    }
+}
+```
+
+## API リファレンス
+
+### `Slack.notify`
+
+```favnir
+public fn notify(webhook_url: String, text: String) -> Result<Unit, String> !Network
+```
+
+シンプルなテキストメッセージを送信します。
+
+```favnir
+bind _ <- Slack.notify(webhook_url, "Pipeline completed: 1,234 rows processed")
+```
+
+### `Slack.post_blocks`
+
+```favnir
+public fn post_blocks(webhook_url: String, blocks: String) -> Result<Unit, String> !Network
+```
+
+Block Kit の JSON ペイロードを送信します。`Slack.build_message` で生成した文字列を渡します。
+
+### Block Kit ビルダー（純粋）
+
+#### `Slack.build_section`
+
+```favnir
+public fn build_section(text: String) -> String
+```
+
+mrkdwn テキストの section ブロックを JSON 文字列として返します。
+
+#### `Slack.build_header`
+
+```favnir
+public fn build_header(text: String) -> String
+```
+
+plain_text の header ブロックを JSON 文字列として返します。
+
+#### `Slack.build_divider`
+
+```favnir
+public fn build_divider() -> String
+```
+
+divider ブロックを JSON 文字列として返します。
+
+#### `Slack.build_message`
+
+```favnir
+public fn build_message(blocks: List<String>) -> String
+```
+
+ブロックリストを Slack Webhook ペイロード `{"blocks": [...]}` にラップします。
+
+## 使用例 — Block Kit メッセージ
+
+```favnir
+use slack
+
+stage SendReport: String -> Unit !Network = |webhook_url| {
+    bind header  <- Slack.build_header("Daily Pipeline Report")
+    bind section <- Slack.build_section("*Rows processed*: 12,345\n*Errors*: 0")
+    bind divider <- Slack.build_divider()
+    bind blocks  <- List.concat(
+        List.concat(List.singleton(header), List.singleton(divider)),
+        List.singleton(section))
+    bind msg     <- Slack.build_message(blocks)
+    match Slack.post_blocks(webhook_url, msg) {
+        Err(e) => IO.println(e)
+        Ok(_)  => ()
+    }
+}
+```
+
+## エフェクト一覧
+
+| 関数 | エフェクト |
+|------|-----------|
+| `notify` / `post_blocks` | `!Network` |
+| `build_section` / `build_header` / `build_divider` / `build_message` | なし（純粋） |

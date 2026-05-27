@@ -63,8 +63,9 @@ use driver::{
     cmd_checkpoint_list, cmd_checkpoint_reset, cmd_checkpoint_set, cmd_checkpoint_show,
     cmd_db_migrate, cmd_db_migrate_rollback, cmd_db_migrate_status, cmd_deploy, cmd_docs, cmd_exec,
     cmd_explain, cmd_explain_compiler, cmd_explain_diff, cmd_explain_error, cmd_explain_error_list,
-    cmd_explain_error_list_json, cmd_fmt, cmd_graph, cmd_infer, cmd_infer_proto, cmd_install,
-    cmd_lint, cmd_migrate, cmd_new, cmd_publish, cmd_registry, cmd_run, cmd_test, cmd_watch,
+    cmd_explain_error_list_json, cmd_explain_lineage, cmd_fmt, cmd_graph, cmd_infer, cmd_infer_proto,
+    cmd_install, cmd_lint, cmd_migrate, cmd_new, cmd_publish, cmd_registry, cmd_run, cmd_test,
+    cmd_watch,
 };
 use rune_cmd::cmd_rune;
 use std::process;
@@ -101,6 +102,9 @@ COMMANDS:
                   With --schema, print SQL CREATE TABLE / CHECK output instead.
                   With --format json, emit structured explain JSON.
                   If <file> is omitted, explains all files in the project.
+    explain --lineage [--format <text|json>] [file]
+                  Static lineage analysis: show Sources / Sinks / Transformations / Pipelines.
+                  Extracts DB table names from SQL string literals and !DbRead/!DbWrite effects.
     docs [file] [--port <n>] [--no-open]
                   Start a local docs server backed by explain JSON and stdlib metadata.
                   If <file> is omitted, serves stdlib-only docs.
@@ -419,6 +423,32 @@ fn main_impl() {
         Some("explain") => {
             if args.get(2).map(|s| s.as_str()) == Some("compiler") {
                 cmd_explain_compiler();
+                return;
+            }
+            if args.iter().any(|a| a == "--lineage") {
+                let mut format = String::from("text");
+                let mut file: Option<&str> = None;
+                let mut i = 2usize;
+                while i < args.len() {
+                    match args[i].as_str() {
+                        "--lineage" => { i += 1; }
+                        "--format" => {
+                            format = args
+                                .get(i + 1)
+                                .unwrap_or_else(|| {
+                                    eprintln!("error: --format requires a value");
+                                    process::exit(1);
+                                })
+                                .clone();
+                            i += 2;
+                        }
+                        other => {
+                            file = Some(other);
+                            i += 1;
+                        }
+                    }
+                }
+                cmd_explain_lineage(file, &format);
                 return;
             }
             if args.get(2).map(|s| s.as_str()) == Some("diff") {

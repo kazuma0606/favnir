@@ -181,3 +181,80 @@ VIS  NAME          TYPE                     EFFECTS      DEPS
 
 `seq` の構造がそのまま設計図として出力されます。
 エフェクト列を見ることで「どのステージで I/O・DB が発生するか」が一目でわかります。
+
+## fav explain --lineage — データ系譜の静的解析
+
+`--lineage` フラグを付けると、エフェクトと SQL 文字列リテラルを静的解析して
+**Sources / Sinks / Transformations / Pipelines** の4セクションを出力します。
+
+```bash
+fav explain --lineage src/pipeline.fav
+fav explain --lineage --format json src/pipeline.fav
+```
+
+### 出力例
+
+以下のような `pipeline.fav` があるとします。
+
+```favnir
+stage ReadOrders: String -> List<Order> !DbRead = |sql| {
+  DB.query(sql, List.empty())
+}
+
+stage WriteShipments: List<Order> -> Int !DbWrite = |orders| {
+  DB.execute("INSERT INTO shipments (order_id) SELECT id FROM orders", List.empty())
+}
+
+seq OrderPipeline = ReadOrders |> WriteShipments
+```
+
+実行結果：
+
+```
+Lineage: src/pipeline.fav
+
+Sources:
+  - ORDERS
+
+Sinks:
+  - SHIPMENTS
+
+Transformations:
+  stage ReadOrders  [!DbRead]   sources=[ORDERS]      sinks=[]
+  stage WriteShipments [!DbWrite]  sources=[]          sinks=[SHIPMENTS]
+
+Pipelines:
+  seq OrderPipeline = ReadOrders |> WriteShipments
+    sources: ORDERS
+    sinks:   SHIPMENTS
+```
+
+### テーブル名の抽出ルール
+
+| SQL パターン | 分類 |
+|---|---|
+| `FROM <table>` / `JOIN <table>` | Sources (読み取り) |
+| `INSERT INTO <table>` | Sinks (書き込み) |
+| `UPDATE <table>` | Sinks (書き込み) |
+| `DELETE FROM <table>` | Sinks (書き込み) |
+
+SQL リテラルが存在しない場合は、エフェクト（`!DbRead` / `!DbWrite` / `!Db`）から
+`(stage-name:db-read)` / `(stage-name:db-write)` というプレースホルダが自動生成されます。
+
+### JSON 出力
+
+`--format json` を指定すると、系譜データを機械可読な JSON で出力します。
+CI パイプラインや外部ツールとの連携に使えます。
+
+```json
+{
+  "transformations": [
+    { "name": "ReadOrders", "kind": "stage", "effects": ["!DbRead"],
+      "sources": ["ORDERS"], "sinks": [] }
+  ],
+  "pipelines": [
+    { "name": "OrderPipeline", "steps": ["ReadOrders", "WriteShipments"],
+      "sources": ["ORDERS"], "sinks": ["SHIPMENTS"] }
+  ]
+}
+```

@@ -34,6 +34,8 @@
 #![allow(clippy::useless_asref)]
 #![allow(clippy::useless_conversion)]
 #![allow(clippy::while_let_loop)]
+#![allow(clippy::explicit_counter_loop)]
+#![allow(clippy::fn_to_numeric_cast)]
 #![allow(clippy::write_literal)]
 
 mod ast;

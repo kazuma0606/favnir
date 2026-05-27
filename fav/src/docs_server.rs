@@ -806,7 +806,7 @@ unsafe fn install_ctrlc_handler_unix() {
     }
 
     const SIGINT: i32 = 2;
-    let _ = signal(SIGINT, handle_sigint as usize);
+    let _ = unsafe { signal(SIGINT, handle_sigint as usize) };
 }
 
 #[cfg(windows)]

@@ -37,6 +37,10 @@ jobs:
         working-directory: fav
         run: cargo build --locked
 
+      - name: Clippy
+        working-directory: fav
+        run: cargo clippy --locked -- -D warnings
+
       - name: Test
         working-directory: fav
         run: cargo test --locked

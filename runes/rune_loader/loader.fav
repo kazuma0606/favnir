@@ -1,0 +1,225 @@
+// runes/rune_loader/loader.fav — Rune path resolution (v7.5.0)
+//
+// Resolution order (matches Rust Resolver::resolve_rune_import_file):
+//   1. <project_root>/rune_modules/<name>/   — installed by `fav rune add`
+//   2. <project_root>/runes/<name>/          — project-local definitions
+//   3. ~/.fav/registry/<name>/<version>/     — local registry
+
+// ── Types ─────────────────────────────────────────────────────────────────────
+
+type ResolveResult =
+  | Found(String)
+  | NotFound
+  | Error(String)
+
+type SemVer = {
+    major: Int
+    minor: Int
+    patch: Int
+}
+
+
+// ── SemVer parsing ────────────────────────────────────────────────────────────
+
+fn parse_int_or_zero(s: String) -> Int {
+    match String.to_int(s) {
+        None    => 0
+        Some(n) => n
+    }
+}
+
+// Parse "X.Y.Z" → Some(SemVer) or None
+public fn parse_semver(v: String) -> Option<SemVer> {
+    bind parts <- String.split(v, ".")
+    bind len   <- List.length(parts)
+    if len == 0 {
+        Option.none()
+    } else {
+        bind major_s <- match List.first(parts)                          { None => "0" Some(s) => s }
+        bind minor_s <- match List.first(List.drop(parts, 1))           { None => "0" Some(s) => s }
+        bind patch_s <- match List.first(List.drop(parts, 2))           { None => "0" Some(s) => s }
+        Option.some(SemVer {
+            major: parse_int_or_zero(major_s)
+            minor: parse_int_or_zero(minor_s)
+            patch: parse_int_or_zero(patch_s)
+        })
+    }
+}
+
+fn semver_ge(a: SemVer, b: SemVer) -> Bool {
+    if a.major > b.major { true }
+    else {
+        if a.major == b.major {
+            if a.minor > b.minor { true }
+            else {
+                if a.minor == b.minor { a.patch >= b.patch }
+                else { false }
+            }
+        }
+        else { false }
+    }
+}
+
+fn semver_lt(a: SemVer, b: SemVer) -> Bool {
+    if a.major < b.major { true }
+    else {
+        if a.major == b.major {
+            if a.minor < b.minor { true }
+            else {
+                if a.minor == b.minor { a.patch < b.patch }
+                else { false }
+            }
+        }
+        else { false }
+    }
+}
+
+fn semver_eq(a: SemVer, b: SemVer) -> Bool {
+    a.major == b.major && a.minor == b.minor && a.patch == b.patch
+}
+
+// Check if version satisfies constraint.
+// Supports "^X.Y.Z" (>= X.Y.Z, < X+1.0.0) and exact "X.Y.Z".
+public fn matches_constraint(version: String, constraint: String) -> Bool {
+    if String.starts_with(constraint, "^") {
+        bind req_str <- String.slice(constraint, 1, String.length(constraint))
+        match parse_semver(version) {
+            None => false
+            Some(ver) => {
+                match parse_semver(req_str) {
+                    None => false
+                    Some(req) => {
+                        bind next_major <- SemVer { major: req.major + 1
+                                    minor: 0
+                                    patch: 0 }
+                        semver_ge(ver, req) && semver_lt(ver, next_major)
+                    }
+                }
+            }
+        }
+    } else {
+        match parse_semver(version) {
+            None => false
+            Some(ver) => {
+                match parse_semver(constraint) {
+                    None => false
+                    Some(req) => semver_eq(ver, req)
+                }
+            }
+        }
+    }
+}
+
+// ── Path helpers ──────────────────────────────────────────────────────────────
+
+fn pjoin(base: String, seg: String) -> String {
+    IO.path_join_raw(base, seg)
+}
+
+fn registry_base() -> Option<String> !IO {
+    match IO.home_dir_raw() {
+        None       => Option.none()
+        Some(home) => Option.some(pjoin(pjoin(home, ".fav"), "registry"))
+    }
+}
+
+// ── Entry file from rune.toml ─────────────────────────────────────────────────
+
+// Minimal: find the line `entry = "..."` in rune.toml content.
+fn extract_entry_from_toml(content: String, default_name: String) -> String {
+    bind lines <- String.lines(content)
+    bind entry_line <- List.find(lines, |l| String.starts_with(String.trim(l), "entry"))
+    match entry_line {
+        None => String.concat(default_name, ".fav")
+        Some(line) => {
+            match String.index_of(line, "=") {
+                None    => String.concat(default_name, ".fav")
+                Some(i) => {
+                    bind raw <- String.trim(String.slice(line, i + 1, String.length(line)))
+                    bind stripped <- String.slice(raw, 1, String.length(raw) - 1)
+                    stripped
+                }
+            }
+        }
+    }
+}
+
+fn read_entry(rune_dir: String, name: String) -> String !IO {
+    bind toml_path <- pjoin(rune_dir, "rune.toml")
+    if IO.file_exists_raw(toml_path) {
+        match IO.read_file_raw(toml_path) {
+            Err(_)      => String.concat(name, ".fav")
+            Ok(content) => extract_entry_from_toml(content, name)
+        }
+    } else {
+        String.concat(name, ".fav")
+    }
+}
+
+// ── Registry lookup ───────────────────────────────────────────────────────────
+
+// List installed versions of a rune in the registry (lexical order, best-effort).
+public fn installed_versions(name: String) -> List<String> !IO {
+    match registry_base() {
+        None      => List.empty()
+        Some(reg) => {
+            bind pkg_dir <- pjoin(reg, name)
+            if IO.is_dir_raw(pkg_dir) {
+                match IO.list_dir_raw(pkg_dir) {
+                    Err(_)  => List.empty()
+                    Ok(vs)  => List.filter(vs, |v| IO.is_dir_raw(pjoin(pkg_dir, v)))
+                }
+            } else {
+                List.empty()
+            }
+        }
+    }
+}
+
+// Find the best matching version for a semver constraint.
+public fn resolve_version(name: String, constraint: String) -> Option<String> !IO {
+    bind versions <- installed_versions(name)
+    List.find(versions, |v| matches_constraint(v, constraint))
+}
+
+fn resolve_from_registry(name: String) -> ResolveResult !IO {
+    match registry_base() {
+        None      => NotFound
+        Some(reg) => {
+            bind pkg_dir  <- pjoin(reg, name)
+            bind versions <- installed_versions(name)
+            match List.first(versions) {
+                None => NotFound
+                Some(ver) => {
+                    bind ver_dir  <- pjoin(pkg_dir, ver)
+                    bind entry    <- read_entry(ver_dir, name)
+                    bind fav_path <- pjoin(ver_dir, entry)
+                    if IO.file_exists_raw(fav_path) { Found(fav_path) }
+                    else { NotFound }
+                }
+            }
+        }
+    }
+}
+
+// ── Main resolution ───────────────────────────────────────────────────────────
+
+// Resolve a rune name to its entry .fav file path.
+// Searches: rune_modules/ → runes/ → ~/.fav/registry/
+public fn resolve(name: String, project_root: String) -> ResolveResult !IO {
+    bind rm_dir   <- pjoin(pjoin(project_root, "rune_modules"), name)
+    if IO.is_dir_raw(rm_dir) {
+        bind entry    <- read_entry(rm_dir, name)
+        bind fav_path <- pjoin(rm_dir, entry)
+        Found(fav_path)
+    } else {
+        bind runes_dir <- pjoin(pjoin(project_root, "runes"), name)
+        if IO.is_dir_raw(runes_dir) {
+            bind entry    <- read_entry(runes_dir, name)
+            bind fav_path <- pjoin(runes_dir, entry)
+            Found(fav_path)
+        } else {
+            resolve_from_registry(name)
+        }
+    }
+}

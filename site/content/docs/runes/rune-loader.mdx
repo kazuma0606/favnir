@@ -1,0 +1,105 @@
+---
+title: "Rune Loader"
+order: 16
+category: "Rune"
+description: "Rune パスの解決と semver バージョン管理"
+---
+
+# Rune Loader
+
+`runes/rune_loader/loader.fav` — Rune のエントリーファイルを解決するローダーです。
+
+Rust 製の `Resolver::resolve_rune_import_file` と同等のロジックを Favnir で実装しており、
+v7.6.0 の CLI セルフホスト化で使用されます。
+
+## 解決優先順位
+
+```
+1. <project_root>/rune_modules/<name>/   ← fav rune add でインストール
+2. <project_root>/runes/<name>/          ← プロジェクトローカル定義
+3. ~/.fav/registry/<name>/<version>/     ← ローカルレジストリ
+```
+
+## セットアップ
+
+```toml
+# rune.toml
+[[runes]]
+name = "rune_loader"
+path = "runes/rune_loader"
+```
+
+## 型
+
+```favnir
+type ResolveResult =
+  | Found(String)    // エントリーファイルの絶対パス
+  | NotFound         // どこにも見つからない
+  | Error(String)    // IO エラー
+
+type SemVer = {
+    major: Int
+    minor: Int
+    patch: Int
+}
+```
+
+## 関数一覧
+
+| 関数 | シグネチャ | 説明 |
+|------|-----------|------|
+| `RuneLoader.resolve` | `String, String -> ResolveResult !IO` | Rune 名とプロジェクトルートで解決 |
+| `RuneLoader.installed_versions` | `String -> List<String> !IO` | インストール済みバージョン一覧 |
+| `RuneLoader.resolve_version` | `String, String -> Option<String> !IO` | semver 制約を満たすバージョンを返す |
+| `RuneLoader.parse_semver` | `String -> Option<SemVer>` | "X.Y.Z" をパース |
+| `RuneLoader.matches_constraint` | `String, String -> Bool` | semver 制約チェック |
+
+## 使用例
+
+### Rune を解決する
+
+```favnir
+bind cwd <- IO.cwd_raw()
+match RuneLoader.resolve("csv", cwd) {
+    Found(path) => IO.println(String.concat("Found: ", path))
+    NotFound    => IO.println("Rune not found")
+    Error(msg)  => IO.println(String.concat("Error: ", msg))
+}
+```
+
+### インストール済みバージョンを確認
+
+```favnir
+bind versions <- RuneLoader.installed_versions("csv")
+bind count    <- List.length(versions)
+IO.println(String.concat("Installed versions: ", Int.to_string(count)))
+```
+
+### semver 制約チェック
+
+```favnir
+// ^1.0 → >= 1.0.0 && < 2.0.0
+bind ok <- RuneLoader.matches_constraint("1.2.3", "^1.0")  // true
+bind ng <- RuneLoader.matches_constraint("2.0.0", "^1.0")  // false
+
+// exact match
+bind exact <- RuneLoader.matches_constraint("1.2.3", "1.2.3")  // true
+```
+
+## semver 制約の書き方
+
+| 制約 | 意味 | 例 |
+|------|------|-----|
+| `^X.Y.Z` | `>= X.Y.Z && < X+1.0.0` | `^1.2.0` → 1.2.0 以上 2.0.0 未満 |
+| `X.Y.Z` | 完全一致 | `1.2.3` のみ |
+
+## エントリーファイルの決定
+
+各 Rune ディレクトリに `rune.toml` があれば `entry` フィールドを読み、
+なければ `<name>.fav` をデフォルトとして使用します。
+
+```toml
+[rune]
+name  = "csv"
+entry = "csv.fav"   # 省略可（デフォルトは "csv.fav"）
+```

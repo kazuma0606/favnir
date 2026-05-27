@@ -1,0 +1,170 @@
+// runes/toml/toml.fav — Mini TOML parser (v7.5.0)
+//
+// Supports a subset of TOML:
+//   [section]          — section headers
+//   key = "value"      — string values
+//   key = ["a", "b"]   — string arrays (stored comma-joined)
+//   # comment          — ignored
+//
+// TomlDoc is Map<String, String> with "section.key" composite keys.
+// Array values are stored as comma-separated strings (use get_arr to split).
+
+// ── Types ─────────────────────────────────────────────────────────────────────
+
+// Rune metadata extracted from rune.toml
+type RuneMeta = {
+    name:    String
+    version: String
+    entry:   String
+    effects: List<String>
+}
+
+// Internal parser state
+type ParseState = {
+    section: String
+    doc:     Map<String, String>
+}
+
+// ── String helpers ────────────────────────────────────────────────────────────
+
+fn strip_quotes(s: String) -> String {
+    bind t <- String.trim(s)
+    if String.starts_with(t, "\"") {
+        String.slice(t, 1, String.length(t) - 1)
+    } else {
+        t
+    }
+}
+
+fn classify_line(line: String) -> String {
+    bind t <- String.trim(line)
+    if String.length(t) == 0 { "empty" }
+    else {
+        if String.starts_with(t, "#") { "comment" }
+        else {
+            if String.starts_with(t, "[") { "section" }
+            else { "keyval" }
+        }
+    }
+}
+
+fn extract_section_name(line: String) -> String {
+    bind t     <- String.trim(line)
+    bind len   <- String.length(t)
+    bind inner <- String.slice(t, 1, len - 1)
+    String.trim(inner)
+}
+
+// Parse array inner content → comma-joined stripped values
+fn parse_array_inner(inner: String) -> String {
+    bind parts   <- String.split(inner, ",")
+    bind stripped <- List.map(parts, |p| strip_quotes(p))
+    String.join(stripped, ",")
+}
+
+// Parse a raw value string into a flat string:
+//   "foo"     → "foo"
+//   ["a","b"] → "a,b"
+fn parse_val_flat(raw: String) -> String {
+    bind t <- String.trim(raw)
+    if String.starts_with(t, "[") {
+        bind len   <- String.length(t)
+        bind inner <- String.slice(t, 1, len - 1)
+        parse_array_inner(inner)
+    } else {
+        strip_quotes(t)
+    }
+}
+
+// Build the composite key "section.key"
+fn doc_key(section: String, key: String) -> String {
+    String.concat(String.concat(section, "."), key)
+}
+
+// ── Line processor ────────────────────────────────────────────────────────────
+
+fn process_line_section(state: ParseState, line: String) -> ParseState {
+    bind sec_name <- extract_section_name(line)
+    ParseState { section: sec_name, doc: state.doc }
+}
+
+fn process_line_keyval(state: ParseState, line: String) -> ParseState {
+    match String.index_of(line, "=") {
+        None    => state
+        Some(i) => {
+            bind raw_key <- String.trim(String.slice(line, 0, i))
+            bind raw_val <- String.trim(String.slice(line, i + 1, String.length(line)))
+            if String.length(raw_key) == 0 { state }
+            else {
+                bind k   <- doc_key(state.section, raw_key)
+                bind val <- parse_val_flat(raw_val)
+                ParseState { section: state.section, doc: Map.set(state.doc, k, val) }
+            }
+        }
+    }
+}
+
+fn process_line(state: ParseState, line: String) -> ParseState {
+    match classify_line(line) {
+        "empty"   => state
+        "comment" => state
+        "section" => process_line_section(state, line)
+        "keyval"  => process_line_keyval(state, line)
+        _         => state
+    }
+}
+
+// ── Public API ────────────────────────────────────────────────────────────────
+
+// Parse a TOML source string into a TomlDoc (Map<String, String>).
+// Keys are "section.key". Array values are comma-joined.
+public fn parse(src: String) -> Result<Map<String, String>, String> {
+    bind lines <- String.lines(src)
+    bind init  <- ParseState { section: "", doc: Map.empty() }
+    bind state <- List.fold(lines, init, |acc, line| process_line(acc, line))
+    Result.ok(state.doc)
+}
+
+// Get a scalar string value. Returns None if missing.
+public fn get_str(doc: Map<String, String>, section: String, key: String) -> Option<String> {
+    Map.get(doc, doc_key(section, key))
+}
+
+// Get an array value split by comma. Returns empty list if not found.
+public fn get_arr(doc: Map<String, String>, section: String, key: String) -> List<String> {
+    match Map.get(doc, doc_key(section, key)) {
+        None    => List.empty()
+        Some(v) => {
+            if String.length(v) == 0 { List.empty() }
+            else { String.split(v, ",") }
+        }
+    }
+}
+
+// ── rune.toml reader ──────────────────────────────────────────────────────────
+
+fn rune_meta_entry(n: String, doc: Map<String, String>) -> String {
+    match get_str(doc, "rune", "entry") {
+        None    => String.concat(n, ".fav")
+        Some(e) => e
+    }
+}
+
+// Read rune.toml at path and return parsed RuneMeta.
+public fn read_rune_meta(path: String) -> Result<RuneMeta, String> !IO {
+    match IO.read_file_raw(path) {
+        Err(e)      => Result.err(e)
+        Ok(content) => {
+            match parse(content) {
+                Err(e)  => Result.err(e)
+                Ok(doc) => {
+                    bind n <- match get_str(doc, "rune", "name")    { None => "unknown" Some(v) => v }
+                    bind v <- match get_str(doc, "rune", "version") { None => "0.0.0"   Some(v) => v }
+                    bind effects <- get_arr(doc, "rune", "effects")
+                    bind entry   <- rune_meta_entry(n, doc)
+                    Result.ok(RuneMeta { name: n, version: v, entry: entry, effects: effects })
+                }
+            }
+        }
+    }
+}

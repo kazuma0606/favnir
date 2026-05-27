@@ -1,0 +1,4 @@
+[rune]
+name        = "rune_loader"
+version     = "0.1.0"
+description = "Rune path resolution: rune_modules/ → runes/ → ~/.fav/registry/"

@@ -1,0 +1,4 @@
+[rune]
+name        = "toml"
+version     = "0.1.0"
+description = "Mini TOML parser for rune.toml files (key=value / [section] / arrays)"

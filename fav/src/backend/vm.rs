@@ -6075,6 +6075,39 @@ fn vm_call_builtin(
             }
             Ok(VMValue::Record(map))
         }
+        "IO.path_join_raw" => {
+            let mut it = args.into_iter();
+            let base = vm_string(it.next().ok_or("IO.path_join_raw: missing base")?, "IO.path_join_raw")?;
+            let seg  = vm_string(it.next().ok_or("IO.path_join_raw: missing segment")?, "IO.path_join_raw")?;
+            let joined = std::path::Path::new(&base)
+                .join(&seg)
+                .to_string_lossy()
+                .to_string();
+            Ok(VMValue::Str(joined))
+        }
+        "IO.home_dir_raw" => {
+            let home = std::env::var("HOME")
+                .or_else(|_| std::env::var("USERPROFILE"))
+                .ok();
+            Ok(match home {
+                Some(p) => VMValue::Variant("some".into(), Some(Box::new(VMValue::Str(p)))),
+                None    => VMValue::Variant("none".into(), None),
+            })
+        }
+        "IO.cwd_raw" => {
+            let cwd = std::env::current_dir()
+                .map(|p| p.to_string_lossy().to_string())
+                .unwrap_or_else(|_| ".".to_string());
+            Ok(VMValue::Str(cwd))
+        }
+        "IO.is_dir_raw" => {
+            let v = args
+                .into_iter()
+                .next()
+                .ok_or_else(|| "IO.is_dir_raw requires 1 argument".to_string())?;
+            let path = vm_string(v, "IO.is_dir_raw")?;
+            Ok(VMValue::Bool(std::path::Path::new(&path).is_dir()))
+        }
         "IO.argv" => {
             let argv: Vec<VMValue> = TEST_ARGV.with(|t| {
                 if let Some(ref args) = *t.borrow() {
@@ -6561,6 +6594,23 @@ fn vm_call_builtin(
                         .collect(),
                 ))),
                 _ => Err("String.words requires a String argument".to_string()),
+            }
+        }
+        "String.compare" => {
+            let mut it = args.into_iter();
+            let a = it
+                .next()
+                .ok_or_else(|| "String.compare requires 2 arguments".to_string())?;
+            let b = it
+                .next()
+                .ok_or_else(|| "String.compare requires 2 arguments".to_string())?;
+            match (a, b) {
+                (VMValue::Str(a), VMValue::Str(b)) => Ok(VMValue::Int(match a.cmp(&b) {
+                    std::cmp::Ordering::Less => -1,
+                    std::cmp::Ordering::Equal => 0,
+                    std::cmp::Ordering::Greater => 1,
+                })),
+                _ => Err("String.compare requires 2 String arguments".to_string()),
             }
         }
         "String.starts_with" => {
@@ -7160,6 +7210,9 @@ fn vm_call_builtin(
                 }
                 _ => Err("List.max requires a List argument".to_string()),
             }
+        }
+        "Map.empty" => {
+            Ok(VMValue::Record(std::collections::HashMap::new()))
         }
         "Map.set" => {
             let mut it = args.into_iter();
@@ -11276,6 +11329,44 @@ fn vm_call_builtin(
                     Err(e) => err_vm(VMValue::Str(e)),
                 },
             )
+        }
+
+        // ── Email primitives (v7.4.0) — SES thin wrapper ──────────────────
+        "Email.send_raw" => {
+            let mut it = args.into_iter();
+            let from = vm_string(
+                it.next().ok_or("Email.send_raw: missing from")?,
+                "Email.send_raw",
+            )?;
+            let to = vm_string(
+                it.next().ok_or("Email.send_raw: missing to")?,
+                "Email.send_raw",
+            )?;
+            let subject = vm_string(
+                it.next().ok_or("Email.send_raw: missing subject")?,
+                "Email.send_raw",
+            )?;
+            let body = vm_string(
+                it.next().ok_or("Email.send_raw: missing body")?,
+                "Email.send_raw",
+            )?;
+            let config = get_aws_config();
+            let base = if let Some(ep) = &config.endpoint_url {
+                ep.trim_end_matches('/').to_string()
+            } else {
+                format!("https://email.{}.amazonaws.com/", config.region)
+            };
+            let form = format!(
+                "Action=SendEmail&Source={}&Destination.ToAddresses.member.1={}&Message.Subject.Data={}&Message.Body.Text.Data={}&Version=2010-12-01",
+                url_encode(&from),
+                url_encode(&to),
+                url_encode(&subject),
+                url_encode(&body),
+            );
+            Ok(match aws_post(&config, "ses", &base, &form, "application/x-www-form-urlencoded", None) {
+                Ok(_) => ok_vm(VMValue::Unit),
+                Err(e) => err_vm(VMValue::Str(e)),
+            })
         }
 
         // ── Cache primitives (v7.3.0) ─────────────────────────────────────

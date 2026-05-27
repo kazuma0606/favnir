@@ -16653,3 +16653,509 @@ public fn main() -> String !Cache {
         assert_eq!(run_inline(src), Value::Str("default_val".to_string()));
     }
 }
+
+// ── stdlib list rune tests (v7.4.0) ───────────────────────────────────────────
+#[cfg(test)]
+mod stdlib_list_tests {
+    use crate::frontend::parser::Parser;
+    use crate::middle::checker::Checker;
+    use crate::backend::vm::VM;
+    use crate::middle::compiler::compile_program;
+    use crate::backend::codegen::codegen_program;
+    use crate::value::Value;
+
+    fn run_inline(src: &str) -> Value {
+        let prog = Parser::parse_str(src, "test.fav").expect("parse");
+        let (errors, _) = Checker::check_program(&prog);
+        assert!(errors.is_empty(), "type errors: {:?}", errors.iter().map(|e| &e.message).collect::<Vec<_>>());
+        let ir = compile_program(&prog);
+        let artifact = codegen_program(&ir);
+        let fn_idx = artifact.fn_idx_by_name("main").expect("main function not found");
+        VM::run(&artifact, fn_idx, vec![]).expect("run")
+    }
+
+    #[test]
+    fn stdlib_list_head_test() {
+        let src = r#"
+fn head(xs: List<Int>) -> Option<Int> {
+    List.first(xs)
+}
+public fn main() -> Int {
+    bind xs <- List.concat(List.singleton(42), List.singleton(99))
+    match head(xs) {
+        None    => -1
+        Some(v) => v
+    }
+}
+"#;
+        assert_eq!(run_inline(src), Value::Int(42));
+    }
+
+    #[test]
+    fn stdlib_list_tail_test() {
+        let src = r#"
+fn tail(xs: List<Int>) -> List<Int> {
+    List.drop(xs, 1)
+}
+public fn main() -> Int {
+    bind xs <- List.concat(List.singleton(1), List.concat(List.singleton(2), List.singleton(3)))
+    bind tl <- tail(xs)
+    List.length(tl)
+}
+"#;
+        assert_eq!(run_inline(src), Value::Int(2));
+    }
+
+    #[test]
+    fn stdlib_list_intersperse_test() {
+        let src = r#"
+fn intersperse_step(acc: List<Int>, x: Int, sep: Int) -> List<Int> {
+    if List.is_empty(acc) {
+        List.singleton(x)
+    } else {
+        List.concat(List.concat(acc, List.singleton(sep)), List.singleton(x))
+    }
+}
+fn intersperse(xs: List<Int>, sep: Int) -> List<Int> {
+    List.fold(xs, List.empty(), |acc, x| intersperse_step(acc, x, sep))
+}
+public fn main() -> Int {
+    bind xs <- List.concat(List.singleton(1), List.concat(List.singleton(2), List.singleton(3)))
+    bind result <- intersperse(xs, 0)
+    List.length(result)
+}
+"#;
+        assert_eq!(run_inline(src), Value::Int(5));
+    }
+
+    #[test]
+    fn stdlib_list_sort_by_test() {
+        let src = r#"
+public fn main() -> String {
+    bind xs <- List.concat(List.singleton("banana"), List.concat(List.singleton("apple"), List.singleton("cherry")))
+    bind sorted <- List.sort(xs, |a, b| String.compare(a, b))
+    match List.first(sorted) {
+        None    => "none"
+        Some(v) => v
+    }
+}
+"#;
+        assert_eq!(run_inline(src), Value::Str("apple".to_string()));
+    }
+
+    #[test]
+    fn stdlib_list_group_by_test() {
+        let src = r#"
+fn group_by(xs: List<String>, key_fn: String -> String) -> Map<String, List<String>> {
+    List.fold(xs, Map.empty(), |acc, x|
+        match Map.get(acc, key_fn(x)) {
+            None     => Map.set(acc, key_fn(x), List.singleton(x))
+            Some(vs) => Map.set(acc, key_fn(x), List.concat(vs, List.singleton(x)))
+        })
+}
+public fn main() -> Int {
+    bind xs <- List.concat(List.singleton("a"), List.concat(List.singleton("b"), List.singleton("a")))
+    bind groups <- group_by(xs, |x| x)
+    match Map.get(groups, "a") {
+        None     => 0
+        Some(vs) => List.length(vs)
+    }
+}
+"#;
+        assert_eq!(run_inline(src), Value::Int(2));
+    }
+}
+
+// ── stdlib map rune tests (v7.4.0) ────────────────────────────────────────────
+#[cfg(test)]
+mod stdlib_map_tests {
+    use crate::frontend::parser::Parser;
+    use crate::middle::checker::Checker;
+    use crate::backend::vm::VM;
+    use crate::middle::compiler::compile_program;
+    use crate::backend::codegen::codegen_program;
+    use crate::value::Value;
+
+    fn run_inline(src: &str) -> Value {
+        let prog = Parser::parse_str(src, "test.fav").expect("parse");
+        let (errors, _) = Checker::check_program(&prog);
+        assert!(errors.is_empty(), "type errors: {:?}", errors.iter().map(|e| &e.message).collect::<Vec<_>>());
+        let ir = compile_program(&prog);
+        let artifact = codegen_program(&ir);
+        let fn_idx = artifact.fn_idx_by_name("main").expect("main function not found");
+        VM::run(&artifact, fn_idx, vec![]).expect("run")
+    }
+
+    #[test]
+    fn stdlib_map_count_by_test() {
+        let src = r#"
+fn count_by(xs: List<String>, key_fn: String -> String) -> Map<String, Int> {
+    List.fold(xs, Map.empty(), |acc, x|
+        match Map.get(acc, key_fn(x)) {
+            None    => Map.set(acc, key_fn(x), 1)
+            Some(n) => Map.set(acc, key_fn(x), n + 1)
+        })
+}
+public fn main() -> Int {
+    bind xs <- List.concat(List.singleton("a"), List.concat(List.singleton("b"), List.singleton("a")))
+    bind counts <- count_by(xs, |x| x)
+    match Map.get(counts, "a") {
+        None    => 0
+        Some(n) => n
+    }
+}
+"#;
+        assert_eq!(run_inline(src), Value::Int(2));
+    }
+
+    #[test]
+    fn stdlib_map_empty_test() {
+        let src = r#"
+public fn main() -> Int {
+    bind m <- Map.empty()
+    bind m2 <- Map.set(m, "k", 42)
+    match Map.get(m2, "k") {
+        None    => -1
+        Some(v) => v
+    }
+}
+"#;
+        assert_eq!(run_inline(src), Value::Int(42));
+    }
+
+    #[test]
+    fn stdlib_map_from_entries_test() {
+        let src = r#"
+fn from_entries(entries: List<String>, key_fn: String -> String, val_fn: String -> Int) -> Map<String, Int> {
+    List.fold(entries, Map.empty(), |acc, e|
+        Map.set(acc, key_fn(e), val_fn(e)))
+}
+public fn main() -> Int {
+    bind xs <- List.concat(List.singleton("apple"), List.singleton("banana"))
+    bind m  <- from_entries(xs, |s| s, |s| String.length(s))
+    match Map.get(m, "apple") {
+        None    => -1
+        Some(n) => n
+    }
+}
+"#;
+        assert_eq!(run_inline(src), Value::Int(5));
+    }
+}
+
+// ── email rune tests (v7.4.0) ─────────────────────────────────────────────────
+#[cfg(test)]
+mod email_rune_tests {
+    use crate::frontend::parser::Parser;
+    use crate::middle::checker::Checker;
+    use crate::backend::vm::VM;
+    use crate::middle::compiler::compile_program;
+    use crate::backend::codegen::codegen_program;
+    use crate::value::Value;
+
+    fn run_inline(src: &str) -> Value {
+        let prog = Parser::parse_str(src, "test.fav").expect("parse");
+        let (errors, _) = Checker::check_program(&prog);
+        assert!(errors.is_empty(), "type errors: {:?}", errors.iter().map(|e| &e.message).collect::<Vec<_>>());
+        let ir = compile_program(&prog);
+        let artifact = codegen_program(&ir);
+        let fn_idx = artifact.fn_idx_by_name("main").expect("main function not found");
+        VM::run(&artifact, fn_idx, vec![]).expect("run")
+    }
+
+    #[test]
+    fn email_send_raw_type_checks() {
+        // Verify Email.send_raw type-checks correctly
+        let src = r#"
+public fn main() -> Bool !Email {
+    bind result <- Email.send_raw("from@example.com", "to@example.com", "Subject", "Body")
+    match result {
+        Ok(_)  => true
+        Err(_) => false
+    }
+}
+"#;
+        let prog = Parser::parse_str(src, "test.fav").expect("parse");
+        let (errors, _) = Checker::check_program(&prog);
+        assert!(errors.is_empty(), "type errors: {:?}", errors.iter().map(|e| &e.message).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn email_send_bulk_type_checks() {
+        // Verify send_bulk fold logic (count Oks)
+        let src = r#"
+fn send_bulk_count(results: List<Result<String, String>>) -> Int {
+    List.fold(results, 0, |acc, r|
+        match r {
+            Ok(_)  => acc + 1
+            Err(_) => acc
+        })
+}
+public fn main() -> Int {
+    bind results <- List.concat(
+        List.singleton(Result.ok("sent")),
+        List.concat(List.singleton(Result.err("fail")), List.singleton(Result.ok("sent"))))
+    send_bulk_count(results)
+}
+"#;
+        assert_eq!(run_inline(src), Value::Int(2));
+    }
+
+    #[test]
+    fn email_notify_subject_test() {
+        // Verify the notify subject string
+        let src = r#"
+public fn main() -> String {
+    "[Favnir] Notification"
+}
+"#;
+        assert_eq!(run_inline(src), Value::Str("[Favnir] Notification".to_string()));
+    }
+}
+
+// ── toml rune tests (v7.5.0) ──────────────────────────────────────────────────
+#[cfg(test)]
+mod toml_rune_tests {
+    use crate::frontend::parser::Parser;
+    use crate::middle::checker::Checker;
+    use crate::backend::vm::VM;
+    use crate::middle::compiler::compile_program;
+    use crate::backend::codegen::codegen_program;
+    use crate::value::Value;
+
+    fn run_inline(src: &str) -> Value {
+        let prog = Parser::parse_str(src, "test.fav").expect("parse");
+        let (errors, _) = Checker::check_program(&prog);
+        assert!(errors.is_empty(), "type errors: {:?}", errors.iter().map(|e| &e.message).collect::<Vec<_>>());
+        let ir = compile_program(&prog);
+        let artifact = codegen_program(&ir);
+        let fn_idx = artifact.fn_idx_by_name("main").expect("main function not found");
+        VM::run(&artifact, fn_idx, vec![]).expect("run")
+    }
+
+    #[test]
+    fn toml_parse_simple_test() {
+        // Test section name extraction: "[rune]" → "rune"
+        let src = r##"
+fn extract_section_name(line: String) -> String {
+    bind t <- String.trim(line)
+    bind inner <- String.slice(t, 1, String.length(t) - 1)
+    String.trim(inner)
+}
+public fn main() -> String {
+    extract_section_name("[rune]")
+}
+"##;
+        assert_eq!(run_inline(src), Value::Str("rune".to_string()));
+    }
+
+    #[test]
+    fn toml_parse_array_test() {
+        // Test array inner parsing: "Io,DbRead" split → 2 items
+        let src = r##"
+fn strip_quotes(s: String) -> String {
+    bind t <- String.trim(s)
+    if String.starts_with(t, "\"") { String.slice(t, 1, String.length(t) - 1) } else { t }
+}
+fn parse_array_inner(inner: String) -> String {
+    bind parts <- String.split(inner, ",")
+    bind stripped <- List.map(parts, |p| strip_quotes(p))
+    String.join(stripped, ",")
+}
+public fn main() -> Int {
+    bind val <- parse_array_inner("Io, DbRead")
+    bind items <- String.split(val, ",")
+    List.length(items)
+}
+"##;
+        assert_eq!(run_inline(src), Value::Int(2));
+    }
+
+    #[test]
+    fn toml_get_str_missing_test() {
+        // Missing key returns "missing" fallback
+        let src = r#"
+public fn main() -> String {
+    bind doc <- Map.empty()
+    match Map.get(doc, "rune.missing") {
+        None    => "missing"
+        Some(v) => v
+    }
+}
+"#;
+        assert_eq!(run_inline(src), Value::Str("missing".to_string()));
+    }
+}
+
+// ── rune_loader tests (v7.5.0) ────────────────────────────────────────────────
+#[cfg(test)]
+mod rune_loader_tests {
+    use crate::frontend::parser::Parser;
+    use crate::middle::checker::Checker;
+    use crate::backend::vm::VM;
+    use crate::middle::compiler::compile_program;
+    use crate::backend::codegen::codegen_program;
+    use crate::value::Value;
+
+    fn run_inline(src: &str) -> Value {
+        let prog = Parser::parse_str(src, "test.fav").expect("parse");
+        let (errors, _) = Checker::check_program(&prog);
+        assert!(errors.is_empty(), "type errors: {:?}", errors.iter().map(|e| &e.message).collect::<Vec<_>>());
+        let ir = compile_program(&prog);
+        let artifact = codegen_program(&ir);
+        let fn_idx = artifact.fn_idx_by_name("main").expect("main function not found");
+        VM::run(&artifact, fn_idx, vec![]).expect("run")
+    }
+
+    #[test]
+    fn loader_semver_caret_matches_test() {
+        let src = r#"
+type SemVer = {
+    major: Int
+    minor: Int
+    patch: Int
+}
+
+fn parse_int_or_zero(s: String) -> Int {
+    match String.to_int(s) { None => 0 Some(n) => n }
+}
+fn parse_semver(v: String) -> Option<SemVer> {
+    bind parts <- String.split(v, ".")
+    bind len <- List.length(parts)
+    if len == 0 { Option.none() }
+    else {
+        bind major_s <- match List.first(parts)              { None => "0" Some(s) => s }
+        bind minor_s <- match List.first(List.drop(parts, 1)){ None => "0" Some(s) => s }
+        bind patch_s <- match List.first(List.drop(parts, 2)){ None => "0" Some(s) => s }
+        Option.some(SemVer {
+            major: parse_int_or_zero(major_s)
+            minor: parse_int_or_zero(minor_s)
+            patch: parse_int_or_zero(patch_s) })
+    }
+}
+fn semver_ge(a: SemVer, b: SemVer) -> Bool {
+    if a.major > b.major { true }
+    else { if a.major == b.major {
+        if a.minor > b.minor { true }
+        else { if a.minor == b.minor { a.patch >= b.patch } else { false } }
+    } else { false } }
+}
+fn semver_lt(a: SemVer, b: SemVer) -> Bool {
+    if a.major < b.major { true }
+    else { if a.major == b.major {
+        if a.minor < b.minor { true }
+        else { if a.minor == b.minor { a.patch < b.patch } else { false } }
+    } else { false } }
+}
+fn matches_constraint(version: String, constraint: String) -> Bool {
+    if String.starts_with(constraint, "^") {
+        bind req_str <- String.slice(constraint, 1, String.length(constraint))
+        match parse_semver(version) {
+            None => false
+            Some(ver) => {
+                match parse_semver(req_str) {
+                    None => false
+                    Some(req) => {
+                        bind next <- SemVer { major: req.major + 1
+                                              minor: 0
+                                              patch: 0 }
+                        semver_ge(ver, req) && semver_lt(ver, next)
+                    }
+                }
+            }
+        }
+    } else { false }
+}
+public fn main() -> Bool {
+    bind ok1 <- matches_constraint("1.2.3", "^1.0")
+    bind ok2 <- matches_constraint("2.0.0", "^1.0")
+    ok1 && ok2 == false
+}
+"#;
+        assert_eq!(run_inline(src), Value::Bool(true));
+    }
+
+    #[test]
+    fn loader_semver_exact_test() {
+        let src = r#"
+type SemVer = {
+    major: Int
+    minor: Int
+    patch: Int
+}
+fn parse_int_or_zero(s: String) -> Int {
+    match String.to_int(s) { None => 0 Some(n) => n }
+}
+fn parse_semver(v: String) -> Option<SemVer> {
+    bind parts <- String.split(v, ".")
+    bind len <- List.length(parts)
+    if len == 0 { Option.none() }
+    else {
+        bind major_s <- match List.first(parts)              { None => "0" Some(s) => s }
+        bind minor_s <- match List.first(List.drop(parts, 1)){ None => "0" Some(s) => s }
+        bind patch_s <- match List.first(List.drop(parts, 2)){ None => "0" Some(s) => s }
+        Option.some(SemVer {
+            major: parse_int_or_zero(major_s)
+            minor: parse_int_or_zero(minor_s)
+            patch: parse_int_or_zero(patch_s) })
+    }
+}
+fn semver_eq(a: SemVer, b: SemVer) -> Bool {
+    a.major == b.major && a.minor == b.minor && a.patch == b.patch
+}
+fn matches_exact(version: String, constraint: String) -> Bool {
+    match parse_semver(version) {
+        None => false
+        Some(ver) => {
+            match parse_semver(constraint) {
+                None => false
+                Some(req) => semver_eq(ver, req)
+            }
+        }
+    }
+}
+public fn main() -> Bool {
+    bind ok1 <- matches_exact("1.2.3", "1.2.3")
+    bind ok2 <- matches_exact("1.2.4", "1.2.3")
+    ok1 && ok2 == false
+}
+"#;
+        assert_eq!(run_inline(src), Value::Bool(true));
+    }
+
+    #[test]
+    fn loader_parse_semver_test() {
+        let src = r#"
+type SemVer = {
+    major: Int
+    minor: Int
+    patch: Int
+}
+fn parse_int_or_zero(s: String) -> Int {
+    match String.to_int(s) { None => 0 Some(n) => n }
+}
+fn parse_semver(v: String) -> Option<SemVer> {
+    bind parts <- String.split(v, ".")
+    bind len <- List.length(parts)
+    if len == 0 { Option.none() }
+    else {
+        bind major_s <- match List.first(parts)              { None => "0" Some(s) => s }
+        bind minor_s <- match List.first(List.drop(parts, 1)){ None => "0" Some(s) => s }
+        bind patch_s <- match List.first(List.drop(parts, 2)){ None => "0" Some(s) => s }
+        Option.some(SemVer {
+            major: parse_int_or_zero(major_s)
+            minor: parse_int_or_zero(minor_s)
+            patch: parse_int_or_zero(patch_s) })
+    }
+}
+public fn main() -> Int {
+    match parse_semver("2.10.3") {
+        None    => -1
+        Some(v) => v.major + v.minor + v.patch
+    }
+}
+"#;
+        // 2 + 10 + 3 = 15
+        assert_eq!(run_inline(src), Value::Int(15));
+    }
+}

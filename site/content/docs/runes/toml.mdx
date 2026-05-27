@@ -1,0 +1,113 @@
+---
+title: "TOML Rune"
+order: 15
+category: "Rune"
+description: "rune.toml を読み取るミニ TOML パーサー"
+---
+
+# TOML Rune
+
+`runes/toml/toml.fav` — `rune.toml` を解析するミニ TOML パーサーです。
+
+フル TOML 仕様ではなく、Rune メタデータに必要なサブセットのみ対応しています。
+
+## 対応フォーマット
+
+```toml
+[section]
+key = "value"
+arr = ["item1", "item2"]
+# コメント行（スキップ）
+```
+
+## セットアップ
+
+```toml
+# rune.toml
+[[runes]]
+name = "toml"
+path = "runes/toml"
+```
+
+## 型
+
+```favnir
+// TomlDoc は Map<String, String>
+// キーは "section.key" 形式
+// 配列値はカンマ結合文字列として格納
+```
+
+## 関数一覧
+
+| 関数 | シグネチャ | 説明 |
+|------|-----------|------|
+| `TomlParser.parse` | `String -> Result<Map<String, String>, String>` | TOML 文字列をパース |
+| `TomlParser.get_str` | `Map<String, String>, String, String -> Option<String>` | スカラー値を取得 |
+| `TomlParser.get_arr` | `Map<String, String>, String, String -> List<String>` | 配列値を取得 |
+| `TomlParser.read_rune_meta` | `String -> Result<RuneMeta, String> !IO` | rune.toml を読んでメタ情報を返す |
+
+## RuneMeta 型
+
+```favnir
+type RuneMeta = {
+    name:    String
+    version: String
+    entry:   String          // エントリーファイル名（デフォルト: "<name>.fav"）
+    effects: List<String>    // エフェクト宣言リスト
+}
+```
+
+## 使用例
+
+### TOML 文字列をパース
+
+```favnir
+bind content <- IO.read_file_raw("rune.toml")
+match content {
+    Err(e)      => IO.println(String.concat("読み込み失敗: ", e))
+    Ok(src)     => {
+        match TomlParser.parse(src) {
+            Err(e)  => IO.println(String.concat("パース失敗: ", e))
+            Ok(doc) => {
+                bind name <- TomlParser.get_str(doc, "rune", "name")
+                match name {
+                    None    => IO.println("name not found")
+                    Some(n) => IO.println(String.concat("Rune: ", n))
+                }
+            }
+        }
+    }
+}
+```
+
+### rune.toml を直接読む
+
+```favnir
+match TomlParser.read_rune_meta("runes/csv/rune.toml") {
+    Err(e)    => IO.println(String.concat("エラー: ", e))
+    Ok(meta)  => {
+        IO.println(String.concat("名前: ",    meta.name))
+        IO.println(String.concat("バージョン: ", meta.version))
+        IO.println(String.concat("エントリ: ", meta.entry))
+    }
+}
+```
+
+### 配列値の取得
+
+```toml
+[rune]
+effects = ["IO", "Cache"]
+```
+
+```favnir
+bind effects <- TomlParser.get_arr(doc, "rune", "effects")
+// ["IO", "Cache"]
+```
+
+## 制限
+
+- 文字列値のみ対応（整数・浮動小数点・Boolean は文字列として読み取られる）
+- インラインテーブル（`{key = "val"}`）非対応
+- マルチライン文字列非対応
+- ネストされたセクション（`[a.b.c]`）非対応

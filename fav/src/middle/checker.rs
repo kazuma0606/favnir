@@ -2131,6 +2131,7 @@ impl Checker {
             "AWS",
             "Queue",
             "Cache",
+            "Email",
         ];
         for effect in effects {
             if let Effect::Unknown(name) = effect {
@@ -4705,7 +4706,25 @@ impl Checker {
             ("IO", "file_stat_raw") => {
                 Some(Type::Map(Box::new(Type::String), Box::new(Type::String)))
             }
+            // IO path primitives (v7.5.0)
+            ("IO", "path_join_raw") => Some(Type::String),
+            ("IO", "home_dir_raw")  => Some(Type::Option(Box::new(Type::String))),
+            ("IO", "cwd_raw")       => Some(Type::String),
+            ("IO", "is_dir_raw")    => Some(Type::Bool),
             ("IO", "argv") => Some(Type::List(Box::new(Type::String))),
+
+            // Map.empty (v7.4.0)
+            ("Map", "empty") => {
+                Some(Type::Map(Box::new(Type::Unknown), Box::new(Type::Unknown)))
+            }
+
+            // String.compare (v7.4.0)
+            ("String", "compare") => Some(Type::Int),
+
+            // Email primitives (v7.4.0)
+            ("Email", "send_raw") => {
+                Some(Type::Result(Box::new(Type::Unit), Box::new(Type::String)))
+            }
 
             // Cache primitives (v7.3.0)
             ("Cache", "get_raw") => Some(Type::Option(Box::new(Type::String))),

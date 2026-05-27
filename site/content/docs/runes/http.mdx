@@ -1,0 +1,153 @@
+---
+title: "HTTP Rune"
+order: 4
+category: "Rune"
+description: "HTTP クライアント — GET/POST/PUT/DELETE・リトライ・認証ヘルパー"
+---
+
+# HTTP Rune
+
+エフェクト: `!Network`
+
+外部 API への HTTP リクエストを送信します。
+
+```favnir
+import rune "http"
+```
+
+## 基本メソッド
+
+### GET
+
+```favnir
+match http.get("https://api.example.com/users") {
+  Ok(resp) => IO.println($"ステータス: {resp.status}  ボディ: {resp.body}")
+  Err(e)   => IO.println($"エラー: {e.message}")
+}
+```
+
+ボディだけ取得したい場合は `get_body` が便利です:
+
+```favnir
+bind body <- http.get_body("https://api.example.com/config.json")
+```
+
+### POST
+
+```favnir
+// テキスト (Content-Type: text/plain)
+bind resp <- http.post("https://api.example.com/log", "started")
+
+// JSON (Content-Type: application/json)
+bind resp <- http.post_json("https://api.example.com/orders",
+  "{\"customer\": \"田中\", \"amount\": 12800}")
+```
+
+### PUT / PATCH / DELETE
+
+```favnir
+// PUT — リソース全体を置き換え
+bind resp <- http.put("https://api.example.com/users/42",
+  "{\"name\": \"田中 太郎\", \"active\": true}")
+
+// PATCH — 部分更新
+bind resp <- http.patch("https://api.example.com/users/42",
+  "{\"active\": false}")
+
+// DELETE
+bind resp <- http.delete("https://api.example.com/users/42")
+```
+
+## カスタムヘッダー
+
+`get_with_headers` / `post_with_headers` でヘッダーを指定します。
+
+```favnir
+bind headers <- Map.set(Map.set((), "X-Tenant-Id", "acme"), "Accept", "application/json")
+bind resp    <- http.get_with_headers("https://api.example.com/data", headers)
+```
+
+## 認証
+
+`http.bearer` / `http.basic` / `http.api_key` で認証ヘッダーを生成し、
+`get_with_headers` / `post_with_headers` と組み合わせます。
+
+```favnir
+// Bearer トークン認証
+bind auth_headers <- http.bearer("my-access-token")
+bind resp         <- http.get_with_headers("https://api.example.com/profile", auth_headers)
+
+// Basic 認証
+bind auth_headers <- http.basic("user@example.com", "password123")
+bind resp         <- http.post_with_headers("https://api.example.com/login", "{}", auth_headers)
+
+// API キー認証
+bind auth_headers <- http.api_key("sk-xxxxxxxxxxxx")
+bind resp         <- http.get_with_headers("https://api.example.com/completions", auth_headers)
+```
+
+## リトライ
+
+`http.with_retry` はリクエストが失敗したとき最大 N 回まで再試行します。
+
+```favnir
+bind resp <- http.with_retry(3, |_| {
+  http.get("https://api.example.com/health")
+})
+```
+
+`retry_get` / `retry_post` で簡潔に書くこともできます:
+
+```favnir
+bind resp <- http.retry_get("https://api.example.com/status", 3)
+bind resp <- http.retry_post("https://api.example.com/events", "{\"type\": \"ping\"}", 3)
+```
+
+## パイプラインでの利用例
+
+```favnir
+import rune "http"
+import rune "aws"
+
+type Order = { id: Int  customer: String  amount: Float }
+
+stage FetchOrders: String -> List<Order> !Network = |api_url| {
+  bind resp  <- http.get_body(api_url)
+  Json.parse_list<Order>(resp)
+}
+
+stage SaveToS3: List<Order> -> Int !AWS = |orders| {
+  aws.s3.put_object("my-bucket", "orders/latest.json", Debug.show(orders))
+}
+
+seq OrderSync = FetchOrders |> SaveToS3
+```
+
+## HttpResponse 型
+
+```favnir
+type HttpResponse = {
+  status: Int
+  body:   String
+}
+```
+
+## 関数一覧
+
+| 関数 | 説明 |
+|------|------|
+| `http.get(url)` | GET リクエスト |
+| `http.get_body(url)` | GET してボディ文字列だけ返す |
+| `http.post(url, body)` | POST (text/plain) |
+| `http.post_json(url, body)` | POST (application/json) |
+| `http.put(url, body)` | PUT (application/json) |
+| `http.patch(url, body)` | PATCH (application/json) |
+| `http.delete(url)` | DELETE |
+| `http.get_with_headers(url, headers)` | カスタムヘッダー付き GET |
+| `http.post_with_headers(url, body, headers)` | カスタムヘッダー付き POST |
+| `http.with_retry(max_attempts, fn)` | リトライ付きリクエスト |
+| `http.retry_get(url, max_attempts)` | リトライ付き GET |
+| `http.retry_post(url, body, max_attempts)` | リトライ付き POST |
+| `http.bearer(token)` | Bearer 認証ヘッダー生成 |
+| `http.basic(user, pass)` | Basic 認証ヘッダー生成 |
+| `http.api_key(key)` | API キーヘッダー生成 |

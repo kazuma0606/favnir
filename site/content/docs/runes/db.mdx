@@ -1,0 +1,146 @@
+---
+title: "DB Rune"
+order: 3
+category: "Rune"
+description: "PostgreSQL / SQLite — クエリ・トランザクション・ページネーション"
+---
+
+# DB Rune
+
+エフェクト: `!Db`
+
+PostgreSQL・SQLite などのリレーショナル DB に接続してクエリを実行します。
+
+```favnir
+import rune "db"
+```
+
+## 接続管理
+
+```favnir
+public fn main() -> Unit !Io !Db {
+  bind handle <- db.connect("postgresql://localhost/mydb")
+  bind rows   <- db.query(handle, "SELECT * FROM orders")
+  IO.println($"{List.length(rows)} 件取得")
+  db.close(handle)
+}
+```
+
+接続文字列の形式:
+
+| DB | 例 |
+|----|-----|
+| PostgreSQL | `"postgresql://user:pass@host/dbname"` |
+| SQLite | `"sqlite://./dev.db"` |
+
+## クエリ
+
+### query — 全行取得
+
+```favnir
+bind rows <- db.query(handle, "SELECT id, name FROM users WHERE active = true")
+```
+
+### query_one — 1 行取得
+
+```favnir
+match db.query_one(handle, "SELECT * FROM users WHERE id = 42") {
+  Ok(row) => IO.println($"名前: {Map.get(row, \"name\")}")
+  Err(e)  => IO.println($"見つかりません: {e.message}")
+}
+```
+
+0 行の場合は `Err(DbError { code: "NOT_FOUND" ... })` を返します。
+
+### query_params — プレースホルダ付きクエリ
+
+```favnir
+bind rows <- db.query_params(handle,
+  "SELECT * FROM orders WHERE customer = $1 AND amount > $2",
+  ["田中", "1000"])
+```
+
+### execute — DDL / DML 実行
+
+```favnir
+bind count <- db.execute(handle, "UPDATE users SET active = false WHERE last_login < '2024-01-01'")
+IO.println($"{count} 件更新")
+```
+
+### execute_params — プレースホルダ付き DML
+
+```favnir
+bind count <- db.execute_params(handle,
+  "INSERT INTO events (type, payload) VALUES ($1, $2)",
+  ["login", "{\"user_id\": 42}"])
+```
+
+## ページネーション
+
+`db.paginate` は SQL に `LIMIT`/`OFFSET` を自動付与します。
+
+```favnir
+public fn list_orders(handle: DbHandle, page: Int) -> Result<List<Map<String, String>>, DbError> !Db {
+  db.paginate(handle, "SELECT * FROM orders ORDER BY created_at DESC", page, 20)
+}
+
+// page=0 → LIMIT 20 OFFSET 0
+// page=1 → LIMIT 20 OFFSET 20
+// page=2 → LIMIT 20 OFFSET 40
+```
+
+## 一括挿入
+
+`db.batch_insert` はリストの各行で `execute_params` を実行します。
+
+```favnir
+bind count <- db.batch_insert(handle,
+  "INSERT INTO log_entries (level, message) VALUES ($1, $2)",
+  [["INFO", "起動完了"], ["WARN", "設定ファイル未検出"], ["INFO", "デフォルト設定を使用"]])
+IO.println($"{count} 件挿入")
+```
+
+## トランザクション
+
+`db.with_transaction` は begin → fn 実行 → commit (Ok) / rollback (Err) を自動管理します。
+
+```favnir
+match db.with_transaction(handle, |tx| {
+  bind _ <- db.execute(tx, "UPDATE accounts SET balance = balance - 1000 WHERE id = 1")
+  bind _ <- db.execute(tx, "UPDATE accounts SET balance = balance + 1000 WHERE id = 2")
+  Result.ok([])
+}) {
+  Ok(_)  => IO.println("送金完了")
+  Err(e) => IO.println($"送金失敗（ロールバック済み）: {e.message}")
+}
+```
+
+### セーブポイント
+
+ネストしたトランザクション相当の操作には savepoint を使います。
+
+```favnir
+bind _ <- db.savepoint(handle, "sp1")
+match db.execute(handle, "DELETE FROM temp_data WHERE expired = true") {
+  Ok(_)  => db.release_savepoint(handle, "sp1")
+  Err(_) => db.rollback_to_savepoint(handle, "sp1")
+}
+```
+
+## 関数一覧
+
+| 関数 | 型シグネチャ | 説明 |
+|------|------------|------|
+| `db.connect(conn_str)` | `String -> Result<DbHandle, DbError>` | 接続を開く |
+| `db.close(handle)` | `DbHandle -> Unit` | 接続を閉じる |
+| `db.query(handle, sql)` | `-> Result<List<Map<String,String>>, DbError>` | 全行取得 |
+| `db.query_one(handle, sql)` | `-> Result<Map<String,String>, DbError>` | 1 行取得 |
+| `db.query_params(handle, sql, params)` | `-> Result<List<Map<String,String>>, DbError>` | プレースホルダ付きクエリ |
+| `db.execute(handle, sql)` | `-> Result<Int, DbError>` | DDL/DML 実行 |
+| `db.execute_params(handle, sql, params)` | `-> Result<Int, DbError>` | プレースホルダ付き DML |
+| `db.paginate(handle, sql, page, size)` | `-> Result<List<Map<String,String>>, DbError>` | LIMIT/OFFSET |
+| `db.batch_insert(handle, template, rows)` | `-> Result<Int, DbError>` | 一括挿入 |
+| `db.with_transaction(handle, fn)` | `-> Result<List<Map<String,String>>, DbError>` | トランザクション |
+| `db.savepoint(handle, name)` | `-> Result<Int, DbError>` | セーブポイント作成 |
+| `db.release_savepoint(handle, name)` | `-> Result<Int, DbError>` | セーブポイント解放 |
+| `db.rollback_to_savepoint(handle, name)` | `-> Result<Int, DbError>` | セーブポイントにロールバック |

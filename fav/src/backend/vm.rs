@@ -4985,6 +4985,10 @@ fn is_known_builtin_namespace(name: &str) -> bool {
             | "Auth"
             | "Log"
             | "AWS"
+            | "Cache"
+            | "Queue"
+            | "Email"
+            | "Compiler"
     )
 }
 
@@ -6107,6 +6111,71 @@ fn vm_call_builtin(
                 .ok_or_else(|| "IO.is_dir_raw requires 1 argument".to_string())?;
             let path = vm_string(v, "IO.is_dir_raw")?;
             Ok(VMValue::Bool(std::path::Path::new(&path).is_dir()))
+        }
+        // CLI primitives (v7.6.0)
+        "IO.write_stderr_raw" => {
+            let v = args
+                .into_iter()
+                .next()
+                .ok_or_else(|| "IO.write_stderr_raw requires 1 argument".to_string())?;
+            let msg = vm_string(v, "IO.write_stderr_raw")?;
+            if !is_io_suppressed() {
+                eprintln!("{}", msg);
+            }
+            Ok(VMValue::Unit)
+        }
+        "IO.exit_raw" => {
+            let code = match args.into_iter().next() {
+                Some(VMValue::Int(n)) => n as i32,
+                _ => 1,
+            };
+            std::process::exit(code)
+        }
+        "Compiler.check_raw" => {
+            let v = args
+                .into_iter()
+                .next()
+                .ok_or_else(|| "Compiler.check_raw requires 1 argument".to_string())?;
+            let path = vm_string(v, "Compiler.check_raw")?;
+            let src = match std::fs::read_to_string(&path) {
+                Err(e) => {
+                    return Ok(err_vm(VMValue::Str(format!("cannot read {}: {}", path, e))))
+                }
+                Ok(s) => s,
+            };
+            let program = match crate::frontend::parser::Parser::parse_str(&src, &path) {
+                Err(e) => return Ok(err_vm(VMValue::Str(e.to_string()))),
+                Ok(p) => p,
+            };
+            let (errors, _) = crate::middle::checker::Checker::check_program(&program);
+            if errors.is_empty() {
+                Ok(ok_vm(VMValue::Str("compiled".to_string())))
+            } else {
+                let msg = errors
+                    .iter()
+                    .map(|e| e.message.clone())
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                Ok(err_vm(VMValue::Str(msg)))
+            }
+        }
+        "Compiler.lineage_text_raw" => {
+            let v = args
+                .into_iter()
+                .next()
+                .ok_or_else(|| "Compiler.lineage_text_raw requires 1 argument".to_string())?;
+            let path = vm_string(v, "Compiler.lineage_text_raw")?;
+            let src = match std::fs::read_to_string(&path) {
+                Err(e) => return Ok(VMValue::Str(format!("error: cannot read {}: {}", path, e))),
+                Ok(s) => s,
+            };
+            let program = match crate::frontend::parser::Parser::parse_str(&src, &path) {
+                Err(e) => return Ok(VMValue::Str(format!("error: parse failed: {}", e))),
+                Ok(p) => p,
+            };
+            let report = crate::driver::lineage_analysis(&program);
+            let text = crate::driver::render_lineage_text(&report, &path);
+            Ok(VMValue::Str(text))
         }
         "IO.argv" => {
             let argv: Vec<VMValue> = TEST_ARGV.with(|t| {

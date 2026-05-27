@@ -1,0 +1,198 @@
+// fav/self/cli.fav — Favnir CLI dispatcher (v7.6.0)
+//
+// Handles: check / explain --lineage / rune list|info / version / help
+//
+// Usage:
+//   fav run fav/self/cli.fav -- check <file>
+//   fav run fav/self/cli.fav -- explain --lineage <file>
+//   fav run fav/self/cli.fav -- rune list
+//   fav run fav/self/cli.fav -- rune info <name>
+//   fav run fav/self/cli.fav -- version
+//   fav run fav/self/cli.fav -- help
+
+// ── Types ──────────────────────────────────────────────────────────────────────
+
+type CliCmd =
+  | CmdCheck(String)
+  | CmdVersion
+  | CmdHelp
+  | CmdLineage(String)
+  | CmdRuneList
+  | CmdRuneInfo(String)
+  | CmdUnknown(String)
+
+// ── Utilities ──────────────────────────────────────────────────────────────────
+
+// String equality helper — used inside closures (bind inside closure is not allowed)
+fn eq_str(a: String, b: String) -> Bool { a == b }
+
+// Returns false if s starts with "--", true otherwise
+fn not_flag(s: String) -> Bool {
+    if String.starts_with(s, "--") { false } else { true }
+}
+
+// Returns true if flag is present in args
+fn find_flag(args: List<String>, flag: String) -> Bool {
+    match List.find(args, |a| eq_str(a, flag)) {
+        None    => false
+        Some(_) => true
+    }
+}
+
+// Returns first argument that does not start with "--"
+fn find_positional(args: List<String>) -> Option<String> {
+    List.find(args, |a| not_flag(a))
+}
+
+// ── Argument parsing ───────────────────────────────────────────────────────────
+
+fn parse_cmd(args: List<String>) -> CliCmd {
+    match List.first(args) {
+        None      => CmdHelp
+        Some(cmd) => parse_named_cmd(cmd, args)
+    }
+}
+
+fn parse_named_cmd(cmd: String, args: List<String>) -> CliCmd {
+    if cmd == "check"    { parse_check_cmd(args) }
+    else { if cmd == "version"   { CmdVersion }
+    else { if cmd == "--version" { CmdVersion }
+    else { if cmd == "help"      { CmdHelp }
+    else { if cmd == "--help"    { CmdHelp }
+    else { if cmd == "explain"   { parse_explain_cmd(args) }
+    else { if cmd == "rune"      { parse_rune_cmd(args) }
+    else { CmdUnknown(String.concat("unknown command: ", cmd)) }
+    } } } } } }
+}
+
+fn parse_check_cmd(args: List<String>) -> CliCmd {
+    match List.first(List.drop(args, 1)) {
+        None    => CmdUnknown("check requires a file argument")
+        Some(f) => CmdCheck(f)
+    }
+}
+
+fn parse_explain_cmd(args: List<String>) -> CliCmd {
+    bind rest        <- List.drop(args, 1)
+    bind has_lineage <- find_flag(rest, "--lineage")
+    if has_lineage {
+        match find_positional(rest) {
+            None    => CmdUnknown("explain --lineage requires a file")
+            Some(f) => CmdLineage(f)
+        }
+    } else {
+        CmdUnknown("explain without --lineage not yet supported in self-host CLI")
+    }
+}
+
+fn parse_rune_cmd(args: List<String>) -> CliCmd {
+    match List.first(List.drop(args, 1)) {
+        None      => CmdRuneList
+        Some(sub) => parse_rune_sub(sub, args)
+    }
+}
+
+fn parse_rune_sub(sub: String, args: List<String>) -> CliCmd {
+    if sub == "list" { CmdRuneList }
+    else { if sub == "info" {
+        match List.first(List.drop(args, 2)) {
+            None       => CmdUnknown("rune info requires a name")
+            Some(name) => CmdRuneInfo(name)
+        }
+    } else {
+        CmdUnknown(String.concat("unknown rune subcommand: ", sub))
+    } }
+}
+
+// ── Action handlers ────────────────────────────────────────────────────────────
+
+fn run_version() -> Unit !IO {
+    IO.println("favnir 7.6.0 (self-host CLI)")
+}
+
+fn run_help() -> Unit !IO {
+    bind _ <- IO.println("fav - Favnir CLI (self-hosted)")
+    bind _ <- IO.println("COMMANDS:")
+    bind _ <- IO.println("  check <file>              Type-check a .fav file")
+    bind _ <- IO.println("  explain --lineage <file>  Static lineage analysis")
+    bind _ <- IO.println("  rune list                 List installed runes")
+    bind _ <- IO.println("  rune info <name>          Show rune location")
+    bind _ <- IO.println("  version                   Show version")
+    IO.println("  help                      Show this help")
+}
+
+fn run_check(path: String) -> Unit !IO {
+    match Compiler.check_raw(path) {
+        Ok(msg) => IO.println(String.concat("ok: ", msg))
+        Err(e)  => {
+            bind _ <- IO.write_stderr_raw(String.concat("error: ", e))
+            IO.exit_raw(1)
+        }
+    }
+}
+
+fn run_lineage(path: String) -> Unit !IO {
+    bind text <- Compiler.lineage_text_raw(path)
+    IO.println(text)
+}
+
+fn print_list(items: List<String>) -> Unit !IO {
+    match List.first(items) {
+        None       => IO.println("")
+        Some(item) => {
+            bind _ <- IO.println(String.concat("  ", item))
+            print_list(List.drop(items, 1))
+        }
+    }
+}
+
+fn run_rune_list() -> Unit !IO {
+    bind cwd      <- IO.cwd_raw()
+    bind rune_dir <- IO.path_join_raw(cwd, "rune_modules")
+    if IO.is_dir_raw(rune_dir) {
+        match IO.list_dir_raw(rune_dir) {
+            Err(_)    => IO.println("(no rune_modules directory)")
+            Ok(names) => print_list(names)
+        }
+    } else {
+        IO.println("(no rune_modules installed)")
+    }
+}
+
+fn run_rune_info(name: String) -> Unit !IO {
+    bind cwd    <- IO.cwd_raw()
+    bind rm_dir <- IO.path_join_raw(IO.path_join_raw(cwd, "rune_modules"), name)
+    if IO.is_dir_raw(rm_dir) {
+        bind _ <- IO.println(String.concat("rune:   ", name))
+        bind _ <- IO.println(String.concat("path:   ", rm_dir))
+        IO.println("source: rune_modules")
+    } else {
+        bind local_dir <- IO.path_join_raw(IO.path_join_raw(cwd, "runes"), name)
+        if IO.is_dir_raw(local_dir) {
+            bind _ <- IO.println(String.concat("rune:   ", name))
+            bind _ <- IO.println(String.concat("path:   ", local_dir))
+            IO.println("source: runes (local)")
+        } else {
+            IO.println(String.concat("rune not found: ", name))
+        }
+    }
+}
+
+// ── Entry point ────────────────────────────────────────────────────────────────
+
+public fn main() -> Unit !IO {
+    bind args <- IO.argv()
+    bind cmd  <- parse_cmd(args)
+    match cmd {
+        CmdCheck(path)    => run_check(path)
+        CmdVersion        => run_version()
+        CmdHelp           => run_help()
+        CmdLineage(path)  => run_lineage(path)
+        CmdRuneList       => run_rune_list()
+        CmdRuneInfo(name) => run_rune_info(name)
+        CmdUnknown(msg)   => {
+            bind _ <- IO.write_stderr_raw(String.concat("error: ", msg))
+            IO.exit_raw(1)
+        }
+    }
+}

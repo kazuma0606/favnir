@@ -181,6 +181,8 @@ pub fn compile_program(program: &Program) -> IRProgram {
         "AWS",
         "Queue",
         "Cache",
+        "Email",
+        "Compiler",
         "assert",
         "assert_eq",
         "assert_ne",
@@ -418,6 +420,8 @@ pub fn compile_program(program: &Program) -> IRProgram {
         "Log",
         "Queue",
         "Cache",
+        "Email",
+        "Compiler",
         // test assertion builtins (callable without namespace prefix)
         "assert",
         "assert_eq",

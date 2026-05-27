@@ -4712,6 +4712,14 @@ impl Checker {
             ("IO", "cwd_raw")       => Some(Type::String),
             ("IO", "is_dir_raw")    => Some(Type::Bool),
             ("IO", "argv") => Some(Type::List(Box::new(Type::String))),
+            // CLI primitives (v7.6.0)
+            ("IO", "write_stderr_raw")       => Some(Type::Unit),
+            ("IO", "exit_raw")               => Some(Type::Unit),
+            ("Compiler", "check_raw")        => Some(Type::Result(
+                Box::new(Type::String),
+                Box::new(Type::String),
+            )),
+            ("Compiler", "lineage_text_raw") => Some(Type::String),
 
             // Map.empty (v7.4.0)
             ("Map", "empty") => {

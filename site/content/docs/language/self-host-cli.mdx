@@ -1,0 +1,152 @@
+---
+title: "Self-Host CLI"
+order: 6
+category: "言語仕様"
+description: "fav/self/cli.fav — Favnir 製 CLI ディスパッチャー"
+---
+
+# Self-Host CLI
+
+`fav/self/cli.fav` — サブコマンドの解析・ディスパッチ・出力整形を Favnir で実装した CLI ドライバです。
+
+v7.6.0 ではコマンドの解析と結果出力を Favnir が担い、重い処理（型チェック本体・lineage 解析）は
+`Compiler.check_raw` / `Compiler.lineage_text_raw` の thin VM primitive 経由で Rust が実行します。
+v7.7.0〜v7.9.0 で checker.fav が完成するにつれ、Rust の処理を段階的に Favnir に置き換えていきます。
+
+## アーキテクチャ
+
+```
+fav check foo.fav
+  └─ main.rs (薄いディスパッチ)
+       └─ CLI.run_check("foo.fav")           [cli.fav — Favnir]
+            └─ Compiler.check_raw("foo.fav")  [VM primitive → Rust]
+```
+
+```
+fav rune list
+  └─ CLI.run_rune_list()                     [cli.fav — Favnir]
+       └─ IO.list_dir_raw("rune_modules/")   [VM primitive]
+```
+
+## CliCmd 型
+
+```favnir
+type CliCmd =
+  | CmdCheck(String)     // check <file>
+  | CmdVersion           // version / --version
+  | CmdHelp              // help / --help
+  | CmdLineage(String)   // explain --lineage <file>
+  | CmdRuneList          // rune list
+  | CmdRuneInfo(String)  // rune info <name>
+  | CmdUnknown(String)   // unknown command → stderr + exit 1
+```
+
+## 関数一覧
+
+### 引数パーサー
+
+| 関数 | 説明 |
+|------|------|
+| `fn parse_cmd(args: List<String>) -> CliCmd` | argv を CliCmd に変換 |
+| `fn parse_named_cmd(cmd, args)` | コマンド名で分岐 |
+| `fn parse_check_cmd(args)` | `check <file>` を解析 |
+| `fn parse_explain_cmd(args)` | `explain [--lineage] <file>` を解析 |
+| `fn parse_rune_cmd(args)` | `rune <sub>` を解析 |
+| `fn find_flag(args, flag)` | `--flag` が含まれているか確認 |
+| `fn find_positional(args)` | 最初の非フラグ引数を取得 |
+
+### アクションハンドラー
+
+| 関数 | 説明 |
+|------|------|
+| `fn run_check(path)` | `Compiler.check_raw(path)` を呼び出し、ok: または stderr |
+| `fn run_lineage(path)` | `Compiler.lineage_text_raw(path)` を呼び出し、テキスト出力 |
+| `fn run_rune_list()` | `rune_modules/` の一覧を表示 |
+| `fn run_rune_info(name)` | `rune_modules/<name>` または `runes/<name>` のパスを表示 |
+| `fn run_version()` | バージョン文字列を出力 |
+| `fn run_help()` | ヘルプテキストを出力 |
+
+### VM プリミティブ（v7.6.0 追加）
+
+| プリミティブ | シグネチャ | 説明 |
+|-------------|-----------|------|
+| `IO.write_stderr_raw` | `String -> Unit !IO` | stderr に出力 |
+| `IO.exit_raw` | `Int -> Unit !IO` | プロセス終了 |
+| `Compiler.check_raw` | `String -> Result<String, String> !IO` | ファイルを型チェック |
+| `Compiler.lineage_text_raw` | `String -> String !IO` | lineage 解析テキスト |
+
+## 使用例
+
+### cli.fav を直接実行する
+
+```bash
+# 型チェック
+fav run fav/self/cli.fav -- check src/pipeline.fav
+
+# lineage 解析
+fav run fav/self/cli.fav -- explain --lineage src/pipeline.fav
+
+# rune 一覧
+fav run fav/self/cli.fav -- rune list
+
+# rune 情報
+fav run fav/self/cli.fav -- rune info csv
+
+# バージョン確認
+fav run fav/self/cli.fav -- version
+```
+
+### コマンド出力例
+
+```
+$ fav run fav/self/cli.fav -- check src/pipeline.fav
+ok: compiled
+
+$ fav run fav/self/cli.fav -- rune list
+  csv
+  db
+  aws
+
+$ fav run fav/self/cli.fav -- rune info csv
+rune:   csv
+path:   /home/user/myproject/rune_modules/csv
+source: rune_modules
+```
+
+## Favnir 制約と実装パターン
+
+### bind inside closure 不可
+
+閉包の中で `bind` は使えないため、比較ヘルパーを外部関数として定義します。
+
+```favnir
+// NG: bind inside closure
+List.find(args, |a| { bind x <- ...; x == flag })
+
+// OK: ヘルパー関数を使う
+fn eq_str(a: String, b: String) -> Bool { a == b }
+List.find(args, |a| eq_str(a, flag))
+```
+
+### else if 非対応
+
+複数分岐は `else { if ... }` と書きます。
+
+```favnir
+fn parse_named_cmd(cmd: String, args: List<String>) -> CliCmd {
+    if cmd == "check"  { parse_check_cmd(args) }
+    else { if cmd == "version" { CmdVersion }
+    else { if cmd == "help"    { CmdHelp }
+    else { CmdUnknown(String.concat("unknown: ", cmd)) }
+    } } }
+}
+```
+
+## ロードマップ
+
+| バージョン | 変更内容 |
+|-----------|---------|
+| v7.6.0 | cli.fav 初版（`Compiler.check_raw` 経由で Rust 型チェック） |
+| v7.7.0 | checker.fav がエフェクト追跡・builtin シグネチャを実装 |
+| v7.8.0 | checker.fav がジェネリクスを実装 |
+| v7.9.0 | checker.fav が HM 型推論を実装 — `Compiler.check_raw` を Favnir で代替可能に |

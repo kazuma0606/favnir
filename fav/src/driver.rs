@@ -17159,3 +17159,85 @@ public fn main() -> Int {
         assert_eq!(run_inline(src), Value::Int(15));
     }
 }
+
+// ── cli self-host tests (v7.6.0) ──────────────────────────────────────────────
+#[cfg(test)]
+mod cli_self_host_tests {
+    use crate::frontend::parser::Parser;
+    use crate::driver::{build_artifact, exec_artifact_main};
+
+    const SELF_HOST_STACK_SIZE: usize = 256 * 1024 * 1024;
+
+    fn self_dir() -> std::path::PathBuf {
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("self")
+    }
+
+    fn run_cli_with_argv(argv: Vec<String>) -> String {
+        let cli_path = self_dir().join("cli.fav");
+        let cli_src = std::fs::read_to_string(&cli_path).expect("cli.fav");
+        let program = Parser::parse_str(&cli_src, "cli.fav").expect("parse cli.fav");
+        let artifact = build_artifact(&program);
+        let builder = std::thread::Builder::new().stack_size(SELF_HOST_STACK_SIZE);
+        builder
+            .spawn(move || {
+                crate::backend::vm::set_test_argv(argv);
+                crate::backend::vm::start_io_capture();
+                let _ = exec_artifact_main(&artifact, None);
+                let out = crate::backend::vm::take_io_captured();
+                crate::backend::vm::clear_test_argv();
+                out
+            })
+            .expect("spawn")
+            .join()
+            .expect("join")
+    }
+
+    #[test]
+    fn cli_version_test() {
+        let out = run_cli_with_argv(vec!["version".to_string()]);
+        assert!(
+            out.contains("favnir"),
+            "expected 'favnir' in version output, got: {:?}",
+            out
+        );
+    }
+
+    #[test]
+    fn cli_help_test() {
+        let out = run_cli_with_argv(vec!["help".to_string()]);
+        assert!(
+            out.contains("COMMANDS:"),
+            "expected 'COMMANDS:' in help output, got: {:?}",
+            out
+        );
+    }
+
+    #[test]
+    fn cli_check_valid_test() {
+        let hello_path = self_dir()
+            .parent()
+            .unwrap()
+            .join("tmp")
+            .join("hello.fav")
+            .to_string_lossy()
+            .to_string();
+        let out = run_cli_with_argv(vec!["check".to_string(), hello_path]);
+        assert!(
+            out.starts_with("ok:"),
+            "expected 'ok:' prefix for valid file, got: {:?}",
+            out
+        );
+    }
+
+    #[test]
+    fn cli_rune_list_test() {
+        // rune list should run without panic; output is environment-dependent
+        let out = run_cli_with_argv(vec!["rune".to_string(), "list".to_string()]);
+        // just verify it produced some output (either list or "no rune_modules")
+        assert!(
+            !out.is_empty(),
+            "expected non-empty output from rune list, got empty"
+        );
+    }
+}

@@ -17241,3 +17241,78 @@ mod cli_self_host_tests {
         );
     }
 }
+
+// ── checker_v77_tests (v7.7.0) ────────────────────────────────────────────────
+#[cfg(test)]
+mod checker_v77_tests {
+    use crate::frontend::parser::Parser;
+    use crate::middle::checker::Checker;
+    use crate::backend::vm::VM;
+    use crate::middle::compiler::compile_program;
+    use crate::backend::codegen::codegen_program;
+    use crate::value::Value;
+
+    fn checker_src() -> String {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("self")
+            .join("checker.fav");
+        std::fs::read_to_string(&path).expect("checker.fav")
+    }
+
+    fn run_checker_inline(test_main: &str) -> Value {
+        let src = format!("{}\n\n{}", checker_src(), test_main);
+        let prog = Parser::parse_str(&src, "checker_test.fav").expect("parse");
+        let (errors, _) = Checker::check_program(&prog);
+        assert!(
+            errors.is_empty(),
+            "type errors: {:?}",
+            errors.iter().map(|e| &e.message).collect::<Vec<_>>()
+        );
+        let ir = compile_program(&prog);
+        let artifact = codegen_program(&ir);
+        let fn_idx = artifact.fn_idx_by_name("main").expect("main function");
+        VM::run(&artifact, fn_idx, vec![]).expect("run")
+    }
+
+    #[test]
+    fn checker_fav_effect_tracking_test() {
+        // IO.argv call → infer_expr_effects returns ["IO"]
+        let result = run_checker_inline(r#"
+public fn main() -> Bool {
+    bind effs <- infer_expr_effects(ECall("IO", "argv", EArgNil))
+    List.any(effs, |e| str_eq(e, "IO"))
+}
+"#);
+        assert_eq!(result, Value::Bool(true), "expected IO effect detected");
+    }
+
+    #[test]
+    fn checker_fav_builtin_coverage_test() {
+        // Cache.get_raw → "Option"
+        let result = run_checker_inline(r#"
+public fn main() -> String {
+    builtin_ret_ty("Cache", "get_raw")
+}
+"#);
+        assert_eq!(
+            result,
+            Value::Str("Option".to_string()),
+            "expected Cache.get_raw -> Option"
+        );
+    }
+
+    #[test]
+    fn checker_fav_exhaustiveness_test() {
+        // Option match with only None arm → E0004
+        let result = run_checker_inline(r#"
+public fn main() -> Bool {
+    match check_match_exhaustive("Option",
+        EArm(PVariant("None"), ELit(LBool(false)), EArmNil)) {
+        None => false
+        Some(e) => String.starts_with(e, "E0004")
+    }
+}
+"#);
+        assert_eq!(result, Value::Bool(true), "expected E0004 for non-exhaustive Option match");
+    }
+}

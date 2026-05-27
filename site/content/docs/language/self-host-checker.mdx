@@ -1,0 +1,133 @@
+---
+title: "Self-Host Checker"
+order: 7
+category: "言語仕様"
+description: "fav/self/checker.fav — Favnir 製型チェッカー"
+---
+
+# Self-Host Checker
+
+`fav/self/checker.fav` — Favnir で実装された型チェッカーです。
+
+v7.7.0 では **エフェクト追跡** / **全 builtin シグネチャ登録** / **エラーコード（E0xxx）** /
+**match 網羅性チェック（Option / Result）** を実装し、Rust 版 `checker.rs` の基本機能と同等になりました。
+
+## アーキテクチャ
+
+```
+fav check foo.fav
+  └─ main.rs → Checker::check_program()    [Rust — 現在の実装]
+
+fav run self/checker.fav -- ...            [将来: checker.fav が代替]
+  └─ check(prog: Program) -> Result<String, String>
+       ├─ infer_expr(expr, env)            型推論パス
+       ├─ infer_expr_effects(expr)         エフェクト収集パス
+       └─ check_match_exhaustive(ty, arms) 網羅性チェックパス
+```
+
+## 3 つの解析パス
+
+### 1. 型推論パス (`infer_expr`)
+
+式を再帰的に走査して型名（`"Int"` / `"String"` / `"Option"` 等）を返します。
+
+```favnir
+fn infer_expr(expr: Expr, env: List<KVPair>) -> Result<String, String>
+```
+
+`KVPair { first: name, second: type_str }` の association list を環境として持ち回ります。
+
+### 2. エフェクト収集パス (`infer_expr_effects`)
+
+式から使用エフェクトを収集します。Result を返さない純粋関数です。
+
+```favnir
+fn infer_expr_effects(expr: Expr) -> List<String>
+```
+
+| ECall の namespace | 生成エフェクト |
+|-------------------|---------------|
+| `"IO"` / `"Compiler"` | `"IO"` |
+| `"Cache"` | `"Cache"` |
+| `"Queue"` | `"Queue"` |
+| `"Email"` | `"Email"` |
+| その他 | なし |
+
+### 3. 網羅性チェックパス (`check_match_exhaustive`)
+
+`EMatch` の scrutinee 型と arms を受け取り、非網羅なら E0004 エラーを返します。
+
+```favnir
+fn check_match_exhaustive(scrut_ty: String, arms: Expr) -> Option<String>
+```
+
+| scrutinee 型 | 必要なコンストラクタ |
+|-------------|---------------------|
+| `"Option"` | `None` + `Some`（または `_`） |
+| `"Result"` | `Ok` + `Err`（または `_`） |
+| その他 | チェックなし（v7.7.0 スコープ外） |
+
+## エラーコード一覧
+
+| コード | 意味 | 例 |
+|--------|------|----|
+| `E0001` | arithmetic 型ミスマッチ | `Int + String` |
+| `E0002` | logical 演算子に Bool 以外 | `1 && "a"` |
+| `E0003` | undeclared effect | `!IO` なしで `IO.println` を呼ぶ |
+| `E0004` | non-exhaustive match | Option に `Some` アームがない |
+
+エラーは `fmt_err("E0001", "...")` で `"E0001: ..."` 形式にフォーマットされます。
+
+## builtin 名前空間カバレッジ（v7.7.0）
+
+| 名前空間 | 登録関数数 | 代表例 |
+|---------|-----------|--------|
+| `IO` | 12 | `argv` / `list_dir_raw` / `write_stderr_raw` |
+| `Compiler` | 2 | `check_raw` / `lineage_text_raw` |
+| `Cache` | 5 | `get_raw` / `set_raw` / `del_prefix_raw` |
+| `Queue` | 4 | `send_raw` / `recv_raw` / `ack_raw` |
+| `Email` | 1 | `send_raw` |
+| `String` | 21 | `concat` / `starts_with` / `split` / `to_bytes` |
+| `List` | 25 | `map` / `fold` / `partition` / `group_by` |
+| `Map` | 12 | `get` / `set` / `from_entries` / `merge_with` |
+| `Int` | 5 | `to_string` / `compare` / `band` / `shr` |
+| `Float` | 2 | `to_string` / `from_int` |
+| `Option` | 3 | `some` / `none` / `and_then` |
+| `Result` | 3 | `ok` / `err` / `and_then` |
+
+## 使用例
+
+```bash
+# checker.fav 自体の型チェック
+fav check fav/self/checker.fav
+
+# checker.fav の Favnir 内テスト実行
+fav test fav/self/checker.fav
+```
+
+## FnDef の effects フィールド
+
+v7.7.0 で `FnDef` に `effects: List<String>` フィールドが追加されました。
+
+```favnir
+type FnDef = {
+    is_public: Bool
+    name: String
+    params: List<Param>
+    ret: TypeExpr
+    effects: List<String>   // ["IO", "Cache"] 等
+    body: Expr
+}
+```
+
+`check_fn_def` は `infer_expr_effects(body)` で推論したエフェクトを
+`fd.effects` と照合し、宣言されていないエフェクトがあれば `E0003` を返します。
+
+## ロードマップ
+
+| バージョン | 変更内容 |
+|-----------|----------|
+| v7.6.0 | checker.fav 初版（Bootstrap 検証用簡略版） |
+| **v7.7.0** | **エフェクト追跡 / builtin 全登録 / E0xxx / match 網羅性** |
+| v7.8.0 | ジェネリクス対応 — `List<A>` の型変数 `A` を追跡、基本単一化 |
+| v7.9.0 | Hindley-Milner 型推論完全版 — `checker.fav` が `checker.rs` の代替に |

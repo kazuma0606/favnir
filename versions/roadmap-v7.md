@@ -297,13 +297,13 @@ bind result <- Sql.from<User>()
 | v6.4.0 | Playground 改善 | 開発体験 |
 | v6.5.0 | サイトドキュメント補完 | エコシステム整備 |
 | v6.6.0 | T.validate 完成 | データ品質 |
-| v6.7.0 | fav deploy ECS/Fargate + E2E デモ | インフラ |
 | v6.8.0 | Rune エコシステム補完 | エコシステム整備 |
 | v6.9.0〜 | OSS 公開準備（v6.10 以降に延びても可） | 公開 |
 | **v7.0.0** | **Schema Authority** | **コアユースケース完成** |
 | v7.1.0 | fav explain --lineage（データリネージ） | データ品質 |
 | v7.2.0 | SQL Rune（型安全クエリビルダ） | dbt 代替 |
 | v7.3.0 | Rune エコシステム拡充 | エコシステム整備 |
+| **v7.x** | **fav deploy ECS/Fargate + E2E デモ** | **インフラ（v7.0 完了後）** |
 
 ---
 

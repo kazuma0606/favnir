@@ -16,6 +16,7 @@ pub struct FieldConstraints {
     pub pattern: Option<String>,
     #[serde(default)]
     pub nullable: bool,
+    pub one_of: Option<Vec<String>>, // e.g. ["pending", "active", "cancelled"]
 }
 
 /// Schema for a single type: field name → constraints.

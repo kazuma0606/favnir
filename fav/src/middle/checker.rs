@@ -5386,6 +5386,14 @@ impl Checker {
                     vec![],
                 )))),
             )),
+            // Validate.rows_raw(type_name, rows) (v6.6.0)
+            ("Validate", "rows_raw") => Some(Type::Result(
+                Box::new(Type::List(Box::new(Type::Unknown))),
+                Box::new(Type::List(Box::new(Type::Named(
+                    "ValidationError".into(),
+                    vec![],
+                )))),
+            )),
             ("Validate", _) => Some(Type::Unknown),
 
             // Crypto.* (v4.5.0) — cryptographic primitives, require !Auth effect

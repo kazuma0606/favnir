@@ -2890,6 +2890,293 @@ public fn main() -> Bool {
     set_schema_registry(HashMap::new());
 }
 
+// ── Validate v6.6.0 — one_of, TypeName.validate, Validate.rows_raw ───────────
+
+#[test]
+fn validate_one_of_valid() {
+    use crate::backend::vm::set_schema_registry;
+    use crate::schemas::{FieldConstraints, ProjectSchemas};
+    use std::collections::HashMap;
+
+    let mut fc = FieldConstraints::default();
+    fc.one_of = Some(vec![
+        "pending".to_string(),
+        "active".to_string(),
+        "cancelled".to_string(),
+    ]);
+    let mut type_schema = HashMap::new();
+    type_schema.insert("status".to_string(), fc);
+    let mut schemas: ProjectSchemas = HashMap::new();
+    schemas.insert("Order".to_string(), type_schema);
+    set_schema_registry(schemas);
+
+    let result = eval(
+        r#"
+type RawOrder = { status: String }
+public fn main() -> Bool {
+    Result.is_ok(Validate.run_raw("Order", RawOrder { status: "active" }))
+}
+"#,
+    );
+    assert_eq!(result, Value::Bool(true));
+    set_schema_registry(HashMap::new());
+}
+
+#[test]
+fn validate_one_of_violation() {
+    use crate::backend::vm::set_schema_registry;
+    use crate::schemas::{FieldConstraints, ProjectSchemas};
+    use std::collections::HashMap;
+
+    let mut fc = FieldConstraints::default();
+    fc.one_of = Some(vec![
+        "pending".to_string(),
+        "active".to_string(),
+        "cancelled".to_string(),
+    ]);
+    let mut type_schema = HashMap::new();
+    type_schema.insert("status".to_string(), fc);
+    let mut schemas: ProjectSchemas = HashMap::new();
+    schemas.insert("Order".to_string(), type_schema);
+    set_schema_registry(schemas);
+
+    let result = eval(
+        r#"
+type RawOrder = { status: String }
+public fn main() -> Bool {
+    Result.is_err(Validate.run_raw("Order", RawOrder { status: "unknown" }))
+}
+"#,
+    );
+    assert_eq!(result, Value::Bool(true));
+    set_schema_registry(HashMap::new());
+}
+
+#[test]
+fn validate_type_dot_validate_ok() {
+    use crate::backend::vm::set_schema_registry;
+    use crate::schemas::{FieldConstraints, ProjectSchemas};
+    use std::collections::HashMap;
+
+    let mut fc = FieldConstraints::default();
+    fc.constraints = vec!["positive".to_string()];
+    let mut type_schema = HashMap::new();
+    type_schema.insert("amount".to_string(), fc);
+    let mut schemas: ProjectSchemas = HashMap::new();
+    schemas.insert("Order".to_string(), type_schema);
+    set_schema_registry(schemas);
+
+    let result = eval(
+        r#"
+type Order = { amount: String }
+public fn main() -> Bool {
+    Result.is_ok(Order.validate(Order { amount: "100" }))
+}
+"#,
+    );
+    assert_eq!(result, Value::Bool(true));
+    set_schema_registry(HashMap::new());
+}
+
+#[test]
+fn validate_type_dot_validate_err() {
+    use crate::backend::vm::set_schema_registry;
+    use crate::schemas::{FieldConstraints, ProjectSchemas};
+    use std::collections::HashMap;
+
+    let mut fc = FieldConstraints::default();
+    fc.constraints = vec!["positive".to_string()];
+    let mut type_schema = HashMap::new();
+    type_schema.insert("amount".to_string(), fc);
+    let mut schemas: ProjectSchemas = HashMap::new();
+    schemas.insert("Order".to_string(), type_schema);
+    set_schema_registry(schemas);
+
+    let result = eval(
+        r#"
+type Order = { amount: String }
+public fn main() -> Bool {
+    Result.is_err(Order.validate(Order { amount: "-1" }))
+}
+"#,
+    );
+    assert_eq!(result, Value::Bool(true));
+    set_schema_registry(HashMap::new());
+}
+
+#[test]
+fn validate_required_field_missing() {
+    use crate::backend::vm::set_schema_registry;
+    use crate::schemas::{FieldConstraints, ProjectSchemas};
+    use std::collections::HashMap;
+
+    let mut fc = FieldConstraints::default();
+    // nullable = false (default) — field is required
+    let mut type_schema = HashMap::new();
+    type_schema.insert("name".to_string(), fc);
+    let mut schemas: ProjectSchemas = HashMap::new();
+    schemas.insert("User".to_string(), type_schema);
+    set_schema_registry(schemas);
+
+    let result = eval(
+        r#"
+type UserRaw = { other: String }
+public fn main() -> Bool {
+    Result.is_err(Validate.run_raw("User", UserRaw { other: "x" }))
+}
+"#,
+    );
+    assert_eq!(result, Value::Bool(true));
+    set_schema_registry(HashMap::new());
+}
+
+#[test]
+fn validate_nullable_field_ok() {
+    use crate::backend::vm::set_schema_registry;
+    use crate::schemas::{FieldConstraints, ProjectSchemas};
+    use std::collections::HashMap;
+
+    let mut fc = FieldConstraints::default();
+    fc.nullable = true;
+    let mut type_schema = HashMap::new();
+    type_schema.insert("note".to_string(), fc);
+    let mut schemas: ProjectSchemas = HashMap::new();
+    schemas.insert("Order".to_string(), type_schema);
+    set_schema_registry(schemas);
+
+    let result = eval(
+        r#"
+type OrderRaw = { other: String }
+public fn main() -> Bool {
+    // note field is absent but nullable=true → should pass
+    Result.is_ok(Validate.run_raw("Order", OrderRaw { other: "x" }))
+}
+"#,
+    );
+    assert_eq!(result, Value::Bool(true));
+    set_schema_registry(HashMap::new());
+}
+
+#[test]
+fn validate_pattern_valid() {
+    use crate::backend::vm::set_schema_registry;
+    use crate::schemas::{FieldConstraints, ProjectSchemas};
+    use std::collections::HashMap;
+
+    let mut fc = FieldConstraints::default();
+    fc.pattern = Some(r"^[^@]+@[^@]+$".to_string());
+    let mut type_schema = HashMap::new();
+    type_schema.insert("email".to_string(), fc);
+    let mut schemas: ProjectSchemas = HashMap::new();
+    schemas.insert("User".to_string(), type_schema);
+    set_schema_registry(schemas);
+
+    let result = eval(
+        r#"
+type UserRaw = { email: String }
+public fn main() -> Bool {
+    Result.is_ok(Validate.run_raw("User", UserRaw { email: "test@example.com" }))
+}
+"#,
+    );
+    assert_eq!(result, Value::Bool(true));
+    set_schema_registry(HashMap::new());
+}
+
+#[test]
+fn validate_multi_constraint_all_pass() {
+    use crate::backend::vm::set_schema_registry;
+    use crate::schemas::{FieldConstraints, ProjectSchemas};
+    use std::collections::HashMap;
+
+    let mut fc_amount = FieldConstraints::default();
+    fc_amount.constraints = vec!["positive".to_string()];
+
+    let mut fc_name = FieldConstraints::default();
+    fc_name.max_length = Some(50);
+
+    let mut type_schema = HashMap::new();
+    type_schema.insert("amount".to_string(), fc_amount);
+    type_schema.insert("name".to_string(), fc_name);
+    let mut schemas: ProjectSchemas = HashMap::new();
+    schemas.insert("Order".to_string(), type_schema);
+    set_schema_registry(schemas);
+
+    let result = eval(
+        r#"
+type RawOrder = { amount: String  name: String }
+public fn main() -> Bool {
+    Result.is_ok(Validate.run_raw("Order", RawOrder { amount: "100" name: "田中" }))
+}
+"#,
+    );
+    assert_eq!(result, Value::Bool(true));
+    set_schema_registry(HashMap::new());
+}
+
+#[test]
+fn validate_multi_constraint_partial_fail() {
+    use crate::backend::vm::set_schema_registry;
+    use crate::schemas::{FieldConstraints, ProjectSchemas};
+    use std::collections::HashMap;
+
+    let mut fc_amount = FieldConstraints::default();
+    fc_amount.constraints = vec!["positive".to_string()];
+
+    let mut fc_name = FieldConstraints::default();
+    fc_name.max_length = Some(5);
+
+    let mut type_schema = HashMap::new();
+    type_schema.insert("amount".to_string(), fc_amount);
+    type_schema.insert("name".to_string(), fc_name);
+    let mut schemas: ProjectSchemas = HashMap::new();
+    schemas.insert("Order".to_string(), type_schema);
+    set_schema_registry(schemas);
+
+    let result = eval(
+        r#"
+type RawOrder = { amount: String  name: String }
+public fn main() -> Bool {
+    // amount=-1 violates positive → Err
+    Result.is_err(Validate.run_raw("Order", RawOrder { amount: "-1" name: "田中" }))
+}
+"#,
+    );
+    assert_eq!(result, Value::Bool(true));
+    set_schema_registry(HashMap::new());
+}
+
+#[test]
+fn validate_rows_raw_schema_violation() {
+    use crate::backend::vm::set_schema_registry;
+    use crate::schemas::{FieldConstraints, ProjectSchemas};
+    use std::collections::HashMap;
+
+    let mut fc = FieldConstraints::default();
+    fc.constraints = vec!["positive".to_string()];
+    let mut type_schema = HashMap::new();
+    type_schema.insert("amount".to_string(), fc);
+    let mut schemas: ProjectSchemas = HashMap::new();
+    schemas.insert("Order".to_string(), type_schema);
+    set_schema_registry(schemas);
+
+    // Simulate rows that would come from a duckdb query result
+    let result = eval(
+        r#"
+type Row = { amount: String }
+fn make_rows() -> List<Row> {
+    List.singleton(Row { amount: "-100" })
+}
+public fn main() -> Bool {
+    bind rows <- make_rows()
+    Result.is_err(Validate.rows_raw("Order", rows))
+}
+"#,
+    );
+    assert_eq!(result, Value::Bool(true));
+    set_schema_registry(HashMap::new());
+}
+
 // ── HTTP v4.2.0 new primitives ────────────────────────────────────────────────
 
 #[test]

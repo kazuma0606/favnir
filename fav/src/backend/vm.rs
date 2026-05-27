@@ -1729,6 +1729,11 @@ impl VM {
                             };
                             vm.stack.push(value);
                         }
+                        // TypeName.validate: treat user-defined type names as namespace (v6.6.0)
+                        VMValue::VariantCtor(ns) => {
+                            let full = format!("{}.{}", ns, field_name);
+                            vm.stack.push(VMValue::Builtin(full));
+                        }
                         _ => return Err(vm.error(artifact, "get_field requires a record value")),
                     }
                 }
@@ -1840,6 +1845,10 @@ impl VM {
                                 _ => VMValue::Builtin(full),
                             };
                             vm.stack.push(value);
+                        }
+                        VMValue::VariantCtor(ns) => {
+                            let full = format!("{}.{}", ns, field_name);
+                            vm.stack.push(VMValue::Builtin(full));
                         }
                         _ => {
                             return Err(vm.error(
@@ -5564,6 +5573,137 @@ fn is_valid_for_type(val: &str, ty: &str) -> bool {
         "Float" => val.parse::<f64>().is_ok(),
         "Bool" => val == "true" || val == "false",
         _ => true, // String and unknown types are always valid
+    }
+}
+
+/// Core validation logic shared by Validate.run_raw and TypeName.validate (v6.6.0).
+/// Checks all registered constraints for the given type and returns Ok(record) or Err(errors).
+fn validate_record_inner(
+    type_name: &str,
+    raw: HashMap<String, VMValue>,
+    schemas: &crate::schemas::ProjectSchemas,
+) -> Result<VMValue, String> {
+    let Some(type_schema) = schemas.get(type_name) else {
+        // No schema registered — pass through as Ok
+        return Ok(ok_vm(VMValue::Record(raw)));
+    };
+
+    let mut errors: Vec<VMValue> = vec![];
+
+    for (field_name, fc) in type_schema {
+        let raw_val = raw.get(field_name.as_str()).and_then(|v| {
+            if let VMValue::Str(s) = v {
+                Some(s.clone())
+            } else {
+                None
+            }
+        });
+
+        match raw_val {
+            None if !fc.nullable => {
+                let mut e = HashMap::new();
+                e.insert("field".into(), VMValue::Str(field_name.clone()));
+                e.insert("constraint".into(), VMValue::Str("required".into()));
+                e.insert("value".into(), VMValue::Str(String::new()));
+                errors.push(VMValue::Record(e));
+            }
+            Some(ref val_str) => {
+                // positive / non_negative
+                if fc.constraints.iter().any(|c| c == "positive") {
+                    if let Ok(n) = val_str.parse::<f64>() {
+                        if n <= 0.0 {
+                            let mut e = HashMap::new();
+                            e.insert("field".into(), VMValue::Str(field_name.clone()));
+                            e.insert("constraint".into(), VMValue::Str("positive".into()));
+                            e.insert("value".into(), VMValue::Str(val_str.clone()));
+                            errors.push(VMValue::Record(e));
+                        }
+                    }
+                }
+                if fc.constraints.iter().any(|c| c == "non_negative") {
+                    if let Ok(n) = val_str.parse::<f64>() {
+                        if n < 0.0 {
+                            let mut e = HashMap::new();
+                            e.insert("field".into(), VMValue::Str(field_name.clone()));
+                            e.insert("constraint".into(), VMValue::Str("non_negative".into()));
+                            e.insert("value".into(), VMValue::Str(val_str.clone()));
+                            errors.push(VMValue::Record(e));
+                        }
+                    }
+                }
+                // min / max
+                if let Some(min) = fc.min {
+                    if let Ok(n) = val_str.parse::<f64>() {
+                        if n < min {
+                            let mut e = HashMap::new();
+                            e.insert("field".into(), VMValue::Str(field_name.clone()));
+                            e.insert("constraint".into(), VMValue::Str(format!("min:{}", min)));
+                            e.insert("value".into(), VMValue::Str(val_str.clone()));
+                            errors.push(VMValue::Record(e));
+                        }
+                    }
+                }
+                if let Some(max) = fc.max {
+                    if let Ok(n) = val_str.parse::<f64>() {
+                        if n > max {
+                            let mut e = HashMap::new();
+                            e.insert("field".into(), VMValue::Str(field_name.clone()));
+                            e.insert("constraint".into(), VMValue::Str(format!("max:{}", max)));
+                            e.insert("value".into(), VMValue::Str(val_str.clone()));
+                            errors.push(VMValue::Record(e));
+                        }
+                    }
+                }
+                // max_length / min_length
+                if let Some(max_len) = fc.max_length {
+                    if val_str.len() > max_len {
+                        let mut e = HashMap::new();
+                        e.insert("field".into(), VMValue::Str(field_name.clone()));
+                        e.insert("constraint".into(), VMValue::Str("max_length".into()));
+                        e.insert("value".into(), VMValue::Str(val_str.clone()));
+                        errors.push(VMValue::Record(e));
+                    }
+                }
+                if let Some(min_len) = fc.min_length {
+                    if val_str.len() < min_len {
+                        let mut e = HashMap::new();
+                        e.insert("field".into(), VMValue::Str(field_name.clone()));
+                        e.insert("constraint".into(), VMValue::Str("min_length".into()));
+                        e.insert("value".into(), VMValue::Str(val_str.clone()));
+                        errors.push(VMValue::Record(e));
+                    }
+                }
+                // pattern
+                if let Some(ref pat) = fc.pattern {
+                    if let Ok(re) = regex::Regex::new(pat) {
+                        if !re.is_match(val_str) {
+                            let mut e = HashMap::new();
+                            e.insert("field".into(), VMValue::Str(field_name.clone()));
+                            e.insert("constraint".into(), VMValue::Str("pattern".into()));
+                            e.insert("value".into(), VMValue::Str(val_str.clone()));
+                            errors.push(VMValue::Record(e));
+                        }
+                    }
+                }
+                // one_of (v6.6.0)
+                if let Some(ref allowed) = fc.one_of {
+                    if !allowed.contains(val_str) {
+                        let mut e = HashMap::new();
+                        e.insert("field".into(), VMValue::Str(field_name.clone()));
+                        e.insert("constraint".into(), VMValue::Str("one_of".into()));
+                        e.insert("value".into(), VMValue::Str(val_str.clone()));
+                        errors.push(VMValue::Record(e));
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    if errors.is_empty() {
+        Ok(ok_vm(VMValue::Record(raw)))
+    } else {
+        Ok(err_vm(VMValue::List(FavList::new(errors))))
     }
 }
 
@@ -10360,128 +10500,65 @@ fn vm_call_builtin(
             };
 
             let schemas = SCHEMA_REGISTRY.with(|s| s.borrow().clone());
-            let Some(type_schema) = schemas.get(&type_name) else {
-                // No schema registered — return empty ok record
-                return Ok(ok_vm(VMValue::Record(HashMap::new())));
+            validate_record_inner(&type_name, raw, &schemas)
+        }
+
+        // Validate.rows_raw(type_name, rows) — validate a list of records (v6.6.0)
+        // Returns Ok(rows) if all pass, Err(first_error_list) on first violation.
+        "Validate.rows_raw" => {
+            if args.len() != 2 {
+                return Err(
+                    "Validate.rows_raw requires 2 arguments (type_name, rows)".to_string()
+                );
+            }
+            let mut it = args.into_iter();
+            let type_name = vm_string(it.next().unwrap(), "Validate.rows_raw type_name")?;
+            let rows = match it.next().unwrap() {
+                VMValue::List(lst) => lst.to_vec(),
+                other => {
+                    return Err(format!(
+                        "Validate.rows_raw: second argument must be List, got {}",
+                        vmvalue_type_name(&other)
+                    ));
+                }
             };
-
-            let mut errors: Vec<VMValue> = vec![];
-
-            for (field_name, fc) in type_schema {
-                let raw_val = raw.get(field_name.as_str()).and_then(|v| {
-                    if let VMValue::Str(s) = v {
-                        Some(s.clone())
-                    } else {
-                        None
-                    }
-                });
-
-                match raw_val {
-                    None if !fc.nullable => {
-                        let mut e = HashMap::new();
-                        e.insert("field".into(), VMValue::Str(field_name.clone()));
-                        e.insert("constraint".into(), VMValue::Str("required".into()));
-                        e.insert("value".into(), VMValue::Str(String::new()));
-                        errors.push(VMValue::Record(e));
-                    }
-                    Some(ref val_str) => {
-                        // positive / non_negative for numeric fields
-                        if fc.constraints.iter().any(|c| c == "positive") {
-                            if let Ok(n) = val_str.parse::<f64>() {
-                                if n <= 0.0 {
-                                    let mut e = HashMap::new();
-                                    e.insert("field".into(), VMValue::Str(field_name.clone()));
-                                    e.insert("constraint".into(), VMValue::Str("positive".into()));
-                                    e.insert("value".into(), VMValue::Str(val_str.clone()));
-                                    errors.push(VMValue::Record(e));
-                                }
-                            }
-                        }
-                        if fc.constraints.iter().any(|c| c == "non_negative") {
-                            if let Ok(n) = val_str.parse::<f64>() {
-                                if n < 0.0 {
-                                    let mut e = HashMap::new();
-                                    e.insert("field".into(), VMValue::Str(field_name.clone()));
-                                    e.insert(
-                                        "constraint".into(),
-                                        VMValue::Str("non_negative".into()),
-                                    );
-                                    e.insert("value".into(), VMValue::Str(val_str.clone()));
-                                    errors.push(VMValue::Record(e));
-                                }
-                            }
-                        }
-                        // min / max
-                        if let Some(min) = fc.min {
-                            if let Ok(n) = val_str.parse::<f64>() {
-                                if n < min {
-                                    let mut e = HashMap::new();
-                                    e.insert("field".into(), VMValue::Str(field_name.clone()));
-                                    e.insert(
-                                        "constraint".into(),
-                                        VMValue::Str(format!("min:{}", min)),
-                                    );
-                                    e.insert("value".into(), VMValue::Str(val_str.clone()));
-                                    errors.push(VMValue::Record(e));
-                                }
-                            }
-                        }
-                        if let Some(max) = fc.max {
-                            if let Ok(n) = val_str.parse::<f64>() {
-                                if n > max {
-                                    let mut e = HashMap::new();
-                                    e.insert("field".into(), VMValue::Str(field_name.clone()));
-                                    e.insert(
-                                        "constraint".into(),
-                                        VMValue::Str(format!("max:{}", max)),
-                                    );
-                                    e.insert("value".into(), VMValue::Str(val_str.clone()));
-                                    errors.push(VMValue::Record(e));
-                                }
-                            }
-                        }
-                        // max_length / min_length
-                        if let Some(max_len) = fc.max_length {
-                            if val_str.len() > max_len {
-                                let mut e = HashMap::new();
-                                e.insert("field".into(), VMValue::Str(field_name.clone()));
-                                e.insert("constraint".into(), VMValue::Str("max_length".into()));
-                                e.insert("value".into(), VMValue::Str(val_str.clone()));
-                                errors.push(VMValue::Record(e));
-                            }
-                        }
-                        if let Some(min_len) = fc.min_length {
-                            if val_str.len() < min_len {
-                                let mut e = HashMap::new();
-                                e.insert("field".into(), VMValue::Str(field_name.clone()));
-                                e.insert("constraint".into(), VMValue::Str("min_length".into()));
-                                e.insert("value".into(), VMValue::Str(val_str.clone()));
-                                errors.push(VMValue::Record(e));
-                            }
-                        }
-                        // pattern
-                        if let Some(ref pat) = fc.pattern {
-                            if let Ok(re) = regex::Regex::new(pat) {
-                                if !re.is_match(val_str) {
-                                    let mut e = HashMap::new();
-                                    e.insert("field".into(), VMValue::Str(field_name.clone()));
-                                    e.insert("constraint".into(), VMValue::Str("pattern".into()));
-                                    e.insert("value".into(), VMValue::Str(val_str.clone()));
-                                    errors.push(VMValue::Record(e));
-                                }
-                            }
+            let schemas = SCHEMA_REGISTRY.with(|s| s.borrow().clone());
+            for row in &rows {
+                if let VMValue::Record(m) = row {
+                    let result = validate_record_inner(&type_name, m.clone(), &schemas)?;
+                    // If any row fails, return the Err immediately
+                    if let VMValue::Variant(ref tag, _) = result {
+                        if tag == "err" {
+                            return Ok(result);
                         }
                     }
-                    _ => {}
                 }
             }
+            Ok(ok_vm(VMValue::List(FavList::new(rows))))
+        }
 
-            if errors.is_empty() {
-                // Reconstruct record from raw map
-                Ok(ok_vm(VMValue::Record(raw)))
-            } else {
-                Ok(err_vm(VMValue::List(FavList::new(errors))))
+        // Dynamic TypeName.validate(record) dispatch (v6.6.0)
+        // Handles calls like Order.validate(raw_order) where Order has a schema entry.
+        name if name.ends_with(".validate") => {
+            let type_name = &name[..name.len() - ".validate".len()];
+            if args.len() != 1 {
+                return Err(format!(
+                    "{}.validate requires 1 argument (record)",
+                    type_name
+                ));
             }
+            let raw = match args.into_iter().next().unwrap() {
+                VMValue::Record(m) => m,
+                other => {
+                    return Err(format!(
+                        "{}.validate: argument must be a Record, got {}",
+                        type_name,
+                        vmvalue_type_name(&other)
+                    ));
+                }
+            };
+            let schemas = SCHEMA_REGISTRY.with(|s| s.borrow().clone());
+            validate_record_inner(type_name, raw, &schemas)
         }
 
         // ── DuckDb.* (v4.3.0) — embedded OLAP engine ───────────────────────

@@ -55,3 +55,62 @@ public fn pipeline() -> Unit !Io !AWS !Db {
   aws.s3.put_object("bucket", "output/summary.json", result)
 }
 ```
+
+## 1 行だけ取得
+
+```favnir
+public fn main() -> Unit !Io !Db {
+  bind conn <- duckdb.open(":memory:")
+  match duckdb.query_one(conn, "SELECT MAX(amount) AS max_amount FROM 'orders.parquet'") {
+    Ok(row)  => IO.println($"最大注文額: {Map.get(row, \"max_amount\")}")
+    Err(e)   => IO.println($"エラー: {e.message}")
+  }
+}
+```
+
+## クエリ実行計画
+
+```favnir
+public fn main() -> Unit !Io !Db {
+  bind conn  <- duckdb.open(":memory:")
+  bind plans <- duckdb.explain(conn, "SELECT * FROM 'orders.parquet' WHERE amount > 1000")
+  IO.println(plans)
+}
+```
+
+## Parquet / CSV ファイル操作
+
+`duckdb.read_parquet` / `duckdb.read_csv` で外部ファイルをそのまま読み込み、
+`duckdb.write_parquet` / `duckdb.write_csv` で SQL 結果をファイルに書き出します。
+
+```favnir
+public fn convert() -> Unit !Io !Db {
+  bind conn <- duckdb.open(":memory:")
+
+  // Parquet を読む
+  bind rows <- duckdb.read_parquet(conn, "data/orders.parquet")
+  IO.println($"{List.length(rows)} 行読み込み")
+
+  // CSV を読む
+  bind csv_rows <- duckdb.read_csv(conn, "data/orders.csv")
+
+  // SQL 結果を Parquet に書き出す
+  duckdb.write_parquet(conn,
+    "SELECT customer, SUM(amount) AS total FROM 'data/orders.parquet' GROUP BY 1",
+    "output/summary.parquet")
+
+  // SQL 結果を CSV に書き出す
+  duckdb.write_csv(conn,
+    "SELECT * FROM 'data/orders.parquet' WHERE amount > 1000",
+    "output/large_orders.csv")
+}
+```
+
+### Parquet/CSV IO 関数一覧
+
+| 関数 | 説明 |
+|------|------|
+| `duckdb.read_parquet(conn, path)` | Parquet ファイルを読む |
+| `duckdb.read_csv(conn, path)` | CSV ファイルを自動スキーマ検出で読む |
+| `duckdb.write_parquet(conn, sql, path)` | SQL 結果を Parquet に書き出す |
+| `duckdb.write_csv(conn, sql, path)` | SQL 結果を CSV に書き出す |

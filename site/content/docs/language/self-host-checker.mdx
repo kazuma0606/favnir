@@ -268,10 +268,60 @@ fn infer_hm(expr: Expr, env: List<KVPair>, state: InfState) -> Result<InfResult,
 | `EBind(name, val, body)` | val を推論 → env に追加 → body を推論（状態スレッディング） |
 | `EIf(cond, then, else)` | then/else を推論 → `unify_deep` で型を統合 |
 | それ以外 | `infer_expr` にフォールバック |
+| `ECall(ns, fname, args)` | `infer_call_hm` で処理（v8.0.0 以降） |
 
 `check_fn_def` は `infer_expr` から `infer_hm` に切り替え済み。
 
-## エラーコード一覧（v7.9.0 時点）
+## v8.0.0: Let ポリモーフィズム（型スキーム generalization / instantiation）
+
+v8.0.0 では `checker.fav` に **Let 多相（Parametric Polymorphism）** を実装した。
+ユーザー定義ジェネリクス関数の呼び出しを `infer_hm` が正しく推論できる。
+
+### 型スキーム文字列形式
+
+環境 `List<KVPair>` は `String → String` の連想リストのため、TypeScheme を以下の形式で直列化する。
+
+```
+"forall|<vars>|<params>|<ret>"
+```
+
+| セクション | 内容 |
+|------------|------|
+| `"forall"` | スキームであることの識別子 |
+| `<vars>` | `,` 結合の型変数名（例: `"A,B"`） |
+| `<params>` | `;` 結合のパラメータ型（例: `"List<A>;Fn"`） |
+| `<ret>` | 戻り型文字列（例: `"Option<A>"`） |
+
+型変数を持たない関数（monotype）はそのまま戻り型文字列を格納する。
+
+### 新規関数
+
+| 関数 | 説明 |
+|------|------|
+| `is_type_var_extended(s)` | 1文字 A〜Z または 2文字（`T0`〜`Z9`）の型変数か判定 |
+| `collect_type_vars_from_te(te)` | TypeExpr から型変数名を再帰収集 |
+| `list_dedup(lst)` | リストの重複除去（初出順を維持） |
+| `fn_to_scheme_str(fd)` | FnDef からスキーム文字列を構築 |
+| `collect_fn_schemes(items, env)` | 全 IFn をスキャンしてスキーム env を構築（pre-pass） |
+| `build_scheme_subst_inner(param_tys, arg_tys, subst)` | `unify_deep` をリストで繰り返し適用 |
+| `apply_scheme_subst(ret_ty, vars, subst)` | `String.replace` で型変数を具体化 |
+| `instantiate_fn_scheme(scheme, arg_tys, state)` | スキームを実引数型で具体化 |
+| `infer_call_user(fname, args, env, state)` | ユーザー定義関数の呼び出し推論 |
+| `infer_call_hm(ns, fname, args, env, state)` | `ns=""` なら `infer_call_user`、それ以外は既存 `infer_call` にフォールバック |
+
+### 動作例
+
+```favnir
+fn first_elem(xs: List<A>) -> Option<A> {
+    List.first(xs)
+}
+
+// infer_hm が first_elem([1,2,3]) の戻り型を "Option<Int>" と推論できる
+```
+
+`check` 関数は `collect_fn_schemes` で事前に全関数スキームを収集してから `check_items` を呼ぶ。
+
+## エラーコード一覧（v8.0.0 時点）
 
 | コード | 意味 |
 |--------|------|
@@ -289,5 +339,5 @@ fn infer_hm(expr: Expr, env: List<KVPair>, state: InfState) -> Result<InfResult,
 | v7.6.0 | checker.fav 初版（Bootstrap 検証用簡略版） |
 | v7.7.0 | エフェクト追跡 / builtin 全登録 / E0xxx / match 網羅性 |
 | v7.8.0 | ジェネリクス — TyVar / Subst / unify / parameterized builtin 推論 |
-| **v7.9.0** | **HM 型推論 — occurs_in / unify_deep / InfState / infer_hm** |
-| v8.0.0 | Let ポリモーフィズム / 型スキーム generalization |
+| v7.9.0 | HM 型推論 — occurs_in / unify_deep / InfState / infer_hm |
+| **v8.0.0** | **Let ポリモーフィズム — 型スキーム generalization / instantiation / infer_call_hm** |

@@ -971,8 +971,218 @@ fn infer_hm(expr: Expr, env: List<KVPair>, state: InfState) -> Result<InfResult,
             Result.and_then(unify_deep(tr.ty, er.ty, er.subst), |s2|
                 Result.ok(inf_result_of(apply_subst(s2, tr.ty),
                     inf_state_new(s2, er.counter))))))
+        ECall(ns, fname, args) => infer_call_hm(ns, fname, args, env, state)
         _ => Result.and_then(infer_expr(expr, env), |ty|
             Result.ok(inf_result_of(ty, state)))
+    }
+}
+
+// ── Type variable (extended) ──────────────────────────────────────────────────
+
+fn is_type_var_extended(s: String) -> Bool {
+    if is_type_var(s) { true }
+    else {
+    if String.length(s) == 2 {
+        bind first  <- String.slice(s, 0, 1)
+        bind second <- String.slice(s, 1, 2)
+        is_type_var(first) &&
+        (second == "0" || second == "1" || second == "2" || second == "3" ||
+         second == "4" || second == "5" || second == "6" || second == "7" ||
+         second == "8" || second == "9")
+    } else { false }
+    }
+}
+
+fn list_dedup_inner(lst: List<String>, seen: List<String>, acc: List<String>) -> List<String> {
+    match List.first(lst) {
+        None    => acc
+        Some(h) => {
+            if List.contains(seen, h) {
+                list_dedup_inner(List.drop(lst, 1), seen, acc)
+            } else {
+                list_dedup_inner(List.drop(lst, 1),
+                    List.push(seen, h), List.push(acc, h))
+            }
+        }
+    }
+}
+
+fn list_dedup(lst: List<String>) -> List<String> {
+    list_dedup_inner(lst, List.empty(), List.empty())
+}
+
+fn collect_type_vars_from_te(te: TypeExpr) -> List<String> {
+    match te {
+        TeSimple(s)    => {
+            if is_type_var_extended(s) { List.push(List.empty(), s) }
+            else { List.empty() }
+        }
+        TeList(inner)  => collect_type_vars_from_te(inner)
+        TeOption(inner) => collect_type_vars_from_te(inner)
+        TeResult(a, b) => List.concat(collect_type_vars_from_te(a),
+                                      collect_type_vars_from_te(b))
+        TeMap(k, v)    => List.concat(collect_type_vars_from_te(k),
+                                      collect_type_vars_from_te(v))
+        TeFn(a, b)     => List.concat(collect_type_vars_from_te(a),
+                                      collect_type_vars_from_te(b))
+    }
+}
+
+fn collect_type_vars_from_params_inner(params: List<Param>, acc: List<String>) -> List<String> {
+    match List.first(params) {
+        None    => acc
+        Some(p) => collect_type_vars_from_params_inner(
+                       List.drop(params, 1),
+                       List.concat(acc, collect_type_vars_from_te(p.ty)))
+    }
+}
+
+fn collect_type_vars_from_params(params: List<Param>) -> List<String> {
+    collect_type_vars_from_params_inner(params, List.empty())
+}
+
+// ── Scheme string helpers ──────────────────────────────────────────────────────
+
+fn is_fn_scheme_str(s: String) -> Bool {
+    String.starts_with(s, "forall|")
+}
+
+fn fn_scheme_section(s: String, idx: Int) -> String {
+    bind parts <- String.split(s, "|")
+    match List.first(List.drop(parts, idx)) {
+        None    => ""
+        Some(v) => v
+    }
+}
+
+fn fn_scheme_vars_str(s: String) -> String   { fn_scheme_section(s, 1) }
+fn fn_scheme_params_str(s: String) -> String { fn_scheme_section(s, 2) }
+fn fn_scheme_ret(s: String) -> String        { fn_scheme_section(s, 3) }
+
+fn make_fn_scheme_str(vars_csv: String, params_semi: String, ret: String) -> String {
+    if String.length(vars_csv) == 0 { ret }
+    else {
+        String.concat("forall|",
+        String.concat(vars_csv,
+        String.concat("|",
+        String.concat(params_semi,
+        String.concat("|", ret)))))
+    }
+}
+
+// ── Scheme construction and pre-pass ──────────────────────────────────────────
+
+fn params_to_type_str_list_inner(params: List<Param>, acc: List<String>) -> List<String> {
+    match List.first(params) {
+        None    => acc
+        Some(p) => params_to_type_str_list_inner(
+                       List.drop(params, 1),
+                       List.concat(acc, List.push(List.empty(), type_expr_to_str(p.ty))))
+    }
+}
+
+fn params_to_type_str_list(params: List<Param>) -> List<String> {
+    params_to_type_str_list_inner(params, List.empty())
+}
+
+fn fn_to_scheme_str(fd: FnDef) -> String {
+    bind all_vars <- list_dedup(List.concat(
+        collect_type_vars_from_params(fd.params),
+        collect_type_vars_from_te(fd.ret)))
+    if List.length(all_vars) == 0 {
+        type_expr_to_str(fd.ret)
+    } else {
+        bind vars_csv    <- String.join(all_vars, ",")
+        bind param_types <- params_to_type_str_list(fd.params)
+        bind params_semi <- String.join(param_types, ";")
+        bind ret_str     <- type_expr_to_str(fd.ret)
+        make_fn_scheme_str(vars_csv, params_semi, ret_str)
+    }
+}
+
+fn collect_fn_schemes(items: List<Item>, env: List<KVPair>) -> List<KVPair> {
+    match List.first(items) {
+        None       => env
+        Some(item) => match item {
+            IFn(fd) => collect_fn_schemes(List.drop(items, 1),
+                           env_insert(env, fd.name, fn_to_scheme_str(fd)))
+            _       => collect_fn_schemes(List.drop(items, 1), env)
+        }
+    }
+}
+
+// ── Scheme instantiation ───────────────────────────────────────────────────────
+
+fn build_scheme_subst_inner(param_tys: List<String>, arg_tys: List<String>, subst: List<KVPair>) -> Result<List<KVPair>, String> {
+    match List.first(param_tys) {
+        None     => Result.ok(subst)
+        Some(pt) => {
+            match List.first(arg_tys) {
+                None     => Result.ok(subst)
+                Some(at) =>
+                    Result.and_then(unify_deep(pt, at, subst), |s2|
+                    build_scheme_subst_inner(
+                        List.drop(param_tys, 1),
+                        List.drop(arg_tys, 1),
+                        s2))
+            }
+        }
+    }
+}
+
+fn apply_scheme_subst_inner(ret_ty: String, vars: List<String>, subst: List<KVPair>) -> String {
+    match List.first(vars) {
+        None    => ret_ty
+        Some(v) => {
+            bind resolved <- match subst_lookup(subst, v) {
+                Some(t) => t
+                None    => v
+            }
+            apply_scheme_subst_inner(
+                String.replace(ret_ty, v, resolved),
+                List.drop(vars, 1),
+                subst)
+        }
+    }
+}
+
+fn apply_scheme_subst(ret_ty: String, vars: List<String>, subst: List<KVPair>) -> String {
+    apply_scheme_subst_inner(ret_ty, vars, subst)
+}
+
+fn instantiate_fn_scheme(scheme: String, arg_tys: List<String>, state: InfState) -> Result<InfResult, String> {
+    bind vars_str   <- fn_scheme_vars_str(scheme)
+    bind params_str <- fn_scheme_params_str(scheme)
+    bind ret_ty     <- fn_scheme_ret(scheme)
+    bind vars       <- String.split(vars_str, ",")
+    bind param_tys  <- String.split(params_str, ";")
+    Result.and_then(
+        build_scheme_subst_inner(param_tys, arg_tys, state.subst),
+        |subst2| Result.ok(inf_result_of(
+            apply_scheme_subst(ret_ty, vars, subst2),
+            inf_state_new(subst2, state.counter))))
+}
+
+fn infer_call_user(fname: String, args: Expr, env: List<KVPair>, state: InfState) -> Result<InfResult, String> {
+    match env_lookup(env, fname) {
+        None     => Result.ok(inf_result_of("Unknown", state))
+        Some(ty) => {
+            if is_fn_scheme_str(ty) {
+                bind arg_tys <- infer_arg_tys(args, env)
+                instantiate_fn_scheme(ty, arg_tys, state)
+            } else {
+                Result.ok(inf_result_of(ty, state))
+            }
+        }
+    }
+}
+
+fn infer_call_hm(ns: String, fname: String, args: Expr, env: List<KVPair>, state: InfState) -> Result<InfResult, String> {
+    if ns == "" {
+        infer_call_user(fname, args, env, state)
+    } else {
+        Result.and_then(infer_call(ns, fname, args, env), |ty|
+        Result.ok(inf_result_of(ty, state)))
     }
 }
 
@@ -999,8 +1209,9 @@ fn check_items(items: List<Item>, env: List<KVPair>) -> Result<String, String> {
 }
 
 public fn check(prog: Program) -> Result<String, String> {
-    bind init_env <- env_empty()
-    check_items(prog.items, init_env)
+    bind init_env   <- env_empty()
+    bind scheme_env <- collect_fn_schemes(prog.items, init_env)
+    check_items(prog.items, scheme_env)
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -1207,5 +1418,58 @@ test "infer_hm evar fresh" {
     match infer_hm(EVar("x"), env_empty(), s0) {
         Err(_) => false
         Ok(r)  => r.ty == "t0" && r.counter == 1
+    }
+}
+
+test "is_type_var_ext single" {
+    is_type_var_extended("A") && is_type_var_extended("Z")
+}
+
+test "is_type_var_ext two-char" {
+    is_type_var_extended("T0") && is_type_var_extended("A9")
+}
+
+test "is_type_var_ext not" {
+    is_type_var_extended("Int") == false && is_type_var_extended("AB") == false
+}
+
+test "collect_te vars simple" {
+    match List.first(collect_type_vars_from_te(TeSimple("A"))) {
+        None    => false
+        Some(v) => v == "A"
+    }
+}
+
+test "collect_te vars none" {
+    List.length(collect_type_vars_from_te(TeSimple("Int"))) == 0
+}
+
+test "is_fn_scheme_str true" {
+    is_fn_scheme_str("forall|A|List<A>|Option<A>") == true
+}
+
+test "is_fn_scheme_str false" {
+    is_fn_scheme_str("Option<Int>") == false
+}
+
+test "fn_scheme_ret" {
+    fn_scheme_ret("forall|A|List<A>|Option<A>") == "Option<A>"
+}
+
+test "instantiate simple" {
+    bind s0 <- inf_state_new(subst_empty(), 0)
+    match instantiate_fn_scheme("forall|A|A|A",
+            List.push(List.empty(), "Int"), s0) {
+        Err(_) => false
+        Ok(r)  => r.ty == "Int"
+    }
+}
+
+test "instantiate nested" {
+    bind s0 <- inf_state_new(subst_empty(), 0)
+    match instantiate_fn_scheme("forall|A|List<A>|Option<A>",
+            List.push(List.empty(), "List<String>"), s0) {
+        Err(_) => false
+        Ok(r)  => r.ty == "Option<String>"
     }
 }

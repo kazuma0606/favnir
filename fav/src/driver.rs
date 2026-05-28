@@ -17468,3 +17468,81 @@ public fn main() -> String {
         assert_eq!(result, Value::Str("t0".to_string()), "expected t0");
     }
 }
+
+// ── checker_v80_tests (v8.0.0) ────────────────────────────────────────────────
+#[cfg(test)]
+mod checker_v80_tests {
+    use crate::frontend::parser::Parser;
+    use crate::middle::checker::Checker;
+    use crate::backend::vm::VM;
+    use crate::middle::compiler::compile_program;
+    use crate::backend::codegen::codegen_program;
+    use crate::value::Value;
+
+    fn checker_src() -> String {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("self")
+            .join("checker.fav");
+        std::fs::read_to_string(&path).expect("checker.fav")
+    }
+
+    fn run_checker_inline(test_main: &str) -> Value {
+        let src = format!("{}\n\n{}", checker_src(), test_main);
+        let prog = Parser::parse_str(&src, "checker_test.fav").expect("parse");
+        let (errors, _) = Checker::check_program(&prog);
+        assert!(
+            errors.is_empty(),
+            "type errors: {:?}",
+            errors.iter().map(|e| &e.message).collect::<Vec<_>>()
+        );
+        let ir = compile_program(&prog);
+        let artifact = codegen_program(&ir);
+        let fn_idx = artifact.fn_idx_by_name("main").expect("main function");
+        VM::run(&artifact, fn_idx, vec![]).expect("run")
+    }
+
+    #[test]
+    fn checker_fav_scheme_str() {
+        // is_fn_scheme_str("forall|A|List<A>|Option<A>") → true
+        let result = run_checker_inline(r#"
+public fn main() -> Bool {
+    is_fn_scheme_str("forall|A|List<A>|Option<A>")
+}
+"#);
+        assert_eq!(result, Value::Bool(true), "expected true");
+    }
+
+    #[test]
+    fn checker_fav_instantiate_scheme() {
+        // instantiate_fn_scheme("forall|A|List<A>|Option<A>", ["List<Int>"], s0) → "Option<Int>"
+        let result = run_checker_inline(r#"
+public fn main() -> String {
+    bind s0 <- inf_state_new(subst_empty(), 0)
+    match instantiate_fn_scheme("forall|A|List<A>|Option<A>",
+            List.push(List.empty(), "List<Int>"), s0) {
+        Err(e) => e
+        Ok(r)  => r.ty
+    }
+}
+"#);
+        assert_eq!(result, Value::Str("Option<Int>".to_string()), "expected Option<Int>");
+    }
+
+    #[test]
+    fn checker_fav_infer_hm_generic_call() {
+        // user-defined fn first_elem(xs: List<A>) -> Option<A>
+        // infer_hm(ECall("", "first_elem", EArgList(EVar("xs"), EArgNil)), env, s0) → "Option<Int>"
+        let result = run_checker_inline(r#"
+public fn main() -> String {
+    bind s0   <- inf_state_new(subst_empty(), 0)
+    bind env  <- env_insert(env_empty(), "first_elem", "forall|A|List<A>|Option<A>")
+    bind env2 <- env_insert(env, "xs", "List<Int>")
+    match infer_hm(ECall("", "first_elem", EArgList(EVar("xs"), EArgNil)), env2, s0) {
+        Err(e) => e
+        Ok(r)  => r.ty
+    }
+}
+"#);
+        assert_eq!(result, Value::Str("Option<Int>".to_string()), "expected Option<Int>");
+    }
+}

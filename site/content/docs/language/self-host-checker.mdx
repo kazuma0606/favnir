@@ -199,11 +199,95 @@ type_param_env(["A", "B"], ["Int", "String"])
 | `E0004` | non-exhaustive match |
 | `E0005` | 型単一化の失敗（conflict / cannot unify）|
 
+## v7.9.0: HM 型推論（完全版）
+
+### occurs_in — 無限型防止
+
+型変数が型文字列中に出現するかを確認します。`unify_deep` の occurs check に使用。
+
+```favnir
+occurs_in("A", "A")           // true
+occurs_in("A", "Int")         // false
+occurs_in("A", "List<A>")     // true
+occurs_in("A", "List<Int>")   // false
+```
+
+### unify_deep — ネスト型の単一化
+
+v7.8.0 の `unify`（flat 型のみ）を拡張し、`"List<A>"` vs `"List<Int>"` のようなパラメータ化型を再帰的に単一化します。
+
+```favnir
+unify_deep("List<A>", "List<Int>", subst_empty())   // Ok([A→Int])
+unify_deep("List<Int>", "List<Int>", subst_empty()) // Ok([])
+unify_deep("List<A>", "Option<Int>", subst_empty()) // Err("E0005: cannot unify List with Option")
+unify_deep("A", "List<A>", subst_empty())           // Err("E0006: occurs check failed: A in List<A>")
+```
+
+| ケース | 結果 |
+|--------|------|
+| `t1 == t2` | `Ok(subst)` |
+| `is_type_var(t1)` + occurs check OK | subst に追加 |
+| `is_type_var(t1)` + occurs check NG | `Err("E0006: occurs check failed: ...")` |
+| 両方がパラメータ化型 + outer 一致 | inner を再帰的に `unify_deep` |
+| 両方がパラメータ化型 + outer 不一致 | `Err("E0005: cannot unify outer1 with outer2")` |
+
+### InfState / InfResult — 推論状態レコード
+
+```favnir
+type InfState = {
+    subst:   List<KVPair>   // 型変数置換環境
+    counter: Int             // fresh 変数カウンタ
+}
+
+type InfResult = {
+    ty:      String          // 推論結果型
+    subst:   List<KVPair>
+    counter: Int
+}
+```
+
+### fresh_var — 新鮮型変数生成
+
+```favnir
+fresh_var(0)   // "t0"
+fresh_var(10)  // "t10"
+```
+
+### infer_hm — HM 型推論パス
+
+状態を引き回しながら式を型推論します。
+
+```favnir
+fn infer_hm(expr: Expr, env: List<KVPair>, state: InfState) -> Result<InfResult, String>
+```
+
+| ノード | 処理 |
+|--------|------|
+| `ELit(_)` | リテラル型を直接返す |
+| `EVar(name)` | env にあれば型を返す、なければ `fresh_var` を生成（counter+1） |
+| `EBind(name, val, body)` | val を推論 → env に追加 → body を推論（状態スレッディング） |
+| `EIf(cond, then, else)` | then/else を推論 → `unify_deep` で型を統合 |
+| それ以外 | `infer_expr` にフォールバック |
+
+`check_fn_def` は `infer_expr` から `infer_hm` に切り替え済み。
+
+## エラーコード一覧（v7.9.0 時点）
+
+| コード | 意味 |
+|--------|------|
+| `E0001` | arithmetic 型ミスマッチ |
+| `E0002` | logical 演算子に Bool 以外 |
+| `E0003` | undeclared effect |
+| `E0004` | non-exhaustive match |
+| `E0005` | 型単一化の失敗（conflict / cannot unify）|
+| `E0006` | occurs check 失敗（無限型）|
+
 ## ロードマップ
 
 | バージョン | 変更内容 |
 |-----------|----------|
 | v7.6.0 | checker.fav 初版（Bootstrap 検証用簡略版） |
 | v7.7.0 | エフェクト追跡 / builtin 全登録 / E0xxx / match 網羅性 |
-| **v7.8.0** | **ジェネリクス — TyVar / Subst / unify / parameterized builtin 推論** |
-| v7.9.0 | Hindley-Milner 型推論完全版 — `checker.fav` が `checker.rs` の代替に |
+| v7.8.0 | ジェネリクス — TyVar / Subst / unify / parameterized builtin 推論 |
+| **v7.9.0** | **HM 型推論 — occurs_in / unify_deep / InfState / infer_hm** |
+| v8.0.0 | Let ポリモーフィズム / 型スキーム generalization |

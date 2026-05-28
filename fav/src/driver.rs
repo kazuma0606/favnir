@@ -17396,3 +17396,75 @@ public fn main() -> String {
         );
     }
 }
+
+// ── checker_v79_tests (v7.9.0) ────────────────────────────────────────────────
+#[cfg(test)]
+mod checker_v79_tests {
+    use crate::frontend::parser::Parser;
+    use crate::middle::checker::Checker;
+    use crate::backend::vm::VM;
+    use crate::middle::compiler::compile_program;
+    use crate::backend::codegen::codegen_program;
+    use crate::value::Value;
+
+    fn checker_src() -> String {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("self")
+            .join("checker.fav");
+        std::fs::read_to_string(&path).expect("checker.fav")
+    }
+
+    fn run_checker_inline(test_main: &str) -> Value {
+        let src = format!("{}\n\n{}", checker_src(), test_main);
+        let prog = Parser::parse_str(&src, "checker_test.fav").expect("parse");
+        let (errors, _) = Checker::check_program(&prog);
+        assert!(
+            errors.is_empty(),
+            "type errors: {:?}",
+            errors.iter().map(|e| &e.message).collect::<Vec<_>>()
+        );
+        let ir = compile_program(&prog);
+        let artifact = codegen_program(&ir);
+        let fn_idx = artifact.fn_idx_by_name("main").expect("main function");
+        VM::run(&artifact, fn_idx, vec![]).expect("run")
+    }
+
+    #[test]
+    fn checker_fav_occurs_in() {
+        // occurs_in("A", "List<A>") → true
+        let result = run_checker_inline(r#"
+public fn main() -> Bool {
+    occurs_in("A", "List<A>")
+}
+"#);
+        assert_eq!(result, Value::Bool(true), "expected true");
+    }
+
+    #[test]
+    fn checker_fav_unify_deep_nested() {
+        // unify_deep("List<A>", "List<Int>", subst_empty()) → Ok, A → "Int"
+        let result = run_checker_inline(r#"
+public fn main() -> String {
+    match unify_deep("List<A>", "List<Int>", subst_empty()) {
+        Err(_) => "error"
+        Ok(s)  => match subst_lookup(s, "A") {
+            None    => "none"
+            Some(t) => t
+        }
+    }
+}
+"#);
+        assert_eq!(result, Value::Str("Int".to_string()), "expected Int");
+    }
+
+    #[test]
+    fn checker_fav_fresh_var() {
+        // fresh_var(0) → "t0"
+        let result = run_checker_inline(r#"
+public fn main() -> String {
+    fresh_var(0)
+}
+"#);
+        assert_eq!(result, Value::Str("t0".to_string()), "expected t0");
+    }
+}

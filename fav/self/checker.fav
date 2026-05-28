@@ -163,6 +163,17 @@ type CheckState = {
     errors: List<String>
 }
 
+type InfState = {
+    subst:   List<KVPair>
+    counter: Int
+}
+
+type InfResult = {
+    ty:      String
+    subst:   List<KVPair>
+    counter: Int
+}
+
 fn env_empty() -> List<KVPair> {
     List.take_while(List.singleton(KVPair { first: "", second: "" }), |v| false)
 }
@@ -584,6 +595,74 @@ fn unify(t1: String, t2: String, subst: List<KVPair>) -> Result<List<KVPair>, St
     }}}}
 }
 
+// ── Occurs check and deep unification ────────────────────────────────────────
+
+fn occurs_in(var: String, ty: String) -> Bool {
+    if ty == var { true }
+    else {
+    if String.contains(ty, "<") {
+        bind inner <- type_str_inner(ty)
+        inner == var || String.contains(inner, var)
+    } else { false }
+    }
+}
+
+fn unify_deep(t1: String, t2: String, subst: List<KVPair>) -> Result<List<KVPair>, String> {
+    if t1 == "Unknown" || t2 == "Unknown" { Result.ok(subst) }
+    else {
+    if t1 == t2 { Result.ok(subst) }
+    else {
+    if is_type_var(t1) {
+        if occurs_in(t1, t2) {
+            Result.err(fmt_err("E0006",
+                String.concat("occurs check failed: ",
+                String.concat(t1, String.concat(" in ", t2)))))
+        } else {
+            match subst_lookup(subst, t1) {
+                None => Result.ok(subst_insert(subst, t1, t2))
+                Some(existing) =>
+                    if existing == t2 { Result.ok(subst) }
+                    else { Result.err(fmt_err("E0005",
+                        String.concat("conflict: ", String.concat(t1,
+                        String.concat(" was ", String.concat(existing,
+                        String.concat(", got ", t2))))))) }
+            }
+        }
+    } else {
+    if is_type_var(t2) {
+        if occurs_in(t2, t1) {
+            Result.err(fmt_err("E0006",
+                String.concat("occurs check failed: ",
+                String.concat(t2, String.concat(" in ", t1)))))
+        } else {
+            match subst_lookup(subst, t2) {
+                None => Result.ok(subst_insert(subst, t2, t1))
+                Some(existing) =>
+                    if existing == t1 { Result.ok(subst) }
+                    else { Result.err(fmt_err("E0005",
+                        String.concat("conflict: ", String.concat(t2,
+                        String.concat(" was ", String.concat(existing,
+                        String.concat(", got ", t1))))))) }
+            }
+        }
+    } else {
+    if String.contains(t1, "<") && String.contains(t2, "<") {
+        bind o1 <- type_str_outer(t1)
+        bind o2 <- type_str_outer(t2)
+        if o1 == o2 {
+            bind i1 <- type_str_inner(t1)
+            bind i2 <- type_str_inner(t2)
+            unify_deep(i1, i2, subst)
+        } else {
+            Result.err(fmt_err("E0005",
+                String.concat("cannot unify ", String.concat(o1, String.concat(" with ", o2)))))
+        }
+    } else {
+        Result.err(fmt_err("E0005",
+            String.concat("cannot unify ", String.concat(t1, String.concat(" with ", t2)))))
+    }}}}}
+}
+
 // ── Pattern environment extension ─────────────────────────────────────────────
 
 fn env_from_pat(pat: Pat, env: List<KVPair>) -> List<KVPair> {
@@ -816,9 +895,11 @@ fn check_fn_def(fd: FnDef, env: List<KVPair>) -> Result<String, String> {
     bind inferred_effs <- infer_expr_effects(fd.body)
     match check_effects_all(fd.effects, inferred_effs) {
         Some(err) => Result.err(err)
-        None =>
-            Result.and_then(infer_expr(fd.body, param_env), |body_ty|
+        None => {
+            bind init_state <- inf_state_new(subst_empty(), 0)
+            Result.and_then(infer_hm(fd.body, param_env, init_state), |r|
             Result.ok(fd.name))
+        }
     }
 }
 
@@ -841,6 +922,58 @@ fn type_param_env_inner(params: List<String>, args: List<String>, acc: List<KVPa
 
 fn type_param_env(params: List<String>, args: List<String>) -> List<KVPair> {
     type_param_env_inner(params, args, subst_empty())
+}
+
+// ── HM inference state helpers ────────────────────────────────────────────────
+
+fn fresh_var(counter: Int) -> String {
+    String.concat("t", Int.to_string(counter))
+}
+
+fn inf_state_new(subst: List<KVPair>, counter: Int) -> InfState {
+    InfState { subst: subst, counter: counter }
+}
+
+fn inf_result_of(ty: String, state: InfState) -> InfResult {
+    InfResult { ty: ty, subst: state.subst, counter: state.counter }
+}
+
+fn inf_state_of(r: InfResult) -> InfState {
+    InfState { subst: r.subst, counter: r.counter }
+}
+
+// ── HM type inference ─────────────────────────────────────────────────────────
+
+fn infer_hm_let(vname: String, val_e: Expr, cont_e: Expr, env: List<KVPair>, state: InfState)
+    -> Result<InfResult, String>
+{
+    Result.and_then(infer_hm(val_e, env, state), |vr|
+        infer_hm(cont_e, env_insert(env, vname, vr.ty), inf_state_of(vr)))
+}
+
+fn infer_hm(expr: Expr, env: List<KVPair>, state: InfState) -> Result<InfResult, String> {
+    match expr {
+        ELit(lit) => Result.ok(inf_result_of(infer_lit(lit), state))
+        EVar(name) => {
+            match env_lookup(env, name) {
+                Some(ty) => Result.ok(inf_result_of(ty, state))
+                None     => {
+                    bind tv <- fresh_var(state.counter)
+                    Result.ok(inf_result_of(tv,
+                        inf_state_new(state.subst, state.counter + 1)))
+                }
+            }
+        }
+        EBind(vname, val_e, cont_e) => infer_hm_let(vname, val_e, cont_e, env, state)
+        EIf(cond, then_e, else_e) =>
+            Result.and_then(infer_hm(then_e, env, state), |tr|
+            Result.and_then(infer_hm(else_e, env, inf_state_of(tr)), |er|
+            Result.and_then(unify_deep(tr.ty, er.ty, er.subst), |s2|
+                Result.ok(inf_result_of(apply_subst(s2, tr.ty),
+                    inf_state_new(s2, er.counter))))))
+        _ => Result.and_then(infer_expr(expr, env), |ty|
+            Result.ok(inf_result_of(ty, state)))
+    }
 }
 
 // ── Item / program checker ────────────────────────────────────────────────────
@@ -1015,4 +1148,64 @@ test "type_str_inner option" {
 
 test "generic list first" {
     infer_generic_list("first", List.push(List.empty(), "List<Int>")) == "Option<Int>"
+}
+
+test "occurs_in same" {
+    occurs_in("A", "A")
+}
+
+test "occurs_in different" {
+    occurs_in("A", "Int") == false
+}
+
+test "occurs_in nested" {
+    occurs_in("A", "List<A>")
+}
+
+test "fresh_var zero" {
+    fresh_var(0) == "t0"
+}
+
+test "fresh_var ten" {
+    fresh_var(10) == "t10"
+}
+
+test "unify_deep same" {
+    match unify_deep("Int", "Int", subst_empty()) {
+        Err(_) => false
+        Ok(s)  => List.length(s) == 0
+    }
+}
+
+test "unify_deep var nested" {
+    match unify_deep("List<A>", "List<Int>", subst_empty()) {
+        Err(_) => false
+        Ok(s)  => match subst_lookup(s, "A") {
+            None    => false
+            Some(t) => t == "Int"
+        }
+    }
+}
+
+test "unify_deep outer mismatch" {
+    match unify_deep("List<A>", "Option<Int>", subst_empty()) {
+        Err(e) => String.starts_with(e, "E0005")
+        Ok(_)  => false
+    }
+}
+
+test "infer_hm int" {
+    bind s0 <- inf_state_new(subst_empty(), 0)
+    match infer_hm(ELit(LInt(42)), env_empty(), s0) {
+        Err(_) => false
+        Ok(r)  => r.ty == "Int"
+    }
+}
+
+test "infer_hm evar fresh" {
+    bind s0 <- inf_state_new(subst_empty(), 0)
+    match infer_hm(EVar("x"), env_empty(), s0) {
+        Err(_) => false
+        Ok(r)  => r.ty == "t0" && r.counter == 1
+    }
 }

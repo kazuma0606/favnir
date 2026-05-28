@@ -17316,3 +17316,83 @@ public fn main() -> Bool {
         assert_eq!(result, Value::Bool(true), "expected E0004 for non-exhaustive Option match");
     }
 }
+
+// ── checker_v78_tests (v7.8.0) ────────────────────────────────────────────────
+#[cfg(test)]
+mod checker_v78_tests {
+    use crate::frontend::parser::Parser;
+    use crate::middle::checker::Checker;
+    use crate::backend::vm::VM;
+    use crate::middle::compiler::compile_program;
+    use crate::backend::codegen::codegen_program;
+    use crate::value::Value;
+
+    fn checker_src() -> String {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("self")
+            .join("checker.fav");
+        std::fs::read_to_string(&path).expect("checker.fav")
+    }
+
+    fn run_checker_inline(test_main: &str) -> Value {
+        let src = format!("{}\n\n{}", checker_src(), test_main);
+        let prog = Parser::parse_str(&src, "checker_test.fav").expect("parse");
+        let (errors, _) = Checker::check_program(&prog);
+        assert!(
+            errors.is_empty(),
+            "type errors: {:?}",
+            errors.iter().map(|e| &e.message).collect::<Vec<_>>()
+        );
+        let ir = compile_program(&prog);
+        let artifact = codegen_program(&ir);
+        let fn_idx = artifact.fn_idx_by_name("main").expect("main function");
+        VM::run(&artifact, fn_idx, vec![]).expect("run")
+    }
+
+    #[test]
+    fn checker_fav_generic_list_first() {
+        // infer_generic_list("first", ["List<Int>"]) → "Option<Int>"
+        let result = run_checker_inline(r#"
+public fn main() -> String {
+    infer_generic_list("first", List.push(List.empty(), "List<Int>"))
+}
+"#);
+        assert_eq!(
+            result,
+            Value::Str("Option<Int>".to_string()),
+            "expected Option<Int>"
+        );
+    }
+
+    #[test]
+    fn checker_fav_unify_var() {
+        // unify("A", "Bool", subst_empty()) → Ok, lookup "A" → "Bool"
+        let result = run_checker_inline(r#"
+public fn main() -> String {
+    match unify("A", "Bool", subst_empty()) {
+        Err(e) => "error"
+        Ok(s)  => match subst_lookup(s, "A") {
+            None    => "none"
+            Some(t) => t
+        }
+    }
+}
+"#);
+        assert_eq!(result, Value::Str("Bool".to_string()), "expected Bool");
+    }
+
+    #[test]
+    fn checker_fav_type_str_inner() {
+        // type_str_inner("Option<String>") → "String"
+        let result = run_checker_inline(r#"
+public fn main() -> String {
+    type_str_inner("Option<String>")
+}
+"#);
+        assert_eq!(
+            result,
+            Value::Str("String".to_string()),
+            "expected String"
+        );
+    }
+}

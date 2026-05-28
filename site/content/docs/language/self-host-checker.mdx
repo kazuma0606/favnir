@@ -123,11 +123,87 @@ type FnDef = {
 `check_fn_def` は `infer_expr_effects(body)` で推論したエフェクトを
 `fd.effects` と照合し、宣言されていないエフェクトがあれば `E0003` を返します。
 
+## v7.8.0: ジェネリクス対応
+
+### 型変数と置換環境
+
+`TyVar(String)` を `Type` sum type に追加。置換環境は `List<KVPair>` で表現。
+
+```favnir
+// 型変数 "A" を "Int" に置換
+bind subst <- subst_insert(subst_empty(), "A", "Int")
+apply_subst(subst, "A")  // → "Int"
+```
+
+### 基本単一化 (`unify`)
+
+```favnir
+unify("A", "Int", subst_empty())    // Ok([{A → Int}])
+unify("Int", "Int", subst_empty())  // Ok([])
+unify("Int", "String", subst_empty()) // Err("E0005: cannot unify Int with String")
+```
+
+| ケース | 結果 |
+|--------|------|
+| `t1 == t2` | `Ok(subst)`（変更なし） |
+| `t1` or `t2` == `"Unknown"` | `Ok(subst)`（後方互換） |
+| `is_type_var(t1)` | subst に `t1 → t2` を追加 |
+| `is_type_var(t2)` | subst に `t2 → t1` を追加 |
+| 競合（既存バインドと不一致） | `Err("E0005: conflict: ...")` |
+| それ以外 | `Err("E0005: cannot unify ...")` |
+
+### Parameterized 型文字列
+
+```favnir
+type_str_outer("List<Int>")   // → "List"
+type_str_inner("List<Int>")   // → "Int"
+type_str_inner("Option<String>") // → "String"
+```
+
+### ジェネリクス対応 builtin 推論
+
+`List.*` / `Option.*` / `Result.*` 呼び出しで引数型から戻り型を精密化:
+
+```favnir
+// List.first(xs) で xs: List<Int> → Option<Int>
+infer_generic_list("first", ["List<Int>"])  // → "Option<Int>"
+infer_generic_list("filter", ["List<String>", "Fn"])  // → "List<String>"
+```
+
+| 関数 | 推論ロジック |
+|------|-------------|
+| `List.first(List<T>)` | `Option<T>` |
+| `List.find(List<T>, Fn)` | `Option<T>` |
+| `List.filter(List<T>, Fn)` | `List<T>` |
+| `List.push(List<T>, T)` | `List<T>` |
+| `List.singleton(T)` | `List<T>` |
+| `List.map(List<T>, Fn)` | `"List"`（HM は v7.9.0） |
+
+### ユーザー定義ジェネリクス型
+
+`TypeDef` に `type_params: List<String>` フィールドを追加。
+`type_param_env(params, args)` で型パラメータ → 型引数のマッピングを構築。
+
+```favnir
+type_param_env(["A", "B"], ["Int", "String"])
+// → [{A → Int}, {B → String}]
+```
+
+## エラーコード一覧（v7.8.0 時点）
+
+| コード | 意味 |
+|--------|------|
+| `E0001` | arithmetic 型ミスマッチ |
+| `E0002` | logical 演算子に Bool 以外 |
+| `E0003` | undeclared effect |
+| `E0004` | non-exhaustive match |
+| `E0005` | 型単一化の失敗（conflict / cannot unify）|
+
 ## ロードマップ
 
 | バージョン | 変更内容 |
 |-----------|----------|
 | v7.6.0 | checker.fav 初版（Bootstrap 検証用簡略版） |
-| **v7.7.0** | **エフェクト追跡 / builtin 全登録 / E0xxx / match 網羅性** |
-| v7.8.0 | ジェネリクス対応 — `List<A>` の型変数 `A` を追跡、基本単一化 |
+| v7.7.0 | エフェクト追跡 / builtin 全登録 / E0xxx / match 網羅性 |
+| **v7.8.0** | **ジェネリクス — TyVar / Subst / unify / parameterized builtin 推論** |
 | v7.9.0 | Hindley-Milner 型推論完全版 — `checker.fav` が `checker.rs` の代替に |

@@ -1,5 +1,5 @@
 // Favnir self-hosted type checker
-// v7.7.0: effect tracking / full builtin coverage / error codes / match exhaustiveness
+// v7.8.0: generics (TyVar / Subst / unify / parameterized builtin inference)
 
 // ── Mirrored AST types (from parser.fav) ─────────────────────────────────────
 
@@ -85,6 +85,7 @@ type VariantDef = {
 type TypeDef = {
     name: String
     is_record: Bool
+    type_params: List<String>
     variants: List<VariantDef>
     fields: List<Param>
 }
@@ -117,6 +118,7 @@ type Type =
   | TyMap(Type, Type)
   | TyFn(Type, Type)
   | TyUnknown
+  | TyVar(String)
 
 fn type_to_str(ty: Type) -> String {
     match ty {
@@ -131,6 +133,7 @@ fn type_to_str(ty: Type) -> String {
         TyMap(k, v) => "Map"
         TyFn(a, b) => "Fn"
         TyUnknown => "Unknown"
+        TyVar(name) => name
     }
 }
 
@@ -176,6 +179,18 @@ fn env_lookup(env: List<KVPair>, name: String) -> Option<String> {
             else { env_lookup(List.drop(env, 1), name) }
         }
     }
+}
+
+// ── Substitution environment (type variables) ─────────────────────────────────
+
+fn subst_empty() -> List<KVPair> { env_empty() }
+
+fn subst_insert(subst: List<KVPair>, name: String, ty: String) -> List<KVPair> {
+    env_insert(subst, name, ty)
+}
+
+fn subst_lookup(subst: List<KVPair>, name: String) -> Option<String> {
+    env_lookup(subst, name)
 }
 
 // ── TypeExpr to string ────────────────────────────────────────────────────────
@@ -493,6 +508,82 @@ fn check_effects_all(declared: List<String>, inferred: List<String>) -> Option<S
     }
 }
 
+// ── Type variable and substitution ────────────────────────────────────────────
+
+fn is_type_var(s: String) -> Bool {
+    if String.length(s) == 1 {
+        bind c <- String.slice(s, 0, 1)
+        c == "A" || c == "B" || c == "C" || c == "D" || c == "E" ||
+        c == "F" || c == "G" || c == "H" || c == "I" || c == "J" ||
+        c == "K" || c == "L" || c == "M" || c == "N" || c == "O" ||
+        c == "P" || c == "Q" || c == "R" || c == "S" || c == "T" ||
+        c == "U" || c == "V" || c == "W" || c == "X" || c == "Y" || c == "Z"
+    } else { false }
+}
+
+fn apply_subst(subst: List<KVPair>, ty: String) -> String {
+    if is_type_var(ty) {
+        match subst_lookup(subst, ty) {
+            Some(resolved) => resolved
+            None => ty
+        }
+    } else { ty }
+}
+
+fn type_str_outer(s: String) -> String {
+    if String.contains(s, "<") {
+        match List.first(String.split(s, "<")) {
+            Some(outer) => outer
+            None => s
+        }
+    } else { s }
+}
+
+fn type_str_inner(s: String) -> String {
+    if String.contains(s, "<") {
+        bind parts <- String.split(s, "<")
+        match List.first(List.drop(parts, 1)) {
+            None => ""
+            Some(rest) => String.slice(rest, 0, String.length(rest) - 1)
+        }
+    } else { "" }
+}
+
+// ── Basic unification ─────────────────────────────────────────────────────────
+
+fn unify(t1: String, t2: String, subst: List<KVPair>) -> Result<List<KVPair>, String> {
+    if t1 == "Unknown" || t2 == "Unknown" { Result.ok(subst) }
+    else {
+    if t1 == t2 { Result.ok(subst) }
+    else {
+    if is_type_var(t1) {
+        match subst_lookup(subst, t1) {
+            None => Result.ok(subst_insert(subst, t1, t2))
+            Some(existing) =>
+                if existing == t2 { Result.ok(subst) }
+                else { Result.err(fmt_err("E0005",
+                    String.concat("conflict: ", String.concat(t1,
+                    String.concat(" was ", String.concat(existing,
+                    String.concat(", got ", t2))))))) }
+        }
+    } else {
+    if is_type_var(t2) {
+        match subst_lookup(subst, t2) {
+            None => Result.ok(subst_insert(subst, t2, t1))
+            Some(existing) =>
+                if existing == t1 { Result.ok(subst) }
+                else { Result.err(fmt_err("E0005",
+                    String.concat("conflict: ", String.concat(t2,
+                    String.concat(" was ", String.concat(existing,
+                    String.concat(", got ", t1))))))) }
+        }
+    } else {
+        Result.err(fmt_err("E0005",
+            String.concat("cannot unify ", String.concat(t1,
+            String.concat(" with ", t2)))))
+    }}}}
+}
+
 // ── Pattern environment extension ─────────────────────────────────────────────
 
 fn env_from_pat(pat: Pat, env: List<KVPair>) -> List<KVPair> {
@@ -596,6 +687,59 @@ fn check_match_exhaustive(scrut_ty: String, arms: Expr) -> Option<String> {
     }}
 }
 
+// ── Generic builtin inference ─────────────────────────────────────────────────
+
+fn unwrap_ty(r: Result<String, String>) -> String {
+    match r {
+        Ok(ty) => ty
+        Err(_) => "Unknown"
+    }
+}
+
+fn infer_arg_tys(args: Expr, env: List<KVPair>) -> List<String> {
+    match args {
+        EArgNil => List.empty()
+        EArgList(h, t) => {
+            bind hty <- unwrap_ty(infer_expr(h, env))
+            List.push(infer_arg_tys(t, env), hty)
+        }
+        _ => List.empty()
+    }
+}
+
+fn wrap_in(outer: String, inner: String) -> String {
+    if inner == "" || inner == "Unknown" { outer }
+    else { String.concat(outer, String.concat("<", String.concat(inner, ">"))) }
+}
+
+fn infer_generic_list(fname: String, arg_tys: List<String>) -> String {
+    bind first_arg <- match List.first(arg_tys) { Some(t) => t   None => "" }
+    bind inner     <- type_str_inner(first_arg)
+    if fname == "first"      { wrap_in("Option", inner) }
+    else { if fname == "find"       { wrap_in("Option", inner) }
+    else { if fname == "filter"     { wrap_in("List", inner) }
+    else { if fname == "push"       { wrap_in("List", inner) }
+    else { if fname == "drop"       { wrap_in("List", inner) }
+    else { if fname == "take"       { wrap_in("List", inner) }
+    else { if fname == "take_while" { wrap_in("List", inner) }
+    else { if fname == "drop_while" { wrap_in("List", inner) }
+    else { if fname == "concat"     { wrap_in("List", inner) }
+    else { if fname == "singleton"  { wrap_in("List", first_arg) }
+    else { if fname == "map"        { "List" }
+    else { list_fn(fname) }
+    }}}}}}}}}}
+}
+
+fn infer_generic_opt(fname: String, arg_tys: List<String>) -> String {
+    if fname == "and_then" { "Option" }
+    else { opt_fn(fname) }
+}
+
+fn infer_generic_res(fname: String, arg_tys: List<String>) -> String {
+    if fname == "and_then" { "Result" }
+    else { res_fn(fname) }
+}
+
 // ── Call inference ────────────────────────────────────────────────────────────
 
 fn infer_call(ns: String, fname: String, args: Expr, env: List<KVPair>) -> Result<String, String> {
@@ -605,7 +749,12 @@ fn infer_call(ns: String, fname: String, args: Expr, env: List<KVPair>) -> Resul
             None => Result.ok("Unknown")
         }
     } else {
-        Result.ok(builtin_ret_ty(ns, fname))
+        bind arg_tys <- infer_arg_tys(args, env)
+        if ns == "List"   { Result.ok(infer_generic_list(fname, arg_tys)) }
+        else { if ns == "Option" { Result.ok(infer_generic_opt(fname, arg_tys)) }
+        else { if ns == "Result" { Result.ok(infer_generic_res(fname, arg_tys)) }
+        else { Result.ok(builtin_ret_ty(ns, fname)) }
+        }}
     }
 }
 
@@ -671,6 +820,27 @@ fn check_fn_def(fd: FnDef, env: List<KVPair>) -> Result<String, String> {
             Result.and_then(infer_expr(fd.body, param_env), |body_ty|
             Result.ok(fd.name))
     }
+}
+
+// ── User-defined generic type helpers ────────────────────────────────────────
+
+fn type_param_env_inner(params: List<String>, args: List<String>, acc: List<KVPair>) -> List<KVPair> {
+    match List.first(params) {
+        None => acc
+        Some(p) => {
+            match List.first(args) {
+                None => acc
+                Some(a) => type_param_env_inner(
+                    List.drop(params, 1),
+                    List.drop(args, 1),
+                    subst_insert(acc, p, a))
+            }
+        }
+    }
+}
+
+fn type_param_env(params: List<String>, args: List<String>) -> List<KVPair> {
+    type_param_env_inner(params, args, subst_empty())
 }
 
 // ── Item / program checker ────────────────────────────────────────────────────
@@ -792,4 +962,57 @@ test "match option missing some" {
         None => false
         Some(e) => String.starts_with(e, "E0004")
     }
+}
+
+test "is_type_var upper" {
+    is_type_var("A") && is_type_var("Z") && is_type_var("T")
+}
+
+test "is_type_var not" {
+    is_type_var("Int") == false && is_type_var("a") == false && is_type_var("AB") == false
+}
+
+test "apply_subst resolves" {
+    bind subst <- subst_insert(subst_empty(), "A", "Int")
+    apply_subst(subst, "A") == "Int"
+}
+
+test "apply_subst no match" {
+    apply_subst(subst_empty(), "String") == "String"
+}
+
+test "unify same" {
+    match unify("Int", "Int", subst_empty()) {
+        Err(_) => false
+        Ok(s)  => List.length(s) == 0
+    }
+}
+
+test "unify var left" {
+    match unify("A", "Bool", subst_empty()) {
+        Err(_) => false
+        Ok(s)  => match subst_lookup(s, "A") {
+            Some(t) => t == "Bool"
+            None    => false
+        }
+    }
+}
+
+test "unify conflict" {
+    match unify("Int", "String", subst_empty()) {
+        Err(e) => String.starts_with(e, "E0005")
+        Ok(_)  => false
+    }
+}
+
+test "type_str_inner list" {
+    type_str_inner("List<Int>") == "Int"
+}
+
+test "type_str_inner option" {
+    type_str_inner("Option<String>") == "String"
+}
+
+test "generic list first" {
+    infer_generic_list("first", List.push(List.empty(), "List<Int>")) == "Option<Int>"
 }

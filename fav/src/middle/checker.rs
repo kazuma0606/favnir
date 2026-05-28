@@ -4890,6 +4890,15 @@ impl Checker {
                 let elem = arg_tys.first().cloned().unwrap_or(Type::Unknown);
                 Some(Type::List(Box::new(elem)))
             }
+            ("List", "intersperse") => {
+                let elem = self.expect_list_arg(&arg_tys, 0, span);
+                Some(Type::List(Box::new(elem)))
+            }
+            ("List", "scan") => {
+                // scan(list, init, f) → List<typeof(init)>
+                let init_ty = arg_tys.get(1).cloned().unwrap_or(Type::Unknown);
+                Some(Type::List(Box::new(init_ty)))
+            }
 
             // String
             ("String", "trim")
@@ -4924,6 +4933,7 @@ impl Checker {
             | ("String", "to_upper")
             | ("String", "to_lower") => Some(Type::String),
             ("String", "join") => Some(Type::String),
+            ("String", "capitalize") | ("String", "indent") => Some(Type::String),
             ("String", "char_at") => Some(Type::Option(Box::new(Type::String))),
             ("String", "to_int") => Some(Type::Option(Box::new(Type::Int))),
             ("String", "to_float") => Some(Type::Option(Box::new(Type::Float))),

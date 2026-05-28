@@ -17560,6 +17560,147 @@ public fn main() -> Int {
     }
 }
 
+// ── stdlib_v82_tests (v8.2.0) ─────────────────────────────────────────────────
+#[cfg(test)]
+mod stdlib_v82_tests {
+    use crate::backend::vm::VM;
+    use crate::backend::artifact::FvcArtifact;
+    use crate::backend::codegen::codegen_program;
+    use crate::frontend::parser::Parser;
+    use crate::middle::compiler::compile_program;
+    use crate::value::Value;
+
+    fn run_fn(src: &str, fname: &str, args: Vec<Value>) -> Value {
+        let prog = Parser::parse_str(src, "test.fav").expect("parse");
+        let ir = compile_program(&prog);
+        let artifact: FvcArtifact = codegen_program(&ir);
+        let fn_idx = artifact.fn_idx_by_name(fname).expect("fn not found");
+        VM::run(&artifact, fn_idx, args).expect("VM error")
+    }
+
+    // E-1: List.intersperse — interleaves separator between elements
+    #[test]
+    fn list_intersperse_basic() {
+        // Pass list from Rust (Favnir has no list literal syntax)
+        let src = r#"
+fn test_intersperse(xs: List<String>, sep: String) -> List<String> {
+    List.intersperse(xs, sep)
+}
+"#;
+        let xs = Value::List(vec![
+            Value::Str("a".to_string()),
+            Value::Str("b".to_string()),
+            Value::Str("c".to_string()),
+        ]);
+        let result = run_fn(src, "test_intersperse", vec![xs, Value::Str(",".to_string())]);
+        match result {
+            Value::List(items) => {
+                let strs: Vec<String> = items
+                    .into_iter()
+                    .map(|v| match v {
+                        Value::Str(s) => s,
+                        _ => panic!("expected Str"),
+                    })
+                    .collect();
+                assert_eq!(strs, vec!["a", ",", "b", ",", "c"]);
+            }
+            _ => panic!("expected List, got {:?}", result),
+        }
+    }
+
+    // E-2: List.intersperse — empty list returns empty
+    #[test]
+    fn list_intersperse_empty() {
+        let src = r#"
+fn test_intersperse_empty(xs: List<String>, sep: String) -> List<String> {
+    List.intersperse(xs, sep)
+}
+"#;
+        let result = run_fn(
+            src,
+            "test_intersperse_empty",
+            vec![Value::List(vec![]), Value::Str(",".to_string())],
+        );
+        match result {
+            Value::List(xs) => assert_eq!(xs.len(), 0),
+            _ => panic!("expected List"),
+        }
+    }
+
+    // E-3: List.scan — prefix sums
+    #[test]
+    fn list_scan_prefix_sums() {
+        let src = r#"
+fn test_scan(xs: List<Int>) -> List<Int> {
+    List.scan(xs, 0, |acc, x| acc + x)
+}
+"#;
+        let xs = Value::List(vec![Value::Int(1), Value::Int(2), Value::Int(3)]);
+        let result = run_fn(src, "test_scan", vec![xs]);
+        match result {
+            Value::List(items) => {
+                let ints: Vec<i64> = items
+                    .into_iter()
+                    .map(|v| match v {
+                        Value::Int(n) => n,
+                        _ => panic!("expected Int"),
+                    })
+                    .collect();
+                assert_eq!(ints, vec![0, 1, 3, 6]);
+            }
+            _ => panic!("expected List"),
+        }
+    }
+
+    // E-4: String.capitalize — first letter uppercased
+    #[test]
+    fn string_capitalize_basic() {
+        let src = r#"
+fn test_capitalize() -> String {
+    String.capitalize("hello world")
+}
+"#;
+        let result = run_fn(src, "test_capitalize", vec![]);
+        assert_eq!(result, Value::Str("Hello world".to_string()));
+    }
+
+    // E-5: String.capitalize — empty string returns empty
+    #[test]
+    fn string_capitalize_empty() {
+        let src = r#"
+fn test_cap_empty() -> String {
+    String.capitalize("")
+}
+"#;
+        let result = run_fn(src, "test_cap_empty", vec![]);
+        assert_eq!(result, Value::Str("".to_string()));
+    }
+
+    // E-6: String.indent — prepends spaces to each line
+    #[test]
+    fn string_indent_multiline() {
+        let src = r#"
+fn test_indent() -> String {
+    String.indent("hello\nworld", 2)
+}
+"#;
+        let result = run_fn(src, "test_indent", vec![]);
+        assert_eq!(result, Value::Str("  hello\n  world".to_string()));
+    }
+
+    // E-7: String.indent — single line
+    #[test]
+    fn string_indent_single() {
+        let src = r#"
+fn test_indent_single() -> String {
+    String.indent("hello", 4)
+}
+"#;
+        let result = run_fn(src, "test_indent_single", vec![]);
+        assert_eq!(result, Value::Str("    hello".to_string()));
+    }
+}
+
 // ── checker_v80_tests (v8.0.0) ────────────────────────────────────────────────
 #[cfg(test)]
 mod checker_v80_tests {

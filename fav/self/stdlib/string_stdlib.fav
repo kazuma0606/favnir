@@ -1,0 +1,32 @@
+// Favnir self-hosted String stdlib extensions (v8.2.0)
+// Functions that extend the built-in String namespace.
+// Loaded at startup via stdlib_fav_runner.rs.
+
+// ── capitalize ────────────────────────────────────────────────────────────────
+
+// Return s with its first character uppercased.
+// Example: capitalize("hello") == "Hello"
+public fn capitalize(s: String) -> String {
+    if String.is_empty(s) {
+        s
+    } else {
+        bind first <- String.slice(s, 0, 1)
+        bind rest  <- String.slice(s, 1, String.length(s))
+        String.concat(String.upper(first), rest)
+    }
+}
+
+// ── indent ────────────────────────────────────────────────────────────────────
+
+// Prepend n spaces to every line in s.
+// Example: indent("hello\nworld", 2) == "  hello\n  world"
+fn indent_line(prefix: String, line: String) -> String {
+    String.concat(prefix, line)
+}
+
+public fn indent(s: String, n: Int) -> String {
+    bind lines  <- String.lines(s)
+    bind prefix <- String.repeat(" ", n)
+    bind result <- List.map(lines, |line| indent_line(prefix, line))
+    String.join(result, "\n")
+}

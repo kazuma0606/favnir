@@ -1,0 +1,21 @@
+// Favnir self-hosted List stdlib extensions (v8.2.0)
+// Functions that extend the built-in List namespace.
+// Loaded at startup via stdlib_fav_runner.rs.
+
+// ── intersperse ───────────────────────────────────────────────────────────────
+
+// Helper: accumulate intersperse result one element at a time.
+// Avoids bind-in-closure by taking sep as an explicit parameter.
+fn intersperse_step(acc: List<String>, sep: String, x: String) -> List<String> {
+    if List.is_empty(acc) {
+        List.push(List.empty(), x)
+    } else {
+        List.push(List.push(acc, sep), x)
+    }
+}
+
+// Interleave sep between every adjacent pair of elements in xs.
+// Example: intersperse(["a","b","c"], ",") == ["a",",","b",",","c"]
+public fn intersperse(xs: List<String>, sep: String) -> List<String> {
+    List.fold(xs, List.empty(), |acc, x| intersperse_step(acc, sep, x))
+}

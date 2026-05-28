@@ -2553,6 +2553,26 @@ impl VM {
                     _ => Err(self.error(artifact, "List.fold requires a List as first argument")),
                 }
             }
+            "List.scan" => {
+                if args.len() != 3 {
+                    return Err(self.error(artifact, "List.scan requires 3 arguments"));
+                }
+                let mut it = args.into_iter();
+                let list = it.next().expect("list");
+                let mut acc = it.next().expect("init");
+                let func = it.next().expect("func");
+                match list {
+                    VMValue::List(fl) => {
+                        let mut result = vec![acc.clone()];
+                        for x in fl {
+                            acc = self.call_value(artifact, func.clone(), vec![acc, x])?;
+                            result.push(acc.clone());
+                        }
+                        Ok(VMValue::List(FavList::new(result)))
+                    }
+                    _ => Err(self.error(artifact, "List.scan requires a List as first argument")),
+                }
+            }
             "List.flat_map" => {
                 if args.len() != 2 {
                     return Err(self.error(artifact, "List.flat_map requires 2 arguments"));
@@ -6802,6 +6822,18 @@ fn vm_call_builtin(
                 _ => Err("String.repeat requires (String, Int)".to_string()),
             }
         }
+        "String.capitalize" => {
+            let value_args: Vec<Value> = args.into_iter().map(Value::from).collect();
+            crate::stdlib_fav_runner::call_string_stdlib("capitalize", value_args)
+                .map(VMValue::from)
+                .map_err(|e| e.message)
+        }
+        "String.indent" => {
+            let value_args: Vec<Value> = args.into_iter().map(Value::from).collect();
+            crate::stdlib_fav_runner::call_string_stdlib("indent", value_args)
+                .map(VMValue::from)
+                .map_err(|e| e.message)
+        }
         "String.char_at" => {
             let mut it = args.into_iter();
             let s = it
@@ -7201,6 +7233,12 @@ fn vm_call_builtin(
                 }
                 _ => Err("List.chunk expects (List, Int)".to_string()),
             }
+        }
+        "List.intersperse" => {
+            let value_args: Vec<Value> = args.into_iter().map(Value::from).collect();
+            crate::stdlib_fav_runner::call_list_stdlib("intersperse", value_args)
+                .map(VMValue::from)
+                .map_err(|e| e.message)
         }
         "List.sum" => {
             let v = args

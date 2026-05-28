@@ -353,8 +353,12 @@ fn str_fn(fname: String) -> String {
     else { if fname == "split"           { "List" }
     else { if fname == "compare"         { "Int" }
     else { if fname == "to_bytes"        { "List" }
+    else { if fname == "lines"           { "List" }
+    else { if fname == "words"           { "List" }
+    else { if fname == "capitalize"      { "String" }
+    else { if fname == "indent"          { "String" }
     else { "Unknown" }
-    }}}}}}}}}}}}}}}}}}}}
+    }}}}}}}}}}}}}}}}}}}}}}}}
 }
 
 fn list_fn(fname: String) -> String {
@@ -383,8 +387,9 @@ fn list_fn(fname: String) -> String {
     else { if fname == "intersperse"     { "List" }
     else { if fname == "zip"             { "List" }
     else { if fname == "chunk"           { "List" }
+    else { if fname == "scan"            { "List" }
     else { "List" }
-    }}}}}}}}}}}}}}}}}}}}}}}}
+    }}}}}}}}}}}}}}}}}}}}}}}}}
 }
 
 fn opt_fn(fname: String) -> String {

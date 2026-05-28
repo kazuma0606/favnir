@@ -1,0 +1,64 @@
+// runes/stdlib/list.fav — High-level List operations (v7.4.0)
+//
+// Usage:
+//   bind groups <- StdList.group_by(xs, |x| x.category)
+//   bind sums   <- StdList.zip_with(as, bs, |a, b| Int.add(a, b))
+//   bind sorted <- StdList.sort_by(users, |u| u.name)
+
+// ── Convenience aliases ───────────────────────────────────────────────────────
+
+// First element as Option (alias for List.first).
+public fn head(xs: List<A>) -> Option<A> {
+    List.first(xs)
+}
+
+// All elements except the first.
+public fn tail(xs: List<A>) -> List<A> {
+    List.drop(xs, 1)
+}
+
+// ── Group by ─────────────────────────────────────────────────────────────────
+
+// Group list elements by a String key function.
+// Returns a Map where each key maps to the list of matching elements.
+// Example: group_by(["a","b","a"], |x| x) -> {"a": ["a","a"], "b": ["b"]}
+public fn group_by(xs: List<A>, key_fn: A -> String) -> Map<String, List<A>> {
+    List.fold(xs, Map.empty(), |acc, x|
+        match Map.get(acc, key_fn(x)) {
+            None     => Map.set(acc, key_fn(x), List.singleton(x))
+            Some(vs) => Map.set(acc, key_fn(x), List.concat(vs, List.singleton(x)))
+        })
+}
+
+// ── Zip with ─────────────────────────────────────────────────────────────────
+
+// Combine two lists element-wise using a function.
+// Stops at the shorter list. f receives each {first, second} pair from List.zip.
+// Example: zip_with(as, bs, |p| Int.add(p.first, p.second))
+public fn zip_with(xs: List<A>, ys: List<B>, f: A -> C) -> List<C> {
+    List.map(List.zip(xs, ys), f)
+}
+
+// ── Sort by ──────────────────────────────────────────────────────────────────
+
+// Sort a list by a String key extracted from each element.
+// Example: sort_by(users, |u| u.name)
+public fn sort_by(xs: List<A>, key_fn: A -> String) -> List<A> {
+    List.sort(xs, |a, b| String.compare(key_fn(a), key_fn(b)))
+}
+
+// ── Intersperse ───────────────────────────────────────────────────────────────
+
+// Insert sep between every element of xs.
+// Example: intersperse([1,2,3], 0) -> [1,0,2,0,3]
+fn intersperse_step(acc: List<A>, x: A, sep: A) -> List<A> {
+    if List.is_empty(acc) {
+        List.singleton(x)
+    } else {
+        List.concat(List.concat(acc, List.singleton(sep)), List.singleton(x))
+    }
+}
+
+public fn intersperse(xs: List<A>, sep: A) -> List<A> {
+    List.fold(xs, List.empty(), |acc, x| intersperse_step(acc, x, sep))
+}

@@ -1,0 +1,4 @@
+[rune]
+name        = "stdlib"
+version     = "0.1.0"
+description = "High-level stdlib extensions — List, Map helpers built on VM primitives"

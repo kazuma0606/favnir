@@ -1,0 +1,92 @@
+---
+title: "Email Rune"
+order: 14
+category: "Rune"
+description: "AWS SES 経由のメール送信 Rune"
+---
+
+# Email Rune
+
+`runes/email/email.fav` — AWS SES を使ったメール送信 Rune です。
+
+## セットアップ
+
+```toml
+# rune.toml
+[[runes]]
+name = "email"
+path = "runes/email"
+```
+
+エフェクトアノテーション: `!Email`
+
+## 関数一覧
+
+| 関数 | シグネチャ | 説明 |
+|------|-----------|------|
+| `Email.send` | `String, String, String, String -> Result<Unit, String> !Email` | メール送信（from, to, subject, body） |
+| `Email.send_bulk` | `String, List<String>, String, String -> Result<Int, String> !Email` | 複数宛先に一括送信（成功件数を返す） |
+| `Email.notify` | `String, String, String -> Result<Unit, String> !Email` | 通知メール送信（件名は `[Favnir] Notification` 固定） |
+| `Email.send_raw` | `String, String, String, String -> Result<Unit, String> !Email` | SES 直接呼び出し（プリミティブ） |
+
+## 使用例
+
+### 単件送信
+
+```favnir
+stage NotifyUser: Record -> Result<Unit, String> !Email = |event| {
+    Email.send(
+        "noreply@example.com",
+        event.user_email,
+        "処理完了のお知らせ",
+        String.concat("ジョブ ", String.concat(event.job_id, " が完了しました。"))
+    )
+}
+```
+
+### 一括送信
+
+```favnir
+stage BroadcastAlert: List<String> -> Result<Int, String> !Email = |recipients| {
+    Email.send_bulk(
+        "alerts@example.com",
+        recipients,
+        "[Alert] パイプライン障害",
+        "データパイプラインでエラーが発生しました。ダッシュボードを確認してください。"
+    )
+}
+```
+
+### 通知ヘルパー
+
+```favnir
+stage Notify: String -> Result<Unit, String> !Email = |msg| {
+    Email.notify("noreply@example.com", "admin@example.com", msg)
+}
+```
+
+## AWS 設定
+
+| 環境変数 | 説明 |
+|---------|------|
+| `AWS_REGION` | SES リージョン（例: `us-east-1`） |
+| `AWS_ACCESS_KEY_ID` | AWS アクセスキー |
+| `AWS_SECRET_ACCESS_KEY` | AWS シークレットキー |
+
+送信元アドレスは SES で事前に検証（verify）が必要です。
+
+## エラーハンドリング
+
+```favnir
+stage SafeNotify: String -> Unit !Email, Io = |msg| {
+    bind result <- Email.send(
+        "noreply@example.com",
+        "ops@example.com",
+        "[Favnir] Alert",
+        msg)
+    match result {
+        Ok(_)  => IO.println("メール送信成功")
+        Err(e) => IO.println(String.concat("送信失敗: ", e))
+    }
+}
+```

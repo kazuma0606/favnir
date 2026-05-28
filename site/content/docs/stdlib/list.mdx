@@ -27,6 +27,33 @@ description: "List<T> — map / filter / fold / any / length / first"
 | `List.zip` | `List<T>, List<U> -> List<(T, U)>` | ペアにする |
 | `List.flat_map` | `List<T>, T -> List<U> -> List<U>` | flatten + map |
 
+## StdList 高レベル関数（runes/stdlib/list.fav）
+
+`import StdList from "stdlib/list"` でインポートして使用します。
+
+| 関数 | シグネチャ | 説明 |
+|------|-----------|------|
+| `StdList.head` | `List<A> -> Option<A>` | 先頭要素（`List.first` のエイリアス） |
+| `StdList.tail` | `List<A> -> List<A>` | 先頭を除いたリスト |
+| `StdList.group_by` | `List<A>, A -> String -> Map<String, List<A>>` | キー関数でグループ化 |
+| `StdList.zip_with` | `List<A>, List<B>, A -> C -> List<C>` | 2 リストを要素ごとに合成 |
+| `StdList.sort_by` | `List<A>, A -> String -> List<A>` | String キーでソート |
+| `StdList.intersperse` | `List<A>, A -> List<A>` | 要素間にセパレータを挿入 |
+
+```favnir
+bind users <- DB.query_raw("SELECT name, dept FROM users")
+
+// 部署ごとにグループ化
+bind by_dept <- StdList.group_by(users, |u| u.dept)
+
+// 名前順にソート
+bind sorted <- StdList.sort_by(users, |u| u.name)
+
+// カンマ区切りの名前リスト
+bind names  <- List.map(users, |u| u.name)
+bind csv    <- StdList.intersperse(names, ",")
+```
+
 ## 使用例
 
 ```favnir

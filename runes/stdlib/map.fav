@@ -1,0 +1,54 @@
+// runes/stdlib/map.fav — High-level Map operations (v7.4.0)
+//
+// Usage:
+//   bind counts <- StdMap.count_by(words, |w| w)
+//   bind merged <- StdMap.merge_with(a, b, |v1, v2| Int.add(v1, v2))
+
+// ── Keys / Values ─────────────────────────────────────────────────────────────
+
+// Return all keys of a map as a list.
+public fn keys(m: Map<String, A>) -> List<String> {
+    Map.keys(m)
+}
+
+// Return all values of a map as a list.
+public fn values(m: Map<String, A>) -> List<A> {
+    Map.values(m)
+}
+
+// ── Count by ──────────────────────────────────────────────────────────────────
+
+// Count occurrences by a String key function.
+// Example: count_by(["a","b","a"], |x| x) -> {"a": 2, "b": 1}
+public fn count_by(xs: List<A>, key_fn: A -> String) -> Map<String, Int> {
+    List.fold(xs, Map.empty(), |acc, x|
+        match Map.get(acc, key_fn(x)) {
+            None    => Map.set(acc, key_fn(x), 1)
+            Some(n) => Map.set(acc, key_fn(x), Int.add(n, 1))
+        })
+}
+
+// ── Merge with ────────────────────────────────────────────────────────────────
+
+// Merge two maps; when a key exists in both, combine values with f.
+// Example: merge_with({"a":1}, {"a":2,"b":3}, |v1,v2| Int.add(v1,v2)) -> {"a":3,"b":3}
+public fn merge_with(a: Map<String, A>, b: Map<String, A>, f: A -> A) -> Map<String, A> {
+    List.fold(Map.keys(b), a, |acc, k|
+        match Map.get(b, k) {
+            None    => acc
+            Some(v) =>
+                match Map.get(acc, k) {
+                    None     => Map.set(acc, k, v)
+                    Some(v2) => Map.set(acc, k, f(v2))
+                }
+        })
+}
+
+// ── From list ─────────────────────────────────────────────────────────────────
+
+// Build a map from a list of {key, value} records.
+// Later duplicates overwrite earlier ones.
+public fn from_entries(entries: List<A>, key_fn: A -> String, val_fn: A -> B) -> Map<String, B> {
+    List.fold(entries, Map.empty(), |acc, e|
+        Map.set(acc, key_fn(e), val_fn(e)))
+}

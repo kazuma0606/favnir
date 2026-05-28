@@ -278,14 +278,240 @@ bind result <- Sql.from<User>()
 | `slack` | `Http.send_raw`（既存）| Slack 通知 Rune |
 | `email` | `Smtp.send_raw` | メール送信 |
 
+**実装済み（v7.3.0 COMPLETE）**: fs / slack / queue / cache（email は v7.4.0 以降）
+
 ---
 
-## 長期ビジョン（v8 以降）
+## v7.4.0 — stdlib 高レベル層（Favnir 化）
+
+**テーマ**: VM primitive の上に乗る高レベルな stdlib 操作を Favnir で書き直す。
+
+### 方針
+
+VM に残すもの（thin primitive）:
+- `List.map` / `List.filter` / `List.fold_left` 等の基本操作
+- `String.concat` / `IO.read_file_raw` 等の I/O primitive
+
+Favnir 化するもの（`runes/stdlib/` へ移動）:
+- `List.group_by` / `List.zip` / `List.zip_with` / `List.sort_by` / `List.chunk`
+- `String.pad_left` / `String.pad_right` / `String.split`（区切り文字指定）
+- `Map.merge` / `Map.from_list` / `Map.map_values`
+
+### やること
+
+- `runes/stdlib/list.fav` — 高レベルリスト操作（group_by / zip / chunk / sort_by）
+- `runes/stdlib/string.fav` — 高レベル文字列操作（split / pad / replace）
+- `runes/stdlib/map.fav` — 高レベル Map 操作（merge / from_list / map_values）
+- 統合テスト + `site/content/docs/stdlib/` ドキュメント
+
+### 完了条件
+
+- `runes/stdlib/` の各ファイルが `fav check` を通る
+- 既存テストがすべて通る
+- email Rune（`Smtp.send_raw` 追加）も本バージョンで対応
+
+---
+
+## v7.5.0 — Rune 読み込みのセルフホスト化
+
+**テーマ**: `fav rune add` / import 解決を Rust から Favnir に移す。
+
+### 依存
+
+- `fs` Rune（✓ v7.3.0 実装済み）
+- ミニ TOML パーサー（新規実装）
+
+### やること
+
+- `runes/toml/toml.fav` — `rune.toml` を読んで `name` / `version` / `entry` / `effects` を取り出す簡易パーサー
+  - フル TOML 実装は不要。`key = "value"` / `[section]` / 配列 `["a", "b"]` のみ対応
+- `runes/rune_loader/loader.fav` — `rune_modules/` → `runes/` → `~/.fav/registry/` の順に解決
+- Rust 側の `resolve_rune_path` を Favnir 製に差し替え
+
+### 完了条件
+
+- `use sql` が Favnir 製 loader 経由で解決できる
+- バージョン制約（`^1.0`）の基本的な比較が動く
+- 既存の rune install / resolve テストがすべて通る
+
+---
+
+## v7.6.0 — CLI の部分セルフホスト化
+
+**テーマ**: `fav check` / `fav explain` / `fav rune` コマンドを Favnir 製 CLI に置き換える。
+
+### 前提
+
+- `IO.argv()` ✓
+- コンパイルパイプライン（compiler.fav）✓
+- Rune loader（✓ v7.5.0）
+- `fav run` だけは VM 呼び出しのため Rust ラッパーが残る
+
+### やること
+
+- `fav/self/cli.fav` — サブコマンド dispatch（check / explain / rune / version / help）
+- `fav check <file>` → compiler.fav の型チェックパスを呼ぶ
+- `fav explain --lineage <file>` → lineage_analysis ロジックを Favnir で再実装
+- `fav rune add/list/info` → rune_loader.fav を使用
+- Rust の `main.rs` は「VM を起動して cli.fav を実行する」だけの薄いラッパーに
+
+### 完了条件
+
+- `fav check` / `fav rune list` が Favnir 製 CLI 経由で動作する
+- 既存の CLI 統合テストが通る
+
+---
+
+## v7.7.0 — checker.fav 基本機能パリティ
+
+**テーマ**: self/checker.fav を checker.rs の基本機能と同等にする。
+
+### 現状の checker.fav ギャップ
+
+現在の checker.fav（513行）は Bootstrap 検証用の簡略版で、実際の `fav check` には使われていない。
+
+### やること
+
+- **エフェクト追跡** — `!DbRead` / `!IO` / `!Cache` 等のアノテーション検証
+- **全 builtin 名前空間の型シグネチャ登録** — `List.*` / `String.*` / `Cache.*` / `Queue.*` 等
+- **エラーコード（E0xxx）** — 現在は単純な String エラーのみ
+- **match 網羅性チェック（基本）** — `None`/`Some` 両腕の有無確認
+- `fav check compiler.fav` を checker.fav 経由で実行し、Rust版と同じエラーを検出できることを確認
+
+### 完了条件
+
+- checker.fav がエフェクト違反・基本型ミスマッチを Rust版と同じく検出できる
+- bootstrap テストが引き続き通る
+
+---
+
+## v7.8.0 — checker.fav ジェネリクス対応
+
+**テーマ**: 型変数と parameterized types を checker.fav で扱えるようにする。
+
+### やること
+
+- **型変数の追跡** — `List<A>` の `A` を変数として管理
+- **組み込みジェネリクス型の instantiation** — `List<Int>` / `Option<String>` / `Result<A,B>`
+- **ユーザー定義ジェネリクス型** — `type Pair<A, B> = { fst: A, snd: B }` のチェック
+- **基本的な単一化（unification）** — `A = String` のような単純な型変数の代入
+
+> **注意**: Favnir 自体が `bind inside closure 不可` 制約を持つため、substitution map の実装には工夫が必要。`List<KVPair>` association list で代用する見通し。
+
+### 完了条件
+
+- `List.map(xs, |x| x + 1)` の型を `List<Int>` と正しく推論できる
+- ユーザー定義ジェネリクス型の型ミスマッチを検出できる
+
+---
+
+## v7.9.0 — checker.fav HM 型推論（基礎）✓ COMPLETE
+
+**テーマ**: Hindley-Milner 型推論の基礎部品を Favnir で実装する。
+
+### 実装済み内容
+
+- **`occurs_in`** — 型変数が型文字列に出現するか確認（E0006 無限型防止）
+- **`unify_deep`** — `"List<A>"` vs `"List<Int>"` のネスト型を outer 比較 + inner 再帰で単一化
+- **`InfState` / `InfResult`** — 推論状態レコード（subst + counter）
+- **`fresh_var`** — `"t0"`, `"t1"`, ... 新鮮型変数生成
+- **`infer_hm`** — HM 推論パス（ELit / EVar / EBind / EIf + infer_expr フォールバック）
+- **`check_fn_def` 更新** — `infer_expr` → `infer_hm` に切り替え
+- Favnir 内テスト 10 件 + driver.rs 統合テスト 3 件
+
+### 残った制約（v8.0.0 へ持ち越し）
+
+- Let 多相（型スキーム generalization）未実装
+- 多文字型変数（`"T1"`, `"Elem"` 等）未対応（1 文字大文字のみ）
+- ネスト 2 段以上のパラメータ化型の完全単一化未対応
+- `checker.fav` はまだ `fav check` の実処理に接続されていない
+
+---
+
+## v8.0.0 — checker.fav 完全統合（Let 多相 + fav check 差し替え）
+
+**テーマ**: checker.fav を checker.rs の完全な代替として `fav check` コマンドに組み込む。
+v8.0.0 の完了をもって「型チェッカーのセルフホスト完成」とする。
+
+### 背景
+
+現状の `fav check foo.fav` は Rust 製 checker.rs を使用している。
+checker.fav は v7.7.0〜v7.9.0 で機能的に同等に近づいたが、
+Let 多相がなく本番パイプラインにも接続されていない。
+
+```
+現状:  fav check foo.fav → checker.rs (Rust)
+v8.0: fav check foo.fav → checker.fav (Favnir、Rust VM の上で動く)
+```
+
+### やること
+
+**A. Let 多相（型スキーム generalization）**
+
+```favnir
+// 現状: is_type_var("A") の 1 文字大文字のみ
+// v8.0: 多文字型変数 "T1" / "Elem" / "Key" 等を追加
+
+fn is_type_var_extended(s: String) -> Bool { ... }
+```
+
+型スキームを表現するレコードを追加：
+
+```favnir
+type TypeScheme = {
+    vars:  List<String>   // 全称量化された型変数
+    body:  String         // 型本体（"List<T>" 等）
+}
+```
+
+`check_fn_def` で関数ごとに型スキームを構築し、
+呼び出し側で `instantiate(scheme, counter)` して fresh_var を割り当てる。
+
+**B. 多文字型変数 + ネスト単一化の拡張**
+
+- `is_type_var` を `is_type_var_extended` に置き換え（`"T1"`, `"Elem"` 等を許容）
+- `unify_deep` で 2 段以上のネスト型（`"Map<String, List<Int>>"` 等）を再帰処理
+
+**C. checker.fav を `fav check` に接続**
+
+`Compiler.check_raw` の実装を checker.fav ベースに切り替える方式を検討：
+
+```
+方式 A: fav check foo.fav
+          → main.rs が checker.fav を読んで VM 上で実行
+          → checker.fav が foo.fav の AST を受け取り型チェック
+方式 B: checker.rs の内部で checker.fav を評価して結果を使う
+```
+
+現実的には方式 A（VM 上で checker.fav を実行）で進める。
+`Compiler.check_raw` を「checker.fav をロードして実行する」実装に差し替え。
+
+**D. エラー形式の統一**
+
+現在 checker.rs は `CheckError { message, span }` を返すが、
+checker.fav は `"E0xxx: ..."` 形式の文字列を返す。
+両者のエラー形式を統一する（または変換レイヤーを追加）。
+
+**E. 既存テストの checker.fav 互換確認**
+
+checker.rs のテストケースを checker.fav で再現し、同じ結果になることを確認。
+
+### 完了条件
+
+- `fav check foo.fav` が checker.fav（Favnir 実装）経由で動作する
+- `fav check fav/self/checker.fav` が checker.fav 自身でチェック通過（完全なブートストラップ）
+- let 多相で `fn id<A>(x: A) -> A` が `id(1)` にも `id("a")` にも使える
+- 既存テストが全件通る
+
+---
+
+## 長期ビジョン（v8.1 以降）
 
 - **Orchestration Rune**: `seq` をそのまま DAG として実行（Airflow/Prefect 代替）
 - **SAP / Salesforce Rune**: レガシー統合ピッチの完成
 - **エンタープライズ**: Veltra ベータ、コンサル向けサポート
 - **コミュニティ**: Discord・外部 Rune 開発者の受け入れ
+- **compiler.rs の完全セルフホスト**: `fav run` も Favnir 製コンパイラ経由に
 
 ---
 
@@ -302,8 +528,14 @@ bind result <- Sql.from<User>()
 | **v7.0.0** | **Schema Authority** | **コアユースケース完成** |
 | v7.1.0 | fav explain --lineage（データリネージ） | データ品質 |
 | v7.2.0 | SQL Rune（型安全クエリビルダ） | dbt 代替 |
-| v7.3.0 | Rune エコシステム拡充 | エコシステム整備 |
-| **v7.x** | **fav deploy ECS/Fargate + E2E デモ** | **インフラ（v7.0 完了後）** |
+| v7.3.0 | Rune エコシステム拡充（fs/slack/queue/cache） | エコシステム整備 |
+| v7.4.0 | stdlib 高レベル層 Favnir 化 + email Rune | セルフホスト準備 |
+| v7.5.0 | Rune 読み込みセルフホスト（TOML パーサー + loader） | セルフホスト |
+| v7.6.0 | CLI 部分セルフホスト（check / explain / rune） | セルフホスト |
+| v7.7.0 ✓ | checker.fav — エフェクト追跡 + builtin シグネチャ + エラーコード | セルフホスト |
+| v7.8.0 ✓ | checker.fav — ジェネリクス + 基本単一化 | セルフホスト |
+| v7.9.0 ✓ | checker.fav — occurs_in / unify_deep / infer_hm（HM 基礎） | セルフホスト |
+| **v8.0.0** | **checker.fav 完全統合 — Let 多相 + fav check 差し替え** | **型チェッカー完全セルフホスト** |
 
 ---
 

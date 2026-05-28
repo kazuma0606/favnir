@@ -2694,6 +2694,20 @@ impl VM {
                     _ => Err(self.error(artifact, "List.any requires a List as first argument")),
                 }
             }
+            "List.contains" => {
+                if args.len() != 2 {
+                    return Err(self.error(artifact, "List.contains requires 2 arguments"));
+                }
+                let mut it = args.into_iter();
+                let list = it.next().expect("list");
+                let elem = it.next().expect("elem");
+                match list {
+                    VMValue::List(fl) => {
+                        Ok(VMValue::Bool(fl.iter().any(|x| x == &elem)))
+                    }
+                    _ => Err(self.error(artifact, "List.contains requires a List as first argument")),
+                }
+            }
             "List.all" => {
                 if args.len() != 2 {
                     return Err(self.error(artifact, "List.all requires 2 arguments"));
@@ -6147,16 +6161,10 @@ fn vm_call_builtin(
                 Err(e) => return Ok(err_vm(VMValue::Str(e.to_string()))),
                 Ok(p) => p,
             };
-            let (errors, _) = crate::middle::checker::Checker::check_program(&program);
-            if errors.is_empty() {
-                Ok(ok_vm(VMValue::Str("compiled".to_string())))
-            } else {
-                let msg = errors
-                    .iter()
-                    .map(|e| e.message.clone())
-                    .collect::<Vec<_>>()
-                    .join("\n");
-                Ok(err_vm(VMValue::Str(msg)))
+            let prog_vm = crate::middle::ast_lower_checker::lower_program(&program);
+            match crate::checker_fav_runner::run_checker_fav(prog_vm) {
+                Ok(()) => Ok(ok_vm(VMValue::Str("compiled".to_string()))),
+                Err(msgs) => Ok(err_vm(VMValue::Str(msgs.join("\n")))),
             }
         }
         "Compiler.lineage_text_raw" => {

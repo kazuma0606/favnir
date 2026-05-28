@@ -1,3 +1,4 @@
+pub mod ast_lower_checker;
 pub mod checker;
 pub mod compiler;
 pub mod ir;

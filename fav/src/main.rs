@@ -40,6 +40,7 @@
 
 mod ast;
 mod backend;
+mod checker_fav_runner;
 mod docs_server;
 mod driver;
 mod error_catalog;
@@ -372,6 +373,7 @@ fn main_impl() {
 
         Some("check") => {
             let mut no_warn = false;
+            let mut legacy_check = false;
             let mut file: Option<&str> = None;
             let mut dir: Option<&str> = None;
             let mut sample: Option<usize> = None;
@@ -380,6 +382,10 @@ fn main_impl() {
                 match args[i].as_str() {
                     "--no-warn" => {
                         no_warn = true;
+                        i += 1;
+                    }
+                    "--legacy-check" => {
+                        legacy_check = true;
                         i += 1;
                     }
                     "--dir" => {
@@ -416,7 +422,7 @@ fn main_impl() {
             } else if let Some(dir) = dir {
                 driver::cmd_check_dir(dir);
             } else {
-                cmd_check(file, no_warn);
+                cmd_check(file, no_warn, legacy_check);
             }
         }
 

@@ -134,7 +134,7 @@ fn render_warnings(
     }
 }
 
-fn check_single_file(
+fn check_single_file_legacy(
     path: &str,
 ) -> (
     String,
@@ -150,6 +150,32 @@ fn check_single_file(
     let (errors, mut warnings) = checker.check_with_self(&program);
     warnings.extend(partial_flw_warnings(&program));
     (source, errors, warnings)
+}
+
+fn check_single_file(
+    path: &str,
+    legacy: bool,
+) -> (
+    String,
+    Vec<crate::middle::checker::TypeError>,
+    Vec<crate::middle::checker::FavWarning>,
+) {
+    if legacy {
+        return check_single_file_legacy(path);
+    }
+    let source = load_file(path);
+    let program = Parser::parse_str(&source, path).unwrap_or_else(|e| {
+        eprintln!("{}", e);
+        process::exit(1);
+    });
+    let prog_vm = crate::middle::ast_lower_checker::lower_program(&program);
+    match crate::checker_fav_runner::run_checker_fav(prog_vm) {
+        Ok(()) => (source, vec![], vec![]),
+        Err(msgs) => {
+            let errors = crate::checker_fav_runner::msgs_to_type_errors(msgs);
+            (source, errors, vec![])
+        }
+    }
 }
 
 // ── file loading ──────────────────────────────────────────────────────────────
@@ -2488,11 +2514,11 @@ fn summarize_function_opcodes(function: &backend::artifact::FvcFunction) -> Stri
 
 // ── fav check ─────────────────────────────────────────────────────────────────
 
-pub fn cmd_check(file: Option<&str>, no_warn: bool) {
+pub fn cmd_check(file: Option<&str>, no_warn: bool, legacy_check: bool) {
     load_checkpoint_config_for_file(file);
     if let Some(path) = file {
         // Single-file mode
-        let (source, errors, warnings) = check_single_file(path);
+        let (source, errors, warnings) = check_single_file(path, legacy_check);
         if errors.is_empty() {
             println!("{}: no errors found", path);
         } else {
@@ -4087,7 +4113,7 @@ mod infer_tests {
 mod tests {
     use super::{
         ExplainPrinter, TestResult, artifact_info_string, build_artifact, build_manifest_json,
-        build_wasm_artifact, check_single_file, cmd_bundle, collect_bench_cases,
+        build_wasm_artifact, check_single_file_legacy, cmd_bundle, collect_bench_cases,
         collect_test_cases, collect_watch_paths, collect_watch_paths_from_dir, create_lib_project,
         create_pipeline_project, create_script_project, diff_explain_json, ensure_no_partial_flw,
         exec_artifact_main, exec_artifact_main_with_emits, exec_wasm_bytes,
@@ -7147,7 +7173,7 @@ public fn main() -> Int { a() }
             .join("cap_user.fav");
         let source_str = source_path.to_string_lossy().to_string();
 
-        let (source, errors, warnings) = check_single_file(&source_str);
+        let (source, errors, warnings) = check_single_file_legacy(&source_str);
         assert!(errors.is_empty(), "expected no check errors");
         assert!(!warnings.is_empty(), "expected deprecated cap warning");
 
@@ -7163,7 +7189,7 @@ public fn main() -> Int { a() }
             .join("cap_user.fav");
         let source_str = source_path.to_string_lossy().to_string();
 
-        let (source, errors, warnings) = check_single_file(&source_str);
+        let (source, errors, warnings) = check_single_file_legacy(&source_str);
         assert!(errors.is_empty(), "expected no check errors");
         assert!(!warnings.is_empty(), "expected deprecated cap warning");
 
@@ -13360,7 +13386,7 @@ mod self_tests {
     fn self_hosted_lexer_type_checks() {
         let path = self_dir().join("lexer.fav");
         let path_str = path.to_string_lossy().to_string();
-        let (_src, errors, _warnings) = check_single_file(&path_str);
+        let (_src, errors, _warnings) = check_single_file_legacy(&path_str);
         assert!(
             errors.is_empty(),
             "self/lexer.fav type errors: {:?}",
@@ -13372,7 +13398,7 @@ mod self_tests {
     fn self_hosted_parser_type_checks() {
         let path = self_dir().join("parser.fav");
         let path_str = path.to_string_lossy().to_string();
-        let (_src, errors, _warnings) = check_single_file(&path_str);
+        let (_src, errors, _warnings) = check_single_file_legacy(&path_str);
         assert!(
             errors.is_empty(),
             "self/parser.fav type errors: {:?}",
@@ -13384,7 +13410,7 @@ mod self_tests {
     fn self_hosted_checker_type_checks() {
         let path = self_dir().join("checker.fav");
         let path_str = path.to_string_lossy().to_string();
-        let (_src, errors, _warnings) = check_single_file(&path_str);
+        let (_src, errors, _warnings) = check_single_file_legacy(&path_str);
         assert!(
             errors.is_empty(),
             "self/checker.fav type errors: {:?}",
@@ -13396,7 +13422,7 @@ mod self_tests {
     fn self_hosted_codegen_type_checks() {
         let path = self_dir().join("codegen.fav");
         let path_str = path.to_string_lossy().to_string();
-        let (_src, errors, _warnings) = check_single_file(&path_str);
+        let (_src, errors, _warnings) = check_single_file_legacy(&path_str);
         assert!(
             errors.is_empty(),
             "self/codegen.fav type errors: {:?}",
@@ -13408,7 +13434,7 @@ mod self_tests {
     fn self_hosted_compiler_type_checks() {
         let path = self_dir().join("compiler.fav");
         let path_str = path.to_string_lossy().to_string();
-        let (_src, errors, _warnings) = check_single_file(&path_str);
+        let (_src, errors, _warnings) = check_single_file_legacy(&path_str);
         assert!(
             errors.is_empty(),
             "self/compiler.fav type errors: {:?}",
@@ -17466,6 +17492,71 @@ public fn main() -> String {
 }
 "#);
         assert_eq!(result, Value::Str("t0".to_string()), "expected t0");
+    }
+}
+
+// ── checker_v81_wire_tests (v8.1.0) ───────────────────────────────────────────
+#[cfg(test)]
+mod checker_v81_wire_tests {
+    use crate::frontend::parser::Parser;
+    use crate::middle::ast_lower_checker::lower_program;
+    use crate::checker_fav_runner::run_checker_fav;
+
+    fn check_source(src: &str) -> Result<(), Vec<String>> {
+        let prog = Parser::parse_str(src, "wire_test.fav").expect("parse");
+        let prog_vm = lower_program(&prog);
+        run_checker_fav(prog_vm)
+    }
+
+    #[test]
+    fn checker_fav_wire_valid_fn() {
+        // 型エラーなし Favnir ソースが Ok を返す
+        let result = check_source(r#"
+fn add(a: Int, b: Int) -> Int {
+    a + b
+}
+public fn main() -> Int {
+    add(1, 2)
+}
+"#);
+        assert!(result.is_ok(), "expected Ok but got: {:?}", result);
+    }
+
+    #[test]
+    fn checker_fav_wire_generic_fn() {
+        // ジェネリクス関数を含むソースが通る
+        let result = check_source(r#"
+fn identity(x: A) -> A {
+    x
+}
+public fn main() -> Int {
+    identity(42)
+}
+"#);
+        assert!(result.is_ok(), "expected Ok but got: {:?}", result);
+    }
+
+    #[test]
+    fn checker_fav_wire_self_check() {
+        // checker.fav 自身が checker.fav 経由でチェック通過（完全ブートストラップ）
+        // 大きなスタックで実行（checker.fav の VM 実行が深い閉包チェーンを持つため）
+        let result = std::thread::Builder::new()
+            .stack_size(64 * 1024 * 1024) // 64 MB
+            .spawn(|| {
+                let checker_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                    .join("self")
+                    .join("checker.fav");
+                let src = std::fs::read_to_string(&checker_path).expect("checker.fav");
+                check_source(&src)
+            })
+            .expect("thread spawn")
+            .join()
+            .expect("thread join");
+        assert!(
+            result.is_ok(),
+            "checker.fav self-check failed: {:?}",
+            result
+        );
     }
 }
 

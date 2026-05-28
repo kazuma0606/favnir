@@ -532,8 +532,16 @@ fn is_type_var(s: String) -> Bool {
     } else { false }
 }
 
+// HM 型推論が生成するフレッシュ型変数 "t0", "t1", ... を認識する
+fn is_fresh_var(s: String) -> Bool {
+    if String.length(s) >= 2 {
+        bind first <- String.slice(s, 0, 1)
+        first == "t"
+    } else { false }
+}
+
 fn apply_subst(subst: List<KVPair>, ty: String) -> String {
-    if is_type_var(ty) {
+    if is_type_var(ty) || is_fresh_var(ty) {
         match subst_lookup(subst, ty) {
             Some(resolved) => resolved
             None => ty
@@ -612,7 +620,7 @@ fn unify_deep(t1: String, t2: String, subst: List<KVPair>) -> Result<List<KVPair
     else {
     if t1 == t2 { Result.ok(subst) }
     else {
-    if is_type_var(t1) {
+    if is_type_var(t1) || is_fresh_var(t1) {
         if occurs_in(t1, t2) {
             Result.err(fmt_err("E0006",
                 String.concat("occurs check failed: ",
@@ -629,7 +637,7 @@ fn unify_deep(t1: String, t2: String, subst: List<KVPair>) -> Result<List<KVPair
             }
         }
     } else {
-    if is_type_var(t2) {
+    if is_type_var(t2) || is_fresh_var(t2) {
         if occurs_in(t2, t1) {
             Result.err(fmt_err("E0006",
                 String.concat("occurs check failed: ",

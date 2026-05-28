@@ -4854,7 +4854,7 @@ impl Checker {
                 let elem = self.expect_list_arg(&arg_tys, 0, span);
                 Some(Type::Option(Box::new(elem)))
             }
-            ("List", "any") | ("List", "all") => {
+            ("List", "any") | ("List", "all") | ("List", "contains") => {
                 let _ = self.expect_list_arg(&arg_tys, 0, span);
                 Some(Type::Bool)
             }

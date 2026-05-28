@@ -341,3 +341,36 @@ fn first_elem(xs: List<A>) -> Option<A> {
 | v7.8.0 | ジェネリクス — TyVar / Subst / unify / parameterized builtin 推論 |
 | v7.9.0 | HM 型推論 — occurs_in / unify_deep / InfState / infer_hm |
 | **v8.0.0** | **Let ポリモーフィズム — 型スキーム generalization / instantiation / infer_call_hm** |
+| **v8.1.0** | **型チェッカーのセルフホスト完成 — fav check 配線（ast_lower_checker + checker_fav_runner）** |
+
+## v8.1.0: 型チェッカーのセルフホスト完成
+
+v8.1.0 で `fav check foo.fav` が **Rust 製 `checker.rs` ではなく Favnir 製 `checker.fav` 経由** で型チェックを行うように差し替えられた。
+
+```
+Before: fav check foo.fav → [Rust parser] → checker.rs → Vec<TypeError>
+After:  fav check foo.fav → [Rust parser] → ast_lower_checker → checker.fav → Vec<TypeError>
+```
+
+### 新規コンポーネント
+
+| ファイル | 役割 |
+|---------|------|
+| `src/middle/ast_lower_checker.rs` | Rust AST → `Value` 変換（checker.fav の型定義に対応） |
+| `src/checker_fav_runner.rs` | checker.fav アーティファクトのロード・実行・結果変換 |
+
+### 完全ブートストラップ検証
+
+`checker_fav_wire_self_check` テストにより、**checker.fav が自分自身をチェックして no errors** になることを確認。
+
+```bash
+fav check fav/self/checker.fav  # → no errors found
+```
+
+### フォールバック
+
+`--legacy-check` フラグで旧 Rust checker.rs にフォールバックできる：
+
+```bash
+fav check --legacy-check foo.fav
+```

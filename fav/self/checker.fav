@@ -837,7 +837,9 @@ fn infer_generic_res(fname: String, arg_tys: List<String>) -> String {
 fn infer_call(ns: String, fname: String, args: Expr, env: List<KVPair>) -> Result<String, String> {
     if ns == "" {
         match env_lookup(env, fname) {
-            Some(ty) => Result.ok(ty)
+            Some(ty) =>
+                if is_fn_scheme_str(ty) { Result.ok(fn_scheme_ret(ty)) }
+                else { Result.ok(ty) }
             None => Result.ok("Unknown")
         }
     } else {
@@ -1073,14 +1075,11 @@ fn fn_scheme_params_str(s: String) -> String { fn_scheme_section(s, 2) }
 fn fn_scheme_ret(s: String) -> String        { fn_scheme_section(s, 3) }
 
 fn make_fn_scheme_str(vars_csv: String, params_semi: String, ret: String) -> String {
-    if String.length(vars_csv) == 0 { ret }
-    else {
-        String.concat("forall|",
-        String.concat(vars_csv,
-        String.concat("|",
-        String.concat(params_semi,
-        String.concat("|", ret)))))
-    }
+    String.concat("forall|",
+    String.concat(vars_csv,
+    String.concat("|",
+    String.concat(params_semi,
+    String.concat("|", ret)))))
 }
 
 // ── Scheme construction and pre-pass ──────────────────────────────────────────
@@ -1099,18 +1098,14 @@ fn params_to_type_str_list(params: List<Param>) -> List<String> {
 }
 
 fn fn_to_scheme_str(fd: FnDef) -> String {
-    bind all_vars <- list_dedup(List.concat(
-        collect_type_vars_from_params(fd.params),
-        collect_type_vars_from_te(fd.ret)))
-    if List.length(all_vars) == 0 {
-        type_expr_to_str(fd.ret)
-    } else {
-        bind vars_csv    <- String.join(all_vars, ",")
-        bind param_types <- params_to_type_str_list(fd.params)
-        bind params_semi <- String.join(param_types, ";")
-        bind ret_str     <- type_expr_to_str(fd.ret)
-        make_fn_scheme_str(vars_csv, params_semi, ret_str)
-    }
+    bind all_vars    <- list_dedup(List.concat(
+                            collect_type_vars_from_params(fd.params),
+                            collect_type_vars_from_te(fd.ret)))
+    bind vars_csv    <- String.join(all_vars, ",")
+    bind param_types <- params_to_type_str_list(fd.params)
+    bind params_semi <- String.join(param_types, ";")
+    bind ret_str     <- type_expr_to_str(fd.ret)
+    make_fn_scheme_str(vars_csv, params_semi, ret_str)
 }
 
 fn collect_fn_schemes(items: List<Item>, env: List<KVPair>) -> List<KVPair> {
@@ -1134,10 +1129,7 @@ fn register_variant(type_name: String, v: VariantDef, env: List<KVPair>) -> List
         None     => env_insert(env, v.name, type_name)
         Some(te) => {
             bind param_str <- type_expr_to_str(te)
-            bind scheme    <- String.concat("forall||",
-                              String.concat(param_str,
-                              String.concat("|", type_name)))
-            env_insert(env, v.name, scheme)
+            env_insert(env, v.name, make_fn_scheme_str("", param_str, type_name))
         }
     }
 }
@@ -1250,7 +1242,12 @@ fn infer_call_user(fname: String, args: Expr, env: List<KVPair>, state: InfState
                         String.concat(" args but got ",
                         Int.to_string(n_actual)))))))
                 } else {
-                    instantiate_fn_scheme(ty, arg_tys, state)
+                    bind vars_str <- fn_scheme_vars_str(ty)
+                    if String.length(vars_str) == 0 {
+                        Result.ok(inf_result_of(fn_scheme_ret(ty), state))
+                    } else {
+                        instantiate_fn_scheme(ty, arg_tys, state)
+                    }
                 }
             } else {
                 Result.ok(inf_result_of(ty, state))

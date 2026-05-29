@@ -17683,6 +17683,69 @@ public fn main() -> Int { identity(1, 2) }
     }
 }
 
+// ── checker_v88_tests (v8.8.0) ────────────────────────────────────────────────
+// Verify E0008 for non-generic user-defined functions (all fns now scheme-encoded).
+#[cfg(test)]
+mod checker_v88_tests {
+    use crate::frontend::parser::Parser;
+    use crate::middle::ast_lower_checker::lower_program;
+    use crate::checker_fav_runner::run_checker_fav;
+
+    fn check_errors(src: &str) -> Vec<String> {
+        let prog = Parser::parse_str(src, "v88_test.fav").expect("parse");
+        let prog_vm = lower_program(&prog);
+        match run_checker_fav(prog_vm) {
+            Ok(()) => vec![],
+            Err(msgs) => crate::checker_fav_runner::msgs_to_type_errors(msgs)
+                .into_iter()
+                .map(|e| format!("{:?}", e))
+                .collect(),
+        }
+    }
+
+    /// Non-generic function called with wrong number of args → E0008.
+    #[test]
+    fn nongeneric_wrong_arity_e0008() {
+        let errors = check_errors(r#"
+fn add(a: Int, b: Int) -> Int { a + b }
+public fn main() -> Int { add(1) }
+"#);
+        assert!(
+            errors.iter().any(|e| e.contains("E0008")),
+            "expected E0008 for non-generic fn arity mismatch, got: {:?}",
+            errors
+        );
+    }
+
+    /// Zero-param function called correctly → no error.
+    #[test]
+    fn zero_param_fn_correct_call() {
+        let errors = check_errors(r#"
+fn get_val() -> Int { 42 }
+public fn main() -> Int { get_val() }
+"#);
+        assert!(
+            errors.is_empty(),
+            "0-param correct call should pass: {:?}",
+            errors
+        );
+    }
+
+    /// Zero-param function called with args → E0008.
+    #[test]
+    fn zero_param_fn_wrong_arity_e0008() {
+        let errors = check_errors(r#"
+fn get_val() -> Int { 42 }
+public fn main() -> Int { get_val(1) }
+"#);
+        assert!(
+            errors.iter().any(|e| e.contains("E0008")),
+            "expected E0008 for zero-param fn with args, got: {:?}",
+            errors
+        );
+    }
+}
+
 // ── stdlib_v82_tests (v8.2.0) ─────────────────────────────────────────────────
 #[cfg(test)]
 mod stdlib_v82_tests {

@@ -41,6 +41,7 @@
 mod ast;
 mod backend;
 mod checker_fav_runner;
+mod compiler_fav_runner;
 mod docs_server;
 mod driver;
 mod stdlib_fav_runner;
@@ -269,22 +270,42 @@ fn main_impl() {
         }
 
         Some("run") => {
-            // Parse --db flag
+            // Parse --db / --legacy / --self-host flags
             let mut db_path: Option<String> = None;
+            let mut legacy = false;
             let mut file_idx = 2usize;
-            if args.get(2).map(|s| s.as_str()) == Some("--db") {
-                db_path = Some(
-                    args.get(3)
-                        .unwrap_or_else(|| {
-                            eprintln!("error: --db requires a path argument");
-                            process::exit(1);
-                        })
-                        .clone(),
-                );
-                file_idx = 4;
+            let mut i = 2usize;
+            while i < args.len() {
+                match args[i].as_str() {
+                    "--db" => {
+                        db_path = Some(
+                            args.get(i + 1)
+                                .unwrap_or_else(|| {
+                                    eprintln!("error: --db requires a path argument");
+                                    process::exit(1);
+                                })
+                                .clone(),
+                        );
+                        i += 2;
+                        file_idx = i;
+                    }
+                    "--legacy" => {
+                        // Force Rust pipeline (opt-out of Favnir default)
+                        legacy = true;
+                        i += 1;
+                        file_idx = i;
+                    }
+                    "--self-host" => {
+                        // Backward-compat alias: --self-host is now the default,
+                        // so this flag is a no-op.
+                        i += 1;
+                        file_idx = i;
+                    }
+                    _ => break,
+                }
             }
             let file = args.get(file_idx).map(|s| s.as_str());
-            cmd_run(file, db_path.as_deref());
+            cmd_run(file, db_path.as_deref(), legacy);
         }
 
         Some("build") => {

@@ -688,11 +688,42 @@ fn load_and_check_program(file: Option<&str>) -> (ast::Program, String) {
 
 // ── fav run ───────────────────────────────────────────────────────────────────
 
-pub fn cmd_run(file: Option<&str>, db_url: Option<&str>) {
+/// Favnir pipeline: checker.fav + compiler.fav + Rust VM.
+/// Used when the source file is a simple single-file program (no rune imports,
+/// not in project mode).
+fn run_with_favnir_pipeline(source_path: &str, db_url: Option<&str>) {
+    // Type-check via checker.fav
+    let (source, errors, _) = check_single_file(source_path, false);
+    if !errors.is_empty() {
+        for e in &errors {
+            eprintln!("{}", format_diagnostic(&source, e));
+        }
+        process::exit(1);
+    }
+    // Compile via compiler.fav
+    let bytes =
+        crate::compiler_fav_runner::compile_file_to_bytes(source_path).unwrap_or_else(|e| {
+            eprintln!("compiler.fav error: {}", e);
+            process::exit(1);
+        });
+    let artifact =
+        crate::backend::artifact::FvcArtifact::from_bytes(&bytes).unwrap_or_else(|e| {
+            eprintln!("artifact deserialization error: {:?}", e);
+            process::exit(1);
+        });
+    exec_artifact_main_with_source(&artifact, db_url, Some(source_path)).unwrap_or_else(
+        |message| {
+            eprintln!("{message}");
+            process::exit(1);
+        },
+    );
+}
+
+/// Load fav.toml config (auth / log / env / aws) for the given source file.
+/// Shared by both Favnir and Rust pipeline paths.
+fn load_run_config(file: Option<&str>) {
     load_checkpoint_config_for_file(file);
-    // Load schemas/*.yaml and register in VM (v4.1.5)
     set_schema_registry(load_schemas(&schemas_root(file)));
-    // Load [auth] + [log] from fav.toml (v4.5.0 / v4.6.0)
     if let Some(f) = file {
         if let Some(root) = crate::toml::FavToml::find_root(
             std::path::Path::new(f)
@@ -711,9 +742,7 @@ pub fn cmd_run(file: Option<&str>, db_url: Option<&str>) {
                         service: lc.service.clone(),
                     });
                 }
-                // Load logs/*.yaml custom codes
                 set_log_codes(load_log_codes(&root));
-                // Apply [env] config (v4.7.0)
                 if let Some(ref ec) = toml.env {
                     if let Some(ref dotenv_path) = ec.dotenv {
                         let dp = root.join(dotenv_path);
@@ -735,7 +764,6 @@ pub fn cmd_run(file: Option<&str>, db_url: Option<&str>) {
                         prefix: ec.prefix.clone(),
                     });
                 }
-                // AWS config (v4.11.0)
                 let mut aws_cfg = AwsConfig::from_env();
                 if let Some(ac) = toml.aws.as_ref() {
                     if let Some(r) = &ac.region {
@@ -749,19 +777,54 @@ pub fn cmd_run(file: Option<&str>, db_url: Option<&str>) {
             }
         }
     }
-    let (run_program, source_path) = load_and_check_program(file);
-    ensure_no_partial_flw(&run_program).unwrap_or_else(|message| {
-        eprintln!("{message}");
+}
+
+/// `fav run [--legacy] <file>`
+///
+/// Default (`legacy = false`): Favnir pipeline (checker.fav + compiler.fav)
+/// for single-file programs.  Falls back to Rust pipeline automatically when:
+///   - `--legacy` is set, OR
+///   - the file is part of a fav.toml project, OR
+///   - the file uses `import rune` declarations.
+pub fn cmd_run(file: Option<&str>, db_url: Option<&str>, legacy: bool) {
+    load_run_config(file);
+
+    // Early parse to decide which pipeline to use.
+    let (source_path, proj) = find_entry(file);
+    let source = load_file(&source_path);
+    let program = Parser::parse_str(&source, &source_path).unwrap_or_else(|e| {
+        eprintln!("{}", e);
         process::exit(1);
     });
-    let artifact = build_artifact(&run_program);
 
-    exec_artifact_main_with_source(&artifact, db_url, Some(&source_path)).unwrap_or_else(
-        |message| {
+    let use_favnir = !legacy && proj.is_none() && !has_rune_imports(&program);
+
+    if use_favnir {
+        run_with_favnir_pipeline(&source_path, db_url);
+    } else {
+        // Rust pipeline (re-parses internally; acceptable for legacy/rune/project cases)
+        let (run_program, source_path2) = load_and_check_program(file);
+        ensure_no_partial_flw(&run_program).unwrap_or_else(|message| {
             eprintln!("{message}");
             process::exit(1);
-        },
-    );
+        });
+        let artifact = build_artifact(&run_program);
+        exec_artifact_main_with_source(&artifact, db_url, Some(&source_path2)).unwrap_or_else(
+            |message| {
+                eprintln!("{message}");
+                process::exit(1);
+            },
+        );
+    }
+}
+
+// ── fav run --self-host (backward-compat alias) ────────────────────────────────
+// --self-host is now the default behaviour of `fav run` for single-file programs.
+// This function is kept for backward compatibility; it simply delegates to cmd_run
+// with legacy=false.
+
+pub fn cmd_run_self_hosted(file: Option<&str>, db_url: Option<&str>) {
+    cmd_run(file, db_url, false);
 }
 
 pub fn cmd_build(file: Option<&str>, out: Option<&str>, target: Option<&str>) {
@@ -17776,5 +17839,159 @@ public fn main() -> String {
 }
 "#);
         assert_eq!(result, Value::Str("Option<Int>".to_string()), "expected Option<Int>");
+    }
+}
+
+// ── run_self_hosted_tests (v8.3.0) ────────────────────────────────────────────
+// Verify that compiler.fav can compile .fav source files and the resulting
+// bytecode executes correctly in the Rust VM.
+#[cfg(test)]
+mod run_self_hosted_tests {
+    use crate::backend::artifact::FvcArtifact;
+    use crate::backend::vm::VM;
+    use crate::value::Value;
+
+    fn compile_and_run_named(name: &str, src: &str) -> Value {
+        let filename = format!("fav_sh_{}.fav", name);
+        let tmp = std::env::temp_dir().join(filename);
+        std::fs::write(&tmp, src).expect("write tmp");
+        let path = tmp.to_str().expect("utf8 path");
+        let bytes = crate::compiler_fav_runner::compile_file_to_bytes(path)
+            .unwrap_or_else(|e| panic!("compiler.fav error: {}", e));
+        let artifact = FvcArtifact::from_bytes(&bytes)
+            .unwrap_or_else(|e| panic!("artifact error: {:?}", e));
+        let fn_idx = artifact.fn_idx_by_name("main").expect("main not found");
+        VM::run(&artifact, fn_idx, vec![]).expect("VM::run failed")
+    }
+
+    #[test]
+    fn run_self_hosted_bool_main() {
+        let result = compile_and_run_named("bool_main", "public fn main() -> Bool { true }");
+        assert_eq!(result, Value::Bool(true));
+    }
+
+    #[test]
+    fn run_self_hosted_arithmetic() {
+        let result = compile_and_run_named(
+            "arithmetic",
+            "fn add(a: Int, b: Int) -> Int { a + b } public fn main() -> Int { add(3, 4) }",
+        );
+        assert_eq!(result, Value::Int(7));
+    }
+
+    #[test]
+    fn run_self_hosted_string_concat() {
+        let result = compile_and_run_named(
+            "string_concat",
+            r#"public fn main() -> String { String.concat("hello", " world") }"#,
+        );
+        assert_eq!(result, Value::Str("hello world".to_string()));
+    }
+
+    #[test]
+    fn run_self_hosted_if_else() {
+        let result = compile_and_run_named(
+            "if_else",
+            "public fn main() -> Int { if true { 42 } else { 0 } }",
+        );
+        assert_eq!(result, Value::Int(42));
+    }
+
+    #[test]
+    fn run_self_hosted_let_bind() {
+        let result = compile_and_run_named(
+            "let_bind",
+            "public fn main() -> Int { bind x <- 10 bind y <- 20 x + y }",
+        );
+        assert_eq!(result, Value::Int(30));
+    }
+
+    // ── v8.4.0: checker.fav is used for type-checking in --self-host path ─────
+
+    fn check_with_checker_fav(src: &str, name: &str) -> Result<(), Vec<String>> {
+        let tmp = std::env::temp_dir().join(format!("fav_sh_{}.fav", name));
+        std::fs::write(&tmp, src).unwrap();
+        let path = tmp.to_str().unwrap();
+        let source = super::load_file(path);
+        let program = crate::frontend::parser::Parser::parse_str(&source, path)
+            .expect("parse error");
+        let prog_vm = crate::middle::ast_lower_checker::lower_program(&program);
+        crate::checker_fav_runner::run_checker_fav(prog_vm)
+    }
+
+    /// checker.fav 型チェックの検証: 有効なコードはエラーなしで通る
+    #[test]
+    fn run_self_hosted_checker_fav_valid() {
+        let result = check_with_checker_fav("public fn main() -> Int { 1 + 2 }", "chk_valid");
+        assert!(result.is_ok(), "checker.fav should report no errors");
+    }
+
+    /// checker.fav 型チェックの検証: !IO 未宣言エフェクト（E0003）を検出する
+    #[test]
+    fn run_self_hosted_checker_fav_catches_type_error() {
+        // IO.println を使う関数が !IO を宣言していない → E0003
+        let result = check_with_checker_fav(
+            r#"fn io_fn() -> Bool { IO.println("test") } public fn main() -> Bool { true }"#,
+            "chk_err",
+        );
+        assert!(result.is_err(), "checker.fav should report E0003 for undeclared !IO effect");
+        let msgs = result.unwrap_err();
+        assert!(
+            msgs.iter().any(|m| m.contains("E0003")),
+            "expected E0003 error, got: {:?}",
+            msgs
+        );
+    }
+}
+
+// ── run_dispatch_tests (v8.5.0) ───────────────────────────────────────────────
+// Verify that cmd_run routes single-file programs to the Favnir pipeline and
+// rune-import files to the Rust pipeline fallback.
+#[cfg(test)]
+mod run_dispatch_tests {
+    use crate::frontend::parser::Parser;
+
+    /// Single-file program (no rune imports) → Favnir pipeline is selected.
+    /// Verified by confirming compile_file_to_bytes succeeds for the same source.
+    #[test]
+    fn dispatch_single_file_uses_favnir() {
+        let src = "public fn main() -> Int { 21 * 2 }";
+        let tmp = std::env::temp_dir().join("fav_disp_single.fav");
+        std::fs::write(&tmp, src).unwrap();
+        let path_str = tmp.to_str().unwrap();
+
+        // Verify has_rune_imports returns false → Favnir path would be taken
+        let source = super::load_file(path_str);
+        let program = Parser::parse_str(&source, path_str).expect("parse");
+        assert!(!super::has_rune_imports(&program), "simple file should have no rune imports");
+
+        // Verify the Favnir pipeline actually compiles and runs it
+        let bytes = crate::compiler_fav_runner::compile_file_to_bytes(path_str)
+            .expect("compiler.fav should compile single-file program");
+        let artifact = crate::backend::artifact::FvcArtifact::from_bytes(&bytes)
+            .expect("artifact deserialization");
+        let fn_idx = artifact.fn_idx_by_name("main").expect("main");
+        let result = crate::backend::vm::VM::run(&artifact, fn_idx, vec![])
+            .expect("VM::run");
+        assert_eq!(result, crate::value::Value::Int(42));
+    }
+
+    /// File with rune import declaration → has_rune_imports returns true
+    /// → Rust pipeline fallback is selected (legacy path).
+    #[test]
+    fn dispatch_rune_import_uses_rust_fallback() {
+        let src = "import rune \"sql\"\npublic fn main() -> Bool { true }";
+        let tmp = std::env::temp_dir().join("fav_disp_rune.fav");
+        std::fs::write(&tmp, src).unwrap();
+        let path_str = tmp.to_str().unwrap();
+
+        let source = super::load_file(path_str);
+        let program = Parser::parse_str(&source, path_str).expect("parse");
+        assert!(
+            super::has_rune_imports(&program),
+            "file with `import rune` should trigger rune-import detection"
+        );
+        // When has_rune_imports is true, cmd_run sets use_favnir=false → Rust pipeline.
+        // We verify the detection logic here; full execution would require rune_modules/.
     }
 }

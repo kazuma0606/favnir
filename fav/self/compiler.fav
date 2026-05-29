@@ -3405,6 +3405,22 @@ fn compile_file(path: String) -> Result<Artifact, String> {
     compile_file_after_lex(src))
 }
 
+// Silent version of compile_file — no IO.println phase messages.
+// Used by compile_bytes so callers get clean bytecode without stdout noise.
+fn compile_file_quiet(path: String) -> Result<Artifact, String> {
+    Result.and_then(IO.read_file_raw(path), |src|
+    Result.and_then(lex(src), |toks|
+    Result.and_then(parse_tokens(toks), |prog|
+    compile(prog))))
+}
+
+// Compile a .fav source file and return the serialized FVC bytecode.
+// Returns Ok(List<Int>) on success, Err(String) on parse/compile failure.
+public fn compile_bytes(path: String) -> Result<List<Int>, String> {
+    Result.and_then(compile_file_quiet(path), |artifact|
+    Result.ok(serialize_artifact(artifact)))
+}
+
 fn print_bytes(bytes: List<Int>) -> Bool {
     match List.first(bytes) {
         None => true

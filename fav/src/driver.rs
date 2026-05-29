@@ -689,8 +689,8 @@ fn load_and_check_program(file: Option<&str>) -> (ast::Program, String) {
 // ── fav run ───────────────────────────────────────────────────────────────────
 
 /// Favnir pipeline: checker.fav + compiler.fav + Rust VM.
-/// Used when the source file is a simple single-file program (no rune imports,
-/// not in project mode).
+/// Used for single-file programs not in project mode (rune imports are handled
+/// by collect_merged_sources in compiler_fav_runner, v8.6.0).
 fn run_with_favnir_pipeline(source_path: &str, db_url: Option<&str>) {
     // Type-check via checker.fav
     let (source, errors, _) = check_single_file(source_path, false);
@@ -700,9 +700,9 @@ fn run_with_favnir_pipeline(source_path: &str, db_url: Option<&str>) {
         }
         process::exit(1);
     }
-    // Compile via compiler.fav
+    // Compile via compiler.fav (rune-import-aware, v8.6.0)
     let bytes =
-        crate::compiler_fav_runner::compile_file_to_bytes(source_path).unwrap_or_else(|e| {
+        crate::compiler_fav_runner::compile_file_to_bytes_rune(source_path).unwrap_or_else(|e| {
             eprintln!("compiler.fav error: {}", e);
             process::exit(1);
         });
@@ -789,15 +789,11 @@ fn load_run_config(file: Option<&str>) {
 pub fn cmd_run(file: Option<&str>, db_url: Option<&str>, legacy: bool) {
     load_run_config(file);
 
-    // Early parse to decide which pipeline to use.
+    // Decide which pipeline to use.
+    // v8.6.0: rune imports are handled inside compile_file_to_bytes_rune,
+    // so we only fall back to Rust pipeline for fav.toml project mode or --legacy.
     let (source_path, proj) = find_entry(file);
-    let source = load_file(&source_path);
-    let program = Parser::parse_str(&source, &source_path).unwrap_or_else(|e| {
-        eprintln!("{}", e);
-        process::exit(1);
-    });
-
-    let use_favnir = !legacy && proj.is_none() && !has_rune_imports(&program);
+    let use_favnir = !legacy && proj.is_none();
 
     if use_favnir {
         run_with_favnir_pipeline(&source_path, db_url);
@@ -17944,15 +17940,12 @@ mod run_self_hosted_tests {
     }
 }
 
-// ── run_dispatch_tests (v8.5.0) ───────────────────────────────────────────────
-// Verify that cmd_run routes single-file programs to the Favnir pipeline and
-// rune-import files to the Rust pipeline fallback.
+// ── run_dispatch_tests (v8.5.0 / updated v8.6.0) ────────────────────────────
+// Verify that cmd_run routes programs to the Favnir pipeline.
+// v8.6.0: rune imports are now handled inside compile_file_to_bytes_rune.
 #[cfg(test)]
 mod run_dispatch_tests {
-    use crate::frontend::parser::Parser;
-
-    /// Single-file program (no rune imports) → Favnir pipeline is selected.
-    /// Verified by confirming compile_file_to_bytes succeeds for the same source.
+    /// Single-file program → Favnir pipeline (compile_file_to_bytes_rune).
     #[test]
     fn dispatch_single_file_uses_favnir() {
         let src = "public fn main() -> Int { 21 * 2 }";
@@ -17960,13 +17953,7 @@ mod run_dispatch_tests {
         std::fs::write(&tmp, src).unwrap();
         let path_str = tmp.to_str().unwrap();
 
-        // Verify has_rune_imports returns false → Favnir path would be taken
-        let source = super::load_file(path_str);
-        let program = Parser::parse_str(&source, path_str).expect("parse");
-        assert!(!super::has_rune_imports(&program), "simple file should have no rune imports");
-
-        // Verify the Favnir pipeline actually compiles and runs it
-        let bytes = crate::compiler_fav_runner::compile_file_to_bytes(path_str)
+        let bytes = crate::compiler_fav_runner::compile_file_to_bytes_rune(path_str)
             .expect("compiler.fav should compile single-file program");
         let artifact = crate::backend::artifact::FvcArtifact::from_bytes(&bytes)
             .expect("artifact deserialization");
@@ -17976,22 +17963,37 @@ mod run_dispatch_tests {
         assert_eq!(result, crate::value::Value::Int(42));
     }
 
-    /// File with rune import declaration → has_rune_imports returns true
-    /// → Rust pipeline fallback is selected (legacy path).
+    /// File with rune import → Favnir pipeline handles it via source merging (v8.6.0).
     #[test]
-    fn dispatch_rune_import_uses_rust_fallback() {
-        let src = "import rune \"sql\"\npublic fn main() -> Bool { true }";
-        let tmp = std::env::temp_dir().join("fav_disp_rune.fav");
-        std::fs::write(&tmp, src).unwrap();
-        let path_str = tmp.to_str().unwrap();
+    fn dispatch_rune_import_uses_favnir_pipeline() {
+        let dir = tempfile::tempdir().expect("tempdir");
 
-        let source = super::load_file(path_str);
-        let program = Parser::parse_str(&source, path_str).expect("parse");
-        assert!(
-            super::has_rune_imports(&program),
-            "file with `import rune` should trigger rune-import detection"
-        );
-        // When has_rune_imports is true, cmd_run sets use_favnir=false → Rust pipeline.
-        // We verify the detection logic here; full execution would require rune_modules/.
+        // Create rune_modules/mymath/mymath.fav
+        let rune_dir = dir.path().join("rune_modules").join("mymath");
+        std::fs::create_dir_all(&rune_dir).expect("create rune dir");
+        std::fs::write(
+            rune_dir.join("mymath.fav"),
+            "public fn double(x: Int) -> Int { x * 2 }",
+        )
+        .expect("write mymath.fav");
+
+        // Create main.fav that imports and uses the rune
+        let main_path = dir.path().join("fav_disp_rune_main.fav");
+        std::fs::write(
+            &main_path,
+            "import rune \"mymath\"\npublic fn main() -> Int { double(21) }",
+        )
+        .expect("write main.fav");
+
+        let bytes = crate::compiler_fav_runner::compile_file_to_bytes_rune(
+            main_path.to_str().unwrap(),
+        )
+        .expect("compile_file_to_bytes_rune should handle rune import");
+        let artifact = crate::backend::artifact::FvcArtifact::from_bytes(&bytes)
+            .expect("artifact deserialization");
+        let fn_idx = artifact.fn_idx_by_name("main").expect("main");
+        let result = crate::backend::vm::VM::run(&artifact, fn_idx, vec![])
+            .expect("VM::run");
+        assert_eq!(result, crate::value::Value::Int(42));
     }
 }

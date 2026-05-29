@@ -3421,6 +3421,15 @@ public fn compile_bytes(path: String) -> Result<List<Int>, String> {
     Result.ok(serialize_artifact(artifact)))
 }
 
+// Compile from a pre-merged source string (no file I/O).
+// Used by the rune-import-aware Rust runner to pass concatenated sources.
+public fn compile_bytes_from_src(src: String) -> Result<List<Int>, String> {
+    Result.and_then(lex(src), |toks|
+    Result.and_then(parse_tokens(toks), |prog|
+    Result.and_then(compile(prog), |artifact|
+    Result.ok(serialize_artifact(artifact)))))
+}
+
 fn print_bytes(bytes: List<Int>) -> Bool {
     match List.first(bytes) {
         None => true

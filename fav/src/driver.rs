@@ -17746,6 +17746,66 @@ public fn main() -> Int { get_val(1) }
     }
 }
 
+// ── checker_v89_tests (v8.9.0) ────────────────────────────────────────────────
+// Verify E0001 (undefined variable) detected in HM path.
+#[cfg(test)]
+mod checker_v89_tests {
+    use crate::frontend::parser::Parser;
+    use crate::middle::ast_lower_checker::lower_program;
+    use crate::checker_fav_runner::run_checker_fav;
+
+    fn check_errors(src: &str) -> Vec<String> {
+        let prog = Parser::parse_str(src, "v89_test.fav").expect("parse");
+        let prog_vm = lower_program(&prog);
+        match run_checker_fav(prog_vm) {
+            Ok(()) => vec![],
+            Err(msgs) => crate::checker_fav_runner::msgs_to_type_errors(msgs)
+                .into_iter()
+                .map(|e| format!("{:?}", e))
+                .collect(),
+        }
+    }
+
+    /// Undefined variable reference → E0001.
+    #[test]
+    fn undefined_var_e0001() {
+        let errors = check_errors("public fn main() -> Int { x }");
+        assert!(
+            errors.iter().any(|e| e.contains("E0001")),
+            "expected E0001 for undefined variable, got: {:?}",
+            errors
+        );
+    }
+
+    /// Function parameter is defined → no error.
+    #[test]
+    fn fn_param_not_e0001() {
+        let errors = check_errors("public fn main(n: Int) -> Int { n }");
+        assert!(
+            errors.is_empty(),
+            "fn param should not cause E0001: {:?}",
+            errors
+        );
+    }
+
+    /// Let-bound variable is defined → no error.
+    #[test]
+    fn let_bound_not_e0001() {
+        let errors = check_errors(r#"
+fn add(a: Int, b: Int) -> Int { a + b }
+public fn main() -> Int {
+    bind r <- add(1, 2)
+    r
+}
+"#);
+        assert!(
+            errors.is_empty(),
+            "let-bound var should not cause E0001: {:?}",
+            errors
+        );
+    }
+}
+
 // ── stdlib_v82_tests (v8.2.0) ─────────────────────────────────────────────────
 #[cfg(test)]
 mod stdlib_v82_tests {

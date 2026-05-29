@@ -972,11 +972,8 @@ fn infer_hm(expr: Expr, env: List<KVPair>, state: InfState) -> Result<InfResult,
         EVar(name) => {
             match env_lookup(env, name) {
                 Some(ty) => Result.ok(inf_result_of(ty, state))
-                None     => {
-                    bind tv <- fresh_var(state.counter)
-                    Result.ok(inf_result_of(tv,
-                        inf_state_new(state.subst, state.counter + 1)))
-                }
+                None     => Result.err(fmt_err("E0001",
+                                String.concat("undefined variable: ", name)))
             }
         }
         EBind(vname, val_e, cont_e) => infer_hm_let(vname, val_e, cont_e, env, state)

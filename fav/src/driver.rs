@@ -17619,6 +17619,70 @@ public fn main() -> Int {
     }
 }
 
+// ── checker_v87_tests (v8.7.0) ────────────────────────────────────────────────
+// Verify E0007 (undefined user-defined function) and E0008 (arity mismatch).
+#[cfg(test)]
+mod checker_v87_tests {
+    use crate::frontend::parser::Parser;
+    use crate::middle::ast_lower_checker::lower_program;
+    use crate::checker_fav_runner::run_checker_fav;
+
+    fn check_errors(src: &str) -> Vec<String> {
+        let prog = Parser::parse_str(src, "v87_test.fav").expect("parse");
+        let prog_vm = lower_program(&prog);
+        match run_checker_fav(prog_vm) {
+            Ok(()) => vec![],
+            Err(msgs) => crate::checker_fav_runner::msgs_to_type_errors(msgs)
+                .into_iter()
+                .map(|e| format!("{:?}", e))
+                .collect(),
+        }
+    }
+
+    /// Calling an undefined user-defined function → E0007.
+    #[test]
+    fn undefined_fn_e0007() {
+        let errors = check_errors(
+            "public fn main() -> Int { foo(1) }",
+        );
+        assert!(
+            errors.iter().any(|e| e.contains("E0007")),
+            "expected E0007 for undefined function, got: {:?}",
+            errors
+        );
+    }
+
+    /// User-defined sum type constructors must NOT trigger E0007.
+    #[test]
+    fn variant_constructor_ok() {
+        let errors = check_errors(r#"
+type MyOpt =
+  | None1
+  | Some1(Int)
+public fn main() -> MyOpt { Some1(42) }
+"#);
+        assert!(
+            errors.is_empty(),
+            "variant constructor should not cause E0007: {:?}",
+            errors
+        );
+    }
+
+    /// Generic function called with wrong number of args → E0008.
+    #[test]
+    fn wrong_arity_e0008() {
+        let errors = check_errors(r#"
+fn identity(x: A) -> A { x }
+public fn main() -> Int { identity(1, 2) }
+"#);
+        assert!(
+            errors.iter().any(|e| e.contains("E0008")),
+            "expected E0008 for arity mismatch, got: {:?}",
+            errors
+        );
+    }
+}
+
 // ── stdlib_v82_tests (v8.2.0) ─────────────────────────────────────────────────
 #[cfg(test)]
 mod stdlib_v82_tests {

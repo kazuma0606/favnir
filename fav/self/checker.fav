@@ -1124,6 +1124,51 @@ fn collect_fn_schemes(items: List<Item>, env: List<KVPair>) -> List<KVPair> {
     }
 }
 
+// ── Variant constructor registration (v8.7.0) ────────────────────────────────
+
+// Register one variant of a sum type into the env.
+// Nullary variants (no payload) are stored as the type name.
+// Payload variants are stored as a scheme string "forall||<param>|<type>".
+fn register_variant(type_name: String, v: VariantDef, env: List<KVPair>) -> List<KVPair> {
+    match v.payload {
+        None     => env_insert(env, v.name, type_name)
+        Some(te) => {
+            bind param_str <- type_expr_to_str(te)
+            bind scheme    <- String.concat("forall||",
+                              String.concat(param_str,
+                              String.concat("|", type_name)))
+            env_insert(env, v.name, scheme)
+        }
+    }
+}
+
+fn register_variants_inner(type_name: String, vs: List<VariantDef>, env: List<KVPair>) -> List<KVPair> {
+    match List.first(vs) {
+        None    => env
+        Some(v) =>
+            register_variants_inner(type_name, List.drop(vs, 1),
+                register_variant(type_name, v, env))
+    }
+}
+
+// Walk items and register all sum type variant constructors into env.
+fn collect_variant_constructors(items: List<Item>, env: List<KVPair>) -> List<KVPair> {
+    match List.first(items) {
+        None => env
+        Some(item) => match item {
+            IType(td) => {
+                if td.is_record {
+                    collect_variant_constructors(List.drop(items, 1), env)
+                } else {
+                    collect_variant_constructors(List.drop(items, 1),
+                        register_variants_inner(td.name, td.variants, env))
+                }
+            }
+            _ => collect_variant_constructors(List.drop(items, 1), env)
+        }
+    }
+}
+
 // ── Scheme instantiation ───────────────────────────────────────────────────────
 
 fn build_scheme_subst_inner(param_tys: List<String>, arg_tys: List<String>, subst: List<KVPair>) -> Result<List<KVPair>, String> {
@@ -1176,13 +1221,37 @@ fn instantiate_fn_scheme(scheme: String, arg_tys: List<String>, state: InfState)
             inf_state_new(subst2, state.counter))))
 }
 
+// Count semicolon-delimited parameters in a scheme params string.
+// Returns 0 for an empty string (0-param function).
+fn count_scheme_params(s: String) -> Int {
+    if String.length(s) == 0 { 0 }
+    else {
+        bind parts <- String.split(s, ";")
+        List.length(parts)
+    }
+}
+
 fn infer_call_user(fname: String, args: Expr, env: List<KVPair>, state: InfState) -> Result<InfResult, String> {
     match env_lookup(env, fname) {
-        None     => Result.ok(inf_result_of("Unknown", state))
+        None =>
+            Result.err(fmt_err("E0007",
+                String.concat("undefined function: ", fname)))
         Some(ty) => {
             if is_fn_scheme_str(ty) {
-                bind arg_tys <- infer_arg_tys(args, env)
-                instantiate_fn_scheme(ty, arg_tys, state)
+                bind arg_tys    <- infer_arg_tys(args, env)
+                bind params_str <- fn_scheme_params_str(ty)
+                bind n_expected <- count_scheme_params(params_str)
+                bind n_actual   <- List.length(arg_tys)
+                if n_expected != n_actual {
+                    Result.err(fmt_err("E0008",
+                        String.concat(fname,
+                        String.concat(": expected ",
+                        String.concat(Int.to_string(n_expected),
+                        String.concat(" args but got ",
+                        Int.to_string(n_actual)))))))
+                } else {
+                    instantiate_fn_scheme(ty, arg_tys, state)
+                }
             } else {
                 Result.ok(inf_result_of(ty, state))
             }
@@ -1224,7 +1293,8 @@ fn check_items(items: List<Item>, env: List<KVPair>) -> Result<String, String> {
 public fn check(prog: Program) -> Result<String, String> {
     bind init_env   <- env_empty()
     bind scheme_env <- collect_fn_schemes(prog.items, init_env)
-    check_items(prog.items, scheme_env)
+    bind full_env   <- collect_variant_constructors(prog.items, scheme_env)
+    check_items(prog.items, full_env)
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────

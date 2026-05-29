@@ -17806,6 +17806,65 @@ public fn main() -> Int {
     }
 }
 
+// ── checker_v810_tests (v8.10.0) ──────────────────────────────────────────────
+// Verify E0009 (declared return type vs inferred body type mismatch).
+#[cfg(test)]
+mod checker_v810_tests {
+    use crate::frontend::parser::Parser;
+    use crate::middle::ast_lower_checker::lower_program;
+    use crate::checker_fav_runner::run_checker_fav;
+
+    fn check_errors(src: &str) -> Vec<String> {
+        let prog = Parser::parse_str(src, "v810_test.fav").expect("parse");
+        let prog_vm = lower_program(&prog);
+        match run_checker_fav(prog_vm) {
+            Ok(()) => vec![],
+            Err(msgs) => crate::checker_fav_runner::msgs_to_type_errors(msgs)
+                .into_iter()
+                .map(|e| format!("{:?}", e))
+                .collect(),
+        }
+    }
+
+    /// Return type mismatch (String body, Int declared) → E0009.
+    #[test]
+    fn return_type_mismatch_e0009() {
+        let errors = check_errors(
+            "fn bad() -> Int { \"hello\" }\npublic fn main() -> Int { bad() }",
+        );
+        assert!(
+            errors.iter().any(|e| e.contains("E0009")),
+            "expected E0009 for return type mismatch, got: {:?}",
+            errors
+        );
+    }
+
+    /// Int literal with Int declared return → no error.
+    #[test]
+    fn return_type_correct_literal() {
+        let errors = check_errors("public fn main() -> Int { 42 }");
+        assert!(
+            errors.is_empty(),
+            "Int literal fn should pass: {:?}",
+            errors
+        );
+    }
+
+    /// Function call with matching return type → no error.
+    #[test]
+    fn return_type_correct_call() {
+        let errors = check_errors(r#"
+fn double(x: Int) -> Int { x + x }
+public fn main() -> Int { double(21) }
+"#);
+        assert!(
+            errors.is_empty(),
+            "fn call with matching return type should pass: {:?}",
+            errors
+        );
+    }
+}
+
 // ── stdlib_v82_tests (v8.2.0) ─────────────────────────────────────────────────
 #[cfg(test)]
 mod stdlib_v82_tests {

@@ -905,6 +905,19 @@ fn infer_expr(expr: Expr, env: List<KVPair>) -> Result<String, String> {
 
 // ── Function definition checker ───────────────────────────────────────────────
 
+fn check_body_ty(fname: String, ret: TypeExpr, r: InfResult) -> Result<String, String> {
+    if types_compatible(apply_subst(r.subst, r.ty), type_expr_to_str(ret)) {
+        Result.ok(fname)
+    } else {
+        Result.err(fmt_err("E0009",
+            String.concat(fname,
+            String.concat(": declared return ",
+            String.concat(type_expr_to_str(ret),
+            String.concat(" but body infers ",
+            apply_subst(r.subst, r.ty)))))))
+    }
+}
+
 fn check_fn_def(fd: FnDef, env: List<KVPair>) -> Result<String, String> {
     bind param_env <- build_param_env(fd.params, env)
     bind inferred_effs <- infer_expr_effects(fd.body)
@@ -913,7 +926,7 @@ fn check_fn_def(fd: FnDef, env: List<KVPair>) -> Result<String, String> {
         None => {
             bind init_state <- inf_state_new(subst_empty(), 0)
             Result.and_then(infer_hm(fd.body, param_env, init_state), |r|
-            Result.ok(fd.name))
+            check_body_ty(fd.name, fd.ret, r))
         }
     }
 }
@@ -1003,6 +1016,20 @@ fn is_type_var_extended(s: String) -> Bool {
          second == "8" || second == "9")
     } else { false }
     }
+}
+
+fn outer_type(s: String) -> String {
+    match List.first(String.split(s, "<")) {
+        None        => s
+        Some(outer) => outer
+    }
+}
+
+fn types_compatible(inferred: String, declared: String) -> Bool {
+    if inferred == declared { true }
+    else if inferred == "Unknown" { true }
+    else if is_type_var_extended(inferred) { true }
+    else { outer_type(inferred) == outer_type(declared) }
 }
 
 fn list_dedup_inner(lst: List<String>, seen: List<String>, acc: List<String>) -> List<String> {

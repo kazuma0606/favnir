@@ -2215,7 +2215,19 @@ impl Parser {
         let then_block = self.parse_block()?;
         let else_block = if self.peek() == &TokenKind::Else {
             self.advance();
-            Some(Box::new(self.parse_block()?))
+            if self.peek() == &TokenKind::If {
+                // `else if` → desugar to `else { if ... }`
+                let start_else = self.peek_span().clone();
+                let if_expr = self.parse_if_expr()?;
+                let span = self.span_from(&start_else);
+                Some(Box::new(Block {
+                    stmts: vec![],
+                    expr: Box::new(if_expr),
+                    span,
+                }))
+            } else {
+                Some(Box::new(self.parse_block()?))
+            }
         } else {
             None
         };

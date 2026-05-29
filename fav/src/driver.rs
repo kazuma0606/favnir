@@ -688,6 +688,33 @@ fn load_and_check_program(file: Option<&str>) -> (ast::Program, String) {
 
 // ── fav run ───────────────────────────────────────────────────────────────────
 
+/// Execute pre-compiled FVC bytecode via the Rust VM.
+/// Shared by `run_with_favnir_pipeline` and `run_with_favnir_pipeline_project`.
+fn run_fvc_bytes(bytes: &[u8], db_url: Option<&str>, source_path: Option<&str>) {
+    let artifact =
+        crate::backend::artifact::FvcArtifact::from_bytes(bytes).unwrap_or_else(|e| {
+            eprintln!("artifact deserialization error: {:?}", e);
+            process::exit(1);
+        });
+    exec_artifact_main_with_source(&artifact, db_url, source_path).unwrap_or_else(|message| {
+        eprintln!("{message}");
+        process::exit(1);
+    });
+}
+
+/// Type-check a merged source string via checker.fav.
+fn check_source_str(src: &str) -> Vec<crate::middle::checker::TypeError> {
+    let program = Parser::parse_str(src, "project.fav").unwrap_or_else(|e| {
+        eprintln!("error: {}", e);
+        process::exit(1);
+    });
+    let prog_vm = crate::middle::ast_lower_checker::lower_program(&program);
+    match crate::checker_fav_runner::run_checker_fav(prog_vm) {
+        Ok(()) => vec![],
+        Err(msgs) => crate::checker_fav_runner::msgs_to_type_errors(msgs),
+    }
+}
+
 /// Favnir pipeline: checker.fav + compiler.fav + Rust VM.
 /// Used for single-file programs not in project mode (rune imports are handled
 /// by collect_merged_sources in compiler_fav_runner, v8.6.0).
@@ -706,17 +733,43 @@ fn run_with_favnir_pipeline(source_path: &str, db_url: Option<&str>) {
             eprintln!("compiler.fav error: {}", e);
             process::exit(1);
         });
-    let artifact =
-        crate::backend::artifact::FvcArtifact::from_bytes(&bytes).unwrap_or_else(|e| {
-            eprintln!("artifact deserialization error: {:?}", e);
+    run_fvc_bytes(&bytes, db_url, Some(source_path));
+}
+
+/// Favnir pipeline for fav.toml project mode (v8.11.0).
+/// Merges all project sources, type-checks, compiles via compiler.fav, and runs.
+fn run_with_favnir_pipeline_project(
+    source_path: &str,
+    root: &std::path::Path,
+    toml: &crate::toml::FavToml,
+    db_url: Option<&str>,
+) {
+    // 1. Collect and merge all project sources
+    let merged =
+        crate::compiler_fav_runner::collect_project_merged(source_path, root, toml)
+            .unwrap_or_else(|e| {
+                eprintln!("error: {}", e);
+                process::exit(1);
+            });
+
+    // 2. Type-check the merged source via checker.fav
+    let errors = check_source_str(&merged);
+    if !errors.is_empty() {
+        for e in &errors {
+            eprintln!("{}", format_diagnostic(&merged, e));
+        }
+        process::exit(1);
+    }
+
+    // 3. Compile merged source → FVC bytecode
+    let bytes = crate::compiler_fav_runner::compile_src_str_to_bytes(&merged)
+        .unwrap_or_else(|e| {
+            eprintln!("compiler.fav error: {}", e);
             process::exit(1);
         });
-    exec_artifact_main_with_source(&artifact, db_url, Some(source_path)).unwrap_or_else(
-        |message| {
-            eprintln!("{message}");
-            process::exit(1);
-        },
-    );
+
+    // 4. Execute
+    run_fvc_bytes(&bytes, db_url, Some(source_path));
 }
 
 /// Load fav.toml config (auth / log / env / aws) for the given source file.
@@ -790,15 +843,20 @@ pub fn cmd_run(file: Option<&str>, db_url: Option<&str>, legacy: bool) {
     load_run_config(file);
 
     // Decide which pipeline to use.
-    // v8.6.0: rune imports are handled inside compile_file_to_bytes_rune,
-    // so we only fall back to Rust pipeline for fav.toml project mode or --legacy.
+    // v8.11.0: project mode now uses Favnir pipeline via compile_project_to_bytes.
+    // Only --legacy forces Rust pipeline.
     let (source_path, proj) = find_entry(file);
-    let use_favnir = !legacy && proj.is_none();
+    let use_favnir = !legacy;
 
     if use_favnir {
-        run_with_favnir_pipeline(&source_path, db_url);
+        if let Some((ref toml, ref root)) = proj {
+            run_with_favnir_pipeline_project(&source_path, root, toml, db_url);
+        } else {
+            run_with_favnir_pipeline(&source_path, db_url);
+        }
+        return;
     } else {
-        // Rust pipeline (re-parses internally; acceptable for legacy/rune/project cases)
+        // Rust pipeline (--legacy)
         let (run_program, source_path2) = load_and_check_program(file);
         ensure_no_partial_flw(&run_program).unwrap_or_else(|message| {
             eprintln!("{message}");
@@ -18206,6 +18264,49 @@ mod run_dispatch_tests {
         let fn_idx = artifact.fn_idx_by_name("main").expect("main");
         let result = crate::backend::vm::VM::run(&artifact, fn_idx, vec![])
             .expect("VM::run");
+        assert_eq!(result, crate::value::Value::Int(42));
+    }
+
+    /// fav.toml project with rune import → Favnir pipeline via compile_project_to_bytes (v8.11.0).
+    /// In Favnir, bare-name imports (`import "name"`) are treated as rune imports.
+    /// Project mode difference from v8.6.0: rune_modules is resolved relative to project root.
+    #[test]
+    fn dispatch_project_uses_favnir_pipeline() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path();
+
+        // fav.toml
+        std::fs::write(root.join("fav.toml"), "[package]\nname = \"testproj\"\n")
+            .expect("write fav.toml");
+
+        // src/
+        std::fs::create_dir(root.join("src")).expect("create src dir");
+
+        // rune_modules/utils/utils.fav  (bare-name import "utils" → rune)
+        let utils_dir = root.join("rune_modules").join("utils");
+        std::fs::create_dir_all(&utils_dir).expect("create rune utils dir");
+        std::fs::write(
+            utils_dir.join("utils.fav"),
+            "public fn add(a: Int, b: Int) -> Int { a + b }\n",
+        )
+        .expect("write utils.fav");
+
+        // src/main.fav  (`import "utils"` is treated as rune by the parser)
+        std::fs::write(
+            root.join("src").join("main.fav"),
+            "import \"utils\"\npublic fn main() -> Int { add(40, 2) }\n",
+        )
+        .expect("write main.fav");
+
+        let entry = root.join("src").join("main.fav").to_string_lossy().to_string();
+        let toml = crate::toml::FavToml::load(root).expect("load fav.toml");
+        let bytes = crate::compiler_fav_runner::compile_project_to_bytes(&entry, root, &toml)
+            .expect("compile_project_to_bytes failed");
+
+        let artifact = crate::backend::artifact::FvcArtifact::from_bytes(&bytes)
+            .expect("artifact deserialization");
+        let fn_idx = artifact.fn_idx_by_name("main").expect("main");
+        let result = crate::backend::vm::VM::run(&artifact, fn_idx, vec![]).expect("VM::run");
         assert_eq!(result, crate::value::Value::Int(42));
     }
 

@@ -154,19 +154,9 @@ fn collect_merged_sources(
     Ok(())
 }
 
-/// Rune-import-aware variant of `compile_file_to_bytes`.
-///
-/// Collects all rune dependency sources, merges them into one flat source string,
-/// then calls `compiler.fav`'s `compile_bytes_from_src` to compile the result.
-///
-/// * `Ok(bytes)` — success. `FvcArtifact::from_bytes(&bytes)` で復元可能。
-/// * `Err(msg)`  — file I/O or compile error.
-pub fn compile_file_to_bytes_rune(path: &str) -> Result<Vec<u8>, String> {
-    let mut visited = std::collections::HashSet::new();
-    let mut sources: Vec<String> = Vec::new();
-    collect_merged_sources(path, &mut visited, &mut sources)?;
-    let merged = sources.join("\n");
-
+/// Compile a pre-merged source string via `compiler.fav`'s `compile_bytes_from_src`.
+/// Returns raw FVC bytecode.
+pub fn compile_src_str_to_bytes(merged: &str) -> Result<Vec<u8>, String> {
     let artifact = get_compiler_fav_artifact();
     let fn_idx = artifact
         .fn_idx_by_name("compile_bytes_from_src")
@@ -174,7 +164,7 @@ pub fn compile_file_to_bytes_rune(path: &str) -> Result<Vec<u8>, String> {
             "compiler_fav_runner: compile_bytes_from_src not found in compiler.fav".to_string()
         })?;
 
-    let result = VM::run(&artifact, fn_idx, vec![Value::Str(merged)])
+    let result = VM::run(&artifact, fn_idx, vec![Value::Str(merged.to_string())])
         .map_err(|e: VMError| format!("compiler.fav VM error: {}", e.message))?;
 
     match result {
@@ -214,4 +204,115 @@ pub fn compile_file_to_bytes_rune(path: &str) -> Result<Vec<u8>, String> {
             "compiler_fav_runner: unexpected result from compile_bytes_from_src".to_string(),
         ),
     }
+}
+
+/// Rune-import-aware variant of `compile_file_to_bytes`.
+///
+/// Collects all rune dependency sources, merges them into one flat source string,
+/// then calls `compile_src_str_to_bytes` to compile the result.
+///
+/// * `Ok(bytes)` — success. `FvcArtifact::from_bytes(&bytes)` で復元可能。
+/// * `Err(msg)`  — file I/O or compile error.
+pub fn compile_file_to_bytes_rune(path: &str) -> Result<Vec<u8>, String> {
+    let mut visited = std::collections::HashSet::new();
+    let mut sources: Vec<String> = Vec::new();
+    collect_merged_sources(path, &mut visited, &mut sources)?;
+    let merged = sources.join("\n");
+    compile_src_str_to_bytes(&merged)
+}
+
+// ── project-mode compilation ───────────────────────────────────────────────────
+
+/// Recursively collect source texts for a fav.toml project file and all its
+/// dependencies (both local modules and rune imports).
+///
+/// * `import "name"` → `src/<name>.fav` (resolved via toml.src_dir)
+/// * `import rune "name"` → delegated to `collect_merged_sources`
+///
+/// `import` and `namespace` lines are stripped so the concatenated result
+/// can be parsed as a single flat program.
+fn collect_project_sources(
+    path: &str,
+    root: &std::path::Path,
+    toml: &crate::toml::FavToml,
+    visited: &mut std::collections::HashSet<String>,
+    out: &mut Vec<String>,
+) -> Result<(), String> {
+    let canon = std::path::Path::new(path)
+        .canonicalize()
+        .map_err(|e| format!("cannot resolve path `{}`: {}", path, e))?;
+    let canon_str = canon.to_string_lossy().to_string();
+    if visited.contains(&canon_str) {
+        return Ok(());
+    }
+    visited.insert(canon_str);
+
+    let src = std::fs::read_to_string(path)
+        .map_err(|e| format!("cannot read `{}`: {}", path, e))?;
+
+    let program = Parser::parse_str(&src, path).map_err(|e| e.to_string())?;
+
+    // Recurse into dependencies first (dependency order)
+    for item in &program.items {
+        match item {
+            crate::ast::Item::ImportDecl { path: name, is_rune: false, .. } => {
+                // Local module: import "name" → src/<name>.fav
+                let dep = toml.src_dir(root).join(format!("{}.fav", name));
+                let dep_str = dep.to_string_lossy().to_string();
+                collect_project_sources(&dep_str, root, toml, visited, out)?;
+            }
+            crate::ast::Item::ImportDecl { path: name, is_rune: true, .. } => {
+                // Rune module: import rune "name" → rune_modules/<name>/
+                let rune_dir = root.join("rune_modules").join(name.as_str());
+                if rune_dir.is_dir() {
+                    let entry = crate::toml::rune_entry_file(&rune_dir, name);
+                    let entry_str = entry.to_string_lossy().to_string();
+                    collect_merged_sources(&entry_str, visited, out)?;
+                }
+            }
+            _ => {}
+        }
+    }
+
+    // Strip import and namespace lines before appending
+    let stripped: String = src
+        .lines()
+        .filter(|l| {
+            let t = l.trim();
+            !t.starts_with("import ") && !t.starts_with("namespace ")
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    out.push(stripped);
+    Ok(())
+}
+
+/// Collect and merge all project sources into a single source string.
+///
+/// Useful when callers need the merged source before compilation (e.g., for type-checking).
+pub fn collect_project_merged(
+    entry: &str,
+    root: &std::path::Path,
+    toml: &crate::toml::FavToml,
+) -> Result<String, String> {
+    let mut visited = std::collections::HashSet::new();
+    let mut sources: Vec<String> = Vec::new();
+    collect_project_sources(entry, root, toml, &mut visited, &mut sources)?;
+    Ok(sources.join("\n"))
+}
+
+/// Compile a fav.toml project to FVC bytecode.
+///
+/// Recursively collects all sources starting from `entry`, merges them into
+/// a single flat program, then compiles via `compiler.fav`.
+///
+/// * `Ok(bytes)` — success.
+/// * `Err(msg)`  — file I/O or compile error.
+pub fn compile_project_to_bytes(
+    entry: &str,
+    root: &std::path::Path,
+    toml: &crate::toml::FavToml,
+) -> Result<Vec<u8>, String> {
+    let merged = collect_project_merged(entry, root, toml)?;
+    compile_src_str_to_bytes(&merged)
 }

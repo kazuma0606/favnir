@@ -842,6 +842,12 @@ fn load_run_config(file: Option<&str>) {
 pub fn cmd_run(file: Option<&str>, db_url: Option<&str>, legacy: bool) {
     load_run_config(file);
 
+    // v9.0.0: --legacy is deprecated. Warn if used.
+    if legacy {
+        eprintln!("warning: --legacy is deprecated since v9.0.0 and will be removed in a future version.");
+        eprintln!("         The Favnir pipeline (checker.fav + compiler.fav) handles all modes.");
+    }
+
     // Decide which pipeline to use.
     // v8.11.0: project mode now uses Favnir pipeline via compile_project_to_bytes.
     // Only --legacy forces Rust pipeline.
@@ -18342,5 +18348,32 @@ mod run_dispatch_tests {
         let result = crate::backend::vm::VM::run(&artifact, fn_idx, vec![])
             .expect("VM::run");
         assert_eq!(result, crate::value::Value::Int(42));
+    }
+}
+
+// ── self_hosting_complete_tests (v9.0.0) ─────────────────────────────────────
+// Milestone: all fav run modes use Favnir pipeline (checker.fav + compiler.fav).
+//
+// Coverage by existing dispatch tests:
+//   dispatch_single_file_uses_favnir         (v8.5.0) — single file
+//   dispatch_rune_import_uses_favnir_pipeline (v8.6.0) — rune import
+//   dispatch_project_uses_favnir_pipeline    (v8.11.0) — fav.toml project
+//
+// This module adds a compile-time assertion that the key public APIs exist.
+#[cfg(test)]
+mod self_hosting_complete_tests {
+    /// v9.0.0 milestone: verify that the Favnir pipeline public APIs are present.
+    /// This is a compile-time (type-level) check — if these fn-pointer assignments
+    /// compile, the functions exist with the expected signatures.
+    #[test]
+    fn v900_self_hosting_apis_exist() {
+        let _: fn(&str) -> Result<Vec<u8>, String> =
+            crate::compiler_fav_runner::compile_src_str_to_bytes;
+        let _: fn(
+            &str,
+            &std::path::Path,
+            &crate::toml::FavToml,
+        ) -> Result<Vec<u8>, String> =
+            crate::compiler_fav_runner::compile_project_to_bytes;
     }
 }

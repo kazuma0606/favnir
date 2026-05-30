@@ -290,7 +290,7 @@ fn main_impl() {
                         file_idx = i;
                     }
                     "--legacy" => {
-                        // Force Rust pipeline (opt-out of Favnir default)
+                        // [deprecated since v9.0.0] Force Rust pipeline (opt-out of Favnir default)
                         legacy = true;
                         i += 1;
                         file_idx = i;

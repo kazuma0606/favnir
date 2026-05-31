@@ -36,7 +36,8 @@
       "Bash(echo \"exit:$?\")",
       "Bash(git add:*)",
       "Bash(git commit:*)",
-      "Bash(git push:*)"
+      "Bash(git push:*)",
+      "Bash(xxd /tmp/lambda-out2.txt)"
     ]
   }
 }

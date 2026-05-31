@@ -221,6 +221,38 @@ pub fn compile_file_to_bytes_rune(path: &str) -> Result<Vec<u8>, String> {
     compile_src_str_to_bytes(&merged)
 }
 
+/// Call `compiler.fav`'s `fmt_source(src)` and return the formatted string.
+///
+/// * `Ok(formatted)` — success.
+/// * `Err(msg)`      — lex/parse error in the source.
+pub fn fmt_source_str(src: &str) -> Result<String, String> {
+    let artifact = get_compiler_fav_artifact();
+    let fn_idx = artifact
+        .fn_idx_by_name("fmt_source")
+        .ok_or_else(|| "compiler_fav_runner: fmt_source not found in compiler.fav".to_string())?;
+
+    let result = VM::run(&artifact, fn_idx, vec![Value::Str(src.to_string())])
+        .map_err(|e: VMError| format!("compiler.fav VM error: {}", e.message))?;
+
+    match result {
+        Value::Variant(ref tag, Some(ref payload)) if tag == "ok" => match payload.as_ref() {
+            Value::Str(s) => Ok(s.clone()),
+            _ => Err("compiler_fav_runner: fmt_source returned non-string Ok payload".to_string()),
+        },
+        Value::Variant(ref tag, ref payload) if tag == "err" => {
+            let msg = match payload {
+                Some(p) => match p.as_ref() {
+                    Value::Str(s) => s.clone(),
+                    _ => format!("{:?}", p),
+                },
+                None => "unknown fmt error".to_string(),
+            };
+            Err(msg)
+        }
+        _ => Err("compiler_fav_runner: unexpected result from fmt_source".to_string()),
+    }
+}
+
 // ── project-mode compilation ───────────────────────────────────────────────────
 
 /// Recursively collect source texts for a fav.toml project file and all its

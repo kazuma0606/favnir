@@ -18455,6 +18455,68 @@ mod stdlib_v91_extra_tests {
 // ── rvm_tests (v9.1.0) ────────────────────────────────────────────────────────
 // rvm 独立バイナリの動作確認
 #[cfg(test)]
+// ── v9.2.0: fav fmt / pretty printer tests ────────────────────────────────────
+#[cfg(test)]
+mod fmt_tests {
+    use crate::compiler_fav_runner::fmt_source_str;
+
+    // D-1: シンプルな fn 定義の整形が期待通りであること
+    #[test]
+    fn fmt_simple_fn() {
+        let src = "fn add(x: Int, y: Int) -> Int {\n    x + y\n}";
+        let result = fmt_source_str(src).expect("fmt_source_str failed");
+        // Should be parseable and formatted consistently
+        assert!(result.contains("fn add(x: Int, y: Int) -> Int {"));
+        assert!(result.contains("x + y"));
+        assert!(!result.is_empty());
+    }
+
+    // D-2: 冪等性テスト — 2 回適用しても結果が変わらない
+    #[test]
+    fn fmt_idempotent() {
+        let src = "fn double(n: Int) -> Int {\n  n * 2\n}\nfn inc(n: Int) -> Int {\n    n + 1\n}";
+        let first = fmt_source_str(src).expect("first fmt failed");
+        let second = fmt_source_str(&first).expect("second fmt failed");
+        assert_eq!(first, second, "formatter is not idempotent");
+    }
+
+    // D-3: stage / seq 定義の整形テスト
+    #[test]
+    fn fmt_stage_and_seq() {
+        let src = "stage Double: Int -> Int = |n| n * 2\nstage AddOne: Int -> Int = |n| n + 1\nseq Pipeline = Double |> AddOne";
+        let result = fmt_source_str(src).expect("fmt_source_str failed");
+        assert!(result.contains("stage Double: Int -> Int = |n| n * 2"));
+        assert!(result.contains("seq Pipeline = Double |> AddOne"));
+        // Idempotency
+        let second = fmt_source_str(&result).expect("second fmt failed");
+        assert_eq!(result, second, "stage/seq fmt not idempotent");
+    }
+
+    // D-4: match 式を含む fn 定義の整形
+    #[test]
+    fn fmt_match_expr() {
+        let src = "fn safe_div(x: Int, y: Int) -> Int {\n    if y == 0 {\n        0\n    } else {\n        x + y\n    }\n}";
+        let result = fmt_source_str(src).expect("fmt_source_str failed");
+        assert!(result.contains("fn safe_div(x: Int, y: Int) -> Int {"));
+        // Idempotency
+        let second = fmt_source_str(&result).expect("second fmt failed");
+        assert_eq!(result, second, "match fmt not idempotent");
+    }
+
+    // D-5: bind 式を含む fn 定義の整形
+    #[test]
+    fn fmt_bind_expr() {
+        let src = "fn greet(name: String) -> String {\n    bind greeting <- \"Hello, \"\n    greeting + name\n}";
+        let result = fmt_source_str(src).expect("fmt_source_str failed");
+        assert!(result.contains("fn greet(name: String) -> String {"));
+        assert!(result.contains("bind greeting <-"));
+        // Idempotency
+        let second = fmt_source_str(&result).expect("second fmt failed");
+        assert_eq!(result, second, "bind fmt not idempotent");
+    }
+}
+
+#[cfg(test)]
 mod rvm_tests {
     // F-1: VM_VERSION 定数の値を確認
     #[test]

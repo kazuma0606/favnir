@@ -3406,6 +3406,292 @@ fn serialize_artifact(artifact: Artifact) -> List<Int> {
 }
 
 // ════════════════════════════════════════════════════════════════════════════
+// PRETTY PRINTER (fav fmt)
+// ════════════════════════════════════════════════════════════════════════════
+
+fn spaces(n: Int) -> String {
+    String.repeat(" ", n)
+}
+
+fn op_to_str(op: Op) -> String {
+    match op {
+        OpAdd => "+"  OpSub => "-"  OpMul => "*"  OpDiv => "/"
+        OpMod => "%"  OpEq => "=="  OpNeq => "!="
+        OpLt => "<"  OpGt => ">"  OpLtEq => "<="  OpGtEq => ">="
+        OpAnd => "&&"  OpOr => "||"
+    }
+}
+
+fn pretty_type(ty: TypeExpr) -> String {
+    match ty {
+        TeSimple(name) => name
+        TeList(inner) => String.concat("List<", String.concat(pretty_type(inner), ">"))
+        TeOption(inner) => String.concat("Option<", String.concat(pretty_type(inner), ">"))
+        TeResult(parts) => String.concat("Result<", String.concat(pretty_type(parts._0), String.concat(", ", String.concat(pretty_type(parts._1), ">"))))
+        TeMap(parts) => String.concat("Map<", String.concat(pretty_type(parts._0), String.concat(", ", String.concat(pretty_type(parts._1), ">"))))
+        TeFn(parts) => String.concat(pretty_type(parts._0), String.concat(" -> ", pretty_type(parts._1)))
+    }
+}
+
+fn pretty_pat(pat: Pat) -> String {
+    match pat {
+        PWild => "_"
+        PVar(name) => name
+        PInt(n) => Int.to_string(n)
+        PFloat(f) => Float.to_string(f)
+        PStr(s) => String.concat("\"", String.concat(s, "\""))
+        PBool(b) => if b { "true" } else { "false" }
+        PUnit => "()"
+        PVariant(name) => name
+        PVariantP(parts) => String.concat(parts._0, String.concat("(", String.concat(pretty_pat(parts._1), ")")))
+    }
+}
+
+fn is_trivial_guard(guard: Expr) -> Bool {
+    match guard {
+        ELit(lit) => match lit { LBool(b) => b  _ => false }
+        _ => false
+    }
+}
+
+fn is_block_expr(expr: Expr) -> Bool {
+    match expr {
+        EBind(parts) => true
+        EBlock(parts) => true
+        _ => false
+    }
+}
+
+fn escape_char(c: String) -> String {
+    if c == "\\" { "\\\\" }
+    else { if c == "\"" { "\\\"" }
+    else { if c == "\n" { "\\n" }
+    else { if c == "\t" { "\\t" }
+    else { c }
+    }}}
+}
+
+fn escape_str(s: String) -> String {
+    bind chars <- String.chars(s)
+    String.join(List.map(chars, |c| escape_char(c)), "")
+}
+
+fn collect_args_rev(args: Expr, acc: List<String>, indent: Int) -> List<String> {
+    match args {
+        EArgNil => acc
+        EArgList(parts) => collect_args_rev(parts._1, List.concat(List.singleton(pretty_expr(parts._0, indent)), acc), indent)
+        _ => acc
+    }
+}
+
+fn pretty_args(args: Expr, indent: Int) -> String {
+    String.join(collect_args_rev(args, empty_string_list(), indent), ", ")
+}
+
+fn collect_fields_rev(fields: Expr, acc: List<String>, indent: Int) -> List<String> {
+    match fields {
+        EFieldNil => acc
+        EField(parts) => collect_fields_rev(parts._2, List.concat(List.singleton(String.concat(parts._0, String.concat(": ", pretty_expr(parts._1, indent)))), acc), indent)
+        _ => acc
+    }
+}
+
+fn pretty_fields_expr(fields: Expr, indent: Int) -> String {
+    String.join(collect_fields_rev(fields, empty_string_list(), indent), "  ")
+}
+
+fn pretty_arm_body(expr: Expr, arm_indent: Int) -> String {
+    if is_block_expr(expr) {
+        String.concat("{\n", String.concat(spaces(arm_indent + 4), String.concat(pretty_expr(expr, arm_indent + 4), String.concat("\n", String.concat(spaces(arm_indent), "}")))))
+    } else {
+        pretty_expr(expr, arm_indent)
+    }
+}
+
+fn pretty_arms(arms: Expr, indent: Int) -> String {
+    match arms {
+        EArmNil => ""
+        EArm(parts) => {
+            bind arm_indent <- indent + 4
+            bind guard_str <- if is_trivial_guard(parts._1) { "" } else { String.concat(" where ", pretty_expr(parts._1, arm_indent)) }
+            bind arm_line <- String.concat(spaces(arm_indent), String.concat(pretty_pat(parts._0), String.concat(guard_str, String.concat(" => ", pretty_arm_body(parts._2, arm_indent)))))
+            bind rest_str <- pretty_arms(parts._3, indent)
+            if rest_str == "" { arm_line } else { String.concat(arm_line, String.concat("\n", rest_str)) }
+        }
+        _ => ""
+    }
+}
+
+fn pretty_expr(expr: Expr, indent: Int) -> String {
+    match expr {
+        ELit(lit) => match lit {
+            LInt(n) => Int.to_string(n)
+            LFloat(f) => Float.to_string(f)
+            LStr(s) => String.concat("\"", String.concat(escape_str(s), "\""))
+            LBool(b) => if b { "true" } else { "false" }
+            LUnit => "()"
+        }
+        EVar(name) => name
+        EBinOp(parts) => String.concat(pretty_expr(parts._1, indent), String.concat(" ", String.concat(op_to_str(parts._0), String.concat(" ", pretty_expr(parts._2, indent)))))
+        ECall(parts) => {
+            bind fn_str <- if parts._0 == "" { parts._1 } else { String.concat(parts._0, String.concat(".", parts._1)) }
+            String.concat(fn_str, String.concat("(", String.concat(pretty_args(parts._2, indent), ")")))
+        }
+        EIf(parts) => {
+            String.concat("if ", String.concat(pretty_expr(parts._0, indent), String.concat(" {\n",
+            String.concat(spaces(indent + 4), String.concat(pretty_expr(parts._1, indent + 4), String.concat("\n",
+            String.concat(spaces(indent), String.concat("} else {\n",
+            String.concat(spaces(indent + 4), String.concat(pretty_expr(parts._2, indent + 4), String.concat("\n",
+            String.concat(spaces(indent), "}"))))))))))))
+        }
+        EAccess(parts) => String.concat(pretty_expr(parts._0, indent), String.concat(".", parts._1))
+        ELambda(parts) => {
+            if is_block_expr(parts._1) {
+                String.concat("|", String.concat(parts._0, String.concat("| {\n", String.concat(spaces(indent + 4), String.concat(pretty_expr(parts._1, indent + 4), String.concat("\n", String.concat(spaces(indent), "}")))))))
+            } else {
+                String.concat("|", String.concat(parts._0, String.concat("| ", pretty_expr(parts._1, indent))))
+            }
+        }
+        EMatch(parts) => {
+            String.concat("match ", String.concat(pretty_expr(parts._0, indent), String.concat(" {\n",
+            String.concat(pretty_arms(parts._1, indent), String.concat("\n", String.concat(spaces(indent), "}"))))))
+        }
+        EBlock(parts) => String.concat(pretty_expr(parts._0, indent), String.concat("\n", String.concat(spaces(indent), pretty_expr(parts._1, indent))))
+        ERecordLit(parts) => String.concat(parts._0, String.concat(" { ", String.concat(pretty_fields_expr(parts._1, indent), " }")))
+        EBind(parts) => {
+            String.concat("bind ", String.concat(parts._0, String.concat(" <- ", String.concat(pretty_expr(parts._1, indent), String.concat("\n", String.concat(spaces(indent), pretty_expr(parts._2, indent)))))))
+        }
+        ECollect(inner) => {
+            String.concat("collect {\n", String.concat(spaces(indent + 4), String.concat(pretty_expr(inner, indent + 4), String.concat("\n", String.concat(spaces(indent), "}")))))
+        }
+        EYield(inner) => String.concat("yield ", String.concat(pretty_expr(inner, indent), ";"))
+        EArgList(parts) => pretty_expr(parts._0, indent)
+        EArgNil => ""
+        EArm(parts) => ""
+        EArmNil => ""
+        EField(parts) => String.concat(parts._0, String.concat(": ", pretty_expr(parts._1, indent)))
+        EFieldNil => ""
+    }
+}
+
+fn pretty_param(p: Param) -> String {
+    String.concat(p.name, String.concat(": ", pretty_type(p.ty)))
+}
+
+fn pretty_fn_def(f: FnDef) -> String {
+    bind pub_str <- if f.is_public { "public " } else { "" }
+    bind params_str <- String.join(List.map(f.params, |p| pretty_param(p)), ", ")
+    bind ret_str <- pretty_type(f.ret)
+    bind body_str <- pretty_expr(f.body, 4)
+    String.concat(pub_str, String.concat("fn ", String.concat(f.name, String.concat("(", String.concat(params_str, String.concat(") -> ", String.concat(ret_str, String.concat(" {\n    ", String.concat(body_str, "\n}") ))))))))
+}
+
+fn pretty_variant(v: VariantDef) -> String {
+    match v.payload {
+        None => String.concat("| ", v.name)
+        Some(ty) => String.concat("| ", String.concat(v.name, String.concat("(", String.concat(pretty_type(ty), ")"))))
+    }
+}
+
+fn join_variants_loop(vs: List<VariantDef>, acc: String) -> String {
+    match List.first(vs) {
+        None => acc
+        Some(v) => {
+            bind vstr <- pretty_variant(v)
+            bind rest <- List.drop(vs, 1)
+            bind new_acc <- if acc == "" { String.concat("  ", vstr) } else { String.concat(acc, String.concat("\n  ", vstr)) }
+            join_variants_loop(rest, new_acc)
+        }
+    }
+}
+
+fn join_record_fields_loop(fields: List<Param>, acc: String) -> String {
+    match List.first(fields) {
+        None => acc
+        Some(p) => {
+            bind fstr <- pretty_param(p)
+            bind rest <- List.drop(fields, 1)
+            bind new_acc <- if acc == "" { String.concat("    ", fstr) } else { String.concat(acc, String.concat("\n    ", fstr)) }
+            join_record_fields_loop(rest, new_acc)
+        }
+    }
+}
+
+fn pretty_type_def(td: TypeDef) -> String {
+    if td.is_record {
+        String.concat("type ", String.concat(td.name, String.concat(" = {\n", String.concat(join_record_fields_loop(td.fields, ""), "\n}"))))
+    } else {
+        String.concat("type ", String.concat(td.name, String.concat(" =\n", join_variants_loop(td.variants, ""))))
+    }
+}
+
+fn pretty_test_def(td: TestDef) -> String {
+    String.concat("test \"", String.concat(escape_str(td.name), String.concat("\" {\n    ", String.concat(pretty_expr(td.body, 4), "\n}"))))
+}
+
+fn pretty_effects(effects: List<String>) -> String {
+    match List.first(effects) {
+        None => ""
+        Some(_) => String.concat(" ", String.join(List.map(effects, |e| String.concat("!", e)), " "))
+    }
+}
+
+fn pretty_stage_def(sd: StageDef) -> String {
+    bind abs_str <- if sd.is_abstract { "abstract " } else { "" }
+    bind pub_str <- if sd.is_public { "public " } else { "" }
+    bind effs_str <- pretty_effects(sd.effects)
+    bind sig_str <- String.concat(pub_str, String.concat(abs_str, String.concat("stage ", String.concat(sd.name, String.concat(": ", String.concat(pretty_type(sd.param_ty), String.concat(" -> ", String.concat(pretty_type(sd.ret_ty), effs_str))))))))
+    match sd.body {
+        None => sig_str
+        Some(body) => String.concat(sig_str, String.concat(" = ", pretty_expr(body, 0)))
+    }
+}
+
+fn pretty_seq_def(sd: SeqDef) -> String {
+    bind abs_str <- if sd.is_abstract { "abstract " } else { "" }
+    bind pub_str <- if sd.is_public { "public " } else { "" }
+    if sd.is_abstract {
+        String.concat(pub_str, String.concat(abs_str, String.concat("seq ", sd.name)))
+    } else {
+        String.concat(pub_str, String.concat(abs_str, String.concat("seq ", String.concat(sd.name, String.concat(" = ", String.join(sd.stages, " |> "))))))
+    }
+}
+
+fn pretty_item(item: Item) -> String {
+    match item {
+        IFn(f) => pretty_fn_def(f)
+        IType(td) => pretty_type_def(td)
+        ITest(td) => pretty_test_def(td)
+        IStage(sd) => pretty_stage_def(sd)
+        ISeq(sd) => pretty_seq_def(sd)
+    }
+}
+
+fn join_items_loop(items: List<Item>, acc: String) -> String {
+    match List.first(items) {
+        None => acc
+        Some(item) => {
+            bind istr <- pretty_item(item)
+            bind rest <- List.drop(items, 1)
+            bind new_acc <- if acc == "" { istr } else { String.concat(acc, String.concat("\n\n\n", istr)) }
+            join_items_loop(rest, new_acc)
+        }
+    }
+}
+
+fn pretty_program(prog: Program) -> String {
+    String.concat(join_items_loop(prog.items, ""), "\n")
+}
+
+// Parse source string and return formatted output.
+// Returns Ok(formatted) on success, Err(msg) on parse failure.
+public fn fmt_source(src: String) -> Result<String, String> {
+    Result.and_then(lex(src), |toks|
+    Result.and_then(parse_tokens(toks), |prog|
+    Result.ok(pretty_program(prog))))
+}
+
+// ════════════════════════════════════════════════════════════════════════════
 // PIPELINE
 // ════════════════════════════════════════════════════════════════════════════
 

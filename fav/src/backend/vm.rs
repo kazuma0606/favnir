@@ -6376,6 +6376,17 @@ fn vm_call_builtin(
             let text = crate::lineage::render_lineage_text(&report, &path);
             Ok(VMValue::Str(text))
         }
+        "Compiler.fmt_source_raw" => {
+            let v = args
+                .into_iter()
+                .next()
+                .ok_or_else(|| "Compiler.fmt_source_raw requires 1 argument".to_string())?;
+            let src = vm_string(v, "Compiler.fmt_source_raw")?;
+            match crate::compiler_fav_runner::fmt_source_str(&src) {
+                Ok(formatted) => Ok(ok_vm(VMValue::Str(formatted))),
+                Err(msg) => Ok(err_vm(VMValue::Str(msg))),
+            }
+        }
         "IO.argv" => {
             let argv: Vec<VMValue> = TEST_ARGV.with(|t| {
                 if let Some(ref args) = *t.borrow() {

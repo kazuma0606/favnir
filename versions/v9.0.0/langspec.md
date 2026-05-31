@@ -454,6 +454,8 @@ runes/<name>/
 | `fav check <file>` | 型チェックのみ（checker.fav 経由） |
 | `fav build <file>` | `.fvc` バイトコードを生成 |
 | `fav exec <file.fvc>` | バイトコードを直接実行（ソース不要） |
+| `rvm <file.fvc>` | VM 単体バイナリで実行（v9.1.0 追加予定、executor イメージ向け） |
+| `rvm --version` | VM バージョンを表示（言語バージョンとは独立して採番） |
 | `fav test <file>` | `test "name" { expr }` ブロックを実行 |
 | `fav bench <file>` | ベンチマーク実行 |
 | `fav explain <file>` | パイプライン構造を表示 |

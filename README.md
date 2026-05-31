@@ -184,6 +184,22 @@ favnir/
   versions/     バージョン履歴・ロードマップ・言語仕様
 ```
 
+### infra/e2e-demo — バイトコードポータビリティ証明デモ
+
+セルフホストコンパイラが生成する `.fvc` バイトコードが、
+**ソースコードなしで** 別マシン・別コンテナ上で動作することを
+3層の物理ネットワーク分離で証明したデモ。
+
+| 層 | 環境 | 役割 | `.fav` ソース |
+|---|---|---|---|
+| Machine A | Public EC2 | Favnir 処理系（`.fav` → `.fvc` コンパイル） | あり |
+| Machine B | Private EC2（インターネット遮断） | Rust VM のみ（`.fvc` 実行） | なし |
+| ECS Fargate | コンテナ（インターネット遮断） | ETL パイプライン実行 | なし |
+
+**結果（2026-05-31）: PASS=8 / FAIL=0**
+証跡は `s3://favnir-e2e-demo/proof/` に保存。
+詳細: [`infra/e2e-demo/ecs/README.md`](infra/e2e-demo/ecs/README.md)
+
 ---
 
 ## 対応プラットフォーム

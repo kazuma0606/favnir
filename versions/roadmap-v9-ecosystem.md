@@ -85,10 +85,23 @@ Result / Option:
 - `Option.map(f, opt)` / `Option.and_then(f, opt)`
 - `Option.unwrap_or(default, opt)` / `Option.is_some(opt)` / `Option.is_none(opt)`
 
+**correctness fix — E0012 非ジェネリック関数引数数チェック**
+
+v8.8.0 の実装メモで「スコープ外」とされた未検出バグを修正する。
+現状 `checker.fav` の `env` には非ジェネリック関数の戻り型のみ保存しており、
+`fn foo(x: Int) -> String` を `foo(1, 2)` と呼んでもエラーにならない。
+
+`checker.fav` への追加:
+- 関数スキーム文字列に引数型列を含める（`"Int|String"` = 引数 Int、戻り String）
+- `check_fn_call_arity(env, name, arg_count)` を追加
+- **E0012 — ArgCountMismatch**: 非ジェネリック関数の引数数不一致
+  → `"E0012: foo expects 1 argument(s), got 2"`
+
 **完了条件**
 - 上記全関数が `fav/self/stdlib/*.fav` に実装されている
 - 各関数の型シグネチャが `checker.fav` / `checker.rs` に登録されている
-- 統合テスト 15 件以上
+- E0012 が非ジェネリック関数の引数数不一致を検出できる
+- 統合テスト 18 件以上（stdlib 15 件 + E0012 3 件）
 
 ---
 
@@ -167,9 +180,10 @@ Rust に触れずに開発できる最初の CLI 拡張。
 
 ---
 
-## v9.4.0 — json・csv Rune（データ I/O の型安全化）
+## v9.4.0 — json・csv・gen Rune（データ I/O + ID 生成）
 
 **テーマ**: データエンジニアが日常的に扱う JSON・CSV を型安全に読み書きできる Rune を追加する。
+合わせて既存 `gen` Rune に UUID 生成を追加し、ID 採番をパイプラインに自然に組み込めるようにする。
 `http` / `llm` Rune（v9.5.0〜）の基盤にもなる。
 
 **背景**
@@ -177,6 +191,10 @@ Rust に触れずに開発できる最初の CLI 拡張。
 現状、JSON / CSV の読み書きには `IO.read_file_raw` + 手動パースが必要で冗長。
 型パラメータ付き `json.decode<Order>` / `csv.read<Order>` が使えると、
 パイプライン記述が大幅に簡潔になる。
+また、新規レコードの ID 採番・相関 ID 付与に UUID は頻出だが、
+現在の `gen` Rune には UUID 生成が含まれていない。
+v9.7.0 で導入する名目型ラッパー（`type UserId(String)`）との組み合わせで
+「生成 → 型でラップ」がパイプラインに自然に入る。
 
 **やること**
 
@@ -194,10 +212,16 @@ Rust に触れずに開発できる最初の CLI 拡張。
   - ファイルなし・文字列から直接パース（テスト・WASM 向け）
 - `rune.toml` + `csv.fav` を作成
 
+既存 `gen` Rune への追加 (`runes/gen/`):
+- `gen.uuid() -> String !Gen` — UUID v4（ランダム）
+- `gen.uuid_v7() -> String !Gen` — UUID v7（タイムスタンプ付き・DB インデックス効率良）
+- `gen.nano_id(n: Int) -> String !Gen` — URL-safe ランダム文字列（n 文字）
+
 使用例:
 ```favnir
 import rune "csv"
 import rune "json"
+import rune "gen"
 
 stage LoadOrders: String -> List<Order> !Io = |path| {
   csv.read<Order>(path)
@@ -206,12 +230,19 @@ stage LoadOrders: String -> List<Order> !Io = |path| {
 stage Serialize: List<Order> -> String = |orders| {
   json.encode(orders)
 }
+
+// UUID 採番 + 名目型ラップ（v9.7.0 以降）
+stage CreateOrder: OrderInput -> Order !Gen = |input| {
+  bind id <- gen.uuid_v7()
+  Order { id: id  item: input.item  amount: input.amount }
+}
 ```
 
 **完了条件**
 - `csv.read<Order>` / `json.decode<Order>` が型付きで動作する
 - `fav check` で型パラメータの不一致を検出できる
-- 統合テスト 5 件以上（CSV 読み込み・JSON ラウンドトリップ等）
+- `gen.uuid()` / `gen.uuid_v7()` / `gen.nano_id(n)` が `!Gen` エフェクトで動作する
+- 統合テスト 8 件以上（CSV 読み込み・JSON ラウンドトリップ・UUID 生成等）
 
 ---
 
@@ -308,44 +339,129 @@ stage SummarizeReport: String -> String !Llm = |text| {
 
 ---
 
-## v9.7.0 — newtype ラッパー（名目型の強化）
+## v9.7.0 — 名目型ラッパー + バリデーション + with（型システム強化）
 
-**テーマ**: 意味的に異なる値を型レベルで区別できるようにする。
-`UserId` と `Int` を混同するバグをコンパイル時に防ぐ。
+**テーマ**: 意味的に異なる値を型レベルで区別し、バリデーションを型定義に内包する。
+さらに `with` キーワードでインターフェース実装を自動合成する。
 
 **背景**
 
-現在 `type UserId = Int` は型エイリアスとして機能するが、
-`UserId` と `Int` は型チェッカーで区別されない。
-newtype を導入することで、意図しない値の混入をコンパイル時に検出できる。
+現在 `type UserId = Int` は型エイリアスであり、`UserId` と `Int` は型チェッカーで区別されない。
+また `Eq` / `Show` / `Serialize` などの実装は手書きが必要でボイラープレートが多い。
+さらにバリデーション（「Percent は 0〜100 の Float」）はパイプラインの各 stage に散在しがちで、
+入口で一度だけ確認するという保証が言語レベルでできない。
+
+**構文設計**
+
+```favnir
+// 名目型ラッパー: type Name(InnerType)
+// エイリアス（既存）と括弧の有無で視覚的に区別
+type UserId(Int)
+type Email(String)
+
+// バリデーション付き: where |v| pred
+// コンストラクタが Result<T, String> を返すようになる
+type Email(String)    where |v| String.contains(v, "@")
+type Percent(Float)   where |v| v >= 0.0 && v <= 100.0
+type NonEmpty(String) where |v| String.length(v) > 0
+
+// with: レコード型・名目型ラッパー両方にインターフェースを自動合成
+type UserId(Int)      with Eq, Show
+type Order with Eq, Show, Serialize = { id: Int  item: String  amount: Float }
+type Email(String)    with Eq, Show  where |v| String.contains(v, "@")
+```
+
+**コンストラクタの型規則**
+
+```
+where なし → T を直接返す
+where あり → Result<T, String> を返す
+```
+
+```favnir
+// where なし: 直接 T
+let id = UserId(42)                    // UserId
+
+// where あり: Result<T, String> → bind で unwrap
+bind pct <- Percent(50.0)             // OK: Percent
+bind pct <- Percent(150.0)            // Result.err("Percent: validation failed")
+bind em  <- Email("a@b.com")          // OK: Email
+bind em  <- Email("invalid")          // Result.err("Email: validation failed")
+```
+
+`bind x <- expr` が既に `Result` の unwrap に使われているため、
+バリデーション付きコンストラクタとの相性が自然。
+
+**パイプラインでの使用例**
+
+```favnir
+// 入口で一度だけ検証 → 下流は型が保証
+stage ParsePercent: String -> Percent !Io = |s| {
+  bind raw <- Float.parse(s)
+  bind pct <- Percent(raw)
+  pct
+}
+
+// パターンマッチで分解
+match pct {
+  Percent(v) -> v * 0.01
+}
+```
 
 **やること**
 
-パーサー（Rust 最小変更）:
-- `newtype UserId = Int` 構文を追加
-- AST に `NewtypeDef { name: String, inner_type: TypeExpr }` を追加
+**【バグ修正】self-hosted pipeline の `T?` / `T!` / `??` 未対応を解消**
+
+精査で判明した実装漏れ。Rust パイプラインでは完全動作するが、
+`fav run`（Favnir pipeline）では `compiler.fav` の自前 lexer/parser が使われるため未対応。
+
+`lexer.fav` への追加:
+- `TkQuestion` / `TkQuestionQuestion` トークンを追加
+- `?` → `TkQuestion`、`??` → `TkQuestionQuestion` のスキャンルールを追加
+
+`parser.fav` への追加:
+- 型パース関数 `parse_type_expr` に `T?` → `TeOption(T)` の後置処理を追加
+- `T!`（エフェクト注釈でない Bang）→ `TeResult(T, TeSimple("String"))` の処理を追加
+- `??` 演算子をパース（null-coalesce 二項演算子として `OpQuestionQuestion` で追加）
+
+`compiler.fav` への追加:
+- **`expr?` エラー伝播演算子** の脱糖（Rust 変更不要、compiler.fav で変換）
+  - `expr?` → `match expr { Ok(v) -> v  Err(e) -> return Err(e) }` に変換
+  - 戻り型が `Result` でない関数での使用は E0013 でエラー
+
+パーサー（Rust — 名目型ラッパー構文）:
+- `type Name(InnerType)` 構文を追加
+- `where |v| pred` 節を AST に追加
+- `type T with Iface1, Iface2 = { ... }` の `with` 節を AST に追加
+- AST: `WrapperDef { name, inner, validator, with_impls }`
 
 `checker.fav` への追加:
-- `newtype` 定義を型環境 `env` に登録
-- `UserId(42)` — コンストラクタ呼び出しの型推論（`Int -> UserId`）
-- パターンマッチ `UserId(n)` — 分解の型規則
-- `UserId` と `Int` の型不一致を E0010 として検出
+- `type Name(Inner)` 定義を型環境 `env` に登録
+- コンストラクタ呼び出し `Name(x)` の型推論
+  - `where` なし: `Inner -> Name`
+  - `where` あり: `Inner -> Result<Name, String>`
+- パターンマッチ `Name(n)` の分解型規則
+- `Name` と `Inner` の型不一致を E0010 として検出
 
-使用例:
-```favnir
-newtype UserId = Int
-newtype Email  = String
-
-fn send_welcome(id: UserId, email: Email) -> Unit !Io = ...
-
-// E0010: expected UserId, got Int
-// → send_welcome(42, "a@b.com") はコンパイルエラー
-```
+`compiler.fav` への追加:
+- `where` あり: コンストラクタに述語チェックコードを挿入
+  - 失敗時は `Result.err("<Name>: validation failed")` を返すコードを生成
+- `with` 自動合成（レコード型・名目型ラッパー共通）:
+  - `Eq` — `eq(a: T, b: T) -> Bool` を合成
+  - `Show` — `show(t: T) -> String` を合成
+  - `Serialize` — `to_json(t: T) -> String` を合成
+  - `Deserialize` — `from_json(s: String) -> Result<T, String>` を合成
+  - 未知のインターフェース名は E0011（未定義インターフェース）でエラー
 
 **完了条件**
-- `newtype` で定義した型がコンストラクタ・パターンマッチで使える
-- 型の取り違えをコンパイル時に検出できる
-- 統合テスト 3 件以上
+- `T?` / `T!` / `??` が `fav run`（Favnir pipeline）で正しく動作する
+- `fav check` と `fav run` の挙動が `T?` に関して一致する
+- `expr?` が `Result` を返す関数内で使える（E0013 で誤用検出）
+- `type Name(Inner)` がコンストラクタ・パターンマッチで使える
+- `where` あり型のコンストラクタが `Result<T, String>` を返す
+- `with Eq, Show, Serialize` の自動合成が `compiler.fav` で動作する
+- 型の取り違えを E0010 でコンパイル時に検出できる
+- 統合テスト 12 件以上
 
 ---
 
@@ -456,13 +572,13 @@ CI/CD 整備:
 
 | バージョン | テーマ | Rust 変更 | フェーズ |
 |---|---|---|---|
-| v9.1.0 | stdlib 拡充（List/String/Map/Result/Option — 約 30 関数） | なし | 基盤強化 |
+| v9.1.0 | stdlib 拡充（約 30 関数）+ E0012 非ジェネリック引数数チェック（correctness fix） | なし | 基盤強化 |
 | v9.2.0 | fav fmt — コードフォーマッタ（冪等性保証） | なし | 基盤強化 |
 | v9.3.0 | fav lint — 静的解析（W001 EffectlessSink 〜 W005 WildcardOnlyMatch） | なし | 基盤強化 |
-| v9.4.0 | json・csv Rune — 型安全データ I/O | なし | データ I/O |
+| v9.4.0 | json・csv Rune — 型安全データ I/O、gen Rune に UUID v4/v7/nano_id 追加 | なし | データ I/O |
 | v9.5.0 | http Rune — `!Http` エフェクト追加 | `!Http` 登録のみ | コネクタ拡充 |
 | v9.6.0 | llm Rune — `!Llm` エフェクト（Claude / OpenAI） | `!Llm` 登録のみ | コネクタ拡充 |
-| v9.7.0 | newtype ラッパー — 名目型強化（E0010） | パーサーのみ | 型システム |
+| v9.7.0 | 名目型ラッパー + `where` + `with` + `T?`/`T!`/`??`/`expr?` self-hosted 修正（bugfix） | パーサーのみ | 型システム |
 | v9.8.0 | fav doc — `///` コメントから Markdown 自動生成 | `///` 保持のみ | 開発体験 |
 | v9.9.0 | fav profile — パイプライン実行時間計測 | なし | 開発体験 |
 | **v10.0.0** | **OSS 公開準備完了（CI / CONTRIBUTING / GitHub Public 化）** | なし | **公開** |

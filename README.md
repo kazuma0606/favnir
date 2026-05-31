@@ -187,18 +187,27 @@ favnir/
 ### infra/e2e-demo — バイトコードポータビリティ証明デモ
 
 セルフホストコンパイラが生成する `.fvc` バイトコードが、
-**ソースコードなしで** 別マシン・別コンテナ上で動作することを
-3層の物理ネットワーク分離で証明したデモ。
+**ソースコードなしで** 異なる実行環境上で動作することを
+4つのシナリオで証明したデモ。すべての証跡は `s3://favnir-e2e-demo/proof/` に保存。
 
-| 層 | 環境 | 役割 | `.fav` ソース |
+| デモ | 環境 | アーキテクチャ | 結果 |
 |---|---|---|---|
-| Machine A | Public EC2 | Favnir 処理系（`.fav` → `.fvc` コンパイル） | あり |
-| Machine B | Private EC2（インターネット遮断） | Rust VM のみ（`.fvc` 実行） | なし |
-| ECS Fargate | コンテナ（インターネット遮断） | ETL パイプライン実行 | なし |
+| ECS | EC2 × 2 + Fargate | Machine A（コンパイル）→ S3 → Machine B（実行）→ ECS ETL | **PASS=8 / FAIL=0** |
+| EKS | EKS Fargate | compiler Pod（`.fav`→`.fvc`）→ executor Pod（VM のみ）| **PASS=6 / FAIL=0** |
+| Lambda | Lambda + SQS + Aurora | S3 イベント → compiler Lambda → SQS → executor Lambda → RDS | **PASS=6 / FAIL=0** |
 
-**結果（2026-05-31）: PASS=8 / FAIL=0**
-証跡は `s3://favnir-e2e-demo/proof/` に保存。
-詳細: [`infra/e2e-demo/ecs/README.md`](infra/e2e-demo/ecs/README.md)
+**共通の証跡ポイント（EKS / Lambda）:**
+
+| チェック | compiler | executor |
+|---|---|---|
+| `.fav` ソースの有無 | あり（toolchain イメージ） | なし（runtime イメージ） |
+| `.fvc` 生成 | `fav build` で生成・S3 保存 | S3 からダウンロードして実行 |
+| DB 書き込み | — | Aurora PostgreSQL → S3 サマリー |
+
+詳細:
+- [`infra/e2e-demo/ecs/README.md`](infra/e2e-demo/ecs/README.md)
+- [`infra/e2e-demo/eks/README.md`](infra/e2e-demo/eks/README.md)
+- [`infra/e2e-demo/lambda/README.md`](infra/e2e-demo/lambda/README.md)
 
 ---
 

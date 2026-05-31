@@ -45,9 +45,18 @@
 pub mod ast;
 pub mod error_catalog;
 pub mod frontend;
+pub mod lineage;
 pub mod middle;
 #[cfg(not(target_arch = "wasm32"))]
+pub mod backend;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod checker_fav_runner;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod compiler_fav_runner;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod registry;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod stdlib_fav_runner;
 pub mod schemas;
 pub mod std_states;
 pub mod toml;
@@ -126,4 +135,36 @@ pub fn compile_source_to_wasm(source: &str) -> Result<Vec<u8>, Diagnostic> {
         line: 0,
         col: 0,
     })
+}
+
+/// Execute a `.fvc` bytecode artifact file.
+/// Mirrors `fav exec <file>` without the `--info` / `.wasm` paths.
+/// Called by the `rvm` standalone binary.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn exec_fvc_file(path: &str, db_url: Option<&str>) {
+    use std::process;
+
+    let mut file = std::fs::File::open(path).unwrap_or_else(|e| {
+        eprintln!("error: cannot open `{}`: {}", path, e);
+        process::exit(1);
+    });
+    let artifact = backend::artifact::FvcArtifact::read_from(&mut file).unwrap_or_else(|e| {
+        eprintln!("error: cannot read artifact `{}`: {}", path, e);
+        process::exit(1);
+    });
+    let main_idx = artifact.fn_idx_by_name("main").unwrap_or_else(|| {
+        eprintln!("error: artifact does not contain a `main` function");
+        process::exit(1);
+    });
+    backend::vm::VM::run_with_emits_db_path_and_source_file(
+        &artifact,
+        main_idx,
+        vec![],
+        db_url,
+        None,
+    )
+    .unwrap_or_else(|e| {
+        eprintln!("runtime error: {}", e.message);
+        process::exit(1);
+    });
 }

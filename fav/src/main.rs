@@ -44,6 +44,7 @@ mod checker_fav_runner;
 mod compiler_fav_runner;
 mod docs_server;
 mod driver;
+mod lineage;
 mod stdlib_fav_runner;
 mod error_catalog;
 mod fmt;

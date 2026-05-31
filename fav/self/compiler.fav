@@ -1140,18 +1140,7 @@ fn parse_primary(toks: List<Token>) -> Result<ExprParse, String> {
             match peek(rest1) {
                 Some(TkIdent(param)) => {
                     bind rest2 <- advance(rest1)
-                    match expect_tok(rest2, TkPipe) {
-                        Err(e) => Result.err(e)
-                        Ok(rest3) => {
-                            match parse_expr(rest3) {
-                                Err(e) => Result.err(e)
-                                Ok(body_p) => Result.ok(ExprParse {
-                                    expr: ELambda(param, body_p.expr)
-                                    rest: body_p.rest
-                                })
-                            }
-                        }
-                    }
+                    parse_lambda_rest(param, rest2)
                 }
                 _ => Result.err("expected lambda parameter")
             }
@@ -1390,6 +1379,44 @@ fn parse_or_rest(lhs: Expr, toks: List<Token>) -> Result<ExprParse, String> {
             }
         }
         _ => Result.ok(ExprParse { expr: lhs, rest: toks })
+    }
+}
+
+// Parse lambda body after the first param has been consumed.
+// Handles multi-param: |x, y| body → ELambda(x, ELambda(y, body))
+// and single-param:    |x|    body → ELambda(x, body)
+fn parse_lambda_rest(param: String, toks: List<Token>) -> Result<ExprParse, String> {
+    match peek(toks) {
+        Some(TkComma) => {
+            bind rest1 <- advance(toks)
+            match peek(rest1) {
+                Some(TkIdent(next_param)) => {
+                    bind rest2 <- advance(rest1)
+                    match parse_lambda_rest(next_param, rest2) {
+                        Err(e) => Result.err(e)
+                        Ok(inner_p) => Result.ok(ExprParse {
+                            expr: ELambda(param, inner_p.expr)
+                            rest: inner_p.rest
+                        })
+                    }
+                }
+                _ => Result.err("expected lambda parameter after comma")
+            }
+        }
+        _ => {
+            match expect_tok(toks, TkPipe) {
+                Err(e) => Result.err(e)
+                Ok(rest3) => {
+                    match parse_expr(rest3) {
+                        Err(e) => Result.err(e)
+                        Ok(body_p) => Result.ok(ExprParse {
+                            expr: ELambda(param, body_p.expr)
+                            rest: body_p.rest
+                        })
+                    }
+                }
+            }
+        }
     }
 }
 

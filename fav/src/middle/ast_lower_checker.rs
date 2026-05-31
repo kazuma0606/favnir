@@ -248,8 +248,19 @@ pub fn lower_expr(expr: &ast::Expr) -> Value {
             v2("EAccess", lower_expr(inner), sv(field))
         }
         ast::Expr::Closure(params, body, _) => {
-            let param = params.first().map(|s| s.as_str()).unwrap_or("_");
-            v2("ELambda", sv(param), lower_expr(body))
+            // Curry multi-param closures: |x, y| body → ELambda("x", ELambda("y", body))
+            let lowered_body = lower_expr(body);
+            if params.len() <= 1 {
+                let param = params.first().map(|s| s.as_str()).unwrap_or("_");
+                v2("ELambda", sv(param), lowered_body)
+            } else {
+                // fold from the right: last param wraps body first
+                let mut result = lowered_body;
+                for param in params.iter().rev() {
+                    result = v2("ELambda", sv(param.as_str()), result);
+                }
+                result
+            }
         }
         ast::Expr::RecordConstruct(name, fields, _) => {
             v2("ERecordLit", sv(name), lower_field_list(fields))

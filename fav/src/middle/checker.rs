@@ -4899,6 +4899,22 @@ impl Checker {
                 let init_ty = arg_tys.get(1).cloned().unwrap_or(Type::Unknown);
                 Some(Type::List(Box::new(init_ty)))
             }
+            ("List", "zip_with") => {
+                // zip_with(f, xs, ys) → List<U>
+                let out = arg_tys
+                    .first()
+                    .and_then(|f| f.as_callable().map(|(_, o)| o.clone()))
+                    .unwrap_or(Type::Unknown);
+                Some(Type::List(Box::new(out)))
+            }
+            ("List", "group_by") => {
+                // group_by(f, xs) → Map<String, List<A>>
+                let elem = self.expect_list_arg(&arg_tys, 1, span);
+                Some(Type::Map(
+                    Box::new(Type::String),
+                    Box::new(Type::List(Box::new(elem))),
+                ))
+            }
 
             // String
             ("String", "trim")
@@ -4934,6 +4950,9 @@ impl Checker {
             | ("String", "to_lower") => Some(Type::String),
             ("String", "join") => Some(Type::String),
             ("String", "capitalize") | ("String", "indent") => Some(Type::String),
+            ("String", "truncate") | ("String", "trim_start") | ("String", "trim_end") => {
+                Some(Type::String)
+            }
             ("String", "char_at") => Some(Type::Option(Box::new(Type::String))),
             ("String", "to_int") => Some(Type::Option(Box::new(Type::Int))),
             ("String", "to_float") => Some(Type::Option(Box::new(Type::Float))),
@@ -5024,6 +5043,27 @@ impl Checker {
                 Some(Type::Result(Box::new(ok_ty), Box::new(new_err)))
             }
             ("Result", "is_ok") | ("Result", "is_err") => Some(Type::Bool),
+            ("Result", "all") => {
+                // Result.all(List<Result<A, E>>) -> Result<List<A>, E>
+                let inner_ok = match arg_tys.first() {
+                    Some(Type::List(inner)) => match inner.as_ref() {
+                        Type::Result(ok, _) => *ok.clone(),
+                        _ => Type::Unknown,
+                    },
+                    _ => Type::Unknown,
+                };
+                let inner_err = match arg_tys.first() {
+                    Some(Type::List(inner)) => match inner.as_ref() {
+                        Type::Result(_, err) => *err.clone(),
+                        _ => Type::Unknown,
+                    },
+                    _ => Type::Unknown,
+                };
+                Some(Type::Result(
+                    Box::new(Type::List(Box::new(inner_ok))),
+                    Box::new(inner_err),
+                ))
+            }
             ("Result", "to_option") => {
                 let ok_ty = match arg_tys.first() {
                     Some(Type::Result(ok, _)) => *ok.clone(),
@@ -5319,6 +5359,12 @@ impl Checker {
             }
             ("Map", "to_list") => Some(Type::List(Box::new(Type::Unknown))),
             ("Map", "from_list") => {
+                Some(Type::Map(Box::new(Type::Unknown), Box::new(Type::Unknown)))
+            }
+            ("Map", "filter") => {
+                Some(Type::Map(Box::new(Type::Unknown), Box::new(Type::Unknown)))
+            }
+            ("Map", "merge_with") => {
                 Some(Type::Map(Box::new(Type::Unknown), Box::new(Type::Unknown)))
             }
             ("Map", _) => Some(Type::Unknown),

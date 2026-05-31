@@ -1,3 +1,7 @@
+/// Bytecode format / VM compatibility version.
+/// Independent from the Favnir language version (`fav --version`).
+pub const VM_VERSION: &str = "1.0.0";
+
 use arrow::array::{
     Array, ArrayRef, BooleanArray, BooleanBuilder, Float64Array, Float64Builder, Int64Array,
     Int64Builder, StringArray, StringBuilder,
@@ -2921,6 +2925,132 @@ impl VM {
                     )),
                 }
             }
+            "List.zip_with" => {
+                if args.len() != 3 {
+                    return Err(self.error(artifact, "List.zip_with requires 3 arguments: (f, xs, ys)"));
+                }
+                let mut it = args.into_iter();
+                let func = it.next().expect("func");
+                let xs = it.next().expect("xs");
+                let ys = it.next().expect("ys");
+                match (xs, ys) {
+                    (VMValue::List(fxs), VMValue::List(fys)) => {
+                        let mut out = Vec::new();
+                        for (x, y) in fxs.iter().zip(fys.iter()) {
+                            // f is curried: |x| |y| body
+                            let partial = self.call_value(artifact, func.clone(), vec![x.clone()])?;
+                            let result = self.call_value(artifact, partial, vec![y.clone()])?;
+                            out.push(result);
+                        }
+                        Ok(VMValue::List(FavList::new(out)))
+                    }
+                    _ => Err(self.error(artifact, "List.zip_with requires (f, List, List)")),
+                }
+            }
+            "List.group_by" => {
+                if args.len() != 2 {
+                    return Err(self.error(artifact, "List.group_by requires 2 arguments: (f, xs)"));
+                }
+                let mut it = args.into_iter();
+                let func = it.next().expect("func");
+                let list = it.next().expect("list");
+                match list {
+                    VMValue::List(fl) => {
+                        let mut groups: HashMap<String, Vec<VMValue>> = HashMap::new();
+                        let mut order: Vec<String> = Vec::new();
+                        for x in fl {
+                            let key_val = self.call_value(artifact, func.clone(), vec![x.clone()])?;
+                            let key = match key_val {
+                                VMValue::Str(s) => s,
+                                other => {
+                                    return Err(self.error(
+                                        artifact,
+                                        &format!(
+                                            "List.group_by key function must return String, got {}",
+                                            vmvalue_type_name(&other)
+                                        ),
+                                    ));
+                                }
+                            };
+                            if !order.contains(&key) {
+                                order.push(key.clone());
+                            }
+                            groups.entry(key).or_default().push(x);
+                        }
+                        let mut result = HashMap::new();
+                        for key in order {
+                            let vals = groups.remove(&key).unwrap_or_default();
+                            result.insert(key, VMValue::List(FavList::new(vals)));
+                        }
+                        Ok(VMValue::Record(result))
+                    }
+                    _ => Err(self.error(artifact, "List.group_by requires a List as second argument")),
+                }
+            }
+            "Map.merge_with" => {
+                if args.len() != 3 {
+                    return Err(self.error(artifact, "Map.merge_with requires 3 arguments: (f, m1, m2)"));
+                }
+                let mut it = args.into_iter();
+                let func = it.next().expect("func");
+                let m1 = it.next().expect("m1");
+                let m2 = it.next().expect("m2");
+                let mut base = match m1 {
+                    VMValue::Record(m) => m,
+                    VMValue::Unit => HashMap::new(),
+                    _ => return Err(self.error(artifact, "Map.merge_with: first map must be a Record")),
+                };
+                let overlay = match m2 {
+                    VMValue::Record(m) => m,
+                    VMValue::Unit => HashMap::new(),
+                    _ => return Err(self.error(artifact, "Map.merge_with: second map must be a Record")),
+                };
+                for (k, v2) in overlay {
+                    if let Some(v1) = base.get(&k).cloned() {
+                        let partial = self.call_value(artifact, func.clone(), vec![v1])?;
+                        let merged = self.call_value(artifact, partial, vec![v2])?;
+                        base.insert(k, merged);
+                    } else {
+                        base.insert(k, v2);
+                    }
+                }
+                Ok(VMValue::Record(base))
+            }
+            "Map.filter" => {
+                if args.len() != 2 {
+                    return Err(self.error(artifact, "Map.filter requires 2 arguments: (pred, m)"));
+                }
+                let mut it = args.into_iter();
+                let func = it.next().expect("func");
+                let map = it.next().expect("map");
+                let m = match map {
+                    VMValue::Record(m) => m,
+                    VMValue::Unit => HashMap::new(),
+                    _ => return Err(self.error(artifact, "Map.filter: argument must be a Record")),
+                };
+                let mut result = HashMap::new();
+                for (k, v) in m {
+                    let partial =
+                        self.call_value(artifact, func.clone(), vec![VMValue::Str(k.clone())])?;
+                    let keep = self.call_value(artifact, partial, vec![v.clone()])?;
+                    match keep {
+                        VMValue::Bool(true) => {
+                            result.insert(k, v);
+                        }
+                        VMValue::Bool(false) => {}
+                        other => {
+                            return Err(self.error(
+                                artifact,
+                                &format!(
+                                    "Map.filter predicate must return Bool, got {}",
+                                    vmvalue_type_name(&other)
+                                ),
+                            ));
+                        }
+                    }
+                }
+                Ok(VMValue::Record(result))
+            }
             "Option.map" => {
                 if args.len() != 2 {
                     return Err(self.error(artifact, "Option.map requires 2 arguments"));
@@ -3263,6 +3393,47 @@ impl VM {
                             "Result.is_err requires a Result argument, got {}",
                             vmvalue_type_name(&other)
                         ),
+                    )),
+                }
+            }
+            "Result.all" => {
+                if args.len() != 1 {
+                    return Err(self.error(artifact, "Result.all requires 1 argument"));
+                }
+                match args.into_iter().next().expect("list") {
+                    VMValue::List(fl) => {
+                        let mut oks = Vec::with_capacity(fl.len());
+                        for item in fl {
+                            match item {
+                                VMValue::Variant(tag, payload) if tag == "ok" => {
+                                    let v = payload
+                                        .map(|b| *b)
+                                        .unwrap_or(VMValue::Unit);
+                                    oks.push(v);
+                                }
+                                VMValue::Variant(tag, payload) if tag == "err" => {
+                                    // first error short-circuits
+                                    return Ok(VMValue::Variant("err".to_string(), payload));
+                                }
+                                other => {
+                                    return Err(self.error(
+                                        artifact,
+                                        &format!(
+                                            "Result.all requires List<Result<A,E>>, got {}",
+                                            vmvalue_type_name(&other)
+                                        ),
+                                    ));
+                                }
+                            }
+                        }
+                        Ok(VMValue::Variant(
+                            "ok".to_string(),
+                            Some(Box::new(VMValue::List(FavList::new(oks)))),
+                        ))
+                    }
+                    other => Err(self.error(
+                        artifact,
+                        &format!("Result.all requires a List argument, got {}", vmvalue_type_name(&other)),
                     )),
                 }
             }
@@ -6201,8 +6372,8 @@ fn vm_call_builtin(
                 Err(e) => return Ok(VMValue::Str(format!("error: parse failed: {}", e))),
                 Ok(p) => p,
             };
-            let report = crate::driver::lineage_analysis(&program);
-            let text = crate::driver::render_lineage_text(&report, &path);
+            let report = crate::lineage::lineage_analysis(&program);
+            let text = crate::lineage::render_lineage_text(&report, &path);
             Ok(VMValue::Str(text))
         }
         "IO.argv" => {
@@ -6822,6 +6993,48 @@ fn vm_call_builtin(
                 _ => Err("String.repeat requires (String, Int)".to_string()),
             }
         }
+        "String.truncate" => {
+            let mut it = args.into_iter();
+            let s = it
+                .next()
+                .ok_or_else(|| "String.truncate requires 3 arguments".to_string())?;
+            let max_len = it
+                .next()
+                .ok_or_else(|| "String.truncate requires 3 arguments".to_string())?;
+            let suffix = it
+                .next()
+                .ok_or_else(|| "String.truncate requires 3 arguments".to_string())?;
+            match (s, max_len, suffix) {
+                (VMValue::Str(s), VMValue::Int(max), VMValue::Str(suf)) => {
+                    let max = max as usize;
+                    if s.chars().count() <= max {
+                        Ok(VMValue::Str(s))
+                    } else {
+                        let suf_len = suf.chars().count();
+                        let take = if max > suf_len { max - suf_len } else { 0 };
+                        let truncated: String = s.chars().take(take).collect();
+                        Ok(VMValue::Str(format!("{}{}", truncated, suf)))
+                    }
+                }
+                _ => Err("String.truncate requires (String, Int, String)".to_string()),
+            }
+        }
+        "String.trim_start" => match args.into_iter().next() {
+            Some(VMValue::Str(s)) => Ok(VMValue::Str(s.trim_start().to_string())),
+            Some(other) => Err(format!(
+                "String.trim_start requires String, got {}",
+                vmvalue_type_name(&other)
+            )),
+            None => Err("String.trim_start requires 1 argument".to_string()),
+        },
+        "String.trim_end" => match args.into_iter().next() {
+            Some(VMValue::Str(s)) => Ok(VMValue::Str(s.trim_end().to_string())),
+            Some(other) => Err(format!(
+                "String.trim_end requires String, got {}",
+                vmvalue_type_name(&other)
+            )),
+            None => Err("String.trim_end requires 1 argument".to_string()),
+        },
         "String.capitalize" => {
             let value_args: Vec<Value> = args.into_iter().map(Value::from).collect();
             crate::stdlib_fav_runner::call_string_stdlib("capitalize", value_args)

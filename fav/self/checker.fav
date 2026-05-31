@@ -357,9 +357,13 @@ fn str_fn(fname: String) -> String {
     else { if fname == "words"           { "List" }
     else { if fname == "capitalize"      { "String" }
     else { if fname == "indent"          { "String" }
+    else { if fname == "truncate"        { "String" }
+    else { if fname == "trim_start"      { "String" }
+    else { if fname == "trim_end"        { "String" }
     else { "Unknown" }
-    }}}}}}}}}}}}}}}}}}}}}}}}
+    }}}}}}}}}}}}}}}}}}}}}}}}}}}
 }
+
 
 fn list_fn(fname: String) -> String {
     if fname == "push"              { "List" }
@@ -404,8 +408,9 @@ fn res_fn(fname: String) -> String {
     if fname == "ok"        { "Result" }
     else { if fname == "err"       { "Result" }
     else { if fname == "and_then"  { "Result" }
+    else { if fname == "all"       { "Result" }
     else { "Unknown" }
-    }}
+    }}}
 }
 
 fn map_fn(fname: String) -> String {
@@ -420,10 +425,12 @@ fn map_fn(fname: String) -> String {
     else { if fname == "to_list"         { "List" }
     else { if fname == "from_entries"    { "Map" }
     else { if fname == "merge_with"      { "Map" }
+    else { if fname == "filter"          { "Map" }
     else { if fname == "count_by"        { "Map" }
     else { "Unknown" }
-    }}}}}}}}}}}
+    }}}}}}}}}}}}
 }
+
 
 fn int_fn(fname: String) -> String {
     if fname == "to_string"  { "String" }

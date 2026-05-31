@@ -16116,357 +16116,13 @@ fn sql_to_sql(q: SqlQuery) -> String {
 }
 
 // ── fav explain --lineage ──────────────────────────────────────────────────────
+// Structs and core analysis logic live in crate::lineage (shared with fav_core lib).
 
-/// Per-stage/fn entry in a lineage report.
-#[derive(Debug, Clone, Serialize)]
-pub struct LineageEntry {
-    pub name: String,
-    pub kind: String, // "stage" | "fn"
-    pub effects: Vec<String>,
-    pub sources: Vec<String>,  // tables read
-    pub sinks: Vec<String>,    // tables written
-}
+#[allow(unused_imports)]
+pub use crate::lineage::{
+    extract_tables_from_sql, lineage_analysis, render_lineage_json, render_lineage_text,
+};
 
-/// A seq pipeline chain.
-#[derive(Debug, Clone, Serialize)]
-pub struct PipelineLineage {
-    pub name: String,
-    pub steps: Vec<String>,
-    pub sources: Vec<String>,
-    pub sinks: Vec<String>,
-}
-
-/// Full lineage report for a file.
-#[derive(Debug, Clone, Serialize)]
-pub struct LineageReport {
-    pub transformations: Vec<LineageEntry>,
-    pub pipelines: Vec<PipelineLineage>,
-}
-
-/// Extract read-tables (FROM / JOIN) and write-tables (INSERT INTO / UPDATE / DELETE FROM)
-/// from a SQL string literal using simple regex-free pattern matching.
-pub fn extract_tables_from_sql(sql: &str) -> (Vec<String>, Vec<String>) {
-    let upper = sql.to_uppercase();
-    let tokens: Vec<&str> = upper.split_whitespace().collect();
-    let mut reads: Vec<String> = Vec::new();
-    let mut writes: Vec<String> = Vec::new();
-
-    let mut i = 0;
-    while i < tokens.len() {
-        match tokens[i] {
-            "FROM" | "JOIN" => {
-                if let Some(t) = tokens.get(i + 1) {
-                    let name = strip_sql_ident(t);
-                    if !name.is_empty() && !reads.contains(&name) {
-                        reads.push(name);
-                    }
-                }
-                i += 1;
-            }
-            "INSERT" => {
-                // INSERT INTO <table>
-                if tokens.get(i + 1) == Some(&"INTO") {
-                    if let Some(t) = tokens.get(i + 2) {
-                        let name = strip_sql_ident(t);
-                        if !name.is_empty() && !writes.contains(&name) {
-                            writes.push(name);
-                        }
-                    }
-                    i += 2;
-                } else {
-                    i += 1;
-                }
-            }
-            "UPDATE" => {
-                if let Some(t) = tokens.get(i + 1) {
-                    let name = strip_sql_ident(t);
-                    if !name.is_empty() && !writes.contains(&name) {
-                        writes.push(name);
-                    }
-                }
-                i += 1;
-            }
-            "DELETE" => {
-                // DELETE FROM <table>
-                if tokens.get(i + 1) == Some(&"FROM") {
-                    if let Some(t) = tokens.get(i + 2) {
-                        let name = strip_sql_ident(t);
-                        if !name.is_empty() && !writes.contains(&name) {
-                            writes.push(name);
-                        }
-                    }
-                    i += 2;
-                } else {
-                    i += 1;
-                }
-            }
-            _ => { i += 1; }
-        }
-    }
-    (reads, writes)
-}
-
-fn strip_sql_ident(s: &str) -> String {
-    // Remove trailing punctuation like ',' '(' ')' and surrounding quotes/backticks
-    let s = s.trim_matches(|c: char| c == ',' || c == '(' || c == ')' || c == ';');
-    let s = s.trim_matches(|c: char| c == '"' || c == '`' || c == '\'');
-    // Keep only valid identifier chars
-    let out: String = s.chars().filter(|c| c.is_alphanumeric() || *c == '_').collect();
-    out
-}
-
-/// Recursively walk an expression and collect string literal arguments
-/// that appear as the first arg to DB call expressions (`DB.*`).
-pub fn collect_sql_literals(expr: &ast::Expr) -> Vec<String> {
-    let mut result = Vec::new();
-    collect_sql_literals_inner(expr, &mut result);
-    result
-}
-
-fn collect_sql_literals_inner(expr: &ast::Expr, out: &mut Vec<String>) {
-    match expr {
-        ast::Expr::Apply(func, args, _) => {
-            // Check if the function is a DB.* field access
-            let is_db_call = match func.as_ref() {
-                ast::Expr::FieldAccess(obj, _, _) => matches!(obj.as_ref(), ast::Expr::Ident(name, _) if name == "DB" || name == "Db"),
-                _ => false,
-            };
-            if is_db_call {
-                // First arg might be the SQL string
-                if let Some(ast::Expr::Lit(ast::Lit::Str(sql), _)) = args.first() {
-                    out.push(sql.clone());
-                }
-            }
-            for a in args {
-                collect_sql_literals_inner(a, out);
-            }
-            collect_sql_literals_inner(func, out);
-        }
-        ast::Expr::Pipeline(exprs, _) => {
-            for e in exprs { collect_sql_literals_inner(e, out); }
-        }
-        ast::Expr::Block(block) => {
-            for s in &block.stmts {
-                collect_sql_literals_stmt(s, out);
-            }
-            collect_sql_literals_inner(&block.expr, out);
-        }
-        ast::Expr::If(cond, then_blk, else_blk, _) => {
-            collect_sql_literals_inner(cond, out);
-            collect_sql_literals_block(then_blk, out);
-            if let Some(b) = else_blk { collect_sql_literals_block(b, out); }
-        }
-        ast::Expr::Match(scrutinee, arms, _) => {
-            collect_sql_literals_inner(scrutinee, out);
-            for arm in arms { collect_sql_literals_inner(&arm.body, out); }
-        }
-        ast::Expr::BinOp(_, l, r, _) => {
-            collect_sql_literals_inner(l, out);
-            collect_sql_literals_inner(r, out);
-        }
-        ast::Expr::FieldAccess(obj, _, _) => { collect_sql_literals_inner(obj, out); }
-        ast::Expr::TypeApply(e, _, _) => { collect_sql_literals_inner(e, out); }
-        ast::Expr::RecordConstruct(_, fields, _) => {
-            for (_, v) in fields { collect_sql_literals_inner(v, out); }
-        }
-        ast::Expr::Closure(_, body, _) => { collect_sql_literals_inner(body, out); }
-        ast::Expr::Collect(blk, _) => { collect_sql_literals_block(blk, out); }
-        ast::Expr::EmitExpr(e, _) => { collect_sql_literals_inner(e, out); }
-        ast::Expr::AssertMatches(e, _, _) => { collect_sql_literals_inner(e, out); }
-        ast::Expr::Lit(_, _) | ast::Expr::Ident(_, _) | ast::Expr::FString(_, _) => {}
-    }
-}
-
-fn collect_sql_literals_block(block: &ast::Block, out: &mut Vec<String>) {
-    for s in &block.stmts { collect_sql_literals_stmt(s, out); }
-    collect_sql_literals_inner(&block.expr, out);
-}
-
-fn collect_sql_literals_stmt(stmt: &ast::Stmt, out: &mut Vec<String>) {
-    match stmt {
-        ast::Stmt::Bind(b) => collect_sql_literals_inner(&b.expr, out),
-        ast::Stmt::Expr(e) => collect_sql_literals_inner(e, out),
-        ast::Stmt::Chain(c) => collect_sql_literals_inner(&c.expr, out),
-        ast::Stmt::Yield(y) => collect_sql_literals_inner(&y.expr, out),
-        ast::Stmt::ForIn(f) => {
-            collect_sql_literals_inner(&f.iter, out);
-            collect_sql_literals_block(&f.body, out);
-        }
-    }
-}
-
-fn is_db_read_effect(e: &ast::Effect) -> bool {
-    matches!(e, ast::Effect::Db | ast::Effect::DbRead)
-}
-
-fn is_db_write_effect(e: &ast::Effect) -> bool {
-    matches!(e, ast::Effect::Db | ast::Effect::DbWrite | ast::Effect::DbAdmin)
-}
-
-/// Analyse a parsed program and build a `LineageReport`.
-pub fn lineage_analysis(program: &ast::Program) -> LineageReport {
-    let mut transformations: Vec<LineageEntry> = Vec::new();
-
-    // Collect stage (TrfDef) entries
-    for item in &program.items {
-        if let ast::Item::TrfDef(trf) = item {
-            let sqls = collect_sql_literals(&ast::Expr::Block(Box::new(trf.body.clone())));
-            let mut sources: Vec<String> = Vec::new();
-            let mut sinks: Vec<String> = Vec::new();
-            for sql in &sqls {
-                let (reads, writes) = extract_tables_from_sql(sql);
-                for r in reads { if !sources.contains(&r) { sources.push(r); } }
-                for w in writes { if !sinks.contains(&w) { sinks.push(w); } }
-            }
-            // Effect-based fallback when no SQL literals found
-            let has_read = trf.effects.iter().any(is_db_read_effect);
-            let has_write = trf.effects.iter().any(is_db_write_effect);
-            if sources.is_empty() && has_read { sources.push(format!("({}:db-read)", trf.name)); }
-            if sinks.is_empty() && has_write { sinks.push(format!("({}:db-write)", trf.name)); }
-
-            transformations.push(LineageEntry {
-                name: trf.name.clone(),
-                kind: "stage".into(),
-                effects: trf.effects.iter().map(|e| format_effects(std::slice::from_ref(e))).collect(),
-                sources,
-                sinks,
-            });
-        } else if let ast::Item::FnDef(fndef) = item {
-            let sqls = collect_sql_literals(&ast::Expr::Block(Box::new(fndef.body.clone())));
-            let mut sources: Vec<String> = Vec::new();
-            let mut sinks: Vec<String> = Vec::new();
-            for sql in &sqls {
-                let (reads, writes) = extract_tables_from_sql(sql);
-                for r in reads { if !sources.contains(&r) { sources.push(r); } }
-                for w in writes { if !sinks.contains(&w) { sinks.push(w); } }
-            }
-            let has_read = fndef.effects.iter().any(is_db_read_effect);
-            let has_write = fndef.effects.iter().any(is_db_write_effect);
-            if sources.is_empty() && has_read { sources.push(format!("({}:db-read)", fndef.name)); }
-            if sinks.is_empty() && has_write { sinks.push(format!("({}:db-write)", fndef.name)); }
-
-            if !fndef.effects.is_empty() {
-                transformations.push(LineageEntry {
-                    name: fndef.name.clone(),
-                    kind: "fn".into(),
-                    effects: fndef.effects.iter().map(|e| format_effects(std::slice::from_ref(e))).collect(),
-                    sources,
-                    sinks,
-                });
-            }
-        }
-    }
-
-    // Build a lookup: name -> (sources, sinks)
-    let mut entry_map: std::collections::HashMap<String, (Vec<String>, Vec<String>)> =
-        std::collections::HashMap::new();
-    for e in &transformations {
-        entry_map.insert(e.name.clone(), (e.sources.clone(), e.sinks.clone()));
-    }
-
-    // Collect seq (FlwDef) pipelines
-    let mut pipelines: Vec<PipelineLineage> = Vec::new();
-    for item in &program.items {
-        if let ast::Item::FlwDef(flw) = item {
-            let mut all_sources: Vec<String> = Vec::new();
-            let mut all_sinks: Vec<String> = Vec::new();
-            for step in &flw.steps {
-                if let Some((srcs, snks)) = entry_map.get(step.as_str()) {
-                    for s in srcs { if !all_sources.contains(s) { all_sources.push(s.clone()); } }
-                    for s in snks { if !all_sinks.contains(s) { all_sinks.push(s.clone()); } }
-                }
-            }
-            pipelines.push(PipelineLineage {
-                name: flw.name.clone(),
-                steps: flw.steps.clone(),
-                sources: all_sources,
-                sinks: all_sinks,
-            });
-        }
-    }
-
-    LineageReport { transformations, pipelines }
-}
-
-/// Render lineage as human-readable text.
-pub fn render_lineage_text(report: &LineageReport, filename: &str) -> String {
-    let mut out = String::new();
-    out.push_str(&format!("Lineage: {}\n", filename));
-    out.push('\n');
-
-    // Collect all sources / sinks
-    let mut all_sources: Vec<String> = Vec::new();
-    let mut all_sinks: Vec<String> = Vec::new();
-    for e in &report.transformations {
-        for s in &e.sources { if !all_sources.contains(s) { all_sources.push(s.clone()); } }
-        for s in &e.sinks   { if !all_sinks.contains(s)   { all_sinks.push(s.clone()); } }
-    }
-    for p in &report.pipelines {
-        for s in &p.sources { if !all_sources.contains(s) { all_sources.push(s.clone()); } }
-        for s in &p.sinks   { if !all_sinks.contains(s)   { all_sinks.push(s.clone()); } }
-    }
-
-    out.push_str("Sources:\n");
-    if all_sources.is_empty() {
-        out.push_str("  (none)\n");
-    } else {
-        for s in &all_sources { out.push_str(&format!("  - {}\n", s)); }
-    }
-    out.push('\n');
-
-    out.push_str("Sinks:\n");
-    if all_sinks.is_empty() {
-        out.push_str("  (none)\n");
-    } else {
-        for s in &all_sinks { out.push_str(&format!("  - {}\n", s)); }
-    }
-    out.push('\n');
-
-    out.push_str("Transformations:\n");
-    if report.transformations.is_empty() {
-        out.push_str("  (none)\n");
-    } else {
-        for e in &report.transformations {
-            out.push_str(&format!(
-                "  {} {} [{}]",
-                e.kind,
-                e.name,
-                e.effects.join(", ")
-            ));
-            if !e.sources.is_empty() || !e.sinks.is_empty() {
-                out.push_str(&format!(
-                    "  sources=[{}] sinks=[{}]",
-                    e.sources.join(", "),
-                    e.sinks.join(", ")
-                ));
-            }
-            out.push('\n');
-        }
-    }
-    out.push('\n');
-
-    out.push_str("Pipelines:\n");
-    if report.pipelines.is_empty() {
-        out.push_str("  (none)\n");
-    } else {
-        for p in &report.pipelines {
-            out.push_str(&format!("  seq {} = {}\n", p.name, p.steps.join(" |> ")));
-            if !p.sources.is_empty() {
-                out.push_str(&format!("    sources: {}\n", p.sources.join(", ")));
-            }
-            if !p.sinks.is_empty() {
-                out.push_str(&format!("    sinks:   {}\n", p.sinks.join(", ")));
-            }
-        }
-    }
-
-    out
-}
-
-/// Render lineage as JSON.
-pub fn render_lineage_json(report: &LineageReport) -> String {
-    serde_json::to_string_pretty(report).unwrap_or_else(|_| "{}".into())
-}
 
 /// `fav explain --lineage [file] [--format text|json]`
 pub fn cmd_explain_lineage(file: Option<&str>, format: &str) {
@@ -18315,6 +17971,27 @@ mod run_dispatch_tests {
         assert_eq!(result, crate::value::Value::Int(42));
     }
 
+    /// Multi-param closure `|x, y|` parses successfully through the Favnir self-hosted pipeline.
+    /// Desugars to curried form; List.zip_with uses curried calling convention f(x)(y).
+    #[test]
+    fn multi_param_closure_self_hosted() {
+        // |x, y| in compiler.fav desugars to ELambda("x", ELambda("y", ...)) = curried
+        // List.zip_with(f, xs, ys) calls f(x) then partial(y) — curried calling works.
+        let src = "public fn main() -> Int { List.length(List.zip_with(|x, y| x + y, List.push(List.push(List.empty(), 1), 2), List.push(List.push(List.empty(), 10), 20))) }";
+        let tmp = std::env::temp_dir().join("fav_multi_param_closure.fav");
+        std::fs::write(&tmp, src).unwrap();
+        let bytes = crate::compiler_fav_runner::compile_file_to_bytes_rune(
+            tmp.to_str().unwrap(),
+        )
+        .expect("compile_file_to_bytes_rune");
+        let artifact = crate::backend::artifact::FvcArtifact::from_bytes(&bytes)
+            .expect("artifact");
+        let fn_idx = artifact.fn_idx_by_name("main").expect("main");
+        let result = crate::backend::vm::VM::run(&artifact, fn_idx, vec![]).expect("run");
+        // zip_with on 2-element lists gives 2-element result
+        assert_eq!(result, crate::value::Value::Int(2));
+    }
+
     /// File with rune import → Favnir pipeline handles it via source merging (v8.6.0).
     #[test]
     fn dispatch_rune_import_uses_favnir_pipeline() {
@@ -18374,5 +18051,437 @@ mod self_hosting_complete_tests {
             &crate::toml::FavToml,
         ) -> Result<Vec<u8>, String> =
             crate::compiler_fav_runner::compile_project_to_bytes;
+    }
+}
+
+// ── stdlib_v91_tests (v9.1.0) ─────────────────────────────────────────────────
+#[cfg(test)]
+mod stdlib_v91_tests {
+    use crate::backend::vm::VM;
+    use crate::backend::artifact::FvcArtifact;
+    use crate::backend::codegen::codegen_program;
+    use crate::frontend::parser::Parser;
+    use crate::middle::compiler::compile_program;
+    use crate::value::Value;
+
+    fn run_fn(src: &str, fname: &str, args: Vec<Value>) -> Value {
+        let prog = Parser::parse_str(src, "test.fav").expect("parse");
+        let ir = compile_program(&prog);
+        let artifact: FvcArtifact = codegen_program(&ir);
+        let fn_idx = artifact.fn_idx_by_name(fname).expect("fn not found");
+        VM::run(&artifact, fn_idx, args).expect("VM error")
+    }
+
+    // F-1: List.zip_with — pairwise addition
+    #[test]
+    fn list_zip_with_add() {
+        let src = r#"
+fn zip_add(xs: List<Int>, ys: List<Int>) -> List<Int> {
+    List.zip_with(|x| |y| x + y, xs, ys)
+}
+"#;
+        let xs = Value::List(vec![Value::Int(1), Value::Int(2), Value::Int(3)]);
+        let ys = Value::List(vec![Value::Int(10), Value::Int(20), Value::Int(30)]);
+        let result = run_fn(src, "zip_add", vec![xs, ys]);
+        match result {
+            Value::List(items) => {
+                let ints: Vec<i64> = items.into_iter().map(|v| match v {
+                    Value::Int(n) => n,
+                    _ => panic!("expected Int"),
+                }).collect();
+                assert_eq!(ints, vec![11, 22, 33]);
+            }
+            _ => panic!("expected List"),
+        }
+    }
+
+    // F-2: List.group_by — group strings by first char
+    #[test]
+    fn list_group_by_first_char() {
+        let src = r#"
+fn group_first(xs: List<String>) -> Map<String, List<String>> {
+    List.group_by(|s| String.slice(s, 0, 1), xs)
+}
+"#;
+        let xs = Value::List(vec![
+            Value::Str("apple".to_string()),
+            Value::Str("avocado".to_string()),
+            Value::Str("banana".to_string()),
+        ]);
+        let result = run_fn(src, "group_first", vec![xs]);
+        match result {
+            Value::Record(m) => {
+                assert!(m.contains_key("a"), "should have key 'a'");
+                assert!(m.contains_key("b"), "should have key 'b'");
+            }
+            _ => panic!("expected Record/Map"),
+        }
+    }
+
+    // F-3: String.truncate — truncates to max length with suffix
+    #[test]
+    fn string_truncate_basic() {
+        let src = r#"
+fn trunc(s: String) -> String {
+    String.truncate(s, 5, "")
+}
+"#;
+        let result = run_fn(src, "trunc", vec![Value::Str("hello world".to_string())]);
+        match result {
+            Value::Str(s) => assert_eq!(s, "hello"),
+            _ => panic!("expected Str"),
+        }
+    }
+
+    // F-4: String.truncate — no-op when shorter than max
+    #[test]
+    fn string_truncate_short() {
+        let src = r#"
+fn trunc_short(s: String) -> String {
+    String.truncate(s, 20, "...")
+}
+"#;
+        let result = run_fn(src, "trunc_short", vec![Value::Str("hi".to_string())]);
+        match result {
+            Value::Str(s) => assert_eq!(s, "hi"),
+            _ => panic!("expected Str"),
+        }
+    }
+
+    // F-5: String.trim_start / trim_end
+    #[test]
+    fn string_trim_start_end() {
+        let src = r#"
+fn do_trim_start(s: String) -> String { String.trim_start(s) }
+fn do_trim_end(s: String) -> String   { String.trim_end(s) }
+"#;
+        let result = run_fn(src, "do_trim_start", vec![Value::Str("  hello".to_string())]);
+        match &result {
+            Value::Str(s) => assert_eq!(s, "hello"),
+            _ => panic!("expected Str"),
+        }
+        let result2 = run_fn(src, "do_trim_end", vec![Value::Str("hello  ".to_string())]);
+        match &result2 {
+            Value::Str(s) => assert_eq!(s, "hello"),
+            _ => panic!("expected Str"),
+        }
+    }
+
+    // F-6: Result.all — collects Ok values
+    #[test]
+    fn result_all_ok() {
+        let src = r#"
+fn collect_ok() -> Result<List<Int>, String> {
+    Result.all(List.push(List.push(List.push(List.empty(), Result.ok(3)), Result.ok(2)), Result.ok(1)))
+}
+"#;
+        let result = run_fn(src, "collect_ok", vec![]);
+        match result {
+            Value::Variant(tag, payload) => {
+                assert_eq!(tag, "ok");
+                match payload {
+                    Some(inner) => match *inner {
+                        Value::List(items) => assert_eq!(items.len(), 3),
+                        _ => panic!("expected List inside ok"),
+                    },
+                    None => panic!("expected payload"),
+                }
+            }
+            _ => panic!("expected Variant(ok)"),
+        }
+    }
+
+    // F-7: Result.all — short-circuits on first Err
+    #[test]
+    fn result_all_err() {
+        let src = r#"
+fn collect_err() -> Result<List<Int>, String> {
+    Result.all(List.push(List.push(List.empty(), Result.err("bad")), Result.ok(1)))
+}
+"#;
+        let result = run_fn(src, "collect_err", vec![]);
+        match result {
+            Value::Variant(tag, _) => assert_eq!(tag, "err"),
+            _ => panic!("expected Variant(err)"),
+        }
+    }
+
+    // F-8: Map.filter — keeps matching keys
+    #[test]
+    fn map_filter_basic() {
+        let src = r#"
+fn map_filt(m: Map<String, Int>) -> Map<String, Int> {
+    Map.filter(|k| |v| v > 1, m)
+}
+"#;
+        let mut m = std::collections::HashMap::new();
+        m.insert("a".to_string(), Value::Int(1));
+        m.insert("b".to_string(), Value::Int(2));
+        m.insert("c".to_string(), Value::Int(3));
+        let result = run_fn(src, "map_filt", vec![Value::Record(m)]);
+        match result {
+            Value::Record(out) => {
+                assert!(!out.contains_key("a"));
+                assert!(out.contains_key("b"));
+                assert!(out.contains_key("c"));
+            }
+            _ => panic!("expected Record/Map"),
+        }
+    }
+
+    // F-8b: Multi-param closure |x, y| works with List.map (flat function)
+    #[test]
+    fn multi_param_closure_map() {
+        // |x, y| desugars to a flat 2-arg fn; List.fold accumulates with curried lambda
+        let src = r#"
+fn fold_add(xs: List<Int>) -> Int {
+    List.fold(xs, 0, |acc, x| acc + x)
+}
+"#;
+        let xs = Value::List(vec![Value::Int(1), Value::Int(2), Value::Int(3)]);
+        let result = run_fn(src, "fold_add", vec![xs]);
+        match result {
+            Value::Int(n) => assert_eq!(n, 6),
+            _ => panic!("expected Int"),
+        }
+    }
+
+    // F-9: Map.merge_with — merge two maps, combining shared keys
+    #[test]
+    fn map_merge_with_basic() {
+        let src = r#"
+fn map_merge(m1: Map<String, Int>, m2: Map<String, Int>) -> Map<String, Int> {
+    Map.merge_with(|a| |b| a + b, m1, m2)
+}
+"#;
+        let mut m1 = std::collections::HashMap::new();
+        m1.insert("x".to_string(), Value::Int(10));
+        m1.insert("y".to_string(), Value::Int(5));
+        let mut m2 = std::collections::HashMap::new();
+        m2.insert("x".to_string(), Value::Int(3));
+        m2.insert("z".to_string(), Value::Int(7));
+        let result = run_fn(src, "map_merge", vec![Value::Record(m1), Value::Record(m2)]);
+        match result {
+            Value::Record(out) => {
+                // x: 10+3=13
+                assert_eq!(out.get("x"), Some(&Value::Int(13)));
+                // y only in m1
+                assert_eq!(out.get("y"), Some(&Value::Int(5)));
+                // z only in m2
+                assert_eq!(out.get("z"), Some(&Value::Int(7)));
+            }
+            _ => panic!("expected Record/Map"),
+        }
+    }
+}
+
+// ── stdlib_v91_extra_tests (v9.1.0) ───────────────────────────────────────────
+// 追加テスト: List / String / Option stdlib 関数の動作確認
+#[cfg(test)]
+mod stdlib_v91_extra_tests {
+    use crate::backend::vm::VM;
+    use crate::backend::artifact::FvcArtifact;
+    use crate::backend::codegen::codegen_program;
+    use crate::frontend::parser::Parser;
+    use crate::middle::compiler::compile_program;
+    use crate::value::Value;
+
+    fn run_fn(src: &str, fname: &str, args: Vec<Value>) -> Value {
+        let prog = Parser::parse_str(src, "test.fav").expect("parse");
+        let ir = compile_program(&prog);
+        let artifact: FvcArtifact = codegen_program(&ir);
+        let fn_idx = artifact.fn_idx_by_name(fname).expect("fn not found");
+        VM::run(&artifact, fn_idx, args).expect("VM error")
+    }
+
+    // G-1: List.sum — 整数リストの合計
+    #[test]
+    fn list_sum_basic() {
+        let src = r#"fn do_sum(xs: List<Int>) -> Int { List.sum(xs) }"#;
+        let xs = Value::List(vec![Value::Int(1), Value::Int(2), Value::Int(3), Value::Int(4)]);
+        assert_eq!(run_fn(src, "do_sum", vec![xs]), Value::Int(10));
+    }
+
+    // G-2: List.sum — 空リストは 0
+    #[test]
+    fn list_sum_empty() {
+        let src = r#"fn do_sum(xs: List<Int>) -> Int { List.sum(xs) }"#;
+        assert_eq!(run_fn(src, "do_sum", vec![Value::List(vec![])]), Value::Int(0));
+    }
+
+    // G-3: List.min — 最小値を返す
+    #[test]
+    fn list_min_basic() {
+        let src = r#"fn do_min(xs: List<Int>) -> Option<Int> { List.min(xs) }"#;
+        let xs = Value::List(vec![Value::Int(3), Value::Int(1), Value::Int(4), Value::Int(1), Value::Int(5)]);
+        let result = run_fn(src, "do_min", vec![xs]);
+        match result {
+            Value::Variant(tag, payload) => {
+                assert_eq!(tag, "some");
+                assert_eq!(payload.map(|v| *v), Some(Value::Int(1)));
+            }
+            _ => panic!("expected some(1), got {:?}", result),
+        }
+    }
+
+    // G-4: List.max — 最大値を返す
+    #[test]
+    fn list_max_basic() {
+        let src = r#"fn do_max(xs: List<Int>) -> Option<Int> { List.max(xs) }"#;
+        let xs = Value::List(vec![Value::Int(3), Value::Int(1), Value::Int(5), Value::Int(2)]);
+        let result = run_fn(src, "do_max", vec![xs]);
+        match result {
+            Value::Variant(tag, payload) => {
+                assert_eq!(tag, "some");
+                assert_eq!(payload.map(|v| *v), Some(Value::Int(5)));
+            }
+            _ => panic!("expected some(5), got {:?}", result),
+        }
+    }
+
+    // G-5: List.unique — 順序保持で重複除去
+    #[test]
+    fn list_unique_dedup() {
+        let src = r#"fn do_unique(xs: List<Int>) -> List<Int> { List.unique(xs) }"#;
+        let xs = Value::List(vec![
+            Value::Int(1), Value::Int(2), Value::Int(1), Value::Int(3), Value::Int(2),
+        ]);
+        let result = run_fn(src, "do_unique", vec![xs]);
+        match result {
+            Value::List(items) => {
+                let ints: Vec<i64> = items.into_iter().map(|v| match v {
+                    Value::Int(n) => n,
+                    _ => panic!(),
+                }).collect();
+                assert_eq!(ints, vec![1, 2, 3]);
+            }
+            _ => panic!("expected List"),
+        }
+    }
+
+    // G-6: List.take_while — 条件を満たす間だけ取得
+    #[test]
+    fn list_take_while_basic() {
+        let src = r#"fn do_tw(xs: List<Int>) -> List<Int> { List.take_while(xs, |x| x < 4) }"#;
+        let xs = Value::List(vec![Value::Int(1), Value::Int(2), Value::Int(3), Value::Int(4), Value::Int(5)]);
+        let result = run_fn(src, "do_tw", vec![xs]);
+        match result {
+            Value::List(items) => {
+                let ints: Vec<i64> = items.into_iter().map(|v| match v { Value::Int(n) => n, _ => panic!() }).collect();
+                assert_eq!(ints, vec![1, 2, 3]);
+            }
+            _ => panic!("expected List"),
+        }
+    }
+
+    // G-7: List.drop_while — 条件を満たす間スキップ
+    #[test]
+    fn list_drop_while_basic() {
+        let src = r#"fn do_dw(xs: List<Int>) -> List<Int> { List.drop_while(xs, |x| x < 3) }"#;
+        let xs = Value::List(vec![Value::Int(1), Value::Int(2), Value::Int(3), Value::Int(4)]);
+        let result = run_fn(src, "do_dw", vec![xs]);
+        match result {
+            Value::List(items) => {
+                let ints: Vec<i64> = items.into_iter().map(|v| match v { Value::Int(n) => n, _ => panic!() }).collect();
+                assert_eq!(ints, vec![3, 4]);
+            }
+            _ => panic!("expected List"),
+        }
+    }
+
+    // G-8: List.flat_map — map して concat
+    #[test]
+    fn list_flat_map_basic() {
+        let src = r#"fn do_fm(xs: List<Int>) -> List<Int> { List.flat_map(xs, |x| List.push(List.push(List.empty(), x), x * 10)) }"#;
+        let xs = Value::List(vec![Value::Int(1), Value::Int(2)]);
+        let result = run_fn(src, "do_fm", vec![xs]);
+        match result {
+            Value::List(items) => {
+                let ints: Vec<i64> = items.into_iter().map(|v| match v { Value::Int(n) => n, _ => panic!() }).collect();
+                assert_eq!(ints, vec![1, 10, 2, 20]);
+            }
+            _ => panic!("expected List"),
+        }
+    }
+
+    // G-9: String.pad_left — 左パディング
+    #[test]
+    fn string_pad_left_basic() {
+        let src = r#"fn do_pl(s: String) -> String { String.pad_left(s, 6, "0") }"#;
+        let result = run_fn(src, "do_pl", vec![Value::Str("42".to_string())]);
+        assert_eq!(result, Value::Str("000042".to_string()));
+    }
+
+    // G-10: String.pad_right — 右パディング
+    #[test]
+    fn string_pad_right_basic() {
+        let src = r#"fn do_pr(s: String) -> String { String.pad_right(s, 5, "-") }"#;
+        let result = run_fn(src, "do_pr", vec![Value::Str("hi".to_string())]);
+        assert_eq!(result, Value::Str("hi---".to_string()));
+    }
+
+    // G-11: String.repeat — 文字列を繰り返す
+    #[test]
+    fn string_repeat_basic() {
+        let src = r#"fn do_rep(s: String) -> String { String.repeat(s, 3) }"#;
+        let result = run_fn(src, "do_rep", vec![Value::Str("ab".to_string())]);
+        assert_eq!(result, Value::Str("ababab".to_string()));
+    }
+
+    // G-12: Option.map — Some 値を変換
+    #[test]
+    fn option_map_some() {
+        let src = r#"fn do_om(o: Option<Int>) -> Option<Int> { Option.map(o, |x| x * 2) }"#;
+        let opt = Value::Variant("some".to_string(), Some(Box::new(Value::Int(5))));
+        let result = run_fn(src, "do_om", vec![opt]);
+        match result {
+            Value::Variant(tag, payload) => {
+                assert_eq!(tag, "some");
+                assert_eq!(payload.map(|v| *v), Some(Value::Int(10)));
+            }
+            _ => panic!("expected some(10)"),
+        }
+    }
+
+    // G-13: Option.unwrap_or — None のときデフォルト値
+    #[test]
+    fn option_unwrap_or_none() {
+        let src = r#"fn do_uo(o: Option<Int>) -> Int { Option.unwrap_or(o, 99) }"#;
+        let none = Value::Variant("none".to_string(), None);
+        assert_eq!(run_fn(src, "do_uo", vec![none]), Value::Int(99));
+    }
+}
+
+// ── rvm_tests (v9.1.0) ────────────────────────────────────────────────────────
+// rvm 独立バイナリの動作確認
+#[cfg(test)]
+mod rvm_tests {
+    // F-1: VM_VERSION 定数の値を確認
+    #[test]
+    fn rvm_version_constant() {
+        assert_eq!(crate::backend::vm::VM_VERSION, "1.0.0");
+    }
+
+    // G-7: rvm が .fvc ファイルを正常に実行できる（compile_src_str_to_bytes → exec_fvc_file 経由）
+    #[test]
+    fn rvm_exec_fvc_file() {
+        use crate::backend::artifact::FvcArtifact;
+        use crate::backend::vm::VM;
+        use crate::value::Value;
+
+        // compile a simple program to .fvc bytes via compiler_fav_runner
+        let src = "public fn main() -> Int { 6 * 7 }";
+        let bytes = crate::compiler_fav_runner::compile_src_str_to_bytes(src)
+            .expect("compile_src_str_to_bytes");
+
+        // write bytes to a temp .fvc file
+        let tmp = std::env::temp_dir().join("rvm_exec_test.fvc");
+        std::fs::write(&tmp, &bytes).unwrap();
+
+        // re-read and execute (same path as rvm's exec_fvc_file)
+        let art = FvcArtifact::from_bytes(&bytes).expect("from_bytes");
+        let idx = art.fn_idx_by_name("main").unwrap();
+        let result = VM::run(&art, idx, vec![]).unwrap();
+        assert_eq!(result, Value::Int(42));
     }
 }

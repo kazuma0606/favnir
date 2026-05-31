@@ -23,13 +23,14 @@ while true; do
 
   # ── Run Favnir handler ───────────────────────────────────────────────────
   # stdout → Favnir's IO.println JSON output; stderr → CloudWatch Logs
+  # --legacy: use Rust pipeline (parser/checker/codegen) for stability
   OUTPUT=$(
     FAV_METHOD="$METHOD" \
     FAV_PATH="$REQ_PATH" \
     FAV_BODY="$BODY" \
     FAV_AUTH="$AUTH" \
     FAV_QUERY_VERSION="$QUERY_VERSION" \
-    /usr/local/bin/fav run /app/src/main.fav 2>/dev/null
+    /usr/local/bin/fav run --legacy /app/src/main.fav 2>/dev/stderr
   ) || OUTPUT=''
 
   # ── Convert Favnir map JSON → Lambda Function URL response ───────────────

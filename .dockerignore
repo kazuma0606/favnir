@@ -12,6 +12,8 @@ site/.next/
 # Version archives, infra, rune packages (not needed in image)
 versions/
 infra/
+# Exception: EKS toolchain image needs pipeline.fav
+!infra/e2e-demo/eks/src/
 runes/
 
 # Local dev files

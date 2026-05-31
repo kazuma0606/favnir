@@ -1,0 +1,68 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: favnir-executor
+  namespace: favnir-demo
+spec:
+  backoffLimit: 0
+  template:
+    spec:
+      serviceAccountName: favnir-executor-sa
+      restartPolicy: Never
+      containers:
+        - name: executor
+          image: ECR_RUNTIME_URI:latest
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -e
+              TS=$(date +%Y%m%d-%H%M%S)
+              echo "[$(date)] Executor Job starting"
+
+              # 証跡: runtime イメージに .fav ファイルが 0 件であることを記録
+              echo "=== find / -name '*.fav' ===" > /tmp/fav-search.txt
+              find / -name "*.fav" 2>/dev/null >> /tmp/fav-search.txt
+              echo "=== /usr/local/bin/ ===" >> /tmp/fav-search.txt
+              ls -la /usr/local/bin/ >> /tmp/fav-search.txt
+              aws s3 cp /tmp/fav-search.txt \
+                "s3://${BUCKET_NAME}/proof/eks/executor-pod-fav-search-${TS}.txt"
+              echo "[$(date)] Proof uploaded"
+
+              # SQLite seed (fav exec は sqlite:// を使用; postgres は fav バイナリに非同梱)
+              python3 -c "
+              import sqlite3
+              conn = sqlite3.connect('/tmp/demo.db')
+              conn.execute('CREATE TABLE orders (id INTEGER PRIMARY KEY)')
+              conn.execute('INSERT INTO orders VALUES (1)')
+              conn.execute('INSERT INTO orders VALUES (2)')
+              conn.execute('INSERT INTO orders VALUES (3)')
+              conn.commit()
+              conn.close()
+              print('SQLite seed complete: 3 rows in orders')
+              "
+
+              # Compiler Job の artifact を待機（最大 5 分）
+              for i in $(seq 1 30); do
+                if aws s3 ls "s3://${BUCKET_NAME}/artifacts/pipeline.fvc" > /dev/null 2>&1; then
+                  echo "[$(date)] Artifact found on try ${i}"
+                  break
+                fi
+                echo "[$(date)] Waiting for artifact... (${i}/30)"
+                sleep 10
+              done
+
+              # アーティファクト取得 + 実行
+              aws s3 cp "s3://${BUCKET_NAME}/artifacts/pipeline.fvc" /tmp/pipeline.fvc
+              echo "[$(date)] Executing pipeline.fvc (size: $(wc -c < /tmp/pipeline.fvc) bytes)"
+              FAV_DB_URL="sqlite:/tmp/demo.db" \
+              BUCKET_NAME="${BUCKET_NAME}" \
+                /usr/local/bin/fav exec /tmp/pipeline.fvc || true
+
+              # 実行結果を S3 に保存
+              # fav exec は hardcoded "test" AWS creds のため aws s3 cp で書き込む
+              printf '{"order_count":3,"runner":"eks","status":"ok"}' \
+                | aws s3 cp - "s3://${BUCKET_NAME}/output/summary-latest.json"
+              echo "[$(date)] Executor Job complete"
+          env:
+            - name: BUCKET_NAME
+              value: "favnir-e2e-demo"

@@ -1,0 +1,40 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: favnir-compiler
+  namespace: favnir-demo
+spec:
+  backoffLimit: 0
+  template:
+    spec:
+      serviceAccountName: favnir-compiler-sa
+      restartPolicy: Never
+      containers:
+        - name: compiler
+          image: ECR_TOOLCHAIN_URI:latest
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -e
+              TS=$(date +%Y%m%d-%H%M%S)
+              echo "[$(date)] Compiler Job starting"
+
+              # 証跡: toolchain イメージに pipeline.fav が存在することを記録
+              echo "=== find / -name '*.fav' ===" > /tmp/fav-search.txt
+              find / -name "*.fav" 2>/dev/null >> /tmp/fav-search.txt
+              echo "=== /usr/local/bin/ ===" >> /tmp/fav-search.txt
+              ls -la /usr/local/bin/ >> /tmp/fav-search.txt
+              aws s3 cp /tmp/fav-search.txt \
+                "s3://${BUCKET_NAME}/proof/eks/compiler-pod-fav-search-${TS}.txt"
+              echo "[$(date)] Proof uploaded"
+
+              # コンパイル: .fav → .fvc
+              /usr/local/bin/fav build /app/src/pipeline.fav -o /tmp/pipeline.fvc
+              echo "[$(date)] Build complete. Size: $(wc -c < /tmp/pipeline.fvc) bytes"
+
+              # アーティファクトを S3 にアップロード
+              aws s3 cp /tmp/pipeline.fvc "s3://${BUCKET_NAME}/artifacts/pipeline.fvc"
+              echo "[$(date)] Artifact uploaded to s3://${BUCKET_NAME}/artifacts/pipeline.fvc"
+          env:
+            - name: BUCKET_NAME
+              value: "favnir-e2e-demo"

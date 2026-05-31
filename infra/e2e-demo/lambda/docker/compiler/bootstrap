@@ -1,0 +1,29 @@
+#!/bin/bash
+# Lambda Custom Runtime bootstrap — favnir-compiler
+# Implements the Lambda Runtime API loop, calls handler.sh per invocation
+set -euo pipefail
+
+while true; do
+  # Get next invocation
+  HEADERS=$(mktemp /tmp/lambda_headers_XXXXXX)
+  curl -sS -D "$HEADERS" -o /tmp/lambda_event.json \
+    "http://${AWS_LAMBDA_RUNTIME_API}/2018-06-01/runtime/invocation/next"
+  REQUEST_ID=$(grep -i "lambda-runtime-aws-request-id:" "$HEADERS" | tr -d '\r' | awk '{print $2}')
+
+  # Run the handler
+  if bash /handler.sh > /tmp/handler_out.txt 2>&1; then
+    curl -sS -X POST \
+      "http://${AWS_LAMBDA_RUNTIME_API}/2018-06-01/runtime/invocation/${REQUEST_ID}/response" \
+      -H "Content-Type: application/json" \
+      -d '{"status":"ok"}'
+  else
+    EXIT_CODE=$?
+    OUTPUT=$(cat /tmp/handler_out.txt | tail -20 | tr -d '\000-\031' | sed 's/"/\\"/g')
+    curl -sS -X POST \
+      "http://${AWS_LAMBDA_RUNTIME_API}/2018-06-01/runtime/invocation/${REQUEST_ID}/error" \
+      -H "Content-Type: application/json" \
+      -d "{\"errorMessage\":\"handler exited ${EXIT_CODE}: ${OUTPUT}\",\"errorType\":\"HandlerError\"}"
+  fi
+
+  rm -f "$HEADERS" /tmp/handler_out.txt
+done

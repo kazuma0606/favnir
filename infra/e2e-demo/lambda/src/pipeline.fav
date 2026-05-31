@@ -1,0 +1,30 @@
+// pipeline.fav - Lambda E2E Demo
+// Compiled by favnir-lambda-compiler, executed by favnir-lambda-executor
+// Uses built-in DB / AWS primitives - no rune modules required
+
+stage FetchCount: String -> Int !Db = |conn_str| {
+  match DB.connect(conn_str) {
+    Err(_) => 0
+    Ok(handle) => match DB.query_raw(handle, "SELECT id FROM orders") {
+      Err(_) => 0
+      Ok(rows) => List.length(rows)
+    }
+  }
+}
+
+stage SaveReport: Int -> Unit !AWS = |count| {
+  match AWS.s3_put_object_raw(
+    Env.get_or("BUCKET_NAME", "favnir-e2e-demo"),
+    "output/report-latest.json",
+    String.concat(String.concat("{\"order_count\":", Int.to_string(count)), ",\"runner\":\"lambda\",\"status\":\"ok\"}")
+  ) {
+    Err(_) => ()
+    Ok(_)  => ()
+  }
+}
+
+seq PipelineDemo = FetchCount |> SaveReport
+
+fn main() -> Unit !Db !AWS {
+  PipelineDemo(Env.get_or("FAV_DB_URL", ""))
+}

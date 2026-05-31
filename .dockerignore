@@ -14,6 +14,9 @@ versions/
 infra/
 # Exception: EKS toolchain image needs pipeline.fav
 !infra/e2e-demo/eks/src/
+# Exception: Lambda images need src/ and docker/ files
+!infra/e2e-demo/lambda/src/
+!infra/e2e-demo/lambda/docker/
 runes/
 
 # Local dev files

@@ -860,7 +860,6 @@ pub fn cmd_run(file: Option<&str>, db_url: Option<&str>, legacy: bool) {
         } else {
             run_with_favnir_pipeline(&source_path, db_url);
         }
-        return;
     } else {
         // Rust pipeline (--legacy)
         let (run_program, source_path2) = load_and_check_program(file);

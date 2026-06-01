@@ -26,6 +26,7 @@ pub enum Effect {
     DbAdmin,  // DDL（CREATE/DROP/ALTER）系（v7.0.0）
     Network,
     Http,
+    Llm,
     Rpc,
     File,
     Checkpoint,

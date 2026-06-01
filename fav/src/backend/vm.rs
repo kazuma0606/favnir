@@ -4345,6 +4345,198 @@ fn err_vm(value: VMValue) -> VMValue {
     VMValue::Variant("err".to_string(), Some(Box::new(value)))
 }
 
+// ── LLM helpers (v9.6.0) ─────────────────────────────────────────────────────
+
+/// Call the LLM provider (Anthropic or OpenAI) with a single user prompt.
+/// Reads LLM_PROVIDER (default "anthropic"), LLM_MODEL, and the provider API key
+/// from the environment. Returns ok_vm(text) or err_vm(msg).
+#[cfg(not(target_arch = "wasm32"))]
+fn llm_call_complete(prompt: &str) -> VMValue {
+    let provider = std::env::var("LLM_PROVIDER").unwrap_or_else(|_| "anthropic".to_string());
+    match provider.as_str() {
+        "openai" => {
+            let api_key = match std::env::var("OPENAI_API_KEY") {
+                Ok(k) => k,
+                Err(_) => return err_vm(VMValue::Str("OPENAI_API_KEY is not set".to_string())),
+            };
+            let model = std::env::var("LLM_MODEL").unwrap_or_else(|_| "gpt-4o".to_string());
+            let body = serde_json::json!({
+                "model": model,
+                "messages": [{"role": "user", "content": prompt}]
+            });
+            match ureq::post("https://api.openai.com/v1/chat/completions")
+                .set("Authorization", &format!("Bearer {}", api_key))
+                .set("Content-Type", "application/json")
+                .send_string(&body.to_string())
+            {
+                Ok(resp) => {
+                    let text = match resp.into_string() {
+                        Ok(t) => t,
+                        Err(e) => return err_vm(VMValue::Str(e.to_string())),
+                    };
+                    match serde_json::from_str::<serde_json::Value>(&text) {
+                        Ok(v) => {
+                            let content = v["choices"][0]["message"]["content"]
+                                .as_str()
+                                .unwrap_or("")
+                                .to_string();
+                            ok_vm(VMValue::Str(content))
+                        }
+                        Err(e) => err_vm(VMValue::Str(e.to_string())),
+                    }
+                }
+                Err(ureq::Error::Status(_, resp)) => {
+                    let msg = resp.into_string().unwrap_or_default();
+                    err_vm(VMValue::Str(msg))
+                }
+                Err(ureq::Error::Transport(e)) => err_vm(VMValue::Str(e.to_string())),
+            }
+        }
+        _ => {
+            // Default: anthropic
+            let api_key = match std::env::var("ANTHROPIC_API_KEY") {
+                Ok(k) => k,
+                Err(_) => {
+                    return err_vm(VMValue::Str("ANTHROPIC_API_KEY is not set".to_string()))
+                }
+            };
+            let model =
+                std::env::var("LLM_MODEL").unwrap_or_else(|_| "claude-opus-4-6".to_string());
+            let body = serde_json::json!({
+                "model": model,
+                "max_tokens": 4096,
+                "messages": [{"role": "user", "content": prompt}]
+            });
+            match ureq::post("https://api.anthropic.com/v1/messages")
+                .set("x-api-key", &api_key)
+                .set("anthropic-version", "2023-06-01")
+                .set("Content-Type", "application/json")
+                .send_string(&body.to_string())
+            {
+                Ok(resp) => {
+                    let text = match resp.into_string() {
+                        Ok(t) => t,
+                        Err(e) => return err_vm(VMValue::Str(e.to_string())),
+                    };
+                    match serde_json::from_str::<serde_json::Value>(&text) {
+                        Ok(v) => {
+                            let content = v["content"][0]["text"]
+                                .as_str()
+                                .unwrap_or("")
+                                .to_string();
+                            ok_vm(VMValue::Str(content))
+                        }
+                        Err(e) => err_vm(VMValue::Str(e.to_string())),
+                    }
+                }
+                Err(ureq::Error::Status(_, resp)) => {
+                    let msg = resp.into_string().unwrap_or_default();
+                    err_vm(VMValue::Str(msg))
+                }
+                Err(ureq::Error::Transport(e)) => err_vm(VMValue::Str(e.to_string())),
+            }
+        }
+    }
+}
+
+/// Call the LLM provider with a JSON-encoded messages array.
+#[cfg(not(target_arch = "wasm32"))]
+fn llm_call_chat(messages_json: &str) -> VMValue {
+    let messages: serde_json::Value = match serde_json::from_str(messages_json) {
+        Ok(v) => v,
+        Err(e) => {
+            return err_vm(VMValue::Str(format!(
+                "Llm.chat_raw: invalid messages JSON: {}",
+                e
+            )))
+        }
+    };
+    let provider = std::env::var("LLM_PROVIDER").unwrap_or_else(|_| "anthropic".to_string());
+    match provider.as_str() {
+        "openai" => {
+            let api_key = match std::env::var("OPENAI_API_KEY") {
+                Ok(k) => k,
+                Err(_) => return err_vm(VMValue::Str("OPENAI_API_KEY is not set".to_string())),
+            };
+            let model = std::env::var("LLM_MODEL").unwrap_or_else(|_| "gpt-4o".to_string());
+            let body = serde_json::json!({
+                "model": model,
+                "messages": messages
+            });
+            match ureq::post("https://api.openai.com/v1/chat/completions")
+                .set("Authorization", &format!("Bearer {}", api_key))
+                .set("Content-Type", "application/json")
+                .send_string(&body.to_string())
+            {
+                Ok(resp) => {
+                    let text = match resp.into_string() {
+                        Ok(t) => t,
+                        Err(e) => return err_vm(VMValue::Str(e.to_string())),
+                    };
+                    match serde_json::from_str::<serde_json::Value>(&text) {
+                        Ok(v) => {
+                            let content = v["choices"][0]["message"]["content"]
+                                .as_str()
+                                .unwrap_or("")
+                                .to_string();
+                            ok_vm(VMValue::Str(content))
+                        }
+                        Err(e) => err_vm(VMValue::Str(e.to_string())),
+                    }
+                }
+                Err(ureq::Error::Status(_, resp)) => {
+                    let msg = resp.into_string().unwrap_or_default();
+                    err_vm(VMValue::Str(msg))
+                }
+                Err(ureq::Error::Transport(e)) => err_vm(VMValue::Str(e.to_string())),
+            }
+        }
+        _ => {
+            let api_key = match std::env::var("ANTHROPIC_API_KEY") {
+                Ok(k) => k,
+                Err(_) => {
+                    return err_vm(VMValue::Str("ANTHROPIC_API_KEY is not set".to_string()))
+                }
+            };
+            let model =
+                std::env::var("LLM_MODEL").unwrap_or_else(|_| "claude-opus-4-6".to_string());
+            let body = serde_json::json!({
+                "model": model,
+                "max_tokens": 4096,
+                "messages": messages
+            });
+            match ureq::post("https://api.anthropic.com/v1/messages")
+                .set("x-api-key", &api_key)
+                .set("anthropic-version", "2023-06-01")
+                .set("Content-Type", "application/json")
+                .send_string(&body.to_string())
+            {
+                Ok(resp) => {
+                    let text = match resp.into_string() {
+                        Ok(t) => t,
+                        Err(e) => return err_vm(VMValue::Str(e.to_string())),
+                    };
+                    match serde_json::from_str::<serde_json::Value>(&text) {
+                        Ok(v) => {
+                            let content = v["content"][0]["text"]
+                                .as_str()
+                                .unwrap_or("")
+                                .to_string();
+                            ok_vm(VMValue::Str(content))
+                        }
+                        Err(e) => err_vm(VMValue::Str(e.to_string())),
+                    }
+                }
+                Err(ureq::Error::Status(_, resp)) => {
+                    let msg = resp.into_string().unwrap_or_default();
+                    err_vm(VMValue::Str(msg))
+                }
+                Err(ureq::Error::Transport(e)) => err_vm(VMValue::Str(e.to_string())),
+            }
+        }
+    }
+}
+
 fn stringify_json_scalar(value: &SerdeJsonValue) -> Option<String> {
     match value {
         SerdeJsonValue::Null => Some(String::new()),
@@ -8764,6 +8956,41 @@ fn vm_call_builtin(
                 Err(ureq::Error::Transport(err)) => Ok(err_vm(VMValue::Str(err.to_string()))),
             }
         }
+
+        // ── Llm.complete_raw / Llm.chat_raw / Llm.extract_raw (v9.6.0) ─────────
+        "Llm.complete_raw" => {
+            let prompt = vm_string(
+                args.into_iter()
+                    .next()
+                    .ok_or_else(|| "Llm.complete_raw requires a prompt argument".to_string())?,
+                "Llm.complete_raw",
+            )?;
+            Ok(llm_call_complete(&prompt))
+        }
+        "Llm.chat_raw" => {
+            let messages_json = vm_string(
+                args.into_iter()
+                    .next()
+                    .ok_or_else(|| "Llm.chat_raw requires a messages argument".to_string())?,
+                "Llm.chat_raw",
+            )?;
+            Ok(llm_call_chat(&messages_json))
+        }
+        "Llm.extract_raw" => {
+            if args.len() != 3 {
+                return Err("Llm.extract_raw requires 3 arguments".to_string());
+            }
+            let mut it = args.into_iter();
+            let schema_name = vm_string(it.next().unwrap(), "Llm.extract_raw schema_name")?;
+            let prompt = vm_string(it.next().unwrap(), "Llm.extract_raw prompt")?;
+            let data = vm_string(it.next().unwrap(), "Llm.extract_raw data")?;
+            let full_prompt = format!(
+                "Extract data as JSON matching the schema '{}'. {}\n\nData:\n{}",
+                schema_name, prompt, data
+            );
+            Ok(llm_call_complete(&full_prompt))
+        }
+
         "Http.put_raw" => {
             if args.len() != 3 {
                 return Err("Http.put_raw requires 3 arguments".to_string());

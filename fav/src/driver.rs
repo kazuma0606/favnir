@@ -9931,6 +9931,7 @@ fn format_effects(effects: &[ast::Effect]) -> String {
             DbAdmin => "!DbAdmin".into(),
             Network => "!Network".into(),
             Http => "!Http".into(),
+            Llm => "!Llm".into(),
             Rpc => "!Rpc".into(),
             File => "!File".into(),
             Checkpoint => "!Checkpoint".into(),
@@ -9953,6 +9954,7 @@ fn effect_json_name(effect: &ast::Effect) -> String {
         ast::Effect::DbAdmin => "DbAdmin".into(),
         ast::Effect::Network => "Network".into(),
         ast::Effect::Http => "Http".into(),
+        ast::Effect::Llm => "Llm".into(),
         ast::Effect::Rpc => "Rpc".into(),
         ast::Effect::File => "File".into(),
         ast::Effect::Checkpoint => "Checkpoint".into(),
@@ -18769,6 +18771,69 @@ fn test_read(path: String) -> String {
             }
             other => panic!("expected Str, got {:?}", other),
         }
+    }
+}
+
+// ── v960_tests (v9.6.0) — LLM Rune / !Llm effect ────────────────────────────
+#[cfg(test)]
+mod v960_tests {
+    use super::tests::run_fav_test_file_with_runes;
+    use crate::lineage::lineage_analysis;
+
+    #[test]
+    fn llm_effect_llm_accepted() {
+        // !Llm 宣言関数内で Llm.* 呼び出しが E0003 を出さないこと
+        let src = r#"
+public fn ask(prompt: String) -> Result<String, String> !Llm {
+    Llm.complete_raw(prompt)
+}
+"#;
+        let errors = super::check_source_str(src);
+        let e0003: Vec<_> = errors.iter().filter(|e| e.code == "E0003").collect();
+        assert!(e0003.is_empty(), "unexpected E0003 with !Llm: {:?}", e0003);
+    }
+
+    #[test]
+    fn llm_effect_missing_errors() {
+        // !Llm 未宣言で Llm.complete_raw を呼ぶと E0003
+        let src = r#"
+public fn ask(prompt: String) -> Result<String, String> {
+    Llm.complete_raw(prompt)
+}
+"#;
+        let errors = super::check_source_str(src);
+        let has_e0003 = errors.iter().any(|e| e.code == "E0003");
+        assert!(has_e0003, "expected E0003 for missing !Llm effect, got: {:?}", errors);
+    }
+
+    #[test]
+    fn lineage_llm_effect_in_sources() {
+        use crate::frontend::parser::Parser;
+        let src = r#"
+stage AskLlm: String -> String !Llm = |prompt| {
+    match Llm.complete_raw(prompt) {
+        Ok(text) => text
+        Err(_) => ""
+    }
+}
+seq Pipeline = AskLlm
+"#;
+        let prog = Parser::parse_str(src, "test").unwrap();
+        let report = lineage_analysis(&prog);
+        let text = crate::lineage::render_lineage_text(&report, "test");
+        assert!(text.contains("!Llm"), "expected !Llm in lineage: {}", text);
+    }
+
+    #[test]
+    fn llm_rune_test_file_passes() {
+        // API キーを確実に unset してテスト（no_key_is_err アサーションが通る）
+        unsafe {
+            std::env::remove_var("ANTHROPIC_API_KEY");
+            std::env::remove_var("OPENAI_API_KEY");
+        }
+        let results = run_fav_test_file_with_runes("runes/llm/llm.test.fav");
+        let failures: Vec<_> = results.iter().filter(|(_, ok, _)| !ok).collect();
+        assert!(failures.is_empty(), "llm.test.fav failures: {:?}", failures);
     }
 }
 

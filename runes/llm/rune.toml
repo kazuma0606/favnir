@@ -1,0 +1,5 @@
+[rune]
+name = "llm"
+version = "9.6.0"
+entry = "llm.fav"
+description = "LLM rune — Anthropic Claude / OpenAI 統一インターフェース（!Llm エフェクト）"

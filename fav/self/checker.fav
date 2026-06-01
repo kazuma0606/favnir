@@ -359,6 +359,13 @@ fn grpc_fn(fname: String) -> String {
     else { "Unknown" }
 }
 
+fn llm_fn(fname: String) -> String {
+    if fname == "complete_raw"     { "Result" }
+    else if fname == "chat_raw"    { "Result" }
+    else if fname == "extract_raw" { "Result" }
+    else { "Result" }
+}
+
 fn str_fn(fname: String) -> String {
     if fname == "concat"            { "String" }
     else { if fname == "length"          { "Int" }
@@ -493,6 +500,7 @@ fn builtin_ret_ty(ns: String, fname: String) -> String {
     else if ns == "Gen"      { gen_fn(fname) }
     else if ns == "Http"     { http_fn(fname) }
     else if ns == "Grpc"     { grpc_fn(fname) }
+    else if ns == "Llm"      { llm_fn(fname) }
     else { "Unknown" }
 }
 
@@ -507,6 +515,7 @@ fn ns_to_effect(ns: String) -> String {
     else if ns == "Gen"      { "Gen" }
     else if ns == "Http"     { "Http" }
     else if ns == "Grpc"     { "Rpc" }
+    else if ns == "Llm"      { "Llm" }
     else { "" }
 }
 

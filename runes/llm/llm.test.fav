@@ -1,0 +1,18 @@
+// runes/llm/llm.test.fav — llm rune テスト (v9.6.0)
+// API キーが設定されていない環境での動作確認
+import "llm"
+
+test "llm_complete_no_key_is_err" {
+    bind result <- llm.complete("Hello")
+    assert(Result.is_err(result))
+}
+
+test "llm_chat_no_key_is_err" {
+    bind result <- llm.chat("[{\"role\":\"user\",\"content\":\"Hello\"}]")
+    assert(Result.is_err(result))
+}
+
+test "llm_extract_no_key_is_err" {
+    bind result <- llm.extract<String>("Extract the main topic.", "The sky is blue.")
+    assert(Result.is_err(result))
+}

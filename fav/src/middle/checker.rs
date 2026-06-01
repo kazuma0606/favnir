@@ -1272,6 +1272,7 @@ impl Checker {
             "Checkpoint",
             "Parquet",
             "Grpc",
+            "Llm",
             "Validate",
             "DuckDb",
             "Crypto",
@@ -2120,6 +2121,7 @@ impl Checker {
             "DbAdmin",
             "Network",
             "Http",
+            "Llm",
             "Rpc",
             "File",
             "Checkpoint",
@@ -4466,6 +4468,7 @@ impl Checker {
                         | "Checkpoint"
                         | "Parquet"
                         | "Grpc"
+                        | "Llm"
                         | "Stream"
                 ) =>
             {
@@ -4541,6 +4544,16 @@ impl Checker {
             self.type_error(
                 "E0108",
                 "Http.* call requires `!Network` or `!Http` effect on enclosing fn/trf",
+                span,
+            );
+        }
+    }
+
+    fn require_llm_effect(&mut self, span: &Span) {
+        if !self.has_effect(|e| matches!(e, Effect::Llm)) {
+            self.type_error(
+                "E0311",
+                "Llm.* call requires `!Llm` effect on enclosing fn/trf",
                 span,
             );
         }
@@ -5308,6 +5321,29 @@ impl Checker {
                 Some(Type::Unit)
             }
             ("Http", "check_basic_auth") => Some(Type::Bool),
+
+            // Llm (v9.6.0) — require !Llm effect
+            ("Llm", "complete_raw") => {
+                self.require_llm_effect(span);
+                Some(Type::Result(
+                    Box::new(Type::String),
+                    Box::new(Type::String),
+                ))
+            }
+            ("Llm", "chat_raw") => {
+                self.require_llm_effect(span);
+                Some(Type::Result(
+                    Box::new(Type::String),
+                    Box::new(Type::String),
+                ))
+            }
+            ("Llm", "extract_raw") => {
+                self.require_llm_effect(span);
+                Some(Type::Result(
+                    Box::new(Type::String),
+                    Box::new(Type::String),
+                ))
+            }
 
             ("Grpc", "serve_raw") => {
                 self.require_rpc_effect(span);

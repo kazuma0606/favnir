@@ -78,6 +78,9 @@ pub fn reachability_analysis(entry: &str, program: &IRProgram) -> ReachabilityRe
                 Effect::Http => {
                     effects_required.insert("Http".to_string());
                 }
+                Effect::Llm => {
+                    effects_required.insert("Llm".to_string());
+                }
                 Effect::Rpc => {
                     effects_required.insert("Rpc".to_string());
                 }

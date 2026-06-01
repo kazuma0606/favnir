@@ -1,0 +1,16 @@
+// runes/llm/llm.fav — Favnir llm rune public API (v9.6.0)
+// Anthropic Claude / OpenAI 統一 LLM インターフェース。
+//
+// 使用例:
+//   import rune "llm"
+//
+//   type Summary = { title: String  points: List<String> }
+//
+//   fn summarize(text: String) -> Result<Summary, String> !Llm {
+//       llm.extract<Summary>(
+//           "Summarize the following text into a title and key points.",
+//           text
+//       )
+//   }
+
+use client.{ complete, chat, extract }

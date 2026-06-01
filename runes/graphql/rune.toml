@@ -1,0 +1,5 @@
+[rune]
+name = "graphql"
+version = "9.5.0"
+entry = "graphql.fav"
+description = "GraphQL client rune — HTTP POST ベースの query / mutate"

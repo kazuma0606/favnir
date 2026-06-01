@@ -1,4 +1,4 @@
-// runes/http/request.fav — HTTP request helpers (v4.1.0)
+// runes/http/request.fav — HTTP request helpers (v4.1.0 / v9.5.0 additions)
 
 public fn get(url: String) -> Result<HttpResponse, HttpError> !Network {
     Http.get_raw(url)
@@ -15,4 +15,44 @@ public fn post_json(url: String, body: String) -> Result<HttpResponse, HttpError
 public fn get_body(url: String) -> Result<String, HttpError> !Network {
     bind result <- Http.get_raw(url)
     Result.map(result, |resp| resp.body)
+}
+
+// ── v9.5.0 additions — !Http エフェクト対応 typed 関数 ────────────────────────
+
+// get_text — HTTP GET してボディを String として返す（エラー型も String）
+public fn get_text(url: String) -> Result<String, String> !Http {
+    Http.get_body_raw(url)
+}
+
+// get_json<T> — HTTP GET してレスポンスを型 T に変換
+// builtin 直接呼び出し（他ジェネリック関数を呼ぶと Rust pipeline で stack overflow）
+public fn get_json<T>(url: String) -> Result<T, String> !Http {
+    match Http.get_body_raw(url) {
+        Err(e) => Result.err(e)
+        Ok(body) =>
+            match Json.parse_raw(body) {
+                Err(e) => Result.err(String.concat("get_json: ", e))
+                Ok(raw) =>
+                    match Schema.adapt_one(raw, type_name_of<T>()) {
+                        Err(_) => Result.err("get_json: schema error")
+                        Ok(v)  => Result.ok(v)
+                    }
+            }
+    }
+}
+
+// post_json_typed<T, R> — 型 T を JSON POST して、レスポンスを型 R に変換
+public fn post_json_typed<T, R>(url: String, body: T) -> Result<R, String> !Http {
+    match Http.post_body_raw(url, Schema.to_json(body, type_name_of<T>()), "application/json") {
+        Err(e) => Result.err(e)
+        Ok(resp_body) =>
+            match Json.parse_raw(resp_body) {
+                Err(e) => Result.err(String.concat("post_json_typed: ", e))
+                Ok(raw) =>
+                    match Schema.adapt_one(raw, type_name_of<R>()) {
+                        Err(_) => Result.err("post_json_typed: schema error")
+                        Ok(v)  => Result.ok(v)
+                    }
+            }
+    }
 }

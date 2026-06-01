@@ -1,0 +1,17 @@
+// runes/graphql/graphql.test.fav — graphql rune テスト (v9.5.0)
+import "graphql"
+
+test "graphql_query_bad_url_is_err" {
+    bind result <- graphql.query<String>("http://127.0.0.1:9", "{ hello }")
+    assert(Result.is_err(result))
+}
+
+test "graphql_mutate_bad_url_is_err" {
+    bind result <- graphql.mutate<String>("http://127.0.0.1:9", "mutation { noop }")
+    assert(Result.is_err(result))
+}
+
+test "graphql_query_invalid_url_is_err" {
+    bind result <- graphql.query<String>("://bad-url", "{ hello }")
+    assert(Result.is_err(result))
+}

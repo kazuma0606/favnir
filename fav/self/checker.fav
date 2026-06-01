@@ -339,6 +339,26 @@ fn gen_fn(fname: String) -> String {
     else { "Unknown" }
 }
 
+fn http_fn(fname: String) -> String {
+    if fname == "get_raw"            { "Result" }
+    else if fname == "post_raw"      { "Result" }
+    else if fname == "put_raw"       { "Result" }
+    else if fname == "delete_raw"    { "Result" }
+    else if fname == "patch_raw"     { "Result" }
+    else if fname == "get_body_raw"  { "Result" }
+    else if fname == "post_body_raw" { "Result" }
+    else { "Result" }
+}
+
+fn grpc_fn(fname: String) -> String {
+    if fname == "call_raw"             { "Result" }
+    else if fname == "call_typed_raw"  { "Result" }
+    else if fname == "call_stream_raw" { "List" }
+    else if fname == "encode_raw"      { "String" }
+    else if fname == "decode_raw"      { "Map" }
+    else { "Unknown" }
+}
+
 fn str_fn(fname: String) -> String {
     if fname == "concat"            { "String" }
     else { if fname == "length"          { "Int" }
@@ -471,6 +491,8 @@ fn builtin_ret_ty(ns: String, fname: String) -> String {
     else if ns == "Queue"    { queue_fn(fname) }
     else if ns == "Email"    { email_fn(fname) }
     else if ns == "Gen"      { gen_fn(fname) }
+    else if ns == "Http"     { http_fn(fname) }
+    else if ns == "Grpc"     { grpc_fn(fname) }
     else { "Unknown" }
 }
 
@@ -483,6 +505,8 @@ fn ns_to_effect(ns: String) -> String {
     else if ns == "Queue"    { "Queue" }
     else if ns == "Email"    { "Email" }
     else if ns == "Gen"      { "Gen" }
+    else if ns == "Http"     { "Http" }
+    else if ns == "Grpc"     { "Rpc" }
     else { "" }
 }
 

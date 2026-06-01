@@ -8717,6 +8717,53 @@ fn vm_call_builtin(
                 }
             }
         }
+        // ── Http.get_body_raw / Http.post_body_raw (v9.5.0) ────────────────────
+        "Http.get_body_raw" => {
+            let url = vm_string(
+                args.into_iter()
+                    .next()
+                    .ok_or_else(|| "Http.get_body_raw requires a URL argument".to_string())?,
+                "Http.get_body_raw",
+            )?;
+            match ureq::get(&url).call() {
+                Ok(resp) => {
+                    let body = resp
+                        .into_string()
+                        .map_err(|e| format!("Http.get_body_raw read error: {}", e))?;
+                    Ok(ok_vm(VMValue::Str(body)))
+                }
+                Err(ureq::Error::Status(_, resp)) => {
+                    let msg = resp.into_string().unwrap_or_default();
+                    Ok(err_vm(VMValue::Str(msg)))
+                }
+                Err(ureq::Error::Transport(err)) => Ok(err_vm(VMValue::Str(err.to_string()))),
+            }
+        }
+        "Http.post_body_raw" => {
+            if args.len() != 3 {
+                return Err("Http.post_body_raw requires 3 arguments".to_string());
+            }
+            let mut it = args.into_iter();
+            let url = vm_string(it.next().unwrap(), "Http.post_body_raw url")?;
+            let body = vm_string(it.next().unwrap(), "Http.post_body_raw body")?;
+            let content_type = vm_string(it.next().unwrap(), "Http.post_body_raw content_type")?;
+            match ureq::post(&url)
+                .set("Content-Type", &content_type)
+                .send_string(&body)
+            {
+                Ok(resp) => {
+                    let resp_body = resp
+                        .into_string()
+                        .map_err(|e| format!("Http.post_body_raw read error: {}", e))?;
+                    Ok(ok_vm(VMValue::Str(resp_body)))
+                }
+                Err(ureq::Error::Status(_, resp)) => {
+                    let msg = resp.into_string().unwrap_or_default();
+                    Ok(err_vm(VMValue::Str(msg)))
+                }
+                Err(ureq::Error::Transport(err)) => Ok(err_vm(VMValue::Str(err.to_string()))),
+            }
+        }
         "Http.put_raw" => {
             if args.len() != 3 {
                 return Err("Http.put_raw requires 3 arguments".to_string());

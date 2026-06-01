@@ -54,6 +54,7 @@ fn format_effects(effects: &[ast::Effect]) -> String {
             DbWrite => "!DbWrite".into(),
             DbAdmin => "!DbAdmin".into(),
             Network => "!Network".into(),
+            Http => "!Http".into(),
             Rpc => "!Rpc".into(),
             File => "!File".into(),
             Checkpoint => "!Checkpoint".into(),

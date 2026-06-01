@@ -2119,6 +2119,7 @@ impl Checker {
             "DbWrite",
             "DbAdmin",
             "Network",
+            "Http",
             "Rpc",
             "File",
             "Checkpoint",
@@ -4536,10 +4537,10 @@ impl Checker {
     }
 
     fn require_network_effect(&mut self, span: &Span) {
-        if !self.has_effect(|e| matches!(e, Effect::Network)) {
+        if !self.has_effect(|e| matches!(e, Effect::Network | Effect::Http)) {
             self.type_error(
                 "E0108",
-                "Http.* call requires `!Network` effect on enclosing fn/trf",
+                "Http.* call requires `!Network` or `!Http` effect on enclosing fn/trf",
                 span,
             );
         }
@@ -5291,6 +5292,14 @@ impl Checker {
                 Some(Type::Result(
                     Box::new(Type::Named("HttpResponse".into(), vec![])),
                     Box::new(Type::Named("HttpError".into(), vec![])),
+                ))
+            }
+            // Http v9.5.0 — body-only primitives (return Result<String, String>)
+            ("Http", "get_body_raw") | ("Http", "post_body_raw") => {
+                self.require_network_effect(span);
+                Some(Type::Result(
+                    Box::new(Type::String),
+                    Box::new(Type::String),
                 ))
             }
             ("Http", "serve_raw") => {

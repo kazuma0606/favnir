@@ -75,6 +75,9 @@ pub fn reachability_analysis(entry: &str, program: &IRProgram) -> ReachabilityRe
                 Effect::Network => {
                     effects_required.insert("Network".to_string());
                 }
+                Effect::Http => {
+                    effects_required.insert("Http".to_string());
+                }
                 Effect::Rpc => {
                     effects_required.insert("Rpc".to_string());
                 }

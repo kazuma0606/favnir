@@ -1122,6 +1122,10 @@ impl Parser {
                         self.advance();
                         Effect::Network
                     }
+                    "Http" => {
+                        self.advance();
+                        Effect::Http
+                    }
                     "Rpc" => {
                         self.advance();
                         Effect::Rpc

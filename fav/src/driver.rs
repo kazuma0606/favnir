@@ -9930,6 +9930,7 @@ fn format_effects(effects: &[ast::Effect]) -> String {
             DbWrite => "!DbWrite".into(),
             DbAdmin => "!DbAdmin".into(),
             Network => "!Network".into(),
+            Http => "!Http".into(),
             Rpc => "!Rpc".into(),
             File => "!File".into(),
             Checkpoint => "!Checkpoint".into(),
@@ -9951,6 +9952,7 @@ fn effect_json_name(effect: &ast::Effect) -> String {
         ast::Effect::DbWrite => "DbWrite".into(),
         ast::Effect::DbAdmin => "DbAdmin".into(),
         ast::Effect::Network => "Network".into(),
+        ast::Effect::Http => "Http".into(),
         ast::Effect::Rpc => "Rpc".into(),
         ast::Effect::File => "File".into(),
         ast::Effect::Checkpoint => "Checkpoint".into(),
@@ -18767,5 +18769,86 @@ fn test_read(path: String) -> String {
             }
             other => panic!("expected Str, got {:?}", other),
         }
+    }
+}
+
+// ── v950_tests (v9.5.0) — HTTP !Http effect / grpc typed / graphql rune ───────
+#[cfg(test)]
+mod v950_tests {
+    use super::tests::run_fav_test_file_with_runes;
+    use crate::lineage::lineage_analysis;
+
+    #[test]
+    fn http_effect_http_accepted() {
+        // !Http 宣言関数内で Http.* 呼び出しが E0003 を出さないこと
+        let src = r#"
+public fn fetch(url: String) -> Result<String, String> !Http {
+    Http.get_body_raw(url)
+}
+"#;
+        let errors = super::check_source_str(src);
+        let e0003: Vec<_> = errors.iter().filter(|e| e.code == "E0003").collect();
+        assert!(e0003.is_empty(), "unexpected E0003 with !Http: {:?}", e0003);
+    }
+
+    #[test]
+    fn http_effect_missing_errors() {
+        // !Http / !Network いずれも未宣言で Http.get_body_raw を呼ぶと E0003
+        let src = r#"
+public fn fetch(url: String) -> Result<String, String> {
+    Http.get_body_raw(url)
+}
+"#;
+        let errors = super::check_source_str(src);
+        let has_e0003 = errors.iter().any(|e| e.code == "E0003");
+        assert!(has_e0003, "expected E0003 for missing !Http effect, got: {:?}", errors);
+    }
+
+    #[test]
+    fn http_get_body_raw_err_on_bad_url() {
+        use crate::backend::artifact::FvcArtifact;
+        use crate::backend::codegen::codegen_program;
+        use crate::backend::vm::VM;
+        use crate::frontend::parser::Parser;
+        use crate::middle::compiler::compile_program;
+        use crate::value::Value;
+
+        let src = r#"fn test_get(url: String) -> String {
+    match Http.get_body_raw(url) {
+        Ok(_) => "ok"
+        Err(_) => "err"
+    }
+}"#;
+        let prog = Parser::parse_str(src, "test").unwrap();
+        let ir = compile_program(&prog);
+        let artifact: FvcArtifact = codegen_program(&ir);
+        let fn_idx = artifact.fn_idx_by_name("test_get").expect("fn not found");
+        let result = VM::run(&artifact, fn_idx, vec![Value::Str("://bad-url".into())]).unwrap();
+        assert_eq!(result, Value::Str("err".into()));
+    }
+
+    #[test]
+    fn lineage_http_effect_in_sources() {
+        use crate::frontend::parser::Parser;
+        let src = r#"
+stage FetchData: String -> String !Http = |url| {
+    match Http.get_body_raw(url) {
+        Ok(body) => body
+        Err(_) => ""
+    }
+}
+seq Pipeline = FetchData
+"#;
+        let prog = Parser::parse_str(src, "test").unwrap();
+        let report = lineage_analysis(&prog);
+        let text = crate::lineage::render_lineage_text(&report, "test");
+        assert!(text.contains("!Http"), "expected !Http in lineage: {}", text);
+    }
+
+    #[test]
+    fn graphql_rune_test_file_passes() {
+        let results = run_fav_test_file_with_runes("runes/graphql/graphql.test.fav");
+        let failures: Vec<_> = results.iter().filter(|(_, ok, _)| !ok).collect();
+        assert!(failures.is_empty(), "graphql.test.fav failures: {:?}", failures);
     }
 }

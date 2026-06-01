@@ -25,6 +25,7 @@ pub enum Effect {
     DbWrite,  // INSERT/UPDATE/DELETE 系（v7.0.0）
     DbAdmin,  // DDL（CREATE/DROP/ALTER）系（v7.0.0）
     Network,
+    Http,
     Rpc,
     File,
     Checkpoint,

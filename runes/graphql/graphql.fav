@@ -1,0 +1,16 @@
+// runes/graphql/graphql.fav — Favnir graphql rune public API (v9.5.0)
+// GraphQL クライアント: HTTP POST ベース、!Http エフェクト。
+//
+// 使用例:
+//   import rune "graphql"
+//
+//   type OrderData = { id: String  item: String  amount: Float }
+//
+//   stage FetchOrder: String -> OrderData !Http = |order_id| {
+//       graphql.query<OrderData>(
+//           "https://api.example.com/graphql",
+//           String.concat("{ order(id: \"", String.concat(order_id, "\") { id item amount } }"))
+//       )
+//   }
+
+use client.{ query, mutate }

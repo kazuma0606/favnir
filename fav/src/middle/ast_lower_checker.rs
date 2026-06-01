@@ -373,6 +373,10 @@ fn lower_type_def(td: &ast::TypeDef) -> Value {
             // Type alias — treat as opaque record-like type
             (true, vec![], vec![])
         }
+        ast::TypeBody::Wrapper(_inner) => {
+            // Handled separately via lower_item → IWrapper
+            (false, vec![], vec![])
+        }
     };
     let type_params: Vec<Value> = td.type_params.iter().map(|s| sv(s)).collect();
     vm_record(vec![
@@ -381,6 +385,29 @@ fn lower_type_def(td: &ast::TypeDef) -> Value {
         ("type_params", vm_list(type_params)),
         ("variants", vm_list(variants)),
         ("fields", vm_list(fields)),
+    ])
+}
+
+// ── WrapperDef ────────────────────────────────────────────────────────────────
+
+fn lower_wrapper_def(td: &ast::TypeDef, inner: &ast::TypeExpr) -> Value {
+    let inner_str = match inner {
+        ast::TypeExpr::Named(name, _, _) => name.clone(),
+        ast::TypeExpr::Optional(inner, _) => {
+            format!("Option<{}>", match inner.as_ref() {
+                ast::TypeExpr::Named(n, _, _) => n.clone(),
+                _ => "Unknown".to_string(),
+            })
+        }
+        _ => "Unknown".to_string(),
+    };
+    let has_where = !td.invariants.is_empty();
+    let with_impls: Vec<Value> = td.with_interfaces.iter().map(|s| sv(s)).collect();
+    vm_record(vec![
+        ("name", sv(&td.name)),
+        ("inner", sv(&inner_str)),
+        ("has_where", Value::Bool(has_where)),
+        ("with_impls", vm_list(with_impls)),
     ])
 }
 
@@ -395,7 +422,12 @@ fn lower_test_def(td: &ast::TestDef) -> Value {
 fn lower_item(item: &ast::Item) -> Option<Value> {
     match item {
         ast::Item::FnDef(fd) => Some(v1("IFn", lower_fn_def(fd))),
-        ast::Item::TypeDef(td) => Some(v1("IType", lower_type_def(td))),
+        ast::Item::TypeDef(td) => {
+            match &td.body {
+                ast::TypeBody::Wrapper(inner) => Some(v1("IWrapper", lower_wrapper_def(td, inner))),
+                _ => Some(v1("IType", lower_type_def(td))),
+            }
+        }
         ast::Item::TestDef(td) => Some(v1("ITest", lower_test_def(td))),
         _ => None,
     }

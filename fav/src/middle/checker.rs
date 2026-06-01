@@ -3728,6 +3728,7 @@ impl Checker {
                     }
                 }
                 TypeBody::Alias(_) => {}
+                TypeBody::Wrapper(_) => {}
             }
         }
         Type::Unknown

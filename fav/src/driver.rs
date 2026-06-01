@@ -8908,6 +8908,7 @@ impl ExplainPrinter {
                         TypeBody::Record(_) => "record",
                         TypeBody::Sum(_) => "sum",
                         TypeBody::Alias(_) => "alias",
+                        TypeBody::Wrapper(_) => "wrapper",
                     };
                     let vis = format_visibility(&td.visibility);
                     let _ = writeln!(
@@ -9155,6 +9156,7 @@ impl ExplainPrinter {
                     TypeBody::Record(_) => "type (record)",
                     TypeBody::Sum(_) => "type (sum)",
                     TypeBody::Alias(_) => "type (alias)",
+                    TypeBody::Wrapper(_) => "type (wrapper)",
                 };
                 let _ = writeln!(
                     out,
@@ -9466,6 +9468,15 @@ impl ExplainPrinter {
                                     "name": td.name,
                                     "kind": "alias",
                                     "target": format_type_expr(target)
+                                }));
+                            }
+                            TypeBody::Wrapper(inner) => {
+                                types.push(json!({
+                                    "name": td.name,
+                                    "kind": "wrapper",
+                                    "inner": format_type_expr(inner),
+                                    "with_interfaces": td.with_interfaces,
+                                    "has_validator": !td.invariants.is_empty()
                                 }));
                             }
                         }
@@ -18915,5 +18926,155 @@ seq Pipeline = FetchData
         let results = run_fav_test_file_with_runes("runes/graphql/graphql.test.fav");
         let failures: Vec<_> = results.iter().filter(|(_, ok, _)| !ok).collect();
         assert!(failures.is_empty(), "graphql.test.fav failures: {:?}", failures);
+    }
+}
+
+// ── v970_tests (v9.7.0) — T?/??/expr? + nominal wrapper types ────────────────
+#[cfg(test)]
+mod v970_tests {
+    use crate::backend::artifact::FvcArtifact;
+    use crate::backend::vm::VM;
+    use crate::value::Value;
+
+    fn compile_and_run(name: &str, src: &str) -> Value {
+        let filename = format!("fav_v970_{}.fav", name);
+        let tmp = std::env::temp_dir().join(filename);
+        std::fs::write(&tmp, src).expect("write tmp");
+        let path = tmp.to_str().expect("utf8 path");
+        let bytes = crate::compiler_fav_runner::compile_file_to_bytes(path)
+            .unwrap_or_else(|e| panic!("compiler.fav error: {}", e));
+        let artifact = FvcArtifact::from_bytes(&bytes)
+            .unwrap_or_else(|e| panic!("artifact error: {:?}", e));
+        let fn_idx = artifact.fn_idx_by_name("main").expect("main not found");
+        VM::run(&artifact, fn_idx, vec![]).expect("VM::run failed")
+    }
+
+    // ── T? / ?? operator tests ─────────────────────────────────────────────────
+
+    #[test]
+    fn null_coalesce_some_returns_inner() {
+        // Option.some(42) ?? 0 => 42
+        let result = compile_and_run(
+            "nc_some",
+            r#"public fn main() -> Int { Option.some(42) ?? 0 }"#,
+        );
+        assert_eq!(result, Value::Int(42));
+    }
+
+    #[test]
+    fn null_coalesce_none_returns_default() {
+        // Option.none() ?? 99 => 99
+        let result = compile_and_run(
+            "nc_none",
+            r#"public fn main() -> Int { Option.none() ?? 99 }"#,
+        );
+        assert_eq!(result, Value::Int(99));
+    }
+
+    #[test]
+    fn type_option_postfix_t_question() {
+        // T? is equivalent to Option<T> — fn returns Option<Int>
+        let result = compile_and_run(
+            "tq",
+            r#"fn wrap(x: Int) -> Int? { Option.some(x) }
+               public fn main() -> Int { wrap(7) ?? 0 }"#,
+        );
+        assert_eq!(result, Value::Int(7));
+    }
+
+    #[test]
+    fn expr_question_unwraps_ok() {
+        // expr? unwraps the Ok value directly
+        let result = compile_and_run(
+            "exprq_ok",
+            r#"fn safe_double(n: Int) -> Result<Int, String> {
+                   Result.ok(n * 2)
+               }
+               public fn main() -> Int {
+                   safe_double(5)?
+               }"#,
+        );
+        assert_eq!(result, Value::Int(10));
+    }
+
+    #[test]
+    fn expr_question_propagates_err() {
+        // expr? in an Err case: the Err is preserved
+        let result = compile_and_run(
+            "exprq_err",
+            r#"fn fail() -> Result<Int, String> { Result.err("oops") }
+               public fn main() -> String {
+                   match fail()? {
+                       Ok(_) => "ok"
+                       Err(e) => e
+                   }
+               }"#,
+        );
+        assert_eq!(result, Value::Str("oops".to_string()));
+    }
+
+    // ── Nominal wrapper type tests ─────────────────────────────────────────────
+
+    #[test]
+    fn wrapper_type_constructor_and_match() {
+        // type UserId(Int) — constructor + pattern extraction
+        let result = compile_and_run(
+            "wrapper_ctor",
+            r#"type UserId(Int)
+               public fn main() -> Int {
+                   match UserId(42) {
+                       UserId(n) => n
+                   }
+               }"#,
+        );
+        assert_eq!(result, Value::Int(42));
+    }
+
+    #[test]
+    fn wrapper_type_fn_param_and_return() {
+        // pass wrapper as function parameter, extract inside
+        let result = compile_and_run(
+            "wrapper_fn",
+            r#"type EmailAddr(String)
+               fn get_addr(e: EmailAddr) -> String {
+                   match e { EmailAddr(s) => s }
+               }
+               public fn main() -> String {
+                   get_addr(EmailAddr("user@example.com"))
+               }"#,
+        );
+        assert_eq!(result, Value::Str("user@example.com".to_string()));
+    }
+
+    #[test]
+    fn wrapper_type_in_option() {
+        // Option<WrapperType> — wrap and unwrap
+        let result = compile_and_run(
+            "wrapper_opt",
+            r#"type Score(Int)
+               fn try_score(n: Int) -> Option<Score> {
+                   if n > 0 { Option.some(Score(n)) } else { Option.none() }
+               }
+               public fn main() -> Int {
+                   match try_score(100) {
+                       Some(Score(v)) => v
+                       None => 0
+                   }
+               }"#,
+        );
+        assert_eq!(result, Value::Int(100));
+    }
+
+    // ── checker.fav type-checks wrapper types without error ───────────────────
+
+    #[test]
+    fn wrapper_type_checker_no_error() {
+        let src = r#"type UserId(Int)
+fn make_user(n: Int) -> UserId { UserId(n) }
+public fn main() -> Int { 1 }
+"#;
+        let errors = super::check_source_str(src);
+        let has_errors = !errors.is_empty();
+        assert!(!has_errors, "unexpected errors for wrapper type: {:?}", errors);
     }
 }

@@ -126,6 +126,8 @@ pub enum TypeBody {
     Record(Vec<Field>),
     Sum(Vec<Variant>),
     Alias(TypeExpr),
+    /// `type UserId(Int)` — nominal wrapper type
+    Wrapper(TypeExpr),
 }
 
 /// `type User = { ... }` or `type Session = | Guest | Authenticated { ... }`

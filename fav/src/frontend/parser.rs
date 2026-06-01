@@ -682,6 +682,47 @@ impl Parser {
         let start = self.peek_span().clone();
         self.expect(&TokenKind::Type)?;
         let (name, _) = self.expect_ident()?;
+
+        // Wrapper type: `type UserId(Int)` (no `=` sign)
+        if self.peek() == &TokenKind::LParen {
+            self.advance(); // consume `(`
+            let inner_ty = self.parse_type_expr()?;
+            self.expect(&TokenKind::RParen)?;
+
+            // Optional `with Eq, Show` clause
+            let with_interfaces = if self.peek() == &TokenKind::With {
+                self.advance();
+                let (first, _) = self.expect_ident()?;
+                let mut names = vec![first];
+                while self.peek() == &TokenKind::Comma {
+                    self.advance();
+                    let (iface, _) = self.expect_ident()?;
+                    names.push(iface);
+                }
+                names
+            } else {
+                vec![]
+            };
+
+            // Optional `where |v| pred` clause
+            let invariants = if self.peek() == &TokenKind::Where {
+                self.advance();
+                vec![self.parse_expr()?]
+            } else {
+                vec![]
+            };
+
+            return Ok(TypeDef {
+                visibility,
+                name,
+                type_params: vec![],
+                with_interfaces,
+                invariants,
+                body: TypeBody::Wrapper(inner_ty),
+                span: self.span_from(&start),
+            });
+        }
+
         let type_params = self.parse_type_params()?;
         let with_interfaces = if self.peek() == &TokenKind::With {
             self.advance();

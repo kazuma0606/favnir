@@ -53,6 +53,8 @@ type Token =
   | TkRBrace
   | TkLBracket
   | TkRBracket
+  | TkQuestion
+  | TkQuestionQuestion
   | TkEof
 
 // ── Literal ───────────────────────────────────────────────────────────────────
@@ -80,6 +82,7 @@ type Op =
   | OpGtEq
   | OpAnd
   | OpOr
+  | OpNullCoalesce
 
 // ── Pattern ───────────────────────────────────────────────────────────────────
 
@@ -122,6 +125,7 @@ type Expr =
   | EBind(String, Expr, Expr)
   | EField(String, Expr, Expr)
   | EFieldNil
+  | EQuestion(Expr)
 
 // ── TypeExpr ──────────────────────────────────────────────────────────────────
 
@@ -294,6 +298,8 @@ fn token_eq(a: Token, b: Token) -> Bool {
         TkRBrace => { match b { TkRBrace => true _ => false } }
         TkLBracket => { match b { TkLBracket => true _ => false } }
         TkRBracket => { match b { TkRBracket => true _ => false } }
+        TkQuestion => { match b { TkQuestion => true _ => false } }
+        TkQuestionQuestion => { match b { TkQuestionQuestion => true _ => false } }
         TkEof => { match b { TkEof => true _ => false } }
     }
 }
@@ -355,22 +361,31 @@ fn parse_type_expr(toks: List<Token>) -> Result<TypeExprParse, String> {
         None => Result.err("expected type")
         Some(TkIdent(name)) => {
             bind rest1 <- advance(toks)
-            match peek(rest1) {
-                Some(TkLt) => {
-                    bind rest2 <- advance(rest1)
-                    Result.and_then(parse_type_expr(rest2), |inner|
-                    Result.and_then(expect_tok(inner.rest, TkGt), |rest3|
-                    if name == "List" {
-                        Result.ok(TypeExprParse { ty: TeList(inner.ty), rest: rest3 })
-                    } else {
-                    if name == "Option" {
-                        Result.ok(TypeExprParse { ty: TeOption(inner.ty), rest: rest3 })
-                    } else {
-                        Result.ok(TypeExprParse { ty: TeSimple(name), rest: rest3 })
-                    }}))
+            Result.and_then(
+                match peek(rest1) {
+                    Some(TkLt) => {
+                        bind rest2 <- advance(rest1)
+                        Result.and_then(parse_type_expr(rest2), |inner|
+                        Result.and_then(expect_tok(inner.rest, TkGt), |rest3|
+                        if name == "List" {
+                            Result.ok(TypeExprParse { ty: TeList(inner.ty), rest: rest3 })
+                        } else {
+                        if name == "Option" {
+                            Result.ok(TypeExprParse { ty: TeOption(inner.ty), rest: rest3 })
+                        } else {
+                            Result.ok(TypeExprParse { ty: TeSimple(name), rest: rest3 })
+                        }}))
+                    }
+                    _ => Result.ok(TypeExprParse { ty: TeSimple(name), rest: rest1 })
+                },
+                |base_p|
+                // T? postfix → TeOption(T)
+                match peek(base_p.rest) {
+                    Some(TkQuestion) =>
+                        Result.ok(TypeExprParse { ty: TeOption(base_p.ty), rest: advance(base_p.rest) })
+                    _ => Result.ok(base_p)
                 }
-                _ => Result.ok(TypeExprParse { ty: TeSimple(name), rest: rest1 })
-            }
+            )
         }
         _ => Result.err("expected type name")
     }
@@ -588,6 +603,10 @@ fn parse_postfix(expr: Expr, toks: List<Token>) -> Result<ExprParse, String> {
                 _ => Result.err("expected field name after dot")
             }
         }
+        Some(TkQuestion) => {
+            bind rest1 <- advance(toks)
+            parse_postfix(EQuestion(expr), rest1)
+        }
         _ => Result.ok(ExprParse { expr: expr, rest: toks })
     }
 }
@@ -696,8 +715,22 @@ fn parse_or_rest(lhs: Expr, toks: List<Token>) -> Result<ExprParse, String> {
     }
 }
 
+fn parse_null_coalesce(toks: List<Token>) -> Result<ExprParse, String> {
+    Result.and_then(parse_or(toks), |lhs| parse_null_coalesce_rest(lhs.expr, lhs.rest))
+}
+
+fn parse_null_coalesce_rest(lhs: Expr, toks: List<Token>) -> Result<ExprParse, String> {
+    match peek(toks) {
+        Some(TkQuestionQuestion) => Result.and_then(
+            parse_or(advance(toks)),
+            |rhs| parse_null_coalesce_rest(EBinOp(OpNullCoalesce, lhs, rhs.expr), rhs.rest)
+        )
+        _ => Result.ok(ExprParse { expr: lhs, rest: toks })
+    }
+}
+
 fn parse_expr(toks: List<Token>) -> Result<ExprParse, String> {
-    parse_or(toks)
+    parse_null_coalesce(toks)
 }
 
 // ── Parameter parser ──────────────────────────────────────────────────────────

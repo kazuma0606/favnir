@@ -53,6 +53,8 @@ type Token =
   | TkRBrace
   | TkLBracket
   | TkRBracket
+  | TkQuestion
+  | TkQuestionQuestion
   | TkEof
 
 // ── Return type for sub-scanners ──────────────────────────────────────────────
@@ -282,11 +284,17 @@ fn scan_op(c: String, tail: List<String>, acc: List<Token>) -> Result<List<Token
     if c == "|" && next_char_is(tail, ">") {
         scan(List.drop(tail, 1), List.push(acc, TkPipeGt))
     } else {
+    if c == "?" && next_char_is(tail, "?") {
+        scan(List.drop(tail, 1), List.push(acc, TkQuestionQuestion))
+    } else {
+    if c == "?" {
+        scan(tail, List.push(acc, TkQuestion))
+    } else {
         match single_char_token(c) {
             Some(t) => scan(tail, List.push(acc, t))
             None => Result.err(String.concat("unexpected character: ", c))
         }
-    }}}}}}}}}}
+    }}}}}}}}}}}}
 }
 
 // ── Main scan loop ────────────────────────────────────────────────────────────

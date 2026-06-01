@@ -139,6 +139,14 @@ impl Formatter {
                     self.type_expr(target)
                 )
             }
+            TypeBody::Wrapper(inner) => {
+                let with_part = if td.with_interfaces.is_empty() {
+                    String::new()
+                } else {
+                    format!(" with {}", td.with_interfaces.join(", "))
+                };
+                format!("{}type {}({}){}", vis, td.name, self.type_expr(inner), with_part)
+            }
         }
     }
 

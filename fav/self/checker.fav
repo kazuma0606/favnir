@@ -24,6 +24,7 @@ type Op =
   | OpGtEq
   | OpAnd
   | OpOr
+  | OpNullCoalesce
 
 type Pat =
   | PWild
@@ -54,6 +55,7 @@ type Expr =
   | EBind(String, Expr, Expr)
   | EField(String, Expr, Expr)
   | EFieldNil
+  | EQuestion(Expr)
 
 type TypeExpr =
   | TeSimple(String)
@@ -95,10 +97,18 @@ type TestDef = {
     body: Expr
 }
 
+type WrapperDef = {
+    name: String
+    inner: String
+    has_where: Bool
+    with_impls: List<String>
+}
+
 type Item =
   | IFn(FnDef)
   | IType(TypeDef)
   | ITest(TestDef)
+  | IWrapper(WrapperDef)
 
 type Program = {
     items: List<Item>
@@ -260,6 +270,13 @@ fn is_cmp_op(op: Op) -> Bool {
     }
 }
 
+fn is_null_coalesce_op(op: Op) -> Bool {
+    match op {
+        OpNullCoalesce => true
+        _ => false
+    }
+}
+
 fn infer_op(op: Op, lty: String, rty: String) -> Result<String, String> {
     if is_arith_op(op) {
         if lty == "Int" && rty == "Int" { Result.ok("Int") }
@@ -273,12 +290,16 @@ fn infer_op(op: Op, lty: String, rty: String) -> Result<String, String> {
     if is_cmp_op(op) {
         Result.ok("Bool")
     } else {
+    if is_null_coalesce_op(op) {
+        // lhs is Option<T>, rhs is T; result is T (approximate with rhs type)
+        Result.ok(rty)
+    } else {
         if lty == "Bool" && rty == "Bool" { Result.ok("Bool") }
         else {
         if lty == "Unknown" || rty == "Unknown" { Result.ok("Bool") }
         else { Result.err(fmt_err("E0002", "logical operator requires Bool operands")) }
         }
-    }}
+    }}}
 }
 
 // ── Per-namespace builtin return types ────────────────────────────────────────
@@ -546,6 +567,9 @@ fn infer_expr_effects(expr: Expr) -> List<String> {
             List.concat(infer_expr_effects(scrut), infer_arms_effects(arms))
         EArgList(h, t) =>
             List.concat(infer_expr_effects(h), infer_expr_effects(t))
+        EQuestion(inner) => infer_expr_effects(inner)
+        EBinOp(op, left, right) =>
+            List.concat(infer_expr_effects(left), infer_expr_effects(right))
         _ => List.empty()
     }
 }
@@ -948,6 +972,9 @@ fn infer_expr(expr: Expr, env: List<KVPair>) -> Result<String, String> {
         EField(fname, val_e, rest) => Result.and_then(infer_expr(val_e, env), |vty|
             infer_expr(rest, env))
         EFieldNil => Result.ok("Unit")
+        EQuestion(inner) => Result.and_then(infer_expr(inner, env), |ity|
+            // expr? unwraps Result<T,E> → T; approximate as Unknown
+            Result.ok("Unknown"))
     }
 }
 
@@ -1228,6 +1255,8 @@ fn collect_variant_constructors(items: List<Item>, env: List<KVPair>) -> List<KV
                         register_variants_inner(td.name, td.variants, env))
                 }
             }
+            IWrapper(wd) => collect_variant_constructors(List.drop(items, 1),
+                env_insert(env, wd.name, make_fn_scheme_str("", wd.inner, wd.name)))
             _ => collect_variant_constructors(List.drop(items, 1), env)
         }
     }
@@ -1343,6 +1372,7 @@ fn check_item(item: Item, env: List<KVPair>) -> Result<String, String> {
     match item {
         IFn(fd) => check_fn_def(fd, env)
         IType(td) => Result.ok(td.name)
+        IWrapper(wd) => Result.ok(wd.name)
         ITest(td) => {
             bind test_env <- env_empty()
             Result.and_then(infer_expr(td.body, test_env), |ty|

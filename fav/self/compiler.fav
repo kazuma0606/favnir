@@ -62,6 +62,8 @@ type Token =
   | TkStage
   | TkSeq
   | TkAbstract
+  | TkQuestion
+  | TkQuestionQuestion
   | TkEof
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -289,11 +291,17 @@ fn scan_op(c: String, tail: List<String>) -> Result<ScanResult, String> {
     if c == "|" && next_char_is(tail, ">") {
         Result.ok(ScanResult { tok: TkPipeGt, rest: List.drop(tail, 1) })
     } else {
+    if c == "?" && next_char_is(tail, "?") {
+        Result.ok(ScanResult { tok: TkQuestionQuestion, rest: List.drop(tail, 1) })
+    } else {
+    if c == "?" {
+        Result.ok(ScanResult { tok: TkQuestion, rest: tail })
+    } else {
         match single_char_token(c) {
             Some(t) => Result.ok(ScanResult { tok: t, rest: tail })
             None => Result.err(String.concat("unexpected character: ", c))
         }
-    }}}}}}}}}}
+    }}}}}}}}}}}}
 }
 
 fn scan_collect(chars: List<String>) -> Bool {
@@ -408,6 +416,7 @@ type Op =
   | OpAdd | OpSub | OpMul | OpDiv | OpMod
   | OpEq | OpNeq | OpLt | OpGt | OpLtEq | OpGtEq
   | OpAnd | OpOr
+  | OpNullCoalesce
 
 type Pat =
   | PWild
@@ -440,6 +449,7 @@ type Expr =
   | EYield(Expr)
   | EField(String, Expr, Expr)
   | EFieldNil
+  | EQuestion(Expr)
 
 type TypeExpr =
   | TeSimple(String)
@@ -496,12 +506,20 @@ type SeqDef = {
     stages:      List<String>
 }
 
+type WrapperDef = {
+    name: String
+    inner: String
+    has_where: Bool
+    with_impls: List<String>
+}
+
 type Item =
   | IFn(FnDef)
   | IType(TypeDef)
   | ITest(TestDef)
   | IStage(StageDef)
   | ISeq(SeqDef)
+  | IWrapper(WrapperDef)
 
 type Program = {
     items: List<Item>
@@ -769,6 +787,17 @@ fn skip_extra_type_args(toks: List<Token>) -> Result<List<Token>, String> {
     }
 }
 
+fn parse_type_expr_postfix(base: TypeExprParse) -> Result<TypeExprParse, String> {
+    match peek(base.rest) {
+        Some(TkQuestion) => {
+            match advance(base.rest) {
+                rest_q => Result.ok(TypeExprParse { ty: TeOption(base.ty), rest: rest_q })
+            }
+        }
+        _ => Result.ok(base)
+    }
+}
+
 fn parse_type_expr(toks: List<Token>) -> Result<TypeExprParse, String> {
     match peek(toks) {
         None => Result.err("expected type")
@@ -786,14 +815,15 @@ fn parse_type_expr(toks: List<Token>) -> Result<TypeExprParse, String> {
                                     match expect_tok(rest_after, TkGt) {
                                         Err(e) => Result.err(e)
                                         Ok(rest3) => {
-                                            if name == "List" {
-                                                Result.ok(TypeExprParse { ty: TeList(inner.ty), rest: rest3 })
+                                            bind base_ty <- if name == "List" {
+                                                TypeExprParse { ty: TeList(inner.ty), rest: rest3 }
                                             } else {
                                             if name == "Option" {
-                                                Result.ok(TypeExprParse { ty: TeOption(inner.ty), rest: rest3 })
+                                                TypeExprParse { ty: TeOption(inner.ty), rest: rest3 }
                                             } else {
-                                                Result.ok(TypeExprParse { ty: TeSimple(name), rest: rest3 })
+                                                TypeExprParse { ty: TeSimple(name), rest: rest3 }
                                             }}
+                                            parse_type_expr_postfix(base_ty)
                                         }
                                     }
                                 }
@@ -801,7 +831,7 @@ fn parse_type_expr(toks: List<Token>) -> Result<TypeExprParse, String> {
                         }
                     }
                 }
-                _ => Result.ok(TypeExprParse { ty: TeSimple(name), rest: rest1 })
+                _ => parse_type_expr_postfix(TypeExprParse { ty: TeSimple(name), rest: rest1 })
             }
         }
         _ => Result.err("expected type name")
@@ -1035,6 +1065,10 @@ fn parse_postfix(expr: Expr, toks: List<Token>) -> Result<ExprParse, String> {
                 }
                 _ => Result.err("expected field name after dot")
             }
+        }
+        Some(TkQuestion) => {
+            bind rest1 <- advance(toks)
+            parse_postfix(EQuestion(expr), rest1)
         }
         _ => Result.ok(ExprParse { expr: expr, rest: toks })
     }
@@ -1420,8 +1454,27 @@ fn parse_lambda_rest(param: String, toks: List<Token>) -> Result<ExprParse, Stri
     }
 }
 
+fn parse_null_coalesce(toks: List<Token>) -> Result<ExprParse, String> {
+    match parse_or(toks) {
+        Ok(lhs) => parse_null_coalesce_rest(lhs.expr, lhs.rest)
+        Err(e) => Result.err(e)
+    }
+}
+
+fn parse_null_coalesce_rest(lhs: Expr, toks: List<Token>) -> Result<ExprParse, String> {
+    match peek(toks) {
+        Some(TkQuestionQuestion) => {
+            match parse_or(advance(toks)) {
+                Ok(rhs) => parse_null_coalesce_rest(EBinOp(OpNullCoalesce, lhs, rhs.expr), rhs.rest)
+                Err(e) => Result.err(e)
+            }
+        }
+        _ => Result.ok(ExprParse { expr: lhs, rest: toks })
+    }
+}
+
 fn parse_expr(toks: List<Token>) -> Result<ExprParse, String> {
-    parse_or(toks)
+    parse_null_coalesce(toks)
 }
 
 fn parse_param(toks: List<Token>) -> Result<ParamParse, String> {
@@ -1668,6 +1721,54 @@ fn parse_type_def(toks: List<Token>) -> Result<TypeDefParse, String> {
     }
 }
 
+fn parse_type_or_wrapper_item(toks: List<Token>) -> Result<ItemParse, String> {
+    match expect_tok(toks, TkType) {
+        Err(e) => Result.err(e)
+        Ok(rest1) => {
+            match peek(rest1) {
+                Some(TkIdent(tname)) => {
+                    bind rest2 <- advance(rest1)
+                    match peek(rest2) {
+                        Some(TkLParen) => {
+                            // Wrapper type: type UserId(Int)
+                            bind rest3 <- advance(rest2)
+                            match parse_type_expr(rest3) {
+                                Err(e) => Result.err(e)
+                                Ok(inner_p) => {
+                                    match expect_tok(inner_p.rest, TkRParen) {
+                                        Err(e) => Result.err(e)
+                                        Ok(rest4) => {
+                                            bind empty_impls <- empty_string_list()
+                                            Result.ok(ItemParse {
+                                                item: IWrapper(WrapperDef {
+                                                    name: tname
+                                                    inner: type_expr_to_str(inner_p.ty)
+                                                    has_where: false
+                                                    with_impls: empty_impls
+                                                })
+                                                rest: rest4
+                                            })
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        Some(TkEq) => {
+                            bind rest3 <- advance(rest2)
+                            match parse_type_def_after_eq(tname, rest3) {
+                                Err(e) => Result.err(e)
+                                Ok(td) => Result.ok(ItemParse { item: IType(td.type_def), rest: td.rest })
+                            }
+                        }
+                        _ => Result.err("expected '=' or '(' after type name")
+                    }
+                }
+                _ => Result.err("expected type name")
+            }
+        }
+    }
+}
+
 fn parse_test_item_after_name(tname: String, rest2: List<Token>) -> Result<ItemParse, String> {
     match expect_tok(rest2, TkLBrace) {
         Err(e) => Result.err(e)
@@ -1853,10 +1954,7 @@ fn parse_item(toks: List<Token>) -> Result<ItemParse, String> {
             }
         }
         Some(TkType) => {
-            match parse_type_def(toks) {
-                Err(e) => Result.err(e)
-                Ok(td) => Result.ok(ItemParse { item: IType(td.type_def), rest: td.rest })
-            }
+            parse_type_or_wrapper_item(toks)
         }
         Some(TkTest) => {
             bind rest1 <- advance(toks)
@@ -2396,7 +2494,7 @@ fn new_lambda_name(ctx: CodegenCtx) -> LambdaNameResult {
 }
 
 fn result_err_expr(err_name: String) -> Expr {
-    ECall("", "Err", EArgList(EVar(err_name), EArgNil))
+    ECall("Result", "err", EArgList(EVar(err_name), EArgNil))
 }
 
 fn result_and_then_match_expr(value_expr: Expr, param: String, body: Expr) -> Expr {
@@ -2963,9 +3061,22 @@ fn compile_expr(expr: Expr, ctx: CodegenCtx, env: List<KVPair>) -> Result<Codege
             bind op <- parts._0
             bind left <- parts._1
             bind right <- parts._2
-            Result.and_then(compile_expr(left, ctx, env), |ctx1|
-            Result.and_then(compile_expr(right, ctx1, env), |ctx2|
-            Result.ok(emit_opcode(ctx2, binop_bc(op)))))
+            match op {
+                OpNullCoalesce =>
+                    // a ?? b  →  match a { Some(v) -> v  None -> b }
+                    compile_expr(
+                        EMatch(left,
+                            EArm(PVariantP("Some", PVar("__nc_v")), ELit(LBool(true)),
+                                EVar("__nc_v"),
+                                EArm(PVariant("None"), ELit(LBool(true)),
+                                    right,
+                                    EArmNil))),
+                        ctx, env)
+                _ =>
+                    Result.and_then(compile_expr(left, ctx, env), |ctx1|
+                    Result.and_then(compile_expr(right, ctx1, env), |ctx2|
+                    Result.ok(emit_opcode(ctx2, binop_bc(op)))))
+            }
         }
         EIf(parts) => compile_if(parts._0, parts._1, parts._2, ctx, env)
         EBind(parts) => {
@@ -3075,6 +3186,9 @@ fn compile_expr(expr: Expr, ctx: CodegenCtx, env: List<KVPair>) -> Result<Codege
             compile_expr(rest, ctx1, env))
         }
         EFieldNil => Result.ok(ctx)
+        EQuestion(inner) =>
+            // expr?  →  bind __q <- inner; __q  (short-circuits on Err)
+            compile_expr(result_and_then_match_expr(inner, "__q_val", EVar("__q_val")), ctx, env)
     }
 }
 
@@ -3210,6 +3324,7 @@ fn compile_items(items: List<Item>, acc: List<FnEntry>) -> Result<List<FnEntry>,
                 }
                 IType(_) => compile_items(List.drop(items, 1), acc)
                 ITest(_) => compile_items(List.drop(items, 1), acc)
+                IWrapper(_) => compile_items(List.drop(items, 1), acc)
                 IStage(stage_def) => {
                     Result.and_then(compile_stage_def(stage_def), |entries|
                     compile_items(List.drop(items, 1), List.concat(acc, entries)))
@@ -3419,6 +3534,7 @@ fn op_to_str(op: Op) -> String {
         OpMod => "%"  OpEq => "=="  OpNeq => "!="
         OpLt => "<"  OpGt => ">"  OpLtEq => "<="  OpGtEq => ">="
         OpAnd => "&&"  OpOr => "||"
+        OpNullCoalesce => "??"
     }
 }
 
@@ -3657,6 +3773,10 @@ fn pretty_seq_def(sd: SeqDef) -> String {
     }
 }
 
+fn pretty_wrapper_def(wd: WrapperDef) -> String {
+    String.concat("type ", String.concat(wd.name, String.concat("(", String.concat(wd.inner, ")"))))
+}
+
 fn pretty_item(item: Item) -> String {
     match item {
         IFn(f) => pretty_fn_def(f)
@@ -3664,6 +3784,7 @@ fn pretty_item(item: Item) -> String {
         ITest(td) => pretty_test_def(td)
         IStage(sd) => pretty_stage_def(sd)
         ISeq(sd) => pretty_seq_def(sd)
+        IWrapper(wd) => pretty_wrapper_def(wd)
     }
 }
 

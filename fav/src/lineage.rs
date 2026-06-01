@@ -225,6 +225,9 @@ fn collect_sql_literals_inner(expr: &ast::Expr, out: &mut Vec<String>) {
         ast::Expr::AssertMatches(e, _, _) => {
             collect_sql_literals_inner(e, out);
         }
+        ast::Expr::Question(e, _) => {
+            collect_sql_literals_inner(e, out);
+        }
         ast::Expr::Lit(_, _) | ast::Expr::Ident(_, _) | ast::Expr::FString(_, _) => {}
     }
 }

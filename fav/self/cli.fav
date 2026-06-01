@@ -1,4 +1,4 @@
-// fav/self/cli.fav — Favnir CLI dispatcher (v9.7.0)
+// fav/self/cli.fav — Favnir CLI dispatcher (v9.7.5)
 //
 // Handles: check / fmt / lint / explain --lineage / rune list|info / version / help
 //
@@ -133,7 +133,7 @@ fn parse_rune_sub(sub: String, args: List<String>) -> CliCmd {
 // ── Action handlers ────────────────────────────────────────────────────────────
 
 fn run_version() -> Unit !IO {
-    IO.println("favnir 9.7.0 (self-host CLI)")
+    IO.println("favnir 9.7.5 (self-host CLI)")
 }
 
 fn run_help() -> Unit !IO {

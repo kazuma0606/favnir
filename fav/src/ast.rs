@@ -274,6 +274,9 @@ pub enum Expr {
 
     /// `emit expr`  Epublish an event
     EmitExpr(Box<Expr>, Span),
+
+    /// `expr?` — error propagation (v9.7.0)
+    Question(Box<Expr>, Span),
 }
 
 impl Expr {
@@ -295,6 +298,7 @@ impl Expr {
             Expr::FString(_, s) => s,
             Expr::EmitExpr(_, s) => s,
             Expr::Collect(_, s) => s,
+            Expr::Question(_, s) => s,
         }
     }
 }

@@ -1927,6 +1927,12 @@ impl Parser {
                     let span = self.span_from(&start);
                     expr = Expr::Apply(Box::new(expr), args, span);
                 }
+                // postfix ?: expr? — error propagation
+                TokenKind::Question => {
+                    self.advance();
+                    let span = self.span_from(&start);
+                    expr = Expr::Question(Box::new(expr), span);
+                }
                 _ => break,
             }
         }

@@ -2689,6 +2689,7 @@ impl Checker {
                 }
             }
             Expr::EmitExpr(expr, _) => self.collect_helpers_in_expr(expr),
+            Expr::Question(expr, _) => self.collect_helpers_in_expr(expr),
         }
     }
 
@@ -4192,6 +4193,12 @@ impl Checker {
                     }
                 });
                 Type::List(Box::new(elem_ty))
+            }
+
+            // expr? — error propagation (v9.7.0)
+            Expr::Question(inner, _) => {
+                self.check_expr(inner);
+                Type::Unknown
             }
         }
     }

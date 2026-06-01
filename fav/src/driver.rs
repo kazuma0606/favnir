@@ -9692,6 +9692,7 @@ fn format_expr_compact(expr: &ast::Expr) -> String {
             out
         }
         Expr::EmitExpr(inner, _) => format!("emit {}", format_expr_compact(inner)),
+        Expr::Question(inner, _) => format!("{}?", format_expr_compact(inner)),
     };
     truncate_compact(rendered, 60)
 }
@@ -9795,7 +9796,8 @@ fn expr_to_sql(expr: &ast::Expr) -> Option<String> {
         | Expr::TypeApply(_, _, _)
         | Expr::FString(_, _)
         | Expr::RecordConstruct(_, _, _)
-        | Expr::EmitExpr(_, _) => None,
+        | Expr::EmitExpr(_, _)
+        | Expr::Question(_, _) => None,
     }
 }
 
@@ -19076,5 +19078,121 @@ public fn main() -> Int { 1 }
         let errors = super::check_source_str(src);
         let has_errors = !errors.is_empty();
         assert!(!has_errors, "unexpected errors for wrapper type: {:?}", errors);
+    }
+}
+
+// ── v975_tests (v9.7.5) — where validator + with parsing + E0013 ─────────────
+#[cfg(test)]
+mod v975_tests {
+    use crate::backend::artifact::FvcArtifact;
+    use crate::backend::vm::VM;
+    use crate::value::Value;
+
+    fn compile_and_run(name: &str, src: &str) -> Value {
+        let filename = format!("fav_v975_{}.fav", name);
+        let tmp = std::env::temp_dir().join(filename);
+        std::fs::write(&tmp, src).expect("write tmp");
+        let path = tmp.to_str().expect("utf8 path");
+        let bytes = crate::compiler_fav_runner::compile_file_to_bytes(path)
+            .unwrap_or_else(|e| panic!("compiler.fav error: {}", e));
+        let artifact = FvcArtifact::from_bytes(&bytes)
+            .unwrap_or_else(|e| panic!("artifact error: {:?}", e));
+        let fn_idx = artifact.fn_idx_by_name("main").expect("main not found");
+        VM::run(&artifact, fn_idx, vec![]).expect("VM::run failed")
+    }
+
+    #[test]
+    fn where_validator_ok() {
+        let result = compile_and_run(
+            "where_ok",
+            r#"type Percent(Float) where |v| v >= 0.0 && v <= 100.0
+public fn main() -> String {
+    match Percent(50.0) {
+        Ok(_) => "ok"
+        Err(e) => e
+    }
+}"#,
+        );
+        assert_eq!(result, Value::Str("ok".to_string()));
+    }
+
+    #[test]
+    fn where_validator_err() {
+        let result = compile_and_run(
+            "where_err",
+            r#"type Percent(Float) where |v| v >= 0.0 && v <= 100.0
+public fn main() -> String {
+    match Percent(150.0) {
+        Ok(_) => "ok"
+        Err(e) => e
+    }
+}"#,
+        );
+        assert_eq!(result, Value::Str("Percent: validation failed".to_string()));
+    }
+
+    #[test]
+    fn where_validator_in_fn() {
+        let result = compile_and_run(
+            "where_fn",
+            r#"type Percent(Float) where |v| v >= 0.0 && v <= 100.0
+fn apply_discount(price: Float, pct: Float) -> String {
+    match Percent(pct) {
+        Err(e) => e
+        Ok(p)  => Float.to_string(price * p / 100.0)
+    }
+}
+public fn main() -> String {
+    apply_discount(1000.0, 20.0)
+}"#,
+        );
+        assert_eq!(result, Value::Str("200.0".to_string()));
+    }
+
+    #[test]
+    fn with_clause_parses_ok() {
+        // type UserId(Int) with Serialize — should parse without error, constructor works as before
+        let result = compile_and_run(
+            "with_parse",
+            r#"type UserId(Int) with Serialize
+public fn main() -> Int {
+    match UserId(42) {
+        UserId(n) => n
+    }
+}"#,
+        );
+        assert_eq!(result, Value::Int(42));
+    }
+
+    #[test]
+    fn e0013_expr_question_on_option() {
+        // Option.some(42)? should produce E0013 from checker.fav
+        let src = r#"public fn main() -> Int { Option.some(42)? }"#;
+        let errors = super::check_source_str(src);
+        let has_e0013 = errors.iter().any(|e| {
+            let msg = format!("{:?}", e);
+            msg.contains("E0013")
+        });
+        assert!(has_e0013, "expected E0013 error, got: {:?}", errors);
+    }
+
+    #[test]
+    fn where_validator_combined_with_and() {
+        let src_ok = r#"type Username(String) where |s| String.length(s) > 0 && String.length(s) <= 5
+public fn main() -> String {
+    match Username("hi") {
+        Ok(_) => "ok"
+        Err(e) => e
+    }
+}"#;
+        let src_err = r#"type Username(String) where |s| String.length(s) > 0 && String.length(s) <= 5
+public fn main() -> String {
+    match Username("") {
+        Ok(_) => "ok"
+        Err(e) => e
+    }
+}"#;
+        assert_eq!(compile_and_run("username_ok", src_ok), Value::Str("ok".to_string()));
+        assert_eq!(compile_and_run("username_err", src_err), Value::Str("Username: validation failed".to_string()));
     }
 }

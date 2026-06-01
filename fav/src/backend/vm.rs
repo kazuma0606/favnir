@@ -6240,6 +6240,11 @@ fn vm_call_builtin(
             [_] => Err("Math.round requires a Float argument".to_string()),
             _ => Err("Math.round requires 1 argument".to_string()),
         },
+        "Float.to_bits" => match args.as_slice() {
+            [VMValue::Float(v)] => Ok(VMValue::Int(v.to_bits() as i64)),
+            [_] => Err("Float.to_bits requires a Float argument".to_string()),
+            _ => Err("Float.to_bits requires 1 argument".to_string()),
+        },
         "IO.println" => {
             let s = match args.into_iter().next() {
                 Some(VMValue::Str(s)) => s,

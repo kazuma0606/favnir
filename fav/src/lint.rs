@@ -190,6 +190,7 @@ fn lint_expr_l008(expr: &Expr, errors: &mut Vec<LintError>) {
         Expr::Closure(_, body, _) => lint_expr_l008(body, errors),
         Expr::Collect(block, _) => lint_block_l008(block, errors),
         Expr::EmitExpr(inner, _) => lint_expr_l008(inner, errors),
+        Expr::Question(inner, _) => lint_expr_l008(inner, errors),
         Expr::RecordConstruct(_, fields, _) => {
             for (_, e) in fields {
                 lint_expr_l008(e, errors);
@@ -341,6 +342,7 @@ fn collect_expr_calls(expr: &Expr, names: &HashSet<String>, uses: &mut HashSet<S
         Expr::Closure(_, body, _) => collect_expr_calls(body, names, uses),
         Expr::Collect(block, _) => collect_block_calls(block, names, uses),
         Expr::EmitExpr(inner, _) => collect_expr_calls(inner, names, uses),
+        Expr::Question(inner, _) => collect_expr_calls(inner, names, uses),
         Expr::RecordConstruct(_, fields, _) => {
             for (_, expr) in fields {
                 collect_expr_calls(expr, names, uses);
@@ -488,6 +490,7 @@ fn lint_expr_sub_blocks(expr: &Expr, errors: &mut Vec<LintError>) {
         Expr::Closure(_, body, _) => lint_expr_sub_blocks(body, errors),
         Expr::Collect(b, _) => lint_block_unused_binds(b, errors),
         Expr::EmitExpr(inner, _) => lint_expr_sub_blocks(inner, errors),
+        Expr::Question(inner, _) => lint_expr_sub_blocks(inner, errors),
         Expr::RecordConstruct(_, fields, _) => {
             for (_, e) in fields {
                 lint_expr_sub_blocks(e, errors);
@@ -542,6 +545,7 @@ fn expr_references(expr: &Expr, name: &str) -> bool {
         }
         Expr::Collect(b, _) => block_references(b, name),
         Expr::EmitExpr(inner, _) => expr_references(inner, name),
+        Expr::Question(inner, _) => expr_references(inner, name),
         Expr::RecordConstruct(_, fields, _) => fields.iter().any(|(_, e)| expr_references(e, name)),
         Expr::FString(parts, _) => parts.iter().any(|part| match part {
             FStringPart::Lit(_) => false,

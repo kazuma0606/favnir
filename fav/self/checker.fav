@@ -500,9 +500,9 @@ fn int_fn(fname: String) -> String {
 
 fn float_fn(fname: String) -> String {
     if fname == "to_string"  { "String" }
-    else { if fname == "from_int"   { "Float" }
+    else if fname == "from_int"   { "Float" }
+    else if fname == "to_bits"    { "Int" }
     else { "Unknown" }
-    }
 }
 
 fn builtin_ret_ty(ns: String, fname: String) -> String {
@@ -973,8 +973,8 @@ fn infer_expr(expr: Expr, env: List<KVPair>) -> Result<String, String> {
             infer_expr(rest, env))
         EFieldNil => Result.ok("Unit")
         EQuestion(inner) => Result.and_then(infer_expr(inner, env), |ity|
-            // expr? unwraps Result<T,E> → T; approximate as Unknown
-            Result.ok("Unknown"))
+            if String.starts_with(ity, "Result") { Result.ok("Unknown") }
+            else { Result.err(String.concat("E0013: ? requires a Result expression, got ", ity)) })
     }
 }
 
@@ -1255,8 +1255,13 @@ fn collect_variant_constructors(items: List<Item>, env: List<KVPair>) -> List<KV
                         register_variants_inner(td.name, td.variants, env))
                 }
             }
-            IWrapper(wd) => collect_variant_constructors(List.drop(items, 1),
-                env_insert(env, wd.name, make_fn_scheme_str("", wd.inner, wd.name)))
+            IWrapper(wd) => {
+                bind ret_ty <- if wd.has_where {
+                    String.concat("Result<", String.concat(wd.inner, ", String>"))
+                } else { wd.name }
+                collect_variant_constructors(List.drop(items, 1),
+                    env_insert(env, wd.name, make_fn_scheme_str("", wd.inner, ret_ty)))
+            }
             _ => collect_variant_constructors(List.drop(items, 1), env)
         }
     }

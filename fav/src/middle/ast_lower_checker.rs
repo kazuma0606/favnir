@@ -279,6 +279,7 @@ pub fn lower_expr(expr: &ast::Expr) -> Value {
         ast::Expr::Block(block) => lower_block(block),
         ast::Expr::Apply(func, args, _) => lower_apply(func, args),
         ast::Expr::Pipeline(steps, _) => lower_pipeline(steps),
+        ast::Expr::Question(inner, _) => v1("EQuestion", lower_expr(inner)),
         // Fallbacks for TypeApply, FString, Collect, AssertMatches, EmitExpr
         _ => v1("EVar", sv("_unsupported_")),
     }

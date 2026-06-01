@@ -19,6 +19,7 @@ type Token =
   | TkElse
   | TkMatch
   | TkWhere
+  | TkWith
   | TkBind
   | TkImport
   | TkPublic
@@ -92,49 +93,29 @@ fn is_whitespace(c: String) -> Bool {
 }
 
 fn keyword_token(s: String) -> Option<Token> {
-    if s == "fn" { Option.some(TkFn) }
-    else {
-    if s == "type" { Option.some(TkType) }
-    else {
-    if s == "if" { Option.some(TkIf) }
-    else {
-    if s == "else" { Option.some(TkElse) }
-    else {
-    if s == "match" { Option.some(TkMatch) }
-    else {
-    if s == "where" { Option.some(TkWhere) }
-    else {
-    if s == "bind" { Option.some(TkBind) }
-    else {
-    if s == "import" { Option.some(TkImport) }
-    else {
-    if s == "public" { Option.some(TkPublic) }
-    else {
-    if s == "return" { Option.some(TkReturn) }
-    else {
-    if s == "for" { Option.some(TkFor) }
-    else {
-    if s == "in" { Option.some(TkIn) }
-    else {
-    if s == "test" { Option.some(TkTest) }
-    else {
-    if s == "bench" { Option.some(TkBench) }
-    else {
-    if s == "collect" { Option.some(TkCollect) }
-    else {
-    if s == "yield" { Option.some(TkYield) }
-    else {
-    if s == "true" { Option.some(TkTrue) }
-    else {
-    if s == "false" { Option.some(TkFalse) }
-    else {
-    if s == "stage" { Option.some(TkStage) }
-    else {
-    if s == "seq" { Option.some(TkSeq) }
-    else {
-    if s == "abstract" { Option.some(TkAbstract) }
+    if s == "fn"       { Option.some(TkFn) }
+    else if s == "type"     { Option.some(TkType) }
+    else if s == "if"       { Option.some(TkIf) }
+    else if s == "else"     { Option.some(TkElse) }
+    else if s == "match"    { Option.some(TkMatch) }
+    else if s == "where"    { Option.some(TkWhere) }
+    else if s == "with"     { Option.some(TkWith) }
+    else if s == "bind"     { Option.some(TkBind) }
+    else if s == "import"   { Option.some(TkImport) }
+    else if s == "public"   { Option.some(TkPublic) }
+    else if s == "return"   { Option.some(TkReturn) }
+    else if s == "for"      { Option.some(TkFor) }
+    else if s == "in"       { Option.some(TkIn) }
+    else if s == "test"     { Option.some(TkTest) }
+    else if s == "bench"    { Option.some(TkBench) }
+    else if s == "collect"  { Option.some(TkCollect) }
+    else if s == "yield"    { Option.some(TkYield) }
+    else if s == "true"     { Option.some(TkTrue) }
+    else if s == "false"    { Option.some(TkFalse) }
+    else if s == "stage"    { Option.some(TkStage) }
+    else if s == "seq"      { Option.some(TkSeq) }
+    else if s == "abstract" { Option.some(TkAbstract) }
     else { Option.none() }
-    }}}}}}}}}}}}}}}}}}}}
 }
 
 fn scan_string_chars(chars: List<String>, acc: List<String>) -> Result<ScanResult, String> {
@@ -509,7 +490,7 @@ type SeqDef = {
 type WrapperDef = {
     name: String
     inner: String
-    has_where: Bool
+    where_pred: Expr
     with_impls: List<String>
 }
 
@@ -650,6 +631,7 @@ fn token_eq(a: Token, b: Token) -> Bool {
         TkBackArrow => { match b { TkBackArrow => true _ => false } }
         TkFatArrow => { match b { TkFatArrow => true _ => false } }
         TkWhere => { match b { TkWhere => true _ => false } }
+        TkWith => { match b { TkWith => true _ => false } }
         TkPipeGt => { match b { TkPipeGt => true _ => false } }
         TkEq => { match b { TkEq => true _ => false } }
         TkBang => { match b { TkBang => true _ => false } }
@@ -680,7 +662,7 @@ fn token_to_string(t: Token) -> String {
         TkStr(s) => String.concat("str:", s)
         TkIdent(s) => String.concat("ident:", s)
         TkTrue => "true" TkFalse => "false" TkFn => "fn" TkType => "type"
-        TkIf => "if" TkElse => "else" TkMatch => "match" TkWhere => "where" TkBind => "bind"
+        TkIf => "if" TkElse => "else" TkMatch => "match" TkWhere => "where" TkWith => "with" TkBind => "bind"
         TkImport => "import" TkPublic => "public" TkReturn => "return"
         TkFor => "for" TkIn => "in" TkTest => "test" TkBench => "bench"
         TkPlus => "+" TkMinus => "-" TkStar => "*" TkSlash => "/"
@@ -1738,16 +1720,25 @@ fn parse_type_or_wrapper_item(toks: List<Token>) -> Result<ItemParse, String> {
                                     match expect_tok(inner_p.rest, TkRParen) {
                                         Err(e) => Result.err(e)
                                         Ok(rest4) => {
-                                            bind empty_impls <- empty_string_list()
-                                            Result.ok(ItemParse {
-                                                item: IWrapper(WrapperDef {
-                                                    name: tname
-                                                    inner: type_expr_to_str(inner_p.ty)
-                                                    has_where: false
-                                                    with_impls: empty_impls
-                                                })
-                                                rest: rest4
-                                            })
+                                            match parse_with_clause(rest4) {
+                                                Err(e) => Result.err(e)
+                                                Ok(with_p) => {
+                                                    match parse_where_clause(with_p.rest) {
+                                                        Err(e) => Result.err(e)
+                                                        Ok(where_p) => {
+                                                            Result.ok(ItemParse {
+                                                                item: IWrapper(WrapperDef {
+                                                                    name: tname
+                                                                    inner: type_expr_to_str(inner_p.ty)
+                                                                    where_pred: where_p.expr
+                                                                    with_impls: with_p.impls
+                                                                })
+                                                                rest: where_p.rest
+                                                            })
+                                                        }
+                                                    }
+                                                }
+                                            }
                                         }
                                     }
                                 }
@@ -1791,6 +1782,48 @@ fn parse_test_item_after_name(tname: String, rest2: List<Token>) -> Result<ItemP
 
 fn empty_string_list() -> List<String> {
     List.drop_while(List.singleton(""), |v| true)
+}
+
+type WithClauseParse = {
+    impls: List<String>
+    rest: List<Token>
+}
+
+fn parse_with_idents(toks: List<Token>, acc: List<String>) -> Result<WithClauseParse, String> {
+    match peek(toks) {
+        Some(TkIdent(iname)) => {
+            bind rest1 <- advance(toks)
+            match peek(rest1) {
+                Some(TkComma) => parse_with_idents(advance(rest1), List.push(acc, iname))
+                _ => Result.ok(WithClauseParse { impls: List.push(acc, iname)  rest: rest1 })
+            }
+        }
+        _ => Result.err("expected interface name after 'with'")
+    }
+}
+
+fn parse_with_clause(toks: List<Token>) -> Result<WithClauseParse, String> {
+    match peek(toks) {
+        Some(TkWith) => {
+            bind rest1 <- advance(toks)
+            bind empty <- empty_string_list()
+            parse_with_idents(rest1, empty)
+        }
+        _ => {
+            bind empty <- empty_string_list()
+            Result.ok(WithClauseParse { impls: empty  rest: toks })
+        }
+    }
+}
+
+fn parse_where_clause(toks: List<Token>) -> Result<ExprParse, String> {
+    match peek(toks) {
+        Some(TkWhere) => {
+            bind rest1 <- advance(toks)
+            parse_expr(rest1)
+        }
+        _ => Result.ok(ExprParse { expr: ELit(LUnit)  rest: toks })
+    }
 }
 
 fn parse_effects_acc(toks: List<Token>, acc: List<String>) -> EffectsParse {
@@ -3313,6 +3346,31 @@ fn compile_seq_def(seq_def: SeqDef) -> Result<List<FnEntry>, String> {
     }
 }
 
+fn compile_wrapper_validator(wd: WrapperDef, items: List<Item>, acc: List<FnEntry>) -> Result<List<FnEntry>, String> {
+    match wd.where_pred {
+        ELambda(parts) => {
+            bind param   <- parts._0
+            bind body    <- parts._1
+            bind err_msg <- String.concat(wd.name, ": validation failed")
+            bind fn_body <- EIf(
+                body,
+                ECall("Result", "ok",  EArgList(EVar(param), EArgNil)),
+                ECall("Result", "err", EArgList(ELit(LStr(err_msg)), EArgNil))
+            )
+            bind fn_def  <- FnDef {
+                is_public: false
+                name:      wd.name
+                params:    List.singleton(Param { name: param  ty: TeSimple(wd.inner) })
+                ret:       TeResult(TeSimple(wd.inner), TeSimple("String"))
+                body:      fn_body
+            }
+            Result.and_then(compile_fn_def(fn_def), |entries|
+            compile_items(List.drop(items, 1), List.concat(acc, entries)))
+        }
+        _ => Result.err(String.concat("where clause must be a lambda: ", wd.name))
+    }
+}
+
 fn compile_items(items: List<Item>, acc: List<FnEntry>) -> Result<List<FnEntry>, String> {
     match List.first(items) {
         None => Result.ok(acc)
@@ -3324,7 +3382,15 @@ fn compile_items(items: List<Item>, acc: List<FnEntry>) -> Result<List<FnEntry>,
                 }
                 IType(_) => compile_items(List.drop(items, 1), acc)
                 ITest(_) => compile_items(List.drop(items, 1), acc)
-                IWrapper(_) => compile_items(List.drop(items, 1), acc)
+                IWrapper(wd) => {
+                    match wd.where_pred {
+                        ELit(lit) => match lit {
+                            LUnit => compile_items(List.drop(items, 1), acc)
+                            _     => compile_wrapper_validator(wd, items, acc)
+                        }
+                        _ => compile_wrapper_validator(wd, items, acc)
+                    }
+                }
                 IStage(stage_def) => {
                     Result.and_then(compile_stage_def(stage_def), |entries|
                     compile_items(List.drop(items, 1), List.concat(acc, entries)))
@@ -3415,10 +3481,14 @@ fn write_str_table(strs: List<String>, acc: List<Int>) -> List<Int> {
     }
 }
 
+fn write_f64_le(f: Float) -> List<Int> {
+    write_i64_le(Float.to_bits(f))
+}
+
 fn serialize_const_val(cv: ConstVal) -> List<Int> {
     match cv {
         CVInt(n) => List.concat(List.singleton(1), write_i64_le(n))
-        CVFloat(_) => List.singleton(2)
+        CVFloat(f) => List.concat(List.singleton(2), write_f64_le(f))
         CVStr(s) => List.concat(List.singleton(3), write_str_bytes(s))
         CVName(s) => {
             bind bs <- String.to_bytes(s)
@@ -3774,7 +3844,14 @@ fn pretty_seq_def(sd: SeqDef) -> String {
 }
 
 fn pretty_wrapper_def(wd: WrapperDef) -> String {
-    String.concat("type ", String.concat(wd.name, String.concat("(", String.concat(wd.inner, ")"))))
+    bind base <- String.concat("type ", String.concat(wd.name, String.concat("(", String.concat(wd.inner, ")"))))
+    bind with_part <- if List.length(wd.with_impls) == 0 { "" }
+                      else { String.concat(" with ", String.join(wd.with_impls, ", ")) }
+    bind where_part <- match wd.where_pred {
+        ELit(lit) => match lit { LUnit => "" _ => String.concat(" where ", pretty_expr(wd.where_pred, 0)) }
+        _ => String.concat(" where ", pretty_expr(wd.where_pred, 0))
+    }
+    String.concat(base, String.concat(with_part, where_part))
 }
 
 fn pretty_item(item: Item) -> String {

@@ -577,6 +577,10 @@ impl Formatter {
             Expr::EmitExpr(inner, _) => {
                 format!("emit {}", self.expr(inner))
             }
+
+            Expr::Question(inner, _) => {
+                format!("{}?", self.expr(inner))
+            }
         }
     }
 

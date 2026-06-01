@@ -1274,6 +1274,7 @@ fn collect_free_vars_expr(expr: &Expr, bound: &mut HashSet<String>, free: &mut H
         }
         Expr::AssertMatches(expr, _, _) => collect_free_vars_expr(expr, bound, free),
         Expr::EmitExpr(inner, _) => collect_free_vars_expr(inner, bound, free),
+        Expr::Question(inner, _) => collect_free_vars_expr(inner, bound, free),
     }
 }
 
@@ -1518,6 +1519,8 @@ pub fn compile_expr(expr: &Expr, ctx: &mut CompileCtx) -> IRExpr {
         ),
         Expr::FString(parts, _) => compile_fstring(parts, ctx),
         Expr::EmitExpr(inner, _) => IRExpr::Emit(Box::new(compile_expr(inner, ctx)), Type::Unit),
+        // expr? — desugared by compiler.fav; not supported in Rust compiler path
+        Expr::Question(inner, _) => compile_expr(inner, ctx),
     }
 }
 

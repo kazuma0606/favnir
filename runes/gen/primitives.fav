@@ -24,3 +24,17 @@ public fn choice(items: List<String>) -> Option<String> !Random {
         List.first(List.drop(items, idx))
     }
 }
+
+// ── v9.4.0 additions — UUID / nano_id ─────────────────────────────────────────
+
+public fn uuid() -> String !Gen {
+    Gen.uuid_raw()
+}
+
+public fn uuid_v7() -> String !Gen {
+    Gen.uuid_v7_raw()
+}
+
+public fn nano_id(n: Int) -> String !Gen {
+    Gen.nano_id_raw(n)
+}

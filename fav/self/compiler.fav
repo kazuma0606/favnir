@@ -3873,10 +3873,25 @@ fn lint_expr_w005(expr: Expr) -> List<LintWarning> {
     }
 }
 
+// ── W004: TooManyArgs — fn の引数が 4 個以上 ─────────────────────────────────
+
+fn lint_fn_w004(fd: FnDef) -> List<LintWarning> {
+    bind n <- List.length(fd.params)
+    if n >= 4 {
+        List.singleton(make_warning("W004", fd.name,
+            String.concat("fn ", String.concat(fd.name,
+                String.concat(" の引数が ", String.concat(Int.to_string(n),
+                    " 個です。レコード型へのまとめを検討してください"))))))
+    } else {
+        List.empty()
+    }
+}
+
 // ── Item-level lint dispatch ─────────────────────────────────────────────────
 
 fn lint_fn(fd: FnDef) -> List<LintWarning> {
-    List.concat(lint_expr_w003(fd.body), lint_expr_w005(fd.body))
+    List.concat(lint_fn_w004(fd),
+        List.concat(lint_expr_w003(fd.body), lint_expr_w005(fd.body)))
 }
 
 fn lint_stage(sd: StageDef) -> List<LintWarning> {

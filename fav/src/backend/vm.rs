@@ -7934,6 +7934,19 @@ fn vm_call_builtin(
             )),
             None => Err("Json.write_array_raw requires 1 argument".to_string()),
         },
+        "Json.pretty_raw" => match args.into_iter().next() {
+            Some(VMValue::Str(s)) => match serde_json::from_str::<SerdeJsonValue>(&s) {
+                Ok(v) => serde_json::to_string_pretty(&v)
+                    .map(VMValue::Str)
+                    .map_err(|e| format!("Json.pretty_raw failed: {}", e)),
+                Err(e) => Err(format!("Json.pretty_raw: invalid JSON: {}", e)),
+            },
+            Some(other) => Err(format!(
+                "Json.pretty_raw expects String, got {}",
+                vmvalue_type_name(&other)
+            )),
+            None => Err("Json.pretty_raw requires 1 argument".to_string()),
+        },
         "Json.parse" => match args.into_iter().next() {
             Some(VMValue::Str(s)) => match serde_json::from_str::<SerdeJsonValue>(&s) {
                 Ok(v) => Ok(VMValue::Variant(
@@ -10125,6 +10138,26 @@ fn vm_call_builtin(
                 results.push(VMValue::Record(map));
             }
             Ok(ok_vm(VMValue::List(FavList::new(results))))
+        }
+
+        // ── Gen.* v9.4.0 additions — UUID / nano_id ──────────────────────────
+        "Gen.uuid_raw" => Ok(VMValue::Str(uuid::Uuid::new_v4().to_string())),
+        "Gen.uuid_v7_raw" => Ok(VMValue::Str(uuid::Uuid::now_v7().to_string())),
+        "Gen.nano_id_raw" => {
+            let n = vm_int(
+                args.into_iter()
+                    .next()
+                    .ok_or_else(|| "Gen.nano_id_raw requires 1 argument".to_string())?,
+                "Gen.nano_id_raw",
+            )? as usize;
+            const ALPHABET: &[u8] =
+                b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-";
+            use rand::Rng;
+            let mut rng = rand::thread_rng();
+            let id: String = (0..n)
+                .map(|_| ALPHABET[rng.gen_range(0..ALPHABET.len())] as char)
+                .collect();
+            Ok(VMValue::Str(id))
         }
 
         // ── Crypto.* (v4.5.0) — cryptographic primitives ──────────────────

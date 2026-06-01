@@ -15,3 +15,27 @@ public fn write<T>(value: T) -> String {
 public fn write_list<T>(rows: List<T>) -> String {
     Schema.to_json_array(rows, type_name_of<T>())
 }
+
+// ── v9.4.0 additions ───────────────────────────────────────────────────────────
+
+// encode<T> — write<T> の別名（JSON 文字列を返す）
+public fn encode<T>(value: T) -> String {
+    Schema.to_json(value, type_name_of<T>())
+}
+
+// decode<T> — parse<T> の別名（エラー型を String に変換）
+public fn decode<T>(text: String) -> Result<T, String> {
+    match Json.parse_raw(text) {
+        Err(e) => Result.err(e)
+        Ok(raw) =>
+            match Schema.adapt_one(raw, type_name_of<T>()) {
+                Err(_) => Result.err("json.decode: schema error")
+                Ok(v)  => Result.ok(v)
+            }
+    }
+}
+
+// pretty — JSON 文字列をインデント付きに整形する
+public fn pretty(text: String) -> String {
+    Json.pretty_raw(text)
+}

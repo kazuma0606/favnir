@@ -18567,6 +18567,22 @@ mod lint_tests {
         let output = lint_source_str(src).expect("lint_source_str failed");
         assert!(!output.contains("W001"), "W001 should not fire for abstract stage, got: {}", output);
     }
+
+    // W004: fn の引数が 4 個以上で警告
+    #[test]
+    fn lint_w004_too_many_params() {
+        let src = "fn big(a: Int, b: Int, c: Int, d: Int) -> Int { a + b + c + d }";
+        let output = lint_source_str(src).expect("lint_source_str failed");
+        assert!(output.contains("W004"), "expected W004 in: {}", output);
+    }
+
+    // W004: fn の引数が 3 個なら警告なし
+    #[test]
+    fn lint_w004_three_params_ok() {
+        let src = "fn ok3(a: Int, b: Int, c: Int) -> Int { a + b + c }";
+        let output = lint_source_str(src).expect("lint_source_str failed");
+        assert!(!output.contains("W004"), "W004 should not fire for 3 params, got: {}", output);
+    }
 }
 
 #[cfg(test)]
@@ -18598,5 +18614,158 @@ mod rvm_tests {
         let idx = art.fn_idx_by_name("main").unwrap();
         let result = VM::run(&art, idx, vec![]).unwrap();
         assert_eq!(result, Value::Int(42));
+    }
+}
+
+// ── v940_tests (v9.4.0) — json/gen builtins + csv I/O + W004 ─────────────────
+#[cfg(test)]
+mod v940_tests {
+    use crate::backend::artifact::FvcArtifact;
+    use crate::backend::codegen::codegen_program;
+    use crate::backend::vm::VM;
+    use crate::frontend::parser::Parser;
+    use crate::middle::compiler::compile_program;
+    use crate::value::Value;
+
+    fn run_fn(src: &str, fname: &str, args: Vec<Value>) -> Value {
+        let prog = Parser::parse_str(src, "test.fav").expect("parse");
+        let ir = compile_program(&prog);
+        let artifact: FvcArtifact = codegen_program(&ir);
+        let fn_idx = artifact.fn_idx_by_name(fname).expect("fn not found");
+        VM::run(&artifact, fn_idx, args).expect("VM error")
+    }
+
+    // F-1: Json.pretty_raw — JSON 文字列を整形する
+    #[test]
+    fn json_pretty_raw_formats() {
+        let src = r#"fn test_pretty(s: String) -> String { Json.pretty_raw(s) }"#;
+        let result = run_fn(src, "test_pretty", vec![Value::Str("{\"a\":1,\"b\":2}".to_string())]);
+        match result {
+            Value::Str(s) => {
+                assert!(s.contains('\n'), "pretty output should contain newlines: {}", s);
+                assert!(s.contains("  "), "pretty output should contain indentation: {}", s);
+            }
+            other => panic!("expected Str, got {:?}", other),
+        }
+    }
+
+    // F-2: Json.pretty_raw — invalid JSON はエラーを返す
+    #[test]
+    fn json_pretty_raw_invalid_json_errors() {
+        let src = r#"
+fn test_pretty_err(s: String) -> String {
+    Json.pretty_raw(s)
+}
+"#;
+        let prog = Parser::parse_str(src, "test.fav").expect("parse");
+        let ir = compile_program(&prog);
+        let artifact: FvcArtifact = codegen_program(&ir);
+        let fn_idx = artifact.fn_idx_by_name("test_pretty_err").expect("fn not found");
+        let result = VM::run(&artifact, fn_idx, vec![Value::Str("not json".to_string())]);
+        assert!(result.is_err(), "expected VM error on invalid JSON");
+    }
+
+    // F-3: Gen.uuid_raw — UUID v4 が 36 文字で返る
+    #[test]
+    fn gen_uuid_raw_returns_v4() {
+        let src = r#"fn test_uuid() -> String { Gen.uuid_raw() }"#;
+        let result = run_fn(src, "test_uuid", vec![]);
+        match result {
+            Value::Str(s) => {
+                assert_eq!(s.len(), 36, "UUID v4 should be 36 chars: {}", s);
+                let parts: Vec<&str> = s.split('-').collect();
+                assert_eq!(parts.len(), 5, "UUID should have 5 hyphen-separated parts: {}", s);
+            }
+            other => panic!("expected Str, got {:?}", other),
+        }
+    }
+
+    // F-4: Gen.uuid_v7_raw — UUID v7 が 36 文字で返る
+    #[test]
+    fn gen_uuid_v7_raw_returns_v7() {
+        let src = r#"fn test_uuid_v7() -> String { Gen.uuid_v7_raw() }"#;
+        let result = run_fn(src, "test_uuid_v7", vec![]);
+        match result {
+            Value::Str(s) => {
+                assert_eq!(s.len(), 36, "UUID v7 should be 36 chars: {}", s);
+                let parts: Vec<&str> = s.split('-').collect();
+                assert_eq!(parts.len(), 5, "UUID should have 5 hyphen-separated parts: {}", s);
+            }
+            other => panic!("expected Str, got {:?}", other),
+        }
+    }
+
+    // F-5: Gen.nano_id_raw — 指定した文字数で返る
+    #[test]
+    fn gen_nano_id_raw_correct_len() {
+        let src = r#"fn test_nano(n: Int) -> String { Gen.nano_id_raw(n) }"#;
+        let result = run_fn(src, "test_nano", vec![Value::Int(12)]);
+        match result {
+            Value::Str(s) => {
+                assert_eq!(s.len(), 12, "nano_id(12) should be 12 chars: {}", s);
+                assert!(
+                    s.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '-'),
+                    "nano_id should only contain URL-safe chars: {}",
+                    s
+                );
+            }
+            other => panic!("expected Str, got {:?}", other),
+        }
+    }
+
+    // F-6: Gen.uuid_raw — 2 回呼ぶと異なる値が返る（衝突確率は無視できる）
+    #[test]
+    fn gen_uuid_raw_unique() {
+        let src = r#"fn test_uuid() -> String { Gen.uuid_raw() }"#;
+        let a = match run_fn(src, "test_uuid", vec![]) {
+            Value::Str(s) => s,
+            other => panic!("expected Str, got {:?}", other),
+        };
+        let b = match run_fn(src, "test_uuid", vec![]) {
+            Value::Str(s) => s,
+            other => panic!("expected Str, got {:?}", other),
+        };
+        assert_ne!(a, b, "two uuid() calls should return different values");
+    }
+
+    // F-7: Csv.parse_raw + IO.write_file_raw — CSV ファイル書き込みと読み込み
+    #[test]
+    fn csv_write_and_read_via_builtins() {
+        use tempfile::NamedTempFile;
+        let tmp = NamedTempFile::new().unwrap();
+        let path = tmp.path().to_str().unwrap().to_string();
+
+        // write CSV
+        let src_write = r#"
+fn test_write(path: String, content: String) -> Unit {
+    match IO.write_file_raw(path, content) {
+        Ok(_) => ()
+        Err(e) => ()
+    }
+}
+"#;
+        let csv_content = "id,name\n1,Alice\n2,Bob\n";
+        run_fn(src_write, "test_write", vec![
+            Value::Str(path.clone()),
+            Value::Str(csv_content.to_string()),
+        ]);
+
+        // read back and parse
+        let src_read = r#"
+fn test_read(path: String) -> String {
+    match IO.read_file_raw(path) {
+        Ok(s) => s
+        Err(e) => ""
+    }
+}
+"#;
+        let result = run_fn(src_read, "test_read", vec![Value::Str(path)]);
+        match result {
+            Value::Str(s) => {
+                assert!(s.contains("Alice"), "CSV content should contain Alice: {}", s);
+                assert!(s.contains("Bob"), "CSV content should contain Bob: {}", s);
+            }
+            other => panic!("expected Str, got {:?}", other),
+        }
     }
 }

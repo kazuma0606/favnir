@@ -213,7 +213,8 @@ Rust に触れずに開発できる最初の CLI 拡張。
   → `"seq Pipeline は外部書き込みなしで終了します"`
 - **W003 — UnusedBinding**: `let x = ...` で `x` が一度も参照されない
   → `"変数 x は定義されていますが使用されていません"`
-- **W004 — TooManyArgs**: `stage` の引数型が 4 個以上（タプル化を検討）
+- **W004 — TooManyArgs**: `stage` の引数型が 4 個以上（タプル化を検討）← **v9.4.0 に延期**
+  - 延期理由: タプル要素数のカウントに `List.length` が必要（v9.4.0 で stdlib 追加予定）
 - **W005 — WildcardOnlyMatch**: `match` の腕が `_` のみ
   → `"match 式の腕が _ のみです。網羅的なパターンを検討してください"`
 
@@ -287,11 +288,24 @@ stage CreateOrder: OrderInput -> Order !Gen = |input| {
 }
 ```
 
+**lint W004 — TooManyArgs（v9.3.0 からの持ち越し）**
+
+v9.3.0 で延期した W004 をこのバージョンで実装する。
+`List.length` が追加されるため、タプル要素数カウントが可能になる。
+
+`compiler.fav` への追加:
+- `fn count_tuple_args(ty: Ty) -> Int` — `TTuple` の要素数を返す再帰カウンタ
+  - `TTuple` なら `List.length(elems)`（本バージョンで追加）、それ以外は 1
+- `fn lint_stage_w004(sd: StageDef) -> List<LintWarning>`
+  - `count_tuple_args(sd.in_ty) >= 4` → W004 を返す
+  - `"W004: stage <name> の引数型が <n> 個です。レコード型へのまとめを検討してください"`
+
 **完了条件**
 - `csv.read<Order>` / `json.decode<Order>` が型付きで動作する
 - `fav check` で型パラメータの不一致を検出できる
 - `gen.uuid()` / `gen.uuid_v7()` / `gen.nano_id(n)` が `!Gen` エフェクトで動作する
-- 統合テスト 8 件以上（CSV 読み込み・JSON ラウンドトリップ・UUID 生成等）
+- W004 が `stage` のタプル入力型 4 個以上で警告を出す
+- 統合テスト 9 件以上（CSV 読み込み・JSON ラウンドトリップ・UUID 生成・W004 各 1 件）
 
 ---
 
@@ -884,8 +898,8 @@ CI/CD 整備:
 |---|---|---|---|
 | v9.1.0 | stdlib 拡充（約 30 関数）+ E0012 + マルチパラムクロージャ修正 + `rvm` 独立バイナリ | `rvm` バイナリ追加のみ | 基盤強化 |
 | v9.2.0 | fav fmt — コードフォーマッタ（冪等性保証） | なし | 基盤強化 |
-| v9.3.0 | fav lint — 静的解析（W001 EffectlessSink 〜 W005 WildcardOnlyMatch） | なし | 基盤強化 |
-| v9.4.0 | json・csv Rune — 型安全データ I/O、gen Rune に UUID v4/v7/nano_id 追加 | なし | データ I/O |
+| v9.3.0 | fav lint — 静的解析（W001〜W003・W005、W004 は v9.4.0 へ延期） | なし | 基盤強化 |
+| v9.4.0 | json・csv Rune — 型安全データ I/O、gen Rune に UUID v4/v7/nano_id 追加、**W004 lint ルール追加** | なし | データ I/O |
 | v9.5.0 | http Rune — `!Http` エフェクト追加 | `!Http` 登録のみ | コネクタ拡充 |
 | v9.6.0 | llm Rune — `!Llm` エフェクト（Claude / OpenAI） | `!Llm` 登録のみ | コネクタ拡充 |
 | v9.7.0 | 名目型ラッパー + `where` + `with` + `T?`/`T!`/`??`/`expr?` self-hosted 修正（bugfix） | パーサーのみ | 型システム |

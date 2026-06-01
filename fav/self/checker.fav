@@ -331,6 +331,14 @@ fn email_fn(fname: String) -> String {
     else { "Unknown" }
 }
 
+fn gen_fn(fname: String) -> String {
+    if fname == "uuid_raw"       { "String" }
+    else if fname == "uuid_v7_raw"   { "String" }
+    else if fname == "nano_id_raw"   { "String" }
+    else if fname == "string_val"    { "String" }
+    else { "Unknown" }
+}
+
 fn str_fn(fname: String) -> String {
     if fname == "concat"            { "String" }
     else { if fname == "length"          { "Int" }
@@ -450,32 +458,32 @@ fn float_fn(fname: String) -> String {
 }
 
 fn builtin_ret_ty(ns: String, fname: String) -> String {
-    if ns == "String"   { str_fn(fname) }
-    else { if ns == "List"      { list_fn(fname) }
-    else { if ns == "Option"    { opt_fn(fname) }
-    else { if ns == "Result"    { res_fn(fname) }
-    else { if ns == "Map"       { map_fn(fname) }
-    else { if ns == "Int"       { int_fn(fname) }
-    else { if ns == "Float"     { float_fn(fname) }
-    else { if ns == "IO"        { io_fn(fname) }
-    else { if ns == "Compiler"  { compiler_fn(fname) }
-    else { if ns == "Cache"     { cache_fn(fname) }
-    else { if ns == "Queue"     { queue_fn(fname) }
-    else { if ns == "Email"     { email_fn(fname) }
+    if ns == "String"        { str_fn(fname) }
+    else if ns == "List"     { list_fn(fname) }
+    else if ns == "Option"   { opt_fn(fname) }
+    else if ns == "Result"   { res_fn(fname) }
+    else if ns == "Map"      { map_fn(fname) }
+    else if ns == "Int"      { int_fn(fname) }
+    else if ns == "Float"    { float_fn(fname) }
+    else if ns == "IO"       { io_fn(fname) }
+    else if ns == "Compiler" { compiler_fn(fname) }
+    else if ns == "Cache"    { cache_fn(fname) }
+    else if ns == "Queue"    { queue_fn(fname) }
+    else if ns == "Email"    { email_fn(fname) }
+    else if ns == "Gen"      { gen_fn(fname) }
     else { "Unknown" }
-    }}}}}}}}}}}
 }
 
 // ── Effect inference ──────────────────────────────────────────────────────────
 
 fn ns_to_effect(ns: String) -> String {
-    if ns == "IO"       { "IO" }
-    else { if ns == "Compiler"  { "IO" }
-    else { if ns == "Cache"     { "Cache" }
-    else { if ns == "Queue"     { "Queue" }
-    else { if ns == "Email"     { "Email" }
+    if ns == "IO"            { "IO" }
+    else if ns == "Compiler" { "IO" }
+    else if ns == "Cache"    { "Cache" }
+    else if ns == "Queue"    { "Queue" }
+    else if ns == "Email"    { "Email" }
+    else if ns == "Gen"      { "Gen" }
     else { "" }
-    }}}}
 }
 
 fn infer_arms_effects(arms: Expr) -> List<String> {

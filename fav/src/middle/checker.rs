@@ -5390,7 +5390,9 @@ impl Checker {
                 Box::new(Type::Named("SchemaError".into(), vec![])),
             )),
             ("Json", "write_raw") | ("Json", "write_array_raw") => Some(Type::String),
-            ("Json", "encode") | ("Json", "encode_pretty") => Some(Type::String),
+            ("Json", "encode") | ("Json", "encode_pretty") | ("Json", "pretty_raw") => {
+                Some(Type::String)
+            }
             ("Json", "get") | ("Json", "at") => {
                 Some(Type::Option(Box::new(Type::Named("Json".into(), vec![]))))
             }
@@ -5522,6 +5524,10 @@ impl Checker {
                 )))),
                 Box::new(Type::String),
             )),
+            // Gen v9.4.0 — UUID / nano_id
+            ("Gen", "uuid_raw") | ("Gen", "uuid_v7_raw") | ("Gen", "nano_id_raw") => {
+                Some(Type::String)
+            }
             ("Gen", _) => Some(Type::Unknown),
 
             // Validate.run_raw(type_name, raw_map) (v4.1.5)

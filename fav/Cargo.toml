@@ -1,6 +1,6 @@
 [package]
 name = "fav"
-version = "9.3.0"
+version = "9.4.0"
 edition = "2024"
 
 [[bin]]
@@ -30,7 +30,7 @@ wasm-encoder = "0.219"
 wasmtime = { version = "30", default-features = false, features = ["cranelift", "runtime"] }
 rusqlite = { version = "0.31", features = ["bundled"] }
 ureq = "2"
-uuid = { version = "1", features = ["v4"] }
+uuid = { version = "1", features = ["v4", "v7"] }
 base64 = "0.22"
 rand = { version = "0.8", features = ["small_rng"] }
 csv = "1"

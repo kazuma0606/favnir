@@ -21,3 +21,26 @@ public fn parse_with_opts<T>(text: String, opts: CsvOptions) -> Result<List<T>, 
     chain raw <- Csv.parse_raw(text, opts.delimiter, opts.has_header)
     Schema.adapt(raw, type_name_of<T>())
 }
+
+// ── v9.4.0 additions ───────────────────────────────────────────────────────────
+
+// read<T> — ファイルパスから CSV を読み込んで型付き List に変換する
+public fn read<T>(path: String) -> Result<List<T>, String> !IO {
+    match IO.read_file_raw(path) {
+        Err(e) => Result.err(String.concat("csv.read: cannot read file: ", e))
+        Ok(text) =>
+            match Csv.parse_raw(text, ",", true) {
+                Err(e) => Result.err(e)
+                Ok(raw) =>
+                    match Schema.adapt(raw, type_name_of<T>()) {
+                        Err(_) => Result.err("csv.read: schema error")
+                        Ok(rows) => Result.ok(rows)
+                    }
+            }
+    }
+}
+
+// write_file<T> — List を CSV としてファイルに書き込む
+public fn write_file<T>(path: String, rows: List<T>) -> Result<Unit, String> !IO {
+    IO.write_file_raw(path, Schema.to_csv(rows, type_name_of<T>()))
+}

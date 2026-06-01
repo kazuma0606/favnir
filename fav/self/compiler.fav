@@ -3692,6 +3692,254 @@ public fn fmt_source(src: String) -> Result<String, String> {
 }
 
 // ════════════════════════════════════════════════════════════════════════════
+// LINTER (fav lint)
+// ════════════════════════════════════════════════════════════════════════════
+
+type LintWarning = {
+    code:    String
+    message: String
+    name:    String
+}
+
+fn make_warning(code: String, name: String, msg: String) -> LintWarning {
+    LintWarning { code: code  name: name  message: msg }
+}
+
+// ── W001: EffectlessSink — stage が Unit を返すがエフェクトなし ─────────────
+
+fn is_unit_type(ty: TypeExpr) -> Bool {
+    match ty {
+        TeSimple(name) => name == "Unit"
+        _ => false
+    }
+}
+
+fn lint_stage_w001(sd: StageDef) -> List<LintWarning> {
+    if sd.is_abstract { List.empty() }
+    else {
+        if is_unit_type(sd.ret_ty) {
+            match List.first(sd.effects) {
+                Some(_) => List.empty()
+                None    => List.singleton(make_warning("W001", sd.name,
+                    String.concat("stage ", String.concat(sd.name,
+                    " の戻り型が Unit ですがエフェクトがありません"))))
+            }
+        } else { List.empty() }
+    }
+}
+
+// ── W002: NoWriteInSeq — seq の最終 stage にエフェクトなし ──────────────────
+
+fn find_stage_by_name(name: String, items: List<Item>) -> Option<StageDef> {
+    match List.first(items) {
+        None => Option.none()
+        Some(item) => {
+            match item {
+                IStage(sd) =>
+                    if sd.name == name { Option.some(sd) }
+                    else { find_stage_by_name(name, List.drop(items, 1)) }
+                _ => find_stage_by_name(name, List.drop(items, 1))
+            }
+        }
+    }
+}
+
+fn lint_seq_w002(sd: SeqDef, items: List<Item>) -> List<LintWarning> {
+    if sd.is_abstract { List.empty() }
+    else {
+        match List.last(sd.stages) {
+            None => List.empty()
+            Some(last_name) =>
+                match find_stage_by_name(last_name, items) {
+                    None         => List.empty()
+                    Some(sd_fnd) =>
+                        match List.first(sd_fnd.effects) {
+                            Some(_) => List.empty()
+                            None    => List.singleton(make_warning("W002", sd.name,
+                                String.concat("seq ", String.concat(sd.name,
+                                " の最終 stage にエフェクトがありません"))))
+                        }
+                }
+        }
+    }
+}
+
+// ── W003: UnusedBinding — 束縛変数が後続式で使用されない ────────────────────
+
+fn pat_binds_name(pat: Pat, name: String) -> Bool {
+    match pat {
+        PVar(n)          => n == name
+        PVariantP(parts) => pat_binds_name(parts._1, name)
+        _                => false
+    }
+}
+
+fn expr_uses(name: String, expr: Expr) -> Bool {
+    match expr {
+        EVar(n)           => n == name
+        ELit(_)           => false
+        EArgNil           => false
+        EArmNil           => false
+        EFieldNil         => false
+        EBinOp(parts)     => expr_uses(name, parts._1) || expr_uses(name, parts._2)
+        ECall(parts)      => expr_uses(name, parts._2)
+        EIf(parts)        => expr_uses(name, parts._0) || expr_uses(name, parts._1) || expr_uses(name, parts._2)
+        EAccess(parts)    => expr_uses(name, parts._0)
+        ELambda(parts)    => if parts._0 == name { false } else { expr_uses(name, parts._1) }
+        EMatch(parts)     => expr_uses(name, parts._0) || expr_uses(name, parts._1)
+        EBlock(parts)     => expr_uses(name, parts._0) || expr_uses(name, parts._1)
+        ERecordLit(parts) => expr_uses(name, parts._1)
+        EArgList(parts)   => expr_uses(name, parts._0) || expr_uses(name, parts._1)
+        EArm(parts)       =>
+            if pat_binds_name(parts._0, name) { expr_uses(name, parts._3) }
+            else { expr_uses(name, parts._1) || expr_uses(name, parts._2) || expr_uses(name, parts._3) }
+        EBind(parts)      =>
+            if parts._0 == name { expr_uses(name, parts._1) }
+            else { expr_uses(name, parts._1) || expr_uses(name, parts._2) }
+        ECollect(inner)   => expr_uses(name, inner)
+        EYield(inner)     => expr_uses(name, inner)
+        EField(parts)     => expr_uses(name, parts._1) || expr_uses(name, parts._2)
+    }
+}
+
+fn lint_expr_w003(expr: Expr) -> List<LintWarning> {
+    match expr {
+        EBind(parts) =>
+            List.concat(
+                if parts._0 == "_" { List.empty() }
+                else {
+                    if expr_uses(parts._0, parts._2) { List.empty() }
+                    else { List.singleton(make_warning("W003", parts._0,
+                        String.concat("変数 ", String.concat(parts._0,
+                        " は定義されていますが使用されていません")))) }
+                },
+                List.concat(lint_expr_w003(parts._1), lint_expr_w003(parts._2)))
+        EIf(parts)      => List.concat(lint_expr_w003(parts._1), lint_expr_w003(parts._2))
+        EMatch(parts)   => List.concat(lint_expr_w003(parts._0), lint_expr_w003(parts._1))
+        EArm(parts)     => List.concat(lint_expr_w003(parts._2), lint_expr_w003(parts._3))
+        EBlock(parts)   => List.concat(lint_expr_w003(parts._0), lint_expr_w003(parts._1))
+        ELambda(parts)  => lint_expr_w003(parts._1)
+        ECollect(inner) => lint_expr_w003(inner)
+        _               => List.empty()
+    }
+}
+
+// ── W005: WildcardOnlyMatch — match の腕が _ のみ ───────────────────────────
+
+fn is_wild_pat(pat: Pat) -> Bool {
+    match pat {
+        PWild   => true
+        PVar(n) => n == "_"
+        _       => false
+    }
+}
+
+fn is_wildcard_only(arms: Expr) -> Bool {
+    match arms {
+        EArmNil     => false
+        EArm(parts) =>
+            match parts._3 {
+                EArmNil => is_wild_pat(parts._0)
+                _       => false
+            }
+        _ => false
+    }
+}
+
+fn lint_arms_w005(arms: Expr) -> List<LintWarning> {
+    match arms {
+        EArmNil     => List.empty()
+        EArm(parts) => List.concat(lint_expr_w005(parts._2), lint_arms_w005(parts._3))
+        _           => List.empty()
+    }
+}
+
+fn lint_expr_w005(expr: Expr) -> List<LintWarning> {
+    match expr {
+        EMatch(parts) =>
+            List.concat(
+                if is_wildcard_only(parts._1) {
+                    List.singleton(make_warning("W005", "_",
+                        "match 式の腕が _ のみです。網羅的なパターンを検討してください"))
+                } else { List.empty() },
+                List.concat(lint_expr_w005(parts._0), lint_arms_w005(parts._1)))
+        EIf(parts)      => List.concat(lint_expr_w005(parts._1), lint_expr_w005(parts._2))
+        EBlock(parts)   => List.concat(lint_expr_w005(parts._0), lint_expr_w005(parts._1))
+        EBind(parts)    => List.concat(lint_expr_w005(parts._1), lint_expr_w005(parts._2))
+        ELambda(parts)  => lint_expr_w005(parts._1)
+        ECollect(inner) => lint_expr_w005(inner)
+        EArm(parts)     => List.concat(lint_expr_w005(parts._2), lint_expr_w005(parts._3))
+        _               => List.empty()
+    }
+}
+
+// ── Item-level lint dispatch ─────────────────────────────────────────────────
+
+fn lint_fn(fd: FnDef) -> List<LintWarning> {
+    List.concat(lint_expr_w003(fd.body), lint_expr_w005(fd.body))
+}
+
+fn lint_stage(sd: StageDef) -> List<LintWarning> {
+    match sd.body {
+        None       => lint_stage_w001(sd)
+        Some(body) => List.concat(lint_stage_w001(sd),
+            List.concat(lint_expr_w003(body), lint_expr_w005(body)))
+    }
+}
+
+fn lint_item(item: Item, items: List<Item>) -> List<LintWarning> {
+    match item {
+        IFn(fd)    => lint_fn(fd)
+        IStage(sd) => lint_stage(sd)
+        ISeq(sd)   => lint_seq_w002(sd, items)
+        _          => List.empty()
+    }
+}
+
+fn lint_items_loop(items: List<Item>, all_items: List<Item>) -> List<LintWarning> {
+    match List.first(items) {
+        None       => List.empty()
+        Some(item) => List.concat(
+            lint_item(item, all_items),
+            lint_items_loop(List.drop(items, 1), all_items))
+    }
+}
+
+fn lint_all(prog: Program) -> List<LintWarning> {
+    lint_items_loop(prog.items, prog.items)
+}
+
+// ── Serialization ────────────────────────────────────────────────────────────
+
+fn format_warning(w: LintWarning) -> String {
+    String.concat(w.code, String.concat(":", String.concat(w.name, String.concat(":", w.message))))
+}
+
+fn format_warnings_loop(ws: List<LintWarning>, acc: String) -> String {
+    match List.first(ws) {
+        None    => acc
+        Some(w) =>
+            format_warnings_loop(
+                List.drop(ws, 1),
+                if acc == "" { format_warning(w) }
+                else { String.concat(acc, String.concat("\n", format_warning(w))) })
+    }
+}
+
+fn format_warnings(ws: List<LintWarning>) -> String {
+    format_warnings_loop(ws, "")
+}
+
+// Lint a source string. Returns Ok(warning_lines) or Err(parse_error).
+// Warning lines are newline-separated "CODE:name:message" strings.
+// Returns Ok("") if no warnings.
+public fn lint_source(src: String) -> Result<String, String> {
+    Result.and_then(lex(src), |toks|
+    Result.and_then(parse_tokens(toks), |prog|
+    Result.ok(format_warnings(lint_all(prog)))))
+}
+
+// ════════════════════════════════════════════════════════════════════════════
 // PIPELINE
 // ════════════════════════════════════════════════════════════════════════════
 

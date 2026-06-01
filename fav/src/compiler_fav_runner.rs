@@ -253,6 +253,38 @@ pub fn fmt_source_str(src: &str) -> Result<String, String> {
     }
 }
 
+/// Call `compiler.fav`'s `lint_source(src)` and return the warning lines string.
+///
+/// * `Ok(warnings)` — success; empty string means no warnings.
+/// * `Err(msg)`     — lex/parse error in the source.
+pub fn lint_source_str(src: &str) -> Result<String, String> {
+    let artifact = get_compiler_fav_artifact();
+    let fn_idx = artifact
+        .fn_idx_by_name("lint_source")
+        .ok_or_else(|| "compiler_fav_runner: lint_source not found in compiler.fav".to_string())?;
+
+    let result = VM::run(&artifact, fn_idx, vec![Value::Str(src.to_string())])
+        .map_err(|e: VMError| format!("compiler.fav VM error: {}", e.message))?;
+
+    match result {
+        Value::Variant(ref tag, Some(ref payload)) if tag == "ok" => match payload.as_ref() {
+            Value::Str(s) => Ok(s.clone()),
+            _ => Err("compiler_fav_runner: lint_source returned non-string Ok payload".to_string()),
+        },
+        Value::Variant(ref tag, ref payload) if tag == "err" => {
+            let msg = match payload {
+                Some(p) => match p.as_ref() {
+                    Value::Str(s) => s.clone(),
+                    _ => format!("{:?}", p),
+                },
+                None => "unknown lint error".to_string(),
+            };
+            Err(msg)
+        }
+        _ => Err("compiler_fav_runner: unexpected result from lint_source".to_string()),
+    }
+}
+
 // ── project-mode compilation ───────────────────────────────────────────────────
 
 /// Recursively collect source texts for a fav.toml project file and all its

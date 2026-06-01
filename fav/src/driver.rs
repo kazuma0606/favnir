@@ -18517,6 +18517,59 @@ mod fmt_tests {
 }
 
 #[cfg(test)]
+mod lint_tests {
+    use crate::compiler_fav_runner::lint_source_str;
+
+    // E-1: W001 — stage が Unit を返すがエフェクトなし
+    #[test]
+    fn lint_w001_effectless_sink() {
+        let src = "stage Noop: String -> Unit = |s| ()";
+        let output = lint_source_str(src).expect("lint_source_str failed");
+        assert!(output.contains("W001"), "expected W001 in: {}", output);
+    }
+
+    // E-2: W002 — seq の最終 stage にエフェクトなし
+    #[test]
+    fn lint_w002_no_write_in_seq() {
+        let src = "stage Pure: Int -> Int = |x| x\nseq S = Pure";
+        let output = lint_source_str(src).expect("lint_source_str failed");
+        assert!(output.contains("W002"), "expected W002 in: {}", output);
+    }
+
+    // E-3: W003 — 束縛変数が未使用
+    #[test]
+    fn lint_w003_unused_binding() {
+        let src = "fn f() -> Int {\n    bind x <- 42\n    99\n}";
+        let output = lint_source_str(src).expect("lint_source_str failed");
+        assert!(output.contains("W003"), "expected W003 in: {}", output);
+    }
+
+    // E-4: W005 — match の腕が _ のみ
+    #[test]
+    fn lint_w005_wildcard_only() {
+        let src = "fn f(x: Int) -> String {\n    match x {\n        _ => \"ok\"\n    }\n}";
+        let output = lint_source_str(src).expect("lint_source_str failed");
+        assert!(output.contains("W005"), "expected W005 in: {}", output);
+    }
+
+    // E-5: 警告なしのソースでは空文字列が返る
+    #[test]
+    fn lint_clean_source_no_warnings() {
+        let src = "fn add(a: Int, b: Int) -> Int {\n    a + b\n}";
+        let output = lint_source_str(src).expect("lint_source_str failed");
+        assert_eq!(output.trim(), "", "expected no warnings, got: {}", output);
+    }
+
+    // E-6: W001 は abstract stage では発火しない
+    #[test]
+    fn lint_w001_abstract_stage_no_warn() {
+        let src = "abstract stage Sink: String -> Unit";
+        let output = lint_source_str(src).expect("lint_source_str failed");
+        assert!(!output.contains("W001"), "W001 should not fire for abstract stage, got: {}", output);
+    }
+}
+
+#[cfg(test)]
 mod rvm_tests {
     // F-1: VM_VERSION 定数の値を確認
     #[test]

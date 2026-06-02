@@ -6595,6 +6595,17 @@ fn vm_call_builtin(
                 Err(msg) => Ok(err_vm(VMValue::Str(msg))),
             }
         }
+        "Compiler.doc_source_raw" => {
+            let v = args
+                .into_iter()
+                .next()
+                .ok_or_else(|| "Compiler.doc_source_raw requires 1 argument".to_string())?;
+            let src = vm_string(v, "Compiler.doc_source_raw")?;
+            match crate::compiler_fav_runner::doc_source_str(&src) {
+                Ok(markdown) => Ok(ok_vm(VMValue::Str(markdown))),
+                Err(msg) => Ok(err_vm(VMValue::Str(msg))),
+            }
+        }
         "IO.argv" => {
             let argv: Vec<VMValue> = TEST_ARGV.with(|t| {
                 if let Some(ref args) = *t.borrow() {

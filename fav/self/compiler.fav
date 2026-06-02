@@ -65,6 +65,7 @@ type Token =
   | TkAbstract
   | TkQuestion
   | TkQuestionQuestion
+  | TkDocComment(String)
   | TkEof
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -295,7 +296,17 @@ fn scan_collect(chars: List<String>) -> Bool {
         Some(c) => {
             bind tail <- List.drop(trimmed, 1)
             if c == "/" && next_char_is(tail, "/") {
-                scan_collect(skip_line_comment(List.drop(tail, 1)))
+                bind after_two <- List.drop(tail, 1)
+                if next_char_is(after_two, "/") {
+                    bind doc_rest  <- List.drop(after_two, 1)
+                    bind doc_chars <- List.drop_while(doc_rest, |ch| ch == " " || ch == "\t")
+                    bind text_chars <- List.take_while(doc_chars, |ch| ch != "\n")
+                    bind text <- String.from_chars(text_chars)
+                    yield Result.ok(TkDocComment(text));
+                    scan_collect(skip_line_comment(after_two))
+                } else {
+                    scan_collect(skip_line_comment(after_two))
+                }
             } else {
             if c == "\"" {
                 bind str_acc <- List.drop_while(List.singleton(""), |x| true)
@@ -451,6 +462,7 @@ type FnDef = {
     params: List<Param>
     ret: TypeExpr
     body: Expr
+    doc: String
 }
 
 type VariantDef = {
@@ -463,6 +475,7 @@ type TypeDef = {
     is_record: Bool
     variants: List<VariantDef>
     fields: List<Param>
+    doc: String
 }
 
 type TestDef = {
@@ -478,6 +491,7 @@ type StageDef = {
     ret_ty:      TypeExpr
     effects:     List<String>
     body:        Option<Expr>
+    doc:         String
 }
 
 type SeqDef = {
@@ -485,6 +499,7 @@ type SeqDef = {
     is_abstract: Bool
     name:        String
     stages:      List<String>
+    doc:         String
 }
 
 type WrapperDef = {
@@ -492,6 +507,7 @@ type WrapperDef = {
     inner: String
     where_pred: Expr
     with_impls: List<String>
+    doc: String
 }
 
 type Item =
@@ -651,6 +667,7 @@ fn token_eq(a: Token, b: Token) -> Bool {
         TkStage => { match b { TkStage => true _ => false } }
         TkSeq => { match b { TkSeq => true _ => false } }
         TkAbstract => { match b { TkAbstract => true _ => false } }
+        TkDocComment(s) => { match b { TkDocComment(t) => s == t _ => false } }
         TkEof => { match b { TkEof => true _ => false } }
     }
 }
@@ -674,6 +691,7 @@ fn token_to_string(t: Token) -> String {
         TkSemicolon => ";" TkLParen => "(" TkRParen => ")"
         TkLBrace => "{" TkRBrace => "}" TkLBracket => "[" TkRBracket => "]"
         TkStage => "stage" TkSeq => "seq" TkAbstract => "abstract"
+        TkDocComment(s) => String.concat("///", s)
         TkEof => "EOF"
     }
 }
@@ -1514,6 +1532,7 @@ fn parse_fn_def_finish(is_pub: Bool, fname: String, params_p: ParamsParse, ret_p
                 params: params_p.params
                 ret: ret_p.ty
                 body: body_p.expr
+                doc: ""
             }
             rest: rest7
         })
@@ -1649,6 +1668,7 @@ fn parse_type_def_variant_branch(tname: String, rest3: List<Token>) -> Result<Ty
                 is_record: false
                 variants: vs.variants
                 fields: empty_params
+                doc: ""
             }
             rest: vs.rest
         })
@@ -1669,6 +1689,7 @@ fn parse_type_def_record_branch(tname: String, rest3: List<Token>) -> Result<Typ
                         is_record: true
                         variants: empty_variants
                         fields: fields_p.params
+                        doc: ""
                     }
                     rest: rest5
                 })
@@ -1732,6 +1753,7 @@ fn parse_type_or_wrapper_item(toks: List<Token>) -> Result<ItemParse, String> {
                                                                     inner: type_expr_to_str(inner_p.ty)
                                                                     where_pred: where_p.expr
                                                                     with_impls: with_p.impls
+                                                                    doc: ""
                                                                 })
                                                                 rest: where_p.rest
                                                             })
@@ -1865,7 +1887,7 @@ fn parse_stage_def_with_body(sname: String, is_pub: Bool, param_ty: TypeExpr, re
             bind sd <- StageDef {
                 is_public: is_pub  is_abstract: false
                 name: sname  param_ty: param_ty  ret_ty: ret_ty
-                effects: effects  body: Option.some(body_p.expr)
+                effects: effects  body: Option.some(body_p.expr)  doc: ""
             }
             Result.ok(StageDefParse { stage_def: sd  rest: body_p.rest })
         }
@@ -1877,7 +1899,7 @@ fn parse_stage_def_effects_done(sname: String, is_pub: Bool, is_abstract: Bool, 
         bind sd <- StageDef {
             is_public: is_pub  is_abstract: true
             name: sname  param_ty: param_ty  ret_ty: ret_ty
-            effects: effs_p.effects  body: Option.none()
+            effects: effs_p.effects  body: Option.none()  doc: ""
         }
         Result.ok(StageDefParse { stage_def: sd  rest: effs_p.rest })
     } else {
@@ -1930,7 +1952,7 @@ fn parse_seq_def(toks: List<Token>, is_pub: Bool, is_abstract: Bool) -> Result<S
             bind rest1 <- advance(toks)
             if is_abstract {
                 bind empty_stages <- empty_string_list()
-                bind sd <- SeqDef { is_public: is_pub  is_abstract: true  name: sname  stages: empty_stages }
+                bind sd <- SeqDef { is_public: is_pub  is_abstract: true  name: sname  stages: empty_stages  doc: "" }
                 Result.ok(SeqDefParse { seq_def: sd  rest: rest1 })
             } else {
                 match expect_tok(rest1, TkEq) {
@@ -1940,7 +1962,7 @@ fn parse_seq_def(toks: List<Token>, is_pub: Bool, is_abstract: Bool) -> Result<S
                         match parse_seq_pipeline_acc(rest2, empty_stages) {
                             Err(e) => Result.err(e)
                             Ok(pipe_p) => {
-                                bind sd <- SeqDef { is_public: is_pub  is_abstract: false  name: sname  stages: pipe_p.stages }
+                                bind sd <- SeqDef { is_public: is_pub  is_abstract: false  name: sname  stages: pipe_p.stages  doc: "" }
                                 Result.ok(SeqDefParse { seq_def: sd  rest: pipe_p.rest })
                             }
                         }
@@ -2037,14 +2059,61 @@ fn parse_item(toks: List<Token>) -> Result<ItemParse, String> {
     }
 }
 
+type DocCollect = {
+    doc: String
+    rest: List<Token>
+}
+
+fn collect_doc(toks: List<Token>, acc: String) -> DocCollect {
+    match peek(toks) {
+        Some(TkDocComment(text)) => {
+            bind rest1 <- advance(toks)
+            bind sep <- if acc == "" { "" } else { "\n" }
+            collect_doc(rest1, String.concat(acc, String.concat(sep, text)))
+        }
+        _ => DocCollect { doc: acc, rest: toks }
+    }
+}
+
+fn set_item_doc(item: Item, doc: String) -> Item {
+    match item {
+        IFn(fd) => IFn(FnDef {
+            is_public: fd.is_public  name: fd.name  params: fd.params
+            ret: fd.ret  body: fd.body  doc: doc
+        })
+        IType(td) => IType(TypeDef {
+            name: td.name  is_record: td.is_record  variants: td.variants
+            fields: td.fields  doc: doc
+        })
+        IStage(sd) => IStage(StageDef {
+            is_public: sd.is_public  is_abstract: sd.is_abstract  name: sd.name
+            param_ty: sd.param_ty  ret_ty: sd.ret_ty  effects: sd.effects
+            body: sd.body  doc: doc
+        })
+        ISeq(sd) => ISeq(SeqDef {
+            is_public: sd.is_public  is_abstract: sd.is_abstract
+            name: sd.name  stages: sd.stages  doc: doc
+        })
+        IWrapper(wd) => IWrapper(WrapperDef {
+            name: wd.name  inner: wd.inner  where_pred: wd.where_pred
+            with_impls: wd.with_impls  doc: doc
+        })
+        ITest(td) => ITest(td)
+    }
+}
+
 fn parse_items_acc(toks: List<Token>, acc: List<Item>) -> Result<ItemsParse, String> {
     match peek(toks) {
         Some(TkEof) => Result.ok(ItemsParse { items: acc, rest: toks })
         None => Result.ok(ItemsParse { items: acc, rest: toks })
         _ => {
-            match parse_item(toks) {
+            bind dc <- collect_doc(toks, "")
+            match parse_item(dc.rest) {
                 Err(e) => Result.err(e)
-                Ok(item_p) => parse_items_acc(item_p.rest, List.push(acc, item_p.item))
+                Ok(item_p) => {
+                    bind item_with_doc <- set_item_doc(item_p.item, dc.doc)
+                    parse_items_acc(item_p.rest, List.push(acc, item_with_doc))
+                }
             }
         }
     }
@@ -2057,6 +2126,7 @@ fn parse_tokens(toks: List<Token>) -> Result<Program, String> {
         params: List.take_while(List.singleton(Param { name: "", ty: TeSimple("") }), |v| false)
         ret: TeSimple("")
         body: ELit(LUnit)
+        doc: ""
     })), |v| false)
     match parse_items_acc(toks, empty) {
         Err(e) => Result.err(e)
@@ -3302,6 +3372,7 @@ fn compile_stage_body(stage_def: StageDef, body: Expr) -> Result<List<FnEntry>, 
                 params: List.singleton(Param { name: pname  ty: stage_def.param_ty })
                 ret: stage_def.ret_ty
                 body: inner
+                doc: ""
             }
             compile_fn_def(fn_def)
         }
@@ -3341,6 +3412,7 @@ fn compile_seq_def(seq_def: SeqDef) -> Result<List<FnEntry>, String> {
             params: List.singleton(Param { name: "$input"  ty: TeSimple("Any") })
             ret: TeSimple("Any")
             body: body
+            doc: ""
         }
         compile_fn_def(fn_def)
     }
@@ -3363,6 +3435,7 @@ fn compile_wrapper_validator(wd: WrapperDef, items: List<Item>, acc: List<FnEntr
                 params:    List.singleton(Param { name: param  ty: TeSimple(wd.inner) })
                 ret:       TeResult(TeSimple(wd.inner), TeSimple("String"))
                 body:      fn_body
+                doc:       ""
             }
             Result.and_then(compile_fn_def(fn_def), |entries|
             compile_items(List.drop(items, 1), List.concat(acc, entries)))
@@ -3764,12 +3837,32 @@ fn pretty_param(p: Param) -> String {
     String.concat(p.name, String.concat(": ", pretty_type(p.ty)))
 }
 
+fn pretty_doc_lines(lines: List<String>, acc: String) -> String {
+    match List.first(lines) {
+        None => acc
+        Some(line) => {
+            bind rest <- List.drop(lines, 1)
+            bind rendered <- String.concat("/// ", line)
+            bind new_acc <- if acc == "" { rendered } else { String.concat(acc, String.concat("\n", rendered)) }
+            pretty_doc_lines(rest, new_acc)
+        }
+    }
+}
+
+fn pretty_doc(doc: String) -> String {
+    if doc == "" { "" } else {
+        bind lines <- String.lines(doc)
+        String.concat(pretty_doc_lines(lines, ""), "\n")
+    }
+}
+
 fn pretty_fn_def(f: FnDef) -> String {
+    bind doc_str <- pretty_doc(f.doc)
     bind pub_str <- if f.is_public { "public " } else { "" }
     bind params_str <- String.join(List.map(f.params, |p| pretty_param(p)), ", ")
     bind ret_str <- pretty_type(f.ret)
     bind body_str <- pretty_expr(f.body, 4)
-    String.concat(pub_str, String.concat("fn ", String.concat(f.name, String.concat("(", String.concat(params_str, String.concat(") -> ", String.concat(ret_str, String.concat(" {\n    ", String.concat(body_str, "\n}") ))))))))
+    String.concat(doc_str, String.concat(pub_str, String.concat("fn ", String.concat(f.name, String.concat("(", String.concat(params_str, String.concat(") -> ", String.concat(ret_str, String.concat(" {\n    ", String.concat(body_str, "\n}") )))))))))
 }
 
 fn pretty_variant(v: VariantDef) -> String {
@@ -3804,11 +3897,13 @@ fn join_record_fields_loop(fields: List<Param>, acc: String) -> String {
 }
 
 fn pretty_type_def(td: TypeDef) -> String {
-    if td.is_record {
+    bind doc_str <- pretty_doc(td.doc)
+    bind body_str <- if td.is_record {
         String.concat("type ", String.concat(td.name, String.concat(" = {\n", String.concat(join_record_fields_loop(td.fields, ""), "\n}"))))
     } else {
         String.concat("type ", String.concat(td.name, String.concat(" =\n", join_variants_loop(td.variants, ""))))
     }
+    String.concat(doc_str, body_str)
 }
 
 fn pretty_test_def(td: TestDef) -> String {
@@ -3823,27 +3918,32 @@ fn pretty_effects(effects: List<String>) -> String {
 }
 
 fn pretty_stage_def(sd: StageDef) -> String {
+    bind doc_str <- pretty_doc(sd.doc)
     bind abs_str <- if sd.is_abstract { "abstract " } else { "" }
     bind pub_str <- if sd.is_public { "public " } else { "" }
     bind effs_str <- pretty_effects(sd.effects)
     bind sig_str <- String.concat(pub_str, String.concat(abs_str, String.concat("stage ", String.concat(sd.name, String.concat(": ", String.concat(pretty_type(sd.param_ty), String.concat(" -> ", String.concat(pretty_type(sd.ret_ty), effs_str))))))))
-    match sd.body {
+    bind body_str <- match sd.body {
         None => sig_str
         Some(body) => String.concat(sig_str, String.concat(" = ", pretty_expr(body, 0)))
     }
+    String.concat(doc_str, body_str)
 }
 
 fn pretty_seq_def(sd: SeqDef) -> String {
+    bind doc_str <- pretty_doc(sd.doc)
     bind abs_str <- if sd.is_abstract { "abstract " } else { "" }
     bind pub_str <- if sd.is_public { "public " } else { "" }
-    if sd.is_abstract {
+    bind body_str <- if sd.is_abstract {
         String.concat(pub_str, String.concat(abs_str, String.concat("seq ", sd.name)))
     } else {
         String.concat(pub_str, String.concat(abs_str, String.concat("seq ", String.concat(sd.name, String.concat(" = ", String.join(sd.stages, " |> "))))))
     }
+    String.concat(doc_str, body_str)
 }
 
 fn pretty_wrapper_def(wd: WrapperDef) -> String {
+    bind doc_str <- pretty_doc(wd.doc)
     bind base <- String.concat("type ", String.concat(wd.name, String.concat("(", String.concat(wd.inner, ")"))))
     bind with_part <- if List.length(wd.with_impls) == 0 { "" }
                       else { String.concat(" with ", String.join(wd.with_impls, ", ")) }
@@ -3851,7 +3951,7 @@ fn pretty_wrapper_def(wd: WrapperDef) -> String {
         ELit(lit) => match lit { LUnit => "" _ => String.concat(" where ", pretty_expr(wd.where_pred, 0)) }
         _ => String.concat(" where ", pretty_expr(wd.where_pred, 0))
     }
-    String.concat(base, String.concat(with_part, where_part))
+    String.concat(doc_str, String.concat(base, String.concat(with_part, where_part)))
 }
 
 fn pretty_item(item: Item) -> String {
@@ -3887,6 +3987,104 @@ public fn fmt_source(src: String) -> Result<String, String> {
     Result.and_then(lex(src), |toks|
     Result.and_then(parse_tokens(toks), |prog|
     Result.ok(pretty_program(prog))))
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// DOC GENERATOR (fav doc)
+// ════════════════════════════════════════════════════════════════════════════
+
+fn doc_fn_sig(fd: FnDef) -> String {
+    bind pub_str <- if fd.is_public { "public " } else { "" }
+    bind params_str <- String.join(List.map(fd.params, |p| pretty_param(p)), ", ")
+    bind ret_str <- pretty_type(fd.ret)
+    String.concat(pub_str, String.concat("fn ", String.concat(fd.name, String.concat("(", String.concat(params_str, String.concat(") -> ", ret_str))))))
+}
+
+fn doc_fn_def(fd: FnDef) -> String {
+    if fd.is_public {
+        bind sig <- doc_fn_sig(fd)
+        bind doc_part <- if fd.doc == "" { "" } else { String.concat("\n\n", fd.doc) }
+        String.concat("### ", String.concat(fd.name, String.concat("\n\n```\n", String.concat(sig, String.concat("\n```", doc_part)))))
+    } else { "" }
+}
+
+fn doc_type_def_item(td: TypeDef) -> String {
+    bind sig <- pretty_type_def(td)
+    bind doc_part <- if td.doc == "" { "" } else { String.concat("\n\n", td.doc) }
+    String.concat("### ", String.concat(td.name, String.concat("\n\n```\n", String.concat(sig, String.concat("\n```", doc_part)))))
+}
+
+fn doc_wrapper_def_item(wd: WrapperDef) -> String {
+    bind sig <- pretty_wrapper_def(wd)
+    bind doc_part <- if wd.doc == "" { "" } else { String.concat("\n\n", wd.doc) }
+    String.concat("### ", String.concat(wd.name, String.concat("\n\n```\n", String.concat(sig, String.concat("\n```", doc_part)))))
+}
+
+fn doc_stage_def_item(sd: StageDef) -> String {
+    if sd.is_public {
+        bind sig <- pretty_stage_def(sd)
+        bind doc_part <- if sd.doc == "" { "" } else { String.concat("\n\n", sd.doc) }
+        String.concat("### ", String.concat(sd.name, String.concat("\n\n```\n", String.concat(sig, String.concat("\n```", doc_part)))))
+    } else { "" }
+}
+
+fn doc_seq_def_item(sd: SeqDef) -> String {
+    if sd.is_public {
+        bind sig <- pretty_seq_def(sd)
+        bind doc_part <- if sd.doc == "" { "" } else { String.concat("\n\n", sd.doc) }
+        String.concat("### ", String.concat(sd.name, String.concat("\n\n```\n", String.concat(sig, String.concat("\n```", doc_part)))))
+    } else { "" }
+}
+
+fn join_nonempty(items: List<String>, sep: String, acc: String) -> String {
+    match List.first(items) {
+        None => acc
+        Some(s) => {
+            bind rest <- List.drop(items, 1)
+            if s == "" { join_nonempty(rest, sep, acc) }
+            else { if acc == "" { join_nonempty(rest, sep, s) }
+            else { join_nonempty(rest, sep, String.concat(acc, String.concat(sep, s))) }
+            }
+        }
+    }
+}
+
+fn build_doc_section(title: String, items: List<String>) -> String {
+    bind joined <- join_nonempty(items, "\n\n---\n\n", "")
+    if joined == "" { "" }
+    else { String.concat("## ", String.concat(title, String.concat("\n\n", joined))) }
+}
+
+fn build_doc_sections(fns: List<String>, types: List<String>, stages: List<String>) -> String {
+    bind fn_sec    <- build_doc_section("Functions", fns)
+    bind type_sec  <- build_doc_section("Types", types)
+    bind stage_sec <- build_doc_section("Stages & Sequences", stages)
+    bind parts <- List.concat(List.singleton(fn_sec), List.concat(List.singleton(type_sec), List.singleton(stage_sec)))
+    join_nonempty(parts, "\n\n", "")
+}
+
+fn doc_items_acc(items: List<Item>, fns: List<String>, types: List<String>, stages: List<String>) -> String {
+    match List.first(items) {
+        None => build_doc_sections(fns, types, stages)
+        Some(IFn(fd)) => doc_items_acc(List.drop(items, 1), List.push(fns, doc_fn_def(fd)), types, stages)
+        Some(IType(td)) => doc_items_acc(List.drop(items, 1), fns, List.push(types, doc_type_def_item(td)), stages)
+        Some(IWrapper(wd)) => doc_items_acc(List.drop(items, 1), fns, List.push(types, doc_wrapper_def_item(wd)), stages)
+        Some(IStage(sd)) => doc_items_acc(List.drop(items, 1), fns, types, List.push(stages, doc_stage_def_item(sd)))
+        Some(ISeq(sd)) => doc_items_acc(List.drop(items, 1), fns, types, List.push(stages, doc_seq_def_item(sd)))
+        Some(ITest(_)) => doc_items_acc(List.drop(items, 1), fns, types, stages)
+    }
+}
+
+// Generate Markdown documentation from a source string.
+// Returns Ok(markdown) on success, Err(msg) on parse failure.
+public fn doc_source(src: String) -> Result<String, String> {
+    Result.and_then(lex(src), |toks|
+    Result.and_then(parse_tokens(toks), |prog| {
+        bind empty_fns    <- empty_string_list()
+        bind empty_types  <- empty_string_list()
+        bind empty_stages <- empty_string_list()
+        Result.ok(doc_items_acc(prog.items, empty_fns, empty_types, empty_stages))
+    }))
 }
 
 // ════════════════════════════════════════════════════════════════════════════

@@ -7854,6 +7854,60 @@ pub fn cmd_lint(file: Option<&str>, warn_only: bool) {
     }
 }
 
+// ── fav doc ───────────────────────────────────────────────────────────────────
+
+/// Generate Markdown documentation from .fav source files.
+///
+/// * `path`    — a `.fav` file or a directory (scanned recursively).
+/// * `out_dir` — output directory for `.md` files (created if absent).
+pub fn cmd_doc(path: &str, out_dir: &str) {
+    let entries: Vec<PathBuf> = {
+        let p = Path::new(path);
+        if p.is_file() {
+            vec![p.to_path_buf()]
+        } else if p.is_dir() {
+            collect_fav_files_recursive(p)
+        } else {
+            eprintln!("error: '{}' is not a file or directory", path);
+            process::exit(1);
+        }
+    };
+
+    if let Err(e) = std::fs::create_dir_all(out_dir) {
+        eprintln!("error: cannot create output directory '{}': {}", out_dir, e);
+        process::exit(1);
+    }
+
+    for entry in &entries {
+        let src = match std::fs::read_to_string(entry) {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("error: cannot read '{}': {}", entry.display(), e);
+                process::exit(1);
+            }
+        };
+
+        let md = match crate::compiler_fav_runner::doc_source_str(&src) {
+            Ok(m) => m,
+            Err(e) => {
+                eprintln!("error: doc failed for '{}': {}", entry.display(), e);
+                process::exit(1);
+            }
+        };
+
+        let stem = entry
+            .file_stem()
+            .map(|s| s.to_string_lossy().to_string())
+            .unwrap_or_else(|| "out".to_string());
+        let out_path = Path::new(out_dir).join(format!("{}.md", stem));
+        if let Err(e) = std::fs::write(&out_path, &md) {
+            eprintln!("error: cannot write '{}': {}", out_path.display(), e);
+            process::exit(1);
+        }
+        println!("doc: {} → {}", entry.display(), out_path.display());
+    }
+}
+
 // ── fav explain ───────────────────────────────────────────────────────────────
 
 pub fn cmd_explain(file: Option<&str>, schema: bool, format: &str, focus: &str) {
@@ -19194,5 +19248,84 @@ public fn main() -> String {
 }"#;
         assert_eq!(compile_and_run("username_ok", src_ok), Value::Str("ok".to_string()));
         assert_eq!(compile_and_run("username_err", src_err), Value::Str("Username: validation failed".to_string()));
+    }
+}
+
+// ── v980_tests (v9.8.0) — fav doc: /// doc comments → Markdown ───────────────
+#[cfg(test)]
+mod v980_tests {
+    fn doc_source(src: &str) -> String {
+        crate::compiler_fav_runner::doc_source_str(src)
+            .unwrap_or_else(|e| panic!("doc_source_str error: {}", e))
+    }
+
+    #[test]
+    fn doc_fn_no_comment() {
+        let src = r#"public fn add(a: Int, b: Int) -> Int { a + b }"#;
+        let md = doc_source(src);
+        assert!(md.contains("### add"), "expected '### add' in:\n{}", md);
+        assert!(md.contains("fn add(a: Int, b: Int) -> Int"), "expected sig in:\n{}", md);
+    }
+
+    #[test]
+    fn doc_fn_with_comment() {
+        let src = "/// Adds two integers.\npublic fn add(a: Int, b: Int) -> Int { a + b }";
+        let md = doc_source(src);
+        assert!(md.contains("### add"), "expected '### add' in:\n{}", md);
+        assert!(md.contains("Adds two integers."), "expected doc text in:\n{}", md);
+    }
+
+    #[test]
+    fn doc_private_fn_excluded() {
+        let src = r#"/// Private helper.
+fn helper(x: Int) -> Int { x }
+public fn main() -> Int { helper(1) }"#;
+        let md = doc_source(src);
+        assert!(!md.contains("helper"), "private fn should be excluded:\n{}", md);
+        assert!(md.contains("### main"), "public fn should be included:\n{}", md);
+    }
+
+    #[test]
+    fn doc_type_def() {
+        let src = r#"/// A point in 2D space.
+type Point = { x: Int  y: Int }
+public fn origin() -> Int { 0 }"#;
+        let md = doc_source(src);
+        assert!(md.contains("### Point"), "expected type in:\n{}", md);
+        assert!(md.contains("A point in 2D space."), "expected doc text in:\n{}", md);
+    }
+
+    #[test]
+    fn doc_wrapper_def() {
+        let src = r#"/// A valid percentage.
+type Percent(Float) where |v| v >= 0.0 && v <= 100.0
+public fn make() -> Int { 0 }"#;
+        let md = doc_source(src);
+        assert!(md.contains("### Percent"), "expected wrapper in:\n{}", md);
+        assert!(md.contains("A valid percentage."), "expected doc text in:\n{}", md);
+    }
+
+    #[test]
+    fn doc_stage_def() {
+        let src = r#"/// Normalizes a float value.
+public stage normalize: Float -> Float = |v| v / 100.0"#;
+        let md = doc_source(src);
+        assert!(md.contains("### normalize"), "expected stage in:\n{}", md);
+        assert!(md.contains("Normalizes a float value."), "expected doc text in:\n{}", md);
+    }
+
+    #[test]
+    fn doc_multiline_comment() {
+        let src = "/// First line.\n/// Second line.\npublic fn f() -> Int { 0 }";
+        let md = doc_source(src);
+        assert!(md.contains("First line."), "expected first line in:\n{}", md);
+        assert!(md.contains("Second line."), "expected second line in:\n{}", md);
+    }
+
+    #[test]
+    fn doc_empty_file() {
+        let md = doc_source("");
+        // Empty file should produce empty or minimal output without error
+        assert!(md.len() < 100, "expected minimal output for empty file:\n{}", md);
     }
 }

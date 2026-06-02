@@ -65,11 +65,11 @@ mod value;
 use driver::{
     cmd_bench, cmd_build, cmd_build_schema, cmd_bundle, cmd_check, cmd_check_with_sample,
     cmd_checkpoint_list, cmd_checkpoint_reset, cmd_checkpoint_set, cmd_checkpoint_show,
-    cmd_db_migrate, cmd_db_migrate_rollback, cmd_db_migrate_status, cmd_deploy, cmd_docs, cmd_exec,
-    cmd_explain, cmd_explain_compiler, cmd_explain_diff, cmd_explain_error, cmd_explain_error_list,
-    cmd_explain_error_list_json, cmd_explain_lineage, cmd_fmt, cmd_graph, cmd_infer, cmd_infer_proto,
-    cmd_install, cmd_lint, cmd_migrate, cmd_new, cmd_publish, cmd_registry, cmd_run, cmd_test,
-    cmd_watch,
+    cmd_db_migrate, cmd_db_migrate_rollback, cmd_db_migrate_status, cmd_deploy, cmd_doc, cmd_docs,
+    cmd_exec, cmd_explain, cmd_explain_compiler, cmd_explain_diff, cmd_explain_error,
+    cmd_explain_error_list, cmd_explain_error_list_json, cmd_explain_lineage, cmd_fmt, cmd_graph,
+    cmd_infer, cmd_infer_proto, cmd_install, cmd_lint, cmd_migrate, cmd_new, cmd_publish,
+    cmd_registry, cmd_run, cmd_test, cmd_watch,
 };
 use rune_cmd::cmd_rune;
 use std::process;
@@ -953,6 +953,31 @@ fn main_impl() {
                 }
             }
             cmd_lint(file.as_deref(), warn_only);
+        }
+
+        Some("doc") => {
+            let mut path = ".".to_string();
+            let mut out_dir = "docs".to_string();
+            let mut i = 2usize;
+            while i < args.len() {
+                match args[i].as_str() {
+                    "--out" => {
+                        out_dir = args
+                            .get(i + 1)
+                            .unwrap_or_else(|| {
+                                eprintln!("error: --out requires a directory path");
+                                process::exit(1);
+                            })
+                            .clone();
+                        i += 2;
+                    }
+                    other => {
+                        path = other.to_string();
+                        i += 1;
+                    }
+                }
+            }
+            cmd_doc(&path, &out_dir);
         }
 
         Some("infer") => {

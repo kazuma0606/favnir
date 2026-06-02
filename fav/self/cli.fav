@@ -1,4 +1,4 @@
-// fav/self/cli.fav — Favnir CLI dispatcher (v9.7.5)
+// fav/self/cli.fav — Favnir CLI dispatcher (v9.8.0)
 //
 // Handles: check / fmt / lint / explain --lineage / rune list|info / version / help
 //
@@ -25,6 +25,7 @@ type CliCmd =
   | CmdRuneInfo(String)
   | CmdFmt(String, Bool)
   | CmdLint(String, Bool)
+  | CmdDoc(String, String)
   | CmdUnknown(String)
 
 // ── Utilities ──────────────────────────────────────────────────────────────────
@@ -69,8 +70,9 @@ fn parse_named_cmd(cmd: String, args: List<String>) -> CliCmd {
     else { if cmd == "rune"      { parse_rune_cmd(args) }
     else { if cmd == "fmt"       { parse_fmt_cmd(args) }
     else { if cmd == "lint"      { parse_lint_cmd(args) }
+    else { if cmd == "doc"       { parse_doc_cmd(args) }
     else { CmdUnknown(String.concat("unknown command: ", cmd)) }
-    } } } } } } } }
+    } } } } } } } } }
 }
 
 fn parse_fmt_cmd(args: List<String>) -> CliCmd {
@@ -88,6 +90,33 @@ fn parse_lint_cmd(args: List<String>) -> CliCmd {
     match find_positional(rest) {
         None    => CmdUnknown("lint requires a file argument")
         Some(f) => CmdLint(f, wae_flag)
+    }
+}
+
+fn not_eq_str(a: String, b: String) -> Bool {
+    if eq_str(a, b) { false } else { true }
+}
+
+fn find_flag_value(args: List<String>, flag: String, default: String) -> String {
+    match List.find(args, |a| eq_str(a, flag)) {
+        None    => default
+        Some(_) => {
+            bind at_flag  <- List.drop_while(args, |a| not_eq_str(a, flag))
+            bind after    <- List.drop(at_flag, 1)
+            match List.first(after) {
+                None    => default
+                Some(v) => if not_flag(v) { v } else { default }
+            }
+        }
+    }
+}
+
+fn parse_doc_cmd(args: List<String>) -> CliCmd {
+    bind rest <- List.drop(args, 1)
+    bind out  <- find_flag_value(rest, "--out", "docs")
+    match find_positional(rest) {
+        None    => CmdDoc(".", out)
+        Some(p) => CmdDoc(p, out)
     }
 }
 
@@ -133,7 +162,7 @@ fn parse_rune_sub(sub: String, args: List<String>) -> CliCmd {
 // ── Action handlers ────────────────────────────────────────────────────────────
 
 fn run_version() -> Unit !IO {
-    IO.println("favnir 9.7.5 (self-host CLI)")
+    IO.println("favnir 9.8.0 (self-host CLI)")
 }
 
 fn run_help() -> Unit !IO {
@@ -147,6 +176,7 @@ fn run_help() -> Unit !IO {
     bind _ <- IO.println("  explain --lineage <file>      Static lineage analysis")
     bind _ <- IO.println("  rune list                     List installed runes")
     bind _ <- IO.println("  rune info <name>              Show rune location")
+    bind _ <- IO.println("  doc <file> [--out <dir>]       Generate Markdown docs from /// comments")
     bind _ <- IO.println("  version                       Show version")
     IO.println("  help                          Show this help")
 }
@@ -208,6 +238,32 @@ fn run_fmt(path: String, check: Bool) -> Unit !IO {
                             }
                             Ok(_) => IO.println(String.concat("formatted: ", path))
                         }
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn run_doc(path: String, out: String) -> Unit !IO {
+    match IO.read_file_raw(path) {
+        Err(e) => {
+            bind _ <- IO.write_stderr_raw(String.concat("error: cannot read file: ", e))
+            IO.exit_raw(1)
+        }
+        Ok(src) => {
+            match Compiler.doc_source_raw(src) {
+                Err(e) => {
+                    bind _ <- IO.write_stderr_raw(String.concat("error: ", e))
+                    IO.exit_raw(1)
+                }
+                Ok(md) => {
+                    match IO.write_file_raw(out, md) {
+                        Err(e) => {
+                            bind _ <- IO.write_stderr_raw(String.concat("error: cannot write: ", e))
+                            IO.exit_raw(1)
+                        }
+                        Ok(_) => IO.println(String.concat("doc: ", path))
                     }
                 }
             }
@@ -286,6 +342,7 @@ public fn main() -> Unit !IO {
         CmdRuneInfo(name)      => run_rune_info(name)
         CmdFmt(parts)          => run_fmt(parts._0, parts._1)
         CmdLint(parts)         => run_lint(parts._0, parts._1)
+        CmdDoc(parts)          => run_doc(parts._0, parts._1)
         CmdUnknown(msg)        => {
             bind _ <- IO.write_stderr_raw(String.concat("error: ", msg))
             IO.exit_raw(1)

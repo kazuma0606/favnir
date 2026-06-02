@@ -63,6 +63,8 @@ type Token =
   | TkStage
   | TkSeq
   | TkAbstract
+  | TkInterface
+  | TkImpl
   | TkQuestion
   | TkQuestionQuestion
   | TkDocComment(String)
@@ -113,9 +115,11 @@ fn keyword_token(s: String) -> Option<Token> {
     else if s == "yield"    { Option.some(TkYield) }
     else if s == "true"     { Option.some(TkTrue) }
     else if s == "false"    { Option.some(TkFalse) }
-    else if s == "stage"    { Option.some(TkStage) }
-    else if s == "seq"      { Option.some(TkSeq) }
-    else if s == "abstract" { Option.some(TkAbstract) }
+    else if s == "stage"     { Option.some(TkStage) }
+    else if s == "seq"       { Option.some(TkSeq) }
+    else if s == "abstract"  { Option.some(TkAbstract) }
+    else if s == "interface" { Option.some(TkInterface) }
+    else if s == "impl"      { Option.some(TkImpl) }
     else { Option.none() }
 }
 
@@ -510,6 +514,22 @@ type WrapperDef = {
     doc: String
 }
 
+type InterfaceMethodDecl = {
+    name: String
+    ty: String
+}
+
+type InterfaceDef = {
+    name: String
+    methods: List<InterfaceMethodDecl>
+}
+
+type ImplDeclDef = {
+    interface_names: List<String>
+    type_name: String
+    methods: List<FnDef>
+}
+
 type Item =
   | IFn(FnDef)
   | IType(TypeDef)
@@ -517,6 +537,8 @@ type Item =
   | IStage(StageDef)
   | ISeq(SeqDef)
   | IWrapper(WrapperDef)
+  | IInterface(InterfaceDef)
+  | IImpl(ImplDeclDef)
 
 type Program = {
     items: List<Item>
@@ -601,6 +623,21 @@ type PipelineNamesParse = {
     rest: List<Token>
 }
 
+type InterfaceMethodDeclParse = {
+    method: InterfaceMethodDecl
+    rest: List<Token>
+}
+
+type InterfaceMethodDeclsParse = {
+    methods: List<InterfaceMethodDecl>
+    rest: List<Token>
+}
+
+type ImplMethodsParse = {
+    methods: List<FnDef>
+    rest: List<Token>
+}
+
 fn peek(toks: List<Token>) -> Option<Token> {
     List.first(toks)
 }
@@ -667,6 +704,8 @@ fn token_eq(a: Token, b: Token) -> Bool {
         TkStage => { match b { TkStage => true _ => false } }
         TkSeq => { match b { TkSeq => true _ => false } }
         TkAbstract => { match b { TkAbstract => true _ => false } }
+        TkInterface => { match b { TkInterface => true _ => false } }
+        TkImpl => { match b { TkImpl => true _ => false } }
         TkDocComment(s) => { match b { TkDocComment(t) => s == t _ => false } }
         TkEof => { match b { TkEof => true _ => false } }
     }
@@ -691,6 +730,7 @@ fn token_to_string(t: Token) -> String {
         TkSemicolon => ";" TkLParen => "(" TkRParen => ")"
         TkLBrace => "{" TkRBrace => "}" TkLBracket => "[" TkRBracket => "]"
         TkStage => "stage" TkSeq => "seq" TkAbstract => "abstract"
+        TkInterface => "interface" TkImpl => "impl"
         TkDocComment(s) => String.concat("///", s)
         TkEof => "EOF"
     }
@@ -1974,6 +2014,140 @@ fn parse_seq_def(toks: List<Token>, is_pub: Bool, is_abstract: Bool) -> Result<S
     }
 }
 
+// ── interface / impl parser helpers ──────────────────────────────────────────
+
+fn skip_interface_type_tokens(toks: List<Token>) -> List<Token> {
+    match peek(toks) {
+        None => toks
+        Some(TkRBrace) => toks
+        Some(TkEof) => toks
+        Some(TkIdent(_)) => {
+            bind rest1 <- advance(toks)
+            match peek(rest1) {
+                Some(TkColon) => toks
+                _ => skip_interface_type_tokens(rest1)
+            }
+        }
+        _ => skip_interface_type_tokens(advance(toks))
+    }
+}
+
+fn parse_interface_method_decl(toks: List<Token>) -> Result<InterfaceMethodDeclParse, String> {
+    match peek(toks) {
+        Some(TkIdent(mname)) => {
+            bind rest1 <- advance(toks)
+            match expect_tok(rest1, TkColon) {
+                Err(e) => Result.err(e)
+                Ok(rest2) => {
+                    bind rest3 <- skip_interface_type_tokens(rest2)
+                    Result.ok(InterfaceMethodDeclParse {
+                        method: InterfaceMethodDecl { name: mname, ty: "" }
+                        rest: rest3
+                    })
+                }
+            }
+        }
+        _ => Result.err("expected interface method name")
+    }
+}
+
+fn parse_interface_methods_acc(toks: List<Token>, acc: List<InterfaceMethodDecl>) -> Result<InterfaceMethodDeclsParse, String> {
+    match peek(toks) {
+        Some(TkRBrace) => Result.ok(InterfaceMethodDeclsParse { methods: acc, rest: toks })
+        Some(TkEof) => Result.err("unterminated interface body")
+        _ => {
+            match parse_interface_method_decl(toks) {
+                Err(e) => Result.err(e)
+                Ok(mp) => parse_interface_methods_acc(mp.rest, List.push(acc, mp.method))
+            }
+        }
+    }
+}
+
+fn parse_interface_item(toks: List<Token>) -> Result<ItemParse, String> {
+    match peek(toks) {
+        Some(TkIdent(iname)) => {
+            bind rest1 <- advance(toks)
+            match expect_tok(rest1, TkLBrace) {
+                Err(e) => Result.err(e)
+                Ok(rest2) => {
+                    match parse_interface_methods_acc(rest2, List.empty()) {
+                        Err(e) => Result.err(e)
+                        Ok(mp) => {
+                            match expect_tok(mp.rest, TkRBrace) {
+                                Err(e) => Result.err(e)
+                                Ok(rest3) => Result.ok(ItemParse {
+                                    item: IInterface(InterfaceDef { name: iname, methods: mp.methods })
+                                    rest: rest3
+                                })
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        _ => Result.err("expected interface name")
+    }
+}
+
+fn parse_impl_methods_acc(toks: List<Token>, acc: List<FnDef>) -> Result<ImplMethodsParse, String> {
+    match peek(toks) {
+        Some(TkRBrace) => Result.ok(ImplMethodsParse { methods: acc, rest: toks })
+        Some(TkEof) => Result.err("unterminated impl body")
+        Some(TkFn) => {
+            match parse_fn_def(toks, false) {
+                Err(e) => Result.err(e)
+                Ok(fd) => parse_impl_methods_acc(fd.rest, List.push(acc, fd.fn_def))
+            }
+        }
+        _ => Result.err("expected fn or } in impl body")
+    }
+}
+
+fn parse_impl_item(toks: List<Token>) -> Result<ItemParse, String> {
+    match peek(toks) {
+        Some(TkIdent(iface_name)) => {
+            bind rest1 <- advance(toks)
+            match expect_tok(rest1, TkFor) {
+                Err(e) => Result.err(e)
+                Ok(rest2) => {
+                    match peek(rest2) {
+                        Some(TkIdent(type_name)) => {
+                            bind rest3 <- advance(rest2)
+                            match expect_tok(rest3, TkLBrace) {
+                                Err(e) => Result.err(e)
+                                Ok(rest4) => {
+                                    match parse_impl_methods_acc(rest4, List.empty()) {
+                                        Err(e) => Result.err(e)
+                                        Ok(mp) => {
+                                            match expect_tok(mp.rest, TkRBrace) {
+                                                Err(e) => Result.err(e)
+                                                Ok(rest5) => {
+                                                    bind iface_names <- List.singleton(iface_name)
+                                                    Result.ok(ItemParse {
+                                                        item: IImpl(ImplDeclDef {
+                                                            interface_names: iface_names
+                                                            type_name: type_name
+                                                            methods: mp.methods
+                                                        })
+                                                        rest: rest5
+                                                    })
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        _ => Result.err("expected type name after for")
+                    }
+                }
+            }
+        }
+        _ => Result.err("expected interface name after impl")
+    }
+}
+
 fn parse_item(toks: List<Token>) -> Result<ItemParse, String> {
     match peek(toks) {
         Some(TkPublic) => {
@@ -2055,7 +2229,15 @@ fn parse_item(toks: List<Token>) -> Result<ItemParse, String> {
                 _ => Result.err("expected stage or seq after abstract")
             }
         }
-        _ => Result.err("expected fn, type, public, stage, seq, abstract, or test")
+        Some(TkInterface) => {
+            bind rest1 <- advance(toks)
+            parse_interface_item(rest1)
+        }
+        Some(TkImpl) => {
+            bind rest1 <- advance(toks)
+            parse_impl_item(rest1)
+        }
+        _ => Result.err("expected fn, type, public, stage, seq, abstract, test, interface, or impl")
     }
 }
 
@@ -2099,6 +2281,8 @@ fn set_item_doc(item: Item, doc: String) -> Item {
             with_impls: wd.with_impls  doc: doc
         })
         ITest(td) => ITest(td)
+        IInterface(_) => item
+        IImpl(_) => item
     }
 }
 
@@ -3444,6 +3628,33 @@ fn compile_wrapper_validator(wd: WrapperDef, items: List<Item>, acc: List<FnEntr
     }
 }
 
+fn compile_impl_decl(id: ImplDeclDef, acc: List<FnEntry>) -> Result<List<FnEntry>, String> {
+    match List.first(id.methods) {
+        None => Result.ok(acc)
+        Some(fn_def) => {
+            bind renamed_def <- FnDef {
+                is_public: fn_def.is_public
+                name: String.concat(id.type_name, String.concat("_", fn_def.name))
+                params: fn_def.params
+                ret: fn_def.ret
+                body: fn_def.body
+                doc: fn_def.doc
+            }
+            match compile_fn_def(renamed_def) {
+                Err(e) => Result.err(e)
+                Ok(entries) => {
+                    bind remaining <- ImplDeclDef {
+                        interface_names: id.interface_names
+                        type_name: id.type_name
+                        methods: List.drop(id.methods, 1)
+                    }
+                    compile_impl_decl(remaining, List.concat(acc, entries))
+                }
+            }
+        }
+    }
+}
+
 fn compile_items(items: List<Item>, acc: List<FnEntry>) -> Result<List<FnEntry>, String> {
     match List.first(items) {
         None => Result.ok(acc)
@@ -3471,6 +3682,13 @@ fn compile_items(items: List<Item>, acc: List<FnEntry>) -> Result<List<FnEntry>,
                 ISeq(seq_def) => {
                     Result.and_then(compile_seq_def(seq_def), |entries|
                     compile_items(List.drop(items, 1), List.concat(acc, entries)))
+                }
+                IInterface(_) => compile_items(List.drop(items, 1), acc)
+                IImpl(id) => {
+                    match compile_impl_decl(id, List.empty()) {
+                        Err(e) => Result.err(e)
+                        Ok(entries) => compile_items(List.drop(items, 1), List.concat(acc, entries))
+                    }
                 }
             }
         }
@@ -3962,6 +4180,14 @@ fn pretty_item(item: Item) -> String {
         IStage(sd) => pretty_stage_def(sd)
         ISeq(sd) => pretty_seq_def(sd)
         IWrapper(wd) => pretty_wrapper_def(wd)
+        IInterface(id) => String.concat("interface ", String.concat(id.name, " { }"))
+        IImpl(id) => {
+            bind iface <- match List.first(id.interface_names) {
+                None => "?"
+                Some(n) => n
+            }
+            String.concat("impl ", String.concat(iface, String.concat(" for ", String.concat(id.name, " { }"))))
+        }
     }
 }
 
@@ -4072,6 +4298,8 @@ fn doc_items_acc(items: List<Item>, fns: List<String>, types: List<String>, stag
         Some(IStage(sd)) => doc_items_acc(List.drop(items, 1), fns, types, List.push(stages, doc_stage_def_item(sd)))
         Some(ISeq(sd)) => doc_items_acc(List.drop(items, 1), fns, types, List.push(stages, doc_seq_def_item(sd)))
         Some(ITest(_)) => doc_items_acc(List.drop(items, 1), fns, types, stages)
+        Some(IInterface(_)) => doc_items_acc(List.drop(items, 1), fns, types, stages)
+        Some(IImpl(_)) => doc_items_acc(List.drop(items, 1), fns, types, stages)
     }
 }
 

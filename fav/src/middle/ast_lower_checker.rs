@@ -420,6 +420,18 @@ fn lower_test_def(td: &ast::TestDef) -> Value {
 
 // ── Item ──────────────────────────────────────────────────────────────────────
 
+fn lower_interface_decl(decl: &ast::InterfaceDecl) -> Value {
+    vm_record(vec![("name", sv(&decl.name))])
+}
+
+fn lower_impl_decl(decl: &ast::InterfaceImplDecl) -> Value {
+    let iface_names: Vec<Value> = decl.interface_names.iter().map(|s| sv(s)).collect();
+    vm_record(vec![
+        ("interface_names", vm_list(iface_names)),
+        ("type_name", sv(&decl.type_name)),
+    ])
+}
+
 fn lower_item(item: &ast::Item) -> Option<Value> {
     match item {
         ast::Item::FnDef(fd) => Some(v1("IFn", lower_fn_def(fd))),
@@ -430,6 +442,8 @@ fn lower_item(item: &ast::Item) -> Option<Value> {
             }
         }
         ast::Item::TestDef(td) => Some(v1("ITest", lower_test_def(td))),
+        ast::Item::InterfaceDecl(d) => Some(v1("IInterface", lower_interface_decl(d))),
+        ast::Item::InterfaceImplDecl(d) => Some(v1("IImpl", lower_impl_decl(d))),
         _ => None,
     }
 }

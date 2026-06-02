@@ -776,7 +776,7 @@ pub const BUILTIN_FNS: &[BuiltinFn] = &[
     },
 ];
 
-const KNOWN_RUNES: &[(&str, &str)] = &[
+pub const KNOWN_RUNES: &[(&str, &str)] = &[
     ("aws", "AWS S3/SQS/DynamoDB !AWS"),
     ("cache", "Cache operations !Cache"),
     ("csv", "CSV read/write !Io"),

@@ -19665,3 +19665,119 @@ public stage normalize: Float -> Float = |v| v / 100.0"#;
         assert!(md.len() < 100, "expected minimal output for empty file:\n{}", md);
     }
 }
+
+// ── v9120_tests (v9.12.0) — interface/impl self-hosted + E0014/E0015 ─────────
+#[cfg(test)]
+mod v9120_tests {
+    use crate::frontend::parser::Parser;
+
+    fn check_with_checker_fav(src: &str, name: &str) -> Result<(), Vec<String>> {
+        let tmp = std::env::temp_dir().join(format!("fav_v9120_{}.fav", name));
+        std::fs::write(&tmp, src).unwrap();
+        let path = tmp.to_str().unwrap().to_string();
+        let source = std::fs::read_to_string(&path).unwrap();
+        let program = Parser::parse_str(&source, &path).expect("parse error");
+        let prog_vm = crate::middle::ast_lower_checker::lower_program(&program);
+        crate::checker_fav_runner::run_checker_fav(prog_vm)
+    }
+
+    fn compile_src(src: &str) -> Result<Vec<u8>, String> {
+        let tmp = std::env::temp_dir().join("fav_v9120_compile.fav");
+        std::fs::write(&tmp, src).unwrap();
+        crate::compiler_fav_runner::compile_file_to_bytes(tmp.to_str().unwrap())
+    }
+
+    // D-1a: interface keyword compiles without parse error in Favnir pipeline
+    #[test]
+    fn interface_keyword_does_not_cause_parse_error() {
+        let src = r#"
+interface Greetable {
+    greet: (String) -> String
+}
+public fn main() -> String { "ok" }
+"#;
+        let result = compile_src(src);
+        assert!(result.is_ok(), "interface keyword caused error: {:?}", result.err());
+    }
+
+    // D-1b: impl keyword compiles without parse error in Favnir pipeline
+    #[test]
+    fn impl_keyword_does_not_cause_parse_error() {
+        let src = r#"
+interface Greetable {
+    greet: (String) -> String
+}
+type Name(String)
+impl Greetable for Name {
+    fn greet(n: Name) -> String { "hello" }
+}
+public fn main() -> String { "ok" }
+"#;
+        let result = compile_src(src);
+        assert!(result.is_ok(), "impl keyword caused error: {:?}", result.err());
+    }
+
+    // D-1c: missing impl block for user-defined interface → E0014
+    #[test]
+    fn missing_impl_e0014_detected() {
+        // type Order(String) with Validatable: wrapper + user-defined interface + no impl block
+        let src = r#"
+interface Validatable {
+    validate: String -> Bool
+}
+type Order(String) with Validatable
+public fn main() -> String { "ok" }
+"#;
+        let result = check_with_checker_fav(src, "e0014");
+        assert!(result.is_err(), "expected E0014 error for missing impl");
+        let msgs = result.unwrap_err();
+        assert!(
+            msgs.iter().any(|m| m.contains("E0014")),
+            "expected E0014 in errors, got: {:?}", msgs
+        );
+    }
+
+    // D-1d: undefined interface referenced with `with` → E0015
+    #[test]
+    fn undefined_interface_e0015_detected() {
+        // type Order(String) with Validatable: no interface definition at all → E0015
+        let src = r#"
+type Order(String) with Validatable
+public fn main() -> String { "ok" }
+"#;
+        let result = check_with_checker_fav(src, "e0015");
+        assert!(result.is_err(), "expected E0015 error for undefined interface");
+        let msgs = result.unwrap_err();
+        assert!(
+            msgs.iter().any(|m| m.contains("E0015")),
+            "expected E0015 in errors, got: {:?}", msgs
+        );
+    }
+
+    // D-1e: Rune definition jump — handle_rune_definition returns None for unknown namespace
+    #[test]
+    fn rune_definition_returns_none_for_unknown_namespace() {
+        let result = crate::lsp::definition::handle_rune_definition(
+            "unknown_ns.some_fn(",
+            18,
+            "/tmp/workspace",
+        );
+        assert!(result.is_none(), "expected None for unknown namespace");
+    }
+
+    // D-1f: handle_rune_definition recognizes http namespace structure
+    #[test]
+    fn rune_definition_recognizes_http_namespace() {
+        // When file doesn't exist it returns None — just verify it doesn't panic and
+        // attempts to look up only known rune namespaces
+        let result = crate::lsp::definition::handle_rune_definition(
+            "http.get(",
+            8,
+            "/nonexistent/workspace",
+        );
+        // None is expected since rune_modules don't exist at that path
+        // but it should not panic — the namespace IS known so it attempts the file lookup
+        // The test passes whether Some or None (just verifying no panic)
+        let _ = result;
+    }
+}

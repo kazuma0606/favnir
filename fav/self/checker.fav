@@ -104,11 +104,27 @@ type WrapperDef = {
     with_impls: List<String>
 }
 
+type InterfaceDef = {
+    name: String
+}
+
+type ImplDeclDef = {
+    interface_names: List<String>
+    type_name: String
+}
+
+type ImplEntry = {
+    iface: String
+    type_: String
+}
+
 type Item =
   | IFn(FnDef)
   | IType(TypeDef)
   | ITest(TestDef)
   | IWrapper(WrapperDef)
+  | IInterface(InterfaceDef)
+  | IImpl(ImplDeclDef)
 
 type Program = {
     items: List<Item>
@@ -1407,6 +1423,100 @@ fn check_item(item: Item, env: List<KVPair>) -> Result<String, String> {
             Result.and_then(infer_expr(td.body, test_env), |ty|
             Result.ok(td.name))
         }
+        IInterface(id) => Result.ok(id.name)
+        IImpl(id) => Result.ok(id.type_name)
+    }
+}
+
+fn collect_interface_schemes(items: List<Item>, env: List<KVPair>) -> List<KVPair> {
+    match List.first(items) {
+        None => env
+        Some(item) => match item {
+            IInterface(id) => collect_interface_schemes(List.drop(items, 1),
+                                  env_insert(env, id.name, "interface"))
+            _ => collect_interface_schemes(List.drop(items, 1), env)
+        }
+    }
+}
+
+fn collect_impl_decls_acc(items: List<Item>, acc: List<ImplEntry>) -> List<ImplEntry> {
+    match List.first(items) {
+        None => acc
+        Some(item) => match item {
+            IImpl(id) => {
+                bind entries <- List.map(id.interface_names, |iface|
+                    ImplEntry { iface: iface, type_: id.type_name }
+                )
+                collect_impl_decls_acc(List.drop(items, 1), List.concat(acc, entries))
+            }
+            _ => collect_impl_decls_acc(List.drop(items, 1), acc)
+        }
+    }
+}
+
+fn collect_impl_decls(items: List<Item>) -> List<ImplEntry> {
+    collect_impl_decls_acc(items, List.empty())
+}
+
+fn is_builtin_iface(name: String) -> Bool {
+    name == "Eq" || name == "Show" || name == "Serialize" || name == "Deserialize"
+}
+
+fn has_impl_entry(impl_list: List<ImplEntry>, iface: String, type_name: String) -> Bool {
+    match List.first(impl_list) {
+        None => false
+        Some(e) => {
+            if e.iface == iface && e.type_ == type_name { true }
+            else { has_impl_entry(List.drop(impl_list, 1), iface, type_name) }
+        }
+    }
+}
+
+fn check_with_impl_one(iface: String, type_name: String, impl_list: List<ImplEntry>, iface_env: List<KVPair>) -> Result<String, String> {
+    if is_builtin_iface(iface) { Result.ok("ok") }
+    else {
+        match env_lookup(iface_env, iface) {
+            None => Result.err(fmt_err("E0015", String.concat("undefined interface ", iface)))
+            Some(_) => {
+                if has_impl_entry(impl_list, iface, type_name) { Result.ok("ok") }
+                else {
+                    bind msg <- String.concat(iface, String.concat(" is not implemented for ", type_name))
+                    bind hint <- String.concat("hint: add `impl ", String.concat(iface, String.concat(" for ", String.concat(type_name, " { ... }` block"))))
+                    Result.err(String.concat(fmt_err("E0014", msg), String.concat("\n", hint)))
+                }
+            }
+        }
+    }
+}
+
+fn check_with_impls_acc(impls: List<String>, type_name: String, impl_list: List<ImplEntry>, iface_env: List<KVPair>) -> Result<String, String> {
+    match List.first(impls) {
+        None => Result.ok("ok")
+        Some(iface) => {
+            match check_with_impl_one(iface, type_name, impl_list, iface_env) {
+                Err(e) => Result.err(e)
+                Ok(_) => check_with_impls_acc(List.drop(impls, 1), type_name, impl_list, iface_env)
+            }
+        }
+    }
+}
+
+fn check_wrapper_with_impls(wd: WrapperDef, impl_list: List<ImplEntry>, iface_env: List<KVPair>) -> Result<String, String> {
+    check_with_impls_acc(wd.with_impls, wd.name, impl_list, iface_env)
+}
+
+fn check_items_with_impls(items: List<Item>, impl_list: List<ImplEntry>, iface_env: List<KVPair>) -> Result<String, String> {
+    match List.first(items) {
+        None => Result.ok("ok")
+        Some(item) => match item {
+            IWrapper(wd) => {
+                match check_wrapper_with_impls(wd, impl_list, iface_env) {
+                    Err(e) => Result.err(e)
+                    Ok(_) => check_items_with_impls(List.drop(items, 1), impl_list, iface_env)
+                }
+            }
+            _ => check_items_with_impls(List.drop(items, 1), impl_list, iface_env)
+        }
     }
 }
 
@@ -1422,7 +1532,12 @@ public fn check(prog: Program) -> Result<String, String> {
     bind init_env   <- env_empty()
     bind scheme_env <- collect_fn_schemes(prog.items, init_env)
     bind full_env   <- collect_variant_constructors(prog.items, scheme_env)
-    check_items(prog.items, full_env)
+    bind iface_env  <- collect_interface_schemes(prog.items, full_env)
+    bind impl_list  <- collect_impl_decls(prog.items)
+    match check_items_with_impls(prog.items, impl_list, iface_env) {
+        Err(e) => Result.err(e)
+        Ok(_) => check_items(prog.items, full_env)
+    }
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────

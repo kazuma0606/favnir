@@ -1,7 +1,93 @@
 use crate::frontend::lexer::Span;
+use crate::lsp::completion::KNOWN_RUNES;
 use crate::lsp::document_store::DocumentStore;
 use crate::lsp::hover::{position_to_char_offset, span_contains};
 use crate::lsp::protocol::{Location, Position, Range};
+
+/// Detect `<ns>.<fn>` pattern at `offset` and jump to the Rune function definition.
+pub fn handle_rune_definition(src: &str, offset: usize, workspace_root: &str) -> Option<Location> {
+    // Extract identifier before cursor (the function name)
+    let before = &src[..offset.min(src.len())];
+    // Find end of function name: scan back from cursor past alnum/_
+    let fn_end = before.len();
+    let fn_start = before
+        .char_indices()
+        .rev()
+        .take_while(|(_, c)| c.is_alphanumeric() || *c == '_')
+        .last()
+        .map(|(i, _)| i)
+        .unwrap_or(fn_end);
+    if fn_start == fn_end {
+        return None;
+    }
+    let fn_name = &before[fn_start..fn_end];
+
+    // Expect a dot before the function name
+    let before_fn = &before[..fn_start];
+    if !before_fn.ends_with('.') {
+        return None;
+    }
+
+    // Extract namespace before the dot
+    let before_dot = &before_fn[..before_fn.len() - 1];
+    let ns_end = before_dot.len();
+    let ns_start = before_dot
+        .char_indices()
+        .rev()
+        .take_while(|(_, c)| c.is_alphanumeric() || *c == '_')
+        .last()
+        .map(|(i, _)| i)
+        .unwrap_or(ns_end);
+    let ns = &before_dot[ns_start..ns_end];
+    if ns.is_empty() {
+        return None;
+    }
+
+    // Check that ns is a known rune
+    let is_known = KNOWN_RUNES.iter().any(|(name, _)| *name == ns);
+    if !is_known {
+        return None;
+    }
+
+    // Build rune file path
+    let rune_path = std::path::Path::new(workspace_root)
+        .join("rune_modules")
+        .join(ns)
+        .join(format!("{}.fav", ns));
+
+    let source = std::fs::read_to_string(&rune_path).ok()?;
+
+    // Find line containing `fn <fn_name>` or `public fn <fn_name>`
+    let target_fn = format!("fn {}", fn_name);
+    for (line_idx, line) in source.lines().enumerate() {
+        let trimmed = line.trim_start();
+        if trimmed.starts_with(&target_fn)
+            || trimmed.starts_with(&format!("public {}", target_fn))
+        {
+            let uri = format!(
+                "file:///{}",
+                rune_path
+                    .to_string_lossy()
+                    .replace('\\', "/")
+                    .trim_start_matches('/')
+            );
+            return Some(Location {
+                uri,
+                range: Range {
+                    start: Position {
+                        line: line_idx as u32,
+                        character: 0,
+                    },
+                    end: Position {
+                        line: line_idx as u32,
+                        character: 0,
+                    },
+                },
+            });
+        }
+    }
+    None
+}
 
 pub fn handle_definition(store: &DocumentStore, uri: &str, pos: Position) -> Option<Location> {
     let doc = store.get(uri)?;

@@ -12,7 +12,7 @@ pub mod signature;
 use std::io::{self, BufRead, Write};
 
 use completion::handle_completion;
-use definition::handle_definition;
+use definition::{handle_definition, handle_rune_definition};
 use diagnostics::errors_to_diagnostics;
 use document_store::DocumentStore;
 use hover::handle_hover;
@@ -23,6 +23,7 @@ pub struct LspServer<W: Write> {
     store: DocumentStore,
     writer: W,
     shutdown_requested: bool,
+    workspace_root: Option<String>,
 }
 
 impl<W: Write> LspServer<W> {
@@ -30,6 +31,7 @@ impl<W: Write> LspServer<W> {
         Self {
             store: DocumentStore::new(),
             writer,
+            workspace_root: None,
             shutdown_requested: false,
         }
     }
@@ -37,6 +39,22 @@ impl<W: Write> LspServer<W> {
     pub fn handle(&mut self, request: RpcRequest) -> io::Result<bool> {
         match request.method.as_str() {
             "initialize" => {
+                self.workspace_root = request
+                    .params
+                    .get("rootUri")
+                    .and_then(|v| v.as_str())
+                    .map(|s| {
+                        // Convert file:///path to filesystem path
+                        let s = s.trim_start_matches("file:///");
+                        #[cfg(windows)]
+                        {
+                            s.replace('/', "\\")
+                        }
+                        #[cfg(not(windows))]
+                        {
+                            format!("/{}", s)
+                        }
+                    });
                 self.write_response(
                     request.id.unwrap_or(serde_json::Value::Null),
                     serde_json::json!({
@@ -87,8 +105,18 @@ impl<W: Write> LspServer<W> {
                 Ok(false)
             }
             "textDocument/definition" => {
+                let workspace_root = self.workspace_root.clone();
                 let result = extract_hover_target(&request.params)
-                    .and_then(|(uri, pos)| handle_definition(&self.store, &uri, pos))
+                    .and_then(|(uri, pos)| {
+                        handle_definition(&self.store, &uri, pos).or_else(|| {
+                            let doc = self.store.get(&uri)?;
+                            let offset =
+                                crate::lsp::hover::position_to_char_offset(&doc.source, pos)?;
+                            workspace_root
+                                .as_deref()
+                                .and_then(|root| handle_rune_definition(&doc.source, offset, root))
+                        })
+                    })
                     .map(|location| {
                         serde_json::to_value(location).unwrap_or(serde_json::Value::Null)
                     })
@@ -679,5 +707,80 @@ mod v9110_tests {
         assert!(list_map.is_some(), "expected List.map in BUILTIN_FNS");
         let map = list_map.unwrap();
         assert!(!map.params.is_empty(), "List.map should have params");
+    }
+}
+
+// ── v9120_tests (v9.12.0) — LSP: Rune definition jump + workspace_root ──────
+#[cfg(test)]
+mod v9120_tests {
+    use super::LspServer;
+    use crate::lsp::definition::handle_rune_definition;
+    use crate::lsp::completion::KNOWN_RUNES;
+
+    // Rune definition jump: unknown namespace → None
+    #[test]
+    fn rune_definition_unknown_namespace_returns_none() {
+        let result = handle_rune_definition("mylib.foo(", 9, "/workspace");
+        assert!(result.is_none(), "unknown namespace should return None");
+    }
+
+    // Rune definition jump: non-rune pattern (no dot) → None
+    #[test]
+    fn rune_definition_no_dot_returns_none() {
+        let result = handle_rune_definition("foo(", 3, "/workspace");
+        assert!(result.is_none(), "no dot pattern should return None");
+    }
+
+    // KNOWN_RUNES includes http and csv
+    #[test]
+    fn known_runes_includes_http_and_csv() {
+        assert!(KNOWN_RUNES.iter().any(|(n, _)| *n == "http"), "expected http in KNOWN_RUNES");
+        assert!(KNOWN_RUNES.iter().any(|(n, _)| *n == "csv"), "expected csv in KNOWN_RUNES");
+    }
+
+    // workspace_root is stored after initialize with rootUri
+    #[test]
+    fn initialize_stores_workspace_root() {
+        let mut out = Vec::new();
+        let mut server = LspServer::new(&mut out);
+        server
+            .handle(crate::lsp::protocol::RpcRequest {
+                id: Some(serde_json::json!(1)),
+                method: "initialize".to_string(),
+                params: serde_json::json!({ "rootUri": "file:///c/Users/test/project" }),
+            })
+            .expect("handle");
+        assert!(server.workspace_root.is_some(), "workspace_root should be set after initialize");
+    }
+
+    // definition handler falls through to rune jump for known namespace
+    #[test]
+    fn definition_handler_attempts_rune_jump_for_known_ns() {
+        let mut out = Vec::new();
+        let mut server = LspServer::new(&mut out);
+        // Open a file with http.get reference
+        server
+            .handle(crate::lsp::protocol::RpcRequest {
+                id: None,
+                method: "textDocument/didOpen".to_string(),
+                params: serde_json::json!({
+                    "textDocument": {
+                        "uri": "file:///main.fav",
+                        "text": "http.get("
+                    }
+                }),
+            })
+            .expect("open");
+        // Request definition at end of "http.get" — should not panic even if file not found
+        server
+            .handle(crate::lsp::protocol::RpcRequest {
+                id: Some(serde_json::json!(2)),
+                method: "textDocument/definition".to_string(),
+                params: serde_json::json!({
+                    "textDocument": { "uri": "file:///main.fav" },
+                    "position": { "line": 0, "character": 8 }
+                }),
+            })
+            .expect("definition request should not panic");
     }
 }

@@ -7908,6 +7908,57 @@ pub fn cmd_doc(path: &str, out_dir: &str) {
     }
 }
 
+// ── fav profile ───────────────────────────────────────────────────────────────
+
+fn render_profile_table(json: &str) {
+    #[derive(serde::Deserialize)]
+    struct Record {
+        name: String,
+        ms: i64,
+    }
+    let records: Vec<Record> = serde_json::from_str(json).unwrap_or_default();
+    if records.is_empty() {
+        println!("(no stage calls recorded)");
+        return;
+    }
+    let total: i64 = records.iter().map(|r| r.ms).sum();
+    let total_f = total.max(1) as f64;
+    let name_w = records.iter().map(|r| r.name.len()).max().unwrap_or(5).max(5);
+    println!("{:<width$}  {:>10}  {:>6}", "Stage", "Time (ms)", "%", width = name_w);
+    println!("{}", "─".repeat(name_w + 22));
+    for r in &records {
+        let pct = (r.ms as f64 / total_f * 100.0).round() as i64;
+        println!("{:<width$}  {:>10}  {:>5}%", r.name, r.ms, pct, width = name_w);
+    }
+    println!("{}", "─".repeat(name_w + 22));
+    println!("{:<width$}  {:>10}  {:>5}%", "Total", total, 100, width = name_w);
+}
+
+pub fn cmd_profile(path: &str, out_fmt: &str) {
+    let src = match std::fs::read_to_string(path) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("error: cannot read '{}': {}", path, e);
+            process::exit(1);
+        }
+    };
+    let bytes = match crate::compiler_fav_runner::compile_profiled_str(&src) {
+        Ok(b) => b,
+        Err(e) => {
+            eprintln!("error: profile compile failed: {}", e);
+            process::exit(1);
+        }
+    };
+    crate::backend::vm::clear_profile_records();
+    run_fvc_bytes(&bytes, None, Some(path));
+    let json = crate::backend::vm::take_profile_dump_json();
+    if out_fmt == "json" {
+        println!("{}", json);
+    } else {
+        render_profile_table(&json);
+    }
+}
+
 // ── fav explain ───────────────────────────────────────────────────────────────
 
 pub fn cmd_explain(file: Option<&str>, schema: bool, format: &str, focus: &str) {
@@ -19248,6 +19299,69 @@ public fn main() -> String {
 }"#;
         assert_eq!(compile_and_run("username_ok", src_ok), Value::Str("ok".to_string()));
         assert_eq!(compile_and_run("username_err", src_err), Value::Str("Username: validation failed".to_string()));
+    }
+}
+
+// ── v990_tests (v9.9.0) — fav profile: stage timing + fav watch primitives ───
+#[cfg(test)]
+mod v990_tests {
+    use crate::backend::vm::{clear_profile_records, take_profile_dump_json};
+    use crate::compiler_fav_runner::compile_profiled_str;
+
+    fn compile_and_run_profiled(src: &str) {
+        let bytes = compile_profiled_str(src)
+            .unwrap_or_else(|e| panic!("compile_profiled_str error: {}", e));
+        let artifact = crate::backend::artifact::FvcArtifact::from_bytes(&bytes)
+            .unwrap_or_else(|e| panic!("from_bytes error: {:?}", e));
+        let main_idx = artifact.fn_idx_by_name("main").expect("main not found");
+        clear_profile_records();
+        crate::backend::vm::VM::run(&artifact, main_idx, vec![])
+            .unwrap_or_else(|e| panic!("VM run error: {}", e.message));
+    }
+
+    #[test]
+    fn profile_stage_names_collected() {
+        // A program with two stages: verify compile_profiled_str succeeds
+        let src = r#"
+public stage double: Int -> Int = |x| x * 2
+public stage inc:    Int -> Int = |x| x + 1
+public fn main() -> Int { inc(double(3)) }
+"#;
+        let bytes = compile_profiled_str(src)
+            .unwrap_or_else(|e| panic!("compile_profiled_str error: {}", e));
+        assert!(!bytes.is_empty(), "expected non-empty bytecode");
+    }
+
+    #[test]
+    fn profile_records_populated_after_run() {
+        let src = r#"
+public stage add_one: Int -> Int = |x| x + 1
+public fn main() -> Int { add_one(41) }
+"#;
+        compile_and_run_profiled(src);
+        let json = take_profile_dump_json();
+        assert!(json.contains("\"add_one\""), "expected 'add_one' in profile dump:\n{}", json);
+    }
+
+    #[test]
+    fn profile_no_overhead_normal_compile() {
+        // compile_profiled_str output differs from normal compile_bytes_from_src
+        // because instrumentation is injected
+        let src = r#"
+public stage noop: Int -> Int = |x| x
+public fn main() -> Int { noop(1) }
+"#;
+        let profiled = compile_profiled_str(src)
+            .unwrap_or_else(|e| panic!("compile_profiled_str: {}", e));
+        let normal = crate::compiler_fav_runner::compile_src_str_to_bytes(src)
+            .unwrap_or_else(|e| panic!("compile_src_str_to_bytes: {}", e));
+        // Profiled bytecode should be LARGER due to injected timing calls
+        assert!(
+            profiled.len() > normal.len(),
+            "profiled bytecode ({} bytes) should be larger than normal ({} bytes)",
+            profiled.len(),
+            normal.len()
+        );
     }
 }
 

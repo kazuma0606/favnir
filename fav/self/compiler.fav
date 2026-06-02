@@ -4088,6 +4088,106 @@ public fn doc_source(src: String) -> Result<String, String> {
 }
 
 // ════════════════════════════════════════════════════════════════════════════
+// PROFILER (fav profile)
+// ════════════════════════════════════════════════════════════════════════════
+
+// Collect all stage names from a program (used to identify stage calls).
+fn collect_stage_names_acc(items: List<Item>, acc: List<String>) -> List<String> {
+    match List.first(items) {
+        None => acc
+        Some(item) => {
+            bind rest <- List.drop(items, 1)
+            match item {
+                IStage(sd) => collect_stage_names_acc(rest, List.push(acc, sd.name))
+                _          => collect_stage_names_acc(rest, acc)
+            }
+        }
+    }
+}
+
+fn collect_stage_names(prog: Program) -> List<String> {
+    collect_stage_names_acc(prog.items, empty_names())
+}
+
+// Instrument a single Expr: wrap ECall("", stage_name, args) with profile timing.
+// Env.profile_timed_raw(name, result, start_ms) evaluates args in reverse order,
+// so start_ms = Env.now_ms_raw() is evaluated BEFORE the stage call.
+fn instrument_expr(e: Expr, snames: List<String>) -> Expr {
+    match e {
+        ELit(_)   => e
+        EVar(_)   => e
+        EArgNil   => e
+        EArmNil   => e
+        EFieldNil => e
+        EBinOp(parts) => EBinOp(parts._0, instrument_expr(parts._1, snames), instrument_expr(parts._2, snames))
+        ECall(parts) => {
+            bind ns    <- parts._0
+            bind fname <- parts._1
+            bind iargs <- instrument_expr(parts._2, snames)
+            if ns == "" && name_in_list(snames, fname) {
+                // Construct args in last-arg-first (parser) order:
+                // profile_timed_raw(name, start_ms, result)
+                // Evaluation order: name first, now_ms_raw second (start), stage_call last.
+                ECall("Env", "profile_timed_raw",
+                    EArgList(ECall("", fname, iargs),
+                    EArgList(ECall("Env", "now_ms_raw", EArgNil),
+                    EArgList(ELit(LStr(fname)),
+                    EArgNil))))
+            } else {
+                ECall(ns, fname, iargs)
+            }
+        }
+        EIf(parts) => EIf(instrument_expr(parts._0, snames), instrument_expr(parts._1, snames), instrument_expr(parts._2, snames))
+        EAccess(parts) => EAccess(instrument_expr(parts._0, snames), parts._1)
+        ELambda(parts) => ELambda(parts._0, instrument_expr(parts._1, snames))
+        EMatch(parts)  => EMatch(instrument_expr(parts._0, snames), instrument_expr(parts._1, snames))
+        EBlock(parts)  => EBlock(instrument_expr(parts._0, snames), instrument_expr(parts._1, snames))
+        ERecordLit(parts) => ERecordLit(parts._0, instrument_expr(parts._1, snames))
+        EArgList(parts)   => EArgList(instrument_expr(parts._0, snames), instrument_expr(parts._1, snames))
+        EArm(parts) => EArm(parts._0, instrument_expr(parts._1, snames), instrument_expr(parts._2, snames), instrument_expr(parts._3, snames))
+        EBind(parts) => EBind(parts._0, instrument_expr(parts._1, snames), instrument_expr(parts._2, snames))
+        ECollect(body)  => ECollect(instrument_expr(body, snames))
+        EYield(val_e)   => EYield(instrument_expr(val_e, snames))
+        EField(parts)   => EField(parts._0, instrument_expr(parts._1, snames), instrument_expr(parts._2, snames))
+        EQuestion(inner) => EQuestion(instrument_expr(inner, snames))
+    }
+}
+
+// Instrument a single Item: only FnDef bodies are traversed.
+fn instrument_item(item: Item, snames: List<String>) -> Item {
+    match item {
+        IFn(fd) => IFn(FnDef {
+            is_public: fd.is_public  name: fd.name  params: fd.params
+            ret: fd.ret  body: instrument_expr(fd.body, snames)  doc: fd.doc
+        })
+        _ => item
+    }
+}
+
+fn instrument_items_acc(items: List<Item>, snames: List<String>, acc: List<Item>) -> List<Item> {
+    match List.first(items) {
+        None => List.reverse(acc)
+        Some(item) => instrument_items_acc(List.drop(items, 1), snames, List.push(acc, instrument_item(item, snames)))
+    }
+}
+
+fn instrument_program(prog: Program, snames: List<String>) -> Program {
+    Program { items: instrument_items_acc(prog.items, snames, List.empty()) }
+}
+
+// Compile source with stage-call profiling instrumentation.
+// Returns Ok(bytes) where stage calls are wrapped with Env.profile_timed_raw.
+public fn compile_source_profiled(src: String) -> Result<List<Int>, String> {
+    Result.and_then(lex(src), |toks|
+    Result.and_then(parse_tokens(toks), |prog| {
+        bind snames <- collect_stage_names(prog)
+        bind iprog  <- instrument_program(prog, snames)
+        Result.and_then(compile(iprog), |artifact|
+        Result.ok(serialize_artifact(artifact)))
+    }))
+}
+
+// ════════════════════════════════════════════════════════════════════════════
 // LINTER (fav lint)
 // ════════════════════════════════════════════════════════════════════════════
 

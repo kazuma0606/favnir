@@ -68,8 +68,8 @@ use driver::{
     cmd_db_migrate, cmd_db_migrate_rollback, cmd_db_migrate_status, cmd_deploy, cmd_doc, cmd_docs,
     cmd_exec, cmd_explain, cmd_explain_compiler, cmd_explain_diff, cmd_explain_error,
     cmd_explain_error_list, cmd_explain_error_list_json, cmd_explain_lineage, cmd_fmt, cmd_graph,
-    cmd_infer, cmd_infer_proto, cmd_install, cmd_lint, cmd_migrate, cmd_new, cmd_publish,
-    cmd_registry, cmd_run, cmd_test, cmd_watch,
+    cmd_infer, cmd_infer_proto, cmd_install, cmd_lint, cmd_migrate, cmd_new, cmd_profile,
+    cmd_publish, cmd_registry, cmd_run, cmd_test, cmd_watch,
 };
 use rune_cmd::cmd_rune;
 use std::process;
@@ -978,6 +978,35 @@ fn main_impl() {
                 }
             }
             cmd_doc(&path, &out_dir);
+        }
+
+        Some("profile") => {
+            let mut path = String::new();
+            let mut out_fmt = "table".to_string();
+            let mut i = 2usize;
+            while i < args.len() {
+                match args[i].as_str() {
+                    "--out" => {
+                        out_fmt = args
+                            .get(i + 1)
+                            .unwrap_or_else(|| {
+                                eprintln!("error: --out requires a format (table|json)");
+                                process::exit(1);
+                            })
+                            .clone();
+                        i += 2;
+                    }
+                    other => {
+                        path = other.to_string();
+                        i += 1;
+                    }
+                }
+            }
+            if path.is_empty() {
+                eprintln!("error: profile requires a .fav file");
+                process::exit(1);
+            }
+            cmd_profile(&path, &out_fmt);
         }
 
         Some("infer") => {

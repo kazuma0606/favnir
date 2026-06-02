@@ -1,6 +1,6 @@
-// fav/self/cli.fav — Favnir CLI dispatcher (v9.8.0)
+// fav/self/cli.fav — Favnir CLI dispatcher (v9.9.0)
 //
-// Handles: check / fmt / lint / explain --lineage / rune list|info / version / help
+// Handles: check / fmt / lint / explain --lineage / rune list|info / version / help / doc / profile / watch
 //
 // Usage:
 //   fav run fav/self/cli.fav -- check <file>
@@ -11,6 +11,9 @@
 //   fav run fav/self/cli.fav -- explain --lineage <file>
 //   fav run fav/self/cli.fav -- rune list
 //   fav run fav/self/cli.fav -- rune info <name>
+//   fav run fav/self/cli.fav -- doc <file> [--out <dir>]
+//   fav run fav/self/cli.fav -- profile <file> [--out table|json]
+//   fav run fav/self/cli.fav -- watch [--check|--test] <file>
 //   fav run fav/self/cli.fav -- version
 //   fav run fav/self/cli.fav -- help
 
@@ -26,6 +29,8 @@ type CliCmd =
   | CmdFmt(String, Bool)
   | CmdLint(String, Bool)
   | CmdDoc(String, String)
+  | CmdProfile(String, String)
+  | CmdWatch(String, String)
   | CmdUnknown(String)
 
 // ── Utilities ──────────────────────────────────────────────────────────────────
@@ -71,8 +76,10 @@ fn parse_named_cmd(cmd: String, args: List<String>) -> CliCmd {
     else { if cmd == "fmt"       { parse_fmt_cmd(args) }
     else { if cmd == "lint"      { parse_lint_cmd(args) }
     else { if cmd == "doc"       { parse_doc_cmd(args) }
+    else { if cmd == "profile"   { parse_profile_cmd(args) }
+    else { if cmd == "watch"     { parse_watch_cmd(args) }
     else { CmdUnknown(String.concat("unknown command: ", cmd)) }
-    } } } } } } } } }
+    } } } } } } } } } } }
 }
 
 fn parse_fmt_cmd(args: List<String>) -> CliCmd {
@@ -120,6 +127,30 @@ fn parse_doc_cmd(args: List<String>) -> CliCmd {
     }
 }
 
+fn parse_profile_cmd(args: List<String>) -> CliCmd {
+    bind rest <- List.drop(args, 1)
+    bind out  <- find_flag_value(rest, "--out", "table")
+    match find_positional(rest) {
+        None    => CmdUnknown("profile requires a file argument")
+        Some(p) => CmdProfile(p, out)
+    }
+}
+
+fn parse_watch_mode(args: List<String>) -> String {
+    if find_flag(args, "--check") { "check" }
+    else { if find_flag(args, "--test") { "test" }
+    else { "run" } }
+}
+
+fn parse_watch_cmd(args: List<String>) -> CliCmd {
+    bind rest <- List.drop(args, 1)
+    bind mode <- parse_watch_mode(rest)
+    match find_positional(rest) {
+        None    => CmdUnknown("watch requires a file argument")
+        Some(p) => CmdWatch(p, mode)
+    }
+}
+
 fn parse_check_cmd(args: List<String>) -> CliCmd {
     match List.first(List.drop(args, 1)) {
         None    => CmdUnknown("check requires a file argument")
@@ -162,7 +193,7 @@ fn parse_rune_sub(sub: String, args: List<String>) -> CliCmd {
 // ── Action handlers ────────────────────────────────────────────────────────────
 
 fn run_version() -> Unit !IO {
-    IO.println("favnir 9.8.0 (self-host CLI)")
+    IO.println("favnir 9.9.0 (self-host CLI)")
 }
 
 fn run_help() -> Unit !IO {
@@ -177,6 +208,8 @@ fn run_help() -> Unit !IO {
     bind _ <- IO.println("  rune list                     List installed runes")
     bind _ <- IO.println("  rune info <name>              Show rune location")
     bind _ <- IO.println("  doc <file> [--out <dir>]       Generate Markdown docs from /// comments")
+    bind _ <- IO.println("  profile <file> [--out table|json]  Profile stage execution times")
+    bind _ <- IO.println("  watch [--check|--test] <file>  Watch file and auto re-run on change")
     bind _ <- IO.println("  version                       Show version")
     IO.println("  help                          Show this help")
 }
@@ -271,6 +304,75 @@ fn run_doc(path: String, out: String) -> Unit !IO {
     }
 }
 
+fn run_profile(path: String, out_fmt: String) -> Unit !IO {
+    match IO.read_file_raw(path) {
+        Err(e) => {
+            bind _ <- IO.write_stderr_raw(String.concat("error: cannot read file: ", e))
+            IO.exit_raw(1)
+        }
+        Ok(src) => {
+            match Compiler.compile_source_profiled_raw(src) {
+                Err(e) => {
+                    bind _ <- IO.write_stderr_raw(String.concat("error: ", e))
+                    IO.exit_raw(1)
+                }
+                Ok(_bytes) => {
+                    bind json <- Env.profile_dump_raw()
+                    if out_fmt == "json" {
+                        IO.println(json)
+                    } else {
+                        IO.println(String.concat("profile: ", path))
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn run_watch_action(path: String, mode: String) -> Unit !IO {
+    if mode == "check" {
+        match Compiler.check_raw(path) {
+            Ok(msg) => IO.println(String.concat("ok: ", msg))
+            Err(e)  => IO.write_stderr_raw(String.concat("error: ", e))
+        }
+    } else {
+        match IO.read_file_raw(path) {
+            Err(e) => IO.write_stderr_raw(String.concat("error: cannot read file: ", e))
+            Ok(src) => {
+                match Compiler.compile_source_raw(src) {
+                    Err(e) => IO.write_stderr_raw(String.concat("error: ", e))
+                    Ok(_)  => IO.println(String.concat("ok: ", path))
+                }
+            }
+        }
+    }
+}
+
+fn watch_loop(path: String, mode: String, last_mtime: Int) -> Unit !IO {
+    bind _ <- IO.sleep_ms_raw(500)
+    match IO.file_mtime_raw(path) {
+        Err(_) => watch_loop(path, mode, last_mtime)
+        Ok(mtime) => {
+            if mtime != last_mtime {
+                bind _ <- IO.println(String.concat("File changed, re-running: ", path))
+                bind _ <- run_watch_action(path, mode)
+                watch_loop(path, mode, mtime)
+            } else {
+                watch_loop(path, mode, last_mtime)
+            }
+        }
+    }
+}
+
+fn run_watch(path: String, mode: String) -> Unit !IO {
+    bind _ <- IO.println(String.concat("Watching ", String.concat(path, " (Ctrl+C to stop)")))
+    bind _ <- run_watch_action(path, mode)
+    match IO.file_mtime_raw(path) {
+        Err(_)      => watch_loop(path, mode, 0)
+        Ok(mtime0)  => watch_loop(path, mode, mtime0)
+    }
+}
+
 fn run_check(path: String) -> Unit !IO {
     match Compiler.check_raw(path) {
         Ok(msg) => IO.println(String.concat("ok: ", msg))
@@ -343,6 +445,8 @@ public fn main() -> Unit !IO {
         CmdFmt(parts)          => run_fmt(parts._0, parts._1)
         CmdLint(parts)         => run_lint(parts._0, parts._1)
         CmdDoc(parts)          => run_doc(parts._0, parts._1)
+        CmdProfile(parts)      => run_profile(parts._0, parts._1)
+        CmdWatch(parts)        => run_watch(parts._0, parts._1)
         CmdUnknown(msg)        => {
             bind _ <- IO.write_stderr_raw(String.concat("error: ", msg))
             IO.exit_raw(1)

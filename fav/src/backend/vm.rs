@@ -59,6 +59,9 @@ thread_local! {
     /// When `Some`, Random.int / Random.float / Gen.* use this instead of thread_rng.
     static SEEDED_RNG: RefCell<Option<rand::rngs::SmallRng>> = const { RefCell::new(None) };
 
+    /// Profile records (v9.9.0): stage name + elapsed ms, cleared each run.
+    static PROFILE_RECORDS: RefCell<Vec<(String, i64)>> = RefCell::new(Vec::new());
+
     /// Sequential ID counters for hint generation (v4.4.0).
     /// Key = "TypeName.field_name", value = next counter value.
     /// Reset when Random.seed is called.
@@ -805,6 +808,26 @@ pub fn set_checkpoint_backend(backend: CheckpointBackend) {
     CHECKPOINT_BACKEND.with(|cell| {
         *cell.borrow_mut() = backend;
     });
+}
+
+/// Clear profiling records (called before each profiled execution).
+pub fn clear_profile_records() {
+    PROFILE_RECORDS.with(|r| r.borrow_mut().clear());
+}
+
+/// Return profiling records as a JSON string: `[{"name":"…","ms":123}, …]`.
+pub fn take_profile_dump_json() -> String {
+    PROFILE_RECORDS.with(|r| {
+        let records = r.borrow();
+        let entries: Vec<String> = records
+            .iter()
+            .map(|(name, ms)| {
+                let name_json = serde_json::to_string(name).unwrap_or_else(|_| format!("\"{}\"", name));
+                format!("{{\"name\":{},\"ms\":{}}}", name_json, ms)
+            })
+            .collect();
+        format!("[{}]", entries.join(","))
+    })
 }
 
 pub fn checkpoint_meta(name: &str) -> Result<CheckpointMetaRecord, String> {
@@ -6605,6 +6628,61 @@ fn vm_call_builtin(
                 Ok(markdown) => Ok(ok_vm(VMValue::Str(markdown))),
                 Err(msg) => Ok(err_vm(VMValue::Str(msg))),
             }
+        }
+        "Compiler.compile_source_profiled_raw" => {
+            let v = args
+                .into_iter()
+                .next()
+                .ok_or_else(|| "Compiler.compile_source_profiled_raw requires 1 argument".to_string())?;
+            let src = vm_string(v, "Compiler.compile_source_profiled_raw")?;
+            match crate::compiler_fav_runner::compile_profiled_str(&src) {
+                Ok(bytes) => {
+                    let int_list: Vec<VMValue> = bytes.iter().map(|b| VMValue::Int(*b as i64)).collect();
+                    Ok(ok_vm(VMValue::List(FavList::new(int_list))))
+                }
+                Err(msg) => Ok(err_vm(VMValue::Str(msg))),
+            }
+        }
+        // ── Env.now_ms_raw / profile primitives (v9.9.0) ─────────────────────
+        "Env.now_ms_raw" => {
+            let ms = chrono::Utc::now().timestamp_millis();
+            Ok(VMValue::Int(ms))
+        }
+        "Env.profile_timed_raw" => {
+            // Signature: profile_timed_raw(name: String, start_ms: Int, result: Any) -> Any
+            // Args arrive after stack pop + reverse: [name, start_ms, result].
+            // Evaluation order: name (literal) → start_ms (now_ms_raw, before stage) → result (stage call).
+            let mut it = args.into_iter();
+            let name = vm_string(it.next().ok_or_else(|| "Env.profile_timed_raw: missing name".to_string())?, "Env.profile_timed_raw")?;
+            let start_ms = vm_int(it.next().ok_or_else(|| "Env.profile_timed_raw: missing start_ms".to_string())?, "Env.profile_timed_raw")?;
+            let result = it.next().ok_or_else(|| "Env.profile_timed_raw: missing result".to_string())?;
+            let elapsed = chrono::Utc::now().timestamp_millis() - start_ms;
+            PROFILE_RECORDS.with(|r| r.borrow_mut().push((name, elapsed)));
+            Ok(result)
+        }
+        "Env.profile_dump_raw" => {
+            Ok(VMValue::Str(crate::backend::vm::take_profile_dump_json()))
+        }
+        // ── IO.file_mtime_raw / IO.sleep_ms_raw (v9.9.0) ──────────────────
+        "IO.file_mtime_raw" => {
+            let v = args.into_iter().next().ok_or_else(|| "IO.file_mtime_raw requires 1 argument".to_string())?;
+            let path = vm_string(v, "IO.file_mtime_raw")?;
+            match std::fs::metadata(&path) {
+                Ok(meta) => match meta.modified() {
+                    Ok(t) => {
+                        let ms = t.duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as i64).unwrap_or(0);
+                        Ok(ok_vm(VMValue::Int(ms)))
+                    }
+                    Err(e) => Ok(err_vm(VMValue::Str(e.to_string()))),
+                },
+                Err(e) => Ok(err_vm(VMValue::Str(e.to_string()))),
+            }
+        }
+        "IO.sleep_ms_raw" => {
+            let v = args.into_iter().next().ok_or_else(|| "IO.sleep_ms_raw requires 1 argument".to_string())?;
+            let ms = vm_int(v, "IO.sleep_ms_raw")?;
+            std::thread::sleep(std::time::Duration::from_millis(ms.max(0) as u64));
+            Ok(VMValue::Unit)
         }
         "IO.argv" => {
             let argv: Vec<VMValue> = TEST_ARGV.with(|t| {

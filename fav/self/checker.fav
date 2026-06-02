@@ -307,6 +307,7 @@ fn infer_op(op: Op, lty: String, rty: String) -> Result<String, String> {
 fn io_fn(fname: String) -> String {
     if fname == "argv"              { "List" }
     else { if fname == "read_file_raw"      { "Result" }
+    else { if fname == "write_file_raw"     { "Result" }
     else { if fname == "write_stdout_raw"   { "Unit" }
     else { if fname == "write_stderr_raw"   { "Unit" }
     else { if fname == "exit_raw"           { "Unit" }
@@ -316,16 +317,30 @@ fn io_fn(fname: String) -> String {
     else { if fname == "home_dir_raw"       { "Option" }
     else { if fname == "cwd_raw"            { "String" }
     else { if fname == "is_dir_raw"         { "Bool" }
+    else { if fname == "file_mtime_raw"     { "Result" }
+    else { if fname == "sleep_ms_raw"       { "Unit" }
     else { if fname == "println"            { "Unit" }
     else { "Unknown" }
-    }}}}}}}}}}}
+    }}}}}}}}}}}}}}
 }
 
 fn compiler_fn(fname: String) -> String {
-    if fname == "check_raw"         { "Result" }
-    else { if fname == "lineage_text_raw" { "String" }
+    if fname == "check_raw"                     { "Result" }
+    else { if fname == "lineage_text_raw"             { "String" }
+    else { if fname == "fmt_source_raw"               { "Result" }
+    else { if fname == "lint_source_raw"              { "Result" }
+    else { if fname == "doc_source_raw"               { "Result" }
+    else { if fname == "compile_source_profiled_raw"  { "Result" }
     else { "Unknown" }
-    }
+    }}}}}
+}
+
+fn env_fn(fname: String) -> String {
+    if fname == "now_ms_raw"          { "Int" }
+    else { if fname == "profile_timed_raw"  { "Unknown" }
+    else { if fname == "profile_dump_raw"   { "String" }
+    else { "Unknown" }
+    }}
 }
 
 fn cache_fn(fname: String) -> String {
@@ -515,6 +530,7 @@ fn builtin_ret_ty(ns: String, fname: String) -> String {
     else if ns == "Float"    { float_fn(fname) }
     else if ns == "IO"       { io_fn(fname) }
     else if ns == "Compiler" { compiler_fn(fname) }
+    else if ns == "Env"      { env_fn(fname) }
     else if ns == "Cache"    { cache_fn(fname) }
     else if ns == "Queue"    { queue_fn(fname) }
     else if ns == "Email"    { email_fn(fname) }
@@ -530,6 +546,7 @@ fn builtin_ret_ty(ns: String, fname: String) -> String {
 fn ns_to_effect(ns: String) -> String {
     if ns == "IO"            { "IO" }
     else if ns == "Compiler" { "IO" }
+    else if ns == "Env"      { "IO" }
     else if ns == "Cache"    { "Cache" }
     else if ns == "Queue"    { "Queue" }
     else if ns == "Email"    { "Email" }

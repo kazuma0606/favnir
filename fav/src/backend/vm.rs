@@ -4368,6 +4368,53 @@ fn err_vm(value: VMValue) -> VMValue {
     VMValue::Variant("err".to_string(), Some(Box::new(value)))
 }
 
+// ── Debug.show_raw helper (v9.10.0) ──────────────────────────────────────────
+
+fn capitalize_variant_tag(tag: &str) -> String {
+    let mut chars = tag.chars();
+    match chars.next() {
+        None => String::new(),
+        Some(c) => c.to_uppercase().to_string() + chars.as_str(),
+    }
+}
+
+fn display_vmvalue(v: &VMValue) -> String {
+    match v {
+        VMValue::Int(n) => n.to_string(),
+        VMValue::Float(f) => {
+            if f.fract() == 0.0 && f.abs() < 1e15 {
+                format!("{:.1}", f)
+            } else {
+                format!("{}", f)
+            }
+        }
+        VMValue::Str(s) => format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\"")),
+        VMValue::Bool(b) => b.to_string(),
+        VMValue::Unit => "()".to_string(),
+        VMValue::List(xs) => {
+            let items: Vec<String> = xs.iter().map(display_vmvalue).collect();
+            format!("[{}]", items.join(", "))
+        }
+        VMValue::Record(fields) => {
+            let mut pairs: Vec<(&String, &VMValue)> = fields.iter().collect();
+            pairs.sort_by_key(|(k, _)| k.as_str());
+            let parts: Vec<String> = pairs.iter()
+                .map(|(k, v)| format!("{}: {}", k, display_vmvalue(v)))
+                .collect();
+            format!("{{{}}}", parts.join(", "))
+        }
+        VMValue::Variant(tag, None) => capitalize_variant_tag(tag),
+        VMValue::Variant(tag, Some(inner)) => {
+            format!("{}({})", capitalize_variant_tag(tag), display_vmvalue(inner))
+        }
+        VMValue::VariantCtor(tag) => capitalize_variant_tag(tag),
+        VMValue::CompiledFn(_) | VMValue::Closure(_, _) | VMValue::Builtin(_) => "<fn>".to_string(),
+        VMValue::Stream(_) => "<stream>".to_string(),
+        VMValue::DbHandle(_) => "<db>".to_string(),
+        VMValue::TxHandle(_) => "<tx>".to_string(),
+    }
+}
+
 // ── LLM helpers (v9.6.0) ─────────────────────────────────────────────────────
 
 /// Call the LLM provider (Anthropic or OpenAI) with a single user prompt.
@@ -6683,6 +6730,12 @@ fn vm_call_builtin(
             let ms = vm_int(v, "IO.sleep_ms_raw")?;
             std::thread::sleep(std::time::Duration::from_millis(ms.max(0) as u64));
             Ok(VMValue::Unit)
+        }
+        // ── Debug.show_raw (v9.10.0) ──────────────────────────────────────────
+        "Debug.show_raw" => {
+            let v = args.into_iter().next()
+                .ok_or_else(|| "Debug.show_raw: missing argument".to_string())?;
+            Ok(VMValue::Str(display_vmvalue(&v)))
         }
         "IO.argv" => {
             let argv: Vec<VMValue> = TEST_ARGV.with(|t| {

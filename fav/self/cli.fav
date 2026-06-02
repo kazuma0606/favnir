@@ -31,6 +31,7 @@ type CliCmd =
   | CmdDoc(String, String)
   | CmdProfile(String, String)
   | CmdWatch(String, String)
+  | CmdRepl
   | CmdUnknown(String)
 
 // ── Utilities ──────────────────────────────────────────────────────────────────
@@ -78,8 +79,9 @@ fn parse_named_cmd(cmd: String, args: List<String>) -> CliCmd {
     else { if cmd == "doc"       { parse_doc_cmd(args) }
     else { if cmd == "profile"   { parse_profile_cmd(args) }
     else { if cmd == "watch"     { parse_watch_cmd(args) }
+    else { if cmd == "repl"      { CmdRepl }
     else { CmdUnknown(String.concat("unknown command: ", cmd)) }
-    } } } } } } } } } } }
+    } } } } } } } } } } } }
 }
 
 fn parse_fmt_cmd(args: List<String>) -> CliCmd {
@@ -193,7 +195,7 @@ fn parse_rune_sub(sub: String, args: List<String>) -> CliCmd {
 // ── Action handlers ────────────────────────────────────────────────────────────
 
 fn run_version() -> Unit !IO {
-    IO.println("favnir 9.9.0 (self-host CLI)")
+    IO.println("favnir 9.10.0 (self-host CLI)")
 }
 
 fn run_help() -> Unit !IO {
@@ -210,6 +212,7 @@ fn run_help() -> Unit !IO {
     bind _ <- IO.println("  doc <file> [--out <dir>]       Generate Markdown docs from /// comments")
     bind _ <- IO.println("  profile <file> [--out table|json]  Profile stage execution times")
     bind _ <- IO.println("  watch [--check|--test] <file>  Watch file and auto re-run on change")
+    bind _ <- IO.println("  repl                          Start interactive REPL")
     bind _ <- IO.println("  version                       Show version")
     IO.println("  help                          Show this help")
 }
@@ -447,6 +450,7 @@ public fn main() -> Unit !IO {
         CmdDoc(parts)          => run_doc(parts._0, parts._1)
         CmdProfile(parts)      => run_profile(parts._0, parts._1)
         CmdWatch(parts)        => run_watch(parts._0, parts._1)
+        CmdRepl                => IO.println("Use 'fav repl' to start the REPL.")
         CmdUnknown(msg)        => {
             bind _ <- IO.write_stderr_raw(String.concat("error: ", msg))
             IO.exit_raw(1)

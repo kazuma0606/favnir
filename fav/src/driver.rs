@@ -8170,6 +8170,193 @@ pub fn cmd_docs(file: Option<&str>, port: u16, no_open: bool) {
     }
 }
 
+// ── fav repl (v9.10.0) ───────────────────────────────────────────────────────
+
+struct ReplSession {
+    definitions: String,
+    def_names: Vec<String>,
+}
+
+impl ReplSession {
+    fn new() -> Self {
+        Self { definitions: String::new(), def_names: Vec::new() }
+    }
+    fn reset(&mut self) {
+        self.definitions.clear();
+        self.def_names.clear();
+        println!("session reset");
+    }
+    fn add_definition(&mut self, src: &str, name: &str) {
+        if !self.definitions.is_empty() {
+            self.definitions.push('\n');
+        }
+        self.definitions.push_str(src);
+        self.definitions.push('\n');
+        self.def_names.push(name.to_string());
+    }
+}
+
+fn is_definition(line: &str) -> bool {
+    let t = line.trim_start();
+    t.starts_with("fn ")
+        || t.starts_with("public fn ")
+        || t.starts_with("stage ")
+        || t.starts_with("seq ")
+        || t.starts_with("type ")
+        || t.starts_with("effect ")
+}
+
+fn extract_def_name(line: &str) -> String {
+    // Skip visibility keywords then return the next token after the item keyword
+    let t = line.trim_start();
+    let after_kw = if let Some(rest) = t.strip_prefix("public fn ") {
+        rest
+    } else if let Some(rest) = t.strip_prefix("fn ") {
+        rest
+    } else if let Some(rest) = t.strip_prefix("stage ") {
+        rest
+    } else if let Some(rest) = t.strip_prefix("seq ") {
+        rest
+    } else if let Some(rest) = t.strip_prefix("type ") {
+        rest
+    } else if let Some(rest) = t.strip_prefix("effect ") {
+        rest
+    } else {
+        t
+    };
+    after_kw
+        .split(|c: char| !c.is_alphanumeric() && c != '_')
+        .next()
+        .unwrap_or("_")
+        .to_string()
+}
+
+fn build_eval_source(session: &ReplSession, expr: &str) -> String {
+    format!(
+        "{}\npublic fn main() -> Unit {{ IO.println(Debug.show_raw({})) }}\n",
+        session.definitions,
+        expr
+    )
+}
+
+fn handle_definition(line: &str, session: &mut ReplSession) {
+    // Type-check the new definition in the current context
+    let candidate = format!("{}\n{}\n", session.definitions, line);
+    let errors = check_source_str(&candidate);
+    if errors.is_empty() {
+        let name = extract_def_name(line);
+        println!("defined: {}", name);
+        session.add_definition(line, &name);
+    } else {
+        for e in &errors {
+            eprintln!("error: {}", e.message);
+        }
+    }
+}
+
+fn handle_expression(expr: &str, session: &ReplSession) {
+    let src = build_eval_source(session, expr);
+    let bytes = match crate::compiler_fav_runner::compile_src_str_to_bytes(&src) {
+        Ok(b) => b,
+        Err(e) => { eprintln!("error: {}", e); return; }
+    };
+    run_fvc_bytes(&bytes, None, None);
+}
+
+fn extract_inferred_type(err_msg: &str) -> Option<String> {
+    // checker.fav E0009 format: "E0009: ...: inferred <TYPE>"
+    // Try a few patterns
+    for marker in &["inferred: ", "inferred "] {
+        if let Some(pos) = err_msg.find(marker) {
+            let after = &err_msg[pos + marker.len()..];
+            let ty: String = after
+                .split(|c: char| c == '\n' || c == ',' || c == ';')
+                .next()
+                .unwrap_or("")
+                .trim()
+                .to_string();
+            if !ty.is_empty() {
+                return Some(ty);
+            }
+        }
+    }
+    None
+}
+
+fn handle_type_cmd(expr: &str, session: &ReplSession) {
+    let probe_src = format!(
+        "{}\nfn _type_probe_() -> ___PROBE___ = {}\n",
+        session.definitions,
+        expr
+    );
+    let errors = check_source_str(&probe_src);
+    let type_str = errors.iter()
+        .find(|e| e.code == "E0009" || e.message.contains("_type_probe_"))
+        .and_then(|e| extract_inferred_type(&e.message));
+    match type_str {
+        Some(ty) => println!("{}", ty),
+        None => {
+            // If no error, it might compile fine — try actually running it as an expr
+            if errors.is_empty() {
+                println!("(unknown)");
+            } else {
+                // Show the first error's message for context
+                println!("(unknown)");
+            }
+        }
+    }
+}
+
+fn print_repl_help() {
+    println!("Commands:");
+    println!("  :help          show this help");
+    println!("  :quit / :q     exit the REPL");
+    println!("  :reset         clear all session definitions");
+    println!("  :env           show accumulated definitions");
+    println!("  :type <expr>   show the type of an expression");
+    println!();
+    println!("Enter expressions to evaluate, or fn/stage/type definitions to add to the session.");
+}
+
+pub fn cmd_repl() {
+    use std::io::{BufRead, Write};
+    let stdin = std::io::stdin();
+    let stdout = std::io::stdout();
+    let mut session = ReplSession::new();
+    println!("Favnir v9.10.0 — type :help for commands");
+    loop {
+        {
+            let mut out = stdout.lock();
+            let _ = write!(out, "> ");
+            let _ = out.flush();
+        }
+        let mut line = String::new();
+        match stdin.lock().read_line(&mut line) {
+            Ok(0) | Err(_) => { println!(); break; } // EOF / Ctrl+D
+            Ok(_) => {}
+        }
+        let line = line.trim_end_matches(['\n', '\r']).trim();
+        if line.is_empty() { continue; }
+        match line {
+            ":quit" | ":q" => break,
+            ":reset" => session.reset(),
+            ":help" | ":h" => print_repl_help(),
+            ":env" => {
+                if session.definitions.is_empty() {
+                    println!("(no definitions)");
+                } else {
+                    println!("{}", session.definitions);
+                }
+            }
+            _ if line.starts_with(":type ") => {
+                handle_type_cmd(line[6..].trim(), &session);
+            }
+            _ if is_definition(line) => handle_definition(line, &mut session),
+            _ => handle_expression(line, &session),
+        }
+    }
+}
+
 fn diff_explain_json(
     from_label: &str,
     from: &serde_json::Value,
@@ -19299,6 +19486,41 @@ public fn main() -> String {
 }"#;
         assert_eq!(compile_and_run("username_ok", src_ok), Value::Str("ok".to_string()));
         assert_eq!(compile_and_run("username_err", src_err), Value::Str("Username: validation failed".to_string()));
+    }
+}
+
+// ── v9100_tests (v9.10.0) — fav repl ────────────────────────────────────────
+#[cfg(test)]
+mod v9100_tests {
+    use super::*;
+
+    #[test]
+    fn repl_build_eval_source_wraps_expr() {
+        let session = ReplSession::new();
+        let src = build_eval_source(&session, "1 + 2");
+        assert!(src.contains("Debug.show_raw(1 + 2)"), "expected Debug.show_raw wrapper, got: {}", src);
+        assert!(src.contains("fn main()"), "expected fn main(), got: {}", src);
+    }
+
+    #[test]
+    fn repl_definition_accumulates() {
+        let mut session = ReplSession::new();
+        handle_definition("fn double(x: Int) -> Int { x * 2 }", &mut session);
+        assert!(session.def_names.contains(&"double".to_string()), "expected 'double' in def_names");
+        assert!(session.definitions.contains("fn double"), "expected definition in session.definitions");
+        // Expression using the accumulated definition should compile
+        let src = build_eval_source(&session, "double(21)");
+        let result = crate::compiler_fav_runner::compile_src_str_to_bytes(&src);
+        assert!(result.is_ok(), "expression using accumulated definition should compile: {:?}", result);
+    }
+
+    #[test]
+    fn repl_error_recovery_on_bad_expr() {
+        let mut session = ReplSession::new();
+        // A definition with a type error should NOT be added to the session
+        let before = session.definitions.clone();
+        handle_definition("fn bad() -> Int { \"not an int\" }", &mut session);
+        assert_eq!(session.definitions, before, "bad definition should not be added to session");
     }
 }
 

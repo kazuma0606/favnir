@@ -7,6 +7,7 @@ pub mod doc_comment;
 pub mod document_store;
 pub mod hover;
 pub mod protocol;
+pub mod signature;
 
 use std::io::{self, BufRead, Write};
 
@@ -16,6 +17,7 @@ use diagnostics::errors_to_diagnostics;
 use document_store::DocumentStore;
 use hover::handle_hover;
 use protocol::{Position, RpcRequest, RpcResponse};
+use signature::get_signature_help;
 
 pub struct LspServer<W: Write> {
     store: DocumentStore,
@@ -42,9 +44,12 @@ impl<W: Write> LspServer<W> {
                             "textDocumentSync": 1,
                             "hoverProvider": true,
                             "completionProvider": {
-                                "triggerCharacters": ["."]
+                                "triggerCharacters": [".", "\""]
                             },
-                            "definitionProvider": true
+                            "definitionProvider": true,
+                            "signatureHelpProvider": {
+                                "triggerCharacters": ["(", ","]
+                            }
                         }
                     }),
                 )?;
@@ -87,6 +92,17 @@ impl<W: Write> LspServer<W> {
                     .map(|location| {
                         serde_json::to_value(location).unwrap_or(serde_json::Value::Null)
                     })
+                    .unwrap_or(serde_json::Value::Null);
+                self.write_response(request.id.unwrap_or(serde_json::Value::Null), result)?;
+                Ok(false)
+            }
+            "textDocument/signatureHelp" => {
+                let result = extract_hover_target(&request.params)
+                    .and_then(|(uri, pos)| {
+                        let doc = self.store.get(&uri)?;
+                        get_signature_help(&doc.source, pos, &doc.symbols)
+                    })
+                    .and_then(|help| serde_json::to_value(help).ok())
                     .unwrap_or(serde_json::Value::Null);
                 self.write_response(request.id.unwrap_or(serde_json::Value::Null), result)?;
                 Ok(false)
@@ -307,7 +323,7 @@ mod tests {
         let text = String::from_utf8(out).expect("utf8");
         assert!(text.contains("\"hoverProvider\":true"));
         assert!(text.contains("\"definitionProvider\":true"));
-        assert!(text.contains("\"completionProvider\":{\"triggerCharacters\":[\".\"]}"));
+        assert!(text.contains("\"completionProvider\":{\"triggerCharacters\":[\".\",\"\\\"\"]}"));
     }
 
     #[test]
@@ -526,5 +542,142 @@ mod tests {
         let text = String::from_utf8(out).expect("utf8");
         assert!(text.contains("\"uri\":\"file:///main.fav\""));
         assert!(text.contains("\"line\":0"));
+    }
+}
+
+// ── v9110_tests (v9.11.0) — LSP module completion + rune completion + signature help ──
+#[cfg(test)]
+mod v9110_tests {
+    use super::LspServer;
+    use crate::lsp::completion::{BUILTIN_FNS, BUILTIN_NAMESPACES, module_completions};
+    use crate::lsp::signature::get_signature_help;
+    use crate::lsp::protocol::Position;
+
+    // F-1a: List.map / filter appear in module completions
+    #[test]
+    fn module_completion_list_contains_map_and_filter() {
+        let items = module_completions("List");
+        assert!(
+            items.iter().any(|i| i.label == "map"),
+            "expected 'map' in List completions"
+        );
+        assert!(
+            items.iter().any(|i| i.label == "filter"),
+            "expected 'filter' in List completions"
+        );
+    }
+
+    // F-1b: String.split / trim appear in module completions
+    #[test]
+    fn module_completion_string_contains_split_and_trim() {
+        let items = module_completions("String");
+        assert!(
+            items.iter().any(|i| i.label == "split"),
+            "expected 'split' in String completions"
+        );
+        assert!(
+            items.iter().any(|i| i.label == "trim"),
+            "expected 'trim' in String completions"
+        );
+    }
+
+    // F-1c: Rune completion returns all known rune names via LspServer
+    #[test]
+    fn rune_completion_returns_known_runes() {
+        let mut out = Vec::new();
+        let mut server = LspServer::new(&mut out);
+        server
+            .handle(crate::lsp::protocol::RpcRequest {
+                id: None,
+                method: "textDocument/didOpen".to_string(),
+                params: serde_json::json!({
+                    "textDocument": {
+                        "uri": "file:///main.fav",
+                        "text": "import rune \""
+                    }
+                }),
+            })
+            .expect("open");
+        server
+            .handle(crate::lsp::protocol::RpcRequest {
+                id: Some(serde_json::json!(20)),
+                method: "textDocument/completion".to_string(),
+                params: serde_json::json!({
+                    "textDocument": { "uri": "file:///main.fav" },
+                    "position": { "line": 0, "character": 13 }
+                }),
+            })
+            .expect("completion");
+        let text = String::from_utf8(out).expect("utf8");
+        assert!(text.contains("\"label\":\"http\""), "expected http rune in completion: {}", &text[..200.min(text.len())]);
+        assert!(text.contains("\"label\":\"csv\""), "expected csv rune in completion");
+        assert!(text.contains("\"label\":\"json\""), "expected json rune in completion");
+    }
+
+    // F-1d: Signature help for List.map( returns activeParameter 0
+    #[test]
+    fn signature_help_builtin_first_param() {
+        let src = "List.map(";
+        let help = get_signature_help(
+            src,
+            Position { line: 0, character: src.len() as u32 },
+            &[],
+        )
+        .expect("expected signature help for List.map(");
+        assert_eq!(help.active_parameter, 0, "first arg → activeParameter 0");
+        assert!(
+            help.signatures[0].label.contains("map"),
+            "signature label should contain 'map'"
+        );
+    }
+
+    // F-1e: Signature help for List.map(xs, → activeParameter 1
+    #[test]
+    fn signature_help_builtin_second_param() {
+        let src = "List.map(xs,";
+        let help = get_signature_help(
+            src,
+            Position { line: 0, character: src.len() as u32 },
+            &[],
+        )
+        .expect("expected signature help for List.map(xs,");
+        assert_eq!(help.active_parameter, 1, "after comma → activeParameter 1");
+    }
+
+    // Extra: signatureHelp capability registered in initialize response
+    #[test]
+    fn initialize_reports_signature_help_provider() {
+        let mut out = Vec::new();
+        let mut server = LspServer::new(&mut out);
+        server
+            .handle(crate::lsp::protocol::RpcRequest {
+                id: Some(serde_json::json!(1)),
+                method: "initialize".to_string(),
+                params: serde_json::json!({}),
+            })
+            .expect("handle");
+        let text = String::from_utf8(out).expect("utf8");
+        assert!(
+            text.contains("signatureHelpProvider"),
+            "expected signatureHelpProvider in capabilities"
+        );
+    }
+
+    // Extra: BUILTIN_NAMESPACES covers key namespaces
+    #[test]
+    fn builtin_namespaces_includes_list_and_string() {
+        assert!(BUILTIN_NAMESPACES.contains(&"List"));
+        assert!(BUILTIN_NAMESPACES.contains(&"String"));
+        assert!(BUILTIN_NAMESPACES.contains(&"Map"));
+    }
+
+    // Extra: BUILTIN_FNS table is non-empty and has correct structure
+    #[test]
+    fn builtin_fns_table_has_entries() {
+        assert!(!BUILTIN_FNS.is_empty());
+        let list_map = BUILTIN_FNS.iter().find(|f| f.namespace == "List" && f.name == "map");
+        assert!(list_map.is_some(), "expected List.map in BUILTIN_FNS");
+        let map = list_map.unwrap();
+        assert!(!map.params.is_empty(), "List.map should have params");
     }
 }

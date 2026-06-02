@@ -70,6 +70,7 @@ pub mod completion_kind {
     pub const FUNCTION: u32 = 3;
     pub const FIELD: u32 = 5;
     pub const CLASS: u32 = 7;
+    pub const MODULE: u32 = 9;
     pub const KEYWORD: u32 = 14;
     pub const SNIPPET: u32 = 15;
 }

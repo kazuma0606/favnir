@@ -8270,7 +8270,7 @@ fn extract_inferred_type(err_msg: &str) -> Option<String> {
         if let Some(pos) = err_msg.find(marker) {
             let after = &err_msg[pos + marker.len()..];
             let ty: String = after
-                .split(|c: char| c == '\n' || c == ',' || c == ';')
+                .split(['\n', ',', ';'])
                 .next()
                 .unwrap_or("")
                 .trim()

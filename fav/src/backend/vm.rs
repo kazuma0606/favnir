@@ -7462,7 +7462,7 @@ fn vm_call_builtin(
                         Ok(VMValue::Str(s))
                     } else {
                         let suf_len = suf.chars().count();
-                        let take = if max > suf_len { max - suf_len } else { 0 };
+                        let take = max.saturating_sub(suf_len);
                         let truncated: String = s.chars().take(take).collect();
                         Ok(VMValue::Str(format!("{}{}", truncated, suf)))
                     }

@@ -63,6 +63,8 @@ pub mod toml;
 pub mod value;
 
 // wasm_codegen uses only wasm-encoder (pure Rust), available on all targets.
+// `#[allow]` needed because backend/mod.rs also declares the same file.
+#[allow(clippy::duplicate_mod)]
 #[path = "backend/wasm_codegen.rs"]
 pub mod wasm_codegen;
 

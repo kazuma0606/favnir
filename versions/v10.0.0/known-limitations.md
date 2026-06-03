@@ -35,7 +35,39 @@ par を含む seq のコンパイルには Rust pipeline を使用する:
 - `fav run --legacy src/file.fav` — Rust pipeline での実行
 - または CI テストで Rust pipeline の `compile_program` / `codegen_program` を直接呼び出す
 
+---
+
+## fav check self/compiler.fav が checker.fav 経由で失敗する
+
+### 症状
+
+CI の Self-check ステップで `./target/debug/fav check self/compiler.fav` を実行すると
+`E0001: undefined variable: _unsupported_` が発生する。
+
+### 根本原因
+
+`compiler.fav` は `collect { yield ... }` コルーチン構文を使っている。
+`ast_lower_checker.rs` の `lower_expr` はこの構文を未対応として
+`EVar("_unsupported_")` に変換してしまい、checker.fav が E0001 を報告する。
+
+`checker.fav` / `cli.fav` はこの構文を使っていないため、これらの self-check は正常に動く。
+
+### 回避策
+
+CI では `compiler.fav` のみ `--legacy` フラグを使って Rust チェッカーで確認する:
+
+```yaml
+./target/debug/fav check --legacy self/compiler.fav
+```
+
 ### 将来の修正方針
+
+- `ast_lower_checker.rs` に `Expr::Collect` / `Expr::Yield` の lowering を追加する
+- v10.x 以降で対応予定（優先度: 低）
+
+---
+
+### 将来の修正方針（par スタックオーバーフロー）
 
 - `RUST_MIN_STACK` 環境変数でスレッドスタックサイズを拡大する（`RUST_MIN_STACK=16777216 fav run ...`）
 - またはコンパイラ内の再帰を trampoline パターンに書き換える

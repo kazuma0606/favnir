@@ -89,6 +89,9 @@ refactor/<内容> 動作を変えないリファクタリング
 4. PR の説明に「何を・なぜ変えたか」を記載する
 5. 新機能には統合テストを追加する（`fav/src/backend/vm_stdlib_tests.rs` 等）
 
+PR を開く前に **[INVARIANTS.md](./INVARIANTS.md) のチェックリスト**を必ず確認してください。
+特に Bootstrap 検証（`cargo test bootstrap_full_self_hosting`）は必須です。
+
 ---
 
 ## Rune 追加ガイド

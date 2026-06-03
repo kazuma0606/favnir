@@ -6,4 +6,13 @@ infra/site/.terraform/
 infra/site/*.tfstate
 infra/site/*.tfstate.backup
 infra/site/.terraform.lock.hcl
+infra/snowflake/.terraform/
+infra/snowflake/*.tfstate
+infra/snowflake/*.tfstate.backup
+infra/snowflake/.terraform.lock.hcl
+infra/snowflake/terraform.tfvars
+infra/snowflake/*.p8
+infra/snowflake/*.pub
 crates/favnir-wasm/target/
+# Zenn article drafts
+zenn/

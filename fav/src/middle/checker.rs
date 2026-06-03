@@ -2821,72 +2821,118 @@ impl Checker {
 
         let mut current_output: Option<Type> = None;
 
-        for step_name in &fd.steps {
-            match self.env.lookup(step_name).cloned() {
-                None => {
-                    self.type_error("E0102", format!("undefined: `{}`", step_name), &fd.span);
-                    current_output = Some(Type::Error);
-                }
-                Some(ty) => {
-                    // Verify the connection: previous output must match this step's input.
-                    if let Some(prev_out) = &current_output {
-                        if let Some((input, _output)) = ty.as_callable() {
-                            if !prev_out.is_compatible(input) {
-                                self.type_error(
-                                    "E0103",
-                                    format!(
-                                        "flw `{}`: `{}` outputs `{}` but `{}` expects `{}`",
-                                        fd.name,
-                                        // previous step name
-                                        fd.steps[fd
-                                            .steps
-                                            .iter()
-                                            .position(|s| s == step_name)
-                                            .unwrap()
-                                            .saturating_sub(1)],
-                                        prev_out.display(),
-                                        step_name,
-                                        input.display(),
-                                    ),
-                                    &fd.span,
-                                );
-                            }
-                        } else {
+        for step in &fd.steps {
+            match step {
+                FlwStep::Stage(step_name) => {
+                    match self.env.lookup(step_name).cloned() {
+                        None => {
                             self.type_error(
-                                "E0103",
+                                "E0102",
+                                format!("undefined: `{}`", step_name),
+                                &fd.span,
+                            );
+                            current_output = Some(Type::Error);
+                        }
+                        Some(ty) => {
+                            if let Some(prev_out) = &current_output {
+                                if let Some((input, _output)) = ty.as_callable() {
+                                    if !prev_out.is_compatible(input) {
+                                        self.type_error(
+                                            "E0103",
+                                            format!(
+                                                "flw `{}`: stage `{}` expects `{}` but got `{}`",
+                                                fd.name,
+                                                step_name,
+                                                input.display(),
+                                                prev_out.display(),
+                                            ),
+                                            &fd.span,
+                                        );
+                                    }
+                                } else {
+                                    self.type_error(
+                                        "E0103",
+                                        format!(
+                                            "`{}` is not a trf or fn, cannot be used in flw",
+                                            step_name
+                                        ),
+                                        &fd.span,
+                                    );
+                                }
+                            }
+                            current_output =
+                                ty.as_callable().map(|(_, o)| o.clone()).or(Some(ty));
+                        }
+                    }
+                }
+                FlwStep::Par(names) => {
+                    // E0017: all names must be defined
+                    for name in names {
+                        if self.env.lookup(name).is_none() {
+                            self.type_error(
+                                "E0017",
                                 format!(
-                                    "`{}` is not a trf or fn, cannot be used in flw",
-                                    step_name
+                                    "E0017: par ステップ内の stage '{}' が定義されていません",
+                                    name
                                 ),
                                 &fd.span,
                             );
                         }
                     }
-                    // Advance current output.
-                    current_output = ty.as_callable().map(|(_, o)| o.clone()).or(Some(ty));
+                    // E0016: all par stages must have the same input type
+                    if let Some(ref prev_out) = current_output {
+                        for name in names {
+                            if let Some(ty) = self.env.lookup(name).cloned() {
+                                if let Some((input, _)) = ty.as_callable() {
+                                    if !prev_out.is_compatible(input) {
+                                        self.type_error(
+                                            "E0016",
+                                            format!(
+                                                "E0016: par ステップの入力型不一致: `{}` expects `{}`, got `{}`",
+                                                name,
+                                                input.display(),
+                                                prev_out.display(),
+                                            ),
+                                            &fd.span,
+                                        );
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    // Output is Unknown (tuple of outputs); type checking of the
+                    // downstream stage is left to the Favnir pipeline checker.
+                    current_output = Some(Type::Unknown);
                 }
             }
         }
 
-        // Register the resolved flw type.
-        if let Some(last_name) = fd.steps.last() {
-            if let Some(last_ty) = self.env.lookup(last_name).cloned() {
-                if let Some(first_name) = fd.steps.first() {
-                    if let Some(first_ty) = self.env.lookup(first_name).cloned() {
-                        let input = first_ty
-                            .as_callable()
-                            .map(|(i, _)| i.clone())
-                            .unwrap_or(Type::Unknown);
-                        let output = last_ty
-                            .as_callable()
-                            .map(|(_, o)| o.clone())
-                            .unwrap_or(Type::Unknown);
-                        self.env.define(
-                            fd.name.clone(),
-                            Type::Trf(Box::new(input), Box::new(output), vec![]),
-                        );
-                    }
-                }
+        // Register the resolved flw type from first/last step.
+        let first_stage = fd.steps.first().and_then(|s| match s {
+            FlwStep::Stage(n) => Some(n.as_str()),
+            FlwStep::Par(names) => names.first().map(|s| s.as_str()),
+        });
+        let last_stage = fd.steps.last().and_then(|s| match s {
+            FlwStep::Stage(n) => Some(n.as_str()),
+            FlwStep::Par(names) => names.last().map(|s| s.as_str()),
+        });
+        if let (Some(first_name), Some(last_name)) = (first_stage, last_stage) {
+            if let (Some(first_ty), Some(last_ty)) = (
+                self.env.lookup(first_name).cloned(),
+                self.env.lookup(last_name).cloned(),
+            ) {
+                let input = first_ty
+                    .as_callable()
+                    .map(|(i, _)| i.clone())
+                    .unwrap_or(Type::Unknown);
+                let output = last_ty
+                    .as_callable()
+                    .map(|(_, o)| o.clone())
+                    .unwrap_or(Type::Unknown);
+                self.env.define(
+                    fd.name.clone(),
+                    Type::Trf(Box::new(input), Box::new(output), vec![]),
+                );
             }
         }
     }

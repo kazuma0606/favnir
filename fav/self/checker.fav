@@ -118,6 +118,21 @@ type ImplEntry = {
     type_: String
 }
 
+type SeqStageEntry = {
+    name:          String
+    input_ty_str:  String
+    output_ty_str: String
+}
+
+type SeqStep =
+  | SStage(String)
+  | SPar(List<String>)
+
+type SeqDef = {
+    name:   String
+    stages: List<SeqStep>
+}
+
 type Item =
   | IFn(FnDef)
   | IType(TypeDef)
@@ -125,6 +140,8 @@ type Item =
   | IWrapper(WrapperDef)
   | IInterface(InterfaceDef)
   | IImpl(ImplDeclDef)
+  | IStage(SeqStageEntry)
+  | ISeq(SeqDef)
 
 type Program = {
     items: List<Item>
@@ -1253,6 +1270,11 @@ fn collect_fn_schemes(items: List<Item>, env: List<KVPair>) -> List<KVPair> {
         Some(item) => match item {
             IFn(fd) => collect_fn_schemes(List.drop(items, 1),
                            env_insert(env, fd.name, fn_to_scheme_str(fd)))
+            IStage(se) => collect_fn_schemes(List.drop(items, 1),
+                              env_insert(env, se.name,
+                                  make_fn_scheme_str("", se.input_ty_str, se.output_ty_str)))
+            ISeq(sd) => collect_fn_schemes(List.drop(items, 1),
+                            env_insert(env, sd.name, make_fn_scheme_str("", "Unknown", "Unknown")))
             _       => collect_fn_schemes(List.drop(items, 1), env)
         }
     }
@@ -1411,6 +1433,117 @@ fn infer_call_hm(ns: String, fname: String, args: Expr, env: List<KVPair>, state
     }
 }
 
+// ── Seq / par checker (v9.13.0) ───────────────────────────────────────────────
+
+// Helper: drop first n elements from a list
+fn seq_drop_n_acc(parts: List<String>, n: Int) -> List<String> {
+    if n == 0 { parts }
+    else { seq_drop_n_acc(List.drop(parts, 1), n - 1) }
+}
+
+// Extract input type from scheme string "forall|<vars>|<params>|<ret>"
+// Returns the first semicolon-delimited param type string, or None.
+fn scheme_input_ty(scheme: String) -> Option<String> {
+    bind parts <- String.split(scheme, "|")
+    match List.first(seq_drop_n_acc(parts, 2)) {
+        None => Option.none()
+        Some(params_str) => {
+            if String.length(params_str) == 0 { Option.none() }
+            else {
+                bind param_parts <- String.split(params_str, ";")
+                List.first(param_parts)
+            }
+        }
+    }
+}
+
+// Extract output type from scheme string "forall|<vars>|<params>|<ret>"
+fn scheme_output_ty(scheme: String) -> Option<String> {
+    bind parts <- String.split(scheme, "|")
+    List.first(seq_drop_n_acc(parts, 3))
+}
+
+// Get the output type string of a named stage/fn from env (empty string if unknown)
+fn stage_output_ty_str(name: String, env: List<KVPair>) -> String {
+    match env_lookup(env, name) {
+        None => ""
+        Some(scheme) => match scheme_output_ty(scheme) {
+            None => ""
+            Some(ty) => ty
+        }
+    }
+}
+
+// Check a single par stage exists (E0017) and has compatible input type (E0016)
+fn check_par_stage(name: String, input_ty: String, env: List<KVPair>) -> Result<String, String> {
+    match env_lookup(env, name) {
+        None => Result.err(fmt_err("E0017",
+            String.concat("par ステップ内の stage '",
+            String.concat(name, "' が定義されていません"))))
+        Some(scheme) => {
+            if input_ty == "" { Result.ok(name) }
+            else {
+                match scheme_input_ty(scheme) {
+                    None => Result.ok(name)
+                    Some(stage_in) => {
+                        if stage_in == input_ty || input_ty == "Unknown" || stage_in == "Unknown" {
+                            Result.ok(name)
+                        } else {
+                            Result.err(fmt_err("E0016",
+                                String.concat("par ステップの入力型不一致: `",
+                                String.concat(name,
+                                String.concat("` expects `",
+                                String.concat(stage_in,
+                                String.concat("`, got `",
+                                String.concat(input_ty, "`"))))))))
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// Check all names in a par step
+fn check_par_names_acc(names: List<String>, input_ty: String, env: List<KVPair>) -> Result<String, String> {
+    match List.first(names) {
+        None => Result.ok("ok")
+        Some(name) => {
+            match check_par_stage(name, input_ty, env) {
+                Err(e) => Result.err(e)
+                Ok(_) => check_par_names_acc(List.drop(names, 1), input_ty, env)
+            }
+        }
+    }
+}
+
+// Check a seq's steps, tracking current_ty through the pipeline
+fn check_seq_steps_acc(steps: List<SeqStep>, current_ty: String, env: List<KVPair>) -> Result<String, String> {
+    match List.first(steps) {
+        None => Result.ok("ok")
+        Some(step) => {
+            match step {
+                SStage(name) => {
+                    bind next_ty <- stage_output_ty_str(name, env)
+                    check_seq_steps_acc(List.drop(steps, 1), next_ty, env)
+                }
+                SPar(names) => {
+                    match check_par_names_acc(names, current_ty, env) {
+                        Err(e) => Result.err(e)
+                        Ok(_) => check_seq_steps_acc(List.drop(steps, 1), "Unknown", env)
+                    }
+                }
+            }
+        }
+    }
+}
+
+// Check a seq definition
+fn check_seq_def(sd: SeqDef, env: List<KVPair>) -> Result<String, String> {
+    Result.and_then(check_seq_steps_acc(sd.stages, "", env), |ok|
+    Result.ok(sd.name))
+}
+
 // ── Item / program checker ────────────────────────────────────────────────────
 
 fn check_item(item: Item, env: List<KVPair>) -> Result<String, String> {
@@ -1425,6 +1558,8 @@ fn check_item(item: Item, env: List<KVPair>) -> Result<String, String> {
         }
         IInterface(id) => Result.ok(id.name)
         IImpl(id) => Result.ok(id.type_name)
+        IStage(se) => Result.ok(se.name)
+        ISeq(sd) => check_seq_def(sd, env)
     }
 }
 

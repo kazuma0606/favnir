@@ -17,8 +17,8 @@ use super::ir::{
 };
 use crate::ast::{
     AbstractFlwDef, AbstractTrfDef, BindStmt, Block, Expr, FStringPart, FlwBindingDef, FlwDef,
-    FlwSlot, ImplDef, InterfaceDecl, InterfaceImplDecl, Item, Lit, MatchArm, Pattern, PatternField,
-    Program, Stmt, TypeBody, TypeExpr,
+    FlwSlot, FlwStep, ImplDef, InterfaceDecl, InterfaceImplDecl, Item, Lit, MatchArm, Pattern,
+    PatternField, Program, Stmt, TypeBody, TypeExpr,
 };
 
 fn collect_abstract_flw_defs(program: &Program) -> HashMap<String, AbstractFlwDef> {
@@ -586,12 +586,59 @@ fn compile_flw_def(fd: &FlwDef, ctx: &mut CompileCtx) -> IRFnDef {
 
     let mut current = IRExpr::Local(input_slot, Type::Unknown);
     for step in &fd.steps {
-        let callee = if let Some(global_idx) = ctx.resolve_global(step) {
-            IRExpr::Global(global_idx, Type::Unknown)
-        } else {
-            IRExpr::Global(u16::MAX, Type::Unknown)
-        };
-        current = IRExpr::Call(Box::new(callee), vec![current], Type::Unknown);
+        match step {
+            FlwStep::Stage(name) => {
+                let callee = if let Some(global_idx) = ctx.resolve_global(name) {
+                    IRExpr::Global(global_idx, Type::Unknown)
+                } else {
+                    IRExpr::Global(u16::MAX, Type::Unknown)
+                };
+                current = IRExpr::Call(Box::new(callee), vec![current], Type::Unknown);
+            }
+            FlwStep::Par(names) => {
+                // par [A, B] → IO.par_execute_raw(["A", "B"], input)
+                // Build the names list via List.empty() + List.push calls.
+                let list_ns_idx = ctx.resolve_global("List").unwrap_or(u16::MAX);
+                let io_ns_idx = ctx.resolve_global("IO").unwrap_or(u16::MAX);
+
+                let list_ns = || IRExpr::Global(list_ns_idx, Type::Unknown);
+                let list_empty = IRExpr::FieldAccess(
+                    Box::new(list_ns()),
+                    "empty".to_string(),
+                    Type::Unknown,
+                );
+                let mut names_expr = IRExpr::Call(
+                    Box::new(list_empty),
+                    vec![],
+                    Type::Unknown,
+                );
+                for n in names {
+                    let list_push = IRExpr::FieldAccess(
+                        Box::new(list_ns()),
+                        "push".to_string(),
+                        Type::Unknown,
+                    );
+                    names_expr = IRExpr::Call(
+                        Box::new(list_push),
+                        vec![
+                            names_expr,
+                            IRExpr::Lit(Lit::Str(n.clone()), Type::Unknown),
+                        ],
+                        Type::Unknown,
+                    );
+                }
+                let par_callee = IRExpr::FieldAccess(
+                    Box::new(IRExpr::Global(io_ns_idx, Type::Unknown)),
+                    "par_execute_raw".to_string(),
+                    Type::Unknown,
+                );
+                current = IRExpr::Call(
+                    Box::new(par_callee),
+                    vec![names_expr, current],
+                    Type::Unknown,
+                );
+            }
+        }
     }
 
     let local_count = ctx.next_slot as usize;

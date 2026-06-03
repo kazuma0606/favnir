@@ -8967,7 +8967,7 @@ fn render_graph_text_with_opts(
             ast::Item::FlwDef(def) if focus == "flw" || focus == "all" => {
                 let _ = writeln!(out, "flw {}:", def.name);
                 for (idx, step) in def.steps.iter().enumerate() {
-                    let _ = writeln!(out, "  {}. {}", idx + 1, step);
+                    let _ = writeln!(out, "  {}. {}", idx + 1, step.display_str());
                 }
             }
             ast::Item::AbstractFlwDef(def) if focus == "flw" || focus == "all" => {
@@ -9047,7 +9047,9 @@ fn render_graph_mermaid_with_opts(
             ast::Item::FlwDef(def) if focus == "flw" || focus == "all" => {
                 let _ = writeln!(out, "    {}[\"flw {}\"]", def.name, def.name);
                 for step in &def.steps {
-                    let _ = writeln!(out, "    {} --> {}", def.name, step);
+                    for name in step.stage_names() {
+                        let _ = writeln!(out, "    {} --> {}", def.name, name);
+                    }
                 }
             }
             ast::Item::AbstractFlwDef(def) if focus == "flw" || focus == "all" => {
@@ -9285,12 +9287,14 @@ impl ExplainPrinter {
                     );
                 }
                 Item::FlwDef(fd) => {
+                    let step_strs: Vec<String> =
+                        fd.steps.iter().map(|s| s.display_str()).collect();
                     let _ = writeln!(
                         out,
                         "{:<col_vis$} {:<col_name$} {:<col_type$} {:<col_eff$} {:<col_inv$} -",
                         "",
                         format!("flw {}", fd.name),
-                        fd.steps.join(" |> "),
+                        step_strs.join(" |> "),
                         "-",
                         "-"
                     );
@@ -9669,10 +9673,12 @@ impl ExplainPrinter {
                 }
                 Item::FlwDef(fd) => {
                     if want_all || focus == "seqs" || focus == "flws" {
+                        let step_strs: Vec<String> =
+                            fd.steps.iter().map(|s| s.display_str()).collect();
                         flws.push(json!({
                             "name": fd.name,
                             "kind": "flw",
-                            "steps": fd.steps,
+                            "steps": step_strs,
                             "reachable_from_entry": reachability.map(|r| r.included.contains(&fd.name)).unwrap_or(true)
                         }));
                     }
@@ -19779,5 +19785,134 @@ public fn main() -> String { "ok" }
         // but it should not panic — the namespace IS known so it attempts the file lookup
         // The test passes whether Some or None (just verifying no panic)
         let _ = result;
+    }
+}
+
+// ── v9130_tests (v9.13.0) — par 並列 stage 実行 ────────────────────────────────
+#[cfg(test)]
+mod v9130_tests {
+    use crate::frontend::parser::Parser;
+    use crate::middle::compiler::compile_program;
+    use crate::backend::codegen::codegen_program;
+    use crate::backend::vm::VM;
+    use crate::value::Value;
+
+    fn check_with_checker_fav(src: &str, name: &str) -> Result<(), Vec<String>> {
+        let tmp = std::env::temp_dir().join(format!("fav_v9130_{}.fav", name));
+        std::fs::write(&tmp, src).unwrap();
+        let path = tmp.to_str().unwrap().to_string();
+        let source = std::fs::read_to_string(&path).unwrap();
+        let program = Parser::parse_str(&source, &path).expect("parse error");
+        let prog_vm = crate::middle::ast_lower_checker::lower_program(&program);
+        crate::checker_fav_runner::run_checker_fav(prog_vm)
+    }
+
+    fn run_inline(src: &str) -> Value {
+        let prog = Parser::parse_str(src, "test.fav").expect("parse");
+        let ir = compile_program(&prog);
+        let artifact = codegen_program(&ir);
+        let fn_idx = artifact.fn_idx_by_name("main").expect("main not found");
+        VM::run(&artifact, fn_idx, vec![]).expect("run")
+    }
+
+    // F-1a: par step compiles and executes without panicking
+    #[test]
+    fn par_executes_in_parallel() {
+        let src = r#"
+stage Double: Int -> Int = |n| { n * 2 }
+stage AddTen: Int -> Int = |n| { n + 10 }
+stage SumList: List<Int> -> Int = |xs| { List.fold(xs, 0, |acc, x| acc + x) }
+seq TestPar = par [Double, AddTen] |> SumList
+public fn main() -> Int { TestPar(5) }
+"#;
+        let prog = Parser::parse_str(src, "test.fav").expect("parse");
+        let ir = compile_program(&prog);
+        let artifact = codegen_program(&ir);
+        let fn_idx = artifact.fn_idx_by_name("main").expect("main not found");
+        let result = VM::run(&artifact, fn_idx, vec![]);
+        assert!(result.is_ok(), "par execution failed: {:?}", result.err());
+    }
+
+    // F-1b: par [Double, AddTen] |> SumList with input 5 returns 25 (10+15)
+    #[test]
+    fn par_result_is_correct() {
+        let src = r#"
+stage Double: Int -> Int = |n| { n * 2 }
+stage AddTen: Int -> Int = |n| { n + 10 }
+stage SumList: List<Int> -> Int = |xs| { List.fold(xs, 0, |acc, x| acc + x) }
+seq TestPar = par [Double, AddTen] |> SumList
+public fn main() -> Int { TestPar(5) }
+"#;
+        let result = run_inline(src);
+        assert_eq!(result, Value::Int(25), "expected 25 (10+15), got: {:?}", result);
+    }
+
+    // F-1c: par stages with mismatched input types → E0016
+    #[test]
+    fn par_input_type_mismatch_e0016() {
+        // Source produces Int; StrStage expects String → mismatch
+        let src = r#"
+stage Source: Int -> Int = |n| { n }
+stage IntStage: Int -> Int = |n| { n + 1 }
+stage StrStage: String -> String = |s| { s }
+stage MergeI: List<Int> -> Int = |xs| { 0 }
+seq BadPar = Source |> par [IntStage, StrStage] |> MergeI
+public fn main() -> String { "ok" }
+"#;
+        let result = check_with_checker_fav(src, "e0016");
+        assert!(result.is_err(), "expected E0016 for type mismatch in par");
+        let msgs = result.unwrap_err();
+        assert!(
+            msgs.iter().any(|m| m.contains("E0016")),
+            "expected E0016 in errors, got: {:?}", msgs
+        );
+    }
+
+    // F-1d: par step references undefined stage → E0017
+    #[test]
+    fn par_unknown_stage_e0017() {
+        let src = r#"
+stage Double: Int -> Int = |n| { n * 2 }
+stage SumList: List<Int> -> Int = |xs| { 0 }
+seq BadPar = par [Double, UndefinedStage] |> SumList
+public fn main() -> String { "ok" }
+"#;
+        let result = check_with_checker_fav(src, "e0017");
+        assert!(result.is_err(), "expected E0017 for undefined stage in par");
+        let msgs = result.unwrap_err();
+        assert!(
+            msgs.iter().any(|m| m.contains("E0017")),
+            "expected E0017 in errors, got: {:?}", msgs
+        );
+    }
+
+    // F-1e: seq with par compiles without error (Rust pipeline)
+    #[test]
+    fn par_compiles_with_favnir_pipeline() {
+        let src = r#"
+stage Double: Int -> Int = |n| { n * 2 }
+stage AddTen: Int -> Int = |n| { n + 10 }
+stage Merge: List<Int> -> Int = |xs| { 0 }
+seq TestPar = par [Double, AddTen] |> Merge
+public fn main() -> Int { TestPar(3) }
+"#;
+        let prog = Parser::parse_str(src, "test.fav").expect("parse");
+        let ir = compile_program(&prog);
+        let artifact = codegen_program(&ir);
+        assert!(artifact.fn_idx_by_name("TestPar").is_some(), "TestPar not compiled");
+    }
+
+    // F-1f: checker.fav handles a valid program with par stages without error
+    #[test]
+    fn par_effects_detected_by_checker_fav() {
+        let src = r#"
+stage Double: Int -> Int = |n| { n * 2 }
+stage AddTen: Int -> Int = |n| { n + 10 }
+stage SumList: List<Int> -> Int = |xs| { 0 }
+seq TestPar = par [Double, AddTen] |> SumList
+public fn main() -> Int { TestPar(1) }
+"#;
+        let result = check_with_checker_fav(src, "par_valid");
+        assert!(result.is_ok(), "checker.fav errored on valid par program: {:?}", result.err());
     }
 }

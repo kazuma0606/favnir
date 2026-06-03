@@ -436,11 +436,38 @@ pub struct AbstractTrfDef {
 
 // ── FlwDef (2-7) ──────────────────────────────────────────────────────────────
 
+/// A single step in a FlwDef pipeline.
+#[derive(Debug, Clone)]
+pub enum FlwStep {
+    /// Single stage: `StageName`
+    Stage(String),
+    /// Parallel group: `par [A, B, ...]`
+    Par(Vec<String>),
+}
+
+impl FlwStep {
+    /// Return all stage names referenced by this step.
+    pub fn stage_names(&self) -> Vec<&str> {
+        match self {
+            FlwStep::Stage(s) => vec![s.as_str()],
+            FlwStep::Par(names) => names.iter().map(|s| s.as_str()).collect(),
+        }
+    }
+
+    /// Render as a display string (e.g. `par [A, B]` or `A`).
+    pub fn display_str(&self) -> String {
+        match self {
+            FlwStep::Stage(s) => s.clone(),
+            FlwStep::Par(names) => format!("par [{}]", names.join(", ")),
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct FlwDef {
     pub name: String,
-    /// Ordered list of trf/fn names joined by `|>`.
-    pub steps: Vec<String>,
+    /// Ordered list of steps (single stage or parallel group).
+    pub steps: Vec<FlwStep>,
     pub span: Span,
 }
 

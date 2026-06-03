@@ -1310,12 +1310,11 @@ impl Parser {
         let (name, _) = self.expect_ident()?;
         self.expect(&TokenKind::Eq)?;
 
-        let (first, _) = self.expect_ident()?;
+        let first = self.parse_flw_step()?;
         let mut steps = vec![first];
         while self.peek() == &TokenKind::PipeGt {
             self.advance();
-            let (step, _) = self.expect_ident()?;
-            steps.push(step);
+            steps.push(self.parse_flw_step()?);
         }
 
         Ok(FlwDef {
@@ -1323,6 +1322,25 @@ impl Parser {
             steps,
             span: self.span_from(&start),
         })
+    }
+
+    fn parse_flw_step(&mut self) -> Result<FlwStep, ParseError> {
+        if self.peek() == &TokenKind::Par {
+            self.advance(); // consume `par`
+            self.expect(&TokenKind::LBracket)?;
+            let (first, _) = self.expect_ident()?;
+            let mut names = vec![first];
+            while self.peek() == &TokenKind::Comma {
+                self.advance();
+                let (name, _) = self.expect_ident()?;
+                names.push(name);
+            }
+            self.expect(&TokenKind::RBracket)?;
+            Ok(FlwStep::Par(names))
+        } else {
+            let (name, _) = self.expect_ident()?;
+            Ok(FlwStep::Stage(name))
+        }
     }
 
     fn parse_abstract_flw_def(
@@ -1389,6 +1407,23 @@ impl Parser {
         self.expect(&TokenKind::Seq)?;
         let (name, _) = self.expect_ident()?;
         self.expect(&TokenKind::Eq)?;
+
+        // Check if first step is `par [...]` or an ident used as template for binding.
+        if self.peek() == &TokenKind::Par {
+            // par [...] — must be a FlwDef, not a binding
+            let first_step = self.parse_flw_step()?;
+            let mut steps = vec![first_step];
+            while self.peek() == &TokenKind::PipeGt {
+                self.advance();
+                steps.push(self.parse_flw_step()?);
+            }
+            return Ok(Item::FlwDef(FlwDef {
+                name,
+                steps,
+                span: self.span_from(&start),
+            }));
+        }
+
         let (first, _) = self.expect_ident()?;
 
         match self.peek() {
@@ -1396,11 +1431,10 @@ impl Parser {
                 self.parse_flw_binding_rest(visibility, start, name, first)
             }
             _ => {
-                let mut steps = vec![first];
+                let mut steps = vec![FlwStep::Stage(first)];
                 while self.peek() == &TokenKind::PipeGt {
                     self.advance();
-                    let (step, _) = self.expect_ident()?;
-                    steps.push(step);
+                    steps.push(self.parse_flw_step()?);
                 }
                 Ok(Item::FlwDef(FlwDef {
                     name,
@@ -2408,7 +2442,20 @@ mod tests {
         let p = parse("seq Import = ParseCsv |> ValidateUser |> SaveUsers");
         if let Item::FlwDef(f) = &p.items[0] {
             assert_eq!(f.name, "Import");
-            assert_eq!(f.steps, vec!["ParseCsv", "ValidateUser", "SaveUsers"]);
+            assert!(matches!(&f.steps[0], FlwStep::Stage(s) if s == "ParseCsv"));
+            assert!(matches!(&f.steps[1], FlwStep::Stage(s) if s == "ValidateUser"));
+            assert!(matches!(&f.steps[2], FlwStep::Stage(s) if s == "SaveUsers"));
+        }
+    }
+
+    #[test]
+    fn test_parse_flw_def_with_par() {
+        let p = parse("seq FullReport = par [FetchOrders, FetchPrices] |> Merge |> Save");
+        if let Item::FlwDef(f) = &p.items[0] {
+            assert_eq!(f.name, "FullReport");
+            assert!(matches!(&f.steps[0], FlwStep::Par(names) if names == &vec!["FetchOrders", "FetchPrices"]));
+            assert!(matches!(&f.steps[1], FlwStep::Stage(s) if s == "Merge"));
+            assert!(matches!(&f.steps[2], FlwStep::Stage(s) if s == "Save"));
         }
     }
 

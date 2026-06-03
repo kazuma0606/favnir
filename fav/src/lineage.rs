@@ -348,22 +348,25 @@ pub fn lineage_analysis(program: &ast::Program) -> LineageReport {
             let mut all_sources: Vec<String> = Vec::new();
             let mut all_sinks: Vec<String> = Vec::new();
             for step in &flw.steps {
-                if let Some((srcs, snks)) = entry_map.get(step.as_str()) {
-                    for s in srcs {
-                        if !all_sources.contains(s) {
-                            all_sources.push(s.clone());
+                for stage_name in step.stage_names() {
+                    if let Some((srcs, snks)) = entry_map.get(stage_name) {
+                        for s in srcs {
+                            if !all_sources.contains(s) {
+                                all_sources.push(s.clone());
+                            }
                         }
-                    }
-                    for s in snks {
-                        if !all_sinks.contains(s) {
-                            all_sinks.push(s.clone());
+                        for s in snks {
+                            if !all_sinks.contains(s) {
+                                all_sinks.push(s.clone());
+                            }
                         }
                     }
                 }
             }
+            let step_strs: Vec<String> = flw.steps.iter().map(|s| s.display_str()).collect();
             pipelines.push(PipelineLineage {
                 name: flw.name.clone(),
-                steps: flw.steps.clone(),
+                steps: step_strs,
                 sources: all_sources,
                 sinks: all_sinks,
             });

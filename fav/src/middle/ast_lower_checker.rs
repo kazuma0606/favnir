@@ -131,6 +131,60 @@ pub fn lower_te(te: &ast::TypeExpr) -> Value {
     }
 }
 
+// ── TypeExpr → String (for stage scheme registration) ─────────────────────────
+
+fn te_to_string(te: &ast::TypeExpr) -> String {
+    match te {
+        ast::TypeExpr::Named(name, args, _) => match (name.as_str(), args.as_slice()) {
+            ("List", [t]) => format!("List<{}>", te_to_string(t)),
+            ("Option", [t]) => format!("Option<{}>", te_to_string(t)),
+            ("Result", [ok, err]) => format!("Result<{}, {}>", te_to_string(ok), te_to_string(err)),
+            ("Map", [k, v]) => format!("Map<{}, {}>", te_to_string(k), te_to_string(v)),
+            (name, []) => name.to_string(),
+            (name, args) => {
+                let args_str: Vec<String> = args.iter().map(te_to_string).collect();
+                format!("{}<{}>", name, args_str.join(", "))
+            }
+        },
+        ast::TypeExpr::Optional(inner, _) => format!("Option<{}>", te_to_string(inner)),
+        ast::TypeExpr::Fallible(inner, _) => format!("Result<{}, String>", te_to_string(inner)),
+        ast::TypeExpr::Arrow(a, b, _) => format!("{} -> {}", te_to_string(a), te_to_string(b)),
+        ast::TypeExpr::TrfFn { input, output, .. } => {
+            format!("{} -> {}", te_to_string(input), te_to_string(output))
+        }
+    }
+}
+
+// ── TrfDef (stage) → IStage ────────────────────────────────────────────────────
+
+fn lower_trf_def(td: &ast::TrfDef) -> Value {
+    vm_record(vec![
+        ("name", sv(&td.name)),
+        ("input_ty_str", sv(&te_to_string(&td.input_ty))),
+        ("output_ty_str", sv(&te_to_string(&td.output_ty))),
+    ])
+}
+
+// ── FlwDef → ISeq ──────────────────────────────────────────────────────────────
+
+fn lower_flw_step(step: &ast::FlwStep) -> Value {
+    match step {
+        ast::FlwStep::Stage(name) => v1("SStage", sv(name)),
+        ast::FlwStep::Par(names) => {
+            let ns: Vec<Value> = names.iter().map(|n| sv(n)).collect();
+            v1("SPar", vm_list(ns))
+        }
+    }
+}
+
+fn lower_flw_def(fd: &ast::FlwDef) -> Value {
+    let steps: Vec<Value> = fd.steps.iter().map(lower_flw_step).collect();
+    vm_record(vec![
+        ("name", sv(&fd.name)),
+        ("stages", vm_list(steps)),
+    ])
+}
+
 // ── EArgList chain ────────────────────────────────────────────────────────────
 
 fn lower_arg_list(args: &[ast::Expr]) -> Value {
@@ -444,6 +498,8 @@ fn lower_item(item: &ast::Item) -> Option<Value> {
         ast::Item::TestDef(td) => Some(v1("ITest", lower_test_def(td))),
         ast::Item::InterfaceDecl(d) => Some(v1("IInterface", lower_interface_decl(d))),
         ast::Item::InterfaceImplDecl(d) => Some(v1("IImpl", lower_impl_decl(d))),
+        ast::Item::TrfDef(td) => Some(v1("IStage", lower_trf_def(td))),
+        ast::Item::FlwDef(fd) => Some(v1("ISeq", lower_flw_def(fd))),
         _ => None,
     }
 }

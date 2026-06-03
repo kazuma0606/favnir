@@ -60,6 +60,7 @@ type Token =
   | TkRBrace
   | TkLBracket
   | TkRBracket
+  | TkPar
   | TkStage
   | TkSeq
   | TkAbstract
@@ -115,6 +116,7 @@ fn keyword_token(s: String) -> Option<Token> {
     else if s == "yield"    { Option.some(TkYield) }
     else if s == "true"     { Option.some(TkTrue) }
     else if s == "false"    { Option.some(TkFalse) }
+    else if s == "par"       { Option.some(TkPar) }
     else if s == "stage"     { Option.some(TkStage) }
     else if s == "seq"       { Option.some(TkSeq) }
     else if s == "abstract"  { Option.some(TkAbstract) }
@@ -498,11 +500,15 @@ type StageDef = {
     doc:         String
 }
 
+type SeqStep =
+  | SStage(String)
+  | SPar(List<String>)
+
 type SeqDef = {
     is_public:   Bool
     is_abstract: Bool
     name:        String
-    stages:      List<String>
+    stages:      List<SeqStep>
     doc:         String
 }
 
@@ -618,8 +624,18 @@ type EffectsParse = {
     rest: List<Token>
 }
 
-type PipelineNamesParse = {
-    stages: List<String>
+type PipelineStepsParse = {
+    stages: List<SeqStep>
+    rest: List<Token>
+}
+
+type ParNamesParse = {
+    names: List<String>
+    rest: List<Token>
+}
+
+type SeqStepParse = {
+    step: SeqStep
     rest: List<Token>
 }
 
@@ -701,6 +717,7 @@ fn token_eq(a: Token, b: Token) -> Bool {
         TkRBrace => { match b { TkRBrace => true _ => false } }
         TkLBracket => { match b { TkLBracket => true _ => false } }
         TkRBracket => { match b { TkRBracket => true _ => false } }
+        TkPar => { match b { TkPar => true _ => false } }
         TkStage => { match b { TkStage => true _ => false } }
         TkSeq => { match b { TkSeq => true _ => false } }
         TkAbstract => { match b { TkAbstract => true _ => false } }
@@ -729,7 +746,7 @@ fn token_to_string(t: Token) -> String {
         TkPipe => "|" TkDot => "." TkComma => "," TkColon => ":"
         TkSemicolon => ";" TkLParen => "(" TkRParen => ")"
         TkLBrace => "{" TkRBrace => "}" TkLBracket => "[" TkRBracket => "]"
-        TkStage => "stage" TkSeq => "seq" TkAbstract => "abstract"
+        TkPar => "par" TkStage => "stage" TkSeq => "seq" TkAbstract => "abstract"
         TkInterface => "interface" TkImpl => "impl"
         TkDocComment(s) => String.concat("///", s)
         TkEof => "EOF"
@@ -1904,19 +1921,63 @@ fn parse_effects_acc(toks: List<Token>, acc: List<String>) -> EffectsParse {
     }
 }
 
-fn parse_seq_pipeline_acc(toks: List<Token>, acc: List<String>) -> Result<PipelineNamesParse, String> {
+fn parse_par_names_acc(toks: List<Token>, acc: List<String>) -> Result<ParNamesParse, String> {
     match peek(toks) {
         Some(TkIdent(sname)) => {
             bind rest1 <- advance(toks)
             match peek(rest1) {
-                Some(TkPipeGt) => {
+                Some(TkComma) => {
                     bind rest2 <- advance(rest1)
-                    parse_seq_pipeline_acc(rest2, List.push(acc, sname))
+                    parse_par_names_acc(rest2, List.push(acc, sname))
                 }
-                _ => Result.ok(PipelineNamesParse { stages: List.push(acc, sname), rest: rest1 })
+                _ => Result.ok(ParNamesParse { names: List.push(acc, sname)  rest: rest1 })
             }
         }
-        _ => Result.err("expected stage name in seq pipeline")
+        _ => Result.err("expected stage name in par [...]")
+    }
+}
+
+fn parse_seq_step(toks: List<Token>) -> Result<SeqStepParse, String> {
+    match peek(toks) {
+        Some(TkPar) => {
+            bind rest1 <- advance(toks)
+            match expect_tok(rest1, TkLBracket) {
+                Err(e) => Result.err(e)
+                Ok(rest2) => {
+                    bind empty_names <- List.empty()
+                    match parse_par_names_acc(rest2, empty_names) {
+                        Err(e) => Result.err(e)
+                        Ok(names_p) => {
+                            match expect_tok(names_p.rest, TkRBracket) {
+                                Err(e) => Result.err(e)
+                                Ok(rest3) => Result.ok(SeqStepParse { step: SPar(names_p.names)  rest: rest3 })
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        Some(TkIdent(sname)) => {
+            bind rest1 <- advance(toks)
+            Result.ok(SeqStepParse { step: SStage(sname)  rest: rest1 })
+        }
+        _ => Result.err("expected stage name or par [...] in seq pipeline")
+    }
+}
+
+fn parse_seq_pipeline_acc(toks: List<Token>, acc: List<SeqStep>) -> Result<PipelineStepsParse, String> {
+    match parse_seq_step(toks) {
+        Err(e) => Result.err(e)
+        Ok(step_p) => {
+            bind new_acc <- List.push(acc, step_p.step)
+            match peek(step_p.rest) {
+                Some(TkPipeGt) => {
+                    bind rest2 <- advance(step_p.rest)
+                    parse_seq_pipeline_acc(rest2, new_acc)
+                }
+                _ => Result.ok(PipelineStepsParse { stages: new_acc  rest: step_p.rest })
+            }
+        }
     }
 }
 
@@ -1991,14 +2052,14 @@ fn parse_seq_def(toks: List<Token>, is_pub: Bool, is_abstract: Bool) -> Result<S
         Some(TkIdent(sname)) => {
             bind rest1 <- advance(toks)
             if is_abstract {
-                bind empty_stages <- empty_string_list()
+                bind empty_stages <- List.empty()
                 bind sd <- SeqDef { is_public: is_pub  is_abstract: true  name: sname  stages: empty_stages  doc: "" }
                 Result.ok(SeqDefParse { seq_def: sd  rest: rest1 })
             } else {
                 match expect_tok(rest1, TkEq) {
                     Err(e) => Result.err(e)
                     Ok(rest2) => {
-                        bind empty_stages <- empty_string_list()
+                        bind empty_stages <- List.empty()
                         match parse_seq_pipeline_acc(rest2, empty_stages) {
                             Err(e) => Result.err(e)
                             Ok(pipe_p) => {
@@ -3574,12 +3635,36 @@ fn compile_stage_def(stage_def: StageDef) -> Result<List<FnEntry>, String> {
     }
 }
 
-fn build_pipe_call(stages: List<String>, input_expr: Expr) -> Expr {
+fn build_par_names_expr_acc(names: List<String>, acc: Expr) -> Expr {
+    match List.first(names) {
+        None => acc
+        Some(n) => {
+            bind rest <- List.drop(names, 1)
+            bind new_acc <- ECall("List", "push", EArgList(acc, EArgList(ELit(LStr(n)), EArgNil)))
+            build_par_names_expr_acc(rest, new_acc)
+        }
+    }
+}
+
+fn build_par_names_expr(names: List<String>) -> Expr {
+    build_par_names_expr_acc(names, ECall("List", "empty", EArgList(ELit(LUnit), EArgNil)))
+}
+
+
+fn build_pipe_call(stages: List<SeqStep>, input_expr: Expr) -> Expr {
     match List.first(stages) {
         None => input_expr
-        Some(sname) => {
+        Some(step) => {
             bind rest <- List.drop(stages, 1)
-            build_pipe_call(rest, ECall("", sname, EArgList(input_expr, EArgNil)))
+            match step {
+                SStage(sname) =>
+                    build_pipe_call(rest, ECall("", sname, EArgList(input_expr, EArgNil)))
+                SPar(names) => {
+                    bind names_expr <- build_par_names_expr(names)
+                    bind par_call <- ECall("IO", "par_execute_raw", EArgList(names_expr, EArgList(input_expr, EArgNil)))
+                    build_pipe_call(rest, par_call)
+                }
+            }
         }
     }
 }
@@ -4148,6 +4233,18 @@ fn pretty_stage_def(sd: StageDef) -> String {
     String.concat(doc_str, body_str)
 }
 
+fn seq_step_to_string(step: SeqStep) -> String {
+    match step {
+        SStage(name) => name
+        SPar(names) => String.concat("par [", String.concat(String.join(names, ", "), "]"))
+    }
+}
+
+fn seq_steps_to_string(steps: List<SeqStep>) -> String {
+    bind strs <- List.map(steps, seq_step_to_string)
+    String.join(strs, " |> ")
+}
+
 fn pretty_seq_def(sd: SeqDef) -> String {
     bind doc_str <- pretty_doc(sd.doc)
     bind abs_str <- if sd.is_abstract { "abstract " } else { "" }
@@ -4155,7 +4252,8 @@ fn pretty_seq_def(sd: SeqDef) -> String {
     bind body_str <- if sd.is_abstract {
         String.concat(pub_str, String.concat(abs_str, String.concat("seq ", sd.name)))
     } else {
-        String.concat(pub_str, String.concat(abs_str, String.concat("seq ", String.concat(sd.name, String.concat(" = ", String.join(sd.stages, " |> "))))))
+        bind stages_str <- seq_steps_to_string(sd.stages)
+        String.concat(pub_str, String.concat(abs_str, String.concat("seq ", String.concat(sd.name, String.concat(" = ", stages_str)))))
     }
     String.concat(doc_str, body_str)
 }
@@ -4468,20 +4566,31 @@ fn find_stage_by_name(name: String, items: List<Item>) -> Option<StageDef> {
     }
 }
 
+fn seq_step_last_stage_name(step: SeqStep) -> Option<String> {
+    match step {
+        SStage(n) => Option.some(n)
+        SPar(names) => List.last(names)
+    }
+}
+
 fn lint_seq_w002(sd: SeqDef, items: List<Item>) -> List<LintWarning> {
     if sd.is_abstract { List.empty() }
     else {
         match List.last(sd.stages) {
             None => List.empty()
-            Some(last_name) =>
-                match find_stage_by_name(last_name, items) {
-                    None         => List.empty()
-                    Some(sd_fnd) =>
-                        match List.first(sd_fnd.effects) {
-                            Some(_) => List.empty()
-                            None    => List.singleton(make_warning("W002", sd.name,
-                                String.concat("seq ", String.concat(sd.name,
-                                " の最終 stage にエフェクトがありません"))))
+            Some(last_step) =>
+                match seq_step_last_stage_name(last_step) {
+                    None => List.empty()
+                    Some(last_name) =>
+                        match find_stage_by_name(last_name, items) {
+                            None         => List.empty()
+                            Some(sd_fnd) =>
+                                match List.first(sd_fnd.effects) {
+                                    Some(_) => List.empty()
+                                    None    => List.singleton(make_warning("W002", sd.name,
+                                        String.concat("seq ", String.concat(sd.name,
+                                        " の最終 stage にエフェクトがありません"))))
+                                }
                         }
                 }
         }

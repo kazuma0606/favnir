@@ -3917,6 +3917,81 @@ impl VM {
                 }
                 Ok(VMValue::Unit)
             }
+            // par [A, B] parallel stage execution (v9.13.0)
+            // Signature: IO.par_execute_raw(names: List<String>, input: Any) -> List<Any>
+            "IO.par_execute_raw" => {
+                if args.len() != 2 {
+                    return Err(self.error(artifact, "IO.par_execute_raw requires 2 arguments"));
+                }
+                let mut it = args.into_iter();
+                let names_val = it.next().unwrap();
+                let input = it.next().unwrap();
+
+                let names: Vec<String> = match names_val {
+                    VMValue::List(fl) => fl
+                        .iter()
+                        .map(|v| match v {
+                            VMValue::Str(s) => Ok(s.clone()),
+                            _ => Err(self.error(
+                                artifact,
+                                "IO.par_execute_raw: stage names must be strings",
+                            )),
+                        })
+                        .collect::<Result<Vec<_>, _>>()?,
+                    _ => {
+                        return Err(self.error(
+                            artifact,
+                            "IO.par_execute_raw: first argument must be a List<String>",
+                        ))
+                    }
+                };
+
+                let artifact_clone = artifact.clone();
+                let db_str = self.db_path.clone();
+
+                let handles: Vec<std::thread::JoinHandle<Result<VMValue, String>>> = names
+                    .into_iter()
+                    .map(|fn_name| {
+                        let artifact_c = artifact_clone.clone();
+                        let input_c = input.clone();
+                        let db_c = db_str.clone();
+                        std::thread::spawn(move || {
+                            let fn_idx =
+                                artifact_c.fn_idx_by_name(&fn_name).ok_or_else(|| {
+                                    format!(
+                                        "E0017: par ステップ内の stage '{}' が定義されていません",
+                                        fn_name
+                                    )
+                                })?;
+                            VM::run_with_vmvalues(
+                                &artifact_c,
+                                fn_idx,
+                                vec![input_c],
+                                db_c,
+                                None,
+                            )
+                            .map(|(v, _)| v)
+                            .map_err(|e| e.message)
+                        })
+                    })
+                    .collect();
+
+                let mut results = Vec::with_capacity(handles.len());
+                for handle in handles {
+                    match handle.join() {
+                        Ok(Ok(v)) => results.push(v),
+                        Ok(Err(e)) => return Err(self.error(artifact, &e)),
+                        Err(_) => {
+                            return Err(self.error(
+                                artifact,
+                                "IO.par_execute_raw: a parallel stage panicked",
+                            ))
+                        }
+                    }
+                }
+                Ok(VMValue::List(FavList::new(results)))
+            }
+
             _ => {
                 if let Some(target_idx) = artifact.globals.iter().position(|g| {
                     g.kind == 0
@@ -6751,6 +6826,7 @@ fn vm_call_builtin(
             });
             Ok(VMValue::List(FavList::new(argv)))
         }
+
 
         "Debug.show" => {
             let v = args

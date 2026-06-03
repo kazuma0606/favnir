@@ -245,8 +245,10 @@ fn collect_trf_flw_uses(program: &Program) -> HashSet<String> {
             Item::TrfDef(td) => collect_block_calls(&td.body, &top_level_names, &mut uses),
             Item::FlwDef(fd) => {
                 for step in &fd.steps {
-                    if top_level_names.contains(step) {
-                        uses.insert(step.clone());
+                    for name in step.stage_names() {
+                        if top_level_names.contains(name) {
+                            uses.insert(name.to_string());
+                        }
                     }
                 }
             }

@@ -1,69 +1,64 @@
-// Favnir self-hosted type checker
-// v7.8.0: generics (TyVar / Subst / unify / parameterized builtin inference)
-
-// ── Mirrored AST types (from parser.fav) ─────────────────────────────────────
-
 type Lit =
-  | LInt(Int)
-  | LFloat(Float)
-  | LStr(String)
-  | LBool(Bool)
-  | LUnit
+    | LInt(Int)
+    | LFloat(Float)
+    | LStr(String)
+    | LBool(Bool)
+    | LUnit
 
 type Op =
-  | OpAdd
-  | OpSub
-  | OpMul
-  | OpDiv
-  | OpMod
-  | OpEq
-  | OpNeq
-  | OpLt
-  | OpGt
-  | OpLtEq
-  | OpGtEq
-  | OpAnd
-  | OpOr
-  | OpNullCoalesce
+    | OpAdd
+    | OpSub
+    | OpMul
+    | OpDiv
+    | OpMod
+    | OpEq
+    | OpNeq
+    | OpLt
+    | OpGt
+    | OpLtEq
+    | OpGtEq
+    | OpAnd
+    | OpOr
+    | OpNullCoalesce
 
 type Pat =
-  | PWild
-  | PVar(String)
-  | PInt(Int)
-  | PFloat(Float)
-  | PStr(String)
-  | PBool(Bool)
-  | PUnit
-  | PVariant(String)
-  | PVariantP(String, Pat)
+    | PWild
+    | PVar(String)
+    | PInt(Int)
+    | PFloat(Float)
+    | PStr(String)
+    | PBool(Bool)
+    | PUnit
+    | PVariant(String)
+    | PVariantP(String, Pat)
 
 type Expr =
-  | ELit(Lit)
-  | EVar(String)
-  | EBinOp(Op, Expr, Expr)
-  | ECall(String, String, Expr)
-  | EIf(Expr, Expr, Expr)
-  | EAccess(Expr, String)
-  | ELambda(String, Expr)
-  | EMatch(Expr, Expr)
-  | EBlock(Expr, Expr)
-  | ERecordLit(String, Expr)
-  | EArgList(Expr, Expr)
-  | EArgNil
-  | EArm(Pat, Expr, Expr)
-  | EArmNil
-  | EBind(String, Expr, Expr)
-  | EField(String, Expr, Expr)
-  | EFieldNil
-  | EQuestion(Expr)
+    | ELit(Lit)
+    | EVar(String)
+    | EBinOp(Op, Expr, Expr)
+    | ECall(String, String, Expr)
+    | EIf(Expr, Expr, Expr)
+    | EAccess(Expr, String)
+    | ELambda(String, Expr)
+    | EMatch(Expr, Expr)
+    | EBlock(Expr, Expr)
+    | ERecordLit(String, Expr)
+    | EArgList(Expr, Expr)
+    | EArgNil
+    | EArm(Pat, Expr, Expr)
+    | EArmNil
+    | EBind(String, Expr, Expr)
+    | EField(String, Expr, Expr)
+    | EFieldNil
+    | EQuestion(Expr)
 
 type TypeExpr =
-  | TeSimple(String)
-  | TeList(TypeExpr)
-  | TeOption(TypeExpr)
-  | TeResult(TypeExpr, TypeExpr)
-  | TeMap(TypeExpr, TypeExpr)
-  | TeFn(TypeExpr, TypeExpr)
+    | TeSimple(String)
+    | TeList(TypeExpr)
+    | TeOption(TypeExpr)
+    | TeResult(TypeExpr, TypeExpr)
+    | TeMap(TypeExpr, TypeExpr)
+    | TeFn(TypeExpr, TypeExpr)
 
 type Param = {
     name: String
@@ -119,49 +114,47 @@ type ImplEntry = {
 }
 
 type SeqStageEntry = {
-    name:          String
-    input_ty_str:  String
+    name: String
+    input_ty_str: String
     output_ty_str: String
 }
 
 type SeqStep =
-  | SStage(String)
-  | SPar(List<String>)
+    | SStage(String)
+    | SPar(List<String>)
 
 type SeqDef = {
-    name:   String
+    name: String
     stages: List<SeqStep>
 }
 
 type Item =
-  | IFn(FnDef)
-  | IType(TypeDef)
-  | ITest(TestDef)
-  | IWrapper(WrapperDef)
-  | IInterface(InterfaceDef)
-  | IImpl(ImplDeclDef)
-  | IStage(SeqStageEntry)
-  | ISeq(SeqDef)
+    | IFn(FnDef)
+    | IType(TypeDef)
+    | ITest(TestDef)
+    | IWrapper(WrapperDef)
+    | IInterface(InterfaceDef)
+    | IImpl(ImplDeclDef)
+    | IStage(SeqStageEntry)
+    | ISeq(SeqDef)
 
 type Program = {
     items: List<Item>
 }
 
-// ── Type sum type ─────────────────────────────────────────────────────────────
-
 type Type =
-  | TyInt
-  | TyFloat
-  | TyBool
-  | TyString
-  | TyUnit
-  | TyList(Type)
-  | TyOption(Type)
-  | TyResult(Type, Type)
-  | TyMap(Type, Type)
-  | TyFn(Type, Type)
-  | TyUnknown
-  | TyVar(String)
+    | TyInt
+    | TyFloat
+    | TyBool
+    | TyString
+    | TyUnit
+    | TyList(Type)
+    | TyOption(Type)
+    | TyResult(Type, Type)
+    | TyMap(Type, Type)
+    | TyFn(Type, Type)
+    | TyUnknown
+    | TyVar(String)
 
 fn type_to_str(ty: Type) -> String {
     match ty {
@@ -172,29 +165,37 @@ fn type_to_str(ty: Type) -> String {
         TyUnit => "Unit"
         TyList(t) => String.concat("List<", String.concat(type_to_str(t), ">"))
         TyOption(t) => String.concat("Option<", String.concat(type_to_str(t), ">"))
-        TyResult(a, b) => "Result"
-        TyMap(k, v) => "Map"
-        TyFn(a, b) => "Fn"
+        TyResult({ _0: a, _1: b }) => "Result"
+        TyMap({ _0: k, _1: v }) => "Map"
+        TyFn({ _0: a, _1: b }) => "Fn"
         TyUnknown => "Unknown"
         TyVar(name) => name
     }
 }
 
 fn str_to_type(s: String) -> Type {
-    if s == "Int" { TyInt }
-    else {
-    if s == "Float" { TyFloat }
-    else {
-    if s == "Bool" { TyBool }
-    else {
-    if s == "String" { TyString }
-    else {
-    if s == "Unit" { TyUnit }
-    else { TyUnknown }
-    }}}}
+    if s == "Int" {
+        TyInt
+    } else {
+        if s == "Float" {
+            TyFloat
+        } else {
+            if s == "Bool" {
+                TyBool
+            } else {
+                if s == "String" {
+                    TyString
+                } else {
+                    if s == "Unit" {
+                        TyUnit
+                    } else {
+                        TyUnknown
+                    }
+                }
+            }
+        }
+    }
 }
-
-// ── Environment (association list) ────────────────────────────────────────────
 
 type KVPair = {
     first: String
@@ -207,37 +208,40 @@ type CheckState = {
 }
 
 type InfState = {
-    subst:   List<KVPair>
+    subst: List<KVPair>
     counter: Int
 }
 
 type InfResult = {
-    ty:      String
-    subst:   List<KVPair>
+    ty: String
+    subst: List<KVPair>
     counter: Int
 }
 
 fn env_empty() -> List<KVPair> {
-    List.take_while(List.singleton(KVPair { first: "", second: "" }), |v| false)
+    List.take_while(List.singleton(KVPair { first: ""  second: "" }), |v| false)
 }
 
 fn env_insert(env: List<KVPair>, name: String, ty: String) -> List<KVPair> {
-    List.push(env, KVPair { first: name, second: ty })
+    List.push(env, KVPair { first: name  second: ty })
 }
 
 fn env_lookup(env: List<KVPair>, name: String) -> Option<String> {
     match List.first(env) {
         None => Option.none()
         Some(pair) => {
-            if pair.first == name { Option.some(pair.second) }
-            else { env_lookup(List.drop(env, 1), name) }
+            if pair.first == name {
+                Option.some(pair.second)
+            } else {
+                env_lookup(List.drop(env, 1), name)
+            }
         }
     }
 }
 
-// ── Substitution environment (type variables) ─────────────────────────────────
-
-fn subst_empty() -> List<KVPair> { env_empty() }
+fn subst_empty() -> List<KVPair> {
+    env_empty()
+}
 
 fn subst_insert(subst: List<KVPair>, name: String, ty: String) -> List<KVPair> {
     env_insert(subst, name, ty)
@@ -247,26 +251,20 @@ fn subst_lookup(subst: List<KVPair>, name: String) -> Option<String> {
     env_lookup(subst, name)
 }
 
-// ── TypeExpr to string ────────────────────────────────────────────────────────
-
 fn type_expr_to_str(te: TypeExpr) -> String {
     match te {
         TeSimple(name) => name
         TeList(inner) => String.concat("List<", String.concat(type_expr_to_str(inner), ">"))
         TeOption(inner) => String.concat("Option<", String.concat(type_expr_to_str(inner), ">"))
-        TeResult(a, b) => "Result"
-        TeMap(k, v) => "Map"
-        TeFn(a, b) => "Fn"
+        TeResult({ _0: a, _1: b }) => "Result"
+        TeMap({ _0: k, _1: v }) => "Map"
+        TeFn({ _0: a, _1: b }) => "Fn"
     }
 }
-
-// ── Error code formatting ─────────────────────────────────────────────────────
 
 fn fmt_err(code: String, msg: String) -> String {
     String.concat(code, String.concat(": ", msg))
 }
-
-// ── Literal inference ─────────────────────────────────────────────────────────
 
 fn infer_lit(lit: Lit) -> String {
     match lit {
@@ -277,8 +275,6 @@ fn infer_lit(lit: Lit) -> String {
         LUnit => "Unit"
     }
 }
-
-// ── Binary operator type inference ────────────────────────────────────────────
 
 fn is_arith_op(op: Op) -> Bool {
     match op {
@@ -312,331 +308,820 @@ fn is_null_coalesce_op(op: Op) -> Bool {
 
 fn infer_op(op: Op, lty: String, rty: String) -> Result<String, String> {
     if is_arith_op(op) {
-        if lty == "Int" && rty == "Int" { Result.ok("Int") }
-        else {
-        if lty == "Float" && rty == "Float" { Result.ok("Float") }
-        else {
-        if lty == "String" && rty == "String" { Result.ok("String") }
-        else {
-        if lty == "Unknown" || rty == "Unknown" { Result.ok("Unknown") }
-        else { Result.err(fmt_err("E0001", String.concat("arithmetic type mismatch: ", String.concat(lty, String.concat(" vs ", rty))))) }
-        }}}
-    } else {
-    if is_cmp_op(op) {
-        Result.ok("Bool")
-    } else {
-    if is_null_coalesce_op(op) {
-        // lhs is Option<T>, rhs is T; result is T (approximate with rhs type)
-        Result.ok(rty)
-    } else {
-        if lty == "Bool" && rty == "Bool" { Result.ok("Bool") }
-        else {
-        if lty == "Unknown" || rty == "Unknown" { Result.ok("Bool") }
-        else { Result.err(fmt_err("E0002", "logical operator requires Bool operands")) }
+        if (lty == "Int") && (rty == "Int") {
+            Result.ok("Int")
+        } else {
+            if (lty == "Float") && (rty == "Float") {
+                Result.ok("Float")
+            } else {
+                if (lty == "String") && (rty == "String") {
+                    Result.ok("String")
+                } else {
+                    if (lty == "Unknown") || (rty == "Unknown") {
+                        Result.ok("Unknown")
+                    } else {
+                        Result.err(fmt_err("E0001", String.concat("arithmetic type mismatch: ", String.concat(lty, String.concat(" vs ", rty)))))
+                    }
+                }
+            }
         }
-    }}}
+    } else {
+        if is_cmp_op(op) {
+            Result.ok("Bool")
+        } else {
+            if is_null_coalesce_op(op) {
+                Result.ok(rty)
+            } else {
+                if (lty == "Bool") && (rty == "Bool") {
+                    Result.ok("Bool")
+                } else {
+                    if (lty == "Unknown") || (rty == "Unknown") {
+                        Result.ok("Bool")
+                    } else {
+                        Result.err(fmt_err("E0002", "logical operator requires Bool operands"))
+                    }
+                }
+            }
+        }
+    }
 }
 
-// ── Per-namespace builtin return types ────────────────────────────────────────
-
 fn io_fn(fname: String) -> String {
-    if fname == "argv"              { "List" }
-    else { if fname == "read_file_raw"      { "Result" }
-    else { if fname == "write_file_raw"     { "Result" }
-    else { if fname == "make_dir_raw"       { "Result" }
-    else { if fname == "write_stdout_raw"   { "Unit" }
-    else { if fname == "write_stderr_raw"   { "Unit" }
-    else { if fname == "exit_raw"           { "Unit" }
-    else { if fname == "list_dir_raw"       { "Result" }
-    else { if fname == "file_stat_raw"      { "Map" }
-    else { if fname == "path_join_raw"      { "String" }
-    else { if fname == "home_dir_raw"       { "Option" }
-    else { if fname == "cwd_raw"            { "String" }
-    else { if fname == "is_dir_raw"         { "Bool" }
-    else { if fname == "file_mtime_raw"     { "Result" }
-    else { if fname == "sleep_ms_raw"       { "Unit" }
-    else { if fname == "println"            { "Unit" }
-    else { "Unknown" }
-    }}}}}}}}}}}}}}}
+    if fname == "argv" {
+        "List"
+    } else {
+        if fname == "read_file_raw" {
+            "Result"
+        } else {
+            if fname == "write_file_raw" {
+                "Result"
+            } else {
+                if fname == "make_dir_raw" {
+                    "Result"
+                } else {
+                    if fname == "write_stdout_raw" {
+                        "Unit"
+                    } else {
+                        if fname == "write_stderr_raw" {
+                            "Unit"
+                        } else {
+                            if fname == "exit_raw" {
+                                "Unit"
+                            } else {
+                                if fname == "list_dir_raw" {
+                                    "Result"
+                                } else {
+                                    if fname == "file_stat_raw" {
+                                        "Map"
+                                    } else {
+                                        if fname == "path_join_raw" {
+                                            "String"
+                                        } else {
+                                            if fname == "home_dir_raw" {
+                                                "Option"
+                                            } else {
+                                                if fname == "cwd_raw" {
+                                                    "String"
+                                                } else {
+                                                    if fname == "is_dir_raw" {
+                                                        "Bool"
+                                                    } else {
+                                                        if fname == "file_mtime_raw" {
+                                                            "Result"
+                                                        } else {
+                                                            if fname == "sleep_ms_raw" {
+                                                                "Unit"
+                                                            } else {
+                                                                if fname == "println" {
+                                                                    "Unit"
+                                                                } else {
+                                                                    "Unknown"
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
 fn compiler_fn(fname: String) -> String {
-    if fname == "check_raw"                     { "Result" }
-    else { if fname == "lineage_text_raw"             { "String" }
-    else { if fname == "fmt_source_raw"               { "Result" }
-    else { if fname == "lint_source_raw"              { "Result" }
-    else { if fname == "doc_source_raw"               { "Result" }
-    else { if fname == "compile_source_profiled_raw"  { "Result" }
-    else { "Unknown" }
-    }}}}}
+    if fname == "check_raw" {
+        "Result"
+    } else {
+        if fname == "lineage_text_raw" {
+            "String"
+        } else {
+            if fname == "fmt_source_raw" {
+                "Result"
+            } else {
+                if fname == "lint_source_raw" {
+                    "Result"
+                } else {
+                    if fname == "doc_source_raw" {
+                        "Result"
+                    } else {
+                        if fname == "compile_source_profiled_raw" {
+                            "Result"
+                        } else {
+                            "Unknown"
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
 fn env_fn(fname: String) -> String {
-    if fname == "now_ms_raw"          { "Int" }
-    else { if fname == "profile_timed_raw"  { "Unknown" }
-    else { if fname == "profile_dump_raw"   { "String" }
-    else { "Unknown" }
-    }}
+    if fname == "now_ms_raw" {
+        "Int"
+    } else {
+        if fname == "profile_timed_raw" {
+            "Unknown"
+        } else {
+            if fname == "profile_dump_raw" {
+                "String"
+            } else {
+                "Unknown"
+            }
+        }
+    }
 }
 
 fn cache_fn(fname: String) -> String {
-    if fname == "get_raw"           { "Option" }
-    else { if fname == "set_raw"         { "Unit" }
-    else { if fname == "del_raw"         { "Unit" }
-    else { if fname == "exists_raw"      { "Bool" }
-    else { if fname == "del_prefix_raw"  { "Unit" }
-    else { "Unknown" }
-    }}}}
+    if fname == "get_raw" {
+        "Option"
+    } else {
+        if fname == "set_raw" {
+            "Unit"
+        } else {
+            if fname == "del_raw" {
+                "Unit"
+            } else {
+                if fname == "exists_raw" {
+                    "Bool"
+                } else {
+                    if fname == "del_prefix_raw" {
+                        "Unit"
+                    } else {
+                        "Unknown"
+                    }
+                }
+            }
+        }
+    }
 }
 
 fn queue_fn(fname: String) -> String {
-    if fname == "send_raw"          { "Result" }
-    else { if fname == "recv_raw"        { "Result" }
-    else { if fname == "ack_raw"         { "Result" }
-    else { if fname == "delete_raw"      { "Result" }
-    else { "Unknown" }
-    }}}
+    if fname == "send_raw" {
+        "Result"
+    } else {
+        if fname == "recv_raw" {
+            "Result"
+        } else {
+            if fname == "ack_raw" {
+                "Result"
+            } else {
+                if fname == "delete_raw" {
+                    "Result"
+                } else {
+                    "Unknown"
+                }
+            }
+        }
+    }
 }
 
 fn email_fn(fname: String) -> String {
-    if fname == "send_raw" { "Result" }
-    else { "Unknown" }
+    if fname == "send_raw" {
+        "Result"
+    } else {
+        "Unknown"
+    }
 }
 
 fn gen_fn(fname: String) -> String {
-    if fname == "uuid_raw"       { "String" }
-    else if fname == "uuid_v7_raw"   { "String" }
-    else if fname == "nano_id_raw"   { "String" }
-    else if fname == "string_val"    { "String" }
-    else { "Unknown" }
+    if fname == "uuid_raw" {
+        "String"
+    } else {
+        if fname == "uuid_v7_raw" {
+            "String"
+        } else {
+            if fname == "nano_id_raw" {
+                "String"
+            } else {
+                if fname == "string_val" {
+                    "String"
+                } else {
+                    "Unknown"
+                }
+            }
+        }
+    }
 }
 
 fn http_fn(fname: String) -> String {
-    if fname == "get_raw"            { "Result" }
-    else if fname == "post_raw"      { "Result" }
-    else if fname == "put_raw"       { "Result" }
-    else if fname == "delete_raw"    { "Result" }
-    else if fname == "patch_raw"     { "Result" }
-    else if fname == "get_body_raw"  { "Result" }
-    else if fname == "post_body_raw" { "Result" }
-    else { "Result" }
+    if fname == "get_raw" {
+        "Result"
+    } else {
+        if fname == "post_raw" {
+            "Result"
+        } else {
+            if fname == "put_raw" {
+                "Result"
+            } else {
+                if fname == "delete_raw" {
+                    "Result"
+                } else {
+                    if fname == "patch_raw" {
+                        "Result"
+                    } else {
+                        if fname == "get_body_raw" {
+                            "Result"
+                        } else {
+                            if fname == "post_body_raw" {
+                                "Result"
+                            } else {
+                                "Result"
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
 fn grpc_fn(fname: String) -> String {
-    if fname == "call_raw"             { "Result" }
-    else if fname == "call_typed_raw"  { "Result" }
-    else if fname == "call_stream_raw" { "List" }
-    else if fname == "encode_raw"      { "String" }
-    else if fname == "decode_raw"      { "Map" }
-    else { "Unknown" }
+    if fname == "call_raw" {
+        "Result"
+    } else {
+        if fname == "call_typed_raw" {
+            "Result"
+        } else {
+            if fname == "call_stream_raw" {
+                "List"
+            } else {
+                if fname == "encode_raw" {
+                    "String"
+                } else {
+                    if fname == "decode_raw" {
+                        "Map"
+                    } else {
+                        "Unknown"
+                    }
+                }
+            }
+        }
+    }
 }
 
 fn llm_fn(fname: String) -> String {
-    if fname == "complete_raw"     { "Result" }
-    else if fname == "chat_raw"    { "Result" }
-    else if fname == "extract_raw" { "Result" }
-    else { "Result" }
+    if fname == "complete_raw" {
+        "Result"
+    } else {
+        if fname == "chat_raw" {
+            "Result"
+        } else {
+            if fname == "extract_raw" {
+                "Result"
+            } else {
+                "Result"
+            }
+        }
+    }
 }
 
 fn debug_fn(fname: String) -> String {
-    if fname == "show_raw" { "String" }
-    else { "Unknown" }
+    if fname == "show_raw" {
+        "String"
+    } else {
+        "Unknown"
+    }
 }
 
 fn str_fn(fname: String) -> String {
-    if fname == "concat"            { "String" }
-    else { if fname == "length"          { "Int" }
-    else { if fname == "contains"        { "Bool" }
-    else { if fname == "slice"           { "String" }
-    else { if fname == "to_int"          { "Option" }
-    else { if fname == "to_float"        { "Option" }
-    else { if fname == "chars"           { "List" }
-    else { if fname == "from_chars"      { "String" }
-    else { if fname == "starts_with"     { "Bool" }
-    else { if fname == "ends_with"       { "Bool" }
-    else { if fname == "trim"            { "String" }
-    else { if fname == "upper"           { "String" }
-    else { if fname == "lower"           { "String" }
-    else { if fname == "to_upper"        { "String" }
-    else { if fname == "to_lower"        { "String" }
-    else { if fname == "join"            { "String" }
-    else { if fname == "repeat"          { "String" }
-    else { if fname == "replace"         { "String" }
-    else { if fname == "split"           { "List" }
-    else { if fname == "compare"         { "Int" }
-    else { if fname == "to_bytes"        { "List" }
-    else { if fname == "lines"           { "List" }
-    else { if fname == "words"           { "List" }
-    else { if fname == "capitalize"      { "String" }
-    else { if fname == "indent"          { "String" }
-    else { if fname == "truncate"        { "String" }
-    else { if fname == "trim_start"      { "String" }
-    else { if fname == "trim_end"        { "String" }
-    else { "Unknown" }
-    }}}}}}}}}}}}}}}}}}}}}}}}}}}
+    if fname == "concat" {
+        "String"
+    } else {
+        if fname == "length" {
+            "Int"
+        } else {
+            if fname == "contains" {
+                "Bool"
+            } else {
+                if fname == "slice" {
+                    "String"
+                } else {
+                    if fname == "to_int" {
+                        "Option"
+                    } else {
+                        if fname == "to_float" {
+                            "Option"
+                        } else {
+                            if fname == "chars" {
+                                "List"
+                            } else {
+                                if fname == "from_chars" {
+                                    "String"
+                                } else {
+                                    if fname == "starts_with" {
+                                        "Bool"
+                                    } else {
+                                        if fname == "ends_with" {
+                                            "Bool"
+                                        } else {
+                                            if fname == "trim" {
+                                                "String"
+                                            } else {
+                                                if fname == "upper" {
+                                                    "String"
+                                                } else {
+                                                    if fname == "lower" {
+                                                        "String"
+                                                    } else {
+                                                        if fname == "to_upper" {
+                                                            "String"
+                                                        } else {
+                                                            if fname == "to_lower" {
+                                                                "String"
+                                                            } else {
+                                                                if fname == "join" {
+                                                                    "String"
+                                                                } else {
+                                                                    if fname == "repeat" {
+                                                                        "String"
+                                                                    } else {
+                                                                        if fname == "replace" {
+                                                                            "String"
+                                                                        } else {
+                                                                            if fname == "split" {
+                                                                                "List"
+                                                                            } else {
+                                                                                if fname == "compare" {
+                                                                                    "Int"
+                                                                                } else {
+                                                                                    if fname == "to_bytes" {
+                                                                                        "List"
+                                                                                    } else {
+                                                                                        if fname == "lines" {
+                                                                                            "List"
+                                                                                        } else {
+                                                                                            if fname == "words" {
+                                                                                                "List"
+                                                                                            } else {
+                                                                                                if fname == "capitalize" {
+                                                                                                    "String"
+                                                                                                } else {
+                                                                                                    if fname == "indent" {
+                                                                                                        "String"
+                                                                                                    } else {
+                                                                                                        if fname == "truncate" {
+                                                                                                            "String"
+                                                                                                        } else {
+                                                                                                            if fname == "trim_start" {
+                                                                                                                "String"
+                                                                                                            } else {
+                                                                                                                if fname == "trim_end" {
+                                                                                                                    "String"
+                                                                                                                } else {
+                                                                                                                    "Unknown"
+                                                                                                                }
+                                                                                                            }
+                                                                                                        }
+                                                                                                    }
+                                                                                                }
+                                                                                            }
+                                                                                        }
+                                                                                    }
+                                                                                }
+                                                                            }
+                                                                        }
+                                                                    }
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
-
 fn list_fn(fname: String) -> String {
-    if fname == "push"              { "List" }
-    else { if fname == "length"          { "Int" }
-    else { if fname == "first"           { "Option" }
-    else { if fname == "concat"          { "List" }
-    else { if fname == "drop"            { "List" }
-    else { if fname == "take"            { "List" }
-    else { if fname == "singleton"       { "List" }
-    else { if fname == "any"             { "Bool" }
-    else { if fname == "all"             { "Bool" }
-    else { if fname == "map"             { "List" }
-    else { if fname == "filter"          { "List" }
-    else { if fname == "range"           { "List" }
-    else { if fname == "take_while"      { "List" }
-    else { if fname == "drop_while"      { "List" }
-    else { if fname == "fold"            { "Unknown" }
-    else { if fname == "fold_left"       { "Unknown" }
-    else { if fname == "find"            { "Option" }
-    else { if fname == "partition"       { "Unknown" }
-    else { if fname == "empty"           { "List" }
-    else { if fname == "sort_by"         { "List" }
-    else { if fname == "zip_with"        { "List" }
-    else { if fname == "group_by"        { "Map" }
-    else { if fname == "intersperse"     { "List" }
-    else { if fname == "zip"             { "List" }
-    else { if fname == "chunk"           { "List" }
-    else { if fname == "scan"            { "List" }
-    else { "List" }
-    }}}}}}}}}}}}}}}}}}}}}}}}}
+    if fname == "push" {
+        "List"
+    } else {
+        if fname == "length" {
+            "Int"
+        } else {
+            if fname == "first" {
+                "Option"
+            } else {
+                if fname == "concat" {
+                    "List"
+                } else {
+                    if fname == "drop" {
+                        "List"
+                    } else {
+                        if fname == "take" {
+                            "List"
+                        } else {
+                            if fname == "singleton" {
+                                "List"
+                            } else {
+                                if fname == "any" {
+                                    "Bool"
+                                } else {
+                                    if fname == "all" {
+                                        "Bool"
+                                    } else {
+                                        if fname == "map" {
+                                            "List"
+                                        } else {
+                                            if fname == "filter" {
+                                                "List"
+                                            } else {
+                                                if fname == "range" {
+                                                    "List"
+                                                } else {
+                                                    if fname == "take_while" {
+                                                        "List"
+                                                    } else {
+                                                        if fname == "drop_while" {
+                                                            "List"
+                                                        } else {
+                                                            if fname == "fold" {
+                                                                "Unknown"
+                                                            } else {
+                                                                if fname == "fold_left" {
+                                                                    "Unknown"
+                                                                } else {
+                                                                    if fname == "find" {
+                                                                        "Option"
+                                                                    } else {
+                                                                        if fname == "partition" {
+                                                                            "Unknown"
+                                                                        } else {
+                                                                            if fname == "empty" {
+                                                                                "List"
+                                                                            } else {
+                                                                                if fname == "sort_by" {
+                                                                                    "List"
+                                                                                } else {
+                                                                                    if fname == "zip_with" {
+                                                                                        "List"
+                                                                                    } else {
+                                                                                        if fname == "group_by" {
+                                                                                            "Map"
+                                                                                        } else {
+                                                                                            if fname == "intersperse" {
+                                                                                                "List"
+                                                                                            } else {
+                                                                                                if fname == "zip" {
+                                                                                                    "List"
+                                                                                                } else {
+                                                                                                    if fname == "chunk" {
+                                                                                                        "List"
+                                                                                                    } else {
+                                                                                                        if fname == "scan" {
+                                                                                                            "List"
+                                                                                                        } else {
+                                                                                                            "List"
+                                                                                                        }
+                                                                                                    }
+                                                                                                }
+                                                                                            }
+                                                                                        }
+                                                                                    }
+                                                                                }
+                                                                            }
+                                                                        }
+                                                                    }
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
 fn opt_fn(fname: String) -> String {
-    if fname == "some"      { "Option" }
-    else { if fname == "none"      { "Option" }
-    else { if fname == "and_then"  { "Option" }
-    else { "Unknown" }
-    }}
+    if fname == "some" {
+        "Option"
+    } else {
+        if fname == "none" {
+            "Option"
+        } else {
+            if fname == "and_then" {
+                "Option"
+            } else {
+                "Unknown"
+            }
+        }
+    }
 }
 
 fn res_fn(fname: String) -> String {
-    if fname == "ok"        { "Result" }
-    else { if fname == "err"       { "Result" }
-    else { if fname == "and_then"  { "Result" }
-    else { if fname == "all"       { "Result" }
-    else { "Unknown" }
-    }}}
+    if fname == "ok" {
+        "Result"
+    } else {
+        if fname == "err" {
+            "Result"
+        } else {
+            if fname == "and_then" {
+                "Result"
+            } else {
+                if fname == "all" {
+                    "Result"
+                } else {
+                    "Unknown"
+                }
+            }
+        }
+    }
 }
 
 fn map_fn(fname: String) -> String {
-    if fname == "get"               { "Option" }
-    else { if fname == "set"             { "Map" }
-    else { if fname == "keys"            { "List" }
-    else { if fname == "values"          { "List" }
-    else { if fname == "from_list"       { "Map" }
-    else { if fname == "empty"           { "Map" }
-    else { if fname == "contains_key"    { "Bool" }
-    else { if fname == "delete"          { "Map" }
-    else { if fname == "to_list"         { "List" }
-    else { if fname == "from_entries"    { "Map" }
-    else { if fname == "merge_with"      { "Map" }
-    else { if fname == "filter"          { "Map" }
-    else { if fname == "count_by"        { "Map" }
-    else { "Unknown" }
-    }}}}}}}}}}}}
+    if fname == "get" {
+        "Option"
+    } else {
+        if fname == "set" {
+            "Map"
+        } else {
+            if fname == "keys" {
+                "List"
+            } else {
+                if fname == "values" {
+                    "List"
+                } else {
+                    if fname == "from_list" {
+                        "Map"
+                    } else {
+                        if fname == "empty" {
+                            "Map"
+                        } else {
+                            if fname == "contains_key" {
+                                "Bool"
+                            } else {
+                                if fname == "delete" {
+                                    "Map"
+                                } else {
+                                    if fname == "to_list" {
+                                        "List"
+                                    } else {
+                                        if fname == "from_entries" {
+                                            "Map"
+                                        } else {
+                                            if fname == "merge_with" {
+                                                "Map"
+                                            } else {
+                                                if fname == "filter" {
+                                                    "Map"
+                                                } else {
+                                                    if fname == "count_by" {
+                                                        "Map"
+                                                    } else {
+                                                        "Unknown"
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
-
 fn int_fn(fname: String) -> String {
-    if fname == "to_string"  { "String" }
-    else { if fname == "compare"    { "Int" }
-    else { if fname == "band"       { "Int" }
-    else { if fname == "shr"        { "Int" }
-    else { if fname == "bor"        { "Int" }
-    else { "Unknown" }
-    }}}}
+    if fname == "to_string" {
+        "String"
+    } else {
+        if fname == "compare" {
+            "Int"
+        } else {
+            if fname == "band" {
+                "Int"
+            } else {
+                if fname == "shr" {
+                    "Int"
+                } else {
+                    if fname == "bor" {
+                        "Int"
+                    } else {
+                        "Unknown"
+                    }
+                }
+            }
+        }
+    }
 }
 
 fn float_fn(fname: String) -> String {
-    if fname == "to_string"  { "String" }
-    else if fname == "from_int"   { "Float" }
-    else if fname == "to_bits"    { "Int" }
-    else { "Unknown" }
+    if fname == "to_string" {
+        "String"
+    } else {
+        if fname == "from_int" {
+            "Float"
+        } else {
+            if fname == "to_bits" {
+                "Int"
+            } else {
+                "Unknown"
+            }
+        }
+    }
 }
 
 fn builtin_ret_ty(ns: String, fname: String) -> String {
-    if ns == "String"        { str_fn(fname) }
-    else if ns == "List"     { list_fn(fname) }
-    else if ns == "Option"   { opt_fn(fname) }
-    else if ns == "Result"   { res_fn(fname) }
-    else if ns == "Map"      { map_fn(fname) }
-    else if ns == "Int"      { int_fn(fname) }
-    else if ns == "Float"    { float_fn(fname) }
-    else if ns == "IO"       { io_fn(fname) }
-    else if ns == "Compiler" { compiler_fn(fname) }
-    else if ns == "Env"      { env_fn(fname) }
-    else if ns == "Cache"    { cache_fn(fname) }
-    else if ns == "Queue"    { queue_fn(fname) }
-    else if ns == "Email"    { email_fn(fname) }
-    else if ns == "Gen"      { gen_fn(fname) }
-    else if ns == "Http"     { http_fn(fname) }
-    else if ns == "Grpc"     { grpc_fn(fname) }
-    else if ns == "Llm"      { llm_fn(fname) }
-    else if ns == "Debug"    { debug_fn(fname) }
-    else { "Unknown" }
+    if ns == "String" {
+        str_fn(fname)
+    } else {
+        if ns == "List" {
+            list_fn(fname)
+        } else {
+            if ns == "Option" {
+                opt_fn(fname)
+            } else {
+                if ns == "Result" {
+                    res_fn(fname)
+                } else {
+                    if ns == "Map" {
+                        map_fn(fname)
+                    } else {
+                        if ns == "Int" {
+                            int_fn(fname)
+                        } else {
+                            if ns == "Float" {
+                                float_fn(fname)
+                            } else {
+                                if ns == "IO" {
+                                    io_fn(fname)
+                                } else {
+                                    if ns == "Compiler" {
+                                        compiler_fn(fname)
+                                    } else {
+                                        if ns == "Env" {
+                                            env_fn(fname)
+                                        } else {
+                                            if ns == "Cache" {
+                                                cache_fn(fname)
+                                            } else {
+                                                if ns == "Queue" {
+                                                    queue_fn(fname)
+                                                } else {
+                                                    if ns == "Email" {
+                                                        email_fn(fname)
+                                                    } else {
+                                                        if ns == "Gen" {
+                                                            gen_fn(fname)
+                                                        } else {
+                                                            if ns == "Http" {
+                                                                http_fn(fname)
+                                                            } else {
+                                                                if ns == "Grpc" {
+                                                                    grpc_fn(fname)
+                                                                } else {
+                                                                    if ns == "Llm" {
+                                                                        llm_fn(fname)
+                                                                    } else {
+                                                                        if ns == "Debug" {
+                                                                            debug_fn(fname)
+                                                                        } else {
+                                                                            "Unknown"
+                                                                        }
+                                                                    }
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
-// ── Effect inference ──────────────────────────────────────────────────────────
-
 fn ns_to_effect(ns: String) -> String {
-    if ns == "IO"            { "IO" }
-    else if ns == "Compiler" { "IO" }
-    else if ns == "Env"      { "IO" }
-    else if ns == "Cache"    { "Cache" }
-    else if ns == "Queue"    { "Queue" }
-    else if ns == "Email"    { "Email" }
-    else if ns == "Gen"      { "Gen" }
-    else if ns == "Http"     { "Http" }
-    else if ns == "Grpc"     { "Rpc" }
-    else if ns == "Llm"      { "Llm" }
-    else if ns == "Debug"    { "IO" }
-    else { "" }
+    if ns == "IO" {
+        "IO"
+    } else {
+        if ns == "Compiler" {
+            "IO"
+        } else {
+            if ns == "Env" {
+                "IO"
+            } else {
+                if ns == "Cache" {
+                    "Cache"
+                } else {
+                    if ns == "Queue" {
+                        "Queue"
+                    } else {
+                        if ns == "Email" {
+                            "Email"
+                        } else {
+                            if ns == "Gen" {
+                                "Gen"
+                            } else {
+                                if ns == "Http" {
+                                    "Http"
+                                } else {
+                                    if ns == "Grpc" {
+                                        "Rpc"
+                                    } else {
+                                        if ns == "Llm" {
+                                            "Llm"
+                                        } else {
+                                            if ns == "Debug" {
+                                                "IO"
+                                            } else {
+                                                ""
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
 fn infer_arms_effects(arms: Expr) -> List<String> {
     match arms {
         EArmNil => List.empty()
-        EArm(pat, body, rest) =>
-            List.concat(infer_expr_effects(body), infer_arms_effects(rest))
+        EArm({ _0: pat, _1: body, _2: rest }) => List.concat(infer_expr_effects(body), infer_arms_effects(rest))
         _ => List.empty()
     }
 }
 
 fn infer_expr_effects(expr: Expr) -> List<String> {
     match expr {
-        ECall(ns, fname, args) => {
-            bind eff <- ns_to_effect(ns)
-            if eff == "" { List.empty() }
-            else { List.singleton(eff) }
+        ECall({ _0: ns, _1: fname, _2: args }) => {
+            bind eff <- ns_to_effect(ns);
+            if eff == "" {
+                List.empty()
+            } else {
+                List.singleton(eff)
+            }
         }
-        EBind(v, val_e, cont_e) =>
-            List.concat(infer_expr_effects(val_e), infer_expr_effects(cont_e))
-        EIf(cond, then_e, else_e) =>
-            List.concat(infer_expr_effects(cond),
-                List.concat(infer_expr_effects(then_e), infer_expr_effects(else_e)))
-        EBlock(a, b) =>
-            List.concat(infer_expr_effects(a), infer_expr_effects(b))
-        EMatch(scrut, arms) =>
-            List.concat(infer_expr_effects(scrut), infer_arms_effects(arms))
-        EArgList(h, t) =>
-            List.concat(infer_expr_effects(h), infer_expr_effects(t))
+        EBind({ _0: v, _1: val_e, _2: cont_e }) => List.concat(infer_expr_effects(val_e), infer_expr_effects(cont_e))
+        EIf({ _0: cond, _1: then_e, _2: else_e }) => List.concat(infer_expr_effects(cond), List.concat(infer_expr_effects(then_e), infer_expr_effects(else_e)))
+        EBlock({ _0: a, _1: b }) => List.concat(infer_expr_effects(a), infer_expr_effects(b))
+        EMatch({ _0: scrut, _1: arms }) => List.concat(infer_expr_effects(scrut), infer_arms_effects(arms))
+        EArgList({ _0: h, _1: t }) => List.concat(infer_expr_effects(h), infer_expr_effects(t))
         EQuestion(inner) => infer_expr_effects(inner)
-        EBinOp(op, left, right) =>
-            List.concat(infer_expr_effects(left), infer_expr_effects(right))
+        EBinOp({ _0: op, _1: left, _2: right }) => List.concat(infer_expr_effects(left), infer_expr_effects(right))
         _ => List.empty()
     }
 }
 
-// ── Effect checking ───────────────────────────────────────────────────────────
-
-fn str_eq(a: String, b: String) -> Bool { a == b }
+fn str_eq(a: String, b: String) -> Bool {
+    a == b
+}
 
 fn has_effect(effects: List<String>, eff: String) -> Bool {
     List.any(effects, |e| str_eq(e, eff))
@@ -649,32 +1134,28 @@ fn check_effects_all(declared: List<String>, inferred: List<String>) -> Option<S
             if has_effect(declared, eff) {
                 check_effects_all(declared, List.drop(inferred, 1))
             } else {
-                Option.some(fmt_err("E0003",
-                    String.concat("undeclared effect !", eff)))
+                Option.some(fmt_err("E0003", String.concat("undeclared effect !", eff)))
             }
         }
     }
 }
 
-// ── Type variable and substitution ────────────────────────────────────────────
-
 fn is_type_var(s: String) -> Bool {
     if String.length(s) == 1 {
-        bind c <- String.slice(s, 0, 1)
-        c == "A" || c == "B" || c == "C" || c == "D" || c == "E" ||
-        c == "F" || c == "G" || c == "H" || c == "I" || c == "J" ||
-        c == "K" || c == "L" || c == "M" || c == "N" || c == "O" ||
-        c == "P" || c == "Q" || c == "R" || c == "S" || c == "T" ||
-        c == "U" || c == "V" || c == "W" || c == "X" || c == "Y" || c == "Z"
-    } else { false }
+        bind c <- String.slice(s, 0, 1);
+        (((((((((((((((((((((((((c == "A") || (c == "B")) || (c == "C")) || (c == "D")) || (c == "E")) || (c == "F")) || (c == "G")) || (c == "H")) || (c == "I")) || (c == "J")) || (c == "K")) || (c == "L")) || (c == "M")) || (c == "N")) || (c == "O")) || (c == "P")) || (c == "Q")) || (c == "R")) || (c == "S")) || (c == "T")) || (c == "U")) || (c == "V")) || (c == "W")) || (c == "X")) || (c == "Y")) || (c == "Z")
+    } else {
+        false
+    }
 }
 
-// HM 型推論が生成するフレッシュ型変数 "t0", "t1", ... を認識する
 fn is_fresh_var(s: String) -> Bool {
     if String.length(s) >= 2 {
-        bind first <- String.slice(s, 0, 1)
+        bind first <- String.slice(s, 0, 1);
         first == "t"
-    } else { false }
+    } else {
+        false
+    }
 }
 
 fn apply_subst(subst: List<KVPair>, ty: String) -> String {
@@ -683,7 +1164,9 @@ fn apply_subst(subst: List<KVPair>, ty: String) -> String {
             Some(resolved) => resolved
             None => ty
         }
-    } else { ty }
+    } else {
+        ty
+    }
 }
 
 fn type_str_outer(s: String) -> String {
@@ -692,174 +1175,166 @@ fn type_str_outer(s: String) -> String {
             Some(outer) => outer
             None => s
         }
-    } else { s }
+    } else {
+        s
+    }
 }
 
 fn type_str_inner(s: String) -> String {
     if String.contains(s, "<") {
-        bind parts <- String.split(s, "<")
+        bind parts <- String.split(s, "<");
         match List.first(List.drop(parts, 1)) {
             None => ""
             Some(rest) => String.slice(rest, 0, String.length(rest) - 1)
         }
-    } else { "" }
+    } else {
+        ""
+    }
 }
-
-// ── Basic unification ─────────────────────────────────────────────────────────
 
 fn unify(t1: String, t2: String, subst: List<KVPair>) -> Result<List<KVPair>, String> {
-    if t1 == "Unknown" || t2 == "Unknown" { Result.ok(subst) }
-    else {
-    if t1 == t2 { Result.ok(subst) }
-    else {
-    if is_type_var(t1) {
-        match subst_lookup(subst, t1) {
-            None => Result.ok(subst_insert(subst, t1, t2))
-            Some(existing) =>
-                if existing == t2 { Result.ok(subst) }
-                else { Result.err(fmt_err("E0005",
-                    String.concat("conflict: ", String.concat(t1,
-                    String.concat(" was ", String.concat(existing,
-                    String.concat(", got ", t2))))))) }
-        }
+    if (t1 == "Unknown") || (t2 == "Unknown") {
+        Result.ok(subst)
     } else {
-    if is_type_var(t2) {
-        match subst_lookup(subst, t2) {
-            None => Result.ok(subst_insert(subst, t2, t1))
-            Some(existing) =>
-                if existing == t1 { Result.ok(subst) }
-                else { Result.err(fmt_err("E0005",
-                    String.concat("conflict: ", String.concat(t2,
-                    String.concat(" was ", String.concat(existing,
-                    String.concat(", got ", t1))))))) }
+        if t1 == t2 {
+            Result.ok(subst)
+        } else {
+            if is_type_var(t1) {
+                match subst_lookup(subst, t1) {
+                    None => Result.ok(subst_insert(subst, t1, t2))
+                    Some(existing) => if existing == t2 {
+                        Result.ok(subst)
+                    } else {
+                        Result.err(fmt_err("E0005", String.concat("conflict: ", String.concat(t1, String.concat(" was ", String.concat(existing, String.concat(", got ", t2)))))))
+                    }
+                }
+            } else {
+                if is_type_var(t2) {
+                    match subst_lookup(subst, t2) {
+                        None => Result.ok(subst_insert(subst, t2, t1))
+                        Some(existing) => if existing == t1 {
+                            Result.ok(subst)
+                        } else {
+                            Result.err(fmt_err("E0005", String.concat("conflict: ", String.concat(t2, String.concat(" was ", String.concat(existing, String.concat(", got ", t1)))))))
+                        }
+                    }
+                } else {
+                    Result.err(fmt_err("E0005", String.concat("cannot unify ", String.concat(t1, String.concat(" with ", t2)))))
+                }
+            }
         }
-    } else {
-        Result.err(fmt_err("E0005",
-            String.concat("cannot unify ", String.concat(t1,
-            String.concat(" with ", t2)))))
-    }}}}
+    }
 }
 
-// ── Occurs check and deep unification ────────────────────────────────────────
-
 fn occurs_in(var: String, ty: String) -> Bool {
-    if ty == var { true }
-    else {
-    if String.contains(ty, "<") {
-        bind inner <- type_str_inner(ty)
-        inner == var || String.contains(inner, var)
-    } else { false }
+    if ty == var {
+        true
+    } else {
+        if String.contains(ty, "<") {
+            bind inner <- type_str_inner(ty);
+            (inner == var) || String.contains(inner, var)
+        } else {
+            false
+        }
     }
 }
 
 fn unify_deep(t1: String, t2: String, subst: List<KVPair>) -> Result<List<KVPair>, String> {
-    if t1 == "Unknown" || t2 == "Unknown" { Result.ok(subst) }
-    else {
-    if t1 == t2 { Result.ok(subst) }
-    else {
-    if is_type_var(t1) || is_fresh_var(t1) {
-        if occurs_in(t1, t2) {
-            Result.err(fmt_err("E0006",
-                String.concat("occurs check failed: ",
-                String.concat(t1, String.concat(" in ", t2)))))
+    if (t1 == "Unknown") || (t2 == "Unknown") {
+        Result.ok(subst)
+    } else {
+        if t1 == t2 {
+            Result.ok(subst)
         } else {
-            match subst_lookup(subst, t1) {
-                None => Result.ok(subst_insert(subst, t1, t2))
-                Some(existing) =>
-                    if existing == t2 { Result.ok(subst) }
-                    else { Result.err(fmt_err("E0005",
-                        String.concat("conflict: ", String.concat(t1,
-                        String.concat(" was ", String.concat(existing,
-                        String.concat(", got ", t2))))))) }
+            if is_type_var(t1) || is_fresh_var(t1) {
+                if occurs_in(t1, t2) {
+                    Result.err(fmt_err("E0006", String.concat("occurs check failed: ", String.concat(t1, String.concat(" in ", t2)))))
+                } else {
+                    match subst_lookup(subst, t1) {
+                        None => Result.ok(subst_insert(subst, t1, t2))
+                        Some(existing) => if existing == t2 {
+                            Result.ok(subst)
+                        } else {
+                            Result.err(fmt_err("E0005", String.concat("conflict: ", String.concat(t1, String.concat(" was ", String.concat(existing, String.concat(", got ", t2)))))))
+                        }
+                    }
+                }
+            } else {
+                if is_type_var(t2) || is_fresh_var(t2) {
+                    if occurs_in(t2, t1) {
+                        Result.err(fmt_err("E0006", String.concat("occurs check failed: ", String.concat(t2, String.concat(" in ", t1)))))
+                    } else {
+                        match subst_lookup(subst, t2) {
+                            None => Result.ok(subst_insert(subst, t2, t1))
+                            Some(existing) => if existing == t1 {
+                                Result.ok(subst)
+                            } else {
+                                Result.err(fmt_err("E0005", String.concat("conflict: ", String.concat(t2, String.concat(" was ", String.concat(existing, String.concat(", got ", t1)))))))
+                            }
+                        }
+                    }
+                } else {
+                    if String.contains(t1, "<") && String.contains(t2, "<") {
+                        bind o1 <- type_str_outer(t1);
+                        bind o2 <- type_str_outer(t2);
+                        if o1 == o2 {
+                            bind i1 <- type_str_inner(t1);
+                            bind i2 <- type_str_inner(t2);
+                            unify_deep(i1, i2, subst)
+                        } else {
+                            Result.err(fmt_err("E0005", String.concat("cannot unify ", String.concat(o1, String.concat(" with ", o2)))))
+                        }
+                    } else {
+                        Result.err(fmt_err("E0005", String.concat("cannot unify ", String.concat(t1, String.concat(" with ", t2)))))
+                    }
+                }
             }
         }
-    } else {
-    if is_type_var(t2) || is_fresh_var(t2) {
-        if occurs_in(t2, t1) {
-            Result.err(fmt_err("E0006",
-                String.concat("occurs check failed: ",
-                String.concat(t2, String.concat(" in ", t1)))))
-        } else {
-            match subst_lookup(subst, t2) {
-                None => Result.ok(subst_insert(subst, t2, t1))
-                Some(existing) =>
-                    if existing == t1 { Result.ok(subst) }
-                    else { Result.err(fmt_err("E0005",
-                        String.concat("conflict: ", String.concat(t2,
-                        String.concat(" was ", String.concat(existing,
-                        String.concat(", got ", t1))))))) }
-            }
-        }
-    } else {
-    if String.contains(t1, "<") && String.contains(t2, "<") {
-        bind o1 <- type_str_outer(t1)
-        bind o2 <- type_str_outer(t2)
-        if o1 == o2 {
-            bind i1 <- type_str_inner(t1)
-            bind i2 <- type_str_inner(t2)
-            unify_deep(i1, i2, subst)
-        } else {
-            Result.err(fmt_err("E0005",
-                String.concat("cannot unify ", String.concat(o1, String.concat(" with ", o2)))))
-        }
-    } else {
-        Result.err(fmt_err("E0005",
-            String.concat("cannot unify ", String.concat(t1, String.concat(" with ", t2)))))
-    }}}}}
+    }
 }
-
-// ── Pattern environment extension ─────────────────────────────────────────────
 
 fn env_from_pat(pat: Pat, env: List<KVPair>) -> List<KVPair> {
     match pat {
         PVar(name) => env_insert(env, name, "Unknown")
-        PVariantP(cname, inner) => env_from_pat(inner, env)
+        PVariantP({ _0: cname, _1: inner }) => env_from_pat(inner, env)
         _ => env
     }
 }
-
-// ── Build param env ───────────────────────────────────────────────────────────
 
 fn build_param_env(params: List<Param>, env: List<KVPair>) -> List<KVPair> {
     match List.first(params) {
         None => env
         Some(p) => {
-            bind new_env <- env_insert(env, p.name, type_expr_to_str(p.ty))
+            bind new_env <- env_insert(env, p.name, type_expr_to_str(p.ty));
             build_param_env(List.drop(params, 1), new_env)
         }
     }
 }
 
-// ── Match arms inference ──────────────────────────────────────────────────────
-
 fn infer_arms(arms: Expr, env: List<KVPair>) -> Result<String, String> {
     match arms {
         EArmNil => Result.ok("Unit")
-        EArm(pat, body, rest) => {
-            bind pat_env <- env_from_pat(pat, env)
-            Result.and_then(infer_expr(body, pat_env), |bty|
-            match rest {
+        EArm({ _0: pat, _1: body, _2: rest }) => {
+            bind pat_env <- env_from_pat(pat, env);
+            Result.and_then(infer_expr(body, pat_env), |bty| match rest {
                 EArmNil => Result.ok(bty)
-                _ => Result.and_then(infer_arms(rest, env), |rty|
-                    if bty == rty || bty == "Unknown" || rty == "Unknown" {
-                        Result.ok(bty)
-                    } else {
-                        Result.ok("Unknown")
-                    })
+                _ => Result.and_then(infer_arms(rest, env), |rty| if ((bty == rty) || (bty == "Unknown")) || (rty == "Unknown") {
+                    Result.ok(bty)
+                } else {
+                    Result.ok("Unknown")
+                })
             })
         }
         _ => Result.err("expected arm list in match")
     }
 }
 
-// ── Match exhaustiveness ──────────────────────────────────────────────────────
-
 fn pat_ctor_name(pat: Pat) -> String {
     match pat {
-        PWild          => "_"
-        PVar(name)     => "_"
+        PWild => "_"
+        PVar(name) => "_"
         PVariant(name) => name
-        PVariantP(name, inner) => name
+        PVariantP({ _0: name, _1: inner }) => name
         _ => ""
     }
 }
@@ -867,8 +1342,8 @@ fn pat_ctor_name(pat: Pat) -> String {
 fn collect_arm_ctors(arms: Expr) -> List<String> {
     match arms {
         EArmNil => List.empty()
-        EArm(pat, body, rest) => {
-            bind ctor <- pat_ctor_name(pat)
+        EArm({ _0: pat, _1: body, _2: rest }) => {
+            bind ctor <- pat_ctor_name(pat);
             List.push(collect_arm_ctors(rest), ctor)
         }
         _ => List.empty()
@@ -884,34 +1359,41 @@ fn has_wildcard_ctor(ctors: List<String>) -> Bool {
 }
 
 fn check_option_exhaustive(ctors: List<String>) -> Bool {
-    if has_wildcard_ctor(ctors) { true }
-    else {
+    if has_wildcard_ctor(ctors) {
+        true
+    } else {
         list_contains(ctors, "None") && list_contains(ctors, "Some")
     }
 }
 
 fn check_result_exhaustive(ctors: List<String>) -> Bool {
-    if has_wildcard_ctor(ctors) { true }
-    else {
+    if has_wildcard_ctor(ctors) {
+        true
+    } else {
         list_contains(ctors, "Ok") && list_contains(ctors, "Err")
     }
 }
 
 fn check_match_exhaustive(scrut_ty: String, arms: Expr) -> Option<String> {
-    bind ctors <- collect_arm_ctors(arms)
+    bind ctors <- collect_arm_ctors(arms);
     if scrut_ty == "Option" {
-        if check_option_exhaustive(ctors) { Option.none() }
-        else { Option.some(fmt_err("E0004", "non-exhaustive match on Option")) }
+        if check_option_exhaustive(ctors) {
+            Option.none()
+        } else {
+            Option.some(fmt_err("E0004", "non-exhaustive match on Option"))
+        }
     } else {
-    if scrut_ty == "Result" {
-        if check_result_exhaustive(ctors) { Option.none() }
-        else { Option.some(fmt_err("E0004", "non-exhaustive match on Result")) }
-    } else {
-        Option.none()
-    }}
+        if scrut_ty == "Result" {
+            if check_result_exhaustive(ctors) {
+                Option.none()
+            } else {
+                Option.some(fmt_err("E0004", "non-exhaustive match on Result"))
+            }
+        } else {
+            Option.none()
+        }
+    }
 }
-
-// ── Generic builtin inference ─────────────────────────────────────────────────
 
 fn unwrap_ty(r: Result<String, String>) -> String {
     match r {
@@ -923,8 +1405,8 @@ fn unwrap_ty(r: Result<String, String>) -> String {
 fn infer_arg_tys(args: Expr, env: List<KVPair>) -> List<String> {
     match args {
         EArgNil => List.empty()
-        EArgList(h, t) => {
-            bind hty <- unwrap_ty(infer_expr(h, env))
+        EArgList({ _0: h, _1: t }) => {
+            bind hty <- unwrap_ty(infer_expr(h, env));
             List.push(infer_arg_tys(t, env), hty)
         }
         _ => List.empty()
@@ -932,59 +1414,109 @@ fn infer_arg_tys(args: Expr, env: List<KVPair>) -> List<String> {
 }
 
 fn wrap_in(outer: String, inner: String) -> String {
-    if inner == "" || inner == "Unknown" { outer }
-    else { String.concat(outer, String.concat("<", String.concat(inner, ">"))) }
+    if (inner == "") || (inner == "Unknown") {
+        outer
+    } else {
+        String.concat(outer, String.concat("<", String.concat(inner, ">")))
+    }
 }
 
 fn infer_generic_list(fname: String, arg_tys: List<String>) -> String {
-    bind first_arg <- match List.first(arg_tys) { Some(t) => t   None => "" }
-    bind inner     <- type_str_inner(first_arg)
-    if fname == "first"      { wrap_in("Option", inner) }
-    else { if fname == "find"       { wrap_in("Option", inner) }
-    else { if fname == "filter"     { wrap_in("List", inner) }
-    else { if fname == "push"       { wrap_in("List", inner) }
-    else { if fname == "drop"       { wrap_in("List", inner) }
-    else { if fname == "take"       { wrap_in("List", inner) }
-    else { if fname == "take_while" { wrap_in("List", inner) }
-    else { if fname == "drop_while" { wrap_in("List", inner) }
-    else { if fname == "concat"     { wrap_in("List", inner) }
-    else { if fname == "singleton"  { wrap_in("List", first_arg) }
-    else { if fname == "map"        { "List" }
-    else { list_fn(fname) }
-    }}}}}}}}}}
+    bind first_arg <- match List.first(arg_tys) {
+        Some(t) => t
+        None => ""
+    };
+    bind inner <- type_str_inner(first_arg);
+    if fname == "first" {
+        wrap_in("Option", inner)
+    } else {
+        if fname == "find" {
+            wrap_in("Option", inner)
+        } else {
+            if fname == "filter" {
+                wrap_in("List", inner)
+            } else {
+                if fname == "push" {
+                    wrap_in("List", inner)
+                } else {
+                    if fname == "drop" {
+                        wrap_in("List", inner)
+                    } else {
+                        if fname == "take" {
+                            wrap_in("List", inner)
+                        } else {
+                            if fname == "take_while" {
+                                wrap_in("List", inner)
+                            } else {
+                                if fname == "drop_while" {
+                                    wrap_in("List", inner)
+                                } else {
+                                    if fname == "concat" {
+                                        wrap_in("List", inner)
+                                    } else {
+                                        if fname == "singleton" {
+                                            wrap_in("List", first_arg)
+                                        } else {
+                                            if fname == "map" {
+                                                "List"
+                                            } else {
+                                                list_fn(fname)
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
 fn infer_generic_opt(fname: String, arg_tys: List<String>) -> String {
-    if fname == "and_then" { "Option" }
-    else { opt_fn(fname) }
+    if fname == "and_then" {
+        "Option"
+    } else {
+        opt_fn(fname)
+    }
 }
 
 fn infer_generic_res(fname: String, arg_tys: List<String>) -> String {
-    if fname == "and_then" { "Result" }
-    else { res_fn(fname) }
+    if fname == "and_then" {
+        "Result"
+    } else {
+        res_fn(fname)
+    }
 }
-
-// ── Call inference ────────────────────────────────────────────────────────────
 
 fn infer_call(ns: String, fname: String, args: Expr, env: List<KVPair>) -> Result<String, String> {
     if ns == "" {
         match env_lookup(env, fname) {
-            Some(ty) =>
-                if is_fn_scheme_str(ty) { Result.ok(fn_scheme_ret(ty)) }
-                else { Result.ok(ty) }
+            Some(ty) => if is_fn_scheme_str(ty) {
+                Result.ok(fn_scheme_ret(ty))
+            } else {
+                Result.ok(ty)
+            }
             None => Result.ok("Unknown")
         }
     } else {
-        bind arg_tys <- infer_arg_tys(args, env)
-        if ns == "List"   { Result.ok(infer_generic_list(fname, arg_tys)) }
-        else { if ns == "Option" { Result.ok(infer_generic_opt(fname, arg_tys)) }
-        else { if ns == "Result" { Result.ok(infer_generic_res(fname, arg_tys)) }
-        else { Result.ok(builtin_ret_ty(ns, fname)) }
-        }}
+        bind arg_tys <- infer_arg_tys(args, env);
+        if ns == "List" {
+            Result.ok(infer_generic_list(fname, arg_tys))
+        } else {
+            if ns == "Option" {
+                Result.ok(infer_generic_opt(fname, arg_tys))
+            } else {
+                if ns == "Result" {
+                    Result.ok(infer_generic_res(fname, arg_tys))
+                } else {
+                    Result.ok(builtin_ret_ty(ns, fname))
+                }
+            }
+        }
     }
 }
-
-// ── Expression inference ──────────────────────────────────────────────────────
 
 fn infer_expr(expr: Expr, env: List<KVPair>) -> Result<String, String> {
     match expr {
@@ -995,78 +1527,58 @@ fn infer_expr(expr: Expr, env: List<KVPair>) -> Result<String, String> {
                 None => Result.ok("Unknown")
             }
         }
-        EBinOp(op, left, right) => Result.and_then(infer_expr(left, env), |lty|
-            Result.and_then(infer_expr(right, env), |rty|
-            infer_op(op, lty, rty)))
-        EIf(cond, then_e, else_e) => Result.and_then(infer_expr(cond, env), |cty|
-            Result.and_then(infer_expr(then_e, env), |tty|
-            Result.and_then(infer_expr(else_e, env), |ety|
-            if tty == ety || tty == "Unknown" || ety == "Unknown" {
-                Result.ok(tty)
-            } else {
-                Result.ok("Unknown")
-            })))
-        EMatch(scrut, arms) => Result.and_then(infer_expr(scrut, env), |sty|
-            match check_match_exhaustive(sty, arms) {
-                Some(err) => Result.err(err)
-                None => infer_arms(arms, env)
-            })
-        ECall(ns, fname, args) => infer_call(ns, fname, args, env)
-        ELambda(param, body) => {
-            bind lam_env <- env_insert(env, param, "Unknown")
-            Result.and_then(infer_expr(body, lam_env), |bty|
-            Result.ok("Fn"))
+        EBinOp({ _0: op, _1: left, _2: right }) => Result.and_then(infer_expr(left, env), |lty| Result.and_then(infer_expr(right, env), |rty| infer_op(op, lty, rty)))
+        EIf({ _0: cond, _1: then_e, _2: else_e }) => Result.and_then(infer_expr(cond, env), |cty| Result.and_then(infer_expr(then_e, env), |tty| Result.and_then(infer_expr(else_e, env), |ety| if ((tty == ety) || (tty == "Unknown")) || (ety == "Unknown") {
+            Result.ok(tty)
+        } else {
+            Result.ok("Unknown")
+        })))
+        EMatch({ _0: scrut, _1: arms }) => Result.and_then(infer_expr(scrut, env), |sty| match check_match_exhaustive(sty, arms) {
+            Some(err) => Result.err(err)
+            None => infer_arms(arms, env)
+        })
+        ECall({ _0: ns, _1: fname, _2: args }) => infer_call(ns, fname, args, env)
+        ELambda({ _0: param, _1: body }) => {
+            bind lam_env <- env_insert(env, param, "Unknown");
+            Result.and_then(infer_expr(body, lam_env), |bty| Result.ok("Fn"))
         }
-        EBind(vname, val_e, cont_e) => Result.and_then(infer_expr(val_e, env), |vty|
-            infer_expr(cont_e, env_insert(env, vname, vty)))
-        ERecordLit(tname, fields) => Result.ok(tname)
-        EAccess(obj_e, field) => Result.and_then(infer_expr(obj_e, env), |oty|
-            Result.ok("Unknown"))
-        EBlock(a, b) => Result.and_then(infer_expr(a, env), |aty|
-            infer_expr(b, env))
-        EArgList(head, tail) => Result.and_then(infer_expr(head, env), |hty|
-            infer_expr(tail, env))
+        EBind({ _0: vname, _1: val_e, _2: cont_e }) => Result.and_then(infer_expr(val_e, env), |vty| infer_expr(cont_e, env_insert(env, vname, vty)))
+        ERecordLit({ _0: tname, _1: fields }) => Result.ok(tname)
+        EAccess({ _0: obj_e, _1: field }) => Result.and_then(infer_expr(obj_e, env), |oty| Result.ok("Unknown"))
+        EBlock({ _0: a, _1: b }) => Result.and_then(infer_expr(a, env), |aty| infer_expr(b, env))
+        EArgList({ _0: head, _1: tail }) => Result.and_then(infer_expr(head, env), |hty| infer_expr(tail, env))
         EArgNil => Result.ok("Unit")
-        EArm(pat, body, rest) => infer_arms(EArm(pat, body, rest), env)
+        EArm({ _0: pat, _1: body, _2: rest }) => infer_arms(EArm(pat, body, rest), env)
         EArmNil => Result.ok("Unit")
-        EField(fname, val_e, rest) => Result.and_then(infer_expr(val_e, env), |vty|
-            infer_expr(rest, env))
+        EField({ _0: fname, _1: val_e, _2: rest }) => Result.and_then(infer_expr(val_e, env), |vty| infer_expr(rest, env))
         EFieldNil => Result.ok("Unit")
-        EQuestion(inner) => Result.and_then(infer_expr(inner, env), |ity|
-            if String.starts_with(ity, "Result") { Result.ok("Unknown") }
-            else { Result.err(String.concat("E0013: ? requires a Result expression, got ", ity)) })
+        EQuestion(inner) => Result.and_then(infer_expr(inner, env), |ity| if String.starts_with(ity, "Result") {
+            Result.ok("Unknown")
+        } else {
+            Result.err(String.concat("E0013: ? requires a Result expression, got ", ity))
+        })
     }
 }
-
-// ── Function definition checker ───────────────────────────────────────────────
 
 fn check_body_ty(fname: String, ret: TypeExpr, r: InfResult) -> Result<String, String> {
     if types_compatible(apply_subst(r.subst, r.ty), type_expr_to_str(ret)) {
         Result.ok(fname)
     } else {
-        Result.err(fmt_err("E0009",
-            String.concat(fname,
-            String.concat(": declared return ",
-            String.concat(type_expr_to_str(ret),
-            String.concat(" but body infers ",
-            apply_subst(r.subst, r.ty)))))))
+        Result.err(fmt_err("E0009", String.concat(fname, String.concat(": declared return ", String.concat(type_expr_to_str(ret), String.concat(" but body infers ", apply_subst(r.subst, r.ty)))))))
     }
 }
 
 fn check_fn_def(fd: FnDef, env: List<KVPair>) -> Result<String, String> {
-    bind param_env <- build_param_env(fd.params, env)
-    bind inferred_effs <- infer_expr_effects(fd.body)
+    bind param_env <- build_param_env(fd.params, env);
+    bind inferred_effs <- infer_expr_effects(fd.body);
     match check_effects_all(fd.effects, inferred_effs) {
         Some(err) => Result.err(err)
         None => {
-            bind init_state <- inf_state_new(subst_empty(), 0)
-            Result.and_then(infer_hm(fd.body, param_env, init_state), |r|
-            check_body_ty(fd.name, fd.ret, r))
+            bind init_state <- inf_state_new(subst_empty(), 0);
+            Result.and_then(infer_hm(fd.body, param_env, init_state), |r| check_body_ty(fd.name, fd.ret, r))
         }
     }
 }
-
-// ── User-defined generic type helpers ────────────────────────────────────────
 
 fn type_param_env_inner(params: List<String>, args: List<String>, acc: List<KVPair>) -> List<KVPair> {
     match List.first(params) {
@@ -1074,10 +1586,7 @@ fn type_param_env_inner(params: List<String>, args: List<String>, acc: List<KVPa
         Some(p) => {
             match List.first(args) {
                 None => acc
-                Some(a) => type_param_env_inner(
-                    List.drop(params, 1),
-                    List.drop(args, 1),
-                    subst_insert(acc, p, a))
+                Some(a) => type_param_env_inner(List.drop(params, 1), List.drop(args, 1), subst_insert(acc, p, a))
             }
         }
     }
@@ -1087,31 +1596,24 @@ fn type_param_env(params: List<String>, args: List<String>) -> List<KVPair> {
     type_param_env_inner(params, args, subst_empty())
 }
 
-// ── HM inference state helpers ────────────────────────────────────────────────
-
 fn fresh_var(counter: Int) -> String {
     String.concat("t", Int.to_string(counter))
 }
 
 fn inf_state_new(subst: List<KVPair>, counter: Int) -> InfState {
-    InfState { subst: subst, counter: counter }
+    InfState { subst: subst  counter: counter }
 }
 
 fn inf_result_of(ty: String, state: InfState) -> InfResult {
-    InfResult { ty: ty, subst: state.subst, counter: state.counter }
+    InfResult { ty: ty  subst: state.subst  counter: state.counter }
 }
 
 fn inf_state_of(r: InfResult) -> InfState {
-    InfState { subst: r.subst, counter: r.counter }
+    InfState { subst: r.subst  counter: r.counter }
 }
 
-// ── HM type inference ─────────────────────────────────────────────────────────
-
-fn infer_hm_let(vname: String, val_e: Expr, cont_e: Expr, env: List<KVPair>, state: InfState)
-    -> Result<InfResult, String>
-{
-    Result.and_then(infer_hm(val_e, env, state), |vr|
-        infer_hm(cont_e, env_insert(env, vname, vr.ty), inf_state_of(vr)))
+fn infer_hm_let(vname: String, val_e: Expr, cont_e: Expr, env: List<KVPair>, state: InfState) -> Result<InfResult, String> {
+    Result.and_then(infer_hm(val_e, env, state), |vr| infer_hm(cont_e, env_insert(env, vname, vr.ty), inf_state_of(vr)))
 }
 
 fn infer_hm(expr: Expr, env: List<KVPair>, state: InfState) -> Result<InfResult, String> {
@@ -1120,62 +1622,61 @@ fn infer_hm(expr: Expr, env: List<KVPair>, state: InfState) -> Result<InfResult,
         EVar(name) => {
             match env_lookup(env, name) {
                 Some(ty) => Result.ok(inf_result_of(ty, state))
-                None     => Result.err(fmt_err("E0001",
-                                String.concat("undefined variable: ", name)))
+                None => Result.err(fmt_err("E0001", String.concat("undefined variable: ", name)))
             }
         }
-        EBind(vname, val_e, cont_e) => infer_hm_let(vname, val_e, cont_e, env, state)
-        EIf(cond, then_e, else_e) =>
-            Result.and_then(infer_hm(then_e, env, state), |tr|
-            Result.and_then(infer_hm(else_e, env, inf_state_of(tr)), |er|
-            Result.and_then(unify_deep(tr.ty, er.ty, er.subst), |s2|
-                Result.ok(inf_result_of(apply_subst(s2, tr.ty),
-                    inf_state_new(s2, er.counter))))))
-        ECall(ns, fname, args) => infer_call_hm(ns, fname, args, env, state)
-        _ => Result.and_then(infer_expr(expr, env), |ty|
-            Result.ok(inf_result_of(ty, state)))
+        EBind({ _0: vname, _1: val_e, _2: cont_e }) => infer_hm_let(vname, val_e, cont_e, env, state)
+        EIf({ _0: cond, _1: then_e, _2: else_e }) => Result.and_then(infer_hm(then_e, env, state), |tr| Result.and_then(infer_hm(else_e, env, inf_state_of(tr)), |er| Result.and_then(unify_deep(tr.ty, er.ty, er.subst), |s2| Result.ok(inf_result_of(apply_subst(s2, tr.ty), inf_state_new(s2, er.counter))))))
+        ECall({ _0: ns, _1: fname, _2: args }) => infer_call_hm(ns, fname, args, env, state)
+        _ => Result.and_then(infer_expr(expr, env), |ty| Result.ok(inf_result_of(ty, state)))
     }
 }
 
-// ── Type variable (extended) ──────────────────────────────────────────────────
-
 fn is_type_var_extended(s: String) -> Bool {
-    if is_type_var(s) { true }
-    else {
-    if String.length(s) == 2 {
-        bind first  <- String.slice(s, 0, 1)
-        bind second <- String.slice(s, 1, 2)
-        is_type_var(first) &&
-        (second == "0" || second == "1" || second == "2" || second == "3" ||
-         second == "4" || second == "5" || second == "6" || second == "7" ||
-         second == "8" || second == "9")
-    } else { false }
+    if is_type_var(s) {
+        true
+    } else {
+        if String.length(s) == 2 {
+            bind first <- String.slice(s, 0, 1);
+            bind second <- String.slice(s, 1, 2);
+            is_type_var(first) && ((((((((((second == "0") || (second == "1")) || (second == "2")) || (second == "3")) || (second == "4")) || (second == "5")) || (second == "6")) || (second == "7")) || (second == "8")) || (second == "9"))
+        } else {
+            false
+        }
     }
 }
 
 fn outer_type(s: String) -> String {
     match List.first(String.split(s, "<")) {
-        None        => s
+        None => s
         Some(outer) => outer
     }
 }
 
 fn types_compatible(inferred: String, declared: String) -> Bool {
-    if inferred == declared { true }
-    else if inferred == "Unknown" { true }
-    else if is_type_var_extended(inferred) { true }
-    else { outer_type(inferred) == outer_type(declared) }
+    if inferred == declared {
+        true
+    } else {
+        if inferred == "Unknown" {
+            true
+        } else {
+            if is_type_var_extended(inferred) {
+                true
+            } else {
+                outer_type(inferred) == outer_type(declared)
+            }
+        }
+    }
 }
 
 fn list_dedup_inner(lst: List<String>, seen: List<String>, acc: List<String>) -> List<String> {
     match List.first(lst) {
-        None    => acc
+        None => acc
         Some(h) => {
             if List.contains(seen, h) {
                 list_dedup_inner(List.drop(lst, 1), seen, acc)
             } else {
-                list_dedup_inner(List.drop(lst, 1),
-                    List.push(seen, h), List.push(acc, h))
+                list_dedup_inner(List.drop(lst, 1), List.push(seen, h), List.push(acc, h))
             }
         }
     }
@@ -1187,27 +1688,25 @@ fn list_dedup(lst: List<String>) -> List<String> {
 
 fn collect_type_vars_from_te(te: TypeExpr) -> List<String> {
     match te {
-        TeSimple(s)    => {
-            if is_type_var_extended(s) { List.push(List.empty(), s) }
-            else { List.empty() }
+        TeSimple(s) => {
+            if is_type_var_extended(s) {
+                List.push(List.empty(), s)
+            } else {
+                List.empty()
+            }
         }
-        TeList(inner)  => collect_type_vars_from_te(inner)
+        TeList(inner) => collect_type_vars_from_te(inner)
         TeOption(inner) => collect_type_vars_from_te(inner)
-        TeResult(a, b) => List.concat(collect_type_vars_from_te(a),
-                                      collect_type_vars_from_te(b))
-        TeMap(k, v)    => List.concat(collect_type_vars_from_te(k),
-                                      collect_type_vars_from_te(v))
-        TeFn(a, b)     => List.concat(collect_type_vars_from_te(a),
-                                      collect_type_vars_from_te(b))
+        TeResult({ _0: a, _1: b }) => List.concat(collect_type_vars_from_te(a), collect_type_vars_from_te(b))
+        TeMap({ _0: k, _1: v }) => List.concat(collect_type_vars_from_te(k), collect_type_vars_from_te(v))
+        TeFn({ _0: a, _1: b }) => List.concat(collect_type_vars_from_te(a), collect_type_vars_from_te(b))
     }
 }
 
 fn collect_type_vars_from_params_inner(params: List<Param>, acc: List<String>) -> List<String> {
     match List.first(params) {
-        None    => acc
-        Some(p) => collect_type_vars_from_params_inner(
-                       List.drop(params, 1),
-                       List.concat(acc, collect_type_vars_from_te(p.ty)))
+        None => acc
+        Some(p) => collect_type_vars_from_params_inner(List.drop(params, 1), List.concat(acc, collect_type_vars_from_te(p.ty)))
     }
 }
 
@@ -1215,40 +1714,38 @@ fn collect_type_vars_from_params(params: List<Param>) -> List<String> {
     collect_type_vars_from_params_inner(params, List.empty())
 }
 
-// ── Scheme string helpers ──────────────────────────────────────────────────────
-
 fn is_fn_scheme_str(s: String) -> Bool {
     String.starts_with(s, "forall|")
 }
 
 fn fn_scheme_section(s: String, idx: Int) -> String {
-    bind parts <- String.split(s, "|")
+    bind parts <- String.split(s, "|");
     match List.first(List.drop(parts, idx)) {
-        None    => ""
+        None => ""
         Some(v) => v
     }
 }
 
-fn fn_scheme_vars_str(s: String) -> String   { fn_scheme_section(s, 1) }
-fn fn_scheme_params_str(s: String) -> String { fn_scheme_section(s, 2) }
-fn fn_scheme_ret(s: String) -> String        { fn_scheme_section(s, 3) }
-
-fn make_fn_scheme_str(vars_csv: String, params_semi: String, ret: String) -> String {
-    String.concat("forall|",
-    String.concat(vars_csv,
-    String.concat("|",
-    String.concat(params_semi,
-    String.concat("|", ret)))))
+fn fn_scheme_vars_str(s: String) -> String {
+    fn_scheme_section(s, 1)
 }
 
-// ── Scheme construction and pre-pass ──────────────────────────────────────────
+fn fn_scheme_params_str(s: String) -> String {
+    fn_scheme_section(s, 2)
+}
+
+fn fn_scheme_ret(s: String) -> String {
+    fn_scheme_section(s, 3)
+}
+
+fn make_fn_scheme_str(vars_csv: String, params_semi: String, ret: String) -> String {
+    String.concat("forall|", String.concat(vars_csv, String.concat("|", String.concat(params_semi, String.concat("|", ret)))))
+}
 
 fn params_to_type_str_list_inner(params: List<Param>, acc: List<String>) -> List<String> {
     match List.first(params) {
-        None    => acc
-        Some(p) => params_to_type_str_list_inner(
-                       List.drop(params, 1),
-                       List.concat(acc, List.push(List.empty(), type_expr_to_str(p.ty))))
+        None => acc
+        Some(p) => params_to_type_str_list_inner(List.drop(params, 1), List.concat(acc, List.push(List.empty(), type_expr_to_str(p.ty))))
     }
 }
 
@@ -1257,42 +1754,31 @@ fn params_to_type_str_list(params: List<Param>) -> List<String> {
 }
 
 fn fn_to_scheme_str(fd: FnDef) -> String {
-    bind all_vars    <- list_dedup(List.concat(
-                            collect_type_vars_from_params(fd.params),
-                            collect_type_vars_from_te(fd.ret)))
-    bind vars_csv    <- String.join(all_vars, ",")
-    bind param_types <- params_to_type_str_list(fd.params)
-    bind params_semi <- String.join(param_types, ";")
-    bind ret_str     <- type_expr_to_str(fd.ret)
+    bind all_vars <- list_dedup(List.concat(collect_type_vars_from_params(fd.params), collect_type_vars_from_te(fd.ret)));
+    bind vars_csv <- String.join(all_vars, ",");
+    bind param_types <- params_to_type_str_list(fd.params);
+    bind params_semi <- String.join(param_types, ";");
+    bind ret_str <- type_expr_to_str(fd.ret);
     make_fn_scheme_str(vars_csv, params_semi, ret_str)
 }
 
 fn collect_fn_schemes(items: List<Item>, env: List<KVPair>) -> List<KVPair> {
     match List.first(items) {
-        None       => env
+        None => env
         Some(item) => match item {
-            IFn(fd) => collect_fn_schemes(List.drop(items, 1),
-                           env_insert(env, fd.name, fn_to_scheme_str(fd)))
-            IStage(se) => collect_fn_schemes(List.drop(items, 1),
-                              env_insert(env, se.name,
-                                  make_fn_scheme_str("", se.input_ty_str, se.output_ty_str)))
-            ISeq(sd) => collect_fn_schemes(List.drop(items, 1),
-                            env_insert(env, sd.name, make_fn_scheme_str("", "Unknown", "Unknown")))
-            _       => collect_fn_schemes(List.drop(items, 1), env)
+            IFn(fd) => collect_fn_schemes(List.drop(items, 1), env_insert(env, fd.name, fn_to_scheme_str(fd)))
+            IStage(se) => collect_fn_schemes(List.drop(items, 1), env_insert(env, se.name, make_fn_scheme_str("", se.input_ty_str, se.output_ty_str)))
+            ISeq(sd) => collect_fn_schemes(List.drop(items, 1), env_insert(env, sd.name, make_fn_scheme_str("", "Unknown", "Unknown")))
+            _ => collect_fn_schemes(List.drop(items, 1), env)
         }
     }
 }
 
-// ── Variant constructor registration (v8.7.0) ────────────────────────────────
-
-// Register one variant of a sum type into the env.
-// Nullary variants (no payload) are stored as the type name.
-// Payload variants are stored as a scheme string "forall||<param>|<type>".
 fn register_variant(type_name: String, v: VariantDef, env: List<KVPair>) -> List<KVPair> {
     match v.payload {
-        None     => env_insert(env, v.name, type_name)
+        None => env_insert(env, v.name, type_name)
         Some(te) => {
-            bind param_str <- type_expr_to_str(te)
+            bind param_str <- type_expr_to_str(te);
             env_insert(env, v.name, make_fn_scheme_str("", param_str, type_name))
         }
     }
@@ -1300,14 +1786,11 @@ fn register_variant(type_name: String, v: VariantDef, env: List<KVPair>) -> List
 
 fn register_variants_inner(type_name: String, vs: List<VariantDef>, env: List<KVPair>) -> List<KVPair> {
     match List.first(vs) {
-        None    => env
-        Some(v) =>
-            register_variants_inner(type_name, List.drop(vs, 1),
-                register_variant(type_name, v, env))
+        None => env
+        Some(v) => register_variants_inner(type_name, List.drop(vs, 1), register_variant(type_name, v, env))
     }
 }
 
-// Walk items and register all sum type variant constructors into env.
 fn collect_variant_constructors(items: List<Item>, env: List<KVPair>) -> List<KVPair> {
     match List.first(items) {
         None => env
@@ -1316,36 +1799,29 @@ fn collect_variant_constructors(items: List<Item>, env: List<KVPair>) -> List<KV
                 if td.is_record {
                     collect_variant_constructors(List.drop(items, 1), env)
                 } else {
-                    collect_variant_constructors(List.drop(items, 1),
-                        register_variants_inner(td.name, td.variants, env))
+                    collect_variant_constructors(List.drop(items, 1), register_variants_inner(td.name, td.variants, env))
                 }
             }
             IWrapper(wd) => {
                 bind ret_ty <- if wd.has_where {
                     String.concat("Result<", String.concat(wd.inner, ", String>"))
-                } else { wd.name }
-                collect_variant_constructors(List.drop(items, 1),
-                    env_insert(env, wd.name, make_fn_scheme_str("", wd.inner, ret_ty)))
+                } else {
+                    wd.name
+                };
+                collect_variant_constructors(List.drop(items, 1), env_insert(env, wd.name, make_fn_scheme_str("", wd.inner, ret_ty)))
             }
             _ => collect_variant_constructors(List.drop(items, 1), env)
         }
     }
 }
 
-// ── Scheme instantiation ───────────────────────────────────────────────────────
-
 fn build_scheme_subst_inner(param_tys: List<String>, arg_tys: List<String>, subst: List<KVPair>) -> Result<List<KVPair>, String> {
     match List.first(param_tys) {
-        None     => Result.ok(subst)
+        None => Result.ok(subst)
         Some(pt) => {
             match List.first(arg_tys) {
-                None     => Result.ok(subst)
-                Some(at) =>
-                    Result.and_then(unify_deep(pt, at, subst), |s2|
-                    build_scheme_subst_inner(
-                        List.drop(param_tys, 1),
-                        List.drop(arg_tys, 1),
-                        s2))
+                None => Result.ok(subst)
+                Some(at) => Result.and_then(unify_deep(pt, at, subst), |s2| build_scheme_subst_inner(List.drop(param_tys, 1), List.drop(arg_tys, 1), s2))
             }
         }
     }
@@ -1353,16 +1829,13 @@ fn build_scheme_subst_inner(param_tys: List<String>, arg_tys: List<String>, subs
 
 fn apply_scheme_subst_inner(ret_ty: String, vars: List<String>, subst: List<KVPair>) -> String {
     match List.first(vars) {
-        None    => ret_ty
+        None => ret_ty
         Some(v) => {
             bind resolved <- match subst_lookup(subst, v) {
                 Some(t) => t
-                None    => v
-            }
-            apply_scheme_subst_inner(
-                String.replace(ret_ty, v, resolved),
-                List.drop(vars, 1),
-                subst)
+                None => v
+            };
+            apply_scheme_subst_inner(String.replace(ret_ty, v, resolved), List.drop(vars, 1), subst)
         }
     }
 }
@@ -1372,48 +1845,36 @@ fn apply_scheme_subst(ret_ty: String, vars: List<String>, subst: List<KVPair>) -
 }
 
 fn instantiate_fn_scheme(scheme: String, arg_tys: List<String>, state: InfState) -> Result<InfResult, String> {
-    bind vars_str   <- fn_scheme_vars_str(scheme)
-    bind params_str <- fn_scheme_params_str(scheme)
-    bind ret_ty     <- fn_scheme_ret(scheme)
-    bind vars       <- String.split(vars_str, ",")
-    bind param_tys  <- String.split(params_str, ";")
-    Result.and_then(
-        build_scheme_subst_inner(param_tys, arg_tys, state.subst),
-        |subst2| Result.ok(inf_result_of(
-            apply_scheme_subst(ret_ty, vars, subst2),
-            inf_state_new(subst2, state.counter))))
+    bind vars_str <- fn_scheme_vars_str(scheme);
+    bind params_str <- fn_scheme_params_str(scheme);
+    bind ret_ty <- fn_scheme_ret(scheme);
+    bind vars <- String.split(vars_str, ",");
+    bind param_tys <- String.split(params_str, ";");
+    Result.and_then(build_scheme_subst_inner(param_tys, arg_tys, state.subst), |subst2| Result.ok(inf_result_of(apply_scheme_subst(ret_ty, vars, subst2), inf_state_new(subst2, state.counter))))
 }
 
-// Count semicolon-delimited parameters in a scheme params string.
-// Returns 0 for an empty string (0-param function).
 fn count_scheme_params(s: String) -> Int {
-    if String.length(s) == 0 { 0 }
-    else {
-        bind parts <- String.split(s, ";")
+    if String.length(s) == 0 {
+        0
+    } else {
+        bind parts <- String.split(s, ";");
         List.length(parts)
     }
 }
 
 fn infer_call_user(fname: String, args: Expr, env: List<KVPair>, state: InfState) -> Result<InfResult, String> {
     match env_lookup(env, fname) {
-        None =>
-            Result.err(fmt_err("E0007",
-                String.concat("undefined function: ", fname)))
+        None => Result.err(fmt_err("E0007", String.concat("undefined function: ", fname)))
         Some(ty) => {
             if is_fn_scheme_str(ty) {
-                bind arg_tys    <- infer_arg_tys(args, env)
-                bind params_str <- fn_scheme_params_str(ty)
-                bind n_expected <- count_scheme_params(params_str)
-                bind n_actual   <- List.length(arg_tys)
+                bind arg_tys <- infer_arg_tys(args, env);
+                bind params_str <- fn_scheme_params_str(ty);
+                bind n_expected <- count_scheme_params(params_str);
+                bind n_actual <- List.length(arg_tys);
                 if n_expected != n_actual {
-                    Result.err(fmt_err("E0008",
-                        String.concat(fname,
-                        String.concat(": expected ",
-                        String.concat(Int.to_string(n_expected),
-                        String.concat(" args but got ",
-                        Int.to_string(n_actual)))))))
+                    Result.err(fmt_err("E0008", String.concat(fname, String.concat(": expected ", String.concat(Int.to_string(n_expected), String.concat(" args but got ", Int.to_string(n_actual)))))))
                 } else {
-                    bind vars_str <- fn_scheme_vars_str(ty)
+                    bind vars_str <- fn_scheme_vars_str(ty);
                     if String.length(vars_str) == 0 {
                         Result.ok(inf_result_of(fn_scheme_ret(ty), state))
                     } else {
@@ -1431,42 +1892,38 @@ fn infer_call_hm(ns: String, fname: String, args: Expr, env: List<KVPair>, state
     if ns == "" {
         infer_call_user(fname, args, env, state)
     } else {
-        Result.and_then(infer_call(ns, fname, args, env), |ty|
-        Result.ok(inf_result_of(ty, state)))
+        Result.and_then(infer_call(ns, fname, args, env), |ty| Result.ok(inf_result_of(ty, state)))
     }
 }
 
-// ── Seq / par checker (v9.13.0) ───────────────────────────────────────────────
-
-// Helper: drop first n elements from a list
 fn seq_drop_n_acc(parts: List<String>, n: Int) -> List<String> {
-    if n == 0 { parts }
-    else { seq_drop_n_acc(List.drop(parts, 1), n - 1) }
+    if n == 0 {
+        parts
+    } else {
+        seq_drop_n_acc(List.drop(parts, 1), n - 1)
+    }
 }
 
-// Extract input type from scheme string "forall|<vars>|<params>|<ret>"
-// Returns the first semicolon-delimited param type string, or None.
 fn scheme_input_ty(scheme: String) -> Option<String> {
-    bind parts <- String.split(scheme, "|")
+    bind parts <- String.split(scheme, "|");
     match List.first(seq_drop_n_acc(parts, 2)) {
         None => Option.none()
         Some(params_str) => {
-            if String.length(params_str) == 0 { Option.none() }
-            else {
-                bind param_parts <- String.split(params_str, ";")
+            if String.length(params_str) == 0 {
+                Option.none()
+            } else {
+                bind param_parts <- String.split(params_str, ";");
                 List.first(param_parts)
             }
         }
     }
 }
 
-// Extract output type from scheme string "forall|<vars>|<params>|<ret>"
 fn scheme_output_ty(scheme: String) -> Option<String> {
-    bind parts <- String.split(scheme, "|")
+    bind parts <- String.split(scheme, "|");
     List.first(seq_drop_n_acc(parts, 3))
 }
 
-// Get the output type string of a named stage/fn from env (empty string if unknown)
 fn stage_output_ty_str(name: String, env: List<KVPair>) -> String {
     match env_lookup(env, name) {
         None => ""
@@ -1477,28 +1934,20 @@ fn stage_output_ty_str(name: String, env: List<KVPair>) -> String {
     }
 }
 
-// Check a single par stage exists (E0017) and has compatible input type (E0016)
 fn check_par_stage(name: String, input_ty: String, env: List<KVPair>) -> Result<String, String> {
     match env_lookup(env, name) {
-        None => Result.err(fmt_err("E0017",
-            String.concat("par ステップ内の stage '",
-            String.concat(name, "' が定義されていません"))))
+        None => Result.err(fmt_err("E0017", String.concat("par ステップ内の stage '", String.concat(name, "' が定義されていません"))))
         Some(scheme) => {
-            if input_ty == "" { Result.ok(name) }
-            else {
+            if input_ty == "" {
+                Result.ok(name)
+            } else {
                 match scheme_input_ty(scheme) {
                     None => Result.ok(name)
                     Some(stage_in) => {
-                        if stage_in == input_ty || input_ty == "Unknown" || stage_in == "Unknown" {
+                        if ((stage_in == input_ty) || (input_ty == "Unknown")) || (stage_in == "Unknown") {
                             Result.ok(name)
                         } else {
-                            Result.err(fmt_err("E0016",
-                                String.concat("par ステップの入力型不一致: `",
-                                String.concat(name,
-                                String.concat("` expects `",
-                                String.concat(stage_in,
-                                String.concat("`, got `",
-                                String.concat(input_ty, "`"))))))))
+                            Result.err(fmt_err("E0016", String.concat("par ステップの入力型不一致: `", String.concat(name, String.concat("` expects `", String.concat(stage_in, String.concat("`, got `", String.concat(input_ty, "`"))))))))
                         }
                     }
                 }
@@ -1507,7 +1956,6 @@ fn check_par_stage(name: String, input_ty: String, env: List<KVPair>) -> Result<
     }
 }
 
-// Check all names in a par step
 fn check_par_names_acc(names: List<String>, input_ty: String, env: List<KVPair>) -> Result<String, String> {
     match List.first(names) {
         None => Result.ok("ok")
@@ -1520,14 +1968,13 @@ fn check_par_names_acc(names: List<String>, input_ty: String, env: List<KVPair>)
     }
 }
 
-// Check a seq's steps, tracking current_ty through the pipeline
 fn check_seq_steps_acc(steps: List<SeqStep>, current_ty: String, env: List<KVPair>) -> Result<String, String> {
     match List.first(steps) {
         None => Result.ok("ok")
         Some(step) => {
             match step {
                 SStage(name) => {
-                    bind next_ty <- stage_output_ty_str(name, env)
+                    bind next_ty <- stage_output_ty_str(name, env);
                     check_seq_steps_acc(List.drop(steps, 1), next_ty, env)
                 }
                 SPar(names) => {
@@ -1541,13 +1988,9 @@ fn check_seq_steps_acc(steps: List<SeqStep>, current_ty: String, env: List<KVPai
     }
 }
 
-// Check a seq definition
 fn check_seq_def(sd: SeqDef, env: List<KVPair>) -> Result<String, String> {
-    Result.and_then(check_seq_steps_acc(sd.stages, "", env), |ok|
-    Result.ok(sd.name))
+    Result.and_then(check_seq_steps_acc(sd.stages, "", env), |ok| Result.ok(sd.name))
 }
-
-// ── Item / program checker ────────────────────────────────────────────────────
 
 fn check_item(item: Item, env: List<KVPair>) -> Result<String, String> {
     match item {
@@ -1555,9 +1998,8 @@ fn check_item(item: Item, env: List<KVPair>) -> Result<String, String> {
         IType(td) => Result.ok(td.name)
         IWrapper(wd) => Result.ok(wd.name)
         ITest(td) => {
-            bind test_env <- env_empty()
-            Result.and_then(infer_expr(td.body, test_env), |ty|
-            Result.ok(td.name))
+            bind test_env <- env_empty();
+            Result.and_then(infer_expr(td.body, test_env), |ty| Result.ok(td.name))
         }
         IInterface(id) => Result.ok(id.name)
         IImpl(id) => Result.ok(id.type_name)
@@ -1570,8 +2012,7 @@ fn collect_interface_schemes(items: List<Item>, env: List<KVPair>) -> List<KVPai
     match List.first(items) {
         None => env
         Some(item) => match item {
-            IInterface(id) => collect_interface_schemes(List.drop(items, 1),
-                                  env_insert(env, id.name, "interface"))
+            IInterface(id) => collect_interface_schemes(List.drop(items, 1), env_insert(env, id.name, "interface"))
             _ => collect_interface_schemes(List.drop(items, 1), env)
         }
     }
@@ -1582,9 +2023,7 @@ fn collect_impl_decls_acc(items: List<Item>, acc: List<ImplEntry>) -> List<ImplE
         None => acc
         Some(item) => match item {
             IImpl(id) => {
-                bind entries <- List.map(id.interface_names, |iface|
-                    ImplEntry { iface: iface, type_: id.type_name }
-                )
+                bind entries <- List.map(id.interface_names, |iface| ImplEntry { iface: iface  type_: id.type_name });
                 collect_impl_decls_acc(List.drop(items, 1), List.concat(acc, entries))
             }
             _ => collect_impl_decls_acc(List.drop(items, 1), acc)
@@ -1597,29 +2036,34 @@ fn collect_impl_decls(items: List<Item>) -> List<ImplEntry> {
 }
 
 fn is_builtin_iface(name: String) -> Bool {
-    name == "Eq" || name == "Show" || name == "Serialize" || name == "Deserialize"
+    (((name == "Eq") || (name == "Show")) || (name == "Serialize")) || (name == "Deserialize")
 }
 
 fn has_impl_entry(impl_list: List<ImplEntry>, iface: String, type_name: String) -> Bool {
     match List.first(impl_list) {
         None => false
         Some(e) => {
-            if e.iface == iface && e.type_ == type_name { true }
-            else { has_impl_entry(List.drop(impl_list, 1), iface, type_name) }
+            if (e.iface == iface) && (e.type_ == type_name) {
+                true
+            } else {
+                has_impl_entry(List.drop(impl_list, 1), iface, type_name)
+            }
         }
     }
 }
 
 fn check_with_impl_one(iface: String, type_name: String, impl_list: List<ImplEntry>, iface_env: List<KVPair>) -> Result<String, String> {
-    if is_builtin_iface(iface) { Result.ok("ok") }
-    else {
+    if is_builtin_iface(iface) {
+        Result.ok("ok")
+    } else {
         match env_lookup(iface_env, iface) {
             None => Result.err(fmt_err("E0015", String.concat("undefined interface ", iface)))
             Some(_) => {
-                if has_impl_entry(impl_list, iface, type_name) { Result.ok("ok") }
-                else {
-                    bind msg <- String.concat(iface, String.concat(" is not implemented for ", type_name))
-                    bind hint <- String.concat("hint: add `impl ", String.concat(iface, String.concat(" for ", String.concat(type_name, " { ... }` block"))))
+                if has_impl_entry(impl_list, iface, type_name) {
+                    Result.ok("ok")
+                } else {
+                    bind msg <- String.concat(iface, String.concat(" is not implemented for ", type_name));
+                    bind hint <- String.concat("hint: add `impl ", String.concat(iface, String.concat(" for ", String.concat(type_name, " { ... }` block"))));
                     Result.err(String.concat(fmt_err("E0014", msg), String.concat("\n", hint)))
                 }
             }
@@ -1661,24 +2105,21 @@ fn check_items_with_impls(items: List<Item>, impl_list: List<ImplEntry>, iface_e
 fn check_items(items: List<Item>, env: List<KVPair>) -> Result<String, String> {
     match List.first(items) {
         None => Result.ok("ok")
-        Some(item) => Result.and_then(check_item(item, env), |name|
-            check_items(List.drop(items, 1), env))
+        Some(item) => Result.and_then(check_item(item, env), |name| check_items(List.drop(items, 1), env))
     }
 }
 
 public fn check(prog: Program) -> Result<String, String> {
-    bind init_env   <- env_empty()
-    bind scheme_env <- collect_fn_schemes(prog.items, init_env)
-    bind full_env   <- collect_variant_constructors(prog.items, scheme_env)
-    bind iface_env  <- collect_interface_schemes(prog.items, full_env)
-    bind impl_list  <- collect_impl_decls(prog.items)
+    bind init_env <- env_empty();
+    bind scheme_env <- collect_fn_schemes(prog.items, init_env);
+    bind full_env <- collect_variant_constructors(prog.items, scheme_env);
+    bind iface_env <- collect_interface_schemes(prog.items, full_env);
+    bind impl_list <- collect_impl_decls(prog.items);
     match check_items_with_impls(prog.items, impl_list, iface_env) {
         Err(e) => Result.err(e)
         Ok(_) => check_items(prog.items, full_env)
     }
 }
-
-// ── Tests ─────────────────────────────────────────────────────────────────────
 
 test "infer_lit int" {
     infer_lit(LInt(42)) == "Int"
@@ -1693,7 +2134,7 @@ test "infer_lit string" {
 }
 
 test "infer_expr literal int" {
-    bind env <- env_empty()
+    bind env <- env_empty();
     match infer_expr(ELit(LInt(1)), env) {
         Err(e) => false
         Ok(ty) => ty == "Int"
@@ -1701,7 +2142,7 @@ test "infer_expr literal int" {
 }
 
 test "infer_expr addition" {
-    bind env <- env_empty()
+    bind env <- env_empty();
     match infer_expr(EBinOp(OpAdd, ELit(LInt(1)), ELit(LInt(2))), env) {
         Err(e) => false
         Ok(ty) => ty == "Int"
@@ -1709,7 +2150,7 @@ test "infer_expr addition" {
 }
 
 test "infer_expr variable lookup" {
-    bind env <- env_insert(env_empty(), "x", "Bool")
+    bind env <- env_insert(env_empty(), "x", "Bool");
     match infer_expr(EVar("x"), env) {
         Err(e) => false
         Ok(ty) => ty == "Bool"
@@ -1717,11 +2158,11 @@ test "infer_expr variable lookup" {
 }
 
 test "type_to_str round trip" {
-    type_to_str(TyInt) == "Int" && type_to_str(TyBool) == "Bool" && type_to_str(TyString) == "String"
+    ((type_to_str(TyInt) == "Int") && (type_to_str(TyBool) == "Bool")) && (type_to_str(TyString) == "String")
 }
 
 test "builtin ret ty" {
-    builtin_ret_ty("String", "concat") == "String" && builtin_ret_ty("List", "length") == "Int"
+    (builtin_ret_ty("String", "concat") == "String") && (builtin_ret_ty("List", "length") == "Int")
 }
 
 test "fmt_err format" {
@@ -1729,17 +2170,17 @@ test "fmt_err format" {
 }
 
 test "effect io detected" {
-    bind effs <- infer_expr_effects(ECall("IO", "argv", EArgNil))
+    bind effs <- infer_expr_effects(ECall("IO", "argv", EArgNil));
     List.any(effs, |e| str_eq(e, "IO"))
 }
 
 test "effect cache detected" {
-    bind effs <- infer_expr_effects(ECall("Cache", "get_raw", EArgNil))
+    bind effs <- infer_expr_effects(ECall("Cache", "get_raw", EArgNil));
     List.any(effs, |e| str_eq(e, "Cache"))
 }
 
 test "effect none for pure" {
-    bind effs <- infer_expr_effects(ELit(LInt(1)))
+    bind effs <- infer_expr_effects(ELit(LInt(1)));
     List.length(effs) == 0
 }
 
@@ -1756,32 +2197,29 @@ test "builtin compiler check_raw" {
 }
 
 test "match option exhaustive ok" {
-    match check_match_exhaustive("Option",
-        EArm(PVariant("None"), ELit(LBool(false)),
-        EArm(PVariantP("Some", PVar("v")), ELit(LBool(true)), EArmNil))) {
+    match check_match_exhaustive("Option", EArm(PVariant("None"), ELit(LBool(false)), EArm(PVariantP("Some", PVar("v")), ELit(LBool(true)), EArmNil))) {
         None => true
         Some(e) => false
     }
 }
 
 test "match option missing some" {
-    match check_match_exhaustive("Option",
-        EArm(PVariant("None"), ELit(LBool(false)), EArmNil)) {
+    match check_match_exhaustive("Option", EArm(PVariant("None"), ELit(LBool(false)), EArmNil)) {
         None => false
         Some(e) => String.starts_with(e, "E0004")
     }
 }
 
 test "is_type_var upper" {
-    is_type_var("A") && is_type_var("Z") && is_type_var("T")
+    (is_type_var("A") && is_type_var("Z")) && is_type_var("T")
 }
 
 test "is_type_var not" {
-    is_type_var("Int") == false && is_type_var("a") == false && is_type_var("AB") == false
+    ((is_type_var("Int") == false) && (is_type_var("a") == false)) && (is_type_var("AB") == false)
 }
 
 test "apply_subst resolves" {
-    bind subst <- subst_insert(subst_empty(), "A", "Int")
+    bind subst <- subst_insert(subst_empty(), "A", "Int");
     apply_subst(subst, "A") == "Int"
 }
 
@@ -1792,16 +2230,16 @@ test "apply_subst no match" {
 test "unify same" {
     match unify("Int", "Int", subst_empty()) {
         Err(_) => false
-        Ok(s)  => List.length(s) == 0
+        Ok(s) => List.length(s) == 0
     }
 }
 
 test "unify var left" {
     match unify("A", "Bool", subst_empty()) {
         Err(_) => false
-        Ok(s)  => match subst_lookup(s, "A") {
+        Ok(s) => match subst_lookup(s, "A") {
             Some(t) => t == "Bool"
-            None    => false
+            None => false
         }
     }
 }
@@ -1809,7 +2247,7 @@ test "unify var left" {
 test "unify conflict" {
     match unify("Int", "String", subst_empty()) {
         Err(e) => String.starts_with(e, "E0005")
-        Ok(_)  => false
+        Ok(_) => false
     }
 }
 
@@ -1848,15 +2286,15 @@ test "fresh_var ten" {
 test "unify_deep same" {
     match unify_deep("Int", "Int", subst_empty()) {
         Err(_) => false
-        Ok(s)  => List.length(s) == 0
+        Ok(s) => List.length(s) == 0
     }
 }
 
 test "unify_deep var nested" {
     match unify_deep("List<A>", "List<Int>", subst_empty()) {
         Err(_) => false
-        Ok(s)  => match subst_lookup(s, "A") {
-            None    => false
+        Ok(s) => match subst_lookup(s, "A") {
+            None => false
             Some(t) => t == "Int"
         }
     }
@@ -1865,23 +2303,23 @@ test "unify_deep var nested" {
 test "unify_deep outer mismatch" {
     match unify_deep("List<A>", "Option<Int>", subst_empty()) {
         Err(e) => String.starts_with(e, "E0005")
-        Ok(_)  => false
+        Ok(_) => false
     }
 }
 
 test "infer_hm int" {
-    bind s0 <- inf_state_new(subst_empty(), 0)
+    bind s0 <- inf_state_new(subst_empty(), 0);
     match infer_hm(ELit(LInt(42)), env_empty(), s0) {
         Err(_) => false
-        Ok(r)  => r.ty == "Int"
+        Ok(r) => r.ty == "Int"
     }
 }
 
 test "infer_hm evar fresh" {
-    bind s0 <- inf_state_new(subst_empty(), 0)
+    bind s0 <- inf_state_new(subst_empty(), 0);
     match infer_hm(EVar("x"), env_empty(), s0) {
         Err(_) => false
-        Ok(r)  => r.ty == "t0" && r.counter == 1
+        Ok(r) => (r.ty == "t0") && (r.counter == 1)
     }
 }
 
@@ -1894,12 +2332,12 @@ test "is_type_var_ext two-char" {
 }
 
 test "is_type_var_ext not" {
-    is_type_var_extended("Int") == false && is_type_var_extended("AB") == false
+    (is_type_var_extended("Int") == false) && (is_type_var_extended("AB") == false)
 }
 
 test "collect_te vars simple" {
     match List.first(collect_type_vars_from_te(TeSimple("A"))) {
-        None    => false
+        None => false
         Some(v) => v == "A"
     }
 }
@@ -1921,19 +2359,17 @@ test "fn_scheme_ret" {
 }
 
 test "instantiate simple" {
-    bind s0 <- inf_state_new(subst_empty(), 0)
-    match instantiate_fn_scheme("forall|A|A|A",
-            List.push(List.empty(), "Int"), s0) {
+    bind s0 <- inf_state_new(subst_empty(), 0);
+    match instantiate_fn_scheme("forall|A|A|A", List.push(List.empty(), "Int"), s0) {
         Err(_) => false
-        Ok(r)  => r.ty == "Int"
+        Ok(r) => r.ty == "Int"
     }
 }
 
 test "instantiate nested" {
-    bind s0 <- inf_state_new(subst_empty(), 0)
-    match instantiate_fn_scheme("forall|A|List<A>|Option<A>",
-            List.push(List.empty(), "List<String>"), s0) {
+    bind s0 <- inf_state_new(subst_empty(), 0);
+    match instantiate_fn_scheme("forall|A|List<A>|Option<A>", List.push(List.empty(), "List<String>"), s0) {
         Err(_) => false
-        Ok(r)  => r.ty == "Option<String>"
+        Ok(r) => r.ty == "Option<String>"
     }
 }

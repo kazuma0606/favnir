@@ -440,14 +440,14 @@ impl Formatter {
                     .map(|ty| format!(": {}", self.type_expr(ty)))
                     .unwrap_or_default();
                 let expr = self.expr(&b.expr);
-                format!("bind {}{} <- {}", pat, ann, expr)
+                format!("bind {}{} <- {};", pat, ann, expr)
             }
             Stmt::Expr(e) => {
                 format!("{};", self.expr(e))
             }
             Stmt::Chain(c) => {
                 let expr = self.expr(&c.expr);
-                format!("chain {} <- {}", c.name, expr)
+                format!("chain {} <- {};", c.name, expr)
             }
             Stmt::Yield(y) => {
                 let expr = self.expr(&y.expr);

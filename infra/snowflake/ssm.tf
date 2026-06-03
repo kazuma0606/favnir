@@ -10,7 +10,7 @@ resource "aws_ssm_parameter" "snowflake_account" {
   name        = "/favnir/snowflake/account"
   description = "Snowflake account identifier"
   type        = "SecureString"
-  value       = var.snowflake_account
+  value       = local.snowflake_account
 
   tags = {
     Project   = "favnir"

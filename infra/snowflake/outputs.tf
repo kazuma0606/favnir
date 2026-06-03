@@ -15,7 +15,7 @@ output "snowflake_schema_name" {
 
 output "snowflake_app_role" {
   description = "Snowflake application role name"
-  value       = snowflake_role.favnir_app.name
+  value       = snowflake_account_role.favnir_app.name
 }
 
 output "ssm_prefix" {

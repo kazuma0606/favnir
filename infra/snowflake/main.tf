@@ -4,6 +4,7 @@ locals {
     Environment = var.environment
     ManagedBy   = "terraform"
   }
+  snowflake_account = "${var.snowflake_organization}-${var.snowflake_account_name}"
 }
 
 # ---------------------------------------------------------------------------
@@ -43,14 +44,14 @@ resource "snowflake_schema" "public" {
 # Application role
 # ---------------------------------------------------------------------------
 
-resource "snowflake_role" "favnir_app" {
+resource "snowflake_account_role" "favnir_app" {
   name    = "FAVNIR_APP"
   comment = "Favnir application role — managed by Terraform"
 }
 
-resource "snowflake_grant_privileges_to_role" "warehouse_usage" {
-  role_name  = snowflake_role.favnir_app.name
-  privileges = ["USAGE"]
+resource "snowflake_grant_privileges_to_account_role" "warehouse_usage" {
+  account_role_name = snowflake_account_role.favnir_app.name
+  privileges        = ["USAGE"]
 
   on_account_object {
     object_type = "WAREHOUSE"
@@ -58,9 +59,9 @@ resource "snowflake_grant_privileges_to_role" "warehouse_usage" {
   }
 }
 
-resource "snowflake_grant_privileges_to_role" "database_usage" {
-  role_name  = snowflake_role.favnir_app.name
-  privileges = ["USAGE"]
+resource "snowflake_grant_privileges_to_account_role" "database_usage" {
+  account_role_name = snowflake_account_role.favnir_app.name
+  privileges        = ["USAGE"]
 
   on_account_object {
     object_type = "DATABASE"
@@ -68,9 +69,9 @@ resource "snowflake_grant_privileges_to_role" "database_usage" {
   }
 }
 
-resource "snowflake_grant_privileges_to_role" "schema_privileges" {
-  role_name  = snowflake_role.favnir_app.name
-  privileges = ["USAGE", "CREATE TABLE", "CREATE VIEW"]
+resource "snowflake_grant_privileges_to_account_role" "schema_privileges" {
+  account_role_name = snowflake_account_role.favnir_app.name
+  privileges        = ["USAGE", "CREATE TABLE", "CREATE VIEW"]
 
   on_schema {
     schema_name = "\"${snowflake_database.favnir.name}\".\"${snowflake_schema.public.name}\""

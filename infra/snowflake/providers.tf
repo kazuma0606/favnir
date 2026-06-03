@@ -7,7 +7,7 @@ terraform {
     }
     snowflake = {
       source  = "Snowflake-Labs/snowflake"
-      version = "~> 0.87"
+      version = "~> 0.100"
     }
   }
   backend "s3" {
@@ -22,7 +22,10 @@ provider "aws" {
 }
 
 provider "snowflake" {
-  account = var.snowflake_account
-  user    = var.snowflake_user
-  role    = var.snowflake_admin_role
+  organization_name = var.snowflake_organization
+  account_name      = var.snowflake_account_name
+  user              = var.snowflake_user
+  role              = var.snowflake_admin_role
+  authenticator     = "JWT"
+  private_key       = file(var.snowflake_private_key_path)
 }

@@ -341,6 +341,7 @@ fn io_fn(fname: String) -> String {
     if fname == "argv"              { "List" }
     else { if fname == "read_file_raw"      { "Result" }
     else { if fname == "write_file_raw"     { "Result" }
+    else { if fname == "make_dir_raw"       { "Result" }
     else { if fname == "write_stdout_raw"   { "Unit" }
     else { if fname == "write_stderr_raw"   { "Unit" }
     else { if fname == "exit_raw"           { "Unit" }
@@ -354,7 +355,7 @@ fn io_fn(fname: String) -> String {
     else { if fname == "sleep_ms_raw"       { "Unit" }
     else { if fname == "println"            { "Unit" }
     else { "Unknown" }
-    }}}}}}}}}}}}}}
+    }}}}}}}}}}}}}}}
 }
 
 fn compiler_fn(fname: String) -> String {

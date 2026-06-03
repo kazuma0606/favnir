@@ -4,6 +4,199 @@ Favnir のバージョン履歴。形式は [Keep a Changelog](https://keepachan
 
 ---
 
+## [v10.0.0] — 2026-06-03
+
+### Added
+- `fav new <name>` — プロジェクトスキャフォールディング（fav.toml / src/main.fav / .gitignore 生成）
+- `IO.make_dir_raw` VM primitive（ディレクトリ作成）
+- GitHub Actions CI に self-check ステップ追加（fav check / fav lint / fav fmt --check）
+- `CONTRIBUTING.md` を現状に合わせて更新
+
+### Notes
+- テスト: 1260 件（fav_new 統合テスト 2 件追加）
+
+---
+
+## [v9.13.0] — 2026-06-03
+
+### Added
+- `par [A, B] |> Merge` — 並列 stage 実行（`std::thread::spawn` VM スレッド並列化）
+- E0016（par ステップ入力型不一致）/ E0017（par 内未定義 stage）
+- `compiler.fav` / `checker.fav` に `SeqStep` / `SeqDef` / `IStage` / `ISeq` 型追加
+- `ast_lower_checker.rs` に `lower_trf_def` / `lower_flw_def` / `te_to_string` 追加
+
+### Notes
+- テスト: 1258 件
+
+---
+
+## [v9.12.0] — 2026-06-02
+
+### Added
+- `interface` / `impl ... for` / `type T with Iface` を `checker.fav` / `compiler.fav` でセルフホスト対応
+- E0014（MissingImpl）/ E0015（ImplMethodNotFound）
+- LSP: Rune 定義ジャンプ（`textDocument/definition`）
+
+### Notes
+- テスト: 1251 件
+
+---
+
+## [v9.11.0] — 2026-06-01
+
+### Added
+- LSP: フィールド補完・モジュール補完（`List.` / `String.` 等）・Rune 補完
+- LSP: Signature help（関数呼び出し時の型シグネチャ表示）
+- `textDocument/completion` / `textDocument/signatureHelp` ハンドラ
+
+### Notes
+- テスト: 1240 件
+
+---
+
+## [v9.10.0] — 2026-05-31
+
+### Added
+- `fav repl` — インタラクティブ REPL（式評価・定義累積・`:type` / `:reset` / `:env`）
+- `cmd_repl` in `cli.fav`
+
+### Notes
+- テスト: 1220 件
+
+---
+
+## [v9.9.0] — 2026-05-31
+
+### Added
+- `fav profile` — stage 別実行時間計測（`--profile` フラグ）
+- `fav watch` — ファイル監視 + 自動再実行（500ms ポーリング）
+
+### Notes
+- テスト: 1217 件
+
+---
+
+## [v9.8.0] — 2026-05-31
+
+### Added
+- `fav doc` — `///` ドキュメントコメント + 型シグネチャから Markdown 自動生成
+- `cmd_doc` in `cli.fav`、`doc_item` / `doc_program` in `compiler.fav`
+
+### Notes
+- テスト: 1213 件
+
+---
+
+## [v9.7.5] — 2026-05-31
+
+### Added
+- `where` バリデーター（`type Email(String) where |v| String.contains(v, "@")`）
+- E0013（`expr?` を非 Result 関数内で使用）
+
+### Fixed
+- Float シリアライズで整数値に小数点が付かないバグを修正
+
+### Notes
+- テスト: 1206 件
+
+---
+
+## [v9.7.0] — 2026-05-31
+
+### Added
+- 名目型ラッパー `type Name(Inner)` — コンストラクタ・パターンマッチ対応
+- `T?` / `T!` / `??` / `expr?` を self-hosted pipeline で対応
+- `with Eq, Show, Serialize, Deserialize` 自動合成
+
+### Notes
+- テスト: 1200 件
+
+---
+
+## [v9.6.0] — 2026-05-31
+
+### Added
+- `!Llm` エフェクト追加
+- `llm` Rune — `llm.complete` / `llm.chat` / `llm.extract<T>`（Claude / OpenAI 対応）
+- `LLM_PROVIDER` / `LLM_MODEL` 環境変数で切り替え
+
+### Notes
+- テスト: 1191 件
+
+---
+
+## [v9.5.0] — 2026-05-31
+
+### Added
+- `!Http` エフェクト追加
+- `http` Rune 拡張（`get_text` / `get_json<T>` / `post_json_typed<T,R>`）
+- `grpc` Rune 拡張・`graphql` Rune 新規作成
+
+### Notes
+- テスト: 1187 件
+
+---
+
+## [v9.4.0] — 2026-05-31
+
+### Added
+- `json` Rune — `encode<T>` / `decode<T>` / `pretty`
+- `csv` Rune 拡張 — `read<T>` / `write_file<T>`
+- `gen` Rune 拡張 — `uuid` / `uuid_v7` / `nano_id`
+- W004 lint ルール（`fn` の引数が 4 個以上 → レコード型推奨）
+
+### Notes
+- テスト: 1182 件
+
+---
+
+## [v9.3.0] — 2026-05-31
+
+### Added
+- `fav lint` — W001〜W005 静的解析ルールエンジン（compiler.fav + cli.fav）
+- W001（EffectlessSink）/ W002（NoWriteInSeq）/ W003（UnusedBinding）/ W005（WildcardOnlyMatch）
+
+### Notes
+- テスト: 1173 件
+
+---
+
+## [v9.2.0] — 2026-05-31
+
+### Added
+- `fav fmt` — コードフォーマッタ（compiler.fav の pretty printer、冪等性保証）
+- `Compiler.fmt_source_raw` VM primitive
+- `--check` フラグ（CI 向け）
+
+### Notes
+- テスト: 1167 件
+
+---
+
+## [v9.1.0] — 2026-05-31
+
+### Added
+- stdlib 大幅拡充（`List.chunk` / `flat_map` / `group_by` / `zip_with` / `unique` 等 30 関数超）
+- `rvm` 独立バイナリ（`src/bin/rvm.rs`）
+- マルチパラメータクロージャ `|x, y| x + y` 対応
+- E0012（非ジェネリック関数引数数不一致）
+
+### Notes
+- テスト: 1162 件
+
+---
+
+## [v9.0.0] — 2026-05-31
+
+### Changed
+- **セルフホスト完成宣言**: `fav run` / `fav check` の全経路が Favnir pipeline 経由で動作
+- `--legacy` フラグ非推奨化
+
+### Notes
+- テスト: 1136 件
+
+---
+
 ## [v7.0.0] — 2026-05-27
 
 ### Added

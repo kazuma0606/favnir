@@ -36,17 +36,22 @@ npm run build
 ## テスト手順
 
 ```bash
-# Rust テスト（全 1043 件）
+# Rust テスト（全 1260 件）
 cd fav
 cargo test
 
 # 特定テストのみ
-cargo test validate
-cargo test bootstrap
+cargo test bootstrap           # Bootstrap 検証（bytecode_A == bytecode_B）
+cargo test checker_fav         # checker.fav セルフチェック
 
-# サンプルコードの型チェック
-fav check examples/basic/hello.fav
-fav check examples/pipeline/pipeline.fav
+# Self-hosted コンポーネントの型チェック
+./target/debug/fav check self/compiler.fav
+./target/debug/fav check self/checker.fav
+./target/debug/fav check self/cli.fav
+
+# Lint・フォーマット確認
+./target/debug/fav lint self/compiler.fav
+./target/debug/fav fmt --check self/compiler.fav
 ```
 
 ---

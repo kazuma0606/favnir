@@ -19916,3 +19916,93 @@ public fn main() -> Int { TestPar(1) }
         assert!(result.is_ok(), "checker.fav errored on valid par program: {:?}", result.err());
     }
 }
+
+// ── v10.0.0 tests ──────────────────────────────────────────────────────────────
+#[cfg(test)]
+mod v10_tests {
+    use crate::frontend::parser::Parser;
+    use crate::middle::compiler::compile_program;
+    use crate::backend::codegen::codegen_program;
+    use crate::backend::vm::VM;
+    use crate::value::Value;
+    use tempfile::TempDir;
+
+    fn run_with_io(src: &str) -> Result<Value, String> {
+        let prog = Parser::parse_str(src, "test.fav").expect("parse");
+        let ir = compile_program(&prog);
+        let artifact = codegen_program(&ir);
+        let fn_idx = artifact.fn_idx_by_name("main").expect("main not found");
+        VM::run(&artifact, fn_idx, vec![]).map_err(|e| format!("{:?}", e))
+    }
+
+    // D-1a: IO.make_dir_raw creates directory and write_file_raw creates files
+    #[test]
+    fn fav_new_creates_project_structure() {
+        let dir = TempDir::new().unwrap();
+        let root = dir.path().to_str().unwrap().replace('\\', "/");
+        let project = root.clone() + "/myproject";
+        let src_dir = project.clone() + "/src";
+
+        let src = format!(
+            r#"
+public fn main() -> Unit !IO {{
+    bind r1 <- IO.make_dir_raw("{src_dir}")
+    match r1 {{
+        Err(e) => IO.println(e)
+        Ok(_)  => {{
+            bind r2 <- IO.write_file_raw("{project}/fav.toml", "[project]\nname = \"myproject\"\n")
+            bind r3 <- IO.write_file_raw("{src_dir}/main.fav", "// hello\n")
+            bind r4 <- IO.write_file_raw("{project}/.gitignore", "*.fvc\n")
+            IO.println("done")
+        }}
+    }}
+}}
+"#
+        );
+
+        let result = run_with_io(&src);
+        assert!(result.is_ok(), "run failed: {:?}", result.err());
+
+        assert!(
+            std::path::Path::new(&format!("{}/fav.toml", project)).exists(),
+            "fav.toml missing"
+        );
+        assert!(
+            std::path::Path::new(&format!("{}/src/main.fav", project)).exists(),
+            "src/main.fav missing"
+        );
+        assert!(
+            std::path::Path::new(&format!("{}/.gitignore", project)).exists(),
+            ".gitignore missing"
+        );
+    }
+
+    // D-1b: the template main.fav compiles and runs without error
+    #[test]
+    fn fav_new_generated_project_runs() {
+        let template = r#"
+type Order = { id: Int  item: String  amount: Float }
+
+stage ParseOrder: String -> Order = |s| {
+  Order { id: 1  item: s  amount: 0.0 }
+}
+
+stage FormatOrder: Order -> String = |o| {
+  String.concat("Order: ", o.item)
+}
+
+seq ProcessOrder = ParseOrder |> FormatOrder
+
+public fn main() -> String { ProcessOrder("Widget") }
+"#;
+        let prog = Parser::parse_str(template, "main.fav").expect("parse");
+        let ir = compile_program(&prog);
+        let artifact = codegen_program(&ir);
+        let fn_idx = artifact.fn_idx_by_name("main").expect("main not found");
+        let result = VM::run(&artifact, fn_idx, vec![]).expect("run failed");
+        match result {
+            Value::Str(s) => assert_eq!(s, "Order: Widget"),
+            other => panic!("unexpected result: {:?}", other),
+        }
+    }
+}

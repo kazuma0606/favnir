@@ -32,6 +32,7 @@ type CliCmd =
   | CmdProfile(String, String)
   | CmdWatch(String, String)
   | CmdRepl
+  | CmdNew(String)
   | CmdUnknown(String)
 
 // ── Utilities ──────────────────────────────────────────────────────────────────
@@ -80,8 +81,9 @@ fn parse_named_cmd(cmd: String, args: List<String>) -> CliCmd {
     else { if cmd == "profile"   { parse_profile_cmd(args) }
     else { if cmd == "watch"     { parse_watch_cmd(args) }
     else { if cmd == "repl"      { CmdRepl }
+    else { if cmd == "new"       { parse_new_cmd(args) }
     else { CmdUnknown(String.concat("unknown command: ", cmd)) }
-    } } } } } } } } } } } }
+    } } } } } } } } } } } } }
 }
 
 fn parse_fmt_cmd(args: List<String>) -> CliCmd {
@@ -153,6 +155,13 @@ fn parse_watch_cmd(args: List<String>) -> CliCmd {
     }
 }
 
+fn parse_new_cmd(args: List<String>) -> CliCmd {
+    match List.first(List.drop(args, 1)) {
+        None    => CmdUnknown("new requires a project name argument")
+        Some(n) => CmdNew(n)
+    }
+}
+
 fn parse_check_cmd(args: List<String>) -> CliCmd {
     match List.first(List.drop(args, 1)) {
         None    => CmdUnknown("check requires a file argument")
@@ -195,7 +204,7 @@ fn parse_rune_sub(sub: String, args: List<String>) -> CliCmd {
 // ── Action handlers ────────────────────────────────────────────────────────────
 
 fn run_version() -> Unit !IO {
-    IO.println("favnir 9.13.0 (self-host CLI)")
+    IO.println("favnir 10.0.0 (self-host CLI)")
 }
 
 fn run_help() -> Unit !IO {
@@ -433,6 +442,51 @@ fn run_rune_info(name: String) -> Unit !IO {
     }
 }
 
+// ── fav new ───────────────────────────────────────────────────────────────────
+
+fn new_fav_toml(name: String) -> String =
+    "[project]\nname = \"" + name + "\"\nversion = \"0.1.0\"\nsrc = \"src\"\n"
+
+fn new_main_fav() -> String =
+    "type Order = { id: Int  item: String  amount: Float }\n\n" +
+    "stage ParseOrder: String -> Order = |s| {\n" +
+    "  Order { id: 1  item: s  amount: 0.0 }\n" +
+    "}\n\n" +
+    "stage FormatOrder: Order -> String = |o| {\n" +
+    "  \"Order#\" + Int.to_string(o.id) + \": \" + o.item\n" +
+    "}\n\n" +
+    "seq ProcessOrder = ParseOrder |> FormatOrder\n"
+
+fn new_gitignore() -> String =
+    "*.fvc\n.fav_cache/\n"
+
+fn run_new(name: String) -> Unit !IO = {
+    bind src_dir <- name + "/src"
+    bind r1      <- IO.make_dir_raw(src_dir)
+    match r1 {
+        Err(e) => IO.println("error: " + e)
+        Ok(_)  => {
+            bind r2 <- IO.write_file_raw(name + "/fav.toml",    new_fav_toml(name))
+            bind r3 <- IO.write_file_raw(src_dir + "/main.fav", new_main_fav())
+            bind r4 <- IO.write_file_raw(name + "/.gitignore",  new_gitignore())
+            match r2 {
+                Err(e) => IO.println("error: " + e)
+                Ok(_)  => {
+                    match r3 {
+                        Err(e) => IO.println("error: " + e)
+                        Ok(_)  => {
+                            match r4 {
+                                Err(e) => IO.println("error: " + e)
+                                Ok(_)  => IO.println("Created project: " + name)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 // ── Entry point ────────────────────────────────────────────────────────────────
 
 public fn main() -> Unit !IO {
@@ -451,6 +505,7 @@ public fn main() -> Unit !IO {
         CmdProfile(parts)      => run_profile(parts._0, parts._1)
         CmdWatch(parts)        => run_watch(parts._0, parts._1)
         CmdRepl                => IO.println("Use 'fav repl' to start the REPL.")
+        CmdNew(name)           => run_new(name)
         CmdUnknown(msg)        => {
             bind _ <- IO.write_stderr_raw(String.concat("error: ", msg))
             IO.exit_raw(1)

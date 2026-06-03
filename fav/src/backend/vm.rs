@@ -6535,6 +6535,20 @@ fn vm_call_builtin(
                 Err(e) => Ok(err_vm(VMValue::Str(e.to_string()))),
             }
         }
+        "IO.make_dir_raw" => {
+            let path = match args
+                .into_iter()
+                .next()
+                .ok_or_else(|| "IO.make_dir_raw requires 1 argument".to_string())?
+            {
+                VMValue::Str(s) => s,
+                _ => return Err("IO.make_dir_raw: path must be a String".to_string()),
+            };
+            match std::fs::create_dir_all(&path) {
+                Ok(()) => Ok(ok_vm(VMValue::Unit)),
+                Err(e) => Ok(err_vm(VMValue::Str(e.to_string()))),
+            }
+        }
         "IO.write_bytes_raw" => {
             let mut it = args.into_iter();
             let path = match it

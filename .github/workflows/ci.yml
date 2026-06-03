@@ -45,6 +45,25 @@ jobs:
         working-directory: fav
         run: cargo test --locked
 
+      - name: Self-check (fav check)
+        working-directory: fav
+        run: |
+          ./target/debug/fav check self/compiler.fav
+          ./target/debug/fav check self/checker.fav
+          ./target/debug/fav check self/cli.fav
+
+      - name: Self-lint (fav lint)
+        working-directory: fav
+        run: |
+          ./target/debug/fav lint self/compiler.fav
+          ./target/debug/fav lint self/checker.fav
+
+      - name: Self-fmt (fav fmt --check)
+        working-directory: fav
+        run: |
+          ./target/debug/fav fmt --check self/compiler.fav
+          ./target/debug/fav fmt --check self/checker.fav
+
   site:
     name: Site — build
     runs-on: ubuntu-latest

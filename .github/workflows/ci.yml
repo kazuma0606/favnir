@@ -51,7 +51,7 @@ jobs:
           # compiler.fav uses collect/yield (coroutine syntax) which ast_lower_checker does not
           # yet lower to checker.fav IR — use --legacy (Rust checker) as a workaround.
           # See versions/v10.0.0/known-limitations.md
-          ./target/debug/fav check --legacy self/compiler.fav
+          ./target/debug/fav check --legacy-check self/compiler.fav
           ./target/debug/fav check self/checker.fav
           ./target/debug/fav check self/cli.fav
 

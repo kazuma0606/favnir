@@ -316,9 +316,11 @@ fn infer_op(op: Op, lty: String, rty: String) -> Result<String, String> {
         else {
         if lty == "Float" && rty == "Float" { Result.ok("Float") }
         else {
+        if lty == "String" && rty == "String" { Result.ok("String") }
+        else {
         if lty == "Unknown" || rty == "Unknown" { Result.ok("Unknown") }
         else { Result.err(fmt_err("E0001", String.concat("arithmetic type mismatch: ", String.concat(lty, String.concat(" vs ", rty))))) }
-        }}
+        }}}
     } else {
     if is_cmp_op(op) {
         Result.ok("Bool")

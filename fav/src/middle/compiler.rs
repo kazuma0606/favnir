@@ -1868,6 +1868,7 @@ fn lower_type_expr(ty: &TypeExpr) -> Type {
                 "Float" => Type::Float,
                 "String" => Type::String,
                 "Unit" => Type::Unit,
+                "_infer" => Type::Unknown,
                 _ => {
                     if name
                         .chars()

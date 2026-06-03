@@ -1489,7 +1489,7 @@ mod tests {
     use crate::middle::ir::{IRExpr, IRFnDef, IRGlobal, IRGlobalKind, IRProgram, IRStmt};
     use std::collections::HashMap;
     use wasm_encoder::{Encode, Module, ValType};
-    use wasmtime::Engine;
+    use wasmtime::{Engine, Linker, Store};
 
     #[test]
     fn wasm_results_for_scalars_and_unit() {
@@ -2366,5 +2366,48 @@ public fn main() -> Unit !Io {
         main.call(&mut store, ()).unwrap();
 
         assert_eq!(*printed.lock().unwrap(), Some(6)); // f(5) = 5 + 1 = 6
+    }
+
+    #[test]
+    fn wasm_codegen_stage_seq_pipeline() {
+        // Regression test: stage params use `_infer` type placeholder,
+        // which must lower to Type::Unknown so WASM codegen can proceed.
+        let source = r#"
+stage Double: Int -> Int = |n| { n * 2 }
+stage AddOne: Int -> Int = |n| { n + 1 }
+stage Square: Int -> Int = |n| { n * n }
+
+seq Transform = Double |> AddOne |> Square
+
+public fn main() -> Unit !Io {
+    IO.println_int(Transform(3))
+}
+"#;
+        let program = Parser::parse_str(source, "stage_seq_wasm.fav").expect("parse");
+        let ir = compile_program(&program);
+        let bytes = wasm_codegen_program(&ir).unwrap();
+
+        let engine = Engine::default();
+        let mut store = Store::new(&engine, ());
+        let module = wasmtime::Module::new(&engine, &bytes).unwrap();
+        let mut linker = Linker::new(&engine);
+
+        let printed: std::sync::Arc<std::sync::Mutex<Option<i64>>> =
+            std::sync::Arc::new(std::sync::Mutex::new(None));
+        let printed_clone = printed.clone();
+        linker
+            .func_wrap("fav_host", "io_println_int", move |v: i64| {
+                *printed_clone.lock().unwrap() = Some(v);
+            })
+            .unwrap();
+
+        let instance = linker.instantiate(&mut store, &module).unwrap();
+        let main = instance
+            .get_typed_func::<(), ()>(&mut store, "main")
+            .unwrap();
+        main.call(&mut store, ()).unwrap();
+
+        // Transform(3) = Square(AddOne(Double(3))) = Square(AddOne(6)) = Square(7) = 49
+        assert_eq!(*printed.lock().unwrap(), Some(49));
     }
 }

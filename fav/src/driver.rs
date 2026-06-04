@@ -20093,6 +20093,24 @@ seq Pipeline = RunQuery
     }
 }
 
+// ── v10600_tests (v10.6.0) — Snowflake Rune ──────────────────────────────────
+#[cfg(test)]
+mod v10600_tests {
+    use super::tests::run_fav_test_file_with_runes;
+
+    #[test]
+    fn snowflake_rune_test_file_passes() {
+        // 資格情報を確実に unset してテスト（no_creds_is_err アサーションが通る）
+        unsafe {
+            std::env::remove_var("SNOWFLAKE_ACCOUNT");
+            std::env::remove_var("SNOWFLAKE_PRIVATE_KEY");
+        }
+        let results = run_fav_test_file_with_runes("runes/snowflake/snowflake.test.fav");
+        let failures: Vec<_> = results.iter().filter(|(_, ok, _)| !ok).collect();
+        assert!(failures.is_empty(), "snowflake.test.fav failures: {:?}", failures);
+    }
+}
+
 // ── v10500_tests (v10.5.0) — Snowflake × Favnir pipeline compile ─────────────
 #[cfg(test)]
 mod v10500_tests {

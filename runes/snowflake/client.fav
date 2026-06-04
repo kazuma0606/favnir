@@ -1,0 +1,33 @@
+// runes/snowflake/client.fav — Snowflake クライアント (v10.6.0)
+// Snowflake SQL API v2 への接続は VM primitive が担う。
+//
+// 環境変数:
+//   SNOWFLAKE_ACCOUNT       — Snowflake アカウント識別子（必須）
+//   SNOWFLAKE_USER          — ユーザー名（必須）
+//   SNOWFLAKE_PRIVATE_KEY   — RSA 秘密鍵 PEM（必須）
+//   SNOWFLAKE_PUBLIC_KEY_FP — 公開鍵フィンガープリント（必須）
+//   SNOWFLAKE_WAREHOUSE     — ウェアハウス名（省略可）
+//   SNOWFLAKE_ROLE          — ロール名（省略可）
+//   SNOWFLAKE_DATABASE      — データベース名（省略可）
+//   SNOWFLAKE_SCHEMA        — スキーマ名（省略可）
+
+// execute — DML（INSERT / UPDATE / DELETE / CREATE 等）を実行する
+public fn execute(sql: String) -> Result<String, String> !Snowflake {
+    Snowflake.execute_raw(sql)
+}
+
+// query<T> — SELECT クエリを実行し、行を型 T の List に変換して返す
+public fn query<T>(sql: String) -> Result<List<T>, String> !Snowflake {
+    match Snowflake.query_raw(sql) {
+        Err(e) => Result.err(e)
+        Ok(raw) =>
+            match Json.parse_raw(raw) {
+                Err(e) => Result.err(String.concat("snowflake.query: ", e))
+                Ok(parsed) =>
+                    match Schema.adapt(parsed, type_name_of<T>()) {
+                        Err(_) => Result.err("snowflake.query: schema error")
+                        Ok(rows) => Result.ok(rows)
+                    }
+            }
+    }
+}

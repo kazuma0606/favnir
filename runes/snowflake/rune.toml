@@ -1,0 +1,5 @@
+[rune]
+name = "snowflake"
+version = "10.6.0"
+entry = "snowflake.fav"
+description = "Snowflake rune — SQL API v2 経由のクエリ・DML 実行（!Snowflake エフェクト）"

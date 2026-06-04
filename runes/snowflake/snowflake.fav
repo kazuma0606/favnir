@@ -1,0 +1,20 @@
+// runes/snowflake/snowflake.fav — Favnir Snowflake rune public API (v10.6.0)
+// Snowflake SQL API v2 経由でクエリ・DML を実行する。
+//
+// 使用例:
+//   import rune "snowflake"
+//
+//   type Order = { order_id: Int  customer: String  amount: Float }
+//
+//   fn get_orders(sql: String) -> Result<List<Order>, String> !Snowflake {
+//       snowflake.query<Order>(sql)
+//   }
+//
+// 環境変数:
+//   SNOWFLAKE_ACCOUNT       — Snowflake アカウント識別子（必須）
+//   SNOWFLAKE_USER          — ユーザー名（必須）
+//   SNOWFLAKE_PRIVATE_KEY   — RSA 秘密鍵 PEM（必須）
+//   SNOWFLAKE_PUBLIC_KEY_FP — 公開鍵フィンガープリント（必須）
+//   オプション: SNOWFLAKE_WAREHOUSE / SNOWFLAKE_ROLE / SNOWFLAKE_DATABASE / SNOWFLAKE_SCHEMA
+
+use client.{ execute, query }

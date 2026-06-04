@@ -1,0 +1,13 @@
+// runes/snowflake/snowflake.test.fav — Snowflake rune テスト (v10.6.0)
+// 資格情報が設定されていない環境での動作確認
+import "snowflake"
+
+test "snowflake_execute_no_creds_is_err" {
+    bind result <- snowflake.execute("SELECT 1")
+    assert(Result.is_err(result))
+}
+
+test "snowflake_query_no_creds_is_err" {
+    bind result <- snowflake.query<String>("SELECT 1")
+    assert(Result.is_err(result))
+}

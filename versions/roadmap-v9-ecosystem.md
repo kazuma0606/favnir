@@ -722,70 +722,77 @@ VSCode 上での Favnir 開発体験を大幅に改善する。
 
 ---
 
-## v9.12.0 — ユーザー定義インターフェース（`interface` キーワード）
+## v9.12.0 — ユーザー定義インターフェース + checker.fav セルフホスト対応
 
-**テーマ**: `with Eq, Show` の組み込みインターフェースに加えて、
-ユーザーが独自インターフェースを定義・実装できるようにする。
-v9.7.0 の `with` 自動合成を基盤として拡張する。
+**テーマ**: `interface` / `impl ... for` / `with` によるインターフェース機能を
+checker.fav（Favnir セルフホスト型チェッカー）で完全に型チェックできるようにする。
+合わせて、ユーザーが独自インターフェースを定義・実装できるようにする。
 
-**背景**
+**背景（現状整理）**
 
-v9.7.0 では `Eq` / `Show` / `Serialize` / `Deserialize` の 4 つの組み込みインターフェースを実装した。
-しかしデータパイプラインでは「この型はバリデーション可能」「この型は変換可能」など
+`interface` / `impl ... for` / `type T with Iface` の構文・AST・Rust チェッカー・Rust コンパイラは
+すでに完全実装済み（パーサー・`checker.rs`・`compiler.rs` 対応あり）。
+
+**未対応箇所**:
+- `checker.fav`（Favnir pipeline のデフォルト型チェック経路）が `InterfaceDecl` / `InterfaceImplDecl` / `with_interfaces` を素通りしている
+- ユーザー定義インターフェースの `impl` 漏れ（E0014）を Favnir pipeline が検出できない
+
+データパイプラインでは「この型はバリデーション可能」「この型は変換可能」など
 ドメイン固有の能力を型レベルで表現したいケースがある。
+Rust 側で動作するだけでは `fav check`（Favnir pipeline）との挙動が一致しないため、
+`checker.fav` に同等のロジックを追加する。
 
-**構文設計**
+**構文（既存、変更なし）**
 
 ```favnir
-// インターフェース定義
+// インターフェース定義（パーサー対応済み）
 interface Validatable {
   fn validate(self) -> Result<Unit, String>
 }
 
-interface Transformer<B> {
-  fn transform(self) -> B
-}
-
-// ユーザー定義型での実装
-type Order with Eq, Validatable = {
-  id:     Int
-  amount: Float
-}
-
-// with Validatable を指定した場合、compiler.fav は
-// fn validate(self: Order) -> Result<Unit, String> の実装を要求する
-// → 実装がなければ E0014: missing interface implementation
-
-// 明示的な実装ブロック（with の自動合成ではカバーできない場合）
+// 明示的な実装ブロック
 impl Validatable for Order {
   fn validate(self) -> Result<Unit, String> = {
     if self.amount > 0.0 { Result.ok(()) }
     else { Result.err("amount must be positive") }
   }
 }
+
+// type 定義への with 節（パーサー対応済み）
+type Order with Eq, Validatable = {
+  id:     Int
+  amount: Float
+}
 ```
 
 **やること**
 
-パーサー（Rust 最小変更）:
-- `interface Name { fn ... }` 構文を追加
-- `impl Interface for Type { ... }` 構文を追加
+パーサー（Rust）:
+- 変更なし（すでに完全対応済み）
 
-`checker.fav` への追加:
-- インターフェース定義を環境に登録
-- `with CustomInterface` 使用時に `impl` ブロックの存在チェック
-- **E0014 — MissingImpl**: `with` で指定したインターフェースの実装がない
+`checker.fav` への追加（メイン作業）:
+- `IInterface` / `IImpl` アイテムを `check_items` で処理（現在は素通り）
+- `collect_interface_methods(prog)` — `interface` 定義のメソッド型シグネチャを env に登録
+- `collect_impl_decls(prog)` — `impl Iface for Type` の存在を env に登録
+- `check_type_def_with_interfaces(td)` — `with_interfaces` のチェック
+  - 組み込み（Eq / Show / Serialize / Deserialize）: 自動合成のため実装チェック不要
+  - ユーザー定義: `impl` ブロックの存在を確認 → なければ **E0014 — MissingImpl**
+- `check_impl_decl(id)` — `impl` ブロック内メソッドの型チェック
+  - メソッド名・シグネチャがインターフェース定義と一致することを確認
 
 `compiler.fav` への追加:
-- `impl` ブロックのコード生成
-- `with` で指定したインターフェースの実装を型定義に紐付け
+- `IInterface` / `IImpl` アイテムのコード生成（Rust `compiler.rs` と同等）
+  - `impl` ブロック内の `fn` を通常の関数定義としてコンパイル
+
+新エラーコード:
+- **E0014 — MissingImpl**: `with` で指定したユーザー定義インターフェースの `impl` ブロックがない
 
 **完了条件**
-- `interface` でユーザー定義インターフェースを宣言できる
-- `impl Interface for Type` で実装を提供できる
-- 実装漏れを E0014 でコンパイル時に検出できる
-- 組み込みインターフェース（Eq/Show 等）と共存する
-- 統合テスト 5 件以上
+- `interface` / `impl ... for` が `fav check`（Favnir pipeline）で型チェックされる
+- `with` で指定した実装漏れを E0014 でコンパイル時に検出できる（Favnir pipeline）
+- `cargo test checker_fav_wire_self_check` 通過
+- Rust pipeline と Favnir pipeline の挙動が一致する
+- 統合テスト 5 件以上（interface 定義・impl チェック・E0014 検出・組み込み with との共存）
 
 ---
 
@@ -907,7 +914,7 @@ CI/CD 整備:
 | v9.9.0 | fav profile — パイプライン実行時間計測 | なし | 開発体験 |
 | v9.10.0 | fav repl — 対話的 REPL（式・関数・stage 評価、定義累積、:type） | なし | インタラクティブ開発 |
 | v9.11.0 | LSP 補完 + go-to-definition（フィールド・モジュール・Signature help） | LSP ハンドラのみ | インタラクティブ開発 |
-| v9.12.0 | ユーザー定義インターフェース（`interface` / `impl` / E0014） | パーサーのみ | 型システム |
+| v9.12.0 | `interface` / `impl` セルフホスト対応（checker.fav + compiler.fav）+ E0014 | なし（Rust 実装済み） | 型システム |
 | v9.13.0 | `par` 並列 stage 実行（`par [A, B] \|> Merge`、VM 並列化） | VM + パーサー | パイプライン強化 |
 | **v10.0.0** | **OSS 公開準備完了（CI / CONTRIBUTING / fav new / GitHub Public 化）** | なし | **公開** |
 

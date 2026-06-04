@@ -61,8 +61,8 @@ Theme: VM Primitive 追加 — Snowflake SQL API v2
 - [x] D-5: `fav/Cargo.toml` version → `"10.2.0"`
 - [x] D-6: `fav/self/cli.fav` の `run_version` → `"10.2.0"`
 - [x] D-7: 本ファイル完了チェック
-- [ ] D-8: `memory/MEMORY.md` に v10.2.0 完了を記録
-- [ ] D-9: commit
+- [x] D-8: `memory/MEMORY.md` に v10.2.0 完了を記録
+- [x] D-9: commit
 
 ---
 

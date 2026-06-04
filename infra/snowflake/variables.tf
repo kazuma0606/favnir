@@ -10,8 +10,13 @@ variable "environment" {
   default     = "prod"
 }
 
-variable "snowflake_account" {
-  description = "Snowflake account identifier (e.g. xy12345.ap-northeast-1.aws)"
+variable "snowflake_organization" {
+  description = "Snowflake organization name (from app.snowflake.com/<org>/...)"
+  type        = string
+}
+
+variable "snowflake_account_name" {
+  description = "Snowflake account name (from app.snowflake.com/.../<account>)"
   type        = string
 }
 
@@ -23,7 +28,13 @@ variable "snowflake_user" {
 variable "snowflake_admin_role" {
   description = "Snowflake role for Terraform operations"
   type        = string
-  default     = "SYSADMIN"
+  default     = "ACCOUNTADMIN"
+}
+
+variable "snowflake_private_key_path" {
+  description = "Path to RSA private key PEM file for Snowflake JWT auth"
+  type        = string
+  default     = "./snowflake_rsa_key.p8"
 }
 
 variable "snowflake_warehouse_size" {

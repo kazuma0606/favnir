@@ -41,13 +41,14 @@ JWT Bearer 認証（RSA 2048-bit キーペア）。
 }
 ```
 
-- `ACCOUNT_UPPER`: アカウント識別子の大文字化（例: `RTQJKBW-IX11747`）
-- `USER_UPPER`: ユーザー名の大文字化（例: `YOSHIMURAHISANORI`）
-- `FINGERPRINT`: RSA 公開鍵の SHA256 フィンガープリント（base64, 例: `esJnLXZIP/...`）
+- `ACCOUNT_UPPER`: アカウント識別子の大文字化（例: `MYORG-MYACCOUNT`）
+- `USER_UPPER`: ユーザー名の大文字化（例: `MYUSER`）
+- `FINGERPRINT`: RSA 公開鍵の SHA256 フィンガープリント（base64）
 - アルゴリズム: RS256（`EncodingKey::from_rsa_pem` が既存の `jsonwebtoken` で動作）
 
 **注**: フィンガープリントは `SNOWFLAKE_PUBLIC_KEY_FP` 環境変数で提供する。
-事前計算値: `SHA256:esJnLXZIP/bOd4Bbbyqc8F274i5z25zpNfTCPI4yg+Y=`（SHA256: プレフィックスを除いた値）
+計算方法: `openssl rsa -in snowflake_rsa_key.p8 -pubout | openssl pkey -pubin -outform DER | openssl dgst -sha256 -binary | openssl enc -base64`
+（SHA256: プレフィックスを除いた base64 値を設定する）
 
 ### エンドポイント
 

@@ -51,25 +51,25 @@ Terraform apply 後に手動で実施する作業。
   openssl rsa -in snowflake_rsa_key.p8 -pubout -out snowflake_rsa_key.pub
   ```
   - `infra/snowflake/snowflake_rsa_key.p8` / `.pub` 生成済み
-  - 公開鍵フィンガープリント: `SHA256:esJnLXZIP/bOd4Bbbyqc8F274i5z25zpNfTCPI4yg+Y=`
+  - 公開鍵フィンガープリント: 確認済み（`DESC USER` で一致を検証）
 - [x] B-2: Snowflake ユーザーに RSA 公開鍵を登録する
   ```sql
-  ALTER USER YOSHIMURAHISANORI SET RSA_PUBLIC_KEY='MIIBIjAN...';
+  ALTER USER <YOUR_SNOWFLAKE_USER> SET RSA_PUBLIC_KEY='<公開鍵本文>';
   ```
   - Snowflake Worksheets（Projects → SQL Worksheet）で実行済み
-  - `DESC USER YOSHIMURAHISANORI` で `RSA_PUBLIC_KEY_FP` の一致を確認済み
+  - `DESC USER <YOUR_SNOWFLAKE_USER>` で `RSA_PUBLIC_KEY_FP` の一致を確認済み
   - `snow connection test -c favnir` → JWT 認証成功確認済み（`snowflake_rsa_key.p8` でログイン可）
-- [ ] B-3: AWS SSM に秘密鍵・ユーザー名・ロールを格納する（手動、未実施）
+- [x] B-3: AWS SSM に秘密鍵・ユーザー名・ロールを格納する
   ```bash
   aws ssm put-parameter --name "/favnir/snowflake/private_key" --type "SecureString" --value "$(cat snowflake_rsa_key.p8)" --overwrite
-  aws ssm put-parameter --name "/favnir/snowflake/user"        --type "SecureString" --value "YOSHIMURAHISANORI" --overwrite
-  aws ssm put-parameter --name "/favnir/snowflake/role"        --type "String"       --value "FAVNIR_APP"        --overwrite
+  aws ssm put-parameter --name "/favnir/snowflake/user"        --type "SecureString" --value "<YOUR_SNOWFLAKE_USER>" --overwrite
+  aws ssm put-parameter --name "/favnir/snowflake/role"        --type "String"       --value "FAVNIR_APP"            --overwrite
   ```
 - [x] B-4: `infra/snowflake/terraform.tfvars` を作成（.gitignore 対象）
   ```hcl
-  snowflake_organization    = "rtqjkbw"
-  snowflake_account_name    = "ix11747"
-  snowflake_user            = "YOSHIMURAHISANORI"
+  snowflake_organization    = "<YOUR_ORG>"
+  snowflake_account_name    = "<YOUR_ACCOUNT>"
+  snowflake_user            = "<YOUR_SNOWFLAKE_USER>"
   snowflake_private_key_path = "./snowflake_rsa_key.p8"
   ```
 - [x] B-5: `.gitignore` に `terraform.tfvars` / `*.p8` / `*.pub` / `.terraform/` / `.terraform.lock.hcl` を追加
@@ -99,17 +99,12 @@ Terraform apply 後に手動で実施する作業。
   - providers.tf・main.tf・ssm.tf・outputs.tf を provider v0.100 向けに修正後に通過
   - `terraform apply` → **11 resources created**
     - `FAVNIR_WH` / `FAVNIR` DB / `PUBLIC` schema / `FAVNIR_APP` ロール + grants 3 件 / SSM 4 件
-- [ ] D-3: 既存 infra への影響がないこと（未確認）
-  ```bash
-  cd infra/registry && terraform plan  # No changes
-  cd infra/site    && terraform plan  # No changes
-  ```
-- [ ] D-4: SSM パラメータが 7 件格納されていること（4/7 完了）
-  ```bash
-  aws ssm get-parameters-by-path --path /favnir/snowflake/ --with-decryption
-  ```
-  - [x] account / warehouse / database / schema（terraform apply で自動作成）
-  - [ ] private_key / user / role（B-3 の手動格納が必要）
+- [x] D-3: 既存 infra への影響がないこと
+  - registry: 実インフラへの変更なし（output 値の差分のみ）
+  - site: `No changes`
+- [x] D-4: SSM パラメータが 7 件格納されていること
+  - account / warehouse / database / schema（terraform apply）
+  - private_key / user / role（aws ssm put-parameter で手動格納）
 - [x] D-5: `cargo test` — 1261 件全通過（Rust コード変更なし）
 - [x] D-6: 本ファイル完了チェック
 - [x] D-7: `memory/MEMORY.md` に v10.1.0 完了を記録
@@ -124,9 +119,9 @@ Terraform apply 後に手動で実施する作業。
 | `infra/snowflake/` に 5 つの .tf ファイルが存在する | ✅ |
 | `terraform init` が通る | ✅ |
 | `terraform apply` で 11 リソース作成 | ✅ |
-| SSM に `/favnir/snowflake/*` が 7 件格納されている | ⚠️ 4/7（B-3 残）|
+| SSM に `/favnir/snowflake/*` が 7 件格納されている | ✅ |
 | `infra/snowflake/README.md` にセットアップ手順がある | ✅ |
-| 既存 infra（registry / site）に `terraform plan` で変更なし | ⬜ 未確認 |
+| 既存 infra（registry / site）に `terraform plan` で変更なし | ✅ |
 | `cargo test` 1261 件全通過 | ✅ |
 | snow CLI JWT 認証成功 | ✅ |
 
@@ -163,8 +158,8 @@ CI/CD から `terraform apply` する場合は環境変数 `TF_VAR_snowflake_acc
 ### snow CLI 接続設定
 
 `~/.snowflake/config.toml` に `[connections.favnir]` を追加:
-- `account = "rtqjkbw-ix11747"` / `authenticator = "SNOWFLAKE_JWT"`
-- `private_key_file = "C:/Users/yoshi/favnir/infra/snowflake/snowflake_rsa_key.p8"`
+- `account = "<YOUR_ORG>-<YOUR_ACCOUNT>"` / `authenticator = "SNOWFLAKE_JWT"`
+- `private_key_file = "<path>/infra/snowflake/snowflake_rsa_key.p8"`
 
 ### 次のバージョン（v10.2.0）への接続
 

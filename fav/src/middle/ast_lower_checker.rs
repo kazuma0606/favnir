@@ -357,6 +357,7 @@ fn effect_to_str(e: &ast::Effect) -> String {
         ast::Effect::Network => "Network".to_string(),
         ast::Effect::Http => "Http".to_string(),
         ast::Effect::Llm => "Llm".to_string(),
+        ast::Effect::Snowflake => "Snowflake".to_string(),
         ast::Effect::Rpc => "Rpc".to_string(),
         ast::Effect::File => "File".to_string(),
         ast::Effect::Checkpoint => "Checkpoint".to_string(),

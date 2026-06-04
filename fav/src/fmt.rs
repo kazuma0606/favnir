@@ -708,6 +708,7 @@ fn fmt_effect(eff: &Effect) -> Option<String> {
         Effect::Network => Some("!Network".to_string()),
         Effect::Http => Some("!Http".to_string()),
         Effect::Llm => Some("!Llm".to_string()),
+        Effect::Snowflake => Some("!Snowflake".to_string()),
         Effect::Rpc => Some("!Rpc".to_string()),
         Effect::File => Some("!File".to_string()),
         Effect::Checkpoint => Some("!Checkpoint".to_string()),

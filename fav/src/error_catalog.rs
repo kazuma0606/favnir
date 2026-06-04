@@ -294,6 +294,14 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
         fix: "Add `!AWS` to the function signature: `fn upload(key: String) -> Unit !AWS`.",
     },
     ErrorEntry {
+        code: "E0314",
+        title: "undeclared !Snowflake effect",
+        category: "effects",
+        description: "A Snowflake operation was used in a function that does not declare `!Snowflake`.",
+        example: "fn run(sql: String) -> Result<String, String> {\n    Snowflake.execute_raw(sql)  // E0314: !Snowflake not declared\n}",
+        fix: "Add `!Snowflake` to the function signature: `fn run(sql: String) -> Result<String, String> !Snowflake`.",
+    },
+    ErrorEntry {
         code: "E0365",
         title: "for-in iterator type error",
         category: "effects",

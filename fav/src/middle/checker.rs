@@ -1273,6 +1273,7 @@ impl Checker {
             "Parquet",
             "Grpc",
             "Llm",
+            "Snowflake",
             "Validate",
             "DuckDb",
             "Crypto",
@@ -2122,6 +2123,7 @@ impl Checker {
             "Network",
             "Http",
             "Llm",
+            "Snowflake",
             "Rpc",
             "File",
             "Checkpoint",
@@ -4523,6 +4525,7 @@ impl Checker {
                         | "Parquet"
                         | "Grpc"
                         | "Llm"
+                        | "Snowflake"
                         | "Stream"
                 ) =>
             {
@@ -4608,6 +4611,16 @@ impl Checker {
             self.type_error(
                 "E0311",
                 "Llm.* call requires `!Llm` effect on enclosing fn/trf",
+                span,
+            );
+        }
+    }
+
+    fn require_snowflake_effect(&mut self, span: &Span) {
+        if !self.has_effect(|e| matches!(e, Effect::Snowflake)) {
+            self.type_error(
+                "E0314",
+                "Snowflake.* call requires `!Snowflake` effect on enclosing fn/stage",
                 span,
             );
         }
@@ -5393,6 +5406,22 @@ impl Checker {
             }
             ("Llm", "extract_raw") => {
                 self.require_llm_effect(span);
+                Some(Type::Result(
+                    Box::new(Type::String),
+                    Box::new(Type::String),
+                ))
+            }
+
+            // Snowflake (v10.3.0) — require !Snowflake effect
+            ("Snowflake", "execute_raw") => {
+                self.require_snowflake_effect(span);
+                Some(Type::Result(
+                    Box::new(Type::String),
+                    Box::new(Type::String),
+                ))
+            }
+            ("Snowflake", "query_raw") => {
+                self.require_snowflake_effect(span);
                 Some(Type::Result(
                     Box::new(Type::String),
                     Box::new(Type::String),

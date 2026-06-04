@@ -1171,6 +1171,10 @@ impl Parser {
                         self.advance();
                         Effect::Llm
                     }
+                    "Snowflake" => {
+                        self.advance();
+                        Effect::Snowflake
+                    }
                     "Rpc" => {
                         self.advance();
                         Effect::Rpc

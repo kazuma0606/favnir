@@ -10243,6 +10243,7 @@ fn format_effects(effects: &[ast::Effect]) -> String {
             Network => "!Network".into(),
             Http => "!Http".into(),
             Llm => "!Llm".into(),
+            Snowflake => "!Snowflake".into(),
             Rpc => "!Rpc".into(),
             File => "!File".into(),
             Checkpoint => "!Checkpoint".into(),
@@ -10266,6 +10267,7 @@ fn effect_json_name(effect: &ast::Effect) -> String {
         ast::Effect::Network => "Network".into(),
         ast::Effect::Http => "Http".into(),
         ast::Effect::Llm => "Llm".into(),
+        ast::Effect::Snowflake => "Snowflake".into(),
         ast::Effect::Rpc => "Rpc".into(),
         ast::Effect::File => "File".into(),
         ast::Effect::Checkpoint => "Checkpoint".into(),
@@ -20004,5 +20006,59 @@ public fn main() -> String { ProcessOrder("Widget") }
             Value::Str(s) => assert_eq!(s, "Order: Widget"),
             other => panic!("unexpected result: {:?}", other),
         }
+    }
+}
+
+// ── v10300_tests (v10.3.0) — !Snowflake effect ───────────────────────────────
+#[cfg(test)]
+mod v10300_tests {
+    use crate::frontend::parser::Parser;
+    use crate::lineage::lineage_analysis;
+    use crate::middle::checker::Checker;
+
+    #[test]
+    fn snowflake_execute_requires_effect() {
+        // !Snowflake 未宣言で Snowflake.execute_raw を呼ぶと E0314
+        let src = r#"
+fn run(sql: String) -> Result<String, String> {
+  Snowflake.execute_raw(sql)
+}
+"#;
+        let prog = Parser::parse_str(src, "test.fav").expect("parse");
+        let (errors, _) = Checker::check_program(&prog);
+        let has_e0314 = errors.iter().any(|e| e.code == "E0314");
+        assert!(has_e0314, "expected E0314 for missing !Snowflake: {:?}", errors);
+    }
+
+    #[test]
+    fn snowflake_execute_with_effect_ok() {
+        // !Snowflake 宣言関数内で Snowflake.execute_raw が E0314 を出さないこと
+        let src = r#"
+fn run(sql: String) -> Result<String, String> !Snowflake {
+  Snowflake.execute_raw(sql)
+}
+"#;
+        let prog = Parser::parse_str(src, "test.fav").expect("parse");
+        let (errors, _) = Checker::check_program(&prog);
+        let e0314: Vec<_> = errors.iter().filter(|e| e.code == "E0314").collect();
+        assert!(e0314.is_empty(), "unexpected E0314 with !Snowflake: {:?}", e0314);
+    }
+
+    #[test]
+    fn snowflake_lineage_shows_effect() {
+        // lineage 出力に !Snowflake が含まれること
+        let src = r#"
+stage RunQuery: String -> String !Snowflake = |sql| {
+  match Snowflake.query_raw(sql) {
+    Ok(json) => json
+    Err(e)   => e
+  }
+}
+seq Pipeline = RunQuery
+"#;
+        let prog = Parser::parse_str(src, "test").unwrap();
+        let report = lineage_analysis(&prog);
+        let text = crate::lineage::render_lineage_text(&report, "test");
+        assert!(text.contains("!Snowflake"), "expected !Snowflake in lineage: {}", text);
     }
 }

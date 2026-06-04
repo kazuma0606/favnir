@@ -20092,3 +20092,31 @@ seq Pipeline = RunQuery
         assert!(text.contains("!Snowflake"), "expected !Snowflake in lineage: {}", text);
     }
 }
+
+// ── v10500_tests (v10.5.0) — Snowflake × Favnir pipeline compile ─────────────
+#[cfg(test)]
+mod v10500_tests {
+    #[test]
+    fn snowflake_compiles_with_favnir_pipeline() {
+        // Favnir pipeline (compiler.fav) で Snowflake.execute_raw を含むソースがコンパイルできること
+        let src = r#"
+fn run(sql: String) -> Result<String, String> !Snowflake {
+  Snowflake.execute_raw(sql)
+}
+"#;
+        let result = crate::compiler_fav_runner::compile_src_str_to_bytes(src);
+        assert!(result.is_ok(), "Snowflake compile via Favnir pipeline failed: {:?}", result);
+    }
+
+    #[test]
+    fn snowflake_query_compiles_with_favnir_pipeline() {
+        // Favnir pipeline で Snowflake.query_raw を含むソースがコンパイルできること
+        let src = r#"
+fn query(sql: String) -> Result<String, String> !Snowflake {
+  Snowflake.query_raw(sql)
+}
+"#;
+        let result = crate::compiler_fav_runner::compile_src_str_to_bytes(src);
+        assert!(result.is_ok(), "Snowflake query compile via Favnir pipeline failed: {:?}", result);
+    }
+}

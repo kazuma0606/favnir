@@ -2018,7 +2018,9 @@ fn parse_fn_def_after_body(is_pub: Bool, fname: String, params_p: ParamsParse, r
 }
 
 fn parse_fn_def_after_ret(is_pub: Bool, fname: String, params_p: ParamsParse, ret_p: TypeExprParse) -> Result<FnDefParse, String> {
-    match expect_tok(ret_p.rest, TkLBrace) {
+    bind empty_effs <- empty_string_list();
+    bind effs_p <- parse_effects_acc(ret_p.rest, empty_effs);
+    match expect_tok(effs_p.rest, TkLBrace) {
         Err(e) => Result.err(e)
         Ok(rest6) => parse_fn_def_after_body(is_pub, fname, params_p, ret_p, rest6)
     }

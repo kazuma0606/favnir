@@ -1,0 +1,7 @@
+order_id,customer,amount,region
+1,Alice,1200.00,US-EAST
+2,Bob,800.50,US-WEST
+3,Alice,350.00,US-EAST
+4,Carol,2100.00,EU-WEST
+5,Bob,450.75,US-WEST
+6,Carol,600.00,EU-WEST

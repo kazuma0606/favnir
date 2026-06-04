@@ -20218,6 +20218,28 @@ seq Pipeline = RunQuery
     }
 }
 
+// ── v10900_tests (v10.9.0) — Snowflake e2e demo structure ────────────────────
+#[cfg(test)]
+mod v10900_tests {
+    #[test]
+    fn snowflake_e2e_demo_structure() {
+        let root = std::env::var("CARGO_MANIFEST_DIR").unwrap();
+        let base = std::path::Path::new(&root)
+            .parent()
+            .unwrap()
+            .join("infra/e2e-demo/snowflake");
+        assert!(base.exists(), "infra/e2e-demo/snowflake/ must exist");
+        assert!(
+            base.join("src/demo.fav").exists(),
+            "infra/e2e-demo/snowflake/src/demo.fav must exist"
+        );
+        assert!(
+            base.join("README.md").exists(),
+            "infra/e2e-demo/snowflake/README.md must exist"
+        );
+    }
+}
+
 // ── v10800_tests (v10.8.0) — Snowflake type mapping ──────────────────────────
 #[cfg(test)]
 mod v10800_tests {

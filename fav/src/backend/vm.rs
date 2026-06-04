@@ -4682,6 +4682,70 @@ fn llm_call_chat(messages_json: &str) -> VMValue {
     }
 }
 
+// ── Snowflake helpers (v10.2.0) ──────────────────────────────────────────────
+
+#[cfg(not(target_arch = "wasm32"))]
+fn snowflake_read_env(key: &str) -> Result<String, String> {
+    std::env::var(key).map_err(|_| format!("{} is not set", key))
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(serde::Serialize)]
+struct SnowflakeClaims {
+    iss: String,
+    sub: String,
+    iat: i64,
+    exp: i64,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn snowflake_generate_jwt(
+    account: &str,
+    user: &str,
+    private_key_pem: &str,
+    public_key_fp: &str,
+) -> Result<String, String> {
+    let account_up = account.to_uppercase();
+    let user_up = user.to_uppercase();
+    let now = chrono::Utc::now().timestamp();
+    let claims = SnowflakeClaims {
+        iss: format!("{}.{}.SHA256:{}", account_up, user_up, public_key_fp),
+        sub: format!("{}.{}", account_up, user_up),
+        iat: now,
+        exp: now + 3600,
+    };
+    let header = jsonwebtoken::Header::new(jsonwebtoken::Algorithm::RS256);
+    let key = jsonwebtoken::EncodingKey::from_rsa_pem(private_key_pem.as_bytes())
+        .map_err(|e| format!("Snowflake JWT: invalid private key: {}", e))?;
+    jsonwebtoken::encode(&header, &claims, &key)
+        .map_err(|e| format!("Snowflake JWT: encode failed: {}", e))
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn snowflake_api_post(
+    account: &str,
+    jwt: &str,
+    body: &serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    let url = format!(
+        "https://{}.snowflakecomputing.com/api/v2/statements",
+        account
+    );
+    let resp = ureq::post(&url)
+        .set("Authorization", &format!("Bearer {}", jwt))
+        .set("Content-Type", "application/json")
+        .set("Accept", "application/json")
+        .set("X-Snowflake-Authorization-Token-Type", "KEYPAIR_JWT")
+        .send_string(&body.to_string())
+        .map_err(|e| match e {
+            ureq::Error::Status(_, r) => r.into_string().unwrap_or_default(),
+            ureq::Error::Transport(t) => t.to_string(),
+        })?;
+    let text = resp.into_string().map_err(|e| e.to_string())?;
+    serde_json::from_str(&text)
+        .map_err(|e| format!("Snowflake API: invalid JSON response: {}", e))
+}
+
 fn stringify_json_scalar(value: &SerdeJsonValue) -> Option<String> {
     match value {
         SerdeJsonValue::Null => Some(String::new()),
@@ -9228,6 +9292,79 @@ fn vm_call_builtin(
             Ok(llm_call_complete(&full_prompt))
         }
 
+        // ── Snowflake.execute_raw / Snowflake.query_raw (v10.2.0) ────────────────
+        "Snowflake.execute_raw" => {
+            let sql = vm_string(
+                args.into_iter()
+                    .next()
+                    .ok_or_else(|| "Snowflake.execute_raw requires a sql argument".to_string())?,
+                "Snowflake.execute_raw",
+            )?;
+            let account   = match snowflake_read_env("SNOWFLAKE_ACCOUNT")      { Ok(v) => v, Err(e) => return Ok(err_vm(VMValue::Str(e))) };
+            let user      = match snowflake_read_env("SNOWFLAKE_USER")         { Ok(v) => v, Err(e) => return Ok(err_vm(VMValue::Str(e))) };
+            let privkey   = match snowflake_read_env("SNOWFLAKE_PRIVATE_KEY")  { Ok(v) => v, Err(e) => return Ok(err_vm(VMValue::Str(e))) };
+            let pubkey_fp = match snowflake_read_env("SNOWFLAKE_PUBLIC_KEY_FP") { Ok(v) => v, Err(e) => return Ok(err_vm(VMValue::Str(e))) };
+            let jwt = match snowflake_generate_jwt(&account, &user, &privkey, &pubkey_fp) {
+                Ok(t) => t,
+                Err(e) => return Ok(err_vm(VMValue::Str(e))),
+            };
+            let mut body = serde_json::json!({ "statement": sql, "timeout": 60 });
+            if let Ok(wh) = std::env::var("SNOWFLAKE_WAREHOUSE") { body["warehouse"] = serde_json::Value::String(wh); }
+            if let Ok(rl) = std::env::var("SNOWFLAKE_ROLE")      { body["role"]      = serde_json::Value::String(rl); }
+            if let Ok(db) = std::env::var("SNOWFLAKE_DATABASE")  { body["database"]  = serde_json::Value::String(db); }
+            if let Ok(sc) = std::env::var("SNOWFLAKE_SCHEMA")    { body["schema"]    = serde_json::Value::String(sc); }
+            match snowflake_api_post(&account, &jwt, &body) {
+                Ok(_)  => Ok(ok_vm(VMValue::Str("ok".to_string()))),
+                Err(e) => Ok(err_vm(VMValue::Str(e))),
+            }
+        }
+        "Snowflake.query_raw" => {
+            let sql = vm_string(
+                args.into_iter()
+                    .next()
+                    .ok_or_else(|| "Snowflake.query_raw requires a sql argument".to_string())?,
+                "Snowflake.query_raw",
+            )?;
+            let account   = match snowflake_read_env("SNOWFLAKE_ACCOUNT")      { Ok(v) => v, Err(e) => return Ok(err_vm(VMValue::Str(e))) };
+            let user      = match snowflake_read_env("SNOWFLAKE_USER")         { Ok(v) => v, Err(e) => return Ok(err_vm(VMValue::Str(e))) };
+            let privkey   = match snowflake_read_env("SNOWFLAKE_PRIVATE_KEY")  { Ok(v) => v, Err(e) => return Ok(err_vm(VMValue::Str(e))) };
+            let pubkey_fp = match snowflake_read_env("SNOWFLAKE_PUBLIC_KEY_FP") { Ok(v) => v, Err(e) => return Ok(err_vm(VMValue::Str(e))) };
+            let jwt = match snowflake_generate_jwt(&account, &user, &privkey, &pubkey_fp) {
+                Ok(t) => t,
+                Err(e) => return Ok(err_vm(VMValue::Str(e))),
+            };
+            let mut body = serde_json::json!({ "statement": sql, "timeout": 60 });
+            if let Ok(wh) = std::env::var("SNOWFLAKE_WAREHOUSE") { body["warehouse"] = serde_json::Value::String(wh); }
+            if let Ok(rl) = std::env::var("SNOWFLAKE_ROLE")      { body["role"]      = serde_json::Value::String(rl); }
+            if let Ok(db) = std::env::var("SNOWFLAKE_DATABASE")  { body["database"]  = serde_json::Value::String(db); }
+            if let Ok(sc) = std::env::var("SNOWFLAKE_SCHEMA")    { body["schema"]    = serde_json::Value::String(sc); }
+            match snowflake_api_post(&account, &jwt, &body) {
+                Ok(resp) => {
+                    let cols: Vec<String> = resp["resultSetMetaData"]["rowType"]
+                        .as_array()
+                        .unwrap_or(&vec![])
+                        .iter()
+                        .map(|c| c["name"].as_str().unwrap_or("").to_string())
+                        .collect();
+                    let rows: Vec<serde_json::Value> = resp["data"]
+                        .as_array()
+                        .unwrap_or(&vec![])
+                        .iter()
+                        .map(|row| {
+                            let mut obj = serde_json::Map::new();
+                            for (i, col) in cols.iter().enumerate() {
+                                obj.insert(col.clone(), row[i].clone());
+                            }
+                            serde_json::Value::Object(obj)
+                        })
+                        .collect();
+                    let json_str = serde_json::to_string(&rows).unwrap_or_default();
+                    Ok(ok_vm(VMValue::Str(json_str)))
+                }
+                Err(e) => Ok(err_vm(VMValue::Str(e))),
+            }
+        }
+
         "Http.put_raw" => {
             if args.len() != 3 {
                 return Err("Http.put_raw requires 3 arguments".to_string());
@@ -12514,5 +12651,167 @@ mod wasm_phase0_builtin_tests {
             assert!(io_output_suppressed_for_tests());
         }
         assert!(!io_output_suppressed_for_tests());
+    }
+}
+
+// ── v10200_tests (v10.2.0) — Snowflake VM primitives ─────────────────────────
+#[cfg(test)]
+#[cfg(not(target_arch = "wasm32"))]
+mod v10200_tests {
+    use super::{VMValue, vm_call_builtin, snowflake_generate_jwt};
+    use std::collections::HashMap;
+
+    /// 環境変数未設定時に Snowflake.execute_raw が Err("SNOWFLAKE_ACCOUNT is not set") を返す
+    #[test]
+    fn snowflake_execute_raw_missing_env_returns_err() {
+        // Ensure the env var is absent for this test
+        // SAFETY: test-only, no other threads read this env var during this test
+        unsafe { std::env::remove_var("SNOWFLAKE_ACCOUNT") };
+        let mut emit_log = Vec::new();
+        let result = vm_call_builtin(
+            "Snowflake.execute_raw",
+            vec![VMValue::Str("SELECT 1".to_string())],
+            &mut emit_log,
+            None,
+            &HashMap::new(),
+        )
+        .expect("call_builtin should not return Err");
+        match result {
+            VMValue::Variant(tag, inner) => {
+                assert_eq!(tag, "err", "expected err variant, got {}", tag);
+                match inner.as_deref() {
+                    Some(VMValue::Str(msg)) => assert_eq!(
+                        msg, "SNOWFLAKE_ACCOUNT is not set",
+                        "unexpected error message: {}",
+                        msg
+                    ),
+                    other => panic!("unexpected inner value: {:?}", other),
+                }
+            }
+            other => panic!("expected Variant, got {:?}", other),
+        }
+    }
+
+    /// 環境変数未設定時に Snowflake.query_raw が Err("SNOWFLAKE_ACCOUNT is not set") を返す
+    #[test]
+    fn snowflake_query_raw_missing_env_returns_err() {
+        // SAFETY: test-only, no other threads read this env var during this test
+        unsafe { std::env::remove_var("SNOWFLAKE_ACCOUNT") };
+        let mut emit_log = Vec::new();
+        let result = vm_call_builtin(
+            "Snowflake.query_raw",
+            vec![VMValue::Str("SELECT 1".to_string())],
+            &mut emit_log,
+            None,
+            &HashMap::new(),
+        )
+        .expect("call_builtin should not return Err");
+        match result {
+            VMValue::Variant(tag, inner) => {
+                assert_eq!(tag, "err", "expected err variant, got {}", tag);
+                match inner.as_deref() {
+                    Some(VMValue::Str(msg)) => assert_eq!(
+                        msg, "SNOWFLAKE_ACCOUNT is not set",
+                        "unexpected error message: {}",
+                        msg
+                    ),
+                    other => panic!("unexpected inner value: {:?}", other),
+                }
+            }
+            other => panic!("expected Variant, got {:?}", other),
+        }
+    }
+
+    /// snowflake_generate_jwt が well-formed な JWT（3 パート xxx.yyy.zzz）を返す
+    #[test]
+    fn snowflake_jwt_well_formed() {
+        // Test-only RSA PKCS#8 key (not used in production)
+        let test_private_key = "\
+-----BEGIN PRIVATE KEY-----\n\
+MIIEvAIBADANBgkqhkiG9w0BAQEFAASCBKYwggSiAgEAAoIBAQCp7XR5mt2/jst5\n\
+Iv92iejdSHWSpWVlfNvav0Jks5lJluqPMN3RQtOwW/QGpahJ1ogof4/eWIWx36jM\n\
+gOZKm5Sy0hKLEChS2yf4wYbcxk2xqR1baBy9cHOWAxkkukznqm2qP24dhwUaFumz\n\
+Npnrf35XgKvuqF4eGWk2HhgvXmMOb/i/aBMrQ+sBnHJkiVJMsGyioeEhz9ZxyTK2\n\
+4R+lnlboWWkpx8iG9oDKjrhgoKf2KQIwG3vJ5DP9tpMChWo0wltue+oIOeUOdgrB\n\
+jWmn+Tmv0YOFD93FH/SNlobWyl/XT7zVaPfPU5HoSedmMFVckr3TUj1TrGaNlEk6\n\
+H+lAh9W3AgMBAAECggEAAaQqgNYvGB+P9Y6R+xof5qtBf3YbgZxwHy/Du2dErsJH\n\
+Z7SoH9JOayCoPbwx4OyyifmZcSNXvz0Sy07fao8QI54F0dQJH6vAOhXccJt1uqaQ\n\
+gwaBaI8Cfstu3bzy6zXpM0DDloNsWDEqdrGrUOv9U2kJwBdeOVozevNVdnep60TD\n\
+kJWqww7VX1RiqI7jb3QSlbMQxZxSmRYeKF73xLuOyzxH/i1QxOrAQ24gtwL1D/TB\n\
+fSIUrHyb0XrtCdlzjhIBmfc5ySfPwbHFC8r3cejSWnR3dF3PhNg40LU0+3/gmfXJ\n\
+dAG7Zn46ZHfM+iWm0MGrFDCAt6hNybgF6ZEZwhbiaQKBgQDbM5gHZxvMuOWiPKIp\n\
+93WBE5P24fMZUp8Flw9ecA6a9D4M892yeS1o3l3TcqW2ttf4JxLJ4vzlO2KaeXQI\n\
+gsEQOs/7jtXX+XSvwpe2cMqGD+S42nH6rAIrGuTAKd7lxpY1/gccFHbEpshs8zEQ\n\
+WDvtUFqOOoNk5ps0qQZtkrbLRQKBgQDGdEMqnRdc51iWWJ31pEqtXqo8enck5KNn\n\
+kWlbamiyVLvS7P5UPbOWB4iYb+7HoHOjwtaf4LkUfHdZsBlOefe4aFEJapcLQn4F\n\
+1uqvOLE5YIDY44h/v9f1jv695ZiHeh9GN49kvQjuIxiNem1JtHjaRnkjGl1mv7ge\n\
+CM25epluywKBgHXY3SlNs9JyrXJ1qrFpSxEkF26pt2qr0rbMqgSZtiB0o0+PZGdp\n\
+YpJ4ynS9tH3w+1d8mktT76bGMJLgLRPOSEGTfPG/rxQ4FxXPRoVdSmSc8ti3CIQ+\n\
+KcRG5yiw2hcqluNcOTJNhjTffe2lKYGiDkXd53GD39RFbrf3D2+lawUJAoGALN+v\n\
+LFyXIs/BDUX+ecPriuZD8iby9+mnNU0BGMWn5OMaEWi7XYsSJ5OOhIGS6ZrTay0s\n\
+YLxsvUAjsKkMH92ecRlNcaajfs1LN8DQEkzsbf/vQpu4isJzb7gkzAW1hrTLi5IW\n\
+n33LHiXbcGpFegwP47NZwuE8S3aAiHIPKqiZNx8CgYBaAvgw8X3qGUAsJXdRPhss\n\
+VOCZsatM+TkHTQpW0cB1WBFuze7HuqkFpQx/3FfPgYAy1+8pQNQc3pLMfNYYgNPO\n\
+fp/s2Pd9AIZbqesNpT+3klKnED+oxyq7zT9zzfiK1sHvHytnIxQKWAOdnQTfxblw\n\
+/6V76JjLOJAao9hnPCFyZA==\n\
+-----END PRIVATE KEY-----";
+        let test_fp = "h96et+XrQBbK5r4IuPy+81/5pXTVSjZBBX8aW2910GE=";
+
+        let token = snowflake_generate_jwt("myorg-myaccount", "testuser", test_private_key, test_fp)
+            .expect("JWT generation failed");
+
+        // Must be 3-part dot-separated
+        let parts: Vec<&str> = token.split('.').collect();
+        assert_eq!(parts.len(), 3, "JWT must have 3 parts, got: {}", token);
+
+        // Decode and verify claims (skip signature validation for unit test)
+        let mut validation = jsonwebtoken::Validation::new(jsonwebtoken::Algorithm::RS256);
+        validation.insecure_disable_signature_validation();
+        validation.set_required_spec_claims(&["iss", "sub", "iat", "exp"]);
+        let pub_key_pem = openssl_pubkey_from_pem(test_private_key);
+        let decoding_key = jsonwebtoken::DecodingKey::from_rsa_pem(pub_key_pem.as_bytes())
+            .expect("decode key");
+        let data = jsonwebtoken::decode::<serde_json::Value>(&token, &decoding_key, &validation)
+            .expect("decode failed");
+
+        let payload = &data.claims;
+        let iss = payload["iss"].as_str().expect("iss missing");
+        let sub = payload["sub"].as_str().expect("sub missing");
+        assert!(payload["iat"].is_number(), "iat must be a number");
+        assert!(payload["exp"].is_number(), "exp must be a number");
+        assert!(
+            iss.contains("SHA256:"),
+            "iss must contain SHA256: prefix, got: {}",
+            iss
+        );
+        assert_eq!(
+            iss, "MYORG-MYACCOUNT.TESTUSER.SHA256:h96et+XrQBbK5r4IuPy+81/5pXTVSjZBBX8aW2910GE=",
+            "iss mismatch"
+        );
+        assert_eq!(sub, "MYORG-MYACCOUNT.TESTUSER", "sub mismatch");
+        let iat = payload["iat"].as_i64().unwrap();
+        let exp = payload["exp"].as_i64().unwrap();
+        assert_eq!(exp - iat, 3600, "exp should be iat + 3600");
+    }
+
+    /// Extract the RSA public key PEM from a PKCS#8 private key PEM using openssl subprocess
+    fn openssl_pubkey_from_pem(private_key_pem: &str) -> String {
+        use std::io::Write;
+        use std::process::{Command, Stdio};
+        let mut child = Command::new("openssl")
+            .args(["rsa", "-pubout"])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("openssl spawn");
+        child
+            .stdin
+            .as_mut()
+            .unwrap()
+            .write_all(private_key_pem.as_bytes())
+            .unwrap();
+        let output = child.wait_with_output().expect("openssl wait");
+        String::from_utf8(output.stdout).expect("openssl output utf8")
     }
 }

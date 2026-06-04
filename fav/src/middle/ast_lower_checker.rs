@@ -411,8 +411,15 @@ fn lower_type_def(td: &ast::TypeDef) -> Value {
                     let payload = match v {
                         ast::Variant::Unit(_, _) => v0("none"),
                         ast::Variant::Tuple(_, tys, _) => {
-                            let te = tys.first().map(lower_te).unwrap_or_else(|| v1("TeSimple", sv("Unit")));
-                            v1("some", te)
+                            if tys.len() <= 1 {
+                                let te = tys.first().map(lower_te).unwrap_or_else(|| v1("TeSimple", sv("Unit")));
+                                v1("some", te)
+                            } else {
+                                // Multi-field variant: encode all field types as a semicolon-separated
+                                // params string so that infer_call_user counts arity correctly.
+                                let params: Vec<String> = tys.iter().map(te_to_string).collect();
+                                v1("some", v1("TeSimple", sv(&params.join(";"))))
+                            }
                         }
                         ast::Variant::Record(_, fields, _) => {
                             // Encode record variant payload as a record TypeExpr (best-effort)

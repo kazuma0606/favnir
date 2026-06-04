@@ -609,7 +609,11 @@ fn snowflake_fn(fname: String) -> String {
         if fname == "query_raw" {
             "Result"
         } else {
-            "Result"
+            if fname == "infer_table_raw" {
+                "Result"
+            } else {
+                "Result"
+            }
         }
     }
 }

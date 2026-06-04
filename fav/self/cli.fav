@@ -33,6 +33,7 @@ type CliCmd =
   | CmdWatch(String, String)
   | CmdRepl
   | CmdNew(String)
+  | CmdInferSnowflake(String, String)
   | CmdUnknown(String)
 
 // ── Utilities ──────────────────────────────────────────────────────────────────
@@ -82,8 +83,9 @@ fn parse_named_cmd(cmd: String, args: List<String>) -> CliCmd {
     else { if cmd == "watch"     { parse_watch_cmd(args) }
     else { if cmd == "repl"      { CmdRepl }
     else { if cmd == "new"       { parse_new_cmd(args) }
+    else { if cmd == "infer"     { parse_infer_cmd(args) }
     else { CmdUnknown(String.concat("unknown command: ", cmd)) }
-    } } } } } } } } } } } } }
+    } } } } } } } } } } } } } }
 }
 
 fn parse_fmt_cmd(args: List<String>) -> CliCmd {
@@ -162,6 +164,22 @@ fn parse_new_cmd(args: List<String>) -> CliCmd {
     }
 }
 
+fn parse_infer_cmd(args: List<String>) -> CliCmd {
+    bind rest  <- List.drop(args, 1)
+    bind from  <- find_flag_value(rest, "--from", "")
+    bind table <- find_flag_value(rest, "--table", "")
+    bind out   <- find_flag_value(rest, "--out", "")
+    if from == "snowflake" {
+        if table == "" {
+            CmdUnknown("infer --from snowflake requires --table <name>")
+        } else {
+            CmdInferSnowflake(table, out)
+        }
+    } else {
+        CmdUnknown("infer: use --from snowflake --table <name>")
+    }
+}
+
 fn parse_check_cmd(args: List<String>) -> CliCmd {
     match List.first(List.drop(args, 1)) {
         None    => CmdUnknown("check requires a file argument")
@@ -204,7 +222,7 @@ fn parse_rune_sub(sub: String, args: List<String>) -> CliCmd {
 // ── Action handlers ────────────────────────────────────────────────────────────
 
 fn run_version() -> Unit !IO {
-    IO.println("favnir 10.7.0 (self-host CLI)")
+    IO.println("favnir 10.8.0 (self-host CLI)")
 }
 
 fn run_help() -> Unit !IO {
@@ -222,6 +240,7 @@ fn run_help() -> Unit !IO {
     bind _ <- IO.println("  profile <file> [--out table|json]  Profile stage execution times")
     bind _ <- IO.println("  watch [--check|--test] <file>  Watch file and auto re-run on change")
     bind _ <- IO.println("  repl                          Start interactive REPL")
+    bind _ <- IO.println("  infer --from snowflake --table <name> [--out <file>]  Infer Favnir type from Snowflake table")
     bind _ <- IO.println("  version                       Show version")
     IO.println("  help                          Show this help")
 }
@@ -487,6 +506,27 @@ fn run_new(name: String) -> Unit !IO = {
     }
 }
 
+fn run_infer_snowflake(table: String, out: String) -> Unit !Snowflake !IO {
+    match Snowflake.infer_table_raw(table) {
+        Err(e) => {
+            bind _ <- IO.write_stderr_raw(String.concat("error: ", e))
+            IO.exit_raw(1)
+        }
+        Ok(typedef) =>
+            if out == "" {
+                IO.println(typedef)
+            } else {
+                match IO.write_file_raw(out, typedef) {
+                    Err(e) => {
+                        bind _ <- IO.write_stderr_raw(String.concat("error: cannot write: ", e))
+                        IO.exit_raw(1)
+                    }
+                    Ok(_) => IO.println(String.concat("written: ", out))
+                }
+            }
+    }
+}
+
 // ── Entry point ────────────────────────────────────────────────────────────────
 
 public fn main() -> Unit !IO {
@@ -506,6 +546,7 @@ public fn main() -> Unit !IO {
         CmdWatch(parts)        => run_watch(parts._0, parts._1)
         CmdRepl                => IO.println("Use 'fav repl' to start the REPL.")
         CmdNew(name)           => run_new(name)
+        CmdInferSnowflake(parts) => run_infer_snowflake(parts._0, parts._1)
         CmdUnknown(msg)        => {
             bind _ <- IO.write_stderr_raw(String.concat("error: ", msg))
             IO.exit_raw(1)

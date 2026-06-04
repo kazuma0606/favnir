@@ -3837,6 +3837,95 @@ fn write_infer_multi_output(defs: &[InferredTypeDef], out: Option<&str>) {
     }
 }
 
+// ── Snowflake schema inference (v10.8.0) ─────────────────────────────────────
+
+fn snowflake_col_type_to_favnir(col_type: &str, nullable: bool) -> InferredType {
+    let base = match col_type.to_uppercase().as_str() {
+        "NUMBER" | "DECIMAL" | "NUMERIC"
+        | "INT" | "INTEGER" | "BIGINT" | "SMALLINT" | "TINYINT" | "BYTEINT" => InferredType::Int,
+        "FLOAT" | "FLOAT4" | "FLOAT8" | "DOUBLE" | "REAL" => InferredType::Float,
+        "BOOLEAN" => InferredType::Bool,
+        _ => InferredType::FavString,
+    };
+    if nullable {
+        InferredType::Option(Box::new(base))
+    } else {
+        base
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn snowflake_infer_table(table: &str) -> Result<String, String> {
+    use crate::backend::vm::{snowflake_api_post, snowflake_generate_jwt, snowflake_read_env};
+    let account   = snowflake_read_env("SNOWFLAKE_ACCOUNT")?;
+    let user      = snowflake_read_env("SNOWFLAKE_USER")?;
+    let privkey   = snowflake_read_env("SNOWFLAKE_PRIVATE_KEY")?;
+    let pubkey_fp = snowflake_read_env("SNOWFLAKE_PUBLIC_KEY_FP")?;
+    let jwt = snowflake_generate_jwt(&account, &user, &privkey, &pubkey_fp)?;
+    let sql = format!(
+        "SELECT COLUMN_NAME, DATA_TYPE, IS_NULLABLE \
+         FROM INFORMATION_SCHEMA.COLUMNS \
+         WHERE TABLE_NAME = '{}' \
+         ORDER BY ORDINAL_POSITION",
+        table.to_uppercase()
+    );
+    let body = serde_json::json!({ "statement": sql, "timeout": 60 });
+    let resp = snowflake_api_post(&account, &jwt, &body)?;
+    let empty_vec = vec![];
+    let cols: Vec<String> = resp["resultSetMetaData"]["rowType"]
+        .as_array()
+        .unwrap_or(&empty_vec)
+        .iter()
+        .map(|c| c["name"].as_str().unwrap_or("").to_string())
+        .collect();
+    let rows_data: Vec<Vec<String>> = resp["data"]
+        .as_array()
+        .unwrap_or(&empty_vec)
+        .iter()
+        .map(|row| {
+            row.as_array()
+                .unwrap_or(&empty_vec)
+                .iter()
+                .map(|v| v.as_str().unwrap_or("").to_string())
+                .collect()
+        })
+        .collect();
+    let col_idx = |name: &str| cols.iter().position(|c| c == name).unwrap_or(usize::MAX);
+    let name_idx     = col_idx("COLUMN_NAME");
+    let type_idx     = col_idx("DATA_TYPE");
+    let nullable_idx = col_idx("IS_NULLABLE");
+    let type_name = table_name_to_type_name(table);
+    let source = format!("--from snowflake --table {}", table.to_uppercase());
+    let fields: Vec<InferredField> = rows_data
+        .iter()
+        .map(|row| {
+            let col_name    = row.get(name_idx).cloned().unwrap_or_default().to_lowercase();
+            let col_type    = row.get(type_idx).cloned().unwrap_or_default();
+            let nullable_s  = row.get(nullable_idx).cloned().unwrap_or_default();
+            let nullable    = matches!(nullable_s.to_uppercase().as_str(), "YES" | "Y");
+            InferredField { name: col_name, ty: snowflake_col_type_to_favnir(&col_type, nullable) }
+        })
+        .collect();
+    let def = InferredTypeDef { name: type_name, fields, source };
+    Ok(format_type_def(&def))
+}
+
+pub fn cmd_infer_snowflake(table: &str, out_path: Option<&str>) {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let output = snowflake_infer_table(table).unwrap_or_else(|e| {
+            eprintln!("error: {}", e);
+            process::exit(1);
+        });
+        write_infer_output(&output, out_path);
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        let _ = (table, out_path);
+        eprintln!("error: Snowflake infer is not supported in WASM");
+    }
+}
+
 pub fn cmd_infer(
     csv_path: Option<&str>,
     db_conn: Option<&str>,
@@ -20126,6 +20215,50 @@ seq Pipeline = RunQuery
         let report = lineage_analysis(&prog);
         let text = crate::lineage::render_lineage_text(&report, "test");
         assert!(text.contains("!Snowflake"), "expected !Snowflake in lineage: {}", text);
+    }
+}
+
+// ── v10800_tests (v10.8.0) — Snowflake type mapping ──────────────────────────
+#[cfg(test)]
+mod v10800_tests {
+    use super::{snowflake_col_type_to_favnir, format_inferred_type, InferredType};
+
+    #[test]
+    fn snowflake_number_maps_to_int() {
+        assert_eq!(format_inferred_type(&snowflake_col_type_to_favnir("NUMBER", false)), "Int");
+        assert_eq!(format_inferred_type(&snowflake_col_type_to_favnir("INTEGER", false)), "Int");
+        assert_eq!(format_inferred_type(&snowflake_col_type_to_favnir("BIGINT", false)), "Int");
+    }
+
+    #[test]
+    fn snowflake_float_maps_to_float() {
+        assert_eq!(format_inferred_type(&snowflake_col_type_to_favnir("FLOAT", false)), "Float");
+        assert_eq!(format_inferred_type(&snowflake_col_type_to_favnir("DOUBLE", false)), "Float");
+    }
+
+    #[test]
+    fn snowflake_varchar_maps_to_string() {
+        assert_eq!(format_inferred_type(&snowflake_col_type_to_favnir("VARCHAR", false)), "String");
+        assert_eq!(format_inferred_type(&snowflake_col_type_to_favnir("TEXT", false)), "String");
+    }
+
+    #[test]
+    fn snowflake_boolean_maps_to_bool() {
+        assert_eq!(format_inferred_type(&snowflake_col_type_to_favnir("BOOLEAN", false)), "Bool");
+    }
+
+    #[test]
+    fn snowflake_timestamp_maps_to_string() {
+        assert_eq!(format_inferred_type(&snowflake_col_type_to_favnir("TIMESTAMP_NTZ", false)), "String");
+        assert_eq!(format_inferred_type(&snowflake_col_type_to_favnir("DATE", false)), "String");
+    }
+
+    #[test]
+    fn snowflake_nullable_wraps_option() {
+        let ty = snowflake_col_type_to_favnir("NUMBER", true);
+        assert_eq!(format_inferred_type(&ty), "Option<Int>");
+        let ty2 = snowflake_col_type_to_favnir("VARCHAR", true);
+        assert_eq!(format_inferred_type(&ty2), "Option<String>");
     }
 }
 

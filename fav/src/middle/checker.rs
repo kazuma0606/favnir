@@ -5427,6 +5427,13 @@ impl Checker {
                     Box::new(Type::String),
                 ))
             }
+            ("Snowflake", "infer_table_raw") => {
+                self.require_snowflake_effect(span);
+                Some(Type::Result(
+                    Box::new(Type::String),
+                    Box::new(Type::String),
+                ))
+            }
 
             ("Grpc", "serve_raw") => {
                 self.require_rpc_effect(span);

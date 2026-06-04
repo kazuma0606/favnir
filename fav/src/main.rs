@@ -68,7 +68,8 @@ use driver::{
     cmd_db_migrate, cmd_db_migrate_rollback, cmd_db_migrate_status, cmd_deploy, cmd_doc, cmd_docs,
     cmd_exec, cmd_explain, cmd_explain_compiler, cmd_explain_diff, cmd_explain_error,
     cmd_explain_error_list, cmd_explain_error_list_json, cmd_explain_lineage, cmd_fmt, cmd_graph,
-    cmd_infer, cmd_infer_proto, cmd_install, cmd_lint, cmd_migrate, cmd_new, cmd_profile,
+    cmd_infer, cmd_infer_proto, cmd_infer_snowflake, cmd_install, cmd_lint, cmd_migrate, cmd_new,
+    cmd_profile,
     cmd_publish, cmd_registry, cmd_repl, cmd_run, cmd_test, cmd_watch,
 };
 use rune_cmd::cmd_rune;
@@ -1020,6 +1021,7 @@ fn main_impl() {
             let mut db_conn: Option<String> = None;
             let mut out_path: Option<String> = None;
             let mut type_name: Option<String> = None;
+            let mut from_source: Option<String> = None;
             let mut i = 2usize;
             while i < args.len() {
                 match args[i].as_str() {
@@ -1067,6 +1069,28 @@ fn main_impl() {
                         );
                         i += 2;
                     }
+                    "--from" => {
+                        from_source = Some(
+                            args.get(i + 1)
+                                .unwrap_or_else(|| {
+                                    eprintln!("error: --from requires a source name");
+                                    process::exit(1);
+                                })
+                                .clone(),
+                        );
+                        i += 2;
+                    }
+                    "--table" => {
+                        table_name = Some(
+                            args.get(i + 1)
+                                .unwrap_or_else(|| {
+                                    eprintln!("error: --table requires a table name");
+                                    process::exit(1);
+                                })
+                                .clone(),
+                        );
+                        i += 2;
+                    }
                     other => {
                         // First positional: csv_path (or table if --db already set)
                         if db_conn.is_some() && csv_path.is_none() {
@@ -1080,6 +1104,14 @@ fn main_impl() {
             }
             if let Some(proto_path) = proto_path {
                 cmd_infer_proto(&proto_path, out_path.as_deref());
+                return;
+            }
+            if from_source.as_deref() == Some("snowflake") {
+                let table = table_name.as_deref().unwrap_or_else(|| {
+                    eprintln!("error: --from snowflake requires --table <name>");
+                    process::exit(1);
+                });
+                cmd_infer_snowflake(table, out_path.as_deref());
                 return;
             }
             cmd_infer(

@@ -90,6 +90,18 @@ pub struct AwsTomlConfig {
     pub profile: Option<String>,
 }
 
+// ── Snowflake config (v10.7.0) ────────────────────────────────────────────────
+
+#[derive(Debug, Clone)]
+pub struct SnowflakeTomlConfig {
+    pub account:   Option<String>,
+    pub user:      Option<String>,
+    pub warehouse: Option<String>,
+    pub role:      Option<String>,
+    pub database:  Option<String>,
+    pub schema:    Option<String>,
+}
+
 // ── Deploy config (v4.11.0) ───────────────────────────────────────────────────
 
 #[derive(Debug, Clone)]
@@ -147,6 +159,8 @@ pub struct FavToml {
     pub aws: Option<AwsTomlConfig>,
     /// Optional deploy configuration (v4.11.0).
     pub deploy: Option<DeployConfig>,
+    /// Optional Snowflake configuration (v10.7.0).
+    pub snowflake: Option<SnowflakeTomlConfig>,
 }
 
 impl FavToml {
@@ -198,6 +212,7 @@ fn parse_fav_toml(content: &str) -> FavToml {
     let mut env_cfg: Option<EnvConfig> = None;
     let mut aws_cfg: Option<AwsTomlConfig> = None;
     let mut deploy_cfg: Option<DeployConfig> = None;
+    let mut snowflake_cfg: Option<SnowflakeTomlConfig> = None;
     let mut section = "";
 
     for line in content.lines() {
@@ -243,6 +258,10 @@ fn parse_fav_toml(content: &str) -> FavToml {
         }
         if trimmed == "[deploy]" || trimmed == "[[deploy.env]]" {
             section = "deploy";
+            continue;
+        }
+        if trimmed == "[snowflake]" {
+            section = "snowflake";
             continue;
         }
         if trimmed.starts_with('[') {
@@ -371,6 +390,28 @@ fn parse_fav_toml(content: &str) -> FavToml {
                 }
                 deploy_cfg = Some(current);
             }
+            "snowflake" => {
+                let mut current = snowflake_cfg.take().unwrap_or(SnowflakeTomlConfig {
+                    account:   None,
+                    user:      None,
+                    warehouse: None,
+                    role:      None,
+                    database:  None,
+                    schema:    None,
+                });
+                if let Some((key, val)) = parse_kv(trimmed) {
+                    match key {
+                        "account"   => current.account   = Some(val.to_string()),
+                        "user"      => current.user      = Some(val.to_string()),
+                        "warehouse" => current.warehouse = Some(val.to_string()),
+                        "role"      => current.role      = Some(val.to_string()),
+                        "database"  => current.database  = Some(val.to_string()),
+                        "schema"    => current.schema    = Some(val.to_string()),
+                        _ => {}
+                    }
+                }
+                snowflake_cfg = Some(current);
+            }
             _ => {}
         }
     }
@@ -391,6 +432,7 @@ fn parse_fav_toml(content: &str) -> FavToml {
         env: env_cfg,
         aws: aws_cfg,
         deploy: deploy_cfg,
+        snowflake: snowflake_cfg,
     }
 }
 
@@ -442,6 +484,27 @@ fn parse_dep_line(line: &str) -> Option<DependencySpec> {
     } else {
         None
     }
+}
+
+/// Expand `${VAR_NAME}` references using environment variables.
+/// Unset variables are replaced with an empty string.
+pub fn expand_env_vars(s: &str) -> String {
+    let mut result = String::new();
+    let mut rest = s;
+    while let Some(start) = rest.find("${") {
+        result.push_str(&rest[..start]);
+        let after = &rest[start + 2..];
+        if let Some(end) = after.find('}') {
+            let var_name = &after[..end];
+            result.push_str(&std::env::var(var_name).unwrap_or_default());
+            rest = &after[end + 1..];
+        } else {
+            result.push_str("${");
+            rest = after;
+        }
+    }
+    result.push_str(rest);
+    result
 }
 
 /// Parse `key = "value"` or `key = value` (unquoted).
@@ -653,6 +716,29 @@ libB = { registry = "local", version = "2.0.0" }
         // No rune.toml
         let result = rune_entry_file(&rune_dir, "csv");
         assert_eq!(result, rune_dir.join("csv.fav"));
+    }
+
+    #[test]
+    fn toml_snowflake_section_parsed() {
+        let t = parse(
+            "[rune]\nname = \"app\"\nversion = \"1.0.0\"\n\
+             [snowflake]\naccount = \"myaccount\"\nuser = \"myuser\"\nwarehouse = \"WH\"\ndatabase = \"DB\"\n",
+        );
+        let sf = t.snowflake.expect("snowflake config");
+        assert_eq!(sf.account.as_deref(),   Some("myaccount"));
+        assert_eq!(sf.user.as_deref(),      Some("myuser"));
+        assert_eq!(sf.warehouse.as_deref(), Some("WH"));
+        assert_eq!(sf.database.as_deref(),  Some("DB"));
+        assert!(sf.role.is_none());
+        assert!(sf.schema.is_none());
+    }
+
+    #[test]
+    fn toml_snowflake_env_var_expanded() {
+        unsafe { std::env::set_var("TEST_SF_ACCT_10700", "myaccount"); }
+        let expanded = expand_env_vars("${TEST_SF_ACCT_10700}.snowflakecomputing.com");
+        assert_eq!(expanded, "myaccount.snowflakecomputing.com");
+        unsafe { std::env::remove_var("TEST_SF_ACCT_10700"); }
     }
 
     #[test]

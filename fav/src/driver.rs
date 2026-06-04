@@ -224,9 +224,35 @@ fn write_text_file(path: &Path, contents: &str) -> Result<(), String> {
     std::fs::write(path, contents).map_err(|e| format!("cannot write `{}`: {}", path.display(), e))
 }
 
+fn inject_snowflake_config(cfg: &crate::toml::SnowflakeTomlConfig) {
+    use crate::toml::expand_env_vars;
+    let pairs: &[(&str, Option<&str>)] = &[
+        ("SNOWFLAKE_ACCOUNT",   cfg.account.as_deref()),
+        ("SNOWFLAKE_USER",      cfg.user.as_deref()),
+        ("SNOWFLAKE_WAREHOUSE", cfg.warehouse.as_deref()),
+        ("SNOWFLAKE_ROLE",      cfg.role.as_deref()),
+        ("SNOWFLAKE_DATABASE",  cfg.database.as_deref()),
+        ("SNOWFLAKE_SCHEMA",    cfg.schema.as_deref()),
+    ];
+    for (key, val) in pairs {
+        if let Some(v) = val {
+            if std::env::var(key).is_err() {
+                // SAFETY: called before VM starts; single-threaded at this point
+                unsafe { std::env::set_var(key, expand_env_vars(v)); }
+            }
+        }
+    }
+}
+
 fn default_fav_toml(name: &str) -> String {
     format!(
-        "[project]\nname    = \"{name}\"\nversion = \"0.1.0\"\nedition = \"2026\"\nsrc     = \"src\"\n"
+        "[project]\nname    = \"{name}\"\nversion = \"0.1.0\"\nedition = \"2026\"\nsrc     = \"src\"\n\n\
+         # [snowflake]\n\
+         # account   = \"${{SNOWFLAKE_ACCOUNT}}\"\n\
+         # user      = \"${{SNOWFLAKE_USER}}\"\n\
+         # warehouse = \"COMPUTE_WH\"\n\
+         # database  = \"MY_DB\"\n\
+         # schema    = \"PUBLIC\"\n"
     )
 }
 
@@ -744,6 +770,11 @@ fn run_with_favnir_pipeline_project(
     toml: &crate::toml::FavToml,
     db_url: Option<&str>,
 ) {
+    // Inject fav.toml [snowflake] settings as env vars (v10.7.0)
+    if let Some(sf_cfg) = &toml.snowflake {
+        inject_snowflake_config(sf_cfg);
+    }
+
     // 1. Collect and merge all project sources
     let merged =
         crate::compiler_fav_runner::collect_project_merged(source_path, root, toml)
@@ -827,6 +858,10 @@ fn load_run_config(file: Option<&str>) {
                     }
                 }
                 set_aws_config(aws_cfg);
+                // Inject [snowflake] settings as env vars (v10.7.0)
+                if let Some(sf_cfg) = toml.snowflake.as_ref() {
+                    inject_snowflake_config(sf_cfg);
+                }
             }
         }
     }
@@ -2734,6 +2769,7 @@ fn try_cmd_check_dir(dir: &Path) -> Result<(), usize> {
         env: None,
         aws: None,
         deploy: None,
+        snowflake: None,
     });
     let files = collect_fav_files_recursive(dir);
     let resolver = make_resolver(Some(toml), Some(root));
@@ -20090,6 +20126,51 @@ seq Pipeline = RunQuery
         let report = lineage_analysis(&prog);
         let text = crate::lineage::render_lineage_text(&report, "test");
         assert!(text.contains("!Snowflake"), "expected !Snowflake in lineage: {}", text);
+    }
+}
+
+// ── v10700_tests (v10.7.0) — fav.toml [snowflake] inject ─────────────────────
+#[cfg(test)]
+mod v10700_tests {
+    use crate::toml::SnowflakeTomlConfig;
+
+    #[test]
+    fn toml_snowflake_inject_sets_env_vars() {
+        unsafe { std::env::remove_var("SNOWFLAKE_WAREHOUSE"); }
+        let cfg = SnowflakeTomlConfig {
+            account:   None,
+            user:      None,
+            warehouse: Some("TEST_WH_10700".to_string()),
+            role:      None,
+            database:  None,
+            schema:    None,
+        };
+        super::inject_snowflake_config(&cfg);
+        assert_eq!(
+            std::env::var("SNOWFLAKE_WAREHOUSE").ok(),
+            Some("TEST_WH_10700".to_string()),
+        );
+        unsafe { std::env::remove_var("SNOWFLAKE_WAREHOUSE"); }
+    }
+
+    #[test]
+    fn toml_snowflake_inject_does_not_overwrite_existing_env() {
+        unsafe { std::env::set_var("SNOWFLAKE_ROLE", "EXISTING_ROLE"); }
+        let cfg = SnowflakeTomlConfig {
+            account:   None,
+            user:      None,
+            warehouse: None,
+            role:      Some("NEW_ROLE".to_string()),
+            database:  None,
+            schema:    None,
+        };
+        super::inject_snowflake_config(&cfg);
+        assert_eq!(
+            std::env::var("SNOWFLAKE_ROLE").ok(),
+            Some("EXISTING_ROLE".to_string()),
+            "should not overwrite existing SNOWFLAKE_ROLE",
+        );
+        unsafe { std::env::remove_var("SNOWFLAKE_ROLE"); }
     }
 }
 

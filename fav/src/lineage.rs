@@ -253,6 +253,150 @@ fn collect_sql_literals_stmt(stmt: &ast::Stmt, out: &mut Vec<String>) {
     }
 }
 
+// ── Snowflake read/write classification ───────────────────────────────────────
+
+fn is_snowflake_read_method(name: &str) -> bool {
+    name == "query" || name == "query_raw"
+}
+
+fn is_snowflake_write_method(name: &str) -> bool {
+    name == "execute" || name == "execute_raw"
+}
+
+/// Walk an expression tree and return `(has_read, has_write)` for Snowflake calls.
+/// - `snowflake.query(...)` / `snowflake.query_raw(...)`   → has_read
+/// - `snowflake.execute(...)` / `snowflake.execute_raw(...)` → has_write
+pub fn collect_snowflake_call_kinds(expr: &ast::Expr) -> (bool, bool) {
+    let mut has_read = false;
+    let mut has_write = false;
+    collect_sf_kinds_inner(expr, &mut has_read, &mut has_write);
+    (has_read, has_write)
+}
+
+fn collect_sf_kinds_inner(expr: &ast::Expr, r: &mut bool, w: &mut bool) {
+    match expr {
+        ast::Expr::Apply(func, args, _) => {
+            if let ast::Expr::FieldAccess(obj, method, _) = func.as_ref() {
+                let is_sf = matches!(
+                    obj.as_ref(),
+                    ast::Expr::Ident(n, _) if n == "snowflake" || n == "Snowflake"
+                );
+                if is_sf {
+                    if is_snowflake_read_method(method) {
+                        *r = true;
+                    }
+                    if is_snowflake_write_method(method) {
+                        *w = true;
+                    }
+                }
+            }
+            for a in args {
+                collect_sf_kinds_inner(a, r, w);
+            }
+            collect_sf_kinds_inner(func, r, w);
+        }
+        ast::Expr::Block(blk) => {
+            for s in &blk.stmts {
+                collect_sf_kinds_stmt(s, r, w);
+            }
+            collect_sf_kinds_inner(&blk.expr, r, w);
+        }
+        ast::Expr::If(cond, then_blk, else_blk, _) => {
+            collect_sf_kinds_inner(cond, r, w);
+            for s in &then_blk.stmts {
+                collect_sf_kinds_stmt(s, r, w);
+            }
+            collect_sf_kinds_inner(&then_blk.expr, r, w);
+            if let Some(b) = else_blk {
+                for s in &b.stmts {
+                    collect_sf_kinds_stmt(s, r, w);
+                }
+                collect_sf_kinds_inner(&b.expr, r, w);
+            }
+        }
+        ast::Expr::Match(scrutinee, arms, _) => {
+            collect_sf_kinds_inner(scrutinee, r, w);
+            for arm in arms {
+                collect_sf_kinds_inner(&arm.body, r, w);
+            }
+        }
+        ast::Expr::Pipeline(exprs, _) => {
+            for e in exprs {
+                collect_sf_kinds_inner(e, r, w);
+            }
+        }
+        ast::Expr::Closure(_, body, _) => {
+            collect_sf_kinds_inner(body, r, w);
+        }
+        ast::Expr::Collect(blk, _) => {
+            for s in &blk.stmts {
+                collect_sf_kinds_stmt(s, r, w);
+            }
+            collect_sf_kinds_inner(&blk.expr, r, w);
+        }
+        ast::Expr::BinOp(_, l, r2, _) => {
+            collect_sf_kinds_inner(l, r, w);
+            collect_sf_kinds_inner(r2, r, w);
+        }
+        ast::Expr::FieldAccess(obj, _, _) | ast::Expr::TypeApply(obj, _, _) => {
+            collect_sf_kinds_inner(obj, r, w);
+        }
+        ast::Expr::RecordConstruct(_, fields, _) => {
+            for (_, v) in fields {
+                collect_sf_kinds_inner(v, r, w);
+            }
+        }
+        ast::Expr::EmitExpr(e, _)
+        | ast::Expr::AssertMatches(e, _, _)
+        | ast::Expr::Question(e, _) => {
+            collect_sf_kinds_inner(e, r, w);
+        }
+        ast::Expr::Lit(_, _) | ast::Expr::Ident(_, _) | ast::Expr::FString(_, _) => {}
+    }
+}
+
+fn collect_sf_kinds_stmt(stmt: &ast::Stmt, r: &mut bool, w: &mut bool) {
+    match stmt {
+        ast::Stmt::Bind(b) => collect_sf_kinds_inner(&b.expr, r, w),
+        ast::Stmt::Expr(e) => collect_sf_kinds_inner(e, r, w),
+        ast::Stmt::Chain(c) => collect_sf_kinds_inner(&c.expr, r, w),
+        ast::Stmt::Yield(y) => collect_sf_kinds_inner(&y.expr, r, w),
+        ast::Stmt::ForIn(f) => {
+            collect_sf_kinds_inner(&f.iter, r, w);
+            for s in &f.body.stmts {
+                collect_sf_kinds_stmt(s, r, w);
+            }
+            collect_sf_kinds_inner(&f.body.expr, r, w);
+        }
+    }
+}
+
+/// Given a stage/fn effect list and its body, produce the final effects string list,
+/// replacing `!Snowflake` with `!Snowflake(read)` / `!Snowflake(write)` where possible.
+fn snowflake_effects(
+    effects: &[ast::Effect],
+    sf_read: bool,
+    sf_write: bool,
+) -> Vec<String> {
+    effects
+        .iter()
+        .flat_map(|e| {
+            if matches!(e, ast::Effect::Snowflake) && (sf_read || sf_write) {
+                let mut v = Vec::new();
+                if sf_read {
+                    v.push("!Snowflake(read)".to_string());
+                }
+                if sf_write {
+                    v.push("!Snowflake(write)".to_string());
+                }
+                v
+            } else {
+                vec![format_effects(std::slice::from_ref(e))]
+            }
+        })
+        .collect()
+}
+
 // ── public API ────────────────────────────────────────────────────────────────
 
 /// Analyse a parsed program and build a `LineageReport`.
@@ -285,14 +429,23 @@ pub fn lineage_analysis(program: &ast::Program) -> LineageReport {
             if sinks.is_empty() && has_write {
                 sinks.push(format!("({}:db-write)", trf.name));
             }
+            // Snowflake read/write classification
+            let has_snowflake = trf.effects.iter().any(|e| matches!(e, ast::Effect::Snowflake));
+            let (sf_read, sf_write) = if has_snowflake {
+                collect_snowflake_call_kinds(&ast::Expr::Block(Box::new(trf.body.clone())))
+            } else {
+                (false, false)
+            };
+            if sf_read {
+                sources.push(format!("({}:snowflake-read)", trf.name));
+            }
+            if sf_write {
+                sinks.push(format!("({}:snowflake-write)", trf.name));
+            }
             transformations.push(LineageEntry {
                 name: trf.name.clone(),
                 kind: "stage".into(),
-                effects: trf
-                    .effects
-                    .iter()
-                    .map(|e| format_effects(std::slice::from_ref(e)))
-                    .collect(),
+                effects: snowflake_effects(&trf.effects, sf_read, sf_write),
                 sources,
                 sinks,
             });
@@ -321,15 +474,24 @@ pub fn lineage_analysis(program: &ast::Program) -> LineageReport {
             if sinks.is_empty() && has_write {
                 sinks.push(format!("({}:db-write)", fndef.name));
             }
+            // Snowflake read/write classification
+            let has_snowflake = fndef.effects.iter().any(|e| matches!(e, ast::Effect::Snowflake));
+            let (sf_read, sf_write) = if has_snowflake {
+                collect_snowflake_call_kinds(&ast::Expr::Block(Box::new(fndef.body.clone())))
+            } else {
+                (false, false)
+            };
+            if sf_read {
+                sources.push(format!("({}:snowflake-read)", fndef.name));
+            }
+            if sf_write {
+                sinks.push(format!("({}:snowflake-write)", fndef.name));
+            }
             if !fndef.effects.is_empty() {
                 transformations.push(LineageEntry {
                     name: fndef.name.clone(),
                     kind: "fn".into(),
-                    effects: fndef
-                        .effects
-                        .iter()
-                        .map(|e| format_effects(std::slice::from_ref(e)))
-                        .collect(),
+                    effects: snowflake_effects(&fndef.effects, sf_read, sf_write),
                     sources,
                     sinks,
                 });
@@ -477,4 +639,80 @@ pub fn render_lineage_text(report: &LineageReport, filename: &str) -> String {
 /// Render lineage as JSON.
 pub fn render_lineage_json(report: &LineageReport) -> String {
     serde_json::to_string_pretty(report).unwrap_or_else(|_| "{}".into())
+}
+
+// ── v11000_tests (v11.0.0) — Snowflake lineage read/write distinction ─────────
+#[cfg(test)]
+mod v11000_tests {
+    use super::lineage_analysis;
+    use crate::frontend::parser::Parser;
+
+    #[test]
+    fn lineage_snowflake_write_stage_shows_write_label() {
+        let src = r#"
+stage Insert: List<String> -> Int !Snowflake = |rows| {
+  snowflake.execute("INSERT INTO T VALUES (?)")
+}
+"#;
+        let prog = Parser::parse_str(src, "test.fav").expect("parse failed");
+        let report = lineage_analysis(&prog);
+        let entry = report
+            .transformations
+            .iter()
+            .find(|e| e.name == "Insert")
+            .expect("Insert not found");
+        assert!(
+            entry.effects.contains(&"!Snowflake(write)".to_string()),
+            "expected !Snowflake(write) in effects, got: {:?}",
+            entry.effects
+        );
+        assert!(
+            entry.sinks.iter().any(|s| s.contains("snowflake-write")),
+            "expected snowflake-write in sinks"
+        );
+    }
+
+    #[test]
+    fn lineage_snowflake_read_stage_shows_read_label() {
+        let src = r#"
+stage Query: String -> List<String> !Snowflake = |sql| {
+  snowflake.query(sql)
+}
+"#;
+        let prog = Parser::parse_str(src, "test.fav").expect("parse failed");
+        let report = lineage_analysis(&prog);
+        let entry = report
+            .transformations
+            .iter()
+            .find(|e| e.name == "Query")
+            .expect("Query not found");
+        assert!(
+            entry.effects.contains(&"!Snowflake(read)".to_string()),
+            "expected !Snowflake(read) in effects, got: {:?}",
+            entry.effects
+        );
+        assert!(
+            entry.sources.iter().any(|s| s.contains("snowflake-read")),
+            "expected snowflake-read in sources"
+        );
+    }
+
+    #[test]
+    fn lineage_snowflake_undistinguished_falls_back() {
+        let src = r#"
+stage Sf: String -> String !Snowflake = |x| { x }
+"#;
+        let prog = Parser::parse_str(src, "test.fav").expect("parse failed");
+        let report = lineage_analysis(&prog);
+        let entry = report
+            .transformations
+            .iter()
+            .find(|e| e.name == "Sf")
+            .expect("Sf not found");
+        assert!(
+            entry.effects.contains(&"!Snowflake".to_string()),
+            "expected !Snowflake fallback in effects, got: {:?}",
+            entry.effects
+        );
+    }
 }

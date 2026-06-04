@@ -97,6 +97,7 @@ seq UserImport = ParseCsv |> ValidateRow |> SaveToDb
 | **Rune エコシステム** | AWS / DuckDB / SQL / DB / fs / Parquet | ✓ |
 | | http / grpc / graphql（`!Http` エフェクト） | ✓ |
 | | llm（`!Llm` エフェクト、Claude / OpenAI） | ✓ |
+| | snowflake（`!Snowflake` エフェクト） | ✓ |
 | | json / csv / gen（uuid / uuid_v7 / nano_id） | ✓ |
 | | slack / queue / cache / email / auth / log | ✓ |
 | **開発体験** | LSP（hover・diagnostics・補完・go-to-definition） | ✓ |
@@ -241,7 +242,8 @@ fav explain --lineage pipeline.fav  # リネージ可視化
 | v9.9.0〜v9.11.0 | `fav profile`・`fav watch`・`fav repl`・LSP 補完強化 | 完了 |
 | v9.12.0〜v9.13.0 | `interface`/`impl` セルフホスト・`par` 並列実行 | 完了 |
 | **v10.0.0** | **OSS 公開準備完了**（`fav new`・CI self-check・CONTRIBUTING/CHANGELOG） | **完了** |
-| v10.x | サイトドキュメント更新・Playground 改善・macOS CI | 予定 |
+| v10.1.0〜v10.9.0 | Snowflake ネイティブ対応（インフラ〜E2E デモ） | 完了 |
+| **v11.0.0** | **Snowflake 統合完成宣言**・リネージ可視化・サイトドキュメント | **完了** |
 
 ---
 

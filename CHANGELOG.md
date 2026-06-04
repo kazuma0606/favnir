@@ -4,6 +4,125 @@ Favnir のバージョン履歴。形式は [Keep a Changelog](https://keepachan
 
 ---
 
+## [v11.0.0] — 2026-06-05
+
+### Added
+- `fav explain --lineage` で `!Snowflake(read)` / `!Snowflake(write)` を区別表示（`lineage.rs` `collect_snowflake_call_kinds`）
+- `site/content/docs/runes/snowflake.mdx` — Snowflake Rune リファレンスページ
+
+### Changed
+- README.md の Rune エコシステム表に `snowflake`（`!Snowflake` エフェクト）を追加
+- CHANGELOG に v10.1.0〜v10.9.0 の全履歴を追記
+
+### Notes
+- テスト: 1286 件（lineage Snowflake 区別テスト 3 件追加）
+
+---
+
+## [v10.9.0] — 2026-06-05
+
+### Added
+- `infra/e2e-demo/snowflake/` — Snowflake E2E デモ（demo.fav 4 ステージ・Terraform・scripts/run.sh・README）
+- `driver.rs` `v10900_tests::snowflake_e2e_demo_structure` — ファイル存在確認テスト
+
+### Notes
+- テスト: 1283 件
+
+---
+
+## [v10.8.0] — 2026-06-04
+
+### Added
+- `fav infer --from snowflake --table <name>` — Snowflake INFORMATION_SCHEMA から Favnir 型定義を自動生成
+- `Snowflake.infer_table_raw` VM primitive
+- `cli.fav` `CmdInferSnowflake` / `parse_infer_cmd` / `run_infer_snowflake`
+- Snowflake 型マッピング（NUMBER→Int / FLOAT→Float / VARCHAR→String / BOOLEAN→Bool / nullable→Option<T>）
+
+### Notes
+- テスト: 1282 件（型マッピングテスト 6 件追加）
+
+---
+
+## [v10.7.0] — 2026-06-04
+
+### Added
+- `toml.rs` `SnowflakeTomlConfig` — `fav.toml` `[snowflake]` セクション解析（account / user / warehouse / role / database / schema）
+- `expand_env_vars` — `${VAR_NAME}` 形式の環境変数参照を展開
+- `inject_snowflake_config` — 実行時に Snowflake 設定を環境変数に注入（上書きなし）
+- `fav new` テンプレートに `[snowflake]` コメントアウト例を追加
+
+### Notes
+- テスト: 1276 件
+
+---
+
+## [v10.6.0] — 2026-06-04
+
+### Added
+- `runes/snowflake/` — Snowflake Rune 実装（`execute` / `query<T>`）
+- `rune.toml` / `snowflake.fav` / `client.fav` / `snowflake.test.fav`
+
+### Notes
+- テスト: 1272 件
+
+---
+
+## [v10.5.0] — 2026-06-04
+
+### Added
+- `compiler.fav` builtin NS リストに `"Snowflake"` を追加（2 箇所）
+- Favnir pipeline で `Snowflake.*` を含む stage がコンパイル可能になった
+
+### Notes
+- テスト: 1271 件
+
+---
+
+## [v10.4.0] — 2026-06-04
+
+### Added
+- `checker.fav` に `snowflake_fn` 追加（`execute_raw` / `query_raw` 型シグネチャ）
+- `builtin_ret_ty` / `ns_to_effect` に Snowflake エントリ追加
+- E0320 エラーコード（`!Snowflake` エフェクト未宣言）
+
+### Notes
+- テスト: 1269 件
+
+---
+
+## [v10.3.0] — 2026-06-04
+
+### Added
+- `Effect::Snowflake` を 8 ファイルに追加（ast / parser / fmt / lineage / driver / ast_lower_checker / checker / reachability）
+- `require_snowflake_effect` (E0314) — `!Snowflake` 未宣言 stage での Snowflake.* 呼び出しを検出
+
+### Notes
+- テスト: 1267 件
+
+---
+
+## [v10.2.0] — 2026-06-04
+
+### Added
+- `Snowflake.execute_raw` / `Snowflake.query_raw` VM primitive（Snowflake SQL API v2 REST + JWT RS256 認証）
+- `snowflake_read_env` / `snowflake_generate_jwt` / `snowflake_api_post` ヘルパー（`vm.rs`）
+
+### Notes
+- テスト: 1264 件
+
+---
+
+## [v10.1.0] — 2026-06-04
+
+### Added
+- `infra/snowflake/` — Snowflake Terraform インフラ（provider / warehouse / database / schema / role / RSA キー / SSM）
+- `infra/snowflake/README.md`
+
+### Notes
+- テスト: 1261 件
+
+---
+
 ## [v10.0.0] — 2026-06-03
 
 ### Added

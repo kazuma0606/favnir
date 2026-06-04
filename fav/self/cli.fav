@@ -204,7 +204,7 @@ fn parse_rune_sub(sub: String, args: List<String>) -> CliCmd {
 // ── Action handlers ────────────────────────────────────────────────────────────
 
 fn run_version() -> Unit !IO {
-    IO.println("favnir 10.3.0 (self-host CLI)")
+    IO.println("favnir 10.4.0 (self-host CLI)")
 }
 
 fn run_help() -> Unit !IO {

@@ -20009,6 +20009,36 @@ public fn main() -> String { ProcessOrder("Widget") }
     }
 }
 
+// ── v10400_tests (v10.4.0) — checker.fav Snowflake support ──────────────────
+#[cfg(test)]
+mod v10400_tests {
+    #[test]
+    fn snowflake_effect_checker_fav_missing() {
+        // checker.fav 経由: !Snowflake 未宣言で E0003
+        let src = r#"
+fn run(sql: String) -> Result<String, String> {
+  Snowflake.execute_raw(sql)
+}
+"#;
+        let errors = super::check_source_str(src);
+        let has_e0003 = errors.iter().any(|e| e.code == "E0003");
+        assert!(has_e0003, "expected E0003 for missing !Snowflake via checker.fav: {:?}", errors);
+    }
+
+    #[test]
+    fn snowflake_effect_checker_fav_ok() {
+        // checker.fav 経由: !Snowflake 宣言済みでエラーなし
+        let src = r#"
+fn run(sql: String) -> Result<String, String> !Snowflake {
+  Snowflake.execute_raw(sql)
+}
+"#;
+        let errors = super::check_source_str(src);
+        let e0003: Vec<_> = errors.iter().filter(|e| e.code == "E0003").collect();
+        assert!(e0003.is_empty(), "unexpected E0003 with !Snowflake via checker.fav: {:?}", e0003);
+    }
+}
+
 // ── v10300_tests (v10.3.0) — !Snowflake effect ───────────────────────────────
 #[cfg(test)]
 mod v10300_tests {

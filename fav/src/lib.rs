@@ -45,6 +45,7 @@
 pub mod ast;
 pub mod error_catalog;
 pub mod frontend;
+pub mod emit_python;
 pub mod lineage;
 pub mod middle;
 #[cfg(not(target_arch = "wasm32"))]

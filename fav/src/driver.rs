@@ -20374,3 +20374,93 @@ fn query(sql: String) -> Result<String, String> !Snowflake {
         assert!(result.is_ok(), "Snowflake query compile via Favnir pipeline failed: {:?}", result);
     }
 }
+
+// ── cmd_transpile (v11.1.0) ───────────────────────────────────────────────────
+
+pub fn cmd_transpile(args: &[String]) {
+    let mut target: Option<String> = None;
+    let mut out_path: Option<String> = None;
+    let mut input_path: Option<String> = None;
+    let mut i = 0usize;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--target" => {
+                i += 1;
+                target = args.get(i).cloned();
+            }
+            "--out" => {
+                i += 1;
+                out_path = args.get(i).cloned();
+            }
+            other => {
+                input_path = Some(other.to_string());
+            }
+        }
+        i += 1;
+    }
+
+    let target = match target {
+        Some(t) => t,
+        None => {
+            eprintln!("error: --target is required");
+            eprintln!("usage: fav transpile --target python <file.fav>");
+            std::process::exit(1);
+        }
+    };
+    if target != "python" {
+        eprintln!("error: unsupported target: {} (supported: python)", target);
+        std::process::exit(1);
+    }
+    let input = match input_path {
+        Some(p) => p,
+        None => {
+            eprintln!("error: input .fav file required");
+            std::process::exit(1);
+        }
+    };
+    if !std::path::Path::new(&input).exists() {
+        eprintln!("error: file not found: {}", input);
+        std::process::exit(1);
+    }
+    let src = match std::fs::read_to_string(&input) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("error reading {}: {}", input, e);
+            std::process::exit(1);
+        }
+    };
+    let prog = match crate::frontend::parser::Parser::parse_str(&src, &input) {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("parse error: {}", e);
+            std::process::exit(1);
+        }
+    };
+    let py_src = crate::emit_python::emit_python(&prog, &input);
+    let out = out_path.unwrap_or_else(|| {
+        if input.ends_with(".fav") {
+            format!("{}.py", &input[..input.len() - 4])
+        } else {
+            format!("{}.py", input)
+        }
+    });
+    if let Err(e) = std::fs::write(&out, &py_src) {
+        eprintln!("error writing {}: {}", out, e);
+        std::process::exit(1);
+    }
+    println!("transpiled: {} -> {}", input, out);
+}
+
+// ── v11100_tests (v11.1.0) ────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod v11100_tests {
+    #[test]
+    fn transpile_cmd_roundtrip() {
+        // driver の cmd_transpile が呼べることを確認（単体ではファイル I/O を伴うため
+        // emit_python_str のスモークテストで代替）
+        let src = "type Foo = { x: Int }";
+        let out = crate::emit_python::emit_python_str(src);
+        assert!(out.contains("class Foo"), "roundtrip: {}", out);
+    }
+}

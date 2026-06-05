@@ -42,6 +42,7 @@ mod ast;
 mod backend;
 mod checker_fav_runner;
 mod compiler_fav_runner;
+mod emit_python;
 mod docs_server;
 mod driver;
 mod lineage;
@@ -69,7 +70,7 @@ use driver::{
     cmd_exec, cmd_explain, cmd_explain_compiler, cmd_explain_diff, cmd_explain_error,
     cmd_explain_error_list, cmd_explain_error_list_json, cmd_explain_lineage, cmd_fmt, cmd_graph,
     cmd_infer, cmd_infer_proto, cmd_infer_snowflake, cmd_install, cmd_lint, cmd_migrate, cmd_new,
-    cmd_profile,
+    cmd_profile, cmd_transpile,
     cmd_publish, cmd_registry, cmd_repl, cmd_run, cmd_test, cmd_watch,
 };
 use rune_cmd::cmd_rune;
@@ -979,6 +980,11 @@ fn main_impl() {
                 }
             }
             cmd_doc(&path, &out_dir);
+        }
+
+        Some("transpile") => {
+            let targs: Vec<String> = args[2..].to_vec();
+            cmd_transpile(&targs);
         }
 
         Some("repl") => {

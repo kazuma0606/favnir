@@ -6,21 +6,20 @@ Date: 2026-06-05
 
 ## Phase 1 — CSV データ作成
 
-- [ ] 1-A: `src/txn_jan.csv` を作成（38行、不良4件）
+- [x] 1-A: `src/txn_jan.csv` を作成（38行、不良4件）
   - 不良: empty_amount x1, negative_amount x1, below_threshold x1, empty_region x1
-- [ ] 1-B: `src/txn_feb.csv` を作成（35行、不良4件）
+- [x] 1-B: `src/txn_feb.csv` を作成（35行、不良4件）
   - 不良: empty_amount x1, negative_amount x1, below_threshold x1, empty_region x1
-- [ ] 1-C: `src/txn_mar.csv` を作成（30行、不良3件）
+- [x] 1-C: `src/txn_mar.csv` を作成（30行、不良3件）
   - 不良: empty_amount x1, below_threshold x1, empty_region x1
 
 ---
 
 ## Phase 2 — Favnir パイプライン
 
-- [ ] 2-A: `src/analyze.fav` を作成
+- [x] 2-A: `src/analyze.fav` を作成
   - `TxnRow` / `DropLog` / `Summary` / `Stats` 型定義
-  - `load_csv_file(path)` ヘルパー
-  - `validate_row(row, idx, file)` — 4種バリデーション
+  - `validate_txn(row, idx, file)` — 4種バリデーション
   - `stage LoadAll: List<String> -> List<TxnRow> !IO`
   - `stage Validate: List<TxnRow> -> List<TxnRow> !IO` — [WARN]/[INFO] ログ付き
   - `stage Aggregate: List<TxnRow> -> List<Summary>` — region×category 集計
@@ -31,7 +30,7 @@ Date: 2026-06-05
 
 ## Phase 3 — Terraform: VPC・ネットワーク
 
-- [ ] 3-A: `terraform/main.tf` を作成
+- [x] 3-A: `terraform/main.tf` を作成
   - provider "aws" (ap-northeast-1)
   - `aws_vpc` (10.3.0.0/16, DNS enabled)
   - `aws_subnet.private_a` (10.3.1.0/24, ap-northeast-1a)
@@ -47,7 +46,7 @@ Date: 2026-06-05
 
 ## Phase 4 — Terraform: IAM
 
-- [ ] 4-A: `terraform/iam.tf` を作成
+- [x] 4-A: `terraform/iam.tf` を作成
   - `aws_iam_role.ec2_role`（EC2 assume role）
   - `aws_iam_role_policy.s3_policy`
     - `s3:GetObject` — `airgap/binary/*`, `airgap/src/*`, `airgap/data/*`
@@ -59,7 +58,7 @@ Date: 2026-06-05
 
 ## Phase 5 — Terraform: EC2
 
-- [ ] 5-A: `terraform/ec2.tf` を作成
+- [x] 5-A: `terraform/ec2.tf` を作成
   - `aws_instance.favnir_ec2`
     - ami: Amazon Linux 2023 (ap-northeast-1)
     - instance_type: t3.small
@@ -79,26 +78,25 @@ Date: 2026-06-05
 
 ## Phase 6 — Terraform: 変数・出力
 
-- [ ] 6-A: `terraform/variables.tf` を作成
+- [x] 6-A: `terraform/variables.tf` を作成
   - `aws_region` (default: ap-northeast-1)
   - `aws_account` (sensitive)
   - `bucket_name` (default: favnir-e2e-demo)
-- [ ] 6-B: `terraform/outputs.tf` を作成
+- [x] 6-B: `terraform/outputs.tf` を作成
   - `instance_id`, `instance_private_ip`, `vpc_id`
 
 ---
 
 ## Phase 7 — スクリプト
 
-- [ ] 7-A: `scripts/upload.sh` を作成
+- [x] 7-A: `scripts/upload.sh` を作成
   - Favnir バイナリを `airgap/binary/fav` にアップロード
   - `analyze.fav` / CSV 3件 を S3 にアップロード
-- [ ] 7-B: `scripts/run.sh` を作成
+- [x] 7-B: `scripts/run.sh` を作成
   - `terraform apply -auto-approve`
   - EC2 instance ID 取得
-  - SSM で起動完了まで待機（cloud-init done チェック）
-  - user_data ログを CloudWatch / SSM 経由で確認
-- [ ] 7-C: `scripts/verify.sh` を作成
+  - proof ファイルの S3 出現で完了検知（最大10分ポーリング）
+- [x] 7-C: `scripts/verify.sh` を作成
   - [1] `airgap/proof/proof-*.txt` が S3 に存在する
   - [2] proof に `which fav: not found` が含まれる
   - [3] proof に `Dropped:` 行が含まれる（品質チェックログ）
@@ -112,7 +110,7 @@ Date: 2026-06-05
 - [ ] 8-A: `terraform init` + `scripts/upload.sh` 実行
 - [ ] 8-B: `scripts/run.sh` 実行（EC2 起動 → user_data 完了待ち）
 - [ ] 8-C: `scripts/verify.sh` 実行 → **PASS=5 / FAIL=0**
-- [ ] 8-D: `README.md` 作成
+- [ ] 8-D: `README.md` 作成（実行後）
   - 実行結果サマリー（PASS=5/FAIL=0）
   - アーキテクチャ図
   - 他デモとの比較表
@@ -129,3 +127,5 @@ Date: 2026-06-05
 | ドロップ率ログが proof に存在する | analyze.fav + verify | |
 | `airgap/output/summary.json` が S3 に存在 | analyze.fav + verify | |
 | EC2 インスタンスが terminated | scripts/verify.sh | |
+
+> Phase 1〜7 完了済み（2026-06-05）。Phase 8 は terraform apply 実行時に着手。

@@ -1,0 +1,36 @@
+transaction_id,merchant_id,merchant_name,category,amount,currency,status,timestamp,customer_id,region
+TXN-202602-0001,MRC-0412,Ginza Restaurant,food,6200.0,JPY,completed,2026-02-01T20:10:00Z,CUS-0220,tokyo
+TXN-202602-0002,MRC-2801,Shinjuku Gym,entertainment,8000.0,JPY,completed,2026-02-01T17:00:00Z,CUS-1187,tokyo
+TXN-202602-0003,MRC-0831,Shinjuku Convenience,retail,470.0,JPY,completed,2026-02-02T07:45:33Z,CUS-3312,tokyo
+TXN-202602-0004,MRC-1042,Tokyo Ramen House,food,0.0,JPY,pending,2026-02-02T12:30:05Z,CUS-0512,tokyo
+TXN-202602-0005,MRC-3301,Osaka Cinema,entertainment,2300.0,JPY,completed,2026-02-03T19:15:22Z,CUS-2844,osaka
+TXN-202602-0006,MRC-0055,JR East,travel,1640.0,JPY,completed,2026-02-04T08:00:11Z,CUS-4201,tokyo
+TXN-202602-0007,MRC-2204,Osaka Sushi Bar,food,7400.0,JPY,completed,2026-02-04T13:22:44Z,CUS-0943,osaka
+TXN-202602-0008,MRC-0612,Fukuoka Bookstore,retail,1890.0,JPY,completed,2026-02-05T10:55:38Z,CUS-0761,fukuoka
+TXN-202602-0009,MRC-1731,Nagoya Cafe,food,620.0,JPY,completed,2026-02-05T08:30:14Z,CUS-2987,nagoya
+TXN-202602-0010,MRC-1903,Sapporo Department,retail,9200.0,JPY,completed,2026-02-06T14:10:29Z,CUS-1504,sapporo
+TXN-202602-0011,MRC-2501,Tokyo Electric,utility,8100.0,JPY,completed,2026-02-07T09:00:00Z,CUS-2301,tokyo
+TXN-202602-0012,MRC-0412,Ginza Restaurant,food,5300.0,JPY,completed,2026-02-07T20:45:17Z,CUS-0220,tokyo
+TXN-202602-0013,MRC-1042,Tokyo Ramen House,food,1950.0,JPY,completed,2026-02-08T19:20:09Z,CUS-3801,tokyo
+TXN-202602-0014,MRC-2801,Shinjuku Gym,entertainment,8000.0,JPY,completed,2026-02-08T17:00:00Z,CUS-1187,tokyo
+TXN-202602-0015,MRC-0831,Shinjuku Convenience,retail,5.0,JPY,completed,2026-02-09T07:18:52Z,CUS-3312,tokyo
+TXN-202602-0016,MRC-3301,Osaka Cinema,entertainment,1900.0,JPY,completed,2026-02-10T20:00:00Z,CUS-2844,osaka
+TXN-202602-0017,MRC-0055,JR East,travel,820.0,JPY,completed,2026-02-11T08:10:44Z,CUS-4201,tokyo
+TXN-202602-0018,MRC-2204,Osaka Sushi Bar,food,4600.0,JPY,completed,2026-02-11T13:05:31Z,CUS-0943,osaka
+TXN-202602-0019,MRC-0612,Fukuoka Bookstore,retail,2100.0,JPY,completed,2026-02-12T10:33:18Z,CUS-0761,fukuoka
+TXN-202602-0020,MRC-1731,Nagoya Cafe,food,580.0,JPY,completed,2026-02-12T09:07:22Z,CUS-2987,nagoya
+TXN-202602-0021,MRC-1903,Sapporo Department,retail,6700.0,JPY,completed,2026-02-13T13:50:40Z,CUS-1504,sapporo
+TXN-202602-0022,MRC-2501,Tokyo Electric,utility,7650.0,JPY,completed,2026-02-14T09:00:00Z,CUS-3801,tokyo
+TXN-202602-0023,MRC-0278,Netflix Japan,entertainment,1490.0,JPY,completed,2026-02-14T00:00:00Z,CUS-2301,
+TXN-202602-0024,MRC-0412,Ginza Restaurant,food,8900.0,JPY,completed,2026-02-14T20:30:55Z,CUS-0220,tokyo
+TXN-202602-0025,MRC-1042,Tokyo Ramen House,food,2200.0,JPY,completed,2026-02-15T12:15:33Z,CUS-0512,tokyo
+TXN-202602-0026,MRC-2801,Shinjuku Gym,entertainment,8000.0,JPY,completed,2026-02-15T17:00:00Z,CUS-1187,tokyo
+TXN-202602-0027,MRC-3301,Osaka Cinema,entertainment,-200.0,JPY,failed,2026-02-16T19:30:00Z,CUS-2844,osaka
+TXN-202602-0028,MRC-0831,Shinjuku Convenience,retail,610.0,JPY,completed,2026-02-17T07:55:10Z,CUS-3312,tokyo
+TXN-202602-0029,MRC-0055,JR East,travel,3280.0,JPY,completed,2026-02-18T08:02:48Z,CUS-4201,tokyo
+TXN-202602-0030,MRC-2204,Osaka Sushi Bar,food,5900.0,JPY,completed,2026-02-19T13:40:22Z,CUS-0943,osaka
+TXN-202602-0031,MRC-0612,Fukuoka Bookstore,retail,1450.0,JPY,completed,2026-02-21T11:20:08Z,CUS-0761,fukuoka
+TXN-202602-0032,MRC-1731,Nagoya Cafe,food,0.0,JPY,pending,2026-02-22T08:55:44Z,CUS-2987,nagoya
+TXN-202602-0033,MRC-1903,Sapporo Department,retail,11200.0,JPY,completed,2026-02-23T14:30:15Z,CUS-1504,sapporo
+TXN-202602-0034,MRC-2501,Tokyo Electric,utility,8340.0,JPY,completed,2026-02-24T09:00:00Z,CUS-2301,tokyo
+TXN-202602-0035,MRC-0412,Ginza Restaurant,food,4700.0,JPY,completed,2026-02-25T20:15:39Z,CUS-0220,tokyo

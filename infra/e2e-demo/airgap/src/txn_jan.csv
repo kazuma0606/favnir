@@ -1,0 +1,39 @@
+transaction_id,merchant_id,merchant_name,category,amount,currency,status,timestamp,customer_id,region
+TXN-202601-0001,MRC-1042,Tokyo Ramen House,food,1850.0,JPY,completed,2026-01-03T09:14:22Z,CUS-2301,tokyo
+TXN-202601-0002,MRC-0831,Shinjuku Convenience,retail,540.0,JPY,completed,2026-01-03T10:02:45Z,CUS-1187,tokyo
+TXN-202601-0003,MRC-2204,Osaka Sushi Bar,food,4200.0,JPY,completed,2026-01-04T12:31:08Z,CUS-0943,osaka
+TXN-202601-0004,MRC-0055,JR East,travel,820.0,JPY,completed,2026-01-04T07:45:33Z,CUS-3312,tokyo
+TXN-202601-0005,MRC-1731,Nagoya Cafe,food,0.0,JPY,completed,2026-01-05T08:20:11Z,CUS-2987,nagoya
+TXN-202601-0006,MRC-0612,Fukuoka Bookstore,retail,1320.0,JPY,completed,2026-01-05T14:08:55Z,CUS-0761,fukuoka
+TXN-202601-0007,MRC-1903,Sapporo Department,retail,7800.0,JPY,completed,2026-01-06T11:22:44Z,CUS-1504,sapporo
+TXN-202601-0008,MRC-0278,Netflix Japan,entertainment,1490.0,JPY,completed,2026-01-06T00:00:00Z,CUS-4201,tokyo
+TXN-202601-0009,MRC-2501,Tokyo Electric,utility,8340.0,JPY,completed,2026-01-07T09:00:00Z,CUS-2301,tokyo
+TXN-202601-0010,MRC-1042,Tokyo Ramen House,food,2100.0,JPY,completed,2026-01-07T19:45:12Z,CUS-0512,tokyo
+TXN-202601-0011,MRC-0831,Shinjuku Convenience,retail,380.0,JPY,completed,2026-01-08T07:33:29Z,CUS-1187,tokyo
+TXN-202601-0012,MRC-3301,Osaka Cinema,entertainment,1900.0,JPY,completed,2026-01-08T20:10:05Z,CUS-2844,osaka
+TXN-202601-0013,MRC-0055,JR East,travel,1640.0,JPY,completed,2026-01-09T08:01:18Z,CUS-3312,tokyo
+TXN-202601-0014,MRC-2204,Osaka Sushi Bar,food,-500.0,JPY,failed,2026-01-09T13:55:40Z,CUS-0943,osaka
+TXN-202601-0015,MRC-0612,Fukuoka Bookstore,retail,2450.0,JPY,completed,2026-01-10T10:44:22Z,CUS-0761,fukuoka
+TXN-202601-0016,MRC-1731,Nagoya Cafe,food,680.0,JPY,completed,2026-01-10T09:15:37Z,CUS-2987,nagoya
+TXN-202601-0017,MRC-1903,Sapporo Department,retail,12800.0,JPY,completed,2026-01-11T13:20:00Z,CUS-1504,sapporo
+TXN-202601-0018,MRC-0278,Netflix Japan,entertainment,1490.0,JPY,completed,2026-01-13T00:00:00Z,CUS-4201,tokyo
+TXN-202601-0019,MRC-2501,Tokyo Electric,utility,8340.0,JPY,pending,2026-01-14T09:00:00Z,CUS-3801,tokyo
+TXN-202601-0020,MRC-0412,Ginza Restaurant,food,5600.0,JPY,completed,2026-01-14T20:30:14Z,CUS-0220,tokyo
+TXN-202601-0021,MRC-1042,Tokyo Ramen House,food,3.5,JPY,completed,2026-01-15T12:08:44Z,CUS-0512,tokyo
+TXN-202601-0022,MRC-2801,Shinjuku Gym,entertainment,8000.0,JPY,completed,2026-01-15T17:00:00Z,CUS-1187,tokyo
+TXN-202601-0023,MRC-0831,Shinjuku Convenience,retail,750.0,JPY,completed,2026-01-16T07:22:10Z,CUS-3312,
+TXN-202601-0024,MRC-3301,Osaka Cinema,entertainment,2300.0,JPY,completed,2026-01-16T19:45:30Z,CUS-2844,osaka
+TXN-202601-0025,MRC-0055,JR East,travel,3280.0,JPY,completed,2026-01-17T07:58:22Z,CUS-4201,tokyo
+TXN-202601-0026,MRC-2204,Osaka Sushi Bar,food,6800.0,JPY,completed,2026-01-17T13:15:09Z,CUS-0943,osaka
+TXN-202601-0027,MRC-0612,Fukuoka Bookstore,retail,980.0,JPY,completed,2026-01-18T11:30:55Z,CUS-0761,fukuoka
+TXN-202601-0028,MRC-1731,Nagoya Cafe,food,520.0,JPY,completed,2026-01-18T08:44:18Z,CUS-2987,nagoya
+TXN-202601-0029,MRC-1903,Sapporo Department,retail,4500.0,JPY,completed,2026-01-19T14:05:33Z,CUS-1504,sapporo
+TXN-202601-0030,MRC-2501,Tokyo Electric,utility,7920.0,JPY,completed,2026-01-21T09:00:00Z,CUS-2301,tokyo
+TXN-202601-0031,MRC-0412,Ginza Restaurant,food,4800.0,JPY,completed,2026-01-22T19:55:00Z,CUS-0220,tokyo
+TXN-202601-0032,MRC-2801,Shinjuku Gym,entertainment,8000.0,JPY,completed,2026-01-22T17:00:00Z,CUS-3801,tokyo
+TXN-202601-0033,MRC-0831,Shinjuku Convenience,retail,290.0,JPY,completed,2026-01-23T07:11:04Z,CUS-1187,tokyo
+TXN-202601-0034,MRC-3301,Osaka Cinema,entertainment,1900.0,JPY,completed,2026-01-24T20:30:00Z,CUS-2844,osaka
+TXN-202601-0035,MRC-0055,JR East,travel,820.0,JPY,completed,2026-01-25T08:05:14Z,CUS-3312,tokyo
+TXN-202601-0036,MRC-2204,Osaka Sushi Bar,food,5100.0,JPY,completed,2026-01-26T12:40:28Z,CUS-0943,osaka
+TXN-202601-0037,MRC-1731,Nagoya Cafe,food,760.0,JPY,completed,2026-01-28T09:02:55Z,CUS-2987,nagoya
+TXN-202601-0038,MRC-0612,Fukuoka Bookstore,retail,1760.0,JPY,completed,2026-01-30T10:18:44Z,CUS-0761,fukuoka

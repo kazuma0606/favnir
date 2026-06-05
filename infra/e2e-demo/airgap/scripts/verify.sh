@@ -74,7 +74,8 @@ fi
 # 5. PASS 確認後 EC2 を terraform destroy（後片付け）
 echo "[PASS] 全チェック完了。EC2 を削除します..."
 cd "$TF_DIR"
-terraform destroy -auto-approve -no-color
+AWS_ACCOUNT=$(aws sts get-caller-identity --query Account --output text 2>/dev/null || echo "")
+terraform destroy -auto-approve -no-color -var="aws_account=${AWS_ACCOUNT}"
 echo ""
 echo "[Done] EC2 terminated. S3 の証跡・出力は保持されています。"
 echo "  Proof : s3://${BUCKET}/airgap/proof/"

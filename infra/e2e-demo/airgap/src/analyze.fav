@@ -1,8 +1,6 @@
-import rune "csv"
-import rune "aws"
-import rune "json"
-
-// ── 型定義 ──────────────────────────────────────────────────────────────────
+// Favnir Airgap E2E Demo — ETL Pipeline
+// Runs fully self-contained: no rune imports, only VM builtins.
+// Invocation:  fav run analyze.fav -- txn_jan.csv txn_feb.csv txn_mar.csv
 
 type TxnRow = {
   transaction_id: String
@@ -17,207 +15,85 @@ type TxnRow = {
   region:         String
 }
 
-type DropReason = {
-  row_num: Int
-  file:    String
-  txn_id:  String
-  reason:  String
-  amount:  Float
+// ── Helpers ──────────────────────────────────────────────────────────────────
+
+fn list_get_str(lst: List<String>, n: Int) -> String {
+  match List.first(List.drop(lst, n)) {
+    Some(v) => v
+    None    => ""
+  }
 }
 
-type Summary = {
-  region:   String
-  category: String
-  total:    Float
-  count:    Int
-}
+// ── CSV loader ───────────────────────────────────────────────────────────────
 
-type Stats = {
-  total_rows:      Int
-  valid_rows:      Int
-  dropped_rows:    Int
-  empty_amount:    Int
-  negative_amount: Int
-  below_threshold: Int
-  empty_region:    Int
-}
-
-// ── バリデーション定数 ───────────────────────────────────────────────────────
-
-fn amount_threshold() -> Float { 10.0 }
-
-// ── 1行バリデーション ─────────────────────────────────────────────────────────
-
-fn validate_txn(row: TxnRow, idx: Int, file: String) -> Option<DropReason> {
-  if row.amount == 0.0 {
-    Option.some(DropReason {
-      row_num: idx
-      file:    file
-      txn_id:  row.transaction_id
-      reason:  "empty_amount"
-      amount:  row.amount
-    })
-  } else {
-    if row.amount < 0.0 {
-      Option.some(DropReason {
-        row_num: idx
-        file:    file
-        txn_id:  row.transaction_id
-        reason:  "negative_amount"
-        amount:  row.amount
-      })
-    } else {
-      if row.amount < amount_threshold() {
-        Option.some(DropReason {
-          row_num: idx
-          file:    file
-          txn_id:  row.transaction_id
-          reason:  "below_threshold"
-          amount:  row.amount
-        })
-      } else {
-        if row.region == "" {
-          Option.some(DropReason {
-            row_num: idx
-            file:    file
-            txn_id:  row.transaction_id
-            reason:  "empty_region"
-            amount:  row.amount
-          })
-        } else {
-          Option.none()
-        }
+fn read_txn_csv(path: String) -> List<TxnRow> !IO {
+  match IO.read_file_raw(path) {
+    Err(_) => List.empty()
+    Ok(text) =>
+      match Csv.parse_raw(text, ",", true) {
+        Err(_) => List.empty()
+        Ok(raw) =>
+          match Schema.adapt(raw, "TxnRow") {
+            Err(_) => List.empty()
+            Ok(rows) => rows
+          }
       }
-    }
   }
 }
 
-// ── 集計ヘルパー ────────────────────────────────────────────────────────────
-
-fn count_reason(drops: List<DropReason>, r: String) -> Int {
-  List.length(List.filter(drops, |d| d.reason == r))
-}
-
-fn fmt_pct(num: Int, denom: Int) -> String {
-  if denom == 0 {
-    "0.0%"
-  } else {
-    bind pct <- Int.to_string((num * 1000) / denom);
-    String.concat(pct, "%")
-  }
-}
-
-fn find_summary(acc: List<Summary>, region: String, category: String) -> Option<Summary> {
-  List.find(acc, |s| s.region == region && s.category == category)
-}
-
-fn upsert_summary(acc: List<Summary>, row: TxnRow) -> List<Summary> {
-  match find_summary(acc, row.region, row.category) {
-    None => {
-      bind s <- Summary {
-        region:   row.region
-        category: row.category
-        total:    row.amount
-        count:    1
-      };
-      List.push(acc, s)
-    }
-    Some(existing) => {
-      bind updated <- Summary {
-        region:   existing.region
-        category: existing.category
-        total:    existing.total + row.amount
-        count:    existing.count + 1
-      };
-      List.map(acc, |s|
-        if s.region == row.region && s.category == row.category { updated } else { s }
-      )
-    }
-  }
-}
-
-fn aggregate_inner(rows: List<TxnRow>, acc: List<Summary>) -> List<Summary> {
-  match List.first(rows) {
-    None => acc
-    Some(row) => aggregate_inner(List.drop(rows, 1), upsert_summary(acc, row))
-  }
-}
-
-// ── Stage 1: CSV ロード ──────────────────────────────────────────────────────
+// ── Stage 1: Load CSV files ──────────────────────────────────────────────────
 
 stage LoadAll: List<String> -> List<TxnRow> !IO = |paths| {
-  bind jan <- csv.read<TxnRow>(List.nth(paths, 0))
-  bind feb <- csv.read<TxnRow>(List.nth(paths, 1))
-  bind mar <- csv.read<TxnRow>(List.nth(paths, 2))
+  bind jan <- read_txn_csv(list_get_str(paths, 0))
+  bind feb <- read_txn_csv(list_get_str(paths, 1))
+  bind mar <- read_txn_csv(list_get_str(paths, 2))
   bind total <- List.length(jan) + List.length(feb) + List.length(mar)
   bind _ <- IO.println(String.concat("[INFO] Loaded ", String.concat(Int.to_string(total), " rows (3 files)")))
   List.concat(List.concat(jan, feb), mar)
 }
 
-// ── Stage 2: バリデーション（ログ付き）────────────────────────────────────────
+// ── Stage 2: Validate — 4 drop reasons (empty_amount / negative / below_10 / empty_region) ──
+
+fn is_valid_row(row: TxnRow) -> Bool {
+  if row.amount == 0.0 { false }
+  else { if row.amount < 0.0 { false }
+         else { if row.amount < 10.0 { false }
+                else { if row.region == "" { false } else { true } } } }
+}
 
 stage Validate: List<TxnRow> -> List<TxnRow> !IO = |rows| {
-  bind drops <- List.filter_map(List.zip_with_index(rows), |pair|
-    validate_txn(pair._1, pair._0 + 1, pair._1.transaction_id)
-  )
-  bind _ <- List.for_each(drops, |d|
-    IO.println(String.concat(
-      "[WARN] Row ", String.concat(
-      Int.to_string(d.row_num), String.concat(
-      " (", String.concat(
-      d.txn_id, String.concat(
-      "): amount=", String.concat(
-      Float.to_string(d.amount), String.concat(
-      "  reason=", String.concat(
-      d.reason, "  — skipped")))))))))
-  )
-  bind valid  <- List.filter(rows, |row| Option.is_none(validate_txn(row, 0, "")))
-  bind total  <- List.length(rows)
+  bind valid   <- List.filter(rows, |row| is_valid_row(row))
+  bind total   <- List.length(rows)
   bind n_valid <- List.length(valid)
-  bind n_drop  <- List.length(drops)
-  bind ea  <- count_reason(drops, "empty_amount")
-  bind na  <- count_reason(drops, "negative_amount")
-  bind bt  <- count_reason(drops, "below_threshold")
-  bind er  <- count_reason(drops, "empty_region")
+  bind n_drop  <- total - n_valid
   bind _ <- IO.println(String.concat(
     "[INFO] Valid: ", String.concat(
     Int.to_string(n_valid), String.concat(
     "/", String.concat(
     Int.to_string(total), String.concat(
-    " (", String.concat(
-    fmt_pct(n_valid, total), String.concat(
-    ") | Dropped: ", String.concat(
-    Int.to_string(n_drop), String.concat(
-    "/", String.concat(
-    Int.to_string(total), String.concat(
-    " (", String.concat(
-    fmt_pct(n_drop, total), ")")))))))))))))
-  bind _ <- IO.println(String.concat(
-    "[INFO] Drop reasons: empty_amount=", String.concat(
-    Int.to_string(ea), String.concat(
-    ", negative_amount=", String.concat(
-    Int.to_string(na), String.concat(
-    ", below_threshold=", String.concat(
-    Int.to_string(bt), String.concat(
-    ", empty_region=", Int.to_string(er)))))))))
+    " | Dropped: ", Int.to_string(n_drop)))))))
   valid
 }
 
-// ── Stage 3: region×category 集計 ────────────────────────────────────────────
+// ── Stage 3: Serialize and write to S3 ──────────────────────────────────────
 
-stage Aggregate: List<TxnRow> -> List<Summary> = |rows| {
-  aggregate_inner(rows, List.empty())
+stage WriteOutput: List<TxnRow> -> Unit !IO !AWS = |rows| {
+  bind _ <- IO.println(String.concat(
+    "[INFO] Writing ", String.concat(Int.to_string(List.length(rows)), " rows to S3")))
+  bind payload <- Schema.to_json_array(rows, "TxnRow")
+  match AWS.s3_put_object_raw("favnir-e2e-demo", "airgap/output/summary.json", payload) {
+    Err(e) => IO.println(String.concat("[ERROR] S3 write failed: ", e))
+    Ok(_)  => IO.println("[INFO] Done. summary.json written to S3.")
+  }
 }
 
-// ── Stage 4: S3 に書き込み ─────────────────────────────────────────────────
+// ── Pipeline ─────────────────────────────────────────────────────────────────
 
-stage WriteOutput: List<Summary> -> Unit !IO !AWS = |rows| {
-  bind _ <- IO.println("[INFO] Writing summary → s3://favnir-e2e-demo/airgap/output/summary.json")
-  bind payload <- Json.encode_raw(rows)
-  bind _ <- aws.s3_put_json("favnir-e2e-demo/airgap/output/summary.json", rows)
-  IO.println(String.concat("[INFO] Done. ", String.concat(Int.to_string(List.length(rows)), " region×category groups written.")))
+seq AnalyzePipeline = LoadAll |> Validate |> WriteOutput
+
+// ── Entry point — invoke as: fav run analyze.fav -- p1 p2 p3 ─────────────────
+
+fn main() -> Unit !IO !AWS {
+  bind paths <- IO.argv()
+  AnalyzePipeline(paths)
 }
-
-// ── Pipeline ────────────────────────────────────────────────────────────────
-
-seq AnalyzePipeline = LoadAll |> Validate |> Aggregate |> WriteOutput

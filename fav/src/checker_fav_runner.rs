@@ -17,20 +17,12 @@ use crate::value::Value;
 
 static CHECKER_FAV_ARTIFACT: OnceLock<Arc<FvcArtifact>> = OnceLock::new();
 
+static CHECKER_FAV_SRC: &str = include_str!("../self/checker.fav");
+
 fn get_checker_fav_artifact() -> Arc<FvcArtifact> {
     CHECKER_FAV_ARTIFACT
         .get_or_init(|| {
-            let manifest_dir = env!("CARGO_MANIFEST_DIR");
-            let checker_path =
-                std::path::Path::new(manifest_dir).join("self").join("checker.fav");
-            let src = std::fs::read_to_string(&checker_path).unwrap_or_else(|e| {
-                panic!(
-                    "checker_fav_runner: cannot read {}: {}",
-                    checker_path.display(),
-                    e
-                )
-            });
-            let prog = Parser::parse_str(&src, "checker.fav")
+            let prog = Parser::parse_str(CHECKER_FAV_SRC, "checker.fav")
                 .expect("checker_fav_runner: checker.fav parse error");
             let ir = compile_program(&prog);
             Arc::new(codegen_program(&ir))

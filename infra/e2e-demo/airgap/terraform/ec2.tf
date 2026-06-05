@@ -57,6 +57,7 @@ resource "aws_instance" "favnir_ec2" {
     echo ""                                                                     | tee -a $PROOF
     echo "[Step 2] Downloading pipeline and CSV data from S3..."               | tee -a $PROOF
     aws s3 cp s3://$BUCKET/airgap/src/analyze.fav /tmp/analyze.fav
+    aws s3 cp s3://$BUCKET/airgap/src/fav.toml    /tmp/fav.toml
     mkdir -p /tmp/data
     aws s3 cp s3://$BUCKET/airgap/data/txn_jan.csv /tmp/data/txn_jan.csv
     aws s3 cp s3://$BUCKET/airgap/data/txn_feb.csv /tmp/data/txn_feb.csv
@@ -68,13 +69,22 @@ resource "aws_instance" "favnir_ec2" {
     echo ""                                                                     | tee -a $PROOF
     echo "[Step 3] Running Favnir ETL pipeline..."                             | tee -a $PROOF
     echo "---"                                                                 | tee -a $PROOF
-    /tmp/fav run /tmp/analyze.fav \
+    # Fetch EC2 instance profile credentials from IMDS for Favnir AWS primitives
+    IMDS_TOKEN=$(curl -sS -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 21600")
+    ROLE_NAME=$(curl -sS -H "X-aws-ec2-metadata-token: $IMDS_TOKEN" http://169.254.169.254/latest/meta-data/iam/security-credentials/)
+    CREDS=$(curl -sS -H "X-aws-ec2-metadata-token: $IMDS_TOKEN" "http://169.254.169.254/latest/meta-data/iam/security-credentials/$ROLE_NAME")
+    export AWS_ACCESS_KEY_ID=$(echo "$CREDS" | python3 -c "import sys,json; print(json.load(sys.stdin)['AccessKeyId'])")
+    export AWS_SECRET_ACCESS_KEY=$(echo "$CREDS" | python3 -c "import sys,json; print(json.load(sys.stdin)['SecretAccessKey'])")
+    export AWS_SESSION_TOKEN=$(echo "$CREDS" | python3 -c "import sys,json; print(json.load(sys.stdin)['Token'])")
+    /tmp/fav run --legacy /tmp/analyze.fav -- \
       /tmp/data/txn_jan.csv \
       /tmp/data/txn_feb.csv \
-      /tmp/data/txn_mar.csv 2>&1 | tee -a $PROOF
+      /tmp/data/txn_mar.csv 2>&1 | tee -a $PROOF || {
+      echo "[ERROR] fav run failed (exit $?)" | tee -a $PROOF
+    }
     echo "---"                                                                 | tee -a $PROOF
 
-    # ── Step 4: 証跡を S3 にアップロード ────────────────────────────────────
+    # ── Step 4: 証跡を S3 にアップロード（成否問わず実行）────────────────────
 
     echo ""                                                                     | tee -a $PROOF
     echo "[Step 4] Uploading proof to S3..."                                   | tee -a $PROOF

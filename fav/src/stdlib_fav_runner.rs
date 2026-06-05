@@ -19,17 +19,13 @@ use crate::value::Value;
 static LIST_STDLIB_ARTIFACT: OnceLock<Arc<FvcArtifact>> = OnceLock::new();
 static STRING_STDLIB_ARTIFACT: OnceLock<Arc<FvcArtifact>> = OnceLock::new();
 
+static LIST_STDLIB_SRC: &str = include_str!("../self/stdlib/list_stdlib.fav");
+static STRING_STDLIB_SRC: &str = include_str!("../self/stdlib/string_stdlib.fav");
+
 fn get_list_stdlib_artifact() -> Arc<FvcArtifact> {
     LIST_STDLIB_ARTIFACT
         .get_or_init(|| {
-            let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("self")
-                .join("stdlib")
-                .join("list_stdlib.fav");
-            let src = std::fs::read_to_string(&path).unwrap_or_else(|e| {
-                panic!("stdlib_fav_runner: cannot read {}: {}", path.display(), e)
-            });
-            let prog = Parser::parse_str(&src, "list_stdlib.fav")
+            let prog = Parser::parse_str(LIST_STDLIB_SRC, "list_stdlib.fav")
                 .expect("stdlib_fav_runner: list_stdlib.fav parse error");
             let ir = compile_program(&prog);
             Arc::new(codegen_program(&ir))
@@ -40,14 +36,7 @@ fn get_list_stdlib_artifact() -> Arc<FvcArtifact> {
 fn get_string_stdlib_artifact() -> Arc<FvcArtifact> {
     STRING_STDLIB_ARTIFACT
         .get_or_init(|| {
-            let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("self")
-                .join("stdlib")
-                .join("string_stdlib.fav");
-            let src = std::fs::read_to_string(&path).unwrap_or_else(|e| {
-                panic!("stdlib_fav_runner: cannot read {}: {}", path.display(), e)
-            });
-            let prog = Parser::parse_str(&src, "string_stdlib.fav")
+            let prog = Parser::parse_str(STRING_STDLIB_SRC, "string_stdlib.fav")
                 .expect("stdlib_fav_runner: string_stdlib.fav parse error");
             let ir = compile_program(&prog);
             Arc::new(codegen_program(&ir))

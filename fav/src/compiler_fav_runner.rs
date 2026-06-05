@@ -21,21 +21,12 @@ use crate::value::Value;
 
 static COMPILER_FAV_ARTIFACT: OnceLock<Arc<FvcArtifact>> = OnceLock::new();
 
+static COMPILER_FAV_SRC: &str = include_str!("../self/compiler.fav");
+
 fn get_compiler_fav_artifact() -> Arc<FvcArtifact> {
     COMPILER_FAV_ARTIFACT
         .get_or_init(|| {
-            let manifest_dir = env!("CARGO_MANIFEST_DIR");
-            let path = std::path::Path::new(manifest_dir)
-                .join("self")
-                .join("compiler.fav");
-            let src = std::fs::read_to_string(&path).unwrap_or_else(|e| {
-                panic!(
-                    "compiler_fav_runner: cannot read {}: {}",
-                    path.display(),
-                    e
-                )
-            });
-            let prog = Parser::parse_str(&src, "compiler.fav")
+            let prog = Parser::parse_str(COMPILER_FAV_SRC, "compiler.fav")
                 .expect("compiler_fav_runner: compiler.fav parse error");
             let ir = compile_program(&prog);
             Arc::new(codegen_program(&ir))

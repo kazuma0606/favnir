@@ -48,7 +48,7 @@ resource "aws_route_table_association" "private_a" {
 
 resource "aws_security_group" "ec2" {
   name        = "favnir-airgap-ec2"
-  description = "Airgap EC2 — VPC endpoint access only"
+  description = "Airgap EC2 - VPC endpoint access only"
   vpc_id      = aws_vpc.airgap.id
 
   egress {
@@ -56,7 +56,15 @@ resource "aws_security_group" "ec2" {
     to_port     = 443
     protocol    = "tcp"
     cidr_blocks = [aws_vpc.airgap.cidr_block]
-    description = "HTTPS to VPC endpoints only"
+    description = "HTTPS to VPC interface endpoints (SSM)"
+  }
+
+  egress {
+    from_port       = 443
+    to_port         = 443
+    protocol        = "tcp"
+    prefix_list_ids = [aws_vpc_endpoint.s3.prefix_list_id]
+    description     = "HTTPS to S3 via gateway endpoint"
   }
 
   tags = { Name = "favnir-airgap-ec2-sg" }
@@ -66,7 +74,7 @@ resource "aws_security_group" "ec2" {
 
 resource "aws_security_group" "endpoints" {
   name        = "favnir-airgap-endpoints"
-  description = "Allow HTTPS from EC2 to VPC endpoints"
+  description = "Allow HTTPS from EC2 to VPC endpoints (airgap)"
   vpc_id      = aws_vpc.airgap.id
 
   ingress {

@@ -107,9 +107,9 @@ Date: 2026-06-05
 
 ## Phase 8 — 動作確認・README
 
-- [ ] 8-A: `terraform init` + `scripts/upload.sh` 実行
-- [ ] 8-B: `scripts/run.sh` 実行（EC2 起動 → user_data 完了待ち）
-- [ ] 8-C: `scripts/verify.sh` 実行 → **PASS=5 / FAIL=0**
+- [x] 8-A: `terraform init` + `scripts/upload.sh` 実行
+- [x] 8-B: `scripts/run.sh` 実行（EC2 起動 → user_data 完了待ち）
+- [x] 8-C: `scripts/verify.sh` 実行 → **PASS=5 / FAIL=0** ✓（2026-06-06）
 - [ ] 8-D: `README.md` 作成（実行後）
   - 実行結果サマリー（PASS=5/FAIL=0）
   - アーキテクチャ図

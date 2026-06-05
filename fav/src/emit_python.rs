@@ -1,7 +1,8 @@
-//! Fav AST → Python ソースコード生成 (v11.1.0)
+//! Fav AST → Python ソースコード生成 (v11.2.0)
 //!
 //! `fav transpile --target python <file.fav>` の出力バックエンド。
-//! v11.1.0 スコープ: 型定義 / fn / bind 脱糖 / match(Option+Result) / 基本 stdlib
+//! v11.1.0: 型定義 / fn / bind 脱糖 / match(Option+Result) / 基本 stdlib
+//! v11.2.0: stage(TrfDef) / seq(FlwDef) / par / fn main() ガード / IO.argv()
 
 use crate::frontend::parser::Parser;
 use crate::ast::{
@@ -65,22 +66,28 @@ pub fn emit_python_str(fav_src: &str) -> String {
 impl Emitter {
     fn emit_program(&mut self, prog: &Program, source_path: &str) -> String {
         self.emit_prelude(source_path);
+        let mut has_main = false;
         for item in &prog.items {
             match item {
                 ast::Item::TypeDef(td) => self.emit_type_def(td),
-                ast::Item::FnDef(fd) => self.emit_fn_def(fd),
-                // stage / seq は v11.2.0 で対応
-                ast::Item::TrfDef(td) => {
-                    self.line(&format!("# TODO: stage {} — transpile support in v11.2.0", td.name));
-                    self.blank();
+                ast::Item::FnDef(fd) => {
+                    if fd.name == "main" {
+                        has_main = true;
+                    }
+                    self.emit_fn_def(fd);
                 }
-                ast::Item::FlwDef(fd) => {
-                    self.line(&format!("# TODO: seq {} — transpile support in v11.2.0", fd.name));
-                    self.blank();
-                }
+                ast::Item::TrfDef(td) => self.emit_trf_def(td),
+                ast::Item::FlwDef(fd) => self.emit_flw_def(fd),
                 // import / use / interface 等は無視
                 _ => {}
             }
+        }
+        if has_main {
+            self.line("if __name__ == \"__main__\":");
+            self.indent += 1;
+            self.line("main()");
+            self.indent -= 1;
+            self.blank();
         }
         self.buf.clone()
     }
@@ -452,10 +459,12 @@ impl Emitter {
                         return format!("len({})", a[0])
                     }
                     ("List", "filter") if a.len() == 2 => {
-                        return format!("[_x for _x in {} if {}(_x)]", a[0], a[1])
+                        let pred = wrap_callable(&a[1]);
+                        return format!("[_x for _x in {} if {}(_x)]", a[0], pred)
                     }
                     ("List", "map") if a.len() == 2 => {
-                        return format!("[{}(_x) for _x in {}]", a[1], a[0])
+                        let f = wrap_callable(&a[1]);
+                        return format!("[{}(_x) for _x in {}]", f, a[0])
                     }
                     ("List", "first") if a.len() == 1 => {
                         return format!("({}[0] if {} else None)", a[0], a[0])
@@ -562,12 +571,18 @@ impl Emitter {
                         return format!("str({}).lower()", a[0])
                     }
 
-                    // ── IO — プレースホルダー（v11.3.0 で実変換）─────────
+                    // ── IO ────────────────────────────────────────────────
                     ("IO", "println") if a.len() == 1 => {
                         return format!("print({})", a[0])
                     }
                     ("IO", "print") if a.len() == 1 => {
                         return format!("print({}, end='')", a[0])
+                    }
+                    ("IO", "argv") if a.is_empty() => {
+                        return "sys.argv[1:]".to_string()
+                    }
+                    ("IO", "argv_all") if a.is_empty() => {
+                        return "sys.argv".to_string()
                     }
                     ("IO", name) => {
                         return format!("_io_{}({})", name, a.join(", "))
@@ -603,7 +618,11 @@ impl Emitter {
         }
 
         // 通常の関数呼び出し
-        let f = self.emit_expr(func);
+        // PascalCase 識別子（stage/seq 名）は snake_case に変換
+        let f = match func {
+            Expr::Ident(name, _) => to_snake(name),
+            other => self.emit_expr(other),
+        };
         let a: Vec<String> = args.iter().map(|a| self.emit_expr(a)).collect();
         format!("{}({})", f, a.join(", "))
     }
@@ -822,7 +841,147 @@ impl Emitter {
     }
 }
 
+// ── TrfDef (stage) ────────────────────────────────────────────────────────────
+
+impl Emitter {
+    fn emit_trf_def(&mut self, td: &ast::TrfDef) {
+        // エフェクトコメント
+        if !td.effects.is_empty() {
+            let eff_strs: Vec<&str> = td.effects.iter().map(|e| {
+                if let Effect::Unknown(s) = e { return s.as_str(); }
+                map_effect(e)
+            }).collect();
+            self.line(&format!("# effects: {}", eff_strs.join(", ")));
+        }
+        // stage の closure パラメータ名を取得（TrfDef.params: Vec<Param>）
+        let param_name = td.params.first()
+            .map(|p| p.name.as_str())
+            .unwrap_or("x");
+        let input_ty  = map_type(&td.input_ty);
+        let output_ty = map_type(&td.output_ty);
+        let fn_name   = to_snake(&td.name);
+
+        self.line(&format!(
+            "def {}({}: {}) -> {}:",
+            fn_name, param_name, input_ty, output_ty
+        ));
+        self.indent += 1;
+        self.emit_block_body(&td.body);
+        self.indent -= 1;
+        self.blank();
+    }
+}
+
+// ── FlwDef (seq) ──────────────────────────────────────────────────────────────
+
+impl Emitter {
+    fn emit_flw_def(&mut self, fd: &ast::FlwDef) {
+        let fn_name = to_snake(&fd.name);
+
+        if fd.steps.is_empty() {
+            self.line(&format!("def {}(x):", fn_name));
+            self.indent += 1;
+            self.line("return x");
+            self.indent -= 1;
+            self.blank();
+            return;
+        }
+
+        let has_par = fd.steps.iter().any(|s| matches!(s, ast::FlwStep::Par(_)));
+        if has_par {
+            self.emit_flw_with_par(&fn_name, &fd.steps);
+        } else {
+            let chain = self.build_chain_expr("x", &fd.steps);
+            self.line(&format!("def {}(x):", fn_name));
+            self.indent += 1;
+            self.line(&format!("return {}", chain));
+            self.indent -= 1;
+            self.blank();
+        }
+    }
+
+    /// "x" → step0(x) → step1(step0(x)) → … のネスト式を構築
+    fn build_chain_expr(&self, input: &str, steps: &[ast::FlwStep]) -> String {
+        let mut expr = input.to_string();
+        for step in steps {
+            match step {
+                ast::FlwStep::Stage(name) => {
+                    expr = format!("{}({})", to_snake(name), expr);
+                }
+                ast::FlwStep::Par(names) => {
+                    // par はシンプルチェーンでは来ないが念のため
+                    let calls: Vec<String> = names.iter()
+                        .map(|n| format!("{}({})", to_snake(n), expr))
+                        .collect();
+                    expr = format!("[{}]", calls.join(", "));
+                }
+            }
+        }
+        expr
+    }
+
+    /// par ステップを含む seq の変換（ThreadPoolExecutor 使用）
+    fn emit_flw_with_par(&mut self, fn_name: &str, steps: &[ast::FlwStep]) {
+        self.line(&format!("def {}(x):", fn_name));
+        self.indent += 1;
+
+        let mut cur = "x".to_string();
+        let mut var_ctr = 0usize;
+        let last_idx = steps.len().saturating_sub(1);
+
+        for (i, step) in steps.iter().enumerate() {
+            match step {
+                ast::FlwStep::Stage(name) => {
+                    if i == last_idx {
+                        self.line(&format!("return {}({})", to_snake(name), cur));
+                    } else {
+                        let v = format!("_step{}", var_ctr);
+                        var_ctr += 1;
+                        self.line(&format!("{} = {}({})", v, to_snake(name), cur));
+                        cur = v;
+                    }
+                }
+                ast::FlwStep::Par(names) => {
+                    self.line("from concurrent.futures import ThreadPoolExecutor");
+                    self.line("with ThreadPoolExecutor() as _pool:");
+                    self.indent += 1;
+                    let submits: Vec<String> = names.iter()
+                        .map(|n| format!("_pool.submit({}, {})", to_snake(n), cur))
+                        .collect();
+                    self.line(&format!("_futures = [{}]", submits.join(", ")));
+                    self.line("_par_results = [_f.result() for _f in _futures]");
+                    self.indent -= 1;
+                    cur = "_par_results".to_string();
+                }
+            }
+        }
+
+        self.indent -= 1;
+        self.blank();
+    }
+}
+
 // ── Util ──────────────────────────────────────────────────────────────────────
+
+/// PascalCase / camelCase → snake_case
+/// LoadAll → load_all, ValidateTxn → validate_txn, IOHelper → io_helper
+pub fn to_snake(name: &str) -> String {
+    let mut out = String::new();
+    let chars: Vec<char> = name.chars().collect();
+    for (i, &ch) in chars.iter().enumerate() {
+        if ch.is_uppercase() && i > 0 {
+            let prev_lower = chars[i - 1].is_lowercase() || chars[i - 1].is_ascii_digit();
+            let next_lower = chars.get(i + 1).map(|c| c.is_lowercase()).unwrap_or(false);
+            if prev_lower || next_lower {
+                out.push('_');
+            }
+        }
+        for c in ch.to_lowercase() {
+            out.push(c);
+        }
+    }
+    out
+}
 
 fn emit_lit(lit: &Lit) -> String {
     match lit {
@@ -834,6 +993,16 @@ fn emit_lit(lit: &Lit) -> String {
         Lit::Str(s) => format!("{:?}", s),
         Lit::Bool(b) => if *b { "True".to_string() } else { "False".to_string() },
         Lit::Unit => "None".to_string(),
+    }
+}
+
+/// lambda 式の場合は括弧で囲む（`lambda x: x` → `(lambda x: x)`）
+/// 既に括弧付きや通常の識別子はそのまま返す
+fn wrap_callable(s: &str) -> String {
+    if s.starts_with("lambda ") {
+        format!("({})", s)
+    } else {
+        s.to_string()
     }
 }
 
@@ -858,6 +1027,100 @@ fn is_simple_expr(expr: &Expr) -> bool {
 }
 
 // ── Tests ──────────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod v11200_tests {
+    use super::*;
+
+    #[test]
+    fn transpile_stage_basic() {
+        let src = r#"stage Foo: Int -> Int = |x| { x }"#;
+        let out = emit_python_str(src);
+        assert!(out.contains("def foo(x: int) -> int:"), "stage def:\n{}", out);
+        assert!(out.contains("return x"), "stage body:\n{}", out);
+    }
+
+    #[test]
+    fn transpile_stage_effects_comment() {
+        let src = r#"stage Bar: String -> String !IO = |s| { s }"#;
+        let out = emit_python_str(src);
+        assert!(out.contains("# effects: IO"), "effect comment:\n{}", out);
+    }
+
+    #[test]
+    fn transpile_stage_multiline_body() {
+        let src = r#"
+stage Validate: List<Int> -> List<Int> !IO = |rows| {
+  bind valid <- List.filter(rows, |x| x > 0)
+  bind _ <- IO.println("done")
+  valid
+}"#;
+        let out = emit_python_str(src);
+        assert!(out.contains("def validate(rows: List[int]) -> List[int]:"), "sig:\n{}", out);
+        assert!(out.contains("[_x for _x in rows"), "filter:\n{}", out);
+        assert!(out.contains("print("), "println→print:\n{}", out);
+        assert!(out.contains("return valid"), "return:\n{}", out);
+    }
+
+    #[test]
+    fn transpile_seq_two_stages() {
+        let src = r#"
+stage Load: Int -> String = |x| { Int.to_string(x) }
+stage Upper: String -> String = |s| { s }
+seq Pipe = Load |> Upper
+"#;
+        let out = emit_python_str(src);
+        assert!(out.contains("def pipe(x):"), "seq def:\n{}", out);
+        assert!(out.contains("upper(load(x))"), "chain:\n{}", out);
+    }
+
+    #[test]
+    fn transpile_seq_three_stages() {
+        let src = r#"
+stage A: Int -> Int = |x| { x }
+stage B: Int -> Int = |x| { x }
+stage C: Int -> Int = |x| { x }
+seq Pipeline = A |> B |> C
+"#;
+        let out = emit_python_str(src);
+        assert!(out.contains("def pipeline(x):"), "def:\n{}", out);
+        assert!(out.contains("c(b(a(x)))"), "3-chain:\n{}", out);
+    }
+
+    #[test]
+    fn transpile_seq_snake_case() {
+        let src = r#"
+stage LoadAll: Int -> Int = |x| { x }
+stage WriteOutput: Int -> Int = |x| { x }
+seq AnalyzePipeline = LoadAll |> WriteOutput
+"#;
+        let out = emit_python_str(src);
+        assert!(out.contains("def load_all("), "load_all:\n{}", out);
+        assert!(out.contains("def write_output("), "write_output:\n{}", out);
+        assert!(out.contains("def analyze_pipeline(x):"), "analyze_pipeline:\n{}", out);
+        assert!(out.contains("write_output(load_all(x))"), "chain:\n{}", out);
+    }
+
+    #[test]
+    fn transpile_main_guard() {
+        let src = r#"fn main() -> Unit !IO { IO.println("hi") }"#;
+        let out = emit_python_str(src);
+        assert!(out.contains("def main()"), "main def:\n{}", out);
+        assert!(
+            out.contains("if __name__ == \"__main__\":"),
+            "__main__ guard:\n{}",
+            out
+        );
+        assert!(out.contains("    main()"), "main() call:\n{}", out);
+    }
+
+    #[test]
+    fn transpile_io_argv() {
+        let src = r#"fn f() -> List<String> !IO { IO.argv() }"#;
+        let out = emit_python_str(src);
+        assert!(out.contains("sys.argv[1:]"), "argv:\n{}", out);
+    }
+}
 
 #[cfg(test)]
 mod v11100_tests {

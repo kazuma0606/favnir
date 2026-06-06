@@ -24,6 +24,12 @@ pub struct Emitter {
     needs_csv_helpers:    bool,
     needs_json_helpers:   bool,
     needs_schema_helpers: bool,
+    // v11.4.0: AWS / boto3 フラグ
+    needs_boto3:          bool,
+    needs_base64:         bool,
+    needs_aws_s3:         bool,
+    needs_aws_dynamo:     bool,
+    needs_aws_sqs:        bool,
     // 型名レジストリ（_SCHEMA_REGISTRY 生成用）
     type_names: Vec<String>,
 }
@@ -40,6 +46,11 @@ impl Emitter {
             needs_csv_helpers:    false,
             needs_json_helpers:   false,
             needs_schema_helpers: false,
+            needs_boto3:          false,
+            needs_base64:         false,
+            needs_aws_s3:         false,
+            needs_aws_dynamo:     false,
+            needs_aws_sqs:        false,
             type_names:           Vec::new(),
         }
     }
@@ -110,6 +121,11 @@ impl Emitter {
         self.needs_csv_helpers    = sub.needs_csv_helpers;
         self.needs_json_helpers   = sub.needs_json_helpers;
         self.needs_schema_helpers = sub.needs_schema_helpers;
+        self.needs_boto3          = sub.needs_boto3;
+        self.needs_base64         = sub.needs_base64;
+        self.needs_aws_s3         = sub.needs_aws_s3;
+        self.needs_aws_dynamo     = sub.needs_aws_dynamo;
+        self.needs_aws_sqs        = sub.needs_aws_sqs;
 
         // Phase 4: プレリュード（conditional imports 含む）
         self.emit_prelude(source_path);
@@ -131,6 +147,9 @@ impl Emitter {
         if self.needs_csv_helpers    { self.emit_csv_helpers(); }
         if self.needs_schema_helpers { self.emit_schema_helpers(); }
         if self.needs_json_helpers   { self.emit_json_helpers(); }
+        if self.needs_aws_s3         { self.emit_aws_s3_helpers(); }
+        if self.needs_aws_dynamo     { self.emit_aws_dynamo_helpers(); }
+        if self.needs_aws_sqs        { self.emit_aws_sqs_helpers(); }
 
         // Phase 8: fn / stage / seq（サブエミッター出力を追加）
         self.buf.push_str(&sub.buf);
@@ -161,6 +180,8 @@ impl Emitter {
         if self.needs_json {
             self.line("import json as _json_mod");
         }
+        if self.needs_boto3  { self.line("import boto3"); }
+        if self.needs_base64 { self.line("import base64 as _base64_mod"); }
         self.blank();
         self.line("class Ok:");
         self.indent += 1;
@@ -658,8 +679,79 @@ impl Emitter {
                         return format!("_io_{}({})", name, a.join(", "))
                     }
 
-                    // ── AWS — プレースホルダー（v11.4.0 で実変換）────────
+                    // ── AWS S3 ───────────────────────────────────────────
+                    ("AWS", "s3_put_object_raw") if a.len() == 3 => {
+                        self.needs_boto3 = true; self.needs_aws_s3 = true;
+                        return format!("_aws_s3_put_object_raw({}, {}, {})", a[0], a[1], a[2])
+                    }
+                    ("AWS", "s3_get_object_raw") if a.len() == 2 => {
+                        self.needs_boto3 = true; self.needs_aws_s3 = true;
+                        return format!("_aws_s3_get_object_raw({}, {})", a[0], a[1])
+                    }
+                    ("AWS", "s3_list_objects_raw") if a.len() == 2 => {
+                        self.needs_boto3 = true; self.needs_aws_s3 = true;
+                        return format!("_aws_s3_list_objects_raw({}, {})", a[0], a[1])
+                    }
+                    ("AWS", "s3_delete_object_raw") if a.len() == 2 => {
+                        self.needs_boto3 = true; self.needs_aws_s3 = true;
+                        return format!("_aws_s3_delete_object_raw({}, {})", a[0], a[1])
+                    }
+                    ("AWS", "s3_get_object_base64_raw") if a.len() == 2 => {
+                        self.needs_boto3 = true; self.needs_aws_s3 = true; self.needs_base64 = true;
+                        return format!("_aws_s3_get_object_base64_raw({}, {})", a[0], a[1])
+                    }
+                    ("AWS", "s3_put_bytes_raw") if a.len() == 3 => {
+                        self.needs_boto3 = true; self.needs_aws_s3 = true;
+                        return format!("_aws_s3_put_bytes_raw({}, {}, {})", a[0], a[1], a[2])
+                    }
+                    ("AWS", "s3_head_bucket_raw") if a.len() == 1 => {
+                        self.needs_boto3 = true; self.needs_aws_s3 = true;
+                        return format!("_aws_s3_head_bucket_raw({})", a[0])
+                    }
+
+                    // ── AWS DynamoDB ──────────────────────────────────────
+                    ("AWS", "dynamo_scan_raw") if a.len() == 1 => {
+                        self.needs_boto3 = true; self.needs_aws_dynamo = true;
+                        return format!("_aws_dynamo_scan_raw({})", a[0])
+                    }
+                    ("AWS", "dynamo_get_item_raw") if a.len() == 2 => {
+                        self.needs_boto3 = true; self.needs_aws_dynamo = true;
+                        return format!("_aws_dynamo_get_item_raw({}, {})", a[0], a[1])
+                    }
+                    ("AWS", "dynamo_put_item_raw") if a.len() == 2 => {
+                        self.needs_boto3 = true; self.needs_aws_dynamo = true;
+                        return format!("_aws_dynamo_put_item_raw({}, {})", a[0], a[1])
+                    }
+                    ("AWS", "dynamo_delete_item_raw") if a.len() == 2 => {
+                        self.needs_boto3 = true; self.needs_aws_dynamo = true;
+                        return format!("_aws_dynamo_delete_item_raw({}, {})", a[0], a[1])
+                    }
+                    ("AWS", "dynamo_query_raw") if a.len() == 2 => {
+                        self.needs_boto3 = true; self.needs_aws_dynamo = true;
+                        return format!("_aws_dynamo_query_raw({}, {})", a[0], a[1])
+                    }
+
+                    // ── AWS SQS ───────────────────────────────────────────
+                    ("AWS", "sqs_send_message_raw") if a.len() == 2 => {
+                        self.needs_boto3 = true; self.needs_aws_sqs = true;
+                        return format!("_aws_sqs_send_message_raw({}, {})", a[0], a[1])
+                    }
+                    ("AWS", "sqs_receive_messages_raw") if a.len() == 2 => {
+                        self.needs_boto3 = true; self.needs_aws_sqs = true;
+                        return format!("_aws_sqs_receive_messages_raw({}, {})", a[0], a[1])
+                    }
+                    ("AWS", "sqs_delete_message_raw") if a.len() == 2 => {
+                        self.needs_boto3 = true; self.needs_aws_sqs = true;
+                        return format!("_aws_sqs_delete_message_raw({}, {})", a[0], a[1])
+                    }
+                    ("AWS", "sqs_get_queue_url_raw") if a.len() == 1 => {
+                        self.needs_boto3 = true; self.needs_aws_sqs = true;
+                        return format!("_aws_sqs_get_queue_url_raw({})", a[0])
+                    }
+
+                    // AWS フォールバック
                     ("AWS", name) => {
+                        self.needs_boto3 = true;
                         return format!("_aws_{}({})", name, a.join(", "))
                     }
 
@@ -1160,6 +1252,251 @@ impl Emitter {
         self.indent -= 1;
         self.blank();
     }
+
+    // ── v11.4.0: AWS ヘルパー ────────────────────────────────────────────────
+
+    fn emit_aws_s3_helpers(&mut self) {
+        self.line("def _aws_s3_put_object_raw(bucket: str, key: str, body: str):");
+        self.indent += 1;
+        self.line("try:");
+        self.indent += 1;
+        self.line("boto3.client(\"s3\").put_object(Bucket=bucket, Key=key, Body=body.encode(\"utf-8\"))");
+        self.line("return Ok(None)");
+        self.indent -= 1;
+        self.line("except Exception as _e:");
+        self.indent += 1;
+        self.line("return Err(str(_e))");
+        self.indent -= 1;
+        self.indent -= 1;
+        self.blank();
+        self.line("def _aws_s3_get_object_raw(bucket: str, key: str):");
+        self.indent += 1;
+        self.line("try:");
+        self.indent += 1;
+        self.line("_body = boto3.client(\"s3\").get_object(Bucket=bucket, Key=key)[\"Body\"].read().decode(\"utf-8\")");
+        self.line("return Ok(_body)");
+        self.indent -= 1;
+        self.line("except Exception as _e:");
+        self.indent += 1;
+        self.line("return Err(str(_e))");
+        self.indent -= 1;
+        self.indent -= 1;
+        self.blank();
+        self.line("def _aws_s3_list_objects_raw(bucket: str, prefix: str):");
+        self.indent += 1;
+        self.line("try:");
+        self.indent += 1;
+        self.line("_resp = boto3.client(\"s3\").list_objects_v2(Bucket=bucket, Prefix=prefix)");
+        self.line("return Ok([_o[\"Key\"] for _o in _resp.get(\"Contents\", [])])");
+        self.indent -= 1;
+        self.line("except Exception as _e:");
+        self.indent += 1;
+        self.line("return Err(str(_e))");
+        self.indent -= 1;
+        self.indent -= 1;
+        self.blank();
+        self.line("def _aws_s3_delete_object_raw(bucket: str, key: str):");
+        self.indent += 1;
+        self.line("try:");
+        self.indent += 1;
+        self.line("boto3.client(\"s3\").delete_object(Bucket=bucket, Key=key)");
+        self.line("return Ok(None)");
+        self.indent -= 1;
+        self.line("except Exception as _e:");
+        self.indent += 1;
+        self.line("return Err(str(_e))");
+        self.indent -= 1;
+        self.indent -= 1;
+        self.blank();
+        self.line("def _aws_s3_head_bucket_raw(bucket: str):");
+        self.indent += 1;
+        self.line("try:");
+        self.indent += 1;
+        self.line("boto3.client(\"s3\").head_bucket(Bucket=bucket)");
+        self.line("return Ok(None)");
+        self.indent -= 1;
+        self.line("except Exception as _e:");
+        self.indent += 1;
+        self.line("return Err(str(_e))");
+        self.indent -= 1;
+        self.indent -= 1;
+        self.blank();
+        self.line("def _aws_s3_get_object_base64_raw(bucket: str, key: str):");
+        self.indent += 1;
+        self.line("try:");
+        self.indent += 1;
+        self.line("_data = boto3.client(\"s3\").get_object(Bucket=bucket, Key=key)[\"Body\"].read()");
+        self.line("return Ok(_base64_mod.b64encode(_data).decode(\"utf-8\"))");
+        self.indent -= 1;
+        self.line("except Exception as _e:");
+        self.indent += 1;
+        self.line("return Err(str(_e))");
+        self.indent -= 1;
+        self.indent -= 1;
+        self.blank();
+        self.line("def _aws_s3_put_bytes_raw(bucket: str, key: str, body_list):");
+        self.indent += 1;
+        self.line("try:");
+        self.indent += 1;
+        self.line("boto3.client(\"s3\").put_object(Bucket=bucket, Key=key, Body=bytes(body_list))");
+        self.line("return Ok(None)");
+        self.indent -= 1;
+        self.line("except Exception as _e:");
+        self.indent += 1;
+        self.line("return Err(str(_e))");
+        self.indent -= 1;
+        self.indent -= 1;
+        self.blank();
+    }
+
+    fn emit_aws_dynamo_helpers(&mut self) {
+        // 型変換ユーティリティ
+        self.line("def _dynamo_serialize(d: dict) -> dict:");
+        self.indent += 1;
+        self.line("_result = {}");
+        self.line("for k, v in d.items():");
+        self.indent += 1;
+        self.line("if isinstance(v, bool):            _result[k] = {\"BOOL\": v}");
+        self.line("elif isinstance(v, (int, float)):  _result[k] = {\"N\": str(v)}");
+        self.line("else:                              _result[k] = {\"S\": str(v)}");
+        self.indent -= 1;
+        self.line("return _result");
+        self.indent -= 1;
+        self.blank();
+        self.line("def _dynamo_deserialize(item: dict) -> dict:");
+        self.indent += 1;
+        self.line("_result = {}");
+        self.line("for k, v in item.items():");
+        self.indent += 1;
+        self.line("if \"S\" in v:     _result[k] = v[\"S\"]");
+        self.line("elif \"N\" in v:   _result[k] = float(v[\"N\"]) if \".\" in v[\"N\"] else int(v[\"N\"])");
+        self.line("elif \"BOOL\" in v: _result[k] = v[\"BOOL\"]");
+        self.line("else:            _result[k] = str(v)");
+        self.indent -= 1;
+        self.line("return _result");
+        self.indent -= 1;
+        self.blank();
+        self.line("def _aws_dynamo_scan_raw(table: str):");
+        self.indent += 1;
+        self.line("try:");
+        self.indent += 1;
+        self.line("_items = boto3.client(\"dynamodb\").scan(TableName=table)[\"Items\"]");
+        self.line("return Ok([_dynamo_deserialize(_i) for _i in _items])");
+        self.indent -= 1;
+        self.line("except Exception as _e:");
+        self.indent += 1;
+        self.line("return Err(str(_e))");
+        self.indent -= 1;
+        self.indent -= 1;
+        self.blank();
+        self.line("def _aws_dynamo_get_item_raw(table: str, key_dict: dict):");
+        self.indent += 1;
+        self.line("try:");
+        self.indent += 1;
+        self.line("_resp = boto3.client(\"dynamodb\").get_item(TableName=table, Key=_dynamo_serialize(key_dict))");
+        self.line("_item = _resp.get(\"Item\")");
+        self.line("return Ok(_dynamo_deserialize(_item) if _item else None)");
+        self.indent -= 1;
+        self.line("except Exception as _e:");
+        self.indent += 1;
+        self.line("return Err(str(_e))");
+        self.indent -= 1;
+        self.indent -= 1;
+        self.blank();
+        self.line("def _aws_dynamo_put_item_raw(table: str, item_dict: dict):");
+        self.indent += 1;
+        self.line("try:");
+        self.indent += 1;
+        self.line("boto3.client(\"dynamodb\").put_item(TableName=table, Item=_dynamo_serialize(item_dict))");
+        self.line("return Ok(None)");
+        self.indent -= 1;
+        self.line("except Exception as _e:");
+        self.indent += 1;
+        self.line("return Err(str(_e))");
+        self.indent -= 1;
+        self.indent -= 1;
+        self.blank();
+        self.line("def _aws_dynamo_delete_item_raw(table: str, key_dict: dict):");
+        self.indent += 1;
+        self.line("try:");
+        self.indent += 1;
+        self.line("boto3.client(\"dynamodb\").delete_item(TableName=table, Key=_dynamo_serialize(key_dict))");
+        self.line("return Ok(None)");
+        self.indent -= 1;
+        self.line("except Exception as _e:");
+        self.indent += 1;
+        self.line("return Err(str(_e))");
+        self.indent -= 1;
+        self.indent -= 1;
+        self.blank();
+        self.line("def _aws_dynamo_query_raw(table: str, filter_expr: str):");
+        self.indent += 1;
+        self.line("try:");
+        self.indent += 1;
+        self.line("_items = boto3.client(\"dynamodb\").query(TableName=table, FilterExpression=filter_expr)[\"Items\"]");
+        self.line("return Ok([_dynamo_deserialize(_i) for _i in _items])");
+        self.indent -= 1;
+        self.line("except Exception as _e:");
+        self.indent += 1;
+        self.line("return Err(str(_e))");
+        self.indent -= 1;
+        self.indent -= 1;
+        self.blank();
+    }
+
+    fn emit_aws_sqs_helpers(&mut self) {
+        self.line("def _aws_sqs_send_message_raw(url: str, body: str):");
+        self.indent += 1;
+        self.line("try:");
+        self.indent += 1;
+        self.line("_resp = boto3.client(\"sqs\").send_message(QueueUrl=url, MessageBody=body)");
+        self.line("return Ok(_resp.get(\"MessageId\", \"\"))");
+        self.indent -= 1;
+        self.line("except Exception as _e:");
+        self.indent += 1;
+        self.line("return Err(str(_e))");
+        self.indent -= 1;
+        self.indent -= 1;
+        self.blank();
+        self.line("def _aws_sqs_receive_messages_raw(url: str, max_count: int):");
+        self.indent += 1;
+        self.line("try:");
+        self.indent += 1;
+        self.line("_resp = boto3.client(\"sqs\").receive_message(QueueUrl=url, MaxNumberOfMessages=max_count)");
+        self.line("return Ok(_resp.get(\"Messages\", []))");
+        self.indent -= 1;
+        self.line("except Exception as _e:");
+        self.indent += 1;
+        self.line("return Err(str(_e))");
+        self.indent -= 1;
+        self.indent -= 1;
+        self.blank();
+        self.line("def _aws_sqs_delete_message_raw(url: str, receipt: str):");
+        self.indent += 1;
+        self.line("try:");
+        self.indent += 1;
+        self.line("boto3.client(\"sqs\").delete_message(QueueUrl=url, ReceiptHandle=receipt)");
+        self.line("return Ok(None)");
+        self.indent -= 1;
+        self.line("except Exception as _e:");
+        self.indent += 1;
+        self.line("return Err(str(_e))");
+        self.indent -= 1;
+        self.indent -= 1;
+        self.blank();
+        self.line("def _aws_sqs_get_queue_url_raw(name: str):");
+        self.indent += 1;
+        self.line("try:");
+        self.indent += 1;
+        self.line("return Ok(boto3.client(\"sqs\").get_queue_url(QueueName=name)[\"QueueUrl\"])");
+        self.indent -= 1;
+        self.line("except Exception as _e:");
+        self.indent += 1;
+        self.line("return Err(str(_e))");
+        self.indent -= 1;
+        self.indent -= 1;
+        self.blank();
+    }
 }
 
 // ── Util ──────────────────────────────────────────────────────────────────────
@@ -1528,5 +1865,95 @@ fn serialize(rows: List<TxnRow>) -> String !IO {
         // import が生成されていること
         assert!(out.contains("import csv as _csv_mod"), "csv import:\n{}", out);
         assert!(out.contains("import json as _json_mod"), "json import:\n{}", out);
+    }
+}
+
+// ── v11400_tests (v11.4.0) ────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod v11400_tests {
+    use super::*;
+
+    #[test]
+    fn transpile_aws_s3_put() {
+        let src = r#"fn store(bucket: String, key: String, body: String) -> Unit !AWS {
+  AWS.s3_put_object_raw(bucket, key, body)
+}"#;
+        let out = emit_python_str(src);
+        assert!(out.contains("_aws_s3_put_object_raw(bucket, key, body)"), "call site:\n{}", out);
+        assert!(out.contains("import boto3"), "boto3 import:\n{}", out);
+        assert!(out.contains("def _aws_s3_put_object_raw"), "helper def:\n{}", out);
+        assert!(out.contains("put_object("), "put_object call:\n{}", out);
+    }
+
+    #[test]
+    fn transpile_aws_s3_get() {
+        let src = r#"fn load(bucket: String, key: String) -> Unit !AWS {
+  AWS.s3_get_object_raw(bucket, key)
+}"#;
+        let out = emit_python_str(src);
+        assert!(out.contains("_aws_s3_get_object_raw(bucket, key)"), "call site:\n{}", out);
+        assert!(out.contains("def _aws_s3_get_object_raw"), "helper def:\n{}", out);
+        assert!(out.contains("get_object("), "get_object call:\n{}", out);
+        assert!(out.contains("decode(\"utf-8\")"), "decode:\n{}", out);
+    }
+
+    #[test]
+    fn transpile_aws_s3_list() {
+        let src = r#"fn list_keys(bucket: String, prefix: String) -> Unit !AWS {
+  AWS.s3_list_objects_raw(bucket, prefix)
+}"#;
+        let out = emit_python_str(src);
+        assert!(out.contains("_aws_s3_list_objects_raw(bucket, prefix)"), "call site:\n{}", out);
+        assert!(out.contains("def _aws_s3_list_objects_raw"), "helper def:\n{}", out);
+        assert!(out.contains("list_objects_v2("), "list_objects_v2 call:\n{}", out);
+    }
+
+    #[test]
+    fn transpile_aws_dynamo_scan() {
+        let src = r#"fn scan_table(table: String) -> Unit !AWS {
+  AWS.dynamo_scan_raw(table)
+}"#;
+        let out = emit_python_str(src);
+        assert!(out.contains("_aws_dynamo_scan_raw(table)"), "call site:\n{}", out);
+        assert!(out.contains("def _aws_dynamo_scan_raw"), "helper def:\n{}", out);
+        assert!(out.contains("def _dynamo_deserialize"), "deserialize helper:\n{}", out);
+        assert!(out.contains("scan(TableName="), "scan call:\n{}", out);
+    }
+
+    #[test]
+    fn transpile_aws_sqs_send() {
+        let src = r#"fn send(url: String, body: String) -> Unit !AWS {
+  AWS.sqs_send_message_raw(url, body)
+}"#;
+        let out = emit_python_str(src);
+        assert!(out.contains("_aws_sqs_send_message_raw(url, body)"), "call site:\n{}", out);
+        assert!(out.contains("def _aws_sqs_send_message_raw"), "helper def:\n{}", out);
+        assert!(out.contains("send_message("), "send_message call:\n{}", out);
+    }
+
+    #[test]
+    fn transpile_analyze_fav_aws_smoke() {
+        let src = r#"
+type TxnRow = {
+  transaction_id: String
+  amount: Float
+  region: String
+}
+
+fn write_output(bucket: String, key: String, rows: List<TxnRow>) -> Unit !AWS {
+  match AWS.s3_put_object_raw(bucket, key, Schema.to_json_array(rows, "TxnRow")) {
+    Ok(_) => ()
+    Err(_) => ()
+  }
+}
+"#;
+        let out = emit_python_str(src);
+        assert!(out.contains("import boto3"), "boto3 import:\n{}", out);
+        assert!(out.contains("def _aws_s3_put_object_raw"), "s3 helper:\n{}", out);
+        assert!(out.contains("def _schema_to_json_array"), "schema helper:\n{}", out);
+        assert!(out.contains("_SCHEMA_REGISTRY"), "schema registry:\n{}", out);
+        assert!(out.contains("put_object(Bucket="), "put_object call:\n{}", out);
+        assert!(out.contains("boto3.client(\"s3\")"), "boto3 s3 client:\n{}", out);
     }
 }

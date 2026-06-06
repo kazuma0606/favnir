@@ -20449,6 +20449,25 @@ pub fn cmd_transpile(args: &[String]) {
         std::process::exit(1);
     }
     println!("transpiled: {} -> {}", input, out);
+
+    // Phase G: pyproject.toml 生成（同ディレクトリ、既存の場合はスキップ）
+    let py_dir = std::path::Path::new(&out)
+        .parent()
+        .unwrap_or(std::path::Path::new("."));
+    let pyproject_path = py_dir.join("pyproject.toml");
+    if !pyproject_path.exists() {
+        let boto3_dep = if py_src.contains("import boto3") {
+            "    \"boto3>=1.34\",\n"
+        } else {
+            ""
+        };
+        let content = format!(
+            "[project]\nname = \"transpiled\"\nversion = \"0.1.0\"\nrequires-python = \">=3.11\"\ndependencies = [\n{}]\n\n[build-system]\nrequires = [\"hatchling\"]\nbuild-backend = \"hatchling.build\"\n",
+            boto3_dep
+        );
+        let _ = std::fs::write(&pyproject_path, &content);
+        println!("generated: {}", pyproject_path.display());
+    }
 }
 
 // ── v11100_tests (v11.1.0) ────────────────────────────────────────────────────

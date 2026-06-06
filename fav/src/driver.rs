@@ -20467,13 +20467,42 @@ pub fn build_readme_content(input_path: &str, name: &str) -> String {
     )
 }
 
+/// --lineage フラグ用: LineageReport → fn/stage 名 → コメント文字列 (v11.8.0)
+fn build_lineage_comments(
+    report: &crate::lineage::LineageReport,
+) -> std::collections::HashMap<String, String> {
+    report.transformations.iter().map(|entry| {
+        let effects = if entry.effects.is_empty() {
+            "Pure".to_string()
+        } else {
+            entry.effects.join(", ")
+        };
+        let sources = if entry.sources.is_empty() { "-".to_string() }
+                      else { entry.sources.join(", ") };
+        let sinks = if entry.sinks.is_empty() { "-".to_string() }
+                    else { entry.sinks.join(", ") };
+        let comment = format!(
+            "# [lineage] effects: {} | sources: {} | sinks: {}",
+            effects, sources, sinks
+        );
+        (entry.name.clone(), comment)
+    }).collect()
+}
+
+/// テスト用 pub wrapper for check_source_str (v11.8.0)
+pub fn check_source_str_pub(src: &str) -> Vec<crate::middle::checker::TypeError> {
+    check_source_str(src)
+}
+
 pub fn cmd_transpile(args: &[String]) {
     let mut target: Option<String> = None;
     let mut out_path: Option<String> = None;
     let mut out_dir: Option<String> = None;
     let mut input_path: Option<String> = None;
-    let mut do_check = false;
-    let mut do_run = false;
+    let mut do_check    = false;
+    let mut do_run      = false;
+    let mut do_no_check = false;
+    let mut do_lineage  = false;
     let mut i = 0usize;
     while i < args.len() {
         match args[i].as_str() {
@@ -20489,12 +20518,10 @@ pub fn cmd_transpile(args: &[String]) {
                 i += 1;
                 out_dir = args.get(i).cloned();
             }
-            "--check" => {
-                do_check = true;
-            }
-            "--run" => {
-                do_run = true;
-            }
+            "--check"    => { do_check    = true; }
+            "--run"      => { do_run      = true; }
+            "--no-check" => { do_no_check = true; }
+            "--lineage"  => { do_lineage  = true; }
             other => {
                 input_path = Some(other.to_string());
             }
@@ -20539,7 +20566,28 @@ pub fn cmd_transpile(args: &[String]) {
             std::process::exit(1);
         }
     };
-    let py_src = crate::emit_python::emit_python(&prog, &input);
+
+    // ── 型チェック（--no-check でスキップ）v11.8.0 ───────────────────────────
+    if !do_no_check {
+        let errors = check_source_str(&src);
+        if !errors.is_empty() {
+            for e in &errors {
+                eprintln!("{}", format_diagnostic(&src, e));
+            }
+            eprintln!("error: {} type error(s); Python generation blocked", errors.len());
+            eprintln!("       (use --no-check to bypass)");
+            std::process::exit(1);
+        }
+    }
+
+    // ── Python 生成（--lineage で lineage コメント付き）v11.8.0 ──────────────
+    let py_src = if do_lineage {
+        let report = crate::lineage::lineage_analysis(&prog);
+        let comments = build_lineage_comments(&report);
+        crate::emit_python::emit_python_with_lineage(&prog, &input, comments)
+    } else {
+        crate::emit_python::emit_python(&prog, &input)
+    };
 
     // basename: "pipeline.fav" → "pipeline"
     let basename = std::path::Path::new(&input)
@@ -20904,5 +20952,90 @@ mod v11700_tests {
         let content2 = build_pyproject_content(py_empty, "demo");
         assert!(!content2.contains("boto3"), "no boto3:\n{}", content2);
         assert!(!content2.contains("psycopg2"), "no psycopg2:\n{}", content2);
+    }
+}
+
+// ── v11800_tests (v11.8.0) — checker 統合 + lineage コメント ─────────────────
+
+#[cfg(test)]
+mod v11800_tests {
+    use crate::emit_python::{emit_python_str, emit_python_with_lineage};
+    use crate::frontend::parser::Parser;
+    use crate::lineage::lineage_analysis;
+    use std::collections::HashMap;
+
+    fn make_lineage_comments(src: &str) -> HashMap<String, String> {
+        let prog = Parser::parse_str(src, "<test>").unwrap();
+        let report = lineage_analysis(&prog);
+        report.transformations.iter().map(|entry| {
+            let effects = if entry.effects.is_empty() { "Pure".to_string() }
+                          else { entry.effects.join(", ") };
+            let sources = if entry.sources.is_empty() { "-".to_string() }
+                          else { entry.sources.join(", ") };
+            let sinks   = if entry.sinks.is_empty()   { "-".to_string() }
+                          else { entry.sinks.join(", ") };
+            let comment = format!(
+                "# [lineage] effects: {} | sources: {} | sinks: {}",
+                effects, sources, sinks
+            );
+            (entry.name.clone(), comment)
+        }).collect()
+    }
+
+    #[test]
+    fn transpile_blocks_on_type_error() {
+        // !Postgres なし → E0315 が check_source_str で検出される
+        let src = "fn run(sql: String) -> Result<String, String> {\n  Postgres.query_raw(sql, \"[]\")\n}";
+        let errors = crate::driver::check_source_str_pub(src);
+        assert!(!errors.is_empty(), "expected type errors for missing !Postgres");
+    }
+
+    #[test]
+    fn transpile_type_check_passes_valid() {
+        // 正常コードではエラーなし
+        let src = "fn greet(name: String) -> String {\n  name\n}";
+        let errors = crate::driver::check_source_str_pub(src);
+        assert!(errors.is_empty(), "expected no errors: {:?}", errors);
+    }
+
+    #[test]
+    fn transpile_lineage_comment_effects() {
+        // --lineage 相当: lineage コメントが fn の前に付く
+        let src = "fn fetch(sql: String) -> Result<String, String> !Postgres {\n  Postgres.query_raw(sql, \"[]\")\n}";
+        let prog = Parser::parse_str(src, "<test>").unwrap();
+        let comments = make_lineage_comments(src);
+        let out = emit_python_with_lineage(&prog, "<test>", comments);
+        assert!(out.contains("# [lineage] effects:"), "lineage comment:\n{}", out);
+    }
+
+    #[test]
+    fn transpile_lineage_comment_pure_fn() {
+        // エフェクトなし fn: lineage_analysis は effects なし fn を含まないため
+        // テスト側で直接 "Pure" コメントを設定して挿入を確認
+        let src = "fn add(a: Int, b: Int) -> Int {\n  a\n}";
+        let prog = Parser::parse_str(src, "<test>").unwrap();
+        let mut comments = HashMap::new();
+        comments.insert("add".to_string(), "# [lineage] effects: Pure | sources: - | sinks: -".to_string());
+        let out = emit_python_with_lineage(&prog, "<test>", comments);
+        assert!(out.contains("# [lineage] effects: Pure"), "pure fn:\n{}", out);
+    }
+
+    #[test]
+    fn transpile_no_check_skips_error() {
+        // --no-check 相当: emit_python_str は型チェックを呼ばないため、
+        // 型エラーのあるコードでも Python が生成される
+        let src = "fn run(sql: String) -> Result<String, String> {\n  Postgres.query_raw(sql, \"[]\")\n}";
+        let out = emit_python_str(src);
+        assert!(out.contains("def run("), "python generated despite type error:\n{}", out);
+    }
+
+    #[test]
+    fn transpile_lineage_postgres_fn() {
+        // !Postgres fn に !Postgres エフェクトコメントが付く
+        let src = "fn insert(sql: String) -> Result<String, String> !Postgres {\n  Postgres.execute_raw(sql, \"[]\")\n}";
+        let prog = Parser::parse_str(src, "<test>").unwrap();
+        let comments = make_lineage_comments(src);
+        let out = emit_python_with_lineage(&prog, "<test>", comments);
+        assert!(out.contains("!Postgres"), "Postgres in lineage:\n{}", out);
     }
 }

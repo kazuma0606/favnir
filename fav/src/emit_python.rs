@@ -10,6 +10,7 @@ use crate::ast::{
     self, BinOp, Block, Effect, Expr, FnDef, FStringPart, Lit, MatchArm, Pattern, Program, Stmt,
     TypeBody, TypeDef, TypeExpr,
 };
+use std::collections::HashMap;
 
 // ── Emitter ────────────────────────────────────────────────────────────────────
 
@@ -33,6 +34,8 @@ pub struct Emitter {
     // v11.6.0: Postgres / psycopg2 フラグ
     needs_psycopg2:       bool,
     needs_pg_helpers:     bool,
+    // v11.8.0: lineage コメント（fn/stage 名 → コメント文字列）
+    lineage_comments: HashMap<String, String>,
     // 型名レジストリ（_SCHEMA_REGISTRY 生成用）
     type_names: Vec<String>,
 }
@@ -56,6 +59,7 @@ impl Emitter {
             needs_aws_sqs:        false,
             needs_psycopg2:       false,
             needs_pg_helpers:     false,
+            lineage_comments:     HashMap::new(),
             type_names:           Vec::new(),
         }
     }
@@ -94,6 +98,17 @@ pub fn emit_python_str(fav_src: &str) -> String {
     emit_python(&prog, "<test>")
 }
 
+/// --lineage フラグ用: lineage コメント付きで Python を生成 (v11.8.0)
+pub fn emit_python_with_lineage(
+    prog: &Program,
+    source_path: &str,
+    comments: HashMap<String, String>,
+) -> String {
+    let mut e = Emitter::new();
+    e.lineage_comments = comments;
+    e.emit_program(prog, source_path)
+}
+
 // ── Program ────────────────────────────────────────────────────────────────────
 
 impl Emitter {
@@ -106,6 +121,7 @@ impl Emitter {
         // Phase 2: fn / stage / seq をサブエミッターで先行処理してフラグ検出
         let mut sub = Emitter::new();
         sub.type_names = self.type_names.clone();
+        sub.lineage_comments = self.lineage_comments.clone();
         let mut has_main = false;
         for item in &prog.items {
             match item {
@@ -286,6 +302,10 @@ fn map_effect(e: &Effect) -> &'static str {
 
 impl Emitter {
     fn emit_fn_def(&mut self, fd: &FnDef) {
+        // lineage コメント（--lineage 指定時のみ）
+        if let Some(comment) = self.lineage_comments.get(&fd.name).cloned() {
+            self.line(&comment);
+        }
         // エフェクトコメント
         if !fd.effects.is_empty() {
             let eff_strs: Vec<&str> = fd.effects.iter().map(|e| {
@@ -1062,6 +1082,10 @@ impl Emitter {
 
 impl Emitter {
     fn emit_trf_def(&mut self, td: &ast::TrfDef) {
+        // lineage コメント（--lineage 指定時のみ）
+        if let Some(comment) = self.lineage_comments.get(&td.name).cloned() {
+            self.line(&comment);
+        }
         // エフェクトコメント
         if !td.effects.is_empty() {
             let eff_strs: Vec<&str> = td.effects.iter().map(|e| {

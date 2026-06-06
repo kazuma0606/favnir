@@ -1,55 +1,61 @@
 # Favnir v12.0.0 Tasks
 
 Date: 2026-06-06
-Theme: Python トランスパイラ完成宣言 + fav2py E2E PASS
+Theme: Python トランスパイラ完成宣言
 
 ---
 
-## Phase A — fav2py E2E 最終確認
+## Phase A — CHANGELOG.md 更新
 
-- [ ] A-1: `infra/e2e-demo/fav2py/scripts/verify.sh` — PASS=5 以上を確認
-  - [1] Fav ネイティブ版の S3 出力が存在する
-  - [2] Python トランスパイル版の S3 出力が存在する
-  - [3] 両者の集計結果（JSON）が一致する
-  - [4] RDS への INSERT 件数が一致する
-  - [5] ECS タスクが正常終了している
-- [ ] A-2: `infra/e2e-demo/fav2py/tasks.md` — Phase 8 完了確認
+- [ ] A-1: v11.1.0〜v11.9.0 の各エントリを CHANGELOG.md に追記
+- [ ] A-2: v12.0.0 エントリを CHANGELOG.md に追記（最上部）
 
 ---
 
-## Phase B — CHANGELOG.md 更新
+## Phase B — README.md 更新
 
-- [ ] B-1: `CHANGELOG.md` 先頭に `[v12.0.0]` エントリ追加
-- [ ] B-2: `[v11.9.0]` 〜 `[v11.1.0]` の全エントリを追記
-
----
-
-## Phase C — README.md 更新
-
-- [ ] C-1: 機能一覧に `fav transpile --target python` を追加
-- [ ] C-2: ロードマップ表に `v11.1.0〜v11.9.0` / `v12.0.0` 行を追記
-- [ ] C-3: エフェクト → Python ライブラリ対応表を追加
+- [ ] B-1: README.md「主要機能」テーブルに `fav transpile --target python` を追記
 
 ---
 
-## Phase D — ドキュメント
+## Phase C — site/content/docs/transpile/python.mdx
 
-- [ ] D-1: `site/content/docs/transpile/python.mdx` 新規作成
-  - `fav transpile --target python` 使用方法
-  - uv との組み合わせ（仮想環境 → 検証 → デプロイ）
+- [ ] C-1: `site/content/docs/transpile/` ディレクトリ作成
+- [ ] C-2: `site/content/docs/transpile/python.mdx` 新規作成
+  - 概要・インストール・基本的な使い方
+  - `--out-dir` / `--check` / `--run` オプション
   - エフェクト → Python ライブラリ対応表
+  - `!Postgres` → psycopg2 変換例
+  - `!AWS` → boto3 変換例
+  - lineage コメント（`--lineage`）
   - fav2py E2E デモへのリンク
-- [ ] D-2: `site/content/docs/effects/postgres.mdx` 新規作成
-  - `!Postgres` エフェクトリファレンス
-  - `fav.toml [postgres]` 設定
-  - `fav infer --from postgres` 使用例
 
 ---
 
-## 完了条件
+## Phase D — Rust テスト（2 件）
+
+- [ ] D-1: `driver.rs` に `v12000_tests` モジュール追加
+  - [ ] `version_is_12_0_0` — `CARGO_PKG_VERSION == "12.0.0"`
+  - [ ] `python_mdx_doc_exists` — `site/content/docs/transpile/python.mdx` の存在確認
+- [ ] D-2: `cargo test v12000` — 2 件通過
+- [ ] D-3: `cargo test --lib` — 1290 件以上通過
+
+---
+
+## Phase E — バージョン更新 + コミット
+
+- [ ] E-1: `fav/Cargo.toml` version → `"12.0.0"`
+- [ ] E-2: `cargo build` で `Cargo.lock` 更新
+- [ ] E-3: `git commit & push` — CI 確認
+
+---
+
+## 完了条件サマリー
 
 | 確認項目 | 状態 |
 |---|---|
-| fav2py E2E — PASS=5 以上 | |
-| `fav transpile --target python` ドキュメント公開 | |
-| CHANGELOG / README 更新済み | |
+| CHANGELOG.md に v11.1.0〜v12.0.0 全エントリ記載 | |
+| README.md に Python トランスパイラ追記 | |
+| `site/content/docs/transpile/python.mdx` 作成 | |
+| `cargo test v12000` 2 件通過 | |
+| `cargo test --lib` 1290 件以上通過 | |

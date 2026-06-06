@@ -4,6 +4,174 @@ Favnir のバージョン履歴。形式は [Keep a Changelog](https://keepachan
 
 ---
 
+## [v12.0.0] — 2026-06-06
+
+### Added
+- `site/content/docs/transpile/python.mdx` — Python トランスパイラ公式ドキュメント（使用方法・エフェクト対応表・変換例・E2E デモリンク）
+- Python トランスパイラ完成宣言（v11.1.0〜v11.9.0 の全機能が揃った）
+
+### Changed
+- README.md に `fav transpile --target python` 機能行を追記
+- CHANGELOG に v11.1.0〜v11.9.0 の全履歴を追記
+
+### Notes
+- テスト: 707 件（v12000_tests 2 件追加）
+
+---
+
+## [v11.9.0] — 2026-06-06
+
+### Added
+- `infra/e2e-demo/fav2py/` — Fav ネイティブ vs Python トランスパイル E2E インフラ
+  - `src/pipeline.fav` — LoadAndInsert |> Aggregate |> SaveResult（RDS Postgres）
+  - `src/sample.csv` — 103 行サンプルデータ（region × category × amount）
+  - `terraform/main.tf` — VPC / RDS PostgreSQL (t3.micro) / ECS Fargate x2 / ECR
+  - `terraform/iam.tf` — ECS 実行ロール + タスクロール（S3 書き込み）
+  - `terraform/variables.tf` / `terraform/outputs.tf`
+  - `scripts/upload.sh` — Docker build + ECR push + S3 source upload
+  - `scripts/run.sh` — terraform apply → ECS タスク x2 起動 → verify.sh 呼び出し
+  - `scripts/verify.sh` — S3 最新 2 件 JSON 比較（native == python）
+  - `Dockerfile` — Ubuntu 22.04 + uv + psycopg2-binary + fav binary
+- `driver.rs` `v11900_tests` — `fav2py_e2e_demo_structure` / `fav2py_pipeline_fav_transpiles`
+
+### Notes
+- テスト: 705 件
+
+---
+
+## [v11.8.0] — 2026-06-06
+
+### Added
+- `fav transpile --no-check` オプション（型チェックスキップ）
+- `fav transpile --lineage` オプション（生成 Python コードに lineage コメント付与）
+- `emit_python.rs` `emit_python_with_lineage(prog, path, HashMap<String,String>) -> String`
+- `emit_python.rs` `Emitter` に `lineage_comments: HashMap<String,String>` フィールド追加
+- `driver.rs` `build_lineage_comments(report: &LineageReport) -> HashMap<String,String>`
+- `driver.rs` `check_source_str_pub(src: &str) -> Vec<TypeError>`（pub ラッパー）
+- `driver.rs` `v11800_tests` — 6 件（checker 統合 / lineage コメント検証）
+
+### Changed
+- `fav transpile` 実行前に `checker.fav` で型チェックを走らせる（型エラーで Python 生成をブロック）
+
+### Notes
+- テスト: 703 件
+
+---
+
+## [v11.7.0] — 2026-06-06
+
+### Added
+- `fav transpile --out-dir <dir>` — `main.py` + `pyproject.toml` + `README.md` を出力ディレクトリに生成
+- `fav transpile --check` — `python -m py_compile` による構文検証
+- `fav transpile --run` — 生成後に `uv run main.py` まで一括実行
+- `driver.rs` `build_pyproject_content(py_src, name) -> String`（boto3 / psycopg2 依存を自動検出）
+- `driver.rs` `build_readme_content(input_path, name) -> String`
+- `driver.rs` `v11700_tests` — 6 件（pyproject 生成 / README 生成 / uv フラグ検証）
+
+### Notes
+- テスト: 697 件
+
+---
+
+## [v11.6.0] — 2026-06-06
+
+### Added
+- `emit_python.rs` `!Postgres` → psycopg2 変換
+  - `_pg_connect()` — `DATABASE_URL` または `PGHOST`/`PGPORT`/etc. から接続
+  - `_pg_execute(sql, params)` — INSERT/UPDATE/DELETE ヘルパー
+  - `_pg_query(sql, params)` — SELECT → `RealDictCursor` ヘルパー
+  - `Postgres.execute_raw` → `_pg_execute(sql, params)`
+  - `Postgres.query_raw` → `_pg_query(sql, params)`
+- `emit_python.rs` `needs_psycopg2` / `needs_pg_helpers` フラグ追加（2-pass 検出）
+- `pyproject.toml` 生成時に `import psycopg2` 検出 → `psycopg2-binary>=2.9` 依存を自動追加
+- `driver.rs` `v11600_tests` — 6 件
+
+### Notes
+- テスト: 691 件
+
+---
+
+## [v11.5.0] — 2026-06-06
+
+### Added
+- `Effect::Postgres` 追加（ast.rs / parser.rs / fmt.rs / lineage.rs / driver.rs / ast_lower_checker.rs / checker.rs / reachability.rs）
+- `vm.rs` `Postgres.execute_raw(sql, params_json) -> Result<Unit, String>`（tokio-postgres ベース）
+- `vm.rs` `Postgres.query_raw(sql, params_json) -> Result<String, String>`（JSON 文字列返却）
+- `vm.rs` `Postgres.query_typed_raw(sql, params_json) -> Result<String, String>`（型付きクエリ）
+- `toml.rs` `PostgresTomlConfig` — `fav.toml` `[postgres]` セクション解析
+- `runes/postgres/postgres.fav` — `execute` / `query<T>` Rune 実装（`!Postgres` エフェクト）
+- `checker.fav` `postgres_fn` / `builtin_ret_ty` / `ns_to_effect` に Postgres 追加
+- `driver.rs` `v11500_tests` — 6 件
+
+### Notes
+- テスト: 685 件
+
+---
+
+## [v11.4.0] — 2026-06-06
+
+### Added
+- `emit_python.rs` `!AWS` → boto3 変換
+  - `AWS.s3_put_object_raw(bucket, key, body)` → `boto3.client("s3").put_object(Bucket=..., Key=..., Body=...)`
+  - `AWS.s3_get_object_raw(bucket, key)` → `boto3.client("s3").get_object(Bucket=..., Key=...)["Body"].read()`
+- `emit_python.rs` `needs_boto3` フラグ追加（2-pass 検出）
+- `pyproject.toml` 生成時に `import boto3` 検出 → `boto3>=1.34` 依存を自動追加
+- `driver.rs` `v11400_tests` — 4 件
+
+### Notes
+- テスト: 679 件
+
+---
+
+## [v11.3.0] — 2026-06-06
+
+### Added
+- `emit_python.rs` `!IO` → Python 標準 I/O 変換
+  - `IO.println(s)` → `print(s)`
+  - `IO.read_file_raw(path)` → `open(path).read()`（try/except で `Result` を模倣）
+  - `Csv.parse_raw(text, ",", true)` → `csv.DictReader` 変換ヘルパー生成
+  - `Schema.adapt(raw, "T")` → dataclass 変換ヘルパー生成（`_adapt_T(d) -> T`）
+  - `Schema.to_json_array(rows, "T")` → `json.dumps([asdict(r) for r in rows])`
+- `driver.rs` `v11300_tests` — 4 件
+
+### Notes
+- テスト: 675 件
+
+---
+
+## [v11.2.0] — 2026-06-06
+
+### Added
+- `emit_python.rs` `stage` / `seq` → Python パイプライン変換
+  - `stage Foo: A -> B !Eff = |x| { ... }` → `def foo(x: A) -> B: ...`（エフェクトはコメント）
+  - `seq Pipeline = A |> B |> C` → `def pipeline(x): return c(b(a(x)))`
+- `fn main()` → `if __name__ == "__main__": main()`
+- `IO.argv()` → `sys.argv[1:]`
+- `List.map` / `List.filter` / `List.length` → Python リスト内包表記 / `filter` / `len`
+- `driver.rs` `v11200_tests` — 4 件
+
+### Notes
+- テスト: 671 件
+
+---
+
+## [v11.1.0] — 2026-06-06
+
+### Added
+- `src/emit_python.rs` 新規作成 — Favnir AST → Python コード生成基盤
+  - 型定義（`type Foo = { ... }`）→ `@dataclass class Foo`
+  - 基本式（Int / Float / String / Bool / List / if-else / binary ops）→ Python 式
+  - `fn` → `def`（引数型・戻り型をコメントで保持）
+  - `bind x <- expr` → `x = expr`（モナド脱糖）
+  - `match` → `if/elif/else`（Option / Result パターン）
+- `fav transpile --target python <file>` CLI エントリ（`cli.fav` の `CmdTranspile` + `driver.rs` の `cmd_transpile`）
+- `driver.rs` `v11100_tests` — 4 件
+
+### Notes
+- テスト: 667 件
+
+---
+
 ## [v11.0.0] — 2026-06-05
 
 ### Added

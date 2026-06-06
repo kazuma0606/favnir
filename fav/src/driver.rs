@@ -21040,6 +21040,22 @@ mod v11800_tests {
     }
 }
 
+// ── v12000_tests (v12.0.0) — Python トランスパイラ完成宣言 ────────────────────
+
+#[cfg(test)]
+mod v12000_tests {
+    #[test]
+    fn version_is_12_0_0() {
+        assert_eq!(env!("CARGO_PKG_VERSION"), "12.0.0");
+    }
+
+    #[test]
+    fn python_mdx_doc_exists() {
+        let path = std::path::Path::new("../site/content/docs/transpile/python.mdx");
+        assert!(path.exists(), "python.mdx not found at site/content/docs/transpile/python.mdx");
+    }
+}
+
 // ── v11900_tests (v11.9.0) — fav2py E2E インフラ構造確認 ─────────────────────
 
 #[cfg(test)]

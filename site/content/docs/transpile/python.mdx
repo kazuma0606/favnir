@@ -1,0 +1,280 @@
+---
+title: Python トランスパイラ
+description: fav transpile --target python — Favnir コードを Python + pyproject.toml に変換する
+---
+
+# Python トランスパイラ
+
+`fav transpile --target python` は Favnir のソースコードを Python コードに変換します。
+Favnir の型安全・エフェクト宣言・リネージをそのまま保ちながら、
+boto3 / psycopg2 / uv などの Python エコシステムに展開できます。
+
+---
+
+## なぜ Python トランスパイルか
+
+| 理由 | 説明 |
+|---|---|
+| **即日 AWS 対応** | Fav Rune が未対応の AWS サービス（DynamoDB, Kinesis, Bedrock 等）を boto3 経由で使える |
+| **既存インフラに乗せる** | Lambda zip / ECS / Glue など既存の Python インフラにそのまま置ける |
+| **uv で完結** | 仮想環境・依存解決・実行まで `uv` で一括管理 |
+| **型付き仕様書** | Favnir コードが「設計図」として残り、Python は実行基盤になる分業構造 |
+
+---
+
+## 事前条件
+
+- `fav` バイナリ（`cargo build --release` でビルド済み）
+- `uv`（`pip install uv` または [公式インストーラ](https://docs.astral.sh/uv/)）
+- Python 3.11 以上
+
+---
+
+## 基本的な使い方
+
+```bash
+fav transpile --target python pipeline.fav
+```
+
+標準出力に Python コードが出力されます。
+
+```bash
+# ファイルに保存
+fav transpile --target python pipeline.fav > main.py
+```
+
+---
+
+## `--out-dir` — uv プロジェクトとして出力
+
+```bash
+fav transpile --target python pipeline.fav --out-dir ./out
+```
+
+`./out/` に以下の 3 ファイルが生成されます:
+
+| ファイル | 内容 |
+|---|---|
+| `main.py` | トランスパイルされた Python コード |
+| `pyproject.toml` | uv 形式のプロジェクト定義（依存は自動検出） |
+| `README.md` | 生成元 `.fav` ファイルの情報 |
+
+---
+
+## `--check` — 構文検証
+
+```bash
+fav transpile --target python pipeline.fav --check
+```
+
+生成した Python コードを `python -m py_compile` で構文検証します。
+`python` が見つからない場合は警告を出してスキップします。
+
+---
+
+## `--run` — 生成 & 実行
+
+```bash
+fav transpile --target python pipeline.fav --out-dir ./out --run
+```
+
+`--out-dir` で生成後、`uv run main.py` まで一括実行します。
+`uv` が見つからない場合は exit 1 します。
+
+---
+
+## `--no-check` — 型チェックスキップ
+
+デフォルトでは `fav transpile` は実行前に `checker.fav` で型チェックを行い、
+型エラーがあれば Python 生成をブロックします。
+
+```bash
+# 型チェックをスキップして強制生成（デバッグ用）
+fav transpile --target python pipeline.fav --no-check
+```
+
+---
+
+## `--lineage` — lineage コメント付与
+
+```bash
+fav transpile --target python pipeline.fav --lineage
+```
+
+生成した各 Python 関数に `fav explain --lineage` と同等の lineage コメントを付与します。
+
+```python
+# [lineage] effects: !IO, !Postgres | sources: sample.csv | sinks: -
+def load_and_insert(path: str) -> int:
+    ...
+```
+
+---
+
+## エフェクト → Python ライブラリ対応表
+
+| Fav エフェクト | Python ライブラリ | `pyproject.toml` 依存（自動追加） |
+|---|---|---|
+| `!IO` | 標準ライブラリ（`os`, `sys`, `csv`, `json`） | なし |
+| `!AWS` | `boto3` | `boto3>=1.34` |
+| `!Postgres` | `psycopg2-binary` | `psycopg2-binary>=2.9` |
+| `!Snowflake` | （将来対応） | — |
+| `!Http` | （将来対応） | — |
+| `!Llm` | （将来対応） | — |
+
+---
+
+## `!Postgres` → psycopg2 変換例
+
+**Favnir:**
+
+```favnir
+import rune "postgres"
+
+type SummaryRow = {
+  region: String
+  category: String
+  total: Float
+}
+
+stage Aggregate: Unit -> List<SummaryRow> !Postgres = |_| {
+  postgres.query<SummaryRow>(
+    "SELECT region, category, SUM(amount) AS total FROM txn GROUP BY region, category",
+    "[]"
+  )
+}
+```
+
+**生成 Python:**
+
+```python
+import psycopg2
+import psycopg2.extras
+import os as _os
+from dataclasses import dataclass
+from typing import List
+
+@dataclass
+class SummaryRow:
+    region: str
+    category: str
+    total: float
+
+def _pg_connect():
+    url = _os.environ.get("DATABASE_URL")
+    if url:
+        return psycopg2.connect(url)
+    return psycopg2.connect(
+        host=_os.environ.get("PGHOST", "localhost"),
+        port=int(_os.environ.get("PGPORT", "5432")),
+        dbname=_os.environ.get("PGDATABASE", "postgres"),
+        user=_os.environ.get("PGUSER", "postgres"),
+        password=_os.environ.get("PGPASSWORD", ""),
+    )
+
+def _pg_query(sql, params_json):
+    conn = _pg_connect()
+    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    import json
+    params = json.loads(params_json)
+    cur.execute(sql, params)
+    rows = cur.fetchall()
+    conn.close()
+    return rows
+
+# effects: !Postgres
+def aggregate(_) -> List[SummaryRow]:
+    rows = _pg_query(
+        "SELECT region, category, SUM(amount) AS total FROM txn GROUP BY region, category",
+        "[]"
+    )
+    return [SummaryRow(**dict(r)) for r in rows]
+```
+
+接続情報は `DATABASE_URL` 環境変数または `PGHOST` / `PGPORT` / `PGDATABASE` / `PGUSER` / `PGPASSWORD` から読み込みます。
+
+---
+
+## `!AWS` → boto3 変換例
+
+**Favnir:**
+
+```favnir
+import rune "aws"
+
+stage SaveResult: String -> Unit !IO !AWS = |body| {
+  AWS.s3_put_object_raw("my-bucket", "results/out.json", body)
+}
+```
+
+**生成 Python:**
+
+```python
+import boto3
+
+# effects: !IO, !AWS
+def save_result(body: str) -> None:
+    boto3.client("s3").put_object(
+        Bucket="my-bucket",
+        Key="results/out.json",
+        Body=body.encode("utf-8"),
+    )
+```
+
+---
+
+## 生成される `pyproject.toml`
+
+`import boto3` と `import psycopg2` が検出された場合の例:
+
+```toml
+[project]
+name = "pipeline"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = [
+    "boto3>=1.34",
+    "psycopg2-binary>=2.9",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+```
+
+---
+
+## fav2py E2E デモ
+
+`infra/e2e-demo/fav2py/` に、Fav ネイティブ実行と Python トランスパイル実行が
+同一 RDS PostgreSQL に対して同じ集計結果を出力することを実証する E2E デモがあります。
+
+```
+infra/e2e-demo/fav2py/
+├── src/
+│   ├── pipeline.fav     # LoadAndInsert |> Aggregate |> SaveResult
+│   └── sample.csv       # 103 行サンプルデータ
+├── terraform/           # VPC / RDS / ECS Fargate x2 / ECR
+├── scripts/
+│   ├── upload.sh        # Docker build + ECR push
+│   ├── run.sh           # terraform apply → ECS タスク x2 起動
+│   └── verify.sh        # Fav 版 vs Python 版の S3 出力比較
+└── README.md
+```
+
+**実行方法:**
+
+```bash
+cd infra/e2e-demo/fav2py
+export TF_VAR_db_password="..."
+export AWS_DEFAULT_REGION=ap-northeast-1
+
+./scripts/upload.sh   # Docker build + ECR push
+./scripts/run.sh      # E2E 実行（PASS=5 目標）
+```
+
+**期待結果:**
+
+```
+=== RESULT: PASS=5 FAIL=0 ===
+```

@@ -96,7 +96,7 @@ Theme: fav2py E2E インフラ (`infra/e2e-demo/fav2py/`)
 
 - [x] I-1: `fav/Cargo.toml` version → `"11.9.0"`
 - [x] I-2: `cargo build` で `Cargo.lock` 更新
-- [ ] I-3: `git commit & push` — CI 確認
+- [x] I-3: `git commit & push` — CI 確認
 
 ---
 

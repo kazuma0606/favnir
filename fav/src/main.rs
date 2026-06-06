@@ -69,7 +69,7 @@ use driver::{
     cmd_db_migrate, cmd_db_migrate_rollback, cmd_db_migrate_status, cmd_deploy, cmd_doc, cmd_docs,
     cmd_exec, cmd_explain, cmd_explain_compiler, cmd_explain_diff, cmd_explain_error,
     cmd_explain_error_list, cmd_explain_error_list_json, cmd_explain_lineage, cmd_fmt, cmd_graph,
-    cmd_infer, cmd_infer_proto, cmd_infer_snowflake, cmd_install, cmd_lint, cmd_migrate, cmd_new,
+    cmd_infer, cmd_infer_postgres, cmd_infer_proto, cmd_infer_snowflake, cmd_install, cmd_lint, cmd_migrate, cmd_new,
     cmd_profile, cmd_transpile,
     cmd_publish, cmd_registry, cmd_repl, cmd_run, cmd_test, cmd_watch,
 };
@@ -1118,6 +1118,14 @@ fn main_impl() {
                     process::exit(1);
                 });
                 cmd_infer_snowflake(table, out_path.as_deref());
+                return;
+            }
+            if from_source.as_deref() == Some("postgres") {
+                let table = table_name.as_deref().unwrap_or_else(|| {
+                    eprintln!("error: --from postgres requires --table <name>");
+                    process::exit(1);
+                });
+                cmd_infer_postgres(table, out_path.as_deref());
                 return;
             }
             cmd_infer(

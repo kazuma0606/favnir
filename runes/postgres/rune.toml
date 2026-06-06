@@ -1,0 +1,5 @@
+[rune]
+name = "postgres"
+version = "11.5.0"
+entry = "postgres.fav"
+description = "PostgreSQL rune — tokio-postgres ベースの SQL 実行・クエリ（!Postgres エフェクト）"

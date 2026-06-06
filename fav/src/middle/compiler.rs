@@ -186,6 +186,7 @@ pub fn compile_program(program: &Program) -> IRProgram {
         "Compiler",
         "Debug",
         "Snowflake",
+        "Postgres",
         "assert",
         "assert_eq",
         "assert_ne",
@@ -428,6 +429,7 @@ pub fn compile_program(program: &Program) -> IRProgram {
         "Compiler",
         "Debug",
         "Snowflake",
+        "Postgres",
         // test assertion builtins (callable without namespace prefix)
         "assert",
         "assert_eq",

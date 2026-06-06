@@ -102,6 +102,18 @@ pub struct SnowflakeTomlConfig {
     pub schema:    Option<String>,
 }
 
+// ── Postgres config (v11.5.0) ─────────────────────────────────────────────────
+
+#[derive(Debug, Clone)]
+pub struct PostgresTomlConfig {
+    pub host:     Option<String>,
+    pub port:     Option<u16>,
+    pub dbname:   Option<String>,
+    pub user:     Option<String>,
+    pub password: Option<String>,
+    pub sslmode:  Option<String>,
+}
+
 // ── Deploy config (v4.11.0) ───────────────────────────────────────────────────
 
 #[derive(Debug, Clone)]
@@ -161,6 +173,8 @@ pub struct FavToml {
     pub deploy: Option<DeployConfig>,
     /// Optional Snowflake configuration (v10.7.0).
     pub snowflake: Option<SnowflakeTomlConfig>,
+    /// Optional Postgres configuration (v11.5.0).
+    pub postgres: Option<PostgresTomlConfig>,
 }
 
 impl FavToml {
@@ -196,6 +210,11 @@ impl FavToml {
     }
 }
 
+/// Public test helper — wraps `parse_fav_toml` for cross-module tests.
+pub fn parse_fav_toml_pub(content: &str) -> FavToml {
+    parse_fav_toml(content)
+}
+
 fn parse_fav_toml(content: &str) -> FavToml {
     let mut name = String::new();
     let mut version = String::new();
@@ -213,6 +232,7 @@ fn parse_fav_toml(content: &str) -> FavToml {
     let mut aws_cfg: Option<AwsTomlConfig> = None;
     let mut deploy_cfg: Option<DeployConfig> = None;
     let mut snowflake_cfg: Option<SnowflakeTomlConfig> = None;
+    let mut postgres_cfg: Option<PostgresTomlConfig> = None;
     let mut section = "";
 
     for line in content.lines() {
@@ -262,6 +282,10 @@ fn parse_fav_toml(content: &str) -> FavToml {
         }
         if trimmed == "[snowflake]" {
             section = "snowflake";
+            continue;
+        }
+        if trimmed == "[postgres]" {
+            section = "postgres";
             continue;
         }
         if trimmed.starts_with('[') {
@@ -412,6 +436,28 @@ fn parse_fav_toml(content: &str) -> FavToml {
                 }
                 snowflake_cfg = Some(current);
             }
+            "postgres" => {
+                let mut current = postgres_cfg.take().unwrap_or(PostgresTomlConfig {
+                    host:     None,
+                    port:     None,
+                    dbname:   None,
+                    user:     None,
+                    password: None,
+                    sslmode:  None,
+                });
+                if let Some((key, val)) = parse_kv(trimmed) {
+                    match key {
+                        "host"     => current.host     = Some(expand_env_vars(val)),
+                        "port"     => current.port     = val.parse::<u16>().ok(),
+                        "dbname"   => current.dbname   = Some(expand_env_vars(val)),
+                        "user"     => current.user     = Some(expand_env_vars(val)),
+                        "password" => current.password = Some(expand_env_vars(val)),
+                        "sslmode"  => current.sslmode  = Some(val.to_string()),
+                        _ => {}
+                    }
+                }
+                postgres_cfg = Some(current);
+            }
             _ => {}
         }
     }
@@ -433,6 +479,7 @@ fn parse_fav_toml(content: &str) -> FavToml {
         aws: aws_cfg,
         deploy: deploy_cfg,
         snowflake: snowflake_cfg,
+        postgres: postgres_cfg,
     }
 }
 

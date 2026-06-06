@@ -1274,6 +1274,7 @@ impl Checker {
             "Grpc",
             "Llm",
             "Snowflake",
+            "Postgres",
             "Validate",
             "DuckDb",
             "Crypto",
@@ -2124,6 +2125,7 @@ impl Checker {
             "Http",
             "Llm",
             "Snowflake",
+            "Postgres",
             "Rpc",
             "File",
             "Checkpoint",
@@ -4526,6 +4528,7 @@ impl Checker {
                         | "Grpc"
                         | "Llm"
                         | "Snowflake"
+                        | "Postgres"
                         | "Stream"
                 ) =>
             {
@@ -4621,6 +4624,16 @@ impl Checker {
             self.type_error(
                 "E0314",
                 "Snowflake.* call requires `!Snowflake` effect on enclosing fn/stage",
+                span,
+            );
+        }
+    }
+
+    fn require_postgres_effect(&mut self, span: &Span) {
+        if !self.has_effect(|e| matches!(e, Effect::Postgres)) {
+            self.type_error(
+                "E0315",
+                "Postgres.* call requires `!Postgres` effect on enclosing fn/stage",
                 span,
             );
         }
@@ -5429,6 +5442,29 @@ impl Checker {
             }
             ("Snowflake", "infer_table_raw") => {
                 self.require_snowflake_effect(span);
+                Some(Type::Result(
+                    Box::new(Type::String),
+                    Box::new(Type::String),
+                ))
+            }
+
+            // Postgres (v11.5.0) — require !Postgres effect
+            ("Postgres", "execute_raw") => {
+                self.require_postgres_effect(span);
+                Some(Type::Result(
+                    Box::new(Type::Unit),
+                    Box::new(Type::String),
+                ))
+            }
+            ("Postgres", "query_raw") => {
+                self.require_postgres_effect(span);
+                Some(Type::Result(
+                    Box::new(Type::String),
+                    Box::new(Type::String),
+                ))
+            }
+            ("Postgres", "infer_table_raw") => {
+                self.require_postgres_effect(span);
                 Some(Type::Result(
                     Box::new(Type::String),
                     Box::new(Type::String),
@@ -6982,6 +7018,7 @@ abstract seq Pipeline {
             aws: None,
             deploy: None,
             snowflake: None,
+            postgres: None,
         };
         let resolver = Arc::new(Mutex::new(Resolver::new(Some(toml), Some(root))));
         (resolver, dir)
@@ -7066,6 +7103,7 @@ abstract seq Pipeline {
             aws: None,
             deploy: None,
             snowflake: None,
+            postgres: None,
         };
         let mut resolver = Resolver::new(Some(toml), Some(root));
         // Simulate a mid-load state: "cycle" is already in the loading set

@@ -618,6 +618,22 @@ fn snowflake_fn(fname: String) -> String {
     }
 }
 
+fn postgres_fn(fname: String) -> String {
+    if fname == "execute_raw" {
+        "Result"
+    } else {
+        if fname == "query_raw" {
+            "Result"
+        } else {
+            if fname == "infer_table_raw" {
+                "Result"
+            } else {
+                "Result"
+            }
+        }
+    }
+}
+
 fn debug_fn(fname: String) -> String {
     if fname == "show_raw" {
         "String"
@@ -1037,10 +1053,14 @@ fn builtin_ret_ty(ns: String, fname: String) -> String {
                                                                         if ns == "Snowflake" {
                                                                             snowflake_fn(fname)
                                                                         } else {
-                                                                            if ns == "Debug" {
-                                                                                debug_fn(fname)
+                                                                            if ns == "Postgres" {
+                                                                                postgres_fn(fname)
                                                                             } else {
-                                                                                "Unknown"
+                                                                                if ns == "Debug" {
+                                                                                    debug_fn(fname)
+                                                                                } else {
+                                                                                    "Unknown"
+                                                                                }
                                                                             }
                                                                         }
                                                                     }
@@ -1096,10 +1116,14 @@ fn ns_to_effect(ns: String) -> String {
                                             if ns == "Snowflake" {
                                                 "Snowflake"
                                             } else {
-                                                if ns == "Debug" {
-                                                    "IO"
+                                                if ns == "Postgres" {
+                                                    "Postgres"
                                                 } else {
-                                                    ""
+                                                    if ns == "Debug" {
+                                                        "IO"
+                                                    } else {
+                                                        ""
+                                                    }
                                                 }
                                             }
                                         }

@@ -2770,6 +2770,7 @@ fn try_cmd_check_dir(dir: &Path) -> Result<(), usize> {
         aws: None,
         deploy: None,
         snowflake: None,
+        postgres: None,
     });
     let files = collect_fav_files_recursive(dir);
     let resolver = make_resolver(Some(toml), Some(root));
@@ -3908,6 +3909,52 @@ fn snowflake_infer_table(table: &str) -> Result<String, String> {
         .collect();
     let def = InferredTypeDef { name: type_name, fields, source };
     Ok(format_type_def(&def))
+}
+
+fn pg_col_type_to_favnir(col_type: &str, nullable: bool) -> InferredType {
+    let base = match col_type.to_lowercase().as_str() {
+        "integer" | "int" | "int2" | "int4" | "int8" | "bigint" | "smallint" | "serial" | "bigserial" => InferredType::Int,
+        "real" | "double precision" | "float4" | "float8" | "numeric" | "decimal" => InferredType::Float,
+        "boolean" | "bool" => InferredType::Bool,
+        _ => InferredType::FavString,
+    };
+    if nullable { InferredType::Option(Box::new(base)) } else { base }
+}
+
+pub fn cmd_infer_postgres(table: &str, out_path: Option<&str>) {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        use crate::backend::vm::{pg_conn_str_from_env, pg_query};
+        let conn_str = pg_conn_str_from_env();
+        let sql = "SELECT column_name, data_type, is_nullable \
+                   FROM information_schema.columns \
+                   WHERE table_name = $1 \
+                   ORDER BY ordinal_position";
+        let json_str = match pg_query(&conn_str, sql, &format!("[\"{}\"]", table)) {
+            Ok(s)  => s,
+            Err(e) => { eprintln!("error: {}", e); process::exit(1); }
+        };
+        let rows: Vec<serde_json::Value> = match serde_json::from_str(&json_str) {
+            Ok(v)  => v,
+            Err(e) => { eprintln!("error parsing infer result: {}", e); process::exit(1); }
+        };
+        let type_name = table_name_to_type_name(table);
+        let source = format!("--from postgres --table {}", table);
+        let fields: Vec<InferredField> = rows.iter().map(|row| {
+            let col_name   = row["column_name"].as_str().unwrap_or("").to_lowercase();
+            let col_type   = row["data_type"].as_str().unwrap_or("");
+            let nullable_s = row["is_nullable"].as_str().unwrap_or("NO");
+            let nullable   = nullable_s.to_uppercase() == "YES";
+            InferredField { name: col_name, ty: pg_col_type_to_favnir(col_type, nullable) }
+        }).collect();
+        let def = InferredTypeDef { name: type_name, fields, source };
+        write_infer_output(&format_type_def(&def), out_path);
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        let _ = (table, out_path);
+        eprintln!("error: Postgres infer is not supported in WASM");
+    }
 }
 
 pub fn cmd_infer_snowflake(table: &str, out_path: Option<&str>) {
@@ -10369,6 +10416,7 @@ fn format_effects(effects: &[ast::Effect]) -> String {
             Http => "!Http".into(),
             Llm => "!Llm".into(),
             Snowflake => "!Snowflake".into(),
+            Postgres => "!Postgres".into(),
             Rpc => "!Rpc".into(),
             File => "!File".into(),
             Checkpoint => "!Checkpoint".into(),
@@ -10393,6 +10441,7 @@ fn effect_json_name(effect: &ast::Effect) -> String {
         ast::Effect::Http => "Http".into(),
         ast::Effect::Llm => "Llm".into(),
         ast::Effect::Snowflake => "Snowflake".into(),
+        ast::Effect::Postgres => "Postgres".into(),
         ast::Effect::Rpc => "Rpc".into(),
         ast::Effect::File => "File".into(),
         ast::Effect::Checkpoint => "Checkpoint".into(),
@@ -20467,6 +20516,90 @@ pub fn cmd_transpile(args: &[String]) {
         );
         let _ = std::fs::write(&pyproject_path, &content);
         println!("generated: {}", pyproject_path.display());
+    }
+}
+
+// ── v11500_tests (v11.5.0) — !Postgres effect ────────────────────────────────
+
+#[cfg(test)]
+mod v11500_tests {
+    use crate::frontend::parser::Parser;
+    use crate::lineage::lineage_analysis;
+    use crate::middle::checker::Checker;
+
+    #[test]
+    fn postgres_execute_requires_effect() {
+        // !Postgres 未宣言で Postgres.query_raw を呼ぶと E0315
+        let src = r#"
+fn run(sql: String) -> Result<String, String> {
+  Postgres.query_raw(sql, "[]")
+}
+"#;
+        let prog = Parser::parse_str(src, "test.fav").expect("parse");
+        let (errors, _) = Checker::check_program(&prog);
+        let has_e0315 = errors.iter().any(|e| e.code == "E0315");
+        assert!(has_e0315, "expected E0315 for missing !Postgres: {:?}", errors);
+    }
+
+    #[test]
+    fn postgres_execute_with_effect_ok() {
+        // !Postgres 宣言関数内で Postgres.execute_raw が E0315 を出さないこと
+        let src = r#"
+fn run(sql: String) -> Result<Unit, String> !Postgres {
+  Postgres.execute_raw(sql, "[]")
+}
+"#;
+        let prog = Parser::parse_str(src, "test.fav").expect("parse");
+        let (errors, _) = Checker::check_program(&prog);
+        let e0315: Vec<_> = errors.iter().filter(|e| e.code == "E0315").collect();
+        assert!(e0315.is_empty(), "unexpected E0315 with !Postgres: {:?}", e0315);
+    }
+
+    #[test]
+    fn postgres_query_raw_type() {
+        // query_raw の戻り型が Result<String, String> であること
+        let src = r#"
+fn run(sql: String) -> Result<String, String> !Postgres {
+  Postgres.query_raw(sql, "[]")
+}
+"#;
+        let prog = Parser::parse_str(src, "test.fav").expect("parse");
+        let (errors, _) = Checker::check_program(&prog);
+        let e0315: Vec<_> = errors.iter().filter(|e| e.code == "E0315").collect();
+        assert!(e0315.is_empty(), "type check ok: {:?}", e0315);
+    }
+
+    #[test]
+    fn postgres_lineage_shows_effect() {
+        // lineage 出力に !Postgres が含まれること
+        let src = r#"
+stage RunQuery: String -> String !Postgres = |sql| {
+  match Postgres.query_raw(sql, "[]") {
+    Ok(json) => json
+    Err(e)   => e
+  }
+}
+seq Pipeline = RunQuery
+"#;
+        let prog = Parser::parse_str(src, "test").unwrap();
+        let report = lineage_analysis(&prog);
+        let text = crate::lineage::render_lineage_text(&report, "test");
+        assert!(text.contains("!Postgres"), "expected !Postgres in lineage: {}", text);
+    }
+
+    #[test]
+    fn fav_toml_postgres_section_parsed() {
+        // fav.toml の [postgres] セクションが PostgresTomlConfig に読み込まれること
+        let content = "[rune]\nname = \"app\"\nversion = \"1.0.0\"\n\
+                       [postgres]\nhost = \"localhost\"\nport = 5432\n\
+                       dbname = \"mydb\"\nuser = \"postgres\"\npassword = \"secret\"\nsslmode = \"require\"\n";
+        let toml = crate::toml::parse_fav_toml_pub(content);
+        let pg = toml.postgres.expect("postgres config");
+        assert_eq!(pg.host.as_deref(), Some("localhost"));
+        assert_eq!(pg.port, Some(5432));
+        assert_eq!(pg.dbname.as_deref(), Some("mydb"));
+        assert_eq!(pg.user.as_deref(), Some("postgres"));
+        assert_eq!(pg.sslmode.as_deref(), Some("require"));
     }
 }
 

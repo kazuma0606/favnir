@@ -84,6 +84,9 @@ pub fn reachability_analysis(entry: &str, program: &IRProgram) -> ReachabilityRe
                 Effect::Snowflake => {
                     effects_required.insert("Snowflake".to_string());
                 }
+                Effect::Postgres => {
+                    effects_required.insert("Postgres".to_string());
+                }
                 Effect::Rpc => {
                     effects_required.insert("Rpc".to_string());
                 }

@@ -1,0 +1,17 @@
+// runes/postgres/postgres.fav — Favnir Postgres rune public API (v11.5.0)
+// tokio-postgres 経由で PostgreSQL に接続し、SQL を実行・クエリする。
+//
+// 使用例:
+//   import rune "postgres"
+//
+//   type Order = { order_id: Int  customer: String  amount: Float }
+//
+//   fn get_orders() -> Result<List<Order>, String> !Postgres {
+//       postgres.query<Order>("SELECT * FROM orders", List.empty())
+//   }
+//
+// 環境変数（いずれかを設定）:
+//   DATABASE_URL  — 接続文字列（例: "host=localhost port=5432 dbname=mydb user=postgres password=pass"）
+//   または個別設定: PGHOST / PGPORT / PGDATABASE / PGUSER / PGPASSWORD
+
+use client.{ execute, query }

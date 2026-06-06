@@ -302,6 +302,14 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
         fix: "Add `!Snowflake` to the function signature: `fn run(sql: String) -> Result<String, String> !Snowflake`.",
     },
     ErrorEntry {
+        code: "E0315",
+        title: "undeclared !Postgres effect",
+        category: "effects",
+        description: "A Postgres operation was used in a function that does not declare `!Postgres`.",
+        example: "fn run(sql: String) -> Result<String, String> {\n    Postgres.query_raw(sql, \"[]\")  // E0315: !Postgres not declared\n}",
+        fix: "Add `!Postgres` to the function signature: `fn run(sql: String) -> Result<String, String> !Postgres`.",
+    },
+    ErrorEntry {
         code: "E0365",
         title: "for-in iterator type error",
         category: "effects",

@@ -1175,6 +1175,10 @@ impl Parser {
                         self.advance();
                         Effect::Snowflake
                     }
+                    "Postgres" => {
+                        self.advance();
+                        Effect::Postgres
+                    }
                     "Rpc" => {
                         self.advance();
                         Effect::Rpc

@@ -57,6 +57,7 @@ fn format_effects(effects: &[ast::Effect]) -> String {
             Http => "!Http".into(),
             Llm => "!Llm".into(),
             Snowflake => "!Snowflake".into(),
+            Postgres => "!Postgres".into(),
             Rpc => "!Rpc".into(),
             File => "!File".into(),
             Checkpoint => "!Checkpoint".into(),

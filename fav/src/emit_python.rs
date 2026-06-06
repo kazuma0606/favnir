@@ -261,6 +261,7 @@ fn map_effect(e: &Effect) -> &'static str {
         Effect::Http => "Http",
         Effect::Llm => "Llm",
         Effect::Snowflake => "Snowflake",
+        Effect::Postgres => "Postgres",
         Effect::Rpc => "Rpc",
         Effect::File => "File",
         Effect::Unknown(_) => "Unknown",

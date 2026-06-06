@@ -4684,6 +4684,97 @@ fn llm_call_chat(messages_json: &str) -> VMValue {
 
 // ── Snowflake helpers (v10.2.0) ──────────────────────────────────────────────
 
+// ── Postgres helpers (v11.5.0) ───────────────────────────────────────────────
+
+#[cfg(not(target_arch = "wasm32"))]
+pub fn pg_conn_str_from_env() -> String {
+    if let Ok(url) = std::env::var("DATABASE_URL") {
+        return url;
+    }
+    let host     = std::env::var("PGHOST").unwrap_or_else(|_| "localhost".to_string());
+    let port     = std::env::var("PGPORT").unwrap_or_else(|_| "5432".to_string());
+    let dbname   = std::env::var("PGDATABASE").unwrap_or_else(|_| "postgres".to_string());
+    let user     = std::env::var("PGUSER").unwrap_or_else(|_| "postgres".to_string());
+    let password = std::env::var("PGPASSWORD").unwrap_or_default();
+    format!("host={} port={} dbname={} user={} password={}", host, port, dbname, user, password)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn pg_params_from_json(params_json: &str) -> Result<Vec<String>, String> {
+    let arr: serde_json::Value = serde_json::from_str(params_json)
+        .map_err(|e| format!("invalid params JSON: {}", e))?;
+    match arr {
+        serde_json::Value::Array(items) => Ok(items.iter().map(|v| match v {
+            serde_json::Value::String(s) => s.clone(),
+            serde_json::Value::Null      => "NULL".to_string(),
+            other                        => other.to_string(),
+        }).collect()),
+        _ => Err("params must be a JSON array".to_string()),
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn pg_execute(conn_str: &str, sql: &str, params_json: &str) -> Result<(), String> {
+    let params = pg_params_from_json(params_json)?;
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|e| e.to_string())?;
+    rt.block_on(async {
+        let (client, connection) = tokio_postgres::connect(conn_str, tokio_postgres::NoTls)
+            .await
+            .map_err(|e| e.to_string())?;
+        tokio::spawn(async move { let _ = connection.await; });
+        let param_refs: Vec<&(dyn tokio_postgres::types::ToSql + Sync)> =
+            params.iter().map(|s| s as &(dyn tokio_postgres::types::ToSql + Sync)).collect();
+        client.execute(sql, &param_refs).await.map_err(|e| e.to_string())?;
+        Ok(())
+    })
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub fn pg_query(conn_str: &str, sql: &str, params_json: &str) -> Result<String, String> {
+    let params = pg_params_from_json(params_json)?;
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|e| e.to_string())?;
+    rt.block_on(async {
+        let (client, connection) = tokio_postgres::connect(conn_str, tokio_postgres::NoTls)
+            .await
+            .map_err(|e| e.to_string())?;
+        tokio::spawn(async move { let _ = connection.await; });
+        let param_refs: Vec<&(dyn tokio_postgres::types::ToSql + Sync)> =
+            params.iter().map(|s| s as &(dyn tokio_postgres::types::ToSql + Sync)).collect();
+        let rows = client.query(sql, &param_refs).await.map_err(|e| e.to_string())?;
+        let json_rows: Vec<serde_json::Value> = rows.iter().map(|row| {
+            let mut map = serde_json::Map::new();
+            for col in row.columns() {
+                let name = col.name().to_string();
+                let val: serde_json::Value = {
+                    if let Ok(v) = row.try_get::<_, Option<String>>(&name.as_str()) {
+                        v.map(serde_json::Value::String).unwrap_or(serde_json::Value::Null)
+                    } else if let Ok(v) = row.try_get::<_, Option<i64>>(&name.as_str()) {
+                        v.map(|n| serde_json::Value::Number(n.into())).unwrap_or(serde_json::Value::Null)
+                    } else if let Ok(v) = row.try_get::<_, Option<i32>>(&name.as_str()) {
+                        v.map(|n| serde_json::Value::Number(n.into())).unwrap_or(serde_json::Value::Null)
+                    } else if let Ok(v) = row.try_get::<_, Option<f64>>(&name.as_str()) {
+                        v.and_then(|f| serde_json::Number::from_f64(f).map(serde_json::Value::Number))
+                         .unwrap_or(serde_json::Value::Null)
+                    } else if let Ok(v) = row.try_get::<_, Option<bool>>(&name.as_str()) {
+                        v.map(serde_json::Value::Bool).unwrap_or(serde_json::Value::Null)
+                    } else {
+                        serde_json::Value::Null
+                    }
+                };
+                map.insert(name, val);
+            }
+            serde_json::Value::Object(map)
+        }).collect();
+        serde_json::to_string(&json_rows).map_err(|e| e.to_string())
+    })
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn snowflake_read_env(key: &str) -> Result<String, String> {
     std::env::var(key).map_err(|_| format!("{} is not set", key))
@@ -9436,6 +9527,95 @@ fn vm_call_builtin(
                             | "INT" | "INTEGER" | "BIGINT" | "SMALLINT" | "TINYINT" | "BYTEINT" => "Int",
                             "FLOAT" | "FLOAT4" | "FLOAT8" | "DOUBLE" | "REAL" => "Float",
                             "BOOLEAN" => "Bool",
+                            _ => "String",
+                        };
+                        let fav_type_str = if nullable { format!("Option<{}>", fav_type) } else { fav_type.to_string() };
+                        let padding = " ".repeat(max_len.saturating_sub(col_name.len()));
+                        out.push_str(&format!("    {}:{} {}\n", col_name, padding, fav_type_str));
+                    }
+                    out.push_str("}\n");
+                    Ok(ok_vm(VMValue::Str(out)))
+                }
+            }
+        }
+
+        // ── Postgres.execute_raw / Postgres.query_raw / Postgres.infer_table_raw (v11.5.0) ──
+        "Postgres.execute_raw" => {
+            let mut it = args.into_iter();
+            let sql = vm_string(
+                it.next().ok_or_else(|| "Postgres.execute_raw requires sql".to_string())?,
+                "Postgres.execute_raw sql",
+            )?;
+            let params_json = vm_string(
+                it.next().ok_or_else(|| "Postgres.execute_raw requires params".to_string())?,
+                "Postgres.execute_raw params",
+            )?;
+            let conn_str = pg_conn_str_from_env();
+            match pg_execute(&conn_str, &sql, &params_json) {
+                Ok(())  => Ok(ok_vm(VMValue::Unit)),
+                Err(e)  => Ok(err_vm(VMValue::Str(e))),
+            }
+        }
+        "Postgres.query_raw" => {
+            let mut it = args.into_iter();
+            let sql = vm_string(
+                it.next().ok_or_else(|| "Postgres.query_raw requires sql".to_string())?,
+                "Postgres.query_raw sql",
+            )?;
+            let params_json = vm_string(
+                it.next().ok_or_else(|| "Postgres.query_raw requires params".to_string())?,
+                "Postgres.query_raw params",
+            )?;
+            let conn_str = pg_conn_str_from_env();
+            match pg_query(&conn_str, &sql, &params_json) {
+                Ok(json) => Ok(ok_vm(VMValue::Str(json))),
+                Err(e)   => Ok(err_vm(VMValue::Str(e))),
+            }
+        }
+        "Postgres.infer_table_raw" => {
+            let table = vm_string(
+                args.into_iter().next().ok_or_else(|| "Postgres.infer_table_raw requires table".to_string())?,
+                "Postgres.infer_table_raw",
+            )?;
+            let conn_str = pg_conn_str_from_env();
+            let sql = "SELECT column_name, data_type, is_nullable \
+                       FROM information_schema.columns \
+                       WHERE table_name = $1 \
+                       ORDER BY ordinal_position";
+            match pg_query(&conn_str, sql, &format!("[\"{}\"]", table)) {
+                Err(e) => Ok(err_vm(VMValue::Str(e))),
+                Ok(json_str) => {
+                    let rows: Vec<serde_json::Value> = match serde_json::from_str(&json_str) {
+                        Ok(v) => v,
+                        Err(e) => return Ok(err_vm(VMValue::Str(e.to_string()))),
+                    };
+                    let type_name_str = {
+                        let t = table.to_uppercase();
+                        let stripped = if t.ends_with('S') && t.len() > 1 { &t[..t.len()-1] } else { &t };
+                        stripped.split('_').map(|seg| {
+                            let mut c = seg.chars();
+                            match c.next() {
+                                None => String::new(),
+                                Some(f) => f.to_uppercase().collect::<String>() + c.as_str(),
+                            }
+                        }).collect::<String>()
+                    };
+                    let max_len = rows.iter()
+                        .filter_map(|r| r["column_name"].as_str())
+                        .map(|s| s.len()).max().unwrap_or(0);
+                    let mut out = format!(
+                        "// auto-generated by `fav infer --from postgres --table {}`\n// Review and adjust before use.\ntype {} = {{\n",
+                        table, type_name_str
+                    );
+                    for row in &rows {
+                        let col_name   = row["column_name"].as_str().unwrap_or("").to_lowercase();
+                        let col_type   = row["data_type"].as_str().unwrap_or("");
+                        let nullable_s = row["is_nullable"].as_str().unwrap_or("NO");
+                        let nullable   = nullable_s.to_uppercase() == "YES";
+                        let fav_type = match col_type.to_lowercase().as_str() {
+                            "integer" | "int" | "int2" | "int4" | "int8" | "bigint" | "smallint" | "serial" | "bigserial" => "Int",
+                            "real" | "double precision" | "float4" | "float8" | "numeric" | "decimal" => "Float",
+                            "boolean" | "bool" => "Bool",
                             _ => "String",
                         };
                         let fav_type_str = if nullable { format!("Option<{}>", fav_type) } else { fav_type.to_string() };

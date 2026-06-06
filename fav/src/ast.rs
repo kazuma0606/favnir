@@ -28,6 +28,7 @@ pub enum Effect {
     Http,
     Llm,
     Snowflake,
+    Postgres,
     Rpc,
     File,
     Checkpoint,

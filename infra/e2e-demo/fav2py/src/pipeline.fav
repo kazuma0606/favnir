@@ -1,0 +1,44 @@
+import rune "postgres"
+import rune "aws"
+import rune "csv"
+
+type TxnRow = {
+  id: Int
+  region: String
+  category: String
+  amount: Float
+}
+
+type SummaryRow = {
+  region: String
+  category: String
+  total: Float
+  count: Int
+}
+
+// Stage 1: CSV 読み込み → Postgres INSERT（各行を個別に INSERT）
+stage LoadAndInsert: String -> Int !IO !Postgres = |path| {
+  bind rows <- csv.read<TxnRow>(path)
+  bind json_str <- Json.encode_raw(rows)
+  bind result <- postgres.execute(
+    "INSERT INTO txn(id,region,category,amount) SELECT (r->>'id')::int, r->>'region', r->>'category', (r->>'amount')::float FROM json_array_elements($1::json) AS r",
+    $"[{json_str}]"
+  )
+  List.length(rows)
+}
+
+// Stage 2: region × category 集計クエリ
+stage Aggregate: Int -> List<SummaryRow> !Postgres = |n| {
+  postgres.query<SummaryRow>(
+    "SELECT region, category, SUM(amount) AS total, COUNT(*)::int AS count FROM txn GROUP BY region, category ORDER BY region, category",
+    "[]"
+  )
+}
+
+// Stage 3: 集計結果を S3 に JSON で保存
+stage SaveResult: List<SummaryRow> -> Unit !IO !AWS = |rows| {
+  bind ts <- aws.timestamp()
+  aws.s3_put_json($"favnir-e2e-demo/proof/fav2py/{ts}.json", rows)
+}
+
+seq Pipeline = LoadAndInsert |> Aggregate |> SaveResult

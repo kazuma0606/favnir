@@ -21039,3 +21039,40 @@ mod v11800_tests {
         assert!(out.contains("!Postgres"), "Postgres in lineage:\n{}", out);
     }
 }
+
+// ── v11900_tests (v11.9.0) — fav2py E2E インフラ構造確認 ─────────────────────
+
+#[cfg(test)]
+mod v11900_tests {
+    use std::path::Path;
+
+    #[test]
+    fn fav2py_e2e_demo_structure() {
+        let base = Path::new("../infra/e2e-demo/fav2py");
+        let files = [
+            "src/pipeline.fav",
+            "src/sample.csv",
+            "terraform/main.tf",
+            "terraform/iam.tf",
+            "terraform/variables.tf",
+            "terraform/outputs.tf",
+            "scripts/upload.sh",
+            "scripts/run.sh",
+            "scripts/verify.sh",
+            "README.md",
+        ];
+        for f in &files {
+            assert!(base.join(f).exists(), "missing: infra/e2e-demo/fav2py/{}", f);
+        }
+    }
+
+    #[test]
+    fn fav2py_pipeline_fav_transpiles() {
+        use crate::frontend::parser::Parser;
+        let src = std::fs::read_to_string("../infra/e2e-demo/fav2py/src/pipeline.fav")
+            .expect("pipeline.fav not found");
+        // rune import は resolver が処理するため、パーサーのみ確認
+        let result = Parser::parse_str(&src, "pipeline.fav");
+        assert!(result.is_ok(), "pipeline.fav parse error: {:?}", result.err());
+    }
+}

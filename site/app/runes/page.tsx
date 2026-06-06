@@ -39,8 +39,13 @@ interface RegistryRune {
   description: string
 }
 
+const FAV_CLIENT_TOKEN = 'fav-registry-v1-dk9p2mxw4qhz'
+
 async function fetchRunes(): Promise<RegistryRune[]> {
-  const res = await fetch(`${REGISTRY_URL}/runes`, { cache: 'force-cache' })
+  const res = await fetch(`${REGISTRY_URL}/runes`, {
+    cache: 'force-cache',
+    headers: { 'X-Fav-Token': FAV_CLIENT_TOKEN },
+  })
   if (!res.ok) {
     throw new Error(`Registry fetch failed: ${res.status} ${res.statusText}`)
   }

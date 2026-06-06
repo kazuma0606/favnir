@@ -7,12 +7,13 @@ use std::path::{Path, PathBuf};
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 
 const REGISTRY_URL: &str = "https://32qp3qwhdh.execute-api.ap-northeast-1.amazonaws.com";
+const FAV_CLIENT_TOKEN: &str = "fav-registry-v1-dk9p2mxw4qhz";
 
 // ── Registry HTTP helpers ─────────────────────────────────────────────────────
 
 fn registry_get(path: &str) -> Result<String, String> {
     let url = format!("{}{}", REGISTRY_URL, path);
-    match ureq::get(&url).call() {
+    match ureq::get(&url).set("X-Fav-Token", FAV_CLIENT_TOKEN).call() {
         Ok(resp) => resp.into_string().map_err(|e| format!("read error: {}", e)),
         Err(ureq::Error::Status(code, resp)) => {
             let text = resp.into_string().unwrap_or_default();
@@ -25,7 +26,7 @@ fn registry_get(path: &str) -> Result<String, String> {
 fn registry_get_bytes(path: &str) -> Result<Vec<u8>, String> {
     use std::io::Read;
     let url = format!("{}{}", REGISTRY_URL, path);
-    match ureq::get(&url).call() {
+    match ureq::get(&url).set("X-Fav-Token", FAV_CLIENT_TOKEN).call() {
         Ok(resp) => {
             let mut buf = Vec::new();
             resp.into_reader()
@@ -46,6 +47,7 @@ fn registry_post(path: &str, body: &str, auth: &str) -> Result<(u16, String), St
     match ureq::post(&url)
         .set("Content-Type", "application/json")
         .set("Authorization", auth)
+        .set("X-Fav-Token", FAV_CLIENT_TOKEN)
         .send_string(body)
     {
         Ok(resp) => {
@@ -564,8 +566,15 @@ fn cmd_rune_publish() {
     })
     .to_string();
 
-    let creds = BASE64.encode("admin:adminuser");
-    let auth = format!("Basic {}", creds);
+    let token = match std::env::var("FAV_PUBLISH_TOKEN") {
+        Ok(t) => t,
+        Err(_) => {
+            eprintln!("error: FAV_PUBLISH_TOKEN environment variable is not set");
+            eprintln!("       Set it before running: export FAV_PUBLISH_TOKEN=<token>");
+            std::process::exit(1);
+        }
+    };
+    let auth = format!("Bearer {}", token);
 
     match registry_post(&format!("/runes/{}", meta.name), &body, &auth) {
         Err(e) => {

@@ -14,6 +14,13 @@ resource "aws_lambda_function" "registry" {
   timeout       = 30
   memory_size   = 512
 
+  environment {
+    variables = {
+      FAV_CLIENT_TOKEN = var.fav_client_token
+      FAV_ADMIN_TOKEN  = var.registry_admin_token
+    }
+  }
+
   tags = {
     Project     = "favnir"
     Environment = var.environment

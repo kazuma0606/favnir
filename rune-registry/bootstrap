@@ -20,6 +20,8 @@ while true; do
   AUTH=$(printf '%s' "$EVENT" \
     | jq -r '(.headers.authorization // .headers.Authorization // "")')
   QUERY_VERSION=$(printf '%s' "$EVENT" | jq -r '.queryStringParameters.version // ""')
+  FAV_TOKEN=$(printf '%s' "$EVENT" \
+    | jq -r '(.headers["x-fav-token"] // .headers["X-Fav-Token"] // "")')
 
   # ── Run Favnir handler ───────────────────────────────────────────────────
   # stdout → Favnir's IO.println JSON output; stderr → CloudWatch Logs
@@ -30,6 +32,7 @@ while true; do
     FAV_BODY="$BODY" \
     FAV_AUTH="$AUTH" \
     FAV_QUERY_VERSION="$QUERY_VERSION" \
+    FAV_FAV_TOKEN="$FAV_TOKEN" \
     /usr/local/bin/fav run --legacy /app/src/main.fav 2>/dev/stderr
   ) || OUTPUT=''
 

@@ -15,3 +15,15 @@ variable "lambda_image_uri" {
   type        = string
   default     = ""
 }
+
+variable "fav_client_token" {
+  description = "Static token embedded in fav binary for registry access"
+  type        = string
+  sensitive   = true
+}
+
+variable "registry_admin_token" {
+  description = "Admin token for rune publish operations"
+  type        = string
+  sensitive   = true
+}

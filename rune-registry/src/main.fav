@@ -51,6 +51,17 @@ fn save_rune(name: String, version: String, description: String, zip_b64: String
   }
 }
 
+// ── Auth helpers ────────────────────────────────────────────────────────────
+
+fn check_client_token(token_opt: Option<String>) -> Bool !Env {
+  bind expected_r <- Env.require_raw("FAV_CLIENT_TOKEN");
+  bind expected <- match expected_r { Err(_) => ""  Ok(v) => v };
+  match token_opt {
+    None    => false
+    Some(t) => t == expected
+  }
+}
+
 // ── Handlers ────────────────────────────────────────────────────────────────
 
 fn handle_list() -> Map<String, String> !AWS {
@@ -72,8 +83,13 @@ fn handle_get(name: String) -> Map<String, String> !AWS {
   }
 }
 
-fn handle_publish(name: String, body: String, auth: String) -> Map<String, String> !AWS {
-  if Http.check_basic_auth(auth, "admin", "adminuser") {
+fn handle_publish(name: String, body: String, auth: String) -> Map<String, String> !AWS !Env {
+  bind expected_r <- Env.require_raw("FAV_ADMIN_TOKEN");
+  bind expected   <- match expected_r { Err(_) => ""  Ok(v) => v };
+  bind bearer <- if String.starts_with(auth, "Bearer ") {
+    String.slice(auth, 7, String.length(auth))
+  } else { "" };
+  if bearer == expected {
     bind fields_res <- Json.parse_raw(body);
     match fields_res {
       Err(_)     => resp_text(400, "invalid JSON body")
@@ -130,7 +146,10 @@ fn handle_download(name: String, version: String) -> Map<String, String> !AWS {
 
 // ── Router ──────────────────────────────────────────────────────────────────
 
-fn route(req: Map<String, String>) -> Map<String, String> !AWS {
+fn route(req: Map<String, String>) -> Map<String, String> !AWS !Env {
+  bind fav_token_opt <- Map.get(req, "fav_token");
+  bind valid <- check_client_token(fav_token_opt);
+  if valid {
   bind method_opt       <- Map.get(req, "method");
   bind path_opt         <- Map.get(req, "path");
   bind auth_opt         <- Map.get(req, "authorization");
@@ -198,6 +217,9 @@ fn route(req: Map<String, String>) -> Map<String, String> !AWS {
       resp_text(405, "method not allowed")
     }
   }
+  } else {
+    resp_text(401, "Unauthorized")
+  }
 }
 
 // ── Main — Lambda custom runtime ────────────────────────────────────────────
@@ -210,16 +232,19 @@ public fn main() -> Unit !Io !Env !AWS {
   bind body_r      <- Env.require_raw("FAV_BODY");
   bind auth_r      <- Env.require_raw("FAV_AUTH");
   bind query_ver_r <- Env.require_raw("FAV_QUERY_VERSION");
+  bind fav_token_r <- Env.require_raw("FAV_FAV_TOKEN");
   bind method    <- match method_r    { Err(_) => "GET"  Ok(m) => m };
   bind path      <- match path_r      { Err(_) => "/"    Ok(p) => p };
   bind body      <- match body_r      { Err(_) => ""     Ok(b) => b };
   bind auth      <- match auth_r      { Err(_) => ""     Ok(a) => a };
   bind query_ver <- match query_ver_r { Err(_) => ""     Ok(v) => v };
+  bind fav_token <- match fav_token_r { Err(_) => ""     Ok(t) => t };
   bind res <- route(
     Map.set(
-      Map.set(Map.set(Map.set(Map.set((), "method", method), "path", path), "body", body),
+      Map.set(Map.set(Map.set(Map.set(Map.set((), "method", method), "path", path), "body", body),
         "authorization", auth),
-      "query_version", query_ver
+      "query_version", query_ver),
+    "fav_token", fav_token
     )
   );
   IO.println(Json.write_raw(res))

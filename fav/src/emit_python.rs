@@ -30,6 +30,9 @@ pub struct Emitter {
     needs_aws_s3:         bool,
     needs_aws_dynamo:     bool,
     needs_aws_sqs:        bool,
+    // v11.6.0: Postgres / psycopg2 フラグ
+    needs_psycopg2:       bool,
+    needs_pg_helpers:     bool,
     // 型名レジストリ（_SCHEMA_REGISTRY 生成用）
     type_names: Vec<String>,
 }
@@ -51,6 +54,8 @@ impl Emitter {
             needs_aws_s3:         false,
             needs_aws_dynamo:     false,
             needs_aws_sqs:        false,
+            needs_psycopg2:       false,
+            needs_pg_helpers:     false,
             type_names:           Vec::new(),
         }
     }
@@ -126,6 +131,8 @@ impl Emitter {
         self.needs_aws_s3         = sub.needs_aws_s3;
         self.needs_aws_dynamo     = sub.needs_aws_dynamo;
         self.needs_aws_sqs        = sub.needs_aws_sqs;
+        self.needs_psycopg2       = sub.needs_psycopg2;
+        self.needs_pg_helpers     = sub.needs_pg_helpers;
 
         // Phase 4: プレリュード（conditional imports 含む）
         self.emit_prelude(source_path);
@@ -150,6 +157,7 @@ impl Emitter {
         if self.needs_aws_s3         { self.emit_aws_s3_helpers(); }
         if self.needs_aws_dynamo     { self.emit_aws_dynamo_helpers(); }
         if self.needs_aws_sqs        { self.emit_aws_sqs_helpers(); }
+        if self.needs_pg_helpers     { self.emit_pg_helpers(); }
 
         // Phase 8: fn / stage / seq（サブエミッター出力を追加）
         self.buf.push_str(&sub.buf);
@@ -182,6 +190,11 @@ impl Emitter {
         }
         if self.needs_boto3  { self.line("import boto3"); }
         if self.needs_base64 { self.line("import base64 as _base64_mod"); }
+        if self.needs_psycopg2 {
+            self.line("import psycopg2");
+            self.line("import psycopg2.extras");
+            self.line("import os as _os");
+        }
         self.blank();
         self.line("class Ok:");
         self.indent += 1;
@@ -756,9 +769,28 @@ impl Emitter {
                         return format!("_aws_{}({})", name, a.join(", "))
                     }
 
-                    // ── Snowflake — プレースホルダー（v11.6.0 以降）──────
+                    // ── Snowflake — プレースホルダー ─────────────────────
                     ("Snowflake", name) => {
                         return format!("_snowflake_{}({})", name, a.join(", "))
+                    }
+
+                    // ── Postgres → psycopg2 (v11.6.0) ────────────────────
+                    ("Postgres", "execute_raw") if a.len() == 2 => {
+                        self.needs_psycopg2 = true;
+                        self.needs_pg_helpers = true;
+                        self.needs_json = true;
+                        return format!("_pg_execute({}, {})", a[0], a[1])
+                    }
+                    ("Postgres", "query_raw") if a.len() == 2 => {
+                        self.needs_psycopg2 = true;
+                        self.needs_pg_helpers = true;
+                        self.needs_json = true;
+                        return format!("_pg_query({}, {})", a[0], a[1])
+                    }
+                    ("Postgres", name) => {
+                        self.needs_psycopg2 = true;
+                        self.needs_pg_helpers = true;
+                        return format!("_pg_{}({})", to_snake(name), a.join(", "))
                     }
 
                     // ── Csv ──────────────────────────────────────────────
@@ -1494,6 +1526,77 @@ impl Emitter {
         self.line("except Exception as _e:");
         self.indent += 1;
         self.line("return Err(str(_e))");
+        self.indent -= 1;
+        self.indent -= 1;
+        self.blank();
+    }
+
+    // ── Postgres / psycopg2 helpers (v11.6.0) ─────────────────────────────
+    fn emit_pg_helpers(&mut self) {
+        // _pg_connect
+        self.line("def _pg_connect():");
+        self.indent += 1;
+        self.line("_url = _os.environ.get(\"DATABASE_URL\")");
+        self.line("if _url:");
+        self.indent += 1;
+        self.line("return psycopg2.connect(_url)");
+        self.indent -= 1;
+        self.line("return psycopg2.connect(");
+        self.indent += 1;
+        self.line("host=_os.environ.get(\"PGHOST\", \"localhost\"),");
+        self.line("port=int(_os.environ.get(\"PGPORT\", \"5432\")),");
+        self.line("dbname=_os.environ.get(\"PGDATABASE\", \"postgres\"),");
+        self.line("user=_os.environ.get(\"PGUSER\", \"postgres\"),");
+        self.line("password=_os.environ.get(\"PGPASSWORD\", \"\"),");
+        self.indent -= 1;
+        self.line(")");
+        self.indent -= 1;
+        self.blank();
+        // _pg_execute
+        self.line("def _pg_execute(_sql, _params_json):");
+        self.indent += 1;
+        self.line("_params = _json_mod.loads(_params_json) if isinstance(_params_json, str) else _params_json");
+        self.line("_conn = _pg_connect()");
+        self.line("try:");
+        self.indent += 1;
+        self.line("with _conn.cursor() as _cur:");
+        self.indent += 1;
+        self.line("_cur.execute(_sql, _params)");
+        self.indent -= 1;
+        self.line("_conn.commit()");
+        self.line("return Ok(None)");
+        self.indent -= 1;
+        self.line("except Exception as _e:");
+        self.indent += 1;
+        self.line("return Err(str(_e))");
+        self.indent -= 1;
+        self.line("finally:");
+        self.indent += 1;
+        self.line("_conn.close()");
+        self.indent -= 1;
+        self.indent -= 1;
+        self.blank();
+        // _pg_query
+        self.line("def _pg_query(_sql, _params_json):");
+        self.indent += 1;
+        self.line("_params = _json_mod.loads(_params_json) if isinstance(_params_json, str) else _params_json");
+        self.line("_conn = _pg_connect()");
+        self.line("try:");
+        self.indent += 1;
+        self.line("with _conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as _cur:");
+        self.indent += 1;
+        self.line("_cur.execute(_sql, _params)");
+        self.line("_rows = [dict(_r) for _r in _cur.fetchall()]");
+        self.indent -= 1;
+        self.line("return Ok(_json_mod.dumps(_rows))");
+        self.indent -= 1;
+        self.line("except Exception as _e:");
+        self.indent += 1;
+        self.line("return Err(str(_e))");
+        self.indent -= 1;
+        self.line("finally:");
+        self.indent += 1;
+        self.line("_conn.close()");
         self.indent -= 1;
         self.indent -= 1;
         self.blank();

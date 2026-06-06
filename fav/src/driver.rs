@@ -20510,9 +20510,14 @@ pub fn cmd_transpile(args: &[String]) {
         } else {
             ""
         };
+        let psycopg2_dep = if py_src.contains("import psycopg2") {
+            "    \"psycopg2-binary>=2.9\",\n"
+        } else {
+            ""
+        };
         let content = format!(
-            "[project]\nname = \"transpiled\"\nversion = \"0.1.0\"\nrequires-python = \">=3.11\"\ndependencies = [\n{}]\n\n[build-system]\nrequires = [\"hatchling\"]\nbuild-backend = \"hatchling.build\"\n",
-            boto3_dep
+            "[project]\nname = \"transpiled\"\nversion = \"0.1.0\"\nrequires-python = \">=3.11\"\ndependencies = [\n{}{}]\n\n[build-system]\nrequires = [\"hatchling\"]\nbuild-backend = \"hatchling.build\"\n",
+            boto3_dep, psycopg2_dep
         );
         let _ = std::fs::write(&pyproject_path, &content);
         println!("generated: {}", pyproject_path.display());
@@ -20614,5 +20619,68 @@ mod v11100_tests {
         let src = "type Foo = { x: Int }";
         let out = crate::emit_python::emit_python_str(src);
         assert!(out.contains("class Foo"), "roundtrip: {}", out);
+    }
+}
+
+// ── v11600_tests (v11.6.0) — !Postgres → psycopg2 transpile ─────────────────
+
+#[cfg(test)]
+mod v11600_tests {
+    use crate::emit_python::emit_python_str;
+
+    fn pg_src(body: &str) -> String {
+        format!(
+            "fn run(sql: String) -> Result<String, String> !Postgres {{\n{}\n}}",
+            body
+        )
+    }
+
+    #[test]
+    fn transpile_postgres_execute_raw() {
+        let src = pg_src("  Postgres.execute_raw(sql, \"[]\")");
+        let out = emit_python_str(&src);
+        assert!(out.contains("_pg_execute("), "expected _pg_execute:\n{}", out);
+    }
+
+    #[test]
+    fn transpile_postgres_query_raw() {
+        let src = pg_src("  Postgres.query_raw(sql, \"[]\")");
+        let out = emit_python_str(&src);
+        assert!(out.contains("_pg_query("), "expected _pg_query:\n{}", out);
+    }
+
+    #[test]
+    fn transpile_postgres_imports_psycopg2() {
+        let src = pg_src("  Postgres.execute_raw(sql, \"[]\")");
+        let out = emit_python_str(&src);
+        assert!(out.contains("import psycopg2"), "expected import psycopg2:\n{}", out);
+    }
+
+    #[test]
+    fn transpile_postgres_pg_connect_helper() {
+        let src = pg_src("  Postgres.execute_raw(sql, \"[]\")");
+        let out = emit_python_str(&src);
+        assert!(out.contains("def _pg_connect()"), "expected _pg_connect helper:\n{}", out);
+    }
+
+    #[test]
+    fn transpile_postgres_pyproject_psycopg2_dep() {
+        // pyproject.toml 生成は cmd_transpile (ファイル I/O) のため、
+        // Python ソース文字列に "import psycopg2" が含まれることで間接確認
+        let src = pg_src("  Postgres.query_raw(sql, \"[]\")");
+        let out = emit_python_str(&src);
+        assert!(out.contains("import psycopg2"), "psycopg2 import present → pyproject dep added:\n{}", out);
+    }
+
+    #[test]
+    fn transpile_postgres_pipeline_smoke() {
+        let src = "type Row = {\n  id: Int\n  name: String\n}\nfn insert_row(sql: String) -> Result<String, String> !Postgres {\n  Postgres.execute_raw(sql, \"[]\")\n}\nfn select_rows(sql: String) -> Result<String, String> !Postgres {\n  Postgres.query_raw(sql, \"[]\")\n}\n";
+        let out = emit_python_str(src);
+        assert!(out.contains("import psycopg2"), "psycopg2:\n{}", out);
+        assert!(out.contains("_pg_execute("), "execute:\n{}", out);
+        assert!(out.contains("_pg_query("), "query:\n{}", out);
+        assert!(out.contains("def _pg_connect()"), "connect helper:\n{}", out);
+        assert!(out.contains("def _pg_execute("), "execute helper:\n{}", out);
+        assert!(out.contains("def _pg_query("), "query helper:\n{}", out);
     }
 }

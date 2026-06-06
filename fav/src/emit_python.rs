@@ -1,8 +1,9 @@
-//! Fav AST → Python ソースコード生成 (v11.2.0)
+//! Fav AST → Python ソースコード生成 (v11.3.0)
 //!
 //! `fav transpile --target python <file.fav>` の出力バックエンド。
 //! v11.1.0: 型定義 / fn / bind 脱糖 / match(Option+Result) / 基本 stdlib
 //! v11.2.0: stage(TrfDef) / seq(FlwDef) / par / fn main() ガード / IO.argv()
+//! v11.3.0: IO.read_file_raw / Csv.parse_raw / Schema.adapt / Json.encode_raw 実変換
 
 use crate::frontend::parser::Parser;
 use crate::ast::{
@@ -16,6 +17,15 @@ pub struct Emitter {
     indent: usize,
     buf: String,
     ctr: usize, // helper 関数の連番
+    // v11.3.0: import / helper フラグ
+    needs_csv:            bool,
+    needs_json:           bool,
+    needs_io_helpers:     bool,
+    needs_csv_helpers:    bool,
+    needs_json_helpers:   bool,
+    needs_schema_helpers: bool,
+    // 型名レジストリ（_SCHEMA_REGISTRY 生成用）
+    type_names: Vec<String>,
 }
 
 impl Emitter {
@@ -24,6 +34,13 @@ impl Emitter {
             indent: 0,
             buf: String::new(),
             ctr: 0,
+            needs_csv:            false,
+            needs_json:           false,
+            needs_io_helpers:     false,
+            needs_csv_helpers:    false,
+            needs_json_helpers:   false,
+            needs_schema_helpers: false,
+            type_names:           Vec::new(),
         }
     }
 
@@ -65,23 +82,60 @@ pub fn emit_python_str(fav_src: &str) -> String {
 
 impl Emitter {
     fn emit_program(&mut self, prog: &Program, source_path: &str) -> String {
-        self.emit_prelude(source_path);
+        // Phase 1: 型名を収集（_SCHEMA_REGISTRY 生成用）
+        self.type_names = prog.items.iter()
+            .filter_map(|i| if let ast::Item::TypeDef(td) = i { Some(td.name.clone()) } else { None })
+            .collect();
+
+        // Phase 2: fn / stage / seq をサブエミッターで先行処理してフラグ検出
+        let mut sub = Emitter::new();
+        sub.type_names = self.type_names.clone();
         let mut has_main = false;
         for item in &prog.items {
             match item {
-                ast::Item::TypeDef(td) => self.emit_type_def(td),
                 ast::Item::FnDef(fd) => {
-                    if fd.name == "main" {
-                        has_main = true;
-                    }
-                    self.emit_fn_def(fd);
+                    if fd.name == "main" { has_main = true; }
+                    sub.emit_fn_def(fd);
                 }
-                ast::Item::TrfDef(td) => self.emit_trf_def(td),
-                ast::Item::FlwDef(fd) => self.emit_flw_def(fd),
-                // import / use / interface 等は無視
+                ast::Item::TrfDef(td) => sub.emit_trf_def(td),
+                ast::Item::FlwDef(fd) => sub.emit_flw_def(fd),
                 _ => {}
             }
         }
+
+        // Phase 3: フラグをコピー
+        self.needs_csv            = sub.needs_csv;
+        self.needs_json           = sub.needs_json;
+        self.needs_io_helpers     = sub.needs_io_helpers;
+        self.needs_csv_helpers    = sub.needs_csv_helpers;
+        self.needs_json_helpers   = sub.needs_json_helpers;
+        self.needs_schema_helpers = sub.needs_schema_helpers;
+
+        // Phase 4: プレリュード（conditional imports 含む）
+        self.emit_prelude(source_path);
+
+        // Phase 5: 型定義
+        for item in &prog.items {
+            if let ast::Item::TypeDef(td) = item {
+                self.emit_type_def(td);
+            }
+        }
+
+        // Phase 6: _SCHEMA_REGISTRY（型定義が 1 件以上あれば常に emit）
+        if !self.type_names.is_empty() {
+            self.emit_schema_registry();
+        }
+
+        // Phase 7: ヘルパー関数
+        if self.needs_io_helpers     { self.emit_io_helpers(); }
+        if self.needs_csv_helpers    { self.emit_csv_helpers(); }
+        if self.needs_schema_helpers { self.emit_schema_helpers(); }
+        if self.needs_json_helpers   { self.emit_json_helpers(); }
+
+        // Phase 8: fn / stage / seq（サブエミッター出力を追加）
+        self.buf.push_str(&sub.buf);
+
+        // Phase 9: __main__ ガード
         if has_main {
             self.line("if __name__ == \"__main__\":");
             self.indent += 1;
@@ -89,6 +143,7 @@ impl Emitter {
             self.indent -= 1;
             self.blank();
         }
+
         self.buf.clone()
     }
 
@@ -99,6 +154,13 @@ impl Emitter {
         self.line("from dataclasses import dataclass, asdict");
         self.line("from typing import List, Optional, Any");
         self.line("import sys");
+        if self.needs_csv {
+            self.line("import csv as _csv_mod");
+            self.line("import io as _io_mod");
+        }
+        if self.needs_json {
+            self.line("import json as _json_mod");
+        }
         self.blank();
         self.line("class Ok:");
         self.indent += 1;
@@ -584,6 +646,14 @@ impl Emitter {
                     ("IO", "argv_all") if a.is_empty() => {
                         return "sys.argv".to_string()
                     }
+                    ("IO", "read_file_raw") if a.len() == 1 => {
+                        self.needs_io_helpers = true;
+                        return format!("_io_read_file_raw({})", a[0])
+                    }
+                    ("IO", "write_file_raw") if a.len() == 2 => {
+                        self.needs_io_helpers = true;
+                        return format!("_io_write_file_raw({}, {})", a[0], a[1])
+                    }
                     ("IO", name) => {
                         return format!("_io_{}({})", name, a.join(", "))
                     }
@@ -598,18 +668,40 @@ impl Emitter {
                         return format!("_snowflake_{}({})", name, a.join(", "))
                     }
 
-                    // ── Csv / Schema / Json — プレースホルダー ────────────
+                    // ── Csv ──────────────────────────────────────────────
                     ("Csv", "parse_raw") => {
+                        self.needs_csv = true;
+                        self.needs_csv_helpers = true;
                         return format!("_csv_parse_raw({})", a.join(", "))
                     }
+
+                    // ── Schema ───────────────────────────────────────────
                     ("Schema", "adapt") => {
+                        self.needs_schema_helpers = true;
+                        self.needs_json = true;
                         return format!("_schema_adapt({})", a.join(", "))
                     }
                     ("Schema", "to_json_array") => {
+                        self.needs_schema_helpers = true;
+                        self.needs_json = true;
                         return format!("_schema_to_json_array({})", a.join(", "))
                     }
+
+                    // ── Json ─────────────────────────────────────────────
+                    ("Json", "encode_raw") | ("Json", "write_raw") | ("Json", "write_array_raw")
+                        if a.len() == 1 =>
+                    {
+                        self.needs_json = true;
+                        return format!("_json_mod.dumps({})", a[0])
+                    }
+                    ("Json", "decode_raw") | ("Json", "parse_raw") if a.len() == 1 => {
+                        self.needs_json = true;
+                        self.needs_json_helpers = true;
+                        return format!("_json_decode_raw({})", a[0])
+                    }
                     ("Json", name) => {
-                        return format!("_json_{}({})", name, a.join(", "))
+                        self.needs_json = true;
+                        return format!("_json_mod_{}({})", name, a.join(", "))
                     }
 
                     _ => {}
@@ -961,6 +1053,115 @@ impl Emitter {
     }
 }
 
+// ── v11.3.0 ヘルパー emit ──────────────────────────────────────────────────────
+
+impl Emitter {
+    fn emit_io_helpers(&mut self) {
+        self.line("def _io_read_file_raw(path: str):");
+        self.indent += 1;
+        self.line("try:");
+        self.indent += 1;
+        self.line("with open(path, encoding='utf-8') as _f:");
+        self.indent += 1;
+        self.line("return Ok(_f.read())");
+        self.indent -= 1;
+        self.indent -= 1;
+        self.line("except Exception as _e:");
+        self.indent += 1;
+        self.line("return Err(str(_e))");
+        self.indent -= 1;
+        self.indent -= 1;
+        self.blank();
+        self.line("def _io_write_file_raw(path: str, text: str):");
+        self.indent += 1;
+        self.line("try:");
+        self.indent += 1;
+        self.line("with open(path, 'w', encoding='utf-8') as _f:");
+        self.indent += 1;
+        self.line("_f.write(text)");
+        self.indent -= 1;
+        self.line("return Ok(None)");
+        self.indent -= 1;
+        self.line("except Exception as _e:");
+        self.indent += 1;
+        self.line("return Err(str(_e))");
+        self.indent -= 1;
+        self.indent -= 1;
+        self.blank();
+    }
+
+    fn emit_csv_helpers(&mut self) {
+        self.line("def _csv_parse_raw(text: str, sep: str, has_header: bool):");
+        self.indent += 1;
+        self.line("try:");
+        self.indent += 1;
+        self.line("_r = _csv_mod.DictReader(_io_mod.StringIO(text), delimiter=sep)");
+        self.line("return Ok([dict(_row) for _row in _r])");
+        self.indent -= 1;
+        self.line("except Exception as _e:");
+        self.indent += 1;
+        self.line("return Err(str(_e))");
+        self.indent -= 1;
+        self.indent -= 1;
+        self.blank();
+    }
+
+    fn emit_schema_registry(&mut self) {
+        self.line("_SCHEMA_REGISTRY = {");
+        self.indent += 1;
+        for name in self.type_names.clone() {
+            self.line(&format!("\"{}\": {},", name, name));
+        }
+        self.indent -= 1;
+        self.line("}");
+        self.blank();
+    }
+
+    fn emit_schema_helpers(&mut self) {
+        self.line("def _schema_adapt(raw, type_name: str):");
+        self.indent += 1;
+        self.line("_TYPE_CAST = {'str': str, 'int': int, 'float': float, 'bool': lambda v: str(v).lower() == 'true'}");
+        self.line("try:");
+        self.indent += 1;
+        self.line("_cls = _SCHEMA_REGISTRY[type_name]");
+        self.line("_fields = _cls.__dataclass_fields__");
+        self.line("def _cast(k, v):");
+        self.indent += 1;
+        self.line("_ann = getattr(_fields[k], 'type', 'str')");
+        self.line("_ann_s = _ann if isinstance(_ann, str) else getattr(_ann, '__name__', 'str')");
+        self.line("return _TYPE_CAST.get(_ann_s, str)(v)");
+        self.indent -= 1;
+        self.line("return Ok([_cls(**{k: _cast(k, v) for k, v in _row.items() if k in _fields}) for _row in raw])");
+        self.indent -= 1;
+        self.line("except Exception as _e:");
+        self.indent += 1;
+        self.line("return Err(str(_e))");
+        self.indent -= 1;
+        self.indent -= 1;
+        self.blank();
+        self.line("def _schema_to_json_array(rows, type_name: str) -> str:");
+        self.indent += 1;
+        self.line("return _json_mod.dumps([asdict(_r) for _r in rows])");
+        self.indent -= 1;
+        self.blank();
+    }
+
+    fn emit_json_helpers(&mut self) {
+        self.line("def _json_decode_raw(s: str):");
+        self.indent += 1;
+        self.line("try:");
+        self.indent += 1;
+        self.line("return Ok(_json_mod.loads(s))");
+        self.indent -= 1;
+        self.line("except Exception as _e:");
+        self.indent += 1;
+        self.line("return Err(str(_e))");
+        self.indent -= 1;
+        self.indent -= 1;
+        self.blank();
+    }
+}
+
 // ── Util ──────────────────────────────────────────────────────────────────────
 
 /// PascalCase / camelCase → snake_case
@@ -1200,5 +1401,132 @@ mod v11100_tests {
         let src = r#"fn f(a: String, b: String) -> String { String.concat(a, b) }"#;
         let out = emit_python_str(src);
         assert!(out.contains("(a + b)"), "String.concat → +:\n{}", out);
+    }
+}
+
+#[cfg(test)]
+mod v11300_tests {
+    use super::*;
+
+    #[test]
+    fn transpile_io_read_file() {
+        let src = r#"fn load(path: String) -> String !IO {
+  match IO.read_file_raw(path) {
+    Ok(t) => t
+    Err(_) => ""
+  }
+}"#;
+        let out = emit_python_str(src);
+        assert!(out.contains("_io_read_file_raw(path)"), "call site:\n{}", out);
+        assert!(out.contains("def _io_read_file_raw"), "helper def:\n{}", out);
+        assert!(out.contains("with open(path"), "open call:\n{}", out);
+        assert!(out.contains("return Ok("), "Ok wrap:\n{}", out);
+        assert!(out.contains("return Err("), "Err wrap:\n{}", out);
+    }
+
+    #[test]
+    fn transpile_io_write_file() {
+        let src = r#"fn save(path: String, text: String) -> Unit !IO {
+  IO.write_file_raw(path, text)
+}"#;
+        let out = emit_python_str(src);
+        assert!(out.contains("_io_write_file_raw(path, text)"), "call site:\n{}", out);
+        assert!(out.contains("def _io_write_file_raw"), "helper def:\n{}", out);
+        assert!(out.contains("open(path, 'w'"), "write open:\n{}", out);
+    }
+
+    #[test]
+    fn transpile_csv_parse_raw() {
+        let src = r#"fn parse(text: String) -> Unit !IO {
+  Csv.parse_raw(text, ",", true)
+}"#;
+        let out = emit_python_str(src);
+        assert!(out.contains("_csv_parse_raw(text"), "call site:\n{}", out);
+        assert!(out.contains("import csv as _csv_mod"), "csv import:\n{}", out);
+        assert!(out.contains("def _csv_parse_raw"), "helper def:\n{}", out);
+        assert!(out.contains("DictReader"), "DictReader:\n{}", out);
+    }
+
+    #[test]
+    fn transpile_schema_registry() {
+        let src = r#"type TxnRow = { amount: Float  region: String }
+fn dummy() -> Unit { () }"#;
+        let out = emit_python_str(src);
+        assert!(out.contains("_SCHEMA_REGISTRY"), "registry dict:\n{}", out);
+        assert!(out.contains("\"TxnRow\": TxnRow"), "registry entry:\n{}", out);
+    }
+
+    #[test]
+    fn transpile_schema_adapt() {
+        let src = r#"type TxnRow = { amount: Float  region: String }
+fn adapt(raw: List<String>) -> Unit !IO {
+  Schema.adapt(raw, "TxnRow")
+}"#;
+        let out = emit_python_str(src);
+        assert!(out.contains("_schema_adapt(raw"), "call site:\n{}", out);
+        assert!(out.contains("def _schema_adapt"), "helper def:\n{}", out);
+        assert!(out.contains("_SCHEMA_REGISTRY"), "registry used:\n{}", out);
+    }
+
+    #[test]
+    fn transpile_schema_to_json_array() {
+        let src = r#"type TxnRow = { amount: Float }
+fn serialize(rows: List<TxnRow>) -> String !IO {
+  Schema.to_json_array(rows, "TxnRow")
+}"#;
+        let out = emit_python_str(src);
+        assert!(out.contains("_schema_to_json_array(rows"), "call site:\n{}", out);
+        assert!(out.contains("def _schema_to_json_array"), "helper def:\n{}", out);
+        assert!(out.contains("asdict"), "asdict:\n{}", out);
+        assert!(out.contains("_json_mod.dumps"), "json dumps:\n{}", out);
+    }
+
+    #[test]
+    fn transpile_json_encode() {
+        let src = r#"fn encode(v: String) -> String { Json.encode_raw(v) }"#;
+        let out = emit_python_str(src);
+        assert!(out.contains("_json_mod.dumps(v)"), "encode_raw:\n{}", out);
+        assert!(out.contains("import json as _json_mod"), "json import:\n{}", out);
+    }
+
+    #[test]
+    fn transpile_analyze_fav_smoke() {
+        // analyze.fav の主要パターンをインラインで検証
+        let src = r#"
+type TxnRow = {
+  transaction_id: String
+  amount: Float
+  region: String
+}
+
+fn read_txn_csv(path: String) -> List<TxnRow> !IO {
+  match IO.read_file_raw(path) {
+    Err(_) => List.empty()
+    Ok(text) =>
+      match Csv.parse_raw(text, ",", true) {
+        Err(_) => List.empty()
+        Ok(raw) =>
+          match Schema.adapt(raw, "TxnRow") {
+            Err(_) => List.empty()
+            Ok(rows) => rows
+          }
+      }
+  }
+}
+
+fn serialize(rows: List<TxnRow>) -> String !IO {
+  Schema.to_json_array(rows, "TxnRow")
+}
+"#;
+        let out = emit_python_str(src);
+        // 全ヘルパーが生成されていること
+        assert!(out.contains("def _io_read_file_raw"),  "io helper:\n{}", out);
+        assert!(out.contains("def _csv_parse_raw"),     "csv helper:\n{}", out);
+        assert!(out.contains("def _schema_adapt"),      "schema_adapt helper:\n{}", out);
+        assert!(out.contains("def _schema_to_json_array"), "to_json_array helper:\n{}", out);
+        assert!(out.contains("_SCHEMA_REGISTRY"),       "registry:\n{}", out);
+        // import が生成されていること
+        assert!(out.contains("import csv as _csv_mod"), "csv import:\n{}", out);
+        assert!(out.contains("import json as _json_mod"), "json import:\n{}", out);
     }
 }

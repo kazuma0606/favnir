@@ -68,6 +68,48 @@ pub fn run_checker_fav(prog_vm: Value) -> Result<(), Vec<String>> {
     }
 }
 
+/// checker.fav の `check` 関数を実行し、Ok ペイロード（警告文字列を含む）を返す。
+///
+/// * `Ok(payload)` — 型エラーなし; `"ok"` または `"ok\nW006: ..."` 形式
+/// * `Err(msgs)` — 型エラーあり
+pub fn run_checker_fav_full(prog_vm: Value) -> Result<String, Vec<String>> {
+    let artifact = get_checker_fav_artifact();
+    let check_idx = artifact
+        .fn_idx_by_name("check")
+        .expect("checker_fav_runner: checker.fav must export `check`");
+
+    let result = VM::run(&artifact, check_idx, vec![prog_vm]).map_err(|e: VMError| {
+        vec![format!("checker.fav VM error: {}", e.message)]
+    })?;
+
+    match result {
+        Value::Variant(ref tag, Some(ref payload)) if tag == "ok" => {
+            let text = match payload.as_ref() {
+                Value::Str(s) => s.clone(),
+                _ => String::new(),
+            };
+            Ok(text)
+        }
+        Value::Variant(ref tag, Some(ref payload)) if tag == "err" => {
+            let text = match payload.as_ref() {
+                Value::Str(s) => s.clone(),
+                _ => format!("{:?}", payload),
+            };
+            let lines: Vec<String> = text
+                .lines()
+                .map(|l| l.to_string())
+                .filter(|l| !l.is_empty())
+                .collect();
+            Err(if lines.is_empty() {
+                vec!["type error (no message)".to_string()]
+            } else {
+                lines
+            })
+        }
+        _ => Err(vec!["unexpected checker.fav result".to_string()]),
+    }
+}
+
 /// `"E0xxx: message"` 行リスト → `Vec<TypeError>`
 pub fn msgs_to_type_errors(msgs: Vec<String>) -> Vec<TypeError> {
     let empty_span = Span {

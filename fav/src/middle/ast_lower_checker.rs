@@ -234,7 +234,7 @@ fn lower_stmts_and_tail(stmts: &[ast::Stmt], tail: &ast::Expr) -> Value {
                 v3("EBind", sv(&name), lower_expr(&b.expr), acc)
             }
             ast::Stmt::Expr(e) => v2("EBlock", lower_expr(e), acc),
-            ast::Stmt::Chain(c) => v3("EBind", sv(&c.name), lower_expr(&c.expr), acc),
+            ast::Stmt::Chain(c) => v3("EChain", sv(&c.name), lower_expr(&c.expr), acc),
             // Yield / ForIn — skip
             _ => acc,
         };

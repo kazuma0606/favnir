@@ -4885,14 +4885,38 @@ fn lint_fn_w004(fd: FnDef) -> List<LintWarning> {
     }
 }
 
+fn lint_arms_w007(arms: Expr, depth: Int) -> List<LintWarning> {
+    match arms {
+        EArmNil => List.empty()
+        EArm(parts) => List.concat(lint_fn_w007(parts._2, depth), lint_arms_w007(parts._3, depth))
+        _ => List.empty()
+    }
+}
+
+fn lint_fn_w007(expr: Expr, depth: Int) -> List<LintWarning> {
+    match expr {
+        EMatch(parts) => if depth >= 3 {
+            List.singleton(make_warning("W007", "_", String.concat("deeply nested match (depth ", String.concat(Int.to_string(depth), ")\n  = help: extract inner logic into a helper function\n  = help: consider using Result.and_then / Option.map to flatten\n  = note: deeply nested match reduces readability and can cause compiler issues"))))
+        } else {
+            List.concat(lint_fn_w007(parts._0, depth), lint_arms_w007(parts._1, depth + 1))
+        }
+        EBind(parts) => List.concat(lint_fn_w007(parts._1, depth), lint_fn_w007(parts._2, depth))
+        EIf(parts) => List.concat(lint_fn_w007(parts._1, depth), lint_fn_w007(parts._2, depth))
+        EBlock(parts) => List.concat(lint_fn_w007(parts._0, depth), lint_fn_w007(parts._1, depth))
+        ELambda(parts) => lint_fn_w007(parts._1, 1)
+        ECollect(inner) => lint_fn_w007(inner, depth)
+        _ => List.empty()
+    }
+}
+
 fn lint_fn(fd: FnDef) -> List<LintWarning> {
-    List.concat(lint_fn_w004(fd), List.concat(lint_expr_w003(fd.body), lint_expr_w005(fd.body)))
+    List.concat(lint_fn_w004(fd), List.concat(lint_expr_w003(fd.body), List.concat(lint_expr_w005(fd.body), lint_fn_w007(fd.body, 1))))
 }
 
 fn lint_stage(sd: StageDef) -> List<LintWarning> {
     match sd.body {
         None => lint_stage_w001(sd)
-        Some(body) => List.concat(lint_stage_w001(sd), List.concat(lint_expr_w003(body), lint_expr_w005(body)))
+        Some(body) => List.concat(lint_stage_w001(sd), List.concat(lint_expr_w003(body), List.concat(lint_expr_w005(body), lint_fn_w007(body, 1))))
     }
 }
 

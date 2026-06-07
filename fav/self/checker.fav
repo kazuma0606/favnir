@@ -48,6 +48,7 @@ type Expr =
     | EArm(Pat, Expr, Expr)
     | EArmNil
     | EBind(String, Expr, Expr)
+    | EChain(String, Expr, Expr)
     | EField(String, Expr, Expr)
     | EFieldNil
     | EQuestion(Expr)
@@ -1159,6 +1160,7 @@ fn infer_expr_effects(expr: Expr) -> List<String> {
             }
         }
         EBind({ _0: v, _1: val_e, _2: cont_e }) => List.concat(infer_expr_effects(val_e), infer_expr_effects(cont_e))
+        EChain({ _0: v, _1: val_e, _2: cont_e }) => List.concat(infer_expr_effects(val_e), infer_expr_effects(cont_e))
         EIf({ _0: cond, _1: then_e, _2: else_e }) => List.concat(infer_expr_effects(cond), List.concat(infer_expr_effects(then_e), infer_expr_effects(else_e)))
         EBlock({ _0: a, _1: b }) => List.concat(infer_expr_effects(a), infer_expr_effects(b))
         EMatch({ _0: scrut, _1: arms }) => List.concat(infer_expr_effects(scrut), infer_arms_effects(arms))
@@ -1389,6 +1391,13 @@ fn check_rebind(expr: Expr, bound: List<String>) -> Option<String> {
                 check_rebind(cont_e, bound_set_add(bound, vname))
             }
         }
+        EChain({ _0: vname, _1: val_e, _2: cont_e }) => {
+            if (vname != "_") && bound_set_contains(bound, vname) {
+                Option.some(fmt_err("E0018", fmt_e0018(vname)))
+            } else {
+                check_rebind(cont_e, bound_set_add(bound, vname))
+            }
+        }
         EIf({ _0: cond, _1: then_e, _2: else_e }) => {
             match check_rebind(then_e, bound) {
                 Some(err) => Option.some(err)
@@ -1418,6 +1427,95 @@ fn check_rebind_ok(expr: Expr, bound: List<String>) -> Result<String, String> {
     match check_rebind(expr, bound) {
         Some(err) => Result.err(err)
         None => Result.ok("ok")
+    }
+}
+
+fn is_result_ty(ty: String) -> Bool {
+    (ty == "Result") || String.starts_with(ty, "Result<")
+}
+
+fn is_call_result_ty(val_e: Expr) -> Bool {
+    match val_e {
+        ECall({ _0: ns, _1: fname, _2: args }) => (ns != "") && is_result_ty(builtin_ret_ty(ns, fname))
+        _ => false
+    }
+}
+
+fn fmt_w006() -> String {
+    String.concat("W006: discarding Result value with `bind _`\n", String.concat("  = help: use `chain _ <- ...` to propagate errors automatically\n", String.concat("  = help: or handle explicitly: match expr { Ok(_) => ... Err(e) => Result.err(e) }\n", "  = note: using `bind _` silently discards errors — the pipeline will continue even on failure")))
+}
+
+fn check_w006_bind(vname: String, val_e: Expr, cont_e: Expr) -> List<String> {
+    bind rest <- check_w006_expr(cont_e);
+    if (vname == "_") && is_call_result_ty(val_e) {
+        List.concat(List.singleton(fmt_w006()), rest)
+    } else {
+        rest
+    }
+}
+
+fn check_w006_arms(arms: Expr) -> List<String> {
+    match arms {
+        EArmNil => List.empty()
+        EArm({ _0: pat, _1: body, _2: rest }) => List.concat(check_w006_expr(body), check_w006_arms(rest))
+        _ => List.empty()
+    }
+}
+
+fn check_w006_expr(expr: Expr) -> List<String> {
+    match expr {
+        EBind({ _0: vname, _1: val_e, _2: cont_e }) => check_w006_bind(vname, val_e, cont_e)
+        EChain({ _0: vname, _1: val_e, _2: cont_e }) => check_w006_expr(cont_e)
+        EBlock({ _0: a, _1: b }) => List.concat(check_w006_expr(a), check_w006_expr(b))
+        EIf({ _0: cond, _1: then_e, _2: else_e }) => List.concat(check_w006_expr(then_e), check_w006_expr(else_e))
+        EMatch({ _0: scrut, _1: arms }) => check_w006_arms(arms)
+        EArmNil => List.empty()
+        ELambda({ _0: param, _1: body }) => check_w006_expr(body)
+        _ => List.empty()
+    }
+}
+
+fn check_w006_item(item: Item) -> List<String> {
+    match item {
+        IFn(fd) => check_w006_expr(fd.body)
+        IStage(se) => check_w006_expr(se.body)
+        _ => List.empty()
+    }
+}
+
+fn check_w006_items(items: List<Item>) -> List<String> {
+    match List.first(items) {
+        None => List.empty()
+        Some(item) => List.concat(check_w006_item(item), check_w006_items(List.drop(items, 1)))
+    }
+}
+
+fn format_w006_list(warns: List<String>) -> String {
+    match List.first(warns) {
+        None => ""
+        Some(w) => {
+            bind rest <- format_w006_list(List.drop(warns, 1));
+            if rest == "" {
+                w
+            } else {
+                String.concat(w, String.concat("\n", rest))
+            }
+        }
+    }
+}
+
+fn check_with_w006(prog: Program, full_env: List<KVPair>) -> Result<String, String> {
+    match check_items(prog.items, full_env) {
+        Err(e) => Result.err(e)
+        Ok(_) => {
+            bind w006_list <- check_w006_items(prog.items);
+            bind w006_str <- format_w006_list(w006_list);
+            if w006_str == "" {
+                Result.ok("ok")
+            } else {
+                Result.ok(String.concat("ok\n", w006_str))
+            }
+        }
     }
 }
 
@@ -1653,6 +1751,7 @@ fn infer_expr(expr: Expr, env: List<KVPair>) -> Result<String, String> {
             Result.and_then(infer_expr(body, lam_env), |bty| Result.ok("Fn"))
         }
         EBind({ _0: vname, _1: val_e, _2: cont_e }) => Result.and_then(infer_expr(val_e, env), |vty| infer_expr(cont_e, env_insert(env, vname, vty)))
+        EChain({ _0: vname, _1: val_e, _2: cont_e }) => Result.and_then(infer_expr(val_e, env), |vty| infer_expr(cont_e, env_insert(env, vname, vty)))
         ERecordLit({ _0: tname, _1: fields }) => Result.ok(tname)
         EAccess({ _0: obj_e, _1: field }) => Result.and_then(infer_expr(obj_e, env), |oty| Result.ok("Unknown"))
         EBlock({ _0: a, _1: b }) => Result.and_then(infer_expr(a, env), |aty| infer_expr(b, env))
@@ -1735,6 +1834,7 @@ fn infer_hm(expr: Expr, env: List<KVPair>, state: InfState) -> Result<InfResult,
             }
         }
         EBind({ _0: vname, _1: val_e, _2: cont_e }) => infer_hm_let(vname, val_e, cont_e, env, state)
+        EChain({ _0: vname, _1: val_e, _2: cont_e }) => infer_hm_let(vname, val_e, cont_e, env, state)
         EIf({ _0: cond, _1: then_e, _2: else_e }) => Result.and_then(infer_hm(then_e, env, state), |tr| Result.and_then(infer_hm(else_e, env, inf_state_of(tr)), |er| Result.and_then(unify_deep(tr.ty, er.ty, er.subst), |s2| Result.ok(inf_result_of(apply_subst(s2, tr.ty), inf_state_new(s2, er.counter))))))
         ECall({ _0: ns, _1: fname, _2: args }) => infer_call_hm(ns, fname, args, env, state)
         _ => Result.and_then(infer_expr(expr, env), |ty| Result.ok(inf_result_of(ty, state)))
@@ -2231,7 +2331,7 @@ public fn check(prog: Program) -> Result<String, String> {
     bind impl_list <- collect_impl_decls(prog.items);
     match check_items_with_impls(prog.items, impl_list, iface_env) {
         Err(e) => Result.err(e)
-        Ok(_) => check_items(prog.items, full_env)
+        Ok(_) => check_with_w006(prog, full_env)
     }
 }
 

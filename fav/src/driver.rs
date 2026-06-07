@@ -21051,6 +21051,178 @@ mod v12000_tests {
     }
 }
 
+// ── v12200_tests (v12.2.0) — W006 (bind _ Result) + W007 (deep match) ─────────
+
+#[cfg(test)]
+mod v12200_tests {
+    use crate::compiler_fav_runner::lint_source_str;
+
+    // ── W006 helpers ─────────────────────────────────────────────────────────
+
+    fn get_w006_warnings(src: &str, name: &str) -> String {
+        let tmp = std::env::temp_dir().join(format!("fav_w006_{}.fav", name));
+        std::fs::write(&tmp, src).unwrap();
+        let path = tmp.to_str().unwrap();
+        let source = super::load_file(path);
+        let program = crate::frontend::parser::Parser::parse_str(&source, path)
+            .expect("parse error");
+        let prog_vm = crate::middle::ast_lower_checker::lower_program(&program);
+        crate::checker_fav_runner::run_checker_fav_full(prog_vm)
+            .expect("unexpected type error")
+    }
+
+    // ── W006: bind _ で Result を捨てる ──────────────────────────────────────
+
+    // W006-1: bind _ <- Postgres.execute_raw(...) → W006
+    #[test]
+    fn w006_bind_underscore_result() {
+        let src = r#"fn f(x: String) -> String !Postgres {
+    bind _ <- Postgres.execute_raw(x, x)
+    x
+}"#;
+        let output = get_w006_warnings(src, "w006_1");
+        assert!(output.contains("W006"), "expected W006 in: {}", output);
+    }
+
+    // W006-2: bind _ <- IO.println(...) → Unit → 警告なし
+    #[test]
+    fn w006_bind_underscore_unit() {
+        let src = r#"fn f(x: String) -> String !IO {
+    bind _ <- IO.println(x)
+    x
+}"#;
+        let output = get_w006_warnings(src, "w006_2");
+        assert!(!output.contains("W006"), "W006 should not fire for Unit: {}", output);
+    }
+
+    // W006-3: chain res <- Postgres.execute_raw(...) → エラー伝播するため警告なし
+    #[test]
+    fn w006_chain_underscore_ok() {
+        let src = r#"fn f(x: String) -> String !Postgres {
+    chain res <- Postgres.execute_raw(x, x)
+    x
+}"#;
+        let output = get_w006_warnings(src, "w006_3");
+        assert!(!output.contains("W006"), "W006 should not fire for chain _: {}", output);
+    }
+
+    // W006-4: explicit match は安全 → 警告なし
+    #[test]
+    fn w006_explicit_match_ok() {
+        let src = r#"fn f(x: String) -> String !Postgres {
+    match Postgres.execute_raw(x, x) {
+        Ok(_) => x
+        Err(e) => x
+    }
+}"#;
+        let output = get_w006_warnings(src, "w006_4");
+        assert!(!output.contains("W006"), "W006 should not fire for explicit match: {}", output);
+    }
+
+    // W006-5: allow = ["W006"] でフィルタ → 警告なし（Rust 側でフィルタ）
+    #[test]
+    fn w006_fav_toml_allow() {
+        let src = r#"fn f(x: String) -> String !Postgres {
+    bind _ <- Postgres.execute_raw(x, x)
+    x
+}"#;
+        let output = get_w006_warnings(src, "w006_5");
+        // Simulate fav.toml [lint] allow = ["W006"]
+        let filtered: String = output
+            .lines()
+            .filter(|l| !l.starts_with("W006"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(!filtered.contains("W006"), "W006 should be suppressed by allow list");
+    }
+
+    // ── W007: 深い match ネスト ───────────────────────────────────────────────
+
+    // W007-1: 2段ネスト → 警告なし
+    #[test]
+    fn w007_depth_2_ok() {
+        let src = r#"fn f(x: Int) -> Int {
+    match x {
+        _ => match x { _ => x }
+    }
+}"#;
+        let output = lint_source_str(src).expect("lint failed");
+        assert!(!output.contains("W007"), "W007 should not fire for depth 2: {}", output);
+    }
+
+    // W007-2: 3段ネスト → W007
+    #[test]
+    fn w007_depth_3_warn() {
+        let src = r#"fn f(x: Int) -> Int {
+    match x {
+        _ => match x {
+            _ => match x { _ => x }
+        }
+    }
+}"#;
+        let output = lint_source_str(src).expect("lint failed");
+        assert!(output.contains("W007"), "expected W007 for depth 3: {}", output);
+    }
+
+    // W007-3: 4段ネスト → W007
+    #[test]
+    fn w007_depth_4_warn() {
+        let src = r#"fn f(x: Int) -> Int {
+    match x {
+        _ => match x {
+            _ => match x {
+                _ => match x { _ => x }
+            }
+        }
+    }
+}"#;
+        let output = lint_source_str(src).expect("lint failed");
+        assert!(output.contains("W007"), "expected W007 for depth 4: {}", output);
+    }
+
+    // W007-4: ヘルパー関数に切り出し → 警告なし
+    #[test]
+    fn w007_helper_fn_ok() {
+        let src = r#"fn inner(x: Int) -> Int {
+    match x { _ => x }
+}
+fn f(x: Int) -> Int {
+    match x {
+        _ => match x { _ => inner(x) }
+    }
+}"#;
+        let output = lint_source_str(src).expect("lint failed");
+        assert!(!output.contains("W007"), "W007 should not fire when helper used: {}", output);
+    }
+
+    // W007-5: allow = ["W007"] でフィルタ → 警告なし
+    #[test]
+    fn w007_fav_toml_allow() {
+        let src = r#"fn f(x: Int) -> Int {
+    match x {
+        _ => match x {
+            _ => match x { _ => x }
+        }
+    }
+}"#;
+        let output = lint_source_str(src).expect("lint failed");
+        // Simulate fav.toml [lint] allow = ["W007"]
+        let filtered: String = output
+            .lines()
+            .filter(|l| !l.starts_with("W007"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(!filtered.contains("W007"), "W007 should be suppressed by allow list");
+    }
+
+    // ── バージョン確認 ────────────────────────────────────────────────────────
+
+    #[test]
+    fn version_is_12_2_0() {
+        assert_eq!(env!("CARGO_PKG_VERSION"), "12.2.0");
+    }
+}
+
 // ── v12100_tests (v12.1.0) — bind 再束縛禁止 E0018 ────────────────────────────
 
 #[cfg(test)]
@@ -21223,13 +21395,6 @@ fn triple(n: Int) -> Int {
 public fn main() -> Int { 0 }
 "#;
         assert_e0018(check_with_checker_fav(src, "triple"), "e0018_triple_rebind");
-    }
-
-    // ── バージョン確認 ────────────────────────────────────────────────────────
-
-    #[test]
-    fn version_is_12_1_0() {
-        assert_eq!(env!("CARGO_PKG_VERSION"), "12.1.0");
     }
 }
 

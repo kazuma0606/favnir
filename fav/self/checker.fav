@@ -1377,25 +1377,13 @@ fn bound_set_add(set: List<String>, name: String) -> List<String> {
 }
 
 fn fmt_e0018(name: String) -> String {
-    String.concat("E0018: variable '",
-        String.concat(name,
-            String.concat("' is already bound in this scope\n",
-                String.concat("  = help: use a different name: `bind ",
-                    String.concat(name,
-                        String.concat("2 <- ...`\n",
-                            "  = help: or discard the value: `bind _ <- ...`"
-                        )
-                    )
-                )
-            )
-        )
-    )
+    String.concat("E0018: variable '", String.concat(name, String.concat("' is already bound in this scope\n", String.concat("  = help: use a different name: `bind ", String.concat(name, String.concat("2 <- ...`\n", "  = help: or discard the value: `bind _ <- ...`"))))))
 }
 
 fn check_rebind(expr: Expr, bound: List<String>) -> Option<String> {
     match expr {
         EBind({ _0: vname, _1: val_e, _2: cont_e }) => {
-            if vname != "_" && bound_set_contains(bound, vname) {
+            if (vname != "_") && bound_set_contains(bound, vname) {
                 Option.some(fmt_err("E0018", fmt_e0018(vname)))
             } else {
                 check_rebind(cont_e, bound_set_add(bound, vname))

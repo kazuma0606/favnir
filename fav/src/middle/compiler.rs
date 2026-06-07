@@ -676,7 +676,7 @@ fn compile_flw_def(fd: &FlwDef, ctx: &mut CompileCtx) -> IRFnDef {
                     body: IRExpr::Block(stmts, Box::new(final_expr), Type::Unknown),
                 };
             } else {
-                let tmp_slot = ctx.define_local(&format!("$seq{idx}"));
+                let tmp_slot = ctx.define_local(format!("$seq{idx}"));
                 stmts.push(IRStmt::SeqChain {
                     slot: tmp_slot,
                     expr: call_expr,

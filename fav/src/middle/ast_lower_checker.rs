@@ -158,10 +158,14 @@ fn te_to_string(te: &ast::TypeExpr) -> String {
 // ── TrfDef (stage) → IStage ────────────────────────────────────────────────────
 
 fn lower_trf_def(td: &ast::TrfDef) -> Value {
+    let params: Vec<Value> = td.params.iter().map(lower_param).collect();
+    let body = lower_block(&td.body);
     vm_record(vec![
         ("name", sv(&td.name)),
         ("input_ty_str", sv(&te_to_string(&td.input_ty))),
         ("output_ty_str", sv(&te_to_string(&td.output_ty))),
+        ("params", vm_list(params)),
+        ("body", body),
     ])
 }
 

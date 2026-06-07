@@ -117,6 +117,8 @@ type SeqStageEntry = {
     name: String
     input_ty_str: String
     output_ty_str: String
+    params: List<Param>
+    body: Expr
 }
 
 type SeqStep =
@@ -1359,6 +1361,78 @@ fn build_param_env(params: List<Param>, env: List<KVPair>) -> List<KVPair> {
     }
 }
 
+fn collect_param_names(params: List<Param>) -> List<String> {
+    match List.first(params) {
+        None => List.empty()
+        Some(p) => List.push(collect_param_names(List.drop(params, 1)), p.name)
+    }
+}
+
+fn bound_set_contains(set: List<String>, name: String) -> Bool {
+    List.any(set, |s| str_eq(s, name))
+}
+
+fn bound_set_add(set: List<String>, name: String) -> List<String> {
+    List.push(set, name)
+}
+
+fn fmt_e0018(name: String) -> String {
+    String.concat("E0018: variable '",
+        String.concat(name,
+            String.concat("' is already bound in this scope\n",
+                String.concat("  = help: use a different name: `bind ",
+                    String.concat(name,
+                        String.concat("2 <- ...`\n",
+                            "  = help: or discard the value: `bind _ <- ...`"
+                        )
+                    )
+                )
+            )
+        )
+    )
+}
+
+fn check_rebind(expr: Expr, bound: List<String>) -> Option<String> {
+    match expr {
+        EBind({ _0: vname, _1: val_e, _2: cont_e }) => {
+            if vname != "_" && bound_set_contains(bound, vname) {
+                Option.some(fmt_err("E0018", fmt_e0018(vname)))
+            } else {
+                check_rebind(cont_e, bound_set_add(bound, vname))
+            }
+        }
+        EIf({ _0: cond, _1: then_e, _2: else_e }) => {
+            match check_rebind(then_e, bound) {
+                Some(err) => Option.some(err)
+                None => check_rebind(else_e, bound)
+            }
+        }
+        EBlock({ _0: a, _1: b }) => {
+            match check_rebind(a, bound) {
+                Some(err) => Option.some(err)
+                None => check_rebind(b, bound)
+            }
+        }
+        EMatch({ _0: scrut, _1: arms }) => check_rebind(arms, List.empty())
+        EArm({ _0: pat, _1: body, _2: rest }) => {
+            match check_rebind(body, List.empty()) {
+                Some(err) => Option.some(err)
+                None => check_rebind(rest, List.empty())
+            }
+        }
+        EArmNil => Option.none()
+        ELambda({ _0: param, _1: body }) => check_rebind(body, List.empty())
+        _ => Option.none()
+    }
+}
+
+fn check_rebind_ok(expr: Expr, bound: List<String>) -> Result<String, String> {
+    match check_rebind(expr, bound) {
+        Some(err) => Result.err(err)
+        None => Result.ok("ok")
+    }
+}
+
 fn infer_arms(arms: Expr, env: List<KVPair>) -> Result<String, String> {
     match arms {
         EArmNil => Result.ok("Unit")
@@ -1619,12 +1693,11 @@ fn check_body_ty(fname: String, ret: TypeExpr, r: InfResult) -> Result<String, S
 fn check_fn_def(fd: FnDef, env: List<KVPair>) -> Result<String, String> {
     bind param_env <- build_param_env(fd.params, env);
     bind inferred_effs <- infer_expr_effects(fd.body);
+    bind init_state <- inf_state_new(subst_empty(), 0);
+    chain _ok <- check_rebind_ok(fd.body, collect_param_names(fd.params));
     match check_effects_all(fd.effects, inferred_effs) {
         Some(err) => Result.err(err)
-        None => {
-            bind init_state <- inf_state_new(subst_empty(), 0);
-            Result.and_then(infer_hm(fd.body, param_env, init_state), |r| check_body_ty(fd.name, fd.ret, r))
-        }
+        None => Result.and_then(infer_hm(fd.body, param_env, init_state), |r| check_body_ty(fd.name, fd.ret, r))
     }
 }
 
@@ -2051,7 +2124,12 @@ fn check_item(item: Item, env: List<KVPair>) -> Result<String, String> {
         }
         IInterface(id) => Result.ok(id.name)
         IImpl(id) => Result.ok(id.type_name)
-        IStage(se) => Result.ok(se.name)
+        IStage(se) => {
+            match check_rebind(se.body, collect_param_names(se.params)) {
+                Some(err) => Result.err(err)
+                None => Result.ok(se.name)
+            }
+        }
         ISeq(sd) => check_seq_def(sd, env)
     }
 }

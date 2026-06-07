@@ -21045,14 +21045,191 @@ mod v11800_tests {
 #[cfg(test)]
 mod v12000_tests {
     #[test]
-    fn version_is_12_0_0() {
-        assert_eq!(env!("CARGO_PKG_VERSION"), "12.0.0");
-    }
-
-    #[test]
     fn python_mdx_doc_exists() {
         let path = std::path::Path::new("../site/content/docs/transpile/python.mdx");
         assert!(path.exists(), "python.mdx not found at site/content/docs/transpile/python.mdx");
+    }
+}
+
+// ── v12100_tests (v12.1.0) — bind 再束縛禁止 E0018 ────────────────────────────
+
+#[cfg(test)]
+mod v12100_tests {
+    fn check_with_checker_fav(src: &str, name: &str) -> Result<(), Vec<String>> {
+        let tmp = std::env::temp_dir().join(format!("fav_e0018_{}.fav", name));
+        std::fs::write(&tmp, src).unwrap();
+        let path = tmp.to_str().unwrap();
+        let source = super::load_file(path);
+        let program = crate::frontend::parser::Parser::parse_str(&source, path)
+            .expect("parse error");
+        let prog_vm = crate::middle::ast_lower_checker::lower_program(&program);
+        crate::checker_fav_runner::run_checker_fav(prog_vm)
+    }
+
+    fn assert_e0018(result: Result<(), Vec<String>>, label: &str) {
+        assert!(result.is_err(), "{}: expected E0018 error, got Ok", label);
+        let msgs = result.unwrap_err();
+        assert!(
+            msgs.iter().any(|m| m.contains("E0018")),
+            "{}: expected E0018 in errors, got: {:?}", label, msgs
+        );
+    }
+
+    // ── 正常系 ────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn e0018_underscore_allowed() {
+        // bind _ は何度でも許可
+        let src = r#"
+fn ok_fn() -> Int !IO {
+  bind _ <- IO.println("a")
+  bind _ <- IO.println("b")
+  0
+}
+public fn main() -> Int { 0 }
+"#;
+        let result = check_with_checker_fav(src, "underscore_ok");
+        assert!(result.is_ok(), "bind _ multiple times should be OK: {:?}", result.err());
+    }
+
+    #[test]
+    fn e0018_match_arm_independent() {
+        // match arm は独立したスコープ — 別 arm で同名変数は OK
+        let src = r#"
+fn ok_match(n: Int) -> Int {
+  match n {
+    Ok(x) => x
+    Err(x) => 0
+  }
+}
+public fn main() -> Int { 0 }
+"#;
+        let result = check_with_checker_fav(src, "arm_ok");
+        assert!(result.is_ok(), "same name in different match arms should be OK: {:?}", result.err());
+    }
+
+    #[test]
+    fn e0018_lambda_scope_independent() {
+        // 別々の fn は独立したスコープ — 同名変数を持てる
+        let src = r#"
+fn outer() -> Int {
+  bind x <- 1
+  x
+}
+fn inner() -> Int {
+  bind x <- 2
+  x
+}
+public fn main() -> Int { 0 }
+"#;
+        let result = check_with_checker_fav(src, "lambda_ok");
+        assert!(result.is_ok(), "separate fns have independent scopes: {:?}", result.err());
+    }
+
+    // ── 異常系 ────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn e0018_bind_rebind_detected() {
+        // 同名 bind を 2 回 → E0018
+        let src = r#"
+fn bad(n: Int) -> Int {
+  bind x <- n
+  bind x <- n
+  x
+}
+public fn main() -> Int { 0 }
+"#;
+        assert_e0018(check_with_checker_fav(src, "bind_rebind"), "e0018_bind_rebind_detected");
+    }
+
+    #[test]
+    fn e0018_chain_rebind_detected() {
+        // chain x を 2 回 → E0018
+        let src = r#"
+fn bad_chain(n: Int) -> Int {
+  chain x <- n
+  chain x <- n
+  x
+}
+public fn main() -> Int { 0 }
+"#;
+        assert_e0018(check_with_checker_fav(src, "chain_rebind"), "e0018_chain_rebind_detected");
+    }
+
+    #[test]
+    fn e0018_bind_then_chain_cross() {
+        // bind x → chain x（クロスキーワード）→ E0018
+        let src = r#"
+fn bad_cross(n: Int) -> Int {
+  bind x <- n
+  chain x <- n
+  x
+}
+public fn main() -> Int { 0 }
+"#;
+        assert_e0018(check_with_checker_fav(src, "bind_chain_cross"), "e0018_bind_then_chain_cross");
+    }
+
+    #[test]
+    fn e0018_chain_then_bind_cross() {
+        // chain x → bind x（逆順クロス）→ E0018
+        let src = r#"
+fn bad_cross2(n: Int) -> Int {
+  chain x <- n
+  bind x <- n
+  x
+}
+public fn main() -> Int { 0 }
+"#;
+        assert_e0018(check_with_checker_fav(src, "chain_bind_cross"), "e0018_chain_then_bind_cross");
+    }
+
+    #[test]
+    fn e0018_param_shadowing_fn() {
+        // fn パラメータ名と同名の bind → E0018
+        let src = r#"
+fn compute(x: Int) -> Int {
+  bind x <- x
+  x
+}
+public fn main() -> Int { 0 }
+"#;
+        assert_e0018(check_with_checker_fav(src, "param_fn"), "e0018_param_shadowing_fn");
+    }
+
+    #[test]
+    fn e0018_param_shadowing_stage() {
+        // stage |input| と同名の bind → E0018
+        let src = r#"
+public stage BadStage: Int -> Int = |input| {
+  bind input <- input
+  input
+}
+public fn main() -> Int { 0 }
+"#;
+        assert_e0018(check_with_checker_fav(src, "param_stage"), "e0018_param_shadowing_stage");
+    }
+
+    #[test]
+    fn e0018_triple_rebind() {
+        // 3 回以上の再束縛でも E0018 が出ること
+        let src = r#"
+fn triple(n: Int) -> Int {
+  bind x <- n
+  bind x <- n
+  bind x <- n
+  x
+}
+public fn main() -> Int { 0 }
+"#;
+        assert_e0018(check_with_checker_fav(src, "triple"), "e0018_triple_rebind");
+    }
+
+    // ── バージョン確認 ────────────────────────────────────────────────────────
+
+    #[test]
+    fn version_is_12_1_0() {
+        assert_eq!(env!("CARGO_PKG_VERSION"), "12.1.0");
     }
 }
 

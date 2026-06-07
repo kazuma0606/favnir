@@ -97,6 +97,14 @@ pub enum IRStmt {
     /// `--legacy` mode: monadic bind — unwrap Ok, short-circuit on Err (v12.3.0).
     LegacyBind(u16, IRExpr),
     Chain(u16, IRExpr),
+    /// seq pipeline fail-fast: unwrap Ok, short-circuit on Err with stage context (v12.4.0).
+    SeqChain {
+        slot: u16,
+        expr: IRExpr,
+        stage_name: String,
+        stage_idx: u8,
+        total: u8,
+    },
     Yield(IRExpr),
     Expr(IRExpr),
     /// Coverage tracking: record that line N was executed (v1.7.0).
@@ -244,6 +252,9 @@ fn collect_stmt_deps(stmt: &IRStmt, globals: &[IRGlobal], deps: &mut BTreeSet<St
     match stmt {
         IRStmt::Bind(_, e) | IRStmt::LegacyBind(_, e) | IRStmt::Chain(_, e) | IRStmt::Yield(e) | IRStmt::Expr(e) => {
             collect_expr_deps(e, globals, deps);
+        }
+        IRStmt::SeqChain { expr, .. } => {
+            collect_expr_deps(expr, globals, deps);
         }
         IRStmt::TrackLine(_) => {}
     }

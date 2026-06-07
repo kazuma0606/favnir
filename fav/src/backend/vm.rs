@@ -1730,6 +1730,61 @@ impl VM {
                         }
                     }
                 }
+                x if x == Opcode::SeqStageCheck as u8 => {
+                    // layout: name_str_idx(2) + stage_idx(1) + total(1) + escape_offset(2)
+                    let name_idx = Self::read_u16(function, frame)? as usize;
+                    if frame.ip + 1 >= function.code.len() {
+                        return Err(vm.error(artifact, "unexpected end of bytecode in seq_stage_check"));
+                    }
+                    let stage_idx = function.code[frame.ip] as usize;
+                    frame.ip += 1;
+                    let total = function.code[frame.ip] as usize;
+                    frame.ip += 1;
+                    let offset = Self::read_u16(function, frame)? as usize;
+                    // frame.ip is now at StoreLocal
+                    let Some(value) = vm.stack.pop() else {
+                        return Err(vm.error(artifact, "stack underflow on seq_stage_check"));
+                    };
+                    match value {
+                        VMValue::Variant(tag, payload) if tag == "ok" || tag == "some" => {
+                            let unwrapped = payload.map(|inner| *inner).ok_or_else(|| {
+                                vm.error(artifact, "seq_stage_check expected payload for ok/some")
+                            })?;
+                            vm.stack.push(unwrapped);
+                        }
+                        VMValue::Variant(tag, payload) if tag == "err" || tag == "none" => {
+                            let stage_name = artifact
+                                .str_table
+                                .get(name_idx)
+                                .map(|s| s.as_str())
+                                .unwrap_or("?");
+                            let inner_msg = match payload.as_deref() {
+                                Some(VMValue::Str(s)) => s.clone(),
+                                Some(other) => format!("{other:?}"),
+                                None => "none".to_string(),
+                            };
+                            let wrapped = format!(
+                                "pipeline stopped at stage {}/{} '{}': {}",
+                                stage_idx + 1,
+                                total,
+                                stage_name,
+                                inner_msg
+                            );
+                            vm.stack.push(VMValue::Variant(
+                                "err".to_string(),
+                                Some(Box::new(VMValue::Str(wrapped))),
+                            ));
+                            let Some(next_ip) = frame.ip.checked_add(offset) else {
+                                return Err(vm.error(artifact, "jump overflow"));
+                            };
+                            frame.ip = next_ip;
+                        }
+                        other => {
+                            // Non-Result value: pass through unchanged
+                            vm.stack.push(other);
+                        }
+                    }
+                }
                 x if x == Opcode::JumpIfNotVariant as u8 => {
                     let name_idx = Self::read_u16(function, frame)? as usize;
                     let offset = Self::read_u16(function, frame)? as usize;

@@ -1066,6 +1066,13 @@ fn legacy_transform_stmt(stmt: IRStmt) -> IRStmt {
         }
         IRStmt::LegacyBind(slot, expr) => IRStmt::LegacyBind(slot, legacy_transform_expr(expr)),
         IRStmt::Chain(slot, expr) => IRStmt::Chain(slot, legacy_transform_expr(expr)),
+        IRStmt::SeqChain { slot, expr, stage_name, stage_idx, total } => IRStmt::SeqChain {
+            slot,
+            expr: legacy_transform_expr(expr),
+            stage_name,
+            stage_idx,
+            total,
+        },
         IRStmt::Yield(expr) => IRStmt::Yield(legacy_transform_expr(expr)),
         IRStmt::Expr(expr) => IRStmt::Expr(legacy_transform_expr(expr)),
         other => other, // TrackLine
@@ -2750,6 +2757,7 @@ fn decode_opcode(byte: u8) -> Option<(&'static str, usize)> {
         Opcode::BuildRecordC => ("BuildRecordC", 5), // 1 byte opcode + 2-byte n + 2-byte base_const_idx
         Opcode::MakeClosureN => ("MakeClosureN", 5), // 1 byte opcode + 2-byte name_const_idx + 2-byte capture_count
         Opcode::LegacyBindCheck => ("LegacyBindCheck", 3), // 1 byte opcode + 2-byte escape offset
+        Opcode::SeqStageCheck => ("SeqStageCheck", 7), // 1 opcode + name_str_idx(2) + stage_idx(1) + total(1) + escape_offset(2)
     };
 
     Some((name, width))
@@ -3329,6 +3337,9 @@ fn collect_tracklines_in_expr(expr: &IRExpr, out: &mut HashSet<u32>) {
                     | IRStmt::LegacyBind(_, e)
                     | IRStmt::Chain(_, e)
                     | IRStmt::Yield(e) => {
+                        collect_tracklines_in_expr(e, out);
+                    }
+                    IRStmt::SeqChain { expr: e, .. } => {
                         collect_tracklines_in_expr(e, out);
                     }
                 }
@@ -8922,6 +8933,13 @@ fn remap_ir_stmt(stmt: &IRStmt, global_idx_map: &std::collections::HashMap<u16, 
         IRStmt::Bind(slot, expr) => IRStmt::Bind(*slot, remap_ir_expr(expr, global_idx_map)),
         IRStmt::LegacyBind(slot, expr) => IRStmt::LegacyBind(*slot, remap_ir_expr(expr, global_idx_map)),
         IRStmt::Chain(slot, expr) => IRStmt::Chain(*slot, remap_ir_expr(expr, global_idx_map)),
+        IRStmt::SeqChain { slot, expr, stage_name, stage_idx, total } => IRStmt::SeqChain {
+            slot: *slot,
+            expr: remap_ir_expr(expr, global_idx_map),
+            stage_name: stage_name.clone(),
+            stage_idx: *stage_idx,
+            total: *total,
+        },
         IRStmt::Yield(expr) => IRStmt::Yield(remap_ir_expr(expr, global_idx_map)),
         IRStmt::Expr(expr) => IRStmt::Expr(remap_ir_expr(expr, global_idx_map)),
         IRStmt::TrackLine(line) => IRStmt::TrackLine(*line),
@@ -21714,10 +21732,204 @@ public fn main() -> Int {
         );
     }
 
+}
+
+// ── v12400_tests (v12.4.0) — seq pipeline fail-fast (SeqStageCheck opcode) ──
+
+#[cfg(test)]
+mod v12400_tests {
+    use super::{
+        apply_legacy_bind_semantics, build_artifact, exec_artifact_main,
+    };
+    use crate::backend::codegen::codegen_program;
+    use crate::frontend::parser::Parser;
+    use crate::middle::compiler::compile_program;
+    use crate::value::Value;
+
+    /// Compile and run source in default mode.
+    fn run_default(source: &str) -> Result<Value, String> {
+        let program = Parser::parse_str(source, "test_seq.fav").expect("parse");
+        let artifact = build_artifact(&program);
+        exec_artifact_main(&artifact, None)
+    }
+
+    /// Compile and run source in --legacy mode.
+    fn run_legacy(source: &str) -> Result<Value, String> {
+        let program = Parser::parse_str(source, "test_seq_legacy.fav").expect("parse");
+        let ir = compile_program(&program);
+        let ir = apply_legacy_bind_semantics(ir);
+        let artifact = codegen_program(&ir);
+        exec_artifact_main(&artifact, None)
+    }
+
+    // ── 正常系 ─────────────────────────────────────────────────────────────────
+
+    // seq_passes_ok_through:
+    // Stage 1 returns ok(s), SeqStageCheck unwraps it, Stage 2 receives plain string.
+    #[test]
+    fn seq_passes_ok_through() {
+        let src = r#"
+stage WrapOk: String -> String = |s| { Result.ok(s) }
+stage Identity: String -> String = |s| { s }
+seq Pipe = WrapOk |> Identity
+
+public fn main() -> String {
+    "hello" |> Pipe
+}
+"#;
+        let result = run_default(src).expect("exec ok");
+        assert_eq!(
+            result,
+            Value::Str("hello".to_string()),
+            "ok(v) should be unwrapped and passed to next stage, got {:?}",
+            result
+        );
+    }
+
+    // seq_plain_value_passes_through:
+    // Non-Result values pass through SeqStageCheck unchanged.
+    #[test]
+    fn seq_plain_value_passes_through() {
+        let src = r#"
+stage PassThrough: String -> String = |s| { s }
+seq Pipe = PassThrough |> PassThrough
+
+public fn main() -> String {
+    "test" |> Pipe
+}
+"#;
+        let result = run_default(src).expect("exec ok");
+        assert_eq!(
+            result,
+            Value::Str("test".to_string()),
+            "plain String should pass through seq pipeline unchanged, got {:?}",
+            result
+        );
+    }
+
+    // ── 短絡系 ─────────────────────────────────────────────────────────────────
+
+    // seq_stops_on_stage_err:
+    // Stage 1 returns err(...), SeqStageCheck escapes — Stage 2 is not called.
+    #[test]
+    fn seq_stops_on_stage_err() {
+        // ShouldNotRun returns ok(s). If it IS called with the err variant as input,
+        // it would return ok(err_variant), which is NOT an err tag.
+        // So getting an err result confirms Stage 2 was NOT called.
+        let src = r#"
+stage ReturnErr: String -> String = |s| { Result.err("fail") }
+stage ShouldNotRun: String -> String = |s| { Result.ok(s) }
+seq Pipe = ReturnErr |> ShouldNotRun
+
+public fn main() -> String {
+    "input" |> Pipe
+}
+"#;
+        let result = run_default(src).expect("exec ok");
+        assert!(
+            matches!(result, Value::Variant(ref tag, _) if tag == "err"),
+            "seq pipeline should stop at err and return Err, got {:?}",
+            result
+        );
+    }
+
+    // seq_error_includes_stage_name:
+    // Error message must include stage name and position.
+    #[test]
+    fn seq_error_includes_stage_name() {
+        let src = r#"
+stage LoadData: String -> String = |s| { Result.err("db error") }
+stage ProcessData: String -> String = |s| { s }
+seq Pipe = LoadData |> ProcessData
+
+public fn main() -> String {
+    "input" |> Pipe
+}
+"#;
+        let result = run_default(src).expect("exec ok");
+        match &result {
+            Value::Variant(tag, Some(payload)) if tag == "err" => {
+                let msg = payload.repr();
+                assert!(
+                    msg.contains("stage 1/2"),
+                    "error should contain 'stage 1/2', got: {}",
+                    msg
+                );
+                assert!(
+                    msg.contains("LoadData"),
+                    "error should contain stage name 'LoadData', got: {}",
+                    msg
+                );
+                assert!(
+                    msg.contains("db error"),
+                    "error should contain original error 'db error', got: {}",
+                    msg
+                );
+            }
+            other => panic!("expected Err variant with message, got {:?}", other),
+        }
+    }
+
+    // seq_error_at_middle_stage:
+    // Stage 2 of 3 returns err — Stage 3 is not called; error says stage 2/3.
+    #[test]
+    fn seq_error_at_middle_stage() {
+        let src = r#"
+stage First: String -> String = |s| { Result.ok(s) }
+stage Second: String -> String = |s| { Result.err("mid fail") }
+stage Third: String -> String = |s| { Result.ok(s) }
+seq Pipe = First |> Second |> Third
+
+public fn main() -> String {
+    "input" |> Pipe
+}
+"#;
+        let result = run_default(src).expect("exec ok");
+        match &result {
+            Value::Variant(tag, Some(payload)) if tag == "err" => {
+                let msg = payload.repr();
+                assert!(
+                    msg.contains("stage 2/3"),
+                    "error should contain 'stage 2/3', got: {}",
+                    msg
+                );
+                assert!(
+                    msg.contains("Second"),
+                    "error should contain stage name 'Second', got: {}",
+                    msg
+                );
+            }
+            other => panic!("expected Err with stage 2/3 info, got {:?}", other),
+        }
+    }
+
+    // ── 後方互換確認 ───────────────────────────────────────────────────────────
+
+    // seq_legacy_mode_fail_fast:
+    // SeqStageCheck is active in --legacy mode too.
+    #[test]
+    fn seq_legacy_mode_fail_fast() {
+        let src = r#"
+stage Fail: String -> String = |s| { Result.err("fail") }
+stage Echo: String -> String = |s| { s }
+seq Pipe = Fail |> Echo
+
+public fn main() -> String {
+    "input" |> Pipe
+}
+"#;
+        let result = run_legacy(src).expect("exec ok");
+        assert!(
+            matches!(result, Value::Variant(ref tag, _) if tag == "err"),
+            "seq fail-fast should work in legacy mode too, got {:?}",
+            result
+        );
+    }
+
     // ── バージョン確認 ────────────────────────────────────────────────────────
 
     #[test]
-    fn version_is_12_3_0() {
-        assert_eq!(env!("CARGO_PKG_VERSION"), "12.3.0");
+    fn version_is_12_4_0() {
+        assert_eq!(env!("CARGO_PKG_VERSION"), "12.4.0");
     }
 }

@@ -37,6 +37,9 @@ pub enum Opcode {
     /// Like ChainCheck but passes through non-Result values unchanged.
     /// Used by `bind` in `--legacy` mode (v12.3.0).
     LegacyBindCheck = 0x35,
+    /// seq pipeline fail-fast: unwrap Ok, short-circuit on Err with stage context (v12.4.0).
+    /// Layout: opcode(1) + name_str_idx(2) + stage_idx(1) + total(1) + escape_offset(2)
+    SeqStageCheck = 0x36,
     GetField = 0x40,
     BuildRecord = 0x41,
     MakeClosure = 0x42,
@@ -150,6 +153,19 @@ impl Codegen {
         let idx = self.str_table.len() as u16;
         self.str_table.push(value.to_string());
         idx
+    }
+
+    /// Emit a SeqStageCheck opcode with stage metadata.
+    /// Layout: SeqStageCheck(1) + name_str_idx(2) + stage_idx(1) + total(1) + escape_offset(2)
+    /// Returns the position of the escape_offset placeholder for later patching.
+    pub fn emit_seq_stage_jump(&mut self, name_str_idx: u16, stage_idx: u8, total: u8) -> usize {
+        self.emit_opcode(Opcode::SeqStageCheck);
+        self.emit_u16(name_str_idx);
+        self.emit_u8(stage_idx);
+        self.emit_u8(total);
+        let pos = self.code.len();
+        self.emit_u16(0); // escape_offset placeholder
+        pos
     }
 }
 
@@ -286,6 +302,14 @@ pub fn emit_stmt(stmt: &IRStmt, cg: &mut Codegen) {
         IRStmt::LegacyBind(slot, expr) => {
             emit_expr(expr, cg);
             let escape = cg.emit_jump(Opcode::LegacyBindCheck);
+            cg.emit_opcode(Opcode::StoreLocal);
+            cg.emit_u16(*slot);
+            cg.chain_escapes.push(escape);
+        }
+        IRStmt::SeqChain { slot, expr, stage_name, stage_idx, total } => {
+            let name_str_idx = cg.intern_str(stage_name);
+            emit_expr(expr, cg);
+            let escape = cg.emit_seq_stage_jump(name_str_idx, *stage_idx, *total);
             cg.emit_opcode(Opcode::StoreLocal);
             cg.emit_u16(*slot);
             cg.chain_escapes.push(escape);
@@ -513,9 +537,15 @@ fn remap_string_operands(code: &mut [u8], str_remap: &[u16]) {
                 || x == Opcode::Call as u8
                 || x == Opcode::Jump as u8
                 || x == Opcode::JumpIfFalse as u8
-                || x == Opcode::ChainCheck as u8 =>
+                || x == Opcode::ChainCheck as u8
+                || x == Opcode::LegacyBindCheck as u8 =>
             {
                 ip += 3;
+            }
+            x if x == Opcode::SeqStageCheck as u8 => {
+                // layout: opcode(1) + name_str_idx(2) + stage_idx(1) + total(1) + escape_offset(2)
+                remap_u16_at(code, ip + 1, str_remap); // remap name_str_idx
+                ip += 7;
             }
             x if x == Opcode::JumpIfNotVariant as u8 => {
                 remap_u16_at(code, ip + 1, str_remap);

@@ -577,6 +577,58 @@ fn build_type_meta(td: &crate::ast::TypeDef) -> Option<TypeMeta> {
     })
 }
 
+/// Returns a display string for a FlwStep (used in SeqChain stage_name).
+fn flw_step_name(step: &FlwStep) -> String {
+    match step {
+        FlwStep::Stage(name) => name.clone(),
+        FlwStep::Par(names) => format!("par[{}]", names.join(",")),
+    }
+}
+
+/// Build the IRExpr for a single FlwStep applied to `input`.
+fn build_step_call(step: &FlwStep, input: IRExpr, ctx: &mut CompileCtx) -> IRExpr {
+    match step {
+        FlwStep::Stage(name) => {
+            let callee = if let Some(global_idx) = ctx.resolve_global(name) {
+                IRExpr::Global(global_idx, Type::Unknown)
+            } else {
+                IRExpr::Global(u16::MAX, Type::Unknown)
+            };
+            IRExpr::Call(Box::new(callee), vec![input], Type::Unknown)
+        }
+        FlwStep::Par(names) => {
+            // par [A, B] → IO.par_execute_raw(["A", "B"], input)
+            let list_ns_idx = ctx.resolve_global("List").unwrap_or(u16::MAX);
+            let io_ns_idx = ctx.resolve_global("IO").unwrap_or(u16::MAX);
+            let list_ns = || IRExpr::Global(list_ns_idx, Type::Unknown);
+            let list_empty = IRExpr::FieldAccess(
+                Box::new(list_ns()),
+                "empty".to_string(),
+                Type::Unknown,
+            );
+            let mut names_expr = IRExpr::Call(Box::new(list_empty), vec![], Type::Unknown);
+            for n in names {
+                let list_push = IRExpr::FieldAccess(
+                    Box::new(list_ns()),
+                    "push".to_string(),
+                    Type::Unknown,
+                );
+                names_expr = IRExpr::Call(
+                    Box::new(list_push),
+                    vec![names_expr, IRExpr::Lit(Lit::Str(n.clone()), Type::Unknown)],
+                    Type::Unknown,
+                );
+            }
+            let par_callee = IRExpr::FieldAccess(
+                Box::new(IRExpr::Global(io_ns_idx, Type::Unknown)),
+                "par_execute_raw".to_string(),
+                Type::Unknown,
+            );
+            IRExpr::Call(Box::new(par_callee), vec![names_expr, input], Type::Unknown)
+        }
+    }
+}
+
 fn compile_flw_def(fd: &FlwDef, ctx: &mut CompileCtx) -> IRFnDef {
     let saved_next = ctx.next_slot;
     let saved_anon = ctx.anon_counter;
@@ -588,62 +640,56 @@ fn compile_flw_def(fd: &FlwDef, ctx: &mut CompileCtx) -> IRFnDef {
     ctx.push_scope();
     let input_slot = ctx.define_local("$input");
 
-    let mut current = IRExpr::Local(input_slot, Type::Unknown);
-    for step in &fd.steps {
-        match step {
-            FlwStep::Stage(name) => {
-                let callee = if let Some(global_idx) = ctx.resolve_global(name) {
-                    IRExpr::Global(global_idx, Type::Unknown)
-                } else {
-                    IRExpr::Global(u16::MAX, Type::Unknown)
-                };
-                current = IRExpr::Call(Box::new(callee), vec![current], Type::Unknown);
-            }
-            FlwStep::Par(names) => {
-                // par [A, B] → IO.par_execute_raw(["A", "B"], input)
-                // Build the names list via List.empty() + List.push calls.
-                let list_ns_idx = ctx.resolve_global("List").unwrap_or(u16::MAX);
-                let io_ns_idx = ctx.resolve_global("IO").unwrap_or(u16::MAX);
+    let total = fd.steps.len();
+    let body = if total <= 1 {
+        // 0 or 1 steps: simple nested call, no fail-fast needed
+        let mut current = IRExpr::Local(input_slot, Type::Unknown);
+        for step in &fd.steps {
+            current = build_step_call(step, current, ctx);
+        }
+        current
+    } else {
+        // 2+ steps: emit SeqChain stmts for all but the final step,
+        // then the final step is the return expression.
+        let mut stmts: Vec<IRStmt> = Vec::new();
+        let mut current_slot = input_slot;
 
-                let list_ns = || IRExpr::Global(list_ns_idx, Type::Unknown);
-                let list_empty = IRExpr::FieldAccess(
-                    Box::new(list_ns()),
-                    "empty".to_string(),
-                    Type::Unknown,
-                );
-                let mut names_expr = IRExpr::Call(
-                    Box::new(list_empty),
-                    vec![],
-                    Type::Unknown,
-                );
-                for n in names {
-                    let list_push = IRExpr::FieldAccess(
-                        Box::new(list_ns()),
-                        "push".to_string(),
-                        Type::Unknown,
-                    );
-                    names_expr = IRExpr::Call(
-                        Box::new(list_push),
-                        vec![
-                            names_expr,
-                            IRExpr::Lit(Lit::Str(n.clone()), Type::Unknown),
-                        ],
-                        Type::Unknown,
-                    );
-                }
-                let par_callee = IRExpr::FieldAccess(
-                    Box::new(IRExpr::Global(io_ns_idx, Type::Unknown)),
-                    "par_execute_raw".to_string(),
-                    Type::Unknown,
-                );
-                current = IRExpr::Call(
-                    Box::new(par_callee),
-                    vec![names_expr, current],
-                    Type::Unknown,
-                );
+        for (idx, step) in fd.steps.iter().enumerate() {
+            let is_last = idx == total - 1;
+            let input = IRExpr::Local(current_slot, Type::Unknown);
+            let call_expr = build_step_call(step, input, ctx);
+
+            if is_last {
+                let final_expr = call_expr;
+                let local_count = ctx.next_slot as usize;
+                ctx.locals = saved_locals;
+                ctx.local_tys = saved_local_tys;
+                ctx.next_slot = saved_next;
+                ctx.anon_counter = saved_anon;
+                return IRFnDef {
+                    name: fd.name.clone(),
+                    param_count: 1,
+                    param_tys: vec![Type::Unknown],
+                    local_count,
+                    effects: Vec::new(),
+                    return_ty: Type::Unknown,
+                    body: IRExpr::Block(stmts, Box::new(final_expr), Type::Unknown),
+                };
+            } else {
+                let tmp_slot = ctx.define_local(&format!("$seq{idx}"));
+                stmts.push(IRStmt::SeqChain {
+                    slot: tmp_slot,
+                    expr: call_expr,
+                    stage_name: flw_step_name(step),
+                    stage_idx: idx as u8,
+                    total: total as u8,
+                });
+                current_slot = tmp_slot;
             }
         }
-    }
+        // Unreachable for total >= 2, but satisfy the compiler
+        IRExpr::Local(input_slot, Type::Unknown)
+    };
 
     let local_count = ctx.next_slot as usize;
     ctx.locals = saved_locals;
@@ -658,7 +704,7 @@ fn compile_flw_def(fd: &FlwDef, ctx: &mut CompileCtx) -> IRFnDef {
         local_count,
         effects: Vec::new(),
         return_ty: Type::Unknown,
-        body: current,
+        body,
     }
 }
 

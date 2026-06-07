@@ -279,6 +279,7 @@ fn walk_closures_in_expr(expr: &IRExpr, ir: &IRProgram, map: &mut HashMap<u16, (
                     | IRStmt::Chain(_, e)
                     | IRStmt::Yield(e)
                     | IRStmt::Expr(e) => walk_closures_in_expr(e, ir, map),
+                    IRStmt::SeqChain { expr: e, .. } => walk_closures_in_expr(e, ir, map),
                     IRStmt::TrackLine(_) => {}
                 }
             }
@@ -331,6 +332,7 @@ fn scan_closure_bound_slots_walk(expr: &IRExpr, map: &mut HashMap<u16, u16>) {
                     | IRStmt::Chain(_, e)
                     | IRStmt::Yield(e)
                     | IRStmt::Expr(e) => scan_closure_bound_slots_walk(e, map),
+                    IRStmt::SeqChain { expr: e, .. } => scan_closure_bound_slots_walk(e, map),
                     IRStmt::TrackLine(_) => {}
                 }
             }
@@ -645,6 +647,10 @@ pub fn collect_local_types_stmt(stmt: &IRStmt, map: &mut HashMap<u16, Type>) {
             map.entry(*slot).or_insert_with(|| expr.ty().clone());
             collect_local_types(expr, map);
         }
+        IRStmt::SeqChain { slot, expr, .. } => {
+            map.entry(*slot).or_insert_with(|| expr.ty().clone());
+            collect_local_types(expr, map);
+        }
         IRStmt::Yield(expr) | IRStmt::Expr(expr) => collect_local_types(expr, map),
         IRStmt::TrackLine(_) => {}
     }
@@ -747,6 +753,7 @@ fn collect_stmt_string_literals(stmt: &IRStmt, ordered: &mut Vec<String>) {
         | IRStmt::Expr(expr) => {
             collect_expr_string_literals(expr, ordered);
         }
+        IRStmt::SeqChain { expr, .. } => collect_expr_string_literals(expr, ordered),
         IRStmt::TrackLine(_) => {}
     }
 }
@@ -804,6 +811,7 @@ pub fn collect_used_builtins(ir: &IRProgram) -> std::collections::HashSet<String
                         | IRStmt::Chain(_, expr)
                         | IRStmt::Yield(expr)
                         | IRStmt::Expr(expr) => walk_expr(expr, globals, used),
+                        IRStmt::SeqChain { expr, .. } => walk_expr(expr, globals, used),
                         IRStmt::TrackLine(_) => {}
                     }
                 }
@@ -960,6 +968,11 @@ fn emit_stmt(
         IRStmt::LegacyBind(_, _) => Err(WasmCodegenError::UnsupportedExpr(
             "legacy_bind statement in wasm MVP".into(),
         )),
+        // In WASM MVP, stages only return numeric types (no Variant/Result), so
+        // SeqChain degrades to a plain Bind — no monadic check needed.
+        IRStmt::SeqChain { slot, expr, .. } => {
+            emit_stmt(&IRStmt::Bind(*slot, expr.clone()), ctx, slot_map, func)
+        }
         IRStmt::Chain(_, _) => Err(WasmCodegenError::UnsupportedExpr(
             "chain statement in wasm MVP".into(),
         )),

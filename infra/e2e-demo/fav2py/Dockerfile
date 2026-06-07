@@ -13,14 +13,17 @@ RUN apt-get update && apt-get install -y \
 RUN pip3 install --no-cache-dir uv
 
 # psycopg2-binary（uv でも利用可能にしておく）
-RUN pip3 install --no-cache-dir psycopg2-binary
+RUN pip3 install --no-cache-dir psycopg2-binary boto3
 
 # fav binary（ビルド済みをコピー）
 COPY fav /usr/local/bin/fav
 RUN chmod +x /usr/local/bin/fav
 
-# app sources
+# app sources (Fav native)
 WORKDIR /app
 COPY src/ /app/
 
-CMD ["fav", "run", "/app/pipeline.fav"]
+# pre-generated Python (fav-python task 用)
+COPY python/ /app/python/
+
+CMD ["fav", "run", "--legacy", "/app/pipeline.fav", "--", "/app/sample.csv"]

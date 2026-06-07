@@ -1,6 +1,5 @@
-import rune "postgres"
-import rune "aws"
-import rune "csv"
+// fav2py E2E Demo — Pipeline
+// Run: fav run --legacy pipeline.fav -- sample.csv
 
 type TxnRow = {
   id: Int
@@ -16,29 +15,75 @@ type SummaryRow = {
   count: Int
 }
 
-// Stage 1: CSV 読み込み → Postgres INSERT（各行を個別に INSERT）
-stage LoadAndInsert: String -> Int !IO !Postgres = |path| {
-  bind rows <- csv.read<TxnRow>(path)
-  bind json_str <- Json.encode_raw(rows)
-  bind result <- postgres.execute(
-    "INSERT INTO txn(id,region,category,amount) SELECT (r->>'id')::int, r->>'region', r->>'category', (r->>'amount')::float FROM json_array_elements($1::json) AS r",
-    $"[{json_str}]"
-  )
-  List.length(rows)
+fn get_csv_path(args: List<String>) -> String {
+  match List.first(args) {
+    Some(p) => p
+    None    => "/app/sample.csv"
+  }
 }
 
-// Stage 2: region × category 集計クエリ
-stage Aggregate: Int -> List<SummaryRow> !Postgres = |n| {
-  postgres.query<SummaryRow>(
-    "SELECT region, category, SUM(amount) AS total, COUNT(*)::int AS count FROM txn GROUP BY region, category ORDER BY region, category",
+// CSV を読んで rows の JSON 配列文字列を返す
+// Csv.parse_raw は Ok(List<Record>) を返す（String ではない）ため
+// Schema.to_json_array でシリアライズする。
+// Stage 内で fn call 結果を直接 match すると --legacy モードで問題があるため
+// helper fn に分離する（airgap デモと同パターン）。
+// 注: $1::json パラメータ方式は tokio_postgres と PostgreSQL 間の
+//     型不一致（TEXT vs json）を引き起こす場合があるため、
+//     JSON を SQL 文字列に直接埋め込む方式を採用する。
+fn load_csv_rows_json(path: String) -> String !IO {
+  match IO.read_file_raw(path) {
+    Err(_) => "[]"
+    Ok(text) => match Csv.parse_raw(text, ",", true) {
+      Err(_)   => "[]"
+      Ok(rows) => Schema.to_json_array(rows, "TxnRow")
+    }
+  }
+}
+
+stage LoadAndInsert: String -> Int !IO !Postgres = |path| {
+  bind rows_json <- load_csv_rows_json(path)
+  bind _ <- Postgres.execute_raw(
+    "CREATE TABLE IF NOT EXISTS txn (id INT, region TEXT, category TEXT, amount FLOAT)",
     "[]"
   )
+  bind _ <- Postgres.execute_raw("DELETE FROM txn", "[]")
+  bind _ <- Postgres.execute_raw(
+    String.concat(
+      "INSERT INTO txn(id,region,category,amount) SELECT (r->>'id')::int, r->>'region', r->>'category', (r->>'amount')::float FROM json_array_elements('",
+      String.concat(rows_json, "'::json) AS r")
+    ),
+    "[]"
+  )
+  bind _ <- IO.println("[INFO] LoadAndInsert complete")
+  0
 }
 
-// Stage 3: 集計結果を S3 に JSON で保存
-stage SaveResult: List<SummaryRow> -> Unit !IO !AWS = |rows| {
-  bind ts <- aws.timestamp()
-  aws.s3_put_json($"favnir-e2e-demo/proof/fav2py/{ts}.json", rows)
+stage Aggregate: Int -> String !Postgres = |n| {
+  match Postgres.query_raw(
+    "SELECT region, category, SUM(amount) AS total, COUNT(*)::int AS count FROM txn GROUP BY region, category ORDER BY region, category",
+    "[]"
+  ) {
+    Ok(json) => json
+    Err(e)   => String.concat("[ERROR] Aggregate: ", e)
+  }
+}
+
+stage SaveResult: String -> Unit !IO !AWS = |result_json| {
+  bind uid <- Gen.uuid_raw()
+  bind _ <- IO.println(String.concat("[INFO] Saving to S3 key: ", uid))
+  match AWS.s3_put_object_raw(
+    "favnir-e2e-demo",
+    String.concat("proof/fav2py/", String.concat(uid, ".json")),
+    result_json
+  ) {
+    Ok(_)  => IO.println("[INFO] Saved to S3 successfully")
+    Err(e) => IO.println("[ERROR] S3 failed")
+  }
 }
 
 seq Pipeline = LoadAndInsert |> Aggregate |> SaveResult
+
+fn main() -> Unit !IO !Postgres !AWS {
+  bind args <- IO.argv()
+  Pipeline(get_csv_path(args))
+}

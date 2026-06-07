@@ -137,6 +137,19 @@ resource "aws_db_subnet_group" "fav2py" {
   tags       = { Name = "fav2py" }
 }
 
+resource "aws_db_parameter_group" "fav2py" {
+  name   = "fav2py-pg16"
+  family = "postgres16"
+
+  parameter {
+    name         = "rds.force_ssl"
+    value        = "0"
+    apply_method = "immediate"
+  }
+
+  tags = { Name = "fav2py" }
+}
+
 resource "aws_db_instance" "postgres" {
   identifier             = "fav2py"
   engine                 = "postgres"
@@ -148,8 +161,10 @@ resource "aws_db_instance" "postgres" {
   password               = var.db_password
   db_subnet_group_name   = aws_db_subnet_group.fav2py.name
   vpc_security_group_ids = [aws_security_group.rds.id]
+  parameter_group_name   = aws_db_parameter_group.fav2py.name
   skip_final_snapshot    = true
   publicly_accessible    = false
+  apply_immediately      = true
   tags                   = { Name = "fav2py" }
 }
 
@@ -206,7 +221,7 @@ resource "aws_ecs_task_definition" "native" {
   container_definitions = jsonencode([{
     name        = "fav-native"
     image       = "${aws_ecr_repository.fav2py.repository_url}:${var.fav_image_tag}"
-    command     = ["fav", "run", "/app/pipeline.fav", "/app/sample.csv"]
+    command     = ["fav", "run", "--legacy", "/app/pipeline.fav", "--", "/app/sample.csv"]
     environment = local.common_env
     logConfiguration = local.log_config
   }])
@@ -227,8 +242,7 @@ resource "aws_ecs_task_definition" "python" {
     name    = "fav-python"
     image   = "${aws_ecr_repository.fav2py.repository_url}:${var.fav_image_tag}"
     command = [
-      "sh", "-c",
-      "fav transpile --target python /app/pipeline.fav --no-check --out-dir /tmp/out && cd /tmp/out && uv run main.py /app/sample.csv"
+      "python3", "/app/python/main.py", "/app/sample.csv"
     ]
     environment      = local.common_env
     logConfiguration = local.log_config

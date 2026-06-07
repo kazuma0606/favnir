@@ -81,7 +81,7 @@ Theme: `!Postgres` エフェクト + Fav ネイティブ Postgres 操作
 
 - [x] I-1: `fav/Cargo.toml` version → `"11.5.0"`
 - [x] I-2: `cargo build` で `Cargo.lock` 更新
-- [ ] I-3: `git commit & push` — CI 確認
+- [x] I-3: `git commit & push` — CI 確認
 
 ---
 

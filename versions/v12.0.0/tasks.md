@@ -7,21 +7,21 @@ Theme: Python トランスパイラ完成宣言
 
 ## Phase A — CHANGELOG.md 更新
 
-- [ ] A-1: v11.1.0〜v11.9.0 の各エントリを CHANGELOG.md に追記
-- [ ] A-2: v12.0.0 エントリを CHANGELOG.md に追記（最上部）
+- [x] A-1: v11.1.0〜v11.9.0 の各エントリを CHANGELOG.md に追記
+- [x] A-2: v12.0.0 エントリを CHANGELOG.md に追記（最上部）
 
 ---
 
 ## Phase B — README.md 更新
 
-- [ ] B-1: README.md「主要機能」テーブルに `fav transpile --target python` を追記
+- [x] B-1: README.md「主要機能」テーブルに `fav transpile --target python` を追記
 
 ---
 
 ## Phase C — site/content/docs/transpile/python.mdx
 
-- [ ] C-1: `site/content/docs/transpile/` ディレクトリ作成
-- [ ] C-2: `site/content/docs/transpile/python.mdx` 新規作成
+- [x] C-1: `site/content/docs/transpile/` ディレクトリ作成
+- [x] C-2: `site/content/docs/transpile/python.mdx` 新規作成
   - 概要・インストール・基本的な使い方
   - `--out-dir` / `--check` / `--run` オプション
   - エフェクト → Python ライブラリ対応表
@@ -34,19 +34,19 @@ Theme: Python トランスパイラ完成宣言
 
 ## Phase D — Rust テスト（2 件）
 
-- [ ] D-1: `driver.rs` に `v12000_tests` モジュール追加
-  - [ ] `version_is_12_0_0` — `CARGO_PKG_VERSION == "12.0.0"`
-  - [ ] `python_mdx_doc_exists` — `site/content/docs/transpile/python.mdx` の存在確認
-- [ ] D-2: `cargo test v12000` — 2 件通過
-- [ ] D-3: `cargo test --lib` — 1290 件以上通過
+- [x] D-1: `driver.rs` に `v12000_tests` モジュール追加
+  - [x] `version_is_12_0_0` — `CARGO_PKG_VERSION == "12.0.0"`
+  - [x] `python_mdx_doc_exists` — `site/content/docs/transpile/python.mdx` の存在確認
+- [x] D-2: `cargo test v12000` — 2 件通過
+- [x] D-3: `cargo test --lib` — 705 件通過
 
 ---
 
 ## Phase E — バージョン更新 + コミット
 
-- [ ] E-1: `fav/Cargo.toml` version → `"12.0.0"`
-- [ ] E-2: `cargo build` で `Cargo.lock` 更新
-- [ ] E-3: `git commit & push` — CI 確認
+- [x] E-1: `fav/Cargo.toml` version → `"12.0.0"`
+- [x] E-2: `cargo build` で `Cargo.lock` 更新
+- [x] E-3: `git commit & push` — CI 確認
 
 ---
 

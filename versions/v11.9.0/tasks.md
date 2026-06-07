@@ -104,10 +104,27 @@ Theme: fav2py E2E インフラ (`infra/e2e-demo/fav2py/`)
 
 | 確認項目 | 状態 |
 |---|---|
-| `infra/e2e-demo/fav2py/` ディレクトリ構造完成 | |
-| `pipeline.fav` に LoadAndInsert / Aggregate / SaveResult stage 実装 | |
-| Terraform で VPC / RDS / ECS Fargate x2 / ECR 定義 | |
-| `upload.sh` / `run.sh` / `verify.sh` スクリプト完成 | |
-| `Dockerfile` — fav + uv + psycopg2 イメージ定義 | |
-| `cargo test v11900` 2 件通過 | |
-| `cargo test --lib` 705 件以上通過 | |
+| `infra/e2e-demo/fav2py/` ディレクトリ構造完成 | ✅ |
+| `pipeline.fav` に LoadAndInsert / Aggregate / SaveResult stage 実装 | ✅ |
+| Terraform で VPC / RDS / ECS Fargate x2 / ECR 定義 | ✅ |
+| `upload.sh` / `run.sh` / `verify.sh` スクリプト完成 | ✅ |
+| `Dockerfile` — fav + uv + psycopg2 イメージ定義 | ✅ |
+| `cargo test v11900` 2 件通過 | ✅ |
+| `cargo test --lib` 705 件以上通過 | ✅ |
+
+## E2E デモ実行結果 (2026-06-07)
+
+**PASS=5 FAIL=0** — `scripts/run.sh` にて確認済み。
+
+- PASS: terraform apply
+- PASS: fav-native exit 0（`fav run --legacy pipeline.fav`）
+- PASS: fav-python exit 0（`python3 /app/python/main.py`）
+- PASS: verify.sh 全 4 チェック（digest 一致 / 件数一致）
+- PASS: run log S3 upload
+
+### 主な修正内容（デモ完成まで）
+
+1. **`pipeline.fav` LoadAndInsert**: `Csv.parse_raw` は `Ok(List<Record>)` を返すため、helper fn `load_csv_rows_json` に分離し `Schema.to_json_array(rows, "TxnRow")` でシリアライズ。`$1::json` パラメータ型不一致を回避するため JSON を SQL 文字列リテラルに直接埋め込む。
+2. **`terraform/main.tf`**: RDS デフォルトの `rds.force_ssl = 1` が tokio_postgres (NoTls) の接続を拒否。カスタムパラメータグループ `fav2py-pg16` で `rds.force_ssl = 0` に設定 → RDS 再起動で適用。
+3. **`scripts/run.sh`**: fav-native 用に ECS タスク override で AWS session credentials を inject（Favnir VM は IMDS 未対応）。
+4. **`scripts/verify.sh`**: `jq` を `uv run --no-project python` に置換。Windows 環境では git bash `/tmp/` と Python `tempfile.gettempdir()` が異なるため `PYTEMP=$(uv run python -c "import tempfile; print(tempfile.gettempdir().replace('\\\\\\\\', '/'))")` でパスを正規化。

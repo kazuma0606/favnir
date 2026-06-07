@@ -34,6 +34,8 @@ pub struct Emitter {
     // v11.6.0: Postgres / psycopg2 フラグ
     needs_psycopg2:       bool,
     needs_pg_helpers:     bool,
+    // v12.0.0: Gen namespace (secrets モジュール)
+    needs_secrets:        bool,
     // v11.8.0: lineage コメント（fn/stage 名 → コメント文字列）
     lineage_comments: HashMap<String, String>,
     // 型名レジストリ（_SCHEMA_REGISTRY 生成用）
@@ -59,6 +61,7 @@ impl Emitter {
             needs_aws_sqs:        false,
             needs_psycopg2:       false,
             needs_pg_helpers:     false,
+            needs_secrets:        false,
             lineage_comments:     HashMap::new(),
             type_names:           Vec::new(),
         }
@@ -149,6 +152,7 @@ impl Emitter {
         self.needs_aws_sqs        = sub.needs_aws_sqs;
         self.needs_psycopg2       = sub.needs_psycopg2;
         self.needs_pg_helpers     = sub.needs_pg_helpers;
+        self.needs_secrets        = sub.needs_secrets;
 
         // Phase 4: プレリュード（conditional imports 含む）
         self.emit_prelude(source_path);
@@ -211,6 +215,7 @@ impl Emitter {
             self.line("import psycopg2.extras");
             self.line("import os as _os");
         }
+        if self.needs_secrets { self.line("import secrets"); }
         self.blank();
         self.line("class Ok:");
         self.indent += 1;
@@ -832,6 +837,20 @@ impl Emitter {
                         return format!("_schema_to_json_array({})", a.join(", "))
                     }
 
+                    // ── Gen (v12.0.0) ─────────────────────────────────────
+                    ("Gen", "nano_id_raw") if a.is_empty() => {
+                        self.needs_secrets = true;
+                        return "secrets.token_hex(10)".to_string()
+                    }
+                    ("Gen", "uuid_raw") | ("Gen", "uuid_v7_raw") if a.is_empty() => {
+                        self.needs_secrets = true;
+                        return "secrets.token_hex(16)".to_string()
+                    }
+                    ("Gen", name) => {
+                        self.needs_secrets = true;
+                        return format!("_gen_{}({})", to_snake(name), a.join(", "))
+                    }
+
                     // ── Json ─────────────────────────────────────────────
                     ("Json", "encode_raw") | ("Json", "write_raw") | ("Json", "write_array_raw")
                         if a.len() == 1 =>
@@ -1245,7 +1264,7 @@ impl Emitter {
         self.line("try:");
         self.indent += 1;
         self.line("_r = _csv_mod.DictReader(_io_mod.StringIO(text), delimiter=sep)");
-        self.line("return Ok([dict(_row) for _row in _r])");
+        self.line("import json as _j; return Ok(_j.dumps([dict(_row) for _row in _r]))");
         self.indent -= 1;
         self.line("except Exception as _e:");
         self.indent += 1;
@@ -1576,22 +1595,33 @@ impl Emitter {
         self.line(")");
         self.indent -= 1;
         self.blank();
+        // _pg_adapt_params: $N → %s, complex params → JSON strings
+        self.line("def _pg_adapt(_sql, _params_json):");
+        self.indent += 1;
+        self.line("import re as _re");
+        self.line("_sql_py = _re.sub(r'\\$\\d+', '%s', _sql)");
+        self.line("_raw = _json_mod.loads(_params_json) if isinstance(_params_json, str) else _params_json");
+        self.line("_ps = [_json_mod.dumps(_p) if isinstance(_p, (list, dict)) else _p for _p in _raw]");
+        self.line("return _sql_py, _ps");
+        self.indent -= 1;
+        self.blank();
         // _pg_execute
         self.line("def _pg_execute(_sql, _params_json):");
         self.indent += 1;
-        self.line("_params = _json_mod.loads(_params_json) if isinstance(_params_json, str) else _params_json");
+        self.line("_sql_py, _ps = _pg_adapt(_sql, _params_json)");
         self.line("_conn = _pg_connect()");
         self.line("try:");
         self.indent += 1;
         self.line("with _conn.cursor() as _cur:");
         self.indent += 1;
-        self.line("_cur.execute(_sql, _params)");
+        self.line("_cur.execute(_sql_py, _ps)");
         self.indent -= 1;
         self.line("_conn.commit()");
         self.line("return Ok(None)");
         self.indent -= 1;
         self.line("except Exception as _e:");
         self.indent += 1;
+        self.line("_conn.rollback()");
         self.line("return Err(str(_e))");
         self.indent -= 1;
         self.line("finally:");
@@ -1603,16 +1633,16 @@ impl Emitter {
         // _pg_query
         self.line("def _pg_query(_sql, _params_json):");
         self.indent += 1;
-        self.line("_params = _json_mod.loads(_params_json) if isinstance(_params_json, str) else _params_json");
+        self.line("_sql_py, _ps = _pg_adapt(_sql, _params_json)");
         self.line("_conn = _pg_connect()");
         self.line("try:");
         self.indent += 1;
         self.line("with _conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as _cur:");
         self.indent += 1;
-        self.line("_cur.execute(_sql, _params)");
+        self.line("_cur.execute(_sql_py, _ps)");
         self.line("_rows = [dict(_r) for _r in _cur.fetchall()]");
         self.indent -= 1;
-        self.line("return Ok(_json_mod.dumps(_rows))");
+        self.line("return Ok(_json_mod.dumps(_rows, default=float))");
         self.indent -= 1;
         self.line("except Exception as _e:");
         self.indent += 1;

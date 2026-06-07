@@ -41,15 +41,30 @@ interface RegistryRune {
 
 const FAV_CLIENT_TOKEN = 'fav-registry-v1-dk9p2mxw4qhz'
 
+function fallbackRunes(): RegistryRune[] {
+  return Object.keys(LOCAL_META)
+    .sort((a, b) => a.localeCompare(b))
+    .map((name) => ({
+      name,
+      version: 'local',
+      description: 'Registry unavailable during build. Showing local catalog metadata.',
+    }))
+}
+
 async function fetchRunes(): Promise<RegistryRune[]> {
-  const res = await fetch(`${REGISTRY_URL}/runes`, {
-    cache: 'force-cache',
-    headers: { 'X-Fav-Token': FAV_CLIENT_TOKEN },
-  })
-  if (!res.ok) {
-    throw new Error(`Registry fetch failed: ${res.status} ${res.statusText}`)
+  try {
+    const res = await fetch(`${REGISTRY_URL}/runes`, {
+      cache: 'force-cache',
+      headers: { 'X-Fav-Token': FAV_CLIENT_TOKEN },
+    })
+    if (!res.ok) {
+      throw new Error(`Registry fetch failed: ${res.status} ${res.statusText}`)
+    }
+    return res.json() as Promise<RegistryRune[]>
+  } catch (error) {
+    console.warn('Falling back to local rune catalog during build:', error)
+    return fallbackRunes()
   }
-  return res.json() as Promise<RegistryRune[]>
 }
 
 export default async function RunesPage() {

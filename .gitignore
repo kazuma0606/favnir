@@ -13,6 +13,14 @@ infra/snowflake/.terraform.lock.hcl
 infra/snowflake/terraform.tfvars
 infra/snowflake/*.p8
 infra/snowflake/*.pub
+# e2e-demo terraform state / provider binaries
+infra/e2e-demo/**/.terraform/
+infra/e2e-demo/**/*.tfstate
+infra/e2e-demo/**/*.tfstate.backup
+# fav binary build artifacts (Linux / AL2023)
+fav/fav-linux
+fav/fav-al2023
+infra/e2e-demo/**/fav
 crates/favnir-wasm/target/
 # Zenn article drafts
 zenn/

@@ -32,15 +32,13 @@ fn get_rune_db(name: String) -> Result<Option<Map<String, String>>, String> !AWS
 }
 
 fn save_rune(name: String, version: String, description: String, zip_b64: String) -> Result<Unit, String> !AWS {
-  bind decoded <- String.base64_decode(zip_b64);
-  match decoded {
+  match String.base64_decode(zip_b64) {
     Err(e) => Result.err(e)
     Ok(bytes) => {
-      bind put_db <- AWS.dynamo_put_item_raw(
+      match AWS.dynamo_put_item_raw(
         db_table(),
         Map.set(Map.set(Map.set((), "name", name), "version", version), "description", description)
-      );
-      match put_db {
+      ) {
         Err(e) => Result.err(e)
         Ok(_)  => {
           bind s3_key <- String.concat(String.concat(name, "/"), String.concat(version, ".zip"));
@@ -54,8 +52,7 @@ fn save_rune(name: String, version: String, description: String, zip_b64: String
 // ── Auth helpers ────────────────────────────────────────────────────────────
 
 fn check_client_token(token_opt: Option<String>) -> Bool !Env {
-  bind expected_r <- Env.require_raw("FAV_CLIENT_TOKEN");
-  bind expected <- match expected_r { Err(_) => ""  Ok(v) => v };
+  bind expected <- match Env.require_raw("FAV_CLIENT_TOKEN") { Err(_) => ""  Ok(v) => v };
   match token_opt {
     None    => false
     Some(t) => t == expected
@@ -65,16 +62,14 @@ fn check_client_token(token_opt: Option<String>) -> Bool !Env {
 // ── Handlers ────────────────────────────────────────────────────────────────
 
 fn handle_list() -> Map<String, String> !AWS {
-  bind scan <- list_runes();
-  match scan {
+  match list_runes() {
     Err(e)    => resp_text(500, e)
     Ok(items) => resp_json(Json.write_array_raw(items))
   }
 }
 
 fn handle_get(name: String) -> Map<String, String> !AWS {
-  bind result <- get_rune_db(name);
-  match result {
+  match get_rune_db(name) {
     Err(e)  => resp_text(500, e)
     Ok(opt) => match opt {
       None       => resp_text(404, "rune not found")
@@ -84,26 +79,20 @@ fn handle_get(name: String) -> Map<String, String> !AWS {
 }
 
 fn handle_publish(name: String, body: String, auth: String) -> Map<String, String> !AWS !Env {
-  bind expected_r <- Env.require_raw("FAV_ADMIN_TOKEN");
-  bind expected   <- match expected_r { Err(_) => ""  Ok(v) => v };
+  bind expected <- match Env.require_raw("FAV_ADMIN_TOKEN") { Err(_) => ""  Ok(v) => v };
   bind bearer <- if String.starts_with(auth, "Bearer ") {
     String.slice(auth, 7, String.length(auth))
   } else { "" };
   if bearer == expected {
-    bind fields_res <- Json.parse_raw(body);
-    match fields_res {
+    match Json.parse_raw(body) {
       Err(_)     => resp_text(400, "invalid JSON body")
       Ok(fields) => {
-        bind version_opt     <- Map.get(fields, "version");
-        bind description_opt <- Map.get(fields, "description");
-        bind zip_opt         <- Map.get(fields, "zip");
-        bind version     <- match version_opt     { None => "0.1.0"  Some(v) => v };
-        bind description <- match description_opt { None => ""       Some(d) => d };
-        match zip_opt {
+        bind version     <- match Map.get(fields, "version")     { None => "0.1.0"  Some(v) => v };
+        bind description <- match Map.get(fields, "description") { None => ""       Some(d) => d };
+        match Map.get(fields, "zip") {
           None          => resp_text(400, "missing zip field")
           Some(zip_b64) => {
-            bind saved <- save_rune(name, version, description, zip_b64);
-            match saved {
+            match save_rune(name, version, description, zip_b64) {
               Err(e) => resp_text(500, e)
               Ok(_)  => resp_text(201, "published")
             }
@@ -118,8 +107,7 @@ fn handle_publish(name: String, body: String, auth: String) -> Map<String, Strin
 
 fn handle_versions(name: String) -> Map<String, String> !AWS {
   bind prefix <- String.concat(name, "/");
-  bind list_res <- AWS.s3_list_objects_raw(pkg_bucket(), prefix);
-  match list_res {
+  match AWS.s3_list_objects_raw(pkg_bucket(), prefix) {
     Err(e)   => resp_text(500, e)
     Ok(keys) => {
       bind prefix_len <- String.length(prefix);
@@ -136,8 +124,7 @@ fn handle_versions(name: String) -> Map<String, String> !AWS {
 
 fn handle_download(name: String, version: String) -> Map<String, String> !AWS {
   bind s3_key <- String.concat(String.concat(name, "/"), String.concat(version, ".zip"));
-  bind get_res <- AWS.s3_get_object_base64_raw(pkg_bucket(), s3_key);
-  match get_res {
+  match AWS.s3_get_object_base64_raw(pkg_bucket(), s3_key) {
     Err(_)  => resp_text(404, "version not found")
     Ok(b64) =>
       Map.set(Map.set(Map.set(Map.set((), "status", 200), "body", b64), "content_type", "application/zip"), "is_base64", "true")
@@ -147,19 +134,13 @@ fn handle_download(name: String, version: String) -> Map<String, String> !AWS {
 // ── Router ──────────────────────────────────────────────────────────────────
 
 fn route(req: Map<String, String>) -> Map<String, String> !AWS !Env {
-  bind fav_token_opt <- Map.get(req, "fav_token");
-  bind valid <- check_client_token(fav_token_opt);
+  bind valid <- check_client_token(Map.get(req, "fav_token"));
   if valid {
-  bind method_opt       <- Map.get(req, "method");
-  bind path_opt         <- Map.get(req, "path");
-  bind auth_opt         <- Map.get(req, "authorization");
-  bind body_opt         <- Map.get(req, "body");
-  bind query_ver_opt    <- Map.get(req, "query_version");
-  bind method    <- match method_opt    { None => "GET"  Some(m) => m };
-  bind path      <- match path_opt      { None => "/"    Some(p) => p };
-  bind auth      <- match auth_opt      { None => ""     Some(a) => a };
-  bind body      <- match body_opt      { None => ""     Some(b) => b };
-  bind query_ver <- match query_ver_opt { None => ""     Some(v) => v };
+  bind method    <- match Map.get(req, "method")        { None => "GET"  Some(m) => m };
+  bind path      <- match Map.get(req, "path")          { None => "/"    Some(p) => p };
+  bind auth      <- match Map.get(req, "authorization") { None => ""     Some(a) => a };
+  bind body      <- match Map.get(req, "body")          { None => ""     Some(b) => b };
+  bind query_ver <- match Map.get(req, "query_version") { None => ""     Some(v) => v };
   if method == "GET" {
     if path == "/runes" {
       handle_list()
@@ -176,14 +157,12 @@ fn route(req: Map<String, String>) -> Map<String, String> !AWS !Env {
             } else {
               if sub == "download" {
                 if query_ver == "" {
-                  bind db_res <- get_rune_db(rune_name);
-                  match db_res {
+                  match get_rune_db(rune_name) {
                     Err(e)  => resp_text(500, e)
                     Ok(opt) => match opt {
                       None       => resp_text(404, "rune not found")
                       Some(item) => {
-                        bind ver_opt <- Map.get(item, "version");
-                        bind ver <- match ver_opt { None => "0.1.0"  Some(v) => v };
+                        bind ver <- match Map.get(item, "version") { None => "0.1.0"  Some(v) => v };
                         handle_download(rune_name, ver)
                       }
                     }
@@ -227,18 +206,12 @@ fn route(req: Map<String, String>) -> Map<String, String> !AWS !Env {
 // prints the response map as JSON to stdout (bootstrap transforms to Lambda format).
 
 public fn main() -> Unit !Io !Env !AWS {
-  bind method_r    <- Env.require_raw("FAV_METHOD");
-  bind path_r      <- Env.require_raw("FAV_PATH");
-  bind body_r      <- Env.require_raw("FAV_BODY");
-  bind auth_r      <- Env.require_raw("FAV_AUTH");
-  bind query_ver_r <- Env.require_raw("FAV_QUERY_VERSION");
-  bind fav_token_r <- Env.require_raw("FAV_FAV_TOKEN");
-  bind method    <- match method_r    { Err(_) => "GET"  Ok(m) => m };
-  bind path      <- match path_r      { Err(_) => "/"    Ok(p) => p };
-  bind body      <- match body_r      { Err(_) => ""     Ok(b) => b };
-  bind auth      <- match auth_r      { Err(_) => ""     Ok(a) => a };
-  bind query_ver <- match query_ver_r { Err(_) => ""     Ok(v) => v };
-  bind fav_token <- match fav_token_r { Err(_) => ""     Ok(t) => t };
+  bind method    <- match Env.require_raw("FAV_METHOD")        { Err(_) => "GET"  Ok(m) => m };
+  bind path      <- match Env.require_raw("FAV_PATH")          { Err(_) => "/"    Ok(p) => p };
+  bind body      <- match Env.require_raw("FAV_BODY")          { Err(_) => ""     Ok(b) => b };
+  bind auth      <- match Env.require_raw("FAV_AUTH")          { Err(_) => ""     Ok(a) => a };
+  bind query_ver <- match Env.require_raw("FAV_QUERY_VERSION") { Err(_) => ""     Ok(v) => v };
+  bind fav_token <- match Env.require_raw("FAV_FAV_TOKEN")     { Err(_) => ""     Ok(t) => t };
   bind res <- route(
     Map.set(
       Map.set(Map.set(Map.set(Map.set(Map.set((), "method", method), "path", path), "body", body),

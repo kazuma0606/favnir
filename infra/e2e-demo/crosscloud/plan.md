@@ -61,6 +61,76 @@ The first version should validate five concerns together:
 - verifier passes, but Azure Database for PostgreSQL is unavailable
 - verifier passes, migration starts, but write phase fails with proof preserved
 
+## Favnir 固有の価値
+
+このデモの当初の設計は「マルチクラウド認証基盤の検証」が主軸であり、Favnir は ETL の実行エンジンに留まっていた。しかし以下の観点を組み込むと、Favnir でなければ成立しない部分が生まれる。
+
+### 1. エフェクト宣言 = データフロー契約
+
+```
+fn migrate() -> Result<MigrationResult, String> !Postgres !Azure
+```
+
+この型シグネチャは「AWS RDS からしか読まない、Azure PG にしか書かない」ことをコンパイル時に静的に保証する。Python や Go ではこの保証は実行時にしか確認できない。
+
+Lambda verifier が HMAC でリクエストの完全性を検証し、Favnir がエフェクト宣言でデータフローを保証するという二層構造になる。**認証はゲート、Favnir のパイプラインが信頼境界そのもの**、という位置づけに変わる。
+
+### 2. 型状態パターンによる移行フェーズの保証
+
+マイグレーションの各フェーズを型として定義する：
+
+```
+type Loaded(List<CustomerRow>)
+type Validated(List<CustomerRow>)
+type Transformed(List<MigratedRow>)
+
+fn load()                  -> Result<Loaded, String>      !Postgres
+fn validate(d: Loaded)     -> Result<Validated, String>
+fn transform(d: Validated) -> Result<Transformed, String>
+fn write(d: Transformed)   -> Result<Unit, String>        !Azure
+```
+
+`validate` には `Loaded` しか渡せない。`Transformed` を `validate` に渡すコードはコンパイルエラーになる。フェーズを飛ばした実行や順序の入れ替えが型レベルで不可能になる。
+
+### 3. `seq` fail-fast による partial write の防止
+
+```
+seq Load |> Validate |> Transform |> Write
+```
+
+Stage 2（Validate）で行のスキーマ違反が検出された場合、Write は実行されない。audit proof には以下が自動的に記録される：
+
+```
+pipeline stopped at stage 2/4 'Validate': row 247 schema violation
+```
+
+「書き込みが起きたかどうか」をアプリコードで管理する必要がなく、Favnir の `seq` opcode がこれを保証する。
+
+### 4. テストコードの読みやすさ
+
+型状態パターンにより、テストの前提条件が型として自己文書化される。
+
+- `Loaded` が来る = load は通過済み
+- `Validated` が来る = load と validate は通過済み
+
+Python では「このフィールドは validate 前提」というコメントを人間が書く必要がある。Favnir では型がそのコメントを兼ねる。各ステージは独立してユニットテスト可能で、前のステージの型を手で作って渡すだけでよい。モックフレームワークは不要。
+
+**型が仕様書であり、仕様書がそのままテスト設計になる。** マルチクラウドのような複雑なシナリオほどこの恩恵が大きい。
+
+### 5. `fav explain --lineage` をコンプライアンス証拠として使う
+
+```
+fav explain --lineage migration.fav
+```
+
+生成される lineage レポート（Source: `!Postgres(read)` → AWS RDS / Sink: `!Azure(write)` → Azure PG）を audit proof の一部として S3 に保存することで、「このパイプラインは RDS 以外からデータを読んでいない」をソースコードから静的に証明できる。
+
+### 6. `fav transpile` を監査ドキュメントとして使う
+
+`fav transpile migration.fav` で生成した Python を Azure 側パートナーへの監査提出資料として使える。Favnir と Python の両方で同一ロジックが保証されるため、二重実装なしにコードの人間可読版を提供できる。
+
+---
+
 ## Explicitly Out Of Scope For V1
 
 To keep this demo lightweight, the following are intentionally excluded:

@@ -11,8 +11,30 @@ env:
   RUST_BACKTRACE: 1
 
 jobs:
+  changes:
+    name: Detect changed areas
+    runs-on: ubuntu-latest
+    outputs:
+      rust: ${{ steps.filter.outputs.rust }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect Rust-related changes
+        id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            rust:
+              - 'fav/**'
+              - 'crates/**'
+              - '.github/workflows/ci.yml'
+
   rust:
     name: Rust — build & test
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
     runs-on: ubuntu-latest
     env:
       # fav/.cargo/config.toml sets CXXFLAGS for Windows MSVC; clear it on Linux

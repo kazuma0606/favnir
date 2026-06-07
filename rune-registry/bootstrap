@@ -14,14 +14,26 @@ while true; do
   rm -f "$HDR"
 
   # ── Extract request fields from Lambda Function URL event ────────────────
-  METHOD=$(printf '%s' "$EVENT" | jq -r '.requestContext.http.method // "GET"')
-  REQ_PATH=$(printf '%s' "$EVENT" | jq -r '.requestContext.http.path // "/"')
-  BODY=$(printf '%s' "$EVENT" | jq -r '.body // ""')
+  # API Gateway omits or nulls optional objects such as headers/queryStringParameters.
+  # Guard every lookup so one missing field does not fail the whole Lambda invocation.
+  METHOD=$(printf '%s' "$EVENT" \
+    | jq -r '((.requestContext // {}) | (.http // {}) | .method // "GET")' 2>/dev/null \
+    || printf 'GET')
+  REQ_PATH=$(printf '%s' "$EVENT" \
+    | jq -r '((.requestContext // {}) | (.http // {}) | .path // "/")' 2>/dev/null \
+    || printf '/')
+  BODY=$(printf '%s' "$EVENT" \
+    | jq -r '(.body // "")' 2>/dev/null \
+    || printf '')
   AUTH=$(printf '%s' "$EVENT" \
-    | jq -r '(.headers.authorization // .headers.Authorization // "")')
-  QUERY_VERSION=$(printf '%s' "$EVENT" | jq -r '.queryStringParameters.version // ""')
+    | jq -r '((.headers // {}) | .authorization // .Authorization // "")' 2>/dev/null \
+    || printf '')
+  QUERY_VERSION=$(printf '%s' "$EVENT" \
+    | jq -r '((.queryStringParameters // {}) | .version // "")' 2>/dev/null \
+    || printf '')
   FAV_TOKEN=$(printf '%s' "$EVENT" \
-    | jq -r '(.headers["x-fav-token"] // .headers["X-Fav-Token"] // "")')
+    | jq -r '((.headers // {}) | .["x-fav-token"] // .["X-Fav-Token"] // "")' 2>/dev/null \
+    || printf '')
 
   # ── Run Favnir handler ───────────────────────────────────────────────────
   # stdout → Favnir's IO.println JSON output; stderr → CloudWatch Logs

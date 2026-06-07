@@ -2,6 +2,18 @@
 
 Date: 2026-05-26
 
+## この計画の位置づけ
+
+`infra/e2e-demo/` 配下のシナリオは、すべてを同じ意味で「Favnir のコアテスト」として扱うものではない。
+
+- `lambda/`, `airgap/`, `fav2py/` の一部は Favnir 近接検証
+- `ecs/`, `eks/`, `snowflake/` は reference integration
+- `crosscloud/` は architecture / R&D lab
+
+分類の詳細は [classification.md](C:/Users/yoshi/favnir/infra/e2e-demo/classification.md) を参照。
+
+この `plan.md` は「Favnir をどのような実行基盤や運用パターンに載せられるか」を整理した全体計画であり、通常の CI 品質ゲートそのものを定義する文書ではない。
+
 ## 目的
 
 Rust コアと Favnir 処理系が「同一プロセス内に混在している」現状では、

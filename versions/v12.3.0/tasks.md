@@ -83,8 +83,8 @@ Theme: `bind` を真の monadic bind に修正（`--legacy` モード）
 ## Phase H — バージョン更新 + コミット
 
 - [x] H-1: `fav/Cargo.toml` version → `"12.3.0"`
-- [ ] H-2: `cargo build` で `Cargo.lock` 更新
-- [ ] H-3: `git commit & push`
+- [x] H-2: `cargo build` で `Cargo.lock` 更新
+- [x] H-3: `git commit & push`
 
 ---
 

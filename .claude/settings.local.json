@@ -37,7 +37,16 @@
       "Bash(git add:*)",
       "Bash(git commit:*)",
       "Bash(git push:*)",
-      "Bash(xxd /tmp/lambda-out2.txt)"
+      "Bash(xxd /tmp/lambda-out2.txt)",
+      "Bash(./target/debug/fav fmt:*)",
+      "Read(//tmp/**)",
+      "Bash(aws s3:*)",
+      "Bash(uv run:*)",
+      "Bash(ECR=\"847333136058.dkr.ecr.ap-northeast-1.amazonaws.com/favnir/fav2py\")",
+      "Bash(MSYS_NO_PATHCONV=1 docker build -t \"$ECR:latest\" .)",
+      "Bash(MSYS_NO_PATHCONV=1 docker push \"$ECR:latest\")",
+      "Bash(docker build:*)",
+      "Bash(docker push:*)"
     ]
   }
 }

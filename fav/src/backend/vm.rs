@@ -1705,6 +1705,31 @@ impl VM {
                         }
                     }
                 }
+                x if x == Opcode::LegacyBindCheck as u8 => {
+                    let offset = Self::read_u16(function, frame)? as usize;
+                    let Some(value) = vm.stack.pop() else {
+                        return Err(vm.error(artifact, "stack underflow on legacy_bind_check"));
+                    };
+                    match value {
+                        VMValue::Variant(tag, payload) if tag == "ok" || tag == "some" => {
+                            let unwrapped = payload.map(|inner| *inner).ok_or_else(|| {
+                                vm.error(artifact, "legacy_bind_check expected payload for ok/some")
+                            })?;
+                            vm.stack.push(unwrapped);
+                        }
+                        VMValue::Variant(tag, payload) if tag == "err" || tag == "none" => {
+                            vm.stack.push(VMValue::Variant(tag, payload));
+                            let Some(next_ip) = frame.ip.checked_add(offset) else {
+                                return Err(vm.error(artifact, "jump overflow"));
+                            };
+                            frame.ip = next_ip;
+                        }
+                        other => {
+                            // Non-Result value: pass through unchanged (simple bind semantics)
+                            vm.stack.push(other);
+                        }
+                    }
+                }
                 x if x == Opcode::JumpIfNotVariant as u8 => {
                     let name_idx = Self::read_u16(function, frame)? as usize;
                     let offset = Self::read_u16(function, frame)? as usize;

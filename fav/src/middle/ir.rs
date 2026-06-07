@@ -94,6 +94,8 @@ impl IRExpr {
 #[derive(Debug, Clone)]
 pub enum IRStmt {
     Bind(u16, IRExpr),
+    /// `--legacy` mode: monadic bind — unwrap Ok, short-circuit on Err (v12.3.0).
+    LegacyBind(u16, IRExpr),
     Chain(u16, IRExpr),
     Yield(IRExpr),
     Expr(IRExpr),
@@ -240,7 +242,7 @@ fn collect_expr_deps(expr: &IRExpr, globals: &[IRGlobal], deps: &mut BTreeSet<St
 
 fn collect_stmt_deps(stmt: &IRStmt, globals: &[IRGlobal], deps: &mut BTreeSet<String>) {
     match stmt {
-        IRStmt::Bind(_, e) | IRStmt::Chain(_, e) | IRStmt::Yield(e) | IRStmt::Expr(e) => {
+        IRStmt::Bind(_, e) | IRStmt::LegacyBind(_, e) | IRStmt::Chain(_, e) | IRStmt::Yield(e) | IRStmt::Expr(e) => {
             collect_expr_deps(e, globals, deps);
         }
         IRStmt::TrackLine(_) => {}

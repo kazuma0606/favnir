@@ -275,6 +275,7 @@ fn walk_closures_in_expr(expr: &IRExpr, ir: &IRProgram, map: &mut HashMap<u16, (
             for stmt in stmts {
                 match stmt {
                     IRStmt::Bind(_, e)
+                    | IRStmt::LegacyBind(_, e)
                     | IRStmt::Chain(_, e)
                     | IRStmt::Yield(e)
                     | IRStmt::Expr(e) => walk_closures_in_expr(e, ir, map),
@@ -326,6 +327,7 @@ fn scan_closure_bound_slots_walk(expr: &IRExpr, map: &mut HashMap<u16, u16>) {
                 }
                 match stmt {
                     IRStmt::Bind(_, e)
+                    | IRStmt::LegacyBind(_, e)
                     | IRStmt::Chain(_, e)
                     | IRStmt::Yield(e)
                     | IRStmt::Expr(e) => scan_closure_bound_slots_walk(e, map),
@@ -639,7 +641,7 @@ pub fn collect_local_types(expr: &IRExpr, map: &mut HashMap<u16, Type>) {
 
 pub fn collect_local_types_stmt(stmt: &IRStmt, map: &mut HashMap<u16, Type>) {
     match stmt {
-        IRStmt::Bind(slot, expr) | IRStmt::Chain(slot, expr) => {
+        IRStmt::Bind(slot, expr) | IRStmt::LegacyBind(slot, expr) | IRStmt::Chain(slot, expr) => {
             map.entry(*slot).or_insert_with(|| expr.ty().clone());
             collect_local_types(expr, map);
         }
@@ -739,6 +741,7 @@ fn collect_expr_string_literals(expr: &IRExpr, ordered: &mut Vec<String>) {
 fn collect_stmt_string_literals(stmt: &IRStmt, ordered: &mut Vec<String>) {
     match stmt {
         IRStmt::Bind(_, expr)
+        | IRStmt::LegacyBind(_, expr)
         | IRStmt::Chain(_, expr)
         | IRStmt::Yield(expr)
         | IRStmt::Expr(expr) => {
@@ -797,6 +800,7 @@ pub fn collect_used_builtins(ir: &IRProgram) -> std::collections::HashSet<String
                 for stmt in stmts {
                     match stmt {
                         IRStmt::Bind(_, expr)
+                        | IRStmt::LegacyBind(_, expr)
                         | IRStmt::Chain(_, expr)
                         | IRStmt::Yield(expr)
                         | IRStmt::Expr(expr) => walk_expr(expr, globals, used),
@@ -953,6 +957,9 @@ fn emit_stmt(
             }
             Ok(())
         }
+        IRStmt::LegacyBind(_, _) => Err(WasmCodegenError::UnsupportedExpr(
+            "legacy_bind statement in wasm MVP".into(),
+        )),
         IRStmt::Chain(_, _) => Err(WasmCodegenError::UnsupportedExpr(
             "chain statement in wasm MVP".into(),
         )),

@@ -15,7 +15,7 @@ use crate::frontend::parser::Parser;
 use crate::middle::checker::Checker;
 use crate::middle::compiler::compile_program;
 use crate::middle::compiler::set_coverage_mode;
-use crate::middle::ir::{IRArm, IRExpr, IRGlobalKind, IRPattern, IRProgram, IRStmt};
+use crate::middle::ir::{IRArm, IRExpr, IRFnDef, IRGlobalKind, IRPattern, IRProgram, IRStmt};
 use crate::middle::resolver::Resolver;
 use crate::schemas::load_schemas;
 use crate::toml::{CheckpointConfig, DeployConfig, FavToml};
@@ -902,7 +902,7 @@ pub fn cmd_run(file: Option<&str>, db_url: Option<&str>, legacy: bool) {
             eprintln!("{message}");
             process::exit(1);
         });
-        let artifact = build_artifact(&run_program);
+        let artifact = build_artifact_legacy(&run_program);
         exec_artifact_main_with_source(&artifact, db_url, Some(&source_path2)).unwrap_or_else(
             |message| {
                 eprintln!("{message}");
@@ -981,6 +981,117 @@ pub fn cmd_build(file: Option<&str>, out: Option<&str>, target: Option<&str>) {
 
 fn build_artifact(program: &ast::Program) -> FvcArtifact {
     let ir = compile_program(program);
+    codegen_program(&ir)
+}
+
+// ── v12.3.0: --legacy monadic bind transformation ─────────────────────────────
+
+/// Walk an `IRExpr` and recursively apply `legacy_transform_stmt` to all
+/// `Block` statement lists (and their nested sub-expressions).
+fn legacy_transform_expr(expr: IRExpr) -> IRExpr {
+    match expr {
+        IRExpr::Block(stmts, final_expr, ty) => {
+            let stmts = stmts.into_iter().map(legacy_transform_stmt).collect();
+            let final_expr = Box::new(legacy_transform_expr(*final_expr));
+            IRExpr::Block(stmts, final_expr, ty)
+        }
+        IRExpr::If(cond, then_e, else_e, ty) => IRExpr::If(
+            Box::new(legacy_transform_expr(*cond)),
+            Box::new(legacy_transform_expr(*then_e)),
+            Box::new(legacy_transform_expr(*else_e)),
+            ty,
+        ),
+        IRExpr::Match(scrutinee, arms, ty) => {
+            let scrutinee = Box::new(legacy_transform_expr(*scrutinee));
+            let arms = arms
+                .into_iter()
+                .map(|arm| IRArm {
+                    pattern: arm.pattern,
+                    guard: arm.guard.map(legacy_transform_expr),
+                    body: legacy_transform_expr(arm.body),
+                })
+                .collect();
+            IRExpr::Match(scrutinee, arms, ty)
+        }
+        IRExpr::Call(callee, args, ty) => IRExpr::Call(
+            Box::new(legacy_transform_expr(*callee)),
+            args.into_iter().map(legacy_transform_expr).collect(),
+            ty,
+        ),
+        IRExpr::FieldAccess(expr, name, ty) => {
+            IRExpr::FieldAccess(Box::new(legacy_transform_expr(*expr)), name, ty)
+        }
+        IRExpr::BinOp(op, left, right, ty) => IRExpr::BinOp(
+            op,
+            Box::new(legacy_transform_expr(*left)),
+            Box::new(legacy_transform_expr(*right)),
+            ty,
+        ),
+        IRExpr::Closure(idx, captures, ty) => IRExpr::Closure(
+            idx,
+            captures.into_iter().map(legacy_transform_expr).collect(),
+            ty,
+        ),
+        IRExpr::Collect(expr, ty) => {
+            IRExpr::Collect(Box::new(legacy_transform_expr(*expr)), ty)
+        }
+        IRExpr::Emit(expr, ty) => IRExpr::Emit(Box::new(legacy_transform_expr(*expr)), ty),
+        IRExpr::RecordConstruct(fields, ty) => IRExpr::RecordConstruct(
+            fields
+                .into_iter()
+                .map(|(name, expr)| (name, legacy_transform_expr(expr)))
+                .collect(),
+            ty,
+        ),
+        IRExpr::CallTrfLocal { local, arg, ty } => IRExpr::CallTrfLocal {
+            local,
+            arg: Box::new(legacy_transform_expr(*arg)),
+            ty,
+        },
+        // Leaf nodes: Lit, Local, Global, TrfRef
+        leaf => leaf,
+    }
+}
+
+/// Replace `IRStmt::Bind(slot, expr)` with `IRStmt::Chain(slot, expr)` when
+/// `expr` has type `Result<_, _>`, applying monadic bind semantics.
+/// All other statement variants are walked recursively but left unchanged.
+fn legacy_transform_stmt(stmt: IRStmt) -> IRStmt {
+    match stmt {
+        // Unconditionally promote every Bind to LegacyBind.
+        // The LegacyBindCheck opcode handles non-Result values at runtime
+        // by passing them through unchanged, so no compile-time type check is needed.
+        IRStmt::Bind(slot, expr) => {
+            IRStmt::LegacyBind(slot, legacy_transform_expr(expr))
+        }
+        IRStmt::LegacyBind(slot, expr) => IRStmt::LegacyBind(slot, legacy_transform_expr(expr)),
+        IRStmt::Chain(slot, expr) => IRStmt::Chain(slot, legacy_transform_expr(expr)),
+        IRStmt::Yield(expr) => IRStmt::Yield(legacy_transform_expr(expr)),
+        IRStmt::Expr(expr) => IRStmt::Expr(legacy_transform_expr(expr)),
+        other => other, // TrackLine
+    }
+}
+
+/// Post-process the compiled IR so that every `bind x <- Result_expr` in
+/// `--legacy` mode behaves as a true monadic bind (unwrap Ok / short-circuit Err).
+/// Favnir pipeline mode (compiler.fav path) is not affected.
+fn apply_legacy_bind_semantics(ir: IRProgram) -> IRProgram {
+    IRProgram {
+        fns: ir
+            .fns
+            .into_iter()
+            .map(|fn_def: IRFnDef| IRFnDef {
+                body: legacy_transform_expr(fn_def.body),
+                ..fn_def
+            })
+            .collect(),
+        ..ir
+    }
+}
+
+fn build_artifact_legacy(program: &ast::Program) -> FvcArtifact {
+    let ir = compile_program(program);
+    let ir = apply_legacy_bind_semantics(ir);
     codegen_program(&ir)
 }
 
@@ -2638,6 +2749,7 @@ fn decode_opcode(byte: u8) -> Option<(&'static str, usize)> {
         Opcode::GetFieldC => ("GetFieldC", 3),                 // 1 byte opcode + 2-byte const_idx
         Opcode::BuildRecordC => ("BuildRecordC", 5), // 1 byte opcode + 2-byte n + 2-byte base_const_idx
         Opcode::MakeClosureN => ("MakeClosureN", 5), // 1 byte opcode + 2-byte name_const_idx + 2-byte capture_count
+        Opcode::LegacyBindCheck => ("LegacyBindCheck", 3), // 1 byte opcode + 2-byte escape offset
     };
 
     Some((name, width))
@@ -3214,6 +3326,7 @@ fn collect_tracklines_in_expr(expr: &IRExpr, out: &mut HashSet<u32>) {
                     }
                     IRStmt::Expr(e)
                     | IRStmt::Bind(_, e)
+                    | IRStmt::LegacyBind(_, e)
                     | IRStmt::Chain(_, e)
                     | IRStmt::Yield(e) => {
                         collect_tracklines_in_expr(e, out);
@@ -8807,6 +8920,7 @@ fn remap_ir_arm(arm: &IRArm, global_idx_map: &std::collections::HashMap<u16, u16
 fn remap_ir_stmt(stmt: &IRStmt, global_idx_map: &std::collections::HashMap<u16, u16>) -> IRStmt {
     match stmt {
         IRStmt::Bind(slot, expr) => IRStmt::Bind(*slot, remap_ir_expr(expr, global_idx_map)),
+        IRStmt::LegacyBind(slot, expr) => IRStmt::LegacyBind(*slot, remap_ir_expr(expr, global_idx_map)),
         IRStmt::Chain(slot, expr) => IRStmt::Chain(*slot, remap_ir_expr(expr, global_idx_map)),
         IRStmt::Yield(expr) => IRStmt::Yield(remap_ir_expr(expr, global_idx_map)),
         IRStmt::Expr(expr) => IRStmt::Expr(remap_ir_expr(expr, global_idx_map)),
@@ -21215,12 +21329,6 @@ fn f(x: Int) -> Int {
         assert!(!filtered.contains("W007"), "W007 should be suppressed by allow list");
     }
 
-    // ── バージョン確認 ────────────────────────────────────────────────────────
-
-    #[test]
-    fn version_is_12_2_0() {
-        assert_eq!(env!("CARGO_PKG_VERSION"), "12.2.0");
-    }
 }
 
 // ── v12100_tests (v12.1.0) — bind 再束縛禁止 E0018 ────────────────────────────
@@ -21432,5 +21540,184 @@ mod v11900_tests {
         // rune import は resolver が処理するため、パーサーのみ確認
         let result = Parser::parse_str(&src, "pipeline.fav");
         assert!(result.is_ok(), "pipeline.fav parse error: {:?}", result.err());
+    }
+}
+
+// ── v12300_tests (v12.3.0) — bind monadic semantics in --legacy mode ──────────
+
+#[cfg(test)]
+mod v12300_tests {
+    use super::{
+        apply_legacy_bind_semantics, build_artifact, exec_artifact_main,
+    };
+    use crate::backend::codegen::codegen_program;
+    use crate::frontend::parser::Parser;
+    use crate::middle::compiler::compile_program;
+    use crate::value::Value;
+
+    /// Compile and run source in --legacy mode (bind → chain for Result).
+    fn run_legacy(source: &str) -> Result<Value, String> {
+        let program = Parser::parse_str(source, "test_legacy.fav").expect("parse");
+        let ir = compile_program(&program);
+        let ir = apply_legacy_bind_semantics(ir);
+        let artifact = codegen_program(&ir);
+        exec_artifact_main(&artifact, None)
+    }
+
+    /// Compile and run source in default (Favnir pipeline-compatible) mode.
+    fn run_default(source: &str) -> Result<Value, String> {
+        let program = Parser::parse_str(source, "test_default.fav").expect("parse");
+        let artifact = build_artifact(&program);
+        exec_artifact_main(&artifact, None)
+    }
+
+    // ── 正常系 ─────────────────────────────────────────────────────────────────
+
+    // bind_ok_unwraps_value_legacy:
+    // bind x <- Result.ok(42) → x == 42 (Int, not Ok(42))
+    #[test]
+    fn bind_ok_unwraps_value_legacy() {
+        let src = r#"
+public fn main() -> Int {
+    bind x <- Result.ok(42)
+    x
+}
+"#;
+        let result = run_legacy(src).expect("exec ok");
+        assert_eq!(result, Value::Int(42), "expected unwrapped 42, got {:?}", result);
+    }
+
+    // bind_non_result_unchanged_legacy:
+    // bind x <- 42 (non-Result) → x == 42, simple assignment unchanged
+    #[test]
+    fn bind_non_result_unchanged_legacy() {
+        let src = r#"
+public fn main() -> Int {
+    bind x <- 42
+    x
+}
+"#;
+        let result = run_legacy(src).expect("exec ok");
+        assert_eq!(result, Value::Int(42));
+    }
+
+    // bind_chain_same_ok_semantics:
+    // bind x <- Result.ok(99) and chain x <- Result.ok(99) produce same result
+    #[test]
+    fn bind_chain_same_ok_semantics() {
+        let src_bind = r#"
+public fn main() -> Int {
+    bind x <- Result.ok(99)
+    x
+}
+"#;
+        let src_chain = r#"
+public fn main() -> Int {
+    chain x <- Result.ok(99)
+    x
+}
+"#;
+        let r1 = run_legacy(src_bind).expect("bind");
+        let r2 = run_legacy(src_chain).expect("chain");
+        assert_eq!(r1, r2, "bind and chain should have same ok semantics in legacy mode");
+    }
+
+    // ── 短絡系 ─────────────────────────────────────────────────────────────────
+
+    // bind_propagates_err_legacy:
+    // bind _ <- Result.err("fail") → function returns Err, not the fallthrough value
+    #[test]
+    fn bind_propagates_err_legacy() {
+        let src = r#"
+public fn main() -> Int {
+    bind _ <- Result.err("fail")
+    42
+}
+"#;
+        let result = run_legacy(src).expect("exec ok");
+        assert!(
+            matches!(result, Value::Variant(ref tag, _) if tag == "err"),
+            "expected Err short-circuit, got {:?}",
+            result
+        );
+    }
+
+    // bind_err_skips_subsequent_binds:
+    // After bind _ <- Err, subsequent bind statements are not executed
+    #[test]
+    fn bind_err_skips_subsequent_binds() {
+        let src = r#"
+public fn main() -> Int {
+    bind _ <- Result.err("stop here")
+    bind _ <- Result.ok(99)
+    42
+}
+"#;
+        let result = run_legacy(src).expect("exec ok");
+        // If subsequent bind had run, it could reach 42.
+        // Short-circuit means result must be Err, not 42.
+        assert!(
+            matches!(result, Value::Variant(ref tag, _) if tag == "err"),
+            "expected Err short-circuit (subsequent binds skipped), got {:?}",
+            result
+        );
+    }
+
+    // bind_err_stops_seq_pipeline:
+    // In a seq pipeline, stage Fail returns Err (via bind short-circuit),
+    // and that Err propagates as the pipeline output.
+    #[test]
+    fn bind_err_stops_seq_pipeline() {
+        // Stage Echo is a passthrough — returns whatever it receives.
+        // If Fail returns Err, Echo receives Err and returns it unchanged.
+        let src = r#"
+stage Fail: String -> String = |s| {
+    bind _ <- Result.err("stage failed")
+    s
+}
+stage Echo: String -> String = |s| { s }
+seq Pipe = Fail |> Echo
+
+public fn main() -> String {
+    "input" |> Pipe
+}
+"#;
+        let result = run_legacy(src).expect("exec ok");
+        assert!(
+            matches!(result, Value::Variant(ref tag, _) if tag == "err"),
+            "expected Err to propagate through seq pipeline, got {:?}",
+            result
+        );
+    }
+
+    // ── 後方互換確認 ───────────────────────────────────────────────────────────
+
+    // favnir_pipeline_bind_unchanged:
+    // In default mode (non-legacy), bind x <- Result.ok(42) gives x = Ok(42) (no unwrap).
+    // The match Ok(v) => v confirms x is still a Variant, not a bare Int.
+    #[test]
+    fn favnir_pipeline_bind_unchanged() {
+        let src = r#"
+public fn main() -> Int {
+    bind x <- Result.ok(42)
+    match x {
+        Ok(v) => v
+        Err(_) => 0
+    }
+}
+"#;
+        let result = run_default(src).expect("exec ok");
+        assert_eq!(
+            result,
+            Value::Int(42),
+            "default mode: bind x <- Ok(42) should give x = Ok(42) (matched via Ok(v))"
+        );
+    }
+
+    // ── バージョン確認 ────────────────────────────────────────────────────────
+
+    #[test]
+    fn version_is_12_3_0() {
+        assert_eq!(env!("CARGO_PKG_VERSION"), "12.3.0");
     }
 }

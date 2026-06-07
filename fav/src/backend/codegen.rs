@@ -34,6 +34,9 @@ pub enum Opcode {
     MatchFail = 0x32,
     ChainCheck = 0x33,
     JumpIfNotVariant = 0x34,
+    /// Like ChainCheck but passes through non-Result values unchanged.
+    /// Used by `bind` in `--legacy` mode (v12.3.0).
+    LegacyBindCheck = 0x35,
     GetField = 0x40,
     BuildRecord = 0x41,
     MakeClosure = 0x42,
@@ -279,6 +282,13 @@ pub fn emit_stmt(stmt: &IRStmt, cg: &mut Codegen) {
             emit_expr(expr, cg);
             cg.emit_opcode(Opcode::StoreLocal);
             cg.emit_u16(*slot);
+        }
+        IRStmt::LegacyBind(slot, expr) => {
+            emit_expr(expr, cg);
+            let escape = cg.emit_jump(Opcode::LegacyBindCheck);
+            cg.emit_opcode(Opcode::StoreLocal);
+            cg.emit_u16(*slot);
+            cg.chain_escapes.push(escape);
         }
         IRStmt::Chain(slot, expr) => {
             emit_expr(expr, cg);

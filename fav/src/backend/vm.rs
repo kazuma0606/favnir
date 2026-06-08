@@ -1194,11 +1194,10 @@ pub struct CallFrame {
     pub line: u32,
 }
 
-/// Process-wide verbose trace level (0=off, 1=verbose/200-char truncation, 2=trace/no limit).
-/// Set by `cmd_run` before pipeline execution; read by VM during `resume`.
+// Per-thread verbose level for `fav run --verbose` / `--trace` (v12.5.0).
+// Thread-local ensures parallel test runs don't interfere with each other.
+// Level: 0=off, 1=verbose/200-char truncation, 2=trace/no limit.
 thread_local! {
-    /// Per-thread verbose level for `fav run --verbose` / `--trace` (v12.5.0).
-    /// Thread-local ensures parallel test runs don't interfere with each other.
     static VERBOSE_LEVEL: std::cell::Cell<u8> = const { std::cell::Cell::new(0) };
 }
 

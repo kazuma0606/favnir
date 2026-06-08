@@ -8,6 +8,9 @@ on:
       - 'fav/**'
       - 'infra/registry/**'
       - '.github/workflows/deploy-registry.yml'
+      - '!rune-registry/**/*.md'
+      - '!fav/**/*.md'
+      - '!infra/registry/**/*.md'
 
 concurrency:
   group: deploy-registry

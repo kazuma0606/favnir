@@ -224,6 +224,17 @@ fn write_text_file(path: &Path, contents: &str) -> Result<(), String> {
     std::fs::write(path, contents).map_err(|e| format!("cannot write `{}`: {}", path.display(), e))
 }
 
+// Inject fav.toml [postgres] settings as env vars (v12.6.0).
+fn inject_postgres_config(cfg: &crate::toml::PostgresTomlConfig) {
+    // Set PGSSLMODE if not already in environment
+    if let Some(ref sslmode) = cfg.sslmode {
+        if std::env::var("PGSSLMODE").is_err() {
+            // SAFETY: called before VM starts; single-threaded at this point
+            unsafe { std::env::set_var("PGSSLMODE", sslmode); }
+        }
+    }
+}
+
 fn inject_snowflake_config(cfg: &crate::toml::SnowflakeTomlConfig) {
     use crate::toml::expand_env_vars;
     let pairs: &[(&str, Option<&str>)] = &[
@@ -774,6 +785,10 @@ fn run_with_favnir_pipeline_project(
     if let Some(sf_cfg) = &toml.snowflake {
         inject_snowflake_config(sf_cfg);
     }
+    // Inject fav.toml [postgres] settings as env vars (v12.6.0)
+    if let Some(pg_cfg) = &toml.postgres {
+        inject_postgres_config(pg_cfg);
+    }
 
     // 1. Collect and merge all project sources
     let merged =
@@ -891,6 +906,10 @@ fn load_run_config(file: Option<&str>) {
                 // Inject [snowflake] settings as env vars (v10.7.0)
                 if let Some(sf_cfg) = toml.snowflake.as_ref() {
                     inject_snowflake_config(sf_cfg);
+                }
+                // Inject [postgres] settings as env vars (v12.6.0)
+                if let Some(pg_cfg) = toml.postgres.as_ref() {
+                    inject_postgres_config(pg_cfg);
                 }
             }
         }
@@ -21125,6 +21144,89 @@ seq Pipeline = RunQuery
     }
 }
 
+// ── v12600_tests (v12.6.0) ────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod v12600_tests {
+    use crate::backend::vm::resolve_sslmode;
+
+    #[test]
+    fn postgres_sslmode_from_url() {
+        // ?sslmode= クエリパラメータが読み取られること
+        assert_eq!(resolve_sslmode("postgresql://u:p@host/db?sslmode=require"), "require");
+        assert_eq!(resolve_sslmode("postgresql://u:p@host/db?sslmode=disable"), "disable");
+    }
+
+    #[test]
+    fn postgres_sslmode_from_url_with_extra_params() {
+        // &以降は無視されること
+        assert_eq!(
+            resolve_sslmode("postgresql://u:p@host/db?sslmode=prefer&connect_timeout=5"),
+            "prefer",
+        );
+    }
+
+    #[test]
+    fn postgres_sslmode_default_is_prefer() {
+        // DATABASE_URL にパラメータがなく PGSSLMODE も未設定ならデフォルト "prefer"
+        let saved = std::env::var("PGSSLMODE").ok();
+        unsafe { std::env::remove_var("PGSSLMODE"); }
+        let mode = resolve_sslmode("postgresql://u:p@host/db");
+        if let Some(v) = saved { unsafe { std::env::set_var("PGSSLMODE", v); } }
+        assert_eq!(mode, "prefer");
+    }
+
+    #[test]
+    fn inject_postgres_config_sets_pgsslmode() {
+        // inject_postgres_config が PGSSLMODE を設定すること
+        let cfg = crate::toml::PostgresTomlConfig {
+            host: None, port: None, dbname: None,
+            user: None, password: None,
+            sslmode: Some("require".to_string()),
+        };
+        // PGSSLMODE を一時的にアンセットして確認
+        let saved = std::env::var("PGSSLMODE").ok();
+        unsafe { std::env::remove_var("PGSSLMODE"); }
+        super::inject_postgres_config(&cfg);
+        let result = std::env::var("PGSSLMODE").ok();
+        // 元に戻す
+        if let Some(v) = saved {
+            unsafe { std::env::set_var("PGSSLMODE", v); }
+        } else {
+            unsafe { std::env::remove_var("PGSSLMODE"); }
+        }
+        assert_eq!(result.as_deref(), Some("require"));
+    }
+
+    #[test]
+    fn postgres_error_format_non_db() {
+        // format_pg_error が非DBエラーを "db error: ..." 形式で返すこと
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let err = rt.block_on(async {
+            // ポート 1 には何も listen していないので接続エラーになる
+            match tokio_postgres::connect(
+                "host=127.0.0.1 port=1 dbname=x user=x",
+                tokio_postgres::NoTls,
+            )
+            .await
+            {
+                Err(e) => e,
+                Ok(_) => panic!("expected connection error but succeeded"),
+            }
+        });
+        let msg = crate::backend::vm::format_pg_error_pub(&err);
+        assert!(msg.starts_with("db error: "), "unexpected: {}", msg);
+    }
+
+    #[test]
+    fn version_is_12_6_0() {
+        assert_eq!(env!("CARGO_PKG_VERSION"), "12.6.0");
+    }
+}
+
 // ── v11100_tests (v11.1.0) ────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -22366,6 +22468,6 @@ public fn main() -> String {{
 
     #[test]
     fn version_is_12_5_0() {
-        assert_eq!(env!("CARGO_PKG_VERSION"), "12.5.0");
+        // Version bump is tested in v12600_tests::version_is_12_6_0.
     }
 }

@@ -4870,7 +4870,77 @@ fn llm_call_chat(messages_json: &str) -> VMValue {
 
 // ── Snowflake helpers (v10.2.0) ──────────────────────────────────────────────
 
-// ── Postgres helpers (v11.5.0) ───────────────────────────────────────────────
+// ── Postgres helpers (v11.5.0 / v12.6.0) ────────────────────────────────────
+
+// Format a tokio_postgres error with full DbError detail (v12.6.0).
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn format_pg_error_pub(e: &tokio_postgres::Error) -> String {
+    format_pg_error(e)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn format_pg_error(e: &tokio_postgres::Error) -> String {
+    if let Some(db_err) = e.as_db_error() {
+        let mut msg = format!("db error: {}", db_err.message());
+        let code = db_err.code().code();
+        if !code.is_empty() {
+            msg.push_str(&format!(" (SQLSTATE {})", code));
+        }
+        if let Some(detail) = db_err.detail() {
+            msg.push_str(&format!(", detail: {}", detail));
+        }
+        msg
+    } else {
+        format!("db error: {}", e)
+    }
+}
+
+// Resolve sslmode: DATABASE_URL ?sslmode= > PGSSLMODE env > "prefer" (v12.6.0).
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn resolve_sslmode(conn_str: &str) -> String {
+    if let Some(pos) = conn_str.find("?sslmode=") {
+        let rest = &conn_str[pos + 9..];
+        let end = rest.find('&').unwrap_or(rest.len());
+        return rest[..end].to_string();
+    }
+    if let Ok(val) = std::env::var("PGSSLMODE") {
+        return val;
+    }
+    "prefer".to_string()
+}
+
+// Connect with TLS routing based on sslmode (v12.6.0).
+// "disable" → NoTls; anything else → rustls (webpki-roots CA bundle).
+#[cfg(not(target_arch = "wasm32"))]
+async fn pg_connect_inner(
+    conn_str: &str,
+    sslmode: &str,
+) -> Result<tokio_postgres::Client, String> {
+    match sslmode {
+        "disable" => {
+            let (client, conn) = tokio_postgres::connect(conn_str, tokio_postgres::NoTls)
+                .await
+                .map_err(|e| format_pg_error(&e))?;
+            tokio::spawn(async move { let _ = conn.await; });
+            Ok(client)
+        }
+        _ => {
+            use rustls::{ClientConfig, RootCertStore};
+            use tokio_postgres_rustls::MakeRustlsConnect;
+            let mut root_store = RootCertStore::empty();
+            root_store.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+            let config = ClientConfig::builder()
+                .with_root_certificates(root_store)
+                .with_no_client_auth();
+            let tls = MakeRustlsConnect::new(config);
+            let (client, conn) = tokio_postgres::connect(conn_str, tls)
+                .await
+                .map_err(|e| format_pg_error(&e))?;
+            tokio::spawn(async move { let _ = conn.await; });
+            Ok(client)
+        }
+    }
+}
 
 #[cfg(not(target_arch = "wasm32"))]
 pub fn pg_conn_str_from_env() -> String {
@@ -4902,18 +4972,16 @@ fn pg_params_from_json(params_json: &str) -> Result<Vec<String>, String> {
 #[cfg(not(target_arch = "wasm32"))]
 fn pg_execute(conn_str: &str, sql: &str, params_json: &str) -> Result<(), String> {
     let params = pg_params_from_json(params_json)?;
+    let sslmode = resolve_sslmode(conn_str);
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
         .map_err(|e| e.to_string())?;
     rt.block_on(async {
-        let (client, connection) = tokio_postgres::connect(conn_str, tokio_postgres::NoTls)
-            .await
-            .map_err(|e| e.to_string())?;
-        tokio::spawn(async move { let _ = connection.await; });
+        let client = pg_connect_inner(conn_str, &sslmode).await?;
         let param_refs: Vec<&(dyn tokio_postgres::types::ToSql + Sync)> =
             params.iter().map(|s| s as &(dyn tokio_postgres::types::ToSql + Sync)).collect();
-        client.execute(sql, &param_refs).await.map_err(|e| e.to_string())?;
+        client.execute(sql, &param_refs).await.map_err(|e| format_pg_error(&e))?;
         Ok(())
     })
 }
@@ -4921,18 +4989,16 @@ fn pg_execute(conn_str: &str, sql: &str, params_json: &str) -> Result<(), String
 #[cfg(not(target_arch = "wasm32"))]
 pub fn pg_query(conn_str: &str, sql: &str, params_json: &str) -> Result<String, String> {
     let params = pg_params_from_json(params_json)?;
+    let sslmode = resolve_sslmode(conn_str);
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
         .map_err(|e| e.to_string())?;
     rt.block_on(async {
-        let (client, connection) = tokio_postgres::connect(conn_str, tokio_postgres::NoTls)
-            .await
-            .map_err(|e| e.to_string())?;
-        tokio::spawn(async move { let _ = connection.await; });
+        let client = pg_connect_inner(conn_str, &sslmode).await?;
         let param_refs: Vec<&(dyn tokio_postgres::types::ToSql + Sync)> =
             params.iter().map(|s| s as &(dyn tokio_postgres::types::ToSql + Sync)).collect();
-        let rows = client.query(sql, &param_refs).await.map_err(|e| e.to_string())?;
+        let rows = client.query(sql, &param_refs).await.map_err(|e| format_pg_error(&e))?;
         let json_rows: Vec<serde_json::Value> = rows.iter().map(|row| {
             let mut map = serde_json::Map::new();
             for col in row.columns() {

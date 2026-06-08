@@ -363,6 +363,7 @@ mod tests {
             deploy: None,
             snowflake: None,
             postgres: None,
+            run: None,
         };
         let resolver = Resolver::new(Some(toml), Some(root));
         (resolver, dir) // dir must outlive the test
@@ -448,6 +449,7 @@ mod tests {
             deploy: None,
             snowflake: None,
             postgres: None,
+            run: None,
         };
         let mut r = Resolver::new(Some(toml), Some(dir.path().to_path_buf()));
         let mut errors = Vec::new();
@@ -549,6 +551,7 @@ mod tests {
             deploy: None,
             snowflake: None,
             postgres: None,
+            run: None,
         };
         let resolver = Resolver::new(Some(toml), Some(root.clone()));
         let result = resolver.resolve_rune_import_file("csv");

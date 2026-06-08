@@ -273,9 +273,11 @@ fn main_impl() {
         }
 
         Some("run") => {
-            // Parse --db / --legacy / --self-host flags
+            // Parse --db / --legacy / --self-host / --verbose / --trace flags
             let mut db_path: Option<String> = None;
             let mut legacy = false;
+            let mut verbose = false;
+            let mut trace = false;
             let mut file_idx = 2usize;
             let mut i = 2usize;
             while i < args.len() {
@@ -304,11 +306,21 @@ fn main_impl() {
                         i += 1;
                         file_idx = i;
                     }
+                    "--verbose" => {
+                        verbose = true;
+                        i += 1;
+                        file_idx = i;
+                    }
+                    "--trace" => {
+                        trace = true;
+                        i += 1;
+                        file_idx = i;
+                    }
                     _ => break,
                 }
             }
             let file = args.get(file_idx).map(|s| s.as_str());
-            cmd_run(file, db_path.as_deref(), legacy);
+            cmd_run(file, db_path.as_deref(), legacy, verbose, trace);
         }
 
         Some("build") => {
@@ -399,6 +411,8 @@ fn main_impl() {
         Some("check") => {
             let mut no_warn = false;
             let mut legacy_check = false;
+            let mut json = false;
+            let mut show_types = false;
             let mut file: Option<&str> = None;
             let mut dir: Option<&str> = None;
             let mut sample: Option<usize> = None;
@@ -411,6 +425,14 @@ fn main_impl() {
                     }
                     "--legacy-check" => {
                         legacy_check = true;
+                        i += 1;
+                    }
+                    "--json" => {
+                        json = true;
+                        i += 1;
+                    }
+                    "--show-types" => {
+                        show_types = true;
                         i += 1;
                     }
                     "--dir" => {
@@ -447,7 +469,7 @@ fn main_impl() {
             } else if let Some(dir) = dir {
                 driver::cmd_check_dir(dir);
             } else {
-                cmd_check(file, no_warn, legacy_check);
+                cmd_check(file, no_warn, legacy_check, json, show_types);
             }
         }
 

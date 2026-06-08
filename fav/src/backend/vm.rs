@@ -1194,6 +1194,19 @@ pub struct CallFrame {
     pub line: u32,
 }
 
+/// Process-wide verbose trace level (0=off, 1=verbose/200-char truncation, 2=trace/no limit).
+/// Set by `cmd_run` before pipeline execution; read by VM during `resume`.
+thread_local! {
+    /// Per-thread verbose level for `fav run --verbose` / `--trace` (v12.5.0).
+    /// Thread-local ensures parallel test runs don't interfere with each other.
+    static VERBOSE_LEVEL: std::cell::Cell<u8> = const { std::cell::Cell::new(0) };
+}
+
+/// Set the thread-local verbose level for `fav run --verbose` / `--trace` (v12.5.0).
+pub fn set_verbose_level(level: u8) {
+    VERBOSE_LEVEL.with(|v| v.set(level));
+}
+
 #[derive(Debug, Clone)]
 pub struct VM {
     globals: Vec<VMValue>,
@@ -1204,6 +1217,8 @@ pub struct VM {
     db_path: Option<String>,
     source_file: String,
     type_metas: HashMap<String, TypeMeta>,
+    /// Collected trace lines (when verbose > 0). Also written to stderr via eprintln!.
+    pub trace_lines: Vec<String>,
 }
 
 static SHARED_DBS: Mutex<Vec<(String, Connection)>> = Mutex::new(Vec::new());
@@ -1378,11 +1393,41 @@ impl VM {
             db_path,
             source_file: String::new(),
             type_metas: artifact.type_metas.clone(),
+            trace_lines: Vec::new(),
         }
     }
 
     pub fn set_source_file(&mut self, source_file: &str) {
         self.source_file = source_file.to_string();
+    }
+
+    // ── verbose trace helpers (v12.5.0) ──────────────────────────────────────
+
+    /// Return current verbose level from the thread-local.
+    #[inline]
+    fn verbose_level() -> u8 {
+        VERBOSE_LEVEL.with(|v| v.get())
+    }
+
+    // ── verbose-aware run API (v12.5.0) ──────────────────────────────────────
+
+    /// Run the given function and return (result, emits, trace_lines).
+    /// Call `set_verbose_level` before invoking to enable tracing.
+    pub fn run_with_trace(
+        artifact: &FvcArtifact,
+        fn_idx: usize,
+        args: Vec<Value>,
+        db_path: Option<&str>,
+        source_file: Option<&str>,
+    ) -> Result<(Value, Vec<Value>, Vec<String>), VMError> {
+        let mut vm = VM::new_with_db_path(artifact, db_path.map(|s| s.to_string()));
+        if let Some(sf) = source_file {
+            vm.set_source_file(sf);
+        }
+        let ret = vm.invoke_function(artifact, fn_idx, args.into_iter().map(VMValue::from).collect())?;
+        let value = Value::from(ret);
+        let emits = vm.emit_log.into_iter().map(Value::from).collect();
+        Ok((value, emits, vm.trace_lines))
     }
 
     #[allow(dead_code)]
@@ -1677,11 +1722,24 @@ impl VM {
                     match value {
                         VMValue::Variant(tag, payload) if tag == "ok" || tag == "some" => {
                             let unwrapped = payload.map(|inner| *inner).ok_or_else(|| {
-                                vm.error(artifact, "chain_check expected payload")
+                                vm.error(artifact, "chain_check expected payload for ok/some")
                             })?;
+                            let vlevel = Self::verbose_level();
+                            if vlevel > 0 {
+                                let display = truncate_for_trace(&unwrapped, vlevel);
+                                trace_emit(&mut vm.trace_lines, format!("[TRACE]   bind <- \u{2192} Ok({})", display));
+                            }
                             vm.stack.push(unwrapped);
                         }
                         VMValue::Variant(tag, payload) if tag == "err" => {
+                            let vlevel = Self::verbose_level();
+                            if vlevel > 0 {
+                                let display = match payload.as_deref() {
+                                    Some(v) => truncate_for_trace(v, vlevel),
+                                    None => String::new(),
+                                };
+                                trace_emit(&mut vm.trace_lines, format!("[TRACE]   bind <- \u{2192} Err({})", display));
+                            }
                             vm.stack.push(VMValue::Variant(tag, payload));
                             let Some(next_ip) = frame.ip.checked_add(offset) else {
                                 return Err(vm.error(artifact, "jump overflow"));
@@ -1689,6 +1747,10 @@ impl VM {
                             frame.ip = next_ip;
                         }
                         VMValue::Variant(tag, None) if tag == "none" => {
+                            let vlevel = Self::verbose_level();
+                            if vlevel > 0 {
+                                trace_emit(&mut vm.trace_lines, "[TRACE]   bind <- \u{2192} None".to_string());
+                            }
                             vm.stack.push(VMValue::Variant(tag, None));
                             let Some(next_ip) = frame.ip.checked_add(offset) else {
                                 return Err(vm.error(artifact, "jump overflow"));
@@ -1745,24 +1807,37 @@ impl VM {
                     let Some(value) = vm.stack.pop() else {
                         return Err(vm.error(artifact, "stack underflow on seq_stage_check"));
                     };
+                    let stage_name = artifact
+                        .str_table
+                        .get(name_idx)
+                        .map(|s| s.as_str())
+                        .unwrap_or("?");
                     match value {
                         VMValue::Variant(tag, payload) if tag == "ok" || tag == "some" => {
                             let unwrapped = payload.map(|inner| *inner).ok_or_else(|| {
                                 vm.error(artifact, "seq_stage_check expected payload for ok/some")
                             })?;
+                            let vlevel = Self::verbose_level();
+                            if vlevel > 0 {
+                                let display = truncate_for_trace(&unwrapped, vlevel);
+                                trace_emit(&mut vm.trace_lines, format!("[TRACE] stage {}: exit Ok({})", stage_name, display));
+                            }
                             vm.stack.push(unwrapped);
                         }
                         VMValue::Variant(tag, payload) if tag == "err" || tag == "none" => {
-                            let stage_name = artifact
-                                .str_table
-                                .get(name_idx)
-                                .map(|s| s.as_str())
-                                .unwrap_or("?");
                             let inner_msg = match payload.as_deref() {
                                 Some(VMValue::Str(s)) => s.clone(),
                                 Some(other) => format!("{other:?}"),
                                 None => "none".to_string(),
                             };
+                            let vlevel = Self::verbose_level();
+                            if vlevel > 0 {
+                                trace_emit(&mut vm.trace_lines, format!("[TRACE] stage {}: exit Err({})", stage_name, inner_msg));
+                                trace_emit(&mut vm.trace_lines, format!(
+                                    "[TRACE] seq: stopped at stage {}/{} ({})",
+                                    stage_idx + 1, total, stage_name
+                                ));
+                            }
                             let wrapped = format!(
                                 "pipeline stopped at stage {}/{} '{}': {}",
                                 stage_idx + 1,
@@ -1783,6 +1858,18 @@ impl VM {
                             // Non-Result value: pass through unchanged
                             vm.stack.push(other);
                         }
+                    }
+                }
+                x if x == Opcode::SeqStageEnter as u8 => {
+                    // layout: name_str_idx(2)
+                    let name_idx = Self::read_u16(function, frame)? as usize;
+                    if Self::verbose_level() > 0 {
+                        let stage_name = artifact
+                            .str_table
+                            .get(name_idx)
+                            .map(|s| s.as_str())
+                            .unwrap_or("?");
+                        trace_emit(&mut vm.trace_lines, format!("[TRACE] stage {}: enter", stage_name));
                     }
                 }
                 x if x == Opcode::JumpIfNotVariant as u8 => {
@@ -4530,6 +4617,26 @@ fn capitalize_variant_tag(tag: &str) -> String {
     match chars.next() {
         None => String::new(),
         Some(c) => c.to_uppercase().to_string() + chars.as_str(),
+    }
+}
+
+// ── verbose trace helpers (v12.5.0) ──────────────────────────────────────────
+
+/// Emit a trace line to stderr and collect it in `trace_lines`.
+/// Standalone (not a method) to avoid borrow conflicts with `frame`.
+fn trace_emit(trace_lines: &mut Vec<String>, msg: String) {
+    eprintln!("{}", msg);
+    trace_lines.push(msg);
+}
+
+/// Format a VMValue for verbose trace, truncating at 200 chars in verbose mode.
+fn truncate_for_trace(val: &VMValue, level: u8) -> String {
+    let s = display_vmvalue(val);
+    let max = if level >= 2 { usize::MAX } else { 200 };
+    if s.len() > max {
+        format!("{}[{} chars]", &s[..max], s.len())
+    } else {
+        s
     }
 }
 

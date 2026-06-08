@@ -40,6 +40,9 @@ pub enum Opcode {
     /// seq pipeline fail-fast: unwrap Ok, short-circuit on Err with stage context (v12.4.0).
     /// Layout: opcode(1) + name_str_idx(2) + stage_idx(1) + total(1) + escape_offset(2)
     SeqStageCheck = 0x36,
+    /// seq stage enter trace for --verbose (v12.5.0).
+    /// Layout: opcode(1) + name_str_idx(2) = 3 bytes total
+    SeqStageEnter = 0x5B,
     GetField = 0x40,
     BuildRecord = 0x41,
     MakeClosure = 0x42,
@@ -308,6 +311,9 @@ pub fn emit_stmt(stmt: &IRStmt, cg: &mut Codegen) {
         }
         IRStmt::SeqChain { slot, expr, stage_name, stage_idx, total } => {
             let name_str_idx = cg.intern_str(stage_name);
+            // Emit stage enter trace opcode before calling the stage (v12.5.0)
+            cg.emit_opcode(Opcode::SeqStageEnter);
+            cg.emit_u16(name_str_idx);
             emit_expr(expr, cg);
             let escape = cg.emit_seq_stage_jump(name_str_idx, *stage_idx, *total);
             cg.emit_opcode(Opcode::StoreLocal);
@@ -546,6 +552,11 @@ fn remap_string_operands(code: &mut [u8], str_remap: &[u16]) {
                 // layout: opcode(1) + name_str_idx(2) + stage_idx(1) + total(1) + escape_offset(2)
                 remap_u16_at(code, ip + 1, str_remap); // remap name_str_idx
                 ip += 7;
+            }
+            x if x == Opcode::SeqStageEnter as u8 => {
+                // layout: opcode(1) + name_str_idx(2)
+                remap_u16_at(code, ip + 1, str_remap);
+                ip += 3;
             }
             x if x == Opcode::JumpIfNotVariant as u8 => {
                 remap_u16_at(code, ip + 1, str_remap);

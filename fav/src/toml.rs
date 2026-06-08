@@ -141,6 +141,15 @@ impl Default for DeployConfig {
     }
 }
 
+/// `[run]` section of fav.toml (v12.5.0).
+#[derive(Debug, Clone)]
+pub struct RunTomlConfig {
+    /// Enable 200-char truncated verbose trace (equivalent to `fav run --verbose`).
+    pub verbose: bool,
+    /// Enable unlimited verbose trace (equivalent to `fav run --trace`).
+    pub trace: bool,
+}
+
 #[derive(Debug, Clone)]
 pub struct FavToml {
     pub name: String,
@@ -175,6 +184,8 @@ pub struct FavToml {
     pub snowflake: Option<SnowflakeTomlConfig>,
     /// Optional Postgres configuration (v11.5.0).
     pub postgres: Option<PostgresTomlConfig>,
+    /// Optional run configuration (v12.5.0).
+    pub run: Option<RunTomlConfig>,
 }
 
 impl FavToml {
@@ -233,6 +244,7 @@ fn parse_fav_toml(content: &str) -> FavToml {
     let mut deploy_cfg: Option<DeployConfig> = None;
     let mut snowflake_cfg: Option<SnowflakeTomlConfig> = None;
     let mut postgres_cfg: Option<PostgresTomlConfig> = None;
+    let mut run_cfg: Option<RunTomlConfig> = None;
     let mut section = "";
 
     for line in content.lines() {
@@ -286,6 +298,10 @@ fn parse_fav_toml(content: &str) -> FavToml {
         }
         if trimmed == "[postgres]" {
             section = "postgres";
+            continue;
+        }
+        if trimmed == "[run]" {
+            section = "run";
             continue;
         }
         if trimmed.starts_with('[') {
@@ -458,6 +474,20 @@ fn parse_fav_toml(content: &str) -> FavToml {
                 }
                 postgres_cfg = Some(current);
             }
+            "run" => {
+                let mut current = run_cfg.take().unwrap_or(RunTomlConfig {
+                    verbose: false,
+                    trace:   false,
+                });
+                if let Some((key, val)) = parse_kv(trimmed) {
+                    match key {
+                        "verbose" => current.verbose = val == "true",
+                        "trace"   => current.trace   = val == "true",
+                        _ => {}
+                    }
+                }
+                run_cfg = Some(current);
+            }
             _ => {}
         }
     }
@@ -480,6 +510,7 @@ fn parse_fav_toml(content: &str) -> FavToml {
         deploy: deploy_cfg,
         snowflake: snowflake_cfg,
         postgres: postgres_cfg,
+        run: run_cfg,
     }
 }
 

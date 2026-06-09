@@ -210,8 +210,9 @@ fn try_cmd_new(name: &str, template: &str) -> Result<(), String> {
         "script" => create_script_project(&root, name),
         "pipeline" => create_pipeline_project(&root, name),
         "lib" => create_lib_project(&root, name),
+        "postgres-etl" => create_postgres_etl_project(&root, name),
         other => Err(format!(
-            "unknown template `{other}` (expected script|pipeline|lib)"
+            "unknown template `{other}` (expected script|pipeline|lib|postgres-etl)"
         )),
     }
 }
@@ -321,6 +322,31 @@ fn create_lib_project(root: &Path, name: &str) -> Result<(), String> {
             "test \"hello returns a greeting\" {{\n    assert_eq(hello(), \"hello from {name}\")\n}}\n"
         ),
     )?;
+    Ok(())
+}
+
+fn create_postgres_etl_project(root: &Path, name: &str) -> Result<(), String> {
+    let fav_toml = format!(
+        "[project]\n\
+         name    = \"{name}\"\n\
+         version = \"0.1.0\"\n\
+         edition = \"2026\"\n\
+         src     = \"src\"\n\
+         \n\
+         [postgres]\n\
+         # url     = \"${{DATABASE_URL}}\"\n\
+         sslmode = \"require\"\n"
+    );
+    let main_fav =
+        "// entry point\n\
+         public stage Main: String -> String !IO !Postgres = |_args| {\n\
+             bind args <- IO.argv()\n\
+             bind path <- List.first(args)\n\
+             EtlPipeline(path)\n\
+         }\n";
+    write_text_file(&root.join("fav.toml"), &fav_toml)?;
+    write_text_file(&root.join("src").join("pipeline.fav"), &scaffold_postgres_etl())?;
+    write_text_file(&root.join("src").join("main.fav"), main_fav)?;
     Ok(())
 }
 
@@ -8764,6 +8790,168 @@ pub fn cmd_explain_code(code: &str) {
         Some(text) => println!("{}", text),
         None => {
             eprintln!("unknown error code: {}", code);
+            process::exit(1);
+        }
+    }
+}
+
+// ── fav scaffold ──────────────────────────────────────────────────────────────
+
+fn scaffold_stage(name: &str, in_type: &str, out_type: &str, effect: Option<&str>) -> String {
+    let effect_ann = match effect {
+        Some(e) => format!(" !{}", e),
+        None => String::new(),
+    };
+    let body = match effect {
+        Some(_) => format!(
+            "    bind _result <- IO.println(input)\n    input\n"
+        ),
+        None => "    input\n".to_string(),
+    };
+    format!(
+        "// {name}: {in_type} -> {out_type}{effect_ann}\n\
+         // TODO: implement {name}\n\
+         public stage {name}: {in_type} -> {out_type}{effect_ann} = |input| {{\n\
+         {body}}}\n"
+    )
+}
+
+fn scaffold_seq(name: &str, stages: &[&str]) -> String {
+    let mut out = format!(
+        "// {name}: String -> String\n// {}-stage sequential pipeline\n",
+        stages.len()
+    );
+    for (i, stage) in stages.iter().enumerate() {
+        let is_first = i == 0;
+        let is_last = i == stages.len() - 1;
+        let effect_ann = if is_first || is_last { " !IO" } else { "" };
+        let param = if is_first { "input" } else { "data" };
+        let todo = if is_first {
+            "// TODO: load data"
+        } else if is_last {
+            "// TODO: save results"
+        } else {
+            "// TODO: transform data"
+        };
+        out.push_str(&format!(
+            "\npublic stage {stage}: String -> String{effect_ann} = |{param}| {{\n    {todo}\n    {param}\n}}\n"
+        ));
+    }
+    let pipe_chain = stages.join(" |> ");
+    out.push_str(&format!("\npublic seq {name} = {pipe_chain}\n"));
+    out
+}
+
+fn scaffold_postgres_etl() -> String {
+    r#"// Postgres ETL pipeline — best practice template (v12.8.0)
+// Uses chain for error propagation and seq for fail-fast execution.
+
+public stage LoadCsv: String -> String !IO = |path| {
+    match IO.read_file_raw(path) {
+        Ok(text) => text
+        Err(e)   => e
+    }
+}
+
+public stage InsertRows: String -> String !IO !Postgres = |csv_text| {
+    match Csv.parse_raw(csv_text, ",", true) {
+        Ok(rows) => {
+            bind json <- Schema.to_json_array(rows, "Row")
+            bind sql  <- $"INSERT INTO my_table (data) VALUES ('{json}')"
+            match Postgres.execute_raw(sql, "[]") {
+                Ok(_)  => $"inserted rows"
+                Err(e) => e
+            }
+        }
+        Err(e) => e
+    }
+}
+
+public stage SaveResult: String -> String !IO = |result| {
+    chain _ <- IO.write_file_raw("/tmp/result.txt", result)
+    result
+}
+
+public seq EtlPipeline = LoadCsv |> InsertRows |> SaveResult
+"#
+    .to_string()
+}
+
+fn scaffold_rune(name: &str) -> String {
+    format!(
+        "// {name} rune — public API\n\
+         // Usage: import {name} from \"path/to/{lower}\"\n\
+         \n\
+         public fn hello(name: String) -> String {{\n\
+             $\"Hello from {name}, {{name}}!\"\n\
+         }}\n",
+        name = name,
+        lower = name.to_lowercase()
+    )
+}
+
+fn write_scaffold(content: &str, out: Option<&str>) {
+    match out {
+        Some(path) => {
+            std::fs::write(path, content)
+                .unwrap_or_else(|e| { eprintln!("error: cannot write {}: {}", path, e); process::exit(1); });
+        }
+        None => print!("{}", content),
+    }
+}
+
+pub fn cmd_scaffold(sub: &str, args: &[String]) {
+    // parse common flags
+    let mut in_type = "String";
+    let mut out_type = "String";
+    let mut effect: Option<&str> = Some("IO");
+    let mut no_effect = false;
+    let mut out_file: Option<&str> = None;
+    let mut stages_str: Option<&str> = None;
+    let mut i = 1usize; // args[0] = Name (positional), args[1..] = flags
+    while i < args.len() {
+        match args[i].as_str() {
+            "--in"        => { in_type   = args.get(i+1).map(|s| s.as_str()).unwrap_or("String"); i += 2; }
+            "--out-type"  => { out_type  = args.get(i+1).map(|s| s.as_str()).unwrap_or("String"); i += 2; }
+            "--effect"    => { effect    = Some(args.get(i+1).map(|s| s.as_str()).unwrap_or("IO")); i += 2; }
+            "--no-effect" => { no_effect = true; i += 1; }
+            "--out"       => { out_file  = args.get(i+1).map(|s| s.as_str()); i += 2; }
+            "--stages"    => { stages_str = args.get(i+1).map(|s| s.as_str()); i += 2; }
+            _             => { i += 1; }
+        }
+    }
+    if no_effect { effect = None; }
+
+    match sub {
+        "stage" => {
+            let name = args.first().map(|s| s.as_str()).unwrap_or("MyStage");
+            let content = scaffold_stage(name, in_type, out_type, effect);
+            write_scaffold(&content, out_file);
+        }
+        "seq" => {
+            let name = args.first().map(|s| s.as_str()).unwrap_or("MyPipeline");
+            let default_stages = vec!["Load", "Transform", "Save"];
+            let custom: Vec<String>;
+            let stage_refs: Vec<&str> = if let Some(s) = stages_str {
+                custom = s.split(',').map(|x| x.trim().to_string()).collect();
+                custom.iter().map(|x| x.as_str()).collect()
+            } else {
+                default_stages
+            };
+            let content = scaffold_seq(name, &stage_refs);
+            write_scaffold(&content, out_file);
+        }
+        "postgres-etl" => {
+            let content = scaffold_postgres_etl();
+            write_scaffold(&content, out_file);
+        }
+        "rune" => {
+            let name = args.first().map(|s| s.as_str()).unwrap_or("MyLib");
+            let content = scaffold_rune(name);
+            write_scaffold(&content, out_file);
+        }
+        other => {
+            eprintln!("error: unknown scaffold template '{}' (expected stage|seq|postgres-etl|rune)", other);
             process::exit(1);
         }
     }
@@ -21606,7 +21794,7 @@ mod v12700_tests {
 
     #[test]
     fn version_is_12_7_0() {
-        assert_eq!(env!("CARGO_PKG_VERSION"), "12.7.0");
+        // Version bump is tested in v12800_tests::version_is_12_8_0.
     }
 }
 
@@ -22935,5 +23123,83 @@ public fn main() -> String {{
     #[test]
     fn version_is_12_5_0() {
         // Version bump is tested in v12600_tests::version_is_12_6_0.
+    }
+}
+
+// ── v12800 tests ──────────────────────────────────────────────────────────────
+#[cfg(test)]
+mod v12800_tests {
+    use super::*;
+
+    #[test]
+    fn scaffold_stage_contains_public() {
+        let out = scaffold_stage("MyStage", "String", "String", Some("IO"));
+        assert!(out.contains("public stage"), "expected 'public stage' in:\n{}", out);
+    }
+
+    #[test]
+    fn scaffold_stage_has_effect() {
+        let out = scaffold_stage("MyStage", "String", "String", Some("IO"));
+        assert!(out.contains("!IO"), "expected '!IO' in:\n{}", out);
+    }
+
+    #[test]
+    fn scaffold_stage_no_effect() {
+        let out = scaffold_stage("MyStage", "String", "String", None);
+        assert!(!out.contains("!IO"), "expected no effect annotation in:\n{}", out);
+        assert!(out.contains("public stage MyStage"), "expected 'public stage MyStage' in:\n{}", out);
+    }
+
+    #[test]
+    fn scaffold_seq_has_pipe() {
+        let out = scaffold_seq("MyPipeline", &["Load", "Transform", "Save"]);
+        assert!(out.contains("|>"), "expected '|>' in:\n{}", out);
+    }
+
+    #[test]
+    fn scaffold_seq_default_stages() {
+        let out = scaffold_seq("MyPipeline", &["Load", "Transform", "Save"]);
+        assert!(out.contains("Load"), "expected 'Load' in:\n{}", out);
+        assert!(out.contains("Transform"), "expected 'Transform' in:\n{}", out);
+        assert!(out.contains("Save"), "expected 'Save' in:\n{}", out);
+    }
+
+    #[test]
+    fn scaffold_seq_custom_stages() {
+        let out = scaffold_seq("MyPipe", &["Fetch", "Process", "Push"]);
+        assert!(out.contains("Fetch"), "expected 'Fetch' in:\n{}", out);
+        assert!(out.contains("Process"), "expected 'Process' in:\n{}", out);
+        assert!(out.contains("Push"), "expected 'Push' in:\n{}", out);
+        assert!(out.contains("public seq MyPipe = Fetch |> Process |> Push"), "expected pipe chain in:\n{}", out);
+    }
+
+    #[test]
+    fn scaffold_postgres_etl_uses_chain() {
+        let out = scaffold_postgres_etl();
+        assert!(out.contains("chain"), "expected 'chain' in:\n{}", out);
+    }
+
+    #[test]
+    fn scaffold_rune_contains_fn() {
+        let out = scaffold_rune("MyLib");
+        assert!(out.contains("public fn"), "expected 'public fn' in:\n{}", out);
+        assert!(out.contains("MyLib"), "expected 'MyLib' in:\n{}", out);
+    }
+
+    #[test]
+    fn new_template_postgres_etl_creates_dir() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("my-etl");
+        create_postgres_etl_project(&dir, "my-etl").unwrap();
+        assert!(dir.join("fav.toml").exists(), "fav.toml not created");
+        assert!(dir.join("src").join("pipeline.fav").exists(), "src/pipeline.fav not created");
+        assert!(dir.join("src").join("main.fav").exists(), "src/main.fav not created");
+        let toml = std::fs::read_to_string(dir.join("fav.toml")).unwrap();
+        assert!(toml.contains("sslmode"), "expected sslmode in fav.toml");
+    }
+
+    #[test]
+    fn version_is_12_8_0() {
+        assert_eq!(env!("CARGO_PKG_VERSION"), "12.8.0");
     }
 }

@@ -71,7 +71,7 @@ use driver::{
     cmd_exec, cmd_explain, cmd_explain_code, cmd_explain_compiler, cmd_explain_diff, cmd_explain_error,
     cmd_explain_error_list, cmd_explain_error_list_json, cmd_explain_lineage, cmd_fmt, cmd_graph,
     cmd_infer, cmd_infer_postgres, cmd_infer_proto, cmd_infer_snowflake, cmd_install, cmd_lint, cmd_migrate, cmd_new,
-    cmd_profile, cmd_transpile,
+    cmd_profile, cmd_scaffold, cmd_transpile,
     cmd_publish, cmd_registry, cmd_repl, cmd_run, cmd_test, cmd_watch,
 };
 use rune_cmd::cmd_rune;
@@ -951,6 +951,15 @@ fn main_impl() {
                 }
             }
             cmd_new(name, template);
+        }
+
+        Some("scaffold") => {
+            let sub = args.get(2).map(|s| s.as_str()).unwrap_or_else(|| {
+                eprintln!("usage: fav scaffold <stage|seq|postgres-etl|rune> [Name] [flags]");
+                process::exit(1);
+            });
+            let rest: Vec<String> = args[3..].to_vec();
+            cmd_scaffold(sub, &rest);
         }
 
         Some("fmt") => {

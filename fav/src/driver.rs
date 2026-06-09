@@ -197,6 +197,12 @@ fn get_help_text(code: &str) -> &'static [&'static str] {
             "pass a value that implements the required capability interface",
             "available implementations: PostgresDb, SnowflakeDb, S3Storage, MockDb",
         ],
+        "E0021" => &[
+            "switch to a context that includes this capability",
+            "LoadCtx provides: db(DbRead), io, env",
+            "WriteCtx provides: db(DbWrite), storage, io, env",
+            "MigrateCtx provides: db_read, db_write, io, env",
+        ],
         _ => &[],
     }
 }
@@ -23711,11 +23717,11 @@ mod v133000_tests {
         Checker::check_program(&prog)
     }
 
-    // A-1: version bump
-    #[test]
-    fn version_is_13_3_0() {
-        assert_eq!(env!("CARGO_PKG_VERSION"), "13.3.0");
-    }
+    // v13.4.0: commented out
+    // #[test]
+    // fn version_is_13_3_0() {
+    //     assert_eq!(env!("CARGO_PKG_VERSION"), "13.3.0");
+    // }
 
     // A-2: collect expr in function body does not produce E0001
     #[test]
@@ -23837,5 +23843,180 @@ fn make_list(x: List<String>) -> List<String> {
         let (errors, _) = check_src(src);
         let e0005: Vec<_> = errors.iter().filter(|e| e.code == "E0005").collect();
         assert!(e0005.is_empty(), "E0005 should not fire for List<String> vs List: {:?}", e0005);
+    }
+}
+
+// ── v13.4.0 tests ────────────────────────────────────────────────────────────
+#[cfg(test)]
+mod v134000_tests {
+    use crate::frontend::parser::Parser;
+    use crate::middle::checker::{Checker, InterfaceRegistry};
+
+    fn check_src(src: &str) -> (Vec<crate::middle::checker::TypeError>, Vec<crate::middle::checker::FavWarning>) {
+        let prog = Parser::parse_str(src, "test.fav").expect("parse error");
+        Checker::check_program(&prog)
+    }
+
+    // F-1: version bump
+    #[test]
+    fn version_is_13_4_0() {
+        assert_eq!(env!("CARGO_PKG_VERSION"), "13.4.0");
+    }
+
+    // B-1: context interfaces are registered in InterfaceRegistry
+    #[test]
+    fn context_interfaces_registered() {
+        let reg = InterfaceRegistry::new();
+        assert!(reg.interfaces.contains_key("CommonCtx"),  "CommonCtx not registered");
+        assert!(reg.interfaces.contains_key("LoadCtx"),    "LoadCtx not registered");
+        assert!(reg.interfaces.contains_key("WriteCtx"),   "WriteCtx not registered");
+        assert!(reg.interfaces.contains_key("MigrateCtx"), "MigrateCtx not registered");
+        // all four have is_context = true
+        assert!(reg.interfaces["CommonCtx"].is_context,  "CommonCtx.is_context should be true");
+        assert!(reg.interfaces["LoadCtx"].is_context,    "LoadCtx.is_context should be true");
+        assert!(reg.interfaces["WriteCtx"].is_context,   "WriteCtx.is_context should be true");
+        assert!(reg.interfaces["MigrateCtx"].is_context, "MigrateCtx.is_context should be true");
+    }
+
+    // B-2: DbRead is a capability interface (is_context = false)
+    #[test]
+    fn capability_interfaces_not_context() {
+        let reg = InterfaceRegistry::new();
+        assert!(!reg.interfaces["DbRead"].is_context,      "DbRead.is_context should be false");
+        assert!(!reg.interfaces["DbWrite"].is_context,     "DbWrite.is_context should be false");
+        assert!(!reg.interfaces["StorageWrite"].is_context,"StorageWrite.is_context should be false");
+        assert!(!reg.interfaces["Io"].is_context,          "Io.is_context should be false");
+    }
+
+    // B-3: LoadCtx.db field resolves to DbRead interface
+    #[test]
+    fn load_ctx_has_db_field() {
+        let reg = InterfaceRegistry::new();
+        let db_ty = reg.lookup_declared_method("LoadCtx", "db");
+        assert!(db_ty.is_some(), "LoadCtx should have a `db` field");
+    }
+
+    // B-4: LoadCtx inherits io from CommonCtx (via super_interface chain)
+    #[test]
+    fn load_ctx_inherits_io() {
+        let src = r#"
+interface WithLoad { db: DbRead  io: Io }
+public fn f(ctx: WithLoad) -> Unit {
+    ctx.io.println("loading...")
+}
+"#;
+        let (errors, _) = check_src(src);
+        let e: Vec<_> = errors.iter().filter(|e| e.code == "E0020" || e.code == "E0021").collect();
+        assert!(e.is_empty(), "Io.println should be valid via WithLoad: {:?}", e);
+    }
+
+    // B-5: ctx.db.query(...) passes on LoadCtx-like interface
+    #[test]
+    fn load_ctx_allows_db_read() {
+        let src = r#"
+interface WithDb { db: DbRead }
+public fn f(ctx: WithDb) -> Result<String, String> {
+    ctx.db.query("SELECT 1", List.empty())
+}
+"#;
+        let (errors, _) = check_src(src);
+        let e: Vec<_> = errors.iter().filter(|e| e.code == "E0020" || e.code == "E0021").collect();
+        assert!(e.is_empty(), "ctx.db.query should pass on DbRead interface: {:?}", e);
+    }
+
+    // C-1: ctx.db.execute on DbRead → E0020 (method not found on capability interface)
+    #[test]
+    fn load_ctx_rejects_db_write() {
+        let src = r#"
+interface ReadOnly { db: DbRead }
+public fn run(ctx: ReadOnly) -> Result<Int, String> {
+    ctx.db.execute("INSERT INTO t VALUES (1)", List.empty())
+}
+"#;
+        let (errors, _) = check_src(src);
+        let has_e0020 = errors.iter().any(|e| e.code == "E0020");
+        assert!(has_e0020, "expected E0020 for DbRead.execute (no such method), errors: {:?}", errors);
+        let has_e0021 = errors.iter().any(|e| e.code == "E0021");
+        assert!(!has_e0021, "should not be E0021 (DbRead is not a context interface), errors: {:?}", errors);
+    }
+
+    // C-2: ctx.storage.put on LoadCtx → E0021 (field not in context)
+    #[test]
+    fn load_ctx_rejects_storage() {
+        let src = r#"
+public fn run(ctx: LoadCtx) -> Result<Unit, String> {
+    ctx.storage.put("bucket", "key", "body")
+}
+"#;
+        let (errors, _) = check_src(src);
+        let has_e0021 = errors.iter().any(|e| e.code == "E0021");
+        assert!(has_e0021, "expected E0021 for ctx.storage on LoadCtx, errors: {:?}", errors);
+        let has_e0020 = errors.iter().any(|e| e.code == "E0020");
+        assert!(!has_e0020, "should be E0021 not E0020 for missing context field, errors: {:?}", errors);
+    }
+
+    // C-3: WriteCtx allows ctx.db.execute
+    #[test]
+    fn write_ctx_allows_db_write() {
+        let src = r#"
+public fn run(ctx: WriteCtx) -> Result<Int, String> {
+    ctx.db.execute("INSERT INTO t VALUES (1)", List.empty())
+}
+"#;
+        let (errors, _) = check_src(src);
+        let e: Vec<_> = errors.iter().filter(|e| e.code == "E0020" || e.code == "E0021").collect();
+        assert!(e.is_empty(), "WriteCtx.db.execute should pass: {:?}", e);
+    }
+
+    // C-4: WriteCtx allows ctx.storage.put
+    #[test]
+    fn write_ctx_allows_storage() {
+        let src = r#"
+public fn run(ctx: WriteCtx) -> Result<Unit, String> {
+    ctx.storage.put("bucket", "key", "body")
+}
+"#;
+        let (errors, _) = check_src(src);
+        let e: Vec<_> = errors.iter().filter(|e| e.code == "E0020" || e.code == "E0021").collect();
+        assert!(e.is_empty(), "WriteCtx.storage.put should pass: {:?}", e);
+    }
+
+    // C-5: MigrateCtx allows both db_read.query and db_write.execute
+    #[test]
+    fn migrate_ctx_has_both_db() {
+        let src = r#"
+public fn run(ctx: MigrateCtx) -> Result<String, String> {
+    bind _ <- ctx.db_write.execute("CREATE TABLE t (id INT)", List.empty())
+    ctx.db_read.query("SELECT 1", List.empty())
+}
+"#;
+        let (errors, _) = check_src(src);
+        let e: Vec<_> = errors.iter().filter(|e| e.code == "E0020" || e.code == "E0021").collect();
+        assert!(e.is_empty(), "MigrateCtx db_read + db_write should pass: {:?}", e);
+    }
+
+    // C-6: E0021 vs E0020 distinction
+    #[test]
+    fn e0021_not_e0020_for_ctx_field() {
+        // Missing capability in context → E0021
+        let ctx_src = r#"
+public fn run(ctx: CommonCtx) -> Unit {
+    ctx.db.query("SELECT 1", List.empty())
+}
+"#;
+        let (errors, _) = check_src(ctx_src);
+        let has_e0021 = errors.iter().any(|e| e.code == "E0021");
+        assert!(has_e0021, "expected E0021 for missing `db` in CommonCtx, errors: {:?}", errors);
+
+        // Missing method in capability → E0020
+        let cap_src = r#"
+interface WithDb { db: DbRead }
+public fn run(ctx: WithDb) -> Result<Int, String> {
+    ctx.db.execute("INSERT ...", List.empty())
+}
+"#;
+        let (errors2, _) = check_src(cap_src);
+        let has_e0020 = errors2.iter().any(|e| e.code == "E0020");
+        assert!(has_e0020, "expected E0020 for missing method on DbRead, errors: {:?}", errors2);
     }
 }

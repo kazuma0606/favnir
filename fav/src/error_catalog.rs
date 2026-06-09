@@ -85,6 +85,22 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
     },
     // ── E02xx: 型エラー ──────────────────────────────────────────────────
     ErrorEntry {
+        code: "E0020",
+        title: "capability interface has no such method",
+        category: "types",
+        description: "A method was called on a capability interface that does not define it.",
+        example: "fn run(ctx: DbRead) { ctx.execute(\"INSERT ...\", List.empty()) }  // E0020: DbRead has no method `execute`",
+        fix: "Use the correct interface (e.g. DbWrite for execute). Available implementations: PostgresDb, SnowflakeDb.",
+    },
+    ErrorEntry {
+        code: "E0021",
+        title: "capability not in context",
+        category: "types",
+        description: "A capability field was accessed on a context interface that does not include it.",
+        example: "fn run(ctx: LoadCtx) { ctx.storage.put(...) }  // E0021: LoadCtx has no field `storage`",
+        fix: "Switch to a context that includes this capability. WriteCtx provides storage; LoadCtx provides db, io, env.",
+    },
+    ErrorEntry {
         code: "E0213",
         title: "type mismatch",
         category: "types",

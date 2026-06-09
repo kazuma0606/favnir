@@ -483,6 +483,7 @@ pub struct ImplScope {
 pub struct InterfaceDef {
     pub super_interface: Option<String>,
     pub methods: HashMap<String, Type>,
+    pub is_context: bool,   // v13.4.0: true = context interface, false = capability
 }
 
 #[allow(dead_code)]
@@ -539,6 +540,30 @@ impl InterfaceRegistry {
         storage_write.insert("delete".into(), mk(vec![s(), s()], ru()));
         self.register_interface("StorageWrite".into(), None, storage_write);
 
+        // v13.4.0: Context composite interfaces
+        // CommonCtx — 全コンテキストの基底（io + env）
+        let mut common_ctx = HashMap::new();
+        common_ctx.insert("io".into(),  Type::Interface("Io".into(),  vec![]));
+        common_ctx.insert("env".into(), Type::Interface("Env".into(), vec![]));
+        self.register_context_interface("CommonCtx".into(), None, common_ctx);
+
+        // LoadCtx: CommonCtx + db: DbRead（読み取り専用ステージ）
+        let mut load_ctx = HashMap::new();
+        load_ctx.insert("db".into(), Type::Interface("DbRead".into(), vec![]));
+        self.register_context_interface("LoadCtx".into(), Some("CommonCtx".into()), load_ctx);
+
+        // WriteCtx: CommonCtx + db: DbWrite + storage: StorageWrite（書き込みステージ）
+        let mut write_ctx = HashMap::new();
+        write_ctx.insert("db".into(),      Type::Interface("DbWrite".into(),     vec![]));
+        write_ctx.insert("storage".into(), Type::Interface("StorageWrite".into(), vec![]));
+        self.register_context_interface("WriteCtx".into(), Some("CommonCtx".into()), write_ctx);
+
+        // MigrateCtx: CommonCtx + db_read: DbRead + db_write: DbWrite（マイグレーションステージ）
+        let mut migrate_ctx = HashMap::new();
+        migrate_ctx.insert("db_read".into(),  Type::Interface("DbRead".into(),  vec![]));
+        migrate_ctx.insert("db_write".into(), Type::Interface("DbWrite".into(), vec![]));
+        self.register_context_interface("MigrateCtx".into(), Some("CommonCtx".into()), migrate_ctx);
+
         // v13.3.0: HttpClient / Io / Env capability interfaces
         let map_ss = || Type::Map(Box::new(s()), Box::new(s()));
         let ro = || Type::Option(Box::new(s()));
@@ -576,6 +601,23 @@ impl InterfaceRegistry {
             InterfaceDef {
                 super_interface,
                 methods,
+                is_context: false,
+            },
+        );
+    }
+
+    fn register_context_interface(
+        &mut self,
+        name: String,
+        super_interface: Option<String>,
+        fields: HashMap<String, Type>,
+    ) {
+        self.interfaces.insert(
+            name,
+            InterfaceDef {
+                super_interface,
+                methods: fields,
+                is_context: true,
             },
         );
     }
@@ -4588,14 +4630,23 @@ impl Checker {
                 {
                     return field_ty;
                 }
-                self.type_error(
-                    "E0020",
-                    format!(
-                        "interface `{}` has no field or method `{}`",
-                        ty_name, field
-                    ),
-                    span,
-                );
+                let is_ctx = self.interface_registry
+                    .interfaces.get(ty_name.as_str())
+                    .map(|d| d.is_context)
+                    .unwrap_or(false);
+                if is_ctx {
+                    self.type_error(
+                        "E0021",
+                        format!("capability `{}` not in context `{}`", field, ty_name),
+                        span,
+                    );
+                } else {
+                    self.type_error(
+                        "E0020",
+                        format!("interface `{}` has no field or method `{}`", ty_name, field),
+                        span,
+                    );
+                }
                 return Type::Error;
             }
         }
@@ -4610,14 +4661,23 @@ impl Checker {
                 {
                     return field_ty;
                 }
-                self.type_error(
-                    "E0020",
-                    format!(
-                        "interface `{}` has no field or method `{}`",
-                        interface_name, field
-                    ),
-                    span,
-                );
+                let is_ctx = self.interface_registry
+                    .interfaces.get(interface_name.as_str())
+                    .map(|d| d.is_context)
+                    .unwrap_or(false);
+                if is_ctx {
+                    self.type_error(
+                        "E0021",
+                        format!("capability `{}` not in context `{}`", field, interface_name),
+                        span,
+                    );
+                } else {
+                    self.type_error(
+                        "E0020",
+                        format!("interface `{}` has no field or method `{}`", interface_name, field),
+                        span,
+                    );
+                }
                 return Type::Error;
             }
         }

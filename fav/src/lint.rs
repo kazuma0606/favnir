@@ -727,6 +727,13 @@ const DEPRECATED_RUNE_CALLS: &[(&str, &str, &str)] = &[
     ("AWS",       "s3_delete_object_raw","ctx.storage.delete(...)"),
     ("Snowflake", "query_raw",           "ctx.db.query(...)"),
     ("Snowflake", "execute_raw",         "ctx.db.execute(...)"),
+    // v13.3.0: IO / Http direct calls deprecated
+    ("IO",        "println",             "ctx.io.println(...)"),
+    ("IO",        "print",              "ctx.io.print(...)"),
+    ("IO",        "read_line",          "ctx.io.read_line()"),
+    ("IO",        "read_file_raw",      "ctx.storage.get(...)"),
+    ("Http",      "get_raw",            "ctx.http.get(...)"),
+    ("Http",      "post_raw",           "ctx.http.post(...)"),
 ];
 
 /// `fav check --ambient` — detect direct Rune calls that should use capability ctx (W009).

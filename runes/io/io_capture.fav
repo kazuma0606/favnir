@@ -1,0 +1,29 @@
+// runes/io/io_capture.fav — IoCapture for unit testing (v13.3.0)
+// テスト用 Io モック。stdout をキャプチャして文字列として返す。
+// 現行 MVP では println は no-op（将来的に実際にキャプチャ予定）。
+
+type IoCapture(List<String>)
+
+public fn IoCapture.empty() -> IoCapture { IoCapture(List.empty()) }
+
+// ── Io impl ─────────────────────────────────────────────────────────────────
+
+impl Io for IoCapture {
+    fn println(io: IoCapture, msg: String) -> Unit {
+        ()
+    }
+
+    fn print(io: IoCapture, msg: String) -> Unit {
+        ()
+    }
+
+    fn read_line(io: IoCapture) -> Result<String, String> {
+        Result.ok("")
+    }
+}
+
+// ── Capture accessor ────────────────────────────────────────────────────────
+
+public fn IoCapture.captured(io: IoCapture) -> String {
+    String.join(io, "\n")
+}

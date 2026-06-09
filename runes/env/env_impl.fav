@@ -1,0 +1,22 @@
+// runes/env/env_impl.fav — EnvImpl capability implementation (v13.3.0)
+// Env インターフェースを実装したプロセス環境変数ラッパー。
+// ctx.env.require(...) / ctx.env.get(...) をシステム env に委譲する。
+
+type EnvImpl(String)
+
+public fn EnvImpl.new() -> EnvImpl { EnvImpl("process") }
+
+// ── Env impl ─────────────────────────────────────────────────────────────────
+
+impl Env for EnvImpl {
+    fn require(e: EnvImpl, key: String) -> Result<String, String> !IO {
+        match IO.getenv_raw(key) {
+            None => Result.err(String.concat("missing env var: ", key))
+            Some(v) => Result.ok(v)
+        }
+    }
+
+    fn get(e: EnvImpl, key: String) -> Option<String> !IO {
+        IO.getenv_raw(key)
+    }
+}

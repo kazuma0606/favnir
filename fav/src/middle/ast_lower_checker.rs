@@ -338,7 +338,9 @@ pub fn lower_expr(expr: &ast::Expr) -> Value {
         ast::Expr::Apply(func, args, _) => lower_apply(func, args),
         ast::Expr::Pipeline(steps, _) => lower_pipeline(steps),
         ast::Expr::Question(inner, _) => v1("EQuestion", lower_expr(inner)),
-        // Fallbacks for TypeApply, FString, Collect, AssertMatches, EmitExpr
+        // v13.3.0: collect { body } → ECollect(body); infer_hm returns "Unknown"
+        ast::Expr::Collect(block, _) => v1("ECollect", lower_block(block)),
+        // Fallbacks for TypeApply, FString, AssertMatches, EmitExpr
         _ => v1("EVar", sv("_unsupported_")),
     }
 }

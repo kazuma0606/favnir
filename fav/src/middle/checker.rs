@@ -538,6 +538,31 @@ impl InterfaceRegistry {
         storage_write.insert("put".into(),    mk(vec![s(), s(), s()], ru()));
         storage_write.insert("delete".into(), mk(vec![s(), s()], ru()));
         self.register_interface("StorageWrite".into(), None, storage_write);
+
+        // v13.3.0: HttpClient / Io / Env capability interfaces
+        let map_ss = || Type::Map(Box::new(s()), Box::new(s()));
+        let ro = || Type::Option(Box::new(s()));
+
+        // HttpClient — HTTP client operations
+        let mut http_client = HashMap::new();
+        http_client.insert("get".into(),    mk(vec![s(), map_ss()], rs()));
+        http_client.insert("post".into(),   mk(vec![s(), s(), map_ss()], rs()));
+        http_client.insert("put".into(),    mk(vec![s(), s(), map_ss()], rs()));
+        http_client.insert("delete".into(), mk(vec![s(), map_ss()], rs()));
+        self.register_interface("HttpClient".into(), None, http_client);
+
+        // Io — standard I/O operations
+        let mut io_iface = HashMap::new();
+        io_iface.insert("println".into(),   mk(vec![s()], Type::Unit));
+        io_iface.insert("print".into(),     mk(vec![s()], Type::Unit));
+        io_iface.insert("read_line".into(), mk(vec![], rs()));
+        self.register_interface("Io".into(), None, io_iface);
+
+        // Env — environment variable operations
+        let mut env_iface = HashMap::new();
+        env_iface.insert("require".into(), mk(vec![s()], rs()));
+        env_iface.insert("get".into(),     mk(vec![s()], ro()));
+        self.register_interface("Env".into(), None, env_iface);
     }
 
     pub fn register_interface(

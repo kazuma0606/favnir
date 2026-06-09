@@ -1,0 +1,27 @@
+// runes/http/http_client_impl.fav — HttpClientImpl capability implementation (v13.3.0)
+// HttpClient インターフェースを実装した HTTP クライアントラッパー。
+// ctx.http.get(...) / ctx.http.post(...) を Http.* primitive に委譲する。
+
+type HttpClientImpl(String)
+
+public fn HttpClientImpl.new() -> HttpClientImpl { HttpClientImpl("default") }
+
+// ── HttpClient impl ─────────────────────────────────────────────────────────
+
+impl HttpClient for HttpClientImpl {
+    fn get(c: HttpClientImpl, url: String, headers: Map<String, String>) -> Result<String, String> !Http {
+        Http.get_raw(url)
+    }
+
+    fn post(c: HttpClientImpl, url: String, body: String, headers: Map<String, String>) -> Result<String, String> !Http {
+        Http.post_raw(url, body)
+    }
+
+    fn put(c: HttpClientImpl, url: String, body: String, headers: Map<String, String>) -> Result<String, String> !Http {
+        Http.post_raw(url, body)
+    }
+
+    fn delete(c: HttpClientImpl, url: String, headers: Map<String, String>) -> Result<String, String> !Http {
+        Http.get_raw(url)
+    }
+}

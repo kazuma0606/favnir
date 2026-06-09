@@ -4963,27 +4963,27 @@ public fn lint_source(src: String) -> Result<String, String> {
     Result.and_then(lex(src), |toks| Result.and_then(parse_tokens(toks), |prog| Result.ok(format_warnings(lint_all(prog)))))
 }
 
-fn compile_file_after_prog(prog: Program) -> Result<Artifact, String> {
+fn compile_file_after_prog(prog: Program) -> Result<Artifact, String> !IO {
     bind _ <- IO.println("phase:compile");
     compile(prog)
 }
 
-fn compile_file_after_parse(toks: List<Token>) -> Result<Artifact, String> {
+fn compile_file_after_parse(toks: List<Token>) -> Result<Artifact, String> !IO {
     bind _ <- IO.println("phase:parse");
     Result.and_then(parse_tokens(toks), |prog| compile_file_after_prog(prog))
 }
 
-fn compile_file_after_lex(src: String) -> Result<Artifact, String> {
+fn compile_file_after_lex(src: String) -> Result<Artifact, String> !IO {
     bind _ <- IO.println("phase:lex");
     Result.and_then(lex(src), |toks| compile_file_after_parse(toks))
 }
 
-fn compile_file(path: String) -> Result<Artifact, String> {
+fn compile_file(path: String) -> Result<Artifact, String> !IO {
     bind _ <- IO.println("phase:read");
     Result.and_then(IO.read_file_raw(path), |src| compile_file_after_lex(src))
 }
 
-fn compile_file_quiet(path: String) -> Result<Artifact, String> {
+fn compile_file_quiet(path: String) -> Result<Artifact, String> !IO {
     Result.and_then(IO.read_file_raw(path), |src| Result.and_then(lex(src), |toks| Result.and_then(parse_tokens(toks), |prog| compile(prog))))
 }
 
@@ -4995,7 +4995,7 @@ public fn compile_bytes_from_src(src: String) -> Result<List<Int>, String> {
     Result.and_then(lex(src), |toks| Result.and_then(parse_tokens(toks), |prog| Result.and_then(compile(prog), |artifact| Result.ok(serialize_artifact(artifact)))))
 }
 
-fn print_bytes(bytes: List<Int>) -> Bool {
+fn print_bytes(bytes: List<Int>) -> Bool !IO {
     match List.first(bytes) {
         None => true
         Some(b) => {
@@ -5005,7 +5005,7 @@ fn print_bytes(bytes: List<Int>) -> Bool {
     }
 }
 
-public fn main() -> Bool {
+public fn main() -> Bool !IO {
     bind args <- IO.argv();
     match List.first(args) {
         None => {

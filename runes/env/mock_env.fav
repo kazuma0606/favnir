@@ -1,0 +1,25 @@
+// runes/env/mock_env.fav — MockEnv for unit testing (v13.3.0)
+// テスト用 Env モック。Map<String, String> でキーバリューを渡す。
+// set() でエントリを追加し、require() / get() で取得する。
+
+type MockEnv(Map<String, String>)
+
+public fn MockEnv.empty() -> MockEnv { MockEnv(Map.empty()) }
+public fn MockEnv.set(env: MockEnv, key: String, val: String) -> MockEnv {
+    MockEnv(Map.insert(env, key, val))
+}
+
+// ── Env impl ─────────────────────────────────────────────────────────────────
+
+impl Env for MockEnv {
+    fn require(e: MockEnv, key: String) -> Result<String, String> {
+        match Map.get(e, key) {
+            None => Result.err(String.concat("missing env var: ", key))
+            Some(v) => Result.ok(v)
+        }
+    }
+
+    fn get(e: MockEnv, key: String) -> Option<String> {
+        Map.get(e, key)
+    }
+}

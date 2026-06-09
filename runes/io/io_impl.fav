@@ -1,0 +1,23 @@
+// runes/io/io_impl.fav — IoImpl capability implementation (v13.3.0)
+// Io インターフェースを実装した標準 I/O ラッパー。
+// ctx.io.println(...) / ctx.io.read_line() を IO.* primitive に委譲する。
+
+type IoImpl(String)
+
+public fn IoImpl.new() -> IoImpl { IoImpl("default") }
+
+// ── Io impl ─────────────────────────────────────────────────────────────────
+
+impl Io for IoImpl {
+    fn println(io: IoImpl, msg: String) -> Unit !IO {
+        IO.println(msg)
+    }
+
+    fn print(io: IoImpl, msg: String) -> Unit !IO {
+        IO.print(msg)
+    }
+
+    fn read_line(io: IoImpl) -> Result<String, String> !IO {
+        IO.read_line()
+    }
+}

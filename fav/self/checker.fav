@@ -1337,7 +1337,13 @@ fn unify_deep(t1: String, t2: String, subst: List<KVPair>) -> Result<List<KVPair
                             Result.err(fmt_err("E0005", String.concat("cannot unify ", String.concat(o1, String.concat(" with ", o2)))))
                         }
                     } else {
-                        Result.err(fmt_err("E0005", String.concat("cannot unify ", String.concat(t1, String.concat(" with ", t2)))))
+                        // v13.3.0: one has type params, other is bare (e.g. List<String> vs List)
+                        // treat as compatible if outer types match
+                        if outer_type(t1) == outer_type(t2) {
+                            Result.ok(subst)
+                        } else {
+                            Result.err(fmt_err("E0005", String.concat("cannot unify ", String.concat(t1, String.concat(" with ", t2)))))
+                        }
                     }
                 }
             }
@@ -1837,6 +1843,8 @@ fn infer_hm(expr: Expr, env: List<KVPair>, state: InfState) -> Result<InfResult,
         EChain({ _0: vname, _1: val_e, _2: cont_e }) => infer_hm_let(vname, val_e, cont_e, env, state)
         EIf({ _0: cond, _1: then_e, _2: else_e }) => Result.and_then(infer_hm(then_e, env, state), |tr| Result.and_then(infer_hm(else_e, env, inf_state_of(tr)), |er| Result.and_then(unify_deep(tr.ty, er.ty, er.subst), |s2| Result.ok(inf_result_of(apply_subst(s2, tr.ty), inf_state_new(s2, er.counter))))))
         ECall({ _0: ns, _1: fname, _2: args }) => infer_call_hm(ns, fname, args, env, state)
+        // v13.3.0: collect { body } — type-check body, return "Unknown" (yield type untracked)
+        ECollect(inner) => Result.and_then(infer_hm(inner, env, state), |r| Result.ok(inf_result_of("Unknown", inf_state_of(r))))
         _ => Result.and_then(infer_expr(expr, env), |ty| Result.ok(inf_result_of(ty, state)))
     }
 }

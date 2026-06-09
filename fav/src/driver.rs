@@ -23584,11 +23584,11 @@ mod v132000_tests {
         Checker::check_program(&prog)
     }
 
-    // A-1: version bump
-    #[test]
-    fn version_is_13_2_0() {
-        assert_eq!(env!("CARGO_PKG_VERSION"), "13.2.0");
-    }
+    // A-1: version bump — commented out after v13.3.0 bump
+    // #[test]
+    // fn version_is_13_2_0() {
+    //     assert_eq!(env!("CARGO_PKG_VERSION"), "13.2.0");
+    // }
 
     // A-2: DbRead is pre-registered in InterfaceRegistry
     #[test]
@@ -23696,5 +23696,146 @@ public fn run(sql: String) -> Result<String, String> !Postgres {
         let lints = crate::lint::lint_program(&prog);
         let has_w009 = lints.iter().any(|l| l.code == "W009");
         assert!(!has_w009, "lint_program should not produce W009");
+    }
+}
+
+// ── v13.3.0 tests ────────────────────────────────────────────────────────────
+#[cfg(test)]
+mod v133000_tests {
+    use crate::frontend::parser::Parser;
+    use crate::lint::check_deprecated_rune_calls;
+    use crate::middle::checker::{Checker, InterfaceRegistry};
+
+    fn check_src(src: &str) -> (Vec<crate::middle::checker::TypeError>, Vec<crate::middle::checker::FavWarning>) {
+        let prog = Parser::parse_str(src, "test.fav").expect("parse error");
+        Checker::check_program(&prog)
+    }
+
+    // A-1: version bump
+    #[test]
+    fn version_is_13_3_0() {
+        assert_eq!(env!("CARGO_PKG_VERSION"), "13.3.0");
+    }
+
+    // A-2: collect expr in function body does not produce E0001
+    #[test]
+    fn collect_expr_no_e0001() {
+        let src = r#"
+fn scan_collect(chars: List<String>) -> Bool {
+    true
+}
+fn scan_entries(chars: List<String>) -> List<String> {
+    collect {
+        scan_collect(chars)
+    }
+}
+"#;
+        let (errors, _) = check_src(src);
+        let e0001: Vec<_> = errors.iter().filter(|e| e.code == "E0001").collect();
+        assert!(e0001.is_empty(), "collect should not produce E0001: {:?}", e0001);
+    }
+
+    // B-1: HttpClient, Io, Env registered in InterfaceRegistry
+    #[test]
+    fn http_client_interface_registered() {
+        let reg = InterfaceRegistry::new();
+        assert!(reg.interfaces.contains_key("HttpClient"), "HttpClient not registered");
+    }
+
+    #[test]
+    fn io_interface_registered() {
+        let reg = InterfaceRegistry::new();
+        assert!(reg.interfaces.contains_key("Io"), "Io not registered");
+        let io = reg.interfaces.get("Io").unwrap();
+        assert!(io.methods.contains_key("println"), "Io.println missing");
+        assert!(io.methods.contains_key("read_line"), "Io.read_line missing");
+    }
+
+    #[test]
+    fn env_interface_registered() {
+        let reg = InterfaceRegistry::new();
+        assert!(reg.interfaces.contains_key("Env"), "Env not registered");
+        let env = reg.interfaces.get("Env").unwrap();
+        assert!(env.methods.contains_key("require"), "Env.require missing");
+        assert!(env.methods.contains_key("get"), "Env.get missing");
+    }
+
+    // B-2: ctx.io.println(...) passes type check when ctx has an Io field
+    #[test]
+    fn io_interface_println_typecheck() {
+        let src = r#"
+interface WithIo {
+    io: Io
+}
+public fn run(ctx: WithIo) -> Unit {
+    ctx.io.println("hello")
+}
+"#;
+        let (errors, _) = check_src(src);
+        let e0020: Vec<_> = errors.iter().filter(|e| e.code == "E0020").collect();
+        assert!(e0020.is_empty(), "unexpected E0020 for Io.println: {:?}", e0020);
+    }
+
+    // B-3: ctx.env.require(...) passes type check when ctx has an Env field
+    #[test]
+    fn env_interface_require_typecheck() {
+        let src = r#"
+interface WithEnv {
+    env: Env
+}
+public fn run(ctx: WithEnv) -> Result<String, String> {
+    ctx.env.require("DATABASE_URL")
+}
+"#;
+        let (errors, _) = check_src(src);
+        let e0020: Vec<_> = errors.iter().filter(|e| e.code == "E0020").collect();
+        assert!(e0020.is_empty(), "unexpected E0020 for Env.require: {:?}", e0020);
+    }
+
+    // D-1: IO.println detected as W009
+    #[test]
+    fn w009_io_println_deprecated() {
+        let src = r#"
+public fn run() -> Unit !IO {
+    IO.println("hello")
+}
+"#;
+        let prog = Parser::parse_str(src, "test.fav").expect("parse error");
+        let warnings = check_deprecated_rune_calls(&prog);
+        let has_w009 = warnings.iter().any(|w| w.code == "W009");
+        assert!(has_w009, "expected W009 for IO.println, got: {:?}", warnings);
+    }
+
+    // D-2: Http.get_raw detected as W009
+    #[test]
+    fn w009_http_get_deprecated() {
+        let src = r#"
+public fn run(url: String) -> Result<String, String> !Http {
+    Http.get_raw(url)
+}
+"#;
+        let prog = Parser::parse_str(src, "test.fav").expect("parse error");
+        let warnings = check_deprecated_rune_calls(&prog);
+        let has_w009 = warnings.iter().any(|w| w.code == "W009");
+        assert!(has_w009, "expected W009 for Http.get_raw, got: {:?}", warnings);
+    }
+
+    // E-1: unify_deep accepts List<String> vs List (bare)
+    #[test]
+    fn unify_deep_list_string_vs_bare_list() {
+        // If List.map returns bare "List", functions using it in if-else with List<String>
+        // should not produce E0005. Verify via a check_src that would previously fail.
+        let src = r#"
+fn make_list(x: List<String>) -> List<String> {
+    if true {
+        x
+    } else {
+        List.map(x, |s| s)
+    }
+}
+"#;
+        let (errors, _) = check_src(src);
+        let e0005: Vec<_> = errors.iter().filter(|e| e.code == "E0005").collect();
+        assert!(e0005.is_empty(), "E0005 should not fire for List<String> vs List: {:?}", e0005);
     }
 }

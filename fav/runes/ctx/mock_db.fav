@@ -1,0 +1,32 @@
+// MockDb — test stub that implements DbRead and DbWrite (v13.5.0)
+
+type MockDb(List<String>)
+
+public fn empty() -> MockDb {
+    MockDb(List.empty())
+}
+
+public fn seed(rows: List<String>) -> MockDb {
+    MockDb(rows)
+}
+
+fn rows(db: MockDb) -> List<String> {
+    match db {
+        MockDb(rs) => rs
+    }
+}
+
+impl DbRead for MockDb {
+    query  = |db, sql, params| Result.ok(Json.encode_raw(rows(db)))
+    query1 = |db, sql, params| {
+        let rs = rows(db)
+        match List.first(rs) {
+            Some(r) => Result.ok(r)
+            None    => Result.err("no rows")
+        }
+    }
+}
+
+impl DbWrite for MockDb {
+    execute = |db, sql, params| Result.ok(0)
+}

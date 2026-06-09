@@ -150,6 +150,17 @@ pub struct LintTomlConfig {
     pub allow: Option<Vec<String>>,
 }
 
+/// `[context]` section of fav.toml (v13.5.0).
+#[derive(Debug, Clone)]
+pub struct ContextConfig {
+    /// Database connection URL (e.g. postgres://...). Supports ${ENV_VAR} expansion.
+    pub db_url: Option<String>,
+    /// Storage backend: "s3" | "local". Defaults to "s3".
+    pub storage: Option<String>,
+    /// HTTP client backend: "ureq". Defaults to "ureq".
+    pub http: Option<String>,
+}
+
 /// `[run]` section of fav.toml (v12.5.0).
 #[derive(Debug, Clone)]
 pub struct RunTomlConfig {
@@ -197,6 +208,8 @@ pub struct FavToml {
     pub run: Option<RunTomlConfig>,
     /// Optional lint configuration (v12.10.0).
     pub lint: Option<LintTomlConfig>,
+    /// Optional context configuration (v13.5.0).
+    pub context: Option<ContextConfig>,
 }
 
 impl FavToml {
@@ -257,6 +270,7 @@ fn parse_fav_toml(content: &str) -> FavToml {
     let mut postgres_cfg: Option<PostgresTomlConfig> = None;
     let mut run_cfg: Option<RunTomlConfig> = None;
     let mut lint_cfg: Option<LintTomlConfig> = None;
+    let mut context_cfg: Option<ContextConfig> = None;
     let mut section = "";
 
     for line in content.lines() {
@@ -314,6 +328,10 @@ fn parse_fav_toml(content: &str) -> FavToml {
         }
         if trimmed == "[run]" {
             section = "run";
+            continue;
+        }
+        if trimmed == "[context]" {
+            section = "context";
             continue;
         }
         if trimmed.starts_with('[') {
@@ -522,6 +540,22 @@ fn parse_fav_toml(content: &str) -> FavToml {
                 }
                 lint_cfg = Some(current);
             }
+            "context" => {
+                let mut current = context_cfg.take().unwrap_or(ContextConfig {
+                    db_url:  None,
+                    storage: None,
+                    http:    None,
+                });
+                if let Some((key, val)) = parse_kv(trimmed) {
+                    match key {
+                        "db_url"  => current.db_url  = Some(expand_env_vars(val)),
+                        "storage" => current.storage = Some(val.to_string()),
+                        "http"    => current.http    = Some(val.to_string()),
+                        _ => {}
+                    }
+                }
+                context_cfg = Some(current);
+            }
             _ => {}
         }
     }
@@ -546,6 +580,7 @@ fn parse_fav_toml(content: &str) -> FavToml {
         postgres: postgres_cfg,
         run: run_cfg,
         lint: lint_cfg,
+        context: context_cfg,
     }
 }
 

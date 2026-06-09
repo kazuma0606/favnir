@@ -5938,6 +5938,7 @@ fn is_known_builtin_namespace(name: &str) -> bool {
             | "Queue"
             | "Email"
             | "Compiler"
+            | "Ctx"
     )
 }
 
@@ -13039,6 +13040,60 @@ fn vm_call_builtin(
                 Ok(_) => ok_vm(VMValue::Unit),
                 Err(e) => err_vm(VMValue::Str(e)),
             })
+        }
+
+        // v13.5.0: Ctx primitives ────────────────────────────────────────────
+        "Ctx.build_raw" => {
+            // Ctx.build_raw(db_url: String, aws_region: String, s3_bucket: String)
+            //   -> Result<String, String>
+            // Returns Err if db_url is empty; otherwise Ok with a JSON context descriptor.
+            if args.len() < 3 {
+                return Err("Ctx.build_raw requires 3 arguments".to_string());
+            }
+            let db_url = match &args[0] {
+                VMValue::Str(s) => s.clone(),
+                _ => return Err("Ctx.build_raw: db_url must be a String".to_string()),
+            };
+            let aws_region = match &args[1] {
+                VMValue::Str(s) => s.clone(),
+                _ => return Err("Ctx.build_raw: aws_region must be a String".to_string()),
+            };
+            let s3_bucket = match &args[2] {
+                VMValue::Str(s) => s.clone(),
+                _ => return Err("Ctx.build_raw: s3_bucket must be a String".to_string()),
+            };
+            if db_url.is_empty() {
+                return Ok(err_vm(VMValue::Str("missing env: DATABASE_URL".to_string())));
+            }
+            let ctx_json = format!(
+                r#"{{"type":"AppCtx","db_url":"{}","aws_region":"{}","s3_bucket":"{}"}}"#,
+                db_url.replace('"', "\\\""),
+                aws_region.replace('"', "\\\""),
+                s3_bucket.replace('"', "\\\""),
+            );
+            Ok(ok_vm(VMValue::Str(ctx_json)))
+        }
+        "Ctx.mock_raw" => {
+            // Ctx.mock_raw(seed_rows: List<String>) -> String
+            // Returns a JSON descriptor for a mock context.
+            if args.len() < 1 {
+                return Err("Ctx.mock_raw requires 1 argument".to_string());
+            }
+            let rows_json = match &args[0] {
+                VMValue::List(fl) => {
+                    let items: Vec<String> = fl
+                        .iter()
+                        .map(|v| match v {
+                            VMValue::Str(s) => format!("\"{}\"", s.replace('"', "\\\"")),
+                            other => format!("\"{}\"", vmvalue_repr(other).replace('"', "\\\"")),
+                        })
+                        .collect();
+                    format!("[{}]", items.join(","))
+                }
+                _ => "[]".to_string(),
+            };
+            let mock_json = format!(r#"{{"type":"MockAppCtx","seed_rows":{}}}"#, rows_json);
+            Ok(VMValue::Str(mock_json))
         }
 
         other => Err(format!("unknown builtin: {}", other)),

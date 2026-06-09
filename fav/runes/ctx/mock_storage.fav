@@ -1,0 +1,12 @@
+// MockStorage — test stub that implements StorageWrite (v13.5.0)
+
+type MockStorage(List<String>)
+
+public fn empty() -> MockStorage {
+    MockStorage(List.empty())
+}
+
+impl StorageWrite for MockStorage {
+    put    = |_, bucket, key, body| Result.ok(Unit)
+    delete = |_, bucket, key|      Result.ok(Unit)
+}

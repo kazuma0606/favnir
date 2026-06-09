@@ -3277,6 +3277,7 @@ fn try_cmd_check_dir(dir: &Path) -> Result<(), usize> {
         postgres: None,
         run: None,
         lint: None,
+        context: None,
     });
     let files = collect_fav_files_recursive(dir);
     let resolver = make_resolver(Some(toml), Some(root));
@@ -23858,10 +23859,10 @@ mod v134000_tests {
     }
 
     // F-1: version bump
-    #[test]
-    fn version_is_13_4_0() {
-        assert_eq!(env!("CARGO_PKG_VERSION"), "13.4.0");
-    }
+    // #[test]
+    // fn version_is_13_4_0() {
+    //     assert_eq!(env!("CARGO_PKG_VERSION"), "13.4.0");
+    // }
 
     // B-1: context interfaces are registered in InterfaceRegistry
     #[test]
@@ -24018,5 +24019,133 @@ public fn run(ctx: WithDb) -> Result<Int, String> {
         let (errors2, _) = check_src(cap_src);
         let has_e0020 = errors2.iter().any(|e| e.code == "E0020");
         assert!(has_e0020, "expected E0020 for missing method on DbRead, errors: {:?}", errors2);
+    }
+}
+
+#[cfg(test)]
+mod v135000_tests {
+    use crate::frontend::parser::Parser;
+    use crate::middle::checker::Checker;
+
+    fn check_src(src: &str) -> (Vec<crate::middle::checker::TypeError>, Vec<crate::middle::checker::FavWarning>) {
+        let prog = Parser::parse_str(src, "test.fav").expect("parse error");
+        Checker::check_program(&prog)
+    }
+
+    // G-1: version bump
+    #[test]
+    fn version_is_13_5_0() {
+        assert_eq!(env!("CARGO_PKG_VERSION"), "13.5.0");
+    }
+
+    // G-2: AppCtx satisfies LoadCtx (fn expecting LoadCtx accepts AppCtx arg)
+    #[test]
+    fn app_ctx_satisfies_load_ctx() {
+        let src = r#"
+fn use_load(ctx: LoadCtx) -> Unit { () }
+public fn run(ctx: AppCtx) -> Unit {
+    use_load(ctx)
+}
+"#;
+        let (errors, _) = check_src(src);
+        let e: Vec<_> = errors.iter().filter(|e| e.code.starts_with('E')).collect();
+        assert!(e.is_empty(), "AppCtx should satisfy LoadCtx: {:?}", e);
+    }
+
+    // G-3: AppCtx satisfies WriteCtx
+    #[test]
+    fn app_ctx_satisfies_write_ctx() {
+        let src = r#"
+fn use_write(ctx: WriteCtx) -> Unit { () }
+public fn run(ctx: AppCtx) -> Unit {
+    use_write(ctx)
+}
+"#;
+        let (errors, _) = check_src(src);
+        let e: Vec<_> = errors.iter().filter(|e| e.code.starts_with('E')).collect();
+        assert!(e.is_empty(), "AppCtx should satisfy WriteCtx: {:?}", e);
+    }
+
+    // G-4: AppCtx satisfies MigrateCtx
+    #[test]
+    fn app_ctx_satisfies_migrate_ctx() {
+        let src = r#"
+fn use_migrate(ctx: MigrateCtx) -> Unit { () }
+public fn run(ctx: AppCtx) -> Unit {
+    use_migrate(ctx)
+}
+"#;
+        let (errors, _) = check_src(src);
+        let e: Vec<_> = errors.iter().filter(|e| e.code.starts_with('E')).collect();
+        assert!(e.is_empty(), "AppCtx should satisfy MigrateCtx: {:?}", e);
+    }
+
+    // G-5: MockDb satisfies DbRead
+    #[test]
+    fn mock_db_satisfies_db_read() {
+        let src = r#"
+fn use_db_read(db: DbRead) -> Unit { () }
+public fn run(db: MockDb) -> Unit {
+    use_db_read(db)
+}
+"#;
+        let (errors, _) = check_src(src);
+        let e: Vec<_> = errors.iter().filter(|e| e.code.starts_with('E')).collect();
+        assert!(e.is_empty(), "MockDb should satisfy DbRead: {:?}", e);
+    }
+
+    // G-6: MockDb satisfies DbWrite
+    #[test]
+    fn mock_db_satisfies_db_write() {
+        let src = r#"
+fn use_db_write(db: DbWrite) -> Unit { () }
+public fn run(db: MockDb) -> Unit {
+    use_db_write(db)
+}
+"#;
+        let (errors, _) = check_src(src);
+        let e: Vec<_> = errors.iter().filter(|e| e.code.starts_with('E')).collect();
+        assert!(e.is_empty(), "MockDb should satisfy DbWrite: {:?}", e);
+    }
+
+    // G-7: MockStorage satisfies StorageWrite
+    #[test]
+    fn mock_storage_satisfies_storage_write() {
+        let src = r#"
+fn use_storage(s: StorageWrite) -> Unit { () }
+public fn run(s: MockStorage) -> Unit {
+    use_storage(s)
+}
+"#;
+        let (errors, _) = check_src(src);
+        let e: Vec<_> = errors.iter().filter(|e| e.code.starts_with('E')).collect();
+        assert!(e.is_empty(), "MockStorage should satisfy StorageWrite: {:?}", e);
+    }
+
+    // G-8: AppCtx satisfies all 4 context interfaces (CommonCtx variant)
+    #[test]
+    fn app_ctx_satisfies_common_ctx() {
+        let src = r#"
+fn need_common(ctx: CommonCtx) -> Unit { () }
+public fn run(ctx: AppCtx) -> Unit {
+    need_common(ctx)
+}
+"#;
+        let (errors, _) = check_src(src);
+        let e: Vec<_> = errors.iter().filter(|e| e.code.starts_with('E')).collect();
+        assert!(e.is_empty(), "AppCtx should satisfy CommonCtx: {:?}", e);
+    }
+
+    // G-9: Ctx.build_raw is recognized as a builtin (no E0007)
+    #[test]
+    fn ctx_rune_build_accepted() {
+        let src = r#"
+public fn run(db_url: String, region: String, bucket: String) -> Result<String, String> {
+    Ctx.build_raw(db_url, region, bucket)
+}
+"#;
+        let (errors, _) = check_src(src);
+        let e: Vec<_> = errors.iter().filter(|e| e.code == "E0007").collect();
+        assert!(e.is_empty(), "Ctx.build_raw should not produce E0007: {:?}", e);
     }
 }

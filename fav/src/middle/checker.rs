@@ -540,6 +540,16 @@ impl InterfaceRegistry {
         storage_write.insert("delete".into(), mk(vec![s(), s()], ru()));
         self.register_interface("StorageWrite".into(), None, storage_write);
 
+        // v13.5.0: AppCtx satisfies all context interfaces; MockDb/MockStorage satisfy capability interfaces
+        let empty = HashMap::new();
+        self.register_impl("CommonCtx".into(),    "AppCtx".into(),     empty.clone(), true);
+        self.register_impl("LoadCtx".into(),      "AppCtx".into(),     empty.clone(), true);
+        self.register_impl("WriteCtx".into(),     "AppCtx".into(),     empty.clone(), true);
+        self.register_impl("MigrateCtx".into(),   "AppCtx".into(),     empty.clone(), true);
+        self.register_impl("DbRead".into(),       "MockDb".into(),     empty.clone(), true);
+        self.register_impl("DbWrite".into(),      "MockDb".into(),     empty.clone(), true);
+        self.register_impl("StorageWrite".into(), "MockStorage".into(), empty,        true);
+
         // v13.4.0: Context composite interfaces
         // CommonCtx — 全コンテキストの基底（io + env）
         let mut common_ctx = HashMap::new();
@@ -4095,6 +4105,12 @@ impl Checker {
                             for (p, a) in inst_params.iter().zip(arg_tys.iter()) {
                                 let ap = subst.apply(p);
                                 let aa = subst.apply(a);
+                                // v13.5.0: Named type satisfying an Interface via impl table
+                                if let (Type::Interface(iface_name, args), Type::Named(ty_name, _)) = (&ap, &aa) {
+                                    if args.is_empty() && self.interface_registry.is_implemented(iface_name, ty_name) {
+                                        continue; // compatible via impl table
+                                    }
+                                }
                                 match unify(&ap, &aa) {
                                     Ok(s) => subst = s.compose(subst),
                                     Err(msg) => {
@@ -7232,6 +7248,7 @@ abstract seq Pipeline {
             postgres: None,
             run: None,
             lint: None,
+            context: None,
         };
         let resolver = Arc::new(Mutex::new(Resolver::new(Some(toml), Some(root))));
         (resolver, dir)
@@ -7319,6 +7336,7 @@ abstract seq Pipeline {
             postgres: None,
             run: None,
             lint: None,
+            context: None,
         };
         let mut resolver = Resolver::new(Some(toml), Some(root));
         // Simulate a mid-load state: "cycle" is already in the loading set

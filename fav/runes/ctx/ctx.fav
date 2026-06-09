@@ -1,0 +1,13 @@
+// Ctx — context builder Rune (v13.5.0)
+// Provides Ctx.build (production) and Ctx.mock (tests).
+
+public fn build(env: Env) -> Result<String, String> {
+    chain db_url     <- env.require("DATABASE_URL")
+    chain aws_region <- env.require("AWS_REGION")
+    let bucket = Option.get_or(env.get("S3_BUCKET"), "default-bucket")
+    Ctx.build_raw(db_url, aws_region, bucket)
+}
+
+public fn mock(seed_rows: List<String>) -> String {
+    Ctx.mock_raw(seed_rows)
+}

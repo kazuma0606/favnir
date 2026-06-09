@@ -185,6 +185,10 @@ fn get_help_text(code: &str) -> &'static [&'static str] {
         "W007" => &[
             "the returned Result must be handled or propagated",
         ],
+        "W008" => &[
+            "pass the capability as a ctx argument: `ctx.io.println(...)`",
+            "ambient effects will become E0023 (error) in v14.0",
+        ],
         _ => &[],
     }
 }
@@ -3063,7 +3067,7 @@ fn collect_binding_types(file: &str) -> Vec<BindingInfo> {
 
 // ── fav check ─────────────────────────────────────────────────────────────────
 
-pub fn cmd_check(file: Option<&str>, no_warn: bool, legacy_check: bool, json: bool, show_types: bool, strict: bool) {
+pub fn cmd_check(file: Option<&str>, no_warn: bool, legacy_check: bool, json: bool, show_types: bool, strict: bool, ambient: bool, report: bool) {
     load_checkpoint_config_for_file(file);
     if let Some(path) = file {
         // Single-file mode
@@ -3124,6 +3128,44 @@ pub fn cmd_check(file: Option<&str>, no_warn: bool, legacy_check: bool, json: bo
             if w006_count > 0 {
                 eprintln!("error: --strict: {} W006 warning(s) treated as errors", w006_count);
                 process::exit(1);
+            }
+        }
+        if ambient {
+            let program = match Parser::parse_str(&source, path) {
+                Ok(p) => p,
+                Err(e) => {
+                    eprintln!("{}", e);
+                    process::exit(1);
+                }
+            };
+            let ambient_warnings = crate::lint::check_ambient_effects(&program);
+            if ambient_warnings.is_empty() {
+                println!("{}: no ambient effect calls found", path);
+            } else {
+                for w in &ambient_warnings {
+                    let line_num = w.span.line as usize;
+                    let col = w.span.col as usize;
+                    let source_line = source.lines().nth(line_num.saturating_sub(1)).unwrap_or("");
+                    let line_prefix = line_num.to_string();
+                    let padding = " ".repeat(line_prefix.len());
+                    let col_offset = " ".repeat(col.saturating_sub(1));
+                    let underline_len = if w.span.end > w.span.start { w.span.end - w.span.start } else { 1 };
+                    let max_len = source_line.len().saturating_sub(col.saturating_sub(1)).max(1);
+                    let underline = "^".repeat(underline_len.min(max_len).max(1));
+                    eprintln!(
+                        "warning[{}]: {}\n  --> {}:{}:{}\n{} |\n{} | {}\n{} | {}{}",
+                        w.code, w.message,
+                        w.span.file, w.span.line, w.span.col,
+                        padding, line_prefix, source_line, padding, col_offset, underline,
+                    );
+                    for hint in get_help_text(w.code) {
+                        eprintln!("  = help: {}", hint);
+                    }
+                }
+                eprintln!("\nambient: {} W008 warning(s)", ambient_warnings.len());
+                if report {
+                    write_ambient_report(path, &ambient_warnings);
+                }
             }
         }
     } else {
@@ -3244,6 +3286,37 @@ fn try_cmd_check_dir(dir: &Path) -> Result<(), usize> {
 pub fn cmd_check_dir(dir: &str) {
     if try_cmd_check_dir(Path::new(dir)).is_err() {
         process::exit(1);
+    }
+}
+
+/// Write W008 ambient effect audit report to `lab/audit/w008-ambient.md` (v13.1.0).
+fn write_ambient_report(source_file: &str, warnings: &[crate::lint::LintError]) {
+    use std::fmt::Write as FmtWrite;
+    let audit_dir = std::path::Path::new("lab").join("audit");
+    if let Err(e) = std::fs::create_dir_all(&audit_dir) {
+        eprintln!("warning: could not create lab/audit/: {}", e);
+        return;
+    }
+    let report_path = audit_dir.join("w008-ambient.md");
+
+    // Append or create
+    let mut content = std::fs::read_to_string(&report_path).unwrap_or_default();
+    let mut section = String::new();
+    let _ = writeln!(section, "\n## {}\n", source_file);
+    let _ = writeln!(section, "| 行 | 呼び出し |");
+    let _ = writeln!(section, "|---|---|");
+    for w in warnings {
+        let call = w.message
+            .trim_start_matches("ambient effect call — ")
+            .trim_end_matches(" called without ctx argument");
+        let _ = writeln!(section, "| {} | `{}` |", w.span.line, call);
+    }
+    let _ = writeln!(section, "\n合計: {} 件", warnings.len());
+    content.push_str(&section);
+
+    match std::fs::write(&report_path, &content) {
+        Ok(_) => eprintln!("report: written to {}", report_path.display()),
+        Err(e) => eprintln!("warning: could not write report: {}", e),
     }
 }
 
@@ -23342,7 +23415,7 @@ mod v130000_tests {
 
     #[test]
     fn version_is_13_0_0() {
-        assert_eq!(env!("CARGO_PKG_VERSION"), "13.0.0");
+        // Version bump is tested in v131000_tests::version_is_13_1_0.
     }
 
     /// fav2py pipeline.fav に W006 lint 警告がないこと（`fav lint --deny-warnings` 相当）
@@ -23389,5 +23462,94 @@ mod v130000_tests {
             "airgap/analyze.fav should have no lint warnings, got: {:?}",
             lints.iter().map(|l| format!("[{}] line {}", l.code, l.span.line)).collect::<Vec<_>>()
         );
+    }
+}
+
+// ── v131000 tests ─────────────────────────────────────────────────────────────
+#[cfg(test)]
+mod v131000_tests {
+    use crate::frontend::parser::Parser;
+    use crate::lint::check_ambient_effects;
+    use crate::middle::checker::Checker;
+
+    #[test]
+    fn version_is_13_1_0() {
+        assert_eq!(env!("CARGO_PKG_VERSION"), "13.1.0");
+    }
+
+    #[test]
+    fn interface_inheritance_parsed() {
+        let src = "interface CommonCtx { io: Io }\ninterface LoadCtx : CommonCtx { db: DbRead }";
+        let prog = Parser::parse_str(src, "test.fav").expect("parse error");
+        let load_ctx = prog.items.iter().find_map(|i| {
+            if let crate::ast::Item::InterfaceDecl(id) = i {
+                if id.name == "LoadCtx" { Some(id) } else { None }
+            } else { None }
+        }).expect("LoadCtx not found");
+        assert_eq!(load_ctx.super_interface.as_deref(), Some("CommonCtx"));
+    }
+
+    #[test]
+    fn interface_inheritance_field_access() {
+        // LoadCtx inherits CommonCtx's `io` method — lookup_declared_method should find it
+        let src = "interface CommonCtx { io: String }\ninterface LoadCtx : CommonCtx { db: String }";
+        let prog = Parser::parse_str(src, "test.fav").expect("parse error");
+        let (errors, _) = Checker::check_program(&prog);
+        assert!(errors.is_empty(), "unexpected errors: {:?}", errors.iter().map(|e| &e.message).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn e0019_circular_interface_detected() {
+        let src = "interface A : B { }\ninterface B : A { }";
+        let prog = Parser::parse_str(src, "test.fav").expect("parse error");
+        let (errors, _) = Checker::check_program(&prog);
+        let has_e0019 = errors.iter().any(|e| e.code == "E0019");
+        assert!(has_e0019, "expected E0019, got: {:?}", errors.iter().map(|e| &e.code).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn e0019_single_interface_no_error() {
+        let src = "interface Foo { bar: String }";
+        let prog = Parser::parse_str(src, "test.fav").expect("parse error");
+        let (errors, _) = Checker::check_program(&prog);
+        let has_e0019 = errors.iter().any(|e| e.code == "E0019");
+        assert!(!has_e0019, "unexpected E0019");
+    }
+
+    #[test]
+    fn w008_ambient_io_println_detected() {
+        let src = "fn run() -> Unit { bind _ <- IO.println(\"hi\") () }";
+        let prog = Parser::parse_str(src, "test.fav").expect("parse error");
+        let warnings = check_ambient_effects(&prog);
+        let has_w008 = warnings.iter().any(|w| w.code == "W008");
+        assert!(has_w008, "expected W008 for IO.println, got: {:?}", warnings);
+    }
+
+    #[test]
+    fn w008_ambient_postgres_raw_detected() {
+        let src = "fn run() -> Unit { bind _ <- Postgres.query_raw(\"SELECT 1\", \"[]\") () }";
+        let prog = Parser::parse_str(src, "test.fav").expect("parse error");
+        let warnings = check_ambient_effects(&prog);
+        let has_w008 = warnings.iter().any(|w| w.code == "W008");
+        assert!(has_w008, "expected W008 for Postgres.query_raw");
+    }
+
+    #[test]
+    fn w008_pure_list_no_warning() {
+        let src = "fn run(xs: List<String>) -> List<String> { List.map(xs, |x| x) }";
+        let prog = Parser::parse_str(src, "test.fav").expect("parse error");
+        let warnings = check_ambient_effects(&prog);
+        let has_w008 = warnings.iter().any(|w| w.code == "W008");
+        assert!(!has_w008, "List.map should not produce W008");
+    }
+
+    #[test]
+    fn w008_lint_program_does_not_include_w008() {
+        // W008 must NOT appear in lint_program (only in check_ambient_effects)
+        let src = "fn run() -> Unit { bind _ <- IO.println(\"hi\") () }";
+        let prog = Parser::parse_str(src, "test.fav").expect("parse error");
+        let lints = crate::lint::lint_program(&prog);
+        let has_w008 = lints.iter().any(|l| l.code == "W008");
+        assert!(!has_w008, "lint_program should not produce W008");
     }
 }

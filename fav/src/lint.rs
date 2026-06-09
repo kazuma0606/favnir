@@ -598,6 +598,125 @@ fn is_pascal_case(name: &str) -> bool {
         && chars.all(|c| c.is_ascii_alphanumeric())
 }
 
+// ── W008: ambient effect detection (v13.1.0) ──────────────────────────────────
+
+/// Namespaces whose direct calls constitute ambient effects.
+const AMBIENT_NAMESPACES: &[&str] = &[
+    "IO", "Postgres", "AWS", "Snowflake", "Http", "Grpc",
+    "Llm", "Queue", "Cache", "Slack", "Email",
+];
+
+/// Gen functions that have side effects (randomness).
+const AMBIENT_GEN_FNS: &[&str] = &["uuid_raw", "uuid_v7_raw", "nano_id"];
+
+/// `fav check --ambient` — detect ambient effect calls (ctx-less NS.fn(...) calls).
+/// Returns W008 warnings. NOT part of `lint_program` (use `fav check --ambient`).
+pub fn check_ambient_effects(program: &Program) -> Vec<LintError> {
+    let mut errors = Vec::new();
+    for item in &program.items {
+        match item {
+            Item::FnDef(fd) => collect_ambient_in_block(&fd.body, &mut errors),
+            Item::TrfDef(td) => collect_ambient_in_block(&td.body, &mut errors),
+            Item::FlwDef(_) => {} // seq definitions have no body expressions to scan
+            Item::ImplDef(id) => {
+                for m in &id.methods {
+                    collect_ambient_in_block(&m.body, &mut errors);
+                }
+            }
+            Item::TestDef(td) => collect_ambient_in_block(&td.body, &mut errors),
+            _ => {}
+        }
+    }
+    errors
+}
+
+fn collect_ambient_in_block(block: &Block, errors: &mut Vec<LintError>) {
+    for stmt in &block.stmts {
+        match stmt {
+            Stmt::Bind(b) => collect_ambient_in_expr(&b.expr, errors),
+            Stmt::Chain(c) => collect_ambient_in_expr(&c.expr, errors),
+            Stmt::Expr(e) => collect_ambient_in_expr(e, errors),
+            Stmt::Yield(y) => collect_ambient_in_expr(&y.expr, errors),
+            Stmt::ForIn(f) => {
+                collect_ambient_in_expr(&f.iter, errors);
+                collect_ambient_in_block(&f.body, errors);
+            }
+        }
+    }
+    collect_ambient_in_expr(&block.expr, errors);
+}
+
+fn collect_ambient_in_expr(expr: &Expr, errors: &mut Vec<LintError>) {
+    match expr {
+        // NS.method(args...) — potential ambient call
+        Expr::Apply(func, args, span) => {
+            if let Expr::FieldAccess(base, method_name, _) = func.as_ref() {
+                if let Expr::Ident(ns, _) = base.as_ref() {
+                    let is_ambient = AMBIENT_NAMESPACES.contains(&ns.as_str())
+                        || (ns == "Gen" && AMBIENT_GEN_FNS.contains(&method_name.as_str()));
+                    if is_ambient {
+                        errors.push(LintError::new(
+                            "W008",
+                            format!(
+                                "ambient effect call — `{}.{}` called without ctx argument",
+                                ns, method_name
+                            ),
+                            span.clone(),
+                        ));
+                    }
+                }
+            }
+            collect_ambient_in_expr(func, errors);
+            for a in args {
+                collect_ambient_in_expr(a, errors);
+            }
+        }
+        Expr::Block(b) => collect_ambient_in_block(b, errors),
+        Expr::If(cond, then, else_, _) => {
+            collect_ambient_in_expr(cond, errors);
+            collect_ambient_in_block(then, errors);
+            if let Some(eb) = else_ {
+                collect_ambient_in_block(eb, errors);
+            }
+        }
+        Expr::Match(scrutinee, arms, _) => {
+            collect_ambient_in_expr(scrutinee, errors);
+            for arm in arms {
+                collect_ambient_in_expr(&arm.body, errors);
+            }
+        }
+        Expr::Pipeline(steps, _) => {
+            for s in steps {
+                collect_ambient_in_expr(s, errors);
+            }
+        }
+        Expr::FieldAccess(obj, _, _) => collect_ambient_in_expr(obj, errors),
+        Expr::BinOp(_, l, r, _) => {
+            collect_ambient_in_expr(l, errors);
+            collect_ambient_in_expr(r, errors);
+        }
+        Expr::Closure(_, body, _) => collect_ambient_in_expr(body, errors),
+        Expr::Collect(b, _) => collect_ambient_in_block(b, errors),
+        Expr::EmitExpr(inner, _) => collect_ambient_in_expr(inner, errors),
+        Expr::Question(inner, _) => collect_ambient_in_expr(inner, errors),
+        Expr::AssertMatches(e, _, _) => collect_ambient_in_expr(e, errors),
+        Expr::TypeApply(f, _, _) => collect_ambient_in_expr(f, errors),
+        Expr::RecordConstruct(_, fields, _) => {
+            for (_, v) in fields {
+                collect_ambient_in_expr(v, errors);
+            }
+        }
+        Expr::FString(parts, _) => {
+            for part in parts {
+                if let FStringPart::Expr(e) = part {
+                    collect_ambient_in_expr(e, errors);
+                }
+            }
+        }
+        Expr::Lit(..) | Expr::Ident(..) => {}
+    }
+}
+
 // ── tests ─────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]

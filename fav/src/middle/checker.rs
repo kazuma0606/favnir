@@ -537,29 +537,38 @@ impl InterfaceRegistry {
             .contains_key(&(interface_name.to_string(), type_name.to_string()))
     }
 
+    /// Look up the method type from the interface *declaration* (canonical type, not impl body).
+    /// Traverses the super_interface chain (v13.1.0).
+    pub fn lookup_declared_method(&self, interface_name: &str, method_name: &str) -> Option<&Type> {
+        let mut current = interface_name.to_string();
+        for _ in 0..=16 {
+            let def = self.interfaces.get(&current)?;
+            if let Some(ty) = def.methods.get(method_name) {
+                return Some(ty);
+            }
+            match def.super_interface.clone() {
+                Some(sup) => current = sup,
+                None => return None,
+            }
+        }
+        None
+    }
+
     pub fn lookup_method(
         &self,
         interface_name: &str,
         type_name: &str,
         method_name: &str,
     ) -> Option<&Type> {
-        self.impls
+        if let Some(entry) = self
+            .impls
             .get(&(interface_name.to_string(), type_name.to_string()))
-            .and_then(|entry| entry.methods.get(method_name))
-            .or_else(|| {
-                self.interfaces
-                    .get(interface_name)
-                    .and_then(|def| def.methods.get(method_name))
-            })
-    }
-
-    /// Look up the method type from the interface *declaration* (canonical type, not impl body).
-    /// Used for method dispatch to get the correct callable type with proper param counts.
-    pub fn lookup_declared_method(&self, interface_name: &str, method_name: &str) -> Option<&Type> {
-        self.interfaces
-            .get(interface_name)?
-            .methods
-            .get(method_name)
+        {
+            if let Some(ty) = entry.methods.get(method_name) {
+                return Some(ty);
+            }
+        }
+        self.lookup_declared_method(interface_name, method_name)
     }
 }
 
@@ -863,6 +872,7 @@ impl Checker {
         for item in &program.items {
             c.check_item(item);
         }
+        c.detect_interface_cycles(program);
         (c.errors, c.warnings)
     }
 
@@ -878,6 +888,7 @@ impl Checker {
         for item in &program.items {
             self.check_item(item);
         }
+        self.detect_interface_cycles(program);
         (
             std::mem::take(&mut self.errors),
             std::mem::take(&mut self.warnings),
@@ -960,6 +971,7 @@ impl Checker {
         for item in &program.items {
             c.check_item(item);
         }
+        c.detect_interface_cycles(program);
         let exports = c.collect_export_scope(program);
         (c.errors, c.warnings, exports)
     }
@@ -2239,6 +2251,42 @@ impl Checker {
         }
     }
 
+    /// E0019: detect circular interface inheritance after all interfaces are registered.
+    fn detect_interface_cycles(&mut self, program: &Program) {
+        let mut reported: HashSet<String> = HashSet::new();
+        for item in &program.items {
+            let Item::InterfaceDecl(id) = item else { continue };
+            if reported.contains(&id.name) {
+                continue;
+            }
+            let mut visited: Vec<String> = vec![id.name.clone()];
+            let mut current = id.super_interface.clone();
+            for _ in 0..=16 {
+                let Some(sup) = current else { break };
+                if visited.contains(&sup) {
+                    if !reported.contains(&id.name) {
+                        reported.insert(id.name.clone());
+                        self.type_error(
+                            "E0019",
+                            format!(
+                                "circular interface inheritance detected: `{}` → `{}`",
+                                id.name, sup
+                            ),
+                            &id.span,
+                        );
+                    }
+                    break;
+                }
+                visited.push(sup.clone());
+                current = self
+                    .interface_registry
+                    .interfaces
+                    .get(&sup)
+                    .and_then(|d| d.super_interface.clone());
+            }
+        }
+    }
+
     fn check_interface_decl(&mut self, id: &InterfaceDecl) {
         if let Some(super_name) = &id.super_interface {
             if !self.interface_registry.interfaces.contains_key(super_name) {
@@ -2247,7 +2295,8 @@ impl Checker {
                     format!("undefined super interface `{}`", super_name),
                     &id.span,
                 );
-                return;
+                // Still register the interface so that cycle detection (E0019)
+                // and dependent declarations can proceed.
             }
         }
 

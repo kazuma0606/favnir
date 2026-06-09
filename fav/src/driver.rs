@@ -70,7 +70,7 @@ fn format_diagnostic(source: &str, error: &crate::middle::checker::TypeError) ->
         .max(1);
     let underline = "^".repeat(token_len.min(max_len).max(1));
 
-    format!(
+    let mut out = format!(
         "error[{}]: {}\n  --> {}:{}:{}\n{} |\n{} | {}\n{} | {}{}",
         error.code,
         error.message,
@@ -83,7 +83,11 @@ fn format_diagnostic(source: &str, error: &crate::middle::checker::TypeError) ->
         padding,
         col_offset,
         underline,
-    )
+    );
+    for hint in get_help_text(error.code) {
+        out.push_str(&format!("\n  = help: {}", hint));
+    }
+    out
 }
 
 fn format_warning(source: &str, warning: &crate::middle::checker::TypeWarning) -> String {
@@ -106,7 +110,7 @@ fn format_warning(source: &str, warning: &crate::middle::checker::TypeWarning) -
         .max(1);
     let underline = "^".repeat(token_len.min(max_len).max(1));
 
-    format!(
+    let mut out = format!(
         "warning[{}]: {}\n  --> {}:{}:{}\n{} |\n{} | {}\n{} | {}{}",
         warning.code,
         warning.message,
@@ -119,7 +123,11 @@ fn format_warning(source: &str, warning: &crate::middle::checker::TypeWarning) -
         padding,
         col_offset,
         underline,
-    )
+    );
+    for hint in get_help_text(warning.code) {
+        out.push_str(&format!("\n  = help: {}", hint));
+    }
+    out
 }
 
 fn render_warnings(
@@ -131,6 +139,53 @@ fn render_warnings(
         Vec::new()
     } else {
         warnings.iter().map(|w| format_warning(source, w)).collect()
+    }
+}
+
+/// Returns static help hints for a given error/warning code (v12.10.0).
+fn get_help_text(code: &str) -> &'static [&'static str] {
+    match code {
+        "E0001" => &[
+            "check the variable name for typos",
+            "introduce the variable with `bind x <- expr`",
+        ],
+        "E0007" => &[
+            "see available primitives: `fav doc --builtins`",
+        ],
+        "E0008" => &[
+            "check the number of arguments matches the function signature",
+        ],
+        "E0009" => &[
+            "the declared return type and the inferred body type must match",
+            "add a type annotation or adjust the return value",
+        ],
+        "E0013" => &[
+            "fix the `where` validator expression",
+        ],
+        "E0014" => &[
+            "add the missing `fn` declaration to the interface",
+        ],
+        "E0015" => &[
+            "implement all required `fn` entries listed in the interface",
+        ],
+        "E0018" => &[
+            "use a different name: `bind x2 <- ...`",
+            "or discard the value: `bind _ <- ...`",
+        ],
+        "W001" => &[
+            "prefix the name with `_` to suppress: `_unused`",
+        ],
+        "W004" => &[
+            "use `chain x <- expr` to propagate errors automatically",
+        ],
+        "W006" => &[
+            "use `chain _ <- expr` to propagate errors automatically",
+            "or handle explicitly: `match expr { Ok(_) => ... Err(e) => ... }`",
+        ],
+        "W007" => &[
+            "the returned Result must be handled or propagated",
+        ],
+        _ => &[],
     }
 }
 
@@ -3008,7 +3063,7 @@ fn collect_binding_types(file: &str) -> Vec<BindingInfo> {
 
 // ── fav check ─────────────────────────────────────────────────────────────────
 
-pub fn cmd_check(file: Option<&str>, no_warn: bool, legacy_check: bool, json: bool, show_types: bool) {
+pub fn cmd_check(file: Option<&str>, no_warn: bool, legacy_check: bool, json: bool, show_types: bool, strict: bool) {
     load_checkpoint_config_for_file(file);
     if let Some(path) = file {
         // Single-file mode
@@ -3062,6 +3117,14 @@ pub fn cmd_check(file: Option<&str>, no_warn: bool, legacy_check: bool, json: bo
         }
         for warning in render_warnings(&source, &warnings, no_warn) {
             eprintln!("{}", warning);
+        }
+        if strict {
+            let bindings = collect_binding_types(path);
+            let w006_count = bindings.iter().filter(|b| b.warning.as_deref() == Some("W006")).count();
+            if w006_count > 0 {
+                eprintln!("error: --strict: {} W006 warning(s) treated as errors", w006_count);
+                process::exit(1);
+            }
         }
     } else {
         // Project mode
@@ -3148,6 +3211,7 @@ fn try_cmd_check_dir(dir: &Path) -> Result<(), usize> {
         snowflake: None,
         postgres: None,
         run: None,
+        lint: None,
     });
     let files = collect_fav_files_recursive(dir);
     let resolver = make_resolver(Some(toml), Some(root));
@@ -8325,13 +8389,24 @@ pub fn cmd_fmt(file: Option<&str>, check: bool) {
 
 // ── fav lint ──────────────────────────────────────────────────────────────────
 
-pub fn cmd_lint(file: Option<&str>, warn_only: bool) {
+pub fn cmd_lint(file: Option<&str>, warn_only: bool, deny_warnings: bool) {
     use crate::lint::lint_program;
+
+    // Load fav.toml lint config (v12.10.0): allow / warn_as_error lists.
+    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    let lint_config = FavToml::find_root(&cwd)
+        .and_then(|root| FavToml::load(&root))
+        .and_then(|t| t.lint);
+    let allow_codes: Vec<String> = lint_config.as_ref()
+        .and_then(|c| c.allow.clone())
+        .unwrap_or_default();
+    let warn_as_error_codes: Vec<String> = lint_config.as_ref()
+        .and_then(|c| c.warn_as_error.clone())
+        .unwrap_or_default();
 
     let paths: Vec<String> = if let Some(f) = file {
         vec![f.to_string()]
     } else {
-        let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
         let root = FavToml::find_root(&cwd).unwrap_or_else(|| {
             eprintln!("error: no fav.toml found; pass a file path or run in project root");
             process::exit(1);
@@ -8347,6 +8422,7 @@ pub fn cmd_lint(file: Option<&str>, warn_only: bool) {
     };
 
     let mut total_warnings = 0usize;
+    let mut has_error_level = false;
 
     for path in &paths {
         let source = load_file(path);
@@ -8355,7 +8431,12 @@ pub fn cmd_lint(file: Option<&str>, warn_only: bool) {
             process::exit(1);
         });
 
-        let lints = lint_program(&program);
+        let raw_lints = lint_program(&program);
+        // Apply [lint] allow filter
+        let lints: Vec<_> = raw_lints.iter()
+            .filter(|l| !allow_codes.contains(&l.code.to_string()))
+            .collect();
+
         if lints.is_empty() {
             println!("{}: ok", path);
         } else {
@@ -8390,6 +8471,12 @@ pub fn cmd_lint(file: Option<&str>, warn_only: bool) {
                     col_offset,
                     underline,
                 );
+                for hint in get_help_text(lint.code) {
+                    eprintln!("  = help: {}", hint);
+                }
+                if warn_as_error_codes.contains(&lint.code.to_string()) {
+                    has_error_level = true;
+                }
             }
             total_warnings += lints.len();
         }
@@ -8401,7 +8488,8 @@ pub fn cmd_lint(file: Option<&str>, warn_only: bool) {
             total_warnings,
             if total_warnings == 1 { "" } else { "s" }
         );
-        if !warn_only {
+        let should_exit = deny_warnings || !warn_only || has_error_level;
+        if should_exit {
             process::exit(1);
         }
     }
@@ -23209,6 +23297,39 @@ mod v12800_tests {
 mod v12900_tests {
     #[test]
     fn version_is_12_9_0() {
-        assert_eq!(env!("CARGO_PKG_VERSION"), "12.9.0");
+        // Version bump is tested in v121000_tests::version_is_12_10_0.
+    }
+}
+
+// ── v121000 tests ─────────────────────────────────────────────────────────────
+#[cfg(test)]
+mod v121000_tests {
+    use super::get_help_text;
+
+    #[test]
+    fn version_is_12_10_0() {
+        assert_eq!(env!("CARGO_PKG_VERSION"), "12.10.0");
+    }
+
+    #[test]
+    fn help_text_e0001_present() {
+        let hints = get_help_text("E0001");
+        assert!(!hints.is_empty(), "expected help text for E0001");
+    }
+
+    #[test]
+    fn help_text_w006_present() {
+        let hints = get_help_text("W006");
+        assert!(
+            hints.iter().any(|h| h.contains("chain")),
+            "expected W006 hint to contain 'chain', got: {:?}",
+            hints
+        );
+    }
+
+    #[test]
+    fn help_text_unknown_is_empty() {
+        let hints = get_help_text("E9999");
+        assert!(hints.is_empty(), "unknown code should return empty slice");
     }
 }

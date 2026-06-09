@@ -141,6 +141,15 @@ impl Default for DeployConfig {
     }
 }
 
+/// `[lint]` section of fav.toml (v12.10.0).
+#[derive(Debug, Clone)]
+pub struct LintTomlConfig {
+    /// Lint codes to treat as errors (exit 1 even with `--warn-only`).
+    pub warn_as_error: Option<Vec<String>>,
+    /// Lint codes to suppress entirely.
+    pub allow: Option<Vec<String>>,
+}
+
 /// `[run]` section of fav.toml (v12.5.0).
 #[derive(Debug, Clone)]
 pub struct RunTomlConfig {
@@ -186,6 +195,8 @@ pub struct FavToml {
     pub postgres: Option<PostgresTomlConfig>,
     /// Optional run configuration (v12.5.0).
     pub run: Option<RunTomlConfig>,
+    /// Optional lint configuration (v12.10.0).
+    pub lint: Option<LintTomlConfig>,
 }
 
 impl FavToml {
@@ -245,6 +256,7 @@ fn parse_fav_toml(content: &str) -> FavToml {
     let mut snowflake_cfg: Option<SnowflakeTomlConfig> = None;
     let mut postgres_cfg: Option<PostgresTomlConfig> = None;
     let mut run_cfg: Option<RunTomlConfig> = None;
+    let mut lint_cfg: Option<LintTomlConfig> = None;
     let mut section = "";
 
     for line in content.lines() {
@@ -488,6 +500,28 @@ fn parse_fav_toml(content: &str) -> FavToml {
                 }
                 run_cfg = Some(current);
             }
+            "lint" => {
+                let mut current = lint_cfg.take().unwrap_or(LintTomlConfig {
+                    warn_as_error: None,
+                    allow: None,
+                });
+                if let Some((key, val)) = parse_kv(trimmed) {
+                    // Parse comma-separated list: warn_as_error = ["W006", "W007"]
+                    let codes: Vec<String> = val
+                        .trim_start_matches('[')
+                        .trim_end_matches(']')
+                        .split(',')
+                        .map(|s| s.trim().trim_matches('"').to_string())
+                        .filter(|s| !s.is_empty())
+                        .collect();
+                    match key {
+                        "warn_as_error" => current.warn_as_error = Some(codes),
+                        "allow"         => current.allow         = Some(codes),
+                        _ => {}
+                    }
+                }
+                lint_cfg = Some(current);
+            }
             _ => {}
         }
     }
@@ -511,6 +545,7 @@ fn parse_fav_toml(content: &str) -> FavToml {
         snowflake: snowflake_cfg,
         postgres: postgres_cfg,
         run: run_cfg,
+        lint: lint_cfg,
     }
 }
 

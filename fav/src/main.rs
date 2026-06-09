@@ -414,6 +414,7 @@ fn main_impl() {
             let mut legacy_check = false;
             let mut json = false;
             let mut show_types = false;
+            let mut strict = false;
             let mut file: Option<&str> = None;
             let mut dir: Option<&str> = None;
             let mut sample: Option<usize> = None;
@@ -434,6 +435,10 @@ fn main_impl() {
                     }
                     "--show-types" => {
                         show_types = true;
+                        i += 1;
+                    }
+                    "--strict" => {
+                        strict = true;
                         i += 1;
                     }
                     "--dir" => {
@@ -470,7 +475,7 @@ fn main_impl() {
             } else if let Some(dir) = dir {
                 driver::cmd_check_dir(dir);
             } else {
-                cmd_check(file, no_warn, legacy_check, json, show_types);
+                cmd_check(file, no_warn, legacy_check, json, show_types, strict);
             }
         }
 
@@ -983,6 +988,7 @@ fn main_impl() {
 
         Some("lint") => {
             let mut warn_only = false;
+            let mut deny_warnings = false;
             let mut file: Option<String> = None;
             let mut i = 2usize;
             while i < args.len() {
@@ -991,13 +997,17 @@ fn main_impl() {
                         warn_only = true;
                         i += 1;
                     }
+                    "--deny-warnings" => {
+                        deny_warnings = true;
+                        i += 1;
+                    }
                     other => {
                         file = Some(other.to_string());
                         i += 1;
                     }
                 }
             }
-            cmd_lint(file.as_deref(), warn_only);
+            cmd_lint(file.as_deref(), warn_only, deny_warnings);
         }
 
         Some("doc") => {

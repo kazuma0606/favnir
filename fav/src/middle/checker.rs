@@ -7020,6 +7020,7 @@ abstract seq Pipeline {
             snowflake: None,
             postgres: None,
             run: None,
+            lint: None,
         };
         let resolver = Arc::new(Mutex::new(Resolver::new(Some(toml), Some(root))));
         (resolver, dir)
@@ -7106,6 +7107,7 @@ abstract seq Pipeline {
             snowflake: None,
             postgres: None,
             run: None,
+            lint: None,
         };
         let mut resolver = Resolver::new(Some(toml), Some(root));
         // Simulate a mid-load state: "cycle" is already in the loading set

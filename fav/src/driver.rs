@@ -8803,9 +8803,7 @@ fn scaffold_stage(name: &str, in_type: &str, out_type: &str, effect: Option<&str
         None => String::new(),
     };
     let body = match effect {
-        Some(_) => format!(
-            "    bind _result <- IO.println(input)\n    input\n"
-        ),
+        Some(_) => "    bind _result <- IO.println(input)\n    input\n".to_string(),
         None => "    input\n".to_string(),
     };
     format!(

@@ -66,8 +66,9 @@ mod value;
 use driver::{
     cmd_bench, cmd_build, cmd_build_schema, cmd_bundle, cmd_check, cmd_check_with_sample,
     cmd_checkpoint_list, cmd_checkpoint_reset, cmd_checkpoint_set, cmd_checkpoint_show,
-    cmd_db_migrate, cmd_db_migrate_rollback, cmd_db_migrate_status, cmd_deploy, cmd_doc, cmd_docs,
-    cmd_exec, cmd_explain, cmd_explain_compiler, cmd_explain_diff, cmd_explain_error,
+    cmd_db_migrate, cmd_db_migrate_rollback, cmd_db_migrate_status, cmd_deploy, cmd_doc,
+    cmd_doc_builtins, cmd_docs,
+    cmd_exec, cmd_explain, cmd_explain_code, cmd_explain_compiler, cmd_explain_diff, cmd_explain_error,
     cmd_explain_error_list, cmd_explain_error_list_json, cmd_explain_lineage, cmd_fmt, cmd_graph,
     cmd_infer, cmd_infer_postgres, cmd_infer_proto, cmd_infer_snowflake, cmd_install, cmd_lint, cmd_migrate, cmd_new,
     cmd_profile, cmd_transpile,
@@ -570,6 +571,17 @@ fn main_impl() {
                     }
                 }
             }
+            // fav explain <code>  e.g. E0018 / W006
+            if let Some(code) = args.get(2) {
+                let c = code.as_str();
+                let is_error_code = c.len() >= 2
+                    && (c.starts_with('E') || c.starts_with('W'))
+                    && c[1..].chars().all(|ch| ch.is_ascii_digit());
+                if is_error_code {
+                    cmd_explain_code(c);
+                    return;
+                }
+            }
             cmd_explain(file, schema, &format, &focus);
         }
 
@@ -980,6 +992,18 @@ fn main_impl() {
         }
 
         Some("doc") => {
+            // fav doc --builtins [--format json|markdown] [--out <file>]
+            if args.iter().any(|a| a == "--builtins") {
+                let format = args.windows(2)
+                    .find(|w| w[0] == "--format")
+                    .map(|w| w[1].as_str())
+                    .unwrap_or("markdown");
+                let out = args.windows(2)
+                    .find(|w| w[0] == "--out")
+                    .map(|w| w[1].as_str());
+                cmd_doc_builtins(format, out);
+                return;
+            }
             let mut path = ".".to_string();
             let mut out_dir = "docs".to_string();
             let mut i = 2usize;

@@ -8381,6 +8381,394 @@ pub fn cmd_lint(file: Option<&str>, warn_only: bool) {
     }
 }
 
+// ── fav doc --builtins (v12.7.0) ─────────────────────────────────────────────
+
+#[derive(serde::Serialize)]
+struct BuiltinPrimitive {
+    namespace:      &'static str,
+    name:           &'static str,
+    signature:      &'static str,
+    effects:        Vec<&'static str>,
+    returns_result: bool,
+    description:    &'static str,
+}
+
+fn builtin_primitives() -> Vec<BuiltinPrimitive> {
+    macro_rules! p {
+        ($ns:expr, $name:expr, $sig:expr, [$($eff:expr),*], $ret:expr, $desc:expr) => {
+            BuiltinPrimitive {
+                namespace: $ns, name: $name, signature: $sig,
+                effects: vec![$($eff),*], returns_result: $ret, description: $desc,
+            }
+        };
+    }
+    vec![
+        // IO
+        p!("IO","IO.println","(value: String) -> Unit",["!IO"],false,
+           "標準出力に文字列を出力する（改行付き）。"),
+        p!("IO","IO.print","(value: String) -> Unit",["!IO"],false,
+           "標準出力に文字列を出力する（改行なし）。"),
+        p!("IO","IO.println_int","(value: Int) -> Unit",["!IO"],false,
+           "整数を標準出力に出力する（改行付き）。"),
+        p!("IO","IO.println_float","(value: Float) -> Unit",["!IO"],false,
+           "浮動小数点数を標準出力に出力する（改行付き）。"),
+        p!("IO","IO.println_bool","(value: Bool) -> Unit",["!IO"],false,
+           "真偽値を標準出力に出力する（改行付き）。"),
+        p!("IO","IO.read_line","() -> String",["!IO"],false,
+           "標準入力から 1 行読み込む。"),
+        p!("IO","IO.read_file_raw","(path: String) -> Result<String, String>",["!IO"],true,
+           "ファイルを UTF-8 文字列として読み込む。失敗時は Err を返す。"),
+        p!("IO","IO.write_file_raw","(path: String, content: String) -> Result<Unit, String>",["!IO"],true,
+           "文字列をファイルに書き込む。失敗時は Err を返す。"),
+        p!("IO","IO.make_dir_raw","(path: String) -> Result<Unit, String>",["!IO"],true,
+           "ディレクトリを再帰的に作成する。失敗時は Err を返す。"),
+        p!("IO","IO.argv","() -> List<String>",["!IO"],false,
+           "コマンドライン引数（`--` 以降）を返す。"),
+        p!("IO","IO.timestamp","() -> Int",["!IO"],false,
+           "現在の UNIX タイムスタンプ（秒）を返す。"),
+        p!("IO","IO.sleep_ms","(ms: Int) -> Unit",["!IO"],false,
+           "指定ミリ秒スリープする。"),
+        // Csv
+        p!("Csv","Csv.parse_raw","(text: String, sep: String, header: Bool) -> Result<List<Record>, String>",["!IO"],true,
+           "CSV テキストを解析してレコードのリストを返す。header=true の場合、1 行目をフィールド名として使用する。"),
+        p!("Csv","Csv.to_string_raw","(rows: List<Record>, sep: String, header: Bool) -> String",[],false,
+           "レコードのリストを CSV 文字列にシリアライズする。"),
+        // Schema
+        p!("Schema","Schema.to_json_array","(rows: List<Record>, type_name: String) -> String",[],false,
+           "型付きレコードのリストを JSON 配列文字列にシリアライズする。"),
+        p!("Schema","Schema.adapt","(row: Record, type_name: String) -> Result<Record, String>",[],true,
+           "レコードを指定型にキャストする。型不一致は Err を返す。"),
+        p!("Schema","Schema.validate","(row: Record, type_name: String) -> Result<Unit, String>",[],true,
+           "レコードが指定型のスキーマを満たすか検証する。"),
+        // Json
+        p!("Json","Json.encode_raw","(value: Any) -> String",[],false,
+           "任意の値を JSON 文字列にシリアライズする。"),
+        p!("Json","Json.decode_raw","(json: String) -> Result<Any, String>",[],true,
+           "JSON 文字列をデシリアライズする。パース失敗は Err を返す。"),
+        p!("Json","Json.pretty_raw","(json: String) -> String",[],false,
+           "JSON 文字列をインデント付きの整形済み JSON に変換する。"),
+        // Gen
+        p!("Gen","Gen.uuid","() -> String",[],false,
+           "UUID v4 の文字列を生成する。"),
+        p!("Gen","Gen.uuid_v7","() -> String",[],false,
+           "UUID v7（時刻順）の文字列を生成する。"),
+        p!("Gen","Gen.nano_id","() -> String",[],false,
+           "NanoID（URL-safe ランダム ID）を生成する。"),
+        p!("Gen","Gen.one_raw","(type_name: String) -> Result<Any, String>",[],true,
+           "指定型のランダムな値を 1 件生成する。型名が不明な場合は Err を返す。"),
+        p!("Gen","Gen.hint_one_raw","(type_name: String, hints: String) -> Result<Any, String>",[],true,
+           "ヒント付きでランダムな値を生成する。hints は JSON オブジェクト文字列。"),
+        // AWS
+        p!("AWS","AWS.s3_get_raw","(bucket: String, key: String) -> Result<String, String>",["!AWS"],true,
+           "S3 オブジェクトを UTF-8 文字列として取得する。"),
+        p!("AWS","AWS.s3_put_raw","(bucket: String, key: String, body: String) -> Result<Unit, String>",["!AWS"],true,
+           "S3 オブジェクトに文字列を書き込む。"),
+        p!("AWS","AWS.sqs_send_raw","(url: String, body: String) -> Result<Unit, String>",["!AWS"],true,
+           "SQS キューにメッセージを送信する。"),
+        p!("AWS","AWS.sqs_receive_raw","(url: String) -> Result<String, String>",["!AWS"],true,
+           "SQS キューからメッセージを受信する（JSON 配列文字列）。"),
+        // Postgres
+        p!("Postgres","Postgres.execute_raw","(sql: String, params: String) -> Result<Unit, String>",["!Postgres"],true,
+           "SQL を実行する（SELECT 以外）。params は JSON 配列文字列。"),
+        p!("Postgres","Postgres.query_raw","(sql: String, params: String) -> Result<String, String>",["!Postgres"],true,
+           "SELECT クエリを実行し、結果を JSON 配列文字列として返す。"),
+        p!("Postgres","Postgres.infer_table_raw","(table: String) -> Result<String, String>",["!Postgres"],true,
+           "テーブルのカラム定義を information_schema から取得し JSON 文字列で返す。"),
+        // Snowflake
+        p!("Snowflake","Snowflake.execute_raw","(sql: String, params: String) -> Result<Unit, String>",["!Snowflake"],true,
+           "Snowflake で SQL を実行する（SELECT 以外）。params は JSON 配列文字列。"),
+        p!("Snowflake","Snowflake.query_raw","(sql: String, params: String) -> Result<String, String>",["!Snowflake"],true,
+           "Snowflake で SELECT クエリを実行し、結果を JSON 配列文字列として返す。"),
+        // Http
+        p!("Http","Http.get_raw","(url: String, headers: String) -> Result<String, String>",["!Http"],true,
+           "HTTP GET リクエストを送信し、レスポンスボディを返す。headers は JSON オブジェクト文字列。"),
+        p!("Http","Http.post_raw","(url: String, headers: String, body: String) -> Result<String, String>",["!Http"],true,
+           "HTTP POST リクエストを送信し、レスポンスボディを返す。"),
+        p!("Http","Http.serve_raw","(port: Int, routes: List<Map<String,String>>, handler: String) -> Unit",["!Http"],false,
+           "HTTP サーバーを起動する。handler は stage 名を指す文字列。"),
+        // Llm
+        p!("Llm","Llm.complete_raw","(prompt: String) -> Result<String, String>",["!Llm"],true,
+           "LLM にプロンプトを送り補完テキストを返す。"),
+        p!("Llm","Llm.chat_raw","(messages: String) -> Result<String, String>",["!Llm"],true,
+           "チャット形式で LLM に問い合わせる。messages は JSON 配列文字列。"),
+        p!("Llm","Llm.extract_raw","(schema: String, text: String) -> Result<String, String>",["!Llm"],true,
+           "テキストから schema に沿った構造データを抽出し JSON 文字列を返す。"),
+    ]
+}
+
+fn render_builtins_markdown(primitives: &[BuiltinPrimitive]) -> String {
+    let mut out = String::from("# Favnir Built-in Primitives\n\n");
+    let mut current_ns = "";
+    for p in primitives {
+        if p.namespace != current_ns {
+            if !current_ns.is_empty() {
+                out.push_str("---\n\n");
+            }
+            current_ns = p.namespace;
+            out.push_str(&format!("## {}\n\n", p.namespace));
+        }
+        out.push_str(&format!("### {}\n", p.name));
+        if p.effects.is_empty() {
+            out.push_str(&format!("`{}`\n\n", p.signature));
+        } else {
+            out.push_str(&format!("`{}` {}\n\n", p.signature, p.effects.join(" ")));
+        }
+        out.push_str(p.description);
+        out.push_str("\n\n");
+    }
+    out
+}
+
+pub fn cmd_doc_builtins(format: &str, out: Option<&str>) {
+    let prims = builtin_primitives();
+    let content = if format == "json" {
+        serde_json::to_string_pretty(&prims).expect("builtin primitives json serialization")
+    } else {
+        render_builtins_markdown(&prims)
+    };
+    match out {
+        Some(path) => {
+            std::fs::write(path, &content)
+                .unwrap_or_else(|e| { eprintln!("error: {}", e); process::exit(1); });
+        }
+        None => print!("{}", content),
+    }
+}
+
+// ── fav explain <code> (v12.7.0) ─────────────────────────────────────────────
+
+pub(crate) fn get_explain_text(code: &str) -> Option<&'static str> {
+    match code {
+        "E0001" => Some(
+"E0001: Undefined variable
+
+変数が定義される前に使用されています。
+スペルミスか、定義より前に参照しているケースが多いです。
+
+修正例:
+  誤: bind result <- transform(rows)   ← rows が未定義
+
+  正: bind rows   <- load_data()
+      bind result <- transform(rows)   ← OK
+
+関連: E0007（未定義関数）"
+        ),
+        "E0007" => Some(
+"E0007: Undefined function
+
+呼び出している関数が見つかりません。
+Namespace の指定ミス、import 漏れが原因のことが多いです。
+
+修正例:
+  誤: bind r <- Csv.Parse(text)    ← 大文字・スペルミス
+
+  正: bind r <- Csv.parse_raw(text, \",\", true)   ← OK
+
+関連: E0001（未定義変数）"
+        ),
+        "E0008" => Some(
+"E0008: Wrong number of arguments
+
+関数呼び出しの引数の数が定義と一致しません。
+
+修正例:
+  誤: bind r <- Csv.parse_raw(text)       ← 引数が 1 つ（3 つ必要）
+
+  正: bind r <- Csv.parse_raw(text, \",\", true)   ← OK"
+        ),
+        "E0009" => Some(
+"E0009: Return type mismatch
+
+関数・stage の宣言した戻り型と実際の戻り値の型が一致しません。
+
+修正例:
+  誤: stage MyStage: String -> Int !IO = |s| { s }   ← String を返している
+
+  正: stage MyStage: String -> String !IO = |s| { s }   ← OK"
+        ),
+        "E0012" => Some(
+"E0012: Type mismatch
+
+式の型が期待される型と一致しません。
+
+修正例:
+  誤: bind n <- Int.add(\"hello\", 1)   ← String を Int に渡している
+
+  正: bind n <- Int.add(42, 1)   ← OK"
+        ),
+        "E0013" => Some(
+"E0013: Where constraint violation
+
+`where` バリデーターの条件を満たしていません。
+
+修正例:
+  type Age(Int) where v > 0 and v < 150
+
+  誤: bind age <- Age(-1)   ← E0013
+
+  正: bind age <- Age(25)   ← OK"
+        ),
+        "E0014" => Some(
+"E0014: Interface not implemented
+
+型が `interface` の実装（`impl`）を持っていません。
+
+修正例:
+  interface Printable { fn print(self) -> Unit }
+
+  誤: 実装なしで Printable として使用   ← E0014
+
+  正: impl Printable for MyType { fn print(self) -> Unit = ... }   ← OK"
+        ),
+        "E0015" => Some(
+"E0015: Method not found
+
+型に指定のメソッドが定義されていません。
+
+修正例:
+  誤: bind r <- my_val.unknown_method()   ← E0015
+
+  正: bind r <- my_val.to_string()   ← OK（定義済みのメソッド）"
+        ),
+        "E0016" => Some(
+"E0016: Effect not declared
+
+stage / fn 宣言の `!Effect` に含まれないエフェクトを内部で使用しています。
+
+修正例:
+  誤: stage MyStage: String -> String = |s| {
+        bind _ <- IO.println(s)   ← !IO が宣言にない → E0016
+        s
+      }
+
+  正: stage MyStage: String -> String !IO = |s| {
+        bind _ <- IO.println(s)   ← OK
+        s
+      }
+
+関連: E0017（不要なエフェクト宣言）"
+        ),
+        "E0017" => Some(
+"E0017: Unused effect declaration
+
+宣言した `!Effect` が実際に使われていません。
+
+修正例:
+  誤: stage MyStage: String -> String !IO !Postgres = |s| { s }
+      ← !IO と !Postgres を宣言しているが使っていない → E0017
+
+  正: stage MyStage: String -> String = |s| { s }   ← OK
+
+関連: E0016（エフェクト宣言漏れ）"
+        ),
+        "E0018" => Some(
+"E0018: Variable already bound
+
+Favnir では変数は一度だけ束縛できます（イミュータブル）。
+同一スコープで bind x を 2 回書くことはできません。
+
+修正例:
+  誤: bind x <- step1()
+      bind x <- step2(x)   ← E0018
+
+  正: bind x  <- step1()
+      bind x2 <- step2(x)  ← OK
+      または:
+      bind _ <- step2(x)   ← 結果を捨てる場合（W006 に注意）
+
+関連: W006（Result を bind _ で捨てる）"
+        ),
+        "W001" => Some(
+"W001: Unused variable
+
+束縛した変数が一度も使われていません。
+
+修正例:
+  誤: bind unused <- compute()   ← W001
+
+  正: bind _ <- compute()   ← 意図的に捨てる場合
+      または変数を実際に使う"
+        ),
+        "W002" => Some(
+"W002: Unreachable code
+
+到達しないコードが存在します。
+
+修正例:
+  誤: bind x <- step()
+      x
+      \"never reached\"   ← W002
+
+  正: コードを削除するか、フロー制御を見直す"
+        ),
+        "W003" => Some(
+"W003: Redundant match arm
+
+match のあるアームが他のアームと重複しています。"
+        ),
+        "W004" => Some(
+"W004: Magic string / number
+
+ハードコードされた文字列・数値が複数箇所に出現しています。
+定数や設定に切り出すことを検討してください。"
+        ),
+        "W005" => Some(
+"W005: Deep nesting
+
+match や if のネストが深すぎます。
+ヘルパー stage / fn に切り出すことを検討してください。"
+        ),
+        "W006" => Some(
+"W006: Discarding Result value
+
+bind _ <- Postgres.execute_raw(...) のように、
+エフェクトが返す Result を bind _ で捨てると警告が出ます。
+失敗がサイレントに通過し、パイプラインが誤動作する原因になります。
+
+修正例:
+  誤: bind _ <- Postgres.execute_raw(sql, params)   ← W006
+
+  正: chain _ <- Postgres.execute_raw(sql, params)  ← エラーを自動伝播
+      または:
+      match Postgres.execute_raw(sql, params) {
+        Ok(_)  => \"ok\"
+        Err(e) => e
+      }
+
+関連: E0018（変数の再束縛）"
+        ),
+        "W007" => Some(
+"W007: Shadowed binding
+
+外側のスコープと同じ名前の変数を内側で束縛しています。
+意図しない名前衝突の可能性があります。
+
+修正例:
+  誤: bind x <- outer()
+      match x {
+        Ok(x) => x   ← 外側の x を shadow → W007
+        Err(e) => e
+      }
+
+  正: match x {
+        Ok(v) => v   ← 別名を使う
+        Err(e) => e
+      }"
+        ),
+        _ => None,
+    }
+}
+
+pub fn cmd_explain_code(code: &str) {
+    match get_explain_text(code) {
+        Some(text) => println!("{}", text),
+        None => {
+            eprintln!("unknown error code: {}", code);
+            process::exit(1);
+        }
+    }
+}
+
 // ── fav doc ───────────────────────────────────────────────────────────────────
 
 /// Generate Markdown documentation from .fav source files.
@@ -21144,6 +21532,84 @@ seq Pipeline = RunQuery
     }
 }
 
+// ── v12700_tests (v12.7.0) ────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod v12700_tests {
+    use super::{builtin_primitives, get_explain_text, render_builtins_markdown};
+
+    #[test]
+    fn doc_builtins_json_is_array() {
+        // --format json の出力が JSON 配列であること
+        let prims = builtin_primitives();
+        let json = serde_json::to_string(&prims).expect("serialize");
+        let val: serde_json::Value = serde_json::from_str(&json).expect("parse");
+        assert!(val.is_array(), "expected JSON array, got: {}", json);
+        assert!(!val.as_array().unwrap().is_empty(), "expected non-empty array");
+    }
+
+    #[test]
+    fn doc_builtins_csv_parse_raw() {
+        // Csv.parse_raw エントリが存在し returns_result=true であること
+        let prims = builtin_primitives();
+        let entry = prims.iter().find(|p| p.name == "Csv.parse_raw")
+            .expect("Csv.parse_raw not found");
+        assert!(entry.returns_result, "Csv.parse_raw should have returns_result=true");
+        assert!(entry.signature.contains("Result"), "signature should mention Result");
+    }
+
+    #[test]
+    fn doc_builtins_postgres_returns_result() {
+        // Postgres.execute_raw の returns_result が true であること
+        let prims = builtin_primitives();
+        let entry = prims.iter().find(|p| p.name == "Postgres.execute_raw")
+            .expect("Postgres.execute_raw not found");
+        assert!(entry.returns_result);
+        assert_eq!(entry.effects, vec!["!Postgres"]);
+    }
+
+    #[test]
+    fn doc_builtins_markdown_has_namespace_headers() {
+        // Markdown 出力に ## IO / ## Csv ヘッダが含まれること
+        let prims = builtin_primitives();
+        let md = render_builtins_markdown(&prims);
+        assert!(md.contains("## IO"), "missing ## IO");
+        assert!(md.contains("## Csv"), "missing ## Csv");
+        assert!(md.contains("## Postgres"), "missing ## Postgres");
+        assert!(md.contains("### IO.println"), "missing ### IO.println");
+    }
+
+    #[test]
+    fn explain_e0018_output() {
+        // E0018 の説明に "already bound" または "束縛" が含まれること
+        let text = get_explain_text("E0018").expect("E0018 should exist");
+        assert!(
+            text.contains("already bound") || text.contains("束縛"),
+            "E0018 text missing key phrase: {}", text
+        );
+    }
+
+    #[test]
+    fn explain_w006_output() {
+        // W006 の説明に "Result" が含まれること
+        let text = get_explain_text("W006").expect("W006 should exist");
+        assert!(text.contains("Result"), "W006 text missing 'Result': {}", text);
+    }
+
+    #[test]
+    fn explain_unknown_returns_none() {
+        // 未知コードで get_explain_text が None を返すこと
+        assert!(get_explain_text("E9999").is_none());
+        assert!(get_explain_text("W999").is_none());
+        assert!(get_explain_text("INVALID").is_none());
+    }
+
+    #[test]
+    fn version_is_12_7_0() {
+        assert_eq!(env!("CARGO_PKG_VERSION"), "12.7.0");
+    }
+}
+
 // ── v12600_tests (v12.6.0) ────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -21223,7 +21689,7 @@ mod v12600_tests {
 
     #[test]
     fn version_is_12_6_0() {
-        assert_eq!(env!("CARGO_PKG_VERSION"), "12.6.0");
+        // Version bump is tested in v12700_tests::version_is_12_7_0.
     }
 }
 

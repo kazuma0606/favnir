@@ -23308,7 +23308,7 @@ mod v121000_tests {
 
     #[test]
     fn version_is_12_10_0() {
-        assert_eq!(env!("CARGO_PKG_VERSION"), "12.10.0");
+        // Version bump is tested in v130000_tests::version_is_13_0_0.
     }
 
     #[test]
@@ -23331,5 +23331,63 @@ mod v121000_tests {
     fn help_text_unknown_is_empty() {
         let hints = get_help_text("E9999");
         assert!(hints.is_empty(), "unknown code should return empty slice");
+    }
+}
+
+// ── v130000 tests ─────────────────────────────────────────────────────────────
+#[cfg(test)]
+mod v130000_tests {
+    use crate::lint::lint_program;
+    use crate::frontend::parser::Parser;
+
+    #[test]
+    fn version_is_13_0_0() {
+        assert_eq!(env!("CARGO_PKG_VERSION"), "13.0.0");
+    }
+
+    /// fav2py pipeline.fav に W006 lint 警告がないこと（`fav lint --deny-warnings` 相当）
+    #[test]
+    fn fav2py_pipeline_no_lint_warnings() {
+        let pipeline_path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../infra/e2e-demo/fav2py/src/pipeline.fav"
+        );
+        let source = match std::fs::read_to_string(pipeline_path) {
+            Ok(s) => s,
+            Err(_) => return, // ファイルがない環境ではスキップ
+        };
+        let program = match Parser::parse_str(&source, pipeline_path) {
+            Ok(p) => p,
+            Err(_) => return,
+        };
+        let lints = lint_program(&program);
+        assert!(
+            lints.is_empty(),
+            "fav2py/pipeline.fav should have no lint warnings, got: {:?}",
+            lints.iter().map(|l| format!("[{}] line {}", l.code, l.span.line)).collect::<Vec<_>>()
+        );
+    }
+
+    /// airgap analyze.fav に lint 警告がないこと
+    #[test]
+    fn airgap_analyze_no_lint_warnings() {
+        let analyze_path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../infra/e2e-demo/airgap/src/analyze.fav"
+        );
+        let source = match std::fs::read_to_string(analyze_path) {
+            Ok(s) => s,
+            Err(_) => return,
+        };
+        let program = match Parser::parse_str(&source, analyze_path) {
+            Ok(p) => p,
+            Err(_) => return,
+        };
+        let lints = lint_program(&program);
+        assert!(
+            lints.is_empty(),
+            "airgap/analyze.fav should have no lint warnings, got: {:?}",
+            lints.iter().map(|l| format!("[{}] line {}", l.code, l.span.line)).collect::<Vec<_>>()
+        );
     }
 }

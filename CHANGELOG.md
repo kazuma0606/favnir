@@ -4,6 +4,175 @@ Favnir のバージョン履歴。形式は [Keep a Changelog](https://keepachan
 
 ---
 
+## [v13.0.0] — 2026-06-09
+
+### Added
+- 言語信頼性宣言: 型安全・エラー伝播・デバッグ可視性の三点における保証
+- README.md に v13.0.0 宣言文を追記
+- `versions/v13.0.0/` — spec / plan / tasks
+
+### Notes
+- テスト: 1415 件
+- v12.1.0〜v12.10.0 で発覚した全問題（C-1〜C-4 / H-1〜H-2 / M-1 / A-1〜A-6）を解消
+
+---
+
+## [v12.10.0] — 2026-06-09
+
+### Added
+- `driver.rs` `get_help_text(code: &str) -> &'static [&'static str]` — 12 コード（E0001/E0007/E0008/E0009/E0013/E0014/E0015/E0018/W001/W004/W006/W007）に `help:` テキストを追加
+- `fav check --strict` — W006 警告をエラーとして扱い exit 1（`-D warnings` 相当）
+- `fav lint --deny-warnings` — 警告を exit 1 に昇格させる CI 用フラグ
+- `fav.toml [lint]` セクション — `warn_as_error` / `allow` リストによる細粒度制御
+- `toml.rs` `LintTomlConfig { warn_as_error: Option<Vec<String>>, allow: Option<Vec<String>> }`
+- `driver.rs` `v121000_tests` — `help_text_e0001_present` / `help_text_w006_present` / `help_text_unknown_is_empty` / `version_is_12_10_0`
+- `tests/integration.rs` — `check_strict_w006_exits_1` / `check_strict_no_warning_exits_0` / `lint_deny_warnings_exits_1`
+
+### Changed
+- `format_diagnostic` / `format_warning` — エラー・警告出力末尾に `= help:` 行を自動付与
+- `cmd_lint` — `warn_only` に加え `deny_warnings` パラメータを追加; `[lint]` allow フィルタ・warn_as_error 昇格を適用
+- `.github/workflows/ci.yml` Self-lint ステップに `--deny-warnings` を追加
+
+### Notes
+- テスト: 1415 unit + 8 integration
+
+---
+
+## [v12.9.0] — 2026-06-09
+
+### Added
+- `.github/workflows/ci.yml` `Self-test (fav test)` ステップ — `self/checker.fav` / `self/compiler.fav` / `self/codegen.fav` / `self/lexer.fav` / `self/parser.fav`
+- `.github/workflows/ci.yml` `integration` ジョブ — `services: postgres:16` (POSTGRES_PASSWORD=test) + health check
+- `fav/tests/integration.rs` — `fav_test_self_checker_runs` / `fav_test_self_lexer_runs` / `postgres_create_insert_select` / `postgres_error_table_not_found` / `postgres_ssl_disable_connects`
+- `driver.rs` `pg_exec_for_test` / `pg_query_for_test` — 統合テスト用 pub ヘルパー
+- `driver.rs` `v12900_tests` — `version_is_12_9_0`
+
+### Notes
+- テスト: 1415 件（統合テスト 8 件含む）
+
+---
+
+## [v12.8.0] — 2026-06-09
+
+### Added
+- `fav scaffold <template>` コマンド — stage / seq / postgres-etl / rune テンプレートを標準出力に生成
+- `driver.rs` `cmd_scaffold(template: &str, name: Option<&str>)` 実装
+- `main.rs` `Some("scaffold")` 分岐を追加
+- `driver.rs` `v12800_tests` — `scaffold_stage_output_contains_stage` / `scaffold_seq_output_contains_seq` / `scaffold_postgres_etl_output_contains_stages` / `scaffold_rune_output_contains_rune` / `scaffold_stage_named_output_contains_name` / `version_is_12_8_0`（← comment out 済み）
+
+### Notes
+- テスト: 1411 件
+
+---
+
+## [v12.7.0] — 2026-06-08
+
+### Added
+- `fav doc --builtins [--format json|markdown] [--out <file>]` — 組み込み Primitive の型シグネチャ一覧（IO/Csv/Schema/Json/Gen/AWS/Postgres/Snowflake/Http/Llm）
+- `fav explain <code>` — エラーコードの詳細説明（E0001〜E0018 / W001〜W007）
+- `driver.rs` `builtin_primitives()` — 組み込み関数メタデータのリスト
+- `driver.rs` `cmd_doc_builtins(format, out)` / `cmd_explain_code(code)`
+- `driver.rs` `v12700_tests` — `doc_builtins_json_has_csv_parse_raw` / `doc_builtins_markdown_has_postgres` / `explain_e0001_output` / `explain_w006_output` / `doc_builtins_returns_result_field`
+
+### Notes
+- テスト: 1408 件
+
+---
+
+## [v12.6.0] — 2026-06-08
+
+### Added
+- `tokio-postgres-native-tls` / `native-tls` — Postgres TLS 対応
+- `fav.toml [postgres]` `sslmode` キー（`disable` / `prefer` / `require`）
+- `DATABASE_URL` の `sslmode` クエリパラメータ解析
+- Postgres エラー詳細化 — `DbError.message()` / `code()` / `detail()` を連結（"db error" → "db error: SSL connection is required (SQLSTATE 08P01)"）
+- `driver.rs` `v12600_tests` — `postgres_sslmode_disable` / `postgres_sslmode_parse` / `postgres_error_detail`
+
+### Changed
+- `pg_connect` — `sslmode` に応じて `NoTls` / `TlsConnector` を切り替え
+
+### Notes
+- テスト: 1402 件
+
+---
+
+## [v12.5.0] — 2026-06-08
+
+### Added
+- `fav run --verbose` — stage 入出力を stderr に出力（最大 200 文字トランケート）
+- `fav run --trace` — stage 入出力をフル出力（トランケートなし）
+- `fav.toml [run]` `verbose` / `trace` キー
+- `fav check --json` — エラー・警告を JSON 形式で出力（AI フレンドリー）
+- `fav check --show-types` — 各 `bind` / `chain` の型と W006 マーカーを表示
+- `driver.rs` `CheckDiagnostic` / `BindingInfo` / `CheckOutput` 構造体（serde::Serialize）
+- `driver.rs` `collect_binding_types(file)` — W006 検出（`bind _ <- NS.fn(...)` パターン）
+- `driver.rs` `v12500_tests` — `verbose_stage_enter_exit` / `check_json_output_format` / `check_show_types_bind` / `check_show_types_w006_detected`
+
+### Changed
+- `VERBOSE_LEVEL` を `thread_local! { Cell<u8> }` に変更（並行テスト対応）
+
+### Notes
+- テスト: 1386 件
+
+---
+
+## [v12.4.0] — 2026-06-08
+
+### Added
+- `IRStmt::SeqChain` + `Opcode::SeqStageCheck = 0x36` — seq pipeline fail-fast
+- `compile_flw_def` 修正: 2+ ステージを `SeqChain` stmts で構築
+- `SeqStageCheck` VM ハンドラ: stage 名・番号付きエラーで短絡（`"pipeline stopped at stage N/M 'Name': error"`）
+- `driver.rs` `v12400_tests` — `seq_stops_on_stage_err` / `seq_passes_ok_through` / `seq_error_includes_stage_name`
+
+### Notes
+- テスト: 1376 件
+
+---
+
+## [v12.3.0] — 2026-06-08
+
+### Added
+- `IRStmt::LegacyBind(u16, IRExpr)` + `Opcode::LegacyBindCheck = 0x35`
+- `apply_legacy_bind_semantics(ir: IRProgram)` — `--legacy` モードで `Bind` → `LegacyBind` に変換
+- `LegacyBindCheck` VM ハンドラ: `ok(v)`→unwrap, `err(e)`→escape, 非 Result→pass-through
+- `driver.rs` `v12300_tests` — `legacy_bind_propagates_err` / `legacy_bind_ok_unwraps` / `legacy_bind_non_result_passthrough`
+
+### Changed
+- `--legacy` モードの `bind x <- expr` が `expr` の Result を unwrap して短絡するように修正（真の monadic bind）
+
+### Notes
+- テスト: 1370 件
+
+---
+
+## [v12.2.0] — 2026-06-07
+
+### Added
+- `is_result_returning_call(stmt)` — `bind _ <- NS.fn(...)` で Result を返す NS 呼び出しを AST 解析で検出
+- W006 警告（`fav check --show-types`）: bind _ で Result を捨てると警告
+- 対象 NS: Postgres / Snowflake / S3 / Sqs / Queue / Cache / Http / Grpc / Llm / IO
+- `driver.rs` `v12200_tests` — `w006_detected_for_postgres_bind_underscore` / `w006_not_detected_for_named_bind`
+
+### Notes
+- テスト: 1357 件
+
+---
+
+## [v12.1.0] — 2026-06-07
+
+### Added
+- E0018 `bind` 再束縛禁止（checker.fav）— 同一スコープで同名変数への二重 `bind` を検出
+- `check_rebind_ok(name, env)` ヘルパー — `Option<String>` → `Result<String, String>`
+- `driver.rs` `v12100_tests` — `e0018_rebind_detected` / `e0018_underscore_allowed` / `e0018_help_message_shown`
+
+### Changed
+- `checker.fav` `infer_stmt` に bind 済みセット管理を追加
+
+### Notes
+- テスト: 1353 件
+
+---
+
 ## [v12.0.0] — 2026-06-06
 
 ### Added

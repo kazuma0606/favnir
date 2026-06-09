@@ -1,0 +1,28 @@
+// runes/ctx/mock_db.fav — MockDb for unit testing (v13.2.0)
+// テスト用 DB モック。seed() でダミーデータを渡し、
+// DbRead.query は JSON 文字列として返す。DbWrite.execute は 0 を返す。
+
+type MockDb(List<String>)
+
+public fn MockDb.empty() -> MockDb { MockDb(List.empty()) }
+public fn MockDb.seed(rows: List<String>) -> MockDb { MockDb(rows) }
+
+// ── DbRead impl ────────────────────────────────────────────────────────────────
+
+impl DbRead for MockDb {
+    fn query(db: MockDb, sql: String, params: List<String>) -> Result<String, String> {
+        Result.ok(Json.encode_raw(db))
+    }
+
+    fn query1(db: MockDb, sql: String, params: List<String>) -> Result<String, String> {
+        Result.ok(Json.encode_raw(db))
+    }
+}
+
+// ── DbWrite impl ───────────────────────────────────────────────────────────────
+
+impl DbWrite for MockDb {
+    fn execute(db: MockDb, sql: String, params: List<String>) -> Result<Int, String> {
+        Result.ok(0)
+    }
+}

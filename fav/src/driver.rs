@@ -189,6 +189,14 @@ fn get_help_text(code: &str) -> &'static [&'static str] {
             "pass the capability as a ctx argument: `ctx.io.println(...)`",
             "ambient effects will become E0023 (error) in v14.0",
         ],
+        "W009" => &[
+            "migrate to capability interface: `chain rows <- ctx.db.query(...)`",
+            "direct Rune calls will be an error in v14.0",
+        ],
+        "E0020" => &[
+            "pass a value that implements the required capability interface",
+            "available implementations: PostgresDb, SnowflakeDb, S3Storage, MockDb",
+        ],
         _ => &[],
     }
 }
@@ -3138,10 +3146,14 @@ pub fn cmd_check(file: Option<&str>, no_warn: bool, legacy_check: bool, json: bo
                     process::exit(1);
                 }
             };
-            let ambient_warnings = crate::lint::check_ambient_effects(&program);
+            let mut ambient_warnings = crate::lint::check_ambient_effects(&program);
+            let w009 = crate::lint::check_deprecated_rune_calls(&program);
+            ambient_warnings.extend(w009);
             if ambient_warnings.is_empty() {
                 println!("{}: no ambient effect calls found", path);
             } else {
+                let w008_count = ambient_warnings.iter().filter(|w| w.code == "W008").count();
+                let w009_count = ambient_warnings.iter().filter(|w| w.code == "W009").count();
                 for w in &ambient_warnings {
                     let line_num = w.span.line as usize;
                     let col = w.span.col as usize;
@@ -3162,7 +3174,12 @@ pub fn cmd_check(file: Option<&str>, no_warn: bool, legacy_check: bool, json: bo
                         eprintln!("  = help: {}", hint);
                     }
                 }
-                eprintln!("\nambient: {} W008 warning(s)", ambient_warnings.len());
+                if w008_count > 0 {
+                    eprintln!("ambient: {} W008 warning(s)", w008_count);
+                }
+                if w009_count > 0 {
+                    eprintln!("deprecated: {} W009 warning(s)", w009_count);
+                }
                 if report {
                     write_ambient_report(path, &ambient_warnings);
                 }
@@ -23472,10 +23489,10 @@ mod v131000_tests {
     use crate::lint::check_ambient_effects;
     use crate::middle::checker::Checker;
 
-    #[test]
-    fn version_is_13_1_0() {
-        assert_eq!(env!("CARGO_PKG_VERSION"), "13.1.0");
-    }
+    // #[test]
+    // fn version_is_13_1_0() {
+    //     assert_eq!(env!("CARGO_PKG_VERSION"), "13.1.0");
+    // }
 
     #[test]
     fn interface_inheritance_parsed() {
@@ -23551,5 +23568,133 @@ mod v131000_tests {
         let lints = crate::lint::lint_program(&prog);
         let has_w008 = lints.iter().any(|l| l.code == "W008");
         assert!(!has_w008, "lint_program should not produce W008");
+    }
+}
+
+// ── v13.2.0 tests ─────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod v132000_tests {
+    use crate::frontend::parser::Parser;
+    use crate::lint::{check_ambient_effects, check_deprecated_rune_calls};
+    use crate::middle::checker::{Checker, InterfaceRegistry};
+
+    fn check_src(src: &str) -> (Vec<crate::middle::checker::TypeError>, Vec<crate::middle::checker::FavWarning>) {
+        let prog = Parser::parse_str(src, "test.fav").expect("parse error");
+        Checker::check_program(&prog)
+    }
+
+    // A-1: version bump
+    #[test]
+    fn version_is_13_2_0() {
+        assert_eq!(env!("CARGO_PKG_VERSION"), "13.2.0");
+    }
+
+    // A-2: DbRead is pre-registered in InterfaceRegistry
+    #[test]
+    fn db_read_interface_registered() {
+        let reg = InterfaceRegistry::new();
+        assert!(reg.interfaces.contains_key("DbRead"), "DbRead not registered");
+        assert!(reg.interfaces.contains_key("DbWrite"), "DbWrite not registered");
+        assert!(reg.interfaces.contains_key("StorageRead"), "StorageRead not registered");
+        assert!(reg.interfaces.contains_key("StorageWrite"), "StorageWrite not registered");
+    }
+
+    // A-3: DbRead has the expected methods
+    #[test]
+    fn db_read_has_query_and_query1() {
+        let reg = InterfaceRegistry::new();
+        let db_read = reg.interfaces.get("DbRead").expect("DbRead missing");
+        assert!(db_read.methods.contains_key("query"),  "DbRead.query missing");
+        assert!(db_read.methods.contains_key("query1"), "DbRead.query1 missing");
+    }
+
+    // B-1: ctx.db.query(...) passes type check when ctx has a DbRead field
+    #[test]
+    fn db_read_interface_type_check() {
+        let src = r#"
+interface WithDb {
+    db: DbRead
+}
+public fn run(ctx: WithDb) -> Result<String, String> {
+    bind rows <- ctx.db.query("SELECT 1", List.empty())
+    Result.ok(rows)
+}
+"#;
+        let (errors, _) = check_src(src);
+        let e0020: Vec<_> = errors.iter().filter(|e| e.code == "E0020").collect();
+        assert!(e0020.is_empty(), "unexpected E0020: {:?}", e0020);
+    }
+
+    // B-2: DbRead has no "execute" method → E0020
+    #[test]
+    fn db_write_rejects_wrong_ctx() {
+        let src = r#"
+interface ReadOnly {
+    db: DbRead
+}
+public fn run(ctx: ReadOnly) -> Result<Int, String> {
+    ctx.db.execute("INSERT INTO t VALUES (1)", List.empty())
+}
+"#;
+        let (errors, _) = check_src(src);
+        let has_e0020 = errors.iter().any(|e| e.code == "E0020");
+        assert!(has_e0020, "expected E0020 for DbRead.execute (no such method), errors: {:?}", errors);
+    }
+
+    // B-3: StorageWrite.put passes type check
+    #[test]
+    fn storage_write_put_type_check() {
+        let src = r#"
+interface WithStorage {
+    store: StorageWrite
+}
+public fn run(ctx: WithStorage, body: String) -> Result<Unit, String> {
+    ctx.store.put("my-bucket", "output/result.json", body)
+}
+"#;
+        let (errors, _) = check_src(src);
+        let e0020: Vec<_> = errors.iter().filter(|e| e.code == "E0020").collect();
+        assert!(e0020.is_empty(), "unexpected E0020: {:?}", e0020);
+    }
+
+    // D-1: Postgres.query_raw detected as W009
+    #[test]
+    fn w009_postgres_direct_deprecated() {
+        let src = r#"
+public fn run(sql: String) -> Result<String, String> !Postgres {
+    bind rows <- Postgres.query_raw(sql, List.empty())
+    Result.ok(rows)
+}
+"#;
+        let prog = Parser::parse_str(src, "test.fav").expect("parse error");
+        let warnings = check_deprecated_rune_calls(&prog);
+        let has_w009 = warnings.iter().any(|w| w.code == "W009");
+        assert!(has_w009, "expected W009 for Postgres.query_raw, got: {:?}", warnings);
+    }
+
+    // D-2: List.map does not trigger W009
+    #[test]
+    fn w009_pure_list_no_warning() {
+        let src = "fn run(xs: List<String>) -> List<String> { List.map(xs, |x| x) }";
+        let prog = Parser::parse_str(src, "test.fav").expect("parse error");
+        let warnings = check_deprecated_rune_calls(&prog);
+        let has_w009 = warnings.iter().any(|w| w.code == "W009");
+        assert!(!has_w009, "List.map should not produce W009");
+    }
+
+    // D-3: without --ambient flag, W009 is not in lint_program
+    #[test]
+    fn w009_not_in_lint_program() {
+        let src = r#"
+public fn run(sql: String) -> Result<String, String> !Postgres {
+    bind rows <- Postgres.query_raw(sql, List.empty())
+    Result.ok(rows)
+}
+"#;
+        let prog = Parser::parse_str(src, "test.fav").expect("parse error");
+        let lints = crate::lint::lint_program(&prog);
+        let has_w009 = lints.iter().any(|l| l.code == "W009");
+        assert!(!has_w009, "lint_program should not produce W009");
     }
 }

@@ -498,10 +498,46 @@ pub struct InterfaceRegistry {
 
 impl InterfaceRegistry {
     pub fn new() -> Self {
-        Self {
+        let mut registry = Self {
             interfaces: HashMap::new(),
             impls: HashMap::new(),
-        }
+        };
+        registry.register_builtin_capabilities();
+        registry
+    }
+
+    /// Pre-register the 4 built-in capability interfaces (v13.2.0).
+    fn register_builtin_capabilities(&mut self) {
+        let s  = || Type::String;
+        let ls = || Type::List(Box::new(Type::String));
+        let mk = |params: Vec<Type>, ret: Type| Type::Fn(params, Box::new(ret));
+        let rs  = || Type::Result(Box::new(s()),  Box::new(s()));
+        let ri  = || Type::Result(Box::new(Type::Int),  Box::new(s()));
+        let ru  = || Type::Result(Box::new(Type::Unit), Box::new(s()));
+        let rls = || Type::Result(Box::new(ls()), Box::new(s()));
+
+        // DbRead — SELECT-like operations
+        let mut db_read = HashMap::new();
+        db_read.insert("query".into(),  mk(vec![s(), ls()], rs()));
+        db_read.insert("query1".into(), mk(vec![s(), ls()], rs()));
+        self.register_interface("DbRead".into(), None, db_read);
+
+        // DbWrite — INSERT/UPDATE/DELETE-like operations
+        let mut db_write = HashMap::new();
+        db_write.insert("execute".into(), mk(vec![s(), ls()], ri()));
+        self.register_interface("DbWrite".into(), None, db_write);
+
+        // StorageRead — object storage read operations
+        let mut storage_read = HashMap::new();
+        storage_read.insert("get".into(),  mk(vec![s(), s()], rs()));
+        storage_read.insert("list".into(), mk(vec![s(), s()], rls()));
+        self.register_interface("StorageRead".into(), None, storage_read);
+
+        // StorageWrite — object storage write operations
+        let mut storage_write = HashMap::new();
+        storage_write.insert("put".into(),    mk(vec![s(), s(), s()], ru()));
+        storage_write.insert("delete".into(), mk(vec![s(), s()], ru()));
+        self.register_interface("StorageWrite".into(), None, storage_write);
     }
 
     pub fn register_interface(
@@ -4514,6 +4550,47 @@ impl Checker {
                 self.type_error(
                     "E0221",
                     format!("no impl of `{}` for type `{}`", cap_name, ty_name),
+                    span,
+                );
+                return Type::Error;
+            }
+            // v13.2.0: if the Named type is a registered interface (capability context),
+            // look up the field in the interface's method/field table.
+            if self.interface_registry.interfaces.contains_key(ty_name.as_str()) {
+                if let Some(field_ty) = self.interface_registry
+                    .lookup_declared_method(ty_name, field)
+                    .cloned()
+                {
+                    return field_ty;
+                }
+                self.type_error(
+                    "E0020",
+                    format!(
+                        "interface `{}` has no field or method `{}`",
+                        ty_name, field
+                    ),
+                    span,
+                );
+                return Type::Error;
+            }
+        }
+        // v13.2.0: Interface(name, []) with no concrete args = structural interface type
+        // used as a capability-context parameter type (e.g. fn load(ctx: LoadCtx)).
+        // Look up the field directly from the interface declaration.
+        if let Type::Interface(interface_name, args) = obj_ty {
+            if args.is_empty() {
+                if let Some(field_ty) = self.interface_registry
+                    .lookup_declared_method(interface_name, field)
+                    .cloned()
+                {
+                    return field_ty;
+                }
+                self.type_error(
+                    "E0020",
+                    format!(
+                        "interface `{}` has no field or method `{}`",
+                        interface_name, field
+                    ),
                     span,
                 );
                 return Type::Error;

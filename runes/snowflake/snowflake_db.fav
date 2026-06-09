@@ -1,0 +1,25 @@
+// runes/snowflake/snowflake_db.fav — SnowflakeDb capability implementation (v13.2.0)
+// DbRead / DbWrite を実装した Snowflake ラッパー。
+// ctx.db.query(...) / ctx.db.execute(...) を Snowflake.* primitive に委譲する。
+
+type SnowflakeDb(String)
+
+// ── DbRead impl ────────────────────────────────────────────────────────────────
+
+impl DbRead for SnowflakeDb {
+    fn query(db: SnowflakeDb, sql: String, params: List<String>) -> Result<String, String> !Snowflake {
+        Snowflake.query_raw(sql)
+    }
+
+    fn query1(db: SnowflakeDb, sql: String, params: List<String>) -> Result<String, String> !Snowflake {
+        Snowflake.query_raw(sql)
+    }
+}
+
+// ── DbWrite impl ───────────────────────────────────────────────────────────────
+
+impl DbWrite for SnowflakeDb {
+    fn execute(db: SnowflakeDb, sql: String, params: List<String>) -> Result<Int, String> !Snowflake {
+        Snowflake.execute_raw(sql)
+    }
+}

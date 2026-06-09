@@ -1,0 +1,25 @@
+// runes/aws/dynamo_db.fav — DynamoDb capability stub (v13.2.0)
+// DynamoDB VM primitive は未実装のため、型宣言のみ。
+// 呼び出しは実行時エラーを返す。完全実装は v13.x 以降。
+
+type DynamoDb(String)
+
+// ── DbRead impl (stub) ────────────────────────────────────────────────────────
+
+impl DbRead for DynamoDb {
+    fn query(db: DynamoDb, sql: String, params: List<String>) -> Result<String, String> {
+        Result.err("DynamoDB support not yet implemented")
+    }
+
+    fn query1(db: DynamoDb, sql: String, params: List<String>) -> Result<String, String> {
+        Result.err("DynamoDB support not yet implemented")
+    }
+}
+
+// ── DbWrite impl (stub) ───────────────────────────────────────────────────────
+
+impl DbWrite for DynamoDb {
+    fn execute(db: DynamoDb, sql: String, params: List<String>) -> Result<Int, String> {
+        Result.err("DynamoDB support not yet implemented")
+    }
+}

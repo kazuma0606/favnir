@@ -717,6 +717,125 @@ fn collect_ambient_in_expr(expr: &Expr, errors: &mut Vec<LintError>) {
     }
 }
 
+/// (namespace, function_name, migration hint) — calls that should use capability ctx instead.
+const DEPRECATED_RUNE_CALLS: &[(&str, &str, &str)] = &[
+    ("Postgres",  "query_raw",           "ctx.db.query(...)"),
+    ("Postgres",  "execute_raw",         "ctx.db.execute(...)"),
+    ("AWS",       "s3_get_object_raw",   "ctx.storage.get(...)"),
+    ("AWS",       "s3_put_object_raw",   "ctx.storage.put(...)"),
+    ("AWS",       "s3_list_objects_raw", "ctx.storage.list(...)"),
+    ("AWS",       "s3_delete_object_raw","ctx.storage.delete(...)"),
+    ("Snowflake", "query_raw",           "ctx.db.query(...)"),
+    ("Snowflake", "execute_raw",         "ctx.db.execute(...)"),
+];
+
+/// `fav check --ambient` — detect direct Rune calls that should use capability ctx (W009).
+/// NOT part of `lint_program`.
+pub fn check_deprecated_rune_calls(program: &Program) -> Vec<LintError> {
+    let mut errors = Vec::new();
+    for item in &program.items {
+        match item {
+            Item::FnDef(fd)   => collect_deprecated_in_block(&fd.body, &mut errors),
+            Item::TrfDef(td)  => collect_deprecated_in_block(&td.body, &mut errors),
+            Item::FlwDef(_)   => {}
+            Item::ImplDef(id) => {
+                for m in &id.methods {
+                    collect_deprecated_in_block(&m.body, &mut errors);
+                }
+            }
+            Item::TestDef(td) => collect_deprecated_in_block(&td.body, &mut errors),
+            _ => {}
+        }
+    }
+    errors
+}
+
+fn collect_deprecated_in_block(block: &Block, errors: &mut Vec<LintError>) {
+    for stmt in &block.stmts {
+        match stmt {
+            Stmt::Bind(b)  => collect_deprecated_in_expr(&b.expr, errors),
+            Stmt::Chain(c) => collect_deprecated_in_expr(&c.expr, errors),
+            Stmt::Expr(e)  => collect_deprecated_in_expr(e, errors),
+            Stmt::Yield(y) => collect_deprecated_in_expr(&y.expr, errors),
+            Stmt::ForIn(f) => {
+                collect_deprecated_in_expr(&f.iter, errors);
+                collect_deprecated_in_block(&f.body, errors);
+            }
+        }
+    }
+    collect_deprecated_in_expr(&block.expr, errors);
+}
+
+fn collect_deprecated_in_expr(expr: &Expr, errors: &mut Vec<LintError>) {
+    match expr {
+        Expr::Apply(func, args, span) => {
+            if let Expr::FieldAccess(base, method_name, _) = func.as_ref() {
+                if let Expr::Ident(ns, _) = base.as_ref() {
+                    for (dep_ns, dep_fn, hint) in DEPRECATED_RUNE_CALLS {
+                        if ns == dep_ns && method_name == dep_fn {
+                            errors.push(LintError::new(
+                                "W009",
+                                format!(
+                                    "direct Rune call `{}.{}` is deprecated — use `{}` instead",
+                                    ns, method_name, hint
+                                ),
+                                span.clone(),
+                            ));
+                        }
+                    }
+                }
+            }
+            collect_deprecated_in_expr(func, errors);
+            for a in args {
+                collect_deprecated_in_expr(a, errors);
+            }
+        }
+        Expr::Block(b) => collect_deprecated_in_block(b, errors),
+        Expr::If(cond, then, else_, _) => {
+            collect_deprecated_in_expr(cond, errors);
+            collect_deprecated_in_block(then, errors);
+            if let Some(eb) = else_ {
+                collect_deprecated_in_block(eb, errors);
+            }
+        }
+        Expr::Match(scrutinee, arms, _) => {
+            collect_deprecated_in_expr(scrutinee, errors);
+            for arm in arms {
+                collect_deprecated_in_expr(&arm.body, errors);
+            }
+        }
+        Expr::Pipeline(steps, _) => {
+            for s in steps {
+                collect_deprecated_in_expr(s, errors);
+            }
+        }
+        Expr::FieldAccess(obj, _, _) => collect_deprecated_in_expr(obj, errors),
+        Expr::BinOp(_, l, r, _) => {
+            collect_deprecated_in_expr(l, errors);
+            collect_deprecated_in_expr(r, errors);
+        }
+        Expr::Closure(_, body, _) => collect_deprecated_in_expr(body, errors),
+        Expr::Collect(b, _) => collect_deprecated_in_block(b, errors),
+        Expr::EmitExpr(inner, _) => collect_deprecated_in_expr(inner, errors),
+        Expr::Question(inner, _) => collect_deprecated_in_expr(inner, errors),
+        Expr::AssertMatches(e, _, _) => collect_deprecated_in_expr(e, errors),
+        Expr::TypeApply(f, _, _) => collect_deprecated_in_expr(f, errors),
+        Expr::RecordConstruct(_, fields, _) => {
+            for (_, v) in fields {
+                collect_deprecated_in_expr(v, errors);
+            }
+        }
+        Expr::FString(parts, _) => {
+            for part in parts {
+                if let FStringPart::Expr(e) = part {
+                    collect_deprecated_in_expr(e, errors);
+                }
+            }
+        }
+        Expr::Lit(..) | Expr::Ident(..) => {}
+    }
+}
+
 // ── tests ─────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]

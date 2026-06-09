@@ -1,0 +1,25 @@
+// runes/postgres/postgres_db.fav — PostgresDb capability implementation (v13.2.0)
+// DbRead / DbWrite を実装した Postgres 接続ラッパー。
+// ctx.db.query(...) / ctx.db.execute(...) の呼び出しを Postgres.* primitive に委譲する。
+
+type PostgresDb(String)
+
+// ── DbRead impl ────────────────────────────────────────────────────────────────
+
+impl DbRead for PostgresDb {
+    fn query(db: PostgresDb, sql: String, params: List<String>) -> Result<String, String> !Postgres {
+        Postgres.query_raw(sql, params)
+    }
+
+    fn query1(db: PostgresDb, sql: String, params: List<String>) -> Result<String, String> !Postgres {
+        Postgres.query_raw(sql, params)
+    }
+}
+
+// ── DbWrite impl ───────────────────────────────────────────────────────────────
+
+impl DbWrite for PostgresDb {
+    fn execute(db: PostgresDb, sql: String, params: List<String>) -> Result<Int, String> !Postgres {
+        Postgres.execute_raw(sql, params)
+    }
+}

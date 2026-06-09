@@ -4970,7 +4970,7 @@ fn pg_params_from_json(params_json: &str) -> Result<Vec<String>, String> {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn pg_execute(conn_str: &str, sql: &str, params_json: &str) -> Result<(), String> {
+pub fn pg_execute(conn_str: &str, sql: &str, params_json: &str) -> Result<(), String> {
     let params = pg_params_from_json(params_json)?;
     let sslmode = resolve_sslmode(conn_str);
     let rt = tokio::runtime::Builder::new_current_thread()

@@ -23200,6 +23200,17 @@ mod v12800_tests {
 
     #[test]
     fn version_is_12_8_0() {
-        assert_eq!(env!("CARGO_PKG_VERSION"), "12.8.0");
+        // Version bump is tested in v12900_tests::version_is_12_9_0.
+    }
+}
+
+// ── v12900 tests ──────────────────────────────────────────────────────────────
+// Note: fav_test_self_* tests are in tests/integration.rs (CARGO_BIN_EXE_fav
+// is only available in integration test context, not unit tests).
+#[cfg(test)]
+mod v12900_tests {
+    #[test]
+    fn version_is_12_9_0() {
+        assert_eq!(env!("CARGO_PKG_VERSION"), "12.9.0");
     }
 }

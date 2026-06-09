@@ -93,6 +93,59 @@ jobs:
           ./target/debug/fav fmt --check self/compiler.fav
           ./target/debug/fav fmt --check self/checker.fav
 
+      - name: Self-test (fav test)
+        working-directory: fav
+        run: |
+          ./target/debug/fav test self/checker.fav
+          ./target/debug/fav test self/compiler.fav
+          ./target/debug/fav test self/codegen.fav
+          ./target/debug/fav test self/lexer.fav
+          ./target/debug/fav test self/parser.fav
+
+  integration:
+    name: Integration — Postgres
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
+    runs-on: ubuntu-latest
+    env:
+      CXXFLAGS: ""
+      DATABASE_URL: "host=localhost user=postgres password=test dbname=postgres sslmode=disable"
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            fav/target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('fav/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build
+        working-directory: fav
+        run: cargo build --locked
+
+      - name: Integration tests
+        working-directory: fav
+        run: cargo test --locked integration -- --test-threads=1
+
   site:
     name: Site — build
     runs-on: ubuntu-latest

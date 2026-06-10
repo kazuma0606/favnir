@@ -3123,7 +3123,7 @@ impl Checker {
                                     Type::Fn(params, ret) if params.len() >= 2 => {
                                         Some((&params[1], ret.as_ref()))
                                     }
-                                    _ => ty.as_callable().map(|(i, o)| (i, o)),
+                                    _ => ty.as_callable(),
                                 }
                             } else {
                                 ty.as_callable()

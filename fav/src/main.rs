@@ -979,6 +979,7 @@ fn main_impl() {
 
         Some("fmt") => {
             let mut check = false;
+            let mut migrate = false;
             let mut file: Option<String> = None;
             let mut i = 2usize;
             while i < args.len() {
@@ -987,13 +988,17 @@ fn main_impl() {
                         check = true;
                         i += 1;
                     }
+                    "--migrate" => {
+                        migrate = true;
+                        i += 1;
+                    }
                     other => {
                         file = Some(other.to_string());
                         i += 1;
                     }
                 }
             }
-            cmd_fmt(file.as_deref(), check);
+            cmd_fmt(file.as_deref(), check, migrate);
         }
 
         Some("lint") => {
@@ -1216,6 +1221,7 @@ fn main_impl() {
             let mut in_place = false;
             let mut dry_run = false;
             let mut check = false;
+            let mut from_effects = false;
             let mut dir: Option<String> = None;
             let mut file: Option<String> = None;
             let mut i = 2usize;
@@ -1231,6 +1237,10 @@ fn main_impl() {
                     }
                     "--check" => {
                         check = true;
+                        i += 1;
+                    }
+                    "--from-effects" => {
+                        from_effects = true;
                         i += 1;
                     }
                     "--dir" => {
@@ -1250,7 +1260,7 @@ fn main_impl() {
                     }
                 }
             }
-            cmd_migrate(file.as_deref(), in_place, dry_run, check, dir.as_deref());
+            cmd_migrate(file.as_deref(), in_place, dry_run, check, dir.as_deref(), from_effects);
         }
 
         Some("explain-error") => {

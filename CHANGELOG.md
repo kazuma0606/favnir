@@ -4,6 +4,44 @@ Favnir のバージョン履歴。形式は [Keep a Changelog](https://keepachan
 
 ---
 
+## [v14.0.0] — 2026-06-11 — 能力型完成宣言
+
+### Breaking Changes
+- `!Effect` 記法は非 legacy モードで E0025 エラーになる（v13.10.0 から段階的導入、v14.0.0 で CI 確認完了）
+- ambient effect 呼び出し（ctx なしの `IO.println` 等）は E0023 エラーになる（v13.8.0 から）
+
+### New Features (v13.1.0〜v13.10.0 集約)
+- `interface` 継承構文（`LoadCtx: CommonCtx`）のコンパイル時チェック
+- `DbRead` / `DbWrite` / `StorageRead` / `StorageWrite` / `HttpClient` / `Io` / `Env` capability interface
+- `LoadCtx` / `WriteCtx` / `MigrateCtx` コンテキスト interface（capability 充足チェック付き）
+- `AppCtx` 具象型 + `Ctx.build` / `Ctx.mock` Rune
+- `ctx.field.method()` フィールドアクセス構文
+- `seq Pipeline(ctx)` — ctx 型推論
+- E0024 型状態パターンチェック
+- `Ctx { db: DbRead }` 糖衣構文（v13.10.0）
+- `fav migrate --from-effects` 移行ツール（v13.10.0）
+
+### Error Codes Added
+- W008: ambient effect call（警告）
+- E0020: capability interface has no such method
+- E0021: capability not in context
+- E0022: ctx-aware pipeline called with wrong number of arguments
+- E0023: ambient effect call is not allowed（エラー）
+- E0024: type state mismatch
+- E0025: bang notation removed
+- W009: direct Rune call deprecated
+- W010: effect migration requires manual review
+
+### Migration
+`fav migrate --from-effects <file>` で旧 `!Effect` 記法を自動変換。
+`--legacy` フラグで移行期間中も旧記法を許容（今後廃止予定）。
+
+### Notes
+- `self/compiler.fav` / `self/checker.fav` の E0025 件数がゼロであることを CI テストで保証
+- テスト: 2207 件（v13.10.0 時点）
+
+---
+
 ## [v13.0.0] — 2026-06-09
 
 ### Added

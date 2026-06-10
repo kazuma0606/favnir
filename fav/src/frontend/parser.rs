@@ -44,6 +44,27 @@ pub struct Parser {
     pos: usize,
 }
 
+/// Desugar `Ctx { fields }` destructure to a concrete ctx type name (v13.10.0).
+fn desugar_ctx_fields(fields: &[(String, Option<String>)]) -> &'static str {
+    let has_db_read = fields.iter().any(|(_, ty)| ty.as_deref() == Some("DbRead"));
+    let has_db_write = fields.iter().any(|(_, ty)| ty.as_deref() == Some("DbWrite"));
+    let has_storage_write = fields.iter().any(|(_, ty)| ty.as_deref() == Some("StorageWrite"));
+    let has_io_only = fields.len() == 1 && fields[0].0 == "io" && fields[0].1.is_none();
+    let has_env_only = fields.len() == 1 && fields[0].0 == "env" && fields[0].1.is_none();
+
+    if has_io_only || has_env_only {
+        return "CommonCtx";
+    }
+    if has_db_read && !has_db_write && !has_storage_write {
+        return "LoadCtx";
+    }
+    if has_db_write || has_storage_write {
+        return "WriteCtx";
+    }
+    // Fallback for mixed or unrecognized combinations
+    "AppCtx"
+}
+
 impl Parser {
     pub fn new(tokens: Vec<Token>) -> Self {
         Parser { tokens, pos: 0 }
@@ -1095,6 +1116,40 @@ impl Parser {
         let mut params = Vec::new();
         while self.peek() != &TokenKind::RParen {
             let start = self.peek_span().clone();
+            // v13.10.0: `Ctx { db: DbRead, io }` sugar syntax → desugar to `ctx: LoadCtx` etc.
+            if matches!(self.peek(), TokenKind::Ident(n) if n == "Ctx")
+                && matches!(self.tokens.get(self.pos + 1).map(|t| &t.kind), Some(TokenKind::LBrace))
+            {
+                self.advance(); // consume "Ctx"
+                self.advance(); // consume "{"
+                let mut fields: Vec<(String, Option<String>)> = Vec::new();
+                while !matches!(self.peek(), TokenKind::RBrace | TokenKind::Eof) {
+                    let (field_name, _) = self.expect_ident()?;
+                    let field_ty = if self.peek() == &TokenKind::Colon {
+                        self.advance();
+                        let (ty_name, _) = self.expect_ident()?;
+                        Some(ty_name)
+                    } else {
+                        None
+                    };
+                    fields.push((field_name, field_ty));
+                    if self.peek() == &TokenKind::Comma {
+                        self.advance();
+                    }
+                }
+                self.expect(&TokenKind::RBrace)?;
+                let ctx_type = desugar_ctx_fields(&fields);
+                let span = self.span_from(&start);
+                params.push(Param {
+                    name: "ctx".to_string(),
+                    ty: crate::ast::TypeExpr::Named(ctx_type.to_string(), vec![], span.clone()),
+                    span,
+                });
+                if self.peek() == &TokenKind::Comma {
+                    self.advance();
+                }
+                continue;
+            }
             let (name, _) = self.expect_ident()?;
             self.expect(&TokenKind::Colon)?;
             let ty = self.parse_fn_param_type()?;

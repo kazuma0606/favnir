@@ -5939,6 +5939,7 @@ fn is_known_builtin_namespace(name: &str) -> bool {
             | "Email"
             | "Compiler"
             | "Ctx"
+            | "AppCtx"
     )
 }
 
@@ -13096,8 +13097,107 @@ fn vm_call_builtin(
             Ok(VMValue::Str(mock_json))
         }
 
+        // ── IO.getenv_raw (v13.6.0) ──────────────────────────────────────────
+        "IO.getenv_raw" => {
+            // IO.getenv_raw(key: String) -> Option<String>
+            let key = vm_string(
+                args.into_iter().next().ok_or_else(|| "IO.getenv_raw requires 1 argument".to_string())?,
+                "IO.getenv_raw",
+            )?;
+            match std::env::var(&key) {
+                Ok(val) => Ok(VMValue::Variant("some".to_string(), Some(Box::new(VMValue::Str(val))))),
+                Err(_)  => Ok(VMValue::Variant("none".to_string(), None)),
+            }
+        }
+
+        // ── AppCtx.* primitives (v13.6.0) ────────────────────────────────────
+        "AppCtx.db_execute" => {
+            // AppCtx.db_execute(ctx_json: String, sql: String, params: String) -> Result<Int, String>
+            let mut it = args.into_iter();
+            let ctx_json = vm_string(it.next().ok_or_else(|| "AppCtx.db_execute: missing ctx".to_string())?,   "AppCtx.db_execute ctx")?;
+            let sql      = vm_string(it.next().ok_or_else(|| "AppCtx.db_execute: missing sql".to_string())?,   "AppCtx.db_execute sql")?;
+            let params   = vm_string(it.next().ok_or_else(|| "AppCtx.db_execute: missing params".to_string())?, "AppCtx.db_execute params")?;
+            let conn_str = appctx_db_url(&ctx_json);
+            match pg_execute(&conn_str, &sql, &params) {
+                Ok(()) => Ok(ok_vm(VMValue::Int(0))),
+                Err(e) => Ok(err_vm(VMValue::Str(e))),
+            }
+        }
+
+        "AppCtx.db_query" => {
+            // AppCtx.db_query(ctx_json: String, sql: String, params: String) -> Result<String, String>
+            let mut it = args.into_iter();
+            let ctx_json = vm_string(it.next().ok_or_else(|| "AppCtx.db_query: missing ctx".to_string())?,   "AppCtx.db_query ctx")?;
+            let sql      = vm_string(it.next().ok_or_else(|| "AppCtx.db_query: missing sql".to_string())?,   "AppCtx.db_query sql")?;
+            let params   = vm_string(it.next().ok_or_else(|| "AppCtx.db_query: missing params".to_string())?, "AppCtx.db_query params")?;
+            let conn_str = appctx_db_url(&ctx_json);
+            match pg_query(&conn_str, &sql, &params) {
+                Ok(json) => Ok(ok_vm(VMValue::Str(json))),
+                Err(e)   => Ok(err_vm(VMValue::Str(e))),
+            }
+        }
+
+        "AppCtx.storage_put" => {
+            // AppCtx.storage_put(ctx_json: String, bucket: String, key: String, body: String) -> Result<Unit, String>
+            let mut it = args.into_iter();
+            let ctx_json = vm_string(it.next().ok_or_else(|| "AppCtx.storage_put: missing ctx".to_string())?,    "AppCtx.storage_put ctx")?;
+            let bucket   = vm_string(it.next().ok_or_else(|| "AppCtx.storage_put: missing bucket".to_string())?, "AppCtx.storage_put bucket")?;
+            let key      = vm_string(it.next().ok_or_else(|| "AppCtx.storage_put: missing key".to_string())?,    "AppCtx.storage_put key")?;
+            let body     = vm_string(it.next().ok_or_else(|| "AppCtx.storage_put: missing body".to_string())?,   "AppCtx.storage_put body")?;
+            let config = appctx_aws_config(&ctx_json);
+            let base = if let Some(ep) = &config.endpoint_url {
+                format!("{}/{}", ep.trim_end_matches('/'), bucket)
+            } else {
+                format!("https://{}.s3.{}.amazonaws.com", bucket, config.region)
+            };
+            let url = format!("{}/{}", base, key);
+            Ok(match aws_put(&config, "s3", &url, &body) {
+                Ok(())  => ok_vm(VMValue::Unit),
+                Err(e)  => err_vm(VMValue::Str(e)),
+            })
+        }
+
+        "AppCtx.io_println" => {
+            // AppCtx.io_println(ctx_json: String, msg: String) -> Unit
+            let mut it = args.into_iter();
+            let _ctx = it.next(); // ctx is not used at runtime
+            let msg = vm_string(
+                it.next().ok_or_else(|| "AppCtx.io_println: missing msg".to_string())?,
+                "AppCtx.io_println msg",
+            )?;
+            println!("{}", msg);
+            Ok(VMValue::Unit)
+        }
+
         other => Err(format!("unknown builtin: {}", other)),
     }
+}
+
+/// Extract the db_url from an AppCtx JSON string.
+/// Falls back to the environment variable if parsing fails.
+fn appctx_db_url(ctx_json: &str) -> String {
+    if let Ok(v) = serde_json::from_str::<serde_json::Value>(ctx_json) {
+        if let Some(s) = v.get("db_url").and_then(|x| x.as_str()) {
+            if !s.is_empty() {
+                return s.to_string();
+            }
+        }
+    }
+    pg_conn_str_from_env()
+}
+
+/// Build an AwsConfig from an AppCtx JSON string.
+/// Merges env-based values (endpoint_url, credentials) with ctx's region/bucket.
+fn appctx_aws_config(ctx_json: &str) -> AwsConfig {
+    let mut cfg = AwsConfig::from_env();
+    if let Ok(v) = serde_json::from_str::<serde_json::Value>(ctx_json) {
+        if let Some(region) = v.get("aws_region").and_then(|x| x.as_str()) {
+            if !region.is_empty() {
+                cfg.region = region.to_string();
+            }
+        }
+    }
+    cfg
 }
 
 #[cfg(test)]

@@ -125,6 +125,14 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
         fix: "Call the intermediate transformation function first. Check the type state sequence inferred from this file's function signatures.",
     },
     ErrorEntry {
+        code: "E0025",
+        title: "bang notation removed",
+        category: "syntax",
+        description: "The `!Effect` notation is no longer supported in standard mode. All side effects must be expressed as capability context arguments (e.g. `ctx: LoadCtx`) rather than `!Postgres` annotations.",
+        example: "fn load() -> Result<Loaded, String> !Postgres  // E0025",
+        fix: "Migrate to capability-context style: `fn load(ctx: LoadCtx) -> Result<Loaded, String>`.\nRun `fav migrate --from-effects <file>` to auto-migrate.\nUse `--legacy` flag to suppress this error during migration.",
+    },
+    ErrorEntry {
         code: "E0213",
         title: "type mismatch",
         category: "types",

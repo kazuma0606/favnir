@@ -41,6 +41,9 @@ v12.0.0（2026-06-06）で、Python トランスパイラ（`fav transpile --tar
 v13.0.0（2026-06-09）で、言語信頼性宣言を完了しました。
 型安全・エラー伝播・デバッグ可視性の三点において、Favnir のランタイム挙動は型システムの宣言と一致することを保証します。
 また、`fav check --json` と `fav doc --builtins --format json` を用いて AI ツールが自律的にコードを修正できることを確認しました。
+v14.0.0（2026-06-11）で、能力型完成宣言を完了しました。
+副作用は通常の型システムで表現されます。`capability 引数がなければ純粋` が言語レベルで保証され、`!Postgres` 等のエフェクト型は廃止されました。
+新しいクラウドサービスの追加は `interface` に `impl` を追加するだけで完了します。`Ctx.mock(...)` により AI ツールが本番接続なしにパイプライン全体をテストできます。
 
 ---
 
@@ -82,7 +85,7 @@ seq UserImport = ParseCsv |> ValidateRow |> SaveToDb
 |---|---|---|
 | **言語コア** | 型チェッカー（ジェネリクス・HM 型推論） | ✓ |
 | | パターンマッチ（ネスト・ガード・バリアント） | ✓ |
-| | エフェクト型（`!Db` `!IO` `!Http` `!Llm` 等） | ✓ |
+| | Capability Context（`ctx: LoadCtx` / `ctx: AppCtx` 等） | ✓ |
 | | 名目型ラッパー（`type UserId(Int)` + `where` バリデーター） | ✓ |
 | | `interface` / `impl ... for` / `type T with Iface` | ✓ |
 | | `par [A, B] \|> Merge` 並列 stage 実行 | ✓ |
@@ -203,6 +206,38 @@ stage Summarize: String -> String !Llm = |text| {
 // Effects: !Db(read), !Llm, !AWS(S3 write) — AI依存度が静的に可視化される
 ```
 
+### Capability Context（v14.0.0〜）
+
+v14.0.0 以降、副作用は `capability 引数`（`ctx: LoadCtx` 等）で表現します。
+`capability 引数がなければ純粋` が言語レベルで保証されます。
+
+```favnir
+// 旧記法（--legacy モードのみ）
+fn load() -> Result<List<Row>, String> !Postgres { ... }
+
+// 新記法（v14.0.0 標準）
+fn load(ctx: LoadCtx) -> Result<List<Row>, String> { ... }
+
+// 糖衣構文
+fn load(Ctx { db: DbRead }, page: Int) -> Result<List<Row>, String> { ... }
+// → fn load(ctx: LoadCtx, page: Int) -> ... に脱糖
+
+// テスト用モック
+fn run_test() -> Bool {
+  let ctx = Ctx.mock(MockDb.empty(), MockStorage.empty());
+  let rows = load(ctx);
+  Result.is_ok(rows)
+}
+```
+
+```bash
+# 旧記法を自動移行
+fav migrate --from-effects src/pipeline.fav
+
+# E0025 チェック（非 legacy モードで !Effect 記法を検出）
+fav check pipeline.fav
+```
+
 ---
 
 ## クイックスタート
@@ -252,6 +287,8 @@ fav explain --lineage pipeline.fav  # リネージ可視化
 | v11.1.0〜v11.4.0 | Python トランスパイラ基盤（emit_python / stage-seq / !IO / !AWS → boto3） | 完了 |
 | v11.5.0〜v11.9.0 | !Postgres → psycopg2・uv 統合・checker 統合・fav2py E2E インフラ | 完了 |
 | **v12.0.0** | **Python トランスパイラ完成宣言**・公式ドキュメント・CHANGELOG 整備 | **完了** |
+| v13.1.0〜v13.10.0 | Capability Context 設計（interface 継承・ctx 型推論・E0020〜E0025・migrate ツール） | 完了 |
+| **v14.0.0** | **能力型完成宣言** — `!Effect` 廃止・`ctx: Capability` 体系の確立・CI self-check | **完了** |
 
 ---
 

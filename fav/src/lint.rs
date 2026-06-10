@@ -1158,6 +1158,105 @@ fn collect_type_state_in_expr(
     }
 }
 
+// ── E0025: check_bang_notation ────────────────────────────────────────────────
+
+/// Returns a context type hint string for a given set of effects.
+/// Conservative: unknown combos → "AppCtx".
+fn infer_ctx_hint(effects: &[Effect]) -> &'static str {
+    let has_postgres = effects.iter().any(|e| matches!(e, Effect::Postgres | Effect::Db | Effect::DbRead | Effect::DbWrite | Effect::DbAdmin | Effect::Snowflake));
+    let has_aws = effects.iter().any(|e| matches!(e, Effect::Unknown(s) if s == "AWS" || s == "S3"));
+    let has_io = effects.iter().any(|e| matches!(e, Effect::Io));
+    let has_http = effects.iter().any(|e| matches!(e, Effect::Http | Effect::Rpc | Effect::Network));
+    let has_llm = effects.iter().any(|e| matches!(e, Effect::Llm));
+
+    // Single-effect cases → specific ctx hint
+    if !has_aws && !has_http && !has_llm && has_postgres {
+        // Only DB effects
+        let db_write = effects.iter().any(|e| matches!(e, Effect::DbWrite | Effect::DbAdmin));
+        if db_write {
+            return "WriteCtx";
+        }
+        return "LoadCtx";
+    }
+    if !has_postgres && !has_aws && !has_http && !has_llm && has_io {
+        return "CommonCtx";
+    }
+    // Multiple effects or unknown → AppCtx
+    "AppCtx"
+}
+
+/// Returns E0025 errors for functions that still use `!Effect` notation (non-legacy mode).
+pub fn check_bang_notation(program: &Program) -> Vec<LintError> {
+    let mut errors = Vec::new();
+    for item in &program.items {
+        match item {
+            Item::FnDef(fd) => {
+                let meaningful: Vec<&Effect> = fd.effects.iter()
+                    .filter(|e| !matches!(e, Effect::Pure))
+                    .collect();
+                if !meaningful.is_empty() {
+                    let effects_str: Vec<String> = meaningful.iter().map(|e| format!("!{}", effect_name(e))).collect();
+                    let ctx_hint = infer_ctx_hint(&fd.effects);
+                    errors.push(LintError::new(
+                        "E0025",
+                        format!(
+                            "`!` effect notation is no longer supported: {}. Migrate to `fn {}(ctx: {}, ...) -> ...`",
+                            effects_str.join(" "),
+                            fd.name,
+                            ctx_hint
+                        ),
+                        fd.span.clone(),
+                    ));
+                }
+            }
+            Item::TrfDef(td) => {
+                let meaningful: Vec<&Effect> = td.effects.iter()
+                    .filter(|e| !matches!(e, Effect::Pure))
+                    .collect();
+                if !meaningful.is_empty() {
+                    let effects_str: Vec<String> = meaningful.iter().map(|e| format!("!{}", effect_name(e))).collect();
+                    let ctx_hint = infer_ctx_hint(&td.effects);
+                    errors.push(LintError::new(
+                        "E0025",
+                        format!(
+                            "`!` effect notation is no longer supported: {}. Migrate stage `{}` to use capability context `{}`",
+                            effects_str.join(" "),
+                            td.name,
+                            ctx_hint
+                        ),
+                        td.span.clone(),
+                    ));
+                }
+            }
+            _ => {}
+        }
+    }
+    errors
+}
+
+fn effect_name(e: &Effect) -> &str {
+    match e {
+        Effect::Pure => "Pure",
+        Effect::Io => "Io",
+        Effect::Db => "Db",
+        Effect::DbRead => "DbRead",
+        Effect::DbWrite => "DbWrite",
+        Effect::DbAdmin => "DbAdmin",
+        Effect::Network => "Network",
+        Effect::Http => "Http",
+        Effect::Llm => "Llm",
+        Effect::Snowflake => "Snowflake",
+        Effect::Postgres => "Postgres",
+        Effect::Rpc => "Rpc",
+        Effect::File => "File",
+        Effect::Checkpoint => "Checkpoint",
+        Effect::Trace => "Trace",
+        Effect::Emit(_) => "Emit",
+        Effect::EmitUnion(_) => "EmitUnion",
+        Effect::Unknown(s) => s.as_str(),
+    }
+}
+
 // ── tests ─────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]

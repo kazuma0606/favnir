@@ -24032,11 +24032,11 @@ mod v135000_tests {
         Checker::check_program(&prog)
     }
 
-    // G-1: version bump
-    #[test]
-    fn version_is_13_5_0() {
-        assert_eq!(env!("CARGO_PKG_VERSION"), "13.5.0");
-    }
+    // G-1: version bump (commented out in v13.6.0)
+    // #[test]
+    // fn version_is_13_5_0() {
+    //     assert_eq!(env!("CARGO_PKG_VERSION"), "13.5.0");
+    // }
 
     // G-2: AppCtx satisfies LoadCtx (fn expecting LoadCtx accepts AppCtx arg)
     #[test]
@@ -24147,5 +24147,94 @@ public fn run(db_url: String, region: String, bucket: String) -> Result<String, 
         let (errors, _) = check_src(src);
         let e: Vec<_> = errors.iter().filter(|e| e.code == "E0007").collect();
         assert!(e.is_empty(), "Ctx.build_raw should not produce E0007: {:?}", e);
+    }
+}
+
+// ── v136000_tests (v13.6.0) — AppCtx VM primitives + ctx-based E2E demos ─────
+#[cfg(test)]
+mod v136000_tests {
+    use crate::frontend::parser::Parser;
+    use crate::lint::check_deprecated_rune_calls;
+    use crate::middle::checker::Checker;
+
+    fn check_src(src: &str) -> (Vec<crate::middle::checker::TypeError>, Vec<crate::middle::checker::FavWarning>) {
+        let prog = Parser::parse_str(src, "test.fav").expect("parse error");
+        Checker::check_program(&prog)
+    }
+
+    // A-1: version bump
+    #[test]
+    fn version_is_13_6_0() {
+        assert_eq!(env!("CARGO_PKG_VERSION"), "13.6.0");
+    }
+
+    // A-2: AppCtx.db_execute call does not produce E0007
+    #[test]
+    fn app_ctx_db_execute_no_e0007() {
+        let src = r#"
+public fn run(ctx: AppCtx, sql: String) -> Result<Int, String> {
+    AppCtx.db_execute(ctx, sql, "[]")
+}
+"#;
+        let (errors, _) = check_src(src);
+        let e: Vec<_> = errors.iter().filter(|e| e.code == "E0007").collect();
+        assert!(e.is_empty(), "AppCtx.db_execute should not produce E0007: {:?}", e);
+    }
+
+    // A-3: AppCtx.storage_put call does not produce E0007
+    #[test]
+    fn app_ctx_storage_put_no_e0007() {
+        let src = r#"
+public fn run(ctx: AppCtx, body: String) -> Result<Unit, String> {
+    AppCtx.storage_put(ctx, "my-bucket", "my-key", body)
+}
+"#;
+        let (errors, _) = check_src(src);
+        let e: Vec<_> = errors.iter().filter(|e| e.code == "E0007").collect();
+        assert!(e.is_empty(), "AppCtx.storage_put should not produce E0007: {:?}", e);
+    }
+
+    // B-1: new fav2py pipeline.fav compiles without errors
+    #[test]
+    fn e2e_fav2py_ctx_based_compiles() {
+        let src = std::fs::read_to_string("../infra/e2e-demo/fav2py/src/pipeline.fav")
+            .expect("pipeline.fav not found");
+        let prog = Parser::parse_str(&src, "pipeline.fav").expect("parse error");
+        let (errors, _) = Checker::check_program(&prog);
+        let e: Vec<_> = errors.iter().filter(|e| e.code.starts_with('E')).collect();
+        assert!(e.is_empty(), "pipeline.fav should have no errors: {:?}", e);
+    }
+
+    // B-2: new airgap analyze.fav compiles without errors
+    #[test]
+    fn e2e_airgap_ctx_based_compiles() {
+        let src = std::fs::read_to_string("../infra/e2e-demo/airgap/src/analyze.fav")
+            .expect("analyze.fav not found");
+        let prog = Parser::parse_str(&src, "analyze.fav").expect("parse error");
+        let (errors, _) = Checker::check_program(&prog);
+        let e: Vec<_> = errors.iter().filter(|e| e.code.starts_with('E')).collect();
+        assert!(e.is_empty(), "analyze.fav should have no errors: {:?}", e);
+    }
+
+    // B-3: new fav2py pipeline.fav has zero W009 warnings
+    #[test]
+    fn w009_count_fav2py_zero() {
+        let src = std::fs::read_to_string("../infra/e2e-demo/fav2py/src/pipeline.fav")
+            .expect("pipeline.fav not found");
+        let prog = Parser::parse_str(&src, "pipeline.fav").expect("parse error");
+        let warnings = check_deprecated_rune_calls(&prog);
+        let w009: Vec<_> = warnings.iter().filter(|w| w.code == "W009").collect();
+        assert!(w009.is_empty(), "pipeline.fav should have zero W009 warnings: {:?}", w009);
+    }
+
+    // B-4: new airgap analyze.fav has zero W009 warnings
+    #[test]
+    fn w009_count_airgap_zero() {
+        let src = std::fs::read_to_string("../infra/e2e-demo/airgap/src/analyze.fav")
+            .expect("analyze.fav not found");
+        let prog = Parser::parse_str(&src, "analyze.fav").expect("parse error");
+        let warnings = check_deprecated_rune_calls(&prog);
+        let w009: Vec<_> = warnings.iter().filter(|w| w.code == "W009").collect();
+        assert!(w009.is_empty(), "analyze.fav should have zero W009 warnings: {:?}", w009);
     }
 }

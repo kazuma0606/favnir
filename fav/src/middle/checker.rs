@@ -2264,6 +2264,7 @@ impl Checker {
             "Queue",
             "Cache",
             "Email",
+            "Gen",
         ];
         for effect in effects {
             if let Effect::Unknown(name) = effect {
@@ -6097,6 +6098,31 @@ impl Checker {
                     vec![],
                 )))),
             )),
+
+            // ── Ctx.* (v13.5.0) ─────────────────────────────────────────────
+            ("Ctx", "build_raw") => Some(Type::Result(
+                Box::new(Type::Named("AppCtx".into(), vec![])),
+                Box::new(Type::String),
+            )),
+            ("Ctx", "mock_raw") => Some(Type::Named("AppCtx".into(), vec![])),
+
+            // ── AppCtx.* (v13.6.0) ──────────────────────────────────────────
+            ("AppCtx", "db_execute") => Some(Type::Result(
+                Box::new(Type::Int),
+                Box::new(Type::String),
+            )),
+            ("AppCtx", "db_query") => Some(Type::Result(
+                Box::new(Type::String),
+                Box::new(Type::String),
+            )),
+            ("AppCtx", "storage_put") => Some(Type::Result(
+                Box::new(Type::Unit),
+                Box::new(Type::String),
+            )),
+            ("AppCtx", "io_println") => Some(Type::Unit),
+
+            // ── IO.getenv_raw (v13.6.0) ──────────────────────────────────────
+            ("IO", "getenv_raw") => Some(Type::Option(Box::new(Type::String))),
 
             _ => None,
         }

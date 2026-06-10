@@ -257,6 +257,11 @@ fn lower_apply(func: &ast::Expr, args: &[ast::Expr]) -> Value {
         }
         ast::Expr::FieldAccess(inner, field, _) => match inner.as_ref() {
             ast::Expr::Ident(ns, _) => v3("ECall", sv(ns), sv(field), lower_arg_list(args)),
+            ast::Expr::FieldAccess(_, cap_name, _) => {
+                // ctx.cap.method(args) → ECall("AppCtx.{cap_name}", method, args)
+                let ns = format!("AppCtx.{}", cap_name);
+                v3("ECall", sv(&ns), sv(field), lower_arg_list(args))
+            }
             _ => v3("ECall", sv(""), sv(field), lower_arg_list(args)),
         },
         _ => v3("ECall", sv(""), sv("_unsupported_"), lower_arg_list(args)),

@@ -1,6 +1,6 @@
-// Favnir Airgap E2E Demo — ETL Pipeline
+// Favnir Airgap E2E Demo — ETL Pipeline (v13.6.0 ctx-based)
 // Runs fully self-contained: no rune imports, only VM builtins.
-// Invocation:  fav run analyze.fav -- txn_jan.csv txn_feb.csv txn_mar.csv
+// Invocation: fav run analyze.fav -- txn_jan.csv txn_feb.csv txn_mar.csv
 
 type TxnRow = {
   transaction_id: String
@@ -43,12 +43,12 @@ fn read_txn_csv(path: String) -> List<TxnRow> !IO {
 
 // ── Stage 1: Load CSV files ──────────────────────────────────────────────────
 
-stage LoadAll: List<String> -> List<TxnRow> !IO = |paths| {
-  bind jan <- read_txn_csv(list_get_str(paths, 0))
-  bind feb <- read_txn_csv(list_get_str(paths, 1))
-  bind mar <- read_txn_csv(list_get_str(paths, 2))
+fn load_all(ctx: AppCtx, paths: List<String>) -> List<TxnRow> {
+  bind jan   <- read_txn_csv(list_get_str(paths, 0))
+  bind feb   <- read_txn_csv(list_get_str(paths, 1))
+  bind mar   <- read_txn_csv(list_get_str(paths, 2))
   bind total <- List.length(jan) + List.length(feb) + List.length(mar)
-  bind _ <- IO.println(String.concat("[INFO] Loaded ", String.concat(Int.to_string(total), " rows (3 files)")))
+  bind _     <- ctx.io.println(String.concat("[INFO] Loaded ", String.concat(Int.to_string(total), " rows (3 files)")))
   List.concat(List.concat(jan, feb), mar)
 }
 
@@ -61,12 +61,12 @@ fn is_valid_row(row: TxnRow) -> Bool {
                 else { if row.region == "" { false } else { true } } } }
 }
 
-stage Validate: List<TxnRow> -> List<TxnRow> !IO = |rows| {
+fn validate(ctx: AppCtx, rows: List<TxnRow>) -> List<TxnRow> {
   bind valid   <- List.filter(rows, |row| is_valid_row(row))
   bind total   <- List.length(rows)
   bind n_valid <- List.length(valid)
   bind n_drop  <- total - n_valid
-  bind _ <- IO.println(String.concat(
+  bind _       <- ctx.io.println(String.concat(
     "[INFO] Valid: ", String.concat(
     Int.to_string(n_valid), String.concat(
     "/", String.concat(
@@ -77,23 +77,32 @@ stage Validate: List<TxnRow> -> List<TxnRow> !IO = |rows| {
 
 // ── Stage 3: Serialize and write to S3 ──────────────────────────────────────
 
-stage WriteOutput: List<TxnRow> -> Unit !IO !AWS = |rows| {
-  bind _ <- IO.println(String.concat(
+fn write_output(ctx: AppCtx, rows: List<TxnRow>) -> Unit {
+  bind _       <- ctx.io.println(String.concat(
     "[INFO] Writing ", String.concat(Int.to_string(List.length(rows)), " rows to S3")))
   bind payload <- Schema.to_json_array(rows, "TxnRow")
-  match AWS.s3_put_object_raw("favnir-e2e-demo", "airgap/output/summary.json", payload) {
-    Err(e) => IO.println(String.concat("[ERROR] S3 write failed: ", e))
-    Ok(_)  => IO.println("[INFO] Done. summary.json written to S3.")
+  match ctx.storage.put("favnir-e2e-demo", "airgap/output/summary.json", payload) {
+    Err(e) => ctx.io.println(String.concat("[ERROR] S3 write failed: ", e))
+    Ok(_)  => ctx.io.println("[INFO] Done. summary.json written to S3.")
   }
 }
 
 // ── Pipeline ─────────────────────────────────────────────────────────────────
 
-seq AnalyzePipeline = LoadAll |> Validate |> WriteOutput
+fn analyze_pipeline(ctx: AppCtx, paths: List<String>) -> Unit {
+  bind rows      <- load_all(ctx, paths)
+  bind validated <- validate(ctx, rows)
+  write_output(ctx, validated)
+}
 
 // ── Entry point — invoke as: fav run analyze.fav -- p1 p2 p3 ─────────────────
 
-fn main() -> Unit !IO !AWS {
+fn main() -> Result<Unit, String> !IO {
+  chain ctx  <- Ctx.build_raw(
+    "",
+    Option.unwrap_or(IO.getenv_raw("AWS_REGION"), "ap-northeast-1"),
+    "favnir-e2e-demo"
+  )
   bind paths <- IO.argv()
-  AnalyzePipeline(paths)
+  Result.ok(analyze_pipeline(ctx, paths))
 }

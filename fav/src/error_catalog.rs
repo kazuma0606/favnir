@@ -117,6 +117,14 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
         fix: "Pass an io capability through the function signature and call `ctx.io.println(\"hi\")` instead. Use `--legacy` flag to allow ambient calls during migration.",
     },
     ErrorEntry {
+        code: "E0024",
+        title: "type state mismatch",
+        category: "types",
+        description: "A value was passed to a function that expects a different stage in a type state sequence. The compiler inferred a type state sequence (e.g. Loaded → Validated → Transformed) from function signatures in this file, and detected a skipped phase.",
+        example: "fn validate(d: Loaded) -> Result<Validated, String>\nfn transform(d: Validated) -> Result<Transformed, String>\n\ntransform(rows)  // E0024: got Loaded, expected Validated",
+        fix: "Call the intermediate transformation function first. Check the type state sequence inferred from this file's function signatures.",
+    },
+    ErrorEntry {
         code: "E0213",
         title: "type mismatch",
         category: "types",

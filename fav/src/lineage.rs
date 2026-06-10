@@ -15,7 +15,11 @@ use crate::ast;
 #[derive(Debug, Clone, Serialize)]
 pub struct LineageEntry {
     pub name: String,
-    pub kind: String, // "stage" | "fn"
+    /// Capability-based classification: "read" | "write" | "transform" | "sink" | "io"
+    /// (v13.9.0+; previously "stage" | "fn")
+    pub kind: String,
+    /// The primary capability interface of this entry, e.g. "DbRead", "DbWrite", "StorageWrite"
+    pub capability: Option<String>,
     pub effects: Vec<String>,
     pub sources: Vec<String>, // tables read
     pub sinks: Vec<String>,   // tables written
@@ -76,6 +80,49 @@ fn is_db_read_effect(e: &ast::Effect) -> bool {
 
 fn is_db_write_effect(e: &ast::Effect) -> bool {
     matches!(e, ast::Effect::Db | ast::Effect::DbWrite | ast::Effect::DbAdmin)
+}
+
+/// Classify a function/stage by capability kind based on parameter types and effects.
+/// Returns (kind, capability): e.g. ("read", Some("DbRead")), ("transform", None).
+fn classify_capability_kind(
+    params: &[ast::Param],
+    effects: &[ast::Effect],
+) -> (String, Option<String>) {
+    // First: check parameter type names for ctx-based capabilities (v13.x design)
+    for p in params {
+        if let ast::TypeExpr::Named(name, _, _) = &p.ty {
+            match name.as_str() {
+                "DbWrite" | "WriteCtx" | "MigrateCtx" => {
+                    return ("write".into(), Some("DbWrite".into()))
+                }
+                "StorageWrite" => return ("sink".into(), Some("StorageWrite".into())),
+                "DbRead" | "LoadCtx" => return ("read".into(), Some("DbRead".into())),
+                "AppCtx" => return ("read".into(), Some("DbRead".into())),
+                "Io" | "CommonCtx" => return ("io".into(), Some("Io".into())),
+                _ => {}
+            }
+        }
+    }
+    // Fallback: classify by legacy effect annotations
+    for e in effects {
+        match e {
+            ast::Effect::DbWrite | ast::Effect::DbAdmin => {
+                return ("write".into(), Some("DbWrite".into()))
+            }
+            ast::Effect::Db | ast::Effect::DbRead => {
+                return ("read".into(), Some("DbRead".into()))
+            }
+            ast::Effect::Postgres | ast::Effect::Snowflake => {
+                return ("read".into(), Some("DbRead".into()))
+            }
+            ast::Effect::Network | ast::Effect::Http | ast::Effect::Llm | ast::Effect::Rpc => {
+                return ("io".into(), Some("HttpClient".into()))
+            }
+            ast::Effect::Io | ast::Effect::File => return ("io".into(), Some("Io".into())),
+            _ => {}
+        }
+    }
+    ("transform".into(), None)
 }
 
 fn strip_sql_ident(s: &str) -> String {
@@ -443,9 +490,11 @@ pub fn lineage_analysis(program: &ast::Program) -> LineageReport {
             if sf_write {
                 sinks.push(format!("({}:snowflake-write)", trf.name));
             }
+            let (cap_kind, cap_name) = classify_capability_kind(&trf.params, &trf.effects);
             transformations.push(LineageEntry {
                 name: trf.name.clone(),
-                kind: "stage".into(),
+                kind: cap_kind,
+                capability: cap_name,
                 effects: snowflake_effects(&trf.effects, sf_read, sf_write),
                 sources,
                 sinks,
@@ -489,9 +538,11 @@ pub fn lineage_analysis(program: &ast::Program) -> LineageReport {
                 sinks.push(format!("({}:snowflake-write)", fndef.name));
             }
             if !fndef.effects.is_empty() {
+                let (cap_kind, cap_name) = classify_capability_kind(&fndef.params, &fndef.effects);
                 transformations.push(LineageEntry {
                     name: fndef.name.clone(),
-                    kind: "fn".into(),
+                    kind: cap_kind,
+                    capability: cap_name,
                     effects: snowflake_effects(&fndef.effects, sf_read, sf_write),
                     sources,
                     sinks,
@@ -601,11 +652,12 @@ pub fn render_lineage_text(report: &LineageReport, filename: &str) -> String {
         out.push_str("  (none)\n");
     } else {
         for e in &report.transformations {
+            let cap_str = e.capability.as_deref().unwrap_or("(pure)");
             out.push_str(&format!(
-                "  {} {} [{}]",
-                e.kind,
+                "  {:12} [{}]  {}",
                 e.name,
-                e.effects.join(", ")
+                e.kind,
+                cap_str,
             ));
             if !e.sources.is_empty() || !e.sinks.is_empty() {
                 out.push_str(&format!(

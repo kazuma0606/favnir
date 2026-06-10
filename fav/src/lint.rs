@@ -860,6 +860,304 @@ fn collect_deprecated_in_expr(expr: &Expr, errors: &mut Vec<LintError>) {
     }
 }
 
+// ── E0024: type state mismatch ────────────────────────────────────────────────
+
+const CTX_LIKE_TYPES: &[&str] = &[
+    "AppCtx", "LoadCtx", "WriteCtx", "MigrateCtx", "CommonCtx",
+];
+
+/// Extract a simple type name (no type args) from a TypeExpr.
+fn simple_type_name(ty: &TypeExpr) -> Option<&str> {
+    if let TypeExpr::Named(name, args, _) = ty {
+        if args.is_empty() {
+            return Some(name.as_str());
+        }
+    }
+    None
+}
+
+/// Unwrap `Result<T, E>` → T name, or plain `T` → T name.
+fn unwrap_output_type_name(ty: &TypeExpr) -> Option<&str> {
+    if let TypeExpr::Named(name, args, _) = ty {
+        if name == "Result" {
+            if let Some(inner) = args.first() {
+                return simple_type_name(inner);
+            }
+        }
+        if args.is_empty() {
+            return Some(name.as_str());
+        }
+    }
+    None
+}
+
+/// Find the "content" parameter type (first non-ctx-like named type).
+fn content_param_type_name<'a>(params: &'a [Param]) -> Option<&'a str> {
+    for p in params {
+        if let Some(name) = simple_type_name(&p.ty) {
+            if !CTX_LIKE_TYPES.contains(&name) {
+                return Some(name);
+            }
+        }
+    }
+    None
+}
+
+/// Collect type-state transition functions: fn_name → (input_type, output_type).
+/// Only functions where both input and output are declared `type X(...)` in the file.
+fn collect_type_state_edges(
+    program: &Program,
+) -> (
+    std::collections::HashMap<String, String>, // fn_name → expected_input
+    std::collections::HashMap<String, String>, // fn_name → output_type
+    std::collections::HashSet<String>,         // all type state type names
+) {
+    let type_state_names: std::collections::HashSet<String> = program
+        .items
+        .iter()
+        .filter_map(|item| {
+            if let Item::TypeDef(td) = item {
+                Some(td.name.clone())
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    let mut fn_expects = std::collections::HashMap::new();
+    let mut fn_output = std::collections::HashMap::new();
+
+    for item in &program.items {
+        if let Item::FnDef(fd) = item {
+            if let Some(input_name) = content_param_type_name(&fd.params) {
+                if type_state_names.contains(input_name) {
+                    if let Some(ret_ty) = &fd.return_ty {
+                        if let Some(output_name) = unwrap_output_type_name(ret_ty) {
+                            if type_state_names.contains(output_name)
+                                && input_name != output_name
+                            {
+                                fn_expects
+                                    .insert(fd.name.clone(), input_name.to_string());
+                                fn_output
+                                    .insert(fd.name.clone(), output_name.to_string());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    (fn_expects, fn_output, type_state_names)
+}
+
+/// Returns E0024 errors for type state phase violations in `program`.
+pub fn check_type_state_errors(program: &Program) -> Vec<LintError> {
+    let (fn_expects, fn_output, type_state_names) = collect_type_state_edges(program);
+    if fn_expects.is_empty() {
+        return vec![];
+    }
+
+    let mut errors = Vec::new();
+    for item in &program.items {
+        if let Item::FnDef(fd) = item {
+            let mut env: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+            for p in &fd.params {
+                if let Some(name) = simple_type_name(&p.ty) {
+                    env.insert(p.name.clone(), name.to_string());
+                }
+            }
+            collect_type_state_in_block(
+                &fd.body,
+                &fn_expects,
+                &fn_output,
+                &type_state_names,
+                &mut env,
+                &mut errors,
+            );
+        }
+    }
+    errors
+}
+
+fn collect_type_state_in_block(
+    block: &Block,
+    fn_expects: &std::collections::HashMap<String, String>,
+    fn_output: &std::collections::HashMap<String, String>,
+    type_state_names: &std::collections::HashSet<String>,
+    env: &mut std::collections::HashMap<String, String>,
+    errors: &mut Vec<LintError>,
+) {
+    for stmt in &block.stmts {
+        match stmt {
+            Stmt::Bind(b) => {
+                collect_type_state_in_expr(
+                    &b.expr, fn_expects, fn_output, type_state_names, env, errors,
+                );
+                if let Pattern::Bind(var_name, _) = &b.pattern {
+                    if let Some(out_ty) = get_ts_call_output(&b.expr, fn_output) {
+                        env.insert(var_name.clone(), out_ty);
+                    }
+                }
+            }
+            Stmt::Chain(c) => {
+                collect_type_state_in_expr(
+                    &c.expr, fn_expects, fn_output, type_state_names, env, errors,
+                );
+                if let Some(out_ty) = get_ts_call_output(&c.expr, fn_output) {
+                    env.insert(c.name.clone(), out_ty);
+                }
+            }
+            Stmt::Expr(e) => {
+                collect_type_state_in_expr(e, fn_expects, fn_output, type_state_names, env, errors)
+            }
+            Stmt::Yield(y) => collect_type_state_in_expr(
+                &y.expr, fn_expects, fn_output, type_state_names, env, errors,
+            ),
+            Stmt::ForIn(f) => {
+                collect_type_state_in_expr(
+                    &f.iter, fn_expects, fn_output, type_state_names, env, errors,
+                );
+                collect_type_state_in_block(
+                    &f.body, fn_expects, fn_output, type_state_names, env, errors,
+                );
+            }
+        }
+    }
+    collect_type_state_in_expr(
+        &block.expr, fn_expects, fn_output, type_state_names, env, errors,
+    );
+}
+
+/// If `expr` is `fn_name(args)` and fn_name is a type-state fn, return its output type.
+fn get_ts_call_output(
+    expr: &Expr,
+    fn_output: &std::collections::HashMap<String, String>,
+) -> Option<String> {
+    if let Expr::Apply(func, _, _) = expr {
+        if let Expr::Ident(fn_name, _) = func.as_ref() {
+            return fn_output.get(fn_name).cloned();
+        }
+    }
+    None
+}
+
+fn collect_type_state_in_expr(
+    expr: &Expr,
+    fn_expects: &std::collections::HashMap<String, String>,
+    fn_output: &std::collections::HashMap<String, String>,
+    type_state_names: &std::collections::HashSet<String>,
+    env: &mut std::collections::HashMap<String, String>,
+    errors: &mut Vec<LintError>,
+) {
+    match expr {
+        Expr::Apply(func, args, span) => {
+            if let Expr::Ident(fn_name, _) = func.as_ref() {
+                if let Some(expected_ty) = fn_expects.get(fn_name) {
+                    // Find the first arg that is an Ident (skip ctx-like args)
+                    let first_content_arg = args.iter().find(|a| {
+                        if let Expr::Ident(v, _) = a {
+                            !CTX_LIKE_TYPES.contains(&v.as_str())
+                        } else {
+                            false
+                        }
+                    });
+                    if let Some(Expr::Ident(var_name, _)) = first_content_arg {
+                        if let Some(actual_ty) = env.get(var_name.as_str()) {
+                            if actual_ty != expected_ty
+                                && type_state_names.contains(actual_ty.as_str())
+                            {
+                                errors.push(LintError::new(
+                                    "E0024",
+                                    format!(
+                                        "type state mismatch — `{}` expected `{}`, got `{}`",
+                                        fn_name, expected_ty, actual_ty
+                                    ),
+                                    span.clone(),
+                                ));
+                            }
+                        }
+                    }
+                }
+            }
+            collect_type_state_in_expr(func, fn_expects, fn_output, type_state_names, env, errors);
+            for a in args {
+                collect_type_state_in_expr(a, fn_expects, fn_output, type_state_names, env, errors);
+            }
+        }
+        Expr::Block(b) => {
+            collect_type_state_in_block(b, fn_expects, fn_output, type_state_names, env, errors)
+        }
+        Expr::If(cond, then, else_, _) => {
+            collect_type_state_in_expr(cond, fn_expects, fn_output, type_state_names, env, errors);
+            collect_type_state_in_block(then, fn_expects, fn_output, type_state_names, env, errors);
+            if let Some(eb) = else_ {
+                collect_type_state_in_block(
+                    eb, fn_expects, fn_output, type_state_names, env, errors,
+                );
+            }
+        }
+        Expr::Match(scrutinee, arms, _) => {
+            collect_type_state_in_expr(
+                scrutinee, fn_expects, fn_output, type_state_names, env, errors,
+            );
+            for arm in arms {
+                collect_type_state_in_expr(
+                    &arm.body, fn_expects, fn_output, type_state_names, env, errors,
+                );
+            }
+        }
+        Expr::Pipeline(steps, _) => {
+            for s in steps {
+                collect_type_state_in_expr(
+                    s, fn_expects, fn_output, type_state_names, env, errors,
+                );
+            }
+        }
+        Expr::FieldAccess(obj, _, _) => {
+            collect_type_state_in_expr(obj, fn_expects, fn_output, type_state_names, env, errors)
+        }
+        Expr::BinOp(_, l, r, _) => {
+            collect_type_state_in_expr(l, fn_expects, fn_output, type_state_names, env, errors);
+            collect_type_state_in_expr(r, fn_expects, fn_output, type_state_names, env, errors);
+        }
+        Expr::Closure(_, body, _) => {
+            collect_type_state_in_expr(body, fn_expects, fn_output, type_state_names, env, errors)
+        }
+        Expr::Collect(b, _) => {
+            collect_type_state_in_block(b, fn_expects, fn_output, type_state_names, env, errors)
+        }
+        Expr::EmitExpr(inner, _) => {
+            collect_type_state_in_expr(inner, fn_expects, fn_output, type_state_names, env, errors)
+        }
+        Expr::Question(inner, _) => {
+            collect_type_state_in_expr(inner, fn_expects, fn_output, type_state_names, env, errors)
+        }
+        Expr::AssertMatches(e, _, _) => {
+            collect_type_state_in_expr(e, fn_expects, fn_output, type_state_names, env, errors)
+        }
+        Expr::TypeApply(f, _, _) => {
+            collect_type_state_in_expr(f, fn_expects, fn_output, type_state_names, env, errors)
+        }
+        Expr::RecordConstruct(_, fields, _) => {
+            for (_, v) in fields {
+                collect_type_state_in_expr(
+                    v, fn_expects, fn_output, type_state_names, env, errors,
+                );
+            }
+        }
+        Expr::FString(parts, _) => {
+            for part in parts {
+                if let FStringPart::Expr(e) = part {
+                    collect_type_state_in_expr(
+                        e, fn_expects, fn_output, type_state_names, env, errors,
+                    );
+                }
+            }
+        }
+        Expr::Lit(..) | Expr::Ident(..) => {}
+    }
+}
+
 // ── tests ─────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]

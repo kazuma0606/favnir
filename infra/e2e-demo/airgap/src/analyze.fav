@@ -89,11 +89,7 @@ fn write_output(ctx: AppCtx, rows: List<TxnRow>) -> Unit {
 
 // ── Pipeline ─────────────────────────────────────────────────────────────────
 
-fn analyze_pipeline(ctx: AppCtx, paths: List<String>) -> Unit {
-  bind rows      <- load_all(ctx, paths)
-  bind validated <- validate(ctx, rows)
-  write_output(ctx, validated)
-}
+seq AnalyzePipeline(ctx) = load_all |> validate |> write_output
 
 // ── Entry point — invoke as: fav run analyze.fav -- p1 p2 p3 ─────────────────
 
@@ -104,5 +100,5 @@ fn main() -> Result<Unit, String> !IO {
     "favnir-e2e-demo"
   )
   bind paths <- IO.argv()
-  Result.ok(analyze_pipeline(ctx, paths))
+  Result.ok(AnalyzePipeline(ctx, paths))
 }

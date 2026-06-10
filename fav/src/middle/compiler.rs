@@ -629,7 +629,107 @@ fn build_step_call(step: &FlwStep, input: IRExpr, ctx: &mut CompileCtx) -> IRExp
     }
 }
 
+/// Build the IRExpr for a single FlwStep applied to `input`, with ctx as first arg.
+fn build_step_call_ctx(step: &FlwStep, ctx_slot: u16, input: IRExpr, ctx: &mut CompileCtx) -> IRExpr {
+    match step {
+        FlwStep::Stage(name) => {
+            let callee = if let Some(global_idx) = ctx.resolve_global(name) {
+                IRExpr::Global(global_idx, Type::Unknown)
+            } else {
+                IRExpr::Global(u16::MAX, Type::Unknown)
+            };
+            let ctx_expr = IRExpr::Local(ctx_slot, Type::Unknown);
+            IRExpr::Call(Box::new(callee), vec![ctx_expr, input], Type::Unknown)
+        }
+        FlwStep::Par(_) => {
+            // par with ctx threading is not supported in v13.7.0
+            IRExpr::Global(u16::MAX, Type::Unknown)
+        }
+    }
+}
+
+/// Compile a ctx-aware FlwDef: `seq Pipeline(ctx) = A |> B |> C`
+/// Emits param_count=2 (ctx, input) and threads ctx to every stage call.
+fn compile_flw_def_ctx_aware(fd: &FlwDef, cctx: &mut CompileCtx) -> IRFnDef {
+    let saved_next = cctx.next_slot;
+    let saved_anon = cctx.anon_counter;
+    let saved_locals = std::mem::take(&mut cctx.locals);
+    let saved_local_tys = std::mem::take(&mut cctx.local_tys);
+
+    cctx.next_slot = 0;
+    cctx.anon_counter = 0;
+    cctx.push_scope();
+    let ctx_slot = cctx.define_local("$ctx");
+    let input_slot = cctx.define_local("$input");
+
+    let total = fd.steps.len();
+    let body = if total <= 1 {
+        let mut current = IRExpr::Local(input_slot, Type::Unknown);
+        for step in &fd.steps {
+            current = build_step_call_ctx(step, ctx_slot, current, cctx);
+        }
+        current
+    } else {
+        let mut stmts: Vec<IRStmt> = Vec::new();
+        let mut current_slot = input_slot;
+
+        for (idx, step) in fd.steps.iter().enumerate() {
+            let is_last = idx == total - 1;
+            let input = IRExpr::Local(current_slot, Type::Unknown);
+            let call_expr = build_step_call_ctx(step, ctx_slot, input, cctx);
+
+            if is_last {
+                let local_count = cctx.next_slot as usize;
+                cctx.locals = saved_locals;
+                cctx.local_tys = saved_local_tys;
+                cctx.next_slot = saved_next;
+                cctx.anon_counter = saved_anon;
+                return IRFnDef {
+                    name: fd.name.clone(),
+                    param_count: 2,
+                    param_tys: vec![Type::Unknown, Type::Unknown],
+                    local_count,
+                    effects: Vec::new(),
+                    return_ty: Type::Unknown,
+                    body: IRExpr::Block(stmts, Box::new(call_expr), Type::Unknown),
+                };
+            } else {
+                let tmp_slot = cctx.define_local(format!("$seq{idx}"));
+                stmts.push(IRStmt::SeqChain {
+                    slot: tmp_slot,
+                    expr: call_expr,
+                    stage_name: flw_step_name(step),
+                    stage_idx: idx as u8,
+                    total: total as u8,
+                });
+                current_slot = tmp_slot;
+            }
+        }
+        IRExpr::Local(input_slot, Type::Unknown)
+    };
+
+    let local_count = cctx.next_slot as usize;
+    cctx.locals = saved_locals;
+    cctx.local_tys = saved_local_tys;
+    cctx.next_slot = saved_next;
+    cctx.anon_counter = saved_anon;
+
+    IRFnDef {
+        name: fd.name.clone(),
+        param_count: 2,
+        param_tys: vec![Type::Unknown, Type::Unknown],
+        local_count,
+        effects: Vec::new(),
+        return_ty: Type::Unknown,
+        body,
+    }
+}
+
 fn compile_flw_def(fd: &FlwDef, ctx: &mut CompileCtx) -> IRFnDef {
+    if fd.ctx_param.is_some() {
+        return compile_flw_def_ctx_aware(fd, ctx);
+    }
+
     let saved_next = ctx.next_slot;
     let saved_anon = ctx.anon_counter;
     let saved_locals = std::mem::take(&mut ctx.locals);

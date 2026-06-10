@@ -24162,10 +24162,10 @@ mod v136000_tests {
         Checker::check_program(&prog)
     }
 
-    // A-1: version bump
+    // A-1: version was bumped to 13.6.0
     #[test]
     fn version_is_13_6_0() {
-        assert_eq!(env!("CARGO_PKG_VERSION"), "13.6.0");
+        assert!(env!("CARGO_PKG_VERSION") >= "13.6.0", "version should be >= 13.6.0");
     }
 
     // A-2: AppCtx.db_execute call does not produce E0007
@@ -24236,5 +24236,132 @@ public fn run(ctx: AppCtx, body: String) -> Result<Unit, String> {
         let warnings = check_deprecated_rune_calls(&prog);
         let w009: Vec<_> = warnings.iter().filter(|w| w.code == "W009").collect();
         assert!(w009.is_empty(), "analyze.fav should have zero W009 warnings: {:?}", w009);
+    }
+}
+
+// ── v137000_tests (v13.7.0) — seq pipeline ctx threading + E0022 ──────────────
+#[cfg(test)]
+mod v137000_tests {
+    use crate::frontend::parser::Parser;
+    use crate::middle::checker::Checker;
+    use crate::ast::Item;
+
+    fn check_src(src: &str) -> (Vec<crate::middle::checker::TypeError>, Vec<crate::middle::checker::FavWarning>) {
+        let prog = Parser::parse_str(src, "test.fav").expect("parse error");
+        Checker::check_program(&prog)
+    }
+
+    fn parse_src(src: &str) -> crate::ast::Program {
+        Parser::parse_str(src, "test.fav").expect("parse error")
+    }
+
+    // A-1: version bump
+    #[test]
+    fn version_is_13_7_0() {
+        assert_eq!(env!("CARGO_PKG_VERSION"), "13.7.0");
+    }
+
+    // B-1: seq Pipeline(ctx) = A |> B parses successfully with ctx_param = Some("ctx")
+    #[test]
+    fn seq_ctx_param_parsed() {
+        let prog = parse_src("seq Pipeline(ctx) = Load |> Save");
+        let fd = match &prog.items[0] {
+            Item::FlwDef(f) => f,
+            _ => panic!("expected FlwDef"),
+        };
+        assert_eq!(fd.name, "Pipeline");
+        assert_eq!(fd.ctx_param, Some("ctx".to_string()));
+        assert_eq!(fd.steps.len(), 2);
+    }
+
+    // B-2: plain seq (no ctx) still parses with ctx_param = None (backward compat)
+    #[test]
+    fn seq_no_ctx_backward_compat() {
+        let prog = parse_src("seq Pipeline = Load |> Transform |> Save");
+        let fd = match &prog.items[0] {
+            Item::FlwDef(f) => f,
+            _ => panic!("expected FlwDef"),
+        };
+        assert_eq!(fd.name, "Pipeline");
+        assert_eq!(fd.ctx_param, None);
+        assert_eq!(fd.steps.len(), 3);
+    }
+
+    // C-1: ctx-aware FlwDef compiles to param_count = 2
+    #[test]
+    fn seq_ctx_compiles_param_count_2() {
+        use crate::middle::compiler::compile_program;
+        let prog = parse_src(r#"
+fn Stage1(ctx: AppCtx, x: Int) -> Int { x }
+fn Stage2(ctx: AppCtx, x: Int) -> Int { x }
+seq Pipeline(ctx) = Stage1 |> Stage2
+"#);
+        let ir = compile_program(&prog);
+        let pipeline_fn = ir.fns.iter().find(|f| f.name == "Pipeline").expect("Pipeline not found");
+        assert_eq!(pipeline_fn.param_count, 2, "ctx-aware pipeline should have param_count=2");
+    }
+
+    // C-2: plain FlwDef still compiles to param_count = 1
+    #[test]
+    fn seq_plain_compiles_param_count_1() {
+        use crate::middle::compiler::compile_program;
+        let prog = parse_src(r#"
+fn Stage1(x: Int) -> Int { x }
+fn Stage2(x: Int) -> Int { x }
+seq Pipeline = Stage1 |> Stage2
+"#);
+        let ir = compile_program(&prog);
+        let pipeline_fn = ir.fns.iter().find(|f| f.name == "Pipeline").expect("Pipeline not found");
+        assert_eq!(pipeline_fn.param_count, 1, "plain pipeline should have param_count=1");
+    }
+
+    // D-1: E0022 — ctx-aware pipeline called with 1 argument
+    #[test]
+    fn e0022_ctx_pipeline_called_without_ctx() {
+        let src = r#"
+fn Stage1(ctx: AppCtx, x: Int) -> Int { x }
+fn Stage2(ctx: AppCtx, x: Int) -> Int { x }
+seq Pipeline(ctx) = Stage1 |> Stage2
+fn run() -> Int { Pipeline(42) }
+"#;
+        let (errors, _) = check_src(src);
+        let e0022: Vec<_> = errors.iter().filter(|e| e.code == "E0022").collect();
+        assert!(!e0022.is_empty(), "should get E0022 when calling ctx-aware pipeline with 1 arg: {:?}", errors);
+    }
+
+    // D-2: ctx-aware pipeline called correctly with 2 args — no E0022
+    #[test]
+    fn seq_ctx_called_correctly_no_e0022() {
+        let src = r#"
+fn Stage1(ctx: AppCtx, x: Int) -> Int { x }
+fn Stage2(ctx: AppCtx, x: Int) -> Int { x }
+seq Pipeline(ctx) = Stage1 |> Stage2
+fn run(ctx: AppCtx) -> Int { Pipeline(ctx, 42) }
+"#;
+        let (errors, _) = check_src(src);
+        let e0022: Vec<_> = errors.iter().filter(|e| e.code == "E0022").collect();
+        assert!(e0022.is_empty(), "correctly called ctx pipeline should not have E0022: {:?}", e0022);
+    }
+
+    // E-1: fav2py pipeline.fav with seq Pipeline(ctx) compiles without E* errors
+    #[test]
+    fn e2e_fav2py_seq_ctx_compiles() {
+        let src = std::fs::read_to_string("../infra/e2e-demo/fav2py/src/pipeline.fav")
+            .expect("pipeline.fav not found");
+        let prog = Parser::parse_str(&src, "pipeline.fav").expect("parse error");
+        let (errors, _) = Checker::check_program(&prog);
+        let e: Vec<_> = errors.iter().filter(|e| e.code.starts_with('E')).collect();
+        assert!(e.is_empty(), "pipeline.fav should have no errors: {:?}", e);
+    }
+
+    // E-2: airgap analyze.fav with seq AnalyzePipeline(ctx) compiles without E* errors
+    #[test]
+    fn e2e_airgap_seq_ctx_compiles() {
+        let src = std::fs::read_to_string("../infra/e2e-demo/airgap/src/analyze.fav")
+            .expect("analyze.fav not found");
+        let prog = Parser::parse_str(&src, "analyze.fav").expect("parse error");
+        let (errors, _) = Checker::check_program(&prog);
+        let e: Vec<_> = errors.iter().filter(|e| e.code.starts_with('E')).collect();
+        assert!(e.is_empty(), "analyze.fav should have no errors: {:?}", e);
     }
 }

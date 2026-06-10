@@ -1,4 +1,4 @@
-// fav2py E2E Demo — Pipeline (v13.6.0 capability-context version)
+// fav2py E2E Demo — Pipeline (v13.7.0 seq ctx-threading style)
 // Run: fav run pipeline.fav (no --legacy flag needed)
 
 type TxnRow = {
@@ -64,13 +64,13 @@ fn save_result(ctx: AppCtx, result_json: String) -> Result<Unit, String> !Gen {
   )
 }
 
+seq Pipeline(ctx) = load_and_insert |> aggregate |> save_result
+
 fn main() -> Result<Unit, String> !IO {
-  chain ctx    <- Ctx.build_raw(
+  chain ctx <- Ctx.build_raw(
     Option.unwrap_or(IO.getenv_raw("DATABASE_URL"), ""),
     Option.unwrap_or(IO.getenv_raw("AWS_REGION"),   "ap-northeast-1"),
     Option.unwrap_or(IO.getenv_raw("S3_BUCKET"),    "favnir-e2e-demo")
   )
-  chain n      <- load_and_insert(ctx, get_csv_path(IO.argv()))
-  chain result <- aggregate(ctx, n)
-  save_result(ctx, result)
+  Pipeline(ctx, get_csv_path(IO.argv()))
 }

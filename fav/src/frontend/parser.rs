@@ -1316,6 +1316,14 @@ impl Parser {
         let start = self.peek_span().clone();
         self.expect(&TokenKind::Seq)?;
         let (name, _) = self.expect_ident()?;
+        let ctx_param = if self.peek() == &TokenKind::LParen {
+            self.advance();
+            let (ident, _) = self.expect_ident()?;
+            self.expect(&TokenKind::RParen)?;
+            Some(ident)
+        } else {
+            None
+        };
         self.expect(&TokenKind::Eq)?;
 
         let first = self.parse_flw_step()?;
@@ -1328,6 +1336,7 @@ impl Parser {
         Ok(FlwDef {
             name,
             steps,
+            ctx_param,
             span: self.span_from(&start),
         })
     }
@@ -1414,6 +1423,14 @@ impl Parser {
         let start = self.peek_span().clone();
         self.expect(&TokenKind::Seq)?;
         let (name, _) = self.expect_ident()?;
+        let ctx_param = if self.peek() == &TokenKind::LParen {
+            self.advance();
+            let (ident, _) = self.expect_ident()?;
+            self.expect(&TokenKind::RParen)?;
+            Some(ident)
+        } else {
+            None
+        };
         self.expect(&TokenKind::Eq)?;
 
         // Check if first step is `par [...]` or an ident used as template for binding.
@@ -1428,6 +1445,7 @@ impl Parser {
             return Ok(Item::FlwDef(FlwDef {
                 name,
                 steps,
+                ctx_param,
                 span: self.span_from(&start),
             }));
         }
@@ -1447,6 +1465,7 @@ impl Parser {
                 Ok(Item::FlwDef(FlwDef {
                     name,
                     steps,
+                    ctx_param,
                     span: self.span_from(&start),
                 }))
             }

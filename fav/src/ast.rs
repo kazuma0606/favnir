@@ -470,6 +470,9 @@ pub struct FlwDef {
     pub name: String,
     /// Ordered list of steps (single stage or parallel group).
     pub steps: Vec<FlwStep>,
+    /// If Some, this pipeline threads a ctx argument to each stage call.
+    /// e.g. `seq Pipeline(ctx) = A |> B |> C` → ctx_param = Some("ctx")
+    pub ctx_param: Option<String>,
     pub span: Span,
 }
 

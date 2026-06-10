@@ -183,9 +183,14 @@ fn lower_flw_step(step: &ast::FlwStep) -> Value {
 
 fn lower_flw_def(fd: &ast::FlwDef) -> Value {
     let steps: Vec<Value> = fd.steps.iter().map(lower_flw_step).collect();
+    let ctx_param = match &fd.ctx_param {
+        Some(p) => Value::Str(p.clone()),
+        None => Value::Str(String::new()),
+    };
     vm_record(vec![
         ("name", sv(&fd.name)),
         ("stages", vm_list(steps)),
+        ("ctx_param", ctx_param),
     ])
 }
 

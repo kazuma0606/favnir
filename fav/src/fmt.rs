@@ -246,7 +246,8 @@ impl Formatter {
 
     fn flw_def(&mut self, fd: &FlwDef) -> String {
         let steps: Vec<String> = fd.steps.iter().map(|s| s.display_str()).collect();
-        format!("seq {} = {}", fd.name, steps.join(" |> "))
+        let ctx_part = fd.ctx_param.as_ref().map(|p| format!("({})", p)).unwrap_or_default();
+        format!("seq {}{} = {}", fd.name, ctx_part, steps.join(" |> "))
     }
 
     fn abstract_flw_def(&mut self, fd: &AbstractFlwDef) -> String {

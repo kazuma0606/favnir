@@ -986,6 +986,7 @@ impl Checker {
             c.check_item(item);
         }
         c.detect_interface_cycles(program);
+        c.check_ctx_pipeline_arity(program);
         (c.errors, c.warnings)
     }
 
@@ -2981,11 +2982,124 @@ impl Checker {
 
     // ── flw_def (4-9) ─────────────────────────────────────────────────────────
 
+    /// E0022: ctx-aware pipeline arity check.
+    /// Detects `seq P(ctx) = ...` called with 1 arg, or plain `seq P = ...` called with 2 args.
+    fn check_ctx_pipeline_arity(&mut self, program: &Program) {
+        // Build map: pipeline_name → has_ctx
+        let mut ctx_map: std::collections::HashMap<String, bool> = std::collections::HashMap::new();
+        for item in &program.items {
+            if let Item::FlwDef(fd) = item {
+                ctx_map.insert(fd.name.clone(), fd.ctx_param.is_some());
+            }
+        }
+        if ctx_map.is_empty() {
+            return;
+        }
+        // Walk all fn/trf bodies scanning for Apply expressions
+        for item in &program.items {
+            match item {
+                Item::FnDef(f) => self.scan_block_for_pipeline_calls(&f.body, &ctx_map),
+                Item::TrfDef(t) => self.scan_block_for_pipeline_calls(&t.body, &ctx_map),
+                Item::ImplDef(id) => {
+                    for m in &id.methods {
+                        self.scan_block_for_pipeline_calls(&m.body, &ctx_map);
+                    }
+                }
+                Item::TestDef(td) => self.scan_block_for_pipeline_calls(&td.body, &ctx_map),
+                _ => {}
+            }
+        }
+    }
+
+    fn scan_block_for_pipeline_calls(
+        &mut self,
+        block: &Block,
+        ctx_map: &std::collections::HashMap<String, bool>,
+    ) {
+        for stmt in &block.stmts {
+            match stmt {
+                Stmt::Bind(b) => self.scan_expr_for_pipeline_calls(&b.expr, ctx_map),
+                Stmt::Chain(c) => self.scan_expr_for_pipeline_calls(&c.expr, ctx_map),
+                Stmt::Expr(e) => self.scan_expr_for_pipeline_calls(e, ctx_map),
+                Stmt::Yield(y) => self.scan_expr_for_pipeline_calls(&y.expr, ctx_map),
+                Stmt::ForIn(f) => {
+                    self.scan_expr_for_pipeline_calls(&f.iter, ctx_map);
+                    self.scan_block_for_pipeline_calls(&f.body, ctx_map);
+                }
+            }
+        }
+        self.scan_expr_for_pipeline_calls(&block.expr, ctx_map);
+    }
+
+    fn scan_expr_for_pipeline_calls(
+        &mut self,
+        expr: &Expr,
+        ctx_map: &std::collections::HashMap<String, bool>,
+    ) {
+        match expr {
+            Expr::Apply(func, args, span) => {
+                // Check if func is a direct identifier that names a FlwDef
+                let pipeline_name = match func.as_ref() {
+                    Expr::Ident(name, _) => Some(name.as_str()),
+                    _ => None,
+                };
+                if let Some(name) = pipeline_name {
+                    if let Some(&has_ctx) = ctx_map.get(name) {
+                        let expected = if has_ctx { 2 } else { 1 };
+                        if args.len() != expected {
+                            self.type_error(
+                                "E0022",
+                                format!(
+                                    "`{}` is a {} pipeline and expects {} argument(s), got {}",
+                                    name,
+                                    if has_ctx { "ctx-aware (seq P(ctx) = ...)" } else { "plain (seq P = ...)" },
+                                    expected,
+                                    args.len(),
+                                ),
+                                span,
+                            );
+                        }
+                    }
+                }
+                // Recurse into subexpressions
+                self.scan_expr_for_pipeline_calls(func, ctx_map);
+                for a in args {
+                    self.scan_expr_for_pipeline_calls(a, ctx_map);
+                }
+            }
+            Expr::Block(block) => self.scan_block_for_pipeline_calls(block, ctx_map),
+            Expr::If(cond, then, else_e, _) => {
+                self.scan_expr_for_pipeline_calls(cond, ctx_map);
+                self.scan_block_for_pipeline_calls(then, ctx_map);
+                if let Some(blk) = else_e {
+                    self.scan_block_for_pipeline_calls(blk, ctx_map);
+                }
+            }
+            Expr::Match(scrutinee, arms, _) => {
+                self.scan_expr_for_pipeline_calls(scrutinee, ctx_map);
+                for arm in arms {
+                    self.scan_expr_for_pipeline_calls(&arm.body, ctx_map);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// Unwrap `Result<T, E>` → `T` for seq pipeline data flow.
+    /// SeqChain opcodes unwrap Result at runtime, so the checker tracks the inner type.
+    fn seq_unwrap_result(ty: Type) -> Type {
+        match ty {
+            Type::Result(ok, _) => *ok,
+            other => other,
+        }
+    }
+
     fn check_flw_def(&mut self, fd: &FlwDef) {
         if fd.steps.is_empty() {
             return;
         }
 
+        let is_ctx_aware = fd.ctx_param.is_some();
         let mut current_output: Option<Type> = None;
 
         for step in &fd.steps {
@@ -3001,8 +3115,22 @@ impl Checker {
                             current_output = Some(Type::Error);
                         }
                         Some(ty) => {
+                            // For ctx-aware pipelines: stages have (ctx, data) → output.
+                            // Use the second param as the data input type and the return as output.
+                            // For plain pipelines: use as_callable() which gives (params[0], ret).
+                            let data_callable = if is_ctx_aware {
+                                match &ty {
+                                    Type::Fn(params, ret) if params.len() >= 2 => {
+                                        Some((&params[1], ret.as_ref()))
+                                    }
+                                    _ => ty.as_callable().map(|(i, o)| (i, o)),
+                                }
+                            } else {
+                                ty.as_callable()
+                            };
+
                             if let Some(prev_out) = &current_output {
-                                if let Some((input, _output)) = ty.as_callable() {
+                                if let Some((input, _output)) = data_callable {
                                     if !prev_out.is_compatible(input) {
                                         self.type_error(
                                             "E0103",
@@ -3027,8 +3155,17 @@ impl Checker {
                                     );
                                 }
                             }
-                            current_output =
-                                ty.as_callable().map(|(_, o)| o.clone()).or(Some(ty));
+                            // Unwrap Result<T,E> → T since SeqChain unwraps at runtime
+                            current_output = if is_ctx_aware {
+                                let raw = match &ty {
+                                    Type::Fn(params, ret) if params.len() >= 2 => *ret.clone(),
+                                    _ => ty.as_callable().map(|(_, o)| o.clone()).unwrap_or(ty),
+                                };
+                                Some(Self::seq_unwrap_result(raw))
+                            } else {
+                                let raw = ty.as_callable().map(|(_, o)| o.clone()).unwrap_or(ty);
+                                Some(Self::seq_unwrap_result(raw))
+                            };
                         }
                     }
                 }

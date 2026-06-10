@@ -101,6 +101,14 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
         fix: "Switch to a context that includes this capability. WriteCtx provides storage; LoadCtx provides db, io, env.",
     },
     ErrorEntry {
+        code: "E0022",
+        title: "ctx-aware pipeline called with wrong number of arguments",
+        category: "types",
+        description: "A ctx-aware seq pipeline (seq P(ctx) = ...) was called with 1 argument instead of 2, or a plain seq pipeline was called with 2 arguments.",
+        example: "seq Pipeline(ctx) = A |> B\nPipeline(data)  // E0022: missing ctx argument",
+        fix: "Call ctx-aware pipelines as `Pipeline(ctx, data)`. Define plain pipelines as `seq P = A |> B` if ctx threading is not needed.",
+    },
+    ErrorEntry {
         code: "E0213",
         title: "type mismatch",
         category: "types",

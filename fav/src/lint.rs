@@ -609,44 +609,62 @@ const AMBIENT_NAMESPACES: &[&str] = &[
 /// Gen functions that have side effects (randomness).
 const AMBIENT_GEN_FNS: &[&str] = &["uuid_raw", "uuid_v7_raw", "nano_id"];
 
+/// Standard check (v13.8.0) — detect ambient effect calls and return E0023 errors.
+/// Used by standard `fav check` in non-legacy mode. In legacy mode, use `check_ambient_effects`.
+pub fn check_ambient_errors(program: &Program) -> Vec<LintError> {
+    collect_ambient(program, "E0023")
+}
+
 /// `fav check --ambient` — detect ambient effect calls (ctx-less NS.fn(...) calls).
-/// Returns W008 warnings. NOT part of `lint_program` (use `fav check --ambient`).
+/// Returns W008 warnings. In non-legacy mode use `check_ambient_errors` for E0023.
 pub fn check_ambient_effects(program: &Program) -> Vec<LintError> {
+    collect_ambient(program, "W008")
+}
+
+fn has_io_effect(effects: &[crate::ast::Effect]) -> bool {
+    use crate::ast::Effect;
+    effects.iter().any(|e| matches!(e, Effect::Io | Effect::Unknown(_)))
+}
+
+fn collect_ambient(program: &Program, code: &'static str) -> Vec<LintError> {
     let mut errors = Vec::new();
     for item in &program.items {
         match item {
-            Item::FnDef(fd) => collect_ambient_in_block(&fd.body, &mut errors),
-            Item::TrfDef(td) => collect_ambient_in_block(&td.body, &mut errors),
-            Item::FlwDef(_) => {} // seq definitions have no body expressions to scan
+            // E0023 exempts functions that explicitly declare !IO — they opt in to ambient effects.
+            // (In v13.10.0, !IO will be removed entirely; for now it silences E0023.)
+            Item::FnDef(fd) if code == "E0023" && has_io_effect(&fd.effects) => {}
+            Item::FnDef(fd) => collect_ambient_in_block(&fd.body, &mut errors, code),
+            Item::TrfDef(td) => collect_ambient_in_block(&td.body, &mut errors, code),
+            Item::FlwDef(_) => {}
             Item::ImplDef(id) => {
                 for m in &id.methods {
-                    collect_ambient_in_block(&m.body, &mut errors);
+                    collect_ambient_in_block(&m.body, &mut errors, code);
                 }
             }
-            Item::TestDef(td) => collect_ambient_in_block(&td.body, &mut errors),
+            Item::TestDef(td) => collect_ambient_in_block(&td.body, &mut errors, code),
             _ => {}
         }
     }
     errors
 }
 
-fn collect_ambient_in_block(block: &Block, errors: &mut Vec<LintError>) {
+fn collect_ambient_in_block(block: &Block, errors: &mut Vec<LintError>, code: &'static str) {
     for stmt in &block.stmts {
         match stmt {
-            Stmt::Bind(b) => collect_ambient_in_expr(&b.expr, errors),
-            Stmt::Chain(c) => collect_ambient_in_expr(&c.expr, errors),
-            Stmt::Expr(e) => collect_ambient_in_expr(e, errors),
-            Stmt::Yield(y) => collect_ambient_in_expr(&y.expr, errors),
+            Stmt::Bind(b) => collect_ambient_in_expr(&b.expr, errors, code),
+            Stmt::Chain(c) => collect_ambient_in_expr(&c.expr, errors, code),
+            Stmt::Expr(e) => collect_ambient_in_expr(e, errors, code),
+            Stmt::Yield(y) => collect_ambient_in_expr(&y.expr, errors, code),
             Stmt::ForIn(f) => {
-                collect_ambient_in_expr(&f.iter, errors);
-                collect_ambient_in_block(&f.body, errors);
+                collect_ambient_in_expr(&f.iter, errors, code);
+                collect_ambient_in_block(&f.body, errors, code);
             }
         }
     }
-    collect_ambient_in_expr(&block.expr, errors);
+    collect_ambient_in_expr(&block.expr, errors, code);
 }
 
-fn collect_ambient_in_expr(expr: &Expr, errors: &mut Vec<LintError>) {
+fn collect_ambient_in_expr(expr: &Expr, errors: &mut Vec<LintError>, code: &'static str) {
     match expr {
         // NS.method(args...) — potential ambient call
         Expr::Apply(func, args, span) => {
@@ -656,7 +674,7 @@ fn collect_ambient_in_expr(expr: &Expr, errors: &mut Vec<LintError>) {
                         || (ns == "Gen" && AMBIENT_GEN_FNS.contains(&method_name.as_str()));
                     if is_ambient {
                         errors.push(LintError::new(
-                            "W008",
+                            code,
                             format!(
                                 "ambient effect call — `{}.{}` called without ctx argument",
                                 ns, method_name
@@ -666,50 +684,50 @@ fn collect_ambient_in_expr(expr: &Expr, errors: &mut Vec<LintError>) {
                     }
                 }
             }
-            collect_ambient_in_expr(func, errors);
+            collect_ambient_in_expr(func, errors, code);
             for a in args {
-                collect_ambient_in_expr(a, errors);
+                collect_ambient_in_expr(a, errors, code);
             }
         }
-        Expr::Block(b) => collect_ambient_in_block(b, errors),
+        Expr::Block(b) => collect_ambient_in_block(b, errors, code),
         Expr::If(cond, then, else_, _) => {
-            collect_ambient_in_expr(cond, errors);
-            collect_ambient_in_block(then, errors);
+            collect_ambient_in_expr(cond, errors, code);
+            collect_ambient_in_block(then, errors, code);
             if let Some(eb) = else_ {
-                collect_ambient_in_block(eb, errors);
+                collect_ambient_in_block(eb, errors, code);
             }
         }
         Expr::Match(scrutinee, arms, _) => {
-            collect_ambient_in_expr(scrutinee, errors);
+            collect_ambient_in_expr(scrutinee, errors, code);
             for arm in arms {
-                collect_ambient_in_expr(&arm.body, errors);
+                collect_ambient_in_expr(&arm.body, errors, code);
             }
         }
         Expr::Pipeline(steps, _) => {
             for s in steps {
-                collect_ambient_in_expr(s, errors);
+                collect_ambient_in_expr(s, errors, code);
             }
         }
-        Expr::FieldAccess(obj, _, _) => collect_ambient_in_expr(obj, errors),
+        Expr::FieldAccess(obj, _, _) => collect_ambient_in_expr(obj, errors, code),
         Expr::BinOp(_, l, r, _) => {
-            collect_ambient_in_expr(l, errors);
-            collect_ambient_in_expr(r, errors);
+            collect_ambient_in_expr(l, errors, code);
+            collect_ambient_in_expr(r, errors, code);
         }
-        Expr::Closure(_, body, _) => collect_ambient_in_expr(body, errors),
-        Expr::Collect(b, _) => collect_ambient_in_block(b, errors),
-        Expr::EmitExpr(inner, _) => collect_ambient_in_expr(inner, errors),
-        Expr::Question(inner, _) => collect_ambient_in_expr(inner, errors),
-        Expr::AssertMatches(e, _, _) => collect_ambient_in_expr(e, errors),
-        Expr::TypeApply(f, _, _) => collect_ambient_in_expr(f, errors),
+        Expr::Closure(_, body, _) => collect_ambient_in_expr(body, errors, code),
+        Expr::Collect(b, _) => collect_ambient_in_block(b, errors, code),
+        Expr::EmitExpr(inner, _) => collect_ambient_in_expr(inner, errors, code),
+        Expr::Question(inner, _) => collect_ambient_in_expr(inner, errors, code),
+        Expr::AssertMatches(e, _, _) => collect_ambient_in_expr(e, errors, code),
+        Expr::TypeApply(f, _, _) => collect_ambient_in_expr(f, errors, code),
         Expr::RecordConstruct(_, fields, _) => {
             for (_, v) in fields {
-                collect_ambient_in_expr(v, errors);
+                collect_ambient_in_expr(v, errors, code);
             }
         }
         Expr::FString(parts, _) => {
             for part in parts {
                 if let FStringPart::Expr(e) = part {
-                    collect_ambient_in_expr(e, errors);
+                    collect_ambient_in_expr(e, errors, code);
                 }
             }
         }
@@ -731,7 +749,6 @@ const DEPRECATED_RUNE_CALLS: &[(&str, &str, &str)] = &[
     ("IO",        "println",             "ctx.io.println(...)"),
     ("IO",        "print",              "ctx.io.print(...)"),
     ("IO",        "read_line",          "ctx.io.read_line()"),
-    ("IO",        "read_file_raw",      "ctx.storage.get(...)"),
     ("Http",      "get_raw",            "ctx.http.get(...)"),
     ("Http",      "post_raw",           "ctx.http.post(...)"),
 ];

@@ -36,52 +36,15 @@ fn get_compiler_fav_artifact() -> Arc<FvcArtifact> {
 
 // ── public API ────────────────────────────────────────────────────────────────
 
-/// `compiler.fav` の `compile_bytes(path)` を呼び出して FVC バイトコードを返す。
+/// Compile a single `.fav` file (no rune imports) via `compiler.fav`'s `compile_bytes_from_src`.
 ///
+/// Reads the file in Rust, then delegates to the pure Favnir compiler.
 /// * `Ok(bytes)` — 成功。`FvcArtifact::from_bytes(&bytes)` で復元可能。
-/// * `Err(msg)`  — 字句/構文/コンパイルエラー。
+/// * `Err(msg)`  — file I/O or compile error.
 pub fn compile_file_to_bytes(path: &str) -> Result<Vec<u8>, String> {
-    let artifact = get_compiler_fav_artifact();
-    let fn_idx = artifact
-        .fn_idx_by_name("compile_bytes")
-        .ok_or_else(|| "compiler_fav_runner: compile_bytes not found in compiler.fav".to_string())?;
-
-    let result = VM::run(&artifact, fn_idx, vec![Value::Str(path.to_string())])
-        .map_err(|e: VMError| format!("compiler.fav VM error: {}", e.message))?;
-
-    match result {
-        Value::Variant(ref tag, Some(ref payload)) if tag == "ok" => {
-            let ints = match payload.as_ref() {
-                Value::List(items) => items,
-                _ => return Err("compiler_fav_runner: compile_bytes returned non-list Ok payload".to_string()),
-            };
-            let bytes: Result<Vec<u8>, String> = ints
-                .iter()
-                .map(|v| match v {
-                    Value::Int(n) => {
-                        if *n >= 0 && *n <= 255 {
-                            Ok(*n as u8)
-                        } else {
-                            Err(format!("compiler_fav_runner: byte value {} out of range", n))
-                        }
-                    }
-                    _ => Err("compiler_fav_runner: non-Int in byte list".to_string()),
-                })
-                .collect();
-            bytes
-        }
-        Value::Variant(ref tag, ref payload) if tag == "err" => {
-            let msg = match payload {
-                Some(p) => match p.as_ref() {
-                    Value::Str(s) => s.clone(),
-                    _ => format!("{:?}", p),
-                },
-                None => "unknown compile error".to_string(),
-            };
-            Err(msg)
-        }
-        _ => Err("compiler_fav_runner: unexpected result from compile_bytes".to_string()),
-    }
+    let src = std::fs::read_to_string(path)
+        .map_err(|e| format!("cannot read `{}`: {}", path, e))?;
+    compile_src_str_to_bytes(&src)
 }
 
 // ── rune-import-aware compilation ─────────────────────────────────────────────

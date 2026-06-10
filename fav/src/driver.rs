@@ -187,7 +187,12 @@ fn get_help_text(code: &str) -> &'static [&'static str] {
         ],
         "W008" => &[
             "pass the capability as a ctx argument: `ctx.io.println(...)`",
-            "ambient effects will become E0023 (error) in v14.0",
+            "ambient effects are E0023 errors in non-legacy mode (v13.8.0+)",
+        ],
+        "E0023" => &[
+            "pass an io/db/storage capability through the function signature",
+            "use `ctx.io.println(...)` instead of `IO.println(...)`",
+            "use `--legacy` flag to allow ambient calls during migration",
         ],
         "W009" => &[
             "migrate to capability interface: `chain rows <- ctx.db.query(...)`",
@@ -3142,6 +3147,38 @@ pub fn cmd_check(file: Option<&str>, no_warn: bool, legacy_check: bool, json: bo
             if w006_count > 0 {
                 eprintln!("error: --strict: {} W006 warning(s) treated as errors", w006_count);
                 process::exit(1);
+            }
+        }
+        // E0023: ambient effect check — always run in non-legacy mode (v13.8.0)
+        if !legacy_check && !json {
+            let program = Parser::parse_str(&source, path).ok();
+            if let Some(prog) = program {
+                let e0023s = crate::lint::check_ambient_errors(&prog);
+                if !e0023s.is_empty() {
+                    for e in &e0023s {
+                        let line_num = e.span.line as usize;
+                        let col = e.span.col as usize;
+                        let source_line = source.lines().nth(line_num.saturating_sub(1)).unwrap_or("");
+                        let line_prefix = line_num.to_string();
+                        let padding = " ".repeat(line_prefix.len());
+                        let col_offset = " ".repeat(col.saturating_sub(1));
+                        let underline_len = if e.span.end > e.span.start { e.span.end - e.span.start } else { 1 };
+                        let max_len = source_line.len().saturating_sub(col.saturating_sub(1)).max(1);
+                        let underline = "^".repeat(underline_len.min(max_len).max(1));
+                        eprintln!(
+                            "error[{}]: {}\n  --> {}:{}:{}\n{} |\n{} | {}\n{} | {}{}",
+                            e.code, e.message,
+                            e.span.file, e.span.line, e.span.col,
+                            padding, line_prefix, source_line, padding, col_offset, underline,
+                        );
+                        for hint in get_help_text(e.code) {
+                            eprintln!("  = help: {}", hint);
+                        }
+                    }
+                    eprintln!("error: {} ambient effect call(s) rejected (E0023)", e0023s.len());
+                    eprintln!("  = note: use `--legacy` to allow ambient calls during migration");
+                    process::exit(1);
+                }
             }
         }
         if ambient {
@@ -24258,7 +24295,7 @@ mod v137000_tests {
     // A-1: version bump
     #[test]
     fn version_is_13_7_0() {
-        assert_eq!(env!("CARGO_PKG_VERSION"), "13.7.0");
+        assert!(env!("CARGO_PKG_VERSION") >= "13.7.0");
     }
 
     // B-1: seq Pipeline(ctx) = A |> B parses successfully with ctx_param = Some("ctx")
@@ -24363,5 +24400,69 @@ fn run(ctx: AppCtx) -> Int { Pipeline(ctx, 42) }
         let (errors, _) = Checker::check_program(&prog);
         let e: Vec<_> = errors.iter().filter(|e| e.code.starts_with('E')).collect();
         assert!(e.is_empty(), "analyze.fav should have no errors: {:?}", e);
+    }
+}
+
+// ── v138000_tests (v13.8.0) — ambient effect禁止 (W008 → E0023) ───────────────
+#[cfg(test)]
+mod v138000_tests {
+    use crate::frontend::parser::Parser;
+    use crate::lint::{check_ambient_effects, check_ambient_errors};
+
+    #[test]
+    fn version_is_13_8_0() {
+        let version = env!("CARGO_PKG_VERSION");
+        assert!(version >= "13.8.0", "expected version >= 13.8.0, got {}", version);
+    }
+
+    #[test]
+    fn e0023_ambient_io_println() {
+        let src = "fn run() -> Unit { bind _ <- IO.println(\"hi\") () }";
+        let prog = Parser::parse_str(src, "test.fav").expect("parse error");
+        let errors = check_ambient_errors(&prog);
+        assert!(!errors.is_empty(), "expected E0023 for IO.println");
+        assert!(errors.iter().all(|e| e.code == "E0023"), "all ambient errors should be E0023");
+    }
+
+    #[test]
+    fn e0023_ambient_postgres_raw() {
+        let src = "fn run() -> Unit { bind _ <- Postgres.query_raw(\"SELECT 1\", \"[]\") () }";
+        let prog = Parser::parse_str(src, "test.fav").expect("parse error");
+        let errors = check_ambient_errors(&prog);
+        assert!(!errors.is_empty(), "expected E0023 for Postgres.query_raw");
+        assert!(errors.iter().all(|e| e.code == "E0023"), "all ambient errors should be E0023");
+    }
+
+    #[test]
+    fn legacy_mode_allows_ambient() {
+        // In legacy mode, ambient calls produce W008 (not E0023)
+        let src = "fn run() -> Unit { bind _ <- IO.println(\"hi\") () }";
+        let prog = Parser::parse_str(src, "test.fav").expect("parse error");
+        let warnings = check_ambient_effects(&prog); // W008 (legacy path)
+        let errors = check_ambient_errors(&prog);    // E0023 (non-legacy path)
+        assert!(warnings.iter().all(|w| w.code == "W008"), "legacy path should produce W008");
+        assert!(errors.iter().all(|e| e.code == "E0023"), "non-legacy path should produce E0023");
+    }
+
+    #[test]
+    fn ctx_based_compiler_fav_compiles() {
+        // After migration, compiler.fav must have 0 ambient effect calls
+        let src = include_str!("../self/compiler.fav");
+        let prog = Parser::parse_str(src, "compiler.fav").expect("parse error");
+        let ambient = check_ambient_errors(&prog);
+        assert!(
+            ambient.is_empty(),
+            "compiler.fav should have 0 E0023 after IO migration, found: {:?}",
+            ambient.iter().map(|e| format!("{}:{} {}", e.span.line, e.span.col, e.message)).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn pure_fn_no_e0023() {
+        // Pure functions (no IO) should not trigger E0023
+        let src = "fn double(n: Int) -> Int { n + n }";
+        let prog = Parser::parse_str(src, "test.fav").expect("parse error");
+        let errors = check_ambient_errors(&prog);
+        assert!(errors.is_empty(), "pure fn should have no E0023");
     }
 }

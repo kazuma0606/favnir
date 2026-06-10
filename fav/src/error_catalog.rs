@@ -109,6 +109,14 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
         fix: "Call ctx-aware pipelines as `Pipeline(ctx, data)`. Define plain pipelines as `seq P = A |> B` if ctx threading is not needed.",
     },
     ErrorEntry {
+        code: "E0023",
+        title: "ambient effect call is not allowed",
+        category: "effects",
+        description: "A function calls a side-effecting namespace (IO, Postgres, AWS, etc.) without threading a capability context (ctx) argument. In non-legacy mode all side effects must be explicit capability arguments.",
+        example: "fn run() -> Unit {\n    bind _ <- IO.println(\"hi\")  // E0023: ambient IO call\n    ()\n}",
+        fix: "Pass an io capability through the function signature and call `ctx.io.println(\"hi\")` instead. Use `--legacy` flag to allow ambient calls during migration.",
+    },
+    ErrorEntry {
         code: "E0213",
         title: "type mismatch",
         category: "types",

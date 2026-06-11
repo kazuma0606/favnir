@@ -29,6 +29,7 @@ pub enum Effect {
     Llm,
     Snowflake,
     Postgres,
+    AzureDb,
     Rpc,
     File,
     Checkpoint,

@@ -1,0 +1,27 @@
+// runes/azure-postgres/azure_postgres.fav — Azure PostgreSQL Rune public API (v14.1.0)
+// Azure DB for PostgreSQL に接続し、SQL を実行・クエリする。
+//
+// 使用例:
+//   import rune "azure-postgres"
+//
+//   type CustomerRow = { id: Int  name: String  email: String }
+//
+//   fn get_customers(conn_str: String) -> Result<List<CustomerRow>, String> !AzureDb {
+//       let ctx = azure_postgres.new_ctx(conn_str)
+//       azure_postgres.query<CustomerRow>(ctx, "SELECT id, name, email FROM customers", "[]")
+//   }
+//
+//   fn insert_customer(conn_str: String, name: String, email: String) -> Result<Int, String> !AzureDb {
+//       let ctx = azure_postgres.new_ctx(conn_str)
+//       azure_postgres.execute(ctx, "INSERT INTO customers(name, email) VALUES($1, $2)",
+//           String.concat("[", String.concat(Json.encode_string(name),
+//               String.concat(", ", String.concat(Json.encode_string(email), "]")))))
+//   }
+//
+// 接続文字列形式:
+//   postgresql://user:password@host:5432/db?sslmode=require
+//
+// TLS: Azure DB for PostgreSQL は SSL 必須。接続文字列に ?sslmode=require を含めること。
+// 環境変数から読む場合: IO.getenv_raw("AZURE_POSTGRES_URL") で取得して new_ctx に渡す。
+
+use client.{ AzureDbCtx, new_ctx, execute, query }

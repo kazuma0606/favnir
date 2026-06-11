@@ -1,0 +1,55 @@
+// runes/azure-postgres/client.fav — Azure DB for PostgreSQL クライアント (v14.1.0)
+// AzurePostgres VM primitive への型付きラッパー。
+//
+// 接続文字列形式:
+//   postgresql://user:password@host:5432/db?sslmode=require
+//
+// 使用例:
+//   let ctx = azure_postgres.new_ctx(conn_str)
+//   bind n    <- azure_postgres.execute(ctx, "INSERT INTO t VALUES($1)", "[\"val\"]")
+//   bind rows <- azure_postgres.query<Row>(ctx, "SELECT * FROM t", "[]")
+//
+// TLS: Azure DB for PostgreSQL は SSL 必須。接続文字列に ?sslmode=require を含めること。
+// 実装: tokio-postgres + rustls (tokio-postgres-rustls) で TLS 接続。
+// v14.2.0: AzureCtx.db フィールドとして組み込む予定。
+
+// AzureDbCtx — Azure DB for PostgreSQL 接続コンテキスト（接続文字列ラッパー）
+type AzureDbCtx(String)
+
+// new_ctx — 接続文字列から AzureDbCtx を作成
+// conn_str 例: "postgresql://user:pass@myserver.postgres.database.azure.com:5432/mydb?sslmode=require"
+public fn new_ctx(conn_str: String) -> AzureDbCtx {
+    AzureDbCtx(conn_str)
+}
+
+// execute — DML（INSERT / UPDATE / DELETE / CREATE 等）を実行する
+// params: JSON 配列文字列（例: "[\"val1\", 42]"）
+// 戻り値: Ok(変更行数) または Err(メッセージ)
+public fn execute(ctx: AzureDbCtx, sql: String, params: String) -> Result<Int, String> !AzureDb {
+    match ctx {
+        AzureDbCtx(conn_str) => AzurePostgres.execute_raw(conn_str, sql, params)
+    }
+}
+
+// query<T> — SELECT クエリを実行し、行を型 T の List に変換して返す
+// params: JSON 配列文字列（例: "[\"val1\"]"）。引数なしの場合は "[]"。
+public fn query<T>(ctx: AzureDbCtx, sql: String, params: String) -> Result<List<T>, String> !AzureDb {
+    match ctx {
+        AzureDbCtx(conn_str) =>
+            match AzurePostgres.query_raw(conn_str, sql, params) {
+                Err(e) => Result.err(e)
+                Ok(raw) =>
+                    match Json.parse_raw(raw) {
+                        Err(e) => Result.err(String.concat("azure_postgres.query: ", e))
+                        Ok(parsed) =>
+                            match Schema.adapt(parsed, type_name_of<T>()) {
+                                Err(_) => Result.err("azure_postgres.query: schema error")
+                                Ok(rows) => Result.ok(rows)
+                            }
+                    }
+            }
+    }
+}
+
+// with_transaction は v14.x 以降で追加予定（higher-order fn の型付きサポート後）
+// fn with_transaction(ctx: AzureDbCtx, f: fn(AzureDbCtx) -> Result<T, String>) -> Result<T, String> !AzureDb

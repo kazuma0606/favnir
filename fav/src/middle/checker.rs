@@ -1419,6 +1419,7 @@ impl Checker {
             "Llm",
             "Snowflake",
             "Postgres",
+            "AzurePostgres",
             "Validate",
             "DuckDb",
             "Crypto",
@@ -2270,6 +2271,7 @@ impl Checker {
             "Llm",
             "Snowflake",
             "Postgres",
+            "AzureDb",
             "Rpc",
             "File",
             "Checkpoint",
@@ -5022,6 +5024,16 @@ impl Checker {
         }
     }
 
+    fn require_azure_db_effect(&mut self, span: &Span) {
+        if !self.has_effect(|e| matches!(e, Effect::AzureDb)) {
+            self.type_error(
+                "E0316",
+                "AzurePostgres.* call requires `!AzureDb` effect on enclosing fn/stage",
+                span,
+            );
+        }
+    }
+
     fn require_rpc_effect(&mut self, span: &Span) {
         if !self.has_effect(|e| matches!(e, Effect::Rpc)) {
             self.type_error(
@@ -5825,6 +5837,22 @@ impl Checker {
             }
             ("Snowflake", "infer_table_raw") => {
                 self.require_snowflake_effect(span);
+                Some(Type::Result(
+                    Box::new(Type::String),
+                    Box::new(Type::String),
+                ))
+            }
+
+            // AzurePostgres (v14.1.0) — require !AzureDb effect
+            ("AzurePostgres", "execute_raw") => {
+                self.require_azure_db_effect(span);
+                Some(Type::Result(
+                    Box::new(Type::Int),
+                    Box::new(Type::String),
+                ))
+            }
+            ("AzurePostgres", "query_raw") => {
+                self.require_azure_db_effect(span);
                 Some(Type::Result(
                     Box::new(Type::String),
                     Box::new(Type::String),

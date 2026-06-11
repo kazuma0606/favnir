@@ -11745,6 +11745,7 @@ fn format_effects(effects: &[ast::Effect]) -> String {
             Llm => "!Llm".into(),
             Snowflake => "!Snowflake".into(),
             Postgres => "!Postgres".into(),
+            AzureDb => "!AzureDb".into(),
             Rpc => "!Rpc".into(),
             File => "!File".into(),
             Checkpoint => "!Checkpoint".into(),
@@ -11770,6 +11771,7 @@ fn effect_json_name(effect: &ast::Effect) -> String {
         ast::Effect::Llm => "Llm".into(),
         ast::Effect::Snowflake => "Snowflake".into(),
         ast::Effect::Postgres => "Postgres".into(),
+        ast::Effect::AzureDb => "AzureDb".into(),
         ast::Effect::Rpc => "Rpc".into(),
         ast::Effect::File => "File".into(),
         ast::Effect::Checkpoint => "Checkpoint".into(),
@@ -25092,6 +25094,74 @@ fn greet(Ctx { io }, name: String) -> Unit {
     }
 }
 
+// ── v141000_tests (v14.1.0) — Azure PostgreSQL Rune ──────────────────────────
+#[cfg(test)]
+mod v141000_tests {
+    use crate::frontend::parser::Parser;
+    use crate::middle::checker::Checker;
+    use crate::lineage::lineage_analysis;
+
+    #[test]
+    fn version_is_14_1_0() {
+        assert_eq!(env!("CARGO_PKG_VERSION"), "14.1.0");
+    }
+
+    #[test]
+    fn azure_postgres_primitives_registered() {
+        // AzurePostgres.execute_raw / query_raw が checker に認識される（E0007 なし）
+        let src = r#"
+fn write_row(conn_str: String) -> Result<Int, String> !AzureDb {
+    AzurePostgres.execute_raw(conn_str, "INSERT INTO t VALUES($1)", "[\"x\"]")
+}
+fn read_rows(conn_str: String) -> Result<String, String> !AzureDb {
+    AzurePostgres.query_raw(conn_str, "SELECT * FROM t", "[]")
+}
+public fn main() -> Unit { IO.println("ok") }
+"#;
+        let prog = Parser::parse_str(src, "azure_test.fav").expect("parse");
+        let (errors, _) = Checker::check_program(&prog);
+        let e0007: Vec<_> = errors.iter()
+            .filter(|e| e.code == "E0007" && e.message.contains("AzurePostgres"))
+            .collect();
+        assert!(e0007.is_empty(),
+            "AzurePostgres primitives should be recognized (no E0007), got: {:?}", e0007);
+    }
+
+    #[test]
+    fn azure_db_effect_in_checker() {
+        // !AzureDb 宣言が E0252（未知エフェクト）を出さないことを確認
+        let src = r#"
+fn fetch(conn_str: String) -> Result<String, String> !AzureDb {
+    AzurePostgres.query_raw(conn_str, "SELECT 1", "[]")
+}
+public fn main() -> Unit { IO.println("ok") }
+"#;
+        let prog = Parser::parse_str(src, "azure_effect_test.fav").expect("parse");
+        let (errors, _) = Checker::check_program(&prog);
+        let e0252: Vec<_> = errors.iter().filter(|e| e.code == "E0252").collect();
+        assert!(e0252.is_empty(),
+            "!AzureDb should not cause E0252, got: {:?}", e0252);
+    }
+
+    #[test]
+    fn azure_db_lineage_tracked() {
+        // AzurePostgres.execute_raw が !AzureDb(write) として lineage に収集される
+        let src = r#"
+fn write_row(conn_str: String) -> Result<Int, String> !AzureDb {
+    AzurePostgres.execute_raw(conn_str, "INSERT INTO t VALUES($1)", "[\"x\"]")
+}
+public fn main() -> Unit { IO.println("ok") }
+"#;
+        let prog = Parser::parse_str(src, "azure_lineage_test.fav").expect("parse");
+        let report = lineage_analysis(&prog);
+        let azure_write = report.transformations.iter()
+            .any(|e| e.effects.iter().any(|s| s.contains("AzureDb(write)")));
+        assert!(azure_write,
+            "AzurePostgres.execute_raw should produce !AzureDb(write) in lineage, report: {:?}",
+            report.transformations);
+    }
+}
+
 // ── v140000_tests (v14.0.0) — 能力型完成宣言 ──────────────────────────────────
 #[cfg(test)]
 mod v140000_tests {
@@ -25175,7 +25245,7 @@ mod v140005_tests {
 
     #[test]
     fn version_is_14_0_5() {
-        assert_eq!(env!("CARGO_PKG_VERSION"), "14.0.5");
+        assert!(!env!("CARGO_PKG_VERSION").is_empty());
     }
 
     #[test]

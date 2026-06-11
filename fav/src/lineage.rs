@@ -62,6 +62,7 @@ fn format_effects(effects: &[ast::Effect]) -> String {
             Llm => "!Llm".into(),
             Snowflake => "!Snowflake".into(),
             Postgres => "!Postgres".into(),
+            AzureDb => "!AzureDb".into(),
             Rpc => "!Rpc".into(),
             File => "!File".into(),
             Checkpoint => "!Checkpoint".into(),
@@ -301,6 +302,149 @@ fn collect_sql_literals_stmt(stmt: &ast::Stmt, out: &mut Vec<String>) {
     }
 }
 
+// ── AzureDb read/write classification (v14.1.0) ───────────────────────────────
+
+fn is_azure_db_read_method(name: &str) -> bool {
+    name == "query_raw"
+}
+
+fn is_azure_db_write_method(name: &str) -> bool {
+    name == "execute_raw"
+}
+
+/// Walk an expression tree and return `(has_read, has_write)` for AzurePostgres calls.
+/// - `AzurePostgres.query_raw(...)`   → has_read
+/// - `AzurePostgres.execute_raw(...)` → has_write
+pub fn collect_azure_call_kinds(expr: &ast::Expr) -> (bool, bool) {
+    let mut has_read = false;
+    let mut has_write = false;
+    collect_azure_kinds_inner(expr, &mut has_read, &mut has_write);
+    (has_read, has_write)
+}
+
+fn collect_azure_kinds_inner(expr: &ast::Expr, r: &mut bool, w: &mut bool) {
+    match expr {
+        ast::Expr::Apply(func, args, _) => {
+            if let ast::Expr::FieldAccess(obj, method, _) = func.as_ref() {
+                let is_azure = matches!(
+                    obj.as_ref(),
+                    ast::Expr::Ident(n, _) if n == "AzurePostgres"
+                );
+                if is_azure {
+                    if is_azure_db_read_method(method) {
+                        *r = true;
+                    }
+                    if is_azure_db_write_method(method) {
+                        *w = true;
+                    }
+                }
+            }
+            for a in args {
+                collect_azure_kinds_inner(a, r, w);
+            }
+            collect_azure_kinds_inner(func, r, w);
+        }
+        ast::Expr::Block(blk) => {
+            for s in &blk.stmts {
+                collect_azure_kinds_stmt(s, r, w);
+            }
+            collect_azure_kinds_inner(&blk.expr, r, w);
+        }
+        ast::Expr::If(cond, then_blk, else_blk, _) => {
+            collect_azure_kinds_inner(cond, r, w);
+            for s in &then_blk.stmts {
+                collect_azure_kinds_stmt(s, r, w);
+            }
+            collect_azure_kinds_inner(&then_blk.expr, r, w);
+            if let Some(b) = else_blk {
+                for s in &b.stmts {
+                    collect_azure_kinds_stmt(s, r, w);
+                }
+                collect_azure_kinds_inner(&b.expr, r, w);
+            }
+        }
+        ast::Expr::Match(scrutinee, arms, _) => {
+            collect_azure_kinds_inner(scrutinee, r, w);
+            for arm in arms {
+                collect_azure_kinds_inner(&arm.body, r, w);
+            }
+        }
+        ast::Expr::Pipeline(exprs, _) => {
+            for e in exprs {
+                collect_azure_kinds_inner(e, r, w);
+            }
+        }
+        ast::Expr::Closure(_, body, _) => {
+            collect_azure_kinds_inner(body, r, w);
+        }
+        ast::Expr::Collect(blk, _) => {
+            for s in &blk.stmts {
+                collect_azure_kinds_stmt(s, r, w);
+            }
+            collect_azure_kinds_inner(&blk.expr, r, w);
+        }
+        ast::Expr::BinOp(_, l, r2, _) => {
+            collect_azure_kinds_inner(l, r, w);
+            collect_azure_kinds_inner(r2, r, w);
+        }
+        ast::Expr::FieldAccess(obj, _, _) | ast::Expr::TypeApply(obj, _, _) => {
+            collect_azure_kinds_inner(obj, r, w);
+        }
+        ast::Expr::RecordConstruct(_, fields, _) => {
+            for (_, v) in fields {
+                collect_azure_kinds_inner(v, r, w);
+            }
+        }
+        ast::Expr::EmitExpr(e, _)
+        | ast::Expr::AssertMatches(e, _, _)
+        | ast::Expr::Question(e, _) => {
+            collect_azure_kinds_inner(e, r, w);
+        }
+        ast::Expr::Lit(_, _) | ast::Expr::Ident(_, _) | ast::Expr::FString(_, _) => {}
+    }
+}
+
+fn collect_azure_kinds_stmt(stmt: &ast::Stmt, r: &mut bool, w: &mut bool) {
+    match stmt {
+        ast::Stmt::Bind(b) => collect_azure_kinds_inner(&b.expr, r, w),
+        ast::Stmt::Expr(e) => collect_azure_kinds_inner(e, r, w),
+        ast::Stmt::Chain(c) => collect_azure_kinds_inner(&c.expr, r, w),
+        ast::Stmt::Yield(y) => collect_azure_kinds_inner(&y.expr, r, w),
+        ast::Stmt::ForIn(f) => {
+            collect_azure_kinds_inner(&f.iter, r, w);
+            for s in &f.body.stmts {
+                collect_azure_kinds_stmt(s, r, w);
+            }
+            collect_azure_kinds_inner(&f.body.expr, r, w);
+        }
+    }
+}
+
+/// Replace `!AzureDb` with `!AzureDb(read)` / `!AzureDb(write)` where known.
+fn azure_db_effects(
+    effects: &[ast::Effect],
+    az_read: bool,
+    az_write: bool,
+) -> Vec<String> {
+    effects
+        .iter()
+        .flat_map(|e| {
+            if matches!(e, ast::Effect::AzureDb) && (az_read || az_write) {
+                let mut v = Vec::new();
+                if az_read {
+                    v.push("!AzureDb(read)".to_string());
+                }
+                if az_write {
+                    v.push("!AzureDb(write)".to_string());
+                }
+                v
+            } else {
+                vec![format_effects(std::slice::from_ref(e))]
+            }
+        })
+        .collect()
+}
+
 // ── Snowflake read/write classification ───────────────────────────────────────
 
 fn is_snowflake_read_method(name: &str) -> bool {
@@ -445,6 +589,32 @@ fn snowflake_effects(
         .collect()
 }
 
+/// Combine Snowflake and AzureDb read/write classification in one pass.
+fn combined_effects(
+    effects: &[ast::Effect],
+    sf_read: bool, sf_write: bool,
+    az_read: bool, az_write: bool,
+) -> Vec<String> {
+    effects
+        .iter()
+        .flat_map(|e| {
+            if matches!(e, ast::Effect::Snowflake) && (sf_read || sf_write) {
+                let mut v = Vec::new();
+                if sf_read  { v.push("!Snowflake(read)".to_string()); }
+                if sf_write { v.push("!Snowflake(write)".to_string()); }
+                v
+            } else if matches!(e, ast::Effect::AzureDb) && (az_read || az_write) {
+                let mut v = Vec::new();
+                if az_read  { v.push("!AzureDb(read)".to_string()); }
+                if az_write { v.push("!AzureDb(write)".to_string()); }
+                v
+            } else {
+                vec![format_effects(std::slice::from_ref(e))]
+            }
+        })
+        .collect()
+}
+
 // ── public API ────────────────────────────────────────────────────────────────
 
 /// Analyse a parsed program and build a `LineageReport`.
@@ -490,12 +660,25 @@ pub fn lineage_analysis(program: &ast::Program) -> LineageReport {
             if sf_write {
                 sinks.push(format!("({}:snowflake-write)", trf.name));
             }
+            // AzureDb read/write classification (v14.1.0)
+            let has_azure_db = trf.effects.iter().any(|e| matches!(e, ast::Effect::AzureDb));
+            let (az_read, az_write) = if has_azure_db {
+                collect_azure_call_kinds(&ast::Expr::Block(Box::new(trf.body.clone())))
+            } else {
+                (false, false)
+            };
+            if az_read {
+                sources.push(format!("({}:azure-db-read)", trf.name));
+            }
+            if az_write {
+                sinks.push(format!("({}:azure-db-write)", trf.name));
+            }
             let (cap_kind, cap_name) = classify_capability_kind(&trf.params, &trf.effects);
             transformations.push(LineageEntry {
                 name: trf.name.clone(),
                 kind: cap_kind,
                 capability: cap_name,
-                effects: snowflake_effects(&trf.effects, sf_read, sf_write),
+                effects: combined_effects(&trf.effects, sf_read, sf_write, az_read, az_write),
                 sources,
                 sinks,
             });
@@ -537,13 +720,26 @@ pub fn lineage_analysis(program: &ast::Program) -> LineageReport {
             if sf_write {
                 sinks.push(format!("({}:snowflake-write)", fndef.name));
             }
+            // AzureDb read/write classification (v14.1.0)
+            let has_azure_db = fndef.effects.iter().any(|e| matches!(e, ast::Effect::AzureDb));
+            let (az_read, az_write) = if has_azure_db {
+                collect_azure_call_kinds(&ast::Expr::Block(Box::new(fndef.body.clone())))
+            } else {
+                (false, false)
+            };
+            if az_read {
+                sources.push(format!("({}:azure-db-read)", fndef.name));
+            }
+            if az_write {
+                sinks.push(format!("({}:azure-db-write)", fndef.name));
+            }
             if !fndef.effects.is_empty() {
                 let (cap_kind, cap_name) = classify_capability_kind(&fndef.params, &fndef.effects);
                 transformations.push(LineageEntry {
                     name: fndef.name.clone(),
                     kind: cap_kind,
                     capability: cap_name,
-                    effects: snowflake_effects(&fndef.effects, sf_read, sf_write),
+                    effects: combined_effects(&fndef.effects, sf_read, sf_write, az_read, az_write),
                     sources,
                     sinks,
                 });

@@ -5027,6 +5027,28 @@ pub fn pg_query(conn_str: &str, sql: &str, params_json: &str) -> Result<String, 
     })
 }
 
+// ── AzurePostgres helpers (v14.1.0) ──────────────────────────────────────────
+
+/// Execute DML on Azure DB for PostgreSQL and return affected row count.
+/// Reuses the same pg_connect_inner (rustls TLS) as the Postgres helpers.
+/// conn_str must include sslmode=require for Azure's mandatory TLS.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn azure_pg_execute(conn_str: &str, sql: &str, params_json: &str) -> Result<i64, String> {
+    let params = pg_params_from_json(params_json)?;
+    let sslmode = resolve_sslmode(conn_str);
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|e| e.to_string())?;
+    rt.block_on(async {
+        let client = pg_connect_inner(conn_str, &sslmode).await?;
+        let param_refs: Vec<&(dyn tokio_postgres::types::ToSql + Sync)> =
+            params.iter().map(|s| s as &(dyn tokio_postgres::types::ToSql + Sync)).collect();
+        let n = client.execute(sql, &param_refs).await.map_err(|e| format_pg_error(&e))?;
+        Ok(n as i64)
+    })
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn snowflake_read_env(key: &str) -> Result<String, String> {
     std::env::var(key).map_err(|_| format!("{} is not set", key))
@@ -9790,6 +9812,46 @@ fn vm_call_builtin(
                     out.push_str("}\n");
                     Ok(ok_vm(VMValue::Str(out)))
                 }
+            }
+        }
+
+        // ── AzurePostgres.execute_raw / AzurePostgres.query_raw (v14.1.0) ──
+        "AzurePostgres.execute_raw" => {
+            let mut it = args.into_iter();
+            let conn_str = vm_string(
+                it.next().ok_or_else(|| "AzurePostgres.execute_raw requires conn_str".to_string())?,
+                "AzurePostgres.execute_raw conn_str",
+            )?;
+            let sql = vm_string(
+                it.next().ok_or_else(|| "AzurePostgres.execute_raw requires sql".to_string())?,
+                "AzurePostgres.execute_raw sql",
+            )?;
+            let params_json = vm_string(
+                it.next().ok_or_else(|| "AzurePostgres.execute_raw requires params".to_string())?,
+                "AzurePostgres.execute_raw params",
+            )?;
+            match azure_pg_execute(&conn_str, &sql, &params_json) {
+                Ok(n)  => Ok(ok_vm(VMValue::Int(n))),
+                Err(e) => Ok(err_vm(VMValue::Str(e))),
+            }
+        }
+        "AzurePostgres.query_raw" => {
+            let mut it = args.into_iter();
+            let conn_str = vm_string(
+                it.next().ok_or_else(|| "AzurePostgres.query_raw requires conn_str".to_string())?,
+                "AzurePostgres.query_raw conn_str",
+            )?;
+            let sql = vm_string(
+                it.next().ok_or_else(|| "AzurePostgres.query_raw requires sql".to_string())?,
+                "AzurePostgres.query_raw sql",
+            )?;
+            let params_json = vm_string(
+                it.next().ok_or_else(|| "AzurePostgres.query_raw requires params".to_string())?,
+                "AzurePostgres.query_raw params",
+            )?;
+            match pg_query(&conn_str, &sql, &params_json) {
+                Ok(json) => Ok(ok_vm(VMValue::Str(json))),
+                Err(e)   => Ok(err_vm(VMValue::Str(e))),
             }
         }
 

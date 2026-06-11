@@ -375,6 +375,7 @@ fn effect_to_str(e: &ast::Effect) -> String {
         ast::Effect::Llm => "Llm".to_string(),
         ast::Effect::Snowflake => "Snowflake".to_string(),
         ast::Effect::Postgres => "Postgres".to_string(),
+        ast::Effect::AzureDb => "AzureDb".to_string(),
         ast::Effect::Rpc => "Rpc".to_string(),
         ast::Effect::File => "File".to_string(),
         ast::Effect::Checkpoint => "Checkpoint".to_string(),

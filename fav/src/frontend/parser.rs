@@ -1234,6 +1234,10 @@ impl Parser {
                         self.advance();
                         Effect::Postgres
                     }
+                    "AzureDb" => {
+                        self.advance();
+                        Effect::AzureDb
+                    }
                     "Rpc" => {
                         self.advance();
                         Effect::Rpc

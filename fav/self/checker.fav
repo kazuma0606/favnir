@@ -1090,10 +1090,10 @@ fn ns_to_effect(ns: String) -> String {
         "IO"
     } else {
         if ns == "Compiler" {
-            "IO"
+            ""
         } else {
             if ns == "Env" {
-                "IO"
+                ""
             } else {
                 if ns == "Cache" {
                     "Cache"
@@ -1356,6 +1356,18 @@ fn env_from_pat(pat: Pat, env: List<KVPair>) -> List<KVPair> {
         PVar(name) => env_insert(env, name, "Unknown")
         PVariantP({ _0: cname, _1: inner }) => env_from_pat(inner, env)
         _ => env
+    }
+}
+
+fn has_appctx_param(params: List<Param>) -> Bool {
+    match List.first(params) {
+        None => false
+        Some(p) =>
+            if type_expr_to_str(p.ty) == "AppCtx" {
+                true
+            } else {
+                has_appctx_param(List.drop(params, 1))
+            }
     }
 }
 
@@ -1788,9 +1800,14 @@ fn check_fn_def(fd: FnDef, env: List<KVPair>) -> Result<String, String> {
     bind inferred_effs <- infer_expr_effects(fd.body);
     bind init_state <- inf_state_new(subst_empty(), 0);
     chain _ok <- check_rebind_ok(fd.body, collect_param_names(fd.params));
-    match check_effects_all(fd.effects, inferred_effs) {
-        Some(err) => Result.err(err)
-        None => Result.and_then(infer_hm(fd.body, param_env, init_state), |r| check_body_ty(fd.name, fd.ret, r))
+    // AppCtx-based functions subsume all effects through the ctx capability
+    if has_appctx_param(fd.params) {
+        Result.and_then(infer_hm(fd.body, param_env, init_state), |r| check_body_ty(fd.name, fd.ret, r))
+    } else {
+        match check_effects_all(fd.effects, inferred_effs) {
+            Some(err) => Result.err(err)
+            None => Result.and_then(infer_hm(fd.body, param_env, init_state), |r| check_body_ty(fd.name, fd.ret, r))
+        }
     }
 }
 

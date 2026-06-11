@@ -26,8 +26,8 @@ fn list_get_str(lst: List<String>, n: Int) -> String {
 
 // ── CSV loader ───────────────────────────────────────────────────────────────
 
-fn read_txn_csv(path: String) -> List<TxnRow> !IO {
-  match IO.read_file_raw(path) {
+fn read_txn_csv(ctx: CommonCtx, path: String) -> List<TxnRow> {
+  match ctx.io.read_file_raw(path) {
     Err(_) => List.empty()
     Ok(text) =>
       match Csv.parse_raw(text, ",", true) {
@@ -44,9 +44,9 @@ fn read_txn_csv(path: String) -> List<TxnRow> !IO {
 // ── Stage 1: Load CSV files ──────────────────────────────────────────────────
 
 fn load_all(ctx: AppCtx, paths: List<String>) -> List<TxnRow> {
-  bind jan   <- read_txn_csv(list_get_str(paths, 0))
-  bind feb   <- read_txn_csv(list_get_str(paths, 1))
-  bind mar   <- read_txn_csv(list_get_str(paths, 2))
+  bind jan   <- read_txn_csv(ctx, list_get_str(paths, 0))
+  bind feb   <- read_txn_csv(ctx, list_get_str(paths, 1))
+  bind mar   <- read_txn_csv(ctx, list_get_str(paths, 2))
   bind total <- List.length(jan) + List.length(feb) + List.length(mar)
   bind _     <- ctx.io.println(String.concat("[INFO] Loaded ", String.concat(Int.to_string(total), " rows (3 files)")))
   List.concat(List.concat(jan, feb), mar)
@@ -93,12 +93,12 @@ seq AnalyzePipeline(ctx) = load_all |> validate |> write_output
 
 // ── Entry point — invoke as: fav run analyze.fav -- p1 p2 p3 ─────────────────
 
-fn main() -> Result<Unit, String> !IO {
-  chain ctx  <- Ctx.build_raw(
+public fn main(ctx: AppCtx) -> Result<Unit, String> {
+  chain real_ctx <- Ctx.build_raw(
     "",
-    Option.unwrap_or(IO.getenv_raw("AWS_REGION"), "ap-northeast-1"),
+    Option.unwrap_or(ctx.io.getenv_raw("AWS_REGION"), "ap-northeast-1"),
     "favnir-e2e-demo"
   )
-  bind paths <- IO.argv()
-  Result.ok(AnalyzePipeline(ctx, paths))
+  bind paths <- ctx.io.argv()
+  Result.ok(AnalyzePipeline(real_ctx, paths))
 }

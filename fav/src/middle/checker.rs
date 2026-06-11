@@ -586,11 +586,29 @@ impl InterfaceRegistry {
         http_client.insert("delete".into(), mk(vec![s(), map_ss()], rs()));
         self.register_interface("HttpClient".into(), None, http_client);
 
-        // Io — standard I/O operations
+        // Io — standard I/O operations (v14.0.5: full capability-context method set)
+        let ru = || Type::Result(Box::new(Type::Unit),  Box::new(s()));
+        let ri = || Type::Result(Box::new(Type::Int),   Box::new(s()));
+        let ls = || Type::List(Box::new(s()));
+        let rl = || Type::Result(Box::new(ls()), Box::new(s()));
         let mut io_iface = HashMap::new();
-        io_iface.insert("println".into(),   mk(vec![s()], Type::Unit));
-        io_iface.insert("print".into(),     mk(vec![s()], Type::Unit));
-        io_iface.insert("read_line".into(), mk(vec![], rs()));
+        io_iface.insert("println".into(),        mk(vec![s()],       Type::Unit));
+        io_iface.insert("print".into(),          mk(vec![s()],       Type::Unit));
+        io_iface.insert("read_line".into(),      mk(vec![],          rs()));
+        io_iface.insert("read_file_raw".into(),  mk(vec![s()],       rs()));
+        io_iface.insert("write_file_raw".into(), mk(vec![s(), s()],  ru()));
+        io_iface.insert("write_stderr_raw".into(), mk(vec![s()],     Type::Unit));
+        io_iface.insert("exit_raw".into(),       mk(vec![Type::Int], Type::Unit));
+        io_iface.insert("argv".into(),           mk(vec![],          ls()));
+        io_iface.insert("cwd_raw".into(),        mk(vec![],          s()));
+        io_iface.insert("path_join_raw".into(),  mk(vec![s(), s()],  s()));
+        io_iface.insert("is_dir_raw".into(),     mk(vec![s()],       Type::Bool));
+        io_iface.insert("list_dir_raw".into(),   mk(vec![s()],       rl()));
+        io_iface.insert("make_dir_raw".into(),   mk(vec![s()],       ru()));
+        io_iface.insert("file_mtime_raw".into(), mk(vec![s()],       ri()));
+        io_iface.insert("sleep_ms_raw".into(),   mk(vec![Type::Int], Type::Unit));
+        io_iface.insert("getenv_raw".into(),     mk(vec![s()],       ro()));
+        io_iface.insert("file_exists_raw".into(), mk(vec![s()],      Type::Bool));
         self.register_interface("Io".into(), None, io_iface);
 
         // Env — environment variable operations

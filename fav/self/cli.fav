@@ -221,51 +221,51 @@ fn parse_rune_sub(sub: String, args: List<String>) -> CliCmd {
 
 // ── Action handlers ────────────────────────────────────────────────────────────
 
-fn run_version() -> Unit !IO {
-    IO.println("favnir 11.2.0 (self-host CLI)")
+fn run_version(ctx: AppCtx) -> Unit {
+    ctx.io.println("favnir 11.2.0 (self-host CLI)")
 }
 
-fn run_help() -> Unit !IO {
-    bind _ <- IO.println("fav - Favnir CLI (self-hosted)")
-    bind _ <- IO.println("COMMANDS:")
-    bind _ <- IO.println("  check <file>                  Type-check a .fav file")
-    bind _ <- IO.println("  fmt <file>                    Format a .fav file")
-    bind _ <- IO.println("  fmt --check <file>            Check formatting (exit 1 if diff)")
-    bind _ <- IO.println("  lint <file>                   Lint a .fav file")
-    bind _ <- IO.println("  lint --warn-as-error <file>   Lint (exit 1 if warnings)")
-    bind _ <- IO.println("  explain --lineage <file>      Static lineage analysis")
-    bind _ <- IO.println("  rune list                     List installed runes")
-    bind _ <- IO.println("  rune info <name>              Show rune location")
-    bind _ <- IO.println("  doc <file> [--out <dir>]       Generate Markdown docs from /// comments")
-    bind _ <- IO.println("  profile <file> [--out table|json]  Profile stage execution times")
-    bind _ <- IO.println("  watch [--check|--test] <file>  Watch file and auto re-run on change")
-    bind _ <- IO.println("  repl                          Start interactive REPL")
-    bind _ <- IO.println("  infer --from snowflake --table <name> [--out <file>]  Infer Favnir type from Snowflake table")
-    bind _ <- IO.println("  version                       Show version")
-    IO.println("  help                          Show this help")
+fn run_help(ctx: AppCtx) -> Unit {
+    bind _ <- ctx.io.println("fav - Favnir CLI (self-hosted)")
+    bind _ <- ctx.io.println("COMMANDS:")
+    bind _ <- ctx.io.println("  check <file>                  Type-check a .fav file")
+    bind _ <- ctx.io.println("  fmt <file>                    Format a .fav file")
+    bind _ <- ctx.io.println("  fmt --check <file>            Check formatting (exit 1 if diff)")
+    bind _ <- ctx.io.println("  lint <file>                   Lint a .fav file")
+    bind _ <- ctx.io.println("  lint --warn-as-error <file>   Lint (exit 1 if warnings)")
+    bind _ <- ctx.io.println("  explain --lineage <file>      Static lineage analysis")
+    bind _ <- ctx.io.println("  rune list                     List installed runes")
+    bind _ <- ctx.io.println("  rune info <name>              Show rune location")
+    bind _ <- ctx.io.println("  doc <file> [--out <dir>]       Generate Markdown docs from /// comments")
+    bind _ <- ctx.io.println("  profile <file> [--out table|json]  Profile stage execution times")
+    bind _ <- ctx.io.println("  watch [--check|--test] <file>  Watch file and auto re-run on change")
+    bind _ <- ctx.io.println("  repl                          Start interactive REPL")
+    bind _ <- ctx.io.println("  infer --from snowflake --table <name> [--out <file>]  Infer Favnir type from Snowflake table")
+    bind _ <- ctx.io.println("  version                       Show version")
+    ctx.io.println("  help                          Show this help")
 }
 
-fn run_lint(path: String, warn_as_error: Bool) -> Unit !IO {
-    match IO.read_file_raw(path) {
+fn run_lint(ctx: AppCtx, path: String, warn_as_error: Bool) -> Unit {
+    match ctx.io.read_file_raw(path) {
         Err(e) => {
-            bind _ <- IO.write_stderr_raw(String.concat("error: cannot read file: ", e))
-            IO.exit_raw(1)
+            bind _ <- ctx.io.write_stderr_raw(String.concat("error: cannot read file: ", e))
+            ctx.io.exit_raw(1)
         }
         Ok(src) => {
             match Compiler.lint_source_raw(src) {
                 Err(e) => {
-                    bind _ <- IO.write_stderr_raw(String.concat("error: ", e))
-                    IO.exit_raw(1)
+                    bind _ <- ctx.io.write_stderr_raw(String.concat("error: ", e))
+                    ctx.io.exit_raw(1)
                 }
                 Ok(warnings) => {
                     if warnings == "" {
-                        IO.println(String.concat("ok (no warnings): ", path))
+                        ctx.io.println(String.concat("ok (no warnings): ", path))
                     } else {
                         if warn_as_error {
-                            bind _ <- IO.write_stderr_raw(warnings)
-                            IO.exit_raw(1)
+                            bind _ <- ctx.io.write_stderr_raw(warnings)
+                            ctx.io.exit_raw(1)
                         } else {
-                            IO.println(warnings)
+                            ctx.io.println(warnings)
                         }
                     }
                 }
@@ -274,33 +274,33 @@ fn run_lint(path: String, warn_as_error: Bool) -> Unit !IO {
     }
 }
 
-fn run_fmt(path: String, check: Bool) -> Unit !IO {
-    match IO.read_file_raw(path) {
+fn run_fmt(ctx: AppCtx, path: String, check: Bool) -> Unit {
+    match ctx.io.read_file_raw(path) {
         Err(e) => {
-            bind _ <- IO.write_stderr_raw(String.concat("error: cannot read file: ", e))
-            IO.exit_raw(1)
+            bind _ <- ctx.io.write_stderr_raw(String.concat("error: cannot read file: ", e))
+            ctx.io.exit_raw(1)
         }
         Ok(src) => {
             match Compiler.fmt_source_raw(src) {
                 Err(e) => {
-                    bind _ <- IO.write_stderr_raw(String.concat("error: ", e))
-                    IO.exit_raw(1)
+                    bind _ <- ctx.io.write_stderr_raw(String.concat("error: ", e))
+                    ctx.io.exit_raw(1)
                 }
                 Ok(formatted) => {
                     if check {
                         if src == formatted {
-                            IO.println(String.concat("ok: ", path))
+                            ctx.io.println(String.concat("ok: ", path))
                         } else {
-                            bind _ <- IO.write_stderr_raw(String.concat("not formatted: ", path))
-                            IO.exit_raw(1)
+                            bind _ <- ctx.io.write_stderr_raw(String.concat("not formatted: ", path))
+                            ctx.io.exit_raw(1)
                         }
                     } else {
-                        match IO.write_file_raw(path, formatted) {
+                        match ctx.io.write_file_raw(path, formatted) {
                             Err(e) => {
-                                bind _ <- IO.write_stderr_raw(String.concat("error: cannot write: ", e))
-                                IO.exit_raw(1)
+                                bind _ <- ctx.io.write_stderr_raw(String.concat("error: cannot write: ", e))
+                                ctx.io.exit_raw(1)
                             }
-                            Ok(_) => IO.println(String.concat("formatted: ", path))
+                            Ok(_) => ctx.io.println(String.concat("formatted: ", path))
                         }
                     }
                 }
@@ -309,25 +309,25 @@ fn run_fmt(path: String, check: Bool) -> Unit !IO {
     }
 }
 
-fn run_doc(path: String, out: String) -> Unit !IO {
-    match IO.read_file_raw(path) {
+fn run_doc(ctx: AppCtx, path: String, out: String) -> Unit {
+    match ctx.io.read_file_raw(path) {
         Err(e) => {
-            bind _ <- IO.write_stderr_raw(String.concat("error: cannot read file: ", e))
-            IO.exit_raw(1)
+            bind _ <- ctx.io.write_stderr_raw(String.concat("error: cannot read file: ", e))
+            ctx.io.exit_raw(1)
         }
         Ok(src) => {
             match Compiler.doc_source_raw(src) {
                 Err(e) => {
-                    bind _ <- IO.write_stderr_raw(String.concat("error: ", e))
-                    IO.exit_raw(1)
+                    bind _ <- ctx.io.write_stderr_raw(String.concat("error: ", e))
+                    ctx.io.exit_raw(1)
                 }
                 Ok(md) => {
-                    match IO.write_file_raw(out, md) {
+                    match ctx.io.write_file_raw(out, md) {
                         Err(e) => {
-                            bind _ <- IO.write_stderr_raw(String.concat("error: cannot write: ", e))
-                            IO.exit_raw(1)
+                            bind _ <- ctx.io.write_stderr_raw(String.concat("error: cannot write: ", e))
+                            ctx.io.exit_raw(1)
                         }
-                        Ok(_) => IO.println(String.concat("doc: ", path))
+                        Ok(_) => ctx.io.println(String.concat("doc: ", path))
                     }
                 }
             }
@@ -335,24 +335,24 @@ fn run_doc(path: String, out: String) -> Unit !IO {
     }
 }
 
-fn run_profile(path: String, out_fmt: String) -> Unit !IO {
-    match IO.read_file_raw(path) {
+fn run_profile(ctx: AppCtx, path: String, out_fmt: String) -> Unit {
+    match ctx.io.read_file_raw(path) {
         Err(e) => {
-            bind _ <- IO.write_stderr_raw(String.concat("error: cannot read file: ", e))
-            IO.exit_raw(1)
+            bind _ <- ctx.io.write_stderr_raw(String.concat("error: cannot read file: ", e))
+            ctx.io.exit_raw(1)
         }
         Ok(src) => {
             match Compiler.compile_source_profiled_raw(src) {
                 Err(e) => {
-                    bind _ <- IO.write_stderr_raw(String.concat("error: ", e))
-                    IO.exit_raw(1)
+                    bind _ <- ctx.io.write_stderr_raw(String.concat("error: ", e))
+                    ctx.io.exit_raw(1)
                 }
                 Ok(_bytes) => {
                     bind json <- Env.profile_dump_raw()
                     if out_fmt == "json" {
-                        IO.println(json)
+                        ctx.io.println(json)
                     } else {
-                        IO.println(String.concat("profile: ", path))
+                        ctx.io.println(String.concat("profile: ", path))
                     }
                 }
             }
@@ -360,103 +360,103 @@ fn run_profile(path: String, out_fmt: String) -> Unit !IO {
     }
 }
 
-fn run_watch_action(path: String, mode: String) -> Unit !IO {
+fn run_watch_action(ctx: AppCtx, path: String, mode: String) -> Unit {
     if mode == "check" {
         match Compiler.check_raw(path) {
-            Ok(msg) => IO.println(String.concat("ok: ", msg))
-            Err(e)  => IO.write_stderr_raw(String.concat("error: ", e))
+            Ok(msg) => ctx.io.println(String.concat("ok: ", msg))
+            Err(e)  => ctx.io.write_stderr_raw(String.concat("error: ", e))
         }
     } else {
-        match IO.read_file_raw(path) {
-            Err(e) => IO.write_stderr_raw(String.concat("error: cannot read file: ", e))
+        match ctx.io.read_file_raw(path) {
+            Err(e) => ctx.io.write_stderr_raw(String.concat("error: cannot read file: ", e))
             Ok(src) => {
                 match Compiler.compile_source_raw(src) {
-                    Err(e) => IO.write_stderr_raw(String.concat("error: ", e))
-                    Ok(_)  => IO.println(String.concat("ok: ", path))
+                    Err(e) => ctx.io.write_stderr_raw(String.concat("error: ", e))
+                    Ok(_)  => ctx.io.println(String.concat("ok: ", path))
                 }
             }
         }
     }
 }
 
-fn watch_loop(path: String, mode: String, last_mtime: Int) -> Unit !IO {
-    bind _ <- IO.sleep_ms_raw(500)
-    match IO.file_mtime_raw(path) {
-        Err(_) => watch_loop(path, mode, last_mtime)
+fn watch_loop(ctx: AppCtx, path: String, mode: String, last_mtime: Int) -> Unit {
+    bind _ <- ctx.io.sleep_ms_raw(500)
+    match ctx.io.file_mtime_raw(path) {
+        Err(_) => watch_loop(ctx, path, mode, last_mtime)
         Ok(mtime) => {
             if mtime != last_mtime {
-                bind _ <- IO.println(String.concat("File changed, re-running: ", path))
-                bind _ <- run_watch_action(path, mode)
-                watch_loop(path, mode, mtime)
+                bind _ <- ctx.io.println(String.concat("File changed, re-running: ", path))
+                bind _ <- run_watch_action(ctx, path, mode)
+                watch_loop(ctx, path, mode, mtime)
             } else {
-                watch_loop(path, mode, last_mtime)
+                watch_loop(ctx, path, mode, last_mtime)
             }
         }
     }
 }
 
-fn run_watch(path: String, mode: String) -> Unit !IO {
-    bind _ <- IO.println(String.concat("Watching ", String.concat(path, " (Ctrl+C to stop)")))
-    bind _ <- run_watch_action(path, mode)
-    match IO.file_mtime_raw(path) {
-        Err(_)      => watch_loop(path, mode, 0)
-        Ok(mtime0)  => watch_loop(path, mode, mtime0)
+fn run_watch(ctx: AppCtx, path: String, mode: String) -> Unit {
+    bind _ <- ctx.io.println(String.concat("Watching ", String.concat(path, " (Ctrl+C to stop)")))
+    bind _ <- run_watch_action(ctx, path, mode)
+    match ctx.io.file_mtime_raw(path) {
+        Err(_)      => watch_loop(ctx, path, mode, 0)
+        Ok(mtime0)  => watch_loop(ctx, path, mode, mtime0)
     }
 }
 
-fn run_check(path: String) -> Unit !IO {
+fn run_check(ctx: AppCtx, path: String) -> Unit {
     match Compiler.check_raw(path) {
-        Ok(msg) => IO.println(String.concat("ok: ", msg))
+        Ok(msg) => ctx.io.println(String.concat("ok: ", msg))
         Err(e)  => {
-            bind _ <- IO.write_stderr_raw(String.concat("error: ", e))
-            IO.exit_raw(1)
+            bind _ <- ctx.io.write_stderr_raw(String.concat("error: ", e))
+            ctx.io.exit_raw(1)
         }
     }
 }
 
-fn run_lineage(path: String) -> Unit !IO {
+fn run_lineage(ctx: AppCtx, path: String) -> Unit {
     bind text <- Compiler.lineage_text_raw(path)
-    IO.println(text)
+    ctx.io.println(text)
 }
 
-fn print_list(items: List<String>) -> Unit !IO {
+fn print_list(ctx: AppCtx, items: List<String>) -> Unit {
     match List.first(items) {
-        None       => IO.println("")
+        None       => ctx.io.println("")
         Some(item) => {
-            bind _ <- IO.println(String.concat("  ", item))
-            print_list(List.drop(items, 1))
+            bind _ <- ctx.io.println(String.concat("  ", item))
+            print_list(ctx, List.drop(items, 1))
         }
     }
 }
 
-fn run_rune_list() -> Unit !IO {
-    bind cwd      <- IO.cwd_raw()
-    bind rune_dir <- IO.path_join_raw(cwd, "rune_modules")
-    if IO.is_dir_raw(rune_dir) {
-        match IO.list_dir_raw(rune_dir) {
-            Err(_)    => IO.println("(no rune_modules directory)")
-            Ok(names) => print_list(names)
+fn run_rune_list(ctx: AppCtx) -> Unit {
+    bind cwd      <- ctx.io.cwd_raw()
+    bind rune_dir <- ctx.io.path_join_raw(cwd, "rune_modules")
+    if ctx.io.is_dir_raw(rune_dir) {
+        match ctx.io.list_dir_raw(rune_dir) {
+            Err(_)    => ctx.io.println("(no rune_modules directory)")
+            Ok(names) => print_list(ctx, names)
         }
     } else {
-        IO.println("(no rune_modules installed)")
+        ctx.io.println("(no rune_modules installed)")
     }
 }
 
-fn run_rune_info(name: String) -> Unit !IO {
-    bind cwd    <- IO.cwd_raw()
-    bind rm_dir <- IO.path_join_raw(IO.path_join_raw(cwd, "rune_modules"), name)
-    if IO.is_dir_raw(rm_dir) {
-        bind _ <- IO.println(String.concat("rune:   ", name))
-        bind _ <- IO.println(String.concat("path:   ", rm_dir))
-        IO.println("source: rune_modules")
+fn run_rune_info(ctx: AppCtx, name: String) -> Unit {
+    bind cwd    <- ctx.io.cwd_raw()
+    bind rm_dir <- ctx.io.path_join_raw(ctx.io.path_join_raw(cwd, "rune_modules"), name)
+    if ctx.io.is_dir_raw(rm_dir) {
+        bind _ <- ctx.io.println(String.concat("rune:   ", name))
+        bind _ <- ctx.io.println(String.concat("path:   ", rm_dir))
+        ctx.io.println("source: rune_modules")
     } else {
-        bind local_dir <- IO.path_join_raw(IO.path_join_raw(cwd, "runes"), name)
-        if IO.is_dir_raw(local_dir) {
-            bind _ <- IO.println(String.concat("rune:   ", name))
-            bind _ <- IO.println(String.concat("path:   ", local_dir))
-            IO.println("source: runes (local)")
+        bind local_dir <- ctx.io.path_join_raw(ctx.io.path_join_raw(cwd, "runes"), name)
+        if ctx.io.is_dir_raw(local_dir) {
+            bind _ <- ctx.io.println(String.concat("rune:   ", name))
+            bind _ <- ctx.io.println(String.concat("path:   ", local_dir))
+            ctx.io.println("source: runes (local)")
         } else {
-            IO.println(String.concat("rune not found: ", name))
+            ctx.io.println(String.concat("rune not found: ", name))
         }
     }
 }
@@ -479,24 +479,24 @@ fn new_main_fav() -> String =
 fn new_gitignore() -> String =
     "*.fvc\n.fav_cache/\n"
 
-fn run_new(name: String) -> Unit !IO = {
+fn run_new(ctx: AppCtx, name: String) -> Unit = {
     bind src_dir <- name + "/src"
-    bind r1      <- IO.make_dir_raw(src_dir)
+    bind r1      <- ctx.io.make_dir_raw(src_dir)
     match r1 {
-        Err(e) => IO.println("error: " + e)
+        Err(e) => ctx.io.println("error: " + e)
         Ok(_)  => {
-            bind r2 <- IO.write_file_raw(name + "/fav.toml",    new_fav_toml(name))
-            bind r3 <- IO.write_file_raw(src_dir + "/main.fav", new_main_fav())
-            bind r4 <- IO.write_file_raw(name + "/.gitignore",  new_gitignore())
+            bind r2 <- ctx.io.write_file_raw(name + "/fav.toml",    new_fav_toml(name))
+            bind r3 <- ctx.io.write_file_raw(src_dir + "/main.fav", new_main_fav())
+            bind r4 <- ctx.io.write_file_raw(name + "/.gitignore",  new_gitignore())
             match r2 {
-                Err(e) => IO.println("error: " + e)
+                Err(e) => ctx.io.println("error: " + e)
                 Ok(_)  => {
                     match r3 {
-                        Err(e) => IO.println("error: " + e)
+                        Err(e) => ctx.io.println("error: " + e)
                         Ok(_)  => {
                             match r4 {
-                                Err(e) => IO.println("error: " + e)
-                                Ok(_)  => IO.println("Created project: " + name)
+                                Err(e) => ctx.io.println("error: " + e)
+                                Ok(_)  => ctx.io.println("Created project: " + name)
                             }
                         }
                     }
@@ -506,22 +506,22 @@ fn run_new(name: String) -> Unit !IO = {
     }
 }
 
-fn run_infer_snowflake(table: String, out: String) -> Unit !Snowflake !IO {
+fn run_infer_snowflake(ctx: AppCtx, table: String, out: String) -> Unit {
     match Snowflake.infer_table_raw(table) {
         Err(e) => {
-            bind _ <- IO.write_stderr_raw(String.concat("error: ", e))
-            IO.exit_raw(1)
+            bind _ <- ctx.io.write_stderr_raw(String.concat("error: ", e))
+            ctx.io.exit_raw(1)
         }
         Ok(typedef) =>
             if out == "" {
-                IO.println(typedef)
+                ctx.io.println(typedef)
             } else {
-                match IO.write_file_raw(out, typedef) {
+                match ctx.io.write_file_raw(out, typedef) {
                     Err(e) => {
-                        bind _ <- IO.write_stderr_raw(String.concat("error: cannot write: ", e))
-                        IO.exit_raw(1)
+                        bind _ <- ctx.io.write_stderr_raw(String.concat("error: cannot write: ", e))
+                        ctx.io.exit_raw(1)
                     }
-                    Ok(_) => IO.println(String.concat("written: ", out))
+                    Ok(_) => ctx.io.println(String.concat("written: ", out))
                 }
             }
     }
@@ -529,27 +529,27 @@ fn run_infer_snowflake(table: String, out: String) -> Unit !Snowflake !IO {
 
 // ── Entry point ────────────────────────────────────────────────────────────────
 
-public fn main() -> Unit !IO {
-    bind args <- IO.argv()
+public fn main(ctx: AppCtx) -> Unit {
+    bind args <- ctx.io.argv()
     bind cmd  <- parse_cmd(args)
     match cmd {
-        CmdCheck(path)         => run_check(path)
-        CmdVersion             => run_version()
-        CmdHelp                => run_help()
-        CmdLineage(path)       => run_lineage(path)
-        CmdRuneList            => run_rune_list()
-        CmdRuneInfo(name)      => run_rune_info(name)
-        CmdFmt(parts)          => run_fmt(parts._0, parts._1)
-        CmdLint(parts)         => run_lint(parts._0, parts._1)
-        CmdDoc(parts)          => run_doc(parts._0, parts._1)
-        CmdProfile(parts)      => run_profile(parts._0, parts._1)
-        CmdWatch(parts)        => run_watch(parts._0, parts._1)
-        CmdRepl                => IO.println("Use 'fav repl' to start the REPL.")
-        CmdNew(name)           => run_new(name)
-        CmdInferSnowflake(parts) => run_infer_snowflake(parts._0, parts._1)
+        CmdCheck(path)         => run_check(ctx, path)
+        CmdVersion             => run_version(ctx)
+        CmdHelp                => run_help(ctx)
+        CmdLineage(path)       => run_lineage(ctx, path)
+        CmdRuneList            => run_rune_list(ctx)
+        CmdRuneInfo(name)      => run_rune_info(ctx, name)
+        CmdFmt(parts)          => run_fmt(ctx, parts._0, parts._1)
+        CmdLint(parts)         => run_lint(ctx, parts._0, parts._1)
+        CmdDoc(parts)          => run_doc(ctx, parts._0, parts._1)
+        CmdProfile(parts)      => run_profile(ctx, parts._0, parts._1)
+        CmdWatch(parts)        => run_watch(ctx, parts._0, parts._1)
+        CmdRepl                => ctx.io.println("Use 'fav repl' to start the REPL.")
+        CmdNew(name)           => run_new(ctx, name)
+        CmdInferSnowflake(parts) => run_infer_snowflake(ctx, parts._0, parts._1)
         CmdUnknown(msg)        => {
-            bind _ <- IO.write_stderr_raw(String.concat("error: ", msg))
-            IO.exit_raw(1)
+            bind _ <- ctx.io.write_stderr_raw(String.concat("error: ", msg))
+            ctx.io.exit_raw(1)
         }
     }
 }

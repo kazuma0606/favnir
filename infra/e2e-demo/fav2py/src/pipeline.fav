@@ -23,8 +23,8 @@ fn get_csv_path(args: List<String>) -> String {
 }
 
 // CSV を読んで rows の JSON 配列文字列を返す
-fn load_csv_rows_json(path: String) -> String !IO {
-  match IO.read_file_raw(path) {
+fn load_csv_rows_json(ctx: CommonCtx, path: String) -> String {
+  match ctx.io.read_file_raw(path) {
     Err(_) => "[]"
     Ok(text) => match Csv.parse_raw(text, ",", true) {
       Err(_)   => "[]"
@@ -40,7 +40,7 @@ fn load_and_insert(ctx: AppCtx, path: String) -> Result<Int, String> {
   chain r3 <- ctx.db.execute(
     String.concat(
       "INSERT INTO txn(id,region,category,amount) SELECT (r->>'id')::int, r->>'region', r->>'category', (r->>'amount')::float FROM json_array_elements('",
-      String.concat(load_csv_rows_json(path), "'::json) AS r")
+      String.concat(load_csv_rows_json(ctx, path), "'::json) AS r")
     ),
     "[]"
   )
@@ -56,7 +56,7 @@ fn aggregate(ctx: AppCtx, n: Int) -> Result<String, String> {
 }
 
 // Stage 3: Save result to S3
-fn save_result(ctx: AppCtx, result_json: String) -> Result<Unit, String> !Gen {
+fn save_result(ctx: AppCtx, result_json: String) -> Result<Unit, String> {
   ctx.storage.put(
     "favnir-e2e-demo",
     String.concat("proof/fav2py/", String.concat(Gen.uuid_raw(), ".json")),
@@ -66,11 +66,11 @@ fn save_result(ctx: AppCtx, result_json: String) -> Result<Unit, String> !Gen {
 
 seq Pipeline(ctx) = load_and_insert |> aggregate |> save_result
 
-fn main() -> Result<Unit, String> !IO {
-  chain ctx <- Ctx.build_raw(
-    Option.unwrap_or(IO.getenv_raw("DATABASE_URL"), ""),
-    Option.unwrap_or(IO.getenv_raw("AWS_REGION"),   "ap-northeast-1"),
-    Option.unwrap_or(IO.getenv_raw("S3_BUCKET"),    "favnir-e2e-demo")
+public fn main(ctx: AppCtx) -> Result<Unit, String> {
+  chain real_ctx <- Ctx.build_raw(
+    Option.unwrap_or(ctx.io.getenv_raw("DATABASE_URL"), ""),
+    Option.unwrap_or(ctx.io.getenv_raw("AWS_REGION"),   "ap-northeast-1"),
+    Option.unwrap_or(ctx.io.getenv_raw("S3_BUCKET"),    "favnir-e2e-demo")
   )
-  Pipeline(ctx, get_csv_path(IO.argv()))
+  Pipeline(real_ctx, get_csv_path(ctx.io.argv()))
 }

@@ -621,18 +621,17 @@ pub fn check_ambient_effects(program: &Program) -> Vec<LintError> {
     collect_ambient(program, "W008")
 }
 
-fn has_io_effect(effects: &[crate::ast::Effect]) -> bool {
-    use crate::ast::Effect;
-    effects.iter().any(|e| matches!(e, Effect::Io | Effect::Unknown(_)))
+fn has_ctx_param(fd: &crate::ast::FnDef) -> bool {
+    fd.params.first().map(|p| p.name == "ctx").unwrap_or(false)
 }
 
 fn collect_ambient(program: &Program, code: &'static str) -> Vec<LintError> {
     let mut errors = Vec::new();
     for item in &program.items {
         match item {
-            // E0023 exempts functions that explicitly declare !IO — they opt in to ambient effects.
-            // (In v13.10.0, !IO will be removed entirely; for now it silences E0023.)
-            Item::FnDef(fd) if code == "E0023" && has_io_effect(&fd.effects) => {}
+            // E0023 exempts functions that receive a ctx parameter — they use capability-context
+            // threading instead of ambient effects, and may call Gen/Snowflake builtins internally.
+            Item::FnDef(fd) if code == "E0023" && has_ctx_param(fd) => {}
             Item::FnDef(fd) => collect_ambient_in_block(&fd.body, &mut errors, code),
             Item::TrfDef(td) => collect_ambient_in_block(&td.body, &mut errors, code),
             Item::FlwDef(_) => {}

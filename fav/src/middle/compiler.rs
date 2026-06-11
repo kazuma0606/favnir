@@ -1560,6 +1560,30 @@ pub fn compile_expr(expr: &Expr, ctx: &mut CompileCtx) -> IRExpr {
         }
         Expr::TypeApply(expr, _, _) => compile_expr(expr, ctx),
         Expr::FieldAccess(obj, field, _) => {
+            // ctx.cap.method → NS.method rewrite (capability-context pattern, v14.0.5)
+            // Rewrites ctx.io.foo → IO.foo, ctx.db.foo → Postgres.foo, etc.
+            if let Expr::FieldAccess(inner_obj, cap_name, _) = obj.as_ref() {
+                if let Expr::Ident(var_name, _) = inner_obj.as_ref() {
+                    if ctx.resolve_local(var_name).is_some() {
+                        let ns_name: Option<&str> = match cap_name.as_str() {
+                            "io"      => Some("IO"),
+                            "db"      => Some("Postgres"),
+                            "storage" => Some("AWS"),
+                            "env"     => Some("Env"),
+                            _         => None,
+                        };
+                        if let Some(ns) = ns_name {
+                            if let Some(ns_idx) = ctx.resolve_global(ns) {
+                                return IRExpr::FieldAccess(
+                                    Box::new(IRExpr::Global(ns_idx, Type::Unknown)),
+                                    field.clone(),
+                                    Type::Unknown,
+                                );
+                            }
+                        }
+                    }
+                }
+            }
             if let Expr::Ident(namespace, _) = obj.as_ref() {
                 let namespace_is_bound = ctx.resolve_local(namespace).is_some()
                     || ctx.resolve_global(namespace).is_some();

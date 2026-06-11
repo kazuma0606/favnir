@@ -4974,37 +4974,37 @@ public fn compile_bytes_from_src(src: String) -> Result<List<Int>, String> {
 // ── Bootstrap entry point (IO-based, for fav run / self-host) ────────────────
 // These functions use IO directly. E0023 exempts `main` as the entry point.
 
-fn compile_file_quiet(path: String) -> Result<Artifact, String> !IO {
-    Result.and_then(IO.read_file_raw(path), |src| Result.and_then(lex(src), |toks| Result.and_then(parse_tokens(toks), |prog| compile(prog))))
+fn compile_file_quiet(ctx: CommonCtx, path: String) -> Result<Artifact, String> {
+    Result.and_then(ctx.io.read_file_raw(path), |src| Result.and_then(lex(src), |toks| Result.and_then(parse_tokens(toks), |prog| compile(prog))))
 }
 
-fn print_bytes(bytes: List<Int>) -> Bool !IO {
+fn print_bytes(ctx: CommonCtx, bytes: List<Int>) -> Bool {
     match List.first(bytes) {
         None => true
         Some(b) => {
-            bind _ <- IO.println(Int.to_string(b));
-            print_bytes(List.drop(bytes, 1))
+            bind _ <- ctx.io.println(Int.to_string(b));
+            print_bytes(ctx, List.drop(bytes, 1))
         }
     }
 }
 
-public fn main() -> Bool !IO {
-    bind args <- IO.argv();
+public fn main(ctx: AppCtx) -> Bool {
+    bind args <- ctx.io.argv();
     match List.first(args) {
         None => {
-            bind _ <- IO.println("usage: compiler <file.fav>");
+            bind _ <- ctx.io.println("usage: compiler <file.fav>");
             false
         }
         Some(path) => {
-            match compile_file_quiet(path) {
+            match compile_file_quiet(ctx, path) {
                 Err(e) => {
-                    bind _ <- IO.println(String.concat("error: ", e));
+                    bind _ <- ctx.io.println(String.concat("error: ", e));
                     false
                 }
                 Ok(artifact) => {
                     bind bytes <- serialize_artifact(artifact);
-                    bind _ <- IO.println(String.concat("compiled: ", Int.to_string(List.length(bytes))));
-                    print_bytes(bytes)
+                    bind _ <- ctx.io.println(String.concat("compiled: ", Int.to_string(List.length(bytes))));
+                    print_bytes(ctx, bytes)
                 }
             }
         }

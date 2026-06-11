@@ -2388,9 +2388,23 @@ fn exec_artifact_main_with_source(
         .fn_idx_by_name("main")
         .ok_or_else(|| "error: artifact does not contain a `main` function".to_string())?;
     let display_source = source_file.unwrap_or("<artifact>");
-    VM::run_with_emits_db_path_and_source_file(artifact, main_idx, vec![], db_path, source_file)
-        .map(|(value, _)| value)
-        .map_err(|e| format_runtime_error(display_source, e))
+    // param_count == 1 → main(ctx: AppCtx) パターン: AppCtx プレースホルダーを注入
+    // ctx.io.* / ctx.db.* 等は checker フェーズで VM builtin 呼び出しにコンパイル済みのため
+    // 空レコードで十分 (ctx 値自体はフィールドアクセスで参照されない)
+    let initial_args = if artifact.functions[main_idx].param_count == 1 {
+        vec![Value::Record(std::collections::HashMap::new())]
+    } else {
+        vec![]
+    };
+    VM::run_with_emits_db_path_and_source_file(
+        artifact,
+        main_idx,
+        initial_args,
+        db_path,
+        source_file,
+    )
+    .map(|(value, _)| value)
+    .map_err(|e| format_runtime_error(display_source, e))
 }
 
 #[cfg(test)]
@@ -2398,7 +2412,12 @@ fn exec_artifact_main_with_emits(artifact: &FvcArtifact) -> Result<(Value, Vec<V
     let main_idx = artifact
         .fn_idx_by_name("main")
         .ok_or_else(|| "error: artifact does not contain a `main` function".to_string())?;
-    VM::run_with_emits_db_path_and_source_file(artifact, main_idx, vec![], None, None)
+    let initial_args = if artifact.functions[main_idx].param_count == 1 {
+        vec![Value::Record(std::collections::HashMap::new())]
+    } else {
+        vec![]
+    };
+    VM::run_with_emits_db_path_and_source_file(artifact, main_idx, initial_args, None, None)
         .map_err(|e| format_runtime_error("<artifact>", e))
 }
 
@@ -25081,28 +25100,19 @@ mod v140000_tests {
 
     #[test]
     fn version_is_14_0_0() {
-        assert_eq!(env!("CARGO_PKG_VERSION"), "14.0.0");
+        assert!(!env!("CARGO_PKG_VERSION").is_empty());
     }
 
     #[test]
     fn e0025_self_compiler_zero() {
-        // self/compiler.fav に E0025 が 0 件（bootstrap entry points を除く）
+        // self/compiler.fav に E0025 が 0 件（v14.0.5 で bootstrap 例外完全削除）
         let src = include_str!("../self/compiler.fav");
         let prog = Parser::parse_str(src, "compiler.fav").expect("parse compiler.fav");
         let errors = check_bang_notation(&prog);
-        // compile_file_quiet, print_bytes, main は bootstrap entry points — 既知の例外
-        let non_bootstrap: Vec<_> = errors
-            .iter()
-            .filter(|e| {
-                !e.message.contains("compile_file_quiet")
-                    && !e.message.contains("print_bytes")
-                    && !e.message.contains("`fn main(")
-            })
-            .collect();
         assert!(
-            non_bootstrap.is_empty(),
-            "compiler.fav has unexpected E0025 (non-bootstrap): {:?}",
-            non_bootstrap
+            errors.is_empty(),
+            "compiler.fav must have 0 E0025, got: {:?}",
+            errors
         );
     }
 
@@ -25121,7 +25131,7 @@ mod v140000_tests {
 
     #[test]
     fn e0023_and_e0025_both_zero_compiler() {
-        // compiler.fav: E0023 + E0025 ともに 0 件（bootstrap 例外を除く）
+        // compiler.fav: E0023 + E0025 ともに 0 件（v14.0.5 で例外なし）
         let src = include_str!("../self/compiler.fav");
         let prog = Parser::parse_str(src, "compiler.fav").expect("parse compiler.fav");
 
@@ -25133,18 +25143,10 @@ mod v140000_tests {
         );
 
         let e0025s = check_bang_notation(&prog);
-        let non_bootstrap: Vec<_> = e0025s
-            .iter()
-            .filter(|e| {
-                !e.message.contains("compile_file_quiet")
-                    && !e.message.contains("print_bytes")
-                    && !e.message.contains("`fn main(")
-            })
-            .collect();
         assert!(
-            non_bootstrap.is_empty(),
-            "compiler.fav has unexpected E0025: {:?}",
-            non_bootstrap
+            e0025s.is_empty(),
+            "compiler.fav must have 0 E0025, got: {:?}",
+            e0025s
         );
     }
 
@@ -25161,5 +25163,54 @@ mod v140000_tests {
 
         // All capability-context lint functions are present and callable
         assert!(true, "capability_context_design_complete");
+    }
+}
+
+// ── v140005_tests (v14.0.5) — セルフホスト完全 capability-context 化 ───────────
+#[cfg(test)]
+mod v140005_tests {
+    use super::{build_artifact, exec_artifact_main_with_emits};
+    use crate::frontend::parser::Parser;
+    use crate::lint::{check_bang_notation, check_ambient_errors};
+
+    #[test]
+    fn version_is_14_0_5() {
+        assert_eq!(env!("CARGO_PKG_VERSION"), "14.0.5");
+    }
+
+    #[test]
+    fn compiler_fav_zero_e0025_no_exceptions() {
+        // compiler.fav: E0025 = 0（フィルターなし — 完全移行確認）
+        let src = include_str!("../self/compiler.fav");
+        let prog = Parser::parse_str(src, "compiler.fav").expect("parse compiler.fav");
+        let errors = check_bang_notation(&prog);
+        assert!(
+            errors.is_empty(),
+            "compiler.fav must have 0 E0025 with no exceptions, got: {:?}",
+            errors
+        );
+    }
+
+    #[test]
+    fn cli_fav_zero_e0025() {
+        // cli.fav: E0025 = 0（全 run_* + main 移行確認）
+        let src = include_str!("../self/cli.fav");
+        let prog = Parser::parse_str(src, "cli.fav").expect("parse cli.fav");
+        let errors = check_bang_notation(&prog);
+        assert!(
+            errors.is_empty(),
+            "cli.fav must have 0 E0025, got: {:?}",
+            errors
+        );
+    }
+
+    #[test]
+    fn main_with_ctx_runs_via_vm() {
+        // param_count == 1 の main が VM 経由で動く（AppCtx 注入）
+        let src = "public fn main(ctx: AppCtx) -> Bool { true }";
+        let prog = Parser::parse_str(src, "ctx_main.fav").expect("parse");
+        let artifact = build_artifact(&prog);
+        let result = exec_artifact_main_with_emits(&artifact);
+        assert!(result.is_ok(), "main(ctx: AppCtx) should run via VM: {:?}", result);
     }
 }

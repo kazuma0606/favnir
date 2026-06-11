@@ -1,0 +1,28 @@
+type TxnRow = {
+  transaction_id: String
+  amount:         Float
+  region:         String
+}
+
+fn read_txn_csv(path: String) -> List<TxnRow> !IO {
+  bind text <- IO.read_file_raw(path)
+  match Csv.parse_raw(text, ",", true) {
+    Err(_) => List.empty()
+    Ok(raw) =>
+      match Schema.adapt(raw, "TxnRow") {
+        Err(_) => List.empty()
+        Ok(rows) => rows
+      }
+  }
+}
+
+stage LoadAll: List<String> -> List<TxnRow> !IO = |paths| {
+  bind jan <- read_txn_csv(List.nth(paths, 0))
+  bind feb <- read_txn_csv(List.nth(paths, 1))
+  bind mar <- read_txn_csv(List.nth(paths, 2))
+  bind total <- List.length(jan) + List.length(feb) + List.length(mar)
+  bind _ <- IO.println(String.concat("[INFO] Loaded ", String.concat(Int.to_string(total), " rows")))
+  List.concat(List.concat(jan, feb), mar)
+}
+
+seq TestPipeline = LoadAll

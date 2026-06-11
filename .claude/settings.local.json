@@ -1,4 +1,19 @@
 {
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"C:/Users/yoshi/favnir/.claude/hooks/pre-commit.js\"",
+            "timeout": 130,
+            "statusMessage": "Running clippy pre-commit check..."
+          }
+        ]
+      }
+    ]
+  },
   "permissions": {
     "allow": [
       "Bash(cargo build:*)",

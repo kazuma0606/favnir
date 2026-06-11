@@ -59,7 +59,7 @@ Theme: `fav run --verbose` + `fav check --json` / `--show-types`
 - [x] E-1: `fav/Cargo.toml` version → `"12.5.0"`
 - [x] E-2: `cargo test` — 全通過（1386 件）
 - [x] E-3: `git commit -m "feat: v12.5.0 — fav run --verbose + fav check --json / --show-types"`
-- [ ] E-4: `git push` → CI 通過確認
+- [x] E-4: `git push` → CI 通過確認
 
 ---
 

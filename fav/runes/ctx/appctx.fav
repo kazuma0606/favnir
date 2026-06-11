@@ -1,0 +1,18 @@
+// AppCtx capability wrapper Rune (v13.6.0)
+// Provides ctx-based wrappers for db/storage/io operations on AppCtx.
+
+public fn db_execute(ctx: AppCtx, sql: String, params: String) -> Result<Int, String> {
+    AppCtx.db_execute(ctx, sql, params)
+}
+
+public fn db_query(ctx: AppCtx, sql: String, params: String) -> Result<String, String> {
+    AppCtx.db_query(ctx, sql, params)
+}
+
+public fn storage_put(ctx: AppCtx, bucket: String, key: String, body: String) -> Result<Unit, String> {
+    AppCtx.storage_put(ctx, bucket, key, body)
+}
+
+public fn io_println(ctx: AppCtx, msg: String) -> Unit {
+    AppCtx.io_println(ctx, msg)
+}

@@ -59,8 +59,8 @@ Theme: Postgres Rune TLS 対応 + エラー詳細化
 
 - [x] F-1: `fav/Cargo.toml` version → `"12.6.0"`
 - [x] F-2: `cargo test` — 全通過（1392 件）
-- [ ] F-3: `git commit -m "feat: v12.6.0 — Postgres TLS (rustls) + error detail"`
-- [ ] F-4: `git push` → CI 通過確認
+- [x] F-3: `git commit -m "feat: v12.6.0 — Postgres TLS (rustls) + error detail"`
+- [x] F-4: `git push` → CI 通過確認
 
 ---
 

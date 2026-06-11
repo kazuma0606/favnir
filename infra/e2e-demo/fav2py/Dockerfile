@@ -26,4 +26,4 @@ COPY src/ /app/
 # pre-generated Python (fav-python task 用)
 COPY python/ /app/python/
 
-CMD ["fav", "run", "--legacy", "/app/pipeline.fav", "--", "/app/sample.csv"]
+CMD ["fav", "run", "/app/pipeline.fav", "--", "/app/sample.csv"]

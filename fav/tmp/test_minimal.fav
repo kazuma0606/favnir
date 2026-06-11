@@ -1,0 +1,14 @@
+import rune "csv"
+
+type TxnRow = {
+  transaction_id: String
+  amount:         Float
+  region:         String
+}
+
+stage LoadAll: List<String> -> List<TxnRow> !IO = |paths| {
+  bind jan <- csv.read<TxnRow>(List.nth(paths, 0))
+  jan
+}
+
+seq TestPipeline = LoadAll

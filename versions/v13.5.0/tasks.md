@@ -90,8 +90,8 @@ Branch: feat/v13-capability-context
   ./target/debug/fav check self/compiler.fav
   ./target/debug/fav check self/checker.fav
   ```
-- [ ] F-4: `git add` + `git commit -m "feat: v13.5.0 — AppCtx + Ctx.build/Ctx.mock + MockDb/MockStorage"`
-- [ ] F-5: `git push origin feat/v13-capability-context`
+- [x] F-4: `git add` + `git commit -m "feat: v13.5.0 — AppCtx + Ctx.build/Ctx.mock + MockDb/MockStorage"`
+- [x] F-5: `git push origin feat/v13-capability-context`
 
 ---
 
@@ -108,4 +108,4 @@ Branch: feat/v13-capability-context
 | `fav.toml` の `[context]` が ContextConfig として解析される | ✅ |
 | `cargo test` 全件パス（1462 passed） | ✅ |
 | `CARGO_PKG_VERSION == "13.5.0"` | ✅ |
-| `git push origin feat/v13-capability-context` | |
+| `git push origin feat/v13-capability-context` | ✅ |

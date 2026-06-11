@@ -23,9 +23,9 @@ fn lookup_id(id: MaybeId) -> String {
     }
 }
 
-public fn main() -> Unit !Io {
+public fn main(ctx: AppCtx) -> Unit {
     bind u <- make_user(1, "Alice")
-    IO.println(u.name);
+    ctx.io.println(u.name);
     bind result <- lookup_id(Option.some(u.id))
-    IO.println(result)
+    ctx.io.println(result);
 }

@@ -16,11 +16,11 @@ fn describe_option(o: Int?) -> String {
     }
 }
 
-public fn main() -> Unit !Io {
-    IO.println(classify(42));
-    IO.println(classify(-7));
-    IO.println(classify(0));
-    IO.println(describe_option(Option.some(200)));
-    IO.println(describe_option(Option.some(5)));
-    IO.println(describe_option(Option.none()))
+public fn main(ctx: AppCtx) -> Unit {
+    ctx.io.println(classify(42));
+    ctx.io.println(classify(-7));
+    ctx.io.println(classify(0));
+    ctx.io.println(describe_option(Option.some(200)));
+    ctx.io.println(describe_option(Option.some(5)));
+    ctx.io.println(describe_option(Option.none()))
 }

@@ -1,3 +1,6 @@
+// NOTE: This example demonstrates the legacy `public effect` / `!Effect` syntax.
+// As of v13.x, custom effects are replaced by capability-context (AppCtx).
+// Run with: fav run --legacy examples/pipeline/custom_effects.fav
 public effect Payment
 public effect Notification
 

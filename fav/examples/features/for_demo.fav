@@ -1,6 +1,6 @@
 // for_demo.fav — v1.9.0: for-in expression example
 
-public fn main() -> Unit !Io {
+public fn main(ctx: AppCtx) -> Unit {
     bind nums <- collect {
         yield 1;
         yield 2;
@@ -9,9 +9,9 @@ public fn main() -> Unit !Io {
         yield 5;
     }
 
-    IO.println("Printing numbers with for-in:")
+    ctx.io.println("Printing numbers with for-in:");
     for n in nums {
-        IO.println_int(n)
+        ctx.io.println_int(n);
     }
 
     // for-in with a string list
@@ -21,8 +21,8 @@ public fn main() -> Unit !Io {
         yield "favnir";
     }
 
-    IO.println("Words:")
+    ctx.io.println("Words:");
     for w in words {
-        IO.println(w)
+        ctx.io.println(w);
     }
 }

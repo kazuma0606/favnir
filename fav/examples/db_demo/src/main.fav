@@ -6,7 +6,7 @@ type User = {
     age:  Int
 }
 
-public fn main() -> Unit !Io !Db {
+public fn main(ctx: AppCtx) -> Unit {
     bind conn_result <- db.connect("sqlite::memory:")
     match conn_result {
         Ok(conn) => {
@@ -23,25 +23,25 @@ public fn main() -> Unit !Io !Db {
 
             bind rows_result <- db.query(conn, "SELECT id, name, age FROM users")
             match rows_result {
-                Ok(rows) => IO.println($"Found {List.length(rows)} users")
-                Err(e)   => IO.println($"Query error: {e.message}")
-            }
+                Ok(rows) => ctx.io.println($"Found {List.length(rows)} users")
+                Err(e)   => ctx.io.println($"Query error: {e.message}")
+            };
 
             bind tx_result <- DB.begin_tx(conn)
             match tx_result {
                 Ok(tx) => {
                     bind _ <- DB.execute_in_tx(tx, "INSERT INTO users VALUES (3, 'Carol', 28)")
                     bind _ <- DB.commit_tx(tx)
-                    IO.println("Transaction committed")
+                    ctx.io.println("Transaction committed");
                 }
-                Err(e) => IO.println($"Transaction error: {e.message}")
-            }
+                Err(e) => ctx.io.println($"Transaction error: {e.message}")
+            };
 
             bind env_url <- Env.get_or("DB_URL", "sqlite::memory:")
-            IO.println($"DB_URL env: {env_url}")
+            ctx.io.println($"DB_URL env: {env_url}");
 
             db.close(conn)
         }
-        Err(e) => IO.println($"Connection error: {e.message}")
+        Err(e) => ctx.io.println($"Connection error: {e.message}")
     }
 }

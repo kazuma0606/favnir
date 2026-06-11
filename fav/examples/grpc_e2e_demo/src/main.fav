@@ -21,7 +21,7 @@ public fn handle_echo(req: Map<String, String>) -> Map<String, String> {
 
 // ── Entry point ───────────────────────────────────────────────────────────────
 
-public fn main() -> Unit !Io !Rpc {
-    IO.println("gRPC echo server on :50052 (HTTP/2, real dispatch)")
+public fn main(ctx: AppCtx) -> Unit {
+    ctx.io.println("gRPC echo server on :50052 (HTTP/2, real dispatch)");
     Grpc.serve_raw(50052, "EchoService")
 }

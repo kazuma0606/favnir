@@ -8,7 +8,7 @@ stage Lower: String -> String = |s| {
 
 seq Normalize = Trim |> Lower
 
-public fn main() -> Unit !Io {
+public fn main(ctx: AppCtx) -> Unit {
     bind result <- "  Hello, World!  " |> Normalize
-    IO.println(result)
+    ctx.io.println(result);
 }

@@ -18,25 +18,25 @@ impl Ring for Complex {
     }
 }
 
-public fn main() -> Unit !Io {
+public fn main(ctx: AppCtx) -> Unit {
     bind z <- Complex { real: 2  imag: 3 }
 
     // (2+3i) * (2+3i) = (4-9) + (12)i = -5 + 12i
     bind z2 <- Complex.ring.multiply(z, z)
-    IO.println("(2+3i)^2:");
-    IO.println_int(z2.real);
-    IO.println_int(z2.imag);
+    ctx.io.println("(2+3i)^2:");
+    ctx.io.println_int(z2.real);
+    ctx.io.println_int(z2.imag);
 
     // (2+3i) + (1+1i) = 3 + 4i
     bind w <- Complex { real: 1  imag: 1 }
     bind s <- Complex.semigroup.combine(z, w)
-    IO.println("(2+3i) + (1+1i):");
-    IO.println_int(s.real);
-    IO.println_int(s.imag);
+    ctx.io.println("(2+3i) + (1+1i):");
+    ctx.io.println_int(s.real);
+    ctx.io.println_int(s.imag);
 
     // identity: z + zero = z  (zero = Monoid identity element)
     bind zero <- Complex { real: 0  imag: 0 }
     bind z3 <- Complex.semigroup.combine(z, zero)
-    IO.println_int(z3.real);
-    IO.println_int(z3.imag)
+    ctx.io.println_int(z3.real);
+    ctx.io.println_int(z3.imag);
 }

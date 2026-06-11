@@ -22,8 +22,8 @@ fn empty_list() -> List<Int> {
     collect { () }
 }
 
-public fn main() -> Unit !Io {
-    IO.println(Debug.show(small_nums()));
-    IO.println(Debug.show(even_nums()));
-    IO.println(Debug.show(empty_list()))
+public fn main(ctx: AppCtx) -> Unit {
+    ctx.io.println(Debug.show(small_nums()));
+    ctx.io.println(Debug.show(even_nums()));
+    ctx.io.println(Debug.show(empty_list()))
 }

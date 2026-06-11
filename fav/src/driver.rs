@@ -7481,8 +7481,8 @@ public fn main() -> Unit !Io {
     fn example_hello_wasm_build_and_exec() {
         let hello = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("examples")
-            .join("basic")
-            .join("hello.fav");
+            .join("wasm")
+            .join("hello_wasm.fav");
         let hello_str = hello.to_string_lossy().to_string();
         let (program, loaded_path) = load_and_check_program(Some(&hello_str));
         assert_eq!(loaded_path, hello_str);
@@ -8159,8 +8159,8 @@ public fn main() -> Int { a() }
     fn wasm_exec_bytes_rejects_db_path_with_w004() {
         let hello = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("examples")
-            .join("basic")
-            .join("hello.fav");
+            .join("wasm")
+            .join("hello_wasm.fav");
         let hello_str = hello.to_string_lossy().to_string();
         let (program, _) = load_and_check_program(Some(&hello_str));
         let bytes = build_wasm_artifact(&program).expect("build wasm");
@@ -8173,8 +8173,8 @@ public fn main() -> Int { a() }
     fn wasm_exec_bytes_info_returns_metadata() {
         let hello = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("examples")
-            .join("basic")
-            .join("hello.fav");
+            .join("wasm")
+            .join("hello_wasm.fav");
         let hello_str = hello.to_string_lossy().to_string();
         let (program, _) = load_and_check_program(Some(&hello_str));
         let bytes = build_wasm_artifact(&program).expect("build wasm");

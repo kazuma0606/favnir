@@ -1781,6 +1781,7 @@ fn infer_expr(expr: Expr, env: List<KVPair>) -> Result<String, String> {
         } else {
             Result.err(String.concat("E0013: ? requires a Result expression, got ", ity))
         })
+        ECollect(_inner) => Result.ok("Unknown")
     }
 }
 

@@ -5,16 +5,16 @@ type Config = {
     port: Int
 }
 
-public fn main() -> Unit !Io !File {
+public fn main(ctx: AppCtx) -> Unit {
     bind text <- File.read("config.json")
     bind result <- json.parse<Config>(text)
     match result {
         Ok(config) => {
-            IO.println($"Connecting to {config.host}:{config.port}");
-            IO.println(json.write<Config>(config))
+            ctx.io.println($"Connecting to {config.host}:{config.port}");
+            ctx.io.println(json.write<Config>(config))
         }
         Err(err) => {
-            IO.println($"JSON error: {Debug.show(err)}")
+            ctx.io.println($"JSON error: {Debug.show(err)}")
         }
     }
 }

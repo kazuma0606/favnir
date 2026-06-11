@@ -36,9 +36,9 @@ fn lookup(id: Int) -> Int? {
     Option.some(user)
 }
 
-public fn main() -> Unit !Io {
-    IO.println(Debug.show(process("42")));
-    IO.println(Debug.show(process("-1")));
-    IO.println(Debug.show(lookup(1)));
-    IO.println(Debug.show(lookup(0)))
+public fn main(ctx: AppCtx) -> Unit {
+    ctx.io.println(Debug.show(process("42")));
+    ctx.io.println(Debug.show(process("-1")));
+    ctx.io.println(Debug.show(lookup(1)));
+    ctx.io.println(Debug.show(lookup(0)))
 }

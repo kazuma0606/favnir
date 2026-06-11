@@ -1,21 +1,21 @@
--- schema_demo/main.fav
--- Demonstrates v4.1.5 type constraint system.
---
--- Place schemas/Order.yaml next to this file:
---
---   amount:
---     constraints: [positive]
---     min: 0.01
---   customer_name:
---     max_length: 64
---     min_length: 1
---   status:
---     pattern: "^(pending|shipped|delivered)$"
---
--- Then run:
---   fav run    schema_demo/main.fav
---   fav build  schema_demo/main.fav --schema
---   fav check  schema_demo/main.fav
+// schema_demo/main.fav
+// Demonstrates v4.1.5 type constraint system.
+//
+// Place schemas/Order.yaml next to this file:
+//
+//   amount:
+//     constraints: [positive]
+//     min: 0.01
+//   customer_name:
+//     max_length: 64
+//     min_length: 1
+//   status:
+//     pattern: "^(pending|shipped|delivered)$"
+//
+// Then run:
+//   fav run    schema_demo/main.fav
+//   fav build  schema_demo/main.fav --schema
+//   fav check  schema_demo/main.fav
 
 type Order = {
     id: Int
@@ -31,29 +31,29 @@ type RawOrder = {
     status: String
 }
 
--- Validate a raw order map at runtime.
+// Validate a raw order map at runtime.
 public fn validate_order(raw: RawOrder) -> Bool {
     Result.is_ok(Validate.run_raw("Order", raw))
 }
 
-public fn main() -> Unit !Io {
-    -- Valid order
-    let valid_raw: RawOrder = RawOrder {
+public fn main(ctx: AppCtx) -> Unit {
+    // Valid order
+    bind valid_raw <- RawOrder {
         id: "1"
         customer_name: "Alice"
         amount: "99.99"
         status: "pending"
     }
-    let is_valid: Bool = validate_order(valid_raw)
-    IO.println(String.concat("Valid order passes: ", Debug.show(is_valid)))
+    bind is_valid <- validate_order(valid_raw)
+    ctx.io.println(String.concat("Valid order passes: ", Debug.show(is_valid)));
 
-    -- Invalid order (negative amount)
-    let invalid_raw: RawOrder = RawOrder {
+    // Invalid order (negative amount)
+    bind invalid_raw <- RawOrder {
         id: "2"
         customer_name: "Bob"
         amount: "-10.0"
         status: "pending"
     }
-    let is_invalid: Bool = Result.is_err(Validate.run_raw("Order", invalid_raw))
-    IO.println(String.concat("Invalid amount detected: ", Debug.show(is_invalid)))
+    bind is_invalid <- Result.is_err(Validate.run_raw("Order", invalid_raw))
+    ctx.io.println(String.concat("Invalid amount detected: ", Debug.show(is_invalid)))
 }

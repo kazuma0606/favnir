@@ -84,7 +84,8 @@ pub fn lower_binop(op: &ast::BinOp) -> Value {
         ast::BinOp::LtEq => v0("OpLtEq"),
         ast::BinOp::GtEq => v0("OpGtEq"),
         ast::BinOp::And => v0("OpAnd"),
-        ast::BinOp::Or | ast::BinOp::NullCoalesce => v0("OpOr"),
+        ast::BinOp::Or => v0("OpOr"),
+        ast::BinOp::NullCoalesce => v0("OpNullCoalesce"),
     }
 }
 

@@ -11,13 +11,13 @@
 
 import "math"
 
-public fn main() -> Unit !Io {
+public fn main(ctx: AppCtx) -> Unit {
     // ディレクトリ rune の public API を使用
     bind doubled <- math.double(21)
     bind total   <- math.sum(List.of(1, 2, 3, 4, 5))
     bind avg     <- math.average(List.of(10, 20, 30))
 
-    IO.println("double(21)        = " ++ Int.to_string(doubled))
-    IO.println("sum(1..5)         = " ++ Int.to_string(total))
-    IO.println("average(10,20,30) = " ++ Float.to_string(avg))
+    ctx.io.println(String.concat("double(21)        = ", Int.to_string(doubled)));
+    ctx.io.println(String.concat("sum(1..5)         = ", Int.to_string(total)));
+    ctx.io.println(String.concat("average(10,20,30) = ", Float.to_string(avg)))
 }

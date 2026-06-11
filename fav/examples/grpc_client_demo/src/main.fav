@@ -1,10 +1,10 @@
 import "grpc"
 
-public fn main() -> Unit !Io !Rpc {
+public fn main(ctx: AppCtx) -> Unit {
     bind req <- Map.set((), "id", "1")
     bind result <- grpc.call("127.0.0.1:50051", "/UserService/GetUser", req)
     match result {
-        Ok(row) => IO.println(Option.unwrap_or(Map.get(row, "name"), ""))
-        Err(err) => IO.println(err.message)
+        Ok(row) => ctx.io.println(Option.unwrap_or(Map.get(row, "name"), ""))
+        Err(err) => ctx.io.println(err.message)
     }
 }

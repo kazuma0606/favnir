@@ -12,6 +12,6 @@ use secret.visible
 // ERROR (E014): private シンボルを import しようとしている
 use secret.hidden
 
-public fn main() -> Unit !Io {
-    IO.println(visible())
+public fn main(ctx: AppCtx) -> Unit {
+    ctx.io.println(visible())
 }

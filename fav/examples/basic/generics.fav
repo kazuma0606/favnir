@@ -12,10 +12,19 @@ fn make_pair<A, B>(a: A, b: B) -> Pair<A, B> {
     Pair { first: a second: b }
 }
 
-public fn main() -> Unit {
+// Show that identity works with Int.
+fn demo_int(ctx: AppCtx) -> Unit {
     bind n <- identity(42)
+    ctx.io.println_int(n)
+}
+
+// Show that identity works with String.
+fn demo_str(ctx: AppCtx) -> Unit {
     bind s <- identity("hello")
-    // Display using show capability
-    IO.println(Int.show.show(n));
-    IO.println(s)
+    ctx.io.println(s)
+}
+
+public fn main(ctx: AppCtx) -> Unit {
+    demo_int(ctx);
+    demo_str(ctx)
 }

@@ -9,9 +9,9 @@ impl Show for UserRow {
     show = |u| String.concat(u.name, String.concat(" (age ", String.concat(String.from_int(u.age), ")")))
 }
 
-public fn main() -> Unit !Io {
+public fn main(ctx: AppCtx) -> Unit {
     bind alice <- UserRow { name: "Alice"  age: 30 }
     bind bob   <- UserRow { name: "Bob"    age: 25 }
-    IO.println(UserRow.show.show(alice));
-    IO.println(UserRow.show.show(bob))
+    ctx.io.println(UserRow.show.show(alice));
+    ctx.io.println(UserRow.show.show(bob))
 }

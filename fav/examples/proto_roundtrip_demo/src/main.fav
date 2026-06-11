@@ -2,11 +2,11 @@ import "grpc"
 
 type User = { id: Int name: String active: Bool }
 
-public fn main() -> Unit !Io {
+public fn main(ctx: AppCtx) -> Unit {
     bind row0 <- Map.set((), "id", "1")
     bind row1 <- Map.set(row0, "name", "Alice")
     bind row2 <- Map.set(row1, "active", "true")
     bind encoded <- grpc.encode("User", row2)
     bind decoded <- grpc.decode("User", encoded)
-    IO.println(Option.unwrap_or(Map.get(decoded, "name"), ""))
+    ctx.io.println(Option.unwrap_or(Map.get(decoded, "name"), ""))
 }

@@ -2,7 +2,7 @@ import "parquet"
 
 type Product = { id: Int name: String }
 
-public fn main() -> Unit !Io {
+public fn main(ctx: AppCtx) -> Unit {
     bind rows <- collect {
         yield Map.set(Map.set((), "id", "1"), "name", "Alice");
         yield Map.set(Map.set((), "id", "2"), "name", "Bob");
@@ -11,7 +11,7 @@ public fn main() -> Unit !Io {
     bind _ <- parquet.write("tmp/demo.parquet", "Product", rows)
     bind loaded <- parquet.read("tmp/demo.parquet")
     match loaded {
-        Ok(xs) => IO.println($"Loaded {List.length(xs)} rows")
-        Err(err) => IO.println(err.message)
+        Ok(xs) => ctx.io.println($"Loaded {List.length(xs)} rows")
+        Err(err) => ctx.io.println(err.message)
     }
 }

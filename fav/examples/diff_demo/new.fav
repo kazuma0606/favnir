@@ -1,7 +1,7 @@
-stage ParseUser: String -> String !Io = |row| { row }
-stage SaveUser: String -> Unit !Db = |row| { () }
+stage ParseUser: String -> String = |row| { row }
+stage SaveUser: String -> Unit = |row| { () }
 
-public fn main() -> Unit !Io !Db {
+public fn main(ctx: AppCtx) -> Unit {
     bind name <- ParseUser("a")
     SaveUser(name)
 }

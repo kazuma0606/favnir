@@ -1,9 +1,9 @@
 import "http"
 
-public fn main() -> Unit !Io !Network {
+public fn main(ctx: AppCtx) -> Unit {
     bind result <- http.get("http://127.0.0.1:9")
     match result {
-        Ok(resp) => IO.println($"status={resp.status}")
-        Err(err) => IO.println($"http error code={err.code}")
+        Ok(resp) => ctx.io.println($"status={resp.status}")
+        Err(err) => ctx.io.println($"http error code={err.code}")
     }
 }

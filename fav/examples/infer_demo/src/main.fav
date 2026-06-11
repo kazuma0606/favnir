@@ -10,12 +10,12 @@ type Row = {
     notes:  Option<String>
 }
 
-public fn main() -> Unit !Io !File {
+public fn main(ctx: AppCtx) -> Unit {
     bind text   <- File.read("data.csv")
     chain rows  <- csv.parse(text, "Row")
     bind n      <- List.length(rows)
-    IO.println($"Loaded {n} rows from data.csv")
+    ctx.io.println($"Loaded {n} rows from data.csv");
     for row in rows {
-        IO.println($"  id={row.id} name={row.name} value={row.value}");
+        ctx.io.println($"  id={row.id} name={row.name} value={row.value}");
     }
 }

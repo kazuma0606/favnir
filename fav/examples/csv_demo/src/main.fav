@@ -6,17 +6,17 @@ type User = {
     age: Int
 }
 
-public fn main() -> Unit !Io !File {
+public fn main(ctx: AppCtx) -> Unit {
     bind text <- File.read("users.csv")
     bind result <- csv.parse<User>(text)
     match result {
         Ok(users) => {
-            IO.println($"Loaded {List.length(users)} users");
+            ctx.io.println($"Loaded {List.length(users)} users");
             bind out <- csv.write<User>(users)
-            IO.println(out)
+            ctx.io.println(out);
         }
         Err(err) => {
-            IO.println($"CSV error: {Debug.show(err)}")
+            ctx.io.println($"CSV error: {Debug.show(err)}")
         }
     }
 }

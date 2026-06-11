@@ -21,9 +21,9 @@ fn safe_divide(a: Int, b: Int) -> Int? {
     }
 }
 
-public fn main() -> Unit !Io {
+public fn main(ctx: AppCtx) -> Unit {
     bind name <- direction_name(North)
-    IO.println(name);
+    ctx.io.println(name);
     bind result <- Option.unwrap_or(safe_divide(10, 2), 0)
-    IO.println(String.upper("done"))
+    ctx.io.println(String.upper("done"))
 }

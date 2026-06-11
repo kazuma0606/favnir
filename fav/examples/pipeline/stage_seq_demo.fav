@@ -8,10 +8,10 @@ stage negate: Int -> Int = |x| { 0 - x }
 // `seq` is an alias for `flw` (sequence of stages)
 seq pipeline = double |> add_ten
 
-public fn main() -> Unit !Io {
+public fn main(ctx: AppCtx) -> Unit {
     bind result <- 5 |> pipeline
-    IO.println_int(result)  // (5 * 2) + 10 = 20
+    ctx.io.println_int(result);  // (5 * 2) + 10 = 20
 
     bind negated <- 5 |> negate
-    IO.println_int(negated)  // -5
+    ctx.io.println_int(negated);  // -5
 }

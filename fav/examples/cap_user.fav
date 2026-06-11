@@ -10,9 +10,9 @@ impl Ord<User> {
     }
 }
 
-public fn main() -> Unit !Io {
+public fn main(ctx: AppCtx) -> Unit {
     bind alice <- User { name: "Alice", score: 90 }
     bind bob <- User { name: "Bob", score: 75 }
     bind winner <- if User.ord.compare(alice, bob) <= 0 { alice } else { bob }
-    IO.println(winner.name)
+    ctx.io.println(winner.name);
 }

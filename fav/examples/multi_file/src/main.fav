@@ -16,7 +16,7 @@ use data.users.list_all
 use data.users.delete
 use data.users.setup_table
 
-public fn main() -> Unit !Io !Db {
+public fn main(ctx: AppCtx) -> Unit {
     // テーブル初期化 (internal fn: 同一プロジェクト内なので使える)
     bind _ <- setup_table();
 
@@ -24,23 +24,23 @@ public fn main() -> Unit !Io !Db {
     bind id_alice <- create("Alice", "alice@example.com");
     bind id_bob   <- create("Bob",   "bob@example.com");
 
-    IO.println("=== Created ===");
-    IO.println(id_alice);
-    IO.println(id_bob);
+    ctx.io.println("=== Created ===");
+    ctx.io.println(id_alice);
+    ctx.io.println(id_bob);
 
     // READ one
     bind found <- find(id_alice);
-    IO.println("=== find(alice) ===");
-    IO.println(Debug.show(found));
+    ctx.io.println("=== find(alice) ===");
+    ctx.io.println(Debug.show(found));
 
     // READ all
     bind rows <- list_all();
-    IO.println("=== list_all ===");
-    IO.println(Debug.show(rows));
+    ctx.io.println("=== list_all ===");
+    ctx.io.println(Debug.show(rows));
 
     // DELETE
     bind _ <- delete(id_bob);
     bind after <- list_all();
-    IO.println("=== after delete ===");
-    IO.println(Debug.show(after))
+    ctx.io.println("=== after delete ===");
+    ctx.io.println(Debug.show(after))
 }

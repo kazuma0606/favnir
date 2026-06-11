@@ -3,11 +3,11 @@
 
 import "grpc"
 
-public fn main() -> Unit !Io !Rpc {
+public fn main(ctx: AppCtx) -> Unit {
     bind payload <- Map.set((), "field1", "hello from Favnir")
     bind result  <- grpc.call("127.0.0.1:50052", "/EchoService/Echo", payload)
     result |> match {
-        Ok(resp)  => IO.println(Option.unwrap_or(Map.get(resp, "field1"), "(no response)"))
-        Err(err)  => IO.println(err.message)
+        Ok(resp)  => ctx.io.println(Option.unwrap_or(Map.get(resp, "field1"), "(no response)"))
+        Err(err)  => ctx.io.println(err.message)
     }
 }

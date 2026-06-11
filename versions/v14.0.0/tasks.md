@@ -63,8 +63,8 @@ Branch: feat/v13-capability-context
 
 以下は v14.0.0 本体には含めず、リリース後に別途実施:
 
-- [ ] `infra/e2e-demo/fav2py/` 実行 PASS=5 確認（ECS Fargate / RDS PostgreSQL）
-- [ ] `infra/e2e-demo/airgap/` 実行 PASS=5 確認（Airgap VPC）
+- [x] `infra/e2e-demo/fav2py/` 実行 PASS=5 確認（ECS Fargate / RDS PostgreSQL）— 2026-06-11
+- [x] `infra/e2e-demo/airgap/` 実行 PASS=5 確認（Airgap VPC）— 2026-06-11
 - 確認後にこのチェックボックスを更新する
 
 ---

@@ -4963,16 +4963,9 @@ public fn lint_source(src: String) -> Result<String, String> {
     Result.and_then(lex(src), |toks| Result.and_then(parse_tokens(toks), |prog| Result.ok(format_warnings(lint_all(prog)))))
 }
 
-// ── Public compilation API (ctx-based, v13.8.0) ──────────────────────────────
-
-// Compile a source string to FVC bytecode (serialized as List<Int>).
-// File I/O is the caller's responsibility — pass pre-read source here.
 public fn compile_bytes_from_src(src: String) -> Result<List<Int>, String> {
     Result.and_then(lex(src), |toks| Result.and_then(parse_tokens(toks), |prog| Result.and_then(compile(prog), |artifact| Result.ok(serialize_artifact(artifact)))))
 }
-
-// ── Bootstrap entry point (IO-based, for fav run / self-host) ────────────────
-// These functions use IO directly. E0023 exempts `main` as the entry point.
 
 fn compile_file_quiet(ctx: CommonCtx, path: String) -> Result<Artifact, String> {
     Result.and_then(ctx.io.read_file_raw(path), |src| Result.and_then(lex(src), |toks| Result.and_then(parse_tokens(toks), |prog| compile(prog))))

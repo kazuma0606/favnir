@@ -12501,12 +12501,11 @@ pub fn source_needs_migration(src: &str) -> bool {
 fn infer_ctx_type_from_effect_names(effects: &[&str]) -> (&'static str, bool) {
     let has_postgres = effects.iter().any(|&e| matches!(e, "Postgres" | "Db" | "DbRead" | "DbWrite" | "DbAdmin" | "Snowflake"));
     let has_aws = effects.iter().any(|&e| matches!(e, "AWS" | "S3"));
-    let has_io = effects.iter().any(|&e| e == "Io");
+    let has_io = effects.contains(&"Io");
     let has_http = effects.iter().any(|&e| matches!(e, "Http" | "Rpc" | "Network"));
-    let has_llm = effects.iter().any(|&e| e == "Llm");
+    let has_llm = effects.contains(&"Llm");
     // W010 when multiple distinct capability categories are mixed (manual review needed)
-    let needs_w010 = (has_postgres && has_aws)
-        || (has_postgres && has_io)
+    let needs_w010 = (has_io || has_aws) && has_postgres
         || has_http
         || has_llm
         || effects.len() > 2;

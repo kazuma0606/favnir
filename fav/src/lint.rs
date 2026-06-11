@@ -891,7 +891,7 @@ fn unwrap_output_type_name(ty: &TypeExpr) -> Option<&str> {
 }
 
 /// Find the "content" parameter type (first non-ctx-like named type).
-fn content_param_type_name<'a>(params: &'a [Param]) -> Option<&'a str> {
+fn content_param_type_name(params: &[Param]) -> Option<&str> {
     for p in params {
         if let Some(name) = simple_type_name(&p.ty) {
             if !CTX_LIKE_TYPES.contains(&name) {

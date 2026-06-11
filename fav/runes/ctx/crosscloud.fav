@@ -1,0 +1,54 @@
+// runes/ctx/crosscloud.fav — AwsCtx / AzureCtx builder (v14.2.0)
+//
+// Provides typed context wrappers for CrossCloud pipelines.
+// Usage:
+//   import rune "ctx"
+//   bind aws_ctx   <- ctx.build_aws("ap-northeast-1", "my-bucket", "postgresql://...")
+//   bind azure_ctx <- ctx.build_azure("${AZURE_POSTGRES_URL}", "${AZURE_STORAGE_ACCOUNT}", ...)
+
+// Nominal wrappers — backed by a JSON string at runtime.
+type AwsCtx(String)
+type AzureCtx(String)
+
+// CrossCloudCtx unifies both clouds.
+// Alternative: pass aws_ctx + azure_ctx as separate arguments to fn migrate().
+type CrossCloudCtx = {
+    aws: AwsCtx
+    azure: AzureCtx
+}
+
+// Build an AwsCtx from the three required fields.
+public fn build_aws(
+    region: String,
+    s3_bucket: String,
+    db_url: String
+) -> Result<AwsCtx, String> {
+    Ctx.build_aws_raw(region, s3_bucket, db_url)
+}
+
+// Build an AzureCtx from the four required fields.
+public fn build_azure(
+    postgres_url: String,
+    storage_account: String,
+    storage_key: String,
+    container: String
+) -> Result<AzureCtx, String> {
+    Ctx.build_azure_raw(postgres_url, storage_account, storage_key, container)
+}
+
+// Field accessors for AzureCtx.
+public fn azure_postgres_url(ctx: AzureCtx) -> String {
+    Ctx.azure_get_field_raw(ctx, "postgres_url")
+}
+
+public fn azure_storage_account(ctx: AzureCtx) -> String {
+    Ctx.azure_get_field_raw(ctx, "storage_account")
+}
+
+public fn azure_storage_key(ctx: AzureCtx) -> String {
+    Ctx.azure_get_field_raw(ctx, "storage_key")
+}
+
+public fn azure_container(ctx: AzureCtx) -> String {
+    Ctx.azure_get_field_raw(ctx, "container")
+}

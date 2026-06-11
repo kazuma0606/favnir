@@ -102,6 +102,16 @@ pub struct SnowflakeTomlConfig {
     pub schema:    Option<String>,
 }
 
+// ── Azure config (v14.2.0) ────────────────────────────────────────────────────
+
+#[derive(Debug, Clone)]
+pub struct AzureTomlConfig {
+    pub postgres_url:    Option<String>,
+    pub storage_account: Option<String>,
+    pub storage_key:     Option<String>,
+    pub container:       Option<String>,
+}
+
 // ── Postgres config (v11.5.0) ─────────────────────────────────────────────────
 
 #[derive(Debug, Clone)]
@@ -210,6 +220,8 @@ pub struct FavToml {
     pub lint: Option<LintTomlConfig>,
     /// Optional context configuration (v13.5.0).
     pub context: Option<ContextConfig>,
+    /// Optional Azure configuration (v14.2.0).
+    pub azure: Option<AzureTomlConfig>,
 }
 
 impl FavToml {
@@ -271,6 +283,7 @@ fn parse_fav_toml(content: &str) -> FavToml {
     let mut run_cfg: Option<RunTomlConfig> = None;
     let mut lint_cfg: Option<LintTomlConfig> = None;
     let mut context_cfg: Option<ContextConfig> = None;
+    let mut azure_cfg: Option<AzureTomlConfig> = None;
     let mut section = "";
 
     for line in content.lines() {
@@ -332,6 +345,10 @@ fn parse_fav_toml(content: &str) -> FavToml {
         }
         if trimmed == "[context]" {
             section = "context";
+            continue;
+        }
+        if trimmed == "[azure]" {
+            section = "azure";
             continue;
         }
         if trimmed.starts_with('[') {
@@ -556,6 +573,24 @@ fn parse_fav_toml(content: &str) -> FavToml {
                 }
                 context_cfg = Some(current);
             }
+            "azure" => {
+                let mut current = azure_cfg.take().unwrap_or(AzureTomlConfig {
+                    postgres_url:    None,
+                    storage_account: None,
+                    storage_key:     None,
+                    container:       None,
+                });
+                if let Some((key, val)) = parse_kv(trimmed) {
+                    match key {
+                        "postgres_url"    => current.postgres_url    = Some(expand_env_vars(val)),
+                        "storage_account" => current.storage_account = Some(expand_env_vars(val)),
+                        "storage_key"     => current.storage_key     = Some(expand_env_vars(val)),
+                        "container"       => current.container       = Some(val.to_string()),
+                        _ => {}
+                    }
+                }
+                azure_cfg = Some(current);
+            }
             _ => {}
         }
     }
@@ -581,6 +616,7 @@ fn parse_fav_toml(content: &str) -> FavToml {
         run: run_cfg,
         lint: lint_cfg,
         context: context_cfg,
+        azure: azure_cfg,
     }
 }
 

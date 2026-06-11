@@ -6289,6 +6289,17 @@ impl Checker {
             )),
             ("Ctx", "mock_raw") => Some(Type::Named("AppCtx".into(), vec![])),
 
+            // ── Ctx.* CrossCloud (v14.2.0) ───────────────────────────────────
+            ("Ctx", "build_aws_raw") => Some(Type::Result(
+                Box::new(Type::Named("AwsCtx".into(), vec![])),
+                Box::new(Type::String),
+            )),
+            ("Ctx", "build_azure_raw") => Some(Type::Result(
+                Box::new(Type::Named("AzureCtx".into(), vec![])),
+                Box::new(Type::String),
+            )),
+            ("Ctx", "azure_get_field_raw") => Some(Type::String),
+
             // ── AppCtx.* (v13.6.0) ──────────────────────────────────────────
             ("AppCtx", "db_execute") => Some(Type::Result(
                 Box::new(Type::Int),
@@ -7458,6 +7469,7 @@ abstract seq Pipeline {
             run: None,
             lint: None,
             context: None,
+            azure: None,
         };
         let resolver = Arc::new(Mutex::new(Resolver::new(Some(toml), Some(root))));
         (resolver, dir)
@@ -7546,6 +7558,7 @@ abstract seq Pipeline {
             run: None,
             lint: None,
             context: None,
+            azure: None,
         };
         let mut resolver = Resolver::new(Some(toml), Some(root));
         // Simulate a mid-load state: "cycle" is already in the loading set

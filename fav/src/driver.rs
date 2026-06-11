@@ -344,6 +344,24 @@ fn inject_snowflake_config(cfg: &crate::toml::SnowflakeTomlConfig) {
     }
 }
 
+fn inject_azure_config(cfg: &crate::toml::AzureTomlConfig) {
+    use crate::toml::expand_env_vars;
+    let pairs: &[(&str, Option<&str>)] = &[
+        ("AZURE_POSTGRES_URL",    cfg.postgres_url.as_deref()),
+        ("AZURE_STORAGE_ACCOUNT", cfg.storage_account.as_deref()),
+        ("AZURE_STORAGE_KEY",     cfg.storage_key.as_deref()),
+        ("AZURE_CONTAINER",       cfg.container.as_deref()),
+    ];
+    for (key, val) in pairs {
+        if let Some(v) = val {
+            if std::env::var(key).is_err() {
+                // SAFETY: called before VM starts; single-threaded at this point
+                unsafe { std::env::set_var(key, expand_env_vars(v)); }
+            }
+        }
+    }
+}
+
 fn default_fav_toml(name: &str) -> String {
     format!(
         "[project]\nname    = \"{name}\"\nversion = \"0.1.0\"\nedition = \"2026\"\nsrc     = \"src\"\n\n\
@@ -903,6 +921,10 @@ fn run_with_favnir_pipeline_project(
     if let Some(pg_cfg) = &toml.postgres {
         inject_postgres_config(pg_cfg);
     }
+    // Inject fav.toml [azure] settings as env vars (v14.2.0)
+    if let Some(az_cfg) = &toml.azure {
+        inject_azure_config(az_cfg);
+    }
 
     // 1. Collect and merge all project sources
     let merged =
@@ -1024,6 +1046,10 @@ fn load_run_config(file: Option<&str>) {
                 // Inject [postgres] settings as env vars (v12.6.0)
                 if let Some(pg_cfg) = toml.postgres.as_ref() {
                     inject_postgres_config(pg_cfg);
+                }
+                // Inject [azure] settings as env vars (v14.2.0)
+                if let Some(az_cfg) = toml.azure.as_ref() {
+                    inject_azure_config(az_cfg);
                 }
             }
         }
@@ -3397,6 +3423,7 @@ fn try_cmd_check_dir(dir: &Path) -> Result<(), usize> {
         run: None,
         lint: None,
         context: None,
+        azure: None,
     });
     let files = collect_fav_files_recursive(dir);
     let resolver = make_resolver(Some(toml), Some(root));
@@ -25102,7 +25129,8 @@ mod v141000_tests {
 
     #[test]
     fn version_is_14_1_0() {
-        assert_eq!(env!("CARGO_PKG_VERSION"), "14.1.0");
+        assert!(env!("CARGO_PKG_VERSION") >= "14.1.0",
+            "version should be >= 14.1.0, got {}", env!("CARGO_PKG_VERSION"));
     }
 
     #[test]
@@ -25158,6 +25186,77 @@ public fn main() -> Unit { IO.println("ok") }
         assert!(azure_write,
             "AzurePostgres.execute_raw should produce !AzureDb(write) in lineage, report: {:?}",
             report.transformations);
+    }
+}
+
+// ── v142000_tests (v14.2.0) — AzureCtx / AwsCtx + fav.toml [azure] ──────────
+#[cfg(test)]
+mod v142000_tests {
+    use crate::frontend::parser::Parser;
+    use crate::middle::checker::Checker;
+
+    #[test]
+    fn version_is_14_2_0() {
+        assert_eq!(env!("CARGO_PKG_VERSION"), "14.2.0");
+    }
+
+    #[test]
+    fn fav_toml_azure_section_parsed() {
+        let toml_src = r#"
+[rune]
+name = "test"
+version = "0.1.0"
+[azure]
+postgres_url = "postgresql://user:pass@host/db"
+storage_account = "mystorageaccount"
+storage_key = "mykey=="
+container = "favnir-proof"
+"#;
+        let toml = crate::toml::parse_fav_toml_pub(toml_src);
+        let azure = toml.azure.expect("azure section should be parsed");
+        assert_eq!(azure.postgres_url.as_deref(), Some("postgresql://user:pass@host/db"));
+        assert_eq!(azure.storage_account.as_deref(), Some("mystorageaccount"));
+        assert_eq!(azure.storage_key.as_deref(), Some("mykey=="));
+        assert_eq!(azure.container.as_deref(), Some("favnir-proof"));
+    }
+
+    #[test]
+    fn aws_ctx_build_raw_registered() {
+        let src = r#"
+public fn main(ctx: AppCtx) -> Unit {
+    bind result <- Ctx.build_aws_raw("ap-northeast-1", "my-bucket", "postgresql://localhost/db")
+    ctx.io.println("ok")
+}
+"#;
+        let prog = Parser::parse_str(src, "aws_ctx_test.fav").expect("parse");
+        let (errors, _) = Checker::check_program(&prog);
+        let e0007: Vec<_> = errors.iter()
+            .filter(|e| e.code == "E0007" && e.message.contains("build_aws_raw"))
+            .collect();
+        assert!(e0007.is_empty(),
+            "Ctx.build_aws_raw should not produce E0007, got: {:?}", e0007);
+    }
+
+    #[test]
+    fn azure_ctx_build_raw_registered() {
+        let src = r#"
+public fn main(ctx: AppCtx) -> Unit {
+    bind result <- Ctx.build_azure_raw(
+        "postgresql://user:pass@host/db",
+        "mystorageaccount",
+        "mykey==",
+        "favnir-proof"
+    )
+    ctx.io.println("ok")
+}
+"#;
+        let prog = Parser::parse_str(src, "azure_ctx_test.fav").expect("parse");
+        let (errors, _) = Checker::check_program(&prog);
+        let e0007: Vec<_> = errors.iter()
+            .filter(|e| e.code == "E0007" && e.message.contains("build_azure_raw"))
+            .collect();
+        assert!(e0007.is_empty(),
+            "Ctx.build_azure_raw should not produce E0007, got: {:?}", e0007);
     }
 }
 

@@ -13159,6 +13159,90 @@ fn vm_call_builtin(
             Ok(VMValue::Str(mock_json))
         }
 
+        // v14.2.0: CrossCloud Ctx primitives ─────────────────────────────────
+        "Ctx.build_aws_raw" => {
+            // Ctx.build_aws_raw(region: String, s3_bucket: String, db_url: String)
+            //   -> Result<AwsCtx, String>
+            if args.len() < 3 {
+                return Err("Ctx.build_aws_raw requires 3 arguments".to_string());
+            }
+            let region = match &args[0] {
+                VMValue::Str(s) => s.clone(),
+                _ => return Err("Ctx.build_aws_raw: region must be a String".to_string()),
+            };
+            let s3_bucket = match &args[1] {
+                VMValue::Str(s) => s.clone(),
+                _ => return Err("Ctx.build_aws_raw: s3_bucket must be a String".to_string()),
+            };
+            let db_url = match &args[2] {
+                VMValue::Str(s) => s.clone(),
+                _ => return Err("Ctx.build_aws_raw: db_url must be a String".to_string()),
+            };
+            let json = format!(
+                r#"{{"type":"AwsCtx","region":"{}","s3_bucket":"{}","db_url":"{}"}}"#,
+                region.replace('"', "\\\""),
+                s3_bucket.replace('"', "\\\""),
+                db_url.replace('"', "\\\""),
+            );
+            Ok(ok_vm(VMValue::Str(json)))
+        }
+        "Ctx.build_azure_raw" => {
+            // Ctx.build_azure_raw(postgres_url, storage_account, storage_key, container)
+            //   -> Result<AzureCtx, String>
+            if args.len() < 4 {
+                return Err("Ctx.build_azure_raw requires 4 arguments".to_string());
+            }
+            let postgres_url = match &args[0] {
+                VMValue::Str(s) => s.clone(),
+                _ => return Err("Ctx.build_azure_raw: postgres_url must be a String".to_string()),
+            };
+            let storage_account = match &args[1] {
+                VMValue::Str(s) => s.clone(),
+                _ => return Err("Ctx.build_azure_raw: storage_account must be a String".to_string()),
+            };
+            let storage_key = match &args[2] {
+                VMValue::Str(s) => s.clone(),
+                _ => return Err("Ctx.build_azure_raw: storage_key must be a String".to_string()),
+            };
+            let container = match &args[3] {
+                VMValue::Str(s) => s.clone(),
+                _ => return Err("Ctx.build_azure_raw: container must be a String".to_string()),
+            };
+            let json = format!(
+                r#"{{"type":"AzureCtx","postgres_url":"{}","storage_account":"{}","storage_key":"{}","container":"{}"}}"#,
+                postgres_url.replace('"', "\\\""),
+                storage_account.replace('"', "\\\""),
+                storage_key.replace('"', "\\\""),
+                container.replace('"', "\\\""),
+            );
+            Ok(ok_vm(VMValue::Str(json)))
+        }
+        "Ctx.azure_get_field_raw" => {
+            // Ctx.azure_get_field_raw(ctx: AzureCtx, field: String) -> String
+            if args.len() < 2 {
+                return Err("Ctx.azure_get_field_raw requires 2 arguments".to_string());
+            }
+            let ctx_str = match &args[0] {
+                VMValue::Str(s) => s.clone(),
+                _ => return Err("Ctx.azure_get_field_raw: ctx must be a String".to_string()),
+            };
+            let field = match &args[1] {
+                VMValue::Str(s) => s.clone(),
+                _ => return Err("Ctx.azure_get_field_raw: field must be a String".to_string()),
+            };
+            // ctx_str may be "ok({...})" or raw JSON
+            let json_str = if ctx_str.starts_with("ok(") && ctx_str.ends_with(')') {
+                &ctx_str[3..ctx_str.len() - 1]
+            } else {
+                &ctx_str
+            };
+            let val: String = serde_json::from_str::<serde_json::Value>(json_str)
+                .ok()
+                .and_then(|v| v.get(&field).and_then(|f| f.as_str()).map(|s| s.to_string()))
+                .unwrap_or_default();
+            Ok(VMValue::Str(val))
+        }
+
         // ── IO.getenv_raw (v13.6.0) ──────────────────────────────────────────
         "IO.getenv_raw" => {
             // IO.getenv_raw(key: String) -> Option<String>

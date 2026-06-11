@@ -64,8 +64,8 @@ Date: 2026-06-11
 
 - [x] G-1: `fav/Cargo.toml` → `version = "14.1.0"`
 - [x] G-2: `cargo test v141000` 全件パス（4/4）
-- [ ] G-3: `cargo test` 全件パス確認（リグレッションなし）
-- [ ] G-4: `git commit -m "feat: v14.1.0 — Azure PostgreSQL Rune"`
+- [x] G-3: `cargo test` 全件パス（1515/705/8/47/8 — リグレッションなし）
+- [x] G-4: `git commit -m "feat: v14.1.0 — Azure PostgreSQL Rune"`
 
 ---
 
@@ -73,13 +73,13 @@ Date: 2026-06-11
 
 | 確認項目 | 状態 |
 |---|---|
-| `AzurePostgres.execute_raw` / `query_raw` が VM に登録されている | |
-| `!AzureDb` 宣言が E0252 を出さない | |
-| `fav explain --lineage` で `!AzureDb(read/write)` が表示される | |
-| `runes/azure-postgres/client.fav` が `fav check` でエラーなし | |
-| `cargo test v141000` 全件パス（4/4） | |
-| `cargo test` 全件パス（リグレッションなし） | |
-| `CARGO_PKG_VERSION == "14.1.0"` | |
+| `AzurePostgres.execute_raw` / `query_raw` が VM に登録されている | ✅ |
+| `!AzureDb` 宣言が E0252 を出さない | ✅ |
+| `fav explain --lineage` で `!AzureDb(read/write)` が表示される | ✅ |
+| `runes/azure-postgres/client.fav` が `fav check` でエラーなし | ✅ |
+| `cargo test v141000` 全件パス（4/4） | ✅ |
+| `cargo test` 全件パス（リグレッションなし） | ✅ |
+| `CARGO_PKG_VERSION == "14.1.0"` | ✅ |
 
 ---
 

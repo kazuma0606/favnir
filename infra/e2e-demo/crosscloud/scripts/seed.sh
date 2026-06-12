@@ -10,8 +10,10 @@ if [ -z "$RDS_CONN" ]; then
   exit 1
 fi
 
+PSQL="docker run --rm -i postgres:16 psql"
+
 echo "[seed] customers テーブル作成..."
-psql "$RDS_CONN" <<'SQL'
+$PSQL "$RDS_CONN" <<'SQL'
 CREATE TABLE IF NOT EXISTS customers (
   customer_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   email       TEXT NOT NULL,
@@ -23,7 +25,7 @@ TRUNCATE customers;
 SQL
 
 echo "[seed] 1000 行 INSERT (full_name に先頭/末尾スペースを含める)..."
-psql "$RDS_CONN" <<'SQL'
+$PSQL "$RDS_CONN" <<'SQL'
 INSERT INTO customers (email, full_name, status)
 SELECT
   'user' || n || '@example.com',
@@ -33,5 +35,5 @@ FROM generate_series(1, 1000) AS n;
 SQL
 
 echo "[seed] 確認..."
-psql "$RDS_CONN" -c "SELECT COUNT(*) AS total_rows FROM customers;"
+$PSQL "$RDS_CONN" -c "SELECT COUNT(*) AS total_rows FROM customers;"
 echo "[seed] 完了"

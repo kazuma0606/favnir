@@ -2,12 +2,15 @@
 // v15.0.0 — 5-stage pipeline (簡略版、認証フローは v15.1.0 以降)
 //
 // 実行方法:
-//   export RDS_CONN_STR="host=... user=... password=... dbname=..."
-//   export AZURE_CONN_STR="host=... user=... password=... dbname=..."
+//   export DATABASE_URL="host=<rds> port=5432 user=favnir password=... dbname=appdb sslmode=disable"
+//   export AZURE_CONN_STR="host=<azure-pg> port=5432 user=favnir password=... dbname=appdb sslmode=require"
 //   export AZURE_STORAGE_ACCOUNT="mystorageaccount"
 //   export AZURE_STORAGE_KEY="base64key=="
 //   export AZURE_CONTAINER="proof"
 //   fav run --legacy src/migrate.fav
+//
+// 注意: Postgres.query_raw/execute_raw は DATABASE_URL 環境変数から接続文字列を自動取得する。
+//       AzurePostgres.execute_raw/query_raw は接続文字列を第1引数で明示する。
 
 type CustomerRow = {
   customer_id: String
@@ -25,13 +28,18 @@ type MigratedRow = {
   source_updated_at: String
 }
 
-// Stage 1: AWS RDS PostgreSQL から customers テーブルを読み取る (!Db)
-fn extract_from_rds(rds_conn: String) -> Result<String, String> !Postgres {
+// Stage 1: AWS RDS PostgreSQL から customers テーブルを読み取る
+// 接続文字列は DATABASE_URL 環境変数から自動取得
+fn extract_from_rds() -> Result<String, String> !Postgres {
   Postgres.query_raw(
-    rds_conn,
     "SELECT customer_id::text, email, TRIM(full_name) AS full_name, status, updated_at::text FROM customers ORDER BY customer_id",
     "[]"
   )
+}
+
+// Azure 接続確認用ヘルパー（Stage 3 の前に疎通チェック）
+fn ping_azure(azure_conn: String) -> Result<Int, String> !AzureDb {
+  AzurePostgres.execute_raw(azure_conn, "SELECT 1", "[]")
 }
 
 // Stage 2+3: 変換 + Azure DB for PostgreSQL へ upsert (!AzureDb)
@@ -60,7 +68,7 @@ fn save_proof_to_blob(account: String, key: String, container: String, target_co
     String.concat(
       String.concat(
         "{\"status\":\"ok\",\"pipeline\":\"crosscloud-migration\",\"target_count\":",
-        $"{target_count}"
+        Int.to_string(target_count)
       ),
       "}"
     )
@@ -69,7 +77,7 @@ fn save_proof_to_blob(account: String, key: String, container: String, target_co
 
 // Stage 5: Azure DB の行数を確認して source と一致するか検証 (!AzureDb)
 fn verify_row_count(azure_conn: String, expected: Int) -> Result<Unit, String> !AzureDb {
-  bind result_json <- AzurePostgres.query_raw(
+  chain result_json <- AzurePostgres.query_raw(
     azure_conn,
     "SELECT COUNT(*)::text AS cnt FROM customers_migrated",
     "[]"
@@ -81,19 +89,19 @@ fn verify_row_count(azure_conn: String, expected: Int) -> Result<Unit, String> !
 
 public fn main(ctx: AppCtx) -> Result<Unit, String> {
   bind _ <- ctx.io.println("[1/5] ExtractFromRds: AWS RDS PostgreSQL から読み取り中...")
-  bind rows_json <- extract_from_rds(
-    Option.unwrap_or(ctx.io.getenv_raw("RDS_CONN_STR"), "")
-  )
+  chain rows_json <- extract_from_rds()
   bind _ <- ctx.io.println("[1/5] OK — rows_json 取得完了")
   bind _ <- ctx.io.println("[2/5] TransformRows: SQL TRIM で正規化済み（extract 時に処理）")
   bind _ <- ctx.io.println("[3/5] LoadToAzurePostgres: Azure DB for PostgreSQL へ upsert 中...")
-  bind target_count <- load_to_azure_postgres(
+  chain _ping <- ping_azure(Option.unwrap_or(ctx.io.getenv_raw("AZURE_CONN_STR"), ""))
+  bind _ <- ctx.io.println("[3/5] Azure 疎通 OK")
+  chain target_count <- load_to_azure_postgres(
     Option.unwrap_or(ctx.io.getenv_raw("AZURE_CONN_STR"), ""),
     rows_json
   )
   bind _ <- ctx.io.println("[3/5] OK")
   bind _ <- ctx.io.println("[4/5] SaveProofToBlob: Azure Blob Storage に証跡 JSON を保存中...")
-  bind _ <- save_proof_to_blob(
+  chain _proof <- save_proof_to_blob(
     Option.unwrap_or(ctx.io.getenv_raw("AZURE_STORAGE_ACCOUNT"), ""),
     Option.unwrap_or(ctx.io.getenv_raw("AZURE_STORAGE_KEY"), ""),
     Option.unwrap_or(ctx.io.getenv_raw("AZURE_CONTAINER"), "proof"),
@@ -101,7 +109,7 @@ public fn main(ctx: AppCtx) -> Result<Unit, String> {
   )
   bind _ <- ctx.io.println("[4/5] OK")
   bind _ <- ctx.io.println("[5/5] VerifyRowCount: Azure DB の行数を確認中...")
-  bind _ <- verify_row_count(
+  chain _verify <- verify_row_count(
     Option.unwrap_or(ctx.io.getenv_raw("AZURE_CONN_STR"), ""),
     target_count
   )

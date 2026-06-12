@@ -22,16 +22,18 @@ for var in RDS_CONN_SECRET_ARN AZURE_CONN_STR AZURE_STORAGE_ACCOUNT AZURE_STORAG
 done
 
 # Secrets Manager から RDS 接続文字列を取得
-echo "[run] Secrets Manager から RDS_CONN_STR を取得..."
-RDS_CONN_STR=$(aws secretsmanager get-secret-value \
+echo "[run] Secrets Manager から DATABASE_URL を取得..."
+DATABASE_URL=$(aws secretsmanager get-secret-value \
   --secret-id "$RDS_CONN_SECRET_ARN" \
   --query SecretString \
   --output text)
-echo "[run] RDS_CONN_STR 取得完了"
+echo "[run] DATABASE_URL 取得完了"
 
 # パイプライン実行
+# Postgres.query_raw は DATABASE_URL を自動参照する
+# AzurePostgres.execute_raw は AZURE_CONN_STR を第1引数として受け取る
 echo "[run] fav run --legacy src/migrate.fav ..."
-export RDS_CONN_STR
+export DATABASE_URL
 export AZURE_CONN_STR
 export AZURE_STORAGE_ACCOUNT
 export AZURE_STORAGE_KEY

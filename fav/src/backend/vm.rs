@@ -4959,13 +4959,20 @@ fn format_pg_error(e: &tokio_postgres::Error) -> String {
     }
 }
 
-// Resolve sslmode: DATABASE_URL ?sslmode= > PGSSLMODE env > "prefer" (v12.6.0).
+// Resolve sslmode: URL ?sslmode= > libpq "sslmode=" key > PGSSLMODE env > "prefer" (v15.0.0).
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn resolve_sslmode(conn_str: &str) -> String {
+    // URL format: ?sslmode=disable
     if let Some(pos) = conn_str.find("?sslmode=") {
         let rest = &conn_str[pos + 9..];
         let end = rest.find('&').unwrap_or(rest.len());
         return rest[..end].to_string();
+    }
+    // libpq key=value format: "sslmode=disable" (space-separated tokens)
+    for part in conn_str.split_whitespace() {
+        if let Some(val) = part.strip_prefix("sslmode=") {
+            return val.to_string();
+        }
     }
     if let Ok(val) = std::env::var("PGSSLMODE") {
         return val;
@@ -4991,6 +4998,8 @@ async fn pg_connect_inner(
         _ => {
             use rustls::{ClientConfig, RootCertStore};
             use tokio_postgres_rustls::MakeRustlsConnect;
+            // Ensure ring crypto provider is installed (Rustls 0.23 requires explicit init).
+            let _ = rustls::crypto::ring::default_provider().install_default();
             let mut root_store = RootCertStore::empty();
             root_store.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
             let config = ClientConfig::builder()

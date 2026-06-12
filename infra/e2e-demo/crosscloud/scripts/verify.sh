@@ -12,12 +12,14 @@ FAIL=0
 check_pass() { echo "[PASS $1] $2"; PASS=$((PASS + 1)); }
 check_fail() { echo "[FAIL $1] $2"; FAIL=$((FAIL + 1)); }
 
+PSQL="docker run --rm -i postgres:16 psql"
+
 echo "=== CrossCloud Migration Verify ==="
 
 # PASS 1: Source rows = 1000
 echo ""
 echo "[CHECK 1] AWS RDS source rows..."
-SRC_COUNT=$(psql "$RDS_CONN_STR" -t -c "SELECT COUNT(*) FROM customers;" | tr -d ' ')
+SRC_COUNT=$($PSQL "$RDS_CONN_STR" -t -c "SELECT COUNT(*) FROM customers;" | tr -d ' \r\n')
 if [ "$SRC_COUNT" = "1000" ]; then
   check_pass 1 "Source rows = $SRC_COUNT"
 else
@@ -27,7 +29,7 @@ fi
 # PASS 2: Target rows = 1000
 echo ""
 echo "[CHECK 2] Azure PostgreSQL target rows..."
-TGT_COUNT=$(psql "$AZURE_CONN_STR" -t -c "SELECT COUNT(*) FROM customers_migrated;" | tr -d ' ')
+TGT_COUNT=$($PSQL "$AZURE_CONN_STR" -t -c "SELECT COUNT(*) FROM customers_migrated;" | tr -d ' \r\n')
 if [ "$TGT_COUNT" = "1000" ]; then
   check_pass 2 "Target rows = $TGT_COUNT"
 else
@@ -37,9 +39,9 @@ fi
 # PASS 3: No untrimmed names (normalized_name に前後スペースがない)
 echo ""
 echo "[CHECK 3] No untrimmed normalized_name..."
-UNTRIMMED=$(psql "$AZURE_CONN_STR" -t -c \
+UNTRIMMED=$($PSQL "$AZURE_CONN_STR" -t -c \
   "SELECT COUNT(*) FROM customers_migrated WHERE normalized_name != TRIM(normalized_name);" \
-  | tr -d ' ')
+  | tr -d ' \r\n')
 if [ "$UNTRIMMED" = "0" ]; then
   check_pass 3 "No untrimmed normalized_name (count=$UNTRIMMED)"
 else

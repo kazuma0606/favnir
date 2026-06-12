@@ -187,6 +187,8 @@ pub fn compile_program(program: &Program) -> IRProgram {
         "Debug",
         "Snowflake",
         "Postgres",
+        "AzurePostgres",
+        "AzureBlob",
         "assert",
         "assert_eq",
         "assert_ne",

@@ -1,85 +1,91 @@
 ---
-title: "エフェクト型"
+title: "副作用とCapability"
 order: 2
 category: "言語仕様"
-description: "Favnir のエフェクト型システム — 副作用を型で表現する"
+description: "Favnir の Capability Context — 副作用を型で表現する（v14.0.0〜）"
 ---
 
-# エフェクト型
+# 副作用と Capability（v14.0.0〜）
 
-Favnir では副作用を関数シグネチャに明示します。
-エフェクトを宣言しない関数は **純粋関数** として扱われ、テスト容易性が保証されます。
+Favnir では副作用を **Capability Context**（`ctx` 引数）で表現します。
+`ctx` を受け取らない関数は **純粋関数** としてコンパイル時に保証されます。
 
-## エフェクト一覧
-
-| エフェクト | 説明 |
-|-----------|------|
-| `!Io` | 標準入出力（`IO.println` など） |
-| `!File` | ファイルシステム読み書き |
-| `!Db` | データベース操作（SQLite・PostgreSQL・DuckDB） |
-| `!Network` | HTTP リクエスト |
-| `!AWS` | AWS SDK 操作（S3・SQS・DynamoDB） |
-| `!Auth` | 認証・認可操作（JWT 検証・RBAC） |
-| `!Env` | 環境変数アクセス |
-
-## 基本的な使い方
+## Capability Context の基本
 
 ```favnir
-// エフェクトなし: 純粋関数
+// 純粋関数: ctx なし
 fn add(a: Int, b: Int) -> Int { a + b }
 
-// !Io: 標準出力
-public fn main() -> Unit !Io {
-  IO.println(add(1, 2))
-}
-
-// 複数エフェクト
-public fn pipeline() -> Unit !Io !AWS !Db {
-  bind rows <- aws.s3.read_csv<Order>("bucket", "orders.csv")
-  bind conn <- db.connect("sqlite::memory:")
-  // ...
+// 副作用あり: ctx を受け取る
+public fn main(ctx: AppCtx) -> Unit {
+  ctx.io.println(add(1, 2))
 }
 ```
 
-## エフェクトの伝播
+`ctx.io.println` のように、副作用は `ctx.capability.method()` の形式で呼び出します。
+`ctx` がなければ `println` は呼び出せません。コンパイラが静的に保証します。
 
-エフェクトを持つ関数を呼び出す側は、同じエフェクトを宣言する必要があります:
+## 組み込み Capability Interface
+
+| Interface | 用途 |
+|-----------|------|
+| `Io` | 標準入出力（`ctx.io.println` 等） |
+| `DbRead` | データベース読み取り |
+| `DbWrite` | データベース書き込み |
+| `StorageRead` | オブジェクトストレージ読み取り |
+| `StorageWrite` | オブジェクトストレージ書き込み |
+| `HttpClient` | HTTP リクエスト |
+| `Env` | 環境変数アクセス |
+
+## コンテキスト型
 
 ```favnir
-fn fetch_user(id: Int) -> Result<User, String> !Db {
-  db.query_one(conn, $"SELECT * FROM users WHERE id = {id}")
+// LoadCtx: DbRead + Io を持つコンテキスト
+fn load_users(ctx: LoadCtx, page: Int) -> Result<List<User>, String> {
+  ctx.db.query($"SELECT * FROM users LIMIT 10 OFFSET {page * 10}")
 }
 
-// fetch_user を呼ぶ側も !Db が必要
-public fn handle_request(id: Int) -> Unit !Io !Db {
-  match fetch_user(id) {
-    Ok(u)  => IO.println(u.name)
-    Err(e) => IO.println($"エラー: {e}")
+// WriteCtx: DbWrite + StorageWrite を持つコンテキスト
+fn save_result(ctx: WriteCtx, data: String) -> Result<Unit, String> {
+  ctx.db.execute("INSERT INTO results VALUES (?)", [data])
+}
+
+// AppCtx: すべての Capability を持つ汎用コンテキスト
+public fn main(ctx: AppCtx) -> Unit {
+  match load_users(ctx, 0) {
+    Ok(users) => ctx.io.println($"{List.length(users)} 件取得")
+    Err(e)    => ctx.io.println($"エラー: {e}")
   }
 }
 ```
 
-## テストでのエフェクト
-
-テストブロックは `!Io / !File / !Db / !Auth / !AWS` をデフォルトで許可します:
+## テストでのモック
 
 ```favnir
-test "pipeline result" {
-  bind conn <- duckdb.open(":memory:")
-  bind result <- duckdb.query<Summary>(conn, "SELECT 1 AS total")
-  List.length(result) == 1
+fn run_test() -> Bool {
+  let ctx = Ctx.mock(MockDb.empty(), MockStorage.empty())
+  let result = load_users(ctx, 0)
+  Result.is_ok(result)
 }
 ```
 
-## エフェクトエラー
+## エラーコード
 
-宣言していないエフェクトを使うとコンパイルエラーになります:
+| コード | 説明 |
+|--------|------|
+| E0023 | ambient effect call — `ctx` なしで副作用を呼び出した |
+| E0025 | bang notation removed — 非 legacy モードで `!Effect` を使用した |
+| E0021 | capability not in context — コンテキストに必要な capability がない |
+
+## --legacy モードでの旧 !Effect 記法
+
+v14.0.0 以前の `!Effect` 記法は `--legacy` フラグ使用時のみ有効です:
 
 ```favnir
-// E0370: !Io not declared
-fn greet(name: String) -> Unit {
-  IO.println(name)  // エラー: !Io を宣言していない
+// --legacy モードでのみ動作（非推奨）
+public fn main() -> Unit !Io {
+  IO.println("Hello")
 }
 ```
 
-→ [E0370 の詳細](/errors/E0370/)
+`fav migrate --from-effects` で自動移行できます。

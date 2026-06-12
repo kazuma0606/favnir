@@ -1,4 +1,6 @@
 // SQS Rune — message queue operations (v4.11.0)
+// NOTE: このファイルは --legacy モード専用のアンビエント API です。
+//       v14.4.0 以降の ctx-aware API は AWS.sqs_*_raw を直接使用してください。
 
 public fn send_message(queue_url: String, body: String) -> Result<String, String> !AWS {
     AWS.sqs_send_message_raw(queue_url, body)

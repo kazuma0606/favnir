@@ -25316,12 +25316,46 @@ public fn load(conn_str: String) -> Result<Int, String> !AzureDb {
     }
 }
 
+// ── v147000_tests (v14.7.0) — site/ ドキュメント更新 + rune ファイル精査 ────────
+#[cfg(test)]
+mod v147000_tests {
+    #[test]
+    fn version_is_14_7_0() {
+        assert_eq!(env!("CARGO_PKG_VERSION"), "14.7.0");
+    }
+
+    #[test]
+    fn site_effects_doc_no_e0370() {
+        // effects.mdx に存在しないエラーコード E0370 が含まれないことを確認
+        let effects = std::fs::read_to_string(
+            std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .parent().unwrap()
+                .join("site/content/docs/language/effects.mdx")
+        ).expect("effects.mdx should exist");
+        assert!(!effects.contains("E0370"),
+            "effects.mdx should not contain nonexistent error code E0370");
+    }
+
+    #[test]
+    fn site_introduction_no_fav_deploy() {
+        // introduction.mdx に存在しない機能 "fav deploy" が含まれないことを確認
+        let intro = std::fs::read_to_string(
+            std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .parent().unwrap()
+                .join("site/content/docs/introduction.mdx")
+        ).expect("introduction.mdx should exist");
+        assert!(!intro.contains("fav deploy"),
+            "introduction.mdx should not contain nonexistent feature 'fav deploy'");
+    }
+}
+
 // ── v146000_tests (v14.6.0) — ドキュメント整備 ────────────────────────────────
 #[cfg(test)]
 mod v146000_tests {
     #[test]
     fn version_is_14_6_0() {
-        assert_eq!(env!("CARGO_PKG_VERSION"), "14.6.0");
+        assert!(env!("CARGO_PKG_VERSION") >= "14.6.0",
+            "expected >= 14.6.0, got {}", env!("CARGO_PKG_VERSION"));
     }
 
     #[test]

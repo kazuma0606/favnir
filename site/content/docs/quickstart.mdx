@@ -10,8 +10,8 @@ description: "5 分で最初の Favnir パイプラインを動かす"
 ## Hello World
 
 ```favnir
-public fn main() -> Unit !Io {
-  IO.println("Hello, Favnir!")
+public fn main(ctx: AppCtx) -> Unit {
+  ctx.io.println("Hello, Favnir!")
 }
 ```
 
@@ -29,9 +29,9 @@ fn greet(u: User) -> String {
   $"こんにちは、{u.name}さん（{u.age}歳）"
 }
 
-public fn main() -> Unit !Io {
-  bind user <- User { name: "田中"  age: 30 }
-  IO.println(greet(user))
+public fn main(ctx: AppCtx) -> Unit {
+  let user = User { name: "田中"  age: 30 }
+  ctx.io.println(greet(user))
 }
 ```
 
@@ -42,10 +42,10 @@ fn divide(a: Int, b: Int) -> Result<Int, String> {
   if b == 0 { Result.err("ゼロ除算") } else { Result.ok(a / b) }
 }
 
-public fn main() -> Unit !Io {
+public fn main(ctx: AppCtx) -> Unit {
   match divide(10, 2) {
-    Ok(v)  => IO.println($"結果: {v}")
-    Err(e) => IO.println($"エラー: {e}")
+    Ok(v)  => ctx.io.println($"結果: {v}")
+    Err(e) => ctx.io.println($"エラー: {e}")
   }
 }
 ```
@@ -55,16 +55,15 @@ public fn main() -> Unit !Io {
 ```favnir
 import rune "duckdb"
 
-type Order = { customer: String  amount: Float }
 type Summary = { customer: String  total: Float }
 
-public fn main() -> Unit !Io !Db {
+public fn main(ctx: AppCtx) -> Unit {
   bind conn   <- duckdb.open(":memory:")
   bind result <- duckdb.query<Summary>(conn,
     "SELECT customer, SUM(amount) AS total
      FROM 'data/orders.parquet'
      GROUP BY customer ORDER BY total DESC")
-  IO.println(result)
+  ctx.io.println(result)
 }
 ```
 
@@ -73,11 +72,10 @@ public fn main() -> Unit !Io !Db {
 ```favnir
 import rune "aws"
 
-type Row = { id: Int  value: String }
-
-public fn main() -> Unit !Io !AWS {
-  bind rows <- aws.s3.read_csv<Row>("my-bucket", "data/input.csv")
-  IO.println($"読み込み: {List.length(rows)} 件")
+public fn main(ctx: AppCtx) -> Unit {
+  let aws_ctx = Ctx.build_aws_raw("ap-northeast-1", "my-bucket", "")
+  bind body <- AWS.s3_get_object_raw("my-bucket", "data/input.csv")
+  ctx.io.println($"取得完了: {String.length(body)} bytes")
 }
 ```
 
@@ -94,5 +92,5 @@ AWS_ENDPOINT_URL=http://localhost:4566 fav run src/main.fav
 ## 次のステップ
 
 - [型システム](/docs/language/types/) — Record・List・Option・Result
-- [エフェクト型](/docs/language/effects/) — 副作用の管理
+- [副作用と Capability](/docs/language/effects/) — Capability Context の仕組み
 - [AWS Rune](/runes/aws/) — S3/SQS/DynamoDB

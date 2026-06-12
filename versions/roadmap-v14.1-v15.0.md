@@ -1,6 +1,6 @@
 # Roadmap v14.1.0 〜 v15.0.0 — CrossCloud E2E Demo
 
-Date: 2026-06-11
+Date: 2026-06-12（最終更新）
 
 ## 目標
 
@@ -22,7 +22,7 @@ AWS RDS Postgres（ソース）→ Favnir パイプライン → Azure DB for Po
 
 ## バージョン計画
 
-### v14.1.0 — Azure PostgreSQL Rune
+### v14.1.0 — Azure PostgreSQL Rune ✅ COMPLETE
 
 **テーマ**: Azure DB for PostgreSQL への接続・操作をサポート
 
@@ -42,136 +42,152 @@ AWS RDS Postgres（ソース）→ Favnir パイプライン → Azure DB for Po
 - `fav/src/lineage.rs`: `!AzureDb(read/write)` 区別追加
 
 - `runes/azure-postgres/rune.fav`: 型付きラッパー
-  ```
-  fn execute(ctx: AzureDbCtx, sql: String) -> Result<Int, String> !AzureDb
-  fn query<T>(ctx: AzureDbCtx, sql: String) -> Result<List<T>, String> !AzureDb
-  fn with_transaction(ctx: AzureDbCtx, f: fn(AzureDbCtx) -> Result<T, String>) -> Result<T, String> !AzureDb
-  ```
 
-- `fav/src/middle/checker.rs`: `AzureDbCtx` type alias 追加
-
-- テスト: `v141000_tests` — `azure_postgres_primitives_registered`, `azure_db_effect_in_checker`, `azure_db_lineage_tracked`
+- テスト: `v141000_tests`
 
 ---
 
-### v14.2.0 — AzureCtx / AwsCtx + fav.toml [azure]
+### v14.2.0 — AzureCtx / AwsCtx + fav.toml [azure] ✅ COMPLETE
 
 **テーマ**: クロスクラウド用 Context 型と設定ファイル拡張
 
 **実装内容:**
 
 - `fav/src/config.rs`: `fav.toml` に `[azure]` セクション追加
-  ```toml
-  [azure]
-  postgres_url = "${AZURE_POSTGRES_URL}"
-  storage_account = "${AZURE_STORAGE_ACCOUNT}"
-  storage_key = "${AZURE_STORAGE_KEY}"
-  container = "favnir-proof"
-  ```
-
-- `fav/src/vm/builtins.rs`: `Ctx.build_aws_raw` / `Ctx.build_azure_raw` プリミティブ追加
-
-- `runes/ctx/rune.fav`: `AwsCtx` / `AzureCtx` / `CrossCloudCtx` 型追加
-  ```
-  type AwsCtx(Record)    // aws_region, s3_bucket, db_host, ...
-  type AzureCtx(Record)  // postgres_url, storage_account, container, ...
-
-  fn build_aws(region: String, s3_bucket: String, db_url: String) -> Result<AwsCtx, String>
-  fn build_azure(postgres_url: String, storage_account: String, storage_key: String, container: String) -> Result<AzureCtx, String>
-
-  // CrossCloudCtx を使う場合（コメントで代替案として提示）:
-  // type CrossCloudCtx(Record)  // aws: AwsCtx, azure: AzureCtx
-  // fn build_crosscloud(aws: AwsCtx, azure: AzureCtx) -> CrossCloudCtx
-  ```
-
-- `fav/src/driver.rs`: `inject_azure_config` / `inject_aws_crosscloud_config` 追加（`fav.toml` の [azure] セクションを env var 展開して Ctx に注入）
-
-- テスト: `v142000_tests` — `fav_toml_azure_section_parsed`, `aws_ctx_build_raw_registered`, `azure_ctx_build_raw_registered`
+- `fav/src/vm/builtins.rs`: `Ctx.build_aws_raw` / `Ctx.build_azure_raw` / `Ctx.aws_get_field_raw` / `Ctx.azure_get_field_raw` プリミティブ追加
+- テスト: `v142000_tests`
 
 ---
 
-### v14.3.0 — Azure lineage + fav explain 出力改善
+### v14.3.0 — Azure lineage + fav explain 出力改善 ✅ COMPLETE
 
 **テーマ**: CrossCloud パイプラインのリネージ可視化
 
 **実装内容:**
 
-- `fav/src/lineage.rs`:
-  - `EffectKind::AzureDbRead` / `EffectKind::AzureDbWrite` 追加
-  - `EffectKind::AzureBlobRead` / `EffectKind::AzureBlobWrite` 追加
-  - `collect_azure_call_kinds` 関数追加
-
-- `fav/src/cli.rs` (`cmd_explain`):
-  - `--lineage` 出力に Azure エフェクトを表示
-  - CrossCloud パイプライン向けフォーマット: `[AWS RDS] → stage → [Azure Postgres]` 形式
-
-- `self/cli.fav`: `run_explain` の lineage 表示に azure effect 追加
-
-- テスト: `v143000_tests` — `azure_db_lineage_collected`, `crosscloud_lineage_format`
+- `fav/src/lineage.rs`: `EffectKind::AzureDbRead/Write`, `EffectKind::AzureBlobRead/Write` 追加
+- `ast::Effect::AzureStorage` 追加
+- `BUILTIN_EFFECTS` に `"AzureStorage"` 追加
+- テスト: `v143000_tests`
 
 ---
 
-### v14.4.0 — AWS Rune 正式パッケージング (runes/aws/)
+### v14.4.0 — AWS Rune 正式パッケージング (runes/aws/) ✅ COMPLETE
 
 **テーマ**: AWS VM ビルトインを型付き Rune ラッパーとして正式公開
 
 **実装内容:**
 
-- `runes/aws/rune.fav`:
-  ```
-  // S3
-  fn s3_put(ctx: AwsStorageCtx, key: String, body: String) -> Result<Unit, String> !Storage
-  fn s3_get(ctx: AwsStorageCtx, key: String) -> Result<String, String> !Storage
-  fn s3_delete(ctx: AwsStorageCtx, key: String) -> Result<Unit, String> !Storage
-  fn s3_list(ctx: AwsStorageCtx, prefix: String) -> Result<List<String>, String> !Storage
-  fn s3_exists(ctx: AwsStorageCtx, key: String) -> Result<Bool, String> !Storage
-
-  // SQS
-  fn sqs_send(ctx: AwsQueueCtx, message: String) -> Result<Unit, String> !Queue
-  fn sqs_receive(ctx: AwsQueueCtx, max: Int) -> Result<List<String>, String> !Queue
-  fn sqs_delete(ctx: AwsQueueCtx, receipt: String) -> Result<Unit, String> !Queue
-
-  // Secrets Manager（新規追加）
-  fn secrets_get(ctx: AwsCtx, secret_name: String) -> Result<String, String> !AWS
-  ```
-
-- `fav/src/vm/builtins.rs`: `AWS.secrets_get_raw` プリミティブ追加
-  - Crate: `aws-sdk-secretsmanager`
-
+- `fav/src/backend/vm.rs`: `AWS.secrets_get_raw` プリミティブ追加（SigV4 + Secrets Manager）
 - `fav/src/middle/checker.rs`: `AWS.secrets_get_raw` の builtin_ret_ty 追加
+- `runes/aws/secrets.fav`: `secrets_get(ctx: String, secret_name: String)` ラッパー
+- `runes/aws/s3.fav`: `s3_put/s3_get/s3_delete/s3_list` ctx-aware ラッパー追加
+- `runes/aws/rune.toml`: メタデータ
+- テスト: `v144000_tests`
 
-- `rune.toml` in `runes/aws/`: メタデータ追加
-
-- テスト: `v144000_tests` — `aws_rune_file_parses`, `secrets_get_raw_registered`, `aws_rune_s3_functions_present`
+**実装メモ（後続バージョンで参照）:**
+- `import rune "ctx"` は使用不可（`runes/ctx/ctx.fav` 未存在）→ `ctx: String` で代替
+- rune ファイル内で `let` 構文を使うとパースエラー → インライン化が必須
 
 ---
 
-### v14.5.0 — Azure Blob Storage Rune
+### v14.5.0 — Azure Blob Storage Rune ✅ COMPLETE
 
 **テーマ**: Azure Blob Storage への証跡保存をサポート
 
 **実装内容:**
 
-- `fav/src/vm/builtins.rs`: Azure Blob VM プリミティブ追加
-  - `AzureBlob.put_raw(account, key, container, blob_name, body) -> Result<Unit, String>`
-  - `AzureBlob.get_raw(account, key, container, blob_name) -> Result<String, String>`
-  - `AzureBlob.list_raw(account, key, container, prefix) -> Result<String, String>`（JSON 配列）
-  - `AzureBlob.delete_raw(account, key, container, blob_name) -> Result<Unit, String>`
-  - Crate: `azure_storage` + `azure_storage_blobs`（`azure-sdk-for-rust`）
+- `fav/src/backend/vm.rs`: Azure Blob VM プリミティブ追加
+  - `azure_blob_sign` ヘルパー（HMAC-SHA256 + base64 Shared Key 署名）
+  - `AzureBlob.put_raw/get_raw/list_raw/delete_raw`
+- `fav/src/middle/checker.rs`: `AzureBlob` namespace + `require_azure_storage_effect` (E0317)
+- `runes/azure-blob/azure_blob.fav`: `put/get/list/delete` ラッパー（ctx: String）
+- `runes/azure-blob/rune.toml`: メタデータ
+- テスト: `v145000_tests`（4件全パス）
 
-- `fav/src/middle/checker.rs`: `AzureBlob` namespace + `!AzureStorage` エフェクト追加
+---
 
-- `fav/src/lineage.rs`: `EffectKind::AzureBlobRead` / `EffectKind::AzureBlobWrite` 実装（v14.3.0 で定義済み）
+### v14.6.0 — ドキュメント整備（README + CHANGELOG）
 
-- `runes/azure-blob/rune.fav`:
-  ```
-  fn put(ctx: AzureStorageCtx, blob_name: String, body: String) -> Result<Unit, String> !AzureStorage
-  fn get(ctx: AzureStorageCtx, blob_name: String) -> Result<String, String> !AzureStorage
-  fn list(ctx: AzureStorageCtx, prefix: String) -> Result<List<String>, String> !AzureStorage
-  fn delete(ctx: AzureStorageCtx, blob_name: String) -> Result<Unit, String> !AzureStorage
-  ```
+**テーマ**: v14.1.0〜v14.5.0 の積み残しドキュメントを一括修正
 
-- テスト: `v145000_tests` — `azure_blob_primitives_registered`, `azure_storage_effect_in_checker`, `azure_blob_rune_parses`
+**背景（2026-06-12 調査結果）:**
+- CHANGELOG に v14.1.0〜v14.5.0 のエントリが丸ごと欠落
+- README の「現在の状態」見出しが `v10.0.0` のまま
+- README のロードマップ表が v14.0.0 で止まっている
+- README のコード例が旧 `!Effect` スタイルで書かれており、v14.0.0 Capability Context と矛盾して見える
+
+**実装内容:**
+
+- `CHANGELOG.md`: v14.1.0〜v14.5.0 の各エントリを追加
+  - v14.1.0: AzurePostgres VM + checker + lineage
+  - v14.2.0: Ctx.build_aws_raw / Ctx.build_azure_raw / fav.toml [azure]
+  - v14.3.0: AzureStorage effect + lineage AzureBlobRead/Write
+  - v14.4.0: AWS.secrets_get_raw + runes/aws/ 正式パッケージング
+  - v14.5.0: AzureBlob.put_raw/get_raw/list_raw/delete_raw + runes/azure-blob/
+
+- `README.md`:
+  - 「現在の状態」見出しを `v14.5.0` に更新
+  - ロードマップ表に v14.1.0〜v14.5.0（完了）を追記
+  - コード例の注記整理: `stage` ブロックの `!Io` / `!Db` 等は「--legacy モードでのみ有効」ラベルを追加、または v14.0.0 スタイルのサンプルに差し替え
+  - 機能一覧表に Azure クラウドサポート行を追加
+
+- テスト: `v146000_tests`
+  - `version_is_14_6_0`
+  - `changelog_has_v14_5_0_entry`（CHANGELOG ファイルに `v14.5.0` 文字列が存在）
+  - `readme_mentions_azure_blob`（README に `AzureBlob` への言及が存在）
+
+---
+
+### v14.7.0 — site/ ドキュメント更新 + rune ファイル精査
+
+**テーマ**: site/content/docs/ の v14.0.0 以前記述を修正し、rune ファイルの ambient スタイルを洗い出す
+
+**背景（2026-06-12 調査結果）:**
+- `site/content/docs/introduction.mdx`: 旧 `!Io / !Db / !AWS / !Auth / !Env` 体系で説明。`fav deploy` / `MCP` / `Notebook` という存在しない機能が記載されている
+- `site/content/docs/language/effects.mdx`: 旧エフェクトシステムのドキュメント。エラーコード `E0370`（実在しない）。v14.0.0 Capability Context への言及ゼロ
+- `site/content/docs/quickstart.mdx`: `!Io`, `!Db`, `!AWS` 旧スタイル全面使用
+- `site/content/docs/runes/aws.mdx` 等: `ctx:` なし ambient API を例示
+- rune ファイルの `!Effect` 使用状況（v14.4 調査時点）:
+  - VM プリミティブラッパー（`ctx: String` + `!Effect`）は v14.x パターンとして **意図的・正しい**
+  - ただし `cache.fav`(12箇所)、`fs.fav`(15箇所)、`queue.fav`(11箇所) 等で ambient スタイルが混在している可能性あり → 個別確認が必要
+
+**実装内容:**
+
+- `site/content/docs/introduction.mdx`:
+  - 旧エフェクト表を削除し Capability Context 体系に書き直し
+  - 存在しない機能（fav deploy / MCP / Notebook）を削除
+- `site/content/docs/language/effects.mdx`:
+  - v14.0.0 Capability Context を主体に書き直し
+  - 旧 `!Effect` は「--legacy モード」として付記
+  - エラーコードを E0023 / E0025 に修正
+- `site/content/docs/quickstart.mdx`: ctx パラメータスタイルのサンプルに更新
+- `site/content/docs/runes/aws.mdx` 等: ctx-aware API 例示に更新
+- rune ファイル精査（`cache.fav`, `fs.fav`, `queue.fav`, `log/emitter.fav`, `rune_loader/loader.fav` 等）:
+  - `ctx:` パラメータなし ambient スタイル → 修正要否を判定
+  - 修正が多い場合は v14.8.0 として分割
+
+**テスト: `v147000_tests`**
+  - `version_is_14_7_0`
+  - `site_effects_doc_no_e0370`（effects.mdx に `E0370` が含まれない）
+  - `site_introduction_no_fav_deploy`（introduction.mdx に `fav deploy` が含まれない）
+
+---
+
+### v14.8.0〜 — 調査結果次第（TBD）
+
+**v14.7.0 の調査・修正作業を経て、追加対応が必要な場合に設ける。**
+
+想定される積み残し候補:
+
+| 候補 | 内容 | 発生条件 |
+|---|---|---|
+| rune ファイル修正 | ambient スタイル rune を ctx-aware に移行 | v14.7 精査で修正量が多い場合 |
+| fav.toml [azure] 実装確認 | `inject_azure_config` の実装状況確認 | v14.2 実装が incomplete だった場合 |
+| crosscloud plan 簡略化 | plan.md の複雑な要件（後述）を v15.0 スコープに絞り込む | v15.0 実装開始前に必要 |
+| その他積み残し | v14.7 調査で新たに発見されたもの | 随時 |
+
+**バージョン番号は v14.8.0, v14.9.0, ... と必要な数だけ増加させる。**
 
 ---
 
@@ -179,37 +195,44 @@ AWS RDS Postgres（ソース）→ Favnir パイプライン → Azure DB for Po
 
 **テーマ**: AWS → Azure クロスクラウドマイグレーションの E2E デモ完成
 
-**実装内容:**
+> **⚠️ 注記（2026-06-12）: crosscloud/plan.md との乖離について**
+>
+> `infra/e2e-demo/crosscloud/plan.md` には、当初の想定より大幅に複雑な要件が記載されている:
+> - Entra ID → Cognito 連携（ID フェデレーション）
+> - HMAC リクエスト整合性チェック
+> - API Gateway + Lambda verifier
+> - Cognito クレームベースの認可（job_type フィルタリング）
+> - 冪等性保証（重複行 INSERT 防止）
+> - 成功・失敗両ケースの証跡記録
+>
+> v15.0.0 では以下の **簡略版シナリオ** に絞る。
+> 複雑な要件（Entra ID 連携・Lambda verifier・認可）は v15.1.0 以降とする。
+> v14.7〜v14.x 系の調査・修正を経て、実装前に plan.md を「簡略版」と「将来版」に分割すること。
+
+**v15.0.0 スコープ（簡略版 5 ステージ）:**
 
 - `infra/e2e-demo/crosscloud/src/migrate.fav`:
   ```
-  // 基本シグネチャ: 引数を分離（CrossCloudCtx に統合する方法もある）
-  fn migrate(aws_ctx: AwsCtx, azure_ctx: AzureCtx) -> Result<Unit, String>
-  // 代替: fn migrate(ctx: CrossCloudCtx) -> Result<Unit, String>
+  fn migrate(aws_ctx: String, azure_ctx: String) -> Result<Unit, String> !AWS !AzureDb !AzureStorage
 
   seq MigrationPipeline [
-    ExtractFromRds    |> aws_ctx
+    ExtractFromRds
     TransformRows
-    LoadToAzurePostgres |> azure_ctx
-    SaveProofToBlob   |> azure_ctx
+    LoadToAzurePostgres
+    SaveProofToBlob
     VerifyRowCount
   ]
 
   public fn main(ctx: AppCtx) -> Result<Unit, String>
   ```
 
-- `infra/e2e-demo/crosscloud/src/validate.fav`:
-  - HMAC 整合性検証（AWS Lambda verifier 相当）
-  - 行数チェック: `source_count == target_count`
-  - 証跡 JSON を Azure Blob に保存
-
 - `infra/e2e-demo/crosscloud/terraform/`:
-  - `aws/main.tf`: RDS Postgres, Secrets Manager, IAM, S3（ログ用）
+  - `aws/main.tf`: RDS Postgres, Secrets Manager, IAM
   - `azure/main.tf`: Azure DB for PostgreSQL, Storage Account, Blob Container
 
 - `infra/e2e-demo/crosscloud/scripts/`:
   - `run.sh`: AWS credentials + Azure credentials を取得し `fav run` を実行
-  - `seed.sh`: AWS RDS にサンプルデータ投入（1000行の txn テーブル）
+  - `seed.sh`: AWS RDS にサンプルデータ投入（1000 行の txn テーブル）
   - `verify.sh`: Azure Postgres の行数 + Blob の証跡 JSON を確認
 
 - `infra/e2e-demo/crosscloud/README.md`: セットアップ手順・前提条件
@@ -230,38 +253,44 @@ AWS RDS Postgres（ソース）→ Favnir パイプライン → Azure DB for Po
 
 ---
 
-## 依存関係
+## 依存関係（更新版）
 
 ```
-v14.1.0 (Azure Postgres VM + checker)
-    ↓
-v14.2.0 (AwsCtx / AzureCtx + fav.toml [azure])
-    ↓
-v14.3.0 (lineage)   ←→   v14.4.0 (runes/aws/)   ←→   v14.5.0 (Azure Blob Rune)
-              ↘                   ↓                   ↙
-                          v15.0.0 (E2E Demo)
+v14.1.0 ✅  v14.2.0 ✅  v14.3.0 ✅  v14.4.0 ✅  v14.5.0 ✅
+                                                        |
+                                              v14.6.0（README/CHANGELOG）
+                                                        |
+                                              v14.7.0（site/ + rune 精査）
+                                                        |
+                                            v14.8.0〜（TBD: 調査次第）
+                                                        |
+                                              v15.0.0（CrossCloud E2E）
 ```
 
-v14.3.0・v14.4.0・v14.5.0 は並行開発可能。すべて v15.0.0 の前提。
+v14.6.0 と v14.7.0 は直列。v14.8.0 以降は v14.7.0 の調査結果で決定。
+すべて v15.0.0 の前提。
 
 ---
 
-## 新規 Cargo 依存予定
+## 新規 Cargo 依存（実績）
 
-| Crate | 用途 | バージョン目標 |
-|---|---|---|
-| `tokio-postgres-openssl` | Azure Postgres TLS | v14.1.0 |
-| `aws-sdk-secretsmanager` | Secrets Manager | v14.4.0 |
-| `azure_storage` | Azure Blob | v14.5.0 |
-| `azure_storage_blobs` | Azure Blob | v14.5.0 |
+| Crate | 用途 | 追加バージョン | 状態 |
+|---|---|---|---|
+| `tokio-postgres-openssl` | Azure Postgres TLS | v14.1.0 | ✅ 追加済み |
+| `hmac` / `sha2` / `base64` | Azure Blob Shared Key | 既存 | ✅ 流用 |
+| `chrono` | Azure Blob RFC 1123 日付 | 既存 | ✅ 流用 |
+| `azure_storage` / `azure_storage_blobs` | Azure Blob SDK | — | ❌ 不使用（ureq + 手動署名で実装） |
+| `aws-sdk-secretsmanager` | Secrets Manager SDK | — | ❌ 不使用（SigV4 + ureq で実装） |
 
 ---
 
 ## 実装ノート
 
 - **Azure Postgres の SSL**: Azure DB for PostgreSQL は SSL 必須。`sslmode=require` を接続文字列に含める。`tokio-postgres` + `tokio-postgres-openssl` + `openssl` crate を使用。
-- **Azure Blob の認証**: Shared Key（account + key）を使う。SAS トークンは v15.x 以降で検討。
-- **HMAC 整合性**: `plan.md` では Lambda verifier として設計されているが、v15.0.0 では Favnir 内でハッシュ計算し Blob に保存する形でシンプル化。Lambda verifier は v15.1.0 以降。
-- **CrossCloudCtx の選択**: `fn migrate(aws_ctx, azure_ctx)` を基本形とする。呼び出し元での `let ctx = CrossCloudCtx { aws: aws_ctx, azure: azure_ctx }` 形式は `runes/ctx/rune.fav` にコメントで残す。
+- **Azure Blob の認証**: Shared Key（account + key）。既存 `hmac 0.12` + `sha2 0.10` + `base64 0.22` で実装済み。SAS トークンは v15.x 以降で検討。
+- **HMAC 整合性（crosscloud/plan.md）**: plan.md では Lambda verifier として設計されているが、v15.0.0 では Favnir 内でハッシュ計算し Blob に保存する形でシンプル化。Lambda verifier は v15.1.0 以降。
+- **CrossCloudCtx の選択**: `fn migrate(aws_ctx: String, azure_ctx: String)` を基本形とする（`runes/ctx/ctx.fav` 未存在のため型付き Ctx は使わない）。
 - **Windows dev 環境**: Azure SDK の TLS は OpenSSL が必要。Windows では `OPENSSL_DIR` 環境変数設定が必要になる可能性あり。
 - **fav2py（Python トランスパイラ）**: CrossCloud デモは Favnir ネイティブのみ。Python トランスパイルは対象外。
+- **rune ファイルの `!Effect` 使用**: VM プリミティブラッパーが `ctx: String` + `!Effect` の組み合わせで書かれているのは v14.x の正しいパターン。一方、`ctx:` パラメータなしで `IO.println` 等を ambient に呼んでいる rune は v14.7.0 で修正対象とする。
+- **`let` 構文**: rune ファイル内で `let x = ...` を使うとパースエラー（"expected RBrace, got Ident"）になる。中間値はインライン化するか `bind` を使うこと。

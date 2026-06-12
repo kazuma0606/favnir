@@ -4,6 +4,109 @@ Favnir のバージョン履歴。形式は [Keep a Changelog](https://keepachan
 
 ---
 
+## [v14.6.0] — 2026-06-12 — ドキュメント整備（README + CHANGELOG）
+
+### Changed
+- `README.md`: 「現在の状態」見出しを v14.6.0 に更新、ロードマップ表に v14.1.0〜v14.6.0 を追記
+- `README.md`: 機能一覧表に Azure Blob Storage / Azure PostgreSQL 行を追加
+- `README.md`: 旧 `!Effect` スタイルコード例に `--legacy` モード注記を追加
+- `CHANGELOG.md`: v14.1.0〜v14.5.0 エントリを追加
+
+### Notes
+- コードの変更なし。純粋なドキュメント更新バージョン
+- テスト: v146000_tests 3 件（version_is_14_6_0 / changelog_has_v14_5_0_entry / readme_mentions_azure_blob）
+
+---
+
+## [v14.5.0] — 2026-06-12 — Azure Blob Storage Rune
+
+### New Features
+- `azure_blob_sign` ヘルパー関数（`vm.rs`）: HMAC-SHA256 + base64 による Azure Shared Key 署名
+  - 既存の `hmac 0.12` + `sha2 0.10` + `base64 0.22` + `chrono` を使用（新規 crate なし）
+  - RFC 1123 日付フォーマット、x-ms-* ヘッダーのアルファベット順ソート
+- `AzureBlob.put_raw(account, key, container, blob_name, body)` VM primitive（BlockBlob PUT）
+- `AzureBlob.get_raw(account, key, container, blob_name)` VM primitive（GET → String）
+- `AzureBlob.list_raw(account, key, container, prefix)` VM primitive（GET → JSON 配列文字列）
+- `AzureBlob.delete_raw(account, key, container, blob_name)` VM primitive（DELETE）
+- `checker.rs`: `require_azure_storage_effect` — `!AzureStorage` 未宣言時に E0317 を発生
+- `checker.rs`: `("AzureBlob", "put_raw/get_raw/list_raw/delete_raw")` を `builtin_ret_ty` に追加
+- `checker.rs`: `"AzureBlob"` を `BUILTIN_EFFECTS` に追加
+- `runes/azure-blob/azure_blob.fav`: `put/get/list/delete` ctx-aware ラッパー（`ctx: String`）
+- `runes/azure-blob/rune.toml`: rune メタデータ（version 14.5.0、effects !AzureStorage）
+
+### Notes
+- テスト: v145000_tests 4 件（version_is_14_5_0 / azure_blob_put_raw_registered / azure_storage_effect_required / azure_blob_rune_file_present）
+- `let` 構文は rune ファイル内でパースエラーになるため引数はインライン化
+- `import rune "ctx"` は使用不可（runes/ctx/ctx.fav 未存在）→ `ctx: String` で代替
+- LIST の canonical_resource は query params をアルファベット順にソート: `comp:list\nprefix:...\nrestype:container`
+
+---
+
+## [v14.4.0] — 2026-06-12 — AWS Rune 正式パッケージング
+
+### New Features
+- `AWS.secrets_get_raw(region, secret_name)` VM primitive（SigV4 + ureq で Secrets Manager `GetSecretValue` API）
+- `Ctx.aws_get_field_raw(ctx, field)` VM primitive — AwsCtx JSON 文字列からフィールドを取得
+- `checker.rs`: `("AWS", "secrets_get_raw")` を `builtin_ret_ty` に追加（`require_aws_effect` 呼び出し）
+- `checker.rs`: `("Ctx", "aws_get_field_raw")` → `Some(Type::String)` を `builtin_ret_ty` に追加
+- `runes/aws/secrets.fav`: `secrets_get(ctx: String, secret_name: String)` ラッパー
+- `runes/aws/s3.fav`: `s3_put/s3_get/s3_delete/s3_list` ctx-aware ラッパーを追加
+- `runes/aws/rune.toml`: version `14.4.0`、description に Secrets Manager を追記
+
+### Notes
+- テスト: v144000_tests 4 件（version_is_14_4_0 / secrets_get_raw_registered / aws_ctx_field_raw_registered / aws_rune_s3_ctx_functions_present）
+- LocalStack エンドポイント対応（`config.endpoint_url` がある場合は `/` に置換）
+- `let` 構文パースエラーのため rune ファイルは全引数インライン化
+
+---
+
+## [v14.3.0] — 2026-06-12 — Azure lineage + !AzureStorage エフェクト
+
+### New Features
+- `ast::Effect::AzureStorage` 追加（parser / lineage / checker で認識）
+- `lineage.rs`: `EffectKind::AzureDbRead` / `AzureDbWrite` / `AzureBlobRead` / `AzureBlobWrite` 追加
+- `lineage.rs`: `collect_azure_blob_call_kinds` / `collect_azure_db_call_kinds` 追加
+- `checker.rs`: `BUILTIN_EFFECTS` に `"AzureStorage"` を追加
+- `fav explain --lineage` 出力に Azure エフェクトが表示されるよう更新
+
+### Notes
+- テスト: v143000_tests
+
+---
+
+## [v14.2.0] — 2026-06-12 — AzureCtx / AwsCtx + fav.toml [azure]
+
+### New Features
+- `Ctx.build_aws_raw(region, s3_bucket, db_url)` VM primitive — AwsCtx JSON を生成
+- `Ctx.build_azure_raw(postgres_url, storage_account, storage_key, container)` VM primitive — AzureCtx JSON を生成
+- `Ctx.aws_get_field_raw(ctx, field)` VM primitive — AwsCtx からフィールドを取得（v14.4.0 で checker に追加）
+- `Ctx.azure_get_field_raw(ctx, field)` VM primitive — AzureCtx からフィールドを取得
+- `fav.toml` に `[azure]` セクション追加（`postgres_url` / `storage_account` / `storage_key` / `container`）
+- `inject_azure_config` — fav.toml の [azure] セクションを env var 展開して実行時 ctx に注入
+
+### Notes
+- テスト: v142000_tests
+
+---
+
+## [v14.1.0] — 2026-06-12 — Azure PostgreSQL Rune
+
+### New Features
+- `AzurePostgres.execute_raw(conn_str, sql, params)` VM primitive（tokio-postgres + tokio ランタイム）
+- `AzurePostgres.query_raw(conn_str, sql, params)` VM primitive（JSON 配列文字列として返す）
+- `checker.rs`: `AzurePostgres` namespace を `builtin_ret_ty` / `BUILTIN_EFFECTS` に追加
+- `checker.rs`: `require_azure_db_effect` — `!AzureDb` 未宣言時に E0316 を発生
+- `ast::Effect::AzureDb` 追加
+- `lineage.rs`: `!AzureDb(read/write)` 区別追加
+- `runes/azure-postgres/azure_postgres.fav`: `execute/query_rows` ctx-aware ラッパー
+- `runes/azure-postgres/rune.toml`: rune メタデータ
+
+### Notes
+- テスト: v141000_tests
+- SSL: `sslmode=require` を接続文字列に付加して Azure DB for PostgreSQL の SSL 必須要件に対応
+
+---
+
 ## [v14.0.0] — 2026-06-11 — 能力型完成宣言
 
 ### Breaking Changes

@@ -25316,6 +25316,41 @@ public fn load(conn_str: String) -> Result<Int, String> !AzureDb {
     }
 }
 
+// ── v146000_tests (v14.6.0) — ドキュメント整備 ────────────────────────────────
+#[cfg(test)]
+mod v146000_tests {
+    #[test]
+    fn version_is_14_6_0() {
+        assert_eq!(env!("CARGO_PKG_VERSION"), "14.6.0");
+    }
+
+    #[test]
+    fn changelog_has_v14_5_0_entry() {
+        let changelog = std::fs::read_to_string(
+            std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .parent().unwrap()
+                .join("CHANGELOG.md")
+        ).expect("CHANGELOG.md should exist");
+        assert!(changelog.contains("[v14.5.0]"),
+            "CHANGELOG.md should contain [v14.5.0] entry");
+        assert!(changelog.contains("[v14.1.0]"),
+            "CHANGELOG.md should contain [v14.1.0] entry");
+    }
+
+    #[test]
+    fn readme_mentions_azure_blob() {
+        let readme = std::fs::read_to_string(
+            std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .parent().unwrap()
+                .join("README.md")
+        ).expect("README.md should exist");
+        assert!(readme.contains("AzureBlob") || readme.contains("Azure Blob"),
+            "README.md should mention Azure Blob Storage");
+        assert!(readme.contains("v14.5.0") || readme.contains("v14.6.0"),
+            "README.md should mention v14.5.0 or v14.6.0 in roadmap");
+    }
+}
+
 // ── v145000_tests (v14.5.0) — Azure Blob Storage Rune ────────────────────────
 #[cfg(test)]
 mod v145000_tests {
@@ -25324,7 +25359,8 @@ mod v145000_tests {
 
     #[test]
     fn version_is_14_5_0() {
-        assert_eq!(env!("CARGO_PKG_VERSION"), "14.5.0");
+        assert!(env!("CARGO_PKG_VERSION") >= "14.5.0",
+            "expected >= 14.5.0, got {}", env!("CARGO_PKG_VERSION"));
     }
 
     #[test]

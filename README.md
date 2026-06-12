@@ -44,6 +44,10 @@ v13.0.0（2026-06-09）で、言語信頼性宣言を完了しました。
 v14.0.0（2026-06-11）で、能力型完成宣言を完了しました。
 副作用は通常の型システムで表現されます。`capability 引数がなければ純粋` が言語レベルで保証され、`!Postgres` 等のエフェクト型は廃止されました。
 新しいクラウドサービスの追加は `interface` に `impl` を追加するだけで完了します。`Ctx.mock(...)` により AI ツールが本番接続なしにパイプライン全体をテストできます。
+v14.1.0〜v14.5.0（2026-06-12）で、クロスクラウド基盤を整備しました。
+Azure DB for PostgreSQL・Azure Blob Storage のネイティブ対応、AWS Secrets Manager 統合、
+および CrossCloud E2E デモ（v15.0.0）に向けた Rune エコシステムを拡充しました。
+v14.6.0（2026-06-12）で、ドキュメント整備を完了しました。
 
 ---
 
@@ -77,9 +81,9 @@ seq UserImport = ParseCsv |> ValidateRow |> SaveToDb
 
 ## 現在の状態
 
-**v10.0.0（2026-06-03）— OSS 公開準備完了**
+**v14.6.0（2026-06-12）— ドキュメント整備完了**
 
-テスト: **1260 件すべて通過**
+テスト: **1530+ 件すべて通過**
 
 | 機能カテゴリ | 機能 | 状態 |
 |---|---|---|
@@ -102,11 +106,13 @@ seq UserImport = ParseCsv |> ValidateRow |> SaveToDb
 | | `fav watch`（ファイル監視 + 自動再実行） | ✓ |
 | | `fav repl`（インタラクティブ REPL） | ✓ |
 | | `fav new <name>`（プロジェクトスキャフォールディング） | ✓ |
-| **Rune エコシステム** | AWS / DuckDB / SQL / DB / fs / Parquet | ✓ |
-| | http / grpc / graphql（`!Http` エフェクト） | ✓ |
-| | llm（`!Llm` エフェクト、Claude / OpenAI） | ✓ |
-| | snowflake（`!Snowflake` エフェクト） | ✓ |
-| | json / csv / gen（uuid / uuid_v7 / nano_id） | ✓ |
+| **Rune エコシステム** | AWS（S3 / SQS / DynamoDB / Secrets Manager） | ✓ |
+| | Azure Blob Storage（`AzureBlob.*`、Shared Key 認証） | ✓ |
+| | Azure PostgreSQL（`AzurePostgres.*`、SSL 対応） | ✓ |
+| | http / grpc / graphql | ✓ |
+| | llm（Claude / OpenAI） | ✓ |
+| | snowflake | ✓ |
+| | DuckDB / SQL / DB / fs / Parquet / json / csv / gen 等 | ✓ |
 | | slack / queue / cache / email / auth / log | ✓ |
 | **開発体験** | LSP（hover・diagnostics・補完・go-to-definition） | ✓ |
 | | Schema Authority（fav infer → T.validate） | ✓ |
@@ -138,6 +144,10 @@ Stage 3: Rust VM で compiler_artifact → hello.fav → bytecode_B
 ---
 
 ## コード例
+
+> **注記**: 以下のコード例（「基本パイプライン」「並列実行」「型バリデーション」「LLM 統合」）は
+> `--legacy` モードでのみ有効な旧 `!Effect` スタイルです。
+> v14.0.0 以降の標準スタイルは「Capability Context（v14.0.0〜）」セクションを参照してください。
 
 ### 基本パイプライン
 
@@ -289,6 +299,8 @@ fav explain --lineage pipeline.fav  # リネージ可視化
 | **v12.0.0** | **Python トランスパイラ完成宣言**・公式ドキュメント・CHANGELOG 整備 | **完了** |
 | v13.1.0〜v13.10.0 | Capability Context 設計（interface 継承・ctx 型推論・E0020〜E0025・migrate ツール） | 完了 |
 | **v14.0.0** | **能力型完成宣言** — `!Effect` 廃止・`ctx: Capability` 体系の確立・CI self-check | **完了** |
+| v14.1.0〜v14.5.0 | Azure PostgreSQL / AzureCtx / Azure Blob Storage Rune / AWS Secrets Manager | 完了 |
+| **v14.6.0** | **ドキュメント整備**（README / CHANGELOG） | **完了** |
 
 ---
 

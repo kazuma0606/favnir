@@ -494,7 +494,6 @@ fn collect_azure_blob_kinds_inner(expr: &ast::Expr, r: &mut bool, w: &mut bool) 
             collect_azure_blob_kinds_inner(e, r, w);
         }
         ast::Expr::Lit(_, _) | ast::Expr::Ident(_, _) | ast::Expr::FString(_, _) => {}
-        _ => {}
     }
 }
 

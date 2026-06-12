@@ -30,6 +30,7 @@ pub enum Effect {
     Snowflake,
     Postgres,
     AzureDb,
+    AzureStorage,  // Azure Blob Storage (v14.3.0 infra, v14.5.0 primitives)
     Rpc,
     File,
     Checkpoint,

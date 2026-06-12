@@ -1,5 +1,46 @@
 # Cross-Cloud Migration E2E Demo
 
+> **v15.0.0 簡略版スコープ** (2026-06-12)
+>
+> このディレクトリは v15.0.0 で **5 ステージパイプライン + Terraform インフラ構築** のみを実装します。
+> Entra ID / Cognito 連携・HMAC 検証・Lambda verifier・認可フローは **v15.1.0 以降** に持ち越しです。
+>
+> ### v15.0.0 実装済みファイル
+> | ファイル | 内容 |
+> |---|---|
+> | `src/migrate.fav` | 5 ステージ Favnir パイプライン |
+> | `terraform/aws/` | RDS PostgreSQL + S3 + Secrets Manager |
+> | `terraform/azure/` | Azure DB for PostgreSQL + Storage Account + Blob |
+> | `scripts/seed.sh` | AWS RDS にサンプルデータ 1000 行投入 |
+> | `scripts/run.sh` | 移行実行スクリプト |
+> | `scripts/verify.sh` | PASS=5 確認スクリプト |
+>
+> ### 実行方法（v15.0.0）
+> ```bash
+> # 1. AWS インフラ構築
+> cd terraform/aws && terraform init && terraform apply
+>
+> # 2. Azure インフラ構築
+> cd terraform/azure && terraform init && terraform apply
+>
+> # 3. RDS にサンプルデータを投入
+> bash scripts/seed.sh "$RDS_CONN_STR"
+>
+> # 4. Azure PostgreSQL に customers_migrated テーブルを作成
+> psql "$AZURE_CONN_STR" -c "CREATE TABLE IF NOT EXISTS customers_migrated (customer_id TEXT PRIMARY KEY, email TEXT, normalized_name TEXT, status TEXT, source_updated_at TEXT);"
+>
+> # 5. 移行実行
+> export RDS_CONN_SECRET_ARN=<terraform output rds_conn_secret_arn>
+> export AZURE_CONN_STR=<terraform output azure_conn_str>
+> export AZURE_STORAGE_ACCOUNT=<terraform output storage_account_name>
+> export AZURE_STORAGE_KEY=<terraform output storage_account_key>
+> bash scripts/run.sh
+>
+> # 6. 結果確認
+> bash scripts/verify.sh
+> # => PASS=5 FAIL=0
+> ```
+
 Azure Functions -> Entra ID -> Cognito -> AWS API Gateway -> AWS Lambda verifier -> Favnir pipeline -> Azure Database for PostgreSQL
 
 ## Goal

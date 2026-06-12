@@ -90,6 +90,9 @@ pub fn reachability_analysis(entry: &str, program: &IRProgram) -> ReachabilityRe
                 Effect::AzureDb => {
                     effects_required.insert("AzureDb".to_string());
                 }
+                Effect::AzureStorage => {
+                    effects_required.insert("AzureStorage".to_string());
+                }
                 Effect::Rpc => {
                     effects_required.insert("Rpc".to_string());
                 }

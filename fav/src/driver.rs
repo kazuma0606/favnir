@@ -25316,12 +25316,77 @@ public fn load(conn_str: String) -> Result<Int, String> !AzureDb {
     }
 }
 
+// ── v150000_tests (v15.0.0) — CrossCloud E2E Demo ────────────────────────────
+#[cfg(test)]
+mod v150000_tests {
+    #[test]
+    fn version_is_15_0_0() {
+        assert_eq!(env!("CARGO_PKG_VERSION"), "15.0.0");
+    }
+
+    #[test]
+    fn crosscloud_fav_parses() {
+        // migrate.fav が Parser でエラーなく解析されることを確認
+        let manifest = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let base = manifest.parent().unwrap();
+        let src = std::fs::read_to_string(
+            base.join("infra/e2e-demo/crosscloud/src/migrate.fav")
+        ).expect("infra/e2e-demo/crosscloud/src/migrate.fav should exist");
+        let result = crate::frontend::parser::Parser::parse_str(&src, "migrate.fav");
+        assert!(result.is_ok(), "migrate.fav should parse without error: {:?}", result.err());
+    }
+
+    #[test]
+    fn crosscloud_effects_declared() {
+        // migrate.fav に !Postgres / !AzureDb / !AzureStorage が含まれることを確認
+        let manifest = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let base = manifest.parent().unwrap();
+        let src = std::fs::read_to_string(
+            base.join("infra/e2e-demo/crosscloud/src/migrate.fav")
+        ).expect("infra/e2e-demo/crosscloud/src/migrate.fav should exist");
+        assert!(src.contains("!Postgres"),      "migrate.fav should declare !Postgres effect");
+        assert!(src.contains("!AzureDb"),      "migrate.fav should declare !AzureDb effect");
+        assert!(src.contains("!AzureStorage"), "migrate.fav should declare !AzureStorage effect");
+    }
+
+    #[test]
+    fn crosscloud_main_has_ctx_param() {
+        // migrate.fav の main が ctx: AppCtx パラメータを持つことを確認
+        let manifest = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let base = manifest.parent().unwrap();
+        let src = std::fs::read_to_string(
+            base.join("infra/e2e-demo/crosscloud/src/migrate.fav")
+        ).expect("infra/e2e-demo/crosscloud/src/migrate.fav should exist");
+        assert!(src.contains("ctx: AppCtx"),
+            "migrate.fav main should have 'ctx: AppCtx' parameter");
+    }
+
+    #[test]
+    fn crosscloud_e2e_demo_structure() {
+        // 必須ファイル 6 件の存在確認
+        let manifest = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let base = manifest.parent().unwrap();
+        let required = [
+            "infra/e2e-demo/crosscloud/src/migrate.fav",
+            "infra/e2e-demo/crosscloud/scripts/run.sh",
+            "infra/e2e-demo/crosscloud/scripts/seed.sh",
+            "infra/e2e-demo/crosscloud/scripts/verify.sh",
+            "infra/e2e-demo/crosscloud/terraform/aws/main.tf",
+            "infra/e2e-demo/crosscloud/terraform/azure/main.tf",
+        ];
+        for path in &required {
+            assert!(base.join(path).exists(), "Required file not found: {}", path);
+        }
+    }
+}
+
 // ── v148000_tests (v14.8.0) — Rune ファイル整備 ──────────────────────────────
 #[cfg(test)]
 mod v148000_tests {
     #[test]
     fn version_is_14_8_0() {
-        assert_eq!(env!("CARGO_PKG_VERSION"), "14.8.0");
+        assert!(env!("CARGO_PKG_VERSION") >= "14.8.0",
+            "expected >= 14.8.0, got {}", env!("CARGO_PKG_VERSION"));
     }
 
     #[test]

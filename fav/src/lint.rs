@@ -1247,6 +1247,7 @@ fn effect_name(e: &Effect) -> &str {
         Effect::Snowflake => "Snowflake",
         Effect::Postgres => "Postgres",
         Effect::AzureDb => "AzureDb",
+        Effect::AzureStorage => "AzureStorage",
         Effect::Rpc => "Rpc",
         Effect::File => "File",
         Effect::Checkpoint => "Checkpoint",

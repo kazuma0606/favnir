@@ -1238,6 +1238,10 @@ impl Parser {
                         self.advance();
                         Effect::AzureDb
                     }
+                    "AzureStorage" => {
+                        self.advance();
+                        Effect::AzureStorage
+                    }
                     "Rpc" => {
                         self.advance();
                         Effect::Rpc

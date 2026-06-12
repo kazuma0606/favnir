@@ -1,0 +1,44 @@
+// runes/azure-blob/azure_blob.fav — Azure Blob Storage wrapper (v14.5.0)
+// ctx: AzureCtx (String JSON from Ctx.build_azure_raw)
+// Fields: storage_account, storage_key, container
+
+/// Upload a blob to Azure Blob Storage using AzureCtx.
+public fn put(ctx: String, blob_name: String, body: String) -> Result<Unit, String> !AzureStorage {
+    AzureBlob.put_raw(
+        Ctx.azure_get_field_raw(ctx, "storage_account"),
+        Ctx.azure_get_field_raw(ctx, "storage_key"),
+        Ctx.azure_get_field_raw(ctx, "container"),
+        blob_name,
+        body
+    )
+}
+
+/// Download a blob from Azure Blob Storage using AzureCtx.
+public fn get(ctx: String, blob_name: String) -> Result<String, String> !AzureStorage {
+    AzureBlob.get_raw(
+        Ctx.azure_get_field_raw(ctx, "storage_account"),
+        Ctx.azure_get_field_raw(ctx, "storage_key"),
+        Ctx.azure_get_field_raw(ctx, "container"),
+        blob_name
+    )
+}
+
+/// List blobs in the container (returns JSON array of names) using AzureCtx.
+public fn list(ctx: String, prefix: String) -> Result<String, String> !AzureStorage {
+    AzureBlob.list_raw(
+        Ctx.azure_get_field_raw(ctx, "storage_account"),
+        Ctx.azure_get_field_raw(ctx, "storage_key"),
+        Ctx.azure_get_field_raw(ctx, "container"),
+        prefix
+    )
+}
+
+/// Delete a blob from Azure Blob Storage using AzureCtx.
+public fn delete(ctx: String, blob_name: String) -> Result<Unit, String> !AzureStorage {
+    AzureBlob.delete_raw(
+        Ctx.azure_get_field_raw(ctx, "storage_account"),
+        Ctx.azure_get_field_raw(ctx, "storage_key"),
+        Ctx.azure_get_field_raw(ctx, "container"),
+        blob_name
+    )
+}

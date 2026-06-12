@@ -505,6 +505,70 @@ fn url_encode(s: &str) -> String {
     out
 }
 
+// ── Azure Blob Shared Key signing (v14.5.0) ───────────────────────────────────
+
+/// Generate (x-ms-date, Authorization) headers for Azure Blob Storage Shared Key auth.
+///
+/// `canonical_resource` format:
+///   - blob ops: `/{account}/{container}/{blob_name}`
+///   - list ops: `/{account}/{container}\ncomp:list\nprefix:{prefix}\nrestype:container`
+fn azure_blob_sign(
+    account: &str,
+    key_b64: &str,
+    method: &str,
+    content_type: &str,
+    content_length: usize,
+    x_ms_blob_type: &str,
+    canonical_resource: &str,
+) -> Result<(String, String), String> {
+    use base64::engine::general_purpose::STANDARD as B64;
+    use base64::Engine;
+
+    let now = chrono::Utc::now();
+    let date = now.format("%a, %d %b %Y %H:%M:%S GMT").to_string();
+
+    // CanonicalizedHeaders — x-ms-* headers sorted alphabetically
+    let mut ms_headers: Vec<(String, String)> = vec![
+        ("x-ms-date".to_string(), date.clone()),
+        ("x-ms-version".to_string(), "2020-10-02".to_string()),
+    ];
+    if !x_ms_blob_type.is_empty() {
+        ms_headers.push(("x-ms-blob-type".to_string(), x_ms_blob_type.to_string()));
+    }
+    ms_headers.sort_by(|a, b| a.0.cmp(&b.0));
+    let canonical_headers: String = ms_headers
+        .iter()
+        .map(|(k, v)| format!("{}:{}\n", k, v))
+        .collect();
+
+    // Content-Length: empty string when 0 (Azure Shared Key convention)
+    let content_length_str = if content_length > 0 {
+        content_length.to_string()
+    } else {
+        String::new()
+    };
+
+    // Full Shared Key StringToSign (Blob service):
+    // VERB\n Content-Encoding\n Content-Language\n Content-Length\n Content-MD5\n
+    // Content-Type\n Date\n If-Modified-Since\n If-Match\n If-None-Match\n
+    // If-Unmodified-Since\n Range\n CanonicalizedHeaders CanonicalizedResource
+    let string_to_sign = format!(
+        "{}\n\n\n{}\n\n{}\n\n\n\n\n\n\n{}{}",
+        method,
+        content_length_str,
+        content_type,
+        canonical_headers,
+        canonical_resource
+    );
+
+    let key_bytes = B64
+        .decode(key_b64)
+        .map_err(|e| format!("azure_blob_sign: invalid storage key: {}", e))?;
+    let sig_bytes = hmac_sha256_bytes(&key_bytes, string_to_sign.as_bytes());
+    let sig = B64.encode(&sig_bytes);
+    Ok((date, format!("SharedKey {}:{}", account, sig)))
+}
+
 // ── Env config (v4.7.0) ───────────────────────────────────────────────────────
 
 /// Env configuration from fav.toml [env] section.
@@ -12985,6 +13049,148 @@ fn vm_call_builtin(
                     Err(e) => err_vm(VMValue::Str(e)),
                 },
             )
+        }
+
+        // ── Azure Blob Storage primitives (v14.5.0) ───────────────────────
+        "AzureBlob.put_raw" => {
+            // AzureBlob.put_raw(account, key, container, blob_name, body) -> Result<Unit, String>
+            let mut it = args.into_iter();
+            let account   = vm_string(it.next().ok_or("put_raw: missing account")?,   "AzureBlob.put_raw")?;
+            let key       = vm_string(it.next().ok_or("put_raw: missing key")?,       "AzureBlob.put_raw")?;
+            let container = vm_string(it.next().ok_or("put_raw: missing container")?, "AzureBlob.put_raw")?;
+            let blob_name = vm_string(it.next().ok_or("put_raw: missing blob_name")?, "AzureBlob.put_raw")?;
+            let body      = vm_string(it.next().ok_or("put_raw: missing body")?,      "AzureBlob.put_raw")?;
+
+            let canonical_resource = format!("/{}/{}/{}", account, container, blob_name);
+            let (date, auth) = match azure_blob_sign(
+                &account, &key, "PUT",
+                "application/octet-stream", body.len(),
+                "BlockBlob", &canonical_resource,
+            ) {
+                Ok(h) => h,
+                Err(e) => return Ok(err_vm(VMValue::Str(e))),
+            };
+            let url = format!(
+                "https://{}.blob.core.windows.net/{}/{}",
+                account, container, blob_name
+            );
+            Ok(match ureq::put(&url)
+                .set("x-ms-date", &date)
+                .set("x-ms-version", "2020-10-02")
+                .set("x-ms-blob-type", "BlockBlob")
+                .set("Content-Type", "application/octet-stream")
+                .set("Authorization", &auth)
+                .send_bytes(body.as_bytes())
+            {
+                Ok(_)  => ok_vm(VMValue::Unit),
+                Err(e) => err_vm(VMValue::Str(e.to_string())),
+            })
+        }
+
+        "AzureBlob.get_raw" => {
+            // AzureBlob.get_raw(account, key, container, blob_name) -> Result<String, String>
+            let mut it = args.into_iter();
+            let account   = vm_string(it.next().ok_or("get_raw: missing account")?,   "AzureBlob.get_raw")?;
+            let key       = vm_string(it.next().ok_or("get_raw: missing key")?,       "AzureBlob.get_raw")?;
+            let container = vm_string(it.next().ok_or("get_raw: missing container")?, "AzureBlob.get_raw")?;
+            let blob_name = vm_string(it.next().ok_or("get_raw: missing blob_name")?, "AzureBlob.get_raw")?;
+
+            let canonical_resource = format!("/{}/{}/{}", account, container, blob_name);
+            let (date, auth) = match azure_blob_sign(
+                &account, &key, "GET", "", 0, "", &canonical_resource,
+            ) {
+                Ok(h) => h,
+                Err(e) => return Ok(err_vm(VMValue::Str(e))),
+            };
+            let url = format!(
+                "https://{}.blob.core.windows.net/{}/{}",
+                account, container, blob_name
+            );
+            Ok(match ureq::get(&url)
+                .set("x-ms-date", &date)
+                .set("x-ms-version", "2020-10-02")
+                .set("Authorization", &auth)
+                .call()
+            {
+                Ok(resp)  => match resp.into_string() {
+                    Ok(body) => ok_vm(VMValue::Str(body)),
+                    Err(e)   => err_vm(VMValue::Str(e.to_string())),
+                },
+                Err(e) => err_vm(VMValue::Str(e.to_string())),
+            })
+        }
+
+        "AzureBlob.list_raw" => {
+            // AzureBlob.list_raw(account, key, container, prefix) -> Result<String, String>
+            // Returns JSON array of blob names
+            let mut it = args.into_iter();
+            let account   = vm_string(it.next().ok_or("list_raw: missing account")?,   "AzureBlob.list_raw")?;
+            let key       = vm_string(it.next().ok_or("list_raw: missing key")?,       "AzureBlob.list_raw")?;
+            let container = vm_string(it.next().ok_or("list_raw: missing container")?, "AzureBlob.list_raw")?;
+            let prefix    = vm_string(it.next().ok_or("list_raw: missing prefix")?,    "AzureBlob.list_raw")?;
+
+            // CanonicalizedResource with sorted query params
+            let canonical_resource = format!(
+                "/{}/{}\ncomp:list\nprefix:{}\nrestype:container",
+                account, container, prefix
+            );
+            let (date, auth) = match azure_blob_sign(
+                &account, &key, "GET", "", 0, "", &canonical_resource,
+            ) {
+                Ok(h) => h,
+                Err(e) => return Ok(err_vm(VMValue::Str(e))),
+            };
+            let url = format!(
+                "https://{}.blob.core.windows.net/{}?restype=container&comp=list&prefix={}",
+                account, container, url_encode(&prefix)
+            );
+            Ok(match ureq::get(&url)
+                .set("x-ms-date", &date)
+                .set("x-ms-version", "2020-10-02")
+                .set("Authorization", &auth)
+                .call()
+            {
+                Ok(resp) => match resp.into_string() {
+                    Ok(xml) => {
+                        let names = extract_xml_tags(&xml, "Name");
+                        let json = serde_json::to_string(&names)
+                            .unwrap_or_else(|_| "[]".to_string());
+                        ok_vm(VMValue::Str(json))
+                    }
+                    Err(e) => err_vm(VMValue::Str(e.to_string())),
+                },
+                Err(e) => err_vm(VMValue::Str(e.to_string())),
+            })
+        }
+
+        "AzureBlob.delete_raw" => {
+            // AzureBlob.delete_raw(account, key, container, blob_name) -> Result<Unit, String>
+            let mut it = args.into_iter();
+            let account   = vm_string(it.next().ok_or("delete_raw: missing account")?,   "AzureBlob.delete_raw")?;
+            let key       = vm_string(it.next().ok_or("delete_raw: missing key")?,       "AzureBlob.delete_raw")?;
+            let container = vm_string(it.next().ok_or("delete_raw: missing container")?, "AzureBlob.delete_raw")?;
+            let blob_name = vm_string(it.next().ok_or("delete_raw: missing blob_name")?, "AzureBlob.delete_raw")?;
+
+            let canonical_resource = format!("/{}/{}/{}", account, container, blob_name);
+            let (date, auth) = match azure_blob_sign(
+                &account, &key, "DELETE", "", 0, "", &canonical_resource,
+            ) {
+                Ok(h) => h,
+                Err(e) => return Ok(err_vm(VMValue::Str(e))),
+            };
+            let url = format!(
+                "https://{}.blob.core.windows.net/{}/{}",
+                account, container, blob_name
+            );
+            Ok(match ureq::request("DELETE", &url)
+                .set("x-ms-date", &date)
+                .set("x-ms-version", "2020-10-02")
+                .set("Authorization", &auth)
+                .call()
+            {
+                Ok(_)  => ok_vm(VMValue::Unit),
+                Err(e) => err_vm(VMValue::Str(e.to_string())),
+            })
         }
 
         // ── Email primitives (v7.4.0) — SES thin wrapper ──────────────────

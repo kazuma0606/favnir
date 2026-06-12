@@ -1420,6 +1420,7 @@ impl Checker {
             "Snowflake",
             "Postgres",
             "AzurePostgres",
+            "AzureBlob",
             "Validate",
             "DuckDb",
             "Crypto",
@@ -5035,6 +5036,16 @@ impl Checker {
         }
     }
 
+    fn require_azure_storage_effect(&mut self, span: &Span) {
+        if !self.has_effect(|e| matches!(e, Effect::AzureStorage)) {
+            self.type_error(
+                "E0317",
+                "AzureBlob.* call requires `!AzureStorage` effect on enclosing fn/stage",
+                span,
+            );
+        }
+    }
+
     fn require_rpc_effect(&mut self, span: &Span) {
         if !self.has_effect(|e| matches!(e, Effect::Rpc)) {
             self.type_error(
@@ -5858,6 +5869,28 @@ impl Checker {
                     Box::new(Type::String),
                     Box::new(Type::String),
                 ))
+            }
+
+            // AzureBlob (v14.5.0) — require !AzureStorage effect
+            ("AzureBlob", "put_raw") => {
+                self.require_azure_storage_effect(span);
+                Some(Type::Result(Box::new(Type::Unit), Box::new(Type::String)))
+            }
+            ("AzureBlob", "get_raw") => {
+                self.require_azure_storage_effect(span);
+                Some(Type::Result(Box::new(Type::String), Box::new(Type::String)))
+            }
+            ("AzureBlob", "list_raw") => {
+                self.require_azure_storage_effect(span);
+                Some(Type::Result(Box::new(Type::String), Box::new(Type::String)))
+            }
+            ("AzureBlob", "delete_raw") => {
+                self.require_azure_storage_effect(span);
+                Some(Type::Result(Box::new(Type::Unit), Box::new(Type::String)))
+            }
+            ("AzureBlob", _) => {
+                self.require_azure_storage_effect(span);
+                Some(Type::Unknown)
             }
 
             // Postgres (v11.5.0) — require !Postgres effect

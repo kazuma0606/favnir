@@ -25316,6 +25316,68 @@ public fn load(conn_str: String) -> Result<Int, String> !AzureDb {
     }
 }
 
+// ── v145000_tests (v14.5.0) — Azure Blob Storage Rune ────────────────────────
+#[cfg(test)]
+mod v145000_tests {
+    use crate::frontend::parser::Parser;
+    use crate::middle::checker::Checker;
+
+    #[test]
+    fn version_is_14_5_0() {
+        assert_eq!(env!("CARGO_PKG_VERSION"), "14.5.0");
+    }
+
+    #[test]
+    fn azure_blob_put_raw_registered() {
+        // AzureBlob.put_raw が E0007 を出さないことを確認
+        let src = r#"
+public fn main(ctx: AppCtx) -> Unit !AzureStorage {
+    bind _ <- AzureBlob.put_raw("myaccount", "base64key==", "mycontainer", "proof/migrate.json", "{}")
+    ctx.io.println("done")
+}
+"#;
+        let prog = Parser::parse_str(src, "azure_blob_test.fav").expect("parse");
+        let (errors, _) = Checker::check_program(&prog);
+        let e0007: Vec<_> = errors.iter()
+            .filter(|e| e.code == "E0007" && e.message.contains("put_raw"))
+            .collect();
+        assert!(e0007.is_empty(),
+            "AzureBlob.put_raw should not produce E0007, got: {:?}", e0007);
+    }
+
+    #[test]
+    fn azure_storage_effect_required() {
+        // !AzureStorage なしで AzureBlob.put_raw を呼ぶと E0317 が出ることを確認
+        let src = r#"
+public fn main(ctx: AppCtx) -> Unit {
+    bind _ <- AzureBlob.put_raw("myaccount", "base64key==", "mycontainer", "proof/migrate.json", "{}")
+    ctx.io.println("done")
+}
+"#;
+        let prog = Parser::parse_str(src, "azure_effect_test.fav").expect("parse");
+        let (errors, _) = Checker::check_program(&prog);
+        let e0317: Vec<_> = errors.iter()
+            .filter(|e| e.code == "E0317")
+            .collect();
+        assert!(!e0317.is_empty(),
+            "AzureBlob.put_raw without !AzureStorage should produce E0317");
+    }
+
+    #[test]
+    fn azure_blob_rune_file_present() {
+        // runes/azure-blob/azure_blob.fav に fn put / fn get が存在することを確認
+        let fav = std::fs::read_to_string(
+            std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .parent().unwrap()
+                .join("runes/azure-blob/azure_blob.fav")
+        ).expect("azure_blob.fav should exist");
+        assert!(fav.contains("fn put"),
+            "azure_blob.fav should contain fn put");
+        assert!(fav.contains("fn get"),
+            "azure_blob.fav should contain fn get");
+    }
+}
+
 // ── v144000_tests (v14.4.0) — AWS Rune 正式パッケージング ─────────────────────
 #[cfg(test)]
 mod v144000_tests {
@@ -25324,7 +25386,8 @@ mod v144000_tests {
 
     #[test]
     fn version_is_14_4_0() {
-        assert_eq!(env!("CARGO_PKG_VERSION"), "14.4.0");
+        assert!(env!("CARGO_PKG_VERSION") >= "14.4.0",
+            "expected >= 14.4.0, got {}", env!("CARGO_PKG_VERSION"));
     }
 
     #[test]

@@ -1,0 +1,8 @@
+[rune]
+name        = "azure-blob"
+version     = "14.5.0"
+description = "Azure Blob Storage: put/get/list/delete with Shared Key authentication"
+entry       = "azure_blob.fav"
+effects     = ["!AzureStorage"]
+
+[dependencies]

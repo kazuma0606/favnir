@@ -4,6 +4,39 @@ Favnir のバージョン履歴。形式は [Keep a Changelog](https://keepachan
 
 ---
 
+## [v14.8.0] — 2026-06-12 — Rune ファイル整備（--legacy 明示化 + fs.fav バグ修正）
+
+### Fixed
+- `runes/fs/fs.fav`: `glob` 関数内の非 Result `bind`（`bind sep <- "/"` 等）をインライン化で修正
+- `runes/fs/fs.fav`: `walk_entry` 関数内の非 Result `bind full_path` もインライン化で修正
+
+### Changed
+- rune ファイル 12 件に `--legacy compatible` コメントを追加（意図を明示）:
+  `cache/cache.fav`, `fs/fs.fav`, `log/emitter.fav`, `log/metric.fav`,
+  `queue/queue.fav`, `gen/output.fav`, `http/request.fav`, `graphql/client.fav`,
+  `grpc/server.fav`, `duckdb/query.fav`, `duckdb/io.fav`, `db/connection.fav`
+
+### Internal
+- Cargo.toml version: `14.8.0`
+- `v148000_tests`: 3 件追加
+
+---
+
+## [v14.7.0] — 2026-06-12 — site/ ドキュメント更新 + rune ファイル精査
+
+### Changed
+- `site/content/docs/introduction.mdx`: 旧エフェクト表・存在しない機能（fav deploy / MCP / Notebook）を削除。Capability Context 体系で書き直し
+- `site/content/docs/language/effects.mdx`: v14.0.0 Capability Context を主体に全面書き直し。E0370 削除、E0023/E0025/E0021 追加
+- `site/content/docs/quickstart.mdx`: `ctx: AppCtx` スタイルのサンプルに更新。`bind user <- User{...}` 誤用を `let` に修正
+- `site/content/docs/installation.mdx`: バージョン表示 `v5.0.0` → `v14.7.0`。`fav deploy` / `fav mcp` / `fav explain-error`（非実装コマンド）を削除
+- `runes/aws/dynamodb.fav`, `runes/aws/sqs.fav`: `--legacy` 専用 API コメントを追加
+
+### Internal
+- Cargo.toml version: `14.7.0`
+- `v148000_tests`: 3 件追加（v147000_tests の誤記 — 本体は v147000_tests）
+
+---
+
 ## [v14.6.0] — 2026-06-12 — ドキュメント整備（README + CHANGELOG）
 
 ### Changed

@@ -1,4 +1,9 @@
 // runes/grpc/server.fav — gRPC server helpers (v4.1.0)
+//
+// NOTE: このファイルは --legacy compatible です。
+//       関数シグネチャに !Effect アノテーションを使用していますが、
+//       VM プリミティブを直接ラップする Rune として意図的に設計されています。
+//       ctx-aware 移行は v15.0 以降で計画予定です。
 
 public fn serve(port: Int, service_name: String) -> Unit !Io !Rpc {
     Grpc.serve_raw(port, service_name)

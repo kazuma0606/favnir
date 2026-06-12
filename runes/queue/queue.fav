@@ -1,5 +1,10 @@
 // runes/queue/queue.fav — Message queue operations (v7.3.0)
 //
+// NOTE: このファイルは --legacy compatible です。
+//       関数シグネチャに !Effect アノテーションを使用していますが、
+//       VM プリミティブを直接ラップする Rune として意図的に設計されています。
+//       ctx-aware 移行は v15.0 以降で計画予定です。
+//
 // Usage:
 //   bind _ <- Queue.send(queue_url, "hello")                    // !Queue
 //   bind n <- Queue.send_batch(queue_url, messages)             // !Queue

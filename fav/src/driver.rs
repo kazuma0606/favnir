@@ -25316,12 +25316,52 @@ public fn load(conn_str: String) -> Result<Int, String> !AzureDb {
     }
 }
 
+// ── v148000_tests (v14.8.0) — Rune ファイル整備 ──────────────────────────────
+#[cfg(test)]
+mod v148000_tests {
+    #[test]
+    fn version_is_14_8_0() {
+        assert_eq!(env!("CARGO_PKG_VERSION"), "14.8.0");
+    }
+
+    #[test]
+    fn fs_rune_glob_no_bind_string() {
+        // fs.fav の glob 関数に非 Result bind がないことを確認
+        let fs_fav = std::fs::read_to_string(
+            std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .parent().unwrap()
+                .join("runes/fs/fs.fav")
+        ).expect("runes/fs/fs.fav should exist");
+        assert!(!fs_fav.contains("bind sep"),
+            "runes/fs/fs.fav should not contain non-Result bind 'bind sep'");
+    }
+
+    #[test]
+    fn ambient_runes_have_legacy_comment() {
+        // ambient rune ファイルに --legacy compatible コメントが存在することを確認
+        let manifest = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let base = manifest.parent().unwrap();
+        let rune_files = [
+            "runes/cache/cache.fav",
+            "runes/log/emitter.fav",
+            "runes/queue/queue.fav",
+        ];
+        for path in &rune_files {
+            let content = std::fs::read_to_string(base.join(path))
+                .unwrap_or_else(|_| panic!("{} should exist", path));
+            assert!(content.contains("--legacy compatible"),
+                "{} should contain '--legacy compatible' comment", path);
+        }
+    }
+}
+
 // ── v147000_tests (v14.7.0) — site/ ドキュメント更新 + rune ファイル精査 ────────
 #[cfg(test)]
 mod v147000_tests {
     #[test]
     fn version_is_14_7_0() {
-        assert_eq!(env!("CARGO_PKG_VERSION"), "14.7.0");
+        assert!(env!("CARGO_PKG_VERSION") >= "14.7.0",
+            "expected >= 14.7.0, got {}", env!("CARGO_PKG_VERSION"));
     }
 
     #[test]

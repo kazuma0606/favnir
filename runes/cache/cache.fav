@@ -1,5 +1,10 @@
 // runes/cache/cache.fav — In-process key-value cache (v7.3.0)
 //
+// NOTE: このファイルは --legacy compatible です。
+//       関数シグネチャに !Effect アノテーションを使用していますが、
+//       VM プリミティブを直接ラップする Rune として意図的に設計されています。
+//       ctx-aware 移行は v15.0 以降で計画予定です。
+//
 // Usage:
 //   bind _   <- Cache.set("user:42", "Alice")           // !Cache
 //   bind v   <- Cache.get("user:42")                    // !Cache  -> Option<String>

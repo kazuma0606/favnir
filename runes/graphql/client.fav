@@ -1,4 +1,9 @@
 // runes/graphql/client.fav — GraphQL クライアント (v9.5.0)
+//
+// NOTE: このファイルは --legacy compatible です。
+//       関数シグネチャに !Effect アノテーションを使用していますが、
+//       VM プリミティブを直接ラップする Rune として意図的に設計されています。
+//       ctx-aware 移行は v15.0 以降で計画予定です。
 // HTTP POST ベース。エフェクトは !Http。
 
 // gql_post — GraphQL リクエストを JSON 形式で HTTP POST する内部ヘルパー

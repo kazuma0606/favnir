@@ -1,5 +1,10 @@
 // runes/fs/fs.fav — File system utilities (v7.3.0)
 //
+// NOTE: このファイルは --legacy compatible です。
+//       関数シグネチャに !Effect アノテーションを使用していますが、
+//       VM プリミティブを直接ラップする Rune として意図的に設計されています。
+//       ctx-aware 移行は v15.0 以降で計画予定です。
+//
 // Usage:
 //   bind content <- Fs.read("data/input.csv")     // !IO
 //   bind _       <- Fs.write("out.txt", content)   // !IO
@@ -66,12 +71,12 @@ public fn size(path: String) -> Option<Int> !IO {
 public fn glob(dir: String, suffix: String) -> Result<List<String>, String> !IO {
     match IO.list_dir_raw(dir) {
         Err(e)    => Result.err(e)
-        Ok(names) => {
-            bind sep      <- "/"
-            bind filtered <- List.filter(names, |name| String.ends_with(name, suffix))
-            bind paths    <- List.map(filtered, |name| String.concat(String.concat(dir, sep), name))
-            Result.ok(paths)
-        }
+        Ok(names) => Result.ok(
+            List.map(
+                List.filter(names, |name| String.ends_with(name, suffix)),
+                |name| String.concat(String.concat(dir, "/"), name)
+            )
+        )
     }
 }
 
@@ -79,14 +84,13 @@ public fn glob(dir: String, suffix: String) -> Result<List<String>, String> !IO 
 
 // Collect full paths from a single directory entry.
 fn walk_entry(dir: String, name: String) -> Result<List<String>, String> !IO {
-    bind full_path <- String.concat(String.concat(dir, "/"), name)
-    bind stat      <- IO.file_stat_raw(full_path)
+    bind stat <- IO.file_stat_raw(String.concat(String.concat(dir, "/"), name))
     match Map.get(stat, "is_dir") {
-        None    => Result.ok(List.singleton(full_path))
+        None    => Result.ok(List.singleton(String.concat(String.concat(dir, "/"), name)))
         Some(v) => if v == "true" {
-            walk(full_path)
+            walk(String.concat(String.concat(dir, "/"), name))
         } else {
-            Result.ok(List.singleton(full_path))
+            Result.ok(List.singleton(String.concat(String.concat(dir, "/"), name)))
         }
     }
 }

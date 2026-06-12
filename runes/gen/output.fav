@@ -1,4 +1,9 @@
 // runes/gen/output.fav — Streaming output: CSV / Parquet / DuckDB (v4.4.0)
+//
+// NOTE: このファイルは --legacy compatible です。
+//       関数シグネチャに !Effect アノテーションを使用していますが、
+//       VM プリミティブを直接ラップする Rune として意図的に設計されています。
+//       ctx-aware 移行は v15.0 以降で計画予定です。
 
 public fn to_csv(path: String, rows: List<Map<String, String>>) -> Result<Unit, String> !Io {
     Gen.to_csv_raw(path, rows)

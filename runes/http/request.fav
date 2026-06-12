@@ -1,4 +1,9 @@
 // runes/http/request.fav — HTTP request helpers (v4.1.0 / v9.5.0 additions)
+//
+// NOTE: このファイルは --legacy compatible です。
+//       関数シグネチャに !Effect アノテーションを使用していますが、
+//       VM プリミティブを直接ラップする Rune として意図的に設計されています。
+//       ctx-aware 移行は v15.0 以降で計画予定です。
 
 public fn get(url: String) -> Result<HttpResponse, HttpError> !Network {
     Http.get_raw(url)

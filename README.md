@@ -47,7 +47,7 @@ v14.0.0（2026-06-11）で、能力型完成宣言を完了しました。
 v14.1.0〜v14.5.0（2026-06-12）で、クロスクラウド基盤を整備しました。
 Azure DB for PostgreSQL・Azure Blob Storage のネイティブ対応、AWS Secrets Manager 統合、
 および CrossCloud E2E デモ（v15.0.0）に向けた Rune エコシステムを拡充しました。
-v14.6.0（2026-06-12）で、ドキュメント整備を完了しました。
+v14.8.0（2026-06-12）で、Rune ファイル整備（--legacy 明示化 + fs.fav バグ修正）を完了しました。
 
 ---
 
@@ -81,9 +81,9 @@ seq UserImport = ParseCsv |> ValidateRow |> SaveToDb
 
 ## 現在の状態
 
-**v14.6.0（2026-06-12）— ドキュメント整備完了**
+**v14.8.0（2026-06-12）— Rune ファイル整備完了**
 
-テスト: **1530+ 件すべて通過**
+テスト: **1540+ 件すべて通過**
 
 | 機能カテゴリ | 機能 | 状態 |
 |---|---|---|
@@ -300,7 +300,9 @@ fav explain --lineage pipeline.fav  # リネージ可視化
 | v13.1.0〜v13.10.0 | Capability Context 設計（interface 継承・ctx 型推論・E0020〜E0025・migrate ツール） | 完了 |
 | **v14.0.0** | **能力型完成宣言** — `!Effect` 廃止・`ctx: Capability` 体系の確立・CI self-check | **完了** |
 | v14.1.0〜v14.5.0 | Azure PostgreSQL / AzureCtx / Azure Blob Storage Rune / AWS Secrets Manager | 完了 |
-| **v14.6.0** | **ドキュメント整備**（README / CHANGELOG） | **完了** |
+| v14.6.0 | ドキュメント整備（README / CHANGELOG） | 完了 |
+| v14.7.0 | site/ ドキュメント更新 + rune ファイル精査 | 完了 |
+| **v14.8.0** | **Rune ファイル整備**（--legacy 明示化 + fs.fav バグ修正） | **完了** |
 
 ---
 

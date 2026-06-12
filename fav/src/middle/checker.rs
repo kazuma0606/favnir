@@ -2272,6 +2272,7 @@ impl Checker {
             "Snowflake",
             "Postgres",
             "AzureDb",
+            "AzureStorage",
             "Rpc",
             "File",
             "Checkpoint",
@@ -6268,6 +6269,13 @@ impl Checker {
                     Box::new(Type::String),
                 ))
             }
+            ("AWS", "secrets_get_raw") => {
+                self.require_aws_effect(span);
+                Some(Type::Result(
+                    Box::new(Type::String),
+                    Box::new(Type::String),
+                ))
+            }
             ("AWS", _) => {
                 self.require_aws_effect(span);
                 Some(Type::Unknown)
@@ -6299,6 +6307,7 @@ impl Checker {
                 Box::new(Type::String),
             )),
             ("Ctx", "azure_get_field_raw") => Some(Type::String),
+            ("Ctx", "aws_get_field_raw") => Some(Type::String),
 
             // ── AppCtx.* (v13.6.0) ──────────────────────────────────────────
             ("AppCtx", "db_execute") => Some(Type::Result(

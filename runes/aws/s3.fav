@@ -1,4 +1,4 @@
-// S3 Rune — object storage operations (v4.11.0)
+// S3 Rune — object storage operations (v4.11.0, ctx-aware wrappers v14.4.0)
 
 public fn get_object(bucket: String, key: String) -> Result<String, String> !AWS {
     AWS.s3_get_object_raw(bucket, key)
@@ -18,4 +18,28 @@ public fn list_objects(bucket: String, prefix: String) -> Result<List<String>, S
 
 public fn bucket_exists(bucket: String) -> Result<Bool, String> !AWS {
     AWS.s3_head_bucket_raw(bucket)
+}
+
+// ── ctx-aware wrappers (v14.4.0) ──────────────────────────────────────────────
+// AwsCtx から s3_bucket を自動取得するショートカット関数。
+// 既存の get_object(bucket, key) はそのまま残す（後方互換）。
+
+/// Put an object using the bucket from AwsCtx (ctx: String JSON from Ctx.build_aws_raw).
+public fn s3_put(ctx: String, key: String, body: String) -> Result<Unit, String> !AWS {
+    AWS.s3_put_object_raw(Ctx.aws_get_field_raw(ctx, "s3_bucket"), key, body)
+}
+
+/// Get an object using the bucket from AwsCtx (ctx: String JSON from Ctx.build_aws_raw).
+public fn s3_get(ctx: String, key: String) -> Result<String, String> !AWS {
+    AWS.s3_get_object_raw(Ctx.aws_get_field_raw(ctx, "s3_bucket"), key)
+}
+
+/// Delete an object using the bucket from AwsCtx (ctx: String JSON from Ctx.build_aws_raw).
+public fn s3_delete(ctx: String, key: String) -> Result<Unit, String> !AWS {
+    AWS.s3_delete_object_raw(Ctx.aws_get_field_raw(ctx, "s3_bucket"), key)
+}
+
+/// List objects using the bucket from AwsCtx (ctx: String JSON from Ctx.build_aws_raw).
+public fn s3_list(ctx: String, prefix: String) -> Result<List<String>, String> !AWS {
+    AWS.s3_list_objects_raw(Ctx.aws_get_field_raw(ctx, "s3_bucket"), prefix)
 }

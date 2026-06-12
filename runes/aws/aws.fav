@@ -4,3 +4,4 @@
 use s3.*
 use sqs.*
 use dynamodb.*
+use secrets.*

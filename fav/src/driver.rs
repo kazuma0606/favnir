@@ -11773,6 +11773,7 @@ fn format_effects(effects: &[ast::Effect]) -> String {
             Snowflake => "!Snowflake".into(),
             Postgres => "!Postgres".into(),
             AzureDb => "!AzureDb".into(),
+            AzureStorage => "!AzureStorage".into(),
             Rpc => "!Rpc".into(),
             File => "!File".into(),
             Checkpoint => "!Checkpoint".into(),
@@ -11799,6 +11800,7 @@ fn effect_json_name(effect: &ast::Effect) -> String {
         ast::Effect::Snowflake => "Snowflake".into(),
         ast::Effect::Postgres => "Postgres".into(),
         ast::Effect::AzureDb => "AzureDb".into(),
+        ast::Effect::AzureStorage => "AzureStorage".into(),
         ast::Effect::Rpc => "Rpc".into(),
         ast::Effect::File => "File".into(),
         ast::Effect::Checkpoint => "Checkpoint".into(),
@@ -25197,7 +25199,8 @@ mod v142000_tests {
 
     #[test]
     fn version_is_14_2_0() {
-        assert_eq!(env!("CARGO_PKG_VERSION"), "14.2.0");
+        assert!(env!("CARGO_PKG_VERSION") >= "14.2.0",
+            "version should be >= 14.2.0, got {}", env!("CARGO_PKG_VERSION"));
     }
 
     #[test]
@@ -25257,6 +25260,121 @@ public fn main(ctx: AppCtx) -> Unit {
             .collect();
         assert!(e0007.is_empty(),
             "Ctx.build_azure_raw should not produce E0007, got: {:?}", e0007);
+    }
+}
+
+// ── v143000_tests (v14.3.0) — Azure lineage + CrossCloud format ───────────────
+#[cfg(test)]
+mod v143000_tests {
+    use crate::frontend::parser::Parser;
+    use crate::lineage::{lineage_analysis, render_lineage_text};
+
+    #[test]
+    fn version_is_14_3_0() {
+        assert!(env!("CARGO_PKG_VERSION") >= "14.3.0",
+            "expected >= 14.3.0, got {}", env!("CARGO_PKG_VERSION"));
+    }
+
+    #[test]
+    fn azure_db_lineage_collected() {
+        let src = r#"
+public fn load_to_azure(conn_str: String) -> Result<Int, String> !AzureDb {
+    AzurePostgres.execute_raw(conn_str, "INSERT INTO t VALUES ($1)", "[42]")
+}
+"#;
+        let prog = Parser::parse_str(src, "test.fav").expect("parse failed");
+        let report = lineage_analysis(&prog);
+        let entry = report.transformations.iter()
+            .find(|e| e.name == "load_to_azure")
+            .expect("load_to_azure not found in lineage");
+        let has_azure_db = entry.effects.iter().any(|e| e.contains("AzureDb"));
+        assert!(has_azure_db, "expected !AzureDb effect, got: {:?}", entry.effects);
+    }
+
+    #[test]
+    fn crosscloud_lineage_format() {
+        let src = r#"
+public fn extract(conn_str: String) -> Result<String, String> !Postgres {
+    Postgres.query_raw(conn_str, "SELECT * FROM src", "[]")
+}
+
+public fn load(conn_str: String) -> Result<Int, String> !AzureDb {
+    AzurePostgres.execute_raw(conn_str, "INSERT INTO dst VALUES ($1)", "[42]")
+}
+"#;
+        let prog = Parser::parse_str(src, "test.fav").expect("parse failed");
+        let report = lineage_analysis(&prog);
+        let text = render_lineage_text(&report, "test.fav");
+        assert!(
+            text.contains("CrossCloud Flow"),
+            "expected CrossCloud Flow section, got:\n{}", text
+        );
+        assert!(
+            text.contains("[AWS RDS]") && text.contains("[Azure Postgres]"),
+            "expected crosscloud markers, got:\n{}", text
+        );
+    }
+}
+
+// ── v144000_tests (v14.4.0) — AWS Rune 正式パッケージング ─────────────────────
+#[cfg(test)]
+mod v144000_tests {
+    use crate::frontend::parser::Parser;
+    use crate::middle::checker::Checker;
+
+    #[test]
+    fn version_is_14_4_0() {
+        assert_eq!(env!("CARGO_PKG_VERSION"), "14.4.0");
+    }
+
+    #[test]
+    fn secrets_get_raw_registered() {
+        // AWS.secrets_get_raw が E0007 を出さないことを確認
+        let src = r#"
+public fn main(ctx: AppCtx) -> Unit !AWS {
+    bind secret <- AWS.secrets_get_raw("ap-northeast-1", "prod/my-secret")
+    ctx.io.println(secret)
+}
+"#;
+        let prog = Parser::parse_str(src, "secrets_test.fav").expect("parse");
+        let (errors, _) = Checker::check_program(&prog);
+        let e0007: Vec<_> = errors.iter()
+            .filter(|e| e.code == "E0007" && e.message.contains("secrets_get_raw"))
+            .collect();
+        assert!(e0007.is_empty(),
+            "AWS.secrets_get_raw should not produce E0007, got: {:?}", e0007);
+    }
+
+    #[test]
+    fn aws_ctx_field_raw_registered() {
+        // Ctx.aws_get_field_raw が E0007 を出さないことを確認
+        let src = r#"
+public fn main(ctx: AppCtx) -> Unit {
+    bind aws_ctx <- Ctx.build_aws_raw("ap-northeast-1", "my-bucket", "postgresql://localhost/db")
+    ctx.io.println(Ctx.aws_get_field_raw(aws_ctx, "region"))
+}
+"#;
+        let prog = Parser::parse_str(src, "aws_field_test.fav").expect("parse");
+        let (errors, _) = Checker::check_program(&prog);
+        let e0007: Vec<_> = errors.iter()
+            .filter(|e| e.code == "E0007" && e.message.contains("aws_get_field_raw"))
+            .collect();
+        assert!(e0007.is_empty(),
+            "Ctx.aws_get_field_raw should not produce E0007, got: {:?}", e0007);
+    }
+
+    #[test]
+    fn aws_rune_s3_ctx_functions_present() {
+        // runes/aws/s3.fav に s3_put / s3_get が存在することを確認
+        let s3_fav = std::fs::read_to_string(
+            std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .parent().unwrap()
+                .join("runes/aws/s3.fav")
+        ).expect("s3.fav should exist");
+        assert!(s3_fav.contains("fn s3_put"),
+            "s3.fav should contain fn s3_put");
+        assert!(s3_fav.contains("fn s3_get"),
+            "s3.fav should contain fn s3_get");
     }
 }
 

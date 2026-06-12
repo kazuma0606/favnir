@@ -12941,6 +12941,52 @@ fn vm_call_builtin(
             )
         }
 
+        // ── AWS Secrets Manager (v14.4.0) ────────────────────────────────
+        "AWS.secrets_get_raw" => {
+            // AWS.secrets_get_raw(region: String, secret_name: String) -> Result<String, String>
+            let mut it = args.into_iter();
+            let region = vm_string(
+                it.next().ok_or("secrets_get_raw: missing region")?,
+                "AWS.secrets_get_raw",
+            )?;
+            let secret_name = vm_string(
+                it.next().ok_or("secrets_get_raw: missing secret_name")?,
+                "AWS.secrets_get_raw",
+            )?;
+            let config = get_aws_config();
+            let url = if let Some(ep) = &config.endpoint_url {
+                format!("{}/", ep.trim_end_matches('/'))
+            } else {
+                format!("https://secretsmanager.{}.amazonaws.com/", region)
+            };
+            let body = format!(
+                r#"{{"SecretId":"{}"}}"#,
+                secret_name.replace('"', "\\\"")
+            );
+            Ok(
+                match aws_post(
+                    &config,
+                    "secretsmanager",
+                    &url,
+                    &body,
+                    "application/x-amz-json-1.1",
+                    Some("secretsmanager.GetSecretValue"),
+                ) {
+                    Ok(resp) => {
+                        let parsed: serde_json::Value =
+                            serde_json::from_str(&resp).unwrap_or(serde_json::Value::Null);
+                        let secret = parsed
+                            .get("SecretString")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")
+                            .to_string();
+                        ok_vm(VMValue::Str(secret))
+                    }
+                    Err(e) => err_vm(VMValue::Str(e)),
+                },
+            )
+        }
+
         // ── Email primitives (v7.4.0) — SES thin wrapper ──────────────────
         "Email.send_raw" => {
             let mut it = args.into_iter();
@@ -13231,6 +13277,31 @@ fn vm_call_builtin(
                 _ => return Err("Ctx.azure_get_field_raw: field must be a String".to_string()),
             };
             // ctx_str may be "ok({...})" or raw JSON
+            let json_str = if ctx_str.starts_with("ok(") && ctx_str.ends_with(')') {
+                &ctx_str[3..ctx_str.len() - 1]
+            } else {
+                &ctx_str
+            };
+            let val: String = serde_json::from_str::<serde_json::Value>(json_str)
+                .ok()
+                .and_then(|v| v.get(&field).and_then(|f| f.as_str()).map(|s| s.to_string()))
+                .unwrap_or_default();
+            Ok(VMValue::Str(val))
+        }
+
+        "Ctx.aws_get_field_raw" => {
+            // Ctx.aws_get_field_raw(ctx: AwsCtx, field: String) -> String (v14.4.0)
+            if args.len() < 2 {
+                return Err("Ctx.aws_get_field_raw requires 2 arguments".to_string());
+            }
+            let ctx_str = match &args[0] {
+                VMValue::Str(s) => s.clone(),
+                _ => return Err("Ctx.aws_get_field_raw: ctx must be a String".to_string()),
+            };
+            let field = match &args[1] {
+                VMValue::Str(s) => s.clone(),
+                _ => return Err("Ctx.aws_get_field_raw: field must be a String".to_string()),
+            };
             let json_str = if ctx_str.starts_with("ok(") && ctx_str.ends_with(')') {
                 &ctx_str[3..ctx_str.len() - 1]
             } else {

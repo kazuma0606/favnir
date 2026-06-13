@@ -235,7 +235,14 @@ const SELF_HOST_STACK_SIZE: usize = 256 * 1024 * 1024;
 fn main() {
     // Self-hosted compiler runs recurse deeply through the parser, checker,
     // and VM, so keep the main worker stack aligned with bootstrap tests.
-    let builder = std::thread::Builder::new().stack_size(SELF_HOST_STACK_SIZE);
+    // In Lambda/constrained environments, use a smaller stack (8 MB) to avoid
+    // EAGAIN when spawning threads with large virtual stacks.
+    let stack_size = if std::env::var("AWS_LAMBDA_FUNCTION_NAME").is_ok() {
+        8 * 1024 * 1024 // 8 MB for Lambda
+    } else {
+        SELF_HOST_STACK_SIZE
+    };
+    let builder = std::thread::Builder::new().stack_size(stack_size);
     let handler = builder
         .spawn(|| main_impl())
         .expect("failed to spawn main thread");

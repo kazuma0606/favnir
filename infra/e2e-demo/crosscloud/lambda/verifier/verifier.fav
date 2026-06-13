@@ -1,0 +1,126 @@
+// verifier.fav — CrossCloud 認証 + 移行トリガー (v15.1.0)
+// Lambda コンテナ内で実行: fav run --legacy /var/task/verifier.fav
+//
+// bootstrap スクリプトが API GW イベントを解析して env var に設定:
+//   VERIFY_METHOD, VERIFY_PATH, VERIFY_TIMESTAMP, VERIFY_NONCE,
+//   VERIFY_SIGNATURE, VERIFY_BODY, VERIFY_REQUEST_ID, VERIFY_NONCE_TTL
+//
+// Terraform が Lambda env として注入:
+//   HMAC_SECRET_ARN, NONCE_TABLE, ECS_CLUSTER_ARN, ECS_TASK_DEF_ARN,
+//   ECS_SUBNETS, ECS_SECURITY_GROUP, S3_PROOF_BUCKET,
+//   AZURE_STORAGE_ACCOUNT, AZURE_STORAGE_KEY
+
+// ── ヘルパー関数 ─────────────────────────────────────────────────────
+
+// StringToSign = Method\nPath\nTimestamp\nNonce\nSHA256(Body)
+fn build_sts(method: String, path: String, ts: String, nonce: String, body: String) -> String !Auth {
+  bind body_hash <- Crypto.sha256_raw(body)
+  String.concat(method,
+    String.concat("\n", String.concat(path,
+      String.concat("\n", String.concat(ts,
+        String.concat("\n", String.concat(nonce,
+          String.concat("\n", body_hash))))))))
+}
+
+// HMAC-SHA256 で署名を検証
+fn verify_hmac(secret: String, sts: String, provided: String) -> Result<Unit, String> !Auth {
+  bind expected <- Crypto.hmac_sha256_raw(secret, sts)
+  if expected == provided {
+    Result.ok(())
+  } else {
+    Result.err("invalid_signature")
+  }
+}
+
+// ECS containerOverrides JSON を構築
+fn build_overrides(account: String, key_val: String) -> String {
+  String.concat(
+    String.concat(
+      "{\"containerOverrides\":[{\"name\":\"migrate\",\"environment\":[{\"name\":\"AZURE_STORAGE_ACCOUNT\",\"value\":\"",
+      account
+    ),
+    String.concat(
+      "\"},{\"name\":\"AZURE_STORAGE_KEY\",\"value\":\"",
+      String.concat(key_val, "\"}]}]}")
+    )
+  )
+}
+
+// ── AWS 操作ラッパー ──────────────────────────────────────────────────
+
+fn get_secret(region: String, arn: String) -> Result<String, String> !AWS {
+  AWS.secrets_get_raw(region, arn)
+}
+
+fn put_nonce(table: String, nonce: String, ttl: String) -> Result<Unit, String> !AWS {
+  AWS.dynamo_put_item_cond_raw(
+    table,
+    "nonce_id", nonce,
+    "expires_at", ttl,
+    "attribute_not_exists(nonce_id)"
+  )
+}
+
+fn run_migration(cluster: String, task_def: String, subnets: String, sg: String, overrides: String) -> Result<String, String> !AWS {
+  AWS.ecs_run_task_raw(cluster, task_def, subnets, sg, overrides)
+}
+
+fn save_proof(bucket: String, key: String, body: String) -> Result<Unit, String> !AWS {
+  AWS.s3_put_object_raw(bucket, key, body)
+}
+
+// ── メイン ───────────────────────────────────────────────────────────
+
+public fn main(ctx: AppCtx) -> Result<Unit, String> !Auth !AWS {
+  // Step 1: リクエスト情報を env から読み取り
+  bind method    <- Option.unwrap_or(ctx.io.getenv_raw("VERIFY_METHOD"), "POST")
+  bind path      <- Option.unwrap_or(ctx.io.getenv_raw("VERIFY_PATH"), "/migrate")
+  bind ts        <- Option.unwrap_or(ctx.io.getenv_raw("VERIFY_TIMESTAMP"), "")
+  bind nonce     <- Option.unwrap_or(ctx.io.getenv_raw("VERIFY_NONCE"), "")
+  bind sig       <- Option.unwrap_or(ctx.io.getenv_raw("VERIFY_SIGNATURE"), "")
+  bind body      <- Option.unwrap_or(ctx.io.getenv_raw("VERIFY_BODY"), "")
+  bind req_id    <- Option.unwrap_or(ctx.io.getenv_raw("VERIFY_REQUEST_ID"), "unknown")
+  bind nonce_ttl <- Option.unwrap_or(ctx.io.getenv_raw("VERIFY_NONCE_TTL"), "0")
+  bind secret_arn <- Option.unwrap_or(ctx.io.getenv_raw("HMAC_SECRET_ARN"), "")
+  bind nonce_tbl  <- Option.unwrap_or(ctx.io.getenv_raw("NONCE_TABLE"), "")
+  bind cluster    <- Option.unwrap_or(ctx.io.getenv_raw("ECS_CLUSTER_ARN"), "")
+  bind task_def   <- Option.unwrap_or(ctx.io.getenv_raw("ECS_TASK_DEF_ARN"), "")
+  bind subnets    <- Option.unwrap_or(ctx.io.getenv_raw("ECS_SUBNETS"), "")
+  bind sg         <- Option.unwrap_or(ctx.io.getenv_raw("ECS_SECURITY_GROUP"), "")
+  bind proof_bkt  <- Option.unwrap_or(ctx.io.getenv_raw("S3_PROOF_BUCKET"), "")
+  bind stg_acct   <- Option.unwrap_or(ctx.io.getenv_raw("AZURE_STORAGE_ACCOUNT"), "")
+  bind stg_key    <- Option.unwrap_or(ctx.io.getenv_raw("AZURE_STORAGE_KEY"), "")
+  bind region     <- Option.unwrap_or(ctx.io.getenv_raw("AWS_REGION"), "ap-northeast-1")
+
+  // Step 2: HMAC シークレット取得
+  bind _log <- ctx.io.println("[1/5] HMAC シークレット取得中...")
+  chain hmac_secret <- get_secret(region, secret_arn)
+
+  // Step 3: HMAC 署名検証
+  bind sts <- build_sts(method, path, ts, nonce, body)
+  chain _hmac_ok <- verify_hmac(hmac_secret, sts, sig)
+  bind _log <- ctx.io.println("[2/5] HMAC 検証 OK")
+
+  // Step 4: Nonce チェック（リプレイ攻撃防止）
+  bind _log <- ctx.io.println("[3/5] Nonce チェック中...")
+  chain _nonce_ok <- put_nonce(nonce_tbl, nonce, nonce_ttl)
+  bind _log <- ctx.io.println("[3/5] Nonce OK")
+
+  // Step 5: ECS Fargate 移行タスク起動
+  bind _log <- ctx.io.println("[4/5] ECS 移行タスク起動中...")
+  bind overrides <- build_overrides(stg_acct, stg_key)
+  chain task_arn <- run_migration(cluster, task_def, subnets, sg, overrides)
+  bind _log <- ctx.io.println(String.concat("[4/5] ECS タスク起動 OK: ", task_arn))
+
+  // Step 6: 証跡を S3 に保存
+  bind _log <- ctx.io.println("[5/5] S3 証跡保存中...")
+  bind proof_key  <- String.concat("auth-proof/", String.concat(req_id, ".json"))
+  bind proof_body <- String.concat(
+    String.concat("{\"status\":\"ok\",\"request_id\":\"", req_id),
+    String.concat("\",\"task_arn\":\"", String.concat(task_arn, "\"}"))
+  )
+  chain _proof_ok <- save_proof(proof_bkt, proof_key, proof_body)
+  bind _log <- ctx.io.println("[5/5] OK — verification complete")
+
+  Result.ok(())
+}

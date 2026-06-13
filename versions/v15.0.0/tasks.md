@@ -141,29 +141,30 @@ Branch: master
 
 ## Phase H — インフラ構築 + E2E 実行（要 AWS/Azure アカウント）
 
-- [ ] H-1: `terraform/aws`: `terraform init && terraform apply`
+- [x] H-1: `terraform/aws`: `terraform init && terraform apply`
   - 出力: `rds_endpoint`, `s3_proof_bucket`
 
-- [ ] H-2: `terraform/azure`: `terraform init && terraform apply`
+- [x] H-2: `terraform/azure`: `terraform init && terraform apply`
   - 出力: `postgresql_fqdn`, `storage_account_name`, `storage_account_key`
 
-- [ ] H-3: RDS に `customers` テーブル作成 + seed
+- [x] H-3: RDS に `customers` テーブル作成 + seed
   - `bash scripts/seed.sh "$RDS_CONN_STR"`
 
-- [ ] H-4: Azure PostgreSQL に `customers_migrated` テーブル作成
-  - Terraform outputs を使って `psql $AZURE_CONN_STR` で DDL 実行
+- [x] H-4: Azure PostgreSQL に `customers_migrated` テーブル作成
+  - Terraform outputs を使って `psql $AZURE_CONN_STR` で DDL 実行（docker psql 使用）
 
-- [ ] H-5: `bash scripts/run.sh` — 移行実行
+- [x] H-5: `bash scripts/run.sh` — 移行実行
   - exit code 0 を確認
 
-- [ ] H-6: `bash scripts/verify.sh`
-  - `PASS=5 FAIL=0` を確認
+- [x] H-6: `bash scripts/verify.sh`
+  - `PASS=5 FAIL=0` を確認（2026-06-13）
 
 ---
 
 ## Phase I — コミット
 
-- [ ] I-1: `git commit -m "feat: v15.0.0 — CrossCloud E2E Demo（簡略版 PASS=5）"`
+- [x] I-1: `git commit -m "feat: v15.0.0 — CrossCloud E2E Demo（簡略版 PASS=5）"`
+  - 追加コミット: `feat: v15.0.0 — CrossCloud E2E Phase H 完了（PASS=5 実証）`（2026-06-13）
 
 ---
 
@@ -178,7 +179,7 @@ Branch: master
 | `cargo test v150000` 全 5 件パス | [x] |
 | `cargo test` 全件パス（リグレッションなし） | [x] |
 | `CARGO_PKG_VERSION == "15.0.0"` | [x] |
-| `scripts/verify.sh` が `PASS=5 FAIL=0` を出力する（要 AWS/Azure 環境） | [ ] Phase H |
+| `scripts/verify.sh` が `PASS=5 FAIL=0` を出力する（要 AWS/Azure 環境） | [x] 2026-06-13 実証済み |
 
 ---
 

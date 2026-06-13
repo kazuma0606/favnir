@@ -169,6 +169,51 @@ resource "aws_lambda_function" "verifier" {
   }
 }
 
+# ── verifier_v2: KMS ECDSA 版 Lambda（v15.1.5）────────────────────────────────
+
+resource "aws_ecr_repository" "verifier_v2" {
+  name                 = "crosscloud-verifier-v2"
+  image_tag_mutability = "MUTABLE"
+  force_delete         = true
+
+  tags = {
+    Project = "favnir-crosscloud"
+  }
+}
+
+resource "aws_lambda_function" "verifier_v2" {
+  function_name = "favnir-crosscloud-verifier-v2-${var.env_suffix}"
+  package_type  = "Image"
+  image_uri     = "${aws_ecr_repository.verifier_v2.repository_url}:${var.ecr_image_tag}"
+  role          = aws_iam_role.lambda_verifier.arn
+  timeout       = 30
+
+  environment {
+    variables = {
+      NONCE_TABLE           = aws_dynamodb_table.nonce.name
+      S3_PROOF_BUCKET       = aws_s3_bucket.proof.id
+      ECS_CLUSTER_ARN       = aws_ecs_cluster.crosscloud.arn
+      ECS_TASK_DEF_ARN      = aws_ecs_task_definition.migrate.arn
+      ECS_SUBNETS           = join(",", tolist(data.aws_subnets.default.ids))
+      ECS_SECURITY_GROUP    = aws_security_group.ecs_tasks.id
+      AZURE_STORAGE_ACCOUNT = var.azure_storage_account
+      AZURE_STORAGE_KEY     = var.azure_storage_key
+    }
+  }
+
+  tags = {
+    Project = "favnir-crosscloud"
+  }
+}
+
+resource "aws_lambda_permission" "apigw_v2" {
+  statement_id  = "AllowAPIGatewayInvokeV2"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.verifier_v2.function_name
+  principal     = "apigateway.amazonaws.com"
+  source_arn    = "${aws_apigatewayv2_api.crosscloud.execution_arn}/*/*"
+}
+
 # ── API Gateway HTTP API ──────────────────────────────────────────────────────
 
 resource "aws_apigatewayv2_api" "crosscloud" {
@@ -223,6 +268,22 @@ resource "aws_lambda_permission" "apigw" {
   function_name = aws_lambda_function.verifier.function_name
   principal     = "apigateway.amazonaws.com"
   source_arn    = "${aws_apigatewayv2_api.crosscloud.execution_arn}/*/*"
+}
+
+# POST /migrate-kms → verifier_v2（KMS ECDSA 版）
+resource "aws_apigatewayv2_integration" "verifier_v2" {
+  api_id                 = aws_apigatewayv2_api.crosscloud.id
+  integration_type       = "AWS_PROXY"
+  integration_uri        = aws_lambda_function.verifier_v2.invoke_arn
+  payload_format_version = "2.0"
+}
+
+resource "aws_apigatewayv2_route" "migrate_kms" {
+  api_id             = aws_apigatewayv2_api.crosscloud.id
+  route_key          = "POST /migrate-kms"
+  authorization_type = "JWT"
+  authorizer_id      = aws_apigatewayv2_authorizer.cognito.id
+  target             = "integrations/${aws_apigatewayv2_integration.verifier_v2.id}"
 }
 
 # ── KMS 非対称署名キー（v15.1.5: ECDSA P-256）────────────────────────────────

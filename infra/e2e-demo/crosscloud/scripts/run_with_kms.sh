@@ -29,7 +29,7 @@ echo "[1] OK — IdToken 取得完了"
 
 # ── StringToSign 構築 ──────────────────────────────────────────────────
 METHOD="POST"
-PATH_="/migrate"
+PATH_="/migrate-kms"
 TIMESTAMP=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 NONCE=$(uuidgen 2>/dev/null || python3 -c "import uuid; print(uuid.uuid4())" | tr '[:upper:]' '[:lower:]')
 BODY='{"action":"migrate"}'
@@ -62,7 +62,7 @@ echo "    Signature : ${SIGNATURE:0:40}..."
 # ── API Gateway に POST ────────────────────────────────────────────────
 echo "[3] POST ${API_ENDPOINT}/migrate ..."
 HTTP_STATUS=$(curl -sS -o /tmp/kms_response.json -w "%{http_code}" \
-  -X POST "${API_ENDPOINT}/migrate" \
+  -X POST "${API_ENDPOINT}/migrate-kms" \
   -H "Authorization: Bearer ${AUTH_RESULT}" \
   -H "Content-Type: application/json" \
   -H "X-Timestamp: ${TIMESTAMP}" \

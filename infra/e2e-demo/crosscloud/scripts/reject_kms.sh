@@ -48,7 +48,7 @@ BODY_HASH=$(echo -n "$BODY" | sha256sum | cut -d' ' -f1)
 # ── 正当な署名を取得しておく ─────────────────────────────────────────
 NONCE_VALID=$(uuidgen 2>/dev/null || python3 -c "import uuid; print(uuid.uuid4())")
 STRING_TO_SIGN="POST
-/migrate
+/migrate-kms
 ${TIMESTAMP}
 ${NONCE_VALID}
 ${BODY_HASH}"
@@ -67,7 +67,7 @@ echo ""
 echo "[REJECT 1] 改ざんボディ（ECDSA 検証失敗）→ 401 期待"
 TAMPERED_BODY='{"action":"drop_all_tables"}'
 STATUS=$(curl -sS -o /dev/null -w "%{http_code}" \
-  -X POST "${API_ENDPOINT}/migrate" \
+  -X POST "${API_ENDPOINT}/migrate-kms" \
   -H "Authorization: Bearer ${AUTH_TOKEN}" \
   -H "Content-Type: application/json" \
   -H "X-Timestamp: ${TIMESTAMP}" \
@@ -83,7 +83,7 @@ echo "[REJECT 2] ランダム署名（不正 DER バイト列）→ 401 期待"
 NONCE_RAND=$(uuidgen 2>/dev/null || python3 -c "import uuid; print(uuid.uuid4())")
 RANDOM_SIG=$(dd if=/dev/urandom bs=64 count=1 2>/dev/null | base64 | tr -d '\n')
 STATUS=$(curl -sS -o /dev/null -w "%{http_code}" \
-  -X POST "${API_ENDPOINT}/migrate" \
+  -X POST "${API_ENDPOINT}/migrate-kms" \
   -H "Authorization: Bearer ${AUTH_TOKEN}" \
   -H "Content-Type: application/json" \
   -H "X-Timestamp: ${TIMESTAMP}" \

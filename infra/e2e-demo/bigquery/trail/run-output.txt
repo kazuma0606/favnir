@@ -1,0 +1,28 @@
+=== v15.2.0 BigQuery E2E Demo 証跡 ===
+Date: Sun Jun 14 08:38:04     2026
+Commit: d7824f0
+
+[run] GCP_PROJECT_ID=favnir-bigquery-demo
+[run] BQ_DATASET=favnir_demo
+[run] GOOGLE_APPLICATION_CREDENTIALS=/c/Users/yoshi/favnir/infra/e2e-demo/bigquery/scripts/../../../../fav/tmp/gcp-sa-key.json
+
+[seed] /tmp/seed.csv を生成しました（3 件）
+
+warning: --legacy is deprecated since v9.0.0 and will be removed in a future version.
+         The Favnir pipeline (checker.fav + compiler.fav) handles all modes.
+[1/4] LoadCsv...
+[1/4] OK
+[2/4] TransformRows...
+[2/4] OK
+[3/4] BigQueryInsert...
+[3/4] OK — 3 rows inserted
+[4/4] QuerySummary...
+[4/4] OK — {"rows":[{"f":[{"v":"3"}]}],"schema":{"fields":[{"mode":"NULLABLE","name":"cnt","type":"INTEGER"}]}}
+
+[verify] BigQuery テーブル件数確認...
+  Project: favnir-bigquery-demo
+  Dataset: favnir_demo
+
+[PASS] INSERT 3件 (3)
+
+PASS=1 FAIL=0

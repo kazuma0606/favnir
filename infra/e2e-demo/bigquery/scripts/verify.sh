@@ -6,7 +6,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 GCP_PROJECT_ID="${1:-${GCP_PROJECT_ID:-favnir-bigquery-demo}}"
 BQ_DATASET="${BQ_DATASET:-favnir_demo}"
-SA_KEY="${GOOGLE_APPLICATION_CREDENTIALS:-${SCRIPT_DIR}/../../../tmp/gcp-sa-key.json}"
+SA_KEY="${GOOGLE_APPLICATION_CREDENTIALS:-${SCRIPT_DIR}/../../../../fav/tmp/gcp-sa-key.json}"
 FAV="${FAV_BIN:-$(which fav 2>/dev/null || echo "${SCRIPT_DIR}/../../../../fav/target/debug/fav")}"
 
 PASS=0

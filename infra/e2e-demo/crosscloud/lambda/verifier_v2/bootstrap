@@ -41,7 +41,7 @@ while true; do
       STATUS=409; MSG="nonce_replay_detected"
     else
       STATUS=500
-      MSG=$(printf '%s' "$OUTPUT" | tr -d '\033\r' | sed -n '3p' | cut -c1-200)
+      MSG=$(printf '%s' "$OUTPUT" | tr -d '\033\r' | tr '\n' ' ' | cut -c1-200)
     fi
     PAYLOAD="{\"statusCode\":${STATUS},\"headers\":{\"Content-Type\":\"application/json\"},\"body\":\"{\\\"error\\\":\\\"${MSG}\\\"}\"}";
   fi

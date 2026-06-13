@@ -86,42 +86,44 @@ Branch: master
 
 ## Phase H — ECR / Lambda デプロイ・E2E
 
-- [ ] H-1: `Dockerfile.builder` でLinux バイナリをビルド（`--no-cache` 付き）
-  ```bash
-  docker build --no-cache -f fav/Dockerfile.builder --tag fav-builder:latest fav/
-  ```
-  ※ `--no-cache` を付けないと変更が反映されないことがある
+- [x] H-1: `Dockerfile.builder` でLinux バイナリをビルド（`--no-cache` 付き）
+  - PEM base64 行折り返し修正後に再ビルド（`--no-cache`）実施
+  - DER parse 失敗時も `err("ecdsa_verify_failed")` を返すよう修正後に再ビルド
 
-- [ ] H-2: ECR ログイン → crosscloud-verifier-v2 リポジトリ作成（terraform apply 後）
+- [x] H-2: ECR ログイン → crosscloud-verifier-v2 リポジトリ作成（terraform apply 済み）
+  - `847333136058.dkr.ecr.ap-northeast-1.amazonaws.com/crosscloud-verifier-v2`
 
-- [ ] H-3: verifier_v2 イメージをビルド・ECR push
-  ```bash
-  docker buildx build --platform linux/amd64 --provenance=false \
-    -t <ACCOUNT>.dkr.ecr.<REGION>.amazonaws.com/crosscloud-verifier-v2:latest \
-    --push lambda/verifier_v2/
-  ```
+- [x] H-3: verifier_v2 イメージをビルド・ECR push
+  - `docker buildx build --platform linux/amd64 --provenance=false --push`
+  - マニフェスト: `sha256:095eab676122d7e225c822d24db82ccf439eda971cfef141ee80417be4b4220e`
 
-- [ ] H-4: `terraform apply` (KMS リソース + Lambda verifier_v2 追加分)
-  - Cognito ユーザー再作成（terraform destroy 済みのため）
-  - `aws cognito-idp admin-set-user-password` で permanent パスワード設定
+- [x] H-4: `terraform apply` (KMS リソース + Lambda verifier_v2 追加分)
+  - KMS key ARN: `arn:aws:kms:ap-northeast-1:847333136058:key/5548aced-0bc4-4863-8615-be58bd6d3bb6`
+  - API endpoint: `https://3e5ithnoj7.execute-api.ap-northeast-1.amazonaws.com`
+  - Cognito: user pool `ap-northeast-1_aTkU4j9ez`, client `37d18bg84udnel648nph430915`
 
-- [ ] H-5: `reject_kms.sh` 実行 → PASS=2 FAIL=0 確認
+- [x] H-5: `reject_kms.sh` 実行 → **PASS=2 FAIL=0**
+  - ケース1: 改ざんボディ → 401 [PASS]
+  - ケース2: ランダム署名（不正 DER）→ 401 [PASS]
 
-- [ ] H-6: `run_with_kms.sh` 実行 → HTTP 200 + ECS タスク起動確認
+- [x] H-6: `run_with_kms.sh` 実行 → **HTTP 200**
+  - KMS 署名検証通過 / ECS タスク起動確認
+  - ECS task ARN: `arn:aws:ecs:ap-northeast-1:847333136058:task/favnir-crosscloud/b942d15df51e41b5a5cb6d7d255a2b93`
 
-- [ ] H-7: S3 証跡確認
-  ```bash
-  aws s3 ls s3://<proof-bucket>/auth-proof/
-  ```
+- [x] H-7: S3 証跡確認
+  - `s3://favnir-crosscloud-proof-dev/auth-proof/327c9085-cd05-481f-b6d5-83c88f6bf9dd.json`
+  - `{"status":"ok","request_id":"327c9085-cd05-481f-b6d5-83c88f6bf9dd","task_arn":"arn:aws:ecs:ap-northeast-1:847333136058:task/favnir-crosscloud/b942d15df51e41b5a5cb6d7d255a2b93"}`
 
-- [ ] H-8: `terraform destroy`（E2E 完了後）
+- [x] H-8: `terraform destroy` 完了
 
 ---
 
 ## Phase I — コミット
 
-- [x] I-1: コミット完了（9c1872c）
+- [x] I-1: Phase A-G コミット完了（9c1872c）
   - `feat: v15.1.5 — CrossCloud KMS 非対称署名（ECDSA P-256）+ リグレッションテスト`
+
+- [x] I-2: Phase H（E2E）完了コミット
 
 ---
 
@@ -137,11 +139,11 @@ Branch: master
 | `auth.tf` に `ECC_NIST_P256` が含まれる | [x] |
 | `lambda/verifier_v2/verifier_v2.fav` が存在する | [x] |
 | `docs/auth-comparison.md` が存在する | [x] |
-| `scripts/reject_kms.sh` が PASS=2 FAIL=0 を出力する（要 AWS 環境）| [ ] 未実施 |
-| `run_with_kms.sh` が HTTP 200 を返す（要 AWS 環境）| [ ] 未実施 |
-| S3 に auth-proof が保存される（要 AWS 環境）| [ ] 未実施 |
+| `scripts/reject_kms.sh` が PASS=2 FAIL=0 を出力する（要 AWS 環境）| [x] PASS=2 FAIL=0 |
+| `run_with_kms.sh` が HTTP 200 を返す（要 AWS 環境）| [x] HTTP 200 |
+| S3 に auth-proof が保存される（要 AWS 環境）| [x] 327c9085-cd05-481f-b6d5-83c88f6bf9dd.json |
 | `lambda/verifier/bootstrap` からデバッグログが削除されている | [x] |
-| terraform destroy 完了 | [ ] Phase H（AWS 環境）実施後 |
+| terraform destroy 完了 | [x] |
 
 ---
 

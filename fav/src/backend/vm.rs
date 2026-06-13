@@ -11633,11 +11633,21 @@ fn vm_call_builtin(
             let sig_bytes = BASE64.decode(sig_b64.trim())
                 .map_err(|e| format!("Crypto.ecdsa_verify_raw: base64 decode: {e}"))?;
 
-            let verifying_key = VerifyingKey::from_public_key_pem(pem.trim())
-                .map_err(|e| format!("Crypto.ecdsa_verify_raw: parse PEM: {e}"))?;
+            let verifying_key = match VerifyingKey::from_public_key_pem(pem.trim()) {
+                Ok(k) => k,
+                Err(_) => return Ok(VMValue::Variant(
+                    "err".into(),
+                    Some(Box::new(VMValue::Str("ecdsa_verify_failed".into()))),
+                )),
+            };
 
-            let sig = Signature::from_der(&sig_bytes)
-                .map_err(|e| format!("Crypto.ecdsa_verify_raw: parse DER sig: {e}"))?;
+            let sig = match Signature::from_der(&sig_bytes) {
+                Ok(s) => s,
+                Err(_) => return Ok(VMValue::Variant(
+                    "err".into(),
+                    Some(Box::new(VMValue::Str("ecdsa_verify_failed".into()))),
+                )),
+            };
 
             match verifying_key.verify(message.as_bytes(), &sig) {
                 Ok(()) => Ok(VMValue::Variant("ok".into(), Some(Box::new(VMValue::Unit)))),
@@ -13314,10 +13324,22 @@ fn vm_call_builtin(
                         .get("PublicKey")
                         .and_then(|v| v.as_str())
                         .ok_or_else(|| format!("kms_get_public_key_raw: missing PublicKey in response: {resp}"))?;
-                    // KMS returns base64-encoded DER; wrap in PEM
+                    // KMS returns base64-encoded DER.
+                    // PEM requires base64 wrapped at 64 chars per line.
+                    let b64_clean: String = der_b64
+                        .trim()
+                        .chars()
+                        .filter(|c| !c.is_whitespace())
+                        .collect();
+                    let b64_wrapped: String = b64_clean
+                        .as_bytes()
+                        .chunks(64)
+                        .map(|c| std::str::from_utf8(c).unwrap_or(""))
+                        .collect::<Vec<_>>()
+                        .join("\n");
                     let pem = format!(
                         "-----BEGIN PUBLIC KEY-----\n{}\n-----END PUBLIC KEY-----\n",
-                        der_b64.trim()
+                        b64_wrapped
                     );
                     Ok(ok_vm(VMValue::Str(pem)))
                 }

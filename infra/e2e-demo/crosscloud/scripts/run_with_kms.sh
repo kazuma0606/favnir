@@ -31,7 +31,7 @@ echo "[1] OK — IdToken 取得完了"
 METHOD="POST"
 PATH_="/migrate-kms"
 TIMESTAMP=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-NONCE=$(uuidgen 2>/dev/null || python3 -c "import uuid; print(uuid.uuid4())" | tr '[:upper:]' '[:lower:]')
+NONCE=$(uuidgen 2>/dev/null || uv run python -c "import uuid; print(uuid.uuid4())" | tr '[:upper:]' '[:lower:]')
 BODY='{"action":"migrate"}'
 
 BODY_HASH=$(echo -n "$BODY" | sha256sum | cut -d' ' -f1)

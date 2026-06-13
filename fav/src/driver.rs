@@ -1056,19 +1056,20 @@ fn load_run_config(file: Option<&str>) {
     }
 }
 
-/// `fav run [--legacy] [--verbose] [--trace] <file>`
-///
-/// Default (`legacy = false`): Favnir pipeline (checker.fav + compiler.fav)
-/// for single-file programs.  Falls back to Rust pipeline automatically when:
-///   - `--legacy` is set, OR
-///   - the file is part of a fav.toml project, OR
-///   - the file uses `import rune` declarations.
 /// Returns true if the Favnir value represents a `Result.err(...)` variant.
 /// Used in cmd_run (--legacy) to detect failed main results and exit 1.
 pub(crate) fn is_result_err_value(v: &Value) -> bool {
     matches!(v, Value::Variant(tag, _) if tag == "err")
 }
 
+/// `fav run [--legacy] [--verbose] [--trace] <file>`
+///
+/// Default (`legacy = false`): Favnir pipeline (checker.fav + compiler.fav)
+/// for single-file programs.  Falls back to Rust pipeline automatically when:
+///
+/// - `--legacy` is set, OR
+/// - the file is part of a fav.toml project, OR
+/// - the file uses `import rune` declarations.
 pub fn cmd_run(file: Option<&str>, db_url: Option<&str>, legacy: bool, verbose: bool, trace: bool) {
     let verbose_level = load_run_config_verbose(file, verbose, trace);
 

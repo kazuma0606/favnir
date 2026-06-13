@@ -13285,7 +13285,6 @@ fn vm_call_builtin(
         // AWS.kms_get_public_key_raw(region: String, key_id: String) -> Result<String, String>
         // Calls KMS GetPublicKey, converts DER → PEM and returns the PEM string.
         "AWS.kms_get_public_key_raw" => {
-            use base64::Engine;
             let mut it = args.into_iter();
             let region = vm_string(
                 it.next().ok_or("kms_get_public_key_raw: missing region")?,

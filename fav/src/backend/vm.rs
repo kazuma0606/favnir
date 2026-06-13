@@ -153,7 +153,7 @@ impl AwsConfig {
 
 thread_local! {
     static AWS_CONFIG: std::cell::RefCell<AwsConfig> =
-        std::cell::RefCell::new(AwsConfig::default());
+        std::cell::RefCell::new(AwsConfig::from_env());
 }
 
 pub fn set_aws_config(cfg: AwsConfig) {
@@ -420,9 +420,14 @@ fn aws_post(
     if let Some(token) = &h.x_amz_security_token {
         req = req.set("x-amz-security-token", token);
     }
-    req.send_string(body)
-        .map_err(|e| e.to_string())
-        .and_then(|r| r.into_string().map_err(|e| e.to_string()))
+    match req.send_string(body) {
+        Ok(r) => r.into_string().map_err(|e| e.to_string()),
+        Err(ureq::Error::Status(code, resp)) => {
+            let body = resp.into_string().unwrap_or_default();
+            Err(format!("HTTP {code}: {body}"))
+        }
+        Err(e) => Err(e.to_string()),
+    }
 }
 
 fn extract_xml_tags(xml: &str, tag: &str) -> Vec<String> {
@@ -13054,6 +13059,171 @@ fn vm_call_builtin(
                             .unwrap_or("")
                             .to_string();
                         ok_vm(VMValue::Str(secret))
+                    }
+                    Err(e) => err_vm(VMValue::Str(e)),
+                },
+            )
+        }
+
+        // ── AWS DynamoDB PutItem with ConditionExpression (v15.1.0) ──────
+        "AWS.dynamo_put_item_cond_raw" => {
+            // AWS.dynamo_put_item_cond_raw(table, key_attr, key_val, ttl_attr, ttl_epoch, condition_expr)
+            //   -> Result<Unit, String>
+            // Returns err("nonce_already_used") on ConditionalCheckFailedException.
+            let mut it = args.into_iter();
+            let table = vm_string(
+                it.next().ok_or("dynamo_put_item_cond_raw: missing table")?,
+                "AWS.dynamo_put_item_cond_raw",
+            )?;
+            let key_attr = vm_string(
+                it.next().ok_or("dynamo_put_item_cond_raw: missing key_attr")?,
+                "AWS.dynamo_put_item_cond_raw",
+            )?;
+            let key_val = vm_string(
+                it.next().ok_or("dynamo_put_item_cond_raw: missing key_val")?,
+                "AWS.dynamo_put_item_cond_raw",
+            )?;
+            let ttl_attr = vm_string(
+                it.next().ok_or("dynamo_put_item_cond_raw: missing ttl_attr")?,
+                "AWS.dynamo_put_item_cond_raw",
+            )?;
+            let ttl_epoch: i64 = match it
+                .next()
+                .ok_or("dynamo_put_item_cond_raw: missing ttl_epoch")?
+            {
+                VMValue::Int(n) => n,
+                VMValue::Str(s) => s.parse::<i64>().map_err(|_| {
+                    "dynamo_put_item_cond_raw: ttl_epoch must be integer".to_string()
+                })?,
+                other => {
+                    return Err(format!(
+                        "dynamo_put_item_cond_raw: ttl_epoch must be Int or String, got {}",
+                        vmvalue_type_name(&other)
+                    ))
+                }
+            };
+            let condition_expr = vm_string(
+                it.next().ok_or("dynamo_put_item_cond_raw: missing condition_expr")?,
+                "AWS.dynamo_put_item_cond_raw",
+            )?;
+            let config = get_aws_config();
+            let url = if let Some(ep) = &config.endpoint_url {
+                ep.trim_end_matches('/').to_string()
+            } else {
+                format!("https://dynamodb.{}.amazonaws.com", config.region)
+            };
+            let key_esc = key_val.replace('\\', "\\\\").replace('"', "\\\"");
+            let cond_esc = condition_expr.replace('"', "\\\"");
+            let body = format!(
+                r#"{{"TableName":"{}","Item":{{"{}":{{"S":"{}"}},"{}":{{"N":"{}"}}}},"ConditionExpression":"{}"}}"#,
+                table, key_attr, key_esc, ttl_attr, ttl_epoch, cond_esc
+            );
+            Ok(
+                match aws_post(
+                    &config,
+                    "dynamodb",
+                    &url,
+                    &body,
+                    "application/x-amz-json-1.0",
+                    Some("DynamoDB_20120810.PutItem"),
+                ) {
+                    Ok(_) => ok_vm(VMValue::Unit),
+                    Err(e) => {
+                        if e.contains("ConditionalCheckFailedException") {
+                            err_vm(VMValue::Str("nonce_already_used".to_string()))
+                        } else {
+                            err_vm(VMValue::Str(e))
+                        }
+                    }
+                },
+            )
+        }
+
+        // ── AWS ECS RunTask (v15.1.0) ──────────────────────────────────────
+        "AWS.ecs_run_task_raw" => {
+            // AWS.ecs_run_task_raw(cluster_arn, task_def_arn, subnets_csv, security_group, overrides_json)
+            //   -> Result<String, String>  (returns task ARN on success)
+            let mut it = args.into_iter();
+            let cluster_arn = vm_string(
+                it.next().ok_or("ecs_run_task_raw: missing cluster_arn")?,
+                "AWS.ecs_run_task_raw",
+            )?;
+            let task_def_arn = vm_string(
+                it.next().ok_or("ecs_run_task_raw: missing task_def_arn")?,
+                "AWS.ecs_run_task_raw",
+            )?;
+            let subnets_csv = vm_string(
+                it.next().ok_or("ecs_run_task_raw: missing subnets_csv")?,
+                "AWS.ecs_run_task_raw",
+            )?;
+            let security_group = vm_string(
+                it.next().ok_or("ecs_run_task_raw: missing security_group")?,
+                "AWS.ecs_run_task_raw",
+            )?;
+            let overrides_json = vm_string(
+                it.next().ok_or("ecs_run_task_raw: missing overrides_json")?,
+                "AWS.ecs_run_task_raw",
+            )?;
+            let config = get_aws_config();
+            let url = if let Some(ep) = &config.endpoint_url {
+                format!("{}/", ep.trim_end_matches('/'))
+            } else {
+                format!("https://ecs.{}.amazonaws.com/", config.region)
+            };
+            let subnets_arr: String = {
+                let parts: Vec<String> = subnets_csv
+                    .split(',')
+                    .map(|s| format!(r#""{}""#, s.trim().replace('"', "\\\"")))
+                    .collect();
+                format!("[{}]", parts.join(","))
+            };
+            let cluster_esc = cluster_arn.replace('"', "\\\"");
+            let taskdef_esc = task_def_arn.replace('"', "\\\"");
+            let sg_esc = security_group.replace('"', "\\\"");
+            let body = format!(
+                r#"{{"cluster":"{}","taskDefinition":"{}","launchType":"FARGATE","networkConfiguration":{{"awsvpcConfiguration":{{"subnets":{},"securityGroups":["{}"],"assignPublicIp":"ENABLED"}}}},"overrides":{}}}"#,
+                cluster_esc, taskdef_esc, subnets_arr, sg_esc, overrides_json
+            );
+            Ok(
+                match aws_post(
+                    &config,
+                    "ecs",
+                    &url,
+                    &body,
+                    "application/x-amz-json-1.1",
+                    Some("AmazonEC2ContainerServiceV20141113.RunTask"),
+                ) {
+                    Ok(resp) => {
+                        let parsed: serde_json::Value =
+                            serde_json::from_str(&resp).unwrap_or(serde_json::Value::Null);
+                        let task_arn = parsed
+                            .get("tasks")
+                            .and_then(|t| t.as_array())
+                            .and_then(|arr| arr.first())
+                            .and_then(|task| task.get("taskArn"))
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")
+                            .to_string();
+                        if task_arn.is_empty() {
+                            let failures = parsed
+                                .get("failures")
+                                .and_then(|f| f.as_array())
+                                .map(|arr| {
+                                    arr.iter()
+                                        .map(|f| {
+                                            f.get("reason")
+                                                .and_then(|r| r.as_str())
+                                                .unwrap_or("unknown")
+                                        })
+                                        .collect::<Vec<_>>()
+                                        .join(", ")
+                                })
+                                .filter(|s| !s.is_empty())
+                                .unwrap_or(resp);
+                            err_vm(VMValue::Str(failures))
+                        } else {
+                            ok_vm(VMValue::Str(task_arn))
+                        }
                     }
                     Err(e) => err_vm(VMValue::Str(e)),
                 },

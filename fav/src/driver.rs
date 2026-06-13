@@ -1095,12 +1095,19 @@ pub fn cmd_run(file: Option<&str>, db_url: Option<&str>, legacy: bool, verbose: 
             process::exit(1);
         });
         let artifact = build_artifact_legacy(&run_program);
-        exec_artifact_main_with_source(&artifact, db_url, Some(&source_path2)).unwrap_or_else(
-            |message| {
+        let result = exec_artifact_main_with_source(&artifact, db_url, Some(&source_path2))
+            .unwrap_or_else(|message| {
                 eprintln!("{message}");
                 process::exit(1);
-            },
-        );
+            });
+        // If main returned Result.err(...), print the error and exit 1.
+        if let Value::Variant(ref tag, ref payload) = result {
+            if tag == "err" {
+                let msg = payload.as_deref().map(|v| v.repr()).unwrap_or_default();
+                eprintln!("error: {msg}");
+                process::exit(1);
+            }
+        }
     }
 }
 
@@ -25316,12 +25323,99 @@ public fn load(conn_str: String) -> Result<Int, String> !AzureDb {
     }
 }
 
+// ── v151000_tests (v15.1.0) — CrossCloud 認証層 (HMAC + Cognito + ECS Pattern B) ──
+#[cfg(test)]
+mod v151000_tests {
+    #[test]
+    fn version_is_15_1_0() {
+        assert_eq!(env!("CARGO_PKG_VERSION"), "15.1.0");
+    }
+
+    #[test]
+    fn verifier_fav_parses() {
+        // verifier.fav が Parser でエラーなく解析されることを確認
+        let manifest = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let base = manifest.parent().unwrap();
+        let src = std::fs::read_to_string(
+            base.join("infra/e2e-demo/crosscloud/lambda/verifier/verifier.fav"),
+        )
+        .expect("lambda/verifier/verifier.fav should exist");
+        let result = crate::frontend::parser::Parser::parse_str(&src, "verifier.fav");
+        assert!(
+            result.is_ok(),
+            "verifier.fav should parse without error: {:?}",
+            result.err()
+        );
+    }
+
+    #[test]
+    fn verifier_fav_has_hmac_and_nonce() {
+        let manifest = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let base = manifest.parent().unwrap();
+        let src = std::fs::read_to_string(
+            base.join("infra/e2e-demo/crosscloud/lambda/verifier/verifier.fav"),
+        )
+        .expect("lambda/verifier/verifier.fav should exist");
+        assert!(src.contains("Crypto.hmac_sha256_raw"), "verifier.fav should call HMAC primitive");
+        assert!(src.contains("AWS.dynamo_put_item_cond_raw"), "verifier.fav should use nonce DynamoDB primitive");
+        assert!(src.contains("AWS.ecs_run_task_raw"), "verifier.fav should trigger ECS task");
+        assert!(src.contains("invalid_signature"), "verifier.fav should reject invalid signatures");
+    }
+
+    #[test]
+    fn verifier_fav_has_aws_effects() {
+        let manifest = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let base = manifest.parent().unwrap();
+        let src = std::fs::read_to_string(
+            base.join("infra/e2e-demo/crosscloud/lambda/verifier/verifier.fav"),
+        )
+        .expect("lambda/verifier/verifier.fav should exist");
+        assert!(src.contains("!AWS"), "verifier.fav should declare !AWS effect");
+    }
+
+    #[test]
+    fn crosscloud_auth_infra_structure() {
+        // v15.1.0 で追加された認証層ファイルの存在確認
+        let manifest = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let base = manifest.parent().unwrap();
+        let required = [
+            "infra/e2e-demo/crosscloud/lambda/verifier/verifier.fav",
+            "infra/e2e-demo/crosscloud/lambda/verifier/Dockerfile",
+            "infra/e2e-demo/crosscloud/lambda/verifier/bootstrap",
+            "infra/e2e-demo/crosscloud/scripts/build-and-push-verifier.sh",
+            "infra/e2e-demo/crosscloud/scripts/run_with_auth.sh",
+            "infra/e2e-demo/crosscloud/scripts/reject_cases.sh",
+        ];
+        for path in &required {
+            assert!(base.join(path).exists(), "Required file not found: {}", path);
+        }
+    }
+
+    #[test]
+    fn new_vm_primitives_are_referenced() {
+        // vm.rs に dynamo_put_item_cond_raw / ecs_run_task_raw が含まれることを確認
+        let manifest = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let base = manifest.parent().unwrap();
+        let vm_src = std::fs::read_to_string(base.join("fav/src/backend/vm.rs"))
+            .expect("vm.rs should exist");
+        assert!(
+            vm_src.contains("\"AWS.dynamo_put_item_cond_raw\""),
+            "vm.rs should contain AWS.dynamo_put_item_cond_raw"
+        );
+        assert!(
+            vm_src.contains("\"AWS.ecs_run_task_raw\""),
+            "vm.rs should contain AWS.ecs_run_task_raw"
+        );
+    }
+}
+
 // ── v150000_tests (v15.0.0) — CrossCloud E2E Demo ────────────────────────────
 #[cfg(test)]
 mod v150000_tests {
     #[test]
     fn version_is_15_0_0() {
-        assert_eq!(env!("CARGO_PKG_VERSION"), "15.0.0");
+        assert!(env!("CARGO_PKG_VERSION") >= "15.0.0",
+            "expected >= 15.0.0, got {}", env!("CARGO_PKG_VERSION"));
     }
 
     #[test]

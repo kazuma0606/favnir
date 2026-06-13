@@ -1,6 +1,10 @@
-# v15.1.0 完成アーキテクチャ — CrossCloud 認証層
+# v15.1.0 完成アーキテクチャ — CrossCloud 認証層（AWS 側）
 
 Date: 2026-06-13
+
+> **スコープ**: このドキュメントは **AWS 側の認証層**（API Gateway + Lambda verifier）のアーキテクチャです。
+> Azure は ECS migrate タスク（migrate.fav）が起動後に接続する先ですが、verifier.fav 自身は Azure に接続しません。
+> CrossCloud 全体図は `infra/e2e-demo/crosscloud/plan.md` を参照してください。
 
 ## 全体構成図
 
@@ -90,9 +94,12 @@ done
 main(ctx: AppCtx) -> Result<Unit, String> !Auth !AWS
 
 Step 1: env var 読み込み（getenv_raw × 14本）
+   ─── 認証用（verifier が直接使う） ───────────────────
    method, path, ts, nonce, sig, body, req_id, nonce_ttl,
-   secret_arn, nonce_tbl, cluster, task_def, subnets, sg,
-   proof_bkt, stg_acct, stg_key, region
+   secret_arn, nonce_tbl, proof_bkt, region
+   ─── ECS 起動用（migrate タスクへの引き渡し値） ───────
+   cluster, task_def, subnets, sg,
+   stg_acct, stg_key  ← Azure Storage キー（verifier は参照するだけ。migrate.fav が使用）
 
 Step 2: HMAC シークレット取得
    chain hmac_secret <- AWS.secrets_get_raw(region, secret_arn)
@@ -115,6 +122,9 @@ Step 5: ECS Fargate 移行タスク起動
      cluster, task_def, subnets, sg, overrides_json
    )
    → RunTask API → task ARN
+   ※ overrides_json に stg_acct / stg_key を環境変数として渡す
+     （migrate.fav が Azure Blob Storage に接続するため）
+     verifier.fav 自身は Azure API を呼ばない
 
 Step 6: S3 証跡保存
    chain _ok <- AWS.s3_put_object_raw(

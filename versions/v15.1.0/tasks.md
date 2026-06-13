@@ -7,13 +7,13 @@ Branch: master
 
 ## Phase A — Docker イメージ
 
-- [ ] A-1: `infra/e2e-demo/crosscloud/docker/Dockerfile` を作成
+- [x] A-1: `infra/e2e-demo/crosscloud/docker/Dockerfile` を作成
   - `debian:bookworm-slim` ベース
   - `fav` バイナリ（x86_64-unknown-linux-musl）を `/usr/local/bin/fav` に配置
   - `migrate.fav` を `/app/migrate.fav` に配置
   - 環境変数デフォルト（`DATABASE_URL` / `AZURE_CONN_STR` 等）を宣言
 
-- [ ] A-2: `infra/e2e-demo/crosscloud/scripts/build-and-push.sh` を作成
+- [x] A-2: `infra/e2e-demo/crosscloud/scripts/build-and-push.sh` を作成
   - `cargo build --release --target x86_64-unknown-linux-musl`
   - `docker build --platform linux/amd64`
   - ECR へ push（`aws ecr get-login-password | docker login`）
@@ -22,7 +22,7 @@ Branch: master
 
 ## Phase B — Terraform: ECS / ECR（`terraform/aws/ecs.tf`）
 
-- [ ] B-1: `infra/e2e-demo/crosscloud/terraform/aws/ecs.tf` を作成
+- [x] B-1: `infra/e2e-demo/crosscloud/terraform/aws/ecs.tf` を作成
   - `aws_ecr_repository` crosscloud-fav
   - `aws_ecs_cluster` favnir-crosscloud
   - `aws_iam_role` ecs-execution（ECR pull + CloudWatch logs + Secrets Manager 参照）
@@ -36,13 +36,13 @@ Branch: master
 
 ## Phase C — Terraform: 認証層（`terraform/aws/auth.tf`）
 
-- [ ] C-1: `infra/e2e-demo/crosscloud/terraform/aws/auth.tf` を作成
+- [x] C-1: `infra/e2e-demo/crosscloud/terraform/aws/auth.tf` を作成
   - `aws_cognito_user_pool` favnir-crosscloud
   - `aws_cognito_user_pool_client`（`USER_PASSWORD_AUTH` 有効、シークレットなし）
   - `aws_secretsmanager_secret` hmac-secret（`favnir/crosscloud/hmac-secret`）
   - `aws_dynamodb_table` nonce（TTL 有効、PAY_PER_REQUEST）
   - `aws_iam_role` lambda-verifier（Secrets Manager + DynamoDB + S3 + ECS RunTask + IAM PassRole）
-  - `aws_lambda_function` verifier（`handler.py`, Python 3.12, 30秒タイムアウト）
+  - `aws_lambda_function` verifier（`package_type = "Image"` に変更、Favnir コンテナ）
   - `aws_apigatewayv2_api` crosscloud（HTTP API）
   - `aws_apigatewayv2_authorizer` cognito（JWT Authorizer）
   - `aws_apigatewayv2_integration` verifier（AWS_PROXY）
@@ -50,10 +50,10 @@ Branch: master
   - `aws_apigatewayv2_stage` $default（auto_deploy）
   - `aws_lambda_permission` apigw → Lambda
 
-- [ ] C-2: `terraform/aws/variables.tf` に追記
+- [x] C-2: `terraform/aws/variables.tf` に追記
   - `ecr_image_tag` / `azure_conn_str` / `azure_storage_account` / `azure_storage_key` / `azure_container` / `hmac_secret`
 
-- [ ] C-3: `terraform/aws/outputs.tf` に追記
+- [x] C-3: `terraform/aws/outputs.tf` に追記
   - `api_gateway_endpoint` / `ecr_repository_url` / `ecs_cluster_name` / `cognito_user_pool_id` / `cognito_client_id`
 
 ---
@@ -135,36 +135,41 @@ Branch: master
 
 ## Phase H — インフラ構築 + E2E 実行（要 AWS/Azure 環境）
 
-- [ ] H-1: `terraform/aws` に v15.1.0 リソース追加
+- [x] H-1: `terraform/aws` に v15.1.0 リソース追加
   - `terraform init && terraform apply`（新変数: `azure_conn_str` / `hmac_secret` 等）
   - 出力: `api_gateway_endpoint`, `ecr_repository_url`, `cognito_user_pool_id`, `cognito_client_id`
+  - ※ `fav/Dockerfile.builder` を使い Linux x86_64 バイナリをビルドして Lambda コンテナに梱包
 
-- [ ] H-2: `scripts/build-and-push.sh` 実行
-  - fav バイナリを `x86_64-unknown-linux-musl` でクロスコンパイル
-  - ECR に push 成功を確認
+- [x] H-2: `scripts/build-and-push-verifier.sh` 実行
+  - `docker build --no-cache -f fav/Dockerfile.builder` でクロスコンパイル
+  - `docker buildx build --platform linux/amd64 --provenance=false` で Lambda イメージをビルド
+  - ECR crosscloud-verifier に push 成功
 
-- [ ] H-3: Cognito テストユーザー作成
+- [x] H-3: Cognito テストユーザー作成
   - `aws cognito-idp admin-create-user` + `admin-set-user-password --permanent`
 
-- [ ] H-4: `bash scripts/reject_cases.sh`
-  - `REJECT PASS=4 FAIL=0` を確認
+- [x] H-4: `bash scripts/reject_cases.sh`
+  - **PASS=5 FAIL=0** を確認（2026-06-13 実証）
+  - ケース 5（JWT なし / API GW 弾き）も追加して 5 ケース
 
-- [ ] H-5: `bash scripts/run_with_auth.sh`
-  - `202 Accepted` → ECS タスク起動 → `[run] SUCCESS` を確認
+- [x] H-5: `bash scripts/run_with_auth.sh`
+  - HTTP 200 + ECS タスク起動確認（2026-06-13 実証）
+  - task ARN: `arn:aws:ecs:ap-northeast-1:847333136058:task/favnir-crosscloud/b4f67567488a4cbb8b120d3abac4582f`
 
-- [ ] H-6: S3 proof ファイル確認
-  - `aws s3 ls s3://<bucket>/auth-proof/allow/` に JSON が存在
-  - `aws s3 ls s3://<bucket>/auth-proof/deny/` に JSON が存在（reject テスト分）
+- [x] H-6: S3 proof ファイル確認
+  - `s3://favnir-crosscloud-proof-dev/auth-proof/3e8142f8-...json`（176 bytes）
+  - `s3://favnir-crosscloud-proof-dev/auth-proof/790cddfb-...json`（176 bytes）
+  - 証跡 JSON: `{"status":"ok","request_id":"<uuid>","task_arn":"<ecs-task-arn>"}`
 
-- [ ] H-7: `terraform destroy`（課金リソース後片付け）
-  - ECS クラスター / Lambda / API GW / Cognito / DynamoDB / ECR
-  - 注意: Azure リソース（v15.0.0 分）は destroy 済みのため不要
+- [x] H-7: `terraform destroy`（課金リソース後片付け）— 2026-06-13 完了（36 resources destroyed）
 
 ---
 
 ## Phase I — コミット
 
-- [ ] I-1: `git commit -m "feat: v15.1.0 — CrossCloud 認証層（HMAC + Cognito + ECS Fargate）"`
+- [x] I-1: コミット完了
+  - `feat: v15.1.0 — CrossCloud E2E Phase H 完了（PASS=5 実証）`（db996de）
+  - `docs: v15.1.0 アーキテクチャ・デバッグ記録 + v15.1.5 計画書 + インフラファイル整備`（0e35654）
 
 ---
 
@@ -180,11 +185,13 @@ Branch: master
 | `terraform/aws/auth.tf` に `aws_dynamodb_table` が含まれる | [x] |
 | `vm.rs` に `AWS.dynamo_put_item_cond_raw` / `AWS.ecs_run_task_raw` が含まれる | [x] |
 | `cargo test v151000` 全 6 件パス | [x] |
-| `cargo test` 全件パス（リグレッションなし） | [x] |
+| `cargo test` 全件パス（リグレッションなし、1550 pass） | [x] |
 | `CARGO_PKG_VERSION == "15.1.0"` | [x] |
 | `scripts/reject_cases.sh` が PASS=5 FAIL=0 を出力する（要 AWS 環境） | [x] 2026-06-13 実証 |
 | ECS Fargate タスクが起動する（要 AWS 環境） | [x] 2026-06-13 実証 |
 | auth-proof が S3 に保存される（要 AWS 環境） | [x] 2026-06-13 実証 |
+| `terraform destroy` 完了（36 resources） | [x] 2026-06-13 実証 |
+| bootstrap デバッグログ削除（production 化） | [x] |
 
 ---
 

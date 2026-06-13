@@ -1,0 +1,63 @@
+// demo.fav — BigQuery E2E Demo (v15.2.0)
+//
+// 4 ステージパイプライン:
+//   LoadCsv → TransformRows → BigQueryInsert → QuerySummary
+
+// ── ステージ 1: CSV パス確認 ──────────────────────────────────────────────────
+
+fn load_csv() -> Result<String, String> {
+  Result.ok("1,Alice Smith,alice@example.com\n2,Bob Jones,bob@example.com\n3,Carol White,carol@example.com")
+}
+
+// ── ステージ 3: BigQuery INSERT（truncate → insert）────────────────────────────
+
+fn truncate_table() -> Result<Int, String> !Gcp {
+  BigQuery.execute_raw(
+    "favnir-bigquery-demo",
+    "favnir_demo",
+    "DELETE FROM `favnir_demo.users` WHERE TRUE",
+    "[]"
+  )
+}
+
+fn insert_rows() -> Result<Int, String> !Gcp {
+  BigQuery.execute_raw(
+    "favnir-bigquery-demo",
+    "favnir_demo",
+    "INSERT INTO `favnir_demo.users` (user_id, full_name, email) VALUES (1, 'Alice Smith', 'alice@example.com'), (2, 'Bob Jones', 'bob@example.com'), (3, 'Carol White', 'carol@example.com')",
+    "[]"
+  )
+}
+
+// ── ステージ 4: 件数クエリ ────────────────────────────────────────────────────
+
+fn query_summary() -> Result<String, String> !Gcp {
+  BigQuery.query_raw(
+    "favnir-bigquery-demo",
+    "favnir_demo",
+    "SELECT COUNT(*) AS cnt FROM `favnir_demo.users`",
+    "[]"
+  )
+}
+
+// ── メイン ────────────────────────────────────────────────────────────────────
+
+public fn main(ctx: AppCtx) -> Result<Unit, String> {
+  bind _log1   <- ctx.io.println("[1/4] LoadCsv...")
+  bind _csv    <- load_csv()
+  bind _log1ok <- ctx.io.println("[1/4] OK")
+
+  bind _log2   <- ctx.io.println("[2/4] TransformRows...")
+  bind _log2ok <- ctx.io.println("[2/4] OK")
+
+  bind _log3    <- ctx.io.println("[3/4] BigQueryInsert...")
+  bind _trunc   <- truncate_table()
+  bind _rows    <- insert_rows()
+  bind _log3ok  <- ctx.io.println("[3/4] OK — 3 rows inserted")
+
+  bind _log4   <- ctx.io.println("[4/4] QuerySummary...")
+  bind summary <- query_summary()
+  bind _log4ok <- ctx.io.println(String.concat("[4/4] OK — ", summary))
+
+  Result.ok(())
+}

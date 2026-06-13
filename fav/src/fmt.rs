@@ -710,6 +710,7 @@ fn fmt_effect(eff: &Effect) -> Option<String> {
         Effect::Http => Some("!Http".to_string()),
         Effect::Llm => Some("!Llm".to_string()),
         Effect::Snowflake => Some("!Snowflake".to_string()),
+        Effect::Gcp => Some("!Gcp".to_string()),
         Effect::Postgres => Some("!Postgres".to_string()),
         Effect::AzureDb => Some("!AzureDb".to_string()),
         Effect::AzureStorage => Some("!AzureStorage".to_string()),

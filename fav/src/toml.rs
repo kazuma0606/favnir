@@ -102,6 +102,15 @@ pub struct SnowflakeTomlConfig {
     pub schema:    Option<String>,
 }
 
+// ── GCP config (v15.2.0) ─────────────────────────────────────────────────────
+
+#[derive(Debug, Clone)]
+pub struct GcpTomlConfig {
+    pub project_id:       Option<String>,
+    pub credentials_file: Option<String>,
+    pub dataset:          Option<String>,
+}
+
 // ── Azure config (v14.2.0) ────────────────────────────────────────────────────
 
 #[derive(Debug, Clone)]
@@ -220,6 +229,8 @@ pub struct FavToml {
     pub lint: Option<LintTomlConfig>,
     /// Optional context configuration (v13.5.0).
     pub context: Option<ContextConfig>,
+    /// Optional GCP configuration (v15.2.0).
+    pub gcp: Option<GcpTomlConfig>,
     /// Optional Azure configuration (v14.2.0).
     pub azure: Option<AzureTomlConfig>,
 }
@@ -284,6 +295,7 @@ fn parse_fav_toml(content: &str) -> FavToml {
     let mut lint_cfg: Option<LintTomlConfig> = None;
     let mut context_cfg: Option<ContextConfig> = None;
     let mut azure_cfg: Option<AzureTomlConfig> = None;
+    let mut gcp_cfg: Option<GcpTomlConfig> = None;
     let mut section = "";
 
     for line in content.lines() {
@@ -349,6 +361,10 @@ fn parse_fav_toml(content: &str) -> FavToml {
         }
         if trimmed == "[azure]" {
             section = "azure";
+            continue;
+        }
+        if trimmed == "[gcp]" {
+            section = "gcp";
             continue;
         }
         if trimmed.starts_with('[') {
@@ -591,6 +607,22 @@ fn parse_fav_toml(content: &str) -> FavToml {
                 }
                 azure_cfg = Some(current);
             }
+            "gcp" => {
+                let mut current = gcp_cfg.take().unwrap_or(GcpTomlConfig {
+                    project_id:       None,
+                    credentials_file: None,
+                    dataset:          None,
+                });
+                if let Some((key, val)) = parse_kv(trimmed) {
+                    match key {
+                        "project_id"       => current.project_id       = Some(expand_env_vars(val)),
+                        "credentials_file" => current.credentials_file = Some(expand_env_vars(val)),
+                        "dataset"          => current.dataset           = Some(val.to_string()),
+                        _ => {}
+                    }
+                }
+                gcp_cfg = Some(current);
+            }
             _ => {}
         }
     }
@@ -616,6 +648,7 @@ fn parse_fav_toml(content: &str) -> FavToml {
         run: run_cfg,
         lint: lint_cfg,
         context: context_cfg,
+        gcp: gcp_cfg,
         azure: azure_cfg,
     }
 }

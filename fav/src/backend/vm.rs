@@ -4678,6 +4678,72 @@ fn err_vm(value: VMValue) -> VMValue {
     VMValue::Variant("err".to_string(), Some(Box::new(value)))
 }
 
+// ── GCP helper (v15.2.0) ─────────────────────────────────────────────────────
+
+/// GOOGLE_APPLICATION_CREDENTIALS のサービスアカウント JSON から OAuth2 Bearer token を取得する。
+fn gcp_get_access_token() -> Result<String, String> {
+    use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    let cred_path = std::env::var("GOOGLE_APPLICATION_CREDENTIALS")
+        .map_err(|_| "GOOGLE_APPLICATION_CREDENTIALS not set".to_string())?;
+    let cred_json = std::fs::read_to_string(&cred_path)
+        .map_err(|e| format!("gcp: failed to read credentials file '{cred_path}': {e}"))?;
+    let cred: serde_json::Value = serde_json::from_str(&cred_json)
+        .map_err(|e| format!("gcp: invalid credentials JSON: {e}"))?;
+
+    let client_email = cred["client_email"].as_str()
+        .ok_or_else(|| "gcp: missing client_email in credentials".to_string())?;
+    let private_key = cred["private_key"].as_str()
+        .ok_or_else(|| "gcp: missing private_key in credentials".to_string())?;
+
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+
+    #[derive(serde::Serialize)]
+    struct GcpClaims<'a> {
+        iss: &'a str,
+        scope: &'a str,
+        aud: &'a str,
+        iat: u64,
+        exp: u64,
+    }
+
+    let claims = GcpClaims {
+        iss: client_email,
+        scope: "https://www.googleapis.com/auth/bigquery",
+        aud: "https://oauth2.googleapis.com/token",
+        iat: now,
+        exp: now + 3600,
+    };
+
+    let header = Header::new(Algorithm::RS256);
+    let key = EncodingKey::from_rsa_pem(private_key.as_bytes())
+        .map_err(|e| format!("gcp: invalid private key: {e}"))?;
+    let jwt = encode(&header, &claims, &key)
+        .map_err(|e| format!("gcp: JWT encode failed: {e}"))?;
+
+    let resp = ureq::post("https://oauth2.googleapis.com/token")
+        .set("Content-Type", "application/x-www-form-urlencoded")
+        .send_string(&format!(
+            "grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Ajwt-bearer&assertion={}",
+            jwt
+        ))
+        .map_err(|e| format!("gcp: token request failed: {e}"))?;
+
+    let resp_body = resp.into_string()
+        .map_err(|e| format!("gcp: token response read failed: {e}"))?;
+    let token_json: serde_json::Value = serde_json::from_str(&resp_body)
+        .map_err(|e| format!("gcp: token response parse failed: {e}"))?;
+
+    token_json["access_token"]
+        .as_str()
+        .map(|s| s.to_string())
+        .ok_or_else(|| format!("gcp: no access_token in response: {resp_body}"))
+}
+
 // ── Debug.show_raw helper (v9.10.0) ──────────────────────────────────────────
 
 fn capitalize_variant_tag(tag: &str) -> String {
@@ -13344,6 +13410,225 @@ fn vm_call_builtin(
                 }
                 Err(e) => Ok(err_vm(VMValue::Str(e))),
             }
+        }
+
+        // ── GCP BigQuery primitives (v15.2.0) ────────────────────────────
+        // 共通: GOOGLE_APPLICATION_CREDENTIALS → RS256 JWT → Bearer token
+
+        "BigQuery.query_raw" => {
+            // (project_id, dataset, sql, params_json) -> Result<String, String>
+            let mut it = args.into_iter();
+            let project_id = vm_string(it.next().ok_or("BigQuery.query_raw: missing project_id")?, "BigQuery.query_raw")?;
+            let _dataset   = vm_string(it.next().ok_or("BigQuery.query_raw: missing dataset")?,    "BigQuery.query_raw")?;
+            let sql        = vm_string(it.next().ok_or("BigQuery.query_raw: missing sql")?,        "BigQuery.query_raw")?;
+            let _params    = vm_string(it.next().ok_or("BigQuery.query_raw: missing params_json")?, "BigQuery.query_raw")?;
+
+            let token = match gcp_get_access_token() {
+                Ok(t) => t,
+                Err(e) => return Ok(err_vm(VMValue::Str(e))),
+            };
+
+            let url = format!(
+                "https://bigquery.googleapis.com/bigquery/v2/projects/{}/queries",
+                project_id
+            );
+            let body = serde_json::json!({
+                "query": sql,
+                "useLegacySql": false,
+                "maxResults": 10000,
+                "timeoutMs": 30000,
+            });
+
+            let resp_text = match ureq::post(&url)
+                .set("Authorization", &format!("Bearer {}", token))
+                .set("Content-Type", "application/json")
+                .send_string(&body.to_string())
+            {
+                Ok(r) => match r.into_string() {
+                    Ok(s) => s,
+                    Err(e) => return Ok(err_vm(VMValue::Str(format!("BigQuery.query_raw: read body: {e}")))),
+                },
+                Err(ureq::Error::Status(code, resp)) => {
+                    let body = resp.into_string().unwrap_or_default();
+                    return Ok(err_vm(VMValue::Str(format!("BigQuery.query_raw: HTTP {code}: {body}"))));
+                }
+                Err(e) => return Ok(err_vm(VMValue::Str(format!("BigQuery.query_raw: {e}")))),
+            };
+
+            let json: serde_json::Value = match serde_json::from_str(&resp_text) {
+                Ok(j) => j,
+                Err(e) => return Ok(err_vm(VMValue::Str(format!("BigQuery.query_raw: parse: {e}")))),
+            };
+
+            if let Some(err) = json.get("error") {
+                return Ok(err_vm(VMValue::Str(format!("BigQuery.query_raw: {err}"))));
+            }
+
+            let rows   = json.get("rows").cloned().unwrap_or(serde_json::Value::Array(vec![]));
+            let schema = json.get("schema").cloned().unwrap_or(serde_json::Value::Null);
+            let result = serde_json::json!({"schema": schema, "rows": rows}).to_string();
+
+            Ok(ok_vm(VMValue::Str(result)))
+        }
+
+        "BigQuery.execute_raw" => {
+            // (project_id, dataset, sql, params_json) -> Result<Int, String>
+            // DML via Jobs API → poll → numDmlAffectedRows
+            let mut it = args.into_iter();
+            let project_id = vm_string(it.next().ok_or("BigQuery.execute_raw: missing project_id")?, "BigQuery.execute_raw")?;
+            let _dataset   = vm_string(it.next().ok_or("BigQuery.execute_raw: missing dataset")?,    "BigQuery.execute_raw")?;
+            let sql        = vm_string(it.next().ok_or("BigQuery.execute_raw: missing sql")?,        "BigQuery.execute_raw")?;
+            let _params    = vm_string(it.next().ok_or("BigQuery.execute_raw: missing params_json")?, "BigQuery.execute_raw")?;
+
+            let token = match gcp_get_access_token() {
+                Ok(t) => t,
+                Err(e) => return Ok(err_vm(VMValue::Str(e))),
+            };
+
+            // ジョブ作成
+            let jobs_url = format!(
+                "https://bigquery.googleapis.com/bigquery/v2/projects/{}/jobs",
+                project_id
+            );
+            let bq_location = std::env::var("BQ_LOCATION").unwrap_or_else(|_| "asia-northeast1".to_string());
+            let job_body = serde_json::json!({
+                "configuration": {
+                    "query": {
+                        "query": sql,
+                        "useLegacySql": false
+                    }
+                },
+                "jobReference": {
+                    "projectId": &project_id,
+                    "location": &bq_location
+                }
+            });
+
+            let resp_text = match ureq::post(&jobs_url)
+                .set("Authorization", &format!("Bearer {}", token))
+                .set("Content-Type", "application/json")
+                .send_string(&job_body.to_string())
+            {
+                Ok(r) => match r.into_string() {
+                    Ok(s) => s,
+                    Err(e) => return Ok(err_vm(VMValue::Str(format!("BigQuery.execute_raw: read body: {e}")))),
+                },
+                Err(ureq::Error::Status(code, resp)) => {
+                    let body = resp.into_string().unwrap_or_default();
+                    return Ok(err_vm(VMValue::Str(format!("BigQuery.execute_raw: HTTP {code}: {body}"))));
+                }
+                Err(e) => return Ok(err_vm(VMValue::Str(format!("BigQuery.execute_raw: {e}")))),
+            };
+
+            let json: serde_json::Value = match serde_json::from_str(&resp_text) {
+                Ok(j) => j,
+                Err(e) => return Ok(err_vm(VMValue::Str(format!("BigQuery.execute_raw: parse job: {e}")))),
+            };
+
+            if let Some(err) = json.get("error") {
+                return Ok(err_vm(VMValue::Str(format!("BigQuery.execute_raw: {err}"))));
+            }
+
+            let job_id = match json.pointer("/jobReference/jobId").and_then(|v| v.as_str()) {
+                Some(id) => id.to_string(),
+                None => return Ok(err_vm(VMValue::Str("BigQuery.execute_raw: missing jobId".into()))),
+            };
+            let job_location = json.pointer("/jobReference/location")
+                .or_else(|| json.pointer("/configuration/query/defaultDataset/datasetId"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("US")
+                .to_string();
+
+            // 完了まで polling（最大 60 回 × 1 秒 = 60 秒）
+            let get_url = format!(
+                "https://bigquery.googleapis.com/bigquery/v2/projects/{}/jobs/{}?location={}",
+                project_id, job_id, job_location
+            );
+            for _ in 0..60 {
+                std::thread::sleep(std::time::Duration::from_secs(1));
+                let poll_text = match ureq::get(&get_url)
+                    .set("Authorization", &format!("Bearer {}", token))
+                    .call()
+                {
+                    Ok(r) => r.into_string().unwrap_or_default(),
+                    Err(e) => return Ok(err_vm(VMValue::Str(format!("BigQuery.execute_raw: poll: {e}")))),
+                };
+                let poll: serde_json::Value = serde_json::from_str(&poll_text)
+                    .unwrap_or(serde_json::Value::Null);
+
+                if let Some(err) = poll.get("status").and_then(|s| s.get("errorResult")) {
+                    return Ok(err_vm(VMValue::Str(format!("BigQuery.execute_raw: job error: {err}"))));
+                }
+
+                let state = poll.pointer("/status/state").and_then(|v| v.as_str()).unwrap_or("");
+                if state == "DONE" {
+                    let affected = poll
+                        .pointer("/statistics/query/numDmlAffectedRows")
+                        .and_then(|v| v.as_str().and_then(|s| s.parse::<i64>().ok())
+                            .or_else(|| v.as_i64()))
+                        .unwrap_or(0);
+                    return Ok(ok_vm(VMValue::Int(affected)));
+                }
+            }
+
+            Ok(err_vm(VMValue::Str("BigQuery.execute_raw: job timed out".into())))
+        }
+
+        "BigQuery.infer_table_raw" => {
+            // (project_id, dataset, table) -> Result<String, String>
+            let mut it = args.into_iter();
+            let project_id = vm_string(it.next().ok_or("BigQuery.infer_table_raw: missing project_id")?, "BigQuery.infer_table_raw")?;
+            let dataset    = vm_string(it.next().ok_or("BigQuery.infer_table_raw: missing dataset")?,    "BigQuery.infer_table_raw")?;
+            let table      = vm_string(it.next().ok_or("BigQuery.infer_table_raw: missing table")?,      "BigQuery.infer_table_raw")?;
+
+            let token = match gcp_get_access_token() {
+                Ok(t) => t,
+                Err(e) => return Ok(err_vm(VMValue::Str(e))),
+            };
+
+            let sql = format!(
+                "SELECT column_name, data_type, is_nullable \
+                 FROM `{project_id}.{dataset}.INFORMATION_SCHEMA.COLUMNS` \
+                 WHERE table_name = '{table}' \
+                 ORDER BY ordinal_position"
+            );
+            let url = format!(
+                "https://bigquery.googleapis.com/bigquery/v2/projects/{}/queries",
+                project_id
+            );
+            let body = serde_json::json!({
+                "query": sql,
+                "useLegacySql": false,
+                "maxResults": 1000,
+                "timeoutMs": 30000,
+            });
+
+            let resp_text = match ureq::post(&url)
+                .set("Authorization", &format!("Bearer {}", token))
+                .set("Content-Type", "application/json")
+                .send_string(&body.to_string())
+            {
+                Ok(r) => match r.into_string() {
+                    Ok(s) => s,
+                    Err(e) => return Ok(err_vm(VMValue::Str(format!("BigQuery.infer_table_raw: read: {e}")))),
+                },
+                Err(ureq::Error::Status(code, resp)) => {
+                    let body = resp.into_string().unwrap_or_default();
+                    return Ok(err_vm(VMValue::Str(format!("BigQuery.infer_table_raw: HTTP {code}: {body}"))));
+                }
+                Err(e) => return Ok(err_vm(VMValue::Str(format!("BigQuery.infer_table_raw: {e}")))),
+            };
+
+            let json: serde_json::Value = match serde_json::from_str(&resp_text) {
+                Ok(j) => j,
+                Err(e) => return Ok(err_vm(VMValue::Str(format!("BigQuery.infer_table_raw: parse: {e}")))),
+            };
+
+            if let Some(err) = json.get("error") {
+                return Ok(err_vm(VMValue::Str(format!("BigQuery.infer_table_raw: {err}"))));
+            }
+
+            Ok(ok_vm(VMValue::Str(resp_text)))
         }
 
         // ── Azure Blob Storage primitives (v14.5.0) ───────────────────────

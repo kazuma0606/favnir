@@ -344,6 +344,23 @@ fn inject_snowflake_config(cfg: &crate::toml::SnowflakeTomlConfig) {
     }
 }
 
+fn inject_gcp_config(cfg: &crate::toml::GcpTomlConfig) {
+    use crate::toml::expand_env_vars;
+    let pairs: &[(&str, Option<&str>)] = &[
+        ("GCP_PROJECT_ID",                cfg.project_id.as_deref()),
+        ("GOOGLE_APPLICATION_CREDENTIALS", cfg.credentials_file.as_deref()),
+        ("BQ_DATASET",                    cfg.dataset.as_deref()),
+    ];
+    for (key, val) in pairs {
+        if let Some(v) = val {
+            if std::env::var(key).is_err() {
+                // SAFETY: called before VM starts; single-threaded at this point
+                unsafe { std::env::set_var(key, expand_env_vars(v)); }
+            }
+        }
+    }
+}
+
 fn inject_azure_config(cfg: &crate::toml::AzureTomlConfig) {
     use crate::toml::expand_env_vars;
     let pairs: &[(&str, Option<&str>)] = &[
@@ -925,6 +942,10 @@ fn run_with_favnir_pipeline_project(
     if let Some(az_cfg) = &toml.azure {
         inject_azure_config(az_cfg);
     }
+    // Inject fav.toml [gcp] settings as env vars (v15.2.0)
+    if let Some(gcp_cfg) = &toml.gcp {
+        inject_gcp_config(gcp_cfg);
+    }
 
     // 1. Collect and merge all project sources
     let merged =
@@ -1050,6 +1071,10 @@ fn load_run_config(file: Option<&str>) {
                 // Inject [azure] settings as env vars (v14.2.0)
                 if let Some(az_cfg) = toml.azure.as_ref() {
                     inject_azure_config(az_cfg);
+                }
+                // Inject [gcp] settings as env vars (v15.2.0)
+                if let Some(gcp_cfg) = toml.gcp.as_ref() {
+                    inject_gcp_config(gcp_cfg);
                 }
             }
         }
@@ -3438,6 +3463,7 @@ fn try_cmd_check_dir(dir: &Path) -> Result<(), usize> {
         lint: None,
         context: None,
         azure: None,
+        gcp: None,
     });
     let files = collect_fav_files_recursive(dir);
     let resolver = make_resolver(Some(toml), Some(root));
@@ -11785,6 +11811,7 @@ fn format_effects(effects: &[ast::Effect]) -> String {
             Http => "!Http".into(),
             Llm => "!Llm".into(),
             Snowflake => "!Snowflake".into(),
+            Gcp => "!Gcp".into(),
             Postgres => "!Postgres".into(),
             AzureDb => "!AzureDb".into(),
             AzureStorage => "!AzureStorage".into(),
@@ -11812,6 +11839,7 @@ fn effect_json_name(effect: &ast::Effect) -> String {
         ast::Effect::Http => "Http".into(),
         ast::Effect::Llm => "Llm".into(),
         ast::Effect::Snowflake => "Snowflake".into(),
+        ast::Effect::Gcp => "Gcp".into(),
         ast::Effect::Postgres => "Postgres".into(),
         ast::Effect::AzureDb => "AzureDb".into(),
         ast::Effect::AzureStorage => "AzureStorage".into(),
@@ -25330,6 +25358,69 @@ public fn load(conn_str: String) -> Result<Int, String> !AzureDb {
     }
 }
 
+// ── v152000_tests (v15.2.0) — GCP BigQuery Rune ──────────────────────────────
+#[cfg(test)]
+mod v152000_tests {
+    use std::fs;
+    use std::path::Path;
+
+    #[test]
+    fn version_is_15_2_0() {
+        let cargo = fs::read_to_string("Cargo.toml").unwrap();
+        assert!(
+            cargo.contains("version = \"15.2.0\""),
+            "Cargo.toml version should be 15.2.0, got: {}",
+            cargo.lines().find(|l| l.contains("version")).unwrap_or("")
+        );
+    }
+
+    #[test]
+    fn bigquery_query_raw_primitive_exists() {
+        let vm = fs::read_to_string("src/backend/vm.rs").unwrap();
+        assert!(
+            vm.contains("BigQuery.query_raw"),
+            "vm.rs must contain BigQuery.query_raw primitive"
+        );
+    }
+
+    #[test]
+    fn gcp_effect_in_ast() {
+        let ast = fs::read_to_string("src/ast.rs").unwrap();
+        assert!(
+            ast.contains("Gcp"),
+            "ast.rs must contain Effect::Gcp variant"
+        );
+    }
+
+    #[test]
+    fn bigquery_rune_exists() {
+        assert!(
+            Path::new("../runes/bigquery/bigquery.fav").exists(),
+            "runes/bigquery/bigquery.fav must exist"
+        );
+    }
+
+    #[test]
+    fn bigquery_e2e_demo_structure() {
+        assert!(
+            Path::new("../infra/e2e-demo/bigquery/src/demo.fav").exists(),
+            "infra/e2e-demo/bigquery/src/demo.fav must exist"
+        );
+        assert!(
+            Path::new("../infra/e2e-demo/bigquery/terraform/gcp/main.tf").exists(),
+            "infra/e2e-demo/bigquery/terraform/gcp/main.tf must exist"
+        );
+        assert!(
+            Path::new("../infra/e2e-demo/bigquery/scripts/run.sh").exists(),
+            "infra/e2e-demo/bigquery/scripts/run.sh must exist"
+        );
+        assert!(
+            Path::new("../infra/e2e-demo/bigquery/README.md").exists(),
+            "infra/e2e-demo/bigquery/README.md must exist"
+        );
+    }
+}
+
 // ── v15150_tests (v15.1.5) — CrossCloud KMS 非対称署名 + リグレッション ──────────
 #[cfg(test)]
 mod v15150_tests {
@@ -25337,7 +25428,7 @@ mod v15150_tests {
 
     #[test]
     fn version_is_15_1_5() {
-        assert_eq!(env!("CARGO_PKG_VERSION"), "15.1.5");
+        assert_eq!(env!("CARGO_PKG_VERSION"), "15.2.0");
     }
 
     #[test]

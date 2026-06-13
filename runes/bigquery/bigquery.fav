@@ -1,0 +1,31 @@
+// runes/bigquery/bigquery.fav — BigQuery Rune (v15.2.0)
+//
+// 使い方:
+//   import rune "bigquery"
+//
+//   fn my_query() -> Result<List<Row>, String> !Gcp {
+//     chain raw <- BigQuery.query("my-project", "my_dataset", "SELECT * FROM users")
+//     Json.decode_list<Row>(raw)
+//   }
+//
+// 環境変数:
+//   GOOGLE_APPLICATION_CREDENTIALS — サービスアカウント JSON キーファイルのパス
+//   GCP_PROJECT_ID                 — デフォルトプロジェクト ID（query/execute の省略可能引数に相当）
+//   BQ_DATASET                     — デフォルトデータセット名
+
+// query_raw の JSON レスポンスから rows フィールドだけを取り出すヘルパー
+fn extract_rows(raw_json: String) -> Result<String, String> {
+  chain parsed <- Json.parse(raw_json)
+  bind rows <- Json.get_field(parsed, "rows")
+  Result.ok(Json.stringify(rows))
+}
+
+// SELECT クエリを実行して JSON 文字列（rows 配列）を返す
+fn query(project_id: String, dataset: String, sql: String) -> Result<String, String> !Gcp {
+  BigQuery.query_raw(project_id, dataset, sql, "[]")
+}
+
+// DML（INSERT / UPDATE / DELETE）を実行して影響行数を返す
+fn execute(project_id: String, dataset: String, sql: String) -> Result<Int, String> !Gcp {
+  BigQuery.execute_raw(project_id, dataset, sql, "[]")
+}

@@ -1418,6 +1418,7 @@ impl Checker {
             "Grpc",
             "Llm",
             "Snowflake",
+            "BigQuery",
             "Postgres",
             "AzurePostgres",
             "AzureBlob",
@@ -2271,6 +2272,7 @@ impl Checker {
             "Http",
             "Llm",
             "Snowflake",
+            "Gcp",
             "Postgres",
             "AzureDb",
             "AzureStorage",
@@ -5016,6 +5018,16 @@ impl Checker {
         }
     }
 
+    fn require_gcp_effect(&mut self, span: &Span) {
+        if !self.has_effect(|e| matches!(e, Effect::Gcp)) {
+            self.type_error(
+                "E0318",
+                "BigQuery.* call requires `!Gcp` effect on enclosing fn/stage",
+                span,
+            );
+        }
+    }
+
     fn require_postgres_effect(&mut self, span: &Span) {
         if !self.has_effect(|e| matches!(e, Effect::Postgres)) {
             self.type_error(
@@ -5849,6 +5861,29 @@ impl Checker {
             }
             ("Snowflake", "infer_table_raw") => {
                 self.require_snowflake_effect(span);
+                Some(Type::Result(
+                    Box::new(Type::String),
+                    Box::new(Type::String),
+                ))
+            }
+
+            // BigQuery (v15.2.0) — require !Gcp effect
+            ("BigQuery", "query_raw") => {
+                self.require_gcp_effect(span);
+                Some(Type::Result(
+                    Box::new(Type::String),
+                    Box::new(Type::String),
+                ))
+            }
+            ("BigQuery", "execute_raw") => {
+                self.require_gcp_effect(span);
+                Some(Type::Result(
+                    Box::new(Type::Int),
+                    Box::new(Type::String),
+                ))
+            }
+            ("BigQuery", "infer_table_raw") => {
+                self.require_gcp_effect(span);
                 Some(Type::Result(
                     Box::new(Type::String),
                     Box::new(Type::String),
@@ -7522,6 +7557,7 @@ abstract seq Pipeline {
             lint: None,
             context: None,
             azure: None,
+            gcp: None,
         };
         let resolver = Arc::new(Mutex::new(Resolver::new(Some(toml), Some(root))));
         (resolver, dir)
@@ -7611,6 +7647,7 @@ abstract seq Pipeline {
             lint: None,
             context: None,
             azure: None,
+            gcp: None,
         };
         let mut resolver = Resolver::new(Some(toml), Some(root));
         // Simulate a mid-load state: "cycle" is already in the loading set

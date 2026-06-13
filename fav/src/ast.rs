@@ -28,6 +28,7 @@ pub enum Effect {
     Http,
     Llm,
     Snowflake,
+    Gcp,          // v15.2.0
     Postgres,
     AzureDb,
     AzureStorage,  // Azure Blob Storage (v14.3.0 infra, v14.5.0 primitives)

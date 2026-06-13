@@ -42,3 +42,13 @@ output "verifier_ecr_url" {
   description = "ECR repository URL for the Lambda verifier container image"
   value       = aws_ecr_repository.verifier.repository_url
 }
+
+output "kms_key_arn" {
+  description = "KMS key ARN for CrossCloud ECDSA P-256 signing (v15.1.5)"
+  value       = aws_kms_key.crosscloud_signer.arn
+}
+
+output "kms_key_alias" {
+  description = "KMS key alias for CrossCloud ECDSA P-256 signing (v15.1.5)"
+  value       = aws_kms_alias.crosscloud_signer.name
+}

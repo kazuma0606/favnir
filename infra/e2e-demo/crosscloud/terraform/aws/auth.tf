@@ -133,6 +133,11 @@ resource "aws_iam_role_policy" "lambda_verifier_policy" {
           aws_iam_role.ecs_execution.arn,
           aws_iam_role.ecs_task.arn,
         ]
+      },
+      {
+        Effect   = "Allow"
+        Action   = ["kms:GetPublicKey"]
+        Resource = [aws_kms_key.crosscloud_signer.arn]
       }
     ]
   })
@@ -218,4 +223,22 @@ resource "aws_lambda_permission" "apigw" {
   function_name = aws_lambda_function.verifier.function_name
   principal     = "apigateway.amazonaws.com"
   source_arn    = "${aws_apigatewayv2_api.crosscloud.execution_arn}/*/*"
+}
+
+# ── KMS 非対称署名キー（v15.1.5: ECDSA P-256）────────────────────────────────
+
+resource "aws_kms_key" "crosscloud_signer" {
+  description              = "CrossCloud request signing key (ECDSA P-256)"
+  key_usage                = "SIGN_VERIFY"
+  customer_master_key_spec = "ECC_NIST_P256"
+  deletion_window_in_days  = 7
+
+  tags = {
+    Project = "favnir-crosscloud"
+  }
+}
+
+resource "aws_kms_alias" "crosscloud_signer" {
+  name          = "alias/crosscloud-signer"
+  target_key_id = aws_kms_key.crosscloud_signer.key_id
 }

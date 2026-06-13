@@ -1,0 +1,53 @@
+#!/bin/sh
+set -euo pipefail
+
+RUNTIME_API="http://${AWS_LAMBDA_RUNTIME_API}/2018-06-01/runtime"
+
+while true; do
+  RESP_HEADERS=$(mktemp)
+  EVENT=$(curl -sS -D "$RESP_HEADERS" "${RUNTIME_API}/invocation/next")
+  REQUEST_ID=$(awk -v IGNORECASE=1 \
+    '/lambda-runtime-aws-request-id/{gsub(/\r/,"",$2); print $2; exit}' \
+    "$RESP_HEADERS")
+  rm -f "$RESP_HEADERS"
+
+  export VERIFY_REQUEST_ID="${REQUEST_ID}"
+  export VERIFY_METHOD=$(echo "$EVENT"     | jq -r '.requestContext.http.method // "POST"')
+  export VERIFY_PATH=$(echo "$EVENT"       | jq -r '.rawPath // "/migrate"')
+  export VERIFY_TIMESTAMP=$(echo "$EVENT"  | jq -r '.headers["x-timestamp"] // ""')
+  export VERIFY_NONCE=$(echo "$EVENT"      | jq -r '.headers["x-nonce"] // ""')
+  export VERIFY_SIGNATURE=$(echo "$EVENT"  | jq -r '.headers["x-signature"] // ""')
+  export VERIFY_KMS_KEY_ID=$(echo "$EVENT" | jq -r '.headers["x-kms-key-id"] // ""')
+
+  RAW_BODY=$(echo "$EVENT" | jq -r '.body // ""')
+  IS_B64=$(echo "$EVENT"   | jq -r '.isBase64Encoded // false')
+  if [ "$IS_B64" = "true" ]; then
+    export VERIFY_BODY=$(printf '%s' "$RAW_BODY" | base64 -d)
+  else
+    export VERIFY_BODY="$RAW_BODY"
+  fi
+
+  export VERIFY_NONCE_TTL=$(( $(date +%s) + 300 ))
+
+  EXIT_CODE=0
+  OUTPUT=$(fav run --legacy /var/task/verifier_v2.fav 2>&1) || EXIT_CODE=$?
+
+  if [ "$EXIT_CODE" -eq 0 ]; then
+    PAYLOAD='{"statusCode":200,"headers":{"Content-Type":"application/json"},"body":"{\"status\":\"accepted\"}"}'
+  else
+    if echo "$OUTPUT" | grep -q "invalid_signature\|ecdsa_verify_failed"; then
+      STATUS=401; MSG="invalid_signature"
+    elif echo "$OUTPUT" | grep -q "nonce_already_used"; then
+      STATUS=409; MSG="nonce_replay_detected"
+    else
+      STATUS=500
+      MSG=$(printf '%s' "$OUTPUT" | tr -d '\033\r' | sed -n '3p' | cut -c1-200)
+    fi
+    PAYLOAD="{\"statusCode\":${STATUS},\"headers\":{\"Content-Type\":\"application/json\"},\"body\":\"{\\\"error\\\":\\\"${MSG}\\\"}\"}";
+  fi
+
+  curl -sS -X POST \
+    "${RUNTIME_API}/invocation/${REQUEST_ID}/response" \
+    -H "Content-Type: application/json" \
+    -d "$PAYLOAD"
+done

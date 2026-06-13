@@ -11607,6 +11607,47 @@ fn vm_call_builtin(
             Ok(VMValue::Str(hex))
         }
 
+        // ── Crypto.ecdsa_verify_raw (v15.1.5) ───────────────────────────────
+        // Args: (pub_key_pem: String, message: String, sig_der_b64: String)
+        // Returns: Result<Unit, String>  (!Auth effect)
+        "Crypto.ecdsa_verify_raw" => {
+            use base64::Engine;
+            use p256::ecdsa::{Signature, VerifyingKey};
+            use p256::ecdsa::signature::Verifier as _;
+            use p256::pkcs8::DecodePublicKey as _;
+
+            let mut it = args.into_iter();
+            let pem = vm_string(
+                it.next().ok_or("Crypto.ecdsa_verify_raw: missing pub_key_pem")?,
+                "Crypto.ecdsa_verify_raw",
+            )?;
+            let message = vm_string(
+                it.next().ok_or("Crypto.ecdsa_verify_raw: missing message")?,
+                "Crypto.ecdsa_verify_raw",
+            )?;
+            let sig_b64 = vm_string(
+                it.next().ok_or("Crypto.ecdsa_verify_raw: missing sig_der_b64")?,
+                "Crypto.ecdsa_verify_raw",
+            )?;
+
+            let sig_bytes = BASE64.decode(sig_b64.trim())
+                .map_err(|e| format!("Crypto.ecdsa_verify_raw: base64 decode: {e}"))?;
+
+            let verifying_key = VerifyingKey::from_public_key_pem(pem.trim())
+                .map_err(|e| format!("Crypto.ecdsa_verify_raw: parse PEM: {e}"))?;
+
+            let sig = Signature::from_der(&sig_bytes)
+                .map_err(|e| format!("Crypto.ecdsa_verify_raw: parse DER sig: {e}"))?;
+
+            match verifying_key.verify(message.as_bytes(), &sig) {
+                Ok(()) => Ok(VMValue::Variant("ok".into(), Some(Box::new(VMValue::Unit)))),
+                Err(_) => Ok(VMValue::Variant(
+                    "err".into(),
+                    Some(Box::new(VMValue::Str("ecdsa_verify_failed".into()))),
+                )),
+            }
+        }
+
         // ── Auth.* (v4.5.0) — auth config helpers ──────────────────────────
         "Auth.get_mode_raw" => Ok(VMValue::Str(AUTH_MODE.with(|m| m.borrow().clone()))),
 
@@ -13228,6 +13269,60 @@ fn vm_call_builtin(
                     Err(e) => err_vm(VMValue::Str(e)),
                 },
             )
+        }
+
+        // ── AWS KMS GetPublicKey (v15.1.5) ────────────────────────────────
+        // AWS.kms_get_public_key_raw(region: String, key_id: String) -> Result<String, String>
+        // Calls KMS GetPublicKey, converts DER → PEM and returns the PEM string.
+        "AWS.kms_get_public_key_raw" => {
+            use base64::Engine;
+            let mut it = args.into_iter();
+            let region = vm_string(
+                it.next().ok_or("kms_get_public_key_raw: missing region")?,
+                "AWS.kms_get_public_key_raw",
+            )?;
+            let key_id = vm_string(
+                it.next().ok_or("kms_get_public_key_raw: missing key_id")?,
+                "AWS.kms_get_public_key_raw",
+            )?;
+
+            let mut config = get_aws_config();
+            // Override region with the explicitly passed region argument
+            config.region = region.clone();
+
+            let url = if let Some(ep) = &config.endpoint_url {
+                format!("{}/", ep.trim_end_matches('/'))
+            } else {
+                format!("https://kms.{}.amazonaws.com/", region)
+            };
+
+            let key_id_esc = key_id.replace('"', "\\\"");
+            let body = format!(r#"{{"KeyId":"{}"}}"#, key_id_esc);
+
+            match aws_post(
+                &config,
+                "kms",
+                &url,
+                &body,
+                "application/x-amz-json-1.1",
+                Some("TrentService.GetPublicKey"),
+            ) {
+                Ok(resp) => {
+                    let parsed: serde_json::Value = serde_json::from_str(&resp)
+                        .map_err(|e| format!("kms_get_public_key_raw: parse JSON: {e}"))?;
+                    let der_b64 = parsed
+                        .get("PublicKey")
+                        .and_then(|v| v.as_str())
+                        .ok_or_else(|| format!("kms_get_public_key_raw: missing PublicKey in response: {resp}"))?;
+                    // KMS returns base64-encoded DER; wrap in PEM
+                    let pem = format!(
+                        "-----BEGIN PUBLIC KEY-----\n{}\n-----END PUBLIC KEY-----\n",
+                        der_b64.trim()
+                    );
+                    Ok(ok_vm(VMValue::Str(pem)))
+                }
+                Err(e) => Ok(err_vm(VMValue::Str(e))),
+            }
         }
 
         // ── Azure Blob Storage primitives (v14.5.0) ───────────────────────

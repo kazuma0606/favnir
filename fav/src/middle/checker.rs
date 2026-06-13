@@ -6195,6 +6195,11 @@ impl Checker {
                 self.require_auth_effect(span);
                 Some(Type::String)
             }
+            // Crypto.ecdsa_verify_raw (v15.1.5) — ECDSA P-256 signature verification
+            ("Crypto", "ecdsa_verify_raw") => {
+                self.require_auth_effect(span);
+                Some(Type::Result(Box::new(Type::Unit), Box::new(Type::String)))
+            }
             ("Crypto", _) => {
                 self.require_auth_effect(span);
                 Some(Type::Unknown)
@@ -6308,6 +6313,11 @@ impl Checker {
                     Box::new(Type::String),
                     Box::new(Type::String),
                 ))
+            }
+            // AWS.kms_get_public_key_raw (v15.1.5) — KMS GetPublicKey → PEM string
+            ("AWS", "kms_get_public_key_raw") => {
+                self.require_aws_effect(span);
+                Some(Type::Result(Box::new(Type::String), Box::new(Type::String)))
             }
             ("AWS", _) => {
                 self.require_aws_effect(span);

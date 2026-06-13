@@ -1,6 +1,6 @@
 [package]
 name = "fav"
-version = "15.1.0"
+version = "15.1.5"
 edition = "2024"
 
 [[bin]]
@@ -57,6 +57,7 @@ notify = "6"
 jsonwebtoken = "9"
 hmac = "0.12"
 sha2 = "0.10"
+p256 = { version = "0.13", features = ["ecdsa", "pem"] }
 zip = { version = "0.6", default-features = false, features = ["deflate"] }
 
 [features]

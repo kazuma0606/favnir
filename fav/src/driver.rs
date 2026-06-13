@@ -1063,6 +1063,12 @@ fn load_run_config(file: Option<&str>) {
 ///   - `--legacy` is set, OR
 ///   - the file is part of a fav.toml project, OR
 ///   - the file uses `import rune` declarations.
+/// Returns true if the Favnir value represents a `Result.err(...)` variant.
+/// Used in cmd_run (--legacy) to detect failed main results and exit 1.
+pub(crate) fn is_result_err_value(v: &Value) -> bool {
+    matches!(v, Value::Variant(tag, _) if tag == "err")
+}
+
 pub fn cmd_run(file: Option<&str>, db_url: Option<&str>, legacy: bool, verbose: bool, trace: bool) {
     let verbose_level = load_run_config_verbose(file, verbose, trace);
 
@@ -25323,12 +25329,87 @@ public fn load(conn_str: String) -> Result<Int, String> !AzureDb {
     }
 }
 
+// ── v15150_tests (v15.1.5) — CrossCloud KMS 非対称署名 + リグレッション ──────────
+#[cfg(test)]
+mod v15150_tests {
+    use super::{is_result_err_value, build_artifact_legacy, exec_artifact_main_with_source};
+
+    #[test]
+    fn version_is_15_1_5() {
+        assert_eq!(env!("CARGO_PKG_VERSION"), "15.1.5");
+    }
+
+    #[test]
+    fn legacy_run_result_err_triggers_exit_path() {
+        // Result.err を返す main を実行すると exec_artifact_main_with_source は
+        // Ok(Variant("err", ...)) を返す → is_result_err_value が true を返すことを確認
+        let src = r#"public fn main(ctx: AppCtx) -> Result<Unit, String> { Result.err("test_error") }"#;
+        let prog = crate::frontend::parser::Parser::parse_str(src, "t.fav")
+            .expect("should parse");
+        let artifact = build_artifact_legacy(&prog);
+        let result = exec_artifact_main_with_source(&artifact, None, None)
+            .expect("exec should not Rust-error");
+        assert!(
+            is_result_err_value(&result),
+            "main returning Result.err should produce Variant(\"err\", ...), got: {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn legacy_run_result_ok_does_not_trigger_exit_path() {
+        // Result.ok を返す main は is_result_err_value が false を返すことを確認
+        let src = r#"public fn main(ctx: AppCtx) -> Result<Unit, String> { Result.ok(()) }"#;
+        let prog = crate::frontend::parser::Parser::parse_str(src, "t.fav")
+            .expect("should parse");
+        let artifact = build_artifact_legacy(&prog);
+        let result = exec_artifact_main_with_source(&artifact, None, None)
+            .expect("exec should not Rust-error");
+        assert!(
+            !is_result_err_value(&result),
+            "main returning Result.ok should not trigger exit path, got: {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn crosscloud_kms_terraform_has_ecc_key() {
+        let manifest = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let base = manifest.parent().unwrap();
+        let auth_tf = std::fs::read_to_string(
+            base.join("infra/e2e-demo/crosscloud/terraform/aws/auth.tf"),
+        )
+        .expect("auth.tf should exist");
+        assert!(
+            auth_tf.contains("ECC_NIST_P256"),
+            "auth.tf should contain KMS ECC_NIST_P256 key"
+        );
+    }
+
+    #[test]
+    fn crosscloud_verifier_v2_exists() {
+        let manifest = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let base = manifest.parent().unwrap();
+        let path = base.join("infra/e2e-demo/crosscloud/lambda/verifier_v2/verifier_v2.fav");
+        assert!(path.exists(), "verifier_v2.fav should exist at {:?}", path);
+    }
+
+    #[test]
+    fn crosscloud_auth_comparison_doc_exists() {
+        let manifest = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let base = manifest.parent().unwrap();
+        let path = base.join("infra/e2e-demo/crosscloud/docs/auth-comparison.md");
+        assert!(path.exists(), "auth-comparison.md should exist at {:?}", path);
+    }
+}
+
 // ── v151000_tests (v15.1.0) — CrossCloud 認証層 (HMAC + Cognito + ECS Pattern B) ──
 #[cfg(test)]
 mod v151000_tests {
     #[test]
     fn version_is_15_1_0() {
-        assert_eq!(env!("CARGO_PKG_VERSION"), "15.1.0");
+        assert!(env!("CARGO_PKG_VERSION") >= "15.1.0",
+            "expected >= 15.1.0, got {}", env!("CARGO_PKG_VERSION"));
     }
 
     #[test]

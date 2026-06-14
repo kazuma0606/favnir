@@ -351,9 +351,35 @@ pub fn lower_expr(expr: &ast::Expr) -> Value {
         ast::Expr::Question(inner, _) => v1("EQuestion", lower_expr(inner)),
         // v13.3.0: collect { body } → ECollect(body); infer_hm returns "Unknown"
         ast::Expr::Collect(block, _) => v1("ECollect", lower_block(block)),
-        // Fallbacks for TypeApply, FString, AssertMatches, EmitExpr
+        ast::Expr::FString(parts, _) => lower_fstring(parts),
+        // Fallbacks for TypeApply, AssertMatches, EmitExpr
         _ => v1("EVar", sv("_unsupported_")),
     }
+}
+
+fn lower_fstring_part(part: &ast::FStringPart) -> Value {
+    match part {
+        ast::FStringPart::Lit(s) => v1("ELit", v1("LStr", sv(s))),
+        ast::FStringPart::Expr(expr) => lower_expr(expr),
+    }
+}
+
+fn lower_fstring(parts: &[ast::FStringPart]) -> Value {
+    if parts.is_empty() {
+        return v1("ELit", v1("LStr", sv("")));
+    }
+    let lowered: Vec<Value> = parts.iter().map(lower_fstring_part).collect();
+    lowered
+        .into_iter()
+        .reduce(|acc, next| {
+            v3(
+                "ECall",
+                sv("String"),
+                sv("concat"),
+                v2("EArgList", acc, v2("EArgList", next, v0("EArgNil"))),
+            )
+        })
+        .unwrap()
 }
 
 // ── Param ─────────────────────────────────────────────────────────────────────

@@ -219,6 +219,10 @@ impl Lexer {
         self.source.get(self.pos + 1).copied()
     }
 
+    fn peek3(&self) -> Option<char> {
+        self.source.get(self.pos + 2).copied()
+    }
+
     fn advance(&mut self) -> char {
         let c = self.source[self.pos];
         self.pos += 1;
@@ -267,6 +271,18 @@ impl Lexer {
         let c = self.peek().unwrap();
 
         let kind = match c {
+            'f' if self.peek2() == Some('"') && self.peek3() == Some('"') => {
+                self.advance(); // 'f'
+                self.advance(); // '"' (1st)
+                self.advance(); // '"' (2nd)
+                self.advance(); // '"' (3rd)
+                TokenKind::FStringRaw(self.lex_fstring_triple(sp, sl, sc)?)
+            }
+            'f' if self.peek2() == Some('"') && self.peek3() != Some('"') => {
+                self.advance(); // 'f'
+                self.advance(); // '"'
+                TokenKind::FStringRaw(self.lex_fstring_raw(sp, sl, sc)?)
+            }
             '$' if self.peek2() == Some('"') => {
                 self.advance();
                 self.advance();
@@ -641,6 +657,49 @@ impl Lexer {
             "unterminated string interpolation literal",
             self.span_from(start_pos, start_line, start_col),
         ))
+    }
+
+    fn lex_fstring_triple(
+        &mut self,
+        start_pos: usize,
+        start_line: u32,
+        start_col: u32,
+    ) -> Result<String, LexError> {
+        let mut out = String::new();
+        let mut depth = 0usize;
+        loop {
+            match self.peek() {
+                None => {
+                    return Err(LexError::new(
+                        "unterminated triple-quote string interpolation",
+                        self.span_from(start_pos, start_line, start_col),
+                    ));
+                }
+                Some('"') if depth == 0 && self.peek2() == Some('"') && self.peek3() == Some('"') => {
+                    self.advance(); // '"'
+                    self.advance(); // '"'
+                    self.advance(); // '"'
+                    return Ok(out);
+                }
+                Some('\\') => {
+                    out.push(self.advance());
+                    if self.peek().is_some() {
+                        out.push(self.advance());
+                    }
+                }
+                Some('{') => {
+                    depth += 1;
+                    out.push(self.advance());
+                }
+                Some('}') => {
+                    depth = depth.saturating_sub(1);
+                    out.push(self.advance());
+                }
+                Some(_) => {
+                    out.push(self.advance());
+                }
+            }
+        }
     }
 }
 

@@ -222,6 +222,14 @@ fn get_help_text(code: &str) -> &'static [&'static str] {
             "WriteCtx provides: db(DbWrite), storage, io, env",
             "MigrateCtx provides: db_read, db_write, io, env",
         ],
+        "E0253" => &[
+            "f-string 内で別の f-string を使うことはできません",
+            "中間変数に束縛してください: `bind s <- f\"...\"`",
+        ],
+        "E0254" | "E0322" => &[
+            "f-string には String / Int / Float / Bool のみ使用可能です",
+            "他の型は事前に文字列化してください: `bind s <- my_val.to_string()`",
+        ],
         _ => &[],
     }
 }
@@ -26316,5 +26324,75 @@ mod v161000_tests {
             "error output must contain URL, got: {}",
             output
         );
+    }
+}
+
+// ── v162000_tests (v16.2.0) — 文字列補間（f-string） ─────────────────────────
+#[cfg(test)]
+mod v162000_tests {
+    use super::{build_artifact, exec_artifact_main};
+    use crate::frontend::parser::Parser;
+
+    fn run_source(src: &str) -> String {
+        let program = Parser::parse_str(src, "fstring_test.fav").expect("parse");
+        let artifact = build_artifact(&program);
+        match exec_artifact_main(&artifact, None).expect("exec") {
+            crate::value::Value::Str(s) => s,
+            other => panic!("unexpected result: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn version_is_16_2_0() {
+        let cargo = std::fs::read_to_string("Cargo.toml").unwrap();
+        assert!(
+            cargo.contains("version = \"16.2.0\""),
+            "Cargo.toml version should be 16.2.0"
+        );
+    }
+
+    #[test]
+    fn fstring_basic_interpolation() {
+        let result = run_source(r#"
+public fn main() -> String {
+    bind name <- "Alice"
+    f"Hello, {name}!"
+}
+"#);
+        assert_eq!(result, "Hello, Alice!");
+    }
+
+    #[test]
+    fn fstring_int_interpolation() {
+        let result = run_source(r#"
+public fn main() -> String {
+    bind age <- 42
+    f"Age: {age}"
+}
+"#);
+        assert_eq!(result, "Age: 42");
+    }
+
+    #[test]
+    fn fstring_expr_interpolation() {
+        let result = run_source(r#"
+public fn main() -> String {
+    bind x <- 6 * 7
+    f"result={x}"
+}
+"#);
+        assert_eq!(result, "result=42");
+    }
+
+    #[test]
+    fn fstring_triple_quote() {
+        let result = run_source(r#"
+public fn main() -> String {
+    bind name <- "Bob"
+    bind score <- 99
+    f"""Name: {name}, Score: {score}"""
+}
+"#);
+        assert_eq!(result, "Name: Bob, Score: 99");
     }
 }

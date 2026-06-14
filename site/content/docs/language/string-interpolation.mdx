@@ -1,0 +1,105 @@
+---
+title: "String Interpolation (f-string)"
+description: f"..." 構文で動的な文字列を簡潔に組み立てる
+---
+
+# String Interpolation
+
+`f"..."` 構文を使うと、文字列の中に式を直接埋め込めます。
+`String.concat` の連鎖を大幅に短縮できます。
+
+## 基本構文
+
+```fav
+public fn greet(name: String, count: Int) -> String {
+  f"Hello, {name}! You have {count} items."
+}
+```
+
+`{...}` の中には任意の式を書けます。
+
+## triple-quote（複数行）
+
+`f"""..."""` を使うと改行を含む文字列も書けます。
+
+```fav
+public fn report(name: String, score: Int) -> String {
+  f"""Name: {name}, Score: {score}"""
+}
+```
+
+## 埋め込める型
+
+| 型 | 例 |
+|---|---|
+| `String` | `f"hello, {name}"` |
+| `Int` | `f"count: {count}"` |
+| `Float` | `f"ratio: {ratio}"` |
+| `Bool` | `f"done: {done}"` |
+
+これ以外の型を埋め込もうとすると **E0322** が発生します。
+
+## Before / After 比較
+
+**Before（String.concat 連鎖）:**
+
+```fav
+fn greet(name: String, count: Int) -> String {
+  String.concat("Hello, ", String.concat(name, String.concat("! You have ", String.concat(Int.to_string(count), " items."))))
+}
+```
+
+**After（f-string）:**
+
+```fav
+fn greet(name: String, count: Int) -> String {
+  f"Hello, {name}! You have {count} items."
+}
+```
+
+## よくある間違い
+
+### Display 未実装の型を埋め込む（E0322）
+
+```fav
+type Row { name: String values: List<Int> }
+
+public fn show(row: Row) -> String {
+  f"row: {row}"  // E0322: Display not implemented for Row
+}
+```
+
+**修正**: フィールドを個別に埋め込む。
+
+```fav
+public fn show(row: Row) -> String {
+  f"name: {row.name}"
+}
+```
+
+### f-string のネスト（E0253）
+
+```fav
+public fn bad(name: String) -> String {
+  f"outer {f"inner {name}"}"  // E0253: nested f-string
+}
+```
+
+**修正**: 中間変数に束縛する。
+
+```fav
+public fn good(name: String) -> String {
+  bind inner <- f"inner {name}"
+  f"outer {inner}"
+}
+```
+
+## 後方互換性
+
+`$"..."` 構文（旧形式）は引き続き動作します。
+新しいコードでは `f"..."` を推奨します。
+
+## 関連エラー
+
+- [E0253](/docs/errors/E0253): f-string のネスト禁止
+- [E0322](/docs/errors/E0322): Display 未実装の型

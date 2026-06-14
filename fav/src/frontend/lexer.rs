@@ -115,6 +115,7 @@ pub enum TokenKind {
     LtEq,      // <=
     GtEq,      // >=
     Semicolon, // ;
+    DotDotDot, // ... (record spread, v16.3.0)
 
     // Literals
     Int(i64),
@@ -329,6 +330,12 @@ impl Lexer {
             ',' => {
                 self.advance();
                 TokenKind::Comma
+            }
+            '.' if self.peek2() == Some('.') && self.peek3() == Some('.') => {
+                self.advance(); // '.'
+                self.advance(); // '.'
+                self.advance(); // '.'
+                TokenKind::DotDotDot
             }
             '.' => {
                 self.advance();

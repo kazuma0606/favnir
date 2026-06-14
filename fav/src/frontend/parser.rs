@@ -2204,8 +2204,16 @@ impl Parser {
                 Err(ParseError::new("unexpected '|>'", start))
             }
 
-            // block (3-17)
-            TokenKind::LBrace => Ok(Expr::Block(Box::new(self.parse_block()?))),
+            // block (3-17) or record spread { ...base, key: val } (v16.3.0)
+            TokenKind::LBrace => {
+                if self.peek2() == Some(&TokenKind::DotDotDot) {
+                    let start_spread = self.peek_span().clone();
+                    self.advance(); // consume '{'
+                    self.parse_record_spread(start_spread)
+                } else {
+                    Ok(Expr::Block(Box::new(self.parse_block()?)))
+                }
+            }
 
             // match (3-18, 3-19)
             TokenKind::Match => self.parse_match_expr(),
@@ -2234,7 +2242,27 @@ impl Parser {
         ))
     }
 
-    fn parse_record_field_patterns(&mut self) -> Result<Vec<PatternField>, ParseError> {
+    /// Parse `{ ...base, key: val, ... }` — record spread (v16.3.0).
+    /// Called after consuming the opening `{`.
+    fn parse_record_spread(&mut self, start: Span) -> Result<Expr, ParseError> {
+        self.expect(&TokenKind::DotDotDot)?;
+        let base = self.parse_expr()?;
+        let mut updates: Vec<(String, Expr)> = Vec::new();
+        while self.peek() == &TokenKind::Comma {
+            self.advance(); // consume ','
+            if self.peek() == &TokenKind::RBrace {
+                break; // trailing comma
+            }
+            let (fname, _) = self.expect_ident()?;
+            self.expect(&TokenKind::Colon)?;
+            let val = self.parse_expr()?;
+            updates.push((fname, val));
+        }
+        self.expect(&TokenKind::RBrace)?;
+        Ok(Expr::RecordSpread(Box::new(base), updates, self.span_from(&start)))
+    }
+
+        fn parse_record_field_patterns(&mut self) -> Result<Vec<PatternField>, ParseError> {
         self.expect(&TokenKind::LBrace)?;
         let mut fields = Vec::new();
         while self.peek() != &TokenKind::RBrace {

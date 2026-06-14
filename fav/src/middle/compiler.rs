@@ -1483,6 +1483,12 @@ fn collect_free_vars_expr(expr: &Expr, bound: &mut HashSet<String>, free: &mut H
             }
         }
         Expr::AssertMatches(expr, _, _) => collect_free_vars_expr(expr, bound, free),
+        Expr::RecordSpread(base, updates, _) => {
+            collect_free_vars_expr(base, bound, free);
+            for (_, v) in updates {
+                collect_free_vars_expr(v, bound, free);
+            }
+        }
         Expr::EmitExpr(inner, _) => collect_free_vars_expr(inner, bound, free),
         Expr::Question(inner, _) => collect_free_vars_expr(inner, bound, free),
     }
@@ -1751,6 +1757,14 @@ pub fn compile_expr(expr: &Expr, ctx: &mut CompileCtx) -> IRExpr {
                 .collect(),
             Type::Unknown,
         ),
+        Expr::RecordSpread(base, updates, _) => {
+            let base_ir = compile_expr(base, ctx);
+            let updates_ir: Vec<(String, IRExpr)> = updates
+                .iter()
+                .map(|(k, v)| (k.clone(), compile_expr(v, ctx)))
+                .collect();
+            IRExpr::RecordSpread(Box::new(base_ir), updates_ir, Type::Unknown)
+        }
         Expr::FString(parts, _) => compile_fstring(parts, ctx),
         Expr::EmitExpr(inner, _) => IRExpr::Emit(Box::new(compile_expr(inner, ctx)), Type::Unit),
         // expr? — desugared by compiler.fav; not supported in Rust compiler path

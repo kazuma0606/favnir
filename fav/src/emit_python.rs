@@ -557,6 +557,17 @@ impl Emitter {
                 format!("{}()", helper)
             }
 
+            Expr::RecordSpread(base, updates, _) => {
+                // { ...base, key: val } → {**base, "key": val}
+                let b = self.emit_expr(base);
+                let mut parts = vec![format!("**{}", b)];
+                for (k, v) in updates {
+                    let val = self.emit_expr(v);
+                    parts.push(format!("\"{}\": {}", k, val));
+                }
+                format!("{{{}}}", parts.join(", "))
+            }
+
             Expr::AssertMatches(_, _, _) | Expr::EmitExpr(_, _) => {
                 "None  # assert/emit not supported in transpile".to_string()
             }

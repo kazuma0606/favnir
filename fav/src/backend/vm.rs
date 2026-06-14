@@ -1940,6 +1940,39 @@ impl VM {
                         trace_emit(&mut vm.trace_lines, format!("[TRACE] stage {}: enter", stage_name));
                     }
                 }
+                x if x == Opcode::MergeRecord as u8 => {
+                    // Layout: n_overrides(2) + names_idx(2)
+                    let n_overrides = Self::read_u16(function, frame)? as usize;
+                    let names_idx = Self::read_u16(function, frame)? as usize;
+                    // Read override field names from str_table
+                    let names_str = artifact.str_table.get(names_idx).cloned().unwrap_or_default();
+                    let field_names: Vec<String> = if names_str.is_empty() {
+                        Vec::new()
+                    } else {
+                        names_str.split('\u{1f}').map(|s| s.to_string()).collect()
+                    };
+                    if field_names.len() != n_overrides {
+                        return Err(vm.error(artifact, "MergeRecord: field name count mismatch"));
+                    }
+                    // Pop override values (pushed left-to-right → pop right-to-left)
+                    let mut override_vals: Vec<VMValue> = (0..n_overrides)
+                        .map(|_| vm.stack.pop().unwrap_or(VMValue::Unit))
+                        .collect();
+                    override_vals.reverse();
+                    // Pop base record
+                    let base_val = vm.stack.pop().ok_or_else(|| {
+                        vm.error(artifact, "MergeRecord: stack underflow on base")
+                    })?;
+                    let mut fields = match base_val {
+                        VMValue::Record(map) => map,
+                        _ => return Err(vm.error(artifact, "MergeRecord: base is not a record")),
+                    };
+                    // Apply overrides
+                    for (name, val) in field_names.into_iter().zip(override_vals) {
+                        fields.insert(name, val);
+                    }
+                    vm.stack.push(VMValue::Record(fields));
+                }
                 x if x == Opcode::JumpIfNotVariant as u8 => {
                     let name_idx = Self::read_u16(function, frame)? as usize;
                     let offset = Self::read_u16(function, frame)? as usize;

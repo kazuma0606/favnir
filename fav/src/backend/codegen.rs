@@ -71,6 +71,11 @@ pub enum Opcode {
     BuildRecordC = 0x59,
     /// Like MakeClosure but looks up function by name (CVName) in artifact globals.
     MakeClosureN = 0x5A,
+    /// Merge base record with N override fields.
+    /// Layout: opcode(1) + n_overrides(2) + names_idx(2) = 5 bytes
+    /// Stack (bottom->top): base_record, val_0, ..., val_{n-1}
+    /// str_table[names_idx]: override field names joined by 
+    MergeRecord = 0x5C,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -290,6 +295,24 @@ pub fn emit_expr(expr: &IRExpr, cg: &mut Codegen) {
             let names_idx = cg.intern_str(&joined);
             cg.emit_opcode(Opcode::BuildRecord);
             cg.emit_u16(fields.len() as u16);
+            cg.emit_u16(names_idx);
+        }
+        IRExpr::RecordSpread(base, updates, _) => {
+            // 1. emit base record
+            emit_expr(base, cg);
+            // 2. emit override values (left to right)
+            let mut names: Vec<&str> = Vec::with_capacity(updates.len());
+            for (name, value) in updates.iter() {
+                emit_expr(value, cg);
+                names.push(name.as_str());
+            }
+            // 3. store override field names in str_table (joined by \x1f)
+            let sep = "\u{1f}";
+            let joined = names.join(sep);
+            let names_idx = cg.intern_str(&joined);
+            // 4. emit MergeRecord opcode
+            cg.emit_opcode(Opcode::MergeRecord);
+            cg.emit_u16(updates.len() as u16);
             cg.emit_u16(names_idx);
         }
     }
@@ -618,6 +641,11 @@ fn remap_string_operands(code: &mut [u8], str_remap: &[u16]) {
             }
             x if x == Opcode::MakeClosureN as u8 => {
                 ip += 5; // 1-byte opcode + 2-byte name_const_idx + 2-byte capture_count (no remap)
+            }
+            x if x == Opcode::MergeRecord as u8 => {
+                // Layout: opcode(1) + n_overrides(2) + names_idx(2)
+                remap_u16_at(code, ip + 3, str_remap); // remap names_idx
+                ip += 5;
             }
             _ => break,
         }

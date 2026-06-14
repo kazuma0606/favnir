@@ -2927,6 +2927,12 @@ impl Checker {
                     self.collect_helpers_in_expr(expr);
                 }
             }
+            Expr::RecordSpread(base, updates, _) => {
+                self.collect_helpers_in_expr(base);
+                for (_, expr) in updates {
+                    self.collect_helpers_in_expr(expr);
+                }
+            }
             Expr::FString(parts, _) => {
                 for part in parts {
                     if let FStringPart::Expr(expr) = part {
@@ -4651,6 +4657,15 @@ impl Checker {
                     }
                 });
                 Type::List(Box::new(elem_ty))
+            }
+
+            // record spread: { ...base, key: val } (v16.3.0)
+            Expr::RecordSpread(base, updates, _) => {
+                self.check_expr(base);
+                for (_, v) in updates {
+                    self.check_expr(v);
+                }
+                Type::Unknown
             }
 
             // expr? — error propagation (v9.7.0)

@@ -308,6 +308,12 @@ fn walk_closures_in_expr(expr: &IRExpr, ir: &IRProgram, map: &mut HashMap<u16, (
                 walk_closures_in_expr(v, ir, map);
             }
         }
+        IRExpr::RecordSpread(base, updates, _) => {
+            walk_closures_in_expr(base, ir, map);
+            for (_, v) in updates {
+                walk_closures_in_expr(v, ir, map);
+            }
+        }
     }
 }
 
@@ -638,6 +644,12 @@ pub fn collect_local_types(expr: &IRExpr, map: &mut HashMap<u16, Type>) {
                 collect_local_types(value, map);
             }
         }
+        IRExpr::RecordSpread(base, updates, _) => {
+            collect_local_types(base, map);
+            for (_, v) in updates {
+                collect_local_types(v, map);
+            }
+        }
     }
 }
 
@@ -739,6 +751,12 @@ fn collect_expr_string_literals(expr: &IRExpr, ordered: &mut Vec<String>) {
         IRExpr::RecordConstruct(fields, _) => {
             for (_, value) in fields {
                 collect_expr_string_literals(value, ordered);
+            }
+        }
+        IRExpr::RecordSpread(base, updates, _) => {
+            collect_expr_string_literals(base, ordered);
+            for (_, v) in updates {
+                collect_expr_string_literals(v, ordered);
             }
         }
     }
@@ -843,6 +861,12 @@ pub fn collect_used_builtins(ir: &IRProgram) -> std::collections::HashSet<String
             IRExpr::RecordConstruct(fields, _) => {
                 for (_, value) in fields {
                     walk_expr(value, globals, used);
+                }
+            }
+            IRExpr::RecordSpread(base, updates, _) => {
+                walk_expr(base, globals, used);
+                for (_, v) in updates {
+                    walk_expr(v, globals, used);
                 }
             }
         }
@@ -1205,6 +1229,9 @@ fn emit_expr(
         )),
         IRExpr::RecordConstruct(_, _) => Err(WasmCodegenError::UnsupportedExpr(
             "record construction in wasm MVP".into(),
+        )),
+        IRExpr::RecordSpread(_, _, _) => Err(WasmCodegenError::UnsupportedExpr(
+            "record spread in wasm MVP".into(),
         )),
     }
 }

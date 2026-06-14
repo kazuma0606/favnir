@@ -276,6 +276,8 @@ pub enum Expr {
 
     /// `TypeName { field: expr, ... }`  Erecord construction
     RecordConstruct(String, Vec<(String, Expr)>, Span),
+    /// record spread: `{ ...base, key: expr }` (v16.3.0)
+    RecordSpread(Box<Expr>, Vec<(String, Expr)>, Span),
     FString(Vec<FStringPart>, Span),
 
     /// `emit expr`  Epublish an event
@@ -301,6 +303,7 @@ impl Expr {
             Expr::Closure(_, _, s) => s,
             Expr::BinOp(_, _, _, s) => s,
             Expr::RecordConstruct(_, _, s) => s,
+            Expr::RecordSpread(_, _, s) => s,
             Expr::FString(_, s) => s,
             Expr::EmitExpr(_, s) => s,
             Expr::Collect(_, s) => s,

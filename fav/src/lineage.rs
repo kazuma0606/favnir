@@ -284,6 +284,12 @@ fn collect_sql_literals_inner(expr: &ast::Expr, out: &mut Vec<String>) {
         ast::Expr::Question(e, _) => {
             collect_sql_literals_inner(e, out);
         }
+        ast::Expr::RecordSpread(base, updates, _) => {
+            collect_sql_literals_inner(base, out);
+            for (_, v) in updates {
+                collect_sql_literals_inner(v, out);
+            }
+        }
         ast::Expr::Lit(_, _) | ast::Expr::Ident(_, _) | ast::Expr::FString(_, _) => {}
     }
 }
@@ -406,6 +412,12 @@ fn collect_azure_kinds_inner(expr: &ast::Expr, r: &mut bool, w: &mut bool) {
         | ast::Expr::Question(e, _) => {
             collect_azure_kinds_inner(e, r, w);
         }
+        ast::Expr::RecordSpread(base, updates, _) => {
+            collect_azure_kinds_inner(base, r, w);
+            for (_, v) in updates {
+                collect_azure_kinds_inner(v, r, w);
+            }
+        }
         ast::Expr::Lit(_, _) | ast::Expr::Ident(_, _) | ast::Expr::FString(_, _) => {}
     }
 }
@@ -497,6 +509,12 @@ fn collect_azure_blob_kinds_inner(expr: &ast::Expr, r: &mut bool, w: &mut bool) 
         | ast::Expr::AssertMatches(e, _, _)
         | ast::Expr::Question(e, _) => {
             collect_azure_blob_kinds_inner(e, r, w);
+        }
+        ast::Expr::RecordSpread(base, updates, _) => {
+            collect_azure_blob_kinds_inner(base, r, w);
+            for (_, v) in updates {
+                collect_azure_blob_kinds_inner(v, r, w);
+            }
         }
         ast::Expr::Lit(_, _) | ast::Expr::Ident(_, _) | ast::Expr::FString(_, _) => {}
     }
@@ -638,6 +656,12 @@ fn collect_sf_kinds_inner(expr: &ast::Expr, r: &mut bool, w: &mut bool) {
         | ast::Expr::AssertMatches(e, _, _)
         | ast::Expr::Question(e, _) => {
             collect_sf_kinds_inner(e, r, w);
+        }
+        ast::Expr::RecordSpread(base, updates, _) => {
+            collect_sf_kinds_inner(base, r, w);
+            for (_, v) in updates {
+                collect_sf_kinds_inner(v, r, w);
+            }
         }
         ast::Expr::Lit(_, _) | ast::Expr::Ident(_, _) | ast::Expr::FString(_, _) => {}
     }

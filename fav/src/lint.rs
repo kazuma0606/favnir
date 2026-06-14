@@ -204,6 +204,12 @@ fn lint_expr_l008(expr: &Expr, errors: &mut Vec<LintError>) {
             }
         }
         Expr::AssertMatches(e, _, _) => lint_expr_l008(e, errors),
+        Expr::RecordSpread(base, updates, _) => {
+            lint_expr_l008(base, errors);
+            for (_, v) in updates {
+                lint_expr_l008(v, errors);
+            }
+        }
         Expr::Ident(..) | Expr::Lit(..) => {}
     }
 }
@@ -357,6 +363,12 @@ fn collect_expr_calls(expr: &Expr, names: &HashSet<String>, uses: &mut HashSet<S
                 }
             }
         }
+        Expr::RecordSpread(base, updates, _) => {
+            collect_expr_calls(base, names, uses);
+            for (_, v) in updates {
+                collect_expr_calls(v, names, uses);
+            }
+        }
         Expr::Lit(..) => {}
     }
 }
@@ -498,6 +510,12 @@ fn lint_expr_sub_blocks(expr: &Expr, errors: &mut Vec<LintError>) {
                 lint_expr_sub_blocks(e, errors);
             }
         }
+        Expr::RecordSpread(base, updates, _) => {
+            lint_expr_sub_blocks(base, errors);
+            for (_, v) in updates {
+                lint_expr_sub_blocks(v, errors);
+            }
+        }
         Expr::FString(parts, _) => {
             for part in parts {
                 if let FStringPart::Expr(expr) = part {
@@ -549,6 +567,10 @@ fn expr_references(expr: &Expr, name: &str) -> bool {
         Expr::EmitExpr(inner, _) => expr_references(inner, name),
         Expr::Question(inner, _) => expr_references(inner, name),
         Expr::RecordConstruct(_, fields, _) => fields.iter().any(|(_, e)| expr_references(e, name)),
+        Expr::RecordSpread(base, updates, _) => {
+            expr_references(base, name)
+                || updates.iter().any(|(_, v)| expr_references(v, name))
+        }
         Expr::FString(parts, _) => parts.iter().any(|part| match part {
             FStringPart::Lit(_) => false,
             FStringPart::Expr(expr) => expr_references(expr, name),
@@ -723,6 +745,12 @@ fn collect_ambient_in_expr(expr: &Expr, errors: &mut Vec<LintError>, code: &'sta
                 collect_ambient_in_expr(v, errors, code);
             }
         }
+        Expr::RecordSpread(base, updates, _) => {
+            collect_ambient_in_expr(base, errors, code);
+            for (_, v) in updates {
+                collect_ambient_in_expr(v, errors, code);
+            }
+        }
         Expr::FString(parts, _) => {
             for part in parts {
                 if let FStringPart::Expr(e) = part {
@@ -845,6 +873,12 @@ fn collect_deprecated_in_expr(expr: &Expr, errors: &mut Vec<LintError>) {
         Expr::TypeApply(f, _, _) => collect_deprecated_in_expr(f, errors),
         Expr::RecordConstruct(_, fields, _) => {
             for (_, v) in fields {
+                collect_deprecated_in_expr(v, errors);
+            }
+        }
+        Expr::RecordSpread(base, updates, _) => {
+            collect_deprecated_in_expr(base, errors);
+            for (_, v) in updates {
                 collect_deprecated_in_expr(v, errors);
             }
         }
@@ -1139,6 +1173,14 @@ fn collect_type_state_in_expr(
         }
         Expr::RecordConstruct(_, fields, _) => {
             for (_, v) in fields {
+                collect_type_state_in_expr(
+                    v, fn_expects, fn_output, type_state_names, env, errors,
+                );
+            }
+        }
+        Expr::RecordSpread(base, updates, _) => {
+            collect_type_state_in_expr(base, fn_expects, fn_output, type_state_names, env, errors);
+            for (_, v) in updates {
                 collect_type_state_in_expr(
                     v, fn_expects, fn_output, type_state_names, env, errors,
                 );

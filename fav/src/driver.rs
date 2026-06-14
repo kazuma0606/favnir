@@ -230,6 +230,18 @@ fn get_help_text(code: &str) -> &'static [&'static str] {
             "f-string には String / Int / Float / Bool のみ使用可能です",
             "他の型は事前に文字列化してください: `bind s <- my_val.to_string()`",
         ],
+        "E0323" => &[
+            "record spread の base は Record 型でなければなりません",
+            "`{ ...base, key: val }` の base が Record 型かどうか確認してください",
+        ],
+        "E0327" => &[
+            "record spread で上書きするフィールドが base Record に存在しません",
+            "フィールド名のスペルミスがないか確認してください",
+        ],
+        "E0328" => &[
+            "record spread の update フィールドに重複があります",
+            "同じフィールド名を複数指定することはできません",
+        ],
         _ => &[],
     }
 }
@@ -3047,6 +3059,7 @@ fn decode_opcode(byte: u8) -> Option<(&'static str, usize)> {
         Opcode::LegacyBindCheck => ("LegacyBindCheck", 3), // 1 byte opcode + 2-byte escape offset
         Opcode::SeqStageCheck => ("SeqStageCheck", 7), // 1 opcode + name_str_idx(2) + stage_idx(1) + total(1) + escape_offset(2)
         Opcode::SeqStageEnter => ("SeqStageEnter", 3), // 1 opcode + name_str_idx(2)
+        Opcode::MergeRecord => ("MergeRecord", 5), // 1 opcode + n_overrides(2) + names_idx(2)
     };
 
     Some((name, width))
@@ -10339,6 +10352,14 @@ fn remap_ir_expr(expr: &IRExpr, global_idx_map: &std::collections::HashMap<u16, 
                 .collect(),
             ty.clone(),
         ),
+        IRExpr::RecordSpread(base, updates, ty) => IRExpr::RecordSpread(
+            Box::new(remap_ir_expr(base, global_idx_map)),
+            updates
+                .iter()
+                .map(|(name, expr)| (name.clone(), remap_ir_expr(expr, global_idx_map)))
+                .collect(),
+            ty.clone(),
+        ),
     }
 }
 
@@ -11606,6 +11627,14 @@ fn format_expr_compact(expr: &ast::Expr) -> String {
             out.push('"');
             out
         }
+        Expr::RecordSpread(base, updates, _) => {
+            let fields = updates
+                .iter()
+                .map(|(k, v)| format!("{k}: {}", format_expr_compact(v)))
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!("{{ ...{}, {fields} }}", format_expr_compact(base))
+        }
         Expr::EmitExpr(inner, _) => format!("emit {}", format_expr_compact(inner)),
         Expr::Question(inner, _) => format!("{}?", format_expr_compact(inner)),
     };
@@ -11711,6 +11740,7 @@ fn expr_to_sql(expr: &ast::Expr) -> Option<String> {
         | Expr::TypeApply(_, _, _)
         | Expr::FString(_, _)
         | Expr::RecordConstruct(_, _, _)
+        | Expr::RecordSpread(_, _, _)
         | Expr::EmitExpr(_, _)
         | Expr::Question(_, _) => None,
     }
@@ -26394,5 +26424,109 @@ public fn main() -> String {
 }
 "#);
         assert_eq!(result, "Name: Bob, Score: 99");
+    }
+}
+
+// ── v163000_tests (v16.3.0) — record spread / update ─────────────────────────
+#[cfg(test)]
+mod v163000_tests {
+    use super::{build_artifact, exec_artifact_main};
+    use crate::frontend::parser::Parser;
+    use crate::value::Value;
+
+    fn run_int(src: &str) -> i64 {
+        let program = Parser::parse_str(src, "record_spread_test.fav").expect("parse");
+        let artifact = build_artifact(&program);
+        match exec_artifact_main(&artifact, None).expect("exec") {
+            Value::Int(n) => n,
+            other => panic!("expected Int, got {:?}", other),
+        }
+    }
+
+    fn run_unit(src: &str) {
+        let program = Parser::parse_str(src, "record_spread_test.fav").expect("parse");
+        let artifact = build_artifact(&program);
+        match exec_artifact_main(&artifact, None).expect("exec") {
+            Value::Unit => {}
+            other => panic!("expected Unit, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn version_is_16_3_0() {
+        let cargo = std::fs::read_to_string("Cargo.toml").unwrap();
+        assert!(
+            cargo.contains("version = \"16.3.0\""),
+            "Cargo.toml version should be 16.3.0"
+        );
+    }
+
+    #[test]
+    fn record_spread_override_field() {
+        // { ...base, y: 10 } overrides y, returns 10
+        let result = run_int(r#"
+type Point = { x: Int y: Int }
+public fn main() -> Int {
+    bind p <- Point { x: 1, y: 2 }
+    bind q <- { ...p, y: 10 }
+    q.y
+}
+"#);
+        assert_eq!(result, 10);
+    }
+
+    #[test]
+    fn record_spread_preserve_base_field() {
+        // { ...base, y: 10 } preserves x from base
+        let result = run_int(r#"
+type Point = { x: Int y: Int }
+public fn main() -> Int {
+    bind p <- Point { x: 5, y: 2 }
+    bind q <- { ...p, y: 10 }
+    q.x
+}
+"#);
+        assert_eq!(result, 5);
+    }
+
+    #[test]
+    fn record_spread_no_overrides() {
+        // { ...base } with no overrides — all fields preserved
+        let result = run_int(r#"
+type Point = { x: Int y: Int }
+public fn main() -> Int {
+    bind p <- Point { x: 7, y: 3 }
+    bind q <- { ...p }
+    q.x
+}
+"#);
+        assert_eq!(result, 7);
+    }
+
+    #[test]
+    fn record_spread_assert_matches() {
+        // verify both fields after spread
+        run_unit(r#"
+type Point = { x: Int y: Int }
+public fn main() -> Unit {
+    bind p <- Point { x: 1, y: 2 }
+    bind q <- { ...p, x: 99 }
+    assert_matches(q, { x: 99, y: 2 })
+}
+"#);
+    }
+
+    #[test]
+    fn record_spread_multiple_overrides() {
+        // override multiple fields
+        let result = run_int(r#"
+type Color = { r: Int g: Int b: Int }
+public fn main() -> Int {
+    bind red <- Color { r: 255, g: 0, b: 0 }
+    bind purple <- { ...red, b: 128 }
+    purple.b
+}
+"#);
+        assert_eq!(result, 128);
     }
 }

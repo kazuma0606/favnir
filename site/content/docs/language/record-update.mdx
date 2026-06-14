@@ -1,0 +1,114 @@
+# Record Spread / Update
+
+Record spread lets you create a new record that copies all fields from an existing record and overrides specific ones. This is often called "record update" or "struct update" syntax.
+
+## Syntax
+
+```fav
+{ ...base, field1: new_val1, field2: new_val2 }
+```
+
+- `base` — any expression that evaluates to a record
+- `field1: new_val1` — zero or more field overrides
+- Fields not listed are copied from `base` unchanged
+
+## Basic Example
+
+```fav
+type Point = { x: Int  y: Int }
+
+public fn main() -> Point {
+    bind origin <- Point { x: 0, y: 0 }
+    bind moved  <- { ...origin, x: 10 }
+    moved   -- Point { x: 10, y: 0 }
+}
+```
+
+## No Overrides
+
+Spreading with no overrides produces a shallow copy:
+
+```fav
+bind copy <- { ...original }
+```
+
+## Multiple Field Overrides
+
+```fav
+type Color = { r: Int  g: Int  b: Int }
+
+public fn main() -> Color {
+    bind red    <- Color { r: 255, g: 0, b: 0 }
+    bind purple <- { ...red, g: 80, b: 180 }
+    purple
+}
+```
+
+## Use Cases
+
+### Updating pipeline state
+
+```fav
+type PipelineCtx = { rows_read: Int  rows_written: Int  errors: Int }
+
+fn inc_written(ctx: PipelineCtx) -> PipelineCtx {
+    { ...ctx, rows_written: ctx.rows_written + 1 }
+}
+```
+
+### Patching records in transformations
+
+```fav
+stage Normalize {
+    fn transform(row: UserRow) -> UserRow {
+        { ...row, name: String.trim(row.name) }
+    }
+}
+```
+
+### Building variants from a template
+
+```fav
+bind defaults <- Config { timeout: 30, retries: 3, verbose: false }
+bind dev_cfg  <- { ...defaults, verbose: true }
+bind prod_cfg <- { ...defaults, retries: 5 }
+```
+
+## Comparison: Before and After
+
+**Before (verbose manual construction):**
+
+```fav
+bind updated <- UserRow {
+    id:    row.id,
+    name:  String.trim(row.name),
+    email: row.email,
+    age:   row.age,
+}
+```
+
+**After (record spread):**
+
+```fav
+bind updated <- { ...row, name: String.trim(row.name) }
+```
+
+## Constraints
+
+- The base expression must evaluate to a **Record** value (E0323)
+- Duplicate field names in the override list are not allowed (E0328)
+- Field order does not affect runtime behavior
+
+## Error Codes
+
+| Code | Meaning |
+|------|---------|
+| E0323 | Base expression is not a Record type |
+| E0327 | Override field does not exist in base Record |
+| E0328 | Duplicate field name in override list |
+
+## Notes
+
+- Record spread creates a **new** record; the original is not mutated
+- The spread operator `...` is only valid inside `{ }` record syntax
+- This is distinct from pipeline spread or list operations

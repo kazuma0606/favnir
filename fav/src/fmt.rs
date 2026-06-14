@@ -576,6 +576,18 @@ impl Formatter {
                 out
             }
 
+            Expr::RecordSpread(base, updates, _) => {
+                let fields: Vec<String> = updates
+                    .iter()
+                    .map(|(k, v)| format!("{}: {}", k, self.expr(v)))
+                    .collect();
+                if fields.is_empty() {
+                    format!("{{ ...{} }}", self.expr(base))
+                } else {
+                    format!("{{ ...{}, {} }}", self.expr(base), fields.join(", "))
+                }
+            }
+
             Expr::EmitExpr(inner, _) => {
                 format!("emit {}", self.expr(inner))
             }

@@ -67,6 +67,8 @@ pub enum IRExpr {
     Collect(Box<IRExpr>, Type),
     Emit(Box<IRExpr>, Type),
     RecordConstruct(Vec<(String, IRExpr)>, Type),
+    /// record spread: `{ ...base, key: val }` (v16.3.0)
+    RecordSpread(Box<IRExpr>, Vec<(String, IRExpr)>, Type),
 }
 
 impl IRExpr {
@@ -86,7 +88,8 @@ impl IRExpr {
             | IRExpr::Closure(_, _, ty)
             | IRExpr::Collect(_, ty)
             | IRExpr::Emit(_, ty)
-            | IRExpr::RecordConstruct(_, ty) => ty,
+            | IRExpr::RecordConstruct(_, ty)
+            | IRExpr::RecordSpread(_, _, ty) => ty,
         }
     }
 }
@@ -243,6 +246,13 @@ fn collect_expr_deps(expr: &IRExpr, globals: &[IRGlobal], deps: &mut BTreeSet<St
         IRExpr::RecordConstruct(fields, _) => {
             for (_, e) in fields {
                 collect_expr_deps(e, globals, deps);
+            }
+        }
+
+        IRExpr::RecordSpread(base, updates, _) => {
+            collect_expr_deps(base, globals, deps);
+            for (_, v) in updates {
+                collect_expr_deps(v, globals, deps);
             }
         }
     }

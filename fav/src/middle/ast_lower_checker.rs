@@ -334,6 +334,10 @@ pub fn lower_expr(expr: &ast::Expr) -> Value {
         ast::Expr::RecordConstruct(name, fields, _) => {
             v2("ERecordLit", sv(name), lower_field_list(fields))
         }
+        ast::Expr::RecordSpread(_, _, _) => {
+            // record spread not yet supported in checker.fav path — treat as unit
+            sv("()")
+        }
         ast::Expr::If(cond, then_block, else_opt, _) => {
             let then_val = lower_block(then_block);
             let else_val = match else_opt {

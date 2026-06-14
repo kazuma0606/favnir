@@ -1,0 +1,118 @@
+---
+title: fav deploy
+description: AWS Lambda に Favnir パイプラインをデプロイする
+---
+
+# fav deploy
+
+`fav deploy` コマンドを使うと、`.fav` パイプラインを AWS Lambda に直接デプロイできます。
+zip パッケージング → S3 アップロード → Lambda 関数更新 の 3 ステップを自動化します。
+
+## セットアップ
+
+### 1. fav.toml の設定
+
+プロジェクトの `fav.toml` に `[deploy]` セクションを追加します:
+
+```toml
+[project]
+name    = "my-pipeline"
+version = "0.1.0"
+
+[deploy]
+target        = "aws-lambda"
+function_name = "my-pipeline-prod"
+role_arn      = "arn:aws:iam::123456789012:role/my-lambda-role"
+runtime       = "provided.al2023"
+region        = "ap-northeast-1"
+memory_mb     = 512
+timeout_sec   = 300
+s3_bucket     = "my-deploy-bucket"
+```
+
+### 2. バイナリのビルド
+
+Lambda（Linux x86_64）向けにバイナリをビルドします:
+
+```bash
+./scripts/build-lambda-layer.sh function.zip
+```
+
+このスクリプトは `cross` crate を使って `x86_64-unknown-linux-musl` 向けにクロスコンパイルし、
+`bootstrap` スクリプトと `fav` バイナリを `function.zip` にまとめます。
+
+## 使い方
+
+### ドライラン（変更なし）
+
+```bash
+fav deploy --dry-run
+```
+
+実際のデプロイを行わず、実行されるステップを確認します:
+
+```
+[deploy] Project: my-pipeline v0.1.0
+[deploy] Function: my-pipeline-prod
+[deploy] Region: ap-northeast-1
+[deploy] Runtime: provided.al2023
+[deploy] Memory: 512 MB, Timeout: 300s
+[deploy] Step 1: Package .fav files → /tmp/my-pipeline-20260614120000.zip (DRY RUN)
+[deploy] Step 2: Upload to s3://my-deploy-bucket/deploys/my-pipeline/20260614120000.zip (DRY RUN)
+[deploy] Step 3: Update Lambda function 'my-pipeline-prod' (DRY RUN)
+[deploy] Done (dry run — no changes made)
+```
+
+### 本番デプロイ
+
+```bash
+fav deploy
+```
+
+### 特定環境へのデプロイ
+
+```bash
+fav deploy --env staging --function my-pipeline-staging --region us-east-1
+```
+
+## `[deploy]` 設定リファレンス
+
+| キー | 型 | デフォルト | 説明 |
+|---|---|---|---|
+| `target` | String | `"aws-lambda"` | デプロイ先プラットフォーム |
+| `function_name` | String | プロジェクト名 | Lambda 関数名 |
+| `role_arn` | String | — | Lambda 実行ロール ARN（必須） |
+| `runtime` | String | `"provided.al2023"` | Lambda ランタイム |
+| `region` | String | `"us-east-1"` | AWS リージョン |
+| `memory_mb` | Int | `256` | メモリ割り当て（MB） |
+| `timeout_sec` | Int | `30` | タイムアウト（秒） |
+| `s3_bucket` | String | — | デプロイ zip アップロード先 S3 バケット（必須） |
+
+## Lambda でのパイプライン実行
+
+Lambda の `bootstrap` スクリプトが `fav run --legacy main.fav` を呼び出します。
+環境変数は Lambda の設定から渡せます:
+
+```bash
+aws lambda update-function-configuration \
+  --function-name my-pipeline-prod \
+  --environment "Variables={DATABASE_URL=...,KAFKA_BOOTSTRAP_BROKERS=...}"
+```
+
+## 必要な IAM 権限
+
+デプロイを実行するユーザー/ロールには以下の権限が必要です:
+
+```json
+{
+  "Effect": "Allow",
+  "Action": [
+    "s3:PutObject",
+    "lambda:CreateFunction",
+    "lambda:UpdateFunctionCode",
+    "lambda:UpdateFunctionConfiguration",
+    "iam:PassRole"
+  ],
+  "Resource": "*"
+}
+```

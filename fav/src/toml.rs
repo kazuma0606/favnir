@@ -147,6 +147,10 @@ pub struct PostgresTomlConfig {
 
 #[derive(Debug, Clone)]
 pub struct DeployConfig {
+    /// Deploy target platform (v15.5.0): "aws-lambda" | "azure-function"
+    pub target: String,
+    /// Lambda function name override (v15.5.0); defaults to fav.toml [project] name
+    pub function_name: Option<String>,
     pub runtime: String,
     pub handler: String,
     pub memory: u32,
@@ -159,7 +163,9 @@ pub struct DeployConfig {
 impl Default for DeployConfig {
     fn default() -> Self {
         DeployConfig {
-            runtime: "provided.al2".to_string(),
+            target: "aws-lambda".to_string(),
+            function_name: None,
+            runtime: "provided.al2023".to_string(),
             handler: "bootstrap".to_string(),
             memory: 256,
             timeout: 30,
@@ -494,13 +500,15 @@ fn parse_fav_toml(content: &str) -> FavToml {
                 let mut current: DeployConfig = deploy_cfg.take().unwrap_or_default();
                 if let Some((key, val)) = parse_kv(trimmed) {
                     match key {
-                        "runtime" => current.runtime = val.to_string(),
-                        "handler" => current.handler = val.to_string(),
-                        "memory" => current.memory = val.parse().unwrap_or(256),
-                        "timeout" => current.timeout = val.parse().unwrap_or(30),
-                        "s3_bucket" => current.s3_bucket = Some(val.to_string()),
-                        "role_arn" => current.role_arn = Some(val.to_string()),
-                        "region" => current.region = Some(val.to_string()),
+                        "target"        => current.target        = val.to_string(),
+                        "function_name" => current.function_name = Some(val.to_string()),
+                        "runtime"       => current.runtime       = val.to_string(),
+                        "handler"       => current.handler       = val.to_string(),
+                        "memory" | "memory_mb" => current.memory = val.parse().unwrap_or(256),
+                        "timeout" | "timeout_sec" => current.timeout = val.parse().unwrap_or(30),
+                        "s3_bucket"     => current.s3_bucket     = Some(val.to_string()),
+                        "role_arn"      => current.role_arn      = Some(val.to_string()),
+                        "region"        => current.region        = Some(val.to_string()),
                         _ => {}
                     }
                 }

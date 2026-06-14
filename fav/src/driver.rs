@@ -25398,6 +25398,45 @@ public fn load(conn_str: String) -> Result<Int, String> !AzureDb {
     }
 }
 
+// ── v155000_tests (v15.5.0) — fav deploy ─────────────────────────────────────
+#[cfg(test)]
+mod v155000_tests {
+    use std::fs;
+    use std::path::Path;
+
+    #[test]
+    fn version_is_15_5_0() {
+        let cargo = fs::read_to_string("Cargo.toml").unwrap();
+        assert!(
+            cargo.contains("version = \"15.5.0\""),
+            "Cargo.toml version should be 15.5.0, got: {}",
+            cargo.lines().find(|l| l.contains("version")).unwrap_or("")
+        );
+    }
+
+    #[test]
+    fn deploy_toml_schema_parses() {
+        let toml_src = "[project]\nname = \"test\"\nversion = \"1.0.0\"\n\
+            [deploy]\ntarget = \"aws-lambda\"\nfunction_name = \"my-fn\"\n\
+            runtime = \"provided.al2023\"\nmemory_mb = 512\ntimeout_sec = 300\n\
+            s3_bucket = \"my-bucket\"\nrole_arn = \"arn:aws:iam::1234:role/r\"\n\
+            region = \"ap-northeast-1\"\n";
+        let parsed = crate::toml::parse_fav_toml_pub(toml_src);
+        let deploy = parsed.deploy.expect("deploy section should be parsed");
+        assert_eq!(deploy.target, "aws-lambda");
+        assert_eq!(deploy.function_name.as_deref(), Some("my-fn"));
+        assert_eq!(deploy.runtime, "provided.al2023");
+        assert_eq!(deploy.memory, 512);
+        assert_eq!(deploy.timeout, 300);
+    }
+
+    #[test]
+    fn deploy_cmd_exists() {
+        let driver = fs::read_to_string("src/driver.rs").unwrap();
+        assert!(driver.contains("fn cmd_deploy"), "driver.rs must contain cmd_deploy function");
+    }
+}
+
 // ── v154000_tests (v15.4.0) — Kafka / MSK Rune ────────────────────────────────
 #[cfg(test)]
 mod v154000_tests {

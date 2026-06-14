@@ -1186,6 +1186,9 @@ impl Emitter {
                         .collect();
                     expr = format!("[{}]", calls.join(", "));
                 }
+                ast::FlwStep::Tap(_) | ast::FlwStep::Inspect => {
+                    // tap/inspect: pass through unchanged in Python emit
+                }
             }
         }
         expr
@@ -1223,6 +1226,9 @@ impl Emitter {
                     self.line("_par_results = [_f.result() for _f in _futures]");
                     self.indent -= 1;
                     cur = "_par_results".to_string();
+                }
+                ast::FlwStep::Tap(_) | ast::FlwStep::Inspect => {
+                    // tap/inspect: pass through unchanged in Python emit
                 }
             }
         }

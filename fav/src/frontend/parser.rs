@@ -1494,6 +1494,17 @@ impl Parser {
             }
             self.expect(&TokenKind::RBracket)?;
             Ok(FlwStep::Par(names))
+        } else if self.peek_ident_text("tap") {
+            // tap(observer_expr) — soft keyword (v16.8.0)
+            self.advance(); // consume "tap"
+            self.expect(&TokenKind::LParen)?;
+            let observer = self.parse_expr()?;
+            self.expect(&TokenKind::RParen)?;
+            Ok(FlwStep::Tap(Box::new(observer)))
+        } else if self.peek_ident_text("inspect") {
+            // inspect — soft keyword (v16.8.0)
+            self.advance(); // consume "inspect"
+            Ok(FlwStep::Inspect)
         } else {
             let (name, _) = self.expect_ident()?;
             Ok(FlwStep::Stage(name))

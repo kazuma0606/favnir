@@ -7785,24 +7785,6 @@ fn vm_call_builtin(
                 )),
             }
         }
-        "assert_eq" => {
-            let mut it = args.into_iter();
-            let a = it
-                .next()
-                .ok_or_else(|| "assert_eq requires 2 arguments".to_string())?;
-            let b = it
-                .next()
-                .ok_or_else(|| "assert_eq requires 2 arguments".to_string())?;
-            if vmvalue_repr(&a) == vmvalue_repr(&b) {
-                Ok(VMValue::Unit)
-            } else {
-                Err(format!(
-                    "assert_eq failed: left={}, right={}",
-                    vmvalue_repr(&a),
-                    vmvalue_repr(&b)
-                ))
-            }
-        }
         "assert_ne" => {
             let mut it = args.into_iter();
             let a = it
@@ -8002,6 +7984,11 @@ fn vm_call_builtin(
                     ))
                 }
             }
+        }
+        "inspect_debug" => {
+            let val = args.into_iter().next().ok_or_else(|| "inspect_debug requires 1 argument".to_string())?;
+            println!("[inspect] {}", vmvalue_repr(&val));
+            Ok(VMValue::Unit)
         }
         "Result.ok" => {
             let v = args

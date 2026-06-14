@@ -241,6 +241,48 @@ Pipelines:
 SQL リテラルが存在しない場合は、エフェクト（`!DbRead` / `!DbWrite` / `!Db`）から
 `(stage-name:db-read)` / `(stage-name:db-write)` というプレースホルダが自動生成されます。
 
+---
+
+## tap / inspect — パイプライン内デバッグ（v16.8.0）
+
+`|> tap(fn)` と `|> inspect` を使うと、値を変換せずに副作用（ログ出力など）を挟めます。
+
+### tap
+
+```favnir
+seq Pipeline = LoadRows
+  |> tap(|rows| IO.println(f"Loaded: {List.length(rows)} rows"))
+  |> TransformRows
+  |> SaveOutput
+```
+
+- `tap(observer_fn)` — 値 `v` を受け取り `observer_fn(v)` を呼び出した後、`v` をそのまま次のステージに渡す
+- 型シグネチャ: `tap<T>(observer: fn(T) -> Unit) -> fn(T) -> T`
+- 観察だけを目的とした副作用（ログ、メトリクス送信など）に使う
+
+### inspect
+
+```favnir
+seq Pipeline = TransformRows |> inspect |> SaveOutput
+```
+
+`inspect` は組み込みの tap です。`vmvalue_repr` で値を文字列化して `[inspect] <value>` の形式で標準出力に出力します。デバッグ用の簡易プローブとして使います。
+
+### --no-tap フラグ
+
+```bash
+fav run --no-tap pipeline.fav
+```
+
+`--no-tap` を指定すると、`tap` と `inspect` ステップがコンパイル時に identity（値をそのまま返すだけ）に変換されます。本番ビルドでは `--no-tap` を使うことでオブザーバーのオーバーヘッドをゼロにできます。
+
+| フラグ | 効果 |
+|---|---|
+| （なし） | tap/inspect が通常通り実行される |
+| `--no-tap` | tap/inspect が identity にコンパイルされる（オーバーヘッドなし） |
+
+---
+
 ### JSON 出力
 
 `--format json` を指定すると、系譜データを機械可読な JSON で出力します。

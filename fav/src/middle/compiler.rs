@@ -3,11 +3,18 @@ use std::collections::{HashMap, HashSet};
 
 thread_local! {
     static COVERAGE_MODE: Cell<bool> = Cell::new(false);
+    /// When true, tap/inspect steps compile to identity (v16.8.0)
+    static NO_TAP_MODE: Cell<bool> = Cell::new(false);
 }
 
 /// Enable coverage-tracking IR emission for the current thread.
 pub fn set_coverage_mode(enabled: bool) {
     COVERAGE_MODE.with(|c| c.set(enabled));
+}
+
+/// Enable no-tap mode: tap/inspect steps compile to identity for the current thread (v16.8.0).
+pub fn set_no_tap_mode(enabled: bool) {
+    NO_TAP_MODE.with(|c| c.set(enabled));
 }
 
 use super::checker::Type;
@@ -62,6 +69,8 @@ pub struct CompileCtx {
     closure_counter: u16,
     /// Namespace aliases: alias_name → real_namespace (v16.6.0)
     pub namespace_aliases: HashMap<String, String>,
+    /// When true, tap/inspect steps compile to identity (--no-tap flag, v16.8.0)
+    pub no_tap: bool,
 }
 
 impl CompileCtx {
@@ -130,6 +139,7 @@ impl CompileCtx {
 
 pub fn compile_program(program: &Program) -> IRProgram {
     let mut ctx = CompileCtx::new();
+    ctx.no_tap = NO_TAP_MODE.with(|c| c.get());
     let mut globals = Vec::new();
     let mut fns = Vec::new();
     let mut type_metas = HashMap::new();
@@ -208,6 +218,8 @@ pub fn compile_program(program: &Program) -> IRProgram {
         "assert_str_starts_with",
         "assert_err_eq",
         "assert_snapshot",
+        // v16.8.0 tap primitive
+        "inspect_debug",
         "IO.println_int",
         "IO.println_float",
         "IO.println_bool",
@@ -475,6 +487,8 @@ pub fn compile_program(program: &Program) -> IRProgram {
         "assert_str_starts_with",
         "assert_err_eq",
         "assert_snapshot",
+        // v16.8.0 tap primitive
+        "inspect_debug",
         "IO.println_int",
         "IO.println_float",
         "IO.println_bool",
@@ -642,6 +656,8 @@ fn flw_step_name(step: &FlwStep) -> String {
     match step {
         FlwStep::Stage(name) => name.clone(),
         FlwStep::Par(names) => format!("par[{}]", names.join(",")),
+        FlwStep::Tap(_) => "tap".to_string(),
+        FlwStep::Inspect => "inspect".to_string(),
     }
 }
 
@@ -686,6 +702,52 @@ fn build_step_call(step: &FlwStep, input: IRExpr, ctx: &mut CompileCtx) -> IRExp
             );
             IRExpr::Call(Box::new(par_callee), vec![names_expr, input], Type::Unknown)
         }
+        FlwStep::Tap(observer_expr) => {
+            if ctx.no_tap {
+                input
+            } else {
+                // { let __tap = input; observer(__tap); __tap }
+                let slot = ctx.next_slot;
+                ctx.next_slot = ctx.next_slot.saturating_add(1);
+                let compiled_observer = compile_expr(observer_expr, ctx);
+                let call_observer = IRExpr::Call(
+                    Box::new(compiled_observer),
+                    vec![IRExpr::Local(slot, Type::Unknown)],
+                    Type::Unknown,
+                );
+                IRExpr::Block(
+                    vec![
+                        IRStmt::Bind(slot, input),
+                        IRStmt::Expr(call_observer),
+                    ],
+                    Box::new(IRExpr::Local(slot, Type::Unknown)),
+                    Type::Unknown,
+                )
+            }
+        }
+        FlwStep::Inspect => {
+            if ctx.no_tap {
+                input
+            } else {
+                // { let __tap = input; inspect_debug(__tap); __tap }
+                let slot = ctx.next_slot;
+                ctx.next_slot = ctx.next_slot.saturating_add(1);
+                let inspect_idx = ctx.resolve_global("inspect_debug").unwrap_or(u16::MAX);
+                let call_inspect = IRExpr::Call(
+                    Box::new(IRExpr::Global(inspect_idx, Type::Unknown)),
+                    vec![IRExpr::Local(slot, Type::Unknown)],
+                    Type::Unknown,
+                );
+                IRExpr::Block(
+                    vec![
+                        IRStmt::Bind(slot, input),
+                        IRStmt::Expr(call_inspect),
+                    ],
+                    Box::new(IRExpr::Local(slot, Type::Unknown)),
+                    Type::Unknown,
+                )
+            }
+        }
     }
 }
 
@@ -702,8 +764,52 @@ fn build_step_call_ctx(step: &FlwStep, ctx_slot: u16, input: IRExpr, ctx: &mut C
             IRExpr::Call(Box::new(callee), vec![ctx_expr, input], Type::Unknown)
         }
         FlwStep::Par(_) => {
-            // par with ctx threading is not supported in v13.7.0
+            // par with ctx threading is not supported
             IRExpr::Global(u16::MAX, Type::Unknown)
+        }
+        FlwStep::Tap(observer_expr) => {
+            if ctx.no_tap {
+                input
+            } else {
+                let slot = ctx.next_slot;
+                ctx.next_slot = ctx.next_slot.saturating_add(1);
+                let compiled_observer = compile_expr(observer_expr, ctx);
+                let call_observer = IRExpr::Call(
+                    Box::new(compiled_observer),
+                    vec![IRExpr::Local(slot, Type::Unknown)],
+                    Type::Unknown,
+                );
+                IRExpr::Block(
+                    vec![
+                        IRStmt::Bind(slot, input),
+                        IRStmt::Expr(call_observer),
+                    ],
+                    Box::new(IRExpr::Local(slot, Type::Unknown)),
+                    Type::Unknown,
+                )
+            }
+        }
+        FlwStep::Inspect => {
+            if ctx.no_tap {
+                input
+            } else {
+                let slot = ctx.next_slot;
+                ctx.next_slot = ctx.next_slot.saturating_add(1);
+                let inspect_idx = ctx.resolve_global("inspect_debug").unwrap_or(u16::MAX);
+                let call_inspect = IRExpr::Call(
+                    Box::new(IRExpr::Global(inspect_idx, Type::Unknown)),
+                    vec![IRExpr::Local(slot, Type::Unknown)],
+                    Type::Unknown,
+                );
+                IRExpr::Block(
+                    vec![
+                        IRStmt::Bind(slot, input),
+                        IRStmt::Expr(call_inspect),
+                    ],
+                    Box::new(IRExpr::Local(slot, Type::Unknown)),
+                    Type::Unknown,
+                )
+            }
         }
     }
 }

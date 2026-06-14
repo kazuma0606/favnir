@@ -452,6 +452,10 @@ pub enum FlwStep {
     Stage(String),
     /// Parallel group: `par [A, B, ...]`
     Par(Vec<String>),
+    /// Side-effect tap: `|> tap(observer_fn)` — passes value through unchanged (v16.8.0)
+    Tap(Box<Expr>),
+    /// Debug tap: `|> inspect` — prints value via vmvalue_repr and passes through (v16.8.0)
+    Inspect,
 }
 
 impl FlwStep {
@@ -460,6 +464,7 @@ impl FlwStep {
         match self {
             FlwStep::Stage(s) => vec![s.as_str()],
             FlwStep::Par(names) => names.iter().map(|s| s.as_str()).collect(),
+            FlwStep::Tap(_) | FlwStep::Inspect => vec![],
         }
     }
 
@@ -468,6 +473,8 @@ impl FlwStep {
         match self {
             FlwStep::Stage(s) => s.clone(),
             FlwStep::Par(names) => format!("par [{}]", names.join(", ")),
+            FlwStep::Tap(_) => "tap(...)".to_string(),
+            FlwStep::Inspect => "inspect".to_string(),
         }
     }
 }

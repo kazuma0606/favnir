@@ -1145,8 +1145,12 @@ pub(crate) fn is_result_err_value(v: &Value) -> bool {
 /// - `--legacy` is set, OR
 /// - the file is part of a fav.toml project, OR
 /// - the file uses `import rune` declarations.
-pub fn cmd_run(file: Option<&str>, db_url: Option<&str>, legacy: bool, verbose: bool, trace: bool) {
+pub fn cmd_run(file: Option<&str>, db_url: Option<&str>, legacy: bool, verbose: bool, trace: bool, no_tap: bool) {
     let verbose_level = load_run_config_verbose(file, verbose, trace);
+
+    if no_tap {
+        crate::middle::compiler::set_no_tap_mode(true);
+    }
 
     // v9.0.0: --legacy is deprecated. Warn if used.
     if legacy {
@@ -1199,7 +1203,7 @@ pub fn cmd_run(file: Option<&str>, db_url: Option<&str>, legacy: bool, verbose: 
 // with legacy=false.
 
 pub fn cmd_run_self_hosted(file: Option<&str>, db_url: Option<&str>) {
-    cmd_run(file, db_url, false, false, false);
+    cmd_run(file, db_url, false, false, false, false);
 }
 
 pub fn cmd_build(file: Option<&str>, out: Option<&str>, target: Option<&str>) {
@@ -26761,6 +26765,109 @@ test "snapshot test" {
 
         // Cleanup
         let _ = std::fs::remove_file(snap_path);
+    }
+}
+
+// ── v168000_tests (v16.8.0) — tap / inspect パイプライン演算子 ────────────────
+#[cfg(test)]
+mod v168000_tests {
+    use super::{build_artifact, exec_artifact_main};
+    use crate::frontend::parser::Parser;
+    use crate::middle::compiler::{set_no_tap_mode, compile_program};
+    use crate::backend::codegen::codegen_program;
+
+    fn run_pipeline_src(src: &str) -> crate::value::Value {
+        let program = Parser::parse_str(src, "test.fav").expect("parse");
+        let artifact = build_artifact(&program);
+        exec_artifact_main(&artifact, None).expect("exec")
+    }
+
+    #[test]
+    fn version_is_16_8_0() {
+        let cargo = include_str!("../Cargo.toml");
+        assert!(cargo.contains("\"16.8.0\""), "Cargo.toml should have version 16.8.0");
+    }
+
+    #[test]
+    fn tap_passes_value_through() {
+        // tap should not modify the value flowing through the pipeline
+        let src = r#"
+stage AddOne: Int -> Int = |x| { x + 1 }
+
+seq Pipeline = AddOne |> tap(|v| IO.println("tapped")) |> AddOne
+
+public fn main() -> Int {
+    1 |> Pipeline
+}
+"#;
+        let result = run_pipeline_src(src);
+        assert_eq!(result, crate::value::Value::Int(3), "tap should pass value through: 1+1+1=3");
+    }
+
+    #[test]
+    fn tap_calls_observer_does_not_crash() {
+        // tap with an observer that uses io.println — must not crash
+        let src = r#"
+stage Identity: Int -> Int = |x| { x }
+
+seq Pipeline = Identity |> tap(|v| IO.println("observer called"))
+
+public fn main() -> Int {
+    42 |> Pipeline
+}
+"#;
+        let result = run_pipeline_src(src);
+        assert_eq!(result, crate::value::Value::Int(42), "tap should pass 42 through");
+    }
+
+    #[test]
+    fn inspect_passes_value_through() {
+        // inspect should not modify the value
+        let src = r#"
+stage Double: Int -> Int = |x| { x * 2 }
+
+seq Pipeline = Double |> inspect |> Double
+
+public fn main() -> Int {
+    3 |> Pipeline
+}
+"#;
+        let result = run_pipeline_src(src);
+        assert_eq!(result, crate::value::Value::Int(12), "inspect should pass value through: 3*2*2=12");
+    }
+
+    #[test]
+    fn no_tap_flag_skips_observer() {
+        // With no_tap=true, tap compiles as identity — result should still be correct
+        let src = r#"
+stage AddOne: Int -> Int = |x| { x + 1 }
+
+seq Pipeline = AddOne |> tap(|v| IO.println("should not print")) |> AddOne
+
+public fn main() -> Int {
+    1 |> Pipeline
+}
+"#;
+        set_no_tap_mode(true);
+        let program = Parser::parse_str(src, "test.fav").expect("parse");
+        let ir = compile_program(&program);
+        let artifact = codegen_program(&ir);
+        set_no_tap_mode(false);
+        let result = exec_artifact_main(&artifact, None).expect("exec");
+        assert_eq!(result, crate::value::Value::Int(3), "no_tap: value should still pass through: 1+1+1=3");
+    }
+
+    #[test]
+    fn inspect_parse_and_compile() {
+        // Verify that `inspect` parses correctly as a FlwStep
+        let src = r#"
+stage Identity: Int -> Int = |x| { x }
+seq Pipeline = Identity |> inspect
+"#;
+        let program = Parser::parse_str(src, "test.fav").expect("parse");
+        assert!(!program.items.is_empty(), "program should parse");
+        let ir = compile_program(&program);
+        assert!(!ir.fns.is_empty(), "should produce IR functions");
     }
 }
 

@@ -179,6 +179,9 @@ fn lower_flw_step(step: &ast::FlwStep) -> Value {
             let ns: Vec<Value> = names.iter().map(|n| sv(n)).collect();
             v1("SPar", vm_list(ns))
         }
+        // tap/inspect are Rust-level constructs; lower as no-op stage markers
+        ast::FlwStep::Tap(_) => v1("SStage", sv("tap")),
+        ast::FlwStep::Inspect => v1("SStage", sv("inspect")),
     }
 }
 

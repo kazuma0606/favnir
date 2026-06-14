@@ -286,6 +286,7 @@ fn main_impl() {
             let mut legacy = false;
             let mut verbose = false;
             let mut trace = false;
+            let mut no_tap = false;
             let mut file_idx = 2usize;
             let mut i = 2usize;
             while i < args.len() {
@@ -329,11 +330,17 @@ fn main_impl() {
                         i += 1;
                         file_idx = i;
                     }
+                    "--no-tap" => {
+                        // Compile tap/inspect steps as identity (zero cost in production, v16.8.0)
+                        no_tap = true;
+                        i += 1;
+                        file_idx = i;
+                    }
                     _ => break,
                 }
             }
             let file = args.get(file_idx).map(|s| s.as_str());
-            cmd_run(file, db_path.as_deref(), legacy, verbose, trace);
+            cmd_run(file, db_path.as_deref(), legacy, verbose, trace, no_tap);
         }
 
         Some("build") => {

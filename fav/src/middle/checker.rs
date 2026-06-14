@@ -3320,6 +3320,9 @@ impl Checker {
                     // downstream stage is left to the Favnir pipeline checker.
                     current_output = Some(Type::Unknown);
                 }
+                FlwStep::Tap(_) | FlwStep::Inspect => {
+                    // tap/inspect pass the value through unchanged — no type change
+                }
             }
         }
 
@@ -3327,10 +3330,12 @@ impl Checker {
         let first_stage = fd.steps.first().and_then(|s| match s {
             FlwStep::Stage(n) => Some(n.as_str()),
             FlwStep::Par(names) => names.first().map(|s| s.as_str()),
+            FlwStep::Tap(_) | FlwStep::Inspect => None,
         });
         let last_stage = fd.steps.last().and_then(|s| match s {
             FlwStep::Stage(n) => Some(n.as_str()),
             FlwStep::Par(names) => names.last().map(|s| s.as_str()),
+            FlwStep::Tap(_) | FlwStep::Inspect => None,
         });
         if let (Some(first_name), Some(last_name)) = (first_stage, last_stage) {
             if let (Some(first_ty), Some(last_ty)) = (

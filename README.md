@@ -51,8 +51,11 @@ v14.8.0（2026-06-12）で、Rune ファイル整備（--legacy 明示化 + fs.f
 v15.0.0〜v15.1.5（2026-06-13〜14）で、CrossCloud E2E デモ + 認証層（HMAC / KMS ECDSA P-256）を実証しました。
 v15.2.0〜v15.4.0（2026-06-14）で、GCP BigQuery・`fav test` DSL・Kafka/MSK Rune を追加しました。
 v15.5.0（2026-06-14）で、`fav deploy`（AWS Lambda デプロイ CLI）を完成しました。
-v16.0.0（2026-06-14）で、**Production Multi-Cloud** マイルストーンを宣言します。
+v16.0.0（2026-06-14）で、**Production Multi-Cloud** マイルストーンを宣言しました。
 AWS / Azure / GCP / Snowflake の 4 クラウドと Kafka/MSK ストリーミングを型安全なパイプラインで統一的に扱えます。
+v16.1.0〜v16.8.0（2026-06-14）で、**Language Ergonomics** シリーズを完了しました。
+f-string 補間 / record spread / stdlib 拡充（DateTime / List.sort_by 等）/ 型エイリアス / namespace alias / `assert_eq` / `test_group` / snapshot テスト / `|> tap(fn)` 演算子が揃い、「書きたくなる言語」への転換を実現しました。
+v17.0.0（2026-06-14）で、**Language Ergonomics** マイルストーンを宣言します。
 
 ---
 
@@ -86,9 +89,9 @@ seq UserImport = ParseCsv |> ValidateRow |> SaveToDb
 
 ## 現在の状態
 
-**v16.0.0（2026-06-14）— Production Multi-Cloud マイルストーン宣言**
+**v17.0.0（2026-06-14）— Language Ergonomics マイルストーン宣言**
 
-テスト: **1572+ 件すべて通過**
+テスト: **1620+ 件すべて通過**
 
 | 機能カテゴリ | 機能 | 状態 |
 |---|---|---|
@@ -99,10 +102,20 @@ seq UserImport = ParseCsv |> ValidateRow |> SaveToDb
 | | `interface` / `impl ... for` / `type T with Iface` | ✓ |
 | | `par [A, B] \|> Merge` 並列 stage 実行 | ✓ |
 | | `collect` / `yield` / クロージャ / `expr?` | ✓ |
+| | f-string 補間（`f"Hello, {name}!"`、`f"""..."""` 三重クォート）（v16.2.0） | ✓ |
+| | レコード更新構文（`{ ...base, field: val }`）（v16.3.0） | ✓ |
+| | 型エイリアス（`alias Email = String`、ジェネリクス対応）（v16.5.0） | ✓ |
+| | Namespace Alias（`use String as S`）（v16.6.0） | ✓ |
 | **パイプライン** | `stage` / `seq` / `\|>` | ✓ |
+| | `\|> tap(observer_fn)` / `\|> inspect`（デバッグ tap、`--no-tap` で本番ゼロコスト）（v16.8.0） | ✓ |
 | | `abstract stage` / `abstract seq`（依存注入） | ✓ |
 | | `fav explain --lineage`（静的リネージ解析） | ✓ |
 | **Python トランスパイラ** | `fav transpile --target python` — Fav → Python + `pyproject.toml` 自動生成（boto3 / psycopg2 対応） | ✓ |
+| **テスト** | `fav test` — `assert_eq` / `test_group` / `assert_snapshot` / `--update-snapshots`（v16.7.0） | ✓ |
+| **標準ライブラリ** | `List.sort_by` / `List.distinct` / `List.sum_by` 等 9 関数（v16.4.0） | ✓ |
+| | `DateTime.now` / `DateTime.parse` / `DateTime.format` 等 12 関数（v16.4.0） | ✓ |
+| | `String.format_int` / `String.format_float` / `String.split_once`（v16.4.0） | ✓ |
+| | `Math.round_to` / `Math.log` / `Math.log2` / `Math.log10`（v16.4.0） | ✓ |
 | **CLI ツール** | `fav run` / `fav check` / `fav test` / `fav bench` | ✓ |
 | | `fav fmt`（冪等コードフォーマッタ） | ✓ |
 | | `fav lint`（W001〜W005 静的解析） | ✓ |
@@ -318,6 +331,15 @@ fav explain --lineage pipeline.fav  # リネージ可視化
 | v15.4.0 | Kafka / MSK Rune（`!Stream` エフェクト） | 完了 |
 | v15.5.0 | `fav deploy`（AWS Lambda デプロイ CLI） | 完了 |
 | **v16.0.0** | **Production Multi-Cloud マイルストーン宣言** | **完了** |
+| v16.1.0 | エラーメッセージ品質向上（rustc スタイル・Span・typo ヒント） | 完了 |
+| v16.2.0 | f-string 文字列補間（`f"Hello, {name}!"`） | 完了 |
+| v16.3.0 | レコード更新構文（`{ ...base, field: val }`） | 完了 |
+| v16.4.0 | 標準ライブラリ拡充（List / String / DateTime / Math） | 完了 |
+| v16.5.0 | 型エイリアス（`alias Email = String`） | 完了 |
+| v16.6.0 | Namespace Alias（`use String as S`） | 完了 |
+| v16.7.0 | fav test 成熟（`assert_eq` / `test_group` / `assert_snapshot`） | 完了 |
+| v16.8.0 | tap / inspect パイプライン演算子（`\|> tap(fn)` / `--no-tap`） | 完了 |
+| **v17.0.0** | **Language Ergonomics マイルストーン宣言** | **完了** |
 
 ---
 

@@ -4,6 +4,150 @@ Favnir のバージョン履歴。形式は [Keep a Changelog](https://keepachan
 
 ---
 
+## [v17.0.0] — 2026-06-14 — Language Ergonomics マイルストーン宣言
+
+### Added
+- v16.x シリーズ集大成：f-string / record spread / stdlib 拡充 / 型エイリアス / namespace alias / fav test 成熟 / tap 演算子が揃い Language Ergonomics を宣言
+- `site/content/docs/stdlib/list.mdx` / `string.mdx` / `datetime.mdx` / `math.mdx` v16.4.0 内容反映
+- `README.md` / `CHANGELOG.md` 全面更新（v16.1.0〜v17.0.0）
+
+### Internal
+- Cargo.toml version: `17.0.0`
+- `v170000_tests`: 5 件追加
+
+---
+
+## [v16.8.0] — 2026-06-14 — tap / inspect パイプライン演算子
+
+### Added
+- `FlwStep::Tap(Box<Expr>)` / `FlwStep::Inspect` を AST に追加（ソフトキーワード）
+- `|> tap(observer_fn)` — 値を変換せず副作用（ログ等）だけ実行してそのまま通す
+- `|> inspect` — `[inspect] <value>` 形式で標準出力に出力する組み込み tap
+- `inspect_debug` VM プリミティブ
+- `CompileCtx.no_tap` フィールド + `set_no_tap_mode()` スレッドローカル
+- `fav run --no-tap` — tap/inspect を identity にコンパイルしてゼロオーバーヘッド化
+- `IRExpr::Block` + `IRStmt::Bind` + `IRStmt::Expr` で実装（新 VM opcode 不要）
+- exhaustive match 更新: `checker.rs` / `ast_lower_checker.rs` / `emit_python.rs`
+- `site/content/docs/language/pipeline.mdx` に tap/inspect セクション追加
+
+### Internal
+- Cargo.toml version: `16.8.0`
+- `v168000_tests`: 6 件追加
+
+---
+
+## [v16.7.0] — 2026-06-14 — fav test 成熟（assert_eq / test_group / スナップショット）
+
+### Added
+- `test_group "name" { test ... }` — 関連テストのグループ化構文
+- `assert_eq(actual, expected)` — `vmvalue_repr` で文字列化して比較、不一致で詳細エラー
+- `assert_approx_eq(actual, expected, epsilon)` — Float 近似比較
+- `assert_contains(list, elem)` — リスト内要素存在確認
+- `assert_length(list, n)` — リスト長確認
+- `assert_str_contains(s, substring)` — 文字列部分一致確認
+- `assert_str_starts_with(s, prefix)` — 文字列プレフィックス確認
+- `assert_err_eq(result, expected_msg)` — エラー内容の文字列一致確認
+- `assert_snapshot(value, name)` — `.snap/{name}.snap` の作成・比較
+- `fav test --update-snapshots` — 全スナップショットを上書き更新
+- `collect_test_cases` を 4-tuple `(path, display_name, fn_name, prog)` に変更
+- `site/content/docs/language/testing.mdx` 全面更新（全アサート・snapshot ワークフロー）
+
+### Internal
+- Cargo.toml version: `16.7.0`
+- `v167000_tests`: 5 件追加（`set_var` は Rust 2024 edition で unsafe）
+
+---
+
+## [v16.6.0] — 2026-06-14 — Namespace Alias（use String as S）
+
+### Added
+- `use String as S` / `use List as L` 構文（ソフトキーワード `as`）
+- `TokenKind::As`、`Item::UseAlias { alias, namespace, span }`
+- `namespace_aliases: HashMap<String, String>` in `CompileCtx` + `Checker`
+- `check_builtin_apply` と `compile_expr FieldAccess` でエイリアス解決
+- `parse_import_decl` の `import "path" as alias` も `TokenKind::As` 対応
+- `site/content/docs/language/modules.mdx` 新規作成
+
+### Internal
+- Cargo.toml version: `16.6.0`
+- `v166000_tests`: 5 件追加
+
+---
+
+## [v16.5.0] — 2026-06-14 — 型エイリアス（alias キーワード）
+
+### Added
+- `alias Email = String` — 型エイリアス宣言（`alias` キーワード）
+- `alias Result2<T> = Result<T, String>` — ジェネリクスエイリアス
+- `Alias` トークン、`Item::AliasDecl { name, params, ty, span }`
+- `alias_env: HashMap<String, (Vec<String>, TypeExpr)>` in `CompileCtx` / `Checker`
+- `resolve_type_expr_with_self` / `resolve_type_expr_with_subst` 双方に alias 解決追加
+- compiler.rs は catch-all で自動スキップ
+- `site/content/docs/language/type-alias.mdx` 新規作成
+
+### Internal
+- Cargo.toml version: `16.5.0`
+- `v165000_tests`: 5 件追加
+
+---
+
+## [v16.4.0] — 2026-06-14 — 標準ライブラリ拡充（List / String / DateTime / Math）
+
+### Added
+- **List**: `sort_by` / `sort_by_desc` / `distinct` / `distinct_by` / `count_where` / `sum_by` / `max_by` / `min_by` / `unzip`（高階関数）
+- **String**: `split_once` / `replace_first` / `format_int(n, width, pad)` / `format_float(f, decimals)`
+- **DateTime**: 新モジュール全 12 関数（`now` / `parse` / `format` / `add_days` / `add_hours` / `diff_days` / `year` / `month` / `day` / `weekday` / `timestamp` / `from_timestamp`）。内部表現は Unix timestamp（Int）。`chrono` クレートを使用。
+- **Math**: `round_to(f, n)` / `log(f)` / `log2(f)` / `log10(f)`
+- `compiler.rs` / `checker.rs` に `DateTime` 名前空間登録
+
+### Internal
+- Cargo.toml version: `16.4.0`
+- `v164000_tests`: 6 件追加
+
+---
+
+## [v16.3.0] — 2026-06-14 — レコード更新構文（{ ...base, field: val }）
+
+### Added
+- `{ ...base, field: val }` — レコードスプレッド / 更新構文
+- `DotDotDot` トークン、`Expr::RecordSpread { base, overrides }`
+- `IRExpr::RecordSpread`、`MergeRecord = 0x5C` VM opcode
+- `remap_string_operands` に `MergeRecord` 追加（未追加だと後続 GetField が壊れる問題を修正）
+
+### Internal
+- Cargo.toml version: `16.3.0`
+- `v163000_tests`: 6 件追加
+
+---
+
+## [v16.2.0] — 2026-06-14 — f-string 文字列補間
+
+### Added
+- `f"Hello, {name}!"` — f-string プレフィックス付き文字列補間
+- `f"""..."""` — 三重クォート f-string
+- `FStringRaw` トークン、`lex_fstring_triple`、`lower_fstring`（コンパイル時に `String.concat` 連鎖へ展開、VM 変更なし）
+
+### Internal
+- Cargo.toml version: `16.2.0`
+- `v162000_tests`: 5 件追加
+
+---
+
+## [v16.1.0] — 2026-06-14 — エラーメッセージ品質向上
+
+### Added
+- rustc スタイルのエラー表示（`-->` ファイル・行・列、`^` アンダーライン）
+- `Span { line, col, len }` を AST 全ノードに追加
+- typo ヒント（Levenshtein 距離 ≤ 2 の候補を最大 3 件表示）
+- `= hint:` / `= help:` メッセージ付与
+- エラーコード URL（`https://favnir.dev/errors/E0xxx`）
+
+### Internal
+- Cargo.toml version: `16.1.0`
+- `v161000_tests`: 5 件追加
+
+---
+
 ## [v16.0.0] — 2026-06-14 — Production Multi-Cloud マイルストーン宣言
 
 ### Added

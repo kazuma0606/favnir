@@ -26871,6 +26871,42 @@ seq Pipeline = Identity |> inspect
     }
 }
 
+// ── v170000_tests (v17.0.0) — Language Ergonomics マイルストーン宣言 ──────────
+#[cfg(test)]
+mod v170000_tests {
+    #[test]
+    fn version_is_17_0_0() {
+        let cargo = include_str!("../Cargo.toml");
+        assert!(cargo.contains("\"17.0.0\""), "Cargo.toml should have version 17.0.0");
+    }
+
+    #[test]
+    fn changelog_has_v16_entries() {
+        let changelog = include_str!("../../CHANGELOG.md");
+        for entry in &["v16.1", "v16.2", "v16.3", "v16.4", "v16.5", "v16.6", "v16.7", "v16.8"] {
+            assert!(changelog.contains(entry), "CHANGELOG.md should contain {}", entry);
+        }
+    }
+
+    #[test]
+    fn readme_mentions_fstring() {
+        let readme = include_str!("../../README.md");
+        assert!(readme.contains("f\""), "README.md should mention f-string syntax");
+    }
+
+    #[test]
+    fn readme_mentions_record_spread() {
+        let readme = include_str!("../../README.md");
+        assert!(readme.contains("..."), "README.md should mention record spread syntax");
+    }
+
+    #[test]
+    fn stdlib_datetime_doc_exists() {
+        let datetime_doc = include_str!("../../site/content/docs/stdlib/datetime.mdx");
+        assert!(datetime_doc.contains("DateTime.now"), "datetime.mdx should contain DateTime.now");
+    }
+}
+
 // ── v165000_tests (v16.5.0) — 型エイリアス（alias キーワード）────────────────
 #[cfg(test)]
 mod v165000_tests {

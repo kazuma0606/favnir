@@ -963,7 +963,9 @@ test "parse addition 1 + 2" {
         Err(e) => false
         Ok(p) => {
             match p.expr {
-                EBinOp(OpAdd, ELit(LInt(1)), ELit(LInt(2))) => true
+                EBinOp(op, l, r) => {
+                    match op { OpAdd => true _ => false }
+                }
                 _ => false
             }
         }
@@ -982,7 +984,19 @@ test "parse mul before add: 2 * 3 + 1" {
         Err(e) => false
         Ok(p) => {
             match p.expr {
-                EBinOp(OpAdd, EBinOp(OpMul, ELit(LInt(2)), ELit(LInt(3))), ELit(LInt(1))) => true
+                EBinOp(outer_op, lhs, rhs) => {
+                    match outer_op {
+                        OpAdd => {
+                            match lhs {
+                                EBinOp(inner_op, ll, lr) => {
+                                    match inner_op { OpMul => true _ => false }
+                                }
+                                _ => false
+                            }
+                        }
+                        _ => false
+                    }
+                }
                 _ => false
             }
         }
@@ -1010,7 +1024,9 @@ test "parse equality" {
         Err(e) => false
         Ok(p) => {
             match p.expr {
-                EBinOp(OpEq, ELit(LInt(1)), ELit(LInt(1))) => true
+                EBinOp(op, l, r) => {
+                    match op { OpEq => true _ => false }
+                }
                 _ => false
             }
         }

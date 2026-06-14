@@ -1,0 +1,34 @@
+---
+title: "E0013: where constraint failed"
+description: where バリデーター制約に違反したときに発生するエラー
+---
+
+# E0013: where constraint failed
+
+## 概要
+
+`where` 句で定義されたバリデーション制約に違反する値を渡したときに発生します。
+
+## エラー例
+
+```fav
+type Age(Int) where self > 0 and self < 150
+
+public fn main() -> Age {
+  Age(-5)  // E0013: where constraint failed
+}
+```
+
+## 修正方法
+
+```fav
+type Age(Int) where self > 0 and self < 150
+
+public fn main() -> Age {
+  Age(25)  // OK
+}
+```
+
+## 関連エラー
+
+- [E0009](/docs/errors/E0009): type mismatch

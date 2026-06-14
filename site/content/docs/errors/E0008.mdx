@@ -1,0 +1,35 @@
+---
+title: "E0008: wrong argument count"
+description: 関数の引数の数が一致しないときに発生するエラー
+---
+
+# E0008: wrong argument count
+
+## 概要
+
+関数の定義と呼び出しで引数の数が一致しないときに発生します。
+
+## エラー例
+
+```fav
+fn add(a: Int, b: Int) -> Int { a + b }
+
+public fn main() -> Int {
+  add(1, 2, 3)  // E0008: wrong argument count: expected 2, got 3
+}
+```
+
+## 修正方法
+
+```fav
+fn add(a: Int, b: Int) -> Int { a + b }
+
+public fn main() -> Int {
+  add(1, 2)  // OK
+}
+```
+
+## 関連エラー
+
+- [E0007](/docs/errors/E0007): undefined function
+- [E0009](/docs/errors/E0009): type mismatch

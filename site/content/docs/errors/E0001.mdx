@@ -1,0 +1,51 @@
+---
+title: "E0001: undefined variable"
+description: 未定義の変数を参照したときに発生するエラー
+---
+
+# E0001: undefined variable
+
+## 概要
+
+スコープ内に存在しない変数名を参照したときに発生します。
+
+## エラー例
+
+```fav
+public fn main() -> Int {
+  transform(user_id, name)  // E0001: undefined variable: user_id
+}
+```
+
+**出力:**
+
+```
+error[E0001]: undefined variable: user_id
+ --> src/pipeline.fav:2:13
+  |
+2 |   transform(user_id, name)
+  |             ^^^^^^^ undefined variable: user_id
+  |
+  = help: check the variable name for typos
+  = 参照: https://favnir.dev/errors/E0001
+```
+
+## 原因
+
+- 変数名の typo（例: `userId` と書くべきところを `user_id` と書いた）
+- `bind` で変数を導入する前に参照した
+- スコープ外の変数を参照しようとした
+
+## 修正方法
+
+```fav
+public fn main() -> Int {
+  bind user_id <- load_user_id()
+  transform(user_id, name)  // OK
+}
+```
+
+## 関連エラー
+
+- [E0007](/docs/errors/E0007): undefined function
+- [E0018](/docs/errors/E0018): rebind not allowed

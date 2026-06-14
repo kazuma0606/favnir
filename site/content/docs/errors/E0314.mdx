@@ -1,0 +1,39 @@
+---
+title: "E0314: missing !AWS effect"
+description: AWS 操作を行う関数に !AWS エフェクト宣言がないときに発生するエラー
+---
+
+# E0314: missing !AWS effect
+
+## 概要
+
+AWS サービス（S3, SQS, DynamoDB 等）にアクセスする関数が `!AWS` エフェクトを宣言していないときに発生します。
+
+## エラー例
+
+```fav
+import "runes/aws/s3"
+
+public fn save(data: String) -> Result<Unit, String> {  // E0314: missing !AWS effect
+  chain _ <- S3.put("my-bucket", "key", data)
+  ok(unit)
+}
+```
+
+## 修正方法
+
+`!AWS` エフェクトを関数シグネチャに追加する:
+
+```fav
+import "runes/aws/s3"
+
+public fn save(data: String) !AWS -> Result<Unit, String> {  // OK
+  chain _ <- S3.put("my-bucket", "key", data)
+  ok(unit)
+}
+```
+
+## 関連エラー
+
+- [E0252](/docs/errors/E0252): unknown effect
+- [E0319](/docs/errors/E0319): missing !Stream effect

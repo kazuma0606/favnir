@@ -1,0 +1,52 @@
+---
+title: "E0322: Display not implemented"
+description: f-string で表示できない型を使用したときに発生するエラー
+---
+
+# E0322: Display not implemented
+
+## 概要
+
+f-string（`f"..."` 構文）で使用できない型の値を埋め込もうとしたときに発生します。
+
+## f-string で使用可能な型
+
+| 型 | 例 |
+|---|---|
+| `String` | `f"hello {name}"` |
+| `Int` | `f"count: {count}"` |
+| `Float` | `f"ratio: {ratio}"` |
+| `Bool` | `f"done: {done}"` |
+
+## エラー例
+
+```fav
+type Row { name: String, values: List<Int> }
+
+public fn show(row: Row) -> String {
+  f"row: {row}"  // E0322: Display not implemented for Row
+}
+```
+
+## 修正方法
+
+フィールドを個別に文字列化する:
+
+```fav
+public fn show(row: Row) -> String {
+  f"name: {row.name}"  // OK
+}
+```
+
+または `String.concat` / `String.join` を使う:
+
+```fav
+public fn show(row: Row) -> String {
+  let vals = String.join(List.map(row.values, Int.to_string), ", ")
+  f"name={row.name} values=[{vals}]"
+}
+```
+
+## 関連エラー
+
+- [E0009](/docs/errors/E0009): type mismatch

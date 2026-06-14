@@ -132,6 +132,7 @@ pub fn msgs_to_type_errors(msgs: Vec<String>) -> Vec<TypeError> {
                 code,
                 message: msg,
                 span: empty_span.clone(),
+                hints: vec![],
             }
         })
         .collect()

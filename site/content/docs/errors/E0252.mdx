@@ -1,0 +1,44 @@
+---
+title: "E0252: unknown effect"
+description: 未定義のエフェクトを使用したときに発生するエラー
+---
+
+# E0252: unknown effect
+
+## 概要
+
+関数宣言で使用したエフェクトが未定義のときに発生します。
+
+## エラー例
+
+```fav
+public fn upload() !S3 -> Result<Unit, String> {  // E0252: unknown effect: S3
+  ok(unit)
+}
+```
+
+## 使用可能なエフェクト
+
+| エフェクト | 説明 |
+|---|---|
+| `!IO` | 標準入出力、ファイル操作 |
+| `!Db` | データベースアクセス |
+| `!AWS` | AWS サービス（S3, SQS, DynamoDB 等） |
+| `!Gcp` | Google Cloud（BigQuery 等） |
+| `!Azure` | Azure サービス |
+| `!Http` | HTTP/REST API |
+| `!Llm` | LLM（Claude / OpenAI）呼び出し |
+| `!Stream` | Kafka / ストリーミング |
+
+## 修正方法
+
+```fav
+public fn upload() !AWS -> Result<Unit, String> {  // OK
+  ok(unit)
+}
+```
+
+## 関連エラー
+
+- [E0314](/docs/errors/E0314): missing !AWS effect
+- [E0319](/docs/errors/E0319): missing !Stream effect

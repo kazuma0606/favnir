@@ -1,0 +1,39 @@
+---
+title: "E0319: missing !Stream effect"
+description: Kafka ストリーミング操作を行う関数に !Stream エフェクト宣言がないときに発生するエラー
+---
+
+# E0319: missing !Stream effect
+
+## 概要
+
+Kafka / MSK ストリーミング操作を行う関数が `!Stream` エフェクトを宣言していないときに発生します。
+
+## エラー例
+
+```fav
+import "runes/kafka/kafka"
+
+public fn publish(msg: String) -> Result<Unit, String> {  // E0319: missing !Stream effect
+  chain _ <- Kafka.produce("my-topic", msg)
+  ok(unit)
+}
+```
+
+## 修正方法
+
+`!Stream` エフェクトを関数シグネチャに追加する:
+
+```fav
+import "runes/kafka/kafka"
+
+public fn publish(msg: String) !Stream -> Result<Unit, String> {  // OK
+  chain _ <- Kafka.produce("my-topic", msg)
+  ok(unit)
+}
+```
+
+## 関連エラー
+
+- [E0252](/docs/errors/E0252): unknown effect
+- [E0314](/docs/errors/E0314): missing !AWS effect

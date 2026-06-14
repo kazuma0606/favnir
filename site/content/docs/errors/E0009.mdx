@@ -1,0 +1,38 @@
+---
+title: "E0009: type mismatch"
+description: 宣言された型と推論された型が一致しないときに発生するエラー
+---
+
+# E0009: type mismatch
+
+## 概要
+
+関数の宣言された戻り値型と、実際に返される値の型が一致しないときに発生します。
+
+## エラー例
+
+```fav
+public fn main() -> String {
+  42  // E0009: type mismatch: expected String, got Int
+}
+```
+
+## 修正方法
+
+```fav
+public fn main() -> String {
+  "hello"  // OK
+}
+```
+
+あるいは宣言型を変更する:
+
+```fav
+public fn main() -> Int {
+  42  // OK
+}
+```
+
+## 関連エラー
+
+- [E0008](/docs/errors/E0008): wrong argument count

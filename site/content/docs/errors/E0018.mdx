@@ -1,0 +1,43 @@
+---
+title: "E0018: rebind not allowed"
+description: bind で同名変数への再束縛が禁止されているときに発生するエラー
+---
+
+# E0018: rebind not allowed
+
+## 概要
+
+`bind` を使って既に束縛済みの変数名に再代入しようとしたときに発生します。
+Favnir の変数は不変（immutable）です。
+
+## エラー例
+
+```fav
+public fn process() -> Result<String, String> {
+  bind result <- fetch_data()
+  bind result <- transform(result)  // E0018: rebind not allowed: result
+  ok(result)
+}
+```
+
+## 修正方法
+
+別の変数名を使う:
+
+```fav
+public fn process() -> Result<String, String> {
+  bind raw <- fetch_data()
+  bind processed <- transform(raw)  // OK
+  ok(processed)
+}
+```
+
+または結果を捨てる（戻り値が不要な場合）:
+
+```fav
+bind _result <- some_effect()
+```
+
+## 関連エラー
+
+- [E0001](/docs/errors/E0001): undefined variable

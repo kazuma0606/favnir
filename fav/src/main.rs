@@ -324,6 +324,11 @@ fn main_impl() {
                         i += 1;
                         file_idx = i;
                     }
+                    "--no-color" => {
+                        // Plain text output (default; ANSI color is opt-in in future versions).
+                        i += 1;
+                        file_idx = i;
+                    }
                     _ => break,
                 }
             }
@@ -456,6 +461,11 @@ fn main_impl() {
                     }
                     "--report" => {
                         report = true;
+                        i += 1;
+                    }
+                    "--no-color" => {
+                        // Plain text output (default; ANSI color is opt-in in future versions).
+                        // Also respected when NO_COLOR env var is set.
                         i += 1;
                     }
                     "--dir" => {

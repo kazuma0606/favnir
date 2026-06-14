@@ -84,9 +84,13 @@ fn format_diagnostic(source: &str, error: &crate::middle::checker::TypeError) ->
         col_offset,
         underline,
     );
+    for hint in &error.hints {
+        out.push_str(&format!("\n  = ヒント: {}", hint));
+    }
     for hint in get_help_text(error.code) {
         out.push_str(&format!("\n  = help: {}", hint));
     }
+    out.push_str(&format!("\n  = 参照: https://favnir.dev/errors/{}", error.code));
     out
 }
 
@@ -26238,5 +26242,79 @@ mod v140005_tests {
         let artifact = build_artifact(&prog);
         let result = exec_artifact_main_with_emits(&artifact);
         assert!(result.is_ok(), "main(ctx: AppCtx) should run via VM: {:?}", result);
+    }
+}
+
+// ── v161000_tests (v16.1.0) — エラーメッセージ品質向上 ────────────────────────
+#[cfg(test)]
+mod v161000_tests {
+    use crate::frontend::parser::Parser;
+    use crate::middle::ast_lower_checker::lower_program;
+    use crate::checker_fav_runner::{msgs_to_type_errors, run_checker_fav};
+
+    /// Run source through checker.fav and format the first error with format_diagnostic.
+    fn check_source_to_string(src: &str) -> String {
+        let prog = Parser::parse_str(src, "test.fav").expect("parse");
+        let prog_vm = lower_program(&prog);
+        match run_checker_fav(prog_vm) {
+            Ok(()) => String::new(),
+            Err(msgs) => {
+                let errors = msgs_to_type_errors(msgs);
+                if errors.is_empty() {
+                    return String::new();
+                }
+                super::format_diagnostic(src, &errors[0])
+            }
+        }
+    }
+
+    #[test]
+    fn version_is_16_1_0() {
+        let cargo = std::fs::read_to_string("Cargo.toml").unwrap();
+        assert!(
+            cargo.contains("version = \"16.1.0\""),
+            "Cargo.toml version should be 16.1.0, got: {}",
+            cargo.lines().find(|l| l.contains("version")).unwrap_or("")
+        );
+    }
+
+    #[test]
+    fn error_output_has_line_number() {
+        let output = check_source_to_string("public fn main() -> Int { undefined_var }");
+        assert!(
+            output.contains(" --> "),
+            "error output must contain ' --> ', got: {}",
+            output
+        );
+    }
+
+    #[test]
+    fn error_output_has_caret() {
+        let output = check_source_to_string("public fn main() -> Int { undefined_var }");
+        assert!(
+            output.contains('^'),
+            "error output must contain '^', got: {}",
+            output
+        );
+    }
+
+    #[test]
+    fn error_output_has_hint() {
+        let output = check_source_to_string("public fn main() -> Int { undefined_var }");
+        assert!(
+            output.contains("help:") || output.contains("ヒント:"),
+            "error output must contain hint text, got: {}",
+            output
+        );
+    }
+
+    #[test]
+    fn error_output_has_url() {
+        let output = check_source_to_string("public fn main() -> Int { undefined_var }");
+        assert!(
+            output.contains("favnir.dev/errors/"),
+            "error output must contain URL, got: {}",
+            output
+        );
     }
 }

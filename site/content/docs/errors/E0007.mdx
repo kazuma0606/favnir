@@ -1,0 +1,39 @@
+---
+title: "E0007: undefined function"
+description: 未定義の関数を呼び出したときに発生するエラー
+---
+
+# E0007: undefined function
+
+## 概要
+
+定義されていない関数を呼び出したときに発生します。
+
+## エラー例
+
+```fav
+public fn main() -> Int {
+  transfomr(42)  // E0007: undefined function: transfomr
+}
+```
+
+## 原因
+
+- 関数名の typo（例: `transform` と書くべきところを `transfomr` と書いた）
+- `import` 宣言が不足している
+- 標準ライブラリ関数の名前空間が誤っている（例: `List.mpa` → `List.map`）
+
+## 修正方法
+
+```fav
+fn transform(x: Int) -> Int { x * 2 }
+
+public fn main() -> Int {
+  transform(42)  // OK
+}
+```
+
+## 関連エラー
+
+- [E0001](/docs/errors/E0001): undefined variable
+- [E0008](/docs/errors/E0008): wrong argument count

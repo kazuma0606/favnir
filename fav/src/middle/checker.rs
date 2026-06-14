@@ -745,6 +745,16 @@ impl TyEnv {
         }
         None
     }
+
+    /// All names visible in any scope (for Levenshtein typo candidates).
+    pub fn names(&self) -> Vec<&str> {
+        let mut names: Vec<&str> = self.scopes.iter()
+            .flat_map(|scope| scope.keys().map(|k| k.as_str()))
+            .collect();
+        names.sort_unstable();
+        names.dedup();
+        names
+    }
 }
 
 // ── TypeError (4-19) ──────────────────────────────────────────────────────────
@@ -754,6 +764,8 @@ pub struct TypeError {
     pub code: &'static str,
     pub message: String,
     pub span: Span,
+    /// Dynamic hints (e.g. Levenshtein typo candidates). Shown before static help text.
+    pub hints: Vec<String>,
 }
 
 impl TypeError {
@@ -762,7 +774,13 @@ impl TypeError {
             code,
             message: message.into(),
             span,
+            hints: vec![],
         }
+    }
+
+    pub fn with_hints(mut self, hints: Vec<String>) -> Self {
+        self.hints = hints;
+        self
     }
 }
 
@@ -820,6 +838,30 @@ impl std::fmt::Display for TypeWarning {
             self.code, self.message, self.span.file, self.span.line, self.span.col
         )
     }
+}
+
+// ── levenshtein typo candidates (v16.1.0) ────────────────────────────────────
+
+/// Return names from `candidates` whose Levenshtein distance to `name` is ≤ `threshold`,
+/// up to `max_results`, sorted by distance (closest first).
+pub fn levenshtein_candidates(
+    name: &str,
+    candidates: &[&str],
+    threshold: usize,
+    max_results: usize,
+) -> Vec<String> {
+    let mut matches: Vec<(usize, &str)> = candidates
+        .iter()
+        .filter_map(|&c| {
+            if c == name {
+                return None; // exact match is not a typo
+            }
+            let dist = strsim::levenshtein(name, c);
+            if dist <= threshold { Some((dist, c)) } else { None }
+        })
+        .collect();
+    matches.sort_by_key(|(d, _)| *d);
+    matches.into_iter().take(max_results).map(|(_, s)| s.to_string()).collect()
 }
 
 // ── Checker ───────────────────────────────────────────────────────────────────
@@ -1374,6 +1416,17 @@ impl Checker {
 
     fn type_error(&mut self, code: &'static str, msg: impl Into<String>, span: &Span) {
         self.errors.push(TypeError::new(code, msg, span.clone()));
+    }
+
+    fn type_error_h(
+        &mut self,
+        code: &'static str,
+        msg: impl Into<String>,
+        span: &Span,
+        hints: Vec<String>,
+    ) {
+        self.errors
+            .push(TypeError::new(code, msg, span.clone()).with_hints(hints));
     }
 
     fn type_warning(&mut self, code: &'static str, msg: impl Into<String>, span: &Span) {
@@ -4138,7 +4191,31 @@ impl Checker {
                         ty
                     }
                     None => {
-                        self.type_error("E0102", format!("undefined: `{}`", name), span);
+                        let suggestions: Vec<String> = {
+                            let env_names = self.env.names();
+                            let lowercase: Vec<&str> = env_names
+                                .iter()
+                                .filter(|&&n| {
+                                    n.chars().next().map(|c| c.is_lowercase()).unwrap_or(false)
+                                })
+                                .copied()
+                                .collect();
+                            levenshtein_candidates(name, &lowercase, 2, 3)
+                        };
+                        let hints = if suggestions.is_empty() {
+                            vec!["introduce the variable with `bind x <- expr`".to_string()]
+                        } else {
+                            suggestions
+                                .into_iter()
+                                .map(|s| format!("did you mean `{}`?", s))
+                                .collect()
+                        };
+                        self.type_error_h(
+                            "E0102",
+                            format!("undefined: `{}`", name),
+                            span,
+                            hints,
+                        );
                         Type::Error
                     }
                 };

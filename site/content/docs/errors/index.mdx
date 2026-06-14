@@ -1,0 +1,46 @@
+---
+title: エラーコード一覧
+description: Favnir コンパイラが出力するエラーコードの一覧と説明
+---
+
+# エラーコード一覧
+
+Favnir コンパイラは型チェック・意味解析の結果を `error[Exxxx]` 形式で出力します。
+
+## 出力形式
+
+```
+error[E0001]: undefined variable: user_id
+ --> src/pipeline.fav:12:5
+  |
+12 |   transform(user_id, name)
+  |             ^^^^^^^ undefined variable: user_id
+  |
+  = help: check the variable name for typos
+  = 参照: https://favnir.dev/errors/E0001
+```
+
+## 変数・関数
+
+| コード | メッセージ | 説明 |
+|---|---|---|
+| [E0001](/docs/errors/E0001) | undefined variable | 未定義の変数を参照した |
+| [E0007](/docs/errors/E0007) | undefined function | 未定義の関数を呼び出した |
+| [E0008](/docs/errors/E0008) | wrong argument count | 引数の数が一致しない |
+| [E0009](/docs/errors/E0009) | type mismatch | 宣言された型と推論された型が一致しない |
+| [E0018](/docs/errors/E0018) | rebind not allowed | `bind` で同名変数への再束縛は禁止 |
+
+## エフェクト
+
+| コード | メッセージ | 説明 |
+|---|---|---|
+| [E0252](/docs/errors/E0252) | unknown effect | 未定義のエフェクトを使用した |
+| [E0314](/docs/errors/E0314) | missing !AWS effect | 関数に `!AWS` エフェクトの宣言がない |
+| [E0319](/docs/errors/E0319) | missing !Stream effect | 関数に `!Stream` エフェクトの宣言がない |
+
+## 型・制約
+
+| コード | メッセージ | 説明 |
+|---|---|---|
+| [E0013](/docs/errors/E0013) | where constraint failed | `where` バリデーター制約に違反した |
+| [E0322](/docs/errors/E0322) | Display not implemented | f-string で使用できない型を指定した |

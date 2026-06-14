@@ -1,0 +1,148 @@
+---
+title: "Modules & Imports"
+description: "Namespace aliases, rune imports, and project-level module usage in Favnir"
+---
+
+# Modules & Imports
+
+Favnir organizes code into **namespaces** (built-in modules like `String`, `List`, `Math`) and **runes** (external library modules). You can import runes, alias namespaces for brevity, and compose pipelines across files.
+
+---
+
+## Namespace Alias (`use X as Y`)
+
+Use the `use ... as` syntax to create a short alias for any built-in namespace.
+
+```favnir
+use String as S
+use List as L
+use Math as M
+
+fn greet(name: String) -> String {
+  S.concat("Hello, ", S.concat(name, "!"))
+}
+
+fn sum_positives(nums: List<Int>) -> Int {
+  let positives = L.filter(nums, |n| M.abs(n) == n)
+  L.fold(positives, 0, |acc, n| acc + n)
+}
+```
+
+Multiple aliases can coexist in the same file:
+
+```favnir
+use String as S
+use List as L
+
+fn pipeline(items: List<String>) -> String {
+  let upper = L.map(items, |s| S.to_upper(s))
+  S.join(upper, ", ")
+}
+```
+
+### Rules
+
+- The alias is **file-scoped** — it does not affect other files.
+- The alias is **purely syntactic** — `S.concat` and `String.concat` are identical at runtime.
+- Aliases do not introduce new types; `String` and `S` refer to the same namespace.
+
+---
+
+## Rune Imports (`import "rune-name"`)
+
+Runes are external library modules. Import them with `import`:
+
+```favnir
+import "db"
+import "http"
+import "json"
+```
+
+After importing, use the rune's namespace directly:
+
+```favnir
+import "json"
+
+fn serialize(data: Record) -> String {
+  Json.encode(data)
+}
+```
+
+### Rune Alias
+
+You can give an imported rune a custom alias with `import "path" as Alias`:
+
+```favnir
+import "db" as Database
+
+fn fetch_user(id: Int) -> User !Db {
+  Database.query("SELECT * FROM users WHERE id = ?", [id])
+}
+```
+
+### Selective imports
+
+Import specific symbols from a rune:
+
+```favnir
+use Json.{ encode, decode }
+use List.{ map, filter, fold }
+```
+
+Or import all exported symbols:
+
+```favnir
+use Json.*
+```
+
+---
+
+## Project Imports (`fav.toml`)
+
+For multi-file projects, declare your entry point and modules in `fav.toml`:
+
+```toml
+[project]
+name = "my-pipeline"
+version = "1.0.0"
+entry = "src/main.fav"
+
+[runes]
+db = { path = "runes/db" }
+http = { path = "runes/http" }
+```
+
+Files within the project can import each other using relative paths:
+
+```favnir
+import "src/utils"
+import "src/models/user"
+```
+
+---
+
+## Built-in Namespaces
+
+The following namespaces are available without any import:
+
+| Namespace  | Description                                  |
+|------------|----------------------------------------------|
+| `String`   | String manipulation (concat, split, trim...)  |
+| `List`     | List operations (map, filter, fold, sort...)  |
+| `Map`      | Key-value map operations                      |
+| `Math`     | Numeric functions (abs, floor, ceil, sqrt...) |
+| `DateTime` | Date/time parsing, formatting, arithmetic     |
+| `Json`     | JSON encode/decode                            |
+| `Csv`      | CSV read/write                                |
+| `Result`   | Result combinators (map, flat_map, unwrap...) |
+| `Option`   | Option combinators                            |
+| `T`        | Type validation and schema checking           |
+| `Gen`      | UUID, NanoID generation                       |
+
+---
+
+## See Also
+
+- [Type Alias (`alias`)](/docs/language/type-alias) — structural type aliases
+- [Runes overview](/docs/runes/overview) — external library modules
+- [Project structure](/docs/guides/project-structure) — `fav.toml` reference

@@ -11078,6 +11078,7 @@ impl ExplainPrinter {
                     );
                 }
                 Item::AliasDecl { .. } => {}
+                Item::UseAlias { .. } => {}
                 Item::NamespaceDecl(..)
                 | Item::UseDecl(..)
                 | Item::RuneUse { .. }
@@ -26529,6 +26530,98 @@ public fn main() -> Float {
             }
             other => panic!("expected Float, got {:?}", other),
         }
+    }
+}
+
+// ── v166000_tests (v16.6.0) — モジュールシステム強化（Namespace Alias）────────
+#[cfg(test)]
+mod v166000_tests {
+    use super::{build_artifact, exec_artifact_main};
+    use crate::frontend::parser::Parser;
+    use crate::value::Value;
+
+    fn run(src: &str) -> Value {
+        let program = Parser::parse_str(src, "v166000_test.fav").expect("parse");
+        let artifact = build_artifact(&program);
+        exec_artifact_main(&artifact, None).expect("exec")
+    }
+
+    fn run_str(src: &str) -> String {
+        match run(src) {
+            Value::Str(s) => s,
+            other => panic!("expected Str, got {:?}", other),
+        }
+    }
+
+    fn run_int(src: &str) -> i64 {
+        match run(src) {
+            Value::Int(n) => n,
+            other => panic!("expected Int, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn version_is_16_6_0() {
+        let cargo = std::fs::read_to_string("Cargo.toml").unwrap();
+        assert!(
+            cargo.contains("version = \"16.6.0\""),
+            "Cargo.toml version should be 16.6.0"
+        );
+    }
+
+    #[test]
+    fn namespace_alias_string() {
+        // `use String as S` → S.concat works like String.concat
+        let result = run_str(r#"
+use String as S
+
+public fn main() -> String {
+    S.concat("hello", " world")
+}
+"#);
+        assert_eq!(result, "hello world");
+    }
+
+    #[test]
+    fn namespace_alias_list() {
+        // `use List as L` → L.length works like List.length
+        let result = run_int(r#"
+use List as L
+
+public fn main() -> Int {
+    bind xs <- L.push(L.push(L.push(L.empty(), 10), 20), 30)
+    L.length(xs)
+}
+"#);
+        assert_eq!(result, 3);
+    }
+
+    #[test]
+    fn namespace_alias_math() {
+        // `use Math as M` → M.abs works like Math.abs
+        let result = run_int(r#"
+use Math as M
+
+public fn main() -> Int {
+    M.abs(-42)
+}
+"#);
+        assert_eq!(result, 42);
+    }
+
+    #[test]
+    fn namespace_alias_multi() {
+        // Multiple aliases coexist: use String as S; use List as L
+        let result = run_int(r#"
+use String as S
+use List as L
+
+public fn main() -> Int {
+    bind parts <- S.split("a,b,c", ",")
+    L.length(parts)
+}
+"#);
+        assert_eq!(result, 3);
     }
 }
 

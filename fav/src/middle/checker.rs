@@ -948,6 +948,8 @@ pub struct Checker {
     type_aliases: HashMap<String, TypeExpr>,
     /// `alias` keyword aliases with generic params (v16.5.0): name -> (params, TypeExpr).
     alias_env: HashMap<String, (Vec<String>, TypeExpr)>,
+    /// Namespace aliases: alias_name → real_namespace (v16.6.0).
+    namespace_aliases: HashMap<String, String>,
     /// Type constraint schemas loaded from schemas/*.yaml (v4.1.5).
     pub schemas: ProjectSchemas,
 }
@@ -987,6 +989,7 @@ impl Checker {
             collect_helpers: HashSet::new(),
             type_aliases: HashMap::new(),
             alias_env: HashMap::new(),
+            namespace_aliases: HashMap::new(),
             schemas: HashMap::new(),
         }
     }
@@ -1028,6 +1031,7 @@ impl Checker {
             collect_helpers: HashSet::new(),
             type_aliases: HashMap::new(),
             alias_env: HashMap::new(),
+            namespace_aliases: HashMap::new(),
             schemas: HashMap::new(),
         }
     }
@@ -2280,6 +2284,10 @@ impl Checker {
                         self.type_arity.insert(name.clone(), params.len());
                     }
                 }
+                // `use X as Y` — namespace alias (v16.6.0)
+                Item::UseAlias { original, alias, .. } => {
+                    self.namespace_aliases.insert(alias.clone(), original.clone());
+                }
                 // namespace / use / test / bench / interface are handled elsewhere
                 Item::NamespaceDecl(..)
                 | Item::UseDecl(..)
@@ -2319,6 +2327,7 @@ impl Checker {
             Item::TestDef(td) => self.check_test_def(td),
             Item::BenchDef(bd) => self.check_bench_def(bd),
             Item::AliasDecl { .. } => {} // registered in register_item_signatures
+            Item::UseAlias { .. } => {}  // registered in register_item_signatures
             Item::NamespaceDecl(..)
             | Item::UseDecl(..)
             | Item::RuneUse { .. }
@@ -5307,8 +5316,12 @@ impl Checker {
         };
         let (ns, method) = match func {
             Expr::FieldAccess(obj, method, _) => {
-                if let Expr::Ident(ns, _) = obj.as_ref() {
-                    (ns.clone(), method.clone())
+                if let Expr::Ident(ns_raw, _) = obj.as_ref() {
+                    // Resolve namespace alias (v16.6.0): `use String as S` → S → String
+                    let ns = self.namespace_aliases.get(ns_raw.as_str())
+                        .cloned()
+                        .unwrap_or_else(|| ns_raw.clone());
+                    (ns, method.clone())
                 } else {
                     return None;
                 }

@@ -224,8 +224,12 @@ impl Parser {
         // pos+3: LBrace or Star
         let t2 = self.tokens.get(self.pos + 2).map(|t| &t.kind);
         let t3 = self.tokens.get(self.pos + 3).map(|t| &t.kind);
-        matches!(t2, Some(TokenKind::Dot))
-            && matches!(t3, Some(TokenKind::LBrace) | Some(TokenKind::Star))
+        // `use X.{ a, b }` or `use X.*` — rune-internal import
+        let is_rune_use = matches!(t2, Some(TokenKind::Dot))
+            && matches!(t3, Some(TokenKind::LBrace) | Some(TokenKind::Star));
+        // `use X as Y` — namespace alias (v16.6.0), must also be parsed as item
+        let is_alias_use = matches!(t2, Some(TokenKind::As));
+        is_rune_use || is_alias_use
     }
 
     fn parse_use_decl(&mut self) -> Result<Vec<String>, ParseError> {
@@ -346,10 +350,17 @@ impl Parser {
                 self.peek_span().clone(),
             )),
             TokenKind::Use => {
+                // `use X as Y` — namespace alias (v16.6.0)
                 // `use X.{ a, b }` or `use X.*` — rune-internal file import
                 let span = self.peek_span().clone();
                 self.advance(); // consume 'use'
                 let (module, _) = self.expect_ident()?;
+                // Detect `use X as Y` pattern
+                if self.peek() == &TokenKind::As {
+                    self.advance(); // consume 'as'
+                    let (alias, _) = self.expect_ident()?;
+                    return Ok(Item::UseAlias { original: module, alias, span });
+                }
                 self.expect(&TokenKind::Dot)?;
                 let names = if self.peek() == &TokenKind::Star {
                     self.advance();
@@ -428,7 +439,7 @@ impl Parser {
         };
         // A bare name (no `/` or `.`) is a rune import: `import "db"` == `import rune "db"`
         let is_rune = explicit_rune || (!path.contains('/') && !path.contains('.'));
-        let alias = if self.peek_ident_text("as") {
+        let alias = if self.peek() == &TokenKind::As || self.peek_ident_text("as") {
             self.advance();
             let (alias, _) = self.expect_ident()?;
             Some(alias)

@@ -60,6 +60,8 @@ pub struct CompileCtx {
     pub lifted_fns: Vec<IRFnDef>,
     anon_counter: u16,
     closure_counter: u16,
+    /// Namespace aliases: alias_name → real_namespace (v16.6.0)
+    pub namespace_aliases: HashMap<String, String>,
 }
 
 impl CompileCtx {
@@ -252,6 +254,13 @@ pub fn compile_program(program: &Program) -> IRProgram {
                 name: (*ty_name).into(),
                 kind: IRGlobalKind::Builtin,
             });
+        }
+    }
+
+    // Pre-pass: collect namespace aliases (v16.6.0)
+    for item in &program.items {
+        if let Item::UseAlias { original, alias, .. } = item {
+            ctx.namespace_aliases.insert(alias.clone(), original.clone());
         }
     }
 
@@ -1604,11 +1613,25 @@ pub fn compile_expr(expr: &Expr, ctx: &mut CompileCtx) -> IRExpr {
                 }
             }
             if let Expr::Ident(namespace, _) = obj.as_ref() {
-                let namespace_is_bound = ctx.resolve_local(namespace).is_some()
-                    || ctx.resolve_global(namespace).is_some();
+                // Resolve namespace alias (v16.6.0): `use String as S` → S → String
+                let real_ns = ctx.namespace_aliases.get(namespace.as_str())
+                    .cloned()
+                    .unwrap_or_else(|| namespace.clone());
+                let namespace_is_bound = ctx.resolve_local(&real_ns).is_some()
+                    || ctx.resolve_global(&real_ns).is_some();
                 if !namespace_is_bound {
                     if let Some(idx) = ctx.resolve_global(field) {
                         return IRExpr::Global(idx, Type::Unknown);
+                    }
+                }
+                // If alias was used, substitute the real namespace global
+                if real_ns != *namespace {
+                    if let Some(ns_idx) = ctx.resolve_global(&real_ns) {
+                        return IRExpr::FieldAccess(
+                            Box::new(IRExpr::Global(ns_idx, Type::Unknown)),
+                            field.clone(),
+                            Type::Unknown,
+                        );
                     }
                 }
             }

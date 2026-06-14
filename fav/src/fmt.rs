@@ -97,6 +97,9 @@ impl Formatter {
                     format!("alias {}<{}> = {}", name, params.join(", "), self.type_expr(ty))
                 }
             }
+            Item::UseAlias { original, alias, .. } => {
+                format!("use {} as {}", original, alias)
+            }
         }
     }
 

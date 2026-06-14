@@ -651,6 +651,12 @@ pub enum Item {
         ty: TypeExpr,
         span: Span,
     },
+    /// `use String as S` — namespace alias (v16.6.0)
+    UseAlias {
+        original: String,
+        alias: String,
+        span: Span,
+    },
 }
 
 impl Item {
@@ -675,6 +681,7 @@ impl Item {
             Item::TestDef(t) => &t.span,
             Item::BenchDef(b) => &b.span,
             Item::AliasDecl { span, .. } => span,
+            Item::UseAlias { span, .. } => span,
         }
     }
 }

@@ -74,6 +74,7 @@ pub enum TokenKind {
     Async,
     Bench,
     Alias,
+    As,
 
     // Effect keywords
     Pure,
@@ -529,6 +530,7 @@ impl Lexer {
             "async" => TokenKind::Async,
             "bench" => TokenKind::Bench,
             "alias" => TokenKind::Alias,
+            "as" => TokenKind::As,
             "Pure" => TokenKind::Pure,
             "Io" => TokenKind::Io,
             "emit" => TokenKind::Emit,

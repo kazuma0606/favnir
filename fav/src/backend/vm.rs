@@ -1973,6 +1973,47 @@ impl VM {
                     }
                     vm.stack.push(VMValue::Record(fields));
                 }
+                // ── list pattern opcodes (v17.2.0) ────────────────────────────
+                x if x == Opcode::ListLen as u8 => {
+                    let v = vm.stack.pop().ok_or_else(|| {
+                        vm.error(artifact, "stack underflow on list_len")
+                    })?;
+                    match v {
+                        VMValue::List(fl) => vm.stack.push(VMValue::Int(fl.len() as i64)),
+                        _ => return Err(vm.error(artifact, "list_len requires a List")),
+                    }
+                }
+                x if x == Opcode::ListGet as u8 => {
+                    let idx_val = vm.stack.pop().ok_or_else(|| {
+                        vm.error(artifact, "stack underflow on list_get (index)")
+                    })?;
+                    let list_val = vm.stack.pop().ok_or_else(|| {
+                        vm.error(artifact, "stack underflow on list_get (list)")
+                    })?;
+                    match (list_val, idx_val) {
+                        (VMValue::List(fl), VMValue::Int(i)) => {
+                            let elem = fl.get(i as usize).cloned().ok_or_else(|| {
+                                vm.error(artifact, "list_get: index out of bounds")
+                            })?;
+                            vm.stack.push(elem);
+                        }
+                        _ => return Err(vm.error(artifact, "list_get requires (List, Int)")),
+                    }
+                }
+                x if x == Opcode::ListDrop as u8 => {
+                    let n_val = vm.stack.pop().ok_or_else(|| {
+                        vm.error(artifact, "stack underflow on list_drop (n)")
+                    })?;
+                    let list_val = vm.stack.pop().ok_or_else(|| {
+                        vm.error(artifact, "stack underflow on list_drop (list)")
+                    })?;
+                    match (list_val, n_val) {
+                        (VMValue::List(fl), VMValue::Int(n)) => {
+                            vm.stack.push(VMValue::List(fl.drop_front(n.max(0) as usize)));
+                        }
+                        _ => return Err(vm.error(artifact, "list_drop requires (List, Int)")),
+                    }
+                }
                 x if x == Opcode::JumpIfNotVariant as u8 => {
                     let name_idx = Self::read_u16(function, frame)? as usize;
                     let offset = Self::read_u16(function, frame)? as usize;

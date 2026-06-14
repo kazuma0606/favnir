@@ -642,6 +642,16 @@ impl Formatter {
                     .collect();
                 format!("{{ {} }}", fs.join(", "))
             }
+            Pattern::Or(pats, _) => {
+                pats.iter().map(|p| self.pattern(p)).collect::<Vec<_>>().join(" | ")
+            }
+            Pattern::List { head, tail, .. } => {
+                let mut parts: Vec<String> = head.iter().map(|p| self.pattern(p)).collect();
+                if let Some(name) = tail {
+                    parts.push(format!("..{}", name));
+                }
+                format!("[{}]", parts.join(", "))
+            }
         }
     }
 

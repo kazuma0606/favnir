@@ -230,6 +230,14 @@ pub enum Pattern {
     Variant(String, Option<Box<Pattern>>, Span),
     /// `{ name, email }` or `{ name: p }`
     Record(Vec<PatternField>, Span),
+    /// `"a" | "b" | "c"` — or-pattern (v17.2.0)
+    Or(Vec<Pattern>, Span),
+    /// `[]` / `[x]` / `[head, ..tail]` / `[a, b, ..rest]` — list-pattern (v17.2.0)
+    List {
+        head: Vec<Pattern>,
+        tail: Option<String>,
+        span: Span,
+    },
 }
 
 impl Pattern {
@@ -240,6 +248,8 @@ impl Pattern {
             Pattern::Bind(_, s) => s,
             Pattern::Variant(_, _, s) => s,
             Pattern::Record(_, s) => s,
+            Pattern::Or(_, s) => s,
+            Pattern::List { span, .. } => span,
         }
     }
 }

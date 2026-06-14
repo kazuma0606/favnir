@@ -1061,6 +1061,15 @@ impl Emitter {
             Pattern::Record(_, _) => {
                 ("True  # record pattern".to_string(), vec![])
             }
+            Pattern::Or(pats, _) => {
+                // emit as first matching alternative
+                if let Some(first) = pats.first() {
+                    self.arm_condition(first, var)
+                } else {
+                    ("False".to_string(), vec![])
+                }
+            }
+            Pattern::List { .. } => ("True  # list pattern".to_string(), vec![]),
         }
     }
 

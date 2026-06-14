@@ -76,6 +76,12 @@ pub enum Opcode {
     /// Stack (bottom->top): base_record, val_0, ..., val_{n-1}
     /// str_table[names_idx]: override field names joined by 
     MergeRecord = 0x5C,
+    /// Pops a list, pushes its length as Int. (v17.2.0)
+    ListLen = 0x60,
+    /// Pops (list, index: Int), pushes element at that index. (v17.2.0)
+    ListGet = 0x61,
+    /// Pops (list, n: Int), pushes list with first n elements dropped. (v17.2.0)
+    ListDrop = 0x62,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -483,6 +489,85 @@ fn emit_pattern_test(
             }
             d
         }
+        // ── or-pattern (v17.2.0) ──────────────────────────────────────────────
+        IRPattern::Or(pats) => {
+            let mut or_success_jumps: Vec<usize> = Vec::new();
+            for (i, pat) in pats.iter().enumerate() {
+                let is_last = i == pats.len() - 1;
+                // Dup the arm_copy for this sub-pattern test
+                cg.emit_opcode(Opcode::Dup);
+                let mut inner_fail: Vec<(usize, usize)> = Vec::new();
+                let inner_depth = emit_pattern_test(pat, &mut inner_fail, cg, depth + 1);
+                // SUCCESS PATH: pop extras back to depth
+                for _ in (depth + 1)..=inner_depth {
+                    cg.emit_opcode(Opcode::Pop);
+                }
+                if is_last {
+                    // Fall through to or_success; propagate fails to outer
+                    for item in inner_fail {
+                        fail_jumps.push(item);
+                    }
+                } else {
+                    // Jump to or_success on this alternative's success
+                    or_success_jumps.push(cg.emit_jump(Opcode::Jump));
+                    // FAIL PATH: pop Dup'd copy, continue to next alternative
+                    for (fail_jump, excess) in inner_fail {
+                        cg.patch_jump(fail_jump);
+                        for _ in 0..excess.saturating_sub(depth) {
+                            cg.emit_opcode(Opcode::Pop);
+                        }
+                    }
+                }
+            }
+            // All or_success_jumps land here
+            for j in or_success_jumps {
+                cg.patch_jump(j);
+            }
+            depth
+        }
+        // ── list-pattern (v17.2.0) ────────────────────────────────────────────
+        IRPattern::List { head, tail } => {
+            let head_len = head.len();
+            // Step 1: length check
+            cg.emit_opcode(Opcode::Dup);          // arm_copy_dup
+            cg.emit_opcode(Opcode::ListLen);       // → Int(len)
+            let count_idx = cg.const_idx(Constant::Int(head_len as i64));
+            cg.emit_opcode(Opcode::Const);
+            cg.emit_u16(count_idx);
+            if tail.is_none() {
+                // Exact length: len == head_len
+                cg.emit_opcode(Opcode::Eq);
+            } else {
+                // At least: head_len <= len  ↔  Const(head_len) Le len
+                // Stack: ..., len, head_len  — swap so Le computes head_len <= len
+                cg.emit_opcode(Opcode::Swap);
+                cg.emit_opcode(Opcode::Le);
+            }
+            fail_jumps.push((cg.emit_jump(Opcode::JumpIfFalse), depth));
+            // Step 2: test each head element
+            for (i, head_pat) in head.iter().enumerate() {
+                cg.emit_opcode(Opcode::Dup);       // arm_copy_dup
+                let idx_c = cg.const_idx(Constant::Int(i as i64));
+                cg.emit_opcode(Opcode::Const);
+                cg.emit_u16(idx_c);
+                cg.emit_opcode(Opcode::ListGet);   // element[i]
+                let inner_depth = emit_pattern_test(head_pat, fail_jumps, cg, depth + 1);
+                for _ in (depth + 1)..=inner_depth {
+                    cg.emit_opcode(Opcode::Pop);
+                }
+            }
+            // Step 3: bind tail if any
+            if let Some(tail_slot) = tail {
+                cg.emit_opcode(Opcode::Dup);
+                let n_idx = cg.const_idx(Constant::Int(head_len as i64));
+                cg.emit_opcode(Opcode::Const);
+                cg.emit_u16(n_idx);
+                cg.emit_opcode(Opcode::ListDrop);  // tail slice
+                cg.emit_opcode(Opcode::StoreLocal);
+                cg.emit_u16(*tail_slot);
+            }
+            depth
+        }
     }
 }
 
@@ -617,7 +702,10 @@ fn remap_string_operands(code: &mut [u8], str_remap: &[u16]) {
                 || x == Opcode::CollectEnd as u8
                 || x == Opcode::YieldValue as u8
                 || x == Opcode::EmitEvent as u8
-                || x == Opcode::Swap as u8 =>
+                || x == Opcode::Swap as u8
+                || x == Opcode::ListLen as u8
+                || x == Opcode::ListGet as u8
+                || x == Opcode::ListDrop as u8 =>
             {
                 ip += 1;
             }

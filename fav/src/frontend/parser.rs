@@ -1946,6 +1946,35 @@ impl Parser {
                 }
             }
 
+            // list-pattern: [] / [x] / [head, ..tail] / [a, b, ..rest] (v17.2.0)
+            TokenKind::LBracket => {
+                self.advance(); // consume '['
+                let mut head: Vec<Pattern> = Vec::new();
+                let mut tail: Option<String> = None;
+                while self.peek() != &TokenKind::RBracket {
+                    if self.peek() == &TokenKind::DotDot {
+                        self.advance(); // consume '..'
+                        if let TokenKind::Ident(name) = self.peek().clone() {
+                            self.advance();
+                            tail = Some(name);
+                        }
+                        break; // rest binding must be last
+                    }
+                    head.push(self.parse_pattern()?);
+                    if self.peek() == &TokenKind::Comma {
+                        self.advance();
+                    } else {
+                        break;
+                    }
+                }
+                self.expect(&TokenKind::RBracket)?;
+                Ok(Pattern::List {
+                    head,
+                    tail,
+                    span: self.span_from(&start),
+                })
+            }
+
             other => Err(ParseError::new(
                 format!("expected pattern, got {:?}", other),
                 self.peek_span().clone(),
@@ -2496,9 +2525,24 @@ impl Parser {
 
     fn parse_match_arm(&mut self) -> Result<MatchArm, ParseError> {
         let start = self.peek_span().clone();
-        let pattern = self.parse_pattern()?;
-        // optional `where guard_expr` (v0.5.0)
-        let guard = if self.peek() == &TokenKind::Where {
+        let first_pat = self.parse_pattern()?;
+        // or-pattern: collect additional alternatives separated by `|` (v17.2.0)
+        let pattern = if self.peek() == &TokenKind::Pipe {
+            let or_start = first_pat.span().clone();
+            let mut pats = vec![first_pat];
+            while self.peek() == &TokenKind::Pipe {
+                self.advance(); // consume '|'
+                pats.push(self.parse_pattern()?);
+            }
+            Pattern::Or(pats, self.span_from(&or_start))
+        } else {
+            first_pat
+        };
+        // optional guard: `if expr` (v17.2.0) or legacy `where expr` (v0.5.0)
+        let guard = if self.peek() == &TokenKind::If {
+            self.advance();
+            Some(Box::new(self.parse_expr()?))
+        } else if self.peek() == &TokenKind::Where {
             self.advance();
             Some(Box::new(self.parse_expr()?))
         } else {

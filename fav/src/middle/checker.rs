@@ -3866,6 +3866,25 @@ impl Checker {
                     }
                 }
             }
+            // or-pattern: all alternatives must bind the same variables; use first (v17.2.0)
+            Pattern::Or(pats, _) => {
+                if let Some(first) = pats.first() {
+                    self.check_pattern_bindings(first, ty);
+                }
+            }
+            // list-pattern: bind head elements and optional tail (v17.2.0)
+            Pattern::List { head, tail, .. } => {
+                let elem_ty = match ty {
+                    Type::List(inner) => *inner.clone(),
+                    _ => Type::Unknown,
+                };
+                for p in head {
+                    self.check_pattern_bindings(p, &elem_ty);
+                }
+                if let Some(name) = tail {
+                    self.env.define(name.clone(), ty.clone());
+                }
+            }
         }
     }
 

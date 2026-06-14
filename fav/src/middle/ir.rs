@@ -128,6 +128,13 @@ pub enum IRPattern {
     Bind(u16),
     Variant(String, Option<Box<IRPattern>>),
     Record(Vec<(String, IRPattern)>),
+    /// `"a" | "b"` — or-pattern (v17.2.0)
+    Or(Vec<IRPattern>),
+    /// `[head, ..tail]` — list-pattern (v17.2.0)
+    List {
+        head: Vec<IRPattern>,
+        tail: Option<u16>,
+    },
 }
 
 // ── dep collection ────────────────────────────────────────────────────────────

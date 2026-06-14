@@ -3064,6 +3064,9 @@ fn decode_opcode(byte: u8) -> Option<(&'static str, usize)> {
         Opcode::SeqStageCheck => ("SeqStageCheck", 7), // 1 opcode + name_str_idx(2) + stage_idx(1) + total(1) + escape_offset(2)
         Opcode::SeqStageEnter => ("SeqStageEnter", 3), // 1 opcode + name_str_idx(2)
         Opcode::MergeRecord => ("MergeRecord", 5), // 1 opcode + n_overrides(2) + names_idx(2)
+        Opcode::ListLen => ("ListLen", 1),
+        Opcode::ListGet => ("ListGet", 1),
+        Opcode::ListDrop => ("ListDrop", 1),
     };
 
     Some((name, width))
@@ -10273,6 +10276,13 @@ fn remap_ir_pattern(pattern: &IRPattern) -> IRPattern {
                 .map(|(name, pat)| (name.clone(), remap_ir_pattern(pat)))
                 .collect(),
         ),
+        IRPattern::Or(pats) => {
+            IRPattern::Or(pats.iter().map(remap_ir_pattern).collect())
+        }
+        IRPattern::List { head, tail } => IRPattern::List {
+            head: head.iter().map(remap_ir_pattern).collect(),
+            tail: *tail,
+        },
     }
 }
 
@@ -26918,6 +26928,114 @@ mod v170000_tests {
     }
 }
 
+// ── v172000_tests (v17.2.0) — パターンマッチ拡張（or-pattern / list-pattern / guard）────
+#[cfg(test)]
+mod v172000_tests {
+    use super::{build_artifact, exec_artifact_main};
+    use crate::frontend::parser::Parser;
+    use crate::value::Value;
+
+    fn run(src: &str) -> Value {
+        let program = Parser::parse_str(src, "v172000_test.fav").expect("parse");
+        let artifact = build_artifact(&program);
+        exec_artifact_main(&artifact, None).expect("exec")
+    }
+
+    #[test]
+    fn version_is_17_2_0() {
+        let cargo = include_str!("../Cargo.toml");
+        assert!(cargo.contains("\"17.2.0\""), "Cargo.toml should have version 17.2.0");
+    }
+
+    #[test]
+    fn or_pattern_string() {
+        // "active" | "pending" => 1, その他 => 0
+        let result = run(r#"
+fn classify(status: String) -> Int {
+    match status {
+        "active" | "pending" => 1
+        _ => 0
+    }
+}
+fn main() -> Int {
+    bind a <- classify("active")
+    bind b <- classify("pending")
+    bind c <- classify("deleted")
+    a + b + c
+}
+"#);
+        assert_eq!(result, Value::Int(2));
+    }
+
+    #[test]
+    fn list_pattern_head_tail() {
+        // [h, ..t] で先頭と残りに分解できる
+        let result = run(r#"
+fn head_of(xs: List<Int>) -> Int {
+    match xs {
+        [h, ..t] => h
+        _ => 0
+    }
+}
+fn tail_len(xs: List<Int>) -> Int {
+    match xs {
+        [h, ..t] => List.length(t)
+        _ => 0
+    }
+}
+fn main() -> Int {
+    bind xs <- List.push(List.push(List.singleton(10), 20), 30)
+    bind h <- head_of(xs)
+    bind tl <- tail_len(xs)
+    h + tl
+}
+"#);
+        // head = 10, tail length = 2 → 12
+        assert_eq!(result, Value::Int(12));
+    }
+
+    #[test]
+    fn list_pattern_empty_single() {
+        // [] と [x] パターンが動作する
+        let result = run(r#"
+fn describe(xs: List<Int>) -> Int {
+    match xs {
+        [] => 0
+        [x] => 1
+        _ => 2
+    }
+}
+fn main() -> Int {
+    bind a <- describe(List.empty())
+    bind b <- describe(List.singleton(42))
+    bind c <- describe(List.push(List.push(List.singleton(1), 2), 3))
+    a + b + c
+}
+"#);
+        assert_eq!(result, Value::Int(3));
+    }
+
+    #[test]
+    fn match_guard() {
+        // guard 条件: { amount: a } if a > 0.0 => ...
+        let result = run(r#"
+type Row = { amount: Float }
+fn classify(row: Row) -> Int {
+    match row {
+        { amount: a } if a > 0.0 => 1
+        _ => 0
+    }
+}
+fn main() -> Int {
+    bind r1 <- Row { amount: 5.0 }
+    bind r2 <- Row { amount: 0.0 }
+    classify(r1) + classify(r2)
+}
+"#);
+        assert_eq!(result, Value::Int(1));
+    }
+}
+
 // ── v171000_tests (v17.1.0) — 境界付きジェネリクス（Bounded Generics）─────────
 #[cfg(test)]
 mod v171000_tests {
@@ -26942,6 +27060,7 @@ mod v171000_tests {
     }
 
     #[test]
+    #[ignore = "historical version check"]
     fn version_is_17_1_0() {
         let cargo = include_str!("../Cargo.toml");
         assert!(cargo.contains("\"17.1.0\""), "Cargo.toml should have version 17.1.0");

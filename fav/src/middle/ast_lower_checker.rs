@@ -107,6 +107,15 @@ pub fn lower_pat(pat: &ast::Pattern) -> Value {
             v2("PVariantP", sv(name), lower_pat(inner))
         }
         ast::Pattern::Record(_, _) => v0("PWild"),
+        ast::Pattern::Or(pats, _) => {
+            // lower as first alternative (all alternatives bind same vars)
+            if let Some(first) = pats.first() {
+                lower_pat(first)
+            } else {
+                v0("PWild")
+            }
+        }
+        ast::Pattern::List { .. } => v0("PWild"),
     }
 }
 

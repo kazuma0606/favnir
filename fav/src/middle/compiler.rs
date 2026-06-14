@@ -1570,6 +1570,21 @@ fn pattern_binds(pattern: &Pattern, out: &mut HashSet<String>) {
                 }
             }
         }
+        // or-pattern: all alternatives bind same vars; use first (v17.2.0)
+        Pattern::Or(pats, _) => {
+            if let Some(first) = pats.first() {
+                pattern_binds(first, out);
+            }
+        }
+        // list-pattern: head element binds + optional tail (v17.2.0)
+        Pattern::List { head, tail, .. } => {
+            for p in head {
+                pattern_binds(p, out);
+            }
+            if let Some(name) = tail {
+                out.insert(name.clone());
+            }
+        }
     }
 }
 
@@ -2205,6 +2220,19 @@ pub fn compile_pattern(pat: &Pattern, ctx: &mut CompileCtx) -> IRPattern {
                 })
                 .collect(),
         ),
+        // or-pattern (v17.2.0)
+        Pattern::Or(pats, _) => {
+            IRPattern::Or(pats.iter().map(|p| compile_pattern(p, ctx)).collect())
+        }
+        // list-pattern (v17.2.0)
+        Pattern::List { head, tail, .. } => {
+            let compiled_head = head.iter().map(|p| compile_pattern(p, ctx)).collect();
+            let tail_slot = tail.as_ref().map(|name| ctx.define_local(name.clone()));
+            IRPattern::List {
+                head: compiled_head,
+                tail: tail_slot,
+            }
+        }
     }
 }
 

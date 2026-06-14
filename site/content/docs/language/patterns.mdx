@@ -1,0 +1,124 @@
+# Pattern Matching
+
+Favnir's `match` expression lets you destructure values based on their shape. v17.2.0 adds **or-patterns**, **list-patterns**, and **guard conditions**.
+
+---
+
+## Or-Pattern (`|`)
+
+Match multiple alternatives with a single arm:
+
+```fav
+match status {
+    "active" | "pending" => process(row)
+    "deleted" | "archived" | "cancelled" => skip(row)
+    _ => Result.err(f"unknown status: {status}")
+}
+```
+
+Also works with variant constructors:
+
+```fav
+match event {
+    Event.Created(x) | Event.Updated(x) => handle_upsert(x)
+    Event.Deleted(id) => handle_delete(id)
+}
+```
+
+All alternatives in an or-pattern must bind the same variable names.
+
+---
+
+## List-Pattern (`[]`)
+
+Decompose a list by its elements and optional tail:
+
+| Pattern | Matches |
+|---|---|
+| `[]` | Empty list |
+| `[x]` | Exactly one element, binds `x` |
+| `[head, ..tail]` | One or more elements; `head` = first, `tail` = rest |
+| `[a, b, ..rest]` | Two or more elements; `a`, `b` = first two, `rest` = remainder |
+
+```fav
+match rows {
+    [] => Result.err("empty list")
+    [single] => process_single(single)
+    [head, ..tail] => process_many(head, tail)
+}
+```
+
+Multiple head elements:
+
+```fav
+match rows {
+    [a, b, ..rest] => compare_and_process(a, b, rest)
+    _ => Result.err("need at least 2 rows")
+}
+```
+
+---
+
+## Guard Condition (`if`)
+
+Add a boolean condition after the pattern with `if`:
+
+```fav
+match row {
+    { amount: a } if a > 1000.0 => high_value(row)
+    { amount: a } if a > 0.0   => normal(row)
+    _                           => Result.err("negative amount")
+}
+```
+
+Guards are evaluated only when the pattern matches. If the guard is `false`, the next arm is tried.
+
+---
+
+## Before / After Comparison
+
+**Before** (nested if-else):
+
+```fav
+fn classify(status: String) -> String {
+    if status == "active" {
+        "live"
+    } else if status == "pending" {
+        "live"
+    } else if status == "deleted" {
+        "gone"
+    } else {
+        "unknown"
+    }
+}
+```
+
+**After** (or-pattern):
+
+```fav
+fn classify(status: String) -> String {
+    match status {
+        "active" | "pending" => "live"
+        "deleted" => "gone"
+        _ => "unknown"
+    }
+}
+```
+
+---
+
+## Exhaustiveness Checking
+
+The compiler enforces exhaustive match. Adding `_` as the final arm ensures all cases are covered. With list-patterns:
+
+- `[]` covers the empty case
+- A pattern with `..tail` covers all non-empty lists
+- Together they cover all lists
+
+```fav
+// Exhaustive: covers empty and non-empty
+match rows {
+    [] => Result.err("no rows")
+    [head, ..tail] => process(head, tail)
+}
+```

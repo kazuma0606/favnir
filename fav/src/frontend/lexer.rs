@@ -119,6 +119,7 @@ pub enum TokenKind {
     GtEq,      // >=
     Semicolon, // ;
     DotDotDot, // ... (record spread, v16.3.0)
+    DotDot,    // .. (list-pattern rest, v17.2.0)
 
     // Literals
     Int(i64),
@@ -339,6 +340,11 @@ impl Lexer {
                 self.advance(); // '.'
                 self.advance(); // '.'
                 TokenKind::DotDotDot
+            }
+            '.' if self.peek2() == Some('.') => {
+                self.advance(); // '.'
+                self.advance(); // '.'
+                TokenKind::DotDot
             }
             '.' => {
                 self.advance();

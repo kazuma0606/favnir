@@ -25482,6 +25482,7 @@ mod v160000_tests {
     use std::path::Path;
 
     #[test]
+    #[ignore = "historical version check"]
     fn version_is_16_0_0() {
         let cargo = fs::read_to_string("Cargo.toml").unwrap();
         assert!(
@@ -25537,6 +25538,7 @@ mod v155000_tests {
     use std::path::Path;
 
     #[test]
+    #[ignore = "historical version check"]
     fn version_is_15_5_0() {
         let cargo = fs::read_to_string("Cargo.toml").unwrap();
         assert!(
@@ -25576,6 +25578,7 @@ mod v154000_tests {
     use std::path::Path;
 
     #[test]
+    #[ignore = "historical version check"]
     fn version_is_15_4_0() {
         let cargo = fs::read_to_string("Cargo.toml").unwrap();
         assert!(
@@ -25621,6 +25624,7 @@ mod v153000_tests {
     use std::path::Path;
 
     #[test]
+    #[ignore = "historical version check"]
     fn version_is_15_3_0() {
         let cargo = fs::read_to_string("Cargo.toml").unwrap();
         assert!(
@@ -26342,6 +26346,7 @@ mod v161000_tests {
     }
 
     #[test]
+    #[ignore = "historical version check"]
     fn version_is_16_1_0() {
         let cargo = std::fs::read_to_string("Cargo.toml").unwrap();
         assert!(
@@ -26408,6 +26413,7 @@ mod v162000_tests {
     }
 
     #[test]
+    #[ignore = "historical version check"]
     fn version_is_16_2_0() {
         let cargo = std::fs::read_to_string("Cargo.toml").unwrap();
         assert!(
@@ -26483,6 +26489,7 @@ mod v164000_tests {
     }
 
     #[test]
+    #[ignore = "historical version check"]
     fn version_is_16_4_0() {
         let cargo = std::fs::read_to_string("Cargo.toml").unwrap();
         assert!(
@@ -26594,6 +26601,7 @@ mod v166000_tests {
     }
 
     #[test]
+    #[ignore = "historical version check"]
     fn version_is_16_6_0() {
         let cargo = std::fs::read_to_string("Cargo.toml").unwrap();
         assert!(
@@ -26694,6 +26702,7 @@ mod v167000_tests {
     }
 
     #[test]
+    #[ignore = "historical version check"]
     fn version_is_16_7_0() {
         let cargo = std::fs::read_to_string("Cargo.toml").unwrap();
         assert!(
@@ -26783,6 +26792,7 @@ mod v168000_tests {
     }
 
     #[test]
+    #[ignore = "historical version check"]
     fn version_is_16_8_0() {
         let cargo = include_str!("../Cargo.toml");
         assert!(cargo.contains("\"16.8.0\""), "Cargo.toml should have version 16.8.0");
@@ -26935,6 +26945,7 @@ mod v165000_tests {
     }
 
     #[test]
+    #[ignore = "historical version check"]
     fn version_is_16_5_0() {
         let cargo = std::fs::read_to_string("Cargo.toml").unwrap();
         assert!(
@@ -27049,6 +27060,7 @@ mod v163000_tests {
     }
 
     #[test]
+    #[ignore = "historical version check"]
     fn version_is_16_3_0() {
         let cargo = std::fs::read_to_string("Cargo.toml").unwrap();
         assert!(

@@ -3806,6 +3806,17 @@ pub fn cmd_test(
                 enable_coverage();
             }
             match VM::run(&artifact, fn_idx, vec![]) {
+                Ok(crate::value::Value::Bool(false)) => {
+                    results.push(TestResult {
+                        description: format!("{test_name} ({path})"),
+                        passed: false,
+                        error_msg: Some("test returned false".into()),
+                        elapsed_ms: started.elapsed().as_millis(),
+                    });
+                    if fail_fast {
+                        break;
+                    }
+                }
                 Ok(_) => results.push(TestResult {
                     description: format!("{test_name} ({path})"),
                     passed: true,
@@ -25358,6 +25369,49 @@ public fn load(conn_str: String) -> Result<Int, String> !AzureDb {
     }
 }
 
+// ── v153000_tests (v15.3.0) — fav test DSL ────────────────────────────────────
+#[cfg(test)]
+mod v153000_tests {
+    use std::fs;
+    use std::path::Path;
+
+    #[test]
+    fn version_is_15_3_0() {
+        let cargo = fs::read_to_string("Cargo.toml").unwrap();
+        assert!(
+            cargo.contains("version = \"15.3.0\""),
+            "Cargo.toml version should be 15.3.0, got: {}",
+            cargo.lines().find(|l| l.contains("version")).unwrap_or("")
+        );
+    }
+
+    #[test]
+    fn test_def_in_ast() {
+        let ast = fs::read_to_string("src/ast.rs").unwrap();
+        assert!(ast.contains("TestDef"), "ast.rs must contain TestDef");
+    }
+
+    #[test]
+    fn assert_ok_primitive_exists() {
+        let vm = fs::read_to_string("src/backend/vm.rs").unwrap();
+        assert!(vm.contains("assert_ok"), "vm.rs must contain assert_ok primitive");
+    }
+
+    #[test]
+    fn cmd_test_exists() {
+        let driver = fs::read_to_string("src/driver.rs").unwrap();
+        assert!(driver.contains("fn cmd_test"), "driver.rs must contain cmd_test function");
+    }
+
+    #[test]
+    fn testing_doc_exists() {
+        assert!(
+            Path::new("../site/content/docs/language/testing.mdx").exists(),
+            "site/content/docs/language/testing.mdx must exist"
+        );
+    }
+}
+
 // ── v152000_tests (v15.2.0) — GCP BigQuery Rune ──────────────────────────────
 #[cfg(test)]
 mod v152000_tests {
@@ -25366,11 +25420,15 @@ mod v152000_tests {
 
     #[test]
     fn version_is_15_2_0() {
-        let cargo = fs::read_to_string("Cargo.toml").unwrap();
+        // Check that the project has reached at least v15.2.0
+        let parts: Vec<u32> = env!("CARGO_PKG_VERSION")
+            .split('.')
+            .filter_map(|s| s.parse().ok())
+            .collect();
         assert!(
-            cargo.contains("version = \"15.2.0\""),
-            "Cargo.toml version should be 15.2.0, got: {}",
-            cargo.lines().find(|l| l.contains("version")).unwrap_or("")
+            parts.len() >= 2 && (parts[0] > 15 || (parts[0] == 15 && parts[1] >= 2)),
+            "expected version >= 15.2.0, got {}",
+            env!("CARGO_PKG_VERSION")
         );
     }
 
@@ -25428,7 +25486,16 @@ mod v15150_tests {
 
     #[test]
     fn version_is_15_1_5() {
-        assert_eq!(env!("CARGO_PKG_VERSION"), "15.2.0");
+        // Check that the project has reached at least v15.1.5
+        let parts: Vec<u32> = env!("CARGO_PKG_VERSION")
+            .split('.')
+            .filter_map(|s| s.parse().ok())
+            .collect();
+        assert!(
+            parts.len() >= 2 && (parts[0] > 15 || (parts[0] == 15 && parts[1] >= 1)),
+            "expected version >= 15.1.0, got {}",
+            env!("CARGO_PKG_VERSION")
+        );
     }
 
     #[test]

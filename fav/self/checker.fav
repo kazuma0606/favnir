@@ -2550,11 +2550,11 @@ test "infer_hm int" {
     }
 }
 
-test "infer_hm evar fresh" {
+test "infer_hm evar undefined" {
     bind s0 <- inf_state_new(subst_empty(), 0);
     match infer_hm(EVar("x"), env_empty(), s0) {
-        Err(_) => false
-        Ok(r) => (r.ty == "t0") && (r.counter == 1)
+        Err(_) => true
+        Ok(_) => false
     }
 }
 

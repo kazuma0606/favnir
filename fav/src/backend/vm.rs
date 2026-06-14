@@ -7473,6 +7473,44 @@ fn vm_call_builtin(
                 ))
             }
         }
+        // ── v15.3.0 assert primitives ──────────────────────────────────────────
+        "assert_ok" => {
+            let r = args.into_iter().next()
+                .ok_or_else(|| "assert_ok requires 1 argument".to_string())?;
+            match r {
+                VMValue::Variant(ref tag, ref inner) if tag == "ok" => {
+                    Ok(inner.as_deref().cloned().unwrap_or(VMValue::Unit))
+                }
+                VMValue::Variant(ref tag, ref inner) if tag == "err" => {
+                    let msg = inner.as_deref().map(|v| vmvalue_repr(v)).unwrap_or_default();
+                    Err(format!("assert_ok failed: got err({msg})"))
+                }
+                other => Err(format!("assert_ok failed: not a Result: {}", vmvalue_repr(&other))),
+            }
+        }
+        "assert_err" => {
+            let r = args.into_iter().next()
+                .ok_or_else(|| "assert_err requires 1 argument".to_string())?;
+            match r {
+                VMValue::Variant(ref tag, ref inner) if tag == "err" => {
+                    Ok(inner.as_deref().cloned().unwrap_or(VMValue::Unit))
+                }
+                VMValue::Variant(ref tag, ref inner) if tag == "ok" => {
+                    let msg = inner.as_deref().map(|v| vmvalue_repr(v)).unwrap_or_default();
+                    Err(format!("assert_err failed: got ok({msg})"))
+                }
+                other => Err(format!("assert_err failed: not a Result: {}", vmvalue_repr(&other))),
+            }
+        }
+        "assert_true" => {
+            let b = args.into_iter().next()
+                .ok_or_else(|| "assert_true requires 1 argument".to_string())?;
+            match b {
+                VMValue::Bool(true) => Ok(VMValue::Unit),
+                VMValue::Bool(false) => Err("assert_true failed: got false".to_string()),
+                other => Err(format!("assert_true failed: not a Bool: {}", vmvalue_repr(&other))),
+            }
+        }
         "Result.ok" => {
             let v = args
                 .into_iter()

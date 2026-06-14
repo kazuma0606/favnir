@@ -1,0 +1,129 @@
+# Generics
+
+Favnir supports **generic functions and types** — parameterized over types — and as of v17.1.0, you can add **interface bounds** to those type parameters using the `with` keyword.
+
+## Basic Generics
+
+A generic function is declared by listing type parameters in angle brackets:
+
+```favnir
+fn identity<T>(val: T) -> T {
+    val
+}
+```
+
+Any type can be passed to an unbounded generic parameter.
+
+## Bounded Generics
+
+Bounded generics restrict which types can be used as a type argument. The syntax is:
+
+```
+fn name<T with Interface>(params) -> ReturnType { ... }
+```
+
+**Examples:**
+
+```favnir
+fn max<T with Ord>(a: T, b: T) -> T {
+    if a > b { a } else { b }
+}
+```
+
+```favnir
+fn serialize_value<T with Serialize>(val: T) -> String {
+    JSON.encode(val)
+}
+```
+
+Multiple bounds are chained with repeated `with`:
+
+```favnir
+fn max_serializable<T with Ord with Serialize>(a: T, b: T) -> T {
+    if a > b { a } else { b }
+}
+```
+
+Multiple type parameters can each have their own bounds:
+
+```favnir
+fn zip_sorted<A with Ord, B with Clone>(keys: List<A>, vals: List<B>) -> List<(A, B)> {
+    List.zip(List.sort(keys), vals)
+}
+```
+
+## Built-in Interfaces
+
+These interfaces are recognized by the type checker for bound validation:
+
+| Interface | Satisfied by |
+|---|---|
+| `Ord` | `Int`, `Float`, `String` |
+| `Eq` | All types |
+| `Serialize` | All types |
+| `Display` | `String`, `Int`, `Float`, `Bool` |
+| `Hash` | `Int`, `String` |
+| `Clone` | All types |
+
+## Custom Interfaces
+
+Bounds can also refer to interfaces defined with the `interface` keyword:
+
+```favnir
+interface Printable {
+    fn print(self: Self) -> String
+}
+
+type Item = { name: String, price: Float }
+
+impl Printable for Item {
+    fn print(self: Item) -> String {
+        f"{self.name}: {self.price}"
+    }
+}
+
+fn display<T with Printable>(val: T) -> String {
+    Printable.print(val)
+}
+```
+
+## Error: E0325
+
+When you pass a type that does not implement a required bound, the type checker reports **E0325**:
+
+```favnir
+fn max<T with Ord>(a: T, b: T) -> T {
+    if a > b { a } else { b }
+}
+
+type Color = { r: Int, g: Int, b: Int }
+
+fn main() -> Color {
+    max({ r: 0, g: 0, b: 0 }, { r: 255, g: 0, b: 0 })
+    // Error E0325: type `Color` does not implement `Ord`
+}
+```
+
+**Fix**: either remove the `Ord` bound (if not needed) or define an `Ord` impl for `Color`.
+
+## Before / After
+
+**Before** (unbounded — runtime error if used with incomparable types):
+
+```favnir
+fn max<T>(a: T, b: T) -> T {
+    if a > b { a } else { b }
+}
+```
+
+**After** (bounded — type-checked at call site):
+
+```favnir
+fn max<T with Ord>(a: T, b: T) -> T {
+    if a > b { a } else { b }
+}
+```
+
+## Type Erasure
+
+Bounds are **checked at compile time and then erased**. At runtime, generic functions behave the same as their unbounded equivalents — there is no dynamic dispatch or runtime overhead from bounds.

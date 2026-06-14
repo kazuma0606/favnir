@@ -690,11 +690,21 @@ fn fmt_visibility(vis: Option<&Visibility>) -> &'static str {
     }
 }
 
-fn fmt_type_params(params: &[String]) -> String {
+fn fmt_type_params(params: &[crate::ast::GenericParam]) -> String {
     if params.is_empty() {
         String::new()
     } else {
-        format!("<{}>", params.join(", "))
+        let parts: Vec<String> = params
+            .iter()
+            .map(|p| {
+                if p.bounds.is_empty() {
+                    p.name.clone()
+                } else {
+                    format!("{} {}", p.name, p.bounds.iter().map(|b| format!("with {}", b)).collect::<Vec<_>>().join(" "))
+                }
+            })
+            .collect();
+        format!("<{}>", parts.join(", "))
     }
 }
 

@@ -10994,7 +10994,7 @@ impl ExplainPrinter {
                     let name = if fd.type_params.is_empty() {
                         format!("abstract seq {}", fd.name)
                     } else {
-                        format!("abstract seq {}<{}>", fd.name, fd.type_params.join(", "))
+                        format!("abstract seq {}<{}>", fd.name, fd.type_params.iter().map(|p| p.name.as_str()).collect::<Vec<_>>().join(", "))
                     };
                     let _ = writeln!(
                         out,
@@ -11065,7 +11065,7 @@ impl ExplainPrinter {
                         "{:<col_vis$} {:<col_name$} {:<col_type$} {:<col_eff$} {:<col_inv$} -",
                         format_visibility(&cd.visibility),
                         format!("cap {}", cd.name),
-                        format!("<{}>", cd.type_params.join(", ")),
+                        format!("<{}>", cd.type_params.iter().map(|p| p.name.as_str()).collect::<Vec<_>>().join(", ")),
                         "-",
                         "-",
                     );
@@ -11180,7 +11180,7 @@ impl ExplainPrinter {
                 if fd.type_params.is_empty() {
                     let _ = writeln!(out, "- {}", fd.name);
                 } else {
-                    let _ = writeln!(out, "- {}<{}>", fd.name, fd.type_params.join(", "));
+                    let _ = writeln!(out, "- {}<{}>", fd.name, fd.type_params.iter().map(|p| p.name.as_str()).collect::<Vec<_>>().join(", "));
                 }
                 for slot in &fd.slots {
                     let _ = writeln!(
@@ -11367,7 +11367,7 @@ impl ExplainPrinter {
                         flws.push(json!({
                             "name": fd.name,
                             "kind": "abstract_flw",
-                            "type_params": fd.type_params,
+                            "type_params": fd.type_params.iter().map(|p| &p.name).collect::<Vec<_>>(),
                             "slots": fd.slots.iter().map(|slot| json!({
                                 "name": slot.name,
                                 "input_type": format_type_expr(&slot.input_ty),
@@ -26885,6 +26885,7 @@ seq Pipeline = Identity |> inspect
 #[cfg(test)]
 mod v170000_tests {
     #[test]
+    #[ignore = "historical version check"]
     fn version_is_17_0_0() {
         let cargo = include_str!("../Cargo.toml");
         assert!(cargo.contains("\"17.0.0\""), "Cargo.toml should have version 17.0.0");
@@ -26914,6 +26915,110 @@ mod v170000_tests {
     fn stdlib_datetime_doc_exists() {
         let datetime_doc = include_str!("../../site/content/docs/stdlib/datetime.mdx");
         assert!(datetime_doc.contains("DateTime.now"), "datetime.mdx should contain DateTime.now");
+    }
+}
+
+// ── v171000_tests (v17.1.0) — 境界付きジェネリクス（Bounded Generics）─────────
+#[cfg(test)]
+mod v171000_tests {
+    use super::{build_artifact, exec_artifact_main};
+    use crate::frontend::parser::Parser;
+    use crate::middle::checker::Checker;
+    use crate::value::Value;
+
+    fn run(src: &str) -> Value {
+        let program = Parser::parse_str(src, "v171000_test.fav").expect("parse");
+        let artifact = build_artifact(&program);
+        exec_artifact_main(&artifact, None).expect("exec")
+    }
+
+    fn check_errors(src: &str) -> Vec<String> {
+        let program = Parser::parse_str(src, "v171000_test.fav").expect("parse");
+        Checker::check_program(&program)
+            .0
+            .iter()
+            .map(|e| e.code.to_string())
+            .collect()
+    }
+
+    #[test]
+    fn version_is_17_1_0() {
+        let cargo = include_str!("../Cargo.toml");
+        assert!(cargo.contains("\"17.1.0\""), "Cargo.toml should have version 17.1.0");
+    }
+
+    #[test]
+    fn bounded_generic_ord_int() {
+        // fn max<T with Ord>(a: T, b: T) -> T — Int を渡すと動作する
+        let result = run(r#"
+fn max<T with Ord>(a: T, b: T) -> T {
+    if a > b { a } else { b }
+}
+fn main() -> Int {
+    max(3, 7)
+}
+"#);
+        assert_eq!(result, Value::Int(7));
+    }
+
+    #[test]
+    fn bounded_generic_ord_float() {
+        // Float も Ord を実装している
+        let result = run(r#"
+fn max<T with Ord>(a: T, b: T) -> T {
+    if a > b { a } else { b }
+}
+fn main() -> Float {
+    max(1.5, 2.5)
+}
+"#);
+        assert_eq!(result, Value::Float(2.5));
+    }
+
+    #[test]
+    fn bounded_generic_serialize_all_types() {
+        // Serialize は全型に対して true → String / Int / Bool すべて動作
+        let result = run(r#"
+fn wrap<T with Serialize>(val: T) -> T {
+    val
+}
+fn main() -> Int {
+    wrap(42)
+}
+"#);
+        assert_eq!(result, Value::Int(42));
+    }
+
+    #[test]
+    fn bounded_generic_multi_bounds() {
+        // T with Ord with Serialize — 複数 bound が動作する
+        let result = run(r#"
+fn max_serializable<T with Ord with Serialize>(a: T, b: T) -> T {
+    if a > b { a } else { b }
+}
+fn main() -> Int {
+    max_serializable(10, 20)
+}
+"#);
+        assert_eq!(result, Value::Int(20));
+    }
+
+    #[test]
+    fn bounded_generic_violation_e0325() {
+        // Ord を実装しない Bool 型で E0325 が出る
+        let errors = check_errors(r#"
+fn max<T with Ord>(a: T, b: T) -> T {
+    if a > b { a } else { b }
+}
+fn main() -> Bool {
+    max(true, false)
+}
+"#);
+        assert!(
+            errors.iter().any(|e| e == "E0325"),
+            "Expected E0325 for Bool not implementing Ord, got: {:?}",
+            errors
+        );
     }
 }
 

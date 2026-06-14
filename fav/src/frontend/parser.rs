@@ -419,6 +419,7 @@ impl Parser {
         self.advance(); // consume `alias`
         let (name, _) = self.expect_ident()?;
         let params = self.parse_type_params()?;
+        let params: Vec<String> = params.into_iter().map(|p| p.name).collect();
         self.expect(&TokenKind::Eq)?;
         let ty = self.parse_type_expr()?;
         Ok(Item::AliasDecl { name, params, ty, span })
@@ -869,22 +870,38 @@ impl Parser {
         })
     }
 
-    /// Parse optional type parameters `<T, U, V>`.
+    /// Parse optional type parameters `<T, U, V>` with optional bounds.
+    /// `<T>` → `[GenericParam { name: "T", bounds: [] }]`
+    /// `<T with Ord>` → `[GenericParam { name: "T", bounds: ["Ord"] }]`
+    /// `<T with Ord with Serialize, U>` → two params
     /// Returns an empty Vec if no `<` is found.
-    fn parse_type_params(&mut self) -> Result<Vec<String>, ParseError> {
+    fn parse_type_params(&mut self) -> Result<Vec<crate::ast::GenericParam>, ParseError> {
         if self.peek() != &TokenKind::LAngle {
             return Ok(vec![]);
         }
         self.advance(); // consume `<`
-        let (first, _) = self.expect_ident()?;
-        let mut params = vec![first];
+        let (first_name, _) = self.expect_ident()?;
+        let first_bounds = self.parse_type_bounds()?;
+        let mut params = vec![crate::ast::GenericParam { name: first_name, bounds: first_bounds }];
         while self.peek() == &TokenKind::Comma {
             self.advance();
             let (name, _) = self.expect_ident()?;
-            params.push(name);
+            let bounds = self.parse_type_bounds()?;
+            params.push(crate::ast::GenericParam { name, bounds });
         }
         self.expect(&TokenKind::RAngle)?;
         Ok(params)
+    }
+
+    /// Parse zero or more `with InterfaceName` bounds after a type parameter name.
+    fn parse_type_bounds(&mut self) -> Result<Vec<String>, ParseError> {
+        let mut bounds = vec![];
+        while self.peek() == &TokenKind::With || self.peek_ident_text("with") {
+            self.advance(); // consume `with`
+            let (bound_name, _) = self.expect_ident()?;
+            bounds.push(bound_name);
+        }
+        Ok(bounds)
     }
 
     fn parse_record_body(&mut self) -> Result<(Vec<Field>, Vec<Expr>), ParseError> {
@@ -3205,7 +3222,7 @@ mod tests {
             panic!("expected FnDef")
         };
         assert_eq!(fd.name, "identity");
-        assert_eq!(fd.type_params, vec!["T"]);
+        assert_eq!(crate::ast::param_names(&fd.type_params), vec!["T"]);
         assert_eq!(fd.params[0].name, "x");
     }
 
@@ -3216,7 +3233,7 @@ mod tests {
             panic!("expected TypeDef")
         };
         assert_eq!(td.name, "Pair");
-        assert_eq!(td.type_params, vec!["A", "B"]);
+        assert_eq!(crate::ast::param_names(&td.type_params), vec!["A", "B"]);
     }
 
     #[test]
@@ -3263,7 +3280,7 @@ mod tests {
         let Item::TrfDef(td) = &p.items[0] else {
             panic!("expected TrfDef")
         };
-        assert_eq!(td.type_params, vec!["T", "U"]);
+        assert_eq!(crate::ast::param_names(&td.type_params), vec!["T", "U"]);
     }
 
     // v2.0.0: cap keyword is a parse error
@@ -3347,7 +3364,7 @@ mod tests {
             panic!("expected AbstractTrfDef")
         };
         assert_eq!(td.name, "Fetch");
-        assert_eq!(td.type_params, vec!["T"]);
+        assert_eq!(crate::ast::param_names(&td.type_params), vec!["T"]);
         assert_eq!(td.effects.len(), 1);
     }
 
@@ -3358,7 +3375,7 @@ mod tests {
             panic!("expected AbstractFlwDef")
         };
         assert_eq!(fd.name, "DataPipeline");
-        assert_eq!(fd.type_params, vec!["Row"]);
+        assert_eq!(crate::ast::param_names(&fd.type_params), vec!["Row"]);
         assert_eq!(fd.slots.len(), 1);
         assert_eq!(fd.slots[0].name, "parse");
         assert!(fd.slots[0].abstract_trf_ty.is_none());

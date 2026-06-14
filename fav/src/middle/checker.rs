@@ -952,6 +952,8 @@ pub struct Checker {
     namespace_aliases: HashMap<String, String>,
     /// Type constraint schemas loaded from schemas/*.yaml (v4.1.5).
     pub schemas: ProjectSchemas,
+    /// Generic bounds registry: fn_name → params with bounds (v17.1.0).
+    fn_bounds_registry: HashMap<String, Vec<crate::ast::GenericParam>>,
 }
 
 impl Checker {
@@ -991,6 +993,7 @@ impl Checker {
             alias_env: HashMap::new(),
             namespace_aliases: HashMap::new(),
             schemas: HashMap::new(),
+            fn_bounds_registry: HashMap::new(),
         }
     }
 
@@ -1033,6 +1036,7 @@ impl Checker {
             alias_env: HashMap::new(),
             namespace_aliases: HashMap::new(),
             schemas: HashMap::new(),
+            fn_bounds_registry: HashMap::new(),
         }
     }
 
@@ -2157,7 +2161,7 @@ impl Checker {
                     // Resolve param/return types with type_params in scope.
                     let saved_tp = std::mem::replace(
                         &mut self.type_params,
-                        fd.type_params.iter().cloned().collect(),
+                        fd.type_params.iter().map(|p| p.name.clone()).collect(),
                     );
                     let params: Vec<Type> = fd
                         .params
@@ -2183,11 +2187,16 @@ impl Checker {
                     );
                     self.type_params = saved_tp;
                     self.env.define(fd.name.clone(), fn_ty);
+                    // Register generic bounds for call-site checking.
+                    if fd.type_params.iter().any(|p| !p.bounds.is_empty()) {
+                        self.fn_bounds_registry
+                            .insert(fd.name.clone(), fd.type_params.clone());
+                    }
                 }
                 Item::TrfDef(td) => {
                     let saved_tp = std::mem::replace(
                         &mut self.type_params,
-                        td.type_params.iter().cloned().collect(),
+                        td.type_params.iter().map(|p| p.name.clone()).collect(),
                     );
                     let input = self.resolve_type_expr(&td.input_ty);
                     let output = self.resolve_type_expr(&td.output_ty);
@@ -2780,7 +2789,7 @@ impl Checker {
         // Validate that each field's type expression is well-formed in type_params scope.
         let saved_tp = std::mem::replace(
             &mut self.type_params,
-            cd.type_params.iter().cloned().collect(),
+            cd.type_params.iter().map(|p| p.name.clone()).collect(),
         );
         for field in &cd.fields {
             self.resolve_type_expr(&field.ty); // triggers errors on bad type refs
@@ -2978,7 +2987,7 @@ impl Checker {
         let saved_effects = std::mem::replace(&mut self.current_effects, fd.effects.clone());
         let saved_tp = std::mem::replace(
             &mut self.type_params,
-            fd.type_params.iter().cloned().collect(),
+            fd.type_params.iter().map(|p| p.name.clone()).collect(),
         );
         self.env.push();
 
@@ -3056,7 +3065,7 @@ impl Checker {
         let saved_effects = std::mem::replace(&mut self.current_effects, td.effects.clone());
         let saved_tp = std::mem::replace(
             &mut self.type_params,
-            td.type_params.iter().cloned().collect(),
+            td.type_params.iter().map(|p| p.name.clone()).collect(),
         );
         self.env.push();
 
@@ -3385,7 +3394,7 @@ impl Checker {
         let type_subst: HashMap<String, Type> = template
             .type_params
             .iter()
-            .cloned()
+            .map(|p| p.name.clone())
             .zip(fd.type_args.iter().map(|arg| self.resolve_type_expr(arg)))
             .collect();
         let slot_map: HashMap<String, FlwSlot> = template
@@ -3577,7 +3586,7 @@ impl Checker {
                     let type_subst: HashMap<String, Type> = td
                         .type_params
                         .iter()
-                        .cloned()
+                        .map(|p| p.name.clone())
                         .zip(resolved_args.iter().cloned())
                         .collect();
                     return Type::AbstractTrf {
@@ -4421,7 +4430,30 @@ impl Checker {
                                     }
                                 }
                             }
-                            subst.apply(&inst_ret)
+                            let resolved = subst.apply(&inst_ret);
+                            // Bounded generics call-site check (E0325).
+                            if let Some(fn_name) = expr_fn_name(func) {
+                                if let Some(bparams) = self.fn_bounds_registry.get(&fn_name).cloned() {
+                                    for bp in &bparams {
+                                        if bp.bounds.is_empty() { continue; }
+                                        let concrete = subst.apply(&inst.apply(&Type::Var(bp.name.clone())));
+                                        for bound in &bp.bounds {
+                                            if !type_implements_bound(&concrete, bound) {
+                                                self.type_error(
+                                                    "E0325",
+                                                    format!(
+                                                        "type `{}` does not implement `{}`",
+                                                        concrete.display(),
+                                                        bound
+                                                    ),
+                                                    span,
+                                                );
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            resolved
                         }
                     }
                     Type::Arrow(input, output) => {
@@ -6839,7 +6871,7 @@ impl Checker {
                     let type_subst: HashMap<String, Type> = td
                         .type_params
                         .iter()
-                        .cloned()
+                        .map(|p| p.name.clone())
                         .zip(resolved_args.iter().cloned())
                         .collect();
                     return Type::AbstractTrf {
@@ -7074,6 +7106,29 @@ fn instantiate_explicit_type_args(
             effects,
         },
         other => other,
+    }
+}
+
+/// Extract a simple function name from a callee expression, if possible.
+fn expr_fn_name(expr: &Expr) -> Option<String> {
+    match expr {
+        Expr::Ident(name, _) => Some(name.clone()),
+        _ => None,
+    }
+}
+
+/// Returns true if the given type satisfies the named interface bound.
+/// Used for bounded generics call-site checking (E0325).
+fn type_implements_bound(ty: &Type, bound: &str) -> bool {
+    match bound {
+        "Eq" | "Serialize" | "Clone" => true,
+        "Ord" => matches!(ty, Type::Int | Type::Float | Type::String),
+        "Display" => matches!(ty, Type::String | Type::Int | Type::Float | Type::Bool),
+        "Hash" => matches!(ty, Type::Int | Type::String),
+        _ => {
+            // Custom interface — treat as satisfied (checker.fav handles custom bounds)
+            true
+        }
     }
 }
 

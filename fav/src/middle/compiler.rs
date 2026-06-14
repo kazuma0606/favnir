@@ -1100,7 +1100,7 @@ fn compile_flw_binding_def(
     let type_subst: HashMap<String, Type> = template
         .type_params
         .iter()
-        .cloned()
+        .map(|p| p.name.clone())
         .zip(fd.type_args.iter().map(lower_type_expr))
         .collect();
     let binding_map: HashMap<&str, &crate::ast::SlotImpl> = fd
@@ -1487,7 +1487,7 @@ fn builtin_interface_method_type(interface_name: &str, method_name: &str) -> Opt
 
 fn compile_fn_def(
     name: &str,
-    type_params: &[String],
+    type_params: &[crate::ast::GenericParam],
     params: &[String],
     param_tys: &[Type],
     effects: &[crate::ast::Effect],
@@ -1508,7 +1508,7 @@ fn compile_fn_def(
         ctx.define_local_with_ty(param.clone(), ty);
     }
     for type_param in type_params {
-        ctx.define_local_with_ty(format!("$type_{}", type_param), Type::String);
+        ctx.define_local_with_ty(format!("$type_{}", type_param.name), Type::String);
     }
     let body_ir = compile_block(body, ctx);
     let local_count = ctx.next_slot as usize;
@@ -2461,7 +2461,7 @@ seq UserImport = DataPipeline<UserRow> { parse <- ParseCsv; save <- SaveUsers }
         let template = AbstractFlwDef {
             visibility: None,
             name: "SavePipeline".into(),
-            type_params: vec!["Row".into()],
+            type_params: vec![crate::ast::GenericParam::unbounded("Row")],
             slots: vec![FlwSlot {
                 name: "save".into(),
                 abstract_trf_ty: None,

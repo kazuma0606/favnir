@@ -496,7 +496,7 @@ fn lower_type_def(td: &ast::TypeDef) -> Value {
             (false, vec![], vec![])
         }
     };
-    let type_params: Vec<Value> = td.type_params.iter().map(|s| sv(s)).collect();
+    let type_params: Vec<Value> = td.type_params.iter().map(|p| sv(&p.name)).collect();
     vm_record(vec![
         ("name", sv(&td.name)),
         ("is_record", Value::Bool(is_record)),

@@ -5,6 +5,29 @@
 
 use crate::frontend::lexer::Span;
 
+// ── GenericParam (v17.1.0) ────────────────────────────────────────────────────
+
+/// A generic type parameter with optional bounds.
+/// `<T>` → `GenericParam { name: "T", bounds: [] }`
+/// `<T with Ord>` → `GenericParam { name: "T", bounds: ["Ord"] }`
+/// `<T with Ord with Serialize>` → `GenericParam { name: "T", bounds: ["Ord", "Serialize"] }`
+#[derive(Debug, Clone, PartialEq)]
+pub struct GenericParam {
+    pub name: String,
+    pub bounds: Vec<String>,
+}
+
+impl GenericParam {
+    pub fn unbounded(name: impl Into<String>) -> Self {
+        Self { name: name.into(), bounds: vec![] }
+    }
+}
+
+/// Extract just the names from a list of GenericParams (for callers that only need names).
+pub fn param_names(params: &[GenericParam]) -> Vec<String> {
+    params.iter().map(|p| p.name.clone()).collect()
+}
+
 // ── Visibility ────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, PartialEq)]
@@ -141,7 +164,7 @@ pub enum TypeBody {
 pub struct TypeDef {
     pub visibility: Option<Visibility>,
     pub name: String,
-    pub type_params: Vec<String>, // e.g. ["T", "U"] for type Pair<T, U>
+    pub type_params: Vec<GenericParam>, // e.g. ["T", "U"] for type Pair<T, U>
     pub with_interfaces: Vec<String>,
     pub invariants: Vec<Expr>,
     pub body: TypeBody,
@@ -408,7 +431,7 @@ pub struct FnDef {
     pub visibility: Option<Visibility>,
     pub is_async: bool,
     pub name: String,
-    pub type_params: Vec<String>, // e.g. ["T", "U"] for fn f<T, U>(...)
+    pub type_params: Vec<GenericParam>, // e.g. ["T", "U"] for fn f<T, U>(...)
     pub params: Vec<Param>,
     pub return_ty: Option<TypeExpr>,
     pub effects: Vec<Effect>,
@@ -423,7 +446,7 @@ pub struct TrfDef {
     pub visibility: Option<Visibility>,
     pub is_async: bool,
     pub name: String,
-    pub type_params: Vec<String>, // e.g. ["T", "U"] for trf F<T, U>: ...
+    pub type_params: Vec<GenericParam>, // e.g. ["T", "U"] for trf F<T, U>: ...
     pub input_ty: TypeExpr,
     pub output_ty: TypeExpr,
     pub effects: Vec<Effect>,
@@ -436,7 +459,7 @@ pub struct TrfDef {
 pub struct AbstractTrfDef {
     pub visibility: Option<Visibility>,
     pub name: String,
-    pub type_params: Vec<String>,
+    pub type_params: Vec<GenericParam>,
     pub input_ty: TypeExpr,
     pub output_ty: TypeExpr,
     pub effects: Vec<Effect>,
@@ -504,7 +527,7 @@ pub struct FlwSlot {
 pub struct AbstractFlwDef {
     pub visibility: Option<Visibility>,
     pub name: String,
-    pub type_params: Vec<String>,
+    pub type_params: Vec<GenericParam>,
     pub slots: Vec<FlwSlot>,
     pub span: Span,
 }
@@ -558,7 +581,7 @@ pub struct InterfaceDecl {
 pub struct InterfaceImplDecl {
     pub interface_names: Vec<String>,
     pub type_name: String,
-    pub type_params: Vec<String>,
+    pub type_params: Vec<GenericParam>,
     pub methods: Vec<(String, Expr)>,
     pub is_auto: bool,
     pub span: Span,
@@ -569,7 +592,7 @@ pub struct InterfaceImplDecl {
 pub struct CapDef {
     pub visibility: Option<Visibility>,
     pub name: String,
-    pub type_params: Vec<String>, // ["T"] for cap Eq<T>
+    pub type_params: Vec<GenericParam>, // ["T"] for cap Eq<T>
     pub fields: Vec<CapField>,
     pub span: Span,
 }

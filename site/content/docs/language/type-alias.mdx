@@ -1,0 +1,75 @@
+# 型エイリアス（Type Alias）
+
+`alias` キーワードで「ドキュメント目的の型別名」を宣言できます。
+型チェック時にエイリアスは元の型に展開されるため、エイリアス型と元の型は完全に交換可能です。
+実行時コストはゼロです（コンパイル後の IR には型情報が残りません）。
+
+## 構文
+
+```fav
+alias Email     = String
+alias Timestamp = String
+alias RowId     = Int
+```
+
+### ジェネリックエイリアス
+
+```fav
+alias Result2<T> = Result<T, String>
+alias Rows<T>    = List<T>
+```
+
+## 使用例
+
+```fav
+alias Email = String
+
+fn parse_email(s: Email) -> Result<Email, String> {
+    if String.contains(s, "@") {
+        Result.ok(s)
+    } else {
+        Result.err("invalid email")
+    }
+}
+
+-- エイリアスは元の型と交換可能
+fn send(addr: Email) -> Result<Unit, String> { Result.ok(()) }
+
+bind e: String <- "alice@example.com"
+send(e)   -- OK: Email = String は同じ型
+```
+
+### ジェネリックエイリアスの例
+
+```fav
+alias Result2<T> = Result<T, String>
+
+fn safe_div(a: Int, b: Int) -> Result2<Int> {
+    if b == 0 {
+        Result.err("division by zero")
+    } else {
+        Result.ok(a)
+    }
+}
+```
+
+## `alias` vs `type` の違い
+
+| | `alias Email = String` | `type Email(String)` |
+|---|---|---|
+| 互換性 | `String` と交換可能 | 区別される（`Email.unwrap()` が必要） |
+| 目的 | ドキュメント・可読性 | ビジネスルール強制 |
+| `where` バリデーター | 不可 | 可能 |
+| 実行時コスト | ゼロ | ゼロ（ラッパー展開） |
+
+## 制約
+
+- 循環エイリアス（`alias A = B, alias B = A`）はエラー（E0329）
+- `where` バリデーターは使用不可（`type Name(Inner) where ...` を使用）
+- ジェネリックエイリアスの型引数は省略不可
+
+## エラーコード
+
+| コード | 説明 |
+|---|---|
+| E0329 | 循環エイリアス定義 |

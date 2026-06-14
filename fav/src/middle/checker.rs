@@ -946,6 +946,8 @@ pub struct Checker {
     collect_helpers: HashSet<String>,
     /// Type alias definitions: name -> target TypeExpr (v1.7.0).
     type_aliases: HashMap<String, TypeExpr>,
+    /// `alias` keyword aliases with generic params (v16.5.0): name -> (params, TypeExpr).
+    alias_env: HashMap<String, (Vec<String>, TypeExpr)>,
     /// Type constraint schemas loaded from schemas/*.yaml (v4.1.5).
     pub schemas: ProjectSchemas,
 }
@@ -984,6 +986,7 @@ impl Checker {
             in_collect: false,
             collect_helpers: HashSet::new(),
             type_aliases: HashMap::new(),
+            alias_env: HashMap::new(),
             schemas: HashMap::new(),
         }
     }
@@ -1024,6 +1027,7 @@ impl Checker {
             in_collect: false,
             collect_helpers: HashSet::new(),
             type_aliases: HashMap::new(),
+            alias_env: HashMap::new(),
             schemas: HashMap::new(),
         }
     }
@@ -2269,6 +2273,13 @@ impl Checker {
                             .insert((id.cap_name.clone(), ty_key), ImplScope { methods });
                     }
                 }
+                // `alias` keyword — register into alias_env for type resolution (v16.5.0)
+                Item::AliasDecl { name, params, ty, .. } => {
+                    self.alias_env.insert(name.clone(), (params.clone(), ty.clone()));
+                    if !params.is_empty() {
+                        self.type_arity.insert(name.clone(), params.len());
+                    }
+                }
                 // namespace / use / test / bench / interface are handled elsewhere
                 Item::NamespaceDecl(..)
                 | Item::UseDecl(..)
@@ -2307,6 +2318,7 @@ impl Checker {
             Item::EffectDef(..) => {}
             Item::TestDef(td) => self.check_test_def(td),
             Item::BenchDef(bd) => self.check_bench_def(bd),
+            Item::AliasDecl { .. } => {} // registered in register_item_signatures
             Item::NamespaceDecl(..)
             | Item::UseDecl(..)
             | Item::RuneUse { .. }
@@ -3578,6 +3590,24 @@ impl Checker {
                         Box::new(resolved_args[0].clone()),
                         Box::new(resolved_args[1].clone()),
                     ),
+                    // `alias` keyword resolution in subst context (v16.5.0)
+                    _ if self.alias_env.contains_key(name.as_str()) => {
+                        let (params, target) = self.alias_env[name.as_str()].clone();
+                        if params.is_empty() {
+                            self.resolve_type_expr_with_subst(&target, subst)
+                        } else {
+                            let new_subst: HashMap<String, Type> = params
+                                .into_iter()
+                                .zip(resolved_args.into_iter())
+                                .collect();
+                            self.resolve_type_expr_with_subst(&target, &new_subst)
+                        }
+                    }
+                    // Type alias resolution (v1.7.0)
+                    _ if self.type_aliases.contains_key(name.as_str()) => {
+                        let alias_target = self.type_aliases[name.as_str()].clone();
+                        self.resolve_type_expr_with_subst(&alias_target, subst)
+                    }
                     _ => Type::Named(name.clone(), resolved_args),
                 }
             }
@@ -6831,6 +6861,19 @@ impl Checker {
                     "_infer" => Type::Unknown,
                     _ if self.interface_registry.interfaces.contains_key(name) => {
                         Type::Interface(name.clone(), resolved_args)
+                    }
+                    // `alias` keyword resolution with generic param substitution (v16.5.0)
+                    _ if self.alias_env.contains_key(name.as_str()) => {
+                        let (params, target) = self.alias_env[name.as_str()].clone();
+                        if params.is_empty() {
+                            self.resolve_type_expr_with_self(&target, self_ty)
+                        } else {
+                            let subst: HashMap<String, Type> = params
+                                .into_iter()
+                                .zip(resolved_args.into_iter())
+                                .collect();
+                            self.resolve_type_expr_with_subst(&target, &subst)
+                        }
                     }
                     // Type alias resolution (v1.7.0)
                     _ if self.type_aliases.contains_key(name.as_str()) => {

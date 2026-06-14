@@ -375,14 +375,33 @@ impl Parser {
                     span,
                 })
             }
+            TokenKind::Alias => {
+                if vis.is_some() {
+                    return Err(ParseError::new(
+                        "visibility modifier on `alias` is not allowed",
+                        self.peek_span().clone(),
+                    ));
+                }
+                self.parse_alias_decl()
+            }
             other => Err(ParseError::new(
                 format!(
-                    "expected item (type/fn/stage/seq/interface/effect/impl/test), got {:?}",
+                    "expected item (type/fn/stage/seq/interface/effect/impl/test/alias), got {:?}",
                     other
                 ),
                 self.peek_span().clone(),
             )),
         }
+    }
+
+    fn parse_alias_decl(&mut self) -> Result<Item, ParseError> {
+        let span = self.peek_span().clone();
+        self.advance(); // consume `alias`
+        let (name, _) = self.expect_ident()?;
+        let params = self.parse_type_params()?;
+        self.expect(&TokenKind::Eq)?;
+        let ty = self.parse_type_expr()?;
+        Ok(Item::AliasDecl { name, params, ty, span })
     }
 
     fn parse_import_decl(&mut self, is_public: bool) -> Result<Item, ParseError> {

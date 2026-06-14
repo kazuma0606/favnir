@@ -90,6 +90,13 @@ impl Formatter {
             Item::ImplDef(id) => self.impl_def(id),
             Item::TestDef(td) => self.test_def(td),
             Item::BenchDef(bd) => self.bench_def(bd),
+            Item::AliasDecl { name, params, ty, .. } => {
+                if params.is_empty() {
+                    format!("alias {} = {}", name, self.type_expr(ty))
+                } else {
+                    format!("alias {}<{}> = {}", name, params.join(", "), self.type_expr(ty))
+                }
+            }
         }
     }
 

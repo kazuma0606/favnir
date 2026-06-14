@@ -11077,6 +11077,7 @@ impl ExplainPrinter {
                         "-"
                     );
                 }
+                Item::AliasDecl { .. } => {}
                 Item::NamespaceDecl(..)
                 | Item::UseDecl(..)
                 | Item::RuneUse { .. }
@@ -26528,6 +26529,122 @@ public fn main() -> Float {
             }
             other => panic!("expected Float, got {:?}", other),
         }
+    }
+}
+
+// ── v165000_tests (v16.5.0) — 型エイリアス（alias キーワード）────────────────
+#[cfg(test)]
+mod v165000_tests {
+    use super::{build_artifact, exec_artifact_main};
+    use crate::frontend::parser::Parser;
+    use crate::value::Value;
+
+    fn run(src: &str) -> Value {
+        let program = Parser::parse_str(src, "v165000_test.fav").expect("parse");
+        let artifact = build_artifact(&program);
+        exec_artifact_main(&artifact, None).expect("exec")
+    }
+
+    fn run_str(src: &str) -> String {
+        match run(src) {
+            Value::Str(s) => s,
+            other => panic!("expected Str, got {:?}", other),
+        }
+    }
+
+    fn run_int(src: &str) -> i64 {
+        match run(src) {
+            Value::Int(n) => n,
+            other => panic!("expected Int, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn version_is_16_5_0() {
+        let cargo = std::fs::read_to_string("Cargo.toml").unwrap();
+        assert!(
+            cargo.contains("version = \"16.5.0\""),
+            "Cargo.toml version should be 16.5.0"
+        );
+    }
+
+    #[test]
+    fn alias_basic() {
+        // alias Email = String を使った関数がコンパイル・実行される
+        let result = run_str(r#"
+alias Email = String
+
+fn greet(e: Email) -> String {
+    String.concat("hello ", e)
+}
+
+public fn main() -> String {
+    greet("alice@example.com")
+}
+"#);
+        assert_eq!(result, "hello alice@example.com");
+    }
+
+    #[test]
+    fn alias_interchangeable() {
+        // alias UserId = Int — String 変数を Email 引数として渡せる
+        let result = run_int(r#"
+alias UserId = Int
+
+fn double_id(id: UserId) -> Int {
+    Math.abs(id) + Math.abs(id)
+}
+
+public fn main() -> Int {
+    bind raw_id: Int <- 21
+    double_id(raw_id)
+}
+"#);
+        assert_eq!(result, 42);
+    }
+
+    #[test]
+    fn alias_generic() {
+        // alias Result2<T> = Result<T, String> — 呼び出しが動作する
+        let result = run_str(r#"
+alias Result2<T> = Result<T, String>
+
+fn safe_head(xs: List<String>) -> Result2<String> {
+    bind first <- List.first(xs)
+    match first {
+        some(v) => Result.ok(v)
+        none    => Result.err("empty list")
+    }
+}
+
+public fn main() -> String {
+    bind items <- List.push(List.empty(), "hello")
+    bind r <- safe_head(items)
+    match r {
+        ok(v)  => v
+        err(e) => e
+    }
+}
+"#);
+        assert_eq!(result, "hello");
+    }
+
+    #[test]
+    fn alias_in_signature() {
+        // エイリアスを引数型・戻り型に使った fn が正常に動作する
+        let result = run_str(r#"
+alias Label = String
+alias Count = Int
+
+fn describe(name: Label, n: Count) -> Label {
+    String.concat(name, String.from_int(n))
+}
+
+public fn main() -> String {
+    describe("item_", 7)
+}
+"#);
+        assert_eq!(result, "item_7");
     }
 }
 

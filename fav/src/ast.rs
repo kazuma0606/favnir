@@ -645,6 +645,12 @@ pub enum Item {
     EffectDef(EffectDef),
     TestDef(TestDef),   // test "description" { ... }
     BenchDef(BenchDef), // bench "description" { ... }  (v1.8.0)
+    AliasDecl {
+        name: String,
+        params: Vec<String>,
+        ty: TypeExpr,
+        span: Span,
+    },
 }
 
 impl Item {
@@ -668,6 +674,7 @@ impl Item {
             Item::EffectDef(e) => &e.span,
             Item::TestDef(t) => &t.span,
             Item::BenchDef(b) => &b.span,
+            Item::AliasDecl { span, .. } => span,
         }
     }
 }

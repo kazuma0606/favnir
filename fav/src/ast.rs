@@ -644,6 +644,11 @@ pub enum Item {
     ImplDef(ImplDef), // impl Eq<Int> { ... }
     EffectDef(EffectDef),
     TestDef(TestDef),   // test "description" { ... }
+    TestGroup {         // test_group "name" { test ... }  (v16.7.0)
+        name: String,
+        tests: Vec<TestDef>,
+        span: Span,
+    },
     BenchDef(BenchDef), // bench "description" { ... }  (v1.8.0)
     AliasDecl {
         name: String,
@@ -679,6 +684,7 @@ impl Item {
             Item::ImplDef(i) => &i.span,
             Item::EffectDef(e) => &e.span,
             Item::TestDef(t) => &t.span,
+            Item::TestGroup { span, .. } => span,
             Item::BenchDef(b) => &b.span,
             Item::AliasDecl { span, .. } => span,
             Item::UseAlias { span, .. } => span,

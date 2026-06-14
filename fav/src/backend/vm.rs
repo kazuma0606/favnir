@@ -7858,6 +7858,151 @@ fn vm_call_builtin(
                 other => Err(format!("assert_true failed: not a Bool: {}", vmvalue_repr(&other))),
             }
         }
+        // ── v16.7.0 assert primitives ──────────────────────────────────────────
+        "assert_eq" => {
+            let mut it = args.into_iter();
+            let actual   = it.next().ok_or_else(|| "assert_eq requires 2 arguments".to_string())?;
+            let expected = it.next().ok_or_else(|| "assert_eq requires 2 arguments".to_string())?;
+            let a_str = vmvalue_repr(&actual);
+            let e_str = vmvalue_repr(&expected);
+            if a_str == e_str {
+                Ok(VMValue::Unit)
+            } else {
+                Err(format!(
+                    "assert_eq failed:\n  actual:   {}\n  expected: {}",
+                    a_str, e_str
+                ))
+            }
+        }
+        "assert_approx_eq" => {
+            let mut it = args.into_iter();
+            let actual   = it.next().ok_or_else(|| "assert_approx_eq requires 3 arguments".to_string())?;
+            let expected = it.next().ok_or_else(|| "assert_approx_eq requires 3 arguments".to_string())?;
+            let epsilon  = it.next().ok_or_else(|| "assert_approx_eq requires 3 arguments".to_string())?;
+            let a   = match &actual   { VMValue::Float(f) => *f, VMValue::Int(i) => *i as f64, _ => return Err(format!("assert_approx_eq: actual must be a number, got {}", vmvalue_repr(&actual))) };
+            let e   = match &expected { VMValue::Float(f) => *f, VMValue::Int(i) => *i as f64, _ => return Err(format!("assert_approx_eq: expected must be a number, got {}", vmvalue_repr(&expected))) };
+            let eps = match &epsilon  { VMValue::Float(f) => *f, VMValue::Int(i) => *i as f64, _ => return Err(format!("assert_approx_eq: epsilon must be a number, got {}", vmvalue_repr(&epsilon))) };
+            if (a - e).abs() <= eps {
+                Ok(VMValue::Unit)
+            } else {
+                Err(format!(
+                    "assert_approx_eq failed:\n  actual:   {}\n  expected: {}\n  epsilon:  {}",
+                    a, e, eps
+                ))
+            }
+        }
+        "assert_contains" => {
+            let mut it = args.into_iter();
+            let list = it.next().ok_or_else(|| "assert_contains requires 2 arguments".to_string())?;
+            let elem = it.next().ok_or_else(|| "assert_contains requires 2 arguments".to_string())?;
+            let elem_str = vmvalue_repr(&elem);
+            match list {
+                VMValue::List(items) => {
+                    if items.iter().any(|v| vmvalue_repr(v) == elem_str) {
+                        Ok(VMValue::Unit)
+                    } else {
+                        Err(format!("assert_contains failed: element {} not found in list", elem_str))
+                    }
+                }
+                other => Err(format!("assert_contains: first argument must be a List, got {}", vmvalue_repr(&other))),
+            }
+        }
+        "assert_length" => {
+            let mut it = args.into_iter();
+            let list = it.next().ok_or_else(|| "assert_length requires 2 arguments".to_string())?;
+            let n    = it.next().ok_or_else(|| "assert_length requires 2 arguments".to_string())?;
+            let expected_len = match n { VMValue::Int(i) => i as usize, other => return Err(format!("assert_length: second argument must be Int, got {}", vmvalue_repr(&other))) };
+            match list {
+                VMValue::List(items) => {
+                    if items.len() == expected_len {
+                        Ok(VMValue::Unit)
+                    } else {
+                        Err(format!("assert_length failed:\n  actual:   {}\n  expected: {}", items.len(), expected_len))
+                    }
+                }
+                other => Err(format!("assert_length: first argument must be a List, got {}", vmvalue_repr(&other))),
+            }
+        }
+        "assert_str_contains" => {
+            let mut it = args.into_iter();
+            let s   = it.next().ok_or_else(|| "assert_str_contains requires 2 arguments".to_string())?;
+            let sub = it.next().ok_or_else(|| "assert_str_contains requires 2 arguments".to_string())?;
+            match (s, sub) {
+                (VMValue::Str(s), VMValue::Str(sub)) => {
+                    if s.contains(sub.as_str()) {
+                        Ok(VMValue::Unit)
+                    } else {
+                        Err(format!("assert_str_contains failed: {:?} does not contain {:?}", s, sub))
+                    }
+                }
+                (s, sub) => Err(format!("assert_str_contains: both arguments must be String, got {} and {}", vmvalue_repr(&s), vmvalue_repr(&sub))),
+            }
+        }
+        "assert_str_starts_with" => {
+            let mut it = args.into_iter();
+            let s      = it.next().ok_or_else(|| "assert_str_starts_with requires 2 arguments".to_string())?;
+            let prefix = it.next().ok_or_else(|| "assert_str_starts_with requires 2 arguments".to_string())?;
+            match (s, prefix) {
+                (VMValue::Str(s), VMValue::Str(prefix)) => {
+                    if s.starts_with(prefix.as_str()) {
+                        Ok(VMValue::Unit)
+                    } else {
+                        Err(format!("assert_str_starts_with failed: {:?} does not start with {:?}", s, prefix))
+                    }
+                }
+                (s, prefix) => Err(format!("assert_str_starts_with: both arguments must be String, got {} and {}", vmvalue_repr(&s), vmvalue_repr(&prefix))),
+            }
+        }
+        "assert_err_eq" => {
+            let mut it = args.into_iter();
+            let result   = it.next().ok_or_else(|| "assert_err_eq requires 2 arguments".to_string())?;
+            let expected = it.next().ok_or_else(|| "assert_err_eq requires 2 arguments".to_string())?;
+            let expected_str = match &expected { VMValue::Str(s) => s.clone(), other => vmvalue_repr(other) };
+            match result {
+                VMValue::Variant(ref tag, ref inner) if tag == "err" => {
+                    let actual_str = inner.as_deref().map(|v| match v { VMValue::Str(s) => s.clone(), other => vmvalue_repr(other) }).unwrap_or_default();
+                    if actual_str == expected_str {
+                        Ok(VMValue::Unit)
+                    } else {
+                        Err(format!("assert_err_eq failed:\n  actual:   {:?}\n  expected: {:?}", actual_str, expected_str))
+                    }
+                }
+                VMValue::Variant(ref tag, _) if tag == "ok" => {
+                    Err(format!("assert_err_eq failed: got ok, expected err({:?})", expected_str))
+                }
+                other => Err(format!("assert_err_eq: first argument must be a Result, got {}", vmvalue_repr(&other))),
+            }
+        }
+        "assert_snapshot" => {
+            let mut it = args.into_iter();
+            let value = it.next().ok_or_else(|| "assert_snapshot requires 2 arguments".to_string())?;
+            let name  = it.next().ok_or_else(|| "assert_snapshot requires 2 arguments".to_string())?;
+            let snap_name = match name { VMValue::Str(s) => s, other => return Err(format!("assert_snapshot: second argument must be String, got {}", vmvalue_repr(&other))) };
+            let snap_content = vmvalue_repr(&value);
+            let snap_dir = std::path::Path::new(".snap");
+            if !snap_dir.exists() {
+                std::fs::create_dir_all(snap_dir)
+                    .map_err(|e| format!("assert_snapshot: failed to create .snap/ directory: {}", e))?;
+            }
+            let snap_path = snap_dir.join(format!("{}.snap", snap_name));
+            let update = std::env::var("UPDATE_SNAPSHOTS").unwrap_or_default() == "1";
+            if !snap_path.exists() || update {
+                std::fs::write(&snap_path, &snap_content)
+                    .map_err(|e| format!("assert_snapshot: failed to write snapshot: {}", e))?;
+                Ok(VMValue::Unit)
+            } else {
+                let stored = std::fs::read_to_string(&snap_path)
+                    .map_err(|e| format!("assert_snapshot: failed to read snapshot: {}", e))?;
+                if stored == snap_content {
+                    Ok(VMValue::Unit)
+                } else {
+                    Err(format!(
+                        "assert_snapshot failed for {:?}:\n  stored:  {}\n  current: {}",
+                        snap_name, stored, snap_content
+                    ))
+                }
+            }
+        }
         "Result.ok" => {
             let v = args
                 .into_iter()

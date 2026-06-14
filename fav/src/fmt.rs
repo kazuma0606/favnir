@@ -89,6 +89,9 @@ impl Formatter {
             Item::CapDef(cd) => self.cap_def(cd),
             Item::ImplDef(id) => self.impl_def(id),
             Item::TestDef(td) => self.test_def(td),
+            Item::TestGroup { name, tests, .. } => {
+                format!("test_group \"{}\" {{ {} tests }}", name, tests.len())
+            }
             Item::BenchDef(bd) => self.bench_def(bd),
             Item::AliasDecl { name, params, ty, .. } => {
                 if params.is_empty() {

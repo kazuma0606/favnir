@@ -336,6 +336,15 @@ impl Parser {
                 }
                 Ok(Item::TestDef(self.parse_test_def()?))
             }
+            TokenKind::TestGroup => {
+                if vis.is_some() {
+                    return Err(ParseError::new(
+                        "visibility modifier on `test_group` is not allowed",
+                        self.peek_span().clone(),
+                    ));
+                }
+                Ok(self.parse_test_group()?)
+            }
             TokenKind::Bench => {
                 if vis.is_some() {
                     return Err(ParseError::new(
@@ -682,6 +691,36 @@ impl Parser {
         Ok(TestDef {
             name,
             body,
+            span: self.span_from(&start),
+        })
+    }
+
+    // ── test_group (v16.7.0) ─────────────────────────────────────────────────
+
+    fn parse_test_group(&mut self) -> Result<Item, ParseError> {
+        let start = self.peek_span().clone();
+        self.expect(&TokenKind::TestGroup)?;
+        let name = match self.peek().clone() {
+            TokenKind::Str(s) => {
+                self.advance();
+                s
+            }
+            _ => {
+                return Err(ParseError::new(
+                    "expected string literal after `test_group`",
+                    self.peek_span().clone(),
+                ));
+            }
+        };
+        self.expect(&TokenKind::LBrace)?;
+        let mut tests = Vec::new();
+        while self.peek() != &TokenKind::RBrace && self.peek() != &TokenKind::Eof {
+            tests.push(self.parse_test_def()?);
+        }
+        self.expect(&TokenKind::RBrace)?;
+        Ok(Item::TestGroup {
+            name,
+            tests,
             span: self.span_from(&start),
         })
     }

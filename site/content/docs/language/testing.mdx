@@ -2,192 +2,203 @@
 title: "テスト・ベンチマーク"
 order: 5
 category: "言語仕様"
-description: "Favnir のテスト構文 — test / bench ブロック、fav test コマンド"
+description: "Favnir のテスト構文 — test / test_group / assert_eq / assert_snapshot / fav test コマンド（v16.7.0）"
 ---
 
-# テスト・ベンチマーク
+# テスト（Testing）
 
-Favnir はテストとベンチマークを言語レベルでサポートしています。外部ライブラリ不要で、`.fav` ファイルの中に直接 `test` / `bench` ブロックを書けます。
+Favnir はテスト DSL を内蔵しています。`.fav` ファイルに直接テストを書いて `fav test` で実行できます。
 
-## test ブロック
+---
+
+## 基本的なテスト
 
 ```favnir
-test "description" {
-    <式 — アサーション関数または Bool 式>
+test "数の加算" {
+  let result = 1 + 1
+  assert_eq(result, 2)
+}
+
+test "文字列のトリム" {
+  let trimmed = String.trim("  hello  ")
+  assert_eq(trimmed, "hello")
 }
 ```
 
-テストブロック内では `assert_eq` / `assert_ok` / `assert_err` / `assert_true` の 4 つのアサーション関数を使います。アサーションが失敗すると即座にテスト FAIL となり、エラーメッセージが表示されます。
-
-### 例
-
-```favnir
-fn add(a: Int, b: Int) -> Int { a + b }
-
-test "add returns correct result" {
-    assert_eq(add(1, 2), 3)
-}
-
-test "add with negatives" {
-    assert_true(add(-1, 1) == 0)
-}
-```
-
-## アサーション関数（4 種類）
-
-| 関数 | シグネチャ | 説明 |
-|---|---|---|
-| `assert_eq(a, b)` | `(T, T) -> Unit` | `a == b` でなければ FAIL |
-| `assert_ok(r)` | `(Result<T, E>) -> T` | `Result.ok(v)` でなければ FAIL。ok なら v を返す |
-| `assert_err(r)` | `(Result<T, E>) -> E` | `Result.err(e)` でなければ FAIL。err なら e を返す |
-| `assert_true(b)` | `(Bool) -> Unit` | `b == true` でなければ FAIL |
-
-### assert_ok の使用例
-
-```favnir
-test "insert returns ok" {
-    bind result <- db_insert(row)
-    assert_ok(result)
-}
-```
-
-### assert_err の使用例
-
-```favnir
-test "invalid input returns err" {
-    bind result <- validate("bad@input")
-    bind msg <- assert_err(result)
-    assert_eq(msg, "invalid email")
-}
-```
-
-### assert_true の使用例
-
-```favnir
-test "list length is correct" {
-    bind xs <- load_rows()
-    bind rows <- assert_ok(xs)
-    assert_true(List.length(rows) > 0)
-}
-```
-
-### bind を使ったテスト
-
-複数のステップが必要なテストには `bind` を使います。
-
-```favnir
-test "transform trims whitespace" {
-    bind row <- Result.ok({ full_name: "  Alice  ", email: "A@example.com" })
-    bind result <- transform_row(row)
-    assert_eq(result.full_name, "Alice")
-}
-```
-
-### Ctx.mock との組み合わせ
-
-```favnir
-test "pipeline with mock db" {
-    bind ctx <- Ctx.mock({ db: MockDb.empty() })
-    bind result <- run_pipeline(ctx)
-    assert_ok(result)
-}
-```
-
-## fav test コマンド
-
-### 単一ファイルのテスト
+実行方法:
 
 ```bash
-fav test myfile.fav
+fav test                          # 全テスト
+fav test myfile.fav               # 単一ファイル
+fav test --filter "加算"          # 名前でフィルタ
+fav test --fail-fast              # 最初の失敗で停止
 ```
 
-### ディレクトリ全体のテスト
+---
 
-```bash
-fav test src/
+## アサート一覧
+
+### assert_eq（v16.7.0）
+
+```favnir
+assert_eq(actual, expected)
+// 不一致の場合: "assert_eq failed:\n  actual: X\n  expected: Y"
+assert_eq(1 + 1, 2)
+assert_eq(String.trim("  hi  "), "hi")
 ```
 
-### オプション
+値は `vmvalue_repr` で文字列化して比較するため、任意の型で使えます。
 
-| オプション | 説明 |
-|-----------|------|
-| `--filter <pattern>` | テスト名に pattern を含むものだけ実行 |
+### assert_approx_eq（v16.7.0）
+
+```favnir
+// 浮動小数点の近似比較: |actual - expected| <= epsilon
+assert_approx_eq(Math.sqrt(2.0), 1.414, 0.001)
+```
+
+### assert_true / assert_ok / assert_err（v15.3.0）
+
+```favnir
+assert_true(condition)        // Bool が false なら FAIL
+assert_ok(result)             // Result が err なら FAIL
+assert_err(result)            // Result が ok なら FAIL
+```
+
+### assert_contains / assert_length（v16.7.0）
+
+```favnir
+let rows = [1, 2, 3]
+assert_contains(rows, 2)      // 要素が存在しなければ FAIL
+assert_length(rows, 3)        // 長さが一致しなければ FAIL
+```
+
+### assert_str_contains / assert_str_starts_with（v16.7.0）
+
+```favnir
+assert_str_contains("Hello, World!", "World")
+assert_str_starts_with("Hello, World!", "Hello")
+```
+
+### assert_err_eq（v16.7.0）
+
+```favnir
+// エラーメッセージの内容を検証
+let result = Result.err("invalid email")
+assert_err_eq(result, "invalid email")
+```
+
+### assert_snapshot（v16.7.0）
+
+```favnir
+assert_snapshot(value, "snapshot_name")
+```
+
+- **初回実行**: `.snap/snapshot_name.snap` にスナップショットを保存してパス
+- **2 回目以降**: 保存済みスナップショットと比較。一致 → パス、不一致 → FAIL
+- **スナップショット更新**: `fav test --update-snapshots` で全スナップショットを上書き
+
+`.snap/` ディレクトリをプロジェクトルートに自動作成します。`.gitignore` に追加するか、コミットしてリグレッションテストに活用できます。
+
+---
+
+## test_group でテストをグループ化（v16.7.0）
+
+関連するテストをグループ化してサマリーをグループ単位で出力できます:
+
+```favnir
+test_group "変換パイプライン" {
+  test "空白をトリムする" {
+    let result = String.trim("  Alice  ")
+    assert_eq(result, "Alice")
+  }
+
+  test "空入力を拒否する" {
+    let result = Result.err("empty")
+    assert_err(result)
+  }
+
+  test "メールを含むか確認" {
+    assert_str_contains("alice@example.com", "@")
+  }
+}
+```
+
+出力例:
+```
+running 3 tests in "変換パイプライン"
+
+  test 空白をトリムする   ... PASS
+  test 空入力を拒否する   ... PASS
+  test メールを含むか確認 ... PASS
+
+test result: ok. 3 passed; 0 failed; 0 filtered; finished in 2ms
+```
+
+---
+
+## fav test フラグ
+
+| フラグ | 説明 |
+|---|---|
+| `--filter <pattern>` | 名前にパターンを含むテストのみ実行 |
 | `--fail-fast` | 最初の失敗で停止 |
-| `--no-capture` | 標準出力をキャプチャせずに表示 |
-| `--coverage` | カバレッジレポートを出力 |
+| `--no-capture` | テスト中の IO 出力を表示（デフォルト: 抑制） |
+| `--update-snapshots` | 全スナップショットを上書き更新 |
+| `--coverage` | カバレッジ計測を有効化 |
+| `--coverage-report <dir>` | HTML カバレッジレポートをディレクトリに出力 |
 
-```bash
-# "list" を含むテストだけ実行
-fav test src/ --filter list
+---
 
-# 最初の失敗で停止
-fav test src/ --fail-fast
-```
+## パターン: let バインディングでセットアップ
 
-## テスト出力フォーマット
-
-```
-running 3 tests in myfile.fav
-
-  PASS  add returns correct result
-  PASS  add with negatives
-  FAIL  safe_div returns Some when divisor is nonzero
-
-test result: FAIL — 2 passed, 1 failed
-```
-
-テストが全件 PASS の場合:
-
-```
-running 3 tests in myfile.fav
-
-  PASS  add returns correct result
-  PASS  add with negatives
-  PASS  safe_div returns None when divisor is zero
-
-test result: ok — 3 passed, 0 failed
-```
-
-## bench ブロック
-
-ベンチマークは `bench` キーワードで定義します。
+テストボディは `let` / `bind` バインディングの後に単一のアサーション式を置く形式です:
 
 ```favnir
-bench "description" {
-    <繰り返し実行したい式>
+test "パイプラインが行を処理する" {
+  let rows = [
+    { name: "  Alice  ", score: 95 },
+    { name: "Bob", score: 87 },
+  ]
+  let count = List.length(rows)
+  assert_eq(count, 2)
 }
 ```
 
-### 例
+---
+
+## パターン: エラーパスのテスト
 
 ```favnir
-bench "list range 1000" {
-    List.range(0, 1000)
+test "パースエラーは err を返す" {
+  let result = DateTime.parse("not a date")
+  assert_err(result)
 }
 
-bench "string concat 100 times" {
-    List.fold(List.range(0, 100), "", |acc, _| String.concat(acc, "x"))
+test "エラーメッセージが一致する" {
+  let result = Result.err("invalid email")
+  assert_err_eq(result, "invalid email")
 }
 ```
 
-## fav bench コマンド
+---
+
+## bench（ベンチマーク）
+
+```favnir
+bench "List.sort のベンチマーク" {
+  let data = [3, 1, 4, 1, 5, 9, 2, 6]
+  List.sort_by(data, |x| x)
+}
+```
 
 ```bash
-fav bench myfile.fav
+fav bench                        # 全ベンチマーク実行
+fav bench --filter "sort"
 ```
 
-### 出力フォーマット
+---
 
-```
-running 2 benchmarks in myfile.fav
+## 参照
 
-  list range 1000          1,234 ns/iter  (±  12 ns)
-  string concat 100 times  5,678 ns/iter  (± 123 ns)
-```
-
-## テストのベストプラクティス
-
-- テストは1つの関数・動作に絞る（1テスト1アサーション）
-- テスト名は「何を確認するか」を日本語または英語で明確に
-- `Result.err` や `Option.none` のケースも必ずテストする
-- 境界値（0、空リスト、最大値など）をテストに含める
+- [パイプライン](/docs/language/pipeline) — ステージパイプラインのテスト
+- [stdlib](/docs/stdlib/list) — テストで使える標準ライブラリ

@@ -821,6 +821,7 @@ fn main_impl() {
             let mut no_capture = false;
             let mut coverage = false;
             let mut coverage_report_dir: Option<String> = None;
+            let mut update_snapshots = false;
             let mut file: Option<String> = None;
             let mut i = 2usize;
             while i < args.len() {
@@ -848,6 +849,10 @@ fn main_impl() {
                         coverage = true;
                         i += 1;
                     }
+                    "--update-snapshots" => {
+                        update_snapshots = true;
+                        i += 1;
+                    }
                     "--coverage-report" => {
                         coverage_report_dir = Some(
                             args.get(i + 1)
@@ -872,6 +877,7 @@ fn main_impl() {
                 no_capture,
                 coverage,
                 coverage_report_dir.as_deref(),
+                update_snapshots,
             );
         }
 

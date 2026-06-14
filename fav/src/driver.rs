@@ -3692,22 +3692,48 @@ struct TestResult {
     elapsed_ms: u128,
 }
 
-fn collect_test_cases(
+/// Returns `(path, display_name, fn_name, prog)` tuples for each test to run.
+pub(crate) fn collect_test_cases(
     programs: Vec<(String, ast::Program)>,
     filter: Option<&str>,
-) -> (Vec<(String, String, ast::Program)>, usize) {
-    let mut tests_to_run: Vec<(String, String, ast::Program)> = Vec::new();
+) -> (Vec<(String, String, String, ast::Program)>, usize) {
+    let mut tests_to_run: Vec<(String, String, String, ast::Program)> = Vec::new();
     let mut total_discovered = 0usize;
     for (path, prog) in programs {
         for item in &prog.items {
-            if let ast::Item::TestDef(td) = item {
-                total_discovered += 1;
-                if let Some(f) = filter {
-                    if !td.name.contains(f) {
-                        continue;
+            match item {
+                ast::Item::TestDef(td) => {
+                    total_discovered += 1;
+                    if let Some(f) = filter {
+                        if !td.name.contains(f) {
+                            continue;
+                        }
+                    }
+                    tests_to_run.push((
+                        path.clone(),
+                        td.name.clone(),
+                        format!("$test:{}", td.name),
+                        prog.clone(),
+                    ));
+                }
+                ast::Item::TestGroup { name: group_name, tests, .. } => {
+                    for td in tests {
+                        total_discovered += 1;
+                        let display = format!("{} :: {}", group_name, td.name);
+                        if let Some(f) = filter {
+                            if !display.contains(f) && !td.name.contains(f) && !group_name.contains(f) {
+                                continue;
+                            }
+                        }
+                        tests_to_run.push((
+                            path.clone(),
+                            display,
+                            format!("$testgroup:{}:{}", group_name, td.name),
+                            prog.clone(),
+                        ));
                     }
                 }
-                tests_to_run.push((path.clone(), td.name.clone(), prog.clone()));
+                _ => {}
             }
         }
     }
@@ -3761,7 +3787,12 @@ pub fn cmd_test(
     no_capture: bool,
     coverage: bool,
     coverage_report_dir: Option<&str>,
+    update_snapshots: bool,
 ) {
+    if update_snapshots {
+        // SAFETY: single-threaded at this point (before test threads spawn)
+        unsafe { std::env::set_var("UPDATE_SNAPSHOTS", "1") };
+    }
     load_checkpoint_config_for_file(file);
     // Collect (file_path, parsed_program) pairs
     let programs: Vec<(String, ast::Program)> = if let Some(path) = file {
@@ -3835,15 +3866,14 @@ pub fn cmd_test(
         let started_all = std::time::Instant::now();
         let mut results: Vec<TestResult> = Vec::new();
 
-        for (path, test_name, prog) in &tests_to_run {
+        for (path, display_name, fn_name, prog) in &tests_to_run {
             let started = std::time::Instant::now();
-            let fn_name = format!("$test:{}", test_name);
             let artifact = build_artifact(prog);
-            let fn_idx = match artifact.fn_idx_by_name(&fn_name) {
+            let fn_idx = match artifact.fn_idx_by_name(fn_name) {
                 Some(i) => i,
                 None => {
                     results.push(TestResult {
-                        description: format!("{test_name} ({path})"),
+                        description: format!("{display_name} ({path})"),
                         passed: false,
                         error_msg: Some("test function not found in artifact".into()),
                         elapsed_ms: started.elapsed().as_millis(),
@@ -3860,7 +3890,7 @@ pub fn cmd_test(
             match VM::run(&artifact, fn_idx, vec![]) {
                 Ok(crate::value::Value::Bool(false)) => {
                     results.push(TestResult {
-                        description: format!("{test_name} ({path})"),
+                        description: format!("{display_name} ({path})"),
                         passed: false,
                         error_msg: Some("test returned false".into()),
                         elapsed_ms: started.elapsed().as_millis(),
@@ -3870,14 +3900,14 @@ pub fn cmd_test(
                     }
                 }
                 Ok(_) => results.push(TestResult {
-                    description: format!("{test_name} ({path})"),
+                    description: format!("{display_name} ({path})"),
                     passed: true,
                     error_msg: None,
                     elapsed_ms: started.elapsed().as_millis(),
                 }),
                 Err(e) => {
                     results.push(TestResult {
-                        description: format!("{test_name} ({path})"),
+                        description: format!("{display_name} ({path})"),
                         passed: false,
                         error_msg: Some(e.message.clone()),
                         elapsed_ms: started.elapsed().as_millis(),
@@ -3906,7 +3936,7 @@ pub fn cmd_test(
         // Report coverage across all test source files
         let source_paths: Vec<String> = tests_to_run
             .iter()
-            .map(|(path, _, _)| path.clone())
+            .map(|(path, _, _, _)| path.clone())
             .collect::<std::collections::BTreeSet<_>>()
             .into_iter()
             .collect();
@@ -5895,13 +5925,12 @@ test "beta" { () }
             super::collect_test_cases(vec![(full_path_str.clone(), merged_prog)], None);
         let mut results = Vec::new();
         crate::backend::vm::set_suppress_io(true);
-        for (_file, test_name, prog) in &tests {
-            let fn_name = format!("$test:{}", test_name);
+        for (_file, display_name, fn_name, prog) in &tests {
             let artifact = super::build_artifact(prog);
-            let fn_idx = artifact.fn_idx_by_name(&fn_name).expect("test fn");
+            let fn_idx = artifact.fn_idx_by_name(fn_name).expect("test fn");
             match crate::backend::vm::VM::run(&artifact, fn_idx, vec![]) {
-                Ok(_) => results.push((test_name.clone(), true, None)),
-                Err(e) => results.push((test_name.clone(), false, Some(e.message))),
+                Ok(_) => results.push((display_name.clone(), true, None)),
+                Err(e) => results.push((display_name.clone(), false, Some(e.message))),
             }
         }
         crate::backend::vm::set_suppress_io(false);
@@ -11079,6 +11108,7 @@ impl ExplainPrinter {
                 }
                 Item::AliasDecl { .. } => {}
                 Item::UseAlias { .. } => {}
+                Item::TestGroup { .. } => {}
                 Item::NamespaceDecl(..)
                 | Item::UseDecl(..)
                 | Item::RuneUse { .. }
@@ -13357,13 +13387,12 @@ mod migrate_tests {
         let (tests, _total) = collect_test_cases(vec![(path.to_string(), prog)], None);
         let mut results = Vec::new();
         crate::backend::vm::set_suppress_io(true);
-        for (_file, test_name, prog) in &tests {
-            let fn_name = format!("$test:{}", test_name);
+        for (_file, display_name, fn_name, prog) in &tests {
             let artifact = build_artifact(prog);
-            let fn_idx = artifact.fn_idx_by_name(&fn_name).expect("test fn");
+            let fn_idx = artifact.fn_idx_by_name(fn_name).expect("test fn");
             match crate::backend::vm::VM::run(&artifact, fn_idx, vec![]) {
-                Ok(_) => results.push((test_name.clone(), true, None)),
-                Err(e) => results.push((test_name.clone(), false, Some(e.message))),
+                Ok(_) => results.push((display_name.clone(), true, None)),
+                Err(e) => results.push((display_name.clone(), false, Some(e.message))),
             }
         }
         crate::backend::vm::set_suppress_io(false);
@@ -26622,6 +26651,116 @@ public fn main() -> Int {
 }
 "#);
         assert_eq!(result, 3);
+    }
+}
+
+// ── v167000_tests (v16.7.0) — fav test 成熟（assert_eq / test_group / snapshot）──
+#[cfg(test)]
+mod v167000_tests {
+    use super::{build_artifact, collect_test_cases, exec_artifact_main};
+    use crate::ast;
+    use crate::frontend::parser::Parser;
+    use crate::value::Value;
+    use crate::backend::vm::VM;
+
+    fn run(src: &str) -> Value {
+        let program = Parser::parse_str(src, "v167000_test.fav").expect("parse");
+        let artifact = build_artifact(&program);
+        exec_artifact_main(&artifact, None).expect("exec")
+    }
+
+    /// Run a Favnir fav-test file and return (passed, failed) counts.
+    fn run_tests(src: &str) -> (usize, usize) {
+        let program = Parser::parse_str(src, "v167000_test.fav").expect("parse");
+        let programs = vec![("v167000_test.fav".to_string(), program)];
+        let (tests, _) = collect_test_cases(programs, None);
+        let artifact = {
+            let prog = Parser::parse_str(src, "v167000_test.fav").expect("parse");
+            build_artifact(&prog)
+        };
+        let mut passed = 0;
+        let mut failed = 0;
+        for (_, _, fn_name, _) in &tests {
+            match VM::run(&artifact, artifact.fn_idx_by_name(fn_name).expect("fn"), vec![]) {
+                Ok(_) => passed += 1,
+                Err(_) => failed += 1,
+            }
+        }
+        (passed, failed)
+    }
+
+    #[test]
+    fn version_is_16_7_0() {
+        let cargo = std::fs::read_to_string("Cargo.toml").unwrap();
+        assert!(
+            cargo.contains("version = \"16.7.0\""),
+            "Cargo.toml version should be 16.7.0"
+        );
+    }
+
+    #[test]
+    fn assert_eq_pass() {
+        // assert_eq with equal values should produce a passing test
+        let src = r#"
+test "eq pass" {
+  assert_eq(2, 2)
+}
+"#;
+        let (passed, failed) = run_tests(src);
+        assert_eq!(passed, 1, "assert_eq with equal values should PASS");
+        assert_eq!(failed, 0);
+    }
+
+    #[test]
+    fn assert_eq_fail() {
+        // assert_eq with unequal values should produce a failing test
+        let src = r#"
+test "eq fail" {
+  assert_eq(1, 2)
+}
+"#;
+        let (passed, failed) = run_tests(src);
+        assert_eq!(failed, 1, "assert_eq with unequal values should FAIL");
+        assert_eq!(passed, 0);
+    }
+
+    #[test]
+    fn test_group_runs_all() {
+        // test_group should run all tests inside and both should pass
+        let src = r#"
+test_group "my group" {
+  test "first" {
+    assert_true(true)
+  }
+  test "second" {
+    assert_eq(1 + 1, 2)
+  }
+}
+"#;
+        let (passed, failed) = run_tests(src);
+        assert_eq!(passed, 2, "test_group should run all 2 tests");
+        assert_eq!(failed, 0);
+    }
+
+    #[test]
+    fn assert_snapshot_creates_file() {
+        // First run: .snap/test_snap_v167.snap should be created
+        let snap_path = std::path::Path::new(".snap/test_snap_v167.snap");
+        // Remove existing snapshot for a clean test
+        let _ = std::fs::remove_file(snap_path);
+
+        let src = r#"
+test "snapshot test" {
+  assert_snapshot("hello snapshot", "test_snap_v167")
+}
+"#;
+        let (passed, failed) = run_tests(src);
+        assert_eq!(passed, 1, "assert_snapshot initial run should PASS");
+        assert_eq!(failed, 0);
+        assert!(snap_path.exists(), ".snap/test_snap_v167.snap should have been created");
+
+        // Cleanup
+        let _ = std::fs::remove_file(snap_path);
     }
 }
 

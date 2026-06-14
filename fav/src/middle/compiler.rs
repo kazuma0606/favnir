@@ -200,6 +200,14 @@ pub fn compile_program(program: &Program) -> IRProgram {
         "assert_ok",
         "assert_err",
         "assert_true",
+        // v16.7.0 assert primitives
+        "assert_approx_eq",
+        "assert_contains",
+        "assert_length",
+        "assert_str_contains",
+        "assert_str_starts_with",
+        "assert_err_eq",
+        "assert_snapshot",
         "IO.println_int",
         "IO.println_float",
         "IO.println_bool",
@@ -400,6 +408,9 @@ pub fn compile_program(program: &Program) -> IRProgram {
             Item::TestDef(_) => {
                 next_fn_idx += 1;
             }
+            Item::TestGroup { tests, .. } => {
+                next_fn_idx += tests.len();
+            }
             Item::BenchDef(_) => {
                 next_fn_idx += 1;
             }
@@ -456,6 +467,14 @@ pub fn compile_program(program: &Program) -> IRProgram {
         "assert_ok",
         "assert_err",
         "assert_true",
+        // v16.7.0 assert primitives
+        "assert_approx_eq",
+        "assert_contains",
+        "assert_length",
+        "assert_str_contains",
+        "assert_str_starts_with",
+        "assert_err_eq",
+        "assert_snapshot",
         "IO.println_int",
         "IO.println_float",
         "IO.println_bool",
@@ -543,6 +562,25 @@ pub fn compile_program(program: &Program) -> IRProgram {
                     &td.body,
                     &mut ctx,
                 ))
+            }
+            Item::TestGroup { name, tests, .. } => {
+                let unit_ty = crate::ast::TypeExpr::Named(
+                    "Unit".into(),
+                    vec![],
+                    crate::frontend::lexer::Span::dummy(),
+                );
+                for td in tests {
+                    fns.push(compile_fn_def(
+                        &format!("$testgroup:{}:{}", name, td.name),
+                        &[],
+                        &[],
+                        &[],
+                        &[],
+                        Some(&unit_ty),
+                        &td.body,
+                        &mut ctx,
+                    ))
+                }
             }
             Item::BenchDef(bd) => {
                 // Bench bodies are compiled with a generated function name for runner use.

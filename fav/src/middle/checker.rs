@@ -2294,6 +2294,7 @@ impl Checker {
                 | Item::RuneUse { .. }
                 | Item::ImportDecl { .. }
                 | Item::TestDef(..)
+                | Item::TestGroup { .. }
                 | Item::BenchDef(..)
                 | Item::InterfaceImplDecl(..) => {}
                 Item::InterfaceDecl(decl) => {
@@ -2325,6 +2326,11 @@ impl Checker {
             Item::ImplDef(id) => self.check_impl_def(id),
             Item::EffectDef(..) => {}
             Item::TestDef(td) => self.check_test_def(td),
+            Item::TestGroup { tests, .. } => {
+                for td in tests {
+                    self.check_test_def(td);
+                }
+            }
             Item::BenchDef(bd) => self.check_bench_def(bd),
             Item::AliasDecl { .. } => {} // registered in register_item_signatures
             Item::UseAlias { .. } => {}  // registered in register_item_signatures

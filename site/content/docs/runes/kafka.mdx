@@ -1,0 +1,121 @@
+---
+title: Kafka Rune
+description: AWS MSK / Apache Kafka をネイティブに操作する Rune（v15.4.0）
+---
+
+# Kafka Rune
+
+`!Stream` エフェクトで AWS MSK（Managed Streaming for Apache Kafka）や
+Apache Kafka にアクセスできます。
+SASL/SCRAM-SHA-512 認証に対応しています。
+
+## セットアップ
+
+### 環境変数
+
+| 変数 | 説明 |
+|---|---|
+| `KAFKA_BOOTSTRAP_BROKERS` | ブローカーアドレス（カンマ区切り、例: `b-1.msk.example.com:9096`） |
+| `KAFKA_SASL_USERNAME` | SASL/SCRAM 認証ユーザー名（省略可）|
+| `KAFKA_SASL_PASSWORD` | SASL/SCRAM 認証パスワード（省略可）|
+
+### fav.toml 設定
+
+```toml
+[kafka]
+bootstrap_brokers = "${KAFKA_BOOTSTRAP_BROKERS}"
+sasl_mechanism    = "SCRAM-SHA-512"
+sasl_username     = "${KAFKA_SASL_USERNAME}"
+sasl_password     = "${KAFKA_SASL_PASSWORD}"
+```
+
+## インポート
+
+```fav
+import rune "kafka"
+```
+
+## 関数リファレンス
+
+### `kafka.produce`
+
+```fav
+fn produce(topic: String, key: String, value: String) -> Result<Unit, String> !Stream
+```
+
+指定した topic にメッセージを produce します。
+
+```fav
+fn send_event(event_id: String, payload: String) -> Result<Unit, String> !Stream {
+  kafka.produce("my-topic", event_id, payload)
+}
+```
+
+### `kafka.consume_one`
+
+```fav
+fn consume_one(topic: String, group_id: String) -> Result<String, String> !Stream
+```
+
+指定した topic から最新のメッセージを 1 件 consume します。
+
+```fav
+fn receive_event() -> Result<String, String> !Stream {
+  kafka.consume_one("my-topic", "my-consumer-group")
+}
+```
+
+## VM プリミティブ
+
+低レベル API として以下のプリミティブが利用可能です:
+
+| プリミティブ | シグネチャ | 説明 |
+|---|---|---|
+| `Kafka.produce_raw` | `(brokers, topic, key, value) -> Result<Unit, String>` | メッセージを produce |
+| `Kafka.consume_one_raw` | `(brokers, topic, group_id) -> Result<String, String>` | 最新メッセージを 1 件 consume |
+
+## `!Stream` エフェクト
+
+Kafka プリミティブを使う関数には `!Stream` エフェクト宣言が必要です。
+宣言がない場合は **E0319** エラーが発生します。
+
+```fav
+// ✓ 正しい
+fn my_producer(msg: String) -> Result<Unit, String> !Stream {
+  kafka.produce("events", "key-1", msg)
+}
+
+// ✗ E0319: Kafka.* call requires `!Stream` effect on enclosing fn/stage
+fn bad_producer(msg: String) -> Result<Unit, String> {
+  kafka.produce("events", "key-1", msg)
+}
+```
+
+## AWS MSK との接続
+
+AWS MSK（Provisioned）では SASL/SCRAM-SHA-512 認証を推奨します:
+
+```toml
+[kafka]
+bootstrap_brokers = "b-1.msk.ap-northeast-1.amazonaws.com:9096,b-2.msk.ap-northeast-1.amazonaws.com:9096"
+sasl_mechanism    = "SCRAM-SHA-512"
+sasl_username     = "${MSK_USERNAME}"
+sasl_password     = "${MSK_PASSWORD}"
+```
+
+MSK の SASL 認証情報は AWS Secrets Manager で管理し、
+ECS / Lambda の環境変数として注入することを推奨します。
+
+## E2E デモ
+
+`infra/e2e-demo/kafka/` に 4-stage パイプラインのデモがあります:
+
+```
+GenerateEvents |> ProduceToKafka |> ConsumeFromKafka |> VerifyResult
+```
+
+Terraform で AWS MSK クラスター（`kafka.t3.small` × 2）を構築し、
+実際の produce → consume ラウンドトリップを確認できます。
+
+> **注意**: MSK Provisioned クラスターは常時課金されます。
+> デモ完了後は必ず `terraform destroy` を実行してください。

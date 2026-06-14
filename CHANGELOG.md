@@ -4,6 +4,118 @@ Favnir のバージョン履歴。形式は [Keep a Changelog](https://keepachan
 
 ---
 
+## [v16.0.0] — 2026-06-14 — Production Multi-Cloud マイルストーン宣言
+
+### Added
+- v15.x シリーズ集大成：CrossCloud 認証・GCP BigQuery・Kafka/MSK・`fav test`・`fav deploy` が揃い Production Multi-Cloud を宣言
+- `site/content/docs/runes/bigquery.mdx` / `kafka.mdx` ドキュメント追加
+- 対応クラウド: AWS / Azure / GCP / Snowflake + Kafka/MSK（4 クラウド + ストリーミング）
+
+### Internal
+- Cargo.toml version: `16.0.0`
+- `v160000_tests`: 5 件追加
+
+---
+
+## [v15.5.0] — 2026-06-14 — `fav deploy`（AWS Lambda デプロイ CLI）
+
+### Added
+- `DeployConfig` に `target` / `function_name` フィールド追加（ロードマップ仕様準拠）
+- `memory_mb` / `timeout_sec` を `memory` / `timeout` のエイリアスとして追加
+- `runtime` デフォルトを `provided.al2023` に更新
+- `scripts/build-lambda-layer.sh`：`cross` で `x86_64-unknown-linux-musl` クロスコンパイル → `bootstrap` + zip パッケージング
+- `site/content/docs/deploy.mdx`：`fav deploy` ユーザーガイド新規作成
+
+### Internal
+- Cargo.toml version: `15.5.0`
+- `v155000_tests`: 3 件追加（version / deploy_toml_schema_parses / deploy_cmd_exists）
+
+---
+
+## [v15.4.0] — 2026-06-14 — Kafka / MSK Rune（`!Stream` エフェクト）
+
+### Added
+- `Effect::Stream` 追加（ast.rs + 全 exhaustive match 対応）
+- `Kafka.produce_raw(brokers, topic, key, value)` / `Kafka.consume_one_raw(brokers, topic, group_id)` VM プリミティブ（rskafka 0.6 pure-Rust、SCRAM-SHA-512 認証）
+- E0319：`!Stream` エフェクト欠如エラー
+- `fav.toml [kafka]` セクション（`bootstrap_brokers` / `sasl_mechanism` / `sasl_username` / `sasl_password`）
+- `runes/kafka/kafka.fav`：`produce` / `consume_one` ラッパー
+- `infra/e2e-demo/kafka/`：4-stage pipeline + Terraform AWS MSK
+- `self/checker.fav`：`kafka_fn` / `ns_to_effect "Kafka"→"Stream"` 追加
+
+### Internal
+- Cargo.toml version: `15.4.0`
+- 依存追加：`rskafka 0.6`（`transport-tls` feature）
+- `v154000_tests`: 5 件追加
+
+---
+
+## [v15.3.0] — 2026-06-14 — `fav test` DSL（ネイティブテストフレームワーク）
+
+### Added
+- `test "description" { ... }` 構文（`TopLevel::TestDef`）
+- `assert_ok` / `assert_err` / `assert_true` VM プリミティブ
+- `cmd_test`（Bool(false) → FAIL 判定修正含む）
+- `site/content/docs/language/testing.mdx` 新規作成
+
+### Internal
+- Cargo.toml version: `15.3.0`
+- `v153000_tests`: 5 件追加
+
+---
+
+## [v15.2.0] — 2026-06-14 — GCP BigQuery Rune（`!Gcp` エフェクト）
+
+### Added
+- `Effect::Gcp` 追加
+- `BigQuery.query_raw` / `BigQuery.execute_raw` / `BigQuery.infer_table_raw` VM プリミティブ（RS256 JWT + Google OAuth2）
+- E0318：`!Gcp` エフェクト欠如エラー
+- `fav.toml [gcp]` セクション（`project_id` / `credentials_file` / `dataset` / `location`）
+- `runes/bigquery/bigquery.fav`：`query` / `execute` ラッパー
+- `infra/e2e-demo/bigquery/`：4-stage pipeline + Terraform GCP BigQuery
+- `self/checker.fav`：`bigquery_fn` / `ns_to_effect "BigQuery"→"Gcp"` 追加
+
+### Internal
+- Cargo.toml version: `15.2.0`
+- `v152000_tests`: 5 件追加
+
+---
+
+## [v15.1.5] — 2026-06-14 — CrossCloud 認証層セキュア版（KMS ECDSA P-256）
+
+### Added
+- Lambda verifier_v2（KMS `GetPublicKey` + Python `cryptography` ECDSA P-256 検証）
+- `infra/e2e-demo/crosscloud/lambda/verifier_v2/`
+- `infra/e2e-demo/crosscloud/scripts/run_with_kms.sh`
+- Terraform：`aws_kms_key`（ECC_NIST_P256 / SIGN_VERIFY）+ `aws_kms_alias`
+- E2E：改ざんボディ / ランダム署名 → PASS=2 FAIL=0
+
+### Internal
+- Cargo.toml version: `15.1.5`
+- `v15150_tests`: 6 件追加
+
+---
+
+## [v15.1.0] — 2026-06-14 — CrossCloud 認証層（HMAC + Cognito + Lambda verifier）
+
+### Added
+- `AWS.dynamo_put_item_cond_raw` VM プリミティブ（DynamoDB ConditionalPut、TTL + nonce リプレイ防止）
+- `AWS.ecs_run_task_raw` VM プリミティブ（ECS Fargate RunTask、SigV4）
+- Lambda verifier（Favnir コンテナ、`public.ecr.aws/lambda/provided:al2023` ベース）
+- Cognito JWT Authorizer + API Gateway
+- HMAC-SHA256 署名方式（StringToSign = Method\nPath\nTimestamp\nNonce\nSHA256(Body)）
+- E2E：`reject_cases.sh` PASS=5 FAIL=0、S3 証跡保存
+
+### Fixed
+- `fav run --legacy` が `Result.err` を返しても exit 0 だった問題を修正（`process::exit(1)` 追加）
+- `AWS_CONFIG` thread-local が `default()` でハードコード値を返していた問題を `from_env()` に修正
+
+### Internal
+- Cargo.toml version: `15.1.0`
+- `v151000_tests`: 6 件追加
+
+---
+
 ## [v14.8.0] — 2026-06-12 — Rune ファイル整備（--legacy 明示化 + fs.fav バグ修正）
 
 ### Fixed

@@ -1,0 +1,102 @@
+---
+title: BigQuery Rune
+description: GCP BigQuery をネイティブに操作する Rune（v15.2.0）
+---
+
+# BigQuery Rune
+
+`!Gcp` エフェクトで GCP BigQuery にアクセスできます。
+Service Account JSON キーを使った RS256 JWT 認証に対応しています。
+
+## セットアップ
+
+### 環境変数
+
+| 変数 | 説明 |
+|---|---|
+| `GOOGLE_APPLICATION_CREDENTIALS` | サービスアカウント JSON キーファイルのパス |
+| `GCP_PROJECT_ID` | デフォルトプロジェクト ID |
+| `BQ_DATASET` | デフォルトデータセット名 |
+| `BQ_LOCATION` | ジョブのロケーション（デフォルト: `asia-northeast1`） |
+
+### fav.toml 設定
+
+```toml
+[gcp]
+project_id       = "my-project"
+credentials_file = "/path/to/service-account.json"
+dataset          = "my_dataset"
+```
+
+## インポート
+
+```fav
+import rune "bigquery"
+```
+
+## 関数リファレンス
+
+### `bigquery.query`
+
+```fav
+fn query(project_id: String, dataset: String, sql: String) -> Result<String, String> !Gcp
+```
+
+SELECT クエリを実行して JSON 文字列（rows 配列）を返します。
+
+```fav
+fn get_users() -> Result<String, String> !Gcp {
+  bigquery.query("my-project", "my_dataset", "SELECT id, name FROM users LIMIT 100")
+}
+```
+
+### `bigquery.execute`
+
+```fav
+fn execute(project_id: String, dataset: String, sql: String) -> Result<Int, String> !Gcp
+```
+
+DML（INSERT / UPDATE / DELETE）を実行して影響行数を返します。
+
+```fav
+fn insert_row(id: String, name: String) -> Result<Int, String> !Gcp {
+  bind sql <- Result.ok(String.concat("INSERT INTO users VALUES ('", String.concat(id, String.concat("', '", String.concat(name, "')")))))
+  bigquery.execute("my-project", "my_dataset", sql)
+}
+```
+
+## VM プリミティブ
+
+低レベル API として以下のプリミティブが利用可能です:
+
+| プリミティブ | シグネチャ | 説明 |
+|---|---|---|
+| `BigQuery.query_raw` | `(project, dataset, sql, params) -> Result<String, String>` | クエリ実行（JSON 文字列返却） |
+| `BigQuery.execute_raw` | `(project, dataset, sql, params) -> Result<Int, String>` | DML 実行（影響行数返却） |
+| `BigQuery.infer_table_raw` | `(project, dataset, table) -> Result<String, String>` | テーブルスキーマ推論 |
+
+## `fav infer` との統合
+
+```bash
+fav infer --from bigquery --table users
+```
+
+BigQuery の INFORMATION_SCHEMA からテーブル定義を読み込み、Favnir の型定義を自動生成します:
+
+```fav
+type Users = {
+  id:         String,
+  name:       String,
+  created_at: String,
+}
+```
+
+## E2E デモ
+
+`infra/e2e-demo/bigquery/` に 4-stage パイプラインのデモがあります:
+
+```
+LoadFromGcs |> TransformRows |> InsertToBigQuery |> QuerySummary
+```
+
+Terraform で BigQuery dataset + GCS bucket を構築し、実際のデータフローを確認できます。

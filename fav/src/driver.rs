@@ -25398,6 +25398,61 @@ public fn load(conn_str: String) -> Result<Int, String> !AzureDb {
     }
 }
 
+// ── v160000_tests (v16.0.0) — Production Multi-Cloud マイルストーン ──────────
+#[cfg(test)]
+mod v160000_tests {
+    use std::fs;
+    use std::path::Path;
+
+    #[test]
+    fn version_is_16_0_0() {
+        let cargo = fs::read_to_string("Cargo.toml").unwrap();
+        assert!(
+            cargo.contains("version = \"16.0.0\""),
+            "Cargo.toml version should be 16.0.0, got: {}",
+            cargo.lines().find(|l| l.contains("version")).unwrap_or("")
+        );
+    }
+
+    #[test]
+    fn changelog_has_v15_entries() {
+        let changelog = fs::read_to_string("../CHANGELOG.md").unwrap();
+        assert!(
+            changelog.contains("[v15."),
+            "CHANGELOG.md must contain v15.x entries"
+        );
+    }
+
+    #[test]
+    fn readme_mentions_bigquery() {
+        let readme = fs::read_to_string("../README.md").unwrap();
+        assert!(
+            readme.contains("BigQuery"),
+            "README.md must mention BigQuery"
+        );
+    }
+
+    #[test]
+    fn readme_mentions_kafka() {
+        let readme = fs::read_to_string("../README.md").unwrap();
+        assert!(
+            readme.contains("Kafka"),
+            "README.md must mention Kafka"
+        );
+    }
+
+    #[test]
+    fn all_e2e_demo_dirs_exist() {
+        for dir in &["airgap", "fav2py", "snowflake", "crosscloud", "bigquery", "kafka"] {
+            assert!(
+                Path::new(&format!("../infra/e2e-demo/{}", dir)).exists(),
+                "infra/e2e-demo/{} must exist",
+                dir
+            );
+        }
+    }
+}
+
 // ── v155000_tests (v15.5.0) — fav deploy ─────────────────────────────────────
 #[cfg(test)]
 mod v155000_tests {

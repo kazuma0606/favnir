@@ -1,0 +1,106 @@
+# DateTime
+
+DateTime モジュールは日時操作のためのユーティリティ関数を提供します（v16.4.0 追加）。
+
+## 内部表現
+
+`DateTime` 型の内部表現は Unix timestamp（秒、`Int`）です。`DateTime.now()` と `DateTime.now_unix()` はどちらも `Int` を返します。
+
+## 現在時刻
+
+```fav
+-- 現在の Unix timestamp（秒）
+bind ts <- DateTime.now_unix()   -- Int
+
+-- DateTime 値として取得（内部は同じ Int）
+bind dt <- DateTime.now()        -- Int
+```
+
+## 変換
+
+```fav
+-- ISO 8601 文字列をパース
+bind result <- DateTime.parse("2026-06-14T12:00:00Z")
+match result {
+    ok(dt)  => DateTime.format_iso(dt)
+    err(msg) => f"parse error: {msg}"
+}
+
+-- フォーマット文字列で出力
+bind s <- DateTime.format(dt, "YYYY-MM-DD")     -- "2026-06-14"
+bind iso <- DateTime.format_iso(dt)              -- "2026-06-14T12:00:00Z"
+```
+
+### フォーマットトークン
+
+| トークン | 意味 | 例 |
+|---|---|---|
+| `YYYY` | 4桁年 | `2026` |
+| `MM` | 2桁月 | `06` |
+| `DD` | 2桁日 | `14` |
+| `HH` | 2桁時（24h） | `12` |
+| `mm` | 2桁分 | `00` |
+| `ss` | 2桁秒 | `00` |
+
+## 演算
+
+```fav
+bind next_week  <- DateTime.add_days(dt, 7)
+bind next_hour  <- DateTime.add_hours(dt, 1)
+
+bind days <- DateTime.diff_days(from_dt, to_dt)
+bind secs <- DateTime.diff_seconds(from_dt, to_dt)
+```
+
+## 比較
+
+```fav
+DateTime.before(a, b)          -- Bool: a < b
+DateTime.after(a, b)           -- Bool: a > b
+DateTime.between(dt, from, to) -- Bool: from <= dt <= to
+```
+
+## 使用例
+
+### パイプライン内での TTL チェック
+
+```fav
+stage FilterExpired(rows: List<EventRow>) -> List<EventRow> {
+    bind now <- DateTime.now_unix()
+    Result.ok(List.filter(rows, |r| DateTime.after(r.expires_at, now)))
+}
+```
+
+### 期間計算
+
+```fav
+fn days_since(ts: Int) -> Int {
+    bind now <- DateTime.now_unix()
+    DateTime.diff_days(ts, now)
+}
+```
+
+### タイムスタンプのフォーマット
+
+```fav
+fn format_date(ts: Int) -> String {
+    DateTime.format(ts, "YYYY-MM-DD")
+}
+```
+
+## 関数リファレンス
+
+| 関数 | 戻り型 | 説明 |
+|---|---|---|
+| `now()` | `Int` | 現在の Unix timestamp（秒） |
+| `now_unix()` | `Int` | 現在の Unix timestamp（秒）— `now()` と同じ |
+| `parse(String)` | `Result<Int, String>` | ISO 8601 文字列をパース |
+| `format(Int, String)` | `String` | フォーマット文字列で出力 |
+| `format_iso(Int)` | `String` | ISO 8601 形式で出力 |
+| `add_days(Int, Int)` | `Int` | 日数を加算 |
+| `add_hours(Int, Int)` | `Int` | 時間数を加算 |
+| `diff_days(Int, Int)` | `Int` | 日数差（to - from）|
+| `diff_seconds(Int, Int)` | `Int` | 秒数差（to - from）|
+| `before(Int, Int)` | `Bool` | a < b |
+| `after(Int, Int)` | `Bool` | a > b |
+| `between(Int, Int, Int)` | `Bool` | from <= dt <= to |

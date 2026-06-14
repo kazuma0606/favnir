@@ -3278,6 +3278,201 @@ impl VM {
                     _ => Err(self.error(artifact, "List.group_by requires a List as second argument")),
                 }
             }
+            // ── List high-order additions (v16.4.0) ──────────────────────────────────
+            "List.sort_by" => {
+                if args.len() != 2 {
+                    return Err(self.error(artifact, "List.sort_by requires 2 arguments: (list, key_fn)"));
+                }
+                let mut it = args.into_iter();
+                let list = it.next().expect("list");
+                let func = it.next().expect("key_fn");
+                match list {
+                    VMValue::List(fl) => {
+                        let mut keyed: Vec<(VMValue, VMValue)> = Vec::with_capacity(fl.len());
+                        for x in fl {
+                            let k = self.call_value(artifact, func.clone(), vec![x.clone()])?;
+                            keyed.push((k, x));
+                        }
+                        let mut sort_err: Option<VMError> = None;
+                        keyed.sort_by(|(a, _), (b, _)| {
+                            if sort_err.is_some() { return std::cmp::Ordering::Equal; }
+                            match (a, b) {
+                                (VMValue::Int(x), VMValue::Int(y)) => x.cmp(y),
+                                (VMValue::Float(x), VMValue::Float(y)) => x.partial_cmp(y).unwrap_or(std::cmp::Ordering::Equal),
+                                (VMValue::Str(x), VMValue::Str(y)) => x.cmp(y),
+                                _ => { sort_err = Some(self.error(artifact, "List.sort_by key must return Int, Float, or String")); std::cmp::Ordering::Equal }
+                            }
+                        });
+                        if let Some(e) = sort_err { return Err(e); }
+                        Ok(VMValue::List(FavList::new(keyed.into_iter().map(|(_, v)| v).collect())))
+                    }
+                    _ => Err(self.error(artifact, "List.sort_by requires a List as first argument")),
+                }
+            }
+            "List.sort_by_desc" => {
+                if args.len() != 2 {
+                    return Err(self.error(artifact, "List.sort_by_desc requires 2 arguments: (list, key_fn)"));
+                }
+                let mut it = args.into_iter();
+                let list = it.next().expect("list");
+                let func = it.next().expect("key_fn");
+                match list {
+                    VMValue::List(fl) => {
+                        let mut keyed: Vec<(VMValue, VMValue)> = Vec::with_capacity(fl.len());
+                        for x in fl {
+                            let k = self.call_value(artifact, func.clone(), vec![x.clone()])?;
+                            keyed.push((k, x));
+                        }
+                        let mut sort_err: Option<VMError> = None;
+                        keyed.sort_by(|(a, _), (b, _)| {
+                            if sort_err.is_some() { return std::cmp::Ordering::Equal; }
+                            match (a, b) {
+                                (VMValue::Int(x), VMValue::Int(y)) => y.cmp(x),
+                                (VMValue::Float(x), VMValue::Float(y)) => y.partial_cmp(x).unwrap_or(std::cmp::Ordering::Equal),
+                                (VMValue::Str(x), VMValue::Str(y)) => y.cmp(x),
+                                _ => { sort_err = Some(self.error(artifact, "List.sort_by_desc key must return Int, Float, or String")); std::cmp::Ordering::Equal }
+                            }
+                        });
+                        if let Some(e) = sort_err { return Err(e); }
+                        Ok(VMValue::List(FavList::new(keyed.into_iter().map(|(_, v)| v).collect())))
+                    }
+                    _ => Err(self.error(artifact, "List.sort_by_desc requires a List as first argument")),
+                }
+            }
+            "List.distinct_by" => {
+                if args.len() != 2 {
+                    return Err(self.error(artifact, "List.distinct_by requires 2 arguments: (list, key_fn)"));
+                }
+                let mut it = args.into_iter();
+                let list = it.next().expect("list");
+                let func = it.next().expect("key_fn");
+                match list {
+                    VMValue::List(fl) => {
+                        let mut seen: Vec<String> = Vec::new();
+                        let mut out: Vec<VMValue> = Vec::new();
+                        for x in fl {
+                            let k = self.call_value(artifact, func.clone(), vec![x.clone()])?;
+                            let key_str = match &k {
+                                VMValue::Str(s) => s.clone(),
+                                VMValue::Int(n) => n.to_string(),
+                                other => vmvalue_repr(other),
+                            };
+                            if !seen.contains(&key_str) {
+                                seen.push(key_str);
+                                out.push(x);
+                            }
+                        }
+                        Ok(VMValue::List(FavList::new(out)))
+                    }
+                    _ => Err(self.error(artifact, "List.distinct_by requires a List as first argument")),
+                }
+            }
+            "List.count_where" => {
+                // alias for List.count
+                if args.len() != 2 {
+                    return Err(self.error(artifact, "List.count_where requires 2 arguments: (list, pred)"));
+                }
+                let mut it = args.into_iter();
+                let list = it.next().expect("list");
+                let pred = it.next().expect("pred");
+                match list {
+                    VMValue::List(fl) => {
+                        let mut count = 0i64;
+                        for x in fl {
+                            match self.call_value(artifact, pred.clone(), vec![x])? {
+                                VMValue::Bool(true) => count += 1,
+                                VMValue::Bool(false) => {}
+                                other => return Err(self.error(artifact, &format!("List.count_where predicate must return Bool, got {}", vmvalue_type_name(&other)))),
+                            }
+                        }
+                        Ok(VMValue::Int(count))
+                    }
+                    _ => Err(self.error(artifact, "List.count_where requires a List as first argument")),
+                }
+            }
+            "List.sum_by" => {
+                if args.len() != 2 {
+                    return Err(self.error(artifact, "List.sum_by requires 2 arguments: (list, fn)"));
+                }
+                let mut it = args.into_iter();
+                let list = it.next().expect("list");
+                let func = it.next().expect("fn");
+                match list {
+                    VMValue::List(fl) => {
+                        let mut sum = 0.0f64;
+                        for x in fl {
+                            match self.call_value(artifact, func.clone(), vec![x])? {
+                                VMValue::Float(f) => sum += f,
+                                VMValue::Int(n) => sum += n as f64,
+                                other => return Err(self.error(artifact, &format!("List.sum_by fn must return Float or Int, got {}", vmvalue_type_name(&other)))),
+                            }
+                        }
+                        Ok(VMValue::Float(sum))
+                    }
+                    _ => Err(self.error(artifact, "List.sum_by requires a List as first argument")),
+                }
+            }
+            "List.max_by" => {
+                if args.len() != 2 {
+                    return Err(self.error(artifact, "List.max_by requires 2 arguments: (list, fn)"));
+                }
+                let mut it = args.into_iter();
+                let list = it.next().expect("list");
+                let func = it.next().expect("fn");
+                match list {
+                    VMValue::List(fl) => {
+                        let mut best: Option<(f64, VMValue)> = None;
+                        for x in fl {
+                            let score = match self.call_value(artifact, func.clone(), vec![x.clone()])? {
+                                VMValue::Float(f) => f,
+                                VMValue::Int(n) => n as f64,
+                                other => return Err(self.error(artifact, &format!("List.max_by fn must return Float or Int, got {}", vmvalue_type_name(&other)))),
+                            };
+                            match &best {
+                                None => { best = Some((score, x)); }
+                                Some((best_score, _)) if score > *best_score => { best = Some((score, x)); }
+                                _ => {}
+                            }
+                        }
+                        match best {
+                            Some((_, v)) => Ok(VMValue::Variant("some".into(), Some(Box::new(v)))),
+                            None => Ok(VMValue::Variant("none".into(), None)),
+                        }
+                    }
+                    _ => Err(self.error(artifact, "List.max_by requires a List as first argument")),
+                }
+            }
+            "List.min_by" => {
+                if args.len() != 2 {
+                    return Err(self.error(artifact, "List.min_by requires 2 arguments: (list, fn)"));
+                }
+                let mut it = args.into_iter();
+                let list = it.next().expect("list");
+                let func = it.next().expect("fn");
+                match list {
+                    VMValue::List(fl) => {
+                        let mut best: Option<(f64, VMValue)> = None;
+                        for x in fl {
+                            let score = match self.call_value(artifact, func.clone(), vec![x.clone()])? {
+                                VMValue::Float(f) => f,
+                                VMValue::Int(n) => n as f64,
+                                other => return Err(self.error(artifact, &format!("List.min_by fn must return Float or Int, got {}", vmvalue_type_name(&other)))),
+                            };
+                            match &best {
+                                None => { best = Some((score, x)); }
+                                Some((best_score, _)) if score < *best_score => { best = Some((score, x)); }
+                                _ => {}
+                            }
+                        }
+                        match best {
+                            Some((_, v)) => Ok(VMValue::Variant("some".into(), Some(Box::new(v)))),
+                            None => Ok(VMValue::Variant("none".into(), None)),
+                        }
+                    }
+                    _ => Err(self.error(artifact, "List.min_by requires a List as first argument")),
+                }
+            }
+
             "Map.merge_with" => {
                 if args.len() != 3 {
                     return Err(self.error(artifact, "Map.merge_with requires 3 arguments: (f, m1, m2)"));
@@ -8755,6 +8950,337 @@ fn vm_call_builtin(
                 _ => Err("List.max requires a List argument".to_string()),
             }
         }
+
+        // ── List additions (v16.4.0, no closure needed) ───────────────────────────
+        "List.distinct" => {
+            let v = args
+                .into_iter()
+                .next()
+                .ok_or_else(|| "List.distinct requires 1 argument".to_string())?;
+            match v {
+                VMValue::List(fl) => {
+                    let mut seen: Vec<VMValue> = Vec::new();
+                    let mut out: Vec<VMValue> = Vec::new();
+                    for x in fl {
+                        if !seen.contains(&x) {
+                            seen.push(x.clone());
+                            out.push(x);
+                        }
+                    }
+                    Ok(VMValue::List(FavList::new(out)))
+                }
+                _ => Err("List.distinct requires a List argument".to_string()),
+            }
+        }
+        "List.unzip" => {
+            let v = args
+                .into_iter()
+                .next()
+                .ok_or_else(|| "List.unzip requires 1 argument".to_string())?;
+            match v {
+                VMValue::List(fl) => {
+                    let mut as_vec: Vec<VMValue> = Vec::new();
+                    let mut bs_vec: Vec<VMValue> = Vec::new();
+                    for item in fl {
+                        match item {
+                            VMValue::Variant(ref tag, ref payload) if tag == "Pair" => {
+                                match payload.as_deref() {
+                                    Some(VMValue::List(pair)) if pair.len() == 2 => {
+                                        as_vec.push(pair[0].clone());
+                                        bs_vec.push(pair[1].clone());
+                                    }
+                                    _ => return Err("List.unzip: each element must be a Pair".to_string()),
+                                }
+                            }
+                            _ => return Err("List.unzip: each element must be a Pair".to_string()),
+                        }
+                    }
+                    Ok(VMValue::Variant(
+                        "Pair".to_string(),
+                        Some(Box::new(VMValue::List(FavList::new(vec![
+                            VMValue::List(FavList::new(as_vec)),
+                            VMValue::List(FavList::new(bs_vec)),
+                        ])))),
+                    ))
+                }
+                _ => Err("List.unzip requires a List argument".to_string()),
+            }
+        }
+
+        // ── String additions (v16.4.0) ────────────────────────────────────────────
+        "String.split_once" => {
+            let mut it = args.into_iter();
+            let s = match it.next().ok_or_else(|| "String.split_once requires 2 arguments".to_string())? {
+                VMValue::Str(s) => s,
+                _ => return Err("String.split_once requires a String as first argument".to_string()),
+            };
+            let sep = match it.next().ok_or_else(|| "String.split_once requires 2 arguments".to_string())? {
+                VMValue::Str(s) => s,
+                _ => return Err("String.split_once requires a String separator".to_string()),
+            };
+            match s.split_once(sep.as_str()) {
+                Some((a, b)) => Ok(VMValue::Variant(
+                    "Pair".to_string(),
+                    Some(Box::new(VMValue::List(FavList::new(vec![
+                        VMValue::Str(a.to_string()),
+                        VMValue::Str(b.to_string()),
+                    ])))),
+                )),
+                None => Ok(VMValue::Variant(
+                    "Pair".to_string(),
+                    Some(Box::new(VMValue::List(FavList::new(vec![
+                        VMValue::Str(s),
+                        VMValue::Str(String::new()),
+                    ])))),
+                )),
+            }
+        }
+        "String.replace_first" => {
+            let mut it = args.into_iter();
+            let s = match it.next().ok_or_else(|| "String.replace_first requires 3 arguments".to_string())? {
+                VMValue::Str(s) => s,
+                _ => return Err("String.replace_first: first argument must be String".to_string()),
+            };
+            let old = match it.next().ok_or_else(|| "String.replace_first requires 3 arguments".to_string())? {
+                VMValue::Str(s) => s,
+                _ => return Err("String.replace_first: second argument must be String".to_string()),
+            };
+            let new = match it.next().ok_or_else(|| "String.replace_first requires 3 arguments".to_string())? {
+                VMValue::Str(s) => s,
+                _ => return Err("String.replace_first: third argument must be String".to_string()),
+            };
+            Ok(VMValue::Str(s.replacen(old.as_str(), new.as_str(), 1)))
+        }
+        "String.format_int" => {
+            // format_int(n, width, pad_char)
+            let mut it = args.into_iter();
+            let n = match it.next().ok_or_else(|| "String.format_int requires 3 arguments".to_string())? {
+                VMValue::Int(n) => n,
+                _ => return Err("String.format_int: first argument must be Int".to_string()),
+            };
+            let width = match it.next().ok_or_else(|| "String.format_int requires 3 arguments".to_string())? {
+                VMValue::Int(w) => w as usize,
+                _ => return Err("String.format_int: second argument must be Int (width)".to_string()),
+            };
+            let pad = match it.next().ok_or_else(|| "String.format_int requires 3 arguments".to_string())? {
+                VMValue::Str(s) => s.chars().next().unwrap_or(' '),
+                _ => return Err("String.format_int: third argument must be String (pad char)".to_string()),
+            };
+            let s = n.to_string();
+            if s.len() >= width {
+                Ok(VMValue::Str(s))
+            } else {
+                let pad_count = width - s.len();
+                Ok(VMValue::Str(format!("{}{}", pad.to_string().repeat(pad_count), s)))
+            }
+        }
+        "String.format_float" => {
+            // format_float(f, digits)
+            let mut it = args.into_iter();
+            let f = match it.next().ok_or_else(|| "String.format_float requires 2 arguments".to_string())? {
+                VMValue::Float(f) => f,
+                VMValue::Int(n) => n as f64,
+                _ => return Err("String.format_float: first argument must be Float or Int".to_string()),
+            };
+            let digits = match it.next().ok_or_else(|| "String.format_float requires 2 arguments".to_string())? {
+                VMValue::Int(d) => d as usize,
+                _ => return Err("String.format_float: second argument must be Int (digits)".to_string()),
+            };
+            Ok(VMValue::Str(format!("{:.prec$}", f, prec = digits)))
+        }
+
+        // ── Math additions (v16.4.0) ──────────────────────────────────────────────
+        "Math.round_to" => {
+            let mut it = args.into_iter();
+            let f = match it.next().ok_or_else(|| "Math.round_to requires 2 arguments".to_string())? {
+                VMValue::Float(f) => f,
+                VMValue::Int(n) => n as f64,
+                _ => return Err("Math.round_to: first argument must be Float or Int".to_string()),
+            };
+            let digits = match it.next().ok_or_else(|| "Math.round_to requires 2 arguments".to_string())? {
+                VMValue::Int(d) => d,
+                _ => return Err("Math.round_to: second argument must be Int (digits)".to_string()),
+            };
+            let factor = 10f64.powi(digits as i32);
+            Ok(VMValue::Float((f * factor).round() / factor))
+        }
+        "Math.log" => match args.as_slice() {
+            [VMValue::Float(v)] => Ok(VMValue::Float(v.ln())),
+            [VMValue::Int(n)] => Ok(VMValue::Float((*n as f64).ln())),
+            [_] => Err("Math.log requires a Float argument".to_string()),
+            _ => Err("Math.log requires 1 argument".to_string()),
+        },
+        "Math.log2" => match args.as_slice() {
+            [VMValue::Float(v)] => Ok(VMValue::Float(v.log2())),
+            [VMValue::Int(n)] => Ok(VMValue::Float((*n as f64).log2())),
+            [_] => Err("Math.log2 requires a Float argument".to_string()),
+            _ => Err("Math.log2 requires 1 argument".to_string()),
+        },
+        "Math.log10" => match args.as_slice() {
+            [VMValue::Float(v)] => Ok(VMValue::Float(v.log10())),
+            [VMValue::Int(n)] => Ok(VMValue::Float((*n as f64).log10())),
+            [_] => Err("Math.log10 requires a Float argument".to_string()),
+            _ => Err("Math.log10 requires 1 argument".to_string()),
+        },
+
+        // ── DateTime (v16.4.0) ────────────────────────────────────────────────────
+        "DateTime.now" | "DateTime.now_unix" => {
+            if !args.is_empty() {
+                return Err("DateTime.now requires 0 arguments".to_string());
+            }
+            use chrono::Utc;
+            Ok(VMValue::Int(Utc::now().timestamp()))
+        }
+        "DateTime.parse" => {
+            let s = match args.into_iter().next().ok_or_else(|| "DateTime.parse requires 1 argument".to_string())? {
+                VMValue::Str(s) => s,
+                _ => return Err("DateTime.parse requires a String argument".to_string()),
+            };
+            use chrono::DateTime;
+            match DateTime::parse_from_rfc3339(&s) {
+                Ok(dt) => Ok(VMValue::Variant(
+                    "ok".to_string(),
+                    Some(Box::new(VMValue::Int(dt.timestamp()))),
+                )),
+                Err(e) => Ok(VMValue::Variant(
+                    "err".to_string(),
+                    Some(Box::new(VMValue::Str(e.to_string()))),
+                )),
+            }
+        }
+        "DateTime.format" => {
+            let mut it = args.into_iter();
+            let ts = match it.next().ok_or_else(|| "DateTime.format requires 2 arguments".to_string())? {
+                VMValue::Int(n) => n,
+                _ => return Err("DateTime.format: first argument must be DateTime (Int)".to_string()),
+            };
+            let fmt = match it.next().ok_or_else(|| "DateTime.format requires 2 arguments".to_string())? {
+                VMValue::Str(s) => s,
+                _ => return Err("DateTime.format: second argument must be a format String".to_string()),
+            };
+            use chrono::{TimeZone, Utc};
+            let dt = Utc.timestamp_opt(ts, 0).single()
+                .ok_or_else(|| "DateTime.format: invalid timestamp".to_string())?;
+            // Convert simple YYYY-MM-DD tokens to chrono format
+            let chrono_fmt = fmt
+                .replace("YYYY", "%Y")
+                .replace("MM", "%m")
+                .replace("DD", "%d")
+                .replace("HH", "%H")
+                .replace("mm", "%M")
+                .replace("ss", "%S");
+            Ok(VMValue::Str(dt.format(&chrono_fmt).to_string()))
+        }
+        "DateTime.format_iso" => {
+            let ts = match args.into_iter().next().ok_or_else(|| "DateTime.format_iso requires 1 argument".to_string())? {
+                VMValue::Int(n) => n,
+                _ => return Err("DateTime.format_iso: argument must be DateTime (Int)".to_string()),
+            };
+            use chrono::{TimeZone, Utc};
+            let dt = Utc.timestamp_opt(ts, 0).single()
+                .ok_or_else(|| "DateTime.format_iso: invalid timestamp".to_string())?;
+            Ok(VMValue::Str(dt.to_rfc3339()))
+        }
+        "DateTime.add_days" => {
+            let mut it = args.into_iter();
+            let ts = match it.next().ok_or_else(|| "DateTime.add_days requires 2 arguments".to_string())? {
+                VMValue::Int(n) => n,
+                _ => return Err("DateTime.add_days: first argument must be DateTime (Int)".to_string()),
+            };
+            let days = match it.next().ok_or_else(|| "DateTime.add_days requires 2 arguments".to_string())? {
+                VMValue::Int(n) => n,
+                _ => return Err("DateTime.add_days: second argument must be Int".to_string()),
+            };
+            use chrono::{Duration, TimeZone, Utc};
+            let dt = Utc.timestamp_opt(ts, 0).single()
+                .ok_or_else(|| "DateTime.add_days: invalid timestamp".to_string())?;
+            Ok(VMValue::Int((dt + Duration::days(days)).timestamp()))
+        }
+        "DateTime.add_hours" => {
+            let mut it = args.into_iter();
+            let ts = match it.next().ok_or_else(|| "DateTime.add_hours requires 2 arguments".to_string())? {
+                VMValue::Int(n) => n,
+                _ => return Err("DateTime.add_hours: first argument must be DateTime (Int)".to_string()),
+            };
+            let hours = match it.next().ok_or_else(|| "DateTime.add_hours requires 2 arguments".to_string())? {
+                VMValue::Int(n) => n,
+                _ => return Err("DateTime.add_hours: second argument must be Int".to_string()),
+            };
+            use chrono::{Duration, TimeZone, Utc};
+            let dt = Utc.timestamp_opt(ts, 0).single()
+                .ok_or_else(|| "DateTime.add_hours: invalid timestamp".to_string())?;
+            Ok(VMValue::Int((dt + Duration::hours(hours)).timestamp()))
+        }
+        "DateTime.diff_days" => {
+            let mut it = args.into_iter();
+            let from = match it.next().ok_or_else(|| "DateTime.diff_days requires 2 arguments".to_string())? {
+                VMValue::Int(n) => n,
+                _ => return Err("DateTime.diff_days: first argument must be DateTime (Int)".to_string()),
+            };
+            let to = match it.next().ok_or_else(|| "DateTime.diff_days requires 2 arguments".to_string())? {
+                VMValue::Int(n) => n,
+                _ => return Err("DateTime.diff_days: second argument must be DateTime (Int)".to_string()),
+            };
+            use chrono::{TimeZone, Utc};
+            let dt_from = Utc.timestamp_opt(from, 0).single()
+                .ok_or_else(|| "DateTime.diff_days: invalid from timestamp".to_string())?;
+            let dt_to = Utc.timestamp_opt(to, 0).single()
+                .ok_or_else(|| "DateTime.diff_days: invalid to timestamp".to_string())?;
+            Ok(VMValue::Int((dt_to - dt_from).num_days()))
+        }
+        "DateTime.diff_seconds" => {
+            let mut it = args.into_iter();
+            let from = match it.next().ok_or_else(|| "DateTime.diff_seconds requires 2 arguments".to_string())? {
+                VMValue::Int(n) => n,
+                _ => return Err("DateTime.diff_seconds: first argument must be DateTime (Int)".to_string()),
+            };
+            let to = match it.next().ok_or_else(|| "DateTime.diff_seconds requires 2 arguments".to_string())? {
+                VMValue::Int(n) => n,
+                _ => return Err("DateTime.diff_seconds: second argument must be DateTime (Int)".to_string()),
+            };
+            Ok(VMValue::Int(to - from))
+        }
+        "DateTime.before" => {
+            let mut it = args.into_iter();
+            let a = match it.next().ok_or_else(|| "DateTime.before requires 2 arguments".to_string())? {
+                VMValue::Int(n) => n,
+                _ => return Err("DateTime.before: first argument must be DateTime (Int)".to_string()),
+            };
+            let b = match it.next().ok_or_else(|| "DateTime.before requires 2 arguments".to_string())? {
+                VMValue::Int(n) => n,
+                _ => return Err("DateTime.before: second argument must be DateTime (Int)".to_string()),
+            };
+            Ok(VMValue::Bool(a < b))
+        }
+        "DateTime.after" => {
+            let mut it = args.into_iter();
+            let a = match it.next().ok_or_else(|| "DateTime.after requires 2 arguments".to_string())? {
+                VMValue::Int(n) => n,
+                _ => return Err("DateTime.after: first argument must be DateTime (Int)".to_string()),
+            };
+            let b = match it.next().ok_or_else(|| "DateTime.after requires 2 arguments".to_string())? {
+                VMValue::Int(n) => n,
+                _ => return Err("DateTime.after: second argument must be DateTime (Int)".to_string()),
+            };
+            Ok(VMValue::Bool(a > b))
+        }
+        "DateTime.between" => {
+            let mut it = args.into_iter();
+            let dt = match it.next().ok_or_else(|| "DateTime.between requires 3 arguments".to_string())? {
+                VMValue::Int(n) => n,
+                _ => return Err("DateTime.between: first argument must be DateTime (Int)".to_string()),
+            };
+            let from = match it.next().ok_or_else(|| "DateTime.between requires 3 arguments".to_string())? {
+                VMValue::Int(n) => n,
+                _ => return Err("DateTime.between: second argument must be DateTime (Int)".to_string()),
+            };
+            let to = match it.next().ok_or_else(|| "DateTime.between requires 3 arguments".to_string())? {
+                VMValue::Int(n) => n,
+                _ => return Err("DateTime.between: third argument must be DateTime (Int)".to_string()),
+            };
+            Ok(VMValue::Bool(from <= dt && dt <= to))
+        }
+
         "Map.empty" => {
             Ok(VMValue::Record(std::collections::HashMap::new()))
         }

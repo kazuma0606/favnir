@@ -26427,6 +26427,110 @@ public fn main() -> String {
     }
 }
 
+// ── v164000_tests (v16.4.0) — stdlib 拡充 ────────────────────────────────────
+#[cfg(test)]
+mod v164000_tests {
+    use super::{build_artifact, exec_artifact_main};
+    use crate::frontend::parser::Parser;
+    use crate::value::Value;
+
+    fn run(src: &str) -> Value {
+        let program = Parser::parse_str(src, "v164000_test.fav").expect("parse");
+        let artifact = build_artifact(&program);
+        exec_artifact_main(&artifact, None).expect("exec")
+    }
+
+    fn run_int(src: &str) -> i64 {
+        match run(src) {
+            Value::Int(n) => n,
+            other => panic!("expected Int, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn version_is_16_4_0() {
+        let cargo = std::fs::read_to_string("Cargo.toml").unwrap();
+        assert!(
+            cargo.contains("version = \"16.4.0\""),
+            "Cargo.toml version should be 16.4.0"
+        );
+    }
+
+    #[test]
+    fn list_group_by_works() {
+        // group_by で 2 グループに分かれることを確認
+        let result = run_int(r#"
+public fn main() -> Int {
+    bind xs <- List.push(List.push(List.push(List.push(List.empty(), 1), 2), 3), 4)
+    bind groups <- List.group_by(|n| if Math.abs(n) == 2 { "two" } else { "other" }, xs)
+    bind twos <- Map.get(groups, "two")
+    match twos {
+        some(lst) => List.length(lst)
+        none      => 0
+    }
+}
+"#);
+        assert_eq!(result, 1);
+    }
+
+    #[test]
+    fn list_chunk_works() {
+        // chunk(xs, 3) で List<List<T>> — 最初のチャンクが 3 要素
+        let result = run_int(r#"
+public fn main() -> Int {
+    bind xs     <- List.range(1, 10)
+    bind chunks <- List.chunk(xs, 3)
+    bind first  <- List.first(chunks)
+    match first {
+        some(chunk) => List.length(chunk)
+        none        => 0
+    }
+}
+"#);
+        assert_eq!(result, 3);
+    }
+
+    #[test]
+    fn string_split_works() {
+        // split("a,b,c", ",") → 3 要素リスト
+        let result = run_int(r#"
+public fn main() -> Int {
+    bind parts <- String.split("a,b,c", ",")
+    List.length(parts)
+}
+"#);
+        assert_eq!(result, 3);
+    }
+
+    #[test]
+    fn datetime_now_unix_works() {
+        // now_unix() は正の Int を返す
+        let result = run_int(r#"
+public fn main() -> Int {
+    DateTime.now_unix()
+}
+"#);
+        assert!(result > 0, "DateTime.now_unix() should return a positive Int, got {}", result);
+    }
+
+    #[test]
+    fn math_round_to_works() {
+        // round_to(3.14159, 2) == 3.14
+        let result = run(r#"
+public fn main() -> Float {
+    Math.round_to(3.14159, 2)
+}
+"#);
+        match result {
+            Value::Float(f) => {
+                let diff = (f - 3.14f64).abs();
+                assert!(diff < 0.001, "Math.round_to(3.14159, 2) should be ~3.14, got {}", f);
+            }
+            other => panic!("expected Float, got {:?}", other),
+        }
+    }
+}
+
 // ── v163000_tests (v16.3.0) — record spread / update ─────────────────────────
 #[cfg(test)]
 mod v163000_tests {

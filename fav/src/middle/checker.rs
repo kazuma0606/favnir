@@ -1473,6 +1473,7 @@ impl Checker {
             "Snowflake",
             "BigQuery",
             "Kafka",
+            "DateTime",
             "Postgres",
             "AzurePostgres",
             "AzureBlob",
@@ -5393,7 +5394,18 @@ impl Checker {
             | ("Math", "min_float")
             | ("Math", "max_float")
             | ("Math", "pow_float")
-            | ("Math", "sqrt") => Some(Type::Float),
+            | ("Math", "sqrt")
+            | ("Math", "round_to")
+            | ("Math", "log")
+            | ("Math", "log2")
+            | ("Math", "log10") => Some(Type::Float),
+            // DateTime (v16.4.0) — internal representation is Int (unix timestamp)
+            ("DateTime", "now") | ("DateTime", "now_unix") => Some(Type::Int),
+            ("DateTime", "parse") => Some(Type::Result(Box::new(Type::Int), Box::new(Type::String))),
+            ("DateTime", "format") | ("DateTime", "format_iso") => Some(Type::String),
+            ("DateTime", "add_days") | ("DateTime", "add_hours") => Some(Type::Int),
+            ("DateTime", "diff_days") | ("DateTime", "diff_seconds") => Some(Type::Int),
+            ("DateTime", "before") | ("DateTime", "after") | ("DateTime", "between") => Some(Type::Bool),
 
             // List
             ("List", "length") | ("List", "is_empty") => {
@@ -5531,6 +5543,26 @@ impl Checker {
                     Box::new(Type::List(Box::new(elem))),
                 ))
             }
+            // List additions (v16.4.0)
+            ("List", "sort_by") | ("List", "sort_by_desc") => {
+                let elem = self.expect_list_arg(&arg_tys, 0, span);
+                Some(Type::List(Box::new(elem)))
+            }
+            ("List", "distinct") => {
+                let elem = self.expect_list_arg(&arg_tys, 0, span);
+                Some(Type::List(Box::new(elem)))
+            }
+            ("List", "distinct_by") => {
+                let elem = self.expect_list_arg(&arg_tys, 0, span);
+                Some(Type::List(Box::new(elem)))
+            }
+            ("List", "count_where") => Some(Type::Int),
+            ("List", "sum_by") => Some(Type::Float),
+            ("List", "max_by") | ("List", "min_by") => {
+                let elem = self.expect_list_arg(&arg_tys, 0, span);
+                Some(Type::Option(Box::new(elem)))
+            }
+            ("List", "unzip") => Some(Type::Unknown),
 
             // String
             ("String", "trim")
@@ -5569,9 +5601,13 @@ impl Checker {
             ("String", "truncate") | ("String", "trim_start") | ("String", "trim_end") => {
                 Some(Type::String)
             }
-            ("String", "char_at") => Some(Type::Option(Box::new(Type::String))),
+            ("String", "char_at") => Some(Type::String),
             ("String", "to_int") => Some(Type::Option(Box::new(Type::Int))),
             ("String", "to_float") => Some(Type::Option(Box::new(Type::Float))),
+            // String additions (v16.4.0)
+            ("String", "split_once") => Some(Type::Unknown), // Pair<String, String>
+            ("String", "replace_first") => Some(Type::String),
+            ("String", "format_int") | ("String", "format_float") => Some(Type::String),
 
             // Option
             ("Option", "some") => {

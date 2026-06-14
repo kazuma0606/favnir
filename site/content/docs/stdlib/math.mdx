@@ -1,0 +1,81 @@
+# Math
+
+Math モジュールは数値演算のためのユーティリティ関数を提供します。
+
+## 基本演算
+
+```fav
+Math.abs(n)          -- Int → Int（絶対値）
+Math.abs_float(f)    -- Float → Float
+
+Math.round(f)        -- Float → Int（四捨五入）
+Math.ceil(f)         -- Float → Int（切り上げ）
+Math.floor(f)        -- Float → Int（切り捨て）
+Math.round_to(f, 2)  -- Float → Float（小数点以下 n 桁）(v16.4.0)
+```
+
+## 比較・範囲
+
+```fav
+Math.min(a, b)           -- Int
+Math.max(a, b)           -- Int
+Math.min_float(a, b)     -- Float
+Math.max_float(a, b)     -- Float
+Math.clamp(v, lo, hi)    -- Int（lo <= v <= hi に収める）
+```
+
+## べき乗・対数
+
+```fav
+Math.pow(base, exp)      -- Int（整数べき乗、exp >= 0）
+Math.pow_float(b, e)     -- Float
+Math.sqrt(f)             -- Float
+
+Math.log(f)              -- Float（自然対数）(v16.4.0)
+Math.log2(f)             -- Float (v16.4.0)
+Math.log10(f)            -- Float (v16.4.0)
+```
+
+## 定数
+
+```fav
+Math.pi                  -- Float（円周率）
+Math.e                   -- Float（ネイピア数）
+```
+
+## 使用例
+
+```fav
+-- 小数点 2 桁に丸める
+bind price  <- Math.round_to(99.9999, 2)   -- 100.0
+
+-- 自然対数
+bind ln2 <- Math.log(2.0)   -- 0.693...
+
+-- clamp でスコアを 0〜100 に収める
+bind clamped <- Math.clamp(raw_score, 0, 100)
+```
+
+## 関数リファレンス
+
+| 関数 | 入力 | 出力 | 説明 |
+|---|---|---|---|
+| `abs(n)` | `Int` | `Int` | 絶対値 |
+| `abs_float(f)` | `Float` | `Float` | 絶対値（Float 版）|
+| `round(f)` | `Float` | `Int` | 四捨五入 |
+| `ceil(f)` | `Float` | `Int` | 切り上げ |
+| `floor(f)` | `Float` | `Int` | 切り捨て |
+| `round_to(f, n)` | `Float, Int` | `Float` | 小数点 n 桁に丸め |
+| `min(a, b)` | `Int, Int` | `Int` | 小さい方 |
+| `max(a, b)` | `Int, Int` | `Int` | 大きい方 |
+| `min_float(a, b)` | `Float, Float` | `Float` | 小さい方 |
+| `max_float(a, b)` | `Float, Float` | `Float` | 大きい方 |
+| `clamp(v, lo, hi)` | `Int, Int, Int` | `Int` | 範囲に収める |
+| `pow(b, e)` | `Int, Int` | `Int` | べき乗 |
+| `pow_float(b, e)` | `Float, Float` | `Float` | べき乗（Float）|
+| `sqrt(f)` | `Float` | `Float` | 平方根 |
+| `log(f)` | `Float` | `Float` | 自然対数 |
+| `log2(f)` | `Float` | `Float` | 底 2 の対数 |
+| `log10(f)` | `Float` | `Float` | 底 10 の対数 |
+| `pi` | — | `Float` | 3.14159... |
+| `e` | — | `Float` | 2.71828... |

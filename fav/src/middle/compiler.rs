@@ -188,6 +188,7 @@ pub fn compile_program(program: &Program) -> IRProgram {
         "Snowflake",
         "BigQuery",
         "Kafka",
+        "DateTime",
         "Postgres",
         "AzurePostgres",
         "AzureBlob",
@@ -437,6 +438,7 @@ pub fn compile_program(program: &Program) -> IRProgram {
         "Debug",
         "Snowflake",
         "BigQuery",
+        "DateTime",
         "Postgres",
         // test assertion builtins (callable without namespace prefix)
         "assert",

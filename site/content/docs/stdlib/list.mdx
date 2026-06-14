@@ -76,3 +76,44 @@ fn demo(nums: List<Int>) -> Unit !Io {
   IO.println_int(sum)
 }
 ```
+
+## v16.4.0 追加関数
+
+### グループ化・集計
+
+```fav
+-- グループ化（fn は String キーを返す）
+bind groups <- List.group_by(|r| r.category, rows)   -- Map<String, List<Row>>
+
+-- 条件付き件数
+bind count <- List.count_where(rows, |r| r.active)   -- Int
+
+-- Float 合計
+bind total <- List.sum_by(rows, |r| r.amount)         -- Float
+
+-- 最大値・最小値要素
+bind best  <- List.max_by(rows, |r| r.score)          -- Option<Row>
+bind worst <- List.min_by(rows, |r| r.score)          -- Option<Row>
+```
+
+### ソート
+
+```fav
+bind sorted      <- List.sort_by(rows, |r| r.amount)      -- 昇順
+bind sorted_desc <- List.sort_by_desc(rows, |r| r.amount) -- 降順
+```
+
+### 変換・フィルタ
+
+```fav
+-- 重複除去
+bind unique    <- List.distinct(xs)                    -- List<T>（== による）
+bind unique_by <- List.distinct_by(xs, |r| r.id)      -- キー指定
+
+-- バッチ分割
+bind batches <- List.chunk(rows, 100)                  -- List<List<T>>
+
+-- zip 拡張
+bind zipped   <- List.zip_with(as, bs, |a b| merge(a, b))  -- List<C>
+bind unzipped <- List.unzip(pairs)                          -- Pair<List<A>, List<B>>
+```

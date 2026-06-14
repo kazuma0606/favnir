@@ -1,0 +1,111 @@
+# String
+
+String モジュールは文字列操作のためのユーティリティ関数を提供します。
+
+## 基本操作
+
+```fav
+String.length(s)           -- Int
+String.is_empty(s)         -- Bool
+String.concat(a, b)        -- String
+String.contains(s, sub)    -- Bool
+String.starts_with(s, p)   -- Bool
+String.ends_with(s, suf)   -- Bool
+```
+
+## 分割・結合
+
+```fav
+String.split(s, ",")              -- List<String>
+String.split_once(s, "=")         -- Pair<String, String>（見つからなければ Pair(s, "")）
+String.lines(s)                   -- List<String>（改行で分割）
+String.join(sep, xs)              -- String（List<String> → String）
+String.words(s)                   -- List<String>（空白で分割）
+```
+
+## トリム・変換
+
+```fav
+String.trim(s)             -- 両端空白除去
+String.trim_start(s)       -- 先頭空白除去
+String.trim_end(s)         -- 末尾空白除去
+String.to_upper(s)         -- 大文字
+String.to_lower(s)         -- 小文字
+String.capitalize(s)       -- 先頭大文字
+String.reverse(s)          -- 逆順
+```
+
+## 置換
+
+```fav
+String.replace(s, "old", "new")        -- 全置換
+String.replace_first(s, "old", "new")  -- 先頭 1 件のみ置換
+```
+
+## スライス・パディング
+
+```fav
+String.slice(s, start, end)        -- 部分文字列
+String.char_at(s, i)               -- String（i 番目の文字、なければ ""）
+String.pad_left(s, 10, "0")        -- 左パディング（ゼロ埋め）
+String.pad_right(s, 20, " ")       -- 右パディング
+String.repeat(s, n)                -- n 回繰り返し
+String.truncate(s, n)              -- 最大 n 文字
+```
+
+## 変換・解析
+
+```fav
+String.to_int(s)           -- Option<Int>
+String.to_float(s)         -- Option<Float>
+String.from_int(n)         -- String
+String.from_float(f)       -- String
+String.chars(s)            -- List<String>（1文字ずつ）
+String.from_chars(xs)      -- String（List<String> → String）
+```
+
+## フォーマット（v16.4.0）
+
+```fav
+String.format_int(42, 5, "0")    -- "00042"（幅 5、ゼロ埋め）
+String.format_float(3.14159, 2)  -- "3.14"（小数点以下 2 桁）
+```
+
+## その他
+
+```fav
+String.index_of(s, sub)    -- Option<Int>
+String.compare(a, b)       -- Int（strcmp 相当）
+String.base64_encode(s)    -- String
+String.base64_decode(s)    -- Result<List<Int>, String>
+```
+
+## 使用例
+
+```fav
+-- CSV 行の分割
+bind fields <- String.split(line, ",")
+
+-- ゼロ埋め ID 生成
+bind id_str <- String.format_int(row.id, 8, "0")   -- "00000042"
+
+-- 価格フォーマット
+bind price_str <- String.format_float(price, 2)     -- "9.99"
+
+-- トリムして空チェック
+bind name <- String.trim(raw)
+if String.is_empty(name) {
+    Result.err("name is required")
+} else {
+    Result.ok(name)
+}
+```
+
+## 関数リファレンス（v16.4.0 追加分）
+
+| 関数 | 戻り型 | 説明 |
+|---|---|---|
+| `split_once(s, sep)` | `Pair<String, String>` | 最初の区切り文字で 2 分割 |
+| `replace_first(s, old, new)` | `String` | 先頭 1 件のみ置換 |
+| `format_int(n, width, pad)` | `String` | 幅指定の整数フォーマット |
+| `format_float(f, digits)` | `String` | 小数点桁数指定フォーマット |

@@ -111,6 +111,16 @@ pub struct GcpTomlConfig {
     pub dataset:          Option<String>,
 }
 
+// ── Kafka config (v15.4.0) ────────────────────────────────────────────────────
+
+#[derive(Debug, Clone)]
+pub struct KafkaTomlConfig {
+    pub bootstrap_brokers: Option<String>,
+    pub sasl_mechanism:    Option<String>,
+    pub sasl_username:     Option<String>,
+    pub sasl_password:     Option<String>,
+}
+
 // ── Azure config (v14.2.0) ────────────────────────────────────────────────────
 
 #[derive(Debug, Clone)]
@@ -231,6 +241,8 @@ pub struct FavToml {
     pub context: Option<ContextConfig>,
     /// Optional GCP configuration (v15.2.0).
     pub gcp: Option<GcpTomlConfig>,
+    /// Optional Kafka / MSK configuration (v15.4.0).
+    pub kafka: Option<KafkaTomlConfig>,
     /// Optional Azure configuration (v14.2.0).
     pub azure: Option<AzureTomlConfig>,
 }
@@ -296,6 +308,7 @@ fn parse_fav_toml(content: &str) -> FavToml {
     let mut context_cfg: Option<ContextConfig> = None;
     let mut azure_cfg: Option<AzureTomlConfig> = None;
     let mut gcp_cfg: Option<GcpTomlConfig> = None;
+    let mut kafka_cfg: Option<KafkaTomlConfig> = None;
     let mut section = "";
 
     for line in content.lines() {
@@ -623,6 +636,24 @@ fn parse_fav_toml(content: &str) -> FavToml {
                 }
                 gcp_cfg = Some(current);
             }
+            "kafka" => {
+                let mut current = kafka_cfg.take().unwrap_or(KafkaTomlConfig {
+                    bootstrap_brokers: None,
+                    sasl_mechanism:    None,
+                    sasl_username:     None,
+                    sasl_password:     None,
+                });
+                if let Some((key, val)) = parse_kv(trimmed) {
+                    match key {
+                        "bootstrap_brokers" => current.bootstrap_brokers = Some(expand_env_vars(val)),
+                        "sasl_mechanism"    => current.sasl_mechanism    = Some(val.to_string()),
+                        "sasl_username"     => current.sasl_username     = Some(expand_env_vars(val)),
+                        "sasl_password"     => current.sasl_password     = Some(expand_env_vars(val)),
+                        _ => {}
+                    }
+                }
+                kafka_cfg = Some(current);
+            }
             _ => {}
         }
     }
@@ -649,6 +680,7 @@ fn parse_fav_toml(content: &str) -> FavToml {
         lint: lint_cfg,
         context: context_cfg,
         gcp: gcp_cfg,
+        kafka: kafka_cfg,
         azure: azure_cfg,
     }
 }

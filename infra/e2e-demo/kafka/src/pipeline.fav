@@ -1,0 +1,47 @@
+// infra/e2e-demo/kafka/src/pipeline.fav
+// Kafka / MSK E2E デモパイプライン (v15.4.0)
+//
+// pipeline:
+//   GenerateEvents |> ProduceToKafka |> ConsumeFromKafka |> VerifyResult
+
+import rune "kafka"
+import rune "json"
+import rune "io"
+
+type Event {
+  id:      String,
+  payload: String,
+}
+
+fn generate_event(id: String) -> Event {
+  Event { id: id, payload: String.concat("data-", id) }
+}
+
+stage GenerateEvents -> List<Event> {
+  bind e1 <- Result.ok(generate_event("evt-001"))
+  bind e2 <- Result.ok(generate_event("evt-002"))
+  bind e3 <- Result.ok(generate_event("evt-003"))
+  Result.ok([e1, e2, e3])
+}
+
+stage ProduceToKafka(events: List<Event>) -> Int !Stream {
+  bind count <- List.fold_result(events, 0, |acc, evt| {
+    bind _ok <- kafka.produce("favnir-demo", evt.id, evt.payload)
+    Result.ok(Int.add(acc, 1))
+  })
+  io.println(String.concat("Produced: ", Int.to_string(count)))
+  Result.ok(count)
+}
+
+stage ConsumeFromKafka(count: Int) -> String !Stream {
+  kafka.consume_one("favnir-demo", "favnir-consumer-group")
+}
+
+stage VerifyResult(msg: String) -> Unit {
+  bind _ok <- io.println(String.concat("Consumed: ", msg))
+  Result.ok(())
+}
+
+public fn main() -> Result<Unit, String> {
+  seq GenerateEvents |> ProduceToKafka |> ConsumeFromKafka |> VerifyResult
+}

@@ -1234,6 +1234,10 @@ impl Parser {
                         self.advance();
                         Effect::Gcp
                     }
+                    "Stream" => {
+                        self.advance();
+                        Effect::Stream
+                    }
                     "Postgres" => {
                         self.advance();
                         Effect::Postgres

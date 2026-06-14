@@ -4678,6 +4678,125 @@ fn err_vm(value: VMValue) -> VMValue {
     VMValue::Variant("err".to_string(), Some(Box::new(value)))
 }
 
+// ── Kafka helpers (v15.4.0) ──────────────────────────────────────────────────
+
+/// brokers 引数が空の場合は環境変数 KAFKA_BOOTSTRAP_BROKERS にフォールバック。
+fn kafka_resolve_brokers(brokers_arg: &str) -> String {
+    let b = brokers_arg.trim().to_string();
+    if b.is_empty() {
+        std::env::var("KAFKA_BOOTSTRAP_BROKERS").unwrap_or_else(|_| "localhost:9092".to_string())
+    } else {
+        b
+    }
+}
+
+/// ブローカーアドレス一覧（カンマ区切り）を Vec<String> に変換。
+fn kafka_broker_list(brokers: &str) -> Vec<String> {
+    brokers.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect()
+}
+
+/// Kafka topic に 1 メッセージを produce する（同期ラッパー）。
+fn kafka_produce_sync(brokers: &str, topic: &str, key: &str, value: &str) -> Result<(), String> {
+    use rskafka::client::ClientBuilder;
+    use rskafka::record::Record;
+    use rskafka::client::partition::{Compression, UnknownTopicHandling};
+
+    let addrs = kafka_broker_list(brokers);
+    if addrs.is_empty() {
+        return Err("Kafka.produce_raw: no brokers specified".to_string());
+    }
+    let username = std::env::var("KAFKA_SASL_USERNAME").ok();
+    let password = std::env::var("KAFKA_SASL_PASSWORD").ok();
+
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|e| format!("Kafka.produce_raw: tokio: {e}"))?;
+
+    rt.block_on(async {
+        let mut builder = ClientBuilder::new(addrs);
+        if let (Some(user), Some(pass)) = (username, password) {
+            builder = builder.sasl_config(
+                rskafka::client::SaslConfig::ScramSha512(
+                    rskafka::client::Credentials::new(user, pass)
+                )
+            );
+        }
+        let client = builder.build().await.map_err(|e| format!("Kafka.produce_raw: connect: {e}"))?;
+        let partition_client = client
+            .partition_client(topic, 0, UnknownTopicHandling::Retry)
+            .await
+            .map_err(|e| format!("Kafka.produce_raw: partition: {e}"))?;
+
+        let record = Record {
+            key:       Some(key.as_bytes().to_vec()),
+            value:     Some(value.as_bytes().to_vec()),
+            timestamp: chrono::Utc::now(),
+            headers:   Default::default(),
+        };
+        partition_client
+            .produce(vec![record], Compression::NoCompression)
+            .await
+            .map_err(|e| format!("Kafka.produce_raw: produce: {e}"))?;
+        Ok(())
+    })
+}
+
+/// Kafka topic から最新オフセットの 1 メッセージを consume する（同期ラッパー）。
+fn kafka_consume_one_sync(brokers: &str, topic: &str) -> Result<String, String> {
+    use rskafka::client::ClientBuilder;
+    use rskafka::client::partition::{OffsetAt, UnknownTopicHandling};
+
+    let addrs = kafka_broker_list(brokers);
+    if addrs.is_empty() {
+        return Err("Kafka.consume_one_raw: no brokers specified".to_string());
+    }
+    let username = std::env::var("KAFKA_SASL_USERNAME").ok();
+    let password = std::env::var("KAFKA_SASL_PASSWORD").ok();
+
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|e| format!("Kafka.consume_one_raw: tokio: {e}"))?;
+
+    rt.block_on(async {
+        let mut builder = ClientBuilder::new(addrs);
+        if let (Some(user), Some(pass)) = (username, password) {
+            builder = builder.sasl_config(
+                rskafka::client::SaslConfig::ScramSha512(
+                    rskafka::client::Credentials::new(user, pass)
+                )
+            );
+        }
+        let client = builder.build().await.map_err(|e| format!("Kafka.consume_one_raw: connect: {e}"))?;
+        let partition_client = client
+            .partition_client(topic, 0, UnknownTopicHandling::Retry)
+            .await
+            .map_err(|e| format!("Kafka.consume_one_raw: partition: {e}"))?;
+
+        let offset = partition_client
+            .get_offset(OffsetAt::Latest)
+            .await
+            .map_err(|e| format!("Kafka.consume_one_raw: offset: {e}"))?;
+
+        if offset == 0 {
+            return Err("Kafka.consume_one_raw: topic is empty".to_string());
+        }
+        let fetch_offset = (offset - 1).max(0);
+
+        let (records, _) = partition_client
+            .fetch_records(fetch_offset, 1..1_048_576, 5_000)
+            .await
+            .map_err(|e| format!("Kafka.consume_one_raw: fetch: {e}"))?;
+
+        let record = records.into_iter().next()
+            .ok_or_else(|| "Kafka.consume_one_raw: no records returned".to_string())?;
+
+        let payload = record.record.value.unwrap_or_default();
+        String::from_utf8(payload).map_err(|e| format!("Kafka.consume_one_raw: utf8: {e}"))
+    })
+}
+
 // ── GCP helper (v15.2.0) ─────────────────────────────────────────────────────
 
 /// GOOGLE_APPLICATION_CREDENTIALS のサービスアカウント JSON から OAuth2 Bearer token を取得する。
@@ -13667,6 +13786,37 @@ fn vm_call_builtin(
             }
 
             Ok(ok_vm(VMValue::Str(resp_text)))
+        }
+
+        // ── Kafka / MSK primitives (v15.4.0) ──────────────────────────────
+
+        "Kafka.produce_raw" => {
+            // (brokers: String, topic: String, key: String, value: String) -> Result<Unit, String>
+            let mut it = args.into_iter();
+            let brokers_arg = vm_string(it.next().ok_or("Kafka.produce_raw: missing brokers")?,  "Kafka.produce_raw")?;
+            let topic       = vm_string(it.next().ok_or("Kafka.produce_raw: missing topic")?,    "Kafka.produce_raw")?;
+            let key_str     = vm_string(it.next().ok_or("Kafka.produce_raw: missing key")?,      "Kafka.produce_raw")?;
+            let value_str   = vm_string(it.next().ok_or("Kafka.produce_raw: missing value")?,    "Kafka.produce_raw")?;
+
+            let brokers = kafka_resolve_brokers(&brokers_arg);
+            match kafka_produce_sync(&brokers, &topic, &key_str, &value_str) {
+                Ok(()) => Ok(ok_vm(VMValue::Unit)),
+                Err(e) => Ok(err_vm(VMValue::Str(e))),
+            }
+        }
+
+        "Kafka.consume_one_raw" => {
+            // (brokers: String, topic: String, group_id: String) -> Result<String, String>
+            let mut it = args.into_iter();
+            let brokers_arg = vm_string(it.next().ok_or("Kafka.consume_one_raw: missing brokers")?,  "Kafka.consume_one_raw")?;
+            let topic       = vm_string(it.next().ok_or("Kafka.consume_one_raw: missing topic")?,    "Kafka.consume_one_raw")?;
+            let _group_id   = vm_string(it.next().ok_or("Kafka.consume_one_raw: missing group_id")?, "Kafka.consume_one_raw")?;
+
+            let brokers = kafka_resolve_brokers(&brokers_arg);
+            match kafka_consume_one_sync(&brokers, &topic) {
+                Ok(msg) => Ok(ok_vm(VMValue::Str(msg))),
+                Err(e)  => Ok(err_vm(VMValue::Str(e))),
+            }
         }
 
         // ── Azure Blob Storage primitives (v14.5.0) ───────────────────────

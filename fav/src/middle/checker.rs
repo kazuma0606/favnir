@@ -1419,6 +1419,7 @@ impl Checker {
             "Llm",
             "Snowflake",
             "BigQuery",
+            "Kafka",
             "Postgres",
             "AzurePostgres",
             "AzureBlob",
@@ -5028,6 +5029,16 @@ impl Checker {
         }
     }
 
+    fn require_stream_effect(&mut self, span: &Span) {
+        if !self.has_effect(|e| matches!(e, Effect::Stream)) {
+            self.type_error(
+                "E0319",
+                "Kafka.* call requires `!Stream` effect on enclosing fn/stage",
+                span,
+            );
+        }
+    }
+
     fn require_postgres_effect(&mut self, span: &Span) {
         if !self.has_effect(|e| matches!(e, Effect::Postgres)) {
             self.type_error(
@@ -5884,6 +5895,22 @@ impl Checker {
             }
             ("BigQuery", "infer_table_raw") => {
                 self.require_gcp_effect(span);
+                Some(Type::Result(
+                    Box::new(Type::String),
+                    Box::new(Type::String),
+                ))
+            }
+
+            // Kafka (v15.4.0) — require !Stream effect
+            ("Kafka", "produce_raw") => {
+                self.require_stream_effect(span);
+                Some(Type::Result(
+                    Box::new(Type::Unit),
+                    Box::new(Type::String),
+                ))
+            }
+            ("Kafka", "consume_one_raw") => {
+                self.require_stream_effect(span);
                 Some(Type::Result(
                     Box::new(Type::String),
                     Box::new(Type::String),
@@ -7558,6 +7585,7 @@ abstract seq Pipeline {
             context: None,
             azure: None,
             gcp: None,
+            kafka: None,
         };
         let resolver = Arc::new(Mutex::new(Resolver::new(Some(toml), Some(root))));
         (resolver, dir)
@@ -7648,6 +7676,7 @@ abstract seq Pipeline {
             context: None,
             azure: None,
             gcp: None,
+            kafka: None,
         };
         let mut resolver = Resolver::new(Some(toml), Some(root));
         // Simulate a mid-load state: "cycle" is already in the loading set

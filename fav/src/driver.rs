@@ -361,6 +361,24 @@ fn inject_gcp_config(cfg: &crate::toml::GcpTomlConfig) {
     }
 }
 
+fn inject_kafka_config(cfg: &crate::toml::KafkaTomlConfig) {
+    use crate::toml::expand_env_vars;
+    let pairs: &[(&str, Option<&str>)] = &[
+        ("KAFKA_BOOTSTRAP_BROKERS", cfg.bootstrap_brokers.as_deref()),
+        ("KAFKA_SASL_MECHANISM",    cfg.sasl_mechanism.as_deref()),
+        ("KAFKA_SASL_USERNAME",     cfg.sasl_username.as_deref()),
+        ("KAFKA_SASL_PASSWORD",     cfg.sasl_password.as_deref()),
+    ];
+    for (key, val) in pairs {
+        if let Some(v) = val {
+            if std::env::var(key).is_err() {
+                // SAFETY: called before VM starts; single-threaded at this point
+                unsafe { std::env::set_var(key, expand_env_vars(v)); }
+            }
+        }
+    }
+}
+
 fn inject_azure_config(cfg: &crate::toml::AzureTomlConfig) {
     use crate::toml::expand_env_vars;
     let pairs: &[(&str, Option<&str>)] = &[
@@ -946,6 +964,10 @@ fn run_with_favnir_pipeline_project(
     if let Some(gcp_cfg) = &toml.gcp {
         inject_gcp_config(gcp_cfg);
     }
+    // Inject fav.toml [kafka] settings as env vars (v15.4.0)
+    if let Some(kafka_cfg) = &toml.kafka {
+        inject_kafka_config(kafka_cfg);
+    }
 
     // 1. Collect and merge all project sources
     let merged =
@@ -1075,6 +1097,10 @@ fn load_run_config(file: Option<&str>) {
                 // Inject [gcp] settings as env vars (v15.2.0)
                 if let Some(gcp_cfg) = toml.gcp.as_ref() {
                     inject_gcp_config(gcp_cfg);
+                }
+                // Inject [kafka] settings as env vars (v15.4.0)
+                if let Some(kafka_cfg) = toml.kafka.as_ref() {
+                    inject_kafka_config(kafka_cfg);
                 }
             }
         }
@@ -3464,6 +3490,7 @@ fn try_cmd_check_dir(dir: &Path) -> Result<(), usize> {
         context: None,
         azure: None,
         gcp: None,
+        kafka: None,
     });
     let files = collect_fav_files_recursive(dir);
     let resolver = make_resolver(Some(toml), Some(root));
@@ -11823,6 +11850,7 @@ fn format_effects(effects: &[ast::Effect]) -> String {
             Llm => "!Llm".into(),
             Snowflake => "!Snowflake".into(),
             Gcp => "!Gcp".into(),
+            Stream => "!Stream".into(),
             Postgres => "!Postgres".into(),
             AzureDb => "!AzureDb".into(),
             AzureStorage => "!AzureStorage".into(),
@@ -11851,6 +11879,7 @@ fn effect_json_name(effect: &ast::Effect) -> String {
         ast::Effect::Llm => "Llm".into(),
         ast::Effect::Snowflake => "Snowflake".into(),
         ast::Effect::Gcp => "Gcp".into(),
+        ast::Effect::Stream => "Stream".into(),
         ast::Effect::Postgres => "Postgres".into(),
         ast::Effect::AzureDb => "AzureDb".into(),
         ast::Effect::AzureStorage => "AzureStorage".into(),
@@ -25365,6 +25394,51 @@ public fn load(conn_str: String) -> Result<Int, String> !AzureDb {
         assert!(
             text.contains("[AWS RDS]") && text.contains("[Azure Postgres]"),
             "expected crosscloud markers, got:\n{}", text
+        );
+    }
+}
+
+// ── v154000_tests (v15.4.0) — Kafka / MSK Rune ────────────────────────────────
+#[cfg(test)]
+mod v154000_tests {
+    use std::fs;
+    use std::path::Path;
+
+    #[test]
+    fn version_is_15_4_0() {
+        let cargo = fs::read_to_string("Cargo.toml").unwrap();
+        assert!(
+            cargo.contains("version = \"15.4.0\""),
+            "Cargo.toml version should be 15.4.0, got: {}",
+            cargo.lines().find(|l| l.contains("version")).unwrap_or("")
+        );
+    }
+
+    #[test]
+    fn stream_effect_in_ast() {
+        let ast = fs::read_to_string("src/ast.rs").unwrap();
+        assert!(ast.contains("Stream"), "ast.rs must contain Stream effect");
+    }
+
+    #[test]
+    fn kafka_produce_raw_in_vm() {
+        let vm = fs::read_to_string("src/backend/vm.rs").unwrap();
+        assert!(vm.contains("Kafka.produce_raw"), "vm.rs must contain Kafka.produce_raw primitive");
+    }
+
+    #[test]
+    fn kafka_rune_exists() {
+        assert!(
+            Path::new("../runes/kafka/kafka.fav").exists(),
+            "../runes/kafka/kafka.fav must exist"
+        );
+    }
+
+    #[test]
+    fn kafka_e2e_demo_structure() {
+        assert!(
+            Path::new("../infra/e2e-demo/kafka/src/pipeline.fav").exists(),
+            "infra/e2e-demo/kafka/src/pipeline.fav must exist"
         );
     }
 }

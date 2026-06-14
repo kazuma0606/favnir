@@ -187,6 +187,7 @@ pub fn compile_program(program: &Program) -> IRProgram {
         "Debug",
         "Snowflake",
         "BigQuery",
+        "Kafka",
         "Postgres",
         "AzurePostgres",
         "AzureBlob",

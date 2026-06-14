@@ -87,6 +87,9 @@ pub fn reachability_analysis(entry: &str, program: &IRProgram) -> ReachabilityRe
                 Effect::Gcp => {
                     effects_required.insert("Gcp".to_string());
                 }
+                Effect::Stream => {
+                    effects_required.insert("Stream".to_string());
+                }
                 Effect::Postgres => {
                     effects_required.insert("Postgres".to_string());
                 }

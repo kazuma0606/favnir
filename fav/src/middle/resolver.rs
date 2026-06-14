@@ -368,6 +368,7 @@ mod tests {
             context: None,
             azure: None,
             gcp: None,
+            kafka: None,
         };
         let resolver = Resolver::new(Some(toml), Some(root));
         (resolver, dir) // dir must outlive the test
@@ -458,6 +459,7 @@ mod tests {
             context: None,
             azure: None,
             gcp: None,
+            kafka: None,
         };
         let mut r = Resolver::new(Some(toml), Some(dir.path().to_path_buf()));
         let mut errors = Vec::new();
@@ -564,6 +566,7 @@ mod tests {
             context: None,
             azure: None,
             gcp: None,
+            kafka: None,
         };
         let resolver = Resolver::new(Some(toml), Some(root.clone()));
         let result = resolver.resolve_rune_import_file("csv");

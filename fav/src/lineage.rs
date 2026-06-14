@@ -62,6 +62,7 @@ fn format_effects(effects: &[ast::Effect]) -> String {
             Llm => "!Llm".into(),
             Snowflake => "!Snowflake".into(),
             Gcp => "!Gcp".into(),
+            Stream => "!Stream".into(),
             Postgres => "!Postgres".into(),
             AzureDb => "!AzureDb".into(),
             AzureStorage => "!AzureStorage".into(),
@@ -117,6 +118,9 @@ fn classify_capability_kind(
             }
             ast::Effect::Postgres | ast::Effect::Snowflake | ast::Effect::Gcp => {
                 return ("read".into(), Some("DbRead".into()))
+            }
+            ast::Effect::Stream => {
+                return ("io".into(), Some("StreamWrite".into()))
             }
             ast::Effect::Network | ast::Effect::Http | ast::Effect::Llm | ast::Effect::Rpc => {
                 return ("io".into(), Some("HttpClient".into()))

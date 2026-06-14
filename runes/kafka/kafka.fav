@@ -1,0 +1,28 @@
+// runes/kafka/kafka.fav — Kafka / MSK Rune (v15.4.0)
+//
+// 使い方:
+//   import rune "kafka"
+//
+//   fn produce_event(topic: String, key: String, payload: String) -> Result<Unit, String> !Stream {
+//     kafka.produce(topic, key, payload)
+//   }
+//
+// 環境変数:
+//   KAFKA_BOOTSTRAP_BROKERS — カンマ区切りのブローカーアドレス（例: "b-1.msk.amazonaws.com:9092"）
+//   KAFKA_SASL_USERNAME     — SASL 認証ユーザー名（省略可）
+//   KAFKA_SASL_PASSWORD     — SASL 認証パスワード（省略可）
+
+// デフォルトのブローカーアドレスを環境変数から取得する
+fn default_brokers() -> String {
+  Env.get_or("KAFKA_BOOTSTRAP_BROKERS", "localhost:9092")
+}
+
+// 指定トピックにメッセージを produce する
+fn produce(topic: String, key: String, value: String) -> Result<Unit, String> !Stream {
+  Kafka.produce_raw(default_brokers(), topic, key, value)
+}
+
+// 指定トピックから最新メッセージを 1 件 consume する
+fn consume_one(topic: String, group_id: String) -> Result<String, String> !Stream {
+  Kafka.consume_one_raw(default_brokers(), topic, group_id)
+}

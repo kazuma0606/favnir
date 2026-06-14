@@ -637,6 +637,18 @@ fn postgres_fn(fname: String) -> String {
     }
 }
 
+fn kafka_fn(fname: String) -> String {
+    if fname == "produce_raw" {
+        "Result"
+    } else {
+        if fname == "consume_one_raw" {
+            "Result"
+        } else {
+            "Result"
+        }
+    }
+}
+
 fn debug_fn(fname: String) -> String {
     if fname == "show_raw" {
         "String"
@@ -1059,10 +1071,14 @@ fn builtin_ret_ty(ns: String, fname: String) -> String {
                                                                             if ns == "Postgres" {
                                                                                 postgres_fn(fname)
                                                                             } else {
-                                                                                if ns == "Debug" {
-                                                                                    debug_fn(fname)
+                                                                                if ns == "Kafka" {
+                                                                                    kafka_fn(fname)
                                                                                 } else {
-                                                                                    "Unknown"
+                                                                                    if ns == "Debug" {
+                                                                                        debug_fn(fname)
+                                                                                    } else {
+                                                                                        "Unknown"
+                                                                                    }
                                                                                 }
                                                                             }
                                                                         }
@@ -1122,10 +1138,14 @@ fn ns_to_effect(ns: String) -> String {
                                                 if ns == "Postgres" {
                                                     "Postgres"
                                                 } else {
-                                                    if ns == "Debug" {
-                                                        "IO"
+                                                    if ns == "Kafka" {
+                                                        "Stream"
                                                     } else {
-                                                        ""
+                                                        if ns == "Debug" {
+                                                            "IO"
+                                                        } else {
+                                                            ""
+                                                        }
                                                     }
                                                 }
                                             }

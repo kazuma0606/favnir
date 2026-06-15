@@ -9,6 +9,9 @@ use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
+/// Set of inferred or declared effects for a function (v18.1.0).
+pub type EffectSet = HashSet<Effect>;
+
 // ── Type (4-1) ────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, PartialEq)]
@@ -54,6 +57,8 @@ pub enum Type {
     Task(Box<Type>),
     /// `Stream<T>` lazy sequence (v2.9.0)
     Stream(Box<Type>),
+    /// `R & { field: Type }` — intersection type (v18.2.0)
+    Intersection(Box<Type>, Box<Type>),
     /// Type is not yet known (monomorphic placeholder / built-in generic)
     Unknown,
     /// Error recovery  Esuppress cascading errors
@@ -68,6 +73,10 @@ impl Type {
         if matches!(self, Type::Unknown | Type::Error | Type::Var(_))
             || matches!(other, Type::Unknown | Type::Error | Type::Var(_))
         {
+            return true;
+        }
+        // Intersection type: conservatively compatible with anything (v18.2.0)
+        if matches!(self, Type::Intersection(_, _)) || matches!(other, Type::Intersection(_, _)) {
             return true;
         }
         match (self, other) {
@@ -242,6 +251,7 @@ impl Type {
             }
             Type::Task(t) => format!("Task<{}>", t.display()),
             Type::Stream(t) => format!("Stream<{}>", t.display()),
+            Type::Intersection(l, r) => format!("{} & {}", l.display(), r.display()),
             Type::Unknown => "_".into(),
             Type::Error => "?".into(),
         }
@@ -954,6 +964,10 @@ pub struct Checker {
     pub schemas: ProjectSchemas,
     /// Generic bounds registry: fn_name → params with bounds (v17.1.0).
     fn_bounds_registry: HashMap<String, Vec<crate::ast::GenericParam>>,
+    /// Inferred effects per fn name (v18.1.0).
+    pub fn_effects_registry: HashMap<String, EffectSet>,
+    /// Call graph for transitive effect propagation: fn_name → called fn names (v18.1.0).
+    fn_call_graph: HashMap<String, Vec<String>>,
 }
 
 impl Checker {
@@ -994,6 +1008,8 @@ impl Checker {
             namespace_aliases: HashMap::new(),
             schemas: HashMap::new(),
             fn_bounds_registry: HashMap::new(),
+            fn_effects_registry: HashMap::new(),
+            fn_call_graph: HashMap::new(),
         }
     }
 
@@ -1037,6 +1053,8 @@ impl Checker {
             namespace_aliases: HashMap::new(),
             schemas: HashMap::new(),
             fn_bounds_registry: HashMap::new(),
+            fn_effects_registry: HashMap::new(),
+            fn_call_graph: HashMap::new(),
         }
     }
 
@@ -1054,6 +1072,7 @@ impl Checker {
         c.process_imports(program);
         c.register_collect_helpers(program);
         c.register_item_signatures(program);
+        c.propagate_transitive_effects();
         for item in &program.items {
             c.check_item(item);
         }
@@ -1071,6 +1090,7 @@ impl Checker {
         self.check_namespace_match(program);
         self.register_collect_helpers(program);
         self.register_item_signatures(program);
+        self.propagate_transitive_effects();
         for item in &program.items {
             self.check_item(item);
         }
@@ -1154,6 +1174,7 @@ impl Checker {
         c.process_imports(program);
         c.register_collect_helpers(program);
         c.register_item_signatures(program);
+        c.propagate_transitive_effects();
         for item in &program.items {
             c.check_item(item);
         }
@@ -2192,6 +2213,10 @@ impl Checker {
                         self.fn_bounds_registry
                             .insert(fd.name.clone(), fd.type_params.clone());
                     }
+                    // Infer effects from fn body (v18.1.0).
+                    let (direct_effects, called_fns) = infer_effects_fn(fd);
+                    self.fn_effects_registry.insert(fd.name.clone(), direct_effects);
+                    self.fn_call_graph.insert(fd.name.clone(), called_fns);
                 }
                 Item::TrfDef(td) => {
                     let saved_tp = std::mem::replace(
@@ -2999,7 +3024,15 @@ impl Checker {
 
     fn check_fn_def(&mut self, fd: &FnDef) {
         self.check_effects_declared(&fd.effects, &fd.span);
-        let saved_effects = std::mem::replace(&mut self.current_effects, fd.effects.clone());
+        // v18.1.0: Use inferred effects when none are explicitly declared.
+        let effective_effects: Vec<Effect> = if fd.effects.is_empty() {
+            self.fn_effects_registry.get(&fd.name)
+                .map(|s| s.iter().cloned().collect())
+                .unwrap_or_default()
+        } else {
+            fd.effects.clone()
+        };
+        let saved_effects = std::mem::replace(&mut self.current_effects, effective_effects);
         let saved_tp = std::mem::replace(
             &mut self.type_params,
             fd.type_params.iter().map(|p| p.name.clone()).collect(),
@@ -3594,6 +3627,11 @@ impl Checker {
                 Box::new(self.resolve_type_expr_with_subst(output, subst)),
                 effects.clone(),
             ),
+            TypeExpr::Intersection(lhs, rhs, _) => Type::Intersection(
+                Box::new(self.resolve_type_expr_with_subst(lhs, subst)),
+                Box::new(self.resolve_type_expr_with_subst(rhs, subst)),
+            ),
+            TypeExpr::RecordType(_, _) => Type::Unknown,
             TypeExpr::Named(name, args, _) if args.is_empty() => subst
                 .get(name)
                 .cloned()
@@ -4502,16 +4540,26 @@ impl Checker {
                                         if bp.bounds.is_empty() { continue; }
                                         let concrete = subst.apply(&inst.apply(&Type::Var(bp.name.clone())));
                                         for bound in &bp.bounds {
-                                            if !type_implements_bound(&concrete, bound) {
-                                                self.type_error(
-                                                    "E0325",
-                                                    format!(
-                                                        "type `{}` does not implement `{}`",
-                                                        concrete.display(),
-                                                        bound
+                                            if !type_implements_bound(&concrete, bound, self) {
+                                                let (err_code, err_msg) = match bound {
+                                                    TypeConstraint::Interface(name) => (
+                                                        "E0325",
+                                                        format!(
+                                                            "type `{}` does not implement `{}`",
+                                                            concrete.display(),
+                                                            name
+                                                        ),
                                                     ),
-                                                    span,
-                                                );
+                                                    TypeConstraint::HasField { name, .. } => (
+                                                        "E0337",
+                                                        format!(
+                                                            "row constraint violated: type `{}` does not have field `{}`",
+                                                            concrete.display(),
+                                                            name
+                                                        ),
+                                                    ),
+                                                };
+                                                self.type_error(err_code, err_msg, span);
                                             }
                                         }
                                     }
@@ -6951,6 +6999,11 @@ impl Checker {
                 Box::new(self.resolve_type_expr_with_self(output, self_ty)),
                 effects.clone(),
             ),
+            TypeExpr::Intersection(lhs, rhs, _) => Type::Intersection(
+                Box::new(self.resolve_type_expr_with_self(lhs, self_ty)),
+                Box::new(self.resolve_type_expr_with_self(rhs, self_ty)),
+            ),
+            TypeExpr::RecordType(_, _) => Type::Unknown,
             TypeExpr::Named(name, args, _) => {
                 if name == "Self" && args.is_empty() {
                     return self_ty
@@ -7123,6 +7176,15 @@ impl Checker {
                 self.validate_type_expr_arity(input);
                 self.validate_type_expr_arity(output);
             }
+            TypeExpr::Intersection(lhs, rhs, _) => {
+                self.validate_type_expr_arity(lhs);
+                self.validate_type_expr_arity(rhs);
+            }
+            TypeExpr::RecordType(fields, _) => {
+                for (_, ty) in fields {
+                    self.validate_type_expr_arity(ty);
+                }
+            }
         }
     }
 }
@@ -7159,6 +7221,10 @@ fn collect_type_vars_ordered(ty: &Type, out: &mut Vec<String>) {
         Type::AbstractTrf { input, output, .. } => {
             collect_type_vars_ordered(input, out);
             collect_type_vars_ordered(output, out);
+        }
+        Type::Intersection(lhs, rhs) => {
+            collect_type_vars_ordered(lhs, out);
+            collect_type_vars_ordered(rhs, out);
         }
         Type::AbstractFlwTemplate(_)
         | Type::PartialFlw { .. }
@@ -7214,18 +7280,35 @@ fn expr_fn_name(expr: &Expr) -> Option<String> {
     }
 }
 
-/// Returns true if the given type satisfies the named interface bound.
-/// Used for bounded generics call-site checking (E0325).
-fn type_implements_bound(ty: &Type, bound: &str) -> bool {
+/// Returns true if the given type satisfies the given type constraint.
+/// Used for bounded generics call-site checking (E0325, E0337).
+fn type_implements_bound(ty: &Type, bound: &TypeConstraint, checker: &Checker) -> bool {
     match bound {
-        "Eq" | "Serialize" | "Clone" => true,
-        "Ord" => matches!(ty, Type::Int | Type::Float | Type::String),
-        "Display" => matches!(ty, Type::String | Type::Int | Type::Float | Type::Bool),
-        "Hash" => matches!(ty, Type::Int | Type::String),
-        _ => {
-            // Custom interface — treat as satisfied (checker.fav handles custom bounds)
-            true
+        TypeConstraint::Interface(name) => match name.as_str() {
+            "Eq" | "Serialize" | "Clone" => true,
+            "Ord" => matches!(ty, Type::Int | Type::Float | Type::String),
+            "Display" => matches!(ty, Type::String | Type::Int | Type::Float | Type::Bool),
+            "Hash" => matches!(ty, Type::Int | Type::String),
+            _ => true, // Custom interface — treat as satisfied
+        },
+        TypeConstraint::HasField { name, ty: _field_ty } => {
+            type_has_field(ty, name, checker)
         }
+    }
+}
+
+/// Returns true if `ty` has a field named `field_name`.
+fn type_has_field(ty: &Type, field_name: &str, checker: &Checker) -> bool {
+    match ty {
+        Type::Named(name, _) => {
+            if let Some(fields) = checker.record_fields.get(name) {
+                fields.iter().any(|(n, _)| n == field_name)
+            } else {
+                false
+            }
+        }
+        Type::Unknown | Type::Error | Type::Var(_) => true, // conservative
+        _ => false,
     }
 }
 
@@ -7791,17 +7874,18 @@ mod tests {
         check_ok(r#"fn f() -> Int !Db { Db.execute("SELECT 1") }"#);
     }
 
-    // 2-7: Http.* without !Network ↁEE008
+    // 2-7: Http.* without !Network — v18.1.0: effect is inferred, so no error
     #[test]
     fn test_network_effect_missing() {
-        let errs = check_err(
+        // v18.1.0: effect inference automatically infers !Http from Http.get,
+        // so omitting !Network/!Http declaration no longer causes E0108.
+        check_ok(
             r#"
             fn f() -> String! {
                 Http.get("http://example.com")
             }
         "#,
         );
-        assert!(errs.iter().any(|e| e.contains("E0108")), "got: {:?}", errs);
     }
 
     // 2-7: Http.* with !Network ↁEok
@@ -7933,6 +8017,8 @@ abstract seq Pipeline {
             azure: None,
             gcp: None,
             kafka: None,
+            dev_dependencies: vec![],
+            registry_url: None,
         };
         let resolver = Arc::new(Mutex::new(Resolver::new(Some(toml), Some(root))));
         (resolver, dir)
@@ -8024,6 +8110,8 @@ abstract seq Pipeline {
             azure: None,
             gcp: None,
             kafka: None,
+            dev_dependencies: vec![],
+            registry_url: None,
         };
         let mut resolver = Resolver::new(Some(toml), Some(root));
         // Simulate a mid-load state: "cycle" is already in the loading set
@@ -9711,4 +9799,190 @@ pub fn collect_exports(program: &Program, env: &TyEnv) -> HashMap<String, (Type,
         }
     }
     exports
+}
+
+// ── Effect Inference (v18.1.0) ────────────────────────────────────────────────
+
+/// Map a namespace identifier to an inferred Effect (v18.1.0).
+fn ns_to_inferred_effect(ns: &str) -> Option<Effect> {
+    match ns {
+        "Postgres" | "Db"               => Some(Effect::Postgres),
+        "IO"                            => Some(Effect::Io),
+        "S3" | "Sqs" | "Dynamo" | "Aws" => Some(Effect::Db),  // generic Db/AWS
+        "Kafka" | "Rskafka"             => Some(Effect::Stream),
+        "Snowflake"                     => Some(Effect::Snowflake),
+        "BigQuery" | "Gcp"              => Some(Effect::Gcp),
+        "Http" | "Ureq"                 => Some(Effect::Http),
+        "Llm"                           => Some(Effect::Llm),
+        "AzurePostgres"                 => Some(Effect::AzureDb),
+        "AzureBlob"                     => Some(Effect::AzureStorage),
+        _                               => None,
+    }
+}
+
+/// Recursively collect direct effects and called function names from an expression.
+fn collect_direct_effects_from_expr(expr: &Expr, out: &mut EffectSet, calls: &mut Vec<String>) {
+    match expr {
+        Expr::Apply(func, args, _) => {
+            let func_inner = match func.as_ref() {
+                Expr::TypeApply(inner, _, _) => inner.as_ref(),
+                other => other,
+            };
+            match func_inner {
+                Expr::FieldAccess(obj, _, _) => {
+                    if let Expr::Ident(ns, _) = obj.as_ref() {
+                        if let Some(eff) = ns_to_inferred_effect(ns) {
+                            out.insert(eff);
+                        }
+                    }
+                }
+                Expr::Ident(fn_name, _) => {
+                    calls.push(fn_name.clone());
+                }
+                _ => {}
+            }
+            collect_direct_effects_from_expr(func, out, calls);
+            for arg in args {
+                collect_direct_effects_from_expr(arg, out, calls);
+            }
+        }
+        Expr::Block(b) => collect_direct_effects_from_block(b, out, calls),
+        Expr::If(cond, then_b, else_b, _) => {
+            collect_direct_effects_from_expr(cond, out, calls);
+            collect_direct_effects_from_block(then_b, out, calls);
+            if let Some(eb) = else_b {
+                collect_direct_effects_from_block(eb, out, calls);
+            }
+        }
+        Expr::Match(scrutinee, arms, _) => {
+            collect_direct_effects_from_expr(scrutinee, out, calls);
+            for arm in arms {
+                if let Some(g) = &arm.guard {
+                    collect_direct_effects_from_expr(g, out, calls);
+                }
+                collect_direct_effects_from_expr(&arm.body, out, calls);
+            }
+        }
+        Expr::Pipeline(exprs, _) => {
+            for e in exprs {
+                collect_direct_effects_from_expr(e, out, calls);
+            }
+        }
+        Expr::BinOp(_, lhs, rhs, _) => {
+            collect_direct_effects_from_expr(lhs, out, calls);
+            collect_direct_effects_from_expr(rhs, out, calls);
+        }
+        Expr::RecordConstruct(_, fields, _) => {
+            for (_, e) in fields {
+                collect_direct_effects_from_expr(e, out, calls);
+            }
+        }
+        Expr::RecordSpread(base, fields, _) => {
+            collect_direct_effects_from_expr(base, out, calls);
+            for (_, e) in fields {
+                collect_direct_effects_from_expr(e, out, calls);
+            }
+        }
+        Expr::Closure(_, body, _) => {
+            collect_direct_effects_from_expr(body, out, calls);
+        }
+        Expr::EmitExpr(e, _) | Expr::Question(e, _) => {
+            collect_direct_effects_from_expr(e, out, calls);
+        }
+        Expr::FString(parts, _) => {
+            for part in parts {
+                if let FStringPart::Expr(e) = part {
+                    collect_direct_effects_from_expr(e, out, calls);
+                }
+            }
+        }
+        Expr::Collect(b, _) => collect_direct_effects_from_block(b, out, calls),
+        Expr::AssertMatches(e, _, _) => {
+            collect_direct_effects_from_expr(e, out, calls);
+        }
+        Expr::ListComp { expr, clauses, .. } | Expr::ResultComp { expr, clauses, .. } => {
+            collect_direct_effects_from_expr(expr, out, calls);
+            for clause in clauses {
+                match clause {
+                    CompClause::Guard(g) => collect_direct_effects_from_expr(g, out, calls),
+                    CompClause::For { src, .. } => collect_direct_effects_from_expr(src, out, calls),
+                }
+            }
+        }
+        Expr::TypeApply(e, _, _) | Expr::FieldAccess(e, _, _) => {
+            collect_direct_effects_from_expr(e, out, calls);
+        }
+        Expr::Lit(_, _) | Expr::Ident(_, _) => {}
+    }
+}
+
+fn collect_direct_effects_from_block(block: &Block, out: &mut EffectSet, calls: &mut Vec<String>) {
+    for stmt in &block.stmts {
+        match stmt {
+            Stmt::Bind(b) => collect_direct_effects_from_expr(&b.expr, out, calls),
+            Stmt::Expr(e) => collect_direct_effects_from_expr(e, out, calls),
+            Stmt::Chain(c) => collect_direct_effects_from_expr(&c.expr, out, calls),
+            Stmt::Yield(y) => collect_direct_effects_from_expr(&y.expr, out, calls),
+            Stmt::ForIn(f) => {
+                collect_direct_effects_from_expr(&f.iter, out, calls);
+                collect_direct_effects_from_block(&f.body, out, calls);
+            }
+            Stmt::Forall(f) => {
+                if let Some(guard) = &f.guard {
+                    collect_direct_effects_from_expr(guard, out, calls);
+                }
+                collect_direct_effects_from_block(&f.body, out, calls);
+            }
+        }
+    }
+    collect_direct_effects_from_expr(&block.expr, out, calls);
+}
+
+/// Infer direct effects and called function names from a fn definition (v18.1.0).
+/// Returns (direct_effects, called_fn_names).
+pub fn infer_effects_fn(fn_def: &FnDef) -> (EffectSet, Vec<String>) {
+    let mut effects = EffectSet::new();
+    let mut calls = Vec::new();
+    collect_direct_effects_from_block(&fn_def.body, &mut effects, &mut calls);
+    (effects, calls)
+}
+
+impl Checker {
+    /// Propagate effects transitively via the call graph (v18.1.0).
+    /// Runs fixpoint iteration (max 10 rounds) to handle call chains.
+    pub fn propagate_transitive_effects(&mut self) {
+        for _ in 0..10 {
+            let mut changed = false;
+            let keys: Vec<String> = self.fn_effects_registry.keys().cloned().collect();
+            for fn_name in &keys {
+                let callees = self.fn_call_graph.get(fn_name).cloned().unwrap_or_default();
+                let mut additional = EffectSet::new();
+                for callee in &callees {
+                    if let Some(callee_effects) = self.fn_effects_registry.get(callee) {
+                        additional.extend(callee_effects.iter().cloned());
+                    }
+                }
+                if !additional.is_empty() {
+                    let entry = self.fn_effects_registry.entry(fn_name.clone()).or_default();
+                    let before_len = entry.len();
+                    entry.extend(additional);
+                    if entry.len() > before_len {
+                        changed = true;
+                    }
+                }
+            }
+            if !changed {
+                break;
+            }
+        }
+    }
+}
+
+/// Run effect inference for a full program, returning fn_name → EffectSet (v18.1.0).
+pub fn infer_effects_for_program(program: &Program) -> HashMap<String, EffectSet> {
+    let mut c = Checker::new();
+    c.register_builtins();
+    c.register_item_signatures(program);
+    c.propagate_transitive_effects();
+    c.fn_effects_registry
 }

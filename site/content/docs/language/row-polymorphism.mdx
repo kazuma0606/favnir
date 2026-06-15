@@ -1,0 +1,119 @@
+# Row Polymorphism
+
+Row polymorphism lets you write generic functions that operate on **any record type that has a specific set of fields**, without requiring the record types to share a common base type.
+
+## Basic Syntax
+
+Use `with { field: Type }` in a generic parameter to constrain the type parameter to records that have that field:
+
+```fav
+fn get_id<R with { id: Int }>(row: R) -> Int {
+  row.id
+}
+```
+
+This function accepts any record type `R` as long as it has an `id: Int` field.
+
+## Using Row-Polymorphic Functions
+
+You can apply the same function to different record types:
+
+```fav
+type UserRow = {
+  id: Int
+  name: String
+}
+
+type OrderRow = {
+  id: Int
+  amount: Float
+}
+
+fn get_id<R with { id: Int }>(row: R) -> Int {
+  row.id
+}
+
+fn main() -> Int {
+  bind user_id  <- get_id(UserRow { id: 1, name: "Alice" })
+  bind order_id <- get_id(OrderRow { id: 42, amount: 100.0 })
+  user_id + order_id
+}
+```
+
+Both `UserRow` and `OrderRow` satisfy the `with { id: Int }` constraint because both have an `id: Int` field.
+
+## Multiple Field Constraints
+
+You can require multiple fields in a single constraint:
+
+```fav
+fn validate_user<R with { id: Int, email: String }>(row: R) -> Result<R, String> {
+  if String.contains(row.email, "@")
+    { Result.ok(row) }
+  else
+    { Result.err(f"invalid email: {row.email}") }
+}
+```
+
+## Intersection Types in Return Position
+
+When a function returns a record extended with additional fields, use the intersection type `R & { field: Type }` in the return type position:
+
+```fav
+fn add_timestamp<R with { id: Int }>(row: R) -> R & { timestamp: String } {
+  { ...row, timestamp: DateTime.format_iso(DateTime.now()) }
+}
+```
+
+The `&` operator combines two types:
+- `R` — the original record type
+- `{ timestamp: String }` — the additional field
+
+Note: The spread syntax `{ ...row, field: value }` is for **values**; `&` is for **types**.
+
+## Pipeline Usage
+
+Row polymorphism integrates with pipeline stages:
+
+```fav
+stage Enrich<R with { id: Int, created_at: String }>(
+  rows: List<R>
+) -> List<R & { age_days: Int }> {
+  Result.ok(List.map(rows, |row| {
+    bind age <- DateTime.diff_days(DateTime.parse(row.created_at), DateTime.now())
+    { ...row, age_days: age }
+  }))
+}
+```
+
+## Error: E0337 Row Constraint Violated
+
+If you pass a record that does not have the required field, the type checker emits **E0337**:
+
+```fav
+type NoId = { name: String }
+
+fn get_id<R with { id: Int }>(row: R) -> Int {
+  row.id
+}
+
+fn main() -> Int {
+  get_id(NoId { name: "Alice" })
+  // E0337: row constraint violated: type `NoId` does not have field `id`
+}
+```
+
+## Relationship to Interface Bounds
+
+Row polymorphism (`with { field: Type }`) and interface bounds (`with Ord`) can coexist on the same type parameter:
+
+```fav
+fn process<R with { id: Int } with Ord>(row: R) -> Int {
+  row.id
+}
+```
+
+| Syntax | Meaning |
+|---|---|
+| `with Ord` | `R` must implement the `Ord` interface |
+| `with { id: Int }` | `R` must have a field `id: Int` |

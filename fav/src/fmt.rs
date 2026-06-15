@@ -724,6 +724,16 @@ impl Formatter {
                     fmt_effects(effects),
                 )
             }
+            TypeExpr::Intersection(lhs, rhs, _) => {
+                format!("{} & {}", self.type_expr(lhs), self.type_expr(rhs))
+            }
+            TypeExpr::RecordType(fields, _) => {
+                let parts: Vec<String> = fields
+                    .iter()
+                    .map(|(n, t)| format!("{}: {}", n, self.type_expr(t)))
+                    .collect();
+                format!("{{ {} }}", parts.join(", "))
+            }
         }
     }
 }
@@ -739,6 +749,32 @@ fn fmt_visibility(vis: Option<&Visibility>) -> &'static str {
     }
 }
 
+fn fmt_type_expr_simple(ty: &TypeExpr) -> String {
+    use crate::ast::TypeExpr;
+    match ty {
+        TypeExpr::Named(name, args, _) if args.is_empty() => name.clone(),
+        TypeExpr::Named(name, args, _) => {
+            let as_: Vec<String> = args.iter().map(fmt_type_expr_simple).collect();
+            format!("{}<{}>", name, as_.join(", "))
+        }
+        TypeExpr::Optional(inner, _) => format!("{}?", fmt_type_expr_simple(inner)),
+        TypeExpr::Fallible(inner, _) => format!("{}!", fmt_type_expr_simple(inner)),
+        TypeExpr::Arrow(from, to, _) => {
+            format!("{} -> {}", fmt_type_expr_simple(from), fmt_type_expr_simple(to))
+        }
+        TypeExpr::Intersection(lhs, rhs, _) => {
+            format!("{} & {}", fmt_type_expr_simple(lhs), fmt_type_expr_simple(rhs))
+        }
+        TypeExpr::RecordType(fields, _) => {
+            let parts: Vec<String> = fields.iter().map(|(n, t)| format!("{}: {}", n, fmt_type_expr_simple(t))).collect();
+            format!("{{ {} }}", parts.join(", "))
+        }
+        TypeExpr::TrfFn { input, output, .. } => {
+            format!("{} -> {}", fmt_type_expr_simple(input), fmt_type_expr_simple(output))
+        }
+    }
+}
+
 fn fmt_type_params(params: &[crate::ast::GenericParam]) -> String {
     if params.is_empty() {
         String::new()
@@ -749,7 +785,14 @@ fn fmt_type_params(params: &[crate::ast::GenericParam]) -> String {
                 if p.bounds.is_empty() {
                     p.name.clone()
                 } else {
-                    format!("{} {}", p.name, p.bounds.iter().map(|b| format!("with {}", b)).collect::<Vec<_>>().join(" "))
+                    use crate::ast::TypeConstraint;
+                    let bounds_str: Vec<String> = p.bounds.iter().map(|b| match b {
+                        TypeConstraint::Interface(name) => format!("with {}", name),
+                        TypeConstraint::HasField { name, ty } => {
+                            format!("with {{ {}: {} }}", name, fmt_type_expr_simple(ty))
+                        }
+                    }).collect();
+                    format!("{} {}", p.name, bounds_str.join(" "))
                 }
             })
             .collect();

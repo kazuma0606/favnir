@@ -893,13 +893,33 @@ impl Parser {
         Ok(params)
     }
 
-    /// Parse zero or more `with InterfaceName` bounds after a type parameter name.
-    fn parse_type_bounds(&mut self) -> Result<Vec<String>, ParseError> {
+    /// Parse zero or more `with InterfaceName` or `with { field: Type, ... }` bounds.
+    fn parse_type_bounds(&mut self) -> Result<Vec<crate::ast::TypeConstraint>, ParseError> {
+        use crate::ast::TypeConstraint;
         let mut bounds = vec![];
         while self.peek() == &TokenKind::With || self.peek_ident_text("with") {
             self.advance(); // consume `with`
-            let (bound_name, _) = self.expect_ident()?;
-            bounds.push(bound_name);
+            if self.peek() == &TokenKind::LBrace {
+                // Record field constraint: `with { field: Type, ... }`
+                self.advance(); // consume `{`
+                loop {
+                    let (name, _) = self.expect_ident()?;
+                    self.expect(&TokenKind::Colon)?;
+                    let ty = self.parse_type_expr()?;
+                    bounds.push(TypeConstraint::HasField { name, ty });
+                    if self.peek() == &TokenKind::RBrace {
+                        break;
+                    }
+                    if self.peek() == &TokenKind::Comma {
+                        self.advance();
+                    }
+                }
+                self.expect(&TokenKind::RBrace)?;
+            } else {
+                // Interface bound: `with Ord`
+                let (bound_name, _) = self.expect_ident()?;
+                bounds.push(TypeConstraint::Interface(bound_name));
+            }
         }
         Ok(bounds)
     }
@@ -1078,6 +1098,14 @@ impl Parser {
             }
         }
 
+        // intersection type `T & U` (v18.2.0)
+        if self.peek() == &TokenKind::Amp {
+            self.advance(); // consume `&`
+            let rhs = self.parse_base_type()?;
+            let span = self.span_from(&start);
+            ty = TypeExpr::Intersection(Box::new(ty), Box::new(rhs), span);
+        }
+
         // arrow ->  (only when allowed)
         if allow_arrow && self.peek() == &TokenKind::Arrow {
             self.advance();
@@ -1102,6 +1130,23 @@ impl Parser {
 
     fn parse_base_type(&mut self) -> Result<TypeExpr, ParseError> {
         let start = self.peek_span().clone();
+        // Inline record type: `{ field: Type, ... }` (v18.2.0)
+        if self.peek() == &TokenKind::LBrace {
+            self.advance(); // consume `{`
+            let mut fields = vec![];
+            while self.peek() != &TokenKind::RBrace {
+                let (field_name, _) = self.expect_ident()?;
+                self.expect(&TokenKind::Colon)?;
+                let field_ty = self.parse_type_expr()?;
+                fields.push((field_name, field_ty));
+                if self.peek() == &TokenKind::Comma {
+                    self.advance();
+                }
+            }
+            self.expect(&TokenKind::RBrace)?;
+            let span = self.span_from(&start);
+            return Ok(TypeExpr::RecordType(fields, span));
+        }
         let name = match self.peek().clone() {
             TokenKind::Ident(n) => {
                 self.advance();

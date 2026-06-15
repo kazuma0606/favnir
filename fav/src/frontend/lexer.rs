@@ -92,6 +92,7 @@ pub enum TokenKind {
     Bang,             // !
     Question,         // ?
     QuestionQuestion, // ??
+    Amp,              // &
     AmpAmp,           // &&
     Colon,            // :
     Comma,            // ,
@@ -325,7 +326,7 @@ impl Lexer {
                     self.advance();
                     TokenKind::AmpAmp
                 } else {
-                    return Err(LexError::new("unexpected `&`", self.span_here()));
+                    TokenKind::Amp
                 }
             }
             ':' => {
@@ -814,7 +815,7 @@ mod tests {
     // symbols
     #[test]
     fn test_symbols() {
-        let kinds = lex("<- |> | || -> ! ? ?? && : , . # [ ] { } ( ) = _");
+        let kinds = lex("<- |> | || -> ! ? ?? & && : , . # [ ] { } ( ) = _");
         assert_eq!(
             kinds,
             vec![
@@ -826,6 +827,7 @@ mod tests {
                 TokenKind::Bang,
                 TokenKind::Question,
                 TokenKind::QuestionQuestion,
+                TokenKind::Amp,
                 TokenKind::AmpAmp,
                 TokenKind::Colon,
                 TokenKind::Comma,

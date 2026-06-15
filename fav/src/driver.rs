@@ -1429,6 +1429,7 @@ fn graphql_type_from_type_expr_nonnull(ty: &ast::TypeExpr) -> String {
         ast::TypeExpr::Optional(inner, _) | ast::TypeExpr::Fallible(inner, _) => {
             graphql_type_from_type_expr_nullable(inner)
         }
+        ast::TypeExpr::Intersection(_, _, _) | ast::TypeExpr::RecordType(_, _) => "String!".to_string(),
     }
 }
 
@@ -1584,6 +1585,7 @@ fn proto_type_from_type_expr_nonwrapper(ty: &ast::TypeExpr, needs_empty: &mut bo
             proto_scalar_name(name).to_string()
         }
         ast::TypeExpr::Arrow(_, _, _) | ast::TypeExpr::TrfFn { .. } => "string".to_string(),
+        ast::TypeExpr::Intersection(_, _, _) | ast::TypeExpr::RecordType(_, _) => "string".to_string(),
     }
 }
 
@@ -3238,7 +3240,7 @@ fn collect_binding_types(file: &str) -> Vec<BindingInfo> {
 
 // ── fav check ─────────────────────────────────────────────────────────────────
 
-pub fn cmd_check(file: Option<&str>, no_warn: bool, legacy_check: bool, json: bool, show_types: bool, strict: bool, ambient: bool, report: bool) {
+pub fn cmd_check(file: Option<&str>, no_warn: bool, legacy_check: bool, json: bool, show_types: bool, strict: bool, ambient: bool, report: bool, show_effects: bool) {
     load_checkpoint_config_for_file(file);
     if let Some(path) = file {
         // Single-file mode
@@ -3280,8 +3282,30 @@ pub fn cmd_check(file: Option<&str>, no_warn: bool, legacy_check: bool, json: bo
             }
         }
 
+        if show_effects {
+            // --show-effects: display inferred effects per fn (v18.1.0)
+            let prog_src = load_file(path);
+            if let Ok(program) = Parser::parse_str(&prog_src, path) {
+                let effects_map = crate::middle::checker::infer_effects_for_program(&program);
+                let mut entries: Vec<_> = effects_map.iter().collect();
+                entries.sort_by_key(|(k, _)| k.as_str());
+                for (fn_name, effect_set) in &entries {
+                    let mut effect_strs: Vec<String> = effect_set.iter()
+                        .map(|e| format!("!{:?}", e))
+                        .collect();
+                    effect_strs.sort();
+                    let effects_display = if effect_strs.is_empty() {
+                        "(none)".to_string()
+                    } else {
+                        effect_strs.join(" ")
+                    };
+                    println!("fn {:<30} inferred: {}", fn_name, effects_display);
+                }
+            }
+        }
+
         if errors.is_empty() {
-            if !show_types {
+            if !show_types && !show_effects {
                 println!("{}: no errors found", path);
             }
         } else {
@@ -3523,6 +3547,8 @@ fn try_cmd_check_dir(dir: &Path) -> Result<(), usize> {
         azure: None,
         gcp: None,
         kafka: None,
+        dev_dependencies: vec![],
+        registry_url: None,
     });
     let files = collect_fav_files_recursive(dir);
     let resolver = make_resolver(Some(toml), Some(root));
@@ -12115,6 +12141,13 @@ fn favnir_type_display(ty: &ast::TypeExpr) -> String {
                 effs
             )
         }
+        ast::TypeExpr::Intersection(lhs, rhs, _) => {
+            format!("{} & {}", favnir_type_display(lhs), favnir_type_display(rhs))
+        }
+        ast::TypeExpr::RecordType(fields, _) => {
+            let parts: Vec<String> = fields.iter().map(|(n, t)| format!("{}: {}", n, favnir_type_display(t))).collect();
+            format!("{{ {} }}", parts.join(", "))
+        }
     }
 }
 
@@ -12131,6 +12164,7 @@ fn favnir_type_to_sql_from_expr(ty: &ast::TypeExpr) -> &'static str {
         ast::TypeExpr::Fallible(inner, _) => favnir_type_to_sql_from_expr(inner),
         ast::TypeExpr::Arrow(_, _, _) => "TEXT",
         ast::TypeExpr::TrfFn { .. } => "TEXT",
+        ast::TypeExpr::Intersection(_, _, _) | ast::TypeExpr::RecordType(_, _) => "TEXT",
     }
 }
 
@@ -12187,6 +12221,11 @@ fn format_type_expr(te: &ast::TypeExpr) -> String {
                 format_type_expr(output),
                 effs
             )
+        }
+        Intersection(lhs, rhs, _) => format!("{} & {}", format_type_expr(lhs), format_type_expr(rhs)),
+        RecordType(fields, _) => {
+            let parts: Vec<String> = fields.iter().map(|(n, t)| format!("{}: {}", n, format_type_expr(t))).collect();
+            format!("{{ {} }}", parts.join(", "))
         }
     }
 }
@@ -12363,6 +12402,8 @@ pub fn cmd_install(pkg_name_arg: Option<&str>, force: bool) {
                     name: name.clone(),
                     version: String::new(),
                     resolved_path: resolved_str,
+                    checksum: None,
+                    source: None,
                 });
                 installed += 1;
             }
@@ -12385,6 +12426,8 @@ pub fn cmd_install(pkg_name_arg: Option<&str>, force: bool) {
                     name: name.clone(),
                     version: version.clone(),
                     resolved_path: resolved_str,
+                    checksum: None,
+                    source: None,
                 });
                 installed += 1;
             }
@@ -12494,6 +12537,206 @@ pub fn cmd_publish(
         "[publish] Done — {}@{} published to local registry",
         pkg_name, pkg_version
     );
+}
+
+// ── v17.8.0: fav add / update / remove / login ────────────────────────────────
+
+/// Internal implementation of `fav add` — takes an explicit project root for testability.
+pub fn cmd_add_impl(
+    project_root: &std::path::Path,
+    pkg_arg: &str,
+    dev: bool,
+) -> Result<(), String> {
+    use crate::registry::client::RegistryClient;
+    use crate::registry::resolver::{parse_semver, parse_version_req, resolve_best};
+    use crate::toml::fav_toml_add_dep;
+    use crate::lock::{LockFile, LockedPackage};
+
+    // Split `name@version` or just `name`
+    let (pkg_name, version_hint) = if let Some((n, v)) = pkg_arg.split_once('@') {
+        (n, Some(v.to_string()))
+    } else {
+        (pkg_arg, None)
+    };
+
+    // Resolve the version from the registry
+    let client = RegistryClient::default_client();
+    let info = client.fetch_package(pkg_name)?;
+
+    let resolved_version = if let Some(hint) = &version_hint {
+        // Use the hint directly (strip leading `^` etc. for exact lookup)
+        let base = hint.trim_start_matches('^').trim_start_matches('~').trim_start_matches('=');
+        if info.versions.contains(&base.to_string()) {
+            base.to_string()
+        } else {
+            // Try semver resolution
+            let req = parse_version_req(hint).ok_or_else(|| format!("invalid version: {}", hint))?;
+            let available: Vec<_> = info.versions.iter().filter_map(|v| parse_semver(v)).collect();
+            resolve_best(&req, &available)
+                .map(|v| format!("{}.{}.{}", v.major, v.minor, v.patch))
+                .ok_or_else(|| format!("E0329: no version matching {} for {}", hint, pkg_name))?
+        }
+    } else {
+        info.latest.clone()
+    };
+
+    let version_req = format!("^{}", resolved_version);
+    let toml_path = project_root.join("fav.toml");
+    fav_toml_add_dep(&toml_path, pkg_name, &version_req, dev)?;
+
+    // Update fav.lock
+    let mut lock = LockFile::load(project_root);
+    // Remove any existing entry for this package
+    lock.packages.retain(|p| p.name != pkg_name);
+    lock.packages.push(LockedPackage {
+        name: pkg_name.to_string(),
+        version: resolved_version.clone(),
+        resolved_path: format!("registry:{}", client.base_url),
+        checksum: None,
+        source: Some(format!("registry:{}", client.base_url)),
+    });
+    lock.save(project_root).map_err(|e| e.to_string())?;
+
+    let section = if dev { "[dev-dependencies]" } else { "[dependencies]" };
+    println!("[add] {} {} = \"{}\" added to {}", pkg_name, resolved_version, version_req, section);
+    Ok(())
+}
+
+/// `fav add [--dev] <name[@version]>`
+pub fn cmd_add(pkg_arg: &str, dev: bool) {
+    let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let root = crate::toml::FavToml::find_root(&cwd).unwrap_or(cwd);
+    if let Err(e) = cmd_add_impl(&root, pkg_arg, dev) {
+        eprintln!("error: {}", e);
+        std::process::exit(1);
+    }
+}
+
+/// `fav update [<name>]`
+pub fn cmd_update(pkg_name: Option<&str>) {
+    use crate::registry::client::RegistryClient;
+    use crate::registry::resolver::{parse_semver, parse_version_req, resolve_best};
+    use crate::toml::{DependencySpec, FavToml};
+    use crate::lock::{LockFile, LockedPackage};
+
+    let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let root = FavToml::find_root(&cwd).unwrap_or_else(|| {
+        eprintln!("error: no fav.toml found");
+        std::process::exit(1);
+    });
+    let toml = FavToml::load(&root).unwrap_or_else(|| {
+        eprintln!("error: could not read fav.toml");
+        std::process::exit(1);
+    });
+
+    let client = RegistryClient::default_client();
+    let mut lock = LockFile::load(&root);
+    let mut updated = 0usize;
+
+    let all_deps: Vec<&DependencySpec> = toml
+        .dependencies
+        .iter()
+        .chain(toml.dev_dependencies.iter())
+        .collect();
+
+    for dep in all_deps {
+        if let Some(target) = pkg_name {
+            if dep.name() != target {
+                continue;
+            }
+        }
+        if let DependencySpec::Semver { name, version } = dep {
+            let req = match parse_version_req(version) {
+                Some(r) => r,
+                None => continue,
+            };
+            match client.fetch_package(name) {
+                Ok(info) => {
+                    let available: Vec<_> = info.versions.iter().filter_map(|v| parse_semver(v)).collect();
+                    if let Some(best) = resolve_best(&req, &available) {
+                        let best_str = format!("{}.{}.{}", best.major, best.minor, best.patch);
+                        lock.packages.retain(|p| p.name != name.as_str());
+                        lock.packages.push(LockedPackage {
+                            name: name.clone(),
+                            version: best_str.clone(),
+                            resolved_path: format!("registry:{}", client.base_url),
+                            checksum: None,
+                            source: Some(format!("registry:{}", client.base_url)),
+                        });
+                        println!("[update] {} → {}", name, best_str);
+                        updated += 1;
+                    }
+                }
+                Err(e) => eprintln!("[update] warning: could not fetch {}: {}", name, e),
+            }
+        }
+    }
+
+    if let Err(e) = lock.save(&root) {
+        eprintln!("error: could not write fav.lock: {}", e);
+        std::process::exit(1);
+    }
+    println!("[update] Done — {} package(s) updated", updated);
+}
+
+/// `fav remove <name>`
+pub fn cmd_remove(pkg_name: &str) {
+    use crate::toml::{FavToml, fav_toml_add_dep};
+    use crate::lock::LockFile;
+
+    let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let root = FavToml::find_root(&cwd).unwrap_or_else(|| {
+        eprintln!("error: no fav.toml found");
+        std::process::exit(1);
+    });
+
+    // Update fav.toml — remove the dep line by rewriting the file
+    let toml_path = root.join("fav.toml");
+    match std::fs::read_to_string(&toml_path) {
+        Ok(content) => {
+            let new_content: Vec<&str> = content
+                .lines()
+                .filter(|line| {
+                    let trimmed = line.trim();
+                    // Remove lines that start with the package name followed by ' =' or '='
+                    let starts = trimmed.starts_with(pkg_name);
+                    if !starts {
+                        return true;
+                    }
+                    let rest = trimmed[pkg_name.len()..].trim_start();
+                    !rest.starts_with('=')
+                })
+                .collect();
+            let _ = std::fs::write(&toml_path, new_content.join("\n") + "\n");
+        }
+        Err(e) => {
+            eprintln!("error: could not read fav.toml: {}", e);
+            std::process::exit(1);
+        }
+    }
+
+    // Update fav.lock
+    let mut lock = LockFile::load(&root);
+    lock.packages.retain(|p| p.name != pkg_name);
+    if let Err(e) = lock.save(&root) {
+        eprintln!("error: could not write fav.lock: {}", e);
+        std::process::exit(1);
+    }
+
+    println!("[remove] {} removed from dependencies", pkg_name);
+    let _ = fav_toml_add_dep; // suppress unused import warning
+}
+
+/// `fav login` — store an auth token for registry access (stub in v17.8.0).
+pub fn cmd_login() {
+    use crate::registry::client::save_credentials_token;
+    // In v17.8.0 this is a stub: write a placeholder token to ~/.fav/credentials.
+    // A real implementation would open a browser for OAuth flow.
+    let token = std::env::var("FAV_TOKEN").unwrap_or_else(|_| "demo-token".to_string());
+    match save_credentials_token(&token) {
+        Ok(()) => println!("[login] Credentials saved to ~/.fav/credentials"),
+        Err(e) => eprintln!("error: {}", e),
+    }
 }
 
 /// `fav registry [list|search <q>|info <name>]`
@@ -22173,7 +22416,8 @@ mod v10300_tests {
 
     #[test]
     fn snowflake_execute_requires_effect() {
-        // !Snowflake 未宣言で Snowflake.execute_raw を呼ぶと E0314
+        // v18.1.0: effect inference automatically infers !Snowflake,
+        // so omitting the declaration no longer causes E0314.
         let src = r#"
 fn run(sql: String) -> Result<String, String> {
   Snowflake.execute_raw(sql)
@@ -22182,7 +22426,7 @@ fn run(sql: String) -> Result<String, String> {
         let prog = Parser::parse_str(src, "test.fav").expect("parse");
         let (errors, _) = Checker::check_program(&prog);
         let has_e0314 = errors.iter().any(|e| e.code == "E0314");
-        assert!(has_e0314, "expected E0314 for missing !Snowflake: {:?}", errors);
+        assert!(!has_e0314, "v18.1.0: E0314 should not occur when effect is inferred, got: {:?}", errors);
     }
 
     #[test]
@@ -22661,7 +22905,8 @@ mod v11500_tests {
 
     #[test]
     fn postgres_execute_requires_effect() {
-        // !Postgres 未宣言で Postgres.query_raw を呼ぶと E0315
+        // v18.1.0: effect inference automatically infers !Postgres,
+        // so omitting the declaration no longer causes E0315.
         let src = r#"
 fn run(sql: String) -> Result<String, String> {
   Postgres.query_raw(sql, "[]")
@@ -22670,7 +22915,7 @@ fn run(sql: String) -> Result<String, String> {
         let prog = Parser::parse_str(src, "test.fav").expect("parse");
         let (errors, _) = Checker::check_program(&prog);
         let has_e0315 = errors.iter().any(|e| e.code == "E0315");
-        assert!(has_e0315, "expected E0315 for missing !Postgres: {:?}", errors);
+        assert!(!has_e0315, "v18.1.0: E0315 should not occur when effect is inferred, got: {:?}", errors);
     }
 
     #[test]
@@ -26393,7 +26638,8 @@ public fn main(ctx: AppCtx) -> Unit !AzureStorage {
 
     #[test]
     fn azure_storage_effect_required() {
-        // !AzureStorage なしで AzureBlob.put_raw を呼ぶと E0317 が出ることを確認
+        // v18.1.0: effect inference automatically infers !AzureStorage from AzureBlob.*,
+        // so omitting !AzureStorage no longer causes E0317.
         let src = r#"
 public fn main(ctx: AppCtx) -> Unit {
     bind _ <- AzureBlob.put_raw("myaccount", "base64key==", "mycontainer", "proof/migrate.json", "{}")
@@ -26405,8 +26651,8 @@ public fn main(ctx: AppCtx) -> Unit {
         let e0317: Vec<_> = errors.iter()
             .filter(|e| e.code == "E0317")
             .collect();
-        assert!(!e0317.is_empty(),
-            "AzureBlob.put_raw without !AzureStorage should produce E0317");
+        assert!(e0317.is_empty(),
+            "v18.1.0: E0317 should not occur when !AzureStorage is inferred, got: {:?}", e0317);
     }
 
     #[test]
@@ -27938,12 +28184,6 @@ mod v177000_tests {
     }
 
     #[test]
-    fn version_is_17_7_0() {
-        let cargo = include_str!("../Cargo.toml");
-        assert!(cargo.contains("\"17.7.0\""), "Cargo.toml should have version 17.7.0");
-    }
-
-    #[test]
     fn forall_int_parses() {
         let src = r#"
 test "forall int parses" {
@@ -28007,5 +28247,304 @@ test "nonzero abs positive" {
 "#;
         let result = run_test_fn(src, "nonzero abs positive");
         assert!(result.is_ok(), "forall with guard should pass: {:?}", result);
+    }
+}
+
+// ── v178000_tests (v17.8.0) — パッケージシステム成熟 ────────────────────────────
+#[cfg(test)]
+mod v178000_tests {
+    use super::*;
+    use crate::lock::{LockFile, LockedPackage};
+    use crate::registry::resolver::{parse_semver, parse_version_req, resolve_best};
+
+    #[test]
+    fn fav_toml_dependencies_parse() {
+        let src = r#"
+[rune]
+name = "my-pipeline"
+version = "1.0.0"
+
+[dependencies]
+csv = "^2.0.0"
+bigquery = "^1.0.0"
+
+[dev-dependencies]
+test-fixtures = "^1.0.0"
+
+[registry]
+url = "https://registry.favnir.dev"
+"#;
+        let toml = crate::toml::parse_fav_toml_pub(src);
+        assert!(
+            toml.dependencies.iter().any(|d| d.name() == "csv"),
+            "csv should be in dependencies"
+        );
+        assert!(
+            toml.dependencies.iter().any(|d| d.name() == "bigquery"),
+            "bigquery should be in dependencies"
+        );
+        assert!(
+            toml.dev_dependencies.iter().any(|d| d.name() == "test-fixtures"),
+            "test-fixtures should be in dev_dependencies"
+        );
+        assert_eq!(
+            toml.registry_url.as_deref(),
+            Some("https://registry.favnir.dev")
+        );
+    }
+
+    #[test]
+    fn fav_lock_generates() {
+        let mut lock = LockFile::default();
+        lock.packages.push(LockedPackage {
+            name: "csv".to_string(),
+            version: "2.1.0".to_string(),
+            resolved_path: "registry:https://registry.favnir.dev".to_string(),
+            checksum: Some("sha256:abc123".to_string()),
+            source: Some("registry:https://registry.favnir.dev".to_string()),
+        });
+        let toml_str = lock.to_toml();
+        assert!(toml_str.contains("checksum"), "lock should contain checksum field");
+        assert!(toml_str.contains("source"), "lock should contain source field");
+        assert!(toml_str.contains("csv"), "lock should contain package name");
+        assert!(toml_str.contains("sha256:abc123"), "lock should contain checksum value");
+    }
+
+    #[test]
+    fn semver_caret_resolve() {
+        let req = parse_version_req("^2.0.0").expect("parse req");
+        let available = vec![
+            parse_semver("1.9.9").unwrap(),
+            parse_semver("2.0.0").unwrap(),
+            parse_semver("2.1.0").unwrap(),
+            parse_semver("3.0.0").unwrap(),
+        ];
+        let best = resolve_best(&req, &available).expect("should resolve");
+        assert_eq!(best.major, 2);
+        assert_eq!(best.minor, 1);
+        assert_eq!(best.patch, 0);
+    }
+
+    #[test]
+    fn cmd_add_updates_toml() {
+        use std::fs;
+        use tempfile::tempdir;
+
+        let dir = tempdir().unwrap();
+        let toml_path = dir.path().join("fav.toml");
+        fs::write(
+            &toml_path,
+            "[rune]\nname = \"test\"\nversion = \"1.0.0\"\n",
+        )
+        .unwrap();
+
+        unsafe { std::env::set_var("REGISTRY_MOCK", "1") };
+        let result = cmd_add_impl(dir.path(), "csv", false);
+        unsafe { std::env::remove_var("REGISTRY_MOCK") };
+
+        assert!(result.is_ok(), "cmd_add_impl should succeed: {:?}", result);
+        let contents = fs::read_to_string(&toml_path).unwrap();
+        assert!(
+            contents.contains("csv"),
+            "fav.toml should contain csv after add, got:\n{}",
+            contents
+        );
+    }
+}
+
+// ── v180000_tests (v18.0.0) — Language Power マイルストーン ─────────────────
+#[cfg(test)]
+mod v180000_tests {
+    #[test]
+    fn changelog_has_v17_entries() {
+        let changelog = include_str!("../../CHANGELOG.md");
+        assert!(changelog.contains("v17."), "CHANGELOG.md should contain v17.x entries");
+    }
+
+    #[test]
+    fn readme_mentions_bounded_generics() {
+        let readme = include_str!("../../README.md");
+        assert!(
+            readme.to_lowercase().contains("bounded generics"),
+            "README.md should mention bounded generics"
+        );
+    }
+
+    #[test]
+    fn readme_mentions_package_system() {
+        let readme = include_str!("../../README.md");
+        assert!(
+            readme.contains("fav add") || readme.to_lowercase().contains("package system"),
+            "README.md should mention the package system"
+        );
+    }
+
+    #[test]
+    fn docs_generics_exists() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .join("site/content/docs/language/generics.mdx");
+        assert!(path.exists(), "site/content/docs/language/generics.mdx should exist");
+    }
+}
+
+// ── v181000_tests (v18.1.0) — エフェクト推論 ────────────────────────────────
+#[cfg(test)]
+mod v181000_tests {
+    use crate::ast::{Effect, Item};
+    use crate::middle::checker::{infer_effects_fn, infer_effects_for_program, EffectSet};
+    use crate::frontend::parser::Parser;
+
+    fn get_effects_direct(src: &str, fn_name: &str) -> EffectSet {
+        let prog = Parser::parse_str(src, "test.fav").expect("parse failed");
+        let fn_def = prog.items.iter()
+            .filter_map(|item| if let Item::FnDef(f) = item { Some(f) } else { None })
+            .find(|f| f.name == fn_name)
+            .unwrap_or_else(|| panic!("fn {} not found", fn_name));
+        let (effects, _) = infer_effects_fn(fn_def);
+        effects
+    }
+
+    fn get_effects_transitive(src: &str, fn_name: &str) -> EffectSet {
+        let prog = Parser::parse_str(src, "test.fav").expect("parse failed");
+        let all = infer_effects_for_program(&prog);
+        all.get(fn_name).cloned().unwrap_or_default()
+    }
+
+    #[test]
+    fn effect_inference_db() {
+        let src = r#"
+fn load() -> Result<Int, String> {
+  bind rows <- Postgres.query_raw("SELECT 1", List.empty())
+  Result.ok(0)
+}
+"#;
+        let effects = get_effects_direct(src, "load");
+        assert!(
+            effects.contains(&Effect::Postgres),
+            "!Postgres should be inferred from Postgres.query_raw, got: {:?}", effects
+        );
+    }
+
+    #[test]
+    fn effect_inference_multi() {
+        let src = r#"
+fn load_and_log() -> Result<Int, String> {
+  bind rows <- Postgres.query_raw("SELECT 1", List.empty())
+  bind _ <- IO.println("done")
+  Result.ok(0)
+}
+"#;
+        let effects = get_effects_direct(src, "load_and_log");
+        assert!(effects.contains(&Effect::Postgres), "!Postgres should be inferred, got: {:?}", effects);
+        assert!(effects.contains(&Effect::Io), "!Io should be inferred, got: {:?}", effects);
+    }
+
+    #[test]
+    fn effect_inference_pure() {
+        let src = r#"
+fn add(a: Int, b: Int) -> Int {
+  a + b
+}
+"#;
+        let effects = get_effects_direct(src, "add");
+        assert!(effects.is_empty(), "pure fn should have no inferred effects, got: {:?}", effects);
+    }
+
+    #[test]
+    fn effect_inference_transitive() {
+        let src = r#"
+fn fetch() -> Result<Int, String> {
+  bind rows <- Postgres.query_raw("SELECT 1", List.empty())
+  Result.ok(0)
+}
+fn wrap() -> Result<Int, String> {
+  fetch()
+}
+"#;
+        let effects = get_effects_transitive(src, "wrap");
+        assert!(
+            effects.contains(&Effect::Postgres),
+            "transitive !Postgres should be inferred for wrap(), got: {:?}", effects
+        );
+    }
+}
+
+// ── v182000_tests (v18.2.0) — 行多相 ────────────────────────────────────────
+#[cfg(test)]
+mod v182000_tests {
+    use crate::frontend::parser::Parser;
+    use crate::middle::checker::Checker;
+
+    #[test]
+    fn version_is_18_2_0() {
+        let cargo = include_str!("../Cargo.toml");
+        assert!(cargo.contains("\"18.2.0\""), "Cargo.toml should have version 18.2.0");
+    }
+
+    #[test]
+    fn row_poly_single_field() {
+        let src = r#"
+fn get_id<R with { id: Int }>(row: R) -> Int {
+  row.id
+}
+"#;
+        let prog = Parser::parse_str(src, "test.fav").expect("parse");
+        let (errors, _) = Checker::check_program(&prog);
+        assert!(errors.is_empty(), "row_poly_single_field should pass: {:?}", errors);
+    }
+
+    #[test]
+    fn row_poly_different_records() {
+        let src = r#"
+type UserRow = {
+  id: Int
+  name: String
+}
+type OrderRow = {
+  id: Int
+  amount: Float
+}
+fn get_id<R with { id: Int }>(row: R) -> Int {
+  row.id
+}
+fn main() -> Int {
+  bind a <- get_id(UserRow { id: 1, name: "Alice" })
+  bind b <- get_id(OrderRow { id: 2, amount: 99.0 })
+  a + b
+}
+"#;
+        let prog = Parser::parse_str(src, "test.fav").expect("parse");
+        let (errors, _) = Checker::check_program(&prog);
+        assert!(errors.is_empty(), "row_poly_different_records should pass: {:?}", errors);
+    }
+
+    #[test]
+    fn row_poly_intersection_return() {
+        let src = r#"
+fn add_ts<R with { id: Int }>(row: R) -> R & { ts: String } {
+  row
+}
+"#;
+        let prog = Parser::parse_str(src, "test.fav").expect("parse");
+        assert!(!prog.items.is_empty(), "program should parse");
+    }
+
+    #[test]
+    fn row_poly_field_missing() {
+        let src = r#"
+type NoId = { name: String }
+fn get_id<R with { id: Int }>(row: R) -> Int {
+  row.id
+}
+fn main() -> Int {
+  get_id(NoId { name: "no id field" })
+}
+"#;
+        let prog = Parser::parse_str(src, "test.fav").expect("parse");
+        let (errors, _) = Checker::check_program(&prog);
+        let has_e0337 = errors.iter().any(|e| e.code == "E0337");
+        assert!(has_e0337, "expected E0337 for missing field, got: {:?}", errors);
     }
 }

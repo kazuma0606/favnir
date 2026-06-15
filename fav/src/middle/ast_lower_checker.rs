@@ -138,6 +138,8 @@ pub fn lower_te(te: &ast::TypeExpr) -> Value {
         }
         ast::TypeExpr::Arrow(a, b, _) => v2("TeFn", lower_te(a), lower_te(b)),
         ast::TypeExpr::TrfFn { input, output, .. } => v2("TeFn", lower_te(input), lower_te(output)),
+        ast::TypeExpr::Intersection(lhs, rhs, _) => v2("TeIntersection", lower_te(lhs), lower_te(rhs)),
+        ast::TypeExpr::RecordType(_, _) => v1("TeSimple", sv("Any")),
     }
 }
 
@@ -162,6 +164,10 @@ fn te_to_string(te: &ast::TypeExpr) -> String {
         ast::TypeExpr::TrfFn { input, output, .. } => {
             format!("{} -> {}", te_to_string(input), te_to_string(output))
         }
+        ast::TypeExpr::Intersection(lhs, rhs, _) => {
+            format!("{} & {}", te_to_string(lhs), te_to_string(rhs))
+        }
+        ast::TypeExpr::RecordType(_, _) => "Any".to_string(),
     }
 }
 

@@ -5,16 +5,27 @@
 
 use crate::frontend::lexer::Span;
 
+// ── TypeConstraint (v18.2.0) ──────────────────────────────────────────────────
+
+/// A bound/constraint on a generic type parameter.
+#[derive(Debug, Clone, PartialEq)]
+pub enum TypeConstraint {
+    /// `with Ord` — interface bound (v17.1.0, existing)
+    Interface(String),
+    /// `with { id: Int, email: String }` — record field constraints (v18.2.0)
+    HasField { name: String, ty: TypeExpr },
+}
+
 // ── GenericParam (v17.1.0) ────────────────────────────────────────────────────
 
 /// A generic type parameter with optional bounds.
 /// `<T>` → `GenericParam { name: "T", bounds: [] }`
-/// `<T with Ord>` → `GenericParam { name: "T", bounds: ["Ord"] }`
-/// `<T with Ord with Serialize>` → `GenericParam { name: "T", bounds: ["Ord", "Serialize"] }`
+/// `<T with Ord>` → `GenericParam { name: "T", bounds: [Interface("Ord")] }`
+/// `<R with { id: Int }>` → `GenericParam { name: "R", bounds: [HasField { name: "id", ty: Int }] }`
 #[derive(Debug, Clone, PartialEq)]
 pub struct GenericParam {
     pub name: String,
-    pub bounds: Vec<String>,
+    pub bounds: Vec<TypeConstraint>,
 }
 
 impl GenericParam {
@@ -39,7 +50,7 @@ pub enum Visibility {
 
 // ── Effect (2-12) ─────────────────────────────────────────────────────────────
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Effect {
     Pure,
     Io,
@@ -75,7 +86,7 @@ pub enum Effect {
 /// Optional(Named("User", [], ..), ..)         ↁE User?
 /// Fallible(Named("User", [], ..), ..)         ↁE User!
 /// Arrow(A, B, ..)                             ↁE A -> B
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum TypeExpr {
     Named(String, Vec<TypeExpr>, Span),
     Optional(Box<TypeExpr>, Span),
@@ -87,6 +98,10 @@ pub enum TypeExpr {
         effects: Vec<Effect>,
         span: Span,
     },
+    /// `R & { field: Type }` — intersection type (v18.2.0)
+    Intersection(Box<TypeExpr>, Box<TypeExpr>, Span),
+    /// `{ field: Type, ... }` — inline anonymous record type (v18.2.0)
+    RecordType(Vec<(String, TypeExpr)>, Span),
 }
 
 impl TypeExpr {
@@ -97,6 +112,8 @@ impl TypeExpr {
             TypeExpr::Fallible(_, s) => s,
             TypeExpr::Arrow(_, _, s) => s,
             TypeExpr::TrfFn { span, .. } => span,
+            TypeExpr::Intersection(_, _, s) => s,
+            TypeExpr::RecordType(_, s) => s,
         }
     }
 }

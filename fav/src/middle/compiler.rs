@@ -23,10 +23,11 @@ use super::ir::{
     TypeMeta,
 };
 use crate::ast::{
-    AbstractFlwDef, AbstractTrfDef, BindStmt, Block, Expr, FStringPart, FlwBindingDef, FlwDef,
-    FlwSlot, FlwStep, ImplDef, InterfaceDecl, InterfaceImplDecl, Item, Lit, MatchArm, Pattern,
-    PatternField, Program, Stmt, TypeBody, TypeExpr,
+    AbstractFlwDef, AbstractTrfDef, BinOp, BindStmt, Block, CompClause, Expr, FStringPart,
+    FlwBindingDef, FlwDef, FlwSlot, FlwStep, ImplDef, InterfaceDecl, InterfaceImplDecl, Item,
+    Lit, MatchArm, Pattern, PatternField, Program, Stmt, TypeBody, TypeExpr,
 };
+use crate::frontend::lexer::Span;
 
 fn collect_abstract_flw_defs(program: &Program) -> HashMap<String, AbstractFlwDef> {
     let mut out = HashMap::new();
@@ -1661,6 +1662,21 @@ fn collect_free_vars_expr(expr: &Expr, bound: &mut HashSet<String>, free: &mut H
         }
         Expr::EmitExpr(inner, _) => collect_free_vars_expr(inner, bound, free),
         Expr::Question(inner, _) => collect_free_vars_expr(inner, bound, free),
+        Expr::ListComp { expr, clauses, .. } | Expr::ResultComp { expr, clauses, .. } => {
+            let mut comp_bound = bound.clone();
+            for clause in clauses {
+                match clause {
+                    CompClause::For { var, src, .. } => {
+                        collect_free_vars_expr(src, &mut comp_bound, free);
+                        comp_bound.insert(var.clone());
+                    }
+                    CompClause::Guard(g) => {
+                        collect_free_vars_expr(g, &mut comp_bound, free);
+                    }
+                }
+            }
+            collect_free_vars_expr(expr, &mut comp_bound, free);
+        }
     }
 }
 
@@ -1953,7 +1969,107 @@ pub fn compile_expr(expr: &Expr, ctx: &mut CompileCtx) -> IRExpr {
         Expr::EmitExpr(inner, _) => IRExpr::Emit(Box::new(compile_expr(inner, ctx)), Type::Unit),
         // expr? — desugared by compiler.fav; not supported in Rust compiler path
         Expr::Question(inner, _) => compile_expr(inner, ctx),
+        // list comprehension — desugar to List.map/filter/flat_map (v17.3.0)
+        Expr::ListComp { expr, clauses, .. } => {
+            let desugared = desugar_list_comp(expr, clauses);
+            compile_expr(&desugared, ctx)
+        }
+        // result comprehension — desugar to List.collect_result (v17.3.0)
+        Expr::ResultComp { expr, clauses, .. } => {
+            let desugared = desugar_result_comp(expr, clauses);
+            compile_expr(&desugared, ctx)
+        }
     }
+}
+
+// ── List comprehension desugar helpers (v17.3.0) ────────────────────────────
+
+/// Build `List.method(src, |var| body)` as an Expr.
+fn list_method_2(method: &str, src: Expr, var: String, body: Expr) -> Expr {
+    let sp = Span::dummy();
+    let list_ns = Expr::Ident("List".to_string(), sp.clone());
+    let method_access = Expr::FieldAccess(Box::new(list_ns), method.to_string(), sp.clone());
+    let closure = Expr::Closure(vec![var], Box::new(body), sp.clone());
+    Expr::Apply(Box::new(method_access), vec![src, closure], sp)
+}
+
+/// Optionally wrap `src` with `List.filter(src, |var| combined_guard)`.
+fn apply_comp_guards(src: Expr, var: &str, guards: &[Expr]) -> Expr {
+    if guards.is_empty() {
+        return src;
+    }
+    let sp = Span::dummy();
+    let combined = guards.iter().skip(1).fold(guards[0].clone(), |acc, g| {
+        Expr::BinOp(BinOp::And, Box::new(acc), Box::new(g.clone()), sp.clone())
+    });
+    list_method_2("filter", src, var.to_string(), combined)
+}
+
+/// Desugar `[body | clauses]` → nested `List.map` / `List.filter` / `List.flat_map` calls.
+fn desugar_list_comp(body: &Expr, clauses: &[CompClause]) -> Expr {
+    // Group clauses into (var, src, guards) where guards follow each For clause
+    struct Group {
+        var: String,
+        src: Expr,
+        guards: Vec<Expr>,
+    }
+    let mut groups: Vec<Group> = Vec::new();
+    let mut i = 0;
+    while i < clauses.len() {
+        match &clauses[i] {
+            CompClause::For { var, src, .. } => {
+                groups.push(Group { var: var.clone(), src: *src.clone(), guards: Vec::new() });
+                i += 1;
+                while i < clauses.len() {
+                    if let CompClause::Guard(g) = &clauses[i] {
+                        groups.last_mut().unwrap().guards.push(*g.clone());
+                        i += 1;
+                    } else {
+                        break;
+                    }
+                }
+            }
+            CompClause::Guard(_) => { i += 1; } // leading guard — skip
+        }
+    }
+
+    if groups.is_empty() {
+        return body.clone();
+    }
+
+    let n = groups.len();
+
+    // Innermost group: List.map(filter(src, guards), |var| body)
+    let inner = &groups[n - 1];
+    let filtered = apply_comp_guards(inner.src.clone(), &inner.var, &inner.guards);
+    let mut result = list_method_2("map", filtered, inner.var.clone(), body.clone());
+
+    // Outer groups: List.flat_map(filter(src, guards), |var| result)
+    for g in groups[..n - 1].iter().rev() {
+        let filtered = apply_comp_guards(g.src.clone(), &g.var, &g.guards);
+        result = list_method_2("flat_map", filtered, g.var.clone(), result);
+    }
+
+    result
+}
+
+/// Desugar `[? f(x) | x <- xs, ...]` → `List.collect_result(xs, |x| f(x))`.
+fn desugar_result_comp(body: &Expr, clauses: &[CompClause]) -> Expr {
+    let sp = Span::dummy();
+    // Use the first For clause as the source
+    for clause in clauses {
+        if let CompClause::For { var, src, .. } = clause {
+            let list_ns = Expr::Ident("List".to_string(), sp.clone());
+            let collect_result = Expr::FieldAccess(
+                Box::new(list_ns),
+                "collect_result".to_string(),
+                sp.clone(),
+            );
+            let closure = Expr::Closure(vec![var.clone()], Box::new(body.clone()), sp.clone());
+            return Expr::Apply(Box::new(collect_result), vec![*src.clone(), closure], sp);
+        }
+    }
+    body.clone() // fallback: no For clause
 }
 
 fn compile_fstring(parts: &[FStringPart], ctx: &mut CompileCtx) -> IRExpr {

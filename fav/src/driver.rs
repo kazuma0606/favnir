@@ -11683,6 +11683,8 @@ fn format_expr_compact(expr: &ast::Expr) -> String {
         }
         Expr::EmitExpr(inner, _) => format!("emit {}", format_expr_compact(inner)),
         Expr::Question(inner, _) => format!("{}?", format_expr_compact(inner)),
+        Expr::ListComp { expr, .. } => format!("[{} | ...]", format_expr_compact(expr)),
+        Expr::ResultComp { expr, .. } => format!("[? {} | ...]", format_expr_compact(expr)),
     };
     truncate_compact(rendered, 60)
 }
@@ -11788,7 +11790,9 @@ fn expr_to_sql(expr: &ast::Expr) -> Option<String> {
         | Expr::RecordConstruct(_, _, _)
         | Expr::RecordSpread(_, _, _)
         | Expr::EmitExpr(_, _)
-        | Expr::Question(_, _) => None,
+        | Expr::Question(_, _)
+        | Expr::ListComp { .. }
+        | Expr::ResultComp { .. } => None,
     }
 }
 
@@ -26928,6 +26932,100 @@ mod v170000_tests {
     }
 }
 
+// ── v173000_tests (v17.3.0) — コレクション内包表記 ──────────────────────────────
+#[cfg(test)]
+mod v173000_tests {
+    use super::{build_artifact, exec_artifact_main};
+    use crate::frontend::parser::Parser;
+    use crate::value::Value;
+
+    fn run(src: &str) -> Value {
+        let program = Parser::parse_str(src, "v173000_test.fav").expect("parse");
+        let artifact = build_artifact(&program);
+        exec_artifact_main(&artifact, None).expect("exec")
+    }
+
+    fn run_result(src: &str) -> Result<Value, String> {
+        let program = Parser::parse_str(src, "v173000_test.fav").expect("parse");
+        let artifact = build_artifact(&program);
+        exec_artifact_main(&artifact, None)
+    }
+
+    #[test]
+    fn version_is_17_3_0() {
+        let cargo = include_str!("../Cargo.toml");
+        assert!(cargo.contains("\"17.3.0\""), "Cargo.toml should have version 17.3.0");
+    }
+
+    #[test]
+    fn list_comp_map() {
+        // [x * 2 | x <- ns] が List.map 相当の結果を返す
+        let result = run(r#"
+fn main() -> Int {
+    bind ns <- List.push(List.push(List.singleton(1), 2), 3)
+    bind doubled <- [x * 2 | x <- ns]
+    List.length(doubled)
+}
+"#);
+        // [2, 4, 6] → length 3
+        assert_eq!(result, Value::Int(3));
+    }
+
+    #[test]
+    fn list_comp_filter() {
+        // [x | x <- ns, x > 2] が List.filter 相当の結果を返す
+        let result = run(r#"
+fn main() -> Int {
+    bind ns <- List.push(List.push(List.push(List.singleton(1), 2), 3), 4)
+    bind big <- [x | x <- ns, x > 2]
+    List.length(big)
+}
+"#);
+        // [3, 4] → length 2
+        assert_eq!(result, Value::Int(2));
+    }
+
+    #[test]
+    fn list_comp_multi_source() {
+        // [Pair(a, b) | a <- as, b <- bs] が直積を返す
+        let result = run(r#"
+type Pair = | Pair(Int, Int)
+fn main() -> Int {
+    bind as_ <- List.push(List.singleton(1), 2)
+    bind bs  <- List.push(List.singleton(10), 20)
+    bind pairs <- [Pair(a, b) | a <- as_, b <- bs]
+    List.length(pairs)
+}
+"#);
+        // 2 × 2 = 4 pairs
+        assert_eq!(result, Value::Int(4));
+    }
+
+    #[test]
+    fn result_comp_propagation() {
+        // [? f(x) | x <- xs] — エラーが伝播して全体が err になる
+        let result = run(r#"
+fn safe_div(n: Int) -> Result<Int, String> {
+    if n == 0 {
+        Result.err("zero!")
+    } else {
+        Result.ok(100 / n)
+    }
+}
+fn main() -> Bool {
+    bind xs <- List.push(List.push(List.singleton(1), 0), 4)
+    bind r  <- [? safe_div(x) | x <- xs]
+    match r {
+        ok(_)  => false
+        err(_) => true
+    }
+}
+"#);
+        // safe_div(0) = err → whole result is err → true
+        assert_eq!(result, Value::Bool(true));
+    }
+}
+
 // ── v172000_tests (v17.2.0) — パターンマッチ拡張（or-pattern / list-pattern / guard）────
 #[cfg(test)]
 mod v172000_tests {
@@ -26942,6 +27040,7 @@ mod v172000_tests {
     }
 
     #[test]
+    #[ignore = "historical version check"]
     fn version_is_17_2_0() {
         let cargo = include_str!("../Cargo.toml");
         assert!(cargo.contains("\"17.2.0\""), "Cargo.toml should have version 17.2.0");

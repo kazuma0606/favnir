@@ -2341,6 +2341,27 @@ impl Parser {
                 }
             }
 
+            // list comprehension / result comprehension: [expr | x <- src, ...]  (v17.3.0)
+            TokenKind::LBracket => {
+                self.advance(); // consume '['
+                let is_result = if self.peek() == &TokenKind::Question {
+                    self.advance(); // consume '?'
+                    true
+                } else {
+                    false
+                };
+                let expr = self.parse_expr()?;
+                self.expect(&TokenKind::Pipe)?; // '|'
+                let clauses = self.parse_comp_clauses()?;
+                self.expect(&TokenKind::RBracket)?;
+                let span = self.span_from(&start);
+                if is_result {
+                    Ok(Expr::ResultComp { expr: Box::new(expr), clauses, span })
+                } else {
+                    Ok(Expr::ListComp { expr: Box::new(expr), clauses, span })
+                }
+            }
+
             // match (3-18, 3-19)
             TokenKind::Match => self.parse_match_expr(),
 
@@ -2500,6 +2521,35 @@ impl Parser {
             }
         }
         Ok(params)
+    }
+
+    // ── comprehension clauses (v17.3.0) ──────────────────────────────────────
+
+    /// Parse `var <- src, guard, var2 <- src2, ...` until `]` is seen.
+    /// Called after consuming the `|` separator in `[expr | clauses]`.
+    fn parse_comp_clauses(&mut self) -> Result<Vec<CompClause>, ParseError> {
+        let mut clauses = Vec::new();
+        loop {
+            let start = self.peek_span().clone();
+            // Detect `ident <- src` (For clause) via 2-token lookahead
+            if matches!(self.peek(), TokenKind::Ident(_))
+                && self.peek2() == Some(&TokenKind::LArrow)
+            {
+                let (var, _) = self.expect_ident()?;
+                self.expect(&TokenKind::LArrow)?;
+                let src = self.parse_expr()?;
+                clauses.push(CompClause::For { var, src: Box::new(src), span: self.span_from(&start) });
+            } else {
+                let guard = self.parse_expr()?;
+                clauses.push(CompClause::Guard(Box::new(guard)));
+            }
+            if self.peek() == &TokenKind::Comma {
+                self.advance();
+            } else {
+                break;
+            }
+        }
+        Ok(clauses)
     }
 
     // ── match (3-18, 3-19) ───────────────────────────────────────────────────

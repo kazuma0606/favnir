@@ -291,6 +291,16 @@ fn collect_sql_literals_inner(expr: &ast::Expr, out: &mut Vec<String>) {
             }
         }
         ast::Expr::Lit(_, _) | ast::Expr::Ident(_, _) | ast::Expr::FString(_, _) => {}
+        ast::Expr::ListComp { expr, clauses, .. }
+        | ast::Expr::ResultComp { expr, clauses, .. } => {
+            collect_sql_literals_inner(expr, out);
+            for c in clauses {
+                match c {
+                    ast::CompClause::For { src, .. } => collect_sql_literals_inner(src, out),
+                    ast::CompClause::Guard(g) => collect_sql_literals_inner(g, out),
+                }
+            }
+        }
     }
 }
 
@@ -419,6 +429,15 @@ fn collect_azure_kinds_inner(expr: &ast::Expr, r: &mut bool, w: &mut bool) {
             }
         }
         ast::Expr::Lit(_, _) | ast::Expr::Ident(_, _) | ast::Expr::FString(_, _) => {}
+        ast::Expr::ListComp { expr, clauses, .. }
+        | ast::Expr::ResultComp { expr, clauses, .. } => {
+            collect_azure_kinds_inner(expr, r, w);
+            for c in clauses {
+                if let ast::CompClause::For { src, .. } = c {
+                    collect_azure_kinds_inner(src, r, w);
+                }
+            }
+        }
     }
 }
 
@@ -517,6 +536,15 @@ fn collect_azure_blob_kinds_inner(expr: &ast::Expr, r: &mut bool, w: &mut bool) 
             }
         }
         ast::Expr::Lit(_, _) | ast::Expr::Ident(_, _) | ast::Expr::FString(_, _) => {}
+        ast::Expr::ListComp { expr, clauses, .. }
+        | ast::Expr::ResultComp { expr, clauses, .. } => {
+            collect_azure_blob_kinds_inner(expr, r, w);
+            for c in clauses {
+                if let ast::CompClause::For { src, .. } = c {
+                    collect_azure_blob_kinds_inner(src, r, w);
+                }
+            }
+        }
     }
 }
 
@@ -664,6 +692,15 @@ fn collect_sf_kinds_inner(expr: &ast::Expr, r: &mut bool, w: &mut bool) {
             }
         }
         ast::Expr::Lit(_, _) | ast::Expr::Ident(_, _) | ast::Expr::FString(_, _) => {}
+        ast::Expr::ListComp { expr, clauses, .. }
+        | ast::Expr::ResultComp { expr, clauses, .. } => {
+            collect_sf_kinds_inner(expr, r, w);
+            for c in clauses {
+                if let ast::CompClause::For { src, .. } = c {
+                    collect_sf_kinds_inner(src, r, w);
+                }
+            }
+        }
     }
 }
 

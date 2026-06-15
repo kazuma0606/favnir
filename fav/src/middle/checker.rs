@@ -2979,6 +2979,15 @@ impl Checker {
             }
             Expr::EmitExpr(expr, _) => self.collect_helpers_in_expr(expr),
             Expr::Question(expr, _) => self.collect_helpers_in_expr(expr),
+            Expr::ListComp { expr, clauses, .. } | Expr::ResultComp { expr, clauses, .. } => {
+                for clause in clauses {
+                    match clause {
+                        CompClause::For { src, .. } => self.collect_helpers_in_expr(src),
+                        CompClause::Guard(g) => self.collect_helpers_in_expr(g),
+                    }
+                }
+                self.collect_helpers_in_expr(expr);
+            }
         }
     }
 
@@ -4774,6 +4783,33 @@ impl Checker {
             Expr::Question(inner, _) => {
                 self.check_expr(inner);
                 Type::Unknown
+            }
+
+            // list comprehension: [expr | x <- src, guard] (v17.3.0)
+            Expr::ListComp { expr, clauses, .. } => {
+                for clause in clauses {
+                    match clause {
+                        CompClause::For { src, .. } => { self.check_expr(src); }
+                        CompClause::Guard(g) => { self.check_expr(g); }
+                    }
+                }
+                self.check_expr(expr);
+                Type::List(Box::new(Type::Unknown))
+            }
+
+            // result comprehension: [? expr | x <- src] (v17.3.0)
+            Expr::ResultComp { expr, clauses, .. } => {
+                for clause in clauses {
+                    match clause {
+                        CompClause::For { src, .. } => { self.check_expr(src); }
+                        CompClause::Guard(g) => { self.check_expr(g); }
+                    }
+                }
+                self.check_expr(expr);
+                Type::Result(
+                    Box::new(Type::List(Box::new(Type::Unknown))),
+                    Box::new(Type::Unknown),
+                )
             }
         }
     }
@@ -6664,6 +6700,12 @@ impl Checker {
 
             // ── IO.getenv_raw (v13.6.0) ──────────────────────────────────────
             ("IO", "getenv_raw") => Some(Type::Option(Box::new(Type::String))),
+
+            // ── List.collect_result (v17.3.0) ────────────────────────────────
+            ("List", "collect_result") => Some(Type::Result(
+                Box::new(Type::List(Box::new(Type::Unknown))),
+                Box::new(Type::Unknown),
+            )),
 
             _ => None,
         }

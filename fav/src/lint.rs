@@ -210,6 +210,15 @@ fn lint_expr_l008(expr: &Expr, errors: &mut Vec<LintError>) {
                 lint_expr_l008(v, errors);
             }
         }
+        Expr::ListComp { expr, clauses, .. } | Expr::ResultComp { expr, clauses, .. } => {
+            lint_expr_l008(expr, errors);
+            for c in clauses {
+                match c {
+                    CompClause::For { src, .. } => lint_expr_l008(src, errors),
+                    CompClause::Guard(g) => lint_expr_l008(g, errors),
+                }
+            }
+        }
         Expr::Ident(..) | Expr::Lit(..) => {}
     }
 }
@@ -369,6 +378,15 @@ fn collect_expr_calls(expr: &Expr, names: &HashSet<String>, uses: &mut HashSet<S
                 collect_expr_calls(v, names, uses);
             }
         }
+        Expr::ListComp { expr, clauses, .. } | Expr::ResultComp { expr, clauses, .. } => {
+            collect_expr_calls(expr, names, uses);
+            for c in clauses {
+                match c {
+                    CompClause::For { src, .. } => collect_expr_calls(src, names, uses),
+                    CompClause::Guard(g) => collect_expr_calls(g, names, uses),
+                }
+            }
+        }
         Expr::Lit(..) => {}
     }
 }
@@ -523,6 +541,15 @@ fn lint_expr_sub_blocks(expr: &Expr, errors: &mut Vec<LintError>) {
                 }
             }
         }
+        Expr::ListComp { expr, clauses, .. } | Expr::ResultComp { expr, clauses, .. } => {
+            lint_expr_sub_blocks(expr, errors);
+            for c in clauses {
+                match c {
+                    CompClause::For { src, .. } => lint_expr_sub_blocks(src, errors),
+                    CompClause::Guard(g) => lint_expr_sub_blocks(g, errors),
+                }
+            }
+        }
         Expr::Lit(..) | Expr::Ident(..) => {}
     }
 }
@@ -575,6 +602,13 @@ fn expr_references(expr: &Expr, name: &str) -> bool {
             FStringPart::Lit(_) => false,
             FStringPart::Expr(expr) => expr_references(expr, name),
         }),
+        Expr::ListComp { expr, clauses, .. } | Expr::ResultComp { expr, clauses, .. } => {
+            expr_references(expr, name)
+                || clauses.iter().any(|c| match c {
+                    CompClause::For { src, .. } => expr_references(src, name),
+                    CompClause::Guard(g) => expr_references(g, name),
+                })
+        }
         Expr::Lit(..) => false,
     }
 }
@@ -758,6 +792,15 @@ fn collect_ambient_in_expr(expr: &Expr, errors: &mut Vec<LintError>, code: &'sta
                 }
             }
         }
+        Expr::ListComp { expr, clauses, .. } | Expr::ResultComp { expr, clauses, .. } => {
+            collect_ambient_in_expr(expr, errors, code);
+            for c in clauses {
+                match c {
+                    CompClause::For { src, .. } => collect_ambient_in_expr(src, errors, code),
+                    CompClause::Guard(g) => collect_ambient_in_expr(g, errors, code),
+                }
+            }
+        }
         Expr::Lit(..) | Expr::Ident(..) => {}
     }
 }
@@ -886,6 +929,15 @@ fn collect_deprecated_in_expr(expr: &Expr, errors: &mut Vec<LintError>) {
             for part in parts {
                 if let FStringPart::Expr(e) = part {
                     collect_deprecated_in_expr(e, errors);
+                }
+            }
+        }
+        Expr::ListComp { expr, clauses, .. } | Expr::ResultComp { expr, clauses, .. } => {
+            collect_deprecated_in_expr(expr, errors);
+            for c in clauses {
+                match c {
+                    CompClause::For { src, .. } => collect_deprecated_in_expr(src, errors),
+                    CompClause::Guard(g) => collect_deprecated_in_expr(g, errors),
                 }
             }
         }
@@ -1191,6 +1243,16 @@ fn collect_type_state_in_expr(
                 if let FStringPart::Expr(e) = part {
                     collect_type_state_in_expr(
                         e, fn_expects, fn_output, type_state_names, env, errors,
+                    );
+                }
+            }
+        }
+        Expr::ListComp { expr, clauses, .. } | Expr::ResultComp { expr, clauses, .. } => {
+            collect_type_state_in_expr(expr, fn_expects, fn_output, type_state_names, env, errors);
+            for c in clauses {
+                if let CompClause::For { src, .. } = c {
+                    collect_type_state_in_expr(
+                        src, fn_expects, fn_output, type_state_names, env, errors,
                     );
                 }
             }

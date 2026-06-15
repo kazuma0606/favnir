@@ -571,6 +571,37 @@ impl Emitter {
             Expr::AssertMatches(_, _, _) | Expr::EmitExpr(_, _) => {
                 "None  # assert/emit not supported in transpile".to_string()
             }
+
+            Expr::ListComp { expr, clauses, .. } => {
+                // Emit as Python list comprehension
+                let body = self.emit_expr(expr);
+                let clauses_str = clauses
+                    .iter()
+                    .map(|c| match c {
+                        crate::ast::CompClause::For { var, src, .. } => {
+                            format!("for {} in {}", var, self.emit_expr(src))
+                        }
+                        crate::ast::CompClause::Guard(g) => {
+                            format!("if {}", self.emit_expr(g))
+                        }
+                    })
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                format!("[{} {}]", body, clauses_str)
+            }
+
+            Expr::ResultComp { expr, clauses, .. } => {
+                // Emit as a comment — Result semantics not supported in Python transpile
+                let body = self.emit_expr(expr);
+                let src = clauses.iter().find_map(|c| {
+                    if let crate::ast::CompClause::For { var, src, .. } = c {
+                        Some(format!("for {} in {}", var, self.emit_expr(src)))
+                    } else {
+                        None
+                    }
+                }).unwrap_or_default();
+                format!("[{} {}]  # result comp — errors not propagated", body, src)
+            }
         }
     }
 

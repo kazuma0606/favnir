@@ -608,6 +608,34 @@ impl Formatter {
             Expr::Question(inner, _) => {
                 format!("{}?", self.expr(inner))
             }
+
+            Expr::ListComp { expr, clauses, .. } => {
+                let clauses_str = clauses
+                    .iter()
+                    .map(|c| match c {
+                        crate::ast::CompClause::For { var, src, .. } => {
+                            format!("{} <- {}", var, self.expr(src))
+                        }
+                        crate::ast::CompClause::Guard(g) => self.expr(g),
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!("[{} | {}]", self.expr(expr), clauses_str)
+            }
+
+            Expr::ResultComp { expr, clauses, .. } => {
+                let clauses_str = clauses
+                    .iter()
+                    .map(|c| match c {
+                        crate::ast::CompClause::For { var, src, .. } => {
+                            format!("{} <- {}", var, self.expr(src))
+                        }
+                        crate::ast::CompClause::Guard(g) => self.expr(g),
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!("[? {} | {}]", self.expr(expr), clauses_str)
+            }
         }
     }
 

@@ -254,6 +254,17 @@ impl Pattern {
     }
 }
 
+// ── CompClause (v17.3.0) ─────────────────────────────────────────────────────
+
+/// A clause in a list or result comprehension.
+#[derive(Debug, Clone)]
+pub enum CompClause {
+    /// `var <- src` — source binding
+    For { var: String, src: Box<Expr>, span: Span },
+    /// `guard_expr` — filter condition
+    Guard(Box<Expr>),
+}
+
 // ── MatchArm (2-11) ───────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone)]
@@ -318,6 +329,20 @@ pub enum Expr {
 
     /// `expr?` — error propagation (v9.7.0)
     Question(Box<Expr>, Span),
+
+    /// `[expr | x <- src, guard]` — list comprehension (v17.3.0)
+    ListComp {
+        expr: Box<Expr>,
+        clauses: Vec<CompClause>,
+        span: Span,
+    },
+
+    /// `[? expr | x <- src]` — result comprehension with error propagation (v17.3.0)
+    ResultComp {
+        expr: Box<Expr>,
+        clauses: Vec<CompClause>,
+        span: Span,
+    },
 }
 
 impl Expr {
@@ -341,6 +366,8 @@ impl Expr {
             Expr::EmitExpr(_, s) => s,
             Expr::Collect(_, s) => s,
             Expr::Question(_, s) => s,
+            Expr::ListComp { span, .. } => span,
+            Expr::ResultComp { span, .. } => span,
         }
     }
 }

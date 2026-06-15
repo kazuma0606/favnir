@@ -1,0 +1,87 @@
+# Collection Comprehensions
+
+Favnir supports list comprehensions — a concise syntax for transforming and filtering collections without explicit `List.map` / `List.filter` calls.
+
+## Basic Syntax
+
+```
+[<expr> | <var> <- <source>]
+```
+
+```favnir
+fn main() -> List<Int> {
+    bind ns <- List.push(List.push(List.singleton(1), 2), 3)
+    [x * 2 | x <- ns]   -- [2, 4, 6]
+}
+```
+
+This desugars to `List.map(ns, |x| x * 2)`.
+
+## Filter Guards
+
+Add a guard expression after the source with a comma:
+
+```
+[<expr> | <var> <- <source>, <guard>]
+```
+
+```favnir
+fn main() -> List<Int> {
+    bind ns <- List.push(List.push(List.push(List.singleton(1), 2), 3), 4)
+    [x | x <- ns, x > 2]   -- [3, 4]
+}
+```
+
+Multiple guards can be chained:
+
+```favnir
+[x | x <- ns, x > 0, x < 10]
+```
+
+## Multiple Sources
+
+Use multiple `<-` clauses to produce the Cartesian product:
+
+```favnir
+type Pair = { a: Int, b: Int }
+
+fn main() -> List<Pair> {
+    bind as_ <- List.push(List.singleton(1), 2)
+    bind bs  <- List.push(List.singleton(10), 20)
+    [{ a: a, b: b } | a <- as_, b <- bs]
+    -- [{ a: 1, b: 10 }, { a: 1, b: 20 }, { a: 2, b: 10 }, { a: 2, b: 20 }]
+}
+```
+
+This desugars to nested `List.flat_map` / `List.map` calls.
+
+## Result Comprehensions
+
+Use `[? ...]` to propagate errors automatically. If any element produces `err(...)`, the whole expression short-circuits:
+
+```
+[? <expr> | <var> <- <source>]
+```
+
+```favnir
+fn safe_parse(s: String) -> Result<Int, String> {
+    -- returns ok(n) or err("invalid")
+}
+
+fn main() -> Result<List<Int>, String> {
+    bind inputs <- List.push(List.push(List.singleton("1"), "2"), "3")
+    [? safe_parse(s) | s <- inputs]
+    -- ok([1, 2, 3]) if all parse; err("invalid") on first failure
+}
+```
+
+This desugars to `List.collect_result(inputs, |s| safe_parse(s))`.
+
+## Desugar Reference
+
+| Comprehension form | Desugars to |
+|---|---|
+| `[f(x) \| x <- xs]` | `List.map(xs, \|x\| f(x))` |
+| `[f(x) \| x <- xs, pred(x)]` | `List.map(List.filter(xs, \|x\| pred(x)), \|x\| f(x))` |
+| `[f(a, b) \| a <- as, b <- bs]` | `List.flat_map(as, \|a\| List.map(bs, \|b\| f(a, b)))` |
+| `[? f(x) \| x <- xs]` | `List.collect_result(xs, \|x\| f(x))` |

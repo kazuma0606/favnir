@@ -2940,6 +2940,45 @@ impl VM {
                     }
                 }
             }
+            // List.collect_result(list, fn) → Result<List<T>, E>  (v17.3.0)
+            "List.collect_result" => {
+                if args.len() != 2 {
+                    return Err(self.error(artifact, "List.collect_result requires 2 arguments"));
+                }
+                let mut it = args.into_iter();
+                let list = it.next().expect("list");
+                let func = it.next().expect("func");
+                match list {
+                    VMValue::List(fl) => {
+                        let mut collected: Vec<VMValue> = Vec::new();
+                        for x in fl {
+                            let res = self.call_value(artifact, func.clone(), vec![x])?;
+                            match res {
+                                VMValue::Variant(ref tag, ref payload) if tag == "ok" => {
+                                    collected.push(*payload.clone().expect("ok payload"));
+                                }
+                                VMValue::Variant(ref tag, _) if tag == "err" => {
+                                    return Ok(res);
+                                }
+                                other => {
+                                    return Err(self.error(
+                                        artifact,
+                                        &format!(
+                                            "List.collect_result: callback must return Result, got {}",
+                                            vmvalue_type_name(&other)
+                                        ),
+                                    ));
+                                }
+                            }
+                        }
+                        Ok(VMValue::Variant(
+                            "ok".to_string(),
+                            Some(Box::new(VMValue::List(FavList::new(collected)))),
+                        ))
+                    }
+                    _ => Err(self.error(artifact, "List.collect_result requires a List as first argument")),
+                }
+            }
             "List.sort" => {
                 if args.len() != 2 {
                     return Err(self.error(artifact, "List.sort requires 2 arguments"));

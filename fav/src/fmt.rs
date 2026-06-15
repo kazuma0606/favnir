@@ -456,6 +456,10 @@ impl Formatter {
                 let expr = self.expr(&b.expr);
                 format!("bind {}{} <- {};", pat, ann, expr)
             }
+            Stmt::Let(l) => {
+                let expr = self.expr(&l.expr);
+                format!("let {} = {};", l.name, expr)
+            }
             Stmt::Expr(e) => {
                 format!("{};", self.expr(e))
             }

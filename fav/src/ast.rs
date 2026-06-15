@@ -394,6 +394,8 @@ pub enum BinOp {
 #[derive(Debug, Clone)]
 pub enum Stmt {
     Bind(BindStmt),
+    /// `let name = expr`  non-Result binding (v17.4.0)
+    Let(LetStmt),
     Expr(Expr),
     /// `chain x <- expr`  Emonadic bind with early-exit on failure (v0.5.0)
     Chain(ChainStmt),
@@ -423,6 +425,15 @@ pub struct BindStmt {
     pub span: Span,
 }
 
+// ── LetStmt (v17.4.0) ─────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone)]
+pub struct LetStmt {
+    pub name: String,
+    pub expr: Expr,
+    pub span: Span,
+}
+
 // ── ChainStmt / YieldStmt (v0.5.0) ───────────────────────────────────────────
 
 #[derive(Debug, Clone)]
@@ -442,6 +453,7 @@ impl Stmt {
     pub fn span(&self) -> &Span {
         match self {
             Stmt::Bind(b) => &b.span,
+            Stmt::Let(l) => &l.span,
             Stmt::Expr(e) => e.span(),
             Stmt::Chain(c) => &c.span,
             Stmt::Yield(y) => &y.span,

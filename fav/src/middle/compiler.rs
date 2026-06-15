@@ -1688,6 +1688,10 @@ fn collect_free_vars_block(block: &Block, bound: &mut HashSet<String>, free: &mu
                 collect_free_vars_expr(&bind.expr, &mut local_bound, free);
                 pattern_binds(&bind.pattern, &mut local_bound);
             }
+            Stmt::Let(let_stmt) => {
+                collect_free_vars_expr(&let_stmt.expr, &mut local_bound, free);
+                local_bound.insert(let_stmt.name.clone());
+            }
             Stmt::Chain(chain) => {
                 if !local_bound.contains(&chain.name) {
                     free.insert(chain.name.clone());
@@ -2205,6 +2209,12 @@ fn compile_stmt_into(stmt: &Stmt, ctx: &mut CompileCtx, out: &mut Vec<IRStmt>) {
                 out.push(IRStmt::Bind(slot, expr_ir));
             }
         },
+        // let name = expr  (v17.4.0) — non-Result binding, no unwrap opcode
+        Stmt::Let(let_stmt) => {
+            let expr_ir = compile_expr(&let_stmt.expr, ctx);
+            let slot = ctx.define_local_with_ty(let_stmt.name.clone(), expr_ir.ty().clone());
+            out.push(IRStmt::Bind(slot, expr_ir));
+        }
         Stmt::Chain(chain) => {
             let expr_ir = compile_expr(&chain.expr, ctx);
             let slot = if let Some(slot) = ctx.resolve_local(&chain.name) {

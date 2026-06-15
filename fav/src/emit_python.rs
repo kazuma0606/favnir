@@ -405,6 +405,10 @@ impl Emitter {
                 let val = self.emit_expr(&y.expr);
                 self.line(&format!("yield {}", val));
             }
+            Stmt::Let(l) => {
+                let val = self.emit_expr(&l.expr);
+                self.line(&format!("{} = {}", l.name, val));
+            }
             Stmt::ForIn(f) => {
                 let iter = self.emit_expr(&f.iter);
                 self.line(&format!("for {} in {}:", f.var, iter));

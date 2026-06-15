@@ -2902,6 +2902,7 @@ impl Checker {
     fn collect_helpers_in_stmt(&mut self, stmt: &Stmt) {
         match stmt {
             Stmt::Bind(b) => self.collect_helpers_in_expr(&b.expr),
+            Stmt::Let(l) => self.collect_helpers_in_expr(&l.expr),
             Stmt::Expr(expr) => self.collect_helpers_in_expr(expr),
             Stmt::Chain(c) => self.collect_helpers_in_expr(&c.expr),
             Stmt::Yield(y) => self.collect_helpers_in_expr(&y.expr),
@@ -3149,6 +3150,7 @@ impl Checker {
         for stmt in &block.stmts {
             match stmt {
                 Stmt::Bind(b) => self.scan_expr_for_pipeline_calls(&b.expr, ctx_map),
+                Stmt::Let(l) => self.scan_expr_for_pipeline_calls(&l.expr, ctx_map),
                 Stmt::Chain(c) => self.scan_expr_for_pipeline_calls(&c.expr, ctx_map),
                 Stmt::Expr(e) => self.scan_expr_for_pipeline_calls(e, ctx_map),
                 Stmt::Yield(y) => self.scan_expr_for_pipeline_calls(&y.expr, ctx_map),
@@ -3757,6 +3759,18 @@ impl Checker {
                 } else {
                     self.check_pattern_bindings(&b.pattern, &effective_ty);
                 }
+            }
+            // let name = expr  (v17.4.0) — non-Result binding
+            Stmt::Let(l) => {
+                let ty = self.check_expr(&l.expr);
+                if matches!(ty, Type::Result(_, _)) {
+                    self.type_error(
+                        "E0326",
+                        "cannot use `let` with a Result value — use `bind` instead",
+                        &l.span,
+                    );
+                }
+                self.env.define(l.name.clone(), ty);
             }
             Stmt::Expr(e) => {
                 self.check_expr(e);

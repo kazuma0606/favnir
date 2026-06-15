@@ -1716,6 +1716,16 @@ impl Parser {
                 continue;
             }
 
+            // let statement — non-Result binding (v17.4.0, trailing ; is optional)
+            if self.peek() == &TokenKind::Let {
+                let let_stmt = self.parse_let_stmt()?;
+                stmts.push(Stmt::Let(let_stmt));
+                if self.peek() == &TokenKind::Semicolon {
+                    self.advance();
+                }
+                continue;
+            }
+
             // chain statement (v0.5.0, trailing ; is optional like bind)
             if self.peek() == &TokenKind::Chain {
                 let chain = self.parse_chain_stmt()?;
@@ -1789,6 +1799,21 @@ impl Parser {
         Ok(BindStmt {
             pattern,
             annotated_ty,
+            expr,
+            span: self.span_from(&start),
+        })
+    }
+
+    // ── let_stmt (v17.4.0) ────────────────────────────────────────────────────
+
+    fn parse_let_stmt(&mut self) -> Result<LetStmt, ParseError> {
+        let start = self.peek_span().clone();
+        self.expect(&TokenKind::Let)?;
+        let (name, _) = self.expect_ident()?;
+        self.expect(&TokenKind::Eq)?;
+        let expr = self.parse_expr()?;
+        Ok(LetStmt {
+            name,
             expr,
             span: self.span_from(&start),
         })

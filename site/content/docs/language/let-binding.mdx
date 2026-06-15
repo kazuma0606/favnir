@@ -1,0 +1,87 @@
+# let バインディング
+
+`let` は関数ボディ内で非 Result 値に名前を付ける構文です。
+`bind x <- Result.ok(expr)` という不自然なラップを書かずに済みます。
+
+## 基本構文
+
+```
+let <name> = <expr>
+```
+
+```favnir
+fn greet(name: String) -> Result<String, String> {
+    let trimmed = String.trim(name)
+    let msg     = f"Hello, {trimmed}!"
+    Result.ok(msg)
+}
+```
+
+## `bind` との使い分け
+
+| 構文 | 用途 | 右辺の型 |
+|---|---|---|
+| `let x = expr` | 非 Result 値の束縛 | `Int` / `String` / `List<T>` 等 |
+| `bind x <- expr` | Result 値の unwrap（エラー伝播） | `Result<T, E>` |
+
+```favnir
+fn process(rows: List<Row>) -> Result<List<Output>, String> {
+    let filtered = [r | r <- rows, r.active]       -- let: List<Row>
+    bind results <- transform_all(filtered)          -- bind: Result<List<Output>, String>
+    Result.ok(results)
+}
+```
+
+## `let` と `bind` の混在
+
+`let` と `bind` は同一ブロック内で自由に混在できます。
+
+```favnir
+fn transform(row: Row) -> Result<Row, String> {
+    let upper   = String.to_upper(row.name)
+    let score   = compute_score(row.value)
+    bind valid  <- validate({ ...row, name: upper, score: score })
+    Result.ok(valid)
+}
+```
+
+## 内包表記との組み合わせ
+
+```favnir
+fn double_positives(ns: List<Int>) -> Result<List<Int>, String> {
+    let doubled = [x * 2 | x <- ns, x > 0]
+    Result.ok(doubled)
+}
+```
+
+## レコードスプレッドとの組み合わせ
+
+```favnir
+fn update_name(row: Row, new_name: String) -> Result<Row, String> {
+    let trimmed = String.trim(new_name)
+    let updated = { ...row, name: trimmed }
+    bind valid  <- validate(updated)
+    Result.ok(valid)
+}
+```
+
+## E0326 — Result 値への `let` 使用
+
+Result 値に `let` を使うとコンパイルエラーになります。
+
+```favnir
+fn bad() -> Result<Int, String> {
+    let r = some_result_fn()   -- E0326: use `bind` for Result values
+    Result.ok(r)
+}
+
+-- 正しくは:
+fn good() -> Result<Int, String> {
+    bind r <- some_result_fn()
+    Result.ok(r)
+}
+```
+
+## トップレベルでの使用不可
+
+`let` は関数ボディ内専用です。トップレベルの定義には使用できません。

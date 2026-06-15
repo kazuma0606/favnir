@@ -26932,6 +26932,78 @@ mod v170000_tests {
     }
 }
 
+// ── v174000_tests (v17.4.0) — `let` バインディング ───────────────────────────────
+#[cfg(test)]
+mod v174000_tests {
+    use super::{build_artifact, exec_artifact_main};
+    use crate::frontend::parser::Parser;
+    use crate::value::Value;
+
+    fn run(src: &str) -> Value {
+        let program = Parser::parse_str(src, "v174000_test.fav").expect("parse");
+        let artifact = build_artifact(&program);
+        exec_artifact_main(&artifact, None).expect("exec")
+    }
+
+    #[test]
+    fn version_is_17_4_0() {
+        let cargo = include_str!("../Cargo.toml");
+        assert!(cargo.contains("\"17.4.0\""), "Cargo.toml should have version 17.4.0");
+    }
+
+    #[test]
+    fn let_binding_basic() {
+        // let x = 42 で束縛し、加算に使える
+        let result = run(r#"
+fn main() -> Int {
+    let x = 42
+    let y = 8
+    x + y
+}
+"#);
+        assert_eq!(result, Value::Int(50));
+    }
+
+    #[test]
+    fn let_binding_string() {
+        // let name = String.trim(s) が動作する
+        let result = run(r#"
+fn main() -> Int {
+    let name = String.trim("  hello  ")
+    String.length(name)
+}
+"#);
+        assert_eq!(result, Value::Int(5));
+    }
+
+    #[test]
+    fn let_with_bind_mix() {
+        // let と bind の混在が動作する（bind は List 束縛、let は Int 計算）
+        let result = run(r#"
+fn main() -> Int {
+    bind ns <- List.push(List.singleton(1), 2)
+    let len = List.length(ns)
+    let doubled = len * 2
+    doubled
+}
+"#);
+        assert_eq!(result, Value::Int(4));
+    }
+
+    #[test]
+    fn let_with_list_comp() {
+        // let で list comprehension 結果を束縛
+        let result = run(r#"
+fn main() -> Int {
+    bind ns <- List.push(List.push(List.singleton(1), 2), 3)
+    let doubled = [x * 2 | x <- ns]
+    List.length(doubled)
+}
+"#);
+        assert_eq!(result, Value::Int(3));
+    }
+}
+
 // ── v173000_tests (v17.3.0) — コレクション内包表記 ──────────────────────────────
 #[cfg(test)]
 mod v173000_tests {
@@ -26952,6 +27024,7 @@ mod v173000_tests {
     }
 
     #[test]
+    #[ignore = "historical version check"]
     fn version_is_17_3_0() {
         let cargo = include_str!("../Cargo.toml");
         assert!(cargo.contains("\"17.3.0\""), "Cargo.toml should have version 17.3.0");

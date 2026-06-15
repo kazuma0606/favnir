@@ -2014,6 +2014,32 @@ impl VM {
                         _ => return Err(vm.error(artifact, "list_drop requires (List, Int)")),
                     }
                 }
+                x if x == Opcode::RefinementAssert as u8 => {
+                    let name_idx = Self::read_u16(function, frame)? as usize;
+                    let param_name = artifact
+                        .str_table
+                        .get(name_idx)
+                        .cloned()
+                        .unwrap_or_else(|| "?".to_string());
+                    let cond = vm.stack.pop().ok_or_else(|| {
+                        vm.error(artifact, "stack underflow on refinement_assert")
+                    })?;
+                    match cond {
+                        VMValue::Bool(true) => {}
+                        VMValue::Bool(false) => {
+                            return Err(vm.error(
+                                artifact,
+                                &format!("refinement violated: argument `{}` does not satisfy its constraint", param_name),
+                            ));
+                        }
+                        _ => {
+                            return Err(vm.error(
+                                artifact,
+                                "refinement_assert expects a Bool",
+                            ));
+                        }
+                    }
+                }
                 x if x == Opcode::JumpIfNotVariant as u8 => {
                     let name_idx = Self::read_u16(function, frame)? as usize;
                     let offset = Self::read_u16(function, frame)? as usize;

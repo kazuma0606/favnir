@@ -281,6 +281,7 @@ fn walk_closures_in_expr(expr: &IRExpr, ir: &IRProgram, map: &mut HashMap<u16, (
                     | IRStmt::Expr(e) => walk_closures_in_expr(e, ir, map),
                     IRStmt::SeqChain { expr: e, .. } => walk_closures_in_expr(e, ir, map),
                     IRStmt::TrackLine(_) => {}
+                    IRStmt::RefinementAssert { expr: e, .. } => walk_closures_in_expr(e, ir, map),
                 }
             }
             walk_closures_in_expr(final_expr, ir, map);
@@ -340,6 +341,7 @@ fn scan_closure_bound_slots_walk(expr: &IRExpr, map: &mut HashMap<u16, u16>) {
                     | IRStmt::Expr(e) => scan_closure_bound_slots_walk(e, map),
                     IRStmt::SeqChain { expr: e, .. } => scan_closure_bound_slots_walk(e, map),
                     IRStmt::TrackLine(_) => {}
+                    IRStmt::RefinementAssert { expr: e, .. } => scan_closure_bound_slots_walk(e, map),
                 }
             }
             scan_closure_bound_slots_walk(final_expr, map);
@@ -665,6 +667,7 @@ pub fn collect_local_types_stmt(stmt: &IRStmt, map: &mut HashMap<u16, Type>) {
         }
         IRStmt::Yield(expr) | IRStmt::Expr(expr) => collect_local_types(expr, map),
         IRStmt::TrackLine(_) => {}
+        IRStmt::RefinementAssert { expr, .. } => collect_local_types(expr, map),
     }
 }
 
@@ -773,6 +776,7 @@ fn collect_stmt_string_literals(stmt: &IRStmt, ordered: &mut Vec<String>) {
         }
         IRStmt::SeqChain { expr, .. } => collect_expr_string_literals(expr, ordered),
         IRStmt::TrackLine(_) => {}
+        IRStmt::RefinementAssert { expr, .. } => collect_expr_string_literals(expr, ordered),
     }
 }
 
@@ -831,6 +835,7 @@ pub fn collect_used_builtins(ir: &IRProgram) -> std::collections::HashSet<String
                         | IRStmt::Expr(expr) => walk_expr(expr, globals, used),
                         IRStmt::SeqChain { expr, .. } => walk_expr(expr, globals, used),
                         IRStmt::TrackLine(_) => {}
+                        IRStmt::RefinementAssert { expr, .. } => walk_expr(expr, globals, used),
                     }
                 }
                 walk_expr(final_expr, globals, used);
@@ -1004,6 +1009,7 @@ fn emit_stmt(
             "yield statement in wasm MVP".into(),
         )),
         IRStmt::TrackLine(_) => Ok(()), // no-op in WASM
+        IRStmt::RefinementAssert { .. } => Ok(()), // no-op in WASM MVP (runtime checks not supported)
     }
 }
 

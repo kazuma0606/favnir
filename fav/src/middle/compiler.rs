@@ -528,19 +528,27 @@ pub fn compile_program(program: &Program) -> IRProgram {
                     fns.push(compile_type_def_constructor(td, &mut ctx));
                 }
             }
-            Item::FnDef(fd) => fns.push(compile_fn_def(
-                &fd.name,
-                &fd.type_params,
-                &fd.params.iter().map(|p| p.name.clone()).collect::<Vec<_>>(),
-                &fd.params
+            Item::FnDef(fd) => {
+                let constraints: Vec<(String, crate::ast::Expr)> = fd
+                    .params
                     .iter()
-                    .map(|p| lower_type_expr(&p.ty))
-                    .collect::<Vec<_>>(),
-                &fd.effects,
-                fd.return_ty.as_ref(),
-                &fd.body,
-                &mut ctx,
-            )),
+                    .filter_map(|p| p.constraint.as_ref().map(|c| (p.name.clone(), *c.clone())))
+                    .collect();
+                fns.push(compile_fn_def_with_constraints(
+                    &fd.name,
+                    &fd.type_params,
+                    &fd.params.iter().map(|p| p.name.clone()).collect::<Vec<_>>(),
+                    &fd.params
+                        .iter()
+                        .map(|p| lower_type_expr(&p.ty))
+                        .collect::<Vec<_>>(),
+                    &fd.effects,
+                    fd.return_ty.as_ref(),
+                    &fd.body,
+                    &constraints,
+                    &mut ctx,
+                ));
+            }
             Item::TrfDef(td) => fns.push(compile_fn_def(
                 &td.name,
                 &td.type_params,
@@ -1521,6 +1529,34 @@ fn compile_fn_def(
     body: &Block,
     ctx: &mut CompileCtx,
 ) -> IRFnDef {
+    compile_fn_def_inner(name, type_params, params, param_tys, effects, return_ty, body, &[], ctx)
+}
+
+fn compile_fn_def_with_constraints(
+    name: &str,
+    type_params: &[crate::ast::GenericParam],
+    params: &[String],
+    param_tys: &[Type],
+    effects: &[crate::ast::Effect],
+    return_ty: Option<&TypeExpr>,
+    body: &Block,
+    param_constraints: &[(String, crate::ast::Expr)],
+    ctx: &mut CompileCtx,
+) -> IRFnDef {
+    compile_fn_def_inner(name, type_params, params, param_tys, effects, return_ty, body, param_constraints, ctx)
+}
+
+fn compile_fn_def_inner(
+    name: &str,
+    type_params: &[crate::ast::GenericParam],
+    params: &[String],
+    param_tys: &[Type],
+    effects: &[crate::ast::Effect],
+    return_ty: Option<&TypeExpr>,
+    body: &Block,
+    param_constraints: &[(String, crate::ast::Expr)],
+    ctx: &mut CompileCtx,
+) -> IRFnDef {
     let saved_next = ctx.next_slot;
     let saved_anon = ctx.anon_counter;
     let saved_locals = std::mem::take(&mut ctx.locals);
@@ -1536,7 +1572,28 @@ fn compile_fn_def(
     for type_param in type_params {
         ctx.define_local_with_ty(format!("$type_{}", type_param.name), Type::String);
     }
-    let body_ir = compile_block(body, ctx);
+    // Emit refinement assertions (v18.3.0) as prepended IR stmts in the body.
+    let body_ir = if param_constraints.is_empty() {
+        compile_block(body, ctx)
+    } else {
+        let mut pre_stmts = Vec::new();
+        for (param_name, constraint_expr) in param_constraints {
+            let expr_ir = compile_expr(constraint_expr, ctx);
+            pre_stmts.push(IRStmt::RefinementAssert {
+                param: param_name.clone(),
+                expr: expr_ir,
+            });
+        }
+        ctx.push_scope();
+        let mut stmts = pre_stmts;
+        for stmt in &body.stmts {
+            compile_stmt_into(stmt, ctx, &mut stmts);
+        }
+        let tail = compile_expr(&body.expr, ctx);
+        ctx.pop_scope();
+        let ty = tail.ty().clone();
+        IRExpr::Block(stmts, Box::new(tail), ty)
+    };
     let local_count = ctx.next_slot as usize;
 
     ctx.locals = saved_locals;

@@ -1274,6 +1274,7 @@ impl Parser {
                 params.push(Param {
                     name: "ctx".to_string(),
                     ty: crate::ast::TypeExpr::Named(ctx_type.to_string(), vec![], span.clone()),
+                    constraint: None,
                     span,
                 });
                 if self.peek() == &TokenKind::Comma {
@@ -1284,9 +1285,20 @@ impl Parser {
             let (name, _) = self.expect_ident()?;
             self.expect(&TokenKind::Colon)?;
             let ty = self.parse_fn_param_type()?;
+            // v18.3.0: refinement constraint `where { expr }`
+            let constraint = if self.peek() == &TokenKind::Where {
+                self.advance(); // consume `where`
+                self.expect(&TokenKind::LBrace)?;
+                let expr = self.parse_expr()?;
+                self.expect(&TokenKind::RBrace)?;
+                Some(Box::new(expr))
+            } else {
+                None
+            };
             params.push(Param {
                 name,
                 ty,
+                constraint,
                 span: self.span_from(&start),
             });
             if self.peek() == &TokenKind::Comma {
@@ -1502,6 +1514,7 @@ impl Parser {
             params.push(Param {
                 name,
                 ty,
+                constraint: None,
                 span: self.span_from(&start),
             });
             if self.peek() == &TokenKind::Comma {

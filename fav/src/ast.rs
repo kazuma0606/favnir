@@ -194,6 +194,7 @@ pub struct TypeDef {
 pub struct Param {
     pub name: String,
     pub ty: TypeExpr,
+    pub constraint: Option<Box<Expr>>,
     pub span: Span,
 }
 

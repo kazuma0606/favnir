@@ -968,6 +968,8 @@ pub struct Checker {
     pub fn_effects_registry: HashMap<String, EffectSet>,
     /// Call graph for transitive effect propagation: fn_name → called fn names (v18.1.0).
     fn_call_graph: HashMap<String, Vec<String>>,
+    /// Refinement constraints: fn_name → [(param_index, param_name, constraint_expr)] (v18.3.0).
+    fn_refinement_registry: HashMap<String, Vec<(usize, String, Box<crate::ast::Expr>)>>,
 }
 
 impl Checker {
@@ -1010,6 +1012,7 @@ impl Checker {
             fn_bounds_registry: HashMap::new(),
             fn_effects_registry: HashMap::new(),
             fn_call_graph: HashMap::new(),
+            fn_refinement_registry: HashMap::new(),
         }
     }
 
@@ -1055,6 +1058,7 @@ impl Checker {
             fn_bounds_registry: HashMap::new(),
             fn_effects_registry: HashMap::new(),
             fn_call_graph: HashMap::new(),
+            fn_refinement_registry: HashMap::new(),
         }
     }
 
@@ -2212,6 +2216,20 @@ impl Checker {
                     if fd.type_params.iter().any(|p| !p.bounds.is_empty()) {
                         self.fn_bounds_registry
                             .insert(fd.name.clone(), fd.type_params.clone());
+                    }
+                    // Register refinement constraints for call-site checking (v18.3.0).
+                    let refinements: Vec<(usize, String, Box<crate::ast::Expr>)> = fd
+                        .params
+                        .iter()
+                        .enumerate()
+                        .filter_map(|(idx, p)| {
+                            p.constraint
+                                .as_ref()
+                                .map(|c| (idx, p.name.clone(), c.clone()))
+                        })
+                        .collect();
+                    if !refinements.is_empty() {
+                        self.fn_refinement_registry.insert(fd.name.clone(), refinements);
                     }
                     // Infer effects from fn body (v18.1.0).
                     let (direct_effects, called_fns) = infer_effects_fn(fd);
@@ -4560,6 +4578,38 @@ impl Checker {
                                                     ),
                                                 };
                                                 self.type_error(err_code, err_msg, span);
+                                            }
+                                        }
+                                    }
+                                }
+                                // Refinement call-site check (E0331, v18.3.0).
+                                if let Some(refinements) = self.fn_refinement_registry.get(&fn_name).cloned() {
+                                    for (param_idx, param_name, constraint) in refinements.iter() {
+                                        if let Some(arg_expr) = args.get(*param_idx) {
+                                            // Try to statically evaluate the argument value.
+                                            let mut values = HashMap::new();
+                                            if let Some(static_val) = self.eval_static_expr(arg_expr, &HashMap::new()) {
+                                                let lit = match static_val {
+                                                    StaticValue::Int(v) => Lit::Int(v),
+                                                    StaticValue::Float(v) => Lit::Float(v),
+                                                    StaticValue::Bool(v) => Lit::Bool(v),
+                                                    StaticValue::String(v) => Lit::Str(v),
+                                                    StaticValue::Unit => Lit::Unit,
+                                                };
+                                                values.insert(param_name.clone(), lit);
+                                                // Evaluate the constraint with the argument value bound.
+                                                if let Some(result) = self.eval_static_expr(constraint, &values) {
+                                                    if result != StaticValue::Bool(true) {
+                                                        self.type_error(
+                                                            "E0331",
+                                                            format!(
+                                                                "refinement violated: argument `{}` does not satisfy its constraint",
+                                                                param_name
+                                                            ),
+                                                            span,
+                                                        );
+                                                    }
+                                                }
                                             }
                                         }
                                     }

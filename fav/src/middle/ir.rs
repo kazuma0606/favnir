@@ -112,6 +112,8 @@ pub enum IRStmt {
     Expr(IRExpr),
     /// Coverage tracking: record that line N was executed (v1.7.0).
     TrackLine(u32),
+    /// Refinement assertion: evaluate `expr`, assert it is true (v18.3.0).
+    RefinementAssert { param: String, expr: IRExpr },
 }
 
 #[derive(Debug, Clone)]
@@ -274,5 +276,8 @@ fn collect_stmt_deps(stmt: &IRStmt, globals: &[IRGlobal], deps: &mut BTreeSet<St
             collect_expr_deps(expr, globals, deps);
         }
         IRStmt::TrackLine(_) => {}
+        IRStmt::RefinementAssert { expr, .. } => {
+            collect_expr_deps(expr, globals, deps);
+        }
     }
 }

@@ -1,0 +1,91 @@
+# Refinement Types
+
+Refinement types let you attach **value-level constraints** to function parameters using `where { expr }`. The type checker verifies the constraint at compile time when the argument is a literal, and injects a runtime assertion otherwise.
+
+## Basic Syntax
+
+```fav
+fn divide(a: Int, b: Int where { b != 0 }) -> Int {
+  a / b
+}
+```
+
+The constraint `where { b != 0 }` is attached to the parameter `b`. Inside the constraint expression, the parameter name is in scope.
+
+## Compile-time Check (E0331)
+
+When you pass a **literal** argument that violates the constraint, the compiler emits **E0331** at the call site:
+
+```fav
+fn divide(a: Int, b: Int where { b != 0 }) -> Int {
+  a / b
+}
+
+fn main() -> Int {
+  divide(10, 0)
+  // E0331: refinement violated: argument `b` does not satisfy its constraint
+}
+```
+
+Passing a valid literal is allowed:
+
+```fav
+fn main() -> Int {
+  divide(10, 2)  // ok: 2 != 0
+}
+```
+
+## Runtime Check
+
+When the argument is a variable or expression that cannot be evaluated at compile time, the compiler inserts a **runtime assertion** (`RefinementAssert` opcode). If the constraint is violated at runtime, the program panics with an error message:
+
+```fav
+fn main() -> Int {
+  bind divisor <- get_divisor()
+  divide(10, divisor)  // RefinementAssert: divisor != 0 checked at runtime
+}
+```
+
+## Compound Constraints
+
+Use `&&` and `||` to compose multiple conditions:
+
+```fav
+fn set_age(age: Int where { age >= 0 && age <= 150 }) -> Int {
+  age
+}
+```
+
+## Multiple Constrained Parameters
+
+Each parameter can independently have a `where` constraint:
+
+```fav
+fn slice(
+  arr: List<Int>,
+  start: Int where { start >= 0 },
+  end: Int where { end > start }
+) -> List<Int> {
+  List.slice(arr, start, end)
+}
+```
+
+## Error: E0331 Refinement Violated
+
+| Code | Description |
+|---|---|
+| E0331 | A literal argument at a call site fails the parameter's `where` constraint |
+
+The error is only emitted for **literal** arguments (integers, floats, booleans, strings). For variable arguments, a runtime check is used instead.
+
+## Relationship to `where` in Type Definitions
+
+The `where` keyword in parameter constraints is distinct from the `where` clause in type definitions. Inside `fn` parameter lists, `where { expr }` attaches a refinement to the preceding parameter.
+
+```fav
+// Parameter refinement (this file's topic)
+fn f(x: Int where { x > 0 }) -> Int { x }
+
+// Type-level where clause (type validation)
+type PositiveInt = Int where { value > 0 }
+```

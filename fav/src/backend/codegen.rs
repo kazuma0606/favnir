@@ -82,6 +82,11 @@ pub enum Opcode {
     ListGet = 0x61,
     /// Pops (list, n: Int), pushes list with first n elements dropped. (v17.2.0)
     ListDrop = 0x62,
+    /// Refinement assertion (v18.3.0).
+    /// Layout: opcode(1) + name_str_idx(2) = 3 bytes.
+    /// Pops a bool from the stack; if false, panics with a refinement error message.
+    /// The name_str_idx points to the param name in str_table.
+    RefinementAssert = 0x63,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -370,6 +375,12 @@ pub fn emit_stmt(stmt: &IRStmt, cg: &mut Codegen) {
             cg.emit_opcode(Opcode::TrackLine);
             // Emit line as u32 (4 bytes LE)
             cg.code.extend_from_slice(&line.to_le_bytes());
+        }
+        IRStmt::RefinementAssert { param, expr } => {
+            emit_expr(expr, cg);
+            cg.emit_opcode(Opcode::RefinementAssert);
+            let str_idx = cg.intern_str(param);
+            cg.emit_u16(str_idx);
         }
     }
 }
@@ -734,6 +745,11 @@ fn remap_string_operands(code: &mut [u8], str_remap: &[u16]) {
                 // Layout: opcode(1) + n_overrides(2) + names_idx(2)
                 remap_u16_at(code, ip + 3, str_remap); // remap names_idx
                 ip += 5;
+            }
+            x if x == Opcode::RefinementAssert as u8 => {
+                // Layout: opcode(1) + name_str_idx(2)
+                remap_u16_at(code, ip + 1, str_remap);
+                ip += 3;
             }
             _ => break,
         }

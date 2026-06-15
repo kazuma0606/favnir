@@ -3069,6 +3069,7 @@ fn decode_opcode(byte: u8) -> Option<(&'static str, usize)> {
         Opcode::ListLen => ("ListLen", 1),
         Opcode::ListGet => ("ListGet", 1),
         Opcode::ListDrop => ("ListDrop", 1),
+        Opcode::RefinementAssert => ("RefinementAssert", 3), // 1 opcode + name_str_idx(2)
     };
 
     Some((name, width))
@@ -4070,6 +4071,9 @@ fn collect_tracklines_in_expr(expr: &IRExpr, out: &mut HashSet<u32>) {
                         collect_tracklines_in_expr(e, out);
                     }
                     IRStmt::SeqChain { expr: e, .. } => {
+                        collect_tracklines_in_expr(e, out);
+                    }
+                    IRStmt::RefinementAssert { expr: e, .. } => {
                         collect_tracklines_in_expr(e, out);
                     }
                 }
@@ -10612,6 +10616,10 @@ fn remap_ir_stmt(stmt: &IRStmt, global_idx_map: &std::collections::HashMap<u16, 
         IRStmt::Yield(expr) => IRStmt::Yield(remap_ir_expr(expr, global_idx_map)),
         IRStmt::Expr(expr) => IRStmt::Expr(remap_ir_expr(expr, global_idx_map)),
         IRStmt::TrackLine(line) => IRStmt::TrackLine(*line),
+        IRStmt::RefinementAssert { param, expr } => IRStmt::RefinementAssert {
+            param: param.clone(),
+            expr: remap_ir_expr(expr, global_idx_map),
+        },
     }
 }
 
@@ -28478,6 +28486,7 @@ mod v182000_tests {
     use crate::middle::checker::Checker;
 
     #[test]
+    #[ignore]
     fn version_is_18_2_0() {
         let cargo = include_str!("../Cargo.toml");
         assert!(cargo.contains("\"18.2.0\""), "Cargo.toml should have version 18.2.0");
@@ -28546,5 +28555,114 @@ fn main() -> Int {
         let (errors, _) = Checker::check_program(&prog);
         let has_e0337 = errors.iter().any(|e| e.code == "E0337");
         assert!(has_e0337, "expected E0337 for missing field, got: {:?}", errors);
+    }
+}
+
+// ── v183000_tests (v18.3.0) — Refinement Types ───────────────────────────────
+#[cfg(test)]
+mod v183000_tests {
+    use super::{build_artifact, exec_artifact_main};
+    use crate::frontend::parser::Parser;
+    use crate::middle::checker::Checker;
+
+    #[test]
+    fn version_is_18_3_0() {
+        let cargo = include_str!("../Cargo.toml");
+        assert!(cargo.contains("\"18.3.0\""), "Cargo.toml should have version 18.3.0");
+    }
+
+    #[test]
+    fn refinement_literal_pass() {
+        // divide(10, 2): b=2 satisfies b != 0 → no error
+        let src = r#"
+fn divide(a: Int, b: Int where { b != 0 }) -> Int {
+  a / b
+}
+fn main() -> Int {
+  divide(10, 2)
+}
+"#;
+        let prog = Parser::parse_str(src, "test.fav").expect("parse");
+        let (errors, _) = Checker::check_program(&prog);
+        let refinement_errors: Vec<_> = errors.iter().filter(|e| e.code == "E0331").collect();
+        assert!(
+            refinement_errors.is_empty(),
+            "refinement_literal_pass: b=2 should satisfy b != 0, got: {:?}",
+            refinement_errors
+        );
+    }
+
+    #[test]
+    fn refinement_literal_fail() {
+        // divide(10, 0): b=0 violates b != 0 → E0331
+        let src = r#"
+fn divide(a: Int, b: Int where { b != 0 }) -> Int {
+  a / b
+}
+fn main() -> Int {
+  divide(10, 0)
+}
+"#;
+        let prog = Parser::parse_str(src, "test.fav").expect("parse");
+        let (errors, _) = Checker::check_program(&prog);
+        let has_e0331 = errors.iter().any(|e| e.code == "E0331");
+        assert!(has_e0331, "expected E0331 for b=0 violating b != 0, got: {:?}", errors);
+    }
+
+    #[test]
+    fn refinement_runtime_check() {
+        // Variable argument comes from a helper fn — cannot be statically evaluated
+        // RefinementAssert opcode should be injected; program should run successfully
+        let src = r#"
+fn get_divisor() -> Int {
+  5
+}
+fn divide(a: Int, b: Int where { b != 0 }) -> Int {
+  a / b
+}
+fn main() -> Int {
+  bind x <- get_divisor()
+  divide(10, x)
+}
+"#;
+        let prog = Parser::parse_str(src, "test.fav").expect("parse");
+        let (errors, _) = Checker::check_program(&prog);
+        // No compile error (variable arg, cannot statically check)
+        let e0331_errors: Vec<_> = errors.iter().filter(|e| e.code == "E0331").collect();
+        assert!(
+            e0331_errors.is_empty(),
+            "refinement_runtime_check: variable arg should not produce E0331, got: {:?}",
+            e0331_errors
+        );
+        // Program should compile and run successfully
+        let program = Parser::parse_str(src, "test.fav").expect("parse");
+        let artifact = build_artifact(&program);
+        let result = exec_artifact_main(&artifact, None);
+        assert!(result.is_ok(), "refinement_runtime_check: expected Ok, got: {:?}", result);
+    }
+
+    #[test]
+    fn refinement_range_constraint() {
+        // age >= 0 && age <= 150 compound constraint, literal passing
+        let src = r#"
+fn set_age(age: Int where { age >= 0 && age <= 150 }) -> Int {
+  age
+}
+fn main() -> Int {
+  set_age(25)
+}
+"#;
+        let prog = Parser::parse_str(src, "test.fav").expect("parse");
+        let (errors, _) = Checker::check_program(&prog);
+        let refinement_errors: Vec<_> = errors.iter().filter(|e| e.code == "E0331").collect();
+        assert!(
+            refinement_errors.is_empty(),
+            "refinement_range_constraint: age=25 should satisfy constraint, got: {:?}",
+            refinement_errors
+        );
+        let program = Parser::parse_str(src, "test.fav").expect("parse");
+        let artifact = build_artifact(&program);
+        let result = exec_artifact_main(&artifact, None);
+        assert!(result.is_ok(), "refinement_range_constraint: expected Ok, got: {:?}", result);
     }
 }

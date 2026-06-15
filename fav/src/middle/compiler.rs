@@ -24,8 +24,9 @@ use super::ir::{
 };
 use crate::ast::{
     AbstractFlwDef, AbstractTrfDef, BinOp, BindStmt, Block, CompClause, Expr, FStringPart,
-    FlwBindingDef, FlwDef, FlwSlot, FlwStep, ImplDef, InterfaceDecl, InterfaceImplDecl, Item,
-    Lit, MatchArm, Pattern, PatternField, Program, Stmt, TypeBody, TypeExpr,
+    FlwBindingDef, FlwDef, FlwSlot, FlwStep, ForInStmt, ImplDef, InterfaceDecl,
+    InterfaceImplDecl, Item, Lit, MatchArm, Pattern, PatternField, Program, Stmt, TypeBody,
+    TypeExpr,
 };
 use crate::frontend::lexer::Span;
 
@@ -225,6 +226,11 @@ pub fn compile_program(program: &Program) -> IRProgram {
         "IO.println_float",
         "IO.println_bool",
         "IO.print",
+        // v17.7.0 forall generators
+        "__forall_gen_int",
+        "__forall_gen_str",
+        "__forall_gen_bool",
+        "__forall_gen_float",
     ] {
         if !ctx.globals.contains_key(*ns) {
             let idx = globals.len() as u16;
@@ -494,6 +500,11 @@ pub fn compile_program(program: &Program) -> IRProgram {
         "IO.println_float",
         "IO.println_bool",
         "IO.print",
+        // v17.7.0 forall generators
+        "__forall_gen_int",
+        "__forall_gen_str",
+        "__forall_gen_bool",
+        "__forall_gen_float",
     ] {
         if !ctx.globals.contains_key(*ns) {
             let idx = globals.len() as u16;
@@ -1688,10 +1699,6 @@ fn collect_free_vars_block(block: &Block, bound: &mut HashSet<String>, free: &mu
                 collect_free_vars_expr(&bind.expr, &mut local_bound, free);
                 pattern_binds(&bind.pattern, &mut local_bound);
             }
-            Stmt::Let(let_stmt) => {
-                collect_free_vars_expr(&let_stmt.expr, &mut local_bound, free);
-                local_bound.insert(let_stmt.name.clone());
-            }
             Stmt::Chain(chain) => {
                 if !local_bound.contains(&chain.name) {
                     free.insert(chain.name.clone());
@@ -1706,6 +1713,17 @@ fn collect_free_vars_block(block: &Block, bound: &mut HashSet<String>, free: &mu
                 collect_free_vars_expr(&f.iter, &mut local_bound, free);
                 let mut inner_bound = local_bound.clone();
                 inner_bound.insert(f.var.clone());
+                collect_free_vars_block(&f.body, &mut inner_bound, free);
+            }
+            Stmt::Forall(f) => {
+                let var_name = &f.vars[0].name;
+                if let Some(g) = &f.guard {
+                    let mut guard_bound = local_bound.clone();
+                    guard_bound.insert(var_name.clone());
+                    collect_free_vars_expr(g, &mut guard_bound, free);
+                }
+                let mut inner_bound = local_bound.clone();
+                inner_bound.insert(var_name.clone());
                 collect_free_vars_block(&f.body, &mut inner_bound, free);
             }
         }
@@ -2209,12 +2227,6 @@ fn compile_stmt_into(stmt: &Stmt, ctx: &mut CompileCtx, out: &mut Vec<IRStmt>) {
                 out.push(IRStmt::Bind(slot, expr_ir));
             }
         },
-        // let name = expr  (v17.4.0) — non-Result binding, no unwrap opcode
-        Stmt::Let(let_stmt) => {
-            let expr_ir = compile_expr(&let_stmt.expr, ctx);
-            let slot = ctx.define_local_with_ty(let_stmt.name.clone(), expr_ir.ty().clone());
-            out.push(IRStmt::Bind(slot, expr_ir));
-        }
         Stmt::Chain(chain) => {
             let expr_ir = compile_expr(&chain.expr, ctx);
             let slot = if let Some(slot) = ctx.resolve_local(&chain.name) {
@@ -2226,6 +2238,101 @@ fn compile_stmt_into(stmt: &Stmt, ctx: &mut CompileCtx, out: &mut Vec<IRStmt>) {
         }
         Stmt::Yield(yield_stmt) => out.push(IRStmt::Yield(compile_expr(&yield_stmt.expr, ctx))),
         Stmt::Expr(expr) => out.push(IRStmt::Expr(compile_expr(expr, ctx))),
+        Stmt::Forall(f) => {
+            // Desugar forall x: Type [where { guard }] { body }
+            // into: bind __vals <- __forall_gen_T(CASES); for x in __vals { body }
+            // (with guard: filter via ListComp + List.take)
+            let var_name = f.vars[0].name.clone();
+            let ty_name = match &f.vars[0].ty {
+                TypeExpr::Named(n, _, _) => n.as_str(),
+                _ => "Int",
+            };
+            let gen_fn = match ty_name {
+                "Int" => "__forall_gen_int",
+                "Float" => "__forall_gen_float",
+                "String" => "__forall_gen_str",
+                "Bool" => "__forall_gen_bool",
+                _ => "__forall_gen_int",
+            };
+            let cases: i64 = std::env::var("FORALL_CASES")
+                .ok()
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(100);
+            let sp = Span::dummy();
+            // Call __forall_gen_T(cases_n) where cases_n accounts for guard
+            let cases_n = if f.guard.is_some() { cases * 10 } else { cases };
+            let gen_call = Expr::Apply(
+                Box::new(Expr::Ident(gen_fn.to_string(), sp.clone())),
+                vec![Expr::Lit(Lit::Int(cases_n), sp.clone())],
+                sp.clone(),
+            );
+            let raw_vals_name = "__forall_vals_raw".to_string();
+            // bind __forall_vals_raw <- __forall_gen_T(cases_n)
+            let bind_raw = Stmt::Bind(BindStmt {
+                pattern: Pattern::Bind(raw_vals_name.clone(), sp.clone()),
+                annotated_ty: None,
+                expr: gen_call,
+                span: sp.clone(),
+            });
+            compile_stmt_into(&bind_raw, ctx, out);
+
+            let iter_name = if f.guard.is_some() {
+                let taken_name = "__forall_vals_taken".to_string();
+                // bind __forall_vals_filtered <- [x | x <- __forall_vals_raw, guard]
+                let filtered_name = "__forall_vals_filtered".to_string();
+                let filter_comp = Expr::ListComp {
+                    expr: Box::new(Expr::Ident(var_name.clone(), sp.clone())),
+                    clauses: vec![
+                        CompClause::For {
+                            var: var_name.clone(),
+                            src: Box::new(Expr::Ident(raw_vals_name.clone(), sp.clone())),
+                            span: sp.clone(),
+                        },
+                        CompClause::Guard(Box::new(f.guard.as_ref().unwrap().clone())),
+                    ],
+                    span: sp.clone(),
+                };
+                let bind_filtered = Stmt::Bind(BindStmt {
+                    pattern: Pattern::Bind(filtered_name.clone(), sp.clone()),
+                    annotated_ty: None,
+                    expr: filter_comp,
+                    span: sp.clone(),
+                });
+                compile_stmt_into(&bind_filtered, ctx, out);
+                // bind __forall_vals_taken <- List.take(__forall_vals_filtered, CASES)
+                let list_take_call = Expr::Apply(
+                    Box::new(Expr::FieldAccess(
+                        Box::new(Expr::Ident("List".to_string(), sp.clone())),
+                        "take".to_string(),
+                        sp.clone(),
+                    )),
+                    vec![
+                        Expr::Ident(filtered_name.clone(), sp.clone()),
+                        Expr::Lit(Lit::Int(cases), sp.clone()),
+                    ],
+                    sp.clone(),
+                );
+                let bind_taken = Stmt::Bind(BindStmt {
+                    pattern: Pattern::Bind(taken_name.clone(), sp.clone()),
+                    annotated_ty: None,
+                    expr: list_take_call,
+                    span: sp.clone(),
+                });
+                compile_stmt_into(&bind_taken, ctx, out);
+                taken_name
+            } else {
+                raw_vals_name
+            };
+
+            // for x in iter_name { body }
+            let for_stmt = Stmt::ForIn(ForInStmt {
+                var: var_name.clone(),
+                iter: Expr::Ident(iter_name, sp.clone()),
+                body: f.body.clone(),
+                span: sp.clone(),
+            });
+            compile_stmt_into(&for_stmt, ctx, out);
+        }
         Stmt::ForIn(f) => {
             // Desugar: `for x in iter { body }` → `List.fold(iter, Unit, |$acc, x| { body; Unit })`
             let closure_name = format!("$for_closure{}", ctx.closure_counter);

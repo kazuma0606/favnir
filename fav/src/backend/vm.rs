@@ -15131,6 +15131,85 @@ fn vm_call_builtin(
             Ok(VMValue::Unit)
         }
 
+        // ── forall generators (v17.7.0) ───────────────────────────────────────
+        "__forall_gen_int" => {
+            let n = match args.into_iter().next() {
+                Some(VMValue::Int(n)) => n.max(0) as usize,
+                _ => 100,
+            };
+            let seed_fixed = [0i64, 1, -1, i32::MAX as i64, i32::MIN as i64];
+            let mut vals: Vec<VMValue> = seed_fixed.iter().take(n).map(|&v| VMValue::Int(v)).collect();
+            if n > seed_fixed.len() {
+                let mut state: u64 = 12345;
+                for _ in 0..(n - seed_fixed.len()) {
+                    state ^= state << 13;
+                    state ^= state >> 7;
+                    state ^= state << 17;
+                    vals.push(VMValue::Int(state as i64));
+                }
+            }
+            Ok(VMValue::List(FavList::new(vals)))
+        }
+        "__forall_gen_str" => {
+            let n = match args.into_iter().next() {
+                Some(VMValue::Int(n)) => n.max(0) as usize,
+                _ => 100,
+            };
+            let seed_fixed = ["", " ", "a", "\n", "hello world"];
+            let mut vals: Vec<VMValue> = seed_fixed.iter().take(n).map(|&v| VMValue::Str(v.to_string())).collect();
+            if n > seed_fixed.len() {
+                let mut state: u64 = 12345;
+                for _ in 0..(n - seed_fixed.len()) {
+                    state ^= state << 13;
+                    state ^= state >> 7;
+                    state ^= state << 17;
+                    let len = (state % 21) as usize; // 0..=20
+                    let mut s = String::with_capacity(len);
+                    for _ in 0..len {
+                        state ^= state << 13;
+                        state ^= state >> 7;
+                        state ^= state << 17;
+                        let ch = (32u8 + (state % 95) as u8) as char; // ASCII 32-126
+                        s.push(ch);
+                    }
+                    vals.push(VMValue::Str(s));
+                }
+            }
+            Ok(VMValue::List(FavList::new(vals)))
+        }
+        "__forall_gen_bool" => {
+            let n = match args.into_iter().next() {
+                Some(VMValue::Int(n)) => n.max(0) as usize,
+                _ => 100,
+            };
+            let vals: Vec<VMValue> = (0..n).map(|i| VMValue::Bool(i % 2 == 0)).collect();
+            Ok(VMValue::List(FavList::new(vals)))
+        }
+        "__forall_gen_float" => {
+            let n = match args.into_iter().next() {
+                Some(VMValue::Int(n)) => n.max(0) as usize,
+                _ => 100,
+            };
+            let seed_fixed: &[f64] = &[0.0, 1.0, -1.0, 0.5, -0.5];
+            let mut vals: Vec<VMValue> = seed_fixed.iter().take(n).map(|&v| VMValue::Float(v)).collect();
+            if n > seed_fixed.len() {
+                let mut state: u64 = 12345;
+                for _ in 0..(n - seed_fixed.len()) {
+                    state ^= state << 13;
+                    state ^= state >> 7;
+                    state ^= state << 17;
+                    // Map to [-1e6, 1e6] range, exclude NaN/Inf
+                    let f = (state as i64 as f64) / (i64::MAX as f64) * 1_000_000.0;
+                    if f.is_finite() {
+                        vals.push(VMValue::Float(f));
+                    } else {
+                        vals.push(VMValue::Float(0.0));
+                    }
+                }
+            }
+            Ok(VMValue::List(FavList::new(vals)))
+        }
+
         other => Err(format!("unknown builtin: {}", other)),
     }
 }

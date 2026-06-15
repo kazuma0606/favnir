@@ -1,0 +1,103 @@
+# fav test — Property-Based Testing (`forall`)
+
+`forall` を使うと、自動生成された任意の入力値に対してプロパティ（性質）が成立するかを検証できます。
+
+---
+
+## 基本構文
+
+```fav
+test "絶対値は非負" {
+  forall n: Int {
+    assert_true(Math.abs(n) >= 0)
+  }
+}
+```
+
+`forall name: Type { body }` の形式で記述します。
+デフォルトで **100 ケース** の入力値を自動生成して検証します。
+
+---
+
+## 対応型（v17.7.0）
+
+| 型 | 生成される値 |
+|---|---|
+| `Int` | 0, 1, -1, 2^31-1, -2^31, + ランダム整数 |
+| `Float` | 0.0, 1.0, -1.0, 0.5, -0.5, + ランダム浮動小数点 |
+| `String` | `""`, `" "`, `"a"`, `"\n"`, `"hello world"`, + ランダム ASCII 文字列 |
+| `Bool` | `true` / `false` の繰り返し（最大 2 パターン） |
+
+> v17.8.0 以降: `List<T>` / 複数変数 / Shrinking 対応予定
+
+---
+
+## ガード条件（`where { ... }`）
+
+入力の前提条件を絞り込めます。
+
+```fav
+test "非ゼロ整数の絶対値は正" {
+  forall n: Int where { n != 0 } {
+    assert_true(Math.abs(n) > 0)
+  }
+}
+```
+
+- ガード条件を満たさない値はスキップされます（件数にカウントされません）
+- スキップが多すぎる場合は `--cases N` を増やしてください
+
+---
+
+## 失敗時の出力
+
+```
+FAIL  test "すべての Int は正"
+  assertion failed: assert_true
+```
+
+失敗した最初の入力値で停止します。
+v17.7.0 では Shrinking（反例の縮小）は行いません（v17.8.0 以降）。
+
+---
+
+## `--cases N` オプション
+
+```bash
+fav test src/pipeline.test.fav --cases 200
+```
+
+`forall` ブロックの試行回数を変更します（デフォルト: 100）。
+
+| オプション | 説明 | デフォルト |
+|---|---|---|
+| `--cases N` | forall の試行回数 | 100 |
+
+---
+
+## 使用例
+
+```fav
+// String.trim の冪等性
+test "trim は冪等" {
+  forall s: String {
+    bind trimmed <- String.trim(s)
+    assert_eq(trimmed, String.trim(trimmed))
+  }
+}
+
+// Bool の対称性
+test "Bool は true か false のどちらか" {
+  forall b: Bool {
+    assert_true(b == true || b == false)
+  }
+}
+
+// 除算ガード
+test "非ゼロ整数で除算できる" {
+  forall n: Int where { n != 0 } {
+    bind q <- 100 / n
+    assert_true(q * n == 100 || 100 % n != 0)
+  }
+}
+```

@@ -62,6 +62,7 @@ pub enum TokenKind {
     Cap,
     Impl,
     For,
+    Forall,
     In,
     Par,
     Stage,
@@ -76,7 +77,6 @@ pub enum TokenKind {
     Bench,
     Alias,
     As,
-    Let, // "let" (v17.4.0)
 
     // Effect keywords
     Pure,
@@ -526,6 +526,7 @@ impl Lexer {
             "cap" => TokenKind::Cap,
             "impl" => TokenKind::Impl,
             "for" => TokenKind::For,
+            "forall" => TokenKind::Forall,
             "in" => TokenKind::In,
             "par" => TokenKind::Par,
             "stage" => TokenKind::Stage,
@@ -540,7 +541,6 @@ impl Lexer {
             "bench" => TokenKind::Bench,
             "alias" => TokenKind::Alias,
             "as" => TokenKind::As,
-            "let" => TokenKind::Let,
             "Pure" => TokenKind::Pure,
             "Io" => TokenKind::Io,
             "emit" => TokenKind::Emit,
@@ -750,7 +750,7 @@ mod tests {
     #[test]
     fn test_keywords() {
         let kinds = lex(
-            "type fn trf abstract flw bind match if else public internal private namespace use import interface with invariant effect cap impl for",
+            "type fn trf abstract flw bind match if else public internal private namespace use import interface with invariant effect cap impl for forall",
         );
         assert_eq!(
             kinds,
@@ -777,6 +777,7 @@ mod tests {
                 TokenKind::Cap,
                 TokenKind::Impl,
                 TokenKind::For,
+                TokenKind::Forall,
                 TokenKind::Eof,
             ]
         );

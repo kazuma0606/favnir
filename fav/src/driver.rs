@@ -4203,25 +4203,96 @@ fn collect_bench_cases(
     (cases, total)
 }
 
-fn exec_bench_case(prog: &ast::Program, description: &str, iters: u64) -> Result<f64, String> {
+// ── BenchStats + helpers (v17.6.0) ────────────────────────────────────────────
+
+pub struct BenchStats {
+    pub name: String,
+    pub runs: u64,
+    pub avg_us: f64,
+    pub p50_us: f64,
+    pub p95_us: f64,
+    pub min_us: f64,
+    pub max_us: f64,
+}
+
+pub fn compute_bench_stats(name: &str, mut timings_us: Vec<f64>) -> BenchStats {
+    let n = timings_us.len();
+    timings_us.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    let avg_us = timings_us.iter().sum::<f64>() / n as f64;
+    let p50_us = timings_us[(n * 50).saturating_sub(1) / 100];
+    let p95_us = timings_us[(n * 95).saturating_sub(1) / 100];
+    let min_us = timings_us[0];
+    let max_us = timings_us[n - 1];
+    BenchStats { name: name.to_string(), runs: n as u64, avg_us, p50_us, p95_us, min_us, max_us }
+}
+
+pub fn format_duration_us(us: f64) -> String {
+    if us < 1_000.0 {
+        format!("{:.1}µs", us)
+    } else if us < 1_000_000.0 {
+        format!("{:.1}ms", us / 1_000.0)
+    } else {
+        format!("{:.2}s", us / 1_000_000.0)
+    }
+}
+
+pub fn bench_stats_to_json(results: &[BenchStats]) -> String {
+    let benchmarks: Vec<serde_json::Value> = results
+        .iter()
+        .map(|s| {
+            serde_json::json!({
+                "name":   s.name,
+                "runs":   s.runs,
+                "avg_us": s.avg_us,
+                "p50_us": s.p50_us,
+                "p95_us": s.p95_us,
+                "min_us": s.min_us,
+                "max_us": s.max_us,
+            })
+        })
+        .collect();
+    serde_json::json!({ "benchmarks": benchmarks }).to_string()
+}
+
+pub struct BenchOpts {
+    pub file: Option<String>,
+    pub filter: Option<String>,
+    pub runs: u64,
+    pub warmup: u64,
+    pub json: bool,
+}
+
+impl Default for BenchOpts {
+    fn default() -> Self {
+        BenchOpts { file: None, filter: None, runs: 100, warmup: 5, json: false }
+    }
+}
+
+fn exec_bench_case_timed(
+    prog: &ast::Program,
+    description: &str,
+    runs: u64,
+    warmup: u64,
+) -> Result<Vec<f64>, String> {
     let fn_name = format!("$bench:{}", description);
     let artifact = build_artifact(prog);
     let fn_idx = artifact
         .fn_idx_by_name(&fn_name)
         .ok_or_else(|| format!("bench function not found in artifact: {fn_name}"))?;
-    // warmup: 1 iter
-    VM::run(&artifact, fn_idx, vec![]).map_err(|e| e.message.clone())?;
-    // timed iters
-    let started = std::time::Instant::now();
-    for _ in 0..iters {
+    for _ in 0..warmup {
         VM::run(&artifact, fn_idx, vec![]).map_err(|e| e.message.clone())?;
     }
-    let elapsed_us = started.elapsed().as_micros() as f64;
-    Ok(elapsed_us / iters as f64)
+    let mut timings_us = Vec::with_capacity(runs as usize);
+    for _ in 0..runs {
+        let t = std::time::Instant::now();
+        VM::run(&artifact, fn_idx, vec![]).map_err(|e| e.message.clone())?;
+        timings_us.push(t.elapsed().as_micros() as f64);
+    }
+    Ok(timings_us)
 }
 
-pub fn cmd_bench(file: Option<&str>, filter: Option<&str>, iters: u64) {
-    let programs: Vec<(String, ast::Program)> = if let Some(path) = file {
+pub fn cmd_bench(opts: &BenchOpts) {
+    let programs: Vec<(String, ast::Program)> = if let Some(path) = opts.file.as_deref() {
         let source = load_file(path);
         let program = Parser::parse_str(&source, path).unwrap_or_else(|e| {
             eprintln!("{}", e);
@@ -4251,37 +4322,65 @@ pub fn cmd_bench(file: Option<&str>, filter: Option<&str>, iters: u64) {
             .collect()
     };
 
-    let (cases, total_discovered) = collect_bench_cases(programs, filter);
+    let (cases, total_discovered) = collect_bench_cases(programs, opts.filter.as_deref());
     let filtered = total_discovered.saturating_sub(cases.len());
     if cases.is_empty() {
         println!("no benchmarks found");
         return;
     }
 
-    println!(
-        "running {} benchmark{} ({} iterations each)",
-        cases.len(),
-        if cases.len() == 1 { "" } else { "s" },
-        iters
-    );
-    println!();
+    if !opts.json {
+        println!(
+            "running {} benchmark{} ({} runs, {} warmup)",
+            cases.len(),
+            if cases.len() == 1 { "" } else { "s" },
+            opts.runs,
+            opts.warmup,
+        );
+        println!();
+    }
 
     let _suppress = crate::backend::vm::SuppressIoGuard::new(true);
-    for (path, desc, prog) in &cases {
-        match exec_bench_case(prog, desc, iters) {
-            Ok(us_per_iter) => {
-                println!(
-                    "bench  {:<40}  {:.2} µs/iter  ({}  {})",
-                    desc, us_per_iter, iters, path
-                );
+    let max_name = cases.iter().map(|(_, desc, _)| desc.len()).max().unwrap_or(20);
+    let mut all_stats: Vec<BenchStats> = Vec::new();
+
+    for (_path, desc, prog) in &cases {
+        match exec_bench_case_timed(prog, desc, opts.runs, opts.warmup) {
+            Ok(timings) => {
+                let stats = compute_bench_stats(desc, timings);
+                if !opts.json {
+                    println!(
+                        "  {:<width$}  avg {:>8}  p50 {:>8}  p95 {:>8}  min {:>8}  max {:>8}",
+                        desc,
+                        format_duration_us(stats.avg_us),
+                        format_duration_us(stats.p50_us),
+                        format_duration_us(stats.p95_us),
+                        format_duration_us(stats.min_us),
+                        format_duration_us(stats.max_us),
+                        width = max_name,
+                    );
+                }
+                all_stats.push(stats);
             }
             Err(e) => {
-                println!("ERROR  {:<40}  {}", desc, e);
+                if !opts.json {
+                    println!("  ERROR  {:<width$}  {}", desc, e, width = max_name);
+                }
             }
         }
     }
-    println!();
-    println!("bench result: ok. {} filtered", filtered);
+
+    if opts.json {
+        println!("{}", bench_stats_to_json(&all_stats));
+    } else {
+        println!();
+        println!(
+            "bench result: {} benchmark{} completed. {} filtered",
+            all_stats.len(),
+            if all_stats.len() == 1 { "" } else { "s" },
+            filtered,
+        );
+    }
 }
 
 fn collect_bench_files(dir: &Path) -> Vec<PathBuf> {
@@ -27107,18 +27206,69 @@ mod v170000_tests {
     }
 }
 
+// ── v176000_tests (v17.6.0) — fav bench 統計強化 ─────────────────────────────
+#[cfg(test)]
+mod v176000_tests {
+    use super::{compute_bench_stats, bench_stats_to_json, collect_bench_cases, BenchStats};
+    use crate::frontend::parser::Parser;
+
+
+    #[test]
+    fn bench_def_parses() {
+        let src = r#"bench "transform rows" { 1 + 1 }"#;
+        let prog = Parser::parse_str(src, "test.fav").expect("parse");
+        let has_bench = prog.items.iter().any(|i| matches!(i, crate::ast::Item::BenchDef(_)));
+        assert!(has_bench, "bench def should be parsed");
+    }
+
+    #[test]
+    fn bench_stats_computed() {
+        let timings = vec![10.0, 20.0, 30.0, 40.0, 50.0, 60.0, 70.0, 80.0, 90.0, 100.0];
+        let stats = compute_bench_stats("test", timings);
+        assert_eq!(stats.runs, 10);
+        assert!((stats.avg_us - 55.0).abs() < 1.0, "avg should be ~55");
+        assert!((stats.min_us - 10.0).abs() < 1.0, "min should be 10");
+        assert!((stats.max_us - 100.0).abs() < 1.0, "max should be 100");
+        assert!(stats.p50_us >= 40.0 && stats.p50_us <= 60.0, "p50 should be around 50");
+    }
+
+    #[test]
+    fn bench_filter_option() {
+        let src = "bench \"transform rows\" { 1 + 1 }\nbench \"json parse\" { 2 + 2 }\n";
+        let prog = Parser::parse_str(src, "test.fav").expect("parse");
+        let programs = vec![("test.fav".to_string(), prog)];
+        let (filtered, total) = collect_bench_cases(programs, Some("transform"));
+        assert_eq!(total, 2, "should find 2 benches total");
+        assert_eq!(filtered.len(), 1, "filter should match 1 bench");
+        assert_eq!(filtered[0].1, "transform rows");
+    }
+
+    #[test]
+    fn bench_json_output() {
+        let stats = vec![BenchStats {
+            name: "my bench".to_string(),
+            runs: 100,
+            avg_us: 1234.5,
+            p50_us: 1200.0,
+            p95_us: 1500.0,
+            min_us: 1000.0,
+            max_us: 2000.0,
+        }];
+        let json = bench_stats_to_json(&stats);
+        assert!(json.contains("\"benchmarks\""), "json should have benchmarks key");
+        assert!(json.contains("\"my bench\""), "json should have bench name");
+        assert!(json.contains("\"avg_us\""), "json should have avg_us");
+        assert!(json.contains("\"p50_us\""), "json should have p50_us");
+        assert!(json.contains("\"p95_us\""), "json should have p95_us");
+    }
+}
+
 // ── v174000_tests (v17.4.0) — `let` バインディング ───────────────────────────────
 #[cfg(test)]
 // ── v175000_tests (v17.5.0) — REPL 品質向上 ──────────────────────────────────
 #[cfg(test)]
 mod v175000_tests {
     use super::{repl_doc_str, repl_complete_prefix, handle_load_cmd, handle_paste_block, ReplSession};
-
-    #[test]
-    fn version_is_17_5_0() {
-        let cargo = include_str!("../Cargo.toml");
-        assert!(cargo.contains("\"17.5.0\""), "Cargo.toml should have version 17.5.0");
-    }
 
     #[test]
     fn repl_doc_command() {
@@ -27161,7 +27311,7 @@ mod v175000_tests {
     }
 }
 
-// ── v174000_tests (v17.4.0) — let バインディング ─────────────────────────────
+// ── v174000_tests (v17.4.0) — let 除去・bind 非 Result 動作確認 ───────────────
 #[cfg(test)]
 mod v174000_tests {
     use super::{build_artifact, exec_artifact_main};
@@ -27175,12 +27325,12 @@ mod v174000_tests {
     }
 
     #[test]
-    fn let_binding_basic() {
-        // let x = 42 で束縛し、加算に使える
+    fn bind_non_result_basic() {
+        // bind は非 Result 値でも使える
         let result = run(r#"
 fn main() -> Int {
-    let x = 42
-    let y = 8
+    bind x <- 42
+    bind y <- 8
     x + y
 }
 "#);
@@ -27188,11 +27338,11 @@ fn main() -> Int {
     }
 
     #[test]
-    fn let_binding_string() {
-        // let name = String.trim(s) が動作する
+    fn bind_non_result_string() {
+        // bind で String 値を束縛できる
         let result = run(r#"
 fn main() -> Int {
-    let name = String.trim("  hello  ")
+    bind name <- String.trim("  hello  ")
     String.length(name)
 }
 "#);
@@ -27200,30 +27350,40 @@ fn main() -> Int {
     }
 
     #[test]
-    fn let_with_bind_mix() {
-        // let と bind の混在が動作する（bind は List 束縛、let は Int 計算）
+    fn bind_mix_result_and_non_result() {
+        // bind は式の値をそのまま束縛する（unwrap しない）
         let result = run(r#"
 fn main() -> Int {
-    bind ns <- List.push(List.singleton(1), 2)
-    let len = List.length(ns)
-    let doubled = len * 2
-    doubled
+    bind x <- 10
+    bind y <- 20
+    bind sum <- x + y
+    sum
 }
 "#);
-        assert_eq!(result, Value::Int(4));
+        assert_eq!(result, Value::Int(30));
     }
 
     #[test]
-    fn let_with_list_comp() {
-        // let で list comprehension 結果を束縛
+    fn bind_with_list_comp() {
+        // bind で list comprehension 結果を束縛
         let result = run(r#"
 fn main() -> Int {
     bind ns <- List.push(List.push(List.singleton(1), 2), 3)
-    let doubled = [x * 2 | x <- ns]
+    bind doubled <- [x * 2 | x <- ns]
     List.length(doubled)
 }
 "#);
         assert_eq!(result, Value::Int(3));
+    }
+
+    #[test]
+    fn let_keyword_not_recognized() {
+        // 'let' はキーワードではなくなった（parse error になる）
+        let result = Parser::parse_str(
+            "fn main() -> Int { let x = 42\n x }",
+            "test.fav",
+        );
+        assert!(result.is_err(), "let should not be a valid keyword");
     }
 }
 
@@ -27755,5 +27915,97 @@ public fn main() -> Int {
 }
 "#);
         assert_eq!(result, 128);
+    }
+}
+
+// ── v177000_tests (v17.7.0) — forall プロパティベーステスト ───────────────────────
+#[cfg(test)]
+mod v177000_tests {
+    use super::{build_artifact};
+    use crate::frontend::parser::Parser;
+    use crate::backend::vm::VM;
+
+    fn run_test_fn(src: &str, test_name: &str) -> Result<(), String> {
+        let program = Parser::parse_str(src, "v177000_test.fav").map_err(|e| e.to_string())?;
+        let artifact = build_artifact(&program);
+        let fn_name = format!("$test:{}", test_name);
+        let fn_idx = artifact
+            .fn_idx_by_name(&fn_name)
+            .ok_or_else(|| format!("test fn not found: {}", fn_name))?;
+        VM::run(&artifact, fn_idx, vec![])
+            .map(|_| ())
+            .map_err(|e| e.message)
+    }
+
+    #[test]
+    fn version_is_17_7_0() {
+        let cargo = include_str!("../Cargo.toml");
+        assert!(cargo.contains("\"17.7.0\""), "Cargo.toml should have version 17.7.0");
+    }
+
+    #[test]
+    fn forall_int_parses() {
+        let src = r#"
+test "forall int parses" {
+  forall n: Int {
+    assert_true(Math.abs(n) >= 0 || Math.abs(n) < 0)
+  }
+}
+"#;
+        let prog = Parser::parse_str(src, "test.fav").expect("parse");
+        let has_forall = prog.items.iter().any(|i| {
+            if let crate::ast::Item::TestDef(t) = i {
+                t.body.stmts.iter().any(|s| matches!(s, crate::ast::Stmt::Forall(_)))
+            } else {
+                false
+            }
+        });
+        assert!(has_forall, "forall stmt should be parsed inside test block");
+    }
+
+    #[test]
+    fn forall_string_idempotent() {
+        let src = r#"
+test "trim idempotent" {
+  forall s: String {
+    bind trimmed <- String.trim(s)
+    assert_eq(trimmed, String.trim(trimmed))
+  }
+}
+"#;
+        let result = run_test_fn(src, "trim idempotent");
+        assert!(result.is_ok(), "forall string idempotent should pass: {:?}", result);
+    }
+
+    #[test]
+    fn forall_finds_counterexample() {
+        let src = r#"
+test "all int positive" {
+  forall n: Int {
+    assert_true(n > 0)
+  }
+}
+"#;
+        let result = run_test_fn(src, "all int positive");
+        assert!(result.is_err(), "forall should find counterexample for false property");
+        let err = result.unwrap_err();
+        assert!(
+            err.contains("assert") || err.contains("false") || err.contains("counterexample"),
+            "error should mention assertion failure, got: {}", err
+        );
+    }
+
+    #[test]
+    fn forall_with_guard() {
+        let src = r#"
+test "nonzero abs positive" {
+  forall n: Int where { n != 0 } {
+    bind abs_n <- Math.abs(n)
+    assert_true(abs_n > 0)
+  }
+}
+"#;
+        let result = run_test_fn(src, "nonzero abs positive");
+        assert!(result.is_ok(), "forall with guard should pass: {:?}", result);
     }
 }

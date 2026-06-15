@@ -124,12 +124,15 @@ fn lint_block_l008(block: &Block, errors: &mut Vec<LintError>) {
     for stmt in &block.stmts {
         match stmt {
             Stmt::Bind(b) => lint_expr_l008(&b.expr, errors),
-            Stmt::Let(l) => lint_expr_l008(&l.expr, errors),
             Stmt::Expr(e) => lint_expr_l008(e, errors),
             Stmt::Chain(c) => lint_expr_l008(&c.expr, errors),
             Stmt::Yield(y) => lint_expr_l008(&y.expr, errors),
             Stmt::ForIn(f) => {
                 lint_expr_l008(&f.iter, errors);
+                lint_block_l008(&f.body, errors);
+            }
+            Stmt::Forall(f) => {
+                if let Some(g) = &f.guard { lint_expr_l008(g, errors); }
                 lint_block_l008(&f.body, errors);
             }
         }
@@ -303,12 +306,15 @@ fn collect_block_calls(block: &Block, names: &HashSet<String>, uses: &mut HashSe
     for stmt in &block.stmts {
         match stmt {
             Stmt::Bind(b) => collect_expr_calls(&b.expr, names, uses),
-            Stmt::Let(l) => collect_expr_calls(&l.expr, names, uses),
             Stmt::Expr(e) => collect_expr_calls(e, names, uses),
             Stmt::Chain(c) => collect_expr_calls(&c.expr, names, uses),
             Stmt::Yield(y) => collect_expr_calls(&y.expr, names, uses),
             Stmt::ForIn(f) => {
                 collect_expr_calls(&f.iter, names, uses);
+                collect_block_calls(&f.body, names, uses);
+            }
+            Stmt::Forall(f) => {
+                if let Some(g) = &f.guard { collect_expr_calls(g, names, uses); }
                 collect_block_calls(&f.body, names, uses);
             }
         }
@@ -478,12 +484,15 @@ fn lint_block_unused_binds(block: &Block, errors: &mut Vec<LintError>) {
 fn lint_stmt_sub_blocks(stmt: &Stmt, errors: &mut Vec<LintError>) {
     match stmt {
         Stmt::Bind(b) => lint_expr_sub_blocks(&b.expr, errors),
-        Stmt::Let(l) => lint_expr_sub_blocks(&l.expr, errors),
         Stmt::Expr(e) => lint_expr_sub_blocks(e, errors),
         Stmt::Chain(c) => lint_expr_sub_blocks(&c.expr, errors),
         Stmt::Yield(y) => lint_expr_sub_blocks(&y.expr, errors),
         Stmt::ForIn(f) => {
             lint_expr_sub_blocks(&f.iter, errors);
+            lint_block_unused_binds(&f.body, errors);
+        }
+        Stmt::Forall(f) => {
+            if let Some(g) = &f.guard { lint_expr_sub_blocks(g, errors); }
             lint_block_unused_binds(&f.body, errors);
         }
     }
@@ -627,11 +636,14 @@ fn stmt_references(stmt: &Stmt, name: &str) -> bool {
             // (the pattern itself is a definition, not a reference)
             expr_references(&b.expr, name)
         }
-        Stmt::Let(l) => expr_references(&l.expr, name),
         Stmt::Expr(e) => expr_references(e, name),
         Stmt::Chain(c) => expr_references(&c.expr, name),
         Stmt::Yield(y) => expr_references(&y.expr, name),
         Stmt::ForIn(f) => expr_references(&f.iter, name) || block_references(&f.body, name),
+        Stmt::Forall(f) => {
+            f.guard.as_ref().map(|g| expr_references(g, name)).unwrap_or(false)
+                || block_references(&f.body, name)
+        }
     }
 }
 
@@ -711,12 +723,15 @@ fn collect_ambient_in_block(block: &Block, errors: &mut Vec<LintError>, code: &'
     for stmt in &block.stmts {
         match stmt {
             Stmt::Bind(b) => collect_ambient_in_expr(&b.expr, errors, code),
-            Stmt::Let(l) => collect_ambient_in_expr(&l.expr, errors, code),
             Stmt::Chain(c) => collect_ambient_in_expr(&c.expr, errors, code),
             Stmt::Expr(e) => collect_ambient_in_expr(e, errors, code),
             Stmt::Yield(y) => collect_ambient_in_expr(&y.expr, errors, code),
             Stmt::ForIn(f) => {
                 collect_ambient_in_expr(&f.iter, errors, code);
+                collect_ambient_in_block(&f.body, errors, code);
+            }
+            Stmt::Forall(f) => {
+                if let Some(g) = &f.guard { collect_ambient_in_expr(g, errors, code); }
                 collect_ambient_in_block(&f.body, errors, code);
             }
         }
@@ -853,12 +868,15 @@ fn collect_deprecated_in_block(block: &Block, errors: &mut Vec<LintError>) {
     for stmt in &block.stmts {
         match stmt {
             Stmt::Bind(b)  => collect_deprecated_in_expr(&b.expr, errors),
-            Stmt::Let(l)   => collect_deprecated_in_expr(&l.expr, errors),
             Stmt::Chain(c) => collect_deprecated_in_expr(&c.expr, errors),
             Stmt::Expr(e)  => collect_deprecated_in_expr(e, errors),
             Stmt::Yield(y) => collect_deprecated_in_expr(&y.expr, errors),
             Stmt::ForIn(f) => {
                 collect_deprecated_in_expr(&f.iter, errors);
+                collect_deprecated_in_block(&f.body, errors);
+            }
+            Stmt::Forall(f) => {
+                if let Some(g) = &f.guard { collect_deprecated_in_expr(g, errors); }
                 collect_deprecated_in_block(&f.body, errors);
             }
         }
@@ -1090,11 +1108,6 @@ fn collect_type_state_in_block(
                     }
                 }
             }
-            Stmt::Let(l) => {
-                collect_type_state_in_expr(
-                    &l.expr, fn_expects, fn_output, type_state_names, env, errors,
-                );
-            }
             Stmt::Chain(c) => {
                 collect_type_state_in_expr(
                     &c.expr, fn_expects, fn_output, type_state_names, env, errors,
@@ -1113,6 +1126,16 @@ fn collect_type_state_in_block(
                 collect_type_state_in_expr(
                     &f.iter, fn_expects, fn_output, type_state_names, env, errors,
                 );
+                collect_type_state_in_block(
+                    &f.body, fn_expects, fn_output, type_state_names, env, errors,
+                );
+            }
+            Stmt::Forall(f) => {
+                if let Some(g) = &f.guard {
+                    collect_type_state_in_expr(
+                        g, fn_expects, fn_output, type_state_names, env, errors,
+                    );
+                }
                 collect_type_state_in_block(
                     &f.body, fn_expects, fn_output, type_state_names, env, errors,
                 );

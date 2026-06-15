@@ -1716,16 +1716,6 @@ impl Parser {
                 continue;
             }
 
-            // let statement — non-Result binding (v17.4.0, trailing ; is optional)
-            if self.peek() == &TokenKind::Let {
-                let let_stmt = self.parse_let_stmt()?;
-                stmts.push(Stmt::Let(let_stmt));
-                if self.peek() == &TokenKind::Semicolon {
-                    self.advance();
-                }
-                continue;
-            }
-
             // chain statement (v0.5.0, trailing ; is optional like bind)
             if self.peek() == &TokenKind::Chain {
                 let chain = self.parse_chain_stmt()?;
@@ -1747,6 +1737,16 @@ impl Parser {
             if self.peek() == &TokenKind::For {
                 let f = self.parse_for_in_stmt()?;
                 stmts.push(Stmt::ForIn(f));
+                if self.peek() == &TokenKind::Semicolon {
+                    self.advance();
+                }
+                continue;
+            }
+
+            // forall property-based test statement (v17.7.0)
+            if self.peek() == &TokenKind::Forall {
+                let f = self.parse_forall_stmt()?;
+                stmts.push(Stmt::Forall(f));
                 if self.peek() == &TokenKind::Semicolon {
                     self.advance();
                 }
@@ -1804,21 +1804,6 @@ impl Parser {
         })
     }
 
-    // ── let_stmt (v17.4.0) ────────────────────────────────────────────────────
-
-    fn parse_let_stmt(&mut self) -> Result<LetStmt, ParseError> {
-        let start = self.peek_span().clone();
-        self.expect(&TokenKind::Let)?;
-        let (name, _) = self.expect_ident()?;
-        self.expect(&TokenKind::Eq)?;
-        let expr = self.parse_expr()?;
-        Ok(LetStmt {
-            name,
-            expr,
-            span: self.span_from(&start),
-        })
-    }
-
     fn parse_chain_stmt(&mut self) -> Result<ChainStmt, ParseError> {
         let start = self.peek_span().clone();
         self.expect(&TokenKind::Chain)?;
@@ -1855,6 +1840,38 @@ impl Parser {
         Ok(ForInStmt {
             var,
             iter,
+            body,
+            span: self.span_from(&start),
+        })
+    }
+
+    // ── forall stmt (v17.7.0) ─────────────────────────────────────────────────
+
+    fn parse_forall_stmt(&mut self) -> Result<ForallStmt, ParseError> {
+        let start = self.peek_span().clone();
+        self.expect(&TokenKind::Forall)?;
+        // parse single variable: name : Type
+        let var_start = self.peek_span().clone();
+        let (name, _) = self.expect_ident()?;
+        self.expect(&TokenKind::Colon)?;
+        let ty = self.parse_type_expr()?;
+        let var_span = self.span_from(&var_start);
+        let vars = vec![ForallVar { name, ty, span: var_span }];
+        // optional where { guard_expr }
+        let guard = if self.peek() == &TokenKind::Where {
+            self.advance();
+            self.expect(&TokenKind::LBrace)?;
+            let g = self.parse_expr()?;
+            self.expect(&TokenKind::RBrace)?;
+            Some(g)
+        } else {
+            None
+        };
+        // body block
+        let body = self.parse_block()?;
+        Ok(ForallStmt {
+            vars,
+            guard,
             body,
             span: self.span_from(&start),
         })

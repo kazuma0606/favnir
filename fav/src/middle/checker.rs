@@ -2902,12 +2902,17 @@ impl Checker {
     fn collect_helpers_in_stmt(&mut self, stmt: &Stmt) {
         match stmt {
             Stmt::Bind(b) => self.collect_helpers_in_expr(&b.expr),
-            Stmt::Let(l) => self.collect_helpers_in_expr(&l.expr),
             Stmt::Expr(expr) => self.collect_helpers_in_expr(expr),
             Stmt::Chain(c) => self.collect_helpers_in_expr(&c.expr),
             Stmt::Yield(y) => self.collect_helpers_in_expr(&y.expr),
             Stmt::ForIn(f) => {
                 self.collect_helpers_in_expr(&f.iter);
+                self.collect_helpers_in_block(&f.body);
+            }
+            Stmt::Forall(f) => {
+                if let Some(g) = &f.guard {
+                    self.collect_helpers_in_expr(g);
+                }
                 self.collect_helpers_in_block(&f.body);
             }
         }
@@ -3150,12 +3155,17 @@ impl Checker {
         for stmt in &block.stmts {
             match stmt {
                 Stmt::Bind(b) => self.scan_expr_for_pipeline_calls(&b.expr, ctx_map),
-                Stmt::Let(l) => self.scan_expr_for_pipeline_calls(&l.expr, ctx_map),
                 Stmt::Chain(c) => self.scan_expr_for_pipeline_calls(&c.expr, ctx_map),
                 Stmt::Expr(e) => self.scan_expr_for_pipeline_calls(e, ctx_map),
                 Stmt::Yield(y) => self.scan_expr_for_pipeline_calls(&y.expr, ctx_map),
                 Stmt::ForIn(f) => {
                     self.scan_expr_for_pipeline_calls(&f.iter, ctx_map);
+                    self.scan_block_for_pipeline_calls(&f.body, ctx_map);
+                }
+                Stmt::Forall(f) => {
+                    if let Some(g) = &f.guard {
+                        self.scan_expr_for_pipeline_calls(g, ctx_map);
+                    }
                     self.scan_block_for_pipeline_calls(&f.body, ctx_map);
                 }
             }
@@ -3760,18 +3770,6 @@ impl Checker {
                     self.check_pattern_bindings(&b.pattern, &effective_ty);
                 }
             }
-            // let name = expr  (v17.4.0) — non-Result binding
-            Stmt::Let(l) => {
-                let ty = self.check_expr(&l.expr);
-                if matches!(ty, Type::Result(_, _)) {
-                    self.type_error(
-                        "E0326",
-                        "cannot use `let` with a Result value — use `bind` instead",
-                        &l.span,
-                    );
-                }
-                self.env.define(l.name.clone(), ty);
-            }
             Stmt::Expr(e) => {
                 self.check_expr(e);
             }
@@ -3811,6 +3809,30 @@ impl Checker {
                 };
                 self.env.push();
                 self.env.define(f.var.clone(), elem_ty);
+                self.check_block(&f.body);
+                self.env.pop();
+            }
+            // forall x: Type [where { guard }] { body }  (v17.7.0)
+            Stmt::Forall(f) => {
+                let var = &f.vars[0];
+                let elem_ty = self.resolve_type_expr(&var.ty);
+                // E0327: only Int/Float/String/Bool supported in v17.7.0
+                match &elem_ty {
+                    Type::Int | Type::Float | Type::String | Type::Bool => {}
+                    _ => {
+                        self.type_error(
+                            "E0327",
+                            "forall only supports Int, Float, String, or Bool in v17.7.0",
+                            &var.span,
+                        );
+                    }
+                }
+                self.env.push();
+                self.env.define(var.name.clone(), elem_ty);
+                // type-check guard if present
+                if let Some(g) = &f.guard {
+                    self.check_expr(g);
+                }
                 self.check_block(&f.body);
                 self.env.pop();
             }

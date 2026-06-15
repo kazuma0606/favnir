@@ -405,16 +405,16 @@ impl Emitter {
                 let val = self.emit_expr(&y.expr);
                 self.line(&format!("yield {}", val));
             }
-            Stmt::Let(l) => {
-                let val = self.emit_expr(&l.expr);
-                self.line(&format!("{} = {}", l.name, val));
-            }
             Stmt::ForIn(f) => {
                 let iter = self.emit_expr(&f.iter);
                 self.line(&format!("for {} in {}:", f.var, iter));
                 self.indent += 1;
                 self.emit_block_body(&f.body);
                 self.indent -= 1;
+            }
+            Stmt::Forall(_f) => {
+                // forall not directly supported in Python output
+                self.line("# forall (property test) - not emitted");
             }
         }
     }

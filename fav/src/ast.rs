@@ -394,8 +394,6 @@ pub enum BinOp {
 #[derive(Debug, Clone)]
 pub enum Stmt {
     Bind(BindStmt),
-    /// `let name = expr`  non-Result binding (v17.4.0)
-    Let(LetStmt),
     Expr(Expr),
     /// `chain x <- expr`  Emonadic bind with early-exit on failure (v0.5.0)
     Chain(ChainStmt),
@@ -403,6 +401,25 @@ pub enum Stmt {
     Yield(YieldStmt),
     /// `for x in list { body }`  Eiteration statement (v1.9.0)
     ForIn(ForInStmt),
+    /// `forall x: Type [where { guard }] { body }`  property-based test (v17.7.0)
+    Forall(ForallStmt),
+}
+
+// ── ForallStmt (v17.7.0) ──────────────────────────────────────────────────────
+
+#[derive(Debug, Clone)]
+pub struct ForallStmt {
+    pub vars: Vec<ForallVar>,
+    pub guard: Option<Expr>,
+    pub body: Block,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone)]
+pub struct ForallVar {
+    pub name: String,
+    pub ty: TypeExpr,
+    pub span: Span,
 }
 
 // ── ForInStmt (v1.9.0) ────────────────────────────────────────────────────────
@@ -421,15 +438,6 @@ pub struct ForInStmt {
 pub struct BindStmt {
     pub pattern: Pattern,
     pub annotated_ty: Option<TypeExpr>,
-    pub expr: Expr,
-    pub span: Span,
-}
-
-// ── LetStmt (v17.4.0) ─────────────────────────────────────────────────────────
-
-#[derive(Debug, Clone)]
-pub struct LetStmt {
-    pub name: String,
     pub expr: Expr,
     pub span: Span,
 }
@@ -453,11 +461,11 @@ impl Stmt {
     pub fn span(&self) -> &Span {
         match self {
             Stmt::Bind(b) => &b.span,
-            Stmt::Let(l) => &l.span,
             Stmt::Expr(e) => e.span(),
             Stmt::Chain(c) => &c.span,
             Stmt::Yield(y) => &y.span,
             Stmt::ForIn(f) => &f.span,
+            Stmt::Forall(f) => &f.span,
         }
     }
 }

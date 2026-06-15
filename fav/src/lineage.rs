@@ -314,12 +314,15 @@ fn collect_sql_literals_block(block: &ast::Block, out: &mut Vec<String>) {
 fn collect_sql_literals_stmt(stmt: &ast::Stmt, out: &mut Vec<String>) {
     match stmt {
         ast::Stmt::Bind(b) => collect_sql_literals_inner(&b.expr, out),
-        ast::Stmt::Let(l) => collect_sql_literals_inner(&l.expr, out),
         ast::Stmt::Expr(e) => collect_sql_literals_inner(e, out),
         ast::Stmt::Chain(c) => collect_sql_literals_inner(&c.expr, out),
         ast::Stmt::Yield(y) => collect_sql_literals_inner(&y.expr, out),
         ast::Stmt::ForIn(f) => {
             collect_sql_literals_inner(&f.iter, out);
+            collect_sql_literals_block(&f.body, out);
+        }
+        ast::Stmt::Forall(f) => {
+            if let Some(g) = &f.guard { collect_sql_literals_inner(g, out); }
             collect_sql_literals_block(&f.body, out);
         }
     }
@@ -445,7 +448,6 @@ fn collect_azure_kinds_inner(expr: &ast::Expr, r: &mut bool, w: &mut bool) {
 fn collect_azure_kinds_stmt(stmt: &ast::Stmt, r: &mut bool, w: &mut bool) {
     match stmt {
         ast::Stmt::Bind(b) => collect_azure_kinds_inner(&b.expr, r, w),
-        ast::Stmt::Let(l) => collect_azure_kinds_inner(&l.expr, r, w),
         ast::Stmt::Expr(e) => collect_azure_kinds_inner(e, r, w),
         ast::Stmt::Chain(c) => collect_azure_kinds_inner(&c.expr, r, w),
         ast::Stmt::Yield(y) => collect_azure_kinds_inner(&y.expr, r, w),
@@ -454,6 +456,11 @@ fn collect_azure_kinds_stmt(stmt: &ast::Stmt, r: &mut bool, w: &mut bool) {
             for s in &f.body.stmts {
                 collect_azure_kinds_stmt(s, r, w);
             }
+            collect_azure_kinds_inner(&f.body.expr, r, w);
+        }
+        ast::Stmt::Forall(f) => {
+            if let Some(g) = &f.guard { collect_azure_kinds_inner(g, r, w); }
+            for s in &f.body.stmts { collect_azure_kinds_stmt(s, r, w); }
             collect_azure_kinds_inner(&f.body.expr, r, w);
         }
     }
@@ -553,12 +560,16 @@ fn collect_azure_blob_kinds_inner(expr: &ast::Expr, r: &mut bool, w: &mut bool) 
 fn collect_azure_blob_kinds_stmt(stmt: &ast::Stmt, r: &mut bool, w: &mut bool) {
     match stmt {
         ast::Stmt::Bind(b) => collect_azure_blob_kinds_inner(&b.expr, r, w),
-        ast::Stmt::Let(l) => collect_azure_blob_kinds_inner(&l.expr, r, w),
         ast::Stmt::Expr(e) => collect_azure_blob_kinds_inner(e, r, w),
         ast::Stmt::Chain(c) => collect_azure_blob_kinds_inner(&c.expr, r, w),
         ast::Stmt::Yield(y) => collect_azure_blob_kinds_inner(&y.expr, r, w),
         ast::Stmt::ForIn(f) => {
             collect_azure_blob_kinds_inner(&f.iter, r, w);
+            for s in &f.body.stmts { collect_azure_blob_kinds_stmt(s, r, w); }
+            collect_azure_blob_kinds_inner(&f.body.expr, r, w);
+        }
+        ast::Stmt::Forall(f) => {
+            if let Some(g) = &f.guard { collect_azure_blob_kinds_inner(g, r, w); }
             for s in &f.body.stmts { collect_azure_blob_kinds_stmt(s, r, w); }
             collect_azure_blob_kinds_inner(&f.body.expr, r, w);
         }
@@ -710,7 +721,6 @@ fn collect_sf_kinds_inner(expr: &ast::Expr, r: &mut bool, w: &mut bool) {
 fn collect_sf_kinds_stmt(stmt: &ast::Stmt, r: &mut bool, w: &mut bool) {
     match stmt {
         ast::Stmt::Bind(b) => collect_sf_kinds_inner(&b.expr, r, w),
-        ast::Stmt::Let(l) => collect_sf_kinds_inner(&l.expr, r, w),
         ast::Stmt::Expr(e) => collect_sf_kinds_inner(e, r, w),
         ast::Stmt::Chain(c) => collect_sf_kinds_inner(&c.expr, r, w),
         ast::Stmt::Yield(y) => collect_sf_kinds_inner(&y.expr, r, w),
@@ -719,6 +729,11 @@ fn collect_sf_kinds_stmt(stmt: &ast::Stmt, r: &mut bool, w: &mut bool) {
             for s in &f.body.stmts {
                 collect_sf_kinds_stmt(s, r, w);
             }
+            collect_sf_kinds_inner(&f.body.expr, r, w);
+        }
+        ast::Stmt::Forall(f) => {
+            if let Some(g) = &f.guard { collect_sf_kinds_inner(g, r, w); }
+            for s in &f.body.stmts { collect_sf_kinds_stmt(s, r, w); }
             collect_sf_kinds_inner(&f.body.expr, r, w);
         }
     }

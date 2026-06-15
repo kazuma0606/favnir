@@ -65,6 +65,7 @@ mod value;
 
 use driver::{
     cmd_bench, cmd_build, cmd_build_schema, cmd_bundle, cmd_check, cmd_check_with_sample,
+    BenchOpts,
     cmd_checkpoint_list, cmd_checkpoint_reset, cmd_checkpoint_set, cmd_checkpoint_show,
     cmd_db_migrate, cmd_db_migrate_rollback, cmd_db_migrate_status, cmd_deploy, cmd_doc,
     cmd_doc_builtins, cmd_docs,
@@ -130,9 +131,11 @@ COMMANDS:
                   With --coverage, print line coverage after tests complete.
                   With --coverage-report <dir>, write coverage report to <dir>/coverage.txt.
                   If <file> is omitted, runs all tests in the project.
-    bench [--filter <pattern>] [--iters <n>] [file]
+    bench [--runs <n>] [--iters <n>] [--warmup <n>] [--filter <pattern>] [--json] [file]
                   Run bench blocks in .fav / .bench.fav files.
-                  --iters sets iteration count (default: 100).
+                  --runs / --iters sets iteration count (default: 100).
+                  --warmup sets warmup iterations (default: 5).
+                  --json outputs results in JSON format.
                   If <file> is omitted, runs all bench blocks in the project.
     new <name> [--template <script|pipeline|lib>]
                   Create a new project scaffold (default template: script).
@@ -830,6 +833,7 @@ fn main_impl() {
             let mut coverage_report_dir: Option<String> = None;
             let mut update_snapshots = false;
             let mut file: Option<String> = None;
+            let mut cases: Option<u64> = None;
             let mut i = 2usize;
             while i < args.len() {
                 match args[i].as_str() {
@@ -871,11 +875,26 @@ fn main_impl() {
                         );
                         i += 2;
                     }
+                    "--cases" => {
+                        let n: u64 = args
+                            .get(i + 1)
+                            .and_then(|s| s.parse().ok())
+                            .unwrap_or_else(|| {
+                                eprintln!("error: --cases requires a positive integer");
+                                process::exit(1);
+                            });
+                        cases = Some(n);
+                        i += 2;
+                    }
                     other => {
                         file = Some(other.to_string());
                         i += 1;
                     }
                 }
+            }
+            if let Some(n) = cases {
+                // SAFETY: setting FORALL_CASES for this process only
+                unsafe { std::env::set_var("FORALL_CASES", n.to_string()) };
             }
             cmd_test(
                 file.as_deref(),
@@ -889,14 +908,12 @@ fn main_impl() {
         }
 
         Some("bench") => {
-            let mut filter: Option<String> = None;
-            let mut iters: u64 = 100;
-            let mut file: Option<String> = None;
+            let mut opts = BenchOpts::default();
             let mut i = 2usize;
             while i < args.len() {
                 match args[i].as_str() {
                     "--filter" => {
-                        filter = Some(
+                        opts.filter = Some(
                             args.get(i + 1)
                                 .unwrap_or_else(|| {
                                     eprintln!("error: --filter requires a pattern argument");
@@ -906,24 +923,39 @@ fn main_impl() {
                         );
                         i += 2;
                     }
-                    "--iters" => {
+                    "--runs" | "--iters" => {
                         let raw = args.get(i + 1).unwrap_or_else(|| {
-                            eprintln!("error: --iters requires a number");
+                            eprintln!("error: {} requires a number", args[i]);
                             process::exit(1);
                         });
-                        iters = raw.parse::<u64>().unwrap_or_else(|_| {
-                            eprintln!("error: --iters must be an integer");
+                        opts.runs = raw.parse::<u64>().unwrap_or_else(|_| {
+                            eprintln!("error: {} must be an integer", args[i]);
                             process::exit(1);
                         });
                         i += 2;
                     }
+                    "--warmup" => {
+                        let raw = args.get(i + 1).unwrap_or_else(|| {
+                            eprintln!("error: --warmup requires a number");
+                            process::exit(1);
+                        });
+                        opts.warmup = raw.parse::<u64>().unwrap_or_else(|_| {
+                            eprintln!("error: --warmup must be an integer");
+                            process::exit(1);
+                        });
+                        i += 2;
+                    }
+                    "--json" => {
+                        opts.json = true;
+                        i += 1;
+                    }
                     other => {
-                        file = Some(other.to_string());
+                        opts.file = Some(other.to_string());
                         i += 1;
                     }
                 }
             }
-            cmd_bench(file.as_deref(), filter.as_deref(), iters);
+            cmd_bench(&opts);
         }
 
         Some("watch") => {

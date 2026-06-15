@@ -456,10 +456,6 @@ impl Formatter {
                 let expr = self.expr(&b.expr);
                 format!("bind {}{} <- {};", pat, ann, expr)
             }
-            Stmt::Let(l) => {
-                let expr = self.expr(&l.expr);
-                format!("let {} = {};", l.name, expr)
-            }
             Stmt::Expr(e) => {
                 format!("{};", self.expr(e))
             }
@@ -475,6 +471,17 @@ impl Formatter {
                 let iter = self.expr(&f.iter);
                 let body = self.block(&f.body);
                 format!("for {} in {} {}", f.var, iter, body)
+            }
+            Stmt::Forall(f) => {
+                let var = &f.vars[0];
+                let ty = self.type_expr(&var.ty);
+                let body = self.block(&f.body);
+                if let Some(g) = &f.guard {
+                    let guard = self.expr(g);
+                    format!("forall {}: {} where {{ {} }} {}", var.name, ty, guard, body)
+                } else {
+                    format!("forall {}: {} {}", var.name, ty, body)
+                }
             }
         }
     }

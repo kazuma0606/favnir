@@ -1,0 +1,132 @@
+# REPL
+
+`fav repl` は Favnir のインタラクティブ実行環境です。式を入力して即座に評価したり、関数定義を累積してセッション内で再利用できます。
+
+## 起動
+
+```bash
+fav repl
+```
+
+```
+Favnir 17.5.0 — type :help for commands
+>
+```
+
+## コマンド一覧
+
+| コマンド | 説明 |
+|---|---|
+| `:help` | コマンド一覧を表示 |
+| `:quit` / `:q` | REPL を終了 |
+| `:reset` | セッションの定義をすべてクリア |
+| `:env` | 累積された定義を表示 |
+| `:type <expr>` | 式の型を表示 |
+| `:doc <Module.fn>` | 関数のシグネチャと説明を表示 |
+| `:load <path>` | `.fav` ファイルの定義をセッションに読み込む |
+| `:save <path>` | セッションの定義をファイルに保存 |
+| `:history` | 入力履歴を表示 |
+| `:paste ... :end` | 複数行の定義を入力するモードに入る |
+
+## 基本操作
+
+### 式の評価
+
+```
+> 1 + 2
+3
+> String.length("hello")
+5
+```
+
+### 関数定義の追加
+
+```
+> fn double(x: Int) -> Int { x * 2 }
+defined: double
+> double(21)
+42
+```
+
+### 型の確認
+
+```
+> :type 1 + 2
+Int
+> :type List.map([1, 2, 3], fn(x) { x * 2 })
+List<Int>
+```
+
+## `:doc` — ドキュメント表示
+
+`:doc <Module.fn>` で組み込み関数のシグネチャと説明を確認できます。
+
+```
+> :doc List.map
+List.map(list: List<A>, fn: A -> B) -> List<B>
+  Apply fn to each element
+
+> :doc String.trim
+String.trim(s: String) -> String
+  Remove leading/trailing whitespace
+```
+
+対応モジュール: `List` / `String` / `Json` / `Map` / `Result` / `IO`
+
+## `:load` — ファイルの読み込み
+
+`.fav` ファイル内の定義をセッションに追加します。
+
+```
+> :load src/helpers.fav
+loaded: safe_div, clamp, normalize
+> safe_div(10, 2)
+5
+```
+
+型エラーがある場合は読み込みを拒否しエラーを表示します。
+
+## `:save` — セッションの保存
+
+現在のセッション定義をファイルに書き出します。
+
+```
+> :save session.fav
+saved 3 definitions to session.fav
+```
+
+## `:history` — 履歴表示
+
+```
+> :history
+1: fn double(x: Int) -> Int { x * 2 }
+2: double(21)
+3: :type double(21)
+```
+
+## `:paste` モード — 複数行入力
+
+複数行にまたがる定義を入力するには `:paste` を使い、`:end` で終了します。
+
+```
+> :paste
+... fn clamp(x: Int, lo: Int, hi: Int) -> Int {
+...   if x < lo { lo }
+...   else if x > hi { hi }
+...   else { x }
+... }
+... :end
+defined: clamp
+> clamp(150, 0, 100)
+100
+```
+
+## タブ補完（`repl_complete_prefix`）
+
+補完ロジックは `repl_complete_prefix(prefix)` として公開されており、エディタ統合や将来の rustyline 接続に利用できます。
+
+```
+# "List." → List の全メソッド候補
+# ":d"    → [":doc "]
+# ":"     → 全コマンド
+```

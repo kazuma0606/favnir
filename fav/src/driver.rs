@@ -9833,15 +9833,17 @@ pub fn cmd_docs(file: Option<&str>, port: u16, no_open: bool) {
 struct ReplSession {
     definitions: String,
     def_names: Vec<String>,
+    history: Vec<String>, // v17.5.0
 }
 
 impl ReplSession {
     fn new() -> Self {
-        Self { definitions: String::new(), def_names: Vec::new() }
+        Self { definitions: String::new(), def_names: Vec::new(), history: Vec::new() }
     }
     fn reset(&mut self) {
         self.definitions.clear();
         self.def_names.clear();
+        self.history.clear();
         println!("session reset");
     }
     fn add_definition(&mut self, src: &str, name: &str) {
@@ -9851,6 +9853,158 @@ impl ReplSession {
         self.definitions.push_str(src);
         self.definitions.push('\n');
         self.def_names.push(name.to_string());
+    }
+    fn add_history(&mut self, line: &str) {
+        self.history.push(line.to_string());
+    }
+    fn print_history(&self) {
+        if self.history.is_empty() {
+            println!("(no history)");
+        } else {
+            for (i, line) in self.history.iter().enumerate() {
+                println!("{}: {}", i + 1, line);
+            }
+        }
+    }
+}
+
+// ── v17.5.0: REPL builtin docs ────────────────────────────────────────────────
+
+const BUILTIN_DOCS: &[(&str, &str, &str)] = &[
+    ("List.map",       "List.map(list: List<A>, fn: A -> B) -> List<B>",            "Apply fn to each element"),
+    ("List.filter",    "List.filter(list: List<A>, fn: A -> Bool) -> List<A>",       "Keep elements where fn is true"),
+    ("List.length",    "List.length(list: List<A>) -> Int",                          "Return number of elements"),
+    ("List.group_by",  "List.group_by(fn: A -> K, list: List<A>) -> Map<K, List<A>>","Group elements by key"),
+    ("List.sort_by",   "List.sort_by(list: List<A>, fn: A -> K) -> List<A>",        "Sort by key function"),
+    ("List.sort_by_desc","List.sort_by_desc(list: List<A>, fn: A -> K) -> List<A>", "Sort descending by key"),
+    ("List.flat_map",  "List.flat_map(list: List<A>, fn: A -> List<B>) -> List<B>", "Map then flatten"),
+    ("List.fold",      "List.fold(list: List<A>, init: B, fn: B -> A -> B) -> B",   "Reduce to single value"),
+    ("List.push",      "List.push(list: List<A>, elem: A) -> List<A>",              "Append element to end"),
+    ("List.singleton", "List.singleton(elem: A) -> List<A>",                        "Create single-element list"),
+    ("List.empty",     "List.empty() -> List<A>",                                   "Create empty list"),
+    ("List.take",      "List.take(list: List<A>, n: Int) -> List<A>",               "Take first n elements"),
+    ("List.drop",      "List.drop(list: List<A>, n: Int) -> List<A>",               "Drop first n elements"),
+    ("List.head",      "List.head(list: List<A>) -> Result<A, String>",             "Get first element"),
+    ("List.tail",      "List.tail(list: List<A>) -> Result<List<A>, String>",       "Get all but first"),
+    ("List.zip",       "List.zip(a: List<A>, b: List<B>) -> List<Pair<A, B>>",      "Zip two lists into pairs"),
+    ("List.reverse",   "List.reverse(list: List<A>) -> List<A>",                    "Reverse list"),
+    ("List.distinct",  "List.distinct(list: List<A>) -> List<A>",                   "Remove duplicates"),
+    ("List.count_where","List.count_where(list: List<A>, fn: A -> Bool) -> Int",    "Count matching elements"),
+    ("String.trim",    "String.trim(s: String) -> String",                          "Remove leading/trailing whitespace"),
+    ("String.length",  "String.length(s: String) -> Int",                           "Character count"),
+    ("String.to_upper","String.to_upper(s: String) -> String",                      "Convert to uppercase"),
+    ("String.to_lower","String.to_lower(s: String) -> String",                      "Convert to lowercase"),
+    ("String.split",   "String.split(s: String, sep: String) -> List<String>",      "Split by separator"),
+    ("String.contains","String.contains(s: String, sub: String) -> Bool",           "Check for substring"),
+    ("String.starts_with","String.starts_with(s: String, prefix: String) -> Bool",  "Prefix check"),
+    ("String.ends_with","String.ends_with(s: String, suffix: String) -> Bool",      "Suffix check"),
+    ("String.replace", "String.replace(s: String, from: String, to: String) -> String","Replace all occurrences"),
+    ("Json.stringify", "Json.stringify(val: A) -> Result<String, String>",          "Serialize to JSON"),
+    ("Json.parse",     "Json.parse(s: String) -> Result<A, String>",                "Parse JSON string"),
+    ("Map.empty",      "Map.empty() -> Map<K, V>",                                  "Create empty map"),
+    ("Map.insert",     "Map.insert(map: Map<K, V>, key: K, val: V) -> Map<K, V>",  "Insert key-value pair"),
+    ("Map.get",        "Map.get(map: Map<K, V>, key: K) -> Result<V, String>",      "Look up by key"),
+    ("Map.keys",       "Map.keys(map: Map<K, V>) -> List<K>",                       "All keys"),
+    ("Map.values",     "Map.values(map: Map<K, V>) -> List<V>",                     "All values"),
+    ("Map.contains_key","Map.contains_key(map: Map<K, V>, key: K) -> Bool",         "Check if key exists"),
+    ("Result.ok",      "Result.ok(val: A) -> Result<A, E>",                         "Wrap value in ok"),
+    ("Result.err",     "Result.err(err: E) -> Result<A, E>",                        "Wrap error in err"),
+    ("IO.println",     "IO.println(s: String) -> Unit",                             "Print line to stdout"),
+    ("IO.print",       "IO.print(s: String) -> Unit",                               "Print without newline"),
+    ("Debug.show_raw", "Debug.show_raw(val: A) -> String",                          "Convert value to debug string"),
+];
+
+const REPL_COMMANDS: &[&str] = &[
+    ":help", ":h", ":quit", ":q", ":reset", ":env",
+    ":history", ":paste", ":type ", ":doc ", ":load ", ":save ",
+];
+
+pub fn repl_doc_str(target: &str) -> Option<String> {
+    for (name, sig, desc) in BUILTIN_DOCS {
+        if *name == target {
+            return Some(format!("{}\n  {}", sig, desc));
+        }
+    }
+    None
+}
+
+fn handle_doc_cmd(target: &str) {
+    match repl_doc_str(target) {
+        Some(doc) => println!("{}", doc),
+        None => println!("no documentation found for '{}'", target),
+    }
+}
+
+pub fn repl_complete_prefix(prefix: &str) -> Vec<String> {
+    let mut result = Vec::new();
+    if prefix.starts_with(':') {
+        for cmd in REPL_COMMANDS {
+            if cmd.starts_with(prefix) {
+                result.push(cmd.to_string());
+            }
+        }
+    } else {
+        for (name, _, _) in BUILTIN_DOCS {
+            if name.starts_with(prefix) {
+                result.push(name.to_string());
+            }
+        }
+    }
+    result.sort();
+    result
+}
+
+fn extract_top_level_names(src: &str) -> Vec<String> {
+    src.lines()
+        .map(|l| l.trim())
+        .filter(|l| is_definition(l))
+        .map(|l| extract_def_name(l))
+        .collect()
+}
+
+pub fn handle_load_cmd(path: &str, session: &mut ReplSession) {
+    let src = match std::fs::read_to_string(path) {
+        Ok(s) => s,
+        Err(e) => { eprintln!("error: cannot read '{}': {}", path, e); return; }
+    };
+    let merged = format!("{}\n{}\n", session.definitions, src);
+    let errors = check_source_str(&merged);
+    if errors.is_empty() {
+        let names = extract_top_level_names(&src);
+        if names.is_empty() {
+            println!("loaded: (no definitions found)");
+        } else {
+            println!("loaded: {}", names.join(", "));
+        }
+        for name in names {
+            session.def_names.push(name);
+        }
+        if !session.definitions.is_empty() {
+            session.definitions.push('\n');
+        }
+        session.definitions.push_str(src.trim_end());
+        session.definitions.push('\n');
+    } else {
+        for e in &errors {
+            eprintln!("error: {}", e.message);
+        }
+    }
+}
+
+pub fn handle_paste_block(src: &str, session: &mut ReplSession) {
+    let trimmed = src.trim();
+    if trimmed.is_empty() { return; }
+    if is_definition(trimmed) {
+        handle_definition(trimmed, session);
+    } else {
+        handle_expression(trimmed, session);
+    }
+}
+
+fn handle_save_cmd(path: &str, session: &ReplSession) {
+    match std::fs::write(path, &session.definitions) {
+        Ok(_) => println!("saved {} definitions to {}", session.def_names.len(), path),
+        Err(e) => eprintln!("error: cannot write '{}': {}", path, e),
     }
 }
 
@@ -9967,11 +10121,16 @@ fn handle_type_cmd(expr: &str, session: &ReplSession) {
 
 fn print_repl_help() {
     println!("Commands:");
-    println!("  :help          show this help");
-    println!("  :quit / :q     exit the REPL");
-    println!("  :reset         clear all session definitions");
-    println!("  :env           show accumulated definitions");
-    println!("  :type <expr>   show the type of an expression");
+    println!("  :help              show this help");
+    println!("  :quit / :q         exit the REPL");
+    println!("  :reset             clear all session definitions");
+    println!("  :env               show accumulated definitions");
+    println!("  :type <expr>       show the type of an expression");
+    println!("  :doc <Module.fn>   show function signature and description");
+    println!("  :load <path>       load .fav file definitions into session");
+    println!("  :save <path>       save session definitions to file");
+    println!("  :history           show input history");
+    println!("  :paste ... :end    enter multi-line definition mode");
     println!();
     println!("Enter expressions to evaluate, or fn/stage/type definitions to add to the session.");
 }
@@ -9981,7 +10140,7 @@ pub fn cmd_repl() {
     let stdin = std::io::stdin();
     let stdout = std::io::stdout();
     let mut session = ReplSession::new();
-    println!("Favnir v9.10.0 — type :help for commands");
+    println!("Favnir {} — type :help for commands", env!("CARGO_PKG_VERSION"));
     loop {
         {
             let mut out = stdout.lock();
@@ -9995,6 +10154,7 @@ pub fn cmd_repl() {
         }
         let line = line.trim_end_matches(['\n', '\r']).trim();
         if line.is_empty() { continue; }
+        session.add_history(line);
         match line {
             ":quit" | ":q" => break,
             ":reset" => session.reset(),
@@ -10006,6 +10166,21 @@ pub fn cmd_repl() {
                     println!("{}", session.definitions);
                 }
             }
+            ":history" => session.print_history(),
+            ":paste" => {
+                let mut lines: Vec<String> = Vec::new();
+                loop {
+                    let mut l = String::new();
+                    if stdin.lock().read_line(&mut l).unwrap_or(0) == 0 { break; }
+                    let l_trimmed = l.trim_end_matches(['\n', '\r']);
+                    if l_trimmed.trim() == ":end" { break; }
+                    lines.push(l_trimmed.to_string());
+                }
+                handle_paste_block(&lines.join("\n"), &mut session);
+            }
+            _ if line.starts_with(":doc ") => handle_doc_cmd(line[5..].trim()),
+            _ if line.starts_with(":load ") => handle_load_cmd(line[6..].trim(), &mut session),
+            _ if line.starts_with(":save ") => handle_save_cmd(line[6..].trim(), &session),
             _ if line.starts_with(":type ") => {
                 handle_type_cmd(line[6..].trim(), &session);
             }
@@ -26934,6 +27109,60 @@ mod v170000_tests {
 
 // ── v174000_tests (v17.4.0) — `let` バインディング ───────────────────────────────
 #[cfg(test)]
+// ── v175000_tests (v17.5.0) — REPL 品質向上 ──────────────────────────────────
+#[cfg(test)]
+mod v175000_tests {
+    use super::{repl_doc_str, repl_complete_prefix, handle_load_cmd, handle_paste_block, ReplSession};
+
+    #[test]
+    fn version_is_17_5_0() {
+        let cargo = include_str!("../Cargo.toml");
+        assert!(cargo.contains("\"17.5.0\""), "Cargo.toml should have version 17.5.0");
+    }
+
+    #[test]
+    fn repl_doc_command() {
+        // repl_doc_str("List.map") が Some を返しシグネチャを含む
+        let doc = repl_doc_str("List.map");
+        assert!(doc.is_some(), "List.map should have documentation");
+        let doc = doc.unwrap();
+        assert!(doc.contains("List<"), "doc should mention List type");
+        assert!(doc.contains("List.map"), "doc should contain function name");
+    }
+
+    #[test]
+    fn repl_type_command_basic() {
+        // repl_complete_prefix で :type を補完できる
+        let completions = repl_complete_prefix(":ty");
+        assert!(completions.iter().any(|s| s.starts_with(":type")),
+            "':ty' should complete to ':type'");
+    }
+
+    #[test]
+    fn repl_load_file() {
+        // 一時ファイルを作成し handle_load_cmd でセッションに取り込める
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("helpers.fav");
+        std::fs::write(&path, "fn double(x: Int) -> Int { x * 2 }\n")
+            .expect("write");
+        let mut session = ReplSession::new();
+        handle_load_cmd(path.to_str().unwrap(), &mut session);
+        assert!(session.def_names.contains(&"double".to_string()),
+            "double should be loaded into session");
+    }
+
+    #[test]
+    fn repl_paste_mode() {
+        // handle_paste_block で複数行定義をセッションに追加できる
+        let mut session = ReplSession::new();
+        handle_paste_block("fn triple(x: Int) -> Int { x * 3 }", &mut session);
+        assert!(session.def_names.contains(&"triple".to_string()),
+            "triple should be in session after paste");
+    }
+}
+
+// ── v174000_tests (v17.4.0) — let バインディング ─────────────────────────────
+#[cfg(test)]
 mod v174000_tests {
     use super::{build_artifact, exec_artifact_main};
     use crate::frontend::parser::Parser;
@@ -26943,12 +27172,6 @@ mod v174000_tests {
         let program = Parser::parse_str(src, "v174000_test.fav").expect("parse");
         let artifact = build_artifact(&program);
         exec_artifact_main(&artifact, None).expect("exec")
-    }
-
-    #[test]
-    fn version_is_17_4_0() {
-        let cargo = include_str!("../Cargo.toml");
-        assert!(cargo.contains("\"17.4.0\""), "Cargo.toml should have version 17.4.0");
     }
 
     #[test]

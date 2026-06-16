@@ -4,3 +4,4 @@ pub mod compiler;
 pub mod ir;
 pub mod reachability;
 pub mod resolver;
+pub mod schema_loader;

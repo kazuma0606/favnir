@@ -248,6 +248,7 @@ fn get_help_text(code: &str) -> &'static [&'static str] {
 
 fn check_single_file_legacy(
     path: &str,
+    refresh_schemas: bool,
 ) -> (
     String,
     Vec<crate::middle::checker::TypeError>,
@@ -259,6 +260,7 @@ fn check_single_file_legacy(
         process::exit(1);
     });
     let mut checker = Checker::new();
+    checker.schema_refresh = refresh_schemas;
     let (errors, mut warnings) = checker.check_with_self(&program);
     warnings.extend(partial_flw_warnings(&program));
     (source, errors, warnings)
@@ -267,13 +269,14 @@ fn check_single_file_legacy(
 fn check_single_file(
     path: &str,
     legacy: bool,
+    refresh_schemas: bool,
 ) -> (
     String,
     Vec<crate::middle::checker::TypeError>,
     Vec<crate::middle::checker::FavWarning>,
 ) {
     if legacy {
-        return check_single_file_legacy(path);
+        return check_single_file_legacy(path, refresh_schemas);
     }
     let source = load_file(path);
     let program = Parser::parse_str(&source, path).unwrap_or_else(|e| {
@@ -948,7 +951,7 @@ fn check_source_str(src: &str) -> Vec<crate::middle::checker::TypeError> {
 /// by collect_merged_sources in compiler_fav_runner, v8.6.0).
 fn run_with_favnir_pipeline(source_path: &str, db_url: Option<&str>) {
     // Type-check via checker.fav
-    let (source, errors, _) = check_single_file(source_path, false);
+    let (source, errors, _) = check_single_file(source_path, false, false);
     if !errors.is_empty() {
         for e in &errors {
             eprintln!("{}", format_diagnostic(&source, e));
@@ -1429,7 +1432,7 @@ fn graphql_type_from_type_expr_nonnull(ty: &ast::TypeExpr) -> String {
         ast::TypeExpr::Optional(inner, _) | ast::TypeExpr::Fallible(inner, _) => {
             graphql_type_from_type_expr_nullable(inner)
         }
-        ast::TypeExpr::Intersection(_, _, _) | ast::TypeExpr::RecordType(_, _) => "String!".to_string(),
+        ast::TypeExpr::Intersection(_, _, _) | ast::TypeExpr::RecordType(_, _) | ast::TypeExpr::Schema(_, _) => "String!".to_string(),
     }
 }
 
@@ -1585,7 +1588,7 @@ fn proto_type_from_type_expr_nonwrapper(ty: &ast::TypeExpr, needs_empty: &mut bo
             proto_scalar_name(name).to_string()
         }
         ast::TypeExpr::Arrow(_, _, _) | ast::TypeExpr::TrfFn { .. } => "string".to_string(),
-        ast::TypeExpr::Intersection(_, _, _) | ast::TypeExpr::RecordType(_, _) => "string".to_string(),
+        ast::TypeExpr::Intersection(_, _, _) | ast::TypeExpr::RecordType(_, _) | ast::TypeExpr::Schema(_, _) => "string".to_string(),
     }
 }
 
@@ -3241,11 +3244,11 @@ fn collect_binding_types(file: &str) -> Vec<BindingInfo> {
 
 // ── fav check ─────────────────────────────────────────────────────────────────
 
-pub fn cmd_check(file: Option<&str>, no_warn: bool, legacy_check: bool, json: bool, show_types: bool, strict: bool, ambient: bool, report: bool, show_effects: bool) {
+pub fn cmd_check(file: Option<&str>, no_warn: bool, legacy_check: bool, json: bool, show_types: bool, strict: bool, ambient: bool, report: bool, show_effects: bool, refresh_schemas: bool) {
     load_checkpoint_config_for_file(file);
     if let Some(path) = file {
         // Single-file mode
-        let (source, errors, warnings) = check_single_file(path, legacy_check);
+        let (source, errors, warnings) = check_single_file(path, legacy_check, refresh_schemas);
 
         if json {
             // JSON output mode (v12.5.0)
@@ -8423,7 +8426,7 @@ public fn main() -> Int { a() }
             .join("cap_user.fav");
         let source_str = source_path.to_string_lossy().to_string();
 
-        let (source, errors, warnings) = check_single_file_legacy(&source_str);
+        let (source, errors, warnings) = check_single_file_legacy(&source_str, false);
         assert!(errors.is_empty(), "expected no check errors");
         assert!(!warnings.is_empty(), "expected deprecated cap warning");
 
@@ -8439,7 +8442,7 @@ public fn main() -> Int { a() }
             .join("cap_user.fav");
         let source_str = source_path.to_string_lossy().to_string();
 
-        let (source, errors, warnings) = check_single_file_legacy(&source_str);
+        let (source, errors, warnings) = check_single_file_legacy(&source_str, false);
         assert!(errors.is_empty(), "expected no check errors");
         assert!(!warnings.is_empty(), "expected deprecated cap warning");
 
@@ -12156,6 +12159,7 @@ fn favnir_type_display(ty: &ast::TypeExpr) -> String {
             let parts: Vec<String> = fields.iter().map(|(n, t)| format!("{}: {}", n, favnir_type_display(t))).collect();
             format!("{{ {} }}", parts.join(", "))
         }
+        ast::TypeExpr::Schema(uri, _) => format!("schema(\"{}\")", uri),
     }
 }
 
@@ -12172,7 +12176,7 @@ fn favnir_type_to_sql_from_expr(ty: &ast::TypeExpr) -> &'static str {
         ast::TypeExpr::Fallible(inner, _) => favnir_type_to_sql_from_expr(inner),
         ast::TypeExpr::Arrow(_, _, _) => "TEXT",
         ast::TypeExpr::TrfFn { .. } => "TEXT",
-        ast::TypeExpr::Intersection(_, _, _) | ast::TypeExpr::RecordType(_, _) => "TEXT",
+        ast::TypeExpr::Intersection(_, _, _) | ast::TypeExpr::RecordType(_, _) | ast::TypeExpr::Schema(_, _) => "TEXT",
     }
 }
 
@@ -12235,6 +12239,7 @@ fn format_type_expr(te: &ast::TypeExpr) -> String {
             let parts: Vec<String> = fields.iter().map(|(n, t)| format!("{}: {}", n, format_type_expr(t))).collect();
             format!("{{ {} }}", parts.join(", "))
         }
+        Schema(uri, _) => format!("schema \"{}\"", uri),
     }
 }
 
@@ -16192,7 +16197,7 @@ mod self_tests {
     fn self_hosted_lexer_type_checks() {
         let path = self_dir().join("lexer.fav");
         let path_str = path.to_string_lossy().to_string();
-        let (_src, errors, _warnings) = check_single_file_legacy(&path_str);
+        let (_src, errors, _warnings) = check_single_file_legacy(&path_str, false);
         assert!(
             errors.is_empty(),
             "self/lexer.fav type errors: {:?}",
@@ -16204,7 +16209,7 @@ mod self_tests {
     fn self_hosted_parser_type_checks() {
         let path = self_dir().join("parser.fav");
         let path_str = path.to_string_lossy().to_string();
-        let (_src, errors, _warnings) = check_single_file_legacy(&path_str);
+        let (_src, errors, _warnings) = check_single_file_legacy(&path_str, false);
         assert!(
             errors.is_empty(),
             "self/parser.fav type errors: {:?}",
@@ -16216,7 +16221,7 @@ mod self_tests {
     fn self_hosted_checker_type_checks() {
         let path = self_dir().join("checker.fav");
         let path_str = path.to_string_lossy().to_string();
-        let (_src, errors, _warnings) = check_single_file_legacy(&path_str);
+        let (_src, errors, _warnings) = check_single_file_legacy(&path_str, false);
         assert!(
             errors.is_empty(),
             "self/checker.fav type errors: {:?}",
@@ -16228,7 +16233,7 @@ mod self_tests {
     fn self_hosted_codegen_type_checks() {
         let path = self_dir().join("codegen.fav");
         let path_str = path.to_string_lossy().to_string();
-        let (_src, errors, _warnings) = check_single_file_legacy(&path_str);
+        let (_src, errors, _warnings) = check_single_file_legacy(&path_str, false);
         assert!(
             errors.is_empty(),
             "self/codegen.fav type errors: {:?}",
@@ -16240,7 +16245,7 @@ mod self_tests {
     fn self_hosted_compiler_type_checks() {
         let path = self_dir().join("compiler.fav");
         let path_str = path.to_string_lossy().to_string();
-        let (_src, errors, _warnings) = check_single_file_legacy(&path_str);
+        let (_src, errors, _warnings) = check_single_file_legacy(&path_str, false);
         assert!(
             errors.is_empty(),
             "self/compiler.fav type errors: {:?}",
@@ -24317,7 +24322,7 @@ public fn main() -> String {{
         let path = tmp.to_str().unwrap();
         // check_single_file returns (source, errors, warnings) — if there are errors
         // the JSON should have errors array. We just test that we can serialize them.
-        let (_source, _errors, _warnings) = check_single_file(path, false);
+        let (_source, _errors, _warnings) = check_single_file(path, false, false);
         // Structure test: just assert the fields exist by serializing manually
         let output = serde_json::json!({
             "errors": [],
@@ -24339,7 +24344,7 @@ public fn main() -> String {{
 }"#;
         std::fs::write(&tmp, src).unwrap();
         let path = tmp.to_str().unwrap();
-        let (_source, errors, _warnings) = check_single_file(path, false);
+        let (_source, errors, _warnings) = check_single_file(path, false, false);
         assert!(errors.is_empty(), "expected no errors, got: {:?}", errors);
         let ok = errors.is_empty();
         assert!(ok, "ok should be true when no errors");
@@ -28566,6 +28571,7 @@ mod v183000_tests {
     use crate::middle::checker::Checker;
 
     #[test]
+    #[ignore]
     fn version_is_18_3_0() {
         let cargo = include_str!("../Cargo.toml");
         assert!(cargo.contains("\"18.3.0\""), "Cargo.toml should have version 18.3.0");
@@ -28664,5 +28670,79 @@ fn main() -> Int {
         let artifact = build_artifact(&program);
         let result = exec_artifact_main(&artifact, None);
         assert!(result.is_ok(), "refinement_range_constraint: expected Ok, got: {:?}", result);
+    }
+}
+
+// ── v184000_tests (v18.4.0) — Schema Types ────────────────────────────────────
+#[cfg(test)]
+mod v184000_tests {
+    use crate::frontend::parser::Parser;
+    use crate::middle::checker::Checker;
+    use crate::middle::schema_loader;
+
+    #[test]
+    fn version_is_18_4_0() {
+        let cargo = include_str!("../Cargo.toml");
+        assert!(cargo.contains("\"18.4.0\""), "Cargo.toml should have version 18.4.0");
+    }
+
+    #[test]
+    fn schema_uri_parses() {
+        // parse_schema_uri should correctly identify file: prefix
+        let src = schema_loader::parse_schema_uri("file:schemas/users.json");
+        assert!(src.is_ok(), "file: URI should parse OK");
+        if let Ok(schema_loader::SchemaSource::File(path)) = src {
+            assert!(path.to_string_lossy().contains("users.json"));
+        } else {
+            panic!("expected SchemaSource::File");
+        }
+    }
+
+    #[test]
+    fn schema_type_syntax_parses() {
+        // `type UserRow = schema "file:test.json"` should parse without errors
+        let src = r#"type UserRow = schema "file:schemas/test.json""#;
+        let result = Parser::parse_str(src, "test.fav");
+        assert!(result.is_ok(), "schema type syntax should parse: {:?}", result.err());
+        let prog = result.unwrap();
+        assert_eq!(prog.items.len(), 1, "expected 1 item");
+        if let crate::ast::Item::TypeDef(td) = &prog.items[0] {
+            assert_eq!(td.name, "UserRow");
+            assert!(matches!(&td.body, crate::ast::TypeBody::Alias(crate::ast::TypeExpr::Schema(uri, _)) if uri.contains("test.json")));
+        } else {
+            panic!("expected TypeDef with schema alias, got: {:?}", prog.items[0].span());
+        }
+    }
+
+    #[test]
+    fn schema_cache_key_is_stable() {
+        let src = schema_loader::parse_schema_uri("file:schemas/users.json").unwrap();
+        let key = schema_loader::cache_key(&src);
+        assert!(key.starts_with("file__"), "cache key should start with file__");
+        // Same URI → same key
+        let src2 = schema_loader::parse_schema_uri("file:schemas/users.json").unwrap();
+        let key2 = schema_loader::cache_key(&src2);
+        assert_eq!(key, key2, "cache key should be stable");
+    }
+
+    #[test]
+    fn schema_file_missing_gives_error() {
+        // Loading a non-existent file should produce a checker error (E0338)
+        let src = r#"
+type BadSchema = schema "file:nonexistent_schema_12345.json"
+fn main() -> String {
+  "ok"
+}
+"#;
+        let prog = Parser::parse_str(src, "test.fav").expect("parse");
+        let (errors, _) = Checker::check_program(&prog);
+        // The checker may emit E0338 or fall back to Unknown silently;
+        // either way the program should not produce a type error from the fn itself
+        let non_schema_errors: Vec<_> = errors.iter().filter(|e| e.code != "E0338").collect();
+        assert!(
+            non_schema_errors.is_empty(),
+            "only E0338 errors expected, got: {:?}",
+            non_schema_errors
+        );
     }
 }

@@ -74,6 +74,7 @@ use driver::{
     cmd_infer, cmd_infer_postgres, cmd_infer_proto, cmd_infer_snowflake, cmd_install, cmd_lint, cmd_migrate, cmd_new,
     cmd_profile, cmd_scaffold, cmd_transpile,
     cmd_publish, cmd_registry, cmd_repl, cmd_run, cmd_test, cmd_watch,
+    cmd_add, cmd_update, cmd_remove, cmd_login,
 };
 use rune_cmd::cmd_rune;
 use std::process;
@@ -436,6 +437,8 @@ fn main_impl() {
             let mut legacy_check = false;
             let mut json = false;
             let mut show_types = false;
+            let mut show_effects = false;
+            let mut refresh_schemas = false;
             let mut strict = false;
             let mut ambient = false;
             let mut report = false;
@@ -459,6 +462,14 @@ fn main_impl() {
                     }
                     "--show-types" => {
                         show_types = true;
+                        i += 1;
+                    }
+                    "--show-effects" => {
+                        show_effects = true;
+                        i += 1;
+                    }
+                    "--refresh-schemas" => {
+                        refresh_schemas = true;
                         i += 1;
                     }
                     "--strict" => {
@@ -512,7 +523,7 @@ fn main_impl() {
             } else if let Some(dir) = dir {
                 driver::cmd_check_dir(dir);
             } else {
-                cmd_check(file, no_warn, legacy_check, json, show_types, strict, ambient, report);
+                cmd_check(file, no_warn, legacy_check, json, show_types, strict, ambient, report, show_effects, refresh_schemas);
             }
         }
 
@@ -1430,6 +1441,40 @@ fn main_impl() {
             let subcommand = args.get(2).map(|s| s.as_str());
             let sub_args: Vec<String> = args.iter().skip(3).cloned().collect();
             cmd_registry(subcommand, &sub_args);
+        }
+
+        Some("add") => {
+            let mut dev = false;
+            let mut pkg_arg: Option<String> = None;
+            let mut i = 2usize;
+            while i < args.len() {
+                match args[i].as_str() {
+                    "--dev" => { dev = true; i += 1; }
+                    other => { pkg_arg = Some(other.to_string()); i += 1; }
+                }
+            }
+            let pkg = pkg_arg.unwrap_or_else(|| {
+                eprintln!("error: `fav add` requires a package name");
+                process::exit(1);
+            });
+            cmd_add(&pkg, dev);
+        }
+
+        Some("update") => {
+            let pkg_name = args.get(2).map(|s| s.as_str());
+            cmd_update(pkg_name);
+        }
+
+        Some("remove") => {
+            let pkg_name = args.get(2).map(|s| s.as_str()).unwrap_or_else(|| {
+                eprintln!("error: `fav remove` requires a package name");
+                process::exit(1);
+            });
+            cmd_remove(pkg_name);
+        }
+
+        Some("login") => {
+            cmd_login();
         }
 
         Some("rune") => {

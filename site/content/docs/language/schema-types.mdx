@@ -1,0 +1,89 @@
+# Schema Types
+
+Schema types let you define a Favnir type directly from an external schema source such as a JSON Schema file, BigQuery table, or Snowflake table. The type checker loads the schema at compile time and treats the type as a record with the corresponding fields.
+
+## Basic Syntax
+
+```fav
+type UserRow = schema "file:schemas/users.json"
+```
+
+The URI after `schema` identifies the source. Supported schemes:
+
+| Scheme | Example |
+|---|---|
+| `file:` | `"file:schemas/users.json"` |
+| `bigquery:` | `"bigquery:project.dataset.table"` |
+| `postgres:` | `"postgres:table_name"` |
+| `snowflake:` | `"snowflake:DB.SCHEMA.TABLE"` |
+
+> **v18.4.0**: Only `file:` is fully implemented. Other schemes are parsed and cached but return an empty field list.
+
+## JSON Schema File Format
+
+Favnir reads standard JSON Schema files with a `properties` object:
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "id":    { "type": "integer" },
+    "name":  { "type": "string" },
+    "score": { "type": "number" },
+    "active": { "type": "boolean" },
+    "tags":  { "type": "array", "items": { "type": "string" } },
+    "email": { "type": ["string", "null"] }
+  }
+}
+```
+
+### Type Mapping
+
+| JSON Schema type | Favnir type |
+|---|---|
+| `"integer"` | `Int` |
+| `"number"` | `Float` |
+| `"string"` | `String` |
+| `"boolean"` | `Bool` |
+| `"array"` with `items` | `List<T>` |
+| `["string", "null"]` (nullable) | `Option<String>` |
+| `"object"` | `String` (nested objects → opaque) |
+
+## Schema Cache
+
+Loaded schemas are cached in `.fav/schema-cache/` as JSON files. The cache is keyed by the URI so repeated runs do not re-read the source file.
+
+To force a refresh (e.g., after updating the schema file):
+
+```bash
+fav check --refresh-schemas myfile.fav
+```
+
+## Example
+
+Given `schemas/users.json`:
+
+```json
+{
+  "properties": {
+    "id":   { "type": "integer" },
+    "name": { "type": "string" },
+    "age":  { "type": ["integer", "null"] }
+  }
+}
+```
+
+You can define:
+
+```fav
+type UserRow = schema "file:schemas/users.json"
+```
+
+The checker treats `UserRow` as a record type with fields `id: Int`, `name: String`, `age: Option<Int>`.
+
+## Error Codes
+
+| Code | Meaning |
+|---|---|
+| `E0338` | Schema file not found |
+| `E0339` | Invalid JSON schema format |

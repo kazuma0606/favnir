@@ -102,6 +102,8 @@ pub enum TypeExpr {
     Intersection(Box<TypeExpr>, Box<TypeExpr>, Span),
     /// `{ field: Type, ... }` — inline anonymous record type (v18.2.0)
     RecordType(Vec<(String, TypeExpr)>, Span),
+    /// `schema "source:identifier"` — schema type import (v18.4.0)
+    Schema(String, Span),
 }
 
 impl TypeExpr {
@@ -114,6 +116,7 @@ impl TypeExpr {
             TypeExpr::TrfFn { span, .. } => span,
             TypeExpr::Intersection(_, _, s) => s,
             TypeExpr::RecordType(_, s) => s,
+            TypeExpr::Schema(_, s) => s,
         }
     }
 }

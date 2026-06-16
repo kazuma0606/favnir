@@ -970,6 +970,10 @@ pub struct Checker {
     fn_call_graph: HashMap<String, Vec<String>>,
     /// Refinement constraints: fn_name → [(param_index, param_name, constraint_expr)] (v18.3.0).
     fn_refinement_registry: HashMap<String, Vec<(usize, String, Box<crate::ast::Expr>)>>,
+    /// Schema type cache: URI → resolved Type (v18.4.0). Pre-populated during register_item_signatures.
+    schema_types: HashMap<String, Type>,
+    /// Whether to refresh schema cache (v18.4.0). Set via --refresh-schemas flag.
+    pub schema_refresh: bool,
 }
 
 impl Checker {
@@ -1013,6 +1017,8 @@ impl Checker {
             fn_effects_registry: HashMap::new(),
             fn_call_graph: HashMap::new(),
             fn_refinement_registry: HashMap::new(),
+            schema_types: HashMap::new(),
+            schema_refresh: false,
         }
     }
 
@@ -1059,6 +1065,8 @@ impl Checker {
             fn_effects_registry: HashMap::new(),
             fn_call_graph: HashMap::new(),
             fn_refinement_registry: HashMap::new(),
+            schema_types: HashMap::new(),
+            schema_refresh: false,
         }
     }
 
@@ -1075,6 +1083,7 @@ impl Checker {
         c.resolve_uses(program);
         c.process_imports(program);
         c.register_collect_helpers(program);
+        c.register_schema_types(program);
         c.register_item_signatures(program);
         c.propagate_transitive_effects();
         for item in &program.items {
@@ -1093,6 +1102,7 @@ impl Checker {
         self.process_imports(program);
         self.check_namespace_match(program);
         self.register_collect_helpers(program);
+        self.register_schema_types(program);
         self.register_item_signatures(program);
         self.propagate_transitive_effects();
         for item in &program.items {
@@ -1177,6 +1187,7 @@ impl Checker {
         c.resolve_uses(program);
         c.process_imports(program);
         c.register_collect_helpers(program);
+        c.register_schema_types(program);
         c.register_item_signatures(program);
         c.propagate_transitive_effects();
         for item in &program.items {
@@ -3650,6 +3661,7 @@ impl Checker {
                 Box::new(self.resolve_type_expr_with_subst(rhs, subst)),
             ),
             TypeExpr::RecordType(_, _) => Type::Unknown,
+            TypeExpr::Schema(uri, _) => self.resolve_schema(uri),
             TypeExpr::Named(name, args, _) if args.is_empty() => subst
                 .get(name)
                 .cloned()
@@ -7054,6 +7066,7 @@ impl Checker {
                 Box::new(self.resolve_type_expr_with_self(rhs, self_ty)),
             ),
             TypeExpr::RecordType(_, _) => Type::Unknown,
+            TypeExpr::Schema(uri, _) => self.resolve_schema(uri),
             TypeExpr::Named(name, args, _) => {
                 if name == "Self" && args.is_empty() {
                     return self_ty
@@ -7233,6 +7246,51 @@ impl Checker {
             TypeExpr::RecordType(fields, _) => {
                 for (_, ty) in fields {
                     self.validate_type_expr_arity(ty);
+                }
+            }
+            TypeExpr::Schema(_, _) => {} // no arity to validate
+        }
+    }
+
+    /// Resolve a `schema "uri"` type expression (v18.4.0).
+    /// Returns the pre-populated type from `schema_types`, or `Type::Unknown`.
+    fn resolve_schema(&self, uri: &str) -> Type {
+        self.schema_types
+            .get(uri)
+            .cloned()
+            .unwrap_or(Type::Unknown)
+    }
+
+    /// Pre-populate schema types from `type X = schema "..."` items (v18.4.0).
+    pub fn register_schema_types(&mut self, program: &Program) {
+        use crate::middle::schema_loader;
+        use crate::ast::{TypeBody};
+        for item in &program.items {
+            // `type UserRow = schema "file:..."` → TypeDef with TypeBody::Alias(Schema(...))
+            let (name, uri) = if let Item::TypeDef(td) = item {
+                if let TypeBody::Alias(TypeExpr::Schema(uri, _)) = &td.body {
+                    (td.name.clone(), uri.clone())
+                } else { continue; }
+            } else if let Item::AliasDecl { name, ty: TypeExpr::Schema(uri, _), .. } = item {
+                (name.clone(), uri.clone())
+            } else { continue; };
+            {
+                let synthetic = format!("$schema:{}", uri);
+                match schema_loader::load_schema_uri(&uri, self.schema_refresh) {
+                    Ok(fields) => {
+                        let typed_fields: Vec<(String, Type)> = fields
+                            .into_iter()
+                            .map(|f| (f.name, schema_loader::schema_field_type_to_type(&f.ty)))
+                            .collect();
+                        self.record_fields.insert(synthetic.clone(), typed_fields);
+                        self.schema_types.insert(uri.clone(), Type::Named(synthetic.clone(), vec![]));
+                        self.env.define(name.clone(), Type::Named(synthetic.clone(), vec![]));
+                    }
+                    Err(err_msg) => {
+                        // Errors will be re-emitted during type checking; use Unknown for now
+                        self.schema_types.insert(uri.clone(), Type::Unknown);
+                        let _ = err_msg;
+                    }
                 }
             }
         }

@@ -734,6 +734,7 @@ impl Formatter {
                     .collect();
                 format!("{{ {} }}", parts.join(", "))
             }
+            TypeExpr::Schema(uri, _) => format!("schema \"{}\"", uri),
         }
     }
 }
@@ -772,6 +773,7 @@ fn fmt_type_expr_simple(ty: &TypeExpr) -> String {
         TypeExpr::TrfFn { input, output, .. } => {
             format!("{} -> {}", fmt_type_expr_simple(input), fmt_type_expr_simple(output))
         }
+        TypeExpr::Schema(uri, _) => format!("schema \"{}\"", uri),
     }
 }
 

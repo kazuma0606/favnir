@@ -1130,6 +1130,19 @@ impl Parser {
 
     fn parse_base_type(&mut self) -> Result<TypeExpr, ParseError> {
         let start = self.peek_span().clone();
+        // Schema type: `schema "uri"` (v18.4.0)
+        if matches!(self.peek(), TokenKind::Ident(n) if n == "schema") {
+            self.advance(); // consume `schema`
+            if let TokenKind::Str(uri) = self.peek().clone() {
+                self.advance();
+                let span = self.span_from(&start);
+                return Ok(TypeExpr::Schema(uri, span));
+            }
+            return Err(ParseError::new(
+                "expected string literal after `schema`".to_string(),
+                self.peek_span().clone(),
+            ));
+        }
         // Inline record type: `{ field: Type, ... }` (v18.2.0)
         if self.peek() == &TokenKind::LBrace {
             self.advance(); // consume `{`

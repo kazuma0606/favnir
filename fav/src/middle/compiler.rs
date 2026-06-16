@@ -1054,6 +1054,7 @@ fn lower_type_expr_with_subst(ty: &TypeExpr, subst: &HashMap<String, Type>) -> T
             Box::new(lower_type_expr_with_subst(rhs, subst)),
         ),
         TypeExpr::RecordType(_, _) => Type::Unknown,
+        TypeExpr::Schema(_, _) => Type::Unknown,
     }
 }
 
@@ -1470,6 +1471,7 @@ fn substitute_self_in_type_expr(ty: &TypeExpr, type_name: &str) -> TypeExpr {
             fields.iter().map(|(n, t)| (n.clone(), substitute_self_in_type_expr(t, type_name))).collect(),
             span.clone(),
         ),
+        TypeExpr::Schema(uri, span) => TypeExpr::Schema(uri.clone(), span.clone()),
     }
 }
 
@@ -2607,6 +2609,7 @@ fn lower_type_expr(ty: &TypeExpr) -> Type {
             Box::new(lower_type_expr(rhs)),
         ),
         TypeExpr::RecordType(_, _) => Type::Unknown,
+        TypeExpr::Schema(_, _) => Type::Unknown,
     }
 }
 

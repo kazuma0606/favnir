@@ -62,7 +62,9 @@ pub mod schemas;
 pub mod std_states;
 pub mod toml;
 pub mod value;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod incremental;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod parallel;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod profiler;

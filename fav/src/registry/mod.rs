@@ -1,6 +1,9 @@
 // Favnir Local Rune Registry — v4.12.0
 // Stores published Rune packages in ~/.fav/registry/<name>/<version>/
 
+pub mod client;
+pub mod resolver;
+
 use std::path::{Path, PathBuf};
 
 // ── PackageMeta ───────────────────────────────────────────────────────────────

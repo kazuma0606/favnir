@@ -120,8 +120,9 @@ pub enum TokenKind {
     LtEq,      // <=
     GtEq,      // >=
     Semicolon, // ;
-    DotDotDot, // ... (record spread, v16.3.0)
-    DotDot,    // .. (list-pattern rest, v17.2.0)
+    DotDotDot,    // ... (record spread, v16.3.0)
+    DotDot,       // .. (list-pattern rest, v17.2.0)
+    LinearArrow,  // -o (linear function type, v18.5.0)
 
     // Literals
     Int(i64),
@@ -430,6 +431,18 @@ impl Lexer {
                 if self.peek() == Some('>') {
                     self.advance();
                     TokenKind::Arrow
+                } else if self.peek() == Some('o') {
+                    // `-o` is linear arrow only when followed by a word boundary
+                    let next_after = self.peek2();
+                    let is_word_boundary = next_after
+                        .map(|c: char| !c.is_alphanumeric() && c != '_')
+                        .unwrap_or(true);
+                    if is_word_boundary {
+                        self.advance(); // consume 'o'
+                        TokenKind::LinearArrow
+                    } else {
+                        TokenKind::Minus
+                    }
                 } else {
                     TokenKind::Minus
                 }

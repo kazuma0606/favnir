@@ -2,14 +2,14 @@ use super::checker::Type;
 use crate::ast::{BinOp, Lit};
 use std::collections::{BTreeSet, HashMap};
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct FieldMeta {
     pub name: String,
     pub ty: String,
     pub col_index: Option<usize>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct TypeMeta {
     pub type_name: String,
     pub fields: Vec<FieldMeta>,

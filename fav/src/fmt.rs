@@ -735,6 +735,8 @@ impl Formatter {
                 format!("{{ {} }}", parts.join(", "))
             }
             TypeExpr::Schema(uri, _) => format!("schema \"{}\"", uri),
+            TypeExpr::LinearArrow(a, b, _) => format!("{} -o {}", self.type_expr(a), self.type_expr(b)),
+            TypeExpr::ConstInt(n, _) => format!("{}", n),
         }
     }
 }
@@ -774,6 +776,8 @@ fn fmt_type_expr_simple(ty: &TypeExpr) -> String {
             format!("{} -> {}", fmt_type_expr_simple(input), fmt_type_expr_simple(output))
         }
         TypeExpr::Schema(uri, _) => format!("schema \"{}\"", uri),
+        TypeExpr::LinearArrow(a, b, _) => format!("{} -o {}", fmt_type_expr_simple(a), fmt_type_expr_simple(b)),
+        TypeExpr::ConstInt(n, _) => format!("{}", n),
     }
 }
 

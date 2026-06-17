@@ -251,6 +251,10 @@ pub struct FavToml {
     pub kafka: Option<KafkaTomlConfig>,
     /// Optional Azure configuration (v14.2.0).
     pub azure: Option<AzureTomlConfig>,
+    /// Dev-only dependencies declared in `[dev-dependencies]` (v17.8.0).
+    pub dev_dependencies: Vec<DependencySpec>,
+    /// Registry URL from `[registry]` section (v17.8.0).
+    pub registry_url: Option<String>,
 }
 
 impl FavToml {
@@ -315,6 +319,8 @@ fn parse_fav_toml(content: &str) -> FavToml {
     let mut azure_cfg: Option<AzureTomlConfig> = None;
     let mut gcp_cfg: Option<GcpTomlConfig> = None;
     let mut kafka_cfg: Option<KafkaTomlConfig> = None;
+    let mut dev_dependencies: Vec<DependencySpec> = Vec::new();
+    let mut registry_url: Option<String> = None;
     let mut section = "";
 
     for line in content.lines() {
@@ -384,6 +390,14 @@ fn parse_fav_toml(content: &str) -> FavToml {
         }
         if trimmed == "[gcp]" {
             section = "gcp";
+            continue;
+        }
+        if trimmed == "[dev-dependencies]" {
+            section = "dev-dependencies";
+            continue;
+        }
+        if trimmed == "[registry]" {
+            section = "registry";
             continue;
         }
         if trimmed.starts_with('[') {
@@ -662,6 +676,18 @@ fn parse_fav_toml(content: &str) -> FavToml {
                 }
                 kafka_cfg = Some(current);
             }
+            "dev-dependencies" => {
+                if let Some(dep) = parse_dep_line(trimmed) {
+                    dev_dependencies.push(dep);
+                }
+            }
+            "registry" => {
+                if let Some((key, val)) = parse_kv(trimmed) {
+                    if key == "url" {
+                        registry_url = Some(val.to_string());
+                    }
+                }
+            }
             _ => {}
         }
     }
@@ -690,7 +716,35 @@ fn parse_fav_toml(content: &str) -> FavToml {
         gcp: gcp_cfg,
         kafka: kafka_cfg,
         azure: azure_cfg,
+        dev_dependencies,
+        registry_url,
     }
+}
+
+/// Append a dependency line to `[dependencies]` (or `[dev-dependencies]`) in a `fav.toml` file.
+/// Creates the section if it does not exist.
+pub fn fav_toml_add_dep(
+    toml_path: &std::path::Path,
+    dep_name: &str,
+    version_req: &str,
+    dev: bool,
+) -> Result<(), String> {
+    let content = std::fs::read_to_string(toml_path).map_err(|e| e.to_string())?;
+    let section_header = if dev { "[dev-dependencies]" } else { "[dependencies]" };
+    let dep_line = format!("{} = \"{}\"", dep_name, version_req);
+
+    let new_content = if let Some(pos) = content.find(section_header) {
+        // Section exists — find where the next section starts (or EOF) and insert before it
+        let after_header = &content[pos + section_header.len()..];
+        let insert_offset = after_header.find("\n[").unwrap_or(after_header.len());
+        let insert_pos = pos + section_header.len() + insert_offset;
+        format!("{}\n{}{}", &content[..insert_pos], dep_line, &content[insert_pos..])
+    } else {
+        // Section does not exist — append it at the end
+        format!("{}\n\n{}\n{}\n", content.trim_end(), section_header, dep_line)
+    };
+
+    std::fs::write(toml_path, new_content).map_err(|e| e.to_string())
 }
 
 /// Parse a dependency line: `name = "^1.0.0"` or `name = { key = "val", ... }`

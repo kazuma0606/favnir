@@ -284,7 +284,8 @@ fn map_type(ty: &TypeExpr) -> String {
         TypeExpr::Optional(inner, _) => format!("Optional[{}]", map_type(inner)),
         TypeExpr::Fallible(inner, _) => format!("Any  # fallible {}", map_type(inner)),
         TypeExpr::Arrow(_, _, _) | TypeExpr::TrfFn { .. } => "Any".to_string(),
-        TypeExpr::Intersection(_, _, _) | TypeExpr::RecordType(_, _) | TypeExpr::Schema(_, _) => "Any".to_string(),
+        TypeExpr::Intersection(_, _, _) | TypeExpr::RecordType(_, _) | TypeExpr::Schema(_, _) | TypeExpr::LinearArrow(_, _, _) => "Any".to_string(),
+        TypeExpr::ConstInt(_, _) => "int".to_string(),
     }
 }
 

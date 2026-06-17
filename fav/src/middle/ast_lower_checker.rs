@@ -141,6 +141,8 @@ pub fn lower_te(te: &ast::TypeExpr) -> Value {
         ast::TypeExpr::Intersection(lhs, rhs, _) => v2("TeIntersection", lower_te(lhs), lower_te(rhs)),
         ast::TypeExpr::RecordType(_, _) => v1("TeSimple", sv("Any")),
         ast::TypeExpr::Schema(uri, _) => v1("TeSimple", sv(uri)),
+        ast::TypeExpr::LinearArrow(a, b, _) => v2("TeFn", lower_te(a), lower_te(b)),
+        ast::TypeExpr::ConstInt(n, _) => v1("TeConst", Value::Int(*n)),
     }
 }
 
@@ -170,6 +172,8 @@ fn te_to_string(te: &ast::TypeExpr) -> String {
         }
         ast::TypeExpr::RecordType(_, _) => "Any".to_string(),
         ast::TypeExpr::Schema(uri, _) => format!("schema(\"{}\")", uri),
+        ast::TypeExpr::LinearArrow(a, b, _) => format!("{} -o {}", te_to_string(a), te_to_string(b)),
+        ast::TypeExpr::ConstInt(n, _) => format!("{}", n),
     }
 }
 

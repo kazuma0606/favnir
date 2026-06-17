@@ -12,6 +12,10 @@ pub struct LockedPackage {
     pub resolved_path: String,
     /// Version string (may be empty for path dependencies).
     pub version: String,
+    /// SHA-256 checksum of the package archive (v17.8.0).
+    pub checksum: Option<String>,
+    /// Source descriptor, e.g. `"registry:https://registry.favnir.dev"` (v17.8.0).
+    pub source: Option<String>,
 }
 
 /// The full lock file.
@@ -53,6 +57,12 @@ impl LockFile {
             out.push_str(&format!("name = \"{}\"\n", pkg.name));
             out.push_str(&format!("version = \"{}\"\n", pkg.version));
             out.push_str(&format!("resolved_path = \"{}\"\n", pkg.resolved_path));
+            if let Some(cs) = &pkg.checksum {
+                out.push_str(&format!("checksum = \"{}\"\n", cs));
+            }
+            if let Some(src) = &pkg.source {
+                out.push_str(&format!("source = \"{}\"\n", src));
+            }
         }
         out
     }
@@ -68,6 +78,8 @@ fn parse_lock_file(content: &str) -> LockFile {
     let mut cur_name = String::new();
     let mut cur_version = String::new();
     let mut cur_path = String::new();
+    let mut cur_checksum: Option<String> = None;
+    let mut cur_source: Option<String> = None;
     let mut in_package = false;
 
     for line in content.lines() {
@@ -81,6 +93,8 @@ fn parse_lock_file(content: &str) -> LockFile {
                     name: std::mem::take(&mut cur_name),
                     version: std::mem::take(&mut cur_version),
                     resolved_path: std::mem::take(&mut cur_path),
+                    checksum: cur_checksum.take(),
+                    source: cur_source.take(),
                 });
             }
             in_package = true;
@@ -96,6 +110,8 @@ fn parse_lock_file(content: &str) -> LockFile {
                 "name" => cur_name = val,
                 "version" => cur_version = val,
                 "resolved_path" => cur_path = val,
+                "checksum" => cur_checksum = Some(val),
+                "source" => cur_source = Some(val),
                 _ => {}
             }
         }
@@ -105,6 +121,8 @@ fn parse_lock_file(content: &str) -> LockFile {
             name: cur_name,
             version: cur_version,
             resolved_path: cur_path,
+            checksum: cur_checksum,
+            source: cur_source,
         });
     }
     LockFile { packages }
@@ -126,6 +144,8 @@ mod tests {
                 name: "mylib".into(),
                 version: "0.1.0".into(),
                 resolved_path: "../mylib".into(),
+                checksum: None,
+                source: None,
             }],
         };
         let toml = lock.to_toml();
@@ -149,6 +169,8 @@ mod tests {
                 name: "utils".into(),
                 version: "1.0.0".into(),
                 resolved_path: "/deps/utils".into(),
+                checksum: None,
+                source: None,
             }],
         };
         assert!(lock.get("utils").is_some());

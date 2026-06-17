@@ -231,6 +231,10 @@ pub fn compile_program(program: &Program) -> IRProgram {
         "__forall_gen_str",
         "__forall_gen_bool",
         "__forall_gen_float",
+        // v19.1.0 streaming pipeline
+        "__streaming_pipeline",
+        // v19.5.0 Apache Arrow
+        "ArrowBatch",
     ] {
         if !ctx.globals.contains_key(*ns) {
             let idx = globals.len() as u16;
@@ -911,9 +915,80 @@ fn compile_flw_def_ctx_aware(fd: &FlwDef, cctx: &mut CompileCtx) -> IRFnDef {
     }
 }
 
+fn compile_streaming_pipeline(fd: &FlwDef, chunk_size: i64, ctx: &mut CompileCtx) -> IRFnDef {
+    let saved_next = ctx.next_slot;
+    let saved_anon = ctx.anon_counter;
+    let saved_locals = std::mem::take(&mut ctx.locals);
+    let saved_local_tys = std::mem::take(&mut ctx.local_tys);
+    ctx.next_slot = 0;
+    ctx.anon_counter = 0;
+    ctx.push_scope();
+    let input_slot = ctx.define_local("$input");
+    let input_expr = IRExpr::Local(input_slot, Type::Unknown);
+
+    // Source stage call (first step)
+    let source_call = if let Some(first_step) = fd.steps.first() {
+        build_step_call(first_step, input_expr, ctx)
+    } else {
+        IRExpr::Local(input_slot, Type::Unknown)
+    };
+
+    // Build List of subsequent stage functions
+    let list_ns_idx = ctx.resolve_global("List").unwrap_or(u16::MAX);
+    let list_empty_fn = IRExpr::FieldAccess(
+        Box::new(IRExpr::Global(list_ns_idx, Type::Unknown)),
+        "empty".into(),
+        Type::Unknown,
+    );
+    let mut stages_list = IRExpr::Call(Box::new(list_empty_fn), vec![], Type::Unknown);
+    for step in fd.steps.iter().skip(1) {
+        if let FlwStep::Stage(name) = step {
+            let stage_fn = if let Some(gidx) = ctx.resolve_global(name) {
+                IRExpr::Global(gidx, Type::Unknown)
+            } else {
+                IRExpr::Global(u16::MAX, Type::Unknown)
+            };
+            let push_fn = IRExpr::FieldAccess(
+                Box::new(IRExpr::Global(list_ns_idx, Type::Unknown)),
+                "push".into(),
+                Type::Unknown,
+            );
+            stages_list = IRExpr::Call(Box::new(push_fn), vec![stages_list, stage_fn], Type::Unknown);
+        }
+    }
+
+    // Call __streaming_pipeline(source_result, stages_list, chunk_size)
+    let sp_idx = ctx.resolve_global("__streaming_pipeline").unwrap_or(u16::MAX);
+    let chunk_lit = IRExpr::Lit(Lit::Int(chunk_size), Type::Unknown);
+    let body = IRExpr::Call(
+        Box::new(IRExpr::Global(sp_idx, Type::Unknown)),
+        vec![source_call, stages_list, chunk_lit],
+        Type::Unknown,
+    );
+
+    let local_count = ctx.next_slot as usize;
+    ctx.locals = saved_locals;
+    ctx.local_tys = saved_local_tys;
+    ctx.next_slot = saved_next;
+    ctx.anon_counter = saved_anon;
+    IRFnDef {
+        name: fd.name.clone(),
+        param_count: 1,
+        param_tys: vec![Type::Unknown],
+        local_count,
+        effects: Vec::new(),
+        return_ty: Type::Unknown,
+        body,
+    }
+}
+
 fn compile_flw_def(fd: &FlwDef, ctx: &mut CompileCtx) -> IRFnDef {
     if fd.ctx_param.is_some() {
         return compile_flw_def_ctx_aware(fd, ctx);
+    }
+    if let Some(ref ann) = fd.streaming {
+        let chunk_size = ann.chunk_size.unwrap_or(512);
+        return compile_streaming_pipeline(fd, chunk_size, ctx);
     }
 
     let saved_next = ctx.next_slot;
@@ -1055,6 +1130,11 @@ fn lower_type_expr_with_subst(ty: &TypeExpr, subst: &HashMap<String, Type>) -> T
         ),
         TypeExpr::RecordType(_, _) => Type::Unknown,
         TypeExpr::Schema(_, _) => Type::Unknown,
+        TypeExpr::LinearArrow(a, b, _) => Type::Arrow(
+            Box::new(lower_type_expr_with_subst(a, subst)),
+            Box::new(lower_type_expr_with_subst(b, subst)),
+        ),
+        TypeExpr::ConstInt(_, _) => Type::Int,
     }
 }
 
@@ -1472,6 +1552,12 @@ fn substitute_self_in_type_expr(ty: &TypeExpr, type_name: &str) -> TypeExpr {
             span.clone(),
         ),
         TypeExpr::Schema(uri, span) => TypeExpr::Schema(uri.clone(), span.clone()),
+        TypeExpr::LinearArrow(a, b, span) => TypeExpr::LinearArrow(
+            Box::new(substitute_self_in_type_expr(a, type_name)),
+            Box::new(substitute_self_in_type_expr(b, type_name)),
+            span.clone(),
+        ),
+        TypeExpr::ConstInt(n, span) => TypeExpr::ConstInt(*n, span.clone()),
     }
 }
 
@@ -2610,6 +2696,11 @@ fn lower_type_expr(ty: &TypeExpr) -> Type {
         ),
         TypeExpr::RecordType(_, _) => Type::Unknown,
         TypeExpr::Schema(_, _) => Type::Unknown,
+        TypeExpr::LinearArrow(a, b, _) => Type::Arrow(
+            Box::new(lower_type_expr(a)),
+            Box::new(lower_type_expr(b)),
+        ),
+        TypeExpr::ConstInt(_, _) => Type::Int,
     }
 }
 

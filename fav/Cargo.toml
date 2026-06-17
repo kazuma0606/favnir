@@ -1,6 +1,6 @@
 [package]
 name = "fav"
-version = "18.4.0"
+version = "19.5.0"
 edition = "2024"
 
 [[bin]]
@@ -29,6 +29,12 @@ wasm-encoder = "0.219"
 # ── Native-only dependencies (not available on wasm32) ────────────────────────
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 wasmtime = { version = "30", default-features = false, features = ["cranelift", "runtime"] }
+cranelift-codegen = { version = "0.117", features = ["x86"] }
+cranelift-frontend = { version = "0.117" }
+cranelift-module = { version = "0.117" }
+cranelift-object = { version = "0.117" }
+cranelift-native = { version = "0.117" }
+tempfile = "3"
 rusqlite = { version = "0.31", features = ["bundled"] }
 ureq = "2"
 uuid = { version = "1", features = ["v4", "v7"] }
@@ -61,6 +67,8 @@ sha2 = "0.10"
 p256 = { version = "0.13", features = ["ecdsa", "pem"] }
 zip = { version = "0.6", default-features = false, features = ["deflate"] }
 rskafka = { version = "0.6", features = ["transport-tls"] }
+rayon = "1"
+petgraph = "0.6"
 
 [features]
 postgres_integration = ["dep:postgres"]

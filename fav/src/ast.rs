@@ -16,21 +16,61 @@ pub enum TypeConstraint {
     HasField { name: String, ty: TypeExpr },
 }
 
+// ── Variance (v18.6.0) ────────────────────────────────────────────────────────
+
+/// Variance annotation on a generic type parameter in an interface.
+/// `+T` → Covariant, `-T` → Contravariant, `T` → Invariant (default).
+#[derive(Debug, Clone, PartialEq)]
+pub enum Variance {
+    /// `+T` — may only appear in output (return) positions.
+    Covariant,
+    /// `-T` — may only appear in input (argument) positions.
+    Contravariant,
+    /// `T` — no restriction (default).
+    Invariant,
+}
+
 // ── GenericParam (v17.1.0) ────────────────────────────────────────────────────
 
-/// A generic type parameter with optional bounds.
-/// `<T>` → `GenericParam { name: "T", bounds: [] }`
-/// `<T with Ord>` → `GenericParam { name: "T", bounds: [Interface("Ord")] }`
-/// `<R with { id: Int }>` → `GenericParam { name: "R", bounds: [HasField { name: "id", ty: Int }] }`
-#[derive(Debug, Clone, PartialEq)]
+/// A generic type parameter with optional bounds, variance (v18.6.0), and const support (v18.7.0).
+/// `<T>` → `GenericParam { name: "T", bounds: [], variance: Invariant, is_const: false, .. }`
+/// `<+T>` → `GenericParam { name: "T", variance: Covariant, .. }`
+/// `<const N: Int>` → `GenericParam { name: "N", is_const: true, const_ty: Some(Named("Int",..")), .. }`
+/// `<const N: Int where { N > 0 }>` → same with `const_constraint: Some(BinOp(Gt, N, 0))`
+#[derive(Debug, Clone)]
 pub struct GenericParam {
     pub name: String,
     pub bounds: Vec<TypeConstraint>,
+    pub variance: Variance,
+    /// v18.7.0: true for `const N: Int` style const generic params.
+    pub is_const: bool,
+    /// v18.7.0: type of the const param (e.g. `Int`). None for regular type params.
+    pub const_ty: Option<TypeExpr>,
+    /// v18.7.0: optional `where { expr }` constraint on the const value.
+    pub const_constraint: Option<Box<Expr>>,
+}
+
+impl PartialEq for GenericParam {
+    fn eq(&self, other: &Self) -> bool {
+        self.name == other.name
+            && self.bounds == other.bounds
+            && self.variance == other.variance
+            && self.is_const == other.is_const
+            && self.const_ty == other.const_ty
+        // const_constraint excluded: Expr does not implement PartialEq
+    }
 }
 
 impl GenericParam {
     pub fn unbounded(name: impl Into<String>) -> Self {
-        Self { name: name.into(), bounds: vec![] }
+        Self {
+            name: name.into(),
+            bounds: vec![],
+            variance: Variance::Invariant,
+            is_const: false,
+            const_ty: None,
+            const_constraint: None,
+        }
     }
 }
 
@@ -104,6 +144,10 @@ pub enum TypeExpr {
     RecordType(Vec<(String, TypeExpr)>, Span),
     /// `schema "source:identifier"` — schema type import (v18.4.0)
     Schema(String, Span),
+    /// `T -o U` — linear function type (v18.5.0)
+    LinearArrow(Box<TypeExpr>, Box<TypeExpr>, Span),
+    /// `100` — integer constant in type argument position, e.g. `f::<100>(...)` (v18.7.0)
+    ConstInt(i64, Span),
 }
 
 impl TypeExpr {
@@ -117,6 +161,8 @@ impl TypeExpr {
             TypeExpr::Intersection(_, _, s) => s,
             TypeExpr::RecordType(_, s) => s,
             TypeExpr::Schema(_, s) => s,
+            TypeExpr::LinearArrow(_, _, s) => s,
+            TypeExpr::ConstInt(_, s) => s,
         }
     }
 }
@@ -502,6 +548,25 @@ pub struct Block {
     pub span: Span,
 }
 
+// ── StreamingAnnotation (v19.1.0) ────────────────────────────────────────────
+
+/// `#[streaming(chunk_size = 1000)]` or `#[streaming]` on seq pipeline definitions.
+#[derive(Debug, Clone)]
+pub struct StreamingAnnotation {
+    pub chunk_size: Option<i64>,
+    pub span: Span,
+}
+
+// ── ApiAnnotation (v18.8.0) ───────────────────────────────────────────────────
+
+/// `#[api(method = "GET", path = "/users/:id")]` annotation on fn definitions.
+#[derive(Debug, Clone)]
+pub struct ApiAnnotation {
+    pub method: String, // "GET", "POST", "PUT", "DELETE", "PATCH"
+    pub path: String,   // "/users/:id"
+    pub span: Span,
+}
+
 // ── FnDef (2-5) ───────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone)]
@@ -515,6 +580,7 @@ pub struct FnDef {
     pub effects: Vec<Effect>,
     pub body: Block,
     pub span: Span,
+    pub api_annotation: Option<ApiAnnotation>, // v18.8.0: #[api(method, path)]
 }
 
 // ── TrfDef (2-6) ──────────────────────────────────────────────────────────────
@@ -530,6 +596,10 @@ pub struct TrfDef {
     pub effects: Vec<Effect>,
     pub params: Vec<Param>,
     pub body: Block,
+    /// v19.1.0: `#[stateful]` annotation — stage maintains state between chunks.
+    pub stateful: bool,
+    /// v19.5.0: `#[arrow]` annotation — stage uses Arrow RecordBatch internally.
+    pub arrow: bool,
     pub span: Span,
 }
 
@@ -588,6 +658,8 @@ pub struct FlwDef {
     /// If Some, this pipeline threads a ctx argument to each stage call.
     /// e.g. `seq Pipeline(ctx) = A |> B |> C` → ctx_param = Some("ctx")
     pub ctx_param: Option<String>,
+    /// v19.1.0: `#[streaming]` annotation — enables chunk-based evaluation.
+    pub streaming: Option<StreamingAnnotation>,
     pub span: Span,
 }
 
@@ -645,11 +717,13 @@ pub struct InterfaceMethod {
 }
 
 /// `interface Show { show: Self -> String }`
+/// `interface Source<+T> { fn next() -> Option<T> }` (v18.6.0)
 #[derive(Debug, Clone)]
 pub struct InterfaceDecl {
     pub visibility: Option<Visibility>,
     pub name: String,
     pub super_interface: Option<String>,
+    pub type_params: Vec<GenericParam>,  // v18.6.0: `<+T>` / `<-T>` / `<T>`
     pub methods: Vec<InterfaceMethod>,
     pub span: Span,
 }

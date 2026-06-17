@@ -1270,6 +1270,27 @@ thread_local! {
     static VERBOSE_LEVEL: std::cell::Cell<u8> = const { std::cell::Cell::new(0) };
 }
 
+// ── v19.5.0: Arrow RecordBatch スレッドローカルストア ─────────────────────────
+thread_local! {
+    static ARROW_BATCHES: std::cell::RefCell<
+        std::collections::HashMap<u64, arrow::record_batch::RecordBatch>
+    > = std::cell::RefCell::new(std::collections::HashMap::new());
+    static NEXT_ARROW_ID: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
+fn arrow_store(batch: arrow::record_batch::RecordBatch) -> u64 {
+    NEXT_ARROW_ID.with(|c| {
+        let id = c.get();
+        c.set(id + 1);
+        ARROW_BATCHES.with(|m| m.borrow_mut().insert(id, batch));
+        id
+    })
+}
+
+fn arrow_get(id: u64) -> Option<arrow::record_batch::RecordBatch> {
+    ARROW_BATCHES.with(|m| m.borrow().get(&id).cloned())
+}
+
 /// Set the thread-local verbose level for `fav run --verbose` / `--trace` (v12.5.0).
 pub fn set_verbose_level(level: u8) {
     VERBOSE_LEVEL.with(|v| v.set(level));
@@ -1396,6 +1417,8 @@ enum VMValue {
     DbHandle(u64),
     /// Opaque DB transaction handle (v3.3.0)
     TxHandle(u64),
+    /// v19.5.0: Apache Arrow RecordBatch への opaque handle
+    ArrowBatch(u64),
 }
 
 impl PartialEq for VMValue {
@@ -1416,6 +1439,7 @@ impl PartialEq for VMValue {
             (VMValue::Stream(_), VMValue::Stream(_)) => false, // streams are not comparable
             (VMValue::DbHandle(a), VMValue::DbHandle(b)) => a == b,
             (VMValue::TxHandle(a), VMValue::TxHandle(b)) => a == b,
+            (VMValue::ArrowBatch(a), VMValue::ArrowBatch(b)) => a == b,
             _ => false,
         }
     }
@@ -4561,6 +4585,40 @@ impl VM {
                 Ok(VMValue::List(FavList::new(results)))
             }
 
+            "__streaming_pipeline" => {
+                // args: [source_list: List<T>, stages: List<Fn>, chunk_size: Int]
+                let mut args_iter = args.into_iter();
+                let source = args_iter.next().unwrap_or(VMValue::Unit);
+                let stages = args_iter.next().unwrap_or(VMValue::Unit);
+                let chunk_size = match args_iter.next() {
+                    Some(VMValue::Int(n)) if n > 0 => n as usize,
+                    _ => 512,
+                };
+                let items = match source {
+                    VMValue::List(fl) => fl.to_vec(),
+                    other => vec![other],
+                };
+                let stage_fns: Vec<VMValue> = match stages {
+                    VMValue::List(fl) => fl.to_vec(),
+                    _ => vec![],
+                };
+                if stage_fns.is_empty() {
+                    return Ok(VMValue::List(FavList::new(items)));
+                }
+                let mut result: Vec<VMValue> = Vec::new();
+                for chunk_items in items.chunks(chunk_size) {
+                    let mut current = VMValue::List(FavList::new(chunk_items.to_vec()));
+                    for stage_fn in &stage_fns {
+                        current = self.call_value(artifact, stage_fn.clone(), vec![current])?;
+                    }
+                    match current {
+                        VMValue::List(fl) => result.extend(fl.to_vec()),
+                        other => result.push(other),
+                    }
+                }
+                Ok(VMValue::List(FavList::new(result)))
+            }
+
             _ => {
                 if let Some(target_idx) = artifact.globals.iter().position(|g| {
                     g.kind == 0
@@ -4719,6 +4777,7 @@ impl From<VMValue> for Value {
             VMValue::Stream(_) => Value::Str("<stream>".to_string()),
             VMValue::DbHandle(id) => Value::Str(format!("<db:{id}>")),
             VMValue::TxHandle(id) => Value::Str(format!("<tx:{id}>")),
+            VMValue::ArrowBatch(id) => Value::Str(format!("<arrow:{id}>")),
         }
     }
 }
@@ -4840,6 +4899,7 @@ fn vmvalue_repr(v: &VMValue) -> String {
         VMValue::Stream(_) => "<stream>".to_string(),
         VMValue::DbHandle(id) => format!("<db:{}>", id),
         VMValue::TxHandle(id) => format!("<tx:{}>", id),
+        VMValue::ArrowBatch(id) => format!("<arrow:{}>", id),
     }
 }
 
@@ -4860,6 +4920,7 @@ fn vmvalue_type_name(v: &VMValue) -> &'static str {
         VMValue::Stream(_) => "Stream",
         VMValue::DbHandle(_) => "DbHandle",
         VMValue::TxHandle(_) => "TxHandle",
+        VMValue::ArrowBatch(_) => "ArrowBatch",
     }
 }
 
@@ -5261,6 +5322,7 @@ fn display_vmvalue(v: &VMValue) -> String {
         VMValue::Stream(_) => "<stream>".to_string(),
         VMValue::DbHandle(_) => "<db>".to_string(),
         VMValue::TxHandle(_) => "<tx>".to_string(),
+        VMValue::ArrowBatch(_) => "<arrow>".to_string(),
     }
 }
 
@@ -6559,6 +6621,7 @@ fn is_known_builtin_namespace(name: &str) -> bool {
             | "Compiler"
             | "Ctx"
             | "AppCtx"
+            | "ArrowBatch"
     )
 }
 
@@ -6610,6 +6673,207 @@ fn arrow_type_for_meta(ty: &str) -> DataType {
         "Bool" => DataType::Boolean,
         _ => DataType::Utf8,
     }
+}
+
+// ── v19.5.0: Arrow ヘルパー関数 ───────────────────────────────────────────────
+
+/// `List<Record>` → `RecordBatch` 変換（スキーマを第 1 行目から推論）
+fn arrow_from_vm_rows(rows: &[VMValue]) -> Result<arrow::record_batch::RecordBatch, String> {
+    use arrow::array::*;
+    use arrow::datatypes::*;
+    use std::sync::Arc;
+
+    if rows.is_empty() {
+        let schema = Arc::new(Schema::empty());
+        return Ok(arrow::record_batch::RecordBatch::new_empty(schema));
+    }
+
+    let first = match &rows[0] {
+        VMValue::Record(m) => m,
+        other => {
+            return Err(format!(
+                "ArrowBatch.from_list: expected Record rows, got {:?}",
+                vmvalue_type_name(other)
+            ))
+        }
+    };
+
+    let mut field_names: Vec<String> = first.keys().cloned().collect();
+    field_names.sort();
+
+    let fields: Vec<Field> = field_names
+        .iter()
+        .map(|name| {
+            let dtype = match first.get(name).unwrap() {
+                VMValue::Int(_) => DataType::Int64,
+                VMValue::Float(_) => DataType::Float64,
+                VMValue::Bool(_) => DataType::Boolean,
+                _ => DataType::Utf8,
+            };
+            Field::new(name.as_str(), dtype, true)
+        })
+        .collect();
+
+    let schema = Arc::new(Schema::new(fields.clone()));
+
+    let arrays: Vec<Arc<dyn Array>> = fields
+        .iter()
+        .map(|field| {
+            let name = field.name();
+            match field.data_type() {
+                DataType::Int64 => {
+                    let vals: Vec<Option<i64>> = rows
+                        .iter()
+                        .map(|r| match r {
+                            VMValue::Record(m) => match m.get(name) {
+                                Some(VMValue::Int(n)) => Some(*n),
+                                _ => None,
+                            },
+                            _ => None,
+                        })
+                        .collect();
+                    Arc::new(Int64Array::from(vals)) as Arc<dyn Array>
+                }
+                DataType::Float64 => {
+                    let vals: Vec<Option<f64>> = rows
+                        .iter()
+                        .map(|r| match r {
+                            VMValue::Record(m) => match m.get(name) {
+                                Some(VMValue::Float(f)) => Some(*f),
+                                _ => None,
+                            },
+                            _ => None,
+                        })
+                        .collect();
+                    Arc::new(Float64Array::from(vals)) as Arc<dyn Array>
+                }
+                DataType::Boolean => {
+                    let vals: Vec<Option<bool>> = rows
+                        .iter()
+                        .map(|r| match r {
+                            VMValue::Record(m) => match m.get(name) {
+                                Some(VMValue::Bool(b)) => Some(*b),
+                                _ => None,
+                            },
+                            _ => None,
+                        })
+                        .collect();
+                    Arc::new(BooleanArray::from(vals)) as Arc<dyn Array>
+                }
+                _ => {
+                    let vals: Vec<Option<String>> = rows
+                        .iter()
+                        .map(|r| match r {
+                            VMValue::Record(m) => m.get(name).map(|v| match v {
+                                VMValue::Str(s) => s.clone(),
+                                other => format!("{:?}", other),
+                            }),
+                            _ => None,
+                        })
+                        .collect();
+                    let refs: Vec<Option<&str>> =
+                        vals.iter().map(|s| s.as_deref()).collect();
+                    Arc::new(StringArray::from(refs)) as Arc<dyn Array>
+                }
+            }
+        })
+        .collect();
+
+    arrow::record_batch::RecordBatch::try_new(schema, arrays)
+        .map_err(|e| format!("arrow RecordBatch::try_new: {e}"))
+}
+
+/// `RecordBatch` → `List<Record>` 変換
+fn arrow_to_vm_rows(
+    batch: &arrow::record_batch::RecordBatch,
+) -> Result<Vec<VMValue>, String> {
+    use arrow::array::*;
+    use arrow::datatypes::DataType;
+
+    let schema = batch.schema();
+    let num_rows = batch.num_rows();
+    let mut result = Vec::with_capacity(num_rows);
+
+    for row_idx in 0..num_rows {
+        let mut record: HashMap<String, VMValue> = HashMap::new();
+        for (col_idx, field) in schema.fields().iter().enumerate() {
+            let col = batch.column(col_idx);
+            let val = match field.data_type() {
+                DataType::Int64 => {
+                    let arr = col.as_any().downcast_ref::<Int64Array>().unwrap();
+                    if arr.is_null(row_idx) {
+                        VMValue::Unit
+                    } else {
+                        VMValue::Int(arr.value(row_idx))
+                    }
+                }
+                DataType::Float64 => {
+                    let arr = col.as_any().downcast_ref::<Float64Array>().unwrap();
+                    if arr.is_null(row_idx) {
+                        VMValue::Unit
+                    } else {
+                        VMValue::Float(arr.value(row_idx))
+                    }
+                }
+                DataType::Boolean => {
+                    let arr = col.as_any().downcast_ref::<BooleanArray>().unwrap();
+                    if arr.is_null(row_idx) {
+                        VMValue::Unit
+                    } else {
+                        VMValue::Bool(arr.value(row_idx))
+                    }
+                }
+                _ => {
+                    let arr = col.as_any().downcast_ref::<StringArray>().unwrap();
+                    if arr.is_null(row_idx) {
+                        VMValue::Unit
+                    } else {
+                        VMValue::Str(arr.value(row_idx).to_string())
+                    }
+                }
+            };
+            record.insert(field.name().clone(), val);
+        }
+        result.push(VMValue::Record(record));
+    }
+
+    Ok(result)
+}
+
+/// `RecordBatch` → Parquet ファイル書き込み（ゼロコピーに近い）
+fn arrow_write_parquet(
+    batch: &arrow::record_batch::RecordBatch,
+    path: &str,
+) -> Result<(), String> {
+    use parquet::arrow::arrow_writer::ArrowWriter;
+    if let Some(parent) = std::path::Path::new(path).parent() {
+        if !parent.as_os_str().is_empty() {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| format!("arrow_write_parquet mkdir: {e}"))?;
+        }
+    }
+    let file = std::fs::File::create(path)
+        .map_err(|e| format!("arrow_write_parquet create: {e}"))?;
+    let mut writer = ArrowWriter::try_new(file, batch.schema(), None)
+        .map_err(|e| format!("ArrowWriter::try_new: {e}"))?;
+    writer.write(batch).map_err(|e| format!("ArrowWriter::write: {e}"))?;
+    writer.close().map_err(|e| format!("ArrowWriter::close: {e}"))?;
+    Ok(())
+}
+
+/// Parquet ファイル → `RecordBatch` 読み込み
+fn arrow_read_parquet(path: &str) -> Result<arrow::record_batch::RecordBatch, String> {
+    use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
+    let file = std::fs::File::open(path)
+        .map_err(|e| format!("arrow_read_parquet open: {e}"))?;
+    let mut reader = ParquetRecordBatchReaderBuilder::try_new(file)
+        .map_err(|e| format!("ParquetRecordBatchReaderBuilder: {e}"))?
+        .build()
+        .map_err(|e| format!("build reader: {e}"))?;
+    reader
+        .next()
+        .ok_or_else(|| "arrow_read_parquet: no batches in file".to_string())?
+        .map_err(|e| format!("read batch: {e}"))
 }
 
 fn parquet_write_rows(
@@ -12238,6 +12502,78 @@ fn vm_call_builtin(
                 .map_err(|e| format!("Gen.to_csv_raw: flush error: {}", e))?;
             Ok(ok_vm(VMValue::Unit))
         }
+        // ── v19.5.0: ArrowBatch primitives ───────────────────────────────────────
+        // ── v19.5.0: ArrowBatch primitives ───────────────────────────────────────
+        "ArrowBatch.from_list" => {
+            let rows = match args.into_iter().next() {
+                Some(VMValue::List(list)) => list.to_vec(),
+                other => return Err(format!(
+                    "ArrowBatch.from_list expects List, got {:?}",
+                    other.as_ref().map(vmvalue_type_name)
+                )),
+            };
+            match arrow_from_vm_rows(&rows) {
+                Ok(batch) => Ok(ok_vm(VMValue::ArrowBatch(arrow_store(batch)))),
+                Err(e) => Ok(err_vm(VMValue::Str(e))),
+            }
+        }
+
+        "ArrowBatch.to_list" => {
+            let id = match args.into_iter().next() {
+                Some(VMValue::ArrowBatch(id)) => id,
+                other => return Err(format!(
+                    "ArrowBatch.to_list expects ArrowBatch, got {:?}",
+                    other.as_ref().map(vmvalue_type_name)
+                )),
+            };
+            match arrow_get(id) {
+                Some(batch) => {
+                    let rows = arrow_to_vm_rows(&batch)?;
+                    Ok(ok_vm(VMValue::List(FavList::new(rows))))
+                }
+                None => Ok(err_vm(VMValue::Str(format!("ArrowBatch: invalid handle {id}")))),
+            }
+        }
+
+        "ArrowBatch.write_parquet" => {
+            let mut it = args.into_iter();
+            let id = match it.next() {
+                Some(VMValue::ArrowBatch(id)) => id,
+                other => return Err(format!(
+                    "ArrowBatch.write_parquet: expected ArrowBatch, got {:?}",
+                    other.as_ref().map(vmvalue_type_name)
+                )),
+            };
+            let path = match it.next() {
+                Some(VMValue::Str(s)) => s,
+                other => return Err(format!(
+                    "ArrowBatch.write_parquet: expected String path, got {:?}",
+                    other.as_ref().map(vmvalue_type_name)
+                )),
+            };
+            match arrow_get(id) {
+                Some(batch) => match arrow_write_parquet(&batch, &path) {
+                    Ok(_) => Ok(ok_vm(VMValue::Unit)),
+                    Err(e) => Ok(err_vm(VMValue::Str(e))),
+                },
+                None => Ok(err_vm(VMValue::Str(format!("ArrowBatch.write_parquet: invalid handle {id}")))),
+            }
+        }
+
+        "ArrowBatch.read_parquet" => {
+            let path = match args.into_iter().next() {
+                Some(VMValue::Str(s)) => s,
+                other => return Err(format!(
+                    "ArrowBatch.read_parquet expects String, got {:?}",
+                    other.as_ref().map(vmvalue_type_name)
+                )),
+            };
+            match arrow_read_parquet(&path) {
+                Ok(batch) => Ok(ok_vm(VMValue::ArrowBatch(arrow_store(batch)))),
+                Err(e) => Ok(err_vm(VMValue::Str(e))),
+            }
+        }
+
         "Gen.to_parquet_raw" => {
             let mut it = args.into_iter();
             let path_val = vm_string(
@@ -15235,6 +15571,7 @@ fn vm_call_builtin(
             }
             Ok(VMValue::List(FavList::new(vals)))
         }
+
 
         other => Err(format!("unknown builtin: {}", other)),
     }

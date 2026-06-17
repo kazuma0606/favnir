@@ -1,0 +1,113 @@
+# Apache Arrow Integration
+
+Favnir v19.5.0 adds native Apache Arrow support via the `ArrowBatch` builtin namespace.
+Arrow RecordBatches provide a columnar in-memory format optimized for analytics workloads.
+
+## Overview
+
+`ArrowBatch` lets you convert Favnir lists of records to/from Arrow RecordBatches,
+and read/write Parquet files using Arrow's native writer.
+
+## API
+
+### `ArrowBatch.from_list`
+
+Convert a `List<Map>` to an Arrow RecordBatch. Schema is inferred from the first row.
+
+```favnir
+bind rows <- collect {
+    yield Map.set(Map.set((), "id", 1), "score", 99);
+    yield Map.set(Map.set((), "id", 2), "score", 87);
+    ()
+}
+match ArrowBatch.from_list(rows) {
+    Ok(batch) => batch
+    Err(e)    => Result.err(e)
+}
+```
+
+### `ArrowBatch.to_list`
+
+Convert an Arrow RecordBatch back to a `List<Map>`.
+
+```favnir
+match ArrowBatch.to_list(batch) {
+    Ok(rows) => List.length(rows)
+    Err(e)   => 0
+}
+```
+
+### `ArrowBatch.write_parquet`
+
+Write an Arrow RecordBatch to a Parquet file.
+
+```favnir
+match ArrowBatch.write_parquet(batch, "output/data.parquet") {
+    Ok(_)  => "written"
+    Err(e) => e
+}
+```
+
+### `ArrowBatch.read_parquet`
+
+Read a Parquet file into an Arrow RecordBatch.
+
+```favnir
+match ArrowBatch.read_parquet("output/data.parquet") {
+    Ok(batch) => batch
+    Err(e)    => Result.err(e)
+}
+```
+
+## `#[arrow]` Stage Annotation
+
+Mark a stage as Arrow-aware with the `#[arrow]` annotation.
+This signals to the runtime that the stage operates on columnar data.
+
+```favnir
+#[arrow]
+stage Transform: List<Int> -> List<Int> = |rows| {
+    Result.ok(rows)
+}
+```
+
+## Parquet Roundtrip Example
+
+```favnir
+public fn main() -> Int {
+    bind rows <- collect {
+        yield Map.set(Map.set((), "id", 1), "value", 100);
+        yield Map.set(Map.set((), "id", 2), "value", 200);
+        ()
+    }
+    match ArrowBatch.from_list(rows) {
+        Err(_) => -1
+        Ok(b) =>
+            match ArrowBatch.write_parquet(b, "tmp/out.parquet") {
+                Err(_) => -2
+                Ok(_) =>
+                    match ArrowBatch.read_parquet("tmp/out.parquet") {
+                        Err(_) => -3
+                        Ok(b2) =>
+                            match ArrowBatch.to_list(b2) {
+                                Err(_)   => -4
+                                Ok(back) => List.length(back)
+                            }
+                    }
+            }
+    }
+}
+```
+
+## Schema Inference
+
+Schema is inferred from the first row of the list:
+
+| Favnir type | Arrow type  |
+|-------------|-------------|
+| `Int`       | `Int64`     |
+| `Float`     | `Float64`   |
+| `Bool`      | `Boolean`   |
+| other       | `Utf8`      |
+
+Column names are sorted alphabetically for deterministic output.

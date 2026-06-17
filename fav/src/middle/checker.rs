@@ -59,6 +59,8 @@ pub enum Type {
     Stream(Box<Type>),
     /// `R & { field: Type }` — intersection type (v18.2.0)
     Intersection(Box<Type>, Box<Type>),
+    /// `T -o U` — linear function type (v18.5.0)
+    LinearFn(Box<Type>, Box<Type>),
     /// Type is not yet known (monomorphic placeholder / built-in generic)
     Unknown,
     /// Error recovery  Esuppress cascading errors
@@ -252,6 +254,7 @@ impl Type {
             Type::Task(t) => format!("Task<{}>", t.display()),
             Type::Stream(t) => format!("Stream<{}>", t.display()),
             Type::Intersection(l, r) => format!("{} & {}", l.display(), r.display()),
+            Type::LinearFn(a, b) => format!("{} -o {}", a.display(), b.display()),
             Type::Unknown => "_".into(),
             Type::Error => "?".into(),
         }
@@ -904,6 +907,13 @@ impl StaticValue {
     }
 }
 
+/// Usage state of a linear variable (v18.5.0).
+#[derive(Debug, Clone, PartialEq)]
+enum LinearState {
+    Available,
+    Consumed,
+}
+
 pub struct Checker {
     env: TyEnv,
     pub errors: Vec<TypeError>,
@@ -974,6 +984,12 @@ pub struct Checker {
     schema_types: HashMap<String, Type>,
     /// Whether to refresh schema cache (v18.4.0). Set via --refresh-schemas flag.
     pub schema_refresh: bool,
+    /// Built-in linear type names (v18.5.0): "Connection", "Tx"
+    linear_types: std::collections::HashSet<String>,
+    /// Linear variable usage in current function scope (v18.5.0)
+    linear_env: HashMap<String, LinearState>,
+    /// Const generic params registry: fn_name → params with const constraints (v18.7.0).
+    const_generics_registry: HashMap<String, Vec<crate::ast::GenericParam>>,
 }
 
 impl Checker {
@@ -1019,6 +1035,9 @@ impl Checker {
             fn_refinement_registry: HashMap::new(),
             schema_types: HashMap::new(),
             schema_refresh: false,
+            linear_types: ["Connection", "Tx"].iter().map(|s| s.to_string()).collect(),
+            linear_env: HashMap::new(),
+            const_generics_registry: HashMap::new(),
         }
     }
 
@@ -1067,6 +1086,9 @@ impl Checker {
             fn_refinement_registry: HashMap::new(),
             schema_types: HashMap::new(),
             schema_refresh: false,
+            linear_types: ["Connection", "Tx"].iter().map(|s| s.to_string()).collect(),
+            linear_env: HashMap::new(),
+            const_generics_registry: HashMap::new(),
         }
     }
 
@@ -1529,6 +1551,7 @@ impl Checker {
             "DuckDb",
             "Crypto",
             "Auth",
+            "ArrowBatch",
         ] {
             self.env
                 .define(ns.to_string(), Type::Named(ns.to_string(), vec![]));
@@ -2228,6 +2251,11 @@ impl Checker {
                         self.fn_bounds_registry
                             .insert(fd.name.clone(), fd.type_params.clone());
                     }
+                    // Register const generic constraints for call-site checking (v18.7.0).
+                    if fd.type_params.iter().any(|p| p.is_const && p.const_constraint.is_some()) {
+                        self.const_generics_registry
+                            .insert(fd.name.clone(), fd.type_params.clone());
+                    }
                     // Register refinement constraints for call-site checking (v18.3.0).
                     let refinements: Vec<(usize, String, Box<crate::ast::Expr>)> = fd
                         .params
@@ -2584,6 +2612,9 @@ impl Checker {
             }
         }
 
+        // v18.6.0: variance check (E0334)
+        self.check_interface_variance(id);
+
         let mut methods = HashMap::new();
         for method in &id.methods {
             let ty = self
@@ -2595,6 +2626,55 @@ impl Checker {
             id.super_interface.clone(),
             methods,
         );
+    }
+
+    /// v18.6.0: Check that covariant (+T) params only appear in output positions
+    /// and contravariant (-T) params only appear in input positions (E0334).
+    fn check_interface_variance(&mut self, id: &InterfaceDecl) {
+        use crate::ast::Variance;
+        for param in &id.type_params {
+            match param.variance {
+                Variance::Invariant => {} // no restriction
+                Variance::Covariant => {
+                    // +T must NOT appear in input (argument) positions
+                    for method in &id.methods {
+                        if type_expr_contains_in_input(&method.ty, &param.name) {
+                            self.type_error_h(
+                                "E0334",
+                                format!(
+                                    "covariant type parameter `+{}` used in input (argument) position in method `{}`",
+                                    param.name, method.name
+                                ),
+                                &method.span,
+                                vec![
+                                    "covariant parameters (+T) may only appear in output (return) positions".to_string(),
+                                    format!("consider using invariant `{}` or contravariant `-{}`", param.name, param.name),
+                                ],
+                            );
+                        }
+                    }
+                }
+                Variance::Contravariant => {
+                    // -T must NOT appear in output (return) positions
+                    for method in &id.methods {
+                        if type_expr_contains_in_output(&method.ty, &param.name) {
+                            self.type_error_h(
+                                "E0334",
+                                format!(
+                                    "contravariant type parameter `-{}` used in output (return) position in method `{}`",
+                                    param.name, method.name
+                                ),
+                                &method.span,
+                                vec![
+                                    "contravariant parameters (-T) may only appear in input (argument) positions".to_string(),
+                                    format!("consider using invariant `{}` or covariant `+{}`", param.name, param.name),
+                                ],
+                            );
+                        }
+                    }
+                }
+            }
+        }
     }
 
     fn check_interface_impl_decl(&mut self, id: &InterfaceImplDecl) {
@@ -3062,6 +3142,8 @@ impl Checker {
             fd.effects.clone()
         };
         let saved_effects = std::mem::replace(&mut self.current_effects, effective_effects);
+        // v18.5.0: Linear type tracking — clear env per function.
+        let saved_linear_env = std::mem::replace(&mut self.linear_env, HashMap::new());
         let saved_tp = std::mem::replace(
             &mut self.type_params,
             fd.type_params.iter().map(|p| p.name.clone()).collect(),
@@ -3128,6 +3210,22 @@ impl Checker {
                 &fd.body.span,
             );
         }
+
+        // v18.5.0: E0333 — linear variable unused (must be consumed).
+        let unused_linears: Vec<String> = self.linear_env
+            .iter()
+            .filter(|(_, s)| **s == LinearState::Available)
+            .map(|(n, _)| n.clone())
+            .collect();
+        for name in unused_linears {
+            self.type_error_h(
+                "E0333",
+                format!("linear variable `{}` was never used (must be consumed exactly once)", name),
+                &fd.span,
+                vec!["linear types must be used exactly once; pass the value to a consuming function".to_string()],
+            );
+        }
+        self.linear_env = saved_linear_env;
 
         self.env.pop();
         self.type_params = saved_tp;
@@ -3662,6 +3760,10 @@ impl Checker {
             ),
             TypeExpr::RecordType(_, _) => Type::Unknown,
             TypeExpr::Schema(uri, _) => self.resolve_schema(uri),
+            TypeExpr::LinearArrow(a, b, _) => Type::LinearFn(
+                Box::new(self.resolve_type_expr_with_subst(a, subst)),
+                Box::new(self.resolve_type_expr_with_subst(b, subst)),
+            ),
             TypeExpr::Named(name, args, _) if args.is_empty() => subst
                 .get(name)
                 .cloned()
@@ -3729,6 +3831,7 @@ impl Checker {
                     _ => Type::Named(name.clone(), resolved_args),
                 }
             }
+            TypeExpr::ConstInt(_, _) => Type::Int,
         }
     }
 
@@ -3836,6 +3939,14 @@ impl Checker {
                     self.check_pattern_bindings(&b.pattern, &annotated_ty);
                 } else {
                     self.check_pattern_bindings(&b.pattern, &effective_ty);
+                }
+                // v18.5.0: Register linear variable in linear_env.
+                if let Pattern::Bind(name, _) = &b.pattern {
+                    if let Type::Named(type_name, _) = &effective_ty {
+                        if self.linear_types.contains(type_name.as_str()) {
+                            self.linear_env.insert(name.clone(), LinearState::Available);
+                        }
+                    }
                 }
             }
             Stmt::Expr(e) => {
@@ -4383,6 +4494,21 @@ impl Checker {
                 if let Some(def_span) = self.global_def_spans.get(name).cloned() {
                     self.def_at.insert(span.clone(), def_span);
                 }
+                // v18.5.0: Linear type usage tracking (E0332).
+                match self.linear_env.get(name).cloned() {
+                    Some(LinearState::Consumed) => {
+                        self.type_error_h(
+                            "E0332",
+                            format!("linear variable `{}` used more than once", name),
+                            span,
+                            vec!["linear types must be used exactly once; each use consumes the value".to_string()],
+                        );
+                    }
+                    Some(LinearState::Available) => {
+                        self.linear_env.insert(name.clone(), LinearState::Consumed);
+                    }
+                    None => {}
+                }
                 let ty = match self.env.lookup(name).cloned() {
                     Some(ty) => {
                         self.check_symbol_visibility(name, span);
@@ -4431,6 +4557,28 @@ impl Checker {
                 } else {
                     instantiate_explicit_type_args(self.check_expr(func), type_args, self)
                 };
+                // Const generic constraint checking (E0335) (v18.7.0).
+                if let Expr::Ident(fname, _) = func.as_ref() {
+                    if let Some(cparams) = self.const_generics_registry.get(fname).cloned() {
+                        for (i, param) in cparams.iter().enumerate() {
+                            if !param.is_const { continue; }
+                            let Some(constraint) = &param.const_constraint else { continue };
+                            let Some(crate::ast::TypeExpr::ConstInt(n, _)) = type_args.get(i) else { continue };
+                            let mut env = HashMap::new();
+                            env.insert(param.name.clone(), *n);
+                            if !eval_const_constraint(constraint, &env) {
+                                self.type_error(
+                                    "E0335",
+                                    format!(
+                                        "const generic `{} = {}` violates constraint",
+                                        param.name, n
+                                    ),
+                                    span,
+                                );
+                            }
+                        }
+                    }
+                }
                 self.remember_type(span, &ty);
                 ty
             }
@@ -7067,6 +7215,10 @@ impl Checker {
             ),
             TypeExpr::RecordType(_, _) => Type::Unknown,
             TypeExpr::Schema(uri, _) => self.resolve_schema(uri),
+            TypeExpr::LinearArrow(a, b, _) => Type::LinearFn(
+                Box::new(self.resolve_type_expr_with_self(a, self_ty)),
+                Box::new(self.resolve_type_expr_with_self(b, self_ty)),
+            ),
             TypeExpr::Named(name, args, _) => {
                 if name == "Self" && args.is_empty() {
                     return self_ty
@@ -7152,6 +7304,7 @@ impl Checker {
                     _ => Type::Named(name.clone(), resolved_args),
                 }
             }
+            TypeExpr::ConstInt(_, _) => Type::Int,
         }
     }
 
@@ -7249,6 +7402,8 @@ impl Checker {
                 }
             }
             TypeExpr::Schema(_, _) => {} // no arity to validate
+            TypeExpr::LinearArrow(_, _, _) => {}
+            TypeExpr::ConstInt(_, _) => {} // integer constant, no arity
         }
     }
 
@@ -7330,7 +7485,7 @@ fn collect_type_vars_ordered(ty: &Type, out: &mut Vec<String>) {
             collect_type_vars_ordered(input, out);
             collect_type_vars_ordered(output, out);
         }
-        Type::Intersection(lhs, rhs) => {
+        Type::Intersection(lhs, rhs) | Type::LinearFn(lhs, rhs) => {
             collect_type_vars_ordered(lhs, out);
             collect_type_vars_ordered(rhs, out);
         }
@@ -7385,6 +7540,47 @@ fn expr_fn_name(expr: &Expr) -> Option<String> {
     match expr {
         Expr::Ident(name, _) => Some(name.clone()),
         _ => None,
+    }
+}
+
+/// Evaluate a simple integer const expression, given a variable env (v18.7.0).
+fn eval_const_int(expr: &Expr, env: &HashMap<String, i64>) -> Option<i64> {
+    match expr {
+        Expr::Lit(crate::ast::Lit::Int(n), _) => Some(*n),
+        Expr::Ident(name, _) => env.get(name).copied(),
+        Expr::BinOp(op, lhs, rhs, _) => {
+            let l = eval_const_int(lhs, env)?;
+            let r = eval_const_int(rhs, env)?;
+            match op {
+                crate::ast::BinOp::Add => Some(l + r),
+                crate::ast::BinOp::Sub => Some(l - r),
+                crate::ast::BinOp::Mul => Some(l * r),
+                crate::ast::BinOp::Div if r != 0 => Some(l / r),
+                _ => None,
+            }
+        }
+        _ => None,
+    }
+}
+
+/// Evaluate a const constraint (boolean expression) against an env (v18.7.0).
+/// Returns true if the constraint is satisfied (or cannot be evaluated).
+fn eval_const_constraint(expr: &Expr, env: &HashMap<String, i64>) -> bool {
+    match expr {
+        Expr::BinOp(op, lhs, rhs, _) => {
+            let l = eval_const_int(lhs, env);
+            let r = eval_const_int(rhs, env);
+            match (op, l, r) {
+                (crate::ast::BinOp::Gt, Some(l), Some(r)) => l > r,
+                (crate::ast::BinOp::GtEq, Some(l), Some(r)) => l >= r,
+                (crate::ast::BinOp::Lt, Some(l), Some(r)) => l < r,
+                (crate::ast::BinOp::LtEq, Some(l), Some(r)) => l <= r,
+                (crate::ast::BinOp::Eq, Some(l), Some(r)) => l == r,
+                (crate::ast::BinOp::NotEq, Some(l), Some(r)) => l != r,
+                _ => true, // Unknown constraint — pass
+            }
+        }
+        _ => true, // Cannot evaluate — pass
     }
 }
 
@@ -10083,6 +10279,49 @@ impl Checker {
                 break;
             }
         }
+    }
+}
+
+// ── v18.6.0: Variance position helpers ───────────────────────────────────────
+
+/// Returns true if type parameter `name` appears in an *input* (argument) position
+/// of the given `TypeExpr`. Used for E0334 covariant-in-input detection.
+fn type_expr_contains_in_input(te: &TypeExpr, name: &str) -> bool {
+    match te {
+        // Arrow: left side is input, right side is output
+        TypeExpr::Arrow(a, _, _) | TypeExpr::LinearArrow(a, _, _) => {
+            type_expr_contains(a, name)
+        }
+        // Bare name / app: no directional context at this level
+        _ => false,
+    }
+}
+
+/// Returns true if type parameter `name` appears in an *output* (return) position
+/// of the given `TypeExpr`. Used for E0334 contravariant-in-output detection.
+fn type_expr_contains_in_output(te: &TypeExpr, name: &str) -> bool {
+    match te {
+        // Arrow: right side is output
+        TypeExpr::Arrow(_, b, _) | TypeExpr::LinearArrow(_, b, _) => {
+            type_expr_contains(b, name)
+        }
+        // Bare named type that IS the name (return type is the param itself)
+        TypeExpr::Named(n, args, _) => n == name || args.iter().any(|a| type_expr_contains(a, name)),
+        _ => false,
+    }
+}
+
+/// Returns true if `name` appears anywhere in `te`.
+fn type_expr_contains(te: &TypeExpr, name: &str) -> bool {
+    match te {
+        TypeExpr::Named(n, args, _) => n == name || args.iter().any(|a| type_expr_contains(a, name)),
+        TypeExpr::Arrow(a, b, _) | TypeExpr::LinearArrow(a, b, _) | TypeExpr::Intersection(a, b, _) => {
+            type_expr_contains(a, name) || type_expr_contains(b, name)
+        }
+        TypeExpr::Optional(inner, _) | TypeExpr::Fallible(inner, _) => type_expr_contains(inner, name),
+        TypeExpr::TrfFn { input, output, .. } => type_expr_contains(input, name) || type_expr_contains(output, name),
+        TypeExpr::RecordType(fields, _) => fields.iter().any(|(_, t)| type_expr_contains(t, name)),
+        TypeExpr::Schema(_, _) | TypeExpr::ConstInt(_, _) => false,
     }
 }
 

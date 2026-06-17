@@ -243,7 +243,138 @@ impl Parser {
 
     // ── item ──────────────────────────────────────────────────────────────────
 
-    fn parse_item(&mut self) -> Result<Item, ParseError> {
+    /// Expect an identifier token with a specific name; consume and return error otherwise.
+    fn expect_ident_name(&mut self, expected: &str) -> Result<(), ParseError> {
+        match self.peek().clone() {
+            TokenKind::Ident(n) if n == expected => {
+                self.advance();
+                Ok(())
+            }
+            other => Err(ParseError::new(
+                format!("expected `{}`, got {:?}", expected, other),
+                self.peek_span().clone(),
+            )),
+        }
+    }
+
+    /// Expect a string literal token; consume and return the string value.
+    fn expect_str(&mut self) -> Result<String, ParseError> {
+        match self.peek().clone() {
+            TokenKind::Str(s) => {
+                self.advance();
+                Ok(s)
+            }
+            other => Err(ParseError::new(
+                format!("expected string literal, got {:?}", other),
+                self.peek_span().clone(),
+            )),
+        }
+    }
+
+    /// Try to parse `#[api(method = "...", path = "...")]` before a fn definition.
+    /// Returns None if the next tokens are not `#[api(`.
+    fn parse_api_annotation(&mut self) -> Result<Option<crate::ast::ApiAnnotation>, ParseError> {
+        // Lookahead: #  [  api
+        let is_api = self.peek() == &TokenKind::Hash
+            && matches!(self.tokens.get(self.pos + 1), Some(t) if t.kind == TokenKind::LBracket)
+            && matches!(self.tokens.get(self.pos + 2), Some(t) if matches!(&t.kind, TokenKind::Ident(n) if n == "api"));
+        if !is_api {
+            return Ok(None);
+        }
+        let start = self.peek_span().clone();
+        self.advance(); // #
+        self.expect(&TokenKind::LBracket)?;
+        self.expect_ident_name("api")?;
+        self.expect(&TokenKind::LParen)?;
+        // method = "..."
+        self.expect_ident_name("method")?;
+        self.expect(&TokenKind::Eq)?;
+        let method = self.expect_str()?;
+        self.expect(&TokenKind::Comma)?;
+        // path = "..."
+        self.expect_ident_name("path")?;
+        self.expect(&TokenKind::Eq)?;
+        let path = self.expect_str()?;
+        // optional trailing comma
+        if self.peek() == &TokenKind::Comma {
+            self.advance();
+        }
+        self.expect(&TokenKind::RParen)?;
+        self.expect(&TokenKind::RBracket)?;
+        Ok(Some(crate::ast::ApiAnnotation { method, path, span: self.span_from(&start) }))
+    }
+
+    fn parse_streaming_annotation(&mut self) -> Result<Option<crate::ast::StreamingAnnotation>, ParseError> {
+        // Lookahead: # [ streaming
+        let is_streaming = self.peek() == &TokenKind::Hash
+            && matches!(self.tokens.get(self.pos + 1), Some(t) if t.kind == TokenKind::LBracket)
+            && matches!(self.tokens.get(self.pos + 2), Some(t) if matches!(&t.kind, TokenKind::Ident(n) if n == "streaming"));
+        if !is_streaming {
+            return Ok(None);
+        }
+        let start = self.peek_span().clone();
+        self.advance(); // #
+        self.expect(&TokenKind::LBracket)?;
+        self.expect_ident_name("streaming")?;
+        let chunk_size = if self.peek() == &TokenKind::LParen {
+            self.advance(); // (
+            self.expect_ident_name("chunk_size")?;
+            self.expect(&TokenKind::Eq)?;
+            let n = match self.peek().clone() {
+                TokenKind::Int(n) => { self.advance(); n }
+                other => return Err(ParseError::new(
+                    format!("expected integer for chunk_size, got {:?}", other),
+                    self.peek_span().clone(),
+                )),
+            };
+            self.expect(&TokenKind::RParen)?;
+            Some(n)
+        } else {
+            None
+        };
+        self.expect(&TokenKind::RBracket)?;
+        Ok(Some(crate::ast::StreamingAnnotation { chunk_size, span: self.span_from(&start) }))
+    }
+
+    fn parse_stateful_annotation(&mut self) -> Result<bool, ParseError> {
+        // Lookahead: # [ stateful ]
+        let is_stateful = self.peek() == &TokenKind::Hash
+            && matches!(self.tokens.get(self.pos + 1), Some(t) if t.kind == TokenKind::LBracket)
+            && matches!(self.tokens.get(self.pos + 2), Some(t) if matches!(&t.kind, TokenKind::Ident(n) if n == "stateful"));
+        if !is_stateful {
+            return Ok(false);
+        }
+        self.advance(); // #
+        self.expect(&TokenKind::LBracket)?;
+        self.expect_ident_name("stateful")?;
+        self.expect(&TokenKind::RBracket)?;
+        Ok(true)
+    }
+
+    fn parse_arrow_annotation(&mut self) -> Result<bool, ParseError> {
+        // Lookahead: # [ arrow ]
+        let is_arrow = self.peek() == &TokenKind::Hash
+            && matches!(self.tokens.get(self.pos + 1), Some(t) if t.kind == TokenKind::LBracket)
+            && matches!(self.tokens.get(self.pos + 2), Some(t) if matches!(&t.kind, TokenKind::Ident(n) if n == "arrow"));
+        if !is_arrow {
+            return Ok(false);
+        }
+        self.advance(); // #
+        self.expect(&TokenKind::LBracket)?;
+        self.expect_ident_name("arrow")?;
+        self.expect(&TokenKind::RBracket)?;
+        Ok(true)
+    }
+
+        fn parse_item(&mut self) -> Result<Item, ParseError> {
+        // v18.8.0: parse optional `#[api(...)]` annotation before visibility/fn
+        let api_annotation = self.parse_api_annotation()?;
+        // v19.1.0: parse optional streaming/stateful annotations
+        let streaming_ann = self.parse_streaming_annotation()?;
+        let stateful_ann = self.parse_stateful_annotation()?;
+        // v19.5.0: parse optional #[arrow] annotation
+        let arrow_ann = self.parse_arrow_annotation()?;
+
         let vis = self.parse_visibility();
 
         match self.peek().clone() {
@@ -261,8 +392,17 @@ impl Parser {
                 self.parse_import_decl(is_public)
             }
             TokenKind::Type => Ok(Item::TypeDef(self.parse_type_def(vis)?)),
-            TokenKind::Fn => Ok(Item::FnDef(self.parse_fn_def(vis, false)?)),
-            TokenKind::Stage => Ok(Item::TrfDef(self.parse_trf_def(vis, false)?)),
+            TokenKind::Fn => {
+                let mut fd = self.parse_fn_def(vis, false)?;
+                fd.api_annotation = api_annotation;
+                Ok(Item::FnDef(fd))
+            }
+            TokenKind::Stage => {
+                let mut td = self.parse_trf_def(vis, false)?;
+                td.stateful = stateful_ann;
+                td.arrow = arrow_ann;
+                Ok(Item::TrfDef(td))
+            }
             TokenKind::Trf => {
                 let span = self.peek_span().clone();
                 self.advance();
@@ -274,8 +414,16 @@ impl Parser {
             TokenKind::Async => {
                 self.advance(); // consume 'async'
                 match self.peek().clone() {
-                    TokenKind::Fn => Ok(Item::FnDef(self.parse_fn_def(vis, true)?)),
-                    TokenKind::Stage => Ok(Item::TrfDef(self.parse_trf_def(vis, true)?)),
+                    TokenKind::Fn => {
+                        let mut fd = self.parse_fn_def(vis, true)?;
+                        fd.api_annotation = api_annotation;
+                        Ok(Item::FnDef(fd))
+                    }
+                    TokenKind::Stage => {
+                        let mut td = self.parse_trf_def(vis, true)?;
+                        td.stateful = stateful_ann;
+                        Ok(Item::TrfDef(td))
+                    }
                     TokenKind::Trf => {
                         let span = self.peek_span().clone();
                         self.advance();
@@ -318,7 +466,13 @@ impl Parser {
                     Ok(Item::InterfaceImplDecl(self.parse_interface_impl_decl()?))
                 }
             }
-            TokenKind::Seq => self.parse_flw_def_or_binding(vis),
+            TokenKind::Seq => {
+                let item = self.parse_flw_def_or_binding(vis)?;
+                Ok(match item {
+                    Item::FlwDef(mut fd) => { fd.streaming = streaming_ann; Item::FlwDef(fd) }
+                    other => other,
+                })
+            }
             TokenKind::Flw => {
                 let span = self.peek_span().clone();
                 self.advance();
@@ -587,6 +741,54 @@ impl Parser {
         })
     }
 
+    /// Parse generic type params with optional variance annotations: `<+T, -U, V>`.
+    /// `+T` → Covariant, `-T` → Contravariant, `T` → Invariant.
+    ///
+    /// Lexer note: `<-T` is tokenized as `LArrow` (`<-`) followed by `Ident("T")`.
+    /// `<+T` is tokenized as `LAngle` + `Plus` + `Ident("T")`.
+    /// So we handle both `LAngle` (normal open) and `LArrow` (contravariant first param).
+    fn parse_variance_type_params(&mut self) -> Result<Vec<crate::ast::GenericParam>, ParseError> {
+        use crate::ast::{GenericParam, Variance};
+        // Determine whether the angle bracket opened with `<` or `<-`.
+        let first_is_contravariant;
+        if self.peek() == &TokenKind::LAngle {
+            self.advance(); // consume `<`
+            first_is_contravariant = false;
+        } else if self.peek() == &TokenKind::LArrow {
+            self.advance(); // consume `<-` — first param is contravariant
+            first_is_contravariant = true;
+        } else {
+            return Ok(vec![]);
+        }
+        let mut params = vec![];
+        let mut is_first = true;
+        loop {
+            let variance = if is_first && first_is_contravariant {
+                // `<-` already consumed variance for the first param
+                Variance::Contravariant
+            } else if self.peek() == &TokenKind::Plus {
+                self.advance(); // consume `+`
+                Variance::Covariant
+            } else if self.peek() == &TokenKind::Minus {
+                self.advance(); // consume `-`
+                Variance::Contravariant
+            } else {
+                Variance::Invariant
+            };
+            is_first = false;
+            let (name, _) = self.expect_ident()?;
+            let bounds = self.parse_type_bounds()?;
+            params.push(GenericParam { name, bounds, variance, is_const: false, const_ty: None, const_constraint: None });
+            if self.peek() == &TokenKind::Comma {
+                self.advance();
+            } else {
+                break;
+            }
+        }
+        self.expect(&TokenKind::RAngle)?;
+        Ok(params)
+    }
+
     fn parse_interface_decl(
         &mut self,
         visibility: Option<Visibility>,
@@ -594,6 +796,9 @@ impl Parser {
         let start = self.peek_span().clone();
         self.expect(&TokenKind::Interface)?;
         let (name, _) = self.expect_ident()?;
+
+        // v18.6.0: optional type params with variance annotations `<+T, -U>`
+        let type_params = self.parse_variance_type_params()?;
 
         let super_interface = if self.peek() == &TokenKind::Colon {
             self.advance();
@@ -622,6 +827,7 @@ impl Parser {
             visibility,
             name,
             super_interface,
+            type_params,
             methods,
             span: self.span_from(&start),
         })
@@ -880,17 +1086,44 @@ impl Parser {
             return Ok(vec![]);
         }
         self.advance(); // consume `<`
-        let (first_name, _) = self.expect_ident()?;
-        let first_bounds = self.parse_type_bounds()?;
-        let mut params = vec![crate::ast::GenericParam { name: first_name, bounds: first_bounds }];
+        let mut params = vec![self.parse_one_type_param()?];
         while self.peek() == &TokenKind::Comma {
             self.advance();
-            let (name, _) = self.expect_ident()?;
-            let bounds = self.parse_type_bounds()?;
-            params.push(crate::ast::GenericParam { name, bounds });
+            params.push(self.parse_one_type_param()?);
         }
         self.expect(&TokenKind::RAngle)?;
         Ok(params)
+    }
+
+    fn parse_one_type_param(&mut self) -> Result<crate::ast::GenericParam, ParseError> {
+        // `const N: Int` const generic param
+        if self.peek_ident_text("const") {
+            self.advance(); // consume `const`
+            let (name, _) = self.expect_ident()?;
+            self.expect(&TokenKind::Colon)?;
+            let const_ty = self.parse_type_expr()?;
+            // optional `where { expr }` compile-time constraint
+            let const_constraint = if self.peek() == &TokenKind::Where {
+                self.advance(); // consume `where`
+                self.expect(&TokenKind::LBrace)?;
+                let expr = self.parse_expr()?;
+                self.expect(&TokenKind::RBrace)?;
+                Some(Box::new(expr))
+            } else {
+                None
+            };
+            return Ok(crate::ast::GenericParam {
+                name,
+                bounds: vec![],
+                variance: crate::ast::Variance::Invariant,
+                is_const: true,
+                const_ty: Some(const_ty),
+                const_constraint,
+            });
+        }
+        let (name, _) = self.expect_ident()?;
+        let bounds = self.parse_type_bounds()?;
+        Ok(crate::ast::GenericParam { name, bounds, variance: crate::ast::Variance::Invariant, is_const: false, const_ty: None, const_constraint: None })
     }
 
     /// Parse zero or more `with InterfaceName` or `with { field: Type, ... }` bounds.
@@ -1114,6 +1347,14 @@ impl Parser {
             ty = TypeExpr::Arrow(Box::new(ty), Box::new(rhs), span);
         }
 
+        // linear arrow -o  (v18.5.0)
+        if allow_arrow && self.peek() == &TokenKind::LinearArrow {
+            self.advance();
+            let rhs = self.parse_type_expr_inner(true)?;
+            let span = self.span_from(&start);
+            ty = TypeExpr::LinearArrow(Box::new(ty), Box::new(rhs), span);
+        }
+
         Ok(ty)
     }
 
@@ -1160,6 +1401,13 @@ impl Parser {
             let span = self.span_from(&start);
             return Ok(TypeExpr::RecordType(fields, span));
         }
+        // Integer literal in type position (const generic argument): `Array<100>`
+        if let TokenKind::Int(n) = self.peek().clone() {
+            self.advance();
+            let span = self.span_from(&start);
+            return Ok(TypeExpr::ConstInt(n, span));
+        }
+
         let name = match self.peek().clone() {
             TokenKind::Ident(n) => {
                 self.advance();
@@ -1253,6 +1501,7 @@ impl Parser {
             effects,
             body,
             span: self.span_from(&start),
+            api_annotation: None, // set by parse_item if #[api(...)] precedes the fn
         })
     }
 
@@ -1483,6 +1732,8 @@ impl Parser {
             effects,
             params,
             body,
+            stateful: false,
+            arrow: false,
             span: self.span_from(&start),
         })
     }
@@ -1565,6 +1816,7 @@ impl Parser {
             name,
             steps,
             ctx_param,
+            streaming: None,
             span: self.span_from(&start),
         })
     }
@@ -1685,6 +1937,7 @@ impl Parser {
                 name,
                 steps,
                 ctx_param,
+                streaming: None,
                 span: self.span_from(&start),
             }));
         }
@@ -1705,6 +1958,7 @@ impl Parser {
                     name,
                     steps,
                     ctx_param,
+                    streaming: None,
                     span: self.span_from(&start),
                 }))
             }

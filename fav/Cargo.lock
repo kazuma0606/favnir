@@ -1075,6 +1075,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f900e0a3847d51eed0321f0777947fb852ccfce0da7fb070100357f69a2f37fc"
 
 [[package]]
+name = "cranelift-module"
+version = "0.117.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e9c3d728819ff644e8613d808378cbfed54fef464790f32e62079e638639eeff"
+dependencies = [
+ "anyhow",
+ "cranelift-codegen",
+ "cranelift-control",
+]
+
+[[package]]
 name = "cranelift-native"
 version = "0.117.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1082,6 +1093,21 @@ checksum = "7617f13f392ebb63c5126258aca8b8eca739636ca7e4eeee301d3eff68489a6a"
 dependencies = [
  "cranelift-codegen",
  "libc",
+ "target-lexicon",
+]
+
+[[package]]
+name = "cranelift-object"
+version = "0.117.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "60fc9092f7d9bba17c96ce51de5d91461f7905f3e1c43d1ba965df4b884d16ce"
+dependencies = [
+ "anyhow",
+ "cranelift-codegen",
+ "cranelift-control",
+ "cranelift-module",
+ "log",
+ "object 0.36.7",
  "target-lexicon",
 ]
 
@@ -1424,12 +1450,17 @@ checksum = "9f1f227452a390804cdb637b74a86990f2a7d7ba4b7d5693aac9b4dd6defd8d6"
 
 [[package]]
 name = "fav"
-version = "18.4.0"
+version = "19.5.0"
 dependencies = [
  "arrow 52.2.0",
  "base64 0.22.1",
  "bytes",
  "chrono",
+ "cranelift-codegen",
+ "cranelift-frontend",
+ "cranelift-module",
+ "cranelift-native",
+ "cranelift-object",
  "csv",
  "duckdb",
  "h2",
@@ -1440,9 +1471,11 @@ dependencies = [
  "open",
  "p256",
  "parquet",
+ "petgraph",
  "postgres",
  "prost",
  "rand 0.8.6",
+ "rayon",
  "regex",
  "rskafka",
  "rusqlite",
@@ -1504,6 +1537,12 @@ name = "find-msvc-tools"
 version = "0.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5baebc0774151f905a1a2cc41989300b1e6fbb29aff0ceffa1064fdd3088d582"
+
+[[package]]
+name = "fixedbitset"
+version = "0.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0ce7134b9999ecaf8bcd65542e436736ef32ddca1b3e06094cb6ec5755203b80"
 
 [[package]]
 name = "flatbuffers"
@@ -2850,6 +2889,16 @@ name = "percent-encoding"
 version = "2.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9b4f627cb1b25917193a259e49bdad08f671f8d9708acfd5fe0a8c1455d87220"
+
+[[package]]
+name = "petgraph"
+version = "0.6.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b4c5cc86750666a3ed20bdaf5ca2a0344f9c67674cae0515bec2da16fbaa47db"
+dependencies = [
+ "fixedbitset",
+ "indexmap 2.14.0",
+]
 
 [[package]]
 name = "phf"

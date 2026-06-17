@@ -1,0 +1,120 @@
+# WASM Binary Optimization
+
+Favnir supports compiling your pipeline to WebAssembly (WASM) with built-in
+dead-code elimination (DCE) and optional wasm-opt integration for maximum
+binary size reduction.
+
+## Targets
+
+| Target | Flag | Description |
+|--------|------|-------------|
+| `wasm32` | `--target wasm` | Standard WASM — exports `main` |
+| `wasm32-wasi` | `--target wasm32-wasi` | WASI-compatible — exports `_start` |
+
+```bash
+# Standard WASM
+fav build --target wasm pipeline.fav -o pipeline.wasm
+
+# WASI target (runnable with wasmtime)
+fav build --target wasm32-wasi pipeline.fav -o pipeline.wasm
+```
+
+## Dead Code Elimination (DCE)
+
+DCE is applied automatically during WASM builds. The compiler performs a
+reachability analysis starting from `main`, removes all unreachable functions
+from the IR, and produces a smaller binary.
+
+DCE requires no additional tooling — it runs entirely within the Favnir
+compiler.
+
+## wasm-opt Integration
+
+For additional size reduction, Favnir can invoke
+[Binaryen's `wasm-opt`](https://github.com/WebAssembly/binaryen) optimizer
+after compilation.
+
+### Installing wasm-opt
+
+```bash
+# macOS
+brew install binaryen
+
+# Ubuntu / Debian
+apt install binaryen
+
+# Windows (via Scoop)
+scoop install binaryen
+```
+
+### Optimization Levels
+
+| Level | Flag | Effect |
+|-------|------|--------|
+| `O0` | `--wasm-opt=O0` | DCE only, wasm-opt is not invoked (default) |
+| `O1` | `--wasm-opt=O1` | Basic optimizations |
+| `O2` | `--wasm-opt=O2` | Standard optimizations |
+| `O3` | `--wasm-opt=O3` | Aggressive optimizations (smallest output) |
+
+```bash
+# DCE only (no wasm-opt required)
+fav build --target wasm pipeline.fav -o pipeline.wasm
+
+# Full optimization pipeline
+fav build --target wasm --wasm-opt=O3 pipeline.fav -o pipeline.wasm
+
+# Strip debug info and optimize
+fav build --target wasm --wasm-opt=O3 --strip-debug pipeline.fav -o pipeline.wasm
+```
+
+If `wasm-opt` is not installed, Favnir prints a warning and falls back to the
+DCE-only output — your build will always succeed.
+
+## Size Report
+
+Add `--size-report` to see before/after sizes:
+
+```bash
+fav build --target wasm --wasm-opt=O2 --size-report pipeline.fav -o pipeline.wasm
+```
+
+Example output:
+
+```
+[fav] WASM size: 48200 -> 31540 bytes (34.6% reduction)
+```
+
+## Running WASM32-WASI Binaries
+
+The `wasm32-wasi` target adds a `_start` export so the binary can be run
+directly with a WASI-compatible runtime:
+
+```bash
+# Build
+fav build --target wasm32-wasi pipeline.fav -o pipeline.wasm
+
+# Run with wasmtime
+wasmtime pipeline.wasm
+
+# Run with wasmer
+wasmer pipeline.wasm
+```
+
+## Example: Full Optimization Pipeline
+
+```fav
+public fn main() -> Unit !Io {
+    IO.println("hello from wasm")
+}
+```
+
+```bash
+fav build --target wasm32-wasi \
+          --wasm-opt=O3 \
+          --strip-debug \
+          --size-report \
+          hello.fav -o hello.wasm
+
+wasmtime hello.wasm
+# hello from wasm
+```

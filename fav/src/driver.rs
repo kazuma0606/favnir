@@ -1459,6 +1459,71 @@ fn build_wasm_artifact(program: &ast::Program) -> Result<Vec<u8>, String> {
     wasm_codegen_program(&ir).map_err(|e| e.to_string())
 }
 
+// ── v19.6.0: WasmBuildConfig / build_wasm_artifact_with_config ──────────────
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum WasmTarget {
+    Wasm32,      // --target wasm (default)
+    Wasm32Wasi,  // --target wasm32-wasi
+}
+
+#[derive(Debug, Clone)]
+pub struct WasmBuildConfig {
+    pub target: WasmTarget,
+    pub opt_level: crate::backend::wasm_opt_pass::WasmOptLevel,
+    pub strip_debug: bool,
+    pub size_report: bool,
+    /// Apply dead code elimination before codegen (default: true).
+    pub dce: bool,
+}
+
+impl Default for WasmBuildConfig {
+    fn default() -> Self {
+        Self {
+            target: WasmTarget::Wasm32,
+            opt_level: crate::backend::wasm_opt_pass::WasmOptLevel::O0,
+            strip_debug: false,
+            size_report: false,
+            dce: true,
+        }
+    }
+}
+
+pub fn build_wasm_artifact_with_config(
+    program: &ast::Program,
+    config: &WasmBuildConfig,
+) -> Result<Vec<u8>, String> {
+    use crate::backend::wasm_dce::{apply_dce, collect_reachable_fns};
+    use crate::backend::wasm_opt_pass::try_wasm_opt;
+
+    let mut ir = compile_program(program);
+
+    if config.dce {
+        let reachable = collect_reachable_fns(&ir, "main");
+        apply_dce(&mut ir, &reachable);
+    }
+
+    let bytes = if config.target == WasmTarget::Wasm32Wasi {
+        crate::backend::wasm_codegen::wasm_codegen_program_wasi(&ir)
+            .map_err(|e| e.to_string())?
+    } else {
+        wasm_codegen_program(&ir).map_err(|e| e.to_string())?
+    };
+
+    let (bytes, report) = try_wasm_opt(bytes, config.opt_level, config.strip_debug);
+
+    if config.size_report {
+        eprintln!(
+            "[fav] WASM size: before={} bytes, after={} bytes, reduced={:.1}%",
+            report.before,
+            report.after,
+            report.reduction_pct()
+        );
+    }
+
+    Ok(bytes)
+}
+
 fn graphql_type_from_type_expr(ty: &ast::TypeExpr) -> String {
     match ty {
         ast::TypeExpr::Optional(inner, _) => graphql_type_from_type_expr_nullable(inner),
@@ -30031,6 +30096,7 @@ mod v195000_tests {
     use crate::driver::tests::exec_project_main_source_with_runes;
 
     #[test]
+    #[ignore]
     fn version_is_19_5_0() {
         let cargo = include_str!("../Cargo.toml");
         assert!(cargo.contains("19.5.0"), "Cargo.toml should have version 19.5.0");
@@ -30138,5 +30204,99 @@ stage Transform: List<Int> -> List<Int> = |rows| {
             })
             .expect("TrfDef not found");
         assert!(trf.arrow, "TrfDef with #[arrow] should have arrow: true");
+    }
+}
+
+// ── v196000_tests (v19.6.0) — WASM バイナリ最適化 ───────────────────────────
+#[cfg(test)]
+#[cfg(not(target_arch = "wasm32"))]
+mod v196000_tests {
+    use crate::backend::wasm_dce::{apply_dce, collect_reachable_fns};
+    use crate::backend::wasm_opt_pass::{WasmOptLevel, WasmSizeReport};
+    use crate::driver::{WasmBuildConfig, WasmTarget, build_wasm_artifact_with_config};
+    use crate::frontend::parser::Parser;
+    use crate::middle::compiler::compile_program;
+
+    #[test]
+    fn version_is_19_6_0() {
+        let cargo = include_str!("../Cargo.toml");
+        assert!(cargo.contains("19.6.0"), "Cargo.toml should have version 19.6.0");
+    }
+
+    #[test]
+    fn wasm_dce_reduces_fn_count() {
+        // Program with an unreachable helper: DCE should remove it.
+        let src = r#"
+fn unused_helper() -> Int { 42 }
+public fn main() -> Unit !Io {
+    IO.println("hi")
+}
+"#;
+        let prog = Parser::parse_str(src, "test.fav").expect("parse");
+        let mut ir = compile_program(&prog);
+        let before_count = ir.fns.len();
+        let reachable = collect_reachable_fns(&ir, "main");
+        let report = apply_dce(&mut ir, &reachable);
+        assert!(
+            ir.fns.len() < before_count,
+            "DCE should remove unreachable functions: before={}, after={}",
+            before_count,
+            ir.fns.len()
+        );
+        assert!(report.removed > 0, "DceReport.removed should be > 0, got {}", report.removed);
+    }
+
+    #[test]
+    fn wasm_size_report_computes() {
+        let report = WasmSizeReport { before: 1000, after: 600 };
+        let pct = report.reduction_pct();
+        assert!(
+            (pct - 40.0).abs() < 0.01,
+            "Expected 40.0% reduction, got {:.2}%",
+            pct
+        );
+        let zero = WasmSizeReport { before: 0, after: 0 };
+        assert_eq!(zero.reduction_pct(), 0.0, "Zero before should give 0.0%");
+    }
+
+    #[test]
+    fn wasm_output_correct() {
+        // Build with DCE enabled, verify wasmtime can execute it.
+        let src = r#"
+public fn main() -> Unit !Io {
+    IO.println("wasm-ok")
+}
+"#;
+        let prog = Parser::parse_str(src, "test.fav").expect("parse");
+        let config = WasmBuildConfig { dce: true, ..WasmBuildConfig::default() };
+        let bytes = build_wasm_artifact_with_config(&prog, &config)
+            .expect("build wasm with DCE");
+        crate::backend::wasm_exec::wasm_exec_main(&bytes)
+            .expect("exec wasm with DCE should succeed");
+    }
+
+    #[test]
+    fn wasm_wasi_target_builds() {
+        // wasm32-wasi target should produce a valid WASM with _start export.
+        let src = r#"
+public fn main() -> Unit !Io {
+    IO.println("wasi-ok")
+}
+"#;
+        let prog = Parser::parse_str(src, "test.fav").expect("parse");
+        let config = WasmBuildConfig {
+            target: WasmTarget::Wasm32Wasi,
+            dce: true,
+            ..WasmBuildConfig::default()
+        };
+        let bytes = build_wasm_artifact_with_config(&prog, &config)
+            .expect("build wasm32-wasi");
+        assert_eq!(&bytes[..4], b"\0asm", "WASM magic number check");
+        // Validate with wasmtime and check for _start export.
+        let engine = wasmtime::Engine::default();
+        let module = wasmtime::Module::new(&engine, &bytes)
+            .expect("should be valid WASM module");
+        let has_start = module.exports().any(|e| e.name() == "_start");
+        assert!(has_start, "wasm32-wasi target should export _start");
     }
 }

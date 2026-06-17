@@ -1526,6 +1526,140 @@ pub fn wasm_codegen_program(ir: &IRProgram) -> Result<Vec<u8>, WasmCodegenError>
     Ok(module.finish())
 }
 
+/// v19.6.0: wasm32-wasi variant — same as `wasm_codegen_program` but also exports
+/// `_start` as an alias for `main` (WASI ABI requirement).
+///
+/// Implementation: generate standard WASM bytes, then patch the export section
+/// in the binary to add a `_start` entry pointing to the same WASM function as
+/// `main`.
+pub fn wasm_codegen_program_wasi(ir: &IRProgram) -> Result<Vec<u8>, WasmCodegenError> {
+    let bytes = wasm_codegen_program(ir)?;
+
+    // Compute main's WASM function index.
+    // Formula: import_count + position_of_main_in_ir_fns
+    let used = collect_used_builtins(ir);
+    let import_count = host_imports()
+        .iter()
+        .filter(|(name, _)| used.contains(*name))
+        .count();
+    let main_fn_ir_idx = ir.fns.iter().position(|f| f.name == "main").unwrap_or(0);
+    let main_wasm_idx = (import_count + main_fn_ir_idx) as u32;
+
+    add_wasi_start_export(bytes, main_wasm_idx)
+}
+
+
+/// Append a `_start` function export (pointing to `main_wasm_idx`) to a
+/// finished WASM binary. Works by locating the export section and inserting
+/// a new export entry.
+fn add_wasi_start_export(
+    bytes: Vec<u8>,
+    main_wasm_idx: u32,
+) -> Result<Vec<u8>, WasmCodegenError> {
+    // WASM section IDs
+    const EXPORT_SECTION_ID: u8 = 7;
+
+    // Encode "_start" export entry:
+    // name = "_start" (6 bytes), kind = 0x00 (func), idx = main_wasm_idx (leb128)
+    let name = b"_start";
+    let mut entry = Vec::new();
+    // name length as leb128
+    leb128_write_u32(&mut entry, name.len() as u32);
+    entry.extend_from_slice(name);
+    entry.push(0x00); // ExportKind::Func
+    leb128_write_u32(&mut entry, main_wasm_idx);
+
+    // Parse the WASM binary to find the export section.
+    // Format: magic(4) + version(4) + sections...
+    // Each section: id(1) + size(leb128) + content(size bytes)
+    if bytes.len() < 8 {
+        return Err(WasmCodegenError::UnsupportedExpr("WASM binary too short".into()));
+    }
+
+    // Parse sections to find the export section.
+    // Each section: id(u8) + size(leb128 u32) + content(size bytes)
+    let mut pos = 8usize; // skip WASM magic (4) + version (4)
+    // Track: where does each section start (id byte position)?
+    let mut export_section_id_pos: Option<usize> = None;
+    let mut export_content_start: usize = 0;
+    let mut export_section_size: usize = 0;
+
+    while pos < bytes.len() {
+        let section_start = pos; // position of the section id byte
+        let section_id = bytes[pos];
+        pos += 1;
+        let (size, size_bytes) = leb128_read_u32(&bytes[pos..]);
+        pos += size_bytes;
+        if section_id == EXPORT_SECTION_ID {
+            export_section_id_pos = Some(section_start);
+            export_content_start = pos;
+            export_section_size = size as usize;
+            break;
+        }
+        pos += size as usize;
+    }
+
+    let Some(section_id_pos) = export_section_id_pos else {
+        // No export section found — return unchanged.
+        return Ok(bytes);
+    };
+
+    let content_end = export_content_start + export_section_size;
+
+    // Decode existing export count (leb128).
+    let (count, count_bytes) = leb128_read_u32(&bytes[export_content_start..content_end]);
+    let new_count = count + 1;
+
+    // Build new export section content: new_count + existing entries + new _start entry.
+    let mut new_content = Vec::new();
+    leb128_write_u32(&mut new_content, new_count);
+    new_content.extend_from_slice(&bytes[export_content_start + count_bytes..content_end]);
+    new_content.extend_from_slice(&entry);
+
+    // Encode new section size.
+    let mut new_size_leb = Vec::new();
+    leb128_write_u32(&mut new_size_leb, new_content.len() as u32);
+
+    // Reconstruct: bytes before this section | section_id | new_size | new_content | bytes after.
+    let mut result = Vec::with_capacity(bytes.len() + entry.len() + 4);
+    result.extend_from_slice(&bytes[..section_id_pos]);
+    result.push(EXPORT_SECTION_ID);
+    result.extend_from_slice(&new_size_leb);
+    result.extend_from_slice(&new_content);
+    result.extend_from_slice(&bytes[content_end..]);
+
+    Ok(result)
+}
+
+fn leb128_write_u32(buf: &mut Vec<u8>, mut val: u32) {
+    loop {
+        let byte = (val & 0x7F) as u8;
+        val >>= 7;
+        if val == 0 {
+            buf.push(byte);
+            break;
+        } else {
+            buf.push(byte | 0x80);
+        }
+    }
+}
+
+fn leb128_read_u32(buf: &[u8]) -> (u32, usize) {
+    let mut result = 0u32;
+    let mut shift = 0;
+    let mut pos = 0;
+    loop {
+        let byte = buf[pos];
+        pos += 1;
+        result |= ((byte & 0x7F) as u32) << shift;
+        if byte & 0x80 == 0 {
+            break;
+        }
+        shift += 7;
+    }
+    (result, pos)
+}
+
 #[cfg(test)]
 mod tests {
     use super::{

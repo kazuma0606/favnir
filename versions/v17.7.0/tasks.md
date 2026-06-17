@@ -8,106 +8,92 @@
 
 ### T1: lexer — `TokenKind::Forall` 追加
 
-- [ ] `fav/src/frontend/lexer.rs` の `TokenKind` enum に `Forall,` を追加
-- [ ] キーワードマッチに `"forall" => TokenKind::Forall,` を追加
+- [x] `fav/src/frontend/lexer.rs` の `TokenKind` enum に `Forall,` を追加
+- [x] キーワードマッチに `"forall" => TokenKind::Forall,` を追加
 
 ### T2: AST — `Stmt::Forall` / `ForallStmt` / `ForallVar` 追加
 
-- [ ] `fav/src/ast.rs` の `Stmt` enum に `Forall(ForallStmt),` を追加
-- [ ] `ForallStmt` 構造体を追加
+- [x] `fav/src/ast.rs` の `Stmt` enum に `Forall(ForallStmt),` を追加
+- [x] `ForallStmt` 構造体を追加
   - フィールド: `vars: Vec<ForallVar>`, `guard: Option<Expr>`, `body: Block`, `span: Span`
-- [ ] `ForallVar` 構造体を追加
+- [x] `ForallVar` 構造体を追加
   - フィールド: `name: String`, `ty: TypeExpr`, `span: Span`
-- [ ] `Stmt::span()` メソッドに `Stmt::Forall(f) => &f.span,` を追加
+- [x] `Stmt::span()` メソッドに `Stmt::Forall(f) => &f.span,` を追加
 
 ### T3: parser — `parse_forall_stmt` 追加
 
-- [ ] `fav/src/frontend/parser.rs` の `parse_block_stmts` に `TokenKind::Forall` ブランチを追加
-- [ ] `parse_forall_stmt` 関数を実装
+- [x] `fav/src/frontend/parser.rs` の `parse_block_stmts` に `TokenKind::Forall` ブランチを追加
+- [x] `parse_forall_stmt` 関数を実装
   - `forall` を消費
   - 変数名を `Ident` として取得
   - `:` を消費
   - `parse_type_expr()` で型を取得
-  - オプションで `where` キーワードを検出し `parse_block_expr()` でガード取得
+  - オプションで `where` キーワードを検出し `{ expr }` でガード取得
   - `{` ... `}` でボディブロックを `parse_block()` で取得
   - `ForallStmt { vars, guard, body, span }` を返す
 
 ### T4: checker — `Stmt::Forall` 型検査 + E0327
 
-- [ ] `fav/src/middle/checker.rs` の `collect_helpers_in_stmt` に `Stmt::Forall(f)` を追加（body ブロックを走査）
-- [ ] `check_stmt` に `Stmt::Forall(f)` を追加
+- [x] `fav/src/middle/checker.rs` の `collect_helpers_in_stmt` に `Stmt::Forall(f)` を追加
+- [x] `check_stmt` に `Stmt::Forall(f)` を追加
   - 型が `Int / Float / String / Bool` 以外なら E0327 を報告
-  - ガードがあれば `check_expr` で型チェック（Bool を期待）
+  - ガードがあれば `check_expr` で型チェック
   - `self.env.define(var.name, ty)` でスコープに変数を追加し body をチェック
-- [ ] `scan_expr_for_pipeline_calls` / その他 exhaustive match へ `Stmt::Forall` を追加
+- [x] `scan_expr_for_pipeline_calls` に `Stmt::Forall` を追加
 
 ### T5: VM primitives — `__forall_gen_int/str/bool/float` 追加
 
-- [ ] `fav/src/backend/vm.rs` に `fn forall_gen_int(n: i64) -> Value` を実装
+- [x] `fav/src/backend/vm.rs` に `__forall_gen_int` を実装
   - 先頭: `0, 1, -1, i32::MAX as i64, i32::MIN as i64`
   - 残り: xorshift64 疑似乱数整数（シード固定: 12345）
-- [ ] `fn forall_gen_str(n: i64) -> Value` を実装
+- [x] `__forall_gen_str` を実装
   - 先頭: `"", " ", "a", "\n", "hello world"`
   - 残り: xorshift64 ベースの ASCII ランダム文字列（長さ 0〜20）
-- [ ] `fn forall_gen_bool(n: i64) -> Value` を実装
+- [x] `__forall_gen_bool` を実装
   - `[true, false, true, false, ...]` の繰り返し（最大 n 件）
-- [ ] `fn forall_gen_float(n: i64) -> Value` を実装
+- [x] `__forall_gen_float` を実装
   - 先頭: `0.0, 1.0, -1.0, 0.5, -0.5`
   - 残り: xorshift64 ベースの浮動小数点（NaN/Inf 除外）
-- [ ] `fav/src/middle/compiler.rs` の builtin 名前テーブル（2 箇所）に 4 関数を追加
-  - `"__forall_gen_int"`, `"__forall_gen_str"`, `"__forall_gen_bool"`, `"__forall_gen_float"`
+- [x] `fav/src/middle/compiler.rs` の builtin 名前テーブル（2 箇所）に 4 関数を追加
 
 ### T6: compiler — `Stmt::Forall` デシュガー
 
-- [ ] `fav/src/middle/compiler.rs` の `collect_free_vars_block` に `Stmt::Forall(f)` を追加
-  - `vars[0].name` を `local_bound` に挿入
-  - guard と body の free vars を収集
-- [ ] `compile_stmt_into` に `Stmt::Forall(f)` を追加し、以下のデシュガーを実装：
+- [x] `fav/src/middle/compiler.rs` の `collect_free_vars_block` に `Stmt::Forall(f)` を追加
+- [x] `compile_stmt_into` に `Stmt::Forall(f)` を追加し、以下のデシュガーを実装：
 
   **ガードなし:**
   ```
   bind __vals <- __forall_gen_{type}(CASES)
-  for x in __vals {
-    body
-  }
+  for x in __vals { body }
   ```
 
   **ガードあり:**
   ```
   bind __vals_raw <- __forall_gen_{type}(CASES * 10)
-  bind __vals <- [v | v <- __vals_raw, guard_with_v]
+  bind __vals <- [x | x <- __vals_raw, guard]
   bind __taken <- List.take(__vals, CASES)
-  for x in __taken {
-    body
-  }
+  for x in __taken { body }
   ```
 
   - `CASES` は `std::env::var("FORALL_CASES").unwrap_or("100")` で取得
-  - 型に応じて `__forall_gen_int` / `__forall_gen_str` / `__forall_gen_bool` / `__forall_gen_float` を選択
+  - 型に応じて gen 関数を選択
 
 ### T7: exhaustive match — 全 Stmt::Forall ハンドラ追加
 
-- [ ] `fav/src/fmt.rs` の `fmt_stmt` に `Stmt::Forall(f)` を追加（`forall {name}: {ty} { ... }` として出力）
-- [ ] `fav/src/emit_python.rs` に `Stmt::Forall(f)` を追加（`# forall not supported` コメント or 簡易展開）
-- [ ] `fav/src/lineage.rs` の 4 関数に `Stmt::Forall(f)` を追加（body を走査、または `_ => {}` の catch-all）
-- [ ] `fav/src/lint.rs` の 7 関数に `Stmt::Forall(f)` を追加（body を走査）
+- [x] `fav/src/fmt.rs` の `fmt_stmt` に `Stmt::Forall(f)` を追加
+- [x] `fav/src/emit_python.rs` に `Stmt::Forall(f)` を追加（コメント出力）
+- [x] `fav/src/lineage.rs` の 4 関数に `Stmt::Forall(f)` を追加
+- [x] `fav/src/lint.rs` の 7 関数に `Stmt::Forall(f)` を追加
 
 ### T8: `main.rs` — `--cases N` オプション追加
 
-- [ ] `fav/src/main.rs` の `Some("test")` ブランチに `--cases` オプション解析を追加
-- [ ] `FORALL_CASES` 環境変数を設定して `cmd_test` に引き渡す
-
-  ```rust
-  // --cases N が指定されたとき
-  unsafe { std::env::set_var("FORALL_CASES", n.to_string()) };
-  ```
-
-- [ ] ヘルプテキストに `--cases N` を追加（デフォルト: 100）
+- [x] `fav/src/main.rs` の `Some("test")` ブランチに `--cases` オプション解析を追加
+- [x] `FORALL_CASES` 環境変数を設定
 
 ### T9: `driver.rs` — `v177000_tests` 追加
 
-- [ ] `fav/src/driver.rs` の `v176000_tests` の `version_is_17_6_0` テストを削除
-- [ ] `v177000_tests` モジュールを追加
+- [x] `fav/src/driver.rs` の `v176000_tests` の `version_is_17_6_0` テストを削除
+- [x] `v177000_tests` モジュールを追加
 
 ```rust
 #[cfg(test)]

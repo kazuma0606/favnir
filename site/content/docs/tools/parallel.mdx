@@ -1,0 +1,98 @@
+---
+title: 並列コンパイル
+description: "複数ファイルを rayon で並列コンパイル — --jobs N でスレッド数を制御"
+---
+
+# 並列コンパイル
+
+v19.4.0 から、`fav build` は複数ファイルを `rayon` で並列コンパイルします。
+大規模プロジェクトでコンパイル時間を大幅に短縮できます。
+
+## 速度の改善
+
+| ファイル数 | シングルスレッド | 4コア並列 | 8コア並列 |
+|---|---|---|---|
+| 1 | 1.0 秒 | 1.0 秒 | 1.0 秒 |
+| 5 | 5.0 秒 | 1.5 秒 | 1.2 秒 |
+| 10 | 10.0 秒 | 3.0 秒 | 2.0 秒 |
+| 20 | 20.0 秒 | 6.0 秒 | 4.0 秒 |
+| 50 | 50.0 秒 | 14.0 秒 | 8.0 秒 |
+
+## 並列化の 4 フェーズ
+
+```
+フェーズ 1: AST 生成（全ファイル完全並列）
+  src/a.fav ──┐
+  src/b.fav ──┤ rayon par_iter → [AST_a, AST_b, AST_c]
+  src/c.fav ──┘
+
+フェーズ 2: 型チェック（依存グラフのトポロジカル順）
+  types.fav    → 依存なし → 第 1 層（先に処理）
+  utils.fav    → types に依存 → 第 2 層
+  pipeline.fav → utils に依存 → 第 3 層
+  ※ 同一層のファイルは rayon で並列処理
+
+フェーズ 3: IR 生成（並列）
+  rayon par_iter → [IR_types, IR_utils, IR_pipeline]
+
+フェーズ 4: リンク（シングルスレッド）
+  final_artifact = merge([IR_types, IR_utils, IR_pipeline])
+```
+
+## `--jobs N` オプション
+
+```bash
+# スレッド数を自動設定（CPU コア数）
+fav build src/pipeline.fav
+
+# 4 スレッドで並列コンパイル
+fav build --jobs 4 src/pipeline.fav
+
+# シングルスレッドで実行（デバッグ用）
+fav build --jobs 1 src/pipeline.fav
+```
+
+`--jobs 0`（または省略）は `rayon::current_num_threads()` に自動設定されます。
+
+## 依存グラフとトポロジカル順処理
+
+`use` 宣言で宣言されたファイル間の依存を自動的に解析し、
+コンパイル順序をトポロジカルソートで決定します。
+
+```favnir
+# pipeline.fav
+use utils.format_date
+use types.Row
+
+fn process(row: Row) -> String {
+    format_date(row.date)
+}
+```
+
+この場合の処理順:
+```
+第 1 層: types.fav（依存なし）
+第 2 層: utils.fav（types に依存）
+第 3 層: pipeline.fav（utils, types に依存）
+```
+
+循環依存がある場合はコンパイルエラーになります:
+```
+error: circular dependency detected
+  → src/a.fav depends on src/b.fav
+  → src/b.fav depends on src/a.fav
+```
+
+## IRProgram のマージ
+
+並列コンパイルで生成された複数の `IRProgram` は最後にマージされます:
+
+- **globals**: 重複名をスキップして連結（builtin グローバルの重複を排除）
+- **fns**: インデックスをオフセット付きで連結
+- **type_metas**: HashMap を merge
+
+## 制限事項（v19.4.0）
+
+- 型チェックのトポロジカル並列化は v19.5 以降で完全対応予定
+- `fav run` は単一ファイル実行のため並列化の対象外
+- クロスコンパイル（`--target native`）でも並列化は有効

@@ -1,0 +1,97 @@
+# エフェクト推論（v18.1.0）
+
+v18.1.0 以降、Favnir の型チェッカーは関数ボディからエフェクトを**自動推論**します。
+`!Db` / `!IO` / `!Snowflake` 等のエフェクト宣言を手書きしなくてもよくなります。
+
+---
+
+## 現状との比較
+
+```fav
+// v18.0 以前: エフェクトを手動で宣言（宣言漏れが E0314 等になる）
+fn load_users() -> Result<List<User>, String> !Postgres !IO {
+  bind rows <- Postgres.query_raw("SELECT * FROM users", [])
+  bind _    <- IO.println(f"loaded {List.length(rows)} rows")
+  Result.ok(rows)
+}
+
+// v18.1 以降: エフェクト宣言が不要（型チェッカーが自動推論）
+fn load_users() -> Result<List<User>, String> {
+  bind rows <- Postgres.query_raw("SELECT * FROM users", [])
+  bind _    <- IO.println(f"loaded {List.length(rows)} rows")
+  Result.ok(rows)
+}
+```
+
+---
+
+## ネームスペース → エフェクト マッピング
+
+| ネームスペース | 推論エフェクト |
+|---|---|
+| `Postgres`, `Db` | `!Postgres` |
+| `IO` | `!Io` |
+| `Snowflake` | `!Snowflake` |
+| `BigQuery`, `Gcp` | `!Gcp` |
+| `Http`, `Ureq` | `!Http` |
+| `Kafka`, `Rskafka` | `!Stream` |
+| `Llm` | `!Llm` |
+| `AzurePostgres` | `!AzureDb` |
+| `AzureBlob` | `!AzureStorage` |
+
+---
+
+## 推移的推論
+
+エフェクトを持つ関数を呼ぶ関数にも、そのエフェクトが伝播します。
+
+```fav
+fn fetch() -> Result<Int, String> {
+  bind rows <- Postgres.query_raw("SELECT 1", [])  // → !Postgres
+  Result.ok(0)
+}
+
+fn wrap() -> Result<Int, String> {
+  fetch()  // → !Postgres が wrap にも推論される
+}
+```
+
+---
+
+## 明示宣言との共存
+
+エフェクトを明示的に宣言することも引き続き可能です。
+`interface` の実装など、外部からの契約として明示したい場合に使います。
+
+```fav
+// interface の実装では明示が必要
+interface Loader {
+  fn load() -> Result<List<Row>, String> !Postgres
+}
+```
+
+---
+
+## `fav check --show-effects`
+
+推論されたエフェクトを確認するには `--show-effects` フラグを使います。
+
+```sh
+fav check src/pipeline.fav --show-effects
+```
+
+出力例:
+
+```
+fn load_users                  inferred: !Io !Postgres
+fn pure_transform              inferred: (none)
+fn wrap                        inferred: !Postgres
+```
+
+---
+
+## 注意事項
+
+- エフェクトが宣言されている場合は、推論結果との整合性が検査されます。
+- 明示宣言のスーパーセットになっている場合は W010 警告が出ます。
+- 宣言が推論結果を下回る場合は E0336 エラーになります（将来バージョンで有効化予定）。

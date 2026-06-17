@@ -1,0 +1,135 @@
+# Linear Types
+
+Linear types enforce that certain values are used **exactly once** — no more, no less. This prevents common resource management bugs like double-closing a connection or forgetting to commit a transaction.
+
+## Syntax
+
+Linear function types use the `-o` arrow (pronounced "lollipop"):
+
+```favnir
+fn use_conn(c: Connection -o String) -> String {
+  c.query("SELECT 1")
+}
+```
+
+The `-o` arrow means the argument `c` must be consumed exactly once inside the function body.
+
+## Built-in Linear Types
+
+Favnir has two built-in linear types:
+
+| Type | Description |
+|---|---|
+| `Connection` | Database connection — must be used and closed |
+| `Tx` | Database transaction — must be committed or rolled back |
+
+These types are tracked by the type checker automatically. You don't need any special annotation beyond using the type name.
+
+## Usage Rules
+
+### A linear variable must be used exactly once
+
+```favnir
+fn good(c: Connection) -> String {
+  bind result <- c.query("SELECT 1")
+  result
+}
+```
+
+### E0332 — Double use
+
+Using a linear variable more than once is an error:
+
+```favnir
+fn bad(c: Connection) -> String {
+  bind a <- c.query("SELECT 1")  // consumes c
+  bind b <- c.query("SELECT 2")  // E0332: c already consumed
+  b
+}
+```
+
+```
+E0332: linear variable `c` used more than once
+  hint: linear types must be used exactly once; each use consumes the value
+```
+
+### E0333 — Unused linear variable
+
+Binding a linear variable and never using it is also an error:
+
+```favnir
+fn bad() -> String {
+  bind c <- open_connection()  // c is never used
+  "oops"                       // E0333: c was never consumed
+}
+```
+
+```
+E0333: linear variable `c` was never used (must be consumed exactly once)
+  hint: linear types must be used exactly once; pass the value to a consuming function
+```
+
+## Difference from `->` (Regular Functions)
+
+| Arrow | Meaning |
+|---|---|
+| `->` | Regular function — arguments can be used any number of times |
+| `-o` | Linear function — argument must be consumed exactly once |
+
+Regular function types do not enforce usage:
+
+```favnir
+fn regular(s: String) -> String {
+  s  // s used once — fine
+}
+
+fn ignores(s: String) -> String {
+  "hello"  // s unused — fine for regular types
+}
+```
+
+Linear types (`Connection`, `Tx`) are tracked regardless of whether the function type uses `-o`:
+
+```favnir
+fn open_conn() -> Connection { Connection }
+
+fn must_use() -> String {
+  bind c <- open_conn()
+  // if you don't use c here, E0333 is emitted
+  c.close()
+}
+```
+
+## The `with_connection` Pattern
+
+A common pattern is to pass a linear connection into a consuming function:
+
+```favnir
+fn with_connection(f: Connection -o String) -> String {
+  bind c <- open_connection()
+  f(c)
+}
+
+fn main() -> String {
+  with_connection(|c| c.query("SELECT 1"))
+}
+```
+
+## Transaction Safety
+
+```favnir
+fn transfer(tx: Tx, from: String, to: String, amount: Int) -> String {
+  bind _ <- tx.execute("UPDATE accounts SET balance = balance - ? WHERE id = ?")
+  bind _ <- tx.execute("UPDATE accounts SET balance = balance + ? WHERE id = ?")
+  tx.commit()  // tx consumed here — exactly once
+}
+```
+
+If `tx.commit()` is missing, E0333 fires. If it's called twice, E0332 fires.
+
+## Compiler Errors
+
+| Code | Description |
+|---|---|
+| `E0332` | Linear variable used more than once (double-consume) |
+| `E0333` | Linear variable never used before function returns |

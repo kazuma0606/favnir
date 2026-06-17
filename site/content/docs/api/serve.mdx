@@ -1,0 +1,69 @@
+---
+title: fav api-serve
+description: #[api(...)] アノテーション付き関数を HTTP サーバーとして起動する
+---
+
+# fav api-serve
+
+`#[api(...)]` アノテーションを持つ Favnir 関数を、開発用 HTTP サーバーとして即時起動します。
+
+> **注意**: `fav api-serve` は開発・プロトタイピング用途のサーバーです。本番環境での使用は推奨しません。
+
+## 基本的な使い方
+
+```bash
+fav api-serve <source.fav>              # デフォルトポート 8080 で起動
+fav api-serve <source.fav> --port 3000  # ポート指定
+```
+
+## 例
+
+```favnir
+type User = { id: Int, name: String }
+
+#[api(method = "GET", path = "/users/:id")]
+fn get_user(id: Int) -> User {
+  User { id: id, name: "Alice" }
+}
+```
+
+```bash
+fav api-serve app.fav --port 8080
+# Listening on 0.0.0.0:8080
+```
+
+```bash
+curl http://localhost:8080/users/42
+# {"id":42,"name":"Alice"}
+```
+
+## パスパラメータ
+
+`:param` 形式のパスパラメータはリクエスト URL から抽出され、対応する関数引数に渡されます。
+数値に変換可能な値は `Int` として渡され、それ以外は `String` として渡されます。
+
+```favnir
+#[api(method = "GET", path = "/items/:id")]
+fn get_item(id: Int) -> String { "item" }
+```
+
+## レスポンス形式
+
+関数の戻り値は自動的に JSON にシリアライズされます。
+
+| Favnir 値      | JSON 出力                              |
+|---------------|----------------------------------------|
+| `Int`         | 数値                                    |
+| `Float`       | 数値                                    |
+| `String`      | 文字列                                  |
+| `Bool`        | `true` / `false`                       |
+| `Unit`        | `null`                                  |
+| Record        | オブジェクト `{ "field": value, ... }`  |
+| Variant       | `{ "tag": "...", "value": ... }`       |
+| List          | 配列                                    |
+
+## ルートマッチング
+
+- メソッド（GET / POST / PUT / DELETE 等）とパスの両方でマッチします。
+- 登録されていないパスは `404 Not Found` を返します。
+- 実行エラーは `500 Internal Server Error` を返します。

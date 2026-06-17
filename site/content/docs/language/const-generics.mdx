@@ -1,0 +1,89 @@
+# Const Generics
+
+**v18.7.0** — Const Generics allow integer constants to be used as type parameters. This lets you encode batch sizes, array lengths, and other numeric invariants directly in the type system — catching misconfiguration at compile time rather than at runtime.
+
+---
+
+## Declaring Const Generic Parameters
+
+Use `const N: Int` inside angle brackets to declare a constant generic parameter:
+
+```favnir
+fn process_batch<const N: Int>(items: List<Row>) -> List<Output> {
+  List.map(List.chunk(items, N), process_chunk)
+}
+```
+
+The constant `N` can be referenced inside the function body as a plain integer value.
+
+---
+
+## Compile-Time Constraints (`where`)
+
+Add a `where { expr }` clause to enforce constraints at the call site:
+
+```favnir
+fn safe_chunk<const N: Int where { N > 0 }>(items: List<Row>) -> List<List<Row>> {
+  List.chunk(items, N)
+}
+```
+
+Supported constraint expressions:
+
+| Expression | Meaning |
+|---|---|
+| `N > 0` | N must be positive |
+| `N >= 1` | N must be at least 1 |
+| `N != 0` | N must be non-zero |
+| `N < 100` | N must be less than 100 |
+| `N == 64` | N must equal 64 |
+
+---
+
+## Passing Const Arguments
+
+Pass an integer literal in type-argument position when calling a const-generic function:
+
+```favnir
+// Valid: N = 100 satisfies N > 0
+bind result <- safe_chunk<100>(my_rows)
+
+// Error E0335: N = 0 does not satisfy N > 0
+bind bad <- safe_chunk<0>(my_rows)
+```
+
+---
+
+## Type Definitions with Const Parameters
+
+Const parameters can also appear in `type` definitions:
+
+```favnir
+type FixedBatch<T, const N: Int> = { items: List<T>, size: Int }
+```
+
+---
+
+## E0335 — Const Constraint Violation
+
+When a const argument fails the `where` constraint, Favnir reports **E0335** at compile time:
+
+```
+error[E0335]: const generic `N = 0` violates constraint
+  --> src/pipeline.fav:12:18
+   |
+12 |   bind bad <- safe_chunk<0>(rows)
+   |                          ^
+   = hint: `safe_chunk` requires `N > 0`; provide a positive integer
+```
+
+---
+
+## Scope
+
+v18.7.0 supports **`Int` type constants only**. The following are out of scope until later versions:
+
+- `Float` / `String` / `Bool` const parameters
+- Runtime const arguments (passing a variable in type position)
+- Monomorphization (generating separate code for each N value)
+- Const argument type inference

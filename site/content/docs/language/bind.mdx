@@ -1,0 +1,74 @@
+# `bind` バインディング（v17.4.0）
+
+Favnir のバインディング構文は `bind x <- expr` に統一されています。
+`let` キーワードは存在しません。
+
+---
+
+## 基本構文
+
+```fav
+bind x <- expr
+```
+
+- `expr` が Result でも非 Result でも使えます
+- ブロック内で `x` を後続の式で参照できます
+
+---
+
+## Result 値と非 Result 値の両方に使える
+
+```fav
+fn process(row: Row) -> Result<Output, String> {
+  // 非 Result 値
+  bind trimmed <- String.trim(row.name)
+  bind score   <- compute_score(row)
+
+  // Result 値（失敗時はエラーを伝播）
+  bind result  <- validate({ ...row, name: trimmed, score: score })
+
+  Result.ok(result)
+}
+```
+
+---
+
+## なぜ `let` がないのか
+
+`bind x <- expr` は Result / 非 Result どちらの値でも使えるため、
+`let` キーワードを別に用意する必要がありません。
+
+```fav
+// これは動作しない（Favnir に let はない）
+// let x = 42
+
+// これが正しい
+bind x <- 42
+bind name <- String.trim(s)
+```
+
+---
+
+## パイプライン内での活用
+
+```fav
+stage TransformRow: RawRow -> Result<CleanRow, String> = |row| {
+  bind name    <- String.trim(row.name)
+  bind email   <- String.lowercase(row.email)
+  bind amount  <- parse_float(row.amount_str)
+
+  if amount < 0.0 {
+    Result.err("negative amount")
+  } else {
+    Result.ok(CleanRow { name: name, email: email, amount: amount })
+  }
+}
+```
+
+---
+
+## `bind` とモナディック bind の違い
+
+`bind x <- expr` は「値をローカル変数に束縛する」構文です。
+Result の失敗を自動伝播する仕組みは、コンパイラがデシュガーした bytecode レベルで実現されます。
+（`fav run --trace` で実際のデシュガー結果を確認できます）

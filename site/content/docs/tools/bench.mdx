@@ -1,0 +1,122 @@
+# fav bench
+
+`fav bench` はベンチマークブロックを実行し、avg / p50 / p95 / min / max の統計を出力します。
+
+---
+
+## 基本構文
+
+```fav
+bench "transform 10k rows" {
+  bind rows <- generate_test_rows(10_000)
+  Transform(rows)
+}
+
+bench "json parse" {
+  Json.parse(large_json_fixture)
+}
+```
+
+ベンチマークブロックは `bench "名前" { 式 }` の形式で記述します。
+ブロック内の式が各イテレーションで実行されます。
+
+---
+
+## 実行
+
+```bash
+# 単一ファイル
+fav bench src/pipeline.fav
+
+# プロジェクト全体（fav.toml が必要）
+fav bench
+```
+
+---
+
+## 出力形式
+
+```
+running 2 benchmarks (100 runs, 5 warmup)
+
+  transform 10k rows   avg   12.3ms  p50   11.9ms  p95   14.8ms  min   11.2ms  max   21.4ms
+  json parse           avg    1.2ms  p50    1.1ms  p95    1.5ms  min    1.0ms  max    2.1ms
+
+bench result: 2 benchmarks completed. 0 filtered
+```
+
+時間単位は自動選択されます：
+
+| 範囲 | 単位 |
+|---|---|
+| 1000µs 未満 | µs |
+| 1000ms 未満 | ms |
+| それ以上 | s |
+
+---
+
+## オプション
+
+| オプション | 説明 | デフォルト |
+|---|---|---|
+| `--runs N` | イテレーション回数 | 100 |
+| `--iters N` | `--runs` の別名（後方互換） | 100 |
+| `--warmup N` | ウォームアップ回数（計測前に実行） | 5 |
+| `--filter PAT` | 名前でフィルタ（部分一致） | なし |
+| `--json` | JSON 形式で出力 | false |
+
+---
+
+## `--filter` でベンチを絞り込む
+
+```bash
+fav bench src/pipeline.fav --filter "json"
+```
+
+ベンチ名に `"json"` を含むものだけ実行されます。
+
+---
+
+## `--json` 出力
+
+```bash
+fav bench src/pipeline.fav --json
+```
+
+```json
+{
+  "benchmarks": [
+    {
+      "name": "transform 10k rows",
+      "runs": 100,
+      "avg_us": 12340.5,
+      "p50_us": 11900.0,
+      "p95_us": 14800.0,
+      "min_us": 11200.0,
+      "max_us": 21400.0
+    }
+  ]
+}
+```
+
+すべての時間値は `µs`（マイクロ秒）単位です。
+
+---
+
+## ウォームアップ
+
+`--warmup N` で指定した回数だけ計測前に実行します。
+JIT ウォームアップや初回キャッシュミスの影響を除外できます。
+
+```bash
+fav bench src/pipeline.fav --warmup 10 --runs 200
+```
+
+---
+
+## ファイル命名規則
+
+`fav bench` はプロジェクトモードで以下のファイルを自動検出します：
+
+- `*.bench.fav`
+- `*.fav`（`bench` ブロックを含む任意の .fav ファイル）

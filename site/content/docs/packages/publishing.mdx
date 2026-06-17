@@ -1,0 +1,103 @@
+# パッケージの公開（v17.8.0）
+
+Favnir のパッケージは **Rune** と呼ばれます。`fav publish` コマンドでレジストリに公開できます。
+
+---
+
+## 1. `fav.toml` の `[rune]` セクション
+
+パッケージを公開するには、`fav.toml` に `[rune]` セクションが必要です。
+
+```toml
+[rune]
+name    = "my-rune"
+version = "1.0.0"
+description = "A reusable Favnir rune for data transformation"
+```
+
+| フィールド | 必須 | 説明 |
+|---|---|---|
+| `name` | ○ | パッケージ名（英数字・ハイフン） |
+| `version` | ○ | SemVer 形式（例: `1.2.3`） |
+| `description` | 推奨 | 1 行の説明文 |
+
+---
+
+## 2. ドライランで確認する
+
+`fav publish --dry-run` は実際には公開せず、アップロード対象ファイルとメタデータを確認します。
+
+```sh
+fav publish --dry-run
+```
+
+出力例：
+
+```
+[dry-run] Would publish: my-rune v1.0.0
+[dry-run] Files: src/lib.fav, fav.toml, README.md
+[dry-run] Registry: https://registry.favnir.dev
+```
+
+問題がなければ `--dry-run` を外して本番公開します。
+
+---
+
+## 3. `fav login` で認証する
+
+初回公開前に `fav login` でアクセストークンを取得してください。
+
+```sh
+fav login
+```
+
+プロンプトに従ってトークンを入力すると、`~/.fav/credentials` に保存されます。
+
+```
+Enter your Favnir registry token: ****
+Saved credentials to ~/.fav/credentials
+```
+
+以降の `fav publish` はこのトークンを自動的に使用します。
+
+---
+
+## 4. `fav publish` で公開する
+
+```sh
+fav publish
+```
+
+成功すると以下のように表示されます。
+
+```
+Published my-rune v1.0.0 to https://registry.favnir.dev
+```
+
+---
+
+## 5. 他のプロジェクトから利用する
+
+公開した Rune は `fav add` でインストールできます。
+
+```sh
+fav add my-rune
+```
+
+`fav.toml` の `[dependencies]` に追加され、`fav install` で `fav.lock` が更新されます。
+
+```toml
+[dependencies]
+my-rune = "^1.0.0"
+```
+
+---
+
+## バージョン管理のガイドライン
+
+- `1.0.0` → 安定版の最初のリリース
+- パッチ変更（バグ修正）: `1.0.0` → `1.0.1`
+- マイナー追加（後方互換）: `1.0.0` → `1.1.0`
+- 破壊的変更: `1.0.0` → `2.0.0`
+
+既存バージョンの上書きはできません。必ずバージョン番号を上げてから再公開してください。

@@ -1,0 +1,106 @@
+---
+title: fav generate api
+description: OpenAPI / GraphQL SDL を型定義から自動生成する
+---
+
+# fav generate api
+
+Favnir の型定義と `#[api(...)]` アノテーションから、OpenAPI 3.0 または GraphQL SDL を自動生成します。
+
+## 基本的な使い方
+
+```bash
+fav generate api <source.fav>                    # OpenAPI YAML を stdout に出力
+fav generate api <source.fav> --json             # OpenAPI JSON を stdout に出力
+fav generate api <source.fav> --format graphql   # GraphQL SDL を stdout に出力
+fav generate api <source.fav> --out openapi.yaml # ファイルに書き出す
+```
+
+## `#[api(...)]` アノテーション
+
+関数に `#[api(method = "...", path = "...")]` を付けると、その関数が API エンドポイントとして登録されます。
+
+```favnir
+type User = { id: Int, name: String }
+
+#[api(method = "GET", path = "/users/:id")]
+fn get_user(id: Int) -> Result<User, String> {
+  Result.ok(User { id: id, name: "Alice" })
+}
+
+#[api(method = "POST", path = "/users")]
+fn create_user(name: String) -> Result<User, String> {
+  Result.ok(User { id: 1, name: name })
+}
+```
+
+## 型マッピング
+
+| Favnir 型    | OpenAPI schema         | GraphQL 型   |
+|-------------|------------------------|--------------|
+| `Int`       | `{ "type": "integer" }` | `Int`        |
+| `Float`     | `{ "type": "number" }`  | `Float`      |
+| `String`    | `{ "type": "string" }`  | `String`     |
+| `Bool`      | `{ "type": "boolean" }` | `Boolean`    |
+| `List<T>`   | `{ "type": "array", "items": <T> }` | `[T]` |
+| 名前付き型  | `{ "$ref": "#/components/schemas/<Name>" }` | `Name` |
+
+## パスパラメータ
+
+`:param` 形式のパスパラメータは、関数の引数と照合されます。
+
+```favnir
+#[api(method = "GET", path = "/users/:id/orders/:order_id")]
+fn get_order(id: Int, order_id: Int) -> Result<Order, String> { ... }
+```
+
+OpenAPI 出力では `/users/{id}/orders/{order_id}` に変換され、`parameters` に展開されます。
+
+## OpenAPI 出力例
+
+```yaml
+openapi: "3.0.0"
+info:
+  title: Favnir API
+  version: "1.0.0"
+paths:
+  /users/{id}:
+    get:
+      operationId: get_user
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+components:
+  schemas:
+    User:
+      type: object
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+```
+
+## GraphQL SDL 出力例
+
+```graphql
+type User {
+  id: Int
+  name: String
+}
+
+type Query {
+  get_user(id: Int): User
+  create_user(name: String): User
+}
+```

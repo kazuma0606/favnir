@@ -1,0 +1,142 @@
+# Variance Annotations
+
+Variance annotations control how generic type parameters behave under subtyping.
+They determine whether `Interface<Sub>` can be used where `Interface<Super>` is expected.
+
+## Syntax
+
+Variance is declared on type parameters in `interface` definitions:
+
+```favnir
+interface Source<+T> { ... }   // covariant
+interface Sink<-T> { ... }     // contravariant
+interface Transform<T> { ... } // invariant (default)
+```
+
+| Annotation | Name | Meaning |
+|---|---|---|
+| `+T` | Covariant | `T` may only appear in *output* (return value) positions |
+| `-T` | Contravariant | `T` may only appear in *input* (argument) positions |
+| `T` | Invariant (default) | No restriction; `T` may appear anywhere |
+
+---
+
+## Covariant (`+T`) — Producer Pattern
+
+A covariant type parameter may only appear in **output** (return) positions.
+This means if `Cat` is a subtype of `Animal`, then `Source<Cat>` is usable as `Source<Animal>`.
+
+```favnir
+interface Source<+T> {
+  next: Unit -> Option<T>   // T in output position — OK
+}
+
+fn read_animals(source: Source<Animal>) -> List<Animal> {
+  ...
+}
+
+bind cat_source: Source<Cat> = make_cat_source()
+read_animals(cat_source)  // OK: Source<Cat> can be used as Source<Animal>
+```
+
+---
+
+## Contravariant (`-T`) — Consumer Pattern
+
+A contravariant type parameter may only appear in **input** (argument) positions.
+If `Animal` is a supertype of `Cat`, then `Sink<Animal>` is usable as `Sink<Cat>`.
+
+```favnir
+interface Sink<-T> {
+  write: T -> Unit   // T in input position — OK
+}
+
+fn write_cats(sink: Sink<Cat>) -> Unit {
+  ...
+}
+
+bind animal_sink: Sink<Animal> = make_animal_sink()
+write_cats(animal_sink)  // OK: Sink<Animal> can be used as Sink<Cat>
+```
+
+---
+
+## Invariant (default) — Read/Write Pattern
+
+Without a variance annotation, the type parameter is invariant.
+`Transform<Cat>` and `Transform<Animal>` are unrelated types.
+
+```favnir
+interface Transform<T> {
+  apply: T -> T   // T in both input and output — invariant required
+}
+```
+
+---
+
+## Variance Rules
+
+| Direction | `+T` (Covariant) | `-T` (Contravariant) | `T` (Invariant) |
+|---|---|---|---|
+| Output (return value) | Allowed | **Forbidden** (E0334) | Allowed |
+| Input (argument) | **Forbidden** (E0334) | Allowed | Allowed |
+| Both | **Forbidden** (E0334) | **Forbidden** (E0334) | Allowed |
+
+---
+
+## E0334 — Variance Violation
+
+Using a covariant parameter in an input position, or a contravariant parameter in an output position, is a compile-time error.
+
+### Covariant in input position
+
+```favnir
+interface BadSource<+T> {
+  write: T -> Unit  // E0334: covariant type +T used in input (argument) position
+}
+```
+
+```
+E0334: covariant type parameter `+T` used in input (argument) position in method `write`
+  hint: covariant parameters (+T) may only appear in output (return) positions
+  hint: consider using invariant `T` or contravariant `-T`
+```
+
+### Contravariant in output position
+
+```favnir
+interface BadSink<-T> {
+  next: Unit -> Option<T>  // E0334: contravariant type -T used in output (return) position
+}
+```
+
+```
+E0334: contravariant type parameter `-T` used in output (return) position in method `next`
+  hint: contravariant parameters (-T) may only appear in input (argument) positions
+  hint: consider using invariant `T` or covariant `+T`
+```
+
+---
+
+## Multiple Type Parameters
+
+An interface can have multiple type parameters with different variance:
+
+```favnir
+// Transformer: consumes T, produces U
+interface Mapper<-T, +U> {
+  map: T -> U
+}
+```
+
+---
+
+## Design Notes
+
+Variance annotations apply only to `interface` type parameters in v18.6.0.
+Type aliases and record types use invariance by default.
+
+The rule of thumb:
+- If the interface only **produces** values of type `T` (returns them) → use `+T`
+- If the interface only **consumes** values of type `T` (accepts them as arguments) → use `-T`
+- If the interface does both → use `T` (invariant)

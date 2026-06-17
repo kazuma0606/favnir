@@ -1,0 +1,103 @@
+---
+title: ストリーミングパイプライン
+description: "#[streaming] アノテーションで大規模データを定常メモリで処理する"
+---
+
+# ストリーミングパイプライン
+
+`#[streaming]` アノテーションを使うと、`seq` パイプラインが **chunk 単位の評価**に切り替わります。
+10GB を超える CSV やログファイルも、最大メモリ使用量を `chunk_size × row_size` 程度に抑えて処理できます。
+
+## 基本的な使い方
+
+```favnir
+// 通常（eager）パイプライン: 全データをメモリに乗せる
+seq LargeDataPipeline = LoadCsv |> Transform |> WriteToDb
+
+// ストリーミングパイプライン: 1000 行ずつ処理
+#[streaming(chunk_size = 1000)]
+seq LargeDataPipeline = LoadCsv |> Transform |> WriteToDb
+```
+
+## `#[streaming]` アノテーション
+
+### chunk_size 指定あり
+
+```favnir
+#[streaming(chunk_size = 1000)]
+seq Pipeline = LoadCsv |> Transform |> Save
+```
+
+- `LoadCsv` が全データを返す
+- 内部で 1000 行ずつチャンクに分割
+- `Transform` / `Save` を 1000 行ずつ呼び出す
+- 結果をまとめて返す
+
+### chunk_size 省略（デフォルト: 512）
+
+```favnir
+#[streaming]
+seq Pipeline = LoadCsv |> Transform |> Save
+```
+
+## `#[stateful]` ステージアノテーション
+
+chunk 間で状態を保持することを示すアノテーションです。
+ドキュメンテーション目的で使用します（実行時の動作は通常の stage と同じ）。
+
+```favnir
+// 状態を持つステージを明示的にマーク
+#[stateful]
+stage RunningAvg: List<Row> -> List<Row> = |rows| {
+  // 実装...
+  rows
+}
+```
+
+## stage の設計
+
+ストリーミングパイプラインでは、各 stage は `List<T>` を受け取り `List<U>` を返します。
+chunk 単位で呼び出されるため、単一要素ではなくリストを処理するように実装します。
+
+```favnir
+// ✓ ストリーミング対応 stage: List を受け取り List を返す
+stage Transform: List<RawRow> -> List<OutputRow> = |rows| {
+  List.map(rows, |row| { process(row) })
+}
+
+// ✗ ストリーミング非対応 stage: 単一要素を処理する
+// stage ProcessRow: RawRow -> OutputRow = |row| { process(row) }
+// → ストリーミングパイプラインには使用できない
+```
+
+## 通常パイプラインとの互換性
+
+ストリーミングパイプラインは、通常パイプラインと**同じ結果**を返します。
+
+```favnir
+stage double_list: List<Int> -> List<Int> = |xs| {
+  List.map(xs, |x| { x * 2 })
+}
+
+// 通常: 全データを一度に処理
+seq EagerPipeline = double_list
+
+// ストリーミング: 2 件ずつ処理（結果は同じ）
+#[streaming(chunk_size = 2)]
+seq StreamingPipeline = double_list
+```
+
+## パフォーマンスのガイドライン
+
+| データ規模 | 推奨 chunk_size | 備考 |
+|---|---|---|
+| 〜1MB | chunk 不要 | 通常の eager パイプラインで十分 |
+| 1MB〜100MB | 1000〜5000 | `#[streaming(chunk_size = 1000)]` |
+| 100MB〜1GB | 500〜2000 | メモリとスループットのバランス |
+| 1GB〜 | 100〜1000 | 小さな chunk でメモリ節約を優先 |
+
+## 制限事項
+
+- **v19.1 現在**: ソース stage は `List<T>` を一度に全部返します（ファイル行単位の真のストリーミングは v19.5 以降）
+- **ctx_param 非対応**: `seq Pipeline(ctx) = ...` 形式はストリーミング非対応（通常の eager 評価になります）
+- **par 非対応**: `par [A, B]` ステップを含むパイプラインはストリーミング非対応

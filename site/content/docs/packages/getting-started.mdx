@@ -1,0 +1,83 @@
+# パッケージ管理入門（`fav add`）
+
+Favnir のパッケージシステムを使うと、Rune を `fav.toml` で依存管理できます。
+
+---
+
+## fav.toml への依存追加
+
+```bash
+fav add csv                  # 最新版を追加
+fav add csv@2.1.0            # バージョン指定
+fav add --dev test-fixtures  # dev-dependency として追加
+```
+
+コマンドは `fav.toml` と `fav.lock` を自動的に更新します。
+
+---
+
+## fav.toml の書き方
+
+```toml
+[rune]
+name    = "my-pipeline"
+version = "1.0.0"
+
+[dependencies]
+csv      = "^2.0.0"
+bigquery = "^1.0.0"
+
+[dev-dependencies]
+test-fixtures = "^1.0.0"
+
+[registry]
+url = "https://registry.favnir.dev"   # デフォルト（省略可）
+```
+
+---
+
+## バージョン指定の形式
+
+| 形式 | 意味 |
+|---|---|
+| `"^2.0.0"` | メジャーバージョン固定（`>=2.0.0, <3.0.0`） |
+| `"~2.1.0"` | マイナーバージョン固定（`>=2.1.0, <2.2.0`） |
+| `"=2.1.3"` | 完全固定 |
+| `"*"` | 最新版 |
+
+---
+
+## パッケージの更新・削除
+
+```bash
+fav update              # すべてのパッケージを semver 範囲内で更新
+fav update csv          # 特定パッケージのみ更新
+fav remove csv          # 依存から削除
+```
+
+---
+
+## fav.lock について
+
+`fav.lock` は `fav add` / `fav update` / `fav install` が自動生成します。
+手動編集は不要です。**git にコミットすることを推奨**します（再現性確保のため）。
+
+```toml
+[[package]]
+name = "csv"
+version = "2.1.0"
+checksum = "sha256:abc123..."
+source = "registry:https://registry.favnir.dev"
+```
+
+---
+
+## パッケージの公開
+
+```bash
+fav login               # 認証トークンを取得
+fav publish             # registry にパッケージを公開
+fav publish --dry-run   # 公開内容を確認（実際には公開しない）
+```
+
+> v17.8.0 では `fav login` はスタブ実装です（`FAV_TOKEN` 環境変数でトークンを設定）。

@@ -30276,7 +30276,7 @@ pub fn cmd_compile_to_bytes(src: &str, filename: &str) -> Result<Vec<u8>, String
     let source_hash: [u8; 32] = Sha256::digest(src.as_bytes()).into();
     let compiled_at = chrono::Utc::now().timestamp() as u64;
 
-    let mut writer = FvcWriter {
+    let writer = FvcWriter {
         str_table: artifact.str_table,
         globals: artifact.globals,
         functions: artifact.functions,

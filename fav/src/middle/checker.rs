@@ -3143,7 +3143,7 @@ impl Checker {
         };
         let saved_effects = std::mem::replace(&mut self.current_effects, effective_effects);
         // v18.5.0: Linear type tracking — clear env per function.
-        let saved_linear_env = std::mem::replace(&mut self.linear_env, HashMap::new());
+        let saved_linear_env = std::mem::take(&mut self.linear_env);
         let saved_tp = std::mem::replace(
             &mut self.type_params,
             fd.type_params.iter().map(|p| p.name.clone()).collect(),

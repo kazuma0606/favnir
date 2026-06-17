@@ -2435,7 +2435,7 @@ fn compile_stmt_into(stmt: &Stmt, ctx: &mut CompileCtx, out: &mut Vec<IRStmt>) {
             });
             compile_stmt_into(&bind_raw, ctx, out);
 
-            let iter_name = if f.guard.is_some() {
+            let iter_name = if let Some(guard_expr) = &f.guard {
                 let taken_name = "__forall_vals_taken".to_string();
                 // bind __forall_vals_filtered <- [x | x <- __forall_vals_raw, guard]
                 let filtered_name = "__forall_vals_filtered".to_string();
@@ -2447,7 +2447,7 @@ fn compile_stmt_into(stmt: &Stmt, ctx: &mut CompileCtx, out: &mut Vec<IRStmt>) {
                             src: Box::new(Expr::Ident(raw_vals_name.clone(), sp.clone())),
                             span: sp.clone(),
                         },
-                        CompClause::Guard(Box::new(f.guard.as_ref().unwrap().clone())),
+                        CompClause::Guard(Box::new(guard_expr.clone())),
                     ],
                     span: sp.clone(),
                 };

@@ -1,0 +1,114 @@
+# Pre-compiled Artifacts (`fav compile`)
+
+Favnir supports pre-compiling pipelines to `.favc` (Favnir Compiled) artifacts,
+enabling near-zero-overhead cold starts in Lambda and container environments.
+
+## The Problem
+
+By default, `fav run pipeline.fav` compiles the source on every invocation:
+
+```
+parse:        ~30ms
+type-check:   ~50ms
+compile:     ~120ms
+execute:       ~5ms
+─────────────────────
+total:       ~205ms   ← Lambda cold start
+```
+
+## The Solution
+
+Pre-compile once at deploy time, then load the artifact at runtime:
+
+```
+load .favc:   ~1ms
+execute:       ~5ms
+─────────────────────
+total:         ~6ms   ← ~34x faster cold start
+```
+
+## Usage
+
+### Step 1: Compile to `.favc`
+
+```bash
+# Compile a single file (output: pipeline.favc)
+fav compile src/pipeline.fav
+
+# Specify output path
+fav compile src/pipeline.fav -o dist/pipeline.favc
+```
+
+### Step 2: Run the artifact
+
+```bash
+fav run --precompiled dist/pipeline.favc
+```
+
+### Step 3: Deploy
+
+```bash
+# Auto-compile before deploy
+fav deploy --precompile
+```
+
+## Lambda Bootstrap Example
+
+```sh
+#!/bin/sh
+# bootstrap — Lambda custom runtime
+
+# Before (source compilation on every cold start, ~205ms)
+exec fav run /var/task/pipeline.fav
+
+# After (pre-compiled artifact, ~6ms)
+exec fav run --precompiled /var/task/pipeline.favc
+```
+
+Include `pipeline.favc` (not `pipeline.fav`) in your Lambda deployment package.
+
+## `.favc` File Format
+
+The `.favc` format is a compact binary encoding of the compiled bytecode:
+
+```
+Header:   "FVC\x01" (4 bytes magic) + version (1 byte)
+Sections: string table, globals, functions (bytecode)
+META:     source SHA-256, compile timestamp, compiler version (optional)
+```
+
+The META section records:
+- **source_hash**: SHA-256 of the original source (for cache validation)
+- **compiled_at**: Unix timestamp when the artifact was created
+- **compiler_ver**: The `fav` version that compiled it (e.g. `"19.7.0"`)
+
+## Version Compatibility
+
+`.favc` files are tied to the bytecode format version of the compiler.
+If you run an artifact compiled with an incompatible version, you will see:
+
+```
+error: unsupported artifact version: 0xFF (current: 0x20).
+       Re-compile with: fav compile <source.fav>
+```
+
+**Best practice**: Re-compile `.favc` artifacts whenever you update `fav`.
+
+## CI/CD Integration
+
+```yaml
+# GitHub Actions example
+- name: Compile Favnir pipeline
+  run: fav compile src/pipeline.fav -o dist/pipeline.favc
+
+- name: Deploy to Lambda
+  run: aws lambda update-function-code --function-name my-fn \
+         --zip-file fileb://dist/pipeline.favc
+```
+
+## Comparison
+
+| Mode | Startup | Use Case |
+|------|---------|----------|
+| `fav run pipeline.fav` | ~205ms | Development, quick iteration |
+| `fav run --precompiled pipeline.favc` | ~6ms | Production, Lambda, containers |

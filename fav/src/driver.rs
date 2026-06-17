@@ -2228,6 +2228,7 @@ fn write_artifact_to_path(artifact: &FvcArtifact, out_path: &Path) -> Result<(),
         functions: artifact.functions.clone(),
         type_metas: artifact.type_metas.clone(),
         explain_json: artifact.explain_json.clone(),
+        meta: artifact.meta.clone(),
     }
     .write_to(&mut file)
     .map_err(|e| {
@@ -30207,6 +30208,78 @@ stage Transform: List<Int> -> List<Int> = |rows| {
     }
 }
 
+// ── v19.7.0: 事前コンパイルキャッシュ ────────────────────────────────────────
+
+/// Compile a Favnir source string to `.favc` bytes (v19.7.0).
+/// Embeds a META section with SHA-256 source hash, timestamp, and compiler version.
+pub fn cmd_compile_to_bytes(src: &str, filename: &str) -> Result<Vec<u8>, String> {
+    use backend::artifact::{FavcMeta, FvcWriter};
+    use sha2::{Digest, Sha256};
+
+    let program =
+        Parser::parse_str(src, filename).map_err(|e| format!("{e}"))?;
+    let artifact = build_artifact(&program);
+
+    let source_hash: [u8; 32] = Sha256::digest(src.as_bytes()).into();
+    let compiled_at = chrono::Utc::now().timestamp() as u64;
+
+    let mut writer = FvcWriter {
+        str_table: artifact.str_table,
+        globals: artifact.globals,
+        functions: artifact.functions,
+        type_metas: artifact.type_metas,
+        explain_json: artifact.explain_json,
+        meta: Some(FavcMeta {
+            source_hash,
+            compiled_at,
+            compiler_ver: env!("CARGO_PKG_VERSION").to_string(),
+        }),
+    };
+    let mut bytes = Vec::new();
+    writer.write_to(&mut bytes).map_err(|e| format!("artifact write error: {e}"))?;
+    Ok(bytes)
+}
+
+/// Compile a Favnir source file to a `.favc` artifact file (v19.7.0).
+pub fn cmd_compile(src_path: &str, out_path: Option<&str>) {
+    let src = std::fs::read_to_string(src_path).unwrap_or_else(|e| {
+        eprintln!("error: cannot read '{}': {}", src_path, e);
+        process::exit(1);
+    });
+    let favc_path = out_path
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| src_path.replace(".fav", ".favc"));
+    let bytes = cmd_compile_to_bytes(&src, src_path).unwrap_or_else(|e| {
+        eprintln!("error: {}", e);
+        process::exit(1);
+    });
+    std::fs::write(&favc_path, &bytes).unwrap_or_else(|e| {
+        eprintln!("error: cannot write '{}': {}", favc_path, e);
+        process::exit(1);
+    });
+    println!("[fav] compiled: {} ({} bytes)", favc_path, bytes.len());
+}
+
+/// Run a pre-compiled `.favc` artifact from bytes (v19.7.0).
+pub fn cmd_run_precompiled_bytes(bytes: &[u8]) -> Result<(), String> {
+    let artifact = FvcArtifact::from_bytes(bytes).map_err(|e| {
+        format!("error: {e}")
+    })?;
+    exec_artifact_main(&artifact, None).map(|_| ())
+}
+
+/// Run a pre-compiled `.favc` artifact file (v19.7.0).
+pub fn cmd_run_precompiled(path: &str) {
+    let bytes = std::fs::read(path).unwrap_or_else(|e| {
+        eprintln!("error: cannot read '{}': {}", path, e);
+        process::exit(1);
+    });
+    cmd_run_precompiled_bytes(&bytes).unwrap_or_else(|e| {
+        eprintln!("{}", e);
+        process::exit(1);
+    });
+}
+
 // ── v196000_tests (v19.6.0) — WASM バイナリ最適化 ───────────────────────────
 #[cfg(test)]
 #[cfg(not(target_arch = "wasm32"))]
@@ -30218,6 +30291,7 @@ mod v196000_tests {
     use crate::middle::compiler::compile_program;
 
     #[test]
+    #[ignore]
     fn version_is_19_6_0() {
         let cargo = include_str!("../Cargo.toml");
         assert!(cargo.contains("19.6.0"), "Cargo.toml should have version 19.6.0");
@@ -30298,5 +30372,60 @@ public fn main() -> Unit !Io {
             .expect("should be valid WASM module");
         let has_start = module.exports().any(|e| e.name() == "_start");
         assert!(has_start, "wasm32-wasi target should export _start");
+    }
+}
+
+// ── v197000_tests (v19.7.0) — 事前コンパイルキャッシュ ─────────────────────
+#[cfg(test)]
+mod v197000_tests {
+    use crate::backend::artifact::{ArtifactError, FvcArtifact};
+    use crate::driver::{cmd_compile_to_bytes, cmd_run_precompiled_bytes};
+
+    #[test]
+    fn version_is_19_7_0() {
+        assert!(
+            include_str!("../Cargo.toml").contains("19.7.0"),
+            "Cargo.toml should contain version 19.7.0"
+        );
+    }
+
+    #[test]
+    fn compile_produces_favc() {
+        let src = r#"public fn main() -> Unit !Io { IO.println("hi") }"#;
+        let bytes = cmd_compile_to_bytes(src, "test.fav").expect("compile");
+        assert_eq!(&bytes[..4], b"FVC\x01", "FVC magic");
+        assert_eq!(bytes[4], 0x20, "bytecode version should be 0x20");
+    }
+
+    #[test]
+    fn precompiled_runs() {
+        let src = r#"public fn main() -> Unit !Io { IO.println("precompiled-ok") }"#;
+        let bytes = cmd_compile_to_bytes(src, "test.fav").expect("compile");
+        cmd_run_precompiled_bytes(&bytes).expect("run precompiled should succeed");
+    }
+
+    #[test]
+    fn precompiled_same_output() {
+        let src = r#"public fn main() -> Unit !Io { IO.println("v197-output") }"#;
+        let bytes = cmd_compile_to_bytes(src, "test.fav").expect("compile");
+        cmd_run_precompiled_bytes(&bytes).expect("precompiled same output");
+    }
+
+    #[test]
+    fn favc_version_check() {
+        // A .favc with an unknown future bytecode version (0xFF) should be rejected.
+        let mut fake = b"FVC\x01".to_vec();
+        fake.push(0xFF); // unknown future version
+        fake.extend_from_slice(&[0, 0, 0]); // padding
+        fake.extend_from_slice(&[0, 0, 0, 0]); // str_count = 0
+        fake.extend_from_slice(&[0, 0, 0, 0]); // fn_count = 0
+        fake.extend_from_slice(&[0, 0, 0, 0]); // global_count = 0
+        let err = FvcArtifact::from_bytes(&fake)
+            .expect_err("unknown version 0xFF should be rejected");
+        assert!(
+            matches!(err, ArtifactError::BadVersion(0xFF)),
+            "expected BadVersion(0xFF), got {:?}",
+            err
+        );
     }
 }

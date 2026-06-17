@@ -89,7 +89,7 @@ pub enum Opcode {
     RefinementAssert = 0x63,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum Constant {
     Int(i64),
     Float(f64),
@@ -648,6 +648,7 @@ pub fn codegen_program(ir: &IRProgram) -> FvcArtifact {
         functions: writer.functions,
         type_metas: ir.type_metas.clone(),
         explain_json: None,
+        meta: None,
     }
 }
 

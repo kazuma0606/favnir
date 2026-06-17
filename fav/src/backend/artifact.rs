@@ -6,16 +6,27 @@ use std::io::{self, Read, Write};
 use super::codegen::Constant;
 
 const MAGIC: &[u8; 4] = b"FVC\x01";
-const VERSION: u8 = 0x20; // v2.0.0
+const VERSION: u8 = 0x20; // format version (META section is additive, no bump needed)
 
+/// Metadata embedded in the META section of a .favc artifact.
 #[derive(Debug, Clone, PartialEq)]
+pub struct FavcMeta {
+    /// SHA-256 of the original source bytes.
+    pub source_hash: [u8; 32],
+    /// Unix timestamp (seconds) when the artifact was compiled.
+    pub compiled_at: u64,
+    /// Compiler version string (e.g. "19.7.0").
+    pub compiler_ver: String,
+}
+
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct FvcGlobal {
     pub name_idx: u32,
     pub kind: u8,
     pub fn_idx: u32,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct FvcFunction {
     pub name_idx: u32,
     pub param_count: u32,
@@ -34,6 +45,8 @@ pub struct FvcWriter {
     pub functions: Vec<FvcFunction>,
     pub type_metas: HashMap<String, TypeMeta>,
     pub explain_json: Option<String>,
+    /// v19.7.0: optional metadata (source hash, timestamp, compiler version).
+    pub meta: Option<FavcMeta>,
 }
 
 impl FvcWriter {
@@ -105,17 +118,24 @@ impl FvcWriter {
             write_type_meta_section(w, &self.type_metas)?;
         }
 
+        if let Some(meta) = &self.meta {
+            write_meta_section(w, meta)?;
+        }
+
         Ok(())
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct FvcArtifact {
     pub str_table: Vec<String>,
     pub globals: Vec<FvcGlobal>,
     pub functions: Vec<FvcFunction>,
     pub type_metas: HashMap<String, TypeMeta>,
     pub explain_json: Option<String>,
+    /// v19.7.0: optional metadata section (None when reading older artifacts).
+    #[serde(skip)]
+    pub meta: Option<FavcMeta>,
 }
 
 impl FvcArtifact {
@@ -203,6 +223,7 @@ impl FvcArtifact {
 
         let mut explain_json = None;
         let mut type_metas = HashMap::new();
+        let mut meta = None;
         loop {
             let mut tag = [0u8; 4];
             match r.read_exact(&mut tag) {
@@ -220,6 +241,9 @@ impl FvcArtifact {
                 b"TMET" => {
                     type_metas = read_type_meta_section(r)?;
                 }
+                b"META" => {
+                    meta = Some(read_meta_section(r)?);
+                }
                 _ => return Err(ArtifactError::BadSectionLayout),
             }
         }
@@ -230,6 +254,7 @@ impl FvcArtifact {
             functions,
             type_metas,
             explain_json,
+            meta,
         })
     }
 
@@ -269,7 +294,11 @@ impl fmt::Display for ArtifactError {
         match self {
             ArtifactError::BadMagic(magic) => write!(f, "bad artifact magic: {magic:?}"),
             ArtifactError::BadVersion(version) => {
-                write!(f, "unsupported artifact version: {version}")
+                write!(
+                    f,
+                    "unsupported artifact version: 0x{version:02X} (current: 0x{VERSION:02X}). \
+                     Re-compile with: fav compile <source.fav>"
+                )
             }
             ArtifactError::BadSectionLayout => write!(f, "artifact section layout is inconsistent"),
             ArtifactError::IoError(err) => write!(f, "{err}"),
@@ -368,6 +397,24 @@ fn read_string(r: &mut impl Read) -> Result<String, ArtifactError> {
     let mut buf = vec![0u8; len];
     r.read_exact(&mut buf)?;
     String::from_utf8(buf).map_err(ArtifactError::Utf8Error)
+}
+
+fn write_meta_section(w: &mut impl Write, meta: &FavcMeta) -> io::Result<()> {
+    w.write_all(b"META")?;
+    w.write_all(&meta.source_hash)?; // 32 bytes
+    w.write_all(&meta.compiled_at.to_le_bytes())?; // 8 bytes
+    write_string(w, &meta.compiler_ver)?;
+    Ok(())
+}
+
+fn read_meta_section(r: &mut impl Read) -> Result<FavcMeta, ArtifactError> {
+    let mut source_hash = [0u8; 32];
+    r.read_exact(&mut source_hash)?;
+    let mut ts_bytes = [0u8; 8];
+    r.read_exact(&mut ts_bytes)?;
+    let compiled_at = u64::from_le_bytes(ts_bytes);
+    let compiler_ver = read_string(r)?;
+    Ok(FavcMeta { source_hash, compiled_at, compiler_ver })
 }
 
 fn write_constant(w: &mut impl Write, constant: &Constant) -> io::Result<()> {

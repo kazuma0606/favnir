@@ -59,6 +59,8 @@ mod notebook;
 mod registry;
 mod rune_cmd;
 mod schemas;
+mod incremental;
+mod parallel;
 mod std_states;
 mod toml;
 mod value;
@@ -75,6 +77,7 @@ use driver::{
     cmd_profile, cmd_scaffold, cmd_transpile,
     cmd_publish, cmd_registry, cmd_repl, cmd_run, cmd_test, cmd_watch,
     cmd_add, cmd_update, cmd_remove, cmd_login,
+    cmd_generate_api, cmd_api_serve,
 };
 use rune_cmd::cmd_rune;
 use std::process;
@@ -284,7 +287,44 @@ fn main_impl() {
             println!("favnir {}", env!("CARGO_PKG_VERSION"));
         }
 
+        // ── v19.7.0: fav compile ──────────────────────────────────────────────
+        Some("compile") => {
+            let mut out: Option<&str> = None;
+            let mut file: Option<&str> = None;
+            let mut i = 2usize;
+            while i < args.len() {
+                match args[i].as_str() {
+                    "-o" => {
+                        out = Some(args.get(i + 1).unwrap_or_else(|| {
+                            eprintln!("error: -o requires a file path");
+                            process::exit(1);
+                        }));
+                        i += 2;
+                    }
+                    other => {
+                        file = Some(other);
+                        i += 1;
+                    }
+                }
+            }
+            let src = file.unwrap_or_else(|| {
+                eprintln!("error: compile requires a source file");
+                process::exit(1);
+            });
+            driver::cmd_compile(src, out);
+        }
+
         Some("run") => {
+            // ── v19.7.0: fav run --precompiled <path> ────────────────────────
+            if args.get(2).map(|s| s.as_str()) == Some("--precompiled") {
+                let path = args.get(3).map(|s| s.as_str()).unwrap_or_else(|| {
+                    eprintln!("error: --precompiled requires a .favc file path");
+                    process::exit(1);
+                });
+                driver::cmd_run_precompiled(path);
+                return;
+            }
+            // ─────────────────────────────────────────────────────────────────
             // Parse --db / --legacy / --self-host / --verbose / --trace flags
             let mut db_path: Option<String> = None;
             let mut legacy = false;
@@ -1661,6 +1701,85 @@ fn main_impl() {
                 }
             }
             lsp::run_lsp_server(port);
+        }
+
+        Some("generate") => match args.get(2).map(|s| s.as_str()) {
+            Some("api") => {
+                let mut format = "openapi";
+                let mut as_json = false;
+                let mut out: Option<String> = None;
+                let mut source: Option<String> = None;
+                let mut i = 3usize;
+                while i < args.len() {
+                    match args[i].as_str() {
+                        "--format" => {
+                            format = match args.get(i + 1).map(|s| s.as_str()) {
+                                Some("openapi") => "openapi",
+                                Some("graphql") => "graphql",
+                                other => {
+                                    eprintln!("error: unknown format {:?}", other);
+                                    process::exit(1);
+                                }
+                            };
+                            i += 2;
+                        }
+                        "--json" => {
+                            as_json = true;
+                            i += 1;
+                        }
+                        "--out" | "-o" => {
+                            out = Some(args.get(i + 1).cloned().unwrap_or_else(|| {
+                                eprintln!("error: --out requires a file path");
+                                process::exit(1);
+                            }));
+                            i += 2;
+                        }
+                        other => {
+                            source = Some(other.to_string());
+                            i += 1;
+                        }
+                    }
+                }
+                let src = source.unwrap_or_else(|| {
+                    eprintln!("error: `fav generate api` requires a source file");
+                    process::exit(1);
+                });
+                cmd_generate_api(&src, format, as_json, out.as_deref());
+            }
+            other => {
+                eprintln!("error: unknown generate subcommand {:?}", other);
+                process::exit(1);
+            }
+        }
+
+        Some("api-serve") => {
+            let mut port = 8080u16;
+            let mut source: Option<String> = None;
+            let mut i = 2usize;
+            while i < args.len() {
+                match args[i].as_str() {
+                    "--port" => {
+                        let raw = args.get(i + 1).unwrap_or_else(|| {
+                            eprintln!("error: --port requires a number");
+                            process::exit(1);
+                        });
+                        port = raw.parse::<u16>().unwrap_or_else(|_| {
+                            eprintln!("error: --port must be a valid u16");
+                            process::exit(1);
+                        });
+                        i += 2;
+                    }
+                    other => {
+                        source = Some(other.to_string());
+                        i += 1;
+                    }
+                }
+            }
+            let src = source.unwrap_or_else(|| {
+                eprintln!("error: `fav api-serve` requires a source file");
+                process::exit(1);
+            });
+            cmd_api_serve(&src, port);
         }
 
         Some(cmd) => {

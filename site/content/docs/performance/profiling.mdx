@@ -1,0 +1,105 @@
+# Performance Profiling
+
+Identify bottlenecks in your pipelines with stage-level timing, flamegraph SVGs,
+and machine-readable JSON output.
+
+## Quick Start
+
+```bash
+# Text report with HOT PATH detection
+fav profile pipeline.fav
+
+# Interactive flamegraph SVG
+fav profile --format=flamegraph pipeline.fav
+open flamegraph.svg
+
+# JSON for CI dashboards
+fav profile --format=json pipeline.fav | jq '.[] | select(.ms > 100)'
+```
+
+## Reducing Noise: `--runs=N`
+
+Run the pipeline N times and report the average timing:
+
+```bash
+fav profile --format=text --runs=10 pipeline.fav
+```
+
+This is essential for pipelines with I/O variance. With N=10, single-run outliers
+(cold disk reads, JIT effects) are smoothed out.
+
+## Focusing on a Stage: `--stage=<name>`
+
+Narrow the report to a single stage:
+
+```bash
+fav profile --format=text --stage=Transform pipeline.fav
+```
+
+## Text Report
+
+```
+Profile: pipeline.fav (285ms total)
+
+Stage          Time (ms)     %
+──────────────────────────────────────
+LoadCsv               45   15.8%
+Transform            210   73.7%  *** HOT PATH ***
+Save                  30   10.5%
+──────────────────────────────────────
+Total                285  100.0%
+```
+
+The slowest stage is automatically highlighted as `*** HOT PATH ***`.
+
+## Flamegraph SVG
+
+```bash
+fav profile --format=flamegraph pipeline.fav
+# → flamegraph.svg
+
+fav profile --format=flamegraph --out=reports/pipeline.svg pipeline.fav
+```
+
+Open the SVG in a browser. Each block represents a pipeline stage; width is
+proportional to time spent. Click blocks to zoom in.
+
+## JSON Output
+
+```json
+[
+  {"stage": "LoadCsv",   "ms": 45,  "pct": 15.8},
+  {"stage": "Transform", "ms": 210, "pct": 73.7},
+  {"stage": "Save",      "ms": 30,  "pct": 10.5}
+]
+```
+
+## CI Integration: Fail on Slow Stages
+
+```yaml
+- name: Profile pipeline
+  run: |
+    fav profile --format=json --runs=3 src/pipeline.fav > profile.json
+    python3 -c "
+    import json, sys
+    data = json.load(open('profile.json'))
+    slow = [s for s in data if s['ms'] > 500]
+    if slow:
+        print('Slow stages:', slow)
+        sys.exit(1)
+    "
+```
+
+## Options Reference
+
+| Flag | Default | Description |
+|---|---|---|
+| `--format=<text\|flamegraph\|json>` | `text` | Output format |
+| `--runs=N` | `1` | Average over N runs |
+| `--stage=<name>` | (all) | Show only the named stage |
+| `--out=<path>` | `flamegraph.svg` | Output file path (flamegraph only) |
+
+## How Profiling Works
+
+Favnir inserts timing wrappers around each stage call when running via `fav profile`.
+Normal `fav run` has zero profiling overhead — the wrappers are not compiled in by default.

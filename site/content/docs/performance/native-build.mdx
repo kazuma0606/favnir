@@ -1,0 +1,53 @@
+# Native Build (`fav build --target native`)
+
+Compile Favnir pipelines to native machine code via the Cranelift code generation backend.
+Native binaries run without the Favnir VM interpreter.
+
+## Quick Start
+
+```bash
+# Compile to native binary
+fav build --target native pipeline.fav
+
+# Run the resulting binary directly
+./pipeline        # Linux/macOS
+./pipeline.exe    # Windows
+```
+
+## How It Works
+
+Favnir's default execution path is:
+
+```
+.fav → (compiler.fav) → .fvc bytecode → VM interpreter
+```
+
+With `--target native`, the pipeline is instead lowered to Cranelift IR and then
+compiled directly to machine code via the Cranelift codegen backend:
+
+```
+.fav → (compiler.fav) → Cranelift IR → native object → linked binary
+```
+
+The native binary includes the Favnir runtime (stdlib, rune calls) statically linked.
+
+## When to Use Native Build
+
+- **Compute-heavy pipelines**: Tight loops (aggregations, transformations) benefit from
+  native register allocation and CPU instruction selection.
+- **Embedded / edge deployments**: No Favnir VM required on the target machine.
+- **Distribution**: Ship a single self-contained binary.
+
+## Comparison
+
+| Mode | Command | Startup | Throughput | Portability |
+|---|---|---|---|---|
+| Interpreted (default) | `fav run pipeline.fav` | Fast | Baseline | Any platform with `fav` |
+| Precompiled bytecode | `fav run --precompiled pipeline.favc` | Faster | Same | Any platform with `fav` |
+| Native binary | `fav build --target native` | Fastest | Higher | Platform-specific binary |
+
+## Limitations
+
+- Native builds only support the subset of operations that map cleanly to Cranelift IR.
+  Rune calls (database, HTTP, etc.) use the same underlying Rust implementations.
+- Cross-compilation is not yet supported; build on the target platform.

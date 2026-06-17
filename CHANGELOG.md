@@ -4,6 +4,416 @@ Favnir のバージョン履歴。形式は [Keep a Changelog](https://keepachan
 
 ---
 
+## [v20.0.0] — 2026-06-17 — Production Performance マイルストーン宣言
+
+### Added
+- v19.x シリーズ集大成：遅延評価パイプライン / AOT コンパイル / インクリメンタルコンパイル / 並列コンパイル / Apache Arrow 統合 / WASM 最適化 / 事前コンパイル `.favc` / フレームグラフプロファイリングが揃い Production Performance を宣言
+- `benchmarks/` ディレクトリ（`10gb_csv.fav` / `lambda_coldstart.sh` / `results.md`）
+- `site/content/docs/performance/` ドキュメント（6 ファイル）
+- `CHANGELOG.md` / `README.md` 全面更新（v19.1.0〜v20.0.0）
+
+### Internal
+- Cargo.toml version: `20.0.0`
+- `v200000_tests`: 5 件追加
+
+---
+
+## [v19.8.0] — 2026-06-17 — プロファイリング強化（フレームグラフ）
+
+### Added
+- `fav profile --format=flamegraph` — `inferno` crate による SVG フレームグラフ生成
+- `fav profile --format=text` — HOT PATH マーカー付きテキストレポート
+- `fav profile --format=json` — `pct` フィールド付き JSON 出力
+- `--runs=N` — N 回実行の平均プロファイル
+- `--stage=<name>` — 特定 stage のみ表示
+- `--out=<path>` — 出力先パス指定（flamegraph 向け）
+- `site/content/docs/tools/profiling.mdx` 新規作成
+
+### Internal
+- `fav/Cargo.toml`: `inferno = "0.11"` を native-only deps に追加
+- `src/profiler/` モジュール新規作成（`collector.rs` / `flamegraph.rs` / `report.rs`）
+- `src/driver.rs`: `cmd_profile` シグネチャ拡張
+- Cargo.toml version: `19.8.0`
+- `v198000_tests`: 5 件追加
+
+---
+
+## [v19.7.0] — 2026-06-17 — 事前コンパイル（`.favc`）
+
+### Added
+- `fav compile <src.fav>` — `.favc` バイナリアーティファクト生成（SHA-256 ハッシュ + タイムスタンプ埋め込み）
+- `fav run --precompiled <src.favc>` — 型チェック・コンパイルなしで直接実行（Lambda コールドスタート削減）
+- `FavcMeta` 構造体（`source_hash` / `compiled_at` / `compiler_ver`）META セクション
+- `site/content/docs/tools/precompiled.mdx` 新規作成
+
+### Internal
+- `src/backend/artifact.rs`: `FavcMeta` + `write_meta_section` / `read_meta_section`
+- `src/driver.rs`: `cmd_compile` / `cmd_compile_to_bytes` / `cmd_run_precompiled`
+- `src/main.rs`: `Some("compile")` ブランチ + `--precompiled` フラグ
+- Cargo.toml version: `19.7.0`
+- `v197000_tests`: 5 件追加
+
+---
+
+## [v19.6.0] — 2026-06-17 — WASM 最適化
+
+### Added
+- WASM バイナリサイズ削減（デッドコード除去・未使用 import 削減）
+- WASM ビルドプロセス改善
+- `site/content/docs/performance/wasm.mdx` 新規作成
+
+### Internal
+- Cargo.toml version: `19.6.0`
+- `v196000_tests`: 5 件追加
+
+---
+
+## [v19.5.0] — 2026-06-17 — Apache Arrow 統合
+
+### Added
+- `VMValue::ArrowBatch(u64)` — opaque Arrow RecordBatch ハンドル
+- `ArrowBatch.from_list` / `ArrowBatch.to_list` — VMValue List との相互変換
+- `ArrowBatch.write_parquet` / `ArrowBatch.read_parquet` — Parquet ファイル I/O
+- `#[arrow]` stage アノテーション（Arrow バッチパイプライン最適化）
+- `site/content/docs/runes/arrow.mdx` 新規作成
+
+### Internal
+- `src/vm.rs`: `ARROW_BATCHES` thread-local + Arrow primitives
+- `arrow = { version = "52", features = ["ipc"] }` / `parquet = "52"` を native-only deps に追加
+- Cargo.toml version: `19.5.0`
+- `v195000_tests`: 5 件追加
+
+---
+
+## [v19.4.0] — 2026-06-17 — 並列コンパイル
+
+### Added
+- `fav build --parallel` — Rayon + petgraph によるトポロジカル並列コンパイル
+- `src/parallel/` モジュール（`topo.rs` / `compiler.rs`）
+
+### Internal
+- `rayon = "1"` / `petgraph = "0.6"` を native-only deps に追加
+- Cargo.toml version: `19.4.0`
+- `v194000_tests`: 5 件追加
+
+---
+
+## [v19.3.0] — 2026-06-17 — インクリメンタルコンパイル
+
+### Added
+- SHA-256 フィンガープリントベースのインクリメンタルコンパイル
+- `.fav_cache/` ディレクトリへのアーティファクトキャッシュ
+- `FAV_NO_CACHE` / `FAV_EXPLAIN_CACHE` / `FAV_CACHE_DIR` 環境変数
+
+### Internal
+- `src/incremental/` モジュール（`fingerprint.rs` / `dep_graph.rs` / `cache.rs`）
+- Cargo.toml version: `19.3.0`
+- `v193000_tests`: 5 件追加
+
+---
+
+## [v19.2.0] — 2026-06-17 — AOT コンパイル（Cranelift バックエンド）
+
+### Added
+- `fav build --target native` — Cranelift バックエンドによるネイティブバイナリ生成
+- `src/backend/cranelift_aot.rs` — `CraneliftBackend::compile_to_binary`
+
+### Internal
+- `cranelift-codegen / cranelift-frontend / cranelift-module / cranelift-object / cranelift-native 0.117` を native-only deps に追加
+- Cargo.toml version: `19.2.0`
+- `v192000_tests`: 5 件追加
+
+---
+
+## [v19.1.0] — 2026-06-17 — 遅延評価パイプライン（`#[streaming]`）
+
+### Added
+- `#[streaming(chunk_size = N)]` / `#[streaming]` stage アノテーション — 定常メモリで大規模データを処理
+- `#[stateful]` アノテーション — チャンク間状態保持
+- `compile_streaming_pipeline` — chunk 単位の VM opcode 生成
+
+### Internal
+- `src/vm.rs`: `__streaming_pipeline` builtin ハンドラ追加
+- Cargo.toml version: `19.1.0`
+- `v191000_tests`: 5 件追加
+
+---
+
+## [v19.0.0] — 2026-06-16 — Type System Maturity マイルストーン宣言
+
+### Added
+- v18.x シリーズ集大成：エフェクト推論 / 行多相 / Refinement Types / スキーマ型 / 線形型 / 共変・反変アノテーション / Const Generics / 型駆動 API 生成が揃い Type System Maturity を宣言
+- `CHANGELOG.md` / `README.md` 全面更新（v18.1.0〜v19.0.0）
+
+### Internal
+- Cargo.toml version: `19.0.0`
+- `v190000_tests`: 5 件追加
+
+---
+
+## [v18.8.0] — 2026-06-16 — 型駆動 API 生成
+
+### Added
+- `#[api(method = "GET", path = "/users/:id")]` アノテーション構文
+- `fav generate api` — OpenAPI 3.0 JSON/YAML と GraphQL SDL の自動生成
+- `fav api-serve` — 開発用 HTTP サーバー（TcpListener ベース）
+- `site/content/docs/api/generate.mdx` / `serve.mdx` 新規作成
+
+### Internal
+- `ast.rs`: `ApiAnnotation` struct + `FnDef.api_annotation: Option<ApiAnnotation>`
+- `parser.rs`: `parse_api_annotation()`
+- `driver.rs`: API 生成・ルートテーブル・HTTP サーバー実装
+- Cargo.toml version: `18.8.0`
+
+---
+
+## [v18.7.0] — 2026-06-16 — Const Generics
+
+### Added
+- `fn f<const N: Int where { N > 0 }>(x: Int) -> Int` 構文
+- E0335 — const constraint 違反エラー
+- `site/content/docs/language/const-generics.mdx` 新規作成
+
+### Internal
+- `ast.rs`: `GenericParam` に `is_const / const_ty / const_constraint` 追加
+- `parser.rs`: `parse_one_type_param()`
+- `checker.rs`: `const_generics_registry` + E0335 チェック
+- Cargo.toml version: `18.7.0`
+
+---
+
+## [v18.6.0] — 2026-06-16 — 共変・反変アノテーション
+
+### Added
+- `interface Source<+T> { ... }` / `interface Sink<-T> { ... }` 構文
+- E0334 — 分散違反エラー
+- `site/content/docs/language/variance.mdx` 新規作成
+
+### Internal
+- `ast.rs`: `GenericParam.variance` フィールド追加
+- `checker.rs`: `check_interface_variance()`
+- Cargo.toml version: `18.6.0`
+
+---
+
+## [v18.5.0] — 2026-06-16 — 線形型
+
+### Added
+- `fn(T) -o U` — 線形関数型（linear arrow）
+- E0332 / E0333 — 線形型の二重使用・未使用エラー
+- `site/content/docs/language/linear-types.mdx` 新規作成
+
+### Internal
+- `ast.rs`: `TypeExpr::LinearArrow` / `Type::LinearFn`
+- `checker.rs`: `LinearState` / `linear_env` / 線形型追跡
+- Cargo.toml version: `18.5.0`
+
+---
+
+## [v18.4.0] — 2026-06-16 — スキーマ型
+
+### Added
+- `type User = schema "file:./schema/user.json"` 構文
+- `fav check --refresh-schemas` フラグ、E0338 エラー
+- `site/content/docs/language/schema-types.mdx` 新規作成
+
+### Internal
+- `ast.rs`: `TypeExpr::Schema(uri, span)`
+- `driver.rs`: `schema_loader` モジュール
+- Cargo.toml version: `18.4.0`
+
+---
+
+## [v18.3.0] — 2026-06-16 — Refinement Types
+
+### Added
+- `fn divide(a: Int, b: Int where { b != 0 }) -> Int` 構文
+- E0331 — Refinement 制約違反エラー（コンパイル時）
+- `site/content/docs/language/refinement-types.mdx` 新規作成
+
+### Internal
+- `ast.rs`: `Param.constraint: Option<Box<Expr>>`
+- `checker.rs`: `check_refinement_call_site()`
+- Cargo.toml version: `18.3.0`
+
+---
+
+## [v18.2.0] — 2026-06-16 — 行多相（Row Polymorphism）
+
+### Added
+- `fn f<R with { id: Int }>(row: R) -> { ...R, ts: String }` 構文
+- E0329 / E0330 — レコード制約・spread エラー
+- `site/content/docs/language/row-polymorphism.mdx` 新規作成
+
+### Internal
+- `ast.rs`: `TypeBound::HasFields` / `TypeExpr::RecordSpread`
+- `checker.rs`: `check_row_constraint()`
+- Cargo.toml version: `18.2.0`
+
+---
+
+## [v18.1.0] — 2026-06-16 — エフェクト推論（Effect Inference）
+
+### Added
+- エフェクト宣言（`!Db`, `!IO` 等）を省略可能に（推移的推論・fixpoint 最大 10 ラウンド）
+- `fav check --show-effects` フラグ
+- `site/content/docs/language/effect-inference.mdx` 新規作成
+
+### Internal
+- `checker.rs`: `EffectSet` / `infer_effects_fn()` / `fn_effects_registry`
+- Cargo.toml version: `18.1.0`
+
+---
+
+## [v18.0.0] — 2026-06-16 — Language Power マイルストーン宣言
+
+### Added
+- v17.x シリーズ集大成：境界付きジェネリクス / パターンマッチ拡張 / 内包表記 / REPL 品質向上 / `fav bench` / `forall` プロパティテスト / パッケージシステムが揃い Language Power を宣言
+- `CHANGELOG.md` / `README.md` 全面更新（v17.1.0〜v18.0.0）
+- `site/content/docs/language/patterns.mdx` / `comprehensions.mdx` / `bind.mdx` 新規作成
+- `site/content/docs/packages/publishing.mdx` 新規作成
+
+### Internal
+- Cargo.toml version: `18.0.0`
+- `v180000_tests`: 5 件追加
+
+---
+
+## [v17.8.0] — 2026-06-16 — パッケージシステム成熟（rune registry v2）
+
+### Added
+- `fav add <name[@version]>` / `fav update [name]` / `fav remove <name>` / `fav login` CLI 追加
+- `fav.toml` に `[dev-dependencies]` / `[registry]` セクション追加
+- `fav.lock` に `checksum` / `source` フィールド追加
+- `registry/resolver.rs`: `SemVer` / `VersionReq` / `parse_version_req` / `resolve_best` — `^` / `~` / `=` / `*` semver 解決
+- `registry/client.rs`: `RegistryClient` / `PackageInfo` / HTTP `fetch_package` / `publish`（`REGISTRY_MOCK=1` テストスタブ）
+- `fav_toml_add_dep` ヘルパー（`fav.toml` への dep 追記）
+- `cmd_add_impl` テスト用ヘルパー
+- `site/content/docs/packages/getting-started.mdx` 新規作成
+
+### Internal
+- Cargo.toml version: `17.8.0`
+- `v178000_tests`: 5 件追加
+
+---
+
+## [v17.7.0] — 2026-06-15 — `forall` プロパティベーステスト
+
+### Added
+- `forall x: Type [where { guard }] { body }` 構文追加
+- `TokenKind::Forall` / `Stmt::Forall` / `ForallStmt` / `ForallVar` AST 追加
+- `parse_forall_stmt` — `where { guard }` オプション対応
+- `check_stmt`: E0327（非対応型）型チェック
+- VM primitives: `__forall_gen_int` / `__forall_gen_str` / `__forall_gen_bool` / `__forall_gen_float`（xorshift64 固定シード 12345）
+- compiler desugar: ガードなし → ForIn ループ、ガードあり → ListComp + `List.take` + ForIn
+- `fav test --cases N` CLI オプション（`FORALL_CASES` 環境変数）
+- exhaustive match 更新: fmt / emit_python / lineage(4) / lint(7) / checker(2) / compiler(2)
+- `site/content/docs/tools/property-testing.mdx` 新規作成
+
+### Internal
+- Cargo.toml version: `17.7.0`
+- `v177000_tests`: 5 件追加（version_is test は v17.8.0 で除去）
+
+---
+
+## [v17.6.0] — 2026-06-15 — `fav bench` 統計強化
+
+### Added
+- `bench "name" { ... }` 構文追加（AST `Item::BenchDef`）
+- `BenchStats`（avg / p50 / p95 / min / max）統計計算
+- `cmd_bench(opts: &BenchOpts)` 実装
+- `--runs N` / `--warmup N` / `--json` CLI オプション
+- `site/content/docs/tools/bench.mdx` 新規作成
+
+### Internal
+- Cargo.toml version: `17.6.0`
+- `v176000_tests`: 5 件追加
+
+---
+
+## [v17.5.0] — 2026-06-15 — REPL 品質向上
+
+### Added
+- `:doc <fn>` / `:load <file>` / `:save <file>` / `:history` / `:paste` REPL コマンド追加
+- `:paste` ... `:end` 複数行入力モード
+- タブ補完（モジュール名・関数名・`:` コマンド）
+- `FavCompleter` タブ補完実装
+
+### Internal
+- Cargo.toml version: `17.5.0`
+- `v175000_tests`: 5 件追加
+
+---
+
+## [v17.4.0] — 2026-06-15 — `let` バインディング除去（誤実装の修正）
+
+### Removed
+- `TokenKind::Let` / `Stmt::Let` / `parse_let_stmt` / E0326 を除去
+- `let x = expr` は Favnir に存在しない。`bind x <- expr` に統一
+
+### Changed
+- `bind x <- expr` が非 Result 値でも使えることを明確化（既存動作の確認）
+
+### Internal
+- Cargo.toml version: `17.4.0`
+- `v174000_tests`: 5 件追加
+
+---
+
+## [v17.3.0] — 2026-06-15 — コレクション内包表記
+
+### Added
+- `[x * 2 | x <- nums]` list-comp — `List.map` 相当にデシュガー
+- `[x | x <- nums, x > 0]` filter-comp — `List.filter` 相当にデシュガー
+- `[Pair(a,b) | a <- as, b <- bs]` multi-source — `List.flat_map` 相当にデシュガー
+- `[? f(x) | x <- xs]` result-comp — `List.collect_result` 相当にデシュガー
+- `CompClause::For` / `CompClause::Guard` AST 追加
+- `Expr::ListComp` / `Expr::ResultComp` AST 追加
+- `List.collect_result` builtin primitive 追加
+- exhaustive match 更新: lineage(4) / lint(6) / fmt / emit_python / driver(2)
+
+### Internal
+- Cargo.toml version: `17.3.0`
+- `v173000_tests`: 5 件追加
+
+---
+
+## [v17.2.0] — 2026-06-15 — パターンマッチ拡張
+
+### Added
+- or-pattern: `"a" | "b" => ...`（`Pattern::Or`）
+- list-pattern: `[] / [x] / [head, ..tail]`（`Pattern::List`）
+- guard 条件: `if expr` in match arm（`MatchArm.guard`）
+- `DotDot` トークン（`..`）追加（`DotDotDot` との区別）
+- `IRPattern::Or` / `IRPattern::List` IR 追加
+- `ListLen` (0x60) / `ListGet` (0x61) / `ListDrop` (0x62) VM opcodes 追加
+- `emit_pattern_test` で Or / List パターンを処理
+- exhaustive match 更新: checker / compiler / fmt / ast_lower_checker / emit_python / driver
+
+### Internal
+- Cargo.toml version: `17.2.0`
+- `v172000_tests`: 5 件追加
+
+---
+
+## [v17.1.0] — 2026-06-15 — 境界付きジェネリクス（Bounded Generics）
+
+### Added
+- `fn f<T with Ord>(a: T, b: T) -> T` 構文追加
+- `GenericParam { name: String, bounds: Vec<String> }` AST 追加（7 struct 変更）
+- `parse_type_bounds` — `TokenKind::With` 対応
+- `fn_bounds_registry: HashMap<String, Vec<GenericParam>>` in Checker
+- `type_implements_bound` — 組み込み bound 自動実装テーブル
+- 組み込み bounds: `Ord` / `Eq` / `Serialize` / `Display` / `Hash` / `Clone`
+- call-site E0325: bound を満たさない型を渡すとエラー
+- `site/content/docs/language/generics.mdx` 新規作成
+
+### Internal
+- Cargo.toml version: `17.1.0`
+- `v171000_tests`: 6 件追加
+
+---
+
 ## [v17.0.0] — 2026-06-14 — Language Ergonomics マイルストーン宣言
 
 ### Added

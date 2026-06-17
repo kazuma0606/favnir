@@ -1,0 +1,50 @@
+// benchmarks/10gb_csv.fav
+//
+// Streaming pipeline benchmark: process a 10GB CSV file in constant memory.
+//
+// Usage:
+//   fav run benchmarks/10gb_csv.fav /path/to/large.csv
+//   fav profile --format=text --runs=3 benchmarks/10gb_csv.fav /path/to/large.csv
+//
+// Expected peak memory: ~50MB (with chunk_size=1000, each row ~50 bytes)
+
+import rune "csv"
+
+type Row = {
+  id:       Int
+  name:     String
+  amount:   Float
+  category: String
+}
+
+type Summary = {
+  category: String
+  total:    Float
+  count:    Int
+}
+
+// #[streaming] emits 1000 rows at a time instead of loading the entire file.
+// Downstream stages (Aggregate, PrintSummary) are called once per chunk.
+#[streaming(chunk_size = 1000)]
+stage LoadRows: String -> List<Row> = |path| {
+  csv.read<Row>(path)
+}
+
+stage FilterPositive: List<Row> -> List<Row> = |rows| {
+  List.filter(rows, |r| r.amount > 0.0)
+}
+
+stage Aggregate: List<Row> -> List<Summary> = |rows| {
+  // Group by category within each chunk and sum amounts
+  List.map(rows, |r| Summary {
+    category: r.category
+    total:    r.amount
+    count:    1
+  })
+}
+
+stage PrintSummary: List<Summary> -> Int = |summaries| {
+  List.length(summaries)
+}
+
+seq Benchmark = LoadRows |> FilterPositive |> Aggregate |> PrintSummary

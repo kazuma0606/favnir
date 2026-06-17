@@ -30445,6 +30445,7 @@ mod v198000_tests {
     }
 
     #[test]
+    #[ignore]
     fn version_is_19_8_0() {
         assert!(
             include_str!("../Cargo.toml").contains("19.8.0"),
@@ -30495,6 +30496,55 @@ mod v198000_tests {
         assert!(
             transform_line.contains("HOT PATH"),
             "Transform line should have HOT PATH marker: '{transform_line}'"
+        );
+    }
+}
+
+// ── v200000_tests (v20.0.0) — Production Performance マイルストーン ──────────
+#[cfg(test)]
+mod v200000_tests {
+    use std::path::Path;
+
+    #[test]
+    fn version_is_20_0_0() {
+        assert!(
+            include_str!("../Cargo.toml").contains("20.0.0"),
+            "Cargo.toml should contain version 20.0.0"
+        );
+    }
+
+    #[test]
+    fn changelog_has_v19_entries() {
+        let changelog = include_str!("../../CHANGELOG.md");
+        assert!(
+            changelog.contains("19.1.0") && changelog.contains("19.8.0"),
+            "CHANGELOG.md should contain v19.1.0 and v19.8.0 entries"
+        );
+    }
+
+    #[test]
+    fn readme_mentions_streaming() {
+        let readme = include_str!("../../README.md");
+        assert!(
+            readme.contains("streaming"),
+            "README.md should mention streaming"
+        );
+    }
+
+    #[test]
+    fn readme_mentions_native_build() {
+        let readme = include_str!("../../README.md");
+        assert!(
+            readme.contains("native"),
+            "README.md should mention native build"
+        );
+    }
+
+    #[test]
+    fn benchmarks_dir_exists() {
+        assert!(
+            Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../benchmarks")).exists(),
+            "benchmarks/ directory should exist"
         );
     }
 }

@@ -1,0 +1,56 @@
+# Incremental Compilation
+
+Favnir tracks SHA-256 fingerprints of source files and reuses cached artifacts for
+unchanged files, dramatically speeding up repeated builds in large projects.
+
+## How It Works
+
+On each `fav build` or `fav run`, Favnir:
+
+1. Computes SHA-256 hashes of all source files in the dependency graph.
+2. Checks `.fav_cache/` for a matching artifact (`<hash>.fvc`).
+3. If found and valid, reuses the cached artifact — skipping compilation.
+4. If not found, compiles the file and writes the artifact to cache.
+
+```
+First run:   parse → typecheck → compile → write .fav_cache/<hash>.fvc
+Second run:  hash matches → load .fav_cache/<hash>.fvc (skip compile)
+```
+
+## Cache Location
+
+By default, cache artifacts are stored in `.fav_cache/` relative to the project root.
+Override with:
+
+```bash
+export FAV_CACHE_DIR=/tmp/my_cache
+```
+
+## Environment Variables
+
+| Variable | Default | Description |
+|---|---|---|
+| `FAV_NO_CACHE` | unset | Set to `1` to disable caching entirely |
+| `FAV_EXPLAIN_CACHE` | unset | Set to `1` to print cache hit/miss reasons |
+| `FAV_CACHE_DIR` | `.fav_cache/` | Override cache directory |
+
+## Debugging Cache Behavior
+
+```bash
+FAV_EXPLAIN_CACHE=1 fav run pipeline.fav
+# → [cache hit]  src/load.fav  (sha256: abc123...)
+# → [cache miss] src/transform.fav  (modified)
+# → [compile]    src/transform.fav → .fav_cache/def456.fvc
+```
+
+## CI Usage
+
+In CI, you can cache `.fav_cache/` between runs to speed up repeated builds:
+
+```yaml
+# GitHub Actions
+- uses: actions/cache@v3
+  with:
+    path: .fav_cache
+    key: fav-cache-${{ hashFiles('**/*.fav') }}
+```

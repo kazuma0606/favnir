@@ -1,0 +1,74 @@
+# Streaming Pipelines (`#[streaming]`)
+
+Process arbitrarily large datasets in constant memory by splitting pipeline execution
+into chunks at the stage level.
+
+## The Problem
+
+Without streaming, a pipeline that loads a 10GB CSV file must hold the entire dataset
+in memory before passing it to the next stage:
+
+```favnir
+// Without streaming — loads 10GB into memory
+stage LoadCsv: String -> List<Row> = |path| { csv.read<Row>(path) }
+seq Pipeline = LoadCsv |> Transform |> Save
+```
+
+## The Solution: `#[streaming]`
+
+Add `#[streaming(chunk_size = N)]` to mark a stage as the streaming source:
+
+```favnir
+#[streaming(chunk_size = 1000)]
+stage LoadCsv: String -> List<Row> = |path| { csv.read<Row>(path) }
+
+stage Transform: List<Row> -> List<Row> = |rows| {
+  List.map(rows, |r| { /* transform each row */ r })
+}
+
+stage Save: List<Row> -> Int = |rows| {
+  // called once per chunk
+  db.bulk_insert(rows)
+}
+
+seq Pipeline = LoadCsv |> Transform |> Save
+```
+
+At runtime, `LoadCsv` emits 1000 rows at a time. Each downstream stage processes
+the chunk before the next is loaded. Peak memory is proportional to `chunk_size`,
+not the total file size.
+
+## `#[streaming]` Without Explicit chunk_size
+
+```favnir
+#[streaming]
+stage LoadRows: String -> List<Row> = |path| { /* ... */ }
+```
+
+Uses the default chunk size (configurable via `FAV_STREAM_CHUNK_SIZE` env var, default: 512).
+
+## Stateful Stages (`#[stateful]`)
+
+Some stages need to accumulate state across chunks (e.g., running totals):
+
+```favnir
+#[stateful]
+stage Accumulate: List<Row> -> List<Summary> = |rows| {
+  // called for each chunk; can maintain internal state between calls
+  summarize(rows)
+}
+```
+
+## Memory Comparison
+
+| Approach | 10GB CSV | Peak Memory |
+|---|---|---|
+| Default (eager) | All in memory | ~10GB |
+| `#[streaming(chunk_size=1000)]` | 1000 rows at a time | ~50MB |
+
+## Limitations
+
+- Only the **first stage** in a pipeline should have `#[streaming]`. Downstream stages
+  receive chunks automatically.
+- `par [A, B]` parallel stages cannot currently be used with streaming sources.
+- The streaming source stage must return `List<T>`.

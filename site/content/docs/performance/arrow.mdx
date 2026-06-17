@@ -1,0 +1,66 @@
+# Apache Arrow Integration
+
+Favnir supports Apache Arrow's columnar memory format for high-performance data exchange
+between pipeline stages. Arrow batches enable zero-copy interop with Parquet, DuckDB,
+and other Arrow-native tools.
+
+## Core API
+
+```favnir
+import rune "arrow"
+
+// Create an ArrowBatch from a Favnir List
+stage LoadArrow: String -> ArrowBatch = |path| {
+  bind rows <- csv.read<Row>(path)
+  ArrowBatch.from_list(rows)
+}
+
+// Process Arrow data
+stage Transform: ArrowBatch -> ArrowBatch = |batch| {
+  bind rows <- ArrowBatch.to_list(batch)
+  bind filtered <- List.filter(rows, |r| r.amount > 0.0)
+  ArrowBatch.from_list(filtered)
+}
+
+// Write to Parquet
+stage Save: ArrowBatch -> Int = |batch| {
+  ArrowBatch.write_parquet(batch, "output.parquet")
+}
+
+seq Pipeline = LoadArrow |> Transform |> Save
+```
+
+## Reading Parquet
+
+```favnir
+stage LoadParquet: String -> ArrowBatch = |path| {
+  ArrowBatch.read_parquet(path)
+}
+```
+
+## API Reference
+
+| Function | Signature | Description |
+|---|---|---|
+| `ArrowBatch.from_list` | `List<T> -> ArrowBatch` | Convert Favnir list to Arrow batch |
+| `ArrowBatch.to_list` | `ArrowBatch -> List<T>` | Convert Arrow batch to Favnir list |
+| `ArrowBatch.write_parquet` | `(ArrowBatch, String) -> Int` | Write batch to Parquet file |
+| `ArrowBatch.read_parquet` | `String -> ArrowBatch` | Read Parquet file as Arrow batch |
+
+## `#[arrow]` Stage Annotation
+
+Mark a stage as Arrow-native to opt into batch-level optimizations:
+
+```favnir
+#[arrow]
+stage ProcessBatch: ArrowBatch -> ArrowBatch = |batch| {
+  // Favnir may skip List conversion internally
+  transform_batch(batch)
+}
+```
+
+## Why Arrow?
+
+- **Columnar layout**: Vectorized operations over columns are CPU-cache friendly.
+- **Zero-copy**: Pass data between Favnir and DuckDB / Parquet without serialization.
+- **Interop**: Arrow is the lingua franca of modern data tools (Pandas, Polars, DuckDB, Spark).

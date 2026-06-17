@@ -1,0 +1,75 @@
+# Precompiled Artifacts (`.favc`)
+
+Compile a Favnir pipeline once and run it repeatedly without re-invoking the type
+checker or compiler. This is particularly useful for Lambda functions where cold-start
+latency matters.
+
+## Workflow
+
+```bash
+# Step 1: Compile once (type-check + compile → .favc)
+fav compile pipeline.fav
+# → pipeline.favc
+
+# Step 2: Run without compile overhead
+fav run --precompiled pipeline.favc
+```
+
+## Custom Output Path
+
+```bash
+fav compile pipeline.fav -o artifacts/pipeline.favc
+fav run --precompiled artifacts/pipeline.favc
+```
+
+## What's Inside a `.favc` File?
+
+A `.favc` file is a binary artifact with the following sections:
+
+| Section | Contents |
+|---|---|
+| `FVC\x01` magic | File type identifier |
+| `str_table` | Interned string literals |
+| `globals` | Global variable definitions |
+| `functions` | Compiled bytecode per function |
+| `META` | `source_hash` (SHA-256), `compiled_at` (Unix timestamp), `compiler_ver` |
+
+The `META` section allows tooling to verify that a `.favc` file matches its source.
+
+## Lambda Cold Start Optimization
+
+Without precompilation, each Lambda invocation that spawns a new container must:
+1. Parse the `.fav` source
+2. Type-check (checker.fav)
+3. Compile (compiler.fav)
+4. Execute
+
+With `fav run --precompiled`, steps 1–3 are skipped:
+
+```bash
+# Dockerfile or Lambda layer
+COPY pipeline.favc /app/
+CMD ["fav", "run", "--precompiled", "/app/pipeline.favc"]
+```
+
+## CI Integration
+
+```yaml
+# GitHub Actions: compile in CI, ship .favc to Lambda
+- name: Compile pipeline
+  run: fav compile src/pipeline.fav -o dist/pipeline.favc
+
+- name: Upload to S3
+  run: aws s3 cp dist/pipeline.favc s3://my-bucket/pipeline.favc
+```
+
+## Compatibility
+
+`.favc` artifacts are tied to the Favnir version that compiled them. If you upgrade
+Favnir, recompile your `.fav` sources to generate fresh `.favc` files. Running an
+artifact compiled by a different version produces a clear error:
+
+```
+error: unsupported artifact version: 0xFF (current: 0x20).
+Re-compile with: fav compile <source.fav>
+```

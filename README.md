@@ -55,7 +55,16 @@ v16.0.0（2026-06-14）で、**Production Multi-Cloud** マイルストーンを
 AWS / Azure / GCP / Snowflake の 4 クラウドと Kafka/MSK ストリーミングを型安全なパイプラインで統一的に扱えます。
 v16.1.0〜v16.8.0（2026-06-14）で、**Language Ergonomics** シリーズを完了しました。
 f-string 補間 / record spread / stdlib 拡充（DateTime / List.sort_by 等）/ 型エイリアス / namespace alias / `assert_eq` / `test_group` / snapshot テスト / `|> tap(fn)` 演算子が揃い、「書きたくなる言語」への転換を実現しました。
-v17.0.0（2026-06-14）で、**Language Ergonomics** マイルストーンを宣言します。
+v17.0.0（2026-06-14）で、**Language Ergonomics** マイルストーンを宣言しました。
+v17.1.0〜v17.8.0（2026-06-15〜16）で、**Language Power** シリーズを完了しました。
+境界付きジェネリクス（`fn f<T with Ord>(...)` ）/ パターンマッチ拡張（or-pattern / list-pattern）/ コレクション内包表記 / `forall` プロパティテスト / パッケージシステム（`fav add` / `fav publish`）が揃い、「言いたいことを言える言語」への転換を実現しました。
+v18.0.0（2026-06-16）で、**Language Power** マイルストーンを宣言しました。
+v18.1.0〜v18.8.0（2026-06-16）で、**Type System Maturity** シリーズを完了しました。
+エフェクト推論 / 行多相 / Refinement Types / スキーマ型 / 線形型 / 共変・反変アノテーション / Const Generics / 型駆動 API 生成が揃い、「信頼できる言語」への転換を実現しました。
+v19.0.0（2026-06-16）で、**Type System Maturity** マイルストーンを宣言しました。
+v19.1.0〜v19.8.0（2026-06-17）で、**Production Performance** シリーズを完了しました。
+遅延評価パイプライン（`#[streaming]`）/ AOT コンパイル（Cranelift）/ インクリメンタルコンパイル / 並列コンパイル / Apache Arrow 統合 / WASM 最適化 / 事前コンパイル（`.favc`）/ フレームグラフプロファイリングが揃い、「本番で速い言語」への転換を実現しました。
+v20.0.0（2026-06-17）で、**Production Performance** マイルストーンを宣言します。
 
 ---
 
@@ -89,9 +98,40 @@ seq UserImport = ParseCsv |> ValidateRow |> SaveToDb
 
 ## 現在の状態
 
-**v17.0.0（2026-06-14）— Language Ergonomics マイルストーン宣言**
+**v20.0.0（2026-06-17）— Production Performance マイルストーン宣言**
 
-テスト: **1620+ 件すべて通過**
+テスト: **1741+ 件すべて通過**
+
+### Production Performance 達成実績
+
+| 機能 | バージョン | 概要 |
+|---|---|---|
+| `#[streaming]` 遅延評価 | v19.1.0 | 定常メモリで 10GB+ CSV を処理 |
+| AOT コンパイル（Cranelift） | v19.2.0 | `fav build --target native` でネイティブバイナリ生成 |
+| インクリメンタルコンパイル | v19.3.0 | 変更ファイルのみ再コンパイル（SHA-256 フィンガープリント） |
+| 並列コンパイル | v19.4.0 | Rayon + petgraph でトポロジカル並列ビルド |
+| Apache Arrow 統合 | v19.5.0 | `ArrowBatch.write_parquet` / `read_parquet` |
+| WASM 最適化 | v19.6.0 | デッドコード除去によるバイナリサイズ削減 |
+| 事前コンパイル `.favc` | v19.7.0 | `fav run --precompiled` で Lambda コールドスタート削減 |
+| フレームグラフ | v19.8.0 | `fav profile --format=flamegraph` で SVG 生成 |
+
+### ベンチマーク参考値
+
+```
+# 10GB CSV ストリーミング処理（定常メモリ）
+fav run --streaming pipeline.fav large.csv
+→ ピークメモリ: ~50MB（chunk_size=1000）
+
+# Lambda コールドスタート（事前コンパイル）
+fav compile pipeline.fav && fav run --precompiled pipeline.favc
+→ 型チェック・コンパイルをスキップ（コールドスタート削減）
+
+# native ビルドの実行速度
+fav build --target native pipeline.fav
+→ VM インタープリタ比で高速実行
+```
+
+詳細は `benchmarks/results.md` を参照。
 
 | 機能カテゴリ | 機能 | 状態 |
 |---|---|---|
@@ -106,24 +146,31 @@ seq UserImport = ParseCsv |> ValidateRow |> SaveToDb
 | | レコード更新構文（`{ ...base, field: val }`）（v16.3.0） | ✓ |
 | | 型エイリアス（`alias Email = String`、ジェネリクス対応）（v16.5.0） | ✓ |
 | | Namespace Alias（`use String as S`）（v16.6.0） | ✓ |
+| | **Bounded Generics**（`fn f<T with Ord>(a: T, b: T) -> T`）（v17.1.0） | ✓ |
+| | **パターンマッチ拡張**（or-pattern `"a" \| "b"` / list-pattern `[head, ..tail]` / guard）（v17.2.0） | ✓ |
+| | **コレクション内包表記**（`[x * 2 \| x <- list]` / `[? f(x) \| x <- xs]`）（v17.3.0） | ✓ |
+| | `bind x <- expr` バインディング統一（非 Result・Result 両対応）（v17.4.0） | ✓ |
 | **パイプライン** | `stage` / `seq` / `\|>` | ✓ |
 | | `\|> tap(observer_fn)` / `\|> inspect`（デバッグ tap、`--no-tap` で本番ゼロコスト）（v16.8.0） | ✓ |
 | | `abstract stage` / `abstract seq`（依存注入） | ✓ |
 | | `fav explain --lineage`（静的リネージ解析） | ✓ |
 | **Python トランスパイラ** | `fav transpile --target python` — Fav → Python + `pyproject.toml` 自動生成（boto3 / psycopg2 対応） | ✓ |
 | **テスト** | `fav test` — `assert_eq` / `test_group` / `assert_snapshot` / `--update-snapshots`（v16.7.0） | ✓ |
+| | **`forall` プロパティベーステスト**（`forall x: Type [where { guard }] { body }`、`--cases N`）（v17.7.0） | ✓ |
 | **標準ライブラリ** | `List.sort_by` / `List.distinct` / `List.sum_by` 等 9 関数（v16.4.0） | ✓ |
 | | `DateTime.now` / `DateTime.parse` / `DateTime.format` 等 12 関数（v16.4.0） | ✓ |
 | | `String.format_int` / `String.format_float` / `String.split_once`（v16.4.0） | ✓ |
 | | `Math.round_to` / `Math.log` / `Math.log2` / `Math.log10`（v16.4.0） | ✓ |
-| **CLI ツール** | `fav run` / `fav check` / `fav test` / `fav bench` | ✓ |
+| **CLI ツール** | `fav run` / `fav check` / `fav test` / `fav bench`（avg / p50 / p95 / min / max、v17.6.0） | ✓ |
 | | `fav fmt`（冪等コードフォーマッタ） | ✓ |
 | | `fav lint`（W001〜W005 静的解析） | ✓ |
 | | `fav doc`（`///` コメント → Markdown 生成） | ✓ |
 | | `fav profile`（stage 別実行時間計測） | ✓ |
 | | `fav watch`（ファイル監視 + 自動再実行） | ✓ |
-| | `fav repl`（インタラクティブ REPL） | ✓ |
+| | **`fav repl`**（インタラクティブ REPL、`:doc` / `:load` / タブ補完、v17.5.0） | ✓ |
 | | `fav new <name>`（プロジェクトスキャフォールディング） | ✓ |
+| **パッケージ管理** | **`fav add` / `fav update` / `fav remove` / `fav publish`**（semver 解決、registry v2、v17.8.0） | ✓ |
+| | `fav.toml` `[dependencies]` / `[dev-dependencies]` / `[registry]`（v17.8.0） | ✓ |
 | **Rune エコシステム** | AWS（S3 / SQS / DynamoDB / Secrets Manager / MSK） | ✓ |
 | | Azure Blob Storage（`AzureBlob.*`、Shared Key 認証） | ✓ |
 | | Azure PostgreSQL（`AzurePostgres.*`、SSL 対応） | ✓ |
@@ -134,6 +181,13 @@ seq UserImport = ParseCsv |> ValidateRow |> SaveToDb
 | | llm（Claude / OpenAI） | ✓ |
 | | DuckDB / SQL / DB / fs / Parquet / json / csv / gen 等 | ✓ |
 | | slack / queue / cache / email / auth / log | ✓ |
+| **パフォーマンス** | `#[streaming(chunk_size=N)]` 遅延評価パイプライン（定常メモリ処理、v19.1.0） | ✓ |
+| | `fav build --target native`（Cranelift AOT コンパイル、v19.2.0） | ✓ |
+| | インクリメンタルコンパイル（SHA-256 フィンガープリント、`.fav_cache/`、v19.3.0） | ✓ |
+| | 並列コンパイル（Rayon + petgraph、v19.4.0） | ✓ |
+| | `ArrowBatch` — Apache Arrow 統合 / `write_parquet` / `read_parquet`（v19.5.0） | ✓ |
+| | `fav compile` / `fav run --precompiled`（Lambda コールドスタート削減、v19.7.0） | ✓ |
+| | `fav profile --format=flamegraph/text/json`（inferno SVG、HOT PATH 検出、v19.8.0） | ✓ |
 | **デプロイ** | `fav deploy`（AWS Lambda、zip + S3 + Lambda update） | ✓ |
 | **開発体験** | LSP（hover・diagnostics・補完・go-to-definition） | ✓ |
 | | Schema Authority（fav infer → T.validate） | ✓ |
@@ -340,6 +394,33 @@ fav explain --lineage pipeline.fav  # リネージ可視化
 | v16.7.0 | fav test 成熟（`assert_eq` / `test_group` / `assert_snapshot`） | 完了 |
 | v16.8.0 | tap / inspect パイプライン演算子（`\|> tap(fn)` / `--no-tap`） | 完了 |
 | **v17.0.0** | **Language Ergonomics マイルストーン宣言** | **完了** |
+| v17.1.0 | 境界付きジェネリクス（`fn f<T with Ord>(...)` / E0325） | 完了 |
+| v17.2.0 | パターンマッチ拡張（or-pattern / list-pattern / guard） | 完了 |
+| v17.3.0 | コレクション内包表記（`[x * 2 \| x <- list]` / result-comp） | 完了 |
+| v17.4.0 | `let` 除去・`bind` 統一（非 Result 値でも `bind x <- expr`） | 完了 |
+| v17.5.0 | REPL 品質向上（`:doc` / `:load` / `:paste` / タブ補完） | 完了 |
+| v17.6.0 | `fav bench`（avg / p50 / p95 / min / max 統計、`--runs` / `--warmup` / `--json`） | 完了 |
+| v17.7.0 | `forall` プロパティベーステスト（`--cases N` / `where { guard }`） | 完了 |
+| v17.8.0 | パッケージシステム成熟（`fav add` / `fav publish` / semver 解決） | 完了 |
+| **v18.0.0** | **Language Power マイルストーン宣言** | **完了** |
+| v18.1.0 | エフェクト推論（Effect Inference） | 完了 |
+| v18.2.0 | 行多相（Row Polymorphism） | 完了 |
+| v18.3.0 | Refinement Types（引数 `where` 制約） | 完了 |
+| v18.4.0 | スキーマ型（`schema "file:..."` インポート） | 完了 |
+| v18.5.0 | 線形型（`-o` arrow、Connection/Tx 安全性） | 完了 |
+| v18.6.0 | 共変・反変アノテーション（`<+T, -U>`） | 完了 |
+| v18.7.0 | Const Generics（`const N: Int where { N > 0 }`） | 完了 |
+| v18.8.0 | 型駆動 API 生成（`#[api(...)]` → OpenAPI / GraphQL） | 完了 |
+| **v19.0.0** | **Type System Maturity マイルストーン宣言** | **完了** |
+| v19.1.0 | 遅延評価パイプライン（`#[streaming(chunk_size=N)]` / `#[stateful]`） | 完了 |
+| v19.2.0 | AOT コンパイル（Cranelift バックエンド、`fav build --target native`） | 完了 |
+| v19.3.0 | インクリメンタルコンパイル（SHA-256 + `.fav_cache/`） | 完了 |
+| v19.4.0 | 並列コンパイル（Rayon + petgraph トポロジカルソート） | 完了 |
+| v19.5.0 | Apache Arrow 統合（`ArrowBatch` / `write_parquet` / `read_parquet`） | 完了 |
+| v19.6.0 | WASM 最適化（デッドコード除去・バイナリサイズ削減） | 完了 |
+| v19.7.0 | 事前コンパイル（`fav compile` / `fav run --precompiled`、Lambda 対応） | 完了 |
+| v19.8.0 | プロファイリング強化（`--format=flamegraph/text/json`、inferno SVG） | 完了 |
+| **v20.0.0** | **Production Performance マイルストーン宣言** | **完了** |
 
 ---
 

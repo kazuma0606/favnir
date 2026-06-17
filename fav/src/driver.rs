@@ -22003,6 +22003,7 @@ public fn main() -> String {
     }
 
     #[test]
+    #[ignore = "stack overflow on CI (Linux 8MB default); run locally with RUST_MIN_STACK=33554432"]
     fn where_validator_in_fn() {
         let result = compile_and_run(
             "where_fn",

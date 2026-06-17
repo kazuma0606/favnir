@@ -61,6 +61,7 @@ mod rune_cmd;
 mod schemas;
 mod incremental;
 mod parallel;
+mod profiler;
 mod std_states;
 mod toml;
 mod value;
@@ -1186,31 +1187,38 @@ fn main_impl() {
 
         Some("profile") => {
             let mut path = String::new();
-            let mut out_fmt = "table".to_string();
+            let mut format = "text".to_string();
+            let mut runs: usize = 1;
+            let mut stage_filter: Option<String> = None;
+            let mut out: Option<String> = None;
             let mut i = 2usize;
             while i < args.len() {
-                match args[i].as_str() {
-                    "--out" => {
-                        out_fmt = args
-                            .get(i + 1)
-                            .unwrap_or_else(|| {
-                                eprintln!("error: --out requires a format (table|json)");
-                                process::exit(1);
-                            })
-                            .clone();
-                        i += 2;
-                    }
-                    other => {
-                        path = other.to_string();
-                        i += 1;
-                    }
+                let arg = args[i].as_str();
+                if let Some(v) = arg.strip_prefix("--format=") {
+                    format = v.to_string(); i += 1;
+                } else if arg == "--format" {
+                    format = args.get(i + 1).cloned().unwrap_or_default(); i += 2;
+                } else if let Some(v) = arg.strip_prefix("--runs=") {
+                    runs = v.parse().unwrap_or(1); i += 1;
+                } else if arg == "--runs" {
+                    runs = args.get(i + 1).and_then(|s| s.parse().ok()).unwrap_or(1); i += 2;
+                } else if let Some(v) = arg.strip_prefix("--stage=") {
+                    stage_filter = Some(v.to_string()); i += 1;
+                } else if arg == "--stage" {
+                    stage_filter = args.get(i + 1).cloned(); i += 2;
+                } else if let Some(v) = arg.strip_prefix("--out=") {
+                    out = Some(v.to_string()); i += 1;
+                } else if arg == "--out" {
+                    out = args.get(i + 1).cloned(); i += 2;
+                } else {
+                    path = arg.to_string(); i += 1;
                 }
             }
             if path.is_empty() {
                 eprintln!("error: profile requires a .fav file");
                 process::exit(1);
             }
-            cmd_profile(&path, &out_fmt);
+            cmd_profile(&path, &format, runs, stage_filter.as_deref(), out.as_deref());
         }
 
         Some("infer") => {

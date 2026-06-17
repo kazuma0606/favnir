@@ -1,0 +1,115 @@
+# Profiling (`fav profile`)
+
+Favnir's profiler measures stage-level execution time and generates flamegraph SVGs,
+text reports, and JSON output to help you identify bottlenecks in your pipelines.
+
+## Quick Start
+
+```bash
+# Text report (default)
+fav profile src/pipeline.fav
+
+# Flamegraph SVG
+fav profile --format=flamegraph src/pipeline.fav
+open flamegraph.svg
+
+# JSON output
+fav profile --format=json src/pipeline.fav > profile.json
+```
+
+## Output Formats
+
+### Text Report (`--format=text`)
+
+```
+Profile: src/pipeline.fav (285ms total)
+
+Stage          Time (ms)     %
+──────────────────────────────────────
+LoadCsv               45   15.8%
+Transform            210   73.7%  *** HOT PATH ***
+Save                  30   10.5%
+──────────────────────────────────────
+Total                285  100.0%
+```
+
+The slowest stage is automatically marked as `*** HOT PATH ***`.
+
+### Flamegraph SVG (`--format=flamegraph`)
+
+```bash
+fav profile --format=flamegraph src/pipeline.fav
+# → flamegraph.svg
+
+# Custom output path
+fav profile --format=flamegraph --out=reports/pipeline.svg src/pipeline.fav
+```
+
+Open the generated SVG in a browser to interactively explore the flame graph.
+Each block represents a pipeline stage; width is proportional to time spent.
+
+### JSON (`--format=json`)
+
+```bash
+fav profile --format=json src/pipeline.fav
+```
+
+```json
+[
+  {"stage": "LoadCsv",   "ms": 45,  "pct": 15.8},
+  {"stage": "Transform", "ms": 210, "pct": 73.7},
+  {"stage": "Save",      "ms": 30,  "pct": 10.5}
+]
+```
+
+Use JSON output to integrate with CI dashboards or custom tooling.
+
+## Options
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--format=<text\|flamegraph\|json>` | `text` | Output format |
+| `--runs=N` | `1` | Run N times and report the average |
+| `--stage=<name>` | (all) | Show only the specified stage |
+| `--out=<path>` | `flamegraph.svg` | Output path (flamegraph only) |
+
+## Multiple Runs (`--runs=N`)
+
+Run the pipeline N times and report the average timing to reduce noise:
+
+```bash
+fav profile --format=text --runs=5 src/pipeline.fav
+```
+
+This is useful for benchmarking pipelines that have variable timing (I/O, network).
+
+## Stage Filter (`--stage=<name>`)
+
+Focus on a single stage:
+
+```bash
+fav profile --format=text --stage=Transform src/pipeline.fav
+```
+
+## CI Integration
+
+```yaml
+# GitHub Actions: fail if any stage exceeds 500ms
+- name: Profile pipeline
+  run: |
+    fav profile --format=json src/pipeline.fav > profile.json
+    python3 -c "
+    import json, sys
+    data = json.load(open('profile.json'))
+    slow = [s for s in data if s['ms'] > 500]
+    if slow:
+        print('Slow stages:', slow)
+        sys.exit(1)
+    "
+```
+
+## How Profiling Works
+
+Favnir injects timing wrappers around each stage call at compile time
+(via `Env.profile_timed_raw`). Profiling is only active when running through
+`fav profile` — normal `fav run` has zero overhead.

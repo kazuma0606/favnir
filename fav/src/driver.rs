@@ -9856,7 +9856,17 @@ fn render_profile_table(json: &str) {
     println!("{:<width$}  {:>10}  {:>5}%", "Total", total, 100, width = name_w);
 }
 
-pub fn cmd_profile(path: &str, out_fmt: &str) {
+pub fn cmd_profile(
+    path: &str,
+    format: &str,
+    runs: usize,
+    stage_filter: Option<&str>,
+    out: Option<&str>,
+) {
+    use crate::profiler::collector::{average_records, parse_profile_json, to_folded_stacks};
+    use crate::profiler::flamegraph::generate_svg;
+    use crate::profiler::report::{format_json_report, format_text_report};
+
     let src = match std::fs::read_to_string(path) {
         Ok(s) => s,
         Err(e) => {
@@ -9871,13 +9881,56 @@ pub fn cmd_profile(path: &str, out_fmt: &str) {
             process::exit(1);
         }
     };
-    crate::backend::vm::clear_profile_records();
-    run_fvc_bytes(&bytes, None, Some(path));
-    let json = crate::backend::vm::take_profile_dump_json();
-    if out_fmt == "json" {
-        println!("{}", json);
-    } else {
-        render_profile_table(&json);
+
+    let run_count = runs.max(1);
+    let mut all_runs = Vec::with_capacity(run_count);
+    for _ in 0..run_count {
+        crate::backend::vm::clear_profile_records();
+        run_fvc_bytes(&bytes, None, Some(path));
+        let json = crate::backend::vm::take_profile_dump_json();
+        all_runs.push(parse_profile_json(&json));
+    }
+
+    let mut records = average_records(all_runs);
+
+    if let Some(filter) = stage_filter {
+        records.retain(|r| r.name == filter);
+    }
+
+    match format {
+        "flamegraph" => {
+            let folded = to_folded_stacks(&records);
+            match generate_svg(&folded) {
+                Ok(svg) => {
+                    let svg_path = out.unwrap_or("flamegraph.svg");
+                    if let Err(e) = std::fs::write(svg_path, &svg) {
+                        eprintln!("error: cannot write '{}': {}", svg_path, e);
+                        process::exit(1);
+                    }
+                    println!("[fav] flamegraph written to {} ({} bytes)", svg_path, svg.len());
+                }
+                Err(e) => {
+                    eprintln!("error: {}", e);
+                    process::exit(1);
+                }
+            }
+        }
+        "json" => {
+            println!("{}", format_json_report(&records));
+        }
+        "text" => {
+            print!("{}", format_text_report(&records, path));
+        }
+        // legacy "table" or unknown → fall back to table renderer
+        other => {
+            if other == "json" {
+                let json = crate::backend::vm::take_profile_dump_json();
+                println!("{}", json);
+            } else {
+                let json = crate::backend::vm::take_profile_dump_json();
+                render_profile_table(&json);
+            }
+        }
     }
 }
 
@@ -30375,6 +30428,77 @@ public fn main() -> Unit !Io {
     }
 }
 
+// ── v198000_tests (v19.8.0) — フレームグラフ生成 ─────────────────────────────
+#[cfg(test)]
+#[cfg(not(target_arch = "wasm32"))]
+mod v198000_tests {
+    use crate::profiler::collector::{StageRecord, parse_profile_json, to_folded_stacks};
+    use crate::profiler::flamegraph::generate_svg;
+    use crate::profiler::report::{format_json_report, format_text_report};
+
+    fn sample_records() -> Vec<StageRecord> {
+        vec![
+            StageRecord { name: "LoadCsv".into(),   elapsed_ms: 45  },
+            StageRecord { name: "Transform".into(),  elapsed_ms: 210 },
+            StageRecord { name: "Save".into(),       elapsed_ms: 30  },
+        ]
+    }
+
+    #[test]
+    fn version_is_19_8_0() {
+        assert!(
+            include_str!("../Cargo.toml").contains("19.8.0"),
+            "Cargo.toml should contain version 19.8.0"
+        );
+    }
+
+    #[test]
+    fn profile_flamegraph_generates_svg() {
+        let folded = to_folded_stacks(&sample_records());
+        assert!(!folded.is_empty(), "folded stacks should not be empty");
+        let svg = generate_svg(&folded).expect("generate_svg should succeed");
+        let has_svg_tag = svg.windows(4).any(|w| w == b"<svg");
+        assert!(has_svg_tag, "output should contain <svg tag, got {} bytes", svg.len());
+    }
+
+    #[test]
+    fn profile_text_output() {
+        let report = format_text_report(&sample_records(), "test.fav");
+        assert!(report.contains("Transform"), "report should contain stage name");
+        assert!(
+            report.contains("73") || report.contains("74"),
+            "report should show ~74% for Transform: {report}"
+        );
+    }
+
+    #[test]
+    fn profile_json_output() {
+        let json = format_json_report(&sample_records());
+        assert!(json.contains("\"pct\""),       "json should have pct field");
+        assert!(json.contains("\"stage\""),     "json should have stage field");
+        assert!(json.contains("\"Transform\""), "json should have stage name");
+        let parsed: serde_json::Value = serde_json::from_str(&json)
+            .expect("format_json_report should produce valid JSON");
+        assert!(parsed.is_array(), "json report should be an array");
+    }
+
+    #[test]
+    fn profile_hot_path_detected() {
+        let report = format_text_report(&sample_records(), "test.fav");
+        assert!(
+            report.contains("HOT PATH"),
+            "slowest stage should be marked HOT PATH: {report}"
+        );
+        let transform_line = report.lines()
+            .find(|l| l.contains("Transform"))
+            .unwrap_or("");
+        assert!(
+            transform_line.contains("HOT PATH"),
+            "Transform line should have HOT PATH marker: '{transform_line}'"
+        );
+    }
+}
+
 // ── v197000_tests (v19.7.0) — 事前コンパイルキャッシュ ─────────────────────
 #[cfg(test)]
 mod v197000_tests {
@@ -30382,6 +30506,7 @@ mod v197000_tests {
     use crate::driver::{cmd_compile_to_bytes, cmd_run_precompiled_bytes};
 
     #[test]
+    #[ignore]
     fn version_is_19_7_0() {
         assert!(
             include_str!("../Cargo.toml").contains("19.7.0"),

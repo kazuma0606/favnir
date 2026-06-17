@@ -10225,7 +10225,7 @@ fn extract_top_level_names(src: &str) -> Vec<String> {
         .collect()
 }
 
-pub fn handle_load_cmd(path: &str, session: &mut ReplSession) {
+fn handle_load_cmd(path: &str, session: &mut ReplSession) {
     let src = match std::fs::read_to_string(path) {
         Ok(s) => s,
         Err(e) => { eprintln!("error: cannot read '{}': {}", path, e); return; }
@@ -10254,7 +10254,7 @@ pub fn handle_load_cmd(path: &str, session: &mut ReplSession) {
     }
 }
 
-pub fn handle_paste_block(src: &str, session: &mut ReplSession) {
+fn handle_paste_block(src: &str, session: &mut ReplSession) {
     let trimmed = src.trim();
     if trimmed.is_empty() { return; }
     if is_definition(trimmed) {
@@ -29238,7 +29238,7 @@ pub fn cmd_generate_api(source: &str, format: &str, as_json: bool, out: Option<&
 // ── v18.8.0: fav api-serve — route table + HTTP server ───────────────────────
 
 #[derive(Debug, Clone)]
-enum PathSegment {
+pub enum PathSegment {
     Literal(String),
     Param(String),
 }

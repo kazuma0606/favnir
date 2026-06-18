@@ -167,8 +167,8 @@ fn add_timestamp<R with { id: Int }>(row: R) -> R & { timestamp: String } {
 }
 
 // 使用例: 型が違うレコードに同じ関数を適用できる
-let user_with_ts  = add_timestamp({ id: 1, name: "Alice" })
-let order_with_ts = add_timestamp({ id: 42, amount: 100.0, status: "pending" })
+bind user_with_ts  <- add_timestamp({ id: 1, name: "Alice" })
+bind order_with_ts <- add_timestamp({ id: 42, amount: 100.0, status: "pending" })
 // user_with_ts の型:  UserRow & { timestamp: String }
 // order_with_ts の型: OrderRow & { timestamp: String }
 // → 呼び出し元はエラーメッセージでもこの形式で型を確認できる
@@ -189,7 +189,7 @@ fn validate_user<R with { id: Int, email: String }>(row: R) -> Result<R, String>
 // パイプラインでの活用（戻り型を & で明示）
 stage Enrich<R with { id: Int, created_at: String }>(rows: List<R>) -> List<R & { age_days: Int }> {
   Result.ok(List.map(rows, |row| {
-    let age = DateTime.diff_days(DateTime.parse(row.created_at), DateTime.now())
+    bind age <- DateTime.diff_days(DateTime.parse(row.created_at), DateTime.now())
     { ...row, age_days: age }
   }))
 }
@@ -265,7 +265,7 @@ fn divide(a: Int, b: Int where { b != 0 }) -> Int {
 }
 
 fn process(rows: List<Row> where { List.length(rows) > 0 }) -> Result<Summary, String> {
-  let head = List.head(rows)
+  bind head <- List.head(rows)
   ...
 }
 
@@ -462,8 +462,8 @@ fn do_work() -> Result<Int, String> !Db {
 // コンパイルエラー例
 fn wrong_usage() -> Result<Int, String> !Db {
   bind conn <- Postgres.connect()
-  let _ = Postgres.query_with_conn(conn, "SELECT 1", [])
-  let _ = Postgres.query_with_conn(conn, "SELECT 2", [])  // E0332: conn は既に消費済み
+  bind _ <- Postgres.query_with_conn(conn, "SELECT 1", [])
+  bind _ <- Postgres.query_with_conn(conn, "SELECT 2", [])  // E0332: conn は既に消費済み
   Result.ok(0)
 }
 ```
@@ -599,14 +599,14 @@ fn process_batch<T, const N: Int where { N > 0 }>(batch: FixedBatch<T, N>) -> Li
 stage ProcessBatch<const BATCH_SIZE: Int where { BATCH_SIZE > 0 }>(
   rows: List<Row>
 ) -> List<Output> {
-  let batches = List.chunk(rows, BATCH_SIZE)
+  bind batches <- List.chunk(rows, BATCH_SIZE)
   Result.ok(List.flat_map(batches, process_chunk))
 }
 
 // 使用例: 型引数でサイズを指定
-let result = process_batch::<100>(my_batch)
+bind result <- process_batch::<100>(my_batch)
 // BATCH_SIZE = 0 を渡すと E0335: const constraint violation
-let bad = process_batch::<0>(my_batch)  // E0335
+bind bad <- process_batch::<0>(my_batch)  // E0335
 ```
 
 **実装内容:**

@@ -1,19 +1,4 @@
 {
-  "hooks": {
-    "PreToolUse": [
-      {
-        "matcher": "Bash",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node \"C:/Users/yoshi/favnir/.claude/hooks/pre-commit.js\"",
-            "timeout": 130,
-            "statusMessage": "Running clippy pre-commit check..."
-          }
-        ]
-      }
-    ]
-  },
   "permissions": {
     "allow": [
       "Bash(cargo build:*)",
@@ -61,7 +46,30 @@
       "Bash(MSYS_NO_PATHCONV=1 docker build -t \"$ECR:latest\" .)",
       "Bash(MSYS_NO_PATHCONV=1 docker push \"$ECR:latest\")",
       "Bash(docker build:*)",
-      "Bash(docker push:*)"
+      "Bash(docker push:*)",
+      "Bash(do echo:*)",
+      "Read(//c/Users/yoshi/favnir/**)",
+      "Bash(./target/debug/fav.exe check:*)",
+      "Bash(target/debug/fav.exe check:*)",
+      "Bash(REGION=\"ap-northeast-1\")",
+      "Bash(ACCOUNT=\"847333136058\")",
+      "Bash(ECR_V2=\"$ACCOUNT.dkr.ecr.$REGION.amazonaws.com/crosscloud-verifier-v2:latest\")",
+      "Bash(docker buildx:*)"
+    ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"C:/Users/yoshi/favnir/.claude/hooks/pre-commit.js\"",
+            "timeout": 130,
+            "statusMessage": "Running clippy pre-commit check..."
+          }
+        ]
+      }
     ]
   }
 }

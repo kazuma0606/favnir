@@ -127,7 +127,7 @@ Branch: master
 
 - [x] P-1: `cargo test v163000` → 6/6 PASS 最終確認
 - [x] P-2: `cargo test` → 1589 PASS（v163000_tests 6/6 含む）
-- [ ] P-3: コミット
+- [x] P-3: コミット
 
 ---
 

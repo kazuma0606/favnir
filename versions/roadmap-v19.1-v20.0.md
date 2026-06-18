@@ -100,7 +100,7 @@ stage Transform(rows: List<RawRow>) -> List<OutputRow> {
 // ステートフル stage（chunk 間で状態を持つ）
 #[stateful]
 stage RunningAvg(rows: List<Row>, state: AvgState) -> Pair<List<Row>, AvgState> {
-  let new_state = update_state(state, rows)
+  bind new_state <- update_state(state, rows)
   Result.ok(Pair(annotate_with_avg(rows, new_state), new_state))
 }
 ```
@@ -411,8 +411,8 @@ fn write_to_parquet(rows: ArrowBatch<OutputRow>, path: String) -> Result<Unit, S
 
 // 通常の List<T> との互換レイヤー
 fn process(rows: List<OutputRow>) -> Result<Unit, String> {
-  let batch = ArrowBatch.from_list(rows)   // List → Arrow 変換
-  let list  = ArrowBatch.to_list(batch)    // Arrow → List 変換
+  bind batch <- ArrowBatch.from_list(rows)  // List → Arrow 変換
+  bind list  <- ArrowBatch.to_list(batch)   // Arrow → List 変換
   ...
 }
 ```

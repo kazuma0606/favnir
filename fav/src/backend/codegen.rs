@@ -87,6 +87,28 @@ pub enum Opcode {
     /// Pops a bool from the stack; if false, panics with a refinement error message.
     /// The name_str_idx points to the param name in str_table.
     RefinementAssert = 0x63,
+    // ── Superinstructions (v20.2.0) — IR-level fused opcodes ────────────────
+    /// Layout: opcode(1) + slot_a(u16) + slot_b(u16) = 5 bytes
+    /// stack[base+a] + stack[base+b] → push
+    AddLL = 0xA0,
+    /// stack[base+a] - stack[base+b] → push
+    SubLL = 0xA1,
+    /// stack[base+a] * stack[base+b] → push
+    MulLL = 0xA2,
+    /// stack[base+a] + constants[k] → push (k = Constant::Int)
+    AddLC = 0xA3,
+    /// stack[base+a] - constants[k] → push
+    SubLC = 0xA4,
+    /// stack[base+a] <= constants[k] → push Bool
+    LeLC = 0xA5,
+    /// stack[base+a] < constants[k] → push Bool
+    LtLC = 0xA6,
+    /// stack[base+a] == constants[k] → push Bool
+    EqLC = 0xA7,
+    /// stack[base+a].field[str_table[f]] → push (str remap applies to operand_b)
+    GetFieldL = 0xA8,
+    /// stack[base+src] → stack[base+dst] (copy, no stack push/pop)
+    MoveLocal = 0xA9,
 }
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -254,12 +276,55 @@ pub fn emit_expr(expr: &IRExpr, cg: &mut Codegen) {
         }
         IRExpr::Match(scrutinee, arms, _) => emit_match(scrutinee, arms, cg),
         IRExpr::FieldAccess(obj, field, _) => {
-            emit_expr(obj, cg);
-            let idx = cg.intern_str(field);
-            cg.emit_opcode(Opcode::GetField);
-            cg.emit_u16(idx);
+            if let IRExpr::Local(a, _) = obj.as_ref() {
+                let f_idx = cg.intern_str(field);
+                cg.emit_opcode(Opcode::GetFieldL);
+                cg.emit_u16(*a);
+                cg.emit_u16(f_idx);
+            } else {
+                emit_expr(obj, cg);
+                let idx = cg.intern_str(field);
+                cg.emit_opcode(Opcode::GetField);
+                cg.emit_u16(idx);
+            }
         }
         IRExpr::BinOp(op, left, right, _) => {
+            // Superinstruction fusion: Local(a) op Local(b)
+            if let (IRExpr::Local(a, _), IRExpr::Local(b, _)) = (left.as_ref(), right.as_ref()) {
+                let super_op = match op {
+                    BinOp::Add => Some(Opcode::AddLL),
+                    BinOp::Sub => Some(Opcode::SubLL),
+                    BinOp::Mul => Some(Opcode::MulLL),
+                    _ => None,
+                };
+                if let Some(sop) = super_op {
+                    cg.emit_opcode(sop);
+                    cg.emit_u16(*a);
+                    cg.emit_u16(*b);
+                    return;
+                }
+            }
+            // Superinstruction fusion: Local(a) op Lit(Int(k))
+            if let (IRExpr::Local(a, _), IRExpr::Lit(Lit::Int(k), _)) =
+                (left.as_ref(), right.as_ref())
+            {
+                let super_op = match op {
+                    BinOp::Add => Some(Opcode::AddLC),
+                    BinOp::Sub => Some(Opcode::SubLC),
+                    BinOp::LtEq => Some(Opcode::LeLC),
+                    BinOp::Lt => Some(Opcode::LtLC),
+                    BinOp::Eq => Some(Opcode::EqLC),
+                    _ => None,
+                };
+                if let Some(sop) = super_op {
+                    let k_idx = cg.const_idx(Constant::Int(*k));
+                    cg.emit_opcode(sop);
+                    cg.emit_u16(*a);
+                    cg.emit_u16(k_idx);
+                    return;
+                }
+            }
+            // fallback: generic codegen
             emit_expr(left, cg);
             emit_expr(right, cg);
             cg.emit_opcode(match op {
@@ -332,9 +397,15 @@ pub fn emit_expr(expr: &IRExpr, cg: &mut Codegen) {
 pub fn emit_stmt(stmt: &IRStmt, cg: &mut Codegen) {
     match stmt {
         IRStmt::Bind(slot, expr) => {
-            emit_expr(expr, cg);
-            cg.emit_opcode(Opcode::StoreLocal);
-            cg.emit_u16(*slot);
+            if let IRExpr::Local(src, _) = expr {
+                cg.emit_opcode(Opcode::MoveLocal);
+                cg.emit_u16(*src);
+                cg.emit_u16(*slot);
+            } else {
+                emit_expr(expr, cg);
+                cg.emit_opcode(Opcode::StoreLocal);
+                cg.emit_u16(*slot);
+            }
         }
         IRStmt::LegacyBind(slot, expr) => {
             emit_expr(expr, cg);
@@ -751,6 +822,24 @@ fn remap_string_operands(code: &mut [u8], str_remap: &[u16]) {
                 // Layout: opcode(1) + name_str_idx(2)
                 remap_u16_at(code, ip + 1, str_remap);
                 ip += 3;
+            }
+            // Superinstructions (v20.2.0): opcode(1) + a(2) + b(2) = 5 bytes, no str remap
+            x if x == Opcode::AddLL as u8
+                || x == Opcode::SubLL as u8
+                || x == Opcode::MulLL as u8
+                || x == Opcode::AddLC as u8
+                || x == Opcode::SubLC as u8
+                || x == Opcode::LeLC as u8
+                || x == Opcode::LtLC as u8
+                || x == Opcode::EqLC as u8
+                || x == Opcode::MoveLocal as u8 =>
+            {
+                ip += 5;
+            }
+            // GetFieldL: opcode(1) + slot_a(2) + f_idx(2) — f_idx IS a str_table index
+            x if x == Opcode::GetFieldL as u8 => {
+                remap_u16_at(code, ip + 3, str_remap);
+                ip += 5;
             }
             _ => break,
         }

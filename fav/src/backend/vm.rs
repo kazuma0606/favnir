@@ -2064,6 +2064,134 @@ impl VM {
                         }
                     }
                 }
+                // ─── Superinstructions (v20.2.0) ─────────────────────────────────
+                x if x == Opcode::AddLL as u8 => {
+                    let a = Self::read_u16(function, frame)? as usize;
+                    let b = Self::read_u16(function, frame)? as usize;
+                    let base = frame.base; // extract before closures to release mutable borrow
+                    let va = vm.stack.get(base + a).cloned()
+                        .ok_or_else(|| vm.error(artifact, "AddLL: slot a out of bounds"))?;
+                    let vb = vm.stack.get(base + b).cloned()
+                        .ok_or_else(|| vm.error(artifact, "AddLL: slot b out of bounds"))?;
+                    vm.stack.push(apply_numeric_binop(va, vb, |x, y| x + y, |x, y| x + y, "add", artifact, &vm.frames)?);
+                }
+                x if x == Opcode::SubLL as u8 => {
+                    let a = Self::read_u16(function, frame)? as usize;
+                    let b = Self::read_u16(function, frame)? as usize;
+                    let base = frame.base;
+                    let va = vm.stack.get(base + a).cloned()
+                        .ok_or_else(|| vm.error(artifact, "SubLL: slot a out of bounds"))?;
+                    let vb = vm.stack.get(base + b).cloned()
+                        .ok_or_else(|| vm.error(artifact, "SubLL: slot b out of bounds"))?;
+                    vm.stack.push(apply_numeric_binop(va, vb, |x, y| x - y, |x, y| x - y, "sub", artifact, &vm.frames)?);
+                }
+                x if x == Opcode::MulLL as u8 => {
+                    let a = Self::read_u16(function, frame)? as usize;
+                    let b = Self::read_u16(function, frame)? as usize;
+                    let base = frame.base;
+                    let va = vm.stack.get(base + a).cloned()
+                        .ok_or_else(|| vm.error(artifact, "MulLL: slot a out of bounds"))?;
+                    let vb = vm.stack.get(base + b).cloned()
+                        .ok_or_else(|| vm.error(artifact, "MulLL: slot b out of bounds"))?;
+                    vm.stack.push(apply_numeric_binop(va, vb, |x, y| x * y, |x, y| x * y, "mul", artifact, &vm.frames)?);
+                }
+                x if x == Opcode::AddLC as u8 => {
+                    let a = Self::read_u16(function, frame)? as usize;
+                    let k_idx = Self::read_u16(function, frame)? as usize;
+                    let base = frame.base;
+                    let va = vm.stack.get(base + a).cloned()
+                        .ok_or_else(|| vm.error(artifact, "AddLC: slot out of bounds"))?;
+                    let vk = function.constants.get(k_idx).cloned()
+                        .map(constant_to_value)
+                        .ok_or_else(|| vm.error(artifact, "AddLC: constant out of bounds"))?;
+                    vm.stack.push(apply_numeric_binop(va, vk, |x, y| x + y, |x, y| x + y, "add", artifact, &vm.frames)?);
+                }
+                x if x == Opcode::SubLC as u8 => {
+                    let a = Self::read_u16(function, frame)? as usize;
+                    let k_idx = Self::read_u16(function, frame)? as usize;
+                    let base = frame.base;
+                    let va = vm.stack.get(base + a).cloned()
+                        .ok_or_else(|| vm.error(artifact, "SubLC: slot out of bounds"))?;
+                    let vk = function.constants.get(k_idx).cloned()
+                        .map(constant_to_value)
+                        .ok_or_else(|| vm.error(artifact, "SubLC: constant out of bounds"))?;
+                    vm.stack.push(apply_numeric_binop(va, vk, |x, y| x - y, |x, y| x - y, "sub", artifact, &vm.frames)?);
+                }
+                x if x == Opcode::LeLC as u8 => {
+                    let a = Self::read_u16(function, frame)? as usize;
+                    let k_idx = Self::read_u16(function, frame)? as usize;
+                    let base = frame.base;
+                    let va = vm.stack.get(base + a).cloned()
+                        .ok_or_else(|| vm.error(artifact, "LeLC: slot out of bounds"))?;
+                    let vk = function.constants.get(k_idx).cloned()
+                        .map(constant_to_value)
+                        .ok_or_else(|| vm.error(artifact, "LeLC: constant out of bounds"))?;
+                    vm.stack.push(compare_pair((va, vk), |a, b| a <= b, artifact, &vm.frames)?);
+                }
+                x if x == Opcode::LtLC as u8 => {
+                    let a = Self::read_u16(function, frame)? as usize;
+                    let k_idx = Self::read_u16(function, frame)? as usize;
+                    let base = frame.base;
+                    let va = vm.stack.get(base + a).cloned()
+                        .ok_or_else(|| vm.error(artifact, "LtLC: slot out of bounds"))?;
+                    let vk = function.constants.get(k_idx).cloned()
+                        .map(constant_to_value)
+                        .ok_or_else(|| vm.error(artifact, "LtLC: constant out of bounds"))?;
+                    vm.stack.push(compare_pair((va, vk), |a, b| a < b, artifact, &vm.frames)?);
+                }
+                x if x == Opcode::EqLC as u8 => {
+                    let a = Self::read_u16(function, frame)? as usize;
+                    let k_idx = Self::read_u16(function, frame)? as usize;
+                    let base = frame.base;
+                    let va = vm.stack.get(base + a).cloned()
+                        .ok_or_else(|| vm.error(artifact, "EqLC: slot out of bounds"))?;
+                    let vk = function.constants.get(k_idx).cloned()
+                        .map(constant_to_value)
+                        .ok_or_else(|| vm.error(artifact, "EqLC: constant out of bounds"))?;
+                    vm.stack.push(VMValue::Bool(va == vk));
+                }
+                x if x == Opcode::GetFieldL as u8 => {
+                    let a = Self::read_u16(function, frame)? as usize;
+                    let f_idx = Self::read_u16(function, frame)? as usize;
+                    let base = frame.base;
+                    let field_name = artifact.str_table.get(f_idx).cloned()
+                        .ok_or_else(|| vm.error(artifact, "GetFieldL: str_table index out of bounds"))?;
+                    let value = vm.stack.get(base + a).cloned()
+                        .ok_or_else(|| vm.error(artifact, "GetFieldL: local slot out of bounds"))?;
+                    match value {
+                        VMValue::Record(map) => {
+                            let v = map.get(&field_name).cloned()
+                                .ok_or_else(|| vm.error(artifact, &format!("GetFieldL: missing field `{field_name}`")))?;
+                            vm.stack.push(v);
+                        }
+                        VMValue::Builtin(ns) => {
+                            let full = format!("{}.{}", ns, field_name);
+                            let v = match full.as_str() {
+                                "Math.pi" => VMValue::Float(std::f64::consts::PI),
+                                "Math.e"  => VMValue::Float(std::f64::consts::E),
+                                _         => VMValue::Builtin(full),
+                            };
+                            vm.stack.push(v);
+                        }
+                        VMValue::VariantCtor(ns) => {
+                            vm.stack.push(VMValue::Builtin(format!("{}.{}", ns, field_name)));
+                        }
+                        other => return Err(vm.error(artifact,
+                            &format!("GetFieldL: expected Record/Builtin/VariantCtor, got {}", vmvalue_type_name(&other)))),
+                    }
+                }
+                x if x == Opcode::MoveLocal as u8 => {
+                    let src = Self::read_u16(function, frame)? as usize;
+                    let dst = Self::read_u16(function, frame)? as usize;
+                    let base = frame.base;
+                    let value = vm.stack.get(base + src).cloned()
+                        .ok_or_else(|| vm.error(artifact, "MoveLocal: src slot out of bounds"))?;
+                    let dst_idx = base + dst;
+                    if dst_idx >= vm.stack.len() {
+                        vm.stack.resize(dst_idx + 1, VMValue::Unit);
+                    }
+                    vm.stack[dst_idx] = value;
+                }
                 x if x == Opcode::JumpIfNotVariant as u8 => {
                     let name_idx = Self::read_u16(function, frame)? as usize;
                     let offset = Self::read_u16(function, frame)? as usize;

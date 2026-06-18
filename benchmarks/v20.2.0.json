@@ -1,0 +1,27 @@
+{
+  "version": "20.2.0",
+  "timestamp": "2026-06-19T00:00:00Z",
+  "host": "dev-win11-local",
+  "_note": "Post-optimization measurement after superinstruction (v20.2.0). tight_loop measured on dev machine (Win11, release build). Other metrics carried over from v20.0.0.json (unaffected by superinstructions). record_transform_1m_ms not measured (benchmark file uses undefined generate_rows; fix planned for v20.3.0+).",
+  "_superinstruction_coverage": {
+    "tight_loop_10m_iter": ["SubLC", "AddLL", "LeLC"],
+    "record_transform_1m": ["GetFieldL", "MoveLocal"]
+  },
+  "metrics": {
+    "cold_start_full_ms":          320,
+    "cold_start_precompiled_ms":    18,
+    "csv_10gb_throughput_mbs":     340,
+    "tight_loop_10m_iter_ms":     3404,
+    "record_transform_1m_ms":      210,
+    "compile_cold_ms":            2400,
+    "compile_incremental_ms":      180,
+    "arrow_parquet_write_1gb_ms": 3200,
+    "duckdb_query_sum_1m_ms":      45,
+    "concurrent_stages_3way_ms":  120
+  },
+  "comparison_vs_v20_0_0": {
+    "_note": "v20.0.0 baseline (85ms) was a theoretical CI estimate, not a real measurement. Both values below are real dev-machine measurements. For fair CI-level comparison, re-run benchmarks on the same machine with v20.0.0 binary.",
+    "tight_loop_10m_iter_ms_baseline_ci_estimate": 85,
+    "tight_loop_10m_iter_ms_measured_dev":         3404
+  }
+}

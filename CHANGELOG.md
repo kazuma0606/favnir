@@ -4,6 +4,21 @@ Favnir のバージョン履歴。形式は [Keep a Changelog](https://keepachan
 
 ---
 
+## [v20.2.0] — 2026-06-19 — スーパー命令（Superinstruction）
+
+### Added
+- `Opcode::AddLL / SubLL / MulLL / AddLC / SubLC / LeLC / LtLC / EqLC / GetFieldL / MoveLocal`
+  (0xA0〜0xA9) — IR レベルスーパー命令 10 種
+- `emit_expr / emit_stmt` が Local×Local・Local×Int リテラルのパターンで自動融合
+- `GetFieldL` が `FieldAccess(Local(a), field)` を 6→5 bytes に圧縮
+- `MoveLocal` が `Bind(dst, Local(src))` を 6→5 bytes に圧縮
+
+### Performance
+- `tight_loop_10m_iter`: ディスパッチ回数削減（+20〜30% 期待）
+- `record_transform_1m`: フィールドアクセスパターン改善（+10〜15% 期待）
+
+---
+
 ## [v20.1.0] — 2026-06-18 — ベンチマーク基盤整備
 
 ### Added

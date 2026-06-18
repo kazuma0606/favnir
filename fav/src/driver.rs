@@ -3150,6 +3150,16 @@ fn decode_opcode(byte: u8) -> Option<(&'static str, usize)> {
         x if x == Opcode::Swap as u8 => Opcode::Swap,
         x if x == Opcode::CallNamed as u8 => Opcode::CallNamed,
         x if x == Opcode::JumpIfNotVariantC as u8 => Opcode::JumpIfNotVariantC,
+        x if x == Opcode::AddLL as u8 => Opcode::AddLL,
+        x if x == Opcode::SubLL as u8 => Opcode::SubLL,
+        x if x == Opcode::MulLL as u8 => Opcode::MulLL,
+        x if x == Opcode::AddLC as u8 => Opcode::AddLC,
+        x if x == Opcode::SubLC as u8 => Opcode::SubLC,
+        x if x == Opcode::LeLC as u8 => Opcode::LeLC,
+        x if x == Opcode::LtLC as u8 => Opcode::LtLC,
+        x if x == Opcode::EqLC as u8 => Opcode::EqLC,
+        x if x == Opcode::GetFieldL as u8 => Opcode::GetFieldL,
+        x if x == Opcode::MoveLocal as u8 => Opcode::MoveLocal,
         _ => return None,
     };
 
@@ -3205,6 +3215,17 @@ fn decode_opcode(byte: u8) -> Option<(&'static str, usize)> {
         Opcode::ListGet => ("ListGet", 1),
         Opcode::ListDrop => ("ListDrop", 1),
         Opcode::RefinementAssert => ("RefinementAssert", 3), // 1 opcode + name_str_idx(2)
+        // Superinstructions (v20.2.0): opcode(1) + a(u16) + b(u16) = 5 bytes
+        Opcode::AddLL => ("AddLL", 5),
+        Opcode::SubLL => ("SubLL", 5),
+        Opcode::MulLL => ("MulLL", 5),
+        Opcode::AddLC => ("AddLC", 5),
+        Opcode::SubLC => ("SubLC", 5),
+        Opcode::LeLC => ("LeLC", 5),
+        Opcode::LtLC => ("LtLC", 5),
+        Opcode::EqLC => ("EqLC", 5),
+        Opcode::GetFieldL => ("GetFieldL", 5),
+        Opcode::MoveLocal => ("MoveLocal", 5),
     };
 
     Some((name, width))
@@ -7731,7 +7752,7 @@ public fn main() -> String {
         assert!(info.contains("$closure0 [fn#"));
         assert!(info.contains("=> fn#"));
         assert!(info.contains("main [fn#0] => fn#0 main @L"));
-        assert!(info.contains("opcodes: LoadLocal="));
+        assert!(info.contains("AddLL="));
         assert!(info.contains("consts: #0=Str(\"!\""));
     }
 
@@ -30551,10 +30572,68 @@ mod v200000_tests {
     }
 }
 
+// ── v202000_tests (v20.2.0) — スーパー命令（Superinstruction） ──────────────
+#[cfg(test)]
+mod v202000_tests {
+    use crate::backend::artifact::FvcArtifact;
+    use crate::backend::codegen::Opcode;
+    use crate::backend::vm::VM;
+    use crate::value::Value;
+
+    fn compile_and_run_si(name: &str, src: &str) -> Value {
+        // Use the Rust codegen path directly so superinstructions are emitted.
+        let prog = crate::frontend::parser::Parser::parse_str(src, &format!("{name}.fav"))
+            .unwrap_or_else(|e| panic!("parse error: {:?}", e));
+        let ir = crate::middle::compiler::compile_program(&prog);
+        let artifact = crate::backend::codegen::codegen_program(&ir);
+        let fn_idx = artifact.fn_idx_by_name("main").expect("main not found");
+        VM::run(&artifact, fn_idx, vec![]).expect("VM::run failed")
+    }
+
+    #[test]
+    fn version_is_20_2_0() {
+        let cargo = include_str!("../Cargo.toml");
+        assert!(cargo.contains("20.2.0"), "Cargo.toml should have version 20.2.0");
+    }
+
+    #[test]
+    fn addll_opcode_value() {
+        assert_eq!(Opcode::AddLL as u8, 0xA0, "AddLL should be 0xA0");
+    }
+
+    #[test]
+    fn getfieldl_opcode_value() {
+        assert_eq!(Opcode::GetFieldL as u8, 0xA8, "GetFieldL should be 0xA8");
+    }
+
+    #[test]
+    fn superinsn_add_local_local() {
+        let result = compile_and_run_si(
+            "add_local_local",
+            "fn add(a: Int, b: Int) -> Int { a + b } public fn main() -> Int { add(3, 4) }",
+        );
+        assert_eq!(result, Value::Int(7), "add(3, 4) should be 7");
+    }
+
+    #[test]
+    fn superinsn_tight_loop() {
+        let src = r#"
+fn tight_loop(n: Int, acc: Int) -> Int {
+  if n <= 0 { acc }
+  else { tight_loop(n - 1, acc + n) }
+}
+public fn main() -> Int { tight_loop(100, 0) }
+"#;
+        let result = compile_and_run_si("tight_loop", src);
+        assert_eq!(result, Value::Int(5050), "tight_loop(100, 0) should be 5050");
+    }
+}
+
 // ── v201000_tests (v20.1.0) — ベンチマーク基盤整備 ──────────────────────────
 #[cfg(test)]
 mod v201000_tests {
     #[test]
+    #[ignore]
     fn version_is_20_1_0() {
         let cargo = include_str!("../Cargo.toml");
         assert!(cargo.contains("20.1.0"), "Cargo.toml should have version 20.1.0");

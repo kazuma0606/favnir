@@ -1,0 +1,6 @@
+fn main() -> Result<Unit, String> {
+  bind t0 <- IO.time_ms()
+  bind _  <- seq ParBench = par [StageA, StageB, StageC] |> Merge
+  bind t1 <- IO.time_ms()
+  IO.println(f"concurrent_stages_3way_ms={t1 - t0}")
+}

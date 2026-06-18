@@ -1,0 +1,16 @@
+import rune "io"
+import rune "csv"
+
+// CI=true のとき 1MB サンプルで代用
+fn main() -> Result<Unit, String> {
+  bind is_ci    <- IO.env_or("CI", "false")
+  bind path     <- if is_ci == "true" {
+    Result.ok("benchmarks/fixtures/sample_1mb.csv")
+  } else {
+    Result.ok("benchmarks/fixtures/sample_10gb.csv")
+  }
+  bind t0 <- IO.time_ms()
+  bind _  <- Csv.stream_file(path, |_row| Result.ok(()))
+  bind t1 <- IO.time_ms()
+  IO.println(f"csv_10gb_throughput_mbs={t1 - t0}")
+}

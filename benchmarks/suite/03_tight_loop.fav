@@ -1,0 +1,11 @@
+fn tight_loop(n: Int, acc: Int) -> Int {
+  if n <= 0 { acc }
+  else { tight_loop(n - 1, acc + n) }
+}
+
+fn main() -> Result<Unit, String> {
+  bind t0  <- IO.time_ms()
+  bind _   <- tight_loop(10_000_000, 0)
+  bind t1  <- IO.time_ms()
+  IO.println(f"tight_loop_10m_iter_ms={t1 - t0}")
+}

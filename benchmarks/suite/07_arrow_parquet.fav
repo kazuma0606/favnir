@@ -1,0 +1,13 @@
+fn main() -> Result<Unit, String> {
+  bind rows <- generate_rows(1_000_000)
+  bind batch <- ArrowBatch.from_list(rows)
+  match batch {
+    err(e) => Result.err(e)
+    ok(b) => {
+      bind t0 <- IO.time_ms()
+      bind _  <- ArrowBatch.write_parquet(b, "benchmarks/fixtures/out_bench.parquet")
+      bind t1 <- IO.time_ms()
+      IO.println(f"arrow_parquet_write_1gb_ms={t1 - t0}")
+    }
+  }
+}

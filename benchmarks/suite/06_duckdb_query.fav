@@ -1,0 +1,10 @@
+import rune "duckdb"
+
+fn main() -> Result<Unit, String> {
+  bind db  <- DuckDb.open(":memory:")
+  bind _   <- DuckDb.execute(db, "CREATE TABLE t AS SELECT * FROM range(1000000)")
+  bind t0  <- IO.time_ms()
+  bind _   <- DuckDb.query(db, "SELECT sum(range) FROM t")
+  bind t1  <- IO.time_ms()
+  IO.println(f"duckdb_query_sum_1m_ms={t1 - t0}")
+}

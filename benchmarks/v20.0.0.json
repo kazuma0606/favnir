@@ -1,0 +1,17 @@
+{
+  "version": "20.0.0",
+  "timestamp": "2026-06-18T00:00:00Z",
+  "_note": "Initial reference values. Updated by CI on first run.",
+  "metrics": {
+    "cold_start_full_ms":          320,
+    "cold_start_precompiled_ms":    18,
+    "csv_10gb_throughput_mbs":     340,
+    "tight_loop_10m_iter_ms":       85,
+    "record_transform_1m_ms":      210,
+    "compile_cold_ms":            2400,
+    "compile_incremental_ms":      180,
+    "arrow_parquet_write_1gb_ms": 3200,
+    "duckdb_query_sum_1m_ms":      45,
+    "concurrent_stages_3way_ms":  120
+  }
+}

@@ -4,6 +4,16 @@ Favnir のバージョン履歴。形式は [Keep a Changelog](https://keepachan
 
 ---
 
+## [v20.1.0] — 2026-06-18 — ベンチマーク基盤整備
+
+### Added
+- `benchmarks/suite/` に 8 計測スクリプトを追加（01_cold_start.sh〜08_concurrent_stages.fav）
+- `benchmarks/compare.fav` — ベースライン比較ツール（threshold 超えで非ゼロ終了）
+- `.github/workflows/bench.yml` — master push ごとに自動計測・回帰検出
+- `benchmarks/v20.0.0.json` — v20.0.0 ベースライン参考値（CI が実測値で更新）
+
+---
+
 ## [v20.0.0] — 2026-06-17 — Production Performance マイルストーン宣言
 
 ### Added

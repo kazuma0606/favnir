@@ -1,0 +1,82 @@
+import rune "json"
+import rune "io"
+
+fn parse_flag(args: List<String>, flag: String) -> Result<String, String> {
+  bind idx <- List.find_index(args, |a| a == flag)
+  match List.get(args, idx + 1) {
+    ok(v)  => Result.ok(v)
+    err(_) => Result.err(f"missing value for {flag}")
+  }
+}
+
+fn has_flag(args: List<String>, flag: String) -> Bool {
+  List.any(args, |a| a == flag)
+}
+
+fn pct_change(baseline: Float, current: Float) -> Float {
+  if baseline == 0.0 { 0.0 }
+  else { (current - baseline) / baseline * 100.0 }
+}
+
+fn check_regressions(
+  b_metrics: Map<String, Float>,
+  c_metrics: Map<String, Float>,
+  threshold: Int
+) -> List<String> {
+  bind pairs <- Map.entries(c_metrics)
+  // filter_map: ok(v) で keep、err(()) で除外
+  List.filter_map(pairs, |kv| {
+    bind key <- kv.key
+    bind cur <- kv.value
+    match Map.get(b_metrics, key) {
+      err(_)   => err(())  // ベースラインにないキーはスキップ
+      ok(base) =>
+        bind pct <- pct_change(base, cur)
+        if pct > Float.from_int(threshold) {
+          ok(f"{key}: +{pct}% (baseline={base}, current={cur})")
+        } else { err(()) }  // 閾値内 → スキップ
+    }
+  })
+}
+
+fn write_results_md(data: JsonValue) -> Result<Unit, String> {
+  bind version <- Json.get_string(data, "version")
+  bind ts      <- Json.get_string(data, "timestamp")
+  bind metrics <- Json.get_object(data, "metrics")
+  bind lines   <- Map.entries(metrics)
+    |> List.map(|kv| f"| {kv.key} | {kv.value} |")
+  bind body    <- String.join(lines, "\n")
+  bind content <- f"# Benchmark Results\n\nVersion: {version} / {ts}\n\n| Metric | Value |\n|---|---|\n{body}\n"
+  IO.write_file("benchmarks/results.md", content)
+}
+
+fn main() -> Result<Unit, String> {
+  bind args      <- IO.args()
+  bind baseline  <- parse_flag(args, "--baseline")
+  bind current   <- parse_flag(args, "--current")
+  bind thr_str   <- parse_flag(args, "--threshold")
+  bind threshold <- Int.parse(thr_str)
+  bind emit_md   <- Result.ok(has_flag(args, "--emit-md"))
+
+  bind b_json  <- IO.read_file(baseline)
+  bind c_json  <- IO.read_file(current)
+  bind b_data  <- Json.parse(b_json)
+  bind c_data  <- Json.parse(c_json)
+
+  if emit_md {
+    bind _ <- write_results_md(c_data)
+    ()
+  } else { () }
+
+  bind b_metrics <- Json.get_object(b_data, "metrics")
+  bind c_metrics <- Json.get_object(c_data, "metrics")
+  bind regressions <- Result.ok(check_regressions(b_metrics, c_metrics, threshold))
+
+  if List.length(regressions) > 0 {
+    bind _ <- IO.println(f"REGRESSION: {List.length(regressions)} metric(s) exceeded {threshold}% threshold:")
+    bind _ <- List.for_each(regressions, |r| IO.println(f"  {r}"))
+    Result.err("benchmark regression detected")
+  } else {
+    IO.println(f"OK: all metrics within {threshold}% of baseline.")
+  }
+}

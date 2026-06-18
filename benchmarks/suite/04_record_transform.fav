@@ -1,0 +1,16 @@
+import rune "io"
+
+type Row = { id: Int, name: String, amount: Float }
+type Out = { id: Int, name: String, amount: Float, label: String }
+
+fn transform_row(r: Row) -> Out {
+  { id: r.id, name: r.name, amount: r.amount * 1.1, label: "processed" }
+}
+
+fn main() -> Result<Unit, String> {
+  bind rows <- generate_rows(1_000_000)
+  bind t0   <- IO.time_ms()
+  bind _    <- List.map(rows, transform_row)
+  bind t1   <- IO.time_ms()
+  IO.println(f"record_transform_1m_ms={t1 - t0}")
+}

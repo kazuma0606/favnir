@@ -30507,6 +30507,7 @@ mod v200000_tests {
     use std::path::Path;
 
     #[test]
+    #[ignore]
     fn version_is_20_0_0() {
         assert!(
             include_str!("../Cargo.toml").contains("20.0.0"),
@@ -30547,6 +30548,62 @@ mod v200000_tests {
             Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../benchmarks")).exists(),
             "benchmarks/ directory should exist"
         );
+    }
+}
+
+// ── v201000_tests (v20.1.0) — ベンチマーク基盤整備 ──────────────────────────
+#[cfg(test)]
+mod v201000_tests {
+    #[test]
+    fn version_is_20_1_0() {
+        let cargo = include_str!("../Cargo.toml");
+        assert!(cargo.contains("20.1.0"), "Cargo.toml should have version 20.1.0");
+    }
+
+    #[test]
+    fn bench_suite_files_exist() {
+        let suite = concat!(env!("CARGO_MANIFEST_DIR"), "/../benchmarks/suite");
+        for f in &[
+            "run_all.sh",
+            "01_cold_start.sh",
+            "02_csv_10gb.fav",
+            "03_tight_loop.fav",
+            "04_record_transform.fav",
+            "05_compile_time.sh",
+            "06_duckdb_query.fav",
+            "07_arrow_parquet.fav",
+            "08_concurrent_stages.fav",
+        ] {
+            assert!(
+                std::path::Path::new(&format!("{suite}/{f}")).exists(),
+                "benchmarks/suite/{f} should exist"
+            );
+        }
+    }
+
+    #[test]
+    fn bench_compare_fav_exists() {
+        assert!(
+            std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../benchmarks/compare.fav")).exists(),
+            "benchmarks/compare.fav should exist"
+        );
+    }
+
+    #[test]
+    fn bench_workflow_exists() {
+        assert!(
+            std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../.github/workflows/bench.yml")).exists(),
+            ".github/workflows/bench.yml should exist"
+        );
+    }
+
+    #[test]
+    fn bench_baseline_valid_json() {
+        let path = std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../benchmarks/v20.0.0.json"));
+        assert!(path.exists(), "benchmarks/v20.0.0.json should exist");
+        let content = std::fs::read_to_string(path).unwrap();
+        assert!(content.contains("\"metrics\""),
+            "v20.0.0.json should contain metrics field");
     }
 }
 

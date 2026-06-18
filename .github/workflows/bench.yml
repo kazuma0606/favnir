@@ -1,0 +1,41 @@
+name: Benchmark
+
+on:
+  push:
+    branches: [master]
+
+jobs:
+  bench:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            fav/target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('fav/Cargo.lock') }}
+
+      - name: Build release
+        run: cargo build --release -j 8
+        working-directory: fav
+
+      - name: Run benchmarks
+        env:
+          CI: "true"
+          FAV: ./fav/target/release/fav
+        run: |
+          bash benchmarks/suite/run_all.sh --format json > benchmarks/latest.json
+          cat benchmarks/latest.json
+
+      - name: Compare with baseline
+        env:
+          FAV: ./fav/target/release/fav
+        run: |
+          $FAV run benchmarks/compare.fav \
+            -- --baseline benchmarks/v20.0.0.json \
+               --current  benchmarks/latest.json \
+               --threshold 10 \
+               --emit-md

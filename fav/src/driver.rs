@@ -4232,6 +4232,7 @@ pub fn cmd_test(
             };
             use std::collections::HashMap;
 
+            // TODO: expose as --coverage-threshold <pct> CLI flag in a future version
             let threshold = 80.0f64;
             let mut summary = CoverageSummary::default();
 
@@ -4253,15 +4254,37 @@ pub fn cmd_test(
                     full_report.push_str(&text_report);
                     full_report.push('\n');
 
-                    if let Ok(prog) = crate::frontend::parser::Parser::parse_str(&source, path) {
-                        let ir = compile_program(&prog);
-                        let fn_report = format_coverage_report_by_fn(&ir, &all_covered);
-                        if !fn_report.is_empty() {
-                            println!("{}", fn_report);
-                            full_report.push_str(&fn_report);
-                            full_report.push('\n');
-                        }
-                    }
+                    // fn カバレッジデータを収集
+                    let (fn_hits, fn_covered_count, fn_total_count) =
+                        if let Ok(prog) = crate::frontend::parser::Parser::parse_str(&source, path) {
+                            let ir = compile_program(&prog);
+                            let fn_report = format_coverage_report_by_fn(&ir, &all_covered);
+                            if !fn_report.is_empty() {
+                                println!("{}", fn_report);
+                                full_report.push_str(&fn_report);
+                                full_report.push('\n');
+                            }
+                            // fn_hits を構築（内部関数 $ を除くユーザー関数）
+                            let mut hits: Vec<(String, bool)> = Vec::new();
+                            for fn_def in &ir.fns {
+                                let name = &fn_def.name;
+                                if name.starts_with('$') {
+                                    continue;
+                                }
+                                let mut fn_lines: HashSet<u32> = HashSet::new();
+                                collect_tracklines_in_expr(&fn_def.body, &mut fn_lines);
+                                if fn_lines.is_empty() {
+                                    continue;
+                                }
+                                let hit = fn_lines.iter().any(|l| all_covered.contains(l));
+                                hits.push((name.clone(), hit));
+                            }
+                            let covered = hits.iter().filter(|(_, h)| *h).count();
+                            let total = hits.len();
+                            (hits, covered, total)
+                        } else {
+                            (vec![], 0, 0)
+                        };
 
                     // CoverageFileStat を組み立て
                     let total_lines = source.lines().count() as u32;
@@ -4276,10 +4299,10 @@ pub fn cmd_test(
                         path: path.clone(),
                         covered: covered_count,
                         total: executable.len(),
-                        fn_covered: 0,
-                        fn_total: 0,
+                        fn_covered: fn_covered_count,
+                        fn_total: fn_total_count,
                         line_hits,
-                        fn_hits: vec![],
+                        fn_hits,
                     });
                     source_map.insert(path.clone(), source);
                 }
@@ -4324,7 +4347,8 @@ pub fn cmd_test(
                     }
                 }
             } else if coverage_html || coverage_lcov {
-                eprintln!("warning: --html/--lcov requires --coverage-report <dir> to write output files");
+                eprintln!("error: --html/--lcov requires --coverage-report <dir>; no output files were written");
+                process::exit(1);
             }
         }
         #[cfg(target_arch = "wasm32")]
@@ -31668,7 +31692,7 @@ mod v213000_tests {
         let summary = CoverageSummary { files: vec![stat] };
         let lcov = generate_lcov(&summary);
         assert!(lcov.contains("SF:src/pipeline.fav"), "should have SF:");
-        assert!(lcov.contains("FN:1,LoadCsv"), "should have FN: line");
+        assert!(lcov.contains("FN:0,LoadCsv"), "should have FN: line");
         assert!(lcov.contains("DA:10,1"), "should have covered line");
         assert!(lcov.contains("DA:12,0"), "should have uncovered line");
         assert!(lcov.contains("end_of_record"), "should have end_of_record");

@@ -105,9 +105,10 @@ pub fn generate_coverage_html(
         } else {
             f.fn_covered as f64 / f.fn_total as f64 * 100.0
         };
+        let path_escaped = f.path.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;");
         html.push_str(&format!(
             "<tr class=\"{}\"><td>{}</td><td>{:.1}%</td><td>{}/{}</td><td>{:.0}% ({}/{})</td></tr>",
-            cls, f.path, f.pct(), f.covered, f.total, fn_pct, f.fn_covered, f.fn_total
+            cls, path_escaped, f.pct(), f.covered, f.total, fn_pct, f.fn_covered, f.fn_total
         ));
     }
     html.push_str("</table>");
@@ -115,8 +116,13 @@ pub fn generate_coverage_html(
     // ファイル詳細（行ハイライト）
     for f in &summary.files {
         if let Some(source) = source_map.get(&f.path) {
-            html.push_str(&format!("<h2>{}</h2><pre class=\"source\">", f.path));
-            let hit_map: HashMap<u32, bool> = f.line_hits.iter().copied().collect();
+            let path_escaped = f.path.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;");
+            html.push_str(&format!("<h2>{}</h2><pre class=\"source\">", path_escaped));
+            // first-entry-wins で重複行番号を排除
+            let mut hit_map = HashMap::<u32, bool>::new();
+            for &(lineno, hit) in &f.line_hits {
+                hit_map.entry(lineno).or_insert(hit);
+            }
             for (idx, line) in source.lines().enumerate() {
                 let lineno = (idx + 1) as u32;
                 let cls = match hit_map.get(&lineno) {
@@ -167,9 +173,9 @@ pub fn generate_lcov(summary: &CoverageSummary) -> String {
     for f in &summary.files {
         out.push_str("TN:\n");
         out.push_str(&format!("SF:{}\n", f.path));
-        // 関数定義（行番号は 1-indexed の連番）
-        for (i, (name, _)) in f.fn_hits.iter().enumerate() {
-            out.push_str(&format!("FN:{},{}\n", i + 1, name));
+        // 関数定義（行番号不明なので 0 を使用。genhtml は 0 を「不明」として扱う）
+        for (name, _) in &f.fn_hits {
+            out.push_str(&format!("FN:0,{}\n", name));
         }
         // 関数実行回数
         for (name, hit) in &f.fn_hits {

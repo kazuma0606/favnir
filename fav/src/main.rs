@@ -1001,6 +1001,10 @@ fn main_impl() {
                 // SAFETY: setting FORALL_CASES for this process only
                 unsafe { std::env::set_var("FORALL_CASES", n.to_string()) };
             }
+            if (coverage_html || coverage_lcov) && !coverage {
+                eprintln!("error: --html/--lcov requires --coverage");
+                std::process::exit(1);
+            }
             cmd_test(
                 file.as_deref(),
                 filter.as_deref(),

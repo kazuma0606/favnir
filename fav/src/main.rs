@@ -62,6 +62,12 @@ mod schemas;
 mod incremental;
 mod parallel;
 mod profiler;
+#[cfg(not(target_arch = "wasm32"))]
+mod pushdown;
+#[cfg(not(target_arch = "wasm32"))]
+mod arena;
+#[cfg(not(target_arch = "wasm32"))]
+mod dap;
 mod std_states;
 mod toml;
 mod value;
@@ -115,7 +121,7 @@ COMMANDS:
                   With --schema, print SQL CREATE TABLE / CHECK output instead.
                   With --format json, emit structured explain JSON.
                   If <file> is omitted, explains all files in the project.
-    explain --lineage [--format <text|json>] [file]
+    explain --lineage [--format <text|json|mermaid|d2>] [file]
                   Static lineage analysis: show Sources / Sinks / Transformations / Pipelines.
                   Extracts DB table names from SQL string literals and !DbRead/!DbWrite effects.
     docs [file] [--port <n>] [--no-open]
@@ -316,6 +322,27 @@ fn main_impl() {
         }
 
         Some("run") => {
+            // ── v21.1.0: fav run --debug <file> ──────────────────────────────
+            #[cfg(not(target_arch = "wasm32"))]
+            if args.iter().any(|a| a == "--debug") {
+                let dap_port = args
+                    .iter()
+                    .position(|a| a == "--dap-port")
+                    .and_then(|i| args.get(i + 1))
+                    .and_then(|p| p.parse::<u16>().ok())
+                    .unwrap_or(5678);
+                let file = args
+                    .iter()
+                    .skip(2)
+                    .find(|a| !a.starts_with("--"))
+                    .map(|s| s.as_str())
+                    .unwrap_or_else(|| {
+                        eprintln!("error: fav run --debug requires a file path");
+                        process::exit(1);
+                    });
+                driver::cmd_run_debug(file, dap_port);
+                return;
+            }
             // ── v19.7.0: fav run --precompiled <path> ────────────────────────
             if args.get(2).map(|s| s.as_str()) == Some("--precompiled") {
                 let path = args.get(3).map(|s| s.as_str()).unwrap_or_else(|| {
@@ -332,6 +359,8 @@ fn main_impl() {
             let mut verbose = false;
             let mut trace = false;
             let mut no_tap = false;
+            let mut legacy_value_repr = false;
+            let mut explain_pushdown = false;
             let mut file_idx = 2usize;
             let mut i = 2usize;
             while i < args.len() {
@@ -381,11 +410,23 @@ fn main_impl() {
                         i += 1;
                         file_idx = i;
                     }
+                    "--legacy-value-repr" => {
+                        // v20.3.0: フォールバック用フラグ（NaN-boxing 移行検証用）
+                        legacy_value_repr = true;
+                        i += 1;
+                        file_idx = i;
+                    }
+                    "--explain-pushdown" => {
+                        // v20.4.0: DuckDB pushdown 適用状況を stderr に出力
+                        explain_pushdown = true;
+                        i += 1;
+                        file_idx = i;
+                    }
                     _ => break,
                 }
             }
             let file = args.get(file_idx).map(|s| s.as_str());
-            cmd_run(file, db_path.as_deref(), legacy, verbose, trace, no_tap);
+            cmd_run(file, db_path.as_deref(), legacy, verbose, trace, no_tap, legacy_value_repr, explain_pushdown);
         }
 
         Some("build") => {
@@ -1794,6 +1835,21 @@ fn main_impl() {
             eprintln!("error: unknown command `{}`", cmd);
             eprintln!("run `fav help` for usage");
             process::exit(1);
+        }
+
+        // ── v21.1.0: fav dap [--port N] ──────────────────────────────────────
+        #[cfg(not(target_arch = "wasm32"))]
+        Some("dap") => {
+            let port = args
+                .iter()
+                .position(|a| a == "--port")
+                .and_then(|i| args.get(i + 1))
+                .and_then(|p| p.parse::<u16>().ok())
+                .unwrap_or(5678);
+            if let Err(e) = driver::cmd_dap(port) {
+                eprintln!("error: {e}");
+                process::exit(1);
+            }
         }
 
         None => print_welcome(),

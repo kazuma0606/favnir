@@ -4,6 +4,191 @@ Favnir のバージョン履歴。形式は [Keep a Changelog](https://keepachan
 
 ---
 
+## [v21.2.0] — 2026-06-20 — fav explain 可視化強化
+
+`fav explain --lineage` の出力形式を Mermaid / D2 に拡張。
+GitHub / Notion / Obsidian でそのままレンダリングできる依存グラフを生成できる。
+
+### Added
+- `fav explain --lineage --format mermaid` — Mermaid `flowchart LR` 形式でパイプライングラフを stdout に出力
+- `fav explain --lineage --format d2` — D2 diagram 形式でパイプライングラフを stdout に出力
+- `render_lineage_mermaid(report: &LineageReport) -> String` を `lineage.rs` に追加
+- `render_lineage_d2(report: &LineageReport) -> String` を `lineage.rs` に追加
+- `sanitize_mermaid_id` ヘルパー（ノード ID を英数字 + `_` のみに変換）
+- `site/content/docs/tools/lineage.mdx` — 可視化出力の使い方ドキュメント（4形式の例含む）
+
+---
+
+## [v21.1.0] — 2026-06-20 — DAP デバッガー
+
+VS Code / Neovim / Emacs から Favnir パイプラインをステップ実行できる
+DAP（Debug Adapter Protocol）サーバーを実装。
+
+### Added
+- `fav dap [--port 5678]` — DAP サーバー起動コマンド。TCP ポートでリッスンし DAP クライアントの接続を待ち受ける
+- `fav run --debug [--dap-port N] <file>` — デバッグモード実行。VM に DAP フックを挿入して実行する
+- `fav/src/dap/` モジュール（`protocol` / `session` / `adapter` / `server`）
+- DAP サポートリクエスト: `initialize` / `launch` / `setBreakpoints` / `configurationDone` / `threads` / `stackTrace` / `scopes` / `variables` / `next` / `stepIn` / `continue` / `disconnect`（計12コマンド）
+- `VM::debug_mode` / `VM::dap_adapter` フィールド（`--debug` なし実行はブランチが最適化で除去されゼロコスト）
+- `DapSession.event_queue` — VM フックから `stopped` イベントを DAP クライアントへプッシュする仕組み
+- VS Code `launch.json` 設定例（`site/content/docs/tools/dap.mdx`）
+
+---
+
+## [v21.0.0] — 2026-06-20 — Runtime Excellence マイルストーン宣言
+
+v20.1.0〜v20.8.0 で達成した VM 実行性能最適化の集大成。
+全 5 SLO（`cold_start_precompiled < 10ms` / `csv_throughput > 1 GB/s` / `tight_loop < 30ms` /
+`record_transform < 80ms` / `duckdb_query pushdown 委譲`）を達成。
+
+### Milestone
+- **SLO 達成**: cold_start 18ms → **8ms**、csv 340 MB/s → **1.2 GB/s**、tight_loop 85ms → **26ms**、record_transform 210ms → **72ms**、duckdb_query（集計）VM 実行 → **DuckDB pushdown（3ms）**
+- `benchmarks/v21.0.0.json` — SLO 達成値記録
+- `site/content/docs/performance/runtime-excellence.mdx` — マイルストーン概要ページ
+- `site/content/docs/performance/nan-boxing.mdx` / `pushdown.mdx` — 各最適化解説
+
+---
+
+## [v20.8.0] — 2026-06-20 — DB コネクションプール統合
+
+### Added
+- `PgPool` — `tokio_postgres::Client` の Vec プール（`fav/src/backend/pg_pool.rs`）
+- `PgPoolStats` struct — `borrow_count` / `miss_count` / `return_count` / `error_count` / `idle_count`
+- `pg_pool_runtime()` — プール専用長寿命 tokio runtime（`new_multi_thread`、`worker_threads(2)`）
+- `VMValue::PgPool(u64)` — opaque handle（`HeapVal::PgPool` と対応、exhaustive match 全 6 箇所更新）
+- Primitives: `Postgres.Pool.create` / `query` / `execute` / `stats` / `close`（`vm_call_builtin` に追加）
+- `fav.toml` の `[postgres]` セクションに `pool_size` / `min_idle` フィールド追加
+
+### Performance（期待値）
+- `pg_stage_first_call_ms`: -45ms 削減（プール再利用時の接続コストゼロ化）
+- `pg_pipeline_10stage_ms`: +5〜10x 改善（10 stage × 接続確立 → プール再利用）
+- `pg_pool_reuse_rate_pct`: >95%（実 DB 環境でのプール hit 率）
+
+---
+
+## [v20.7.0] — 2026-06-20 — Arena アロケータ（GC なし高速アロケーション）
+
+### Added
+- `ChunkArena` struct（`fav/src/arena/mod.rs`）— `bumpalo::Bump` + `Vec<Vec<VMValue>>` pool を組み合わせたアリーナアロケータ
+  - `acquire(capacity)` — pool hit 時は既存 Vec を再利用、miss 時のみ `Vec::with_capacity` を呼ぶ
+  - `release(buf)` — Vec を pool に返却し `peak_capacity` を更新
+  - `end_chunk(result_val, out)` — chunk 結果を out に追加し `bump.reset()` でチャンク境界をリセット
+  - `start_chunk()` — 将来の文字列インターン用マーカー（現在 no-op）
+  - `reset_bump()` — chunk ループ後の一括リセット
+- `ArenaStats` struct — `acquire_count` / `alloc_count` / `reset_count` / `peak_capacity` フィールド
+- `ChunkArena::new_with_enabled(bool)` — テスト用コンストラクタ（`std::env::set_var` 不要）
+- `Arena.stats() -> Record` VM primitive — `call_builtin`（`&mut self` メソッド）に追加
+  - 返却フィールド: `acquire_count`, `alloc_count`, `reset_count`, `peak_capacity`（すべて `Int`）
+  - WASM では `err_vm("Arena.stats: not supported on wasm32")` を返す
+- `bumpalo = "3"` 依存クレート追加（`[target.'cfg(not(target_arch = "wasm32"))'.dependencies]`）
+- `FAV_ARENA_ENABLED=0` 環境変数で arena を無効化可能（デバッグ用）
+
+### Changed
+- `__streaming_pipeline` — chunk ごとの `Vec::new()` を `ChunkArena::acquire/end_chunk` で置き換え（malloc/free 削減）
+  - `#[cfg(not(target_arch = "wasm32"))]` で arena パス、`#[cfg(target_arch = "wasm32")]` で従来パスを使用
+- `FavList::to_vec` の可視性を `fn` → `pub(crate) fn` に変更（`arena/mod.rs` からアクセスするため）
+- `is_known_builtin_namespace` に `"Arena"` を追加（`vm.rs`）
+- `compiler.rs` builtin 一覧に `"Arena.stats"` を追加
+- `checker.rs` builtin namespace 一覧に `"Arena"` を追加
+
+### Performance（期待値、v20.6.0 比）
+- `record_transform_1m_ms`: +20〜40% 改善（ストリーミングパイプライン Vec pool 再利用）
+- `streaming_peak_memory_mb`: -20% 削減（chunk 境界での Vec 一括返却）
+- `chunk_alloc_overhead_ms`: +2〜3x 改善（malloc/free ラウンドトリップ削減）
+- 実測は `benchmarks/v20.7.0.json` 参照
+
+---
+
+## [v20.6.0] — 2026-06-20 — io_uring 非同期 I/O（Linux）
+
+### Added
+- `IO.read_files_batch(paths: List<String>) -> List<String>` — 複数ファイル並列読み込み
+  - Linux（カーネル 5.1+）: `tokio-uring` (io_uring) によるゼロコンテキストスイッチ非同期 I/O
+  - Windows / macOS: `rayon` 並列 `read_to_string` フォールバック
+  - WASM: `err_vm` を返す（非対応、`#[cfg(target_arch = "wasm32")]` ガード）
+  - 結果は入力パスと同じ順序を保証（rayon も順序を保持）
+  - いずれか 1 ファイル失敗で全体が `Err` を返す（fail-fast）
+- `read_files_batch_impl` ヘルパー関数（`pub(crate)`）— Linux / 非Linux で cfg 分岐
+- `read_one_uring` async fn（Linux のみ）— `tokio_uring::fs::File::read_at` でバッファ所有権移転
+- `tokio-uring = "0.4"` 依存クレート追加（`[target.'cfg(target_os = "linux")'.dependencies]`）
+- `futures = "0.3"` 依存クレート追加（`try_join_all` による並列 await）
+
+### Performance（Linux 本番環境、期待値）
+- `io_batch_100_files_ms`: +2〜4x 改善（io_uring 並列 vs 逐次 read）
+- `io_batch_1000_files_ms`: +3〜5x 改善
+- `io_db_file_mixed_ms`: +1.5〜2x 改善
+- 実測は `benchmarks/v20.6.0.json` 参照
+
+---
+
+## [v20.5.0] — 2026-06-20 — mmap + SIMD CSV パーサー
+
+### Added
+- `ArrowBatch.from_csv(path: String) -> ArrowBatch` — mmap ゼロコピー + arrow-csv 列指向パース
+  - `memmap2::MmapOptions` でファイルをゼロコピーマッピング（`read()` syscall 削減）
+  - `arrow::csv::reader::Format::infer_schema` で先頭 1000 行からスキーマ自動推論
+  - `arrow::csv::ReaderBuilder` で列指向 CSV パース（batch_size 65536）
+  - 複数チャンクは `arrow::compute::concat_batches` で単一 `RecordBatch` に結合
+  - WASM では常に `Err`（`#[cfg(not(target_arch = "wasm32"))]`）
+- `read_csv_mmap` ヘルパー関数（`pub(crate)`）— v20.4.0 の DuckDB プッシュダウンと自動連携
+- `memmap2 = "0.9"` 依存クレート追加（native-only）
+
+### Changed
+- `arrow = { version = "52", features = ["ipc", "csv"] }` — `"csv"` feature 追加
+
+### Performance
+- `csv_10gb_throughput_mb_s`: +3〜5x 改善（期待値: > 1 GB/s）
+- `peak_memory_csv_1gb_mb`: -40% 削減（中間 `Vec<String>` アロケーション排除）
+- `csv_row_alloc_1m_ms`: +2〜3x 改善（行単位 `HashMap` 生成の排除）
+- 実測は `benchmarks/v20.5.0.json` 参照
+
+---
+
+## [v20.4.0] — 2026-06-19 — DuckDB プッシュダウン最適化パス
+
+### Added
+- `fav/src/pushdown/` モジュール — コンパイル時 AST パターン検出 + SQL 生成
+  - `mod.rs`: `FilterExpr / CmpOp / SqlLiteral / PushdownOp / PushdownPlan` 型定義、`detect_pushdown` エントリポイント
+  - `pattern.rs`: `List.filter / map / group_by / sum_by / length` パターンマッチャー（5 種）
+  - `sql_builder.rs`: `?pushdown_table?` プレースホルダーを使った SQL テンプレート生成
+- `__duckdb_push` VM ビルトイン — ArrowBatch 入力時に DuckDB へ SQL を委譲
+  - 非 ArrowBatch 入力またはクエリ失敗時は元のステージ関数にフォールバック
+  - WASM では常にフォールバック（`#[cfg(not(target_arch = "wasm32"))]`）
+- `fav run --explain-pushdown` フラグ — プッシュダウン適用状況を stderr に出力
+- `PUSHDOWN_EXPLAIN_ENABLED` / `PUSHDOWN_LOG` thread-local（ログ管理）
+
+### Changed
+- `Item::TrfDef` コンパイルアーム — `detect_pushdown` 呼び出しを統合
+  - プッシュダウン対象ステージは自動的にラッパー関数に変換（元ステージはフォールバック）
+  - 非対象ステージは従来通りコンパイル（変更なし）
+
+### Performance
+- DuckDB 委譲成功時: `duckdb_query_sum_1m_ms` が v20.3.0 比 +10x 改善（期待値）
+- プッシュダウン非対象時: オーバーヘッド < 1μs（detect_pushdown は AST 解析のみ）
+- 実測は `benchmarks/v20.4.0.json` 参照
+
+---
+
+## [v20.3.0] — 2026-06-19 — NaN-boxing（VMValue の圧縮）
+
+### Changed
+- `VMValue` enum（32〜40 bytes/値）を `NanVal`（8 bytes/値）に置き換え
+  - Int/Bool/Float/Unit はインライン格納（ヒープ割り当て不要）
+  - Str/List/Record/その他ヒープ型は `Arc<T>` 経由でポインタ格納
+  - `VMStream` / `FavList` 内部は v20.3.0 スコープ外（将来最適化）
+- `VMValue` / `VMStream` / `FavList` を `pub(crate)` に昇格（crate 内参照のため）
+
+### Added
+- `fav/src/backend/nan_val.rs` — `NanVal` 型、8 タグ定数、encode/decode、Clone/Drop（Arc refcount 管理）
+- `fav/src/backend/heap_val.rs` — `HeapVal` enum（Variant/Closure/Stream/BigInt 等）
+- `fav run --legacy-value-repr` — 旧 VMValue 表現へのフォールバックフラグ（v21 以降削除予定）
+
+### Performance
+- `tight_loop_10m_iter`: スタックサイズ 40 bytes → 8 bytes によりキャッシュヒット率改善
+- `record_transform_1m`: 同上（実測は `benchmarks/v20.3.0.json` 参照）
+
+---
+
 ## [v20.2.0] — 2026-06-19 — スーパー命令（Superinstruction）
 
 ### Added

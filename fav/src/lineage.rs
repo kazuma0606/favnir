@@ -1122,6 +1122,83 @@ pub fn render_lineage_json(report: &LineageReport) -> String {
     serde_json::to_string_pretty(report).unwrap_or_else(|_| "{}".into())
 }
 
+/// LineageReport を Mermaid flowchart LR 形式にレンダリングする。
+pub fn render_lineage_mermaid(report: &LineageReport) -> String {
+    let mut out = String::from("flowchart LR\n");
+
+    // ノード定義: stage / fn ごとに1ノード
+    for entry in &report.transformations {
+        let effects = if entry.effects.is_empty() {
+            "Pure".to_string()
+        } else {
+            entry.effects.iter()
+                .map(|e| format!("!{}", e.trim_start_matches('!')))
+                .collect::<Vec<_>>()
+                .join("+")
+        };
+        let id = sanitize_mermaid_id(&entry.name);
+        out.push_str(&format!("  {}[\"{}<br/>{}\"]\n", id, entry.name, effects));
+    }
+
+    // エッジ定義: pipeline の steps を順に接続
+    for pipeline in &report.pipelines {
+        let steps = &pipeline.steps;
+        for i in 0..steps.len().saturating_sub(1) {
+            let from = sanitize_mermaid_id(&steps[i]);
+            let to   = sanitize_mermaid_id(&steps[i + 1]);
+            out.push_str(&format!("  {} --> {}\n", from, to));
+        }
+    }
+
+    out
+}
+
+/// LineageReport を D2 diagram 形式にレンダリングする。
+pub fn render_lineage_d2(report: &LineageReport) -> String {
+    let mut out = String::new();
+
+    // ノード定義
+    for entry in &report.transformations {
+        let effects = if entry.effects.is_empty() {
+            "Pure".to_string()
+        } else {
+            entry.effects.iter()
+                .map(|e| format!("!{}", e.trim_start_matches('!')))
+                .collect::<Vec<_>>()
+                .join(", ")
+        };
+        let id = sanitize_mermaid_id(&entry.name);
+        out.push_str(&format!("{}: \"{} ({})\"\n", id, entry.name, effects));
+    }
+
+    // エッジ定義
+    for pipeline in &report.pipelines {
+        let steps = &pipeline.steps;
+        for i in 0..steps.len().saturating_sub(1) {
+            let from = sanitize_mermaid_id(&steps[i]);
+            let to   = sanitize_mermaid_id(&steps[i + 1]);
+            out.push_str(&format!("{} -> {}\n", from, to));
+        }
+    }
+
+    out
+}
+
+/// Mermaid / D2 ノード ID として使える文字列に変換する（英数字 + アンダースコアのみ）。
+/// 先頭が数字の場合は `n_` プレフィックスを付加する。
+fn sanitize_mermaid_id(name: &str) -> String {
+    let sanitized: String = name.chars()
+        .map(|c| if c.is_alphanumeric() || c == '_' { c } else { '_' })
+        .collect();
+    if sanitized.starts_with(|c: char| c.is_ascii_digit()) {
+        format!("n_{}", sanitized)
+    } else if sanitized.is_empty() {
+        "_node".to_string()
+    } else {
+        sanitized
+    }
+}
+
 // ── v11000_tests (v11.0.0) — Snowflake lineage read/write distinction ─────────
 #[cfg(test)]
 mod v11000_tests {

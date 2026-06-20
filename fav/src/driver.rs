@@ -1148,12 +1148,20 @@ pub(crate) fn is_result_err_value(v: &Value) -> bool {
 /// - `--legacy` is set, OR
 /// - the file is part of a fav.toml project, OR
 /// - the file uses `import rune` declarations.
-pub fn cmd_run(file: Option<&str>, db_url: Option<&str>, legacy: bool, verbose: bool, trace: bool, no_tap: bool) {
+pub fn cmd_run(file: Option<&str>, db_url: Option<&str>, legacy: bool, verbose: bool, trace: bool, no_tap: bool, legacy_value_repr: bool, explain_pushdown: bool) {
     let verbose_level = load_run_config_verbose(file, verbose, trace);
 
     if no_tap {
         crate::middle::compiler::set_no_tap_mode(true);
     }
+
+    // v20.4.0: --explain-pushdown — enable pushdown logging
+    if explain_pushdown {
+        crate::backend::vm::set_pushdown_explain(true);
+    }
+
+    // v20.3.0: --legacy-value-repr は NaN-boxing 移行検証用フラグ（現時点は no-op）
+    let _ = legacy_value_repr;
 
     // v9.0.0: --legacy is deprecated. Warn if used.
     if legacy {
@@ -1176,6 +1184,17 @@ pub fn cmd_run(file: Option<&str>, db_url: Option<&str>, legacy: bool, verbose: 
         } else {
             run_with_favnir_pipeline(&source_path, db_url);
         }
+        // v20.4.0: --explain-pushdown — Favnir pipeline path
+        if explain_pushdown {
+            let log = crate::backend::vm::take_pushdown_log();
+            if log.is_empty() {
+                eprintln!("[pushdown] No pushdown patterns applied.");
+            } else {
+                for entry in &log {
+                    eprintln!("{entry}");
+                }
+            }
+        }
     } else {
         // Rust pipeline (--legacy)
         let (run_program, source_path2) = load_and_check_program(file);
@@ -1197,6 +1216,18 @@ pub fn cmd_run(file: Option<&str>, db_url: Option<&str>, legacy: bool, verbose: 
                 process::exit(1);
             }
         }
+
+        // v20.4.0: --explain-pushdown — legacy pipeline path
+        if explain_pushdown {
+            let log = crate::backend::vm::take_pushdown_log();
+            if log.is_empty() {
+                eprintln!("[pushdown] No pushdown patterns applied.");
+            } else {
+                for entry in &log {
+                    eprintln!("{entry}");
+                }
+            }
+        }
     }
 }
 
@@ -1206,8 +1237,76 @@ pub fn cmd_run(file: Option<&str>, db_url: Option<&str>, legacy: bool, verbose: 
 // with legacy=false.
 
 pub fn cmd_run_self_hosted(file: Option<&str>, db_url: Option<&str>) {
-    cmd_run(file, db_url, false, false, false, false);
+    cmd_run(file, db_url, false, false, false, false, false, false);
 }
+
+// ── v21.1.0: DAP デバッガー ───────────────────────────────────────────────────
+
+/// DAP サーバーを指定ポートで起動する（`fav dap [--port N]`）。
+/// VS Code 等の DAP クライアントが接続するのを待ち受ける。
+#[cfg(not(target_arch = "wasm32"))]
+pub fn cmd_dap(port: u16) -> Result<(), String> {
+    use std::sync::{Arc, Condvar, Mutex};
+    let session = Arc::new(Mutex::new(crate::dap::DapSession::new()));
+    let vm_block = Arc::new((Mutex::new(false), Condvar::new()));
+    crate::dap::run_dap_server(port, session, vm_block, None)
+}
+
+/// デバッグモードで .fav ファイルを実行する（`fav run --debug <file>`）。
+/// DAP サーバーを別スレッドで起動し、VM と DapSession を共有する。
+#[cfg(not(target_arch = "wasm32"))]
+pub fn cmd_run_debug(file: &str, dap_port: u16) {
+    // 1. ソースをコンパイルして FvcArtifact を生成
+    let bytes =
+        crate::compiler_fav_runner::compile_file_to_bytes_rune(file).unwrap_or_else(|e| {
+            eprintln!("compiler.fav error: {e}");
+            process::exit(1);
+        });
+    let artifact =
+        crate::backend::artifact::FvcArtifact::from_bytes(&bytes).unwrap_or_else(|e| {
+            eprintln!("artifact error: {:?}", e);
+            process::exit(1);
+        });
+
+    // 2. DapAdapter を作成（Arc<Mutex<DapSession>> を内包）
+    let adapter = crate::dap::DapAdapter::new();
+
+    // 3. DAP サーバーを別スレッドで起動（session + vm_block を共有）
+    //    ready_tx/rx で「サーバーが accept 待機に入った」ことを同期する（HIGH-3 競合回避）
+    let shared_session = adapter.session.clone();
+    let shared_vm_block = adapter.vm_block.clone();
+    let (ready_tx, ready_rx) = std::sync::mpsc::sync_channel(0);
+    std::thread::spawn(move || {
+        let _ = crate::dap::run_dap_server(dap_port, shared_session, shared_vm_block, Some(ready_tx));
+    });
+    // サーバーが TcpListener::bind 完了 → accept 待機に入るまで待つ
+    let _ = ready_rx.recv();
+
+    // 4. VM を debug_mode で起動して実行
+    let main_idx = match artifact.fn_idx_by_name("main") {
+        Some(idx) => idx,
+        None => {
+            eprintln!("error: artifact does not contain a `main` function");
+            process::exit(1);
+        }
+    };
+    let mut vm = crate::backend::vm::VM::new_with_db_path(&artifact, None);
+    vm.set_source_file(file);
+    vm.debug_mode = true;
+    vm.dap_adapter = Some(adapter);
+
+    let args = if artifact.functions[main_idx].param_count == 1 {
+        vec![crate::backend::vm::VMValue::Record(std::collections::HashMap::new())]
+    } else {
+        vec![]
+    };
+
+    if let Err(e) = vm.run_debug(&artifact, main_idx, args) {
+        eprintln!("runtime error: {}", e.message);
+        process::exit(1);
+    }
+}
+
 
 pub fn cmd_build(file: Option<&str>, out: Option<&str>, target: Option<&str>) {
     if matches!(target, Some("graphql")) {
@@ -19020,7 +19119,9 @@ fn sql_to_sql(q: SqlQuery) -> String {
 
 #[allow(unused_imports)]
 pub use crate::lineage::{
-    extract_tables_from_sql, lineage_analysis, render_lineage_json, render_lineage_text,
+    extract_tables_from_sql, lineage_analysis,
+    render_lineage_json, render_lineage_text,
+    render_lineage_mermaid, render_lineage_d2,
 };
 
 
@@ -19051,10 +19152,15 @@ pub fn cmd_explain_lineage(file: Option<&str>, format: &str) {
             process::exit(1);
         });
         let report = lineage_analysis(&program);
-        if format == "json" {
-            print!("{}", render_lineage_json(&report));
-        } else {
-            print!("{}", render_lineage_text(&report, path));
+        match &*format {
+            "json"    => print!("{}", render_lineage_json(&report)),
+            "mermaid" => print!("{}", render_lineage_mermaid(&report)),
+            "d2"      => print!("{}", render_lineage_d2(&report)),
+            "text"    => print!("{}", render_lineage_text(&report, path)),
+            other     => {
+                eprintln!("error: unknown format '{}'. valid: text, json, mermaid, d2", other);
+                process::exit(1);
+            }
         }
     }
 }
@@ -23325,6 +23431,7 @@ mod v12600_tests {
             host: None, port: None, dbname: None,
             user: None, password: None,
             sslmode: Some("require".to_string()),
+            pool_size: None, min_idle: None,
         };
         // PGSSLMODE を一時的にアンセットして確認
         let saved = std::env::var("PGSSLMODE").ok();
@@ -30591,6 +30698,7 @@ mod v202000_tests {
     }
 
     #[test]
+    #[ignore]
     fn version_is_20_2_0() {
         let cargo = include_str!("../Cargo.toml");
         assert!(cargo.contains("20.2.0"), "Cargo.toml should have version 20.2.0");
@@ -30626,6 +30734,129 @@ public fn main() -> Int { tight_loop(100, 0) }
 "#;
         let result = compile_and_run_si("tight_loop", src);
         assert_eq!(result, Value::Int(5050), "tight_loop(100, 0) should be 5050");
+    }
+}
+
+// ── v203000_tests (v20.3.0) — NaN-boxing ────────────────────────────────────
+#[cfg(test)]
+mod v203000_tests {
+    use crate::backend::nan_val::NanVal;
+
+    #[test]
+    #[ignore]
+    fn version_is_20_3_0() {
+        let cargo = include_str!("../Cargo.toml");
+        assert!(cargo.contains("20.3.0"), "Cargo.toml should have version 20.3.0");
+    }
+
+    #[test]
+    fn nan_val_size_is_8_bytes() {
+        assert_eq!(std::mem::size_of::<NanVal>(), 8, "NanVal must be 8 bytes");
+    }
+
+    #[test]
+    fn nan_val_int_roundtrip() {
+        for n in [-1_i64, 0, 1, 42, i32::MAX as i64, i32::MIN as i64] {
+            let v = NanVal::from_int(n);
+            assert_eq!(v.as_int(), Some(n), "int roundtrip failed for {n}");
+        }
+    }
+
+    #[test]
+    fn nan_val_float_roundtrip() {
+        let v = NanVal::from_float(3.14);
+        assert!((v.as_float().unwrap() - 3.14).abs() < 1e-10);
+        let vn = NanVal::from_float(-3.14);
+        assert!((vn.as_float().unwrap() + 3.14).abs() < 1e-10);
+        let nan = NanVal::from_float(f64::NAN);
+        assert!(nan.as_float().unwrap().is_nan());
+    }
+
+    #[test]
+    fn nan_val_bool_roundtrip() {
+        assert_eq!(NanVal::from_bool(true).as_bool(), Some(true));
+        assert_eq!(NanVal::from_bool(false).as_bool(), Some(false));
+        assert_eq!(NanVal::unit().as_bool(), None);
+    }
+}
+
+// ── v204000_tests (v20.4.0) — DuckDB プッシュダウン最適化パス ───────────────
+#[cfg(test)]
+mod v204000_tests {
+    use crate::pushdown::pattern::make_filter_expr;
+    use crate::pushdown::sql_builder::{build_filter_where, build_sql};
+    use crate::pushdown::PushdownOp;
+    use crate::ast::Expr;
+    use crate::frontend::lexer::Span;
+
+    fn sp() -> Span {
+        Span::dummy()
+    }
+
+    #[test]
+    #[ignore]
+    fn version_is_20_4_0() {
+        let cargo = include_str!("../Cargo.toml");
+        assert!(cargo.contains("20.4.0"), "Cargo.toml should have version 20.4.0");
+    }
+
+    #[test]
+    fn pushdown_detect_filter() {
+        use crate::pushdown::detect_pushdown;
+        // Build: List.filter(rows, |r| r.amount > 1000.0)
+        let list_ident = Box::new(Expr::Ident("List".to_string(), sp()));
+        let filter_fn = Box::new(Expr::FieldAccess(list_ident, "filter".to_string(), sp()));
+        let rows_arg = Expr::Ident("rows".to_string(), sp());
+        let r_dot_amount = Expr::FieldAccess(
+            Box::new(Expr::Ident("r".to_string(), sp())),
+            "amount".to_string(),
+            sp(),
+        );
+        let lit_1000 = Expr::Lit(crate::ast::Lit::Float(1000.0), sp());
+        let cond = Expr::BinOp(
+            crate::ast::BinOp::Gt,
+            Box::new(r_dot_amount),
+            Box::new(lit_1000),
+            sp(),
+        );
+        let closure = Expr::Closure(vec!["r".to_string()], Box::new(cond), sp());
+        let body = Expr::Apply(filter_fn, vec![rows_arg, closure], sp());
+
+        let plan = detect_pushdown(&body, "rows");
+        assert!(plan.is_some(), "should detect Filter pattern");
+        let plan = plan.unwrap();
+        assert!(matches!(plan.op, crate::pushdown::PushdownOp::Filter(_)));
+    }
+
+    #[test]
+    fn pushdown_sql_filter() {
+        let filter_expr = make_filter_expr(); // amount > 1000.0
+        let sql = build_filter_where(&filter_expr);
+        assert!(sql.contains("amount"), "WHERE clause should contain field name");
+        assert!(sql.contains(">"), "WHERE clause should contain > operator");
+        assert!(sql.contains("1000"), "WHERE clause should contain literal value");
+
+        let op = PushdownOp::Filter(filter_expr);
+        let full_sql = build_sql(&op);
+        assert!(full_sql.contains("SELECT * FROM ?pushdown_table?"));
+        assert!(full_sql.contains("WHERE"));
+        assert!(full_sql.contains("amount"));
+    }
+
+    #[test]
+    fn pushdown_sql_count() {
+        let op = PushdownOp::Count;
+        let sql = build_sql(&op);
+        assert_eq!(sql, "SELECT COUNT(*) FROM ?pushdown_table?");
+    }
+
+    #[test]
+    fn pushdown_no_match_complex() {
+        use crate::pushdown::detect_pushdown;
+        // A bare Ident is not a pushdown-eligible pattern
+        let body = Expr::Ident("rows".to_string(), sp());
+        let plan = detect_pushdown(&body, "rows");
+        assert!(plan.is_none(), "bare Ident should not match any pushdown pattern");
     }
 }
 
@@ -30739,5 +30970,557 @@ mod v197000_tests {
             "expected BadVersion(0xFF), got {:?}",
             err
         );
+    }
+}
+
+// ── v205000_tests (v20.5.0) — mmap + SIMD CSV パーサー ────────────────────────
+#[cfg(test)]
+mod v205000_tests {
+    use crate::backend::vm::read_csv_mmap;
+
+    // line!() でテストごとに一意なファイルパスを生成（並列実行時の競合回避）
+    macro_rules! temp_csv {
+        ($content:expr) => {{
+            let mut p = std::env::temp_dir();
+            p.push(format!("fav_v205_{}_{}.csv", std::process::id(), line!()));
+            std::fs::write(&p, $content).unwrap();
+            p
+        }};
+    }
+
+    #[ignore]
+    #[test]
+    fn version_is_20_5_0() {
+        let cargo = include_str!("../Cargo.toml");
+        assert!(cargo.contains("20.5.0"), "Cargo.toml should have version 20.5.0");
+    }
+
+    #[test]
+    fn csv_mmap_reads_row_count() {
+        let path = temp_csv!("name,amount\nalice,100\nbob,200\ncharlie,300\n");
+        let result = read_csv_mmap(path.to_str().unwrap());
+        let _ = std::fs::remove_file(&path); // clean up before any potential panic
+        let batch = result.expect("should read CSV");
+        assert_eq!(batch.num_rows(), 3, "expected 3 data rows");
+    }
+
+    #[test]
+    fn csv_mmap_schema_has_headers() {
+        let path = temp_csv!("name,amount\nalice,100\n");
+        let result = read_csv_mmap(path.to_str().unwrap());
+        let _ = std::fs::remove_file(&path); // clean up before any potential panic
+        let batch = result.expect("should read CSV");
+        let schema = batch.schema();
+        let field_names: Vec<&str> = schema.fields()
+            .iter()
+            .map(|f| f.name().as_str())
+            .collect();
+        assert!(field_names.contains(&"name"), "schema should have 'name' field, got {:?}", field_names);
+        assert!(field_names.contains(&"amount"), "schema should have 'amount' field, got {:?}", field_names);
+    }
+
+    #[test]
+    fn csv_mmap_int_column_typed() {
+        let path = temp_csv!("id,score\n1,95\n2,87\n3,100\n");
+        let result = read_csv_mmap(path.to_str().unwrap());
+        let _ = std::fs::remove_file(&path); // clean up before any potential panic
+        let batch = result.expect("should read CSV");
+        let schema = batch.schema();
+        let score_field = schema.field_with_name("score").expect("should have 'score' field");
+        let dt = score_field.data_type();
+        assert!(
+            matches!(dt, arrow::datatypes::DataType::Int64 | arrow::datatypes::DataType::Int32),
+            "score should be integer type, got {:?}", dt
+        );
+    }
+
+    #[test]
+    fn csv_mmap_returns_arrow_batch() {
+        let path = temp_csv!("x,y\n1,2\n3,4\n");
+        let result = read_csv_mmap(path.to_str().unwrap());
+        let _ = std::fs::remove_file(&path); // clean up before any potential panic
+        assert!(result.is_ok(), "read_csv_mmap should succeed for valid CSV");
+        assert_eq!(result.unwrap().num_rows(), 2);
+    }
+}
+
+// ── v206000_tests (v20.6.0) — io_uring 非同期 I/O ────────────────────────────
+#[cfg(test)]
+mod v206000_tests {
+    #[cfg(not(target_arch = "wasm32"))]
+    use crate::backend::vm::read_files_batch_impl;
+
+    // line!() でテストごとに一意なファイルパスを生成（並列実行時の競合回避）
+    macro_rules! temp_txt {
+        ($content:expr) => {{
+            let mut p = std::env::temp_dir();
+            p.push(format!("fav_v206_{}_{}.txt", std::process::id(), line!()));
+            std::fs::write(&p, $content).unwrap();
+            p
+        }};
+    }
+
+    #[ignore]
+    #[test]
+    fn version_is_20_6_0() {
+        let cargo = include_str!("../Cargo.toml");
+        assert!(cargo.contains("20.6.0"), "Cargo.toml should have version 20.6.0");
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn io_batch_reads_single_file() {
+        let path = temp_txt!("hello world");
+        let paths = vec![path.to_str().unwrap().to_string()];
+        let result = read_files_batch_impl(&paths);
+        let _ = std::fs::remove_file(&path);
+        let contents = result.expect("should read single file");
+        assert_eq!(contents.len(), 1);
+        assert_eq!(contents[0], "hello world");
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn io_batch_reads_multiple_files() {
+        let p1 = temp_txt!("file one");
+        let p2 = temp_txt!("file two");
+        let p3 = temp_txt!("file three");
+        let paths = vec![
+            p1.to_str().unwrap().to_string(),
+            p2.to_str().unwrap().to_string(),
+            p3.to_str().unwrap().to_string(),
+        ];
+        let result = read_files_batch_impl(&paths);
+        let _ = std::fs::remove_file(&p1);
+        let _ = std::fs::remove_file(&p2);
+        let _ = std::fs::remove_file(&p3);
+        let contents = result.expect("should read 3 files");
+        assert_eq!(contents.len(), 3);
+        assert!(contents.iter().any(|s| s == "file one"), "missing 'file one'");
+        assert!(contents.iter().any(|s| s == "file two"), "missing 'file two'");
+        assert!(contents.iter().any(|s| s == "file three"), "missing 'file three'");
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn io_batch_preserves_order() {
+        let p1 = temp_txt!("alpha");
+        let p2 = temp_txt!("beta");
+        let p3 = temp_txt!("gamma");
+        let paths = vec![
+            p1.to_str().unwrap().to_string(),
+            p2.to_str().unwrap().to_string(),
+            p3.to_str().unwrap().to_string(),
+        ];
+        let result = read_files_batch_impl(&paths);
+        let _ = std::fs::remove_file(&p1);
+        let _ = std::fs::remove_file(&p2);
+        let _ = std::fs::remove_file(&p3);
+        let contents = result.expect("should read in order");
+        assert_eq!(contents[0], "alpha", "first file should be 'alpha'");
+        assert_eq!(contents[1], "beta", "second file should be 'beta'");
+        assert_eq!(contents[2], "gamma", "third file should be 'gamma'");
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn io_batch_error_on_missing_file() {
+        let result = read_files_batch_impl(&[
+            "/nonexistent/path/fav_v206_missing.txt".to_string(),
+        ]);
+        assert!(result.is_err(), "should return Err for missing file");
+    }
+}
+
+// ── v20.7.0: Arena アロケータ テスト ────────────────────────────────────────
+#[cfg(test)]
+mod v207000_tests {
+    use super::*;
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    #[ignore]
+    fn version_is_20_7_0() {
+        let cargo = include_str!("../Cargo.toml");
+        assert!(cargo.contains("20.7.0"), "Cargo.toml should contain version 20.7.0");
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn arena_acquire_and_release() {
+        use crate::arena::ChunkArena;
+        let mut arena = ChunkArena::new_with_enabled(true);
+        // 初回: pool miss → alloc
+        let buf = arena.acquire(16);
+        assert_eq!(arena.stats().alloc_count, 1, "first acquire should be alloc");
+        assert_eq!(arena.stats().acquire_count, 0, "no pool hit yet");
+        // release して pool に返却
+        arena.release(buf);
+        assert_eq!(arena.stats().reset_count, 1, "release increments reset_count");
+        // 再取得: pool hit
+        let buf2 = arena.acquire(16);
+        assert_eq!(arena.stats().acquire_count, 1, "second acquire should be pool hit");
+        drop(buf2);
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn arena_stats_track_counts() {
+        use crate::arena::ChunkArena;
+        let mut arena = ChunkArena::new_with_enabled(true);
+        let buf = arena.acquire(8);
+        arena.release(buf);
+        assert_eq!(arena.stats().alloc_count, 1);
+        assert_eq!(arena.stats().reset_count, 1);
+        assert_eq!(arena.stats().acquire_count, 0);
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn arena_streaming_pipeline_correctness() {
+        use crate::arena::ChunkArena;
+        let mut arena = ChunkArena::new_with_enabled(true);
+        // 3 回 acquire/release で pool の再利用を確認
+        for i in 0..3 {
+            let buf = arena.acquire(4);
+            arena.release(buf);
+            assert_eq!(arena.stats().reset_count, i + 1, "reset_count after iteration {}", i);
+        }
+        // 1 回目は alloc、2〜3 回目は pool hit
+        assert_eq!(arena.stats().alloc_count, 1, "only first acquire is alloc");
+        assert_eq!(arena.stats().acquire_count, 2, "two pool hits");
+        assert_eq!(arena.stats().reset_count, 3, "three releases = reset_count 3");
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn arena_disabled_by_env() {
+        use crate::arena::ChunkArena;
+        // new_with_enabled(false) で pool を使わないことを確認（set_var 不要）
+        let mut arena = ChunkArena::new_with_enabled(false);
+        let buf = arena.acquire(8);
+        assert_eq!(arena.stats().alloc_count, 1, "disabled: always alloc");
+        assert_eq!(arena.stats().acquire_count, 0, "disabled: no pool hit");
+        assert_eq!(arena.stats().reset_count, 0, "disabled: release/end_chunk never called yet");
+        drop(buf);
+        let buf2 = arena.acquire(8);
+        assert_eq!(arena.stats().alloc_count, 2, "disabled: second acquire also alloc");
+        assert_eq!(arena.stats().acquire_count, 0, "disabled: still no pool hit");
+        drop(buf2);
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn arena_end_chunk_reclaims_vec() {
+        use crate::arena::ChunkArena;
+        use crate::backend::vm::{FavList, VMValue};
+        let mut arena = ChunkArena::new_with_enabled(true);
+        let mut out: Vec<VMValue> = Vec::new();
+
+        // chunk 1: acquire → alloc_count=1, end_chunk → Vec が pool に返却される
+        let buf = arena.acquire(4);
+        assert_eq!(arena.stats().alloc_count, 1, "first acquire is alloc");
+        let val = VMValue::List(FavList::new(buf));
+        arena.end_chunk(val, &mut out);
+        assert_eq!(arena.stats().reset_count, 1, "end_chunk increments reset_count");
+
+        // chunk 2: acquire → pool hit（前チャンクの Vec が返ってくる）
+        let buf2 = arena.acquire(4);
+        assert_eq!(arena.stats().acquire_count, 1, "second chunk is pool hit via end_chunk reclaim");
+        assert_eq!(arena.stats().alloc_count, 1, "no new alloc");
+        drop(buf2);
+    }
+}
+
+// ── v20.8.0: DB コネクションプール テスト ────────────────────────────────────
+#[cfg(test)]
+mod v208000_tests {
+    use super::*;
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    #[ignore]
+    fn version_is_20_8_0() {
+        let cargo = include_str!("../Cargo.toml");
+        assert!(cargo.contains("20.8.0"), "Cargo.toml should contain version 20.8.0");
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn pg_pool_stats_default_zero() {
+        use crate::backend::pg_pool::PgPoolStats;
+        let stats = PgPoolStats::default();
+        assert_eq!(stats.borrow_count, 0);
+        assert_eq!(stats.miss_count, 0);
+        assert_eq!(stats.return_count, 0);
+        assert_eq!(stats.error_count, 0);
+        assert_eq!(stats.idle_count, 0);
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn pg_pool_inner_pool_size() {
+        use crate::backend::pg_pool::PgPoolInner;
+        let pool = PgPoolInner::new("postgresql://localhost/test", 7);
+        assert_eq!(pool.pool_size, 7);
+        let stats = pool.stats_snapshot();
+        assert_eq!(stats.idle_count, 0, "新規プールは idle 接続なし");
+        assert_eq!(stats.borrow_count, 0);
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn pg_pool_toml_pool_size_min_idle() {
+        use crate::toml::parse_fav_toml_pub;
+        let toml = "[project]\nname = \"test\"\n\n[postgres]\npool_size = 8\nmin_idle = 3\n";
+        let config = parse_fav_toml_pub(toml);
+        let pg = config.postgres.unwrap();
+        assert_eq!(pg.pool_size, Some(8));
+        assert_eq!(pg.min_idle, Some(3));
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn pg_pool_acquire_increments_miss_on_failure() {
+        use crate::backend::pg_pool::PgPoolInner;
+        // 接続不可能なアドレスで miss_count + error_count が増加することを確認
+        // ?connect_timeout=1 は libpq オプション（tokio_postgres は無視するが接続は即失敗）
+        let pool = PgPoolInner::new("postgresql://127.0.0.1:19999/noexist?connect_timeout=1", 3);
+        let result = pool.acquire();
+        assert!(result.is_err(), "接続不可能な DB には Err を返す");
+        let stats = pool.stats_snapshot();
+        assert_eq!(stats.miss_count, 1, "pool が空なので miss");
+        assert_eq!(stats.error_count, 1, "接続エラーで error_count 増加");
+        assert_eq!(stats.borrow_count, 0, "pool hit なし");
+    }
+}
+
+// ── v210000_tests (v21.0.0) — Runtime Excellence マイルストーン宣言 ──────────
+#[cfg(test)]
+#[cfg(not(target_arch = "wasm32"))]
+mod v210000_tests {
+    #[test]
+    #[ignore]
+    fn version_is_21_0_0() {
+        let cargo = include_str!("../Cargo.toml");
+        assert!(cargo.contains("21.0.0"), "Cargo.toml should have version 21.0.0");
+    }
+
+    #[test]
+    fn changelog_has_v20x_entries() {
+        let cl = include_str!("../../CHANGELOG.md");
+        assert!(cl.contains("v20.1.0"), "CHANGELOG should have v20.1.0 entry");
+        assert!(cl.contains("v20.2.0"), "CHANGELOG should have v20.2.0 entry");
+        assert!(cl.contains("v20.3.0"), "CHANGELOG should have v20.3.0 entry");
+        assert!(cl.contains("v20.4.0"), "CHANGELOG should have v20.4.0 entry");
+        assert!(cl.contains("v20.5.0"), "CHANGELOG should have v20.5.0 entry");
+        assert!(cl.contains("v20.6.0"), "CHANGELOG should have v20.6.0 entry");
+        assert!(cl.contains("v20.7.0"), "CHANGELOG should have v20.7.0 entry");
+        assert!(cl.contains("v20.8.0"), "CHANGELOG should have v20.8.0 entry");
+        assert!(cl.contains("v21.0.0"), "CHANGELOG should have v21.0.0 entry");
+    }
+
+    #[test]
+    fn readme_mentions_nan_boxing() {
+        let readme = include_str!("../../README.md");
+        assert!(
+            readme.contains("NaN-boxing") || readme.contains("nan-boxing"),
+            "README should mention NaN-boxing"
+        );
+    }
+
+    #[test]
+    fn readme_mentions_pushdown() {
+        let readme = include_str!("../../README.md");
+        assert!(
+            readme.contains("pushdown") || readme.contains("プッシュダウン"),
+            "README should mention DuckDB pushdown"
+        );
+    }
+
+    #[test]
+    fn bench_v21_baseline_exists() {
+        // include_str! でコンパイル時にファイルの存在を保証
+        let content = include_str!("../../benchmarks/v21.0.0.json");
+        assert!(content.contains("\"metrics\""),
+            "v21.0.0.json should contain metrics field");
+    }
+}
+
+// ── v211000_tests (v21.1.0) — DAP デバッガー ─────────────────────────────────
+#[cfg(test)]
+#[cfg(not(target_arch = "wasm32"))]
+mod v211000_tests {
+    #[test]
+    #[ignore]
+    fn version_is_21_1_0() {
+        let cargo = include_str!("../Cargo.toml");
+        assert!(cargo.contains("21.1.0"), "Cargo.toml should have version 21.1.0");
+    }
+
+    #[test]
+    fn dap_protocol_initialize_request_parses() {
+        use crate::dap::protocol::DapRequest;
+        let json = r#"{"seq":1,"type":"request","command":"initialize","arguments":{"adapterID":"favnir"}}"#;
+        let req: DapRequest = serde_json::from_str(json).expect("should parse initialize request");
+        assert_eq!(req.command, "initialize");
+        assert_eq!(req.seq, 1);
+    }
+
+    #[test]
+    fn dap_protocol_response_serializes() {
+        use crate::dap::protocol::DapResponse;
+        let resp = DapResponse {
+            seq: 1,
+            kind: "response".to_string(),
+            request_seq: 1,
+            success: true,
+            command: "initialize".to_string(),
+            body: Some(serde_json::json!({"supportsConfigurationDoneRequest": true})),
+            message: None,
+        };
+        let json = serde_json::to_string(&resp).expect("should serialize");
+        assert!(json.contains("\"success\":true"));
+        assert!(json.contains("\"command\":\"initialize\""));
+    }
+
+    #[test]
+    fn dap_session_breakpoint_set_and_hit() {
+        use crate::dap::session::DapSession;
+        let mut sess = DapSession::new();
+        sess.set_breakpoints("src/pipeline.fav", vec![10, 20]);
+        assert!(sess.is_breakpoint("src/pipeline.fav", 10));
+        assert!(sess.is_breakpoint("src/pipeline.fav", 20));
+        assert!(!sess.is_breakpoint("src/pipeline.fav", 15));
+    }
+
+    #[test]
+    fn dap_adapter_stopped_event_format() {
+        use crate::dap::adapter::{DapAdapter, DapHook};
+        let adapter = DapAdapter::new();
+        // ブレークポイントを事前設定
+        {
+            let mut sess = adapter.session.lock().unwrap();
+            sess.set_breakpoints("pipeline.fav", vec![5]);
+        }
+        // StageEnter フックを発火
+        adapter.on_hook(DapHook::StageEnter {
+            name: "Transform".to_string(),
+            source: "pipeline.fav".to_string(),
+            line: 5,
+            locals: vec![("x".to_string(), "Int".to_string(), "42".to_string())],
+        });
+        let mut sess = adapter.session.lock().unwrap();
+        assert!(sess.stopped, "should be stopped at breakpoint");
+        assert_eq!(sess.current_line, Some(5));
+        assert_eq!(sess.stop_reason.as_deref(), Some("breakpoint"));
+        // stopped イベントが event_queue に積まれ、JSON フォーマットが正しいことを確認
+        assert!(!sess.event_queue.is_empty(), "event_queue should have stopped event");
+        let event = &sess.event_queue[0];
+        assert_eq!(event["type"].as_str(), Some("event"));
+        assert_eq!(event["event"].as_str(), Some("stopped"));
+        assert_eq!(event["body"]["line"].as_u64(), Some(5));
+        assert_eq!(event["body"]["source"]["path"].as_str(), Some("pipeline.fav"));
+        let _ = std::mem::take(&mut sess.event_queue);
+    }
+}
+
+// ── v212000_tests (v21.2.0) — fav explain 可視化強化 ─────────────────────────
+#[cfg(test)]
+#[cfg(not(target_arch = "wasm32"))]
+mod v212000_tests {
+    #[test]
+    fn version_is_21_2_0() {
+        let cargo = include_str!("../Cargo.toml");
+        assert!(cargo.contains("21.2.0"), "Cargo.toml should have version 21.2.0");
+    }
+
+    #[test]
+    fn render_lineage_mermaid_basic() {
+        use crate::lineage::{LineageEntry, LineageReport, PipelineLineage, render_lineage_mermaid};
+        let report = LineageReport {
+            transformations: vec![
+                LineageEntry {
+                    name: "LoadCsv".to_string(),
+                    kind: "stage".to_string(),
+                    capability: None,
+                    effects: vec!["!Io".to_string()],
+                    sources: vec![],
+                    sinks: vec![],
+                },
+                LineageEntry {
+                    name: "Transform".to_string(),
+                    kind: "stage".to_string(),
+                    capability: None,
+                    effects: vec![],
+                    sources: vec![],
+                    sinks: vec![],
+                },
+            ],
+            pipelines: vec![],
+        };
+        let mermaid = render_lineage_mermaid(&report);
+        assert!(mermaid.contains("flowchart LR"), "should have flowchart header");
+        assert!(mermaid.contains("LoadCsv"), "should have LoadCsv node");
+        assert!(mermaid.contains("Transform"), "should have Transform node");
+    }
+
+    #[test]
+    fn render_lineage_mermaid_pipeline_edges() {
+        use crate::lineage::{LineageReport, PipelineLineage, render_lineage_mermaid};
+        let report = LineageReport {
+            transformations: vec![],
+            pipelines: vec![PipelineLineage {
+                name: "main".to_string(),
+                steps: vec!["LoadCsv".to_string(), "Transform".to_string(), "SaveToDb".to_string()],
+                sources: vec![],
+                sinks: vec![],
+            }],
+        };
+        let mermaid = render_lineage_mermaid(&report);
+        assert!(mermaid.contains("-->"), "should have edge arrows");
+        assert!(mermaid.contains("LoadCsv"), "should contain LoadCsv");
+        assert!(mermaid.contains("SaveToDb"), "should contain SaveToDb");
+    }
+
+    #[test]
+    fn render_lineage_d2_basic() {
+        use crate::lineage::{LineageEntry, LineageReport, PipelineLineage, render_lineage_d2};
+        let report = LineageReport {
+            transformations: vec![
+                LineageEntry {
+                    name: "LoadCsv".to_string(),
+                    kind: "stage".to_string(),
+                    capability: None,
+                    effects: vec!["!Io".to_string()],
+                    sources: vec![],
+                    sinks: vec![],
+                },
+            ],
+            pipelines: vec![PipelineLineage {
+                name: "main".to_string(),
+                steps: vec!["LoadCsv".to_string(), "Transform".to_string()],
+                sources: vec![],
+                sinks: vec![],
+            }],
+        };
+        let d2 = render_lineage_d2(&report);
+        assert!(d2.contains("LoadCsv"), "should have LoadCsv node");
+        assert!(d2.contains("->"), "should have edge arrow");
+    }
+
+    #[test]
+    fn lineage_format_mermaid_no_panic() {
+        use crate::lineage::{lineage_analysis, render_lineage_mermaid};
+        use crate::frontend::parser::Parser;
+        let src = r#"
+stage Transform: List<Row> -> List<Row> = |rows| { rows }
+seq Pipeline = Transform
+"#;
+        let program = Parser::parse_str(src, "test.fav").expect("parse ok");
+        let report = lineage_analysis(&program);
+        let mermaid = render_lineage_mermaid(&report);
+        assert!(!mermaid.is_empty(), "mermaid output should not be empty");
+        assert!(mermaid.contains("flowchart LR"));
     }
 }

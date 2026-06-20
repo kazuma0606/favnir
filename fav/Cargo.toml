@@ -1,6 +1,6 @@
 [package]
 name = "fav"
-version = "20.2.0"
+version = "21.2.0"
 edition = "2024"
 
 [[bin]]
@@ -58,7 +58,8 @@ h2 = "0.3"
 bytes = "1"
 http = "0.2"
 parquet = "52"
-arrow = { version = "52", features = ["ipc"] }
+arrow = { version = "52", features = ["ipc", "csv"] }
+memmap2 = "0.9"
 duckdb = { version = "1", features = ["bundled", "parquet"] }
 notify = "6"
 jsonwebtoken = "9"
@@ -70,6 +71,12 @@ rskafka = { version = "0.6", features = ["transport-tls"] }
 rayon = "1"
 petgraph = "0.6"
 inferno = "0.11"
+futures = "0.3"
+bumpalo = "3"
+
+# ── Linux-only dependencies ───────────────────────────────────────────────────
+[target.'cfg(target_os = "linux")'.dependencies]
+tokio-uring = "0.4"
 
 [features]
 postgres_integration = ["dep:postgres"]

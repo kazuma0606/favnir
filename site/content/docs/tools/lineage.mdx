@@ -1,0 +1,78 @@
+# fav explain --lineage
+
+パイプラインの依存グラフを可視化する。
+
+## 出力形式
+
+```bash
+fav explain --lineage src/pipeline.fav               # default: text
+fav explain --lineage --format json src/pipeline.fav
+fav explain --lineage --format mermaid src/pipeline.fav
+fav explain --lineage --format d2 src/pipeline.fav
+```
+
+| `--format` | 出力 | 用途 |
+|---|---|---|
+| `text`（デフォルト） | テキスト | ターミナル確認 |
+| `json` | JSON | CI / 外部ツール連携 |
+| `mermaid` | Mermaid `flowchart LR` | GitHub / Notion / Obsidian |
+| `d2` | D2 diagram | インタラクティブ SVG |
+
+## Mermaid 出力例
+
+```bash
+fav explain --lineage --format mermaid src/pipeline.fav
+```
+
+```mermaid
+flowchart LR
+  LoadCsv["LoadCsv<br/>!Io"]
+  Transform["Transform<br/>Pure"]
+  SaveToDb["SaveToDb<br/>!Db"]
+  LoadCsv --> Transform
+  Transform --> SaveToDb
+```
+
+GitHub の Markdown や Notion / Obsidian に貼り付けるとそのままレンダリングされる。
+
+ファイルに出力する場合:
+
+```bash
+fav explain --lineage --format mermaid src/pipeline.fav > pipeline.mmd
+```
+
+## D2 出力例
+
+```bash
+fav explain --lineage --format d2 src/pipeline.fav
+```
+
+```d2
+LoadCsv: "LoadCsv (!Io)"
+Transform: "Transform (Pure)"
+SaveToDb: "SaveToDb (!Db)"
+LoadCsv -> Transform
+Transform -> SaveToDb
+```
+
+[D2](https://d2lang.com/) をインストールすると SVG に変換できる:
+
+```bash
+d2 pipeline.d2 pipeline.svg
+```
+
+## ノード生成ルール
+
+- 各 `stage` / `fn` を1ノードとして生成
+- ノードラベル: `<name>\n<effects>` 形式（Mermaid）/ `<name> (<effects>)` 形式（D2）
+- エフェクトなし → `Pure`
+- エフェクトあり → `!Io` / `!Db` 等（複数は `+` 区切り）
+
+## テキスト / JSON 形式
+
+既存の `text` / `json` 形式は引き続き利用できる:
+
+```bash
+fav explain --lineage src/pipeline.fav
+fav explain --lineage --format json src/pipeline.fav | jq '.pipelines'
+```

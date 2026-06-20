@@ -1,0 +1,69 @@
+# fav test --coverage
+
+テストカバレッジを計測し、HTML レポートまたは LCOV 形式で出力する。
+
+## 基本的な使い方
+
+```bash
+# テキストサマリーをコンソールに表示（既存の動作）
+fav test --coverage src/
+
+# HTML レポートを coverage/ ディレクトリに生成
+fav test --coverage --html --coverage-report coverage/ src/
+
+# LCOV 形式を coverage/ ディレクトリに生成
+fav test --coverage --lcov --coverage-report coverage/ src/
+
+# HTML + LCOV 同時生成
+fav test --coverage --html --lcov --coverage-report coverage/ src/
+```
+
+> **注意**: `--html` / `--lcov` は `--coverage-report <dir>` と組み合わせて使う必要があります。
+
+## コンソールサマリー
+
+`--coverage` を付けると、テスト後にファイル別のカバレッジが表示される:
+
+```
+Coverage: 78.4% (234/298 lines)
+  ✓ src/pipeline.fav      95.2%  (40/42)
+  ✓ src/transform.fav     88.1%  (59/67)
+  ✗ src/loader.fav        51.3%  (81/158)  ← 要改善
+```
+
+80% 以上のファイルは `✓`、未満は `✗` で表示される。
+
+## HTML レポート（`--html`）
+
+`coverage/index.html` に生成される。外部 CSS/JS 依存なし。
+
+- **サマリーヘッダー**: プロジェクト全体のカバレッジ率
+- **ファイル一覧テーブル**: ファイル名・行カバレッジ・関数カバレッジ
+- **行ハイライト**: 緑（カバー済み）/ 赤（未カバー）/ 灰（非実行行）
+
+```bash
+fav test --coverage --html --coverage-report coverage/ src/
+open coverage/index.html  # または xdg-open / start
+```
+
+## LCOV 形式（`--lcov`）
+
+`coverage/lcov.info` に生成される。CI の coveralls / codecov と連携できる。
+
+### GitHub Actions での使用例
+
+```yaml
+- name: Run tests with coverage
+  run: fav test --coverage --lcov --coverage-report coverage/ src/
+
+- name: Upload to Coveralls
+  uses: coverallsapp/github-action@v2
+  with:
+    file: coverage/lcov.info
+```
+
+## 注意事項
+
+- `--coverage` なし実行では計装コードがゼロコスト（パフォーマンスへの影響なし）
+- branch カバレッジ（match の各 arm）は将来バージョンで対応予定
+- LCOV の関数行番号は現バージョンでは連番（実際のソース行番号は将来対応予定）

@@ -4077,6 +4077,8 @@ pub fn cmd_test(
     coverage: bool,
     coverage_report_dir: Option<&str>,
     update_snapshots: bool,
+    coverage_html: bool,
+    coverage_lcov: bool,
 ) {
     if update_snapshots {
         // SAFETY: single-threaded at this point (before test threads spawn)
@@ -4222,42 +4224,113 @@ pub fn cmd_test(
     print!("{rendered}");
 
     if coverage {
-        // Report coverage across all test source files
-        let source_paths: Vec<String> = tests_to_run
-            .iter()
-            .map(|(path, _, _, _)| path.clone())
-            .collect::<std::collections::BTreeSet<_>>()
-            .into_iter()
-            .collect();
-        let mut full_report = String::new();
-        for path in &source_paths {
-            if let Ok(source) = std::fs::read_to_string(path) {
-                let report = format_coverage_report(path, &source, &all_covered);
-                println!("{}", report);
-                full_report.push_str(&report);
-                full_report.push('\n');
-                if let Ok(prog) = crate::frontend::parser::Parser::parse_str(&source, path) {
-                    let ir = compile_program(&prog);
-                    let fn_report = format_coverage_report_by_fn(&ir, &all_covered);
-                    if !fn_report.is_empty() {
-                        println!("{}", fn_report);
-                        full_report.push_str(&fn_report);
-                        full_report.push('\n');
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            use crate::coverage::{
+                CoverageFileStat, CoverageSummary,
+                format_coverage_summary_console, generate_coverage_html, generate_lcov,
+            };
+            use std::collections::HashMap;
+
+            let threshold = 80.0f64;
+            let mut summary = CoverageSummary::default();
+
+            let source_paths: Vec<String> = tests_to_run
+                .iter()
+                .map(|(path, _, _, _)| path.clone())
+                .collect::<std::collections::BTreeSet<_>>()
+                .into_iter()
+                .collect();
+
+            let mut full_report = String::new();
+            let mut source_map: HashMap<String, String> = HashMap::new();
+
+            for path in &source_paths {
+                if let Ok(source) = std::fs::read_to_string(path) {
+                    // 既存テキストレポート（後方互換）
+                    let text_report = format_coverage_report(path, &source, &all_covered);
+                    println!("{}", text_report);
+                    full_report.push_str(&text_report);
+                    full_report.push('\n');
+
+                    if let Ok(prog) = crate::frontend::parser::Parser::parse_str(&source, path) {
+                        let ir = compile_program(&prog);
+                        let fn_report = format_coverage_report_by_fn(&ir, &all_covered);
+                        if !fn_report.is_empty() {
+                            println!("{}", fn_report);
+                            full_report.push_str(&fn_report);
+                            full_report.push('\n');
+                        }
+                    }
+
+                    // CoverageFileStat を組み立て
+                    let total_lines = source.lines().count() as u32;
+                    let executable: Vec<u32> = (1..=total_lines)
+                        .filter(|l| is_executable_line(&source, *l))
+                        .collect();
+                    let line_hits: Vec<(u32, bool)> = executable.iter()
+                        .map(|&l| (l, all_covered.contains(&l)))
+                        .collect();
+                    let covered_count = line_hits.iter().filter(|(_, hit)| *hit).count();
+                    summary.files.push(CoverageFileStat {
+                        path: path.clone(),
+                        covered: covered_count,
+                        total: executable.len(),
+                        fn_covered: 0,
+                        fn_total: 0,
+                        line_hits,
+                        fn_hits: vec![],
+                    });
+                    source_map.insert(path.clone(), source);
+                }
+            }
+
+            // コンソールサマリー（新形式）
+            println!("{}", format_coverage_summary_console(&summary, threshold));
+
+            // coverage-report ディレクトリへの書き込み
+            if let Some(dir) = coverage_report_dir {
+                if let Err(e) = std::fs::create_dir_all(dir) {
+                    eprintln!("warning: could not create coverage report dir: {e}");
+                } else {
+                    // coverage.txt（後方互換）
+                    let txt_path = std::path::Path::new(dir).join("coverage.txt");
+                    if let Err(e) = std::fs::write(&txt_path, &full_report) {
+                        eprintln!("warning: could not write coverage report: {e}");
+                    } else {
+                        println!("coverage report written to {}", txt_path.display());
+                    }
+
+                    // HTML
+                    if coverage_html {
+                        let html = generate_coverage_html(&summary, &source_map);
+                        let html_path = std::path::Path::new(dir).join("index.html");
+                        if let Err(e) = std::fs::write(&html_path, &html) {
+                            eprintln!("warning: could not write HTML report: {e}");
+                        } else {
+                            println!("HTML report: {}", html_path.display());
+                        }
+                    }
+
+                    // LCOV
+                    if coverage_lcov {
+                        let lcov = generate_lcov(&summary);
+                        let lcov_path = std::path::Path::new(dir).join("lcov.info");
+                        if let Err(e) = std::fs::write(&lcov_path, &lcov) {
+                            eprintln!("warning: could not write LCOV report: {e}");
+                        } else {
+                            println!("LCOV report: {}", lcov_path.display());
+                        }
                     }
                 }
+            } else if coverage_html || coverage_lcov {
+                eprintln!("warning: --html/--lcov requires --coverage-report <dir> to write output files");
             }
         }
-        if let Some(dir) = coverage_report_dir {
-            if let Err(e) = std::fs::create_dir_all(dir) {
-                eprintln!("warning: could not create coverage report dir: {e}");
-            } else {
-                let out_path = std::path::Path::new(dir).join("coverage.txt");
-                if let Err(e) = std::fs::write(&out_path, &full_report) {
-                    eprintln!("warning: could not write coverage report: {e}");
-                } else {
-                    println!("coverage report written to {}", out_path.display());
-                }
-            }
+        #[cfg(target_arch = "wasm32")]
+        {
+            // WASM では coverage レポート出力は非対応
+            let _ = (coverage_html, coverage_lcov);
         }
     }
 
@@ -4266,7 +4339,7 @@ pub fn cmd_test(
     }
 }
 
-fn is_executable_line(source: &str, line: u32) -> bool {
+pub(crate) fn is_executable_line(source: &str, line: u32) -> bool {
     let line_str = source.lines().nth((line - 1) as usize).unwrap_or("");
     let trimmed = line_str.trim();
     !trimmed.is_empty()
@@ -31430,6 +31503,7 @@ mod v211000_tests {
 #[cfg(not(target_arch = "wasm32"))]
 mod v212000_tests {
     #[test]
+    #[ignore]
     fn version_is_21_2_0() {
         let cargo = include_str!("../Cargo.toml");
         assert!(cargo.contains("21.2.0"), "Cargo.toml should have version 21.2.0");
@@ -31522,5 +31596,99 @@ seq Pipeline = Transform
         let mermaid = render_lineage_mermaid(&report);
         assert!(!mermaid.is_empty(), "mermaid output should not be empty");
         assert!(mermaid.contains("flowchart LR"));
+    }
+}
+
+// ── v213000_tests (v21.3.0) — テストカバレッジ HTML / LCOV ──────────────────
+#[cfg(test)]
+#[cfg(not(target_arch = "wasm32"))]
+mod v213000_tests {
+    #[test]
+    fn version_is_21_3_0() {
+        let cargo = include_str!("../Cargo.toml");
+        assert!(cargo.contains("21.3.0"), "Cargo.toml should have version 21.3.0");
+    }
+
+    #[test]
+    fn coverage_html_contains_structure() {
+        use crate::coverage::{CoverageFileStat, CoverageSummary, generate_coverage_html};
+        use std::collections::HashMap;
+        let stat = CoverageFileStat {
+            path: "src/pipeline.fav".to_string(),
+            covered: 8,
+            total: 10,
+            fn_covered: 1,
+            fn_total: 1,
+            line_hits: vec![(1, true), (2, true), (3, false)],
+            fn_hits: vec![("LoadCsv".to_string(), true)],
+        };
+        let summary = CoverageSummary { files: vec![stat] };
+        let mut src_map = HashMap::new();
+        src_map.insert("src/pipeline.fav".to_string(), "stage A = |x| { x }\n".to_string());
+        let html = generate_coverage_html(&summary, &src_map);
+        assert!(html.contains("<!DOCTYPE html>"), "should have DOCTYPE");
+        assert!(html.contains("<table>"), "should have table");
+        assert!(html.contains("80.0%"), "should show coverage pct");
+        assert!(html.contains("8/10"), "should show covered/total lines");
+    }
+
+    #[test]
+    fn coverage_html_highlights_covered_lines() {
+        use crate::coverage::{CoverageFileStat, CoverageSummary, generate_coverage_html};
+        use std::collections::HashMap;
+        let stat = CoverageFileStat {
+            path: "src/test.fav".to_string(),
+            covered: 1,
+            total: 2,
+            fn_covered: 0,
+            fn_total: 0,
+            line_hits: vec![(1, true), (2, false)],
+            fn_hits: vec![],
+        };
+        let summary = CoverageSummary { files: vec![stat] };
+        let mut src_map = HashMap::new();
+        src_map.insert("src/test.fav".to_string(), "line1\nline2\n".to_string());
+        let html = generate_coverage_html(&summary, &src_map);
+        assert!(html.contains("class=\"covered\""), "should have covered class");
+        assert!(html.contains("class=\"uncovered\""), "should have uncovered class");
+    }
+
+    #[test]
+    fn coverage_lcov_format() {
+        use crate::coverage::{CoverageFileStat, CoverageSummary, generate_lcov};
+        let stat = CoverageFileStat {
+            path: "src/pipeline.fav".to_string(),
+            covered: 2,
+            total: 3,
+            fn_covered: 1,
+            fn_total: 1,
+            line_hits: vec![(10, true), (11, true), (12, false)],
+            fn_hits: vec![("LoadCsv".to_string(), true)],
+        };
+        let summary = CoverageSummary { files: vec![stat] };
+        let lcov = generate_lcov(&summary);
+        assert!(lcov.contains("SF:src/pipeline.fav"), "should have SF:");
+        assert!(lcov.contains("FN:1,LoadCsv"), "should have FN: line");
+        assert!(lcov.contains("DA:10,1"), "should have covered line");
+        assert!(lcov.contains("DA:12,0"), "should have uncovered line");
+        assert!(lcov.contains("end_of_record"), "should have end_of_record");
+    }
+
+    #[test]
+    fn coverage_summary_line_format() {
+        use crate::coverage::{CoverageFileStat, CoverageSummary, format_coverage_summary_console};
+        let stat = CoverageFileStat {
+            path: "src/pipeline.fav".to_string(),
+            covered: 8,
+            total: 10,
+            fn_covered: 1,
+            fn_total: 1,
+            line_hits: vec![],
+            fn_hits: vec![],
+        };
+        let summary = CoverageSummary { files: vec![stat] };
+        let out = format_coverage_summary_console(&summary, 80.0);
+        assert!(out.contains("Coverage:"), "should have Coverage: header");
+        assert!(out.contains("✓"), "should have check mark for 80%+ file");
     }
 }

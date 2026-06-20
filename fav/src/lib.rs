@@ -68,6 +68,14 @@ pub mod incremental;
 pub mod parallel;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod profiler;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod pushdown;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod arena;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod dap;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod coverage;
 
 // wasm_codegen uses only wasm-encoder (pure Rust), available on all targets.
 // `#[allow]` needed because backend/mod.rs also declares the same file.

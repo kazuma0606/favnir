@@ -4,6 +4,21 @@ Favnir のバージョン履歴。形式は [Keep a Changelog](https://keepachan
 
 ---
 
+## [v21.3.0] — 2026-06-20 — テストカバレッジ HTML / LCOV 出力
+
+`fav test --coverage --html` で HTML カバレッジレポート、
+`--lcov` で LCOV 形式ファイルを生成できるようになった。
+
+### Added
+- `fav test --coverage --html --coverage-report <dir>` — HTML レポート（index.html）生成（行ハイライト・ファイル一覧テーブル付き）
+- `fav test --coverage --lcov --coverage-report <dir>` — LCOV 形式（lcov.info）出力（coveralls / codecov 連携用）
+- コンソールサマリーをファイル別 ✓/✗ 形式に改善（`Coverage: XX.X% (N/M lines)`）
+- `fav/src/coverage/mod.rs` 新規作成（`CoverageFileStat` / `CoverageSummary` / `generate_coverage_html` / `generate_lcov` / `format_coverage_summary_console`）
+- `is_executable_line` を `pub(crate)` に昇格（coverage モジュールからの利用を可能に）
+- `site/content/docs/tools/coverage.mdx` — 使い方ドキュメント
+
+---
+
 ## [v21.2.0] — 2026-06-20 — fav explain 可視化強化
 
 `fav explain --lineage` の出力形式を Mermaid / D2 に拡張。

@@ -68,6 +68,8 @@ mod pushdown;
 mod arena;
 #[cfg(not(target_arch = "wasm32"))]
 mod dap;
+#[cfg(not(target_arch = "wasm32"))]
+mod coverage;
 mod std_states;
 mod toml;
 mod value;
@@ -137,7 +139,7 @@ COMMANDS:
                   Build a reachability-trimmed .fvc artifact and optional manifest/explain outputs.
     graph [--format <text|mermaid>] [--focus <flw|fn>] [--entry <name>] [--depth <n>] <file>
                   Show the flow or function dependency graph in text or Mermaid form.
-    test [--filter <pattern>] [--fail-fast] [--no-capture] [--coverage] [--coverage-report <dir>] [file]
+    test [--filter <pattern>] [--fail-fast] [--no-capture] [--coverage] [--html] [--lcov] [--coverage-report <dir>] [file]
                   Run test blocks in .fav / .test.fav / .spec.fav files.
                   With --coverage, print line coverage after tests complete.
                   With --coverage-report <dir>, write coverage report to <dir>/coverage.txt.
@@ -923,6 +925,8 @@ fn main_impl() {
             let mut fail_fast = false;
             let mut no_capture = false;
             let mut coverage = false;
+            let mut coverage_html = false;
+            let mut coverage_lcov = false;
             let mut coverage_report_dir: Option<String> = None;
             let mut update_snapshots = false;
             let mut file: Option<String> = None;
@@ -951,6 +955,14 @@ fn main_impl() {
                     }
                     "--coverage" => {
                         coverage = true;
+                        i += 1;
+                    }
+                    "--html" => {
+                        coverage_html = true;
+                        i += 1;
+                    }
+                    "--lcov" => {
+                        coverage_lcov = true;
                         i += 1;
                     }
                     "--update-snapshots" => {
@@ -997,6 +1009,8 @@ fn main_impl() {
                 coverage,
                 coverage_report_dir.as_deref(),
                 update_snapshots,
+                coverage_html,
+                coverage_lcov,
             );
         }
 

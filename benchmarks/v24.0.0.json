@@ -1,0 +1,12 @@
+{
+  "version": "24.0.0",
+  "date": "2026-06-23",
+  "test_count": 1930,
+  "feature": "VM in Favnir マイルストーン宣言",
+  "metrics": {
+    "vm_fav_phases": 5,
+    "milestone": "VM in Favnir",
+    "roadmap_conditions_met": 4,
+    "new_pub_fns": 1
+  }
+}

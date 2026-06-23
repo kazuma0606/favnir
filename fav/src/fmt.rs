@@ -103,6 +103,7 @@ impl Formatter {
             Item::UseAlias { original, alias, .. } => {
                 format!("use {} as {}", original, alias)
             }
+            Item::PipelineDef(pd) => format!("pipeline {} {{ ... }}", pd.name), // v22.5.0: fmt スタブ
         }
     }
 
@@ -852,6 +853,7 @@ fn fmt_effect(eff: &Effect) -> Option<String> {
         Effect::File => Some("!File".to_string()),
         Effect::Checkpoint => Some("!Checkpoint".to_string()),
         Effect::Trace => Some("!Trace".to_string()),
+        Effect::PipelineState => Some("!PipelineState".to_string()),
         Effect::Unknown(name) => Some(format!("!{}", name)),
         Effect::Emit(t) => Some(format!("!Emit<{}>", t)),
         Effect::EmitUnion(ts) => Some(format!("!Emit<{}>", ts.join("|"))),

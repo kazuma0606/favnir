@@ -1,0 +1,82 @@
+---
+title: "par stage で並列 ETL パイプライン"
+description: "par を使って複数のデータソースを並列に取得し、マージして処理するレシピ"
+---
+
+# par stage で並列 ETL パイプライン
+
+## 概要
+
+`par [A, B]` で複数ステージを並列実行し、結果をマージするパターンです。
+異なるデータソースからの取得を並列化することで、全体の実行時間を短縮します。
+
+## parallel.fav
+
+```favnir
+import postgres as db
+
+type UserRow  { id: Int; name: String }
+type OrderRow { user_id: Int; amount: Float }
+
+type MergedRow {
+  user_id:     Int
+  user_name:   String
+  total_spend: Float
+}
+
+stage FetchUsers -> List[UserRow] !Http {
+  // Http.get は String を返す → Json.decode で型付き変換
+  Http.get("https://api.example.com/users")
+    |> Json.decode[List[UserRow]]
+}
+
+stage FetchOrders -> List[OrderRow] !Http {
+  Http.get("https://api.example.com/orders")
+    |> Json.decode[List[OrderRow]]
+}
+
+fn calc_spend(orders: List[OrderRow], user_id: Int) -> Float {
+  orders
+    |> List.filter(|o| o.user_id == user_id)
+    |> List.map(|o| o.amount)
+    |> List.sum
+}
+
+stage MergeAndStore(
+  users:  List[UserRow],
+  orders: List[OrderRow]
+) -> Int !Db {
+  users
+    |> List.map(|u| MergedRow {
+         user_id:     u.id,
+         user_name:   u.name,
+         total_spend: calc_spend(orders, u.id),
+       })
+    |> List.map(|row|
+         db.execute(
+           "INSERT INTO summary (user_id, user_name, total_spend) VALUES ($1, $2, $3)",
+           [row.user_id, row.user_name, row.total_spend]
+         ))
+    |> List.length
+}
+
+pipeline ParallelETL {
+  par [FetchUsers, FetchOrders] |> MergeAndStore
+}
+```
+
+## 実行
+
+```bash
+fav run parallel.fav
+# Merged 250 rows in 1.2s (vs 2.4s sequential)
+```
+
+## ポイント
+
+- `par [A, B]` で 2 ステージを並列実行（スレッド分離）
+- `|> MergeAndStore` で両結果を受け取るステージにパイプ
+- `Http.get` → `Json.decode[T]` の 2 ステップで型安全な JSON 取得
+- `bind` ではなくパイプラインと純粋関数（`calc_spend`）で副作用を分離
+- `db.execute(SQL, args)` で型安全な DB 書き込み（`db.upsert` は使わない）
+- 依存関係のない取得処理の並列化に最適

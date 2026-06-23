@@ -111,6 +111,8 @@ pub enum Effect {
     File,
     Checkpoint,
     Trace,
+    /// v22.3.0: Pipeline distributed state (`!PipelineState`)
+    PipelineState,
     /// `Emit<EventType>`
     Emit(String),
     /// `Emit<A | B>`  Eresult of composing multiple Emit effects
@@ -567,6 +569,69 @@ pub struct ApiAnnotation {
     pub span: Span,
 }
 
+// ── PipelineDef (v22.5.0) ─────────────────────────────────────────────────────
+
+/// v22.5.0: A single step in a pipeline DAG.
+#[derive(Debug, Clone)]
+pub struct PipelineStep {
+    /// Step ラベル（`step "load_raw"` の `"load_raw"`）
+    pub name: String,
+    /// 実行する seq 宣言名（`= seq LoadRaw` の `LoadRaw`）
+    pub seq_name: String,
+    /// このステップが依存するステップ名（`after "load_raw"` の `"load_raw"`）
+    pub after: Vec<String>,
+    pub span: Span,
+}
+
+/// v22.5.0: `pipeline Name { step ... }` ブロック。
+#[derive(Debug, Clone)]
+pub struct PipelineDef {
+    pub name: String,
+    pub steps: Vec<PipelineStep>,
+    pub span: Span,
+}
+
+// ── TriggerAnnotation (v22.4.0) ───────────────────────────────────────────────
+
+/// `#[trigger(event = "s3:ObjectCreated", bucket = "raw-data")]` annotation on seq definitions.
+#[derive(Debug, Clone)]
+pub struct TriggerAnnotation {
+    /// イベント種別: "s3:ObjectCreated", "kafka:message", "sqs:message" など
+    pub event: String,
+    /// S3 バケット名（s3:* イベント用）
+    pub bucket: Option<String>,
+    /// Kafka / SQS トピック / キュー名（kafka:* / sqs:* イベント用）
+    pub topic: Option<String>,
+    pub span: Span,
+}
+
+// ── SLA Annotations (v22.6.0) ────────────────────────────────────────────────
+
+/// `#[timeout(seconds = 30)]` annotation on stage definitions.
+#[derive(Debug, Clone)]
+pub struct TimeoutAnnotation {
+    pub seconds: f64,
+    pub span: Span,
+}
+
+/// `#[retry(max = 3, backoff = "exponential")]` annotation on stage definitions.
+/// `backoff` は `"exponential"` / `"linear"` / `"none"` のいずれか。
+#[derive(Debug, Clone)]
+pub struct RetryAnnotation {
+    pub max: u32,
+    pub backoff: String,
+    pub span: Span,
+}
+
+/// `#[circuit_breaker(threshold = 0.5, window = 60)]` annotation on stage definitions.
+/// `threshold` は 0.0 超〜1.0 以下、`window` は秒単位（正の整数）。
+#[derive(Debug, Clone)]
+pub struct CircuitBreakerAnnotation {
+    pub threshold: f64,
+    pub window: u64,
+    pub span: Span,
+}
+
 // ── FnDef (2-5) ───────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone)]
@@ -581,6 +646,8 @@ pub struct FnDef {
     pub body: Block,
     pub span: Span,
     pub api_annotation: Option<ApiAnnotation>, // v18.8.0: #[api(method, path)]
+    /// v24.4.0: `#[deprecated]` アノテーション付き関数
+    pub deprecated: bool,
 }
 
 // ── TrfDef (2-6) ──────────────────────────────────────────────────────────────
@@ -600,6 +667,14 @@ pub struct TrfDef {
     pub stateful: bool,
     /// v19.5.0: `#[arrow]` annotation — stage uses Arrow RecordBatch internally.
     pub arrow: bool,
+    /// v22.1.0: `#[checkpoint]` annotation — stage output is persisted to a checkpoint file.
+    pub checkpoint: bool,
+    /// v22.6.0: `#[timeout(seconds = N)]` annotation.
+    pub timeout: Option<TimeoutAnnotation>,
+    /// v22.6.0: `#[retry(max = N, backoff = "...")]` annotation.
+    pub retry_ann: Option<RetryAnnotation>,
+    /// v22.6.0: `#[circuit_breaker(threshold = F, window = N)]` annotation.
+    pub circuit_breaker: Option<CircuitBreakerAnnotation>,
     pub span: Span,
 }
 
@@ -623,6 +698,8 @@ pub enum FlwStep {
     Stage(String),
     /// Parallel group: `par [A, B, ...]`
     Par(Vec<String>),
+    /// Distributed parallel group: `par_distributed [A, B, ...]` — v22.2.0
+    ParDistributed(Vec<String>),
     /// Side-effect tap: `|> tap(observer_fn)` — passes value through unchanged (v16.8.0)
     Tap(Box<Expr>),
     /// Debug tap: `|> inspect` — prints value via vmvalue_repr and passes through (v16.8.0)
@@ -634,7 +711,7 @@ impl FlwStep {
     pub fn stage_names(&self) -> Vec<&str> {
         match self {
             FlwStep::Stage(s) => vec![s.as_str()],
-            FlwStep::Par(names) => names.iter().map(|s| s.as_str()).collect(),
+            FlwStep::Par(names) | FlwStep::ParDistributed(names) => names.iter().map(|s| s.as_str()).collect(),
             FlwStep::Tap(_) | FlwStep::Inspect => vec![],
         }
     }
@@ -644,6 +721,7 @@ impl FlwStep {
         match self {
             FlwStep::Stage(s) => s.clone(),
             FlwStep::Par(names) => format!("par [{}]", names.join(", ")),
+            FlwStep::ParDistributed(names) => format!("par_distributed [{}]", names.join(", ")),
             FlwStep::Tap(_) => "tap(...)".to_string(),
             FlwStep::Inspect => "inspect".to_string(),
         }
@@ -660,6 +738,8 @@ pub struct FlwDef {
     pub ctx_param: Option<String>,
     /// v19.1.0: `#[streaming]` annotation — enables chunk-based evaluation.
     pub streaming: Option<StreamingAnnotation>,
+    /// v22.4.0: `#[trigger(...)]` annotation — event-driven pipeline trigger.
+    pub trigger: Option<TriggerAnnotation>,
     pub span: Span,
 }
 
@@ -803,6 +883,7 @@ pub enum Item {
     TrfDef(TrfDef),
     AbstractTrfDef(AbstractTrfDef),
     FlwDef(FlwDef),
+    PipelineDef(PipelineDef), // v22.5.0
     AbstractFlwDef(AbstractFlwDef),
     FlwBindingDef(FlwBindingDef),
     NamespaceDecl(String, Span), // namespace data.users
@@ -870,6 +951,7 @@ impl Item {
             Item::BenchDef(b) => &b.span,
             Item::AliasDecl { span, .. } => span,
             Item::UseAlias { span, .. } => span,
+            Item::PipelineDef(pd) => &pd.span,
         }
     }
 }

@@ -1,0 +1,27 @@
+{
+  "version": "23.1.0",
+  "timestamp": "2026-06-21T00:00:00Z",
+  "_note": "Bytes type implementation: opaque handle, 13 builtin functions, NaN-boxing compatible.",
+  "metrics": {
+    "test_count": 1894,
+    "bytes_functions": 13,
+    "bytes_wasm_functions": 11,
+    "bytes_native_only_functions": 2
+  },
+  "_metrics_notes": {
+    "bytes_wasm_functions": "wasm32 で使える 11 関数（read_file / write_file を除く）",
+    "bytes_native_only_functions": "read_file / write_file（cfg(not(wasm32))）",
+    "test_count": "v23.0.0 完了時（1886）+ v231000_tests 9 件（5 件 + コードレビュー指摘後 4 件追加）"
+  },
+  "bytes_features": {
+    "opaque_handle":  { "achieved": true, "version": "v23.1.0", "note": "NaN-boxing 準拠" },
+    "from_hex":       { "achieved": true, "version": "v23.1.0" },
+    "to_hex":         { "achieved": true, "version": "v23.1.0" },
+    "from_str":       { "achieved": true, "version": "v23.1.0" },
+    "to_utf8":        { "achieved": true, "version": "v23.1.0" },
+    "get_slice":      { "achieved": true, "version": "v23.1.0" },
+    "concat":         { "achieved": true, "version": "v23.1.0" },
+    "file_io":        { "achieved": true, "version": "v23.1.0", "note": "native only" },
+    "read_u16_24_32": { "achieved": true, "version": "v23.1.0", "note": "vm.fav bytecode decode 用" }
+  }
+}

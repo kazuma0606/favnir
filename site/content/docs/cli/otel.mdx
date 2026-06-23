@@ -1,0 +1,77 @@
+---
+title: OpenTelemetry 統合
+description: fav run --trace で分散トレーシングを有効化し、Jaeger・Grafana Tempo 等の標準 OTel バックエンドで可視化する方法
+---
+
+# OpenTelemetry 統合
+
+v22.7.0 から `fav run --trace` に分散トレーシングが統合されました。
+各 `stage` の実行が **OpenTelemetry span** として収集され、Jaeger や Grafana Tempo 等の
+標準バックエンドで可視化できます。
+
+## クイックスタート
+
+```bash
+# Jaeger を起動（Docker）
+docker run -d --name jaeger \
+  -p 4318:4318 \
+  -p 16686:16686 \
+  jaegertracing/all-in-one:latest
+
+# OTel エンドポイントを設定して実行
+OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318 fav run --trace pipeline.fav
+```
+
+Jaeger UI（`http://localhost:16686`）で `favnir` サービスのトレースを確認できます。
+
+## 環境変数
+
+| 変数 | 説明 |
+|---|---|
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | OTLP/HTTP エンドポイント（例: `http://jaeger:4318`）。設定した場合、`{endpoint}/v1/traces` に POST する |
+
+## フォールバック出力（環境変数未設定時）
+
+`OTEL_EXPORTER_OTLP_ENDPOINT` が設定されていない場合、`[OTEL]` span サマリーを **stderr** に出力します。
+
+```
+[OTEL] trace_id=a1b2c3d4e5f67890a1b2c3d4e5f67890
+[OTEL] span stage:LoadCsv                   dur=   120ms  status=ok  in=0 out=1000
+[OTEL] span stage:Transform                 dur=   200ms  status=ok  in=1000 out=1000
+[OTEL] span stage:Save                      dur=   130ms  status=ok  in=1000 out=1000
+```
+
+## Span 構造
+
+各 `stage` が独立した span として収集されます。
+
+### Span Attributes
+
+| Attribute | 型 | 例 |
+|---|---|---|
+| `favnir.stage.name` | string | `"FetchData"` |
+| `favnir.stage.input_items` | int | `42` |
+| `favnir.stage.output_items` | int | `36` |
+| `favnir.stage.status` | string | `"ok"` / `"error"` |
+| `service.name` | string | `"favnir"` |
+| `service.version` | string | `"22.7.0"` |
+
+### Span 名
+
+```
+stage:<stage名>
+```
+
+例: `stage:LoadCsv`、`stage:Transform`、`stage:Save`
+
+## スコープ外（v22.7.0 では未実装）
+
+- root span（pipeline 全体を包む span）
+- `traceparent` HTTP ヘッダーによる外部 trace_id 注入
+- OTLP/gRPC エクスポート
+- `fav.toml` 経由での OTel 設定（`[otel]` セクション）
+
+## 関連
+
+- [`fav run`](/docs/cli/run) — パイプライン実行コマンド
+- [`fav run --trace`](/docs/cli/run#trace) — トレース出力オプション

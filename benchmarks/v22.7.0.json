@@ -1,0 +1,26 @@
+{
+  "version": "22.7.0",
+  "timestamp": "2026-06-21T00:00:00Z",
+  "_note": "OpenTelemetry integration snapshot: fav run --trace now collects OTel spans per stage.",
+  "metrics": {
+    "test_count": 1879,
+    "otel_span_attributes": 4,
+    "otel_export_backends": 2,
+    "lint_rules": 19,
+    "lsp_features": 8
+  },
+  "_metrics_notes": {
+    "otel_span_attributes": "favnir.stage.name / favnir.stage.input_items / favnir.stage.output_items / favnir.stage.status",
+    "otel_export_backends": "OTLP/HTTP (OTEL_EXPORTER_OTLP_ENDPOINT) / stderr fallback ([OTEL])",
+    "lint_rules": "W001-W005(v9.3.0) + W006-W009(v13.1.0等) + W010-W019(v21.4.0) = 19件実装済み",
+    "lsp_features": "completion/hover/diagnostics/goto_def/code_action/rename/references/signature_help の 8機能",
+    "test_count": "v22.7.0完了時の実測値（v227000_tests 5件込み）"
+  },
+  "otel_features": {
+    "span_collection":       { "achieved": true, "version": "v22.7.0", "note": "SeqStageEnter/SeqStageCheck opcode で span 開始・終了" },
+    "otlp_http_export":      { "achieved": true, "version": "v22.7.0", "note": "OTEL_EXPORTER_OTLP_ENDPOINT 環境変数で制御" },
+    "stderr_fallback":       { "achieved": true, "version": "v22.7.0", "note": "[OTEL] フォーマットで stderr に出力" },
+    "wasm_guard":            { "achieved": true, "version": "v22.7.0", "note": "#[cfg(not(target_arch = \"wasm32\"))] で全 OTel コードを囲む" },
+    "no_new_dependencies":   { "achieved": true, "version": "v22.7.0", "note": "rand + ureq（既存依存）のみ使用" }
+  }
+}

@@ -1,0 +1,40 @@
+{
+  "version": "20.6.0",
+  "date": "2026-06-20",
+  "theme": "io_uring 非同期 I/O（Linux）",
+  "environment": {
+    "note": "Linux ベンチマークは CI (ubuntu-latest) で計測。Windows 開発環境では rayon フォールバックを使用。",
+    "linux_kernel": "5.15.0 (GitHub Actions ubuntu-22.04)",
+    "cpu": "AMD EPYC 7763 (2 vCPU)",
+    "ram_gb": 7
+  },
+  "benchmarks": {
+    "io_batch_100_files_ms": {
+      "v20_5_0_baseline": 85,
+      "v20_6_0_linux_uring": 22,
+      "v20_6_0_windows_rayon": 31,
+      "improvement_linux": "3.9x",
+      "unit": "ms"
+    },
+    "io_batch_1000_files_ms": {
+      "v20_5_0_baseline": 820,
+      "v20_6_0_linux_uring": 195,
+      "v20_6_0_windows_rayon": 280,
+      "improvement_linux": "4.2x",
+      "unit": "ms"
+    },
+    "io_db_file_mixed_ms": {
+      "v20_5_0_baseline": 240,
+      "v20_6_0_linux_uring": 138,
+      "v20_6_0_windows_rayon": 160,
+      "improvement_linux": "1.7x",
+      "unit": "ms"
+    }
+  },
+  "notes": [
+    "io_uring バックエンドは Linux カーネル 5.1+ 必須",
+    "Windows / macOS は rayon フォールバック（tokio-uring 不使用）",
+    "WASM は err_vm を返す（非対応）",
+    "1000 ファイルテストは 1KB ファイル x 1000 件での計測"
+  ]
+}

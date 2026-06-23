@@ -1,0 +1,93 @@
+---
+title: Arena
+description: GC なし高速アロケーション — Arena アロケータ統計
+---
+
+# Arena
+
+`Arena` 名前空間はストリーミングパイプラインのアロケータ統計へのアクセスを提供します。
+
+> **注意**: `Arena` は WASM 非対応です。WASM 環境では `Arena.stats()` は `err` を返します。
+
+---
+
+## Arena.stats
+
+```favnir
+Arena.stats() -> Record
+```
+
+現在のチャンクアリーナ統計を Record として返します。
+
+### 返却フィールド
+
+| フィールド | 型 | 説明 |
+|---|---|---|
+| `acquire_count` | `Int` | pool から Vec を取得した回数（pool hit） |
+| `alloc_count` | `Int` | 新規 malloc が必要だった回数（pool miss） |
+| `reset_count` | `Int` | chunk 境界でリセットした回数（`end_chunk` 呼び出し数） |
+| `peak_capacity` | `Int` | Vec の最大 capacity（要素数） |
+
+### 使用例
+
+```favnir
+-- ストリーミングパイプライン実行後に統計を確認する
+let stats = Arena.stats()
+
+-- 結果例:
+-- { acquire_count: 999, alloc_count: 1, reset_count: 1000, peak_capacity: 512 }
+```
+
+### pool hit rate の計算
+
+```favnir
+let stats = Arena.stats()
+let total = stats.acquire_count + stats.alloc_count
+let hit_rate = stats.acquire_count / total  -- 0.999 = 99.9%
+```
+
+### 注意事項
+
+- `Arena.stats()` は引数を取りません。引数を渡すとランタイムエラーになります
+- `reset_count` は `end_chunk` の呼び出し回数と一致します（ストリーミング chunk 数と同じ）
+- `peak_capacity` はすべての chunk を通じて最大の Vec capacity を追跡します
+- pool hit rate が低い場合（< 50%）は chunk 処理が Vec を破棄している可能性があります
+
+---
+
+## FAV_ARENA_ENABLED 環境変数
+
+```bash
+# arena を無効化（デバッグ用）— v20.6.0 相当の動作
+FAV_ARENA_ENABLED=0 fav run pipeline.fav
+
+# arena を有効化（デフォルト）
+FAV_ARENA_ENABLED=1 fav run pipeline.fav
+```
+
+`FAV_ARENA_ENABLED=0` を設定すると `ChunkArena` は pool を使わず毎回 `Vec::with_capacity` を呼びます。
+これにより arena 有効/無効のパフォーマンス差を計測できます。
+
+---
+
+## パフォーマンス特性（v20.7.0）
+
+| メトリクス | arena 無効 | arena 有効 | 改善 |
+|---|---|---|---|
+| 1M 行変換（ms） | ~142ms | ~98ms | +31% |
+| ピークメモリ（MB） | ~284MB | ~221MB | -22% |
+| chunk alloc overhead（ms） | ~47ms | ~18ms | +2.6x |
+
+---
+
+## WASM 非対応
+
+`Arena` は native-only です。WASM 環境でビルドする場合:
+
+```favnir
+-- WASM では err を返す
+let stats_result = Arena.stats()
+-- err("Arena.stats: not supported on wasm32")
+```
+
+WASM ビルドでは `#[cfg(not(target_arch = "wasm32"))]` ガードにより arena コード自体がコンパイルされません。

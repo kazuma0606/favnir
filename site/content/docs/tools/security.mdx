@@ -1,0 +1,57 @@
+---
+title: "セキュリティモデル"
+description: "Favnir のエフェクトシステムによるセキュリティ保証と CVE 対応プロセス"
+---
+
+# セキュリティモデル
+
+## エフェクトシステムの保証
+
+Favnir の根本原則: **「capability 引数がなければ純粋」**
+
+`!Effect` を宣言しない関数は参照透明であることが保証される。
+副作用（HTTP 通信、DB 書き込み、ファイル操作など）は必ずシグネチャに現れる。
+
+```favnir
+// 純粋関数 — 副作用なし、同じ入力で必ず同じ出力
+fn transform(x: Int) -> Int { x * 2 }
+
+// 副作用あり — !Http を宣言
+fn fetch(url: String) -> String !Http { Http.get(url) }
+```
+
+## W021 lint ルール
+
+W021 `pure_fn_calls_effectful` — 純粋関数が副作用関数を呼び出す箇所を検出する。
+
+```favnir
+fn fetch_data(url: String) -> String !Http { ... }
+
+// W021: pure function `process` calls effectful function `fetch_data`
+fn process(url: String) -> String { fetch_data(url) }
+```
+
+修正方法: `process` に `!Http` を追加するか、別の純粋な関数を呼ぶ。
+
+## Capability 公理
+
+| 公理 | 内容 |
+|---|---|
+| 純粋性（Purity）| エフェクト宣言なしの関数は参照透明 |
+| 効果の伝播（Effect Propagation）| 副作用関数を呼ぶ関数は同じエフェクトを宣言する |
+| 能力の封じ込め（Capability Confinement）| 宣言なしでは副作用を発生させられない |
+| 合成（Composition）| `f |> g` のエフェクトは E₁ ∪ E₂ |
+
+詳細は [SECURITY_MODEL.md](https://github.com/favnir/favnir/blob/main/SECURITY_MODEL.md) を参照。
+
+## CVE 対応プロセス
+
+セキュリティ脆弱性を発見した場合は **security@favnir.dev** へご報告ください。
+公開 Issue は作成しないでください。
+
+- 7 日以内: 受領確認
+- 30 日以内: 初期調査・CVSS スコア評価
+- **90 日以内**: パッチリリース
+- 90 日後: 脆弱性の公開
+
+詳細は [SECURITY.md](https://github.com/favnir/favnir/blob/main/SECURITY.md) を参照。

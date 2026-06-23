@@ -1,0 +1,52 @@
+---
+title: "形式的仕様書"
+description: "fav spec コマンドによる Favnir 言語の形式的仕様書生成"
+---
+
+# 形式的仕様書
+
+Favnir v24.1 では `fav spec` コマンドを実装しました。
+言語の型システム・エフェクトシステム・パターンマッチ規則を形式的仕様書として出力します。
+
+## fav spec の使い方
+
+```bash
+# Markdown 形式で出力
+fav spec --format markdown > SPEC.md
+
+# HTML 形式で出力
+fav spec --format html > spec/index.html
+```
+
+## 仕様書の構成
+
+生成される仕様書には以下が含まれます:
+
+| セクション | 内容 |
+|---|---|
+| 型システム | 型推論規則（HM 型推論）・型スキーム・unification |
+| エフェクトシステム | エフェクト宣言・伝播・Capability 公理 |
+| パターンマッチ | 網羅性チェック規則・パターンコンパイル |
+| オペコード仕様 | decode → execute 対応表（VM 命令セット） |
+
+## エフェクトシステム公理（抜粋）
+
+```
+[T-Pure]   ──────────────────────────────────
+           Γ ⊢ f : τ₁ → τ₂  (effects = ∅)
+
+[T-Effect] Γ ⊢ f : τ₁ → τ₂ !E
+           ──────────────────────────────────
+           caller must declare !E
+
+[T-Compose] Γ ⊢ f : A → B !E₁, g : B → C !E₂
+            ──────────────────────────────────
+            Γ ⊢ f |> g : A → C !(E₁ ∪ E₂)
+```
+
+詳細は [SECURITY_MODEL.md](https://github.com/favnir/favnir/blob/main/SECURITY_MODEL.md) を参照。
+
+## ダウンロード
+
+- [SPEC.md](https://github.com/favnir/favnir/blob/main/SPEC.md) — 最新の Markdown 形式仕様書
+- `fav spec --format markdown` で手元に生成

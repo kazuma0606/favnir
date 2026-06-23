@@ -22,6 +22,7 @@ use super::ir::{
     FieldMeta, IRArm, IRExpr, IRFnDef, IRGlobal, IRGlobalKind, IRPattern, IRProgram, IRStmt,
     TypeMeta,
 };
+use crate::pushdown::{detect_pushdown, PushdownPlan};
 use crate::ast::{
     AbstractFlwDef, AbstractTrfDef, BinOp, BindStmt, Block, CompClause, Expr, FStringPart,
     FlwBindingDef, FlwDef, FlwSlot, FlwStep, ForInStmt, ImplDef, InterfaceDecl,
@@ -235,6 +236,20 @@ pub fn compile_program(program: &Program) -> IRProgram {
         "__streaming_pipeline",
         // v19.5.0 Apache Arrow
         "ArrowBatch",
+        // v20.4.0 DuckDB pushdown
+        "__duckdb_push",
+        // v20.7.0 Arena アロケータ
+        "Arena.stats",
+        // v23.1.0 Bytes 型（namespace として登録）
+        "Bytes",
+        // v23.3.0 Mut コレクション（namespace として登録）
+        "Mut",
+        // v20.8.0 Postgres Pool
+        "Postgres.Pool.create",
+        "Postgres.Pool.query",
+        "Postgres.Pool.execute",
+        "Postgres.Pool.stats",
+        "Postgres.Pool.close",
     ] {
         if !ctx.globals.contains_key(*ns) {
             let idx = globals.len() as u16;
@@ -438,6 +453,7 @@ pub fn compile_program(program: &Program) -> IRProgram {
                 next_fn_idx += 1;
             }
             Item::InterfaceDecl(_) => {}
+            Item::PipelineDef(_) => {} // v22.5.0: グローバル登録不要（現状スタブ）
             _ => {}
         }
     }
@@ -553,19 +569,65 @@ pub fn compile_program(program: &Program) -> IRProgram {
                     &mut ctx,
                 ));
             }
-            Item::TrfDef(td) => fns.push(compile_fn_def(
-                &td.name,
-                &td.type_params,
-                &td.params.iter().map(|p| p.name.clone()).collect::<Vec<_>>(),
-                &td.params
-                    .iter()
-                    .map(|p| lower_type_expr(&p.ty))
-                    .collect::<Vec<_>>(),
-                &td.effects,
-                Some(&td.output_ty),
-                &td.body,
-                &mut ctx,
-            )),
+            Item::TrfDef(td) => {
+                let param_name = td.params.first().map(|p| p.name.as_str()).unwrap_or("_");
+                let pushdown = detect_pushdown(&td.body.expr, param_name);
+                let param_strs: Vec<String> =
+                    td.params.iter().map(|p| p.name.clone()).collect();
+                let param_tys_: Vec<Type> =
+                    td.params.iter().map(|p| lower_type_expr(&p.ty)).collect();
+
+                // Only generate a pushdown wrapper when __duckdb_push is registered.
+                // If it somehow isn't (shouldn't happen in normal builds), skip to
+                // avoid embedding u16::MAX as the global index.
+                let duckdb_push_available = ctx.resolve_global("__duckdb_push").is_some();
+
+                if let Some(plan) = pushdown.filter(|_| duckdb_push_available) {
+                    // Compile the original stage as fallback (at fns[fallback_fn_idx])
+                    let fallback_fn_idx = fns.len();
+                    let fallback_name = format!("__pushdown_fallback_{}", td.name);
+                    let mut fallback_fn = compile_fn_def(
+                        &fallback_name,
+                        &td.type_params,
+                        &param_strs,
+                        &param_tys_,
+                        &td.effects,
+                        Some(&td.output_ty),
+                        &td.body,
+                        &mut ctx,
+                    );
+                    fallback_fn.name = fallback_name;
+                    fns.push(fallback_fn);
+
+                    // Build wrapper at fns[wrapper_fn_idx] calling __duckdb_push
+                    let wrapper_fn_idx = fns.len();
+                    let wrapper_fn = compile_pushdown_wrapper(
+                        &td.name,
+                        &plan,
+                        fallback_fn_idx,
+                        &mut ctx,
+                    );
+                    fns.push(wrapper_fn);
+
+                    // Update the global for td.name to point to the wrapper
+                    if let Some(&g_idx) = ctx.globals.get(&td.name) {
+                        if let Some(g) = globals.get_mut(g_idx as usize) {
+                            g.kind = IRGlobalKind::Fn(wrapper_fn_idx);
+                        }
+                    }
+                } else {
+                    fns.push(compile_fn_def(
+                        &td.name,
+                        &td.type_params,
+                        &param_strs,
+                        &param_tys_,
+                        &td.effects,
+                        Some(&td.output_ty),
+                        &td.body,
+                        &mut ctx,
+                    ));
+                }
+            }
             Item::FlwDef(fd) => fns.push(compile_flw_def(fd, &mut ctx)),
             Item::AbstractTrfDef(_) => {}
             Item::AbstractFlwDef(_) => {}
@@ -639,6 +701,7 @@ pub fn compile_program(program: &Program) -> IRProgram {
                 ))
             }
             Item::InterfaceDecl(_) => {}
+            Item::PipelineDef(_) => {} // v22.5.0: コンパイル不要（現状スタブ）
             _ => {}
         }
     }
@@ -680,6 +743,7 @@ fn flw_step_name(step: &FlwStep) -> String {
     match step {
         FlwStep::Stage(name) => name.clone(),
         FlwStep::Par(names) => format!("par[{}]", names.join(",")),
+        FlwStep::ParDistributed(names) => format!("par_distributed[{}]", names.join(",")),
         FlwStep::Tap(_) => "tap".to_string(),
         FlwStep::Inspect => "inspect".to_string(),
     }
@@ -722,6 +786,36 @@ fn build_step_call(step: &FlwStep, input: IRExpr, ctx: &mut CompileCtx) -> IRExp
             let par_callee = IRExpr::FieldAccess(
                 Box::new(IRExpr::Global(io_ns_idx, Type::Unknown)),
                 "par_execute_raw".to_string(),
+                Type::Unknown,
+            );
+            IRExpr::Call(Box::new(par_callee), vec![names_expr, input], Type::Unknown)
+        }
+        FlwStep::ParDistributed(names) => {
+            // par_distributed [A, B] → IO.par_distributed_raw(["A", "B"], input)
+            let list_ns_idx = ctx.resolve_global("List").unwrap_or(u16::MAX);
+            let io_ns_idx = ctx.resolve_global("IO").unwrap_or(u16::MAX);
+            let list_ns = || IRExpr::Global(list_ns_idx, Type::Unknown);
+            let list_empty = IRExpr::FieldAccess(
+                Box::new(list_ns()),
+                "empty".to_string(),
+                Type::Unknown,
+            );
+            let mut names_expr = IRExpr::Call(Box::new(list_empty), vec![], Type::Unknown);
+            for n in names {
+                let list_push = IRExpr::FieldAccess(
+                    Box::new(list_ns()),
+                    "push".to_string(),
+                    Type::Unknown,
+                );
+                names_expr = IRExpr::Call(
+                    Box::new(list_push),
+                    vec![names_expr, IRExpr::Lit(Lit::Str(n.clone()), Type::Unknown)],
+                    Type::Unknown,
+                );
+            }
+            let par_callee = IRExpr::FieldAccess(
+                Box::new(IRExpr::Global(io_ns_idx, Type::Unknown)),
+                "par_distributed_raw".to_string(),
                 Type::Unknown,
             );
             IRExpr::Call(Box::new(par_callee), vec![names_expr, input], Type::Unknown)
@@ -787,8 +881,8 @@ fn build_step_call_ctx(step: &FlwStep, ctx_slot: u16, input: IRExpr, ctx: &mut C
             let ctx_expr = IRExpr::Local(ctx_slot, Type::Unknown);
             IRExpr::Call(Box::new(callee), vec![ctx_expr, input], Type::Unknown)
         }
-        FlwStep::Par(_) => {
-            // par with ctx threading is not supported
+        FlwStep::Par(_) | FlwStep::ParDistributed(_) => {
+            // par / par_distributed with ctx threading is not supported
             IRExpr::Global(u16::MAX, Type::Unknown)
         }
         FlwStep::Tap(observer_expr) => {
@@ -973,6 +1067,58 @@ fn compile_streaming_pipeline(fd: &FlwDef, chunk_size: i64, ctx: &mut CompileCtx
     ctx.anon_counter = saved_anon;
     IRFnDef {
         name: fd.name.clone(),
+        param_count: 1,
+        param_tys: vec![Type::Unknown],
+        local_count,
+        effects: Vec::new(),
+        return_ty: Type::Unknown,
+        body,
+    }
+}
+
+/// Build a pushdown wrapper `IRFnDef` that dispatches to `__duckdb_push` at runtime.
+///
+/// The generated IR is equivalent to:
+///   fn name(rows) = __duckdb_push(rows, sql_template, fallback_fn_idx)
+///
+/// At runtime the VM's `__duckdb_push` handler:
+///   - Executes the SQL against a DuckDB ArrowBatch if possible
+///   - Returns `Err("__PUSHDOWN_FALLBACK:{fallback_fn_idx}")` on non-Arrow or DuckDB failure
+///   - The VM call_builtin handler catches the prefix and retries with the original stage fn
+fn compile_pushdown_wrapper(
+    name: &str,
+    plan: &PushdownPlan,
+    fallback_fn_idx: usize,
+    ctx: &mut CompileCtx,
+) -> IRFnDef {
+    let saved_next = ctx.next_slot;
+    let saved_anon = ctx.anon_counter;
+    let saved_locals = std::mem::take(&mut ctx.locals);
+    let saved_local_tys = std::mem::take(&mut ctx.local_tys);
+    ctx.next_slot = 0;
+    ctx.anon_counter = 0;
+    ctx.push_scope();
+    let rows_slot = ctx.define_local("$rows");
+    let rows_expr = IRExpr::Local(rows_slot, Type::Unknown);
+
+    let push_idx = ctx.resolve_global("__duckdb_push").unwrap_or(u16::MAX);
+    let sql_lit = IRExpr::Lit(Lit::Str(plan.sql.clone()), Type::Unknown);
+    let fb_lit = IRExpr::Lit(Lit::Int(fallback_fn_idx as i64), Type::Unknown);
+
+    let body = IRExpr::Call(
+        Box::new(IRExpr::Global(push_idx, Type::Unknown)),
+        vec![rows_expr, sql_lit, fb_lit],
+        Type::Unknown,
+    );
+
+    let local_count = ctx.next_slot as usize;
+    ctx.locals = saved_locals;
+    ctx.local_tys = saved_local_tys;
+    ctx.next_slot = saved_next;
+    ctx.anon_counter = saved_anon;
+
+    IRFnDef {
+        name: name.to_string(),
         param_count: 1,
         param_tys: vec![Type::Unknown],
         local_count,

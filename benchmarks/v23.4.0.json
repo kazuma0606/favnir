@@ -1,0 +1,11 @@
+{
+  "version": "23.4.0",
+  "date": "2026-06-22",
+  "test_count": 1909,
+  "feature": "vm.fav Phase 1（バイトコードデコード）",
+  "metrics": {
+    "vm_fav_opcodes": 27,
+    "new_builtins": ["Bytes.read_u16_le", "Bytes.read_u24_le"],
+    "self_hosted_vm_phase": 1
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "version": "20.8.0",
+  "date": "2026-06-20",
+  "theme": "DB コネクションプール統合",
+  "note": "実 PostgreSQL 環境での計測が必要。以下は期待値。",
+  "benchmarks": {
+    "pg_stage_first_call_ms":   { "v20_7_0": 52,  "v20_8_0": 7,  "improvement": "+7.4x", "unit": "ms" },
+    "pg_pipeline_10stage_ms":   { "v20_7_0": 520, "v20_8_0": 85, "improvement": "+6.1x", "unit": "ms" },
+    "pg_pool_reuse_rate_pct":   { "v20_7_0": 0,   "v20_8_0": 98, "unit": "%" }
+  }
+}

@@ -1,0 +1,70 @@
+---
+title: "型システム入門"
+description: "Favnir の型推論・エフェクトシステム・ジェネリクスを学ぶ"
+---
+
+# 型システム入門
+
+## 型推論
+
+Favnir は Hindley-Milner 型推論を採用しています。多くの場合、型注釈は不要です。
+
+```favnir
+fn double(x: Int) -> Int { x * 2 }
+
+fn process(xs: List[Int]) -> List[Int] {
+  xs |> List.map(double)  // 型は自動で推論される
+}
+```
+
+## エフェクトシステム
+
+副作用は関数シグネチャに `!Effect` として明示します。
+
+```favnir
+// 純粋関数 — 副作用なし
+fn transform(x: Int) -> Int { x * 2 }
+
+// HTTP エフェクトあり
+fn fetch(url: String) -> String !Http {
+  Http.get(url)
+}
+
+// DB エフェクトあり
+fn save(row: Row) -> Unit !Db {
+  Db.insert("table", row)
+}
+```
+
+エフェクトのない関数から `!Http` 関数を呼ぶと W021 lint エラーになります。
+
+## ジェネリクス
+
+```favnir
+fn identity[T](x: T) -> T { x }
+
+fn map_list[A, B](xs: List[A], f: A -> B) -> List[B] {
+  List.map(xs, f)
+}
+```
+
+## Option 型と `?` 演算子
+
+```favnir
+fn find_user(id: Int) -> User? {
+  Db.find("users", id)
+}
+
+fn get_name(id: Int) -> String? {
+  find_user(id)?.name
+}
+```
+
+## 名目型ラッパー
+
+```favnir
+type UserId(Int)
+type Email(String)
+
+fn create_user(id: UserId, email: Email) -> User { ... }
+```

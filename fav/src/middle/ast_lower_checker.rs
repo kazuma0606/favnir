@@ -200,6 +200,10 @@ fn lower_flw_step(step: &ast::FlwStep) -> Value {
             let ns: Vec<Value> = names.iter().map(|n| sv(n)).collect();
             v1("SPar", vm_list(ns))
         }
+        ast::FlwStep::ParDistributed(names) => {
+            let ns: Vec<Value> = names.iter().map(|n| sv(n)).collect();
+            v1("SParDistributed", vm_list(ns))
+        }
         // tap/inspect are Rust-level constructs; lower as no-op stage markers
         ast::FlwStep::Tap(_) => v1("SStage", sv("tap")),
         ast::FlwStep::Inspect => v1("SStage", sv("inspect")),
@@ -438,6 +442,7 @@ fn effect_to_str(e: &ast::Effect) -> String {
         ast::Effect::File => "File".to_string(),
         ast::Effect::Checkpoint => "Checkpoint".to_string(),
         ast::Effect::Trace => "Trace".to_string(),
+        ast::Effect::PipelineState => "PipelineState".to_string(),
         ast::Effect::Emit(s) => format!("Emit<{}>", s),
         ast::Effect::EmitUnion(vs) => format!("Emit<{}>", vs.join("|")),
         ast::Effect::Unknown(s) => s.clone(),

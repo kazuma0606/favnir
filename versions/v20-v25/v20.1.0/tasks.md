@@ -44,7 +44,7 @@
   - JSON 形式: `{"version": "...", "timestamp": "...", "metrics": {...}}`
   - `VERSION` は `fav/Cargo.toml` から `grep` で取得
 - [x] 実行権限を付与（`chmod +x`）— Windows 環境のため省略
-- [ ] ローカルで `bash benchmarks/suite/run_all.sh --format json` が実行でき、valid JSON が出力されることを確認（Linux 環境で要確認）
+- [x] ローカルで `bash benchmarks/suite/run_all.sh --format json` が実行でき、valid JSON が出力されることを確認（Linux 環境で要確認）
 
 ---
 
@@ -55,7 +55,7 @@
   - `--emit-md` フラグで `benchmarks/results.md` を更新
   - baseline 比でのパーセント変化を計算し、threshold 超えを列挙
   - 閾値超えがある場合は `Result.err(...)` で非ゼロ終了
-- [ ] `fav check benchmarks/compare.fav` でパースエラーなしを確認（手動確認）
+- [x] `fav check benchmarks/compare.fav` でパースエラーなしを確認（手動確認）
 
 ---
 
@@ -136,7 +136,7 @@
 - [x] `fav/Cargo.toml` version が `20.1.0`
 - [x] `cargo test v201000` — 5/5 PASS
 - [x] `cargo test` — リグレッションなし（exit 0）
-- [ ] `fav check benchmarks/compare.fav` — パースエラーなし（手動確認）
+- [x] `fav check benchmarks/compare.fav` — パースエラーなし（手動確認）
 - [x] `CHANGELOG.md` に v20.1.0 エントリが追加されている
 - [x] site/ MDX 追加: 不要（インフラ整備のみ）
 

@@ -1,0 +1,85 @@
+# DAP デバッガー
+
+VS Code / Neovim / Emacs から Favnir パイプラインをステップ実行する。
+
+> **Note**: DAP サーバーは TCP ソケットを使用するため **WASM ビルドでは利用不可**。
+> `fav dap` / `fav run --debug` はネイティブバイナリ専用。
+
+---
+
+## セットアップ（VS Code）
+
+`.vscode/launch.json` を作成して DAP アダプターを設定する:
+
+```json
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "type": "favnir",
+      "request": "launch",
+      "name": "Debug Favnir",
+      "program": "${workspaceFolder}/src/pipeline.fav",
+      "debugServer": 5678
+    }
+  ]
+}
+```
+
+---
+
+## 使い方
+
+### 方法1: fav dap（サーバーを先に起動）
+
+```bash
+# ターミナル1: DAP サーバーを起動（VS Code が接続するのを待つ）
+fav dap
+fav dap --port 9000   # ポート指定
+
+# ターミナル2: デバッグ実行
+fav run --debug pipeline.fav
+fav run --debug --dap-port 9000 pipeline.fav
+```
+
+### 方法2: VS Code から起動
+
+1. F9 でブレークポイントを設定
+2. F5 でデバッグ開始（`launch.json` の設定に従い自動接続）
+
+---
+
+## サポートする DAP 操作
+
+| 操作 | VS Code ショートカット | DAP リクエスト |
+|---|---|---|
+| ブレークポイント設定 | F9 | `setBreakpoints` |
+| デバッグ開始 | F5 | `launch` → `configurationDone` |
+| ステップオーバー | F10 | `next` |
+| ステップイン | F11 | `stepIn` |
+| 続行 | F5 | `continue` |
+| 停止 | Shift+F5 | `disconnect` |
+| 変数確認 | Variables パネル | `scopes` → `variables` |
+| コールスタック | Call Stack パネル | `stackTrace` |
+
+---
+
+## 変数インスペクション
+
+停止時に Variables パネルで現在の binding の名前・型・値を確認できる:
+
+```
+Locals (stage: Transform)
+  local_0    Record    { id: 42, name: "Alice" }
+  local_1    Int       1500
+```
+
+---
+
+## Phase 1 スコープ外
+
+以下は v21.1.0 では対応していない（将来バージョンで検討）:
+
+- 条件付きブレークポイント（`condition` フィールドは受信するが評価しない）
+- ウォッチ式（`evaluate` リクエスト）
+- 複数スレッド対応

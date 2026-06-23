@@ -1,0 +1,26 @@
+{
+  "version": "22.8.0",
+  "timestamp": "2026-06-21T00:00:00Z",
+  "_note": "fav deploy enhancement snapshot: ECS Fargate / Kubernetes CronJob / Fly.io deploy config generation.",
+  "metrics": {
+    "test_count": 1883,
+    "deploy_targets": 4,
+    "generated_file_types": 4,
+    "lint_rules": 19,
+    "lsp_features": 8
+  },
+  "_metrics_notes": {
+    "deploy_targets": "aws-lambda (既存) / ecs / k8s / fly の 4 ターゲット",
+    "generated_file_types": "Dockerfile / ecs-task-def.json / {name}-cronjob.yaml / fly.toml",
+    "test_count": "v22.8.0完了時の実測値（v228000_tests 5件込み）"
+  },
+  "deploy_features": {
+    "target_ecs":     { "achieved": true, "version": "v22.8.0", "generates": ["Dockerfile", "ecs-task-def.json"] },
+    "target_k8s":     { "achieved": true, "version": "v22.8.0", "generates": ["Dockerfile", "{name}-cronjob.yaml"] },
+    "target_fly":     { "achieved": true, "version": "v22.8.0", "generates": ["Dockerfile", "fly.toml"] },
+    "target_lambda":  { "achieved": true, "version": "v4.11.0",  "note": "既存、後方互換維持" },
+    "dry_run":        { "achieved": true, "version": "v22.8.0", "note": "全ターゲットで --dry-run 対応" },
+    "out_dir_flag":   { "achieved": true, "version": "v22.8.0", "note": "--out-dir で出力先指定" },
+    "wasm_guard":     { "achieved": true, "version": "v22.8.0", "note": "全新規関数に #[cfg(not(wasm32))]" }
+  }
+}

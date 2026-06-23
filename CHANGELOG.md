@@ -4,6 +4,396 @@ Favnir のバージョン履歴。形式は [Keep a Changelog](https://keepachan
 
 ---
 
+## [v25.0.0] — 2026-06-24 — Practical Self-Hosting マイルストーン宣言（v1.0 リリース候補）
+
+### Added
+- `MILESTONE.md` — Practical Self-Hosting 達成宣言ドキュメント（リポジトリルート）
+- `site/content/docs/v1-release.mdx` — v1.0 リリースノート（v24.1〜v24.8 機能一覧）
+- `v250000_tests`（5 件）: `milestone_md_has_selfhost_declaration` / `readme_mentions_v1_release` / `stability_md_exists` / `site_v1_release_page_exists` / `changelog_has_v25_0_0`
+
+### Changed
+- `README.md` — v25.0 / Practical Self-Hosting マイルストーン達成を追記
+- `versions/roadmap-v20.1-v25.0.md` — v24.1〜v24.8 を「完了」、v25.0.0 を「宣言済み」に更新
+
+### Milestone
+- コンパイラ（compiler.fav）/ 型チェッカー（checker.fav）/ CLI（cli.fav）/ VM 仕様（vm.fav）がすべて Favnir で実装済み
+- VM 実行基盤（バイトコードディスパッチ）のみ Rust で永続維持（設計上の意図）
+- テスト数: 1974 件（前バージョン比 +5）
+
+---
+
+## [v24.8.0] — 2026-06-24 — `fav new` テンプレートギャラリー
+
+### Added
+- `TEMPLATE_GALLERY` 定数（4 テンプレート: etl-csv-to-db / api-gateway / lambda-scheduled / distributed-etl）
+- `fav new --template etl-csv-to-db` — CSV → DB ETL スターター（pipeline.fav / fav.toml / README / CI）
+- `fav new --template api-gateway` — HTTP API ゲートウェイスターター
+- `fav new --template lambda-scheduled` — スケジュール実行ジョブスターター
+- `fav new --template distributed-etl` — 分散並列 ETL スターター（par [A,B] |> Merge パターン）
+- `site/content/docs/tools/templates.mdx` — テンプレートギャラリードキュメント
+
+### Changed
+- `try_cmd_new` エラーメッセージに 4 テンプレート名を追記
+
+---
+
+## [v24.7.0] — 2026-06-23 — ドキュメントサイト v2
+
+### Added
+- `site/content/learn/` チュートリアルセクション（getting-started / pipeline-basics / type-system）
+- `site/content/cookbook/` レシピ集（etl-csv-to-db / api-gateway / parallel-pipeline）
+- `site/app/packages/page.tsx` — Rune レジストリ静的一覧ページ（45 パッケージ）
+- `site/content/docs/bench/index.mdx` — ベンチマーク履歴・fav bench コマンド解説
+- `site/content/docs/spec/index.mdx` — 形式的仕様書・fav spec コマンド解説
+
+### Changed
+- サイト構成を learn / cookbook / spec / bench / packages の 5 軸に拡張
+
+---
+
+## [v24.6.0] — 2026-06-23 — セキュリティ審査（エフェクトシステム形式検証）
+
+### Added
+- W021 `pure_fn_calls_effectful` lint ルール — 純粋関数から副作用関数を呼び出す箇所を検出
+- `SECURITY.md` — CVE 対応プロセス（security@favnir.dev、90日 responsible disclosure）
+- `SECURITY_MODEL.md` — エフェクトシステムの形式的仕様（capability 公理 4 条 + 推論規則）
+- `site/content/docs/tools/security.mdx` — セキュリティモデル解説ページ
+
+### Notes
+- W021 は `fn` 定義間の呼び出し関係のみ検出。`trf`/`flw` 対応は v24.7+ 予定
+- TLA+/Coq による機械検証は v25.0 前後を目標
+
+---
+
+## [v24.5.0] — 2026-06-23 — Rune レジストリ成熟（公式パッケージ 50+）
+
+### Added
+- `fav search <query>` — 公式 Rune カタログを検索するトップレベルコマンド
+- `OFFICIAL_CATALOG` — 50 パッケージを収録した組み込み公式カタログ（driver.rs）
+- 15 新規 Rune スタブ（avro / orc / excel / xml / huggingface / scikit /
+  gcs / pubsub / redis / mysql / mongodb / s3 / sqs / dynamodb / azure-servicebus）
+- `site/content/docs/runes/catalog.mdx` — 全 50 Rune 公式カタログページ
+
+### Notes
+- 新規 Rune は v24.5.0 時点ではスタブ（rune.toml + .fav ヘッダー）。完全実装は v25.x 以降で個別に対応
+- `fav search` は OFFICIAL_CATALOG（組み込み）を検索。ローカルインストール済み Rune の検索は `fav registry search <q>` を使用
+
+---
+
+## [v24.4.0] — 2026-06-23 — v1.0 後方互換性ポリシー確定
+
+### Added
+- `#[deprecated]` アノテーション — `fn` 定義に付与することで廃止予定を宣言できる
+- W020 `deprecated_call` lint ルール — `#[deprecated]` 付き関数の呼び出しを `fav lint` で検出
+- `STABILITY.md` — v1.x 後方互換ポリシー・v2.0 破壊的変更ポリシー・SemVer 準拠宣言
+
+### Notes
+- `#[deprecated]` は `fn` にのみ対応（`trf`・`flw` は v24.7+ 予定）
+- `impl` ブロック内 `fn` への `#[deprecated]` は v24.7+ 予定
+- `--legacy` フラグは v2.0 まで維持（STABILITY.md 参照）
+
+---
+
+## [v24.3.0] — 2026-06-23 — 継続的パフォーマンス回帰検知
+
+### Added
+- `driver::cmd_bench_compare(baseline_json, current_json, threshold, emit_md) -> (bool, String)` — ベンチマーク JSON 比較の公開 API
+- `fav bench --baseline <path> --current <path> [--threshold N] [--emit-md]` CLI サブコマンド（既存 `fav bench` の `--baseline` 検出で自動ディスパッチ）
+- `benchmarks/latest.json` — CI 出力テンプレート
+
+### Changed
+- `.github/workflows/bench.yml` — baseline を `v24.2.0.json` に更新、threshold を 5% に変更、回帰時 CI fail を有効化（`|| exit 1`）
+- `benchmarks/v24.2.0.json` — `metrics` を数値のみに修正（`stage4_deferred` 削除）
+
+### Notes
+- 回帰判定式: `(current - baseline) / baseline * 100 > threshold`（増加が劣化）
+- `bench.favnir.dev` グラフ公開は v24.7（ドキュメントサイト v2）と同時対応予定
+
+---
+
+## [v24.2.0] — 2026-06-23 — 4-Stage Bootstrap 検証
+
+### Added
+- `fav/tests/bootstrap/` — Bootstrap 検証用 fixture 5 件（hello / arithmetic / pattern_match / list_ops / closures）
+- `v242000_tests` — Bootstrap fixture コンパイルテスト 7 件（カウント済）
+- `bootstrap_stage1_stage3_hello_match` / `bootstrap_stage1_stage3_arithmetic_match` — Stage 1/3 bytecode 比較（`#[ignore]`、低速）
+
+### Notes
+- Stage 4（vm.fav + compiler_artifact → bytecode_C）は vm.fav Phase 6（ユーザー定義関数ディスパッチ）完了後に追加予定
+- `bytecode_A == bytecode_B` 検証は `cargo test bootstrap_stage1 -- --ignored` で実行
+- `type T = A | B` 形式のフィールドなしバリアントと `[h | t]` リストパターンはパーサー非対応のため、pattern_match.fav を Option マッチ、list_ops.fav を多引数算術関数に変更
+- 実際のテスト件数: 1940（version_is_24_1_0 削除 -1、新規 +7 = 純増 +6）
+
+---
+
+## [v24.1.0] — 2026-06-23 — 形式的仕様書生成（fav spec）
+
+### Added
+- `driver::cmd_spec(format: &str) -> String` — Favnir 言語仕様書を Markdown / HTML で生成する公開 API
+- `fav spec [--format markdown|html]` CLI サブコマンド — 型システム・opcode・エフェクト・パターンマッチ規則を仕様書として出力
+
+### Notes
+- 仕様書は 4 セクション構成: 型システム（HM 推論規則）/ opcode 動作仕様（31 opcode）/ エフェクトシステム意味論 / パターンマッチ網羅性
+- HTML 変換は既存 `md_to_html`（v21.7.0 実装）を再利用
+- 既知の制限: HTML 出力のテーブル行は `<p>` タグとして出力（`<table>` 変換は Phase 2 以降）
+
+---
+
+## [v24.0.0] — 2026-06-23 — VM in Favnir マイルストーン宣言
+
+### Added
+- `driver::run_with_vm(vm_src, bytecode_hex, globals_entries)` — vm.fav 経由でバイトコードを実行する公開 API
+- `fav run --vm <path> --hex <hex>` CLI フラグ — 端末から vm.fav 経由でバイトコードを直接実行
+
+### Notes
+- VM in Favnir マイルストーン宣言（v23.1〜v24.0 の達成を宣言）
+  - v23.1: Bytes 型 / v23.2: ビット演算 / v23.3: Mut<T>
+  - v23.4〜v23.8: vm.fav Phase 1〜5（デコード・実行ループ・制御フロー・builtin・GetField）
+- ロードマップ完了条件 1〜3・5 を達成；条件 4（500件超テスト）は Phase 6 以降
+
+---
+
+## [v23.8.0] — 2026-06-22 — vm.fav Phase 5（GetField・collect_args・hello.fav 実行）
+
+### Added
+- `vm.fav` Phase 5: GetField・多引数 Call・vmval_display
+  - `fn collect_args_rec(stack: Int, n: Int, acc: Int) -> Result<Int, String>` 追加
+  - `fn collect_args(stack: Int, n: Int) -> Result<Int, String>` 追加
+  - `GetField(idx)` オペコード: namespace VMStr + globals[idx]=field VMStr → push "ns.field" VMStr
+  - `Call(argc)` ハンドラを `collect_args` 利用の汎用実装に置換（任意の argc に対応）
+  - `fn vmval_display(v: VMVal) -> String` 追加（ユーザー向け表示: VMStr は引用符なし）
+  - `call_builtin` に `"String.concat"` 追加（2 引数 builtin・collect_args 引数順実証）
+
+### Notes
+- `LoadGlobal + GetField + Call(N)` シーケンス完成: 任意の builtin 呼び出しチェーンが vm.fav 上で動作
+- `fav run --vm=<path>` CLI フラグは v24.0 で実装予定
+
+---
+
+## [v23.7.0] — 2026-06-22 — vm.fav Phase 4（stdlib・builtin 呼び出し）
+
+### Added
+- `vm.fav` Phase 4: stdlib・builtin 呼び出し
+  - `VMVal` に `VMStr(String)` バリアントを追加
+  - `fn call_builtin(name: String, args: Int) -> Result<VMVal, String>` 実装（4 builtin: Int.to_string / String.length / String.trim / Math.abs）
+  - `LoadGlobal(idx)` オペコード: globals マップから値を lookup してスタックに push
+  - `Call(0)` / `Call(1)` オペコード: builtin ディスパッチ（Favnir ↔ Rust の永続的境界）
+  - `fn vm_run_named(bytecode: Bytes, globals: Int) -> Result<VMVal, String>` 追加
+
+### Changed
+- `fn vm_execute` シグネチャ: `(bytecode, stack, locals, pc)` → `(bytecode, stack, locals, globals, pc)`
+- `fn vm_run` が空 globals マップを生成するよう更新
+
+---
+
+## [v23.6.0] — 2026-06-22 — vm.fav Phase 3（制御フロー・ローカル変数）
+
+### Added
+- `vm.fav` Phase 3: 制御フロー・ローカル変数
+  - `vm_execute` に `locals: Int` パラメータを追加（MutMap による単一フレームのローカル変数）
+  - `vm_run` が `Mut.map()` でローカル変数マップを生成
+  - 新オペコード 12 件: Jump / JumpIfFalse / LoadLocal / StoreLocal / Ne / Lt / Le / Gt / Ge / And / Or / Div
+
+### Changed
+- `fn vm_execute` シグネチャ: `(bytecode, stack, pc)` → `(bytecode, stack, locals, pc)`
+
+---
+
+## [v23.5.0] — 2026-06-22 — vm.fav Phase 2（スタックベース実行ループ）
+
+### Added
+- `vm.fav` Phase 2: スタックベース実行ループ
+  - `type VMVal` — スタック値 sum type（VMInt / VMBool / VMUnit）
+  - `fn vmval_to_string` — デバッグ用文字列化
+  - `fn vm_execute(bytecode: Bytes, stack: Int, pc: Int) -> Result<VMVal, String>` — 実行ループ（再帰）
+    - 対応オペコード 11 件: ConstUnit / ConstTrue / ConstFalse / Const(n) / Pop / Dup / Return / Add / Sub / Mul / Eq
+  - `fn vm_run(bytecode: Bytes) -> Result<VMVal, String>` — エントリポイント
+
+---
+
+## [v23.4.0] — 2026-06-22 — vm.fav Phase 1（バイトコードデコード）
+
+### Added
+- `fav/self/vm.fav` — Favnir セルフホスト VM Phase 1（バイトコードデコード）
+  - `type Opcode` — 27 バリアント（Const〜Unknown）定義
+  - `type DecodeResult` — `{ op: Opcode, next_pc: Int }` レコード型
+  - `fn decode_byte_no_operand` / `fn decode_byte_with_u16_le` ヘルパー
+  - `fn decode_opcode` — メインデコードエントリポイント
+  - `fn opcode_to_string` — デバッグ用文字列変換
+- `Bytes.read_u16_le` / `Bytes.read_u24_le` — リトルエンディアン Bytes 読み取り primitive（vm.rs）
+
+---
+
+## [v23.3.0] — 2026-06-22 — 可変コレクション `Mut<T>`
+
+### Added
+- `Mut.list()` / `Mut.map()` — 可変コレクション生成（`VMValue::MutList(u64)` / `VMValue::MutMap(u64)` opaque handle）
+- `Mut.push` / `Mut.pop` / `Mut.peek` / `Mut.len` / `Mut.set` / `Mut.get` / `Mut.delete` / `Mut.has`
+- checker builtin_ret_ty に Mut 5 エントリ追加、compiler builtins リストに `"Mut"` 追加
+- 1902 テスト合格
+
+---
+
+## [v23.2.0] — 2026-06-21 — ビット演算
+
+### Added
+- `Int.bit_and` / `Int.bit_or` / `Int.bit_xor` / `Int.bit_not` / `Int.shift_left` / `Int.shift_right`
+- 16 進数リテラル `0xFF`（lexer `lex_number()` 拡張）
+- 1898 テスト合格
+
+---
+
+## [v23.1.0] — 2026-06-21 — `Bytes` 型
+
+### Added
+- `VMValue::Bytes(u64)` / `HeapVal::Bytes(u64)` — バイト列 opaque handle（NaN-boxing 準拠）
+- `Bytes.from_hex` / `Bytes.to_hex` / `Bytes.from_list` / `Bytes.to_list` / `Bytes.length` / `Bytes.get` / `Bytes.set` / `Bytes.slice` / `Bytes.concat` / `Bytes.read_u8` / `Bytes.read_u16` / `Bytes.read_u32` / `Bytes.write_file` / `Bytes.read_file`
+- checker namespace + compiler builtins に `"Bytes"` 追加
+- 1894 テスト合格
+
+---
+
+## [v23.0.0] — 2026-06-21 — Distributed Scale マイルストーン宣言
+
+### Added
+- Distributed Scale マイルストーン宣言（v22.0.0〜v22.8.0 の実装を集大成）
+- `benchmarks/v23.0.0.json` 作成（1887 テスト合格）
+
+---
+
+## [v22.8.0] — 2026-06-21 — `fav deploy` 強化（ECS / K8s / Fly.io 対応）
+
+### Added
+- `DeployConfig` 拡張（`platform` フィールド: `"ecs"` / `"k8s"` / `"fly"`）
+- `cmd_deploy_ecs` / `cmd_deploy_k8s` / `cmd_deploy_fly` — プラットフォーム別デプロイ
+- 1883 テスト合格
+
+---
+
+## [v22.7.0] — 2026-06-21 — OpenTelemetry 統合
+
+### Added
+- `fav/src/otel.rs` — OTel スパン生成モジュール新規作成
+- `SeqStageEnter` / `SeqStageExit` — stage 境界での自動 span 生成
+- `--otel-endpoint` CLI フラグ、`!Otel` エフェクト追加
+- 1879 テスト合格
+
+---
+
+## [v22.6.0] — 2026-06-21 — SLA 宣言（タイムアウト・リトライ・サーキットブレーカー）
+
+### Added
+- `TimeoutAnnotation` / `RetryAnnotation` / `CircuitBreakerAnnotation` struct（ast.rs）
+- `@timeout(ms)` / `@retry(n)` / `@circuit_breaker(threshold)` アノテーション構文
+- 1872 テスト合格
+
+---
+
+## [v22.5.0] — 2026-06-21 — Pipeline Orchestration（DAG スケジューリング）
+
+### Added
+- `TokenKind::Pipeline` キーワード追加（lexer.rs）
+- `pipeline` 宣言構文 — 複数の `seq` / `par` ブロックを DAG として定義
+- 1864 テスト合格
+
+---
+
+## [v22.4.0] — 2026-06-21 — Event-driven Pipeline（イベントトリガー）
+
+### Added
+- `TriggerAnnotation` struct — `@trigger(kind)` アノテーション、`FlwDef.trigger` フィールド追加
+- `!Event` エフェクト追加、`Trigger.sqs` / `Trigger.http` / `Trigger.schedule` Rune
+- 1860 テスト合格
+
+---
+
+## [v22.3.0] — 2026-06-21 — Pipeline State Rune（分散状態管理）
+
+### Added
+- `Effect::PipelineState` 追加（ast.rs）
+- `PipelineState` Rune（`get` / `set` / `delete` / `list_keys` primitives）
+- 1855 テスト合格
+
+---
+
+## [v22.2.0] — 2026-06-21 — Distributed `par`（複数 Worker への分散）
+
+### Added
+- `FlwStep::ParDistributed { stages, workers }` — 複数 Worker への分散実行
+- `--workers N` CLI フラグ
+- 1850 テスト合格
+
+---
+
+## [v22.1.0] — 2026-06-21 — Checkpoint / Resume（パイプライン永続化）
+
+### Added
+- `TrfDef.checkpoint: bool` フィールド追加、`@checkpoint` アノテーション構文
+- checkpoint 書き込み / 読み取り VM primitive（`.fav-checkpoint/` ディレクトリ）
+- `fav run --resume` フラグ — チェックポイントから再開
+- 1846 テスト合格
+
+---
+
+## [v22.0.0] — 2026-06-21 — Developer Tooling Complete マイルストーン宣言
+
+### Added
+- Developer Tooling Complete マイルストーン宣言（v21.0.0〜v21.8.0 の実装を集大成）
+- `benchmarks/v22.0.0.json` 作成、README Developer Tooling セクション追加
+- 1842 テスト合格
+
+---
+
+## [v21.8.0] — 2026-06-20 — `fav migrate` 強化
+
+### Added
+- `migrate_fav_toml_source` — `fav.toml` マイグレーション（v13→v14 等）
+- `fav migrate --from v13 --to v14` — バージョン指定移行、`fav migrate --check` — 確認モード
+- 1831+ テスト合格
+
+---
+
+## [v21.7.0] — 2026-06-20 — `fav doc` サイト生成（docsite）
+
+### Added
+- `fav doc --format site src/ --out docs/` — 静的 HTML ドキュメントサイト生成（ダークテーマ）
+- `fav doc --serve src/` — ローカルプレビューサーバー（`TcpListener`、デフォルト port 8080）
+- `html_escape` / `inline_md` / `md_to_html`、`site/content/docs/tools/doc-site.mdx` 新規作成
+- 1831 テスト合格
+
+---
+
+## [v21.6.0] — 2026-06-20 — Playground v2（共有・テンプレート・ライブ統計）
+
+### Added
+- `site/lib/share-url.ts` — gzip+base64url URL エンコード/デコード
+- `site/lib/playground-templates.ts` — 6 テンプレート、`site/app/playground/share-api.ts` — Lambda API クライアント
+- Playground 共有ボタン・テンプレートドロップダウン・実行統計・URL 復元
+- `infra/share/` — AWS Lambda 共有 API（Terraform + handlers/share.js）
+- 1824 テスト合格
+
+---
+
+## [v21.5.0] — 2026-06-20 — LSP コードアクション強化
+
+### Added
+- `CheckedDoc.program: Option<Program>` フィールド追加（document_store.rs）
+- `lsp/references.rs` / `lsp/rename.rs` / `lsp/code_action.rs` 新規作成
+- LSP capabilities に `codeActionProvider` / `renameProvider` / `referencesProvider` 追加
+- 1817 テスト合格
+
+---
+
+## [v21.4.0] — 2026-06-20 — `fav lint` 強化（W010〜W019）
+
+### Added
+- W010〜W019 lint ルール追加（stage_too_large / effectless_io_call / unused_type / map_filter_chain / redundant_result_ok / rebind_in_block / wildcard_only_match / deep_nesting / magic_number / string_concat_chain）
+- `partial_flw_warnings` を W020 に改名（W011 との衝突回避）
+- 1806 テスト合格
+
+---
+
+
 ## [v21.3.0] — 2026-06-20 — テストカバレッジ HTML / LCOV 出力
 
 `fav test --coverage --html` で HTML カバレッジレポート、

@@ -1,0 +1,73 @@
+---
+title: "CSV を DB に投入する"
+description: "runes/csv と runes/postgres を使って CSV ファイルを読み込み、データベースに挿入するレシピ"
+---
+
+# CSV を DB に投入する
+
+## 概要
+
+CSV ファイルを読み込み、行ごとに変換して PostgreSQL に挿入するパイプラインです。
+
+## fav.toml
+
+```toml
+[project]
+name = "csv-to-db"
+
+[runes]
+csv      = "1.0.0"
+postgres = "1.0.0"
+
+[context]
+db_url = { env = "DATABASE_URL" }
+```
+
+## pipeline.fav
+
+```favnir
+import csv
+import postgres as db
+
+type Row {
+  id:    Int
+  name:  String
+  value: Float
+}
+
+stage LoadCsv -> List[Row] !Io {
+  csv.read_file("data.csv")
+    |> List.map(|row| Row {
+         id:    Int.parse(row["id"]),
+         name:  row["name"],
+         value: Float.parse(row["value"]),
+       })
+}
+
+stage InsertRows(rows: List[Row]) -> Int !Db {
+  rows |> List.map(|row|
+    db.execute(
+      "INSERT INTO records (id, name, value) VALUES ($1, $2, $3)",
+      [row.id, row.name, row.value]
+    )
+  ) |> List.length
+}
+
+pipeline CsvToDb {
+  LoadCsv |> InsertRows
+}
+```
+
+## 実行
+
+```bash
+DATABASE_URL=postgres://localhost/mydb fav run pipeline.fav
+# Inserted 1000 rows
+```
+
+## ポイント
+
+- `!Io` エフェクト: CSV ファイル読み込み
+- `!Db` エフェクト: db への書き込み
+- `List.map` でストリーム変換
+- 型注釈 `Row` で csv → db の型安全性を保証

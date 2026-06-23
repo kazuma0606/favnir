@@ -1,0 +1,27 @@
+// runes/state/state.fav — Pipeline State Rune (v22.3.0)
+//
+// 分散パイプラインで型安全な状態管理を提供する Rune。
+// v22.3.0: インメモリ HashMap バックエンド（スタブ）
+// v22.4+: Redis / DynamoDB / PostgreSQL バックエンド追加予定
+//
+// Usage:
+//   bind _ <- State.set("seen:" ++ row.id, "1")    // !PipelineState
+//   bind v <- State.get("seen:" ++ row.id)          // !PipelineState -> Option<String>
+//   bind b <- State.has("seen:" ++ row.id)          // !PipelineState -> Bool
+//   bind _ <- State.delete("seen:" ++ row.id)       // !PipelineState
+
+public fn get(key: String) -> Option<String> !PipelineState {
+    State.get_raw(key)
+}
+
+public fn set(key: String, value: String) -> Unit !PipelineState {
+    State.set_raw(key, value)
+}
+
+public fn has(key: String) -> Bool !PipelineState {
+    State.has_raw(key)
+}
+
+public fn delete(key: String) -> Unit !PipelineState {
+    State.delete_raw(key)
+}

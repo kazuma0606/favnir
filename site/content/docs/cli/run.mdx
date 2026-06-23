@@ -1,0 +1,74 @@
+---
+title: "fav run"
+order: 1
+category: "CLI"
+description: "Favnir プログラムを実行する"
+---
+
+# fav run
+
+Favnir プログラムをコンパイルして実行します。
+
+```bash
+fav run <file.fav> [options]
+fav run --project [options]   # fav.toml プロジェクトモード
+```
+
+## オプション
+
+| フラグ | 説明 |
+|-------|------|
+| `--verbose` | ステージごとの実行ログを出力 |
+| `--trace` | 全命令レベルのトレースログを出力（デバッグ用） |
+| `--legacy` | レガシー Rust コンパイラ/チェッカーを使用（非推奨） |
+| `--legacy-value-repr` | VM の内部値表現に旧 VMValue 形式を使用（デバッグ用） |
+| `--project` | `fav.toml` を検索してプロジェクトモードで実行 |
+| `--self-host` | Favnir セルフホストコンパイラ経由で実行（デフォルト） |
+
+## 使用例
+
+```bash
+# 単一ファイルを実行
+fav run pipeline.fav
+
+# 詳細ログ付きで実行
+fav run pipeline.fav --verbose
+
+# プロジェクトモード
+fav run --project
+```
+
+## --legacy-value-repr
+
+`--legacy-value-repr` フラグは、VM の内部スタック値の表現を NaN-boxing（`NanVal`）から
+旧来の tagged union（`VMValue`）に切り替えます。
+
+このフラグは **デバッグ・診断専用** です。通常の使用では不要です。
+
+```bash
+fav run pipeline.fav --legacy-value-repr
+```
+
+### 背景
+
+v20.3.0 より、VM の内部スタックは NaN-boxing（`NanVal`）を使用します。
+すべての値を 8 バイトの `u64` に収めることで、旧 `VMValue` enum（~40 バイト）と比べて
+メモリ使用量を削減し、ループ性能を改善します。
+
+`--legacy-value-repr` を指定すると VMValue パスが有効になり、新旧実装の動作比較に使えます。
+
+> **注意**: `--legacy-value-repr` は将来のバージョンで削除される可能性があります。
+> 本番環境での使用は推奨しません。
+
+## --verbose / --trace
+
+```bash
+# ステージ別の実行時間を表示
+fav run pipeline.fav --verbose
+
+# 全 VM 命令のトレースを表示（大量出力に注意）
+fav run pipeline.fav --trace
+```
+
+`--verbose` はステージ境界ごとの時間計測を出力します。
+`--trace` は各 VM 命令の実行を逐次出力します（パフォーマンスに影響します）。

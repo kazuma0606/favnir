@@ -1,0 +1,10 @@
+fn describe(x: Option<Int>) -> String {
+    match x {
+        none    => "nothing"
+        some(n) => f"got {n}"
+    }
+}
+
+public fn main() -> String {
+    describe(some(42))
+}

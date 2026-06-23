@@ -146,6 +146,12 @@ impl Parser {
                 self.advance();
                 Ok((name, span))
             }
+            // v22.5.0: `pipeline` は予約語だが、識別子として使われている既存コードとの
+            // 互換性のため `use pipeline.{...}` 等の文脈では識別子として扱う。
+            TokenKind::Pipeline => {
+                self.advance();
+                Ok(("pipeline".to_string(), span))
+            }
             other => Err(ParseError::new(
                 format!("expected identifier, got {:?}", other),
                 span,
@@ -273,6 +279,23 @@ impl Parser {
 
     /// Try to parse `#[api(method = "...", path = "...")]` before a fn definition.
     /// Returns None if the next tokens are not `#[api(`.
+    /// v24.4.0: `#[deprecated]` を認識して bool を返す。
+    fn parse_deprecated_annotation(&mut self) -> Result<bool, ParseError> {
+        if self.peek() == &TokenKind::Hash
+            && matches!(self.tokens.get(self.pos + 1), Some(t) if t.kind == TokenKind::LBracket)
+            && matches!(self.tokens.get(self.pos + 2), Some(t) if matches!(&t.kind, TokenKind::Ident(n) if n == "deprecated"))
+            && matches!(self.tokens.get(self.pos + 3), Some(t) if t.kind == TokenKind::RBracket)
+        {
+            self.advance(); // #
+            self.advance(); // [
+            self.advance(); // deprecated
+            self.advance(); // ]
+            Ok(true)
+        } else {
+            Ok(false)
+        }
+    }
+
     fn parse_api_annotation(&mut self) -> Result<Option<crate::ast::ApiAnnotation>, ParseError> {
         // Lookahead: #  [  api
         let is_api = self.peek() == &TokenKind::Hash
@@ -366,7 +389,184 @@ impl Parser {
         Ok(true)
     }
 
-        fn parse_item(&mut self) -> Result<Item, ParseError> {
+    /// v22.1.0: parse optional `#[checkpoint]` annotation on stage definitions.
+    fn parse_checkpoint_annotation(&mut self) -> Result<bool, ParseError> {
+        // Lookahead: # [ checkpoint ]
+        let is_checkpoint = self.peek() == &TokenKind::Hash
+            && matches!(self.tokens.get(self.pos + 1), Some(t) if t.kind == TokenKind::LBracket)
+            && matches!(self.tokens.get(self.pos + 2), Some(t) if matches!(&t.kind, TokenKind::Ident(n) if n == "checkpoint"));
+        if !is_checkpoint {
+            return Ok(false);
+        }
+        self.advance(); // #
+        self.expect(&TokenKind::LBracket)?;
+        self.expect_ident_name("checkpoint")?;
+        self.expect(&TokenKind::RBracket)?;
+        Ok(true)
+    }
+
+    /// v22.4.0: parse optional `#[trigger(event = "...", bucket/topic = "...")]` annotation on seq.
+    fn parse_trigger_annotation(&mut self) -> Result<Option<crate::ast::TriggerAnnotation>, ParseError> {
+        // Lookahead: # [ trigger
+        let is_trigger = self.peek() == &TokenKind::Hash
+            && matches!(self.tokens.get(self.pos + 1), Some(t) if t.kind == TokenKind::LBracket)
+            && matches!(self.tokens.get(self.pos + 2), Some(t) if matches!(&t.kind, TokenKind::Ident(n) if n == "trigger"));
+        if !is_trigger {
+            return Ok(None);
+        }
+        let start = self.peek_span().clone();
+        self.advance(); // #
+        self.expect(&TokenKind::LBracket)?;
+        self.expect_ident_name("trigger")?;
+        self.expect(&TokenKind::LParen)?;
+        // event = "..."
+        self.expect_ident_name("event")?;
+        self.expect(&TokenKind::Eq)?;
+        let event = self.expect_str()?;
+        // optional: , bucket = "..." OR , topic = "..."
+        let mut bucket: Option<String> = None;
+        let mut topic: Option<String> = None;
+        while self.peek() == &TokenKind::Comma {
+            self.advance(); // ,
+            if self.peek() == &TokenKind::RParen { break; } // trailing comma
+            let (key, _) = self.expect_ident()?;
+            self.expect(&TokenKind::Eq)?;
+            let val = self.expect_str()?;
+            match key.as_str() {
+                "bucket" => bucket = Some(val),
+                "topic"  => topic  = Some(val),
+                other    => return Err(ParseError::new(
+                    format!("unknown trigger key `{}`; expected `bucket` or `topic`", other),
+                    self.peek_span().clone(),
+                )),
+            }
+        }
+        self.expect(&TokenKind::RParen)?;
+        self.expect(&TokenKind::RBracket)?;
+        Ok(Some(crate::ast::TriggerAnnotation {
+            event,
+            bucket,
+            topic,
+            span: self.span_from(&start),
+        }))
+    }
+
+    /// v22.6.0: parse optional `#[timeout(seconds = N)]` annotation on stage definitions.
+    fn parse_timeout_annotation(&mut self) -> Result<Option<crate::ast::TimeoutAnnotation>, ParseError> {
+        let is_timeout = self.peek() == &TokenKind::Hash
+            && matches!(self.tokens.get(self.pos + 1), Some(t) if t.kind == TokenKind::LBracket)
+            && matches!(self.tokens.get(self.pos + 2), Some(t) if matches!(&t.kind, TokenKind::Ident(n) if n == "timeout"));
+        if !is_timeout {
+            return Ok(None);
+        }
+        let start = self.peek_span().clone();
+        self.advance();                          // #
+        self.expect(&TokenKind::LBracket)?;      // [
+        self.expect_ident_name("timeout")?;
+        self.expect(&TokenKind::LParen)?;
+        self.expect_ident_name("seconds")?;
+        self.expect(&TokenKind::Eq)?;
+        let seconds = match self.peek().clone() {
+            TokenKind::Int(n) => { self.advance(); n as f64 }
+            TokenKind::Float(f) => { self.advance(); f }
+            other => return Err(ParseError::new(
+                format!("expected number after `seconds =`, got {:?}", other),
+                self.peek_span().clone(),
+            )),
+        };
+        self.expect(&TokenKind::RParen)?;
+        self.expect(&TokenKind::RBracket)?;
+        Ok(Some(crate::ast::TimeoutAnnotation { seconds, span: self.span_from(&start) }))
+    }
+
+    /// v22.6.0: parse optional `#[retry(max = N, backoff = "...")]` annotation.
+    fn parse_retry_annotation(&mut self) -> Result<Option<crate::ast::RetryAnnotation>, ParseError> {
+        let is_retry = self.peek() == &TokenKind::Hash
+            && matches!(self.tokens.get(self.pos + 1), Some(t) if t.kind == TokenKind::LBracket)
+            && matches!(self.tokens.get(self.pos + 2), Some(t) if matches!(&t.kind, TokenKind::Ident(n) if n == "retry"));
+        if !is_retry {
+            return Ok(None);
+        }
+        let start = self.peek_span().clone();
+        self.advance();                          // #
+        self.expect(&TokenKind::LBracket)?;      // [
+        self.expect_ident_name("retry")?;
+        self.expect(&TokenKind::LParen)?;
+        self.expect_ident_name("max")?;
+        self.expect(&TokenKind::Eq)?;
+        let max = match self.peek().clone() {
+            TokenKind::Int(n) => {
+                let span = self.peek_span().clone();
+                self.advance();
+                u32::try_from(n).map_err(|_| ParseError::new(
+                    format!("retry max value {} is out of range (must be 0..4294967295)", n),
+                    span,
+                ))?
+            }
+            other => return Err(ParseError::new(
+                format!("expected integer after `max =`, got {:?}", other),
+                self.peek_span().clone(),
+            )),
+        };
+        self.expect(&TokenKind::Comma)?;
+        self.expect_ident_name("backoff")?;
+        self.expect(&TokenKind::Eq)?;
+        let backoff = self.expect_str()?;
+        self.expect(&TokenKind::RParen)?;
+        self.expect(&TokenKind::RBracket)?;
+        Ok(Some(crate::ast::RetryAnnotation { max, backoff, span: self.span_from(&start) }))
+    }
+
+    /// v22.6.0: parse optional `#[circuit_breaker(threshold = F, window = N)]` annotation.
+    fn parse_circuit_breaker_annotation(&mut self) -> Result<Option<crate::ast::CircuitBreakerAnnotation>, ParseError> {
+        let is_cb = self.peek() == &TokenKind::Hash
+            && matches!(self.tokens.get(self.pos + 1), Some(t) if t.kind == TokenKind::LBracket)
+            && matches!(self.tokens.get(self.pos + 2), Some(t) if matches!(&t.kind, TokenKind::Ident(n) if n == "circuit_breaker"));
+        if !is_cb {
+            return Ok(None);
+        }
+        let start = self.peek_span().clone();
+        self.advance();                          // #
+        self.expect(&TokenKind::LBracket)?;      // [
+        self.expect_ident_name("circuit_breaker")?;
+        self.expect(&TokenKind::LParen)?;
+        self.expect_ident_name("threshold")?;
+        self.expect(&TokenKind::Eq)?;
+        let threshold = match self.peek().clone() {
+            TokenKind::Int(n) => { self.advance(); n as f64 }
+            TokenKind::Float(f) => { self.advance(); f }
+            other => return Err(ParseError::new(
+                format!("expected number after `threshold =`, got {:?}", other),
+                self.peek_span().clone(),
+            )),
+        };
+        self.expect(&TokenKind::Comma)?;
+        self.expect_ident_name("window")?;
+        self.expect(&TokenKind::Eq)?;
+        let window = match self.peek().clone() {
+            TokenKind::Int(n) => {
+                let span = self.peek_span().clone();
+                self.advance();
+                u64::try_from(n).map_err(|_| ParseError::new(
+                    format!("circuit_breaker window value {} is out of range (must be non-negative)", n),
+                    span,
+                ))?
+            }
+            other => return Err(ParseError::new(
+                format!("expected integer after `window =`, got {:?}", other),
+                self.peek_span().clone(),
+            )),
+        };
+        self.expect(&TokenKind::RParen)?;
+        self.expect(&TokenKind::RBracket)?;
+        Ok(Some(crate::ast::CircuitBreakerAnnotation { threshold, window, span: self.span_from(&start) }))
+    }
+
+    fn parse_item(&mut self) -> Result<Item, ParseError> {
+        // Annotation ordering: #[deprecated] must appear before #[api(...)], #[streaming], etc.
+        // because each parser tries to consume #[ ... ] and they are mutually exclusive.
+        // v24.4.0: parse optional #[deprecated] annotation before fn
+        let deprecated_ann = self.parse_deprecated_annotation()?;
         // v18.8.0: parse optional `#[api(...)]` annotation before visibility/fn
         let api_annotation = self.parse_api_annotation()?;
         // v19.1.0: parse optional streaming/stateful annotations
@@ -374,6 +574,14 @@ impl Parser {
         let stateful_ann = self.parse_stateful_annotation()?;
         // v19.5.0: parse optional #[arrow] annotation
         let arrow_ann = self.parse_arrow_annotation()?;
+        // v22.1.0: parse optional #[checkpoint] annotation
+        let checkpoint_ann = self.parse_checkpoint_annotation()?;
+        // v22.4.0: parse optional #[trigger(...)] annotation
+        let trigger_ann = self.parse_trigger_annotation()?;
+        // v22.6.0: parse optional SLA annotations
+        let timeout_ann         = self.parse_timeout_annotation()?;
+        let retry_ann           = self.parse_retry_annotation()?;
+        let circuit_breaker_ann = self.parse_circuit_breaker_annotation()?;
 
         let vis = self.parse_visibility();
 
@@ -395,12 +603,17 @@ impl Parser {
             TokenKind::Fn => {
                 let mut fd = self.parse_fn_def(vis, false)?;
                 fd.api_annotation = api_annotation;
+                fd.deprecated = deprecated_ann; // v24.4.0
                 Ok(Item::FnDef(fd))
             }
             TokenKind::Stage => {
                 let mut td = self.parse_trf_def(vis, false)?;
                 td.stateful = stateful_ann;
                 td.arrow = arrow_ann;
+                td.checkpoint = checkpoint_ann;
+                td.timeout         = timeout_ann;          // v22.6.0
+                td.retry_ann       = retry_ann;           // v22.6.0
+                td.circuit_breaker = circuit_breaker_ann;  // v22.6.0
                 Ok(Item::TrfDef(td))
             }
             TokenKind::Trf => {
@@ -417,11 +630,17 @@ impl Parser {
                     TokenKind::Fn => {
                         let mut fd = self.parse_fn_def(vis, true)?;
                         fd.api_annotation = api_annotation;
+                        fd.deprecated = deprecated_ann; // v24.4.0
                         Ok(Item::FnDef(fd))
                     }
                     TokenKind::Stage => {
                         let mut td = self.parse_trf_def(vis, true)?;
                         td.stateful = stateful_ann;
+                        td.arrow = arrow_ann;
+                        td.checkpoint = checkpoint_ann;
+                        td.timeout         = timeout_ann;          // v22.6.0
+                        td.retry_ann       = retry_ann;           // v22.6.0
+                        td.circuit_breaker = circuit_breaker_ann;  // v22.6.0
                         Ok(Item::TrfDef(td))
                     }
                     TokenKind::Trf => {
@@ -466,10 +685,15 @@ impl Parser {
                     Ok(Item::InterfaceImplDecl(self.parse_interface_impl_decl()?))
                 }
             }
+            TokenKind::Pipeline => Ok(Item::PipelineDef(self.parse_pipeline_def()?)), // v22.5.0
             TokenKind::Seq => {
                 let item = self.parse_flw_def_or_binding(vis)?;
                 Ok(match item {
-                    Item::FlwDef(mut fd) => { fd.streaming = streaming_ann; Item::FlwDef(fd) }
+                    Item::FlwDef(mut fd) => {
+                        fd.streaming = streaming_ann;
+                        fd.trigger = trigger_ann; // v22.4.0
+                        Item::FlwDef(fd)
+                    }
                     other => other,
                 })
             }
@@ -1413,7 +1637,7 @@ impl Parser {
                 self.advance();
                 n
             }
-            // Allow effect keywords as type names (e.g., "Io" as a type)
+            // Allow effect keywords and soft keywords as type names
             TokenKind::Pure => {
                 self.advance();
                 "Pure".to_string()
@@ -1421,6 +1645,11 @@ impl Parser {
             TokenKind::Io => {
                 self.advance();
                 "Io".to_string()
+            }
+            // `pipeline` soft keyword — allow as type name for backward compat (v22.5.0)
+            TokenKind::Pipeline => {
+                self.advance();
+                "pipeline".to_string()
             }
             other => {
                 return Err(ParseError::new(
@@ -1502,6 +1731,7 @@ impl Parser {
             body,
             span: self.span_from(&start),
             api_annotation: None, // set by parse_item if #[api(...)] precedes the fn
+            deprecated: false,    // set by parse_item if #[deprecated] precedes the fn
         })
     }
 
@@ -1667,6 +1897,10 @@ impl Parser {
                         self.advance();
                         Effect::Checkpoint
                     }
+                    "PipelineState" => {
+                        self.advance();
+                        Effect::PipelineState
+                    }
                     "Trace" => {
                         self.advance();
                         Effect::Trace
@@ -1734,6 +1968,10 @@ impl Parser {
             body,
             stateful: false,
             arrow: false,
+            checkpoint: false,
+            timeout: None,
+            retry_ann: None,
+            circuit_breaker: None,
             span: self.span_from(&start),
         })
     }
@@ -1788,6 +2026,49 @@ impl Parser {
         Ok(params)
     }
 
+    // ── pipeline_def (v22.5.0) ───────────────────────────────────────────────
+
+    /// v22.5.0: parse `step "<name>" = seq <SeqName> [after "<dep>", ...]`
+    fn parse_pipeline_step(&mut self) -> Result<crate::ast::PipelineStep, ParseError> {
+        let start = self.peek_span().clone();
+        // "step" — soft keyword
+        self.expect_ident_name("step")?;
+        let name = self.expect_str()?;
+        self.expect(&TokenKind::Eq)?;
+        self.expect(&TokenKind::Seq)?;
+        let (seq_name, _) = self.expect_ident()?;
+        // optional: after "<dep1>", "<dep2>"
+        let mut after = Vec::new();
+        if self.peek_ident_text("after") {
+            self.advance(); // consume "after"
+            let dep = self.expect_str()?;
+            after.push(dep);
+            while self.peek() == &TokenKind::Comma {
+                self.advance(); // ,
+                if !matches!(self.peek(), TokenKind::Str(_)) {
+                    // trailing comma or unexpected token — stop consuming deps
+                    break;
+                }
+                after.push(self.expect_str()?);
+            }
+        }
+        Ok(crate::ast::PipelineStep { name, seq_name, after, span: self.span_from(&start) })
+    }
+
+    /// v22.5.0: parse `pipeline <Name> { step ... }`
+    fn parse_pipeline_def(&mut self) -> Result<crate::ast::PipelineDef, ParseError> {
+        let start = self.peek_span().clone();
+        self.expect(&TokenKind::Pipeline)?;
+        let (name, _) = self.expect_ident()?;
+        self.expect(&TokenKind::LBrace)?;
+        let mut steps = Vec::new();
+        while self.peek() != &TokenKind::RBrace && !self.at_end() {
+            steps.push(self.parse_pipeline_step()?);
+        }
+        self.expect(&TokenKind::RBrace)?;
+        Ok(crate::ast::PipelineDef { name, steps, span: self.span_from(&start) })
+    }
+
     // ── flw_def (3-7) ────────────────────────────────────────────────────────
 
     #[allow(dead_code)]
@@ -1817,6 +2098,7 @@ impl Parser {
             steps,
             ctx_param,
             streaming: None,
+            trigger: None,
             span: self.span_from(&start),
         })
     }
@@ -1834,6 +2116,19 @@ impl Parser {
             }
             self.expect(&TokenKind::RBracket)?;
             Ok(FlwStep::Par(names))
+        } else if self.peek_ident_text("par_distributed") {
+            // par_distributed [...] — soft keyword (v22.2.0)
+            self.advance(); // consume "par_distributed"
+            self.expect(&TokenKind::LBracket)?;
+            let (first, _) = self.expect_ident()?;
+            let mut names = vec![first];
+            while self.peek() == &TokenKind::Comma {
+                self.advance();
+                let (name, _) = self.expect_ident()?;
+                names.push(name);
+            }
+            self.expect(&TokenKind::RBracket)?;
+            Ok(FlwStep::ParDistributed(names))
         } else if self.peek_ident_text("tap") {
             // tap(observer_expr) — soft keyword (v16.8.0)
             self.advance(); // consume "tap"
@@ -1924,8 +2219,8 @@ impl Parser {
         };
         self.expect(&TokenKind::Eq)?;
 
-        // Check if first step is `par [...]` or an ident used as template for binding.
-        if self.peek() == &TokenKind::Par {
+        // Check if first step is `par [...]` / `par_distributed [...]` or an ident used as template for binding.
+        if self.peek() == &TokenKind::Par || self.peek_ident_text("par_distributed") {
             // par [...] — must be a FlwDef, not a binding
             let first_step = self.parse_flw_step()?;
             let mut steps = vec![first_step];
@@ -1938,6 +2233,7 @@ impl Parser {
                 steps,
                 ctx_param,
                 streaming: None,
+                trigger: None,
                 span: self.span_from(&start),
             }));
         }
@@ -1959,6 +2255,7 @@ impl Parser {
                     steps,
                     ctx_param,
                     streaming: None,
+                    trigger: None,
                     span: self.span_from(&start),
                 }))
             }
@@ -2656,6 +2953,12 @@ impl Parser {
                 } else {
                     Ok(Expr::Ident(name, start))
                 }
+            }
+
+            // `pipeline` used as identifier expression (backward compat — v22.5.0 soft keyword)
+            TokenKind::Pipeline => {
+                self.advance();
+                Ok(Expr::Ident("pipeline".to_string(), start))
             }
 
             // effect keywords used as namespaces (Pure, Io, Emit → identifiers)

@@ -1,0 +1,76 @@
+# fav deploy --trigger
+
+`#[trigger(...)]` アノテーションを使って、S3 / Kafka / SQS をトリガーとするイベント駆動パイプラインを定義し、`fav deploy --trigger` でデプロイ設定 JSON を生成する。
+
+> v22.4.0 はデプロイ設定 JSON の生成まで対応。Lambda + EventBridge への実際のデプロイは v22.5+ で対応予定。
+
+---
+
+## `#[trigger(...)]` アノテーション
+
+`seq` 宣言の直前に付与する。
+
+```favnir
+// S3 ファイルアップロードをトリガーに
+#[trigger(event = "s3:ObjectCreated", bucket = "raw-data")]
+seq ProcessUpload = ParseCsv |> Validate |> WriteToWarehouse
+
+// Kafka メッセージをトリガーに
+#[trigger(event = "kafka:message", topic = "orders")]
+seq ProcessOrder = DeserializeOrder |> EnrichOrder |> SaveOrder
+
+// SQS メッセージをトリガーに
+#[trigger(event = "sqs:message", topic = "data-queue")]
+seq ProcessQueue = Deserialize |> Process |> Save
+```
+
+### サポートキー
+
+| キー | 型 | 必須 | 説明 |
+|---|---|---|---|
+| `event` | String | ✓ | イベント種別（例: `"s3:ObjectCreated"`, `"kafka:message"`, `"sqs:message"`） |
+| `bucket` | String | △ | S3 イベントのバケット名（`s3:*` イベント用） |
+| `topic` | String | △ | Kafka / SQS のトピック / キュー名 |
+
+`bucket` と `topic` はどちらか一方を指定する（イベント種別に応じて選択）。
+
+---
+
+## `fav deploy --trigger <file>`
+
+```bash
+fav deploy --trigger src/pipeline.fav
+```
+
+`#[trigger(...)]` が付いた `seq` をすべて収集し、デプロイ設定 JSON を stdout に出力する。
+
+### 出力例
+
+```json
+[
+  {
+    "pipeline": "ProcessUpload",
+    "trigger": {
+      "event": "s3:ObjectCreated",
+      "bucket": "raw-data"
+    }
+  },
+  {
+    "pipeline": "ProcessOrder",
+    "trigger": {
+      "event": "kafka:message",
+      "topic": "orders"
+    }
+  }
+]
+```
+
+`--trigger` が指定された場合、`--env` / `--function` / `--region` フラグは無視される。
+
+---
+
+## 将来の拡張（v22.5+）
+
+- Lambda + EventBridge / MSK / SQS へのデプロイ（AWS API 直接呼び出し）
+- Terraform ファイル生成オプション（`--format terraform`）
+- 複数ファイルプロジェクトへの対応（`fav.toml` ベース）

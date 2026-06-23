@@ -1,0 +1,90 @@
+---
+title: "IO Primitives"
+order: 11
+category: "Primitive"
+description: "I/O プリミティブ — ファイル読み書き・バッチ読み込み（io_uring / rayon）"
+---
+
+# IO Primitives
+
+エフェクト: `!IO`
+
+`IO` 名前空間はファイル読み書きを行う低レベル VM プリミティブです。
+`fs` Rune の高レベル API と異なり、直接 VM から呼び出せます。
+
+## `IO.read_files_batch`
+
+```favnir
+IO.read_files_batch(paths: List<String>) -> List<String>
+```
+
+複数のファイルを並列に読み込み、内容の文字列リストを返します。
+結果は入力パスと同じ順序を保証します。
+
+### 使用例
+
+```favnir
+stage LoadShards: List<String> -> List<String> = |paths| {
+  IO.read_files_batch(paths)
+}
+
+// seq pipeline
+stage Process: String -> Unit = |root| {
+  bind shard_paths <- IO.read_file_raw(root + "/index.txt")
+  bind shards <- IO.read_files_batch(List.split(shard_paths, "\n"))
+  shards |> List.iter(|s| emit s)
+}
+```
+
+### プラットフォーム動作
+
+| 環境 | バックエンド | 備考 |
+|---|---|---|
+| **Linux** | `tokio-uring`（io_uring） | カーネル 5.1+ 必須 |
+| **Windows / macOS** | `rayon` 並列 `read_to_string` | スレッドプールによるフォールバック |
+| **WASM** | 非対応 | `err` が返ります |
+
+> **注意**: Linux 環境ではカーネル 5.1+ が必要です。カーネル 5.1 未満では
+> 実行時エラー（`err`）になります。
+
+### エラー処理
+
+いずれか 1 ファイルの読み込みに失敗した場合、全体が `err` を返します（fail-fast）。
+
+```favnir
+match IO.read_files_batch(paths) {
+  Err(msg) => emit "failed: " + msg
+  Ok(contents) => contents |> List.iter(|c| emit c)
+}
+```
+
+---
+
+## `IO.read_file_raw`
+
+```favnir
+IO.read_file_raw(path: String) -> String
+```
+
+単一ファイルを文字列として読み込みます（逐次）。
+複数ファイルの並列読み込みには `IO.read_files_batch` を使用してください。
+
+---
+
+## `IO.write_file_raw`
+
+```favnir
+IO.write_file_raw(path: String, content: String) -> Unit
+```
+
+文字列をファイルに書き込みます（上書き）。
+
+---
+
+## `IO.timestamp`
+
+```favnir
+IO.timestamp() -> String
+```
+
+現在の ISO 8601 タイムスタンプ文字列を返します。

@@ -66,6 +66,27 @@ pub struct Location {
     pub range: Range,
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct TextEdit {
+    pub range: Range,
+    #[serde(rename = "newText")]
+    pub new_text: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct WorkspaceEdit {
+    pub changes: std::collections::HashMap<String, Vec<TextEdit>>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct CodeAction {
+    pub title: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub edit: Option<WorkspaceEdit>,
+}
+
 pub mod completion_kind {
     pub const FUNCTION: u32 = 3;
     pub const FIELD: u32 = 5;

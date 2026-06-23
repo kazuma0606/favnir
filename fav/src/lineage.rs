@@ -69,6 +69,7 @@ fn format_effects(effects: &[ast::Effect]) -> String {
             Rpc => "!Rpc".into(),
             File => "!File".into(),
             Checkpoint => "!Checkpoint".into(),
+            PipelineState => "!PipelineState".into(),
             Unknown(name) => format!("!{}", name),
             Emit(ev) => format!("!Emit<{}>", ev),
             EmitUnion(evs) => format!("!Emit<{}>", evs.join("|")),

@@ -1,0 +1,139 @@
+---
+title: SLA 宣言（タイムアウト・リトライ・サーキットブレーカー）
+description: #[timeout] / #[retry] / #[circuit_breaker] アノテーションで stage に SLA を宣言する
+---
+
+# SLA 宣言
+
+Favnir v22.6.0 から、`stage` 定義に **SLA アノテーション** を付与して
+タイムアウト・リトライ・サーキットブレーカーの意図をコンパイル時に宣言できます。
+
+> **注意**: v22.6.0 時点では静的チェックと `fav explain --sla` での可視化のみ対応しています。
+> 実行時強制（タイムアウト割り込み・自動リトライ・CB 遮断）は v22.7+ で追加予定です。
+
+---
+
+## `#[timeout]`
+
+```favnir
+#[timeout(seconds = 30)]
+stage FetchData: () -> List<Row> = |_| {
+  Http.get("https://api.example.com/data")
+}
+```
+
+### パラメータ
+
+| パラメータ | 型      | 必須 | 説明                         |
+|-----------|---------|------|------------------------------|
+| `seconds` | `Float` | ✓    | タイムアウト秒数（正の数値） |
+
+### バリデーション
+
+| エラーコード | 条件                   | メッセージ                            |
+|-------------|------------------------|---------------------------------------|
+| E0401       | `seconds <= 0`         | timeout seconds must be > 0           |
+
+---
+
+## `#[retry]`
+
+```favnir
+#[retry(max = 3, backoff = "exponential")]
+stage CallApi: Input -> Output = |input| {
+  Http.post("https://api.example.com/process", input)
+}
+```
+
+### パラメータ
+
+| パラメータ | 型       | 必須 | 説明                                             |
+|-----------|----------|------|--------------------------------------------------|
+| `max`     | `Int`    | ✓    | 最大リトライ回数（1 以上）                        |
+| `backoff` | `String` | ✓    | バックオフ戦略: `"exponential"` / `"linear"` / `"none"` |
+
+### バリデーション
+
+| エラーコード | 条件                                | メッセージ                                              |
+|-------------|-------------------------------------|--------------------------------------------------------|
+| E0402       | `max == 0`                          | retry max must be >= 1                                 |
+| E0402       | backoff が上記 3 値以外             | retry backoff must be "exponential", "linear", or "none" |
+
+---
+
+## `#[circuit_breaker]`
+
+```favnir
+#[circuit_breaker(threshold = 0.5, window = 60)]
+stage WriteToDb: Row -> () = |row| {
+  Db.insert("events", row)
+}
+```
+
+### パラメータ
+
+| パラメータ  | 型      | 必須 | 説明                                          |
+|------------|---------|------|-----------------------------------------------|
+| `threshold` | `Float` | ✓    | エラー率の閾値（0.0 超〜1.0 以下）            |
+| `window`    | `Int`   | ✓    | 評価ウィンドウ秒数（1 以上）                  |
+
+### バリデーション
+
+| エラーコード | 条件                               | メッセージ                                  |
+|-------------|------------------------------------|--------------------------------------------|
+| E0403       | `threshold <= 0.0` または `> 1.0` | circuit_breaker threshold must be in (0, 1] |
+| E0403       | `window == 0`                      | circuit_breaker window must be > 0          |
+
+---
+
+## 複数アノテーションの組み合わせ
+
+同一 `stage` に複数の SLA アノテーションを付与できます。
+
+```favnir
+#[timeout(seconds = 10)]
+#[retry(max = 5, backoff = "exponential")]
+#[circuit_breaker(threshold = 0.3, window = 120)]
+stage ProcessPayment: PaymentRequest -> PaymentResult = |req| {
+  PaymentGateway.charge(req)
+}
+```
+
+> **注意**: `fn` 定義に SLA アノテーションを付与した場合はサイレントに無視されます。
+> SLA アノテーションは `stage` 定義にのみ適用されます。
+
+---
+
+## `fav explain --sla`
+
+`fav explain --sla <file>` で、ファイル内の全 `stage` の SLA 情報を表形式で確認できます。
+
+```bash
+$ fav explain --sla pipeline.fav
+```
+
+出力例:
+
+```
+Stage               Timeout(s)  Retry(max)  Backoff       CB threshold  CB window(s)  Worst-case(s)
+────────────────────────────────────────────────────────────────────────────────────────────────────
+FetchData           30          —           —             —             —             30.0
+CallApi             —           3           exponential   —             —             —
+ProcessPayment      10          5           exponential   0.30          120           50.0
+WriteToDb           —           —           —             0.50          60            —
+
+Total worst-case (SLA-annotated stages only): 80.0s
+```
+
+- `Worst-case(s)` は `timeout × (retry.max + 1)` で計算（タイムアウトのみの場合は `timeout`）
+- アノテーションなし stage は `—` 表示で合計には含まれません
+
+---
+
+## エラーコード早見表
+
+| コード | タイトル                        | 原因と対処                                      |
+|--------|---------------------------------|-------------------------------------------------|
+| E0401  | invalid timeout annotation      | `seconds = 0` 以下を指定 → 正の数値に変更       |
+| E0402  | invalid retry annotation        | `max = 0` か backoff 文字列が不正 → 値を修正    |
+| E0403  | invalid circuit_breaker annotation | `threshold` が範囲外か `window = 0` → 値を修正 |

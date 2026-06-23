@@ -1,0 +1,31 @@
+---
+title: Distributed Scale
+description: v22.x シリーズで達成した分散スケール機能の全体像
+---
+
+# Distributed Scale
+
+v22.x シリーズ（v22.1.0〜v22.8.0）で達成した分散スケール機能の全体像。
+
+> **Distributed Scale マイルストーン（v23.0.0）**: 全 5 完了条件達成
+
+## 達成した完了条件
+
+| 完了条件 | 達成バージョン |
+|---|---|
+| checkpoint 付きパイプラインが失敗後に再開できる | v22.1.0 ✅ |
+| `par_distributed [A, B, C]` が複数 Worker で並列実行できる | v22.2.0 ✅ |
+| `#[trigger(event = "s3:...")]` で S3 イベント駆動パイプラインがデプロイできる | v22.4.0 ✅ |
+| OpenTelemetry の trace が Jaeger で確認できる | v22.7.0 ✅ |
+| `fav orchestrate` で multi-step DAG が依存順に実行できる | v22.5.0 ✅ |
+
+## 機能一覧
+
+- [Checkpoint / Resume](/docs/cli/checkpoint) — v22.1.0
+- [Distributed par](/docs/cli/par-distributed) — v22.2.0
+- [Pipeline State Rune](/docs/runes/state) — v22.3.0
+- [Event-driven Pipeline](/docs/cli/trigger) — v22.4.0
+- [Pipeline Orchestration](/docs/cli/orchestrate) — v22.5.0
+- [SLA 宣言](/docs/cli/sla) — v22.6.0
+- [OpenTelemetry](/docs/cli/otel) — v22.7.0
+- [`fav deploy`](/docs/cli/deploy) — v22.8.0

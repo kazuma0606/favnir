@@ -1,0 +1,88 @@
+# ベンチマーク回帰検知
+
+Favnir は v24.3.0 から継続的なパフォーマンス回帰検知を本番稼働させています。
+`master` への merge ごとに CI が自動でベンチマークを比較し、5% 以上の劣化で fail します。
+
+---
+
+## CI フロー
+
+```bash
+# .github/workflows/bench.yml で自動実行
+bash benchmarks/suite/run_all.sh --format json > benchmarks/latest.json
+
+fav bench \
+  --baseline benchmarks/v24.2.0.json \
+  --current  benchmarks/latest.json \
+  --threshold 5 \
+  --emit-md || exit 1
+```
+
+---
+
+## `fav bench` 比較モード
+
+`--baseline` フラグを付けると比較モードになります。
+
+```bash
+fav bench \
+  --baseline benchmarks/v24.2.0.json \
+  --current  benchmarks/latest.json \
+  --threshold 5
+```
+
+### オプション
+
+| フラグ | 説明 | デフォルト |
+|---|---|---|
+| `--baseline <path>` | ベースライン JSON（必須） | — |
+| `--current <path>` | 比較対象 JSON（必須） | — |
+| `--threshold N` | 回帰判定しきい値（%） | 5.0 |
+| `--emit-md` | Markdown テーブル形式で出力 | false |
+
+---
+
+## 回帰判定式
+
+```
+pct_change = (current - baseline) / baseline * 100
+```
+
+`pct_change > threshold` の metric が 1 件でも存在すると回帰と判定し、exit code 1 を返します。
+
+### 出力例（テキスト形式）
+
+```
+OK: all metrics within 5.0% of baseline (v24.2.0 → v24.3.0).
+```
+
+```
+REGRESSION: 1 metric(s) exceeded 5.0% threshold:
+  duration_ms: +22.3% (baseline=16600, current=20300)
+```
+
+---
+
+## ベンチマーク JSON 形式
+
+`metrics` フィールドは**フラットな数値のみ**を記述してください。
+
+```json
+{
+  "version": "24.3.0",
+  "date": "2026-06-23",
+  "timestamp": "2026-06-23T10:00:00Z",
+  "metrics": {
+    "duration_ms": 16600,
+    "test_count": 1944
+  }
+}
+```
+
+---
+
+## 注意事項
+
+- `metrics` 内のネストオブジェクトは非対応（最初の `}` で終端する単純スキャン）
+- `test_count` の**減少**は回帰として検出しません（増加のみ判定）
+- `bench.favnir.dev` グラフ公開は v24.7（ドキュメントサイト v2）と同時対応予定

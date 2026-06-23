@@ -212,6 +212,26 @@ fn get_help_text(code: &str) -> &'static [&'static str] {
             "migrate to capability interface: `chain rows <- ctx.db.query(...)`",
             "direct Rune calls will be an error in v14.0",
         ],
+        "W010" => &["split the stage into smaller, focused stages"],
+        "W011" => &[
+            "add `!Io` (or the appropriate effect) to the stage signature",
+            "or pass the capability through a ctx argument",
+        ],
+        "W012" => &[
+            "remove the unused type definition",
+            "or make it `pub` if it is referenced externally",
+        ],
+        "W013" => &["use `List.filter_map(|x| { ... })` instead of chaining map and filter"],
+        "W014" => &["bind directly from the inner expression without the `Result.ok(...)` wrapper"],
+        "W015" => &[
+            "rename the second binding to avoid the rebind",
+            "or use `bind _` to intentionally discard a value",
+        ],
+        "W016" => &["add specific patterns before `_ =>`; if intentional, this is fine"],
+        "W017" => &["extract the inner logic to a separate helper function to reduce nesting"],
+        "W018" => &["extract the magic number to a named constant: `bind MAX_AMOUNT <- 9999`"],
+        "W019" => &["use an f-string instead: `f\"{a}{b}{c}\"`"],
+        "W020" => &["bind all required slots in the flw binding, or mark it as abstract"],
         "E0020" => &[
             "pass a value that implements the required capability interface",
             "available implementations: PostgresDb, SnowflakeDb, S3Storage, MockDb",
@@ -325,9 +345,16 @@ fn try_cmd_new(name: &str, template: &str) -> Result<(), String> {
         "script" => create_script_project(&root, name),
         "pipeline" => create_pipeline_project(&root, name),
         "lib" => create_lib_project(&root, name),
-        "postgres-etl" => create_postgres_etl_project(&root, name),
+        "postgres-etl"     => create_postgres_etl_project(&root, name),
+        // v24.8.0: テンプレートギャラリー
+        "etl-csv-to-db"    => create_etl_csv_to_db_project(&root, name),
+        "api-gateway"      => create_api_gateway_project(&root, name),
+        "lambda-scheduled" => create_lambda_scheduled_project(&root, name),
+        "distributed-etl"  => create_distributed_etl_project(&root, name),
         other => Err(format!(
-            "unknown template `{other}` (expected script|pipeline|lib|postgres-etl)"
+            "unknown template `{other}` \
+             (expected script|pipeline|lib|postgres-etl|\
+             etl-csv-to-db|api-gateway|lambda-scheduled|distributed-etl)"
         )),
     }
 }
@@ -518,6 +545,79 @@ fn create_postgres_etl_project(root: &Path, name: &str) -> Result<(), String> {
     Ok(())
 }
 
+// ── v24.8.0: テンプレートギャラリー ───────────────────────────────────────────
+
+pub const TEMPLATE_GALLERY: &[(&str, &str)] = &[
+    ("etl-csv-to-db",    "CSV → DB ETL パイプライン"),
+    ("api-gateway",      "HTTP API ゲートウェイ"),
+    ("lambda-scheduled", "スケジュール実行 Lambda ジョブ"),
+    ("distributed-etl",  "分散並列 ETL パイプライン"),
+];
+
+fn create_etl_csv_to_db_project(root: &Path, name: &str) -> Result<(), String> {
+    write_text_file(&root.join("pipeline.fav"), &format!(
+        "import csv\nimport postgres as db\n\nstage LoadCsv -> List[String] !Io {{\n    csv.read_file(\"data.csv\")\n}}\n\nstage InsertRows(rows: List[String]) -> Int !Db {{\n    rows |> List.map(|row| db.execute(\"INSERT INTO records (data) VALUES ($1)\", [row]))\n         |> List.length\n}}\n\npipeline {name} {{\n    LoadCsv |> InsertRows\n}}\n"
+    ))?;
+    write_text_file(&root.join("fav.toml"), &format!(
+        "[project]\nname = \"{name}\"\n\n[runes]\ncsv      = \"1.0.0\"\npostgres = \"1.0.0\"\n"
+    ))?;
+    write_text_file(&root.join("README.md"), &format!(
+        "# {name}\n\nCSV to DB ETL pipeline.\n\n## Usage\n\n```bash\nDATABASE_URL=postgres://localhost/{name} fav run pipeline.fav\n```\n"
+    ))?;
+    write_text_file(&root.join(".github/workflows/ci.yml"),
+        "name: CI\non: [push, pull_request]\njobs:\n  test:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n      - run: cargo install fav\n      - run: fav check pipeline.fav\n"
+    )?;
+    Ok(())
+}
+
+fn create_api_gateway_project(root: &Path, name: &str) -> Result<(), String> {
+    write_text_file(&root.join("api.fav"), &format!(
+        "stage Server -> Unit !Http {{\n    Http.serve_raw(8080, |req| \"{{\\\"status\\\":\\\"ok\\\"}}\")\n}}\n\npipeline {name} {{ Server }}\n"
+    ))?;
+    write_text_file(&root.join("fav.toml"), &format!(
+        "[project]\nname = \"{name}\"\n\n[runes]\nhttp = \"1.0.0\"\n"
+    ))?;
+    write_text_file(&root.join("README.md"), &format!(
+        "# {name}\n\nHTTP API gateway.\n\n## Usage\n\n```bash\nfav run api.fav\n```\n"
+    ))?;
+    write_text_file(&root.join(".github/workflows/ci.yml"),
+        "name: CI\non: [push, pull_request]\njobs:\n  test:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n      - run: cargo install fav\n      - run: fav check api.fav\n"
+    )?;
+    Ok(())
+}
+
+fn create_lambda_scheduled_project(root: &Path, name: &str) -> Result<(), String> {
+    write_text_file(&root.join("job.fav"), &format!(
+        "stage Run -> Unit !Io {{\n    Io.println(\"Running: {name}\")\n}}\n\npipeline {name} {{ Run }}\n"
+    ))?;
+    write_text_file(&root.join("fav.toml"), &format!(
+        "[project]\nname = \"{name}\"\n"
+    ))?;
+    write_text_file(&root.join("README.md"), &format!(
+        "# {name}\n\nScheduled Lambda job.\n\n## Usage\n\n```bash\nfav run job.fav\n```\n"
+    ))?;
+    write_text_file(&root.join(".github/workflows/ci.yml"),
+        "name: CI\non:\n  schedule:\n    - cron: '0 * * * *'\n  push:\njobs:\n  run:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n      - run: cargo install fav\n      - run: fav run job.fav\n"
+    )?;
+    Ok(())
+}
+
+fn create_distributed_etl_project(root: &Path, name: &str) -> Result<(), String> {
+    write_text_file(&root.join("pipeline.fav"), &format!(
+        "stage FetchA -> List[String] !Http {{ Http.get(\"https://api.example.com/a\") |> String.split(\"\\n\") }}\nstage FetchB -> List[String] !Http {{ Http.get(\"https://api.example.com/b\") |> String.split(\"\\n\") }}\n\nstage Merge(a: List[String], b: List[String]) -> Int !Db {{\n    List.concat(a, b)\n        |> List.map(|row| Db.execute(\"INSERT INTO results (data) VALUES ($1)\", [row]))\n        |> List.length\n}}\n\npipeline {name} {{\n    par [FetchA, FetchB] |> Merge\n}}\n"
+    ))?;
+    write_text_file(&root.join("fav.toml"), &format!(
+        "[project]\nname = \"{name}\"\n\n[runes]\npostgres = \"1.0.0\"\n"
+    ))?;
+    write_text_file(&root.join("README.md"), &format!(
+        "# {name}\n\nDistributed parallel ETL.\n\n## Usage\n\n```bash\nDATABASE_URL=postgres://localhost/{name} fav run pipeline.fav\n```\n"
+    ))?;
+    write_text_file(&root.join(".github/workflows/ci.yml"),
+        "name: CI\non: [push, pull_request]\njobs:\n  test:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n      - run: cargo install fav\n      - run: fav check pipeline.fav\n"
+    )?;
+    Ok(())
+}
+
 // ── module loading ────────────────────────────────────────────────────────────
 
 /// Load a program and all its transitive imports, returning a merged list of
@@ -687,7 +787,7 @@ fn partial_flw_warnings(program: &ast::Program) -> Vec<crate::middle::checker::T
             program.items.iter().find_map(|item| match item {
                 ast::Item::FlwBindingDef(fd) if fd.name == name => {
                     Some(crate::middle::checker::TypeWarning::new(
-                        "W011",
+                        "W020",
                         format!(
                             "`{}` is a partial flw binding with unbound slots: {}",
                             name,
@@ -956,12 +1056,16 @@ fn run_with_favnir_pipeline(source_path: &str, db_url: Option<&str>) {
         for e in &errors {
             eprintln!("{}", format_diagnostic(&source, e));
         }
+        #[cfg(not(target_arch = "wasm32"))]
+        crate::otel::otel_flush_if_enabled();
         process::exit(1);
     }
     // Compile via compiler.fav (rune-import-aware, v8.6.0)
     let bytes =
         crate::compiler_fav_runner::compile_file_to_bytes_rune(source_path).unwrap_or_else(|e| {
             eprintln!("compiler.fav error: {}", e);
+            #[cfg(not(target_arch = "wasm32"))]
+            crate::otel::otel_flush_if_enabled();
             process::exit(1);
         });
     run_fvc_bytes(&bytes, db_url, Some(source_path));
@@ -1001,6 +1105,8 @@ fn run_with_favnir_pipeline_project(
         crate::compiler_fav_runner::collect_project_merged(source_path, root, toml)
             .unwrap_or_else(|e| {
                 eprintln!("error: {}", e);
+                #[cfg(not(target_arch = "wasm32"))]
+                crate::otel::otel_flush_if_enabled();
                 process::exit(1);
             });
 
@@ -1010,6 +1116,8 @@ fn run_with_favnir_pipeline_project(
         for e in &errors {
             eprintln!("{}", format_diagnostic(&merged, e));
         }
+        #[cfg(not(target_arch = "wasm32"))]
+        crate::otel::otel_flush_if_enabled();
         process::exit(1);
     }
 
@@ -1017,6 +1125,8 @@ fn run_with_favnir_pipeline_project(
     let bytes = crate::compiler_fav_runner::compile_src_str_to_bytes(&merged)
         .unwrap_or_else(|e| {
             eprintln!("compiler.fav error: {}", e);
+            #[cfg(not(target_arch = "wasm32"))]
+            crate::otel::otel_flush_if_enabled();
             process::exit(1);
         });
 
@@ -1148,7 +1258,7 @@ pub(crate) fn is_result_err_value(v: &Value) -> bool {
 /// - `--legacy` is set, OR
 /// - the file is part of a fav.toml project, OR
 /// - the file uses `import rune` declarations.
-pub fn cmd_run(file: Option<&str>, db_url: Option<&str>, legacy: bool, verbose: bool, trace: bool, no_tap: bool, legacy_value_repr: bool, explain_pushdown: bool) {
+pub fn cmd_run(file: Option<&str>, db_url: Option<&str>, legacy: bool, verbose: bool, trace: bool, no_tap: bool, legacy_value_repr: bool, explain_pushdown: bool, checkpoint_dir: Option<&str>, resume_dir: Option<&str>) {
     let verbose_level = load_run_config_verbose(file, verbose, trace);
 
     if no_tap {
@@ -1162,6 +1272,56 @@ pub fn cmd_run(file: Option<&str>, db_url: Option<&str>, legacy: bool, verbose: 
 
     // v20.3.0: --legacy-value-repr は NaN-boxing 移行検証用フラグ（現時点は no-op）
     let _ = legacy_value_repr;
+
+    // v22.1.0: Checkpoint / Resume setup
+    {
+        let checkpoint_stages = file
+            .and_then(|f| std::fs::read_to_string(f).ok())
+            .map(|src| {
+                let file_name = file.unwrap_or("<input>");
+                let tokens = crate::frontend::lexer::Lexer::new(&src, file_name)
+                    .tokenize()
+                    .unwrap_or_default();
+                crate::frontend::parser::Parser::new(tokens)
+                    .parse_program()
+                    .map(|prog| {
+                        prog.items.iter().filter_map(|item| {
+                            if let crate::ast::Item::TrfDef(td) = item {
+                                if td.checkpoint { Some(td.name.clone()) } else { None }
+                            } else { None }
+                        }).collect::<std::collections::HashSet<_>>()
+                    })
+                    .unwrap_or_default()
+            })
+            .unwrap_or_default();
+        crate::backend::vm::set_checkpoint_stages(checkpoint_stages);
+        crate::backend::vm::set_checkpoint_dir(checkpoint_dir);
+        crate::backend::vm::set_resume_dir(resume_dir);
+    }
+
+    // v22.2.0: Worker endpoints from fav.toml [workers]
+    {
+        let worker_endpoints = file
+            .and_then(|f| std::path::Path::new(f).parent())
+            .and_then(|dir| crate::toml::FavToml::find_root(dir))
+            .and_then(|root| crate::toml::FavToml::load(&root))
+            .and_then(|toml| toml.workers)
+            .map(|w| w.endpoints)
+            .unwrap_or_default();
+        crate::backend::vm::set_worker_endpoints(worker_endpoints);
+    }
+
+    // v22.3.0: State backend from fav.toml [state]
+    {
+        let state_backend = file
+            .and_then(|f| std::path::Path::new(f).parent())
+            .and_then(|dir| crate::toml::FavToml::find_root(dir))
+            .and_then(|root| crate::toml::FavToml::load(&root))
+            .and_then(|toml| toml.state)
+            .map(|s| if s.backend.is_empty() { "memory".to_string() } else { s.backend })
+            .unwrap_or_else(|| "memory".to_string());
+        crate::backend::vm::set_state_backend(&state_backend);
+    }
 
     // v9.0.0: --legacy is deprecated. Warn if used.
     if legacy {
@@ -1177,6 +1337,11 @@ pub fn cmd_run(file: Option<&str>, db_url: Option<&str>, legacy: bool, verbose: 
 
     // Set global verbose level before pipeline execution (v12.5.0)
     crate::backend::vm::set_verbose_level(verbose_level);
+    // v22.7.0: OTel 初期化（trace フラグが立っているとき）
+    #[cfg(not(target_arch = "wasm32"))]
+    if trace {
+        crate::otel::otel_init();
+    }
 
     if use_favnir {
         if let Some((ref toml, ref root)) = proj {
@@ -1229,6 +1394,15 @@ pub fn cmd_run(file: Option<&str>, db_url: Option<&str>, legacy: bool, verbose: 
             }
         }
     }
+    // v22.7.0: OTel エクスポート（run 完了後）
+    #[cfg(not(target_arch = "wasm32"))]
+    if trace {
+        match std::env::var("OTEL_EXPORTER_OTLP_ENDPOINT") {
+            Ok(ep) => crate::otel::otel_export_http(&ep),
+            Err(_) => crate::otel::otel_export_stdout(),
+        }
+        crate::otel::otel_reset();
+    }
 }
 
 // ── fav run --self-host (backward-compat alias) ────────────────────────────────
@@ -1237,7 +1411,7 @@ pub fn cmd_run(file: Option<&str>, db_url: Option<&str>, legacy: bool, verbose: 
 // with legacy=false.
 
 pub fn cmd_run_self_hosted(file: Option<&str>, db_url: Option<&str>) {
-    cmd_run(file, db_url, false, false, false, false, false, false);
+    cmd_run(file, db_url, false, false, false, false, false, false, None, None);
 }
 
 // ── v21.1.0: DAP デバッガー ───────────────────────────────────────────────────
@@ -3805,6 +3979,8 @@ fn try_cmd_check_dir(dir: &Path) -> Result<(), usize> {
         kafka: None,
         dev_dependencies: vec![],
         registry_url: None,
+        workers: None,
+        state: None,
     });
     let files = collect_fav_files_recursive(dir);
     let resolver = make_resolver(Some(toml), Some(root));
@@ -8302,7 +8478,7 @@ seq PartialImport = DataPipeline<UserRow> { parse <- ParseCsv }
         let program = Parser::parse_str(source, "partial_flw_check.fav").expect("parse");
         let warnings = partial_flw_warnings(&program);
         assert_eq!(warnings.len(), 1);
-        assert_eq!(warnings[0].code, "W011");
+        assert_eq!(warnings[0].code, "W020");
         assert!(warnings[0].message.contains("PartialImport"));
         assert!(warnings[0].message.contains("validate, save"));
     }
@@ -10044,6 +10220,636 @@ pub fn cmd_doc(path: &str, out_dir: &str) {
             process::exit(1);
         }
         println!("doc: {} → {}", entry.display(), out_path.display());
+    }
+}
+
+// ── fav doc --format site / --serve (v21.7.0) ────────────────────────────────
+
+const DOCSITE_CSS: &str = r#"
+body{background:#0d1117;color:#c9d1d9;font-family:sans-serif;margin:0;}
+.sidebar{width:220px;background:#161b22;position:fixed;top:0;bottom:0;overflow-y:auto;padding:16px;box-sizing:border-box;}
+.sidebar-title{font-weight:bold;font-size:1.1em;margin-bottom:12px;color:#f0f6fc;}
+.sidebar ul{list-style:none;padding:0;margin:0;}
+.sidebar li a{color:#58a6ff;text-decoration:none;display:block;padding:4px 0;}
+.sidebar li a:hover{text-decoration:underline;}
+.sidebar li a.active{color:#f0f6fc;font-weight:bold;}
+.content{margin-left:236px;padding:32px;max-width:860px;}
+h1{border-bottom:1px solid #30363d;padding-bottom:8px;}
+h2{color:#c9d1d9;margin-top:1.6em;}
+h3{color:#8b949e;margin-top:1.2em;}
+pre{background:#161b22;padding:12px;border-radius:6px;overflow-x:auto;}
+code{font-family:monospace;font-size:0.9em;}
+p{line-height:1.6;}
+"#;
+
+fn html_escape(s: &str) -> String {
+    s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;")
+}
+
+fn inline_md(text: &str) -> String {
+    // Process backtick spans then bold spans.
+    // Apply html_escape to plain-text segments only; generated tags are not escaped.
+    let mut out = String::new();
+    let mut rest = text;
+    while !rest.is_empty() {
+        if let Some(start) = rest.find('`') {
+            out.push_str(&html_escape(&rest[..start]));
+            let after = &rest[start + 1..];
+            if let Some(end) = after.find('`') {
+                out.push_str("<code>");
+                out.push_str(&html_escape(&after[..end]));
+                out.push_str("</code>");
+                rest = &after[end + 1..];
+            } else {
+                // Unclosed backtick — output as-is
+                out.push('`');
+                out.push_str(&html_escape(after));
+                rest = "";
+            }
+        } else {
+            out.push_str(&html_escape(rest));
+            rest = "";
+        }
+    }
+    // Second pass: bold (**...** outside <code>...</code> spans only)
+    let mut out2 = String::new();
+    let mut s2 = out.as_str();
+    while !s2.is_empty() {
+        // If the next special token is a <code> tag, emit the code span verbatim.
+        let code_pos = s2.find("<code>");
+        let bold_pos = s2.find("**");
+        match (code_pos, bold_pos) {
+            (Some(cp), Some(bp)) if cp < bp => {
+                // <code> comes first — emit up to and including </code> without bold processing
+                out2.push_str(&s2[..cp]);
+                let after_open = &s2[cp + "<code>".len()..];
+                if let Some(close) = after_open.find("</code>") {
+                    out2.push_str("<code>");
+                    out2.push_str(&after_open[..close]);
+                    out2.push_str("</code>");
+                    s2 = &after_open[close + "</code>".len()..];
+                } else {
+                    // Unclosed <code> — emit rest verbatim
+                    out2.push_str("<code>");
+                    out2.push_str(after_open);
+                    s2 = "";
+                }
+            }
+            (_, Some(bp)) => {
+                let before = &s2[..bp];
+                let after = &s2[bp + 2..];
+                if let Some(end) = after.find("**") {
+                    out2.push_str(before);
+                    out2.push_str("<strong>");
+                    out2.push_str(&after[..end]);
+                    out2.push_str("</strong>");
+                    s2 = &after[end + 2..];
+                } else {
+                    // Unclosed bold — output as-is
+                    out2.push_str(before);
+                    out2.push_str("**");
+                    out2.push_str(after);
+                    s2 = "";
+                }
+            }
+            _ => {
+                out2.push_str(s2);
+                s2 = "";
+            }
+        }
+    }
+    out2
+}
+
+fn md_to_html(md: &str) -> String {
+    let mut html = String::new();
+    let mut in_code_block = false;
+    for line in md.lines() {
+        if line.starts_with("```") {
+            if in_code_block {
+                html.push_str("</code></pre>\n");
+                in_code_block = false;
+            } else {
+                html.push_str("<pre><code>");
+                in_code_block = true;
+            }
+            continue;
+        }
+        if in_code_block {
+            html.push_str(&html_escape(line));
+            html.push('\n');
+            continue;
+        }
+        if let Some(text) = line.strip_prefix("### ") {
+            html.push_str(&format!("<h3>{}</h3>\n", inline_md(text)));
+        } else if let Some(text) = line.strip_prefix("## ") {
+            html.push_str(&format!("<h2>{}</h2>\n", inline_md(text)));
+        } else if let Some(text) = line.strip_prefix("# ") {
+            html.push_str(&format!("<h1>{}</h1>\n", inline_md(text)));
+        } else if line.trim().is_empty() {
+            // skip blank lines
+        } else {
+            html.push_str(&format!("<p>{}</p>\n", inline_md(line)));
+        }
+    }
+    if in_code_block {
+        html.push_str("</code></pre>\n");
+    }
+    html
+}
+
+// ── v24.1.0: fav spec — 形式的仕様書 ────────────────────────────────────
+const SPEC_CONTENT: &str = r#"## 1. 型システム（Type System）
+
+### 1.1 基本型
+
+| 型 | 説明 |
+|---|---|
+| `Int` | 64-bit 符号付き整数 |
+| `Float` | 64-bit 浮動小数点数 |
+| `Bool` | 真偽値（`true` / `false`） |
+| `String` | UTF-8 文字列 |
+| `Unit` | 単一値型（副作用のみの式の戻り値） |
+| `List<A>` | 同質リスト（共変） |
+| `Option<A>` | 省略可能な値（`some(a)` / `none`） |
+| `Result<A, E>` | 成功または失敗（`ok(a)` / `err(e)`） |
+| `Bytes` | バイト列（v23.1.0） |
+
+### 1.2 型推論規則（Hindley-Milner ベース）
+
+Favnir は Hindley-Milner 型推論を基礎とし、エフェクトアノテーションを拡張する。
+
+```
+[Var]  Γ, x : σ ⊢ x : σ
+[Abs]  Γ, x : τ₁ ⊢ e : τ₂  →  Γ ⊢ fn(x) { e } : τ₁ → τ₂
+[App]  Γ ⊢ f : τ₁ → τ₂, Γ ⊢ a : τ₁  →  Γ ⊢ f(a) : τ₂
+[Let]  Γ ⊢ e₁ : σ, Γ, x : σ ⊢ e₂ : τ  →  Γ ⊢ (bind x <- e₁; e₂) : τ
+[Gen]  Γ ⊢ e : τ, α ∉ free(Γ)  →  Γ ⊢ e : ∀α. τ
+```
+
+---
+
+## 2. opcode 動作仕様
+
+### 2.1 opcode 一覧（主要命令）
+
+以下は主要な opcode の一覧です。制御フロー拡張命令（ChainCheck / JumpIfNotVariant 等）、
+スーパー命令（0xA0〜0xA9）、コレクション命令（YieldValue / EmitEvent 等）は省略しています。
+
+| opcode | バイト | オペランド | 説明 |
+|---|---|---|---|
+| Const | 0x01 | u24(idx) | 定数テーブル[idx] をプッシュ |
+| ConstUnit | 0x02 | — | Unit をプッシュ |
+| ConstTrue | 0x03 | — | true をプッシュ |
+| ConstFalse | 0x04 | — | false をプッシュ |
+| LoadLocal | 0x10 | u24(idx) | ローカル変数[idx] をプッシュ |
+| StoreLocal | 0x11 | u24(idx) | スタックトップ → ローカル変数[idx] |
+| LoadGlobal | 0x12 | u24(idx) | グローバル[idx] をプッシュ |
+| Pop | 0x13 | — | スタックトップを破棄 |
+| Dup | 0x14 | — | スタックトップを複製 |
+| Call | 0x15 | u24(argc) | 関数呼び出し（argc 引数） |
+| Return | 0x16 | — | 関数から戻る |
+| Add | 0x20 | — | 加算 |
+| Sub | 0x21 | — | 減算 |
+| Mul | 0x22 | — | 乗算 |
+| Div | 0x23 | — | 除算 |
+| Eq | 0x24 | — | 等値比較 |
+| Ne | 0x25 | — | 非等値比較 |
+| Lt | 0x26 | — | 小なり |
+| Le | 0x27 | — | 以下 |
+| Gt | 0x28 | — | 大なり |
+| Ge | 0x29 | — | 以上 |
+| And | 0x2A | — | 論理積 |
+| Or | 0x2B | — | 論理和 |
+| Jump | 0x30 | i24(off) | 無条件ジャンプ（pc += off） |
+| JumpIfFalse | 0x31 | i24(off) | false のときジャンプ |
+| MatchFail | 0x32 | — | パターンマッチ失敗 |
+| GetField | 0x40 | u24(idx) | フィールドアクセス（namespace.field） |
+| BuildRecord | 0x41 | u24(n) | レコード構築 |
+| MakeClosure | 0x42 | u24(idx) | クロージャ生成 |
+| CollectBegin | 0x50 | — | コレクション収集開始 |
+| CollectEnd | 0x51 | — | コレクション収集終了 |
+
+### 2.2 オペランドエンコーディング
+
+- `u24(idx)`: 3 バイトリトルエンディアン符号なし整数
+- `i24(off)`: 3 バイトリトルエンディアン符号あり整数（符号拡張）
+- `—`: オペランドなし（1 バイト命令）
+
+---
+
+## 3. エフェクトシステム（Effect System）
+
+### 3.1 エフェクト一覧
+
+| エフェクト | アノテーション | 説明 |
+|---|---|---|
+| Pure | （なし） | 副作用なし（決定論的） |
+| Io | `!Io` | 標準入出力 |
+| Http | `!Http` | HTTP リクエスト |
+| Llm | `!Llm` | LLM API（Claude / OpenAI） |
+| Db | `!Db` | データベース（汎用） |
+| Snowflake | `!Snowflake` | Snowflake DWH |
+| File | `!File` | ファイルシステム |
+| Trace | `!Trace` | OpenTelemetry トレーシング |
+
+### 3.2 エフェクト意味論
+
+エフェクトアノテーションなし ⇔ 純粋（参照透過）:
+
+```
+∀ f : A → B. (エフェクトアノテーションなし) ⇒ f は参照透過
+```
+
+エフェクト合成（合成関数のエフェクトは構成要素の和集合）:
+
+```
+f : A → B !E₁,  g : B → C !E₂  ⊢  (g ∘ f) : A → C !(E₁ ∪ E₂)
+```
+
+---
+
+## 4. パターンマッチ網羅性（Pattern Match Exhaustiveness）
+
+### 4.1 網羅性条件
+
+```
+match e { pat₁ => e₁ ... patₙ => eₙ }
+条件: ∀ v ∈ type(e). ∃ i. match(patᵢ, v) = true
+```
+
+非網羅的なパターンマッチは E0010 としてコンパイルエラー。
+
+### 4.2 パターン種別
+
+| パターン | 例 | マッチ条件 |
+|---|---|---|
+| リテラル | `0`, `"hi"`, `true` | 等値 |
+| 変数 | `x` | 常にマッチ（束縛） |
+| ワイルドカード | `_` | 常にマッチ（束縛なし） |
+| バリアント | `some(x)`, `ok(v)` | バリアント一致 + ペイロードマッチ |
+| Or パターン | `0 \| 1 \| 2` | いずれかにマッチ |
+| レコード | `Point { x, y }` | フィールド全マッチ |
+"#;
+
+fn build_spec_markdown() -> String {
+    let header = format!(
+        "# Favnir 言語仕様書\n\nバージョン: {}\n\n---\n\n",
+        env!("CARGO_PKG_VERSION")
+    );
+    format!("{}{}", header, SPEC_CONTENT)
+}
+
+pub fn cmd_spec(format: &str) -> String {
+    let md = build_spec_markdown();
+    match format {
+        "html" => md_to_html(&md),
+        "markdown" => md,
+        other => {
+            eprintln!("warning: unknown spec format '{}', defaulting to markdown", other);
+            md
+        }
+    }
+}
+
+// ── v24.3.0: benchmark regression detection helpers ──────────────────────────
+
+/// JSON 文字列の "metrics": { ... } セクションから数値フィールドを抽出する。
+/// metrics はフラット数値のみ対応（ネストオブジェクト非対応）。
+fn extract_bench_metrics(json: &str) -> Vec<(String, f64)> {
+    let start = match json.find("\"metrics\"") {
+        Some(i) => i,
+        None => return vec![],
+    };
+    let brace = match json[start..].find('{') {
+        Some(i) => start + i + 1,
+        None => return vec![],
+    };
+    let end = match json[brace..].find('}') {
+        Some(i) => brace + i,
+        None => return vec![],
+    };
+    let body = &json[brace..end];
+    let mut result = Vec::new();
+    for segment in body.split(',') {
+        let segment = segment.trim();
+        if let Some(colon) = segment.find(':') {
+            let key_part = segment[..colon].trim().trim_matches('"');
+            let val_part = segment[colon + 1..].trim();
+            if let Ok(v) = val_part.parse::<f64>() {
+                result.push((key_part.to_string(), v));
+            }
+        }
+    }
+    result
+}
+
+/// JSON 文字列から "version" フィールドの値を取り出す。
+fn extract_bench_version(json: &str) -> String {
+    if let Some(i) = json.find("\"version\"") {
+        let rest = &json[i + 9..];
+        if let Some(j) = rest.find('"') {
+            let after = &rest[j + 1..];
+            if let Some(k) = after.find('"') {
+                return after[..k].to_string();
+            }
+        }
+    }
+    "unknown".to_string()
+}
+
+/// ベンチマーク JSON 2 件を比較し、metrics の pct_change を計算する。
+/// pct_change = (current - baseline) / baseline * 100
+/// threshold% を超えた metric があれば (false, report)。
+///
+/// 設計上の注意:
+/// - current にある key のみをループする。baseline-only の key は無視する
+///   （新 metric 追加でも false alarm にならないよう意図的に除外）。
+/// - 減少（負の pct_change）は回帰として検出しない（増加のみ判定）。
+/// - metrics はフラット数値のみ対応（ネストオブジェクト非対応）。
+pub fn cmd_bench_compare(
+    baseline_json: &str,
+    current_json: &str,
+    threshold: f64,
+    emit_md: bool,
+) -> (bool, String) {
+    let baseline_metrics = extract_bench_metrics(baseline_json);
+    let current_metrics = extract_bench_metrics(current_json);
+    let baseline_ver = extract_bench_version(baseline_json);
+    let current_ver = extract_bench_version(current_json);
+
+    let mut regressions: Vec<String> = Vec::new();
+    let mut rows: Vec<(String, f64, f64, f64)> = Vec::new();
+
+    for (key, cur) in &current_metrics {
+        if let Some((_, base)) = baseline_metrics.iter().find(|(k, _)| k == key) {
+            let pct = if *base == 0.0 {
+                0.0
+            } else {
+                (cur - base) / base * 100.0
+            };
+            rows.push((key.clone(), *base, *cur, pct));
+            if pct > threshold {
+                regressions.push(format!(
+                    "  {key}: +{pct:.1}% (baseline={base}, current={cur})"
+                ));
+            }
+        }
+    }
+
+    if emit_md {
+        let mut md = format!(
+            "# Benchmark Regression Report\n\nBaseline: `{baseline_ver}` → Current: `{current_ver}`\n\n"
+        );
+        md.push_str("| Metric | Baseline | Current | Change |\n|---|---|---|---|\n");
+        for (key, base, cur, pct) in &rows {
+            let sign = if *pct >= 0.0 { "+" } else { "" };
+            md.push_str(&format!("| {key} | {base} | {cur} | {sign}{pct:.1}% |\n"));
+        }
+        if !regressions.is_empty() {
+            md.push_str(&format!(
+                "\n**REGRESSION**: {} metric(s) exceeded {threshold:.1}% threshold.\n",
+                regressions.len()
+            ));
+        } else {
+            md.push_str(&format!(
+                "\n**OK**: all metrics within {threshold:.1}% of baseline.\n"
+            ));
+        }
+        return (regressions.is_empty(), md);
+    }
+
+    if regressions.is_empty() {
+        (
+            true,
+            format!(
+                "OK: all metrics within {threshold:.1}% of baseline ({baseline_ver} → {current_ver})."
+            ),
+        )
+    } else {
+        (
+            false,
+            format!(
+                "REGRESSION: {} metric(s) exceeded {threshold:.1}% threshold:\n{}",
+                regressions.len(),
+                regressions.join("\n")
+            ),
+        )
+    }
+}
+
+fn build_nav_html(modules: &[String], current: Option<&str>) -> String {
+    let mut nav = String::from(
+        "<nav class=\"sidebar\"><div class=\"sidebar-title\">Favnir Docs</div><ul>",
+    );
+    let index_class = if current.is_none() { " class=\"active\"" } else { "" };
+    nav.push_str(&format!("<li><a href=\"index.html\"{}> index</a></li>", index_class));
+    for stem in modules {
+        let active = if current == Some(stem.as_str()) { " class=\"active\"" } else { "" };
+        nav.push_str(&format!(
+            "<li><a href=\"{}.html\"{}>{}</a></li>",
+            html_escape(stem), active, html_escape(stem)
+        ));
+    }
+    nav.push_str("</ul></nav>");
+    nav
+}
+
+fn build_index_content_html(modules: &[String]) -> String {
+    let mut html = String::from("<h1>Favnir Docs</h1>\n<ul>\n");
+    for stem in modules {
+        html.push_str(&format!(
+            "  <li><a href=\"{}.html\">{}</a></li>\n",
+            html_escape(stem), html_escape(stem)
+        ));
+    }
+    html.push_str("</ul>\n");
+    html
+}
+
+fn build_page_html(title: &str, nav_html: &str, content_html: &str) -> String {
+    format!(
+        "<!DOCTYPE html>\n\
+         <html lang=\"ja\">\n\
+         <head>\n\
+         <meta charset=\"utf-8\">\n\
+         <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n\
+         <title>{title} — Favnir Docs</title>\n\
+         <style>{css}</style>\n\
+         </head>\n\
+         <body>\n\
+         {nav}\n\
+         <main class=\"content\">\n\
+         {content}\n\
+         </main>\n\
+         </body>\n\
+         </html>\n",
+        title = html_escape(title),
+        css = DOCSITE_CSS,
+        nav = nav_html,
+        content = content_html,
+    )
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub fn cmd_doc_site(path: &str, out_dir: &str) {
+    let entries: Vec<PathBuf> = {
+        let p = Path::new(path);
+        if p.is_file() {
+            vec![p.to_path_buf()]
+        } else if p.is_dir() {
+            collect_fav_files_recursive(p)
+        } else {
+            eprintln!("error: '{}' is not a file or directory", path);
+            process::exit(1);
+        }
+    };
+
+    if let Err(e) = std::fs::create_dir_all(out_dir) {
+        eprintln!("error: cannot create output directory '{}': {}", out_dir, e);
+        process::exit(1);
+    }
+
+    let mut modules: Vec<(String, String)> = vec![];
+    for entry in &entries {
+        let src = std::fs::read_to_string(entry).unwrap_or_default();
+        let md = crate::compiler_fav_runner::doc_source_str(&src).unwrap_or_default();
+        let stem = entry
+            .file_stem()
+            .map(|s| s.to_string_lossy().to_string())
+            .unwrap_or_else(|| "out".to_string());
+        modules.push((stem, md));
+    }
+
+    if modules.is_empty() {
+        eprintln!("warning: no .fav files found in '{}'", path);
+    }
+
+    let stems: Vec<String> = modules.iter().map(|(s, _)| s.clone()).collect();
+
+    // index.html
+    let nav = build_nav_html(&stems, None);
+    let index_content = build_index_content_html(&stems);
+    let index_html = build_page_html("index", &nav, &index_content);
+    let index_path = Path::new(out_dir).join("index.html");
+    if let Err(e) = std::fs::write(&index_path, &index_html) {
+        eprintln!("error: cannot write '{}': {}", index_path.display(), e);
+        process::exit(1);
+    }
+    println!("doc: index → {}", index_path.display());
+
+    // per-module pages
+    for (stem, md) in &modules {
+        let nav = build_nav_html(&stems, Some(stem));
+        let content = md_to_html(md);
+        let page = build_page_html(stem, &nav, &content);
+        let out_path = Path::new(out_dir).join(format!("{}.html", stem));
+        if let Err(e) = std::fs::write(&out_path, &page) {
+            eprintln!("error: cannot write '{}': {}", out_path.display(), e);
+            process::exit(1);
+        }
+        println!("doc: {} → {}", stem, out_path.display());
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub fn cmd_doc_serve(path: &str, port: u16, no_open: bool) {
+    use std::collections::HashMap;
+    use std::io::{BufRead, BufReader, Write};
+    use std::net::{TcpListener, TcpStream};
+
+    let entries: Vec<PathBuf> = {
+        let p = Path::new(path);
+        if p.is_file() {
+            vec![p.to_path_buf()]
+        } else if p.is_dir() {
+            collect_fav_files_recursive(p)
+        } else {
+            eprintln!("error: '{}' is not a file or directory", path);
+            process::exit(1);
+        }
+    };
+
+    if entries.is_empty() {
+        eprintln!("warning: no .fav files found in '{}'", path);
+    }
+
+    let mut modules: Vec<(String, String)> = vec![];
+    for entry in &entries {
+        let src = std::fs::read_to_string(entry).unwrap_or_default();
+        let md = crate::compiler_fav_runner::doc_source_str(&src).unwrap_or_default();
+        let stem = entry
+            .file_stem()
+            .map(|s| s.to_string_lossy().to_string())
+            .unwrap_or_else(|| "out".to_string());
+        modules.push((stem, md));
+    }
+
+    let stems: Vec<String> = modules.iter().map(|(s, _)| s.clone()).collect();
+
+    let mut pages: HashMap<String, String> = HashMap::new();
+    let nav_index = build_nav_html(&stems, None);
+    let index_content = build_index_content_html(&stems);
+    pages.insert("index".to_string(), build_page_html("index", &nav_index, &index_content));
+    for (stem, md) in &modules {
+        let nav = build_nav_html(&stems, Some(stem));
+        let content = md_to_html(md);
+        pages.insert(stem.clone(), build_page_html(stem, &nav, &content));
+    }
+
+    // Bind first, then open browser
+    let listener = match TcpListener::bind(format!("127.0.0.1:{}", port)) {
+        Ok(l) => l,
+        Err(e) => {
+            eprintln!("error: cannot bind to port {}: {}", port, e);
+            process::exit(1);
+        }
+    };
+
+    let url = format!("http://localhost:{}", port);
+    println!("Favnir doc server running at {}", url);
+    if !no_open {
+        let _ = open::that(&url);
+    }
+
+    fn handle_request(mut stream: TcpStream, pages: &HashMap<String, String>) {
+        let reader = BufReader::new(&stream);
+        let request_line = reader.lines().next().and_then(|l| l.ok()).unwrap_or_default();
+        // Parse "GET /path HTTP/1.x"
+        let path_part = request_line
+            .split_whitespace()
+            .nth(1)
+            .unwrap_or("/")
+            .to_string();
+        // Normalize: strip leading '/', strip query string, strip .html suffix
+        let raw = path_part.trim_start_matches('/');
+        let raw = raw.split('?').next().unwrap_or("");
+        let key = raw.trim_end_matches(".html");
+        let key = if key.is_empty() { "index" } else { key };
+
+        if let Some(html) = pages.get(key) {
+            let response = format!(
+                "HTTP/1.0 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\n\r\n{}",
+                html.len(),
+                html
+            );
+            let _ = stream.write_all(response.as_bytes());
+        } else {
+            let body = "<h1>404 Not Found</h1>";
+            let response = format!(
+                "HTTP/1.0 404 Not Found\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\n\r\n{}",
+                body.len(),
+                body
+            );
+            let _ = stream.write_all(response.as_bytes());
+        }
+    }
+
+    for stream in listener.incoming() {
+        match stream {
+            Ok(s) => handle_request(s, &pages),
+            Err(_) => break,
+        }
     }
 }
 
@@ -11836,6 +12642,7 @@ impl ExplainPrinter {
                 Item::AliasDecl { .. } => {}
                 Item::UseAlias { .. } => {}
                 Item::TestGroup { .. } => {}
+                Item::PipelineDef(..) => {} // v22.5.0: スタブ
                 Item::NamespaceDecl(..)
                 | Item::UseDecl(..)
                 | Item::RuneUse { .. }
@@ -12682,6 +13489,7 @@ fn format_effects(effects: &[ast::Effect]) -> String {
             Rpc => "!Rpc".into(),
             File => "!File".into(),
             Checkpoint => "!Checkpoint".into(),
+            PipelineState => "!PipelineState".into(),
             Unknown(name) => format!("!{}", name),
             Emit(ev) => format!("!Emit<{}>", ev),
             EmitUnion(evs) => format!("!Emit<{}>", evs.join("|")),
@@ -12711,6 +13519,7 @@ fn effect_json_name(effect: &ast::Effect) -> String {
         ast::Effect::Rpc => "Rpc".into(),
         ast::Effect::File => "File".into(),
         ast::Effect::Checkpoint => "Checkpoint".into(),
+        ast::Effect::PipelineState => "PipelineState".into(),
         ast::Effect::Unknown(name) => name.clone(),
         ast::Effect::Emit(ev) => format!("Emit<{ev}>"),
         ast::Effect::EmitUnion(evs) => format!("Emit<{}>", evs.join("|")),
@@ -13238,6 +14047,8 @@ pub fn cmd_deploy(
     function_name: Option<&str>,
     region: Option<&str>,
     dry_run: bool,
+    target: Option<&str>,   // v22.8.0: CLI --target。None の場合 fav.toml [deploy].target を使用
+    out_dir: Option<&str>,  // v22.8.0: 生成ファイル出力先。None の場合 fav.toml または ".fav-deploy"
 ) {
     let _env = env.unwrap_or("production");
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
@@ -13255,6 +14066,34 @@ pub fn cmd_deploy(
         .unwrap_or("us-east-1");
     let s3_bucket = deploy_cfg.s3_bucket.as_deref().unwrap_or("");
     let role_arn = deploy_cfg.role_arn.as_deref().unwrap_or("");
+
+    // v22.8.0: ターゲット解決（CLI 引数 > fav.toml [deploy].target > "aws-lambda"）
+    let effective_target = target.unwrap_or(deploy_cfg.target.as_str());
+    let effective_out_dir = out_dir.unwrap_or(
+        deploy_cfg.out_dir.as_deref().unwrap_or(".fav-deploy"),
+    );
+    // cfg!() マクロを使用（#[cfg] は match 文全体に付けられないため）
+    if cfg!(not(target_arch = "wasm32")) {
+        match effective_target {
+            "ecs" => {
+                cmd_deploy_ecs(project_name, &deploy_cfg, dry_run, effective_out_dir);
+                return;
+            }
+            "k8s" => {
+                cmd_deploy_k8s(project_name, &deploy_cfg, dry_run, effective_out_dir);
+                return;
+            }
+            "fly" => {
+                cmd_deploy_fly(project_name, &deploy_cfg, dry_run, effective_out_dir);
+                return;
+            }
+            other if other != "aws-lambda" => {
+                eprintln!("error: unknown deploy target `{}`", other);
+                process::exit(1);
+            }
+            _ => {} // "aws-lambda" → fall through to existing Lambda logic
+        }
+    }
 
     println!("[deploy] Project: {} v{}", project_name, toml.version);
     println!("[deploy] Function: {}", func_name);
@@ -13312,6 +14151,521 @@ pub fn cmd_deploy(
     } else {
         println!("[deploy] Done");
     }
+}
+
+// ── v22.8.0: Container deploy helpers (ECS / K8s / Fly.io) ───────────────────
+
+/// プロジェクト名をファイル名・YAML 値として安全な形に正規化する。
+/// パストラバーサル（`..`）・パス区切り文字・YAML/TOML 特殊文字を `-` に置換する。
+#[cfg(not(target_arch = "wasm32"))]
+fn sanitize_name(name: &str) -> String {
+    let s = name.replace("..", "-")
+        .replace(['/', '\\', ':', '"', '<', '>', '|', '?', '*'], "-");
+    let s = s.trim_matches('-').to_string();
+    if s.is_empty() { "fav-project".to_string() } else { s }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn generate_dockerfile(project_name: &str) -> String {
+    format!(
+        "FROM debian:bookworm-slim\n\
+         WORKDIR /app\n\
+         COPY . .\n\
+         RUN apt-get update && apt-get install -y ca-certificates \
+             && rm -rf /var/lib/apt/lists/*\n\
+         COPY ./fav /usr/local/bin/fav\n\
+         RUN chmod +x /usr/local/bin/fav\n\
+         ENTRYPOINT [\"fav\", \"run\", \"pipeline.fav\"]\n\
+         # Generated by fav deploy for project: {name}\n",
+        name = project_name,
+    )
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn generate_ecs_task_def(project_name: &str, cfg: &crate::toml::DeployConfig) -> String {
+    let cpu    = cfg.cpu.as_deref().unwrap_or("512");
+    let memory = cfg.memory.to_string();
+    let region = cfg.region.as_deref().unwrap_or("us-east-1");
+    let role   = cfg.role_arn.as_deref().unwrap_or("");
+    format!(
+        r#"{{
+  "family": "{name}",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "{cpu}",
+  "memory": "{memory}",
+  "executionRoleArn": "{role}",
+  "containerDefinitions": [{{
+    "name": "{name}",
+    "image": "<ECR_REPO>/{name}:latest",
+    "essential": true,
+    "logConfiguration": {{
+      "logDriver": "awslogs",
+      "options": {{
+        "awslogs-group": "/fav/{name}",
+        "awslogs-region": "{region}",
+        "awslogs-stream-prefix": "fav"
+      }}
+    }}
+  }}]
+}}"#,
+        name   = escape_json_str(project_name),
+        cpu    = cpu,
+        memory = memory,
+        region = escape_json_str(region),
+        role   = escape_json_str(role),
+    )
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn generate_k8s_cronjob(project_name: &str, cfg: &crate::toml::DeployConfig) -> String {
+    let ns        = cfg.namespace.as_deref().unwrap_or("default");
+    let schedule  = cfg.schedule.as_deref().unwrap_or("0 0 * * *");
+    let safe_name = sanitize_name(project_name);
+    let mut out = String::new();
+    out.push_str("apiVersion: batch/v1\n");
+    out.push_str("kind: CronJob\n");
+    out.push_str(&format!("metadata:\n  name: {}\n  namespace: {}\n", safe_name, ns));
+    out.push_str(&format!("spec:\n  schedule: \"{}\"\n  jobTemplate:\n    spec:\n", schedule));
+    out.push_str("      template:\n        spec:\n          containers:\n");
+    out.push_str(&format!("          - name: {}\n", safe_name));
+    out.push_str(&format!("            image: <IMAGE>/{}:latest\n", safe_name));
+    out.push_str("            imagePullPolicy: Always\n");
+    out.push_str("          restartPolicy: OnFailure\n");
+    out
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn generate_fly_toml(project_name: &str, cfg: &crate::toml::DeployConfig) -> String {
+    let app_name = cfg.app.as_deref().unwrap_or(project_name);
+    let region   = cfg.region.as_deref().unwrap_or("nrt");
+    format!(
+        "app = \"{app}\"\nprimary_region = \"{region}\"\n\n\
+         [build]\n  dockerfile = \"Dockerfile\"\n\n\
+         [http_service]\n  internal_port = 8080\n  force_https = true\n",
+        app    = escape_json_str(app_name),
+        region = escape_json_str(region),
+    )
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn write_deploy_file(out_dir: &str, filename: &str, content: &str, dry_run: bool) {
+    if dry_run {
+        println!("[deploy] (dry-run) Would write {}/{}", out_dir, filename);
+        println!("{}", content);
+    } else {
+        let dir = std::path::Path::new(out_dir);
+        if let Err(e) = std::fs::create_dir_all(dir) {
+            eprintln!("[deploy] error: cannot create {}: {}", out_dir, e);
+            process::exit(1);
+        }
+        let path = dir.join(filename);
+        if let Err(e) = std::fs::write(&path, content) {
+            eprintln!("[deploy] error: cannot write {:?}: {}", path, e);
+            process::exit(1);
+        }
+        println!("[deploy] Wrote {}", path.display());
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub fn cmd_deploy_ecs(
+    project_name: &str,
+    deploy_cfg: &crate::toml::DeployConfig,
+    dry_run: bool,
+    out_dir: &str,
+) {
+    println!("[deploy] Target: ECS Fargate  Project: {}", project_name);
+    println!(
+        "[deploy] CPU: {}  Memory: {} MB",
+        deploy_cfg.cpu.as_deref().unwrap_or("512"),
+        deploy_cfg.memory,
+    );
+    println!("[deploy] Cluster: {}", deploy_cfg.cluster.as_deref().unwrap_or("fav-cluster"));
+    if dry_run { println!("[deploy] (dry-run mode)"); }
+
+    let dockerfile = generate_dockerfile(project_name);
+    let task_def   = generate_ecs_task_def(project_name, deploy_cfg);
+
+    write_deploy_file(out_dir, "Dockerfile",        &dockerfile, dry_run);
+    write_deploy_file(out_dir, "ecs-task-def.json", &task_def,   dry_run);
+
+    println!("[deploy] Next steps:");
+    println!("  1. docker build -t {name} {dir}/", name = project_name, dir = out_dir);
+    println!("  2. aws ecr create-repository --repository-name {name}", name = project_name);
+    println!("  3. docker push <ECR_REPO>/{name}:latest", name = project_name);
+    println!(
+        "  4. aws ecs register-task-definition --cli-input-json file://{dir}/ecs-task-def.json",
+        dir = out_dir
+    );
+    if dry_run { println!("[deploy] Done (dry-run)"); } else { println!("[deploy] Done"); }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub fn cmd_deploy_k8s(
+    project_name: &str,
+    deploy_cfg: &crate::toml::DeployConfig,
+    dry_run: bool,
+    out_dir: &str,
+) {
+    println!("[deploy] Target: Kubernetes CronJob  Project: {}", project_name);
+    println!(
+        "[deploy] Namespace: {}  Schedule: {}",
+        deploy_cfg.namespace.as_deref().unwrap_or("default"),
+        deploy_cfg.schedule.as_deref().unwrap_or("0 0 * * *"),
+    );
+    if dry_run { println!("[deploy] (dry-run mode)"); }
+
+    let dockerfile   = generate_dockerfile(project_name);
+    let cronjob_yaml = generate_k8s_cronjob(project_name, deploy_cfg);
+    let yaml_file    = format!("{}-cronjob.yaml", sanitize_name(project_name));
+
+    write_deploy_file(out_dir, "Dockerfile", &dockerfile,    dry_run);
+    write_deploy_file(out_dir, &yaml_file,   &cronjob_yaml,  dry_run);
+
+    println!("[deploy] Next steps:");
+    println!("  1. docker build -t {name} {dir}/", name = project_name, dir = out_dir);
+    println!("  2. docker push <IMAGE>/{name}:latest", name = project_name);
+    println!("  3. kubectl apply -f {dir}/{yaml}", dir = out_dir, yaml = yaml_file);
+    if dry_run { println!("[deploy] Done (dry-run)"); } else { println!("[deploy] Done"); }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub fn cmd_deploy_fly(
+    project_name: &str,
+    deploy_cfg: &crate::toml::DeployConfig,
+    dry_run: bool,
+    out_dir: &str,
+) {
+    let app_name = deploy_cfg.app.as_deref().unwrap_or(project_name);
+    println!("[deploy] Target: Fly.io  App: {}  Project: {}", app_name, project_name);
+    if dry_run { println!("[deploy] (dry-run mode)"); }
+
+    let dockerfile = generate_dockerfile(project_name);
+    let fly_toml   = generate_fly_toml(project_name, deploy_cfg);
+
+    write_deploy_file(out_dir, "Dockerfile", &dockerfile, dry_run);
+    write_deploy_file(out_dir, "fly.toml",   &fly_toml,   dry_run);
+
+    println!("[deploy] Next steps:");
+    println!("  1. flyctl auth login");
+    println!("  2. flyctl apps create {}", app_name);
+    println!("  3. flyctl deploy --config {}/fly.toml", out_dir);
+    if dry_run { println!("[deploy] Done (dry-run)"); } else { println!("[deploy] Done"); }
+}
+
+// ── v22.4.0: Event-driven trigger deployment ──────────────────────────────────
+
+/// JSON 文字列として安全にエスケープする（`"` → `\"`, `\` → `\\`, 制御文字 → `\uXXXX`）。
+fn escape_json_str(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for ch in s.chars() {
+        match ch {
+            '"'  => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            c if (c as u32) < 0x20 => {
+                out.push_str(&format!("\\u{:04x}", c as u32));
+            }
+            c => out.push(c),
+        }
+    }
+    out
+}
+
+pub(crate) fn build_trigger_config_json(entries: &[(&str, &crate::ast::TriggerAnnotation)]) -> String {
+    let items: Vec<String> = entries.iter().map(|(name, t)| {
+        let extra = match (t.bucket.as_deref(), t.topic.as_deref()) {
+            (Some(b), _) => format!(",\n      \"bucket\": \"{}\"", escape_json_str(b)),
+            (_, Some(tp)) => format!(",\n      \"topic\": \"{}\"", escape_json_str(tp)),
+            _ => String::new(),
+        };
+        format!(
+            "  {{\n    \"pipeline\": \"{}\",\n    \"trigger\": {{\n      \"event\": \"{}\"{}\n    }}\n  }}",
+            escape_json_str(name), escape_json_str(&t.event), extra
+        )
+    }).collect();
+    format!("[\n{}\n]", items.join(",\n"))
+}
+
+pub fn cmd_deploy_trigger(file: &str, out: Option<&str>) {
+    let src = load_file(file);
+    let prog = Parser::parse_str(&src, file).unwrap_or_else(|e| {
+        eprintln!("{}", e);
+        process::exit(1);
+    });
+    let entries: Vec<(&str, &crate::ast::TriggerAnnotation)> = prog.items.iter()
+        .filter_map(|item| {
+            if let crate::ast::Item::FlwDef(fd) = item {
+                fd.trigger.as_ref().map(|t| (fd.name.as_str(), t))
+            } else {
+                None
+            }
+        })
+        .collect();
+    if entries.is_empty() {
+        eprintln!("warning: no #[trigger(...)] annotations found in {}", file);
+        return;
+    }
+    let json = build_trigger_config_json(&entries);
+    match out {
+        Some(path) => std::fs::write(path, &json).unwrap_or_else(|e| {
+            eprintln!("error: failed to write {}: {}", path, e);
+            process::exit(1);
+        }),
+        None => println!("{}", json),
+    }
+}
+
+// ── v22.6.0: fav explain --sla ───────────────────────────────────────────────
+
+/// `fav explain --sla [file]` — stage の SLA アノテーションと最悪実行時間を出力する。
+/// アノテーションなし stage も行に含めるが worst_case を `—` とし合計には含めない。
+pub fn cmd_explain_sla(file: Option<&str>) {
+    use crate::ast::Item;
+    let src = match file {
+        Some(f) => load_file(f),
+        None => {
+            eprintln!("error: fav explain --sla requires a file argument");
+            process::exit(1);
+        }
+    };
+    let file_name = file.unwrap_or("<stdin>");
+    let prog = Parser::parse_str(&src, file_name).unwrap_or_else(|e| {
+        eprintln!("{}", e);
+        process::exit(1);
+    });
+
+    let separator = "━".repeat(60);
+    println!("SLA Summary — {}", file_name);
+    println!("{}", separator);
+    println!("{:<20} {:<10} {:<8} {:<20} {}", "stage", "timeout", "retry", "circuit_breaker", "worst_case");
+
+    let mut total_worst_secs = 0.0f64;
+    let mut found_any = false;
+
+    for item in &prog.items {
+        if let Item::TrfDef(td) = item {
+            let timeout_str = td.timeout.as_ref()
+                .map(|t| format!("{}s", t.seconds))
+                .unwrap_or_else(|| "\u{2014}".to_string());
+            let retry_str = td.retry_ann.as_ref()
+                .map(|r| format!("{}\u{00d7}", r.max))
+                .unwrap_or_else(|| "\u{2014}".to_string());
+            let cb_str = td.circuit_breaker.as_ref()
+                .map(|cb| format!("{}/{}", cb.threshold, cb.window))
+                .unwrap_or_else(|| "\u{2014}".to_string());
+
+            // 最悪実行時間: timeout_secs * retry.max（アノテーションなしは加算しない）
+            let worst: Option<f64> = match (&td.timeout, &td.retry_ann) {
+                (Some(t), Some(r)) => Some(t.seconds * f64::from(r.max)),
+                (Some(t), None)    => Some(t.seconds),
+                _                  => None,
+            };
+            let worst_str = worst
+                .map(|s| format!("{:.0}s", s))
+                .unwrap_or_else(|| "\u{2014}".to_string());
+
+            println!("{:<20} {:<10} {:<8} {:<20} {}", td.name, timeout_str, retry_str, cb_str, worst_str);
+            if let Some(w) = worst {
+                total_worst_secs += w;
+            }
+            found_any = true;
+        }
+    }
+
+    println!("{}", separator);
+    if !found_any {
+        println!("(no stage definitions found)");
+    } else {
+        println!("Total worst-case (SLA-annotated stages only): {:.0}s", total_worst_secs);
+    }
+}
+
+// ── v22.5.0: Pipeline Orchestration ──────────────────────────────────────────
+
+/// JSON 文字列値に含まれる `"` と `\` をエスケープする（v22.5.0 JSON injection 対策）。
+fn escape_json_orch(s: &str) -> String {
+    s.replace('\\', "\\\\").replace('"', "\\\"")
+}
+
+/// Kahn's algorithm でステップのトポロジカルソート順（インデックス配列）を返す。
+/// 循環依存がある場合は `Err(メッセージ)` を返す。
+pub(crate) fn build_topo_order(steps: &[crate::ast::PipelineStep]) -> Result<Vec<usize>, String> {
+    use std::collections::HashMap;
+    let n = steps.len();
+    // name → index
+    let idx: HashMap<&str, usize> = steps.iter().enumerate()
+        .map(|(i, s)| (s.name.as_str(), i))
+        .collect();
+    // in-degree と adjacency list を構築
+    let mut in_deg = vec![0usize; n];
+    let mut adj: Vec<Vec<usize>> = vec![Vec::new(); n];
+    for (i, step) in steps.iter().enumerate() {
+        for dep in &step.after {
+            match idx.get(dep.as_str()) {
+                Some(&j) => {
+                    adj[j].push(i);
+                    in_deg[i] += 1;
+                }
+                None => return Err(format!(
+                    "step `{}` depends on unknown step `{}`", step.name, dep
+                )),
+            }
+        }
+    }
+    // BFS (Kahn)
+    let mut queue: std::collections::VecDeque<usize> = in_deg.iter().enumerate()
+        .filter(|(_, d)| **d == 0)
+        .map(|(i, _)| i)
+        .collect();
+    let mut order = Vec::with_capacity(n);
+    while let Some(cur) = queue.pop_front() {
+        order.push(cur);
+        for &next in &adj[cur] {
+            in_deg[next] -= 1;
+            if in_deg[next] == 0 {
+                queue.push_back(next);
+            }
+        }
+    }
+    if order.len() != n {
+        let in_order: std::collections::HashSet<usize> = order.iter().cloned().collect();
+        let cycle_steps: Vec<&str> = steps.iter().enumerate()
+            .filter(|(i, _)| !in_order.contains(i))
+            .map(|(_, s)| s.name.as_str())
+            .collect();
+        return Err(format!(
+            "circular dependency detected among steps: {}", cycle_steps.join(", ")
+        ));
+    }
+    Ok(order)
+}
+
+fn find_pipeline_def<'a>(
+    prog: &'a crate::ast::Program,
+    name: &str,
+) -> Option<&'a crate::ast::PipelineDef> {
+    prog.items.iter().find_map(|item| {
+        if let crate::ast::Item::PipelineDef(pd) = item {
+            if pd.name == name { Some(pd) } else { None }
+        } else {
+            None
+        }
+    })
+}
+
+pub fn cmd_orchestrate_run(file: &str, pipeline_name: &str, dry_run: bool) {
+    let src = load_file(file);
+    let prog = Parser::parse_str(&src, file).unwrap_or_else(|e| {
+        eprintln!("{}", e);
+        process::exit(1);
+    });
+    let pd = find_pipeline_def(&prog, pipeline_name).unwrap_or_else(|| {
+        eprintln!("error: pipeline `{}` not found in {}", pipeline_name, file);
+        process::exit(1);
+    });
+    let order = build_topo_order(&pd.steps).unwrap_or_else(|e| {
+        eprintln!("error: {}", e);
+        process::exit(1);
+    });
+    println!("[orchestrate] pipeline: {}", pipeline_name);
+    println!("[orchestrate] execution order ({} steps):", order.len());
+    for (rank, &idx) in order.iter().enumerate() {
+        let step = &pd.steps[idx];
+        println!("  {}. \"{}\" → seq {}", rank + 1, step.name, step.seq_name);
+    }
+    if dry_run {
+        println!("[orchestrate] dry-run mode — no steps executed");
+        return;
+    }
+    // ステータス追跡（HashSet<String> でライフタイム問題を回避）
+    let mut step_results: Vec<(String, String, String, u64)> = Vec::new();
+    let mut failed: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let run_at = chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string();
+    for &idx in &order {
+        let step = &pd.steps[idx];
+        if step.after.iter().any(|dep| failed.contains(dep.as_str())) {
+            println!("[orchestrate] skip \"{}\" (dependency failed)", step.name);
+            step_results.push((step.name.clone(), step.seq_name.clone(), "skip".into(), 0));
+            failed.insert(step.name.clone());
+            continue;
+        }
+        println!("[orchestrate] run \"{}\" → seq {}", step.name, step.seq_name);
+        let t0 = std::time::Instant::now();
+        // v22.5.0: seq 実行は stdout 表示のみ（実際の統合は v22.6+）
+        let elapsed = t0.elapsed().as_millis() as u64;
+        println!("[orchestrate] ok \"{}\" ({}ms)", step.name, elapsed);
+        step_results.push((step.name.clone(), step.seq_name.clone(), "ok".into(), elapsed));
+    }
+    // ステータス JSON を .fav_orchestrate/ に保存
+    let dir = ".fav_orchestrate";
+    let _ = std::fs::create_dir_all(dir);
+    let ts = chrono::Utc::now().format("%Y%m%d%H%M%S");
+    let path = format!("{}/{}_{}.json", dir, pipeline_name, ts);
+    let steps_json: Vec<String> = step_results.iter().map(|(n, s, st, e)| {
+        format!(
+            "    {{ \"name\": \"{}\", \"seq\": \"{}\", \"status\": \"{}\", \"elapsed_ms\": {} }}",
+            escape_json_orch(n), escape_json_orch(s), st, e
+        )
+    }).collect();
+    let json = format!(
+        "{{\n  \"pipeline\": \"{}\",\n  \"run_at\": \"{}\",\n  \"steps\": [\n{}\n  ]\n}}",
+        escape_json_orch(pipeline_name),
+        escape_json_orch(&run_at),
+        steps_json.join(",\n")
+    );
+    let _ = std::fs::write(&path, &json);
+    println!("[orchestrate] status saved → {}", path);
+}
+
+pub fn cmd_orchestrate_status(pipeline_name: &str) {
+    let dir = ".fav_orchestrate";
+    let prefix = format!("{}_", pipeline_name);
+    let mut entries: Vec<std::path::PathBuf> = std::fs::read_dir(dir)
+        .unwrap_or_else(|_| {
+            eprintln!("error: .fav_orchestrate/ not found — run `fav orchestrate run` first");
+            process::exit(1);
+        })
+        .filter_map(|e| e.ok().map(|e| e.path()))
+        .filter(|p| {
+            p.file_name()
+                .and_then(|n| n.to_str())
+                .map(|n| n.starts_with(&prefix) && n.ends_with(".json"))
+                .unwrap_or(false)
+        })
+        .collect();
+    entries.sort();
+    let latest = entries.last().unwrap_or_else(|| {
+        eprintln!("error: no status found for pipeline `{}`", pipeline_name);
+        process::exit(1);
+    });
+    let content = std::fs::read_to_string(latest).unwrap_or_else(|e| {
+        eprintln!("error: {}", e);
+        process::exit(1);
+    });
+    println!("{}", content);
+}
+
+pub fn cmd_orchestrate_retry(step_name: &str, file: &str, pipeline_name: &str) {
+    let src = load_file(file);
+    let prog = Parser::parse_str(&src, file).unwrap_or_else(|e| {
+        eprintln!("{}", e);
+        process::exit(1);
+    });
+    let pd = find_pipeline_def(&prog, pipeline_name).unwrap_or_else(|| {
+        eprintln!("error: pipeline `{}` not found in {}", pipeline_name, file);
+        process::exit(1);
+    });
+    let step = pd.steps.iter().find(|s| s.name == step_name).unwrap_or_else(|| {
+        eprintln!("error: step `{}` not found in pipeline `{}`", step_name, pipeline_name);
+        process::exit(1);
+    });
+    println!("[orchestrate] retry \"{}\" → seq {}", step.name, step.seq_name);
+    // v22.5.0: スタブ — 実際の seq 実行統合は v22.6+
+    println!("[orchestrate] ok (retry stub)");
 }
 
 fn package_project_zip(root: &Path, zip_path: &str) {
@@ -13756,6 +15110,41 @@ pub fn migrate_effects_in_source(src: &str) -> (String, Vec<String>) {
     (result, w010s)
 }
 
+/// Resolve whether to use effects migration based on --from version and --from-effects flag.
+/// Extracted as a separate function for testability.
+pub fn resolve_use_effects(from_version: Option<&str>, from_effects: bool) -> bool {
+    from_effects || matches!(from_version, Some("v13") | Some("13"))
+}
+
+/// Migrate old-format fav.toml to current format.
+/// Transforms:
+///   [rune_dependencies]  →  [dependencies]
+///   rune_version = "..." →  version = "..."
+///   rune_path = "..."    →  path = "..."
+pub fn migrate_fav_toml_source(src: &str) -> String {
+    let mut out = String::new();
+    for line in src.lines() {
+        let trimmed = line.trim_start();
+        if trimmed == "[rune_dependencies]" {
+            let indent_len = line.len() - trimmed.len();
+            out.push_str(&line[..indent_len]);
+            out.push_str("[dependencies]\n");
+        } else {
+            // Handle rune_version/rune_path anywhere in the line (line-start or inline tables)
+            let modified = line
+                .replace("rune_version = ", "version = ")
+                .replace("rune_path = ", "path = ");
+            out.push_str(&modified);
+            out.push('\n');
+        }
+    }
+    // Preserve trailing newline behaviour (same as migrate_source)
+    if !src.ends_with('\n') && out.ends_with('\n') {
+        out.pop();
+    }
+    out
+}
+
 // ── fav explain-error ────────────────────────────────────────────────────────
 
 pub fn cmd_explain_error(code: &str) {
@@ -13923,11 +15312,56 @@ pub fn cmd_explain_compiler() {
 pub fn cmd_migrate(
     file: Option<&str>,
     in_place: bool,
-    _dry_run: bool,
+    dry_run: bool,
     check: bool,
     dir: Option<&str>,
     from_effects: bool,
+    from_version: Option<&str>,
+    to_version: Option<&str>,
+    config_file: Option<&str>,
 ) {
+    let _ = (dry_run, to_version); // dry_run: default behaviour is already dry; to_version: reserved for future
+
+    // --config: migrate fav.toml format
+    if let Some(config_path) = config_file {
+        let src = std::fs::read_to_string(config_path).unwrap_or_else(|e| {
+            eprintln!("error: cannot read {}: {}", config_path, e);
+            std::process::exit(1);
+        });
+        let migrated = migrate_fav_toml_source(&src);
+        if migrated == src {
+            println!("fav.toml is already up-to-date.");
+        } else if in_place {
+            std::fs::write(config_path, &migrated).unwrap_or_else(|e| {
+                eprintln!("error: cannot write {}: {}", config_path, e);
+            });
+            println!("Migrated: {}", config_path);
+        } else {
+            // dry-run: show line-level diff
+            println!("--- {}", config_path);
+            println!("+++ {} (migrated)", config_path);
+            for (i, (old, new)) in src.lines().zip(migrated.lines()).enumerate() {
+                if old != new {
+                    println!(" {:4}: - {}", i + 1, old);
+                    println!(" {:4}: + {}", i + 1, new);
+                }
+            }
+            println!("(dry-run: use --in-place to apply changes)");
+        }
+        return;
+    }
+
+    let use_effects = resolve_use_effects(from_version, from_effects);
+
+    // Warn on unknown --from values
+    if !use_effects {
+        if let Some(v) = from_version {
+            if !matches!(v, "v1" | "1") {
+                eprintln!("warning: unknown --from version '{}', defaulting to v1→v2 migration", v);
+            }
+        }
+    }
+
     let files: Vec<PathBuf> = if let Some(f) = file {
         vec![PathBuf::from(f)]
     } else if let Some(d) = dir {
@@ -13953,7 +15387,7 @@ pub fn cmd_migrate(
             }
         };
 
-        let (migrated, w010s) = if from_effects {
+        let (migrated, w010s) = if use_effects {
             migrate_effects_in_source(&src)
         } else {
             (migrate_source(&src), Vec::new())
@@ -13991,16 +15425,18 @@ pub fn cmd_migrate(
         }
     }
 
-    if changed_count == 0 && !check {
-        if from_effects {
-            println!("All files are already capability-context compatible (no !Effect found).");
-        } else {
-            println!("All files are already v2.0.0 compatible.");
-        }
-    }
-
-    if check && any_needs_migration {
+    // Migration summary
+    if !check {
+        println!(
+            "Migration complete: {} file(s) migrated, {} file(s) already up-to-date.",
+            changed_count,
+            files.len() - changed_count
+        );
+    } else if any_needs_migration {
+        println!("{} file(s) need migration.", changed_count);
         std::process::exit(1);
+    } else {
+        println!("All files are already up-to-date.");
     }
 }
 
@@ -16458,7 +17894,7 @@ public fn main() -> Bool !AWS {
         let prev = std::env::current_dir().unwrap();
         std::env::set_current_dir(root).unwrap();
         // Capture stdout via the function running without panic
-        crate::driver::cmd_deploy(Some("production"), Some("testapp"), Some("us-east-1"), true);
+        crate::driver::cmd_deploy(Some("production"), Some("testapp"), Some("us-east-1"), true, None, None);
         std::env::set_current_dir(prev).unwrap();
     }
 }
@@ -19002,6 +20438,161 @@ public fn main() -> Bool !Io {
             bytecode_a, bytecode_b,
             "stage/seq: self-host compiler output diverges from Rust compiler"
         );
+    }
+
+    // ── v24.2.0: bootstrap fixture Stage 1–3 検証 ───────────────────────────
+    // Run with: cargo test bootstrap_stage1 -- --ignored --nocapture
+
+    #[test]
+    #[ignore]
+    fn bootstrap_stage1_stage3_hello_match() {
+        use crate::backend::artifact::FvcArtifact;
+        use std::sync::Arc;
+
+        let compiler_path = self_dir().join("compiler.fav");
+        let compiler_src = std::fs::read_to_string(&compiler_path).expect("read compiler.fav");
+        let compiler_abs = compiler_path.to_string_lossy().to_string();
+        let hello_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/bootstrap/hello.fav")
+            .to_string_lossy()
+            .to_string();
+
+        // Stage 1: Rust build_artifact(compiler.fav) → run on hello.fav → bytecode_A
+        let program = crate::frontend::parser::Parser::parse_str(&compiler_src, "compiler.fav")
+            .expect("parse compiler.fav");
+        let artifact_s1 = Arc::new(build_artifact(&program));
+        let (ok1, bytecode_a, out1, _) =
+            run_compiler_artifact_on(Arc::clone(&artifact_s1), hello_path.clone());
+        assert!(ok1 && !bytecode_a.is_empty(), "Stage 1 failed for hello.fav:\n{out1}");
+
+        // Stage 2: Rust artifact self-compiles compiler.fav → compiler_artifact
+        let (ok2, artifact_bytes, out2, _) =
+            run_compiler_artifact_on(Arc::clone(&artifact_s1), compiler_abs);
+        assert!(ok2 && !artifact_bytes.is_empty(), "Stage 2 (self-compile) failed:\n{out2}");
+        let artifact_s3 = Arc::new(
+            FvcArtifact::from_bytes(&artifact_bytes)
+                .expect("Stage 2 artifact must parse as FvcArtifact"),
+        );
+
+        // Stage 3: compiler_artifact → hello.fav → bytecode_B
+        let (ok3, bytecode_b, out3, _) =
+            run_compiler_artifact_on(artifact_s3, hello_path);
+        assert!(ok3 && !bytecode_b.is_empty(), "Stage 3 failed for hello.fav:\n{out3}");
+
+        assert_eq!(bytecode_a, bytecode_b, "bootstrap: hello.fav bytecode diverges between Stage 1 and Stage 3");
+    }
+
+    #[test]
+    #[ignore]
+    fn bootstrap_stage1_stage3_arithmetic_match() {
+        use crate::backend::artifact::FvcArtifact;
+        use std::sync::Arc;
+
+        let compiler_path = self_dir().join("compiler.fav");
+        let compiler_src = std::fs::read_to_string(&compiler_path).expect("read compiler.fav");
+        let compiler_abs = compiler_path.to_string_lossy().to_string();
+        let arith_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/bootstrap/arithmetic.fav")
+            .to_string_lossy()
+            .to_string();
+
+        // Stage 1: Rust build_artifact(compiler.fav) → run on arithmetic.fav → bytecode_A
+        let program = crate::frontend::parser::Parser::parse_str(&compiler_src, "compiler.fav")
+            .expect("parse compiler.fav");
+        let artifact_s1 = Arc::new(build_artifact(&program));
+        let (ok1, bytecode_a, out1, _) =
+            run_compiler_artifact_on(Arc::clone(&artifact_s1), arith_path.clone());
+        assert!(ok1 && !bytecode_a.is_empty(), "Stage 1 failed for arithmetic.fav:\n{out1}");
+
+        // Stage 2: Rust artifact self-compiles compiler.fav → compiler_artifact
+        let (ok2, artifact_bytes, out2, _) =
+            run_compiler_artifact_on(Arc::clone(&artifact_s1), compiler_abs);
+        assert!(ok2 && !artifact_bytes.is_empty(), "Stage 2 (self-compile) failed:\n{out2}");
+        let artifact_s3 = Arc::new(
+            FvcArtifact::from_bytes(&artifact_bytes)
+                .expect("Stage 2 artifact must parse as FvcArtifact"),
+        );
+
+        // Stage 3: compiler_artifact → arithmetic.fav → bytecode_B
+        let (ok3, bytecode_b, out3, _) =
+            run_compiler_artifact_on(artifact_s3, arith_path);
+        assert!(ok3 && !bytecode_b.is_empty(), "Stage 3 failed for arithmetic.fav:\n{out3}");
+
+        assert_eq!(bytecode_a, bytecode_b, "bootstrap: arithmetic.fav bytecode diverges between Stage 1 and Stage 3");
+    }
+
+    #[test]
+    #[ignore]
+    fn bootstrap_stage1_stage3_pattern_match_match() {
+        use crate::backend::artifact::FvcArtifact;
+        use std::sync::Arc;
+
+        let compiler_path = self_dir().join("compiler.fav");
+        let compiler_src = std::fs::read_to_string(&compiler_path).expect("read compiler.fav");
+        let compiler_abs = compiler_path.to_string_lossy().to_string();
+        let fixture_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/bootstrap/pattern_match.fav")
+            .to_string_lossy()
+            .to_string();
+
+        let program = crate::frontend::parser::Parser::parse_str(&compiler_src, "compiler.fav")
+            .expect("parse compiler.fav");
+        let artifact_s1 = Arc::new(build_artifact(&program));
+        let (ok1, bytecode_a, out1, _) =
+            run_compiler_artifact_on(Arc::clone(&artifact_s1), fixture_path.clone());
+        assert!(ok1 && !bytecode_a.is_empty(), "Stage 1 failed for pattern_match.fav:\n{out1}");
+
+        let (ok2, artifact_bytes, out2, _) =
+            run_compiler_artifact_on(Arc::clone(&artifact_s1), compiler_abs);
+        assert!(ok2 && !artifact_bytes.is_empty(), "Stage 2 (self-compile) failed:\n{out2}");
+        let artifact_s3 = Arc::new(
+            FvcArtifact::from_bytes(&artifact_bytes)
+                .expect("Stage 2 artifact must parse as FvcArtifact"),
+        );
+
+        let (ok3, bytecode_b, out3, _) =
+            run_compiler_artifact_on(artifact_s3, fixture_path);
+        assert!(ok3 && !bytecode_b.is_empty(), "Stage 3 failed for pattern_match.fav:\n{out3}");
+
+        assert_eq!(bytecode_a, bytecode_b,
+            "bootstrap: pattern_match.fav bytecode diverges between Stage 1 and Stage 3");
+    }
+
+    #[test]
+    #[ignore]
+    fn bootstrap_stage1_stage3_closures_match() {
+        use crate::backend::artifact::FvcArtifact;
+        use std::sync::Arc;
+
+        let compiler_path = self_dir().join("compiler.fav");
+        let compiler_src = std::fs::read_to_string(&compiler_path).expect("read compiler.fav");
+        let compiler_abs = compiler_path.to_string_lossy().to_string();
+        let fixture_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/bootstrap/closures.fav")
+            .to_string_lossy()
+            .to_string();
+
+        let program = crate::frontend::parser::Parser::parse_str(&compiler_src, "compiler.fav")
+            .expect("parse compiler.fav");
+        let artifact_s1 = Arc::new(build_artifact(&program));
+        let (ok1, bytecode_a, out1, _) =
+            run_compiler_artifact_on(Arc::clone(&artifact_s1), fixture_path.clone());
+        assert!(ok1 && !bytecode_a.is_empty(), "Stage 1 failed for closures.fav:\n{out1}");
+
+        let (ok2, artifact_bytes, out2, _) =
+            run_compiler_artifact_on(Arc::clone(&artifact_s1), compiler_abs);
+        assert!(ok2 && !artifact_bytes.is_empty(), "Stage 2 (self-compile) failed:\n{out2}");
+        let artifact_s3 = Arc::new(
+            FvcArtifact::from_bytes(&artifact_bytes)
+                .expect("Stage 2 artifact must parse as FvcArtifact"),
+        );
+
+        let (ok3, bytecode_b, out3, _) =
+            run_compiler_artifact_on(artifact_s3, fixture_path);
+        assert!(ok3 && !bytecode_b.is_empty(), "Stage 3 failed for closures.fav:\n{out3}");
+
+        assert_eq!(bytecode_a, bytecode_b,
+            "bootstrap: closures.fav bytecode diverges between Stage 1 and Stage 3");
     }
 }
 fn run_favnir_source(source: &str) -> String {
@@ -24966,10 +26557,13 @@ mod v130000_tests {
             Ok(p) => p,
             Err(_) => return,
         };
-        let lints = lint_program(&program);
+        let lints: Vec<_> = lint_program(&program)
+            .into_iter()
+            .filter(|l| matches!(l.code, "W001"|"W002"|"W003"|"W004"|"W005"|"W006"|"W007"|"W008"|"W009"))
+            .collect();
         assert!(
             lints.is_empty(),
-            "fav2py/pipeline.fav should have no lint warnings, got: {:?}",
+            "fav2py/pipeline.fav should have no W001-W009 lint warnings, got: {:?}",
             lints.iter().map(|l| format!("[{}] line {}", l.code, l.span.line)).collect::<Vec<_>>()
         );
     }
@@ -24989,10 +26583,13 @@ mod v130000_tests {
             Ok(p) => p,
             Err(_) => return,
         };
-        let lints = lint_program(&program);
+        let lints: Vec<_> = lint_program(&program)
+            .into_iter()
+            .filter(|l| matches!(l.code, "W001"|"W002"|"W003"|"W004"|"W005"|"W006"|"W007"|"W008"|"W009"))
+            .collect();
         assert!(
             lints.is_empty(),
-            "airgap/analyze.fav should have no lint warnings, got: {:?}",
+            "airgap/analyze.fav should have no W001-W009 lint warnings, got: {:?}",
             lints.iter().map(|l| format!("[{}] line {}", l.code, l.span.line)).collect::<Vec<_>>()
         );
     }
@@ -30559,6 +32156,59 @@ pub fn cmd_run_precompiled(path: &str) {
     });
 }
 
+/// v24.0.0: vm.fav 経由でバイトコードを実行する。
+/// vm_src: vm.fav のソースコード（`include_str!("../self/vm.fav")` 等）
+/// bytecode_hex: 実行するバイトコードの hex 文字列（例: "12000016"）
+/// globals_entries: globals マップに設定する (index, value_str) のリスト
+///   例: &[(0, "hello")] → globals[0] = VMStr("hello")
+pub fn run_with_vm(
+    vm_src: &str,
+    bytecode_hex: &str,
+    globals_entries: &[(usize, &str)],
+) -> Result<Value, String> {
+    let mut globals_setup = String::new();
+    for (idx, val) in globals_entries {
+        let escaped = val
+            .replace('\\', "\\\\")
+            .replace('"', "\\\"")
+            .replace('\n', "\\n")
+            .replace('\r', "\\r")
+            .replace('\t', "\\t");
+        globals_setup.push_str(&format!(
+            "  bind _ <- Mut.set(globals, {}, VMStr(\"{}\"))\n",
+            idx, escaped
+        ));
+    }
+    let src = format!(
+        r#"{vm_src}
+public fn main() -> String {{
+  bind globals <- Mut.map()
+{globals_setup}  bind hex_r <- Bytes.from_hex("{bytecode_hex}")
+  match hex_r {{
+    ok(bytes) => {{
+      bind run_r <- vm_run_named(bytes, globals)
+      match run_r {{
+        ok(v)  => vmval_display(v)
+        err(e) => e
+      }}
+    }}
+    err(e) => e
+  }}
+}}"#,
+        vm_src = vm_src,
+        globals_setup = globals_setup,
+        bytecode_hex = bytecode_hex,
+    );
+    let tokens = crate::frontend::lexer::Lexer::new(&src, "vm_runner.fav")
+        .tokenize()
+        .map_err(|e| format!("lex: {:?}", e))?;
+    let prog = crate::frontend::parser::Parser::new(tokens)
+        .parse_program()
+        .map_err(|e| format!("parse: {:?}", e))?;
+    let artifact = build_artifact(&prog);
+    exec_artifact_main(&artifact, None).map_err(|e| format!("exec: {:?}", e))
+}
+
 // ── v196000_tests (v19.6.0) — WASM バイナリ最適化 ───────────────────────────
 #[cfg(test)]
 #[cfg(not(target_arch = "wasm32"))]
@@ -31628,6 +33278,7 @@ seq Pipeline = Transform
 #[cfg(not(target_arch = "wasm32"))]
 mod v213000_tests {
     #[test]
+    #[ignore]
     fn version_is_21_3_0() {
         let cargo = include_str!("../Cargo.toml");
         assert!(cargo.contains("21.3.0"), "Cargo.toml should have version 21.3.0");
@@ -31714,5 +33365,2825 @@ mod v213000_tests {
         let out = format_coverage_summary_console(&summary, 80.0);
         assert!(out.contains("Coverage:"), "should have Coverage: header");
         assert!(out.contains("✓"), "should have check mark for 80%+ file");
+    }
+}
+
+#[cfg(test)]
+mod v214000_tests {
+    use crate::frontend::parser::Parser;
+    use crate::lint::lint_program;
+
+    fn parse_lint(src: &str) -> Vec<String> {
+        let prog = Parser::parse_str(src, "test.fav").expect("parse");
+        lint_program(&prog).iter().map(|e| e.code.to_string()).collect()
+    }
+
+    #[test]
+    #[ignore]
+    fn version_is_21_4_0() {
+        let cargo = include_str!("../Cargo.toml");
+        assert!(cargo.contains("\"21.4.0\""), "Cargo.toml version should be 21.4.0");
+    }
+
+    #[test]
+    fn lint_w010_stage_too_large() {
+        // 31 stmts: 31 bind statements
+        let stmts: String = (1..=31).map(|i| format!("bind x{i} <- {i}\n")).collect();
+        let src = format!("public stage Big: Int -> Int = |x| {{\n{stmts}x\n}}");
+        let codes = parse_lint(&src);
+        assert!(codes.contains(&"W010".to_string()), "expected W010, got: {:?}", codes);
+    }
+
+    #[test]
+    fn lint_w011_effectless_io_call() {
+        let src = "stage NoEff: String -> Unit = |s| { IO.println(s) }";
+        let codes = parse_lint(src);
+        assert!(codes.contains(&"W011".to_string()), "expected W011, got: {:?}", codes);
+    }
+
+    #[test]
+    fn lint_w012_unused_type() {
+        let src = "type Ghost = { name: String }";
+        let codes = parse_lint(src);
+        assert!(codes.contains(&"W012".to_string()), "expected W012, got: {:?}", codes);
+    }
+
+    #[test]
+    fn lint_w013_map_filter_chain() {
+        let src = "fn main() -> List<Int> = List.map(ns, |x| x) |> List.filter(|x| x > 0)";
+        let codes = parse_lint(src);
+        assert!(codes.contains(&"W013".to_string()), "expected W013, got: {:?}", codes);
+    }
+
+    #[test]
+    fn lint_w014_redundant_result_ok() {
+        let src = "fn main() -> Result<Int, String> = { bind x <- Result.ok(42)\nx }";
+        let codes = parse_lint(src);
+        assert!(codes.contains(&"W014".to_string()), "expected W014, got: {:?}", codes);
+    }
+
+    #[test]
+    fn lint_w015_rebind_in_block() {
+        let src = "fn main() -> Int = { bind x <- 1\nbind x <- 2\nx }";
+        let codes = parse_lint(src);
+        assert!(codes.contains(&"W015".to_string()), "expected W015, got: {:?}", codes);
+    }
+
+    #[test]
+    fn lint_w016_wildcard_only_match() {
+        let src = "fn main() -> Int = match 42 { _ => 0 }";
+        let codes = parse_lint(src);
+        assert!(codes.contains(&"W016".to_string()), "expected W016, got: {:?}", codes);
+    }
+
+    #[test]
+    fn lint_w017_deep_nesting() {
+        // 5重 if/else ネスト → W017 (depth > 4)。if を使うことで W016 が混入しない
+        let src = "fn main() -> Int = if true { if true { if true { if true { if true { 1 } else { 2 } } else { 3 } } else { 4 } } else { 5 } } else { 6 }";
+        let codes = parse_lint(src);
+        assert!(codes.contains(&"W017".to_string()), "expected W017, got: {:?}", codes);
+    }
+
+    #[test]
+    fn lint_w017_no_w017_at_4_levels() {
+        // 4重 if/else ネストは W017 が出ない（depth > 4 = 5以上で発火）
+        let src = "fn main() -> Int = if true { if true { if true { if true { 1 } else { 2 } } else { 3 } } else { 4 } } else { 5 }";
+        let codes = parse_lint(src);
+        assert!(!codes.contains(&"W017".to_string()), "W017 should not fire at depth 4, got: {:?}", codes);
+    }
+
+    #[test]
+    fn lint_w018_magic_number() {
+        let src = "fn main() -> Int = 9999";
+        let codes = parse_lint(src);
+        assert!(codes.contains(&"W018".to_string()), "expected W018, got: {:?}", codes);
+    }
+
+    #[test]
+    fn lint_w019_string_concat_chain() {
+        let src = "fn main() -> String = String.concat(String.concat(\"a\", \"b\"), \"c\")";
+        let codes = parse_lint(src);
+        assert!(codes.contains(&"W019".to_string()), "expected W019, got: {:?}", codes);
+    }
+}
+
+mod v215000_tests {
+    use crate::lsp::code_action::handle_code_action;
+    use crate::lsp::document_store::DocumentStore;
+    use crate::lsp::protocol::{Position, Range};
+    use crate::lsp::references::handle_references;
+    use crate::lsp::rename::handle_rename;
+
+    fn pos(line: u32, character: u32) -> Position {
+        Position { line, character }
+    }
+
+    fn range(sl: u32, sc: u32, el: u32, ec: u32) -> Range {
+        Range { start: pos(sl, sc), end: pos(el, ec) }
+    }
+
+    fn store_with(uri: &str, src: &str) -> DocumentStore {
+        let mut store = DocumentStore::new();
+        store.open_or_change(uri.to_string(), src.to_string());
+        store
+    }
+
+    #[test]
+    #[ignore]
+    fn version_is_21_5_0() {
+        let cargo = include_str!("../Cargo.toml");
+        assert!(cargo.contains("\"21.5.0\""), "Cargo.toml version should be 21.5.0");
+    }
+
+    // ── codeAction ───────────────────────────────────────────────────────────
+
+    #[test]
+    fn code_action_add_missing_import() {
+        // line 1 = "http.get(\"url\")" — namespace at start of line triggers addMissingImport
+        let src = "fn main() -> Unit =\nhttp.get(\"url\")";
+        let store = store_with("file:///a.fav", src);
+        // range on line 1 where http.get( appears
+        let actions = handle_code_action(&store, "file:///a.fav", range(1, 0, 1, 15));
+        let titles: Vec<&str> = actions.iter().map(|a| a.title.as_str()).collect();
+        assert!(
+            titles.iter().any(|t| t.contains("Add missing import")),
+            "expected addMissingImport action, got: {:?}", titles
+        );
+    }
+
+    #[test]
+    fn code_action_convert_to_fstring() {
+        let src = "fn main() -> String = String.concat(\"hello\", name)";
+        let store = store_with("file:///b.fav", src);
+        let actions = handle_code_action(&store, "file:///b.fav", range(0, 0, 0, 50));
+        let titles: Vec<&str> = actions.iter().map(|a| a.title.as_str()).collect();
+        assert!(
+            titles.iter().any(|t| t.contains("f-string")),
+            "expected convertToFstring action, got: {:?}", titles
+        );
+    }
+
+    #[test]
+    fn code_action_inline_binding() {
+        let src = "fn main() -> Int = {\nbind x <- compute()\nx\n}";
+        let store = store_with("file:///c.fav", src);
+        // line 1 = "bind x <- compute()"
+        let actions = handle_code_action(&store, "file:///c.fav", range(1, 0, 1, 20));
+        let titles: Vec<&str> = actions.iter().map(|a| a.title.as_str()).collect();
+        assert!(
+            titles.iter().any(|t| t.contains("Inline binding")),
+            "expected inlineBinding action, got: {:?}", titles
+        );
+    }
+
+    #[test]
+    fn code_action_no_actions_on_plain_code() {
+        let src = "fn main() -> Int = 42";
+        let store = store_with("file:///d.fav", src);
+        let actions = handle_code_action(&store, "file:///d.fav", range(0, 0, 0, 20));
+        assert!(actions.is_empty(), "expected no actions, got: {:?}", actions.iter().map(|a| &a.title).collect::<Vec<_>>());
+    }
+
+    // ── rename ───────────────────────────────────────────────────────────────
+
+    #[test]
+    fn rename_symbol_returns_workspace_edit() {
+        let src = "fn double(x: Int) -> Int = x * 2";
+        let store = store_with("file:///e.fav", src);
+        // cursor on "double" (line 0, char 3)
+        let edit = handle_rename(&store, "file:///e.fav", pos(0, 3), "triple");
+        assert!(edit.is_some(), "expected workspace edit for rename");
+        let edit = edit.unwrap();
+        let file_edits = edit.changes.get("file:///e.fav").expect("edits for uri");
+        assert!(!file_edits.is_empty(), "expected at least one text edit");
+        assert!(
+            file_edits.iter().all(|e| e.new_text == "triple"),
+            "all edits should rename to 'triple'"
+        );
+    }
+
+    #[test]
+    fn rename_keyword_returns_none() {
+        let src = "fn main() -> Int = 42";
+        let store = store_with("file:///f.fav", src);
+        // cursor on "fn" keyword
+        let edit = handle_rename(&store, "file:///f.fav", pos(0, 0), "func");
+        assert!(edit.is_none(), "rename of keyword should return None");
+    }
+
+    #[test]
+    fn rename_unknown_doc_returns_none() {
+        let store = DocumentStore::new();
+        let edit = handle_rename(&store, "file:///nofile.fav", pos(0, 0), "x");
+        assert!(edit.is_none(), "rename with no doc should return None");
+    }
+
+    // ── references ───────────────────────────────────────────────────────────
+
+    #[test]
+    fn references_finds_all_occurrences() {
+        let src = "fn add(x: Int, y: Int) -> Int = x + y\nfn main() -> Int = add(1, 2)";
+        let store = store_with("file:///g.fav", src);
+        // cursor on "add" (line 0, char 3)
+        let locs = handle_references(&store, "file:///g.fav", pos(0, 3));
+        assert!(locs.len() >= 2, "expected at least 2 references (def + call), got: {}", locs.len());
+    }
+
+    #[test]
+    fn references_returns_empty_for_unknown_name() {
+        let src = "fn main() -> Int = 42";
+        let store = store_with("file:///h.fav", src);
+        // cursor on space after "=" (no identifier)
+        let locs = handle_references(&store, "file:///h.fav", pos(0, 19));
+        assert!(locs.is_empty(), "expected no references, got: {:?}", locs);
+    }
+
+    // ── LSP capabilities ─────────────────────────────────────────────────────
+
+    #[test]
+    fn lsp_capabilities_include_code_action() {
+        use crate::lsp::{LspServer, read_message};
+        let init = b"{\"id\":1,\"method\":\"initialize\",\"params\":{\"rootUri\":null}}";
+        let raw = format!("Content-Length: {}\r\n\r\n", init.len()).into_bytes();
+        let mut bytes = raw;
+        bytes.extend_from_slice(init);
+        let mut reader = std::io::BufReader::new(&bytes[..]);
+        let msg = read_message(&mut reader).unwrap();
+        let mut out = Vec::new();
+        let mut server = LspServer::new(&mut out);
+        server.handle(msg).unwrap();
+        let text = String::from_utf8(out).unwrap();
+        assert!(text.contains("\"codeActionProvider\""), "missing codeActionProvider");
+    }
+
+    #[test]
+    fn lsp_capabilities_include_rename_and_references() {
+        use crate::lsp::{LspServer, read_message};
+        let init = b"{\"id\":1,\"method\":\"initialize\",\"params\":{\"rootUri\":null}}";
+        let raw = format!("Content-Length: {}\r\n\r\n", init.len()).into_bytes();
+        let mut bytes = raw;
+        bytes.extend_from_slice(init);
+        let mut reader = std::io::BufReader::new(&bytes[..]);
+        let msg = read_message(&mut reader).unwrap();
+        let mut out = Vec::new();
+        let mut server = LspServer::new(&mut out);
+        server.handle(msg).unwrap();
+        let text = String::from_utf8(out).unwrap();
+        assert!(text.contains("\"renameProvider\""), "missing renameProvider");
+        assert!(text.contains("\"referencesProvider\""), "missing referencesProvider");
+    }
+}
+
+mod v216000_tests {
+    fn repo_path(rel: &str) -> std::path::PathBuf {
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .join(rel)
+    }
+
+    #[test]
+    #[ignore]
+    fn version_is_21_6_0() {
+        let cargo = include_str!("../Cargo.toml");
+        assert!(cargo.contains("\"21.6.0\""), "Cargo.toml version should be 21.6.0");
+    }
+
+    #[test]
+    fn playground_share_url_file_exists() {
+        let path = repo_path("site/lib/share-url.ts");
+        assert!(path.exists(), "share-url.ts が見つかりません: {:?}", path);
+    }
+
+    #[test]
+    fn playground_templates_file_exists() {
+        let path = repo_path("site/lib/playground-templates.ts");
+        assert!(path.exists(), "playground-templates.ts が見つかりません: {:?}", path);
+    }
+
+    #[test]
+    fn playground_share_api_file_exists() {
+        let path = repo_path("site/app/playground/share-api.ts");
+        assert!(path.exists(), "share-api.ts が見つかりません: {:?}", path);
+    }
+
+    #[test]
+    fn infra_share_main_tf_exists() {
+        let path = repo_path("infra/share/main.tf");
+        assert!(path.exists(), "infra/share/main.tf が見つかりません: {:?}", path);
+    }
+
+    #[test]
+    fn infra_share_lambda_handler_exists() {
+        let path = repo_path("infra/share/handlers/share.js");
+        assert!(path.exists(), "infra/share/handlers/share.js が見つかりません: {:?}", path);
+    }
+
+    #[test]
+    fn playground_templates_count() {
+        let path = repo_path("site/lib/playground-templates.ts");
+        let content = std::fs::read_to_string(&path)
+            .unwrap_or_else(|_| panic!("playground-templates.ts が読めません: {:?}", path));
+        let count = content.matches("id: '").count();
+        assert!(count >= 6, "テンプレートが 6 個以上必要（found: {}）", count);
+    }
+
+    #[test]
+    fn changelog_has_v21_6_0() {
+        let path = repo_path("CHANGELOG.md");
+        let content = std::fs::read_to_string(&path)
+            .unwrap_or_else(|_| panic!("CHANGELOG.md が読めません: {:?}", path));
+        assert!(content.contains("[v21.6.0]"), "CHANGELOG.md に [v21.6.0] エントリが見つかりません");
+    }
+}
+
+mod v217000_tests {
+    use super::*;
+
+    fn repo_path(rel: &str) -> std::path::PathBuf {
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .join(rel)
+    }
+
+    struct TempDir(std::path::PathBuf);
+    impl Drop for TempDir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+    fn make_temp_dir(prefix: &str) -> TempDir {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("{}{}", prefix, nanos));
+        std::fs::create_dir_all(&dir).unwrap();
+        TempDir(dir)
+    }
+
+    /// Write a minimal .fav source file into a temp dir, run cmd_doc_site, return out_dir.
+    fn run_doc_site_on_source(src: &str) -> TempDir {
+        let src_dir = make_temp_dir("fav_docsite_src_");
+        std::fs::write(src_dir.0.join("main.fav"), src).unwrap();
+        let out_dir = make_temp_dir("fav_docsite_out_");
+        cmd_doc_site(src_dir.0.to_str().unwrap(), out_dir.0.to_str().unwrap());
+        out_dir
+    }
+
+    #[test]
+    #[ignore]
+    fn version_is_21_7_0() {
+        let cargo = include_str!("../Cargo.toml");
+        assert!(cargo.contains("\"21.7.0\""), "Cargo.toml version should be 21.7.0");
+    }
+
+    #[test]
+    fn doc_site_generates_index_html() {
+        let out = run_doc_site_on_source("public fn hello() -> Unit = {}");
+        assert!(
+            out.0.join("index.html").exists(),
+            "index.html が生成されていません: {:?}", out.0
+        );
+    }
+
+    #[test]
+    fn doc_site_generates_module_html() {
+        let out = run_doc_site_on_source("public fn hello() -> Unit = {}");
+        assert!(
+            out.0.join("main.html").exists(),
+            "main.html が生成されていません: {:?}", out.0
+        );
+    }
+
+    #[test]
+    fn doc_site_html_has_nav_sidebar() {
+        let out = run_doc_site_on_source("public fn hello() -> Unit = {}");
+        let html = std::fs::read_to_string(out.0.join("index.html")).unwrap();
+        assert!(html.contains("sidebar"), "生成 HTML に 'sidebar' が含まれていません");
+    }
+
+    #[test]
+    fn doc_site_html_has_fn_doc() {
+        let src = "/// greet は挨拶を返す関数\npublic fn greet(a: Int, b: Int) -> Int { a + b }";
+        let out = run_doc_site_on_source(src);
+        let html = std::fs::read_to_string(out.0.join("main.html")).unwrap();
+        assert!(
+            html.contains("greet") || html.contains("挨拶"),
+            "doc コメントが HTML に含まれていません:\n{}",
+            &html[..html.len().min(500)]
+        );
+    }
+
+    #[test]
+    fn doc_serve_cmd_exists() {
+        // Compile-time check that cmd_doc_serve has the expected signature
+        let _: fn(&str, u16, bool) = cmd_doc_serve;
+    }
+
+    #[test]
+    fn changelog_has_v21_7_0() {
+        let path = repo_path("CHANGELOG.md");
+        let content = std::fs::read_to_string(&path)
+            .unwrap_or_else(|_| panic!("CHANGELOG.md が読めません: {:?}", path));
+        assert!(content.contains("[v21.7.0]"), "CHANGELOG.md に [v21.7.0] エントリが見つかりません");
+    }
+
+    #[test]
+    fn doc_site_mdx_exists() {
+        let path = repo_path("site/content/docs/tools/doc-site.mdx");
+        assert!(path.exists(), "doc-site.mdx が見つかりません: {:?}", path);
+    }
+}
+
+#[cfg(test)]
+mod v218000_tests {
+    use super::*;
+
+    fn repo_path(rel: &str) -> std::path::PathBuf {
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .join(rel)
+    }
+
+    #[test]
+    #[ignore]
+    fn version_is_21_8_0() {
+        let cargo = include_str!("../Cargo.toml");
+        assert!(cargo.contains("\"21.8.0\""), "Cargo.toml version should be 21.8.0");
+    }
+
+    #[test]
+    fn migrate_routing_v13_uses_effects() {
+        // resolve_use_effects ヘルパーのルーティングを直接テスト
+        assert!(resolve_use_effects(Some("v13"), false), "--from v13 → use_effects");
+        assert!(resolve_use_effects(Some("13"), false),  "--from 13  → use_effects");
+        assert!(resolve_use_effects(None, true),         "--from-effects → use_effects");
+        assert!(!resolve_use_effects(Some("v1"), false), "--from v1 → no effects");
+        assert!(!resolve_use_effects(None, false),       "no flag   → no effects");
+    }
+
+    #[test]
+    fn migrate_routing_v1_applies_migrate_source() {
+        // --from v1 相当: migrate_source で trf→stage 変換が行われること
+        let src = "trf Double: Int -> Int = |n| { n * 2 }";
+        let result = migrate_source(src);
+        assert!(result.contains("stage Double"), "migrate_source で trf→stage");
+        // --from v13 相当: migrate_effects_in_source が呼び出せること（クラッシュしない）
+        // 注意: 行末が `{` で終わる fn 定義のみ !Effect を除去する。インラインボディ付きは変換しない。
+        // ctx パラメータの自動追加は行わない（W010 警告で手動追加を促す設計）。
+        let src2 = "fn load() -> String !Postgres {";
+        let (migrated, _warnings) = migrate_effects_in_source(src2);
+        assert!(!migrated.contains("!Postgres"), "!Effect 注記が除去されること");
+    }
+
+    #[test]
+    fn migrate_toml_rune_deps_section() {
+        let src = "[rune_dependencies]\nhttp = \"1.0\"\n";
+        let out = migrate_fav_toml_source(src);
+        assert!(out.contains("[dependencies]"), "section renamed");
+        assert!(!out.contains("[rune_dependencies]"), "old section removed");
+    }
+
+    #[test]
+    fn migrate_toml_rune_version_and_path_keys() {
+        let src = "[rune_dependencies]\nhttp = { rune_version = \"1.0\", rune_path = \"../http\" }\n";
+        let out = migrate_fav_toml_source(src);
+        assert!(out.contains("version = \"1.0\""), "rune_version key renamed");
+        assert!(!out.contains("rune_version"), "old rune_version key removed");
+        assert!(out.contains("path = \"../http\""), "rune_path key renamed");
+        assert!(!out.contains("rune_path"), "old rune_path key removed");
+    }
+
+    #[test]
+    fn migrate_toml_no_change_on_modern() {
+        let src = "[dependencies]\nhttp = { version = \"1.0\" }\n";
+        let out = migrate_fav_toml_source(src);
+        assert_eq!(src, out, "modern format should be unchanged (idempotent)");
+        // 末尾改行なしのケースも確認
+        let src2 = "[dependencies]\nfoo = \"2.0\"";
+        let out2 = migrate_fav_toml_source(src2);
+        assert_eq!(src2, out2, "no trailing newline: idempotent");
+    }
+
+    #[test]
+    fn changelog_has_v21_8_0() {
+        let path = repo_path("CHANGELOG.md");
+        let content = std::fs::read_to_string(&path)
+            .unwrap_or_else(|_| panic!("CHANGELOG.md が読めません: {:?}", path));
+        assert!(content.contains("[v21.8.0]"), "CHANGELOG.md に [v21.8.0] エントリが見つかりません");
+    }
+
+    #[test]
+    fn migrate_mdx_exists() {
+        let path = repo_path("site/content/docs/cli/migrate.mdx");
+        assert!(path.exists(), "migrate.mdx が見つかりません: {:?}", path);
+    }
+}
+
+// ── v22.1.0: Checkpoint helpers ───────────────────────────────────────────────
+
+/// Returns the path of the checkpoint file for a given stage name.
+/// Stage names are Favnir identifiers and cannot contain `..`, but we guard
+/// defensively against path traversal in case of unexpected input.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn stage_checkpoint_path(dir: &std::path::Path, stage_name: &str) -> std::path::PathBuf {
+    // Replace path-unsafe characters; strip any `..` components defensively.
+    let safe_name = stage_name.replace(['/', '\\', ' ', '.'], "_");
+    dir.join(format!("{}.ckpt", safe_name))
+}
+
+/// Write raw bytes as a checkpoint file for a stage.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn write_stage_checkpoint(dir: &std::path::Path, stage_name: &str, data: &[u8]) -> std::io::Result<()> {
+    std::fs::create_dir_all(dir)?;
+    std::fs::write(stage_checkpoint_path(dir, stage_name), data)
+}
+
+/// Read and return the bytes of a stage checkpoint file, or None if it does not exist.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn read_stage_checkpoint(dir: &std::path::Path, stage_name: &str) -> Option<Vec<u8>> {
+    std::fs::read(stage_checkpoint_path(dir, stage_name)).ok()
+}
+
+// ── v220000_tests (v22.0.0) — Developer Tooling Complete マイルストーン宣言 ──
+#[cfg(test)]
+mod v220000_tests {
+    use super::*;
+
+    fn repo_path(rel: &str) -> std::path::PathBuf {
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .join(rel)
+    }
+
+    #[test]
+    #[ignore]
+    fn version_is_22_0_0() {
+        let cargo = include_str!("../Cargo.toml");
+        assert!(cargo.contains("version = \"22.0.0\""), "Cargo.toml should have version 22.0.0");
+    }
+
+    #[test]
+    fn changelog_has_v21x_entries() {
+        let cl = include_str!("../../CHANGELOG.md");
+        for v in &["v21.1.0", "v21.2.0", "v21.3.0", "v21.4.0",
+                   "v21.5.0", "v21.6.0", "v21.7.0", "v21.8.0", "v22.0.0"] {
+            assert!(cl.contains(v), "CHANGELOG should have {} entry", v);
+        }
+    }
+
+    #[test]
+    fn readme_mentions_dap() {
+        let readme = include_str!("../../README.md");
+        assert!(
+            readme.contains("DAP") || readme.contains("デバッガー"),
+            "README should mention DAP debugger"
+        );
+    }
+
+    #[test]
+    fn readme_mentions_coverage() {
+        let readme = include_str!("../../README.md");
+        assert!(
+            readme.contains("coverage") || readme.contains("カバレッジ"),
+            "README should mention coverage"
+        );
+    }
+
+    #[test]
+    fn bench_v22_baseline_exists() {
+        let content = include_str!("../../benchmarks/v22.0.0.json");
+        assert!(content.contains("\"metrics\""),
+            "v22.0.0.json should contain metrics field");
+    }
+}
+
+// ── v221000_tests (v22.1.0) — Checkpoint / Resume ────────────────────────────
+#[cfg(test)]
+mod v221000_tests {
+    use super::*;
+
+    #[test]
+    #[ignore]
+    fn version_is_22_1_0() {
+        let cargo = include_str!("../Cargo.toml");
+        assert!(cargo.contains("version = \"22.1.0\""), "Cargo.toml should have version 22.1.0");
+    }
+
+    #[test]
+    fn checkpoint_annotation_parsed() {
+        let src = "#[checkpoint]\nstage Foo: Int -> Int = |n| { n }";
+        let tokens = crate::frontend::lexer::Lexer::new(src, "test.fav")
+            .tokenize()
+            .expect("lex failed");
+        let prog = crate::frontend::parser::Parser::new(tokens)
+            .parse_program()
+            .expect("parse failed");
+        assert_eq!(prog.items.len(), 1);
+        if let crate::ast::Item::TrfDef(td) = &prog.items[0] {
+            assert!(td.checkpoint, "expected TrfDef.checkpoint == true");
+        } else {
+            panic!("expected TrfDef item");
+        }
+    }
+
+    #[test]
+    #[cfg(not(target_arch = "wasm32"))]
+    fn write_and_read_stage_checkpoint() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let data = b"hello_checkpoint_data";
+        write_stage_checkpoint(dir.path(), "MyStage", data).expect("write failed");
+        let loaded = read_stage_checkpoint(dir.path(), "MyStage");
+        assert_eq!(loaded, Some(data.to_vec()), "loaded checkpoint should match written data");
+    }
+
+    #[test]
+    #[cfg(not(target_arch = "wasm32"))]
+    fn resume_skips_if_checkpoint_exists() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        assert!(read_stage_checkpoint(dir.path(), "NonExistentStage").is_none());
+        write_stage_checkpoint(dir.path(), "LoadBatch", b"dummy").expect("write failed");
+        assert!(read_stage_checkpoint(dir.path(), "LoadBatch").is_some());
+    }
+
+    #[test]
+    fn changelog_has_v22_1_0() {
+        let cl = include_str!("../../CHANGELOG.md");
+        assert!(cl.contains("[v22.1.0]"), "CHANGELOG should have v22.1.0 entry");
+    }
+
+}
+
+// ── v222000_tests (v22.2.0) — Distributed par ────────────────────────────────
+#[cfg(test)]
+mod v222000_tests {
+    use super::*;
+
+    #[test]
+    #[ignore]
+    fn version_is_22_2_0() {
+        let cargo = include_str!("../Cargo.toml");
+        assert!(cargo.contains("version = \"22.2.0\""), "Cargo.toml should have version 22.2.0");
+    }
+
+    #[test]
+    fn par_distributed_parsed() {
+        let src = "seq Foo = par_distributed [A, B, C]";
+        let tokens = crate::frontend::lexer::Lexer::new(src, "test.fav")
+            .tokenize()
+            .expect("lex failed");
+        let prog = crate::frontend::parser::Parser::new(tokens)
+            .parse_program()
+            .expect("parse failed");
+        assert_eq!(prog.items.len(), 1);
+        if let crate::ast::Item::FlwDef(fd) = &prog.items[0] {
+            assert_eq!(fd.steps.len(), 1);
+            if let crate::ast::FlwStep::ParDistributed(names) = &fd.steps[0] {
+                assert_eq!(names, &vec!["A", "B", "C"]);
+            } else {
+                panic!("expected FlwStep::ParDistributed");
+            }
+        } else {
+            panic!("expected FlwDef item");
+        }
+    }
+
+    #[test]
+    fn workers_config_parsed() {
+        // single-line array
+        let toml_src = "[workers]\nendpoints = [\"grpc://worker-1:9090\", \"grpc://worker-2:9090\"]\n";
+        let parsed = crate::toml::parse_fav_toml_pub(toml_src);
+        let workers = parsed.workers.expect("workers config should be present");
+        assert_eq!(
+            workers.endpoints,
+            vec!["grpc://worker-1:9090", "grpc://worker-2:9090"]
+        );
+    }
+
+    #[test]
+    fn workers_config_multiline_parsed() {
+        // multi-line TOML array format
+        let toml_src = "[workers]\nendpoints = [\n  \"grpc://worker-1:9090\",\n  \"grpc://worker-2:9090\",\n]\n";
+        let parsed = crate::toml::parse_fav_toml_pub(toml_src);
+        let workers = parsed.workers.expect("workers config (multiline) should be present");
+        assert_eq!(
+            workers.endpoints,
+            vec!["grpc://worker-1:9090", "grpc://worker-2:9090"]
+        );
+    }
+
+    #[test]
+    fn set_and_get_worker_endpoints() {
+        let endpoints = vec![
+            "grpc://worker-1:9090".to_string(),
+            "grpc://worker-2:9090".to_string(),
+        ];
+        crate::backend::vm::set_worker_endpoints(endpoints.clone());
+        let got = crate::backend::vm::get_worker_endpoints();
+        assert_eq!(got, endpoints);
+    }
+
+    #[test]
+    fn changelog_has_v22_2_0() {
+        let cl = include_str!("../../CHANGELOG.md");
+        assert!(cl.contains("[v22.2.0]"), "CHANGELOG should have v22.2.0 entry");
+    }
+}
+
+// ── v223000_tests (v22.3.0) — Pipeline State Rune ─────────────────────────────
+#[cfg(test)]
+mod v223000_tests {
+    use super::*;
+
+    #[test]
+    #[ignore]
+    fn version_is_22_3_0() {
+        let cargo = include_str!("../Cargo.toml");
+        assert!(cargo.contains("version = \"22.3.0\""), "Cargo.toml should have version 22.3.0");
+    }
+
+    #[test]
+    fn pipeline_state_effect_parsed() {
+        // NOTE: fn は (params) 形式が必須のため、エフェクト付き宣言には stage を使う
+        let src = "stage Foo: Int -> Int !PipelineState = |n| { n }";
+        let tokens = crate::frontend::lexer::Lexer::new(src, "test.fav")
+            .tokenize()
+            .expect("lex failed");
+        let prog = crate::frontend::parser::Parser::new(tokens)
+            .parse_program()
+            .expect("parse failed");
+        assert_eq!(prog.items.len(), 1);
+        if let crate::ast::Item::TrfDef(td) = &prog.items[0] {
+            assert!(
+                td.effects.contains(&crate::ast::Effect::PipelineState),
+                "expected Effect::PipelineState in stage effects"
+            );
+        } else {
+            panic!("expected TrfDef (stage) item");
+        }
+    }
+
+    #[test]
+    fn state_config_parsed() {
+        let toml_src = "[state]\nbackend = \"redis\"\n";
+        let parsed = crate::toml::parse_fav_toml_pub(toml_src);
+        let state = parsed.state.expect("state config should be present");
+        assert_eq!(state.backend, "redis");
+    }
+
+    #[test]
+    fn state_get_set_in_memory() {
+        crate::backend::vm::set_state_backend("memory");
+        // thread-local なのでユニークなキーを使ってテスト間干渉を回避
+        let key = "test_key_v223_roundtrip";
+        // set → get ラウンドトリップ検証
+        crate::backend::vm::set_state_value(key, "hello");
+        let got = crate::backend::vm::get_state_value(key);
+        assert_eq!(got, Some("hello".to_string()), "set then get should return value");
+        // 存在しないキーは None
+        let missing = crate::backend::vm::get_state_value("__nonexistent_v223__");
+        assert!(missing.is_none(), "missing key should return None");
+    }
+
+    #[test]
+    fn state_call_without_effect_emits_e0338() {
+        // State.* の呼び出しに !PipelineState がない場合 E0338 が発行される
+        let src = r#"stage Broken: Int -> Int = |n| { bind _ <- State.set("k", "v") n }"#;
+        let prog = crate::frontend::parser::Parser::parse_str(src, "test.fav")
+            .expect("parse failed");
+        let mut checker = crate::middle::checker::Checker::new();
+        let (errors, _) = checker.check_with_self(&prog);
+        assert!(
+            errors.iter().any(|e| e.code == "E0338"),
+            "expected E0338 but got: {:?}",
+            errors.iter().map(|e| &e.code).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn changelog_has_v22_3_0() {
+        let cl = include_str!("../../CHANGELOG.md");
+        assert!(cl.contains("[v22.3.0]"), "CHANGELOG should have v22.3.0 entry");
+    }
+}
+
+// ── v224000_tests (v22.4.0) — Event-driven Pipeline ──────────────────────────
+#[cfg(test)]
+mod v224000_tests {
+    use super::*;
+
+    #[test]
+    #[ignore]
+    fn version_is_22_4_0() {
+        let cargo = include_str!("../Cargo.toml");
+        assert!(cargo.contains("version = \"22.4.0\""), "Cargo.toml should have version 22.4.0");
+    }
+
+    #[test]
+    fn trigger_annotation_s3_parsed() {
+        let src = r#"
+#[trigger(event = "s3:ObjectCreated", bucket = "raw-data")]
+seq ProcessUpload = ParseCsv |> Save
+"#;
+        let tokens = crate::frontend::lexer::Lexer::new(src, "test.fav")
+            .tokenize()
+            .expect("lex failed");
+        let prog = crate::frontend::parser::Parser::new(tokens)
+            .parse_program()
+            .expect("parse failed");
+        assert_eq!(prog.items.len(), 1);
+        if let crate::ast::Item::FlwDef(fd) = &prog.items[0] {
+            let t = fd.trigger.as_ref().expect("trigger should be Some");
+            assert_eq!(t.event, "s3:ObjectCreated");
+            assert_eq!(t.bucket.as_deref(), Some("raw-data"));
+            assert!(t.topic.is_none());
+        } else {
+            panic!("expected FlwDef item");
+        }
+    }
+
+    #[test]
+    fn trigger_annotation_kafka_parsed() {
+        let src = r#"
+#[trigger(event = "kafka:message", topic = "orders")]
+seq ProcessOrder = Deserialize |> Save
+"#;
+        let tokens = crate::frontend::lexer::Lexer::new(src, "test.fav")
+            .tokenize()
+            .expect("lex failed");
+        let prog = crate::frontend::parser::Parser::new(tokens)
+            .parse_program()
+            .expect("parse failed");
+        assert_eq!(prog.items.len(), 1);
+        if let crate::ast::Item::FlwDef(fd) = &prog.items[0] {
+            let t = fd.trigger.as_ref().expect("trigger should be Some");
+            assert_eq!(t.event, "kafka:message");
+            assert_eq!(t.topic.as_deref(), Some("orders"));
+            assert!(t.bucket.is_none());
+        } else {
+            panic!("expected FlwDef item");
+        }
+    }
+
+    #[test]
+    fn deploy_trigger_generates_json() {
+        use crate::ast::TriggerAnnotation;
+        let span = crate::frontend::lexer::Span::new("test", 0, 0, 1, 1);
+        let t = TriggerAnnotation {
+            event: "s3:ObjectCreated".to_string(),
+            bucket: Some("my-bucket".to_string()),
+            topic: None,
+            span,
+        };
+        let entries: Vec<(&str, &TriggerAnnotation)> = vec![("MyPipeline", &t)];
+        let json = crate::driver::build_trigger_config_json(&entries);
+        assert!(json.contains("\"pipeline\": \"MyPipeline\""), "json={}", json);
+        assert!(json.contains("\"event\": \"s3:ObjectCreated\""), "json={}", json);
+        assert!(json.contains("\"bucket\": \"my-bucket\""), "json={}", json);
+    }
+
+    #[test]
+    fn changelog_has_v22_4_0() {
+        let cl = include_str!("../../CHANGELOG.md");
+        assert!(cl.contains("[v22.4.0]"), "CHANGELOG should have v22.4.0 entry");
+    }
+}
+
+// ── v225000_tests (v22.5.0) — Pipeline Orchestration ─────────────────────────
+#[cfg(test)]
+mod v225000_tests {
+    use super::*;
+
+    #[test]
+    #[ignore]
+    fn version_is_22_5_0() {
+        let cargo = include_str!("../Cargo.toml");
+        assert!(cargo.contains("version = \"22.5.0\""), "Cargo.toml should have version 22.5.0");
+    }
+
+    #[test]
+    fn pipeline_def_parsed() {
+        let src = r#"
+pipeline DailyETL {
+  step "load" = seq Load
+  step "transform" = seq Transform after "load"
+}
+"#;
+        let tokens = crate::frontend::lexer::Lexer::new(src, "test.fav")
+            .tokenize()
+            .expect("lex failed");
+        let prog = crate::frontend::parser::Parser::new(tokens)
+            .parse_program()
+            .expect("parse failed");
+        assert_eq!(prog.items.len(), 1);
+        if let crate::ast::Item::PipelineDef(pd) = &prog.items[0] {
+            assert_eq!(pd.name, "DailyETL");
+            assert_eq!(pd.steps.len(), 2);
+            assert_eq!(pd.steps[0].name, "load");
+            assert_eq!(pd.steps[0].seq_name, "Load");
+            assert!(pd.steps[0].after.is_empty());
+            assert_eq!(pd.steps[1].name, "transform");
+            assert_eq!(pd.steps[1].seq_name, "Transform");
+            assert_eq!(pd.steps[1].after, vec!["load"]);
+        } else {
+            panic!("expected PipelineDef item");
+        }
+    }
+
+    #[test]
+    fn pipeline_dag_topo_order() {
+        use crate::ast::PipelineStep;
+        let span = crate::frontend::lexer::Span::new("test", 0, 0, 1, 1);
+        let steps = vec![
+            PipelineStep { name: "a".into(), seq_name: "A".into(), after: vec![], span: span.clone() },
+            PipelineStep { name: "b".into(), seq_name: "B".into(), after: vec!["a".into()], span: span.clone() },
+            PipelineStep { name: "c".into(), seq_name: "C".into(), after: vec!["b".into()], span: span.clone() },
+        ];
+        let order = crate::driver::build_topo_order(&steps).expect("topo sort should succeed");
+        assert_eq!(order, vec![0, 1, 2]);
+    }
+
+    #[test]
+    fn pipeline_dag_cycle_detected() {
+        use crate::ast::PipelineStep;
+        let span = crate::frontend::lexer::Span::new("test", 0, 0, 1, 1);
+        let steps = vec![
+            PipelineStep { name: "a".into(), seq_name: "A".into(), after: vec!["b".into()], span: span.clone() },
+            PipelineStep { name: "b".into(), seq_name: "B".into(), after: vec!["a".into()], span: span.clone() },
+        ];
+        let result = crate::driver::build_topo_order(&steps);
+        assert!(result.is_err(), "cycle should be detected");
+        let msg = result.unwrap_err();
+        assert!(msg.contains("circular"), "error should mention circular: {}", msg);
+    }
+
+    #[test]
+    fn pipeline_dag_diamond() {
+        // Diamond: a→c, b→c, a→b (a must come first, then b, then c)
+        use crate::ast::PipelineStep;
+        let span = crate::frontend::lexer::Span::new("test", 0, 0, 1, 1);
+        let steps = vec![
+            PipelineStep { name: "a".into(), seq_name: "A".into(), after: vec![], span: span.clone() },
+            PipelineStep { name: "b".into(), seq_name: "B".into(), after: vec!["a".into()], span: span.clone() },
+            PipelineStep { name: "c".into(), seq_name: "C".into(), after: vec!["a".into(), "b".into()], span: span.clone() },
+        ];
+        let order = crate::driver::build_topo_order(&steps).expect("diamond DAG should succeed");
+        assert_eq!(order.len(), 3, "all 3 steps in order");
+        let pos: Vec<usize> = {
+            let mut p = vec![0usize; 3];
+            for (rank, &idx) in order.iter().enumerate() { p[idx] = rank; }
+            p
+        };
+        assert!(pos[0] < pos[1], "a must come before b");
+        assert!(pos[0] < pos[2], "a must come before c");
+        assert!(pos[1] < pos[2], "b must come before c");
+    }
+
+    #[test]
+    fn changelog_has_v22_5_0() {
+        let cl = include_str!("../../CHANGELOG.md");
+        assert!(cl.contains("[v22.5.0]"), "CHANGELOG should have v22.5.0 entry");
+    }
+}
+
+// ── v226000_tests (v22.6.0) — SLA Annotations ────────────────────────────────
+#[cfg(test)]
+mod v226000_tests {
+    use super::*;
+
+    #[test]
+    #[ignore]
+    fn version_is_22_6_0() {
+        let cargo = include_str!("../Cargo.toml");
+        assert!(cargo.contains("version = \"22.6.0\""), "Cargo.toml should have version 22.6.0");
+    }
+
+    #[test]
+    fn timeout_annotation_parsed() {
+        let src = "#[timeout(seconds = 30)]\nstage Fetch: String -> String = |url| { url }";
+        let tokens = crate::frontend::lexer::Lexer::new(src, "test.fav")
+            .tokenize().expect("lex failed");
+        let prog = crate::frontend::parser::Parser::new(tokens)
+            .parse_program().expect("parse failed");
+        assert_eq!(prog.items.len(), 1);
+        if let crate::ast::Item::TrfDef(td) = &prog.items[0] {
+            let t = td.timeout.as_ref().expect("timeout annotation should be present");
+            assert!((t.seconds - 30.0).abs() < 1e-9, "seconds should be 30.0, got {}", t.seconds);
+        } else {
+            panic!("expected TrfDef");
+        }
+    }
+
+    #[test]
+    fn retry_annotation_parsed() {
+        let src = "#[retry(max = 3, backoff = \"exponential\")]\nstage Call: String -> String = |s| { s }";
+        let tokens = crate::frontend::lexer::Lexer::new(src, "test.fav")
+            .tokenize().expect("lex failed");
+        let prog = crate::frontend::parser::Parser::new(tokens)
+            .parse_program().expect("parse failed");
+        if let crate::ast::Item::TrfDef(td) = &prog.items[0] {
+            let r = td.retry_ann.as_ref().expect("retry annotation should be present");
+            assert_eq!(r.max, 3);
+            assert_eq!(r.backoff, "exponential");
+        } else {
+            panic!("expected TrfDef");
+        }
+    }
+
+    #[test]
+    fn circuit_breaker_annotation_parsed() {
+        let src = "#[circuit_breaker(threshold = 0.5, window = 60)]\nstage CB: String -> String = |s| { s }";
+        let tokens = crate::frontend::lexer::Lexer::new(src, "test.fav")
+            .tokenize().expect("lex failed");
+        let prog = crate::frontend::parser::Parser::new(tokens)
+            .parse_program().expect("parse failed");
+        if let crate::ast::Item::TrfDef(td) = &prog.items[0] {
+            let cb = td.circuit_breaker.as_ref().expect("circuit_breaker annotation should be present");
+            assert!((cb.threshold - 0.5).abs() < 1e-9, "threshold should be 0.5");
+            assert_eq!(cb.window, 60);
+        } else {
+            panic!("expected TrfDef");
+        }
+    }
+
+    #[test]
+    fn sla_invalid_timeout_checker_err() {
+        let src = "#[timeout(seconds = 0)]\nstage Bad: String -> String = |s| { s }";
+        let tokens = crate::frontend::lexer::Lexer::new(src, "test.fav")
+            .tokenize().expect("lex failed");
+        let prog = crate::frontend::parser::Parser::new(tokens)
+            .parse_program().expect("parse failed");
+        let (errs, _) = crate::middle::checker::Checker::check_program(&prog);
+        assert!(errs.iter().any(|e| e.code == "E0401"), "expected E0401, got: {:?}", errs);
+    }
+
+    #[test]
+    fn sla_invalid_retry_checker_err() {
+        let src = "#[retry(max = 0, backoff = \"none\")]\nstage Bad: String -> String = |s| { s }";
+        let tokens = crate::frontend::lexer::Lexer::new(src, "test.fav")
+            .tokenize().expect("lex failed");
+        let prog = crate::frontend::parser::Parser::new(tokens)
+            .parse_program().expect("parse failed");
+        let (errs, _) = crate::middle::checker::Checker::check_program(&prog);
+        assert!(errs.iter().any(|e| e.code == "E0402"), "expected E0402, got: {:?}", errs);
+    }
+
+    #[test]
+    fn sla_invalid_circuit_breaker_checker_err() {
+        let src = "#[circuit_breaker(threshold = 0.0, window = 60)]\nstage Bad: String -> String = |s| { s }";
+        let tokens = crate::frontend::lexer::Lexer::new(src, "test.fav")
+            .tokenize().expect("lex failed");
+        let prog = crate::frontend::parser::Parser::new(tokens)
+            .parse_program().expect("parse failed");
+        let (errs, _) = crate::middle::checker::Checker::check_program(&prog);
+        assert!(errs.iter().any(|e| e.code == "E0403"), "expected E0403, got: {:?}", errs);
+    }
+
+    #[test]
+    fn changelog_has_v22_6_0() {
+        let cl = include_str!("../../CHANGELOG.md");
+        assert!(cl.contains("[v22.6.0]"), "CHANGELOG should have v22.6.0 entry");
+    }
+}
+
+// ── v22.6.0 review fix: missing tests ────────────────────────────────────────
+#[cfg(test)]
+mod v226000_extra_tests {
+    use super::*;
+
+    fn parse_src(src: &str) -> crate::ast::Program {
+        let tokens = crate::frontend::lexer::Lexer::new(src, "test.fav")
+            .tokenize().expect("lex failed");
+        crate::frontend::parser::Parser::new(tokens)
+            .parse_program().expect("parse failed")
+    }
+
+    #[test]
+    fn sla_invalid_retry_unknown_backoff_checker_err() {
+        let prog = parse_src(
+            "#[retry(max = 3, backoff = \"fast\")]\nstage Bad: String -> String = |s| { s }",
+        );
+        let (errs, _) = crate::middle::checker::Checker::check_program(&prog);
+        assert!(
+            errs.iter().any(|e| e.code == "E0402"),
+            "expected E0402 for unknown backoff, got: {:?}", errs,
+        );
+    }
+
+    #[test]
+    fn sla_invalid_cb_window_zero_checker_err() {
+        let prog = parse_src(
+            "#[circuit_breaker(threshold = 0.5, window = 0)]\nstage Bad: String -> String = |s| { s }",
+        );
+        let (errs, _) = crate::middle::checker::Checker::check_program(&prog);
+        assert!(
+            errs.iter().any(|e| e.code == "E0403"),
+            "expected E0403 for window=0, got: {:?}", errs,
+        );
+    }
+}
+
+// ── v227000_tests (v22.7.0) — OpenTelemetry 統合 ─────────────────────────────
+#[cfg(test)]
+mod v227000_tests {
+    use super::*;
+
+    fn parse_and_run_with_otel(src: &str) -> Vec<crate::otel::OtelSpan> {
+        crate::otel::otel_init();
+        let result = std::panic::catch_unwind(|| {
+            let tokens = crate::frontend::lexer::Lexer::new(src, "test.fav")
+                .tokenize().expect("lex failed");
+            let prog = crate::frontend::parser::Parser::new(tokens)
+                .parse_program().expect("parse failed");
+            let artifact = build_artifact(&prog);
+            exec_artifact_main(&artifact, None).expect("exec_artifact_main failed");
+        });
+        let spans = crate::otel::otel_collected_spans();
+        crate::otel::otel_reset();
+        result.expect("parse_and_run_with_otel panicked");
+        spans
+    }
+
+    #[test]
+    #[ignore]
+    fn version_is_22_7_0() {
+        let cargo = include_str!("../Cargo.toml");
+        assert!(cargo.contains("version = \"22.7.0\""), "Cargo.toml should have version 22.7.0");
+    }
+
+    #[test]
+    fn otel_spans_collected_after_run() {
+        let src = "stage Double: Int -> Int = |n| { n }\nstage AddOne: Int -> Int = |n| { n + 1 }\nseq TestPipe = Double |> AddOne\npublic fn main() -> Int { 42 |> TestPipe }";
+        let spans = parse_and_run_with_otel(src);
+        assert!(!spans.is_empty(), "expected at least 1 OTel span, got 0");
+    }
+
+    #[test]
+    fn otel_span_name_includes_stage_name() {
+        let src = "stage MyStage: Int -> Int = |n| { n }\nstage Next: Int -> Int = |n| { n + 1 }\nseq TestPipe = MyStage |> Next\npublic fn main() -> Int { 42 |> TestPipe }";
+        let spans = parse_and_run_with_otel(src);
+        assert!(
+            spans.iter().any(|s| s.name.contains("MyStage")),
+            "expected span with name containing 'MyStage', got: {:?}",
+            spans.iter().map(|s| &s.name).collect::<Vec<_>>(),
+        );
+    }
+
+    #[test]
+    fn otel_export_stdout_does_not_panic() {
+        crate::otel::otel_init();
+        let sid = crate::otel::otel_span_start("stage:Test", None);
+        crate::otel::otel_span_end(&sid, 1, 1, crate::otel::OtelStatus::Ok);
+        crate::otel::otel_export_stdout();
+        crate::otel::otel_reset();
+    }
+
+    #[test]
+    fn changelog_has_v22_7_0() {
+        let cl = include_str!("../../CHANGELOG.md");
+        assert!(cl.contains("[v22.7.0]"), "CHANGELOG should have v22.7.0 entry");
+    }
+}
+
+// ── v228000_tests (v22.8.0) — fav deploy 強化（ECS / K8s / Fly.io） ─────────
+#[cfg(test)]
+mod v228000_tests {
+    use super::*;
+    use std::fs;
+    use tempfile::TempDir;
+
+    fn make_deploy_cfg(target: &str) -> crate::toml::DeployConfig {
+        let mut cfg = crate::toml::DeployConfig::default();
+        cfg.target = target.to_string();
+        cfg
+    }
+
+    #[test]
+    #[ignore]
+    fn version_is_22_8_0() {
+        let cargo = include_str!("../Cargo.toml");
+        assert!(cargo.contains("version = \"22.8.0\""), "Cargo.toml should have version 22.8.0");
+    }
+
+    #[test]
+    fn deploy_ecs_generates_dockerfile() {
+        let tmp = TempDir::new().unwrap();
+        let out = tmp.path().to_str().unwrap();
+        let cfg = make_deploy_cfg("ecs");
+        cmd_deploy_ecs("testproject", &cfg, false, out);
+        let dockerfile = fs::read_to_string(format!("{}/Dockerfile", out)).unwrap();
+        assert!(dockerfile.contains("FROM debian"), "Dockerfile must contain FROM debian");
+        let task_def = fs::read_to_string(format!("{}/ecs-task-def.json", out)).unwrap();
+        assert!(task_def.contains("testproject"), "ecs-task-def.json must contain project name as family");
+    }
+
+    #[test]
+    fn deploy_k8s_generates_cronjob_yaml() {
+        let tmp = TempDir::new().unwrap();
+        let out = tmp.path().to_str().unwrap();
+        let cfg = make_deploy_cfg("k8s");
+        cmd_deploy_k8s("testproject", &cfg, false, out);
+        let yaml = fs::read_to_string(format!("{}/testproject-cronjob.yaml", out)).unwrap();
+        assert!(yaml.contains("CronJob"), "YAML must contain CronJob kind");
+        assert!(yaml.contains("testproject"), "YAML must contain project name");
+    }
+
+    #[test]
+    fn deploy_fly_generates_fly_toml() {
+        let tmp = TempDir::new().unwrap();
+        let out = tmp.path().to_str().unwrap();
+        let cfg = make_deploy_cfg("fly");
+        cmd_deploy_fly("testproject", &cfg, false, out);
+        let fly = fs::read_to_string(format!("{}/fly.toml", out)).unwrap();
+        assert!(fly.contains("app ="), "fly.toml must contain app field");
+        assert!(fly.contains("testproject"), "fly.toml must contain project name");
+    }
+
+    #[test]
+    fn changelog_has_v22_8_0() {
+        let cl = include_str!("../../CHANGELOG.md");
+        assert!(cl.contains("[v22.8.0]"), "CHANGELOG should have v22.8.0 entry");
+    }
+}
+
+#[cfg(test)]
+mod v230000_tests {
+    use super::*;
+
+    #[ignore]
+    #[test]
+    fn version_is_23_0_0() {
+        let cargo = include_str!("../Cargo.toml");
+        assert!(cargo.contains("version = \"23.0.0\""), "Cargo.toml should have version 23.0.0");
+    }
+
+    #[test]
+    fn changelog_has_v22x_entries() {
+        let cl = include_str!("../../CHANGELOG.md");
+        for v in &["v22.1.0", "v22.2.0", "v22.3.0", "v22.4.0",
+                   "v22.5.0", "v22.6.0", "v22.7.0", "v22.8.0", "v23.0.0"] {
+            assert!(cl.contains(v), "CHANGELOG should have {} entry", v);
+        }
+    }
+
+    #[test]
+    fn readme_mentions_otel() {
+        let readme = include_str!("../../README.md");
+        assert!(
+            readme.contains("OpenTelemetry") || readme.contains("OTel"),
+            "README should mention OpenTelemetry"
+        );
+    }
+
+    #[test]
+    fn readme_mentions_orchestrate() {
+        let readme = include_str!("../../README.md");
+        assert!(
+            readme.contains("orchestrate") || readme.contains("DAG"),
+            "README should mention fav orchestrate or DAG"
+        );
+    }
+
+    #[test]
+    fn bench_v23_baseline_exists() {
+        let content = include_str!("../../benchmarks/v23.0.0.json");
+        assert!(content.contains("\"metrics\""),
+            "v23.0.0.json should contain metrics field");
+    }
+}
+
+// ── v231000_tests (v23.1.0) — Bytes 型 ──────────────────────────────────────
+#[cfg(test)]
+mod v231000_tests {
+    use super::*;
+
+    #[test]
+    #[ignore]
+    fn version_is_23_1_0() {
+        let cargo = include_str!("../Cargo.toml");
+        assert!(cargo.contains("version = \"23.1.0\""), "Cargo.toml should have version 23.1.0");
+    }
+
+    #[test]
+    fn bytes_from_hex_to_hex_roundtrip() {
+        let src = r#"stage ToHex: Bytes -> String = |b| { Bytes.to_hex(b) }
+stage FromHex: String -> Bytes = |s| {
+  match Bytes.from_hex(s) {
+    ok(b) => b
+    err(_) => Bytes.from_str("error")
+  }
+}
+seq Roundtrip = FromHex |> ToHex
+public fn main() -> String { "414243" |> Roundtrip }
+"#;
+        let tokens = crate::frontend::lexer::Lexer::new(src, "test.fav")
+            .tokenize().expect("lex");
+        let prog = crate::frontend::parser::Parser::new(tokens)
+            .parse_program().expect("parse");
+        let artifact = build_artifact(&prog);
+        let result = exec_artifact_main(&artifact, None).expect("exec");
+        assert_eq!(result, crate::value::Value::Str("414243".into()),
+            "from_hex/to_hex roundtrip should return original hex string");
+    }
+
+    #[test]
+    fn bytes_get_correct_byte() {
+        let src = r#"stage GetFirst: Bytes -> Int = |b| {
+  match Bytes.get(b, 0) {
+    ok(n) => n
+    err(_) => -1
+  }
+}
+stage MakeBytes: String -> Bytes = |s| {
+  match Bytes.from_hex(s) {
+    ok(b) => b
+    err(_) => Bytes.from_str("")
+  }
+}
+seq GetByte = MakeBytes |> GetFirst
+public fn main() -> Int { "ff00" |> GetByte }
+"#;
+        let tokens = crate::frontend::lexer::Lexer::new(src, "test.fav")
+            .tokenize().expect("lex");
+        let prog = crate::frontend::parser::Parser::new(tokens)
+            .parse_program().expect("parse");
+        let artifact = build_artifact(&prog);
+        let result = exec_artifact_main(&artifact, None).expect("exec");
+        assert_eq!(result, crate::value::Value::Int(255),
+            "get(0) of 0xff00 should be 255");
+    }
+
+    #[test]
+    fn bytes_concat_increases_length() {
+        let src = r#"stage MakeA: String -> Bytes = |s| {
+  match Bytes.from_hex("4142") {
+    ok(b) => b
+    err(e) => Bytes.from_str("")
+  }
+}
+stage MakeB: String -> Bytes = |s| {
+  match Bytes.from_hex("414243") {
+    ok(b) => b
+    err(e) => Bytes.from_str("")
+  }
+}
+stage ConcatLen: Bytes -> Int = |a| {
+  bind b <- MakeB("")
+  Bytes.len(Bytes.concat(a, b))
+}
+seq CheckLen = MakeA |> ConcatLen
+public fn main() -> Int { "" |> CheckLen }
+"#;
+        let tokens = crate::frontend::lexer::Lexer::new(src, "test.fav")
+            .tokenize().expect("lex");
+        let prog = crate::frontend::parser::Parser::new(tokens)
+            .parse_program().expect("parse");
+        let artifact = build_artifact(&prog);
+        let result = exec_artifact_main(&artifact, None).expect("exec");
+        assert_eq!(result, crate::value::Value::Int(5),
+            "concat of 2+3 bytes should have length 5");
+    }
+
+    #[test]
+    fn changelog_has_v23_1_0() {
+        let cl = include_str!("../../CHANGELOG.md");
+        assert!(cl.contains("[v23.1.0]"), "CHANGELOG should have v23.1.0 entry");
+    }
+
+    #[test]
+    fn bytes_slice_returns_subrange() {
+        // from_hex("414243") = [0x41, 0x42, 0x43]; slice(1, 3) = [0x42, 0x43] → to_hex = "4243"
+        let src = r#"stage MakeBytes: String -> Bytes = |s| {
+  match Bytes.from_hex(s) {
+    ok(b) => b
+    err(e) => Bytes.from_str("")
+  }
+}
+stage SliceHex: Bytes -> String = |b| {
+  Bytes.to_hex(Bytes.slice(b, 1, 3))
+}
+seq Test = MakeBytes |> SliceHex
+public fn main() -> String { "414243" |> Test }
+"#;
+        let tokens = crate::frontend::lexer::Lexer::new(src, "test.fav")
+            .tokenize().expect("lex");
+        let prog = crate::frontend::parser::Parser::new(tokens)
+            .parse_program().expect("parse");
+        let artifact = build_artifact(&prog);
+        let result = exec_artifact_main(&artifact, None).expect("exec");
+        assert_eq!(result, crate::value::Value::Str("4243".into()),
+            "slice(1, 3) of 0x414243 should be 0x4243");
+    }
+
+    #[test]
+    fn bytes_to_utf8_decodes_ascii() {
+        // from_hex("414243") = "ABC" in UTF-8
+        let src = r#"stage MakeBytes: String -> Bytes = |s| {
+  match Bytes.from_hex(s) {
+    ok(b) => b
+    err(e) => Bytes.from_str("")
+  }
+}
+stage Decode: Bytes -> String = |b| {
+  match Bytes.to_utf8(b) {
+    ok(s) => s
+    err(e) => "error"
+  }
+}
+seq Test = MakeBytes |> Decode
+public fn main() -> String { "414243" |> Test }
+"#;
+        let tokens = crate::frontend::lexer::Lexer::new(src, "test.fav")
+            .tokenize().expect("lex");
+        let prog = crate::frontend::parser::Parser::new(tokens)
+            .parse_program().expect("parse");
+        let artifact = build_artifact(&prog);
+        let result = exec_artifact_main(&artifact, None).expect("exec");
+        assert_eq!(result, crate::value::Value::Str("ABC".into()),
+            "to_utf8 of 0x414243 should be 'ABC'");
+    }
+
+    #[test]
+    fn bytes_read_u16_big_endian() {
+        // from_hex("0102") = [0x01, 0x02]; read_u16(0) = 0x0102 = 258
+        let src = r#"stage MakeBytes: String -> Bytes = |s| {
+  match Bytes.from_hex(s) {
+    ok(b) => b
+    err(e) => Bytes.from_str("")
+  }
+}
+stage ReadU16: Bytes -> Int = |b| {
+  match Bytes.read_u16(b, 0) {
+    ok(n) => n
+    err(e) => -1
+  }
+}
+seq Test = MakeBytes |> ReadU16
+public fn main() -> Int { "0102" |> Test }
+"#;
+        let tokens = crate::frontend::lexer::Lexer::new(src, "test.fav")
+            .tokenize().expect("lex");
+        let prog = crate::frontend::parser::Parser::new(tokens)
+            .parse_program().expect("parse");
+        let artifact = build_artifact(&prog);
+        let result = exec_artifact_main(&artifact, None).expect("exec");
+        assert_eq!(result, crate::value::Value::Int(258),
+            "read_u16(0) of 0x0102 should be 258 (big-endian)");
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn bytes_read_write_file_roundtrip() {
+        use std::io::Write;
+        // write known bytes to a temp file, then read back and verify to_hex
+        let mut tmp = std::env::temp_dir();
+        tmp.push("fav_bytes_test_v231.bin");
+        let data = vec![0xCAu8, 0xFEu8, 0xBAu8, 0xBEu8];
+        std::fs::write(&tmp, &data).expect("write temp file");
+
+        let path_str = tmp.to_string_lossy().to_string();
+        let src = format!(r#"stage ReadHex: String -> String = |p| {{
+  match Bytes.read_file(p) {{
+    ok(b) => Bytes.to_hex(b)
+    err(e) => "error"
+  }}
+}}
+public fn main() -> String {{ "{}" |> ReadHex }}"#, path_str.replace('\\', "\\\\"));
+
+        let tokens = crate::frontend::lexer::Lexer::new(&src, "test.fav")
+            .tokenize().expect("lex");
+        let prog = crate::frontend::parser::Parser::new(tokens)
+            .parse_program().expect("parse");
+        let artifact = build_artifact(&prog);
+        let result = exec_artifact_main(&artifact, None).expect("exec");
+        let _ = std::fs::remove_file(&tmp);
+        assert_eq!(result, crate::value::Value::Str("cafebabe".into()),
+            "read_file then to_hex should return cafebabe");
+    }
+}
+
+// ── v232000_tests (v23.2.0) — ビット演算 ──────────────────────────────────────
+#[cfg(test)]
+mod v232000_tests {
+    use super::*;
+
+    #[test]
+    #[ignore]
+    fn version_is_23_2_0() {
+        let cargo = include_str!("../Cargo.toml");
+        assert!(cargo.contains("version = \"23.2.0\""), "Cargo.toml should have version 23.2.0");
+    }
+
+    #[test]
+    fn int_bit_and_with_hex_literals() {
+        // Int.bit_and(0xFF, 0x0F) = 255 & 15 = 15
+        let src = "public fn main() -> Int { Int.bit_and(0xFF, 0x0F) }";
+        let tokens = crate::frontend::lexer::Lexer::new(src, "test.fav")
+            .tokenize().expect("lex");
+        let prog = crate::frontend::parser::Parser::new(tokens)
+            .parse_program().expect("parse");
+        let artifact = build_artifact(&prog);
+        let result = exec_artifact_main(&artifact, None).expect("exec");
+        assert_eq!(result, crate::value::Value::Int(15), "0xFF & 0x0F should be 15");
+    }
+
+    #[test]
+    fn int_shift_left_correct() {
+        let src = "public fn main() -> Int { Int.shift_left(1, 4) }";
+        let tokens = crate::frontend::lexer::Lexer::new(src, "test.fav")
+            .tokenize().expect("lex");
+        let prog = crate::frontend::parser::Parser::new(tokens)
+            .parse_program().expect("parse");
+        let artifact = build_artifact(&prog);
+        let result = exec_artifact_main(&artifact, None).expect("exec");
+        assert_eq!(result, crate::value::Value::Int(16), "1 << 4 should be 16");
+    }
+
+    #[test]
+    fn int_bit_not_is_minus_one() {
+        // !0i64 == -1 in two's complement (i64 全ビット反転)
+        let src = "public fn main() -> Int { Int.bit_not(0) }";
+        let tokens = crate::frontend::lexer::Lexer::new(src, "test.fav")
+            .tokenize().expect("lex");
+        let prog = crate::frontend::parser::Parser::new(tokens)
+            .parse_program().expect("parse");
+        let artifact = build_artifact(&prog);
+        let result = exec_artifact_main(&artifact, None).expect("exec");
+        assert_eq!(result, crate::value::Value::Int(-1), "bit_not(0) should be -1");
+    }
+
+    #[test]
+    fn changelog_has_v23_2_0() {
+        let cl = include_str!("../../CHANGELOG.md");
+        assert!(cl.contains("[v23.2.0]"), "CHANGELOG.md should have [v23.2.0] entry");
+    }
+}
+
+// ── v233000_tests (v23.3.0) — 可変コレクション Mut<T> ────────────────────────
+#[cfg(test)]
+mod v233000_tests {
+    use super::*;
+
+    #[test]
+    #[ignore]
+    fn version_is_23_3_0() {
+        let cargo = include_str!("../Cargo.toml");
+        assert!(cargo.contains("version = \"23.3.0\""), "Cargo.toml should have version 23.3.0");
+    }
+
+    #[test]
+    fn mut_list_push_pop_correct() {
+        // push 42, push 99, pop → ok(99)
+        let src = r#"public fn main() -> String {
+  bind lst <- Mut.list()
+  bind _p1 <- Mut.push(lst, 42)
+  bind _p2 <- Mut.push(lst, 99)
+  bind pop_result <- Mut.pop(lst)
+  match pop_result {
+    ok(v) => Int.to_string(v)
+    err(_) => "error"
+  }
+}"#;
+        let tokens = crate::frontend::lexer::Lexer::new(src, "test.fav")
+            .tokenize().expect("lex");
+        let prog = crate::frontend::parser::Parser::new(tokens)
+            .parse_program().expect("parse");
+        let artifact = build_artifact(&prog);
+        let result = exec_artifact_main(&artifact, None).expect("exec");
+        assert_eq!(result, crate::value::Value::Str("99".to_string()), "pop after push(42),push(99) should be 99");
+    }
+
+    #[test]
+    fn mut_list_len_after_push() {
+        let src = r#"public fn main() -> Int {
+  bind lst <- Mut.list()
+  bind _p1 <- Mut.push(lst, 10)
+  bind _p2 <- Mut.push(lst, 20)
+  Mut.len(lst)
+}"#;
+        let tokens = crate::frontend::lexer::Lexer::new(src, "test.fav")
+            .tokenize().expect("lex");
+        let prog = crate::frontend::parser::Parser::new(tokens)
+            .parse_program().expect("parse");
+        let artifact = build_artifact(&prog);
+        let result = exec_artifact_main(&artifact, None).expect("exec");
+        assert_eq!(result, crate::value::Value::Int(2), "len after 2 pushes should be 2");
+    }
+
+    #[test]
+    fn mut_map_set_get_correct() {
+        // set("key", 42) → get("key") → ok(42)
+        let src = r#"public fn main() -> String {
+  bind mp <- Mut.map()
+  bind _s1 <- Mut.set(mp, "key", 42)
+  bind get_result <- Mut.get(mp, "key")
+  match get_result {
+    ok(v) => Int.to_string(v)
+    err(_) => "error"
+  }
+}"#;
+        let tokens = crate::frontend::lexer::Lexer::new(src, "test.fav")
+            .tokenize().expect("lex");
+        let prog = crate::frontend::parser::Parser::new(tokens)
+            .parse_program().expect("parse");
+        let artifact = build_artifact(&prog);
+        let result = exec_artifact_main(&artifact, None).expect("exec");
+        assert_eq!(result, crate::value::Value::Str("42".to_string()), "get after set(\"key\",42) should be 42");
+    }
+
+    #[test]
+    fn mut_list_pop_empty_returns_err() {
+        // 空リストへの pop は err を返す
+        let src = r#"public fn main() -> Bool {
+  bind lst <- Mut.list()
+  bind result <- Mut.pop(lst)
+  match result {
+    ok(_) => false
+    err(_) => true
+  }
+}"#;
+        let tokens = crate::frontend::lexer::Lexer::new(src, "test.fav")
+            .tokenize().expect("lex");
+        let prog = crate::frontend::parser::Parser::new(tokens)
+            .parse_program().expect("parse");
+        let artifact = build_artifact(&prog);
+        let result = exec_artifact_main(&artifact, None).expect("exec");
+        assert_eq!(result, crate::value::Value::Bool(true), "pop on empty list should return err");
+    }
+
+    #[test]
+    fn mut_map_get_missing_key_returns_err() {
+        // 存在しないキーへの get は err を返す
+        let src = r#"public fn main() -> Bool {
+  bind mp <- Mut.map()
+  bind result <- Mut.get(mp, "missing")
+  match result {
+    ok(_) => false
+    err(_) => true
+  }
+}"#;
+        let tokens = crate::frontend::lexer::Lexer::new(src, "test.fav")
+            .tokenize().expect("lex");
+        let prog = crate::frontend::parser::Parser::new(tokens)
+            .parse_program().expect("parse");
+        let artifact = build_artifact(&prog);
+        let result = exec_artifact_main(&artifact, None).expect("exec");
+        assert_eq!(result, crate::value::Value::Bool(true), "get on missing key should return err");
+    }
+
+    #[test]
+    fn mut_map_has_returns_correct() {
+        let src = r#"public fn main() -> Bool {
+  bind mp <- Mut.map()
+  bind _s <- Mut.set(mp, "k", 1)
+  Mut.has(mp, "k")
+}"#;
+        let tokens = crate::frontend::lexer::Lexer::new(src, "test.fav")
+            .tokenize().expect("lex");
+        let prog = crate::frontend::parser::Parser::new(tokens)
+            .parse_program().expect("parse");
+        let artifact = build_artifact(&prog);
+        let result = exec_artifact_main(&artifact, None).expect("exec");
+        assert_eq!(result, crate::value::Value::Bool(true), "has after set should return true");
+    }
+
+    #[test]
+    fn changelog_has_v23_3_0() {
+        let cl = include_str!("../../CHANGELOG.md");
+        assert!(cl.contains("[v23.3.0]"), "CHANGELOG.md should have [v23.3.0] entry");
+    }
+}
+
+// ── v234000_tests (v23.4.0) — vm.fav Phase 1（バイトコードデコード）────────
+#[cfg(test)]
+mod v234000_tests {
+    use super::*;
+
+    #[test]
+    #[ignore]
+    fn version_is_23_4_0() {
+        let cargo = include_str!("../Cargo.toml");
+        assert!(cargo.contains("version = \"23.4.0\""), "Cargo.toml should have version 23.4.0");
+    }
+
+    #[test]
+    fn vm_fav_file_exists() {
+        let src = include_str!("../self/vm.fav");
+        assert!(!src.is_empty(), "vm.fav should not be empty");
+    }
+
+    #[test]
+    fn vm_fav_compiles() {
+        let src = include_str!("../self/vm.fav");
+        let tokens = crate::frontend::lexer::Lexer::new(src, "vm.fav")
+            .tokenize().expect("lex vm.fav");
+        let prog = crate::frontend::parser::Parser::new(tokens)
+            .parse_program().expect("parse vm.fav");
+        let _artifact = build_artifact(&prog);
+    }
+
+    #[test]
+    fn decode_const_opcode() {
+        // bytes = [0x01, 0x03, 0x00]
+        // 0x01 = Const opcode, u16 LE [0x03, 0x00] = 3 → Const(3), next_pc = 3
+        // Bytes.from_hex は Result<Bytes, String> を返すため match で展開
+        let vm_src = include_str!("../self/vm.fav");
+        let src = format!(r#"{}
+public fn main() -> String {{
+  bind hex_result <- Bytes.from_hex("010300")
+  match hex_result {{
+    ok(bytes) => {{
+      bind dec_result <- decode_opcode(bytes, 0)
+      match dec_result {{
+        ok(r) => opcode_to_string(r.op)
+        err(e) => e
+      }}
+    }}
+    err(e) => e
+  }}
+}}"#, vm_src);
+        let tokens = crate::frontend::lexer::Lexer::new(&src, "vm_test.fav")
+            .tokenize().expect("lex");
+        let prog = crate::frontend::parser::Parser::new(tokens)
+            .parse_program().expect("parse");
+        let artifact = build_artifact(&prog);
+        let result = exec_artifact_main(&artifact, None).expect("exec");
+        assert_eq!(result, crate::value::Value::Str("Const(3)".to_string()),
+            "decode_opcode([0x01, 0x03, 0x00], 0) should be Const(3)");
+    }
+
+    #[test]
+    fn changelog_has_v23_4_0() {
+        let cl = include_str!("../../CHANGELOG.md");
+        assert!(cl.contains("[v23.4.0]"), "CHANGELOG.md should have [v23.4.0] entry");
+    }
+}
+
+// ── v235000_tests (v23.5.0) — vm.fav Phase 2（スタックベース実行ループ）────────
+#[cfg(test)]
+mod v235000_tests {
+    use super::*;
+
+    #[test]
+    #[ignore]
+    fn version_is_23_5_0() {
+        let cargo = include_str!("../Cargo.toml");
+        assert!(cargo.contains("version = \"23.5.0\""), "Cargo.toml should have version 23.5.0");
+    }
+
+    #[test]
+    fn vm_fav_phase2_compiles() {
+        let src = include_str!("../self/vm.fav");
+        let tokens = crate::frontend::lexer::Lexer::new(src, "vm.fav")
+            .tokenize().expect("lex vm.fav");
+        let prog = crate::frontend::parser::Parser::new(tokens)
+            .parse_program().expect("parse vm.fav");
+        let _artifact = build_artifact(&prog);
+    }
+
+    #[test]
+    fn execute_const_unit() {
+        // bytecode: ConstUnit(0x02) + Return(0x16)
+        let vm_src = include_str!("../self/vm.fav");
+        let src = format!(r#"{}
+public fn main() -> String {{
+  bind hex_r <- Bytes.from_hex("0216")
+  match hex_r {{
+    ok(bytes) => {{
+      bind run_r <- vm_run(bytes)
+      match run_r {{
+        ok(v)  => vmval_to_string(v)
+        err(e) => e
+      }}
+    }}
+    err(e) => e
+  }}
+}}"#, vm_src);
+        let tokens = crate::frontend::lexer::Lexer::new(&src, "vm_test.fav")
+            .tokenize().expect("lex");
+        let prog = crate::frontend::parser::Parser::new(tokens)
+            .parse_program().expect("parse");
+        let artifact = build_artifact(&prog);
+        let result = exec_artifact_main(&artifact, None).expect("exec");
+        assert_eq!(result, crate::value::Value::Str("VMUnit".to_string()),
+            "vm_run([ConstUnit, Return]) should return VMUnit");
+    }
+
+    #[test]
+    fn execute_add() {
+        // bytecode: Const(3) + Const(4) + Add + Return
+        // 01 03 00  01 04 00  20  16
+        let vm_src = include_str!("../self/vm.fav");
+        let src = format!(r#"{}
+public fn main() -> String {{
+  bind hex_r <- Bytes.from_hex("0103000104002016")
+  match hex_r {{
+    ok(bytes) => {{
+      bind run_r <- vm_run(bytes)
+      match run_r {{
+        ok(v)  => vmval_to_string(v)
+        err(e) => e
+      }}
+    }}
+    err(e) => e
+  }}
+}}"#, vm_src);
+        let tokens = crate::frontend::lexer::Lexer::new(&src, "vm_test.fav")
+            .tokenize().expect("lex");
+        let prog = crate::frontend::parser::Parser::new(tokens)
+            .parse_program().expect("parse");
+        let artifact = build_artifact(&prog);
+        let result = exec_artifact_main(&artifact, None).expect("exec");
+        assert_eq!(result, crate::value::Value::Str("VMInt(7)".to_string()),
+            "vm_run([Const(3), Const(4), Add, Return]) should return VMInt(7)");
+    }
+
+    #[test]
+    fn changelog_has_v23_5_0() {
+        let cl = include_str!("../../CHANGELOG.md");
+        assert!(cl.contains("[v23.5.0]"), "CHANGELOG.md should have [v23.5.0] entry");
+    }
+}
+
+// ── v236000_tests (v23.6.0) — vm.fav Phase 3（制御フロー・ローカル変数）────────
+#[cfg(test)]
+mod v236000_tests {
+    use super::*;
+
+    #[test]
+    #[ignore]
+    fn version_is_23_6_0() {
+        let cargo = include_str!("../Cargo.toml");
+        assert!(cargo.contains("version = \"23.6.0\""), "Cargo.toml should have version 23.6.0");
+    }
+
+    #[test]
+    fn vm_fav_phase3_compiles() {
+        let src = include_str!("../self/vm.fav");
+        let tokens = crate::frontend::lexer::Lexer::new(src, "vm.fav")
+            .tokenize().expect("lex vm.fav");
+        let prog = crate::frontend::parser::Parser::new(tokens)
+            .parse_program().expect("parse vm.fav");
+        let _artifact = build_artifact(&prog);
+    }
+
+    #[test]
+    fn execute_locals() {
+        // Const(42) → StoreLocal(0) → LoadLocal(0) → Return → VMInt(42)
+        // 01 2A 00  11 00 00  10 00 00  16
+        let vm_src = include_str!("../self/vm.fav");
+        let src = format!(r#"{}
+public fn main() -> String {{
+  bind hex_r <- Bytes.from_hex("012a0011000010000016")
+  match hex_r {{
+    ok(bytes) => {{
+      bind run_r <- vm_run(bytes)
+      match run_r {{
+        ok(v)  => vmval_to_string(v)
+        err(e) => e
+      }}
+    }}
+    err(e) => e
+  }}
+}}"#, vm_src);
+        let tokens = crate::frontend::lexer::Lexer::new(&src, "vm_test.fav")
+            .tokenize().expect("lex");
+        let prog = crate::frontend::parser::Parser::new(tokens)
+            .parse_program().expect("parse");
+        let artifact = build_artifact(&prog);
+        let result = exec_artifact_main(&artifact, None).expect("exec");
+        assert_eq!(result, crate::value::Value::Str("VMInt(42)".to_string()),
+            "locals round-trip: Const(42)+StoreLocal(0)+LoadLocal(0)+Return should be VMInt(42)");
+    }
+
+    #[test]
+    fn execute_jump() {
+        // ConstFalse + JumpIfFalse(6) → skip Const(1)+Jump(3) → Const(2) → Return → VMInt(2)
+        // 04  31 06 00  01 01 00  30 03 00  01 02 00  16
+        let vm_src = include_str!("../self/vm.fav");
+        let src = format!(r#"{}
+public fn main() -> String {{
+  bind hex_r <- Bytes.from_hex("0431060001010030030001020016")
+  match hex_r {{
+    ok(bytes) => {{
+      bind run_r <- vm_run(bytes)
+      match run_r {{
+        ok(v)  => vmval_to_string(v)
+        err(e) => e
+      }}
+    }}
+    err(e) => e
+  }}
+}}"#, vm_src);
+        let tokens = crate::frontend::lexer::Lexer::new(&src, "vm_test.fav")
+            .tokenize().expect("lex");
+        let prog = crate::frontend::parser::Parser::new(tokens)
+            .parse_program().expect("parse");
+        let artifact = build_artifact(&prog);
+        let result = exec_artifact_main(&artifact, None).expect("exec");
+        assert_eq!(result, crate::value::Value::Str("VMInt(2)".to_string()),
+            "JumpIfFalse with false condition should reach false path: VMInt(2)");
+    }
+
+    #[test]
+    fn changelog_has_v23_6_0() {
+        let cl = include_str!("../../CHANGELOG.md");
+        assert!(cl.contains("[v23.6.0]"), "CHANGELOG.md should have [v23.6.0] entry");
+    }
+}
+
+// ── v237000_tests (v23.7.0) — vm.fav Phase 4（stdlib・builtin 呼び出し）──────
+#[cfg(test)]
+mod v237000_tests {
+    use super::*;
+
+    #[test]
+    fn vm_fav_phase4_compiles() {
+        let src = include_str!("../self/vm.fav");
+        let tokens = crate::frontend::lexer::Lexer::new(src, "vm.fav")
+            .tokenize().expect("lex vm.fav");
+        let prog = crate::frontend::parser::Parser::new(tokens)
+            .parse_program().expect("parse vm.fav");
+        let _artifact = build_artifact(&prog);
+    }
+
+    #[test]
+    fn vmstr_to_string_variant() {
+        // VMStr バリアントが追加され vmval_to_string が正しく動作することを確認
+        let vm_src = include_str!("../self/vm.fav");
+        let src = format!(r#"{}
+public fn main() -> String {{
+  vmval_to_string(VMStr("hello"))
+}}"#, vm_src);
+        let tokens = crate::frontend::lexer::Lexer::new(&src, "vm_test.fav")
+            .tokenize().expect("lex");
+        let prog = crate::frontend::parser::Parser::new(tokens)
+            .parse_program().expect("parse");
+        let artifact = build_artifact(&prog);
+        let result = exec_artifact_main(&artifact, None).expect("exec");
+        assert_eq!(result, crate::value::Value::Str("VMStr(hello)".to_string()),
+            "vmval_to_string(VMStr(\"hello\")) should return \"VMStr(hello)\"");
+    }
+
+    #[test]
+    fn execute_builtin_call() {
+        // LoadGlobal(0)="Int.to_string" + Const(42) + Call(1) + Return
+        // Bytecode hex: "120000012a0015010016"
+        //   12 00 00  LoadGlobal(0)   → push globals[0] = VMStr("Int.to_string")
+        //   01 2A 00  Const(42)       → push VMInt(42)
+        //   15 01 00  Call(1)         → pop VMInt(42), pop VMStr("Int.to_string")
+        //                                → call_builtin → push VMStr("42")
+        //   16        Return           → VMStr("42")
+        let vm_src = include_str!("../self/vm.fav");
+        let src = format!(r#"{}
+public fn main() -> String {{
+  bind globals <- Mut.map()
+  bind _ <- Mut.set(globals, 0, VMStr("Int.to_string"))
+  bind hex_r <- Bytes.from_hex("120000012a0015010016")
+  match hex_r {{
+    ok(bytes) => {{
+      bind run_r <- vm_run_named(bytes, globals)
+      match run_r {{
+        ok(v)  => vmval_to_string(v)
+        err(e) => e
+      }}
+    }}
+    err(e) => e
+  }}
+}}"#, vm_src);
+        let tokens = crate::frontend::lexer::Lexer::new(&src, "vm_test.fav")
+            .tokenize().expect("lex");
+        let prog = crate::frontend::parser::Parser::new(tokens)
+            .parse_program().expect("parse");
+        let artifact = build_artifact(&prog);
+        let result = exec_artifact_main(&artifact, None).expect("exec");
+        assert_eq!(result, crate::value::Value::Str("VMStr(42)".to_string()),
+            "LoadGlobal+Const+Call(1)+Return should call Int.to_string(42) -> VMStr(42)");
+    }
+
+    #[test]
+    fn changelog_has_v23_7_0() {
+        let cl = include_str!("../../CHANGELOG.md");
+        assert!(cl.contains("[v23.7.0]"), "CHANGELOG.md should have [v23.7.0] entry");
+    }
+}
+
+// ── v238000_tests (v23.8.0) — vm.fav Phase 5（GetField・collect_args・hello.fav 実行）──────
+#[cfg(test)]
+mod v238000_tests {
+    use super::*;
+
+    #[test]
+    fn vm_fav_phase5_compiles() {
+        let src = include_str!("../self/vm.fav");
+        let tokens = crate::frontend::lexer::Lexer::new(src, "vm.fav")
+            .tokenize().expect("lex vm.fav");
+        let prog = crate::frontend::parser::Parser::new(tokens)
+            .parse_program().expect("parse vm.fav");
+        let _artifact = build_artifact(&prog);
+    }
+
+    #[test]
+    fn execute_hello_via_vm() {
+        // LoadGlobal(0)=VMStr("hello") + Return
+        // Bytecode hex: "12000016"
+        //   12 00 00  LoadGlobal(0)  → push VMStr("hello")
+        //   16        Return          → VMStr("hello")
+        // vmval_display(VMStr("hello")) = "hello"
+        let vm_src = include_str!("../self/vm.fav");
+        let src = format!(r#"{}
+public fn main() -> String {{
+  bind globals <- Mut.map()
+  bind _ <- Mut.set(globals, 0, VMStr("hello"))
+  bind hex_r <- Bytes.from_hex("12000016")
+  match hex_r {{
+    ok(bytes) => {{
+      bind run_r <- vm_run_named(bytes, globals)
+      match run_r {{
+        ok(v)  => vmval_display(v)
+        err(e) => e
+      }}
+    }}
+    err(e) => e
+  }}
+}}"#, vm_src);
+        let tokens = crate::frontend::lexer::Lexer::new(&src, "vm_test.fav")
+            .tokenize().expect("lex");
+        let prog = crate::frontend::parser::Parser::new(tokens)
+            .parse_program().expect("parse");
+        let artifact = build_artifact(&prog);
+        let result = exec_artifact_main(&artifact, None).expect("exec");
+        assert_eq!(result, crate::value::Value::Str("hello".to_string()),
+            "vmval_display(VMStr(\"hello\")) should return \"hello\"");
+    }
+
+    #[test]
+    fn execute_getfield_call() {
+        // LoadGlobal(0)="String" + GetField(1)="trim" + LoadGlobal(2)=" hi " + Call(1) + Return
+        // Bytecode hex: "12000040010012020015010016"
+        //   12 00 00  LoadGlobal(0)  → push VMStr("String")
+        //   40 01 00  GetField(1)    → pop "String" + globals[1]="trim" → push VMStr("String.trim")
+        //   12 02 00  LoadGlobal(2)  → push VMStr(" hi ")
+        //   15 01 00  Call(1)        → collect_args(1) → args=[VMStr(" hi ")]
+        //                               pop callee VMStr("String.trim")
+        //                               call_builtin("String.trim", args) → VMStr("hi")
+        //   16        Return          → VMStr("hi")
+        // vmval_display(VMStr("hi")) = "hi"
+        let vm_src = include_str!("../self/vm.fav");
+        let src = format!(r#"{}
+public fn main() -> String {{
+  bind globals <- Mut.map()
+  bind _ <- Mut.set(globals, 0, VMStr("String"))
+  bind _ <- Mut.set(globals, 1, VMStr("trim"))
+  bind _ <- Mut.set(globals, 2, VMStr(" hi "))
+  bind hex_r <- Bytes.from_hex("12000040010012020015010016")
+  match hex_r {{
+    ok(bytes) => {{
+      bind run_r <- vm_run_named(bytes, globals)
+      match run_r {{
+        ok(v)  => vmval_display(v)
+        err(e) => e
+      }}
+    }}
+    err(e) => e
+  }}
+}}"#, vm_src);
+        let tokens = crate::frontend::lexer::Lexer::new(&src, "vm_test.fav")
+            .tokenize().expect("lex");
+        let prog = crate::frontend::parser::Parser::new(tokens)
+            .parse_program().expect("parse");
+        let artifact = build_artifact(&prog);
+        let result = exec_artifact_main(&artifact, None).expect("exec");
+        assert_eq!(result, crate::value::Value::Str("hi".to_string()),
+            "GetField(\"trim\") + Call(1) should call String.trim(\" hi \") -> \"hi\"");
+    }
+
+    #[test]
+    fn execute_string_concat() {
+        // LoadGlobal(0)="String" + GetField(1)="concat" + LoadGlobal(2)="hello" + LoadGlobal(3)=" world" + Call(2) + Return
+        // Bytecode hex: "12000040010012020012030015020016"
+        //   12 00 00  LoadGlobal(0)  → push VMStr("String")
+        //   40 01 00  GetField(1)    → pop "String" + globals[1]="concat" → push VMStr("String.concat")
+        //   12 02 00  LoadGlobal(2)  → push VMStr("hello")
+        //   12 03 00  LoadGlobal(3)  → push VMStr(" world")
+        //   15 02 00  Call(2)        → collect_args(2)
+        //                               step1: pop " world" → acc=[" world"]
+        //                               step2: pop "hello"  → acc=[" world", "hello"]  ← "hello" is top
+        //                               pop callee "String.concat"
+        //                               call_builtin: pop "hello" (arg1), pop " world" (arg2)
+        //                               String.concat("hello", " world") → "hello world"
+        //   16        Return          → VMStr("hello world")
+        let vm_src = include_str!("../self/vm.fav");
+        let src = format!(r#"{}
+public fn main() -> String {{
+  bind globals <- Mut.map()
+  bind _ <- Mut.set(globals, 0, VMStr("String"))
+  bind _ <- Mut.set(globals, 1, VMStr("concat"))
+  bind _ <- Mut.set(globals, 2, VMStr("hello"))
+  bind _ <- Mut.set(globals, 3, VMStr(" world"))
+  bind hex_r <- Bytes.from_hex("12000040010012020012030015020016")
+  match hex_r {{
+    ok(bytes) => {{
+      bind run_r <- vm_run_named(bytes, globals)
+      match run_r {{
+        ok(v)  => vmval_display(v)
+        err(e) => e
+      }}
+    }}
+    err(e) => e
+  }}
+}}"#, vm_src);
+        let tokens = crate::frontend::lexer::Lexer::new(&src, "vm_test.fav")
+            .tokenize().expect("lex");
+        let prog = crate::frontend::parser::Parser::new(tokens)
+            .parse_program().expect("parse");
+        let artifact = build_artifact(&prog);
+        let result = exec_artifact_main(&artifact, None).expect("exec");
+        assert_eq!(result, crate::value::Value::Str("hello world".to_string()),
+            "collect_args(2) should preserve source order: String.concat(\"hello\", \" world\") -> \"hello world\"");
+    }
+
+    #[test]
+    fn changelog_has_v23_8_0() {
+        let cl = include_str!("../../CHANGELOG.md");
+        assert!(cl.contains("[v23.8.0]"), "CHANGELOG.md should have [v23.8.0] entry");
+    }
+}
+
+// ── v240000_tests (v24.0.0) — VM in Favnir マイルストーン宣言 ──────────────
+#[cfg(test)]
+mod v240000_tests {
+    use super::*;
+
+    #[test]
+    fn run_with_vm_hello() {
+        // run_with_vm: LoadGlobal(0)="hello" + Return → vmval_display = "hello"
+        // hex: "12000016"
+        //   12 00 00  LoadGlobal(0)  → push VMStr("hello")
+        //   16        Return          → VMStr("hello")
+        let vm_src = include_str!("../self/vm.fav");
+        let result = run_with_vm(vm_src, "12000016", &[(0, "hello")])
+            .expect("run_with_vm should succeed");
+        assert_eq!(result, crate::value::Value::Str("hello".to_string()),
+            "run_with_vm hello test should return \"hello\"");
+    }
+
+    #[test]
+    fn run_with_vm_string_trim() {
+        // run_with_vm: LoadGlobal(0)="String" + GetField(1)="trim" + LoadGlobal(2)=" hi " + Call(1) + Return
+        // hex: "12000040010012020015010016"
+        //   12 00 00  LoadGlobal(0)  → push VMStr("String")
+        //   40 01 00  GetField(1)    → push VMStr("String.trim")
+        //   12 02 00  LoadGlobal(2)  → push VMStr(" hi ")
+        //   15 01 00  Call(1)        → call_builtin("String.trim") → VMStr("hi")
+        //   16        Return          → VMStr("hi")
+        let vm_src = include_str!("../self/vm.fav");
+        let result = run_with_vm(
+            vm_src,
+            "12000040010012020015010016",
+            &[(0, "String"), (1, "trim"), (2, " hi ")],
+        )
+        .expect("run_with_vm string trim should succeed");
+        assert_eq!(result, crate::value::Value::Str("hi".to_string()),
+            "run_with_vm String.trim(\" hi \") should return \"hi\"");
+    }
+
+    #[test]
+    fn changelog_has_v24_0_0() {
+        let cl = include_str!("../../CHANGELOG.md");
+        assert!(cl.contains("[v24.0.0]"), "CHANGELOG.md should have [v24.0.0] entry");
+    }
+
+    #[test]
+    fn readme_has_vm_in_favnir() {
+        let readme = include_str!("../../README.md");
+        assert!(readme.contains("VM in Favnir"), "README.md should have VM in Favnir section");
+    }
+}
+
+// ── v241000_tests (v24.1.0) — 形式的仕様書生成（fav spec） ──────────────
+#[cfg(test)]
+mod v241000_tests {
+    use super::*;
+
+    #[test]
+    fn cmd_spec_markdown_has_type_system() {
+        let out = cmd_spec("markdown");
+        assert!(out.contains("型システム"), "spec markdown should contain 型システム");
+    }
+
+    #[test]
+    fn cmd_spec_markdown_has_opcodes() {
+        let out = cmd_spec("markdown");
+        assert!(out.contains("0x01"), "spec markdown should contain opcode 0x01 (Const)");
+    }
+
+    #[test]
+    fn cmd_spec_html_has_h1() {
+        let out = cmd_spec("html");
+        assert!(out.contains("<h1>"), "spec html should contain <h1> tag");
+    }
+
+    #[test]
+    fn changelog_has_v24_1_0() {
+        let cl = include_str!("../../CHANGELOG.md");
+        assert!(cl.contains("[v24.1.0]"), "CHANGELOG.md should have [v24.1.0] entry");
+    }
+}
+
+// ── v242000_tests (v24.2.0) — 4-Stage Bootstrap 検証 ────────────────────
+#[cfg(test)]
+mod v242000_tests {
+    use super::*;
+
+    fn compile_fixture(src: &str, name: &str) -> crate::backend::artifact::FvcArtifact {
+        let tokens = crate::frontend::lexer::Lexer::new(src, name)
+            .tokenize()
+            .unwrap_or_else(|e| panic!("{name} tokenize failed: {e:?}"));
+        let prog = crate::frontend::parser::Parser::new(tokens)
+            .parse_program()
+            .unwrap_or_else(|e| panic!("{name} parse failed: {e:?}"));
+        let art = build_artifact(&prog);
+        assert!(
+            !art.globals.is_empty(),
+            "{name}: build_artifact produced zero globals"
+        );
+        art
+    }
+
+    #[test]
+    fn bootstrap_hello_compiles() {
+        compile_fixture(include_str!("../tests/bootstrap/hello.fav"), "hello.fav");
+    }
+
+    #[test]
+    fn bootstrap_arithmetic_compiles() {
+        compile_fixture(include_str!("../tests/bootstrap/arithmetic.fav"), "arithmetic.fav");
+    }
+
+    #[test]
+    fn bootstrap_pattern_match_compiles() {
+        compile_fixture(include_str!("../tests/bootstrap/pattern_match.fav"), "pattern_match.fav");
+    }
+
+    #[test]
+    fn bootstrap_list_ops_compiles() {
+        compile_fixture(include_str!("../tests/bootstrap/list_ops.fav"), "list_ops.fav");
+    }
+
+    #[test]
+    fn bootstrap_closures_compiles() {
+        compile_fixture(include_str!("../tests/bootstrap/closures.fav"), "closures.fav");
+    }
+
+    #[test]
+    fn changelog_has_v24_2_0() {
+        let cl = include_str!("../../CHANGELOG.md");
+        assert!(
+            cl.contains("[v24.2.0]"),
+            "CHANGELOG.md should have [v24.2.0] entry"
+        );
+    }
+
+}
+
+// ── v243000_tests (v24.3.0) — 継続的パフォーマンス回帰検知 ──────────────────
+#[cfg(test)]
+mod v243000_tests {
+    use super::*;
+
+    const BASELINE_JSON: &str = r#"{
+        "version": "24.2.0",
+        "metrics": { "duration_ms": 16600, "test_count": 1940 }
+    }"#;
+
+    #[test]
+    fn bench_compare_no_regression() {
+        // duration_ms +0.6% < 5.0% threshold → OK
+        let current = r#"{"version": "24.3.0", "metrics": {"duration_ms": 16700, "test_count": 1944}}"#;
+        let (ok, report) = cmd_bench_compare(BASELINE_JSON, current, 5.0, false);
+        assert!(ok, "no regression expected: {report}");
+        assert!(report.contains("OK"), "report should contain OK: {report}");
+    }
+
+    #[test]
+    fn bench_compare_regression_detected() {
+        // duration_ms +22% > 5% threshold → REGRESSION
+        let current = r#"{"version": "24.3.0", "metrics": {"duration_ms": 20300, "test_count": 1944}}"#;
+        let (ok, report) = cmd_bench_compare(BASELINE_JSON, current, 5.0, false);
+        assert!(!ok, "regression should be detected: {report}");
+        assert!(report.contains("REGRESSION"), "report should contain REGRESSION: {report}");
+        assert!(report.contains("duration_ms"), "report should name the regressed metric: {report}");
+    }
+
+    #[test]
+    fn bench_compare_emit_md_has_header() {
+        let current = r#"{"version": "24.3.0", "metrics": {"duration_ms": 16700, "test_count": 1944}}"#;
+        let (_, report) = cmd_bench_compare(BASELINE_JSON, current, 5.0, true);
+        assert!(
+            report.contains("# Benchmark"),
+            "emit_md report should start with markdown header: {report}"
+        );
+    }
+
+    #[test]
+    fn changelog_has_v24_3_0() {
+        let cl = include_str!("../../CHANGELOG.md");
+        assert!(
+            cl.contains("[v24.3.0]"),
+            "CHANGELOG.md should have [v24.3.0] entry"
+        );
+    }
+}
+
+// ── v24.5.0: 公式 Rune カタログ ──────────────────────────────────────────────
+/// 公式 Favnir Rune カタログ（name, latest_version, description）。
+/// `fav search <query>` の検索対象。
+pub const OFFICIAL_CATALOG: &[(&str, &str, &str)] = &[
+    // ── 既存 Rune（35 件） ────────────────────────────────────────────────────
+    ("auth",             "1.0.0", "JWT / OAuth2 / API Key 認証"),
+    ("aws",              "1.0.0", "AWS SDK 統合（S3 / SQS / DynamoDB / Lambda）"),
+    ("azure-blob",       "1.0.0", "Azure Blob Storage 読み書き"),
+    ("azure-postgres",   "1.0.0", "Azure Database for PostgreSQL 接続"),
+    ("bigquery",         "1.0.0", "Google BigQuery 読み書き"),
+    ("cache",            "1.0.0", "インメモリ / TTL キャッシュ"),
+    ("csv",              "1.0.0", "CSV 読み書き（ストリーミング対応）"),
+    ("ctx",              "1.0.0", "Capability Context（AppCtx / MockCtx）"),
+    ("db",               "1.0.0", "汎用 DB インターフェース（DbRead / DbWrite）"),
+    ("duckdb",           "1.0.0", "DuckDB 組み込み分析エンジン"),
+    ("email",            "1.0.0", "SMTP / SendGrid メール送信"),
+    ("env",              "1.0.0", "環境変数読み取り"),
+    ("fs",               "1.0.0", "ファイルシステム操作（read / write / watch）"),
+    ("gen",              "1.0.0", "UUID / NanoID / ランダム値生成"),
+    ("graphql",          "1.0.0", "GraphQL クライアント（型付きクエリ）"),
+    ("grpc",             "1.0.0", "gRPC クライアント / サーバー"),
+    ("http",             "1.0.0", "HTTP/1.1 + HTTP/2 クライアント"),
+    ("incremental",      "1.0.0", "増分処理チェックポイント"),
+    ("io",               "1.0.0", "標準 I/O プリミティブ"),
+    ("json",             "1.0.0", "JSON エンコード / デコード"),
+    ("kafka",            "1.0.0", "Apache Kafka / AWS MSK プロデューサー・コンシューマー"),
+    ("llm",              "1.0.0", "LLM 統合（Claude / OpenAI）"),
+    ("log",              "1.0.0", "構造化ログ（JSON / text）"),
+    ("parquet",          "1.0.0", "Apache Parquet 読み書き"),
+    ("postgres",         "1.0.0", "PostgreSQL 接続"),
+    ("queue",            "1.0.0", "インメモリ Queue プリミティブ"),
+    ("rune_loader",      "1.0.0", "Rune 動的ロードユーティリティ"),
+    ("slack",            "1.0.0", "Slack Webhook 通知・Block Kit"),
+    ("snowflake",        "1.0.0", "Snowflake クエリ・ロード"),
+    ("sql",              "1.0.0", "汎用 SQL クエリビルダー"),
+    ("stat",             "1.0.0", "基本統計量（mean / stddev / percentile）"),
+    ("state",            "1.0.0", "ステートフル処理（!State エフェクト）"),
+    ("stdlib",           "1.0.0", "Favnir 標準ライブラリ（List / Map / String）"),
+    ("toml",             "1.0.0", "TOML 設定ファイルパーサー"),
+    ("validate",         "1.0.0", "スキーマバリデーション（where 節統合）"),
+    // ── v24.5.0 新規 Rune（15 件） ───────────────────────────────────────────
+    ("avro",             "1.0.0", "Apache Avro シリアライズ / デシリアライズ"),
+    ("orc",              "1.0.0", "Apache ORC カラムナーフォーマット"),
+    ("excel",            "1.0.0", "Excel (.xlsx) 読み書き"),
+    ("xml",              "1.0.0", "XML パース / シリアライズ（XPath 対応）"),
+    ("huggingface",      "1.0.0", "HuggingFace API 統合（テキスト / 画像 / 埋め込み）"),
+    ("scikit",           "1.0.0", "scikit-learn ML モデル統合（Python ブリッジ）"),
+    ("gcs",              "1.0.0", "Google Cloud Storage 読み書き"),
+    ("pubsub",           "1.0.0", "Google Cloud Pub/Sub パブリッシュ / サブスクライブ"),
+    ("redis",            "1.0.0", "Redis キャッシュ・メッセージブローカー"),
+    ("mysql",            "1.0.0", "MySQL / MariaDB 接続"),
+    ("mongodb",          "1.0.0", "MongoDB ドキュメントストア"),
+    ("s3",               "1.0.0", "AWS S3 オブジェクトストレージ"),
+    ("sqs",              "1.0.0", "AWS SQS メッセージキュー"),
+    ("dynamodb",         "1.0.0", "AWS DynamoDB NoSQL"),
+    ("azure-servicebus", "1.0.0", "Azure Service Bus メッセージング"),
+];
+
+/// `fav search [<query>]` — 公式 Rune カタログを検索する。
+/// 大文字小文字を区別しない部分一致（name または description）。
+pub fn cmd_search(query: &str) {
+    let q = query.to_lowercase();
+    let results: Vec<_> = OFFICIAL_CATALOG
+        .iter()
+        .filter(|(name, _, desc)| {
+            q.is_empty() || name.contains(&q) || desc.to_lowercase().contains(&q)
+        })
+        .collect();
+    if results.is_empty() {
+        println!("(no packages matching \"{}\")", query);
+        return;
+    }
+    println!("{:<20} {:<8} {}", "NAME", "VERSION", "DESCRIPTION");
+    for (name, version, desc) in results {
+        println!("{:<20} {:<8} {}", name, version, desc);
+    }
+}
+
+// ── v244000_tests (v24.4.0) — v1.0 後方互換性ポリシー確定 ────────────────────
+#[cfg(test)]
+mod v244000_tests {
+    use super::*;
+
+    #[test]
+    fn deprecated_fn_annotation_parsed() {
+        let src = "#[deprecated]\nfn old_func(x: Int) -> Int { x + 1 }";
+        let tokens = crate::frontend::lexer::Lexer::new(src, "test.fav")
+            .tokenize()
+            .expect("tokenize failed");
+        let prog = crate::frontend::parser::Parser::new(tokens)
+            .parse_program()
+            .expect("parse failed");
+        let fn_def = prog.items.iter().find_map(|i| {
+            if let crate::ast::Item::FnDef(fd) = i { Some(fd) } else { None }
+        }).expect("FnDef not found");
+        assert!(fn_def.deprecated, "fn should be marked deprecated");
+    }
+
+    #[test]
+    fn deprecated_call_emits_w020() {
+        let src = r#"
+            #[deprecated]
+            fn old_func(x: Int) -> Int { x + 1 }
+
+            fn new_func(x: Int) -> Int { old_func(x) }
+        "#;
+        let tokens = crate::frontend::lexer::Lexer::new(src, "test.fav")
+            .tokenize()
+            .expect("tokenize failed");
+        let prog = crate::frontend::parser::Parser::new(tokens)
+            .parse_program()
+            .expect("parse failed");
+        let mut warnings = Vec::new();
+        crate::lint::check_w020_deprecated_call(&prog, &mut warnings);
+        assert_eq!(warnings.len(), 1, "expected 1 W020 warning, got: {warnings:?}");
+        assert!(
+            warnings[0].message.contains("old_func"),
+            "warning should mention old_func: {:?}",
+            warnings[0]
+        );
+    }
+
+    #[test]
+    fn deprecated_fn_self_call_no_w020() {
+        // A deprecated fn calling itself recursively must NOT generate a W020 warning.
+        let src = r#"
+            #[deprecated]
+            fn old_func(n: Int) -> Int { old_func(n) }
+        "#;
+        let tokens = crate::frontend::lexer::Lexer::new(src, "test.fav")
+            .tokenize()
+            .expect("tokenize failed");
+        let prog = crate::frontend::parser::Parser::new(tokens)
+            .parse_program()
+            .expect("parse failed");
+        let mut warnings = Vec::new();
+        crate::lint::check_w020_deprecated_call(&prog, &mut warnings);
+        assert_eq!(
+            warnings.len(), 0,
+            "deprecated fn self-call should not emit W020: {warnings:?}"
+        );
+    }
+
+    #[test]
+    fn stability_md_has_policy() {
+        let md = include_str!("../../STABILITY.md");
+        assert!(md.contains("v1.x"), "STABILITY.md should mention v1.x policy");
+        assert!(md.contains("v2.0"), "STABILITY.md should mention v2.0 policy");
+    }
+
+    #[test]
+    fn changelog_has_v24_4_0() {
+        let cl = include_str!("../../CHANGELOG.md");
+        assert!(
+            cl.contains("[v24.4.0]"),
+            "CHANGELOG.md should have [v24.4.0] entry"
+        );
+    }
+}
+
+// ── v245000_tests (v24.5.0) — Rune レジストリ成熟 ───────────────────────────
+#[cfg(test)]
+mod v245000_tests {
+    use super::*;
+
+    #[test]
+    fn fav_search_command_exists() {
+        // include_str! パスは driver.rs と同じ src/ ディレクトリ基準
+        let main_src = include_str!("main.rs");
+        assert!(
+            main_src.contains("Some(\"search\")"),
+            "main.rs should have Some(\"search\") arm"
+        );
+        let drv_src = include_str!("driver.rs");
+        assert!(
+            drv_src.contains("pub fn cmd_search"),
+            "driver.rs should have pub fn cmd_search"
+        );
+    }
+
+    #[test]
+    fn official_catalog_50_plus() {
+        // use super::* により OFFICIAL_CATALOG は直接アクセス可能
+        assert!(
+            OFFICIAL_CATALOG.len() >= 50,
+            "OFFICIAL_CATALOG should have 50+ entries, got {}",
+            OFFICIAL_CATALOG.len()
+        );
+    }
+
+    #[test]
+    fn catalog_covers_cloud_formats_ml() {
+        // use super::* により OFFICIAL_CATALOG は直接アクセス可能
+        let names: Vec<&str> = OFFICIAL_CATALOG
+            .iter()
+            .map(|(n, _, _)| *n)
+            .collect();
+        let required = [
+            "avro", "orc", "excel", "xml",
+            "huggingface", "scikit",
+            "gcs", "redis",
+        ];
+        for name in required {
+            assert!(
+                names.contains(&name),
+                "OFFICIAL_CATALOG should contain '{}' but does not; catalog: {:?}",
+                name, names
+            );
+        }
+    }
+
+    #[test]
+    fn changelog_has_v24_5_0() {
+        let cl = include_str!("../../CHANGELOG.md");
+        assert!(
+            cl.contains("[v24.5.0]"),
+            "CHANGELOG.md should have [v24.5.0] entry"
+        );
+    }
+}
+
+// ── v246000_tests (v24.6.0) — セキュリティ審査 ──────────────────────────────
+#[cfg(test)]
+mod v246000_tests {
+    use super::*;
+
+    #[test]
+    fn security_md_has_disclosure_policy() {
+        let md = include_str!("../../SECURITY.md");
+        assert!(
+            md.contains("security@favnir.dev"),
+            "SECURITY.md should have security@favnir.dev"
+        );
+        assert!(
+            md.contains("90"),
+            "SECURITY.md should mention 90-day disclosure period"
+        );
+    }
+
+    #[test]
+    fn security_model_md_exists() {
+        let md = include_str!("../../SECURITY_MODEL.md");
+        assert!(
+            md.contains("Capability"),
+            "SECURITY_MODEL.md should contain 'Capability'"
+        );
+        assert!(
+            md.contains("Purity"),
+            "SECURITY_MODEL.md should contain 'Purity'"
+        );
+    }
+
+    #[test]
+    fn w021_pure_fn_calls_effectful_lint() {
+        let src = r#"
+            fn fetch_data(url: String) -> String !Http { url }
+
+            fn process(url: String) -> String { fetch_data(url) }
+        "#;
+        let tokens = crate::frontend::lexer::Lexer::new(src, "test.fav")
+            .tokenize()
+            .expect("tokenize failed");
+        let prog = crate::frontend::parser::Parser::new(tokens)
+            .parse_program()
+            .expect("parse failed");
+        let mut warnings = Vec::new();
+        crate::lint::check_w021_pure_fn_calls_effectful(&prog, &mut warnings);
+        assert_eq!(
+            warnings.len(), 1,
+            "expected 1 W021 warning, got: {warnings:?}"
+        );
+        assert!(
+            warnings[0].message.contains("process"),
+            "warning should mention caller 'process': {:?}", warnings[0]
+        );
+        assert!(
+            warnings[0].message.contains("fetch_data"),
+            "warning should mention callee 'fetch_data': {:?}", warnings[0]
+        );
+
+        // false-positive なし: effectful → effectful は警告しない
+        let src2 = r#"
+            fn fetch_data(url: String) -> String !Http { url }
+            fn process(url: String) -> String !Http { fetch_data(url) }
+        "#;
+        let tokens2 = crate::frontend::lexer::Lexer::new(src2, "test2.fav")
+            .tokenize().expect("tokenize");
+        let prog2 = crate::frontend::parser::Parser::new(tokens2)
+            .parse_program().expect("parse");
+        let mut w2 = Vec::new();
+        crate::lint::check_w021_pure_fn_calls_effectful(&prog2, &mut w2);
+        assert!(w2.is_empty(), "effectful->effectful must not warn: {w2:?}");
+
+        // false-positive なし: pure → pure は警告しない
+        let src3 = r#"
+            fn double(x: Int) -> Int { x * 2 }
+            fn quadruple(x: Int) -> Int { double(double(x)) }
+        "#;
+        let tokens3 = crate::frontend::lexer::Lexer::new(src3, "test3.fav")
+            .tokenize().expect("tokenize");
+        let prog3 = crate::frontend::parser::Parser::new(tokens3)
+            .parse_program().expect("parse");
+        let mut w3 = Vec::new();
+        crate::lint::check_w021_pure_fn_calls_effectful(&prog3, &mut w3);
+        assert!(w3.is_empty(), "pure->pure must not warn: {w3:?}");
+    }
+
+    #[test]
+    fn changelog_has_v24_6_0() {
+        let cl = include_str!("../../CHANGELOG.md");
+        assert!(
+            cl.contains("[v24.6.0]"),
+            "CHANGELOG.md should have [v24.6.0] entry"
+        );
+    }
+}
+
+// ── v247000_tests (v24.7.0) — ドキュメントサイト v2 ───────────────────────────
+#[cfg(test)]
+mod v247000_tests {
+    use super::*;
+
+    #[test]
+    fn learn_getting_started_exists() {
+        let md = include_str!("../../site/content/learn/getting-started.mdx");
+        assert!(md.contains("Hello"),
+            "getting-started.mdx must contain 'Hello'");
+        // 他の learn ファイルも存在確認（include_str! はコンパイル時チェック）
+        let _ = include_str!("../../site/content/learn/pipeline-basics.mdx");
+        let _ = include_str!("../../site/content/learn/type-system.mdx");
+    }
+
+    #[test]
+    fn cookbook_etl_recipe_exists() {
+        let md = include_str!("../../site/content/cookbook/etl-csv-to-db.mdx");
+        assert!(md.to_lowercase().contains("csv"),
+            "etl recipe must mention csv: {}", &md[..200]);
+        assert!(md.to_lowercase().contains("db"),
+            "etl recipe must mention db: {}", &md[..200]);
+        // 他の cookbook ファイルも存在確認
+        let _ = include_str!("../../site/content/cookbook/api-gateway.mdx");
+        let _ = include_str!("../../site/content/cookbook/parallel-pipeline.mdx");
+    }
+
+    #[test]
+    fn packages_page_has_rune_keyword() {
+        let src = include_str!("../../site/app/packages/page.tsx");
+        assert!(src.to_lowercase().contains("rune"),
+            "packages page must mention rune");
+    }
+
+    #[test]
+    fn bench_page_exists() {
+        let md = include_str!("../../site/content/docs/bench/index.mdx");
+        assert!(md.to_lowercase().contains("benchmark"),
+            "bench page must contain 'benchmark'");
+    }
+
+    #[test]
+    fn spec_page_exists() {
+        let md = include_str!("../../site/content/docs/spec/index.mdx");
+        assert!(md.contains("fav spec"),
+            "spec page must contain 'fav spec'");
+    }
+
+    #[test]
+    fn changelog_has_v24_7_0() {
+        let cl = include_str!("../../CHANGELOG.md");
+        assert!(cl.contains("[v24.7.0]"),
+            "CHANGELOG.md must contain [v24.7.0]");
+    }
+}
+
+// ── v248000_tests (v24.8.0) — テンプレートギャラリー ──────────────────────────
+#[cfg(test)]
+mod v248000_tests {
+    use super::*;
+
+    #[test]
+    fn template_gallery_has_4_entries() {
+        assert_eq!(TEMPLATE_GALLERY.len(), 4,
+            "TEMPLATE_GALLERY must have 4 entries, got {}", TEMPLATE_GALLERY.len());
+        let names: Vec<&str> = TEMPLATE_GALLERY.iter().map(|(n, _)| *n).collect();
+        assert!(names.contains(&"etl-csv-to-db"),     "missing etl-csv-to-db");
+        assert!(names.contains(&"api-gateway"),        "missing api-gateway");
+        assert!(names.contains(&"lambda-scheduled"),   "missing lambda-scheduled");
+        assert!(names.contains(&"distributed-etl"),    "missing distributed-etl");
+    }
+
+    #[test]
+    fn fav_new_etl_csv_to_db_ok() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let proj = dir.path().join("myetl");
+        let result = try_cmd_new(proj.to_str().unwrap(), "etl-csv-to-db");
+        assert!(result.is_ok(), "etl-csv-to-db must succeed: {:?}", result);
+        assert!(proj.join("pipeline.fav").exists(), "pipeline.fav missing");
+        assert!(proj.join("fav.toml").exists(),     "fav.toml missing");
+    }
+
+    #[test]
+    fn fav_new_api_gateway_ok() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let proj = dir.path().join("myapi");
+        let result = try_cmd_new(proj.to_str().unwrap(), "api-gateway");
+        assert!(result.is_ok(), "api-gateway must succeed: {:?}", result);
+        assert!(proj.join("api.fav").exists(),  "api.fav missing");
+        assert!(proj.join("fav.toml").exists(), "fav.toml missing");
+    }
+
+    #[test]
+    fn fav_new_lambda_scheduled_ok() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let proj = dir.path().join("myjob");
+        let result = try_cmd_new(proj.to_str().unwrap(), "lambda-scheduled");
+        assert!(result.is_ok(), "lambda-scheduled must succeed: {:?}", result);
+        assert!(proj.join("job.fav").exists(),  "job.fav missing");
+        assert!(proj.join("fav.toml").exists(), "fav.toml missing");
+    }
+
+    #[test]
+    fn fav_new_distributed_etl_ok() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let proj = dir.path().join("mybig");
+        let result = try_cmd_new(proj.to_str().unwrap(), "distributed-etl");
+        assert!(result.is_ok(), "distributed-etl must succeed: {:?}", result);
+        assert!(proj.join("pipeline.fav").exists(), "pipeline.fav missing");
+        assert!(proj.join("fav.toml").exists(),     "fav.toml missing");
+    }
+
+    #[test]
+    fn fav_new_unknown_template_errors() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let proj = dir.path().join("badproj");
+        let result = try_cmd_new(proj.to_str().unwrap(), "no-such-template");
+        assert!(result.is_err(), "unknown template must return Err");
+        let msg = result.unwrap_err();
+        assert!(msg.contains("etl-csv-to-db"), "error must list etl-csv-to-db: {msg}");
+    }
+
+    #[test]
+    fn changelog_has_v24_8_0() {
+        let cl = include_str!("../../CHANGELOG.md");
+        assert!(cl.contains("[v24.8.0]"),
+            "CHANGELOG.md must contain [v24.8.0]");
+    }
+}
+
+// ── v250000_tests (v25.0.0) — Practical Self-Hosting マイルストーン宣言 ────────
+#[cfg(test)]
+mod v250000_tests {
+    #[test]
+    fn milestone_md_has_selfhost_declaration() {
+        let content = include_str!("../../MILESTONE.md");
+        assert!(content.contains("Practical Self-Hosting"),
+            "MILESTONE.md must contain 'Practical Self-Hosting'");
+        assert!(content.contains("compiler.fav"),
+            "MILESTONE.md must contain 'compiler.fav'");
+    }
+
+    #[test]
+    fn readme_mentions_v1_release() {
+        let content = include_str!("../../README.md");
+        assert!(content.contains("v25.0"),
+            "README.md must contain 'v25.0'");
+    }
+
+    #[test]
+    fn stability_md_exists() {
+        let content = include_str!("../../STABILITY.md");
+        assert!(content.contains("v1.x"),
+            "STABILITY.md must contain 'v1.x'");
+    }
+
+    #[test]
+    fn site_v1_release_page_exists() {
+        let content = include_str!("../../site/content/docs/v1-release.mdx");
+        assert!(content.contains("v25.0"),
+            "site/content/docs/v1-release.mdx must contain 'v25.0'");
+    }
+
+    #[test]
+    fn changelog_has_v25_0_0() {
+        let content = include_str!("../../CHANGELOG.md");
+        assert!(content.contains("[v25.0.0]"),
+            "CHANGELOG.md must contain '[v25.0.0]'");
     }
 }

@@ -1,0 +1,4 @@
+[rune]
+name        = "xml"
+version     = "1.0.0"
+description = "XML パース / シリアライズ（XPath 対応）"

@@ -1,0 +1,9 @@
+{
+  "version": "23.3.0",
+  "date": "2026-06-22",
+  "feature": "可変コレクション Mut<T>",
+  "test_count": 1902,
+  "compile_ms": 142,
+  "exec_ms": 38,
+  "notes": "MUT_LIST_STORE / MUT_MAP_STORE thread-local HashMap opaque handle パターン。NaN-boxing 準拠。"
+}

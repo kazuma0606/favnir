@@ -1,0 +1,50 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cargo build:*)",
+      "Bash(cargo test:*)",
+      "Bash(cargo run:*)",
+      "Bash(cargo check:*)",
+      "Bash(cargo clippy:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git push:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Bash(git status:*)",
+      "Bash(git rev-parse:*)",
+      "Bash(npm run:*)",
+      "Bash(uv run:*)",
+      "Bash(aws logs:*)",
+      "Bash(aws lambda:*)",
+      "Bash(aws s3:*)",
+      "Bash(aws ecr:*)",
+      "Bash(aws cloudfront:*)",
+      "Bash(docker build:*)",
+      "Bash(docker push:*)",
+      "Bash(docker buildx:*)",
+      "Bash(gh run:*)",
+      "Bash(gh pr:*)",
+      "Bash(nproc:*)",
+      "Bash(ls:*)",
+      "Bash(echo:*)",
+      "Read(**)"
+    ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \".claude/hooks/git-hooks.js\"",
+            "timeout": 130,
+            "statusMessage": "Running git pre-tool checks..."
+          }
+        ]
+      }
+    ],
+    "Stop": []
+  }
+}

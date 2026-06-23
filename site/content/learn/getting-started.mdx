@@ -1,0 +1,48 @@
+---
+title: "はじめての Favnir"
+description: "インストールから Hello World まで — 5 分で始める Favnir"
+---
+
+# はじめての Favnir
+
+## インストール
+
+```bash
+cargo install fav
+fav --version  # favnir 24.7.0
+```
+
+## Hello World
+
+`hello.fav` を作成します:
+
+```favnir
+fn main() -> String { "Hello, Favnir!" }
+```
+
+実行:
+
+```bash
+fav run hello.fav
+# Hello, Favnir!
+```
+
+## 最初のパイプライン
+
+```favnir
+stage Load   -> String { "data.csv" }
+stage Process(s: String) -> String { s }
+
+pipeline Main {
+  Load |> Process
+}
+```
+
+```bash
+fav run pipeline.fav
+```
+
+## 次のステップ
+
+- [パイプラインの基礎](/learn/pipeline-basics) — stage / seq / par を学ぶ
+- [型システム入門](/learn/type-system) — 型推論とエフェクトを理解する

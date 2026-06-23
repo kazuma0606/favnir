@@ -1,0 +1,68 @@
+---
+title: "ベンチマーク"
+description: "Favnir のバージョン別パフォーマンス計測結果とベンチマーク基盤の使い方"
+---
+
+# ベンチマーク
+
+Favnir はバージョンごとにコンパイル速度・テスト実行速度のベンチマークを計測しています。
+CI の merge ごとに自動計測し、5% 以上の性能劣化を検知すると CI が fail します（v24.3）。
+
+## fav bench
+
+```bash
+fav bench                          # 現在バージョンを計測
+fav bench --baseline benchmarks/v24.6.0.json  # ベースラインと比較
+```
+
+出力例:
+
+```
+Benchmark: fav run hello.fav
+  Duration: 12ms (baseline: 11ms, +9% ⚠ exceeds 5% threshold)
+```
+
+## 履歴
+
+| バージョン | テスト数 | 実行時間 | 備考 |
+|---|---|---|---|
+| v24.7.0 | 1962 | 17.2s | ドキュメントサイト v2 |
+| v24.6.0 | 1957 | 17.0s | W021 lint ルール |
+| v24.5.0 | 1953 | 16.8s | Rune レジストリ 50+ |
+| v24.4.0 | 1949 | 16.6s | deprecated lint |
+| v24.3.0 | 1944 | 16.4s | ベンチマーク回帰検知 |
+| v24.2.0 | 1940 | 16.2s | Bootstrap 検証 |
+| v24.1.0 | 1934 | 16.0s | fav spec |
+| v24.0.0 | 1930 | 15.8s | VM in Favnir |
+| v23.x   | 〜1926 | 〜15s | vm.fav フェーズ |
+| v22.x   | 〜1800 | 〜13s | — |
+| v21.x   | 〜1600 | 〜11s | — |
+| v20.x   | 〜1400 | 〜9s  | — |
+
+詳細な benchmark JSON は [`benchmarks/`](https://github.com/favnir/favnir/tree/main/benchmarks) を参照。
+
+## ベンチマーク JSON 形式
+
+```json
+{
+  "version": "24.7.0",
+  "date": "2026-06-23",
+  "test_count": 1962,
+  "feature": "ドキュメントサイト v2",
+  "metrics": {
+    "test_count": 1962,
+    "duration_ms": 17200
+  }
+}
+```
+
+## CI 設定
+
+`.github/workflows/bench.yml` でベンチマーク回帰チェックを設定しています:
+
+```yaml
+- name: Benchmark regression check
+  run: |
+    fav bench --baseline benchmarks/v24.6.0.json \
+              --threshold 5 || exit 1
+```

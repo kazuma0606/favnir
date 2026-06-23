@@ -76,6 +76,8 @@ pub mod arena;
 pub mod dap;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod coverage;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod otel;
 
 // wasm_codegen uses only wasm-encoder (pure Rust), available on all targets.
 // `#[allow]` needed because backend/mod.rs also declares the same file.

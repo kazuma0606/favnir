@@ -14,7 +14,7 @@
 
 use crate::ast::*;
 use crate::frontend::lexer::Span;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 // ── LintError ─────────────────────────────────────────────────────────────────
 
@@ -91,9 +91,25 @@ pub fn lint_program(program: &Program) -> Vec<LintError> {
             Item::TestDef(td) => lint_block_unused_binds(&td.body, &mut errors),
             Item::BenchDef(bd) => lint_block_unused_binds(&bd.body, &mut errors),
             Item::ImportDecl { .. } => {}
+            Item::PipelineDef(_) => {} // v22.5.0: lint ルール未定義（現状スタブ）
             _ => {}
         }
     }
+    // v21.4.0: W010-W019 ──────────────────────────────────────────────────────
+    check_w010_stage_too_large(program, &mut errors);
+    check_w011_effectless_io_call(program, &mut errors);
+    check_w012_unused_type(program, &mut errors);
+    check_w013_map_filter_chain(program, &mut errors);
+    check_w014_redundant_result_ok(program, &mut errors);
+    check_w015_rebind_in_block(program, &mut errors);
+    check_w016_wildcard_only_match(program, &mut errors);
+    check_w017_deep_nesting(program, &mut errors);
+    check_w018_magic_number(program, &mut errors);
+    check_w019_string_concat_chain(program, &mut errors);
+    // v24.4.0: W020
+    check_w020_deprecated_call(program, &mut errors);
+    // v24.6.0: W021
+    check_w021_pure_fn_calls_effectful(program, &mut errors);
     errors
 }
 
@@ -1392,9 +1408,954 @@ fn effect_name(e: &Effect) -> &str {
         Effect::File => "File",
         Effect::Checkpoint => "Checkpoint",
         Effect::Trace => "Trace",
+        Effect::PipelineState => "PipelineState",
         Effect::Emit(_) => "Emit",
         Effect::EmitUnion(_) => "EmitUnion",
         Effect::Unknown(s) => s.as_str(),
+    }
+}
+
+// ── W010〜W019 (v21.4.0) ──────────────────────────────────────────────────────
+
+// W010: stage_too_large — TrfDef body.stmts.len() > 30 (final return expr not counted)
+fn check_w010_stage_too_large(program: &Program, errors: &mut Vec<LintError>) {
+    for item in &program.items {
+        if let Item::TrfDef(td) = item {
+            let n = td.body.stmts.len();
+            if n > 30 {
+                errors.push(LintError::new(
+                    "W010",
+                    format!(
+                        "stage `{}` has {} statements (>30); consider splitting into smaller stages",
+                        td.name, n
+                    ),
+                    td.span.clone(),
+                ));
+            }
+        }
+    }
+}
+
+// W011: effectless_io_call — TrfDef with no declared effects calls an ambient namespace
+fn check_w011_effectless_io_call(program: &Program, errors: &mut Vec<LintError>) {
+    for item in &program.items {
+        if let Item::TrfDef(td) = item {
+            if td.effects.is_empty() {
+                if let Some((ns, method, span)) = find_ambient_call_in_block(&td.body) {
+                    errors.push(LintError::new(
+                        "W011",
+                        format!(
+                            "stage `{}` calls `{}.{}` but declares no effects; add `!Io` or use ctx",
+                            td.name, ns, method
+                        ),
+                        span,
+                    ));
+                }
+            }
+        }
+    }
+}
+
+fn find_ambient_call_in_block(block: &Block) -> Option<(String, String, Span)> {
+    for stmt in &block.stmts {
+        let found = match stmt {
+            Stmt::Bind(b) => find_ambient_call_in_expr(&b.expr),
+            Stmt::Expr(e) => find_ambient_call_in_expr(e),
+            Stmt::Chain(c) => find_ambient_call_in_expr(&c.expr),
+            Stmt::Yield(y) => find_ambient_call_in_expr(&y.expr),
+            Stmt::ForIn(f) => {
+                find_ambient_call_in_expr(&f.iter)
+                    .or_else(|| find_ambient_call_in_block(&f.body))
+            }
+            Stmt::Forall(f) => {
+                f.guard.as_ref().and_then(find_ambient_call_in_expr)
+                    .or_else(|| find_ambient_call_in_block(&f.body))
+            }
+        };
+        if found.is_some() { return found; }
+    }
+    find_ambient_call_in_expr(&block.expr)
+}
+
+fn find_ambient_call_in_expr(expr: &Expr) -> Option<(String, String, Span)> {
+    match expr {
+        Expr::Apply(func, args, span) => {
+            if let Expr::FieldAccess(base, method, _) = func.as_ref() {
+                if let Expr::Ident(ns, _) = base.as_ref() {
+                    let is_ambient = AMBIENT_NAMESPACES.contains(&ns.as_str())
+                        || (ns == "Gen" && AMBIENT_GEN_FNS.contains(&method.as_str()));
+                    if is_ambient {
+                        return Some((ns.clone(), method.clone(), span.clone()));
+                    }
+                }
+            }
+            find_ambient_call_in_expr(func)
+                .or_else(|| args.iter().find_map(find_ambient_call_in_expr))
+        }
+        Expr::Block(b) => find_ambient_call_in_block(b),
+        Expr::If(cond, then, else_, _) => {
+            find_ambient_call_in_expr(cond)
+                .or_else(|| find_ambient_call_in_block(then))
+                .or_else(|| else_.as_ref().and_then(|eb| find_ambient_call_in_block(eb)))
+        }
+        Expr::Match(s, arms, _) => {
+            find_ambient_call_in_expr(s)
+                .or_else(|| arms.iter().find_map(|a| find_ambient_call_in_expr(&a.body)))
+        }
+        Expr::Pipeline(steps, _) => steps.iter().find_map(find_ambient_call_in_expr),
+        Expr::Closure(_, body, _) => find_ambient_call_in_expr(body),
+        Expr::FieldAccess(obj, _, _) => find_ambient_call_in_expr(obj),
+        Expr::BinOp(_, l, r, _) => {
+            find_ambient_call_in_expr(l).or_else(|| find_ambient_call_in_expr(r))
+        }
+        _ => None,
+    }
+}
+
+// W012: unused_type — TypeDef not referenced in any TypeExpr
+fn check_w012_unused_type(program: &Program, errors: &mut Vec<LintError>) {
+    // collect private TypeDef names
+    let mut defined: Vec<(String, Span)> = Vec::new();
+    for item in &program.items {
+        if let Item::TypeDef(td) = item {
+            if td.visibility.is_none() {
+                defined.push((td.name.clone(), td.span.clone()));
+            }
+        }
+    }
+    if defined.is_empty() { return; }
+
+    // collect all type names used in TypeExprs across the program
+    let mut used: HashSet<String> = HashSet::new();
+    for item in &program.items {
+        collect_used_type_names_item(item, &mut used);
+    }
+
+    for (name, span) in &defined {
+        if !used.contains(name) {
+            errors.push(LintError::new(
+                "W012",
+                format!("type `{}` is defined but never used", name),
+                span.clone(),
+            ));
+        }
+    }
+}
+
+fn collect_used_type_names_item(item: &Item, used: &mut HashSet<String>) {
+    match item {
+        Item::FnDef(fd) => {
+            for p in &fd.params { collect_used_in_type_expr(&p.ty, used); }
+            if let Some(ret) = &fd.return_ty { collect_used_in_type_expr(ret, used); }
+        }
+        Item::TrfDef(td) => {
+            collect_used_in_type_expr(&td.input_ty, used);
+            collect_used_in_type_expr(&td.output_ty, used);
+            for p in &td.params { collect_used_in_type_expr(&p.ty, used); }
+        }
+        Item::TypeDef(td) => collect_used_in_type_body(&td.body, used),
+        Item::AbstractTrfDef(td) => {
+            collect_used_in_type_expr(&td.input_ty, used);
+            collect_used_in_type_expr(&td.output_ty, used);
+        }
+        Item::InterfaceDecl(id) => {
+            for sig in &id.methods {
+                collect_used_in_type_expr(&sig.ty, used);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn collect_used_in_type_body(body: &TypeBody, used: &mut HashSet<String>) {
+    match body {
+        TypeBody::Record(fields) => {
+            for f in fields { collect_used_in_type_expr(&f.ty, used); }
+        }
+        TypeBody::Sum(variants) => {
+            for v in variants {
+                match v {
+                    Variant::Unit(..) => {}
+                    Variant::Tuple(_, tys, _) => {
+                        for ty in tys { collect_used_in_type_expr(ty, used); }
+                    }
+                    Variant::Record(_, fields, _) => {
+                        for f in fields { collect_used_in_type_expr(&f.ty, used); }
+                    }
+                }
+            }
+        }
+        TypeBody::Alias(ty) => collect_used_in_type_expr(ty, used),
+        TypeBody::Wrapper(inner) => collect_used_in_type_expr(inner, used),
+    }
+}
+
+fn collect_used_in_type_expr(ty: &TypeExpr, used: &mut HashSet<String>) {
+    match ty {
+        TypeExpr::Named(name, args, _) => {
+            used.insert(name.clone());
+            for a in args { collect_used_in_type_expr(a, used); }
+        }
+        TypeExpr::Optional(inner, _) | TypeExpr::Fallible(inner, _) => {
+            collect_used_in_type_expr(inner, used);
+        }
+        TypeExpr::Arrow(a, b, _) | TypeExpr::LinearArrow(a, b, _) => {
+            collect_used_in_type_expr(a, used);
+            collect_used_in_type_expr(b, used);
+        }
+        TypeExpr::TrfFn { input, output, .. } => {
+            collect_used_in_type_expr(input, used);
+            collect_used_in_type_expr(output, used);
+        }
+        TypeExpr::Intersection(a, b, _) => {
+            collect_used_in_type_expr(a, used);
+            collect_used_in_type_expr(b, used);
+        }
+        TypeExpr::RecordType(fields, _) => {
+            for (_, ty) in fields { collect_used_in_type_expr(ty, used); }
+        }
+        TypeExpr::Schema(..) | TypeExpr::ConstInt(..) => {}
+    }
+}
+
+// W013: map_filter_chain — List.map immediately followed by List.filter in a Pipeline
+fn check_w013_map_filter_chain(program: &Program, errors: &mut Vec<LintError>) {
+    for item in &program.items {
+        match item {
+            Item::FnDef(fd) => check_w013_block(&fd.body, errors),
+            Item::TrfDef(td) => check_w013_block(&td.body, errors),
+            Item::TestDef(td) => check_w013_block(&td.body, errors),
+            _ => {}
+        }
+    }
+}
+
+fn check_w013_block(block: &Block, errors: &mut Vec<LintError>) {
+    for stmt in &block.stmts {
+        match stmt {
+            Stmt::Bind(b) => check_w013_expr(&b.expr, errors),
+            Stmt::Expr(e) => check_w013_expr(e, errors),
+            Stmt::Chain(c) => check_w013_expr(&c.expr, errors),
+            Stmt::Yield(y) => check_w013_expr(&y.expr, errors),
+            Stmt::ForIn(f) => { check_w013_expr(&f.iter, errors); check_w013_block(&f.body, errors); }
+            Stmt::Forall(f) => {
+                if let Some(g) = &f.guard { check_w013_expr(g, errors); }
+                check_w013_block(&f.body, errors);
+            }
+        }
+    }
+    check_w013_expr(&block.expr, errors);
+}
+
+fn is_list_call(expr: &Expr, method: &str) -> bool {
+    if let Expr::Apply(func, _, _) = expr {
+        if let Expr::FieldAccess(base, m, _) = func.as_ref() {
+            if let Expr::Ident(ns, _) = base.as_ref() {
+                return ns == "List" && m == method;
+            }
+        }
+    }
+    false
+}
+
+fn check_w013_expr(expr: &Expr, errors: &mut Vec<LintError>) {
+    if let Expr::Pipeline(steps, span) = expr {
+        for i in 0..steps.len().saturating_sub(1) {
+            if is_list_call(&steps[i], "map") && is_list_call(&steps[i + 1], "filter") {
+                errors.push(LintError::new(
+                    "W013",
+                    "`List.map(...) |> List.filter(...)` can be simplified to `List.filter_map(...)`",
+                    span.clone(),
+                ));
+                break;
+            }
+        }
+        for step in steps { check_w013_expr(step, errors); }
+        return;
+    }
+    match expr {
+        Expr::Apply(f, args, _) => {
+            check_w013_expr(f, errors);
+            for a in args { check_w013_expr(a, errors); }
+        }
+        Expr::Block(b) => check_w013_block(b, errors),
+        Expr::If(c, t, e, _) => {
+            check_w013_expr(c, errors);
+            check_w013_block(t, errors);
+            if let Some(eb) = e { check_w013_block(eb, errors); }
+        }
+        Expr::Match(s, arms, _) => {
+            check_w013_expr(s, errors);
+            for arm in arms { check_w013_expr(&arm.body, errors); }
+        }
+        Expr::Closure(_, body, _) => check_w013_expr(body, errors),
+        _ => {}
+    }
+}
+
+// W014: redundant_result_ok — bind x <- Result.ok(expr) where x is not "_"
+fn check_w014_redundant_result_ok(program: &Program, errors: &mut Vec<LintError>) {
+    for item in &program.items {
+        match item {
+            Item::FnDef(fd) => check_w014_block(&fd.body, errors),
+            Item::TrfDef(td) => check_w014_block(&td.body, errors),
+            Item::TestDef(td) => check_w014_block(&td.body, errors),
+            _ => {}
+        }
+    }
+}
+
+fn check_w014_block(block: &Block, errors: &mut Vec<LintError>) {
+    for stmt in &block.stmts {
+        match stmt {
+            Stmt::Bind(b) => {
+                if let Pattern::Bind(name, span) = &b.pattern {
+                    if name != "_" && is_result_ok_call(&b.expr) {
+                        errors.push(LintError::new(
+                            "W014",
+                            format!(
+                                "`bind {} <- Result.ok(...)` — Result.ok is redundant; bind directly from the inner expression",
+                                name
+                            ),
+                            span.clone(),
+                        ));
+                    }
+                }
+                check_w014_expr(&b.expr, errors);
+            }
+            Stmt::Expr(e) => check_w014_expr(e, errors),
+            Stmt::Chain(c) => check_w014_expr(&c.expr, errors),
+            Stmt::Yield(y) => check_w014_expr(&y.expr, errors),
+            Stmt::ForIn(f) => { check_w014_expr(&f.iter, errors); check_w014_block(&f.body, errors); }
+            Stmt::Forall(f) => {
+                if let Some(g) = &f.guard { check_w014_expr(g, errors); }
+                check_w014_block(&f.body, errors);
+            }
+        }
+    }
+    check_w014_expr(&block.expr, errors);
+}
+
+fn is_result_ok_call(expr: &Expr) -> bool {
+    if let Expr::Apply(func, args, _) = expr {
+        if args.len() == 1 {
+            if let Expr::FieldAccess(base, method, _) = func.as_ref() {
+                if let Expr::Ident(ns, _) = base.as_ref() {
+                    return ns == "Result" && method == "ok";
+                }
+            }
+        }
+    }
+    false
+}
+
+fn check_w014_expr(expr: &Expr, errors: &mut Vec<LintError>) {
+    match expr {
+        Expr::Apply(f, args, _) => {
+            check_w014_expr(f, errors);
+            for a in args { check_w014_expr(a, errors); }
+        }
+        Expr::Block(b) => check_w014_block(b, errors),
+        Expr::If(c, t, e, _) => {
+            check_w014_expr(c, errors);
+            check_w014_block(t, errors);
+            if let Some(eb) = e { check_w014_block(eb, errors); }
+        }
+        Expr::Match(s, arms, _) => {
+            check_w014_expr(s, errors);
+            for arm in arms { check_w014_expr(&arm.body, errors); }
+        }
+        Expr::Closure(_, body, _) => check_w014_expr(body, errors),
+        Expr::Pipeline(steps, _) => { for s in steps { check_w014_expr(s, errors); } }
+        _ => {}
+    }
+}
+
+// W015: rebind_in_block — same name bound twice in the same block
+fn check_w015_rebind_in_block(program: &Program, errors: &mut Vec<LintError>) {
+    for item in &program.items {
+        match item {
+            Item::FnDef(fd) => check_w015_block(&fd.body, errors),
+            Item::TrfDef(td) => check_w015_block(&td.body, errors),
+            Item::TestDef(td) => check_w015_block(&td.body, errors),
+            _ => {}
+        }
+    }
+}
+
+fn check_w015_block(block: &Block, errors: &mut Vec<LintError>) {
+    let mut seen: HashMap<String, Span> = HashMap::new();
+    for stmt in &block.stmts {
+        match stmt {
+            Stmt::Bind(b) => {
+                if let Pattern::Bind(name, span) = &b.pattern {
+                    if name != "_" {
+                        if let Some(first_span) = seen.get(name) {
+                            errors.push(LintError::new(
+                                "W015",
+                                format!(
+                                    "binding `{}` is rebound in the same block (first bound at line {})",
+                                    name, first_span.line
+                                ),
+                                span.clone(),
+                            ));
+                        } else {
+                            seen.insert(name.clone(), span.clone());
+                        }
+                    }
+                }
+                // recurse into sub-blocks
+                check_w015_expr(&b.expr, errors);
+            }
+            Stmt::Expr(e) => check_w015_expr(e, errors),
+            Stmt::Chain(c) => check_w015_expr(&c.expr, errors),
+            Stmt::Yield(y) => check_w015_expr(&y.expr, errors),
+            Stmt::ForIn(f) => {
+                check_w015_expr(&f.iter, errors);
+                check_w015_block(&f.body, errors);
+            }
+            Stmt::Forall(f) => {
+                if let Some(g) = &f.guard { check_w015_expr(g, errors); }
+                check_w015_block(&f.body, errors);
+            }
+        }
+    }
+    check_w015_expr(&block.expr, errors);
+}
+
+fn check_w015_expr(expr: &Expr, errors: &mut Vec<LintError>) {
+    match expr {
+        Expr::Block(b) => check_w015_block(b, errors),
+        Expr::If(c, t, e, _) => {
+            check_w015_expr(c, errors);
+            check_w015_block(t, errors);
+            if let Some(eb) = e { check_w015_block(eb, errors); }
+        }
+        Expr::Match(s, arms, _) => {
+            check_w015_expr(s, errors);
+            for arm in arms { check_w015_expr(&arm.body, errors); }
+        }
+        Expr::Apply(f, args, _) => {
+            check_w015_expr(f, errors);
+            for a in args { check_w015_expr(a, errors); }
+        }
+        Expr::Closure(_, body, _) => check_w015_expr(body, errors),
+        Expr::Pipeline(steps, _) => { for s in steps { check_w015_expr(s, errors); } }
+        _ => {}
+    }
+}
+
+// W016: wildcard_only_match — match with a single `_ =>` arm
+fn check_w016_wildcard_only_match(program: &Program, errors: &mut Vec<LintError>) {
+    for item in &program.items {
+        match item {
+            Item::FnDef(fd) => check_w016_block(&fd.body, errors),
+            Item::TrfDef(td) => check_w016_block(&td.body, errors),
+            Item::TestDef(td) => check_w016_block(&td.body, errors),
+            _ => {}
+        }
+    }
+}
+
+fn check_w016_block(block: &Block, errors: &mut Vec<LintError>) {
+    for stmt in &block.stmts {
+        match stmt {
+            Stmt::Bind(b) => check_w016_expr(&b.expr, errors),
+            Stmt::Expr(e) => check_w016_expr(e, errors),
+            Stmt::Chain(c) => check_w016_expr(&c.expr, errors),
+            Stmt::Yield(y) => check_w016_expr(&y.expr, errors),
+            Stmt::ForIn(f) => { check_w016_expr(&f.iter, errors); check_w016_block(&f.body, errors); }
+            Stmt::Forall(f) => {
+                if let Some(g) = &f.guard { check_w016_expr(g, errors); }
+                check_w016_block(&f.body, errors);
+            }
+        }
+    }
+    check_w016_expr(&block.expr, errors);
+}
+
+fn check_w016_expr(expr: &Expr, errors: &mut Vec<LintError>) {
+    match expr {
+        Expr::Match(scrutinee, arms, span) => {
+            check_w016_expr(scrutinee, errors);
+            if arms.len() == 1 && matches!(arms[0].pattern, Pattern::Wildcard(_)) {
+                errors.push(LintError::new(
+                    "W016",
+                    "match has only a wildcard arm `_ =>`; consider using a specific pattern or removing the match",
+                    span.clone(),
+                ));
+            }
+            for arm in arms { check_w016_expr(&arm.body, errors); }
+        }
+        Expr::Apply(f, args, _) => {
+            check_w016_expr(f, errors);
+            for a in args { check_w016_expr(a, errors); }
+        }
+        Expr::Block(b) => check_w016_block(b, errors),
+        Expr::If(c, t, e, _) => {
+            check_w016_expr(c, errors);
+            check_w016_block(t, errors);
+            if let Some(eb) = e { check_w016_block(eb, errors); }
+        }
+        Expr::Pipeline(steps, _) => { for s in steps { check_w016_expr(s, errors); } }
+        Expr::Closure(_, body, _) => check_w016_expr(body, errors),
+        _ => {}
+    }
+}
+
+// W017: deep_nesting — nesting depth > 4 (5+ levels)
+fn check_w017_deep_nesting(program: &Program, errors: &mut Vec<LintError>) {
+    for item in &program.items {
+        match item {
+            Item::FnDef(fd) => {
+                let d = nesting_depth_block(&fd.body);
+                if d > 4 {
+                    errors.push(LintError::new(
+                        "W017",
+                        format!("nesting depth {} exceeds 4; consider extracting inner logic to a separate function", d),
+                        fd.span.clone(),
+                    ));
+                }
+            }
+            Item::TrfDef(td) => {
+                let d = nesting_depth_block(&td.body);
+                if d > 4 {
+                    errors.push(LintError::new(
+                        "W017",
+                        format!("nesting depth {} exceeds 4; consider extracting inner logic to a separate function", d),
+                        td.span.clone(),
+                    ));
+                }
+            }
+            Item::TestDef(td) => {
+                let d = nesting_depth_block(&td.body);
+                if d > 4 {
+                    errors.push(LintError::new(
+                        "W017",
+                        format!("nesting depth {} exceeds 4; consider extracting inner logic to a separate function", d),
+                        td.span.clone(),
+                    ));
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+fn nesting_depth_block(block: &Block) -> usize {
+    let stmt_max = block.stmts.iter().map(|s| nesting_depth_stmt(s)).max().unwrap_or(0);
+    stmt_max.max(nesting_depth_expr(&block.expr))
+}
+
+fn nesting_depth_stmt(stmt: &Stmt) -> usize {
+    match stmt {
+        Stmt::Bind(b) => nesting_depth_expr(&b.expr),
+        Stmt::Expr(e) => nesting_depth_expr(e),
+        Stmt::Chain(c) => nesting_depth_expr(&c.expr),
+        Stmt::Yield(y) => nesting_depth_expr(&y.expr),
+        Stmt::ForIn(f) => nesting_depth_expr(&f.iter).max(nesting_depth_block(&f.body)),
+        Stmt::Forall(f) => {
+            let g = f.guard.as_ref().map(|g| nesting_depth_expr(g)).unwrap_or(0);
+            g.max(nesting_depth_block(&f.body))
+        }
+    }
+}
+
+fn nesting_depth_expr(expr: &Expr) -> usize {
+    match expr {
+        Expr::Match(s, arms, _) => {
+            let inner = arms.iter().map(|a| nesting_depth_expr(&a.body)).max().unwrap_or(0);
+            1 + nesting_depth_expr(s).max(inner)
+        }
+        Expr::If(c, t, e, _) => {
+            let t_d = nesting_depth_block(t);
+            let e_d = e.as_ref().map(|eb| nesting_depth_block(eb)).unwrap_or(0);
+            1 + nesting_depth_expr(c).max(t_d).max(e_d)
+        }
+        Expr::Apply(f, args, _) => {
+            let fd = nesting_depth_expr(f);
+            let ad = args.iter().map(|a| nesting_depth_expr(a)).max().unwrap_or(0);
+            fd.max(ad)
+        }
+        Expr::Block(b) => nesting_depth_block(b),
+        Expr::Pipeline(steps, _) => steps.iter().map(|s| nesting_depth_expr(s)).max().unwrap_or(0),
+        Expr::Closure(_, body, _) => nesting_depth_expr(body),
+        Expr::BinOp(_, l, r, _) => nesting_depth_expr(l).max(nesting_depth_expr(r)),
+        Expr::FieldAccess(obj, _, _) => nesting_depth_expr(obj),
+        _ => 0,
+    }
+}
+
+// W018: magic_number — integer or float literal > 100
+fn check_w018_magic_number(program: &Program, errors: &mut Vec<LintError>) {
+    for item in &program.items {
+        match item {
+            Item::FnDef(fd) => check_w018_block(&fd.body, errors),
+            Item::TrfDef(td) => check_w018_block(&td.body, errors),
+            Item::TestDef(td) => check_w018_block(&td.body, errors),
+            _ => {}
+        }
+    }
+}
+
+fn check_w018_block(block: &Block, errors: &mut Vec<LintError>) {
+    for stmt in &block.stmts {
+        match stmt {
+            Stmt::Bind(b) => check_w018_expr(&b.expr, errors),
+            Stmt::Expr(e) => check_w018_expr(e, errors),
+            Stmt::Chain(c) => check_w018_expr(&c.expr, errors),
+            Stmt::Yield(y) => check_w018_expr(&y.expr, errors),
+            Stmt::ForIn(f) => { check_w018_expr(&f.iter, errors); check_w018_block(&f.body, errors); }
+            Stmt::Forall(f) => {
+                if let Some(g) = &f.guard { check_w018_expr(g, errors); }
+                check_w018_block(&f.body, errors);
+            }
+        }
+    }
+    check_w018_expr(&block.expr, errors);
+}
+
+fn check_w018_expr(expr: &Expr, errors: &mut Vec<LintError>) {
+    match expr {
+        Expr::Lit(Lit::Int(n), span) => {
+            if n.unsigned_abs() > 100 {
+                errors.push(LintError::new(
+                    "W018",
+                    format!("magic number `{}`; consider extracting to a named constant", n),
+                    span.clone(),
+                ));
+            }
+        }
+        Expr::Lit(Lit::Float(f), span) => {
+            if f.abs() > 100.0 {
+                errors.push(LintError::new(
+                    "W018",
+                    format!("magic number `{}`; consider extracting to a named constant", f),
+                    span.clone(),
+                ));
+            }
+        }
+        Expr::Apply(f, args, _) => {
+            check_w018_expr(f, errors);
+            for a in args { check_w018_expr(a, errors); }
+        }
+        Expr::Block(b) => check_w018_block(b, errors),
+        Expr::If(c, t, e, _) => {
+            check_w018_expr(c, errors);
+            check_w018_block(t, errors);
+            if let Some(eb) = e { check_w018_block(eb, errors); }
+        }
+        Expr::Match(s, arms, _) => {
+            check_w018_expr(s, errors);
+            for arm in arms { check_w018_expr(&arm.body, errors); }
+        }
+        Expr::Pipeline(steps, _) => { for s in steps { check_w018_expr(s, errors); } }
+        Expr::BinOp(_, l, r, _) => {
+            check_w018_expr(l, errors);
+            check_w018_expr(r, errors);
+        }
+        Expr::Closure(_, body, _) => check_w018_expr(body, errors),
+        _ => {}
+    }
+}
+
+// W019: string_concat_chain — String.concat(String.concat(...), ...) nested call
+fn check_w019_string_concat_chain(program: &Program, errors: &mut Vec<LintError>) {
+    for item in &program.items {
+        match item {
+            Item::FnDef(fd) => check_w019_block(&fd.body, errors),
+            Item::TrfDef(td) => check_w019_block(&td.body, errors),
+            Item::TestDef(td) => check_w019_block(&td.body, errors),
+            _ => {}
+        }
+    }
+}
+
+fn is_string_concat(expr: &Expr) -> bool {
+    if let Expr::Apply(func, _, _) = expr {
+        if let Expr::FieldAccess(base, method, _) = func.as_ref() {
+            if let Expr::Ident(ns, _) = base.as_ref() {
+                return ns == "String" && method == "concat";
+            }
+        }
+    }
+    false
+}
+
+fn check_w019_block(block: &Block, errors: &mut Vec<LintError>) {
+    for stmt in &block.stmts {
+        match stmt {
+            Stmt::Bind(b) => check_w019_expr(&b.expr, errors),
+            Stmt::Expr(e) => check_w019_expr(e, errors),
+            Stmt::Chain(c) => check_w019_expr(&c.expr, errors),
+            Stmt::Yield(y) => check_w019_expr(&y.expr, errors),
+            Stmt::ForIn(f) => { check_w019_expr(&f.iter, errors); check_w019_block(&f.body, errors); }
+            Stmt::Forall(f) => {
+                if let Some(g) = &f.guard { check_w019_expr(g, errors); }
+                check_w019_block(&f.body, errors);
+            }
+        }
+    }
+    check_w019_expr(&block.expr, errors);
+}
+
+fn check_w019_expr(expr: &Expr, errors: &mut Vec<LintError>) {
+    if is_string_concat(expr) {
+        if let Expr::Apply(_, args, span) = expr {
+            if args.iter().any(|a| is_string_concat(a)) {
+                errors.push(LintError::new(
+                    "W019",
+                    "chained `String.concat` calls; consider using an f-string instead: `f\"{a}{b}{c}\"`",
+                    span.clone(),
+                ));
+                // Only recurse into non-concat args to avoid duplicate W019 for the same chain
+                for a in args {
+                    if !is_string_concat(a) { check_w019_expr(a, errors); }
+                }
+                return;
+            }
+            for a in args { check_w019_expr(a, errors); }
+        }
+        return;
+    }
+    match expr {
+        Expr::Apply(f, args, _) => {
+            check_w019_expr(f, errors);
+            for a in args { check_w019_expr(a, errors); }
+        }
+        Expr::Block(b) => check_w019_block(b, errors),
+        Expr::If(c, t, e, _) => {
+            check_w019_expr(c, errors);
+            check_w019_block(t, errors);
+            if let Some(eb) = e { check_w019_block(eb, errors); }
+        }
+        Expr::Match(s, arms, _) => {
+            check_w019_expr(s, errors);
+            for arm in arms { check_w019_expr(&arm.body, errors); }
+        }
+        Expr::Pipeline(steps, _) => { for s in steps { check_w019_expr(s, errors); } }
+        Expr::Closure(_, body, _) => check_w019_expr(body, errors),
+        _ => {}
+    }
+}
+
+// ── W020: deprecated_call (v24.4.0) ───────────────────────────────────────────
+pub fn check_w020_deprecated_call(program: &Program, errors: &mut Vec<LintError>) {
+    use std::collections::HashSet;
+    let deprecated: HashSet<String> = program
+        .items
+        .iter()
+        .filter_map(|item| {
+            if let Item::FnDef(fd) = item {
+                if fd.deprecated { Some(fd.name.clone()) } else { None }
+            } else {
+                None
+            }
+        })
+        .collect();
+    if deprecated.is_empty() {
+        return;
+    }
+    for item in &program.items {
+        match item {
+            // deprecated fn 自身の body はスキップ（再帰呼び出しの誤検出を防ぐ）
+            Item::FnDef(fd) if !fd.deprecated => check_w020_block(&fd.body, &deprecated, errors),
+            Item::FnDef(_) => {}
+            Item::TrfDef(td) => check_w020_block(&td.body, &deprecated, errors),
+            _ => {}
+        }
+    }
+}
+
+fn check_w020_block(block: &Block, deprecated: &std::collections::HashSet<String>, errors: &mut Vec<LintError>) {
+    for stmt in &block.stmts {
+        match stmt {
+            Stmt::Bind(b)  => check_w020_expr(&b.expr, deprecated, errors),
+            Stmt::Chain(c) => check_w020_expr(&c.expr, deprecated, errors),
+            Stmt::Expr(e)  => check_w020_expr(e, deprecated, errors),
+            Stmt::Yield(y) => check_w020_expr(&y.expr, deprecated, errors),
+            Stmt::ForIn(f) => {
+                check_w020_expr(&f.iter, deprecated, errors);
+                check_w020_block(&f.body, deprecated, errors);
+            }
+            Stmt::Forall(f) => {
+                if let Some(g) = &f.guard { check_w020_expr(g, deprecated, errors); }
+                check_w020_block(&f.body, deprecated, errors);
+            }
+        }
+    }
+    check_w020_expr(&block.expr, deprecated, errors);
+}
+
+fn check_w020_expr(expr: &Expr, deprecated: &std::collections::HashSet<String>, errors: &mut Vec<LintError>) {
+    match expr {
+        Expr::Apply(func, args, span) => {
+            if let Expr::Ident(name, _) = func.as_ref() {
+                if deprecated.contains(name) {
+                    errors.push(LintError::new(
+                        "W020",
+                        format!("call to deprecated function `{name}`"),
+                        span.clone(),
+                    ));
+                }
+            }
+            check_w020_expr(func, deprecated, errors);
+            for a in args { check_w020_expr(a, deprecated, errors); }
+        }
+        Expr::If(cond, then, else_, _) => {
+            check_w020_expr(cond, deprecated, errors);
+            check_w020_block(then, deprecated, errors);
+            if let Some(e) = else_ { check_w020_block(e, deprecated, errors); }
+        }
+        Expr::Match(subject, arms, _) => {
+            check_w020_expr(subject, deprecated, errors);
+            for arm in arms { check_w020_expr(&arm.body, deprecated, errors); }
+        }
+        Expr::Block(b) => check_w020_block(b, deprecated, errors),
+        Expr::Closure(_, body, _) => check_w020_expr(body, deprecated, errors),
+        Expr::Pipeline(steps, _) => {
+            for s in steps { check_w020_expr(s, deprecated, errors); }
+        }
+        _ => {}
+    }
+}
+
+// ── W021: pure_fn_calls_effectful (v24.6.0) ──────────────────────────────────
+fn check_w021_block(
+    block: &Block,
+    caller: &str,
+    effectful: &std::collections::HashSet<String>,
+    errors: &mut Vec<LintError>,
+) {
+    for stmt in &block.stmts {
+        match stmt {
+            Stmt::Bind(b)  => check_w021_expr(&b.expr, caller, effectful, errors),
+            Stmt::Chain(c) => check_w021_expr(&c.expr, caller, effectful, errors),
+            Stmt::Expr(e)  => check_w021_expr(e, caller, effectful, errors),
+            Stmt::Yield(y) => check_w021_expr(&y.expr, caller, effectful, errors),
+            Stmt::ForIn(f) => {
+                check_w021_expr(&f.iter, caller, effectful, errors);
+                check_w021_block(&f.body, caller, effectful, errors);
+            }
+            Stmt::Forall(f) => {
+                // Forall は iter フィールドなし（guard + body のみ）
+                if let Some(g) = &f.guard { check_w021_expr(g, caller, effectful, errors); }
+                check_w021_block(&f.body, caller, effectful, errors);
+            }
+        }
+    }
+    check_w021_expr(&block.expr, caller, effectful, errors);
+}
+
+fn check_w021_expr(
+    expr: &Expr,
+    caller: &str,
+    effectful: &std::collections::HashSet<String>,
+    errors: &mut Vec<LintError>,
+) {
+    match expr {
+        Expr::Apply(func, args, span) => {
+            if let Expr::Ident(name, _) = func.as_ref() {
+                if effectful.contains(name) {
+                    errors.push(LintError::new(
+                        "W021",
+                        format!(
+                            "pure function `{caller}` calls effectful function `{name}` \
+                             — declare the effect or mark `{caller}` as effectful"
+                        ),
+                        span.clone(),
+                    ));
+                }
+            }
+            check_w021_expr(func, caller, effectful, errors);
+            for a in args { check_w021_expr(a, caller, effectful, errors); }
+        }
+        Expr::If(cond, then, else_, _) => {
+            check_w021_expr(cond, caller, effectful, errors);
+            check_w021_block(then, caller, effectful, errors);
+            if let Some(e) = else_ { check_w021_block(e, caller, effectful, errors); }
+        }
+        Expr::Match(subject, arms, _) => {
+            check_w021_expr(subject, caller, effectful, errors);
+            // MatchArm.body は Expr（Block ではない）
+            for arm in arms { check_w021_expr(&arm.body, caller, effectful, errors); }
+        }
+        Expr::Block(b) => check_w021_block(b, caller, effectful, errors),
+        // クロージャ内のエフェクト呼び出しはクロージャの呼び出し元が制御するため走査しない
+        Expr::Closure(_, _, _) => {}
+        Expr::Pipeline(steps, _) => {
+            for s in steps { check_w021_expr(s, caller, effectful, errors); }
+        }
+        Expr::BinOp(_, l, r, _) => {
+            check_w021_expr(l, caller, effectful, errors);
+            check_w021_expr(r, caller, effectful, errors);
+        }
+        Expr::FString(parts, _) => {
+            for part in parts {
+                if let FStringPart::Expr(e) = part {
+                    check_w021_expr(e, caller, effectful, errors);
+                }
+            }
+        }
+        Expr::Question(inner, _) | Expr::EmitExpr(inner, _) => {
+            check_w021_expr(inner, caller, effectful, errors);
+        }
+        Expr::FieldAccess(obj, _, _) => {
+            check_w021_expr(obj, caller, effectful, errors);
+        }
+        Expr::TypeApply(callee, _, _) => {
+            check_w021_expr(callee, caller, effectful, errors);
+        }
+        Expr::AssertMatches(e, _, _) => {
+            check_w021_expr(e, caller, effectful, errors);
+        }
+        Expr::RecordConstruct(_, fields, _) => {
+            for (_, v) in fields { check_w021_expr(v, caller, effectful, errors); }
+        }
+        Expr::RecordSpread(base, updates, _) => {
+            check_w021_expr(base, caller, effectful, errors);
+            for (_, v) in updates { check_w021_expr(v, caller, effectful, errors); }
+        }
+        Expr::Collect(block, _) => check_w021_block(block, caller, effectful, errors),
+        Expr::ListComp { expr, clauses, .. } | Expr::ResultComp { expr, clauses, .. } => {
+            check_w021_expr(expr, caller, effectful, errors);
+            for clause in clauses {
+                match clause {
+                    CompClause::For { src, .. } => check_w021_expr(src, caller, effectful, errors),
+                    CompClause::Guard(g) => check_w021_expr(g, caller, effectful, errors),
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+/// v24.6.0: W021 — 純粋関数から副作用関数を呼び出す箇所を検出する。
+/// 「capability 引数がなければ純粋」という Favnir エフェクトシステムの公理を lint として実装。
+pub fn check_w021_pure_fn_calls_effectful(program: &Program, errors: &mut Vec<LintError>) {
+    use std::collections::HashSet;
+    // Effect は lint.rs 先頭の `use crate::ast::*;` により既にスコープ内
+    // Step 1: エフェクト宣言のある fn 名のセットを収集（Pure 以外のエフェクトを持つもの）
+    let effectful_fns: HashSet<String> = program.items.iter()
+        .filter_map(|item| {
+            if let Item::FnDef(fd) = item {
+                let is_effectful = fd.effects.iter().any(|e| e != &Effect::Pure);
+                if is_effectful { Some(fd.name.clone()) } else { None }
+            } else {
+                None
+            }
+        })
+        .collect();
+    if effectful_fns.is_empty() { return; }
+    // Step 2: 純粋な FnDef（effects が空、または Pure のみ）の body を走査
+    for item in &program.items {
+        if let Item::FnDef(fd) = item {
+            let is_pure = fd.effects.is_empty()
+                || fd.effects.iter().all(|e| e == &Effect::Pure);
+            if is_pure {
+                check_w021_block(&fd.body, &fd.name, &effectful_fns, errors);
+            }
+        }
     }
 }
 

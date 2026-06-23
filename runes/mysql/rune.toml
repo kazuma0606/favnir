@@ -1,0 +1,4 @@
+[rune]
+name        = "mysql"
+version     = "1.0.0"
+description = "MySQL / MariaDB 接続"

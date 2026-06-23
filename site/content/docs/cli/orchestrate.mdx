@@ -1,0 +1,94 @@
+# fav orchestrate
+
+`pipeline` ブロックで `seq` パイプライン間の依存（DAG）を宣言し、`fav orchestrate` コマンドで依存順に自動実行する。外部の Airflow / Prefect を使わず Favnir 自体で multi-step ワークフローを管理できる。
+
+> v22.5.0 は構文解析・DAG トポロジカルソート・ステータス追跡を実装。Lambda / ECS へのリモートデプロイは v22.6+ で対応予定。
+
+---
+
+## `pipeline` ブロック構文
+
+```favnir
+pipeline DailyETL {
+  step "load_raw"   = seq LoadRaw
+  step "transform"  = seq Transform  after "load_raw"
+  step "enrich"     = seq Enrich     after "transform"
+  step "write"      = seq Write      after "enrich", "load_meta"
+  step "load_meta"  = seq LoadMeta
+}
+```
+
+### 構文ルール
+
+| 要素 | 説明 |
+|---|---|
+| `pipeline <Name> { ... }` | パイプライン定義ブロック。`pipeline` は予約語 |
+| `step "<name>"` | ステップのラベル（文字列リテラル） |
+| `= seq <SeqName>` | 実行する `seq` 宣言名（識別子） |
+| `after "<dep1>", "<dep2>"` | このステップが依存するステップ名（省略可） |
+
+依存なし step は DAG の根（root）として最初に実行される。循環依存はコンパイル時にエラーになる。
+
+---
+
+## `fav orchestrate run`
+
+```bash
+fav orchestrate run DailyETL pipeline.fav
+fav orchestrate run DailyETL pipeline.fav --dry-run
+```
+
+1. `.fav` ファイルを解析して `pipeline DailyETL` を探す
+2. Kahn's algorithm でトポロジカルソートを実行（循環依存があればエラー終了）
+3. 依存順に step を逐次実行
+4. 実行結果を `.fav_orchestrate/DailyETL_<timestamp>.json` に保存
+
+`--dry-run` を指定すると実行順を表示するだけで step は実行されない。
+
+---
+
+## `fav orchestrate status`
+
+```bash
+fav orchestrate status DailyETL
+```
+
+`.fav_orchestrate/` に保存された最新の実行ステータスを JSON で表示する。
+
+```json
+{
+  "pipeline": "DailyETL",
+  "run_at": "2026-06-21T12:00:00Z",
+  "steps": [
+    { "name": "load_raw",  "seq": "LoadRaw",   "status": "ok",     "elapsed_ms": 120 },
+    { "name": "transform", "seq": "Transform", "status": "ok",     "elapsed_ms": 340 },
+    { "name": "enrich",    "seq": "Enrich",    "status": "failed", "elapsed_ms": 50  },
+    { "name": "write",     "seq": "Write",     "status": "skip",   "elapsed_ms": 0   }
+  ]
+}
+```
+
+| status | 意味 |
+|---|---|
+| `ok` | 正常完了 |
+| `failed` | 実行エラー |
+| `skip` | 依存 step が失敗したためスキップ |
+
+---
+
+## `fav orchestrate retry`
+
+```bash
+fav orchestrate retry "enrich" DailyETL pipeline.fav
+```
+
+指定した step のみを単独で再実行する。前後の依存 step は skip される。
+
+---
+
+## 将来の拡張（v22.6+）
+
+- `seq` の実際の実行統合（`fav run` 経由）
+- step 内並列実行（同一トポロジカルレイヤーの step を同時実行）
+- Lambda / ECS / Kubernetes へのリモートデプロイ
+- `#[timeout]` / `#[retry]` アノテーションとの統合（v22.6 SLA 宣言）

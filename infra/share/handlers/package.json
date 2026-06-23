@@ -1,0 +1,9 @@
+{
+  "name": "favnir-share-handler",
+  "version": "1.0.0",
+  "description": "Favnir Playground share Lambda handler",
+  "main": "share.js",
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3"
+  }
+}

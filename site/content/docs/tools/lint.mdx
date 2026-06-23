@@ -1,0 +1,300 @@
+# fav lint
+
+`fav lint` は Favnir ソースコードの静的解析を実行し、潜在的な問題や改善点を検出します。
+
+```bash
+fav lint src/
+fav lint pipeline.fav
+fav explain --hint W010   # ルールの詳細を表示
+```
+
+---
+
+## ルール一覧
+
+| コード | ルール名 | 概要 |
+|--------|----------|------|
+| W001 | `unused_binding` | 使われていない変数 |
+| W002 | `dead_stage` | 到達不能なステージ |
+| W003 | `missing_effect` | エフェクト宣言漏れ |
+| W004 | `implicit_unit_return` | 暗黙の Unit 返却 |
+| W005 | `unused_private_stage` | 未使用のプライベートステージ |
+| W006 | `effectful_pure_fn` | Pure 宣言関数のエフェクト使用 |
+| W007 | `missing_error_handling` | Result のエラーを無視 |
+| W008 | `ambient_without_effect` | エフェクト宣言なし ambient 呼び出し |
+| W009 | `unused_import` | 未使用の rune import |
+| **W010** | `stage_too_large` | ステージが大きすぎる（31 stmt 超） |
+| **W011** | `effectless_io_call` | エフェクトなし stage が IO 等を呼び出す |
+| **W012** | `unused_type` | 未使用の型定義 |
+| **W013** | `map_filter_chain` | map |> filter → filter_map を推奨 |
+| **W014** | `redundant_result_ok` | 冗長な Result.ok ラップ |
+| **W015** | `rebind_in_block` | 同一ブロック内での bind 再束縛 |
+| **W016** | `wildcard_only_match` | ワイルドカードのみの match |
+| **W017** | `deep_nesting` | 深すぎるネスト（5 レベル以上） |
+| **W018** | `magic_number` | マジックナンバー（100 超のリテラル） |
+| **W019** | `string_concat_chain` | String.concat の連鎖 |
+| **W020** | `deprecated_call` | `#[deprecated]` 付き関数の呼び出し |
+
+---
+
+## W010 — `stage_too_large`
+
+ステージの body が 31 ステートメントを超えている場合に発火します。
+ステージを小さな単位に分割することを推奨します。
+
+**悪い例**
+```favnir
+stage Huge: List<Row> -> List<Row> = |rows| {
+  bind a <- ...
+  bind b <- ...
+  // ... 31 以上の bind ...
+  rows
+}
+```
+
+**良い例**
+```favnir
+stage Validate: List<Row> -> List<Row> = |rows| { ... }
+stage Enrich:   List<Row> -> List<Row> = |rows| { ... }
+stage Normalize: List<Row> -> List<Row> = |rows| { ... }
+
+seq Pipeline = Validate |> Enrich |> Normalize
+```
+
+---
+
+## W011 — `effectless_io_call`
+
+エフェクト宣言を持たない `stage` が IO・Postgres・AWS 等の ambient 名前空間を呼び出しています。
+ステージシグネチャに `!Io` 等のエフェクトを追加するか、ctx 経由で渡してください。
+
+**悪い例**
+```favnir
+stage Log: String -> Unit = |msg| {
+  IO.println(msg)   // W011: !Io 宣言がない
+}
+```
+
+**良い例**
+```favnir
+stage Log: String -> Unit !Io = |msg| {
+  IO.println(msg)
+}
+```
+
+---
+
+## W012 — `unused_type`
+
+private な TypeDef がプログラム内のどの型注釈にも登場しない場合に発火します。
+外部参照の可能性がある `public` 型は対象外です。
+
+**悪い例**
+```favnir
+type Ghost = { name: String }   // W012: どこにも使われていない
+```
+
+**良い例**
+```favnir
+// 削除する、または pub にする
+public type Ghost = { name: String }
+```
+
+---
+
+## W013 — `map_filter_chain`
+
+`List.map(...) |> List.filter(...)` のパターンは `List.filter_map` で簡略化できます。
+
+**悪い例**
+```favnir
+fn process(ns: List<Int>) -> List<Int> =
+  List.map(ns, |x| x * 2) |> List.filter(|x| x > 10)
+```
+
+**良い例**
+```favnir
+fn process(ns: List<Int>) -> List<Int> =
+  List.filter_map(ns, |x| {
+    bind v <- x * 2
+    if v > 10 { Some(v) } else { None }
+  })
+```
+
+---
+
+## W014 — `redundant_result_ok`
+
+`bind x <- Result.ok(expr)` の形式は `Result.ok` のラップが不要です。
+内側の式から直接 bind できます。
+
+**悪い例**
+```favnir
+fn compute() -> Result<Int, String> = {
+  bind x <- Result.ok(42)   // W014: Result.ok は不要
+  Result.ok(x + 1)
+}
+```
+
+**良い例**
+```favnir
+fn compute() -> Result<Int, String> = {
+  bind x <- 42
+  Result.ok(x + 1)
+}
+```
+
+---
+
+## W015 — `rebind_in_block`
+
+同一ブロック内で同じ名前が 2 回以上 `bind` されています。
+シャドーウィングは意図しないバグの原因になることがあります。
+
+**悪い例**
+```favnir
+fn process() -> Int = {
+  bind x <- 1
+  bind x <- 2   // W015: x が再束縛されている
+  x
+}
+```
+
+**良い例**
+```favnir
+fn process() -> Int = {
+  bind x1 <- 1
+  bind x2 <- 2
+  x1 + x2
+}
+```
+
+---
+
+## W016 — `wildcard_only_match`
+
+`match` にワイルドカードアーム（`_ =>`）しかない場合に発火します。
+具体的なパターンを追加するか、match 自体を除去してください。
+
+**悪い例**
+```favnir
+fn process(x: Result<Int, String>) -> Int =
+  match x {
+    _ => 0   // W016: 具体的なパターンがない
+  }
+```
+
+**良い例**
+```favnir
+fn process(x: Result<Int, String>) -> Int =
+  match x {
+    Ok(n)  => n
+    Err(_) => 0
+  }
+```
+
+---
+
+## W017 — `deep_nesting`
+
+`match` または `if` のネストが 5 レベル以上に達した場合に発火します。
+内側のロジックを別の関数に抽出することを推奨します。
+
+**悪い例**
+```favnir
+fn process(x: Option<Option<Option<Option<Option<Int>>>>>) -> Int =
+  match x {
+    Some(a) => match a {
+      Some(b) => match b {
+        Some(c) => match c {
+          Some(d) => match d {
+            Some(n) => n   // W017: ネスト 5 段
+            None    => 0
+          }
+          None => 0
+        }
+        None => 0
+      }
+      None => 0
+    }
+    None => 0
+  }
+```
+
+**良い例**
+```favnir
+fn unwrap_inner(d: Option<Int>) -> Int =
+  match d { Some(n) => n  None => 0 }
+
+fn unwrap_outer(x: Option<Option<Option<Option<Option<Int>>>>>) -> Int =
+  match x {
+    Some(a) => unwrap_inner(Option.flatten(Option.flatten(Option.flatten(a))))
+    None    => 0
+  }
+```
+
+---
+
+## W018 — `magic_number`
+
+100 を超える整数または浮動小数点リテラルが型注釈以外の文脈に登場した場合に発火します。
+名前付き定数に抽出してください。
+
+**悪い例**
+```favnir
+fn tax(amount: Float) -> Float =
+  amount * 1.08 / 9999.0   // W018: 9999.0 はマジックナンバー
+```
+
+**良い例**
+```favnir
+// 定数を定義するか、let で抽出する
+fn tax(amount: Float) -> Float = {
+  bind max_amount <- 9999.0
+  amount * 1.08 / max_amount
+}
+```
+
+---
+
+## W019 — `string_concat_chain`
+
+`String.concat` の呼び出しが 2 回以上連鎖している場合に発火します。
+f-string（補間文字列）で書き直すことを推奨します。
+
+**悪い例**
+```favnir
+fn make_label(name: String, count: Int) -> String =
+  String.concat("Total ", String.concat(name, String.concat(": ", Int.to_string(count))))
+```
+
+**良い例**
+```favnir
+fn make_label(name: String, count: Int) -> String = {
+  bind part1 <- String.concat("Total ", name)
+  bind part2 <- String.concat(": ", Int.to_string(count))
+  String.concat(part1, part2)
+}
+```
+
+---
+
+## W020 — `deprecated_call`
+
+`#[deprecated]` アノテーションが付いた関数を呼び出すと発火します。
+v1.x 互換性ポリシー（`STABILITY.md` 参照）に基づき、廃止予定 API の使用を警告します。
+
+**アノテーションの付け方**
+```favnir
+#[deprecated]
+fn old_api(x: Int) -> String { f"{x}" }
+```
+
+**警告が出る呼び出し**
+```favnir
+fn caller(x: Int) -> String {
+  old_api(x)   // W020: call to deprecated function `old_api`
+}
+```
+
+**修正方法:** 廃止予定の関数を置き換える新しい API を使ってください。

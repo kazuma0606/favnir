@@ -1,0 +1,141 @@
+---
+title: "Rune カタログ"
+description: "Favnir 公式 Rune パッケージ一覧（v24.5.0、50 パッケージ）"
+---
+
+# Rune カタログ
+
+`fav search` で検索できる公式 Rune パッケージの一覧です（v24.5.0 時点、50 パッケージ）。
+
+```bash
+fav search                  # 全パッケージを一覧表示
+fav search "bigquery"       # 名前または説明で検索
+fav install <name>          # インストール
+```
+
+---
+
+## 認証
+
+| Rune | 説明 | バージョン |
+|---|---|---|
+| `auth` | JWT / OAuth2 / API Key 認証 | 1.0.0 |
+
+---
+
+## クラウド（AWS）
+
+| Rune | 説明 | バージョン |
+|---|---|---|
+| `aws` | AWS SDK 統合（S3 / SQS / DynamoDB / Lambda）| 1.0.0 |
+| `s3` | AWS S3 オブジェクトストレージ | 1.0.0 |
+| `sqs` | AWS SQS メッセージキュー | 1.0.0 |
+| `dynamodb` | AWS DynamoDB NoSQL | 1.0.0 |
+
+---
+
+## クラウド（Azure）
+
+| Rune | 説明 | バージョン |
+|---|---|---|
+| `azure-blob` | Azure Blob Storage 読み書き | 1.0.0 |
+| `azure-postgres` | Azure Database for PostgreSQL 接続 | 1.0.0 |
+| `azure-servicebus` | Azure Service Bus メッセージング | 1.0.0 |
+
+---
+
+## クラウド（GCP）
+
+| Rune | 説明 | バージョン |
+|---|---|---|
+| `bigquery` | Google BigQuery 読み書き | 1.0.0 |
+| `gcs` | Google Cloud Storage 読み書き | 1.0.0 |
+| `pubsub` | Google Cloud Pub/Sub パブリッシュ / サブスクライブ | 1.0.0 |
+
+---
+
+## クラウド（Snowflake）
+
+| Rune | 説明 | バージョン |
+|---|---|---|
+| `snowflake` | Snowflake クエリ・ロード | 1.0.0 |
+
+---
+
+## データフォーマット
+
+| Rune | 説明 | バージョン |
+|---|---|---|
+| `avro` | Apache Avro シリアライズ / デシリアライズ | 1.0.0 |
+| `csv` | CSV 読み書き（ストリーミング対応）| 1.0.0 |
+| `excel` | Excel (.xlsx) 読み書き | 1.0.0 |
+| `json` | JSON エンコード / デコード | 1.0.0 |
+| `orc` | Apache ORC カラムナーフォーマット | 1.0.0 |
+| `parquet` | Apache Parquet 読み書き | 1.0.0 |
+| `toml` | TOML 設定ファイルパーサー | 1.0.0 |
+| `xml` | XML パース / シリアライズ（XPath 対応）| 1.0.0 |
+
+---
+
+## データベース
+
+| Rune | 説明 | バージョン |
+|---|---|---|
+| `db` | 汎用 DB インターフェース（DbRead / DbWrite）| 1.0.0 |
+| `duckdb` | DuckDB 組み込み分析エンジン | 1.0.0 |
+| `mongodb` | MongoDB ドキュメントストア | 1.0.0 |
+| `mysql` | MySQL / MariaDB 接続 | 1.0.0 |
+| `postgres` | PostgreSQL 接続 | 1.0.0 |
+| `sql` | 汎用 SQL クエリビルダー | 1.0.0 |
+
+---
+
+## メッセージング
+
+| Rune | 説明 | バージョン |
+|---|---|---|
+| `kafka` | Apache Kafka / AWS MSK プロデューサー・コンシューマー | 1.0.0 |
+| `queue` | インメモリ Queue プリミティブ | 1.0.0 |
+| `redis` | Redis キャッシュ・メッセージブローカー | 1.0.0 |
+| `slack` | Slack Webhook 通知・Block Kit | 1.0.0 |
+
+---
+
+## ML / AI
+
+| Rune | 説明 | バージョン |
+|---|---|---|
+| `huggingface` | HuggingFace API 統合（テキスト / 画像 / 埋め込み）| 1.0.0 |
+| `llm` | LLM 統合（Claude / OpenAI）| 1.0.0 |
+| `scikit` | scikit-learn ML モデル統合（Python ブリッジ）| 1.0.0 |
+
+---
+
+## HTTP / API
+
+| Rune | 説明 | バージョン |
+|---|---|---|
+| `graphql` | GraphQL クライアント（型付きクエリ）| 1.0.0 |
+| `grpc` | gRPC クライアント / サーバー | 1.0.0 |
+| `http` | HTTP/1.1 + HTTP/2 クライアント | 1.0.0 |
+
+---
+
+## ユーティリティ
+
+| Rune | 説明 | バージョン |
+|---|---|---|
+| `cache` | インメモリ / TTL キャッシュ | 1.0.0 |
+| `ctx` | Capability Context（AppCtx / MockCtx）| 1.0.0 |
+| `email` | SMTP / SendGrid メール送信 | 1.0.0 |
+| `env` | 環境変数読み取り | 1.0.0 |
+| `fs` | ファイルシステム操作（read / write / watch）| 1.0.0 |
+| `gen` | UUID / NanoID / ランダム値生成 | 1.0.0 |
+| `incremental` | 増分処理チェックポイント | 1.0.0 |
+| `io` | 標準 I/O プリミティブ | 1.0.0 |
+| `log` | 構造化ログ（JSON / text）| 1.0.0 |
+| `rune_loader` | Rune 動的ロードユーティリティ | 1.0.0 |
+| `stat` | 基本統計量（mean / stddev / percentile）| 1.0.0 |
+| `state` | ステートフル処理（!State エフェクト）| 1.0.0 |
+| `stdlib` | Favnir 標準ライブラリ（List / Map / String）| 1.0.0 |
+| `validate` | スキーマバリデーション（where 節統合）| 1.0.0 |

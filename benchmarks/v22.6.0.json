@@ -1,0 +1,28 @@
+{
+  "version": "22.6.0",
+  "timestamp": "2026-06-21T00:00:00Z",
+  "_note": "SLA Declarations milestone snapshot: #[timeout], #[retry], #[circuit_breaker] annotations.",
+  "metrics": {
+    "test_count": 1872,
+    "sla_annotation_types": 3,
+    "sla_error_codes": 3,
+    "lint_rules": 19,
+    "lsp_features": 8
+  },
+  "_metrics_notes": {
+    "sla_annotation_types": "#[timeout] / #[retry] / #[circuit_breaker] の 3 種",
+    "sla_error_codes": "E0401（timeout 無効値）/ E0402（retry 無効値）/ E0403（circuit_breaker 無効値）",
+    "lint_rules": "W001-W005(v9.3.0) + W006-W009(v13.1.0等) + W010-W019(v21.4.0) = 19件実装済み",
+    "lsp_features": "completion/hover/diagnostics/goto_def/code_action/rename/references/signature_help の 8機能",
+    "test_count": "v22.6.0完了時の実測値（v226000_tests 8件込み）"
+  },
+  "sla_features": {
+    "timeout_annotation":         { "achieved": true, "version": "v22.6.0", "example": "#[timeout(seconds = 30)]" },
+    "retry_annotation":           { "achieved": true, "version": "v22.6.0", "example": "#[retry(max = 3, backoff = \"exponential\")]" },
+    "circuit_breaker_annotation": { "achieved": true, "version": "v22.6.0", "example": "#[circuit_breaker(threshold = 0.5, window = 60)]" },
+    "checker_validation_e0401":   { "achieved": true, "version": "v22.6.0" },
+    "checker_validation_e0402":   { "achieved": true, "version": "v22.6.0" },
+    "checker_validation_e0403":   { "achieved": true, "version": "v22.6.0" },
+    "explain_sla_command":        { "achieved": true, "version": "v22.6.0", "note": "fav explain --sla <file>" }
+  }
+}

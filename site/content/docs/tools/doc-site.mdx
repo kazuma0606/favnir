@@ -1,0 +1,124 @@
+# fav doc — サイト生成（docsite）
+
+`fav doc --format site` を使うと、`///` ドキュメントコメントから静的 HTML ドキュメントサイトを自動生成できます。
+v21.7.0 で追加された機能です。
+
+## コマンドリファレンス
+
+### `fav doc --format site` — 静的サイト生成
+
+```bash
+fav doc --format site src/ --out docs/
+```
+
+| オプション | 説明 | デフォルト |
+|---|---|---|
+| `--format site` | 静的 HTML サイトを生成 | — |
+| `--out <dir>` | 出力ディレクトリ | `docs/` |
+| `<path>` | 入力ファイルまたはディレクトリ | `.`（カレントディレクトリ） |
+
+### `fav doc --serve` — ローカルプレビューサーバー
+
+```bash
+fav doc --serve src/
+```
+
+| オプション | 説明 | デフォルト |
+|---|---|---|
+| `--serve` | プレビューサーバーを起動 | — |
+| `--port <num>` | ポート番号 | `8080` |
+| `--no-open` | ブラウザを自動オープンしない | — |
+| `<path>` | 入力ファイルまたはディレクトリ | `.` |
+
+---
+
+## 出力構造
+
+```
+docs/
+  index.html          ← モジュール一覧トップページ
+  pipeline.html       ← pipeline.fav のドキュメントページ
+  transform.html      ← transform.fav のドキュメントページ
+  ...
+```
+
+すべての HTML ファイルは **自己完結**（外部リソース参照なし）です。
+生成した `docs/` フォルダをそのまま静的ホスティング（S3, GitHub Pages 等）にアップロードできます。
+
+---
+
+## ページ構成
+
+左側にサイドバー、右側にドキュメントコンテンツの 2 カラムレイアウト。ダークテーマ。
+
+```
+┌─ sidebar ─────────┬─ content ────────────────────────┐
+│ Favnir Docs       │  # pipeline                       │
+│                   │                                   │
+│ • index           │  ## stage Double                  │
+│ • pipeline  ←     │  Double: Int -> Int               │
+│ • transform       │  2倍にする stage                  │
+└───────────────────┴───────────────────────────────────┘
+```
+
+---
+
+## ドキュメントコメントの書き方
+
+`///` で始まる行がドキュメントコメントとして認識されます。
+
+```favnir
+/// CSV ファイルを読み込んで行のリストを返す stage
+///
+/// 例:
+/// ```
+/// LoadCsv("data.csv")  // → List<Row>
+/// ```
+stage LoadCsv: String -> List<Row> = |path| {
+  IO.read_csv(path)
+}
+```
+
+---
+
+## 既存の `fav doc` との違い
+
+| コマンド | 出力 | 用途 |
+|---|---|---|
+| `fav doc src/ --out docs/` | `.md` ファイル | Markdown ドキュメント生成（既存） |
+| `fav doc --format site src/ --out docs/` | HTML サイト | ブラウザで閲覧可能なドキュメントサイト（v21.7.0 新機能） |
+| `fav doc --serve src/` | ローカルサーバー | 開発中のプレビュー（v21.7.0 新機能） |
+
+---
+
+## ローカルプレビューの使い方
+
+```bash
+# src/ ディレクトリをドキュメント化してプレビュー
+fav doc --serve src/
+# → http://localhost:8080 でブラウザが自動的に開きます
+
+# ポートを変更する場合
+fav doc --serve src/ --port 9000
+
+# ブラウザを自動オープンしない場合
+fav doc --serve src/ --no-open
+```
+
+`Ctrl+C` でサーバーを停止します。
+
+---
+
+## サイト生成の例
+
+```bash
+# プロジェクト全体をドキュメント化
+fav doc --format site src/ --out docs/
+
+# 単一ファイルをドキュメント化
+fav doc --format site src/pipeline.fav --out docs/
+
+# 生成されたファイルを確認
+ls docs/
+# index.html  pipeline.html  transform.html  ...
+```

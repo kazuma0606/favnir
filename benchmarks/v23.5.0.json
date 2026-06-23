@@ -1,0 +1,11 @@
+{
+  "version": "23.5.0",
+  "date": "2026-06-22",
+  "test_count": 1913,
+  "feature": "vm.fav Phase 2（スタックベース実行ループ）",
+  "metrics": {
+    "vm_fav_opcodes_phase2": 11,
+    "vmval_variants": 3,
+    "self_hosted_vm_phase": 2
+  }
+}

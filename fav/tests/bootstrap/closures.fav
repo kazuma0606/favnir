@@ -1,0 +1,6 @@
+fn apply(f: Int -> Int, x: Int) -> Int { f(x) }
+
+public fn main() -> String {
+    bind r <- apply(|x| x * x, 7)
+    f"result={r}"
+}

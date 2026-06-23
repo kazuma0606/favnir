@@ -1,0 +1,130 @@
+---
+title: "Mut<T> — 可変コレクション"
+description: "Favnir の可変リスト・マップ API（v23.3.0）"
+---
+
+# `Mut<T>` — 可変コレクション
+
+`Mut` 名前空間は**可変リスト**と**可変マップ**を提供します。
+Favnir は原則として不変データを推奨しますが、アルゴリズムの実装やキャッシュ用途など、
+ミュータブルなコレクションが必要な場面に `Mut` を使います。
+
+> v23.3.0 で追加。
+
+---
+
+## 可変リスト
+
+### `Mut.list() -> MutList`
+
+空の可変リストを生成します。
+
+```fav
+let lst = Mut.list()
+```
+
+### `Mut.push(lst, val) -> Result<Unit, String>`
+
+リストの末尾に値を追加します。`bind` で受け取ってください。
+
+```fav
+bind _p <- Mut.push(lst, 42)
+```
+
+### `Mut.pop(lst) -> Result<T, String>`
+
+リストの末尾から値を取り出して返します。リストが空の場合は `Err` を返します。
+
+```fav
+bind v <- Mut.pop(lst)
+```
+
+### `Mut.peek(lst) -> Result<T, String>`
+
+末尾の値を取り出さずに参照します。リストが空の場合は `Err` を返します。
+
+```fav
+bind top <- Mut.peek(lst)
+```
+
+### `Mut.len(lst) -> Int`
+
+リストの現在の要素数を返します。
+
+```fav
+let n = Mut.len(lst)
+```
+
+---
+
+## 可変マップ
+
+### `Mut.map() -> MutMap`
+
+空の可変マップを生成します。
+
+```fav
+let mp = Mut.map()
+```
+
+### `Mut.set(mp, key, val) -> Result<Unit, String>`
+
+キーに値をセットします。
+
+```fav
+bind _s <- Mut.set(mp, "name", "Alice")
+```
+
+### `Mut.get(mp, key) -> Result<T, String>`
+
+キーに対応する値を取得します。キーが存在しない場合は `Err` を返します。
+
+```fav
+bind v <- Mut.get(mp, "name")
+```
+
+### `Mut.delete(mp, key) -> Result<Unit, String>`
+
+キーとその値を削除します。
+
+```fav
+bind _d <- Mut.delete(mp, "name")
+```
+
+### `Mut.has(mp, key) -> Bool`
+
+キーが存在するかどうかを返します。
+
+```fav
+let exists = Mut.has(mp, "name")
+```
+
+---
+
+## 使用例
+
+```fav
+public fn count_words(words: List<String>) -> Int {
+  let counts = Mut.map()
+  let _ = List.for_each(words, |w| {
+    if Mut.has(counts, w) {
+      bind cur <- Mut.get(counts, w)
+      bind _s <- Mut.set(counts, w, cur + 1)
+      Unit
+    } else {
+      bind _s <- Mut.set(counts, w, 1)
+      Unit
+    }
+  })
+  Mut.len(counts)
+}
+```
+
+---
+
+## 実装メモ
+
+- `MutList` / `MutMap` は NaN-boxing opaque handle（`u64` ID）として実装されています。
+- データは `thread_local!` な HashMap（`MUT_LIST_STORE` / `MUT_MAP_STORE`）に格納されます。
+- マップのキー検索は線形探索（`Vec<(VMValue, VMValue)>`）で実装されています。
+- 関数値をキーとして使うことはサポートしていません（v23.4 以降の予定）。

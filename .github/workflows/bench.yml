@@ -34,8 +34,9 @@ jobs:
         env:
           FAV: ./fav/target/release/fav
         run: |
+          # || exit 1 ensures CI fails on regression regardless of fav run exit code propagation
           $FAV run benchmarks/compare.fav \
-            -- --baseline benchmarks/v20.0.0.json \
+            -- --baseline benchmarks/v24.2.0.json \
                --current  benchmarks/latest.json \
-               --threshold 10 \
-               --emit-md
+               --threshold 5 \
+               --emit-md || exit 1

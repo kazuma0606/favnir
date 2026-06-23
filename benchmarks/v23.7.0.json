@@ -1,0 +1,13 @@
+{
+  "version": "23.7.0",
+  "date": "2026-06-22",
+  "test_count": 1921,
+  "feature": "vm.fav Phase 4（stdlib・builtin 呼び出し）",
+  "metrics": {
+    "vm_fav_phase": 4,
+    "call_builtin_count": 4,
+    "vm_execute_params": 5,
+    "new_opcodes": 2,
+    "vmval_variants": 4
+  }
+}

@@ -29,6 +29,8 @@ type HmacSha256 = Hmac<Sha256>;
 
 use super::artifact::FvcArtifact;
 use super::codegen::{Constant, Opcode};
+use super::heap_val::HeapVal;
+use super::nan_val::{NanVal, RecordMap};
 use crate::middle::ir::TypeMeta;
 use crate::schemas::ProjectSchemas;
 use crate::value::Value;
@@ -1278,6 +1280,167 @@ thread_local! {
     static NEXT_ARROW_ID: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
 }
 
+// ── v20.4.0: DuckDB pushdown thread-locals ────────────────────────────────────
+thread_local! {
+    /// Whether pushdown explain output is enabled (set by --explain-pushdown flag).
+    pub static PUSHDOWN_EXPLAIN_ENABLED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    /// Accumulated pushdown log entries for --explain-pushdown output.
+    pub static PUSHDOWN_LOG: std::cell::RefCell<Vec<String>> = std::cell::RefCell::new(Vec::new());
+}
+
+// ── v23.1.0: Bytes スレッドローカルストア ────────────────────────────────────
+// 注意: ArrowBatch / DbHandle と同じ opaque-handle パターン。
+// エントリは明示的に削除されない（VMValue::Drop がないため）。
+// 同一スレッドで大量の Bytes オブジェクトを生成するプログラムはメモリが増大する既知の制限。
+// 将来バージョンで GC / 参照カウント削除を検討（v25.x 予定）。
+thread_local! {
+    static BYTES_STORE: std::cell::RefCell<
+        std::collections::HashMap<u64, std::sync::Arc<Vec<u8>>>
+    > = std::cell::RefCell::new(std::collections::HashMap::new());
+    static NEXT_BYTES_ID: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
+fn bytes_new(data: Vec<u8>) -> u64 {
+    NEXT_BYTES_ID.with(|c| {
+        let id = c.get();
+        c.set(id + 1);
+        BYTES_STORE.with(|m| m.borrow_mut().insert(id, std::sync::Arc::new(data)));
+        id
+    })
+}
+
+fn bytes_get_arc(id: u64) -> Option<std::sync::Arc<Vec<u8>>> {
+    BYTES_STORE.with(|m| m.borrow().get(&id).cloned())
+}
+
+// v23.3.0: Mut コレクションストレージ（GC 未実装のためメモリリークあり、v25.x で対応予定）
+// 安全性注記: MUT_LIST_STORE.borrow_mut() は vm_call_builtin の各 Mut アームで 1 回のみ呼ばれる。
+// ネスト（borrow_mut 保持中に再度 Mut 操作を呼ぶ）はしないこと。
+// ID は 0 始まり（NEXT_BYTES_ID と同パターン）。DB_NEXT_ID の 1 始まりとは異なる。
+// MutMap のキー探索は Vec<(VMValue, VMValue)> の線形探索（O(n)）。エントリ数が少ない場合に限り適切。
+thread_local! {
+    static MUT_LIST_STORE: std::cell::RefCell<
+        std::collections::HashMap<u64, Vec<VMValue>>
+    > = std::cell::RefCell::new(std::collections::HashMap::new());
+    static NEXT_MUT_LIST_ID: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+    static MUT_MAP_STORE: std::cell::RefCell<
+        std::collections::HashMap<u64, Vec<(VMValue, VMValue)>>
+    > = std::cell::RefCell::new(std::collections::HashMap::new());
+    static NEXT_MUT_MAP_ID: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
+fn mut_list_new() -> u64 {
+    NEXT_MUT_LIST_ID.with(|c| {
+        let id = c.get();
+        c.set(id + 1);
+        MUT_LIST_STORE.with(|m| m.borrow_mut().insert(id, Vec::new()));
+        id
+    })
+}
+
+fn mut_map_new() -> u64 {
+    NEXT_MUT_MAP_ID.with(|c| {
+        let id = c.get();
+        c.set(id + 1);
+        MUT_MAP_STORE.with(|m| m.borrow_mut().insert(id, Vec::new()));
+        id
+    })
+}
+
+/// Enable pushdown explain mode for the current thread.
+pub fn set_pushdown_explain(enabled: bool) {
+    PUSHDOWN_EXPLAIN_ENABLED.with(|c| c.set(enabled));
+}
+
+/// Take the accumulated pushdown log entries (clears the log).
+pub fn take_pushdown_log() -> Vec<String> {
+    PUSHDOWN_LOG.with(|log| std::mem::take(&mut *log.borrow_mut()))
+}
+
+// ── v22.1.0: Stage Checkpoint / Resume thread-locals ─────────────────────────
+// NOTE: Named with STAGE_ prefix to avoid collision with the existing
+// CheckpointBackend (used by `fav checkpoint` incremental processing).
+thread_local! {
+    static STAGE_CHECKPOINT_DIR: std::cell::RefCell<Option<std::path::PathBuf>>
+        = std::cell::RefCell::new(None);
+    static STAGE_RESUME_DIR: std::cell::RefCell<Option<std::path::PathBuf>>
+        = std::cell::RefCell::new(None);
+    static STAGE_CHECKPOINT_NAMES: std::cell::RefCell<std::collections::HashSet<String>>
+        = std::cell::RefCell::new(std::collections::HashSet::new());
+}
+
+pub fn set_checkpoint_dir(dir: Option<&str>) {
+    STAGE_CHECKPOINT_DIR.with(|c| *c.borrow_mut() = dir.map(std::path::PathBuf::from));
+}
+
+pub fn set_resume_dir(dir: Option<&str>) {
+    STAGE_RESUME_DIR.with(|c| *c.borrow_mut() = dir.map(std::path::PathBuf::from));
+}
+
+pub fn set_checkpoint_stages(names: std::collections::HashSet<String>) {
+    STAGE_CHECKPOINT_NAMES.with(|c| *c.borrow_mut() = names);
+}
+
+// ── v22.2.0: Distributed Worker endpoints thread-local ────────────────────────
+thread_local! {
+    static WORKER_ENDPOINTS: std::cell::RefCell<Vec<String>>
+        = std::cell::RefCell::new(Vec::new());
+}
+
+pub fn set_worker_endpoints(endpoints: Vec<String>) {
+    WORKER_ENDPOINTS.with(|c| *c.borrow_mut() = endpoints);
+}
+
+pub fn get_worker_endpoints() -> Vec<String> {
+    WORKER_ENDPOINTS.with(|c| c.borrow().clone())
+}
+
+// ── v22.3.0: Pipeline State — in-memory backend (default) ─────────────────────
+thread_local! {
+    static STATE_STORE: std::cell::RefCell<std::collections::HashMap<String, String>>
+        = std::cell::RefCell::new(std::collections::HashMap::new());
+    static STATE_BACKEND: std::cell::RefCell<String>
+        = std::cell::RefCell::new("memory".to_string());
+}
+
+pub fn set_state_backend(backend: &str) {
+    if backend != "memory" {
+        // v22.3.0: only "memory" backend is implemented.
+        // Redis / DynamoDB / PostgreSQL will be added in v22.4+.
+        eprintln!(
+            "warning [v22.3.0]: state backend \"{}\" is not yet supported. \
+             Falling back to in-memory backend. Upgrade to v22.4+ for external backends.",
+            backend
+        );
+    }
+    STATE_BACKEND.with(|c| *c.borrow_mut() = backend.to_string());
+}
+
+/// テスト用: STATE_STORE からキーを直接読む（クレート内のみ）
+pub(crate) fn get_state_value(key: &str) -> Option<String> {
+    STATE_STORE.with(|c| c.borrow().get(key).cloned())
+}
+
+/// テスト用: STATE_STORE にキーを直接書き込む（クレート内のみ）
+pub(crate) fn set_state_value(key: &str, val: &str) {
+    STATE_STORE.with(|c| c.borrow_mut().insert(key.to_string(), val.to_string()));
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn write_stage_checkpoint_bytes(dir: &std::path::Path, stage_name: &str, data: &[u8]) -> std::io::Result<()> {
+    std::fs::create_dir_all(dir)?;
+    let safe_name = stage_name.replace(['/', '\\', ' ', '.'], "_");
+    let file_name = format!("{}.ckpt", safe_name);
+    std::fs::write(dir.join(file_name), data)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn read_stage_checkpoint_bytes(dir: &std::path::Path, stage_name: &str) -> Option<Vec<u8>> {
+    let safe_name = stage_name.replace(['/', '\\', ' ', '.'], "_");
+    let file_name = format!("{}.ckpt", safe_name);
+    std::fs::read(dir.join(file_name)).ok()
+}
+
 fn arrow_store(batch: arrow::record_batch::RecordBatch) -> u64 {
     NEXT_ARROW_ID.with(|c| {
         let id = c.get();
@@ -1298,16 +1461,27 @@ pub fn set_verbose_level(level: u8) {
 
 #[derive(Debug, Clone)]
 pub struct VM {
-    globals: Vec<VMValue>,
-    stack: Vec<VMValue>,
+    globals: Vec<NanVal>,
+    stack: Vec<NanVal>,
     frames: Vec<CallFrame>,
-    collect_frames: Vec<Vec<VMValue>>,
-    emit_log: Vec<VMValue>,
+    collect_frames: Vec<Vec<NanVal>>,
+    emit_log: Vec<NanVal>,
     db_path: Option<String>,
     source_file: String,
     type_metas: HashMap<String, TypeMeta>,
     /// Collected trace lines (when verbose > 0). Also written to stderr via eprintln!.
     pub trace_lines: Vec<String>,
+    /// v22.7.0: 現在実行中 stage の OTel span ID。SeqStageEnter で設定、SeqStageCheck で消費。
+    #[cfg(not(target_arch = "wasm32"))]
+    pub current_otel_span_id: Option<crate::otel::SpanId>,
+    /// Arena アロケータ — chunk ごとの Vec<VMValue> を pool 再利用（v20.7.0）
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) chunk_arena: crate::arena::ChunkArena,
+    /// DAP デバッガー — debug_mode = true 時に dap_adapter フックを呼ぶ（v21.1.0）
+    #[cfg(not(target_arch = "wasm32"))]
+    pub debug_mode: bool,
+    #[cfg(not(target_arch = "wasm32"))]
+    pub dap_adapter: Option<crate::dap::DapAdapter>,
 }
 
 static SHARED_DBS: Mutex<Vec<(String, Connection)>> = Mutex::new(Vec::new());
@@ -1329,7 +1503,7 @@ fn duckdb_store() -> std::sync::MutexGuard<'static, HashMap<u64, duckdb::Connect
 
 /// Lazy stream representation for `Stream<T>` (v2.9.0)
 #[derive(Debug, Clone)]
-enum VMStream {
+pub(crate) enum VMStream {
     /// Infinite: generates next value from current seed using next_fn
     Gen { seed: VMValue, next_fn: VMValue },
     /// Finite: converted from a list
@@ -1351,11 +1525,11 @@ enum VMStream {
 /// Shared list with start offset enabling O(1) `List.drop` from the front.
 /// Cloning is O(1) (Arc refcount bump). Mutation materialises a new Vec.
 #[derive(Debug, Clone)]
-struct FavList(Arc<Vec<VMValue>>, usize);
+pub(crate) struct FavList(pub(crate) Arc<Vec<VMValue>>, pub(crate) usize);
 
 impl FavList {
     #[inline]
-    fn new(v: Vec<VMValue>) -> Self {
+    pub(crate) fn new(v: Vec<VMValue>) -> Self {
         FavList(Arc::new(v), 0)
     }
     /// O(1) drop from the front — just advances the offset.
@@ -1370,7 +1544,7 @@ impl FavList {
     }
     /// Materialise the virtual slice into an owned Vec (O(n)).
     #[inline]
-    fn to_vec(&self) -> Vec<VMValue> {
+    pub(crate) fn to_vec(&self) -> Vec<VMValue> {
         self.0[self.1..].iter().cloned().collect()
     }
 }
@@ -1398,7 +1572,7 @@ impl IntoIterator for FavList {
 }
 
 #[derive(Debug, Clone)]
-enum VMValue {
+pub(crate) enum VMValue {
     Bool(bool),
     Int(i64),
     Float(f64),
@@ -1419,6 +1593,14 @@ enum VMValue {
     TxHandle(u64),
     /// v19.5.0: Apache Arrow RecordBatch への opaque handle
     ArrowBatch(u64),
+    /// v20.8.0: DB コネクションプール opaque handle
+    PgPool(u64),
+    /// v23.1.0: 生バイト列 opaque handle
+    Bytes(u64),
+    /// v23.3.0: 可変リスト opaque handle
+    MutList(u64),
+    /// v23.3.0: 可変マップ opaque handle
+    MutMap(u64),
 }
 
 impl PartialEq for VMValue {
@@ -1440,6 +1622,10 @@ impl PartialEq for VMValue {
             (VMValue::DbHandle(a), VMValue::DbHandle(b)) => a == b,
             (VMValue::TxHandle(a), VMValue::TxHandle(b)) => a == b,
             (VMValue::ArrowBatch(a), VMValue::ArrowBatch(b)) => a == b,
+            (VMValue::PgPool(a),     VMValue::PgPool(b))     => a == b,
+            (VMValue::Bytes(a),      VMValue::Bytes(b))      => a == b,
+            (VMValue::MutList(a),    VMValue::MutList(b))    => a == b,
+            (VMValue::MutMap(a),     VMValue::MutMap(b))     => a == b,
             _ => false,
         }
     }
@@ -1456,14 +1642,14 @@ impl VM {
             .globals
             .iter()
             .map(|g| match g.kind {
-                0 => VMValue::CompiledFn(g.fn_idx as usize),
+                0 => NanVal::from_heap(HeapVal::CompiledFn(g.fn_idx as usize)),
                 1 => {
                     let name = artifact
                         .str_table
                         .get(g.name_idx as usize)
                         .cloned()
                         .unwrap_or_else(|| "<builtin>".to_string());
-                    VMValue::Builtin(name)
+                    NanVal::from_heap(HeapVal::Builtin(name))
                 }
                 2 => {
                     let name = artifact
@@ -1471,9 +1657,9 @@ impl VM {
                         .get(g.name_idx as usize)
                         .cloned()
                         .unwrap_or_else(|| "<variant>".to_string());
-                    VMValue::VariantCtor(name)
+                    NanVal::from_heap(HeapVal::VariantCtor(name))
                 }
-                _ => VMValue::Unit,
+                _ => NanVal::unit(),
             })
             .collect();
         VM {
@@ -1486,11 +1672,43 @@ impl VM {
             source_file: String::new(),
             type_metas: artifact.type_metas.clone(),
             trace_lines: Vec::new(),
+            #[cfg(not(target_arch = "wasm32"))]
+            current_otel_span_id: None,
+            #[cfg(not(target_arch = "wasm32"))]
+            chunk_arena: crate::arena::ChunkArena::new(),
+            #[cfg(not(target_arch = "wasm32"))]
+            debug_mode: false,
+            #[cfg(not(target_arch = "wasm32"))]
+            dap_adapter: None,
         }
     }
 
     pub fn set_source_file(&mut self, source_file: &str) {
         self.source_file = source_file.to_string();
+    }
+
+    // ── DAP デバッガー ヘルパー (v21.1.0) ────────────────────────────────────
+
+    /// 現在フレームのローカル変数を DAP 用に収集する。
+    /// スタックベース VM のため変数名は local_0, local_1, ... の連番。
+    #[cfg(not(target_arch = "wasm32"))]
+    fn collect_locals_for_dap(&self) -> Vec<(String, String, String)> {
+        let Some(frame) = self.frames.last() else {
+            return vec![];
+        };
+        let end = (frame.base + frame.n_locals).min(self.stack.len());
+        self.stack[frame.base..end]
+            .iter()
+            .enumerate()
+            .map(|(i, nanval)| {
+                let val: VMValue = nanval.clone().to_vmvalue(); // clone() 必須（to_vmvalue は値渡し）
+                (
+                    format!("local_{}", i),
+                    vmvalue_type_name(&val).to_string(),
+                    vmvalue_repr(&val),
+                )
+            })
+            .collect()
     }
 
     // ── verbose trace helpers (v12.5.0) ──────────────────────────────────────
@@ -1518,7 +1736,7 @@ impl VM {
         }
         let ret = vm.invoke_function(artifact, fn_idx, args.into_iter().map(VMValue::from).collect())?;
         let value = Value::from(ret);
-        let emits = vm.emit_log.into_iter().map(Value::from).collect();
+        let emits = vm.emit_log.into_iter().map(|v| Value::from(v.to_vmvalue())).collect();
         Ok((value, emits, vm.trace_lines))
     }
 
@@ -1574,6 +1792,18 @@ impl VM {
         ))
     }
 
+    /// DAP デバッグモードで実行する（v21.1.0）。
+    /// `self` に `debug_mode = true` と `dap_adapter` をセットしてから呼ぶこと。
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn run_debug(
+        &mut self,
+        artifact: &FvcArtifact,
+        fn_idx: usize,
+        args: Vec<VMValue>,
+    ) -> Result<VMValue, VMError> {
+        self.invoke_function(artifact, fn_idx, args)
+    }
+
     fn run_with_vmvalues(
         artifact: &FvcArtifact,
         fn_idx: usize,
@@ -1586,7 +1816,8 @@ impl VM {
             vm.set_source_file(&source_file);
         }
         let ret = vm.invoke_function(artifact, fn_idx, args)?;
-        Ok((ret, vm.emit_log))
+        let emits: Vec<VMValue> = vm.emit_log.into_iter().map(|v| v.to_vmvalue()).collect();
+        Ok((ret, emits))
     }
 
     fn invoke_function(
@@ -1596,8 +1827,10 @@ impl VM {
         args: Vec<VMValue>,
     ) -> Result<VMValue, VMError> {
         let caller_depth = self.frames.len();
-        self.push_compiled_frame(artifact, fn_idx, args)?;
-        self.resume(artifact, caller_depth)
+        let nan_args: Vec<NanVal> = args.into_iter().map(NanVal::from_vmvalue).collect();
+        self.push_compiled_frame(artifact, fn_idx, nan_args)?;
+        let ret = self.resume(artifact, caller_depth)?;
+        Ok(ret.to_vmvalue())
     }
 
     /// Push a compiled function frame onto the call stack without running resume.
@@ -1606,7 +1839,7 @@ impl VM {
         &mut self,
         artifact: &FvcArtifact,
         fn_idx: usize,
-        args: Vec<VMValue>,
+        args: Vec<NanVal>,
     ) -> Result<(), VMError> {
         let function = artifact.functions.get(fn_idx).ok_or_else(|| VMError {
             message: format!("unknown function index: {fn_idx}"),
@@ -1618,15 +1851,42 @@ impl VM {
         self.stack.extend(args);
         let required = function.local_count as usize;
         while self.stack.len() < base + required {
-            self.stack.push(VMValue::Unit);
+            self.stack.push(NanVal::unit());
         }
         self.frames.push(CallFrame {
             fn_idx,
             ip: 0,
             base,
             n_locals: required,
-            line: 0,
+            line: function.source_line,
         });
+
+        // ── DAP フック: stage 入口（v21.1.0）──────────────────────────────
+        #[cfg(not(target_arch = "wasm32"))]
+        if self.debug_mode {
+            if let Some(adapter) = &self.dap_adapter {
+                let fn_name = artifact
+                    .str_table
+                    .get(function.name_idx as usize)
+                    .cloned()
+                    .unwrap_or_else(|| format!("fn_{}", fn_idx));
+                // ブレークポイント判定を先に行い、ヒット時のみ locals を収集（MED-7: lazy）
+                let will_stop = {
+                    let sess = adapter.session.lock().unwrap_or_else(|e| e.into_inner());
+                    sess.is_breakpoint(&self.source_file, function.source_line) || adapter.step_mode
+                };
+                let locals = if will_stop { self.collect_locals_for_dap() } else { vec![] };
+                adapter.on_hook(crate::dap::DapHook::StageEnter {
+                    name: fn_name,
+                    source: self.source_file.clone(),
+                    line: function.source_line,
+                    locals,
+                });
+                // ブレークポイント停止中は VM スレッドをここでブロック（HIGH-1）
+                adapter.wait_if_stopped();
+            }
+        }
+
         Ok(())
     }
 
@@ -1681,7 +1941,7 @@ impl VM {
         let new_base = self.frames[frames_len - 1].base;
 
         // Move new frame's stack segment down to parent_base, discarding parent's locals
-        let new_locals: Vec<VMValue> = self.stack.drain(new_base..).collect();
+        let new_locals: Vec<NanVal> = self.stack.drain(new_base..).collect();
         self.stack.truncate(parent_base);
         self.stack.extend(new_locals);
 
@@ -1693,11 +1953,11 @@ impl VM {
         self.frames.last_mut().unwrap().base = parent_base;
     }
 
-    fn resume(&mut self, artifact: &FvcArtifact, caller_depth: usize) -> Result<VMValue, VMError> {
+    fn resume(&mut self, artifact: &FvcArtifact, caller_depth: usize) -> Result<NanVal, VMError> {
         let vm = self;
         loop {
             let Some(frame) = vm.frames.last_mut() else {
-                return Ok(VMValue::Unit);
+                return Ok(NanVal::unit());
             };
             let function = &artifact.functions[frame.fn_idx];
             if frame.ip >= function.code.len() {
@@ -1713,11 +1973,11 @@ impl VM {
                         .constants
                         .get(idx)
                         .ok_or_else(|| vm.error(artifact, "constant index out of bounds"))?;
-                    vm.stack.push(constant_to_value(constant.clone()));
+                    vm.stack.push(constant_to_nan(constant.clone()));
                 }
-                x if x == Opcode::ConstUnit as u8 => vm.stack.push(VMValue::Unit),
-                x if x == Opcode::ConstTrue as u8 => vm.stack.push(VMValue::Bool(true)),
-                x if x == Opcode::ConstFalse as u8 => vm.stack.push(VMValue::Bool(false)),
+                x if x == Opcode::ConstUnit as u8 => vm.stack.push(NanVal::unit()),
+                x if x == Opcode::ConstTrue as u8 => vm.stack.push(NanVal::from_bool(true)),
+                x if x == Opcode::ConstFalse as u8 => vm.stack.push(NanVal::from_bool(false)),
                 x if x == Opcode::LoadLocal as u8 => {
                     let slot = Self::read_u16(function, frame)? as usize;
                     let idx = frame.base + slot;
@@ -1736,7 +1996,7 @@ impl VM {
                         .pop()
                         .ok_or_else(|| vm.error(artifact, "stack underflow on store"))?;
                     if idx >= vm.stack.len() {
-                        vm.stack.resize(idx + 1, VMValue::Unit);
+                        vm.stack.resize_with(idx + 1, NanVal::unit);
                     }
                     vm.stack[idx] = value;
                 }
@@ -1745,11 +2005,11 @@ impl VM {
                     let value = match function.constants.get(idx) {
                         Some(crate::backend::codegen::Constant::Name(name)) => {
                             if let Some(fn_idx) = artifact.fn_idx_by_name(name) {
-                                VMValue::CompiledFn(fn_idx)
+                                NanVal::from_heap(HeapVal::CompiledFn(fn_idx))
                             } else if is_known_builtin_namespace(name) {
-                                VMValue::Builtin(name.clone())
+                                NanVal::from_heap(HeapVal::Builtin(name.clone()))
                             } else if looks_like_variant_ctor(name) {
-                                VMValue::VariantCtor(name.clone())
+                                NanVal::from_heap(HeapVal::VariantCtor(name.clone()))
                             } else {
                                 vm.globals.get(idx).cloned().ok_or_else(|| {
                                     vm.error(
@@ -1792,15 +2052,15 @@ impl VM {
                     let Some(cond) = vm.stack.pop() else {
                         return Err(vm.error(artifact, "stack underflow on conditional jump"));
                     };
-                    match cond {
-                        VMValue::Bool(false) => {
+                    match cond.as_bool() {
+                        Some(false) => {
                             let Some(next_ip) = frame.ip.checked_add(offset) else {
                                 return Err(vm.error(artifact, "jump overflow"));
                             };
                             frame.ip = next_ip;
                         }
-                        VMValue::Bool(true) => {}
-                        _ => return Err(vm.error(artifact, "conditional jump requires a Bool")),
+                        Some(true) => {}
+                        None => return Err(vm.error(artifact, "conditional jump requires a Bool")),
                     }
                 }
                 x if x == Opcode::MatchFail as u8 => {
@@ -1811,49 +2071,53 @@ impl VM {
                     let Some(value) = vm.stack.pop() else {
                         return Err(vm.error(artifact, "stack underflow on chain_check"));
                     };
-                    match value {
-                        VMValue::Variant(tag, payload) if tag == "ok" || tag == "some" => {
-                            let unwrapped = payload.map(|inner| *inner).ok_or_else(|| {
+                    match value.as_heap() {
+                        Some(HeapVal::Variant(tag, payload))
+                            if tag == "ok" || tag == "some" =>
+                        {
+                            let unwrapped = payload.as_ref().map(|v| v.clone()).ok_or_else(|| {
                                 vm.error(artifact, "chain_check expected payload for ok/some")
                             })?;
                             let vlevel = Self::verbose_level();
                             if vlevel > 0 {
-                                let display = truncate_for_trace(&unwrapped, vlevel);
+                                let uvm = unwrapped.clone().to_vmvalue();
+                                let display = truncate_for_trace(&uvm, vlevel);
                                 trace_emit(&mut vm.trace_lines, format!("[TRACE]   bind <- \u{2192} Ok({})", display));
                             }
                             vm.stack.push(unwrapped);
                         }
-                        VMValue::Variant(tag, payload) if tag == "err" => {
+                        Some(HeapVal::Variant(tag, payload)) if tag == "err" => {
                             let vlevel = Self::verbose_level();
                             if vlevel > 0 {
-                                let display = match payload.as_deref() {
-                                    Some(v) => truncate_for_trace(v, vlevel),
+                                let display = match payload {
+                                    Some(v) => truncate_for_trace(&v.clone().to_vmvalue(), vlevel),
                                     None => String::new(),
                                 };
                                 trace_emit(&mut vm.trace_lines, format!("[TRACE]   bind <- \u{2192} Err({})", display));
                             }
-                            vm.stack.push(VMValue::Variant(tag, payload));
+                            vm.stack.push(value);
                             let Some(next_ip) = frame.ip.checked_add(offset) else {
                                 return Err(vm.error(artifact, "jump overflow"));
                             };
                             frame.ip = next_ip;
                         }
-                        VMValue::Variant(tag, None) if tag == "none" => {
+                        Some(HeapVal::Variant(tag, None)) if tag == "none" => {
                             let vlevel = Self::verbose_level();
                             if vlevel > 0 {
                                 trace_emit(&mut vm.trace_lines, "[TRACE]   bind <- \u{2192} None".to_string());
                             }
-                            vm.stack.push(VMValue::Variant(tag, None));
+                            vm.stack.push(value);
                             let Some(next_ip) = frame.ip.checked_add(offset) else {
                                 return Err(vm.error(artifact, "jump overflow"));
                             };
                             frame.ip = next_ip;
                         }
-                        other => {
+                        _ => {
                             return Err(vm.error(
                                 artifact,
                                 &format!(
-                                    "chain_check requires ok/some/err/none variant, got {other:?}"
+                                    "chain_check requires ok/some/err/none variant, got {:?}",
+                                    value
                                 ),
                             ));
                         }
@@ -1864,23 +2128,25 @@ impl VM {
                     let Some(value) = vm.stack.pop() else {
                         return Err(vm.error(artifact, "stack underflow on legacy_bind_check"));
                     };
-                    match value {
-                        VMValue::Variant(tag, payload) if tag == "ok" || tag == "some" => {
-                            let unwrapped = payload.map(|inner| *inner).ok_or_else(|| {
+                    match value.as_heap() {
+                        Some(HeapVal::Variant(tag, payload))
+                            if tag == "ok" || tag == "some" =>
+                        {
+                            let unwrapped = payload.as_ref().map(|v| v.clone()).ok_or_else(|| {
                                 vm.error(artifact, "legacy_bind_check expected payload for ok/some")
                             })?;
                             vm.stack.push(unwrapped);
                         }
-                        VMValue::Variant(tag, payload) if tag == "err" || tag == "none" => {
-                            vm.stack.push(VMValue::Variant(tag, payload));
+                        Some(HeapVal::Variant(tag, _)) if tag == "err" || tag == "none" => {
+                            vm.stack.push(value);
                             let Some(next_ip) = frame.ip.checked_add(offset) else {
                                 return Err(vm.error(artifact, "jump overflow"));
                             };
                             frame.ip = next_ip;
                         }
-                        other => {
+                        _ => {
                             // Non-Result value: pass through unchanged (simple bind semantics)
-                            vm.stack.push(other);
+                            vm.stack.push(value);
                         }
                     }
                 }
@@ -1904,22 +2170,43 @@ impl VM {
                         .get(name_idx)
                         .map(|s| s.as_str())
                         .unwrap_or("?");
-                    match value {
-                        VMValue::Variant(tag, payload) if tag == "ok" || tag == "some" => {
-                            let unwrapped = payload.map(|inner| *inner).ok_or_else(|| {
+                    match value.as_heap() {
+                        Some(HeapVal::Variant(tag, payload))
+                            if tag == "ok" || tag == "some" =>
+                        {
+                            let unwrapped = payload.as_ref().map(|v| v.clone()).ok_or_else(|| {
                                 vm.error(artifact, "seq_stage_check expected payload for ok/some")
                             })?;
                             let vlevel = Self::verbose_level();
+                            #[cfg(not(target_arch = "wasm32"))]
+                            let needs_otel = vm.current_otel_span_id.is_some();
+                            #[cfg(target_arch = "wasm32")]
+                            let needs_otel = false;
+                            let uvm = if vlevel > 0 || needs_otel {
+                                Some(unwrapped.clone().to_vmvalue())
+                            } else {
+                                None
+                            };
                             if vlevel > 0 {
-                                let display = truncate_for_trace(&unwrapped, vlevel);
+                                let display = truncate_for_trace(uvm.as_ref().unwrap(), vlevel);
                                 trace_emit(&mut vm.trace_lines, format!("[TRACE] stage {}: exit Ok({})", stage_name, display));
+                            }
+                            // v22.7.0: OTel span 終了（Ok）
+                            #[cfg(not(target_arch = "wasm32"))]
+                            if let Some(ref sid) = vm.current_otel_span_id.take() {
+                                let out_items = otel_value_items(uvm.as_ref().unwrap());
+                                crate::otel::otel_span_end(sid, 0, out_items, crate::otel::OtelStatus::Ok);
                             }
                             vm.stack.push(unwrapped);
                         }
-                        VMValue::Variant(tag, payload) if tag == "err" || tag == "none" => {
-                            let inner_msg = match payload.as_deref() {
-                                Some(VMValue::Str(s)) => s.clone(),
-                                Some(other) => format!("{other:?}"),
+                        Some(HeapVal::Variant(tag, payload))
+                            if tag == "err" || tag == "none" =>
+                        {
+                            let inner_msg = match payload {
+                                Some(v) => match v.as_str() {
+                                    Some(s) => s.to_string(),
+                                    None => format!("{v:?}"),
+                                },
                                 None => "none".to_string(),
                             };
                             let vlevel = Self::verbose_level();
@@ -1930,6 +2217,14 @@ impl VM {
                                     stage_idx + 1, total, stage_name
                                 ));
                             }
+                            // v22.7.0: OTel span 終了（Err）
+                            #[cfg(not(target_arch = "wasm32"))]
+                            if let Some(ref sid) = vm.current_otel_span_id.take() {
+                                crate::otel::otel_span_end(
+                                    sid, 0, 0,
+                                    crate::otel::OtelStatus::Error(inner_msg.clone()),
+                                );
+                            }
                             let wrapped = format!(
                                 "pipeline stopped at stage {}/{} '{}': {}",
                                 stage_idx + 1,
@@ -1937,31 +2232,48 @@ impl VM {
                                 stage_name,
                                 inner_msg
                             );
-                            vm.stack.push(VMValue::Variant(
+                            vm.stack.push(NanVal::from_heap(HeapVal::Variant(
                                 "err".to_string(),
-                                Some(Box::new(VMValue::Str(wrapped))),
-                            ));
+                                Some(NanVal::from_str(wrapped)),
+                            )));
                             let Some(next_ip) = frame.ip.checked_add(offset) else {
                                 return Err(vm.error(artifact, "jump overflow"));
                             };
                             frame.ip = next_ip;
                         }
-                        other => {
+                        _ => {
                             // Non-Result value: pass through unchanged
-                            vm.stack.push(other);
+                            // v22.7.0: OTel span 終了（非 Result 値）
+                            #[cfg(not(target_arch = "wasm32"))]
+                            if let Some(ref sid) = vm.current_otel_span_id.take() {
+                                let out_items = otel_value_items(&value.clone().to_vmvalue());
+                                crate::otel::otel_span_end(sid, 0, out_items, crate::otel::OtelStatus::Ok);
+                            }
+                            vm.stack.push(value);
                         }
                     }
                 }
                 x if x == Opcode::SeqStageEnter as u8 => {
                     // layout: name_str_idx(2)
                     let name_idx = Self::read_u16(function, frame)? as usize;
+                    // v22.7.0: stage_name を hoist（OTel + verbose 両方で使う）
+                    let stage_name = artifact
+                        .str_table
+                        .get(name_idx)
+                        .map(|s| s.as_str())
+                        .unwrap_or("?");
                     if Self::verbose_level() > 0 {
-                        let stage_name = artifact
-                            .str_table
-                            .get(name_idx)
-                            .map(|s| s.as_str())
-                            .unwrap_or("?");
                         trace_emit(&mut vm.trace_lines, format!("[TRACE] stage {}: enter", stage_name));
+                    }
+                    // v22.7.0: OTel span 開始
+                    #[cfg(not(target_arch = "wasm32"))]
+                    if crate::otel::otel_is_enabled() {
+                        let parent  = crate::otel::otel_current_parent();
+                        let span_id = crate::otel::otel_span_start(
+                            &format!("stage:{}", stage_name),
+                            parent.as_ref(),
+                        );
+                        vm.current_otel_span_id = Some(span_id);
                     }
                 }
                 x if x == Opcode::MergeRecord as u8 => {
@@ -1979,32 +2291,32 @@ impl VM {
                         return Err(vm.error(artifact, "MergeRecord: field name count mismatch"));
                     }
                     // Pop override values (pushed left-to-right → pop right-to-left)
-                    let mut override_vals: Vec<VMValue> = (0..n_overrides)
-                        .map(|_| vm.stack.pop().unwrap_or(VMValue::Unit))
+                    let mut override_vals: Vec<NanVal> = (0..n_overrides)
+                        .map(|_| vm.stack.pop().unwrap_or_else(NanVal::unit))
                         .collect();
                     override_vals.reverse();
                     // Pop base record
                     let base_val = vm.stack.pop().ok_or_else(|| {
                         vm.error(artifact, "MergeRecord: stack underflow on base")
                     })?;
-                    let mut fields = match base_val {
-                        VMValue::Record(map) => map,
-                        _ => return Err(vm.error(artifact, "MergeRecord: base is not a record")),
+                    let mut fields: RecordMap = match base_val.as_record() {
+                        Some(map) => map.clone(),
+                        None => return Err(vm.error(artifact, "MergeRecord: base is not a record")),
                     };
                     // Apply overrides
                     for (name, val) in field_names.into_iter().zip(override_vals) {
                         fields.insert(name, val);
                     }
-                    vm.stack.push(VMValue::Record(fields));
+                    vm.stack.push(NanVal::from_record(fields));
                 }
                 // ── list pattern opcodes (v17.2.0) ────────────────────────────
                 x if x == Opcode::ListLen as u8 => {
                     let v = vm.stack.pop().ok_or_else(|| {
                         vm.error(artifact, "stack underflow on list_len")
                     })?;
-                    match v {
-                        VMValue::List(fl) => vm.stack.push(VMValue::Int(fl.len() as i64)),
-                        _ => return Err(vm.error(artifact, "list_len requires a List")),
+                    match v.as_list() {
+                        Some(fl) => vm.stack.push(NanVal::from_int(fl.len() as i64)),
+                        None => return Err(vm.error(artifact, "list_len requires a List")),
                     }
                 }
                 x if x == Opcode::ListGet as u8 => {
@@ -2014,12 +2326,12 @@ impl VM {
                     let list_val = vm.stack.pop().ok_or_else(|| {
                         vm.error(artifact, "stack underflow on list_get (list)")
                     })?;
-                    match (list_val, idx_val) {
-                        (VMValue::List(fl), VMValue::Int(i)) => {
+                    match (list_val.as_list(), idx_val.as_int()) {
+                        (Some(fl), Some(i)) => {
                             let elem = fl.get(i as usize).cloned().ok_or_else(|| {
                                 vm.error(artifact, "list_get: index out of bounds")
                             })?;
-                            vm.stack.push(elem);
+                            vm.stack.push(NanVal::from_vmvalue(elem));
                         }
                         _ => return Err(vm.error(artifact, "list_get requires (List, Int)")),
                     }
@@ -2031,9 +2343,9 @@ impl VM {
                     let list_val = vm.stack.pop().ok_or_else(|| {
                         vm.error(artifact, "stack underflow on list_drop (list)")
                     })?;
-                    match (list_val, n_val) {
-                        (VMValue::List(fl), VMValue::Int(n)) => {
-                            vm.stack.push(VMValue::List(fl.drop_front(n.max(0) as usize)));
+                    match (list_val.as_list(), n_val.as_int()) {
+                        (Some(fl), Some(n)) => {
+                            vm.stack.push(NanVal::from_list(fl.drop_front(n.max(0) as usize)));
                         }
                         _ => return Err(vm.error(artifact, "list_drop requires (List, Int)")),
                     }
@@ -2048,15 +2360,15 @@ impl VM {
                     let cond = vm.stack.pop().ok_or_else(|| {
                         vm.error(artifact, "stack underflow on refinement_assert")
                     })?;
-                    match cond {
-                        VMValue::Bool(true) => {}
-                        VMValue::Bool(false) => {
+                    match cond.as_bool() {
+                        Some(true) => {}
+                        Some(false) => {
                             return Err(vm.error(
                                 artifact,
                                 &format!("refinement violated: argument `{}` does not satisfy its constraint", param_name),
                             ));
                         }
-                        _ => {
+                        None => {
                             return Err(vm.error(
                                 artifact,
                                 "refinement_assert expects a Bool",
@@ -2068,12 +2380,12 @@ impl VM {
                 x if x == Opcode::AddLL as u8 => {
                     let a = Self::read_u16(function, frame)? as usize;
                     let b = Self::read_u16(function, frame)? as usize;
-                    let base = frame.base; // extract before closures to release mutable borrow
+                    let base = frame.base;
                     let va = vm.stack.get(base + a).cloned()
                         .ok_or_else(|| vm.error(artifact, "AddLL: slot a out of bounds"))?;
                     let vb = vm.stack.get(base + b).cloned()
                         .ok_or_else(|| vm.error(artifact, "AddLL: slot b out of bounds"))?;
-                    vm.stack.push(apply_numeric_binop(va, vb, |x, y| x + y, |x, y| x + y, "add", artifact, &vm.frames)?);
+                    vm.stack.push(apply_numeric_binop_nan(va, vb, |x, y| x + y, |x, y| x + y, "add", artifact, &vm.frames)?);
                 }
                 x if x == Opcode::SubLL as u8 => {
                     let a = Self::read_u16(function, frame)? as usize;
@@ -2083,7 +2395,7 @@ impl VM {
                         .ok_or_else(|| vm.error(artifact, "SubLL: slot a out of bounds"))?;
                     let vb = vm.stack.get(base + b).cloned()
                         .ok_or_else(|| vm.error(artifact, "SubLL: slot b out of bounds"))?;
-                    vm.stack.push(apply_numeric_binop(va, vb, |x, y| x - y, |x, y| x - y, "sub", artifact, &vm.frames)?);
+                    vm.stack.push(apply_numeric_binop_nan(va, vb, |x, y| x - y, |x, y| x - y, "sub", artifact, &vm.frames)?);
                 }
                 x if x == Opcode::MulLL as u8 => {
                     let a = Self::read_u16(function, frame)? as usize;
@@ -2093,7 +2405,7 @@ impl VM {
                         .ok_or_else(|| vm.error(artifact, "MulLL: slot a out of bounds"))?;
                     let vb = vm.stack.get(base + b).cloned()
                         .ok_or_else(|| vm.error(artifact, "MulLL: slot b out of bounds"))?;
-                    vm.stack.push(apply_numeric_binop(va, vb, |x, y| x * y, |x, y| x * y, "mul", artifact, &vm.frames)?);
+                    vm.stack.push(apply_numeric_binop_nan(va, vb, |x, y| x * y, |x, y| x * y, "mul", artifact, &vm.frames)?);
                 }
                 x if x == Opcode::AddLC as u8 => {
                     let a = Self::read_u16(function, frame)? as usize;
@@ -2102,9 +2414,9 @@ impl VM {
                     let va = vm.stack.get(base + a).cloned()
                         .ok_or_else(|| vm.error(artifact, "AddLC: slot out of bounds"))?;
                     let vk = function.constants.get(k_idx).cloned()
-                        .map(constant_to_value)
+                        .map(constant_to_nan)
                         .ok_or_else(|| vm.error(artifact, "AddLC: constant out of bounds"))?;
-                    vm.stack.push(apply_numeric_binop(va, vk, |x, y| x + y, |x, y| x + y, "add", artifact, &vm.frames)?);
+                    vm.stack.push(apply_numeric_binop_nan(va, vk, |x, y| x + y, |x, y| x + y, "add", artifact, &vm.frames)?);
                 }
                 x if x == Opcode::SubLC as u8 => {
                     let a = Self::read_u16(function, frame)? as usize;
@@ -2113,9 +2425,9 @@ impl VM {
                     let va = vm.stack.get(base + a).cloned()
                         .ok_or_else(|| vm.error(artifact, "SubLC: slot out of bounds"))?;
                     let vk = function.constants.get(k_idx).cloned()
-                        .map(constant_to_value)
+                        .map(constant_to_nan)
                         .ok_or_else(|| vm.error(artifact, "SubLC: constant out of bounds"))?;
-                    vm.stack.push(apply_numeric_binop(va, vk, |x, y| x - y, |x, y| x - y, "sub", artifact, &vm.frames)?);
+                    vm.stack.push(apply_numeric_binop_nan(va, vk, |x, y| x - y, |x, y| x - y, "sub", artifact, &vm.frames)?);
                 }
                 x if x == Opcode::LeLC as u8 => {
                     let a = Self::read_u16(function, frame)? as usize;
@@ -2124,9 +2436,9 @@ impl VM {
                     let va = vm.stack.get(base + a).cloned()
                         .ok_or_else(|| vm.error(artifact, "LeLC: slot out of bounds"))?;
                     let vk = function.constants.get(k_idx).cloned()
-                        .map(constant_to_value)
+                        .map(constant_to_nan)
                         .ok_or_else(|| vm.error(artifact, "LeLC: constant out of bounds"))?;
-                    vm.stack.push(compare_pair((va, vk), |a, b| a <= b, artifact, &vm.frames)?);
+                    vm.stack.push(compare_pair_nan((va, vk), |a, b| a <= b, artifact, &vm.frames)?);
                 }
                 x if x == Opcode::LtLC as u8 => {
                     let a = Self::read_u16(function, frame)? as usize;
@@ -2135,9 +2447,9 @@ impl VM {
                     let va = vm.stack.get(base + a).cloned()
                         .ok_or_else(|| vm.error(artifact, "LtLC: slot out of bounds"))?;
                     let vk = function.constants.get(k_idx).cloned()
-                        .map(constant_to_value)
+                        .map(constant_to_nan)
                         .ok_or_else(|| vm.error(artifact, "LtLC: constant out of bounds"))?;
-                    vm.stack.push(compare_pair((va, vk), |a, b| a < b, artifact, &vm.frames)?);
+                    vm.stack.push(compare_pair_nan((va, vk), |a, b| a < b, artifact, &vm.frames)?);
                 }
                 x if x == Opcode::EqLC as u8 => {
                     let a = Self::read_u16(function, frame)? as usize;
@@ -2146,9 +2458,9 @@ impl VM {
                     let va = vm.stack.get(base + a).cloned()
                         .ok_or_else(|| vm.error(artifact, "EqLC: slot out of bounds"))?;
                     let vk = function.constants.get(k_idx).cloned()
-                        .map(constant_to_value)
+                        .map(constant_to_nan)
                         .ok_or_else(|| vm.error(artifact, "EqLC: constant out of bounds"))?;
-                    vm.stack.push(VMValue::Bool(va == vk));
+                    vm.stack.push(NanVal::from_bool(va == vk));
                 }
                 x if x == Opcode::GetFieldL as u8 => {
                     let a = Self::read_u16(function, frame)? as usize;
@@ -2158,26 +2470,30 @@ impl VM {
                         .ok_or_else(|| vm.error(artifact, "GetFieldL: str_table index out of bounds"))?;
                     let value = vm.stack.get(base + a).cloned()
                         .ok_or_else(|| vm.error(artifact, "GetFieldL: local slot out of bounds"))?;
-                    match value {
-                        VMValue::Record(map) => {
-                            let v = map.get(&field_name).cloned()
-                                .ok_or_else(|| vm.error(artifact, &format!("GetFieldL: missing field `{field_name}`")))?;
-                            vm.stack.push(v);
-                        }
-                        VMValue::Builtin(ns) => {
-                            let full = format!("{}.{}", ns, field_name);
-                            let v = match full.as_str() {
-                                "Math.pi" => VMValue::Float(std::f64::consts::PI),
-                                "Math.e"  => VMValue::Float(std::f64::consts::E),
-                                _         => VMValue::Builtin(full),
-                            };
-                            vm.stack.push(v);
-                        }
-                        VMValue::VariantCtor(ns) => {
-                            vm.stack.push(VMValue::Builtin(format!("{}.{}", ns, field_name)));
-                        }
-                        other => return Err(vm.error(artifact,
-                            &format!("GetFieldL: expected Record/Builtin/VariantCtor, got {}", vmvalue_type_name(&other)))),
+                    if let Some(map) = value.as_record() {
+                        let v = map.get(&field_name).cloned()
+                            .ok_or_else(|| vm.error(artifact, &format!("GetFieldL: missing field `{field_name}`")))?;
+                        vm.stack.push(v);
+                    } else if let Some(heap) = value.as_heap() {
+                        let pushed = match heap {
+                            HeapVal::Builtin(ns) => {
+                                let full = format!("{}.{}", ns, field_name);
+                                match full.as_str() {
+                                    "Math.pi" => NanVal::from_float(std::f64::consts::PI),
+                                    "Math.e"  => NanVal::from_float(std::f64::consts::E),
+                                    _         => NanVal::from_heap(HeapVal::Builtin(full)),
+                                }
+                            }
+                            HeapVal::VariantCtor(ns) => {
+                                NanVal::from_heap(HeapVal::Builtin(format!("{}.{}", ns, field_name)))
+                            }
+                            _ => return Err(vm.error(artifact,
+                                &format!("GetFieldL: expected Record/Builtin/VariantCtor, got {:?}", value))),
+                        };
+                        vm.stack.push(pushed);
+                    } else {
+                        return Err(vm.error(artifact,
+                            &format!("GetFieldL: expected Record/Builtin/VariantCtor, got {:?}", value)));
                     }
                 }
                 x if x == Opcode::MoveLocal as u8 => {
@@ -2188,7 +2504,7 @@ impl VM {
                         .ok_or_else(|| vm.error(artifact, "MoveLocal: src slot out of bounds"))?;
                     let dst_idx = base + dst;
                     if dst_idx >= vm.stack.len() {
-                        vm.stack.resize(dst_idx + 1, VMValue::Unit);
+                        vm.stack.resize_with(dst_idx + 1, NanVal::unit);
                     }
                     vm.stack[dst_idx] = value;
                 }
@@ -2201,21 +2517,26 @@ impl VM {
                     let Some(value) = vm.stack.pop() else {
                         return Err(vm.error(artifact, "stack underflow on variant check"));
                     };
-                    match value {
-                        VMValue::Variant(tag, payload) if tag == expected => {
-                            vm.stack.push(VMValue::Variant(tag, payload));
-                        }
-                        VMValue::VariantCtor(name) if name == expected => {
-                            // Zero-arg variant: matches as Variant with no payload
-                            vm.stack.push(VMValue::Variant(name, None));
-                        }
-                        other => {
-                            vm.stack.push(other);
-                            let Some(next_ip) = frame.ip.checked_add(offset) else {
-                                return Err(vm.error(artifact, "jump overflow"));
-                            };
-                            frame.ip = next_ip;
-                        }
+                    let matched = match value.as_heap() {
+                        Some(HeapVal::Variant(tag, _)) if tag == &expected => true,
+                        Some(HeapVal::VariantCtor(name)) if name == &expected => true,
+                        _ => false,
+                    };
+                    if matched {
+                        // Normalize VariantCtor to zero-arg Variant
+                        let normalized = match value.as_heap() {
+                            Some(HeapVal::VariantCtor(_)) => {
+                                NanVal::from_heap(HeapVal::Variant(expected, None))
+                            }
+                            _ => value,
+                        };
+                        vm.stack.push(normalized);
+                    } else {
+                        vm.stack.push(value);
+                        let Some(next_ip) = frame.ip.checked_add(offset) else {
+                            return Err(vm.error(artifact, "jump overflow"));
+                        };
+                        frame.ip = next_ip;
                     }
                 }
                 x if x == Opcode::GetField as u8 => {
@@ -2231,30 +2552,30 @@ impl VM {
                         .stack
                         .pop()
                         .ok_or_else(|| vm.error(artifact, "stack underflow on get_field"))?;
-                    match value {
-                        VMValue::Record(map) => {
-                            let field = map.get(&field_name).cloned().ok_or_else(|| {
-                                vm.error(artifact, &format!("missing record field `{field_name}`"))
-                            })?;
-                            vm.stack.push(field);
-                        }
-                        VMValue::Builtin(ns) => {
-                            let full = format!("{}.{}", ns, field_name);
-                            // 0-arg numeric constants: evaluate immediately so `Math.pi`
-                            // can be used as a bare expression without parentheses.
-                            let value = match full.as_str() {
-                                "Math.pi" => VMValue::Float(std::f64::consts::PI),
-                                "Math.e" => VMValue::Float(std::f64::consts::E),
-                                _ => VMValue::Builtin(full),
-                            };
-                            vm.stack.push(value);
-                        }
-                        // TypeName.validate: treat user-defined type names as namespace (v6.6.0)
-                        VMValue::VariantCtor(ns) => {
-                            let full = format!("{}.{}", ns, field_name);
-                            vm.stack.push(VMValue::Builtin(full));
-                        }
-                        _ => return Err(vm.error(artifact, "get_field requires a record value")),
+                    if let Some(map) = value.as_record() {
+                        let field = map.get(&field_name).cloned().ok_or_else(|| {
+                            vm.error(artifact, &format!("missing record field `{field_name}`"))
+                        })?;
+                        vm.stack.push(field);
+                    } else if let Some(heap) = value.as_heap() {
+                        let pushed = match heap {
+                            HeapVal::Builtin(ns) => {
+                                let full = format!("{}.{}", ns, field_name);
+                                match full.as_str() {
+                                    "Math.pi" => NanVal::from_float(std::f64::consts::PI),
+                                    "Math.e"  => NanVal::from_float(std::f64::consts::E),
+                                    _         => NanVal::from_heap(HeapVal::Builtin(full)),
+                                }
+                            }
+                            // TypeName.validate: treat user-defined type names as namespace (v6.6.0)
+                            HeapVal::VariantCtor(ns) => {
+                                NanVal::from_heap(HeapVal::Builtin(format!("{}.{}", ns, field_name)))
+                            }
+                            _ => return Err(vm.error(artifact, "get_field requires a record value")),
+                        };
+                        vm.stack.push(pushed);
+                    } else {
+                        return Err(vm.error(artifact, "get_field requires a record value"));
                     }
                 }
                 x if x == Opcode::BuildRecord as u8 => {
@@ -2303,29 +2624,28 @@ impl VM {
                         })?);
                     }
                     values.reverse();
-                    let mut map = HashMap::with_capacity(field_count);
+                    let mut map: RecordMap = HashMap::with_capacity(field_count);
                     for (name, value) in field_names.into_iter().zip(values.into_iter()) {
                         map.insert(name, value);
                     }
-                    vm.stack.push(VMValue::Record(map));
+                    vm.stack.push(NanVal::from_record(map));
                 }
                 x if x == Opcode::MakeClosure as u8 => {
                     let global_idx = Self::read_u16(function, frame)? as usize;
                     let capture_count = Self::read_u16(function, frame)? as usize;
-                    let mut captures = Vec::with_capacity(capture_count);
+                    let mut captures: Vec<NanVal> = Vec::with_capacity(capture_count);
                     for _ in 0..capture_count {
                         captures.push(vm.stack.pop().ok_or_else(|| {
                             vm.error(artifact, "stack underflow on make_closure")
                         })?);
                     }
                     captures.reverse();
-                    let target =
-                        vm.globals.get(global_idx).cloned().ok_or_else(|| {
-                            vm.error(artifact, "closure global index out of bounds")
-                        })?;
-                    match target {
-                        VMValue::CompiledFn(fn_idx) => {
-                            vm.stack.push(VMValue::Closure(fn_idx, captures))
+                    let target = vm.globals.get(global_idx).cloned().ok_or_else(|| {
+                        vm.error(artifact, "closure global index out of bounds")
+                    })?;
+                    match target.as_heap() {
+                        Some(HeapVal::CompiledFn(fn_idx)) => {
+                            vm.stack.push(NanVal::from_heap(HeapVal::Closure(*fn_idx, captures)));
                         }
                         _ => {
                             return Err(vm.error(
@@ -2350,32 +2670,29 @@ impl VM {
                         .stack
                         .pop()
                         .ok_or_else(|| vm.error(artifact, "stack underflow on get_field_c"))?;
-                    match value {
-                        VMValue::Record(map) => {
-                            let field = map.get(&field_name).cloned().ok_or_else(|| {
-                                vm.error(artifact, &format!("missing record field `{field_name}`"))
-                            })?;
-                            vm.stack.push(field);
-                        }
-                        VMValue::Builtin(ns) => {
-                            let full = format!("{}.{}", ns, field_name);
-                            let value = match full.as_str() {
-                                "Math.pi" => VMValue::Float(std::f64::consts::PI),
-                                "Math.e" => VMValue::Float(std::f64::consts::E),
-                                _ => VMValue::Builtin(full),
-                            };
-                            vm.stack.push(value);
-                        }
-                        VMValue::VariantCtor(ns) => {
-                            let full = format!("{}.{}", ns, field_name);
-                            vm.stack.push(VMValue::Builtin(full));
-                        }
-                        _ => {
-                            return Err(vm.error(
-                                artifact,
-                                "get_field_c requires a record or builtin value",
-                            ));
-                        }
+                    if let Some(map) = value.as_record() {
+                        let field = map.get(&field_name).cloned().ok_or_else(|| {
+                            vm.error(artifact, &format!("missing record field `{field_name}`"))
+                        })?;
+                        vm.stack.push(field);
+                    } else if let Some(heap) = value.as_heap() {
+                        let pushed = match heap {
+                            HeapVal::Builtin(ns) => {
+                                let full = format!("{}.{}", ns, field_name);
+                                match full.as_str() {
+                                    "Math.pi" => NanVal::from_float(std::f64::consts::PI),
+                                    "Math.e"  => NanVal::from_float(std::f64::consts::E),
+                                    _         => NanVal::from_heap(HeapVal::Builtin(full)),
+                                }
+                            }
+                            HeapVal::VariantCtor(ns) => {
+                                NanVal::from_heap(HeapVal::Builtin(format!("{}.{}", ns, field_name)))
+                            }
+                            _ => return Err(vm.error(artifact, "get_field_c requires a record or builtin value")),
+                        };
+                        vm.stack.push(pushed);
+                    } else {
+                        return Err(vm.error(artifact, "get_field_c requires a record or builtin value"));
                     }
                 }
                 x if x == Opcode::BuildRecordC as u8 => {
@@ -2403,11 +2720,11 @@ impl VM {
                         })?);
                     }
                     values.reverse();
-                    let mut map = HashMap::with_capacity(n);
+                    let mut map: RecordMap = HashMap::with_capacity(n);
                     for (name, value) in field_names.into_iter().zip(values.into_iter()) {
                         map.insert(name, value);
                     }
-                    vm.stack.push(VMValue::Record(map));
+                    vm.stack.push(NanVal::from_record(map));
                 }
                 x if x == Opcode::MakeClosureN as u8 => {
                     let name_const_idx = Self::read_u16(function, frame)? as usize;
@@ -2421,7 +2738,7 @@ impl VM {
                             ));
                         }
                     };
-                    let mut captures = Vec::with_capacity(capture_count);
+                    let mut captures: Vec<NanVal> = Vec::with_capacity(capture_count);
                     for _ in 0..capture_count {
                         captures.push(vm.stack.pop().ok_or_else(|| {
                             vm.error(artifact, "stack underflow on make_closure_n")
@@ -2434,15 +2751,17 @@ impl VM {
                             &format!("MakeClosureN: function `{fn_name}` not found in globals"),
                         )
                     })?;
-                    vm.stack.push(VMValue::Closure(fn_idx, captures));
+                    vm.stack.push(NanVal::from_heap(HeapVal::Closure(fn_idx, captures)));
                 }
                 x if x == Opcode::GetVariantPayload as u8 => {
                     let value = vm.stack.pop().ok_or_else(|| {
                         vm.error(artifact, "stack underflow on get_variant_payload")
                     })?;
-                    match value {
-                        VMValue::Variant(_, Some(payload)) => vm.stack.push(*payload),
-                        VMValue::Variant(_, None) => {
+                    match value.as_heap() {
+                        Some(HeapVal::Variant(_, Some(payload))) => {
+                            vm.stack.push(payload.clone());
+                        }
+                        Some(HeapVal::Variant(_, None)) => {
                             return Err(vm.error(artifact, "variant has no payload"));
                         }
                         _ => {
@@ -2456,11 +2775,12 @@ impl VM {
                     vm.collect_frames.push(Vec::new());
                 }
                 x if x == Opcode::CollectEnd as u8 => {
-                    let values = vm
+                    let nan_values = vm
                         .collect_frames
                         .pop()
                         .ok_or_else(|| vm.error(artifact, "collect_end without collect_begin"))?;
-                    vm.stack.push(VMValue::List(FavList::new(values)));
+                    let vm_values: Vec<VMValue> = nan_values.into_iter().map(|v| v.to_vmvalue()).collect();
+                    vm.stack.push(NanVal::from_list(FavList::new(vm_values)));
                 }
                 x if x == Opcode::YieldValue as u8 => {
                     let Some(value) = vm.stack.pop() else {
@@ -2476,7 +2796,7 @@ impl VM {
                         return Err(vm.error(artifact, "stack underflow on emit"));
                     };
                     vm.emit_log.push(value);
-                    vm.stack.push(VMValue::Unit);
+                    vm.stack.push(NanVal::unit());
                 }
                 x if x == Opcode::Call as u8 => {
                     let arg_count = Self::read_u16(function, frame)? as usize;
@@ -2486,7 +2806,7 @@ impl VM {
                         .checked_sub(arg_count + 1)
                         .ok_or_else(|| vm.error(artifact, "stack underflow on call"))?;
                     let callee = vm.stack[callee_pos].clone();
-                    let mut args = Vec::with_capacity(arg_count);
+                    let mut args: Vec<NanVal> = Vec::with_capacity(arg_count);
                     for _ in 0..arg_count {
                         args.push(
                             vm.stack
@@ -2499,20 +2819,45 @@ impl VM {
                     // Iterative dispatch: push frame for compiled fns/closures instead of
                     // calling invoke_function recursively (avoids Rust stack overflow on
                     // deeply recursive Favnir programs).
-                    match callee {
-                        VMValue::CompiledFn(fn_idx) => {
+                    match callee.as_heap() {
+                        Some(HeapVal::CompiledFn(fn_idx)) => {
+                            let fn_idx = *fn_idx;
                             vm.push_compiled_frame(artifact, fn_idx, args)?;
                             vm.try_apply_tco(artifact);
                         }
-                        VMValue::Closure(fn_idx, captures) => {
-                            let mut full_args = captures;
+                        Some(HeapVal::Closure(fn_idx, captures)) => {
+                            let fn_idx = *fn_idx;
+                            let mut full_args: Vec<NanVal> = captures.clone();
                             full_args.extend(args);
                             vm.push_compiled_frame(artifact, fn_idx, full_args)?;
                             vm.try_apply_tco(artifact);
                         }
-                        other => {
-                            let result = vm.call_value(artifact, other, args)?;
+                        Some(HeapVal::VariantCtor(name)) => {
+                            let name = name.clone();
+                            let result = match args.len() {
+                                0 => NanVal::from_heap(HeapVal::Variant(name, None)),
+                                1 => NanVal::from_heap(HeapVal::Variant(name, Some(args.into_iter().next().unwrap()))),
+                                _ => {
+                                    let map: RecordMap = args.into_iter().enumerate()
+                                        .map(|(i, v)| (format!("_{i}"), v))
+                                        .collect();
+                                    NanVal::from_heap(HeapVal::Variant(name, Some(NanVal::from_record(map))))
+                                }
+                            };
                             vm.stack.push(result);
+                        }
+                        Some(HeapVal::Builtin(name)) => {
+                            let name = name.clone();
+                            let args_vm: Vec<VMValue> = args.into_iter().map(|v| v.to_vmvalue()).collect();
+                            let result = vm.call_builtin(artifact, &name, args_vm)?;
+                            vm.stack.push(NanVal::from_vmvalue(result));
+                        }
+                        _ => {
+                            // Bridge for any other heap value
+                            let callee_vm = callee.to_vmvalue();
+                            let args_vm: Vec<VMValue> = args.into_iter().map(|v| v.to_vmvalue()).collect();
+                            let result = vm.call_value(artifact, callee_vm, args_vm)?;
+                            vm.stack.push(NanVal::from_vmvalue(result));
                         }
                     }
                 }
@@ -2529,7 +2874,7 @@ impl VM {
                             ));
                         }
                     };
-                    let mut args = Vec::with_capacity(arg_count);
+                    let mut args: Vec<NanVal> = Vec::with_capacity(arg_count);
                     for _ in 0..arg_count {
                         args.push(
                             vm.stack.pop().ok_or_else(|| {
@@ -2549,104 +2894,89 @@ impl VM {
                         match fn_name.as_str() {
                             "Result.and_then" => {
                                 let func = args.pop().expect("Result.and_then: missing func");
-                                let result_val =
-                                    args.pop().expect("Result.and_then: missing result");
-                                match result_val {
-                                    VMValue::Variant(ref tag, _) if tag == "Ok" => {
-                                        let inner = match result_val {
-                                            VMValue::Variant(_, payload) => {
-                                                payload.map(|p| *p).unwrap_or(VMValue::Unit)
-                                            }
-                                            _ => unreachable!(),
-                                        };
-                                        match func {
-                                            VMValue::CompiledFn(fn_idx) => {
-                                                vm.push_compiled_frame(
-                                                    artifact,
-                                                    fn_idx,
-                                                    vec![inner],
-                                                )?;
+                                let result_val = args.pop().expect("Result.and_then: missing result");
+                                match result_val.as_heap() {
+                                    Some(HeapVal::Variant(tag, payload)) if tag == "Ok" => {
+                                        let inner = payload.as_ref().map(|v| v.clone()).unwrap_or_else(NanVal::unit);
+                                        match func.as_heap() {
+                                            Some(HeapVal::CompiledFn(fn_idx)) => {
+                                                let fn_idx = *fn_idx;
+                                                vm.push_compiled_frame(artifact, fn_idx, vec![inner])?;
                                                 vm.try_apply_tco(artifact);
                                             }
-                                            VMValue::Closure(fn_idx, captures) => {
-                                                let mut full_args = captures;
+                                            Some(HeapVal::Closure(fn_idx, captures)) => {
+                                                let fn_idx = *fn_idx;
+                                                let mut full_args: Vec<NanVal> = captures.clone();
                                                 full_args.push(inner);
-                                                vm.push_compiled_frame(
-                                                    artifact, fn_idx, full_args,
-                                                )?;
+                                                vm.push_compiled_frame(artifact, fn_idx, full_args)?;
                                                 vm.try_apply_tco(artifact);
                                             }
-                                            other => {
-                                                let r =
-                                                    vm.call_value(artifact, other, vec![inner])?;
-                                                vm.stack.push(r);
+                                            _ => {
+                                                let callee_vm = func.to_vmvalue();
+                                                let r = vm.call_value(artifact, callee_vm, vec![inner.to_vmvalue()])?;
+                                                vm.stack.push(NanVal::from_vmvalue(r));
                                             }
                                         }
                                     }
-                                    VMValue::Variant(ref tag, _) if tag == "Err" => {
+                                    Some(HeapVal::Variant(tag, _)) if tag == "Err" => {
                                         vm.stack.push(result_val);
                                     }
                                     _ => {
-                                        return Err(vm.error(
-                                            artifact,
-                                            "Result.and_then: expected a Result value",
-                                        ));
+                                        return Err(vm.error(artifact, "Result.and_then: expected a Result value"));
                                     }
                                 }
                             }
                             "Option.and_then" => {
                                 let func = args.pop().expect("Option.and_then: missing func");
                                 let opt_val = args.pop().expect("Option.and_then: missing option");
-                                match opt_val {
-                                    VMValue::Variant(ref tag, _) if tag == "Some" => {
-                                        let inner = match opt_val {
-                                            VMValue::Variant(_, payload) => {
-                                                payload.map(|p| *p).unwrap_or(VMValue::Unit)
-                                            }
-                                            _ => unreachable!(),
-                                        };
-                                        match func {
-                                            VMValue::CompiledFn(fn_idx) => {
-                                                vm.push_compiled_frame(
-                                                    artifact,
-                                                    fn_idx,
-                                                    vec![inner],
-                                                )?;
+                                match opt_val.as_heap() {
+                                    Some(HeapVal::Variant(tag, payload)) if tag == "Some" => {
+                                        let inner = payload.as_ref().map(|v| v.clone()).unwrap_or_else(NanVal::unit);
+                                        match func.as_heap() {
+                                            Some(HeapVal::CompiledFn(fn_idx)) => {
+                                                let fn_idx = *fn_idx;
+                                                vm.push_compiled_frame(artifact, fn_idx, vec![inner])?;
                                                 vm.try_apply_tco(artifact);
                                             }
-                                            VMValue::Closure(fn_idx, captures) => {
-                                                let mut full_args = captures;
+                                            Some(HeapVal::Closure(fn_idx, captures)) => {
+                                                let fn_idx = *fn_idx;
+                                                let mut full_args: Vec<NanVal> = captures.clone();
                                                 full_args.push(inner);
-                                                vm.push_compiled_frame(
-                                                    artifact, fn_idx, full_args,
-                                                )?;
+                                                vm.push_compiled_frame(artifact, fn_idx, full_args)?;
                                                 vm.try_apply_tco(artifact);
                                             }
-                                            other => {
-                                                let r =
-                                                    vm.call_value(artifact, other, vec![inner])?;
-                                                vm.stack.push(r);
+                                            _ => {
+                                                let callee_vm = func.to_vmvalue();
+                                                let r = vm.call_value(artifact, callee_vm, vec![inner.to_vmvalue()])?;
+                                                vm.stack.push(NanVal::from_vmvalue(r));
                                             }
                                         }
                                     }
-                                    VMValue::Variant(ref tag, _) if tag == "None" => {
-                                        vm.stack.push(VMValue::Variant("None".to_string(), None));
+                                    Some(HeapVal::Variant(tag, _)) if tag == "None" => {
+                                        vm.stack.push(NanVal::from_heap(HeapVal::Variant("None".to_string(), None)));
                                     }
                                     _ => {
-                                        return Err(vm.error(
-                                            artifact,
-                                            "Option.and_then: expected an Option value",
-                                        ));
+                                        return Err(vm.error(artifact, "Option.and_then: expected an Option value"));
                                     }
                                 }
                             }
                             _ => {
-                                let result = vm.call_builtin(artifact, &fn_name, args)?;
-                                vm.stack.push(result);
+                                let args_vm: Vec<VMValue> = args.into_iter().map(|v| v.to_vmvalue()).collect();
+                                let result = vm.call_builtin(artifact, &fn_name, args_vm)?;
+                                vm.stack.push(NanVal::from_vmvalue(result));
                             }
                         }
                     } else if looks_like_variant_ctor(&fn_name) {
-                        let result = vm.call_value(artifact, VMValue::VariantCtor(fn_name), args)?;
+                        let result = match args.len() {
+                            0 => NanVal::from_heap(HeapVal::Variant(fn_name, None)),
+                            1 => NanVal::from_heap(HeapVal::Variant(fn_name, Some(args.into_iter().next().unwrap()))),
+                            _ => {
+                                let map: RecordMap = args.into_iter().enumerate()
+                                    .map(|(i, v)| (format!("_{i}"), v))
+                                    .collect();
+                                NanVal::from_heap(HeapVal::Variant(fn_name, Some(NanVal::from_record(map))))
+                            }
+                        };
                         vm.stack.push(result);
                     } else {
                         return Err(vm.error(
@@ -2671,150 +3001,103 @@ impl VM {
                     let Some(value) = vm.stack.pop() else {
                         return Err(vm.error(artifact, "stack underflow on JumpIfNotVariantC"));
                     };
-                    match value {
-                        VMValue::Variant(tag, payload) if tag == expected => {
-                            vm.stack.push(VMValue::Variant(tag, payload));
-                        }
-                        VMValue::VariantCtor(name) if name == expected => {
-                            vm.stack.push(VMValue::Variant(name, None));
-                        }
-                        other => {
-                            vm.stack.push(other);
-                            let Some(next_ip) = frame.ip.checked_add(offset) else {
-                                return Err(vm.error(artifact, "JumpIfNotVariantC jump overflow"));
-                            };
-                            frame.ip = next_ip;
-                        }
+                    let matched = match value.as_heap() {
+                        Some(HeapVal::Variant(tag, _)) if tag == &expected => true,
+                        Some(HeapVal::VariantCtor(name)) if name == &expected => true,
+                        _ => false,
+                    };
+                    if matched {
+                        let normalized = match value.as_heap() {
+                            Some(HeapVal::VariantCtor(_)) => {
+                                NanVal::from_heap(HeapVal::Variant(expected, None))
+                            }
+                            _ => value,
+                        };
+                        vm.stack.push(normalized);
+                    } else {
+                        vm.stack.push(value);
+                        let Some(next_ip) = frame.ip.checked_add(offset) else {
+                            return Err(vm.error(artifact, "JumpIfNotVariantC jump overflow"));
+                        };
+                        frame.ip = next_ip;
                     }
                 }
                 x if x == Opcode::Add as u8 => {
                     let (left, right) = vm.pop_pair(artifact)?;
-                    vm.stack.push(apply_numeric_binop(
-                        left,
-                        right,
-                        |a, b| a + b,
-                        |a, b| a + b,
-                        "add",
-                        artifact,
-                        &vm.frames,
+                    vm.stack.push(apply_numeric_binop_nan(
+                        left, right, |a, b| a + b, |a, b| a + b, "add", artifact, &vm.frames,
                     )?);
                 }
                 x if x == Opcode::Sub as u8 => {
                     let (left, right) = vm.pop_pair(artifact)?;
-                    vm.stack.push(apply_numeric_binop(
-                        left,
-                        right,
-                        |a, b| a - b,
-                        |a, b| a - b,
-                        "sub",
-                        artifact,
-                        &vm.frames,
+                    vm.stack.push(apply_numeric_binop_nan(
+                        left, right, |a, b| a - b, |a, b| a - b, "sub", artifact, &vm.frames,
                     )?);
                 }
                 x if x == Opcode::Mul as u8 => {
                     let (left, right) = vm.pop_pair(artifact)?;
-                    vm.stack.push(apply_numeric_binop(
-                        left,
-                        right,
-                        |a, b| a * b,
-                        |a, b| a * b,
-                        "mul",
-                        artifact,
-                        &vm.frames,
+                    vm.stack.push(apply_numeric_binop_nan(
+                        left, right, |a, b| a * b, |a, b| a * b, "mul", artifact, &vm.frames,
                     )?);
                 }
                 x if x == Opcode::Div as u8 => {
                     let (left, right) = vm.pop_pair(artifact)?;
-                    let division_by_zero = match (&left, &right) {
-                        (VMValue::Int(_), VMValue::Int(0)) => true,
-                        (VMValue::Float(_), VMValue::Float(v)) => *v == 0.0,
-                        (VMValue::Int(_), VMValue::Float(v)) => *v == 0.0,
-                        (VMValue::Float(_), VMValue::Int(0)) => true,
+                    let division_by_zero = match (left.as_int(), left.as_float(), right.as_int(), right.as_float()) {
+                        (Some(_), _, Some(0), _) => true,
+                        (_, Some(_), _, Some(v)) => v == 0.0,
+                        (Some(_), _, _, Some(v)) => v == 0.0,
+                        (_, Some(_), Some(0), _) => true,
                         _ => false,
                     };
                     if division_by_zero {
                         return Err(vm_error_from_frames(
-                            artifact,
-                            &vm.frames,
-                            "division by zero".to_string(),
+                            artifact, &vm.frames, "division by zero".to_string(),
                         ));
                     }
-                    vm.stack.push(apply_numeric_binop(
-                        left,
-                        right,
-                        |a, b| a / b,
-                        |a, b| a / b,
-                        "div",
-                        artifact,
-                        &vm.frames,
+                    vm.stack.push(apply_numeric_binop_nan(
+                        left, right, |a, b| a / b, |a, b| a / b, "div", artifact, &vm.frames,
                     )?);
                 }
                 x if x == Opcode::And as u8 => {
                     let (left, right) = vm.pop_pair(artifact)?;
-                    match (left, right) {
-                        (VMValue::Bool(a), VMValue::Bool(b)) => {
-                            vm.stack.push(VMValue::Bool(a && b))
-                        }
-                        (left, right) => {
-                            return Err(vm.error(
-                                artifact,
-                                &format!(
-                                    "logical and requires Bool operands, got {} and {}",
-                                    vmvalue_type_name(&left),
-                                    vmvalue_type_name(&right)
-                                ),
-                            ));
-                        }
+                    match (left.as_bool(), right.as_bool()) {
+                        (Some(a), Some(b)) => vm.stack.push(NanVal::from_bool(a && b)),
+                        _ => return Err(vm.error(artifact, "logical and requires Bool operands")),
                     }
                 }
                 x if x == Opcode::Or as u8 => {
                     let (left, right) = vm.pop_pair(artifact)?;
-                    match (left, right) {
-                        (VMValue::Bool(a), VMValue::Bool(b)) => {
-                            vm.stack.push(VMValue::Bool(a || b))
-                        }
-                        (left, right) => {
-                            return Err(vm.error(
-                                artifact,
-                                &format!(
-                                    "logical or requires Bool operands, got {} and {}",
-                                    vmvalue_type_name(&left),
-                                    vmvalue_type_name(&right)
-                                ),
-                            ));
-                        }
+                    match (left.as_bool(), right.as_bool()) {
+                        (Some(a), Some(b)) => vm.stack.push(NanVal::from_bool(a || b)),
+                        _ => return Err(vm.error(artifact, "logical or requires Bool operands")),
                     }
                 }
                 x if x == Opcode::Eq as u8 => {
                     let (left, right) = vm.pop_pair(artifact)?;
-                    vm.stack.push(VMValue::Bool(left == right));
+                    vm.stack.push(NanVal::from_bool(left == right));
                 }
                 x if x == Opcode::Ne as u8 => {
                     let (left, right) = vm.pop_pair(artifact)?;
-                    vm.stack.push(VMValue::Bool(left != right));
+                    vm.stack.push(NanVal::from_bool(left != right));
                 }
                 x if x == Opcode::Lt as u8 => {
                     let pair = vm.pop_pair(artifact)?;
-                    vm.stack
-                        .push(compare_pair(pair, |a, b| a < b, artifact, &vm.frames)?);
+                    vm.stack.push(compare_pair_nan(pair, |a, b| a < b, artifact, &vm.frames)?);
                 }
                 x if x == Opcode::Le as u8 => {
                     let pair = vm.pop_pair(artifact)?;
-                    vm.stack
-                        .push(compare_pair(pair, |a, b| a <= b, artifact, &vm.frames)?);
+                    vm.stack.push(compare_pair_nan(pair, |a, b| a <= b, artifact, &vm.frames)?);
                 }
                 x if x == Opcode::Gt as u8 => {
                     let pair = vm.pop_pair(artifact)?;
-                    vm.stack
-                        .push(compare_pair(pair, |a, b| a > b, artifact, &vm.frames)?);
+                    vm.stack.push(compare_pair_nan(pair, |a, b| a > b, artifact, &vm.frames)?);
                 }
                 x if x == Opcode::Ge as u8 => {
                     let pair = vm.pop_pair(artifact)?;
-                    vm.stack
-                        .push(compare_pair(pair, |a, b| a >= b, artifact, &vm.frames)?);
+                    vm.stack.push(compare_pair_nan(pair, |a, b| a >= b, artifact, &vm.frames)?);
                 }
                 x if x == Opcode::Return as u8 => {
-                    let ret = vm.stack.pop().unwrap_or(VMValue::Unit);
+                    let ret = vm.stack.pop().unwrap_or_else(NanVal::unit);
                     let frame = vm.frames.pop().expect("frame exists");
                     vm.stack.truncate(frame.base);
                     if vm.frames.len() == caller_depth {
@@ -4713,6 +4996,90 @@ impl VM {
                 Ok(VMValue::List(FavList::new(results)))
             }
 
+            // v22.2.0: Distributed parallel execution (stub — logs endpoints, falls back to local par)
+            // NOTE: Uses std::thread::spawn; not supported on wasm32 (same as IO.par_execute_raw).
+            "IO.par_distributed_raw" => {
+                if args.len() != 2 {
+                    return Err(self.error(artifact, "IO.par_distributed_raw requires 2 arguments"));
+                }
+                let mut it = args.into_iter();
+                let names_val = it.next().unwrap();
+                let input = it.next().unwrap();
+
+                let names: Vec<String> = match names_val {
+                    VMValue::List(fl) => fl
+                        .iter()
+                        .map(|v| match v {
+                            VMValue::Str(s) => Ok(s.clone()),
+                            _ => Err(self.error(
+                                artifact,
+                                "IO.par_distributed_raw: stage names must be strings",
+                            )),
+                        })
+                        .collect::<Result<Vec<_>, _>>()?,
+                    _ => {
+                        return Err(self.error(
+                            artifact,
+                            "IO.par_distributed_raw: first argument must be a List<String>",
+                        ))
+                    }
+                };
+
+                let endpoints = get_worker_endpoints();
+                if !endpoints.is_empty() {
+                    eprintln!(
+                        "[par_distributed] distributing to {} workers (stub: local fallback)",
+                        endpoints.len()
+                    );
+                }
+
+                // v22.2.0: stub — local parallel execution (actual gRPC dispatch in v22.3+)
+                let artifact_clone = artifact.clone();
+                let db_str = self.db_path.clone();
+
+                let handles: Vec<std::thread::JoinHandle<Result<VMValue, String>>> = names
+                    .into_iter()
+                    .map(|fn_name| {
+                        let artifact_c = artifact_clone.clone();
+                        let input_c = input.clone();
+                        let db_c = db_str.clone();
+                        std::thread::spawn(move || {
+                            let fn_idx =
+                                artifact_c.fn_idx_by_name(&fn_name).ok_or_else(|| {
+                                    format!(
+                                        "E0017: par_distributed ステップ内の stage '{}' が定義されていません",
+                                        fn_name
+                                    )
+                                })?;
+                            VM::run_with_vmvalues(
+                                &artifact_c,
+                                fn_idx,
+                                vec![input_c],
+                                db_c,
+                                None,
+                            )
+                            .map(|(v, _)| v)
+                            .map_err(|e| e.message)
+                        })
+                    })
+                    .collect();
+
+                let mut results = Vec::with_capacity(handles.len());
+                for handle in handles {
+                    match handle.join() {
+                        Ok(Ok(v)) => results.push(v),
+                        Ok(Err(e)) => return Err(self.error(artifact, &e)),
+                        Err(_) => {
+                            return Err(self.error(
+                                artifact,
+                                "IO.par_distributed_raw: a parallel stage panicked",
+                            ))
+                        }
+                    }
+                }
+                Ok(VMValue::List(FavList::new(results)))
+            }
+
             "__streaming_pipeline" => {
                 // args: [source_list: List<T>, stages: List<Fn>, chunk_size: Int]
                 let mut args_iter = args.into_iter();
@@ -4735,16 +5102,124 @@ impl VM {
                 }
                 let mut result: Vec<VMValue> = Vec::new();
                 for chunk_items in items.chunks(chunk_size) {
-                    let mut current = VMValue::List(FavList::new(chunk_items.to_vec()));
+                    #[cfg(not(target_arch = "wasm32"))]
+                    self.chunk_arena.start_chunk();
+
+                    #[cfg(not(target_arch = "wasm32"))]
+                    let mut buf = self.chunk_arena.acquire(chunk_items.len());
+                    #[cfg(target_arch = "wasm32")]
+                    let mut buf = Vec::with_capacity(chunk_items.len());
+
+                    buf.extend_from_slice(chunk_items);
+                    let mut current = VMValue::List(FavList::new(buf));
+
                     for stage_fn in &stage_fns {
                         current = self.call_value(artifact, stage_fn.clone(), vec![current])?;
                     }
+
+                    #[cfg(not(target_arch = "wasm32"))]
+                    self.chunk_arena.end_chunk(current, &mut result);
+                    #[cfg(target_arch = "wasm32")]
                     match current {
                         VMValue::List(fl) => result.extend(fl.to_vec()),
                         other => result.push(other),
                     }
                 }
+                // end_chunk が各チャンク末に bump.reset() を呼ぶため
+                // ループ後の reset_bump() は不要（冗長な二重リセットを回避）
+
                 Ok(VMValue::List(FavList::new(result)))
+            }
+
+            // ── v22.1.0: Stage checkpoint lookup ──────────────────────────────────
+            // args: [stage_name: Str]
+            // v22.1.0 scope: resume lookup only (hit/miss signal).
+            //   - Hit: returns the raw checkpoint bytes as Str.
+            //   - Miss: returns Bool(false).
+            // Full stage_fn wrapping and checkpoint write are deferred to v22.3+.
+            "__checkpoint_wrap" => {
+                let stage_name = match args.into_iter().next() {
+                    Some(VMValue::Str(s)) => s,
+                    _ => return Ok(VMValue::Bool(false)),
+                };
+                #[cfg(not(target_arch = "wasm32"))]
+                {
+                    let resume_hit = STAGE_RESUME_DIR.with(|c| {
+                        c.borrow().as_ref().and_then(|dir| {
+                            read_stage_checkpoint_bytes(dir, &stage_name)
+                        })
+                    });
+                    if let Some(data) = resume_hit {
+                        return Ok(VMValue::Str(String::from_utf8_lossy(&data).into_owned()));
+                    }
+                }
+                Ok(VMValue::Bool(false))
+            }
+
+            // ── v20.4.0: DuckDB pushdown ──────────────────────────────────────────
+            "__duckdb_push" => {
+                // args: [rows: ArrowBatch | any, sql_template: Str, fallback_fn_idx: Int]
+                let mut it = args.into_iter();
+                let rows = it.next().unwrap_or(VMValue::Unit);
+                let sql_template = match it.next() {
+                    Some(VMValue::Str(s)) => s,
+                    _ => return Err(self.error(artifact, "__duckdb_push: missing sql template")),
+                };
+                let fallback_fn_idx = match it.next() {
+                    Some(VMValue::Int(n)) => n as usize,
+                    _ => return Err(self.error(artifact, "__duckdb_push: missing fallback index")),
+                };
+
+                let rows_for_fallback = rows.clone();
+
+                // Attempt DuckDB pushdown if input is ArrowBatch
+                let pushdown_result = match &rows {
+                    VMValue::ArrowBatch(id) => {
+                        execute_duckdb_pushdown(*id, &sql_template)
+                    }
+                    _ => Err("not_arrow_batch".to_string()),
+                };
+
+                match pushdown_result {
+                    Ok(result) => {
+                        if PUSHDOWN_EXPLAIN_ENABLED.with(|c| c.get()) {
+                            PUSHDOWN_LOG.with(|log| {
+                                log.borrow_mut().push(format!(
+                                    "[pushdown] SQL={} → OK",
+                                    sql_template
+                                ));
+                            });
+                        }
+                        Ok(result)
+                    }
+                    Err(_) => {
+                        // Fallback: call the original stage function directly
+                        self.invoke_function(artifact, fallback_fn_idx, vec![rows_for_fallback])
+                    }
+                }
+            }
+
+            // ── v20.7.0: Arena アロケータ統計 ─────────────────────────────────────
+            "Arena.stats" => {
+                if !args.is_empty() {
+                    return Err(self.error(artifact, "Arena.stats: expected 0 arguments"));
+                }
+                #[cfg(not(target_arch = "wasm32"))]
+                {
+                    let s = self.chunk_arena.stats();
+                    let mut map = std::collections::HashMap::new();
+                    map.insert("acquire_count".to_string(), VMValue::Int(s.acquire_count as i64));
+                    map.insert("alloc_count".to_string(), VMValue::Int(s.alloc_count as i64));
+                    map.insert("reset_count".to_string(), VMValue::Int(s.reset_count as i64));
+                    map.insert("peak_capacity".to_string(), VMValue::Int(s.peak_capacity as i64));
+                    Ok(ok_vm(VMValue::Record(map)))
+                }
+                #[cfg(target_arch = "wasm32")]
+                {
+                    Ok(err_vm(VMValue::Str(
+                        "Arena.stats: not supported on wasm32".to_string(),
+                    )))
+                }
             }
 
             _ => {
@@ -4761,14 +5236,18 @@ impl VM {
                         args,
                     );
                 }
-                vm_call_builtin(
+                // vm_call_builtin works with Vec<VMValue> emit_log; bridge via temp vec
+                let mut temp_log: Vec<VMValue> = Vec::new();
+                let result = vm_call_builtin(
                     name,
                     args,
-                    &mut self.emit_log,
+                    &mut temp_log,
                     self.db_path.as_deref(),
                     &self.type_metas,
                 )
-                .map_err(|e| self.error(artifact, &e))
+                .map_err(|e| self.error(artifact, &e));
+                self.emit_log.extend(temp_log.into_iter().map(NanVal::from_vmvalue));
+                result
             }
         }
     }
@@ -4835,7 +5314,7 @@ impl VM {
         }
     }
 
-    fn pop_pair(&mut self, artifact: &FvcArtifact) -> Result<(VMValue, VMValue), VMError> {
+    fn pop_pair(&mut self, artifact: &FvcArtifact) -> Result<(NanVal, NanVal), VMError> {
         let right = self
             .stack
             .pop()
@@ -4855,6 +5334,98 @@ fn constant_to_value(constant: Constant) -> VMValue {
         Constant::Str(v) => VMValue::Str(v),
         Constant::Name(v) => VMValue::Str(v),
     }
+}
+
+/// NaN-boxing 版 Constant → NanVal 変換（T5）
+fn constant_to_nan(constant: Constant) -> NanVal {
+    match constant {
+        Constant::Int(v)   => NanVal::from_int(v),
+        Constant::Float(v) => NanVal::from_float(v),
+        Constant::Str(v)   => NanVal::from_str(v),
+        Constant::Name(v)  => NanVal::from_str(v),
+    }
+}
+
+/// NaN-boxing 版数値二項演算（T5）
+fn apply_numeric_binop_nan(
+    left: NanVal,
+    right: NanVal,
+    int_op: impl FnOnce(i64, i64) -> i64,
+    float_op: impl FnOnce(f64, f64) -> f64,
+    op_name: &str,
+    artifact: &FvcArtifact,
+    frames: &[CallFrame],
+) -> Result<NanVal, VMError> {
+    match (left.as_int(), left.as_float(), right.as_int(), right.as_float()) {
+        (Some(a), _, Some(b), _) => Ok(NanVal::from_int(int_op(a, b))),
+        (_, Some(a), _, Some(b)) => Ok(NanVal::from_float(float_op(a, b))),
+        (Some(a), _, _, Some(b)) => Ok(NanVal::from_float(float_op(a as f64, b))),
+        (_, Some(a), Some(b), _) => Ok(NanVal::from_float(float_op(a, b as f64))),
+        _ => Err(vm_error_from_frames(
+            artifact,
+            frames,
+            format!("type error in {op_name}: numeric operands required"),
+        )),
+    }
+}
+
+/// NaN-boxing 版比較演算（T5）
+fn compare_pair_nan(
+    pair: (NanVal, NanVal),
+    cmp: impl FnOnce(f64, f64) -> bool,
+    artifact: &FvcArtifact,
+    frames: &[CallFrame],
+) -> Result<NanVal, VMError> {
+    let (left, right) = pair;
+    match (left.as_int(), left.as_float(), right.as_int(), right.as_float()) {
+        (Some(a), _, Some(b), _) => Ok(NanVal::from_bool(cmp(a as f64, b as f64))),
+        (_, Some(a), _, Some(b)) => Ok(NanVal::from_bool(cmp(a, b))),
+        (Some(a), _, _, Some(b)) => Ok(NanVal::from_bool(cmp(a as f64, b))),
+        (_, Some(a), Some(b), _) => Ok(NanVal::from_bool(cmp(a, b as f64))),
+        _ => Err(vm_error_from_frames(
+            artifact,
+            frames,
+            "type error in comparison: numeric operands required".to_string(),
+        )),
+    }
+}
+
+/// NanVal の型名文字列（T5）
+fn nanval_type_name(v: &NanVal) -> &'static str {
+    use super::heap_val::HeapVal;
+    if v.is_float() { return "Float"; }
+    if v.is_int()   { return "Int"; }
+    if v.is_bool()  { return "Bool"; }
+    if v.is_unit()  { return "Unit"; }
+    if v.is_str()   { return "String"; }
+    if v.is_list()  { return "List"; }
+    if v.is_record() { return "Record"; }
+    if v.is_heap() {
+        if let Some(h) = v.as_heap() {
+            return match h {
+                HeapVal::Variant(_, _)  => "Variant",
+                HeapVal::VariantCtor(_) => "VariantCtor",
+                HeapVal::CompiledFn(_)  => "CompiledFn",
+                HeapVal::Closure(_, _)  => "Closure",
+                HeapVal::Builtin(_)     => "Builtin",
+                HeapVal::Stream(_)      => "Stream",
+                HeapVal::DbHandle(_)    => "DbHandle",
+                HeapVal::TxHandle(_)    => "TxHandle",
+                HeapVal::ArrowBatch(_)  => "ArrowBatch",
+                HeapVal::PgPool(_)      => "PgPool",
+                HeapVal::Bytes(_)       => "Bytes",
+                HeapVal::MutList(_)     => "MutList",
+                HeapVal::MutMap(_)      => "MutMap",
+                HeapVal::BigInt(_)      => "Int",
+            };
+        }
+    }
+    "Unknown"
+}
+
+/// NanVal → Value 変換（テスト・CLI 出力用レガシーブリッジ）（T5）
+pub fn vm_to_external_value(v: NanVal) -> Value {
+    Value::from(v.to_vmvalue())
 }
 
 impl From<Value> for VMValue {
@@ -4906,6 +5477,10 @@ impl From<VMValue> for Value {
             VMValue::DbHandle(id) => Value::Str(format!("<db:{id}>")),
             VMValue::TxHandle(id) => Value::Str(format!("<tx:{id}>")),
             VMValue::ArrowBatch(id) => Value::Str(format!("<arrow:{id}>")),
+            VMValue::PgPool(id) => Value::Str(format!("<pgpool:{id}>")),
+            VMValue::Bytes(id)   => Value::Str(format!("<bytes:{id}>")),
+            VMValue::MutList(id) => Value::Str(format!("<mut-list:{id}>")),
+            VMValue::MutMap(id)  => Value::Str(format!("<mut-map:{id}>")),
         }
     }
 }
@@ -5028,6 +5603,10 @@ fn vmvalue_repr(v: &VMValue) -> String {
         VMValue::DbHandle(id) => format!("<db:{}>", id),
         VMValue::TxHandle(id) => format!("<tx:{}>", id),
         VMValue::ArrowBatch(id) => format!("<arrow:{}>", id),
+        VMValue::PgPool(id) => format!("<pgpool:{}>", id),
+        VMValue::Bytes(id) => format!("<bytes:{}>", id),
+        VMValue::MutList(id) => format!("<mut-list:{}>", id),
+        VMValue::MutMap(id) => format!("<mut-map:{}>", id),
     }
 }
 
@@ -5049,6 +5628,10 @@ fn vmvalue_type_name(v: &VMValue) -> &'static str {
         VMValue::DbHandle(_) => "DbHandle",
         VMValue::TxHandle(_) => "TxHandle",
         VMValue::ArrowBatch(_) => "ArrowBatch",
+        VMValue::PgPool(_) => "PgPool",
+        VMValue::Bytes(_)   => "Bytes",
+        VMValue::MutList(_) => "MutList",
+        VMValue::MutMap(_)  => "MutMap",
     }
 }
 
@@ -5400,6 +5983,16 @@ fn capitalize_variant_tag(tag: &str) -> String {
 
 /// Emit a trace line to stderr and collect it in `trace_lines`.
 /// Standalone (not a method) to avoid borrow conflicts with `frame`.
+/// v22.7.0: VMValue の要素数を返す（OTel output_items 用）。
+#[cfg(not(target_arch = "wasm32"))]
+fn otel_value_items(v: &VMValue) -> u64 {
+    match v {
+        VMValue::List(fl) => (fl.0.len().saturating_sub(fl.1)) as u64,
+        VMValue::Str(s)   => s.len() as u64,
+        _                 => 1,
+    }
+}
+
 fn trace_emit(trace_lines: &mut Vec<String>, msg: String) {
     eprintln!("{}", msg);
     trace_lines.push(msg);
@@ -5451,6 +6044,10 @@ fn display_vmvalue(v: &VMValue) -> String {
         VMValue::DbHandle(_) => "<db>".to_string(),
         VMValue::TxHandle(_) => "<tx>".to_string(),
         VMValue::ArrowBatch(_) => "<arrow>".to_string(),
+        VMValue::PgPool(_) => "<pgpool>".to_string(),
+        VMValue::Bytes(_)   => "<bytes>".to_string(),
+        VMValue::MutList(_) => "<mut-list>".to_string(),
+        VMValue::MutMap(_)  => "<mut-map>".to_string(),
     }
 }
 
@@ -5812,6 +6409,110 @@ pub fn pg_query(conn_str: &str, sql: &str, params_json: &str) -> Result<String, 
         }).collect();
         serde_json::to_string(&json_rows).map_err(|e| e.to_string())
     })
+}
+
+// ── v20.8.0: PgPool グローバルストア + runtime ────────────────────────────────
+
+#[cfg(not(target_arch = "wasm32"))]
+type PgPoolMap = std::collections::HashMap<u64, std::sync::Arc<crate::backend::pg_pool::PgPoolInner>>;
+
+#[cfg(not(target_arch = "wasm32"))]
+static PG_POOLS: std::sync::OnceLock<std::sync::Mutex<PgPoolMap>> = std::sync::OnceLock::new();
+
+#[cfg(not(target_arch = "wasm32"))]
+static PG_POOL_NEXT_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+
+#[cfg(not(target_arch = "wasm32"))]
+fn pg_pool_store() -> std::sync::MutexGuard<'static, PgPoolMap> {
+    PG_POOLS.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()))
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn pg_pool_alloc(inner: std::sync::Arc<crate::backend::pg_pool::PgPoolInner>) -> u64 {
+    let id = PG_POOL_NEXT_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    pg_pool_store().insert(id, inner);
+    id
+}
+
+/// VMValue（List または単一値）を pg_params_from_json が解析できる JSON 配列文字列に変換する。
+fn vmvalue_to_params_json(v: &VMValue) -> String {
+    fn to_serde(v: &VMValue) -> serde_json::Value {
+        match v {
+            VMValue::Str(s)   => serde_json::Value::String(s.clone()),
+            VMValue::Int(n)   => serde_json::Value::Number((*n).into()),
+            VMValue::Float(f) => {
+                if f.is_nan() {
+                    serde_json::Value::String("NaN".to_string())
+                } else if f.is_infinite() && *f > 0.0 {
+                    serde_json::Value::String("Infinity".to_string())
+                } else if f.is_infinite() {
+                    serde_json::Value::String("-Infinity".to_string())
+                } else {
+                    serde_json::Number::from_f64(*f)
+                        .map(serde_json::Value::Number)
+                        .unwrap_or(serde_json::Value::Null)
+                }
+            }
+            VMValue::Bool(b)  => serde_json::Value::Bool(*b),
+            VMValue::Unit     => serde_json::Value::Null,
+            other             => serde_json::Value::String(vmvalue_repr(other)),
+        }
+    }
+    let arr = match v {
+        VMValue::List(fl) => serde_json::Value::Array(fl.iter().map(to_serde).collect()),
+        other             => serde_json::Value::Array(vec![to_serde(other)]),
+    };
+    serde_json::to_string(&arr).unwrap_or_else(|_| "[]".to_string())
+}
+
+/// PgPool 専用の長寿命 tokio runtime（接続 background task を維持するため）
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn pg_pool_runtime() -> &'static tokio::runtime::Runtime {
+    static RT: std::sync::OnceLock<tokio::runtime::Runtime> = std::sync::OnceLock::new();
+    RT.get_or_init(|| {
+        tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .worker_threads(2)
+            .thread_name("fav-pgpool")
+            .build()
+            .expect("fav: failed to build PgPool runtime")
+    })
+}
+
+/// PgPool 経由のクエリ実行（async helper）
+#[cfg(not(target_arch = "wasm32"))]
+async fn pg_query_with_client(
+    client: &tokio_postgres::Client,
+    sql: &str,
+    params: &[String],
+) -> Result<Vec<VMValue>, String> {
+    let param_refs: Vec<&(dyn tokio_postgres::types::ToSql + Sync)> =
+        params.iter().map(|s| s as &(dyn tokio_postgres::types::ToSql + Sync)).collect();
+    let rows = client.query(sql, &param_refs).await.map_err(|e| format_pg_error(&e))?;
+    let vm_rows: Vec<VMValue> = rows.iter().map(|row| {
+        let mut map = std::collections::HashMap::new();
+        for col in row.columns() {
+            let name = col.name().to_string();
+            let val = if let Ok(v) = row.try_get::<_, Option<String>>(&name.as_str()) {
+                v.map(VMValue::Str).unwrap_or(VMValue::Unit)
+            } else if let Ok(v) = row.try_get::<_, Option<i64>>(&name.as_str()) {
+                v.map(VMValue::Int).unwrap_or(VMValue::Unit)
+            } else if let Ok(v) = row.try_get::<_, Option<i32>>(&name.as_str()) {
+                v.map(|n| VMValue::Int(n as i64)).unwrap_or(VMValue::Unit)
+            } else if let Ok(v) = row.try_get::<_, Option<f64>>(&name.as_str()) {
+                v.map(VMValue::Float).unwrap_or(VMValue::Unit)
+            } else if let Ok(v) = row.try_get::<_, Option<bool>>(&name.as_str()) {
+                v.map(VMValue::Bool).unwrap_or(VMValue::Unit)
+            } else {
+                VMValue::Unit
+            };
+            map.insert(name, val);
+        }
+        VMValue::Record(map)
+    }).collect();
+    Ok(vm_rows)
 }
 
 // ── AzurePostgres helpers (v14.1.0) ──────────────────────────────────────────
@@ -6750,6 +7451,11 @@ fn is_known_builtin_namespace(name: &str) -> bool {
             | "Ctx"
             | "AppCtx"
             | "ArrowBatch"
+            | "__duckdb_push"
+            | "Arena"
+            | "State"   // v22.3.0
+            | "Bytes"   // v23.1.0
+            | "Mut"     // v23.3.0
     )
 }
 
@@ -7002,6 +7708,192 @@ fn arrow_read_parquet(path: &str) -> Result<arrow::record_batch::RecordBatch, St
         .next()
         .ok_or_else(|| "arrow_read_parquet: no batches in file".to_string())?
         .map_err(|e| format!("read batch: {e}"))
+}
+
+// ── v20.5.0: mmap + arrow-csv CSV reader ─────────────────────────────────────
+
+/// Read a CSV file using mmap (zero-copy) and arrow-csv (columnar SIMD parsing).
+/// Schema is inferred from the header + first 1000 rows.
+/// Returns a single `RecordBatch` (multiple internal chunks are merged via `concat_batches`).
+///
+/// Guarded with `#[cfg(not(target_arch = "wasm32"))]` — on WASM always returns Err.
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn read_csv_mmap(path: &str) -> Result<arrow::record_batch::RecordBatch, String> {
+    use arrow::csv::reader::Format;
+    use arrow::csv::ReaderBuilder;
+    use memmap2::MmapOptions;
+    use std::io::Cursor;
+
+    let file = std::fs::File::open(path)
+        .map_err(|e| format!("ArrowBatch.from_csv: cannot open '{}': {e}", path))?;
+
+    // SAFETY: The file is opened read-only and not modified during the mmap lifetime.
+    // External file mutation during a pipeline run is outside Favnir's contract.
+    let mmap = unsafe {
+        MmapOptions::new()
+            .map(&file)
+            .map_err(|e| format!("ArrowBatch.from_csv: mmap failed: {e}"))?
+    };
+
+    // Pass 1: infer schema from first 1000 rows.
+    // Format::infer_schema consumes the reader — use a fresh Cursor for the read pass.
+    let format = Format::default().with_header(true);
+    let (schema, _) = format
+        .infer_schema(Cursor::new(&mmap[..]), Some(1000))
+        .map_err(|e| format!("ArrowBatch.from_csv: schema inference failed: {e}"))?;
+
+    let schema = std::sync::Arc::new(schema);
+
+    // Pass 2: read all data via mmap slice (zero-copy second reference into the same mapping)
+    let mut reader = ReaderBuilder::new(schema.clone())
+        .with_header(true)
+        .with_batch_size(65536)
+        .build(Cursor::new(&mmap[..]))
+        .map_err(|e| format!("ArrowBatch.from_csv: reader build failed: {e}"))?;
+
+    // Collect all record batches
+    let mut batches: Vec<arrow::record_batch::RecordBatch> = (&mut reader)
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| format!("ArrowBatch.from_csv: parse failed: {e}"))?;
+
+    if batches.is_empty() {
+        return Err(format!("ArrowBatch.from_csv: no data in '{}'", path));
+    }
+    if batches.len() == 1 {
+        return Ok(batches.swap_remove(0));
+    }
+
+    // Merge multiple chunks into a single RecordBatch
+    arrow::compute::concat_batches(&schema, &batches)
+        .map_err(|e| format!("ArrowBatch.from_csv: concat_batches failed: {e}"))
+}
+
+// No wasm32 stub needed: the call site in vm_call_builtin is cfg-guarded below.
+
+// ── v20.6.0: io_uring batch file reader ──────────────────────────────────────
+
+/// Read multiple files concurrently.
+/// Linux: tokio-uring (io_uring, near-zero context switches).
+/// Windows / macOS: rayon parallel read_to_string (thread-pool fallback).
+/// Returns files in the same order as the input paths.
+/// Any single failure causes the whole batch to return Err.
+#[cfg(all(target_os = "linux", not(target_arch = "wasm32")))]
+pub(crate) fn read_files_batch_impl(paths: &[String]) -> Result<Vec<String>, String> {
+    tokio_uring::start(async {
+        let handles: Vec<_> = paths.iter()
+            .map(|p| read_one_uring(p.clone()))
+            .collect();
+        futures::future::try_join_all(handles).await
+    })
+    // map_err handles only tokio_uring::start() own failures (e.g. kernel too old).
+    // Per-file errors from read_one_uring propagate as-is via try_join_all,
+    // so they are not double-wrapped with this prefix.
+    .map_err(|e| format!("IO.read_files_batch: io_uring runtime error: {e}"))
+}
+
+/// Read a single file using tokio-uring (Linux only).
+/// Opens the file, reads via `read_at` with move semantics, and truncates the
+/// buffer to the actual bytes read to handle partial reads correctly.
+#[cfg(all(target_os = "linux", not(target_arch = "wasm32")))]
+async fn read_one_uring(path: String) -> Result<String, String> {
+    use tokio_uring::fs::File;
+
+    let size = std::fs::metadata(&path)
+        .map_err(|e| format!("IO.read_files_batch: metadata '{}': {e}", path))?
+        .len() as usize;
+
+    if size == 0 {
+        return Ok(String::new());
+    }
+
+    let file = File::open(&path).await
+        .map_err(|e| format!("IO.read_files_batch: open '{}': {e}", path))?;
+
+    let buf = vec![0u8; size];
+    let (res, mut buf) = file.read_at(buf, 0).await;
+    let bytes_read = res
+        .map_err(|e| format!("IO.read_files_batch: read '{}': {e}", path))?;
+    buf.truncate(bytes_read);
+
+    String::from_utf8(buf)
+        .map_err(|e| format!("IO.read_files_batch: utf8 '{}': {e}", path))
+}
+
+/// Non-Linux fallback: rayon parallel read (Windows / macOS).
+#[cfg(all(not(target_os = "linux"), not(target_arch = "wasm32")))]
+pub(crate) fn read_files_batch_impl(paths: &[String]) -> Result<Vec<String>, String> {
+    use rayon::prelude::*;
+    paths
+        .par_iter()
+        .map(|p| {
+            std::fs::read_to_string(p)
+                .map_err(|e| format!("IO.read_files_batch: cannot read '{}': {e}", p))
+        })
+        .collect()
+}
+
+// ── v20.4.0: DuckDB pushdown execution ───────────────────────────────────────
+
+/// Execute a pushdown SQL query against a DuckDB ArrowBatch.
+/// Returns `Ok(VMValue::ArrowBatch(new_id))` on success.
+/// Returns `Err(...)` on failure (caller falls back to the original stage fn).
+///
+/// Strategy: write the ArrowBatch to a temp Parquet file, then use DuckDB's
+/// native `read_parquet(path)` as the table reference. This avoids arrow crate
+/// version incompatibilities between the project and the duckdb crate.
+///
+/// Guarded with `#[cfg(not(target_arch = "wasm32"))]` — on WASM always returns Err.
+#[cfg(not(target_arch = "wasm32"))]
+fn execute_duckdb_pushdown(batch_id: u64, sql_template: &str) -> Result<VMValue, String> {
+    let batch = match arrow_get(batch_id) {
+        Some(b) => b,
+        None => return Err(format!("pushdown: invalid ArrowBatch handle {batch_id}")),
+    };
+
+    // Write batch to a temp Parquet file.
+    // Include PID + thread-local sequence number to prevent collisions during
+    // parallel execution (par stages, concurrent tests).
+    thread_local! {
+        static PUSHDOWN_TMP_SEQ: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+    }
+    let seq = PUSHDOWN_TMP_SEQ.with(|c| { let v = c.get(); c.set(v + 1); v });
+    let pid = std::process::id();
+    let tmp_path = {
+        let mut p = std::env::temp_dir();
+        p.push(format!("_fav_pushdown_{pid}_{seq}_{batch_id}.parquet"));
+        p
+    };
+    let tmp_str = tmp_path
+        .to_str()
+        .ok_or_else(|| "pushdown: non-UTF8 temp path".to_string())?
+        .to_string();
+    arrow_write_parquet(&batch, &tmp_str)?;
+
+    // Replace placeholder with read_parquet reference (using forward slashes for DuckDB)
+    let duckdb_path = tmp_str.replace('\\', "/");
+    let sql = sql_template.replace(
+        "?pushdown_table?",
+        &format!("read_parquet('{duckdb_path}')"),
+    );
+    debug_assert!(!sql.contains("?pushdown_table?"), "SQL placeholder not fully replaced");
+
+    // Open DuckDB in-memory and execute the query
+    let conn = duckdb::Connection::open_in_memory()
+        .map_err(|e| format!("pushdown: duckdb open: {e}"))?;
+
+    let rows = duckdb_query_typed(&conn, &sql)?;
+
+    // Clean up temp file (best-effort)
+    let _ = std::fs::remove_file(&tmp_path);
+
+    // Convert query result rows back to an ArrowBatch
+    let result_batch = arrow_from_vm_rows(&rows)?;
+    Ok(VMValue::ArrowBatch(arrow_store(result_batch)))
+}
+
+#[cfg(target_arch = "wasm32")]
+fn execute_duckdb_pushdown(_batch_id: u64, _sql_template: &str) -> Result<VMValue, String> {
+    Err("pushdown: not supported on wasm32".to_string())
 }
 
 fn parquet_write_rows(
@@ -7270,7 +8162,40 @@ fn duckdb_value_to_string(val: duckdb::types::Value) -> String {
     }
 }
 
+fn duckdb_value_to_vmvalue(val: duckdb::types::Value) -> VMValue {
+    use duckdb::types::Value;
+    match val {
+        Value::Null => VMValue::Unit,
+        Value::Boolean(b) => VMValue::Bool(b),
+        Value::TinyInt(i) => VMValue::Int(i as i64),
+        Value::SmallInt(i) => VMValue::Int(i as i64),
+        Value::Int(i) => VMValue::Int(i as i64),
+        Value::BigInt(i) => VMValue::Int(i),
+        Value::HugeInt(i) => VMValue::Int(i as i64),
+        Value::UTinyInt(i) => VMValue::Int(i as i64),
+        Value::USmallInt(i) => VMValue::Int(i as i64),
+        Value::UInt(i) => VMValue::Int(i as i64),
+        Value::UBigInt(i) => VMValue::Int(i as i64),
+        Value::Float(f) => VMValue::Float(f as f64),
+        Value::Double(f) => VMValue::Float(f),
+        Value::Text(s) => VMValue::Str(s),
+        other => VMValue::Str(duckdb_value_to_string(other)),
+    }
+}
+
 fn duckdb_query_raw(conn: &duckdb::Connection, sql: &str) -> Result<Vec<VMValue>, String> {
+    duckdb_query_impl(conn, sql, false)
+}
+
+fn duckdb_query_typed(conn: &duckdb::Connection, sql: &str) -> Result<Vec<VMValue>, String> {
+    duckdb_query_impl(conn, sql, true)
+}
+
+fn duckdb_query_impl(
+    conn: &duckdb::Connection,
+    sql: &str,
+    typed: bool,
+) -> Result<Vec<VMValue>, String> {
     let mut stmt = conn
         .prepare(sql)
         .map_err(|e| format!("DuckDB query failed: {}", e))?;
@@ -7290,7 +8215,12 @@ fn duckdb_query_raw(conn: &duckdb::Connection, sql: &str) -> Result<Vec<VMValue>
             let val: duckdb::types::Value = row
                 .get(i)
                 .map_err(|e| format!("DuckDB column get failed: {}", e))?;
-            map.insert(name.clone(), VMValue::Str(duckdb_value_to_string(val)));
+            let vm_val = if typed {
+                duckdb_value_to_vmvalue(val)
+            } else {
+                VMValue::Str(duckdb_value_to_string(val))
+            };
+            map.insert(name.clone(), vm_val);
         }
         rows_out.push(VMValue::Record(map));
     }
@@ -7932,6 +8862,41 @@ fn vm_call_builtin(
             match std::fs::read_to_string(&path) {
                 Ok(content) => Ok(ok_vm(VMValue::Str(content))),
                 Err(e) => Ok(err_vm(VMValue::Str(e.to_string()))),
+            }
+        }
+        // ── v20.6.0: io_uring batch read ─────────────────────────────────────
+        "IO.read_files_batch" => {
+            let paths = match args.into_iter().next() {
+                Some(VMValue::List(list)) => list
+                    .iter()
+                    .map(|v| match v {
+                        VMValue::Str(s) => Ok(s.clone()),
+                        other => Err(format!(
+                            "IO.read_files_batch: path must be String, got {}",
+                            vmvalue_type_name(other)
+                        )),
+                    })
+                    .collect::<Result<Vec<_>, _>>()?,
+                _ => return Err("IO.read_files_batch: expected List<String>".to_string()),
+            };
+            #[cfg(not(target_arch = "wasm32"))]
+            {
+                match read_files_batch_impl(&paths) {
+                    Ok(contents) => {
+                        let list = FavList::new(
+                            contents.into_iter().map(VMValue::Str).collect::<Vec<_>>(),
+                        );
+                        Ok(ok_vm(VMValue::List(list)))
+                    }
+                    Err(e) => Ok(err_vm(VMValue::Str(e))),
+                }
+            }
+            #[cfg(target_arch = "wasm32")]
+            {
+                let _ = paths;
+                Ok(err_vm(VMValue::Str(
+                    "IO.read_files_batch: not supported on wasm32".to_string(),
+                )))
             }
         }
         "IO.write_file_raw" => {
@@ -8651,6 +9616,78 @@ fn vm_call_builtin(
             match v {
                 VMValue::Int(x) => Ok(VMValue::Int(!x)),
                 _ => Err("Int.bnot requires an Int argument".to_string()),
+            }
+        }
+        // v23.2.0: public API names for bit operations
+        "Int.bit_and" => {
+            let mut it = args.into_iter();
+            let x = it.next().ok_or_else(|| "Int.bit_and requires 2 arguments".to_string())?;
+            let y = it.next().ok_or_else(|| "Int.bit_and requires 2 arguments".to_string())?;
+            match (x, y) {
+                (VMValue::Int(x), VMValue::Int(y)) => Ok(VMValue::Int(x & y)),
+                _ => Err("Int.bit_and requires two Int arguments".to_string()),
+            }
+        }
+        "Int.bit_or" => {
+            let mut it = args.into_iter();
+            let x = it.next().ok_or_else(|| "Int.bit_or requires 2 arguments".to_string())?;
+            let y = it.next().ok_or_else(|| "Int.bit_or requires 2 arguments".to_string())?;
+            match (x, y) {
+                (VMValue::Int(x), VMValue::Int(y)) => Ok(VMValue::Int(x | y)),
+                _ => Err("Int.bit_or requires two Int arguments".to_string()),
+            }
+        }
+        "Int.bit_xor" => {
+            let mut it = args.into_iter();
+            let x = it.next().ok_or_else(|| "Int.bit_xor requires 2 arguments".to_string())?;
+            let y = it.next().ok_or_else(|| "Int.bit_xor requires 2 arguments".to_string())?;
+            match (x, y) {
+                (VMValue::Int(x), VMValue::Int(y)) => Ok(VMValue::Int(x ^ y)),
+                _ => Err("Int.bit_xor requires two Int arguments".to_string()),
+            }
+        }
+        "Int.bit_not" => {
+            let v = args
+                .into_iter()
+                .next()
+                .ok_or_else(|| "Int.bit_not requires 1 argument".to_string())?;
+            match v {
+                VMValue::Int(x) => Ok(VMValue::Int(!x)),
+                _ => Err("Int.bit_not requires an Int argument".to_string()),
+            }
+        }
+        "Int.shift_left" => {
+            let mut it = args.into_iter();
+            let x = it.next().ok_or_else(|| "Int.shift_left requires 2 arguments".to_string())?;
+            let n = it.next().ok_or_else(|| "Int.shift_left requires 2 arguments".to_string())?;
+            match (x, n) {
+                (VMValue::Int(x), VMValue::Int(n)) => {
+                    if n < 0 || n >= 64 {
+                        return Err(format!(
+                            "Int.shift_left: shift amount {} out of range 0..=63",
+                            n
+                        ));
+                    }
+                    Ok(VMValue::Int(x << n))
+                }
+                _ => Err("Int.shift_left requires two Int arguments".to_string()),
+            }
+        }
+        "Int.shift_right" => {
+            let mut it = args.into_iter();
+            let x = it.next().ok_or_else(|| "Int.shift_right requires 2 arguments".to_string())?;
+            let n = it.next().ok_or_else(|| "Int.shift_right requires 2 arguments".to_string())?;
+            match (x, n) {
+                (VMValue::Int(x), VMValue::Int(n)) => {
+                    if n < 0 || n >= 64 {
+                        return Err(format!(
+                            "Int.shift_right: shift amount {} out of range 0..=63",
+                            n
+                        ));
+                    }
+                    Ok(VMValue::Int(x >> n))
+                }
+                _ => Err("Int.shift_right requires two Int arguments".to_string()),
             }
         }
         "Int.to_byte" => {
@@ -11434,6 +12471,130 @@ fn vm_call_builtin(
             }
         }
 
+        // ── v20.8.0: Postgres.Pool primitives ────────────────────────────────────────
+
+        "Postgres.Pool.create" => {
+            let pool_size = match args.into_iter().next() {
+                Some(VMValue::Int(n)) if n > 0 => n as usize,
+                _ => 5,
+            };
+            let conn_str = pg_conn_str_from_env();
+            let inner = crate::backend::pg_pool::PgPoolInner::new(&conn_str, pool_size);
+            let id = pg_pool_alloc(inner);
+            Ok(ok_vm(VMValue::PgPool(id)))
+        }
+
+        "Postgres.Pool.query" => {
+            let mut it = args.into_iter();
+            let id = match it.next() {
+                Some(VMValue::PgPool(id)) => id,
+                _ => return Ok(err_vm(VMValue::Str("Postgres.Pool.query: expected PgPool as first argument".into()))),
+            };
+            let sql = match it.next() {
+                Some(VMValue::Str(s)) => s,
+                _ => return Ok(err_vm(VMValue::Str("Postgres.Pool.query: expected sql Str".into()))),
+            };
+            let params_json = match it.next() {
+                Some(v) => vmvalue_to_params_json(&v),
+                None => "[]".to_string(),
+            };
+            let inner = pg_pool_store().get(&id).cloned();
+            match inner {
+                None => Ok(err_vm(VMValue::Str(format!("Postgres.Pool.query: invalid pool id {id}")))),
+                Some(pool) => {
+                    match pool.acquire() {
+                        Err(e) => Ok(err_vm(VMValue::Str(e))),
+                        Ok(client) => {
+                            let params = match pg_params_from_json(&params_json) {
+                                Ok(p) => p,
+                                Err(e) => { pool.release(client); return Ok(err_vm(VMValue::Str(e))); }
+                            };
+                            let result = pg_pool_runtime().block_on(async {
+                                pg_query_with_client(&client, &sql, &params).await
+                            });
+                            pool.release(client);
+                            match result {
+                                Ok(rows) => Ok(ok_vm(VMValue::List(FavList::new(rows)))),
+                                Err(e)   => Ok(err_vm(VMValue::Str(e))),
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        "Postgres.Pool.execute" => {
+            let mut it = args.into_iter();
+            let id = match it.next() {
+                Some(VMValue::PgPool(id)) => id,
+                _ => return Ok(err_vm(VMValue::Str("Postgres.Pool.execute: expected PgPool as first argument".into()))),
+            };
+            let sql = match it.next() {
+                Some(VMValue::Str(s)) => s,
+                _ => return Ok(err_vm(VMValue::Str("Postgres.Pool.execute: expected sql Str".into()))),
+            };
+            let params_json = match it.next() {
+                Some(v) => vmvalue_to_params_json(&v),
+                None => "[]".to_string(),
+            };
+            let inner = pg_pool_store().get(&id).cloned();
+            match inner {
+                None => Ok(err_vm(VMValue::Str(format!("Postgres.Pool.execute: invalid pool id {id}")))),
+                Some(pool) => {
+                    match pool.acquire() {
+                        Err(e) => Ok(err_vm(VMValue::Str(e))),
+                        Ok(client) => {
+                            let params = match pg_params_from_json(&params_json) {
+                                Ok(p) => p,
+                                Err(e) => { pool.release(client); return Ok(err_vm(VMValue::Str(e))); }
+                            };
+                            let result = pg_pool_runtime().block_on(async {
+                                let param_refs: Vec<&(dyn tokio_postgres::types::ToSql + Sync)> =
+                                    params.iter().map(|s| s as &(dyn tokio_postgres::types::ToSql + Sync)).collect();
+                                client.execute(sql.as_str(), &param_refs).await
+                                    .map(|n| n as i64)
+                                    .map_err(|e| format_pg_error(&e))
+                            });
+                            pool.release(client);
+                            match result {
+                                Ok(n)  => Ok(ok_vm(VMValue::Int(n))),
+                                Err(e) => Ok(err_vm(VMValue::Str(e))),
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        "Postgres.Pool.stats" => {
+            let id = match args.into_iter().next() {
+                Some(VMValue::PgPool(id)) => id,
+                _ => return Ok(err_vm(VMValue::Str("Postgres.Pool.stats: expected PgPool".into()))),
+            };
+            match pg_pool_store().get(&id).cloned() {
+                None => Ok(err_vm(VMValue::Str(format!("Postgres.Pool.stats: invalid pool id {id}")))),
+                Some(pool) => {
+                    let s = pool.stats_snapshot();
+                    let mut map = std::collections::HashMap::new();
+                    map.insert("borrow_count".to_string(), VMValue::Int(s.borrow_count as i64));
+                    map.insert("miss_count".to_string(),   VMValue::Int(s.miss_count   as i64));
+                    map.insert("return_count".to_string(), VMValue::Int(s.return_count as i64));
+                    map.insert("error_count".to_string(),  VMValue::Int(s.error_count  as i64));
+                    map.insert("idle_count".to_string(),   VMValue::Int(s.idle_count   as i64));
+                    Ok(ok_vm(VMValue::Record(map)))
+                }
+            }
+        }
+
+        "Postgres.Pool.close" => {
+            let id = match args.into_iter().next() {
+                Some(VMValue::PgPool(id)) => id,
+                _ => return Ok(err_vm(VMValue::Str("Postgres.Pool.close: expected PgPool".into()))),
+            };
+            pg_pool_store().remove(&id);
+            Ok(ok_vm(VMValue::Unit))
+        }
+
         "Http.put_raw" => {
             if args.len() != 3 {
                 return Err("Http.put_raw requires 3 arguments".to_string());
@@ -12699,6 +13860,30 @@ fn vm_call_builtin(
             match arrow_read_parquet(&path) {
                 Ok(batch) => Ok(ok_vm(VMValue::ArrowBatch(arrow_store(batch)))),
                 Err(e) => Ok(err_vm(VMValue::Str(e))),
+            }
+        }
+
+        // ── v20.5.0: mmap + SIMD CSV ──────────────────────────────────────────
+        "ArrowBatch.from_csv" => {
+            let path = match args.into_iter().next() {
+                Some(VMValue::Str(s)) => s,
+                _ => return Err("ArrowBatch.from_csv: expected String path".to_string()),
+            };
+            // read_csv_mmap uses memmap2 and arrow-csv which are native-only dependencies.
+            // On wasm32 we return a typed error without calling native code.
+            #[cfg(not(target_arch = "wasm32"))]
+            {
+                match read_csv_mmap(&path) {
+                    Ok(batch) => Ok(ok_vm(VMValue::ArrowBatch(arrow_store(batch)))),
+                    Err(e) => Ok(err_vm(VMValue::Str(e))),
+                }
+            }
+            #[cfg(target_arch = "wasm32")]
+            {
+                let _ = path;
+                Ok(err_vm(VMValue::Str(
+                    "ArrowBatch.from_csv: not supported on wasm32".to_string(),
+                )))
             }
         }
 
@@ -15318,6 +16503,429 @@ fn vm_call_builtin(
                 n
             });
             Ok(VMValue::Int(count as i64))
+        }
+
+        // ── State primitives (v22.3.0) — in-memory backend stub ───────────
+        "State.get_raw" => {
+            let key = match args.into_iter().next() {
+                Some(VMValue::Str(s)) => s,
+                _ => return Err("State.get_raw requires a String key".to_string()),
+            };
+            let val = STATE_STORE.with(|c| c.borrow().get(&key).cloned());
+            Ok(match val {
+                Some(v) => VMValue::Variant("some".to_string(), Some(Box::new(VMValue::Str(v)))),
+                None    => VMValue::Variant("none".to_string(), None),
+            })
+        }
+        "State.set_raw" => {
+            let mut it = args.into_iter();
+            let key = match it.next() {
+                Some(VMValue::Str(s)) => s,
+                _ => return Err("State.set_raw: key must be a String".to_string()),
+            };
+            let val = match it.next() {
+                Some(VMValue::Str(s)) => s,
+                _ => return Err("State.set_raw: value must be a String".to_string()),
+            };
+            STATE_STORE.with(|c| c.borrow_mut().insert(key, val));
+            Ok(VMValue::Unit)
+        }
+        "State.has_raw" => {
+            let key = match args.into_iter().next() {
+                Some(VMValue::Str(s)) => s,
+                _ => return Err("State.has_raw: key must be a String".to_string()),
+            };
+            let exists = STATE_STORE.with(|c| c.borrow().contains_key(&key));
+            Ok(VMValue::Bool(exists))
+        }
+        "State.delete_raw" => {
+            let key = match args.into_iter().next() {
+                Some(VMValue::Str(s)) => s,
+                _ => return Err("State.delete_raw: key must be a String".to_string()),
+            };
+            STATE_STORE.with(|c| c.borrow_mut().remove(&key));
+            Ok(VMValue::Unit)
+        }
+
+        // ── v23.1.0: Bytes 型 ─────────────────────────────────────────────
+        "Bytes.from_hex" => {
+            let s = match args.into_iter().next() {
+                Some(VMValue::Str(s)) => s,
+                _ => return Err("Bytes.from_hex: expected String".to_string()),
+            };
+            let s = s.trim().to_string();
+            if s.len() % 2 != 0 {
+                return Ok(err_vm(VMValue::Str("Bytes.from_hex: odd length".into())));
+            }
+            let bytes: Result<Vec<u8>, _> = (0..s.len() / 2)
+                .map(|i| u8::from_str_radix(&s[i * 2..i * 2 + 2], 16))
+                .collect();
+            match bytes {
+                Ok(b)  => Ok(ok_vm(VMValue::Bytes(bytes_new(b)))),
+                Err(e) => Ok(err_vm(VMValue::Str(format!("Bytes.from_hex: {}", e)))),
+            }
+        }
+        "Bytes.from_str" => {
+            let s = match args.into_iter().next() {
+                Some(VMValue::Str(s)) => s,
+                _ => return Err("Bytes.from_str: expected String".to_string()),
+            };
+            Ok(VMValue::Bytes(bytes_new(s.into_bytes())))
+        }
+        "Bytes.len" => {
+            let id = match args.into_iter().next() {
+                Some(VMValue::Bytes(id)) => id,
+                _ => return Err("Bytes.len: expected Bytes".to_string()),
+            };
+            let len = bytes_get_arc(id).map(|a| a.len()).unwrap_or(0) as i64;
+            Ok(VMValue::Int(len))
+        }
+        "Bytes.get" => {
+            let mut it = args.into_iter();
+            let id  = match it.next() { Some(VMValue::Bytes(id)) => id, _ => return Err("Bytes.get: arg0 not Bytes".to_string()) };
+            let idx = match it.next() { Some(VMValue::Int(n))    => n,  _ => return Err("Bytes.get: arg1 not Int".to_string()) };
+            // [v23.1.0 fix] reject negative indices before as-usize cast
+            if idx < 0 {
+                return Ok(err_vm(VMValue::Str(format!("Bytes.get: negative index {}", idx))));
+            }
+            match bytes_get_arc(id) {
+                Some(arc) => {
+                    let i = idx as usize;
+                    if i < arc.len() {
+                        Ok(ok_vm(VMValue::Int(arc[i] as i64)))
+                    } else {
+                        Ok(err_vm(VMValue::Str(format!("Bytes.get: index {} out of bounds (len={})", idx, arc.len()))))
+                    }
+                }
+                None => Ok(err_vm(VMValue::Str("Bytes.get: invalid Bytes handle".into()))),
+            }
+        }
+        "Bytes.slice" => {
+            let mut it = args.into_iter();
+            let id    = match it.next() { Some(VMValue::Bytes(id)) => id, _ => return Err("Bytes.slice: arg0 not Bytes".to_string()) };
+            let start = match it.next() { Some(VMValue::Int(n))    => n,  _ => return Err("Bytes.slice: arg1 not Int".to_string()) };
+            let end   = match it.next() { Some(VMValue::Int(n))    => n,  _ => return Err("Bytes.slice: arg2 not Int".to_string()) };
+            match bytes_get_arc(id) {
+                Some(arc) => {
+                    let len = arc.len();
+                    // [v23.1.0 fix] clamp negative values to 0 before as-usize cast
+                    let s = if start < 0 { 0usize } else { (start as usize).min(len) };
+                    let e = if end < 0 { 0usize } else { (end as usize).min(len) }.max(s);
+                    Ok(VMValue::Bytes(bytes_new(arc[s..e].to_vec())))
+                }
+                None => Ok(err_vm(VMValue::Str("Bytes.slice: invalid Bytes handle".into()))),
+            }
+        }
+        "Bytes.concat" => {
+            let mut it = args.into_iter();
+            let id_a = match it.next() { Some(VMValue::Bytes(id)) => id, _ => return Err("Bytes.concat: arg0 not Bytes".to_string()) };
+            let id_b = match it.next() { Some(VMValue::Bytes(id)) => id, _ => return Err("Bytes.concat: arg1 not Bytes".to_string()) };
+            // [v23.1.0 fix] propagate runtime error on invalid handles instead of silent empty fallback
+            let a = match bytes_get_arc(id_a) {
+                Some(arc) => arc,
+                None => return Err("Bytes.concat: invalid Bytes handle (arg0)".to_string()),
+            };
+            let b = match bytes_get_arc(id_b) {
+                Some(arc) => arc,
+                None => return Err("Bytes.concat: invalid Bytes handle (arg1)".to_string()),
+            };
+            let mut v = (*a).clone();
+            v.extend_from_slice(&b);
+            Ok(VMValue::Bytes(bytes_new(v)))
+        }
+        "Bytes.to_utf8" => {
+            let id = match args.into_iter().next() { Some(VMValue::Bytes(id)) => id, _ => return Err("Bytes.to_utf8: expected Bytes".to_string()) };
+            match bytes_get_arc(id) {
+                Some(arc) => match std::str::from_utf8(&arc) {
+                    Ok(s)  => Ok(ok_vm(VMValue::Str(s.to_string()))),
+                    Err(e) => Ok(err_vm(VMValue::Str(format!("Bytes.to_utf8: {}", e)))),
+                },
+                None => Ok(err_vm(VMValue::Str("Bytes.to_utf8: invalid handle".into()))),
+            }
+        }
+        "Bytes.to_hex" => {
+            let id = match args.into_iter().next() { Some(VMValue::Bytes(id)) => id, _ => return Err("Bytes.to_hex: expected Bytes".to_string()) };
+            // [v23.1.0 fix] propagate runtime error on invalid handle instead of silent empty string
+            match bytes_get_arc(id) {
+                Some(arc) => {
+                    let hex = arc.iter().map(|b| format!("{:02x}", b)).collect::<String>();
+                    Ok(VMValue::Str(hex))
+                }
+                None => Err("Bytes.to_hex: invalid Bytes handle".to_string()),
+            }
+        }
+        "Bytes.read_u16" => {
+            let mut it = args.into_iter();
+            let id  = match it.next() { Some(VMValue::Bytes(id)) => id, _ => return Err("Bytes.read_u16: arg0 not Bytes".to_string()) };
+            let off = match it.next() { Some(VMValue::Int(n))    => n as usize, _ => return Err("Bytes.read_u16: arg1 not Int".to_string()) };
+            match bytes_get_arc(id) {
+                Some(arc) if off + 2 <= arc.len() => {
+                    let v = (arc[off] as i64) << 8 | arc[off + 1] as i64;
+                    Ok(ok_vm(VMValue::Int(v)))
+                }
+                _ => Ok(err_vm(VMValue::Str("Bytes.read_u16: out of bounds".into()))),
+            }
+        }
+        "Bytes.read_u24" => {
+            let mut it = args.into_iter();
+            let id  = match it.next() { Some(VMValue::Bytes(id)) => id, _ => return Err("Bytes.read_u24: arg0 not Bytes".to_string()) };
+            let off = match it.next() { Some(VMValue::Int(n))    => n as usize, _ => return Err("Bytes.read_u24: arg1 not Int".to_string()) };
+            match bytes_get_arc(id) {
+                Some(arc) if off + 3 <= arc.len() => {
+                    let v = (arc[off] as i64) << 16 | (arc[off + 1] as i64) << 8 | arc[off + 2] as i64;
+                    Ok(ok_vm(VMValue::Int(v)))
+                }
+                _ => Ok(err_vm(VMValue::Str("Bytes.read_u24: out of bounds".into()))),
+            }
+        }
+        "Bytes.read_u32" => {
+            let mut it = args.into_iter();
+            let id  = match it.next() { Some(VMValue::Bytes(id)) => id, _ => return Err("Bytes.read_u32: arg0 not Bytes".to_string()) };
+            let off = match it.next() { Some(VMValue::Int(n))    => n as usize, _ => return Err("Bytes.read_u32: arg1 not Int".to_string()) };
+            match bytes_get_arc(id) {
+                Some(arc) if off + 4 <= arc.len() => {
+                    let v = (arc[off] as i64) << 24
+                          | (arc[off + 1] as i64) << 16
+                          | (arc[off + 2] as i64) << 8
+                          |  arc[off + 3] as i64;
+                    Ok(ok_vm(VMValue::Int(v)))
+                }
+                _ => Ok(err_vm(VMValue::Str("Bytes.read_u32: out of bounds".into()))),
+            }
+        }
+        // v23.4.0: LE バリアント（codegen.rs は u16 LE でバイトコードを生成するため）
+        "Bytes.read_u16_le" => {
+            let mut it = args.into_iter();
+            let id  = match it.next() { Some(VMValue::Bytes(id)) => id, _ => return Err("Bytes.read_u16_le: arg0 not Bytes".to_string()) };
+            let off = match it.next() { Some(VMValue::Int(n))    => n as usize, _ => return Err("Bytes.read_u16_le: arg1 not Int".to_string()) };
+            match bytes_get_arc(id) {
+                Some(arc) if off + 2 <= arc.len() => {
+                    let v = arc[off] as i64 | (arc[off + 1] as i64) << 8;
+                    Ok(ok_vm(VMValue::Int(v)))
+                }
+                _ => Ok(err_vm(VMValue::Str("Bytes.read_u16_le: out of bounds".into()))),
+            }
+        }
+        "Bytes.read_u24_le" => {
+            let mut it = args.into_iter();
+            let id  = match it.next() { Some(VMValue::Bytes(id)) => id, _ => return Err("Bytes.read_u24_le: arg0 not Bytes".to_string()) };
+            let off = match it.next() { Some(VMValue::Int(n))    => n as usize, _ => return Err("Bytes.read_u24_le: arg1 not Int".to_string()) };
+            match bytes_get_arc(id) {
+                Some(arc) if off + 3 <= arc.len() => {
+                    let v = arc[off] as i64 | (arc[off + 1] as i64) << 8 | (arc[off + 2] as i64) << 16;
+                    Ok(ok_vm(VMValue::Int(v)))
+                }
+                _ => Ok(err_vm(VMValue::Str("Bytes.read_u24_le: out of bounds".into()))),
+            }
+        }
+        "Bytes.read_file" => {
+            #[cfg(not(target_arch = "wasm32"))]
+            {
+                let path = match args.into_iter().next() {
+                    Some(VMValue::Str(s)) => s,
+                    _ => return Err("Bytes.read_file: expected String".to_string()),
+                };
+                // [v23.1.0 fix] reject path traversal: paths containing ".." components
+                if std::path::Path::new(&path).components().any(|c| c == std::path::Component::ParentDir) {
+                    return Ok(err_vm(VMValue::Str("Bytes.read_file: path traversal not allowed".into())));
+                }
+                return match std::fs::read(&path) {
+                    Ok(data) => Ok(ok_vm(VMValue::Bytes(bytes_new(data)))),
+                    Err(e)   => Ok(err_vm(VMValue::Str(format!("Bytes.read_file: {}", e)))),
+                };
+            }
+            #[allow(unreachable_code)]
+            Ok(err_vm(VMValue::Str("Bytes.read_file: not available on wasm32".into())))
+        }
+        "Bytes.write_file" => {
+            #[cfg(not(target_arch = "wasm32"))]
+            {
+                let mut it = args.into_iter();
+                let path = match it.next() {
+                    Some(VMValue::Str(s)) => s,
+                    _ => return Err("Bytes.write_file: arg0 not String".to_string()),
+                };
+                // [v23.1.0 fix] reject path traversal: paths containing ".." components
+                if std::path::Path::new(&path).components().any(|c| c == std::path::Component::ParentDir) {
+                    return Ok(err_vm(VMValue::Str("Bytes.write_file: path traversal not allowed".into())));
+                }
+                let id = match it.next() {
+                    Some(VMValue::Bytes(id)) => id,
+                    _ => return Err("Bytes.write_file: arg1 not Bytes".to_string()),
+                };
+                return match bytes_get_arc(id) {
+                    Some(arc) => match std::fs::write(&path, arc.as_ref()) {
+                        Ok(())  => Ok(ok_vm(VMValue::Unit)),
+                        Err(e)  => Ok(err_vm(VMValue::Str(format!("Bytes.write_file: {}", e)))),
+                    },
+                    None => Ok(err_vm(VMValue::Str("Bytes.write_file: invalid Bytes handle".into()))),
+                };
+            }
+            #[allow(unreachable_code)]
+            Ok(err_vm(VMValue::Str("Bytes.write_file: not available on wasm32".into())))
+        }
+
+        // ── Mut コレクション primitives (v23.3.0) ──────────────────────────
+        "Mut.list" => {
+            Ok(VMValue::MutList(mut_list_new()))
+        }
+        "Mut.push" => {
+            // ok_vm(VMValue::Unit) を返す設計: checker 戻り型は Result<Unit, String>。
+            // Favnir の bind は Result をアンラップしない（単純代入）。
+            // `bind _p <- Mut.push(lst, val)` で戻り値を捨てるのが標準パターン。
+            let mut it = args.into_iter();
+            let handle = it.next().ok_or_else(|| "Mut.push requires 2 arguments".to_string())?;
+            let val    = it.next().ok_or_else(|| "Mut.push requires 2 arguments".to_string())?;
+            let id = match handle {
+                VMValue::MutList(id) => id,
+                _ => return Err("Mut.push: first argument must be a MutList".to_string()),
+            };
+            MUT_LIST_STORE.with(|s| {
+                s.borrow_mut()
+                    .get_mut(&id)
+                    .ok_or_else(|| format!("Mut.push: invalid MutList handle {}", id))
+                    .map(|vec| vec.push(val))
+            })?;
+            Ok(ok_vm(VMValue::Unit))
+        }
+        "Mut.pop" => {
+            let handle = args.into_iter().next()
+                .ok_or_else(|| "Mut.pop requires 1 argument".to_string())?;
+            let id = match handle {
+                VMValue::MutList(id) => id,
+                _ => return Err("Mut.pop: argument must be a MutList".to_string()),
+            };
+            MUT_LIST_STORE.with(|s| {
+                s.borrow_mut()
+                    .get_mut(&id)
+                    .ok_or_else(|| format!("Mut.pop: invalid MutList handle {}", id))
+                    .map(|vec| {
+                        vec.pop()
+                            .map(ok_vm)
+                            .unwrap_or_else(|| err_vm(VMValue::Str("Mut.pop: list is empty".to_string())))
+                    })
+            })
+        }
+        "Mut.peek" => {
+            let handle = args.into_iter().next()
+                .ok_or_else(|| "Mut.peek requires 1 argument".to_string())?;
+            let id = match handle {
+                VMValue::MutList(id) => id,
+                _ => return Err("Mut.peek: argument must be a MutList".to_string()),
+            };
+            MUT_LIST_STORE.with(|s| {
+                s.borrow()
+                    .get(&id)
+                    .ok_or_else(|| format!("Mut.peek: invalid MutList handle {}", id))
+                    .map(|vec| {
+                        vec.last()
+                            .cloned()
+                            .map(ok_vm)
+                            .unwrap_or_else(|| err_vm(VMValue::Str("Mut.peek: list is empty".to_string())))
+                    })
+            })
+        }
+        "Mut.len" => {
+            let handle = args.into_iter().next()
+                .ok_or_else(|| "Mut.len requires 1 argument".to_string())?;
+            match handle {
+                VMValue::MutList(id) => {
+                    MUT_LIST_STORE.with(|s| {
+                        s.borrow()
+                            .get(&id)
+                            .ok_or_else(|| format!("Mut.len: invalid MutList handle {}", id))
+                            .map(|vec| VMValue::Int(vec.len() as i64))
+                    })
+                }
+                VMValue::MutMap(id) => {
+                    MUT_MAP_STORE.with(|s| {
+                        s.borrow()
+                            .get(&id)
+                            .ok_or_else(|| format!("Mut.len: invalid MutMap handle {}", id))
+                            .map(|vec| VMValue::Int(vec.len() as i64))
+                    })
+                }
+                _ => Err("Mut.len: argument must be a MutList or MutMap".to_string()),
+            }
+        }
+        "Mut.map" => {
+            Ok(VMValue::MutMap(mut_map_new()))
+        }
+        "Mut.set" => {
+            let mut it = args.into_iter();
+            let handle = it.next().ok_or_else(|| "Mut.set requires 3 arguments".to_string())?;
+            let key    = it.next().ok_or_else(|| "Mut.set requires 3 arguments".to_string())?;
+            let val    = it.next().ok_or_else(|| "Mut.set requires 3 arguments".to_string())?;
+            let id = match handle {
+                VMValue::MutMap(id) => id,
+                _ => return Err("Mut.set: first argument must be a MutMap".to_string()),
+            };
+            MUT_MAP_STORE.with(|s| {
+                s.borrow_mut()
+                    .get_mut(&id)
+                    .ok_or_else(|| format!("Mut.set: invalid MutMap handle {}", id))
+                    .map(|vec| {
+                        if let Some(entry) = vec.iter_mut().find(|(k, _)| k == &key) {
+                            entry.1 = val;
+                        } else {
+                            vec.push((key, val));
+                        }
+                    })
+            })?;
+            Ok(ok_vm(VMValue::Unit))
+        }
+        "Mut.get" => {
+            let mut it = args.into_iter();
+            let handle = it.next().ok_or_else(|| "Mut.get requires 2 arguments".to_string())?;
+            let key    = it.next().ok_or_else(|| "Mut.get requires 2 arguments".to_string())?;
+            let id = match handle {
+                VMValue::MutMap(id) => id,
+                _ => return Err("Mut.get: first argument must be a MutMap".to_string()),
+            };
+            MUT_MAP_STORE.with(|s| {
+                s.borrow()
+                    .get(&id)
+                    .ok_or_else(|| format!("Mut.get: invalid MutMap handle {}", id))
+                    .map(|vec| {
+                        vec.iter()
+                            .find(|(k, _)| k == &key)
+                            .map(|(_, v)| ok_vm(v.clone()))
+                            .unwrap_or_else(|| err_vm(VMValue::Str("Mut.get: key not found".to_string())))
+                    })
+            })
+        }
+        "Mut.delete" => {
+            // キーが存在しない場合も ok(unit) を返す（冪等削除）。
+            // エラーが必要な場合は Mut.has で事前確認すること。
+            let mut it = args.into_iter();
+            let handle = it.next().ok_or_else(|| "Mut.delete requires 2 arguments".to_string())?;
+            let key    = it.next().ok_or_else(|| "Mut.delete requires 2 arguments".to_string())?;
+            let id = match handle {
+                VMValue::MutMap(id) => id,
+                _ => return Err("Mut.delete: first argument must be a MutMap".to_string()),
+            };
+            MUT_MAP_STORE.with(|s| {
+                s.borrow_mut()
+                    .get_mut(&id)
+                    .ok_or_else(|| format!("Mut.delete: invalid MutMap handle {}", id))
+                    .map(|vec| vec.retain(|(k, _)| k != &key))
+            })?;
+            Ok(ok_vm(VMValue::Unit))
+        }
+        "Mut.has" => {
+            let mut it = args.into_iter();
+            let handle = it.next().ok_or_else(|| "Mut.has requires 2 arguments".to_string())?;
+            let key    = it.next().ok_or_else(|| "Mut.has requires 2 arguments".to_string())?;
+            let id = match handle {
+                VMValue::MutMap(id) => id,
+                _ => return Err("Mut.has: first argument must be a MutMap".to_string()),
+            };
+            MUT_MAP_STORE.with(|s| {
+                s.borrow()
+                    .get(&id)
+                    .ok_or_else(|| format!("Mut.has: invalid MutMap handle {}", id))
+                    .map(|vec| VMValue::Bool(vec.iter().any(|(k, _)| k == &key)))
+            })
         }
 
         // ── Queue primitives (v7.3.0) — thin SQS wrappers ─────────────────

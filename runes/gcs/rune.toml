@@ -1,0 +1,4 @@
+[rune]
+name        = "gcs"
+version     = "1.0.0"
+description = "Google Cloud Storage 読み書き"

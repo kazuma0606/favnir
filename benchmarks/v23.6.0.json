@@ -1,0 +1,11 @@
+{
+  "version": "23.6.0",
+  "date": "2026-06-22",
+  "test_count": 1917,
+  "feature": "vm.fav Phase 3（制御フロー・ローカル変数）",
+  "metrics": {
+    "vm_fav_opcodes_phase3": 12,
+    "vm_execute_params": 4,
+    "self_hosted_vm_phase": 3
+  }
+}

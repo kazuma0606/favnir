@@ -1,0 +1,73 @@
+---
+title: par_distributed
+description: 複数 Worker ノードへのパイプライン並列分散実行
+---
+
+# `par_distributed`
+
+`par_distributed [A, B, C]` は `par [A, B, C]` の分散版で、
+複数の Worker ノードにパイプラインステージを並列配布します（v22.2.0）。
+
+---
+
+## 構文
+
+```favnir
+seq DistributedReport = par_distributed [FetchOrders, FetchPrices, FetchInventory] |> Merge
+```
+
+- `par_distributed` はソフトキーワード（予約語ではない）
+- ステージ名のリスト構文は `par` と同じ `[A, B, C]` 形式
+- 戻り値は各ステージ出力のリスト（`par` と同等）
+
+---
+
+## `fav.toml` の `[workers]` 設定
+
+```toml
+[workers]
+endpoints = [
+  "grpc://worker-1:9090",
+  "grpc://worker-2:9090",
+  "grpc://worker-3:9090",
+]
+```
+
+| フィールド | 型 | 説明 |
+|---|---|---|
+| `endpoints` | `Vec<String>` | Worker gRPC エンドポイントのリスト |
+
+---
+
+## 実行フロー（v22.2.0 スコープ）
+
+```
+fav run pipeline.fav
+  └─ fav.toml の [workers].endpoints を読む
+     ├─ endpoints が空 → ローカル並列実行（IO.par_execute_raw と同等）
+     └─ endpoints あり → ログ出力 + ローカル並列フォールバック
+```
+
+> **注意**: v22.2.0 では実際の gRPC ネットワーク転送は実装しません（スタブ）。
+> Worker ノードへの stage バイトコード転送は v22.3 以降で対応します。
+
+---
+
+## フォールバック動作
+
+Worker エンドポイントが設定されていない場合は、`par` と同じローカル並列実行を行います。
+これにより、Worker 環境がない開発環境でも同じコードを実行できます。
+
+---
+
+## 今後のロードマップ
+
+- **v22.3**: `fav worker --port N` — Worker サーバープロセス
+- **v23.0**: 実際の gRPC ネットワーク経由での stage バイトコード転送・3 台 Worker での並列実行
+
+---
+
+## 関連
+
+- [`par`](/docs/language/par) — シングルマシン並列実行
+- [`#[checkpoint]`](/docs/cli/checkpoint) — パイプライン永続化・再開

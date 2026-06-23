@@ -1,0 +1,26 @@
+{
+  "version": "23.0.0",
+  "timestamp": "2026-06-21T00:00:00Z",
+  "_note": "Distributed Scale milestone snapshot: checkpoint/resume, distributed par, event-driven, orchestration, OTel.",
+  "metrics": {
+    "test_count": 1887,
+    "distributed_features": 5,
+    "deploy_targets": 4,
+    "otel_span_types": 2,
+    "sla_annotation_types": 3
+  },
+  "_metrics_notes": {
+    "distributed_features": "checkpoint / distributed_par / pipeline_state / event_trigger / orchestrate",
+    "deploy_targets": "aws-lambda(既存) / ecs / k8s / fly",
+    "otel_span_types": "SeqStageEnter / SeqStageCheck の 2 種類",
+    "sla_annotation_types": "timeout / retry / circuit_breaker",
+    "test_count": "v22.8.0完了時の実測値（1882）+ v230000_tests 5件"
+  },
+  "milestone_checklist": {
+    "checkpoint_resume":   { "achieved": true, "version": "v22.1.0" },
+    "distributed_par":     { "achieved": true, "version": "v22.2.0" },
+    "s3_event_trigger":    { "achieved": true, "version": "v22.4.0" },
+    "otel_jaeger_trace":   { "achieved": true, "version": "v22.7.0" },
+    "orchestrate_dag":     { "achieved": true, "version": "v22.5.0" }
+  }
+}

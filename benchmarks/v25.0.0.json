@@ -1,0 +1,10 @@
+{
+  "version": "25.0.0",
+  "date": "2026-06-24",
+  "test_count": 1974,
+  "feature": "Practical Self-Hosting マイルストーン宣言",
+  "metrics": {
+    "test_count": 1974,
+    "duration_ms": 17600
+  }
+}

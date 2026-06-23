@@ -1,0 +1,119 @@
+---
+title: fav deploy
+description: Favnir パイプラインを AWS Lambda・ECS Fargate・Kubernetes・Fly.io にデプロイする
+---
+
+# fav deploy
+
+`fav deploy` は Favnir パイプラインを各種プラットフォームにデプロイします。
+v22.8.0 から `--target` フラグでコンテナベース実行環境（ECS / K8s / Fly.io）に対応しました。
+
+## 基本的な使い方
+
+```bash
+# AWS Lambda（デフォルト）
+fav deploy
+
+# AWS ECS Fargate
+fav deploy --target ecs
+
+# Kubernetes CronJob
+fav deploy --target k8s
+
+# Fly.io
+fav deploy --target fly
+
+# ドライラン（ファイル生成のみ確認）
+fav deploy --target ecs --dry-run
+
+# 出力先を指定
+fav deploy --target ecs --out-dir ./deploy-config
+```
+
+## ターゲット一覧
+
+| `--target` | プラットフォーム | 生成ファイル |
+|---|---|---|
+| `aws-lambda`（デフォルト） | AWS Lambda | S3 アップロード + Lambda 更新 |
+| `ecs` | AWS ECS Fargate | `Dockerfile`, `ecs-task-def.json` |
+| `k8s` | Kubernetes CronJob | `Dockerfile`, `{name}-cronjob.yaml` |
+| `fly` | Fly.io | `Dockerfile`, `fly.toml` |
+
+## fav.toml 設定
+
+```toml
+[deploy]
+target  = "ecs"                 # デフォルトターゲット
+region  = "ap-northeast-1"      # AWS リージョン
+cpu     = "1024"                # ECS vCPU（256/512/1024/2048/4096）
+memory  = 2048                  # メモリ（MB）
+cluster = "my-cluster"          # ECS クラスター名
+out_dir = ".fav-deploy"         # 生成ファイル出力先
+
+# K8s 専用
+namespace = "production"        # Kubernetes namespace
+schedule  = "0 2 * * *"        # CronJob スケジュール（cron 式）
+
+# Fly.io 専用
+app = "my-fav-pipeline"        # Fly.io app 名
+```
+
+## ECS Fargate デプロイ手順
+
+```bash
+# 1. 設定ファイルを生成
+fav deploy --target ecs
+
+# 2. Docker イメージをビルド
+docker build -t my-pipeline .fav-deploy/
+
+# 3. ECR にプッシュ
+aws ecr create-repository --repository-name my-pipeline
+docker push <ECR_REPO>/my-pipeline:latest
+
+# 4. タスク定義を登録
+aws ecs register-task-definition \
+  --cli-input-json file://.fav-deploy/ecs-task-def.json
+```
+
+## Kubernetes CronJob デプロイ手順
+
+```bash
+# 1. 設定ファイルを生成
+fav deploy --target k8s
+
+# 2. Docker イメージをビルド & プッシュ
+docker build -t my-pipeline .fav-deploy/
+docker push <IMAGE>/my-pipeline:latest
+
+# 3. CronJob を適用
+kubectl apply -f .fav-deploy/my-pipeline-cronjob.yaml
+```
+
+## Fly.io デプロイ手順
+
+```bash
+# 1. 設定ファイルを生成
+fav deploy --target fly
+
+# 2. Fly.io CLI でデプロイ
+flyctl auth login
+flyctl apps create my-fav-pipeline
+flyctl deploy --config .fav-deploy/fly.toml
+```
+
+## フラグ一覧
+
+| フラグ | 説明 |
+|---|---|
+| `--target <name>` | デプロイターゲット（`ecs`/`k8s`/`fly`/`aws-lambda`） |
+| `--out-dir <path>` | 生成ファイル出力先（デフォルト `.fav-deploy/`） |
+| `--dry-run` | ファイルを書かず内容をコンソールに出力 |
+| `--env <name>` | 環境名（Lambda 用） |
+| `--function <name>` | Lambda 関数名（Lambda 用） |
+| `--region <region>` | AWS リージョン（Lambda / ECS 用） |
+
+## 関連
+
+- [`fav run`](/docs/cli/run) — パイプライン実行
+- [`fav.toml`](/docs/cli/fav-toml) — プロジェクト設定

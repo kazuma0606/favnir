@@ -65,6 +65,8 @@ mod profiler;
 #[cfg(not(target_arch = "wasm32"))]
 mod pushdown;
 #[cfg(not(target_arch = "wasm32"))]
+mod otel;
+#[cfg(not(target_arch = "wasm32"))]
 mod arena;
 #[cfg(not(target_arch = "wasm32"))]
 mod dap;
@@ -79,12 +81,12 @@ use driver::{
     BenchOpts,
     cmd_checkpoint_list, cmd_checkpoint_reset, cmd_checkpoint_set, cmd_checkpoint_show,
     cmd_db_migrate, cmd_db_migrate_rollback, cmd_db_migrate_status, cmd_deploy, cmd_doc,
-    cmd_doc_builtins, cmd_docs,
+    cmd_doc_builtins, cmd_doc_site, cmd_doc_serve, cmd_docs,
     cmd_exec, cmd_explain, cmd_explain_code, cmd_explain_compiler, cmd_explain_diff, cmd_explain_error,
-    cmd_explain_error_list, cmd_explain_error_list_json, cmd_explain_lineage, cmd_fmt, cmd_graph,
+    cmd_explain_error_list, cmd_explain_error_list_json, cmd_explain_lineage, cmd_explain_sla, cmd_fmt, cmd_graph,
     cmd_infer, cmd_infer_postgres, cmd_infer_proto, cmd_infer_snowflake, cmd_install, cmd_lint, cmd_migrate, cmd_new,
     cmd_profile, cmd_scaffold, cmd_transpile,
-    cmd_publish, cmd_registry, cmd_repl, cmd_run, cmd_test, cmd_watch,
+    cmd_publish, cmd_registry, cmd_repl, cmd_run, cmd_search, cmd_test, cmd_watch,
     cmd_add, cmd_update, cmd_remove, cmd_login,
     cmd_generate_api, cmd_api_serve,
 };
@@ -195,8 +197,12 @@ COMMANDS:
     explain-error --list [--format <text|json>]
                   List all known error codes with titles.
                   With --format json, emit structured JSON (for site generation).
-    deploy [--env <name>] [--function <name>] [--region <r>] [--dry-run]
-                  Deploy to AWS Lambda (packages .fav files and uploads to S3/Lambda).
+    deploy [--target <ecs|k8s|fly|aws-lambda>] [--env <name>] [--function <name>]
+           [--region <r>] [--out-dir <path>] [--dry-run]
+                  Deploy pipeline to a container or serverless platform.
+                  Targets: ecs (AWS ECS Fargate), k8s (Kubernetes CronJob),
+                           fly (Fly.io), aws-lambda (default, packages & uploads to S3/Lambda).
+                  Generates Dockerfile + platform config in --out-dir (default .fav-deploy/).
     install [<name>] [--force]
                   Install [dependencies] from fav.toml into ./runes/ (Semver deps)
                   or write fav.lock (path/registry deps). Optionally install a single dep by name.
@@ -355,6 +361,38 @@ fn main_impl() {
                 return;
             }
             // ─────────────────────────────────────────────────────────────────
+            // ── v24.0.0: fav run --vm <path> --hex <hex> ─────────────────────
+            if args.iter().any(|a| a == "--hex") && !args.iter().any(|a| a == "--vm") {
+                eprintln!("error: --hex requires --vm <path>");
+                process::exit(1);
+            }
+            if let Some(vm_pos) = args.iter().position(|a| a == "--vm") {
+                let vm_path = args.get(vm_pos + 1).map(|s| s.as_str()).unwrap_or_else(|| {
+                    eprintln!("error: --vm requires a path argument");
+                    process::exit(1);
+                });
+                let hex_pos = args.iter().position(|a| a == "--hex").unwrap_or_else(|| {
+                    eprintln!("error: --vm requires --hex <bytecode_hex>");
+                    process::exit(1);
+                });
+                let bytecode_hex = args.get(hex_pos + 1).map(|s| s.as_str()).unwrap_or_else(|| {
+                    eprintln!("error: --hex requires a hex string argument");
+                    process::exit(1);
+                });
+                let vm_src = std::fs::read_to_string(vm_path).unwrap_or_else(|e| {
+                    eprintln!("error: cannot read {}: {}", vm_path, e);
+                    process::exit(1);
+                });
+                match driver::run_with_vm(&vm_src, bytecode_hex, &[]) {
+                    Ok(v) => println!("{}", v.display()),
+                    Err(e) => {
+                        eprintln!("error: {}", e);
+                        process::exit(1);
+                    }
+                }
+                return;
+            }
+            // ─────────────────────────────────────────────────────────────────
             // Parse --db / --legacy / --self-host / --verbose / --trace flags
             let mut db_path: Option<String> = None;
             let mut legacy = false;
@@ -363,6 +401,8 @@ fn main_impl() {
             let mut no_tap = false;
             let mut legacy_value_repr = false;
             let mut explain_pushdown = false;
+            let mut checkpoint_dir: Option<String> = None;
+            let mut resume_dir: Option<String> = None;
             let mut file_idx = 2usize;
             let mut i = 2usize;
             while i < args.len() {
@@ -424,11 +464,37 @@ fn main_impl() {
                         i += 1;
                         file_idx = i;
                     }
+                    "--checkpoint-dir" => {
+                        // v22.1.0: checkpoint ファイルを保存するディレクトリ
+                        checkpoint_dir = Some(
+                            args.get(i + 1)
+                                .unwrap_or_else(|| {
+                                    eprintln!("error: --checkpoint-dir requires a directory path");
+                                    process::exit(1);
+                                })
+                                .clone(),
+                        );
+                        i += 2;
+                        file_idx = i;
+                    }
+                    "--resume" => {
+                        // v22.1.0: checkpoint ファイルを読み込んで該当 stage をスキップ
+                        resume_dir = Some(
+                            args.get(i + 1)
+                                .unwrap_or_else(|| {
+                                    eprintln!("error: --resume requires a directory path");
+                                    process::exit(1);
+                                })
+                                .clone(),
+                        );
+                        i += 2;
+                        file_idx = i;
+                    }
                     _ => break,
                 }
             }
             let file = args.get(file_idx).map(|s| s.as_str());
-            cmd_run(file, db_path.as_deref(), legacy, verbose, trace, no_tap, legacy_value_repr, explain_pushdown);
+            cmd_run(file, db_path.as_deref(), legacy, verbose, trace, no_tap, legacy_value_repr, explain_pushdown, checkpoint_dir.as_deref(), resume_dir.as_deref());
         }
 
         Some("build") => {
@@ -614,6 +680,11 @@ fn main_impl() {
         Some("explain") => {
             if args.get(2).map(|s| s.as_str()) == Some("compiler") {
                 cmd_explain_compiler();
+                return;
+            }
+            if args.iter().any(|a| a == "--sla") {
+                let file = args.iter().skip(2).find(|a| !a.starts_with('-')).map(|s| s.as_str());
+                cmd_explain_sla(file);
                 return;
             }
             if args.iter().any(|a| a == "--lineage") {
@@ -1019,6 +1090,43 @@ fn main_impl() {
         }
 
         Some("bench") => {
+            // ── v24.3.0: --baseline flag → compare mode ───────────────────────
+            if args.iter().any(|a| a == "--baseline") {
+                let baseline_path = args.iter().position(|a| a == "--baseline")
+                    .and_then(|i| args.get(i + 1))
+                    .map(|s| s.as_str())
+                    .unwrap_or_else(|| {
+                        eprintln!("error: fav bench requires --baseline <path>");
+                        process::exit(1);
+                    });
+                let current_path = args.iter().position(|a| a == "--current")
+                    .and_then(|i| args.get(i + 1))
+                    .map(|s| s.as_str())
+                    .unwrap_or_else(|| {
+                        eprintln!("error: fav bench requires --current <path>");
+                        process::exit(1);
+                    });
+                let threshold: f64 = args.iter().position(|a| a == "--threshold")
+                    .and_then(|i| args.get(i + 1))
+                    .and_then(|s| s.parse().ok())
+                    .unwrap_or(5.0);
+                let emit_md = args.iter().any(|a| a == "--emit-md");
+                let baseline_json = std::fs::read_to_string(baseline_path).unwrap_or_else(|e| {
+                    eprintln!("error: cannot read {baseline_path}: {e}");
+                    process::exit(1);
+                });
+                let current_json = std::fs::read_to_string(current_path).unwrap_or_else(|e| {
+                    eprintln!("error: cannot read {current_path}: {e}");
+                    process::exit(1);
+                });
+                let (ok, report) = driver::cmd_bench_compare(&baseline_json, &current_json, threshold, emit_md);
+                println!("{report}");
+                if !ok {
+                    process::exit(1);
+                }
+                return;
+            }
+            // ── original bench runner ─────────────────────────────────────────
             let mut opts = BenchOpts::default();
             let mut i = 2usize;
             while i < args.len() {
@@ -1211,11 +1319,39 @@ fn main_impl() {
                 cmd_doc_builtins(format, out);
                 return;
             }
+            // fav doc --serve [path] [--port N] [--no-open]
+            if args.iter().any(|a| a == "--serve") {
+                let port = args.windows(2)
+                    .find(|w| w[0] == "--port")
+                    .and_then(|w| w[1].parse::<u16>().ok())
+                    .unwrap_or(8080);
+                let no_open = args.iter().any(|a| a == "--no-open");
+                let mut path = ".".to_string();
+                let mut i = 2usize;
+                while i < args.len() {
+                    match args[i].as_str() {
+                        "--serve" | "--no-open" => { i += 1; }
+                        "--port" => { i += 2; }
+                        other if !other.starts_with("--") => {
+                            path = other.to_string();
+                            break;
+                        }
+                        _ => { i += 1; }
+                    }
+                }
+                cmd_doc_serve(&path, port, no_open);
+                return;
+            }
+            let format = args.windows(2)
+                .find(|w| w[0] == "--format")
+                .map(|w| w[1].clone())
+                .unwrap_or_else(|| "markdown".to_string());
             let mut path = ".".to_string();
             let mut out_dir = "docs".to_string();
             let mut i = 2usize;
             while i < args.len() {
                 match args[i].as_str() {
+                    "--format" => { i += 2; }
                     "--out" => {
                         out_dir = args
                             .get(i + 1)
@@ -1226,13 +1362,30 @@ fn main_impl() {
                             .clone();
                         i += 2;
                     }
-                    other => {
+                    other if !other.starts_with("--") => {
                         path = other.to_string();
                         i += 1;
                     }
+                    _ => { i += 1; }
                 }
             }
-            cmd_doc(&path, &out_dir);
+            match format.as_str() {
+                "site" => cmd_doc_site(&path, &out_dir),
+                _ => cmd_doc(&path, &out_dir),
+            }
+        }
+
+        Some("spec") => {
+            // ── v24.1.0: fav spec [--format markdown|html] ───────────────
+            let format = if let Some(pos) = args.iter().position(|a| a == "--format") {
+                args.get(pos + 1).map(|s| s.as_str()).unwrap_or_else(|| {
+                    eprintln!("error: --format requires markdown or html");
+                    process::exit(1);
+                })
+            } else {
+                "markdown"
+            };
+            println!("{}", driver::cmd_spec(format));
         }
 
         Some("transpile") => {
@@ -1404,6 +1557,9 @@ fn main_impl() {
             let mut from_effects = false;
             let mut dir: Option<String> = None;
             let mut file: Option<String> = None;
+            let mut from_version: Option<String> = None;
+            let mut to_version: Option<String> = None;
+            let mut config_file: Option<String> = None;
             let mut i = 2usize;
             while i < args.len() {
                 match args[i].as_str() {
@@ -1434,13 +1590,49 @@ fn main_impl() {
                         );
                         i += 2;
                     }
+                    "--from" => {
+                        from_version = Some(
+                            args.get(i + 1)
+                                .unwrap_or_else(|| {
+                                    eprintln!("error: --from requires a version argument");
+                                    process::exit(1);
+                                })
+                                .clone(),
+                        );
+                        i += 2;
+                    }
+                    "--to" => {
+                        to_version = Some(
+                            args.get(i + 1)
+                                .unwrap_or_else(|| {
+                                    eprintln!("error: --to requires a version argument");
+                                    process::exit(1);
+                                })
+                                .clone(),
+                        );
+                        i += 2;
+                    }
+                    "--config" => {
+                        config_file = Some(
+                            args.get(i + 1)
+                                .unwrap_or_else(|| {
+                                    eprintln!("error: --config requires a file path argument");
+                                    process::exit(1);
+                                })
+                                .clone(),
+                        );
+                        i += 2;
+                    }
                     other => {
                         file = Some(other.to_string());
                         i += 1;
                     }
                 }
             }
-            cmd_migrate(file.as_deref(), in_place, dry_run, check, dir.as_deref(), from_effects);
+            cmd_migrate(
+                file.as_deref(), in_place, dry_run, check, dir.as_deref(), from_effects,
+                from_version.as_deref(), to_version.as_deref(), config_file.as_deref(),
+            );
         }
 
         Some("explain-error") => {
@@ -1550,6 +1742,11 @@ fn main_impl() {
             cmd_registry(subcommand, &sub_args);
         }
 
+        Some("search") => {
+            let query = args.get(2).map(|s| s.as_str()).unwrap_or("");
+            cmd_search(query);
+        }
+
         Some("add") => {
             let mut dev = false;
             let mut pkg_arg: Option<String> = None;
@@ -1594,6 +1791,9 @@ fn main_impl() {
             let mut function_name: Option<String> = None;
             let mut region: Option<String> = None;
             let mut dry_run = false;
+            let mut trigger_file: Option<String> = None;
+            let mut target: Option<String>  = None;  // v22.8.0
+            let mut out_dir: Option<String> = None;  // v22.8.0
             let mut i = 2usize;
             while i < args.len() {
                 match args[i].as_str() {
@@ -1634,18 +1834,102 @@ fn main_impl() {
                         dry_run = true;
                         i += 1;
                     }
+                    "--target" => {
+                        target = Some(
+                            args.get(i + 1)
+                                .unwrap_or_else(|| {
+                                    eprintln!("error: --target requires a value (ecs|k8s|fly|aws-lambda)");
+                                    process::exit(1);
+                                })
+                                .clone(),
+                        );
+                        i += 2;
+                    }
+                    "--out-dir" => {
+                        out_dir = Some(
+                            args.get(i + 1)
+                                .unwrap_or_else(|| {
+                                    eprintln!("error: --out-dir requires a directory path");
+                                    process::exit(1);
+                                })
+                                .clone(),
+                        );
+                        i += 2;
+                    }
+                    "--trigger" => {
+                        trigger_file = Some(
+                            args.get(i + 1)
+                                .unwrap_or_else(|| {
+                                    eprintln!("error: --trigger requires a file path");
+                                    process::exit(1);
+                                })
+                                .clone(),
+                        );
+                        i += 2;
+                    }
                     other => {
                         eprintln!("error: unexpected deploy argument `{}`", other);
                         process::exit(1);
                     }
                 }
             }
-            cmd_deploy(
-                env.as_deref(),
-                function_name.as_deref(),
-                region.as_deref(),
-                dry_run,
-            );
+            if let Some(ref tfile) = trigger_file {
+                crate::driver::cmd_deploy_trigger(tfile, None);
+            } else {
+                cmd_deploy(
+                    env.as_deref(),
+                    function_name.as_deref(),
+                    region.as_deref(),
+                    dry_run,
+                    target.as_deref(),
+                    out_dir.as_deref(),
+                );
+            }
+        }
+
+        Some("orchestrate") => {
+            match args.get(2).map(|s| s.as_str()) {
+                Some("run") => {
+                    let pipeline_name = args.get(3).unwrap_or_else(|| {
+                        eprintln!("error: orchestrate run requires <PipelineName>");
+                        process::exit(1);
+                    });
+                    let file = args.get(4).unwrap_or_else(|| {
+                        eprintln!("error: orchestrate run requires <file>");
+                        process::exit(1);
+                    });
+                    let dry_run = args.iter().any(|a| a == "--dry-run");
+                    crate::driver::cmd_orchestrate_run(file, pipeline_name, dry_run);
+                }
+                Some("status") => {
+                    let pipeline_name = args.get(3).unwrap_or_else(|| {
+                        eprintln!("error: orchestrate status requires <PipelineName>");
+                        process::exit(1);
+                    });
+                    crate::driver::cmd_orchestrate_status(pipeline_name);
+                }
+                Some("retry") => {
+                    let step_name = args.get(3).unwrap_or_else(|| {
+                        eprintln!("error: orchestrate retry requires <StepName>");
+                        process::exit(1);
+                    });
+                    let pipeline_name = args.get(4).unwrap_or_else(|| {
+                        eprintln!("error: orchestrate retry requires <PipelineName>");
+                        process::exit(1);
+                    });
+                    let file = args.get(5).unwrap_or_else(|| {
+                        eprintln!("error: orchestrate retry requires <file>");
+                        process::exit(1);
+                    });
+                    crate::driver::cmd_orchestrate_retry(step_name, file, pipeline_name);
+                }
+                _ => {
+                    eprintln!("usage: fav orchestrate run <PipelineName> <file> [--dry-run]");
+                    eprintln!("       fav orchestrate status <PipelineName>");
+                    eprintln!("       fav orchestrate retry <StepName> <PipelineName> <file>");
+                    process::exit(1);
+                }
+            }
         }
 
         Some("mcp") => {
@@ -1849,12 +2133,6 @@ fn main_impl() {
             cmd_api_serve(&src, port);
         }
 
-        Some(cmd) => {
-            eprintln!("error: unknown command `{}`", cmd);
-            eprintln!("run `fav help` for usage");
-            process::exit(1);
-        }
-
         // ── v21.1.0: fav dap [--port N] ──────────────────────────────────────
         #[cfg(not(target_arch = "wasm32"))]
         Some("dap") => {
@@ -1868,6 +2146,12 @@ fn main_impl() {
                 eprintln!("error: {e}");
                 process::exit(1);
             }
+        }
+
+        Some(cmd) => {
+            eprintln!("error: unknown command `{}`", cmd);
+            eprintln!("run `fav help` for usage");
+            process::exit(1);
         }
 
         None => print_welcome(),

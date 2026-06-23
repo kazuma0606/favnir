@@ -1,0 +1,8 @@
+fn sum(a: Int, b: Int, c: Int, d: Int, e: Int) -> Int {
+    a + b + c + d + e
+}
+
+public fn main() -> String {
+    bind r <- sum(1, 2, 3, 4, 5)
+    f"total={r}"
+}

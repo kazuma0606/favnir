@@ -1,0 +1,55 @@
+# Checkpoint / Resume
+
+長時間実行パイプラインの中断・再開を安全に行う機能です（v22.1.0）。
+
+## 基本的な使い方
+
+```bash
+# checkpoint を保存しながら実行
+fav run --checkpoint-dir /tmp/ckpt pipeline.fav
+
+# 中断後に再開（checkpoint 済み stage をスキップ）
+fav run --resume /tmp/ckpt pipeline.fav
+
+# 両方指定（再開しつつ新しい checkpoint も保存）
+fav run --checkpoint-dir /tmp/ckpt2 --resume /tmp/ckpt pipeline.fav
+```
+
+## `#[checkpoint]` アノテーション
+
+```favnir
+#[checkpoint]
+stage ProcessBatch: List<Row> -> List<Result> = |rows| { ... }
+
+seq LongRunning = Load |> ProcessBatch |> Save
+```
+
+`#[checkpoint]` を付けた stage の出力は `--checkpoint-dir` で指定したディレクトリに保存されます。
+`--resume` を指定すると、checkpoint 済みの stage はスキップされ、次の stage から再開します。
+
+- `stage`（`TrfDef`）にのみ付与可能。`seq`（`FlwDef`）には付与しない。
+- 複数の stage に付与可能。
+
+## Checkpoint ファイル形式
+
+```
+<checkpoint-dir>/
+  <stage_name>.ckpt     ← stage 出力のバイト列
+```
+
+ファイル名はスペース・スラッシュ・バックスラッシュをアンダースコアに変換した `{stage_name}.ckpt` です。
+
+## オプション
+
+| オプション | 型 | 説明 |
+|---|---|---|
+| `--checkpoint-dir <dir>` | `Option<String>` | checkpoint ファイルを保存するディレクトリ |
+| `--resume <dir>` | `Option<String>` | checkpoint ファイルを読み込んで該当 stage をスキップ |
+
+## スコープ外（v22.1.0）
+
+以下は v22.1.0 では実装していません：
+
+- checkpoint ファイルの圧縮（gzip 等）
+- 分散ストレージ（S3 / DynamoDB）への保存（v22.3 予定）
+- SHA-256 チェックサム検証（v22.3 予定）

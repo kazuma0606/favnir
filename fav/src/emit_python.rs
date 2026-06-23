@@ -300,6 +300,7 @@ fn map_effect(e: &Effect) -> &'static str {
         Effect::Postgres => "Postgres",
         Effect::Rpc => "Rpc",
         Effect::File => "File",
+        Effect::PipelineState => "PipelineState",
         Effect::Unknown(_) => "Unknown",
         _ => "Effect",
     }
@@ -1204,7 +1205,7 @@ impl Emitter {
             return;
         }
 
-        let has_par = fd.steps.iter().any(|s| matches!(s, ast::FlwStep::Par(_)));
+        let has_par = fd.steps.iter().any(|s| matches!(s, ast::FlwStep::Par(_) | ast::FlwStep::ParDistributed(_)));
         if has_par {
             self.emit_flw_with_par(&fn_name, &fd.steps);
         } else {
@@ -1225,8 +1226,8 @@ impl Emitter {
                 ast::FlwStep::Stage(name) => {
                     expr = format!("{}({})", to_snake(name), expr);
                 }
-                ast::FlwStep::Par(names) => {
-                    // par はシンプルチェーンでは来ないが念のため
+                ast::FlwStep::Par(names) | ast::FlwStep::ParDistributed(names) => {
+                    // par/par_distributed はシンプルチェーンでは来ないが念のため
                     let calls: Vec<String> = names.iter()
                         .map(|n| format!("{}({})", to_snake(n), expr))
                         .collect();
@@ -1261,7 +1262,8 @@ impl Emitter {
                         cur = v;
                     }
                 }
-                ast::FlwStep::Par(names) => {
+                ast::FlwStep::Par(names) | ast::FlwStep::ParDistributed(names) => {
+                    // par_distributed: stub in Python emit — uses local threads (gRPC dispatch not implemented)
                     self.line("from concurrent.futures import ThreadPoolExecutor");
                     self.line("with ThreadPoolExecutor() as _pool:");
                     self.indent += 1;

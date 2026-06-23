@@ -1,0 +1,56 @@
+---
+title: 4-Stage Bootstrap 検証
+description: Rust VM と vm.fav（Favnir）の等価性を自動検証する仕組み
+---
+
+# 4-Stage Bootstrap 検証
+
+Favnir コンパイラは以下の 4 段階で自己検証します。
+
+## ステージ定義
+
+| ステージ | 実行系 | 入力 | 出力 |
+|---|---|---|---|
+| Stage 1 | Rust VM + compiler.fav（元） | fixture.fav | bytecode_A |
+| Stage 2 | Rust VM + compiler.fav（元） | compiler.fav | compiler_artifact |
+| Stage 3 | Rust VM + compiler_artifact | fixture.fav | bytecode_B |
+| Stage 4 | vm.fav（Favnir）+ compiler_artifact | fixture.fav | bytecode_C |
+
+## 検証式
+
+```
+bytecode_A == bytecode_B  （Stage 1/3 一致 — 3-stage bootstrap）
+bytecode_B == bytecode_C  （Stage 3/4 一致 — vm.fav 等価性証明）
+```
+
+## fixture 一覧
+
+| ファイル | 内容 |
+|---|---|
+| `tests/bootstrap/hello.fav` | 基本文字列出力 |
+| `tests/bootstrap/arithmetic.fav` | 整数演算・関数呼び出し |
+| `tests/bootstrap/pattern_match.fav` | Option 型パターンマッチ |
+| `tests/bootstrap/list_ops.fav` | 多引数算術関数 |
+| `tests/bootstrap/closures.fav` | 高階関数・クロージャ |
+
+## テスト実行
+
+```bash
+# 高速テスト（CI 常時実行）
+cargo test v242000 --bin fav
+
+# Stage 1–3 bootstrap 検証（低速・任意実行）
+cargo test bootstrap_stage1 --bin fav -- --ignored --nocapture
+```
+
+## Stage 4 について
+
+Stage 4（vm.fav + compiler_artifact → bytecode_C）は vm.fav Phase 6
+（ユーザー定義関数ディスパッチ）完了後に有効化される予定です（v25.x 以降）。
+
+現在は Stage 1–3（`bytecode_A == bytecode_B`）のみ検証しています。
+
+## 関連ドキュメント
+
+- [`fav spec`](/docs/tools/spec) — 形式的仕様書生成
+- [`vm.fav`](/docs/tools/vm-fav) — Favnir で書かれた VM 仕様

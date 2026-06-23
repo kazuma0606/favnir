@@ -1,0 +1,109 @@
+# LSP サポート
+
+Favnir は [Language Server Protocol](https://microsoft.github.io/language-server-protocol/) (LSP) サーバーを内蔵しています。
+`fav lsp` コマンドで起動し、VS Code / Neovim / Zed などのエディタとシームレスに連携できます。
+
+## 起動方法
+
+```bash
+fav lsp
+```
+
+stdio モードで起動します。エディタの LSP クライアントは標準入出力経由で接続してください。
+
+## VS Code 設定例
+
+`.vscode/settings.json` に以下を追加:
+
+```json
+{
+  "favnir.lsp.enable": true,
+  "favnir.lsp.path": "/usr/local/bin/fav"
+}
+```
+
+公式 VS Code 拡張（`favnir.favnir-vscode`）をインストールすると自動設定されます。
+
+## 対応機能一覧
+
+| 機能 | LSP メソッド | 説明 |
+|---|---|---|
+| ホバー情報 | `textDocument/hover` | 型シグネチャ・ドキュメントコメント表示 |
+| 補完 | `textDocument/completion` | キーワード・Rune メソッド・スニペット |
+| 定義ジャンプ | `textDocument/definition` | シンボル定義・Rune ファイルへジャンプ |
+| シグネチャヘルプ | `textDocument/signatureHelp` | 関数引数のシグネチャ表示 |
+| 診断 | `textDocument/publishDiagnostics` | 型エラー・lint 警告をリアルタイム表示 |
+| コードアクション | `textDocument/codeAction` | import 自動追加・f-string 変換・binding インライン化 |
+| リネーム | `textDocument/rename` | シンボルを AST 全体で一括リネーム |
+| 参照検索 | `textDocument/references` | シンボルの全出現箇所を一覧表示 |
+
+## コードアクション（v21.5.0）
+
+カーソル行の文脈に応じて 3 種類のアクションを提供します。
+
+### CA-1: Add missing import
+
+Rune の名前空間を使用しているが `use` 宣言がない場合に提案されます。
+
+```fav
+-- before: カーソルをこの行に置いてアクションを実行
+http.get("https://api.example.com/data")
+```
+
+```fav
+-- after: ファイル先頭に自動挿入
+use http
+
+http.get("https://api.example.com/data")
+```
+
+対象となる名前空間は `http`、`postgres`、`fs`、`json`、`csv`、`slack` など [既知 Rune 一覧](/docs/runes/overview) に含まれるすべての Rune です。
+
+### CA-2: Convert to f-string
+
+`String.concat(` の連鎖を検出し、f-string への書き換えを提案します。
+
+```fav
+-- before
+String.concat(String.concat("Hello, ", name), "!")
+```
+
+```fav
+-- after
+f"Hello, {name}!"
+```
+
+### CA-3: Inline binding
+
+`bind name <- expr` を検出し、式を使用箇所にインライン化することを提案します。
+
+```fav
+-- before
+bind result <- compute(x)
+result
+```
+
+```fav
+-- after
+compute(x)
+```
+
+## リネーム（v21.5.0）
+
+カーソル位置のシンボルを、同一ファイル内のすべての出現箇所で一括リネームします。
+
+- Favnir キーワード（`fn`, `stage`, `bind`, `match` 等）はリネーム不可
+- 編集結果は `WorkspaceEdit` として返され、エディタが適用します
+
+**使い方（VS Code）**: シンボルにカーソルを置いて `F2` キー
+
+## 参照検索（v21.5.0）
+
+カーソル位置のシンボルが出現するすべての箇所（定義・呼び出し・型注釈など）を Location リストで返します。
+
+**使い方（VS Code）**: シンボルを右クリック → "Find All References" または `Shift+F12`
+
+## 診断コード
+
+LSP 経由で報告されるエラーコードの一覧は [エラーリファレンス](/docs/errors) を参照してください。
+lint 警告（W001〜）については [lint ドキュメント](/docs/tools/lint) を参照してください。

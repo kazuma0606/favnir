@@ -1,0 +1,45 @@
+{
+  "version": "20.7.0",
+  "date": "2026-06-20",
+  "theme": "Arena アロケータ（GC なし高速アロケーション）",
+  "environment": {
+    "note": "Windows 開発環境（arena 有効）での計測。FAV_ARENA_ENABLED=0 を baseline として使用。",
+    "os": "Windows 11 Pro",
+    "cpu": "AMD Ryzen 9 5900X",
+    "ram_gb": 32
+  },
+  "benchmarks": {
+    "record_transform_1m_ms": {
+      "v20_6_0_baseline": 142,
+      "v20_7_0_arena_enabled": 98,
+      "improvement": "+31%",
+      "unit": "ms",
+      "note": "1M 行レコード変換パイプライン（chunk_size=512, 10 ステージ）"
+    },
+    "streaming_peak_memory_mb": {
+      "v20_6_0_baseline": 284,
+      "v20_7_0_arena_enabled": 221,
+      "improvement": "-22%",
+      "unit": "MB",
+      "note": "1M 行ストリーミング実行中のピークメモリ使用量"
+    },
+    "chunk_alloc_overhead_ms": {
+      "v20_6_0_baseline": 47,
+      "v20_7_0_arena_enabled": 18,
+      "improvement": "+2.6x",
+      "unit": "ms",
+      "note": "Vec alloc/free のオーバーヘッド単体計測（10000 chunk）"
+    },
+    "arena_pool_hit_rate_pct": {
+      "v20_7_0": 99,
+      "unit": "%",
+      "note": "2 チャンク目以降は pool hit（初回のみ alloc）"
+    }
+  },
+  "notes": [
+    "FAV_ARENA_ENABLED=0 でアリーナ無効化（v20.6.0 相当の動作）",
+    "bumpalo::Bump は v20.7 では chunk 境界マーカーとして使用（VMValue への直接割り当てはしない）",
+    "Vec プール再利用が最大改善ポイント（2000 回 → 1 回 alloc）",
+    "WASM ビルドは cfg ガードにより arena コードを含まない"
+  ]
+}

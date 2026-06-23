@@ -121,6 +121,22 @@ pub struct KafkaTomlConfig {
     pub sasl_password:     Option<String>,
 }
 
+// ── Workers config (v22.2.0) ──────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Default)]
+pub struct WorkersConfig {
+    /// gRPC エンドポイントのリスト（例: "grpc://worker-1:9090"）
+    pub endpoints: Vec<String>,
+}
+
+// ── State config (v22.3.0) ────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Default)]
+pub struct StateConfig {
+    /// バックエンド種別 ("memory" | "redis" | "dynamodb" | "postgres")
+    pub backend: String,
+}
+
 // ── Azure config (v14.2.0) ────────────────────────────────────────────────────
 
 #[derive(Debug, Clone)]
@@ -135,12 +151,15 @@ pub struct AzureTomlConfig {
 
 #[derive(Debug, Clone)]
 pub struct PostgresTomlConfig {
-    pub host:     Option<String>,
-    pub port:     Option<u16>,
-    pub dbname:   Option<String>,
-    pub user:     Option<String>,
-    pub password: Option<String>,
-    pub sslmode:  Option<String>,
+    pub host:      Option<String>,
+    pub port:      Option<u16>,
+    pub dbname:    Option<String>,
+    pub user:      Option<String>,
+    pub password:  Option<String>,
+    pub sslmode:   Option<String>,
+    // v20.8.0 追加
+    pub pool_size: Option<usize>,
+    pub min_idle:  Option<usize>,
 }
 
 // ── Deploy config (v4.11.0) ───────────────────────────────────────────────────
@@ -158,6 +177,13 @@ pub struct DeployConfig {
     pub s3_bucket: Option<String>,
     pub role_arn: Option<String>,
     pub region: Option<String>,
+    // v22.8.0: コンテナターゲット用フィールド
+    pub cpu:       Option<String>,  // ECS vCPU: "256"|"512"|"1024"|"2048"|"4096"
+    pub cluster:   Option<String>,  // ECS クラスター名（省略時 "fav-cluster"）
+    pub namespace: Option<String>,  // K8s namespace（省略時 "default"）
+    pub schedule:  Option<String>,  // K8s CronJob schedule（省略時 "0 0 * * *"）
+    pub app:       Option<String>,  // Fly.io app 名（省略時 project_name）
+    pub out_dir:   Option<String>,  // 生成ファイル出力先（省略時 ".fav-deploy/"）
 }
 
 impl Default for DeployConfig {
@@ -172,6 +198,12 @@ impl Default for DeployConfig {
             s3_bucket: None,
             role_arn: None,
             region: None,
+            cpu:       None,
+            cluster:   None,
+            namespace: None,
+            schedule:  None,
+            app:       None,
+            out_dir:   None,
         }
     }
 }
@@ -255,6 +287,10 @@ pub struct FavToml {
     pub dev_dependencies: Vec<DependencySpec>,
     /// Registry URL from `[registry]` section (v17.8.0).
     pub registry_url: Option<String>,
+    /// Worker endpoints from `[workers]` section (v22.2.0).
+    pub workers: Option<WorkersConfig>,
+    /// State backend from `[state]` section (v22.3.0).
+    pub state: Option<StateConfig>,
 }
 
 impl FavToml {
@@ -321,6 +357,10 @@ fn parse_fav_toml(content: &str) -> FavToml {
     let mut kafka_cfg: Option<KafkaTomlConfig> = None;
     let mut dev_dependencies: Vec<DependencySpec> = Vec::new();
     let mut registry_url: Option<String> = None;
+    let mut workers_cfg: Option<WorkersConfig> = None;
+    // v22.2.0: accumulator for multi-line [workers].endpoints array
+    let mut workers_endpoints_accum: Option<Vec<String>> = None;
+    let mut state_cfg: Option<StateConfig> = None;
     let mut section = "";
 
     for line in content.lines() {
@@ -398,6 +438,14 @@ fn parse_fav_toml(content: &str) -> FavToml {
         }
         if trimmed == "[registry]" {
             section = "registry";
+            continue;
+        }
+        if trimmed == "[workers]" {
+            section = "workers";
+            continue;
+        }
+        if trimmed == "[state]" {
+            section = "state";
             continue;
         }
         if trimmed.starts_with('[') {
@@ -523,6 +571,13 @@ fn parse_fav_toml(content: &str) -> FavToml {
                         "s3_bucket"     => current.s3_bucket     = Some(val.to_string()),
                         "role_arn"      => current.role_arn      = Some(val.to_string()),
                         "region"        => current.region        = Some(val.to_string()),
+                        // v22.8.0: コンテナターゲット用フィールド
+                        "cpu"       => current.cpu       = Some(val.to_string()),
+                        "cluster"   => current.cluster   = Some(val.to_string()),
+                        "namespace" => current.namespace = Some(val.to_string()),
+                        "schedule"  => current.schedule  = Some(val.to_string()),
+                        "app"       => current.app       = Some(val.to_string()),
+                        "out_dir"   => current.out_dir   = Some(val.to_string()),
                         _ => {}
                     }
                 }
@@ -552,12 +607,14 @@ fn parse_fav_toml(content: &str) -> FavToml {
             }
             "postgres" => {
                 let mut current = postgres_cfg.take().unwrap_or(PostgresTomlConfig {
-                    host:     None,
-                    port:     None,
-                    dbname:   None,
-                    user:     None,
-                    password: None,
-                    sslmode:  None,
+                    host:      None,
+                    port:      None,
+                    dbname:    None,
+                    user:      None,
+                    password:  None,
+                    sslmode:   None,
+                    pool_size: None,
+                    min_idle:  None,
                 });
                 if let Some((key, val)) = parse_kv(trimmed) {
                     match key {
@@ -566,7 +623,9 @@ fn parse_fav_toml(content: &str) -> FavToml {
                         "dbname"   => current.dbname   = Some(expand_env_vars(val)),
                         "user"     => current.user     = Some(expand_env_vars(val)),
                         "password" => current.password = Some(expand_env_vars(val)),
-                        "sslmode"  => current.sslmode  = Some(val.to_string()),
+                        "sslmode"   => current.sslmode   = Some(val.to_string()),
+                        "pool_size" => current.pool_size = val.parse::<usize>().ok(),
+                        "min_idle"  => current.min_idle  = val.parse::<usize>().ok(),
                         _ => {}
                     }
                 }
@@ -688,6 +747,57 @@ fn parse_fav_toml(content: &str) -> FavToml {
                     }
                 }
             }
+            "workers" => {
+                if workers_endpoints_accum.is_some() {
+                    // Inside a multi-line endpoints array — accumulate or close
+                    let t = trimmed.trim_end_matches(',').trim();
+                    if t == "]" {
+                        // End of multi-line array
+                        if let Some(accum) = workers_endpoints_accum.take() {
+                            let mut current = workers_cfg.take().unwrap_or_default();
+                            current.endpoints = accum;
+                            workers_cfg = Some(current);
+                        }
+                    } else {
+                        // Individual entry: `"grpc://worker-1:9090"` or `"grpc://....",`
+                        let entry = t.trim_matches('"').to_string();
+                        if !entry.is_empty() {
+                            if let Some(ref mut accum) = workers_endpoints_accum {
+                                accum.push(entry);
+                            }
+                        }
+                    }
+                } else if let Some((key, val)) = parse_kv(trimmed) {
+                    if key == "endpoints" {
+                        let val_t = val.trim();
+                        if val_t.starts_with('[') && val_t.ends_with(']') {
+                            // Single-line array: endpoints = ["grpc://a", "grpc://b"]
+                            let endpoints: Vec<String> = val_t
+                                .trim_start_matches('[')
+                                .trim_end_matches(']')
+                                .split(',')
+                                .map(|s| s.trim().trim_matches('"').to_string())
+                                .filter(|s| !s.is_empty())
+                                .collect();
+                            let mut current = workers_cfg.take().unwrap_or_default();
+                            current.endpoints = endpoints;
+                            workers_cfg = Some(current);
+                        } else if val_t.starts_with('[') {
+                            // Start of multi-line array: endpoints = [
+                            workers_endpoints_accum = Some(Vec::new());
+                        }
+                    }
+                }
+            }
+            "state" => {
+                if let Some((key, val)) = parse_kv(trimmed) {
+                    if key == "backend" {
+                        let mut current = state_cfg.take().unwrap_or_default();
+                        current.backend = val.trim_matches('"').to_string();
+                        state_cfg = Some(current);
+                    }
+                }
+            }
             _ => {}
         }
     }
@@ -718,6 +828,8 @@ fn parse_fav_toml(content: &str) -> FavToml {
         azure: azure_cfg,
         dev_dependencies,
         registry_url,
+        workers: workers_cfg,
+        state: state_cfg,
     }
 }
 

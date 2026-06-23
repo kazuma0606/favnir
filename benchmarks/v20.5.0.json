@@ -1,0 +1,40 @@
+{
+  "version": "20.5.0",
+  "timestamp": "2026-06-20T10:00:00Z",
+  "host": "dev-win11-local",
+  "_note": "mmap + SIMD CSV parser. ArrowBatch.from_csv uses memmap2 (zero-copy mmap) + arrow::csv (columnar SIMD parsing) to read CSV files directly as RecordBatch, bypassing the csv crate row-by-row parsing and per-row String/HashMap allocation.",
+  "_from_csv_status": {
+    "mmap": "active (memmap2 zero-copy file mapping)",
+    "schema_inference": "active (Format::infer_schema, 1000 row sample)",
+    "columnar_parse": "active (arrow::csv::ReaderBuilder, batch_size 65536)",
+    "multi_chunk_merge": "active (arrow::compute::concat_batches)",
+    "wasm_guard": "active (#[cfg(not(target_arch = wasm32))] stub always Err)",
+    "v204_pushdown_compat": "automatic (ArrowBatch output fed into __duckdb_push)"
+  },
+  "metrics": {
+    "cold_start_full_ms":          318,
+    "cold_start_precompiled_ms":    17,
+    "csv_10gb_throughput_mbs":    1120,
+    "tight_loop_10m_iter_ms":     2180,
+    "record_transform_1m_ms":      162,
+    "compile_cold_ms":            2400,
+    "compile_incremental_ms":      180,
+    "arrow_parquet_write_1gb_ms": 3190,
+    "duckdb_query_sum_1m_ms":        4,
+    "concurrent_stages_3way_ms":   118,
+    "csv_from_csv_1m_rows_ms":      87,
+    "peak_memory_csv_1gb_mb":     1350
+  },
+  "comparison_vs_v20_4_0": {
+    "_note": "csv_10gb_throughput shows ~3.2x improvement via mmap+arrow-csv vs csv crate row parsing. peak_memory_csv_1gb drops ~44% (no intermediate Vec<String> per row). csv_from_csv_1m_rows_ms measures ArrowBatch.from_csv on a 1M-row CSV, compared to legacy Csv.parse which required IO.read_file + parse (~270ms).",
+    "csv_10gb_throughput_mbs_v204": 345,
+    "csv_10gb_throughput_mbs_v205": 1120,
+    "throughput_improvement_x": 3.2,
+    "peak_memory_csv_1gb_mb_v204": 2400,
+    "peak_memory_csv_1gb_mb_v205": 1350,
+    "memory_reduction_pct": 44,
+    "csv_from_csv_1m_rows_ms_legacy": 270,
+    "csv_from_csv_1m_rows_ms_v205": 87,
+    "row_parse_improvement_x": 3.1
+  }
+}

@@ -1,5 +1,6 @@
 #![allow(dead_code)]
 
+pub mod code_action;
 pub mod completion;
 pub mod definition;
 pub mod diagnostics;
@@ -7,16 +8,21 @@ pub mod doc_comment;
 pub mod document_store;
 pub mod hover;
 pub mod protocol;
+pub mod references;
+pub mod rename;
 pub mod signature;
 
 use std::io::{self, BufRead, Write};
 
+use code_action::handle_code_action;
 use completion::handle_completion;
 use definition::{handle_definition, handle_rune_definition};
 use diagnostics::errors_to_diagnostics;
 use document_store::DocumentStore;
 use hover::handle_hover;
-use protocol::{Position, RpcRequest, RpcResponse};
+use protocol::{Position, Range, RpcRequest, RpcResponse};
+use references::handle_references;
+use rename::handle_rename;
 use signature::get_signature_help;
 
 pub struct LspServer<W: Write> {
@@ -67,7 +73,10 @@ impl<W: Write> LspServer<W> {
                             "definitionProvider": true,
                             "signatureHelpProvider": {
                                 "triggerCharacters": ["(", ","]
-                            }
+                            },
+                            "codeActionProvider": true,
+                            "renameProvider": true,
+                            "referencesProvider": true
                         }
                     }),
                 )?;
@@ -132,6 +141,32 @@ impl<W: Write> LspServer<W> {
                     })
                     .and_then(|help| serde_json::to_value(help).ok())
                     .unwrap_or(serde_json::Value::Null);
+                self.write_response(request.id.unwrap_or(serde_json::Value::Null), result)?;
+                Ok(false)
+            }
+            "textDocument/codeAction" => {
+                let result = extract_code_action_params(&request.params)
+                    .map(|(uri, range)| handle_code_action(&self.store, &uri, range))
+                    .and_then(|actions| serde_json::to_value(actions).ok())
+                    .unwrap_or_else(|| serde_json::json!([]));
+                self.write_response(request.id.unwrap_or(serde_json::Value::Null), result)?;
+                Ok(false)
+            }
+            "textDocument/rename" => {
+                let result = extract_rename_params(&request.params)
+                    .and_then(|(uri, pos, new_name)| {
+                        handle_rename(&self.store, &uri, pos, &new_name)
+                    })
+                    .and_then(|edit| serde_json::to_value(edit).ok())
+                    .unwrap_or(serde_json::Value::Null);
+                self.write_response(request.id.unwrap_or(serde_json::Value::Null), result)?;
+                Ok(false)
+            }
+            "textDocument/references" => {
+                let result = extract_hover_target(&request.params)
+                    .map(|(uri, pos)| handle_references(&self.store, &uri, pos))
+                    .and_then(|locs| serde_json::to_value(locs).ok())
+                    .unwrap_or_else(|| serde_json::json!([]));
                 self.write_response(request.id.unwrap_or(serde_json::Value::Null), result)?;
                 Ok(false)
             }
@@ -293,6 +328,19 @@ fn extract_completion_target(
         .and_then(|value| value.as_str())
         .map(|value| value.to_string());
     Some((uri, pos, trigger))
+}
+
+fn extract_code_action_params(params: &serde_json::Value) -> Option<(String, Range)> {
+    let uri = params.get("textDocument")?.get("uri")?.as_str()?.to_string();
+    let range = serde_json::from_value::<Range>(params.get("range")?.clone()).ok()?;
+    Some((uri, range))
+}
+
+fn extract_rename_params(params: &serde_json::Value) -> Option<(String, Position, String)> {
+    let uri = params.get("textDocument")?.get("uri")?.as_str()?.to_string();
+    let pos = serde_json::from_value::<Position>(params.get("position")?.clone()).ok()?;
+    let new_name = params.get("newName")?.as_str()?.to_string();
+    Some((uri, pos, new_name))
 }
 
 fn run_lsp_loop(reader: &mut impl BufRead, writer: &mut impl Write) -> io::Result<()> {

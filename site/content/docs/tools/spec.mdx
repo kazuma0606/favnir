@@ -1,0 +1,56 @@
+---
+title: fav spec
+description: 形式的仕様書生成コマンド
+---
+
+# fav spec
+
+Favnir 言語の形式的仕様書を Markdown または HTML 形式で出力します。
+
+## 使い方
+
+```bash
+fav spec --format markdown > SPEC.md
+fav spec --format html > spec/index.html
+```
+
+## オプション
+
+| オプション | 説明 |
+|---|---|
+| `--format markdown` | Markdown 形式で出力（デフォルト） |
+| `--format html` | HTML 形式で出力 |
+
+## 出力セクション
+
+仕様書は以下の 4 セクションで構成されます。
+
+### 1. 型システム（Type System）
+
+基本型一覧（Int / Float / Bool / String / Unit / List\<A\> / Option\<A\> / Result\<A,E\> / Bytes）と、
+Hindley-Milner を基礎とした型推論規則（Var / Abs / App / Let / Gen）を記述します。
+
+### 2. opcode 動作仕様
+
+全 31 opcode のバイト値・オペランド・スタック操作・説明をまとめた対応表です。
+vm.fav の実装と対応しています。
+
+### 3. エフェクトシステム（Effect System）
+
+エフェクト一覧（Pure / Io / Http / Llm / Db / Snowflake / File / Trace）と、
+「エフェクトアノテーションなし ⇔ 純粋（参照透過）」の形式的定義、エフェクト合成規則を記述します。
+
+### 4. パターンマッチ網羅性（Pattern Match Exhaustiveness）
+
+網羅性条件（∀ v ∈ type(e). ∃ i. match(patᵢ, v) = true）と、
+パターン種別（リテラル / 変数 / ワイルドカード / バリアント / Or / レコード）を記述します。
+非網羅的なパターンマッチは E0010 としてコンパイルエラーになります。
+
+## 既知の制限
+
+- **HTML テーブル**: `--format html` では Markdown テーブル（`| ... |`）が `<table>` ではなく `<p>` タグとして出力されます。テーブルの適切な HTML 変換は将来のバージョンで対応予定です。
+
+## 関連コマンド
+
+- [`fav doc`](/docs/tools/doc-site) — `///` コメントから API ドキュメントを生成
+- [`fav explain`](/docs/tools/lsp) — リネージ解析・データフロー可視化

@@ -1,0 +1,4 @@
+[rune]
+name        = "avro"
+version     = "1.0.0"
+description = "Apache Avro シリアライズ / デシリアライズ"

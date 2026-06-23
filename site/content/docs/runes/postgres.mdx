@@ -1,0 +1,111 @@
+# Postgres Rune
+
+PostgreSQL データベースとやり取りするための組み込み Rune。
+
+> **WASM 非対応**: Postgres / Postgres.Pool 系 primitive はネイティブ実行専用です。
+
+---
+
+## 基本操作（Raw API）
+
+```favnir
+-- 環境変数 DATABASE_URL または fav.toml [postgres] の接続文字列を使用
+bind _ <- Postgres.execute_raw("INSERT INTO logs (msg) VALUES ($1)", ["hello"])
+bind rows <- Postgres.query_raw("SELECT id, name FROM users WHERE id = $1", [42])
+```
+
+---
+
+## Postgres.Pool — コネクションプール（v20.8.0）
+
+接続確立コスト（~50ms/回）を排除するコネクションプール。
+プールを一度作成して stage 間で再利用することで、多段パイプラインの DB アクセスを大幅に高速化します。
+
+### `Postgres.Pool.create(pool_size)`
+
+```favnir
+-- pool_size: 最大接続数（デフォルト: 5）
+bind pool <- Postgres.Pool.create(10)
+```
+
+- `fav.toml` の `[postgres]` セクションの接続設定を使用
+- Lazy 初期化（`create` 時点では接続を確立しない）
+
+### `Postgres.Pool.query(pool, sql, params)`
+
+```favnir
+bind users <- Postgres.Pool.query(pool, "SELECT id, name FROM users WHERE active = $1", [true])
+-- 返値: Result<List<Record>>
+```
+
+### `Postgres.Pool.execute(pool, sql, params)`
+
+```favnir
+bind rows_affected <- Postgres.Pool.execute(pool,
+  "INSERT INTO logs (msg, ts) VALUES ($1, NOW())",
+  ["pipeline started"])
+-- 返値: Result<Int>（影響行数）
+```
+
+### `Postgres.Pool.stats(pool)`
+
+```favnir
+let stats = Postgres.Pool.stats(pool)
+-- 返値: Record {
+--   borrow_count: Int,   -- pool hit 回数
+--   miss_count: Int,     -- 新規接続回数（pool miss）
+--   return_count: Int,   -- 返却回数
+--   error_count: Int,    -- エラー回数
+--   idle_count: Int,     -- 現在の idle 接続数
+-- }
+```
+
+### `Postgres.Pool.close(pool)`
+
+```favnir
+Postgres.Pool.close(pool)
+-- プールを閉じ、全接続を解放（プロセス終了時に自動クローズ）
+```
+
+---
+
+## fav.toml 設定
+
+```toml
+[postgres]
+host     = "localhost"
+port     = 5432
+dbname   = "mydb"
+user     = "admin"
+password = "${POSTGRES_PASSWORD}"
+sslmode  = "disable"
+pool_size = 10   # v20.8.0 追加（デフォルト: 5）
+min_idle  = 2    # v20.8.0 追加（将来の background warmup 用）
+```
+
+---
+
+## パイプライン例
+
+```favnir
+-- プールを一度作成して 10 stage で再利用（接続確立コスト: 1 回のみ）
+bind pool <- Postgres.Pool.create(5)
+
+stage LoadUser: UserId -> User = |uid| {
+  bind rows <- Postgres.Pool.query(pool, "SELECT * FROM users WHERE id = $1", [uid])
+  -- ...
+}
+
+stage SaveResult: Result -> Unit = |r| {
+  bind _ <- Postgres.Pool.execute(pool, "INSERT INTO results VALUES ($1)", [r.value])
+  ()
+}
+```
+
+---
+
+## 注意事項
+
+- v20.8 では `sslmode = "disable"` 相当（NoTls）のみ対応。TLS は v20.9 で追加予定。
+- `min_idle` は値を保存するが、v20.8 では prewarming は行わない（v20.9 で実装予定）。
+- プールは `pg_pool_runtime`（専用 multi-thread tokio runtime）上で動作する。

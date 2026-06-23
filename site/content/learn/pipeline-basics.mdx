@@ -1,0 +1,58 @@
+---
+title: "パイプラインの基礎"
+description: "stage / seq / par と |> 演算子を使ったデータパイプラインの構築"
+---
+
+# パイプラインの基礎
+
+## stage
+
+`stage` はデータ変換の単一ステップです。
+
+```favnir
+stage Fetch -> String !Http {
+  Http.get("https://api.example.com/data")
+}
+
+stage Parse(raw: String) -> List[Int] {
+  raw |> String.split(",") |> List.map(Int.parse)
+}
+```
+
+## |> パイプライン演算子
+
+ステージを `|>` でつなげてパイプラインを構成します。
+
+```favnir
+pipeline Main {
+  Fetch |> Parse |> Transform |> Save
+}
+```
+
+## seq — フォールト トレラント逐次実行
+
+`seq` は各ステージを順番に実行し、エラーがあれば即時停止します。
+
+```favnir
+pipeline SafeLoad {
+  seq [Validate, Transform, Store]
+}
+```
+
+## par — 並列実行
+
+`par` で複数のステージを並列に実行し、結果をマージします。
+
+```favnir
+pipeline ParallelETL {
+  par [FetchUsers, FetchOrders] |> MergeAndStore
+}
+```
+
+## まとめ
+
+| 構文 | 意味 |
+|---|---|
+| `A \|> B` | A の出力を B の入力へ |
+| `seq [A, B, C]` | 逐次実行（fail-fast） |
+| `par [A, B]` | 並列実行 |

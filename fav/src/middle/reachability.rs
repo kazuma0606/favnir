@@ -108,6 +108,9 @@ pub fn reachability_analysis(entry: &str, program: &IRProgram) -> ReachabilityRe
                 Effect::Checkpoint => {
                     effects_required.insert("Checkpoint".to_string());
                 }
+                Effect::PipelineState => {
+                    effects_required.insert("PipelineState".to_string());
+                }
                 Effect::Unknown(name) => {
                     effects_required.insert(name.clone());
                 }

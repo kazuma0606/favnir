@@ -1,0 +1,116 @@
+---
+title: "state Rune"
+order: 24
+category: "Rune"
+description: "分散パイプライン向け型安全な状態管理 — !PipelineState エフェクト"
+---
+
+# state Rune
+
+エフェクト: `!PipelineState`
+
+`state` Rune は複数の Worker をまたぐキーバリュー形式の分散状態ストアを提供します。
+v22.3.0 はスレッドローカルのインメモリ HashMap をバックエンドとして使用します。
+Redis / DynamoDB / PostgreSQL への対応は v22.4+ で追加予定です。
+
+## インストール
+
+```
+fav rune add state
+```
+
+## 基本的な使い方
+
+```favnir
+import rune "state"
+
+stage DeduplicateRows: List<Row> -> List<Row> !PipelineState = |rows| {
+  List.filter(rows, |r| {
+    bind already <- State.has("seen:" ++ r.id)
+    if already {
+      false
+    } else {
+      bind _ <- State.set("seen:" ++ r.id, "1")
+      true
+    }
+  })
+}
+
+seq DeduplicatedPipeline = LoadRows |> DeduplicateRows |> Save
+```
+
+## API リファレンス
+
+### `State.get`
+
+```favnir
+State.get(key: String) -> Option<String> !PipelineState
+```
+
+キーに対応する値を返します。存在しない場合は `None`。
+
+### `State.set`
+
+```favnir
+State.set(key: String, value: String) -> Unit !PipelineState
+```
+
+キーに値をセットします。
+
+### `State.has`
+
+```favnir
+State.has(key: String) -> Bool !PipelineState
+```
+
+キーが存在するかどうかを返します。
+
+### `State.delete`
+
+```favnir
+State.delete(key: String) -> Unit !PipelineState
+```
+
+キーを削除します。存在しない場合は何もしません。
+
+## `!PipelineState` エフェクト
+
+`State.*` の呼び出しには `!PipelineState` エフェクトが必要です。
+エフェクトなしで呼び出すと **E0338** エラーになります。
+
+```favnir
+// E0338 エラー: !PipelineState エフェクトがない
+stage Broken: Int -> Int = |n| {
+  bind _ <- State.set("key", "val")  // ERROR E0338
+  n
+}
+
+// 正しい: !PipelineState を宣言する
+stage Correct: Int -> Int !PipelineState = |n| {
+  bind _ <- State.set("key", "val")
+  n
+}
+```
+
+エフェクトは伝播します。`!PipelineState` を持つ関数を呼ぶ関数も `!PipelineState` が必要です。
+
+## `fav.toml` の `[state]` 設定
+
+```toml
+[state]
+backend = "memory"   # v22.3.0 は "memory" のみ対応
+                     # v22.4+ で "redis" | "dynamodb" | "postgres" を追加予定
+```
+
+`[state]` セクションを省略した場合、デフォルトで `"memory"` バックエンドが使用されます。
+
+## 将来のバックエンド（v22.4+）
+
+| バックエンド | 設定値 | 対応バージョン |
+|---|---|---|
+| インメモリ HashMap（スレッドローカル） | `"memory"` | v22.3.0 |
+| Redis | `"redis"` | v22.4+ |
+| DynamoDB | `"dynamodb"` | v22.4+ |
+| PostgreSQL | `"postgres"` | v22.4+ |
+
+外部バックエンドを使用すると、複数の Worker 間で状態を共有できるようになります。

@@ -1,0 +1,6 @@
+// runes/gcs/gcs.fav — Google Cloud Storage Rune (v24.5.0)
+//
+// 使い方:
+//   import rune "gcs"
+//
+// NOTE: このスタブは v24.5.0 で追加。完全実装は v25.x 以降で対応予定。

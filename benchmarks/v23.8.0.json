@@ -1,0 +1,13 @@
+{
+  "version": "23.8.0",
+  "date": "2026-06-22",
+  "test_count": 1926,
+  "feature": "vm.fav Phase 5（GetField・collect_args・hello.fav 実行）",
+  "metrics": {
+    "vm_fav_phase": 5,
+    "call_builtin_count": 5,
+    "new_opcodes": 1,
+    "collect_args_helpers": 2,
+    "vmval_variants": 4
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "version": "24.7.0",
+  "date": "2026-06-23",
+  "test_count": 1962,
+  "feature": "ドキュメントサイト v2",
+  "metrics": {
+    "test_count": 1962,
+    "duration_ms": 17200
+  }
+}

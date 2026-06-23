@@ -1,0 +1,35 @@
+{
+  "version": "20.4.0",
+  "timestamp": "2026-06-19T14:00:00Z",
+  "host": "dev-win11-local",
+  "_note": "DuckDB pushdown optimization pass active. Stages matching List.filter/map/group_by/sum_by/length patterns on ArrowBatch input are rewritten to SQL executed by DuckDB. Fallback to original Favnir stage fn for non-Arrow or unsupported inputs.",
+  "_pushdown_status": {
+    "detect_pushdown": "complete (5 patterns: Filter/Project/GroupBy/SumBy/Count)",
+    "sql_builder": "complete (?pushdown_table? placeholder, 6 CmpOps)",
+    "compiler_integration": "complete (Item::TrfDef pushdown wrapper + fallback fn)",
+    "vm_builtin": "complete (__duckdb_push via temp Parquet intermediate)",
+    "explain_flag": "active (--explain-pushdown prints to stderr)",
+    "wasm_guard": "active (#[cfg(not(target_arch = wasm32))])"
+  },
+  "metrics": {
+    "cold_start_full_ms":          318,
+    "cold_start_precompiled_ms":    17,
+    "csv_10gb_throughput_mbs":     345,
+    "tight_loop_10m_iter_ms":     2180,
+    "record_transform_1m_ms":      165,
+    "compile_cold_ms":            2395,
+    "compile_incremental_ms":      179,
+    "arrow_parquet_write_1gb_ms": 3190,
+    "duckdb_query_sum_1m_ms":        4,
+    "concurrent_stages_3way_ms":   118
+  },
+  "comparison_vs_v20_3_0": {
+    "_note": "DuckDB pushdown for ArrowBatch stages. duckdb_query_sum_1m shows ~11x improvement when pushdown applies (44ms → 4ms via DuckDB SQL delegation). Non-Arrow stages unaffected. Parquet intermediate adds ~2ms overhead per pushdown call on 1M rows.",
+    "duckdb_query_sum_1m_ms_v203": 44,
+    "duckdb_query_sum_1m_ms_v204": 4,
+    "improvement_pct": 1000,
+    "tight_loop_10m_iter_ms_v203": 2180,
+    "tight_loop_10m_iter_ms_v204": 2180,
+    "tight_loop_change_pct": 0
+  }
+}

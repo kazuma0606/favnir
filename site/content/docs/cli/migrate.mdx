@@ -1,0 +1,142 @@
+# fav migrate
+
+`fav migrate` はソースコードと設定ファイルを旧バージョンの Favnir 形式から現行形式へ自動変換するツールです。
+
+---
+
+## 概要
+
+Favnir は過去のバージョンとの互換性を保つため、テキストレベルの自動移行機能を提供します。
+`fav migrate` はファイルを読み込み、旧形式の構文や設定キーを検出・変換します。
+
+---
+
+## コマンドリファレンス
+
+```
+fav migrate [options] [<file>]
+```
+
+### オプション
+
+| フラグ | 説明 |
+|---|---|
+| `--from <version>` | 移行元バージョン（`v1`, `v13`） |
+| `--to <version>` | 移行先バージョン（`v2`, `v14`）。`--from v13` の場合デフォルト `v14` |
+| `--config <file>` | fav.toml のみを対象として移行 |
+| `--in-place` | ファイルを直接書き換える（省略時はドライラン） |
+| `--dry-run` | 変更のプレビュー（デフォルト動作。`--in-place` なしと同等） |
+| `--check` | 変更が必要なファイルを表示して exit 1（CI 向け） |
+| `--dir <dir>` | 対象ディレクトリを指定 |
+| `--from-effects` | `--from v13 --to v14` の別名（後方互換のため残存） |
+
+---
+
+## 移行パス
+
+| `--from` | `--to` | 内容 | 等価なフラグ |
+|---|---|---|---|
+| `v1` | `v2` | `trf` → `stage`、`flw` → `seq` | （デフォルト） |
+| `v13` | `v14` | `!Effect` → Ctx 構文 | `--from-effects` |
+
+`--to` を省略した場合、`--from v13` は自動的に `v14` へ移行します。
+
+---
+
+## 使用例
+
+### !Effect → Ctx 移行（v13 → v14）— 3 つの等価な書き方
+
+```bash
+fav migrate --from v13 --to v14 src/
+fav migrate --from v13 src/
+fav migrate --from-effects src/
+```
+
+### trf/flw → stage/seq 移行（v1 → v2）
+
+```bash
+fav migrate --from v1 --to v2 src/
+fav migrate src/  # デフォルト（--from v1 相当）
+```
+
+### ファイルを直接書き換える
+
+```bash
+fav migrate --from v13 --in-place src/
+```
+
+### ドライラン（デフォルト）— 変更箇所の確認のみ
+
+```bash
+fav migrate --dry-run src/
+```
+
+### CI チェック — 未移行ファイルがあれば exit 1
+
+```bash
+fav migrate --check src/
+```
+
+### fav.toml 形式の移行
+
+```bash
+# ドライラン（差分確認）
+fav migrate --config fav.toml
+
+# 実際に書き換える
+fav migrate --config fav.toml --in-place
+```
+
+---
+
+## fav.toml 移行（`--config`）
+
+旧形式の `fav.toml` は以下のキー/セクション名を使っています。
+
+| 旧形式 | 新形式 |
+|---|---|
+| `[rune_dependencies]` | `[dependencies]` |
+| `rune_version = "..."` | `version = "..."` |
+| `rune_path = "..."` | `path = "..."` |
+
+**例（移行前）:**
+
+```toml
+[rune_dependencies]
+http = { rune_version = "1.0" }
+utils = { rune_path = "../utils" }
+```
+
+**例（移行後）:**
+
+```toml
+[dependencies]
+http = { version = "1.0" }
+utils = { path = "../utils" }
+```
+
+`--in-place` なしで実行すると差分のみを表示し、ファイルは変更されません。
+
+---
+
+## 移行サマリー
+
+移行完了後、必ず以下の形式でサマリーが表示されます:
+
+```
+Migration complete: 3 file(s) migrated, 5 file(s) already up-to-date.
+```
+
+`--check` モードでは:
+
+```
+2 file(s) need migration.
+```
+
+---
+
+## 後方互換性
+
+`--from-effects` フラグは `--from v13` の別名として引き続き動作します。
+既存のスクリプトや CI 設定を変更する必要はありません。

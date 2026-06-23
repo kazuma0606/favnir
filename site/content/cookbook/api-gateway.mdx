@@ -1,0 +1,77 @@
+---
+title: "HTTP API を Favnir で実装する"
+description: "!Http エフェクトを使って REST API エンドポイントを Favnir で実装するレシピ"
+---
+
+# HTTP API を Favnir で実装する
+
+## 概要
+
+`!Http` エフェクトと http Rune を使って REST API を実装します。
+
+> **注意**: 以下のコード例は http Rune の高レベル API（`listen` / `ok` / `not_found`）を使用しています。
+> 実際の API は `runes/http/` を参照してください（v24.x 時点では一部 WIP）。
+
+## api.fav
+
+```favnir
+import http
+import postgres as db
+
+type UserRequest {
+  name:  String
+  email: String
+}
+
+type UserResponse {
+  id:      Int
+  name:    String
+  created: String
+}
+
+fn handle_create_user(req: UserRequest) -> UserResponse !Db {
+  bind id <- db.execute(
+    "INSERT INTO users (name, email) VALUES ($1, $2) RETURNING id",
+    [req.name, req.email]
+  )
+  // created: 示例のため固定値。実際は Gen.now_iso() 等で取得する。
+  UserResponse { id: id, name: req.name, created: "2026-06-23" }
+}
+
+stage Server -> Unit !Http !Db {
+  http.listen(8080, |request|
+    match request.path {
+      "/users" if request.method == "POST" =>
+        request.body
+          |> Json.decode[UserRequest]
+          |> handle_create_user
+          |> Json.encode
+          |> http.ok
+      _ =>
+        http.not_found("endpoint not found")
+    }
+  )
+}
+
+pipeline Api { Server }
+```
+
+## 実行
+
+```bash
+fav run api.fav
+# Listening on http://localhost:8080
+
+curl -X POST http://localhost:8080/users \
+  -H "Content-Type: application/json" \
+  -d '{"name":"Alice","email":"alice@example.com"}'
+# {"id":1,"name":"Alice","created":"2026-06-23"}
+```
+
+## ポイント
+
+- `!Http` エフェクト: サーバー起動・リクエスト処理
+- `!Db` エフェクト: ユーザー作成
+- `bind id <- db.execute(...)` で DB の戻り値を束縛（`let` は使わない）
+- パターンマッチで route dispatch
+- `Json.decode[T]` で型安全なリクエスト解析

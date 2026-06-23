@@ -1,0 +1,24 @@
+{
+  "version": "23.2.0",
+  "timestamp": "2026-06-21T00:00:00Z",
+  "_note": "Bit operations public API + hex literals: 6 new Int.bit_* functions, 0x hex literal lexer support.",
+  "metrics": {
+    "test_count": 1898,
+    "bit_functions_added": 6,
+    "hex_literal_support": true
+  },
+  "_metrics_notes": {
+    "test_count": "v23.1.0 完了時（1894）+ v232000_tests 5 件 - version_is_23_1_0 #[ignore] 1 件 = 1898",
+    "bit_functions_added": "Int.bit_and / bit_or / bit_xor / bit_not / shift_left / shift_right",
+    "hex_literal_support": "lexer で 0x/0X prefix を解析し TokenKind::Int(i64) に変換"
+  },
+  "bit_features": {
+    "bit_and":      { "achieved": true, "version": "v23.2.0" },
+    "bit_or":       { "achieved": true, "version": "v23.2.0" },
+    "bit_xor":      { "achieved": true, "version": "v23.2.0" },
+    "bit_not":      { "achieved": true, "version": "v23.2.0", "note": "i64 全ビット反転: bit_not(0) = -1" },
+    "shift_left":   { "achieved": true, "version": "v23.2.0", "note": "シフト量 0..=63 範囲外は Err" },
+    "shift_right":  { "achieved": true, "version": "v23.2.0", "note": "算術右シフト（符号拡張）、シフト量 0..=63 範囲外は Err" },
+    "hex_literals": { "achieved": true, "version": "v23.2.0", "note": "0xFF → TokenKind::Int(255)" }
+  }
+}

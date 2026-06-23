@@ -1,0 +1,10 @@
+{
+  "version": "24.2.0",
+  "date": "2026-06-23",
+  "test_count": 1940,
+  "feature": "4-Stage Bootstrap 検証",
+  "metrics": {
+    "test_count": 1940,
+    "duration_ms": 16600
+  }
+}

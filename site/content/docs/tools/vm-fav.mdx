@@ -1,0 +1,240 @@
+# vm.fav — Favnir セルフホスト VM（Phase 1）
+
+`fav/self/vm.fav` は Favnir 自身で記述した VM バイトコードデコーダです。
+v23.4.0 で Phase 1 として実装されました。
+
+## 概要
+
+Favnir コンパイラが生成するバイトコードを Favnir 自身でデコード・解析することで、セルフホスト VM の第一歩を踏み出します。
+
+## 対応 Opcode（Phase 1: 27 件）
+
+| Opcode | バイト | 説明 |
+|--------|--------|------|
+| `Const(idx)` | `0x01 + u16 LE` | 定数プール参照 |
+| `ConstUnit` | `0x02` | Unit 値 |
+| `ConstTrue` | `0x03` | Bool true |
+| `ConstFalse` | `0x04` | Bool false |
+| `LoadLocal(slot)` | `0x10 + u16 LE` | ローカル変数ロード |
+| `StoreLocal(slot)` | `0x11 + u16 LE` | ローカル変数ストア |
+| `LoadGlobal(idx)` | `0x12 + u16 LE` | グローバル変数ロード |
+| `Pop` | `0x13` | スタックトップ破棄 |
+| `Dup` | `0x14` | スタックトップ複製 |
+| `Call(argc)` | `0x15 + u16 LE` | 関数呼び出し |
+| `Return` | `0x16` | 関数リターン |
+| `Add` / `Sub` / `Mul` / `Div` | `0x20`–`0x23` | 四則演算 |
+| `Eq` / `Ne` / `Lt` / `Le` / `Gt` / `Ge` | `0x24`–`0x29` | 比較演算 |
+| `And` / `Or` | `0x2a`–`0x2b` | 論理演算 |
+| `Jump(offset)` | `0x30 + u16 LE` | 無条件ジャンプ |
+| `JumpIfFalse(offset)` | `0x31 + u16 LE` | 条件ジャンプ |
+| `GetField(idx)` | `0x40 + u16 LE` | フィールドアクセス |
+| `Unknown(byte)` | その他 | 未知の opcode |
+
+## 型定義
+
+```favnir
+type Opcode =
+  | Const(Int)
+  | ConstUnit
+  | ConstTrue
+  | ConstFalse
+  | LoadLocal(Int)
+  | StoreLocal(Int)
+  | LoadGlobal(Int)
+  | Pop
+  | Dup
+  | Call(Int)
+  | Return
+  | Add | Sub | Mul | Div
+  | Eq | Ne | Lt | Le | Gt | Ge | And | Or
+  | Jump(Int)
+  | JumpIfFalse(Int)
+  | GetField(Int)
+  | Unknown(Int)
+
+type DecodeResult = {
+  op:      Opcode
+  next_pc: Int
+}
+```
+
+## 主要関数
+
+### `decode_opcode(bytes: Bytes, pc: Int) -> Result<DecodeResult, String>`
+
+バイト列の位置 `pc` から 1 命令をデコードします。
+
+```favnir
+bind hex_result <- Bytes.from_hex("010300")
+match hex_result {
+  ok(bytes) => {
+    bind r <- decode_opcode(bytes, 0)
+    match r {
+      ok(dec) => opcode_to_string(dec.op)  // => "Const(3)"
+      err(e)  => e
+    }
+  }
+  err(e) => e
+}
+```
+
+### `opcode_to_string(op: Opcode) -> String`
+
+Opcode を人間が読みやすい文字列に変換します。デバッグ用途。
+
+## エンディアン
+
+Favnir バイトコードは **リトルエンディアン（LE）** でオペランドを格納します。
+vm.fav では `Bytes.read_u16_le`（v23.4.0 追加）を使用してデコードします。
+
+## Phase 2: スタックベース実行ループ（v23.5.0）
+
+### VMVal 型
+
+```favnir
+type VMVal =
+  | VMInt(Int)
+  | VMBool(Bool)
+  | VMUnit
+```
+
+### 実行エントリポイント
+
+```favnir
+// バイトコードを実行して結果を返す
+bind hex_r <- Bytes.from_hex("0103000104002016")
+match hex_r {
+  ok(bytes) => {
+    bind run_r <- vm_run(bytes)
+    match run_r {
+      ok(v)  => vmval_to_string(v)  // => "VMInt(7)"
+      err(e) => e
+    }
+  }
+  err(e) => e
+}
+```
+
+### 対応オペコード（Phase 2: 11 件）
+
+| オペコード | 動作 |
+|---|---|
+| `ConstUnit` / `ConstTrue` / `ConstFalse` | 定数を push |
+| `Const(n)` | VMInt(n) として push |
+| `Pop` / `Dup` | スタック操作 |
+| `Return` | スタックトップを Result.ok で返す |
+| `Add` / `Sub` / `Mul` | 整数演算 |
+| `Eq` | 整数比較 → VMBool |
+
+## Phase 3（v23.6.0）— 制御フロー・ローカル変数
+
+Phase 3 では制御フロー命令とローカル変数アクセスを追加し、単一フレーム実行を完成させます。
+
+```favnir
+// vm_execute に locals パラメータを追加
+fn vm_execute(bytecode: Bytes, stack: Int, locals: Int, pc: Int) -> Result<VMVal, String>
+
+// vm_run が MutMap でローカル変数マップを生成
+fn vm_run(bytecode: Bytes) -> Result<VMVal, String> {
+  bind stack  <- Mut.list()
+  bind locals <- Mut.map()
+  vm_execute(bytecode, stack, locals, 0)
+}
+```
+
+### 対応オペコード（Phase 3: 12 件）
+
+| オペコード | バイト | 動作 |
+|---|---|---|
+| `Jump(off)` | `0x30 u16LE` | `pc = next_pc + off`（相対前方ジャンプ） |
+| `JumpIfFalse(off)` | `0x31 u16LE` | false なら `pc = next_pc + off` |
+| `LoadLocal(slot)` | `0x10 u16LE` | `locals[slot]` を push |
+| `StoreLocal(slot)` | `0x11 u16LE` | pop して `locals[slot]` に格納 |
+| `Ne` / `Lt` / `Le` / `Gt` / `Ge` | `0x25`〜`0x29` | 整数比較 → VMBool |
+| `And` / `Or` | `0x2a`/`0x2b` | bool 論理演算 |
+| `Div` | `0x23` | 整数除算（ゼロ除算 → err） |
+
+## Phase 4（v23.7.0）— stdlib・builtin 呼び出し
+
+Phase 4 では `VMStr` 型と `call_builtin` 関数を追加し、Favnir ↔ Rust の永続的境界を確立します。
+`LoadGlobal` / `Call` オペコードを実装し、vm.fav から Rust 実装の builtin を呼び出せるようにします。
+
+```favnir
+// VMVal に VMStr バリアントを追加
+type VMVal =
+  | VMInt(Int)
+  | VMBool(Bool)
+  | VMUnit
+  | VMStr(String)   // Phase 4 追加
+
+// Favnir ↔ Rust の永続的境界: この層は Rust 側に残る
+fn call_builtin(name: String, args: Int) -> Result<VMVal, String> {
+  match name {
+    "Int.to_string" => { ... }   // VMInt(n) → VMStr
+    "String.length" => { ... }   // VMStr(s) → VMInt
+    "String.trim"   => { ... }   // VMStr(s) → VMStr
+    "Math.abs"      => { ... }   // VMInt(n) → VMInt
+    _ => Result.err(f"call_builtin: unknown builtin: {name}")
+  }
+}
+
+// globals マップを外部から渡すエントリポイント
+fn vm_run_named(bytecode: Bytes, globals: Int) -> Result<VMVal, String>
+```
+
+### Phase 4 の設計思想
+
+`call_builtin` は **Favnir で書かれた関数**だが、その内部で `String.length(s)` や `String.trim(s)` を呼ぶ。
+これらは Rust VM の `vm_call_builtin` にディスパッチされる。
+vm.fav は Favnir の語彙で Rust のネイティブ実装を利用する ── この境界は永続的に Rust 側に残る。
+
+### 対応オペコード（Phase 4: 2 件）
+
+| オペコード | バイト | 動作 |
+|---|---|---|
+| `LoadGlobal(idx)` | `0x12 u16LE` | `globals[idx]` を pop → push（builtin 名 or 定数） |
+| `Call(argc)` | `0x15 u16LE` | argc=0/1 の builtin 呼び出し（VMStr から `call_builtin` ディスパッチ） |
+
+## フェーズ一覧
+
+| フェーズ | 内容 |
+|----------|------|
+| Phase 1（v23.4.0） | バイトコードデコード |
+| Phase 2（v23.5.0） | スタックベース実行ループ・VMVal 型 |
+| Phase 3（v23.6.0） | 制御フロー（Jump/JumpIfFalse）・ローカル変数（LoadLocal/StoreLocal）・残余演算 |
+| Phase 4（v23.7.0） | builtin ディスパッチ（LoadGlobal / Call / call_builtin）・VMStr 追加 |
+| Phase 5（v23.8.0） | GetField・collect_args・vmval_display・String.concat（任意 argc 対応） |
+| Phase 6 | VMRecord・完全セルフホスト VM |
+
+## Phase 5（v23.8.0）— GetField・collect_args・hello.fav 実行
+
+Phase 5 では `LoadGlobal + GetField + Call(N)` の完全なビルトイン呼び出しシーケンスを実現します。
+
+```favnir
+// collect_args: スタックから N 個の引数をソース順で収集
+fn collect_args(stack: Int, n: Int) -> Result<Int, String>
+
+// GetField: Namespace.Field 名を動的に合成
+// スタック前: ..., VMStr("String")
+// スタック後: ..., VMStr("String.trim")
+
+// vmval_display: ユーザー向け表示（VMStr は引用符なし）
+fn vmval_display(v: VMVal) -> String
+```
+
+### 対応オペコード（Phase 5: 1 件）
+
+| オペコード | バイト | 動作 |
+|---|---|---|
+| `GetField(idx)` | `0x40 u16LE` | pop VMStr(ns) + globals[idx]=VMStr(field) → push VMStr("ns.field") |
+
+### 引数順の不変条件
+
+`collect_args(stack, N)` はスタックから LIFO で収集し、`Mut.pop(args)` で arg1 から順に取り出せる。
+
+```
+String.concat("hello", " world") のバイトコード:
+  LoadGlobal(0)="String" → GetField(1)="concat" → LoadGlobal(2)="hello" → LoadGlobal(3)=" world" → Call(2)
+  collect_args(2): pop " world"→acc=[" world"], pop "hello"→acc=[" world","hello"]
+  call_builtin: pop "hello"(arg1), pop " world"(arg2) → "hello world" ✓
+```

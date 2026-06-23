@@ -1,0 +1,10 @@
+{
+  "version": "24.4.0",
+  "date": "2026-06-23",
+  "test_count": 1949,
+  "feature": "v1.0 後方互換性ポリシー確定",
+  "metrics": {
+    "test_count": 1949,
+    "duration_ms": 16700
+  }
+}

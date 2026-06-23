@@ -1,0 +1,89 @@
+---
+title: Bytes 型
+description: 生バイト列を Favnir から直接操作する Bytes 型（v23.1.0）
+---
+
+# Bytes 型
+
+`Bytes` 型は生バイト列を Favnir から直接操作するためのプリミティブ型です（v23.1.0 追加）。
+`vm.fav`（v23.4〜v23.8）のバイトコードデコードで必要となる基盤として設計されており、
+v23.x「VM in Favnir」ロードマップの第一歩です。
+
+## 基本的な使い方
+
+```favnir
+// 生成
+// from_hex は Result<Bytes, String> を返す（ok/err でラップ）
+bind data <- Bytes.from_hex("464f4f")
+  |> match { ok(b) => b  err(_) => Bytes.from_str("") }
+
+// from_str は Bytes を直接返す（Result ではない）。ネストして使う
+bind n_str <- Bytes.len(Bytes.from_str("hello"))  // Int: 5
+
+// アクセス
+bind n    <- Bytes.len(data)              // Int: 3
+bind byte <- Bytes.get(data, 0)           // Result<Int, String>: ok(70)
+bind sl   <- Bytes.slice(data, 1, 3)      // Bytes: "OO"（index 1〜2）
+
+// concat は Bytes を直接返す（Result ではない）。ネストして使う
+bind cat_len <- Bytes.len(Bytes.concat(data, data))  // Int: 6
+
+// 変換
+bind s   <- Bytes.to_utf8(data)           // Result<String, String>
+bind hex <- Bytes.to_hex(data)            // String: "464f4f"
+```
+
+## バイナリ I/O（native のみ）
+
+```favnir
+bind raw <- Bytes.read_file("data.bin")   // Result<Bytes, String>
+Bytes.write_file("out.bin", raw)          // Result<(), String>
+```
+
+> `Bytes.read_file` / `Bytes.write_file` は WASM では使用できません。
+
+## VM デコード用（Big-endian 整数読み取り）
+
+```favnir
+// バイトコードのオペコード・オペランドを読む例
+bind opcode   <- Bytes.read_u16(bytecode, 0)   // Result<Int, String>
+bind operand  <- Bytes.read_u24(bytecode, 2)   // Result<Int, String>
+bind operand4 <- Bytes.read_u32(bytecode, 0)   // Result<Int, String>
+```
+
+## 関数一覧
+
+| 関数 | シグネチャ | 説明 |
+|---|---|---|
+| `Bytes.from_hex` | `String -> Result<Bytes, String>` | 16進文字列からバイト列生成 |
+| `Bytes.from_str` | `String -> Bytes` | UTF-8 文字列からバイト列生成 |
+| `Bytes.len` | `Bytes -> Int` | バイト長 |
+| `Bytes.get` | `Bytes, Int -> Result<Int, String>` | 指定インデックスのバイト値（0〜255）|
+| `Bytes.slice` | `Bytes, Int, Int -> Bytes` | バイト列のスライス（範囲外はクランプ）|
+| `Bytes.concat` | `Bytes, Bytes -> Bytes` | 結合 |
+| `Bytes.to_utf8` | `Bytes -> Result<String, String>` | UTF-8 デコード |
+| `Bytes.to_hex` | `Bytes -> String` | 16進文字列に変換（小文字）|
+| `Bytes.read_file` | `String -> Result<Bytes, String>` | バイナリファイル読み込み（native）|
+| `Bytes.write_file` | `String, Bytes -> Result<(), String>` | バイナリファイル書き込み（native）|
+| `Bytes.read_u16` | `Bytes, Int -> Result<Int, String>` | Big-endian u16 読み取り |
+| `Bytes.read_u24` | `Bytes, Int -> Result<Int, String>` | Big-endian u24 読み取り |
+| `Bytes.read_u32` | `Bytes, Int -> Result<Int, String>` | Big-endian u32 読み取り |
+
+## アーキテクチャ
+
+`Bytes` 型は NaN-boxing アーキテクチャに準拠した opaque handle 方式で実装されています。
+`ArrowBatch` / `DbHandle` / `PgPool` と同じパターンです。
+
+```
+VMValue::Bytes(u64)  ←→  BYTES_STORE: HashMap<u64, Arc<Vec<u8>>>
+```
+
+実際のバイト列データは thread-local の `BYTES_STORE` に `Arc<Vec<u8>>` として格納され、
+`VMValue` は u64 の ID のみを保持します。
+
+## スコープ外（今後のバージョンで対応予定）
+
+- ビット演算（`Int.bit_and` 等）→ v23.2.0
+- `Mut<T>` 可変コレクション → v23.3.0
+- `Bytes.from_base64` / `Bytes.to_base64` → 将来バージョン
+- WASM での `Bytes.read_file` / `Bytes.write_file` → 未定

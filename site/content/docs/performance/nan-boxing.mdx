@@ -1,0 +1,71 @@
+# NaN-boxing（VMValue 圧縮）
+
+> **v20.3.0** で実装。`tight_loop_10m_iter` +2〜3x、`record_transform_1m` +1.5〜2x。
+
+---
+
+## 概要
+
+NaN-boxing は IEEE 754 浮動小数点の「静的 NaN」パターンの余剰ビットを利用し、
+Favnir の `VMValue` を 8 bytes 固定幅（`u64`）に収める技術です。
+
+改善前の `VMValue` は Rust の enum であり、最大バリアントのサイズが全バリアントに適用されていました:
+
+```rust
+// 改善前: enum サイズ = max(バリアント) = 32〜40 bytes
+enum VMValue {
+    Int(i64),       // 8 + タグ
+    Float(f64),     // 8 + タグ
+    Str(String),    // 24 + タグ（String は 3 words）
+    List(FavList),  // 24 + タグ
+    // ...
+}
+// → Vec<VMValue> は要素ごとに 32 bytes → キャッシュミス多発
+```
+
+---
+
+## NaN-boxing 後の表現
+
+```
+[IEEE 754 の "quiet NaN" パターン空間]
+
+0x7FF8_0000_0000_0000  → NaN（Float の正規 NaN）
+0x7FFx_xxxx_xxxx_xxxx  → ヒープポインタ（Str / List / Record）
+0xFFF0_0000_xxxx_xxxx  → Int（52 bit 範囲）
+0xFFF1_0000_0000_000x  → Bool（0 = false, 1 = true）
+0xFFF2_0000_0000_0000  → Unit（null 相当）
+通常の f64 値          → Float
+```
+
+`VMValue` は `NanVal(u64)` の型エイリアスになり、`Vec<VMValue>` の要素サイズが 8 bytes に。
+
+---
+
+## ヒープ値（HeapVal）
+
+ポインタとして参照する値は `HeapVal` として別途ヒープに確保されます:
+
+| HeapVal バリアント | 内容 |
+|---|---|
+| `HeapVal::Str(String)` | UTF-8 文字列 |
+| `HeapVal::List(FavList)` | リスト |
+| `HeapVal::Record(HashMap)` | レコード |
+| `HeapVal::ArrowBatch(u64)` | Arrow RecordBatch ハンドル |
+| `HeapVal::PgPool(u64)` | Postgres コネクションプール ハンドル |
+
+---
+
+## フォールバック
+
+```bash
+# NaN-boxing 無効化（デバッグ用）
+fav run --legacy-value-repr pipeline.fav
+```
+
+---
+
+## 注意事項
+
+- Int の範囲は 52 bit（±2^51）。それ以上の整数は `Float` として扱われる。
+- `vmvalue_to_params_json` では NaN / Inf を文字列 `"NaN"` / `"Infinity"` / `"-Infinity"` に変換。

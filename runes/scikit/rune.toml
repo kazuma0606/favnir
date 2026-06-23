@@ -1,0 +1,4 @@
+[rune]
+name        = "scikit"
+version     = "1.0.0"
+description = "scikit-learn ML モデル統合（Python ブリッジ）"

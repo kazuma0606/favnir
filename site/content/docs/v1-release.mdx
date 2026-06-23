@@ -1,0 +1,95 @@
+# v1.0 リリースノート（v25.0）
+
+Favnir v25.0 をもって、**v1.0 リリース候補**を正式に宣言します。
+
+> Practical Self-Hosting 達成 — コンパイラ・型チェッカー・CLI・VM 仕様がすべて Favnir で実装されました。
+
+---
+
+## v25.0 マイルストーン
+
+v24.0〜v24.8 で達成した「すべてのコアコンポーネントを Favnir で実装した」状態を、
+v25.0 = v1.0 リリース候補として正式に宣言します。
+
+| コンポーネント | 実装 |
+|---|---|
+| コンパイラ（compiler.fav） | Favnir ✓ |
+| 型チェッカー（checker.fav） | Favnir ✓ |
+| CLI（cli.fav） | Favnir ✓ |
+| VM 仕様（vm.fav） | Favnir ✓ |
+| VM 実行基盤 | Rust（永続・設計上） |
+
+---
+
+## v24.1〜v24.8 の達成機能
+
+### v24.1 — 形式的仕様書生成（`fav spec`）
+
+```bash
+fav spec --format markdown > SPEC.md
+fav spec --format html
+```
+
+言語セマンティクスを機械可読な形式で出力。`fav spec` コマンドが追加されました。
+
+### v24.2 — 4-Stage Bootstrap 検証
+
+3-stage bootstrap を VM を含む 4-stage に拡張。
+`fav/tests/bootstrap/` に 5 fixture（hello / arithmetic / pattern_match / list_ops / closures）を追加し、
+Stage 1〜3 の bytecode 一致（A == B）を検証できます（`cargo test -- --ignored` で実行）。
+
+### v24.3 — 継続的パフォーマンス回帰検知
+
+```bash
+fav bench --baseline benchmarks/v24.0.0.json
+```
+
+`fav bench --baseline` で前バージョンとのパフォーマンス比較が可能になりました。
+5% 以上の劣化で CI が自動 fail します。
+
+### v24.4 — v1.0 後方互換性ポリシー確定
+
+`STABILITY.md` を追加し、v1.x の破壊的変更禁止ポリシーを文書化。
+`#[deprecated]` アノテーションと W020 lint ルール（非推奨関数呼び出し検知）を追加。
+
+### v24.5 — Rune レジストリ成熟（公式パッケージ 50+）
+
+`fav search <keyword>` コマンドを追加。
+公式 Rune カタログが 50 パッケージを超えました（avro / orc / excel / redis / mongodb 等）。
+
+### v24.6 — セキュリティ審査（エフェクトシステム形式検証）
+
+W021 `pure_fn_calls_effectful` lint ルールを追加。
+純粋関数がエフェクトフル関数を呼び出す場合に警告します。
+`SECURITY.md` と `SECURITY_MODEL.md` を追加しました。
+
+### v24.7 — ドキュメントサイト v2
+
+`/learn`（入門記事 3 本）・`/cookbook`（レシピ 3 本）・`/packages`・`/bench`・`/spec` ページを追加。
+ドキュメントサイトが大幅に拡充されました。
+
+### v24.8 — `fav new` テンプレートギャラリー
+
+```bash
+fav new --template etl-csv-to-db  myproject
+fav new --template api-gateway    myproject
+fav new --template lambda-scheduled myjob
+fav new --template distributed-etl  mybigproject
+```
+
+4 つの本番向けテンプレートを追加。`TEMPLATE_GALLERY` として公開されています。
+
+---
+
+## v1.x 後方互換性保証
+
+v1.x（マイナーバージョン）では破壊的変更を行いません。
+詳細は [STABILITY.md](/docs/stability) を参照してください。
+
+---
+
+## インストール
+
+```bash
+cargo install fav --version "25.0.0"
+```

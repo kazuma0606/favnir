@@ -1,0 +1,10 @@
+{
+  "version": "24.3.0",
+  "date": "2026-06-23",
+  "test_count": 1944,
+  "feature": "継続的パフォーマンス回帰検知",
+  "metrics": {
+    "test_count": 1944,
+    "duration_ms": 16600
+  }
+}

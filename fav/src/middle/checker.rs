@@ -1537,6 +1537,7 @@ impl Checker {
             "Env",
             "Gen",
             "Checkpoint",
+            "State",   // v22.3.0
             "Parquet",
             "Grpc",
             "Llm",
@@ -1552,6 +1553,9 @@ impl Checker {
             "Crypto",
             "Auth",
             "ArrowBatch",
+            "Arena",
+            "Bytes",
+            "Mut", // v23.3.0
         ] {
             self.env
                 .define(ns.to_string(), Type::Named(ns.to_string(), vec![]));
@@ -2387,7 +2391,8 @@ impl Checker {
                 | Item::TestDef(..)
                 | Item::TestGroup { .. }
                 | Item::BenchDef(..)
-                | Item::InterfaceImplDecl(..) => {}
+                | Item::InterfaceImplDecl(..)
+                | Item::PipelineDef(..) => {} // v22.5.0: スタブ
                 Item::InterfaceDecl(decl) => {
                     self.remember_global_symbol(
                         decl.name.clone(),
@@ -2429,6 +2434,7 @@ impl Checker {
             | Item::UseDecl(..)
             | Item::RuneUse { .. }
             | Item::ImportDecl { .. } => {}
+            Item::PipelineDef(_) => {} // v22.5.0: 型チェック未対応（スタブ）
         }
     }
 
@@ -2452,6 +2458,7 @@ impl Checker {
             "Rpc",
             "File",
             "Checkpoint",
+            "PipelineState",  // v22.3.0
             "Trace",
             "Emit",
             "Random",
@@ -3274,6 +3281,37 @@ impl Checker {
         self.env.pop();
         self.type_params = saved_tp;
         self.current_effects = saved_effects;
+
+        // ── SLA バリデーション (v22.6.0) ──────────────────────────────────────
+        if let Some(t) = &td.timeout {
+            if !t.seconds.is_finite() || t.seconds <= 0.0 {
+                self.type_error("E0401", format!("timeout seconds must be > 0, got {}", t.seconds), &t.span);
+            }
+        }
+        if let Some(r) = &td.retry_ann {
+            if r.max == 0 {
+                self.type_error("E0402", "retry max must be >= 1".to_string(), &r.span);
+            }
+            if !matches!(r.backoff.as_str(), "exponential" | "linear" | "none") {
+                self.type_error(
+                    "E0402",
+                    format!("unknown backoff strategy {:?}; expected \"exponential\", \"linear\", or \"none\"", r.backoff),
+                    &r.span,
+                );
+            }
+        }
+        if let Some(cb) = &td.circuit_breaker {
+            if !cb.threshold.is_finite() || cb.threshold <= 0.0 || cb.threshold > 1.0 {
+                self.type_error(
+                    "E0403",
+                    format!("circuit_breaker threshold must be in (0.0, 1.0], got {}", cb.threshold),
+                    &cb.span,
+                );
+            }
+            if cb.window == 0 {
+                self.type_error("E0403", "circuit_breaker window must be > 0".to_string(), &cb.span);
+            }
+        }
     }
 
     // ── flw_def (4-9) ─────────────────────────────────────────────────────────
@@ -3510,6 +3548,42 @@ impl Checker {
                     // downstream stage is left to the Favnir pipeline checker.
                     current_output = Some(Type::Unknown);
                 }
+                FlwStep::ParDistributed(names) => {
+                    // Same validation as Par (E0016/E0017); actual distribution is handled at runtime
+                    for name in names {
+                        if self.env.lookup(name).is_none() {
+                            self.type_error(
+                                "E0017",
+                                format!(
+                                    "E0017: par_distributed ステップ内の stage '{}' が定義されていません",
+                                    name
+                                ),
+                                &fd.span,
+                            );
+                        }
+                    }
+                    if let Some(ref prev_out) = current_output {
+                        for name in names {
+                            if let Some(ty) = self.env.lookup(name).cloned() {
+                                if let Some((input, _)) = ty.as_callable() {
+                                    if !prev_out.is_compatible(input) {
+                                        self.type_error(
+                                            "E0016",
+                                            format!(
+                                                "E0016: par_distributed ステップの入力型不一致: `{}` expects `{}`, got `{}`",
+                                                name,
+                                                input.display(),
+                                                prev_out.display(),
+                                            ),
+                                            &fd.span,
+                                        );
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    current_output = Some(Type::Unknown);
+                }
                 FlwStep::Tap(_) | FlwStep::Inspect => {
                     // tap/inspect pass the value through unchanged — no type change
                 }
@@ -3519,12 +3593,12 @@ impl Checker {
         // Register the resolved flw type from first/last step.
         let first_stage = fd.steps.first().and_then(|s| match s {
             FlwStep::Stage(n) => Some(n.as_str()),
-            FlwStep::Par(names) => names.first().map(|s| s.as_str()),
+            FlwStep::Par(names) | FlwStep::ParDistributed(names) => names.first().map(|s| s.as_str()),
             FlwStep::Tap(_) | FlwStep::Inspect => None,
         });
         let last_stage = fd.steps.last().and_then(|s| match s {
             FlwStep::Stage(n) => Some(n.as_str()),
-            FlwStep::Par(names) => names.last().map(|s| s.as_str()),
+            FlwStep::Par(names) | FlwStep::ParDistributed(names) => names.last().map(|s| s.as_str()),
             FlwStep::Tap(_) | FlwStep::Inspect => None,
         });
         if let (Some(first_name), Some(last_name)) = (first_stage, last_stage) {
@@ -5438,6 +5512,7 @@ impl Checker {
                         | "Json"
                         | "Csv"
                         | "Checkpoint"
+                        | "State"       // v22.3.0
                         | "Parquet"
                         | "Grpc"
                         | "Llm"
@@ -5675,6 +5750,16 @@ impl Checker {
         }
     }
 
+    fn require_state_effect(&mut self, span: &Span) {
+        if !self.has_effect(|e| matches!(e, Effect::PipelineState)) {
+            self.type_error(
+                "E0338",
+                "State.* call requires `!PipelineState` effect on enclosing fn/trf",
+                span,
+            );
+        }
+    }
+
     fn require_emit_effect(&mut self, span: &Span) {
         let has_emit = self.has_effect(|e| matches!(e, Effect::Emit(_) | Effect::EmitUnion(_)));
         if !has_emit {
@@ -5814,6 +5899,27 @@ impl Checker {
             | ("Int", "bor")
             | ("Int", "bxor") => Some(Type::Int),
             ("Int", "bnot") | ("Int", "to_byte") => Some(Type::Int),
+
+            // Int bit operations v23.2.0 (public API names)
+            ("Int", "bit_and")
+            | ("Int", "bit_or")
+            | ("Int", "bit_xor")
+            | ("Int", "bit_not")
+            | ("Int", "shift_left")
+            | ("Int", "shift_right") => Some(Type::Int),
+
+            // Mut コレクション v23.3.0
+            // Type::Unknown: MutList/MutMap は opaque handle（ArrowBatch 等と同パターン）。
+            // 型チェックをスキップするため、引数型の検証は vm_call_builtin に委ねる。
+            ("Mut", "list") | ("Mut", "map") => Some(Type::Unknown),
+            ("Mut", "push") | ("Mut", "set") | ("Mut", "delete") => {
+                Some(Type::Result(Box::new(Type::Unit), Box::new(Type::String)))
+            }
+            ("Mut", "pop") | ("Mut", "peek") | ("Mut", "get") => {
+                Some(Type::Result(Box::new(Type::Unknown), Box::new(Type::String)))
+            }
+            ("Mut", "len") => Some(Type::Int),
+            ("Mut", "has") => Some(Type::Bool),
 
             // Math
             ("Math", "pi") | ("Math", "e") => Some(Type::Float),
@@ -6357,6 +6463,20 @@ impl Checker {
             ("Checkpoint", "meta") => {
                 self.require_checkpoint_effect(span);
                 Some(Type::Named("CheckpointMeta".into(), vec![]))
+            }
+
+            // State (v22.3.0): require !PipelineState effect
+            ("State", "get") => {
+                self.require_state_effect(span);
+                Some(Type::Option(Box::new(Type::String)))
+            }
+            ("State", "set") | ("State", "delete") => {
+                self.require_state_effect(span);
+                Some(Type::Unit)
+            }
+            ("State", "has") => {
+                self.require_state_effect(span);
+                Some(Type::Bool)
             }
 
             // Http (2-7): require !Network effect
@@ -8323,6 +8443,8 @@ abstract seq Pipeline {
             kafka: None,
             dev_dependencies: vec![],
             registry_url: None,
+            workers: None,
+            state: None,
         };
         let resolver = Arc::new(Mutex::new(Resolver::new(Some(toml), Some(root))));
         (resolver, dir)
@@ -8416,6 +8538,8 @@ abstract seq Pipeline {
             kafka: None,
             dev_dependencies: vec![],
             registry_url: None,
+            workers: None,
+            state: None,
         };
         let mut resolver = Resolver::new(Some(toml), Some(root));
         // Simulate a mid-load state: "cycle" is already in the loading set

@@ -1,0 +1,11 @@
+{
+  "version": "24.1.0",
+  "date": "2026-06-23",
+  "test_count": 1934,
+  "feature": "形式的仕様書生成（fav spec）",
+  "metrics": {
+    "spec_sections": 4,
+    "opcode_count": 31,
+    "new_pub_fns": 1
+  }
+}

@@ -1081,7 +1081,7 @@ v17.0.0  Language Ergonomics 宣言
 ├── v17.1  境界付きジェネリクス（T with Ord）
 ├── v17.2  パターンマッチ拡張（or-pattern / list-pattern）
 ├── v17.3  コレクション内包表記
-├── v17.4  let バインディング（非 Result 文脈）
+├── v17.4  let バインディング除去（誤実装の修正）
 ├── v17.5  REPL 品質向上
 ├── v17.6  fav bench
 ├── v17.7  プロパティベーステスト（forall）
@@ -1128,8 +1128,14 @@ v20.0.0  Production Performance 宣言
 
 | ファイル | 目的 |
 |---|---|
-| `versions/roadmap-v16.1-v17.0.md` | v17.0 詳細実装計画 |
-| `versions/roadmap-v17.1-v18.0.md` | v18.0 詳細実装計画（後で作成） |
-| `versions/roadmap-v18.1-v19.0.md` | v19.0 詳細実装計画（後で作成） |
-| `versions/roadmap-v19.1-v20.0.md` | v20.0 詳細実装計画（後で作成） |
-| `versions/roadmap-v15.1-v16.0.md` | 前ロードマップ（形式参照） |
+| `versions/roadmap/roadmap-v16.1-v17.0.md` | v17.0 詳細実装計画 |
+| `versions/roadmap/roadmap-v17.1-v18.0.md` | v18.0 詳細実装計画 |
+| `versions/roadmap/roadmap-v18.1-v19.0.md` | v19.0 詳細実装計画 |
+| `versions/roadmap/roadmap-v19.1-v20.0.md` | v20.0 詳細実装計画 |
+| `versions/roadmap/roadmap-v15.1-v16.0.md` | 前ロードマップ（形式参照） |
+| `versions/roadmap-v20.1-v25.0.md` | v20.1〜v25.0 マスタースケジュール |
+| `versions/roadmap/roadmap-v20.1-v21.0.md` | v21.0 Runtime Excellence 詳細計画 |
+| `versions/roadmap/roadmap-v21.1-v22.0.md` | v22.0 Developer Tooling Complete 詳細計画 |
+| `versions/roadmap/roadmap-v22.1-v23.0.md` | v23.0 Distributed Scale 詳細計画 |
+| `versions/roadmap/roadmap-v23.1-v24.0.md` | v24.0 VM in Favnir 詳細計画 |
+| `versions/roadmap/roadmap-v24.1-v25.0.md` | v25.0 Practical Self-Hosting 詳細計画 |

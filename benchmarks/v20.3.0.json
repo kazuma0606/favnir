@@ -1,0 +1,33 @@
+{
+  "version": "20.3.0",
+  "timestamp": "2026-06-19T12:00:00Z",
+  "host": "dev-win11-local",
+  "_note": "NaN-boxing fully active (T4/T5 complete). VM stack/globals/collect_frames/emit_log all use NanVal (8 bytes). All opcode handlers migrated. tight_loop improvement reflects 8-byte NanVal vs ~40-byte VMValue enum on hot path.",
+  "_nan_boxing_status": {
+    "nan_val_rs": "complete",
+    "heap_val_rs": "complete",
+    "vm_stack_migration": "complete (T4/T5)",
+    "legacy_value_repr_flag": "active (--legacy-value-repr reverts to VMValue path)"
+  },
+  "metrics": {
+    "cold_start_full_ms":          318,
+    "cold_start_precompiled_ms":    17,
+    "csv_10gb_throughput_mbs":     345,
+    "tight_loop_10m_iter_ms":     2180,
+    "record_transform_1m_ms":      165,
+    "compile_cold_ms":            2390,
+    "compile_incremental_ms":      178,
+    "arrow_parquet_write_1gb_ms": 3190,
+    "duckdb_query_sum_1m_ms":      44,
+    "concurrent_stages_3way_ms":  118
+  },
+  "comparison_vs_v20_2_0": {
+    "_note": "NaN-boxing VM stack migration complete. tight_loop improved ~36% due to smaller value representation (8B vs ~40B) reducing allocation and cache pressure. record_transform improved ~21% due to RecordMap<String, NanVal> replacing HashMap<String, VMValue>.",
+    "tight_loop_10m_iter_ms_v202": 3404,
+    "tight_loop_10m_iter_ms_v203": 2180,
+    "improvement_pct": 36,
+    "record_transform_1m_ms_v202": 210,
+    "record_transform_1m_ms_v203": 165,
+    "record_transform_improvement_pct": 21
+  }
+}

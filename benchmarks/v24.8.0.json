@@ -1,0 +1,10 @@
+{
+  "version": "24.8.0",
+  "date": "2026-06-24",
+  "test_count": 1969,
+  "feature": "fav new テンプレートギャラリー",
+  "metrics": {
+    "test_count": 1969,
+    "duration_ms": 17400
+  }
+}

@@ -1,0 +1,82 @@
+---
+title: ビット演算
+description: Int 型のビットレベル操作（v23.2.0）
+---
+
+# ビット演算
+
+v23.2.0 で追加されたビット演算関数です。vm.fav のバイトコードデコードで opcode/operand の抽出に使います。
+
+## 基本的な使い方
+
+```favnir
+bind a <- Int.bit_and(0xFF, 0x0F)     // 15
+bind b <- Int.bit_or(0xF0, 0x0F)      // 255
+bind c <- Int.bit_xor(0xFF, 0x0F)     // 240
+bind d <- Int.bit_not(0x00)           // -1（i64 全ビット反転）
+bind e <- Int.shift_left(1, 4)        // 16
+bind f <- Int.shift_right(256, 4)     // 16
+```
+
+## 16 進数リテラル
+
+`0x` または `0X` プレフィックスで 16 進数を直接記述できます。
+
+```favnir
+bind mask <- Int.bit_and(word, 0x00FFFFFF)   // 下位 24 ビットを取り出す
+bind high <- Int.shift_right(word, 24)       // 上位 8 ビット
+bind opcode <- Int.bit_and(high, 0xFF)       // vm.fav のバイトコードデコード例
+```
+
+## `Int.bit_not` の挙動（i64）
+
+Favnir の `Int` は i64（64 ビット符号付き整数）です。
+
+```favnir
+Int.bit_not(0x00)    // -1（0xFFFFFFFFFFFFFFFF）— 0xFFFFFFFF ではない
+Int.bit_not(-1)      // 0
+```
+
+> `bit_not(0)` の結果は `-1` であり `0xFFFFFFFF` ではありません。i64 の全 64 ビットが反転します。
+
+## シフト量の範囲
+
+`shift_left` / `shift_right` のシフト量（第 2 引数）は `0..=63` の範囲内である必要があります。
+範囲外（負数または 64 以上）の場合はランタイムエラー（`Err`）を返します。
+
+```favnir
+// 正常
+bind x <- Int.shift_left(1, 63)    // -9223372036854775808（i64 最小値）
+
+// 範囲外 → ランタイムエラー
+// Int.shift_left(1, 64)  — エラー
+// Int.shift_left(1, -1)  — エラー
+```
+
+## 関数一覧
+
+| 関数 | シグネチャ | 説明 |
+|---|---|---|
+| `Int.bit_and` | `Int, Int -> Int` | ビット AND |
+| `Int.bit_or` | `Int, Int -> Int` | ビット OR |
+| `Int.bit_xor` | `Int, Int -> Int` | ビット XOR |
+| `Int.bit_not` | `Int -> Int` | ビット NOT（i64 全ビット反転）|
+| `Int.shift_left` | `Int, Int -> Int` | 左シフト（シフト量 0〜63）|
+| `Int.shift_right` | `Int, Int -> Int` | 算術右シフト・符号拡張（シフト量 0〜63）|
+
+## 旧名との関係
+
+v5.1.0 以前から存在する旧名（`Int.band` / `Int.bor` / `Int.bxor` / `Int.bnot` / `Int.shl` / `Int.shr`）は
+後方互換のため引き続き使用できます。新しいコードでは `bit_` prefix / `shift_left/right` の使用を推奨します。
+
+## vm.fav での活用例
+
+```favnir
+// バイトコード 1 ワードから opcode と operand を取り出す
+fn decode_word(word: Int) -> { opcode: Int  operand: Int } {
+  bind high    <- Int.shift_right(word, 24)
+  bind opcode  <- Int.bit_and(high, 0xFF)
+  bind operand <- Int.bit_and(word, 0x00FFFFFF)
+  { opcode: opcode  operand: operand }
+}
+```

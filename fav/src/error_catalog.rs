@@ -405,6 +405,31 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
         example: "async fn f() -> Int { 42 }  // used where Task<Int> not expected",
         fix: "Use `bind` to unwrap a Task<T>, or adjust the return type annotation.",
     },
+    // ── E04xx: SLA アノテーション (v22.6.0) ──────────────────────────
+    ErrorEntry {
+        code: "E0401",
+        title: "invalid timeout annotation",
+        category: "sla",
+        description: "`#[timeout(seconds = N)]` の `seconds` が 0 以下です。",
+        example: "#[timeout(seconds = 0)] stage F: A -> B = |x| { x }  // E0401",
+        fix: "`seconds` に正の値（例: `seconds = 30`）を指定してください。",
+    },
+    ErrorEntry {
+        code: "E0402",
+        title: "invalid retry annotation",
+        category: "sla",
+        description: "`#[retry(max = N, backoff = \"...\")]` の `max` が 0 以下、または `backoff` が不正な値です。",
+        example: "#[retry(max = 0, backoff = \"fast\")]  // E0402",
+        fix: "`max` は 1 以上にし、`backoff` は \"exponential\" / \"linear\" / \"none\" のいずれかを指定してください。",
+    },
+    ErrorEntry {
+        code: "E0403",
+        title: "invalid circuit_breaker annotation",
+        category: "sla",
+        description: "`#[circuit_breaker(threshold = F, window = N)]` の `threshold` が (0.0, 1.0] の範囲外、または `window` が 0 以下です。",
+        example: "#[circuit_breaker(threshold = 0.0, window = 0)]  // E0403",
+        fix: "`threshold` は 0.0 超〜1.0 以下、`window` は 1 以上の整数を指定してください。",
+    },
     // ── E05xx: モジュール ────────────────────────────────────────────────
     ErrorEntry {
         code: "E0500",

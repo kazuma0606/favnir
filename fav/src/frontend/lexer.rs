@@ -77,6 +77,7 @@ pub enum TokenKind {
     Bench,
     Alias,
     As,
+    Pipeline, // v22.5.0: `pipeline` block keyword
 
     // Effect keywords
     Pure,
@@ -555,6 +556,7 @@ impl Lexer {
             "bench" => TokenKind::Bench,
             "alias" => TokenKind::Alias,
             "as" => TokenKind::As,
+            "pipeline" => TokenKind::Pipeline,
             "Pure" => TokenKind::Pure,
             "Io" => TokenKind::Io,
             "emit" => TokenKind::Emit,
@@ -567,6 +569,29 @@ impl Lexer {
     // ── number ────────────────────────────────────────────────────────────────
 
     fn lex_number(&mut self) -> Result<TokenKind, LexError> {
+        // v23.2.0: 16 進数リテラル（0x / 0X）
+        // next_token() は advance しないため、入場時に '0' は pos にある
+        if self.peek() == Some('0') && matches!(self.peek2(), Some('x') | Some('X')) {
+            self.advance(); // '0'
+            self.advance(); // 'x' or 'X'
+            let mut hex = String::new();
+            while self.peek().map(|c| c.is_ascii_hexdigit()).unwrap_or(false) {
+                hex.push(self.advance());
+            }
+            if hex.is_empty() {
+                return Err(LexError::new(
+                    "invalid hex literal: expected hex digits after '0x'",
+                    self.span_here(),
+                ));
+            }
+            return i64::from_str_radix(&hex, 16).map(TokenKind::Int).map_err(|_| {
+                LexError::new(
+                    format!("hex literal '0x{}' overflows i64", hex),
+                    self.span_here(),
+                )
+            });
+        }
+
         let mut s = String::new();
         let mut is_float = false;
 

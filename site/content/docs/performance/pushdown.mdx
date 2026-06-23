@@ -1,0 +1,82 @@
+# DuckDB プッシュダウン最適化パス
+
+> **v20.4.0** で実装。集計クエリが VM 実行から DuckDB SQL 委譲へ（+10〜100x）。
+
+---
+
+## 概要
+
+Favnir コンパイラの静的解析パスが、特定のパターンを持つ `stage` 定義を検出し、
+DuckDB SQL クエリに自動変換して委譲します。VM でループを実行する代わりに、
+DuckDB の最適化エンジンに処理を委ねることで劇的な性能改善を実現します。
+
+---
+
+## 自動変換されるパターン（Phase 1）
+
+| Favnir 操作 | 生成される SQL |
+|---|---|
+| `List.filter(rows, \|r\| r.field > n)` | `WHERE field > n` |
+| `List.group_by(rows, \|r\| r.key)` | `GROUP BY key` |
+| `List.sum_by(rows, \|r\| r.val)` | `SUM(val)` |
+| `List.map(rows, \|r\| r.field)` | `SELECT field` |
+| `List.length(rows)` | `COUNT(*)` |
+
+---
+
+## 使用例
+
+```favnir
+-- 以下の stage は自動的に DuckDB SQL に変換される
+stage Aggregate: List<Row> -> List<Summary> = |rows| {
+  List.filter(rows, |r| r.amount > 1000.0 && r.status == "active")
+  |> List.group_by(|r| r.category)
+  |> Map.map(|k, v| Summary {
+       category: k,
+       total: List.sum_by(v, |r| r.amount)
+     })
+}
+```
+
+↓ コンパイラが自動生成する DuckDB SQL
+
+```sql
+SELECT category, SUM(amount) AS total
+FROM ?pushdown_table?
+WHERE amount > 1000.0 AND status = 'active'
+GROUP BY category
+```
+
+---
+
+## 変換を確認する
+
+```bash
+# pushdown が適用されているか確認
+fav run --explain-pushdown pipeline.fav
+```
+
+出力例:
+```
+[PUSHDOWN] stage Aggregate → DuckDB SQL
+  pattern: Filter + GroupBy + SumBy
+  generated SQL: SELECT category, SUM(amount) AS total FROM ...
+```
+
+---
+
+## 実装詳細
+
+- `fav/src/pushdown/` — 最適化パスモジュール
+  - `mod.rs` — `detect_pushdown` エントリポイント
+  - `pattern.rs` — `FilterExpr` / `CmpOp` / `PushdownOp` 型定義、パターン検出
+  - `sql_builder.rs` — `PushdownPlan` → SQL 文字列生成
+- Arrow 52 と DuckDB（arrow 54）の型非互換は Parquet 中間ファイルで回避
+
+---
+
+## 注意事項
+
+- Phase 1 では単純な比較演算子（`>` / `<` / `==` / `!=`）のみ対応。
+- 複雑なクロージャ（複数の参照、外部変数のキャプチャ）は pushdown 対象外となり VM 実行にフォールバック。
+- `--explain-pushdown` フラグで pushdown 適用の可否を確認できる。

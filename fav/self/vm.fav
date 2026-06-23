@@ -1,0 +1,743 @@
+// v23.4.0: vm.fav — Favnir セルフホスト VM Phase 1（バイトコードデコード）
+//
+// 対応 opcode: codegen.rs の主要バリアント 27 件（Phase 1）
+// Phase 2 以降: 実行ループ / CallFrame / VMValue / builtin ディスパッチ
+//
+// エンディアン注記:
+//   codegen.rs は emit_u16(v.to_le_bytes()) でリトルエンディアン（LE）バイトコードを生成する。
+//   Bytes.read_u16 は BE のため、vm.fav では Bytes.read_u16_le（v23.4.0 追加）を使用する。
+//
+// 重要: Favnir で Result 値を構築する場合は Result.ok(...) / Result.err(...) を使用する。
+//   bare ok(...) / err(...) はグローバルとして未登録のため LoadGlobal(65535) になりクラッシュする。
+
+type Opcode =
+  | Const(Int)
+  | ConstUnit
+  | ConstTrue
+  | ConstFalse
+  | LoadLocal(Int)
+  | StoreLocal(Int)
+  | LoadGlobal(Int)
+  | Pop
+  | Dup
+  | Call(Int)
+  | Return
+  | Add
+  | Sub
+  | Mul
+  | Div
+  | Eq
+  | Ne
+  | Lt
+  | Le
+  | Gt
+  | Ge
+  | And
+  | Or
+  | Jump(Int)
+  | JumpIfFalse(Int)
+  | GetField(Int)
+  | Unknown(Int)
+
+type DecodeResult = {
+  op:      Opcode
+  next_pc: Int
+}
+
+fn decode_byte_no_operand(byte: Int, pc: Int) -> Result<DecodeResult, String> {
+  match byte {
+    0x02 => Result.ok(DecodeResult { op: ConstUnit     next_pc: pc + 1 })
+    0x03 => Result.ok(DecodeResult { op: ConstTrue     next_pc: pc + 1 })
+    0x04 => Result.ok(DecodeResult { op: ConstFalse    next_pc: pc + 1 })
+    0x13 => Result.ok(DecodeResult { op: Pop           next_pc: pc + 1 })
+    0x14 => Result.ok(DecodeResult { op: Dup           next_pc: pc + 1 })
+    0x16 => Result.ok(DecodeResult { op: Return        next_pc: pc + 1 })
+    0x20 => Result.ok(DecodeResult { op: Add           next_pc: pc + 1 })
+    0x21 => Result.ok(DecodeResult { op: Sub           next_pc: pc + 1 })
+    0x22 => Result.ok(DecodeResult { op: Mul           next_pc: pc + 1 })
+    0x23 => Result.ok(DecodeResult { op: Div           next_pc: pc + 1 })
+    0x24 => Result.ok(DecodeResult { op: Eq            next_pc: pc + 1 })
+    0x25 => Result.ok(DecodeResult { op: Ne            next_pc: pc + 1 })
+    0x26 => Result.ok(DecodeResult { op: Lt            next_pc: pc + 1 })
+    0x27 => Result.ok(DecodeResult { op: Le            next_pc: pc + 1 })
+    0x28 => Result.ok(DecodeResult { op: Gt            next_pc: pc + 1 })
+    0x29 => Result.ok(DecodeResult { op: Ge            next_pc: pc + 1 })
+    0x2a => Result.ok(DecodeResult { op: And           next_pc: pc + 1 })
+    0x2b => Result.ok(DecodeResult { op: Or            next_pc: pc + 1 })
+    _    => Result.ok(DecodeResult { op: Unknown(byte) next_pc: pc + 1 })
+  }
+}
+
+fn decode_byte_with_u16_le(bytes: Bytes, byte: Int, pc: Int) -> Result<DecodeResult, String> {
+  bind r <- Bytes.read_u16_le(bytes, pc + 1)
+  match r {
+    ok(operand) => match byte {
+      0x01 => Result.ok(DecodeResult { op: Const(operand)       next_pc: pc + 3 })
+      0x10 => Result.ok(DecodeResult { op: LoadLocal(operand)   next_pc: pc + 3 })
+      0x11 => Result.ok(DecodeResult { op: StoreLocal(operand)  next_pc: pc + 3 })
+      0x12 => Result.ok(DecodeResult { op: LoadGlobal(operand)  next_pc: pc + 3 })
+      0x15 => Result.ok(DecodeResult { op: Call(operand)        next_pc: pc + 3 })
+      0x30 => Result.ok(DecodeResult { op: Jump(operand)        next_pc: pc + 3 })
+      0x31 => Result.ok(DecodeResult { op: JumpIfFalse(operand) next_pc: pc + 3 })
+      0x40 => Result.ok(DecodeResult { op: GetField(operand)    next_pc: pc + 3 })
+      _    => Result.err(f"decode_byte_with_u16_le: unknown 3-byte opcode: {byte}")
+    }
+    err(e) => Result.err(e)
+  }
+}
+
+fn decode_opcode(bytes: Bytes, pc: Int) -> Result<DecodeResult, String> {
+  bind get_result <- Bytes.get(bytes, pc)
+  match get_result {
+    ok(byte) => match byte {
+      0x01 => decode_byte_with_u16_le(bytes, byte, pc)
+      0x10 => decode_byte_with_u16_le(bytes, byte, pc)
+      0x11 => decode_byte_with_u16_le(bytes, byte, pc)
+      0x12 => decode_byte_with_u16_le(bytes, byte, pc)
+      0x15 => decode_byte_with_u16_le(bytes, byte, pc)
+      0x30 => decode_byte_with_u16_le(bytes, byte, pc)
+      0x31 => decode_byte_with_u16_le(bytes, byte, pc)
+      0x40 => decode_byte_with_u16_le(bytes, byte, pc)
+      _    => decode_byte_no_operand(byte, pc)
+    }
+    err(e) => Result.err(e)
+  }
+}
+
+fn opcode_to_string(op: Opcode) -> String {
+  match op {
+    Const(idx)       => f"Const({idx})"
+    ConstUnit        => "ConstUnit"
+    ConstTrue        => "ConstTrue"
+    ConstFalse       => "ConstFalse"
+    LoadLocal(s)     => f"LoadLocal({s})"
+    StoreLocal(s)    => f"StoreLocal({s})"
+    LoadGlobal(g)    => f"LoadGlobal({g})"
+    Pop              => "Pop"
+    Dup              => "Dup"
+    Call(argc)       => f"Call({argc})"
+    Return           => "Return"
+    Add              => "Add"
+    Sub              => "Sub"
+    Mul              => "Mul"
+    Div              => "Div"
+    Eq               => "Eq"
+    Ne               => "Ne"
+    Lt               => "Lt"
+    Le               => "Le"
+    Gt               => "Gt"
+    Ge               => "Ge"
+    And              => "And"
+    Or               => "Or"
+    Jump(off)        => f"Jump({off})"
+    JumpIfFalse(off) => f"JumpIfFalse({off})"
+    GetField(idx)    => f"GetField({idx})"
+    Unknown(b)       => f"Unknown({b})"
+  }
+}
+
+// v23.5.0: vm.fav Phase 2（スタックベース実行ループ）
+//
+// 設計ノート:
+//   - stack は Mut.list() が返す opaque handle。Favnir 型宣言は Int。
+//     (Type::Unknown は型チェッカーで全型に unify するため Int 宣言で問題なし)
+//   - Mut.push は Result<Unit, String> を返すため bind _ <- Mut.push(...) で sequencing。
+//   - Const(n): Phase 2 では u16 オペランドを整数値として push（定数プール省略）。
+//   - Result.ok / Result.err: bare ok/err は LoadGlobal(65535) クラッシュのため必ず名前空間付き。
+
+type VMVal =
+  | VMInt(Int)
+  | VMBool(Bool)
+  | VMUnit
+  | VMStr(String)
+
+fn vmval_to_string(v: VMVal) -> String {
+  match v {
+    VMInt(n)  => f"VMInt({n})"
+    VMBool(b) => f"VMBool({b})"
+    VMUnit    => "VMUnit"
+    VMStr(s)  => String.concat("VMStr(", String.concat(s, ")"))
+  }
+}
+
+// ユーザー向け表示形式。VMStr は引用符なし（vmval_to_string はデバッグ用）。
+fn vmval_display(v: VMVal) -> String {
+  match v {
+    VMInt(n)  => f"{n}"
+    VMBool(b) => f"{b}"
+    VMUnit    => ""
+    VMStr(s)  => s
+  }
+}
+
+// vm.fav Phase 4: Favnir ↔ Rust の永続的境界。
+// vm.fav からは Favnir 記法で呼び出すが、実行時は Rust VM の vm_call_builtin にディスパッチされる。
+// args: Int — Mut.list() の opaque handle（積まれた引数を pop して使う）
+fn call_builtin(name: String, args: Int) -> Result<VMVal, String> {
+  match name {
+    "Int.to_string" => {
+      bind v_r <- Mut.pop(args)
+      match v_r {
+        err(e) => Result.err(e)
+        ok(v) => match v {
+          VMInt(n) => Result.ok(VMStr(f"{n}"))
+          _ => Result.err("Int.to_string: expected VMInt")
+        }
+      }
+    }
+    "String.length" => {
+      bind v_r <- Mut.pop(args)
+      match v_r {
+        err(e) => Result.err(e)
+        ok(v) => match v {
+          VMStr(s) => Result.ok(VMInt(String.length(s)))
+          _ => Result.err("String.length: expected VMStr")
+        }
+      }
+    }
+    "String.trim" => {
+      bind v_r <- Mut.pop(args)
+      match v_r {
+        err(e) => Result.err(e)
+        ok(v) => match v {
+          VMStr(s) => Result.ok(VMStr(String.trim(s)))
+          _ => Result.err("String.trim: expected VMStr")
+        }
+      }
+    }
+    // 注: Int.MIN_VALUE(-9223372036854775808) を渡した場合、0 - n はオーバーフローする（既知の設計上制限）。
+    "Math.abs" => {
+      bind v_r <- Mut.pop(args)
+      match v_r {
+        err(e) => Result.err(e)
+        ok(v) => match v {
+          VMInt(n) => if n < 0 {
+            Result.ok(VMInt(0 - n))
+          } else {
+            Result.ok(VMInt(n))
+          }
+          _ => Result.err("Math.abs: expected VMInt")
+        }
+      }
+    }
+    "String.concat" => {
+      bind a_r <- Mut.pop(args)
+      match a_r {
+        err(e) => Result.err(e)
+        ok(a) => {
+          bind b_r <- Mut.pop(args)
+          match b_r {
+            err(e) => Result.err(e)
+            ok(b) => match a {
+              VMStr(sa) => match b {
+                VMStr(sb) => Result.ok(VMStr(String.concat(sa, sb)))
+                _ => Result.err("String.concat: arg2 not VMStr")
+              }
+              _ => Result.err("String.concat: arg1 not VMStr")
+            }
+          }
+        }
+      }
+    }
+    _ => Result.err(f"call_builtin: unknown builtin: {name}")
+  }
+}
+
+// Phase 5: collect_args_rec — スタックから n 個の引数を LIFO 順で acc に push する。
+// 収集後: acc トップが「ソースコード上の第 1 引数」。
+// 例: push callee, push arg1, push arg2, Call(2)
+//   step1: pop arg2 → acc=[arg2]
+//   step2: pop arg1 → acc=[arg2, arg1]  ← arg1 が top
+//   → Mut.pop(acc) で arg1 が先に取れる = ソース順
+fn collect_args_rec(stack: Int, n: Int, acc: Int) -> Result<Int, String> {
+  match n {
+    0 => Result.ok(acc)
+    _ => {
+      bind v_r <- Mut.pop(stack)
+      match v_r {
+        err(e) => Result.err(f"collect_args: {e}")
+        ok(v) => {
+          // Mut.push は Result<Unit, String> を返すが、bind _ <- は unwrap しない（Favnir の仕様）。
+          // MutList ハンドルが常に有効であるため、push 失敗は実際には発生しない。
+          bind _ <- Mut.push(acc, v)
+          collect_args_rec(stack, n - 1, acc)
+        }
+      }
+    }
+  }
+}
+
+fn collect_args(stack: Int, n: Int) -> Result<Int, String> {
+  bind acc <- Mut.list()
+  collect_args_rec(stack, n, acc)
+}
+
+fn vm_execute(bytecode: Bytes, stack: Int, locals: Int, globals: Int, pc: Int) -> Result<VMVal, String> {
+  bind dec_r <- decode_opcode(bytecode, pc)
+  match dec_r {
+    err(e) => Result.err(e)
+    ok(dec) => match dec.op {
+      ConstUnit => {
+        bind _ <- Mut.push(stack, VMUnit)
+        vm_execute(bytecode, stack, locals, globals, dec.next_pc)
+      }
+      ConstTrue => {
+        bind _ <- Mut.push(stack, VMBool(true))
+        vm_execute(bytecode, stack, locals, globals, dec.next_pc)
+      }
+      ConstFalse => {
+        bind _ <- Mut.push(stack, VMBool(false))
+        vm_execute(bytecode, stack, locals, globals, dec.next_pc)
+      }
+      Const(n) => {
+        bind _ <- Mut.push(stack, VMInt(n))
+        vm_execute(bytecode, stack, locals, globals, dec.next_pc)
+      }
+      Pop => {
+        bind top_r <- Mut.pop(stack)
+        match top_r {
+          err(e) => Result.err(f"Pop: {e}")
+          ok(_)  => vm_execute(bytecode, stack, locals, globals, dec.next_pc)
+        }
+      }
+      Dup => {
+        bind top_r <- Mut.peek(stack)
+        match top_r {
+          err(e) => Result.err(e)
+          ok(v) => {
+            bind push_r <- Mut.push(stack, v)
+            match push_r {
+              err(e) => Result.err(f"Dup: {e}")
+              ok(_)  => vm_execute(bytecode, stack, locals, globals, dec.next_pc)
+            }
+          }
+        }
+      }
+      Return => {
+        bind top_r <- Mut.pop(stack)
+        match top_r {
+          ok(v)  => Result.ok(v)
+          err(e) => Result.err(f"Return: {e}")
+        }
+      }
+      Add => {
+        bind b_r <- Mut.pop(stack)
+        match b_r {
+          err(e) => Result.err(e)
+          ok(b) => {
+            bind a_r <- Mut.pop(stack)
+            match a_r {
+              err(e) => Result.err(e)
+              ok(a) => match a {
+                VMInt(ai) => match b {
+                  VMInt(bi) => {
+                    bind _ <- Mut.push(stack, VMInt(ai + bi))
+                    vm_execute(bytecode, stack, locals, globals, dec.next_pc)
+                  }
+                  _ => Result.err("Add: type error on b")
+                }
+                _ => Result.err("Add: type error on a")
+              }
+            }
+          }
+        }
+      }
+      Sub => {
+        bind b_r <- Mut.pop(stack)
+        match b_r {
+          err(e) => Result.err(e)
+          ok(b) => {
+            bind a_r <- Mut.pop(stack)
+            match a_r {
+              err(e) => Result.err(e)
+              ok(a) => match a {
+                VMInt(ai) => match b {
+                  VMInt(bi) => {
+                    bind _ <- Mut.push(stack, VMInt(ai - bi))
+                    vm_execute(bytecode, stack, locals, globals, dec.next_pc)
+                  }
+                  _ => Result.err("Sub: type error on b")
+                }
+                _ => Result.err("Sub: type error on a")
+              }
+            }
+          }
+        }
+      }
+      Mul => {
+        bind b_r <- Mut.pop(stack)
+        match b_r {
+          err(e) => Result.err(e)
+          ok(b) => {
+            bind a_r <- Mut.pop(stack)
+            match a_r {
+              err(e) => Result.err(e)
+              ok(a) => match a {
+                VMInt(ai) => match b {
+                  VMInt(bi) => {
+                    bind _ <- Mut.push(stack, VMInt(ai * bi))
+                    vm_execute(bytecode, stack, locals, globals, dec.next_pc)
+                  }
+                  _ => Result.err("Mul: type error on b")
+                }
+                _ => Result.err("Mul: type error on a")
+              }
+            }
+          }
+        }
+      }
+      Eq => {
+        bind b_r <- Mut.pop(stack)
+        match b_r {
+          err(e) => Result.err(e)
+          ok(b) => {
+            bind a_r <- Mut.pop(stack)
+            match a_r {
+              err(e) => Result.err(e)
+              ok(a) => match a {
+                VMInt(ai) => match b {
+                  VMInt(bi) => {
+                    bind push_r <- Mut.push(stack, VMBool(ai == bi))
+                    match push_r {
+                      err(e) => Result.err(e)
+                      ok(_)  => vm_execute(bytecode, stack, locals, globals, dec.next_pc)
+                    }
+                  }
+                  _ => Result.err("Eq: type error on b")
+                }
+                _ => Result.err("Eq: type error on a")
+              }
+            }
+          }
+        }
+      }
+      Jump(off) => {
+        vm_execute(bytecode, stack, locals, globals, dec.next_pc + off)
+      }
+      JumpIfFalse(off) => {
+        bind cond_r <- Mut.pop(stack)
+        match cond_r {
+          err(e) => Result.err(e)
+          ok(cond) => match cond {
+            VMBool(b) => match b {
+              true  => vm_execute(bytecode, stack, locals, globals, dec.next_pc)
+              false => vm_execute(bytecode, stack, locals, globals, dec.next_pc + off)
+            }
+            _ => Result.err("JumpIfFalse: not a Bool")
+          }
+        }
+      }
+      LoadLocal(slot) => {
+        bind get_r <- Mut.get(locals, slot)
+        match get_r {
+          err(e) => Result.err(f"LoadLocal: {e}")
+          ok(v) => {
+            bind push_r <- Mut.push(stack, v)
+            match push_r {
+              err(e) => Result.err(f"LoadLocal push: {e}")
+              ok(_)  => vm_execute(bytecode, stack, locals, globals, dec.next_pc)
+            }
+          }
+        }
+      }
+      StoreLocal(slot) => {
+        bind val_r <- Mut.pop(stack)
+        match val_r {
+          err(e) => Result.err(e)
+          ok(val) => {
+            bind set_r <- Mut.set(locals, slot, val)
+            match set_r {
+              err(e) => Result.err(f"StoreLocal: {e}")
+              ok(_)  => vm_execute(bytecode, stack, locals, globals, dec.next_pc)
+            }
+          }
+        }
+      }
+      Ne => {
+        bind b_r <- Mut.pop(stack)
+        match b_r {
+          err(e) => Result.err(e)
+          ok(b) => {
+            bind a_r <- Mut.pop(stack)
+            match a_r {
+              err(e) => Result.err(e)
+              ok(a) => match a {
+                VMInt(ai) => match b {
+                  VMInt(bi) => {
+                    bind push_r <- Mut.push(stack, VMBool(ai != bi))
+                    match push_r {
+                      err(e) => Result.err(e)
+                      ok(_)  => vm_execute(bytecode, stack, locals, globals, dec.next_pc)
+                    }
+                  }
+                  _ => Result.err("Ne: type error on b")
+                }
+                _ => Result.err("Ne: type error on a")
+              }
+            }
+          }
+        }
+      }
+      Lt => {
+        bind b_r <- Mut.pop(stack)
+        match b_r {
+          err(e) => Result.err(e)
+          ok(b) => {
+            bind a_r <- Mut.pop(stack)
+            match a_r {
+              err(e) => Result.err(e)
+              ok(a) => match a {
+                VMInt(ai) => match b {
+                  VMInt(bi) => {
+                    bind push_r <- Mut.push(stack, VMBool(ai < bi))
+                    match push_r {
+                      err(e) => Result.err(e)
+                      ok(_)  => vm_execute(bytecode, stack, locals, globals, dec.next_pc)
+                    }
+                  }
+                  _ => Result.err("Lt: type error on b")
+                }
+                _ => Result.err("Lt: type error on a")
+              }
+            }
+          }
+        }
+      }
+      Le => {
+        bind b_r <- Mut.pop(stack)
+        match b_r {
+          err(e) => Result.err(e)
+          ok(b) => {
+            bind a_r <- Mut.pop(stack)
+            match a_r {
+              err(e) => Result.err(e)
+              ok(a) => match a {
+                VMInt(ai) => match b {
+                  VMInt(bi) => {
+                    bind push_r <- Mut.push(stack, VMBool(ai <= bi))
+                    match push_r {
+                      err(e) => Result.err(e)
+                      ok(_)  => vm_execute(bytecode, stack, locals, globals, dec.next_pc)
+                    }
+                  }
+                  _ => Result.err("Le: type error on b")
+                }
+                _ => Result.err("Le: type error on a")
+              }
+            }
+          }
+        }
+      }
+      Gt => {
+        bind b_r <- Mut.pop(stack)
+        match b_r {
+          err(e) => Result.err(e)
+          ok(b) => {
+            bind a_r <- Mut.pop(stack)
+            match a_r {
+              err(e) => Result.err(e)
+              ok(a) => match a {
+                VMInt(ai) => match b {
+                  VMInt(bi) => {
+                    bind push_r <- Mut.push(stack, VMBool(ai > bi))
+                    match push_r {
+                      err(e) => Result.err(e)
+                      ok(_)  => vm_execute(bytecode, stack, locals, globals, dec.next_pc)
+                    }
+                  }
+                  _ => Result.err("Gt: type error on b")
+                }
+                _ => Result.err("Gt: type error on a")
+              }
+            }
+          }
+        }
+      }
+      Ge => {
+        bind b_r <- Mut.pop(stack)
+        match b_r {
+          err(e) => Result.err(e)
+          ok(b) => {
+            bind a_r <- Mut.pop(stack)
+            match a_r {
+              err(e) => Result.err(e)
+              ok(a) => match a {
+                VMInt(ai) => match b {
+                  VMInt(bi) => {
+                    bind push_r <- Mut.push(stack, VMBool(ai >= bi))
+                    match push_r {
+                      err(e) => Result.err(e)
+                      ok(_)  => vm_execute(bytecode, stack, locals, globals, dec.next_pc)
+                    }
+                  }
+                  _ => Result.err("Ge: type error on b")
+                }
+                _ => Result.err("Ge: type error on a")
+              }
+            }
+          }
+        }
+      }
+      And => {
+        bind b_r <- Mut.pop(stack)
+        match b_r {
+          err(e) => Result.err(e)
+          ok(b) => {
+            bind a_r <- Mut.pop(stack)
+            match a_r {
+              err(e) => Result.err(e)
+              ok(a) => match a {
+                VMBool(ab) => match b {
+                  VMBool(bb) => {
+                    bind push_r <- Mut.push(stack, VMBool(ab && bb))
+                    match push_r {
+                      err(e) => Result.err(e)
+                      ok(_)  => vm_execute(bytecode, stack, locals, globals, dec.next_pc)
+                    }
+                  }
+                  _ => Result.err("And: type error on b")
+                }
+                _ => Result.err("And: type error on a")
+              }
+            }
+          }
+        }
+      }
+      Or => {
+        bind b_r <- Mut.pop(stack)
+        match b_r {
+          err(e) => Result.err(e)
+          ok(b) => {
+            bind a_r <- Mut.pop(stack)
+            match a_r {
+              err(e) => Result.err(e)
+              ok(a) => match a {
+                VMBool(ab) => match b {
+                  VMBool(bb) => {
+                    bind push_r <- Mut.push(stack, VMBool(ab || bb))
+                    match push_r {
+                      err(e) => Result.err(e)
+                      ok(_)  => vm_execute(bytecode, stack, locals, globals, dec.next_pc)
+                    }
+                  }
+                  _ => Result.err("Or: type error on b")
+                }
+                _ => Result.err("Or: type error on a")
+              }
+            }
+          }
+        }
+      }
+      Div => {
+        bind b_r <- Mut.pop(stack)
+        match b_r {
+          err(e) => Result.err(e)
+          ok(b) => {
+            bind a_r <- Mut.pop(stack)
+            match a_r {
+              err(e) => Result.err(e)
+              ok(a) => match a {
+                VMInt(ai) => match b {
+                  VMInt(bi) => match bi {
+                    0 => Result.err("Div: division by zero")
+                    _ => {
+                      bind push_r <- Mut.push(stack, VMInt(ai / bi))
+                      match push_r {
+                        err(e) => Result.err(e)
+                        ok(_)  => vm_execute(bytecode, stack, locals, globals, dec.next_pc)
+                      }
+                    }
+                  }
+                  _ => Result.err("Div: type error on b")
+                }
+                _ => Result.err("Div: type error on a")
+              }
+            }
+          }
+        }
+      }
+      LoadGlobal(idx) => {
+        bind g_r <- Mut.get(globals, idx)
+        match g_r {
+          err(e) => Result.err(f"LoadGlobal: {e}")
+          ok(v) => {
+            bind push_r <- Mut.push(stack, v)
+            match push_r {
+              err(e) => Result.err(e)
+              ok(_)  => vm_execute(bytecode, stack, locals, globals, dec.next_pc)
+            }
+          }
+        }
+      }
+      // Call: collect_args でスタックから argc 個の引数をソース順で収集
+      // （push callee → push arg1 → ... → push argN → Call(N)）
+      Call(argc) => {
+        bind args_r <- collect_args(stack, argc)
+        match args_r {
+          err(e) => Result.err(e)
+          ok(args) => {
+            bind callee_r <- Mut.pop(stack)
+            match callee_r {
+              err(e) => Result.err(e)
+              ok(callee) => match callee {
+                VMStr(name) => {
+                  bind res_r <- call_builtin(name, args)
+                  match res_r {
+                    err(e) => Result.err(e)
+                    ok(v) => {
+                      bind push_r <- Mut.push(stack, v)
+                      match push_r {
+                        err(e) => Result.err(e)
+                        ok(_)  => vm_execute(bytecode, stack, locals, globals, dec.next_pc)
+                      }
+                    }
+                  }
+                }
+                _ => Result.err("Call: callee is not a VMStr")
+              }
+            }
+          }
+        }
+      }
+      GetField(idx) => {
+        bind ns_r <- Mut.pop(stack)
+        match ns_r {
+          err(e) => Result.err(f"GetField: stack underflow: {e}")
+          ok(ns) => match ns {
+            VMStr(ns_name) => {
+              bind field_r <- Mut.get(globals, idx)
+              match field_r {
+                err(e) => Result.err(f"GetField: globals[{idx}] not found: {e}")
+                ok(field) => match field {
+                  VMStr(field_name) => {
+                    bind push_r <- Mut.push(stack, VMStr(String.concat(ns_name, String.concat(".", field_name))))
+                    match push_r {
+                      err(e) => Result.err(e)
+                      ok(_)  => vm_execute(bytecode, stack, locals, globals, dec.next_pc)
+                    }
+                  }
+                  _ => Result.err("GetField: globals[idx] is not VMStr")
+                }
+              }
+            }
+            _ => Result.err("GetField: top of stack is not VMStr")
+          }
+        }
+      }
+      _ => Result.err("vm_execute: unimplemented opcode")
+    }
+  }
+}
+
+fn vm_run(bytecode: Bytes) -> Result<VMVal, String> {
+  bind stack   <- Mut.list()
+  bind locals  <- Mut.map()
+  bind globals <- Mut.map()
+  vm_execute(bytecode, stack, locals, globals, 0)
+}
+
+fn vm_run_named(bytecode: Bytes, globals: Int) -> Result<VMVal, String> {
+  bind stack  <- Mut.list()
+  bind locals <- Mut.map()
+  vm_execute(bytecode, stack, locals, globals, 0)
+}

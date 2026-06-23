@@ -1,0 +1,4 @@
+[rune]
+name        = "orc"
+version     = "1.0.0"
+description = "Apache ORC カラムナーフォーマット"

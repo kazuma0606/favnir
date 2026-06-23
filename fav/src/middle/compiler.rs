@@ -22,6 +22,7 @@ use super::ir::{
     FieldMeta, IRArm, IRExpr, IRFnDef, IRGlobal, IRGlobalKind, IRPattern, IRProgram, IRStmt,
     TypeMeta,
 };
+#[cfg(not(target_arch = "wasm32"))]
 use crate::pushdown::{detect_pushdown, PushdownPlan};
 use crate::ast::{
     AbstractFlwDef, AbstractTrfDef, BinOp, BindStmt, Block, CompClause, Expr, FStringPart,
@@ -570,63 +571,66 @@ pub fn compile_program(program: &Program) -> IRProgram {
                 ));
             }
             Item::TrfDef(td) => {
-                let param_name = td.params.first().map(|p| p.name.as_str()).unwrap_or("_");
-                let pushdown = detect_pushdown(&td.body.expr, param_name);
                 let param_strs: Vec<String> =
                     td.params.iter().map(|p| p.name.clone()).collect();
                 let param_tys_: Vec<Type> =
                     td.params.iter().map(|p| lower_type_expr(&p.ty)).collect();
 
-                // Only generate a pushdown wrapper when __duckdb_push is registered.
-                // If it somehow isn't (shouldn't happen in normal builds), skip to
-                // avoid embedding u16::MAX as the global index.
-                let duckdb_push_available = ctx.resolve_global("__duckdb_push").is_some();
+                #[cfg(not(target_arch = "wasm32"))]
+                {
+                    let param_name = td.params.first().map(|p| p.name.as_str()).unwrap_or("_");
+                    let pushdown = detect_pushdown(&td.body.expr, param_name);
 
-                if let Some(plan) = pushdown.filter(|_| duckdb_push_available) {
-                    // Compile the original stage as fallback (at fns[fallback_fn_idx])
-                    let fallback_fn_idx = fns.len();
-                    let fallback_name = format!("__pushdown_fallback_{}", td.name);
-                    let mut fallback_fn = compile_fn_def(
-                        &fallback_name,
-                        &td.type_params,
-                        &param_strs,
-                        &param_tys_,
-                        &td.effects,
-                        Some(&td.output_ty),
-                        &td.body,
-                        &mut ctx,
-                    );
-                    fallback_fn.name = fallback_name;
-                    fns.push(fallback_fn);
+                    // Only generate a pushdown wrapper when __duckdb_push is registered.
+                    let duckdb_push_available = ctx.resolve_global("__duckdb_push").is_some();
 
-                    // Build wrapper at fns[wrapper_fn_idx] calling __duckdb_push
-                    let wrapper_fn_idx = fns.len();
-                    let wrapper_fn = compile_pushdown_wrapper(
-                        &td.name,
-                        &plan,
-                        fallback_fn_idx,
-                        &mut ctx,
-                    );
-                    fns.push(wrapper_fn);
+                    if let Some(plan) = pushdown.filter(|_| duckdb_push_available) {
+                        // Compile the original stage as fallback (at fns[fallback_fn_idx])
+                        let fallback_fn_idx = fns.len();
+                        let fallback_name = format!("__pushdown_fallback_{}", td.name);
+                        let mut fallback_fn = compile_fn_def(
+                            &fallback_name,
+                            &td.type_params,
+                            &param_strs,
+                            &param_tys_,
+                            &td.effects,
+                            Some(&td.output_ty),
+                            &td.body,
+                            &mut ctx,
+                        );
+                        fallback_fn.name = fallback_name;
+                        fns.push(fallback_fn);
 
-                    // Update the global for td.name to point to the wrapper
-                    if let Some(&g_idx) = ctx.globals.get(&td.name) {
-                        if let Some(g) = globals.get_mut(g_idx as usize) {
-                            g.kind = IRGlobalKind::Fn(wrapper_fn_idx);
+                        // Build wrapper at fns[wrapper_fn_idx] calling __duckdb_push
+                        let wrapper_fn_idx = fns.len();
+                        let wrapper_fn = compile_pushdown_wrapper(
+                            &td.name,
+                            &plan,
+                            fallback_fn_idx,
+                            &mut ctx,
+                        );
+                        fns.push(wrapper_fn);
+
+                        // Update the global for td.name to point to the wrapper
+                        if let Some(&g_idx) = ctx.globals.get(&td.name) {
+                            if let Some(g) = globals.get_mut(g_idx as usize) {
+                                g.kind = IRGlobalKind::Fn(wrapper_fn_idx);
+                            }
                         }
+                        continue;
                     }
-                } else {
-                    fns.push(compile_fn_def(
-                        &td.name,
-                        &td.type_params,
-                        &param_strs,
-                        &param_tys_,
-                        &td.effects,
-                        Some(&td.output_ty),
-                        &td.body,
-                        &mut ctx,
-                    ));
                 }
+
+                fns.push(compile_fn_def(
+                    &td.name,
+                    &td.type_params,
+                    &param_strs,
+                    &param_tys_,
+                    &td.effects,
+                    Some(&td.output_ty),
+                    &td.body,
+                    &mut ctx,
+                ));
             }
             Item::FlwDef(fd) => fns.push(compile_flw_def(fd, &mut ctx)),
             Item::AbstractTrfDef(_) => {}
@@ -1076,6 +1080,7 @@ fn compile_streaming_pipeline(fd: &FlwDef, chunk_size: i64, ctx: &mut CompileCtx
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Build a pushdown wrapper `IRFnDef` that dispatches to `__duckdb_push` at runtime.
 ///
 /// The generated IR is equivalent to:

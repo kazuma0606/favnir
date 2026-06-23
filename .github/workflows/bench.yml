@@ -7,6 +7,7 @@ on:
 jobs:
   bench:
     runs-on: ubuntu-latest
+    continue-on-error: true   # libduckdb-sys v1.x が release ビルドで MSVC フラグ(/EHsc)を Linux GCC に渡すバグのため暫定
     steps:
       - uses: actions/checkout@v4
 

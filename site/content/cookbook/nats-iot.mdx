@@ -1,0 +1,19 @@
+# NATS IoT データ収集
+
+NATS メッセージブローカーを使って IoT デバイスからセンサーデータを収集し、時系列 DB に保存します。
+
+```favnir
+import runes/nats
+
+stage CollectIoTData: Unit -> List<SensorReading> !Stream = |_| {
+  bind conn <- NATS.connect(config.nats_url)
+  bind msgs <- NATS.subscribe(conn, "sensors.>")
+  msgs |> List.map(|m| NATS.decode[SensorReading](m))
+       |> Result.all
+}
+```
+
+## 関連 Rune
+
+- [NATS](/docs/runes/nats) — NATS メッセージブローカー
+- [Prometheus](/docs/runes/prometheus) — メトリクス集計

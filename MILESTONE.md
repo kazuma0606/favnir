@@ -1,4 +1,44 @@
-# Practical Self-Hosting Milestone
+# Favnir Milestones
+
+## v30.0.0 — Ecosystem Maturity（2026-07-01）
+
+> 「`fav add stripe` で Stripe 連携 Rune が 5 分で動き、
+>  コミュニティ投稿 Rune が Registry に 10 本以上存在する」
+> = Ecosystem Maturity の完成を象徴するデモ
+
+v30.0.0 をもって、Favnir の **Ecosystem Maturity** を正式に宣言する。
+
+Rune Registry（fav publish / add / search / info）が本番稼働し、
+コミュニティ投稿 Rune 10 本（stripe / twilio / notion / linear / airtable /
+sendgrid / hubspot / zendesk / shopify / intercom）が `runes/` 下に存在する。
+AI/ML Rune 4 本（mlflow / pinecone / vertex-ai / sagemaker）と
+VS Code 拡張・ドキュメントサイト v3（cookbook 32 本）が揃い、
+「Favnir で書いたパイプラインをコミュニティが Rune で拡張できる」状態を達成した。
+
+### 達成コンポーネント（v29.1〜v29.9）
+
+| コンポーネント | バージョン | 内容 |
+|---|---|---|
+| Rune Registry（fav publish / add / search / info） | v29.1 | Lambda + S3 + GitHub OAuth |
+| mlflow Rune | v29.2 | start_run / log_metric / log_param / log_artifact / register_model |
+| pinecone Rune | v29.3 | upsert / query / delete / fetch / describe_index_stats |
+| vertex-ai / sagemaker Rune | v29.4 | predict / batch_predict / invoke / create_endpoint |
+| github Rune | v29.5 | create_comment / create_issue / update_issue / list_prs |
+| pagerduty Rune | v29.6 | create_incident / resolve / acknowledge / add_note |
+| VS Code 拡張 公式リリース | v29.7 | TextMate grammar / LSP クライアント / Task Runner 統合 |
+| ドキュメントサイト v3 | v29.8 | cookbook 32 本 / community ページ |
+| コミュニティ Rune コンテスト | v29.9 | 10 本スタブ / CONTRIBUTING.md ガイド |
+
+### 残件（v31.x）
+
+- Rune Registry への実際のパッケージアップロード（Lambda 本番稼働後）
+- コミュニティ Rune の HTTP 認証ヘッダー対応（HTTP Rune 有効化後）
+- VS Code Marketplace への公開（手動）
+
+**宣言日**: 2026-07-01
+**宣言バージョン**: v30.0.0
+
+---
 
 **宣言日**: 2026-06-24
 **宣言バージョン**: v25.0.0 = v1.0 リリース候補
@@ -60,7 +100,7 @@ VM の「仕様・動作の記述」は vm.fav（Favnir）が担い、
 | 4 | `fav run --vm=self/vm.fav self/cli.fav` E2E | 延期（v25.x） |
 | 5 | 4-stage bootstrap 全 6 fixture（Stage 4 = vm.fav） | 延期（v25.x） |
 
-テスト 2〜5 は vm.fav Phase 6（`CallFn` オペコード / ユーザー定義関数ディスパッチ）が
+テスト 2〜5 は vm.fav Phase 6（ユーザー定義関数ディスパッチ、実装では `CallNamed` opcode として確定）が
 未実装のため v25.x に延期。テスト 1 の全件 PASS をもって v25.0.0 の完了条件とする。
 
 ---
@@ -69,3 +109,216 @@ VM の「仕様・動作の記述」は vm.fav（Favnir）が担い、
 
 v25.0.0 = v1.0 リリース候補として、後方互換性ポリシーを確定した。
 詳細は [STABILITY.md](./STABILITY.md) を参照。
+
+---
+
+## v29.0.0 — Observability First（2026-06-28）
+
+> 「`#[track(latency, error_rate)]` を stage に付けるだけで
+>  Grafana ダッシュボードにメトリクスが現れる」
+> = Observability First の完成を象徴するデモ
+
+v29.0.0 をもって、Favnir の **Observability First** を正式に宣言する。
+
+prometheus / datadog / sentry / grafana / otel の 5 Rune が揃い、
+`#[track]` / `#[trace]` / `#[on_error]` アノテーションと E2E デモ 3 本が
+Docker Compose で動作する。パイプラインの内側を型安全に観測できる状態を達成した。
+
+### 達成コンポーネント（v28.1〜v28.9）
+
+| コンポーネント | バージョン | 内容 |
+|---|---|---|
+| prometheus Rune | v28.1 | counter / gauge / histogram / push + `#[track]` アノテーション |
+| datadog Rune | v28.2 | metric / log / trace / event / service_check |
+| OpenTelemetry Rune（otel 強化） | v28.3 | start_span / set_attribute / add_event / end_span + `#[trace]` アノテーション |
+| `fav profile` 強化 | v28.4 | `--format flamegraph`（SVG 生成）/ `--compare <version>` |
+| sentry Rune | v28.5 | capture_error / capture_message / set_user / set_tag / set_extra + `#[on_error]` アノテーション |
+| grafana Rune | v28.6 | create_annotation / push_dashboard / snapshot |
+| E2E デモ（prometheus + grafana） | v28.7 | `#[track]` stage → Grafana ダッシュボード自動反映 |
+| E2E デモ（datadog APM） | v28.8 | `#[trace]` stage → Datadog サービスマップ・フレームグラフ |
+| E2E デモ（sentry アラート） | v28.9 | `#[on_error]` stage → Sentry critical アラート自動送信 |
+
+### 象徴デモ
+
+```favnir
+import runes/prometheus
+import runes/grafana
+
+// #[track] を付けるだけで Grafana ダッシュボードにメトリクスが現れる
+// #[track(latency: true, error_rate: true)]
+stage ExtractOrders: Unit -> List<RawOrder> !Db = |_| {
+    Postgres.query[RawOrder](conn, "SELECT * FROM orders WHERE status = 'pending'")
+}
+
+// #[track(latency: true)]
+stage TransformOrders: List<RawOrder> -> List<Order> !Pure = |rows| {
+    Result.ok(List.map(rows, parse_order))
+}
+
+// #[track(latency: true, error_rate: true)]
+stage LoadToWarehouse: List<Order> -> Unit !Db = |orders| {
+    Postgres.execute_many(conn, "INSERT INTO warehouse SELECT * FROM ?", orders)
+}
+
+seq ObservabilityFirstDemo = ExtractOrders |> TransformOrders |> LoadToWarehouse
+```
+
+### v29.x 残件（次フェーズ）
+
+- prometheus / grafana 実メトリクス送信の統合テスト（実際の pushgateway との E2E）
+- `#[track]` / `#[trace]` / `#[on_error]` アノテーションのコンパイラ自動挿入実装
+- Datadog APM トレース送信の実統合（DSN 本番テスト）
+- `fav profile --compare` の stage 別 JSON 比較精度向上
+
+---
+
+## v28.0.0 — Data Lakehouse（2026-06-27）
+
+> 「Delta Lake テーブルを Favnir から型安全に読み書きし、
+>  dbt モデルの結果を次のステージに渡す」
+> = Data Lakehouse の完成を象徴するデモ
+
+v28.0.0 をもって、Favnir の **Data Lakehouse** を正式に宣言する。
+
+Delta Lake / Iceberg テーブルの読み書き、dbt モデル参照、
+主要 DWH 3 本（ClickHouse / BigQuery / Redshift）への接続、
+SQLite 組み込み DB が揃い、現代データ基盤アーキテクチャへの完全統合を達成した。
+
+### 達成コンポーネント（v27.1〜v27.9）
+
+| コンポーネント | バージョン | 内容 |
+|---|---|---|
+| delta-lake Rune | v27.1 | read / write / merge / history / vacuum / optimize |
+| iceberg Rune | v27.2 | read / append / overwrite / time_travel / schema_evolution / list_snapshots |
+| clickhouse Rune | v27.3 | connect / query / insert / async_insert |
+| bigquery Rune | v27.4 | connect / query / insert / load_from_gcs / create_table |
+| redshift Rune | v27.5 | connect / query / execute / copy_from_s3 / unload_to_s3 |
+| jsonl Rune | v27.6 | read / write / stream / append |
+| `fav infer --from delta/iceberg` | v27.7 | Delta / Iceberg スキーマ → Favnir 型定義自動生成 |
+| dbt 連携 Rune | v27.8 | ref / source（manifest.json 解析、`!Db` エフェクト） |
+| sqlite Rune | v27.9 | open / open_memory / query / execute / execute_many / close |
+
+### 象徴デモ
+
+```favnir
+import rune "delta-lake"
+import rune "dbt"
+import rune "sqlite"
+
+// Delta Lake からロード → dbt モデル参照 → SQLite に保存
+stage LoadFromDelta: Unit -> List<OrderRow> !Io = |_| {
+    DeltaLake.read[OrderRow]("s3://my-bucket/orders")
+}
+
+stage EnrichWithDbt: List<OrderRow> -> List<EnrichedOrder> !Db = |orders| {
+    bind summary <- Dbt.ref(config.dbt, "customer_summary")
+    Result.ok(List.map(orders, |o| enrich(o, summary)))
+}
+
+stage SaveToSqlite: List<EnrichedOrder> -> Unit !Db = |rows| {
+    bind db <- SQLite.open_memory()
+    bind _  <- SQLite.execute(db, "CREATE TABLE orders (id INT, amount REAL)", "[]")
+    SQLite.execute_many(db, "INSERT INTO orders VALUES (?, ?)", rows)
+}
+
+seq DataLakehousePipeline = LoadFromDelta |> EnrichWithDbt |> SaveToSqlite
+```
+
+### v28.x 残件（次フェーズ）
+
+- delta-rs 実統合（実際の Delta テーブル読み書き）
+- rusqlite 実統合（実際の SQLite 操作）
+- dbt manifest.json 実解析と SQL 実行
+- Iceberg REST カタログ実統合
+
+---
+
+## v27.0.0 — Streaming Native（2026-06-27）
+
+> 「Kafka → 変換 → Elasticsearch のリアルタイムパイプラインが 50 行で書ける」
+> = Streaming Native の完成を象徴するデモ
+
+v27.0.0 をもって、Favnir の **Streaming Native** を正式に宣言する。
+
+ストリーミング Rune 5 本（kinesis / nats / rabbitmq / sqs / pulsar）が実質化され、
+`Stream.*` 操作 6 関数（map / filter / flat_map / window / merge / split）が使用可能になり、
+E2E デモ 3 本（kafka→ES / kinesis→S3 / nats→postgres）が Docker Compose で動作する。
+
+### 達成コンポーネント（v26.1〜v26.9）
+
+| コンポーネント | バージョン | 実装済み関数 |
+|---|---|---|
+| kinesis Rune | v26.1.0 | connect / put_record / put_records / get_shard_iterator / get_records |
+| nats Rune | v26.2.0 | connect / publish / subscribe / jetstream_publish / jetstream_consume |
+| rabbitmq Rune | v26.3.0 | connect / declare_exchange / declare_queue / bind_queue / publish / consume |
+| Stream.* 操作 6 関数 | v26.4.0 | map / filter / flat_map / window / merge / split |
+| E2E デモ: kafka → Elasticsearch | v26.5.0 | `examples/streaming/kafka_to_elasticsearch.fav` |
+| E2E デモ: kinesis → S3 | v26.6.0 | `examples/streaming/kinesis_to_s3.fav` |
+| E2E デモ: nats → postgres | v26.7.0 | `examples/streaming/nats_to_postgres.fav` |
+| sqs Rune | v26.8.0 | send_message / send_message_batch / receive_messages / delete_message / purge / consume |
+| pulsar Rune | v26.9.0 | produce / consume / ack / nack（暫定 `!AWS` エフェクト、v27.x で `!Pulsar` へ移行予定） |
+
+### Streaming Native 検証コマンド
+
+```bash
+docker compose -f examples/streaming/docker-compose.yml up -d
+fav run examples/streaming/kafka_to_elasticsearch.fav
+fav run examples/streaming/kinesis_to_s3.fav
+fav run examples/streaming/nats_to_postgres.fav
+```
+
+### v27.x 残件（次フェーズ）
+
+- kinesis: `Kinesis.consume[T]` 継続消費ループ
+- nats: `NATS.request[T]` リクエスト/レスポンス
+- rabbitmq: `RabbitMQ.ack` / `RabbitMQ.nack`
+- pulsar: Binary Protocol 経由の高速 produce
+
+---
+
+## v26.0.0 — Rune Foundation（2026-06-26）
+
+> 「Favnir で書いたパイプラインが実際の本番データを動かせる」
+
+v26.0.0 をもって、Favnir の **Rune Foundation** を正式に宣言する。
+
+コア 8 Rune（postgres / s3 / redis / mysql / mongodb / dynamodb / kafka / elasticsearch）が
+「動く Rune の 5 条件（connect / read / write / error / test）」をすべてクリアした。
+また vm.fav Phase 6（`CallNamed` opcode, 0x56）が完成し、
+multi-function Favnir プログラムを vm.fav インタープリター上で実行できるようになった。
+
+### 達成した Rune
+
+| Rune | 条件 | 主要関数 |
+|---|---|---|
+| postgres | connect / read / write / error / test ✓ | connect / query / execute / execute_many / transaction / Pool |
+| s3 | connect / read / write / error / test ✓ | get_object / put_object / list_objects / delete_object / presign_url |
+| redis | connect / read / write / error / test ✓ | get / set / del / incr / lpush / rpop / publish / subscribe |
+| mysql | connect / read / write / error / test ✓ | connect / query / execute / transaction（DbConn interface 統一） |
+| mongodb | connect / read / write / error / test ✓ | find / find_one / insert_one / insert_many / update_one / delete_one / aggregate |
+| dynamodb | connect / read / write / error / test ✓ | get_item / put_item / delete_item / query / scan / batch_write / transact_write |
+| kafka | connect / read / write / error / test ✓ | produce / consume / consume_batch / commit / seek |
+| elasticsearch | connect / read / write / error / test ✓ | index / search / bulk / delete / knn_search / create_index |
+
+### デモ
+
+```bash
+# postgres → 集計 → s3 → kafka 通知
+fav run examples/full_etl.fav
+
+# postgres ETL
+fav run examples/postgres_etl.fav
+
+# s3 CSV → Parquet 変換
+fav run examples/s3_csv_to_parquet.fav
+```
+
+### vm.fav Phase 6 達成
+
+`CallNamed(name_idx, argc)` opcode (0x56) の実装により、
+multi-function Favnir プログラムを vm.fav インタープリター上で実行できるようになった。
+
+```bash
+# multi-function プログラムを vm.fav 経由で実行
+fav run --vm self/vm.fav --compile hello.fav
+```

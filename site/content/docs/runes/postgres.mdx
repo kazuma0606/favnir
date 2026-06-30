@@ -104,8 +104,66 @@ stage SaveResult: Result -> Unit = |r| {
 
 ---
 
+## 接続オブジェクト API（v25.1.0）
+
+環境変数ではなく明示的な接続オブジェクト（`PgConn`）を使って接続を管理する API。
+複数の DB や動的な接続先切り替えに対応できる。
+
+### `connect(config)`
+
+```favnir
+import rune "postgres"
+
+-- PgConfig は接続文字列ラッパー
+let cfg = PgConfig("host=localhost port=5432 user=postgres password=secret dbname=mydb sslmode=disable")
+bind conn <- connect(cfg)
+-- 返値: Result<PgConn, String>
+```
+
+| `PgConfig` フィールド | 説明 |
+|---|---|
+| `host` | ホスト名（デフォルト: localhost） |
+| `port` | ポート番号（デフォルト: 5432） |
+| `user` | ユーザー名 |
+| `password` | パスワード |
+| `dbname` | データベース名 |
+| `sslmode` | `disable` / `require`（デフォルト: disable） |
+
+### `execute_many(conn, sql, rows)`
+
+```favnir
+let rows = [["alice", "30"], ["bob", "25"]]
+bind n <- execute_many(conn, "INSERT INTO users(name, age) VALUES ($1, $2)", rows)
+-- 返値: Result<Int, String>（挿入行数）
+```
+
+### `transaction(conn, fn)`
+
+```favnir
+bind result <- transaction<Int>(conn, |tx_conn| {
+    execute_many(tx_conn, "UPDATE users SET age = age + 1 WHERE name = $1", [["alice"]])?;
+    Result.ok(1)
+})
+-- fn が Err を返した場合は自動 ROLLBACK
+```
+
+### `Pool.create(config)` / `Pool.get(pool)` / `Pool.release(pool, conn)`
+
+```favnir
+let pool_cfg = PoolConfig("max_size=10 host=localhost port=5432 user=postgres password=secret dbname=mydb")
+bind pool <- Pool.create(pool_cfg)
+
+bind conn <- Pool.get(pool)
+-- ... 処理 ...
+Pool.release(pool, conn)
+```
+
+---
+
 ## 注意事項
 
-- v20.8 では `sslmode = "disable"` 相当（NoTls）のみ対応。TLS は v20.9 で追加予定。
+- v25.1.0 で接続オブジェクト API（`connect` / `execute_many` / `transaction` / `Pool.create`）を追加。
+- `transaction` のクロージャ内 VM 実行は将来バージョンで完全対応予定（v25.x）。
+- `sslmode=require` で基本 SSL 接続対応。カスタム証明書（クライアント証明書）は未対応。
 - `min_idle` は値を保存するが、v20.8 では prewarming は行わない（v20.9 で実装予定）。
 - プールは `pg_pool_runtime`（専用 multi-thread tokio runtime）上で動作する。

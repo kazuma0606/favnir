@@ -1,0 +1,37 @@
+// pagerduty Rune -- PagerDuty Events API v2 連携（v29.6.0）
+// 接続: PAGERDUTY_ROUTING_KEY / PAGERDUTY_BASE_URL 環境変数
+// NOTE: PAGERDUTY_ROUTING_KEY は HTTP Rune の認証ヘッダー機構が有効化されるまでリクエストには付与されない
+
+// インシデントを作成し、dedup_key を返す
+// severity: "critical" | "error" | "warning" | "info"
+// routing_key: PAGERDUTY_ROUTING_KEY 環境変数が設定されている場合は環境変数を優先。未設定時は routing_key 引数をフォールバックとして使用
+fn PagerDuty.create_incident(routing_key: String, title: String, severity: String, key: String) -> Result<String, String> !Http =
+  Http.post_json(
+    Env.get_or("PAGERDUTY_BASE_URL", "https://events.pagerduty.com") ++ "/v2/enqueue",
+    { "routing_key": Env.get_or("PAGERDUTY_ROUTING_KEY", routing_key), "event_action": "trigger", "dedup_key": key, "payload": { "summary": title, "severity": severity } }
+  )
+
+// インシデントを解決する
+fn PagerDuty.resolve(routing_key: String, incident_key: String) -> Result<Unit, String> !Http =
+  Http.post_json(
+    Env.get_or("PAGERDUTY_BASE_URL", "https://events.pagerduty.com") ++ "/v2/enqueue",
+    { "routing_key": Env.get_or("PAGERDUTY_ROUTING_KEY", routing_key), "event_action": "resolve", "dedup_key": incident_key }
+  )
+
+// インシデントを確認する（対応中マーク）
+fn PagerDuty.acknowledge(routing_key: String, incident_key: String) -> Result<Unit, String> !Http =
+  Http.post_json(
+    Env.get_or("PAGERDUTY_BASE_URL", "https://events.pagerduty.com") ++ "/v2/enqueue",
+    { "routing_key": Env.get_or("PAGERDUTY_ROUTING_KEY", routing_key), "event_action": "acknowledge", "dedup_key": incident_key }
+  )
+
+// インシデントにノートを追加する（プレースホルダー実装）
+// NOTE: PagerDuty Events API v2（/v2/enqueue）はノート追加非対応（REST API が必要）。
+// 現実装は note 内容を summary に埋め込んだ trigger イベントを送信するプレースホルダーとして動作する。
+// dedup_key が一致する既存インシデントがあれば update として処理されるが、新規インシデント扱いになる副作用に注意。
+// Http.patch primitive 実装後に REST API /incidents/{id}/notes へ移行予定。
+fn PagerDuty.add_note(routing_key: String, incident_key: String, note: String) -> Result<Unit, String> !Http =
+  Http.post_json(
+    Env.get_or("PAGERDUTY_BASE_URL", "https://events.pagerduty.com") ++ "/v2/enqueue",
+    { "routing_key": Env.get_or("PAGERDUTY_ROUTING_KEY", routing_key), "event_action": "trigger", "dedup_key": incident_key, "payload": { "summary": note, "severity": "info" } }
+  )

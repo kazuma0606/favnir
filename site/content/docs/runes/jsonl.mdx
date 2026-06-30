@@ -1,0 +1,102 @@
+---
+title: JSONL Rune
+description: JSON Lines の読み書き・ストリーミング処理 Rune（v27.6.0）
+---
+
+# JSONL Rune
+
+`import rune "jsonl"` で JSON Lines（`.jsonl`）ファイルの読み書き・追記・ストリーミング処理ができます。
+
+> **注**: v27.6.0 は引数検証 stub 実装です。実ファイル I/O は v28.x で実装予定です。
+
+## セットアップ
+
+```toml
+# fav.toml
+[runes]
+jsonl = "27.6.0"
+```
+
+```favnir
+import rune "jsonl"
+```
+
+## エフェクト
+
+JSONL はファイル I/O ベースのため `!Io` エフェクトを使用します（DeltaLake / Iceberg / fs と統一）。
+
+## 関数リファレンス
+
+### `JSONL.read`
+
+```favnir
+fn read(path: String) -> Result<String, String> !Io
+```
+
+JSONL ファイルを全件読み込み、JSON 配列文字列として返します。
+
+```favnir
+bind rows <- JSONL.read("data/events.jsonl")
+```
+
+### `JSONL.write`
+
+```favnir
+fn write(path: String, rows: String) -> Result<Unit, String> !Io
+```
+
+JSON 配列文字列を JSONL 形式でファイルに書き込みます（上書き）。追記は `JSONL.append` を使用してください。
+
+```favnir
+bind _ <- JSONL.write("data/processed.jsonl", rows)
+```
+
+### `JSONL.stream`
+
+```favnir
+fn stream(path: String) -> Result<String, String> !Io
+```
+
+ストリーミング読み込み（v27.6.0 は stub。コールバック機構は v28.x で実装予定）。
+
+```favnir
+bind rows <- JSONL.stream("data/large_events.jsonl")
+```
+
+### `JSONL.append`
+
+```favnir
+fn append(path: String, row: String) -> Result<Unit, String> !Io
+```
+
+JSON オブジェクト文字列を JSONL ファイルに 1 行追記します。
+
+```favnir
+bind _ <- JSONL.append("data/events.jsonl", "{\"id\":1,\"event\":\"click\"}")
+```
+
+## パイプライン例
+
+```favnir
+// examples/jsonl_etl.fav
+import rune "jsonl"
+
+stage ReadData: Unit -> Result<String, String> !Io = |_| {
+    JSONL.read("data/events.jsonl")
+}
+
+// seq pipeline は前ステージの成功値（String）を次ステージの引数として渡す
+stage WriteProcessed: String -> Result<Unit, String> !Io = |rows| {
+    JSONL.write("data/processed.jsonl", rows)
+}
+
+seq JsonlEtlPipeline = ReadData |> WriteProcessed
+```
+
+## スコープ外（v28.x 以降）
+
+- `JSONL.read[T]` ジェネリック API（型安全な行取得）
+- `JSONL.stream[T](path, fn)` コールバック機構（1 行ずつ変換・フィルタ）
+- `JSONL.write` の append / overwrite モードオプション
+- `Stream.*` との統合（ストリーミングパイプライン）
+- gzip 圧縮 JSONL（`.jsonl.gz`）サポート

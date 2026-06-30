@@ -1,0 +1,14 @@
+// runes/postgres/db_conn.fav — DbConn interface (v25.1.0)
+// Postgres / MySQL など共通の接続インターフェース。
+// DbRead / DbWrite と組み合わせて使う。
+//
+// PgConn は DbConn の具体実装として機能する。
+// postgres_db.fav の PostgresDb 型が既存の DbRead / DbWrite impl を提供しており、
+// DbConn の各メソッドは client.fav の execute_conn / execute_many / query_conn / transaction が対応する。
+
+interface DbConn {
+    fn query<T>(sql: String, params: List<String>) -> Result<List<T>, String>
+    fn execute(sql: String, params: List<String>) -> Result<Int, String>
+    fn execute_many(sql: String, rows: List<List<String>>) -> Result<Int, String>
+    fn transaction<T>(action: (DbConn) -> Result<T, String>) -> Result<T, String>
+}

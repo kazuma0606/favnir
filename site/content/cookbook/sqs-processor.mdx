@@ -1,0 +1,19 @@
+# SQS メッセージ処理
+
+AWS SQS キューからメッセージをポーリングし、処理後に削除するパイプラインです。
+
+```favnir
+import runes/sqs
+
+stage ProcessSQSMessages: Unit -> Int !Http = |_| {
+  bind msgs    <- SQS.receive_messages(config.sqs_queue_url, 10)
+  bind results <- msgs |> List.map(process_message) |> Result.all
+  bind _       <- msgs |> List.map(|m| SQS.delete_message(config.sqs_queue_url, m.receipt_handle)) |> Result.all
+  Result.ok(List.length(results))
+}
+```
+
+## 関連 Rune
+
+- [SQS](/docs/runes/sqs) — AWS SQS キュー
+- [PagerDuty](/docs/runes/pagerduty) — 処理失敗時のアラート

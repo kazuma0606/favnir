@@ -1144,7 +1144,47 @@ fn ns_to_effect(ns: String) -> String {
                                                         if ns == "Debug" {
                                                             "IO"
                                                         } else {
-                                                            ""
+                                                            if ns == "ClickHouse" {
+                                                                "Db"
+                                                            } else {
+                                                                if ns == "Redshift" {
+                                                                    "Db"
+                                                                } else {
+                                                                    if ns == "JSONL" {
+                                                                        "IO"
+                                                                    } else {
+                                                                        if ns == "Dbt" {
+                                                                            "Db"
+                                                                        } else {
+                                                                            if ns == "SQLite" {
+                                                                                "Db"
+                                                                            } else {
+                                                                                if ns == "Prometheus" {
+                                                                                    "IO"
+                                                                                } else {
+                                                                                    if ns == "Datadog" {
+                                                                                        "IO"
+                                                                                    } else {
+                                                                                        if ns == "OTel" {
+                                                                                            "IO"
+                                                                                        } else {
+                                                                                            if ns == "Sentry" {
+                                                                                                "IO"
+                                                                                            } else {
+                                                                                                if ns == "Grafana" {
+                                                                                                    "IO"
+                                                                                                } else {
+                                                                                                    ""
+                                                                                                }
+                                                                                            }
+                                                                                        }
+                                                                                    }
+                                                                                }
+                                                                            }
+                                                                        }
+                                                                    }
+                                                                }
+                                                            }
                                                         }
                                                     }
                                                 }

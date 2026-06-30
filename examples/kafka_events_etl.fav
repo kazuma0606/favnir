@@ -1,0 +1,20 @@
+import rune "kafka"
+
+// ── Kafka を使ったイベント ETL デモ (v25.7.0) ─────────────────────────────────
+// 前提: docker run -p 9092:9092 redpandadata/redpanda:latest \
+//           redpanda start --overprovisioned --node-id 0 \
+//           --kafka-addr 0.0.0.0:9092 --advertise-kafka-addr localhost:9092
+// 実行: fav run examples/kafka_events_etl.fav
+
+stage PublishEvent: String -> Result<Unit, String> !Stream = |event_json| {
+    bind conn <- Kafka.connect("localhost:9092")
+    bind _    <- Kafka.create_topic(conn, "events", 1)
+    Kafka.produce(conn, "events", "event-key", event_json)
+}
+
+stage ConsumeEvents: Unit -> Result<String, String> !Stream = |_| {
+    bind conn <- Kafka.connect("localhost:9092")
+    Kafka.consume_batch(conn, "events", "etl-group", 10)
+}
+
+seq EventsETL = PublishEvent |> ConsumeEvents

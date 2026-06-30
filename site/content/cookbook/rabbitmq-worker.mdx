@@ -1,0 +1,19 @@
+# RabbitMQ ワーカーパイプライン
+
+RabbitMQ キューからタスクを取得し、処理結果を別キューに送信するワーカーパイプラインです。
+
+```favnir
+import runes/rabbitmq
+
+stage ProcessRabbitMQTask: Unit -> Unit !Stream = |_| {
+  bind conn <- RabbitMQ.connect(config.rabbitmq_url)
+  bind msg  <- RabbitMQ.consume(conn, config.task_queue)
+  bind task <- RabbitMQ.decode[Task](msg)
+  bind result <- process_task(task)
+  RabbitMQ.publish(conn, config.result_queue, result)
+}
+```
+
+## 関連 Rune
+
+- [RabbitMQ](/docs/runes/rabbitmq) — RabbitMQ メッセージブローカー

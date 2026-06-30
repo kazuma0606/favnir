@@ -1,6 +1,45 @@
-// runes/dynamodb/dynamodb.fav — AWS DynamoDB Rune (v24.5.0)
+// runes/dynamodb/dynamodb.fav — AWS DynamoDB Rune (v25.6.0)
 //
 // 使い方:
 //   import rune "dynamodb"
 //
-// NOTE: このスタブは v24.5.0 で追加。完全実装は v25.x 以降で対応予定。
+// 接続:
+//   "" または "default" → AWS_ENDPOINT_URL → LOCALSTACK_ENDPOINT → AWS 本番
+//   "http://localhost:4566" → LocalStack
+
+// 接続エンドポイント URL ラッパー型
+type DynamoConn(String)
+
+// "" または "default" → AWS 本番（AWS_ENDPOINT_URL / LOCALSTACK_ENDPOINT 環境変数を参照）
+// "http://localhost:4566" → LocalStack
+public fn connect(endpoint: String) -> Result<DynamoConn, String> !DynamoDB {
+    DynamoDB.connect_raw(endpoint)
+}
+
+public fn get_item(conn: DynamoConn, table: String, key_json: String) -> Result<String, String> !DynamoDB {
+    DynamoDB.get_item_raw(conn, table, key_json)
+}
+
+public fn put_item(conn: DynamoConn, table: String, item_json: String) -> Result<Unit, String> !DynamoDB {
+    DynamoDB.put_item_raw(conn, table, item_json)
+}
+
+public fn delete_item(conn: DynamoConn, table: String, key_json: String) -> Result<Unit, String> !DynamoDB {
+    DynamoDB.delete_item_raw(conn, table, key_json)
+}
+
+public fn query(conn: DynamoConn, table: String, key_cond: String, attr_vals_json: String) -> Result<String, String> !DynamoDB {
+    DynamoDB.query_raw(conn, table, key_cond, attr_vals_json)
+}
+
+public fn scan(conn: DynamoConn, table: String, filter_json: String) -> Result<String, String> !DynamoDB {
+    DynamoDB.scan_raw(conn, table, filter_json)
+}
+
+public fn batch_write(conn: DynamoConn, table: String, puts_json: String) -> Result<Int, String> !DynamoDB {
+    DynamoDB.batch_write_raw(conn, table, puts_json)
+}
+
+public fn transact_write(conn: DynamoConn, ops_json: String) -> Result<Unit, String> !DynamoDB {
+    DynamoDB.transact_write_raw(conn, ops_json)
+}

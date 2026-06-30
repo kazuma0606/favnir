@@ -43,3 +43,17 @@ public fn s3_delete(ctx: String, key: String) -> Result<Unit, String> !AWS {
 public fn s3_list(ctx: String, prefix: String) -> Result<List<String>, String> !AWS {
     AWS.s3_list_objects_raw(Ctx.aws_get_field_raw(ctx, "s3_bucket"), prefix)
 }
+
+// ── v25.2.0 additions ─────────────────────────────────────────────────────────
+
+// presign_url — 署名付き URL を生成する（GET 操作用。PUT 対応は v25.x 以降）
+// ttl_secs: URL の有効期間（秒）例: 3600 = 1時間
+public fn presign_url(bucket: String, key: String, ttl_secs: Int) -> Result<String, String> !AWS {
+    AWS.s3_presign_url_raw(bucket, key, ttl_secs)
+}
+
+// stream_get — 大容量オブジェクトのストリーミング取得
+// 現バージョンでは get_object と同等の動作（将来 Stream<Bytes> 対応予定）
+public fn stream_get(bucket: String, key: String) -> Result<String, String> !AWS {
+    AWS.s3_stream_get_raw(bucket, key)
+}

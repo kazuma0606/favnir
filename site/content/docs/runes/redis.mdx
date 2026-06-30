@@ -1,0 +1,165 @@
+---
+title: Redis Rune
+description: 外部 Redis サービスへの接続・KV 操作・リスト・Pub/Sub（v25.3.0）
+---
+
+# Redis Rune
+
+`import rune "redis"` で利用できる Redis クライアント Rune です。
+インメモリの `!Cache` エフェクトとは独立した外部 Redis 専用 Rune です。
+
+## セットアップ
+
+```bash
+# Docker でローカル Redis を起動
+docker run -p 6379:6379 redis:7
+```
+
+## 型定義
+
+```favnir
+// 接続 URL ラッパー型（"redis://host:port/db" 形式）
+type RedisConn(String)
+```
+
+## API リファレンス
+
+### 接続
+
+#### `Redis.connect`
+
+```favnir
+public fn connect(url: String) -> Result<RedisConn, String> !Redis
+```
+
+接続 URL から `RedisConn` を作成します。接続確立時に PING で疎通確認を行います。
+
+```favnir
+bind conn <- Redis.connect("redis://localhost:6379/0")
+```
+
+---
+
+### 基本 KV 操作
+
+#### `Redis.get`
+
+```favnir
+public fn get(conn: RedisConn, key: String) -> Result<String, String> !Redis
+```
+
+指定したキーの値を取得します。キーが存在しない場合は `Result.err("nil")` を返します。
+
+#### `Redis.set`
+
+```favnir
+public fn set(conn: RedisConn, key: String, value: String, ttl_secs: Int) -> Result<Unit, String> !Redis
+```
+
+値を設定します。`ttl_secs = 0` で無期限（EX なし）、`> 0` で TTL 付き SET になります。
+
+**注意**: `value` は `String` 型です。`Int` を渡す場合は `String.from_int(n)` で変換してください。
+
+#### `Redis.del`
+
+```favnir
+public fn del(conn: RedisConn, key: String) -> Result<Int, String> !Redis
+```
+
+キーを削除します。戻り値は削除した件数です。
+
+#### `Redis.incr`
+
+```favnir
+public fn incr(conn: RedisConn, key: String) -> Result<Int, String> !Redis
+```
+
+キーの値をインクリメントします。キーが存在しない場合は 1 から始まります。カウンタ・レート制限用途に便利です。
+
+---
+
+### リスト操作
+
+#### `Redis.lpush`
+
+```favnir
+public fn lpush(conn: RedisConn, key: String, value: String) -> Result<Int, String> !Redis
+```
+
+リストの先頭に値を追加します。戻り値はリスト長です。
+
+#### `Redis.rpop`
+
+```favnir
+public fn rpop(conn: RedisConn, key: String) -> Result<String, String> !Redis
+```
+
+リストの末尾から値を取り出します。リストが空の場合は `Result.err("nil")` を返します。
+
+---
+
+### Pub/Sub
+
+#### `Redis.publish`
+
+```favnir
+public fn publish(conn: RedisConn, channel: String, msg: String) -> Result<Int, String> !Redis
+```
+
+チャンネルにメッセージを送信します。戻り値は受信者数です。
+
+#### `Redis.subscribe_once`
+
+```favnir
+public fn subscribe_once(conn: RedisConn, channel: String) -> Result<String, String> !Redis
+```
+
+チャンネルから**メッセージを 1 件受信**します（ブロッキング）。
+
+- タイムアウト: **30 秒**
+- タイムアウト時の戻り値: `Result.err("timeout: no message received within 30s")`
+
+> **注意**: コールバックループ型の `subscribe(conn, channel, fn)` は将来バージョンで別関数として追加予定です（v25.x 以降）。
+
+---
+
+## エフェクト
+
+`!Redis` エフェクトが必要です。エフェクトなしで呼び出すと **E0320** エラーになります。
+
+```favnir
+// 正しい例
+public fn get_value(key: String) -> Result<String, String> !Redis {
+    bind conn <- Redis.connect("redis://localhost:6379/0")
+    Redis.get(conn, key)
+}
+```
+
+---
+
+## 使用例: レート制限
+
+```favnir
+import rune "redis"
+
+type RateResult = { allowed: Bool, count: Int }
+
+stage CheckRateLimit: String -> RateResult !Redis = |user_id| {
+    bind conn  <- Redis.connect("redis://localhost:6379/0")
+    bind key   <- Result.ok("rate:" + user_id)
+    bind count <- Redis.incr(conn, key)
+    bind _     <- Redis.set(conn, key, String.from_int(count), 60)
+    Result.ok({ allowed: count <= 10, count: count })
+}
+```
+
+---
+
+## `!Cache` との違い
+
+| | `!Cache` | `!Redis` |
+|---|---|---|
+| 実装 | インメモリ（プロセス内） | 外部 Redis サーバー |
+| 永続化 | なし | あり（Redis 設定次第） |
+| Pub/Sub | なし | あり |
+| 用途 | テスト・軽量キャッシュ | 本番キャッシュ・セッション・メッセージング |

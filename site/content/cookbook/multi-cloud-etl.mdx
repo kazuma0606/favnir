@@ -1,0 +1,32 @@
+# マルチクラウド ETL（S3 + GCS + Azure）
+
+AWS S3・Google Cloud Storage・Azure Blob Storage を横断するマルチクラウド ETL パイプラインです。
+
+```favnir
+import runes/aws/s3
+import runes/azure-blob
+
+// S3 から読み込み → 変換 → Azure Blob に書き込み
+seq MultiCloudETL =
+  ExtractFromS3
+  |> TransformData
+  |> WriteToAzureBlob
+
+stage ExtractFromS3: Unit -> List<Row> !Http = |_| {
+  bind data <- S3.get_object(config.aws_bucket, config.source_key)
+  CSV.parse[Row](data)
+}
+
+stage WriteToAzureBlob: List<Row> -> Unit !Http = |rows| {
+  AzureBlob.put(config.azure_ctx, config.dest_key, CSV.encode(rows))
+}
+```
+
+> **注意（GCS）**: GCS Rune（`runes/gcs`）は現在スタブ実装です（v24.5.0 追加、完全実装は v25.x 以降予定）。GCS への書き込みは実装完了後に追加できます。
+
+> **注意（Azure）**: `config.azure_ctx` は `Ctx.build_azure_raw` で生成した JSON 文字列（`storage_account` / `storage_key` / `container` フィールドを含む）です。
+
+## 関連 Rune
+
+- [S3](/docs/runes/s3) — AWS S3
+- [Azure Blob](/docs/runes/azure-blob) — Azure Blob Storage

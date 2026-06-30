@@ -1,121 +1,167 @@
 ---
 title: Kafka Rune
-description: AWS MSK / Apache Kafka をネイティブに操作する Rune（v15.4.0）
+description: Apache Kafka / AWS MSK / Redpanda に接続する Rune（v25.7.0）
 ---
 
 # Kafka Rune
 
-`!Stream` エフェクトで AWS MSK（Managed Streaming for Apache Kafka）や
-Apache Kafka にアクセスできます。
-SASL/SCRAM-SHA-512 認証に対応しています。
+`import rune "kafka"` で Apache Kafka（または Redpanda / AWS MSK）に接続できます。`!Stream` エフェクトが必要です。
 
 ## セットアップ
 
-### 環境変数
-
-| 変数 | 説明 |
-|---|---|
-| `KAFKA_BOOTSTRAP_BROKERS` | ブローカーアドレス（カンマ区切り、例: `b-1.msk.example.com:9096`） |
-| `KAFKA_SASL_USERNAME` | SASL/SCRAM 認証ユーザー名（省略可）|
-| `KAFKA_SASL_PASSWORD` | SASL/SCRAM 認証パスワード（省略可）|
-
-### fav.toml 設定
-
-```toml
-[kafka]
-bootstrap_brokers = "${KAFKA_BOOTSTRAP_BROKERS}"
-sasl_mechanism    = "SCRAM-SHA-512"
-sasl_username     = "${KAFKA_SASL_USERNAME}"
-sasl_password     = "${KAFKA_SASL_PASSWORD}"
+```bash
+docker run -p 9092:9092 redpandadata/redpanda:latest \
+    redpanda start --overprovisioned --node-id 0 \
+    --kafka-addr 0.0.0.0:9092 --advertise-kafka-addr localhost:9092
 ```
 
-## インポート
+Redpanda はローカル開発用の Kafka 互換ブローカーです。AWS MSK / Confluent Cloud にも同じ API で接続できます。
 
-```fav
-import rune "kafka"
-```
+> **接続モデル（v25.7.0）**: 各 `Kafka.connect` 呼び出しのたびに `list_topics` ping を送信します。コネクションプールは v26.x で対応予定。
 
-## 関数リファレンス
-
-### `kafka.produce`
-
-```fav
-fn produce(topic: String, key: String, value: String) -> Result<Unit, String> !Stream
-```
-
-指定した topic にメッセージを produce します。
-
-```fav
-fn send_event(event_id: String, payload: String) -> Result<Unit, String> !Stream {
-  kafka.produce("my-topic", event_id, payload)
-}
-```
-
-### `kafka.consume_one`
-
-```fav
-fn consume_one(topic: String, group_id: String) -> Result<String, String> !Stream
-```
-
-指定した topic から最新のメッセージを 1 件 consume します。
-
-```fav
-fn receive_event() -> Result<String, String> !Stream {
-  kafka.consume_one("my-topic", "my-consumer-group")
-}
-```
-
-## VM プリミティブ
-
-低レベル API として以下のプリミティブが利用可能です:
-
-| プリミティブ | シグネチャ | 説明 |
-|---|---|---|
-| `Kafka.produce_raw` | `(brokers, topic, key, value) -> Result<Unit, String>` | メッセージを produce |
-| `Kafka.consume_one_raw` | `(brokers, topic, group_id) -> Result<String, String>` | 最新メッセージを 1 件 consume |
+環境変数:
+- `KAFKA_BOOTSTRAP_BROKERS` — カンマ区切りのブローカーアドレス（例: `localhost:9092`）
+- `KAFKA_SASL_USERNAME` / `KAFKA_SASL_PASSWORD` — SASL/SCRAM-SHA-512 認証（省略可）
 
 ## `!Stream` エフェクト
 
-Kafka プリミティブを使う関数には `!Stream` エフェクト宣言が必要です。
-宣言がない場合は **E0319** エラーが発生します。
+`!Stream` は外部 Kafka/ストリーミング操作を明示するエフェクトです。宣言がない場合は **E0319** エラーが発生します。
 
-```fav
-// ✓ 正しい
-fn my_producer(msg: String) -> Result<Unit, String> !Stream {
-  kafka.produce("events", "key-1", msg)
+```favnir
+stage PublishEvent: String -> Result<Unit, String> !Stream = |event_json| {
+    bind conn <- Kafka.connect("localhost:9092")
+    Kafka.produce(conn, "events", "event-key", event_json)
+}
+```
+
+## API リファレンス
+
+### `Kafka.connect`
+
+```favnir
+fn connect(brokers: String) -> Result<KafkaConn, String> !Stream
+```
+
+ブローカーへの接続確認（`list_topics` ping）を行い、`KafkaConn` を返します。
+
+- `""` → `KAFKA_BOOTSTRAP_BROKERS` 環境変数 → `"localhost:9092"`
+- それ以外 → 指定文字列をそのまま使用
+
+```favnir
+bind conn <- Kafka.connect("localhost:9092")
+```
+
+---
+
+### `Kafka.produce`
+
+```favnir
+fn produce(conn: KafkaConn, topic: String, key: String, value: String) -> Result<Unit, String> !Stream
+```
+
+指定トピックにメッセージを produce します（partition 0 固定）。
+
+```favnir
+bind _ <- Kafka.produce(conn, "events", "user-123", "{\"type\": \"signup\"}")
+```
+
+---
+
+### `Kafka.consume_one`
+
+```favnir
+fn consume_one(conn: KafkaConn, topic: String, group_id: String) -> Result<String, String> !Stream
+```
+
+トピックの最新オフセットから 1 件取得します。
+
+- トピックが空の場合: `Result.err("Kafka.consume_one_raw: topic is empty")`
+
+> **注意**: `group_id` は rskafka v0.6 の制約により現時点では未使用です（v26.x で Consumer Group 実装予定）。
+
+```favnir
+bind msg <- Kafka.consume_one(conn, "events", "my-group")
+```
+
+---
+
+### `Kafka.consume_batch`
+
+```favnir
+fn consume_batch(conn: KafkaConn, topic: String, group_id: String, max_count: Int) -> Result<String, String> !Stream
+```
+
+最新オフセットから最大 `max_count` 件のメッセージ payload を JSON 配列文字列で返します。
+
+- トピックが空の場合: `Result.ok("[]")`
+- 戻り値例: `"[\"msg1\", \"msg2\", \"msg3\"]"`
+
+> **注意**: `group_id` は rskafka v0.6 の制約により現時点では未使用です（v26.x で Consumer Group 実装予定）。
+
+```favnir
+bind msgs_json <- Kafka.consume_batch(conn, "events", "etl-group", 10)
+```
+
+---
+
+### `Kafka.create_topic`
+
+```favnir
+fn create_topic(conn: KafkaConn, topic: String, partitions: Int) -> Result<Unit, String> !Stream
+```
+
+トピックを作成します（partition 数指定、replication factor 1）。
+
+- トピックが既に存在する場合はエラーを返します。
+
+```favnir
+bind _ <- Kafka.create_topic(conn, "events", 3)
+```
+
+---
+
+## VM プリミティブ（低レベル API）
+
+| プリミティブ | 引数 | 戻り値 |
+|---|---|---|
+| `Kafka.connect_raw` | `brokers: String` | `Result<String, String>` |
+| `Kafka.produce_raw` | `brokers, topic, key, value: String` | `Result<Unit, String>` |
+| `Kafka.consume_one_raw` | `brokers, topic, group_id: String` | `Result<String, String>` |
+| `Kafka.consume_batch_raw` | `brokers, topic: String, max_count: Int` | `Result<String, String>`（JSON 配列） |
+| `Kafka.create_topic_raw` | `brokers, topic: String, partitions: Int` | `Result<Unit, String>` |
+
+## スコープ外（v25.7.0）
+
+- Consumer Group オフセット管理（`commit` / `seek`）— rskafka v0.6 は Consumer Group プロトコル未対応
+- スキーマレジストリ（Avro / Protobuf デシリアライズ）
+- Exactly-Once Semantics（EOS / transactional producer）
+- 複数 partition のラウンドロビン送信（partition 0 固定）
+
+## 使用例
+
+```favnir
+import rune "kafka"
+
+stage PublishEvent: String -> Result<Unit, String> !Stream = |event_json| {
+    bind conn <- Kafka.connect("localhost:9092")
+    bind _    <- Kafka.create_topic(conn, "events", 1)
+    Kafka.produce(conn, "events", "event-key", event_json)
 }
 
-// ✗ E0319: Kafka.* call requires `!Stream` effect on enclosing fn/stage
-fn bad_producer(msg: String) -> Result<Unit, String> {
-  kafka.produce("events", "key-1", msg)
+stage ConsumeEvents: Unit -> Result<String, String> !Stream = |_| {
+    bind conn <- Kafka.connect("localhost:9092")
+    Kafka.consume_batch(conn, "events", "etl-group", 10)
 }
+
+seq EventsETL = PublishEvent |> ConsumeEvents
 ```
 
 ## AWS MSK との接続
 
-AWS MSK（Provisioned）では SASL/SCRAM-SHA-512 認証を推奨します:
+SASL/SCRAM-SHA-512 認証:
 
-```toml
-[kafka]
-bootstrap_brokers = "b-1.msk.ap-northeast-1.amazonaws.com:9096,b-2.msk.ap-northeast-1.amazonaws.com:9096"
-sasl_mechanism    = "SCRAM-SHA-512"
-sasl_username     = "${MSK_USERNAME}"
-sasl_password     = "${MSK_PASSWORD}"
+```bash
+export KAFKA_BOOTSTRAP_BROKERS="b-1.msk.ap-northeast-1.amazonaws.com:9096,b-2.msk.ap-northeast-1.amazonaws.com:9096"
+export KAFKA_SASL_USERNAME="your-username"
+export KAFKA_SASL_PASSWORD="your-password"
 ```
-
-MSK の SASL 認証情報は AWS Secrets Manager で管理し、
-ECS / Lambda の環境変数として注入することを推奨します。
-
-## E2E デモ
-
-`infra/e2e-demo/kafka/` に 4-stage パイプラインのデモがあります:
-
-```
-GenerateEvents |> ProduceToKafka |> ConsumeFromKafka |> VerifyResult
-```
-
-Terraform で AWS MSK クラスター（`kafka.t3.small` × 2）を構築し、
-実際の produce → consume ラウンドトリップを確認できます。
-
-> **注意**: MSK Provisioned クラスターは常時課金されます。
-> デモ完了後は必ず `terraform destroy` を実行してください。

@@ -1,0 +1,17 @@
+# Delta Lake Upsert パイプライン
+
+Delta Lake テーブルへの upsert（merge）操作をパイプラインとして実装します。
+
+```favnir
+import runes/delta-lake
+
+stage UpsertOrders: List<Order> -> Unit !Http = |orders| {
+  bind table <- DeltaLake.open(config.delta_table_path)
+  DeltaLake.merge(table, orders, "target.id = source.id")
+}
+```
+
+## 関連 Rune
+
+- [Delta Lake](/docs/runes/delta-lake) — Delta Lake テーブル操作
+- [S3](/docs/runes/s3) — Delta Lake バックストレージ

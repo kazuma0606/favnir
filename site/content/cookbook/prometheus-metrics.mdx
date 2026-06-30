@@ -1,0 +1,27 @@
+# Prometheus メトリクス送信
+
+Favnir パイプラインの実行メトリクスを Prometheus Pushgateway に送信します。
+
+```favnir
+import runes/prometheus
+
+stage RecordPipelineMetrics: PipelineResult -> Unit !Http = |result| {
+  bind _ <- Prometheus.push_gauge(
+    config.prometheus_url,
+    "pipeline_rows_processed",
+    Float.from_int(result.row_count),
+    { "pipeline": result.name, "status": "success" }
+  )
+  Prometheus.push_gauge(
+    config.prometheus_url,
+    "pipeline_duration_seconds",
+    result.duration_ms / 1000.0,
+    { "pipeline": result.name }
+  )
+}
+```
+
+## 関連 Rune
+
+- [Prometheus](/docs/runes/prometheus) — Prometheus メトリクス
+- [Grafana](/docs/runes/grafana) — メトリクス可視化

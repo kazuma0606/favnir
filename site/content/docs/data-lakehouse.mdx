@@ -1,0 +1,93 @@
+# Data Lakehouse
+
+**宣言日**: 2026-06-27
+**宣言バージョン**: v28.0.0
+
+---
+
+## 宣言
+
+> 「Delta Lake テーブルを Favnir から型安全に読み書きし、
+>  dbt モデルの結果を次のステージに渡す」
+> = Data Lakehouse の完成を象徴するデモ
+
+v28.0.0 をもって、Favnir の **Data Lakehouse** マイルストーンを正式に宣言します。
+
+現代のデータ基盤の中心は「データレイクハウス」です。
+Delta Lake / Apache Iceberg がデータレイクの標準になり、
+dbt がデータ変換の標準ツールとして普及しています。
+このマイルストーンで Favnir は現代データ基盤アーキテクチャに完全に統合されました。
+
+---
+
+## 達成コンポーネント
+
+| Rune / 機能 | バージョン | 内容 |
+|---|---|---|
+| delta-lake Rune | v27.1 | Delta テーブル読み書き（read / write / merge / history / vacuum / optimize） |
+| iceberg Rune | v27.2 | Iceberg テーブル操作（read / append / overwrite / time_travel / schema_evolution / list_snapshots） |
+| clickhouse Rune | v27.3 | ClickHouse 列指向 DB（connect / query / insert / async_insert） |
+| bigquery Rune | v27.4 | Google BigQuery（connect / query / insert / load_from_gcs / create_table） |
+| redshift Rune | v27.5 | AWS Redshift（connect / query / copy_from_s3 / unload_to_s3） |
+| jsonl Rune | v27.6 | JSON Lines（read / write / stream / append） |
+| `fav infer --from delta` | v27.7 | Delta Lake スキーマ → Favnir 型定義自動生成 |
+| `fav infer --from iceberg` | v27.7 | Iceberg スキーマ → Favnir 型定義自動生成 |
+| dbt 連携 Rune | v27.8 | dbt モデル参照（ref / source、manifest.json 解析） |
+| sqlite Rune | v27.9 | SQLite 組み込み DB（open / open_memory / query / execute / execute_many / close） |
+
+---
+
+## Data Lakehouse の定義
+
+本プロジェクト固有の定義:
+
+> 「Delta Lake / Iceberg テーブルの読み書きができ、dbt モデルを参照でき、
+>  主要 DWH 3 本（BigQuery / Redshift / ClickHouse）に接続できる」状態
+
+---
+
+## 象徴デモ
+
+```favnir
+import rune "delta-lake"
+import rune "dbt"
+import rune "sqlite"
+
+stage LoadFromDelta: Unit -> List<OrderRow> !Io = |_| {
+    DeltaLake.read[OrderRow]("s3://my-bucket/orders")
+}
+
+stage EnrichWithDbt: List<OrderRow> -> List<EnrichedOrder> !Db = |orders| {
+    bind summary <- Dbt.ref(config.dbt, "customer_summary")
+    Result.ok(List.map(orders, |o| enrich(o, summary)))
+}
+
+stage SaveToSqlite: List<EnrichedOrder> -> Unit !Db = |rows| {
+    bind db <- SQLite.open_memory()
+    bind _  <- SQLite.execute(db, "CREATE TABLE orders (id INT, amount REAL)", "[]")
+    SQLite.execute_many(db, "INSERT INTO orders VALUES (?, ?)", rows)
+}
+
+seq DataLakehousePipeline = LoadFromDelta |> EnrichWithDbt |> SaveToSqlite
+```
+
+---
+
+## v28.x ロードマップ
+
+| 項目 | 内容 |
+|---|---|
+| delta-rs 実統合 | 実際の Delta テーブル読み書き（`delta-rs` クレート） |
+| rusqlite 実統合 | 実際の SQLite 操作（`rusqlite --features bundled`） |
+| dbt manifest.json 実解析 | compiled SQL 抽出と実行 |
+| Iceberg REST カタログ実統合 | Apache Iceberg Rust 実装との統合 |
+
+---
+
+## 関連ドキュメント
+
+- `MILESTONE.md` — マイルストーン宣言の全文（リポジトリルートに配置）
+- [delta-lake Rune](./runes/delta-lake.mdx)
+- [iceberg Rune](./runes/iceberg.mdx)
+- [dbt Rune](./runes/dbt.mdx)
+- [sqlite Rune](./runes/sqlite.mdx)

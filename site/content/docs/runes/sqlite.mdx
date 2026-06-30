@@ -1,0 +1,101 @@
+# SQLite Rune
+
+依存ゼロ・ローカル動作の組み込み DB SQLite を Favnir から型安全に操作する。
+ローカル開発・軽量 ETL・テスト用 DB として広く使われる。
+Favnir のテスト基盤（MockDb の代替）としても有用。
+
+> **v27.9.0 stub**: 実際の SQLite 操作（`rusqlite` クレート統合）は v28.x に実装予定。
+> 現バージョンでは引数検証のみ行い、固定値を返す。
+
+## インポート
+
+```favnir
+import rune "sqlite"
+```
+
+## 関数
+
+### `open(path)`
+
+DB ファイルを開く（なければ作成）。
+
+```favnir
+bind db <- SQLite.open("./output.db")
+```
+
+### `open_memory()`
+
+インメモリ DB を開く（テスト用）。引数なし。
+
+```favnir
+bind db <- SQLite.open_memory()
+```
+
+### `query(db, sql, params)`
+
+型付きクエリ（SELECT）。結果を JSON 配列文字列で返す。
+
+```favnir
+bind rows <- SQLite.query(db, "SELECT * FROM data WHERE id = ?", "[1]")
+```
+
+### `execute(db, sql, params)`
+
+DDL / DML を実行し、影響行数（`Int`）を返す。
+
+```favnir
+bind n <- SQLite.execute(db, "INSERT INTO data VALUES (?, ?)", "[1, \"test\"]")
+```
+
+### `execute_many(db, sql, rows)`
+
+バッチ実行。複数行をまとめて挿入・更新する。
+
+```favnir
+bind n <- SQLite.execute_many(db, "INSERT INTO data VALUES (?, ?)", "[[1,\"a\"],[2,\"b\"]]")
+```
+
+### `close(db)`
+
+DB クローズ。
+
+```favnir
+bind _ <- SQLite.close(db)
+```
+
+## エフェクト
+
+`!Db` — SQLite はデータベース操作のため。
+
+## 使用例
+
+```favnir
+import rune "sqlite"
+
+stage CreateTable: Unit -> Result<Unit, String> !Db = |_| {
+    bind db <- SQLite.open(":memory:")
+    bind _  <- SQLite.execute(db, "CREATE TABLE data (id INT, name TEXT)", "[]")
+    Result.ok(unit)
+}
+
+seq SqliteEtlPipeline = CreateTable
+```
+
+## API リファレンス
+
+| 関数 | シグネチャ | 説明 |
+|---|---|---|
+| `open` | `String -> Result<String, String> !Db` | DB ファイルを開く |
+| `open_memory` | `Unit -> Result<String, String> !Db` | インメモリ DB を開く |
+| `query` | `(String, String, String) -> Result<String, String> !Db` | SELECT クエリ |
+| `execute` | `(String, String, String) -> Result<Int, String> !Db` | DDL / DML 実行 |
+| `execute_many` | `(String, String, String) -> Result<Int, String> !Db` | バッチ実行 |
+| `close` | `String -> Result<Unit, String> !Db` | DB クローズ |
+
+## v28.x 以降の予定
+
+- `rusqlite --features bundled` を使った実 SQLite 操作
+- `SQLite.query[T]` の型パラメータによるデシリアライズ
+- `SQLite.execute_many` でのバッチトランザクション最適化
+- `NULL` 値 / `BLOB` 型の Favnir 型マッピング
+- WAL モード設定（`PRAGMA journal_mode=WAL`）

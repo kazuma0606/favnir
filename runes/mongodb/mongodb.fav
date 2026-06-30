@@ -1,6 +1,45 @@
-// runes/mongodb/mongodb.fav — MongoDB Rune (v24.5.0)
+// runes/mongodb/mongodb.fav — MongoDB Rune (v25.5.0)
 //
 // 使い方:
 //   import rune "mongodb"
 //
-// NOTE: このスタブは v24.5.0 で追加。完全実装は v25.x 以降で対応予定。
+// 接続 URL 形式: "mongodb://user:pass@host:port/dbname"
+// データベース名は URL パスから自動抽出される。
+// !MongoDB エフェクトが必要（E0322: 未宣言エラー）。
+//
+// 接続モデル: 各関数呼び出しのたびに新規接続を確立する。
+// コネクションプールは v26.x で対応予定。
+
+type MongoConn(String)
+
+public fn connect(url: String) -> Result<MongoConn, String> !MongoDB {
+    Mongo.connect_raw(url)
+}
+
+public fn find(conn: MongoConn, coll: String, filter: String) -> Result<String, String> !MongoDB {
+    Mongo.find_raw(conn, coll, filter)
+}
+
+public fn find_one(conn: MongoConn, coll: String, filter: String) -> Result<String, String> !MongoDB {
+    Mongo.find_one_raw(conn, coll, filter)
+}
+
+public fn insert_one(conn: MongoConn, coll: String, doc: String) -> Result<String, String> !MongoDB {
+    Mongo.insert_one_raw(conn, coll, doc)
+}
+
+public fn insert_many(conn: MongoConn, coll: String, docs: String) -> Result<Int, String> !MongoDB {
+    Mongo.insert_many_raw(conn, coll, docs)
+}
+
+public fn update_one(conn: MongoConn, coll: String, filter: String, update: String) -> Result<Int, String> !MongoDB {
+    Mongo.update_one_raw(conn, coll, filter, update)
+}
+
+public fn delete_one(conn: MongoConn, coll: String, filter: String) -> Result<Int, String> !MongoDB {
+    Mongo.delete_one_raw(conn, coll, filter)
+}
+
+public fn aggregate(conn: MongoConn, coll: String, pipeline: String) -> Result<String, String> !MongoDB {
+    Mongo.aggregate_raw(conn, coll, pipeline)
+}

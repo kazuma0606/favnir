@@ -1,0 +1,137 @@
+# MySQL Rune
+
+`import rune "mysql"` で MySQL データベースに接続できます。`!MySQL` エフェクトが必要です。
+
+## セットアップ
+
+```bash
+docker run -e MYSQL_ROOT_PASSWORD=root -e MYSQL_DATABASE=mydb -p 3306:3306 mysql:8
+```
+
+環境変数 `MYSQL_URL` を設定するか、`MySQL.connect` に直接 URL を渡します。
+
+> **接続モデル（v25.4.0）**: `MySQL.query` / `MySQL.execute` 等は呼び出しのたびに新規接続を確立します。
+> 大量データ処理ではパフォーマンスに影響が出る場合があります。コネクションプールは v26.x で対応予定です。
+
+```
+mysql://user:password@host:3306/database
+```
+
+## `!MySQL` エフェクト
+
+`!MySQL` は外部 MySQL 操作を明示するエフェクトです。`!Postgres` とは独立した別エフェクトです。
+
+```favnir
+stage FetchRows: Unit -> String !MySQL = |_| {
+    bind conn <- MySQL.connect("mysql://root:root@localhost:3306/mydb")
+    MySQL.query(conn, "SELECT * FROM users", "[]")
+}
+```
+
+## API リファレンス
+
+### `MySQL.connect`
+
+```favnir
+fn connect(url: String) -> Result<MySqlConn, String> !MySQL
+```
+
+URL から接続を確立します。成功時は `MySqlConn` を返します。
+
+```favnir
+bind conn <- MySQL.connect("mysql://root:root@localhost:3306/mydb")
+```
+
+---
+
+### `MySQL.query`
+
+```favnir
+fn query(conn: MySqlConn, sql: String, params: String) -> Result<String, String> !MySQL
+```
+
+SELECT クエリを実行し、行を JSON 配列文字列として返します。
+
+- `params`: JSON 配列文字列（例: `"[\"pending\", 30]"`）
+- 戻り値: `[{"col": "val", ...}, ...]` 形式の JSON 文字列
+
+```favnir
+bind rows <- MySQL.query(conn, "SELECT id, name FROM users WHERE status = ?", "[\"active\"]")
+```
+
+---
+
+### `MySQL.execute`
+
+```favnir
+fn execute(conn: MySqlConn, sql: String, params: String) -> Result<Int, String> !MySQL
+```
+
+INSERT / UPDATE / DELETE を実行し、影響行数を返します。
+
+```favnir
+bind affected <- MySQL.execute(conn, "UPDATE users SET status = ? WHERE id = ?", "[\"inactive\", \"42\"]")
+```
+
+---
+
+### `MySQL.transaction_begin`
+
+```favnir
+fn transaction_begin(conn: MySqlConn) -> Result<Unit, String> !MySQL
+```
+
+`BEGIN` を発行します。
+
+> **注意**: 現実装では各 primitive が独立接続を使用するため、`transaction_begin` / `execute` / `commit` は
+> 同一接続上のトランザクションとしては動作しません（擬似実装）。v26.x で解決予定。
+
+---
+
+### `MySQL.transaction_commit`
+
+```favnir
+fn transaction_commit(conn: MySqlConn) -> Result<Unit, String> !MySQL
+```
+
+`COMMIT` を発行します。
+
+---
+
+### `MySQL.transaction_rollback`
+
+```favnir
+fn transaction_rollback(conn: MySqlConn) -> Result<Unit, String> !MySQL
+```
+
+`ROLLBACK` を発行します。
+
+---
+
+## Postgres との比較
+
+| 機能 | Postgres | MySQL |
+|---|---|---|
+| 接続 | `Postgres.connect(url)` | `MySQL.connect(url)` |
+| SELECT | `Postgres.query(conn, sql, params)` | `MySQL.query(conn, sql, params)` |
+| INSERT/UPDATE/DELETE | `Postgres.execute(conn, sql, params)` | `MySQL.execute(conn, sql, params)` |
+| トランザクション | `Postgres.transaction_begin/commit/rollback` | `MySQL.transaction_begin/commit/rollback` |
+| エフェクト | `!Postgres` | `!MySQL` |
+
+## 使用例
+
+```favnir
+import rune "mysql"
+
+stage LoadPendingOrders: Unit -> String !MySQL = |_| {
+    bind conn <- MySQL.connect("mysql://root:root@localhost:3306/shop")
+    MySQL.query(conn, "SELECT id, amount FROM orders WHERE status = ?", "[\"pending\"]")
+}
+
+stage MarkProcessed: String -> Int !MySQL = |order_id| {
+    bind conn <- MySQL.connect("mysql://root:root@localhost:3306/shop")
+    MySQL.execute(conn, "UPDATE orders SET status = ? WHERE id = ?", "[\"processed\", " + order_id + "]")
+}
+
+pipeline OrdersETL = LoadPendingOrders |> MarkProcessed
+```

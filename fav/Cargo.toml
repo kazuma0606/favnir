@@ -1,6 +1,6 @@
 [package]
 name = "fav"
-version = "25.0.0"
+version = "30.0.0"
 edition = "2024"
 
 [[bin]]
@@ -68,6 +68,9 @@ sha2 = "0.10"
 p256 = { version = "0.13", features = ["ecdsa", "pem"] }
 zip = { version = "0.6", default-features = false, features = ["deflate"] }
 rskafka = { version = "0.6", features = ["transport-tls"] }
+redis = { version = "0.25", default-features = false, features = ["tcp_nodelay"] }
+mysql = { version = "24", default-features = false }
+mongodb = { version = "3" }
 rayon = "1"
 petgraph = "0.6"
 inferno = "0.11"

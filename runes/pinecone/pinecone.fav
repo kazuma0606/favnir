@@ -1,0 +1,47 @@
+// pinecone Rune -- Pinecone ベクトルDB 連携（v29.3.0）
+// 接続: PINECONE_API_KEY / PINECONE_ENV / PINECONE_BASE_URL 環境変数
+// NOTE: PINECONE_API_KEY は HTTP Rune の認証ヘッダー機構が有効化されるまでリクエストには付与されない
+// NOTE: fetch は Pinecone API 仕様では GET だが、Favnir HTTP Rune は Http.post_json で統一
+//       （Http.get_with_body primitive が実装され次第移行予定）
+
+// ベクトルエントリ型
+type PineconeVector = {
+  id: String,
+  values: List<Float>,
+  metadata: String
+}
+
+// ベクトルを追加・更新する（バッチ対応）
+fn Pinecone.upsert(index: String, vectors: List<PineconeVector>) -> Result<Unit, String> !Http =
+  Http.post_json(
+    Env.get_or("PINECONE_BASE_URL", "https://api.pinecone.io") ++ "/vectors/upsert",
+    { "index": index, "vectors": vectors }
+  )
+
+// 近傍検索（メタデータフィルタ付き）
+fn Pinecone.query(index: String, vector: List<Float>, k: Int, filter: String) -> Result<List<String>, String> !Http =
+  Http.post_json(
+    Env.get_or("PINECONE_BASE_URL", "https://api.pinecone.io") ++ "/query",
+    { "index": index, "vector": vector, "topK": k, "filter": filter }
+  )
+
+// ID 指定でベクトルを削除する
+fn Pinecone.delete(index: String, ids: List<String>) -> Result<Unit, String> !Http =
+  Http.post_json(
+    Env.get_or("PINECONE_BASE_URL", "https://api.pinecone.io") ++ "/vectors/delete",
+    { "index": index, "ids": ids }
+  )
+
+// ID 指定でベクトルを取得する
+fn Pinecone.fetch(index: String, ids: List<String>) -> Result<List<String>, String> !Http =
+  Http.post_json(
+    Env.get_or("PINECONE_BASE_URL", "https://api.pinecone.io") ++ "/vectors/fetch",
+    { "index": index, "ids": ids }
+  )
+
+// インデックス統計を取得する
+fn Pinecone.describe_index_stats(index: String) -> Result<String, String> !Http =
+  Http.post_json(
+    Env.get_or("PINECONE_BASE_URL", "https://api.pinecone.io") ++ "/describe_index_stats",
+    { "index": index }
+  )

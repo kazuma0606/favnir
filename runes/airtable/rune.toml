@@ -1,0 +1,6 @@
+[rune]
+name = "airtable"
+version = "0.1.0"
+description = "Airtable レコード操作 API 連携（コミュニティ投稿 Rune）"
+author = "Favnir Community"
+license = "MIT"

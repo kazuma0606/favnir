@@ -1,0 +1,6 @@
+[rune]
+name        = "pagerduty"
+version     = "1.0.0"
+description = "PagerDuty Events API v2 連携（create_incident / resolve / acknowledge / add_note）"
+license     = "MIT"
+authors     = ["Favnir Team"]

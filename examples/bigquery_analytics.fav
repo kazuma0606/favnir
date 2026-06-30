@@ -1,0 +1,20 @@
+// examples/bigquery_analytics.fav — BigQuery Analytics デモ (v27.4.0)
+import rune "bigquery"
+
+stage CreateEventTable: Unit -> Result<Unit, String> !Db = |_| {
+    bind conn <- BigQuery.connect("project:my-project,dataset:analytics")
+    BigQuery.create_table(conn, "events", "{\"fields\":[{\"name\":\"id\",\"type\":\"INTEGER\"}]}")
+}
+
+// seq pipeline は前ステージの成功値（Unit）を次ステージの引数として渡す
+stage LoadFromGcs: Unit -> Result<Unit, String> !Db = |_| {
+    bind conn <- BigQuery.connect("project:my-project,dataset:analytics")
+    BigQuery.load_from_gcs(conn, "events", "gs://my-bucket/events/*.parquet", "PARQUET")
+}
+
+stage QueryStats: Unit -> Result<String, String> !Db = |_| {
+    bind conn <- BigQuery.connect("project:my-project,dataset:analytics")
+    BigQuery.query(conn, "SELECT count(*) FROM analytics.events")
+}
+
+seq BigQueryAnalyticsPipeline = CreateEventTable |> LoadFromGcs |> QueryStats

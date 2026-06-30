@@ -1,0 +1,87 @@
+# SQS Rune
+
+v26.8.0 で実質化した AWS SQS Rune。
+`import rune "sqs"` → `SQS.*` 名前空間で 6 関数が使用可能。
+
+## セットアップ（LocalStack）
+
+```bash
+# LocalStack 起動
+docker compose -f examples/streaming/docker-compose.yml up -d localstack
+
+# キュー作成
+aws --endpoint-url=http://localhost:4566 sqs create-queue --queue-name my-queue
+```
+
+## 環境変数
+
+| 変数名 | デフォルト値 | 説明 |
+|---|---|---|
+| `AWS_ENDPOINT_URL` | （本番 AWS） | LocalStack エンドポイント（例: `http://localhost:4566`） |
+| `AWS_ACCESS_KEY_ID` | — | 認証キー（LocalStack では `test`） |
+| `AWS_SECRET_ACCESS_KEY` | — | シークレット（LocalStack では `test`） |
+| `AWS_DEFAULT_REGION` | `us-east-1` | AWS リージョン |
+
+## 関数一覧
+
+### `SQS.send_message(queue_url, body)`
+
+メッセージを送信する。戻り値は `MessageId` 文字列。
+
+```favnir
+import rune "sqs"
+
+stage SendAlert: String -> Result<String, String> !AWS = |message| {
+    SQS.send_message("https://sqs.us-east-1.amazonaws.com/123456789/alerts", message)
+}
+```
+
+### `SQS.send_message_batch(queue_url, messages)`
+
+最大 10 件のメッセージをバッチ送信する。
+
+```favnir
+bind result <- SQS.send_message_batch(queue_url, ["msg1", "msg2", "msg3"])
+```
+
+### `SQS.receive_messages(queue_url, max)`
+
+最大 `max` 件のメッセージを受信する（`max` は 1〜10 の範囲、SQS API 制約）。戻り値はメッセージの JSON 文字列。
+
+```favnir
+bind messages_json <- SQS.receive_messages(queue_url, 10)
+```
+
+### `SQS.delete_message(queue_url, receipt_handle)`
+
+メッセージを削除（受信確認）する。`receipt_handle` は `receive_messages` の結果から取得する。
+
+```favnir
+bind _ <- SQS.delete_message(queue_url, receipt_handle)
+```
+
+### `SQS.purge(queue_url)`
+
+キュー内の全メッセージを削除する（テスト用）。
+
+```favnir
+bind _ <- SQS.purge(queue_url)
+```
+
+### `SQS.consume(queue_url)`
+
+メッセージを 1 回ポーリングして JSON 文字列で返す（継続消費スタブ）。
+
+```favnir
+stage ProcessMessages: Unit -> Result<String, String> !AWS = |_| {
+    SQS.consume("https://sqs.us-east-1.amazonaws.com/123456789/my-queue")
+}
+```
+
+## スコープ外（v27.x 以降）
+
+- `SQS.consume[T](queue_url, fn)` — コールバック型継続消費ループ
+- `SQS.receive_messages[T]` — 型付きデシリアライズ
+- `send_message` の遅延配信オプション（`DelaySeconds` パラメータ）
+- Dead Letter Queue（DLQ）操作
+- FIFO キュー（`MessageGroupId` / `MessageDeduplicationId`）

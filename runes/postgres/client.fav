@@ -1,17 +1,19 @@
-// runes/postgres/client.fav — Postgres クライアント (v11.5.0)
+// runes/postgres/client.fav — Postgres クライアント (v25.1.0)
 // Postgres への接続は VM primitive が担う。
 //
-// 環境変数:
+// 環境変数（connect を使わず環境変数から接続する場合）:
 //   DATABASE_URL  — 接続文字列（優先）
 //   PGHOST / PGPORT / PGDATABASE / PGUSER / PGPASSWORD — 個別設定
 
-// execute — DML（INSERT / UPDATE / DELETE / CREATE 等）を実行する
+// ── 既存 API（後方互換） ────────────────────────────────────────────────────────
+
+// execute — DML（INSERT / UPDATE / DELETE / CREATE 等）を実行する（環境変数ベース）
 // params は JSON 配列文字列（例: "[\"val1\", 42]"）
 public fn execute(sql: String, params: String) -> Result<Unit, String> !Postgres {
     Postgres.execute_raw(sql, params)
 }
 
-// query<T> — SELECT クエリを実行し、行を型 T の List に変換して返す
+// query<T> — SELECT クエリを実行し、行を型 T の List に変換して返す（環境変数ベース）
 // params は JSON 配列文字列（例: "[\"val1\"]"）
 public fn query<T>(sql: String, params: String) -> Result<List<T>, String> !Postgres {
     match Postgres.query_raw(sql, params) {
@@ -26,4 +28,82 @@ public fn query<T>(sql: String, params: String) -> Result<List<T>, String> !Post
                     }
             }
     }
+}
+
+// ── v25.1.0: 接続オブジェクト API ──────────────────────────────────────────────
+
+// connect — PgConfig から接続を確立し PgConn を返す
+// config は接続文字列: "host=<h> port=<p> user=<u> password=<pw> dbname=<db> [sslmode=require]"
+public fn connect(config: PgConfig) -> Result<PgConn, String> !Postgres {
+    Postgres.connect_raw(config)
+}
+
+// execute_conn — PgConn（接続オブジェクト）経由で DML / DDL を実行する
+// params は JSON 配列文字列（例: "[\"val1\"]"）
+public fn execute_conn(conn: PgConn, sql: String, params: String) -> Result<Unit, String> !Postgres {
+    Postgres.execute_with_conn_raw(conn, sql, params)
+}
+
+// query_conn<T> — PgConn 経由でクエリを実行し、行を型 T の List に変換して返す
+// params は JSON 配列文字列（例: "[\"val1\"]"）
+public fn query_conn<T>(conn: PgConn, sql: String, params: String) -> Result<List<T>, String> !Postgres {
+    match Postgres.query_with_conn_raw(conn, sql, params) {
+        Err(e) => Result.err(e)
+        Ok(raw) =>
+            match Json.parse_raw(raw) {
+                Err(e) => Result.err(String.concat("postgres.query_conn: ", e))
+                Ok(parsed) =>
+                    match Schema.adapt(parsed, type_name_of<T>()) {
+                        Err(_) => Result.err("postgres.query_conn: schema error")
+                        Ok(rows) => Result.ok(rows)
+                    }
+            }
+    }
+}
+
+// execute_many — バッチ実行（PgConn 経由で同一 SQL を複数行に適用）
+// rows の各要素が 1 行分のパラメータリスト（例: [["alice", "30"], ["bob", "25"]]）
+//
+// 注意: 各行は個別に autocommit で実行される。部分失敗を防ぐには
+// transaction 内で呼び出すこと（エラー時に ROLLBACK が実行される）。
+public fn execute_many(conn: PgConn, sql: String, rows: List<List<String>>) -> Result<Int, String> !Postgres {
+    Postgres.execute_many_raw(conn, sql, rows)
+}
+
+// transaction<T> — トランザクション実行
+// action（クロージャ）の前後に BEGIN / COMMIT を発行する。
+// action が Err を返した場合は自動 ROLLBACK。
+// 使用例:
+//   transaction<Int>(conn, |tx_conn| {
+//       execute_many(tx_conn, "UPDATE ...", rows)?;
+//       Result.ok(1)
+//   })
+public fn transaction<T>(conn: PgConn, action: (PgConn) -> Result<T, String>) -> Result<T, String> !Postgres {
+    Postgres.transaction_begin_raw(conn)?;
+    match action(conn) {
+        Ok(r) =>
+            match Postgres.transaction_commit_raw(conn) {
+                Ok(_) => Result.ok(r)
+                Err(e) => Result.err(e)
+            }
+        Err(e) =>
+            Postgres.transaction_rollback_raw(conn);
+            Result.err(e)
+    }
+}
+
+// Pool.create — PoolConfig からコネクションプールを作成する
+// config は "max_size=N host=<h> port=<p> user=<u> password=<pw> dbname=<db>" 形式
+public fn Pool.create(config: PoolConfig) -> Result<PgPool, String> !Postgres {
+    Postgres.pool_create_with_config_raw(config)
+}
+
+// Pool.get — プールから PgConn を取得する
+public fn Pool.get(pool: PgPool) -> Result<PgConn, String> !Postgres {
+    Postgres.pool_get_raw(pool)
+}
+
+// Pool.release — PgConn をプールに返却する
+public fn Pool.release(pool: PgPool, conn: PgConn) -> Unit !Postgres {
+    Postgres.pool_release_raw(pool, conn)
 }

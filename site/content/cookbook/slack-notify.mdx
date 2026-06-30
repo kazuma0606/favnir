@@ -1,0 +1,22 @@
+# Slack 通知パイプライン
+
+パイプライン完了・失敗を Slack チャンネルに通知します。
+
+```favnir
+import runes/slack
+
+stage NotifySlackOnComplete: PipelineResult -> Unit !Http = |result| {
+  Slack.post_message(
+    config.slack_webhook_url,
+    "#data-pipeline",
+    ":white_check_mark: Pipeline `" ++ result.name ++ "` completed: " ++
+      Int.to_string(result.row_count) ++ " rows in " ++
+      Float.to_string(result.duration_ms / 1000.0) ++ "s"
+  )
+}
+```
+
+## 関連 Rune
+
+- [Slack](/docs/runes/slack) — Slack Incoming Webhook
+- [PagerDuty](/docs/runes/pagerduty) — クリティカル障害のエスカレーション

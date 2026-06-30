@@ -1,0 +1,37 @@
+// runes/kinesis/kinesis.fav — Kinesis Rune (v26.1.0)
+//
+// 使い方:
+//   import rune "kinesis"
+//
+// 環境変数:
+//   KINESIS_ENDPOINT        — エンドポイント URL（省略時: "http://localhost:4566"）
+//   AWS_ACCESS_KEY_ID       — AWS アクセスキー（LocalStack では任意値で可）
+//   AWS_SECRET_ACCESS_KEY   — AWS シークレットキー（LocalStack では任意値で可）
+//   AWS_DEFAULT_REGION      — AWS リージョン（省略時: "us-east-1"）
+//
+// ローカル開発:
+//   docker run -p 4566:4566 localstack/localstack
+
+type KinesisConn(String)
+type ShardIterator(String)
+type KinesisRecord = { partition_key: String, data: String, sequence_num: String }
+
+public fn connect(endpoint: String) -> Result<KinesisConn, String> !Stream {
+    Kinesis.connect_raw(endpoint)
+}
+
+public fn put_record(conn: KinesisConn, stream: String, key: String, data: String) -> Result<String, String> !Stream {
+    Kinesis.put_record_raw(conn, stream, key, data)
+}
+
+public fn put_records(conn: KinesisConn, stream: String, records: List<KinesisRecord>) -> Result<Int, String> !Stream {
+    Kinesis.put_records_raw(conn, stream, records)
+}
+
+public fn get_shard_iterator(conn: KinesisConn, stream: String, shard_id: String, iter_type: String) -> Result<ShardIterator, String> !Stream {
+    Kinesis.get_shard_iterator_raw(conn, stream, shard_id, iter_type)
+}
+
+public fn get_records(conn: KinesisConn, iterator: ShardIterator, limit: Int) -> Result<String, String> !Stream {
+    Kinesis.get_records_raw(conn, iterator, limit)
+}

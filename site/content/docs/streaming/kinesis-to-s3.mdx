@@ -1,0 +1,77 @@
+# Kinesis → S3 クリックイベントアーカイブ
+
+v26.6.0 で実装した Streaming Native 第 2 E2E デモ。
+Kinesis から消費したクリックイベントを S3 にアーカイブするパイプライン。
+
+## パイプライン構成
+
+```
+FetchClickEvents → SerializeBatch → UploadToS3
+(Unit)              (String)          (String)
+```
+
+| ステージ | エフェクト | 処理内容 |
+|---|---|---|
+| `FetchClickEvents` | `!Stream` | Kinesis の `clickstream` ストリームから最大 1000 件取得（TRIM_HORIZON） |
+| `SerializeBatch` | `!Pure` | 空バッチをスキップ（JSON 長さ > 2 のみ通過） |
+| `UploadToS3` | `!AWS` | S3 の `clickstream-archive` バケットに JSON バッチをアーカイブ |
+
+## セットアップ
+
+```bash
+# サービス起動（LocalStack が起動するまで healthcheck で待機）
+docker compose -f examples/streaming/docker-compose.yml up -d --wait
+
+# ヘルスチェック確認
+curl http://localhost:4566/_localstack/health
+```
+
+## 環境変数
+
+| 変数名 | デフォルト値 | 説明 |
+|---|---|---|
+| `KINESIS_ENDPOINT` | `http://localhost:4566` | Kinesis エンドポイント（LocalStack） |
+| `AWS_ACCESS_KEY_ID` | `test` | LocalStack では任意値 |
+| `AWS_SECRET_ACCESS_KEY` | `test` | LocalStack では任意値 |
+| `AWS_DEFAULT_REGION` | `us-east-1` | AWS リージョン |
+
+## 実行
+
+```bash
+fav run examples/streaming/kinesis_to_s3.fav
+```
+
+## コード全文
+
+```favnir
+import rune "kinesis"
+import rune "aws"
+
+stage FetchClickEvents: Unit -> Result<String, String> !Stream = |_| {
+    bind conn <- Kinesis.connect("")
+    bind iter <- Kinesis.get_shard_iterator(conn, "clickstream", "shardId-000000000000", "TRIM_HORIZON")
+    Kinesis.get_records(conn, iter, 1000)
+}
+
+stage SerializeBatch: String -> Result<String, String> !Pure = |records_json| {
+    if String.length(records_json) > 2
+    then Result.ok(records_json)
+    else Result.err("empty batch — skipping")
+}
+
+stage UploadToS3: String -> Result<String, String> !AWS = |batch_json| {
+    bind key <- Result.ok("archive/clickstream-batch.json")
+    bind _   <- S3.put_object("clickstream-archive", key, batch_json)
+    Result.ok("archived to s3://clickstream-archive/" ++ key)
+}
+
+seq ArchivePipeline = FetchClickEvents |> SerializeBatch |> UploadToS3
+```
+
+## スコープ外（v27.x 以降）
+
+- `Kinesis.consume[ClickEvent](...)` スタイルの型付き消費ループ
+- `#[streaming(window = 30)]` による実際のタンブリングウィンドウとの連携
+- Parquet シリアライズ（`SerializeToParquet` ステージ）
+- Kinesis Enhanced Fan-Out / KCL 対応
+- S3 マルチパートアップロード（大容量バッチ）

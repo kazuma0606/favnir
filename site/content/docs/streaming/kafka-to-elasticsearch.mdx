@@ -1,0 +1,74 @@
+# Kafka → Elasticsearch リアルタイムログ集計
+
+v26.5.0 で実装した Streaming Native 第 1 E2E デモ。
+Kafka から消費したログを Elasticsearch にリアルタイムでインデックスするパイプライン。
+
+## パイプライン構成
+
+```
+FetchLogs → FilterErrors → IndexToES
+(Unit)       (String)       (String → String)
+```
+
+| ステージ | エフェクト | 処理内容 |
+|---|---|---|
+| `FetchLogs` | `!Stream` | Kafka の `app-logs` トピックからバッチ消費（最大 50 件） |
+| `FilterErrors` | `!Pure` | WARN / ERROR を含むバッチのみ通過 |
+| `IndexToES` | `!Elasticsearch` | Elasticsearch の `logs-index` にバルクインデックス |
+
+## セットアップ
+
+```bash
+# サービス起動
+docker compose -f examples/streaming/docker-compose.yml up -d
+
+# ヘルスチェック（ES が起動するまで 30 秒ほど待つ）
+curl http://localhost:9200/_cluster/health
+```
+
+## 環境変数
+
+| 変数名 | デフォルト値 | 説明 |
+|---|---|---|
+| `KAFKA_BOOTSTRAP_BROKERS` | `localhost:9092` | Kafka（Redpanda）ブローカーアドレス |
+| `ELASTICSEARCH_URL` | `http://localhost:9200` | Elasticsearch エンドポイント |
+
+## 実行
+
+```bash
+fav run examples/streaming/kafka_to_elasticsearch.fav
+```
+
+## コード全文
+
+```favnir
+import rune "kafka"
+import rune "elasticsearch"
+
+stage FetchLogs: Unit -> Result<String, String> !Stream = |_| {
+    bind conn <- Kafka.connect("")
+    Kafka.consume_batch(conn, "app-logs", "favnir-log-consumer", 50)
+}
+
+stage FilterErrors: String -> Result<String, String> !Pure = |batch_json| {
+    if String.contains(batch_json, "ERROR") || String.contains(batch_json, "WARN")
+    then Result.ok(batch_json)
+    else Result.err("no error/warn logs in batch — skipping")
+}
+
+stage IndexToES: String -> Result<String, String> !Elasticsearch = |batch_json| {
+    bind conn <- Elasticsearch.connect("")
+    bind _    <- Elasticsearch.bulk(conn, "logs-index", batch_json)
+    Result.ok("indexed batch to logs-index")
+}
+
+seq LogPipeline = FetchLogs |> FilterErrors |> IndexToES
+```
+
+## スコープ外（v27.x 以降）
+
+- 型付きデシリアライズ（`RawLog` → `ParsedLog` 変換）
+- `ParseLog` / `EnrichWithGeo` ステージ（ロードマップ v26.5 節に記載）
+- ACK / NACK による配信確認
+- リトライロジック / Dead Letter Queue
+- Kafka Consumer Group オフセット管理

@@ -1,0 +1,26 @@
+# `fav infer` でスキーマ自動推論
+
+`fav infer` コマンドでデータソースからスキーマを自動推論し、型安全なパイプラインを構築します。
+
+```bash
+# Postgres テーブルからスキーマを推論
+fav infer --from postgres --table orders
+
+# Parquet ファイルからスキーマを推論
+fav infer --from parquet --file data/orders.parquet
+```
+
+推論結果の型定義を使ったパイプライン:
+
+```favnir
+// fav infer が生成した型定義
+type Order = { id: Int, customer_id: Int, total: Float, status: String }
+
+stage ProcessOrders: List<Order> -> List<Order> = |orders| {
+  orders |> List.filter(|o| o.status == "pending")
+}
+```
+
+## 関連コマンド
+
+- [fav infer](/docs/cli/infer) — スキーマ推論コマンド

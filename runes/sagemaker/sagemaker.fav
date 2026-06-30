@@ -1,0 +1,26 @@
+// sagemaker Rune -- AWS SageMaker 連携（v29.4.0）
+// 接続: SAGEMAKER_REGION / SAGEMAKER_BASE_URL 環境変数
+// NOTE: SAGEMAKER_BASE_URL が未設定の場合、SAGEMAKER_REGION（デフォルト: us-east-1）からベース URL を自動構築する
+
+// SageMaker エンドポイントで推論を実行する
+fn SageMaker.invoke(endpoint_name: String, payload: String) -> Result<String, String> !Http =
+  Http.post_json(
+    Env.get_or("SAGEMAKER_BASE_URL", "https://runtime.sagemaker." ++ Env.get_or("SAGEMAKER_REGION", "us-east-1") ++ ".amazonaws.com") ++ "/endpoints/" ++ endpoint_name ++ "/invocations",
+    { "payload": payload }
+  )
+
+// SageMaker エンドポイントを作成し、エンドポイント名を返す
+fn SageMaker.create_endpoint(model: String, config: String) -> Result<String, String> !Http =
+  Http.post_json(
+    Env.get_or("SAGEMAKER_BASE_URL", "https://runtime.sagemaker." ++ Env.get_or("SAGEMAKER_REGION", "us-east-1") ++ ".amazonaws.com") ++ "/endpoints",
+    { "model": model, "config": config }
+  )
+
+// SageMaker エンドポイントを削除する
+// NOTE: AWS SageMaker API は DELETE メソッドを使うが、Favnir HTTP Rune に Http.delete が未実装のため
+//       POST + /delete パスで代替している（Http.delete primitive 実装後に移行予定）
+fn SageMaker.delete_endpoint(name: String) -> Result<Unit, String> !Http =
+  Http.post_json(
+    Env.get_or("SAGEMAKER_BASE_URL", "https://runtime.sagemaker." ++ Env.get_or("SAGEMAKER_REGION", "us-east-1") ++ ".amazonaws.com") ++ "/endpoints/" ++ name ++ "/delete",
+    { "name": name }
+  )

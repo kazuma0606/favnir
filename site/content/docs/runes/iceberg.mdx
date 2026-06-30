@@ -1,0 +1,136 @@
+# Apache Iceberg Rune
+
+`import rune "iceberg"` で Apache Iceberg テーブルの読み書き・スナップショット管理ができます。
+
+> **注**: v27.2.0 は引数検証 stub 実装です。`iceberg-rust` クレートを使った実テーブル連携は v28.x で実装予定です。
+
+## セットアップ
+
+```toml
+# fav.toml
+[runes]
+iceberg = "27.2.0"
+```
+
+```favnir
+import rune "iceberg"
+```
+
+## エフェクト
+
+Iceberg は REST カタログへの HTTP 通信・ファイルシステム操作を行うため `!Io` エフェクトを使用します。
+
+## カタログ
+
+`catalog` パラメータには REST カタログの URL または AWS Glue カタログ名を渡します。
+
+```
+REST カタログ（ローカル開発）: "http://localhost:8181"
+AWS Glue カタログ:             "glue://ap-northeast-1"
+```
+
+## 関数リファレンス
+
+### `Iceberg.read`
+
+```favnir
+fn read(catalog: String, table: String) -> Result<String, String> !Io
+```
+
+テーブル全件を JSON 配列文字列として読み込みます。
+
+```favnir
+bind rows <- Iceberg.read("http://localhost:8181", "warehouse.orders")
+```
+
+### `Iceberg.append`
+
+```favnir
+fn append(catalog: String, table: String, data: String) -> Result<Unit, String> !Io
+```
+
+データを追加して新しいスナップショットを作成します。
+
+```favnir
+bind _ <- Iceberg.append("http://localhost:8181", "warehouse.orders", rows_json)
+```
+
+### `Iceberg.overwrite`
+
+```favnir
+fn overwrite(catalog: String, table: String, data: String, filter: String) -> Result<Unit, String> !Io
+```
+
+フィルタ条件を満たすデータを上書きします。
+
+```favnir
+bind _ <- Iceberg.overwrite("http://localhost:8181", "warehouse.orders", new_rows, "status = 'pending'")
+```
+
+### `Iceberg.time_travel`
+
+```favnir
+fn time_travel(catalog: String, table: String, snapshot_id: Int) -> Result<String, String> !Io
+```
+
+スナップショット ID を指定して過去のデータを読み込みます。`snapshot_id` は Apache Iceberg 仕様の 64-bit long（Favnir `Int` = i64）です。
+
+```favnir
+bind rows <- Iceberg.time_travel("http://localhost:8181", "warehouse.orders", 8744736658854505749)
+```
+
+### `Iceberg.schema_evolution`
+
+```favnir
+fn schema_evolution(catalog: String, table: String, new_schema: String) -> Result<Unit, String> !Io
+```
+
+スキーマ追加・型昇格など互換変更のみ適用します（破壊的変更は拒否されます）。
+
+```favnir
+bind _ <- Iceberg.schema_evolution("http://localhost:8181", "warehouse.orders", "{\"add_column\":\"discount\"}")
+```
+
+### `Iceberg.list_snapshots`
+
+```favnir
+fn list_snapshots(catalog: String, table: String) -> Result<String, String> !Io
+```
+
+スナップショット一覧を JSON 配列として取得します。
+
+```favnir
+bind snapshots <- Iceberg.list_snapshots("http://localhost:8181", "warehouse.orders")
+```
+
+## パイプライン例
+
+```favnir
+// examples/iceberg_etl.fav
+import rune "iceberg"
+
+stage LoadFromIceberg: Unit -> Result<String, String> !Io = |_| {
+    Iceberg.read("http://localhost:8181", "warehouse.raw_orders")
+}
+
+stage TransformData: String -> Result<String, String> = |rows_json| {
+    if String.length(rows_json) > 2
+    then Result.ok(rows_json)
+    else Result.err("empty iceberg table")
+}
+
+stage AppendToIceberg: String -> Result<String, String> !Io = |data| {
+    bind _ <- Iceberg.append("http://localhost:8181", "warehouse.processed_orders", data)
+    Result.ok("appended to iceberg table")
+}
+
+seq IcebergEtlPipeline = LoadFromIceberg |> TransformData |> AppendToIceberg
+```
+
+## スコープ外（v28.x 以降）
+
+- `iceberg-rust` クレートを使った実 Iceberg テーブルの読み書き
+- `Iceberg.read[T]` / `Iceberg.time_travel[T]` ジェネリック API
+- REST カタログ / AWS Glue カタログへの実接続
+- Time travel の実スナップショット解決
+- Change Data Feed / Incremental read

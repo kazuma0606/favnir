@@ -1,0 +1,23 @@
+# S3 CSV → Parquet 変換
+
+S3 上の CSV ファイルを読み込み、Parquet 形式に変換して S3 に書き戻します。
+
+```favnir
+import runes/aws/s3
+
+stage ConvertCsvToParquet: String -> Unit !Http = |s3_key| {
+  bind csv_data <- S3.get_object(config.s3_bucket, s3_key)
+  bind rows     <- CSV.parse[Map<String, String>](csv_data)
+  bind _        <- Parquet.append(config.output_parquet_path, "Row", rows)
+  let out_key   = String.replace(s3_key, ".csv", ".parquet")
+  bind parquet_bytes <- Fs.read_bytes(config.output_parquet_path)
+  S3.put_object(config.s3_bucket, out_key, parquet_bytes)
+}
+```
+
+> **注意**: 現在の Parquet Rune（`Parquet.append`）はローカルファイルへの書き込みのみサポートしています。S3 への直接ストリーミングは将来実装予定です。
+
+## 関連 Rune
+
+- [S3](/docs/runes/s3) — AWS S3 オブジェクトストレージ
+- [Delta Lake](/docs/runes/delta-lake) — Delta Lake フォーマット

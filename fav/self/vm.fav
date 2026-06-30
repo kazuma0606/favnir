@@ -21,6 +21,7 @@ type Opcode =
   | Pop
   | Dup
   | Call(Int)
+  | CallNamed(Int, Int)   // v25.9.0: fn_name_const_idx, argc
   | Return
   | Add
   | Sub
@@ -86,6 +87,24 @@ fn decode_byte_with_u16_le(bytes: Bytes, byte: Int, pc: Int) -> Result<DecodeRes
   }
 }
 
+// v25.9.0: 5バイト opcode デコーダー（1-byte opcode + 2-byte op1 LE + 2-byte op2 LE）
+fn decode_byte_with_u16x2_le(bytes: Bytes, byte: Int, pc: Int) -> Result<DecodeResult, String> {
+  bind r1 <- Bytes.read_u16_le(bytes, pc + 1)
+  match r1 {
+    ok(op1) => {
+      bind r2 <- Bytes.read_u16_le(bytes, pc + 3)
+      match r2 {
+        ok(op2) => match byte {
+          0x56 => Result.ok(DecodeResult { op: CallNamed(op1, op2)  next_pc: pc + 5 })
+          _    => Result.err(f"decode_byte_with_u16x2_le: unknown opcode: {byte}")
+        }
+        err(e) => Result.err(e)
+      }
+    }
+    err(e) => Result.err(e)
+  }
+}
+
 fn decode_opcode(bytes: Bytes, pc: Int) -> Result<DecodeResult, String> {
   bind get_result <- Bytes.get(bytes, pc)
   match get_result {
@@ -98,6 +117,7 @@ fn decode_opcode(bytes: Bytes, pc: Int) -> Result<DecodeResult, String> {
       0x30 => decode_byte_with_u16_le(bytes, byte, pc)
       0x31 => decode_byte_with_u16_le(bytes, byte, pc)
       0x40 => decode_byte_with_u16_le(bytes, byte, pc)
+      0x56 => decode_byte_with_u16x2_le(bytes, byte, pc)
       _    => decode_byte_no_operand(byte, pc)
     }
     err(e) => Result.err(e)
@@ -115,8 +135,9 @@ fn opcode_to_string(op: Opcode) -> String {
     LoadGlobal(g)    => f"LoadGlobal({g})"
     Pop              => "Pop"
     Dup              => "Dup"
-    Call(argc)       => f"Call({argc})"
-    Return           => "Return"
+    Call(argc)          => f"Call({argc})"
+    CallNamed(ni, ac)   => f"CallNamed({ni},{ac})"
+    Return              => "Return"
     Add              => "Add"
     Sub              => "Sub"
     Mul              => "Mul"
@@ -272,32 +293,198 @@ fn collect_args(stack: Int, n: Int) -> Result<Int, String> {
   collect_args_rec(stack, n, acc)
 }
 
-fn vm_execute(bytecode: Bytes, stack: Int, locals: Int, globals: Int, pc: Int) -> Result<VMVal, String> {
+// v25.9.0: Phase 6 補助型・関数 ─────────────────────────────────────────────
+
+// parse_fn_json が返す関数定義
+type FnDef = {
+  code:   String   // バイトコード hex 文字列
+  consts: String   // JSON 配列文字列 ["name1","name2"]
+}
+
+// build_program_lists が返すキーリスト・バリューリストのペア
+type ListPair = {
+  first:  Int   // prog_keys Mut.map handle
+  second: Int   // prog_vals Mut.map handle
+}
+
+// parse_fn_json: {"code":"hexstring","consts":[...]} → FnDef
+// 単純文字列解析（関数名にカンマ・ダブルクォートなし前提）
+// 注: Favnir fn 本体では let...in は使用不可のため、match で中間値を束縛する。
+fn parse_fn_json(fn_json: String) -> Result<FnDef, String> {
+  match String.index_of(fn_json, "\"code\":\"") {
+    some(cmpos) => {
+      match String.index_of(String.slice(fn_json, cmpos + 8, String.length(fn_json)), "\"") {
+        some(cend) => {
+          match String.index_of(fn_json, "\"consts\":") {
+            some(ccpos) => {
+              match String.index_of(String.slice(fn_json, ccpos + 9, String.length(fn_json)), "]") {
+                some(csend) => {
+                  Result.ok(FnDef {
+                    code:   String.slice(String.slice(fn_json, cmpos + 8, String.length(fn_json)), 0, cend)
+                    consts: String.slice(String.slice(fn_json, ccpos + 9, String.length(fn_json)), 0, csend + 1)
+                  })
+                }
+                _ => Result.err("parse_fn_json: consts array unterminated")
+              }
+            }
+            _ => Result.err("parse_fn_json: no consts field")
+          }
+        }
+        _ => Result.err("parse_fn_json: code value unterminated")
+      }
+    }
+    _ => Result.err("parse_fn_json: no code field")
+  }
+}
+
+// build_consts_push_all: JSON 配列内部文字列 "a","b","c" → Mut.map に順番に登録
+// inner: ["a","b"] から [ と ] を除いた内部文字列
+fn build_consts_push_all(inner: String, consts_map: Int, idx: Int) -> Result<Unit, String> {
+  match String.length(inner) {
+    0 => Result.ok(VMUnit)
+    inner_len => {
+      match String.index_of(inner, ",") {
+        some(comma_pos) => {
+          // item = inner[1..comma_pos-1]（先頭の " と末尾の " を除く）
+          bind _ <- Mut.set(consts_map, idx, VMStr(String.slice(inner, 1, comma_pos - 1)))
+          build_consts_push_all(String.slice(inner, comma_pos + 1, inner_len), consts_map, idx + 1)
+        }
+        none => {
+          // 最後の要素: inner は "item" 形式
+          bind _ <- Mut.set(consts_map, idx, VMStr(String.slice(inner, 1, inner_len - 1)))
+          Result.ok(VMUnit)
+        }
+      }
+    }
+  }
+}
+
+// build_consts_list: JSON 配列文字列 ["a","b"] → Mut.map（Int キー → VMStr）
+fn build_consts_list(consts_json: String) -> Result<Int, String> {
+  bind consts_map <- Mut.map()
+  match String.length(consts_json) {
+    0 => Result.ok(consts_map)
+    cj_len => {
+      match String.length(String.slice(consts_json, 1, cj_len - 1)) {
+        0 => Result.ok(consts_map)
+        _ => {
+          bind _ <- build_consts_push_all(String.slice(consts_json, 1, cj_len - 1), consts_map, 0)
+          Result.ok(consts_map)
+        }
+      }
+    }
+  }
+}
+
+// copy_args_to_locals_rec: args リスト（LIFO pop 順 = ソース引数順）を locals に登録
+fn copy_args_to_locals_rec(args: Int, fresh_locals: Int, i: Int) -> Result<Unit, String> {
+  bind arg_r <- Mut.pop(args)
+  match arg_r {
+    err(_) => Result.ok(VMUnit)   // args 空 = 全引数コピー完了
+    ok(arg) => {
+      bind _ <- Mut.set(fresh_locals, i, arg)
+      copy_args_to_locals_rec(args, fresh_locals, i + 1)
+    }
+  }
+}
+
+fn copy_args_to_locals(args: Int, fresh_locals: Int) -> Result<Unit, String> {
+  copy_args_to_locals_rec(args, fresh_locals, 0)
+}
+
+// find_fn_in_program: prog_keys / prog_vals の線形検索で fn_name の JSON を返す
+fn find_fn_in_program(prog_keys: Int, prog_vals: Int, fn_name: String, i: Int) -> Result<String, String> {
+  bind key_r <- Mut.get(prog_keys, i)
+  match key_r {
+    err(_) => Result.err(f"function '{fn_name}' not found in program")
+    ok(key_val) => match key_val {
+      VMStr(k) => {
+        match k == fn_name {
+          true => {
+            bind val_r <- Mut.get(prog_vals, i)
+            match val_r {
+              err(e) => Result.err(f"prog_vals[{i}] not found: {e}")
+              ok(val) => match val {
+                VMStr(json) => Result.ok(json)
+                _ => Result.err("prog_vals: non-VMStr value")
+              }
+            }
+          }
+          false => find_fn_in_program(prog_keys, prog_vals, fn_name, i + 1)
+        }
+      }
+      _ => Result.err("prog_keys: non-VMStr key")
+    }
+  }
+}
+
+// build_program_lists_rec: JSON オブジェクト内部文字列 → prog_keys, prog_vals 構築
+// inner 例: "main":{"code":"ab","consts":[]},"h":{"code":"16","consts":[]}
+fn build_program_lists_rec(inner: String, prog_keys: Int, prog_vals: Int, idx: Int) -> Result<Unit, String> {
+  match String.length(inner) {
+    0 => Result.ok(VMUnit)
+    inner_len => {
+      match String.index_of(inner, "\":{") {
+        some(sep_pos) => {
+          // name = inner[1..sep_pos]（先頭の " から ":{" の直前まで）
+          // fn_json starts at sep_pos + 2（"{ → { の位置）
+          // fn_json の末尾を } で検索（fn_json 内部に { は存在しない前提）
+          match String.index_of(String.slice(inner, sep_pos + 2, inner_len), "}") {
+            some(close_pos) => {
+              bind _ <- Mut.set(prog_keys, idx, VMStr(String.slice(inner, 1, sep_pos)))
+              bind _ <- Mut.set(prog_vals, idx, VMStr(String.slice(String.slice(inner, sep_pos + 2, inner_len), 0, close_pos + 1)))
+              // used = (sep_pos + 2) + close_pos + 1 = sep_pos + close_pos + 3
+              match String.length(String.slice(inner, sep_pos + close_pos + 3, inner_len)) {
+                0 => Result.ok(VMUnit)
+                rem_len => {
+                  // remaining は ",next_entry..." の形式（先頭の , をスキップ）
+                  build_program_lists_rec(String.slice(String.slice(inner, sep_pos + close_pos + 3, inner_len), 1, rem_len), prog_keys, prog_vals, idx + 1)
+                }
+              }
+            }
+            _ => Result.err("build_program_lists: malformed fn entry")
+          }
+        }
+        _ => Result.ok(VMUnit)
+      }
+    }
+  }
+}
+
+// build_program_lists: program JSON → (prog_keys, prog_vals) の ListPair
+fn build_program_lists(program_json: String) -> Result<ListPair, String> {
+  bind prog_keys <- Mut.map()
+  bind prog_vals <- Mut.map()
+  bind _ <- build_program_lists_rec(String.slice(program_json, 1, String.length(program_json) - 1), prog_keys, prog_vals, 0)
+  Result.ok(ListPair { first: prog_keys  second: prog_vals })
+}
+
+fn vm_execute(bytecode: Bytes, stack: Int, locals: Int, globals: Int, consts: Int, prog_keys: Int, prog_vals: Int, pc: Int) -> Result<VMVal, String> {
   bind dec_r <- decode_opcode(bytecode, pc)
   match dec_r {
     err(e) => Result.err(e)
     ok(dec) => match dec.op {
       ConstUnit => {
         bind _ <- Mut.push(stack, VMUnit)
-        vm_execute(bytecode, stack, locals, globals, dec.next_pc)
+        vm_execute(bytecode, stack, locals, globals, consts, prog_keys, prog_vals, dec.next_pc)
       }
       ConstTrue => {
         bind _ <- Mut.push(stack, VMBool(true))
-        vm_execute(bytecode, stack, locals, globals, dec.next_pc)
+        vm_execute(bytecode, stack, locals, globals, consts, prog_keys, prog_vals, dec.next_pc)
       }
       ConstFalse => {
         bind _ <- Mut.push(stack, VMBool(false))
-        vm_execute(bytecode, stack, locals, globals, dec.next_pc)
+        vm_execute(bytecode, stack, locals, globals, consts, prog_keys, prog_vals, dec.next_pc)
       }
       Const(n) => {
         bind _ <- Mut.push(stack, VMInt(n))
-        vm_execute(bytecode, stack, locals, globals, dec.next_pc)
+        vm_execute(bytecode, stack, locals, globals, consts, prog_keys, prog_vals, dec.next_pc)
       }
       Pop => {
         bind top_r <- Mut.pop(stack)
         match top_r {
           err(e) => Result.err(f"Pop: {e}")
-          ok(_)  => vm_execute(bytecode, stack, locals, globals, dec.next_pc)
+          ok(_)  => vm_execute(bytecode, stack, locals, globals, consts, prog_keys, prog_vals, dec.next_pc)
         }
       }
       Dup => {
@@ -308,7 +495,7 @@ fn vm_execute(bytecode: Bytes, stack: Int, locals: Int, globals: Int, pc: Int) -
             bind push_r <- Mut.push(stack, v)
             match push_r {
               err(e) => Result.err(f"Dup: {e}")
-              ok(_)  => vm_execute(bytecode, stack, locals, globals, dec.next_pc)
+              ok(_)  => vm_execute(bytecode, stack, locals, globals, consts, prog_keys, prog_vals, dec.next_pc)
             }
           }
         }
@@ -332,7 +519,7 @@ fn vm_execute(bytecode: Bytes, stack: Int, locals: Int, globals: Int, pc: Int) -
                 VMInt(ai) => match b {
                   VMInt(bi) => {
                     bind _ <- Mut.push(stack, VMInt(ai + bi))
-                    vm_execute(bytecode, stack, locals, globals, dec.next_pc)
+                    vm_execute(bytecode, stack, locals, globals, consts, prog_keys, prog_vals, dec.next_pc)
                   }
                   _ => Result.err("Add: type error on b")
                 }
@@ -354,7 +541,7 @@ fn vm_execute(bytecode: Bytes, stack: Int, locals: Int, globals: Int, pc: Int) -
                 VMInt(ai) => match b {
                   VMInt(bi) => {
                     bind _ <- Mut.push(stack, VMInt(ai - bi))
-                    vm_execute(bytecode, stack, locals, globals, dec.next_pc)
+                    vm_execute(bytecode, stack, locals, globals, consts, prog_keys, prog_vals, dec.next_pc)
                   }
                   _ => Result.err("Sub: type error on b")
                 }
@@ -376,7 +563,7 @@ fn vm_execute(bytecode: Bytes, stack: Int, locals: Int, globals: Int, pc: Int) -
                 VMInt(ai) => match b {
                   VMInt(bi) => {
                     bind _ <- Mut.push(stack, VMInt(ai * bi))
-                    vm_execute(bytecode, stack, locals, globals, dec.next_pc)
+                    vm_execute(bytecode, stack, locals, globals, consts, prog_keys, prog_vals, dec.next_pc)
                   }
                   _ => Result.err("Mul: type error on b")
                 }
@@ -400,7 +587,7 @@ fn vm_execute(bytecode: Bytes, stack: Int, locals: Int, globals: Int, pc: Int) -
                     bind push_r <- Mut.push(stack, VMBool(ai == bi))
                     match push_r {
                       err(e) => Result.err(e)
-                      ok(_)  => vm_execute(bytecode, stack, locals, globals, dec.next_pc)
+                      ok(_)  => vm_execute(bytecode, stack, locals, globals, consts, prog_keys, prog_vals, dec.next_pc)
                     }
                   }
                   _ => Result.err("Eq: type error on b")
@@ -412,7 +599,7 @@ fn vm_execute(bytecode: Bytes, stack: Int, locals: Int, globals: Int, pc: Int) -
         }
       }
       Jump(off) => {
-        vm_execute(bytecode, stack, locals, globals, dec.next_pc + off)
+        vm_execute(bytecode, stack, locals, globals, consts, prog_keys, prog_vals, dec.next_pc + off)
       }
       JumpIfFalse(off) => {
         bind cond_r <- Mut.pop(stack)
@@ -420,8 +607,8 @@ fn vm_execute(bytecode: Bytes, stack: Int, locals: Int, globals: Int, pc: Int) -
           err(e) => Result.err(e)
           ok(cond) => match cond {
             VMBool(b) => match b {
-              true  => vm_execute(bytecode, stack, locals, globals, dec.next_pc)
-              false => vm_execute(bytecode, stack, locals, globals, dec.next_pc + off)
+              true  => vm_execute(bytecode, stack, locals, globals, consts, prog_keys, prog_vals, dec.next_pc)
+              false => vm_execute(bytecode, stack, locals, globals, consts, prog_keys, prog_vals, dec.next_pc + off)
             }
             _ => Result.err("JumpIfFalse: not a Bool")
           }
@@ -435,7 +622,7 @@ fn vm_execute(bytecode: Bytes, stack: Int, locals: Int, globals: Int, pc: Int) -
             bind push_r <- Mut.push(stack, v)
             match push_r {
               err(e) => Result.err(f"LoadLocal push: {e}")
-              ok(_)  => vm_execute(bytecode, stack, locals, globals, dec.next_pc)
+              ok(_)  => vm_execute(bytecode, stack, locals, globals, consts, prog_keys, prog_vals, dec.next_pc)
             }
           }
         }
@@ -448,7 +635,7 @@ fn vm_execute(bytecode: Bytes, stack: Int, locals: Int, globals: Int, pc: Int) -
             bind set_r <- Mut.set(locals, slot, val)
             match set_r {
               err(e) => Result.err(f"StoreLocal: {e}")
-              ok(_)  => vm_execute(bytecode, stack, locals, globals, dec.next_pc)
+              ok(_)  => vm_execute(bytecode, stack, locals, globals, consts, prog_keys, prog_vals, dec.next_pc)
             }
           }
         }
@@ -467,7 +654,7 @@ fn vm_execute(bytecode: Bytes, stack: Int, locals: Int, globals: Int, pc: Int) -
                     bind push_r <- Mut.push(stack, VMBool(ai != bi))
                     match push_r {
                       err(e) => Result.err(e)
-                      ok(_)  => vm_execute(bytecode, stack, locals, globals, dec.next_pc)
+                      ok(_)  => vm_execute(bytecode, stack, locals, globals, consts, prog_keys, prog_vals, dec.next_pc)
                     }
                   }
                   _ => Result.err("Ne: type error on b")
@@ -492,7 +679,7 @@ fn vm_execute(bytecode: Bytes, stack: Int, locals: Int, globals: Int, pc: Int) -
                     bind push_r <- Mut.push(stack, VMBool(ai < bi))
                     match push_r {
                       err(e) => Result.err(e)
-                      ok(_)  => vm_execute(bytecode, stack, locals, globals, dec.next_pc)
+                      ok(_)  => vm_execute(bytecode, stack, locals, globals, consts, prog_keys, prog_vals, dec.next_pc)
                     }
                   }
                   _ => Result.err("Lt: type error on b")
@@ -517,7 +704,7 @@ fn vm_execute(bytecode: Bytes, stack: Int, locals: Int, globals: Int, pc: Int) -
                     bind push_r <- Mut.push(stack, VMBool(ai <= bi))
                     match push_r {
                       err(e) => Result.err(e)
-                      ok(_)  => vm_execute(bytecode, stack, locals, globals, dec.next_pc)
+                      ok(_)  => vm_execute(bytecode, stack, locals, globals, consts, prog_keys, prog_vals, dec.next_pc)
                     }
                   }
                   _ => Result.err("Le: type error on b")
@@ -542,7 +729,7 @@ fn vm_execute(bytecode: Bytes, stack: Int, locals: Int, globals: Int, pc: Int) -
                     bind push_r <- Mut.push(stack, VMBool(ai > bi))
                     match push_r {
                       err(e) => Result.err(e)
-                      ok(_)  => vm_execute(bytecode, stack, locals, globals, dec.next_pc)
+                      ok(_)  => vm_execute(bytecode, stack, locals, globals, consts, prog_keys, prog_vals, dec.next_pc)
                     }
                   }
                   _ => Result.err("Gt: type error on b")
@@ -567,7 +754,7 @@ fn vm_execute(bytecode: Bytes, stack: Int, locals: Int, globals: Int, pc: Int) -
                     bind push_r <- Mut.push(stack, VMBool(ai >= bi))
                     match push_r {
                       err(e) => Result.err(e)
-                      ok(_)  => vm_execute(bytecode, stack, locals, globals, dec.next_pc)
+                      ok(_)  => vm_execute(bytecode, stack, locals, globals, consts, prog_keys, prog_vals, dec.next_pc)
                     }
                   }
                   _ => Result.err("Ge: type error on b")
@@ -592,7 +779,7 @@ fn vm_execute(bytecode: Bytes, stack: Int, locals: Int, globals: Int, pc: Int) -
                     bind push_r <- Mut.push(stack, VMBool(ab && bb))
                     match push_r {
                       err(e) => Result.err(e)
-                      ok(_)  => vm_execute(bytecode, stack, locals, globals, dec.next_pc)
+                      ok(_)  => vm_execute(bytecode, stack, locals, globals, consts, prog_keys, prog_vals, dec.next_pc)
                     }
                   }
                   _ => Result.err("And: type error on b")
@@ -617,7 +804,7 @@ fn vm_execute(bytecode: Bytes, stack: Int, locals: Int, globals: Int, pc: Int) -
                     bind push_r <- Mut.push(stack, VMBool(ab || bb))
                     match push_r {
                       err(e) => Result.err(e)
-                      ok(_)  => vm_execute(bytecode, stack, locals, globals, dec.next_pc)
+                      ok(_)  => vm_execute(bytecode, stack, locals, globals, consts, prog_keys, prog_vals, dec.next_pc)
                     }
                   }
                   _ => Result.err("Or: type error on b")
@@ -644,7 +831,7 @@ fn vm_execute(bytecode: Bytes, stack: Int, locals: Int, globals: Int, pc: Int) -
                       bind push_r <- Mut.push(stack, VMInt(ai / bi))
                       match push_r {
                         err(e) => Result.err(e)
-                        ok(_)  => vm_execute(bytecode, stack, locals, globals, dec.next_pc)
+                        ok(_)  => vm_execute(bytecode, stack, locals, globals, consts, prog_keys, prog_vals, dec.next_pc)
                       }
                     }
                   }
@@ -664,7 +851,7 @@ fn vm_execute(bytecode: Bytes, stack: Int, locals: Int, globals: Int, pc: Int) -
             bind push_r <- Mut.push(stack, v)
             match push_r {
               err(e) => Result.err(e)
-              ok(_)  => vm_execute(bytecode, stack, locals, globals, dec.next_pc)
+              ok(_)  => vm_execute(bytecode, stack, locals, globals, consts, prog_keys, prog_vals, dec.next_pc)
             }
           }
         }
@@ -688,7 +875,7 @@ fn vm_execute(bytecode: Bytes, stack: Int, locals: Int, globals: Int, pc: Int) -
                       bind push_r <- Mut.push(stack, v)
                       match push_r {
                         err(e) => Result.err(e)
-                        ok(_)  => vm_execute(bytecode, stack, locals, globals, dec.next_pc)
+                        ok(_)  => vm_execute(bytecode, stack, locals, globals, consts, prog_keys, prog_vals, dec.next_pc)
                       }
                     }
                   }
@@ -696,6 +883,66 @@ fn vm_execute(bytecode: Bytes, stack: Int, locals: Int, globals: Int, pc: Int) -
                 _ => Result.err("Call: callee is not a VMStr")
               }
             }
+          }
+        }
+      }
+      // v25.9.0: CallNamed — ユーザー定義関数呼び出し
+      // 1. consts[name_idx] → fn_name
+      // 2. prog_keys/prog_vals から fn_json を線形検索
+      // 3. fn_json をパースして bytecode + consts を取得
+      // 4. argc 個の引数を収集し fresh locals にコピー
+      // 5. 再帰実行して結果を stack に push
+      CallNamed(name_idx, argc) => {
+        bind name_r <- Mut.get(consts, name_idx)
+        match name_r {
+          err(e) => Result.err(f"CallNamed: consts[{name_idx}] not found: {e}")
+          ok(name_val) => match name_val {
+            VMStr(fn_name) => {
+              bind fn_json_r <- find_fn_in_program(prog_keys, prog_vals, fn_name, 0)
+              match fn_json_r {
+                err(e) => Result.err(f"CallNamed: fn '{fn_name}' not found: {e}")
+                ok(fn_json) => {
+                  bind parsed_r <- parse_fn_json(fn_json)
+                  match parsed_r {
+                    err(e) => Result.err(f"CallNamed: parse: {e}")
+                    ok(fn_def) => {
+                      bind args_r <- collect_args(stack, argc)
+                      match args_r {
+                        err(e) => Result.err(e)
+                        ok(args) => {
+                          bind fresh_locals <- Mut.map()
+                          bind _ <- copy_args_to_locals(args, fresh_locals)
+                          bind bytes_r <- Bytes.from_hex(fn_def.code)
+                          match bytes_r {
+                            err(e) => Result.err(f"CallNamed: from_hex: {e}")
+                            ok(fn_bytes) => {
+                              bind fn_consts_r <- build_consts_list(fn_def.consts)
+                              match fn_consts_r {
+                                err(e) => Result.err(f"CallNamed: build_consts: {e}")
+                                ok(fn_consts) => {
+                                  bind result_r <- vm_execute(fn_bytes, stack, fresh_locals, globals, fn_consts, prog_keys, prog_vals, 0)
+                                  match result_r {
+                                    err(e) => Result.err(e)
+                                    ok(v) => {
+                                      bind push_r <- Mut.push(stack, v)
+                                      match push_r {
+                                        err(e) => Result.err(e)
+                                        ok(_)  => vm_execute(bytecode, stack, locals, globals, consts, prog_keys, prog_vals, dec.next_pc)
+                                      }
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+            _ => Result.err(f"CallNamed: consts[{name_idx}] is not VMStr")
           }
         }
       }
@@ -713,7 +960,7 @@ fn vm_execute(bytecode: Bytes, stack: Int, locals: Int, globals: Int, pc: Int) -
                     bind push_r <- Mut.push(stack, VMStr(String.concat(ns_name, String.concat(".", field_name))))
                     match push_r {
                       err(e) => Result.err(e)
-                      ok(_)  => vm_execute(bytecode, stack, locals, globals, dec.next_pc)
+                      ok(_)  => vm_execute(bytecode, stack, locals, globals, consts, prog_keys, prog_vals, dec.next_pc)
                     }
                   }
                   _ => Result.err("GetField: globals[idx] is not VMStr")
@@ -730,14 +977,60 @@ fn vm_execute(bytecode: Bytes, stack: Int, locals: Int, globals: Int, pc: Int) -
 }
 
 fn vm_run(bytecode: Bytes) -> Result<VMVal, String> {
-  bind stack   <- Mut.list()
-  bind locals  <- Mut.map()
-  bind globals <- Mut.map()
-  vm_execute(bytecode, stack, locals, globals, 0)
+  bind stack     <- Mut.list()
+  bind locals    <- Mut.map()
+  bind globals   <- Mut.map()
+  bind consts    <- Mut.map()
+  bind prog_keys <- Mut.map()
+  bind prog_vals <- Mut.map()
+  vm_execute(bytecode, stack, locals, globals, consts, prog_keys, prog_vals, 0)
 }
 
 fn vm_run_named(bytecode: Bytes, globals: Int) -> Result<VMVal, String> {
-  bind stack  <- Mut.list()
-  bind locals <- Mut.map()
-  vm_execute(bytecode, stack, locals, globals, 0)
+  bind stack     <- Mut.list()
+  bind locals    <- Mut.map()
+  bind consts    <- Mut.map()
+  bind prog_keys <- Mut.map()
+  bind prog_vals <- Mut.map()
+  vm_execute(bytecode, stack, locals, globals, consts, prog_keys, prog_vals, 0)
+}
+
+// v25.9.0: vm_run_program — multi-function program JSON を受け取り main 関数を実行する
+// program_json 例:
+//   {"main":{"code":"01000012...","consts":["helper"]},"helper":{"code":"16","consts":[]}}
+fn vm_run_program(program_json: String) -> Result<VMVal, String> {
+  bind prog_lists_r <- build_program_lists(program_json)
+  match prog_lists_r {
+    err(e) => Result.err(f"vm_run_program: build_program_lists: {e}")
+    ok(prog_lists) => {
+      bind main_json_r <- find_fn_in_program(prog_lists.first, prog_lists.second, "main", 0)
+      match main_json_r {
+        err(e) => Result.err(f"vm_run_program: no 'main' function: {e}")
+        ok(main_json) => {
+          bind parsed_r <- parse_fn_json(main_json)
+          match parsed_r {
+            err(e) => Result.err(f"vm_run_program: parse main: {e}")
+            ok(main_def) => {
+              bind bytes_r <- Bytes.from_hex(main_def.code)
+              match bytes_r {
+                err(e) => Result.err(f"vm_run_program: from_hex: {e}")
+                ok(bytes) => {
+                  bind stack    <- Mut.list()
+                  bind locals   <- Mut.map()
+                  bind globals  <- Mut.map()
+                  bind consts_r <- build_consts_list(main_def.consts)
+                  match consts_r {
+                    err(e) => Result.err(f"vm_run_program: build_consts: {e}")
+                    ok(consts) => {
+                      vm_execute(bytes, stack, locals, globals, consts, prog_lists.first, prog_lists.second, 0)
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
 }

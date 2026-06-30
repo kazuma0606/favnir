@@ -1,0 +1,60 @@
+// examples/postgres_etl.fav — postgres Rune E2E デモ (v25.1.0)
+//
+// 前提:
+//   docker run -d -p 5432:5432 -e POSTGRES_PASSWORD=postgres postgres:15
+//
+// 実行:
+//   fav run examples/postgres_etl.fav
+//
+// ETL フロー:
+//   connect → execute_conn(DDL) → execute_many(INSERT) → query_conn(SELECT) → transaction(UPDATE)
+
+import rune "postgres"
+
+// ユーザー型定義
+type User = { name: String, age: Int }
+
+// ── Stage 1: 接続確立 ──────────────────────────────────────────────────────────
+// 接続オブジェクト API を使って明示的に接続を確立する
+stage Connect: Unit -> PgConn !Postgres = |_| {
+    bind cfg <- Result.ok(PgConfig("host=localhost port=5432 user=postgres password=postgres dbname=etl_demo sslmode=disable"))
+    connect(cfg)
+}
+
+// ── Stage 2: テーブル作成 ──────────────────────────────────────────────────────
+// execute_conn で同じ conn を使って DDL を実行する（環境変数 API と混在しない）
+stage Setup: PgConn -> PgConn !Postgres = |conn| {
+    bind _ <- execute_conn(
+        conn,
+        "CREATE TABLE IF NOT EXISTS users (id SERIAL PRIMARY KEY, name TEXT NOT NULL, age INT NOT NULL)",
+        "[]"
+    )
+    Result.ok(conn)
+}
+
+// ── Stage 3: バッチ挿入 ────────────────────────────────────────────────────────
+// execute_many はアトミックではない。部分失敗を防ぐには transaction 内で使うこと。
+stage InsertUsers: PgConn -> PgConn !Postgres = |conn| {
+    bind rows <- Result.ok([["alice", "30"], ["bob", "25"], ["carol", "35"]])
+    bind _ <- execute_many(conn, "INSERT INTO users(name, age) VALUES ($1, $2)", rows)
+    Result.ok(conn)
+}
+
+// ── Stage 4: クエリ実行 ────────────────────────────────────────────────────────
+// query_conn<T> で conn 経由のクエリを実行し User 型にデシリアライズ
+stage QueryUsers: PgConn -> List<User> !Postgres = |conn| {
+    query_conn<User>(conn, "SELECT name, age FROM users ORDER BY age", "[]")
+}
+
+// ── Stage 5: トランザクション内更新 ───────────────────────────────────────────
+// transaction が BEGIN/COMMIT/ROLLBACK を自動管理する
+// action クロージャが Err を返した場合は ROLLBACK が発行される
+stage UpdateInTx: PgConn -> Int !Postgres = |conn| {
+    transaction<Int>(conn, |tx_conn| {
+        bind _ <- execute_many(tx_conn, "UPDATE users SET age = age + 1 WHERE name = $1", [["alice"]])
+        Result.ok(1)
+    })
+}
+
+// ── パイプライン ──────────────────────────────────────────────────────────────
+pipeline ETL = Connect |> Setup |> InsertUsers |> QueryUsers

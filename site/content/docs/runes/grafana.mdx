@@ -1,0 +1,45 @@
+---
+title: grafana Rune
+description: Grafana ダッシュボード管理 Rune（v28.6.0）
+---
+
+# grafana Rune
+
+`runes/grafana` は Grafana HTTP API 経由でアノテーション作成・ダッシュボード更新・スナップショット生成を行う Rune です。
+
+## インポート
+
+```favnir
+import runes/grafana
+```
+
+## 関数一覧
+
+| 関数 | シグネチャ | 説明 |
+|---|---|---|
+| `Grafana.create_annotation` | `(dashboard_id: String, text: String, tags: String) -> Result<Unit, String> !Io` | アノテーション作成（デプロイ記録等）|
+| `Grafana.push_dashboard` | `(json: String) -> Result<Unit, String> !Io` | ダッシュボード定義の更新 |
+| `Grafana.snapshot` | `(dashboard_id: String) -> Result<String, String> !Io` | スナップショット作成（共有 URL 生成）|
+
+## 使用例
+
+```favnir
+import runes/grafana
+
+stage RecordDeploy: Unit -> Result<Unit, String> !Io = |_| {
+    bind _ <- Grafana.create_annotation("main-dashboard", "Deploy v28.6.0", "deploy,favnir")
+    bind _ <- Grafana.push_dashboard("{\"title\": \"ETL Pipeline\", \"panels\": []}")
+    Result.ok(unit)
+}
+```
+
+## エフェクト
+
+すべての関数は `!Io` エフェクトを持ちます（Grafana HTTP API への送信）。
+
+## 注記
+
+- API キー（`Authorization: Bearer <key>`）の設定は v28.7+ で `fav.toml` の `[grafana]` セクションに追加予定。v28.6.0 時点ではスタブのため API キー設定は不要
+- `snapshot` が返す URL はスタブでは `"https://grafana.example.com/dashboard/snapshot/stub"` の固定文字列。実際の URL 生成は v28.7+
+- WASM ターゲットでは `Result.err("Grafana not supported on wasm32")` を返します
+- `push_dashboard` に渡す JSON は Grafana Dashboard JSON Model 形式（Grafana 公式ドキュメント参照）

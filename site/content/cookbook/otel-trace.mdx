@@ -1,0 +1,21 @@
+# OpenTelemetry トレーシング
+
+OpenTelemetry（OTel）を使って Favnir パイプラインの分散トレースを収集します。
+
+```favnir
+import runes/otel
+
+stage TraceETLPipeline: List<Row> -> List<Row> !Http = |rows| {
+  bind tracer <- OTel.tracer(config.otel_endpoint, "favnir-etl")
+  bind span   <- OTel.start_span(tracer, "etl.transform")
+  OTel.set_attribute(span, "rows.count", Int.to_string(List.length(rows)))
+  bind result <- transform_rows(rows)
+  bind _      <- OTel.end_span(span)
+  Result.ok(result)
+}
+```
+
+## 関連 Rune
+
+- [OTel](/docs/runes/otel) — OpenTelemetry 標準
+- [Datadog](/docs/runes/datadog) — OTel バックエンドとして利用可

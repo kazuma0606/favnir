@@ -1,0 +1,99 @@
+# Rune Foundation — v26.0.0 マイルストーン
+
+v26.0.0 で **Rune Foundation** を達成しました。
+コア 8 Rune がすべて「動く Rune の 5 条件」をクリアし、
+「Favnir で書いたパイプラインが実際の本番データを動かせる」状態になりました。
+
+## 達成した Rune
+
+| Rune | connect | read | write | error | test |
+|---|---|---|---|---|---|
+| postgres | ✓ | ✓ | ✓ | ✓ | ✓（5件） |
+| s3 | ✓ | ✓ | ✓ | ✓ | ✓（5件） |
+| redis | ✓ | ✓ | ✓ | ✓ | ✓（5件） |
+| mysql | ✓ | ✓ | ✓ | ✓ | ✓（4件） |
+| mongodb | ✓ | ✓ | ✓ | ✓ | ✓（5件） |
+| dynamodb | ✓ | ✓ | ✓ | ✓ | ✓（5件） |
+| kafka | ✓ | ✓ | ✓ | ✓ | ✓（5件） |
+| elasticsearch | ✓ | ✓ | ✓ | ✓ | ✓（5件） |
+
+## 「動く Rune の 5 条件」
+
+```
+1. connect  — 接続・認証が実際に確立できる（ローカル Docker で検証）
+2. read     — データを Favnir の型として読み込める（型変換・デシリアライズ）
+3. write    — Favnir のデータをサービスに書き込める
+4. error    — 失敗時に型付きエラー（Result.err）が返る
+5. test     — cargo test でモックを使った自動テストが通る
+```
+
+## full_etl.fav デモ
+
+postgres → 集計 → s3 → kafka 通知の完全パイプライン:
+
+```favnir
+import runes/postgres
+import runes/s3
+import runes/kafka
+
+type Order = { id: Int, amount: Float, status: String }
+type Summary = { total_orders: Int, total_amount: Float }
+
+stage LoadOrders: Unit -> List<Order> !Db = |_| {
+  bind conn <- Postgres.connect(config.postgres)
+  Postgres.query[Order](conn, "SELECT id, amount, status FROM orders WHERE status = $1", ["completed"])
+}
+
+stage Summarize: List<Order> -> Summary = |orders| {
+  let total  = List.length(orders)
+  let amount = List.fold(orders, 0.0, |acc, o| acc + o.amount)
+  Result.ok(Summary { total_orders: total, total_amount: amount })
+}
+
+stage SaveToS3: Summary -> Summary !Io = |summary| {
+  bind json_str <- Json.encode(summary)
+  bind _        <- S3.put_object("my-bucket", "etl/summary.json", Bytes.from_string(json_str))
+  Result.ok(summary)
+}
+
+stage NotifyKafka: Summary -> Unit !Io = |summary| {
+  bind msg <- Json.encode(summary)
+  Kafka.produce("etl-events", "summary", msg)
+}
+
+LoadOrders |> Summarize |> SaveToS3 |> NotifyKafka
+```
+
+### 実行方法
+
+```bash
+# ローカル Docker 環境を起動
+docker compose up postgres localstack redpanda -d
+
+# フル ETL デモを実行
+fav run examples/full_etl.fav
+
+# 個別デモ
+fav run examples/postgres_etl.fav
+fav run examples/s3_csv_to_parquet.fav
+```
+
+## vm.fav Phase 6 — CallNamed opcode
+
+v25.9.0 で `CallNamed(name_idx, argc)` opcode (0x56) を実装しました。
+multi-function Favnir プログラムを vm.fav インタープリター上で実行できます。
+
+```bash
+# ソースをコンパイルして vm.fav 経由で実行
+fav run --vm self/vm.fav --compile hello.fav
+```
+
+| opcode | バイト | 動作 |
+|---|---|---|
+| `CallNamed(ni, ac)` | `0x56 u16LE u16LE` | consts[ni]=fn_name → program から fn_json → fresh locals で vm_execute 再帰 |
+
+## 参照
+
+- [MILESTONE.md](../../../MILESTONE.md) — Rune Foundation 宣言
+- [STABILITY.md](../../../STABILITY.md) — v1.x 後方互換性ポリシー
+- [vm-fav.mdx](./tools/vm-fav.mdx) — vm.fav Phase 6 詳細

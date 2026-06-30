@@ -1,0 +1,48 @@
+---
+title: otel Rune
+description: OpenTelemetry トレース送信 Rune（v28.3.0）
+---
+
+# otel Rune
+
+`runes/otel` は OpenTelemetry トレースを OTLP / Jaeger / Tempo / Honeycomb へ送信する Rune です。
+既存の `fav/src/otel.rs`（v22.7.0）の機能を Favnir から直接呼び出せる形に整理しました。
+
+## インポート
+
+```favnir
+import runes/otel
+```
+
+## 関数一覧
+
+| 関数 | シグネチャ | 説明 |
+|---|---|---|
+| `OTel.start_span` | `(name: String, service: String) -> Result<Unit, String> !Io` | 新しいスパンを開始 |
+| `OTel.set_attribute` | `(key: String, value: String) -> Result<Unit, String> !Io` | スパンに属性を追加 |
+| `OTel.add_event` | `(name: String, attrs: String) -> Result<Unit, String> !Io` | スパンにイベントを追加 |
+| `OTel.end_span` | `(status: String) -> Result<Unit, String> !Io` | スパンを終了 |
+
+## 使用例
+
+```favnir
+import runes/otel
+
+stage TraceLoad: Unit -> Result<Unit, String> !Io = |_| {
+    bind _ <- OTel.start_span("load-orders", "etl-service")
+    bind _ <- OTel.set_attribute("db.system", "postgresql")
+    bind _ <- OTel.add_event("query.start", "{}")
+    bind _ <- OTel.end_span("ok")
+    Result.ok(unit)
+}
+```
+
+## エフェクト
+
+すべての関数は `!Io` エフェクトを持ちます（OTLP エンドポイントへの HTTP 送信）。
+
+## 注記
+
+- `#[trace(name, service)]` アノテーションによる自動スパン挿入は v28.3+ で実装予定
+- OTLP エクスポーターの接続先設定（`fav.toml` `[otel]` セクション）は v28.4+ で追加予定
+- WASM ターゲットでは `Result.err("OTel not supported on wasm32")` を返します

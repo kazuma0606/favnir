@@ -1,0 +1,21 @@
+# MLflow 実験管理
+
+Favnir の前処理パイプラインと MLflow 実験を統合し、特徴量エンジニアリングの結果を記録します。
+
+```favnir
+import runes/mlflow
+
+stage LogFeatureEngineering: FeatureSet -> FeatureSet !Http = |features| {
+  bind run_id <- MLflow.start_run("feature-engineering-v1")
+  bind _      <- MLflow.log_param(run_id, "null_strategy", "mean_fill")
+  bind _      <- MLflow.log_metric(run_id, "null_rate", features.null_rate, 0)
+  bind _      <- MLflow.log_metric(run_id, "feature_count", Float.from_int(features.count), 0)
+  bind _      <- MLflow.end_run(run_id, "FINISHED")
+  Result.ok(features)
+}
+```
+
+## 関連 Rune
+
+- [MLflow](/docs/runes/mlflow) — ML 実験管理・モデルレジストリ
+- [Pinecone](/docs/runes/pinecone) — ベクトル DB

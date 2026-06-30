@@ -1,0 +1,6 @@
+[rune]
+name        = "mlflow"
+version     = "1.0.0"
+description = "MLflow 実験管理・モデルレジストリ連携"
+license     = "MIT"
+authors     = ["Favnir Team"]

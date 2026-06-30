@@ -1,0 +1,38 @@
+import rune "nats"
+import rune "postgres"
+
+// ── NATS → Postgres IoT センサーデータ蓄積デモ (v26.7.0) ──────────────────────
+// 前提: docker compose -f examples/streaming/docker-compose.yml up -d
+// 実行: fav run examples/streaming/nats_to_postgres.fav
+//
+// 環境変数:
+//   NATS_URL    — NATS サーバー URL（省略: "nats://localhost:4222"）
+//   DATABASE_URL — Postgres 接続文字列（省略: "host=localhost port=5432 user=favnir password=favnir dbname=sensors"）
+
+// 1. NATS の sensors.data サブジェクトからセンサー読み取りを受信
+// Note: NATS.connect("") の空文字列は VM primitive 内で NATS_URL 環境変数に
+//       フォールバックする（backend/vm.rs の NatsConnectRaw 実装参照）。
+stage FetchSensorData: Unit -> Result<String, String> !Stream = |_| {
+    bind conn <- NATS.connect("")
+    NATS.subscribe(conn, "sensors.data")
+}
+
+// 2. 空ペイロードをスキップ（スタブ: 実プロジェクトでは値範囲チェックに拡張可能）
+stage ValidateSensor: String -> Result<String, String> !Pure = |payload| {
+    if String.length(payload) > 0
+    then Result.ok(payload)
+    else Result.err("empty sensor payload — skipping")
+}
+
+// 3. Postgres の sensor_readings テーブルに INSERT
+// Note: Postgres.execute は Result<Unit, String> を返す。Unit を _ で捨てて Result<String, String> に変換。
+//       params は JSON 配列形式。sensor_json（JSONオブジェクト文字列）を配列で包んで渡す。
+stage InsertToPostgres: String -> Result<String, String> !Postgres = |sensor_json| {
+    bind _ <- Postgres.execute(
+        "INSERT INTO sensor_readings (data, received_at) VALUES ($1::jsonb, NOW())",
+        "[" ++ sensor_json ++ "]"
+    )
+    Result.ok("inserted sensor reading into sensor_readings")
+}
+
+seq SensorPipeline = FetchSensorData |> ValidateSensor |> InsertToPostgres

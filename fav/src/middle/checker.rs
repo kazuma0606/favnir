@@ -5648,6 +5648,56 @@ impl Checker {
         }
     }
 
+    fn require_redis_effect(&mut self, span: &Span) {
+        if !self.has_effect(|e| matches!(e, Effect::Redis)) {
+            self.type_error(
+                "E0320",
+                "Redis.* call requires `!Redis` effect on enclosing fn/stage",
+                span,
+            );
+        }
+    }
+
+    fn require_mysql_effect(&mut self, span: &Span) {
+        if !self.has_effect(|e| matches!(e, Effect::MySQL)) {
+            self.type_error(
+                "E0321",
+                "MySQL.* call requires `!MySQL` effect on enclosing fn/stage",
+                span,
+            );
+        }
+    }
+
+    fn require_mongodb_effect(&mut self, span: &Span) {
+        if !self.has_effect(|e| matches!(e, Effect::MongoDB)) {
+            self.type_error(
+                "E0322",
+                "Mongo.* call requires `!MongoDB` effect on enclosing fn/stage",
+                span,
+            );
+        }
+    }
+
+    fn require_dynamodb_effect(&mut self, span: &Span) {
+        if !self.has_effect(|e| matches!(e, Effect::DynamoDB)) {
+            self.type_error(
+                "E0323",
+                "DynamoDB.* call requires `!DynamoDB` effect on enclosing fn/stage",
+                span,
+            );
+        }
+    }
+
+    fn require_elasticsearch_effect(&mut self, span: &Span) {
+        if !self.has_effect(|e| matches!(e, Effect::Elasticsearch)) {
+            self.type_error(
+                "E0324",
+                "ES.* call requires `!Elasticsearch` effect on enclosing fn/stage",
+                span,
+            );
+        }
+    }
+
     fn require_azure_db_effect(&mut self, span: &Span) {
         if !self.has_effect(|e| matches!(e, Effect::AzureDb)) {
             self.type_error(
@@ -6599,6 +6649,31 @@ impl Checker {
                     Box::new(Type::String),
                 ))
             }
+            // Kafka 新規 primitives (v25.7.0)
+            // connect_raw の戻り型は Result<String, String>（checker レベル）。
+            // KafkaConn(String) は名目型ラッパー — checker は String として扱う（DynamoConn と同パターン）。
+            ("Kafka", "connect_raw") => {
+                self.require_stream_effect(span);
+                Some(Type::Result(
+                    Box::new(Type::String),
+                    Box::new(Type::String),
+                ))
+            }
+            ("Kafka", "consume_batch_raw") => {
+                self.require_stream_effect(span);
+                // 戻り値は JSON 配列文字列（payload の Vec<String> を JSON エンコード）
+                Some(Type::Result(
+                    Box::new(Type::String),
+                    Box::new(Type::String),
+                ))
+            }
+            ("Kafka", "create_topic_raw") => {
+                self.require_stream_effect(span);
+                Some(Type::Result(
+                    Box::new(Type::Unit),
+                    Box::new(Type::String),
+                ))
+            }
 
             // AzurePostgres (v14.1.0) — require !AzureDb effect
             ("AzurePostgres", "execute_raw") => {
@@ -6635,6 +6710,123 @@ impl Checker {
             }
             ("AzureBlob", _) => {
                 self.require_azure_storage_effect(span);
+                Some(Type::Unknown)
+            }
+
+            // Redis (v25.3.0) — require !Redis effect
+            // connect_raw の戻り型は Result<String, String>（checker レベル）。
+            // runes/redis/redis.fav では Result<RedisConn, String> として公開しているが、
+            // RedisConn(String) は名目型ラッパーであり checker は String として扱う
+            // （PgConn / SnowflakeConn と同じパターン — 意図的な簡略化）。
+            ("Redis", "connect_raw") => {
+                self.require_redis_effect(span);
+                Some(Type::Result(Box::new(Type::String), Box::new(Type::String)))
+            }
+            ("Redis", "get_raw") | ("Redis", "rpop_raw") | ("Redis", "subscribe_once_raw") => {
+                self.require_redis_effect(span);
+                Some(Type::Result(Box::new(Type::String), Box::new(Type::String)))
+            }
+            ("Redis", "set_raw") => {
+                self.require_redis_effect(span);
+                Some(Type::Result(Box::new(Type::Unit), Box::new(Type::String)))
+            }
+            ("Redis", "del_raw") | ("Redis", "incr_raw") | ("Redis", "lpush_raw") | ("Redis", "publish_raw") => {
+                self.require_redis_effect(span);
+                Some(Type::Result(Box::new(Type::Int), Box::new(Type::String)))
+            }
+            ("Redis", _) => {
+                self.require_redis_effect(span);
+                Some(Type::Unknown)
+            }
+
+            // MySQL (v25.4.0) — require !MySQL effect
+            // connect_raw の戻り型は Result<String, String>（checker レベル）。
+            // runes/mysql/mysql.fav では Result<MySqlConn, String> として公開しているが、
+            // MySqlConn(String) は名目型ラッパーであり checker は String として扱う
+            // （PgConn / RedisConn と同じパターン — 意図的な簡略化）。
+            ("MySQL", "connect_raw") => {
+                self.require_mysql_effect(span);
+                Some(Type::Result(Box::new(Type::String), Box::new(Type::String)))
+            }
+            ("MySQL", "query_raw") => {
+                self.require_mysql_effect(span);
+                Some(Type::Result(Box::new(Type::String), Box::new(Type::String)))
+            }
+            ("MySQL", "execute_raw") => {
+                self.require_mysql_effect(span);
+                Some(Type::Result(Box::new(Type::Int), Box::new(Type::String)))
+            }
+            ("MySQL", "transaction_begin_raw") | ("MySQL", "transaction_commit_raw") | ("MySQL", "transaction_rollback_raw") => {
+                self.require_mysql_effect(span);
+                Some(Type::Result(Box::new(Type::Unit), Box::new(Type::String)))
+            }
+            ("MySQL", _) => {
+                self.require_mysql_effect(span);
+                Some(Type::Unknown)
+            }
+
+            // MongoDB (v25.5.0) — require !MongoDB effect
+            // connect_raw の戻り型は Result<String, String>（checker レベル）。
+            // MongoConn(String) は名目型ラッパー — PgConn / RedisConn / MySqlConn と同パターン。
+            ("Mongo", "connect_raw") => {
+                self.require_mongodb_effect(span);
+                Some(Type::Result(Box::new(Type::String), Box::new(Type::String)))
+            }
+            ("Mongo", "find_raw") | ("Mongo", "find_one_raw") | ("Mongo", "aggregate_raw") | ("Mongo", "insert_one_raw") => {
+                self.require_mongodb_effect(span);
+                Some(Type::Result(Box::new(Type::String), Box::new(Type::String)))
+            }
+            ("Mongo", "insert_many_raw") | ("Mongo", "update_one_raw") | ("Mongo", "delete_one_raw") => {
+                self.require_mongodb_effect(span);
+                Some(Type::Result(Box::new(Type::Int), Box::new(Type::String)))
+            }
+            ("Mongo", _) => {
+                self.require_mongodb_effect(span);
+                Some(Type::Unknown)
+            }
+
+            // DynamoDB (v25.6.0) — require !DynamoDB effect
+            // connect_raw の戻り型は Result<String, String>（checker レベル）。
+            // DynamoConn(String) は名目型ラッパーであり checker は String として扱う
+            // → runes/dynamodb/dynamodb.fav の `connect` が Result<DynamoConn, String> を返せる
+            // （PgConn / RedisConn / MySqlConn / MongoConn と同パターン — 意図的な簡略化）
+            ("DynamoDB", "connect_raw") => {
+                self.require_dynamodb_effect(span);
+                Some(Type::Result(Box::new(Type::String), Box::new(Type::String)))
+            }
+            ("DynamoDB", "get_item_raw") | ("DynamoDB", "query_raw") | ("DynamoDB", "scan_raw") => {
+                self.require_dynamodb_effect(span);
+                Some(Type::Result(Box::new(Type::String), Box::new(Type::String)))
+            }
+            ("DynamoDB", "put_item_raw") | ("DynamoDB", "delete_item_raw") | ("DynamoDB", "transact_write_raw") => {
+                self.require_dynamodb_effect(span);
+                Some(Type::Result(Box::new(Type::Unit), Box::new(Type::String)))
+            }
+            ("DynamoDB", "batch_write_raw") => {
+                self.require_dynamodb_effect(span);
+                Some(Type::Result(Box::new(Type::Int), Box::new(Type::String)))
+            }
+            ("DynamoDB", _) => {
+                self.require_dynamodb_effect(span);
+                Some(Type::Unknown)
+            }
+
+            // Elasticsearch (v25.8.0) — require !Elasticsearch effect
+            // ESConn(String) は名目型ラッパー — checker は String として扱う（DynamoConn と同パターン）
+            ("ES", "connect_raw") => {
+                self.require_elasticsearch_effect(span);
+                Some(Type::Result(Box::new(Type::String), Box::new(Type::String)))
+            }
+            ("ES", "index_raw") | ("ES", "index_with_id_raw") | ("ES", "delete_raw") | ("ES", "create_index_raw") => {
+                self.require_elasticsearch_effect(span);
+                Some(Type::Result(Box::new(Type::Unit), Box::new(Type::String)))
+            }
+            ("ES", "search_raw") | ("ES", "knn_search_raw") | ("ES", "bulk_raw") => {
+                self.require_elasticsearch_effect(span);
+                Some(Type::Result(Box::new(Type::String), Box::new(Type::String)))
+            }
+            ("ES", _) => {
+                self.require_elasticsearch_effect(span);
                 Some(Type::Unknown)
             }
 
@@ -10235,6 +10427,11 @@ pub fn collect_exports(program: &Program, env: &TyEnv) -> HashMap<String, (Type,
 fn ns_to_inferred_effect(ns: &str) -> Option<Effect> {
     match ns {
         "Postgres" | "Db"               => Some(Effect::Postgres),
+        "Redis"                         => Some(Effect::Redis),
+        "MySQL"                         => Some(Effect::MySQL),
+        "Mongo" | "MongoDB"             => Some(Effect::MongoDB),
+        "DynamoDB"                      => Some(Effect::DynamoDB),
+        "ES" | "Elasticsearch"          => Some(Effect::Elasticsearch),
         "IO"                            => Some(Effect::Io),
         "S3" | "Sqs" | "Dynamo" | "Aws" => Some(Effect::Db),  // generic Db/AWS
         "Kafka" | "Rskafka"             => Some(Effect::Stream),

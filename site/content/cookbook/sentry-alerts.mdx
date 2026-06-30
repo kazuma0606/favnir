@@ -1,0 +1,26 @@
+# Sentry エラーレポート
+
+パイプライン実行中の例外を Sentry に自動レポートします。
+
+```favnir
+import runes/sentry
+
+stage LoadWithSentryGuard: String -> List<Row> !Http = |source| {
+  match load_data(source) {
+  | Result.ok(rows)  -> Result.ok(rows)
+  | Result.err(msg)  ->
+      bind _ <- Sentry.capture_exception(
+        config.sentry_dsn,
+        "LoadError",
+        msg,
+        { "source": source }
+      )
+      Result.err(msg)
+  }
+}
+```
+
+## 関連 Rune
+
+- [Sentry](/docs/runes/sentry) — エラートラッキング
+- [PagerDuty](/docs/runes/pagerduty) — クリティカルエラーのエスカレーション

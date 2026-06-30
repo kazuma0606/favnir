@@ -228,6 +228,20 @@ fn vmval_display(v: VMVal) -> String
 |---|---|---|
 | `GetField(idx)` | `0x40 u16LE` | pop VMStr(ns) + globals[idx]=VMStr(field) → push VMStr("ns.field") |
 
+### Phase 6: CallNamed — ユーザー定義関数呼び出し（v25.9.0）
+
+`CallNamed(name_idx, argc)` opcode (0x56, 5 バイト) により、multi-function プログラムの実行に対応。
+
+```bash
+fav run --vm self/vm.fav --compile hello.fav
+```
+
+`--compile` フラグはソースをコンパイルして program JSON を生成し、`vm_run_program` 経由で実行する。
+
+| オペコード | バイト | 動作 |
+|---|---|---|
+| `CallNamed(ni, ac)` | `0x56 u16LE u16LE` | consts[ni]=fn_name → program から fn_json → fresh locals で vm_execute 再帰呼び出し |
+
 ### 引数順の不変条件
 
 `collect_args(stack, N)` はスタックから LIFO で収集し、`Mut.pop(args)` で arg1 から順に取り出せる。

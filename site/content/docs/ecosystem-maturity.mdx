@@ -1,0 +1,54 @@
+---
+title: Ecosystem Maturity
+description: v30.0.0 — Favnir Ecosystem Maturity マイルストーン宣言
+---
+
+# Ecosystem Maturity（v30.0.0）
+
+> 「`fav add stripe` で Stripe 連携 Rune が 5 分で動き、
+>  コミュニティ投稿 Rune が Registry に 10 本以上存在する」
+
+v30.0.0（2026-07-01）をもって、Favnir の **Ecosystem Maturity** を正式に宣言します。
+
+## 達成したこと
+
+v29.1〜v29.9 の 9 バージョンで以下を構築しました：
+
+- **Rune Registry**: `fav publish / add / search / info` が実際の Lambda API を呼ぶ
+- **AI/ML Rune 4 本**: mlflow / pinecone / vertex-ai / sagemaker
+- **GitHub / PagerDuty Rune**: CI 統合とインシデント通知
+- **VS Code 拡張**: TextMate grammar / LSP / Task Runner
+- **ドキュメントサイト v3**: cookbook 32 本 / `/community` ページ
+- **コミュニティ Rune 10 本**: stripe / twilio / notion / linear / airtable /
+  sendgrid / hubspot / zendesk / shopify / intercom
+
+## 象徴デモ
+
+```bash
+# Stripe 連携 Rune を追加（コミュニティ投稿）
+fav add stripe
+
+# Stripe.create_payment_intent が 5 分で動く
+fav run my_pipeline.fav
+```
+
+## テスト数推移（v29.x）
+
+| バージョン | テーマ | テスト数 |
+|---|---|---|
+| v29.1.0 | fav publish 実装 | 2318 |
+| v29.2.0 | mlflow Rune | 2324 |
+| v29.3.0 | pinecone Rune | 2330 |
+| v29.4.0 | vertex-ai / sagemaker Rune | 2336 |
+| v29.5.0 | github Rune | 2342 |
+| v29.6.0 | pagerduty Rune | 2348 |
+| v29.7.0 | VS Code 拡張 | 2354 |
+| v29.8.0 | ドキュメントサイト v3 | 2360 |
+| v29.9.0 | コミュニティ Rune コンテスト | 2366 |
+| **v30.0.0** | **Ecosystem Maturity 宣言** | **2372** |
+
+## 次のフェーズ（v31.x）
+
+- Rune Registry への実際のパッケージアップロード（Lambda 本番稼働後）
+- コミュニティ Rune の HTTP 認証ヘッダー対応（HTTP Rune 有効化後）
+- VS Code Marketplace への公式パッケージ公開

@@ -1,7 +1,7 @@
 # Performance Profiling
 
 Identify bottlenecks in your pipelines with stage-level timing, flamegraph SVGs,
-and machine-readable JSON output.
+machine-readable JSON output, and version-to-version comparison via `--compare`.
 
 ## Quick Start
 
@@ -98,6 +98,36 @@ proportional to time spent. Click blocks to zoom in.
 | `--runs=N` | `1` | Average over N runs |
 | `--stage=<name>` | (all) | Show only the named stage |
 | `--out=<path>` | `flamegraph.svg` | Output file path (flamegraph only) |
+
+## バージョン間比較: `--compare`
+
+前バージョンのベンチマークと比較し、劣化した stage を `[SLOWER]` でハイライトします。
+
+```bash
+# v28.3.0 のベンチマークと比較
+fav profile --compare v28.3.0 src/pipeline.fav
+```
+
+出力例:
+
+```
+fav profile --compare v28.3.0 src/pipeline.fav
+
+Stage              Baseline (ms)  Current (ms)     Diff      Mark
+────────────────────────────────────────────────────────────────────
+ExtractOrders            12.0          18.0       +50.0%   [SLOWER]
+TransformOrders           8.0           7.0       -12.5%   [FASTER]
+LoadWarehouse            25.0          25.0        +0.0%
+NewStage                    -          10.0            -   [NEW]
+```
+
+- **`[SLOWER]`**: ベースラインより 10% 以上遅い
+- **`[FASTER]`**: ベースラインより 10% 以上速い
+- **`[NEW]`**: ベースラインに存在しない新しい stage
+
+> **注記（v28.4.0）**: 現バージョンでは `benchmarks/*.json` に stage 別 ms データが未収録のため、
+> `--compare` 実行時は全 stage が `[NEW]` として出力されます。
+> stage 別ベースラインデータは v28.x 以降のバージョンで対応予定です。
 
 ## How Profiling Works
 

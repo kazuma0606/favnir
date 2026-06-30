@@ -1,0 +1,9 @@
+{
+  "version": "25.4.0",
+  "timestamp": "2026-06-25T00:00:00Z",
+  "metrics": {
+    "test_count": 2000,
+    "compile_hello_ms": 12,
+    "compile_etl_ms": 45
+  }
+}

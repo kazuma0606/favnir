@@ -1,0 +1,18 @@
+// examples/sqlite_etl.fav — SQLite 軽量 ETL パイプラインデモ（v27.9.0 stub）
+// NOTE: v27.9.0 stub — rusqlite 統合は v28.x 以降
+
+import rune "sqlite"
+
+stage CreateTable: Unit -> Result<Unit, String> !Db = |_| {
+    bind db <- SQLite.open(":memory:")
+    bind _  <- SQLite.execute(db, "CREATE TABLE data (id INT, name TEXT)", "[]")
+    Result.ok(unit)
+}
+
+// TODO(v28.x): InsertRows を SqliteEtlPipeline に組み込む（rusqlite 統合後）
+stage InsertRows: Unit -> Result<Int, String> !Db = |_| {
+    bind db <- SQLite.open(":memory:")
+    SQLite.execute(db, "INSERT INTO data VALUES (1, 'test')", "[]")
+}
+
+seq SqliteEtlPipeline = CreateTable

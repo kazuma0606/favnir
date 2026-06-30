@@ -1,0 +1,20 @@
+# SageMaker エンドポイント推論
+
+AWS SageMaker のデプロイ済みエンドポイントを Favnir パイプラインから呼び出して推論を実行します。
+
+```favnir
+import runes/sagemaker
+
+stage InferWithSageMaker: String -> String !Http = |payload| {
+  SageMaker.invoke(config.sagemaker_endpoint, payload)
+}
+
+stage BatchScoreWithSageMaker: List<String> -> List<String> !Http = |payloads| {
+  payloads |> List.map(|p| SageMaker.invoke(config.sagemaker_endpoint, p)) |> Result.all
+}
+```
+
+## 関連 Rune
+
+- [SageMaker](/docs/runes/sagemaker) — AWS SageMaker ML プラットフォーム
+- [S3](/docs/runes/s3) — バッチ推論の I/O

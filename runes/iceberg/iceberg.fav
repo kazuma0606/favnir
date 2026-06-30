@@ -1,0 +1,21 @@
+// runes/iceberg/iceberg.fav — Apache Iceberg Rune (v27.2.0)
+// iceberg-rust 統合は v28.x 以降。現バージョンは引数検証 stub。
+// TODO(v28.x): iceberg-rust クレートを使った実テーブル読み書きに移行予定。
+public fn read(catalog: String, table: String) -> Result<String, String> !Io {
+    Iceberg.read_raw(catalog, table)
+}
+public fn append(catalog: String, table: String, data: String) -> Result<Unit, String> !Io {
+    Iceberg.append_raw(catalog, table, data)
+}
+public fn overwrite(catalog: String, table: String, data: String, filter: String) -> Result<Unit, String> !Io {
+    Iceberg.overwrite_raw(catalog, table, data, filter)
+}
+public fn time_travel(catalog: String, table: String, snapshot_id: Int) -> Result<String, String> !Io {
+    Iceberg.time_travel_raw(catalog, table, snapshot_id)
+}
+public fn schema_evolution(catalog: String, table: String, new_schema: String) -> Result<Unit, String> !Io {
+    Iceberg.schema_evolution_raw(catalog, table, new_schema)
+}
+public fn list_snapshots(catalog: String, table: String) -> Result<String, String> !Io {
+    Iceberg.list_snapshots_raw(catalog, table)
+}

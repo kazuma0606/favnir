@@ -1,0 +1,17 @@
+# BigQuery データロード
+
+変換済みデータを BigQuery テーブルにロードするパイプラインです。
+
+```favnir
+import runes/bigquery
+
+stage LoadToBigQuery: List<Row> -> Unit !Http = |rows| {
+  bind client <- BigQuery.client(config.bigquery_project, config.bigquery_dataset)
+  BigQuery.insert_rows(client, config.bigquery_table, rows)
+}
+```
+
+## 関連 Rune
+
+- [BigQuery](/docs/runes/bigquery) — Google BigQuery DWH
+- [Delta Lake](/docs/runes/delta-lake) — ロード前のステージング

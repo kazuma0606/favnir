@@ -1,0 +1,159 @@
+# Elasticsearch Rune
+
+Favnir の `elasticsearch` Rune は、Elasticsearch クラスターへの全文検索・ベクトル検索・ドキュメント書き込みを
+`!Elasticsearch` エフェクトで安全に行うためのインターフェースです（v25.8.0 で追加）。
+
+## セットアップ
+
+### Docker（ローカル開発）
+
+```bash
+docker run -p 9200:9200 \
+  -e "discovery.type=single-node" \
+  -e "xpack.security.enabled=false" \
+  elasticsearch:8.11.0
+```
+
+### 環境変数
+
+| 変数 | 説明 | デフォルト |
+|---|---|---|
+| `ELASTICSEARCH_URL` | クラスター URL | `http://localhost:9200` |
+| `ELASTICSEARCH_API_KEY` | API キー認証（優先） | — |
+| `ELASTICSEARCH_USERNAME` / `ELASTICSEARCH_PASSWORD` | Basic 認証 | — |
+
+## import
+
+```favnir
+import rune "elasticsearch"
+```
+
+## 型
+
+```favnir
+type ESConn(String)  // 接続先 URL を保持する名目型ラッパー
+```
+
+`connect` の引数に `""` を渡すと `ELASTICSEARCH_URL` 環境変数 → `http://localhost:9200` にフォールバックします。
+
+## API
+
+### connect
+
+```favnir
+fn connect(url: String) -> Result<ESConn, String> !Elasticsearch
+```
+
+クラスターに接続確認し、成功時は `ESConn` を返します。
+
+```favnir
+bind conn = ES.connect("") in  // ELASTICSEARCH_URL を使用
+```
+
+### index
+
+```favnir
+fn index(conn: ESConn, idx: String, doc_json: String) -> Result<Unit, String> !Elasticsearch
+```
+
+ドキュメントを `idx` インデックスに追加します（ID は ES が自動採番）。
+
+```favnir
+bind _ = ES.index(conn, "app-logs", "{\"message\":\"server started\",\"level\":\"info\"}") in
+```
+
+### index_with_id
+
+```favnir
+fn index_with_id(conn: ESConn, idx: String, id: String, doc_json: String) -> Result<Unit, String> !Elasticsearch
+```
+
+指定した `id` でドキュメントを追加・上書きします。
+
+### search
+
+```favnir
+fn search(conn: ESConn, idx: String, query_json: String) -> Result<String, String> !Elasticsearch
+```
+
+Elasticsearch Query DSL で検索します。`hits.hits[]._source` を JSON 配列文字列で返します。
+
+```favnir
+let query = "{\"query\":{\"match\":{\"message\":\"error\"}}}" in
+bind results = ES.search(conn, "app-logs", query) in
+```
+
+### knn_search
+
+```favnir
+fn knn_search(conn: ESConn, idx: String, knn_json: String) -> Result<String, String> !Elasticsearch
+```
+
+kNN ベクトル検索を行います。`_source` 配列を JSON 文字列で返します。
+
+```favnir
+let knn = "{\"knn\":{\"field\":\"embedding\",\"query_vector\":[0.1,0.2,0.3],\"k\":5,\"num_candidates\":100}}" in
+bind results = ES.knn_search(conn, "vectors", knn) in
+```
+
+### bulk
+
+```favnir
+fn bulk(conn: ESConn, idx: String, docs_json: String) -> Result<Unit, String> !Elasticsearch
+```
+
+JSON 配列を NDJSON に変換して `POST /_bulk` で一括インデックスします。
+
+```favnir
+let docs = "[{\"message\":\"log1\"},{\"message\":\"log2\"}]" in
+bind _ = ES.bulk(conn, "app-logs", docs) in
+```
+
+### delete
+
+```favnir
+fn delete(conn: ESConn, idx: String, id: String) -> Result<Unit, String> !Elasticsearch
+```
+
+指定した `id` のドキュメントを削除します。
+
+### create_index
+
+```favnir
+fn create_index(conn: ESConn, idx: String, mapping_json: String) -> Result<Unit, String> !Elasticsearch
+```
+
+インデックスを作成します。`mapping_json` が `""` のとき `{}` ボディで `PUT /{idx}` を呼びます。
+
+```favnir
+// マッピングなし
+bind _ = ES.create_index(conn, "app-logs", "") in
+
+// カスタムマッピング
+let mapping = "{\"mappings\":{\"properties\":{\"message\":{\"type\":\"text\"},\"level\":{\"type\":\"keyword\"}}}}" in
+bind _ = ES.create_index(conn, "app-logs", mapping) in
+```
+
+## エフェクト
+
+`!Elasticsearch` エフェクトを宣言していない関数から ES 操作を呼ぶと **E0324** が発生します。
+
+```favnir
+// NG: !Elasticsearch なし
+fn run(idx: String) -> Result<String, String> {
+  ES.search_raw(url, idx, "{}")  // E0324: !Elasticsearch not declared
+}
+
+// OK
+fn run(idx: String) -> Result<String, String> !Elasticsearch {
+  bind conn = ES.connect("") in
+  ES.search(conn, idx, "{}")
+}
+```
+
+## スコープ外（v26.x 予定）
+
+- `search[T]` / `knn_search[T]` — 型付きジェネリクス変換
+- スクロール API / ページネーション
+- インデックスエイリアス管理
+- 集計クエリ（aggregations）専用 API

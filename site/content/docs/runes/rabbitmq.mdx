@@ -1,0 +1,110 @@
+# RabbitMQ Rune
+
+AMQP プロトコルを使うエンタープライズ MQ との統合。v26.3.0 で「動く Rune の 5 条件」をクリア。
+
+## 「動く Rune」5 条件クリア状況
+
+| # | 条件 | 実装 | 状態 |
+|---|---|---|---|
+| 1 | connect | `connect(url)` — RabbitConn を返す | ✓ |
+| 2 | read | `consume(conn, queue)` — メッセージを JSON 文字列で取得 | ✓ |
+| 3 | write | `publish(conn, exchange, routing_key, msg)` — メッセージ発行 | ✓ |
+| 4 | error | `Result<T, String>` 統一、接続失敗時に適切なエラーを返す | ✓ |
+| 5 | test | `v263000_tests` 8 件 PASS | ✓ |
+
+## セットアップ
+
+```bash
+# 管理 UI 付きで起動（UI: http://localhost:15672 guest/guest）
+docker run -p 5672:5672 -p 15672:15672 rabbitmq:3-management
+export RABBITMQ_URL=amqp://guest:guest@localhost:5672
+```
+
+## 使い方
+
+```favnir
+import rune "rabbitmq"
+
+fn main() -> Result<String, String> !Stream {
+    bind conn <- connect("")
+    bind _    <- declare_exchange(conn, "orders", "direct")
+    bind _    <- declare_queue(conn, "order-queue")
+    bind _    <- bind_queue(conn, "order-queue", "orders", "new")
+    bind _    <- publish(conn, "orders", "new", "{\"id\": 1, \"item\": \"widget\"}")
+    bind msg  <- consume(conn, "order-queue")
+    Result.ok(msg)
+}
+```
+
+## API リファレンス
+
+### `connect(url: String) -> Result<RabbitConn, String>`
+
+RabbitMQ サーバーへの接続を確立します。
+
+- `url` が空文字列の場合、`RABBITMQ_URL` 環境変数（デフォルト: `amqp://guest:guest@localhost:5672`）を使用します。
+
+### `declare_exchange(conn: RabbitConn, name: String, ex_type: String) -> Result<Unit, String>`
+
+Exchange を宣言します。
+
+`ex_type` には以下を指定できます:
+- `"direct"` — routing key と完全一致するキューに配信
+- `"fanout"` — バインドされた全キューにブロードキャスト
+- `"topic"` — パターンマッチング（`*` / `#` ワイルドカード）
+
+### `declare_queue(conn: RabbitConn, name: String) -> Result<Unit, String>`
+
+Queue を宣言します。
+
+### `bind_queue(conn: RabbitConn, queue: String, exchange: String, routing_key: String) -> Result<Unit, String>`
+
+Queue を Exchange にバインドします。`routing_key` でメッセージのルーティングを制御します。
+
+### `publish(conn: RabbitConn, exchange: String, routing_key: String, msg: String) -> Result<Unit, String>`
+
+メッセージを発行します。`exchange` と `routing_key` の組み合わせでルーティングされます。
+
+### `consume(conn: RabbitConn, queue: String) -> Result<String, String>`
+
+Queue からメッセージを 1 件取得します。結果は JSON オブジェクト文字列として返されます。
+
+## 型定義
+
+```favnir
+type RabbitConn(String)
+type RabbitMsg = {
+    exchange:    String
+    routing_key: String
+    body:        String
+}
+```
+
+## Exchange / Queue / Binding の概念
+
+```
+Publisher → Exchange → Binding（routing_key） → Queue → Consumer
+```
+
+| 概念 | 説明 |
+|---|---|
+| Exchange | メッセージの受け口。type によってルーティング戦略が変わる |
+| Queue | メッセージの保管場所。Consumer が pull する |
+| Binding | Exchange と Queue の紐付け。routing_key でフィルタリング |
+
+## エラー処理
+
+```favnir
+match connect("amqp://localhost:5672") {
+    Result.ok(conn) => publish(conn, "logs", "info", "hello")
+    Result.err(e)   => Result.err("RabbitMQ connection failed: " + e)
+}
+```
+
+## スコープ外（v26.x 以降）
+
+- `ack(delivery)` / `nack(delivery, requeue)` — delivery ハンドル管理が必要
+- fn コールバックスタイルの継続消費ループ
+- `declare_exchange` / `declare_queue` の opts（durable / exclusive / auto-delete）
+- TLS 接続サポート
+- Exchange / Queue バインディングの argument ヘッダー詳細制御

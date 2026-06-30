@@ -1,0 +1,17 @@
+import rune "mysql"
+
+// ── MySQL を使った注文 ETL デモ (v25.4.0) ─────────────────────────────────────
+// 前提: docker run -e MYSQL_ROOT_PASSWORD=root -e MYSQL_DATABASE=shop -p 3306:3306 mysql:8
+// 実行: fav run examples/mysql_orders_etl.fav
+
+stage LoadPendingOrders: Unit -> String !MySQL = |_| {
+    bind conn <- MySQL.connect("mysql://root:root@localhost:3306/shop")
+    MySQL.query(conn, "SELECT id, amount FROM orders WHERE status = ?", "[\"pending\"]")
+}
+
+stage MarkProcessed: String -> Int !MySQL = |order_id| {
+    bind conn <- MySQL.connect("mysql://root:root@localhost:3306/shop")
+    MySQL.execute(conn, "UPDATE orders SET status = ? WHERE id = ?", "[\"processed\", " + order_id + "]")
+}
+
+pipeline OrdersETL = LoadPendingOrders |> MarkProcessed

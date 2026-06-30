@@ -1,0 +1,27 @@
+// examples/observability/sentry_alerting.fav — Sentry アラート E2E デモ (v28.9.0)
+import runes/sentry
+
+// #[on_error(report_to: "sentry", level: "critical")] — v29.0+ でコンパイラが自動挿入予定
+stage CriticalLoad: Unit -> Result<Unit, String> !Io = |_| {
+    bind _ <- Sentry.capture_error("critical stage failed: connection timeout")
+    bind _ <- Sentry.capture_message("critical", "pipeline critical failure detected")
+    Result.ok(())
+}
+
+stage ReportError: Unit -> Result<Unit, String> !Io = |_| {
+    bind _ <- Sentry.capture_error("pipeline execution failed: connection timeout")
+    bind _ <- Sentry.set_tag("pipeline", "etl")
+    Result.ok(())
+}
+
+stage SetContext: Unit -> Result<Unit, String> !Io = |_| {
+    bind _ <- Sentry.set_user("user-001", "ops@example.com")
+    bind _ <- Sentry.set_extra("pipeline_version", "28.9.0")
+    Result.ok(())
+}
+
+seq SentryAlertingDemo = CriticalLoad |> ReportError |> SetContext
+
+fn main() -> Result<Unit, String> !Io {
+    SentryAlertingDemo(())
+}

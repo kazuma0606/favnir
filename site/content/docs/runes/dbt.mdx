@@ -1,0 +1,73 @@
+# dbt Rune
+
+dbt（data build tool）の `manifest.json` を解析して、dbt モデルの結果を
+Favnir パイプラインから型安全に読み込む。
+
+> **v27.8.0 stub**: 実際の `manifest.json` 解析と SQL 実行は v28.x に実装予定。
+> 現バージョンでは引数検証のみ行い、空配列 `[]` を返す。
+
+## インポート
+
+```favnir
+import rune "dbt"
+```
+
+## 関数
+
+### `ref(config, model_name)`
+
+dbt モデルの出力を読み込む。`manifest.json` を解析して compiled SQL を実行し、型付き結果を返す。
+
+```favnir
+stage LoadCustomerSummary: Unit -> Result<String, String> !Db = |_| {
+  Dbt.ref("./dbt_project", "customer_summary")
+}
+```
+
+| 引数 | 型 | 説明 |
+|---|---|---|
+| `config` | `String` | dbt プロジェクトのパス（v28.x で `DbtConfig` 型に昇格予定） |
+| `model_name` | `String` | dbt モデル名（例: `"customer_summary"`） |
+
+### `source(config, source_name, table_name)`
+
+dbt の source 定義から SQL を生成して実行する。
+
+```favnir
+stage LoadRawEvents: Unit -> Result<String, String> !Db = |_| {
+  Dbt.source("./dbt_project", "raw", "events")
+}
+```
+
+| 引数 | 型 | 説明 |
+|---|---|---|
+| `config` | `String` | dbt プロジェクトのパス |
+| `source_name` | `String` | dbt source 名（例: `"raw"`） |
+| `table_name` | `String` | テーブル名（例: `"events"`） |
+
+## エフェクト
+
+`!Db` — dbt はデータベースにクエリを実行するため。
+
+## 使用例
+
+```favnir
+import rune "dbt"
+
+stage LoadCustomerSummary: Unit -> Result<String, String> !Db = |_| {
+  Dbt.ref("./dbt_project", "customer_summary")
+}
+
+stage LoadRawEvents: Unit -> Result<String, String> !Db = |_| {
+  Dbt.source("./dbt_project", "raw", "events")
+}
+
+seq DbtRefPipeline = LoadCustomerSummary
+```
+
+## v28.x 以降の予定
+
+- `manifest.json` の実解析（compiled SQL の抽出・実行）
+- `DbtConfig { project_dir: String, profiles_dir: String, target: String }` 構造体型
+- `Dbt.run_model(config, model_name)` — dbt CLI 呼び出し
+- 型パラメータ `[T]` によるデシリアライズ

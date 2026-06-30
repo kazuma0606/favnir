@@ -1,0 +1,27 @@
+import runes/prometheus
+import runes/grafana
+
+// #[track(latency: true, error_rate: true)] — v29.0+ でコンパイラが自動挿入予定
+stage ExtractOrders: Unit -> Result<Unit, String> !Io = |_| {
+    bind _ <- Prometheus.counter("rows_extracted_total", 100.0, "pipeline:etl")
+    Result.ok(())
+}
+
+// #[track(latency: true)]
+stage TransformOrders: Unit -> Result<Unit, String> !Io = |_| {
+    bind _ <- Prometheus.histogram("transform_duration_ms", 42.5)
+    Result.ok(())
+}
+
+// #[track(latency: true, error_rate: true)]
+stage LoadToWarehouse: Unit -> Result<Unit, String> !Io = |_| {
+    bind _ <- Prometheus.gauge("warehouse_rows", 100.0)
+    bind _ <- Grafana.create_annotation("etl-dashboard", "ETL cycle complete", "pipeline,favnir")
+    Result.ok(())
+}
+
+seq PrometheusGrafanaDemo = ExtractOrders |> TransformOrders |> LoadToWarehouse
+
+fn main() -> Result<Unit, String> !Io {
+    PrometheusGrafanaDemo(())
+}

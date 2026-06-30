@@ -1,0 +1,65 @@
+# prometheus Rune
+
+Prometheus メトリクスを Pushgateway 経由で送信する Rune。
+ETL パイプラインの実行時間・エラー率・スループットを型安全に計測できます。
+
+> **v28.1.0 stub** — 実際の Pushgateway HTTP 送信は v28.x 以降に実装予定。
+
+## インポート
+
+```favnir
+import rune "prometheus"
+```
+
+## エフェクト
+
+`!Io` — Pushgateway への HTTP 送信はネットワーク I/O。
+
+## 関数一覧
+
+| 関数 | シグネチャ | 内容 |
+|---|---|---|
+| `counter` | `(name: String, value: Float, labels: String) -> Result<Unit, String> !Io` | カウンタ（単調増加） |
+| `gauge` | `(name: String, value: Float) -> Result<Unit, String> !Io` | ゲージ（増減あり） |
+| `histogram` | `(name: String, value: Float) -> Result<Unit, String> !Io` | ヒストグラム（分布計測） |
+| `push` | `(gateway_url: String) -> Result<Unit, String> !Io` | Pushgateway への送信 |
+
+## 使用例
+
+```favnir
+import rune "prometheus"
+
+stage ReportMetrics: Unit -> Unit !Io = |_| {
+    bind _ <- Prometheus.counter("rows_processed_total", 42.0, "[]")
+    bind _ <- Prometheus.gauge("queue_depth", 7.0)
+    bind _ <- Prometheus.histogram("stage_duration_ms", 123.0)
+    Result.ok(unit)
+}
+
+stage PushToGateway: Unit -> Unit !Io = |_| {
+    Prometheus.push("http://localhost:9091")
+}
+
+seq PrometheusDemo = ReportMetrics |> PushToGateway
+```
+
+## ローカル開発環境
+
+```yaml
+# docker-compose.yml（抜粋）
+services:
+  prometheus:
+    image: prom/prometheus
+    ports: ["9090:9090"]
+  pushgateway:
+    image: prom/pushgateway
+    ports: ["9091:9091"]
+  grafana:
+    image: grafana/grafana
+    ports: ["3000:3000"]
+```
+
+## v28.x ロードマップ
+
+- v28.x: Pushgateway への実 HTTP 送信（`prometheus` クレート統合）
+- v28.2+: `#[track(latency, error_rate)]` アノテーションによる自動計測

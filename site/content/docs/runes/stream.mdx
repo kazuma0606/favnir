@@ -1,0 +1,118 @@
+# Stream Rune
+
+`#[streaming]` ステージでのリアルタイムストリーム変換。v26.4.0 で 6 つの操作を実質化。
+
+## `#[streaming]` アノテーション
+
+| パラメータ | 型 | デフォルト | 説明 |
+|---|---|---|---|
+| `chunk_size` | Int | なし | チャンクバッファサイズ |
+| `backpressure` | Bool | `false` | バックプレッシャー有効化（v26.4.0 追加）。アノテーションとして格納；bounded channel 制御は v27.x |
+
+```favnir
+// chunk_size のみ（従来どおり）
+#[streaming(chunk_size = 1000)]
+stage BatchLogs: Stream<RawLog> -> Stream<ParsedLog> !Io = |stream| {
+  Stream.map(stream, parse_log)
+}
+
+// backpressure 追加（v26.4.0 新機能）
+#[streaming(chunk_size = 1000, backpressure = true)]
+stage TransformLogs: Stream<RawLog> -> Stream<ParsedLog> !Io = |stream| {
+  Stream.map(stream, parse_log)
+}
+```
+
+## 使い方
+
+```favnir
+import rune "stream"
+
+fn main() -> Result<String, String> !Stream {
+    bind s   <- Result.ok(Stream.from([1, 2, 3, 4, 5]))
+    bind doubled <- Result.ok(map(s, |x| x * 2))
+    bind evens   <- Result.ok(filter(doubled, |x| x > 4))
+    bind lst     <- Result.ok(Stream.to_list(evens))
+    Result.ok(List.to_string(lst))
+}
+```
+
+## API リファレンス
+
+### `map(stream, f) -> Stream`
+
+各要素を変換する。
+
+```favnir
+bind result <- Result.ok(Stream.to_list(map(Stream.from([1, 2, 3]), |x| x * 2)))
+// result = [2, 4, 6]
+```
+
+### `filter(stream, pred) -> Stream`
+
+条件を満たす要素のみ通過させる。
+
+```favnir
+bind result <- Result.ok(Stream.to_list(filter(Stream.from([1, 2, 3, 4]), |x| x > 2)))
+// result = [3, 4]
+```
+
+### `flat_map(stream, f) -> Stream`
+
+各要素を変換してからフラット化（1→N 変換）。
+
+```favnir
+bind result <- Result.ok(Stream.to_list(flat_map(Stream.from([1, 2, 3]), |x| [x, x * 10])))
+// result = [1, 10, 2, 20, 3, 30]
+```
+
+### `window(stream, size_secs, f) -> Stream`
+
+タンブリングウィンドウ。`size_secs` 要素ずつバッチ化して fn を適用する。
+（スタブでは秒数ではなく要素数として扱う。実際の時刻ウィンドウは v27.x）
+
+```favnir
+bind result <- Result.ok(Stream.to_list(window(Stream.from([1, 2, 3, 4, 5]), 2, |batch| List.length(batch))))
+// result = [2, 2, 1]  -- 各バッチの長さ
+```
+
+### `merge(streams) -> Stream`
+
+複数のストリームを順次連結する。
+
+```favnir
+bind s1 <- Result.ok(Stream.from([1, 2]))
+bind s2 <- Result.ok(Stream.from([3, 4]))
+bind result <- Result.ok(Stream.to_list(merge([s1, s2])))
+// result = [1, 2, 3, 4]
+```
+
+### `split(stream, pred) -> [List, List]`
+
+predicate で 2 つのリストに分岐する。`[trues, falses]` の 2 要素リストを返す。
+
+```favnir
+bind parts <- Result.ok(Stream.to_list(split(Stream.from([1, 2, 3, 4, 5]), |x| x > 3)))
+// parts = [[4, 5], [1, 2, 3]]
+```
+
+## タンブリングウィンドウの例
+
+```favnir
+#[streaming(chunk_size = 60, backpressure = true)]
+stage AggregatePerMinute: Stream<RawLog> -> Stream<LogSummary> !Io = |stream| {
+  window(stream, 60, |batch| {
+    LogSummary {
+      count:       List.length(batch),
+      error_count: List.length(List.filter(batch, |l| l.level == "ERROR"))
+    }
+  })
+}
+```
+
+## スコープ外（v27.x 以降）
+
+- `backpressure = true` による実際の bounded channel（`tokio::sync::mpsc`）制御
+- スライディングウィンドウ / セッションウィンドウ（`window` の `type` パラメータ）
+- `Stream.split` の 2 出力ストリーム同時消費（タプル返却）
+- `Stream.zip` / `Stream.throttle` / `Stream.debounce`

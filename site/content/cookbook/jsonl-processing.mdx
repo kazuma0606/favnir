@@ -1,0 +1,20 @@
+# JSON Lines ファイル処理
+
+JSON Lines（JSONL）形式のファイルを読み込み、各行を変換してデータベースに書き込みます。
+
+```favnir
+import runes/jsonl
+
+stage ProcessJsonLines: String -> Int !Io = |file_path| {
+  bind rows        <- JSONL.read_file[EventRow](file_path)
+  bind transformed <- rows |> List.map(transform_row) |> Result.all
+  bind conn        <- Postgres.connect(config.db)
+  bind _           <- Postgres.insert_batch(conn, "events", transformed)
+  Result.ok(List.length(rows))
+}
+```
+
+## 関連 Rune
+
+- [JSONL](/docs/runes/jsonl) — JSON Lines ファイル読み書き
+- [Postgres](/docs/runes/postgres) — PostgreSQL 連携

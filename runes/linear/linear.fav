@@ -1,0 +1,15 @@
+// linear Rune -- Linear Issue 管理 API 連携（コミュニティ投稿 Rune）
+// 接続: LINEAR_BASE_URL 環境変数
+// NOTE: api_key は HTTP Rune の認証ヘッダー機構が有効化されるまでリクエストには付与されない
+
+fn Linear.create_issue(api_key: String, team_id: String, title: String, description: String) -> Result<String, String> !Http =
+  Http.post_json(
+    Env.get_or("LINEAR_BASE_URL", "https://api.linear.app") ++ "/graphql",
+    { "query": "mutation { issueCreate(input: { teamId: \"" ++ team_id ++ "\", title: \"" ++ title ++ "\", description: \"" ++ description ++ "\" }) { issue { id title } } }" }
+  )
+
+fn Linear.update_issue(api_key: String, issue_id: String, state_id: String) -> Result<String, String> !Http =
+  Http.post_json(
+    Env.get_or("LINEAR_BASE_URL", "https://api.linear.app") ++ "/graphql",
+    { "query": "mutation { issueUpdate(id: \"" ++ issue_id ++ "\", input: { stateId: \"" ++ state_id ++ "\" }) { issue { id state { name } } } }" }
+  )

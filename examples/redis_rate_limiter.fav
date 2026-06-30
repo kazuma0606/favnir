@@ -1,0 +1,27 @@
+// examples/redis_rate_limiter.fav — Redis レート制限デモ (v25.3.0)
+// 前提: docker run -p 6379:6379 redis:7
+// 実行: fav run examples/redis_rate_limiter.fav
+
+import rune "redis"
+
+type RateResult = { allowed: Bool, count: Int }
+
+// ── Stage 1: リクエスト数をインクリメントしてレート確認 ──────────────────────
+stage CheckRateLimit: String -> RateResult !Redis = |user_id| {
+    bind conn  <- Redis.connect("redis://localhost:6379/0")
+    bind key   <- Result.ok("rate:" + user_id)
+    bind count <- Redis.incr(conn, key)
+    // count は Int、set の value は String のため String.from_int で変換
+    bind _     <- Redis.set(conn, key, String.from_int(count), 60)
+    Result.ok({ allowed: count <= 10, count: count })
+}
+
+// ── Stage 2: 結果をイベントキューに記録 ──────────────────────────────────────
+stage RecordEvent: RateResult -> Unit !Redis = |result| {
+    bind conn <- Redis.connect("redis://localhost:6379/0")
+    bind msg  <- Result.ok("rate_check:" + result.allowed)
+    Redis.lpush(conn, "events", msg)
+}
+
+// ── パイプライン ──────────────────────────────────────────────────────────────
+pipeline RateLimitPipeline = CheckRateLimit |> RecordEvent

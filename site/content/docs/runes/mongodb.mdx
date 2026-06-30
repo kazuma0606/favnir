@@ -1,0 +1,198 @@
+# MongoDB Rune
+
+`import rune "mongodb"` で MongoDB ドキュメントストアに接続できます。`!MongoDB` エフェクトが必要です。
+
+## セットアップ
+
+```bash
+docker run -p 27017:27017 mongo:7
+```
+
+環境変数 `MONGODB_URL` を設定するか、`Mongo.connect` に直接 URL を渡します。
+
+> **接続モデル（v25.5.0）**: 各関数呼び出しのたびに新規接続を確立します。
+> 大量データ処理ではパフォーマンスに影響が出る場合があります。コネクションプールは v26.x で対応予定。
+
+```
+mongodb://user:password@host:27017/database
+```
+
+データベース名は URL のパス部分から自動抽出されます（`/database` の部分）。
+
+## `!MongoDB` エフェクト
+
+`!MongoDB` は外部 MongoDB 操作を明示するエフェクトです。SQL Rune（`!Postgres` / `!MySQL`）とは独立した別エフェクトです。
+
+> **名前空間について**: `import rune "mongodb"` 後は `Mongo.connect(...)` / `Mongo.find(...)` 等、`Mongo` 名前空間で呼び出します。
+> `MongoDB.connect(...)` も同様に動作します（チェッカーが両方を受け付けます）。
+
+```favnir
+stage FetchEvents: Unit -> Result<String, String> !MongoDB = |_| {
+    bind conn <- Mongo.connect("mongodb://localhost:27017/analytics")
+    Mongo.find(conn, "events", "{\"status\": \"active\"}")
+}
+```
+
+## API リファレンス
+
+### `Mongo.connect`
+
+```favnir
+fn connect(url: String) -> Result<MongoConn, String> !MongoDB
+```
+
+URL から接続を確立します（ping で接続確認）。成功時は `MongoConn` を返します。
+
+```favnir
+bind conn <- Mongo.connect("mongodb://localhost:27017/mydb")
+```
+
+---
+
+### `Mongo.find`
+
+```favnir
+fn find(conn: MongoConn, coll: String, filter: String) -> Result<String, String> !MongoDB
+```
+
+フィルタに一致する全ドキュメントを JSON 配列文字列で返します。
+
+- `filter`: JSON 文字列（例: `"{\"status\": \"active\"}"` ）
+- 戻り値: `[{"_id": {"$oid": "..."}, ...}, ...]` 形式の JSON 文字列
+
+```favnir
+bind docs <- Mongo.find(conn, "events", "{\"status\": \"active\"}")
+```
+
+---
+
+### `Mongo.find_one`
+
+```favnir
+fn find_one(conn: MongoConn, coll: String, filter: String) -> Result<String, String> !MongoDB
+```
+
+フィルタに一致する最初のドキュメントを JSON オブジェクト文字列で返します。
+
+- 見つからない場合: `Result.err("not_found")`
+
+```favnir
+bind doc <- Mongo.find_one(conn, "users", "{\"email\": \"alice@example.com\"}")
+```
+
+---
+
+### `Mongo.insert_one`
+
+```favnir
+fn insert_one(conn: MongoConn, coll: String, doc: String) -> Result<String, String> !MongoDB
+```
+
+ドキュメントを挿入します。成功時は挿入された `_id` の文字列を返します。
+
+```favnir
+bind id <- Mongo.insert_one(conn, "events", "{\"type\": \"click\", \"status\": \"active\"}")
+```
+
+---
+
+### `Mongo.insert_many`
+
+```favnir
+fn insert_many(conn: MongoConn, coll: String, docs: String) -> Result<Int, String> !MongoDB
+```
+
+複数ドキュメントをバッチ挿入します。成功時は挿入件数を返します。
+
+- `docs`: JSON 配列文字列（例: `"[{\"name\": \"alice\"}, {\"name\": \"bob\"}]"`）
+
+```favnir
+bind count <- Mongo.insert_many(conn, "users", "[{\"name\": \"alice\"}, {\"name\": \"bob\"}]")
+```
+
+---
+
+### `Mongo.update_one`
+
+```favnir
+fn update_one(conn: MongoConn, coll: String, filter: String, update: String) -> Result<Int, String> !MongoDB
+```
+
+フィルタに一致する最初のドキュメントを更新します。`$set` / `$inc` 等の演算子に対応。成功時は更新件数を返します。
+
+```favnir
+bind n <- Mongo.update_one(conn, "events", "{\"_id\": \"...\"}", "{\"$set\": {\"status\": \"processed\"}}")
+```
+
+---
+
+### `Mongo.delete_one`
+
+```favnir
+fn delete_one(conn: MongoConn, coll: String, filter: String) -> Result<Int, String> !MongoDB
+```
+
+フィルタに一致する最初のドキュメントを削除します。成功時は削除件数を返します。
+
+```favnir
+bind n <- Mongo.delete_one(conn, "events", "{\"status\": \"archived\"}")
+```
+
+---
+
+### `Mongo.aggregate`
+
+```favnir
+fn aggregate(conn: MongoConn, coll: String, pipeline: String) -> Result<String, String> !MongoDB
+```
+
+集計パイプラインを実行します（`$match` / `$group` / `$sort` 等）。結果を JSON 配列文字列で返します。
+
+- `pipeline`: JSON 配列文字列
+
+```favnir
+bind result <- Mongo.aggregate(conn, "events",
+    "[{\"$match\": {\"status\": \"active\"}}, {\"$group\": {\"_id\": \"$type\", \"count\": {\"$sum\": 1}}}]")
+```
+
+---
+
+## JSON フォーマット
+
+| パラメータ | 形式 | 例 |
+|---|---|---|
+| `filter` | JSON オブジェクト文字列 | `"{\"status\": \"active\"}"` |
+| `update` | JSON オブジェクト文字列（演算子含む） | `"{\"$set\": {\"status\": \"done\"}}"` |
+| `doc` | JSON オブジェクト文字列 | `"{\"name\": \"alice\"}"` |
+| `docs` | JSON 配列文字列 | `"[{\"name\": \"alice\"}, ...]"` |
+| `pipeline` | JSON 配列文字列 | `"[{\"$match\": {...}}, ...]"` |
+
+> **`_id` のシリアライズ**: `find` / `find_one` の戻り値では `_id` は `{"$oid": "..."}` 形式になります。
+
+## スコープ外（v25.5.0）
+
+- トランザクション（`ClientSession` / `with_transaction`）
+- インデックス操作（`create_index` / `drop_index`）
+- コレクション管理（`create_collection` / `drop_collection`）
+- TLS 接続（`mongodb+srv://` スキーム）
+- Atlas Search / ベクトル検索
+
+## 使用例
+
+```favnir
+import rune "mongodb"
+
+stage LoadActiveEvents: Unit -> Result<String, String> !MongoDB = |_| {
+    bind conn <- Mongo.connect("mongodb://localhost:27017/analytics")
+    Mongo.find(conn, "events", "{\"status\": \"active\"}")
+}
+
+stage ArchiveEvent: Result<String, String> -> Result<Int, String> !MongoDB = |event_result| {
+    bind event_json <- event_result
+    bind conn       <- Mongo.connect("mongodb://localhost:27017/analytics")
+    bind _          <- Mongo.insert_one(conn, "archive", event_json)
+    Mongo.delete_one(conn, "events", "{\"status\": \"active\"}")
+}
+
+pipeline EventsETL = LoadActiveEvents |> ArchiveEvent
+```

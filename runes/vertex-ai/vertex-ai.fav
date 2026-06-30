@@ -1,0 +1,30 @@
+// vertex-ai Rune -- Google Vertex AI 連携（v29.4.0）
+// 接続: VERTEX_AI_PROJECT / VERTEX_AI_LOCATION / VERTEX_AI_BASE_URL 環境変数
+// NOTE: VERTEX_AI_PROJECT は batch_predict / deploy_model / list_endpoints で必須。未設定時は空文字が埋まりリクエストが失敗する
+
+// オンライン推論（エンドポイント URL 指定）
+fn VertexAI.predict(endpoint: String, instances: List<String>) -> Result<List<String>, String> !Http =
+  Http.post_json(
+    Env.get_or("VERTEX_AI_BASE_URL", "https://us-central1-aiplatform.googleapis.com") ++ "/v1/" ++ endpoint ++ ":predict",
+    { "instances": instances }
+  )
+
+// バッチ推論（GCS I/O）
+fn VertexAI.batch_predict(model: String, gcs_input: String, gcs_output: String) -> Result<String, String> !Http =
+  Http.post_json(
+    Env.get_or("VERTEX_AI_BASE_URL", "https://us-central1-aiplatform.googleapis.com") ++ "/v1/projects/" ++ Env.get_or("VERTEX_AI_PROJECT", "") ++ "/locations/" ++ Env.get_or("VERTEX_AI_LOCATION", "us-central1") ++ "/batchPredictionJobs",
+    { "model": model, "inputConfig": { "gcsSource": gcs_input }, "outputConfig": { "gcsDestination": gcs_output } }
+  )
+
+// モデルをエンドポイントにデプロイし、エンドポイント ID を返す
+fn VertexAI.deploy_model(model_id: String, machine_type: String) -> Result<String, String> !Http =
+  Http.post_json(
+    Env.get_or("VERTEX_AI_BASE_URL", "https://us-central1-aiplatform.googleapis.com") ++ "/v1/projects/" ++ Env.get_or("VERTEX_AI_PROJECT", "") ++ "/locations/" ++ Env.get_or("VERTEX_AI_LOCATION", "us-central1") ++ "/endpoints",
+    { "model_id": model_id, "machine_type": machine_type }
+  )
+
+// エンドポイント一覧を取得する
+fn VertexAI.list_endpoints() -> Result<List<String>, String> !Http =
+  Http.get_json(
+    Env.get_or("VERTEX_AI_BASE_URL", "https://us-central1-aiplatform.googleapis.com") ++ "/v1/projects/" ++ Env.get_or("VERTEX_AI_PROJECT", "") ++ "/locations/" ++ Env.get_or("VERTEX_AI_LOCATION", "us-central1") ++ "/endpoints"
+  )

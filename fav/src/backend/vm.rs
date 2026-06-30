@@ -1520,6 +1520,14 @@ pub(crate) enum VMStream {
     },
     /// Finite prefix of an inner stream
     Take { inner: Box<VMStream>, n: i64 },
+    /// v26.4.0: flat_map — apply fn to each element, then flatten 1 level
+    FlatMap { inner: Box<VMStream>, map_fn: VMValue },
+    /// v26.4.0: window — batch into groups of `size` elements (tumbling window stub)
+    Window { inner: Box<VMStream>, size: i64, window_fn: VMValue },
+    /// v26.4.0: merge — concatenate multiple streams in order
+    Merge { streams: Vec<VMStream> },
+    /// v26.4.0: split — partition into [trues, falses] lists by predicate
+    Split { inner: Box<VMStream>, pred_fn: VMValue },
 }
 
 /// Shared list with start offset enabling O(1) `List.drop` from the front.
@@ -4604,6 +4612,131 @@ impl VM {
                     )),
                 }
             }
+            // ── v26.4.0: Stream.* operations ─────────────────────────────────────────
+            "Stream.flat_map" => {
+                if args.len() != 2 {
+                    return Err(self.error(artifact, "Stream.flat_map requires 2 arguments"));
+                }
+                let mut it = args.into_iter();
+                let stream = it.next().expect("stream");
+                let map_fn = it.next().expect("fn");
+                match stream {
+                    VMValue::Stream(inner) => Ok(VMValue::Stream(Box::new(VMStream::FlatMap {
+                        inner,
+                        map_fn,
+                    }))),
+                    other => Err(self.error(
+                        artifact,
+                        &format!(
+                            "Stream.flat_map requires a Stream as first argument, got {}",
+                            vmvalue_type_name(&other)
+                        ),
+                    )),
+                }
+            }
+            "Stream.window" => {
+                if args.len() != 3 {
+                    return Err(self.error(artifact, "Stream.window requires 3 arguments"));
+                }
+                let mut it = args.into_iter();
+                let stream = it.next().expect("stream");
+                let size_val = it.next().expect("size");
+                let window_fn = it.next().expect("fn");
+                match (stream, size_val) {
+                    (VMValue::Stream(inner), VMValue::Int(size)) => {
+                        Ok(VMValue::Stream(Box::new(VMStream::Window { inner, size, window_fn })))
+                    }
+                    (VMValue::Stream(_), other) => Err(self.error(
+                        artifact,
+                        &format!(
+                            "Stream.window second argument must be Int, got {}",
+                            vmvalue_type_name(&other)
+                        ),
+                    )),
+                    (other, _) => Err(self.error(
+                        artifact,
+                        &format!(
+                            "Stream.window requires a Stream as first argument, got {}",
+                            vmvalue_type_name(&other)
+                        ),
+                    )),
+                }
+            }
+            "Stream.merge" => {
+                if args.len() != 1 {
+                    return Err(self.error(artifact, "Stream.merge requires 1 argument (list of streams)"));
+                }
+                let streams_val = args.into_iter().next().expect("streams");
+                match streams_val {
+                    VMValue::List(list) => {
+                        let mut streams = Vec::new();
+                        for item in list.iter() {
+                            match item {
+                                VMValue::Stream(s) => streams.push(s.as_ref().clone()),
+                                other => return Err(self.error(
+                                    artifact,
+                                    &format!(
+                                        "Stream.merge: each element must be a Stream, got {}",
+                                        vmvalue_type_name(other)
+                                    ),
+                                )),
+                            }
+                        }
+                        Ok(VMValue::Stream(Box::new(VMStream::Merge { streams })))
+                    }
+                    other => Err(self.error(
+                        artifact,
+                        &format!(
+                            "Stream.merge requires a List of Streams, got {}",
+                            vmvalue_type_name(&other)
+                        ),
+                    )),
+                }
+            }
+            "Stream.split" => {
+                // Immediately materializes and returns VMValue::List([trues_list, falses_list]).
+                // Returning VMValue::Stream would create semantic confusion because the 2-element
+                // result does not compose with Stream.map/filter/take in a meaningful way.
+                if args.len() != 2 {
+                    return Err(self.error(artifact, "Stream.split requires 2 arguments"));
+                }
+                let mut it = args.into_iter();
+                let stream = it.next().expect("stream");
+                let pred_fn = it.next().expect("predicate");
+                match stream {
+                    VMValue::Stream(inner) => {
+                        let items = self.materialize_stream(artifact, *inner)?;
+                        let mut trues = Vec::new();
+                        let mut falses = Vec::new();
+                        for item in items {
+                            let keep = self.call_value(artifact, pred_fn.clone(), vec![item.clone()])?;
+                            match keep {
+                                VMValue::Bool(true) => trues.push(item),
+                                VMValue::Bool(false) => falses.push(item),
+                                other => return Err(self.error(
+                                    artifact,
+                                    &format!(
+                                        "Stream.split predicate must return Bool, got {}",
+                                        vmvalue_type_name(&other)
+                                    ),
+                                )),
+                            }
+                        }
+                        Ok(VMValue::List(FavList::new(vec![
+                            VMValue::List(FavList::new(trues)),
+                            VMValue::List(FavList::new(falses)),
+                        ])))
+                    }
+                    other => Err(self.error(
+                        artifact,
+                        &format!(
+                            "Stream.split requires a Stream as first argument, got {}",
+                            vmvalue_type_name(&other)
+                        ),
+                    )),
+                }
+            }
+            // ── end v26.4.0 Stream.* ─────────────────────────────────────────────────
             "Http.serve_raw" => {
                 if args.len() != 3 {
                     return Err(self.error(artifact, "Http.serve_raw requires 3 arguments"));
@@ -5311,6 +5444,68 @@ impl VM {
                     }
                 }
             }
+            // ── v26.4.0 ────────────────────────────────────────────────────────────
+            VMStream::FlatMap { inner, map_fn } => {
+                let items = self.materialize_stream(artifact, *inner)?;
+                let mut out = Vec::new();
+                for item in items {
+                    let result = self.call_value(artifact, map_fn.clone(), vec![item])?;
+                    match result {
+                        VMValue::List(list) => out.extend(list.iter().cloned()),
+                        other => out.push(other),
+                    }
+                }
+                Ok(out)
+            }
+            VMStream::Window { inner, size, window_fn } => {
+                let items = self.materialize_stream(artifact, *inner)?;
+                let chunk_size = if size <= 0 { 1 } else { size as usize };
+                let mut out = Vec::new();
+                for chunk in items.chunks(chunk_size) {
+                    let batch = VMValue::List(FavList::new(chunk.to_vec()));
+                    let result = self.call_value(artifact, window_fn.clone(), vec![batch])?;
+                    out.push(result);
+                }
+                Ok(out)
+            }
+            VMStream::Merge { streams } => {
+                let mut out = Vec::new();
+                for s in streams {
+                    let items = self.materialize_stream(artifact, s)?;
+                    out.extend(items);
+                }
+                Ok(out)
+            }
+            // NOTE: VMStream::Split is intentionally absent here.
+            // Stream.split is immediately materialized in the primitive itself,
+            // so a VMStream::Split value is never passed to materialize_stream.
+            VMStream::Split { inner, pred_fn } => {
+                // Fallback: should not be reached via normal code paths.
+                // Materialize defensively using the same logic as the primitive.
+                let items = self.materialize_stream(artifact, *inner)?;
+                let mut trues = Vec::new();
+                let mut falses = Vec::new();
+                for item in items {
+                    let keep = self.call_value(artifact, pred_fn.clone(), vec![item.clone()])?;
+                    match keep {
+                        VMValue::Bool(true) => trues.push(item),
+                        VMValue::Bool(false) => falses.push(item),
+                        other => {
+                            return Err(self.error(
+                                artifact,
+                                &format!(
+                                    "Stream.split predicate must return Bool, got {}",
+                                    vmvalue_type_name(&other)
+                                ),
+                            ));
+                        }
+                    }
+                }
+                Ok(vec![
+                    VMValue::List(FavList::new(trues)),
+                    VMValue::List(FavList::new(falses)),
+                ])
+            }
         }
     }
 
@@ -5903,6 +6098,145 @@ fn kafka_consume_one_sync(brokers: &str, topic: &str) -> Result<String, String> 
     })
 }
 
+// ── Kafka helpers (v25.7.0) ───────────────────────────────────────────────────
+// TODO(v26.x): コネクションプール（現在は毎回接続確立）
+
+/// Kafka ブローカーへの接続確認（list_topics ping）。
+fn kafka_connect_sync(brokers: &str) -> Result<(), String> {
+    use rskafka::client::ClientBuilder;
+
+    let addrs = kafka_broker_list(brokers);
+    if addrs.is_empty() {
+        return Err("Kafka.connect_raw: no brokers specified".to_string());
+    }
+    let username = std::env::var("KAFKA_SASL_USERNAME").ok();
+    let password = std::env::var("KAFKA_SASL_PASSWORD").ok();
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|e| format!("Kafka.connect_raw: tokio: {e}"))?;
+    rt.block_on(async {
+        let mut builder = ClientBuilder::new(addrs);
+        if let (Some(user), Some(pass)) = (username, password) {
+            builder = builder.sasl_config(
+                rskafka::client::SaslConfig::ScramSha512(
+                    rskafka::client::Credentials::new(user, pass),
+                ),
+            );
+        }
+        let client = builder
+            .build()
+            .await
+            .map_err(|e| format!("Kafka.connect_raw: connect: {e}"))?;
+        let _ = client
+            .list_topics()
+            .await
+            .map_err(|e| format!("Kafka.connect_raw: list_topics: {e}"))?;
+        Ok(())
+    })
+}
+
+/// Kafka topic から最大 max_count 件のメッセージを JSON 配列文字列で返す。
+fn kafka_consume_batch_sync(brokers: &str, topic: &str, max_count: i64) -> Result<String, String> {
+    use rskafka::client::ClientBuilder;
+    use rskafka::client::partition::{OffsetAt, UnknownTopicHandling};
+
+    let addrs = kafka_broker_list(brokers);
+    if addrs.is_empty() {
+        return Err("Kafka.consume_batch_raw: no brokers specified".to_string());
+    }
+    let username = std::env::var("KAFKA_SASL_USERNAME").ok();
+    let password = std::env::var("KAFKA_SASL_PASSWORD").ok();
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|e| format!("Kafka.consume_batch_raw: tokio: {e}"))?;
+    rt.block_on(async {
+        let mut builder = ClientBuilder::new(addrs);
+        if let (Some(user), Some(pass)) = (username, password) {
+            builder = builder.sasl_config(
+                rskafka::client::SaslConfig::ScramSha512(
+                    rskafka::client::Credentials::new(user, pass),
+                ),
+            );
+        }
+        let client = builder
+            .build()
+            .await
+            .map_err(|e| format!("Kafka.consume_batch_raw: connect: {e}"))?;
+        let partition_client = client
+            .partition_client(topic, 0, UnknownTopicHandling::Retry)
+            .await
+            .map_err(|e| format!("Kafka.consume_batch_raw: partition: {e}"))?;
+        let latest_offset = partition_client
+            .get_offset(OffsetAt::Latest)
+            .await
+            .map_err(|e| format!("Kafka.consume_batch_raw: offset: {e}"))?;
+        if latest_offset == 0 {
+            return Ok("[]".to_string());
+        }
+        if max_count <= 0 {
+            return Ok("[]".to_string());
+        }
+        let count = max_count;
+        let start_offset = (latest_offset - count).max(0);
+        // TODO(v26.x): max_bytes を (count * 64 * 1024).max(1_048_576) に変更してバッチ容量を動的調整する
+        let (records, _) = partition_client
+            .fetch_records(start_offset, 1..1_048_576, 5_000)
+            .await
+            .map_err(|e| format!("Kafka.consume_batch_raw: fetch: {e}"))?;
+        let payloads: Vec<serde_json::Value> = records
+            .into_iter()
+            .take(count as usize)
+            .map(|r| {
+                let bytes = r.record.value.unwrap_or_default();
+                serde_json::Value::String(String::from_utf8_lossy(&bytes).to_string())
+            })
+            .collect();
+        serde_json::to_string(&payloads)
+            .map_err(|e| format!("Kafka.consume_batch_raw: serialize: {e}"))
+    })
+}
+
+/// Kafka トピックを作成する（partition 数指定）。
+fn kafka_create_topic_sync(brokers: &str, topic: &str, partitions: i32) -> Result<(), String> {
+    use rskafka::client::ClientBuilder;
+
+    let addrs = kafka_broker_list(brokers);
+    if addrs.is_empty() {
+        return Err("Kafka.create_topic_raw: no brokers specified".to_string());
+    }
+    let username = std::env::var("KAFKA_SASL_USERNAME").ok();
+    let password = std::env::var("KAFKA_SASL_PASSWORD").ok();
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|e| format!("Kafka.create_topic_raw: tokio: {e}"))?;
+    rt.block_on(async {
+        let mut builder = ClientBuilder::new(addrs);
+        if let (Some(user), Some(pass)) = (username, password) {
+            builder = builder.sasl_config(
+                rskafka::client::SaslConfig::ScramSha512(
+                    rskafka::client::Credentials::new(user, pass),
+                ),
+            );
+        }
+        let client = builder
+            .build()
+            .await
+            .map_err(|e| format!("Kafka.create_topic_raw: connect: {e}"))?;
+        // controller_client() は rskafka v0.6 で同期関数（.await 不要）
+        let controller_client = client
+            .controller_client()
+            .map_err(|e| format!("Kafka.create_topic_raw: controller: {e}"))?;
+        controller_client
+            .create_topic(topic, partitions, 1_i16, 5_000)
+            .await
+            .map_err(|e| format!("Kafka.create_topic_raw: topic={}: {e}", topic))?;
+        Ok(())
+    })
+}
+
 // ── GCP helper (v15.2.0) ─────────────────────────────────────────────────────
 
 /// GOOGLE_APPLICATION_CREDENTIALS のサービスアカウント JSON から OAuth2 Bearer token を取得する。
@@ -6246,6 +6580,289 @@ fn llm_call_chat(messages_json: &str) -> VMValue {
 // ── Snowflake helpers (v10.2.0) ──────────────────────────────────────────────
 
 // ── Postgres helpers (v11.5.0 / v12.6.0) ────────────────────────────────────
+
+// ── MySQL helpers (v25.4.0) ───────────────────────────────────────────────────
+
+// ── MongoDB helpers (v25.5.0) ─────────────────────────────────────────────────
+
+/// URL からデータベース名を抽出する。
+/// "mongodb://host:port/dbname"             → "dbname"
+/// "mongodb://user:pass@host:port/dbname"   → "dbname"（認証情報をスキップ）
+/// "mongodb://host:port"                    → "test"（パスなし時のデフォルト）
+#[cfg(not(target_arch = "wasm32"))]
+fn extract_mongo_db_name(url: &str) -> String {
+    let after_scheme = url
+        .strip_prefix("mongodb://")
+        .or_else(|| url.strip_prefix("mongodb+srv://"))
+        .unwrap_or(url);
+    // "user:pass@host:port/dbname" → rfind('@') で認証情報をスキップ
+    let after_auth = match after_scheme.rfind('@') {
+        Some(pos) => &after_scheme[pos + 1..],
+        None => after_scheme,
+    };
+    if let Some(slash_pos) = after_auth.find('/') {
+        let db_part = &after_auth[slash_pos + 1..];
+        let db_name = db_part.split('?').next().unwrap_or(db_part);
+        if !db_name.is_empty() {
+            return db_name.to_string();
+        }
+    }
+    "test".to_string()
+}
+
+/// BSON Document → serde_json::Value（ObjectId は {"$oid": "..."} 形式に変換）
+#[cfg(not(target_arch = "wasm32"))]
+fn mongo_bson_to_json(doc: mongodb::bson::Document) -> serde_json::Value {
+    fn bson_val_to_json(b: mongodb::bson::Bson) -> serde_json::Value {
+        match b {
+            mongodb::bson::Bson::ObjectId(oid) => {
+                serde_json::json!({"$oid": oid.to_hex()})
+            }
+            mongodb::bson::Bson::Document(d) => {
+                let map: serde_json::Map<String, serde_json::Value> = d
+                    .into_iter()
+                    .map(|(k, v)| (k, bson_val_to_json(v)))
+                    .collect();
+                serde_json::Value::Object(map)
+            }
+            mongodb::bson::Bson::Array(arr) => {
+                serde_json::Value::Array(arr.into_iter().map(bson_val_to_json).collect())
+            }
+            mongodb::bson::Bson::String(s) => serde_json::Value::String(s),
+            mongodb::bson::Bson::Boolean(b) => serde_json::Value::Bool(b),
+            mongodb::bson::Bson::Int32(i) => serde_json::Value::Number(i.into()),
+            mongodb::bson::Bson::Int64(i) => serde_json::Value::Number(i.into()),
+            mongodb::bson::Bson::Double(f) => {
+                serde_json::Number::from_f64(f)
+                    .map(serde_json::Value::Number)
+                    .unwrap_or(serde_json::Value::Null)
+            }
+            mongodb::bson::Bson::Null => serde_json::Value::Null,
+            // DateTime / Timestamp / Binary / Decimal128 等は Extended JSON 形式で返る
+            // （例: DateTime → {"$date": ...}）。シリアライズ失敗時は Null を返す。
+            other => serde_json::to_value(&other).unwrap_or(serde_json::Value::Null),
+        }
+    }
+    bson_val_to_json(mongodb::bson::Bson::Document(doc))
+}
+
+/// JSON 文字列 → BSON Document
+#[cfg(not(target_arch = "wasm32"))]
+fn mongo_json_to_bson(v: &str) -> Result<mongodb::bson::Document, String> {
+    let json: serde_json::Value = serde_json::from_str(v)
+        .map_err(|e| format!("MongoDB JSON parse error: {}", e))?;
+    mongodb::bson::to_document(&json)
+        .map_err(|e| format!("MongoDB BSON conversion error: {}", e))
+}
+
+// ── DynamoDB helpers (v25.6.0) ────────────────────────────────────────────────
+// TODO(v26.x): コネクションプール（現在は毎回 ListTables ping / HTTP リクエスト）
+
+/// DynamoConn 文字列（endpoint）から実際の DynamoDB endpoint URL を決定する。
+/// - 空または "default" → config.endpoint_url → LOCALSTACK_ENDPOINT → AWS 本番
+/// - それ以外 → 文字列をそのまま使用
+#[cfg(not(target_arch = "wasm32"))]
+fn get_dynamo_endpoint(conn_endpoint: &str, config: &AwsConfig) -> String {
+    if conn_endpoint.is_empty() || conn_endpoint == "default" {
+        config.endpoint_url.as_deref()
+            .map(|s| s.to_string())
+            .or_else(|| std::env::var("LOCALSTACK_ENDPOINT").ok())
+            .unwrap_or_else(|| format!("https://dynamodb.{}.amazonaws.com", config.region))
+    } else {
+        conn_endpoint.to_string()
+    }
+}
+
+// ── Elasticsearch helpers (v25.8.0) ─────────────────────────────────────────
+
+/// ESConn url string → 実 ES エンドポイント URL（末尾 `/` なし）
+/// 空文字列 → ELASTICSEARCH_URL env → "http://localhost:9200"
+#[cfg(not(target_arch = "wasm32"))]
+fn get_es_url(conn_url: &str) -> String {
+    if conn_url.is_empty() || conn_url == "default" {
+        std::env::var("ELASTICSEARCH_URL")
+            .unwrap_or_else(|_| "http://localhost:9200".to_string())
+    } else {
+        conn_url.trim_end_matches('/').to_string()
+    }
+}
+
+/// ES HTTP リクエスト（ELASTICSEARCH_API_KEY → Basic → no-auth）
+#[cfg(not(target_arch = "wasm32"))]
+fn es_http(method: &str, url: &str, content_type: Option<&str>, body: Option<&str>) -> Result<String, String> {
+    let mut req = ureq::request(method, url);
+    if let Ok(key) = std::env::var("ELASTICSEARCH_API_KEY") {
+        if !key.is_empty() {
+            req = req.set("Authorization", &format!("ApiKey {}", key));
+        }
+    } else if let (Ok(user), Ok(pass)) = (std::env::var("ELASTICSEARCH_USERNAME"), std::env::var("ELASTICSEARCH_PASSWORD")) {
+        if !user.is_empty() {
+            let encoded = BASE64.encode(format!("{}:{}", user, pass));
+            req = req.set("Authorization", &format!("Basic {}", encoded));
+        }
+    }
+    if let Some(ct) = content_type {
+        req = req.set("Content-Type", ct);
+    }
+    let resp = if let Some(b) = body {
+        req.send_string(b)
+    } else {
+        req.call()
+    };
+    match resp {
+        Ok(r) => r.into_string().map_err(|e| format!("es_http: read body: {}", e)),
+        Err(ureq::Error::Status(code, r)) => {
+            let msg = r.into_string().unwrap_or_default();
+            Err(format!("es_http: HTTP {}: {}", code, msg))
+        }
+        Err(e) => Err(format!("es_http: {}", e)),
+    }
+}
+
+/// ES bulk NDJSON リクエスト（Content-Type: application/x-ndjson）
+#[cfg(not(target_arch = "wasm32"))]
+fn es_http_ndjson(method: &str, url: &str, ndjson: &str) -> Result<String, String> {
+    es_http(method, url, Some("application/x-ndjson"), Some(ndjson))
+}
+
+/// プレーン JSON Value → DynamoDB 属性型 JSON Value
+/// String  → {"S": "val"}
+/// Number  → {"N": "1.0"}
+/// Boolean → {"BOOL": true}
+/// Null    → {"NULL": true}
+/// Array   → {"L": [...]}
+/// Object  → {"M": {...}}
+#[cfg(not(target_arch = "wasm32"))]
+fn json_val_to_dynamo_attr(v: &serde_json::Value) -> serde_json::Value {
+    match v {
+        serde_json::Value::String(s) => serde_json::json!({"S": s}),
+        serde_json::Value::Number(n) => serde_json::json!({"N": n.to_string()}),
+        serde_json::Value::Bool(b) => serde_json::json!({"BOOL": b}),
+        serde_json::Value::Null => serde_json::json!({"NULL": true}),
+        serde_json::Value::Array(arr) => {
+            let items: Vec<serde_json::Value> = arr.iter().map(json_val_to_dynamo_attr).collect();
+            serde_json::json!({"L": items})
+        }
+        serde_json::Value::Object(obj) => {
+            let mut m = serde_json::Map::new();
+            for (k, val) in obj {
+                m.insert(k.clone(), json_val_to_dynamo_attr(val));
+            }
+            serde_json::json!({"M": m})
+        }
+    }
+}
+
+/// プレーン JSON Object → DynamoDB Item (属性型 JSON Map)
+/// {"pk": "user1", "ttl": 1700} → {"pk":{"S":"user1"},"ttl":{"N":"1700"}}
+#[cfg(not(target_arch = "wasm32"))]
+fn json_to_dynamo_item(v: &serde_json::Value) -> Result<serde_json::Map<String, serde_json::Value>, String> {
+    let obj = v.as_object().ok_or_else(|| "DynamoDB: expected JSON object for item/key".to_string())?;
+    let mut item = serde_json::Map::new();
+    for (k, val) in obj {
+        item.insert(k.clone(), json_val_to_dynamo_attr(val));
+    }
+    Ok(item)
+}
+
+/// DynamoDB 属性値 JSON → プレーン JSON Value
+/// {"S": "user1"} → "user1"
+/// {"N": "1700"}  → 1700
+#[cfg(not(target_arch = "wasm32"))]
+fn dynamo_attr_to_json(v: &serde_json::Value) -> serde_json::Value {
+    if let Some(obj) = v.as_object() {
+        if let Some(s) = obj.get("S").and_then(|x| x.as_str()) {
+            return serde_json::Value::String(s.to_string());
+        }
+        if let Some(n) = obj.get("N").and_then(|x| x.as_str()) {
+            if let Ok(i) = n.parse::<i64>() {
+                return serde_json::json!(i);
+            }
+            if let Ok(f) = n.parse::<f64>() {
+                return serde_json::Number::from_f64(f)
+                    .map(serde_json::Value::Number)
+                    .unwrap_or_else(|| serde_json::Value::String(n.to_string()));
+            }
+        }
+        if let Some(b) = obj.get("BOOL").and_then(|x| x.as_bool()) {
+            return serde_json::Value::Bool(b);
+        }
+        if obj.get("NULL").is_some() {
+            return serde_json::Value::Null;
+        }
+        if let Some(arr) = obj.get("L").and_then(|x| x.as_array()) {
+            return serde_json::Value::Array(arr.iter().map(dynamo_attr_to_json).collect());
+        }
+        if let Some(m) = obj.get("M").and_then(|x| x.as_object()) {
+            let mut out = serde_json::Map::new();
+            for (k, val) in m {
+                out.insert(k.clone(), dynamo_attr_to_json(val));
+            }
+            return serde_json::Value::Object(out);
+        }
+        // 既知の未対応型: SS（String Set）/ NS（Number Set）/ BS（Binary Set）
+        // これらが含まれるアイテムでは属性型 JSON がそのまま返される。
+        // TODO(v26.x): SS/NS/BS を Vec<String> / Vec<Number> に変換する
+    }
+    v.clone()
+}
+
+/// DynamoDB Item (属性型 JSON オブジェクト) → プレーン JSON Value
+#[cfg(not(target_arch = "wasm32"))]
+fn dynamo_item_to_plain_json(item: &serde_json::Value) -> serde_json::Value {
+    if let Some(obj) = item.as_object() {
+        let mut out = serde_json::Map::new();
+        for (k, v) in obj {
+            out.insert(k.clone(), dynamo_attr_to_json(v));
+        }
+        serde_json::Value::Object(out)
+    } else {
+        item.clone()
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn json_to_mysql_value(v: serde_json::Value) -> mysql::Value {
+    match v {
+        serde_json::Value::Null => mysql::Value::NULL,
+        serde_json::Value::Bool(b) => mysql::Value::Int(if b { 1 } else { 0 }),
+        serde_json::Value::Number(n) => {
+            if let Some(i) = n.as_i64() {
+                mysql::Value::Int(i)
+            } else if let Some(f) = n.as_f64() {
+                // Float(f32) ではなく Double(f64) を使用して精度損失を防ぐ
+                mysql::Value::Double(f)
+            } else {
+                mysql::Value::Bytes(n.to_string().into_bytes())
+            }
+        }
+        serde_json::Value::String(s) => mysql::Value::Bytes(s.into_bytes()),
+        _ => mysql::Value::Bytes(v.to_string().into_bytes()),
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn mysql_value_to_json(v: mysql::Value) -> serde_json::Value {
+    match v {
+        mysql::Value::NULL => serde_json::Value::Null,
+        mysql::Value::Bytes(b) => {
+            serde_json::Value::String(String::from_utf8_lossy(&b).into_owned())
+        }
+        mysql::Value::Int(i) => serde_json::Value::Number(i.into()),
+        mysql::Value::UInt(u) => serde_json::Value::Number(u.into()),
+        mysql::Value::Float(f) => {
+            serde_json::Number::from_f64(f as f64)
+                .map(serde_json::Value::Number)
+                .unwrap_or(serde_json::Value::Null)
+        }
+        mysql::Value::Double(d) => {
+            serde_json::Number::from_f64(d)
+                .map(serde_json::Value::Number)
+                .unwrap_or(serde_json::Value::Null)
+        }
+        other => serde_json::Value::String(format!("{:?}", other)),
+    }
+}
 
 // Format a tokio_postgres error with full DbError detail (v12.6.0).
 #[cfg(not(target_arch = "wasm32"))]
@@ -12595,6 +13212,172 @@ fn vm_call_builtin(
             Ok(ok_vm(VMValue::Unit))
         }
 
+        // ── v25.1.0: 接続オブジェクト API ─────────────────────────────────────────
+
+        // Postgres.connect_raw — PgConfig（接続文字列）を受け取り接続確認後 PgConn を返す
+        "Postgres.connect_raw" => {
+            let conn_str = vm_string(
+                args.into_iter().next().ok_or_else(|| "Postgres.connect_raw requires config".to_string())?,
+                "Postgres.connect_raw config",
+            )?;
+            // 接続文字列を PgConn（String）としてそのまま返す
+            // 実環境では接続確認 ping を行う
+            Ok(ok_vm(VMValue::Str(conn_str)))
+        }
+
+        // Postgres.execute_many_raw — 同一 SQL を複数行に対してバッチ実行する
+        // 注意: 各行は autocommit で実行される。部分失敗を防ぐには transaction_begin_raw / commit_raw で囲むこと。
+        "Postgres.execute_many_raw" => {
+            let mut it = args.into_iter();
+            let conn_str = vm_string(
+                it.next().ok_or_else(|| "Postgres.execute_many_raw requires conn".to_string())?,
+                "Postgres.execute_many_raw conn",
+            )?;
+            let sql = vm_string(
+                it.next().ok_or_else(|| "Postgres.execute_many_raw requires sql".to_string())?,
+                "Postgres.execute_many_raw sql",
+            )?;
+            let rows_val = it.next().ok_or_else(|| "Postgres.execute_many_raw requires rows".to_string())?;
+            let rows = match rows_val {
+                VMValue::List(fl) => fl,
+                _ => return Ok(err_vm(VMValue::Str("Postgres.execute_many_raw: expected List for rows".into()))),
+            };
+            let mut total: i64 = 0;
+            for row in rows.iter() {
+                let params_json = vmvalue_to_params_json(&row);
+                match pg_execute(&conn_str, &sql, &params_json) {
+                    Ok(()) => total += 1,
+                    Err(e) => return Ok(err_vm(VMValue::Str(e))),
+                }
+            }
+            Ok(ok_vm(VMValue::Int(total)))
+        }
+
+        // Postgres.transaction_begin_raw — BEGIN を発行する（client.fav の transaction<T> が呼ぶ）
+        "Postgres.transaction_begin_raw" => {
+            let conn_str = vm_string(
+                args.into_iter().next().ok_or_else(|| "Postgres.transaction_begin_raw requires conn".to_string())?,
+                "Postgres.transaction_begin_raw conn",
+            )?;
+            match pg_execute(&conn_str, "BEGIN", "[]") {
+                Ok(()) => Ok(ok_vm(VMValue::Unit)),
+                Err(e) => Ok(err_vm(VMValue::Str(format!("transaction BEGIN failed: {e}")))),
+            }
+        }
+
+        // Postgres.transaction_commit_raw — COMMIT を発行する
+        "Postgres.transaction_commit_raw" => {
+            let conn_str = vm_string(
+                args.into_iter().next().ok_or_else(|| "Postgres.transaction_commit_raw requires conn".to_string())?,
+                "Postgres.transaction_commit_raw conn",
+            )?;
+            match pg_execute(&conn_str, "COMMIT", "[]") {
+                Ok(()) => Ok(ok_vm(VMValue::Unit)),
+                Err(e) => Ok(err_vm(VMValue::Str(format!("transaction COMMIT failed: {e}")))),
+            }
+        }
+
+        // Postgres.transaction_rollback_raw — ROLLBACK を発行する（エラーはベストエフォートで無視）
+        "Postgres.transaction_rollback_raw" => {
+            let conn_str = vm_string(
+                args.into_iter().next().ok_or_else(|| "Postgres.transaction_rollback_raw requires conn".to_string())?,
+                "Postgres.transaction_rollback_raw conn",
+            )?;
+            // ROLLBACK 失敗は無視（接続断の場合はサーバー側でタイムアウト後にロールバック）
+            let _ = pg_execute(&conn_str, "ROLLBACK", "[]");
+            Ok(ok_vm(VMValue::Unit))
+        }
+
+        // Postgres.execute_with_conn_raw — PgConn（接続文字列）経由で DML を実行する（HIGH-4 対応）
+        "Postgres.execute_with_conn_raw" => {
+            let mut it = args.into_iter();
+            let conn_str = vm_string(
+                it.next().ok_or_else(|| "Postgres.execute_with_conn_raw requires conn".to_string())?,
+                "Postgres.execute_with_conn_raw conn",
+            )?;
+            let sql = vm_string(
+                it.next().ok_or_else(|| "Postgres.execute_with_conn_raw requires sql".to_string())?,
+                "Postgres.execute_with_conn_raw sql",
+            )?;
+            let params_json = vm_string(
+                it.next().ok_or_else(|| "Postgres.execute_with_conn_raw requires params".to_string())?,
+                "Postgres.execute_with_conn_raw params",
+            )?;
+            match pg_execute(&conn_str, &sql, &params_json) {
+                Ok(()) => Ok(ok_vm(VMValue::Unit)),
+                Err(e)  => Ok(err_vm(VMValue::Str(e))),
+            }
+        }
+
+        // Postgres.query_with_conn_raw — PgConn（接続文字列）経由でクエリを実行する（HIGH-3 対応）
+        "Postgres.query_with_conn_raw" => {
+            let mut it = args.into_iter();
+            let conn_str = vm_string(
+                it.next().ok_or_else(|| "Postgres.query_with_conn_raw requires conn".to_string())?,
+                "Postgres.query_with_conn_raw conn",
+            )?;
+            let sql = vm_string(
+                it.next().ok_or_else(|| "Postgres.query_with_conn_raw requires sql".to_string())?,
+                "Postgres.query_with_conn_raw sql",
+            )?;
+            let params_json = vm_string(
+                it.next().ok_or_else(|| "Postgres.query_with_conn_raw requires params".to_string())?,
+                "Postgres.query_with_conn_raw params",
+            )?;
+            match pg_query(&conn_str, &sql, &params_json) {
+                Ok(json) => Ok(ok_vm(VMValue::Str(json))),
+                Err(e)   => Ok(err_vm(VMValue::Str(e))),
+            }
+        }
+
+        // Postgres.pool_create_with_config_raw — PoolConfig（接続文字列）からプールを作成する
+        "Postgres.pool_create_with_config_raw" => {
+            let config_str = vm_string(
+                args.into_iter().next().ok_or_else(|| "Postgres.pool_create_with_config_raw requires config".to_string())?,
+                "Postgres.pool_create_with_config_raw config",
+            )?;
+            // max_size を config 文字列から抽出（"max_size=N" を探す）
+            let pool_size: usize = config_str.split_whitespace()
+                .find_map(|kv| {
+                    let mut parts = kv.splitn(2, '=');
+                    if parts.next()? == "max_size" {
+                        parts.next()?.parse().ok()
+                    } else {
+                        None
+                    }
+                })
+                .unwrap_or(5);
+            // max_size= を除いた残りを接続文字列として使う
+            let conn_str: String = config_str.split_whitespace()
+                .filter(|kv| !kv.starts_with("max_size="))
+                .collect::<Vec<_>>()
+                .join(" ");
+            let effective_conn = if conn_str.is_empty() { pg_conn_str_from_env() } else { conn_str };
+            let inner = crate::backend::pg_pool::PgPoolInner::new(&effective_conn, pool_size);
+            let id = pg_pool_alloc(inner);
+            Ok(ok_vm(VMValue::PgPool(id)))
+        }
+
+        // Postgres.pool_get_raw — プールから接続を取得し PgConn（接続文字列）を返す
+        // .cloned() で MutexGuard を即座に解放（既存 Pool.query/Pool.execute と同パターン）
+        "Postgres.pool_get_raw" => {
+            let id = match args.into_iter().next() {
+                Some(VMValue::PgPool(id)) => id,
+                _ => return Ok(err_vm(VMValue::Str("Postgres.pool_get_raw: expected PgPool".into()))),
+            };
+            let inner = pg_pool_store().get(&id).cloned();
+            match inner {
+                None => Ok(err_vm(VMValue::Str(format!("Postgres.pool_get_raw: invalid pool id {id}")))),
+                Some(pool) => Ok(ok_vm(VMValue::Str(pool.conn_str.clone()))),
+            }
+        }
+
+        // Postgres.pool_release_raw — PgConn をプールに返却（現実装では no-op）
+        "Postgres.pool_release_raw" => {
+            // PgConn は String（接続文字列）のため返却リソースなし
+            Ok(ok_vm(VMValue::Unit))
+        }
+
         "Http.put_raw" => {
             if args.len() != 3 {
                 return Err("Http.put_raw requires 3 arguments".to_string());
@@ -15399,6 +16182,93 @@ fn vm_call_builtin(
             })
         }
 
+        // ── AWS S3 extended (v25.2.0) ────────────────────────────────────
+        "AWS.s3_presign_url_raw" => {
+            let mut it = args.into_iter();
+            let bucket = vm_string(
+                it.next().ok_or("s3_presign_url_raw: missing bucket")?,
+                "AWS.s3_presign_url_raw",
+            )?;
+            let key = vm_string(
+                it.next().ok_or("s3_presign_url_raw: missing key")?,
+                "AWS.s3_presign_url_raw",
+            )?;
+            let ttl: i64 = match it.next() {
+                Some(VMValue::Int(n)) => n,
+                _ => 3600,
+            };
+            let config = get_aws_config();
+            let base = if let Some(ep) = &config.endpoint_url {
+                format!("{}/{}", ep.trim_end_matches('/'), bucket)
+            } else {
+                format!("https://{}.s3.{}.amazonaws.com", bucket, config.region)
+            };
+            let object_url = format!("{}/{}", base, key);
+            // Build presigned URL using SigV4 query parameters.
+            // For LocalStack (endpoint_url set) use a simplified unsigned URL.
+            let presigned = if config.endpoint_url.is_some() {
+                format!("{}?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Expires={}&X-Amz-Signature=dummy", object_url, ttl)
+            } else {
+                let now = chrono::Utc::now();
+                let amz_date = now.format("%Y%m%dT%H%M%SZ").to_string();
+                let date_stamp = now.format("%Y%m%d").to_string();
+                let credential_scope = format!("{}/{}/s3/aws4_request", date_stamp, config.region);
+                let credential = format!("{}/{}", config.access_key, credential_scope);
+                let canonical_qs = format!(
+                    "X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential={}&X-Amz-Date={}&X-Amz-Expires={}&X-Amz-SignedHeaders=host",
+                    url_encode(&credential), amz_date, ttl
+                );
+                let host = object_url
+                    .trim_start_matches("https://")
+                    .split('/')
+                    .next()
+                    .unwrap_or("");
+                let path = {
+                    let after = object_url.splitn(2, "://").nth(1).unwrap_or(&object_url);
+                    after.splitn(2, '/').nth(1).map(|s| format!("/{}", s)).unwrap_or_else(|| "/".to_string())
+                };
+                let canonical_req = format!(
+                    "GET\n{}\n{}\nhost:{}\n\nhost\nUNSIGNED-PAYLOAD",
+                    path, canonical_qs, host
+                );
+                let string_to_sign = format!(
+                    "AWS4-HMAC-SHA256\n{}\n{}\n{}",
+                    amz_date,
+                    credential_scope,
+                    sha256_hex_bytes(canonical_req.as_bytes())
+                );
+                let signing_key = sigv4_signing_key(&config.secret_key, &date_stamp, &config.region, "s3");
+                let sig_bytes = hmac_sha256_bytes(&signing_key, string_to_sign.as_bytes());
+                let signature: String = sig_bytes.iter().map(|b| format!("{:02x}", b)).collect();
+                format!("{}?{}&X-Amz-Signature={}", object_url, canonical_qs, signature)
+            };
+            Ok(ok_vm(VMValue::Str(presigned)))
+        }
+
+        "AWS.s3_stream_get_raw" => {
+            // TODO(v25.x): Stream<Bytes> 対応 — 現バージョンは get_object と同一ロジック
+            let mut it = args.into_iter();
+            let bucket = vm_string(
+                it.next().ok_or("s3_stream_get_raw: missing bucket")?,
+                "AWS.s3_stream_get_raw",
+            )?;
+            let key = vm_string(
+                it.next().ok_or("s3_stream_get_raw: missing key")?,
+                "AWS.s3_stream_get_raw",
+            )?;
+            let config = get_aws_config();
+            let base = if let Some(ep) = &config.endpoint_url {
+                format!("{}/{}", ep.trim_end_matches('/'), bucket)
+            } else {
+                format!("https://{}.s3.{}.amazonaws.com", bucket, config.region)
+            };
+            let url = format!("{}/{}", base, key);
+            Ok(match aws_get(&config, "s3", &url) {
+                Ok(body) => ok_vm(VMValue::Str(body)),
+                Err(e) => err_vm(VMValue::Str(e)),
+            })
+        }
+
         // ── AWS SQS (v4.11.0) ─────────────────────────────────────────────
         "AWS.sqs_send_message_raw" => {
             let mut it = args.into_iter();
@@ -15556,6 +16426,126 @@ fn vm_call_builtin(
                     Err(e) => err_vm(VMValue::Str(e)),
                 },
             )
+        }
+
+        // ── SQS Rune primitives (v26.8.0) ────────────────────────────────
+        "SQS.send_message_batch_raw" => {
+            let mut it = args.into_iter();
+            let queue_url = vm_string(
+                it.next().ok_or("SQS.send_message_batch_raw: missing queue_url")?,
+                "SQS.send_message_batch_raw",
+            )?;
+            let messages = match it.next().ok_or("SQS.send_message_batch_raw: missing messages")? {
+                VMValue::List(list) => list,
+                _ => return Err("SQS.send_message_batch_raw: messages must be a List".to_string()),
+            };
+            if messages.len() > 10 {
+                return Ok(err_vm(VMValue::Str(format!(
+                    "SQS.send_message_batch: batch size {} exceeds SQS limit of 10",
+                    messages.len()
+                ))));
+            }
+            let config = get_aws_config();
+            let mut form = "Action=SendMessageBatch&Version=2012-11-05".to_string();
+            for (i, msg) in messages.iter().enumerate() {
+                let body = match msg {
+                    VMValue::Str(s) => s.clone(),
+                    _ => format!("{:?}", msg),
+                };
+                let n = i + 1; // SQS バッチエントリは 1-indexed（SQS API 仕様）
+                form.push_str(&format!(
+                    "&SendMessageBatchRequestEntry.{n}.Id=msg{n}&SendMessageBatchRequestEntry.{n}.MessageBody={}",
+                    url_encode(&body),
+                ));
+            }
+            Ok(match aws_post(&config, "sqs", &queue_url, &form, "application/x-www-form-urlencoded", None) {
+                Ok(xml) => {
+                    let ids = extract_xml_tags(&xml, "MessageId");
+                    ok_vm(VMValue::Str(format!("{{\"sent\":{}}}", ids.len())))
+                }
+                Err(e) => err_vm(VMValue::Str(e)),
+            })
+        }
+
+        "SQS.receive_messages_raw" => {
+            // AttributeName.1=All: LocalStack 動作確認済み。本番 AWS の MessageAttribute 取得は v27.x で対応。
+            let mut it = args.into_iter();
+            let queue_url = vm_string(
+                it.next().ok_or("SQS.receive_messages_raw: missing queue_url")?,
+                "SQS.receive_messages_raw",
+            )?;
+            let max = match it.next().ok_or("SQS.receive_messages_raw: missing max")? {
+                VMValue::Int(n) => n,
+                _ => return Err("SQS.receive_messages_raw: max must be an Int".to_string()),
+            };
+            if max < 1 || max > 10 {
+                return Ok(err_vm(VMValue::Str(format!(
+                    "SQS.receive_messages: max must be between 1 and 10, got {}",
+                    max
+                ))));
+            }
+            let config = get_aws_config();
+            let form = format!(
+                "Action=ReceiveMessage&MaxNumberOfMessages={}&AttributeName.1=All&Version=2012-11-05",
+                max
+            );
+            Ok(match aws_post(&config, "sqs", &queue_url, &form, "application/x-www-form-urlencoded", None) {
+                Ok(xml) => {
+                    let messages = extract_xml_tags(&xml, "Message");
+                    let items: Vec<String> = messages.into_iter().map(|msg| {
+                        let id = extract_xml_tags(&msg, "MessageId").into_iter().next().unwrap_or_default();
+                        let body = extract_xml_tags(&msg, "Body").into_iter().next().unwrap_or_default();
+                        let handle = extract_xml_tags(&msg, "ReceiptHandle").into_iter().next().unwrap_or_default();
+                        let id_j = serde_json::to_string(&id).unwrap_or_else(|_| "\"\"".to_string());
+                        let body_j = serde_json::to_string(&body).unwrap_or_else(|_| "\"\"".to_string());
+                        let handle_j = serde_json::to_string(&handle).unwrap_or_else(|_| "\"\"".to_string());
+                        format!("{{\"message_id\":{},\"body\":{},\"receipt_handle\":{}}}", id_j, body_j, handle_j)
+                    }).collect();
+                    ok_vm(VMValue::Str(format!("[{}]", items.join(","))))
+                }
+                Err(e) => err_vm(VMValue::Str(e)),
+            })
+        }
+
+        "SQS.purge_raw" => {
+            let mut it = args.into_iter();
+            let queue_url = vm_string(
+                it.next().ok_or("SQS.purge_raw: missing queue_url")?,
+                "SQS.purge_raw",
+            )?;
+            let config = get_aws_config();
+            let form = "Action=PurgeQueue&Version=2012-11-05".to_string();
+            Ok(match aws_post(&config, "sqs", &queue_url, &form, "application/x-www-form-urlencoded", None) {
+                Ok(_) => ok_vm(VMValue::Unit),
+                Err(e) => err_vm(VMValue::Str(e)),
+            })
+        }
+
+        "SQS.consume_raw" => {
+            // Stub: 1 回ポーリングして JSON 文字列で返す（継続ループは v27.x）
+            let mut it = args.into_iter();
+            let queue_url = vm_string(
+                it.next().ok_or("SQS.consume_raw: missing queue_url")?,
+                "SQS.consume_raw",
+            )?;
+            let config = get_aws_config();
+            let form = "Action=ReceiveMessage&MaxNumberOfMessages=10&AttributeName.1=All&Version=2012-11-05".to_string();
+            Ok(match aws_post(&config, "sqs", &queue_url, &form, "application/x-www-form-urlencoded", None) {
+                Ok(xml) => {
+                    let messages = extract_xml_tags(&xml, "Message");
+                    let items: Vec<String> = messages.into_iter().map(|msg| {
+                        let id = extract_xml_tags(&msg, "MessageId").into_iter().next().unwrap_or_default();
+                        let body = extract_xml_tags(&msg, "Body").into_iter().next().unwrap_or_default();
+                        let handle = extract_xml_tags(&msg, "ReceiptHandle").into_iter().next().unwrap_or_default();
+                        let id_j = serde_json::to_string(&id).unwrap_or_else(|_| "\"\"".to_string());
+                        let body_j = serde_json::to_string(&body).unwrap_or_else(|_| "\"\"".to_string());
+                        let handle_j = serde_json::to_string(&handle).unwrap_or_else(|_| "\"\"".to_string());
+                        format!("{{\"message_id\":{},\"body\":{},\"receipt_handle\":{}}}", id_j, body_j, handle_j)
+                    }).collect();
+                    ok_vm(VMValue::Str(format!("[{}]", items.join(","))))
+                }
+                Err(e) => err_vm(VMValue::Str(e)),
+            })
         }
 
         // ── AWS DynamoDB (v4.11.0) ────────────────────────────────────────
@@ -16017,6 +17007,9 @@ fn vm_call_builtin(
 
         // ── GCP BigQuery primitives (v15.2.0) ────────────────────────────
         // 共通: GOOGLE_APPLICATION_CREDENTIALS → RS256 JWT → Bearer token
+        // TODO(v28.x): query_raw / execute_raw / infer_table_raw に wasm32 ガードを追加する。
+        //              v27.4.0 追加の connect_raw 等（下方）はガード済みのため非対称になっている。
+        //              v28.x の google-cloud-bigquery クレート統合時にまとめて対処すること。
 
         "BigQuery.query_raw" => {
             // (project_id, dataset, sql, params_json) -> Result<String, String>
@@ -16234,10 +17227,78 @@ fn vm_call_builtin(
             Ok(ok_vm(VMValue::Str(resp_text)))
         }
 
-        // ── Kafka / MSK primitives (v15.4.0) ──────────────────────────────
+        // ── BigQuery connect-based primitives (v27.4.0) ───────────────────
+        // connect-based API（!Db エフェクト、DWH 統一）。v15.2.0 の query_raw / execute_raw は残す。
+        // TODO(v28.x): google-cloud-bigquery クレートを使った実接続に移行予定。
+        //              _config のフォーマットは現在 "project:X,dataset:Y" のカンマ区切り文字列。
+        //              v28.x で fav.toml [bigquery] セクション統合に変更予定（フォーマット破壊的変更あり）。
+        //              _config を BigQuery クライアントの初期化（project_id / credentials）に渡す。
 
+        #[cfg(not(target_arch = "wasm32"))]
+        "BigQuery.connect_raw" => {
+            // (config: String) -> Result<String, String> !Db
+            let mut it = args.into_iter();
+            let _config = vm_string(it.next().ok_or("BigQuery.connect_raw: missing config")?, "BigQuery.connect_raw")?;
+            Ok(ok_vm(VMValue::Str("bigquery-stub-conn".into())))
+        }
+        #[cfg(target_arch = "wasm32")]
+        "BigQuery.connect_raw" => Ok(err_vm(VMValue::Str("BigQuery not supported on wasm32".into()))),
+
+        #[cfg(not(target_arch = "wasm32"))]
+        "BigQuery.conn_query_raw" => {
+            // (conn: String, sql: String) -> Result<String, String> !Db
+            let mut it = args.into_iter();
+            let _conn = vm_string(it.next().ok_or("BigQuery.conn_query_raw: missing conn")?, "BigQuery.conn_query_raw")?;
+            let _sql  = vm_string(it.next().ok_or("BigQuery.conn_query_raw: missing sql")?,  "BigQuery.conn_query_raw")?;
+            Ok(ok_vm(VMValue::Str("[]".into())))
+        }
+        #[cfg(target_arch = "wasm32")]
+        "BigQuery.conn_query_raw" => Ok(err_vm(VMValue::Str("BigQuery not supported on wasm32".into()))),
+
+        #[cfg(not(target_arch = "wasm32"))]
+        "BigQuery.insert_raw" => {
+            // (conn: String, table: String, rows: String) -> Result<Unit, String> !Db
+            let mut it = args.into_iter();
+            let _conn  = vm_string(it.next().ok_or("BigQuery.insert_raw: missing conn")?,  "BigQuery.insert_raw")?;
+            let _table = vm_string(it.next().ok_or("BigQuery.insert_raw: missing table")?, "BigQuery.insert_raw")?;
+            let _rows  = vm_string(it.next().ok_or("BigQuery.insert_raw: missing rows")?,  "BigQuery.insert_raw")?;
+            Ok(ok_vm(VMValue::Unit))
+        }
+        #[cfg(target_arch = "wasm32")]
+        "BigQuery.insert_raw" => Ok(err_vm(VMValue::Str("BigQuery not supported on wasm32".into()))),
+
+        #[cfg(not(target_arch = "wasm32"))]
+        "BigQuery.load_from_gcs_raw" => {
+            // (conn: String, table: String, gcs_uri: String, format: String) -> Result<Unit, String> !Db
+            let mut it = args.into_iter();
+            let _conn    = vm_string(it.next().ok_or("BigQuery.load_from_gcs_raw: missing conn")?,    "BigQuery.load_from_gcs_raw")?;
+            let _table   = vm_string(it.next().ok_or("BigQuery.load_from_gcs_raw: missing table")?,   "BigQuery.load_from_gcs_raw")?;
+            let _gcs_uri = vm_string(it.next().ok_or("BigQuery.load_from_gcs_raw: missing gcs_uri")?, "BigQuery.load_from_gcs_raw")?;
+            let _format  = vm_string(it.next().ok_or("BigQuery.load_from_gcs_raw: missing format")?,  "BigQuery.load_from_gcs_raw")?;
+            Ok(ok_vm(VMValue::Unit))
+        }
+        #[cfg(target_arch = "wasm32")]
+        "BigQuery.load_from_gcs_raw" => Ok(err_vm(VMValue::Str("BigQuery not supported on wasm32".into()))),
+
+        #[cfg(not(target_arch = "wasm32"))]
+        "BigQuery.create_table_raw" => {
+            // (conn: String, table: String, schema: String) -> Result<Unit, String> !Db
+            let mut it = args.into_iter();
+            let _conn   = vm_string(it.next().ok_or("BigQuery.create_table_raw: missing conn")?,   "BigQuery.create_table_raw")?;
+            let _table  = vm_string(it.next().ok_or("BigQuery.create_table_raw: missing table")?,  "BigQuery.create_table_raw")?;
+            let _schema = vm_string(it.next().ok_or("BigQuery.create_table_raw: missing schema")?, "BigQuery.create_table_raw")?;
+            Ok(ok_vm(VMValue::Unit))
+        }
+        #[cfg(target_arch = "wasm32")]
+        "BigQuery.create_table_raw" => Ok(err_vm(VMValue::Str("BigQuery not supported on wasm32".into()))),
+
+        // ── Kafka / MSK primitives (v15.4.0) ──────────────────────────────
+        // TODO(v25.7.0): wasm32 ガードを既存 2 primitive にも追加（新規 3 件と対称化）
+
+        #[cfg(not(target_arch = "wasm32"))]
         "Kafka.produce_raw" => {
-            // (brokers: String, topic: String, key: String, value: String) -> Result<Unit, String>
+            // (conn_str: String [= brokers addr from KafkaConn], topic: String, key: String, value: String) -> Result<Unit, String>
+            // Rune 側から呼ばれる際は conn: KafkaConn の内部 String（ブローカーアドレス）が渡される（名目型ラッパー）。
             let mut it = args.into_iter();
             let brokers_arg = vm_string(it.next().ok_or("Kafka.produce_raw: missing brokers")?,  "Kafka.produce_raw")?;
             let topic       = vm_string(it.next().ok_or("Kafka.produce_raw: missing topic")?,    "Kafka.produce_raw")?;
@@ -16250,9 +17311,13 @@ fn vm_call_builtin(
                 Err(e) => Ok(err_vm(VMValue::Str(e))),
             }
         }
+        #[cfg(target_arch = "wasm32")]
+        "Kafka.produce_raw" => Ok(err_vm(VMValue::Str("Kafka not supported on wasm32".into()))),
 
+        #[cfg(not(target_arch = "wasm32"))]
         "Kafka.consume_one_raw" => {
-            // (brokers: String, topic: String, group_id: String) -> Result<String, String>
+            // (conn_str: String [= brokers addr from KafkaConn], topic: String, group_id: String) -> Result<String, String>
+            // Rune 側から呼ばれる際は conn: KafkaConn の内部 String（ブローカーアドレス）が渡される（名目型ラッパー）。
             let mut it = args.into_iter();
             let brokers_arg = vm_string(it.next().ok_or("Kafka.consume_one_raw: missing brokers")?,  "Kafka.consume_one_raw")?;
             let topic       = vm_string(it.next().ok_or("Kafka.consume_one_raw: missing topic")?,    "Kafka.consume_one_raw")?;
@@ -16264,6 +17329,1015 @@ fn vm_call_builtin(
                 Err(e)  => Ok(err_vm(VMValue::Str(e))),
             }
         }
+        #[cfg(target_arch = "wasm32")]
+        "Kafka.consume_one_raw" => Ok(err_vm(VMValue::Str("Kafka not supported on wasm32".into()))),
+
+        // ── Kafka 新規 primitives (v25.7.0) ──────────────────────────────
+        #[cfg(not(target_arch = "wasm32"))]
+        "Kafka.connect_raw" => {
+            // (brokers: String) -> Result<String, String>
+            let mut it = args.into_iter();
+            let brokers_arg = vm_string(it.next().ok_or("Kafka.connect_raw: missing brokers")?, "Kafka.connect_raw")?;
+            let brokers = kafka_resolve_brokers(&brokers_arg);
+            match kafka_connect_sync(&brokers) {
+                Ok(()) => Ok(ok_vm(VMValue::Str(brokers))),
+                Err(e)  => Ok(err_vm(VMValue::Str(e))),
+            }
+        }
+        #[cfg(target_arch = "wasm32")]
+        "Kafka.connect_raw" => Ok(err_vm(VMValue::Str("Kafka not supported on wasm32".into()))),
+
+        #[cfg(not(target_arch = "wasm32"))]
+        "Kafka.consume_batch_raw" => {
+            // (brokers: String, topic: String, max_count: Int) -> Result<String, String>
+            let mut it = args.into_iter();
+            let brokers_arg = vm_string(it.next().ok_or("Kafka.consume_batch_raw: missing brokers")?, "Kafka.consume_batch_raw")?;
+            let topic       = vm_string(it.next().ok_or("Kafka.consume_batch_raw: missing topic")?,   "Kafka.consume_batch_raw")?;
+            let max_count   = match it.next().ok_or("Kafka.consume_batch_raw: missing max_count")? {
+                VMValue::Int(n) => n,
+                _ => return Err("Kafka.consume_batch_raw: max_count must be Int".to_string()),
+            };
+            let brokers = kafka_resolve_brokers(&brokers_arg);
+            match kafka_consume_batch_sync(&brokers, &topic, max_count) {
+                Ok(s)  => Ok(ok_vm(VMValue::Str(s))),
+                Err(e) => Ok(err_vm(VMValue::Str(e))),
+            }
+        }
+        #[cfg(target_arch = "wasm32")]
+        "Kafka.consume_batch_raw" => Ok(err_vm(VMValue::Str("Kafka not supported on wasm32".into()))),
+
+        #[cfg(not(target_arch = "wasm32"))]
+        "Kafka.create_topic_raw" => {
+            // (brokers: String, topic: String, partitions: Int) -> Result<Unit, String>
+            let mut it = args.into_iter();
+            let brokers_arg = vm_string(it.next().ok_or("Kafka.create_topic_raw: missing brokers")?,  "Kafka.create_topic_raw")?;
+            let topic       = vm_string(it.next().ok_or("Kafka.create_topic_raw: missing topic")?,    "Kafka.create_topic_raw")?;
+            let partitions  = match it.next().ok_or("Kafka.create_topic_raw: missing partitions")? {
+                VMValue::Int(n) => n as i32,
+                _ => return Err("Kafka.create_topic_raw: partitions must be Int".to_string()),
+            };
+            let brokers = kafka_resolve_brokers(&brokers_arg);
+            match kafka_create_topic_sync(&brokers, &topic, partitions) {
+                Ok(())  => Ok(ok_vm(VMValue::Unit)),
+                Err(e)  => Ok(err_vm(VMValue::Str(e))),
+            }
+        }
+        #[cfg(target_arch = "wasm32")]
+        "Kafka.create_topic_raw" => Ok(err_vm(VMValue::Str("Kafka not supported on wasm32".into()))),
+
+        // ── Kinesis primitives (v26.1.0) ─────────────────────────────────
+        #[cfg(not(target_arch = "wasm32"))]
+        "Kinesis.connect_raw" => {
+            // (endpoint: String) -> Result<String, String>
+            // "" → KINESIS_ENDPOINT env var → "http://localhost:4566"
+            let mut it = args.into_iter();
+            let endpoint = vm_string(it.next().ok_or("Kinesis.connect_raw: missing endpoint")?, "Kinesis.connect_raw")?;
+            let ep = if endpoint.is_empty() {
+                std::env::var("KINESIS_ENDPOINT").unwrap_or_else(|_| "http://localhost:4566".to_string())
+            } else {
+                endpoint
+            };
+            Ok(ok_vm(VMValue::Str(ep)))
+        }
+        #[cfg(target_arch = "wasm32")]
+        "Kinesis.connect_raw" => Ok(err_vm(VMValue::Str("Kinesis not supported on wasm32".into()))),
+
+        #[cfg(not(target_arch = "wasm32"))]
+        "Kinesis.put_record_raw" => {
+            // (conn: String, stream: String, key: String, data: String) -> Result<String, String>
+            // Returns sequence number stub "seq-0001"
+            let mut it = args.into_iter();
+            let _conn   = vm_string(it.next().ok_or("Kinesis.put_record_raw: missing conn")?,   "Kinesis.put_record_raw")?;
+            let _stream = vm_string(it.next().ok_or("Kinesis.put_record_raw: missing stream")?, "Kinesis.put_record_raw")?;
+            let _key    = vm_string(it.next().ok_or("Kinesis.put_record_raw: missing key")?,    "Kinesis.put_record_raw")?;
+            let _data   = vm_string(it.next().ok_or("Kinesis.put_record_raw: missing data")?,   "Kinesis.put_record_raw")?;
+            Ok(ok_vm(VMValue::Str("seq-0001".to_string())))
+        }
+        #[cfg(target_arch = "wasm32")]
+        "Kinesis.put_record_raw" => Ok(err_vm(VMValue::Str("Kinesis not supported on wasm32".into()))),
+
+        #[cfg(not(target_arch = "wasm32"))]
+        "Kinesis.put_records_raw" => {
+            // (conn: String, stream: String, records: List) -> Result<Int, String>
+            // Returns count of records successfully sent (stub: all succeed)
+            let mut it = args.into_iter();
+            let _conn    = vm_string(it.next().ok_or("Kinesis.put_records_raw: missing conn")?,   "Kinesis.put_records_raw")?;
+            let _stream  = vm_string(it.next().ok_or("Kinesis.put_records_raw: missing stream")?, "Kinesis.put_records_raw")?;
+            let records  = it.next().ok_or("Kinesis.put_records_raw: missing records")?;
+            // TODO: when replacing stub with real AWS SDK call, validate each element
+            // is a VMValue::Record with { partition_key, data, sequence_num } fields
+            let count = match records {
+                VMValue::List(v) => v.len() as i64,
+                _ => return Err("Kinesis.put_records_raw: records must be a List".to_string()),
+            };
+            Ok(ok_vm(VMValue::Int(count)))
+        }
+        #[cfg(target_arch = "wasm32")]
+        "Kinesis.put_records_raw" => Ok(err_vm(VMValue::Str("Kinesis not supported on wasm32".into()))),
+
+        #[cfg(not(target_arch = "wasm32"))]
+        "Kinesis.get_shard_iterator_raw" => {
+            // (conn: String, stream: String, shard_id: String, iter_type: String) -> Result<String, String>
+            // Returns a stub iterator string
+            let mut it = args.into_iter();
+            let _conn      = vm_string(it.next().ok_or("Kinesis.get_shard_iterator_raw: missing conn")?,      "Kinesis.get_shard_iterator_raw")?;
+            let stream     = vm_string(it.next().ok_or("Kinesis.get_shard_iterator_raw: missing stream")?,    "Kinesis.get_shard_iterator_raw")?;
+            let _shard_id  = vm_string(it.next().ok_or("Kinesis.get_shard_iterator_raw: missing shard_id")?,  "Kinesis.get_shard_iterator_raw")?;
+            let iter_type  = vm_string(it.next().ok_or("Kinesis.get_shard_iterator_raw: missing iter_type")?, "Kinesis.get_shard_iterator_raw")?;
+            let iterator = format!("shard-iter-{stream}-{iter_type}");
+            Ok(ok_vm(VMValue::Str(iterator)))
+        }
+        #[cfg(target_arch = "wasm32")]
+        "Kinesis.get_shard_iterator_raw" => Ok(err_vm(VMValue::Str("Kinesis not supported on wasm32".into()))),
+
+        #[cfg(not(target_arch = "wasm32"))]
+        "Kinesis.get_records_raw" => {
+            // (conn: String, iterator: String, limit: Int) -> Result<String, String>
+            // Returns JSON array string of KinesisRecord objects (stub: empty array)
+            let mut it = args.into_iter();
+            let _conn     = vm_string(it.next().ok_or("Kinesis.get_records_raw: missing conn")?,     "Kinesis.get_records_raw")?;
+            let _iterator = vm_string(it.next().ok_or("Kinesis.get_records_raw: missing iterator")?, "Kinesis.get_records_raw")?;
+            let limit     = match it.next().ok_or("Kinesis.get_records_raw: missing limit")? {
+                VMValue::Int(n) => n,
+                _ => return Err("Kinesis.get_records_raw: limit must be Int".to_string()),
+            };
+            if limit <= 0 {
+                return Ok(err_vm(VMValue::Str("Kinesis.get_records_raw: limit must be > 0".to_string())));
+            }
+            Ok(ok_vm(VMValue::Str("[]".to_string())))
+        }
+        #[cfg(target_arch = "wasm32")]
+        "Kinesis.get_records_raw" => Ok(err_vm(VMValue::Str("Kinesis not supported on wasm32".into()))),
+
+        // ── NATS primitives (v26.2.0) ─────────────────────────────────────
+        #[cfg(not(target_arch = "wasm32"))]
+        "NATS.connect_raw" => {
+            // (url: String) -> Result<NatsConn, String>
+            // Stub: returns the URL string as VMValue::Str (NatsConn nominal type wrapper).
+            // TODO: when replacing stub with real nats crate call, replace VMValue::Str
+            // with a connection handle (e.g., store in a global registry keyed by ID string).
+            let mut it = args.into_iter();
+            let url = vm_string(it.next().ok_or("NATS.connect_raw: missing url")?, "NATS.connect_raw")?;
+            let u = if url.is_empty() {
+                std::env::var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".to_string())
+            } else { url };
+            Ok(ok_vm(VMValue::Str(u)))
+        }
+        #[cfg(target_arch = "wasm32")]
+        "NATS.connect_raw" => Ok(err_vm(VMValue::Str("NATS not supported on wasm32".into()))),
+
+        #[cfg(not(target_arch = "wasm32"))]
+        "NATS.publish_raw" => {
+            // (conn: NatsConn, subject: String, payload: String) -> Result<Unit, String>
+            let mut it = args.into_iter();
+            let _conn    = vm_string(it.next().ok_or("NATS.publish_raw: missing conn")?,    "NATS.publish_raw")?;
+            let _subject = vm_string(it.next().ok_or("NATS.publish_raw: missing subject")?, "NATS.publish_raw")?;
+            let _payload = vm_string(it.next().ok_or("NATS.publish_raw: missing payload")?, "NATS.publish_raw")?;
+            Ok(ok_vm(VMValue::Unit))
+        }
+        #[cfg(target_arch = "wasm32")]
+        "NATS.publish_raw" => Ok(err_vm(VMValue::Str("NATS not supported on wasm32".into()))),
+
+        #[cfg(not(target_arch = "wasm32"))]
+        "NATS.subscribe_raw" => {
+            // (conn: NatsConn, subject: String) -> Result<String, String>
+            // Stub: returns empty JSON object (no live server connection)
+            let mut it = args.into_iter();
+            let _conn    = vm_string(it.next().ok_or("NATS.subscribe_raw: missing conn")?,    "NATS.subscribe_raw")?;
+            let _subject = vm_string(it.next().ok_or("NATS.subscribe_raw: missing subject")?, "NATS.subscribe_raw")?;
+            Ok(ok_vm(VMValue::Str("{}".to_string())))
+        }
+        #[cfg(target_arch = "wasm32")]
+        "NATS.subscribe_raw" => Ok(err_vm(VMValue::Str("NATS not supported on wasm32".into()))),
+
+        #[cfg(not(target_arch = "wasm32"))]
+        "NATS.jetstream_publish_raw" => {
+            // (conn: NatsConn, stream: String, payload: String) -> Result<String, String>
+            // Stub: returns sequence number string
+            let mut it = args.into_iter();
+            let _conn    = vm_string(it.next().ok_or("NATS.jetstream_publish_raw: missing conn")?,    "NATS.jetstream_publish_raw")?;
+            let _stream  = vm_string(it.next().ok_or("NATS.jetstream_publish_raw: missing stream")?,  "NATS.jetstream_publish_raw")?;
+            let _payload = vm_string(it.next().ok_or("NATS.jetstream_publish_raw: missing payload")?, "NATS.jetstream_publish_raw")?;
+            Ok(ok_vm(VMValue::Str("seq-js-0001".to_string())))
+        }
+        #[cfg(target_arch = "wasm32")]
+        "NATS.jetstream_publish_raw" => Ok(err_vm(VMValue::Str("NATS not supported on wasm32".into()))),
+
+        #[cfg(not(target_arch = "wasm32"))]
+        "NATS.jetstream_consume_raw" => {
+            // (conn: NatsConn, stream: String, consumer: String) -> Result<String, String>
+            // Stub: returns empty JSON array
+            let mut it = args.into_iter();
+            let _conn     = vm_string(it.next().ok_or("NATS.jetstream_consume_raw: missing conn")?,     "NATS.jetstream_consume_raw")?;
+            let _stream   = vm_string(it.next().ok_or("NATS.jetstream_consume_raw: missing stream")?,   "NATS.jetstream_consume_raw")?;
+            let _consumer = vm_string(it.next().ok_or("NATS.jetstream_consume_raw: missing consumer")?, "NATS.jetstream_consume_raw")?;
+            Ok(ok_vm(VMValue::Str("[]".to_string())))
+        }
+        #[cfg(target_arch = "wasm32")]
+        "NATS.jetstream_consume_raw" => Ok(err_vm(VMValue::Str("NATS not supported on wasm32".into()))),
+
+        // ── RabbitMQ primitives (v26.3.0) ─────────────────────────────────
+        #[cfg(not(target_arch = "wasm32"))]
+        "RabbitMQ.connect_raw" => {
+            // (url: String) -> Result<RabbitConn, String>
+            // Stub: returns URL string as VMValue::Str (RabbitConn nominal type wrapper).
+            // TODO: when replacing stub with real AMQP connection, replace VMValue::Str
+            // with a connection handle stored in a global registry keyed by ID string.
+            let mut it = args.into_iter();
+            let url = vm_string(it.next().ok_or("RabbitMQ.connect_raw: missing url")?, "RabbitMQ.connect_raw")?;
+            let u = if url.is_empty() {
+                std::env::var("RABBITMQ_URL").unwrap_or_else(|_| "amqp://guest:guest@localhost:5672".to_string())
+            } else { url };
+            Ok(ok_vm(VMValue::Str(u)))
+        }
+        #[cfg(target_arch = "wasm32")]
+        "RabbitMQ.connect_raw" => Ok(err_vm(VMValue::Str("RabbitMQ not supported on wasm32".into()))),
+
+        #[cfg(not(target_arch = "wasm32"))]
+        "RabbitMQ.declare_exchange_raw" => {
+            // (conn: RabbitConn, name: String, ex_type: String) -> Result<Unit, String>
+            // Stub: validates args and returns Unit
+            let mut it = args.into_iter();
+            let _conn    = vm_string(it.next().ok_or("RabbitMQ.declare_exchange_raw: missing conn")?,    "RabbitMQ.declare_exchange_raw")?;
+            let _name    = vm_string(it.next().ok_or("RabbitMQ.declare_exchange_raw: missing name")?,    "RabbitMQ.declare_exchange_raw")?;
+            let _ex_type = vm_string(it.next().ok_or("RabbitMQ.declare_exchange_raw: missing ex_type")?, "RabbitMQ.declare_exchange_raw")?;
+            Ok(ok_vm(VMValue::Unit))
+        }
+        #[cfg(target_arch = "wasm32")]
+        "RabbitMQ.declare_exchange_raw" => Ok(err_vm(VMValue::Str("RabbitMQ not supported on wasm32".into()))),
+
+        #[cfg(not(target_arch = "wasm32"))]
+        "RabbitMQ.declare_queue_raw" => {
+            // (conn: RabbitConn, name: String) -> Result<Unit, String>
+            let mut it = args.into_iter();
+            let _conn = vm_string(it.next().ok_or("RabbitMQ.declare_queue_raw: missing conn")?, "RabbitMQ.declare_queue_raw")?;
+            let _name = vm_string(it.next().ok_or("RabbitMQ.declare_queue_raw: missing name")?, "RabbitMQ.declare_queue_raw")?;
+            Ok(ok_vm(VMValue::Unit))
+        }
+        #[cfg(target_arch = "wasm32")]
+        "RabbitMQ.declare_queue_raw" => Ok(err_vm(VMValue::Str("RabbitMQ not supported on wasm32".into()))),
+
+        #[cfg(not(target_arch = "wasm32"))]
+        "RabbitMQ.bind_queue_raw" => {
+            // (conn: RabbitConn, queue: String, exchange: String, routing_key: String) -> Result<Unit, String>
+            let mut it = args.into_iter();
+            let _conn        = vm_string(it.next().ok_or("RabbitMQ.bind_queue_raw: missing conn")?,        "RabbitMQ.bind_queue_raw")?;
+            let _queue       = vm_string(it.next().ok_or("RabbitMQ.bind_queue_raw: missing queue")?,       "RabbitMQ.bind_queue_raw")?;
+            let _exchange    = vm_string(it.next().ok_or("RabbitMQ.bind_queue_raw: missing exchange")?,    "RabbitMQ.bind_queue_raw")?;
+            let _routing_key = vm_string(it.next().ok_or("RabbitMQ.bind_queue_raw: missing routing_key")?, "RabbitMQ.bind_queue_raw")?;
+            Ok(ok_vm(VMValue::Unit))
+        }
+        #[cfg(target_arch = "wasm32")]
+        "RabbitMQ.bind_queue_raw" => Ok(err_vm(VMValue::Str("RabbitMQ not supported on wasm32".into()))),
+
+        #[cfg(not(target_arch = "wasm32"))]
+        "RabbitMQ.publish_raw" => {
+            // (conn: RabbitConn, exchange: String, routing_key: String, msg: String) -> Result<Unit, String>
+            let mut it = args.into_iter();
+            let _conn        = vm_string(it.next().ok_or("RabbitMQ.publish_raw: missing conn")?,        "RabbitMQ.publish_raw")?;
+            let _exchange    = vm_string(it.next().ok_or("RabbitMQ.publish_raw: missing exchange")?,    "RabbitMQ.publish_raw")?;
+            let _routing_key = vm_string(it.next().ok_or("RabbitMQ.publish_raw: missing routing_key")?, "RabbitMQ.publish_raw")?;
+            let _msg         = vm_string(it.next().ok_or("RabbitMQ.publish_raw: missing msg")?,         "RabbitMQ.publish_raw")?;
+            Ok(ok_vm(VMValue::Unit))
+        }
+        #[cfg(target_arch = "wasm32")]
+        "RabbitMQ.publish_raw" => Ok(err_vm(VMValue::Str("RabbitMQ not supported on wasm32".into()))),
+
+        #[cfg(not(target_arch = "wasm32"))]
+        "RabbitMQ.consume_raw" => {
+            // (conn: RabbitConn, queue: String) -> Result<String, String>
+            // Stub: returns empty JSON object (no live AMQP connection)
+            let mut it = args.into_iter();
+            let _conn  = vm_string(it.next().ok_or("RabbitMQ.consume_raw: missing conn")?,  "RabbitMQ.consume_raw")?;
+            let _queue = vm_string(it.next().ok_or("RabbitMQ.consume_raw: missing queue")?, "RabbitMQ.consume_raw")?;
+            Ok(ok_vm(VMValue::Str("{}".to_string())))
+        }
+        #[cfg(target_arch = "wasm32")]
+        "RabbitMQ.consume_raw" => Ok(err_vm(VMValue::Str("RabbitMQ not supported on wasm32".into()))),
+
+        // ── Pulsar primitives (v26.9.0) ────────────────────────────────────
+        #[cfg(not(target_arch = "wasm32"))]
+        "Pulsar.produce_raw" => {
+            // (topic: String, key: String, value: String) -> Result<String, String>
+            // Stub: Pulsar Binary Protocol (port 6650) は v27.x 以降。引数検証のみ実施。
+            let mut it = args.into_iter();
+            let _topic = vm_string(it.next().ok_or("Pulsar.produce_raw: missing topic")?, "Pulsar.produce_raw")?;
+            let _key   = vm_string(it.next().ok_or("Pulsar.produce_raw: missing key")?,   "Pulsar.produce_raw")?;
+            let _value = vm_string(it.next().ok_or("Pulsar.produce_raw: missing value")?, "Pulsar.produce_raw")?;
+            Ok(ok_vm(VMValue::Str("stub-message-id".to_string())))
+        }
+        #[cfg(target_arch = "wasm32")]
+        "Pulsar.produce_raw" => Ok(err_vm(VMValue::Str("Pulsar not supported on wasm32".into()))),
+
+        #[cfg(not(target_arch = "wasm32"))]
+        "Pulsar.consume_raw" => {
+            // (topic: String, subscription: String) -> Result<String, String>
+            // Stub: 1 回ポーリング返却。継続消費ループは v27.x 以降。
+            let mut it = args.into_iter();
+            let _topic        = vm_string(it.next().ok_or("Pulsar.consume_raw: missing topic")?,        "Pulsar.consume_raw")?;
+            let _subscription = vm_string(it.next().ok_or("Pulsar.consume_raw: missing subscription")?, "Pulsar.consume_raw")?;
+            Ok(ok_vm(VMValue::Str("[]".to_string())))
+        }
+        #[cfg(target_arch = "wasm32")]
+        "Pulsar.consume_raw" => Ok(err_vm(VMValue::Str("Pulsar not supported on wasm32".into()))),
+
+        #[cfg(not(target_arch = "wasm32"))]
+        "Pulsar.ack_raw" => {
+            // (message_id: String) -> Result<Unit, String>
+            let mut it = args.into_iter();
+            let _message_id = vm_string(it.next().ok_or("Pulsar.ack_raw: missing message_id")?, "Pulsar.ack_raw")?;
+            Ok(ok_vm(VMValue::Unit))
+        }
+        #[cfg(target_arch = "wasm32")]
+        "Pulsar.ack_raw" => Ok(err_vm(VMValue::Str("Pulsar not supported on wasm32".into()))),
+
+        #[cfg(not(target_arch = "wasm32"))]
+        "Pulsar.nack_raw" => {
+            // (message_id: String) -> Result<Unit, String>
+            let mut it = args.into_iter();
+            let _message_id = vm_string(it.next().ok_or("Pulsar.nack_raw: missing message_id")?, "Pulsar.nack_raw")?;
+            Ok(ok_vm(VMValue::Unit))
+        }
+        #[cfg(target_arch = "wasm32")]
+        "Pulsar.nack_raw" => Ok(err_vm(VMValue::Str("Pulsar not supported on wasm32".into()))),
+
+        // ── Delta Lake primitives (v27.1.0) ───────────────────────────────
+        #[cfg(not(target_arch = "wasm32"))]
+        "DeltaLake.read_raw" => {
+            // (path: String) -> Result<String, String>
+            // Stub: delta-rs 統合は v28.x 以降
+            let mut it = args.into_iter();
+            let _path = vm_string(it.next().ok_or("DeltaLake.read_raw: missing path")?, "DeltaLake.read_raw")?;
+            Ok(ok_vm(VMValue::Str("[]".to_string())))
+        }
+        #[cfg(target_arch = "wasm32")]
+        "DeltaLake.read_raw" => Ok(err_vm(VMValue::Str("DeltaLake not supported on wasm32".into()))),
+
+        #[cfg(not(target_arch = "wasm32"))]
+        "DeltaLake.read_with_filter_raw" => {
+            // (path: String, predicate: String) -> Result<String, String>
+            let mut it = args.into_iter();
+            let _path      = vm_string(it.next().ok_or("DeltaLake.read_with_filter_raw: missing path")?,      "DeltaLake.read_with_filter_raw")?;
+            let _predicate = vm_string(it.next().ok_or("DeltaLake.read_with_filter_raw: missing predicate")?, "DeltaLake.read_with_filter_raw")?;
+            Ok(ok_vm(VMValue::Str("[]".to_string())))
+        }
+        #[cfg(target_arch = "wasm32")]
+        "DeltaLake.read_with_filter_raw" => Ok(err_vm(VMValue::Str("DeltaLake not supported on wasm32".into()))),
+
+        #[cfg(not(target_arch = "wasm32"))]
+        "DeltaLake.write_raw" => {
+            // (path: String, data: String, mode: String) -> Result<Unit, String>
+            let mut it = args.into_iter();
+            let _path = vm_string(it.next().ok_or("DeltaLake.write_raw: missing path")?, "DeltaLake.write_raw")?;
+            let _data = vm_string(it.next().ok_or("DeltaLake.write_raw: missing data")?, "DeltaLake.write_raw")?;
+            let mode  = vm_string(it.next().ok_or("DeltaLake.write_raw: missing mode")?, "DeltaLake.write_raw")?;
+            if mode != "append" && mode != "overwrite" {
+                return Ok(err_vm(VMValue::Str(format!("DeltaLake.write_raw: invalid mode '{}', must be 'append' or 'overwrite'", mode))));
+            }
+            Ok(ok_vm(VMValue::Unit))
+        }
+        #[cfg(target_arch = "wasm32")]
+        "DeltaLake.write_raw" => Ok(err_vm(VMValue::Str("DeltaLake not supported on wasm32".into()))),
+
+        #[cfg(not(target_arch = "wasm32"))]
+        "DeltaLake.merge_raw" => {
+            // (path: String, data: String, condition: String) -> Result<String, String>
+            let mut it = args.into_iter();
+            let _path      = vm_string(it.next().ok_or("DeltaLake.merge_raw: missing path")?,      "DeltaLake.merge_raw")?;
+            let _data      = vm_string(it.next().ok_or("DeltaLake.merge_raw: missing data")?,      "DeltaLake.merge_raw")?;
+            let _condition = vm_string(it.next().ok_or("DeltaLake.merge_raw: missing condition")?, "DeltaLake.merge_raw")?;
+            Ok(ok_vm(VMValue::Str("{\"merged\":0}".to_string())))
+        }
+        #[cfg(target_arch = "wasm32")]
+        "DeltaLake.merge_raw" => Ok(err_vm(VMValue::Str("DeltaLake not supported on wasm32".into()))),
+
+        #[cfg(not(target_arch = "wasm32"))]
+        "DeltaLake.history_raw" => {
+            // (path: String) -> Result<String, String>
+            let mut it = args.into_iter();
+            let _path = vm_string(it.next().ok_or("DeltaLake.history_raw: missing path")?, "DeltaLake.history_raw")?;
+            Ok(ok_vm(VMValue::Str("[]".to_string())))
+        }
+        #[cfg(target_arch = "wasm32")]
+        "DeltaLake.history_raw" => Ok(err_vm(VMValue::Str("DeltaLake not supported on wasm32".into()))),
+
+        #[cfg(not(target_arch = "wasm32"))]
+        "DeltaLake.vacuum_raw" => {
+            // (path: String, retention_hours: Int) -> Result<Unit, String>
+            let mut it = args.into_iter();
+            let _path = vm_string(it.next().ok_or("DeltaLake.vacuum_raw: missing path")?, "DeltaLake.vacuum_raw")?;
+            let retention = match it.next().ok_or("DeltaLake.vacuum_raw: missing retention_hours")? {
+                VMValue::Int(n) => n,
+                _ => return Err("DeltaLake.vacuum_raw: retention_hours must be an Int".to_string()),
+            };
+            if retention < 168 {
+                return Ok(err_vm(VMValue::Str(format!(
+                    "DeltaLake.vacuum_raw: retention_hours {} is below minimum 168 (7 days)", retention
+                ))));
+            }
+            Ok(ok_vm(VMValue::Unit))
+        }
+        #[cfg(target_arch = "wasm32")]
+        "DeltaLake.vacuum_raw" => Ok(err_vm(VMValue::Str("DeltaLake not supported on wasm32".into()))),
+
+        #[cfg(not(target_arch = "wasm32"))]
+        "DeltaLake.optimize_raw" => {
+            // (path: String) -> Result<String, String>
+            let mut it = args.into_iter();
+            let _path = vm_string(it.next().ok_or("DeltaLake.optimize_raw: missing path")?, "DeltaLake.optimize_raw")?;
+            Ok(ok_vm(VMValue::Str("{\"optimized\":0}".to_string())))
+        }
+        #[cfg(target_arch = "wasm32")]
+        "DeltaLake.optimize_raw" => Ok(err_vm(VMValue::Str("DeltaLake not supported on wasm32".into()))),
+
+        #[cfg(not(target_arch = "wasm32"))]
+        "DeltaLake.infer_schema_raw" => {
+            // (path: String) -> Result<String, String>
+            // Stub: delta-rs 統合は v28.x 以降。固定スキーマ JSON を返す
+            let mut it = args.into_iter();
+            let _path = vm_string(it.next().ok_or("DeltaLake.infer_schema_raw: missing path")?, "DeltaLake.infer_schema_raw")?;
+            Ok(ok_vm(VMValue::Str("[]".to_string())))
+        }
+        #[cfg(target_arch = "wasm32")]
+        "DeltaLake.infer_schema_raw" => Ok(err_vm(VMValue::Str("DeltaLake not supported on wasm32".into()))),
+
+        // ── Apache Iceberg primitives (v27.2.0) ───────────────────────────
+        #[cfg(not(target_arch = "wasm32"))]
+        "Iceberg.read_raw" => {
+            // (catalog: String, table: String) -> Result<String, String>
+            // Stub: iceberg-rust 統合は v28.x 以降
+            let mut it = args.into_iter();
+            let _catalog = vm_string(it.next().ok_or("Iceberg.read_raw: missing catalog")?, "Iceberg.read_raw")?;
+            let _table   = vm_string(it.next().ok_or("Iceberg.read_raw: missing table")?,   "Iceberg.read_raw")?;
+            Ok(ok_vm(VMValue::Str("[]".to_string())))
+        }
+        #[cfg(target_arch = "wasm32")]
+        "Iceberg.read_raw" => Ok(err_vm(VMValue::Str("Iceberg not supported on wasm32".into()))),
+
+        #[cfg(not(target_arch = "wasm32"))]
+        "Iceberg.append_raw" => {
+            // (catalog: String, table: String, data: String) -> Result<Unit, String>
+            let mut it = args.into_iter();
+            let _catalog = vm_string(it.next().ok_or("Iceberg.append_raw: missing catalog")?, "Iceberg.append_raw")?;
+            let _table   = vm_string(it.next().ok_or("Iceberg.append_raw: missing table")?,   "Iceberg.append_raw")?;
+            let _data    = vm_string(it.next().ok_or("Iceberg.append_raw: missing data")?,    "Iceberg.append_raw")?;
+            Ok(ok_vm(VMValue::Unit))
+        }
+        #[cfg(target_arch = "wasm32")]
+        "Iceberg.append_raw" => Ok(err_vm(VMValue::Str("Iceberg not supported on wasm32".into()))),
+
+        #[cfg(not(target_arch = "wasm32"))]
+        "Iceberg.overwrite_raw" => {
+            // (catalog: String, table: String, data: String, filter: String) -> Result<Unit, String>
+            let mut it = args.into_iter();
+            let _catalog = vm_string(it.next().ok_or("Iceberg.overwrite_raw: missing catalog")?, "Iceberg.overwrite_raw")?;
+            let _table   = vm_string(it.next().ok_or("Iceberg.overwrite_raw: missing table")?,   "Iceberg.overwrite_raw")?;
+            let _data    = vm_string(it.next().ok_or("Iceberg.overwrite_raw: missing data")?,    "Iceberg.overwrite_raw")?;
+            let _filter  = vm_string(it.next().ok_or("Iceberg.overwrite_raw: missing filter")?,  "Iceberg.overwrite_raw")?;
+            Ok(ok_vm(VMValue::Unit))
+        }
+        #[cfg(target_arch = "wasm32")]
+        "Iceberg.overwrite_raw" => Ok(err_vm(VMValue::Str("Iceberg not supported on wasm32".into()))),
+
+        #[cfg(not(target_arch = "wasm32"))]
+        "Iceberg.time_travel_raw" => {
+            // (catalog: String, table: String, snapshot_id: Int) -> Result<String, String>
+            // snapshot_id: i64 (Apache Iceberg 仕様の 64-bit long と一致)
+            let mut it = args.into_iter();
+            let _catalog = vm_string(it.next().ok_or("Iceberg.time_travel_raw: missing catalog")?, "Iceberg.time_travel_raw")?;
+            let _table   = vm_string(it.next().ok_or("Iceberg.time_travel_raw: missing table")?,   "Iceberg.time_travel_raw")?;
+            let _snapshot_id = match it.next().ok_or("Iceberg.time_travel_raw: missing snapshot_id")? {
+                VMValue::Int(n) => n,
+                _ => return Err("Iceberg.time_travel_raw: snapshot_id must be an Int".to_string()),
+            };
+            Ok(ok_vm(VMValue::Str("[]".to_string())))
+        }
+        #[cfg(target_arch = "wasm32")]
+        "Iceberg.time_travel_raw" => Ok(err_vm(VMValue::Str("Iceberg not supported on wasm32".into()))),
+
+        #[cfg(not(target_arch = "wasm32"))]
+        "Iceberg.schema_evolution_raw" => {
+            // (catalog: String, table: String, new_schema: String) -> Result<Unit, String>
+            let mut it = args.into_iter();
+            let _catalog    = vm_string(it.next().ok_or("Iceberg.schema_evolution_raw: missing catalog")?,    "Iceberg.schema_evolution_raw")?;
+            let _table      = vm_string(it.next().ok_or("Iceberg.schema_evolution_raw: missing table")?,      "Iceberg.schema_evolution_raw")?;
+            let _new_schema = vm_string(it.next().ok_or("Iceberg.schema_evolution_raw: missing new_schema")?, "Iceberg.schema_evolution_raw")?;
+            Ok(ok_vm(VMValue::Unit))
+        }
+        #[cfg(target_arch = "wasm32")]
+        "Iceberg.schema_evolution_raw" => Ok(err_vm(VMValue::Str("Iceberg not supported on wasm32".into()))),
+
+        #[cfg(not(target_arch = "wasm32"))]
+        "Iceberg.list_snapshots_raw" => {
+            // (catalog: String, table: String) -> Result<String, String>
+            let mut it = args.into_iter();
+            let _catalog = vm_string(it.next().ok_or("Iceberg.list_snapshots_raw: missing catalog")?, "Iceberg.list_snapshots_raw")?;
+            let _table   = vm_string(it.next().ok_or("Iceberg.list_snapshots_raw: missing table")?,   "Iceberg.list_snapshots_raw")?;
+            Ok(ok_vm(VMValue::Str("[]".to_string())))
+        }
+        #[cfg(target_arch = "wasm32")]
+        "Iceberg.list_snapshots_raw" => Ok(err_vm(VMValue::Str("Iceberg not supported on wasm32".into()))),
+
+        #[cfg(not(target_arch = "wasm32"))]
+        "Iceberg.infer_schema_raw" => {
+            // (catalog: String, table: String) -> Result<String, String>
+            // Stub: iceberg-rust 統合は v28.x 以降。固定スキーマ JSON を返す
+            let mut it = args.into_iter();
+            let _catalog = vm_string(it.next().ok_or("Iceberg.infer_schema_raw: missing catalog")?, "Iceberg.infer_schema_raw")?;
+            let _table   = vm_string(it.next().ok_or("Iceberg.infer_schema_raw: missing table")?,   "Iceberg.infer_schema_raw")?;
+            Ok(ok_vm(VMValue::Str("[]".to_string())))
+        }
+        #[cfg(target_arch = "wasm32")]
+        "Iceberg.infer_schema_raw" => Ok(err_vm(VMValue::Str("Iceberg not supported on wasm32".into()))),
+
+        // ── ClickHouse primitives (v27.3.0) ───────────────────────────────
+        #[cfg(not(target_arch = "wasm32"))]
+        "ClickHouse.connect_raw" => {
+            // (config: String) -> Result<String, String>
+            // Stub: clickhouse-rs 統合は v28.x 以降。接続ハンドル識別子を返す（postgres Rune と同一パターン）
+            // TODO(v28.x): _config（接続 URL / DSN）を clickhouse-rs の Client 初期化に渡し、
+            //              実際のコネクションハンドルを返すように移行すること
+            let mut it = args.into_iter();
+            let _config = vm_string(it.next().ok_or("ClickHouse.connect_raw: missing config")?, "ClickHouse.connect_raw")?;
+            Ok(ok_vm(VMValue::Str("clickhouse-stub-conn".to_string())))
+        }
+        #[cfg(target_arch = "wasm32")]
+        "ClickHouse.connect_raw" => Ok(err_vm(VMValue::Str("ClickHouse not supported on wasm32".into()))),
+
+        #[cfg(not(target_arch = "wasm32"))]
+        "ClickHouse.query_raw" => {
+            // (conn: String, sql: String) -> Result<String, String>
+            // TODO(v28.x): ClickHouse.query[T] ジェネリック API に移行予定
+            let mut it = args.into_iter();
+            let _conn = vm_string(it.next().ok_or("ClickHouse.query_raw: missing conn")?, "ClickHouse.query_raw")?;
+            let _sql  = vm_string(it.next().ok_or("ClickHouse.query_raw: missing sql")?,  "ClickHouse.query_raw")?;
+            Ok(ok_vm(VMValue::Str("[]".to_string())))
+        }
+        #[cfg(target_arch = "wasm32")]
+        "ClickHouse.query_raw" => Ok(err_vm(VMValue::Str("ClickHouse not supported on wasm32".into()))),
+
+        #[cfg(not(target_arch = "wasm32"))]
+        "ClickHouse.insert_raw" => {
+            // (conn: String, table: String, rows: String) -> Result<Unit, String>
+            let mut it = args.into_iter();
+            let _conn  = vm_string(it.next().ok_or("ClickHouse.insert_raw: missing conn")?,  "ClickHouse.insert_raw")?;
+            let _table = vm_string(it.next().ok_or("ClickHouse.insert_raw: missing table")?, "ClickHouse.insert_raw")?;
+            let _rows  = vm_string(it.next().ok_or("ClickHouse.insert_raw: missing rows")?,  "ClickHouse.insert_raw")?;
+            Ok(ok_vm(VMValue::Unit))
+        }
+        #[cfg(target_arch = "wasm32")]
+        "ClickHouse.insert_raw" => Ok(err_vm(VMValue::Str("ClickHouse not supported on wasm32".into()))),
+
+        #[cfg(not(target_arch = "wasm32"))]
+        "ClickHouse.async_insert_raw" => {
+            // (conn: String, table: String, rows: String) -> Result<Unit, String>
+            let mut it = args.into_iter();
+            let _conn  = vm_string(it.next().ok_or("ClickHouse.async_insert_raw: missing conn")?,  "ClickHouse.async_insert_raw")?;
+            let _table = vm_string(it.next().ok_or("ClickHouse.async_insert_raw: missing table")?, "ClickHouse.async_insert_raw")?;
+            let _rows  = vm_string(it.next().ok_or("ClickHouse.async_insert_raw: missing rows")?,  "ClickHouse.async_insert_raw")?;
+            Ok(ok_vm(VMValue::Unit))
+        }
+        #[cfg(target_arch = "wasm32")]
+        "ClickHouse.async_insert_raw" => Ok(err_vm(VMValue::Str("ClickHouse not supported on wasm32".into()))),
+
+        // ── Redshift primitives (v27.5.0) ─────────────────────────────────
+        // connect-based API（!Db エフェクト、postgres 互換）。
+        // TODO(v28.x): postgres クレートを使った実接続に移行予定。
+        //              _config（DSN / 接続文字列）を postgres クライアントの初期化に渡す。
+
+        #[cfg(not(target_arch = "wasm32"))]
+        "Redshift.connect_raw" => {
+            // (config: String) -> Result<String, String> !Db
+            let mut it = args.into_iter();
+            let _config = vm_string(it.next().ok_or("Redshift.connect_raw: missing config")?, "Redshift.connect_raw")?;
+            Ok(ok_vm(VMValue::Str("redshift-stub-conn".into())))
+        }
+        #[cfg(target_arch = "wasm32")]
+        "Redshift.connect_raw" => Ok(err_vm(VMValue::Str("Redshift not supported on wasm32".into()))),
+
+        #[cfg(not(target_arch = "wasm32"))]
+        "Redshift.query_raw" => {
+            // (conn: String, sql: String) -> Result<String, String> !Db
+            let mut it = args.into_iter();
+            let _conn = vm_string(it.next().ok_or("Redshift.query_raw: missing conn")?, "Redshift.query_raw")?;
+            let _sql  = vm_string(it.next().ok_or("Redshift.query_raw: missing sql")?,  "Redshift.query_raw")?;
+            Ok(ok_vm(VMValue::Str("[]".into())))
+        }
+        #[cfg(target_arch = "wasm32")]
+        "Redshift.query_raw" => Ok(err_vm(VMValue::Str("Redshift not supported on wasm32".into()))),
+
+        #[cfg(not(target_arch = "wasm32"))]
+        "Redshift.execute_raw" => {
+            // (conn: String, sql: String, params: String) -> Result<Int, String> !Db
+            let mut it = args.into_iter();
+            let _conn   = vm_string(it.next().ok_or("Redshift.execute_raw: missing conn")?,   "Redshift.execute_raw")?;
+            let _sql    = vm_string(it.next().ok_or("Redshift.execute_raw: missing sql")?,    "Redshift.execute_raw")?;
+            let _params = vm_string(it.next().ok_or("Redshift.execute_raw: missing params")?, "Redshift.execute_raw")?;
+            Ok(ok_vm(VMValue::Int(0)))
+        }
+        #[cfg(target_arch = "wasm32")]
+        "Redshift.execute_raw" => Ok(err_vm(VMValue::Str("Redshift not supported on wasm32".into()))),
+
+        #[cfg(not(target_arch = "wasm32"))]
+        "Redshift.copy_from_s3_raw" => {
+            // (conn: String, table: String, s3_uri: String, opts: String) -> Result<Unit, String> !Db
+            let mut it = args.into_iter();
+            let _conn    = vm_string(it.next().ok_or("Redshift.copy_from_s3_raw: missing conn")?,    "Redshift.copy_from_s3_raw")?;
+            let _table   = vm_string(it.next().ok_or("Redshift.copy_from_s3_raw: missing table")?,   "Redshift.copy_from_s3_raw")?;
+            let _s3_uri  = vm_string(it.next().ok_or("Redshift.copy_from_s3_raw: missing s3_uri")?,  "Redshift.copy_from_s3_raw")?;
+            let _opts    = vm_string(it.next().ok_or("Redshift.copy_from_s3_raw: missing opts")?,    "Redshift.copy_from_s3_raw")?;
+            Ok(ok_vm(VMValue::Unit))
+        }
+        #[cfg(target_arch = "wasm32")]
+        "Redshift.copy_from_s3_raw" => Ok(err_vm(VMValue::Str("Redshift not supported on wasm32".into()))),
+
+        #[cfg(not(target_arch = "wasm32"))]
+        "Redshift.unload_to_s3_raw" => {
+            // (conn: String, query: String, s3_uri: String, opts: String) -> Result<Unit, String> !Db
+            let mut it = args.into_iter();
+            let _conn   = vm_string(it.next().ok_or("Redshift.unload_to_s3_raw: missing conn")?,   "Redshift.unload_to_s3_raw")?;
+            let _query  = vm_string(it.next().ok_or("Redshift.unload_to_s3_raw: missing query")?,  "Redshift.unload_to_s3_raw")?;
+            let _s3_uri = vm_string(it.next().ok_or("Redshift.unload_to_s3_raw: missing s3_uri")?, "Redshift.unload_to_s3_raw")?;
+            let _opts   = vm_string(it.next().ok_or("Redshift.unload_to_s3_raw: missing opts")?,   "Redshift.unload_to_s3_raw")?;
+            Ok(ok_vm(VMValue::Unit))
+        }
+        #[cfg(target_arch = "wasm32")]
+        "Redshift.unload_to_s3_raw" => Ok(err_vm(VMValue::Str("Redshift not supported on wasm32".into()))),
+
+        // ── JSONL primitives (v27.6.0) ────────────────────────────────────
+        // JSON Lines（1 行 1 JSON オブジェクト）の読み書き・ストリーミング処理。
+        // TODO(v28.x): JSONL.read[T] / JSONL.stream[T] ジェネリック API に移行予定。
+        //              stream_raw はコールバック機構（高階関数）なし。v28.x で追加する。
+
+        #[cfg(not(target_arch = "wasm32"))]
+        "JSONL.read_raw" => {
+            // (path: String) -> Result<String, String> !Io
+            let mut it = args.into_iter();
+            let _path = vm_string(it.next().ok_or("JSONL.read_raw: missing path")?, "JSONL.read_raw")?;
+            Ok(ok_vm(VMValue::Str("[]".into())))
+        }
+        #[cfg(target_arch = "wasm32")]
+        "JSONL.read_raw" => Ok(err_vm(VMValue::Str("JSONL not supported on wasm32".into()))),
+
+        #[cfg(not(target_arch = "wasm32"))]
+        "JSONL.write_raw" => {
+            // (path: String, rows: String) -> Result<Unit, String> !Io
+            let mut it = args.into_iter();
+            let _path = vm_string(it.next().ok_or("JSONL.write_raw: missing path")?, "JSONL.write_raw")?;
+            let _rows = vm_string(it.next().ok_or("JSONL.write_raw: missing rows")?, "JSONL.write_raw")?;
+            Ok(ok_vm(VMValue::Unit))
+        }
+        #[cfg(target_arch = "wasm32")]
+        "JSONL.write_raw" => Ok(err_vm(VMValue::Str("JSONL not supported on wasm32".into()))),
+
+        #[cfg(not(target_arch = "wasm32"))]
+        "JSONL.stream_raw" => {
+            // (path: String) -> Result<String, String> !Io
+            // stub: コールバック機構は v28.x。全件読み込みと同等の結果を返す。
+            let mut it = args.into_iter();
+            let _path = vm_string(it.next().ok_or("JSONL.stream_raw: missing path")?, "JSONL.stream_raw")?;
+            Ok(ok_vm(VMValue::Str("[]".into())))
+        }
+        #[cfg(target_arch = "wasm32")]
+        "JSONL.stream_raw" => Ok(err_vm(VMValue::Str("JSONL not supported on wasm32".into()))),
+
+        #[cfg(not(target_arch = "wasm32"))]
+        "JSONL.append_raw" => {
+            // (path: String, row: String) -> Result<Unit, String> !Io
+            let mut it = args.into_iter();
+            let _path = vm_string(it.next().ok_or("JSONL.append_raw: missing path")?, "JSONL.append_raw")?;
+            let _row  = vm_string(it.next().ok_or("JSONL.append_raw: missing row")?,  "JSONL.append_raw")?;
+            Ok(ok_vm(VMValue::Unit))
+        }
+        #[cfg(target_arch = "wasm32")]
+        "JSONL.append_raw" => Ok(err_vm(VMValue::Str("JSONL not supported on wasm32".into()))),
+
+        // ── Dbt primitives (v27.8.0) ──────────────────────────────────────
+        // TODO(v28.x): manifest.json の実解析・compiled SQL 実行に移行予定
+        #[cfg(not(target_arch = "wasm32"))]
+        "Dbt.ref_raw" => {
+            // (config: String, model_name: String) -> Result<String, String>
+            // Stub: manifest.json 解析は v28.x 以降。"[]" = 空行セット（JSON 配列）を返す
+            let mut it = args.into_iter();
+            let _config     = vm_string(it.next().ok_or("Dbt.ref_raw: missing config")?,      "Dbt.ref_raw")?;
+            let _model_name = vm_string(it.next().ok_or("Dbt.ref_raw: missing model_name")?,  "Dbt.ref_raw")?;
+            Ok(ok_vm(VMValue::Str("[]".to_string())))
+        }
+        #[cfg(target_arch = "wasm32")]
+        "Dbt.ref_raw" => Ok(err_vm(VMValue::Str("Dbt not supported on wasm32".into()))),
+
+        #[cfg(not(target_arch = "wasm32"))]
+        "Dbt.source_raw" => {
+            // (config: String, source_name: String, table_name: String) -> Result<String, String>
+            // Stub: dbt source 定義解析は v28.x 以降。"[]" = 空行セット（JSON 配列）を返す
+            let mut it = args.into_iter();
+            let _config      = vm_string(it.next().ok_or("Dbt.source_raw: missing config")?,       "Dbt.source_raw")?;
+            let _source_name = vm_string(it.next().ok_or("Dbt.source_raw: missing source_name")?,  "Dbt.source_raw")?;
+            let _table_name  = vm_string(it.next().ok_or("Dbt.source_raw: missing table_name")?,   "Dbt.source_raw")?;
+            Ok(ok_vm(VMValue::Str("[]".to_string())))
+        }
+        #[cfg(target_arch = "wasm32")]
+        "Dbt.source_raw" => Ok(err_vm(VMValue::Str("Dbt not supported on wasm32".into()))),
+
+        // ── SQLite primitives (v27.9.0) ───────────────────────────────────
+        // TODO(v28.x): rusqlite --features bundled を使った実 SQLite 操作に移行予定
+        #[cfg(not(target_arch = "wasm32"))]
+        "SQLite.open_raw" => {
+            // (path: String) -> Result<String, String>
+            // Stub: DB ファイルを開く（v28.x で rusqlite 統合）。接続ハンドル識別子を返す
+            let mut it = args.into_iter();
+            let _path = vm_string(it.next().ok_or("SQLite.open_raw: missing path")?, "SQLite.open_raw")?;
+            Ok(ok_vm(VMValue::Str("sqlite-stub-conn".to_string())))
+        }
+        #[cfg(target_arch = "wasm32")]
+        "SQLite.open_raw" => Ok(err_vm(VMValue::Str("SQLite not supported on wasm32".into()))),
+
+        #[cfg(not(target_arch = "wasm32"))]
+        "SQLite.open_memory_raw" => {
+            // () -> Result<String, String>
+            // Stub: インメモリ DB（引数なし）。テスト用途を想定
+            Ok(ok_vm(VMValue::Str("sqlite-memory-stub-conn".to_string())))
+        }
+        #[cfg(target_arch = "wasm32")]
+        "SQLite.open_memory_raw" => Ok(err_vm(VMValue::Str("SQLite not supported on wasm32".into()))),
+
+        #[cfg(not(target_arch = "wasm32"))]
+        "SQLite.query_raw" => {
+            // (db: String, sql: String, params: String) -> Result<String, String>
+            // Stub: 型付きクエリ。"[]" = 空行セット（JSON 配列）を返す
+            let mut it = args.into_iter();
+            let _db     = vm_string(it.next().ok_or("SQLite.query_raw: missing db")?,     "SQLite.query_raw")?;
+            let _sql    = vm_string(it.next().ok_or("SQLite.query_raw: missing sql")?,    "SQLite.query_raw")?;
+            let _params = vm_string(it.next().ok_or("SQLite.query_raw: missing params")?, "SQLite.query_raw")?;
+            Ok(ok_vm(VMValue::Str("[]".to_string())))
+        }
+        #[cfg(target_arch = "wasm32")]
+        "SQLite.query_raw" => Ok(err_vm(VMValue::Str("SQLite not supported on wasm32".into()))),
+
+        #[cfg(not(target_arch = "wasm32"))]
+        "SQLite.execute_raw" => {
+            // (db: String, sql: String, params: String) -> Result<Int, String>
+            // Stub: DDL / DML 実行。影響行数 0 を返す（Redshift.execute_raw と同パターン）
+            let mut it = args.into_iter();
+            let _db     = vm_string(it.next().ok_or("SQLite.execute_raw: missing db")?,     "SQLite.execute_raw")?;
+            let _sql    = vm_string(it.next().ok_or("SQLite.execute_raw: missing sql")?,    "SQLite.execute_raw")?;
+            let _params = vm_string(it.next().ok_or("SQLite.execute_raw: missing params")?, "SQLite.execute_raw")?;
+            Ok(ok_vm(VMValue::Int(0)))
+        }
+        #[cfg(target_arch = "wasm32")]
+        "SQLite.execute_raw" => Ok(err_vm(VMValue::Str("SQLite not supported on wasm32".into()))),
+
+        #[cfg(not(target_arch = "wasm32"))]
+        "SQLite.execute_many_raw" => {
+            // (db: String, sql: String, rows: String) -> Result<Int, String>
+            // Stub: バッチ実行。影響行数 0 を返す
+            let mut it = args.into_iter();
+            let _db   = vm_string(it.next().ok_or("SQLite.execute_many_raw: missing db")?,   "SQLite.execute_many_raw")?;
+            let _sql  = vm_string(it.next().ok_or("SQLite.execute_many_raw: missing sql")?,  "SQLite.execute_many_raw")?;
+            let _rows = vm_string(it.next().ok_or("SQLite.execute_many_raw: missing rows")?, "SQLite.execute_many_raw")?;
+            Ok(ok_vm(VMValue::Int(0)))
+        }
+        #[cfg(target_arch = "wasm32")]
+        "SQLite.execute_many_raw" => Ok(err_vm(VMValue::Str("SQLite not supported on wasm32".into()))),
+
+        #[cfg(not(target_arch = "wasm32"))]
+        "SQLite.close_raw" => {
+            // (db: String) -> Result<Unit, String>
+            // Stub: DB クローズ
+            let mut it = args.into_iter();
+            let _db = vm_string(it.next().ok_or("SQLite.close_raw: missing db")?, "SQLite.close_raw")?;
+            Ok(ok_vm(VMValue::Unit))
+        }
+        #[cfg(target_arch = "wasm32")]
+        "SQLite.close_raw" => Ok(err_vm(VMValue::Str("SQLite not supported on wasm32".into()))),
+
+        // ── Prometheus primitives (v28.1.0) ───────────────────────────────
+        #[cfg(not(target_arch = "wasm32"))]
+        "Prometheus.counter_raw" => {
+            // (name: String, value: Float, labels: String) -> Result<Unit, String>
+            // Stub: Pushgateway への HTTP 送信は v28.x 以降
+            let mut it = args.into_iter();
+            let _name   = vm_string(it.next().ok_or("Prometheus.counter_raw: missing name")?,   "Prometheus.counter_raw")?;
+            let _value  = vm_float( it.next().ok_or("Prometheus.counter_raw: missing value")?,  "Prometheus.counter_raw")?;
+            let _labels = vm_string(it.next().ok_or("Prometheus.counter_raw: missing labels")?, "Prometheus.counter_raw")?;
+            Ok(ok_vm(VMValue::Unit))
+        }
+        #[cfg(target_arch = "wasm32")]
+        "Prometheus.counter_raw" => Ok(err_vm(VMValue::Str("Prometheus not supported on wasm32".into()))),
+        #[cfg(not(target_arch = "wasm32"))]
+        "Prometheus.gauge_raw" => {
+            // (name: String, value: Float) -> Result<Unit, String>
+            let mut it = args.into_iter();
+            let _name  = vm_string(it.next().ok_or("Prometheus.gauge_raw: missing name")?,  "Prometheus.gauge_raw")?;
+            let _value = vm_float( it.next().ok_or("Prometheus.gauge_raw: missing value")?, "Prometheus.gauge_raw")?;
+            Ok(ok_vm(VMValue::Unit))
+        }
+        #[cfg(target_arch = "wasm32")]
+        "Prometheus.gauge_raw" => Ok(err_vm(VMValue::Str("Prometheus not supported on wasm32".into()))),
+        #[cfg(not(target_arch = "wasm32"))]
+        "Prometheus.histogram_raw" => {
+            // (name: String, value: Float) -> Result<Unit, String>
+            let mut it = args.into_iter();
+            let _name  = vm_string(it.next().ok_or("Prometheus.histogram_raw: missing name")?,  "Prometheus.histogram_raw")?;
+            let _value = vm_float( it.next().ok_or("Prometheus.histogram_raw: missing value")?, "Prometheus.histogram_raw")?;
+            Ok(ok_vm(VMValue::Unit))
+        }
+        #[cfg(target_arch = "wasm32")]
+        "Prometheus.histogram_raw" => Ok(err_vm(VMValue::Str("Prometheus not supported on wasm32".into()))),
+        #[cfg(not(target_arch = "wasm32"))]
+        "Prometheus.push_raw" => {
+            // (gateway_url: String) -> Result<Unit, String>
+            let mut it = args.into_iter();
+            let _gateway_url = vm_string(it.next().ok_or("Prometheus.push_raw: missing gateway_url")?, "Prometheus.push_raw")?;
+            Ok(ok_vm(VMValue::Unit))
+        }
+        #[cfg(target_arch = "wasm32")]
+        "Prometheus.push_raw" => Ok(err_vm(VMValue::Str("Prometheus not supported on wasm32".into()))),
+
+        // ── Datadog primitives (v28.2.0) ──────────────────────────────────
+        #[cfg(not(target_arch = "wasm32"))]
+        "Datadog.metric_raw" => {
+            // (name: String, value: Float, tags: String) -> Result<Unit, String>
+            // Stub: DogStatsD / Datadog API 送信は v28.x 以降
+            let mut it = args.into_iter();
+            let _name  = vm_string(it.next().ok_or("Datadog.metric_raw: missing name")?,  "Datadog.metric_raw")?;
+            let _value = vm_float( it.next().ok_or("Datadog.metric_raw: missing value")?, "Datadog.metric_raw")?;
+            let _tags  = vm_string(it.next().ok_or("Datadog.metric_raw: missing tags")?,  "Datadog.metric_raw")?;
+            Ok(ok_vm(VMValue::Unit))
+        }
+        #[cfg(target_arch = "wasm32")]
+        "Datadog.metric_raw" => Ok(err_vm(VMValue::Str("Datadog not supported on wasm32".into()))),
+        #[cfg(not(target_arch = "wasm32"))]
+        "Datadog.log_raw" => {
+            // (level: String, message: String, attrs: String) -> Result<Unit, String>
+            let mut it = args.into_iter();
+            let _level   = vm_string(it.next().ok_or("Datadog.log_raw: missing level")?,   "Datadog.log_raw")?;
+            let _message = vm_string(it.next().ok_or("Datadog.log_raw: missing message")?, "Datadog.log_raw")?;
+            let _attrs   = vm_string(it.next().ok_or("Datadog.log_raw: missing attrs")?,   "Datadog.log_raw")?;
+            Ok(ok_vm(VMValue::Unit))
+        }
+        #[cfg(target_arch = "wasm32")]
+        "Datadog.log_raw" => Ok(err_vm(VMValue::Str("Datadog not supported on wasm32".into()))),
+        #[cfg(not(target_arch = "wasm32"))]
+        "Datadog.trace_raw" => {
+            // (name: String, fn_body: String) -> Result<Unit, String>
+            let mut it = args.into_iter();
+            let _name    = vm_string(it.next().ok_or("Datadog.trace_raw: missing name")?,    "Datadog.trace_raw")?;
+            let _fn_body = vm_string(it.next().ok_or("Datadog.trace_raw: missing fn_body")?, "Datadog.trace_raw")?;
+            Ok(ok_vm(VMValue::Unit))
+        }
+        #[cfg(target_arch = "wasm32")]
+        "Datadog.trace_raw" => Ok(err_vm(VMValue::Str("Datadog not supported on wasm32".into()))),
+        #[cfg(not(target_arch = "wasm32"))]
+        "Datadog.event_raw" => {
+            // (title: String, text: String, tags: String) -> Result<Unit, String>
+            let mut it = args.into_iter();
+            let _title = vm_string(it.next().ok_or("Datadog.event_raw: missing title")?, "Datadog.event_raw")?;
+            let _text  = vm_string(it.next().ok_or("Datadog.event_raw: missing text")?,  "Datadog.event_raw")?;
+            let _tags  = vm_string(it.next().ok_or("Datadog.event_raw: missing tags")?,  "Datadog.event_raw")?;
+            Ok(ok_vm(VMValue::Unit))
+        }
+        #[cfg(target_arch = "wasm32")]
+        "Datadog.event_raw" => Ok(err_vm(VMValue::Str("Datadog not supported on wasm32".into()))),
+        #[cfg(not(target_arch = "wasm32"))]
+        "Datadog.service_check_raw" => {
+            // (name: String, status: String) -> Result<Unit, String>
+            let mut it = args.into_iter();
+            let _name   = vm_string(it.next().ok_or("Datadog.service_check_raw: missing name")?,   "Datadog.service_check_raw")?;
+            let _status = vm_string(it.next().ok_or("Datadog.service_check_raw: missing status")?, "Datadog.service_check_raw")?;
+            Ok(ok_vm(VMValue::Unit))
+        }
+        #[cfg(target_arch = "wasm32")]
+        "Datadog.service_check_raw" => Ok(err_vm(VMValue::Str("Datadog not supported on wasm32".into()))),
+
+        // ── OTel primitives (v28.3.0) ─────────────────────────────────────
+        // Stub: OTLP HTTP エクスポートは fav/src/otel.rs 経由（v28.x 以降）
+        #[cfg(not(target_arch = "wasm32"))]
+        "OTel.start_span_raw" => {
+            // (name: String, service: String) -> Result<Unit, String>
+            let mut it = args.into_iter();
+            let _name    = vm_string(it.next().ok_or("OTel.start_span_raw: missing name")?,    "OTel.start_span_raw")?;
+            let _service = vm_string(it.next().ok_or("OTel.start_span_raw: missing service")?, "OTel.start_span_raw")?;
+            Ok(ok_vm(VMValue::Unit))
+        }
+        #[cfg(target_arch = "wasm32")]
+        "OTel.start_span_raw" => Ok(err_vm(VMValue::Str("OTel not supported on wasm32".into()))),
+
+        #[cfg(not(target_arch = "wasm32"))]
+        "OTel.set_attribute_raw" => {
+            // (key: String, value: String) -> Result<Unit, String>
+            let mut it = args.into_iter();
+            let _key   = vm_string(it.next().ok_or("OTel.set_attribute_raw: missing key")?,   "OTel.set_attribute_raw")?;
+            let _value = vm_string(it.next().ok_or("OTel.set_attribute_raw: missing value")?, "OTel.set_attribute_raw")?;
+            Ok(ok_vm(VMValue::Unit))
+        }
+        #[cfg(target_arch = "wasm32")]
+        "OTel.set_attribute_raw" => Ok(err_vm(VMValue::Str("OTel not supported on wasm32".into()))),
+
+        #[cfg(not(target_arch = "wasm32"))]
+        "OTel.add_event_raw" => {
+            // (name: String, attrs: String) -> Result<Unit, String>
+            let mut it = args.into_iter();
+            let _name  = vm_string(it.next().ok_or("OTel.add_event_raw: missing name")?,  "OTel.add_event_raw")?;
+            let _attrs = vm_string(it.next().ok_or("OTel.add_event_raw: missing attrs")?, "OTel.add_event_raw")?;
+            Ok(ok_vm(VMValue::Unit))
+        }
+        #[cfg(target_arch = "wasm32")]
+        "OTel.add_event_raw" => Ok(err_vm(VMValue::Str("OTel not supported on wasm32".into()))),
+
+        #[cfg(not(target_arch = "wasm32"))]
+        "OTel.end_span_raw" => {
+            // (status: String) -> Result<Unit, String>
+            let mut it = args.into_iter();
+            let _status = vm_string(it.next().ok_or("OTel.end_span_raw: missing status")?, "OTel.end_span_raw")?;
+            Ok(ok_vm(VMValue::Unit))
+        }
+        #[cfg(target_arch = "wasm32")]
+        "OTel.end_span_raw" => Ok(err_vm(VMValue::Str("OTel not supported on wasm32".into()))),
+
+        // ── Sentry primitives (v28.5.0) ───────────────────────────────────
+        // Stub: Sentry SDK / Relay HTTP 送信は v28.x 以降
+        #[cfg(not(target_arch = "wasm32"))]
+        "Sentry.capture_error_raw" => {
+            let mut it = args.into_iter();
+            let _err = vm_string(it.next().ok_or("Sentry.capture_error_raw: missing err")?, "Sentry.capture_error_raw")?;
+            Ok(ok_vm(VMValue::Unit))
+        }
+        #[cfg(target_arch = "wasm32")]
+        "Sentry.capture_error_raw" => Ok(err_vm(VMValue::Str("Sentry not supported on wasm32".into()))),
+
+        #[cfg(not(target_arch = "wasm32"))]
+        "Sentry.capture_message_raw" => {
+            let mut it = args.into_iter();
+            let _level = vm_string(it.next().ok_or("Sentry.capture_message_raw: missing level")?, "Sentry.capture_message_raw")?;
+            let _msg   = vm_string(it.next().ok_or("Sentry.capture_message_raw: missing msg")?,   "Sentry.capture_message_raw")?;
+            Ok(ok_vm(VMValue::Unit))
+        }
+        #[cfg(target_arch = "wasm32")]
+        "Sentry.capture_message_raw" => Ok(err_vm(VMValue::Str("Sentry not supported on wasm32".into()))),
+
+        #[cfg(not(target_arch = "wasm32"))]
+        "Sentry.set_user_raw" => {
+            let mut it = args.into_iter();
+            let _id    = vm_string(it.next().ok_or("Sentry.set_user_raw: missing id")?,    "Sentry.set_user_raw")?;
+            let _email = vm_string(it.next().ok_or("Sentry.set_user_raw: missing email")?, "Sentry.set_user_raw")?;
+            Ok(ok_vm(VMValue::Unit))
+        }
+        #[cfg(target_arch = "wasm32")]
+        "Sentry.set_user_raw" => Ok(err_vm(VMValue::Str("Sentry not supported on wasm32".into()))),
+
+        #[cfg(not(target_arch = "wasm32"))]
+        "Sentry.set_tag_raw" => {
+            let mut it = args.into_iter();
+            let _key   = vm_string(it.next().ok_or("Sentry.set_tag_raw: missing key")?,   "Sentry.set_tag_raw")?;
+            let _value = vm_string(it.next().ok_or("Sentry.set_tag_raw: missing value")?, "Sentry.set_tag_raw")?;
+            Ok(ok_vm(VMValue::Unit))
+        }
+        #[cfg(target_arch = "wasm32")]
+        "Sentry.set_tag_raw" => Ok(err_vm(VMValue::Str("Sentry not supported on wasm32".into()))),
+
+        #[cfg(not(target_arch = "wasm32"))]
+        "Sentry.set_extra_raw" => {
+            let mut it = args.into_iter();
+            let _key   = vm_string(it.next().ok_or("Sentry.set_extra_raw: missing key")?,   "Sentry.set_extra_raw")?;
+            let _value = vm_string(it.next().ok_or("Sentry.set_extra_raw: missing value")?, "Sentry.set_extra_raw")?;
+            Ok(ok_vm(VMValue::Unit))
+        }
+        #[cfg(target_arch = "wasm32")]
+        "Sentry.set_extra_raw" => Ok(err_vm(VMValue::Str("Sentry not supported on wasm32".into()))),
+
+        // ── Grafana primitives (v28.6.0) ──────────────────────────────────
+        // Stub: Grafana HTTP API リクエストは v28.7 以降
+        #[cfg(not(target_arch = "wasm32"))]
+        "Grafana.create_annotation_raw" => {
+            let mut it = args.into_iter();
+            let _dashboard_id = vm_string(it.next().ok_or("Grafana.create_annotation_raw: missing dashboard_id")?, "Grafana.create_annotation_raw")?;
+            let _text         = vm_string(it.next().ok_or("Grafana.create_annotation_raw: missing text")?,         "Grafana.create_annotation_raw")?;
+            let _tags         = vm_string(it.next().ok_or("Grafana.create_annotation_raw: missing tags")?,         "Grafana.create_annotation_raw")?;
+            Ok(ok_vm(VMValue::Unit))
+        }
+        #[cfg(target_arch = "wasm32")]
+        "Grafana.create_annotation_raw" => Ok(err_vm(VMValue::Str("Grafana not supported on wasm32".into()))),
+
+        #[cfg(not(target_arch = "wasm32"))]
+        "Grafana.push_dashboard_raw" => {
+            let mut it = args.into_iter();
+            let _json = vm_string(it.next().ok_or("Grafana.push_dashboard_raw: missing json")?, "Grafana.push_dashboard_raw")?;
+            Ok(ok_vm(VMValue::Unit))
+        }
+        #[cfg(target_arch = "wasm32")]
+        "Grafana.push_dashboard_raw" => Ok(err_vm(VMValue::Str("Grafana not supported on wasm32".into()))),
+
+        #[cfg(not(target_arch = "wasm32"))]
+        "Grafana.snapshot_raw" => {
+            let mut it = args.into_iter();
+            let _dashboard_id = vm_string(it.next().ok_or("Grafana.snapshot_raw: missing dashboard_id")?, "Grafana.snapshot_raw")?;
+            // 注意: snapshot_raw のみ VMValue::Str を返す（スナップショット URL）。
+            // create_annotation_raw / push_dashboard_raw は VMValue::Unit を返す点と非対称。
+            Ok(ok_vm(VMValue::Str("https://grafana.example.com/dashboard/snapshot/stub".into())))
+        }
+        #[cfg(target_arch = "wasm32")]
+        "Grafana.snapshot_raw" => Ok(err_vm(VMValue::Str("Grafana not supported on wasm32".into()))),
 
         // ── Azure Blob Storage primitives (v14.5.0) ───────────────────────
         "AzureBlob.put_raw" => {
@@ -16504,6 +18578,1053 @@ fn vm_call_builtin(
             });
             Ok(VMValue::Int(count as i64))
         }
+
+        // ── Redis (v25.3.0) ───────────────────────────────────────────────
+        // NOTE: !Cache primitives（上記）はインメモリ用。Redis は外部サービス専用。
+        // 接続モデル: connect_raw は URL を RedisConn（String ラッパー）として返す。
+        // 各 primitive は毎回 Client::open + get_connection() で接続を確立する。
+        // これは PgConn パターンと同様の設計（接続プールは v26.x 以降で対応予定）。
+        "Redis.connect_raw" => {
+            let mut it = args.into_iter();
+            let url = vm_string(
+                it.next().ok_or("Redis.connect_raw: missing url")?,
+                "Redis.connect_raw",
+            )?;
+            let client = redis::Client::open(url.as_str())
+                .map_err(|e| format!("Redis connect error: {}", e))?;
+            let mut conn = client
+                .get_connection()
+                .map_err(|e| format!("Redis connection error: {}", e))?;
+            // PING 確認
+            let _: String = redis::cmd("PING")
+                .query(&mut conn)
+                .map_err(|e| format!("Redis PING error: {}", e))?;
+            Ok(ok_vm(VMValue::Str(url)))
+        }
+
+        "Redis.get_raw" => {
+            let mut it = args.into_iter();
+            let url = vm_string(
+                it.next().ok_or("Redis.get_raw: missing conn")?,
+                "Redis.get_raw",
+            )?;
+            let key = vm_string(
+                it.next().ok_or("Redis.get_raw: missing key")?,
+                "Redis.get_raw",
+            )?;
+            let client = redis::Client::open(url.as_str())
+                .map_err(|e| format!("Redis.get_raw connect error: {}", e))?;
+            let mut conn = client
+                .get_connection()
+                .map_err(|e| format!("Redis.get_raw connection error: {}", e))?;
+            let result: Option<String> = redis::cmd("GET")
+                .arg(&key)
+                .query(&mut conn)
+                .map_err(|e| format!("Redis GET error: {}", e))?;
+            match result {
+                Some(v) => Ok(ok_vm(VMValue::Str(v))),
+                None => Ok(err_vm(VMValue::Str("nil".to_string()))),
+            }
+        }
+
+        "Redis.set_raw" => {
+            let mut it = args.into_iter();
+            let url = vm_string(
+                it.next().ok_or("Redis.set_raw: missing conn")?,
+                "Redis.set_raw",
+            )?;
+            let key = vm_string(
+                it.next().ok_or("Redis.set_raw: missing key")?,
+                "Redis.set_raw",
+            )?;
+            let value = vm_string(
+                it.next().ok_or("Redis.set_raw: missing value")?,
+                "Redis.set_raw",
+            )?;
+            let ttl: i64 = match it.next() {
+                Some(VMValue::Int(n)) => n,
+                _ => 0,
+            };
+            let client = redis::Client::open(url.as_str())
+                .map_err(|e| format!("Redis.set_raw connect error: {}", e))?;
+            let mut conn = client
+                .get_connection()
+                .map_err(|e| format!("Redis.set_raw connection error: {}", e))?;
+            if ttl > 0 {
+                redis::cmd("SET")
+                    .arg(&key)
+                    .arg(&value)
+                    .arg("EX")
+                    .arg(ttl)
+                    .query::<()>(&mut conn)
+                    .map_err(|e| format!("Redis SET EX error: {}", e))?;
+            } else {
+                redis::cmd("SET")
+                    .arg(&key)
+                    .arg(&value)
+                    .query::<()>(&mut conn)
+                    .map_err(|e| format!("Redis SET error: {}", e))?;
+            }
+            Ok(ok_vm(VMValue::Unit))
+        }
+
+        "Redis.del_raw" => {
+            let mut it = args.into_iter();
+            let url = vm_string(
+                it.next().ok_or("Redis.del_raw: missing conn")?,
+                "Redis.del_raw",
+            )?;
+            let key = vm_string(
+                it.next().ok_or("Redis.del_raw: missing key")?,
+                "Redis.del_raw",
+            )?;
+            let client = redis::Client::open(url.as_str())
+                .map_err(|e| format!("Redis.del_raw connect error: {}", e))?;
+            let mut conn = client
+                .get_connection()
+                .map_err(|e| format!("Redis.del_raw connection error: {}", e))?;
+            let count: i64 = redis::cmd("DEL")
+                .arg(&key)
+                .query(&mut conn)
+                .map_err(|e| format!("Redis DEL error: {}", e))?;
+            Ok(ok_vm(VMValue::Int(count)))
+        }
+
+        "Redis.incr_raw" => {
+            let mut it = args.into_iter();
+            let url = vm_string(
+                it.next().ok_or("Redis.incr_raw: missing conn")?,
+                "Redis.incr_raw",
+            )?;
+            let key = vm_string(
+                it.next().ok_or("Redis.incr_raw: missing key")?,
+                "Redis.incr_raw",
+            )?;
+            let client = redis::Client::open(url.as_str())
+                .map_err(|e| format!("Redis.incr_raw connect error: {}", e))?;
+            let mut conn = client
+                .get_connection()
+                .map_err(|e| format!("Redis.incr_raw connection error: {}", e))?;
+            let new_val: i64 = redis::cmd("INCR")
+                .arg(&key)
+                .query(&mut conn)
+                .map_err(|e| format!("Redis INCR error: {}", e))?;
+            Ok(ok_vm(VMValue::Int(new_val)))
+        }
+
+        "Redis.lpush_raw" => {
+            let mut it = args.into_iter();
+            let url = vm_string(
+                it.next().ok_or("Redis.lpush_raw: missing conn")?,
+                "Redis.lpush_raw",
+            )?;
+            let key = vm_string(
+                it.next().ok_or("Redis.lpush_raw: missing key")?,
+                "Redis.lpush_raw",
+            )?;
+            let value = vm_string(
+                it.next().ok_or("Redis.lpush_raw: missing value")?,
+                "Redis.lpush_raw",
+            )?;
+            let client = redis::Client::open(url.as_str())
+                .map_err(|e| format!("Redis.lpush_raw connect error: {}", e))?;
+            let mut conn = client
+                .get_connection()
+                .map_err(|e| format!("Redis.lpush_raw connection error: {}", e))?;
+            let list_len: i64 = redis::cmd("LPUSH")
+                .arg(&key)
+                .arg(&value)
+                .query(&mut conn)
+                .map_err(|e| format!("Redis LPUSH error: {}", e))?;
+            Ok(ok_vm(VMValue::Int(list_len)))
+        }
+
+        "Redis.rpop_raw" => {
+            let mut it = args.into_iter();
+            let url = vm_string(
+                it.next().ok_or("Redis.rpop_raw: missing conn")?,
+                "Redis.rpop_raw",
+            )?;
+            let key = vm_string(
+                it.next().ok_or("Redis.rpop_raw: missing key")?,
+                "Redis.rpop_raw",
+            )?;
+            let client = redis::Client::open(url.as_str())
+                .map_err(|e| format!("Redis.rpop_raw connect error: {}", e))?;
+            let mut conn = client
+                .get_connection()
+                .map_err(|e| format!("Redis.rpop_raw connection error: {}", e))?;
+            let result: Option<String> = redis::cmd("RPOP")
+                .arg(&key)
+                .query(&mut conn)
+                .map_err(|e| format!("Redis RPOP error: {}", e))?;
+            match result {
+                Some(v) => Ok(ok_vm(VMValue::Str(v))),
+                None => Ok(err_vm(VMValue::Str("nil".to_string()))),
+            }
+        }
+
+        "Redis.publish_raw" => {
+            let mut it = args.into_iter();
+            let url = vm_string(
+                it.next().ok_or("Redis.publish_raw: missing conn")?,
+                "Redis.publish_raw",
+            )?;
+            let channel = vm_string(
+                it.next().ok_or("Redis.publish_raw: missing channel")?,
+                "Redis.publish_raw",
+            )?;
+            let msg = vm_string(
+                it.next().ok_or("Redis.publish_raw: missing msg")?,
+                "Redis.publish_raw",
+            )?;
+            let client = redis::Client::open(url.as_str())
+                .map_err(|e| format!("Redis.publish_raw connect error: {}", e))?;
+            let mut conn = client
+                .get_connection()
+                .map_err(|e| format!("Redis.publish_raw connection error: {}", e))?;
+            let receivers: i64 = redis::cmd("PUBLISH")
+                .arg(&channel)
+                .arg(&msg)
+                .query(&mut conn)
+                .map_err(|e| format!("Redis PUBLISH error: {}", e))?;
+            Ok(ok_vm(VMValue::Int(receivers)))
+        }
+
+        "Redis.subscribe_once_raw" => {
+            // ブロッキング受信（タイムアウト REDIS_SUBSCRIBE_TIMEOUT_SECS 秒）
+            // タイムアウト時は Result.err("timeout: no message received within 30s")
+            const REDIS_SUBSCRIBE_TIMEOUT_SECS: u64 = 30;
+            let mut it = args.into_iter();
+            let url = vm_string(
+                it.next().ok_or("Redis.subscribe_once_raw: missing conn")?,
+                "Redis.subscribe_once_raw",
+            )?;
+            let channel = vm_string(
+                it.next().ok_or("Redis.subscribe_once_raw: missing channel")?,
+                "Redis.subscribe_once_raw",
+            )?;
+            let client = redis::Client::open(url.as_str())
+                .map_err(|e| format!("Redis.subscribe_once_raw connect error: {}", e))?;
+            let mut conn = client
+                .get_connection()
+                .map_err(|e| format!("Redis.subscribe_once_raw connection error: {}", e))?;
+            conn.set_read_timeout(Some(std::time::Duration::from_secs(REDIS_SUBSCRIBE_TIMEOUT_SECS)))
+                .map_err(|e| format!("Redis subscribe_once set_read_timeout error: {}", e))?;
+            // PubSubCommands::subscribe を使って 1 件だけ受信
+            use redis::PubSubCommands;
+            let mut payload_result: Result<String, String> =
+                Err(format!("timeout: no message received within {}s", REDIS_SUBSCRIBE_TIMEOUT_SECS));
+            if let Err(e) = conn.subscribe(&[channel.as_str()], |msg| {
+                payload_result = msg
+                    .get_payload::<String>()
+                    .map_err(|e| format!("Redis get_payload error: {}", e));
+                redis::ControlFlow::Break(())
+            }) {
+                // subscribe 自体が失敗した場合（接続切断、購読エラー等）は実際のエラーを返す
+                payload_result = Err(format!("Redis subscribe error: {}", e));
+            }
+            match payload_result {
+                Ok(v) => Ok(ok_vm(VMValue::Str(v))),
+                Err(e) => Ok(err_vm(VMValue::Str(e))),
+            }
+        }
+
+        // ── MySQL (v25.4.0) ───────────────────────────────────────────────
+        // NOTE: 接続モデルは RedisConn / PgConn パターンと同様。
+        // 各 primitive は毎回 mysql::Conn::new(url) で接続を確立する（接続プールは v26.x 以降）。
+        // transaction_begin/commit/rollback は各呼び出しで独立接続を使用するため、
+        // 同一接続上のトランザクションとしては動作しない（擬似実装）。原子性は保証されない。
+        #[cfg(not(target_arch = "wasm32"))]
+        "MySQL.connect_raw" => {
+            use mysql::prelude::Queryable;
+            let url = vm_string(
+                args.into_iter().next().ok_or("MySQL.connect_raw: missing url")?,
+                "MySQL.connect_raw",
+            )?;
+            let mut conn = mysql::Conn::new(
+                mysql::Opts::from_url(&url)
+                    .map_err(|e| format!("MySQL.connect_raw invalid URL: {}", e))?,
+            )
+            .map_err(|e| format!("MySQL.connect_raw connection error: {}", e))?;
+            // PING 確認
+            conn.query_drop("SELECT 1")
+                .map_err(|e| format!("MySQL.connect_raw PING error: {}", e))?;
+            Ok(ok_vm(VMValue::Str(url)))
+        }
+        #[cfg(target_arch = "wasm32")]
+        "MySQL.connect_raw" => Ok(err_vm(VMValue::Str("MySQL not supported on wasm32".into()))),
+
+        #[cfg(not(target_arch = "wasm32"))]
+        "MySQL.query_raw" => {
+            use mysql::prelude::Queryable;
+            let mut it = args.into_iter();
+            let url = vm_string(
+                it.next().ok_or("MySQL.query_raw: missing conn")?,
+                "MySQL.query_raw",
+            )?;
+            let sql = vm_string(
+                it.next().ok_or("MySQL.query_raw: missing sql")?,
+                "MySQL.query_raw",
+            )?;
+            let params_json = vm_string(
+                it.next().ok_or("MySQL.query_raw: missing params")?,
+                "MySQL.query_raw",
+            )?;
+            let mut conn = mysql::Conn::new(
+                mysql::Opts::from_url(&url)
+                    .map_err(|e| format!("MySQL.query_raw invalid URL: {}", e))?,
+            )
+            .map_err(|e| format!("MySQL.query_raw connection error: {}", e))?;
+            // params_json を mysql::Params に変換
+            let params_val: serde_json::Value = serde_json::from_str(&params_json)
+                .map_err(|e| format!("MySQL.query_raw params JSON error: {}", e))?;
+            let positional: Vec<mysql::Value> = if let serde_json::Value::Array(arr) = params_val {
+                arr.into_iter().map(|v| json_to_mysql_value(v)).collect()
+            } else {
+                vec![]
+            };
+            let rows: Vec<mysql::Row> = conn
+                .exec(sql.as_str(), mysql::Params::Positional(positional))
+                .map_err(|e| format!("MySQL.query_raw exec error: {}", e))?;
+            // 各 Row を JSON オブジェクトに変換
+            let json_rows: Vec<serde_json::Value> = rows
+                .into_iter()
+                .map(|row| {
+                    let cols = row.columns_ref().to_vec();
+                    let mut map = serde_json::Map::new();
+                    for (i, col) in cols.iter().enumerate() {
+                        let key = col.name_str().to_string();
+                        let val = row.get::<mysql::Value, usize>(i)
+                            .unwrap_or(mysql::Value::NULL);
+                        map.insert(key, mysql_value_to_json(val));
+                    }
+                    serde_json::Value::Object(map)
+                })
+                .collect();
+            let json_str = serde_json::to_string(&json_rows)
+                .map_err(|e| format!("MySQL.query_raw serialize error: {}", e))?;
+            Ok(ok_vm(VMValue::Str(json_str)))
+        }
+        #[cfg(target_arch = "wasm32")]
+        "MySQL.query_raw" => Ok(err_vm(VMValue::Str("MySQL not supported on wasm32".into()))),
+
+        #[cfg(not(target_arch = "wasm32"))]
+        "MySQL.execute_raw" => {
+            use mysql::prelude::Queryable;
+            let mut it = args.into_iter();
+            let url = vm_string(
+                it.next().ok_or("MySQL.execute_raw: missing conn")?,
+                "MySQL.execute_raw",
+            )?;
+            let sql = vm_string(
+                it.next().ok_or("MySQL.execute_raw: missing sql")?,
+                "MySQL.execute_raw",
+            )?;
+            let params_json = vm_string(
+                it.next().ok_or("MySQL.execute_raw: missing params")?,
+                "MySQL.execute_raw",
+            )?;
+            let mut conn = mysql::Conn::new(
+                mysql::Opts::from_url(&url)
+                    .map_err(|e| format!("MySQL.execute_raw invalid URL: {}", e))?,
+            )
+            .map_err(|e| format!("MySQL.execute_raw connection error: {}", e))?;
+            let params_val: serde_json::Value = serde_json::from_str(&params_json)
+                .map_err(|e| format!("MySQL.execute_raw params JSON error: {}", e))?;
+            let positional: Vec<mysql::Value> = if let serde_json::Value::Array(arr) = params_val {
+                arr.into_iter().map(|v| json_to_mysql_value(v)).collect()
+            } else {
+                vec![]
+            };
+            conn.exec_drop(sql.as_str(), mysql::Params::Positional(positional))
+                .map_err(|e| format!("MySQL.execute_raw exec error: {e} (sql: {sql})"))?;
+            let affected = conn.affected_rows();
+            Ok(ok_vm(VMValue::Int(affected as i64)))
+        }
+        #[cfg(target_arch = "wasm32")]
+        "MySQL.execute_raw" => Ok(err_vm(VMValue::Str("MySQL not supported on wasm32".into()))),
+
+        #[cfg(not(target_arch = "wasm32"))]
+        "MySQL.transaction_begin_raw" => {
+            use mysql::prelude::Queryable;
+            let url = vm_string(
+                args.into_iter().next().ok_or("MySQL.transaction_begin_raw: missing conn")?,
+                "MySQL.transaction_begin_raw",
+            )?;
+            let mut conn = mysql::Conn::new(
+                mysql::Opts::from_url(&url)
+                    .map_err(|e| format!("MySQL.transaction_begin_raw invalid URL: {}", e))?,
+            )
+            .map_err(|e| format!("MySQL.transaction_begin_raw connection error: {}", e))?;
+            conn.exec_drop("BEGIN", mysql::Params::Empty)
+                .map_err(|e| format!("MySQL transaction BEGIN failed: {}", e))?;
+            Ok(ok_vm(VMValue::Unit))
+        }
+        #[cfg(target_arch = "wasm32")]
+        "MySQL.transaction_begin_raw" => Ok(err_vm(VMValue::Str("MySQL not supported on wasm32".into()))),
+
+        #[cfg(not(target_arch = "wasm32"))]
+        "MySQL.transaction_commit_raw" => {
+            use mysql::prelude::Queryable;
+            let url = vm_string(
+                args.into_iter().next().ok_or("MySQL.transaction_commit_raw: missing conn")?,
+                "MySQL.transaction_commit_raw",
+            )?;
+            let mut conn = mysql::Conn::new(
+                mysql::Opts::from_url(&url)
+                    .map_err(|e| format!("MySQL.transaction_commit_raw invalid URL: {}", e))?,
+            )
+            .map_err(|e| format!("MySQL.transaction_commit_raw connection error: {}", e))?;
+            conn.exec_drop("COMMIT", mysql::Params::Empty)
+                .map_err(|e| format!("MySQL transaction COMMIT failed: {}", e))?;
+            Ok(ok_vm(VMValue::Unit))
+        }
+        #[cfg(target_arch = "wasm32")]
+        "MySQL.transaction_commit_raw" => Ok(err_vm(VMValue::Str("MySQL not supported on wasm32".into()))),
+
+        #[cfg(not(target_arch = "wasm32"))]
+        "MySQL.transaction_rollback_raw" => {
+            use mysql::prelude::Queryable;
+            let url = vm_string(
+                args.into_iter().next().ok_or("MySQL.transaction_rollback_raw: missing conn")?,
+                "MySQL.transaction_rollback_raw",
+            )?;
+            let mut conn = mysql::Conn::new(
+                mysql::Opts::from_url(&url)
+                    .map_err(|e| format!("MySQL.transaction_rollback_raw invalid URL: {}", e))?,
+            )
+            .map_err(|e| format!("MySQL.transaction_rollback_raw connection error: {}", e))?;
+            conn.exec_drop("ROLLBACK", mysql::Params::Empty)
+                .map_err(|e| format!("MySQL transaction ROLLBACK failed: {}", e))?;
+            Ok(ok_vm(VMValue::Unit))
+        }
+        #[cfg(target_arch = "wasm32")]
+        "MySQL.transaction_rollback_raw" => Ok(err_vm(VMValue::Str("MySQL not supported on wasm32".into()))),
+
+        // ── MongoDB primitives (v25.5.0) — tokio + mongodb async API ──────
+        // TODO(v26.x): 各 primitive で毎回 tokio runtime + mongodb::Client を生成している。
+        // コネクションプール（static OnceLock<Client> 等）で改善予定。
+        #[cfg(not(target_arch = "wasm32"))]
+        "Mongo.connect_raw" => {
+            let mut it = args.into_iter();
+            let url = vm_string(
+                it.next().ok_or("Mongo.connect_raw: missing url")?,
+                "Mongo.connect_raw",
+            )?;
+            let db_name = extract_mongo_db_name(&url);
+            let url2 = url.clone();
+            tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .map_err(|e| format!("Mongo.connect_raw: tokio error: {}", e))?
+                .block_on(async move {
+                    let client = mongodb::Client::with_uri_str(&url2)
+                        .await
+                        .map_err(|e| format!("Mongo.connect_raw: invalid URL: {}", e))?;
+                    client
+                        .database(&db_name)
+                        .run_command(mongodb::bson::doc! { "ping": 1 })
+                        .await
+                        .map_err(|e| format!("Mongo.connect_raw: ping error: {}", e))?;
+                    Ok::<_, String>(())
+                })?;
+            Ok(ok_vm(VMValue::Str(url)))
+        }
+        #[cfg(target_arch = "wasm32")]
+        "Mongo.connect_raw" => Ok(err_vm(VMValue::Str("MongoDB not supported on wasm32".into()))),
+
+        #[cfg(not(target_arch = "wasm32"))]
+        "Mongo.find_raw" => {
+            let mut it = args.into_iter();
+            let url = vm_string(it.next().ok_or("Mongo.find_raw: missing conn")?, "Mongo.find_raw")?;
+            let coll = vm_string(it.next().ok_or("Mongo.find_raw: missing coll")?, "Mongo.find_raw")?;
+            let filter_json = vm_string(it.next().ok_or("Mongo.find_raw: missing filter")?, "Mongo.find_raw")?;
+            let db_name = extract_mongo_db_name(&url);
+            let result = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .map_err(|e| format!("Mongo.find_raw: tokio error: {}", e))?
+                .block_on(async move {
+                    use futures::TryStreamExt;
+                    let filter_doc = mongo_json_to_bson(&filter_json)?;
+                    let client = mongodb::Client::with_uri_str(&url).await
+                        .map_err(|e| format!("Mongo.find_raw connection error on '{}': {}", coll, e))?;
+                    let collection = client.database(&db_name)
+                        .collection::<mongodb::bson::Document>(&coll);
+                    let cursor = collection.find(filter_doc).await
+                        .map_err(|e| format!("Mongo.find_raw error on '{}': {}", coll, e))?;
+                    let docs: Vec<mongodb::bson::Document> = cursor.try_collect().await
+                        .map_err(|e| format!("Mongo.find_raw cursor error on '{}': {}", coll, e))?;
+                    let json_arr: Vec<serde_json::Value> = docs.into_iter().map(mongo_bson_to_json).collect();
+                    serde_json::to_string(&json_arr)
+                        .map_err(|e| format!("Mongo.find_raw serialize error: {}", e))
+                })?;
+            Ok(ok_vm(VMValue::Str(result)))
+        }
+        #[cfg(target_arch = "wasm32")]
+        "Mongo.find_raw" => Ok(err_vm(VMValue::Str("MongoDB not supported on wasm32".into()))),
+
+        #[cfg(not(target_arch = "wasm32"))]
+        "Mongo.find_one_raw" => {
+            let mut it = args.into_iter();
+            let url = vm_string(it.next().ok_or("Mongo.find_one_raw: missing conn")?, "Mongo.find_one_raw")?;
+            let coll = vm_string(it.next().ok_or("Mongo.find_one_raw: missing coll")?, "Mongo.find_one_raw")?;
+            let filter_json = vm_string(it.next().ok_or("Mongo.find_one_raw: missing filter")?, "Mongo.find_one_raw")?;
+            let db_name = extract_mongo_db_name(&url);
+            // connection/query エラーは ? で Rust Err として伝播（MySQL/Redis と同パターン）
+            // None（未発見）のみ Favnir Result.err("not_found") として返す
+            let opt = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .map_err(|e| format!("Mongo.find_one_raw: tokio error: {}", e))?
+                .block_on(async move {
+                    let filter_doc = mongo_json_to_bson(&filter_json)?;
+                    let client = mongodb::Client::with_uri_str(&url).await
+                        .map_err(|e| format!("Mongo.find_one_raw connection error on '{}': {}", coll, e))?;
+                    let collection = client.database(&db_name)
+                        .collection::<mongodb::bson::Document>(&coll);
+                    collection.find_one(filter_doc).await
+                        .map_err(|e| format!("Mongo.find_one_raw error on '{}': {}", coll, e))
+                })?;
+            match opt {
+                Some(doc) => {
+                    let json = mongo_bson_to_json(doc);
+                    let s = serde_json::to_string(&json)
+                        .map_err(|e| format!("Mongo.find_one_raw serialize error: {}", e))?;
+                    Ok(ok_vm(VMValue::Str(s)))
+                }
+                None => Ok(err_vm(VMValue::Str("not_found".into()))),
+            }
+        }
+        #[cfg(target_arch = "wasm32")]
+        "Mongo.find_one_raw" => Ok(err_vm(VMValue::Str("MongoDB not supported on wasm32".into()))),
+
+        #[cfg(not(target_arch = "wasm32"))]
+        "Mongo.insert_one_raw" => {
+            let mut it = args.into_iter();
+            let url = vm_string(it.next().ok_or("Mongo.insert_one_raw: missing conn")?, "Mongo.insert_one_raw")?;
+            let coll = vm_string(it.next().ok_or("Mongo.insert_one_raw: missing coll")?, "Mongo.insert_one_raw")?;
+            let doc_json = vm_string(it.next().ok_or("Mongo.insert_one_raw: missing doc")?, "Mongo.insert_one_raw")?;
+            let db_name = extract_mongo_db_name(&url);
+            let result = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .map_err(|e| format!("Mongo.insert_one_raw: tokio error: {}", e))?
+                .block_on(async move {
+                    let doc = mongo_json_to_bson(&doc_json)?;
+                    let client = mongodb::Client::with_uri_str(&url).await
+                        .map_err(|e| format!("Mongo.insert_one_raw connection error on '{}': {}", coll, e))?;
+                    let collection = client.database(&db_name)
+                        .collection::<mongodb::bson::Document>(&coll);
+                    let res = collection.insert_one(doc).await
+                        .map_err(|e| format!("Mongo.insert_one_raw error on '{}': {}", coll, e))?;
+                    let id_str = match &res.inserted_id {
+                        mongodb::bson::Bson::ObjectId(oid) => oid.to_hex(),
+                        other => other.to_string(),
+                    };
+                    Ok::<_, String>(id_str)
+                })?;
+            Ok(ok_vm(VMValue::Str(result)))
+        }
+        #[cfg(target_arch = "wasm32")]
+        "Mongo.insert_one_raw" => Ok(err_vm(VMValue::Str("MongoDB not supported on wasm32".into()))),
+
+        #[cfg(not(target_arch = "wasm32"))]
+        "Mongo.insert_many_raw" => {
+            let mut it = args.into_iter();
+            let url = vm_string(it.next().ok_or("Mongo.insert_many_raw: missing conn")?, "Mongo.insert_many_raw")?;
+            let coll = vm_string(it.next().ok_or("Mongo.insert_many_raw: missing coll")?, "Mongo.insert_many_raw")?;
+            let docs_json = vm_string(it.next().ok_or("Mongo.insert_many_raw: missing docs")?, "Mongo.insert_many_raw")?;
+            let db_name = extract_mongo_db_name(&url);
+            let count = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .map_err(|e| format!("Mongo.insert_many_raw: tokio error: {}", e))?
+                .block_on(async move {
+                    let json_val: serde_json::Value = serde_json::from_str(&docs_json)
+                        .map_err(|e| format!("Mongo.insert_many_raw JSON error: {}", e))?;
+                    let arr = match json_val {
+                        serde_json::Value::Array(a) => a,
+                        _ => return Err("Mongo.insert_many_raw: docs must be a JSON array".to_string()),
+                    };
+                    let docs: Vec<mongodb::bson::Document> = arr.into_iter()
+                        .map(|v| mongodb::bson::to_document(&v)
+                            .map_err(|e| format!("Mongo.insert_many_raw BSON error: {}", e)))
+                        .collect::<Result<_, _>>()?;
+                    let client = mongodb::Client::with_uri_str(&url).await
+                        .map_err(|e| format!("Mongo.insert_many_raw connection error on '{}': {}", coll, e))?;
+                    let collection = client.database(&db_name)
+                        .collection::<mongodb::bson::Document>(&coll);
+                    let res = collection.insert_many(docs).await
+                        .map_err(|e| format!("Mongo.insert_many_raw error on '{}': {}", coll, e))?;
+                    Ok::<_, String>(res.inserted_ids.len() as i64)
+                })?;
+            Ok(ok_vm(VMValue::Int(count)))
+        }
+        #[cfg(target_arch = "wasm32")]
+        "Mongo.insert_many_raw" => Ok(err_vm(VMValue::Str("MongoDB not supported on wasm32".into()))),
+
+        #[cfg(not(target_arch = "wasm32"))]
+        "Mongo.update_one_raw" => {
+            let mut it = args.into_iter();
+            let url = vm_string(it.next().ok_or("Mongo.update_one_raw: missing conn")?, "Mongo.update_one_raw")?;
+            let coll = vm_string(it.next().ok_or("Mongo.update_one_raw: missing coll")?, "Mongo.update_one_raw")?;
+            let filter_json = vm_string(it.next().ok_or("Mongo.update_one_raw: missing filter")?, "Mongo.update_one_raw")?;
+            let update_json = vm_string(it.next().ok_or("Mongo.update_one_raw: missing update")?, "Mongo.update_one_raw")?;
+            let db_name = extract_mongo_db_name(&url);
+            let modified = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .map_err(|e| format!("Mongo.update_one_raw: tokio error: {}", e))?
+                .block_on(async move {
+                    let filter_doc = mongo_json_to_bson(&filter_json)?;
+                    let update_doc = mongo_json_to_bson(&update_json)?;
+                    // update ドキュメントは $set / $inc 等の演算子を含む必要がある
+                    if update_doc.keys().next().map(|k| !k.starts_with('$')).unwrap_or(false) {
+                        return Err(format!(
+                            "Mongo.update_one_raw: update document on '{}' must use operators ($set, $inc, etc.), not a plain document",
+                            coll
+                        ));
+                    }
+                    let client = mongodb::Client::with_uri_str(&url).await
+                        .map_err(|e| format!("Mongo.update_one_raw connection error on '{}': {}", coll, e))?;
+                    let collection = client.database(&db_name)
+                        .collection::<mongodb::bson::Document>(&coll);
+                    let res = collection.update_one(filter_doc, update_doc).await
+                        .map_err(|e| format!("Mongo.update_one_raw error on '{}': {}", coll, e))?;
+                    Ok::<_, String>(res.modified_count as i64)
+                })?;
+            Ok(ok_vm(VMValue::Int(modified)))
+        }
+        #[cfg(target_arch = "wasm32")]
+        "Mongo.update_one_raw" => Ok(err_vm(VMValue::Str("MongoDB not supported on wasm32".into()))),
+
+        #[cfg(not(target_arch = "wasm32"))]
+        "Mongo.delete_one_raw" => {
+            let mut it = args.into_iter();
+            let url = vm_string(it.next().ok_or("Mongo.delete_one_raw: missing conn")?, "Mongo.delete_one_raw")?;
+            let coll = vm_string(it.next().ok_or("Mongo.delete_one_raw: missing coll")?, "Mongo.delete_one_raw")?;
+            let filter_json = vm_string(it.next().ok_or("Mongo.delete_one_raw: missing filter")?, "Mongo.delete_one_raw")?;
+            let db_name = extract_mongo_db_name(&url);
+            let deleted = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .map_err(|e| format!("Mongo.delete_one_raw: tokio error: {}", e))?
+                .block_on(async move {
+                    let filter_doc = mongo_json_to_bson(&filter_json)?;
+                    let client = mongodb::Client::with_uri_str(&url).await
+                        .map_err(|e| format!("Mongo.delete_one_raw connection error on '{}': {}", coll, e))?;
+                    let collection = client.database(&db_name)
+                        .collection::<mongodb::bson::Document>(&coll);
+                    let res = collection.delete_one(filter_doc).await
+                        .map_err(|e| format!("Mongo.delete_one_raw error on '{}': {}", coll, e))?;
+                    Ok::<_, String>(res.deleted_count as i64)
+                })?;
+            Ok(ok_vm(VMValue::Int(deleted)))
+        }
+        #[cfg(target_arch = "wasm32")]
+        "Mongo.delete_one_raw" => Ok(err_vm(VMValue::Str("MongoDB not supported on wasm32".into()))),
+
+        #[cfg(not(target_arch = "wasm32"))]
+        "Mongo.aggregate_raw" => {
+            let mut it = args.into_iter();
+            let url = vm_string(it.next().ok_or("Mongo.aggregate_raw: missing conn")?, "Mongo.aggregate_raw")?;
+            let coll = vm_string(it.next().ok_or("Mongo.aggregate_raw: missing coll")?, "Mongo.aggregate_raw")?;
+            let pipeline_json = vm_string(it.next().ok_or("Mongo.aggregate_raw: missing pipeline")?, "Mongo.aggregate_raw")?;
+            let db_name = extract_mongo_db_name(&url);
+            let result = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .map_err(|e| format!("Mongo.aggregate_raw: tokio error: {}", e))?
+                .block_on(async move {
+                    use futures::TryStreamExt;
+                    let json_val: serde_json::Value = serde_json::from_str(&pipeline_json)
+                        .map_err(|e| format!("Mongo.aggregate_raw JSON error: {}", e))?;
+                    let pipeline_arr = match json_val {
+                        serde_json::Value::Array(a) => a,
+                        _ => return Err("Mongo.aggregate_raw: pipeline must be a JSON array".to_string()),
+                    };
+                    let pipeline: Vec<mongodb::bson::Document> = pipeline_arr.into_iter()
+                        .map(|v| mongodb::bson::to_document(&v)
+                            .map_err(|e| format!("Mongo.aggregate_raw BSON error: {}", e)))
+                        .collect::<Result<_, _>>()?;
+                    let client = mongodb::Client::with_uri_str(&url).await
+                        .map_err(|e| format!("Mongo.aggregate_raw connection error on '{}': {}", coll, e))?;
+                    let collection = client.database(&db_name)
+                        .collection::<mongodb::bson::Document>(&coll);
+                    let cursor = collection.aggregate(pipeline).await
+                        .map_err(|e| format!("Mongo.aggregate_raw error on '{}': {}", coll, e))?;
+                    let docs: Vec<mongodb::bson::Document> = cursor.try_collect().await
+                        .map_err(|e| format!("Mongo.aggregate_raw cursor error on '{}': {}", coll, e))?;
+                    let json_arr: Vec<serde_json::Value> = docs.into_iter().map(mongo_bson_to_json).collect();
+                    serde_json::to_string(&json_arr)
+                        .map_err(|e| format!("Mongo.aggregate_raw serialize error: {}", e))
+                })?;
+            Ok(ok_vm(VMValue::Str(result)))
+        }
+        #[cfg(target_arch = "wasm32")]
+        "Mongo.aggregate_raw" => Ok(err_vm(VMValue::Str("MongoDB not supported on wasm32".into()))),
+
+        // ── DynamoDB primitives (v25.6.0) — JSON string I/O ──────────────
+        #[cfg(not(target_arch = "wasm32"))]
+        "DynamoDB.connect_raw" => {
+            let mut it = args.into_iter();
+            let endpoint_str = vm_string(it.next().ok_or("DynamoDB.connect_raw: missing endpoint")?, "DynamoDB.connect_raw")?;
+            let config = get_aws_config();
+            let url = get_dynamo_endpoint(&endpoint_str, &config);
+            // ListTables ping（接続確認）
+            match aws_post(&config, "dynamodb", &url, "{}", "application/x-amz-json-1.0", Some("DynamoDB_20120810.ListTables")) {
+                Ok(_) => Ok(ok_vm(VMValue::Str(endpoint_str))),
+                Err(e) => Ok(err_vm(VMValue::Str(format!("DynamoDB.connect_raw: ping failed: {}", e)))),
+            }
+        }
+        #[cfg(target_arch = "wasm32")]
+        "DynamoDB.connect_raw" => Ok(err_vm(VMValue::Str("DynamoDB not supported on wasm32".into()))),
+
+        #[cfg(not(target_arch = "wasm32"))]
+        "DynamoDB.get_item_raw" => {
+            let mut it = args.into_iter();
+            let endpoint_str = vm_string(it.next().ok_or("DynamoDB.get_item_raw: missing endpoint")?, "DynamoDB.get_item_raw")?;
+            let table = vm_string(it.next().ok_or("DynamoDB.get_item_raw: missing table")?, "DynamoDB.get_item_raw")?;
+            let key_json = vm_string(it.next().ok_or("DynamoDB.get_item_raw: missing key_json")?, "DynamoDB.get_item_raw")?;
+            let config = get_aws_config();
+            let url = get_dynamo_endpoint(&endpoint_str, &config);
+            let key_val: serde_json::Value = serde_json::from_str(&key_json)
+                .map_err(|e| format!("DynamoDB.get_item_raw: key JSON parse: {}", e))?;
+            let key_item = json_to_dynamo_item(&key_val)
+                .map_err(|e| format!("DynamoDB.get_item_raw: {}", e))?;
+            let body = serde_json::json!({"TableName": table, "Key": key_item}).to_string();
+            let resp_str = match aws_post(&config, "dynamodb", &url, &body, "application/x-amz-json-1.0", Some("DynamoDB_20120810.GetItem")) {
+                Ok(s) => s,
+                Err(e) => return Ok(err_vm(VMValue::Str(format!("DynamoDB.get_item_raw: table={}: {}", table, e)))),
+            };
+            let resp_json: serde_json::Value = serde_json::from_str(&resp_str)
+                .map_err(|e| format!("DynamoDB.get_item_raw: JSON parse: {}", e))?;
+            if let Some(item) = resp_json.get("Item") {
+                let plain = dynamo_item_to_plain_json(item);
+                let s = serde_json::to_string(&plain)
+                    .map_err(|e| format!("DynamoDB.get_item_raw: serialize: {}", e))?;
+                Ok(ok_vm(VMValue::Str(s)))
+            } else {
+                Ok(err_vm(VMValue::Str("not_found".into())))
+            }
+        }
+        #[cfg(target_arch = "wasm32")]
+        "DynamoDB.get_item_raw" => Ok(err_vm(VMValue::Str("DynamoDB not supported on wasm32".into()))),
+
+        #[cfg(not(target_arch = "wasm32"))]
+        "DynamoDB.put_item_raw" => {
+            let mut it = args.into_iter();
+            let endpoint_str = vm_string(it.next().ok_or("DynamoDB.put_item_raw: missing endpoint")?, "DynamoDB.put_item_raw")?;
+            let table = vm_string(it.next().ok_or("DynamoDB.put_item_raw: missing table")?, "DynamoDB.put_item_raw")?;
+            let item_json = vm_string(it.next().ok_or("DynamoDB.put_item_raw: missing item_json")?, "DynamoDB.put_item_raw")?;
+            let config = get_aws_config();
+            let url = get_dynamo_endpoint(&endpoint_str, &config);
+            let item_val: serde_json::Value = serde_json::from_str(&item_json)
+                .map_err(|e| format!("DynamoDB.put_item_raw: item JSON parse: {}", e))?;
+            let item = json_to_dynamo_item(&item_val)
+                .map_err(|e| format!("DynamoDB.put_item_raw: {}", e))?;
+            let body = serde_json::json!({"TableName": table, "Item": item}).to_string();
+            match aws_post(&config, "dynamodb", &url, &body, "application/x-amz-json-1.0", Some("DynamoDB_20120810.PutItem")) {
+                Ok(_) => Ok(ok_vm(VMValue::Unit)),
+                Err(e) => Ok(err_vm(VMValue::Str(format!("DynamoDB.put_item_raw: table={}: {}", table, e)))),
+            }
+        }
+        #[cfg(target_arch = "wasm32")]
+        "DynamoDB.put_item_raw" => Ok(err_vm(VMValue::Str("DynamoDB not supported on wasm32".into()))),
+
+        #[cfg(not(target_arch = "wasm32"))]
+        "DynamoDB.delete_item_raw" => {
+            let mut it = args.into_iter();
+            let endpoint_str = vm_string(it.next().ok_or("DynamoDB.delete_item_raw: missing endpoint")?, "DynamoDB.delete_item_raw")?;
+            let table = vm_string(it.next().ok_or("DynamoDB.delete_item_raw: missing table")?, "DynamoDB.delete_item_raw")?;
+            let key_json = vm_string(it.next().ok_or("DynamoDB.delete_item_raw: missing key_json")?, "DynamoDB.delete_item_raw")?;
+            let config = get_aws_config();
+            let url = get_dynamo_endpoint(&endpoint_str, &config);
+            let key_val: serde_json::Value = serde_json::from_str(&key_json)
+                .map_err(|e| format!("DynamoDB.delete_item_raw: key JSON parse: {}", e))?;
+            let key_item = json_to_dynamo_item(&key_val)
+                .map_err(|e| format!("DynamoDB.delete_item_raw: {}", e))?;
+            let body = serde_json::json!({"TableName": table, "Key": key_item}).to_string();
+            match aws_post(&config, "dynamodb", &url, &body, "application/x-amz-json-1.0", Some("DynamoDB_20120810.DeleteItem")) {
+                Ok(_) => Ok(ok_vm(VMValue::Unit)),
+                Err(e) => Ok(err_vm(VMValue::Str(format!("DynamoDB.delete_item_raw: table={}: {}", table, e)))),
+            }
+        }
+        #[cfg(target_arch = "wasm32")]
+        "DynamoDB.delete_item_raw" => Ok(err_vm(VMValue::Str("DynamoDB not supported on wasm32".into()))),
+
+        #[cfg(not(target_arch = "wasm32"))]
+        "DynamoDB.query_raw" => {
+            let mut it = args.into_iter();
+            let endpoint_str = vm_string(it.next().ok_or("DynamoDB.query_raw: missing endpoint")?, "DynamoDB.query_raw")?;
+            let table = vm_string(it.next().ok_or("DynamoDB.query_raw: missing table")?, "DynamoDB.query_raw")?;
+            let key_cond = vm_string(it.next().ok_or("DynamoDB.query_raw: missing key_cond")?, "DynamoDB.query_raw")?;
+            let attr_vals_json = vm_string(it.next().ok_or("DynamoDB.query_raw: missing attr_vals_json")?, "DynamoDB.query_raw")?;
+            let config = get_aws_config();
+            let url = get_dynamo_endpoint(&endpoint_str, &config);
+            let attr_vals: serde_json::Value = serde_json::from_str(&attr_vals_json)
+                .map_err(|e| format!("DynamoDB.query_raw: attr_vals JSON parse: {}", e))?;
+            let attr_map = json_to_dynamo_item(&attr_vals)
+                .map_err(|e| format!("DynamoDB.query_raw: {}", e))?;
+            let body = serde_json::json!({
+                "TableName": table,
+                "KeyConditionExpression": key_cond,
+                "ExpressionAttributeValues": attr_map
+            }).to_string();
+            let resp_str = match aws_post(&config, "dynamodb", &url, &body, "application/x-amz-json-1.0", Some("DynamoDB_20120810.Query")) {
+                Ok(s) => s,
+                Err(e) => return Ok(err_vm(VMValue::Str(format!("DynamoDB.query_raw: table={}: {}", table, e)))),
+            };
+            let resp_json: serde_json::Value = serde_json::from_str(&resp_str)
+                .map_err(|e| format!("DynamoDB.query_raw: JSON parse: {}", e))?;
+            let items = resp_json.get("Items").and_then(|x| x.as_array()).cloned().unwrap_or_default();
+            let plain: Vec<serde_json::Value> = items.iter().map(dynamo_item_to_plain_json).collect();
+            let s = serde_json::to_string(&plain)
+                .map_err(|e| format!("DynamoDB.query_raw: serialize: {}", e))?;
+            Ok(ok_vm(VMValue::Str(s)))
+        }
+        #[cfg(target_arch = "wasm32")]
+        "DynamoDB.query_raw" => Ok(err_vm(VMValue::Str("DynamoDB not supported on wasm32".into()))),
+
+        #[cfg(not(target_arch = "wasm32"))]
+        "DynamoDB.scan_raw" => {
+            let mut it = args.into_iter();
+            let endpoint_str = vm_string(it.next().ok_or("DynamoDB.scan_raw: missing endpoint")?, "DynamoDB.scan_raw")?;
+            let table = vm_string(it.next().ok_or("DynamoDB.scan_raw: missing table")?, "DynamoDB.scan_raw")?;
+            let filter_json = vm_string(it.next().ok_or("DynamoDB.scan_raw: missing filter_json")?, "DynamoDB.scan_raw")?;
+            let config = get_aws_config();
+            let url = get_dynamo_endpoint(&endpoint_str, &config);
+            // filter_json が空 → FilterExpression を含めない（全件スキャン）
+            // filter_json は DynamoDB 式文字列（例: "attribute_exists(pk)"）を直接渡す。
+            // JSON オブジェクトではなく文字列として FilterExpression フィールドに設定する。
+            let body = if filter_json.is_empty() {
+                serde_json::json!({"TableName": table}).to_string()
+            } else {
+                serde_json::json!({"TableName": table, "FilterExpression": filter_json}).to_string()
+            };
+            let resp_str = match aws_post(&config, "dynamodb", &url, &body, "application/x-amz-json-1.0", Some("DynamoDB_20120810.Scan")) {
+                Ok(s) => s,
+                Err(e) => return Ok(err_vm(VMValue::Str(format!("DynamoDB.scan_raw: table={}: {}", table, e)))),
+            };
+            let resp_json: serde_json::Value = serde_json::from_str(&resp_str)
+                .map_err(|e| format!("DynamoDB.scan_raw: JSON parse: {}", e))?;
+            let items = resp_json.get("Items").and_then(|x| x.as_array()).cloned().unwrap_or_default();
+            let plain: Vec<serde_json::Value> = items.iter().map(dynamo_item_to_plain_json).collect();
+            let s = serde_json::to_string(&plain)
+                .map_err(|e| format!("DynamoDB.scan_raw: serialize: {}", e))?;
+            Ok(ok_vm(VMValue::Str(s)))
+        }
+        #[cfg(target_arch = "wasm32")]
+        "DynamoDB.scan_raw" => Ok(err_vm(VMValue::Str("DynamoDB not supported on wasm32".into()))),
+
+        #[cfg(not(target_arch = "wasm32"))]
+        "DynamoDB.batch_write_raw" => {
+            let mut it = args.into_iter();
+            let endpoint_str = vm_string(it.next().ok_or("DynamoDB.batch_write_raw: missing endpoint")?, "DynamoDB.batch_write_raw")?;
+            let table = vm_string(it.next().ok_or("DynamoDB.batch_write_raw: missing table")?, "DynamoDB.batch_write_raw")?;
+            let puts_json = vm_string(it.next().ok_or("DynamoDB.batch_write_raw: missing puts_json")?, "DynamoDB.batch_write_raw")?;
+            let puts: Vec<serde_json::Value> = serde_json::from_str(&puts_json)
+                .map_err(|e| format!("DynamoDB.batch_write_raw: JSON parse: {}", e))?;
+            if puts.len() > 25 {
+                return Ok(err_vm(VMValue::Str(format!("DynamoDB.batch_write_raw: max 25 items per batch, got {}", puts.len()))));
+            }
+            let count = puts.len();
+            // collect::<Result<_,_>>() の Err を ? で伝播させると VM クラッシュになるため
+            // 他プリミティブと同様に Ok(err_vm(...)) パターンに変換する
+            let requests: Vec<serde_json::Value> = match puts.iter()
+                .map(|item| json_to_dynamo_item(item).map(|m| serde_json::json!({"PutRequest": {"Item": m}})))
+                .collect::<Result<Vec<_>, _>>()
+            {
+                Ok(v) => v,
+                Err(e) => return Ok(err_vm(VMValue::Str(format!("DynamoDB.batch_write_raw: item conversion: {}", e)))),
+            };
+            let config = get_aws_config();
+            let url = get_dynamo_endpoint(&endpoint_str, &config);
+            let body = serde_json::json!({"RequestItems": {&table: requests}}).to_string();
+            match aws_post(&config, "dynamodb", &url, &body, "application/x-amz-json-1.0", Some("DynamoDB_20120810.BatchWriteItem")) {
+                Ok(_) => Ok(ok_vm(VMValue::Int(count as i64))),
+                Err(e) => Ok(err_vm(VMValue::Str(format!("DynamoDB.batch_write_raw: table={}: {}", table, e)))),
+            }
+        }
+        #[cfg(target_arch = "wasm32")]
+        "DynamoDB.batch_write_raw" => Ok(err_vm(VMValue::Str("DynamoDB not supported on wasm32".into()))),
+
+        #[cfg(not(target_arch = "wasm32"))]
+        "DynamoDB.transact_write_raw" => {
+            let mut it = args.into_iter();
+            let endpoint_str = vm_string(it.next().ok_or("DynamoDB.transact_write_raw: missing endpoint")?, "DynamoDB.transact_write_raw")?;
+            let ops_json = vm_string(it.next().ok_or("DynamoDB.transact_write_raw: missing ops_json")?, "DynamoDB.transact_write_raw")?;
+            // ops_json は DynamoDB TransactItems 形式（属性型 JSON）をそのまま渡す
+            let ops: serde_json::Value = serde_json::from_str(&ops_json)
+                .map_err(|e| format!("DynamoDB.transact_write_raw: JSON parse: {}", e))?;
+            let config = get_aws_config();
+            let url = get_dynamo_endpoint(&endpoint_str, &config);
+            let body = serde_json::json!({"TransactItems": ops}).to_string();
+            match aws_post(&config, "dynamodb", &url, &body, "application/x-amz-json-1.0", Some("DynamoDB_20120810.TransactWriteItems")) {
+                Ok(_) => Ok(ok_vm(VMValue::Unit)),
+                Err(e) => Ok(err_vm(VMValue::Str(format!("DynamoDB.transact_write_raw: {}", e)))),
+            }
+        }
+        #[cfg(target_arch = "wasm32")]
+        "DynamoDB.transact_write_raw" => Ok(err_vm(VMValue::Str("DynamoDB not supported on wasm32".into()))),
+
+        // ── Elasticsearch primitives (v25.8.0) — JSON string I/O ─────────
+        #[cfg(not(target_arch = "wasm32"))]
+        "ES.connect_raw" => {
+            let mut it = args.into_iter();
+            let url_str = vm_string(it.next().ok_or("ES.connect_raw: missing url")?, "ES.connect_raw")?;
+            let url = get_es_url(&url_str);
+            match es_http("GET", &format!("{}/", url), None, None) {
+                Ok(_) => Ok(ok_vm(VMValue::Str(url))),
+                Err(e) => Ok(err_vm(VMValue::Str(format!("ES.connect_raw: ping failed: {}", e)))),
+            }
+        }
+        #[cfg(target_arch = "wasm32")]
+        "ES.connect_raw" => Ok(err_vm(VMValue::Str("Elasticsearch not supported on wasm32".into()))),
+
+        #[cfg(not(target_arch = "wasm32"))]
+        "ES.index_raw" => {
+            let mut it = args.into_iter();
+            let url_str = vm_string(it.next().ok_or("ES.index_raw: missing url")?, "ES.index_raw")?;
+            let index = vm_string(it.next().ok_or("ES.index_raw: missing index")?, "ES.index_raw")?;
+            let doc_json = vm_string(it.next().ok_or("ES.index_raw: missing doc_json")?, "ES.index_raw")?;
+            let ep = format!("{}/{}/_doc", get_es_url(&url_str), index);
+            match es_http("POST", &ep, Some("application/json"), Some(&doc_json)) {
+                Ok(_) => Ok(ok_vm(VMValue::Unit)),
+                Err(e) => Ok(err_vm(VMValue::Str(format!("ES.index_raw: {}", e)))),
+            }
+        }
+        #[cfg(target_arch = "wasm32")]
+        "ES.index_raw" => Ok(err_vm(VMValue::Str("Elasticsearch not supported on wasm32".into()))),
+
+        #[cfg(not(target_arch = "wasm32"))]
+        "ES.index_with_id_raw" => {
+            let mut it = args.into_iter();
+            let url_str = vm_string(it.next().ok_or("ES.index_with_id_raw: missing url")?, "ES.index_with_id_raw")?;
+            let index = vm_string(it.next().ok_or("ES.index_with_id_raw: missing index")?, "ES.index_with_id_raw")?;
+            let id = vm_string(it.next().ok_or("ES.index_with_id_raw: missing id")?, "ES.index_with_id_raw")?;
+            let doc_json = vm_string(it.next().ok_or("ES.index_with_id_raw: missing doc_json")?, "ES.index_with_id_raw")?;
+            let ep = format!("{}/{}/_doc/{}", get_es_url(&url_str), index, id);
+            match es_http("PUT", &ep, Some("application/json"), Some(&doc_json)) {
+                Ok(_) => Ok(ok_vm(VMValue::Unit)),
+                Err(e) => Ok(err_vm(VMValue::Str(format!("ES.index_with_id_raw: {}", e)))),
+            }
+        }
+        #[cfg(target_arch = "wasm32")]
+        "ES.index_with_id_raw" => Ok(err_vm(VMValue::Str("Elasticsearch not supported on wasm32".into()))),
+
+        #[cfg(not(target_arch = "wasm32"))]
+        "ES.search_raw" => {
+            let mut it = args.into_iter();
+            let url_str = vm_string(it.next().ok_or("ES.search_raw: missing url")?, "ES.search_raw")?;
+            let index = vm_string(it.next().ok_or("ES.search_raw: missing index")?, "ES.search_raw")?;
+            let query_json = vm_string(it.next().ok_or("ES.search_raw: missing query_json")?, "ES.search_raw")?;
+            let ep = format!("{}/{}/_search", get_es_url(&url_str), index);
+            match es_http("POST", &ep, Some("application/json"), Some(&query_json)) {
+                Ok(body) => {
+                    let v: serde_json::Value = serde_json::from_str(&body)
+                        .map_err(|e| format!("ES.search_raw: parse: {}", e))?;
+                    let hits = v["hits"]["hits"].as_array().cloned().unwrap_or_default();
+                    let sources: Vec<serde_json::Value> = hits.iter()
+                        .filter_map(|h| {
+                            let src = &h["_source"];
+                            if src.is_null() { None } else { Some(src.clone()) }
+                        })
+                        .collect();
+                    let s = serde_json::to_string(&sources)
+                        .map_err(|e| format!("ES.search_raw: serialize: {}", e))?;
+                    Ok(ok_vm(VMValue::Str(s)))
+                }
+                Err(e) => Ok(err_vm(VMValue::Str(format!("ES.search_raw: {}", e)))),
+            }
+        }
+        #[cfg(target_arch = "wasm32")]
+        "ES.search_raw" => Ok(err_vm(VMValue::Str("Elasticsearch not supported on wasm32".into()))),
+
+        #[cfg(not(target_arch = "wasm32"))]
+        "ES.knn_search_raw" => {
+            let mut it = args.into_iter();
+            let url_str = vm_string(it.next().ok_or("ES.knn_search_raw: missing url")?, "ES.knn_search_raw")?;
+            let index = vm_string(it.next().ok_or("ES.knn_search_raw: missing index")?, "ES.knn_search_raw")?;
+            let knn_json = vm_string(it.next().ok_or("ES.knn_search_raw: missing knn_json")?, "ES.knn_search_raw")?;
+            let ep = format!("{}/{}/_search", get_es_url(&url_str), index);
+            match es_http("POST", &ep, Some("application/json"), Some(&knn_json)) {
+                Ok(body) => {
+                    let v: serde_json::Value = serde_json::from_str(&body)
+                        .map_err(|e| format!("ES.knn_search_raw: parse: {}", e))?;
+                    let hits = v["hits"]["hits"].as_array().cloned().unwrap_or_default();
+                    let sources: Vec<serde_json::Value> = hits.iter()
+                        .filter_map(|h| {
+                            let src = &h["_source"];
+                            if src.is_null() { None } else { Some(src.clone()) }
+                        })
+                        .collect();
+                    let s = serde_json::to_string(&sources)
+                        .map_err(|e| format!("ES.knn_search_raw: serialize: {}", e))?;
+                    Ok(ok_vm(VMValue::Str(s)))
+                }
+                Err(e) => Ok(err_vm(VMValue::Str(format!("ES.knn_search_raw: {}", e)))),
+            }
+        }
+        #[cfg(target_arch = "wasm32")]
+        "ES.knn_search_raw" => Ok(err_vm(VMValue::Str("Elasticsearch not supported on wasm32".into()))),
+
+        #[cfg(not(target_arch = "wasm32"))]
+        "ES.bulk_raw" => {
+            let mut it = args.into_iter();
+            let url_str = vm_string(it.next().ok_or("ES.bulk_raw: missing url")?, "ES.bulk_raw")?;
+            let index = vm_string(it.next().ok_or("ES.bulk_raw: missing index")?, "ES.bulk_raw")?;
+            let docs_json = vm_string(it.next().ok_or("ES.bulk_raw: missing docs_json")?, "ES.bulk_raw")?;
+            let docs: Vec<serde_json::Value> = serde_json::from_str(&docs_json)
+                .map_err(|e| format!("ES.bulk_raw: JSON parse: {}", e))?;
+            let mut ndjson = String::new();
+            for doc in &docs {
+                ndjson.push_str(&format!("{{\"index\":{{\"_index\":\"{}\"}}}}\n", index));
+                ndjson.push_str(&serde_json::to_string(doc)
+                    .map_err(|e| format!("ES.bulk_raw: serialize doc: {}", e))?);
+                ndjson.push('\n');
+            }
+            let ep = format!("{}/_bulk", get_es_url(&url_str));
+            match es_http_ndjson("POST", &ep, &ndjson) {
+                Ok(_) => Ok(ok_vm(VMValue::Unit)),
+                Err(e) => Ok(err_vm(VMValue::Str(format!("ES.bulk_raw: {}", e)))),
+            }
+        }
+        #[cfg(target_arch = "wasm32")]
+        "ES.bulk_raw" => Ok(err_vm(VMValue::Str("Elasticsearch not supported on wasm32".into()))),
+
+        #[cfg(not(target_arch = "wasm32"))]
+        "ES.delete_raw" => {
+            let mut it = args.into_iter();
+            let url_str = vm_string(it.next().ok_or("ES.delete_raw: missing url")?, "ES.delete_raw")?;
+            let index = vm_string(it.next().ok_or("ES.delete_raw: missing index")?, "ES.delete_raw")?;
+            let id = vm_string(it.next().ok_or("ES.delete_raw: missing id")?, "ES.delete_raw")?;
+            let ep = format!("{}/{}/_doc/{}", get_es_url(&url_str), index, id);
+            match es_http("DELETE", &ep, None, None) {
+                Ok(_) => Ok(ok_vm(VMValue::Unit)),
+                Err(e) => Ok(err_vm(VMValue::Str(format!("ES.delete_raw: {}", e)))),
+            }
+        }
+        #[cfg(target_arch = "wasm32")]
+        "ES.delete_raw" => Ok(err_vm(VMValue::Str("Elasticsearch not supported on wasm32".into()))),
+
+        #[cfg(not(target_arch = "wasm32"))]
+        "ES.create_index_raw" => {
+            let mut it = args.into_iter();
+            let url_str = vm_string(it.next().ok_or("ES.create_index_raw: missing url")?, "ES.create_index_raw")?;
+            let index = vm_string(it.next().ok_or("ES.create_index_raw: missing index")?, "ES.create_index_raw")?;
+            let mapping_json = vm_string(it.next().ok_or("ES.create_index_raw: missing mapping_json")?, "ES.create_index_raw")?;
+            let body = if mapping_json.trim().is_empty() { "{}".to_string() } else { mapping_json };
+            let ep = format!("{}/{}", get_es_url(&url_str), index);
+            match es_http("PUT", &ep, Some("application/json"), Some(&body)) {
+                Ok(_) => Ok(ok_vm(VMValue::Unit)),
+                Err(e) => Ok(err_vm(VMValue::Str(format!("ES.create_index_raw: {}", e)))),
+            }
+        }
+        #[cfg(target_arch = "wasm32")]
+        "ES.create_index_raw" => Ok(err_vm(VMValue::Str("Elasticsearch not supported on wasm32".into()))),
 
         // ── State primitives (v22.3.0) — in-memory backend stub ───────────
         "State.get_raw" => {

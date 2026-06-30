@@ -339,24 +339,51 @@ impl Parser {
         self.advance(); // #
         self.expect(&TokenKind::LBracket)?;
         self.expect_ident_name("streaming")?;
-        let chunk_size = if self.peek() == &TokenKind::LParen {
+        let mut chunk_size: Option<i64> = None;
+        let mut backpressure: Option<bool> = None;
+        if self.peek() == &TokenKind::LParen {
             self.advance(); // (
-            self.expect_ident_name("chunk_size")?;
-            self.expect(&TokenKind::Eq)?;
-            let n = match self.peek().clone() {
-                TokenKind::Int(n) => { self.advance(); n }
-                other => return Err(ParseError::new(
-                    format!("expected integer for chunk_size, got {:?}", other),
-                    self.peek_span().clone(),
-                )),
-            };
+            // v26.4.0: support multiple comma-separated key=value pairs
+            loop {
+                let key = match self.peek().clone() {
+                    TokenKind::Ident(k) => { self.advance(); k }
+                    _ => break, // RParen or end
+                };
+                self.expect(&TokenKind::Eq)?;
+                match key.as_str() {
+                    "chunk_size" => {
+                        chunk_size = Some(match self.peek().clone() {
+                            TokenKind::Int(n) => { self.advance(); n }
+                            other => return Err(ParseError::new(
+                                format!("expected integer for chunk_size, got {:?}", other),
+                                self.peek_span().clone(),
+                            )),
+                        });
+                    }
+                    "backpressure" => {
+                        backpressure = Some(match self.peek().clone() {
+                            TokenKind::Bool(b) => { self.advance(); b }
+                            other => return Err(ParseError::new(
+                                format!("expected bool for backpressure, got {:?}", other),
+                                self.peek_span().clone(),
+                            )),
+                        });
+                    }
+                    _ => {
+                        // unknown key: skip value token for forward compatibility
+                        self.advance();
+                    }
+                }
+                if self.peek() == &TokenKind::Comma {
+                    self.advance(); // ,
+                } else {
+                    break;
+                }
+            }
             self.expect(&TokenKind::RParen)?;
-            Some(n)
-        } else {
-            None
-        };
+        }
         self.expect(&TokenKind::RBracket)?;
-        Ok(Some(crate::ast::StreamingAnnotation { chunk_size, span: self.span_from(&start) }))
+        Ok(Some(crate::ast::StreamingAnnotation { chunk_size, backpressure, span: self.span_from(&start) }))
     }
 
     fn parse_stateful_annotation(&mut self) -> Result<bool, ParseError> {
@@ -818,6 +845,25 @@ impl Parser {
                 self.advance();
                 path
             }
+            // Support `import runes/X` path syntax (v28.x+): parse as rune import
+            TokenKind::Ident(first_seg) => {
+                self.advance();
+                if self.peek() == &TokenKind::Slash {
+                    self.advance(); // consume `/`
+                    let (second_seg, _) = self.expect_ident()?;
+                    // `import runes/sentry` → rune name is `sentry`
+                    if first_seg == "runes" {
+                        second_seg
+                    } else {
+                        format!("{}/{}", first_seg, second_seg)
+                    }
+                } else {
+                    return Err(ParseError::new(
+                        format!("expected string literal import path, got Ident({:?})", first_seg),
+                        self.peek_span().clone(),
+                    ));
+                }
+            }
             other => {
                 return Err(ParseError::new(
                     format!("expected string literal import path, got {:?}", other),
@@ -826,6 +872,7 @@ impl Parser {
             }
         };
         // A bare name (no `/` or `.`) is a rune import: `import "db"` == `import rune "db"`
+        // `import runes/X` is always a rune import (explicit_rune=false but path has no `.`)
         let is_rune = explicit_rune || (!path.contains('/') && !path.contains('.'));
         let alias = if self.peek() == &TokenKind::As || self.peek_ident_text("as") {
             self.advance();
@@ -1877,6 +1924,26 @@ impl Parser {
                         self.advance();
                         Effect::Postgres
                     }
+                    "Redis" => {
+                        self.advance();
+                        Effect::Redis
+                    }
+                    "MySQL" => {
+                        self.advance();
+                        Effect::MySQL
+                    }
+                    "MongoDB" => {
+                        self.advance();
+                        Effect::MongoDB
+                    }
+                    "DynamoDB" => {
+                        self.advance();
+                        Effect::DynamoDB
+                    }
+                    "Elasticsearch" => {
+                        self.advance();
+                        Effect::Elasticsearch
+                    }
                     "AzureDb" => {
                         self.advance();
                         Effect::AzureDb
@@ -2005,7 +2072,14 @@ impl Parser {
         let mut params = Vec::new();
         while self.peek() != &TokenKind::Pipe {
             let start = self.peek_span().clone();
-            let (name, _) = self.expect_ident()?;
+            // Allow `_` wildcard as an anonymous parameter
+            let name = if self.peek() == &TokenKind::Underscore {
+                self.advance();
+                "_".to_string()
+            } else {
+                let (n, _) = self.expect_ident()?;
+                n
+            };
             // Type annotation is optional for closure params
             let ty = if self.peek() == &TokenKind::Colon {
                 self.advance();
@@ -3184,7 +3258,14 @@ impl Parser {
     fn parse_closure_params(&mut self) -> Result<Vec<String>, ParseError> {
         let mut params = Vec::new();
         while self.peek() != &TokenKind::Pipe {
-            let (name, _) = self.expect_ident()?;
+            // Allow `_` wildcard as an anonymous parameter
+            let name = if self.peek() == &TokenKind::Underscore {
+                self.advance();
+                "_".to_string()
+            } else {
+                let (n, _) = self.expect_ident()?;
+                n
+            };
             params.push(name);
             if self.peek() == &TokenKind::Comma {
                 self.advance();

@@ -1,0 +1,37 @@
+import rune "kafka"
+import rune "elasticsearch"
+
+// ── Kafka → Elasticsearch リアルタイムログ集計デモ (v26.5.0) ─────────────────
+// 前提: docker compose -f examples/streaming/docker-compose.yml up -d
+// 実行: fav run examples/streaming/kafka_to_elasticsearch.fav
+//
+// 環境変数:
+//   KAFKA_BOOTSTRAP_BROKERS  — Kafka ブローカー（省略: "localhost:9092"）
+//   ELASTICSEARCH_URL        — ES エンドポイント（省略: "http://localhost:9200"）
+//
+// パイプライン構成:
+//   FetchLogs → FilterErrors → IndexToES
+//   (Unit)      (String)       (String → String)
+
+// 1. Kafka から生ログをバッチ消費（50 件まで）
+stage FetchLogs: Unit -> Result<String, String> !Stream = |_| {
+    bind conn <- Kafka.connect("")
+    Kafka.consume_batch(conn, "app-logs", "favnir-log-consumer", 50)
+}
+
+// 2. WARN / ERROR を含むバッチのみ通過（簡易フィルタリング）
+//    実際の型付きデシリアライズは v27.x 以降
+stage FilterErrors: String -> Result<String, String> !Pure = |batch_json| {
+    if String.contains(batch_json, "ERROR") || String.contains(batch_json, "WARN")
+    then Result.ok(batch_json)
+    else Result.err("no error/warn logs in batch — skipping")
+}
+
+// 3. Elasticsearch の logs-index にバルクインデックス
+stage IndexToES: String -> Result<String, String> !Elasticsearch = |batch_json| {
+    bind conn <- Elasticsearch.connect("")
+    bind _    <- Elasticsearch.bulk(conn, "logs-index", batch_json)
+    Result.ok("indexed batch to logs-index")
+}
+
+seq LogPipeline = FetchLogs |> FilterErrors |> IndexToES

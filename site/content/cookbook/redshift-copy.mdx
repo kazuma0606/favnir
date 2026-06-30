@@ -1,0 +1,17 @@
+# Redshift COPY コマンド連携
+
+S3 に配置したファイルを Redshift COPY コマンドで高速ロードします。
+
+```favnir
+import runes/redshift
+
+stage CopyToRedshift: String -> Unit !Db = |s3_path| {
+  bind conn <- Redshift.connect(config.redshift_conn)
+  Redshift.copy(conn, config.redshift_table, s3_path, config.iam_role)
+}
+```
+
+## 関連 Rune
+
+- [Redshift](/docs/runes/redshift) — Amazon Redshift DWH
+- [S3](/docs/runes/s3) — COPY ソースストレージ

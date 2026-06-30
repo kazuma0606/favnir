@@ -1,0 +1,76 @@
+---
+title: Datadog APM Demo
+description: Datadog APM による ETL パイプライントレース E2E デモ（v28.8.0）
+---
+
+# Datadog APM Demo
+
+`examples/observability/datadog_apm.fav` は、Favnir ETL パイプラインのトレースを
+Datadog APM で可視化する E2E デモです。
+
+## アーキテクチャ
+
+```
+Favnir Pipeline
+  └─ Datadog.metric / trace / log  ─→  Datadog Agent (port 8125/8126)
+  └─ Datadog.event / service_check ─→  Datadog APM / Logs / Events
+```
+
+## デモパイプライン
+
+```favnir
+import runes/datadog
+
+// #[trace(service: "etl-extractor")] — v29.0+ で自動挿入予定
+stage ExtractEvents: Unit -> Result<Unit, String> !Io = |_| {
+    bind _ <- Datadog.metric("etl.extract.rows", 200.0, "pipeline:etl,stage:extract")
+    bind _ <- Datadog.trace("etl-extractor", "extract_events")
+    Result.ok(unit)
+}
+
+// #[trace(service: "etl-transformer")]
+stage TransformEvents: Unit -> Result<Unit, String> !Io = |_| {
+    bind _ <- Datadog.metric("etl.transform.duration_ms", 38.5, "pipeline:etl,stage:transform")
+    bind _ <- Datadog.log("info", "Transform complete", "{\"rows\": 200}")
+    Result.ok(unit)
+}
+
+// #[trace(service: "etl-loader")]
+stage LoadEvents: Unit -> Result<Unit, String> !Io = |_| {
+    bind _ <- Datadog.metric("etl.load.rows", 200.0, "pipeline:etl,stage:load")
+    bind _ <- Datadog.event("ETL Complete", "All stages finished successfully", "pipeline:etl")
+    bind _ <- Datadog.service_check("etl.pipeline", "OK")
+    Result.ok(unit)
+}
+
+seq DatadogApmDemo = ExtractEvents |> TransformEvents |> LoadEvents
+```
+
+## クイックスタート
+
+```bash
+# Datadog API キーを設定（未設定の場合はデモ用ダミーキーで起動しますが、メトリクスは Datadog に送信されません）
+export DD_API_KEY=your-api-key-here
+
+# インフラ起動（Prometheus + Grafana + Datadog Agent）
+docker compose -f examples/observability/docker-compose.yml up -d
+
+# パイプライン実行
+fav run examples/observability/datadog_apm.fav
+
+# Datadog APM でトレースを確認
+open https://app.datadoghq.com/apm/traces
+```
+
+## `#[trace]` アノテーション（将来機能）
+
+v29.0+ では `#[trace(service: "etl-extractor")]` を stage に付けるだけで
+コンパイラが OTel スパン・Datadog APM トレースを自動挿入する予定です。
+
+v28.8.0 時点では `// #[trace(service: "...")]` のコメント形式で記述し、
+`Datadog.trace` / `Datadog.metric` を明示的に呼び出しています。
+
+## 関連 Rune
+
+- [datadog Rune](/docs/runes/datadog) — メトリクス・ログ・トレース送信
+- [Observability E2E Demo](/docs/tools/observability-e2e) — Prometheus + Grafana デモ

@@ -1,0 +1,23 @@
+# Kinesis → S3 アーカイバー
+
+AWS Kinesis Data Streams からイベントを消費し、Parquet 形式でローカルに蓄積後 S3 にアーカイブします。
+
+```favnir
+import runes/kinesis
+import runes/aws/s3
+
+stage ArchiveKinesisToS3: Unit -> Unit !Stream = |_| {
+  bind records <- Kinesis.get_records(config.kinesis_stream, config.kinesis_shard_id)
+  bind rows    <- records |> List.map(|r| Kinesis.decode[Map<String, String>](r)) |> Result.all
+  bind _       <- Parquet.append(config.local_parquet_path, "KinesisRecord", rows)
+  bind parquet_bytes <- Fs.read_bytes(config.local_parquet_path)
+  S3.put_object(config.archive_bucket, Gen.timestamp() ++ ".parquet", parquet_bytes)
+}
+```
+
+> **注意**: Parquet Rune（`Parquet.append`）はローカルファイルへの書き込みのみサポートしています。S3 への直接ストリーミングは将来実装予定です。
+
+## 関連 Rune
+
+- [Kinesis](/docs/runes/kinesis) — AWS Kinesis Data Streams
+- [S3](/docs/runes/s3) — アーカイブ先ストレージ

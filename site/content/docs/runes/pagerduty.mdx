@@ -1,0 +1,82 @@
+# PagerDuty Rune
+
+PagerDuty と Favnir パイプラインを統合します。
+クリティカルな `stage` の失敗を PagerDuty Events API v2 を通じて自動エスカレーションできます。
+
+## セットアップ
+
+```bash
+export PAGERDUTY_ROUTING_KEY=your-routing-key
+export PAGERDUTY_BASE_URL=https://events.pagerduty.com  # デフォルト
+```
+
+## クイックスタート
+
+```favnir
+import runes/pagerduty
+
+// クリティカルな stage が失敗したら PagerDuty アラートを作成
+stage AlertOnFailure: String -> Unit !Http = |error_msg| {
+  bind _ <- PagerDuty.create_incident(
+    config.pagerduty_routing_key,
+    "[CRITICAL] Pipeline Failure: " ++ error_msg,
+    "critical",
+    "pipeline-failure-" ++ Gen.uuid()
+  )
+  Result.ok(unit)
+}
+
+// インシデント解決
+stage ResolveIncident: String -> Unit !Http = |incident_key| {
+  PagerDuty.resolve(config.pagerduty_routing_key, incident_key)
+}
+```
+
+## API リファレンス
+
+### `PagerDuty.create_incident`
+
+```favnir
+fn PagerDuty.create_incident(routing_key: String, title: String, severity: String, key: String) -> Result<String, String> !Http
+```
+
+インシデントを作成し、`dedup_key` を返します。`severity` は `"critical"` / `"error"` / `"warning"` / `"info"` のいずれかを指定します。`routing_key` は `PAGERDUTY_ROUTING_KEY` 環境変数が未設定の場合のフォールバックとして使われます。
+
+### `PagerDuty.resolve`
+
+```favnir
+fn PagerDuty.resolve(routing_key: String, incident_key: String) -> Result<Unit, String> !Http
+```
+
+インシデントを解決済みにします。
+
+### `PagerDuty.acknowledge`
+
+```favnir
+fn PagerDuty.acknowledge(routing_key: String, incident_key: String) -> Result<Unit, String> !Http
+```
+
+インシデントを確認済み（対応中）にします。
+
+### `PagerDuty.add_note`
+
+```favnir
+fn PagerDuty.add_note(routing_key: String, incident_key: String, note: String) -> Result<Unit, String> !Http
+```
+
+> **注意（プレースホルダー実装）**: PagerDuty Events API v2（`/v2/enqueue`）はノート追加非対応のため、現実装は note 内容を `summary` に埋め込んだ `trigger` イベントを送信します。`dedup_key` が一致する既存インシデントがある場合は update として処理されますが、`trigger` アクション自体の副作用に注意してください。`Http.patch` primitive 実装後に REST API `/incidents/{id}/notes` へ移行予定です。
+
+インシデントにノートを追加します（プレースホルダー実装）。
+
+## 接続設定
+
+| 環境変数 | デフォルト | 説明 |
+|---|---|---|
+| `PAGERDUTY_ROUTING_KEY` | — | PagerDuty Events API v2 のルーティングキー。設定済みの場合は関数の `routing_key` 引数より優先されます（HTTP 有効化後に自動付与予定）|
+| `PAGERDUTY_BASE_URL` | `https://events.pagerduty.com` | API ベース URL |
+
+## 関連 Rune
+
+- [Sentry](/docs/runes/sentry) — エラートラッキング
+- [Datadog](/docs/runes/datadog) — メトリクス・APM
+- [Grafana](/docs/runes/grafana) — ダッシュボード・アラート

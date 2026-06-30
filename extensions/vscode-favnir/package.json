@@ -1,0 +1,58 @@
+{
+  "name": "vscode-favnir",
+  "displayName": "Favnir",
+  "description": "Favnir language support for VS Code — syntax highlighting, type inference, LSP",
+  "version": "1.0.0",
+  "publisher": "favnir",
+  "engines": { "vscode": "^1.85.0" },
+  "categories": ["Programming Languages"],
+  "activationEvents": ["onLanguage:favnir"],
+  "main": "./out/extension.js",
+  "contributes": {
+    "languages": [
+      {
+        "id": "favnir",
+        "aliases": ["Favnir", "fav"],
+        "extensions": [".fav"],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "favnir",
+        "scopeName": "source.favnir",
+        "path": "./syntaxes/favnir.tmLanguage.json"
+      }
+    ],
+    "taskDefinitions": [
+      {
+        "type": "favnir",
+        "properties": {
+          "command": { "type": "string", "description": "fav command (run/check/test)" }
+        }
+      }
+    ],
+    "configuration": {
+      "title": "Favnir",
+      "properties": {
+        "favnir.serverPath": {
+          "type": "string",
+          "default": "fav",
+          "description": "Path to the fav binary used as the Favnir LSP server."
+        }
+      }
+    }
+  },
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.85.0",
+    "typescript": "^5.3.3",
+    "@vscode/vsce": "^2.22.0"
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "package": "vsce package"
+  }
+}

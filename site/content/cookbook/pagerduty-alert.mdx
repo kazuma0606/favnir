@@ -1,0 +1,26 @@
+# PagerDuty アラート自動化
+
+クリティカルなパイプライン障害を PagerDuty に自動エスカレーションします。
+
+```favnir
+import runes/pagerduty
+
+stage AlertOnCriticalFailure: String -> Unit !Http = |error_msg| {
+  bind _ <- PagerDuty.create_incident(
+    config.pagerduty_routing_key,
+    "[CRITICAL] Pipeline Failure: " ++ error_msg,
+    "critical",
+    "pipeline-failure-" ++ Gen.uuid()
+  )
+  Result.ok(unit)
+}
+
+stage ResolveAfterRecovery: String -> Unit !Http = |incident_key| {
+  PagerDuty.resolve(config.pagerduty_routing_key, incident_key)
+}
+```
+
+## 関連 Rune
+
+- [PagerDuty](/docs/runes/pagerduty) — インシデント管理
+- [Sentry](/docs/runes/sentry) — エラートラッキング

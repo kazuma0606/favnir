@@ -1,0 +1,110 @@
+# NATS Rune
+
+軽量・高速メッセージング（コア NATS + JetStream）との統合。v26.2.0 で「動く Rune の 5 条件」をクリア。
+
+## 「動く Rune」5 条件クリア状況
+
+| # | 条件 | 実装 | 状態 |
+|---|---|---|---|
+| 1 | connect | `connect(url)` — NatsConn を返す | ✓ |
+| 2 | read | `subscribe(conn, subject)` — メッセージを JSON 文字列で取得 | ✓ |
+| 3 | write | `publish(conn, subject, payload)` — メッセージ発行 | ✓ |
+| 4 | error | `Result<T, String>` 統一、接続失敗時に適切なエラーを返す | ✓ |
+| 5 | test | `v262000_tests` 7 件 PASS | ✓ |
+
+## セットアップ
+
+```bash
+# JetStream 有効で起動
+docker run -p 4222:4222 nats:latest -js
+export NATS_URL=nats://localhost:4222
+```
+
+## 使い方
+
+```favnir
+import rune "nats"
+
+fn main() -> Result<String, String> !Stream {
+    bind conn <- connect("")
+    bind _    <- publish(conn, "orders.new", "{\"id\": 1, \"item\": \"widget\"}")
+    bind msg  <- subscribe(conn, "orders.new")
+    Result.ok(msg)
+}
+```
+
+### JetStream（永続メッセージ）
+
+```favnir
+import rune "nats"
+
+fn main() -> Result<String, String> !Stream {
+    bind conn <- connect("")
+    bind seq  <- jetstream_publish(conn, "ORDERS", "{\"id\": 1}")
+    bind msgs <- jetstream_consume(conn, "ORDERS", "my-consumer")
+    Result.ok(msgs)
+}
+```
+
+## API リファレンス
+
+### `connect(url: String) -> Result<NatsConn, String>`
+
+NATS サーバーへの接続を確立します。
+
+- `url` が空文字列の場合、`NATS_URL` 環境変数（デフォルト: `nats://localhost:4222`）を使用します。
+
+### `publish(conn: NatsConn, subject: String, payload: String) -> Result<Unit, String>`
+
+メッセージを発行します（コア NATS）。subject はドット区切りの階層構造をサポートします（例: `orders.new`）。
+
+### `subscribe(conn: NatsConn, subject: String) -> Result<String, String>`
+
+メッセージを 1 件取得します。結果は JSON オブジェクト文字列として返されます。
+`Json.decode` 等で `NatsMsg` に変換してください。
+
+### `jetstream_publish(conn: NatsConn, stream: String, payload: String) -> Result<String, String>`
+
+JetStream ストリームに永続メッセージを送信します。成功時はシーケンス番号を返します。
+
+### `jetstream_consume(conn: NatsConn, stream: String, consumer: String) -> Result<String, String>`
+
+JetStream ストリームからメッセージを取得します。結果は JSON 配列文字列として返されます。
+
+## 型定義
+
+```favnir
+type NatsConn(String)
+type NatsMsg = {
+    subject: String
+    payload: String
+    reply:   String
+}
+```
+
+## エラー処理
+
+```favnir
+match connect("nats://localhost:4222") {
+    Result.ok(conn) => publish(conn, "topic", "hello")
+    Result.err(e)   => Result.err("NATS connection failed: " + e)
+}
+```
+
+## コア NATS vs JetStream
+
+| 機能 | コア NATS | JetStream |
+|---|---|---|
+| 永続化 | なし（Fire & Forget） | あり（ストリーム保存） |
+| ACK | なし | あり |
+| リプレイ | なし | あり（TRIM_HORIZON 等） |
+| 関数 | `publish` / `subscribe` | `jetstream_publish` / `jetstream_consume` |
+
+## スコープ外（v26.x 以降）
+
+- `request[T](subject, payload, timeout)` リクエスト/レスポンスパターン — v26.9 以降予定
+- fn コールバックスタイルの継続購読ループ
+- TLS / mTLS 接続サポート
+- NATS クラスタ接続（複数サーバー）
+- JetStream Key-Value Store / Object Store
+- nats_to_postgres E2E デモ — v26.7 予定

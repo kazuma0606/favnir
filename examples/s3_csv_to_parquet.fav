@@ -1,0 +1,24 @@
+// examples/s3_csv_to_parquet.fav — S3 CSV → Parquet 変換デモ (v25.2.0)
+// 前提: docker compose up localstack -d
+// 実行: fav run examples/s3_csv_to_parquet.fav
+
+import rune "aws"
+
+type Row = { id: Int, name: String, value: Float }
+
+// ── Stage 1: S3 から CSV を取得 ────────────────────────────────────────────────
+stage DownloadCsv: Unit -> List<Row> !AWS = |_| {
+    bind bucket <- Result.ok("etl-demo")
+    bind csv <- S3.get_object(bucket, "input/data.csv")
+    Csv.decode<Row>(csv)
+}
+
+// ── Stage 2: Parquet に変換して S3 にアップロード ─────────────────────────────
+stage UploadParquet: List<Row> -> Unit !AWS = |rows| {
+    bind bucket <- Result.ok("etl-demo")
+    bind bytes <- Parquet.encode(rows)
+    S3.put_object(bucket, "output/result.parquet", bytes)
+}
+
+// ── パイプライン ──────────────────────────────────────────────────────────────
+pipeline CsvToParquet = DownloadCsv |> UploadParquet

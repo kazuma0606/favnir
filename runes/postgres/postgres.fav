@@ -1,17 +1,21 @@
-// runes/postgres/postgres.fav — Favnir Postgres rune public API (v11.5.0)
+// runes/postgres/postgres.fav — Favnir Postgres rune public API (v25.1.0)
 // tokio-postgres 経由で PostgreSQL に接続し、SQL を実行・クエリする。
 //
-// 使用例:
+// 使用例（接続オブジェクト API）:
 //   import rune "postgres"
 //
 //   type Order = { order_id: Int  customer: String  amount: Float }
 //
-//   fn get_orders() -> Result<List<Order>, String> !Postgres {
-//       postgres.query<Order>("SELECT * FROM orders", List.empty())
+//   fn get_orders(conn: PgConn) -> Result<List<Order>, String> !Postgres {
+//       query_conn<Order>(conn, "SELECT * FROM orders WHERE active = $1", "[true]")
 //   }
 //
-// 環境変数（いずれかを設定）:
-//   DATABASE_URL  — 接続文字列（例: "host=localhost port=5432 dbname=mydb user=postgres password=pass"）
-//   または個別設定: PGHOST / PGPORT / PGDATABASE / PGUSER / PGPASSWORD
+// 環境変数（環境変数ベース API を使う場合）:
+//   DATABASE_URL  または個別設定: PGHOST / PGPORT / PGDATABASE / PGUSER / PGPASSWORD
 
-use client.{ execute, query }
+use types.{ PgConfig, PgConn, PoolConfig }
+use db_conn.{ DbConn }
+// 接続オブジェクト API + 既存後方互換 API をすべてエクスポート
+use client.{ connect, execute, execute_conn, execute_many, query, query_conn, transaction }
+// Pool.* 関数は client モジュールから直接インポート可能:
+//   use runes/postgres/client.{ Pool.create, Pool.get, Pool.release }

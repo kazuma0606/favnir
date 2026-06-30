@@ -1,6 +1,38 @@
-// runes/mysql/mysql.fav — MySQL Rune (v24.5.0)
+// runes/mysql/mysql.fav — MySQL Rune (v25.4.0)
 //
 // 使い方:
 //   import rune "mysql"
 //
-// NOTE: このスタブは v24.5.0 で追加。完全実装は v25.x 以降で対応予定。
+// 接続モデル: MySqlConn(String) は URL のラッパー型。
+// 各関数は内部で毎回接続を確立する（PgConn / RedisConn と同パターン）。
+// 接続プールは v26.x 以降で対応予定。
+//
+// トランザクション注意: transaction_begin/commit/rollback は
+// 各呼び出しで独立した接続を使用するため、同一接続上のトランザクションとして動作しない
+// （擬似実装）。実際の原子性は保証されない。将来 MySQL.transaction(conn, fn) で解決予定。
+
+type MySqlConn(String)
+
+public fn connect(url: String) -> Result<MySqlConn, String> !MySQL {
+    MySQL.connect_raw(url)
+}
+
+public fn query(conn: MySqlConn, sql: String, params: String) -> Result<String, String> !MySQL {
+    MySQL.query_raw(conn, sql, params)
+}
+
+public fn execute(conn: MySqlConn, sql: String, params: String) -> Result<Int, String> !MySQL {
+    MySQL.execute_raw(conn, sql, params)
+}
+
+public fn transaction_begin(conn: MySqlConn) -> Result<Unit, String> !MySQL {
+    MySQL.transaction_begin_raw(conn)
+}
+
+public fn transaction_commit(conn: MySqlConn) -> Result<Unit, String> !MySQL {
+    MySQL.transaction_commit_raw(conn)
+}
+
+public fn transaction_rollback(conn: MySqlConn) -> Result<Unit, String> !MySQL {
+    MySQL.transaction_rollback_raw(conn)
+}

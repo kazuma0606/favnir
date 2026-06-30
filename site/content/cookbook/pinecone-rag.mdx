@@ -1,0 +1,23 @@
+# Pinecone RAG パイプライン
+
+Pinecone ベクトル DB と LLM Rune を組み合わせた RAG（Retrieval-Augmented Generation）パイプラインです。
+
+```favnir
+import runes/pinecone
+import runes/llm
+
+stage SearchAndGenerate: String -> String !Http = |question| {
+  // 1. 質問をベクトル化
+  bind embedding <- LLM.embed(config.openai, question)
+  // 2. Pinecone で近傍ドキュメントを取得
+  bind contexts  <- Pinecone.query(config.pinecone_index, embedding, 5, "")
+  // 3. コンテキスト付きで LLM に回答生成
+  bind answer    <- LLM.complete(config.openai, build_prompt(question, contexts))
+  Result.ok(answer)
+}
+```
+
+## 関連 Rune
+
+- [Pinecone](/docs/runes/pinecone) — ベクトル DB（RAG）
+- [LLM](/docs/runes/llm) — テキスト生成・埋め込み

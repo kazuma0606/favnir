@@ -1,0 +1,14 @@
+// airtable Rune -- Airtable レコード操作 API 連携（コミュニティ投稿 Rune）
+// 接続: AIRTABLE_BASE_URL 環境変数
+// NOTE: api_key は HTTP Rune の認証ヘッダー機構が有効化されるまでリクエストには付与されない
+
+fn Airtable.list_records(api_key: String, base_id: String, table_name: String) -> Result<String, String> !Http =
+  Http.get_json(
+    Env.get_or("AIRTABLE_BASE_URL", "https://api.airtable.com") ++ "/v0/" ++ base_id ++ "/" ++ table_name
+  )
+
+fn Airtable.create_record(api_key: String, base_id: String, table_name: String, fields: String) -> Result<String, String> !Http =
+  Http.post_json(
+    Env.get_or("AIRTABLE_BASE_URL", "https://api.airtable.com") ++ "/v0/" ++ base_id ++ "/" ++ table_name,
+    { "fields": fields }
+  )

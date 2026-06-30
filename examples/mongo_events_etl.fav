@@ -1,0 +1,21 @@
+import rune "mongodb"
+
+// ── MongoDB を使ったイベント ETL デモ (v25.5.0) ──────────────────────────────
+// 前提: docker run -p 27017:27017 mongo:7
+// 実行: fav run examples/mongo_events_etl.fav
+// 注意: import rune "mongodb" 後は Mongo.connect / Mongo.find 等 "Mongo" 名前空間で呼び出す
+//       （VM primitive 名前空間は "Mongo"。"MongoDB" でも動作する）
+
+stage LoadActiveEvents: Unit -> Result<String, String> !MongoDB = |_| {
+    bind conn <- Mongo.connect("mongodb://localhost:27017/analytics")
+    Mongo.find(conn, "events", "{\"status\": \"active\"}")
+}
+
+stage ArchiveEvent: Result<String, String> -> Result<Int, String> !MongoDB = |event_result| {
+    bind event_json <- event_result
+    bind conn       <- Mongo.connect("mongodb://localhost:27017/analytics")
+    bind _          <- Mongo.insert_one(conn, "archive", event_json)
+    Mongo.delete_one(conn, "events", "{\"status\": \"active\"}")
+}
+
+pipeline EventsETL = LoadActiveEvents |> ArchiveEvent

@@ -1,0 +1,25 @@
+# GitHub PR にデータ品質レポートを投稿
+
+データ品質チェックの結果を GitHub PR のコメントとして自動投稿します。CI パイプライン内で実行します。
+
+```favnir
+import runes/github
+
+stage PostQualityReport: QualityReport -> Unit !Http = |report| {
+  bind pr_number <- Result.from_option(
+    Env.get_opt("GITHUB_PR_NUMBER"),
+    "GITHUB_PR_NUMBER not set"
+  )
+  GitHub.create_comment(
+    config.github_token,
+    config.github_repo,
+    pr_number,
+    format_quality_report(report)
+  )
+}
+```
+
+## 関連 Rune
+
+- [GitHub](/docs/runes/github) — GitHub REST API 連携
+- [PagerDuty](/docs/runes/pagerduty) — クリティカル品質問題のエスカレーション

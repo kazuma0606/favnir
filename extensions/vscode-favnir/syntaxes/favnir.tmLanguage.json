@@ -1,0 +1,65 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "Favnir",
+  "scopeName": "source.favnir",
+  "patterns": [
+    { "include": "#comments" },
+    { "include": "#strings" },
+    { "include": "#keywords" },
+    { "include": "#effects" },
+    { "include": "#types" },
+    { "include": "#constants" },
+    { "include": "#numbers" },
+    { "include": "#functions" }
+  ],
+  "repository": {
+    "comments": {
+      "name": "comment.line.double-slash.favnir",
+      "match": "//.*$"
+    },
+    "strings": {
+      "name": "string.quoted.double.favnir",
+      "begin": "\"",
+      "end": "\"",
+      "patterns": [
+        { "name": "constant.character.escape.favnir", "match": "\\\\." }
+      ]
+    },
+    "keywords": {
+      "patterns": [
+        {
+          "name": "keyword.control.favnir",
+          "match": "\\b(fn|stage|seq|type|interface|impl|match|if|else|bind|par|import|where|with|pub)\\b"
+        },
+        {
+          "name": "keyword.operator.favnir",
+          "match": "(\\|>|\\+\\+|->|<-|\\?\\?|\\?)"
+        }
+      ]
+    },
+    "effects": {
+      "name": "support.type.effect.favnir",
+      "match": "!(Http|Db|DbRead|DbWrite|DbAdmin|Io|Llm|Snowflake|Gcp|Stream|Postgres|Redis|MySQL|MongoDB|DynamoDB|Elasticsearch|AzureDb|AzureStorage|Network|Rpc|File|Checkpoint|Trace|PipelineState|Pure)\\b"
+    },
+    "types": {
+      "name": "storage.type.favnir",
+      "match": "\\b(String|Int|Float|Bool|Unit|List|Result|Option|Map|Set)\\b"
+    },
+    "constants": {
+      "patterns": [
+        {
+          "name": "constant.language.favnir",
+          "match": "\\b(true|false|unit)\\b"
+        }
+      ]
+    },
+    "numbers": {
+      "name": "constant.numeric.favnir",
+      "match": "\\b[0-9]+(\\.[0-9]+)?\\b"
+    },
+    "functions": {
+      "name": "entity.name.function.favnir",
+      "match": "\\b([A-Za-z][A-Za-z0-9_]*)(?=\\s*\\()"
+    }
+  }
+}

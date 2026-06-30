@@ -1,0 +1,15 @@
+// hubspot Rune -- HubSpot CRM API 連携（コミュニティ投稿 Rune）
+// 接続: HUBSPOT_BASE_URL 環境変数
+// NOTE: api_key は HTTP Rune の認証ヘッダー機構が有効化されるまでリクエストには付与されない
+
+fn HubSpot.create_contact(api_key: String, email: String, first_name: String, last_name: String) -> Result<String, String> !Http =
+  Http.post_json(
+    Env.get_or("HUBSPOT_BASE_URL", "https://api.hubapi.com") ++ "/crm/v3/objects/contacts",
+    { "properties": { "email": email, "firstname": first_name, "lastname": last_name } }
+  )
+
+fn HubSpot.update_deal(api_key: String, deal_id: String, amount: String, stage: String) -> Result<String, String> !Http =
+  Http.patch_json(
+    Env.get_or("HUBSPOT_BASE_URL", "https://api.hubapi.com") ++ "/crm/v3/objects/deals/" ++ deal_id,
+    { "properties": { "amount": amount, "dealstage": stage } }
+  )

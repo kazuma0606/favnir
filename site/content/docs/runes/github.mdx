@@ -1,0 +1,96 @@
+# GitHub Rune
+
+GitHub REST API と Favnir パイプラインを統合します。
+データ品質チェック結果の PR コメント投稿、データ異常の Issue 自動起票など、
+CI/CD パイプラインと Favnir を接続できます。
+
+## セットアップ
+
+```bash
+export GITHUB_TOKEN=ghp_your_personal_access_token
+export GITHUB_REPO=owner/repo
+export GITHUB_BASE_URL=https://api.github.com
+```
+
+## クイックスタート
+
+```favnir
+import runes/github
+
+// データ品質チェック結果を PR にコメント
+stage PostQualityReport: String -> Unit !Http = |report| {
+  bind pr_number <- Env.get("GITHUB_PR_NUMBER")
+  GitHub.create_comment(config.github, pr_number, report)
+}
+
+// データ異常を Issue として自動起票
+stage CreateDataAlert: String -> Unit !Http = |title| {
+  bind _ <- GitHub.create_issue(
+    config.github,
+    "[DATA ALERT] " ++ title,
+    "自動検知されたデータ異常です。",
+    ["data-alert", "automated"]
+  )
+  Result.ok(unit)
+}
+```
+
+## API リファレンス
+
+### `GitHub.create_comment`
+
+```favnir
+fn GitHub.create_comment(config: String, pr_number: String, body: String) -> Result<Unit, String> !Http
+```
+
+PR または Issue にコメントを作成します。
+
+### `GitHub.create_issue`
+
+```favnir
+fn GitHub.create_issue(config: String, title: String, body: String, labels: List<String>) -> Result<String, String> !Http
+```
+
+Issue を作成し、GitHub API レスポンス（JSON 文字列）を返します。Issue 番号は呼び出し側でレスポンスから取り出してください。
+
+### `GitHub.update_issue`
+
+```favnir
+fn GitHub.update_issue(config: String, issue_number: String, state: String) -> Result<Unit, String> !Http
+```
+
+Issue の状態を更新します。`state` は `"open"` または `"closed"`。
+
+> **注意**: 現在の実装は `Http.post_json`（POST）を使用しています。GitHub REST API は本来 PATCH メソッドを要求するため、実 HTTP 接続が有効化される際に `Http.patch_json` へ移行予定です。
+
+### `GitHub.list_prs`
+
+```favnir
+fn GitHub.list_prs(config: String, state: String) -> Result<List<String>, String> !Http
+```
+
+PR 一覧を取得します。`state` は `"open"` / `"closed"` / `"all"`。
+
+### `GitHub.get_pr`
+
+```favnir
+fn GitHub.get_pr(config: String, pr_number: String) -> Result<String, String> !Http
+```
+
+PR の詳細情報を取得します。
+
+## 接続設定
+
+| 環境変数 | デフォルト | 説明 |
+|---|---|---|
+| `GITHUB_TOKEN` | — | Personal Access Token（HTTP 有効化後に `Authorization: Bearer` ヘッダーへ自動付与予定）|
+| `GITHUB_REPO` | — | リポジトリ（例: `owner/repo`）|
+| `GITHUB_BASE_URL` | `https://api.github.com` | API ベース URL |
+
+> **現在の制限**: `GITHUB_TOKEN` は環境変数として定義されていますが、HTTP Rune の認証ヘッダー機構が有効化されるまでリクエストには付与されません。実 API への接続はインフラ稼働後に有効化されます。
+
+## 関連 Rune
+
+- [PagerDuty](/docs/runes/pagerduty) — インシデント通知
+- [Slack](/docs/runes/slack) — チャット通知
+- [Sentry](/docs/runes/sentry) — エラートラッキング

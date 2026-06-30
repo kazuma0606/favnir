@@ -1,0 +1,13 @@
+// runes/dbt/dbt.fav — dbt 連携 Rune (v27.8.0)
+// dbt（data build tool）の manifest.json を解析して dbt モデルの結果を型安全に読み込む。
+// v27.8.0 stub — manifest.json の実解析は v28.x 以降
+// TODO(v28.x): DbtConfig { project_dir: String, profiles_dir: String, target: String } 型に昇格予定
+// NOTE: ref は将来 Favnir 予約語になる可能性あり。その際は dbt_ref にリネーム（v28.x で検討）
+
+public fn ref(config: String, model_name: String) -> Result<String, String> !Db {
+    Dbt.ref_raw(config, model_name)
+}
+
+public fn source(config: String, source_name: String, table_name: String) -> Result<String, String> !Db {
+    Dbt.source_raw(config, source_name, table_name)
+}

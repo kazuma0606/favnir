@@ -84,10 +84,10 @@ use driver::{
     cmd_doc_builtins, cmd_doc_site, cmd_doc_serve, cmd_docs,
     cmd_exec, cmd_explain, cmd_explain_code, cmd_explain_compiler, cmd_explain_diff, cmd_explain_error,
     cmd_explain_error_list, cmd_explain_error_list_json, cmd_explain_lineage, cmd_explain_sla, cmd_fmt, cmd_graph,
-    cmd_infer, cmd_infer_postgres, cmd_infer_proto, cmd_infer_snowflake, cmd_install, cmd_lint, cmd_migrate, cmd_new,
-    cmd_profile, cmd_scaffold, cmd_transpile,
+    cmd_infer, cmd_infer_delta, cmd_infer_iceberg, cmd_infer_postgres, cmd_infer_proto, cmd_infer_snowflake, cmd_install, cmd_lint, cmd_migrate, cmd_new,
+    cmd_profile, cmd_profile_compare, cmd_scaffold, cmd_transpile,
     cmd_publish, cmd_registry, cmd_repl, cmd_run, cmd_search, cmd_test, cmd_watch,
-    cmd_add, cmd_update, cmd_remove, cmd_login,
+    cmd_add, cmd_update, cmd_remove, cmd_login, cmd_info,
     cmd_generate_api, cmd_api_serve,
 };
 use rune_cmd::cmd_rune;
@@ -371,16 +371,45 @@ fn main_impl() {
                     eprintln!("error: --vm requires a path argument");
                     process::exit(1);
                 });
+                let vm_src = std::fs::read_to_string(vm_path).unwrap_or_else(|e| {
+                    eprintln!("error: cannot read {}: {}", vm_path, e);
+                    process::exit(1);
+                });
+                // ── v25.9.0: fav run --vm <path> --compile <src> ─────────────
+                if let Some(compile_pos) = args.iter().position(|a| a == "--compile") {
+                    let src_path = args.get(compile_pos + 1).map(|s| s.as_str()).unwrap_or_else(|| {
+                        eprintln!("error: --compile requires a source path argument");
+                        process::exit(1);
+                    });
+                    let src_text = std::fs::read_to_string(src_path).unwrap_or_else(|e| {
+                        eprintln!("error: cannot read {}: {}", src_path, e);
+                        process::exit(1);
+                    });
+                    let tokens = crate::frontend::lexer::Lexer::new(&src_text, src_path)
+                        .tokenize()
+                        .unwrap_or_else(|e| {
+                            eprintln!("error: lex: {:?}", e);
+                            process::exit(1);
+                        });
+                    let program = crate::frontend::parser::Parser::new(tokens)
+                        .parse_program()
+                        .unwrap_or_else(|e| {
+                            eprintln!("error: parse: {:?}", e);
+                            process::exit(1);
+                        });
+                    let artifact = driver::build_artifact_pub(&program);
+                    let program_json = driver::build_vm_program_json(&artifact);
+                    let result = driver::run_via_vm(&vm_src, &program_json);
+                    println!("{}", result);
+                    return;
+                }
+                // ── v24.0.0: fav run --vm <path> --hex <hex> ─────────────────
                 let hex_pos = args.iter().position(|a| a == "--hex").unwrap_or_else(|| {
-                    eprintln!("error: --vm requires --hex <bytecode_hex>");
+                    eprintln!("error: --vm requires --hex <bytecode_hex> or --compile <src>");
                     process::exit(1);
                 });
                 let bytecode_hex = args.get(hex_pos + 1).map(|s| s.as_str()).unwrap_or_else(|| {
                     eprintln!("error: --hex requires a hex string argument");
-                    process::exit(1);
-                });
-                let vm_src = std::fs::read_to_string(vm_path).unwrap_or_else(|e| {
-                    eprintln!("error: cannot read {}: {}", vm_path, e);
                     process::exit(1);
                 });
                 match driver::run_with_vm(&vm_src, bytecode_hex, &[]) {
@@ -1403,6 +1432,7 @@ fn main_impl() {
             let mut runs: usize = 1;
             let mut stage_filter: Option<String> = None;
             let mut out: Option<String> = None;
+            let mut compare: Option<String> = None;
             let mut i = 2usize;
             while i < args.len() {
                 let arg = args[i].as_str();
@@ -1422,15 +1452,27 @@ fn main_impl() {
                     out = Some(v.to_string()); i += 1;
                 } else if arg == "--out" {
                     out = args.get(i + 1).cloned(); i += 2;
+                } else if let Some(v) = arg.strip_prefix("--compare=") {
+                    compare = Some(v.to_string()); i += 1;
+                } else if arg == "--compare" {
+                    compare = args.get(i + 1).cloned(); i += 2;
                 } else {
                     path = arg.to_string(); i += 1;
                 }
             }
             if path.is_empty() {
-                eprintln!("error: profile requires a .fav file");
+                if compare.is_some() {
+                    eprintln!("error: profile --compare requires a .fav file path");
+                } else {
+                    eprintln!("error: profile requires a .fav file");
+                }
                 process::exit(1);
             }
-            cmd_profile(&path, &format, runs, stage_filter.as_deref(), out.as_deref());
+            if let Some(ref v) = compare {
+                cmd_profile_compare(v, &path);
+            } else {
+                cmd_profile(&path, &format, runs, stage_filter.as_deref(), out.as_deref());
+            }
         }
 
         Some("infer") => {
@@ -1441,6 +1483,8 @@ fn main_impl() {
             let mut out_path: Option<String> = None;
             let mut type_name: Option<String> = None;
             let mut from_source: Option<String> = None;
+            let mut path_arg: Option<String> = None;
+            let mut catalog_arg: Option<String> = None;
             let mut i = 2usize;
             while i < args.len() {
                 match args[i].as_str() {
@@ -1510,6 +1554,28 @@ fn main_impl() {
                         );
                         i += 2;
                     }
+                    "--path" => {
+                        path_arg = Some(
+                            args.get(i + 1)
+                                .unwrap_or_else(|| {
+                                    eprintln!("error: --path requires a path");
+                                    process::exit(1);
+                                })
+                                .clone(),
+                        );
+                        i += 2;
+                    }
+                    "--catalog" => {
+                        catalog_arg = Some(
+                            args.get(i + 1)
+                                .unwrap_or_else(|| {
+                                    eprintln!("error: --catalog requires a catalog URL");
+                                    process::exit(1);
+                                })
+                                .clone(),
+                        );
+                        i += 2;
+                    }
                     other => {
                         // First positional: csv_path (or table if --db already set)
                         if db_conn.is_some() && csv_path.is_none() {
@@ -1539,6 +1605,26 @@ fn main_impl() {
                     process::exit(1);
                 });
                 cmd_infer_postgres(table, out_path.as_deref());
+                return;
+            }
+            if from_source.as_deref() == Some("delta") {
+                let path = path_arg.as_deref().unwrap_or_else(|| {
+                    eprintln!("error: --from delta requires --path <path>");
+                    process::exit(1);
+                });
+                cmd_infer_delta(path, out_path.as_deref());
+                return;
+            }
+            if from_source.as_deref() == Some("iceberg") {
+                let catalog = catalog_arg.as_deref().unwrap_or_else(|| {
+                    eprintln!("error: --from iceberg requires --catalog <url>");
+                    process::exit(1);
+                });
+                let table = table_name.as_deref().unwrap_or_else(|| {
+                    eprintln!("error: --from iceberg requires --table <name>");
+                    process::exit(1);
+                });
+                cmd_infer_iceberg(catalog, table, out_path.as_deref());
                 return;
             }
             cmd_infer(
@@ -1745,6 +1831,14 @@ fn main_impl() {
         Some("search") => {
             let query = args.get(2).map(|s| s.as_str()).unwrap_or("");
             cmd_search(query);
+        }
+
+        Some("info") => {
+            let pkg_name = args.get(2).map(|s| s.as_str()).unwrap_or_else(|| {
+                eprintln!("error: `fav info` requires a package name");
+                process::exit(1);
+            });
+            cmd_info(pkg_name);
         }
 
         Some("add") => {

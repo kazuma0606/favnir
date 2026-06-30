@@ -1,0 +1,15 @@
+// runes/pulsar/pulsar.fav — Apache Pulsar Rune (v26.9.0)
+// Pulsar Binary Protocol (port 6650) は v27.x 以降。produce は stub 実装。
+// TODO(v27.x): !Pulsar エフェクトに移行予定。現在は !AWS を暫定使用（専用エフェクト未実装のため）。
+public fn produce(topic: String, key: String, value: String) -> Result<String, String> !AWS {
+    Pulsar.produce_raw(topic, key, value)
+}
+public fn consume(topic: String, subscription: String) -> Result<String, String> !AWS {
+    Pulsar.consume_raw(topic, subscription)
+}
+public fn ack(message_id: String) -> Result<Unit, String> !AWS {
+    Pulsar.ack_raw(message_id)
+}
+public fn nack(message_id: String) -> Result<Unit, String> !AWS {
+    Pulsar.nack_raw(message_id)
+}

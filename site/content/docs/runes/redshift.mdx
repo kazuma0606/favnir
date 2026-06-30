@@ -1,0 +1,122 @@
+---
+title: Redshift Rune
+description: AWS Redshift をネイティブに操作する Rune（v27.5.0）
+---
+
+# Redshift Rune
+
+`import rune "redshift"` で AWS Redshift への接続・クエリ・S3 COPY / UNLOAD ができます。
+
+> **注**: v27.5.0 は引数検証 stub 実装です。postgres クレートを使った実接続は v28.x で実装予定です。
+
+## セットアップ
+
+```toml
+# fav.toml
+[runes]
+redshift = "27.5.0"
+```
+
+```favnir
+import rune "redshift"
+```
+
+## エフェクト
+
+Redshift は postgres 互換 API を使用するため `!Db` エフェクトを採用します（ClickHouse / BigQuery と統一）。
+
+## 関数リファレンス
+
+### `Redshift.connect`
+
+```favnir
+fn connect(config: String) -> Result<String, String> !Db
+```
+
+Redshift への接続を確立し、接続ハンドル文字列を返します。`config` にはホスト・ポート・DB 名等の接続情報を渡します。
+
+```favnir
+bind conn <- Redshift.connect("host:localhost,port:5439,dbname:dev")
+```
+
+### `Redshift.query`
+
+```favnir
+fn query(conn: String, sql: String) -> Result<String, String> !Db
+```
+
+SELECT クエリを実行し、結果を JSON 配列文字列として返します。
+
+```favnir
+bind rows <- Redshift.query(conn, "SELECT count(*) FROM events")
+```
+
+### `Redshift.execute`
+
+```favnir
+fn execute(conn: String, sql: String, params: String) -> Result<Int, String> !Db
+```
+
+DDL / DML を実行し、影響行数を返します。`params` には JSON 配列形式でパラメータを渡します。
+
+```favnir
+bind n <- Redshift.execute(conn, "DELETE FROM events WHERE date < '2024-01-01'", "[]")
+```
+
+### `Redshift.copy_from_s3`
+
+```favnir
+fn copy_from_s3(conn: String, table: String, s3_uri: String, opts: String) -> Result<Unit, String> !Db
+```
+
+S3 から Redshift テーブルへバルクロードします（大量データ向き）。`opts` に `FORMAT CSV` / `FORMAT PARQUET` 等を指定します。
+
+```favnir
+bind _ <- Redshift.copy_from_s3(conn, "events", "s3://my-bucket/events/*.csv", "FORMAT CSV")
+```
+
+### `Redshift.unload_to_s3`
+
+```favnir
+fn unload_to_s3(conn: String, query: String, s3_uri: String, opts: String) -> Result<Unit, String> !Db
+```
+
+SELECT 結果を S3 へ出力（UNLOAD）します。`opts` に `FORMAT PARQUET` 等を指定します。
+
+```favnir
+bind _ <- Redshift.unload_to_s3(conn, "SELECT * FROM events", "s3://my-bucket/output/", "FORMAT PARQUET")
+```
+
+## パイプライン例
+
+```favnir
+// examples/redshift_analytics.fav
+import rune "redshift"
+
+stage LoadFromS3: Unit -> Result<Unit, String> !Db = |_| {
+    bind conn <- Redshift.connect("host:localhost,port:5439,dbname:dev")
+    Redshift.copy_from_s3(conn, "events", "s3://my-bucket/events/*.csv", "FORMAT CSV")
+}
+
+// seq pipeline は前ステージの成功値（Unit）を次ステージの引数として渡す
+stage QuerySummary: Unit -> Result<String, String> !Db = |_| {
+    bind conn <- Redshift.connect("host:localhost,port:5439,dbname:dev")
+    Redshift.query(conn, "SELECT count(*) FROM events")
+}
+
+stage UnloadToS3: String -> Result<Unit, String> !Db = |query| {
+    bind conn <- Redshift.connect("host:localhost,port:5439,dbname:dev")
+    Redshift.unload_to_s3(conn, query, "s3://my-bucket/output/", "FORMAT PARQUET")
+}
+
+seq RedshiftAnalyticsPipeline = LoadFromS3 |> QuerySummary |> UnloadToS3
+```
+
+## スコープ外（v28.x 以降）
+
+- postgres クレートを使った実 Redshift 接続
+- `Redshift.query[T]` ジェネリック API（型安全な行取得）
+- S3 COPY の IAM ロール認証（`iam_role` オプション）
+- COPY の format 検証（CSV / PARQUET / JSON / ORC 等）
+- Redshift Spectrum（S3 上のデータを直接クエリ）
+- 接続プール管理

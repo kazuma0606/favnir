@@ -1,0 +1,71 @@
+---
+title: Observability E2E Demo
+description: Prometheus + Grafana による ETL パイプライン可観測性 E2E デモ（v28.7.0）
+---
+
+# Observability E2E Demo
+
+`examples/observability/prometheus_grafana.fav` は、Favnir ETL パイプラインのメトリクスを
+Prometheus で収集し Grafana ダッシュボードに表示する E2E デモです。
+
+## アーキテクチャ
+
+```
+Favnir Pipeline
+  └─ Prometheus.counter / gauge / histogram  ─→  Prometheus (port 9090)
+  └─ Grafana.create_annotation               ─→  Grafana (port 3000)
+```
+
+## デモパイプライン
+
+```favnir
+import runes/prometheus
+import runes/grafana
+
+// #[track(latency: true, error_rate: true)] — v29.0+ で自動挿入予定
+stage ExtractOrders: Unit -> Result<Unit, String> !Io = |_| {
+    bind _ <- Prometheus.counter("rows_extracted_total", 100.0, "pipeline:etl")
+    Result.ok(unit)
+}
+
+// #[track(latency: true)]
+stage TransformOrders: Unit -> Result<Unit, String> !Io = |_| {
+    bind _ <- Prometheus.histogram("transform_duration_ms", 42.5)
+    Result.ok(unit)
+}
+
+// #[track(latency: true, error_rate: true)]
+stage LoadToWarehouse: Unit -> Result<Unit, String> !Io = |_| {
+    bind _ <- Prometheus.gauge("warehouse_rows", 100.0)
+    bind _ <- Grafana.create_annotation("etl-dashboard", "ETL cycle complete", "pipeline,favnir")
+    Result.ok(unit)
+}
+
+seq PrometheusGrafanaDemo = ExtractOrders |> TransformOrders |> LoadToWarehouse
+```
+
+## クイックスタート
+
+```bash
+# インフラ起動
+docker compose -f examples/observability/docker-compose.yml up -d
+
+# パイプライン実行
+fav run examples/observability/prometheus_grafana.fav
+
+# Grafana UI を開く
+open http://localhost:3000  # admin / admin
+```
+
+## `#[track]` アノテーション（将来機能）
+
+v29.0+ では `#[track(latency: true, error_rate: true)]` を stage に付けるだけで
+コンパイラが `Prometheus.*` 呼び出しを自動挿入する予定です。
+
+v28.7.0 時点では上記アノテーションはコメント形式で記述し、
+`Prometheus.*` / `Grafana.*` 関数を明示的に呼び出しています。
+
+## 関連 Rune
+
+- [prometheus Rune](/docs/runes/prometheus) — メトリクス収集
+- [grafana Rune](/docs/runes/grafana) — ダッシュボード管理

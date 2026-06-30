@@ -1,0 +1,110 @@
+# ClickHouse Rune
+
+`import rune "clickhouse"` で ClickHouse への接続・クエリ・バルク挿入ができます。
+
+> **注**: v27.3.0 は引数検証 stub 実装です。`clickhouse-rs` クレートを使った実接続は v28.x で実装予定です。
+
+## セットアップ
+
+```toml
+# fav.toml
+[runes]
+clickhouse = "27.3.0"
+```
+
+```favnir
+import rune "clickhouse"
+```
+
+## エフェクト
+
+ClickHouse は DB 接続プロトコル経由の操作のため `!Db` エフェクトを使用します（postgres Rune と同一）。Delta Lake / Iceberg の `!Io` とは異なります。
+
+## Docker 構成例
+
+```yaml
+services:
+  clickhouse:
+    image: clickhouse/clickhouse-server:latest
+    ports:
+      - "8123:8123"   # HTTP インターフェース
+      - "9000:9000"   # Native プロトコル
+```
+
+## 関数リファレンス
+
+### `ClickHouse.connect`
+
+```favnir
+fn connect(config: String) -> Result<String, String> !Db
+```
+
+ClickHouse への接続を確立し、接続ハンドル文字列を返します。`config` には HTTP エンドポイント URL を渡します。
+
+```favnir
+bind conn <- ClickHouse.connect("http://localhost:8123")
+```
+
+### `ClickHouse.query`
+
+```favnir
+fn query(conn: String, sql: String) -> Result<String, String> !Db
+```
+
+SELECT クエリを実行し、結果を JSON 配列文字列として返します。
+
+```favnir
+bind rows <- ClickHouse.query(conn, "SELECT count() FROM events WHERE date = today()")
+```
+
+### `ClickHouse.insert`
+
+```favnir
+fn insert(conn: String, table: String, rows: String) -> Result<Unit, String> !Db
+```
+
+JSON 形式のデータをテーブルにバルク挿入します。
+
+```favnir
+bind _ <- ClickHouse.insert(conn, "events", rows_json)
+```
+
+### `ClickHouse.async_insert`
+
+```favnir
+fn async_insert(conn: String, table: String, rows: String) -> Result<Unit, String> !Db
+```
+
+ClickHouse v21.11+ の非同期バルク挿入を使用します。高スループットのストリーミング挿入に適しています。
+
+```favnir
+bind _ <- ClickHouse.async_insert(conn, "events", rows_json)
+```
+
+## パイプライン例
+
+```favnir
+// examples/clickhouse_analytics.fav
+import rune "clickhouse"
+
+stage LoadEvents: Unit -> Result<String, String> !Db = |_| {
+    bind conn <- ClickHouse.connect("http://localhost:8123")
+    ClickHouse.query(conn, "SELECT * FROM events LIMIT 100")
+}
+
+// seq pipeline は前ステージの成功値（String）を次ステージの引数として渡す
+stage InsertProcessed: String -> Result<Unit, String> !Db = |data| {
+    bind conn <- ClickHouse.connect("http://localhost:8123")
+    ClickHouse.insert(conn, "processed_events", data)
+}
+
+seq ClickHouseAnalyticsPipeline = LoadEvents |> InsertProcessed
+```
+
+## スコープ外（v28.x 以降）
+
+- `clickhouse-rs` クレートを使った実 ClickHouse 接続
+- `ClickHouse.query[T]` ジェネリック API（型安全な行取得）
+- HTTP / Native プロトコルの実通信
+- 接続プール管理
+- ClickHouse v21.11+ の async_insert 実実装

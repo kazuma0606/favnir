@@ -1,0 +1,17 @@
+// examples/observability/prometheus_demo.fav — Prometheus メトリクス送信デモ（v28.1.0 stub）
+// NOTE: v28.1.0 stub — 実際の Pushgateway HTTP 送信は v28.x 以降
+
+import rune "prometheus"
+
+stage ReportMetrics: Unit -> Result<Unit, String> !Io = |_| {
+    bind _ <- Prometheus.counter("rows_processed_total", 42.0, "[]")
+    bind _ <- Prometheus.gauge("queue_depth", 7.0)
+    bind _ <- Prometheus.histogram("stage_duration_ms", 123.0)
+    Result.ok(unit)
+}
+
+stage PushToGateway: Unit -> Result<Unit, String> !Io = |_| {
+    Prometheus.push("http://localhost:9091")
+}
+
+seq PrometheusDemo = ReportMetrics |> PushToGateway

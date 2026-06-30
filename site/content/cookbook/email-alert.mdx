@@ -1,0 +1,21 @@
+# メールアラート送信
+
+パイプライン失敗時にメールアラートを送信します。
+
+```favnir
+import runes/email
+
+stage SendFailureAlert: PipelineError -> Unit !Http = |error| {
+  Email.send(
+    config.email_from,
+    config.alert_recipients,
+    "[ALERT] Pipeline Failure: " ++ error.pipeline_name,
+    format_error_body(error)
+  )
+}
+```
+
+## 関連 Rune
+
+- [Email](/docs/runes/email) — メール送信（SMTP / SendGrid）
+- [Slack](/docs/runes/slack) — Slack 通知との併用

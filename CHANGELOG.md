@@ -4,6 +4,597 @@ Favnir のバージョン履歴。形式は [Keep a Changelog](https://keepachan
 
 ---
 
+## [v30.0.0] — 2026-07-01
+
+### Added
+- `MILESTONE.md` — Ecosystem Maturity 宣言セクション追加
+- `site/content/docs/ecosystem-maturity.mdx` — マイルストーン宣言ドキュメント（`fav add stripe` デモ）
+- `versions/roadmap/roadmap-v29.1-v30.0.md` — 達成宣言（COMPLETE）追記
+- テスト数: 2366 → 2372（+6）
+
+---
+
+## [v29.9.0] — 2026-07-01
+
+### Added
+- `CONTRIBUTING.md` — コミュニティ Rune 開発ガイド（5 条件: connect / read / write / error / test）追加
+- `runes/stripe|twilio|notion|linear|airtable|sendgrid|hubspot|zendesk|shopify|intercom/` — コミュニティ Rune スタブ 10 本（各 `.fav` + `rune.toml`）
+- `site/app/community/page.tsx` — 第 1 回 Rune コンテスト告知セクション追加
+- テスト数: 2360 → 2366（+6）
+
+---
+
+## [v29.8.0] — 2026-07-01
+
+### Added
+- `site/content/cookbook/` — cookbook 29 本追加（3 → 32 本）
+- `site/app/community/` — `/community/` ページ新設（GitHub Discussions / Discord リンク）
+- テスト数: 2354 → 2360（+6）
+
+---
+
+## [v29.7.0] — 2026-06-30
+
+### Added
+- `extensions/vscode-favnir/` — VS Code 拡張パッケージ（TextMate grammar / LSP クライアント / Task Runner 統合）
+- `site/content/docs/tools/vscode-extension.mdx` — VS Code 拡張ドキュメント
+- テスト数: 2348 → 2354（+6）
+
+---
+
+## [v29.6.0] — 2026-06-30
+
+### Added
+- `runes/pagerduty/` — PagerDuty Events API v2 Rune（create_incident / resolve / acknowledge / add_note）
+- `site/content/docs/runes/pagerduty.mdx` — PagerDuty Rune ドキュメント
+- テスト数: 2342 → 2348（+6）
+
+---
+
+## [v29.5.0] — 2026-06-30
+
+### Added
+- `runes/github/` — GitHub REST API Rune（create_comment / create_issue / update_issue / list_prs / get_pr）
+- `site/content/docs/runes/github.mdx` — GitHub Rune ドキュメント
+- テスト数: 2336 → 2342（+6）
+
+---
+
+## [v29.4.0] — 2026-06-30
+
+### Added
+- `runes/vertex-ai/` — Google Vertex AI Rune（predict / batch_predict / deploy_model / list_endpoints）
+- `runes/sagemaker/` — AWS SageMaker Rune（invoke / create_endpoint / delete_endpoint）
+- `site/content/docs/runes/vertex-ai.mdx` / `sagemaker.mdx` — ドキュメント追加
+- テスト数: 2330 → 2336（+6）
+
+---
+
+## [v29.3.0] — 2026-06-30
+
+### Added
+- `runes/pinecone/` — Pinecone ベクトルDB Rune（upsert / query / delete / fetch / describe_index_stats）
+- RAG パイプラインサポート: LLM Rune と組み合わせてドキュメント検索付き LLM パイプラインを構築可能
+- `site/content/docs/runes/pinecone.mdx` — Pinecone Rune ドキュメント
+- テスト数: 2324 → 2330（+6）
+
+---
+
+## [v29.2.0] — 2026-06-30
+
+### Added
+- `runes/mlflow/mlflow.fav` — MLflow Rune 実装（`start_run` / `log_metric` / `log_param` / `log_artifact` / `end_run` / `register_model` / `load_model` / `list_experiments` 8 関数）
+- `runes/mlflow/rune.toml` — Rune メタデータ
+- `site/content/docs/runes/mlflow.mdx` — MLflow ドキュメント追加
+- テスト数: 2318 → 2324（+6）
+
+---
+
+## [v29.1.0] — 2026-06-28
+
+### Added
+- `cmd_publish`（`driver.rs`）— `FAVNIR_REGISTRY_URL` 環境変数を参照し `{url}/v1/publish` へのリモート API 呼び出しを追加（インフラ稼働後に HTTP POST 有効化）
+- `pub fn cmd_info(pkg_name: &str)`（`driver.rs`）— `FAVNIR_REGISTRY_URL/v1/packages/{name}` へのリモート参照 + 静的カタログフォールバック
+- `cmd_search`（`driver.rs`）— `FAVNIR_REGISTRY_URL` 設定時に `/v1/search?q=...` へのリモート参照を追加（フォールバック: 静的カタログ）
+- `cmd_login`（`driver.rs`）— GitHub OAuth URL 生成（`https://github.com/login/oauth/authorize?client_id=...&scope=read:user`）
+- `Some("info")`（`main.rs`）— `fav info <pkg>` サブコマンドを `cmd_info` にルーティング
+- `benchmarks/v29.1.0.json` — テスト数 2318 件を記録
+
+### Changed
+- `Cargo.toml` version `29.0.0` → `29.1.0`
+
+---
+
+## [v29.0.0] — 2026-06-28
+
+### Added
+- `MILESTONE.md` に "Observability First" セクション追加（v28.1〜v28.9 達成コンポーネント一覧・象徴デモ・v29.x 残件）
+- `site/content/docs/observability-first.mdx` — Observability First マイルストーン解説ドキュメント（prometheus / sentry / grafana コード例・`fav profile` 使用例・マイルストーン履歴）
+- `README.md` に v29.0 "Observability First" マイルストーン参照を追記
+- `versions/roadmap/roadmap-v28.1-v29.0.md` に v29.0 完了マーク追記
+- `benchmarks/v29.0.0.json` — テスト数 2312 件を記録
+
+### Fixed
+- `examples/observability/prometheus_grafana.fav` — `fn main()` 追加 + `Result.ok(unit)` → `Result.ok(())` 修正（`fav run` 対応）
+- `examples/observability/datadog_apm.fav` — `fn main()` 追加 + `Result.ok(unit)` → `Result.ok(())` 修正（`fav run` 対応）
+- `fav/tests/fixtures/etl.fav` — `{ unit }` → `{ () }` 修正 + `fn main()` 追加（`fav profile --format flamegraph` 対応）
+- `examples/observability/docker-compose.yml` — `sentry-redis`（redis:7-alpine）/ `sentry-postgres`（postgres:15-alpine）追加（sentry の依存サービス）
+
+### Changed
+- `Cargo.toml` version `28.9.0` → `29.0.0`
+
+---
+
+## [v28.9.0] — 2026-06-28
+
+### Added
+- `examples/observability/sentry_alerting.fav` 拡充 — `CriticalLoad` stage 追加（`// #[on_error(report_to: "sentry", level: "critical")]` コメント形式）+ `Sentry.capture_message` 使用 + `seq SentryAlertingDemo` を `CriticalLoad |> ReportError |> SetContext` に拡充
+- `examples/observability/docker-compose.yml` に `getsentry/sentry:24.0` サービス追加
+- `site/content/docs/tools/sentry-alerting.mdx` — Sentry アラート E2E デモ解説ドキュメント
+
+---
+
+## [v28.8.0] — 2026-06-28
+
+### Added
+- `examples/observability/datadog_apm.fav` 拡充 — 3 stage（ExtractEvents / TransformEvents / LoadEvents）+ `// #[trace(service:` コメント形式アノテーション
+- `examples/observability/docker-compose.yml` に `datadog-agent:7` サービス追加
+- `site/content/docs/tools/datadog-apm.mdx` — Datadog APM E2E デモ解説ドキュメント
+
+---
+
+## [v28.7.0] — 2026-06-28
+
+### Added
+- `examples/observability/prometheus_grafana.fav` — ETL パイプライン × Prometheus + Grafana E2E デモ（`PrometheusGrafanaDemo` seq）
+- `examples/observability/docker-compose.yml` — prometheus / grafana Docker 定義
+- `examples/observability/README.md` — セットアップ手順（docker compose up → fav run → Grafana UI）
+- `site/content/docs/tools/observability-e2e.mdx` — E2E デモ解説ドキュメント
+
+---
+
+## [v28.6.0] — 2026-06-28
+
+### Added
+- `runes/grafana/grafana.fav` — Grafana ダッシュボード管理 Rune（create_annotation / push_dashboard / snapshot）
+- `Grafana.create_annotation_raw` / `push_dashboard_raw` / `snapshot_raw` VM primitive 追加（`#[cfg]` ガード付き）
+- `fav/self/checker.fav` `ns_to_effect` に `"Grafana" => "IO"` 追加
+- `examples/observability/grafana_dashboard.fav` — GrafanaDashboardDemo E2E デモ
+- `site/content/docs/runes/grafana.mdx` — ドキュメント追加
+
+---
+
+## [v28.5.0] — 2026-06-28
+
+### Added
+- `runes/sentry/sentry.fav` — Sentry エラートラッキング Rune（capture_error / capture_message / set_user / set_tag / set_extra）
+- `Sentry.capture_error_raw` / `capture_message_raw` / `set_user_raw` / `set_tag_raw` / `set_extra_raw` VM primitive 追加（`#[cfg]` ガード付き）
+- `fav/self/checker.fav` `ns_to_effect` に `"Sentry" => "IO"` 追加
+- `examples/observability/sentry_alerting.fav` — SentryAlertingDemo E2E デモ
+- `site/content/docs/runes/sentry.mdx` — ドキュメント追加
+
+---
+
+## [v28.4.0] — 2026-06-28
+
+### Added
+- `fav profile --compare <version>` — ベースラインベンチマークとの stage 別実行時間比較（`[SLOWER]` / `[FASTER]` / `[NEW]` マーカー出力）
+- `pub fn cmd_profile_compare` を `driver.rs` に追加
+- `fav/tests/fixtures/etl.fav` — プロファイルテスト用 ETL フィクスチャ
+- `site/content/docs/performance/profiling.mdx` に `--compare` セクション追加
+
+---
+
+## [v28.3.0] — 2026-06-28
+
+### Added
+- `runes/otel/otel.fav` — OpenTelemetry Rune（start_span / set_attribute / add_event / end_span）
+- `OTel.start_span_raw` / `OTel.set_attribute_raw` / `OTel.add_event_raw` / `OTel.end_span_raw` VM primitive 追加（`#[cfg]` ガード付き）
+- `fav/self/checker.fav` `ns_to_effect` に `"OTel" => "IO"` 追加
+- `examples/observability/otel_tracing.fav` — OTelTracingDemo E2E デモ
+- `site/content/docs/runes/otel.mdx` — ドキュメント追加
+
+---
+
+## [v28.2.0] — 2026-06-27 — datadog Rune 追加
+
+### Added
+- `runes/datadog/datadog.fav` — Datadog APM/Metrics/Logs Rune（metric / log / trace / event / service_check 5 関数、`!Io` エフェクト）
+- `Datadog.metric_raw` / `log_raw` / `trace_raw` / `event_raw` / `service_check_raw` VM primitive 5 件追加（`#[cfg]` ガード付き）
+- `examples/observability/datadog_apm.fav` — APM トレース + メトリクス送信デモ（DatadogApmDemo seq pipeline）
+- `site/content/docs/runes/datadog.mdx` ドキュメント追加
+- `fav/self/checker.fav` `ns_to_effect` に `"Datadog" => "IO"` 追加
+
+### Notes
+- v28.2.0 は stub 実装。実際の DogStatsD / Datadog API 送信は v28.x 以降
+- `#[trace]` アノテーションは v28.3+ で独立バージョンとして実装予定
+
+---
+
+## [v28.1.0] — 2026-06-27 — prometheus Rune 追加
+
+### Added
+- `runes/prometheus/prometheus.fav` — Prometheus メトリクス Rune（counter / gauge / histogram / push 4 関数、`!Io` エフェクト）
+- `Prometheus.counter_raw` / `gauge_raw` / `histogram_raw` / `push_raw` VM primitive 4 件追加（`#[cfg]` ガード付き）
+- `examples/observability/prometheus_demo.fav` — カスタムメトリクス送信デモ（PrometheusDemo seq pipeline）
+- `site/content/docs/runes/prometheus.mdx` ドキュメント追加
+- `fav/self/checker.fav` `ns_to_effect` に `"Prometheus" => "Io"` 追加
+
+### Notes
+- v28.1.0 は stub 実装。実際の Pushgateway HTTP 送信は v28.x 以降
+- `#[track]` アノテーションは v28.2+ で独立バージョンとして実装予定
+
+---
+
+## [v28.0.0] — 2026-06-27 — Data Lakehouse マイルストーン宣言
+
+### Added
+- `MILESTONE.md` に "Data Lakehouse" セクション追加（v27.1〜v27.9 完了コンポーネント一覧・象徴デモ・v28.x 残件）
+- `site/content/docs/data-lakehouse.mdx` — Data Lakehouse マイルストーン解説ページ
+- `benchmarks/v28.0.0.json` — ベンチマーク記録（test_count: 2226）
+
+### Notes
+- v27.1〜v27.9 で実装した Data Lakehouse スタック（Delta Lake / Iceberg / ClickHouse / BigQuery / Redshift / JSONL / dbt / SQLite / `fav infer --from delta/iceberg`）の全コンポーネント完成を宣言
+- v28.x では stub 実装（delta-rs / rusqlite / manifest.json 実解析）を本統合に移行予定
+
+---
+
+## [v27.9.0] — 2026-06-27 — sqlite Rune 追加
+
+### Added
+- `runes/sqlite/sqlite.fav` — SQLite Rune（open / open_memory / query / execute / execute_many / close 6 関数、`!Db` エフェクト）
+- `SQLite.open_raw` / `open_memory_raw` / `query_raw` / `execute_raw` / `execute_many_raw` / `close_raw` VM primitive 6 件追加（`#[cfg]` ガード付き）
+- `examples/sqlite_etl.fav` — SQLite 軽量 ETL パイプラインデモ
+- `site/content/docs/runes/sqlite.mdx` ドキュメント追加
+- `fav/self/checker.fav` `ns_to_effect` に `"SQLite" => "Db"` 追加
+
+### Notes
+- v27.9.0 は stub 実装。実際の SQLite 操作（`rusqlite` クレート統合）は v28.x に延期
+
+---
+
+## [v27.8.0] — 2026-06-27 — dbt 連携 Rune
+
+### Added
+- `runes/dbt/dbt.fav` — dbt 連携 Rune（ref / source 2 関数、`!Db` エフェクト）
+- `Dbt.ref_raw` / `Dbt.source_raw` VM primitive 追加（`#[cfg]` ガード付き）
+- `examples/dbt_pipeline.fav` — dbt モデル参照パイプラインデモ
+- `fav/tests/fixtures/dbt_manifest.json` — manifest.json モックフィクスチャ
+- `site/content/docs/runes/dbt.mdx` ドキュメント追加
+- `fav/self/checker.fav` `ns_to_effect` に `"Dbt" => "Db"` 追加
+
+### Notes
+- v27.8.0 は stub 実装。`manifest.json` の実解析と SQL 実行は v28.x に延期
+
+---
+
+## [v27.7.0] — 2026-06-27 — `fav infer --from delta` / `--from iceberg`
+
+### Added
+- `fav infer --from delta --path <path>` — Delta Lake テーブルスキーマから Favnir 型定義を自動生成（v27.7.0 stub）
+- `fav infer --from iceberg --catalog <url> --table <name>` — Iceberg テーブルスキーマから型定義を自動生成（v27.7.0 stub）
+- `DeltaLake.infer_schema_raw` / `Iceberg.infer_schema_raw` VM primitive 追加（`#[cfg]` ガード付き）
+- `delta_type_to_favnir` 型マッピング関数（long/integer/int→Int, double/float→Float, string→String, timestamp→DateTime, boolean→Bool）
+- `site/content/docs/tools/infer-delta-iceberg.mdx` ドキュメント追加
+
+### Notes
+- v27.7.0 は stub 実装。実際のテーブルスキーマ読み取りは v28.x（`delta-rs` / `iceberg-rust` 統合時）に実装予定
+
+---
+
+## [v27.6.0] — 2026-06-27 — jsonl Rune 追加
+
+### Added
+- `runes/jsonl/jsonl.fav` — JSONL Rune（read / write / stream / append 4 関数、`!Io` エフェクト）
+- `JSONL.*_raw` VM primitives 4 件（`#[cfg(not(target_arch = "wasm32"))]` ガード付き、stub 実装）
+- `examples/jsonl_etl.fav` — JSONL ETL デモ（ReadData |> WriteProcessed）
+- `site/content/docs/runes/jsonl.mdx` — JSONL Rune ドキュメント
+
+---
+
+## [v27.5.0] — 2026-06-27 — redshift Rune 追加
+
+### Added
+- `runes/redshift/redshift.fav` — Redshift Rune（connect / query / execute / copy_from_s3 / unload_to_s3 5 関数、`!Db` エフェクト）
+- `Redshift.*_raw` VM primitives 5 件（`#[cfg(not(target_arch = "wasm32"))]` ガード付き、stub 実装）
+- `examples/redshift_analytics.fav` — Redshift Analytics デモ（LoadFromS3 |> QuerySummary |> UnloadToS3）
+- `site/content/docs/runes/redshift.mdx` — Redshift Rune ドキュメント
+
+---
+
+## [v27.4.0] — 2026-06-27 — bigquery Rune 実質化
+
+### Added
+- `runes/bigquery/bigquery.fav` — BigQuery Rune 実質化（connect / query / insert / load_from_gcs / create_table 5 関数、`!Db` エフェクト）
+- `BigQuery.connect_raw` / `BigQuery.conn_query_raw` / `BigQuery.insert_raw` / `BigQuery.load_from_gcs_raw` / `BigQuery.create_table_raw` VM primitives 5 件（`#[cfg(not(target_arch = "wasm32"))]` ガード付き、stub 実装）
+- `examples/bigquery_analytics.fav` — BigQuery Analytics デモ（CreateEventTable |> LoadFromGcs |> QueryStats）
+- `site/content/docs/runes/bigquery.mdx` — BigQuery Rune ドキュメント（v27.4.0 新 API）
+
+### Changed
+- `runes/bigquery/bigquery.fav` — v15.2.0 の `!Gcp` エフェクト・非 public API から `!Db` エフェクト・`public fn` API に刷新（既存 `BigQuery.query_raw` / `BigQuery.execute_raw` VM primitive は後方互換として残存）
+
+---
+
+## [v27.3.0] — 2026-06-27 — clickhouse Rune 追加
+
+### Added
+- `runes/clickhouse/clickhouse.fav` — ClickHouse Rune（connect / query / insert / async_insert 4 関数）
+- `ClickHouse.*_raw` VM primitives 4 件（`#[cfg(not(target_arch = "wasm32"))]` ガード付き、stub 実装）
+- `examples/clickhouse_analytics.fav` — ClickHouse Analytics デモ（LoadEvents |> InsertProcessed）
+- `site/content/docs/runes/clickhouse.mdx` — ClickHouse Rune ドキュメント
+
+---
+
+## [v27.2.0] — 2026-06-27 — iceberg Rune 追加
+
+### Added
+- `runes/iceberg/iceberg.fav` — Apache Iceberg Rune（read / append / overwrite / time_travel / schema_evolution / list_snapshots 6 関数）
+- `Iceberg.*_raw` VM primitives 6 件（`#[cfg(not(target_arch = "wasm32"))]` ガード付き、stub 実装）
+- `examples/iceberg_etl.fav` — Iceberg ETL デモ（LoadFromIceberg |> TransformData |> AppendToIceberg）
+- `site/content/docs/runes/iceberg.mdx` — Apache Iceberg Rune ドキュメント
+
+---
+
+## [v27.1.0] — 2026-06-27 — delta-lake Rune 追加
+
+### Added
+- `runes/delta-lake/delta-lake.fav` — Delta Lake Rune（read / read_with_filter / write / merge / history / vacuum / optimize 7 関数）
+- `DeltaLake.*_raw` VM primitives 7 件（`#[cfg(not(target_arch = "wasm32"))]` ガード付き、stub 実装）
+- `examples/delta_lake_etl.fav` — Delta Lake ETL デモ（LoadRawData |> TransformOrders |> SaveProcessed）
+- `site/content/docs/runes/delta-lake.mdx` — Delta Lake Rune ドキュメント
+
+---
+
+## [v27.0.0] — 2026-06-27 — Streaming Native マイルストーン宣言
+
+### Milestone
+- **Streaming Native** 宣言: ストリーミング Rune 5 本（kinesis / nats / rabbitmq / sqs / pulsar）実質化完了
+- `Stream.*` 操作 6 関数（map / filter / flat_map / window / merge / split）使用可能
+- E2E デモ 3 本（kafka→ES / kinesis→S3 / nats→postgres）が Docker Compose で動作
+
+### Added
+- `MILESTONE.md` に "Streaming Native" マイルストーンセクション追加
+- `site/content/docs/streaming-native.mdx` — Streaming Native マイルストーン解説ページ
+- `README.md` に v27.0 マイルストーン記載
+- `versions/roadmap/roadmap-v26.1-v27.0.md` に完了日追記
+
+---
+
+## [v26.9.0] — 2026-06-27 — Pulsar Rune 追加
+
+### Added
+- `runes/pulsar/pulsar.fav` — Apache Pulsar Rune 追加（`produce` / `consume` / `ack` / `nack` 4 関数）
+- `Pulsar.produce_raw` / `Pulsar.consume_raw` / `Pulsar.ack_raw` / `Pulsar.nack_raw` VM primitives（`#[cfg(not(target_arch = "wasm32"))]` ガード付き）
+- `examples/streaming/docker-compose.yml` に `pulsar` サービス（`apachepulsar/pulsar:3.2.0`）追加
+- `site/content/docs/runes/pulsar.mdx` — Pulsar Rune ドキュメント
+
+---
+
+## [v26.8.0] — 2026-06-27 — SQS Rune 実質化
+
+### Added
+- `runes/sqs/sqs.fav` — SQS Rune 実質化（`send_message` / `send_message_batch` / `receive_messages` / `delete_message` / `purge` / `consume` 6 関数）
+- `fav/src/backend/vm.rs` — `SQS.send_message_batch_raw` / `SQS.receive_messages_raw` / `SQS.purge_raw` / `SQS.consume_raw` primitive 追加
+- `site/content/docs/runes/sqs.mdx` — SQS Rune ドキュメント
+
+---
+
+## [v26.7.0] — 2026-06-27 — ストリーミング E2E デモ（nats → postgres）
+
+### Added
+- `examples/streaming/nats_to_postgres.fav` — NATS → Postgres IoT センサーデータ蓄積デモ（FetchSensorData / ValidateSensor / InsertToPostgres + `seq SensorPipeline`）
+- `examples/streaming/docker-compose.yml` に `nats` / `postgres` サービス追加
+- `examples/streaming/README.md` — 3 本の E2E デモ実行手順まとめ
+- `site/content/docs/streaming/nats-to-postgres.mdx` — E2E デモドキュメント
+
+---
+
+## [v26.6.0] — 2026-06-27 — ストリーミング E2E デモ（kinesis → s3）
+
+### Added
+- `examples/streaming/kinesis_to_s3.fav` — Kinesis → S3 クリックイベントアーカイブデモ（FetchClickEvents / SerializeBatch / UploadToS3 + `seq ArchivePipeline`）
+- `examples/streaming/docker-compose.yml` に `localstack` サービス追加（Kinesis / S3 ローカルエミュレーション）
+- `site/content/docs/streaming/kinesis-to-s3.mdx` — E2E デモドキュメント
+
+---
+
+## [v26.5.0] — 2026-06-27 — ストリーミング E2E デモ（kafka → elasticsearch）
+
+### Added
+- `examples/streaming/kafka_to_elasticsearch.fav` — Kafka → Elasticsearch リアルタイムログ集計デモ（FetchLogs / FilterErrors / IndexToES + `seq LogPipeline`）
+- `examples/streaming/docker-compose.yml` — Kafka（Redpanda）/ Elasticsearch サービス定義
+- `site/content/docs/streaming/kafka-to-elasticsearch.mdx` — E2E デモドキュメント
+
+---
+
+## [v26.4.0] — 2026-06-27 — `#[streaming]` バックプレッシャー対応 + `Stream.*` 操作
+
+### Added
+- `StreamingAnnotation.backpressure: Option<bool>` フィールド追加（`ast.rs` + `parser.rs`）— `#[streaming(backpressure = true)]` 構文をサポート
+- `Stream.flat_map` / `Stream.window` / `Stream.merge` / `Stream.split` — VM primitive 4 件追加（`vm.rs`）
+- `VMStream::FlatMap` / `VMStream::Window` / `VMStream::Merge` / `VMStream::Split` — 遅延評価バリアント追加
+- `runes/stream/stream.fav` — Stream Rune 新規作成（map / filter / flat_map / window / merge / split）
+- `site/content/docs/runes/stream.mdx` — Stream Rune ドキュメント新規作成
+
+---
+
+## [v26.3.0] — 2026-06-26 — rabbitmq Rune 実質化
+
+### Added
+- `runes/rabbitmq/rabbitmq.fav` — RabbitMQ Rune（connect / declare_exchange / declare_queue / bind_queue / publish / consume）
+- `RabbitMQ.connect_raw` / `declare_exchange_raw` / `declare_queue_raw` / `bind_queue_raw` / `publish_raw` / `consume_raw` — VM primitive 6 件追加
+- `site/content/docs/runes/rabbitmq.mdx` — RabbitMQ Rune ドキュメント新規作成
+- `benchmarks/v26.3.0.json` — ベンチマーク記録（test_count: 2062）
+
+---
+
+## [v26.2.0] — 2026-06-26 — nats Rune 実質化
+
+### Added
+- `runes/nats/nats.fav` — NATS Rune（connect / publish / subscribe / jetstream_publish / jetstream_consume）
+- `NATS.connect_raw` / `publish_raw` / `subscribe_raw` / `jetstream_publish_raw` / `jetstream_consume_raw` — VM primitive 5 件追加
+- `site/content/docs/runes/nats.mdx` — NATS Rune ドキュメント新規作成
+- `benchmarks/v26.2.0.json` — ベンチマーク記録（test_count: 2054）
+
+---
+
+## [v26.1.0] — 2026-06-26 — kinesis Rune 実質化
+
+### Added
+- `runes/kinesis/kinesis.fav` — Kinesis Rune（connect / put_record / put_records / get_shard_iterator / get_records）
+- `Kinesis.connect_raw` / `put_record_raw` / `put_records_raw` / `get_shard_iterator_raw` / `get_records_raw` — VM primitive 5 件追加
+- `site/content/docs/runes/kinesis.mdx` — Kinesis Rune ドキュメント新規作成
+- `benchmarks/v26.1.0.json` — ベンチマーク記録（test_count: 2047）
+
+---
+
+## [v26.0.0] — 2026-06-26 — Rune Foundation マイルストーン宣言
+
+### Milestone
+- **Rune Foundation**: コア 8 Rune（postgres / s3 / redis / mysql / mongodb / dynamodb / kafka / elasticsearch）が「動く Rune の 5 条件（connect / read / write / error / test）」をすべてクリア
+- `examples/full_etl.fav` — postgres → 集計 → s3 → kafka 通知の完全デモパイプライン
+- `examples/postgres_etl.fav` / `examples/s3_csv_to_parquet.fav` — 個別 Rune デモ
+- vm.fav Phase 6（`CallNamed` opcode, 0x56）完了: multi-function プログラムを vm.fav で実行可能（v25.9.0 完了の宣言）
+- `MILESTONE.md` に「Rune Foundation」セクション追記
+- `site/content/docs/rune-foundation.mdx` 新規作成
+- `versions/roadmap/roadmap-v25.1-v26.0.md` — v25.1〜v25.9 COMPLETE・v26.0.0 宣言済みに更新
+
+---
+
+## [v25.9.0] — 2026-06-26 — vm.fav Phase 6（CallNamed 実装 — ユーザー定義関数呼び出し）
+
+### Added
+- `CallNamed(Int, Int)` opcode (0x56) — `fav/self/vm.fav` に追加（fn_name_const_idx, argc）
+- `decode_byte_with_u16x2_le` — 5 バイト opcode デコーダー（u16 LE ×2 オペランド）
+- `vm_execute` シグネチャ拡張: `consts: Int, prog_keys: Int, prog_vals: Int`（現在関数の定数プールとプログラムテーブル）
+- `vm_run_program(program_json)` — multi-function program JSON を受け取り main 関数を実行する新エントリポイント
+- 補助型・関数: `FnDef` / `ListPair` / `parse_fn_json` / `build_consts_list` / `copy_args_to_locals` / `find_fn_in_program` / `build_program_lists`
+- `build_vm_program_json(artifact)` — `FvcArtifact` → program JSON シリアライザ（`Constant::Int/Float/Str/Name` 全バリアント対応）
+- `run_via_vm(vm_src, program_json)` — vm.fav 経由で multi-function プログラムを実行
+- `fav run --vm <path> --compile <src>` — ソースをコンパイルして vm.fav 経由で実行する CLI モード
+- `site/content/docs/tools/vm-fav.mdx` — Phase 6 / `--compile` フラグ説明を追記
+
+### Notes
+- 線形検索パターン採用（`Mut.str_map` は未実装のため `prog_keys` / `prog_vals` の Mut.map ペア）
+- `Constant::Name` が `CallNamed` の参照対象（`Constant::Str` ではない）
+- `parse_fn_json` は単純文字列解析（関数名にカンマ・ダブルクォートなし前提）
+
+---
+
+## [v25.8.0] — 2026-06-25 — elasticsearch Rune 実質化（全文検索・ベクトル検索・バルク書き込み）
+
+### Added
+- `Effect::Elasticsearch` — 新規エフェクト variant（`!Elasticsearch`）
+- E0324 `UndeclaredElasticsearchEffect` — エラーカタログ追加
+- `ES.*_raw` 8 件 VM プリミティブ（`connect` / `index` / `index_with_id` / `search` / `knn_search` / `bulk` / `delete` / `create_index`）
+- `runes/elasticsearch/elasticsearch.fav` — `ESConn` 型 + 8 関数
+- `examples/elasticsearch_logs_etl.fav` — `IndexLog |> SearchLogs` パイプラインデモ
+- `site/content/docs/runes/elasticsearch.mdx` — 全 API リファレンス（Docker セットアップ・認証・スコープ外）
+- 認証: `ELASTICSEARCH_API_KEY`（優先）→ Basic（USERNAME/PASSWORD）→ 認証なし
+- `knn_search` — kNN ベクトル検索（`_source` 配列 JSON 文字列で返す）
+- `bulk` — JSON 配列 → NDJSON 変換 → `POST /_bulk`（一括インデックス）
+
+---
+
+## [v25.7.0] — 2026-06-25 — kafka Rune 実質化（「動く Rune」5 条件達成）
+
+### Added
+- `KafkaConn(String)` — Kafka ブローカー接続ラッパー型（`""` → `KAFKA_BOOTSTRAP_BROKERS` 環境変数 → `"localhost:9092"`）
+- `Kafka.connect` / `produce` / `consume_one` / `consume_batch` / `create_topic`（5 関数、`KafkaConn` ベース）
+- `Kafka.connect_raw` / `Kafka.consume_batch_raw` / `Kafka.create_topic_raw`（新規 VM primitives 3 件）— 既存 rskafka v0.6 再利用（追加 crate なし）
+- `kafka_connect_sync` / `kafka_consume_batch_sync` / `kafka_create_topic_sync` ヘルパー（vm.rs）
+- E0319 `UndeclaredStreamEffect` を `error_catalog.rs` に登録（checker.rs には v15.4.0 から存在）
+- `examples/kafka_events_etl.fav` — イベント ETL デモ（PublishEvent / ConsumeEvents / EventsETL）
+- `site/content/docs/runes/kafka.mdx` — 全 API ドキュメント（Redpanda セットアップ手順含む）
+
+---
+
+## [v25.6.0] — 2026-06-25 — dynamodb Rune 実質化（「動く Rune」5 条件達成）
+
+### Added
+- `Effect::DynamoDB` — 新エフェクト（AWS NoSQL KV 専用。E0323 エラーコード追加）
+- `DynamoDB.connect` / `get_item` / `put_item` / `delete_item` / `query` / `scan` / `batch_write` / `transact_write`（8 関数）
+- `DynamoDB.*_raw` VM primitives 8 件（`vm.rs`）— 既存 `aws_post` / SigV4 インフラ再利用（追加 crate なし）
+- `get_dynamo_endpoint` / `json_val_to_dynamo_attr` / `json_to_dynamo_item` / `dynamo_attr_to_json` / `dynamo_item_to_plain_json` ヘルパー（JSON ↔ DynamoDB 属性型変換）
+- `examples/dynamodb_session_store.fav` — セッションストア デモ（StoreSession / GetSession / DeleteSession）
+- `site/content/docs/runes/dynamodb.mdx` — 全 API ドキュメント（JSON フォーマット・属性型変換説明含む）
+
+---
+
+## [v25.5.0] — 2026-06-25 — mongodb Rune 実質化（「動く Rune」5 条件達成）
+
+### Added
+- `Effect::MongoDB` — 新エフェクト（ドキュメント系 NoSQL 専用。E0322 エラーコード追加）
+- `Mongo.connect` / `find` / `find_one` / `insert_one` / `insert_many` / `update_one` / `delete_one` / `aggregate`（8 関数）
+- `Mongo.*_raw` VM primitives 8 件（`vm.rs`）— tokio `block_on` で async mongodb v3 API を同期化
+- `mongodb = { version = "3", features = ["tokio-runtime"] }` を native-only 依存に追加
+- `extract_mongo_db_name` / `mongo_bson_to_json` / `mongo_json_to_bson` ヘルパー（ObjectId → `{"$oid": "..."}` 変換対応）
+- `examples/mongo_events_etl.fav` — イベント ETL デモ（LoadActiveEvents |> ArchiveEvent）
+- `site/content/docs/runes/mongodb.mdx` — 全 API ドキュメント（JSON フォーマット・スコープ外説明含む）
+
+---
+
+## [v25.4.0] — 2026-06-25 — mysql Rune 実質化（「動く Rune」5 条件達成）
+
+### Added
+- `Effect::MySQL` — 新エフェクト（`!Postgres` とは独立した外部 MySQL 専用。E0321 エラーコード追加）
+- `MySQL.connect` / `MySQL.query` / `MySQL.execute` / `MySQL.transaction_begin/commit/rollback`（6 関数）
+- `MySQL.*_raw` VM primitives 6 件（`vm.rs`）— `mysql::prelude::Queryable` トレイト使用
+- `mysql = { version = "24", default-features = false }` を native-only 依存に追加
+- `examples/mysql_orders_etl.fav` — 注文 ETL デモ（LoadPendingOrders |> MarkProcessed）
+- `site/content/docs/runes/mysql.mdx` — 全 API ドキュメント（Postgres との比較表含む）
+- `json_to_mysql_value` / `mysql_value_to_json` ヘルパー関数（`vm.rs`）
+
+### Notes
+- `transaction_begin/commit/rollback` は VM 制約により各呼び出しで独立接続を使用（擬似実装）。原子性は非保証。v26.x で解決予定
+- Postgres と同一シグネチャ（connect/query/execute/transaction）で API を統一。`impl DbConn for MySqlConn` は v26.x で対応予定
+
+---
+
+## [v25.3.0] — 2026-06-25 — redis Rune 実質化（「動く Rune」5 条件達成）
+
+### Added
+- `Effect::Redis` — 新エフェクト（`!Cache` インメモリとは独立した外部 Redis 専用。E0320 エラーコード追加）
+- `Redis.connect(url)` — RedisConn（接続 URL ラッパー）を返す
+- `Redis.get / set / del / incr` — 基本 KV 操作
+- `Redis.lpush / rpop` — リスト操作（キュー用途）
+- `Redis.publish / subscribe_once` — Pub/Sub（subscribe_once は 30 秒タイムアウト付き 1 件受信）
+- `examples/redis_rate_limiter.fav` — Redis を使ったレート制限 E2E デモ
+- `v253000_tests`（7 件）: connect / get / set / incr / subscribe_once primitive 存在確認 + example + changelog + Effect::Redis
+
+---
+
+## [v25.2.0] — 2026-06-24 — s3 Rune 実質化（「動く Rune」5 条件達成）
+
+### Added
+- `S3.presign_url(bucket, key, ttl_secs)` — 署名付き URL 生成（GET 操作用、自前 SigV4 実装）
+- `S3.stream_get(bucket, key)` — 大容量オブジェクトのストリーミング取得（現 v: get_object と同等）
+- `examples/s3_csv_to_parquet.fav` — S3 CSV → Parquet 変換 E2E デモ（`import rune "aws"` 使用）
+- `v252000_tests`（6 件）: presign_url / stream_get Rune + primitive 存在確認、example 確認、changelog 確認
+
+---
+
+## [v25.1.0] — 2026-06-24 — postgres Rune 実質化（「動く Rune」5 条件達成）
+
+### Added
+- `Postgres.connect(config)` — PgConfig（接続文字列ラッパー）から接続オブジェクト（PgConn）を返す
+- `Postgres.execute_many(conn, sql, rows)` — バッチ実行（同一 SQL を複数行に適用）
+- `Postgres.transaction(conn, fn)` — トランザクション（エラー時自動 ROLLBACK）
+- `Postgres.Pool.create(config)` — PoolConfig から接続プールを作成（`pool_create_with_config_raw`）
+- `Postgres.Pool.get(pool)` — プールから PgConn を取得
+- `Postgres.Pool.release(pool, conn)` — PgConn をプールに返却
+- `runes/postgres/db_conn.fav` — `DbConn` interface（query / execute / execute_many / transaction）
+- `runes/postgres/types.fav` — `PgConfig` / `PgConn` / `PoolConfig` 型定義
+- `examples/postgres_etl.fav` — E2E デモ（connect → execute_many → query → transaction）
+- `v251000_tests`（6 件）: connect / execute_many / transaction / Pool.create 存在確認 + example + changelog
+
+### Changed
+- `runes/postgres/client.fav` — 上記 6 関数を追加（既存 `execute` / `query<T>` は後方互換として維持）
+- `runes/postgres/postgres.fav` — `types` / `db_conn` / 新関数を re-export に追加
+- `site/content/docs/runes/postgres.mdx` — 接続オブジェクト API セクションを追加
+
+---
+
 ## [v25.0.0] — 2026-06-24 — Practical Self-Hosting マイルストーン宣言（v1.0 リリース候補）
 
 ### Added

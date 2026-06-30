@@ -1,0 +1,19 @@
+// examples/iceberg_etl.fav — Iceberg ETL デモ (v27.2.0)
+import rune "iceberg"
+
+stage LoadFromIceberg: Unit -> Result<String, String> !Io = |_| {
+    Iceberg.read("http://localhost:8181", "warehouse.raw_orders")
+}
+
+stage TransformData: String -> Result<String, String> = |rows_json| {
+    if String.length(rows_json) > 2
+    then Result.ok(rows_json)
+    else Result.err("empty iceberg table")
+}
+
+stage AppendToIceberg: String -> Result<String, String> !Io = |data| {
+    bind _ <- Iceberg.append("http://localhost:8181", "warehouse.processed_orders", data)
+    Result.ok("appended to iceberg table")
+}
+
+seq IcebergEtlPipeline = LoadFromIceberg |> TransformData |> AppendToIceberg

@@ -1,75 +1,27 @@
 {
   "permissions": {
     "allow": [
-      "Bash(cargo build:*)",
       "Bash(./target/debug/fav run:*)",
       "Bash(./target/debug/fav check:*)",
-      "Bash(echo \"exit: $?\")",
-      "Bash(cd:*)",
-      "Bash(cargo test:*)",
-      "Bash(cargo run:*)",
-      "Bash(grep -v \"^warning\\\\|^  \\\\|^$\\\\|^|\\\\|^=\\\\|^help\")",
-      "Bash(grep -v \"//\")",
-      "Bash(grep -n '\"\"List\\\\.push\"\"' src/vm.rs)",
-      "Bash(/c/Users/yoshi/favnir/fav/examples/test_any.fav:*)",
-      "Bash(/c/Users/yoshi/favnir/fav/examples/test_run.fav:*)",
-      "Bash(/tmp/type_err.fav:*)",
-      "Bash(grep -v \"Compiling\\\\|Finished\\\\|^$\")",
-      "Bash(/c/Users/yoshi/favnir/fav/target/debug/fav.exe run:*)",
-      "Bash(grep -v \"//\\\\|test\\\\|///\")",
-      "Bash(grep -rn \"\"E0[0-9][0-9]\"\" C:/Users/yoshi/favnir/fav/src/)",
-      "Bash(for f:*)",
-      "Bash(do)",
-      "Bash(sed -i -e 's/\"\"E000\"\"/\"\"E0500\"\"/g' -e 's/\"\"E012\"\"/\"\"E0112\"\"/g' -e 's/\"\"E013\"\"/\"\"E0213\"\"/g' -e 's/\"\"E014\"\"/\"\"E0214\"\"/g' -e 's/\"\"E018\"\"/\"\"E0218\"\"/g' \"$f\")",
-      "Bash(echo \"done: $f\")",
-      "Bash(done)",
-      "Bash(taskkill /F /IM \"fav-18aa1375978f43bc.exe\")",
-      "Bash(taskkill /F /IM \"fav.exe\")",
-      "Bash(npm run:*)",
-      "Bash(./fav/target/debug/fav check:*)",
-      "Bash(aws logs:*)",
-      "Bash(MSYS_NO_PATHCONV=1 aws logs describe-log-streams --log-group-name \"/aws/lambda/favnir-registry\" --region ap-northeast-1 2>&1)",
-      "Bash(aws lambda:*)",
+      "Bash(./target/debug/fav fmt:*)",
+      "Bash(./target/debug/fav.exe check:*)",
+      "Bash(target/debug/fav.exe check:*)",
       "Bash(./target/release/fav check:*)",
       "Bash(./target/release/fav test:*)",
       "Bash(./target/release/fav run:*)",
-      "Bash(echo \"exit:$?\")",
-      "Bash(git add:*)",
-      "Bash(git commit:*)",
-      "Bash(git push:*)",
-      "Bash(xxd /tmp/lambda-out2.txt)",
-      "Bash(./target/debug/fav fmt:*)",
+      "Bash(/c/Users/yoshi/favnir/fav/target/debug/fav.exe run:*)",
+      "Bash(./fav/target/debug/fav check:*)",
+      "Bash(taskkill /F /IM \"fav.exe\")",
+      "Bash(MSYS_NO_PATHCONV=1 aws logs describe-log-streams --log-group-name \"/aws/lambda/favnir-registry\" --region ap-northeast-1 2>&1)",
+      "Bash(MSYS_NO_PATHCONV=1 docker build:*)",
+      "Bash(MSYS_NO_PATHCONV=1 docker push:*)",
       "Read(//tmp/**)",
-      "Bash(aws s3:*)",
-      "Bash(uv run:*)",
-      "Bash(ECR=\"847333136058.dkr.ecr.ap-northeast-1.amazonaws.com/favnir/fav2py\")",
-      "Bash(MSYS_NO_PATHCONV=1 docker build -t \"$ECR:latest\" .)",
-      "Bash(MSYS_NO_PATHCONV=1 docker push \"$ECR:latest\")",
-      "Bash(docker build:*)",
-      "Bash(docker push:*)",
-      "Bash(do echo:*)",
       "Read(//c/Users/yoshi/favnir/**)",
-      "Bash(./target/debug/fav.exe check:*)",
-      "Bash(target/debug/fav.exe check:*)",
-      "Bash(REGION=\"ap-northeast-1\")",
-      "Bash(ACCOUNT=\"847333136058\")",
-      "Bash(ECR_V2=\"$ACCOUNT.dkr.ecr.$REGION.amazonaws.com/crosscloud-verifier-v2:latest\")",
-      "Bash(docker buildx:*)"
-    ]
-  },
-  "hooks": {
-    "PreToolUse": [
-      {
-        "matcher": "Bash",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node \"C:/Users/yoshi/favnir/.claude/hooks/pre-commit.js\"",
-            "timeout": 130,
-            "statusMessage": "Running clippy pre-commit check..."
-          }
-        ]
-      }
+      "Bash(wsl bash:*)",
+      "Bash(./fav/target/release/fav.exe run:*)",
+      "Bash(./fav/target/release/fav.exe bench:*)",
+      "Bash(node:*)",
+      "Bash(docker compose:*)"
     ]
   }
 }

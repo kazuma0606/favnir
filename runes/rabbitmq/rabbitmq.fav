@@ -1,0 +1,37 @@
+// runes/rabbitmq/rabbitmq.fav — RabbitMQ Rune (v26.3.0)
+//
+// 使い方:
+//   import rune "rabbitmq"
+//
+// 環境変数:
+//   RABBITMQ_URL    — AMQP URL（省略時: "amqp://guest:guest@localhost:5672"）
+//
+// ローカル開発（管理 UI 付き）:
+//   docker run -p 5672:5672 -p 15672:15672 rabbitmq:3-management
+
+type RabbitConn(String)
+type RabbitMsg = { exchange: String, routing_key: String, body: String }
+
+public fn connect(url: String) -> Result<RabbitConn, String> !Stream {
+    RabbitMQ.connect_raw(url)
+}
+
+public fn declare_exchange(conn: RabbitConn, name: String, ex_type: String) -> Result<Unit, String> !Stream {
+    RabbitMQ.declare_exchange_raw(conn, name, ex_type)
+}
+
+public fn declare_queue(conn: RabbitConn, name: String) -> Result<Unit, String> !Stream {
+    RabbitMQ.declare_queue_raw(conn, name)
+}
+
+public fn bind_queue(conn: RabbitConn, queue: String, exchange: String, routing_key: String) -> Result<Unit, String> !Stream {
+    RabbitMQ.bind_queue_raw(conn, queue, exchange, routing_key)
+}
+
+public fn publish(conn: RabbitConn, exchange: String, routing_key: String, msg: String) -> Result<Unit, String> !Stream {
+    RabbitMQ.publish_raw(conn, exchange, routing_key, msg)
+}
+
+public fn consume(conn: RabbitConn, queue: String) -> Result<String, String> !Stream {
+    RabbitMQ.consume_raw(conn, queue)
+}

@@ -1,0 +1,6 @@
+[rune]
+name        = "vertex-ai"
+version     = "1.0.0"
+description = "Google Vertex AI 連携（predict / batch_predict / deploy_model / list_endpoints）"
+license     = "MIT"
+authors     = ["Favnir Team"]

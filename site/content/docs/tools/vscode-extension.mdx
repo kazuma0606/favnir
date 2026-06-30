@@ -1,0 +1,73 @@
+# VS Code 拡張（vscode-favnir）
+
+Favnir の VS Code 拡張（`vscode-favnir`）は、LSP サーバーと連携してリアルタイムの型チェック・補完・定義ジャンプを提供します。
+
+## インストール
+
+VS Code Marketplace で `Favnir` を検索してインストールするか、`.vsix` ファイルから手動インストールします。
+
+```bash
+# vsix から手動インストール
+code --install-extension vscode-favnir-1.0.0.vsix
+```
+
+## 機能
+
+| 機能 | 説明 |
+|---|---|
+| シンタックスハイライト | `.fav` ファイルのキーワード・型・エフェクト・文字列を色分け |
+| エラー / 警告のリアルタイム表示 | LSP `publishDiagnostics` でコード編集中に即時フィードバック |
+| 補完 | `stage` 名・Rune 関数・型名の自動補完（Ctrl+Space）|
+| 定義ジャンプ（F12） | `fn` / `stage` 定義箇所へジャンプ |
+| ホバー表示 | 関数シグネチャ・Rune ドキュメントをマウスオーバーで表示 |
+| シグネチャヘルプ | 関数呼び出し時に引数の型ヒントを表示 |
+| `fav run` / `fav check` 統合 | コマンドパレット（Ctrl+Shift+P）から直接実行 |
+
+## セットアップ
+
+拡張は `fav` バイナリが PATH に存在すれば自動で動作します。バイナリのパスを変更したい場合は設定で指定できます。
+
+```json
+// .vscode/settings.json
+{
+  "favnir.serverPath": "/usr/local/bin/fav"
+}
+```
+
+## コマンド
+
+| コマンド | 説明 |
+|---|---|
+| `Favnir: Run` | `fav run` をターミナルで実行 |
+| `Favnir: Check` | `fav check` をターミナルで実行 |
+
+## TextMate Grammar（シンタックスハイライト）
+
+`extensions/vscode-favnir/syntaxes/favnir.tmLanguage.json` で以下のスコープを定義しています。
+
+| スコープ | 対象 |
+|---|---|
+| `keyword.control.favnir` | `fn` / `stage` / `seq` / `type` / `match` / `bind` 等 |
+| `support.type.effect.favnir` | `!Http` / `!Db` / `!Io` / `!Llm` 等のエフェクト |
+| `storage.type.favnir` | `String` / `Int` / `List` / `Result` 等の組み込み型 |
+| `string.quoted.double.favnir` | ダブルクォート文字列 |
+| `constant.language.favnir` | `true` / `false` / `unit` |
+| `comment.line.double-slash.favnir` | `//` コメント |
+
+## LSP サーバーについて
+
+拡張は `fav lsp` サブコマンドを stdio で起動し、LSP プロトコルで通信します。LSP サーバーは `fav/src/lsp/` に実装されており（v9.11.0 から稼働）、以下のプロトコルをサポートしています。
+
+- `textDocument/completion`
+- `textDocument/definition`
+- `textDocument/hover`
+- `textDocument/signatureHelp`
+- `textDocument/publishDiagnostics`
+- `textDocument/references`
+- `textDocument/rename`
+
+## 関連ドキュメント
+
+- [LSP 設定](/docs/tools/lsp) — LSP サーバーの直接利用
+- [fav check](/docs/tools/check) — 型チェックコマンド
+- [fav run](/docs/tools/run) — パイプライン実行コマンド

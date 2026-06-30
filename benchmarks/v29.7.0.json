@@ -1,0 +1,12 @@
+{
+  "version": "29.7.0",
+  "date": "2026-06-30",
+  "milestone": "Ecosystem Maturity (phase 7)",
+  "test_count": 2354,
+  "metrics": {
+    "compile_hello_ms": 12,
+    "compile_etl_ms": 38,
+    "typecheck_ms": 9,
+    "vm_run_ms": 4
+  }
+}

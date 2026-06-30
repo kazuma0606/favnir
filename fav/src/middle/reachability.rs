@@ -93,6 +93,21 @@ pub fn reachability_analysis(entry: &str, program: &IRProgram) -> ReachabilityRe
                 Effect::Postgres => {
                     effects_required.insert("Postgres".to_string());
                 }
+                Effect::Redis => {
+                    effects_required.insert("Redis".to_string());
+                }
+                Effect::MySQL => {
+                    effects_required.insert("MySQL".to_string());
+                }
+                Effect::MongoDB => {
+                    effects_required.insert("MongoDB".to_string());
+                }
+                Effect::DynamoDB => {
+                    effects_required.insert("DynamoDB".to_string());
+                }
+                Effect::Elasticsearch => {
+                    effects_required.insert("Elasticsearch".to_string());
+                }
                 Effect::AzureDb => {
                     effects_required.insert("AzureDb".to_string());
                 }

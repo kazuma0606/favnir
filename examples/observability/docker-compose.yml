@@ -1,0 +1,56 @@
+# ⚠️ デモ用設定です。本番環境では GF_SECURITY_ADMIN_PASSWORD を環境変数 ${GF_ADMIN_PASSWORD} に置き換えてください。
+version: "3.8"
+services:
+  prometheus:
+    image: prom/prometheus:v2.45.0
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+  grafana:
+    image: grafana/grafana:10.0.0
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=${GF_ADMIN_PASSWORD:-admin}
+    depends_on:
+      - prometheus
+  datadog-agent:
+    image: datadog/agent:7
+    environment:
+      - DD_API_KEY=${DD_API_KEY:-dummy-key-for-local-mode}
+      - DD_SITE=datadoghq.com
+      - DD_APM_ENABLED=true
+      - DD_LOGS_ENABLED=true
+      - DD_DOGSTATSD_NON_LOCAL_TRAFFIC=true
+    ports:
+      - "8125:8125/udp"
+      - "8126:8126"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+  sentry-redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+  sentry-postgres:
+    image: postgres:15-alpine
+    environment:
+      - POSTGRES_DB=sentry
+      - POSTGRES_USER=sentry
+      - POSTGRES_PASSWORD=${SENTRY_DB_PASSWORD:-sentry}
+    ports:
+      - "5432:5432"
+  sentry:
+    image: getsentry/sentry:24.0
+    ports:
+      - "9000:9000"
+    environment:
+      - SENTRY_SECRET_KEY=${SENTRY_SECRET_KEY:-dummy-secret-key-for-local-mode}
+      - SENTRY_DB_USER=sentry
+      - SENTRY_DB_NAME=sentry
+      - SENTRY_DB_PASSWORD=${SENTRY_DB_PASSWORD:-sentry}
+      - SENTRY_POSTGRES_HOST=sentry-postgres
+      - SENTRY_REDIS_HOST=sentry-redis
+    depends_on:
+      - sentry-redis
+      - sentry-postgres

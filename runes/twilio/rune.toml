@@ -1,0 +1,6 @@
+[rune]
+name = "twilio"
+version = "0.1.0"
+description = "Twilio SMS/Voice API 連携（コミュニティ投稿 Rune）"
+author = "Favnir Community"
+license = "MIT"

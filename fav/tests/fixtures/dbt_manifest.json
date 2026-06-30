@@ -1,0 +1,16 @@
+{
+  "nodes": {
+    "model.my_project.customer_summary": {
+      "compiled_sql": "SELECT * FROM customer_summary_raw",
+      "name": "customer_summary",
+      "resource_type": "model"
+    }
+  },
+  "sources": {
+    "source.my_project.raw.events": {
+      "name": "events",
+      "source_name": "raw",
+      "schema": "raw"
+    }
+  }
+}

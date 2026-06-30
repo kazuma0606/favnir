@@ -1,0 +1,15 @@
+// intercom Rune -- Intercom メッセージ API 連携（コミュニティ投稿 Rune）
+// 接続: INTERCOM_BASE_URL 環境変数
+// NOTE: api_key は HTTP Rune の認証ヘッダー機構が有効化されるまでリクエストには付与されない
+
+fn Intercom.create_conversation(api_key: String, from_user_id: String, body: String) -> Result<String, String> !Http =
+  Http.post_json(
+    Env.get_or("INTERCOM_BASE_URL", "https://api.intercom.io") ++ "/conversations",
+    { "from": { "type": "user", "id": from_user_id }, "body": body }
+  )
+
+fn Intercom.send_message(api_key: String, conversation_id: String, body: String) -> Result<String, String> !Http =
+  Http.post_json(
+    Env.get_or("INTERCOM_BASE_URL", "https://api.intercom.io") ++ "/conversations/" ++ conversation_id ++ "/reply",
+    { "message_type": "comment", "type": "admin", "body": body }
+  )

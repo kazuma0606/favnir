@@ -1,0 +1,16 @@
+// examples/dbt_pipeline.fav — dbt モデル参照パイプラインデモ（v27.8.0 stub）
+// NOTE: v27.8.0 stub — manifest.json の実解析は v28.x 以降
+
+import rune "dbt"
+
+stage LoadCustomerSummary: Unit -> Result<String, String> !Db = |_| {
+    Dbt.ref("./dbt_project", "customer_summary")
+}
+
+// NOTE: LoadRawEvents はデモ用の未接続ステージ（DbtRefPipeline には含まれない）
+// v28.x で複数モデル参照パイプラインに組み込む予定
+stage LoadRawEvents: Unit -> Result<String, String> !Db = |_| {
+    Dbt.source("./dbt_project", "raw", "events")
+}
+
+seq DbtRefPipeline = LoadCustomerSummary

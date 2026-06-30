@@ -1,0 +1,83 @@
+---
+title: Sentry Alerting Demo
+description: Sentry アラート E2E デモ（v28.9.0）
+---
+
+# Sentry Alerting Demo
+
+`examples/observability/sentry_alerting.fav` は、Favnir ETL パイプラインの失敗を
+Sentry でアラートとして受け取る E2E デモです。
+
+## アーキテクチャ
+
+```
+Favnir Pipeline
+  └─ Sentry.capture_error / capture_message  ─→  Sentry (port 9000)
+  └─ Sentry.set_tag / set_user / set_extra   ─→  Sentry イベントコンテキスト
+```
+
+## デモパイプライン
+
+```favnir
+import runes/sentry
+
+// #[on_error(report_to: "sentry", level: "critical")] — v29.0+ で自動挿入予定
+stage CriticalLoad: Unit -> Result<Unit, String> !Io = |_| {
+    bind _ <- Sentry.capture_error("critical stage failed: connection timeout")
+    bind _ <- Sentry.capture_message("critical", "pipeline critical failure detected")
+    Result.ok(unit)
+}
+
+stage ReportError: Unit -> Result<Unit, String> !Io = |_| {
+    bind _ <- Sentry.capture_error("pipeline execution failed: connection timeout")
+    bind _ <- Sentry.set_tag("pipeline", "etl")
+    Result.ok(unit)
+}
+
+stage SetContext: Unit -> Result<Unit, String> !Io = |_| {
+    bind _ <- Sentry.set_user("user-001", "ops@example.com")
+    bind _ <- Sentry.set_extra("pipeline_version", "28.9.0")
+    Result.ok(unit)
+}
+
+seq SentryAlertingDemo = CriticalLoad |> ReportError |> SetContext
+```
+
+## クイックスタート
+
+```bash
+# Grafana 管理者パスワードを設定（未設定の場合はデモ用 "admin" で起動します）
+export GF_ADMIN_PASSWORD=your-grafana-password
+
+# Sentry シークレットキーを設定（未設定の場合はデモ用ダミーキーで起動します）
+export SENTRY_SECRET_KEY=your-secret-key-here
+
+# インフラ起動（Prometheus + Grafana + Datadog Agent + Sentry）
+docker compose -f examples/observability/docker-compose.yml up -d
+
+# パイプライン実行
+fav run examples/observability/sentry_alerting.fav
+
+# Sentry UI でアラートを確認
+open http://localhost:9000
+```
+
+> **注記（Sentry デモスコープ）**: v28.9.0 の Sentry 構成は `getsentry/sentry` イメージの単体起動確認を目的とした簡略版です。
+> `docker ps` で `getsentry/sentry` コンテナが起動していることを確認できます。
+> 完全動作（イベント受信・UI 表示）には別途 redis / postgres が必要です。
+> 本番環境の Sentry セルフホストには `SENTRY_SECRET_KEY` と追加サービスの設定が必須です。
+
+## `#[on_error]` アノテーション（将来機能）
+
+v29.0+ では `#[on_error(report_to: "sentry", level: "critical")]` を stage に付けるだけで
+コンパイラがエラーハンドラを自動挿入する予定です。
+
+v28.9.0 時点では `// #[on_error(report_to: "sentry", level: "critical")]` のコメント形式で記述し、
+`Sentry.capture_error` / `Sentry.capture_message` を明示的に呼び出しています。
+（v28.7.0 の `#[track]`・v28.8.0 の `#[trace]` と同じ方針）
+
+## 関連 Rune
+
+- [sentry Rune](/docs/runes/sentry) — エラートラッキング・アラート送信
+- [Datadog APM Demo](/docs/tools/datadog-apm) — Datadog APM トレースデモ
+- [Observability E2E Demo](/docs/tools/observability-e2e) — Prometheus + Grafana デモ

@@ -1,0 +1,20 @@
+# Vertex AI オンライン推論
+
+Google Vertex AI のデプロイ済みモデルエンドポイントを Favnir パイプラインから呼び出します。
+
+```favnir
+import runes/vertex-ai
+
+stage ScoreWithVertexAI: List<Feature> -> List<Prediction> !Http = |features| {
+  bind predictions <- VertexAI.predict(
+    config.vertex_endpoint,
+    features |> List.map(encode_feature)
+  )
+  Result.ok(predictions)
+}
+```
+
+## 関連 Rune
+
+- [Vertex AI](/docs/runes/vertex-ai) — Google Vertex AI ML プラットフォーム
+- [MLflow](/docs/runes/mlflow) — モデル実験管理

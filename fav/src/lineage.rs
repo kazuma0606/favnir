@@ -64,6 +64,11 @@ fn format_effects(effects: &[ast::Effect]) -> String {
             Gcp => "!Gcp".into(),
             Stream => "!Stream".into(),
             Postgres => "!Postgres".into(),
+            Redis => "!Redis".into(),
+            MySQL => "!MySQL".into(),
+            MongoDB => "!MongoDB".into(),
+            DynamoDB => "!DynamoDB".into(),
+            Elasticsearch => "!Elasticsearch".into(),
             AzureDb => "!AzureDb".into(),
             AzureStorage => "!AzureStorage".into(),
             Rpc => "!Rpc".into(),
@@ -119,6 +124,30 @@ fn classify_capability_kind(
             }
             ast::Effect::Postgres | ast::Effect::Snowflake | ast::Effect::Gcp => {
                 return ("read".into(), Some("DbRead".into()))
+            }
+            ast::Effect::Redis => {
+                // Redis は read/write 混在（get/set/incr/lpush/publish）。
+                // DB 読み取りではなく io ノードとして分類する。
+                return ("io".into(), Some("CacheWrite".into()))
+            }
+            ast::Effect::MySQL => {
+                // MySQL は Postgres と同一分類（リネージグラフ上で read ノード）。
+                // SQL の種別（SELECT vs INSERT/UPDATE）はステージレベルでは判断できないため
+                // Postgres / Snowflake と同様に "read"/"DbRead" に統一する。
+                return ("read".into(), Some("DbRead".into()))
+            }
+            ast::Effect::MongoDB => {
+                // MongoDB はドキュメント系 NoSQL。
+                // リレーショナル DB とは異なる io ノードとして分類する。
+                return ("io".into(), Some("DocStore".into()))
+            }
+            ast::Effect::DynamoDB => {
+                // DynamoDB は AWS KV / NoSQL ストア。
+                return ("io".into(), Some("KvStore".into()))
+            }
+            ast::Effect::Elasticsearch => {
+                // Elasticsearch は全文検索・ベクトル検索エンジン。
+                return ("io".into(), Some("Search".into()))
             }
             ast::Effect::Stream => {
                 return ("io".into(), Some("StreamWrite".into()))

@@ -1,0 +1,19 @@
+// examples/delta_lake_etl.fav — Delta Lake ETL デモ (v27.1.0)
+import rune "delta-lake"
+
+stage LoadRawData: Unit -> Result<String, String> !Io = |_| {
+    DeltaLake.read("/tmp/favnir_delta/raw_orders")
+}
+
+stage TransformOrders: String -> Result<String, String> = |rows_json| {
+    if String.length(rows_json) > 2
+    then Result.ok(rows_json)
+    else Result.err("empty delta table")
+}
+
+stage SaveProcessed: String -> Result<String, String> !Io = |data| {
+    bind _ <- DeltaLake.write("/tmp/favnir_delta/processed_orders", data, "append")
+    Result.ok("written to delta table")
+}
+
+seq DeltaEtlPipeline = LoadRawData |> TransformOrders |> SaveProcessed

@@ -1,0 +1,6 @@
+[rune]
+name        = "pinecone"
+version     = "1.0.0"
+description = "Pinecone ベクトルDB 連携（upsert / query / delete / fetch / describe_index_stats）"
+license     = "MIT"
+authors     = ["Favnir Team"]

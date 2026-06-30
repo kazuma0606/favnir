@@ -1,0 +1,15 @@
+// runes/otel/otel.fav — OpenTelemetry Rune (v28.3.0)
+// OTLP / Jaeger / Tempo / Honeycomb へトレースを送信する。
+// v28.3.0 stub — 実際の OTLP HTTP エクスポートは fav/src/otel.rs を参照
+public fn start_span(name: String, service: String) -> Result<Unit, String> !Io {
+    OTel.start_span_raw(name, service)
+}
+public fn set_attribute(key: String, value: String) -> Result<Unit, String> !Io {
+    OTel.set_attribute_raw(key, value)
+}
+public fn add_event(name: String, attrs: String) -> Result<Unit, String> !Io {
+    OTel.add_event_raw(name, attrs)
+}
+public fn end_span(status: String) -> Result<Unit, String> !Io {
+    OTel.end_span_raw(status)
+}

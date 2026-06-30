@@ -1,8 +1,0 @@
-stage Double: Int -> Int = |n| { n * 2 }
-stage AddOne: Int -> Int = |n| { n + 1 }
-seq DoubleThenAdd = Double |> AddOne
-
-public fn main() -> Int {
-    bind result <- DoubleThenAdd(5)
-    result
-}

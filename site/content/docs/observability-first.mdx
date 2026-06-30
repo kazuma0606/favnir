@@ -1,0 +1,110 @@
+# Observability First
+
+**宣言バージョン**: v29.0.0（2026-06-28）
+
+Favnir v29.0.0 で **Observability First** マイルストーンを達成しました。
+prometheus / datadog / sentry / grafana / otel の 5 Rune が揃い、
+`#[track]` / `#[trace]` / `#[on_error]` アノテーションと E2E デモ 3 本が
+Docker Compose で動作します。
+
+## 達成コンポーネント
+
+| コンポーネント | バージョン | 主要 API |
+|---|---|---|
+| prometheus Rune | v28.1 | `Prometheus.counter` / `gauge` / `histogram` / `push` |
+| datadog Rune | v28.2 | `Datadog.metric` / `log` / `trace` / `event` |
+| OpenTelemetry Rune | v28.3 | `OTel.start_span` / `set_attribute` / `end_span` |
+| `fav profile` 強化 | v28.4 | `--format flamegraph` / `--compare <version>` |
+| sentry Rune | v28.5 | `Sentry.capture_error` / `capture_message` / `set_tag` |
+| grafana Rune | v28.6 | `Grafana.create_annotation` / `push_dashboard` / `snapshot` |
+| E2E デモ（prometheus + grafana） | v28.7 | `prometheus_grafana.fav` |
+| E2E デモ（datadog APM） | v28.8 | `datadog_apm.fav` |
+| E2E デモ（sentry アラート） | v28.9 | `sentry_alerting.fav` |
+
+## クイックスタート
+
+```bash
+# Docker Compose で可観測性スタック起動
+docker compose -f examples/observability/docker-compose.yml up -d
+
+# E2E デモ実行
+fav run examples/observability/prometheus_grafana.fav
+fav run examples/observability/datadog_apm.fav
+fav run examples/observability/sentry_alerting.fav
+```
+
+## 象徴デモ：`#[track]` で Grafana に自動反映
+
+```favnir
+import runes/prometheus
+
+// #[track] を付けるだけでメトリクスが Grafana ダッシュボードに現れる
+// #[track(latency: true, error_rate: true)]
+stage ExtractOrders: Unit -> List<RawOrder> !Db = |_| {
+    Postgres.query[RawOrder](conn, "SELECT * FROM orders WHERE status = 'pending'")
+}
+
+// #[track(latency: true)]
+stage TransformOrders: List<RawOrder> -> List<Order> !Pure = |rows| {
+    Result.ok(List.map(rows, parse_order))
+}
+
+seq ObservabilityPipeline = ExtractOrders |> TransformOrders
+```
+
+## prometheus Rune
+
+```favnir
+import runes/prometheus
+
+stage ReportMetrics: PipelineSummary -> Unit !Io = |summary| {
+    bind _ <- Prometheus.counter("rows_processed_total", summary.count, ["pipeline": "etl"])
+    bind _ <- Prometheus.histogram("stage_duration_ms", summary.duration_ms)
+    bind _ <- Prometheus.gauge("queue_depth", Float.from_int(summary.queue_size))
+    bind _ <- Prometheus.push("http://prometheus-pushgateway:9091")
+    Result.ok(unit)
+}
+```
+
+## sentry Rune
+
+```favnir
+import runes/sentry
+
+// #[on_error] で stage 失敗を自動通知
+// #[on_error(report_to: "sentry", level: "critical")]
+stage CriticalLoad: Unit -> List<Order> !Db = |_| {
+    bind conn  <- Postgres.connect(config.db)
+    bind rows  <- Postgres.query[Order](conn, "SELECT * FROM critical_orders")
+    Result.ok(rows)
+}
+
+// 手動でエラーを送信
+stage ReportError: AppError -> Unit !Io = |err| {
+    bind _ <- Sentry.capture_error(err)
+    bind _ <- Sentry.set_tag("pipeline", "etl")
+    Result.ok(unit)
+}
+```
+
+## `fav profile` フレームグラフ
+
+```bash
+# SVG フレームグラフを生成（ブラウザで開いてインタラクティブに操作可能）
+fav profile --format flamegraph tests/fixtures/etl.fav
+# → ./profile.svg
+
+# 前バージョンとの比較
+fav profile --compare v26.0.0 tests/fixtures/etl.fav
+# → 劣化 stage を [SLOWER] でハイライト
+```
+
+## マイルストーン履歴
+
+| マイルストーン | バージョン | 内容 |
+|---|---|---|
+| Practical Self-Hosting | v25.0.0 | compiler.fav が自分自身をコンパイル |
+| Rune Foundation | v26.0.0 | コア 8 Rune 完備 |
+| Streaming Native | v27.0.0 | リアルタイムパイプライン型安全対応 |
+| Data Lakehouse | v28.0.0 | Delta Lake / Iceberg / dbt / SQLite 統合 |
+| **Observability First** | **v29.0.0** | パイプラインの内側が見える |

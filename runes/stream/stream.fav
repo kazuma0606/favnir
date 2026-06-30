@@ -1,0 +1,32 @@
+// runes/stream/stream.fav — Stream Rune (v26.4.0)
+//
+// 使い方:
+//   import rune "stream"
+//
+// Stream.* primitive（vm.rs 実装）を薄くラップして公開する。
+// Stream.map / Stream.filter は v19.1.0 から実装済み。
+// Stream.flat_map / Stream.window / Stream.merge / Stream.split は v26.4.0 で追加。
+
+public fn map(stream, f) {
+    Stream.map(stream, f)
+}
+
+public fn filter(stream, pred) {
+    Stream.filter(stream, pred)
+}
+
+public fn flat_map(stream, f) {
+    Stream.flat_map(stream, f)
+}
+
+public fn window(stream, size_secs, f) {
+    Stream.window(stream, size_secs, f)
+}
+
+public fn merge(streams) {
+    Stream.merge(streams)
+}
+
+public fn split(stream, pred) {
+    Stream.split(stream, pred)
+}

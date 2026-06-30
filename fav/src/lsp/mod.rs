@@ -382,7 +382,7 @@ mod tests {
         let text = String::from_utf8(out).expect("utf8");
         assert!(text.starts_with("Content-Length: "));
         assert!(text.contains("\r\n\r\n"));
-        assert!(text.ends_with("{\"id\":1,\"jsonrpc\":\"2.0\",\"result\":{\"ok\":true}}"));
+        assert!(text.ends_with("{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"ok\":true}}"));
     }
 
     #[test]

@@ -150,6 +150,46 @@ cargo test bootstrap
 
 ---
 
+## コミュニティ Rune 開発ガイド
+
+コミュニティ Rune の審査は以下の 5 条件（connect / read / write / error / test）で行います。
+
+### 5 条件（connect / read / write / error / test）
+
+| 条件 | 内容 |
+|---|---|
+| connect | `RUNE_NAME_URL` 等の環境変数でサービスに接続できる |
+| read | データを取得する関数が 1 つ以上ある |
+| write | データを書き込む関数が 1 つ以上ある |
+| error | エラーを `Result.err` で返す（クラッシュしない）|
+| test | `cargo test` で 3 件以上 PASS する |
+
+### rune.toml の形式
+
+各コミュニティ Rune は `rune.toml`（`[rune]` セクション）と `.fav` ファイルで構成します。
+
+```toml
+[rune]
+name = "my-rune"
+version = "0.1.0"
+description = "My community Rune"
+author = "Your Name"
+license = "MIT"
+```
+
+### 投稿方法
+
+1. `runes/<rune-name>/` ディレクトリを作成
+2. `rune.toml` と `<rune-name>.fav` を追加（5 条件を満たすこと）
+3. PR を開く — レビュー後 `runes/` にマージされます
+
+### 第 1 回 Favnir Rune コンテスト（2026-07）
+
+優秀な Rune には公式 README への掲載・グッズ等の特典あり。
+詳細は [/community](/community) ページを参照。
+
+---
+
 ## ライセンス
 
 コントリビューションは MIT ライセンスに同意したものとみなします。

@@ -1,0 +1,70 @@
+# Vertex AI Rune
+
+Google Vertex AI と Favnir パイプラインを統合します。
+学習済みモデルのオンライン推論・バッチ推論・エンドポイント管理を `stage` として表現できます。
+
+## セットアップ
+
+```bash
+export VERTEX_AI_PROJECT=your-gcp-project-id
+export VERTEX_AI_LOCATION=us-central1
+export VERTEX_AI_BASE_URL=https://us-central1-aiplatform.googleapis.com
+```
+
+## クイックスタート
+
+```favnir
+import runes/vertex-ai
+
+stage ScoreWithVertexModel: List<String> -> List<String> !Http = |features| {
+  VertexAI.predict(config.vertex_endpoint, features)
+}
+```
+
+## API リファレンス
+
+### `VertexAI.predict`
+
+```favnir
+fn VertexAI.predict(endpoint: String, instances: List<String>) -> Result<List<String>, String> !Http
+```
+
+オンライン推論を実行します。`endpoint` はエンドポイントのリソース名（例: `endpoints/1234567890`）。
+
+### `VertexAI.batch_predict`
+
+```favnir
+fn VertexAI.batch_predict(model: String, gcs_input: String, gcs_output: String) -> Result<String, String> !Http
+```
+
+GCS 上の入力データに対してバッチ推論を実行し、ジョブ ID を返します。
+
+### `VertexAI.deploy_model`
+
+```favnir
+fn VertexAI.deploy_model(model_id: String, machine_type: String) -> Result<String, String> !Http
+```
+
+モデルをエンドポイントにデプロイし、エンドポイント ID を返します。
+
+### `VertexAI.list_endpoints`
+
+```favnir
+fn VertexAI.list_endpoints() -> Result<List<String>, String> !Http
+```
+
+プロジェクト内のエンドポイント一覧を取得します。
+
+## 接続設定
+
+| 環境変数 | デフォルト | 説明 |
+|---|---|---|
+| `VERTEX_AI_PROJECT` | — | GCP プロジェクト ID（必須）|
+| `VERTEX_AI_LOCATION` | `us-central1` | リージョン |
+| `VERTEX_AI_BASE_URL` | `https://us-central1-aiplatform.googleapis.com` | API ベース URL |
+
+## 関連 Rune
+
+- [MLflow](/docs/runes/mlflow) — 実験管理・モデルレジストリ
+- [SageMaker](/docs/runes/sagemaker) — AWS ML プラットフォーム
+- [Pinecone](/docs/runes/pinecone) — ベクトル DB（RAG）

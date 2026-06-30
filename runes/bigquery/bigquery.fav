@@ -1,31 +1,19 @@
-// runes/bigquery/bigquery.fav — BigQuery Rune (v15.2.0)
-//
-// 使い方:
-//   import rune "bigquery"
-//
-//   fn my_query() -> Result<List<Row>, String> !Gcp {
-//     chain raw <- BigQuery.query("my-project", "my_dataset", "SELECT * FROM users")
-//     Json.decode_list<Row>(raw)
-//   }
-//
-// 環境変数:
-//   GOOGLE_APPLICATION_CREDENTIALS — サービスアカウント JSON キーファイルのパス
-//   GCP_PROJECT_ID                 — デフォルトプロジェクト ID（query/execute の省略可能引数に相当）
-//   BQ_DATASET                     — デフォルトデータセット名
-
-// query_raw の JSON レスポンスから rows フィールドだけを取り出すヘルパー
-fn extract_rows(raw_json: String) -> Result<String, String> {
-  chain parsed <- Json.parse(raw_json)
-  bind rows <- Json.get_field(parsed, "rows")
-  Result.ok(Json.stringify(rows))
+// runes/bigquery/bigquery.fav — BigQuery Rune (v27.4.0)
+// v15.2.0 の部分実装（query/execute、!Gcp エフェクト）から connect-based API（!Db エフェクト）に昇格。
+// Google BigQuery クライアントライブラリ統合は v28.x 以降。現バージョンは引数検証 stub。
+// TODO(v28.x): google-cloud-bigquery クレートを使った実接続に移行予定。
+public fn connect(config: String) -> Result<String, String> !Db {
+    BigQuery.connect_raw(config)
 }
-
-// SELECT クエリを実行して JSON 文字列（rows 配列）を返す
-fn query(project_id: String, dataset: String, sql: String) -> Result<String, String> !Gcp {
-  BigQuery.query_raw(project_id, dataset, sql, "[]")
+public fn query(conn: String, sql: String) -> Result<String, String> !Db {
+    BigQuery.conn_query_raw(conn, sql)
 }
-
-// DML（INSERT / UPDATE / DELETE）を実行して影響行数を返す
-fn execute(project_id: String, dataset: String, sql: String) -> Result<Int, String> !Gcp {
-  BigQuery.execute_raw(project_id, dataset, sql, "[]")
+public fn insert(conn: String, table: String, rows: String) -> Result<Unit, String> !Db {
+    BigQuery.insert_raw(conn, table, rows)
+}
+public fn load_from_gcs(conn: String, table: String, gcs_uri: String, format: String) -> Result<Unit, String> !Db {
+    BigQuery.load_from_gcs_raw(conn, table, gcs_uri, format)
+}
+public fn create_table(conn: String, table: String, schema: String) -> Result<Unit, String> !Db {
+    BigQuery.create_table_raw(conn, table, schema)
 }

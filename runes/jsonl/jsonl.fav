@@ -1,0 +1,16 @@
+// runes/jsonl/jsonl.fav — JSONL Rune (v27.6.0)
+// JSON Lines（1 行 1 JSON オブジェクト）の読み書き・ストリーミング処理。
+// ジェネリック型付き API（JSONL.read[T] / JSONL.stream[T]）は v28.x 以降。
+// TODO(v28.x): JSONL.read[T] / JSONL.stream[T] ジェネリック API + コールバック機構に移行予定。
+public fn read(path: String) -> Result<String, String> !Io {
+    JSONL.read_raw(path)
+}
+public fn write(path: String, rows: String) -> Result<Unit, String> !Io {
+    JSONL.write_raw(path, rows)
+}
+public fn stream(path: String) -> Result<String, String> !Io {
+    JSONL.stream_raw(path)
+}
+public fn append(path: String, row: String) -> Result<Unit, String> !Io {
+    JSONL.append_raw(path, row)
+}

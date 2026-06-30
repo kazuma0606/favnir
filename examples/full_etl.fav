@@ -1,0 +1,48 @@
+// full_etl.fav — Rune Foundation デモ
+// postgres → 集計 → s3 保存 → kafka 通知
+// `fav run examples/full_etl.fav`（ローカル Docker 環境必須）
+
+import runes/postgres
+import runes/s3
+import runes/kafka
+import runes/json
+
+type Order = {
+  id:     Int
+  amount: Float
+  status: String
+}
+
+type Summary = {
+  total_orders: Int
+  total_amount: Float
+}
+
+// postgres から完了済み注文を取得
+stage LoadOrders: Unit -> List<Order> !Db = |_| {
+  bind conn <- Postgres.connect(config.postgres)
+  Postgres.query[Order](conn, "SELECT id, amount, status FROM orders WHERE status = $1", ["completed"])
+}
+
+// 注文リストを集計して Summary に変換
+stage Summarize: List<Order> -> Summary = |orders| {
+  bind total  <- Result.ok(List.length(orders))
+  bind amount <- Result.ok(List.fold(orders, 0.0, |acc, o| acc + o.amount))
+  Result.ok(Summary { total_orders: total, total_amount: amount })
+}
+
+// 集計結果を S3 に保存
+stage SaveToS3: Summary -> Summary !Io = |summary| {
+  bind json_str <- Json.encode(summary)
+  bind _        <- S3.put_object("my-bucket", "etl/summary.json", Bytes.from_str(json_str))
+  Result.ok(summary)
+}
+
+// Kafka に通知を送信
+stage NotifyKafka: Summary -> Unit !Io = |summary| {
+  bind msg <- Json.encode(summary)
+  Kafka.produce("etl-events", "summary", msg)
+}
+
+// フル ETL パイプライン: postgres → 集計 → s3 → kafka
+LoadOrders |> Summarize |> SaveToS3 |> NotifyKafka

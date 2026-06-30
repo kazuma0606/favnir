@@ -1,0 +1,16 @@
+# ClickHouse バルクインサート
+
+ClickHouse への大量データの高速バルクインサートパイプラインです。
+
+```favnir
+import runes/clickhouse
+
+stage BulkInsertClickHouse: List<Event> -> Unit !Db = |events| {
+  bind conn <- ClickHouse.connect(config.clickhouse_url)
+  ClickHouse.insert_batch(conn, config.clickhouse_table, events)
+}
+```
+
+## 関連 Rune
+
+- [ClickHouse](/docs/runes/clickhouse) — ClickHouse 列指向 DB

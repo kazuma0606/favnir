@@ -1,0 +1,62 @@
+# SageMaker Rune
+
+AWS SageMaker と Favnir パイプラインを統合します。
+学習済みモデルのエンドポイント推論・作成・削除を `stage` として表現できます。
+
+## セットアップ
+
+```bash
+export SAGEMAKER_REGION=us-east-1
+export SAGEMAKER_BASE_URL=https://runtime.sagemaker.us-east-1.amazonaws.com
+```
+
+## クイックスタート
+
+```favnir
+import runes/sagemaker
+
+stage ScoreWithSageMaker: String -> String !Http = |payload| {
+  SageMaker.invoke(config.sagemaker_endpoint, payload)
+}
+```
+
+## API リファレンス
+
+### `SageMaker.invoke`
+
+```favnir
+fn SageMaker.invoke(endpoint_name: String, payload: String) -> Result<String, String> !Http
+```
+
+SageMaker エンドポイントで推論を実行し、レスポンス本文を返します。
+
+### `SageMaker.create_endpoint`
+
+```favnir
+fn SageMaker.create_endpoint(model: String, config: String) -> Result<String, String> !Http
+```
+
+エンドポイントを作成し、エンドポイント名を返します。
+
+### `SageMaker.delete_endpoint`
+
+```favnir
+fn SageMaker.delete_endpoint(name: String) -> Result<Unit, String> !Http
+```
+
+エンドポイントを削除します。
+
+> **注意**: AWS SageMaker API は本来 DELETE メソッドを使用しますが、Favnir HTTP Rune に `Http.delete` が未実装のため、POST + `/delete` パスで代替しています。`Http.delete` primitive の実装後に移行予定です。
+
+## 接続設定
+
+| 環境変数 | デフォルト | 説明 |
+|---|---|---|
+| `SAGEMAKER_REGION` | `us-east-1` | AWS リージョン。`SAGEMAKER_BASE_URL` 未設定時に URL の構築に使用 |
+| `SAGEMAKER_BASE_URL` | `https://runtime.sagemaker.{REGION}.amazonaws.com` | API ベース URL（設定した場合 SAGEMAKER_REGION より優先）|
+
+## 関連 Rune
+
+- [MLflow](/docs/runes/mlflow) — 実験管理・モデルレジストリ
+- [Vertex AI](/docs/runes/vertex-ai) — Google ML プラットフォーム
+- [Pinecone](/docs/runes/pinecone) — ベクトル DB（RAG）

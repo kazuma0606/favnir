@@ -1,0 +1,20 @@
+// runes/redshift/redshift.fav — Redshift Rune (v27.5.0)
+// AWS Redshift（postgres 互換 API）への接続・クエリ・S3 COPY / UNLOAD。
+// postgres ドライバを使った実接続は v28.x 以降。現バージョンは引数検証 stub。
+// TODO(v28.x): postgres クレートを使った実接続に移行予定。
+//              _config（DSN / 接続文字列）を postgres クライアントの初期化に渡す。
+public fn connect(config: String) -> Result<String, String> !Db {
+    Redshift.connect_raw(config)
+}
+public fn query(conn: String, sql: String) -> Result<String, String> !Db {
+    Redshift.query_raw(conn, sql)
+}
+public fn execute(conn: String, sql: String, params: String) -> Result<Int, String> !Db {
+    Redshift.execute_raw(conn, sql, params)
+}
+public fn copy_from_s3(conn: String, table: String, s3_uri: String, opts: String) -> Result<Unit, String> !Db {
+    Redshift.copy_from_s3_raw(conn, table, s3_uri, opts)
+}
+public fn unload_to_s3(conn: String, query: String, s3_uri: String, opts: String) -> Result<Unit, String> !Db {
+    Redshift.unload_to_s3_raw(conn, query, s3_uri, opts)
+}

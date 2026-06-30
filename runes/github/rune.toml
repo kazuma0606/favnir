@@ -1,0 +1,6 @@
+[rune]
+name        = "github"
+version     = "1.0.0"
+description = "GitHub REST API 連携（create_comment / create_issue / update_issue / list_prs / get_pr）"
+license     = "MIT"
+authors     = ["Favnir Team"]

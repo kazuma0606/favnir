@@ -1,0 +1,69 @@
+# datadog Rune
+
+Datadog APM・ログ・メトリクスを DogStatsD / Datadog API 経由で送信する Rune。
+ETL パイプラインのトレース・エラー率・カスタムメトリクスを型安全に収集できます。
+
+> **v28.2.0 stub** — 実際の DogStatsD / Datadog API 送信は v28.x 以降に実装予定。
+
+## インポート
+
+```favnir
+import rune "datadog"
+```
+
+## エフェクト
+
+`!Io` — DogStatsD / Datadog API へのネットワーク送信は I/O。
+
+## 関数一覧
+
+| 関数 | シグネチャ | 内容 |
+|---|---|---|
+| `metric` | `(name: String, value: Float, tags: String) -> Result<Unit, String> !Io` | カスタムメトリクス送信（DogStatsD） |
+| `log` | `(level: String, message: String, attrs: String) -> Result<Unit, String> !Io` | 構造化ログ送信（JSON Lines 形式） |
+| `trace` | `(name: String, fn_body: String) -> Result<Unit, String> !Io` | APM トレース（スパン） |
+| `event` | `(title: String, text: String, tags: String) -> Result<Unit, String> !Io` | イベント通知（デプロイ・アラート等） |
+| `service_check` | `(name: String, status: String) -> Result<Unit, String> !Io` | サービスチェック（OK / WARN / CRITICAL） |
+
+## 使用例
+
+```favnir
+import rune "datadog"
+
+stage TraceExtract: Unit -> Result<Unit, String> !Io = |_| {
+    bind _ <- Datadog.trace("etl-extractor", "extract")
+    bind _ <- Datadog.metric("etl.extract.calls", 1.0, "[]")
+    Result.ok(unit)
+}
+
+stage ReportToDatadog: Unit -> Result<Unit, String> !Io = |_| {
+    bind _ <- Datadog.log("info", "ETL pipeline completed", "{}")
+    bind _ <- Datadog.event("ETL Complete", "All stages finished", "[]")
+    bind _ <- Datadog.service_check("etl.pipeline", "OK")
+    Result.ok(unit)
+}
+
+seq DatadogApmDemo = TraceExtract |> ReportToDatadog
+```
+
+## ローカル開発環境
+
+```yaml
+# docker-compose.yml（抜粋）
+services:
+  datadog-agent:
+    image: datadog/agent:7
+    environment:
+      - DD_API_KEY=test
+      - DD_SITE=datadoghq.com
+      - DD_APM_ENABLED=true
+    ports:
+      - "8125:8125/udp"  # DogStatsD
+      - "8126:8126"      # APM
+```
+
+## v28.x ロードマップ
+
+- v28.x: DogStatsD UDP 送信実装 / Datadog API 実統合
+- v28.3+: `#[trace(service: "name")]` アノテーション対応
+- v28.8: `#[trace]` 付き E2E デモ（datadog_apm.fav 置き換え）

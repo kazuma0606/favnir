@@ -1,0 +1,33 @@
+// runes/nats/nats.fav — NATS Rune (v26.2.0)
+//
+// 使い方:
+//   import rune "nats"
+//
+// 環境変数:
+//   NATS_URL    — NATS サーバー URL（省略時: "nats://localhost:4222"）
+//
+// ローカル開発（JetStream 有効）:
+//   docker run -p 4222:4222 nats:latest -js
+
+type NatsConn(String)
+type NatsMsg = { subject: String, payload: String, reply: String }
+
+public fn connect(url: String) -> Result<NatsConn, String> !Stream {
+    NATS.connect_raw(url)
+}
+
+public fn publish(conn: NatsConn, subject: String, payload: String) -> Result<Unit, String> !Stream {
+    NATS.publish_raw(conn, subject, payload)
+}
+
+public fn subscribe(conn: NatsConn, subject: String) -> Result<String, String> !Stream {
+    NATS.subscribe_raw(conn, subject)
+}
+
+public fn jetstream_publish(conn: NatsConn, stream: String, payload: String) -> Result<String, String> !Stream {
+    NATS.jetstream_publish_raw(conn, stream, payload)
+}
+
+public fn jetstream_consume(conn: NatsConn, stream: String, consumer: String) -> Result<String, String> !Stream {
+    NATS.jetstream_consume_raw(conn, stream, consumer)
+}

@@ -105,6 +105,16 @@ pub enum Effect {
     Gcp,          // v15.2.0
     Stream,       // v15.4.0 — Kafka / MSK
     Postgres,
+    /// v25.3.0: Redis Rune effect（外部 Redis 専用。インメモリ !Cache とは独立）
+    Redis,
+    /// v25.4.0: MySQL Rune effect（外部 MySQL 専用。!Postgres とは独立）
+    MySQL,
+    /// v25.5.0: MongoDB Rune effect（ドキュメント系 NoSQL 専用）
+    MongoDB,
+    /// v25.6.0: DynamoDB Rune effect（AWS NoSQL KV）
+    DynamoDB,
+    /// v25.8.0: Elasticsearch Rune effect（全文検索・ベクトル検索）
+    Elasticsearch,
     AzureDb,
     AzureStorage,  // Azure Blob Storage (v14.3.0 infra, v14.5.0 primitives)
     Rpc,
@@ -553,9 +563,11 @@ pub struct Block {
 // ── StreamingAnnotation (v19.1.0) ────────────────────────────────────────────
 
 /// `#[streaming(chunk_size = 1000)]` or `#[streaming]` on seq pipeline definitions.
+/// v26.4.0: `backpressure = true` parameter added.
 #[derive(Debug, Clone)]
 pub struct StreamingAnnotation {
     pub chunk_size: Option<i64>,
+    pub backpressure: Option<bool>,  // v26.4.0: stored as annotation; bounded channel impl in v27.x
     pub span: Span,
 }
 

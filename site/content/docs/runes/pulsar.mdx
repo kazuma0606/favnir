@@ -1,0 +1,95 @@
+# Pulsar Rune
+
+v26.9.0 で追加した Apache Pulsar Rune。
+`import rune "pulsar"` → `Pulsar.*` 名前空間で 4 関数が使用可能。
+
+## セットアップ（Docker standalone）
+
+```bash
+# Pulsar standalone 起動
+docker compose -f examples/streaming/docker-compose.yml up -d pulsar
+
+# トピック作成（任意）
+docker exec <pulsar-container> bin/pulsar-admin topics create persistent://public/default/my-topic
+```
+
+## 環境変数
+
+| 変数名 | デフォルト値 | 説明 |
+|---|---|---|
+| `PULSAR_ENDPOINT` | `http://localhost:8080` | Pulsar Admin REST API エンドポイント |
+
+## 関数一覧
+
+### `Pulsar.produce(topic, key, value)`
+
+メッセージを送信する（現バージョンは stub 実装）。戻り値はメッセージ ID 文字列。
+
+> **注意**: Pulsar Binary Protocol（port 6650）は v27.x 以降。現バージョンは `"stub-message-id"` を返す。
+
+```favnir
+import rune "pulsar"
+
+stage PublishEvent: String -> Result<String, String> !AWS = |payload| {
+    Pulsar.produce("persistent://public/default/events", "partition-key", payload)
+}
+```
+
+> **注**: `!AWS` エフェクトは `!Pulsar` 独立前の暫定表記です（v27.x で移行予定）。
+
+```favnir
+```
+
+### `Pulsar.consume(topic, subscription)`
+
+1 回ポーリングしてメッセージの JSON 文字列を返す（継続消費は v27.x 以降）。
+
+```favnir
+bind messages_json <- Pulsar.consume(
+    "persistent://public/default/events",
+    "my-subscription"
+)
+```
+
+### `Pulsar.ack(message_id)`
+
+メッセージを確認（ACK）する。
+
+```favnir
+bind _ <- Pulsar.ack(message_id)
+```
+
+### `Pulsar.nack(message_id)`
+
+メッセージを否定確認（NACK）する。ブローカーが再配信を行う。
+
+```favnir
+bind _ <- Pulsar.nack(message_id)
+```
+
+## パイプライン例
+
+```favnir
+import rune "pulsar"
+
+stage FetchEvents: Unit -> Result<String, String> !AWS = |_| {
+    Pulsar.consume("persistent://public/default/events", "favnir-sub")
+}
+
+stage ProcessEvent: String -> Result<String, String> !Pure = |payload| {
+    if String.length(payload) > 2
+    then Result.ok(payload)
+    else Result.err("empty payload")
+}
+
+seq EventPipeline = FetchEvents |> ProcessEvent
+```
+
+## スコープ外（v27.x 以降）
+
+- Pulsar Binary Protocol（port 6650）経由の高速 produce
+- `Pulsar.consume[T](topic, subscription, fn)` — 型付きコールバック継続消費ループ
+- マルチテナント（`tenant` / `namespace` パラメータの完全サポート）
+- `!Pulsar` エフェクトの独立（現在 `!AWS` に包含）
+- Persistent Topic の詳細制御（サブスクリプションモード: Exclusive / Shared / Key_Shared）
+- FIFO（Key_Shared）サブスクリプションモード

@@ -1,0 +1,85 @@
+# NATS → Postgres IoT センサーデータ蓄積
+
+v26.7.0 で実装した Streaming Native 第 3 E2E デモ。
+NATS の `sensors.data` サブジェクトから届く IoT センサーデータを Postgres に蓄積するパイプライン。
+
+## パイプライン構成
+
+```
+FetchSensorData → ValidateSensor → InsertToPostgres
+(Unit)             (String)          (String)
+```
+
+| ステージ | エフェクト | 処理内容 |
+|---|---|---|
+| `FetchSensorData` | `!Stream` | NATS の `sensors.data` サブジェクトを購読 |
+| `ValidateSensor` | `!Pure` | 空ペイロードをスキップ |
+| `InsertToPostgres` | `!Postgres` | `sensor_readings` テーブルに JSONB で INSERT |
+
+## セットアップ
+
+```bash
+# サービス起動（healthcheck 完了まで待機）
+docker compose -f examples/streaming/docker-compose.yml up -d --wait
+
+# Postgres テーブル作成
+docker exec -it $(docker compose -f examples/streaming/docker-compose.yml ps -q postgres) \
+    psql -U favnir -d sensors -c "
+    CREATE TABLE IF NOT EXISTS sensor_readings (
+        id SERIAL PRIMARY KEY,
+        data JSONB NOT NULL,
+        received_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );"
+
+# ヘルスチェック確認
+curl http://localhost:8222/healthz
+```
+
+## 環境変数
+
+| 変数名 | デフォルト値 | 説明 |
+|---|---|---|
+| `NATS_URL` | `nats://localhost:4222` | NATS サーバー URL |
+| `DATABASE_URL` | `host=localhost port=5432 user=favnir password=favnir dbname=sensors` | Postgres 接続文字列 |
+
+## 実行
+
+```bash
+fav run examples/streaming/nats_to_postgres.fav
+```
+
+## コード全文
+
+```favnir
+import rune "nats"
+import rune "postgres"
+
+stage FetchSensorData: Unit -> Result<String, String> !Stream = |_| {
+    bind conn <- NATS.connect("")
+    NATS.subscribe(conn, "sensors.data")
+}
+
+stage ValidateSensor: String -> Result<String, String> !Pure = |payload| {
+    if String.length(payload) > 0
+    then Result.ok(payload)
+    else Result.err("empty sensor payload — skipping")
+}
+
+stage InsertToPostgres: String -> Result<String, String> !Postgres = |sensor_json| {
+    bind _ <- Postgres.execute(
+        "INSERT INTO sensor_readings (data, received_at) VALUES ($1::jsonb, NOW())",
+        "[" ++ sensor_json ++ "]"
+    )
+    Result.ok("inserted sensor reading into sensor_readings")
+}
+
+seq SensorPipeline = FetchSensorData |> ValidateSensor |> InsertToPostgres
+```
+
+## スコープ外（v27.x 以降）
+
+- 型付きデシリアライズ（`SensorReading` 構造体 → `value: Float` フィールドアクセス）
+- `NATS.subscribe[T]("sensors.>")` ワイルドカード + 型付き消費
+- `EnrichWithMetadata` ステージ（センサーメタデータ付与）
+- JetStream 消費（`NATS.jetstream_consume`）による ACK / 永続化保証
+- Postgres コネクションプール（`Pool.create`）

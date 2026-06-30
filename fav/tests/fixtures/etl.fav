@@ -1,0 +1,10 @@
+// fav/tests/fixtures/etl.fav — profile テスト用 ETL フィクスチャ (v28.4.0 作成、v29.0.0 修正)
+stage ExtractOrders: Unit -> Unit = |_| { () }
+stage TransformOrders: Unit -> Unit = |_| { () }
+stage LoadWarehouse: Unit -> Unit = |_| { () }
+
+seq EtlPipeline = ExtractOrders |> TransformOrders |> LoadWarehouse
+
+fn main() -> Unit {
+    EtlPipeline(())
+}

@@ -1,0 +1,25 @@
+# LLM テキスト生成パイプライン
+
+LLM Rune を使ってドキュメントの要約・分類・抽出を行うパイプラインです。
+
+```favnir
+import runes/llm
+
+stage SummarizeDocuments: List<String> -> List<String> !Http = |docs| {
+  docs |> List.map(|doc|
+    LLM.complete(
+      config.openai,
+      "以下のテキストを 3 文以内で要約してください:\n\n" ++ doc
+    )
+  ) |> Result.all
+}
+
+stage ClassifyIntent: String -> String !Http = |text| {
+  LLM.complete(config.openai, "次のテキストの意図を ['問い合わせ', '注文', 'クレーム'] から分類してください:\n\n" ++ text)
+}
+```
+
+## 関連 Rune
+
+- [LLM](/docs/runes/llm) — Claude / OpenAI テキスト生成
+- [Pinecone](/docs/runes/pinecone) — RAG 拡張

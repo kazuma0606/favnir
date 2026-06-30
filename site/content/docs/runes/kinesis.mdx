@@ -1,0 +1,99 @@
+# Kinesis Rune
+
+AWS Kinesis Data Streams との統合。v26.1.0 で「動く Rune の 5 条件」をクリア。
+
+## 「動く Rune」5 条件クリア状況
+
+| # | 条件 | 実装 | 状態 |
+|---|---|---|---|
+| 1 | connect | `connect(endpoint)` — KinesisConn を返す | ✓ |
+| 2 | read | `get_records(conn, iterator, limit)` — シャードからレコード取得 | ✓ |
+| 3 | write | `put_record(conn, stream, key, data)` — レコード送信 | ✓ |
+| 4 | error | `Result<T, String>` 統一、LocalStack 接続失敗時に適切なエラーを返す | ✓ |
+| 5 | test | `v261000_tests` 6 件 PASS | ✓ |
+
+## セットアップ
+
+```bash
+docker run -p 4566:4566 localstack/localstack
+export KINESIS_ENDPOINT=http://localhost:4566
+export AWS_ACCESS_KEY_ID=test
+export AWS_SECRET_ACCESS_KEY=test
+export AWS_DEFAULT_REGION=us-east-1
+```
+
+## 使い方
+
+```favnir
+import rune "kinesis"
+
+fn main() -> Result<String, String> !Stream {
+    bind conn     <- connect("")
+    bind iter     <- get_shard_iterator(conn, "my-stream", "shardId-000000000000", "LATEST")
+    bind _        <- put_record(conn, "my-stream", "partition-key", "hello kinesis")
+    bind records  <- get_records(conn, iter, 100)
+    Result.ok(records)
+}
+```
+
+## API リファレンス
+
+### `connect(endpoint: String) -> Result<KinesisConn, String>`
+
+Kinesis エンドポイントへの接続を確立します。
+
+- `endpoint` が空文字列の場合、`KINESIS_ENDPOINT` 環境変数（デフォルト: `http://localhost:4566`）を使用します。
+- LocalStack 使用時は `""` を渡すか、`KINESIS_ENDPOINT` を設定してください。
+
+### `put_record(conn: KinesisConn, stream: String, key: String, data: String) -> Result<String, String>`
+
+Kinesis ストリームに 1 件のレコードを送信します。成功時はシーケンス番号を返します。
+
+### `put_records(conn: KinesisConn, stream: String, records: List<KinesisRecord>) -> Result<Int, String>`
+
+バッチでレコードを送信します（最大 500 件・10 MB）。成功件数を返します。
+
+### `get_shard_iterator(conn: KinesisConn, stream: String, shard_id: String, iter_type: String) -> Result<ShardIterator, String>`
+
+シャードイテレータを取得します。
+
+`iter_type` には以下を指定できます:
+- `"LATEST"` — 最新レコードから読み取り
+- `"TRIM_HORIZON"` — 最古レコードから読み取り
+- `"AT_SEQUENCE_NUMBER"` — 特定シーケンス番号から読み取り
+
+### `get_records(conn: KinesisConn, iterator: ShardIterator, limit: Int) -> Result<String, String>`
+
+シャードからレコードを取得します。結果は JSON 配列文字列として返されます。
+`Json.decode` 等で `List<KinesisRecord>` に変換してください。
+
+`limit <= 0` の場合はエラーを返します。
+
+## 型定義
+
+```favnir
+type KinesisConn(String)
+type ShardIterator(String)
+type KinesisRecord = {
+    partition_key: String
+    data:          String
+    sequence_num:  String
+}
+```
+
+## エラー処理
+
+```favnir
+match connect("http://localhost:4566") {
+    Result.ok(conn) => put_record(conn, "my-stream", "key", "data")
+    Result.err(e)   => Result.err("Kinesis connection failed: " + e)
+}
+```
+
+## スコープ外（v26.x 以降）
+
+- `consume` 継続消費ループ（ポーリング）— v26.2〜v26.9 予定
+- Enhanced Fan-Out（EFO）コンシューマー
+- Server-Side Encryption（KMS）
+- `Stream.*` 操作との統合 — v26.4 予定
+- kinesis_to_s3 E2E デモ — v26.6 予定

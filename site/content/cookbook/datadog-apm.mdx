@@ -1,0 +1,19 @@
+# Datadog APM トレース
+
+Favnir パイプラインの各 stage を Datadog APM でトレースします。
+
+```favnir
+import runes/datadog
+
+stage TraceWithDatadog: List<Row> -> List<Row> !Http = |rows| {
+  bind span <- Datadog.start_span(config.datadog_api_key, "pipeline.transform", "favnir")
+  bind result <- transform_rows(rows)
+  bind _ <- Datadog.finish_span(span, "success")
+  Result.ok(result)
+}
+```
+
+## 関連 Rune
+
+- [Datadog](/docs/runes/datadog) — Datadog APM・メトリクス
+- [OTel](/docs/runes/otel) — OpenTelemetry 標準トレース

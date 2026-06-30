@@ -1,0 +1,6 @@
+[rune]
+name        = "sagemaker"
+version     = "1.0.0"
+description = "AWS SageMaker 連携（invoke / create_endpoint / delete_endpoint）"
+license     = "MIT"
+authors     = ["Favnir Team"]

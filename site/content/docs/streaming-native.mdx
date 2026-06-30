@@ -1,0 +1,98 @@
+# Streaming Native
+
+v27.0.0 で宣言した **Streaming Native** マイルストーン。
+「Kafka → 変換 → Elasticsearch のリアルタイムパイプラインが 50 行で書ける」状態。
+
+## 定義
+
+> 「ストリーミング Rune 5 本が実質化され、`Stream.*` 操作 6 関数が使え、
+>  E2E デモ 3 本が Docker Compose で動く」状態 = **Streaming Native**
+
+## ストリーミング Rune 一覧
+
+| Rune | import | 主要関数 | 用途 |
+|---|---|---|---|
+| kinesis | `import rune "kinesis"` | put_record / get_records / get_shard_iterator | AWS リアルタイムストリーミング |
+| nats | `import rune "nats"` | publish / subscribe / jetstream_publish / jetstream_consume | 軽量・高速 IoT / マイクロサービス |
+| rabbitmq | `import rune "rabbitmq"` | connect / declare_exchange / publish / consume | エンタープライズ MQ（AMQP） |
+| sqs | `import rune "sqs"` | send_message / receive_messages / delete_message / purge | AWS 非同期キュー |
+| pulsar | `import rune "pulsar"` | produce / consume / ack / nack | マルチテナント分散ストリーミング（`!AWS` エフェクト暫定、v27.x で `!Pulsar` へ） |
+
+## Stream.* 操作 6 関数
+
+```favnir
+import rune "stream"
+
+// map: 各要素を変換
+stage Transform: Stream<String> -> Stream<String> !Pure = |stream| {
+    Stream.map(stream, |s| String.to_upper(s))
+}
+
+// filter: 条件を満たす要素のみ通過
+stage FilterErrors: Stream<String> -> Stream<String> !Pure = |stream| {
+    Stream.filter(stream, |s| String.contains(s, "ERROR"))
+}
+
+// flat_map: 1→N 変換
+// window: タンブリングウィンドウ（N 秒ごとにバッチ化）
+// merge: 複数ストリームを合流
+// split: 条件で 2 ストリームに分岐
+```
+
+| 操作 | シグネチャ | 内容 |
+|---|---|---|
+| `Stream.map` | `(stream, fn)` | 各要素を変換 |
+| `Stream.filter` | `(stream, pred)` | 条件を満たす要素のみ通過 |
+| `Stream.flat_map` | `(stream, fn)` | 1→N 変換して展開 |
+| `Stream.window` | `(stream, size_secs, fn)` | タンブリングウィンドウ |
+| `Stream.merge` | `(streams)` | 複数ストリームを合流 |
+| `Stream.split` | `(stream, pred)` | 条件で 2 ストリームに分岐 |
+
+## E2E デモ 3 本
+
+### kafka → Elasticsearch（リアルタイムログ集計）
+
+```bash
+docker compose -f examples/streaming/docker-compose.yml up -d kafka elasticsearch
+fav run examples/streaming/kafka_to_elasticsearch.fav
+```
+
+### kinesis → S3（クリックイベントアーカイブ）
+
+```bash
+docker compose -f examples/streaming/docker-compose.yml up -d localstack
+fav run examples/streaming/kinesis_to_s3.fav
+```
+
+### nats → postgres（IoT センサーデータ蓄積）
+
+```bash
+docker compose -f examples/streaming/docker-compose.yml up -d nats postgres
+fav run examples/streaming/nats_to_postgres.fav
+```
+
+## 全サービス一括起動
+
+```bash
+docker compose -f examples/streaming/docker-compose.yml up -d
+```
+
+サービス一覧:
+
+| サービス | ポート | 用途 |
+|---|---|---|
+| kafka (Redpanda) | 9092 | kafka_to_elasticsearch デモ |
+| elasticsearch | 9200 | kafka_to_elasticsearch デモ |
+| localstack | 4566 | kinesis_to_s3 デモ（Kinesis + S3） |
+| nats | 4222 / 8222 | nats_to_postgres デモ |
+| postgres | 5432 | nats_to_postgres デモ |
+| pulsar | 6650 / 8080 | pulsar Rune テスト用 |
+
+## 次フェーズ（v27.x 以降）
+
+- kinesis: `Kinesis.consume[T]` 継続消費ループ
+- nats: `NATS.request[T]` リクエスト/レスポンス
+- rabbitmq: `RabbitMQ.ack` / `RabbitMQ.nack`
+- pulsar: Binary Protocol 経由の高速 produce
+- `Stream<T>` 型の型システム統合
+- スライディング・セッションウィンドウ対応

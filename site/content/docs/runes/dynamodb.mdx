@@ -1,0 +1,210 @@
+# DynamoDB Rune
+
+`import rune "dynamodb"` で AWS DynamoDB に接続できます。`!DynamoDB` エフェクトが必要です。
+
+## セットアップ
+
+```bash
+docker run -p 4566:4566 localstack/localstack
+```
+
+LocalStack を使う場合はエンドポイントに `"http://localhost:4566"` を渡します。AWS 本番を使う場合は `""` または `"default"` を渡します。
+
+> **接続モデル（v25.6.0）**: 各関数呼び出しのたびに HTTP リクエストを送信します。コネクションプールは v26.x で対応予定。
+
+環境変数:
+- `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` — AWS 認証情報
+- `AWS_DEFAULT_REGION` — リージョン（デフォルト: `us-east-1`）
+- `AWS_ENDPOINT_URL` — カスタムエンドポイント（LocalStack 等）
+- `LOCALSTACK_ENDPOINT` — LocalStack エンドポイント（`AWS_ENDPOINT_URL` が未設定の場合に参照）
+
+## `!DynamoDB` エフェクト
+
+`!DynamoDB` は外部 DynamoDB 操作を明示するエフェクトです。他の DB エフェクト（`!Postgres` / `!MongoDB` 等）とは独立した別エフェクトです。
+
+```favnir
+stage GetSession: String -> Result<String, String> !DynamoDB = |session_id| {
+    bind conn <- DynamoDB.connect("http://localhost:4566")
+    DynamoDB.get_item(conn, "sessions", "{\"session_id\": \"" + session_id + "\"}")
+}
+```
+
+## API リファレンス
+
+### `DynamoDB.connect`
+
+```favnir
+fn connect(endpoint: String) -> Result<DynamoConn, String> !DynamoDB
+```
+
+エンドポイントへの接続を確認（ListTables ping）し、`DynamoConn` を返します。
+
+- `""` または `"default"` → `AWS_ENDPOINT_URL` → `LOCALSTACK_ENDPOINT` → AWS 本番
+- `"http://localhost:4566"` → LocalStack
+
+```favnir
+bind conn <- DynamoDB.connect("http://localhost:4566")
+```
+
+---
+
+### `DynamoDB.get_item`
+
+```favnir
+fn get_item(conn: DynamoConn, table: String, key_json: String) -> Result<String, String> !DynamoDB
+```
+
+プライマリキーで 1 件取得します。JSON オブジェクト文字列で返します。
+
+- `key_json`: `{"pk": "user123"}` 形式（プレーン JSON）
+- 見つからない場合: `Result.err("not_found")`
+
+```favnir
+bind item <- DynamoDB.get_item(conn, "users", "{\"pk\": \"user123\"}")
+```
+
+---
+
+### `DynamoDB.put_item`
+
+```favnir
+fn put_item(conn: DynamoConn, table: String, item_json: String) -> Result<Unit, String> !DynamoDB
+```
+
+アイテムを書き込みます（上書き）。
+
+- `item_json`: `{"pk": "user123", "name": "Alice", "ttl": 1700000000}` 形式（プレーン JSON）
+
+```favnir
+bind _ <- DynamoDB.put_item(conn, "users", "{\"pk\": \"user123\", \"name\": \"Alice\"}")
+```
+
+---
+
+### `DynamoDB.delete_item`
+
+```favnir
+fn delete_item(conn: DynamoConn, table: String, key_json: String) -> Result<Unit, String> !DynamoDB
+```
+
+プライマリキーで 1 件削除します。
+
+```favnir
+bind _ <- DynamoDB.delete_item(conn, "users", "{\"pk\": \"user123\"}")
+```
+
+---
+
+### `DynamoDB.query`
+
+```favnir
+fn query(conn: DynamoConn, table: String, key_cond: String, attr_vals_json: String) -> Result<String, String> !DynamoDB
+```
+
+`KeyConditionExpression` でクエリします。JSON 配列文字列で返します。
+
+- `key_cond`: `"pk = :pk"` 形式の KeyConditionExpression
+- `attr_vals_json`: `{":pk": "user123"}` 形式（プレーン JSON — `:` プレフィックスが必要）
+
+```favnir
+bind items <- DynamoDB.query(conn, "events",
+    "pk = :pk",
+    "{\":pk\": \"user123\"}")
+```
+
+---
+
+### `DynamoDB.scan`
+
+```favnir
+fn scan(conn: DynamoConn, table: String, filter_json: String) -> Result<String, String> !DynamoDB
+```
+
+テーブルを全件スキャンします。`filter_json` が `""` の場合は全件返します。
+
+```favnir
+// 全件スキャン
+bind all_items <- DynamoDB.scan(conn, "events", "")
+
+// フィルタ付き（filter_json は DynamoDB FilterExpression 文字列を直接渡す）
+// ExpressionAttributeNames / ExpressionAttributeValues が必要な場合は transact_write を使用
+bind active <- DynamoDB.scan(conn, "events", "attribute_exists(session_id)")
+```
+
+---
+
+### `DynamoDB.batch_write`
+
+```favnir
+fn batch_write(conn: DynamoConn, table: String, puts_json: String) -> Result<Int, String> !DynamoDB
+```
+
+複数アイテムをバッチ書き込みします（最大 25 件）。書き込み件数を返します。
+
+- `puts_json`: JSON 配列文字列（プレーン JSON）
+
+```favnir
+bind count <- DynamoDB.batch_write(conn, "sessions",
+    "[{\"pk\": \"s1\", \"data\": \"...\"}, {\"pk\": \"s2\", \"data\": \"...\"}]")
+```
+
+---
+
+### `DynamoDB.transact_write`
+
+```favnir
+fn transact_write(conn: DynamoConn, ops_json: String) -> Result<Unit, String> !DynamoDB
+```
+
+トランザクションとして複数操作をアトミックに実行します。
+
+> **注意**: `ops_json` は DynamoDB ネイティブ形式（属性型 JSON）で渡す必要があります。
+
+```favnir
+bind _ <- DynamoDB.transact_write(conn,
+    "[{\"Put\": {\"TableName\": \"sessions\", \"Item\": {\"pk\": {\"S\": \"abc\"}}}}]")
+```
+
+---
+
+## JSON フォーマット
+
+| パラメータ | 形式 | 例 |
+|---|---|---|
+| `key_json` | JSON オブジェクト（プレーン） | `"{\"pk\": \"user1\"}"` |
+| `item_json` | JSON オブジェクト（プレーン） | `"{\"pk\": \"user1\", \"name\": \"Alice\"}"` |
+| `attr_vals_json` | JSON オブジェクト（プレーン、`:` プレフィックス） | `"{\":pk\": \"user1\"}"` |
+| `puts_json` | JSON 配列（プレーン） | `"[{\"pk\": \"u1\"}, ...]"` |
+| `ops_json` | DynamoDB TransactItems 形式（属性型 JSON） | `"[{\"Put\": {\"TableName\": \"t\", \"Item\": {\"pk\": {\"S\": \"u1\"}}}}]"` |
+
+> **型変換**: `get_item` / `query` / `scan` の戻り値はプレーン JSON（`{"pk": "user1"}` 形式）。DynamoDB の属性型 JSON（`{"pk": {"S": "user1"}}` 形式）は自動変換されます。
+
+## スコープ外（v25.6.0）
+
+- GSI（グローバルセカンダリインデックス）作成・管理
+- DynamoDB Streams
+- ConditionExpression（`AWS.dynamo_put_item_cond_raw` として既存）
+- ページネーション（`LastEvaluatedKey` の自動処理）
+- DAX（DynamoDB Accelerator）接続
+- 型付きジェネリクス（`DynamoDB.get_item[T]` 等）
+
+## 使用例
+
+```favnir
+import rune "dynamodb"
+
+stage StoreSession: String -> Result<Unit, String> !DynamoDB = |session_json| {
+    bind conn <- DynamoDB.connect("http://localhost:4566")
+    DynamoDB.put_item(conn, "sessions", session_json)
+}
+
+stage GetSession: String -> Result<String, String> !DynamoDB = |session_id| {
+    bind conn <- DynamoDB.connect("http://localhost:4566")
+    DynamoDB.get_item(conn, "sessions", "{\"session_id\": \"" + session_id + "\"}")
+}
+
+stage DeleteSession: String -> Result<Unit, String> !DynamoDB = |session_id| {
+    bind conn <- DynamoDB.connect("http://localhost:4566")
+    DynamoDB.delete_item(conn, "sessions", "{\"session_id\": \"" + session_id + "\"}")
+}
+```

@@ -1,0 +1,48 @@
+---
+title: sentry Rune
+description: Sentry エラートラッキング Rune（v28.5.0）
+---
+
+# sentry Rune
+
+`runes/sentry` は Sentry API 経由でエラーイベント・メッセージを送信する Rune です。
+
+## インポート
+
+```favnir
+import runes/sentry
+```
+
+## 関数一覧
+
+| 関数 | シグネチャ | 説明 |
+|---|---|---|
+| `Sentry.capture_error` | `(err: String) -> Result<Unit, String> !Io` | エラーイベント送信 |
+| `Sentry.capture_message` | `(level: String, msg: String) -> Result<Unit, String> !Io` | メッセージイベント送信 |
+| `Sentry.set_user` | `(id: String, email: String) -> Result<Unit, String> !Io` | ユーザーコンテキスト設定 |
+| `Sentry.set_tag` | `(key: String, value: String) -> Result<Unit, String> !Io` | タグ設定（フィルタリング用） |
+| `Sentry.set_extra` | `(key: String, value: String) -> Result<Unit, String> !Io` | 追加情報設定 |
+
+## 使用例
+
+```favnir
+import runes/sentry
+
+stage HandleError: Unit -> Result<Unit, String> !Io = |_| {
+    bind _ <- Sentry.set_user("user-001", "ops@example.com")
+    bind _ <- Sentry.set_tag("pipeline", "etl")
+    bind _ <- Sentry.capture_error("stage failed: timeout")
+    Result.ok(unit)
+}
+```
+
+## エフェクト
+
+すべての関数は `!Io` エフェクトを持ちます（Sentry API への HTTP 送信）。
+
+## 注記
+
+- `#[on_error(report_to, level)]` アノテーションによる自動エラー送信は v28.9+ で実装予定
+- DSN（Data Source Name）の設定は v28.9+ で `fav.toml` の `[sentry]` セクションに追加予定。v28.5.0 時点ではスタブのため DSN 設定は不要
+- WASM ターゲットでは `Result.err("Sentry not supported on wasm32")` を返します
+- PII（個人情報）の取り扱いには Sentry のデータスクラビング設定を利用してください

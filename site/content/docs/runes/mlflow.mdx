@@ -1,0 +1,127 @@
+# MLflow Rune
+
+MLflow 実験管理・モデルレジストリと Favnir パイプラインを統合します。
+データ前処理の結果を実験として記録し、学習済みモデルをレジストリに登録するまでを
+`stage` として表現できます。
+
+## セットアップ
+
+```bash
+# MLflow サーバーを起動（Docker）
+docker run -p 5000:5000 ghcr.io/mlflow/mlflow mlflow server --host 0.0.0.0
+
+# 接続先を環境変数で指定（デフォルト: http://localhost:5000）
+export MLFLOW_TRACKING_URI=http://localhost:5000
+```
+
+## クイックスタート
+
+```favnir
+import runes/mlflow
+
+seq FeatureEngineeringPipeline =
+  LoadRawData
+  |> ExtractFeatures
+  |> LogExperiment
+
+stage LogExperiment: FeatureSet -> FeatureSet !Http = |features| {
+  bind run_id <- MLflow.start_run("feature-engineering-v1")
+  bind _      <- MLflow.log_param(run_id, "window_size", "7d")
+  bind _      <- MLflow.log_metric(run_id, "null_rate", features.null_rate, 0)
+  bind _      <- MLflow.log_artifact(run_id, "features/output.parquet")
+  bind _      <- MLflow.end_run(run_id, "FINISHED")
+  Result.ok(features)
+}
+```
+
+## API リファレンス
+
+### `MLflow.start_run`
+
+```favnir
+fn MLflow.start_run(experiment_name: String) -> Result<String, String> !Http
+```
+
+実験実行を開始し、`run_id` を返します。
+
+### `MLflow.log_metric`
+
+```favnir
+fn MLflow.log_metric(run_id: String, key: String, value: Float, step: Int) -> Result<Unit, String> !Http
+```
+
+メトリクスをステップ付きで記録します。
+
+### `MLflow.log_param`
+
+```favnir
+fn MLflow.log_param(run_id: String, key: String, value: String) -> Result<Unit, String> !Http
+```
+
+ハイパーパラメータを記録します。
+
+### `MLflow.log_artifact`
+
+```favnir
+fn MLflow.log_artifact(run_id: String, local_path: String) -> Result<Unit, String> !Http
+```
+
+成果物ファイル（モデル、データ等）をアップロードします。
+
+### `MLflow.end_run`
+
+```favnir
+fn MLflow.end_run(run_id: String, status: String) -> Result<Unit, String> !Http
+```
+
+実験実行を終了します。`status` は `"FINISHED"` または `"FAILED"`。
+
+### `MLflow.register_model`
+
+```favnir
+fn MLflow.register_model(run_id: String, name: String) -> Result<String, String> !Http
+```
+
+学習済みモデルをモデルレジストリに登録し、バージョン ID を返します。
+
+### `MLflow.load_model`
+
+```favnir
+fn MLflow.load_model(name: String, version: String) -> Result<String, String> !Http
+```
+
+登録済みモデルのアーティファクト URI を取得します。
+
+### `MLflow.list_experiments`
+
+```favnir
+fn MLflow.list_experiments() -> Result<List<String>, String> !Http
+```
+
+実験名の一覧を取得します。
+
+## モデルレジストリ
+
+```favnir
+stage TrainAndRegister: TrainingData -> String !Http = |data| {
+  bind run_id    <- MLflow.start_run("model-training")
+  bind _         <- MLflow.log_param(run_id, "learning_rate", "0.001")
+  bind _         <- MLflow.log_metric(run_id, "accuracy", 0.95, 100)
+  bind _         <- MLflow.log_artifact(run_id, "models/checkpoint.pt")
+  bind _         <- MLflow.end_run(run_id, "FINISHED")
+  bind model_ver <- MLflow.register_model(run_id, "my-classifier")
+  Result.ok(model_ver)
+}
+```
+
+## 接続設定
+
+| 環境変数 | デフォルト | 説明 |
+|---|---|---|
+| `MLFLOW_TRACKING_URI` | `http://localhost:5000` | MLflow サーバーの URL |
+
+## 関連 Rune
+
+- [Prometheus](/docs/runes/prometheus) — メトリクス収集
+- [Datadog](/docs/runes/datadog) — APM / トレーシング
+- [OTel](/docs/runes/otel) — OpenTelemetry 統合

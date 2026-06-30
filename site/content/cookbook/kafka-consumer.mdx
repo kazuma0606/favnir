@@ -1,0 +1,22 @@
+# Kafka コンシューマーパイプライン
+
+Kafka トピックからメッセージを消費し、変換してデータウェアハウスに書き込むストリーミングパイプラインです。
+
+```favnir
+import runes/kafka
+
+seq KafkaToWarehouse =
+  ConsumeKafka
+  |> TransformEvent
+  |> WriteToWarehouse
+
+stage ConsumeKafka: Unit -> List<KafkaMessage> !Stream = |_| {
+  bind consumer <- Kafka.consumer(config.kafka_brokers, config.kafka_group_id)
+  Kafka.poll(consumer, config.kafka_topic, 100)
+}
+```
+
+## 関連 Rune
+
+- [Kafka](/docs/runes/kafka) — Apache Kafka ストリーミング
+- [BigQuery](/docs/runes/bigquery) — ストリーミング書き込み先

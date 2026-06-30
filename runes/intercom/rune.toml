@@ -1,0 +1,6 @@
+[rune]
+name = "intercom"
+version = "0.1.0"
+description = "Intercom メッセージ API 連携（コミュニティ投稿 Rune）"
+author = "Favnir Community"
+license = "MIT"

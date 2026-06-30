@@ -1,0 +1,17 @@
+# dbt モデル参照
+
+dbt で管理されたモデルを Favnir パイプラインから参照し、結果を取得します。
+
+```favnir
+import runes/dbt
+
+stage ReadDbtModel: String -> List<Row> !Db = |model_name| {
+  bind result <- DBT.run_and_fetch[Row](config.dbt_project, model_name)
+  Result.ok(result)
+}
+```
+
+## 関連 Rune
+
+- [dbt](/docs/runes/dbt) — dbt モデル連携
+- [BigQuery](/docs/runes/bigquery) — dbt バックエンド

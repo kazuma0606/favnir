@@ -1,0 +1,23 @@
+# Grafana ダッシュボード連携
+
+Favnir パイプラインのメトリクスを Grafana ダッシュボードに送信します。
+
+```favnir
+import runes/grafana
+
+stage PushToGrafana: PipelineStats -> Unit !Http = |stats| {
+  Grafana.push_metrics(
+    config.grafana_url,
+    config.grafana_api_key,
+    [
+      { "name": "rows_processed", "value": Float.from_int(stats.rows), "tags": ["pipeline:etl"] },
+      { "name": "error_rate",     "value": stats.error_rate,           "tags": ["pipeline:etl"] }
+    ]
+  )
+}
+```
+
+## 関連 Rune
+
+- [Grafana](/docs/runes/grafana) — Grafana ダッシュボード
+- [Prometheus](/docs/runes/prometheus) — メトリクスソース

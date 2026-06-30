@@ -1,0 +1,17 @@
+# SQLite ETL（ローカル開発用）
+
+SQLite をソースまたはシンクとした ETL パイプラインです。本番環境への移行前のローカル開発に適しています。
+
+```favnir
+import runes/sqlite
+
+stage ExtractFromSQLite: String -> List<Row> !Db = |query| {
+  bind conn <- SQLite.connect(config.sqlite_path)
+  SQLite.query[Row](conn, query)
+}
+```
+
+## 関連 Rune
+
+- [SQLite](/docs/runes/sqlite) — SQLite データベース連携
+- [Postgres](/docs/runes/postgres) — 本番環境への移行先

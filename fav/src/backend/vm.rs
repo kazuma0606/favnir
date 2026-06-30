@@ -10279,6 +10279,7 @@ fn vm_call_builtin(
             let n = it.next().ok_or_else(|| "Int.shift_left requires 2 arguments".to_string())?;
             match (x, n) {
                 (VMValue::Int(x), VMValue::Int(n)) => {
+                    #[allow(clippy::manual_range_contains)]
                     if n < 0 || n >= 64 {
                         return Err(format!(
                             "Int.shift_left: shift amount {} out of range 0..=63",
@@ -10296,6 +10297,7 @@ fn vm_call_builtin(
             let n = it.next().ok_or_else(|| "Int.shift_right requires 2 arguments".to_string())?;
             match (x, n) {
                 (VMValue::Int(x), VMValue::Int(n)) => {
+                    #[allow(clippy::manual_range_contains)]
                     if n < 0 || n >= 64 {
                         return Err(format!(
                             "Int.shift_right: shift amount {} out of range 0..=63",
@@ -16478,6 +16480,7 @@ fn vm_call_builtin(
                 VMValue::Int(n) => n,
                 _ => return Err("SQS.receive_messages_raw: max must be an Int".to_string()),
             };
+            #[allow(clippy::manual_range_contains)]
             if max < 1 || max > 10 {
                 return Ok(err_vm(VMValue::Str(format!(
                     "SQS.receive_messages: max must be between 1 and 10, got {}",

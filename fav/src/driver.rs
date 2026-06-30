@@ -5502,6 +5502,7 @@ fn iceberg_table_to_type_name(table: &str) -> String {
 pub fn cmd_infer_delta(path: &str, out_path: Option<&str>) {
     #[cfg(not(target_arch = "wasm32"))]
     {
+        #[allow(clippy::collapsible_str_replace)]
         let safe_path = path.replace('\n', "").replace('\r', "");
         let type_name = delta_path_to_type_name(&safe_path);
         let output = format!(
@@ -5534,7 +5535,9 @@ pub fn cmd_infer_delta(path: &str, out_path: Option<&str>) {
 pub fn cmd_infer_iceberg(catalog: &str, table: &str, out_path: Option<&str>) {
     #[cfg(not(target_arch = "wasm32"))]
     {
+        #[allow(clippy::collapsible_str_replace)]
         let safe_catalog = catalog.replace('\n', "").replace('\r', "");
+        #[allow(clippy::collapsible_str_replace)]
         let safe_table = table.replace('\n', "").replace('\r', "");
         let type_name = iceberg_table_to_type_name(&safe_table);
         let output = format!(
@@ -21089,7 +21092,7 @@ pub fn cmd_explain_lineage(file: Option<&str>, format: &str) {
             process::exit(1);
         });
         let report = lineage_analysis(&program);
-        match &*format {
+        match format {
             "json"    => print!("{}", render_lineage_json(&report)),
             "mermaid" => print!("{}", render_lineage_mermaid(&report)),
             "d2"      => print!("{}", render_lineage_d2(&report)),
@@ -33788,6 +33791,7 @@ mod v214000_tests {
     }
 }
 
+#[allow(unused_imports)]
 mod v215000_tests {
     use crate::lsp::code_action::handle_code_action;
     use crate::lsp::document_store::DocumentStore;

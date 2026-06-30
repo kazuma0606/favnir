@@ -83,6 +83,7 @@ impl NanVal {
     pub fn from_int(n: i64) -> Self {
         const I48_MIN: i64 = -(1_i64 << 47);
         const I48_MAX: i64 = (1_i64 << 47) - 1;
+        #[allow(clippy::manual_range_contains)]
         if n >= I48_MIN && n <= I48_MAX {
             // 下位 48 bits に 2's complement のまま格納
             NanVal(TAG_INT | (n as u64 & PTR_MASK))
@@ -102,6 +103,7 @@ impl NanVal {
     }
 
     /// String を Arc に包み、ポインタを格納する。
+    #[allow(clippy::should_implement_trait)]
     pub fn from_str(s: String) -> Self {
         let ptr = Arc::into_raw(Arc::new(s)) as u64;
         debug_assert!(ptr & TAG_MASK == 0, "pointer exceeds 48 bits");
@@ -148,7 +150,9 @@ impl NanVal {
     #[inline]
     pub fn is_float(&self) -> bool {
         let upper16 = (self.0 >> 48) as u16;
-        upper16 < 0x7FF8 || upper16 > 0x7FFF || self.0 == TAG_FLOAT_NAN
+        #[allow(clippy::manual_range_contains)]
+        let in_nan_range = upper16 >= 0x7FF8 && upper16 <= 0x7FFF;
+        !in_nan_range || self.0 == TAG_FLOAT_NAN
     }
 
     #[inline]
@@ -476,6 +480,7 @@ impl NanVal {
 
     /// NanVal から VMValue に変換するブリッジ（self を消費する）。
     /// call_value/call_builtin の境界で使用する（slow path）。
+    #[allow(clippy::wrong_self_convention)]
     pub(crate) fn to_vmvalue(self) -> super::vm::VMValue {
         use super::heap_val::HeapVal;
         use super::vm::VMValue;

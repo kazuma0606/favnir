@@ -26,12 +26,12 @@ pub fn handle_references(store: &DocumentStore, uri: &str, pos: Position) -> Vec
 
     collect_symbol_occurrences(program, &name)
         .into_iter()
-        .filter_map(|span| {
+        .map(|span| {
             let range = span_to_range(&span);
-            Some(Location {
+            Location {
                 uri: uri.to_string(),
                 range,
-            })
+            }
         })
         .collect()
 }

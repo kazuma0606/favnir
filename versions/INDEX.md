@@ -8,7 +8,8 @@ Favnir バージョン管理ディレクトリの索引。
 
 | ファイル | 対象期間 | 状態 |
 |---|---|---|
-| [roadmap/roadmap-v25.1-v30.0.md](roadmap/roadmap-v25.1-v30.0.md) | v25.1〜v30.0 | **現行（計画中）** |
+| [roadmap/roadmap-v30.1-v35.0.md](roadmap/roadmap-v30.1-v35.0.md) | v30.1〜v35.0 | **現行（計画中）** |
+| [roadmap/roadmap-v25.1-v30.0.md](roadmap/roadmap-v25.1-v30.0.md) | v25.1〜v30.0 | 完了 |
 | [roadmap-v20.1-v25.0.md](roadmap-v20.1-v25.0.md) | v20.1〜v25.0 | 完了 |
 | [roadmap-master.md](roadmap-master.md) | v17〜v20 | 完了（アーカイブ） |
 
@@ -20,6 +21,11 @@ Favnir バージョン管理ディレクトリの索引。
 
 | ファイル | 対象期間 |
 |---|---|
+| [roadmap/roadmap-v34.1-v35.0.md](roadmap/roadmap-v34.1-v35.0.md) | v34.1〜v35.0 — Production Ready |
+| [roadmap/roadmap-v33.1-v34.0.md](roadmap/roadmap-v33.1-v34.0.md) | v33.1〜v34.0 — Performance & Tooling |
+| [roadmap/roadmap-v32.1-v33.0.md](roadmap/roadmap-v32.1-v33.0.md) | v32.1〜v33.0 — Language Power |
+| [roadmap/roadmap-v31.1-v32.0.md](roadmap/roadmap-v31.1-v32.0.md) | v31.1〜v32.0 — Language Polish |
+| [roadmap/roadmap-v30.1-v31.0.md](roadmap/roadmap-v30.1-v31.0.md) | v30.1〜v31.0 — Real-World Readiness |
 | [roadmap/roadmap-v29.1-v30.0.md](roadmap/roadmap-v29.1-v30.0.md) | v29.1〜v30.0 — Ecosystem Maturity |
 | [roadmap/roadmap-v28.1-v29.0.md](roadmap/roadmap-v28.1-v29.0.md) | v28.1〜v29.0 — Observability First |
 | [roadmap/roadmap-v27.1-v28.0.md](roadmap/roadmap-v27.1-v28.0.md) | v27.1〜v28.0 — Data Lakehouse |
@@ -65,20 +71,22 @@ Favnir バージョン管理ディレクトリの索引。
 
 > 一部バージョン（v6.1.0 / v6.2.0 / v8.3.0 / v9.0.0 等）は歴史的事情で spec/plan/tasks が揃っていない。これらは pre_v4.0.0 / post_v4.0.0 / v9-v20 の各ディレクトリに収録。
 
-### v25〜v30（v25-v30/ — **未作成・構想段階**）
+### v25〜v30（v25-v30/）
 
-> このディレクトリはまだ存在しません。v25.1.0 の実装着手時に作成予定です。
+各バージョンに `spec.md` / `plan.md` / `tasks.md` を収録（全件 COMPLETE）。
 
-各バージョン実装時に以下の構造で作成します:
+### v30〜v35（v30-v35/ — **実装中**）
+
+v30.1.0 以降のバージョンドキュメントを収録予定。
+各バージョン実装時に以下の構造で作成:
 
 ```
-versions/v25-v30/
-├── v25.1.0/
+versions/v30-v35/
+├── v30.1.0/
 │   ├── spec.md
 │   ├── plan.md
-│   ├── tasks.md
-│   └── progress.md
-├── v25.2.0/
+│   └── tasks.md
+├── v30.2.0/
 │   └── ...
 ```
 

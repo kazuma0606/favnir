@@ -9563,7 +9563,7 @@ pub fn cmd_fmt(file: Option<&str>, check: bool, migrate: bool) {
 
 // ── fav lint ──────────────────────────────────────────────────────────────────
 
-pub fn cmd_lint(file: Option<&str>, warn_only: bool, deny_warnings: bool) {
+pub fn cmd_lint(file: Option<&str>, warn_only: bool, deny_warnings: bool, cli_allow_codes: Vec<String>) {
     use crate::lint::lint_program;
 
     // Load fav.toml lint config (v12.10.0): allow / warn_as_error lists.
@@ -9571,9 +9571,10 @@ pub fn cmd_lint(file: Option<&str>, warn_only: bool, deny_warnings: bool) {
     let lint_config = FavToml::find_root(&cwd)
         .and_then(|root| FavToml::load(&root))
         .and_then(|t| t.lint);
-    let allow_codes: Vec<String> = lint_config.as_ref()
+    let mut allow_codes: Vec<String> = lint_config.as_ref()
         .and_then(|c| c.allow.clone())
         .unwrap_or_default();
+    allow_codes.extend(cli_allow_codes);
     let warn_as_error_codes: Vec<String> = lint_config.as_ref()
         .and_then(|c| c.warn_as_error.clone())
         .unwrap_or_default();

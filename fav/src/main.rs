@@ -1315,6 +1315,7 @@ fn main_impl() {
             let mut warn_only = false;
             let mut deny_warnings = false;
             let mut file: Option<String> = None;
+            let mut cli_allow: Vec<String> = Vec::new();
             let mut i = 2usize;
             while i < args.len() {
                 match args[i].as_str() {
@@ -1326,13 +1327,21 @@ fn main_impl() {
                         deny_warnings = true;
                         i += 1;
                     }
+                    "--allow" => {
+                        if i + 1 < args.len() {
+                            cli_allow.push(args[i + 1].clone());
+                            i += 2;
+                        } else {
+                            i += 1;
+                        }
+                    }
                     other => {
                         file = Some(other.to_string());
                         i += 1;
                     }
                 }
             }
-            cmd_lint(file.as_deref(), warn_only, deny_warnings);
+            cmd_lint(file.as_deref(), warn_only, deny_warnings, cli_allow);
         }
 
         Some("doc") => {

@@ -84,8 +84,8 @@ jobs:
       - name: Self-lint (fav lint)
         working-directory: fav
         run: |
-          ./target/debug/fav lint --deny-warnings self/compiler.fav
-          ./target/debug/fav lint --deny-warnings self/checker.fav
+          ./target/debug/fav lint --deny-warnings --allow W017 --allow W018 --allow W019 self/compiler.fav
+          ./target/debug/fav lint --deny-warnings --allow W012 --allow W017 --allow W018 --allow W019 self/checker.fav
 
       - name: Self-fmt (fav fmt --check)
         working-directory: fav

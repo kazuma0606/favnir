@@ -1239,7 +1239,6 @@ fn has_effect(effects: List<String>, eff: String) -> Bool {
     List.any(effects, |e| str_eq(e, eff))
 }
 
-// v35.5.0: Effect enforcement removed from checker.fav — Effect enum deleted.
 fn check_effects_all(declared: List<String>, inferred: List<String>) -> Option<String> {
     Option.none()
 }
@@ -1845,7 +1844,6 @@ fn check_body_ty(fname: String, ret: TypeExpr, r: InfResult) -> Result<String, S
     }
 }
 
-// v35.5.0: Effect enforcement removed — infer_expr_effects / check_effects_all calls deleted.
 fn check_fn_def(fd: FnDef, env: List<KVPair>) -> Result<String, String> {
     bind param_env <- build_param_env(fd.params, env);
     bind init_state <- inf_state_new(subst_empty(), 0);

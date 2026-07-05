@@ -1,8 +1,10 @@
 Run a spec or code review for the current version.
 
-If $ARGUMENTS is a version number (e.g. `v20.1.0`):
-  Use the spec-reviewer agent to review `versions/v9-v20/$ARGUMENTS/spec.md`,
-  `versions/v9-v20/$ARGUMENTS/plan.md`, and `versions/v9-v20/$ARGUMENTS/tasks.md`.
+If $ARGUMENTS is a version number (e.g. `v20.1.0`) or a codename (e.g. `v35.0B`):
+  Use Glob to find the version directory across all generation folders:
+  `versions/v9-v20/`, `versions/v20-v25/`, `versions/v25-v30/`, `versions/v30-v35/`
+  Then use the spec-reviewer agent to review the spec.md, plan.md, and tasks.md found there.
+  The spec-reviewer will also cross-check against the roadmap in `versions/roadmap/`.
 
 If $ARGUMENTS is `code` or empty:
   Use the code-reviewer agent to review recently changed files:

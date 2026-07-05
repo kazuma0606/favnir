@@ -9,6 +9,10 @@ Steps:
    - Use Glob on `versions/roadmap/` to list all roadmap `.md` files
    - Grep for the target version number/codename to locate the section
    - Read that section to extract the intended scope and deliverables
+   - **If no entry is found**: stop and tell the user:
+     "このバージョンのロードマップエントリが見つかりません。
+      versions/roadmap/ に該当バージョンの記述を追加してから再実行してください。"
+     Do NOT proceed to create spec/plan/tasks without a roadmap entry.
 4. Determine the version directory based on the version number:
    - v9.x.x 〜 v20.0.x  → `versions/v9-v20/<version>/`
    - v20.1.x 〜 v25.x.x → `versions/v20-v25/<version>/`

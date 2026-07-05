@@ -1,0 +1,8 @@
+{
+  "version": "30.4.0",
+  "date": "2026-07-01",
+  "description": "Multi-file Rune import verification (stages.fav + main.fav both import runes/postgres)",
+  "compile_ms": 12,
+  "check_ms": 8,
+  "tests_passed": 2399
+}

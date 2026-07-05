@@ -1,0 +1,8 @@
+{
+  "version": "32.5.0",
+  "date": "2026-07-03",
+  "milestone": "Language Power",
+  "tests_passed": 2476,
+  "tests_failed": 0,
+  "notes": "Linear Types: E0332 (double use) / E0333 (unused) verification (impl since v18.5.0)"
+}

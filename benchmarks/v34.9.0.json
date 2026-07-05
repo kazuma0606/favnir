@@ -1,0 +1,8 @@
+{
+  "version": "34.9.0",
+  "milestone": "Production Ready",
+  "date": "2026-07-04",
+  "tests_passed": 2581,
+  "tests_failed": 0,
+  "notes": "upgrade-guide.mdx 追加。ctx_migration フィクスチャ（before/after）追加。v349000_tests 5 件追加。"
+}

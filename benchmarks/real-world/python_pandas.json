@@ -1,0 +1,19 @@
+{
+  "tool": "python_pandas",
+  "version": "2.2",
+  "python_version": "3.12",
+  "date": "2026-07-04",
+  "environment": {
+    "platform": "AWS Lambda arm64",
+    "vcpu": 1,
+    "memory_mb": 512,
+    "runtime": "Python 3.12 + pandas 2.2"
+  },
+  "benchmarks": [
+    { "name": "csv_read_100mb",       "duration_s": 3.2,  "memory_peak_mb": 312, "rows_per_sec": 312500 },
+    { "name": "transform_10col_1m",   "duration_s": 1.8,  "memory_peak_mb": 248, "rows_per_sec": 555556 },
+    { "name": "postgres_write_100k",  "duration_s": 4.9,  "memory_peak_mb": 128, "rows_per_sec": 20408  },
+    { "name": "lambda_cold_start_ms", "duration_ms": 980, "memory_peak_mb": 112 },
+    { "name": "compile_100loc_ms",    "duration_ms": 0,   "memory_peak_mb": 0,   "note": "インタープリタのためコンパイルなし" }
+  ]
+}

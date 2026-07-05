@@ -1,0 +1,8 @@
+{
+  "version": "30.8.0",
+  "date": "2026-07-02",
+  "description": "fav new --list: template gallery listing command",
+  "compile_ms": 11,
+  "check_ms": 7,
+  "tests_passed": 2415
+}

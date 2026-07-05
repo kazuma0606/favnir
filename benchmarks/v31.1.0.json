@@ -1,0 +1,8 @@
+{
+  "version": "31.1.0",
+  "date": "2026-07-02",
+  "milestone": "Real-World Readiness",
+  "tests_passed": 2426,
+  "tests_failed": 0,
+  "notes": "get_help_text() extended for E0002-E0006, E0010"
+}

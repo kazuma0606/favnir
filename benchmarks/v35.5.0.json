@@ -1,0 +1,8 @@
+{
+  "version": "35.5.0",
+  "milestone": "Production Ready",
+  "date": "2026-07-05",
+  "tests_passed": 2611,
+  "tests_failed": 0,
+  "notes": "v34.9A: Effect enum + effects フィールドの完全削除。ast.rs/checker.rs/compiler.rs/lineage.rs/reachability.rs/ir.rs からすべての Effect 参照を除去。checker.fav の check_effects_all を no-op 化。rune ファイルから !Effect アノテーションを除去（95ファイル）。関連テスト 33件スタブ化。2611 tests pass (0 failures)。"
+}

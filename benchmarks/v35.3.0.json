@@ -1,0 +1,8 @@
+{
+  "version": "35.3.0",
+  "milestone": "Production Ready",
+  "date": "2026-07-05",
+  "tests_passed": 2601,
+  "tests_failed": 0,
+  "notes": "v34.7A: examples/ 31件 + infra/e2e-demo/ 10件 の !Effect アノテーション完全除去。v35300_tests 5件追加。"
+}

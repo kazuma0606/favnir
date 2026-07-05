@@ -1,0 +1,8 @@
+{
+  "version": "34.7.0",
+  "milestone": "Production Ready",
+  "date": "2026-07-04",
+  "tests_passed": 2571,
+  "tests_failed": 0,
+  "notes": "ctx-syntax-guide.mdx 追加。getting-started.mdx AppCtx セクション追加。README.md ctx 移行シリーズ追記。v347000_tests 5 件追加。"
+}

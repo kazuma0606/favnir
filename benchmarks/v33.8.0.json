@@ -1,0 +1,8 @@
+{
+  "version": "33.8.0",
+  "milestone": "Performance & Tooling",
+  "date": "2026-07-04",
+  "tests_passed": 2528,
+  "tests_failed": 0,
+  "notes": "プロファイリング強化確認（parse_profile_json / to_folded_stacks）。v338000_tests 4件追加。"
+}

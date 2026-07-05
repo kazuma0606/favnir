@@ -1,0 +1,8 @@
+{
+  "version": "31.9.0",
+  "date": "2026-07-03",
+  "milestone": "Real-World Readiness",
+  "tests_passed": 2452,
+  "tests_failed": 0,
+  "notes": "REPL blank-line history skip; check --all empty-dir warning"
+}

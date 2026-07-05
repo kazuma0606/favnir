@@ -1,0 +1,8 @@
+{
+  "version": "33.5.0",
+  "milestone": "Performance & Tooling",
+  "date": "2026-07-04",
+  "tests_passed": 2516,
+  "tests_failed": 0,
+  "notes": "fav run --precompiled（FavcMeta / source_hash）確認。v335000_tests 4件追加。"
+}

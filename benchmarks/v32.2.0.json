@@ -1,0 +1,8 @@
+{
+  "version": "32.2.0",
+  "date": "2026-07-03",
+  "milestone": "Language Power",
+  "tests_passed": 2464,
+  "tests_failed": 0,
+  "notes": "Row Polymorphism: with { field: Type } constraint verification (impl since v18.2.0)"
+}

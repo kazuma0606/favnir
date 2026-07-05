@@ -1,0 +1,8 @@
+{
+  "version": "35.2.0",
+  "milestone": "Production Ready",
+  "date": "2026-07-05",
+  "tests_passed": 2596,
+  "tests_failed": 0,
+  "notes": "v34.6A補完: runes/ 配下 100 件 !Effect → ctx: AppCtx 移行完了。compiler.rs に Ctx/AppCtx namespace 登録追加。v35200_tests 5 件追加。"
+}

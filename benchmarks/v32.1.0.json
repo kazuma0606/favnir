@@ -1,0 +1,8 @@
+{
+  "version": "32.1.0",
+  "date": "2026-07-03",
+  "milestone": "Language Power",
+  "tests_passed": 2460,
+  "tests_failed": 0,
+  "notes": "Bounded generics: Display/Hash bound verification (impl since v17.1.0)"
+}

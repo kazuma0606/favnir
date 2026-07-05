@@ -1,0 +1,8 @@
+{
+  "version": "35.4.0",
+  "milestone": "Production Ready",
+  "date": "2026-07-05",
+  "tests_passed": 2606,
+  "tests_failed": 0,
+  "notes": "v34.8A: !Effect アノテーション構文を E0374 ハードパースエラー化。ctx: AppCtx によるエフェクトバイパス。W022 lint 削除。v35400_tests 5件追加。"
+}

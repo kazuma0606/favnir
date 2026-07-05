@@ -1,0 +1,8 @@
+{
+  "version": "32.0.0",
+  "date": "2026-07-03",
+  "milestone": "Language Polish",
+  "tests_passed": 2456,
+  "tests_failed": 0,
+  "notes": "Language Polish milestone declaration; cargo clean + rebuild"
+}

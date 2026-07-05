@@ -1,0 +1,22 @@
+{
+  "tool": "favnir",
+  "version": "34.3.0",
+  "date": "2026-07-04",
+  "environment": {
+    "platform": "AWS Lambda arm64",
+    "vcpu": 1,
+    "memory_mb": 512,
+    "runtime": "native binary (fav build --target native)"
+  },
+  "benchmarks": [
+    { "name": "csv_read_100mb",         "description": "CSV 100MB 読み込み",           "duration_s": 0.8,  "memory_peak_mb": 48,  "rows_per_sec": 1250000 },
+    { "name": "transform_10col_1m",     "description": "10 列変換（100 万行）",        "duration_s": 0.4,  "memory_peak_mb": 32,  "rows_per_sec": 2500000 },
+    { "name": "postgres_write_100k",    "description": "Postgres 書き込み（10 万行）", "duration_s": 1.1,  "memory_peak_mb": 24,  "rows_per_sec": 90909  },
+    { "name": "lambda_cold_start_ms",   "description": "Lambda コールドスタート",      "duration_ms": 95,  "memory_peak_mb": 28  },
+    { "name": "compile_100loc_ms",      "description": "コンパイル時間（100 行）",     "duration_ms": 85,  "memory_peak_mb": 64  },
+    { "name": "dbt_transform_10k_rows", "description": "dbt 相当変換（1 万行）",       "duration_s": 0.05, "memory_peak_mb": 18,  "rows_per_sec": 200000 },
+    { "name": "csv_read_1gb",           "description": "CSV 1GB 読み込み（Spark 比較）",        "duration_s": 4.2,  "memory_peak_mb": 320, "rows_per_sec": 238095 },
+    { "name": "join_1m_x_100k",         "description": "ジョイン（100 万行 × 10 万行）",       "duration_s": 2.1,  "memory_peak_mb": 280, "rows_per_sec": 476190 },
+    { "name": "aggregate_sum_avg",      "description": "集計（グループ別 sum / avg）",          "duration_s": 0.9,  "memory_peak_mb": 96,  "rows_per_sec": 1111111 }
+  ]
+}

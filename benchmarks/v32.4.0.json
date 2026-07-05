@@ -1,0 +1,8 @@
+{
+  "version": "32.4.0",
+  "date": "2026-07-03",
+  "milestone": "Language Power",
+  "tests_passed": 2472,
+  "tests_failed": 0,
+  "notes": "Schema Types: type alias = schema \"uri\" parse/AST verification (impl since v18.4.0)"
+}

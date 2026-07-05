@@ -1,0 +1,8 @@
+{
+  "version": "31.8.0",
+  "date": "2026-07-03",
+  "milestone": "Real-World Readiness",
+  "tests_passed": 2449,
+  "tests_failed": 0,
+  "notes": "fav scaffold: auto-write stage/seq stubs to project src/"
+}

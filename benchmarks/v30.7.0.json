@@ -1,0 +1,8 @@
+{
+  "version": "30.7.0",
+  "date": "2026-07-02",
+  "description": "runtime error stack trace improvement: stage context + hints",
+  "compile_ms": 11,
+  "check_ms": 7,
+  "tests_passed": 2412
+}

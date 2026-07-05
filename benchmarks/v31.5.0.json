@@ -1,0 +1,8 @@
+{
+  "version": "31.5.0",
+  "date": "2026-07-02",
+  "milestone": "Real-World Readiness",
+  "tests_passed": 2440,
+  "tests_failed": 0,
+  "notes": "LSP inlayHint: bind variable type inline display"
+}

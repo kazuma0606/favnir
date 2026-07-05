@@ -1,0 +1,8 @@
+{
+  "version": "33.7.0",
+  "milestone": "Performance & Tooling",
+  "date": "2026-07-04",
+  "tests_passed": 2524,
+  "tests_failed": 0,
+  "notes": "エフェクトシステム移行準備（migrate_effects / resolve_use_effects）確認。v337000_tests 4件追加。"
+}

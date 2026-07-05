@@ -1,0 +1,6 @@
+{
+  "version": "30.1.0",
+  "date": "2026-07-01",
+  "test_count": 2378,
+  "notes": "ビルド軽量化: [profile.dev] debug=0 / split-debuginfo=off"
+}

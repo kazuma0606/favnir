@@ -1,0 +1,8 @@
+{
+  "version": "30.9.0",
+  "date": "2026-07-02",
+  "description": "dogfood fixes: [project] toml parsing, import resolution, test hint, new hint",
+  "compile_ms": 11,
+  "check_ms": 7,
+  "tests_passed": 2418
+}

@@ -1,0 +1,8 @@
+{
+  "version": "34.5.0",
+  "milestone": "Production Ready",
+  "date": "2026-07-04",
+  "tests_passed": 2561,
+  "tests_failed": 0,
+  "notes": "W022 deprecated_effect_annotation lint ルール追加。runes/ctx/io.fav (IoCtx) 追加。migration-effects.mdx 追加。v345000_tests 5 件追加。"
+}

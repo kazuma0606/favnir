@@ -1,0 +1,8 @@
+{
+  "version": "35.6.0",
+  "milestone": "Production Ready",
+  "date": "2026-07-05",
+  "tests_passed": 2611,
+  "tests_failed": 0,
+  "notes": "v35.0A: MDX 128 ファイル・317 コードブロックの !Effect 除去。ctx-syntax-guide.mdx 完成。README 更新。MILESTONE.md Production Ready 宣言。2611 tests pass (0 failures)。"
+}

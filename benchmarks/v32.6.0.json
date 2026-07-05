@@ -1,0 +1,8 @@
+{
+  "version": "32.6.0",
+  "milestone": "Language Power",
+  "date": "2026-07-03",
+  "tests_passed": 2480,
+  "tests_failed": 0,
+  "notes": "分散アノテーション（Variance Annotations）確認・テスト補強。v326000_tests 4件追加。"
+}

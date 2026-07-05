@@ -1,6 +1,6 @@
 [package]
 name = "fav"
-version = "30.0.0"
+version = "35.8.0"
 edition = "2024"
 
 [[bin]]
@@ -86,3 +86,8 @@ postgres_integration = ["dep:postgres"]
 
 [dev-dependencies]
 tempfile = "3"
+
+[profile.dev]
+debug = 0
+# Windows MSVC ではデフォルトで off 相当（no-op）。Linux / CI クロスビルド向けに明示。
+split-debuginfo = "off"

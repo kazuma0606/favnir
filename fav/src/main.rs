@@ -84,7 +84,7 @@ use driver::{
     cmd_doc_builtins, cmd_doc_site, cmd_doc_serve, cmd_docs,
     cmd_exec, cmd_explain, cmd_explain_code, cmd_explain_compiler, cmd_explain_diff, cmd_explain_error,
     cmd_explain_error_list, cmd_explain_error_list_json, cmd_explain_lineage, cmd_explain_sla, cmd_fmt, cmd_graph,
-    cmd_infer, cmd_infer_delta, cmd_infer_iceberg, cmd_infer_postgres, cmd_infer_proto, cmd_infer_snowflake, cmd_install, cmd_lint, cmd_migrate, cmd_new,
+    cmd_infer, cmd_infer_delta, cmd_infer_iceberg, cmd_infer_postgres, cmd_infer_proto, cmd_infer_snowflake, cmd_install, cmd_lint, cmd_migrate, cmd_upgrade, cmd_new, cmd_new_list,
     cmd_profile, cmd_profile_compare, cmd_scaffold, cmd_transpile,
     cmd_publish, cmd_registry, cmd_repl, cmd_run, cmd_search, cmd_test, cmd_watch,
     cmd_add, cmd_update, cmd_remove, cmd_login, cmd_info,
@@ -127,7 +127,7 @@ COMMANDS:
                   If <file> is omitted, explains all files in the project.
     explain --lineage [--format <text|json|mermaid|d2>] [file]
                   Static lineage analysis: show Sources / Sinks / Transformations / Pipelines.
-                  Extracts DB table names from SQL string literals and !DbRead/!DbWrite effects.
+                  Extracts DB table names from SQL string literals and DbRead/DbWrite lineage tags.
     docs [file] [--port <n>] [--no-open]
                   Start a local docs server backed by explain JSON and stdlib metadata.
                   If <file> is omitted, serves stdlib-only docs.
@@ -624,6 +624,7 @@ fn main_impl() {
             let mut file: Option<&str> = None;
             let mut dir: Option<&str> = None;
             let mut sample: Option<usize> = None;
+            let mut all_mode = false;
             let mut i = 2usize;
             while i < args.len() {
                 match args[i].as_str() {
@@ -686,6 +687,10 @@ fn main_impl() {
                         }));
                         i += 2;
                     }
+                    "--all" => {
+                        all_mode = true;
+                        i += 1;
+                    }
                     other => {
                         file = Some(other);
                         i += 1;
@@ -701,6 +706,8 @@ fn main_impl() {
                 }
             } else if let Some(dir) = dir {
                 driver::cmd_check_dir(dir);
+            } else if all_mode {
+                driver::cmd_check_all(json);
             } else {
                 cmd_check(file, no_warn, legacy_check, json, show_types, strict, ambient, report, show_effects, refresh_schemas);
             }
@@ -1030,6 +1037,8 @@ fn main_impl() {
             let mut coverage_report_dir: Option<String> = None;
             let mut update_snapshots = false;
             let mut file: Option<String> = None;
+            let mut watch_mode = false;
+            let mut watch_dirs: Vec<String> = Vec::new();
             let mut cases: Option<u64> = None;
             let mut i = 2usize;
             while i < args.len() {
@@ -1091,6 +1100,10 @@ fn main_impl() {
                         cases = Some(n);
                         i += 2;
                     }
+                    "--watch" => {
+                        watch_mode = true;
+                        i += 1;
+                    }
                     other => {
                         file = Some(other.to_string());
                         i += 1;
@@ -1100,6 +1113,22 @@ fn main_impl() {
             if let Some(n) = cases {
                 // SAFETY: setting FORALL_CASES for this process only
                 unsafe { std::env::set_var("FORALL_CASES", n.to_string()) };
+            }
+            if watch_mode {
+                let file_for_watch: Option<&str> = if let Some(ref f) = file {
+                    let path = std::path::Path::new(f);
+                    if path.is_dir() {
+                        watch_dirs.push(f.clone());
+                        None
+                    } else {
+                        Some(f.as_str())
+                    }
+                } else {
+                    None
+                };
+                let dir_refs: Vec<&str> = watch_dirs.iter().map(|s| s.as_str()).collect();
+                cmd_watch(file_for_watch, "test", &dir_refs, 80);
+                return;
             }
             if (coverage_html || coverage_lcov) && !coverage {
                 eprintln!("error: --html/--lcov requires --coverage");
@@ -1254,8 +1283,14 @@ fn main_impl() {
         }
 
         Some("new") => {
+            // --list フラグ: テンプレート一覧を表示して終了
+            if args.get(2).map(|s| s.as_str()) == Some("--list") {
+                cmd_new_list();
+                return;
+            }
             let name = args.get(2).unwrap_or_else(|| {
                 eprintln!("error: new requires a project name");
+                eprintln!("  hint: run 'fav new --list' to see available templates");
                 process::exit(1);
             });
             let mut template = "script";
@@ -1728,6 +1763,17 @@ fn main_impl() {
                 file.as_deref(), in_place, dry_run, check, dir.as_deref(), from_effects,
                 from_version.as_deref(), to_version.as_deref(), config_file.as_deref(),
             );
+        }
+
+        Some("upgrade") => {
+            let arg_refs: Vec<&str> = args[2..].iter().map(|s| s.as_str()).collect();
+            match cmd_upgrade(&arg_refs) {
+                Ok(msg) => println!("{}", msg),
+                Err(e) => {
+                    eprintln!("{}", e);
+                    process::exit(1);
+                }
+            }
         }
 
         Some("explain-error") => {

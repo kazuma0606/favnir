@@ -315,7 +315,7 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
         category: "effects",
         description: "A database operation was used in a function that does not declare `!Db`.",
         example: "fn query() -> String {\n    DB.query_raw(conn, \"SELECT 1\")  // E0310: !Db not declared\n}",
-        fix: "Add `!Db` to the function signature: `fn query() -> String !Db`.",
+        fix: "Pass a capability context parameter: `fn query(ctx: AppCtx) -> String`.",
     },
     ErrorEntry {
         code: "E0311",
@@ -323,7 +323,7 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
         category: "effects",
         description: "An auth operation was used in a function that does not declare `!Auth`.",
         example: "fn verify(token: String) -> Bool {\n    auth.verify_jwt(token, secret)  // E0311: !Auth not declared\n}",
-        fix: "Add `!Auth` to the function signature: `fn verify(token: String) -> Bool !Auth`.",
+        fix: "Pass a capability context parameter: `fn verify(ctx: AppCtx, token: String) -> Bool`.",
     },
     ErrorEntry {
         code: "E0312",
@@ -331,7 +331,7 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
         category: "effects",
         description: "An environment variable operation was used without declaring `!Env`.",
         example: "fn cfg() -> String {\n    Env.require_raw(\"API_KEY\")  // E0312: !Env not declared\n}",
-        fix: "Add `!Env` to the function signature: `fn cfg() -> String !Env`.",
+        fix: "Pass a capability context parameter: `fn cfg(ctx: AppCtx) -> String`.",
     },
     ErrorEntry {
         code: "E0313",
@@ -339,7 +339,7 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
         category: "effects",
         description: "An AWS SDK operation was used in a function that does not declare `!AWS`.",
         example: "fn upload(key: String) -> Unit {\n    AWS.s3_put_object_raw(...)  // E0313: !AWS not declared\n}",
-        fix: "Add `!AWS` to the function signature: `fn upload(key: String) -> Unit !AWS`.",
+        fix: "Pass a capability context parameter: `fn upload(ctx: AppCtx, key: String) -> Unit`.",
     },
     ErrorEntry {
         code: "E0314",
@@ -347,7 +347,7 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
         category: "effects",
         description: "A Snowflake operation was used in a function that does not declare `!Snowflake`.",
         example: "fn run(sql: String) -> Result<String, String> {\n    Snowflake.execute_raw(sql)  // E0314: !Snowflake not declared\n}",
-        fix: "Add `!Snowflake` to the function signature: `fn run(sql: String) -> Result<String, String> !Snowflake`.",
+        fix: "Pass a capability context parameter: `fn run(ctx: AppCtx, sql: String) -> Result<String, String>`.",
     },
     ErrorEntry {
         code: "E0315",
@@ -355,7 +355,7 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
         category: "effects",
         description: "A Postgres operation was used in a function that does not declare `!Postgres`.",
         example: "fn run(sql: String) -> Result<String, String> {\n    Postgres.query_raw(sql, \"[]\")  // E0315: !Postgres not declared\n}",
-        fix: "Add `!Postgres` to the function signature: `fn run(sql: String) -> Result<String, String> !Postgres`.",
+        fix: "Pass a capability context parameter: `fn run(ctx: AppCtx, sql: String) -> Result<String, String>`.",
     },
     ErrorEntry {
         code: "E0319",
@@ -363,7 +363,7 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
         category: "effects",
         description: "A Kafka/stream operation was used in a function that does not declare `!Stream`.",
         example: "fn run(topic: String) -> Result<Unit, String> {\n    Kafka.produce_raw(brokers, topic, \"k\", \"v\")  // E0319: !Stream not declared\n}",
-        fix: "Add `!Stream` to the function signature: `fn run(topic: String) -> Result<Unit, String> !Stream`.",
+        fix: "Pass a capability context parameter: `fn run(ctx: AppCtx, topic: String) -> Result<Unit, String>`.",
     },
     ErrorEntry {
         code: "E0320",
@@ -371,7 +371,7 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
         category: "effects",
         description: "A Redis operation was used in a function that does not declare `!Redis`.",
         example: "fn run(key: String) -> Result<String, String> {\n    Redis.get_raw(conn, key)  // E0320: !Redis not declared\n}",
-        fix: "Add `!Redis` to the function signature: `fn run(key: String) -> Result<String, String> !Redis`.",
+        fix: "Pass a capability context parameter: `fn run(ctx: AppCtx, key: String) -> Result<String, String>`.",
     },
     ErrorEntry {
         code: "E0321",
@@ -379,7 +379,7 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
         category: "effects",
         description: "A MySQL operation was used in a function that does not declare `!MySQL`.",
         example: "fn run(sql: String) -> Result<String, String> {\n    MySQL.query_raw(conn, sql, \"[]\")  // E0321: !MySQL not declared\n}",
-        fix: "Add `!MySQL` to the function signature: `fn run(sql: String) -> Result<String, String> !MySQL`.",
+        fix: "Pass a capability context parameter: `fn run(ctx: AppCtx, sql: String) -> Result<String, String>`.",
     },
     ErrorEntry {
         code: "E0322",
@@ -387,7 +387,7 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
         category: "effects",
         description: "A MongoDB operation was used in a function that does not declare `!MongoDB`.",
         example: "fn run(coll: String) -> Result<String, String> {\n    Mongo.find_raw(conn, coll, \"{}\")  // E0322: !MongoDB not declared\n}",
-        fix: "Add `!MongoDB` to the function signature: `fn run(coll: String) -> Result<String, String> !MongoDB`.",
+        fix: "Pass a capability context parameter: `fn run(ctx: AppCtx, coll: String) -> Result<String, String>`.",
     },
     ErrorEntry {
         code: "E0323",
@@ -395,7 +395,7 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
         category: "effects",
         description: "A DynamoDB operation was used in a function that does not declare `!DynamoDB`.",
         example: "fn run(table: String) -> Result<String, String> {\n    DynamoDB.get_item_raw(conn, table, \"{}\")  // E0323: !DynamoDB not declared\n}",
-        fix: "Add `!DynamoDB` to the function signature: `fn run(table: String) -> Result<String, String> !DynamoDB`.",
+        fix: "Pass a capability context parameter: `fn run(ctx: AppCtx, table: String) -> Result<String, String>`.",
     },
     ErrorEntry {
         code: "E0324",
@@ -403,7 +403,7 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
         category: "effects",
         description: "An Elasticsearch operation was used in a function that does not declare `!Elasticsearch`.",
         example: "fn run(idx: String) -> Result<String, String> {\n    ES.search_raw(url, idx, \"{}\")  // E0324: !Elasticsearch not declared\n}",
-        fix: "Add `!Elasticsearch` to the function signature: `fn run(idx: String) -> Result<String, String> !Elasticsearch`.",
+        fix: "Pass a capability context parameter: `fn run(ctx: AppCtx, idx: String) -> Result<String, String>`.",
     },
     ErrorEntry {
         code: "E0365",
@@ -430,28 +430,22 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
         fix: "Make sure the default value has the same type as the Option's inner type.",
     },
     ErrorEntry {
-        code: "E0370",
-        title: "undeclared effect",
-        category: "effects",
-        description: "A function uses an effect (Io, Db, etc.) that is not declared in its signature.",
-        example: "fn greet(name: String) -> Unit {\n    IO.println(name)  // E0370: !Io not declared\n}",
-        fix: "Add the effect to the function signature: `fn greet(name: String) -> Unit !Io`.",
-    },
-    ErrorEntry {
-        code: "E0371",
-        title: "effect not allowed in context",
-        category: "effects",
-        description: "An effect was used in a context that does not permit it.",
-        example: "// pure function calling impure\nfn pure_fn() -> Int {\n    IO.println(\"hi\")  // E0371\n    42\n}",
-        fix: "Declare the effect in the function signature, or refactor to avoid the effect.",
-    },
-    ErrorEntry {
         code: "E0373",
         title: "async/Task effect error",
         category: "effects",
         description: "An async function or Task<T> was used incorrectly.",
         example: "async fn f() -> Int { 42 }  // used where Task<Int> not expected",
         fix: "Use `bind` to unwrap a Task<T>, or adjust the return type annotation.",
+    },
+    ErrorEntry {
+        code: "E0374",
+        title: "removed syntax: !Effect annotation",
+        category: "effects",
+        description: "The `!Effect` annotation syntax was removed in v35.4.0. \
+                      Declare side effects by passing `ctx: AppCtx` as the first parameter.",
+        example: "// Error: fn fetch(url: String) -> String !Http { ... }\n\
+                  // Fix:   fn fetch(ctx: AppCtx, url: String) -> String { ... }",
+        fix: "Add `ctx: AppCtx` as the first parameter and remove the `!Effect` annotation.",
     },
     // ── E04xx: SLA アノテーション (v22.6.0) ──────────────────────────
     ErrorEntry {

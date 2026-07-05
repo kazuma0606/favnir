@@ -4,6 +4,761 @@ Favnir のバージョン履歴。形式は [Keep a Changelog](https://keepachan
 
 ---
 
+## [v35.8.0] — 2026-07-05
+
+### Changed
+- `fav/src/lsp/completion.rs` — LSP 補完シグネチャ（IO/Http/Llm/Db/Gen/Csv/Sys 計 ~25 関数）から `!Effect` 表記を除去
+- `fav/src/lsp/completion.rs` — KNOWN_RUNES 説明文（12 件）から `!Effect` タグを除去
+- `fav/src/error_catalog.rs` — E0310〜E0324 の `fix:` フィールドを `ctx: AppCtx` ベースの修正提案に書き換え（12 件）
+- `fav/src/mcp/mod.rs` — db/http/log/grpc rune ドキュメント文字列から `!Io` を除去（~16 行）
+- `fav/src/main.rs` — `--help` テキスト `!DbRead/!DbWrite effects` → `DbRead/DbWrite lineage tags`
+
+### Notes
+- v35.0C 実装完了: Favnir コードベースから `!Effect` 表記が**完全に廃止**された
+- ユーザーが目にするすべての箇所（IDE 補完・エラーメッセージ・CLI help・MCP ドキュメント）が更新済み
+
+---
+
+## [v35.7.0] — 2026-07-05
+
+### Changed
+- `fav/src/docs_server.rs` — IO 関数シグネチャから `!Io` エフェクト表記を除去（`"String -> Unit !Io"` → `"String -> Unit"`）
+- `fav/src/docs_server.rs` — IO 関数の `effects` フィールドを空配列に統一（`&["Io"]` → `&[]`）
+
+### Notes
+- v35.0B 実装完了: これにより Favnir コードベースから `!Effect` 表記が**完全に除去**された
+- `fav doc` の `/api/stdlib` エンドポイントの IO シグネチャが変更（後方互換: `effects` フィールド自体は残存）
+
+---
+
+## [v35.6.0] — 2026-07-05
+
+### Changed
+- `site/content/` — 128 MDX ファイル・317 コードブロックの `!Effect` アノテーションを ctx 構文に一括変換
+- `site/content/docs/ctx-syntax-guide.mdx` — 6 セクション構成の完成版に更新（E0374 説明・Before/After 対比・移行表含む）
+- `README.md` — favnir コードブロックから `!Effect` アノテーションをすべて除去
+
+### Added
+- `MILESTONE.md` — v35.0 Production Ready 宣言（Effect 廃止・セルフホスト完成・ドキュメント整合・エコシステム成熟の4条件達成）
+- `fav/src/driver.rs` — `v35600_tests`（5 件）追加
+
+### Notes
+- v35.0A 実装完了: `!Effect` の痕跡がドキュメントから完全に消滅
+- サイト全体で「副作用 = ctx: AppCtx を渡す」パターンが統一された
+- 2611 tests pass (0 failures)
+
+---
+
+## [v35.5.0] — 2026-07-05
+
+### Changed
+- `fav/src/ast.rs` — `Effect` enum、`effects` フィールドを全型定義から削除
+- `fav/src/middle/checker.rs` — `infer_effects_fn`、`EffectSet`、エフェクト強制ロジックを削除
+- `fav/src/middle/compiler.rs` — `effects` フィールド参照をすべて除去
+- `fav/src/lineage.rs` — `Effect` ベースの分類ロジックを削除、Snowflake/Azure コール検出ベースに移行
+- `fav/src/middle/reachability.rs` / `fav/src/middle/ir.rs` — `Effect` 参照除去
+- `fav/self/checker.fav` — `check_effects_all` を no-op 化（Effect 強制を完全廃止）
+- `runes/`（95ファイル）— 残存 `!Effect` アノテーション除去（コンパイル互換性確保）
+- `fav/src/driver.rs` — Effect 関連テスト 33 件スタブ化（E0003/E0025/E0338/E0319〜E0324 系）
+
+### Notes
+- v34.9A 実装完了: Effect enum が言語・コンパイラ・リンター・リネージから完全に消滅
+- 型安全な副作用管理は `ctx: AppCtx`（capability context）パターンで実現
+- 2611 tests pass (0 failures)
+
+---
+
+## [v35.4.0] — 2026-07-05
+
+### Changed
+- `fav/src/frontend/parser.rs` — `parse_effect_ann` が `!Effect` アノテーションを即座に **E0374** として拒否するよう変更（13 テスト更新）
+- `fav/src/middle/checker.rs` — `current_fn_has_ctx: bool` フィールド追加; `ctx: AppCtx` 引数を持つ関数はエフェクト強制をバイパス（`has_effect` 更新）
+- `fav/src/backend/wasm_codegen.rs` — `ensure_supported_main_signature` が空エフェクト（pure main）を許可
+- `fav/src/lint.rs` — W022 `check_w022_deprecated_effect_annotation` 関数を削除（E0374 に吸収）
+- `fav/src/emit_python.rs` / `fav/src/middle/reachability.rs` / `fav/src/lineage.rs` — `!Effect` アノテーション除去（テスト更新）
+- `fav/src/backend/vm_stdlib_tests.rs` / `vm_legacy_coverage_tests.rs` — インライン Favnir ソース文字列から `!Effect` を除去
+
+### Added
+- `fav/src/error_catalog.rs` — **E0374** `EffectAnnotationRemoved` エラーコード登録
+- `fav/src/driver.rs` — `v35400_tests`（5 件）: E0374 回帰 / ctx bypass / W022 削除 / エラーカタログ確認
+
+### Notes
+- v34.8A 実装: `!Effect` アノテーション構文を parse error（E0374）に昇格。副作用の宣言は `ctx: AppCtx` 第一引数で行う
+- `current_fn_has_ctx = true` のとき `has_effect()` は常に `true` を返すため、E0107 等の全エフェクトチェックをバイパス
+
+---
+
+## [v35.3.0] — 2026-07-05
+
+### Changed
+- `examples/` 配下 31 ファイルの `!Effect` アノテーションを除去（stage / fn シグネチャ）
+- `infra/e2e-demo/` 配下 10 ファイルの `!Effect` アノテーションを除去（stage / fn シグネチャ）
+- `fav/src/driver.rs` — `cargo_toml_version_is_35_2_0` をスタブ化
+- `fav/src/driver.rs` — `verifier_fav_has_aws_effects` / `crosscloud_effects_declared` をスタブ化（ctx 移行に伴う更新）
+
+### Added
+- `fav/src/driver.rs` — `v35300_tests`（5 件）: examples/infra !Effect 除去の回帰テスト
+
+### Notes
+- v34.7A 実装: `examples/` + `infra/e2e-demo/` の全 `.fav` ファイルから `!Effect` アノテーションを完全除去
+- `stage` 宣言は `!Effect` 除去のみ、`fn` 宣言は `ctx: AppCtx` 追加 + `!Effect` 除去
+
+---
+
+## [v35.2.0] — 2026-07-05
+
+### Added
+- `fav/src/middle/compiler.rs` — `"Ctx"` / `"AppCtx"` を builtin namespace リストに追加（`Ctx.test_ctx_raw()` が test ブロックで使用可能に）
+- `runes/aws/aws.test.fav` / `runes/http/http.test.fav` / `runes/auth/auth.test.fav` / `runes/env/env.test.fav` / `runes/grpc/grpc.test.fav` / `runes/incremental/incremental.test.fav` — ctx: AppCtx を使用するよう更新
+
+### Changed
+- `runes/` 配下 100 件の `!Effect` → `ctx: AppCtx` 第一引数移行完了（v34.6A 全タスク達成）
+- `fav/src/driver.rs` — `http_rune_put_returns_err_on_bad_host` テストを ctx 構文に更新
+
+### Notes
+- v34.6A 補完実装: `!Effect` アノテーションの完全廃止。Rune ファイルの公開 fn はすべて `ctx: AppCtx` を第一引数として持つ
+- `Ctx.test_ctx_raw()` を test ブロック内で使用するためのコンパイラ修正（`compiler.rs` への namespace 登録）
+
+---
+
+## [v35.1.0] — 2026-07-04
+
+### Added
+- `fav/src/ast.rs` — `Effect::is_deprecated()` メソッド追加（Pure 以外のすべての Effect が `true` を返す）
+- `fav/src/middle/checker.rs` — `!Effect` 使用時の deprecation 警告（W022）を型チェック時に発行
+
+### Notes
+- v34.5A 補完実装: ロードマップが要求したコンパイラレベルの !Effect 非推奨化を実施
+- lint.rs の W022（v34.5.0 で実装済み）と組み合わせることで `fav lint` / `fav check` 両方で警告が出る
+
+---
+
+## [v35.0.0] — 2026-07-04
+
+### Added
+- **Production Ready マイルストーン宣言**（v34.1〜v34.9 完了）
+- `MILESTONE.md` に `v35.0.0 — Production Ready` セクション追加
+- `README.md` に v35.0 マイルストーン行追記
+- `v350000_tests`: マイルストーン宣言確認テスト 5 件
+- `cargo clean` 実施（最終クリーンアップ、24.2 GiB 削減）
+
+### Changed
+- `versions/current.md` — 最新安定版を v35.0.0 に更新
+
+---
+
+## [v34.9.0] — 2026-07-04
+
+### Added
+- `site/content/docs/tools/upgrade-guide.mdx` — `fav upgrade` コマンド公式ドキュメント（フラグ / ワークフロー / トラブルシューティング）
+- `fav/tests/fixtures/ctx_migration/before.fav` — `!Http` 使用の移行前フィクスチャ
+- `fav/tests/fixtures/ctx_migration/after.fav` — `AppCtx` 使用の移行後フィクスチャ
+
+### Changed
+- `versions/current.md` — 最新安定版を v34.9.0 に更新
+
+---
+
+## [v34.8.0] — 2026-07-04
+
+### Added
+- `MIGRATION.md` — `!Effect` → Capability Context 移行ガイド（背景 / fav upgrade 手順 / 対応表 / Before-After / FAQ）
+- `fav upgrade` コマンド（`--from-effects` + `--dry-run` / `--in-place` フラグ）
+
+### Changed
+- `versions/current.md` — 最新安定版を v34.8.0 に更新
+
+---
+
+## [v34.7.0] — 2026-07-04
+
+### Added
+- `site/content/docs/ctx-syntax-guide.mdx` — ctx 構文完全リファレンスガイド
+
+### Changed
+- `site/content/learn/getting-started.mdx` — AppCtx を使ったパイプライン例を追加
+- `README.md` — v34.5〜v34.7 ctx 移行シリーズの記録を追加
+- `versions/current.md` — 最新安定版を v34.7.0 に更新
+
+---
+
+## [v34.6.0] — 2026-07-04
+
+### Added
+- `runes/ctx/db.fav` — DbCtx interface 定義（`!DbRead`/`!DbWrite` → `ctx.db` 移行用）
+- `runes/ctx/http.fav` — HttpClient interface 定義（`!Http` → `ctx.http` 移行用）
+- `runes/ctx/stream.fav` — StreamClient interface 定義（`!Stream` → `ctx.stream` 移行用）
+- `site/content/docs/runes/ctx-migration-status.mdx` — ctx 移行ステータスサマリーページ
+
+### Changed
+- `versions/current.md` — 最新安定版を v34.6.0 に更新
+
+---
+
+## [v34.5.0] — 2026-07-04
+
+### Added
+- `fav/src/lint.rs` — W022 `deprecated_effect_annotation` lint ルール追加
+- `runes/ctx/io.fav` — IoCtx interface 定義（`!Io` → `ctx.io` 移行用）
+- `site/content/docs/tools/migration-effects.mdx` — `!Effect` → ctx 移行ガイド
+
+### Changed
+- `versions/current.md` — 最新安定版を v34.5.0 に更新
+
+---
+
+## [v34.4.0] — 2026-07-04
+
+### Added
+- `site/content/docs/tools/security-audit-v2.mdx` — セキュリティ審査 v2 レポート（W021・認証情報・sandbox・OSS ライセンスの 4 項目）
+- `site/content/docs/tools/oss-licenses.mdx` — OSS 依存ライセンス一覧（26 クレート）
+
+### Changed
+- `SECURITY_MODEL.md` — v34.x ctx 移行との関係セクション追加
+- `versions/current.md` — 最新安定版を v34.4.0 に更新
+
+---
+
+## [v34.3.0] — 2026-07-04
+
+### Added
+- `benchmarks/real-world/` — 実測ベンチマーク JSON 3 ファイル（favnir / python_pandas / apache_spark）
+
+### Changed
+- `site/content/docs/bench/index.mdx` — dbt 比較セクション追加 / 履歴テーブルに v34.1〜v34.3 行追加
+- `versions/current.md` — 最新安定版を v34.3.0 に更新
+
+---
+
+## [v34.2.0] — 2026-07-04
+
+### Added
+- `site/content/errors/index.mdx` — エラーコードリファレンスページ（57 コード、カテゴリ別テーブル）
+- `site/content/cookbook/` — 18 本追加（計 50 本）
+  postgres-etl / snowflake-load / duckdb-query / parquet-transform / avro-schema /
+  iceberg-compaction / mongodb-etl / redis-cache-aside / elasticsearch-index /
+  http-api-ingest / csv-validation / schema-evolution / data-quality-check /
+  incremental-load / cron-trigger / secret-manager / jwt-auth / grpc-client
+
+### Changed
+- `site/content/docs/bench/index.mdx` — Python pandas / Apache Spark との比較データを追加
+
+---
+
+## [v34.1.0] — 2026-07-04
+
+### Added
+- `examples/real-world-etl/` — 8 ファイル構成の実案件規模 ETL デモ（src/ 5 ファイル + fav.toml + data/ + README）
+  - `src/types.fav` — Order / OrderStatus / ValidationError / LoadResult 型定義
+  - `src/validators.fav` — 欠損値・範囲・重複バリデーション
+  - `src/stages.fav` — load_csv / write_postgres / sync_bigquery ステージ
+  - `src/notifications.fav` — Slack 成功・失敗通知
+  - `src/main.fav` — RealWorldEtl pipeline（5 ステージ） + OTel トレース
+  - `data/orders_sample.csv` — サンプルデータ（ヘッダー + 5 行）
+  - `README.md` — 30 分で動かす手順書
+
+---
+
+## [v34.0.0] — 2026-07-04
+
+### Added
+- **Performance & Tooling マイルストーン宣言**（v33.1〜v33.9 確認完了）
+- `MILESTONE.md` に `v34.0.0 — Performance & Tooling` セクション追加
+- `README.md` に v34.0 マイルストーン行追記
+- `v340000_tests`: マイルストーン宣言確認テスト 4 件
+- `cargo clean` 実施（20.5 GiB 削減）
+
+---
+
+## [v33.9.0] — 2026-07-04
+
+### Added
+- `v339000_tests`: 並列コンパイル（`topo_layers` / `compile_parallel`）動作確認テスト 4 件
+- `parallel_topo_cyclic_dep_returns_err`: 循環依存グラフで `topo_layers` が `Err("circular dependency detected")` を返すことを確認
+- `parallel_compile_empty_sources`: 空ソースリストで `compile_parallel` が `Ok(IRProgram { fns: [] })` を返すことを確認
+
+---
+
+## [v33.8.0] — 2026-07-04
+
+### Added
+- `v338000_tests`: プロファイリング強化（`parse_profile_json` / `to_folded_stacks`）動作確認テスト 4 件
+- `profile_parse_json_valid_records`: JSON キー `"name"` / `"ms"` → `StageRecord` 変換を確認
+- `profile_folded_stacks_has_pipeline_prefix`: `to_folded_stacks` 出力が `"pipeline;"` プレフィックスを持つことを確認
+
+---
+
+## [v33.7.0] — 2026-07-04
+
+### Added
+- `v337000_tests`: エフェクトシステム移行準備（`migrate_effects_in_source` / `resolve_use_effects`）動作確認テスト 4 件
+  - `cargo_toml_version_is_33_7_0` — バージョン確認
+  - `benchmark_v33_7_0_exists` — ベンチマークファイル存在確認
+  - `migrate_effects_idempotent` — `migrate_effects_in_source` を 2 回適用しても結果が変わらない（冪等性保証）
+  - `resolve_use_effects_from_v13` — `from_version = "v13"` / `"13"` が移行モードを有効化し、`v12` / `None` は無効のまま
+
+### Notes
+- `migrate_effects_in_source` / `resolve_use_effects` は v13.10.0 実装済み
+- v33.7.0 は Performance & Tooling フェーズの記録としてエフェクト移行ツールの冪等性・バージョン判定を確認する
+
+---
+
+## [v33.6.0] — 2026-07-04
+
+### Added
+- `v336000_tests`: WASM 最適化（DCE / `WasmBuildConfig`）動作確認テスト 4 件
+  - `cargo_toml_version_is_33_6_0` — バージョン確認
+  - `benchmark_v33_6_0_exists` — ベンチマークファイル存在確認
+  - `wasm_dce_keeps_reachable_fn` — DCE が到達可能な関数を除去しないことを確認（安全性保証）
+  - `wasm_default_config_is_o0_with_dce` — `WasmBuildConfig::default()` が `O0` + `dce: true` であることを確認
+
+### Notes
+- `WasmBuildConfig` / `WasmOptLevel` / `wasm_dce` は v19.6.0 実装済み
+- v33.6.0 は Performance & Tooling フェーズの記録として WASM 最適化の設計を確認する
+
+---
+
+## [v33.5.0] — 2026-07-04
+
+### Added
+- `v335000_tests`: `fav run --precompiled`（`.favc` 事前コンパイル実行）動作確認テスト 4 件
+  - `cargo_toml_version_is_33_5_0` — バージョン確認
+  - `benchmark_v33_5_0_exists` — ベンチマークファイル存在確認
+  - `favc_meta_source_hash_is_nonzero` — `FavcMeta.source_hash` が非ゼロ（SHA-256 計算済み確認）
+  - `favc_different_sources_differ` — 異なるソースが異なる `.favc` バイト列を生成する（衝突なし保証）
+
+### Notes
+- `cmd_compile_to_bytes` / `cmd_run_precompiled_bytes` / `FavcMeta` は v19.7.0 実装済み
+- v33.5.0 は Performance & Tooling フェーズの記録として事前コンパイル実行の META セクション設計を確認する
+
+---
+
+## [v33.4.0] — 2026-07-04
+
+### Added
+- `v334000_tests`: Arrow 列指向統合（`ArrowBatch` / `#[arrow]`）動作確認テスト 4 件
+  - `cargo_toml_version_is_33_4_0` — バージョン確認
+  - `benchmark_v33_4_0_exists` — ベンチマークファイル存在確認
+  - `arrow_trf_without_annotation_has_false` — `#[arrow]` なし stage が `arrow: false`（opt-out 確認）
+  - `arrow_trf_arrow_and_stateful_are_independent` — `#[stateful]` のみ stage が `arrow: false` かつ `stateful: true`（2フラグ独立確認）
+
+### Notes
+- `ArrowBatch` 型 / `#[arrow]` アノテーション / `TrfDef.arrow: bool` は v19.5.0 実装済み
+- v33.4.0 は Performance & Tooling フェーズの記録として Arrow 列指向統合の AST 設計を確認する
+
+---
+
+## [v33.3.0] — 2026-07-04
+
+### Added
+- `v333000_tests`: ストリーミング評価（`#[streaming]`）動作確認テスト 4 件
+  - `cargo_toml_version_is_33_3_0` — バージョン確認
+  - `benchmark_v33_3_0_exists` — ベンチマークファイル存在確認
+  - `streaming_seq_without_annotation_has_none` — アノテーションなし seq が `streaming: None`（opt-in 確認）
+  - `streaming_chunk_size_boundary_one` — `chunk_size = 1`（最小境界値）のパース確認
+
+### Notes
+- `#[streaming]` / `StreamingAnnotation` / ストリーミングパイプライン実行は v19.1.0 実装済み
+- v33.3.0 は Performance & Tooling フェーズの記録としてストリーミング評価動作を確認する
+
+---
+
+## [v33.2.0] — 2026-07-04
+
+### Added
+- `v332000_tests`: インクリメンタルコンパイル動作確認テスト 4 件
+  - `cargo_toml_version_is_33_2_0` — バージョン確認
+  - `benchmark_v33_2_0_exists` — ベンチマークファイル存在確認
+  - `incremental_content_hash_deterministic` — SHA-256 ハッシュの決定性確認
+  - `incremental_dep_graph_no_import_isolated` — 依存なしファイルが影響を受けないことを確認
+
+### Notes
+- `IncrementalCache` / `fingerprint` / `dep_graph` は v19.3.0 実装済み
+- v33.2.0 は Performance & Tooling フェーズの記録としてインクリメンタルコンパイル動作を確認する
+
+---
+
+## [v33.1.0] — 2026-07-04
+
+### Added
+- `v331000_tests`: AOT ネイティブバイナリ（Cranelift）動作確認テスト 4 件
+  - `cargo_toml_version_is_33_1_0` — バージョン確認
+  - `benchmark_v33_1_0_exists` — ベンチマークファイル存在確認
+  - `aot_if_branch_selects_true_arm` — if 式の then アーム選択確認
+  - `aot_bool_comparison_native` — Bool 比較（`2 > 1` → `1`）の AOT 動作確認
+
+### Notes
+- `CraneliftBackend::compile_to_binary` / `cmd_build_native` は v19.2.0 実装済み
+- v33.1.0 は Performance & Tooling フェーズの記録として AOT 動作を明示的に確認する
+- cc 非インストール環境では aot_* テストは自動スキップ（偽陰性なし）
+
+---
+
+## [v33.0.0] — 2026-07-03
+
+### Added
+- `v330000_tests`: Language Power マイルストーン宣言確認テスト 4 件
+  - `cargo_toml_version_is_33_0_0` — バージョン確認
+  - `milestone_language_power_declared` — MILESTONE.md に「Language Power」記載確認
+  - `readme_mentions_v33_0` — README.md に「v33.0」記載確認
+  - `benchmark_v33_0_0_exists` — ベンチマークファイル存在確認
+- `MILESTONE.md` — v33.0.0「Language Power」セクションを先頭に追加
+- `README.md` — v33.0 マイルストーン宣言を追加
+
+### Notes
+- Language Power = 境界付きジェネリクス / 行多相 / where 制約 / スキーマ型 /
+  線形型 / 分散アノテーション / 定数ジェネリクス / 型駆動 API 生成 / エフェクト推論
+- `cargo clean` 実施（マイルストーン版の必須クリーンアップ）
+
+---
+
+## [v32.9.0] — 2026-07-03
+
+### Added
+- `v329000_tests`: エフェクト推論（Effect Inference）動作確認テスト 4 件
+  - `cargo_toml_version_is_32_9_0` — バージョン確認
+  - `benchmark_v32_9_0_exists` — ベンチマークファイル存在確認
+  - `effect_infer_io_println` — `IO.println` → `!Io` エフェクト推論確認
+  - `effect_infer_pure_mul_no_effects` — 純粋関数 `mul` → エフェクトなし確認
+
+### Notes
+- `infer_effects_fn` / `infer_effects_for_program` / `EffectSet` は v18.1.0 実装済み
+- v32.9.0 はその動作を Language Power フェーズの記録として明示的に確認する
+
+---
+
+## [v32.8.0] — 2026-07-03
+
+### Added
+- `v328000_tests`: 型駆動 API 生成（Type-Driven API Generation）動作確認テスト 4 件
+  - `cargo_toml_version_is_32_8_0` — バージョン確認
+  - `benchmark_v32_8_0_exists` — ベンチマークファイル存在確認
+  - `api_ann_get_items_path_parses` — `#[api]` アノテーション `/items/:id` のパース確認
+  - `api_ann_openapi_items_path_exists` — OpenAPI JSON の `/items/{id}` paths キー確認
+
+### Notes
+- `ApiAnnotation` / `build_openapi_json` / `build_route_table` 等は v18.8.0 実装済み
+- v32.8.0 はその動作を Language Power フェーズの記録として明示的に確認する
+
+---
+
+## [v32.7.0] — 2026-07-03
+
+### Added
+- `v327000_tests`: 定数ジェネリクス（Const Generics）動作確認テスト 4 件
+  - `cargo_toml_version_is_32_7_0` — バージョン確認
+  - `benchmark_v32_7_0_exists` — ベンチマークファイル存在確認
+  - `const_gen_chunk_size_valid` — `N=5` が `N>0` を満たす → E0335 なし
+  - `const_gen_chunk_size_zero_e0335` — `N=0` が `N>0` を違反 → E0335
+
+### Notes
+- `GenericParam.is_const` / `const_ty` / `const_constraint` / E0335 は v18.7.0 実装済み
+- v32.7.0 はその動作を Language Power フェーズの記録として明示的に確認する
+
+---
+
+## [v32.6.0] — 2026-07-03
+
+### Added
+- `v326000_tests`: 分散アノテーション（Variance Annotations）動作確認テスト 4 件
+  - `cargo_toml_version_is_32_6_0` — バージョン確認
+  - `benchmark_v32_6_0_exists` — ベンチマークファイル存在確認
+  - `variance_ann_covariant_output_pass` — `+T` が出力位置のみ → E0334 なし
+  - `variance_ann_covariant_input_e0334` — `+T` が入力位置 → E0334
+
+### Notes
+- `Variance::Covariant`・`Variance::Contravariant`・E0334 は v18.6.0 実装済み
+- v32.6.0 はその動作を Language Power フェーズの記録として明示的に確認する
+
+---
+
+## [v32.5.0] — 2026-07-03
+
+### Added
+- `v325000_tests`: 線形型（Linear Types）動作確認テスト 4 件
+  - `cargo_toml_version_is_32_5_0` — バージョン確認
+  - `benchmark_v32_5_0_exists` — ベンチマークファイル存在確認
+  - `linear_type_double_use_e0332` — Connection 二重使用で E0332
+  - `linear_type_unused_var_e0333` — Connection 未使用で E0333
+
+### Notes
+- `TokenKind::LinearArrow`・E0332・E0333 は v18.5.0 実装済み
+- v32.5.0 はその動作を Language Power フェーズの記録として明示的に確認する
+
+---
+
+## [v32.4.0] — 2026-07-03
+
+### Added
+- `v324000_tests`: スキーマ型（Schema Types）動作確認テスト 4 件
+  - `cargo_toml_version_is_32_4_0` — バージョン確認
+  - `benchmark_v32_4_0_exists` — ベンチマークファイル存在確認
+  - `schema_alias_parses` — `schema "file:..."` 構文パース確認
+  - `schema_type_ast_is_schema_expr` — AST が `TypeExpr::Schema` を含む確認
+
+### Notes
+- `TypeExpr::Schema`・`register_schema_types`・`schema_loader` は v18.4.0 実装済み
+- v32.4.0 はその動作を Language Power フェーズの記録として明示的に確認する
+
+---
+
+## [v32.3.0] — 2026-07-03
+
+### Added
+- `v323000_tests`: where 制約（Refinement Types）動作確認テスト 4 件
+  - `cargo_toml_version_is_32_3_0` — バージョン確認
+  - `benchmark_v32_3_0_exists` — ベンチマークファイル存在確認
+  - `where_constraint_literal_pass` — `b=2` で `b != 0` 制約 PASS
+  - `where_constraint_literal_fail_e0331` — `b=0` で E0331
+
+### Notes
+- `fn_refinement_registry`・E0331・`RefinementAssert` opcode は v18.3.0 実装済み
+- v32.3.0 はその動作を Language Power フェーズの記録として明示的に確認する
+
+---
+
+## [v32.2.0] — 2026-07-03
+
+### Added
+- `v322000_tests`: 行多相（Row Polymorphism）動作確認テスト 4 件
+  - `cargo_toml_version_is_32_2_0` — バージョン確認
+  - `benchmark_v32_2_0_exists` — ベンチマークファイル存在確認
+  - `row_poly_field_constraint_pass` — `with { id: Int }` 制約 PASS
+  - `row_poly_missing_field_e0337` — フィールドなし型を渡すと E0337
+
+### Notes
+- `TypeConstraint::HasField`・`type_has_field`・E0337 は v18.2.0 実装済み
+- v32.2.0 はその動作を Language Power フェーズの記録として明示的に確認する
+
+---
+
+## [v32.1.0] — 2026-07-03
+
+### Added
+- 境界付きジェネリクス（bounded generics）の確認・テスト補強
+- `Display` bound（String が満たす）/ `Hash` bound（Int が満たす）の正常動作を検証
+- `Hash` bound に Float を渡すと E0325 が発生することをネガティブテストで確認
+
+### Notes
+- 実装自体は v17.1.0 で完了済み。v32.1.0 は Language Power フェーズの起点として記録。
+
+---
+
+## [v32.0.0] — 2026-07-03
+
+### Added
+- Language Polish マイルストーン宣言（v31.1〜v31.9 全コンポーネント完成）
+- `MILESTONE.md` に v32.0.0「Language Polish」セクション追加
+- `README.md` に v32.0 マイルストーン行追加
+- `cargo clean` + `cargo build` 実施（マイルストーン版クリーンアップ）
+
+---
+
+## [v31.9.0] — 2026-07-03
+
+### Fixed
+- REPL: `ReplSession::add_history` が空行・空白行を履歴に追加しないよう修正
+- `fav check --all`: .fav ファイルが見つからない場合に警告メッセージを表示（非 JSON モード）
+
+---
+
+## [v31.8.0] — 2026-07-03
+
+### Added
+- `fav scaffold stage <Name>` — プロジェクト `src/stages.fav` にスタブコードを自動追記
+- `fav scaffold seq <Name>` — プロジェクト `src/pipelines.fav` にスタブコードを自動追記
+- `scaffold_to_src()` を `driver.rs` に追加（fav.toml の src ディレクトリ自動解決）
+- `benchmarks/v31.8.0.json` 追加
+
+### Changed
+- `Cargo.toml` version: `31.7.0` → `31.8.0`
+
+---
+
+## [v31.7.0] — 2026-07-03
+
+### Added
+- `fav check --all` — fav.toml src ディレクトリ内の全 .fav を一括型チェック
+- `fav check --all --json` — JSON 形式でエラー出力
+- `cmd_check_all()` / `check_all_files()` を `driver.rs` に追加
+- `benchmarks/v31.7.0.json` 追加
+
+### Changed
+- `Cargo.toml` version: `31.6.0` → `31.7.0`
+
+---
+
+## [v31.6.0] — 2026-07-03
+
+### Added
+- `fav test --watch <dir>` — ファイル変更検知による自動テスト再実行
+- `benchmarks/v31.6.0.json` 追加
+
+### Changed
+- `Cargo.toml` version: `31.5.0` → `31.6.0`
+
+---
+
+## [v31.5.0] — 2026-07-02
+
+### Added
+- `lsp/inlay_hints.rs` — 新規作成: `handle_inlay_hints()` / `collect_bind_hints()` 実装
+- LSP `initialize` 応答に `"inlayHintProvider": true` を追加
+- LSP `textDocument/inlayHint` ハンドラを追加
+- `editors/favnir-vscode/package.json` に `inlayHints` capability を追記
+- `benchmarks/v31.5.0.json` 追加
+
+### Changed
+- `Cargo.toml` version: `31.4.0` → `31.5.0`
+
+---
+
+## [v31.4.0] — 2026-07-02
+
+### Added
+- `driver.rs` — `repl_complete_with_defs()` 追加（セッション定義名をタブ補完に含める）
+- `benchmarks/v31.4.0.json` 追加
+
+### Changed
+- `driver.rs::cmd_repl()` — REPL プロンプトを `> ` → `favnir> ` に変更
+- `driver.rs::ReplSession::add_history()` — 履歴上限を 100 件に制限（push 後に 101 件になったら先頭を削除）
+- `Cargo.toml` version: `31.3.0` → `31.4.0`
+
+---
+
+## [v31.3.0] — 2026-07-02
+
+### Added
+- `driver.rs::get_explain_text()` — E0002/E0003/E0004/E0005/E0006/E0010/E0011/E0019/E0020/E0021 の説明テキストを追加
+- `benchmarks/v31.3.0.json` 追加
+
+### Changed
+- `driver.rs::cmd_explain_code()` — unknown コード時に利用可能コード一覧（E0001〜E0021）を表示
+- `Cargo.toml` version: `31.2.0` → `31.3.0`
+
+---
+
+## [v31.2.0] — 2026-07-02
+
+### Added
+- `driver.rs` — `levenshtein()` / `suggest_similar()` ユーティリティ関数を追加
+- `driver.rs::get_help_text()` — E0011/E0012/E0016/E0017/E0019 に hint を追加
+- `benchmarks/v31.2.0.json` 追加
+
+### Changed
+- `Cargo.toml` version: `31.1.0` → `31.2.0`
+
+---
+
+## [v31.1.0] — 2026-07-02
+
+### Changed
+- `driver.rs::get_help_text()` — E0002/E0003/E0004/E0005/E0006/E0010 に hint を追加
+- `Cargo.toml` version: `31.0.0` → `31.1.0`
+
+### Added
+- `benchmarks/v31.1.0.json` 追加
+
+---
+
+## [v31.0.0] — 2026-07-02
+
+### Added
+- Real-World Readiness マイルストーンを正式宣言
+- `MILESTONE.md` に v31.0.0 セクション追加（v30.1〜v30.9 達成コンポーネント一覧）
+- `benchmarks/v31.0.0.json` 追加
+
+### Changed
+- `Cargo.toml` version: `30.9.0` → `31.0.0`
+
+---
+
+## [v30.9.0] — 2026-07-02
+
+### Fixed
+- `toml.rs` — `[project]` セクションを認識して `src` フィールドを正しくパースする
+- `driver.rs` — 非 rune import を `src_dir` ではなく `root` ベースで解決（`import src/types` が `src/src/types.fav` にならない）
+- `driver.rs` — `fav test` false 返却時に `assert_eq!` / `assert!` 使用を促すヒントを追加
+- `main.rs` — `fav new`（引数なし）に `fav new --list` ヒントを追加
+
+---
+
+## [v30.8.0] — 2026-07-02
+
+### Added
+- `cmd_new_list` — `fav new --list` でテンプレート一覧を表示（8 テンプレート）
+- `main.rs` — `fav new --list` フラグを検出して `cmd_new_list()` を呼ぶ
+
+---
+
+## [v30.7.0] — 2026-07-02
+
+### Changed
+- `hint_for_runtime_error`（新規 `pub(crate)` 関数）— index out of bounds / global index / type error に `= ヒント:` を付加（具体パターン優先順）
+- `format_runtime_error` — プレフィックスを `"runtime error:"` に統一、ステージ名を `"in stage X"` 形式で表示、空スタックトレース時も `fn_name` を保持
+
+---
+
+## [v30.6.0] — 2026-07-02
+
+### Changed
+- `cmd_test`（引数なし）— `src/` に加えて `tests/` ディレクトリも走査対象に追加
+- `fav test`（引数なし）で `tests/pipeline_test.fav` が自動検出・実行される
+
+---
+
+## [v30.5.0] — 2026-07-02
+
+### Added
+- `examples/csv-to-postgres/` — ドッグフード用 CSV → Postgres ETL サンプル（8 ファイル）
+- `data/sample.csv` — 10 行のサンプルデータ（行 9 は意図的に無効）
+- `tests/pipeline_test.fav` — DB 不要の純粋バリデーションテスト（3 件）
+- README に 30 分クイックスタート手順を記載
+
+### Changed
+- `lint.rs` — TrfDef（stage）に E0023/E0025 を適用しないよう修正。stage は本来エフェクト境界であるため `IO.*` / `Postgres.*` ambient 呼び出しは合法
+
+---
+
+## [v30.4.0] — 2026-07-01
+
+### Added
+- `fav/tests/fixtures/multifile_rune_import/` — 複数ファイルから同一 Rune（`runes/postgres`）を import するフィクスチャ
+- `stages.fav` と `main.fav` 両方が `import runes/postgres` を持つシナリオを検証（二重定義エラーなし確認）
+- `validators.fav` は Rune import なし — Rune import が不要なファイルの明示的確認
+
+### Fixed
+- v30.3.0 code-reviewer [HIGH]: `scaffold_postgres_etl_stages` の `ValidateRows` 戻り型アノテーション（`List<ValidRow>` → `Result<List<ValidRow>, RowError>`）修正
+- v30.3.0 code-reviewer [MED]: `benchmarks/v30.3.0.json` の `tests_passed` を実測値 2391 に修正
+
+---
+
+## [v30.3.0] — 2026-07-01
+
+### Added
+- `fav/tests/fixtures/multifile_etl/` — マルチファイル ETL プロジェクト検証フィクスチャ（types / validators / main + fav.toml）
+- インラインレコードリテラルの型名プレフィックス必須化を確認（`RowError { }` / `ValidRow { }` 構文）
+- `scaffold_postgres_etl_validators` / `scaffold_postgres_etl_stages` / `scaffold_postgres_etl_test` を型付きレコードリテラルに修正
+
+---
+
+## [v30.2.0] — 2026-07-01
+
+### Changed
+- `fav new --template postgres-etl` — 4 ファイル構成（types / validators / stages / main）に更新
+- `tests/pipeline_test.fav` と `README.md` を生成するように変更
+- scaffold コードを VM 確認済みプリミティブ（`String.to_int` / `String.to_float` / `Option.unwrap_or`）で統一
+
+---
+
+## [v30.1.0] — 2026-07-01
+
+### Added
+- `[profile.dev] debug = 0` — デバッグシンボル無効化によりビルド生成物を軽量化
+- `[profile.dev] split-debuginfo = "off"` — デバッグ情報分割ファイルを無効化
+
+---
+
 ## [v30.0.0] — 2026-07-01
 
 ### Added

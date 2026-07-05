@@ -403,37 +403,37 @@ fn tool_favnir_rune_docs(rune: &str) -> serde_json::Value {
     let docs = match rune {
         "db" => {
             "## db Rune\n\n\
-### connect(url: String) -> Result<DbHandle, String> !Io\n\
+### connect(url: String) -> Result<DbHandle, String>\n\
 Establish a database connection.\n\n\
-### query(conn: DbHandle, sql: String, params: List<String>) -> Result<List<Map<String,String>>, String> !Io\n\
+### query(conn: DbHandle, sql: String, params: List<String>) -> Result<List<Map<String,String>>, String>\n\
 Execute a SELECT query.\n\n\
-### execute(conn: DbHandle, sql: String, params: List<String>) -> Result<Int, String> !Io\n\
+### execute(conn: DbHandle, sql: String, params: List<String>) -> Result<Int, String>\n\
 Execute an INSERT/UPDATE/DELETE.\n\n\
-### query_one(conn: DbHandle, sql: String, params: List<String>) -> Result<Map<String,String>, String> !Io\n\
+### query_one(conn: DbHandle, sql: String, params: List<String>) -> Result<Map<String,String>, String>\n\
 Execute a SELECT expecting exactly one row.\n\n\
-### with_transaction(conn: DbHandle, f: (DbHandle) -> Result<A, String>) -> Result<A, String> !Io\n\
+### with_transaction(conn: DbHandle, f: (DbHandle) -> Result<A, String>) -> Result<A, String>\n\
 Run f inside a transaction; rollback on error."
         }
         "http" => {
             "## http Rune\n\n\
-### get(url: String) -> Result<String, String> !Io\n\
+### get(url: String) -> Result<String, String>\n\
 HTTP GET request.\n\n\
-### post(url: String, body: String) -> Result<String, String> !Io\n\
+### post(url: String, body: String) -> Result<String, String>\n\
 HTTP POST request.\n\n\
-### put(url: String, body: String) -> Result<String, String> !Io\n\
+### put(url: String, body: String) -> Result<String, String>\n\
 HTTP PUT request.\n\n\
-### delete(url: String) -> Result<String, String> !Io\n\
+### delete(url: String) -> Result<String, String>\n\
 HTTP DELETE request."
         }
         "log" => {
             "## log Rune\n\n\
-### info(code: String, message: String, ctx: Map<String,String>) -> Unit !Io\n\
+### info(code: String, message: String, ctx: Map<String,String>) -> Unit\n\
 Log at INFO level.\n\n\
-### warn(code: String, message: String, ctx: Map<String,String>) -> Unit !Io\n\
+### warn(code: String, message: String, ctx: Map<String,String>) -> Unit\n\
 Log at WARN level.\n\n\
-### error(code: String, message: String, ctx: Map<String,String>) -> Unit !Io\n\
+### error(code: String, message: String, ctx: Map<String,String>) -> Unit\n\
 Log at ERROR level.\n\n\
-### metric(name: String, value: Float, unit: String) -> Unit !Io\n\
+### metric(name: String, value: Float, unit: String) -> Unit\n\
 Emit a metric data point."
         }
         "gen" => {
@@ -449,11 +449,11 @@ Write rows to a CSV file."
         }
         "auth" => {
             "## auth Rune\n\n\
-### jwt_sign(payload: Map<String,String>, secret: String) -> Result<String, String> !Auth\n\
+### jwt_sign(payload: Map<String,String>, secret: String) -> Result<String, String>\n\
 Sign a JWT token.\n\n\
-### jwt_verify(token: String, secret: String) -> Result<Bool, String> !Auth\n\
+### jwt_verify(token: String, secret: String) -> Result<Bool, String>\n\
 Verify a JWT token signature.\n\n\
-### hmac_sha256(message: String, secret: String) -> String !Auth\n\
+### hmac_sha256(message: String, secret: String) -> String\n\
 Compute HMAC-SHA256 hex digest."
         }
         "env" => {
@@ -469,9 +469,9 @@ Load a .env file into the environment."
         }
         "grpc" => {
             "## grpc Rune\n\n\
-### call(host: String, method: String, payload: Map<String,String>) -> Result<Map<String,String>, String> !Io\n\
+### call(host: String, method: String, payload: Map<String,String>) -> Result<Map<String,String>, String>\n\
 Call a gRPC method with a Map payload.\n\n\
-### call_typed(response_type: String, host: String, method: String, payload: Map<String,String>) -> Result<Map<String,String>, String> !Io\n\
+### call_typed(response_type: String, host: String, method: String, payload: Map<String,String>) -> Result<Map<String,String>, String>\n\
 Call a gRPC method and decode the response using the given type name."
         }
         other => {
@@ -592,11 +592,11 @@ fn stdlib_docs() -> &'static str {
 - `Result.is_err(res)` → Bool\n\
 \n\
 ## IO\n\
-- `IO.println(s)` → Unit !Io\n\
-- `IO.print(s)` → Unit !Io\n\
-- `IO.read_line()` → String !Io\n\
-- `IO.read_file(path)` → Result<String, String> !File\n\
-- `IO.write_file(path, content)` → Result<Unit, String> !File\n"
+- `IO.println(s)` → Unit\n\
+- `IO.print(s)` → Unit\n\
+- `IO.read_line()` → String\n\
+- `IO.read_file(path)` → Result<String, String>\n\
+- `IO.write_file(path, content)` → Result<Unit, String>\n"
 }
 
 fn collect_project_fav_files() -> Vec<String> {
@@ -665,8 +665,8 @@ fn prompt_get(name: &str, arguments: &serde_json::Value) -> serde_json::Value {
                 .unwrap_or("stdout");
             let text = format!(
                 "Write a Favnir pipeline that reads from {} and writes to {}. \
-Use appropriate Runes (import rune \"...\") and declare effects (!Io, !File, etc.). \
-Include a public fn main() -> Unit !Io entry point.",
+Use appropriate Runes (import rune \"...\") and pass capability context (ctx: AppCtx) to effectful functions. \
+Include a public fn main() -> Unit entry point.",
                 source_type, output_type
             );
             serde_json::json!({

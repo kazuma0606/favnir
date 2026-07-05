@@ -24,13 +24,13 @@ type MergedRow {
   total_spend: Float
 }
 
-stage FetchUsers -> List[UserRow] !Http {
+stage FetchUsers -> List[UserRow] {
   // Http.get は String を返す → Json.decode で型付き変換
   Http.get("https://api.example.com/users")
     |> Json.decode[List[UserRow]]
 }
 
-stage FetchOrders -> List[OrderRow] !Http {
+stage FetchOrders -> List[OrderRow] {
   Http.get("https://api.example.com/orders")
     |> Json.decode[List[OrderRow]]
 }
@@ -45,7 +45,7 @@ fn calc_spend(orders: List[OrderRow], user_id: Int) -> Float {
 stage MergeAndStore(
   users:  List[UserRow],
   orders: List[OrderRow]
-) -> Int !Db {
+) -> Int {
   users
     |> List.map(|u| MergedRow {
          user_id:     u.id,

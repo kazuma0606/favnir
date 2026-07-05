@@ -36,7 +36,7 @@ services:
 ### `ClickHouse.connect`
 
 ```favnir
-fn connect(config: String) -> Result<String, String> !Db
+fn connect(config: String) -> Result<String, String>
 ```
 
 ClickHouse への接続を確立し、接続ハンドル文字列を返します。`config` には HTTP エンドポイント URL を渡します。
@@ -48,7 +48,7 @@ bind conn <- ClickHouse.connect("http://localhost:8123")
 ### `ClickHouse.query`
 
 ```favnir
-fn query(conn: String, sql: String) -> Result<String, String> !Db
+fn query(conn: String, sql: String) -> Result<String, String>
 ```
 
 SELECT クエリを実行し、結果を JSON 配列文字列として返します。
@@ -60,7 +60,7 @@ bind rows <- ClickHouse.query(conn, "SELECT count() FROM events WHERE date = tod
 ### `ClickHouse.insert`
 
 ```favnir
-fn insert(conn: String, table: String, rows: String) -> Result<Unit, String> !Db
+fn insert(conn: String, table: String, rows: String) -> Result<Unit, String>
 ```
 
 JSON 形式のデータをテーブルにバルク挿入します。
@@ -72,7 +72,7 @@ bind _ <- ClickHouse.insert(conn, "events", rows_json)
 ### `ClickHouse.async_insert`
 
 ```favnir
-fn async_insert(conn: String, table: String, rows: String) -> Result<Unit, String> !Db
+fn async_insert(conn: String, table: String, rows: String) -> Result<Unit, String>
 ```
 
 ClickHouse v21.11+ の非同期バルク挿入を使用します。高スループットのストリーミング挿入に適しています。
@@ -87,13 +87,13 @@ bind _ <- ClickHouse.async_insert(conn, "events", rows_json)
 // examples/clickhouse_analytics.fav
 import rune "clickhouse"
 
-stage LoadEvents: Unit -> Result<String, String> !Db = |_| {
+stage LoadEvents: Unit -> Result<String, String> = |_| {
     bind conn <- ClickHouse.connect("http://localhost:8123")
     ClickHouse.query(conn, "SELECT * FROM events LIMIT 100")
 }
 
 // seq pipeline は前ステージの成功値（String）を次ステージの引数として渡す
-stage InsertProcessed: String -> Result<Unit, String> !Db = |data| {
+stage InsertProcessed: String -> Result<Unit, String> = |data| {
     bind conn <- ClickHouse.connect("http://localhost:8123")
     ClickHouse.insert(conn, "processed_events", data)
 }

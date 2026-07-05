@@ -1,0 +1,39 @@
+---
+title: "HTTP API からのデータ取り込み"
+description: "外部 REST API をポーリングしてデータを取り込み、Postgres に保存するパイプライン"
+---
+
+# HTTP API からのデータ取り込み
+
+外部 REST API を定期的にポーリングしてデータを取得し、Postgres に保存します。
+
+## コード例
+
+```favnir
+import runes/http
+import runes/postgres
+
+type ApiResponse = { items: List<Item>, next_cursor: Option<String> }
+type Item = { id: String, name: String, value: Float, updated_at: String }
+
+fn fetch_page(cursor: Option<String>) -> Result<ApiResponse, String> {
+    let url = match cursor {
+        None       -> "https://api.example.com/items?limit=100"
+        Some(c)    -> String.concat(["https://api.example.com/items?limit=100&cursor=", c])
+    }
+    bind resp <- HTTP.get_json(url, ApiResponse)
+    Result.ok(resp)
+}
+
+fn main() -> Unit {
+    bind page1 <- fetch_page(None)
+    bind n1    <- Postgres.upsert("items", page1.items, "id")
+    IO.println(String.concat(["Ingested ", Int.to_string(n1), " items."]))
+}
+```
+
+## ポイント
+
+- `HTTP.get_json` はレスポンスを指定した型に自動デシリアライズします。
+- ページネーションには `next_cursor` を使いループで全ページを取得します。
+- API キーは環境変数で渡し、`HTTP.set_header("Authorization", ...)` でヘッダーに設定します。

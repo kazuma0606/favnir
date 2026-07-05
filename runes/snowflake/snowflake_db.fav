@@ -7,11 +7,11 @@ type SnowflakeDb(String)
 // ── DbRead impl ────────────────────────────────────────────────────────────────
 
 impl DbRead for SnowflakeDb {
-    fn query(db: SnowflakeDb, sql: String, params: List<String>) -> Result<String, String> !Snowflake {
+    fn query(db: SnowflakeDb, sql: String, params: List<String>) -> Result<String, String> {
         Snowflake.query_raw(sql)
     }
 
-    fn query1(db: SnowflakeDb, sql: String, params: List<String>) -> Result<String, String> !Snowflake {
+    fn query1(db: SnowflakeDb, sql: String, params: List<String>) -> Result<String, String> {
         Snowflake.query_raw(sql)
     }
 }
@@ -19,7 +19,7 @@ impl DbRead for SnowflakeDb {
 // ── DbWrite impl ───────────────────────────────────────────────────────────────
 
 impl DbWrite for SnowflakeDb {
-    fn execute(db: SnowflakeDb, sql: String, params: List<String>) -> Result<Int, String> !Snowflake {
+    fn execute(db: SnowflakeDb, sql: String, params: List<String>) -> Result<Int, String> {
         Snowflake.execute_raw(sql)
     }
 }

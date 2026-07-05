@@ -2,13 +2,13 @@
 // 接続: SENDGRID_BASE_URL 環境変数
 // NOTE: api_key は HTTP Rune の認証ヘッダー機構が有効化されるまでリクエストには付与されない
 
-fn SendGrid.send_email(api_key: String, from: String, to: String, subject: String, body: String) -> Result<String, String> !Http =
+fn SendGrid.send_email(api_key: String, from: String, to: String, subject: String, body: String) -> Result<String, String> =
   Http.post_json(
     Env.get_or("SENDGRID_BASE_URL", "https://api.sendgrid.com") ++ "/v3/mail/send",
     { "personalizations": [{ "to": [{ "email": to }] }], "from": { "email": from }, "subject": subject, "content": [{ "type": "text/plain", "value": body }] }
   )
 
-fn SendGrid.send_template(api_key: String, from: String, to: String, template_id: String, dynamic_data: String) -> Result<String, String> !Http =
+fn SendGrid.send_template(api_key: String, from: String, to: String, template_id: String, dynamic_data: String) -> Result<String, String> =
   Http.post_json(
     Env.get_or("SENDGRID_BASE_URL", "https://api.sendgrid.com") ++ "/v3/mail/send",
     { "personalizations": [{ "to": [{ "email": to }], "dynamic_template_data": dynamic_data }], "from": { "email": from }, "template_id": template_id }

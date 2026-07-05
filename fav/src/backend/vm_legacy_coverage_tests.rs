@@ -157,7 +157,7 @@ fn legacy_vm_test_option_and_result() {
 #[test]
 fn legacy_vm_test_db_execute_query() {
     let src = r#"
-        public fn main() -> Unit !Db {
+        public fn main() -> Unit {
             bind _ <- Db.execute("CREATE TABLE t (id INTEGER, name TEXT)");
             bind _ <- Db.execute("INSERT INTO t VALUES (?, ?)", 1, "Alice");
             bind _ <- Db.execute("INSERT INTO t VALUES (?, ?)", 2, "Bob");
@@ -181,7 +181,7 @@ fn legacy_vm_test_file_read_write_roundtrip() {
     let content = "hello from Favnir";
     let src = format!(
         r#"
-public fn main() -> String !File {{
+public fn main() -> String {{
     File.write("{path}", "{content}");
     File.read("{path}")
 }}

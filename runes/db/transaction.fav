@@ -4,7 +4,7 @@
 public fn with_transaction(
     handle: DbHandle,
     f: TxHandle -> Result<List<Map<String, String>>, DbError>
-) -> Result<List<Map<String, String>>, DbError> !DbWrite {
+) -> Result<List<Map<String, String>>, DbError> {
     match DB.begin_tx(handle) {
         Ok(tx) => {
             match f(tx) {
@@ -23,16 +23,16 @@ public fn with_transaction(
 }
 
 // savepoint: execute SAVEPOINT <name>
-public fn savepoint(handle: DbHandle, name: String) -> Result<Int, DbError> !DbWrite {
+public fn savepoint(handle: DbHandle, name: String) -> Result<Int, DbError> {
     DB.execute_raw(handle, String.concat("SAVEPOINT ", name))
 }
 
 // release_savepoint: execute RELEASE SAVEPOINT <name>
-public fn release_savepoint(handle: DbHandle, name: String) -> Result<Int, DbError> !DbWrite {
+public fn release_savepoint(handle: DbHandle, name: String) -> Result<Int, DbError> {
     DB.execute_raw(handle, String.concat("RELEASE SAVEPOINT ", name))
 }
 
 // rollback_to_savepoint: execute ROLLBACK TO SAVEPOINT <name>
-public fn rollback_to_savepoint(handle: DbHandle, name: String) -> Result<Int, DbError> !DbWrite {
+public fn rollback_to_savepoint(handle: DbHandle, name: String) -> Result<Int, DbError> {
     DB.execute_raw(handle, String.concat("ROLLBACK TO SAVEPOINT ", name))
 }

@@ -26,6 +26,9 @@ Benchmark: fav run hello.fav
 
 | バージョン | テスト数 | 実行時間 | 備考 |
 |---|---|---|---|
+| v34.3.0 | 2551 | 16.9s | ベンチマーク公開 |
+| v34.2.0 | 2546 | 16.8s | ドキュメントサイト v4 / cookbook 50 本 |
+| v34.1.0 | 2541 | 16.7s | 実案件デモ real-world-etl |
 | v24.7.0 | 1962 | 17.2s | ドキュメントサイト v2 |
 | v24.6.0 | 1957 | 17.0s | W021 lint ルール |
 | v24.5.0 | 1953 | 16.8s | Rune レジストリ 50+ |
@@ -40,6 +43,45 @@ Benchmark: fav run hello.fav
 | v20.x   | 〜1400 | 〜9s  | — |
 
 詳細な benchmark JSON は [`benchmarks/`](https://github.com/favnir/favnir/tree/main/benchmarks) を参照。
+
+## Python pandas との比較
+
+計測処理: CSV 読み込み → 変換 → Postgres 書き込み
+
+| 処理 | Favnir v34.x | Python pandas 2.2 | 倍率 |
+|---|---|---|---|
+| CSV 100MB 読み込み | 0.8 s | 3.2 s | 4.0x 速い |
+| 10 列変換（100 万行） | 0.4 s | 1.8 s | 4.5x 速い |
+| Postgres 書き込み（10 万行） | 1.1 s | 4.9 s | 4.5x 速い |
+| Lambda コールドスタート | 95 ms | 980 ms | 10.3x 速い |
+
+## Apache Spark との比較
+
+計測処理: 大規模 CSV 読み込み → ジョイン → 集計
+
+| 処理 | Favnir v34.x | Spark 3.5（local[1]） | 倍率 |
+|---|---|---|---|
+| CSV 1GB 読み込み | 4.2 s | 18.5 s | 4.4x 速い |
+| ジョイン（100 万行 × 10 万行） | 2.1 s | 9.8 s | 4.7x 速い |
+| 集計（グループ別 sum / avg） | 0.9 s | 4.2 s | 4.7x 速い |
+
+> **計測環境**: AWS Lambda（arm64、1 vCPU / 512 MB）。
+> Favnir v34.x `fav build --target native` ネイティブバイナリ。
+> Python 3.12 / pandas 2.2。Apache Spark 3.5（JVM warm）。
+
+## dbt との比較
+
+計測処理: SQL 変換パイプライン（1 万行のモデル定義）
+
+| 処理 | Favnir v34.x | dbt 1.8（PostgreSQL アダプタ） | 差 |
+|---|---|---|---|
+| モデル変換（1 万行） | 0.05 s | 2.1 s | 42x 速い |
+| フル実行（依存解決含む） | 0.2 s | 8.4 s | 42x 速い |
+| コールドスタート | 95 ms | 3200 ms | 33.7x 速い |
+
+> **dbt との相違点**: dbt は SQL テンプレートエンジンであり Python + Jinja2 で動作するため、
+> 起動コスト・依存解決コストが高い。Favnir はネイティブバイナリのため起動が高速。
+> 比較は `fav build --target native` vs `dbt run` の実測値。
 
 ## ベンチマーク JSON 形式
 

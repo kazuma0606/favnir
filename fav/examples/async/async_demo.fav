@@ -4,15 +4,15 @@
 // bind x <- async_fn() unwraps the Task at type-check time.
 // At runtime, Task is synchronous and transparent.
 
-async fn fetch_greeting() -> String !Io {
+async fn fetch_greeting() -> String {
     "Hello from async!"
 }
 
-async fn fetch_number() -> Int !Io {
+async fn fetch_number() -> Int {
     42
 }
 
-public fn main() -> Unit !Io {
+public fn main() -> Unit {
     bind msg <- fetch_greeting()
     bind n   <- fetch_number()
     bind doubled <- Task.map(n, |x| x * 2)

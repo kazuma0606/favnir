@@ -14,7 +14,7 @@ Kafka / MSK ストリーミング操作を行う関数が `!Stream` エフェク
 ```fav
 import "runes/kafka/kafka"
 
-public fn publish(msg: String) -> Result<Unit, String> {  // E0319: missing !Stream effect
+public fn publish(msg: String) -> Result<Unit, String> {  // E0319: missing effect
   chain _ <- Kafka.produce("my-topic", msg)
   ok(unit)
 }
@@ -27,7 +27,7 @@ public fn publish(msg: String) -> Result<Unit, String> {  // E0319: missing !Str
 ```fav
 import "runes/kafka/kafka"
 
-public fn publish(msg: String) !Stream -> Result<Unit, String> {  // OK
+public fn publish(msg: String) -> Result<Unit, String> {  // OK
   chain _ <- Kafka.produce("my-topic", msg)
   ok(unit)
 }

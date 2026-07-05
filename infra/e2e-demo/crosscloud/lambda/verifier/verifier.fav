@@ -13,7 +13,7 @@
 // ── ヘルパー関数 ─────────────────────────────────────────────────────
 
 // StringToSign = Method\nPath\nTimestamp\nNonce\nSHA256(Body)
-fn build_sts(method: String, path: String, ts: String, nonce: String, body: String) -> String !Auth {
+fn build_sts(ctx: AppCtx, method: String, path: String, ts: String, nonce: String, body: String) -> String {
   bind body_hash <- Crypto.sha256_raw(body)
   String.concat(method,
     String.concat("\n", String.concat(path,
@@ -23,7 +23,7 @@ fn build_sts(method: String, path: String, ts: String, nonce: String, body: Stri
 }
 
 // HMAC-SHA256 で署名を検証
-fn verify_hmac(secret: String, sts: String, provided: String) -> Result<Unit, String> !Auth {
+fn verify_hmac(ctx: AppCtx, secret: String, sts: String, provided: String) -> Result<Unit, String> {
   bind expected <- Crypto.hmac_sha256_raw(secret, sts)
   if expected == provided {
     Result.ok(())
@@ -48,11 +48,11 @@ fn build_overrides(account: String, key_val: String) -> String {
 
 // ── AWS 操作ラッパー ──────────────────────────────────────────────────
 
-fn get_secret(region: String, arn: String) -> Result<String, String> !AWS {
+fn get_secret(ctx: AppCtx, region: String, arn: String) -> Result<String, String> {
   AWS.secrets_get_raw(region, arn)
 }
 
-fn put_nonce(table: String, nonce: String, ttl: String) -> Result<Unit, String> !AWS {
+fn put_nonce(ctx: AppCtx, table: String, nonce: String, ttl: String) -> Result<Unit, String> {
   AWS.dynamo_put_item_cond_raw(
     table,
     "nonce_id", nonce,
@@ -61,17 +61,17 @@ fn put_nonce(table: String, nonce: String, ttl: String) -> Result<Unit, String> 
   )
 }
 
-fn run_migration(cluster: String, task_def: String, subnets: String, sg: String, overrides: String) -> Result<String, String> !AWS {
+fn run_migration(ctx: AppCtx, cluster: String, task_def: String, subnets: String, sg: String, overrides: String) -> Result<String, String> {
   AWS.ecs_run_task_raw(cluster, task_def, subnets, sg, overrides)
 }
 
-fn save_proof(bucket: String, key: String, body: String) -> Result<Unit, String> !AWS {
+fn save_proof(ctx: AppCtx, bucket: String, key: String, body: String) -> Result<Unit, String> {
   AWS.s3_put_object_raw(bucket, key, body)
 }
 
 // ── メイン ───────────────────────────────────────────────────────────
 
-public fn main(ctx: AppCtx) -> Result<Unit, String> !Auth !AWS {
+public fn main(ctx: AppCtx) -> Result<Unit, String> {
   // Step 1: リクエスト情報を env から読み取り
   bind method    <- Option.unwrap_or(ctx.io.getenv_raw("VERIFY_METHOD"), "POST")
   bind path      <- Option.unwrap_or(ctx.io.getenv_raw("VERIFY_PATH"), "/migrate")

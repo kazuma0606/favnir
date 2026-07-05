@@ -9,7 +9,6 @@ use wasm_encoder::{
     TypeSection, ValType,
 };
 
-use crate::ast::Effect;
 use crate::middle::checker::Type;
 use crate::middle::ir::{IRExpr, IRGlobalKind, IRProgram, IRStmt};
 
@@ -45,7 +44,7 @@ impl fmt::Display for WasmCodegenError {
             WasmCodegenError::UnsupportedMainSignature => {
                 write!(
                     f,
-                    "error[W003]: WASM codegen requires `public fn main() -> Unit !Io`"
+                    "error[W003]: WASM codegen requires `public fn main() -> Unit`"
                 )
             }
         }
@@ -508,8 +507,7 @@ pub fn ensure_supported_main_signature(ir: &IRProgram) -> Result<(), WasmCodegen
     let Some(main_fn) = ir.fns.get(main_idx) else {
         return Err(WasmCodegenError::UnsupportedMainSignature);
     };
-    let io_only = main_fn.effects.len() == 1 && matches!(main_fn.effects[0], Effect::Io);
-    if main_fn.param_count == 0 && main_fn.return_ty == Type::Unit && io_only {
+    if main_fn.param_count == 0 && main_fn.return_ty == Type::Unit {
         Ok(())
     } else {
         Err(WasmCodegenError::UnsupportedMainSignature)
@@ -1669,7 +1667,7 @@ mod tests {
         collect_used_builtins, ensure_supported_main_signature, favnir_type_to_wasm_params,
         favnir_type_to_wasm_results, plan_wasm_locals, wasm_codegen_program, wasm_local_for_type,
     };
-    use crate::ast::{Effect, Lit};
+    use crate::ast::Lit;
     use crate::frontend::parser::Parser;
     use crate::middle::checker::Type;
     use crate::middle::compiler::compile_program;
@@ -1752,7 +1750,6 @@ mod tests {
                 param_count: 1,
                 param_tys: vec![Type::String],
                 local_count: 1,
-                effects: vec![],
                 return_ty: Type::Unit,
                 body: IRExpr::Lit(Lit::Unit, Type::Unit),
             },
@@ -1772,7 +1769,6 @@ mod tests {
                 param_count: 1,
                 param_tys: vec![Type::Int],
                 local_count: 2,
-                effects: vec![],
                 return_ty: Type::Unit,
                 body: IRExpr::Block(
                     vec![IRStmt::Bind(
@@ -1873,7 +1869,6 @@ mod tests {
                 param_count: 0,
                 param_tys: vec![],
                 local_count: 0,
-                effects: vec![Effect::Io],
                 return_ty: Type::Unit,
                 body: IRExpr::Lit(crate::ast::Lit::Unit, Type::Unit),
             }],
@@ -1894,7 +1889,6 @@ mod tests {
                 param_count: 0,
                 param_tys: vec![],
                 local_count: 0,
-                effects: vec![],
                 return_ty: Type::Int,
                 body: IRExpr::Lit(crate::ast::Lit::Int(1), Type::Int),
             }],
@@ -1918,7 +1912,6 @@ mod tests {
                 param_count: 0,
                 param_tys: vec![],
                 local_count: 0,
-                effects: vec![Effect::Io],
                 return_ty: Type::Unit,
                 body: IRExpr::Lit(crate::ast::Lit::Unit, Type::Unit),
             }],
@@ -1972,7 +1965,6 @@ mod tests {
                 param_count: 1,
                 param_tys: vec![Type::Int],
                 local_count: 1,
-                effects: vec![],
                 return_ty: Type::Int,
                 body: IRExpr::BinOp(
                     crate::ast::BinOp::Add,
@@ -2008,7 +2000,6 @@ mod tests {
                 param_count: 0,
                 param_tys: vec![],
                 local_count: 0,
-                effects: vec![Effect::Io],
                 return_ty: Type::Unit,
                 body: IRExpr::Call(
                     Box::new(IRExpr::FieldAccess(
@@ -2041,7 +2032,6 @@ mod tests {
                 param_count: 0,
                 param_tys: vec![],
                 local_count: 0,
-                effects: vec![Effect::Io],
                 return_ty: Type::Unit,
                 body: IRExpr::Match(
                     Box::new(IRExpr::Lit(Lit::Int(1), Type::Int)),
@@ -2064,7 +2054,6 @@ mod tests {
                 param_count: 0,
                 param_tys: vec![],
                 local_count: 0,
-                effects: vec![Effect::Io],
                 return_ty: Type::Unit,
                 body: IRExpr::Block(
                     vec![IRStmt::Expr(IRExpr::Lit(
@@ -2101,7 +2090,6 @@ mod tests {
                 param_count: 0,
                 param_tys: vec![],
                 local_count: 0,
-                effects: vec![Effect::Io],
                 return_ty: Type::Unit,
                 body: IRExpr::Call(
                     Box::new(IRExpr::FieldAccess(
@@ -2138,7 +2126,6 @@ mod tests {
                 param_count: 0,
                 param_tys: vec![],
                 local_count: 0,
-                effects: vec![Effect::Io],
                 return_ty: Type::Unit,
                 body: IRExpr::Call(
                     Box::new(IRExpr::FieldAccess(
@@ -2170,7 +2157,6 @@ mod tests {
                 param_count: 0,
                 param_tys: vec![],
                 local_count: 0,
-                effects: vec![Effect::Io],
                 return_ty: Type::Unit,
                 body: IRExpr::Block(
                     vec![IRStmt::Expr(IRExpr::If(
@@ -2211,7 +2197,6 @@ mod tests {
                     param_count: 1,
                     param_tys: vec![Type::Int],
                     local_count: 1,
-                    effects: vec![],
                     return_ty: Type::Int,
                     body: IRExpr::If(
                         Box::new(IRExpr::BinOp(
@@ -2244,8 +2229,7 @@ mod tests {
                     param_count: 0,
                     param_tys: vec![],
                     local_count: 0,
-                    effects: vec![Effect::Io],
-                    return_ty: Type::Unit,
+                        return_ty: Type::Unit,
                     body: IRExpr::Lit(Lit::Unit, Type::Unit),
                 },
             ],
@@ -2279,7 +2263,7 @@ public fn factorial(n: Int) -> Int {
     }
 }
 
-public fn main() -> Unit !Io {
+public fn main() -> Unit {
     IO.println_int(add(21, 21));
     IO.println_int(abs(-5));
     IO.println_int(factorial(5))
@@ -2295,7 +2279,7 @@ public fn main() -> Unit !Io {
     #[test]
     fn wasm_hello_world() {
         let source = r#"
-public fn main() -> Unit !Io {
+public fn main() -> Unit {
     IO.println("Hello")
 }
 "#;
@@ -2309,7 +2293,7 @@ public fn main() -> Unit !Io {
     #[test]
     fn wasm_int_arithmetic() {
         let source = r#"
-public fn main() -> Unit !Io {
+public fn main() -> Unit {
     IO.println_int(21 + 21)
 }
 "#;
@@ -2331,7 +2315,7 @@ public fn abs(n: Int) -> Int {
     }
 }
 
-public fn main() -> Unit !Io {
+public fn main() -> Unit {
     IO.println_int(abs(-5))
 }
 "#;
@@ -2353,7 +2337,7 @@ public fn factorial(n: Int) -> Int {
     }
 }
 
-public fn main() -> Unit !Io {
+public fn main() -> Unit {
     IO.println_int(factorial(5))
 }
 "#;
@@ -2367,7 +2351,7 @@ public fn main() -> Unit !Io {
     #[test]
     fn wasm_bool_ops() {
         let source = r#"
-public fn main() -> Unit !Io {
+public fn main() -> Unit {
     IO.println_bool((1 < 2) == true)
 }
 "#;
@@ -2385,7 +2369,7 @@ public fn greet() -> String {
     "hi"
 }
 
-public fn main() -> Unit !Io {
+public fn main() -> Unit {
     IO.println("ok")
 }
 "#;
@@ -2403,7 +2387,7 @@ public fn id(name: String) -> String {
     name
 }
 
-public fn main() -> Unit !Io {
+public fn main() -> Unit {
     IO.println(id("Favnir"))
 }
 "#;
@@ -2417,7 +2401,7 @@ public fn main() -> Unit !Io {
     #[test]
     fn wasm_string_bind_and_print_module_is_valid() {
         let source = r#"
-public fn main() -> Unit !Io {
+public fn main() -> Unit {
     bind s <- "hi";
     IO.println(s)
 }
@@ -2440,7 +2424,7 @@ public fn choose(flag: Bool) -> String {
     }
 }
 
-public fn main() -> Unit !Io {
+public fn main() -> Unit {
     IO.println("ok")
 }
 "#;
@@ -2455,7 +2439,7 @@ public fn main() -> Unit !Io {
     #[test]
     fn wasm_w002_debug_show() {
         let source = r#"
-public fn main() -> Unit !Io {
+public fn main() -> Unit {
     Debug.show(42)
 }
 "#;
@@ -2468,7 +2452,7 @@ public fn main() -> Unit !Io {
     #[test]
     fn wasm_w003_main_returns_int() {
         let source = r#"
-public fn main() -> Int !Io {
+public fn main() -> Int {
     42
 }
 "#;
@@ -2484,7 +2468,7 @@ public fn main() -> Int !Io {
     fn wasm_closure_codegen_produces_valid_module() {
         // `bind f <- |x| x + 1; f(5)` — closure with no captures
         let source = r#"
-public fn main() -> Unit !Io {
+public fn main() -> Unit {
     bind f <- |x| x + 1;
     IO.println_int(f(5))
 }
@@ -2501,7 +2485,7 @@ public fn main() -> Unit !Io {
     fn wasm_closure_capture_produces_valid_module() {
         // closure captures an outer variable
         let source = r#"
-public fn main() -> Unit !Io {
+public fn main() -> Unit {
     bind n <- 10;
     bind add_n <- |x| x + n;
     IO.println_int(add_n(5))
@@ -2520,7 +2504,7 @@ public fn main() -> Unit !Io {
         use wasmtime::{Engine, Linker, Store};
 
         let source = r#"
-public fn main() -> Unit !Io {
+public fn main() -> Unit {
     bind f <- |x| x + 1;
     IO.println_int(f(5))
 }
@@ -2566,7 +2550,7 @@ stage Square: Int -> Int = |n| { n * n }
 
 seq Transform = Double |> AddOne |> Square
 
-public fn main() -> Unit !Io {
+public fn main() -> Unit {
     IO.println_int(Transform(3))
 }
 "#;

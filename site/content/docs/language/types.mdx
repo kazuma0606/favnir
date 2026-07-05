@@ -31,7 +31,7 @@ IO.println(p.x)   // 3
 
 ```favnir
 // List は外部データ（クエリ結果など）や List.map 等で構築します
-fn demo(nums: List<Int>) -> Unit !Io {
+fn demo(nums: List<Int>) -> Unit {
   bind doubled <- List.map(nums, |n| n * 2)   // 各要素を2倍
   bind evens   <- List.filter(nums, |n| n % 2 == 0)  // 偶数のみ
   bind sum     <- List.fold(nums, 0, |acc, n| acc + n)  // 合計

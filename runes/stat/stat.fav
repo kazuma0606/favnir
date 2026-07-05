@@ -8,21 +8,21 @@ public type ProfileReport = {
 
 // Basic generators
 
-public fn sample_int() -> Int !Random = Random.int(0, 100)
+public fn sample_int() -> Int = Random.int(0, 100)
 
-public fn sample_float() -> Float !Random = Random.float()
+public fn sample_float() -> Float = Random.float()
 
-public fn sample_bool() -> Bool !Random = Random.int(0, 1) == 1
+public fn sample_bool() -> Bool = Random.int(0, 1) == 1
 
 // Uniform distribution (curried): uniform(min)(max)
 
-public fn uniform(min: Int) -> Int -> Int !Random = |max| {
+public fn uniform(min: Int) -> Int -> Int = |max| {
     Random.int(min, max)
 }
 
 // List selection
 
-public fn choice_str(xs: List<String>) -> String !Random = {
+public fn choice_str(xs: List<String>) -> String = {
     if List.length(xs) == 0 {
         ""
     } else {
@@ -30,7 +30,7 @@ public fn choice_str(xs: List<String>) -> String !Random = {
     }
 }
 
-public fn choice_int(xs: List<Int>) -> Int !Random = {
+public fn choice_int(xs: List<Int>) -> Int = {
     if List.length(xs) == 0 {
         0
     } else {
@@ -40,11 +40,11 @@ public fn choice_int(xs: List<Int>) -> Int !Random = {
 
 // List generation
 
-public fn list_int(n: Int) -> List<Int> !Random = {
+public fn list_int(n: Int) -> List<Int> = {
     List.map(List.range(0, n), |ignored| Random.int(0, 100))
 }
 
-public fn list_float(n: Int) -> List<Float> !Random = {
+public fn list_float(n: Int) -> List<Float> = {
     List.map(List.range(0, n), |ignored| Random.float())
 }
 

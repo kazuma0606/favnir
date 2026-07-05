@@ -116,7 +116,7 @@ fn pjoin(base: String, seg: String) -> String {
     IO.path_join_raw(base, seg)
 }
 
-fn registry_base() -> Option<String> !IO {
+fn registry_base() -> Option<String> {
     match IO.home_dir_raw() {
         None       => Option.none()
         Some(home) => Option.some(pjoin(pjoin(home, ".fav"), "registry"))
@@ -144,7 +144,7 @@ fn extract_entry_from_toml(content: String, default_name: String) -> String {
     }
 }
 
-fn read_entry(rune_dir: String, name: String) -> String !IO {
+fn read_entry(rune_dir: String, name: String) -> String {
     bind toml_path <- pjoin(rune_dir, "rune.toml")
     if IO.file_exists_raw(toml_path) {
         match IO.read_file_raw(toml_path) {
@@ -159,7 +159,7 @@ fn read_entry(rune_dir: String, name: String) -> String !IO {
 // ── Registry lookup ───────────────────────────────────────────────────────────
 
 // List installed versions of a rune in the registry (lexical order, best-effort).
-public fn installed_versions(name: String) -> List<String> !IO {
+public fn installed_versions(name: String) -> List<String> {
     match registry_base() {
         None      => List.empty()
         Some(reg) => {
@@ -177,12 +177,12 @@ public fn installed_versions(name: String) -> List<String> !IO {
 }
 
 // Find the best matching version for a semver constraint.
-public fn resolve_version(name: String, constraint: String) -> Option<String> !IO {
+public fn resolve_version(name: String, constraint: String) -> Option<String> {
     bind versions <- installed_versions(name)
     List.find(versions, |v| matches_constraint(v, constraint))
 }
 
-fn resolve_from_registry(name: String) -> ResolveResult !IO {
+fn resolve_from_registry(name: String) -> ResolveResult {
     match registry_base() {
         None      => NotFound
         Some(reg) => {
@@ -206,7 +206,7 @@ fn resolve_from_registry(name: String) -> ResolveResult !IO {
 
 // Resolve a rune name to its entry .fav file path.
 // Searches: rune_modules/ → runes/ → ~/.fav/registry/
-public fn resolve(name: String, project_root: String) -> ResolveResult !IO {
+public fn resolve(name: String, project_root: String) -> ResolveResult {
     bind rm_dir   <- pjoin(pjoin(project_root, "rune_modules"), name)
     if IO.is_dir_raw(rm_dir) {
         bind entry    <- read_entry(rm_dir, name)

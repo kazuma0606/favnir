@@ -1,0 +1,16 @@
+[project]
+name    = "real-world-etl"
+version = "0.1.0"
+edition = "2026"
+src     = "src"
+
+[postgres]
+# url = "$DATABASE_URL"
+sslmode = "require"
+
+[runes]
+csv      = { version = "1.0" }
+postgres = { version = "1.0" }
+bigquery = { version = "1.0" }
+slack    = { version = "1.0" }
+otel     = { version = "1.0" }

@@ -12,7 +12,7 @@ async fn fetch_value(n: Int) -> Int {
     compute(n)
 }
 
-public fn main() -> Unit !Io {
+public fn main() -> Unit {
     // Task.all — collect all results
     bind t1 <- fetch_value(3)
     bind t2 <- fetch_value(4)

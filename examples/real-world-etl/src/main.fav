@@ -1,0 +1,30 @@
+import runes/otel
+
+pipeline RealWorldEtl {
+    stage LoadCsv {
+        bind raw <- load_csv("data/orders_sample.csv")
+        raw
+    }
+    |> stage Validate {
+        let result = validate_all(input)
+        result
+    }
+    |> stage WritePostgres {
+        bind n <- write_postgres(input.orders)
+        { written: n, errors: input.errors }
+    }
+    |> stage SyncBigQuery {
+        bind m <- sync_bigquery(input.orders)
+        { written: input.written, bq_written: m, errors: input.errors }
+    }
+    |> stage Notify {
+        notify_success(input.written, List.length(input.errors))
+        input
+    }
+}
+
+fn main(ctx: AppCtx) -> Unit {
+    OTel.with_trace("real-world-etl", fn () {
+        run RealWorldEtl
+    })
+}

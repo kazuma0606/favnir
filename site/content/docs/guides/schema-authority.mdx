@@ -143,7 +143,7 @@ import rune "duckdb"
 
 type Order = { id: Int  customer_name: String  amount: Float  status: String }
 
-public fn main() -> Unit !Io !Db {
+public fn main() -> Unit {
   bind conn <- duckdb.open(":memory:")
   bind rows <- duckdb.query<Order>(conn, "SELECT * FROM 'data/orders.csv'")
   match Validate.rows_raw("Order", rows) {
@@ -160,20 +160,20 @@ public fn main() -> Unit !Io !Db {
 v7.0.0 から DB エフェクトが 3 段階に細分化されました。
 
 ```favnir
-// !DbRead — SELECT のみ許可
-fn list_orders(handle: DbHandle) -> Result<List<Order>, DbError> !DbRead {
+//Read — SELECT のみ許可
+fn list_orders(handle: DbHandle) -> Result<List<Order>, DbError>Read {
   db.query(handle, "SELECT * FROM orders")
 }
 
-// !DbWrite — INSERT / UPDATE / DELETE を許可
-fn create_order(handle: DbHandle, order: Order) -> Result<Int, DbError> !DbWrite {
+//Write — INSERT / UPDATE / DELETE を許可
+fn create_order(handle: DbHandle, order: Order) -> Result<Int, DbError>Write {
   db.execute_params(handle,
     "INSERT INTO orders (customer_name, amount, status) VALUES ($1, $2, $3)",
     [order.customer_name, Float.to_string(order.amount), order.status])
 }
 
-// !DbAdmin — DDL（CREATE / DROP / ALTER）を許可
-fn setup_tables(handle: DbHandle) -> Result<Int, DbError> !DbAdmin {
+//Admin — DDL（CREATE / DROP / ALTER）を許可
+fn setup_tables(handle: DbHandle) -> Result<Int, DbError>Admin {
   db.execute(handle,
     "CREATE TABLE IF NOT EXISTS orders (id SERIAL PRIMARY KEY, customer_name TEXT, amount FLOAT, status TEXT)")
 }
@@ -215,7 +215,7 @@ type Order = { id: Int  customer_name: String  amount: Float  status: String }
 type Summary = { customer_name: String  total: Float }
 
 // ステップ 1: CSV を読み込んで検証
-stage LoadAndValidate: String -> List<Order> !Db !Io = |path| {
+stage LoadAndValidate: String -> List<Order> = |path| {
   bind conn <- duckdb.open(":memory:")
   bind rows <- duckdb.query<Order>(conn, $"SELECT * FROM '{path}'")
   match Validate.rows_raw("Order", rows) {
@@ -232,8 +232,8 @@ stage Summarize: List<Order> -> List<Summary> = |orders| {
   List.map(orders, |o| Summary { customer_name: o.customer_name  total: o.amount })
 }
 
-// ステップ 3: DB に保存（!DbWrite）
-stage SaveSummary: List<Summary> -> Int !DbWrite = |summaries| {
+// ステップ 3: DB に保存（Write）
+stage SaveSummary: List<Summary> -> IntWrite = |summaries| {
   bind handle <- db.connect("postgresql://localhost/mydb")
   List.fold_left(summaries, 0, |count, s| {
     match db.execute_params(handle,

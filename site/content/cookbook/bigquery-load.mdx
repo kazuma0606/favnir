@@ -5,7 +5,7 @@
 ```favnir
 import runes/bigquery
 
-stage LoadToBigQuery: List<Row> -> Unit !Http = |rows| {
+stage LoadToBigQuery: List<Row> -> Unit = |rows| {
   bind client <- BigQuery.client(config.bigquery_project, config.bigquery_dataset)
   BigQuery.insert_rows(client, config.bigquery_table, rows)
 }

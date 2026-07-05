@@ -1,0 +1,6 @@
+order_id,customer,product,quantity,price,status,created_at
+ORD-0001,Alice,Widget A,3,29.99,Pending,2026-07-01T09:00:00Z
+ORD-0002,Bob,Gadget B,1,149.00,Processing,2026-07-01T09:05:00Z
+ORD-0003,Carol,Widget A,5,29.99,Shipped,2026-07-01T09:10:00Z
+ORD-0004,Dave,Accessory C,2,9.99,Pending,2026-07-01T09:15:00Z
+ORD-0005,Eve,Gadget B,1,149.00,Cancelled,2026-07-01T09:20:00Z

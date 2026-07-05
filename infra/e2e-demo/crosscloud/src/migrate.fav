@@ -30,7 +30,7 @@ type MigratedRow = {
 
 // Stage 1: AWS RDS PostgreSQL から customers テーブルを読み取る
 // 接続文字列は DATABASE_URL 環境変数から自動取得
-fn extract_from_rds() -> Result<String, String> !Postgres {
+fn extract_from_rds(ctx: AppCtx) -> Result<String, String> {
   Postgres.query_raw(
     "SELECT customer_id::text, email, TRIM(full_name) AS full_name, status, updated_at::text FROM customers ORDER BY customer_id",
     "[]"
@@ -38,13 +38,13 @@ fn extract_from_rds() -> Result<String, String> !Postgres {
 }
 
 // Azure 接続確認用ヘルパー（Stage 3 の前に疎通チェック）
-fn ping_azure(azure_conn: String) -> Result<Int, String> !AzureDb {
+fn ping_azure(ctx: AppCtx, azure_conn: String) -> Result<Int, String> {
   AzurePostgres.execute_raw(azure_conn, "SELECT 1", "[]")
 }
 
-// Stage 2+3: 変換 + Azure DB for PostgreSQL へ upsert (!AzureDb)
+// Stage 2+3: 変換 + Azure DB for PostgreSQL へ upsert
 // rows_json は Postgres.query_raw が返す JSON 配列文字列
-fn load_to_azure_postgres(azure_conn: String, rows_json: String) -> Result<Int, String> !AzureDb {
+fn load_to_azure_postgres(ctx: AppCtx, azure_conn: String, rows_json: String) -> Result<Int, String> {
   AzurePostgres.execute_raw(
     azure_conn,
     String.concat(
@@ -58,8 +58,8 @@ fn load_to_azure_postgres(azure_conn: String, rows_json: String) -> Result<Int, 
   )
 }
 
-// Stage 4: 証跡 JSON を Azure Blob Storage に保存 (!AzureStorage)
-fn save_proof_to_blob(account: String, key: String, container: String, target_count: Int) -> Result<Unit, String> !AzureStorage {
+// Stage 4: 証跡 JSON を Azure Blob Storage に保存
+fn save_proof_to_blob(ctx: AppCtx, account: String, key: String, container: String, target_count: Int) -> Result<Unit, String> {
   AzureBlob.put_raw(
     account,
     key,
@@ -75,8 +75,8 @@ fn save_proof_to_blob(account: String, key: String, container: String, target_co
   )
 }
 
-// Stage 5: Azure DB の行数を確認して source と一致するか検証 (!AzureDb)
-fn verify_row_count(azure_conn: String, expected: Int) -> Result<Unit, String> !AzureDb {
+// Stage 5: Azure DB の行数を確認して source と一致するか検証
+fn verify_row_count(ctx: AppCtx, azure_conn: String, expected: Int) -> Result<Unit, String> {
   chain result_json <- AzurePostgres.query_raw(
     azure_conn,
     "SELECT COUNT(*)::text AS cnt FROM customers_migrated",

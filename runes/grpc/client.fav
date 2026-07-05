@@ -1,14 +1,14 @@
 // runes/grpc/client.fav — gRPC client helpers (v4.2.0 / v9.5.0 additions)
 
-public fn call(host: String, method: String, payload: Map<String, String>) -> Result<Map<String, String>, RpcError> !Rpc {
+public fn call(host: String, method: String, payload: Map<String, String>) -> Result<Map<String, String>, RpcError> {
     Grpc.call_raw(host, method, payload)
 }
 
-public fn call_stream(host: String, method: String, payload: Map<String, String>) -> List<Map<String, String>> !Rpc {
+public fn call_stream(host: String, method: String, payload: Map<String, String>) -> List<Map<String, String>> {
     Grpc.call_stream_raw(host, method, payload)
 }
 
-public fn call_typed(response_type: String, host: String, method: String, payload: Map<String, String>) -> Result<Map<String, String>, RpcError> !Rpc {
+public fn call_typed(response_type: String, host: String, method: String, payload: Map<String, String>) -> Result<Map<String, String>, RpcError> {
     Grpc.call_typed_raw(response_type, host, method, payload)
 }
 
@@ -16,7 +16,7 @@ public fn call_typed(response_type: String, host: String, method: String, payloa
 
 // call_json<T> — gRPC 単一レスポンスを型 T に変換
 // Map<String, String> を encode_raw → JSON → Schema.adapt_one で T に変換する
-public fn call_json<T>(host: String, method: String, payload: Map<String, String>) -> Result<T, String> !Rpc {
+public fn call_json<T>(host: String, method: String, payload: Map<String, String>) -> Result<T, String> {
     match Grpc.call_raw(host, method, payload) {
         Err(e) => Result.err(e.message)
         Ok(row) =>
@@ -32,6 +32,6 @@ public fn call_json<T>(host: String, method: String, payload: Map<String, String
 }
 
 // call_list<T> — gRPC ストリームレスポンスをそのまま返す（型 T は Map<String,String> と互換）
-public fn call_list<T>(host: String, method: String, payload: Map<String, String>) -> List<T> !Rpc {
+public fn call_list<T>(host: String, method: String, payload: Map<String, String>) -> List<T> {
     Grpc.call_stream_raw(host, method, payload)
 }

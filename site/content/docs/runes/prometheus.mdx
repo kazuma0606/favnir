@@ -29,14 +29,14 @@ import rune "prometheus"
 ```favnir
 import rune "prometheus"
 
-stage ReportMetrics: Unit -> Unit !Io = |_| {
+stage ReportMetrics: Unit -> Unit = |_| {
     bind _ <- Prometheus.counter("rows_processed_total", 42.0, "[]")
     bind _ <- Prometheus.gauge("queue_depth", 7.0)
     bind _ <- Prometheus.histogram("stage_duration_ms", 123.0)
     Result.ok(unit)
 }
 
-stage PushToGateway: Unit -> Unit !Io = |_| {
+stage PushToGateway: Unit -> Unit = |_| {
     Prometheus.push("http://localhost:9091")
 }
 

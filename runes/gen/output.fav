@@ -5,14 +5,14 @@
 //       VM プリミティブを直接ラップする Rune として意図的に設計されています。
 //       ctx-aware 移行は v15.0 以降で計画予定です。
 
-public fn to_csv(path: String, rows: List<Map<String, String>>) -> Result<Unit, String> !Io {
+public fn to_csv(path: String, rows: List<Map<String, String>>) -> Result<Unit, String> {
     Gen.to_csv_raw(path, rows)
 }
 
-public fn to_parquet(path: String, rows: List<Map<String, String>>) -> Result<Unit, String> !Io {
+public fn to_parquet(path: String, rows: List<Map<String, String>>) -> Result<Unit, String> {
     Gen.to_parquet_raw(path, rows)
 }
 
-public fn load_into(conn: DbHandle, table_name: String, rows: List<Map<String, String>>) -> Result<Int, String> !Db {
+public fn load_into(conn: DbHandle, table_name: String, rows: List<Map<String, String>>) -> Result<Int, String> {
     Gen.load_into_raw(conn, table_name, rows)
 }

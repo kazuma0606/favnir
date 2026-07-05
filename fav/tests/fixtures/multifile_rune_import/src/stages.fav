@@ -1,0 +1,12 @@
+import runes/postgres
+import src/types
+
+// Build SQL insert string from a validated row (pure — no ambient calls)
+public fn build_insert_sql(row: ValidRow) -> String {
+    $"INSERT INTO records (id, name, amount, date) VALUES ({Int.to_string(row.id)}, '{row.name}', {Float.to_string(row.amount)}, '{row.date}')"
+}
+
+// Build a list of SQL strings from all validated rows
+public fn build_all_sqls(rows: List<ValidRow>) -> List<String> {
+    List.map(rows, |row| build_insert_sql(row))
+}

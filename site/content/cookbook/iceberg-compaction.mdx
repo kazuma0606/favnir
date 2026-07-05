@@ -1,0 +1,33 @@
+---
+title: "Iceberg テーブルコンパクション"
+description: "Apache Iceberg テーブルの小ファイルをコンパクションして読み取りパフォーマンスを改善する"
+---
+
+# Iceberg テーブルコンパクション
+
+Apache Iceberg テーブルに蓄積した小ファイルをコンパクションし、クエリパフォーマンスを改善します。
+
+## コード例
+
+```favnir
+import runes/iceberg
+
+fn main() -> Unit {
+    bind catalog <- Iceberg.open_catalog("glue", "my_database")
+    bind table   <- Iceberg.open_table(catalog, "orders")
+    bind stats   <- Iceberg.compact(table, {
+        target_file_size_bytes: 134217728  // 128 MB
+        min_input_files:        5
+    })
+    IO.println(String.concat([
+        "Compacted ", Int.to_string(stats.files_rewritten),
+        " files -> ", Int.to_string(stats.files_added), " files."
+    ]))
+}
+```
+
+## ポイント
+
+- `Iceberg.compact` は `target_file_size_bytes` に近いサイズになるようファイルを再構成します。
+- `min_input_files` を設定することで、小ファイルが少ない場合にコンパクションをスキップできます。
+- スケジュール実行には `cron-trigger` レシピと組み合わせてください。

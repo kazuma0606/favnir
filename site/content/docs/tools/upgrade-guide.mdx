@@ -1,0 +1,127 @@
+# fav upgrade
+
+`fav upgrade` はプロジェクトを新しいバージョンの Favnir 言語仕様に自動移行するツールです。
+
+---
+
+## 概要
+
+```bash
+fav upgrade --from-effects [--dry-run | --in-place] [file | --dir <path>]
+```
+
+現在サポートしている移行モード:
+
+| モード | フラグ | 説明 |
+|---|---|---|
+| `!Effect` → ctx 移行 | `--from-effects` | v34.5 の破壊的変更に対応 |
+
+---
+
+## フラグ
+
+### `--from-effects`（必須）
+
+`!Effect` アノテーションを Capability Context（`AppCtx`）構文に移行します。
+
+```bash
+fav upgrade --from-effects my_pipeline.fav
+```
+
+このフラグなしで実行するとエラーになります。
+
+### `--dry-run`
+
+変更内容をプレビュー表示します。ファイルは書き換えません。
+
+```bash
+fav upgrade --from-effects --dry-run my_pipeline.fav
+```
+
+出力例:
+
+```
+dry-run: would migrate !Effect annotations to ctx syntax in file 'my_pipeline.fav'
+Run with --in-place to apply changes.
+```
+
+### `--in-place`
+
+ファイルを直接書き換えます。事前に `--dry-run` で変更内容を確認することを推奨します。
+
+```bash
+fav upgrade --from-effects --in-place my_pipeline.fav
+```
+
+### `--dir <path>`
+
+ディレクトリ内の全 `.fav` ファイルを対象にします。
+
+```bash
+fav upgrade --from-effects --in-place --dir src/
+```
+
+---
+
+## `fav migrate` との使い分け
+
+`fav upgrade` は `fav migrate` のエイリアスではありません。用途が異なります。
+
+| コマンド | 用途 |
+|---|---|
+| `fav upgrade --from-effects` | `!Effect` → ctx 移行（v34.5 破壊的変更） |
+| `fav migrate --from-effects` | 同じ移行を行う（`upgrade` = `migrate --from-effects` の糖衣） |
+| `fav migrate --config fav.toml` | `fav.toml` フォーマット移行 |
+| `fav migrate --from 33.0 --to 34.0` | バージョン間の構文差分を自動適用 |
+
+---
+
+## 推奨ワークフロー
+
+1. `fav lint` で W022 警告を確認する
+
+```bash
+fav lint src/
+```
+
+2. `--dry-run` で変更内容をプレビューする
+
+```bash
+fav upgrade --from-effects --dry-run --dir src/
+```
+
+3. `--in-place` で適用する
+
+```bash
+fav upgrade --from-effects --in-place --dir src/
+```
+
+4. `fav check` で型エラーがないことを確認する
+
+```bash
+fav check src/
+```
+
+5. テストを実行して動作確認する
+
+```bash
+fav test
+```
+
+---
+
+## トラブルシューティング
+
+### `error: fav upgrade requires --from-effects flag`
+
+`--from-effects` フラグが必要です。現在このフラグなしの実行はサポートしていません。
+
+### `fav lint` で W022 が大量に出る
+
+`fav upgrade --from-effects --in-place --dir src/` を実行して一括移行してください。
+
+### 移行後に型エラーが出る
+
+`AppCtx` に必要なフィールドが不足している可能性があります。`Ctx.mock()` でモックを作るか、`fav.toml` の `[context]` セクションを確認してください。
+
+詳細な移行手順は [MIGRATION.md](/migration) を参照してください。

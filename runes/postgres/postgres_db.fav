@@ -7,11 +7,11 @@ type PostgresDb(String)
 // ── DbRead impl ────────────────────────────────────────────────────────────────
 
 impl DbRead for PostgresDb {
-    fn query(db: PostgresDb, sql: String, params: List<String>) -> Result<String, String> !Postgres {
+    fn query(db: PostgresDb, sql: String, params: List<String>) -> Result<String, String> {
         Postgres.query_raw(sql, params)
     }
 
-    fn query1(db: PostgresDb, sql: String, params: List<String>) -> Result<String, String> !Postgres {
+    fn query1(db: PostgresDb, sql: String, params: List<String>) -> Result<String, String> {
         Postgres.query_raw(sql, params)
     }
 }
@@ -19,7 +19,7 @@ impl DbRead for PostgresDb {
 // ── DbWrite impl ───────────────────────────────────────────────────────────────
 
 impl DbWrite for PostgresDb {
-    fn execute(db: PostgresDb, sql: String, params: List<String>) -> Result<Int, String> !Postgres {
+    fn execute(db: PostgresDb, sql: String, params: List<String>) -> Result<Int, String> {
         Postgres.execute_raw(sql, params)
     }
 }

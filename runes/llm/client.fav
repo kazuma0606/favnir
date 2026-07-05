@@ -7,18 +7,18 @@
 //   ANTHROPIC_API_KEY / OPENAI_API_KEY
 
 // complete — シングルターンプロンプトを LLM に送信
-public fn complete(prompt: String) -> Result<String, String> !Llm {
+public fn complete(prompt: String) -> Result<String, String> {
     Llm.complete_raw(prompt)
 }
 
 // chat — マルチターン会話を LLM に送信
 // messages は [{role: "user"|"assistant", content: "..."}] の JSON 文字列
-public fn chat(messages_json: String) -> Result<String, String> !Llm {
+public fn chat(messages_json: String) -> Result<String, String> {
     Llm.chat_raw(messages_json)
 }
 
 // extract<T> — プロンプトとデータから型 T の構造体を抽出
-public fn extract<T>(prompt: String, data: String) -> Result<T, String> !Llm {
+public fn extract<T>(prompt: String, data: String) -> Result<T, String> {
     match Llm.extract_raw(type_name_of<T>(), prompt, data) {
         Err(e) => Result.err(e)
         Ok(raw) =>

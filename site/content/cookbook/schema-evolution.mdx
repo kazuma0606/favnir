@@ -1,0 +1,37 @@
+---
+title: "スキーマ進化・後方互換性管理"
+description: "Favnir でスキーマ変更を安全に管理し、旧バージョンのデータを新バージョンに移行する"
+---
+
+# スキーマ進化・後方互換性管理
+
+型定義のバージョンを管理し、旧スキーマのデータを新スキーマに安全に移行します。
+
+## コード例
+
+```favnir
+import runes/postgres
+
+// v1 スキーマ（旧）
+type OrderV1 = { id: String, customer: String, total: Float }
+
+// v2 スキーマ（新: status フィールド追加）
+type OrderV2 = { id: String, customer: String, total: Float, status: String }
+
+fn migrate_v1_to_v2(o: OrderV1) -> OrderV2 {
+    { id: o.id, customer: o.customer, total: o.total, status: "pending" }
+}
+
+fn main() -> Unit {
+    bind v1_rows <- Postgres.query_raw("SELECT id, customer, total FROM orders_v1")
+    let v2_rows   = List.map(v1_rows, migrate_v1_to_v2)
+    bind n        <- Postgres.insert_many("orders_v2", v2_rows)
+    IO.println(String.concat(["Migrated ", Int.to_string(n), " rows."]))
+}
+```
+
+## ポイント
+
+- 移行関数 `migrate_v1_to_v2` に変換ロジックを集約し、単体テストを書きます。
+- 新フィールドにはデフォルト値を設定して後方互換性を維持します。
+- Favnir の型チェッカーが新フィールドの追加漏れをコンパイル時に検出します。

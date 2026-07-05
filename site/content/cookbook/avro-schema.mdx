@@ -1,0 +1,37 @@
+---
+title: "Avro スキーマ登録と読み書き"
+description: "Schema Registry に Avro スキーマを登録し、Avro 形式でデータを読み書きする"
+---
+
+# Avro スキーマ登録と読み書き
+
+Confluent Schema Registry に Avro スキーマを登録し、Kafka トピックへ Avro 形式でデータを送受信します。
+
+## コード例
+
+```favnir
+import runes/avro
+import runes/kafka
+
+type OrderEvent = {
+    order_id: String
+    customer: String
+    amount:   Float
+    ts:       String
+}
+
+fn main() -> Unit {
+    bind schema_id <- Avro.register_schema("orders-value", OrderEvent)
+    bind events    <- Kafka.consume("orders-raw", 100)
+    let decoded = List.map(events, fn (e) { Avro.decode(e, OrderEvent) })
+    let valid   = List.filter_map(decoded, fn (r) { Result.to_option(r) })
+    bind _ <- Kafka.produce_avro("orders-clean", valid, schema_id)
+    IO.println(String.concat(["Published ", Int.to_string(List.length(valid)), " events."]))
+}
+```
+
+## ポイント
+
+- `Avro.register_schema` は Schema Registry に型定義を登録し、スキーマ ID を返します。
+- `Avro.decode` は受信メッセージを Favnir の型に安全にデコードします。
+- 環境変数 `SCHEMA_REGISTRY_URL` でレジストリ URL を設定してください。

@@ -11,7 +11,7 @@ fn load_csv() -> Result<String, String> {
 
 // ── ステージ 3: BigQuery INSERT（truncate → insert）────────────────────────────
 
-fn truncate_table() -> Result<Int, String> !Gcp {
+fn truncate_table(ctx: AppCtx) -> Result<Int, String> {
   BigQuery.execute_raw(
     "favnir-bigquery-demo",
     "favnir_demo",
@@ -20,7 +20,7 @@ fn truncate_table() -> Result<Int, String> !Gcp {
   )
 }
 
-fn insert_rows() -> Result<Int, String> !Gcp {
+fn insert_rows(ctx: AppCtx) -> Result<Int, String> {
   BigQuery.execute_raw(
     "favnir-bigquery-demo",
     "favnir_demo",
@@ -31,7 +31,7 @@ fn insert_rows() -> Result<Int, String> !Gcp {
 
 // ── ステージ 4: 件数クエリ ────────────────────────────────────────────────────
 
-fn query_summary() -> Result<String, String> !Gcp {
+fn query_summary(ctx: AppCtx) -> Result<String, String> {
   BigQuery.query_raw(
     "favnir-bigquery-demo",
     "favnir_demo",

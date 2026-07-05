@@ -23,7 +23,7 @@ LocalStack を使う場合はエンドポイントに `"http://localhost:4566"` 
 `!DynamoDB` は外部 DynamoDB 操作を明示するエフェクトです。他の DB エフェクト（`!Postgres` / `!MongoDB` 等）とは独立した別エフェクトです。
 
 ```favnir
-stage GetSession: String -> Result<String, String> !DynamoDB = |session_id| {
+stage GetSession: String -> Result<String, String> = |session_id| {
     bind conn <- DynamoDB.connect("http://localhost:4566")
     DynamoDB.get_item(conn, "sessions", "{\"session_id\": \"" + session_id + "\"}")
 }
@@ -34,7 +34,7 @@ stage GetSession: String -> Result<String, String> !DynamoDB = |session_id| {
 ### `DynamoDB.connect`
 
 ```favnir
-fn connect(endpoint: String) -> Result<DynamoConn, String> !DynamoDB
+fn connect(endpoint: String) -> Result<DynamoConn, String>
 ```
 
 エンドポイントへの接続を確認（ListTables ping）し、`DynamoConn` を返します。
@@ -51,7 +51,7 @@ bind conn <- DynamoDB.connect("http://localhost:4566")
 ### `DynamoDB.get_item`
 
 ```favnir
-fn get_item(conn: DynamoConn, table: String, key_json: String) -> Result<String, String> !DynamoDB
+fn get_item(conn: DynamoConn, table: String, key_json: String) -> Result<String, String>
 ```
 
 プライマリキーで 1 件取得します。JSON オブジェクト文字列で返します。
@@ -68,7 +68,7 @@ bind item <- DynamoDB.get_item(conn, "users", "{\"pk\": \"user123\"}")
 ### `DynamoDB.put_item`
 
 ```favnir
-fn put_item(conn: DynamoConn, table: String, item_json: String) -> Result<Unit, String> !DynamoDB
+fn put_item(conn: DynamoConn, table: String, item_json: String) -> Result<Unit, String>
 ```
 
 アイテムを書き込みます（上書き）。
@@ -84,7 +84,7 @@ bind _ <- DynamoDB.put_item(conn, "users", "{\"pk\": \"user123\", \"name\": \"Al
 ### `DynamoDB.delete_item`
 
 ```favnir
-fn delete_item(conn: DynamoConn, table: String, key_json: String) -> Result<Unit, String> !DynamoDB
+fn delete_item(conn: DynamoConn, table: String, key_json: String) -> Result<Unit, String>
 ```
 
 プライマリキーで 1 件削除します。
@@ -98,7 +98,7 @@ bind _ <- DynamoDB.delete_item(conn, "users", "{\"pk\": \"user123\"}")
 ### `DynamoDB.query`
 
 ```favnir
-fn query(conn: DynamoConn, table: String, key_cond: String, attr_vals_json: String) -> Result<String, String> !DynamoDB
+fn query(conn: DynamoConn, table: String, key_cond: String, attr_vals_json: String) -> Result<String, String>
 ```
 
 `KeyConditionExpression` でクエリします。JSON 配列文字列で返します。
@@ -117,7 +117,7 @@ bind items <- DynamoDB.query(conn, "events",
 ### `DynamoDB.scan`
 
 ```favnir
-fn scan(conn: DynamoConn, table: String, filter_json: String) -> Result<String, String> !DynamoDB
+fn scan(conn: DynamoConn, table: String, filter_json: String) -> Result<String, String>
 ```
 
 テーブルを全件スキャンします。`filter_json` が `""` の場合は全件返します。
@@ -136,7 +136,7 @@ bind active <- DynamoDB.scan(conn, "events", "attribute_exists(session_id)")
 ### `DynamoDB.batch_write`
 
 ```favnir
-fn batch_write(conn: DynamoConn, table: String, puts_json: String) -> Result<Int, String> !DynamoDB
+fn batch_write(conn: DynamoConn, table: String, puts_json: String) -> Result<Int, String>
 ```
 
 複数アイテムをバッチ書き込みします（最大 25 件）。書き込み件数を返します。
@@ -153,7 +153,7 @@ bind count <- DynamoDB.batch_write(conn, "sessions",
 ### `DynamoDB.transact_write`
 
 ```favnir
-fn transact_write(conn: DynamoConn, ops_json: String) -> Result<Unit, String> !DynamoDB
+fn transact_write(conn: DynamoConn, ops_json: String) -> Result<Unit, String>
 ```
 
 トランザクションとして複数操作をアトミックに実行します。
@@ -193,17 +193,17 @@ bind _ <- DynamoDB.transact_write(conn,
 ```favnir
 import rune "dynamodb"
 
-stage StoreSession: String -> Result<Unit, String> !DynamoDB = |session_json| {
+stage StoreSession: String -> Result<Unit, String> = |session_json| {
     bind conn <- DynamoDB.connect("http://localhost:4566")
     DynamoDB.put_item(conn, "sessions", session_json)
 }
 
-stage GetSession: String -> Result<String, String> !DynamoDB = |session_id| {
+stage GetSession: String -> Result<String, String> = |session_id| {
     bind conn <- DynamoDB.connect("http://localhost:4566")
     DynamoDB.get_item(conn, "sessions", "{\"session_id\": \"" + session_id + "\"}")
 }
 
-stage DeleteSession: String -> Result<Unit, String> !DynamoDB = |session_id| {
+stage DeleteSession: String -> Result<Unit, String> = |session_id| {
     bind conn <- DynamoDB.connect("http://localhost:4566")
     DynamoDB.delete_item(conn, "sessions", "{\"session_id\": \"" + session_id + "\"}")
 }

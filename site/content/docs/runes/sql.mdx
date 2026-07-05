@@ -26,7 +26,7 @@ fav rune add sql
 ```favnir
 use sql
 
-stage FetchActiveUsers: DbHandle -> List<Map<String, String>> !DbRead = |handle| {
+stage FetchActiveUsers: DbHandle -> List<Map<String, String>>Read = |handle| {
     bind q  <- Sql.from("users")
     bind q  <- Sql.add_where(q, "active = ?", List.singleton("true"))
     bind q  <- Sql.order_by(q, "name", "asc")
@@ -157,7 +157,7 @@ bind sql <- Sql.to_sql(q)
 
 ```favnir
 public fn run_raw(handle: DbHandle, q: SqlQuery)
-    -> Result<List<Map<String, String>>, DbError> !DbRead
+    -> Result<List<Map<String, String>>, DbError>Read
 ```
 
 クエリを実行し、行を `Map<String, String>` のリストとして返します。
@@ -166,7 +166,7 @@ public fn run_raw(handle: DbHandle, q: SqlQuery)
 
 ```favnir
 public fn count_raw(handle: DbHandle, q: SqlQuery)
-    -> Result<Int, DbError> !DbRead
+    -> Result<Int, DbError>Read
 ```
 
 `COUNT(*) as n` クエリを実行し、行数を返します。
@@ -190,7 +190,7 @@ public fn insert_into(
     table:  String,
     cols:   List<String>,
     rows:   List<List<String>>
-) -> Result<Int, DbError> !DbWrite
+) -> Result<Int, DbError>Write
 ```
 
 複数行を一括挿入します。返り値は挿入行数。
@@ -214,7 +214,7 @@ public fn update_where(
     set_clause: String,
     params:     List<String>,
     where_cond: String
-) -> Result<Int, DbError> !DbWrite
+) -> Result<Int, DbError>Write
 ```
 
 ```favnir
@@ -233,7 +233,7 @@ public fn delete_where(
     table:      String,
     where_cond: String,
     params:     List<String>
-) -> Result<Int, DbError> !DbWrite
+) -> Result<Int, DbError>Write
 ```
 
 ```favnir

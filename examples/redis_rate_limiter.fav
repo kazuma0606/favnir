@@ -7,7 +7,7 @@ import rune "redis"
 type RateResult = { allowed: Bool, count: Int }
 
 // ── Stage 1: リクエスト数をインクリメントしてレート確認 ──────────────────────
-stage CheckRateLimit: String -> RateResult !Redis = |user_id| {
+stage CheckRateLimit: String -> RateResult = |user_id| {
     bind conn  <- Redis.connect("redis://localhost:6379/0")
     bind key   <- Result.ok("rate:" + user_id)
     bind count <- Redis.incr(conn, key)
@@ -17,7 +17,7 @@ stage CheckRateLimit: String -> RateResult !Redis = |user_id| {
 }
 
 // ── Stage 2: 結果をイベントキューに記録 ──────────────────────────────────────
-stage RecordEvent: RateResult -> Unit !Redis = |result| {
+stage RecordEvent: RateResult -> Unit = |result| {
     bind conn <- Redis.connect("redis://localhost:6379/0")
     bind msg  <- Result.ok("rate_check:" + result.allowed)
     Redis.lpush(conn, "events", msg)

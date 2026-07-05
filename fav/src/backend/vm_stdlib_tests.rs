@@ -493,7 +493,7 @@ fn test_logical_ops_runtime() {
 fn test_io_read_line_suppressed_returns_empty() {
     use crate::backend::vm::SuppressIoGuard;
     let _guard = SuppressIoGuard::new(true);
-    let result = eval("public fn main() -> String !Io { IO.read_line() }");
+    let result = eval("public fn main() -> String { IO.read_line() }");
     assert_eq!(result, Value::Str("".into()));
 }
 
@@ -1642,7 +1642,7 @@ fn test_for_in_returns_unit() {
     // for-in itself evaluates to Unit; surrounding fn returns 42
     let result = eval(
         r#"
-public fn main() -> Int !Io {
+public fn main() -> Int {
     bind nums <- collect { yield 10; yield 20; }
     for n in nums {
         IO.println_int(n)
@@ -2124,7 +2124,7 @@ public fn main() -> Bool {
 fn crypto_jwt_sign_and_verify_roundtrip() {
     let result = eval(
         r#"
-public fn main() -> Bool !Auth {
+public fn main() -> Bool {
     bind tok <- Crypto.jwt_sign_raw("{\"sub\":\"alice\",\"role\":\"admin\",\"exp\":9999999999}", "mysecret", "HS256");
     match tok {
         Ok(token) => {
@@ -2146,7 +2146,7 @@ public fn main() -> Bool !Auth {
 fn crypto_jwt_verify_invalid_signature_returns_err() {
     let result = eval(
         r#"
-public fn main() -> Bool !Auth {
+public fn main() -> Bool {
     bind tok <- Crypto.jwt_sign_raw("{\"sub\":\"bob\",\"exp\":9999999999}", "secret1", "HS256");
     match tok {
         Ok(token) => {
@@ -2168,7 +2168,7 @@ public fn main() -> Bool !Auth {
 fn crypto_jwt_decode_no_verify() {
     let result = eval(
         r#"
-public fn main() -> Bool !Auth {
+public fn main() -> Bool {
     bind tok <- Crypto.jwt_sign_raw("{\"sub\":\"charlie\",\"exp\":9999999999}", "anysecret", "HS256");
     match tok {
         Ok(token) => {
@@ -2191,7 +2191,7 @@ fn crypto_hmac_sha256_known_value() {
     // HMAC-SHA256 result should be 64 hex chars
     let result = eval(
         r#"
-public fn main() -> Int !Auth {
+public fn main() -> Int {
     String.length(Crypto.hmac_sha256_raw("key", "The quick brown fox jumps over the lazy dog"))
 }
 "#,
@@ -2203,7 +2203,7 @@ public fn main() -> Int !Auth {
 fn crypto_sha256_known_value() {
     let result = eval(
         r#"
-public fn main() -> Bool !Auth {
+public fn main() -> Bool {
     Crypto.sha256_raw("hello") == "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
 }
 "#,
@@ -2215,7 +2215,7 @@ public fn main() -> Bool !Auth {
 fn crypto_random_hex_length() {
     let result = eval(
         r#"
-public fn main() -> Int !Auth {
+public fn main() -> Int {
     String.length(Crypto.random_hex_raw(16))
 }
 "#,
@@ -2234,7 +2234,7 @@ fn log_emit_text_format_runs() {
         service: String::new(),
     });
     let result =
-        eval(r#"public fn main() -> Unit !Io { Log.emit_raw("INFO", "I000", "started", "{}") }"#);
+        eval(r#"public fn main() -> Unit { Log.emit_raw("INFO", "I000", "started", "{}") }"#);
     assert_eq!(result, Value::Unit);
 }
 
@@ -2247,7 +2247,7 @@ fn log_emit_json_format_runs() {
         service: "test".into(),
     });
     let result =
-        eval(r#"public fn main() -> Unit !Io { Log.emit_raw("SUCCESS", "S000", "done", "{}") }"#);
+        eval(r#"public fn main() -> Unit { Log.emit_raw("SUCCESS", "S000", "done", "{}") }"#);
     assert_eq!(result, Value::Unit);
     // reset
     set_log_config(LogConfig::default());
@@ -2263,7 +2263,7 @@ fn log_emit_level_filter_suppresses() {
         service: String::new(),
     });
     let result = eval(
-        r#"public fn main() -> Unit !Io { Log.emit_raw("INFO", "I000", "suppressed", "{}") }"#,
+        r#"public fn main() -> Unit { Log.emit_raw("INFO", "I000", "suppressed", "{}") }"#,
     );
     assert_eq!(result, Value::Unit);
     set_log_config(LogConfig::default());
@@ -2279,7 +2279,7 @@ fn log_emit_level_filter_passes() {
         service: String::new(),
     });
     let result = eval(
-        r#"public fn main() -> Unit !Io { Log.emit_raw("ERROR", "LE010", "db error", "{}") }"#,
+        r#"public fn main() -> Unit { Log.emit_raw("ERROR", "LE010", "db error", "{}") }"#,
     );
     assert_eq!(result, Value::Unit);
     set_log_config(LogConfig::default());
@@ -2288,7 +2288,7 @@ fn log_emit_level_filter_passes() {
 #[test]
 fn log_metric_text_runs() {
     set_log_config(LogConfig::default());
-    let result = eval(r#"public fn main() -> Unit !Io { Log.metric_raw("rows", 1000, "Count") }"#);
+    let result = eval(r#"public fn main() -> Unit { Log.metric_raw("rows", 1000, "Count") }"#);
     assert_eq!(result, Value::Unit);
 }
 
@@ -2300,7 +2300,7 @@ fn log_metric_json_runs() {
         output: "stdout".into(),
         service: String::new(),
     });
-    let result = eval(r#"public fn main() -> Unit !Io { Log.metric_raw("rows", 1500, "Count") }"#);
+    let result = eval(r#"public fn main() -> Unit { Log.metric_raw("rows", 1500, "Count") }"#);
     assert_eq!(result, Value::Unit);
     set_log_config(LogConfig::default());
 }
@@ -2309,7 +2309,7 @@ fn log_metric_json_runs() {
 fn log_emit_ctx_json_runs() {
     set_log_config(LogConfig::default());
     let result = eval(
-        r#"public fn main() -> Unit !Io { Log.emit_raw("INFO", "I010", "processing", "{\"batch\":\"1\"}") }"#,
+        r#"public fn main() -> Unit { Log.emit_raw("INFO", "I010", "processing", "{\"batch\":\"1\"}") }"#,
     );
     assert_eq!(result, Value::Unit);
 }
@@ -2318,7 +2318,7 @@ fn log_emit_ctx_json_runs() {
 fn log_map_to_json_raw_returns_json() {
     let result = eval(
         r#"
-public fn main() -> String !Io {
+public fn main() -> String {
     Log.map_to_json_raw(Map.set((), "key", "val"))
 }
 "#,
@@ -2341,7 +2341,7 @@ fn checkpoint_last_returns_none_initially() {
     });
     let result = eval(
         r#"
-public fn main() -> Bool !Checkpoint {
+public fn main() -> Bool {
     bind value <- Checkpoint.last("vm_cp_none")
     Option.is_none(value)
 }
@@ -2358,7 +2358,7 @@ fn checkpoint_save_and_meta_roundtrip() {
     });
     let result = eval(
         r#"
-public fn main() -> String !Checkpoint {
+public fn main() -> String {
     Checkpoint.save("vm_cp_save", "hello");
     bind meta <- Checkpoint.meta("vm_cp_save")
     meta.value
@@ -2376,7 +2376,7 @@ fn checkpoint_reset_clears_saved_value() {
     });
     let result = eval(
         r#"
-public fn main() -> Bool !Checkpoint {
+public fn main() -> Bool {
     Checkpoint.save("vm_cp_reset", "hello");
     Checkpoint.reset("vm_cp_reset");
     bind value <- Checkpoint.last("vm_cp_reset")
@@ -2391,7 +2391,7 @@ public fn main() -> Bool !Checkpoint {
 fn io_timestamp_returns_iso_utc_length() {
     let result = eval(
         r#"
-public fn main() -> Int !Io {
+public fn main() -> Int {
     String.length(IO.timestamp())
 }
 "#,
@@ -2403,7 +2403,7 @@ public fn main() -> Int !Io {
 fn db_upsert_raw_is_idempotent() {
     let result = eval(
         r#"
-public fn main() -> Int !Db {
+public fn main() -> Int {
     bind conn_result <- DB.connect("sqlite::memory:")
     match conn_result {
         Ok(conn) => {
@@ -2429,7 +2429,7 @@ public fn main() -> Int !Db {
 fn db_upsert_raw_updates_existing_row() {
     let result = eval(
         r#"
-public fn main() -> String !Db {
+public fn main() -> String {
     bind conn_result <- DB.connect("sqlite::memory:")
     match conn_result {
         Ok(conn) => {
@@ -2459,7 +2459,7 @@ public fn main() -> String !Db {
 fn http_get_raw_returns_err_on_bad_url() {
     let result = eval(
         r#"
-public fn main() -> Bool !Network {
+public fn main() -> Bool {
     bind result <- Http.get_raw("://bad-url")
     Result.is_err(result)
 }
@@ -2484,7 +2484,7 @@ fn http_post_raw_sends_body() {
     });
     let src = format!(
         r#"
-public fn main() -> String !Network {{
+public fn main() -> String {{
     bind result <- Http.post_raw("http://127.0.0.1:{port}/echo", "hello", "text/plain")
     match result {{
         Ok(resp) => resp.body
@@ -2642,7 +2642,7 @@ fn grpc_encode_grpc_frame_roundtrip() {
 fn grpc_call_raw_returns_err_on_bad_host() {
     let result = eval(
         r#"
-public fn main() -> Bool !Rpc {
+public fn main() -> Bool {
     bind payload <- Map.set((), "id", "1")
     bind result <- Grpc.call_raw("127.0.0.1:9", "/UserService/GetUser", payload)
     Result.is_err(result)
@@ -2656,7 +2656,7 @@ public fn main() -> Bool !Rpc {
 fn grpc_call_stream_raw_returns_list_on_bad_host() {
     let result = eval(
         r#"
-public fn main() -> Int !Rpc {
+public fn main() -> Int {
     bind payload <- Map.set((), "id", "1")
     bind rows <- Grpc.call_stream_raw("127.0.0.1:9", "/UserService/ListUsers", payload)
     List.length(rows)
@@ -2713,7 +2713,7 @@ public fn handle_echo(req: Map<String, String>) -> Map<String, String> {{
     req
 }}
 
-public fn main() -> Unit !Io !Rpc {{
+public fn main() -> Unit {{
     Grpc.serve_raw({free_port}, "EchoService")
 }}
 "#
@@ -3183,7 +3183,7 @@ public fn main() -> Bool {
 fn http_put_raw_returns_err_on_bad_host() {
     let result = eval(
         r#"
-public fn main() -> Bool !Network {
+public fn main() -> Bool {
     bind r <- Http.put_raw("http://127.0.0.1:1/x", "{}", "application/json")
     Result.is_err(r)
 }
@@ -3196,7 +3196,7 @@ public fn main() -> Bool !Network {
 fn http_delete_raw_returns_err_on_bad_host() {
     let result = eval(
         r#"
-public fn main() -> Bool !Network {
+public fn main() -> Bool {
     bind r <- Http.delete_raw("http://127.0.0.1:1/x")
     Result.is_err(r)
 }
@@ -3209,7 +3209,7 @@ public fn main() -> Bool !Network {
 fn http_patch_raw_returns_err_on_bad_host() {
     let result = eval(
         r#"
-public fn main() -> Bool !Network {
+public fn main() -> Bool {
     bind r <- Http.patch_raw("http://127.0.0.1:1/x", "{}", "application/json")
     Result.is_err(r)
 }
@@ -3237,7 +3237,7 @@ fn grpc_call_typed_raw_returns_err_on_bad_host() {
         r#"
 type User = { id: Int name: String }
 
-public fn main() -> Bool !Rpc {
+public fn main() -> Bool {
     bind r <- Grpc.call_typed_raw("User", "127.0.0.1:9", "/UserService/GetUser", Map.set((), "id", "1"))
     Result.is_err(r)
 }
@@ -3254,7 +3254,7 @@ fn duckdb_open_memory_succeeds() {
         r#"
 type DbError = { code: String message: String }
 
-public fn main() -> Bool !Db {
+public fn main() -> Bool {
     bind r <- DuckDb.open_raw(":memory:")
     Result.is_ok(r)
 }
@@ -3269,7 +3269,7 @@ fn duckdb_execute_create_table_succeeds() {
         r#"
 type DbError = { code: String message: String }
 
-public fn main() -> Bool !Db {
+public fn main() -> Bool {
     bind conn_result <- DuckDb.open_raw(":memory:")
     match conn_result {
         Ok(conn) => {
@@ -3290,7 +3290,7 @@ fn duckdb_query_returns_inserted_row() {
         r#"
 type DbError = { code: String message: String }
 
-public fn main() -> Int !Db {
+public fn main() -> Int {
     bind conn_result <- DuckDb.open_raw(":memory:")
     match conn_result {
         Ok(conn) => {
@@ -3316,7 +3316,7 @@ fn duckdb_query_bad_sql_returns_err() {
         r#"
 type DbError = { code: String message: String }
 
-public fn main() -> Bool !Db {
+public fn main() -> Bool {
     bind conn_result <- DuckDb.open_raw(":memory:")
     match conn_result {
         Ok(conn) => {
@@ -3341,7 +3341,7 @@ fn env_get_raw_returns_some() {
     set_env_config(EnvConfig::default());
     let result = eval(
         r#"
-public fn main() -> Bool !Env {
+public fn main() -> Bool {
     match Env.get_raw("FAV_TEST_ENV_47_A") {
         Some(_) => true
         None    => false
@@ -3357,7 +3357,7 @@ fn env_get_raw_returns_none() {
     set_env_config(EnvConfig::default());
     let result = eval(
         r#"
-public fn main() -> Bool !Env {
+public fn main() -> Bool {
     match Env.get_raw("__FAV_TEST_ENV_47_MISSING_NONE__") {
         Some(_) => false
         None    => true
@@ -3376,7 +3376,7 @@ fn env_require_raw_ok() {
     set_env_config(EnvConfig::default());
     let result = eval(
         r#"
-public fn main() -> Bool !Env {
+public fn main() -> Bool {
     match Env.require_raw("FAV_TEST_ENV_47_B") {
         Ok(_)  => true
         Err(_) => false
@@ -3392,7 +3392,7 @@ fn env_require_raw_err() {
     set_env_config(EnvConfig::default());
     let result = eval(
         r#"
-public fn main() -> Bool !Env {
+public fn main() -> Bool {
     match Env.require_raw("__FAV_TEST_ENV_47_MISSING_REQ__") {
         Ok(_)  => false
         Err(e) => String.contains(e, "ENV_MISSING")
@@ -3411,7 +3411,7 @@ fn env_get_int_raw_ok() {
     set_env_config(EnvConfig::default());
     let result = eval(
         r#"
-public fn main() -> Bool !Env {
+public fn main() -> Bool {
     match Env.get_int_raw("FAV_TEST_ENV_47_INT") {
         Ok(n)  => n == 42
         Err(_) => false
@@ -3430,7 +3430,7 @@ fn env_get_int_raw_parse_err() {
     set_env_config(EnvConfig::default());
     let result = eval(
         r#"
-public fn main() -> Bool !Env {
+public fn main() -> Bool {
     match Env.get_int_raw("FAV_TEST_ENV_47_BADINT") {
         Ok(_)  => false
         Err(e) => String.contains(e, "ENV_PARSE_INT")
@@ -3449,7 +3449,7 @@ fn env_get_bool_raw_true() {
     set_env_config(EnvConfig::default());
     let result = eval(
         r#"
-public fn main() -> Bool !Env {
+public fn main() -> Bool {
     match Env.get_bool_raw("FAV_TEST_ENV_47_BOOL_T") {
         Ok(b)  => b
         Err(_) => false
@@ -3469,7 +3469,7 @@ fn env_load_dotenv_raw_ok() {
     let path_str = env_path.to_string_lossy().replace('\\', "/");
     let src = format!(
         r#"
-public fn main() -> Bool !Env {{
+public fn main() -> Bool {{
     match Env.load_dotenv_raw("{}") {{
         Ok(_)  => true
         Err(_) => false
@@ -3668,7 +3668,7 @@ fn test_io_read_write_file() {
         .replace('\\', "/");
     let src = format!(
         r#"
-public fn main() -> String !Io {{
+public fn main() -> String {{
     bind _ <- IO.write_file_raw("{path}", "hello favnir");
     match IO.read_file_raw("{path}") {{
         ok(s) => s
@@ -3691,7 +3691,7 @@ fn test_io_write_bytes() {
         .replace('\\', "/");
     let src = format!(
         r#"
-public fn main() -> Bool !Io {{
+public fn main() -> Bool {{
     bind bytes <- List.range(65, 68)
     bind _ <- IO.write_bytes_raw("{path}", bytes);
     IO.file_exists_raw("{path}")
@@ -3710,11 +3710,11 @@ fn test_io_file_exists() {
         .to_str()
         .unwrap()
         .replace('\\', "/");
-    let src_before = format!(r#"public fn main() -> Bool !Io {{ IO.file_exists_raw("{path}") }}"#);
+    let src_before = format!(r#"public fn main() -> Bool {{ IO.file_exists_raw("{path}") }}"#);
     assert_eq!(eval(&src_before), Value::Bool(false));
 
     std::fs::write(&path, b"x").unwrap();
-    let src_after = format!(r#"public fn main() -> Bool !Io {{ IO.file_exists_raw("{path}") }}"#);
+    let src_after = format!(r#"public fn main() -> Bool {{ IO.file_exists_raw("{path}") }}"#);
     assert_eq!(eval(&src_after), Value::Bool(true));
 }
 

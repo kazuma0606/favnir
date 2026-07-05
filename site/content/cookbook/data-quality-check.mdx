@@ -1,0 +1,53 @@
+---
+title: "データ品質チェック"
+description: "パイプライン内でデータ品質期待値テストを実行し、異常を検知したら通知する"
+---
+
+# データ品質チェック
+
+パイプライン実行中にデータ品質チェックを行い、行数・NULL 率・値範囲などの期待値を検証します。
+
+## コード例
+
+```favnir
+import runes/postgres
+import runes/slack
+
+type QualityReport = {
+    table:      String
+    row_count:  Int
+    null_rate:  Float
+    passed:     Bool
+    message:    String
+}
+
+fn check_quality(table: String, min_rows: Int, max_null_rate: Float) -> QualityReport {
+    bind stats <- Postgres.query_one(
+        "SELECT COUNT(*) as cnt, AVG(CASE WHEN amount IS NULL THEN 1.0 ELSE 0.0 END) as null_rate FROM orders",
+        []
+    )
+    let row_count = Int.parse(stats["cnt"])
+    let null_rate = Float.parse(stats["null_rate"])
+    let passed    = row_count >= min_rows && null_rate <= max_null_rate
+    let message   = if passed { "OK" } else {
+        String.concat(["FAIL: rows=", Int.to_string(row_count), " null_rate=", Float.to_string(null_rate)])
+    }
+    { table, row_count, null_rate, passed, message }
+}
+
+fn main() -> Unit {
+    bind report <- check_quality("orders", 1000, 0.05)
+    if not(report.passed) {
+        bind _ <- Slack.post_message("#data-alerts", String.concat(["Data quality FAIL: ", report.message]))
+        IO.println("Quality check failed.")
+    } else {
+        IO.println("Quality check passed.")
+    }
+}
+```
+
+## ポイント
+
+- 期待値（最小行数・最大 NULL 率）をパラメータ化することで再利用可能なチェック関数を作れます。
+- 失敗時に Slack 通知を送るパターンは `slack-notify` レシピと組み合わせてください。
+- `fav test` でモックデータを使った品質チェックのユニットテストが書けます。

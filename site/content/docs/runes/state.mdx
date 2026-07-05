@@ -24,7 +24,7 @@ fav rune add state
 ```favnir
 import rune "state"
 
-stage DeduplicateRows: List<Row> -> List<Row> !PipelineState = |rows| {
+stage DeduplicateRows: List<Row> -> List<Row> = |rows| {
   List.filter(rows, |r| {
     bind already <- State.has("seen:" ++ r.id)
     if already {
@@ -44,7 +44,7 @@ seq DeduplicatedPipeline = LoadRows |> DeduplicateRows |> Save
 ### `State.get`
 
 ```favnir
-State.get(key: String) -> Option<String> !PipelineState
+State.get(key: String) -> Option<String>
 ```
 
 キーに対応する値を返します。存在しない場合は `None`。
@@ -52,7 +52,7 @@ State.get(key: String) -> Option<String> !PipelineState
 ### `State.set`
 
 ```favnir
-State.set(key: String, value: String) -> Unit !PipelineState
+State.set(key: String, value: String) -> Unit
 ```
 
 キーに値をセットします。
@@ -60,7 +60,7 @@ State.set(key: String, value: String) -> Unit !PipelineState
 ### `State.has`
 
 ```favnir
-State.has(key: String) -> Bool !PipelineState
+State.has(key: String) -> Bool
 ```
 
 キーが存在するかどうかを返します。
@@ -68,7 +68,7 @@ State.has(key: String) -> Bool !PipelineState
 ### `State.delete`
 
 ```favnir
-State.delete(key: String) -> Unit !PipelineState
+State.delete(key: String) -> Unit
 ```
 
 キーを削除します。存在しない場合は何もしません。
@@ -79,14 +79,14 @@ State.delete(key: String) -> Unit !PipelineState
 エフェクトなしで呼び出すと **E0338** エラーになります。
 
 ```favnir
-// E0338 エラー: !PipelineState エフェクトがない
+// E0338 エラー: エフェクトがない
 stage Broken: Int -> Int = |n| {
   bind _ <- State.set("key", "val")  // ERROR E0338
   n
 }
 
-// 正しい: !PipelineState を宣言する
-stage Correct: Int -> Int !PipelineState = |n| {
+// 正しい: を宣言する
+stage Correct: Int -> Int = |n| {
   bind _ <- State.set("key", "val")
   n
 }

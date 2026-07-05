@@ -168,12 +168,12 @@ type Order = {
   amount:        Float
 }
 
-stage LoadOrders: String -> List<Order> !Db = |path| {
+stage LoadOrders: String -> List<Order> = |path| {
   bind conn <- duckdb.open(":memory:")
   duckdb.query<Order>(conn, $"SELECT * FROM '{path}'")
 }
 
-public fn main() -> Unit !Io !Db {
+public fn main() -> Unit {
   bind orders <- LoadOrders("data/orders.csv")
   IO.println($"読み込み: {List.length(orders)} 件")
 }
@@ -189,7 +189,7 @@ import rune "duckdb"
 
 type Order = { id: Int  customer_name: String  amount: Float }
 
-public fn main() -> Unit !Io !Db {
+public fn main() -> Unit {
   bind conn   <- duckdb.open(":memory:")
   bind rows   <- duckdb.query<Order>(conn, "SELECT * FROM 'orders.csv'")
   match Validate.rows_raw("Order", rows) {

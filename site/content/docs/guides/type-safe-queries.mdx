@@ -13,7 +13,7 @@ description: "SQL Rune を使ってインジェクション不可・エフェク
 
 ```favnir
 // 危険 — 型チェックなし、インジェクションリスク
-stage FetchUsers: DbHandle -> List<Map<String, String>> !DbRead = |handle| {
+stage FetchUsers: DbHandle -> List<Map<String, String>>Read = |handle| {
     match DB.query_raw(handle, "SELECT * FROM users WHERE active = 'true'") {
         Err(e)   => List.empty()
         Ok(rows) => rows
@@ -31,7 +31,7 @@ stage FetchUsers: DbHandle -> List<Map<String, String>> !DbRead = |handle| {
 ```favnir
 use sql
 
-stage FetchActiveUsers: DbHandle -> List<Map<String, String>> !DbRead = |handle| {
+stage FetchActiveUsers: DbHandle -> List<Map<String, String>>Read = |handle| {
     bind q <- Sql.from("users")
     bind q <- Sql.add_where(q, "active = ?", List.singleton("true"))
     bind q <- Sql.order_by(q, "name", "asc")
@@ -92,7 +92,7 @@ bind sql <- Sql.to_sql(q)
 同じ `SqlQuery` を `count_raw` に渡すだけです。
 
 ```favnir
-stage CountPendingOrders: DbHandle -> Int !DbRead = |handle| {
+stage CountPendingOrders: DbHandle -> IntRead = |handle| {
     bind q <- Sql.from("orders")
     bind q <- Sql.add_where(q, "status = ?", List.singleton("pending"))
     match Sql.count_raw(handle, q) {
@@ -107,7 +107,7 @@ stage CountPendingOrders: DbHandle -> Int !DbRead = |handle| {
 INSERT / UPDATE / DELETE は `!DbWrite` エフェクトが自動で付きます。
 
 ```favnir
-stage CreateUser: DbHandle -> Int !DbWrite = |handle| {
+stage CreateUser: DbHandle -> IntWrite = |handle| {
     bind cols <- List.concat(List.singleton("name"), List.singleton("email"))
     bind row  <- List.concat(List.singleton("Alice"), List.singleton("alice@example.com"))
     match Sql.insert_into(handle, "users", cols, List.singleton(row)) {

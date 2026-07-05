@@ -111,12 +111,12 @@ import rune "aws"
 
 type Order = { id: Int  customer: String  amount: Float }
 
-stage FetchOrders: String -> List<Order> !Network = |api_url| {
+stage FetchOrders: String -> List<Order> = |api_url| {
   bind resp  <- http.get_body(api_url)
   Json.parse_list<Order>(resp)
 }
 
-stage SaveToS3: List<Order> -> Int !AWS = |orders| {
+stage SaveToS3: List<Order> -> Int = |orders| {
   aws.s3.put_object("my-bucket", "orders/latest.json", Debug.show(orders))
 }
 

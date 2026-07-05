@@ -28,7 +28,7 @@ Redpanda はローカル開発用の Kafka 互換ブローカーです。AWS MSK
 `!Stream` は外部 Kafka/ストリーミング操作を明示するエフェクトです。宣言がない場合は **E0319** エラーが発生します。
 
 ```favnir
-stage PublishEvent: String -> Result<Unit, String> !Stream = |event_json| {
+stage PublishEvent: String -> Result<Unit, String> = |event_json| {
     bind conn <- Kafka.connect("localhost:9092")
     Kafka.produce(conn, "events", "event-key", event_json)
 }
@@ -39,7 +39,7 @@ stage PublishEvent: String -> Result<Unit, String> !Stream = |event_json| {
 ### `Kafka.connect`
 
 ```favnir
-fn connect(brokers: String) -> Result<KafkaConn, String> !Stream
+fn connect(brokers: String) -> Result<KafkaConn, String>
 ```
 
 ブローカーへの接続確認（`list_topics` ping）を行い、`KafkaConn` を返します。
@@ -56,7 +56,7 @@ bind conn <- Kafka.connect("localhost:9092")
 ### `Kafka.produce`
 
 ```favnir
-fn produce(conn: KafkaConn, topic: String, key: String, value: String) -> Result<Unit, String> !Stream
+fn produce(conn: KafkaConn, topic: String, key: String, value: String) -> Result<Unit, String>
 ```
 
 指定トピックにメッセージを produce します（partition 0 固定）。
@@ -70,7 +70,7 @@ bind _ <- Kafka.produce(conn, "events", "user-123", "{\"type\": \"signup\"}")
 ### `Kafka.consume_one`
 
 ```favnir
-fn consume_one(conn: KafkaConn, topic: String, group_id: String) -> Result<String, String> !Stream
+fn consume_one(conn: KafkaConn, topic: String, group_id: String) -> Result<String, String>
 ```
 
 トピックの最新オフセットから 1 件取得します。
@@ -88,7 +88,7 @@ bind msg <- Kafka.consume_one(conn, "events", "my-group")
 ### `Kafka.consume_batch`
 
 ```favnir
-fn consume_batch(conn: KafkaConn, topic: String, group_id: String, max_count: Int) -> Result<String, String> !Stream
+fn consume_batch(conn: KafkaConn, topic: String, group_id: String, max_count: Int) -> Result<String, String>
 ```
 
 最新オフセットから最大 `max_count` 件のメッセージ payload を JSON 配列文字列で返します。
@@ -107,7 +107,7 @@ bind msgs_json <- Kafka.consume_batch(conn, "events", "etl-group", 10)
 ### `Kafka.create_topic`
 
 ```favnir
-fn create_topic(conn: KafkaConn, topic: String, partitions: Int) -> Result<Unit, String> !Stream
+fn create_topic(conn: KafkaConn, topic: String, partitions: Int) -> Result<Unit, String>
 ```
 
 トピックを作成します（partition 数指定、replication factor 1）。
@@ -142,13 +142,13 @@ bind _ <- Kafka.create_topic(conn, "events", 3)
 ```favnir
 import rune "kafka"
 
-stage PublishEvent: String -> Result<Unit, String> !Stream = |event_json| {
+stage PublishEvent: String -> Result<Unit, String> = |event_json| {
     bind conn <- Kafka.connect("localhost:9092")
     bind _    <- Kafka.create_topic(conn, "events", 1)
     Kafka.produce(conn, "events", "event-key", event_json)
 }
 
-stage ConsumeEvents: Unit -> Result<String, String> !Stream = |_| {
+stage ConsumeEvents: Unit -> Result<String, String> = |_| {
     bind conn <- Kafka.connect("localhost:9092")
     Kafka.consume_batch(conn, "events", "etl-group", 10)
 }

@@ -7,6 +7,7 @@ pub mod diagnostics;
 pub mod doc_comment;
 pub mod document_store;
 pub mod hover;
+pub mod inlay_hints;
 pub mod protocol;
 pub mod references;
 pub mod rename;
@@ -76,7 +77,8 @@ impl<W: Write> LspServer<W> {
                             },
                             "codeActionProvider": true,
                             "renameProvider": true,
-                            "referencesProvider": true
+                            "referencesProvider": true,
+                            "inlayHintProvider": true
                         }
                     }),
                 )?;
@@ -166,6 +168,17 @@ impl<W: Write> LspServer<W> {
                 let result = extract_hover_target(&request.params)
                     .map(|(uri, pos)| handle_references(&self.store, &uri, pos))
                     .and_then(|locs| serde_json::to_value(locs).ok())
+                    .unwrap_or_else(|| serde_json::json!([]));
+                self.write_response(request.id.unwrap_or(serde_json::Value::Null), result)?;
+                Ok(false)
+            }
+            "textDocument/inlayHint" => {
+                let result = request.params
+                    .get("textDocument")
+                    .and_then(|td| td.get("uri"))
+                    .and_then(|u| u.as_str())
+                    .map(|uri| inlay_hints::handle_inlay_hints(&self.store, uri))
+                    .and_then(|hints| serde_json::to_value(hints).ok())
                     .unwrap_or_else(|| serde_json::json!([]));
                 self.write_response(request.id.unwrap_or(serde_json::Value::Null), result)?;
                 Ok(false)

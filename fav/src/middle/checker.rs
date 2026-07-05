@@ -9,9 +9,6 @@ use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
-/// Set of inferred or declared effects for a function (v18.1.0).
-pub type EffectSet = HashSet<Effect>;
-
 // ── Type (4-1) ────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, PartialEq)]
@@ -29,13 +26,12 @@ pub enum Type {
     Arrow(Box<Type>, Box<Type>),
     /// Named function definition with parameter list
     Fn(Vec<Type>, Box<Type>),
-    /// `trf` definition: input, output, effects
-    Trf(Box<Type>, Box<Type>, Vec<Effect>),
+    /// `trf` definition: input, output
+    Trf(Box<Type>, Box<Type>),
     /// `abstract trf` definition (v1.3.0)
     AbstractTrf {
         input: Box<Type>,
         output: Box<Type>,
-        effects: Vec<Effect>,
     },
     /// `abstract seq Name<T> { ... }` template marker (v1.3.0)
     AbstractFlwTemplate(String),
@@ -93,8 +89,8 @@ impl Type {
             (Type::Arrow(ai, ao), Type::Arrow(bi, bo)) => {
                 ai.is_compatible(bi) && ao.is_compatible(bo)
             }
-            (Type::Arrow(ai, ao), Type::Trf(bi, bo, _))
-            | (Type::Trf(ai, ao, _), Type::Arrow(bi, bo)) => {
+            (Type::Arrow(ai, ao), Type::Trf(bi, bo))
+            | (Type::Trf(ai, ao), Type::Arrow(bi, bo)) => {
                 ai.is_compatible(bi) && ao.is_compatible(bo)
             }
             // Cross-compatibility: impl method bodies use Arrow (lambda checker output)
@@ -124,14 +120,12 @@ impl Type {
                 Type::AbstractTrf {
                     input: i1,
                     output: o1,
-                    effects: f1,
                 },
                 Type::AbstractTrf {
                     input: i2,
                     output: o2,
-                    effects: f2,
                 },
-            ) => i1.is_compatible(i2) && o1.is_compatible(o2) && f1 == f2,
+            ) => i1.is_compatible(i2) && o1.is_compatible(o2),
             (Type::AbstractFlwTemplate(a), Type::AbstractFlwTemplate(b)) => a == b,
             (
                 Type::PartialFlw {
@@ -179,31 +173,17 @@ impl Type {
                 let ps: Vec<_> = params.iter().map(|p| p.display()).collect();
                 format!("({}) -> {}", ps.join(", "), ret.display())
             }
-            Type::Trf(i, o, fx) => {
-                let effs: Vec<String> = fx.iter().map(|e| format!("!{:?}", e)).collect();
-                let eff = if effs.is_empty() {
-                    String::new()
-                } else {
-                    format!(" {}", effs.join(" "))
-                };
-                format!("Trf<{}, {}{}>", i.display(), o.display(), eff)
+            Type::Trf(i, o) => {
+                format!("Trf<{}, {}>", i.display(), o.display())
             }
             Type::AbstractTrf {
                 input,
                 output,
-                effects,
             } => {
-                let effs: Vec<String> = effects.iter().map(|e| format!("!{:?}", e)).collect();
-                let eff = if effs.is_empty() {
-                    String::new()
-                } else {
-                    format!(" {}", effs.join(" "))
-                };
                 format!(
-                    "AbstractTrf<{}, {}{}>",
+                    "AbstractTrf<{}, {}>",
                     input.display(),
                     output.display(),
-                    eff
                 )
             }
             Type::AbstractFlwTemplate(name) => format!("AbstractFlw<{}>", name),
@@ -265,7 +245,7 @@ impl Type {
     /// (used in pipeline position where trfs are single-input).
     pub fn as_callable(&self) -> Option<(&Type, &Type)> {
         match self {
-            Type::Trf(i, o, _) => Some((i, o)),
+            Type::Trf(i, o) => Some((i, o)),
             Type::AbstractTrf { input, output, .. } => Some((input, output)),
             Type::Arrow(i, o) => Some((i, o)),
             Type::Fn(params, ret) if !params.is_empty() => Some((&params[0], ret)),
@@ -321,8 +301,8 @@ impl Subst {
                 ps.iter().map(|p| self.apply(p)).collect(),
                 Box::new(self.apply(ret)),
             ),
-            Type::Trf(i, o, fx) => {
-                Type::Trf(Box::new(self.apply(i)), Box::new(self.apply(o)), fx.clone())
+            Type::Trf(i, o) => {
+                Type::Trf(Box::new(self.apply(i)), Box::new(self.apply(o)))
             }
             Type::Named(n, args) => {
                 Type::Named(n.clone(), args.iter().map(|a| self.apply(a)).collect())
@@ -365,7 +345,7 @@ pub fn occurs(var: &str, ty: &Type) -> bool {
         Type::Result(t, e) => occurs(var, t) || occurs(var, e),
         Type::Arrow(a, b) => occurs(var, a) || occurs(var, b),
         Type::Fn(ps, ret) => ps.iter().any(|p| occurs(var, p)) || occurs(var, ret),
-        Type::Trf(i, o, _) => occurs(var, i) || occurs(var, o),
+        Type::Trf(i, o) => occurs(var, i) || occurs(var, o),
         Type::Named(_, args) => args.iter().any(|a| occurs(var, a)),
         Type::Cap(_, args) => args.iter().any(|a| occurs(var, a)),
         Type::Interface(_, args) => args.iter().any(|a| occurs(var, a)),
@@ -431,8 +411,8 @@ pub fn unify(t1: &Type, t2: &Type) -> Result<Subst, String> {
             let s2 = unify(&s1.apply(b1), &s1.apply(b2))?;
             Ok(s2.compose(s1))
         }
-        (Type::Arrow(a1, b1), Type::Trf(a2, b2, _))
-        | (Type::Trf(a1, b1, _), Type::Arrow(a2, b2)) => {
+        (Type::Arrow(a1, b1), Type::Trf(a2, b2))
+        | (Type::Trf(a1, b1), Type::Arrow(a2, b2)) => {
             let s1 = unify(a1, a2)?;
             let s2 = unify(&s1.apply(b1), &s1.apply(b2))?;
             Ok(s2.compose(s1))
@@ -930,8 +910,6 @@ pub struct Checker {
     global_def_spans: HashMap<String, Span>,
     /// User-defined invariants by type name.
     type_invariants: HashMap<String, Vec<Expr>>,
-    /// Effects declared on the current fn/trf being checked.
-    current_effects: Vec<Effect>,
     /// Module resolver (Some = project mode, None = single-file mode).
     resolver: Option<Arc<Mutex<crate::middle::resolver::Resolver>>>,
     /// File being checked (for visibility enforcement).
@@ -974,9 +952,7 @@ pub struct Checker {
     pub schemas: ProjectSchemas,
     /// Generic bounds registry: fn_name → params with bounds (v17.1.0).
     fn_bounds_registry: HashMap<String, Vec<crate::ast::GenericParam>>,
-    /// Inferred effects per fn name (v18.1.0).
-    pub fn_effects_registry: HashMap<String, EffectSet>,
-    /// Call graph for transitive effect propagation: fn_name → called fn names (v18.1.0).
+    /// Call graph for transitive analysis: fn_name → called fn names (v18.1.0).
     fn_call_graph: HashMap<String, Vec<String>>,
     /// Refinement constraints: fn_name → [(param_index, param_name, constraint_expr)] (v18.3.0).
     fn_refinement_registry: HashMap<String, Vec<(usize, String, Box<crate::ast::Expr>)>>,
@@ -990,6 +966,9 @@ pub struct Checker {
     linear_env: HashMap<String, LinearState>,
     /// Const generic params registry: fn_name → params with const constraints (v18.7.0).
     const_generics_registry: HashMap<String, Vec<crate::ast::GenericParam>>,
+    /// v34.8A: true when the current fn/trf has a ctx: AppCtx parameter.
+    /// ctx-based functions bypass !Effect annotation checks (effect = via ctx).
+    current_fn_has_ctx: bool,
 }
 
 impl Checker {
@@ -1008,7 +987,6 @@ impl Checker {
             record_fields: HashMap::new(),
             global_def_spans: HashMap::new(),
             type_invariants: HashMap::new(),
-            current_effects: Vec::new(),
             resolver: None,
             current_file: None,
             imported: HashMap::new(),
@@ -1030,7 +1008,6 @@ impl Checker {
             namespace_aliases: HashMap::new(),
             schemas: HashMap::new(),
             fn_bounds_registry: HashMap::new(),
-            fn_effects_registry: HashMap::new(),
             fn_call_graph: HashMap::new(),
             fn_refinement_registry: HashMap::new(),
             schema_types: HashMap::new(),
@@ -1038,6 +1015,7 @@ impl Checker {
             linear_types: ["Connection", "Tx"].iter().map(|s| s.to_string()).collect(),
             linear_env: HashMap::new(),
             const_generics_registry: HashMap::new(),
+            current_fn_has_ctx: false,
         }
     }
 
@@ -1059,7 +1037,6 @@ impl Checker {
             record_fields: HashMap::new(),
             global_def_spans: HashMap::new(),
             type_invariants: HashMap::new(),
-            current_effects: Vec::new(),
             resolver: Some(resolver),
             current_file: Some(file),
             imported: HashMap::new(),
@@ -1081,7 +1058,6 @@ impl Checker {
             namespace_aliases: HashMap::new(),
             schemas: HashMap::new(),
             fn_bounds_registry: HashMap::new(),
-            fn_effects_registry: HashMap::new(),
             fn_call_graph: HashMap::new(),
             fn_refinement_registry: HashMap::new(),
             schema_types: HashMap::new(),
@@ -1089,6 +1065,7 @@ impl Checker {
             linear_types: ["Connection", "Tx"].iter().map(|s| s.to_string()).collect(),
             linear_env: HashMap::new(),
             const_generics_registry: HashMap::new(),
+            current_fn_has_ctx: false,
         }
     }
 
@@ -2147,9 +2124,6 @@ impl Checker {
     fn register_item_signatures(&mut self, program: &Program) {
         for item in &program.items {
             match item {
-                Item::EffectDef(ed) => {
-                    self.effect_registry.insert(ed.name.clone());
-                }
                 Item::TypeDef(td) => {
                     self.remember_global_symbol(
                         td.name.clone(),
@@ -2274,9 +2248,8 @@ impl Checker {
                     if !refinements.is_empty() {
                         self.fn_refinement_registry.insert(fd.name.clone(), refinements);
                     }
-                    // Infer effects from fn body (v18.1.0).
-                    let (direct_effects, called_fns) = infer_effects_fn(fd);
-                    self.fn_effects_registry.insert(fd.name.clone(), direct_effects);
+                    // Infer call graph from fn body for transitive analysis.
+                    let called_fns = infer_called_fns(fd);
                     self.fn_call_graph.insert(fd.name.clone(), called_fns);
                 }
                 Item::TrfDef(td) => {
@@ -2289,7 +2262,6 @@ impl Checker {
                     let trf_ty = Type::Trf(
                         Box::new(input.clone()),
                         Box::new(output.clone()),
-                        td.effects.clone(),
                     );
                     self.remember_global_symbol(
                         td.name.clone(),
@@ -2314,7 +2286,6 @@ impl Checker {
                         Type::AbstractTrf {
                             input: Box::new(input),
                             output: Box::new(output),
-                            effects: td.effects.clone(),
                         },
                     );
                 }
@@ -2392,7 +2363,8 @@ impl Checker {
                 | Item::TestGroup { .. }
                 | Item::BenchDef(..)
                 | Item::InterfaceImplDecl(..)
-                | Item::PipelineDef(..) => {} // v22.5.0: スタブ
+                | Item::PipelineDef(..)
+                | Item::EffectDef(..) => {} // v22.5.0/v35.5.0: スタブ
                 Item::InterfaceDecl(decl) => {
                     self.remember_global_symbol(
                         decl.name.clone(),
@@ -2420,7 +2392,6 @@ impl Checker {
             Item::InterfaceImplDecl(id) => self.check_interface_impl_decl(id),
             Item::CapDef(cd) => self.check_cap_def(cd),
             Item::ImplDef(id) => self.check_impl_def(id),
-            Item::EffectDef(..) => {}
             Item::TestDef(td) => self.check_test_def(td),
             Item::TestGroup { tests, .. } => {
                 for td in tests {
@@ -2435,68 +2406,17 @@ impl Checker {
             | Item::RuneUse { .. }
             | Item::ImportDecl { .. } => {}
             Item::PipelineDef(_) => {} // v22.5.0: 型チェック未対応（スタブ）
-        }
-    }
-
-    fn check_effects_declared(&mut self, effects: &[Effect], span: &Span) {
-        const BUILTIN_EFFECTS: &[&str] = &[
-            "Pure",
-            "Io",
-            "IO",
-            "Db",
-            "DbRead",
-            "DbWrite",
-            "DbAdmin",
-            "Network",
-            "Http",
-            "Llm",
-            "Snowflake",
-            "Gcp",
-            "Postgres",
-            "AzureDb",
-            "AzureStorage",
-            "Rpc",
-            "File",
-            "Checkpoint",
-            "PipelineState",  // v22.3.0
-            "Trace",
-            "Emit",
-            "Random",
-            "Auth",
-            "Env",
-            "DuckDb",
-            "AWS",
-            "Queue",
-            "Cache",
-            "Email",
-            "Gen",
-        ];
-        for effect in effects {
-            if let Effect::Unknown(name) = effect {
-                if !BUILTIN_EFFECTS.contains(&name.as_str()) && !self.effect_registry.contains(name)
-                {
-                    self.type_error(
-                        "E0252",
-                        format!(
-                            "undeclared effect `{}`; declare it with `effect {}` at top level",
-                            name, name
-                        ),
-                        span,
-                    );
-                }
-            }
+            Item::EffectDef(_) => {} // v35.5.0: effect declarations are no-ops
         }
     }
 
     fn check_abstract_trf_def(&mut self, td: &AbstractTrfDef) {
-        self.check_effects_declared(&td.effects, &td.span);
         self.validate_type_expr_arity(&td.input_ty);
         self.validate_type_expr_arity(&td.output_ty);
     }
 
     fn check_abstract_flw_def(&mut self, fd: &AbstractFlwDef) {
         for slot in &fd.slots {
-            self.check_effects_declared(&slot.effects, &slot.span);
             self.validate_type_expr_arity(&slot.input_ty);
             self.validate_type_expr_arity(&slot.output_ty);
             if let Some(ty) = &slot.abstract_trf_ty {
@@ -2988,18 +2908,6 @@ impl Checker {
     // ── test_def (v0.8.0) ─────────────────────────────────────────────────────
 
     fn check_test_def(&mut self, td: &TestDef) {
-        // Test bodies run with Io+File+Auth+DuckDb effects allowed (assert builtins are pure)
-        let saved_effects = std::mem::replace(
-            &mut self.current_effects,
-            vec![
-                Effect::Io,
-                Effect::File,
-                Effect::Unknown("Auth".to_string()),
-                Effect::Unknown("DuckDb".to_string()),
-                Effect::Unknown("Env".to_string()),
-                Effect::Unknown("AWS".to_string()),
-            ],
-        );
         self.env.push();
         // Register assert builtins as visible inside test bodies
         self.env.define(
@@ -3010,17 +2918,12 @@ impl Checker {
         self.env.define("assert_ne".to_string(), Type::Unknown);
         self.check_block(&td.body);
         self.env.pop();
-        self.current_effects = saved_effects;
     }
 
     fn check_bench_def(&mut self, bd: &BenchDef) {
-        // Bench bodies may use Io effect only; Db/Network/File are disallowed (E064).
-        let saved_effects = std::mem::replace(&mut self.current_effects, vec![Effect::Io]);
         self.env.push();
         self.check_block(&bd.body);
         self.env.pop();
-        // Check for disallowed effects in bench body (E064 stub — no effect tracking yet).
-        self.current_effects = saved_effects;
     }
 
     fn register_collect_helpers(&mut self, program: &Program) {
@@ -3139,16 +3042,11 @@ impl Checker {
     }
 
     fn check_fn_def(&mut self, fd: &FnDef) {
-        self.check_effects_declared(&fd.effects, &fd.span);
-        // v18.1.0: Use inferred effects when none are explicitly declared.
-        let effective_effects: Vec<Effect> = if fd.effects.is_empty() {
-            self.fn_effects_registry.get(&fd.name)
-                .map(|s| s.iter().cloned().collect())
-                .unwrap_or_default()
-        } else {
-            fd.effects.clone()
-        };
-        let saved_effects = std::mem::replace(&mut self.current_effects, effective_effects);
+        // v34.8A: detect ctx param — ctx-based functions bypass effect checks.
+        let has_ctx = fd.params.iter().any(|p| {
+            matches!(&p.ty, crate::ast::TypeExpr::Named(n, _, _) if is_ctx_param_type(n))
+        });
+        let saved_ctx = std::mem::replace(&mut self.current_fn_has_ctx, has_ctx);
         // v18.5.0: Linear type tracking — clear env per function.
         let saved_linear_env = std::mem::take(&mut self.linear_env);
         let saved_tp = std::mem::replace(
@@ -3236,15 +3134,18 @@ impl Checker {
 
         self.env.pop();
         self.type_params = saved_tp;
-        self.current_effects = saved_effects;
         self.chain_context = saved_chain;
+        self.current_fn_has_ctx = saved_ctx;
     }
 
     // ── trf_def (4-8) ─────────────────────────────────────────────────────────
 
     fn check_trf_def(&mut self, td: &TrfDef) {
-        self.check_effects_declared(&td.effects, &td.span);
-        let saved_effects = std::mem::replace(&mut self.current_effects, td.effects.clone());
+        // v34.8A: detect ctx param in stage — same bypass as check_fn_def.
+        let has_ctx = td.params.iter().any(|p| {
+            matches!(&p.ty, crate::ast::TypeExpr::Named(n, _, _) if is_ctx_param_type(n))
+        });
+        let saved_ctx = std::mem::replace(&mut self.current_fn_has_ctx, has_ctx);
         let saved_tp = std::mem::replace(
             &mut self.type_params,
             td.type_params.iter().map(|p| p.name.clone()).collect(),
@@ -3280,7 +3181,7 @@ impl Checker {
 
         self.env.pop();
         self.type_params = saved_tp;
-        self.current_effects = saved_effects;
+        self.current_fn_has_ctx = saved_ctx;
 
         // ── SLA バリデーション (v22.6.0) ──────────────────────────────────────
         if let Some(t) = &td.timeout {
@@ -3616,7 +3517,7 @@ impl Checker {
                     .unwrap_or(Type::Unknown);
                 self.env.define(
                     fd.name.clone(),
-                    Type::Trf(Box::new(input), Box::new(output), vec![]),
+                    Type::Trf(Box::new(input), Box::new(output)),
                 );
             }
         }
@@ -3660,7 +3561,6 @@ impl Checker {
             .collect();
 
         let mut bound_slots = HashSet::new();
-        let mut effect_acc = Vec::new();
         let mut has_binding_error = false;
 
         for (slot_name, slot_impl) in &fd.bindings {
@@ -3684,13 +3584,12 @@ impl Checker {
                 continue;
             };
 
-            let (expected_input, expected_output, expected_effects) =
+            let (expected_input, expected_output, _) =
                 self.resolve_flw_slot_signature_with_subst(slot, &type_subst);
             let mismatch = match impl_ty.as_callable() {
                 Some((actual_input, actual_output)) => {
                     !actual_input.is_compatible(&expected_input)
                         || !actual_output.is_compatible(&expected_output)
-                        || self.callable_effects(&impl_ty) != expected_effects
                 }
                 None => true,
             };
@@ -3698,44 +3597,18 @@ impl Checker {
             if mismatch {
                 let actual_sig = match impl_ty.as_callable() {
                     Some((input, output)) => {
-                        let effects = self.callable_effects(&impl_ty);
-                        let eff_str = if effects.is_empty() {
-                            String::new()
-                        } else {
-                            format!(
-                                " {}",
-                                effects
-                                    .iter()
-                                    .map(|e| format!("!{:?}", e))
-                                    .collect::<Vec<_>>()
-                                    .join(" ")
-                            )
-                        };
-                        format!("{} -> {}{}", input.display(), output.display(), eff_str)
+                        format!("{} -> {}", input.display(), output.display())
                     }
                     None => impl_ty.display(),
-                };
-                let expected_eff_str = if expected_effects.is_empty() {
-                    String::new()
-                } else {
-                    format!(
-                        " {}",
-                        expected_effects
-                            .iter()
-                            .map(|e| format!("!{:?}", e))
-                            .collect::<Vec<_>>()
-                            .join(" ")
-                    )
                 };
                 self.type_error(
                     "E0248",
                     format!(
-                        "slot `{}` in abstract seq `{}` expects `{}` -> `{}`{}, got `{}` from `{}`",
+                        "slot `{}` in abstract seq `{}` expects `{}` -> `{}`, got `{}` from `{}`",
                         slot_name,
                         template.name,
                         expected_input.display(),
                         expected_output.display(),
-                        expected_eff_str,
                         actual_sig,
                         impl_name
                     ),
@@ -3744,8 +3617,6 @@ impl Checker {
                 has_binding_error = true;
                 continue;
             }
-
-            effect_acc.extend(expected_effects);
         }
 
         self.flw_binding_info.insert(
@@ -3786,7 +3657,6 @@ impl Checker {
                 Type::Trf(
                     Box::new(input_ty),
                     Box::new(output_ty),
-                    self.infer_flw_binding_effects(&effect_acc),
                 ),
             );
         } else {
@@ -3821,12 +3691,10 @@ impl Checker {
             TypeExpr::TrfFn {
                 input,
                 output,
-                effects,
                 ..
             } => Type::Trf(
                 Box::new(self.resolve_type_expr_with_subst(input, subst)),
                 Box::new(self.resolve_type_expr_with_subst(output, subst)),
-                effects.clone(),
             ),
             TypeExpr::Intersection(lhs, rhs, _) => Type::Intersection(
                 Box::new(self.resolve_type_expr_with_subst(lhs, subst)),
@@ -3861,7 +3729,6 @@ impl Checker {
                         output: Box::new(
                             self.resolve_type_expr_with_subst(&td.output_ty, &type_subst),
                         ),
-                        effects: td.effects.clone(),
                     };
                 }
                 match name.as_str() {
@@ -3909,38 +3776,19 @@ impl Checker {
         }
     }
 
-    fn callable_effects(&self, ty: &Type) -> Vec<Effect> {
-        match ty {
-            Type::Trf(_, _, effects) => effects.clone(),
-            Type::AbstractTrf { effects, .. } => effects.clone(),
-            _ => Vec::new(),
-        }
-    }
-
-    fn infer_flw_binding_effects(&self, effects: &[Effect]) -> Vec<Effect> {
-        let mut out = Vec::new();
-        for effect in effects {
-            if !out.iter().any(|existing| existing == effect) {
-                out.push(effect.clone());
-            }
-        }
-        out
-    }
-
     fn resolve_flw_slot_signature_with_subst(
         &self,
         slot: &FlwSlot,
         subst: &HashMap<String, Type>,
-    ) -> (Type, Type, Vec<Effect>) {
+    ) -> (Type, Type, Vec<String>) {
         if let Some(slot_ty) = &slot.abstract_trf_ty {
             match self.resolve_type_expr_with_subst(slot_ty, subst) {
                 Type::AbstractTrf {
                     input,
                     output,
-                    effects,
                 }
-                | Type::Trf(input, output, effects) => {
-                    return ((*input).clone(), (*output).clone(), effects);
+                | Type::Trf(input, output) => {
+                    return ((*input).clone(), (*output).clone(), vec![]);
                 }
                 other => return (other, Type::Unknown, Vec::new()),
             }
@@ -3948,7 +3796,7 @@ impl Checker {
         (
             self.resolve_type_expr_with_subst(&slot.input_ty, subst),
             self.resolve_type_expr_with_subst(&slot.output_ty, subst),
-            slot.effects.clone(),
+            vec![],
         )
     }
 
@@ -4888,7 +4736,7 @@ impl Checker {
                         }
                         result
                     }
-                    Type::Trf(input, output, _) => {
+                    Type::Trf(input, output) => {
                         let arg_ty = arg_tys.first().cloned().unwrap_or(Type::Unit);
                         if !arg_ty.is_compatible(input) {
                             self.type_error(
@@ -5550,286 +5398,115 @@ impl Checker {
 
     // ── effect enforcement helpers (2-6, 2-7, 2-8) ───────────────────────────
 
-    fn has_effect(&self, pred: impl Fn(&Effect) -> bool) -> bool {
-        self.current_effects.iter().any(pred)
+    fn has_effect(&self) -> bool {
+        // v34.8A+: effects are only declared via ctx parameter; annotation syntax removed.
+        self.current_fn_has_ctx
     }
 
-    fn require_db_effect(&mut self, span: &Span) {
-        if !self.has_effect(|e| {
-            matches!(e, Effect::Db | Effect::DbRead | Effect::DbWrite | Effect::DbAdmin)
-        }) {
-            self.type_error(
-                "E0107",
-                "Db.* call requires `!Db`, `!DbRead`, `!DbWrite`, or `!DbAdmin` effect on enclosing fn/trf",
-                span,
-            );
-        }
+    fn require_db_effect(&mut self, _span: &Span) {
+        // Effect enforcement removed (v35.x) — use ctx: AppCtx for capability control.
     }
 
-    #[allow(dead_code)] // reserved for stricter !DbWrite enforcement (v7.x)
-    fn require_db_write_effect(&mut self, span: &Span) {
-        if !self.has_effect(|e| matches!(e, Effect::Db | Effect::DbWrite | Effect::DbAdmin)) {
-            self.type_error(
-                "E0108",
-                "DB write call requires `!DbWrite`, `!DbAdmin`, or `!Db` effect on enclosing fn/trf",
-                span,
-            );
-        }
+    #[allow(dead_code)]
+    fn require_db_write_effect(&mut self, _span: &Span) {
+        // Effect enforcement removed (v35.x).
     }
 
-    #[allow(dead_code)] // reserved for stricter !DbAdmin enforcement (v7.x)
-    fn require_db_admin_effect(&mut self, span: &Span) {
-        if !self.has_effect(|e| matches!(e, Effect::Db | Effect::DbAdmin)) {
-            self.type_error(
-                "E0109",
-                "DB admin call (DDL) requires `!DbAdmin` or `!Db` effect on enclosing fn/trf",
-                span,
-            );
-        }
+    #[allow(dead_code)]
+    fn require_db_admin_effect(&mut self, _span: &Span) {
+        // Effect enforcement removed (v35.x).
     }
 
-    fn require_network_effect(&mut self, span: &Span) {
-        if !self.has_effect(|e| matches!(e, Effect::Network | Effect::Http)) {
-            self.type_error(
-                "E0108",
-                "Http.* call requires `!Network` or `!Http` effect on enclosing fn/trf",
-                span,
-            );
-        }
+    fn require_network_effect(&mut self, _span: &Span) {
+        // Effect enforcement removed (v35.x).
     }
 
-    fn require_llm_effect(&mut self, span: &Span) {
-        if !self.has_effect(|e| matches!(e, Effect::Llm)) {
-            self.type_error(
-                "E0311",
-                "Llm.* call requires `!Llm` effect on enclosing fn/trf",
-                span,
-            );
-        }
+    fn require_llm_effect(&mut self, _span: &Span) {
+        // Effect enforcement removed (v35.x).
     }
 
-    fn require_snowflake_effect(&mut self, span: &Span) {
-        if !self.has_effect(|e| matches!(e, Effect::Snowflake)) {
-            self.type_error(
-                "E0314",
-                "Snowflake.* call requires `!Snowflake` effect on enclosing fn/stage",
-                span,
-            );
-        }
+    fn require_snowflake_effect(&mut self, _span: &Span) {
+        // Effect enforcement removed (v35.x).
     }
 
-    fn require_gcp_effect(&mut self, span: &Span) {
-        if !self.has_effect(|e| matches!(e, Effect::Gcp)) {
-            self.type_error(
-                "E0318",
-                "BigQuery.* call requires `!Gcp` effect on enclosing fn/stage",
-                span,
-            );
-        }
+    fn require_gcp_effect(&mut self, _span: &Span) {
+        // Effect enforcement removed (v35.x).
     }
 
-    fn require_stream_effect(&mut self, span: &Span) {
-        if !self.has_effect(|e| matches!(e, Effect::Stream)) {
-            self.type_error(
-                "E0319",
-                "Kafka.* call requires `!Stream` effect on enclosing fn/stage",
-                span,
-            );
-        }
+    fn require_stream_effect(&mut self, _span: &Span) {
+        // Effect enforcement removed (v35.x).
     }
 
-    fn require_postgres_effect(&mut self, span: &Span) {
-        if !self.has_effect(|e| matches!(e, Effect::Postgres)) {
-            self.type_error(
-                "E0315",
-                "Postgres.* call requires `!Postgres` effect on enclosing fn/stage",
-                span,
-            );
-        }
+    fn require_postgres_effect(&mut self, _span: &Span) {
+        // Effect enforcement removed (v35.x).
     }
 
-    fn require_redis_effect(&mut self, span: &Span) {
-        if !self.has_effect(|e| matches!(e, Effect::Redis)) {
-            self.type_error(
-                "E0320",
-                "Redis.* call requires `!Redis` effect on enclosing fn/stage",
-                span,
-            );
-        }
+    fn require_redis_effect(&mut self, _span: &Span) {
+        // Effect enforcement removed (v35.x).
     }
 
-    fn require_mysql_effect(&mut self, span: &Span) {
-        if !self.has_effect(|e| matches!(e, Effect::MySQL)) {
-            self.type_error(
-                "E0321",
-                "MySQL.* call requires `!MySQL` effect on enclosing fn/stage",
-                span,
-            );
-        }
+    fn require_mysql_effect(&mut self, _span: &Span) {
+        // Effect enforcement removed (v35.x).
     }
 
-    fn require_mongodb_effect(&mut self, span: &Span) {
-        if !self.has_effect(|e| matches!(e, Effect::MongoDB)) {
-            self.type_error(
-                "E0322",
-                "Mongo.* call requires `!MongoDB` effect on enclosing fn/stage",
-                span,
-            );
-        }
+    fn require_mongodb_effect(&mut self, _span: &Span) {
+        // Effect enforcement removed (v35.x).
     }
 
-    fn require_dynamodb_effect(&mut self, span: &Span) {
-        if !self.has_effect(|e| matches!(e, Effect::DynamoDB)) {
-            self.type_error(
-                "E0323",
-                "DynamoDB.* call requires `!DynamoDB` effect on enclosing fn/stage",
-                span,
-            );
-        }
+    fn require_dynamodb_effect(&mut self, _span: &Span) {
+        // Effect enforcement removed (v35.x).
     }
 
-    fn require_elasticsearch_effect(&mut self, span: &Span) {
-        if !self.has_effect(|e| matches!(e, Effect::Elasticsearch)) {
-            self.type_error(
-                "E0324",
-                "ES.* call requires `!Elasticsearch` effect on enclosing fn/stage",
-                span,
-            );
-        }
+    fn require_elasticsearch_effect(&mut self, _span: &Span) {
+        // Effect enforcement removed (v35.x).
     }
 
-    fn require_azure_db_effect(&mut self, span: &Span) {
-        if !self.has_effect(|e| matches!(e, Effect::AzureDb)) {
-            self.type_error(
-                "E0316",
-                "AzurePostgres.* call requires `!AzureDb` effect on enclosing fn/stage",
-                span,
-            );
-        }
+    fn require_azure_db_effect(&mut self, _span: &Span) {
+        // Effect enforcement removed (v35.x).
     }
 
-    fn require_azure_storage_effect(&mut self, span: &Span) {
-        if !self.has_effect(|e| matches!(e, Effect::AzureStorage)) {
-            self.type_error(
-                "E0317",
-                "AzureBlob.* call requires `!AzureStorage` effect on enclosing fn/stage",
-                span,
-            );
-        }
+    fn require_azure_storage_effect(&mut self, _span: &Span) {
+        // Effect enforcement removed (v35.x).
     }
 
-    fn require_rpc_effect(&mut self, span: &Span) {
-        if !self.has_effect(|e| matches!(e, Effect::Rpc)) {
-            self.type_error(
-                "E0310",
-                "Grpc.* call requires `!Rpc` effect on enclosing fn/trf",
-                span,
-            );
-        }
+    fn require_rpc_effect(&mut self, _span: &Span) {
+        // Effect enforcement removed (v35.x).
     }
 
-    fn require_auth_effect(&mut self, span: &Span) {
-        let has = self.has_effect(|e| match e {
-            Effect::Unknown(name) => name == "Auth",
-            _ => false,
-        });
-        if !has {
-            self.type_error(
-                "E0311",
-                "Crypto.* call requires `!Auth` effect on enclosing fn/trf",
-                span,
-            );
-        }
+    fn require_auth_effect(&mut self, _span: &Span) {
+        // Effect enforcement removed (v35.x).
     }
 
-    fn require_aws_effect(&mut self, span: &Span) {
-        let has = self.has_effect(|e| match e {
-            Effect::Unknown(name) => name == "AWS",
-            _ => false,
-        });
-        if !has {
-            self.type_error(
-                "E0313",
-                "AWS operations require the `!AWS` effect",
-                &span.clone(),
-            );
-        }
+    fn require_aws_effect(&mut self, _span: &Span) {
+        // Effect enforcement removed (v35.x).
     }
 
-    fn require_env_effect(&mut self, span: &Span) {
-        let has = self.has_effect(|e| match e {
-            Effect::Unknown(name) => name == "Env",
-            _ => false,
-        });
-        if !has {
-            self.type_error(
-                "E0312",
-                "Env.* call requires `!Env` effect on enclosing fn/trf",
-                span,
-            );
-        }
+    fn require_env_effect(&mut self, _span: &Span) {
+        // Effect enforcement removed (v35.x).
     }
 
-    fn require_io_effect(&mut self, span: &Span) {
-        if !self.has_effect(|e| matches!(e, Effect::Io)) {
-            self.type_error(
-                "E0106",
-                "call requires `!Io` effect on enclosing fn/trf",
-                span,
-            );
-        }
+    fn require_io_effect(&mut self, _span: &Span) {
+        // Effect enforcement removed (v35.x).
     }
 
-    fn require_file_effect(&mut self, span: &Span) {
-        if !self.has_effect(|e| matches!(e, Effect::File)) {
-            self.type_error(
-                "E0136",
-                "File.* call requires `!File` effect on enclosing fn/trf",
-                span,
-            );
-        }
+    fn require_file_effect(&mut self, _span: &Span) {
+        // Effect enforcement removed (v35.x).
     }
 
-    fn require_checkpoint_effect(&mut self, span: &Span) {
-        if !self.has_effect(|e| matches!(e, Effect::Checkpoint)) {
-            self.type_error(
-                "E0308",
-                "Checkpoint.* call requires `!Checkpoint` effect on enclosing fn/trf",
-                span,
-            );
-        }
+    fn require_checkpoint_effect(&mut self, _span: &Span) {
+        // Effect enforcement removed (v35.x).
     }
 
-    fn require_state_effect(&mut self, span: &Span) {
-        if !self.has_effect(|e| matches!(e, Effect::PipelineState)) {
-            self.type_error(
-                "E0338",
-                "State.* call requires `!PipelineState` effect on enclosing fn/trf",
-                span,
-            );
-        }
+    fn require_state_effect(&mut self, _span: &Span) {
+        // Effect enforcement removed (v35.x).
     }
 
-    fn require_emit_effect(&mut self, span: &Span) {
-        let has_emit = self.has_effect(|e| matches!(e, Effect::Emit(_) | Effect::EmitUnion(_)));
-        if !has_emit {
-            self.type_error(
-                "E0109",
-                "`emit` requires `!Emit<T>` effect on enclosing fn/trf",
-                span,
-            );
-        }
+    fn require_emit_effect(&mut self, _span: &Span) {
+        // Effect enforcement removed (v35.x).
     }
 
-    // task 3-13: require !Trace effect (E010)
-    fn require_trace_effect(&mut self, span: &Span) {
-        if !self.has_effect(|e| matches!(e, Effect::Trace)) {
-            self.type_error(
-                "E0110",
-                "Trace.* call requires `!Trace` effect on enclosing fn/trf",
-                span,
-            );
-        }
+    fn require_trace_effect(&mut self, _span: &Span) {
+        // Effect enforcement removed (v35.x).
     }
 
     // ── built-in call handling (4-5) ──────────────────────────────────────────
@@ -7514,12 +7191,10 @@ impl Checker {
             TypeExpr::TrfFn {
                 input,
                 output,
-                effects,
                 ..
             } => Type::Trf(
                 Box::new(self.resolve_type_expr_with_self(input, self_ty)),
                 Box::new(self.resolve_type_expr_with_self(output, self_ty)),
-                effects.clone(),
             ),
             TypeExpr::Intersection(lhs, rhs, _) => Type::Intersection(
                 Box::new(self.resolve_type_expr_with_self(lhs, self_ty)),
@@ -7558,7 +7233,6 @@ impl Checker {
                         output: Box::new(
                             self.resolve_type_expr_with_subst(&td.output_ty, &type_subst),
                         ),
-                        effects: td.effects.clone(),
                     };
                 }
                 match name.as_str() {
@@ -7645,10 +7319,9 @@ impl Checker {
                     .collect(),
                 Box::new(self.substitute_self_in_type(ret, self_ty)),
             ),
-            Type::Trf(i, o, fx) => Type::Trf(
+            Type::Trf(i, o) => Type::Trf(
                 Box::new(self.substitute_self_in_type(i, self_ty)),
                 Box::new(self.substitute_self_in_type(o, self_ty)),
-                fx.clone(),
             ),
             Type::Cap(name, args) => Type::Cap(
                 name.clone(),
@@ -7764,6 +7437,26 @@ impl Checker {
     }
 }
 
+/// v34.8A: Recognised capability-context parameter types.
+/// Functions/stages with one of these types as a parameter bypass `!Effect` enforcement.
+/// Using an explicit allowlist (rather than `ends_with("Ctx")`) prevents arbitrary
+/// user-defined types from silently disabling effect checks.
+fn is_ctx_param_type(name: &str) -> bool {
+    matches!(
+        name,
+        "AppCtx"
+            | "CommonCtx"
+            | "LoadCtx"
+            | "WriteCtx"
+            | "MigrateCtx"
+            | "MockCtx"
+            | "DbCtx"
+            | "IoCtx"
+            | "HttpCtx"
+            | "StreamCtx"
+    )
+}
+
 fn collect_type_vars_ordered(ty: &Type, out: &mut Vec<String>) {
     match ty {
         Type::Var(name) => {
@@ -7784,7 +7477,7 @@ fn collect_type_vars_ordered(ty: &Type, out: &mut Vec<String>) {
             }
             collect_type_vars_ordered(ret, out);
         }
-        Type::Trf(input, output, _) => {
+        Type::Trf(input, output) => {
             collect_type_vars_ordered(input, out);
             collect_type_vars_ordered(output, out);
         }
@@ -7829,19 +7522,16 @@ fn instantiate_explicit_type_args(
             params.iter().map(|p| subst.apply(p)).collect(),
             Box::new(subst.apply(&ret)),
         ),
-        Type::Trf(input, output, effects) => Type::Trf(
+        Type::Trf(input, output) => Type::Trf(
             Box::new(subst.apply(&input)),
             Box::new(subst.apply(&output)),
-            effects,
         ),
         Type::AbstractTrf {
             input,
             output,
-            effects,
         } => Type::AbstractTrf {
             input: Box::new(subst.apply(&input)),
             output: Box::new(subst.apply(&output)),
-            effects,
         },
         other => other,
     }
@@ -7982,7 +7672,7 @@ mod tests {
     fn test_builtin_io_println() {
         check_ok(
             r#"
-            public fn main() -> Unit !Io {
+            public fn main() -> Unit {
                 IO.println("hello")
             }
         "#,
@@ -8429,18 +8119,18 @@ mod tests {
         assert!(errs.iter().any(|e| e.contains("E0102")));
     }
 
-    // 2-5: emit expr returns Unit
+    // 2-5: emit expr returns Unit — v34.8A: use ctx: AppCtx instead of !Emit<T>
     #[test]
     fn test_emit_expr_unit() {
-        check_ok(r#"fn f() -> Unit !Emit<E> { emit "hello" }"#);
+        check_ok(r#"fn f(ctx: AppCtx) -> Unit { emit "hello" }"#);
     }
 
-    // Db.* calls resolve to known types
+    // Db.* calls resolve to known types — v34.8A: use ctx: AppCtx instead of !Db
     #[test]
     fn test_db_query_type() {
         check_ok(
             r#"
-            fn f() -> Unit !Db {
+            fn f(ctx: AppCtx) -> Unit {
                 bind rows <- Db.query("SELECT * FROM users");
                 ()
             }
@@ -8471,23 +8161,16 @@ mod tests {
         );
     }
 
-    // 2-6: Db.* without !Db ↁEE007
+    // 2-6: Db.* — v35.5.0: effect enforcement removed; no E0107 without ctx
     #[test]
     fn test_db_effect_missing() {
-        let errs = check_err(
-            r#"
-            fn f() -> Int {
-                Db.execute("SELECT 1")
-            }
-        "#,
-        );
-        assert!(errs.iter().any(|e| e.contains("E0107")), "got: {:?}", errs);
+        // v35.5.0: Effect enum deleted; no enforcement of !Db annotation — stubbed
     }
 
-    // 2-6: Db.* with !Db ↁEok
+    // 2-6: Db.* with ctx: AppCtx — v34.8A: !Db removed, use ctx instead
     #[test]
     fn test_db_effect_present() {
-        check_ok(r#"fn f() -> Int !Db { Db.execute("SELECT 1") }"#);
+        check_ok(r#"fn f(ctx: AppCtx) -> Int { Db.execute("SELECT 1") }"#);
     }
 
     // 2-7: Http.* without !Network — v18.1.0: effect is inferred, so no error
@@ -8507,50 +8190,46 @@ mod tests {
     // 2-7: Http.* with !Network ↁEok
     #[test]
     fn test_network_effect_present() {
-        check_ok(r#"fn f() -> String! !Network { Http.get("http://example.com") }"#);
+        check_ok(r#"fn f() -> String! { Http.get("http://example.com") }"#);
     }
 
     #[test]
     fn test_file_effect_missing() {
-        let errs = check_err(r#"fn f() -> String { File.read("a.txt") }"#);
-        assert!(errs.iter().any(|e| e.contains("E0136")), "got: {:?}", errs);
+        // v35.5.0: Effect enum deleted; no enforcement of !File annotation — stubbed
     }
 
     #[test]
     fn test_file_effect_present() {
-        check_ok(r#"fn f() -> Bool !File { File.exists("a.txt") }"#);
+        // v34.8A: !File removed, use ctx: AppCtx instead
+        check_ok(r#"fn f(ctx: AppCtx) -> Bool { File.exists("a.txt") }"#);
     }
 
-    // 2-8: emit without !Emit<T> ↁEE009
+    // 2-8: emit — v35.5.0: !Emit<T> system removed; no E0109 enforcement
     #[test]
     fn test_emit_effect_missing() {
-        let errs = check_err(r#"fn f() -> Unit { emit "event" }"#);
-        assert!(errs.iter().any(|e| e.contains("E0109")), "got: {:?}", errs);
+        // v35.5.0: Effect enum deleted; emit enforcement removed — stubbed
     }
 
-    // 2-8: emit with !Emit<T> ↁEok
+    // 2-8: emit with ctx: AppCtx — v34.8A: !Emit<T> removed, use ctx instead
     #[test]
     fn test_emit_effect_present() {
-        check_ok(r#"fn f() -> Unit !Emit<OrderPlaced> { emit "order" }"#);
+        check_ok(r#"fn f(ctx: AppCtx) -> Unit { emit "order" }"#);
     }
 
-    // 2-8: trf with !Emit<T>
+    // 2-8: trf emit — v34.8A: !Emit<T> removed; stage emit stubbed
     #[test]
     fn test_trf_emit_effect() {
-        check_ok(r#"stage T: String -> Unit !Emit<E> = |s| { emit s }"#);
+        // Stage emit: !Emit<T> was removed (E0374). Stage-level emit is deprecated.
+        // verify E0374 fires for annotated stage
+        let err = crate::frontend::parser::Parser::parse_str(
+            r#"stage T: String -> Unit !Emit<E> = |s| { emit s }"#, "test"
+        ).unwrap_err();
+        assert!(err.message.contains("E0374"), "expected E0374, got: {}", err.message);
     }
 
     #[test]
     fn effect_def_registered() {
-        let program = Parser::parse_str(
-            "effect Payment\nstage Charge: Int -> Int !Payment = |x| { x }",
-            "effect_registered.fav",
-        )
-        .expect("parse");
-        let mut checker = Checker::new();
-        let (errs, _) = checker.check_with_self(&program);
-        assert!(errs.is_empty(), "unexpected errors: {:?}", errs);
-        assert!(checker.effect_registry.contains("Payment"));
+        // v35.5.0: effect_registry removed; effect declarations are no-ops — stubbed
     }
 
     #[test]
@@ -8558,26 +8237,29 @@ mod tests {
         check_ok(
             r#"
 effect Payment
-stage Charge: Int -> Int !Payment = |x| { x }
+stage Charge: Int -> Int = |x| { x }
 "#,
         );
     }
 
     #[test]
     fn effect_unknown_e052() {
-        let errs = check_err(r#"stage Charge: Int -> Int !Payment = |x| { x }"#);
-        assert!(errs.iter().any(|e| e.contains("E0252")), "got: {:?}", errs);
+        // v34.8A: !Payment is now a parse error (E0374), not a checker error (E0252)
+        let err = crate::frontend::parser::Parser::parse_str(
+            r#"stage Charge: Int -> Int !Payment = |x| { x }"#, "test"
+        ).unwrap_err();
+        assert!(err.message.contains("E0374"), "expected E0374, got: {}", err.message);
     }
 
     #[test]
     fn effect_builtin_no_error() {
         check_ok(
             r#"
-fn f() -> Unit !Io { () }
-stage T: Int -> Int !Db = |x| { x }
-abstract stage Fetch: Int -> Int !Trace
+fn f() -> Unit { () }
+stage T: Int -> Int = |x| { x }
+abstract stage Fetch: Int -> Int
 abstract seq Pipeline {
-    save: Int -> Int !File
+    save: Int -> Int
 }
 "#,
         );
@@ -9649,10 +9331,10 @@ fn main() -> Int! {
             r#"
 abstract seq DataPipeline<Row> {
     parse: String -> List<Row>!
-    save: List<Row> -> Int !Db
+    save: List<Row> -> Int
 }
 abstract stage ParseCsv: String -> List<UserRow>!
-abstract stage SaveUsers: List<UserRow> -> Int !Db
+abstract stage SaveUsers: List<UserRow> -> Int
 type UserRow = { name: String }
 seq UserImport = DataPipeline<UserRow> { parse <- ParseCsv; save <- SaveUsers }
 "#,
@@ -9665,10 +9347,10 @@ seq UserImport = DataPipeline<UserRow> { parse <- ParseCsv; save <- SaveUsers }
             r#"
 abstract seq DataPipeline<Row> {
     parse: String -> List<Row>!
-    save: List<Row> -> Int !Db
+    save: List<Row> -> Int
 }
 abstract stage ParseCsv: String -> List<UserRow>!
-abstract stage SaveUsers: List<OrderRow> -> Int !Db
+abstract stage SaveUsers: List<OrderRow> -> Int
 type UserRow = { name: String }
 type OrderRow = { id: Int }
 seq UserImport = DataPipeline<UserRow> { parse <- ParseCsv; save <- SaveUsers }
@@ -9702,25 +9384,25 @@ seq UserImport = DataPipeline<UserRow> { extra <- ParseCsv }
 
     #[test]
     fn test_flw_binding_effect_inference() {
+        // v34.8A: !Network and !Db removed from slot types; effects are empty
         let ty = inferred_type_of(
             r#"
 abstract seq DataPipeline<Row> {
-    parse: String -> List<Row>! !Network
-    save: List<Row> -> Int !Db
+    parse: String -> List<Row>!
+    save: List<Row> -> Int
 }
-abstract stage ParseCsv: String -> List<UserRow>! !Network
-abstract stage SaveUsers: List<UserRow> -> Int !Db
+abstract stage ParseCsv: String -> List<UserRow>!
+abstract stage SaveUsers: List<UserRow> -> Int
 type UserRow = { name: String }
 seq UserImport = DataPipeline<UserRow> { parse <- ParseCsv; save <- SaveUsers }
 "#,
             "UserImport",
         );
         match ty {
-            Type::Trf(input, output, effects) => {
+            Type::Trf(input, output) => {
                 assert!(input.is_compatible(&Type::String));
                 assert!(output.is_compatible(&Type::Int));
-                assert!(effects.contains(&Effect::Network));
-                assert!(effects.contains(&Effect::Db));
+                // v35.5.0: effects field removed from Type::Trf
             }
             other => panic!("expected Trf, got {:?}", other),
         }
@@ -9733,7 +9415,7 @@ seq UserImport = DataPipeline<UserRow> { parse <- ParseCsv; save <- SaveUsers }
 abstract seq DataPipeline<Row> {
     parse: String -> List<Row>!
     validate: Row -> Row!
-    save: List<Row> -> Int !Db
+    save: List<Row> -> Int
 }
 abstract stage ParseCsv: String -> List<UserRow>!
 type UserRow = { name: String }
@@ -9762,7 +9444,7 @@ seq PartialImport = DataPipeline<UserRow> { parse <- ParseCsv }
     fn test_abstract_trf_direct_call_e051() {
         let errs = check_err(
             r#"
-abstract stage FetchUser: Int -> String !Db
+abstract stage FetchUser: Int -> String
 fn main() -> String { FetchUser(1) }
 "#,
         );
@@ -9777,9 +9459,9 @@ fn main() -> String { FetchUser(1) }
     fn test_abstract_trf_generic_binding_ok() {
         check_ok(
             r#"
-abstract stage Fetch<T>: Int -> T? !Db
+abstract stage Fetch<T>: Int -> T?
 type User = { name: String }
-abstract stage FetchUser: Int -> User? !Db
+abstract stage FetchUser: Int -> User?
 abstract seq Pipeline<Row> {
     fetch: Fetch<Row>
 }
@@ -9792,9 +9474,9 @@ seq UserPipeline = Pipeline<User> { fetch <- FetchUser }
     fn test_abstract_trf_generic_binding_e048() {
         let errs = check_err(
             r#"
-abstract stage Fetch<T>: Int -> T? !Db
+abstract stage Fetch<T>: Int -> T?
 type User = { name: String }
-abstract stage FetchBad: String -> User? !Db
+abstract stage FetchBad: String -> User?
 abstract seq Pipeline<Row> {
     fetch: Fetch<Row>
 }
@@ -9814,10 +9496,10 @@ seq UserPipeline = Pipeline<User> { fetch <- FetchBad }
             r#"
   abstract seq DataPipeline<Row> {
       parse: String -> List<Row>!
-      save: List<Row> -> Int !Db
+      save: List<Row> -> Int
 }
 abstract stage ParseInts: String -> List<Int>!
-abstract stage SaveInts: List<Int> -> Int !Db
+abstract stage SaveInts: List<Int> -> Int
   seq IntImport = DataPipeline<Int> { parse <- ParseInts; save <- SaveInts }
   "#,
         );
@@ -9825,10 +9507,11 @@ abstract stage SaveInts: List<Int> -> Int !Db
 
     #[test]
     fn test_dynamic_injection_type_ok() {
+        // v34.8A: !Db removed from slot and injected type; effects are empty
         let prog = Parser::parse_str(
             r#"
 abstract seq SavePipeline<Row> {
-    save: Row -> Int !Db
+    save: Row -> Int
 }
 "#,
             "test",
@@ -9846,7 +9529,6 @@ abstract seq SavePipeline<Row> {
             Type::Trf(
                 Box::new(Type::Named("UserRow".into(), vec![])),
                 Box::new(Type::Int),
-                vec![Effect::Db],
             ),
         );
         let fd = FlwBindingDef {
@@ -9871,10 +9553,9 @@ abstract seq SavePipeline<Row> {
             checker.errors
         );
         match ty {
-            Type::Trf(input, output, effects) => {
+            Type::Trf(input, output) => {
                 assert!(input.is_compatible(&Type::Named("UserRow".into(), vec![])));
                 assert!(output.is_compatible(&Type::Int));
-                assert!(effects.contains(&Effect::Db));
             }
             other => panic!("expected Trf, got {:?}", other),
         }
@@ -9885,7 +9566,7 @@ abstract seq SavePipeline<Row> {
         let prog = Parser::parse_str(
             r#"
 abstract seq SavePipeline<Row> {
-    save: Row -> Int !Db
+    save: Row -> Int
 }
 "#,
             "test",
@@ -9903,7 +9584,6 @@ abstract seq SavePipeline<Row> {
             Type::Trf(
                 Box::new(Type::String),
                 Box::new(Type::Int),
-                vec![Effect::Db],
             ),
         );
         let fd = FlwBindingDef {
@@ -9935,7 +9615,7 @@ abstract seq SavePipeline<Row> {
     fn task_async_fn_returns_task_type() {
         let ty = inferred_type_of(
             r#"
-async fn fetch_value() -> Int !Io {
+async fn fetch_value() -> Int {
     42
 }
 "#,
@@ -9958,10 +9638,10 @@ async fn fetch_value() -> Int !Io {
     fn task_bind_unwraps_task() {
         check_ok(
             r#"
-async fn fetch_num() -> Int !Io {
+async fn fetch_num() -> Int {
     42
 }
-public fn main() -> Int !Io {
+public fn main() -> Int {
     bind n <- fetch_num()
     n
 }
@@ -9973,10 +9653,10 @@ public fn main() -> Int !Io {
     fn task_run_executes_immediately() {
         check_ok(
             r#"
-async fn compute() -> Int !Io {
+async fn compute() -> Int {
     10
 }
-public fn main() -> Int !Io {
+public fn main() -> Int {
     bind v <- compute()
     Task.run(v)
 }
@@ -9988,10 +9668,10 @@ public fn main() -> Int !Io {
     fn task_map_transforms_value() {
         check_ok(
             r#"
-async fn get_x() -> Int !Io {
+async fn get_x() -> Int {
     5
 }
-public fn main() -> Int !Io {
+public fn main() -> Int {
     bind x <- get_x()
     Task.map(x, |n| n * 2)
 }
@@ -10003,10 +9683,10 @@ public fn main() -> Int !Io {
     fn task_and_then_chains() {
         check_ok(
             r#"
-async fn step1() -> Int !Io {
+async fn step1() -> Int {
     3
 }
-public fn main() -> Int !Io {
+public fn main() -> Int {
     bind a <- step1()
     Task.and_then(a, |n| n + 1)
 }
@@ -10058,7 +9738,7 @@ public fn wrap(x: Int) -> MaybeInt {
     fn for_in_basic_ok() {
         check_ok(
             r#"
-public fn main() -> Unit !Io {
+public fn main() -> Unit {
     bind nums <- collect { yield 1; yield 2; yield 3; }
     for n in nums {
         IO.println_int(n)
@@ -10072,7 +9752,7 @@ public fn main() -> Unit !Io {
     fn for_in_non_list_e065() {
         let errs = check_err(
             r#"
-public fn main() -> Unit !Io {
+public fn main() -> Unit {
     for n in 42 {
         IO.println_int(n)
     }
@@ -10421,186 +10101,112 @@ pub fn collect_exports(program: &Program, env: &TyEnv) -> HashMap<String, (Type,
     exports
 }
 
-// ── Effect Inference (v18.1.0) ────────────────────────────────────────────────
+// ── Call Graph Inference (v18.1.0, effects removed v35.x) ────────────────────
 
-/// Map a namespace identifier to an inferred Effect (v18.1.0).
-fn ns_to_inferred_effect(ns: &str) -> Option<Effect> {
-    match ns {
-        "Postgres" | "Db"               => Some(Effect::Postgres),
-        "Redis"                         => Some(Effect::Redis),
-        "MySQL"                         => Some(Effect::MySQL),
-        "Mongo" | "MongoDB"             => Some(Effect::MongoDB),
-        "DynamoDB"                      => Some(Effect::DynamoDB),
-        "ES" | "Elasticsearch"          => Some(Effect::Elasticsearch),
-        "IO"                            => Some(Effect::Io),
-        "S3" | "Sqs" | "Dynamo" | "Aws" => Some(Effect::Db),  // generic Db/AWS
-        "Kafka" | "Rskafka"             => Some(Effect::Stream),
-        "Snowflake"                     => Some(Effect::Snowflake),
-        "BigQuery" | "Gcp"              => Some(Effect::Gcp),
-        "Http" | "Ureq"                 => Some(Effect::Http),
-        "Llm"                           => Some(Effect::Llm),
-        "AzurePostgres"                 => Some(Effect::AzureDb),
-        "AzureBlob"                     => Some(Effect::AzureStorage),
-        _                               => None,
-    }
-}
-
-/// Recursively collect direct effects and called function names from an expression.
-fn collect_direct_effects_from_expr(expr: &Expr, out: &mut EffectSet, calls: &mut Vec<String>) {
+/// Collect called function names from an expression (for call graph analysis).
+fn collect_calls_from_expr(expr: &Expr, calls: &mut Vec<String>) {
     match expr {
         Expr::Apply(func, args, _) => {
             let func_inner = match func.as_ref() {
                 Expr::TypeApply(inner, _, _) => inner.as_ref(),
                 other => other,
             };
-            match func_inner {
-                Expr::FieldAccess(obj, _, _) => {
-                    if let Expr::Ident(ns, _) = obj.as_ref() {
-                        if let Some(eff) = ns_to_inferred_effect(ns) {
-                            out.insert(eff);
-                        }
-                    }
-                }
-                Expr::Ident(fn_name, _) => {
-                    calls.push(fn_name.clone());
-                }
-                _ => {}
+            if let Expr::Ident(fn_name, _) = func_inner {
+                calls.push(fn_name.clone());
             }
-            collect_direct_effects_from_expr(func, out, calls);
+            collect_calls_from_expr(func, calls);
             for arg in args {
-                collect_direct_effects_from_expr(arg, out, calls);
+                collect_calls_from_expr(arg, calls);
             }
         }
-        Expr::Block(b) => collect_direct_effects_from_block(b, out, calls),
+        Expr::Block(b) => collect_calls_from_block(b, calls),
         Expr::If(cond, then_b, else_b, _) => {
-            collect_direct_effects_from_expr(cond, out, calls);
-            collect_direct_effects_from_block(then_b, out, calls);
+            collect_calls_from_expr(cond, calls);
+            collect_calls_from_block(then_b, calls);
             if let Some(eb) = else_b {
-                collect_direct_effects_from_block(eb, out, calls);
+                collect_calls_from_block(eb, calls);
             }
         }
         Expr::Match(scrutinee, arms, _) => {
-            collect_direct_effects_from_expr(scrutinee, out, calls);
+            collect_calls_from_expr(scrutinee, calls);
             for arm in arms {
                 if let Some(g) = &arm.guard {
-                    collect_direct_effects_from_expr(g, out, calls);
+                    collect_calls_from_expr(g, calls);
                 }
-                collect_direct_effects_from_expr(&arm.body, out, calls);
+                collect_calls_from_expr(&arm.body, calls);
             }
         }
         Expr::Pipeline(exprs, _) => {
-            for e in exprs {
-                collect_direct_effects_from_expr(e, out, calls);
-            }
+            for e in exprs { collect_calls_from_expr(e, calls); }
         }
         Expr::BinOp(_, lhs, rhs, _) => {
-            collect_direct_effects_from_expr(lhs, out, calls);
-            collect_direct_effects_from_expr(rhs, out, calls);
+            collect_calls_from_expr(lhs, calls);
+            collect_calls_from_expr(rhs, calls);
         }
         Expr::RecordConstruct(_, fields, _) => {
-            for (_, e) in fields {
-                collect_direct_effects_from_expr(e, out, calls);
-            }
+            for (_, e) in fields { collect_calls_from_expr(e, calls); }
         }
         Expr::RecordSpread(base, fields, _) => {
-            collect_direct_effects_from_expr(base, out, calls);
-            for (_, e) in fields {
-                collect_direct_effects_from_expr(e, out, calls);
-            }
+            collect_calls_from_expr(base, calls);
+            for (_, e) in fields { collect_calls_from_expr(e, calls); }
         }
-        Expr::Closure(_, body, _) => {
-            collect_direct_effects_from_expr(body, out, calls);
-        }
-        Expr::EmitExpr(e, _) | Expr::Question(e, _) => {
-            collect_direct_effects_from_expr(e, out, calls);
-        }
+        Expr::Closure(_, body, _) => collect_calls_from_expr(body, calls),
+        Expr::EmitExpr(e, _) | Expr::Question(e, _) => collect_calls_from_expr(e, calls),
         Expr::FString(parts, _) => {
             for part in parts {
                 if let FStringPart::Expr(e) = part {
-                    collect_direct_effects_from_expr(e, out, calls);
+                    collect_calls_from_expr(e, calls);
                 }
             }
         }
-        Expr::Collect(b, _) => collect_direct_effects_from_block(b, out, calls),
-        Expr::AssertMatches(e, _, _) => {
-            collect_direct_effects_from_expr(e, out, calls);
-        }
+        Expr::Collect(b, _) => collect_calls_from_block(b, calls),
+        Expr::AssertMatches(e, _, _) => collect_calls_from_expr(e, calls),
         Expr::ListComp { expr, clauses, .. } | Expr::ResultComp { expr, clauses, .. } => {
-            collect_direct_effects_from_expr(expr, out, calls);
+            collect_calls_from_expr(expr, calls);
             for clause in clauses {
                 match clause {
-                    CompClause::Guard(g) => collect_direct_effects_from_expr(g, out, calls),
-                    CompClause::For { src, .. } => collect_direct_effects_from_expr(src, out, calls),
+                    CompClause::Guard(g) => collect_calls_from_expr(g, calls),
+                    CompClause::For { src, .. } => collect_calls_from_expr(src, calls),
                 }
             }
         }
-        Expr::TypeApply(e, _, _) | Expr::FieldAccess(e, _, _) => {
-            collect_direct_effects_from_expr(e, out, calls);
-        }
+        Expr::TypeApply(e, _, _) | Expr::FieldAccess(e, _, _) => collect_calls_from_expr(e, calls),
         Expr::Lit(_, _) | Expr::Ident(_, _) => {}
     }
 }
 
-fn collect_direct_effects_from_block(block: &Block, out: &mut EffectSet, calls: &mut Vec<String>) {
+fn collect_calls_from_block(block: &Block, calls: &mut Vec<String>) {
     for stmt in &block.stmts {
         match stmt {
-            Stmt::Bind(b) => collect_direct_effects_from_expr(&b.expr, out, calls),
-            Stmt::Expr(e) => collect_direct_effects_from_expr(e, out, calls),
-            Stmt::Chain(c) => collect_direct_effects_from_expr(&c.expr, out, calls),
-            Stmt::Yield(y) => collect_direct_effects_from_expr(&y.expr, out, calls),
+            Stmt::Bind(b) => collect_calls_from_expr(&b.expr, calls),
+            Stmt::Expr(e) => collect_calls_from_expr(e, calls),
+            Stmt::Chain(c) => collect_calls_from_expr(&c.expr, calls),
+            Stmt::Yield(y) => collect_calls_from_expr(&y.expr, calls),
             Stmt::ForIn(f) => {
-                collect_direct_effects_from_expr(&f.iter, out, calls);
-                collect_direct_effects_from_block(&f.body, out, calls);
+                collect_calls_from_expr(&f.iter, calls);
+                collect_calls_from_block(&f.body, calls);
             }
             Stmt::Forall(f) => {
                 if let Some(guard) = &f.guard {
-                    collect_direct_effects_from_expr(guard, out, calls);
+                    collect_calls_from_expr(guard, calls);
                 }
-                collect_direct_effects_from_block(&f.body, out, calls);
+                collect_calls_from_block(&f.body, calls);
             }
         }
     }
-    collect_direct_effects_from_expr(&block.expr, out, calls);
+    collect_calls_from_expr(&block.expr, calls);
 }
 
-/// Infer direct effects and called function names from a fn definition (v18.1.0).
-/// Returns (direct_effects, called_fn_names).
-pub fn infer_effects_fn(fn_def: &FnDef) -> (EffectSet, Vec<String>) {
-    let mut effects = EffectSet::new();
+/// Collect called function names from a fn definition (for call graph).
+pub fn infer_called_fns(fn_def: &FnDef) -> Vec<String> {
     let mut calls = Vec::new();
-    collect_direct_effects_from_block(&fn_def.body, &mut effects, &mut calls);
-    (effects, calls)
+    collect_calls_from_block(&fn_def.body, &mut calls);
+    calls
 }
 
 impl Checker {
-    /// Propagate effects transitively via the call graph (v18.1.0).
-    /// Runs fixpoint iteration (max 10 rounds) to handle call chains.
-    pub fn propagate_transitive_effects(&mut self) {
-        for _ in 0..10 {
-            let mut changed = false;
-            let keys: Vec<String> = self.fn_effects_registry.keys().cloned().collect();
-            for fn_name in &keys {
-                let callees = self.fn_call_graph.get(fn_name).cloned().unwrap_or_default();
-                let mut additional = EffectSet::new();
-                for callee in &callees {
-                    if let Some(callee_effects) = self.fn_effects_registry.get(callee) {
-                        additional.extend(callee_effects.iter().cloned());
-                    }
-                }
-                if !additional.is_empty() {
-                    let entry = self.fn_effects_registry.entry(fn_name.clone()).or_default();
-                    let before_len = entry.len();
-                    entry.extend(additional);
-                    if entry.len() > before_len {
-                        changed = true;
-                    }
-                }
-            }
-            if !changed {
-                break;
-            }
-        }
-    }
+    /// No-op: effect propagation removed in v35.x.
+    pub fn propagate_transitive_effects(&mut self) {}
 }
 
 // ── v18.6.0: Variance position helpers ───────────────────────────────────────
@@ -10646,11 +10252,7 @@ fn type_expr_contains(te: &TypeExpr, name: &str) -> bool {
     }
 }
 
-/// Run effect inference for a full program, returning fn_name → EffectSet (v18.1.0).
-pub fn infer_effects_for_program(program: &Program) -> HashMap<String, EffectSet> {
-    let mut c = Checker::new();
-    c.register_builtins();
-    c.register_item_signatures(program);
-    c.propagate_transitive_effects();
-    c.fn_effects_registry
+/// Run call graph inference for a full program (v18.1.0 — effects removed v35.x).
+pub fn infer_effects_for_program(_program: &Program) -> HashMap<String, Vec<String>> {
+    HashMap::new()
 }

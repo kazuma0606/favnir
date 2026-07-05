@@ -1,15 +1,15 @@
 // runes/gen/structured.fav — Type-driven structured data generation (v4.1.0)
 
-public fn one(type_name: String) -> Map<String, String> !Random {
+public fn one(type_name: String) -> Map<String, String> {
     Gen.one_raw(type_name)
 }
 
-public fn list(type_name: String, n: Int, seed: Int) -> List<Map<String, String>> !Random {
+public fn list(type_name: String, n: Int, seed: Int) -> List<Map<String, String>> {
     Random.seed(seed);
     Gen.list_raw(type_name, n)
 }
 
-public fn simulate(type_name: String, n: Int, noise: Float, seed: Int) -> List<Map<String, String>> !Random {
+public fn simulate(type_name: String, n: Int, noise: Float, seed: Int) -> List<Map<String, String>> {
     Random.seed(seed);
     Gen.simulate_raw(type_name, n, noise)
 }

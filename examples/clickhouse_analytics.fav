@@ -1,13 +1,13 @@
 // examples/clickhouse_analytics.fav — ClickHouse Analytics デモ (v27.3.0)
 import rune "clickhouse"
 
-stage LoadEvents: Unit -> Result<String, String> !Db = |_| {
+stage LoadEvents: Unit -> Result<String, String> = |_| {
     bind conn <- ClickHouse.connect("http://localhost:8123")
     ClickHouse.query(conn, "SELECT * FROM events LIMIT 100")
 }
 
 // seq pipeline は前ステージの成功値（String）を次ステージの引数として渡す
-stage InsertProcessed: String -> Result<Unit, String> !Db = |data| {
+stage InsertProcessed: String -> Result<Unit, String> = |data| {
     bind conn <- ClickHouse.connect("http://localhost:8123")
     ClickHouse.insert(conn, "processed_events", data)
 }

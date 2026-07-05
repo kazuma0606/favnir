@@ -563,7 +563,6 @@ pub fn compile_program(program: &Program) -> IRProgram {
                         .iter()
                         .map(|p| lower_type_expr(&p.ty))
                         .collect::<Vec<_>>(),
-                    &fd.effects,
                     fd.return_ty.as_ref(),
                     &fd.body,
                     &constraints,
@@ -593,7 +592,6 @@ pub fn compile_program(program: &Program) -> IRProgram {
                             &td.type_params,
                             &param_strs,
                             &param_tys_,
-                            &td.effects,
                             Some(&td.output_ty),
                             &td.body,
                             &mut ctx,
@@ -626,7 +624,6 @@ pub fn compile_program(program: &Program) -> IRProgram {
                     &td.type_params,
                     &param_strs,
                     &param_tys_,
-                    &td.effects,
                     Some(&td.output_ty),
                     &td.body,
                     &mut ctx,
@@ -661,7 +658,6 @@ pub fn compile_program(program: &Program) -> IRProgram {
                     &[],
                     &[],
                     &[],
-                    &[],
                     Some(&unit_ty),
                     &td.body,
                     &mut ctx,
@@ -676,7 +672,6 @@ pub fn compile_program(program: &Program) -> IRProgram {
                 for td in tests {
                     fns.push(compile_fn_def(
                         &format!("$testgroup:{}:{}", name, td.name),
-                        &[],
                         &[],
                         &[],
                         &[],
@@ -695,7 +690,6 @@ pub fn compile_program(program: &Program) -> IRProgram {
                 );
                 fns.push(compile_fn_def(
                     &format!("$bench:{}", bd.description),
-                    &[],
                     &[],
                     &[],
                     &[],
@@ -977,7 +971,6 @@ fn compile_flw_def_ctx_aware(fd: &FlwDef, cctx: &mut CompileCtx) -> IRFnDef {
                     param_count: 2,
                     param_tys: vec![Type::Unknown, Type::Unknown],
                     local_count,
-                    effects: Vec::new(),
                     return_ty: Type::Unknown,
                     body: IRExpr::Block(stmts, Box::new(call_expr), Type::Unknown),
                 };
@@ -1007,7 +1000,6 @@ fn compile_flw_def_ctx_aware(fd: &FlwDef, cctx: &mut CompileCtx) -> IRFnDef {
         param_count: 2,
         param_tys: vec![Type::Unknown, Type::Unknown],
         local_count,
-        effects: Vec::new(),
         return_ty: Type::Unknown,
         body,
     }
@@ -1074,7 +1066,6 @@ fn compile_streaming_pipeline(fd: &FlwDef, chunk_size: i64, ctx: &mut CompileCtx
         param_count: 1,
         param_tys: vec![Type::Unknown],
         local_count,
-        effects: Vec::new(),
         return_ty: Type::Unknown,
         body,
     }
@@ -1127,7 +1118,6 @@ fn compile_pushdown_wrapper(
         param_count: 1,
         param_tys: vec![Type::Unknown],
         local_count,
-        effects: Vec::new(),
         return_ty: Type::Unknown,
         body,
     }
@@ -1183,7 +1173,6 @@ fn compile_flw_def(fd: &FlwDef, ctx: &mut CompileCtx) -> IRFnDef {
                     param_count: 1,
                     param_tys: vec![Type::Unknown],
                     local_count,
-                    effects: Vec::new(),
                     return_ty: Type::Unknown,
                     body: IRExpr::Block(stmts, Box::new(final_expr), Type::Unknown),
                 };
@@ -1214,7 +1203,6 @@ fn compile_flw_def(fd: &FlwDef, ctx: &mut CompileCtx) -> IRFnDef {
         param_count: 1,
         param_tys: vec![Type::Unknown],
         local_count,
-        effects: Vec::new(),
         return_ty: Type::Unknown,
         body,
     }
@@ -1268,12 +1256,10 @@ fn lower_type_expr_with_subst(ty: &TypeExpr, subst: &HashMap<String, Type>) -> T
         TypeExpr::TrfFn {
             input,
             output,
-            effects,
             ..
         } => Type::Trf(
             Box::new(lower_type_expr_with_subst(input, subst)),
             Box::new(lower_type_expr_with_subst(output, subst)),
-            effects.clone(),
         ),
         TypeExpr::Intersection(lhs, rhs, _) => Type::Intersection(
             Box::new(lower_type_expr_with_subst(lhs, subst)),
@@ -1289,47 +1275,26 @@ fn lower_type_expr_with_subst(ty: &TypeExpr, subst: &HashMap<String, Type>) -> T
     }
 }
 
-fn infer_flw_slot_effects(slots: &[FlwSlot]) -> Vec<crate::ast::Effect> {
-    let mut out = Vec::new();
-    for slot in slots {
-        let slot_effects: Vec<crate::ast::Effect> = if let Some(slot_ty) = &slot.abstract_trf_ty {
-            match lower_type_expr(slot_ty) {
-                Type::AbstractTrf { effects, .. } | Type::Trf(_, _, effects) => effects,
-                _ => slot.effects.clone(),
-            }
-        } else {
-            slot.effects.clone()
-        };
-        for effect in &slot_effects {
-            if !out.iter().any(|existing| existing == effect) {
-                out.push(effect.clone());
-            }
-        }
-    }
-    out
-}
-
 fn lower_flw_slot_signature_with_subst(
     slot: &FlwSlot,
     subst: &HashMap<String, Type>,
-) -> (Type, Type, Vec<crate::ast::Effect>) {
+) -> (Type, Type) {
     if let Some(slot_ty) = &slot.abstract_trf_ty {
         match lower_type_expr_with_subst(slot_ty, subst) {
             Type::AbstractTrf {
                 input,
                 output,
-                effects,
+                ..
             }
-            | Type::Trf(input, output, effects) => {
-                return ((*input).clone(), (*output).clone(), effects);
+            | Type::Trf(input, output, ..) => {
+                return ((*input).clone(), (*output).clone());
             }
-            other => return (other, Type::Unknown, Vec::new()),
+            other => return (other, Type::Unknown),
         }
     }
     (
         lower_type_expr_with_subst(&slot.input_ty, subst),
         lower_type_expr_with_subst(&slot.output_ty, subst),
-        slot.effects.clone(),
     )
 }
 
@@ -1403,14 +1368,13 @@ fn compile_flw_binding_def(
         .first()
         .expect("fully bound flw template has at least one slot");
     let last_slot = template.slots.last().unwrap();
-    let (input_ty, _, _) = lower_flw_slot_signature_with_subst(first_slot, &type_subst);
-    let (_, return_ty, _) = lower_flw_slot_signature_with_subst(last_slot, &type_subst);
+    let (input_ty, _) = lower_flw_slot_signature_with_subst(first_slot, &type_subst);
+    let (_, return_ty) = lower_flw_slot_signature_with_subst(last_slot, &type_subst);
     IRFnDef {
         name: fd.name.clone(),
         param_count: 1,
         param_tys: vec![input_ty],
         local_count,
-        effects: infer_flw_slot_effects(&template.slots),
         return_ty,
         body: current,
     }
@@ -1446,7 +1410,6 @@ fn compile_type_def_constructor(td: &crate::ast::TypeDef, ctx: &mut CompileCtx) 
         param_count: fields.len(),
         param_tys: fields.iter().map(|f| lower_type_expr(&f.ty)).collect(),
         local_count,
-        effects: Vec::new(),
         return_ty: Type::Result(
             Box::new(Type::Named(td.name.clone(), vec![])),
             Box::new(Type::String),
@@ -1563,7 +1526,6 @@ fn compile_impl_def(id: &ImplDef, ctx: &mut CompileCtx) -> Vec<IRFnDef> {
                     .iter()
                     .map(|p| lower_type_expr(&p.ty))
                     .collect::<Vec<_>>(),
-                &method.effects,
                 method.return_ty.as_ref(),
                 &method.body,
                 ctx,
@@ -1614,7 +1576,6 @@ fn compile_interface_impl_decl(
                         &[],
                         params,
                         &param_tys.iter().map(lower_type_expr).collect::<Vec<_>>(),
-                        &[],
                         Some(&return_ty),
                         &body_block,
                         ctx,
@@ -1628,7 +1589,6 @@ fn compile_interface_impl_decl(
                     };
                     out.push(compile_fn_def(
                         &global_name,
-                        &[],
                         &[],
                         &[],
                         &[],
@@ -1685,12 +1645,10 @@ fn substitute_self_in_type_expr(ty: &TypeExpr, type_name: &str) -> TypeExpr {
         TypeExpr::TrfFn {
             input,
             output,
-            effects,
             span,
         } => TypeExpr::TrfFn {
             input: Box::new(substitute_self_in_type_expr(input, type_name)),
             output: Box::new(substitute_self_in_type_expr(output, type_name)),
-            effects: effects.clone(),
             span: span.clone(),
         },
         TypeExpr::Intersection(lhs, rhs, span) => TypeExpr::Intersection(
@@ -1763,12 +1721,11 @@ fn compile_fn_def(
     type_params: &[crate::ast::GenericParam],
     params: &[String],
     param_tys: &[Type],
-    effects: &[crate::ast::Effect],
     return_ty: Option<&TypeExpr>,
     body: &Block,
     ctx: &mut CompileCtx,
 ) -> IRFnDef {
-    compile_fn_def_inner(name, type_params, params, param_tys, effects, return_ty, body, &[], ctx)
+    compile_fn_def_inner(name, type_params, params, param_tys, return_ty, body, &[], ctx)
 }
 
 fn compile_fn_def_with_constraints(
@@ -1776,13 +1733,12 @@ fn compile_fn_def_with_constraints(
     type_params: &[crate::ast::GenericParam],
     params: &[String],
     param_tys: &[Type],
-    effects: &[crate::ast::Effect],
     return_ty: Option<&TypeExpr>,
     body: &Block,
     param_constraints: &[(String, crate::ast::Expr)],
     ctx: &mut CompileCtx,
 ) -> IRFnDef {
-    compile_fn_def_inner(name, type_params, params, param_tys, effects, return_ty, body, param_constraints, ctx)
+    compile_fn_def_inner(name, type_params, params, param_tys, return_ty, body, param_constraints, ctx)
 }
 
 fn compile_fn_def_inner(
@@ -1790,7 +1746,6 @@ fn compile_fn_def_inner(
     type_params: &[crate::ast::GenericParam],
     params: &[String],
     param_tys: &[Type],
-    effects: &[crate::ast::Effect],
     return_ty: Option<&TypeExpr>,
     body: &Block,
     param_constraints: &[(String, crate::ast::Expr)],
@@ -1849,7 +1804,6 @@ fn compile_fn_def_inner(
             .chain(std::iter::repeat_n(Type::String, type_params.len()))
             .collect(),
         local_count,
-        effects: effects.to_vec(),
         return_ty: return_ty
             .map(lower_type_expr)
             .unwrap_or_else(|| body_ir.ty().clone()),
@@ -2240,8 +2194,7 @@ pub fn compile_expr(expr: &Expr, ctx: &mut CompileCtx) -> IRExpr {
                 param_count: captures.len() + params.len(),
                 param_tys: vec![Type::Unknown; captures.len() + params.len()],
                 local_count,
-                effects: Vec::new(),
-                return_ty: body_ir.ty().clone(),
+                        return_ty: body_ir.ty().clone(),
                 body: body_ir,
             });
 
@@ -2689,8 +2642,7 @@ fn compile_stmt_into(stmt: &Stmt, ctx: &mut CompileCtx, out: &mut Vec<IRStmt>) {
                 param_count: captures.len() + params.len(),
                 param_tys: vec![Type::Unknown; captures.len() + params.len()],
                 local_count,
-                effects: Vec::new(),
-                return_ty: body_ir.ty().clone(),
+                        return_ty: body_ir.ty().clone(),
                 body: body_ir,
             });
             let closure_ir = IRExpr::Closure(
@@ -2834,12 +2786,10 @@ fn lower_type_expr(ty: &TypeExpr) -> Type {
         TypeExpr::TrfFn {
             input,
             output,
-            effects,
             ..
         } => Type::Trf(
             Box::new(lower_type_expr(input)),
             Box::new(lower_type_expr(output)),
-            effects.clone(),
         ),
         TypeExpr::Intersection(lhs, rhs, _) => Type::Intersection(
             Box::new(lower_type_expr(lhs)),
@@ -3012,10 +2962,10 @@ public fn main() -> Int {
             r#"
 abstract seq DataPipeline<Row> {
     parse: String -> List<Row>!
-    save: List<Row> -> Int !Db
+    save: List<Row> -> Int
 }
 abstract stage ParseCsv: String -> List<UserRow>!
-abstract stage SaveUsers: List<UserRow> -> Int !Db
+abstract stage SaveUsers: List<UserRow> -> Int
 type UserRow = { name: String }
 seq UserImport = DataPipeline<UserRow> { parse <- ParseCsv; save <- SaveUsers }
 "#,
@@ -3034,7 +2984,7 @@ seq UserImport = DataPipeline<UserRow> { parse <- ParseCsv; save <- SaveUsers }
         assert_eq!(flw_fn.param_count, 1);
         assert!(matches!(flw_fn.param_tys.as_slice(), [Type::String]));
         assert!(matches!(flw_fn.return_ty, Type::Int));
-        assert!(flw_fn.effects.contains(&crate::ast::Effect::Db));
+        // v34.8A: !Db annotation removed; effects tracking removed (v35.x)
     }
 
     #[test]
@@ -3049,7 +2999,6 @@ seq UserImport = DataPipeline<UserRow> { parse <- ParseCsv; save <- SaveUsers }
                 abstract_trf_ty: None,
                 input_ty: TypeExpr::Named("Row".into(), vec![], span.clone()),
                 output_ty: TypeExpr::Named("Int".into(), vec![], span.clone()),
-                effects: vec![crate::ast::Effect::Db],
                 span: span.clone(),
             }],
             span: span.clone(),
@@ -3079,7 +3028,7 @@ seq UserImport = DataPipeline<UserRow> { parse <- ParseCsv; save <- SaveUsers }
 abstract seq DataPipeline<Row> {
     parse: String -> List<Row>!
     validate: Row -> Row!
-    save: List<Row> -> Int !Db
+    save: List<Row> -> Int
 }
 abstract stage ParseCsv: String -> List<UserRow>!
 type UserRow = { name: String }

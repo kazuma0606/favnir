@@ -2,7 +2,7 @@
 // Compiled on Machine A, executed on Machine B (no .fav source needed)
 // Uses built-in DB / AWS primitives - no rune modules required
 
-stage FetchCount: String -> Int !Db = |conn_str| {
+stage FetchCount: String -> Int = |conn_str| {
   match DB.connect(conn_str) {
     Err(_) => 0
     Ok(handle) => match DB.query_raw(handle, "SELECT id FROM orders") {
@@ -12,7 +12,7 @@ stage FetchCount: String -> Int !Db = |conn_str| {
   }
 }
 
-stage SaveReport: Int -> Unit !AWS = |count| {
+stage SaveReport: Int -> Unit = |count| {
   match AWS.s3_put_object_raw(
     Env.get_or("BUCKET_NAME", "favnir-e2e-demo"),
     "output/report-latest.json",
@@ -25,6 +25,6 @@ stage SaveReport: Int -> Unit !AWS = |count| {
 
 seq PipelineDemo = FetchCount |> SaveReport
 
-fn main() -> Unit !Db !AWS {
+fn main(ctx: AppCtx) -> Unit {
   PipelineDemo(Env.get_or("FAV_DB_URL", ""))
 }

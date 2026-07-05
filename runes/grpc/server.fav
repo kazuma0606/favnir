@@ -5,10 +5,10 @@
 //       VM プリミティブを直接ラップする Rune として意図的に設計されています。
 //       ctx-aware 移行は v15.0 以降で計画予定です。
 
-public fn serve(port: Int, service_name: String) -> Unit !Io !Rpc {
+public fn serve(port: Int, service_name: String) -> Unit {
     Grpc.serve_raw(port, service_name)
 }
 
-public fn serve_stream(port: Int, service_name: String) -> Unit !Io !Rpc {
+public fn serve_stream(port: Int, service_name: String) -> Unit {
     Grpc.serve_stream_raw(port, service_name)
 }

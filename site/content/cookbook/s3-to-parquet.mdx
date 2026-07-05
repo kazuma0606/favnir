@@ -5,7 +5,7 @@ S3 上の CSV ファイルを読み込み、Parquet 形式に変換して S3 に
 ```favnir
 import runes/aws/s3
 
-stage ConvertCsvToParquet: String -> Unit !Http = |s3_key| {
+stage ConvertCsvToParquet: String -> Unit = |s3_key| {
   bind csv_data <- S3.get_object(config.s3_bucket, s3_key)
   bind rows     <- CSV.parse[Map<String, String>](csv_data)
   bind _        <- Parquet.append(config.output_parquet_path, "Row", rows)

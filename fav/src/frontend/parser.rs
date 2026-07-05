@@ -1746,8 +1746,8 @@ impl Parser {
             None
         };
 
-        // optional effect annotation: !Io !Db ...
-        let effects = self.parse_effect_ann()?;
+        // v35.4.0: !Effect annotation syntax removed (E0374); parse_effect_ann errors on `!`.
+        self.parse_effect_ann()?;
 
         let body = if self.peek() == &TokenKind::Eq {
             self.advance();
@@ -1774,7 +1774,6 @@ impl Parser {
             type_params,
             params,
             return_ty,
-            effects,
             body,
             span: self.span_from(&start),
             api_annotation: None, // set by parse_item if #[api(...)] precedes the fn
@@ -1853,147 +1852,27 @@ impl Parser {
         if self.peek() == &TokenKind::Arrow {
             self.advance();
             let output = self.parse_type_expr_inner(false)?;
-            let effects = self.parse_effect_ann()?;
+            self.parse_effect_ann()?;
             return Ok(TypeExpr::TrfFn {
                 input: Box::new(left),
                 output: Box::new(output),
-                effects,
                 span: self.span_from(&start),
             });
         }
         Ok(left)
     }
 
-    // effect annotation: ("!" effect_term)+   (1-8, 1-9)
-    // effect_term = Pure | Io | Db | Network | Rpc | File | Checkpoint | Emit<IDENT>
-    fn parse_effect_ann(&mut self) -> Result<Vec<Effect>, ParseError> {
-        let mut effects = Vec::new();
-        while self.peek() == &TokenKind::Bang {
-            self.advance(); // consume !
-            let effect = match self.peek().clone() {
-                TokenKind::Pure => {
-                    self.advance();
-                    Effect::Pure
-                }
-                TokenKind::Io => {
-                    self.advance();
-                    Effect::Io
-                }
-                TokenKind::Ident(ref name) => match name.as_str() {
-                    "DbRead" => {
-                        self.advance();
-                        Effect::DbRead
-                    }
-                    "DbWrite" => {
-                        self.advance();
-                        Effect::DbWrite
-                    }
-                    "DbAdmin" => {
-                        self.advance();
-                        Effect::DbAdmin
-                    }
-                    "Db" => {
-                        self.advance();
-                        Effect::Db
-                    }
-                    "Network" => {
-                        self.advance();
-                        Effect::Network
-                    }
-                    "Http" => {
-                        self.advance();
-                        Effect::Http
-                    }
-                    "Llm" => {
-                        self.advance();
-                        Effect::Llm
-                    }
-                    "Snowflake" => {
-                        self.advance();
-                        Effect::Snowflake
-                    }
-                    "Gcp" => {
-                        self.advance();
-                        Effect::Gcp
-                    }
-                    "Stream" => {
-                        self.advance();
-                        Effect::Stream
-                    }
-                    "Postgres" => {
-                        self.advance();
-                        Effect::Postgres
-                    }
-                    "Redis" => {
-                        self.advance();
-                        Effect::Redis
-                    }
-                    "MySQL" => {
-                        self.advance();
-                        Effect::MySQL
-                    }
-                    "MongoDB" => {
-                        self.advance();
-                        Effect::MongoDB
-                    }
-                    "DynamoDB" => {
-                        self.advance();
-                        Effect::DynamoDB
-                    }
-                    "Elasticsearch" => {
-                        self.advance();
-                        Effect::Elasticsearch
-                    }
-                    "AzureDb" => {
-                        self.advance();
-                        Effect::AzureDb
-                    }
-                    "AzureStorage" => {
-                        self.advance();
-                        Effect::AzureStorage
-                    }
-                    "Rpc" => {
-                        self.advance();
-                        Effect::Rpc
-                    }
-                    "File" => {
-                        self.advance();
-                        Effect::File
-                    }
-                    "Checkpoint" => {
-                        self.advance();
-                        Effect::Checkpoint
-                    }
-                    "PipelineState" => {
-                        self.advance();
-                        Effect::PipelineState
-                    }
-                    "Trace" => {
-                        self.advance();
-                        Effect::Trace
-                    }
-                    "Emit" => {
-                        self.advance();
-                        self.expect(&TokenKind::LAngle)?;
-                        let (event_name, _) = self.expect_ident()?;
-                        self.expect(&TokenKind::RAngle)?;
-                        Effect::Emit(event_name)
-                    }
-                    other => {
-                        self.advance();
-                        Effect::Unknown(other.to_string())
-                    }
-                },
-                other => {
-                    return Err(ParseError::new(
-                        format!("expected effect name after `!`, got {:?}", other),
-                        self.peek_span().clone(),
-                    ));
-                }
-            };
-            effects.push(effect);
+    // effect annotation: ("!" effect_term)+   — v35.4.0: !Effect syntax removed (E0374)
+    fn parse_effect_ann(&mut self) -> Result<(), ParseError> {
+        if self.peek() == &TokenKind::Bang {
+            return Err(ParseError::new(
+                "[E0374] `!Effect` annotation syntax was removed in v35.4.0 \
+                 — declare side effects by passing `ctx: AppCtx` as the first parameter \
+                 (e.g. `fn f(ctx: AppCtx, ...) -> T { ... }`)",
+                self.peek_span().clone(),
+            ));
         }
-        Ok(effects)
+        Ok(())
     }
 
     // ── trf_def (3-6) ────────────────────────────────────────────────────────
@@ -2012,8 +1891,8 @@ impl Parser {
         self.expect(&TokenKind::Arrow)?;
         let output_ty = self.parse_type_expr_no_arrow()?;
 
-        // optional effect annotation: !Db !Emit<UserCreated> ...
-        let effects = self.parse_effect_ann()?;
+        // v35.4.0: !Effect annotation syntax removed (E0374); parse_effect_ann errors on `!`.
+        self.parse_effect_ann()?;
 
         self.expect(&TokenKind::Eq)?;
         // closure params: |param, ...| or ||
@@ -2030,7 +1909,6 @@ impl Parser {
             type_params,
             input_ty,
             output_ty,
-            effects,
             params,
             body,
             stateful: false,
@@ -2055,14 +1933,13 @@ impl Parser {
         let input_ty = self.parse_type_expr_no_arrow()?;
         self.expect(&TokenKind::Arrow)?;
         let output_ty = self.parse_type_expr_no_arrow()?;
-        let effects = self.parse_effect_ann()?;
+        self.parse_effect_ann()?;
         Ok(AbstractTrfDef {
             visibility,
             name,
             type_params,
             input_ty,
             output_ty,
-            effects,
             span: self.span_from(&start),
         })
     }
@@ -2251,7 +2128,7 @@ impl Parser {
         let (name, _) = self.expect_ident()?;
         self.expect(&TokenKind::Colon)?;
         let first_ty = self.parse_type_expr_no_arrow()?;
-        let (abstract_trf_ty, input_ty, output_ty, effects) =
+        let (abstract_trf_ty, input_ty, output_ty) =
             if matches!(self.peek(), TokenKind::Arrow) {
                 self.expect(&TokenKind::Arrow)?;
                 // Slot outputs may be fallible (`T!`) and are followed by either
@@ -2259,19 +2136,18 @@ impl Parser {
                 // Use full type parsing here so a trailing `!` stays part of the
                 // output type instead of being misread as the start of `!Effect`.
                 let output_ty = self.parse_type_expr()?;
-                let effects = self.parse_effect_ann()?;
-                (None, first_ty, output_ty, effects)
+                self.parse_effect_ann()?;
+                (None, first_ty, output_ty)
             } else {
                 let infer_span = self.span_from(&start);
                 let infer_ty = TypeExpr::Named("_infer".into(), vec![], infer_span);
-                (Some(first_ty), infer_ty.clone(), infer_ty, Vec::new())
+                (Some(first_ty), infer_ty.clone(), infer_ty)
             };
         Ok(FlwSlot {
             name,
             abstract_trf_ty,
             input_ty,
             output_ty,
-            effects,
             span: self.span_from(&start),
         })
     }
@@ -3467,12 +3343,16 @@ mod tests {
     }
 
     // fn_def with visibility (3-5)
+    // v34.8A: !Effect is now E0374 — test that it errors, and that visibility still parses
     #[test]
     fn test_parse_public_fn() {
-        let p = parse("public fn main() -> Unit !Io { () }");
+        // !Io now causes E0374
+        let err = Parser::parse_str("public fn main() -> Unit !Io { () }", "test").unwrap_err();
+        assert!(err.message.contains("E0374"), "expected E0374, got: {}", err.message);
+        // Without !Effect, public fn parses fine
+        let p = parse("public fn main() -> Unit { () }");
         if let Item::FnDef(f) = &p.items[0] {
             assert_eq!(f.visibility, Some(Visibility::Public));
-            assert!(f.effects.contains(&Effect::Io));
         }
     }
 
@@ -3483,7 +3363,6 @@ mod tests {
         assert!(matches!(p.items[0], Item::TrfDef(_)));
         if let Item::TrfDef(t) = &p.items[0] {
             assert_eq!(t.name, "ParseCsv");
-            assert!(t.effects.is_empty());
         }
     }
 
@@ -3496,12 +3375,11 @@ mod tests {
     }
 
     // stage_def with effect (3-6, 3-22)
+    // v34.8A: !Effect is now E0374
     #[test]
     fn test_parse_trf_with_effect() {
-        let p = parse("stage Print: String -> Unit !Io = |s| { () }");
-        if let Item::TrfDef(t) = &p.items[0] {
-            assert!(t.effects.contains(&Effect::Io));
-        }
+        let err = Parser::parse_str("stage Print: String -> Unit !Io = |s| { () }", "test").unwrap_err();
+        assert!(err.message.contains("E0374"), "expected E0374, got: {}", err.message);
     }
 
     // seq_def (3-7)
@@ -3770,25 +3648,17 @@ mod tests {
         }
     }
 
-    // effect annotation (3-22)
+    // effect annotation (3-22) — v34.8A: !Effect syntax removed, must be E0374
     #[test]
     fn test_parse_effect_annotation() {
-        let p = parse("fn f() -> Unit !Io { () }");
-        if let Item::FnDef(f) = &p.items[0] {
-            assert!(f.effects.contains(&Effect::Io));
-        }
+        let err = Parser::parse_str("fn f() -> Unit !Io { () }", "test").unwrap_err();
+        assert!(err.message.contains("E0374"), "expected E0374, got: {}", err.message);
     }
 
     #[test]
     fn test_parse_db_read_write_admin_effects() {
-        let p = parse("fn f() -> Unit !DbRead !DbWrite !DbAdmin { () }");
-        if let Item::FnDef(f) = &p.items[0] {
-            assert!(f.effects.contains(&Effect::DbRead));
-            assert!(f.effects.contains(&Effect::DbWrite));
-            assert!(f.effects.contains(&Effect::DbAdmin));
-        } else {
-            panic!("expected FnDef");
-        }
+        let err = Parser::parse_str("fn f() -> Unit !DbRead !DbWrite !DbAdmin { () }", "test").unwrap_err();
+        assert!(err.message.contains("E0374"), "expected E0374, got: {}", err.message);
     }
 
     #[test]
@@ -3817,38 +3687,16 @@ mod tests {
 
     #[test]
     fn test_parse_fn_param_trf_type() {
-        let p = parse("fn f(save: String -> Int !Db) -> Unit { () }");
-        if let Item::FnDef(f) = &p.items[0] {
-            match &f.params[0].ty {
-                TypeExpr::TrfFn {
-                    input,
-                    output,
-                    effects,
-                    ..
-                } => {
-                    assert!(
-                        matches!(input.as_ref(), TypeExpr::Named(name, _, _) if name == "String")
-                    );
-                    assert!(
-                        matches!(output.as_ref(), TypeExpr::Named(name, _, _) if name == "Int")
-                    );
-                    assert!(effects.contains(&Effect::Db));
-                }
-                other => panic!("expected TrfFn, got {:?}", other),
-            }
-        } else {
-            panic!("expected FnDef");
-        }
+        // v34.8A: !Db in type annotation also removed (E0374)
+        let err = Parser::parse_str("fn f(save: String -> Int !Db) -> Unit { () }", "test").unwrap_err();
+        assert!(err.message.contains("E0374"), "expected E0374, got: {}", err.message);
     }
 
     #[test]
     fn test_parse_file_effect_annotation() {
-        let p = parse("fn f() -> String !File { \"ok\" }");
-        if let Item::FnDef(f) = &p.items[0] {
-            assert!(f.effects.contains(&Effect::File));
-        } else {
-            panic!("expected FnDef");
-        }
+        // v34.8A: !File annotation removed (E0374)
+        let err = Parser::parse_str("fn f() -> String !File { \"ok\" }", "test").unwrap_err();
+        assert!(err.message.contains("E0374"), "expected E0374, got: {}", err.message);
     }
 
     // field access
@@ -3934,30 +3782,18 @@ mod tests {
 
     // ── v0.2.0 parser tests (1-13) ────────────────────────────────────────────
 
-    // 1-8, 1-9: multiple effects including Emit<T>
+    // 1-8, 1-9: multiple effects — v34.8A: !Effect removed (E0374)
     #[test]
     fn test_parse_multi_effect() {
-        let p = parse("stage T: Int -> Int !Db !Emit<UserCreated> = |n| { n }");
-        if let Item::TrfDef(t) = &p.items[0] {
-            assert!(t.effects.contains(&Effect::Db));
-            assert!(t.effects.contains(&Effect::Emit("UserCreated".into())));
-            assert_eq!(t.effects.len(), 2);
-        } else {
-            panic!("expected TrfDef");
-        }
+        let err = Parser::parse_str("stage T: Int -> Int !Db !Emit<UserCreated> = |n| { n }", "test").unwrap_err();
+        assert!(err.message.contains("E0374"), "expected E0374, got: {}", err.message);
     }
 
-    // 1-8: fn with multiple effects
+    // 1-8: fn with multiple effects — v34.8A: !Effect removed (E0374)
     #[test]
     fn test_parse_fn_multi_effect() {
-        let p = parse("fn f() -> Unit !Io !Db { () }");
-        if let Item::FnDef(f) = &p.items[0] {
-            assert!(f.effects.contains(&Effect::Io));
-            assert!(f.effects.contains(&Effect::Db));
-            assert_eq!(f.effects.len(), 2);
-        } else {
-            panic!("expected FnDef");
-        }
+        let err = Parser::parse_str("fn f() -> Unit !Io !Db { () }", "test").unwrap_err();
+        assert!(err.message.contains("E0374"), "expected E0374, got: {}", err.message);
     }
 
     // 1-10: record construction expression
@@ -3977,38 +3813,36 @@ mod tests {
         }
     }
 
-    // 1-11: emit expression
+    // 1-11: emit expression — v34.8A: !Emit<E> annotation removed (E0374); emit expr still valid
     #[test]
     fn test_parse_emit_expr() {
-        let p = parse(r#"fn f() -> Unit !Emit<E> { emit "hello" }"#);
+        let err = Parser::parse_str(r#"fn f() -> Unit !Emit<E> { emit "hello" }"#, "test").unwrap_err();
+        assert!(err.message.contains("E0374"), "expected E0374, got: {}", err.message);
+        // emit expression parses without annotation
+        let p = parse(r#"fn f() -> Unit { emit "hello" }"#);
         if let Item::FnDef(f) = &p.items[0] {
             assert!(matches!(*f.body.expr, Expr::EmitExpr(_, _)));
-        } else {
-            panic!("expected FnDef");
         }
     }
 
-    // 1-12: emit in block stmt position
+    // 1-12: emit in block stmt position — v34.8A: !Emit<E> annotation removed (E0374)
     #[test]
     fn test_parse_emit_in_block() {
-        let p = parse(r#"fn f() -> Unit !Emit<E> { emit "ev"; () }"#);
+        let err = Parser::parse_str(r#"fn f() -> Unit !Emit<E> { emit "ev"; () }"#, "test").unwrap_err();
+        assert!(err.message.contains("E0374"), "expected E0374, got: {}", err.message);
+        // emit in block still valid without annotation
+        let p = parse(r#"fn f() -> Unit { emit "ev"; () }"#);
         if let Item::FnDef(f) = &p.items[0] {
             assert_eq!(f.body.stmts.len(), 1);
             assert!(matches!(f.body.stmts[0], Stmt::Expr(Expr::EmitExpr(_, _))));
-        } else {
-            panic!("expected FnDef");
         }
     }
 
-    // 1-9: Emit<T> as only effect
+    // 1-9: Emit<T> as only effect — v34.8A: removed (E0374)
     #[test]
     fn test_parse_emit_effect_only() {
-        let p = parse("fn f() -> Unit !Emit<OrderPlaced> { () }");
-        if let Item::FnDef(f) = &p.items[0] {
-            assert!(f.effects.contains(&Effect::Emit("OrderPlaced".into())));
-        } else {
-            panic!("expected FnDef");
-        }
+        let err = Parser::parse_str("fn f() -> Unit !Emit<OrderPlaced> { () }", "test").unwrap_err();
+        assert!(err.message.contains("E0374"), "expected E0374, got: {}", err.message);
     }
 
     // ── v0.3.0 parser tests (1-12) ────────────────────────────────────────────
@@ -4186,13 +4020,16 @@ mod tests {
 
     #[test]
     fn test_parse_abstract_trf() {
-        let p = parse("abstract stage FetchUser: UserId -> User? !Db");
+        // v34.8A: !Db annotation removed (E0374)
+        let err = Parser::parse_str("abstract stage FetchUser: UserId -> User? !Db", "test").unwrap_err();
+        assert!(err.message.contains("E0374"), "expected E0374, got: {}", err.message);
+        // without annotation, abstract stage parses normally
+        let p = parse("abstract stage FetchUser: UserId -> User?");
         let Item::AbstractTrfDef(td) = &p.items[0] else {
             panic!("expected AbstractTrfDef")
         };
         assert_eq!(td.name, "FetchUser");
         assert!(td.type_params.is_empty());
-        assert_eq!(td.effects.len(), 1);
     }
 
     #[test]
@@ -4204,13 +4041,16 @@ mod tests {
 
     #[test]
     fn test_parse_abstract_trf_generic() {
-        let p = parse("abstract stage Fetch<T>: Int -> T? !Db");
+        // v34.8A: !Db annotation removed (E0374)
+        let err = Parser::parse_str("abstract stage Fetch<T>: Int -> T? !Db", "test").unwrap_err();
+        assert!(err.message.contains("E0374"), "expected E0374, got: {}", err.message);
+        // without annotation, generic abstract stage parses normally
+        let p = parse("abstract stage Fetch<T>: Int -> T?");
         let Item::AbstractTrfDef(td) = &p.items[0] else {
             panic!("expected AbstractTrfDef")
         };
         assert_eq!(td.name, "Fetch");
         assert_eq!(crate::ast::param_names(&td.type_params), vec!["T"]);
-        assert_eq!(td.effects.len(), 1);
     }
 
     #[test]
@@ -4250,8 +4090,9 @@ mod tests {
 
     #[test]
     fn test_parse_abstract_flw_multi_slot() {
+        // v34.8A: !Db removed from slot type (E0374); slot type now has no effects
         let p = parse(
-            "abstract seq DataPipeline<Row> { parse: String -> List<Row>!; save: List<Row> -> Int !Db }",
+            "abstract seq DataPipeline<Row> { parse: String -> List<Row>!; save: List<Row> -> Int }",
         );
         let Item::AbstractFlwDef(fd) = &p.items[0] else {
             panic!("expected AbstractFlwDef")

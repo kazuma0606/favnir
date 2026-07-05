@@ -12,13 +12,13 @@
 ```favnir
 // chunk_size のみ（従来どおり）
 #[streaming(chunk_size = 1000)]
-stage BatchLogs: Stream<RawLog> -> Stream<ParsedLog> !Io = |stream| {
+stage BatchLogs: Stream<RawLog> -> Stream<ParsedLog> = |stream| {
   Stream.map(stream, parse_log)
 }
 
 // backpressure 追加（v26.4.0 新機能）
 #[streaming(chunk_size = 1000, backpressure = true)]
-stage TransformLogs: Stream<RawLog> -> Stream<ParsedLog> !Io = |stream| {
+stage TransformLogs: Stream<RawLog> -> Stream<ParsedLog> = |stream| {
   Stream.map(stream, parse_log)
 }
 ```
@@ -28,7 +28,7 @@ stage TransformLogs: Stream<RawLog> -> Stream<ParsedLog> !Io = |stream| {
 ```favnir
 import rune "stream"
 
-fn main() -> Result<String, String> !Stream {
+fn main() -> Result<String, String> {
     bind s   <- Result.ok(Stream.from([1, 2, 3, 4, 5]))
     bind doubled <- Result.ok(map(s, |x| x * 2))
     bind evens   <- Result.ok(filter(doubled, |x| x > 4))
@@ -100,7 +100,7 @@ bind parts <- Result.ok(Stream.to_list(split(Stream.from([1, 2, 3, 4, 5]), |x| x
 
 ```favnir
 #[streaming(chunk_size = 60, backpressure = true)]
-stage AggregatePerMinute: Stream<RawLog> -> Stream<LogSummary> !Io = |stream| {
+stage AggregatePerMinute: Stream<RawLog> -> Stream<LogSummary> = |stream| {
   window(stream, 60, |batch| {
     LogSummary {
       count:       List.length(batch),

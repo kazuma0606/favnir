@@ -19,7 +19,7 @@ type User = {
 
 // Creates the users table if it does not exist.
 // id column stores UUID strings as TEXT.
-fn setup_db() -> Int !Db {
+fn setup_db() -> Int {
     Db.execute("CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, name TEXT NOT NULL, email TEXT NOT NULL UNIQUE)")
 }
 
@@ -27,7 +27,7 @@ fn setup_db() -> Int !Db {
 
 // Generates a UUID, inserts a new user, emits a UserCreated event,
 // and returns the new user's UUID.
-fn create_user(name: String, email: String) -> String !Db !Emit<UserCreated> {
+fn create_user(name: String, email: String) -> String {
     bind id <- Util.uuid();
     bind _ <- Db.execute("INSERT INTO users (id, name, email) VALUES (?, ?, ?)", id, name, email);
     emit User { id: id, name: name, email: email };
@@ -38,12 +38,12 @@ fn create_user(name: String, email: String) -> String !Db !Emit<UserCreated> {
 
 // Returns all users ordered by name.
 // Each row is a Map<String, String> (column name → value).
-fn list_users() -> List<Map<String, String>> !Db {
+fn list_users() -> List<Map<String, String>> {
     Db.query("SELECT id, name, email FROM users ORDER BY name")
 }
 
 // Returns a single user by UUID, or none if not found.
-fn find_user(id: String) -> Map<String, String>? !Db {
+fn find_user(id: String) -> Map<String, String>? {
     Db.query_one("SELECT id, name, email FROM users WHERE id = ?", id)
 }
 
@@ -51,7 +51,7 @@ fn find_user(id: String) -> Map<String, String>? !Db {
 
 // Updates the email address for the given UUID.
 // Returns the number of rows changed (0 = not found, 1 = updated).
-fn update_email(id: String, new_email: String) -> Int !Db {
+fn update_email(id: String, new_email: String) -> Int {
     Db.execute("UPDATE users SET email = ? WHERE id = ?", new_email, id)
 }
 
@@ -59,13 +59,13 @@ fn update_email(id: String, new_email: String) -> Int !Db {
 
 // Deletes the user with the given UUID.
 // Returns the number of rows changed.
-fn delete_user(id: String) -> Int !Db {
+fn delete_user(id: String) -> Int {
     Db.execute("DELETE FROM users WHERE id = ?", id)
 }
 
 // ── Entry point ────────────────────────────────────────────────────────────────
 
-public fn main() -> Unit !Db !Io !Emit<UserCreated> {
+public fn main() -> Unit {
     bind _ <- setup_db();
 
     // INSERT — each call generates a fresh UUID

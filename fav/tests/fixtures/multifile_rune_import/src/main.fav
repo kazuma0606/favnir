@@ -1,0 +1,20 @@
+import runes/postgres
+import src/stages
+import src/validators
+import src/types
+
+// Pipeline: CSV lines -> SQL strings ready for Postgres execution
+// Both this file and stages.fav import runes/postgres — multi-import scenario
+public fn run_pipeline(lines: List<String>) -> Result<List<String>, String> {
+    bind valid_rows <- Result.all(
+        List.map(lines, |line|
+            validators.validate_row(RawRow {
+                id:     Option.unwrap_or(List.first(String.split(line, ",")),                    "0")
+                name:   Option.unwrap_or(List.first(List.drop(String.split(line, ","), 1)), "")
+                amount: Option.unwrap_or(List.first(List.drop(String.split(line, ","), 2)), "0.0")
+                date:   Option.unwrap_or(List.first(List.drop(String.split(line, ","), 3)), "")
+            })
+        )
+    )
+    Result.ok(stages.build_all_sqls(valid_rows))
+}

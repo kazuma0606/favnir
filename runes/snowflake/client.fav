@@ -12,12 +12,12 @@
 //   SNOWFLAKE_SCHEMA        — スキーマ名（省略可）
 
 // execute — DML（INSERT / UPDATE / DELETE / CREATE 等）を実行する
-public fn execute(sql: String) -> Result<String, String> !Snowflake {
+public fn execute(sql: String) -> Result<String, String> {
     Snowflake.execute_raw(sql)
 }
 
 // query<T> — SELECT クエリを実行し、行を型 T の List に変換して返す
-public fn query<T>(sql: String) -> Result<List<T>, String> !Snowflake {
+public fn query<T>(sql: String) -> Result<List<T>, String> {
     match Snowflake.query_raw(sql) {
         Err(e) => Result.err(e)
         Ok(raw) =>

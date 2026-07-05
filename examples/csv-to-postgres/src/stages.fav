@@ -1,0 +1,46 @@
+import runes/postgres
+import src/types
+import src/validators
+
+fn parse_csv_row(parts: List<String>) -> RawRow {
+    RawRow {
+        id:     Option.unwrap_or(List.first(parts),                "0")
+        name:   Option.unwrap_or(List.first(List.drop(parts, 1)), "")
+        amount: Option.unwrap_or(List.first(List.drop(parts, 2)), "0.0")
+        date:   Option.unwrap_or(List.first(List.drop(parts, 3)), "")
+    }
+}
+
+public stage LoadCsv: String -> List<RawRow> = |path| {
+    bind text <- IO.read_file_raw(path)
+    Result.ok(
+        String.lines(text)
+            |> List.drop(1)
+            |> List.map(|line| parse_csv_row(String.split(line, ",")))
+    )
+}
+
+public stage ValidateRows: List<RawRow> -> List<ValidRow> = |rows| {
+    Result.ok(
+        List.flat_map(rows, |row|
+            match validators.validate_row(row) {
+                Err(_) => List.empty()
+                Ok(v)  => List.singleton(v)
+            }
+        )
+    )
+}
+
+public stage WriteToDb: List<ValidRow> -> Int = |rows| {
+    bind count <- Result.all(
+        List.map(rows, |row|
+            Postgres.execute(
+                "INSERT INTO records (id, name, amount, date) VALUES ($1, $2, $3, $4)",
+                $"[{Int.to_string(row.id)}, \"{String.replace(row.name, "\"", "\\\"")}\", {Float.to_string(row.amount)}, \"{row.date}\"]"
+            )
+        )
+    )
+    Result.ok(List.length(count))
+}
+
+public seq EtlPipeline = LoadCsv |> ValidateRows |> WriteToDb

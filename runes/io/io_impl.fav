@@ -9,15 +9,15 @@ public fn IoImpl.new() -> IoImpl { IoImpl("default") }
 // ── Io impl ─────────────────────────────────────────────────────────────────
 
 impl Io for IoImpl {
-    fn println(io: IoImpl, msg: String) -> Unit !IO {
+    fn println(io: IoImpl, msg: String) -> Unit {
         IO.println(msg)
     }
 
-    fn print(io: IoImpl, msg: String) -> Unit !IO {
+    fn print(io: IoImpl, msg: String) -> Unit {
         IO.print(msg)
     }
 
-    fn read_line(io: IoImpl) -> Result<String, String> !IO {
+    fn read_line(io: IoImpl) -> Result<String, String> {
         IO.read_line()
     }
 }

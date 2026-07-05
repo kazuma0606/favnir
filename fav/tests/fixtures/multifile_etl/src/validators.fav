@@ -1,0 +1,11 @@
+import src/types
+
+public fn validate_row(row: RawRow) -> Result<ValidRow, RowError> {
+    match String.to_int(row.id) {
+        None     => Result.err(RowError { field: "id", message: "id must be integer" })
+        Some(id) => match String.to_float(row.amount) {
+            None         => Result.err(RowError { field: "amount", message: "amount must be float" })
+            Some(amount) => Result.ok(ValidRow { id: id, name: row.name, amount: amount })
+        }
+    }
+}

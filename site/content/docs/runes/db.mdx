@@ -24,13 +24,13 @@ v7.0.0 から DB エフェクトが 3 段階に細分化されました。
 | `!Db` | すべて（後方互換） | — |
 
 ```favnir
-// 読み取り専用 — !DbRead のみ宣言
-fn get_orders(handle: DbHandle) -> Result<List<Map<String, String>>, DbError> !DbRead {
+// 読み取り専用 —Read のみ宣言
+fn get_orders(handle: DbHandle) -> Result<List<Map<String, String>>, DbError>Read {
   db.query(handle, "SELECT * FROM orders WHERE status = 'active'")
 }
 
-// 書き込み — !DbWrite を宣言
-fn cancel_order(handle: DbHandle, id: Int) -> Result<Int, DbError> !DbWrite {
+// 書き込み —Write を宣言
+fn cancel_order(handle: DbHandle, id: Int) -> Result<Int, DbError>Write {
   db.execute_params(handle, "UPDATE orders SET status = 'cancelled' WHERE id = $1",
     [Int.to_string(id)])
 }
@@ -43,7 +43,7 @@ import rune "db"
 ## 接続管理
 
 ```favnir
-public fn main() -> Unit !Io !Db {
+public fn main() -> Unit {
   bind handle <- db.connect("postgresql://localhost/mydb")
   bind rows   <- db.query(handle, "SELECT * FROM orders")
   IO.println($"{List.length(rows)} 件取得")
@@ -105,7 +105,7 @@ bind count <- db.execute_params(handle,
 `db.paginate` は SQL に `LIMIT`/`OFFSET` を自動付与します。
 
 ```favnir
-public fn list_orders(handle: DbHandle, page: Int) -> Result<List<Map<String, String>>, DbError> !Db {
+public fn list_orders(handle: DbHandle, page: Int) -> Result<List<Map<String, String>>, DbError> {
   db.paginate(handle, "SELECT * FROM orders ORDER BY created_at DESC", page, 20)
 }
 

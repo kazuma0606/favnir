@@ -29,7 +29,7 @@ type RedisConn(String)
 #### `Redis.connect`
 
 ```favnir
-public fn connect(url: String) -> Result<RedisConn, String> !Redis
+public fn connect(url: String) -> Result<RedisConn, String>
 ```
 
 接続 URL から `RedisConn` を作成します。接続確立時に PING で疎通確認を行います。
@@ -45,7 +45,7 @@ bind conn <- Redis.connect("redis://localhost:6379/0")
 #### `Redis.get`
 
 ```favnir
-public fn get(conn: RedisConn, key: String) -> Result<String, String> !Redis
+public fn get(conn: RedisConn, key: String) -> Result<String, String>
 ```
 
 指定したキーの値を取得します。キーが存在しない場合は `Result.err("nil")` を返します。
@@ -53,7 +53,7 @@ public fn get(conn: RedisConn, key: String) -> Result<String, String> !Redis
 #### `Redis.set`
 
 ```favnir
-public fn set(conn: RedisConn, key: String, value: String, ttl_secs: Int) -> Result<Unit, String> !Redis
+public fn set(conn: RedisConn, key: String, value: String, ttl_secs: Int) -> Result<Unit, String>
 ```
 
 値を設定します。`ttl_secs = 0` で無期限（EX なし）、`> 0` で TTL 付き SET になります。
@@ -63,7 +63,7 @@ public fn set(conn: RedisConn, key: String, value: String, ttl_secs: Int) -> Res
 #### `Redis.del`
 
 ```favnir
-public fn del(conn: RedisConn, key: String) -> Result<Int, String> !Redis
+public fn del(conn: RedisConn, key: String) -> Result<Int, String>
 ```
 
 キーを削除します。戻り値は削除した件数です。
@@ -71,7 +71,7 @@ public fn del(conn: RedisConn, key: String) -> Result<Int, String> !Redis
 #### `Redis.incr`
 
 ```favnir
-public fn incr(conn: RedisConn, key: String) -> Result<Int, String> !Redis
+public fn incr(conn: RedisConn, key: String) -> Result<Int, String>
 ```
 
 キーの値をインクリメントします。キーが存在しない場合は 1 から始まります。カウンタ・レート制限用途に便利です。
@@ -83,7 +83,7 @@ public fn incr(conn: RedisConn, key: String) -> Result<Int, String> !Redis
 #### `Redis.lpush`
 
 ```favnir
-public fn lpush(conn: RedisConn, key: String, value: String) -> Result<Int, String> !Redis
+public fn lpush(conn: RedisConn, key: String, value: String) -> Result<Int, String>
 ```
 
 リストの先頭に値を追加します。戻り値はリスト長です。
@@ -91,7 +91,7 @@ public fn lpush(conn: RedisConn, key: String, value: String) -> Result<Int, Stri
 #### `Redis.rpop`
 
 ```favnir
-public fn rpop(conn: RedisConn, key: String) -> Result<String, String> !Redis
+public fn rpop(conn: RedisConn, key: String) -> Result<String, String>
 ```
 
 リストの末尾から値を取り出します。リストが空の場合は `Result.err("nil")` を返します。
@@ -103,7 +103,7 @@ public fn rpop(conn: RedisConn, key: String) -> Result<String, String> !Redis
 #### `Redis.publish`
 
 ```favnir
-public fn publish(conn: RedisConn, channel: String, msg: String) -> Result<Int, String> !Redis
+public fn publish(conn: RedisConn, channel: String, msg: String) -> Result<Int, String>
 ```
 
 チャンネルにメッセージを送信します。戻り値は受信者数です。
@@ -111,7 +111,7 @@ public fn publish(conn: RedisConn, channel: String, msg: String) -> Result<Int, 
 #### `Redis.subscribe_once`
 
 ```favnir
-public fn subscribe_once(conn: RedisConn, channel: String) -> Result<String, String> !Redis
+public fn subscribe_once(conn: RedisConn, channel: String) -> Result<String, String>
 ```
 
 チャンネルから**メッセージを 1 件受信**します（ブロッキング）。
@@ -129,7 +129,7 @@ public fn subscribe_once(conn: RedisConn, channel: String) -> Result<String, Str
 
 ```favnir
 // 正しい例
-public fn get_value(key: String) -> Result<String, String> !Redis {
+public fn get_value(key: String) -> Result<String, String> {
     bind conn <- Redis.connect("redis://localhost:6379/0")
     Redis.get(conn, key)
 }
@@ -144,7 +144,7 @@ import rune "redis"
 
 type RateResult = { allowed: Bool, count: Int }
 
-stage CheckRateLimit: String -> RateResult !Redis = |user_id| {
+stage CheckRateLimit: String -> RateResult = |user_id| {
     bind conn  <- Redis.connect("redis://localhost:6379/0")
     bind key   <- Result.ok("rate:" + user_id)
     bind count <- Redis.incr(conn, key)

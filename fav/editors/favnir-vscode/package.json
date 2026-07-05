@@ -20,6 +20,12 @@
         "scopeName": "source.favnir",
         "path": "./syntaxes/favnir.tmLanguage.json"
       }
-    ]
+    ],
+    "_note_inlayHints": "inlayHintProvider is declared in LSP initialize response; VS Code activates it automatically",
+    "capabilities": {
+      "inlayHints": {
+        "resolveProvider": false
+      }
+    }
   }
 }

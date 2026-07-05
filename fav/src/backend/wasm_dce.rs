@@ -222,7 +222,6 @@ mod tests {
             param_count: 0,
             param_tys: vec![],
             local_count: 0,
-            effects: vec![],
             return_ty: Type::Int,
             body: IRExpr::Lit(Lit::Int(1), Type::Int),
         }];
@@ -233,7 +232,6 @@ mod tests {
                 param_count: 0,
                 param_tys: vec![],
                 local_count: 0,
-                effects: vec![],
                 return_ty: Type::Int,
                 body: IRExpr::Lit(Lit::Int(99), Type::Int),
             });

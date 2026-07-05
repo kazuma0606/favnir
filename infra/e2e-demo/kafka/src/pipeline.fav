@@ -24,7 +24,7 @@ stage GenerateEvents -> List<Event> {
   Result.ok([e1, e2, e3])
 }
 
-stage ProduceToKafka(events: List<Event>) -> Int !Stream {
+stage ProduceToKafka(events: List<Event>) -> Int {
   bind count <- List.fold_result(events, 0, |acc, evt| {
     bind _ok <- kafka.produce("favnir-demo", evt.id, evt.payload)
     Result.ok(Int.add(acc, 1))
@@ -33,7 +33,7 @@ stage ProduceToKafka(events: List<Event>) -> Int !Stream {
   Result.ok(count)
 }
 
-stage ConsumeFromKafka(count: Int) -> String !Stream {
+stage ConsumeFromKafka(count: Int) -> String {
   kafka.consume_one("favnir-demo", "favnir-consumer-group")
 }
 

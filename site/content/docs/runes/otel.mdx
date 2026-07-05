@@ -28,7 +28,7 @@ import runes/otel
 ```favnir
 import runes/otel
 
-stage TraceLoad: Unit -> Result<Unit, String> !Io = |_| {
+stage TraceLoad: Unit -> Result<Unit, String> = |_| {
     bind _ <- OTel.start_span("load-orders", "etl-service")
     bind _ <- OTel.set_attribute("db.system", "postgresql")
     bind _ <- OTel.add_event("query.start", "{}")

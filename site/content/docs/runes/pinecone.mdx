@@ -19,7 +19,7 @@ import runes/pinecone
 import runes/llm
 
 // ドキュメントをベクトル化して Pinecone に保存
-stage IndexDocuments: List<String> -> Unit !Http = |docs| {
+stage IndexDocuments: List<String> -> Unit = |docs| {
   bind vectors <- docs
     |> List.map(|doc|
       bind embedding <- LLM.embed(config.openai, doc)
@@ -30,7 +30,7 @@ stage IndexDocuments: List<String> -> Unit !Http = |docs| {
 }
 
 // クエリに関連するドキュメントを取得（RAG）
-stage SearchDocuments: String -> List<String> !Http = |query| {
+stage SearchDocuments: String -> List<String> = |query| {
   bind embedding <- LLM.embed(config.openai, query)
   Pinecone.query(config.pinecone_index, embedding, 5, "")
 }
@@ -41,7 +41,7 @@ stage SearchDocuments: String -> List<String> !Http = |query| {
 ### `Pinecone.upsert`
 
 ```favnir
-fn Pinecone.upsert(index: String, vectors: List<PineconeVector>) -> Result<Unit, String> !Http
+fn Pinecone.upsert(index: String, vectors: List<PineconeVector>) -> Result<Unit, String>
 ```
 
 ベクトルをインデックスに追加・更新します（バッチ対応）。
@@ -49,7 +49,7 @@ fn Pinecone.upsert(index: String, vectors: List<PineconeVector>) -> Result<Unit,
 ### `Pinecone.query`
 
 ```favnir
-fn Pinecone.query(index: String, vector: List<Float>, k: Int, filter: String) -> Result<List<String>, String> !Http
+fn Pinecone.query(index: String, vector: List<Float>, k: Int, filter: String) -> Result<List<String>, String>
 ```
 
 クエリベクトルに近い上位 `k` 件を返します。`filter` にメタデータフィルタ（JSON 文字列）を指定できます。
@@ -57,7 +57,7 @@ fn Pinecone.query(index: String, vector: List<Float>, k: Int, filter: String) ->
 ### `Pinecone.delete`
 
 ```favnir
-fn Pinecone.delete(index: String, ids: List<String>) -> Result<Unit, String> !Http
+fn Pinecone.delete(index: String, ids: List<String>) -> Result<Unit, String>
 ```
 
 ID 指定でベクトルを削除します。
@@ -65,7 +65,7 @@ ID 指定でベクトルを削除します。
 ### `Pinecone.fetch`
 
 ```favnir
-fn Pinecone.fetch(index: String, ids: List<String>) -> Result<List<String>, String> !Http
+fn Pinecone.fetch(index: String, ids: List<String>) -> Result<List<String>, String>
 ```
 
 ID 指定でベクトルを取得します。
@@ -75,7 +75,7 @@ ID 指定でベクトルを取得します。
 ### `Pinecone.describe_index_stats`
 
 ```favnir
-fn Pinecone.describe_index_stats(index: String) -> Result<String, String> !Http
+fn Pinecone.describe_index_stats(index: String) -> Result<String, String>
 ```
 
 インデックスの統計情報（ベクトル数・次元数等）を取得します。

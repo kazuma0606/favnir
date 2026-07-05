@@ -16,7 +16,7 @@ export PAGERDUTY_BASE_URL=https://events.pagerduty.com  # デフォルト
 import runes/pagerduty
 
 // クリティカルな stage が失敗したら PagerDuty アラートを作成
-stage AlertOnFailure: String -> Unit !Http = |error_msg| {
+stage AlertOnFailure: String -> Unit = |error_msg| {
   bind _ <- PagerDuty.create_incident(
     config.pagerduty_routing_key,
     "[CRITICAL] Pipeline Failure: " ++ error_msg,
@@ -27,7 +27,7 @@ stage AlertOnFailure: String -> Unit !Http = |error_msg| {
 }
 
 // インシデント解決
-stage ResolveIncident: String -> Unit !Http = |incident_key| {
+stage ResolveIncident: String -> Unit = |incident_key| {
   PagerDuty.resolve(config.pagerduty_routing_key, incident_key)
 }
 ```
@@ -37,7 +37,7 @@ stage ResolveIncident: String -> Unit !Http = |incident_key| {
 ### `PagerDuty.create_incident`
 
 ```favnir
-fn PagerDuty.create_incident(routing_key: String, title: String, severity: String, key: String) -> Result<String, String> !Http
+fn PagerDuty.create_incident(routing_key: String, title: String, severity: String, key: String) -> Result<String, String>
 ```
 
 インシデントを作成し、`dedup_key` を返します。`severity` は `"critical"` / `"error"` / `"warning"` / `"info"` のいずれかを指定します。`routing_key` は `PAGERDUTY_ROUTING_KEY` 環境変数が未設定の場合のフォールバックとして使われます。
@@ -45,7 +45,7 @@ fn PagerDuty.create_incident(routing_key: String, title: String, severity: Strin
 ### `PagerDuty.resolve`
 
 ```favnir
-fn PagerDuty.resolve(routing_key: String, incident_key: String) -> Result<Unit, String> !Http
+fn PagerDuty.resolve(routing_key: String, incident_key: String) -> Result<Unit, String>
 ```
 
 インシデントを解決済みにします。
@@ -53,7 +53,7 @@ fn PagerDuty.resolve(routing_key: String, incident_key: String) -> Result<Unit, 
 ### `PagerDuty.acknowledge`
 
 ```favnir
-fn PagerDuty.acknowledge(routing_key: String, incident_key: String) -> Result<Unit, String> !Http
+fn PagerDuty.acknowledge(routing_key: String, incident_key: String) -> Result<Unit, String>
 ```
 
 インシデントを確認済み（対応中）にします。
@@ -61,7 +61,7 @@ fn PagerDuty.acknowledge(routing_key: String, incident_key: String) -> Result<Un
 ### `PagerDuty.add_note`
 
 ```favnir
-fn PagerDuty.add_note(routing_key: String, incident_key: String, note: String) -> Result<Unit, String> !Http
+fn PagerDuty.add_note(routing_key: String, incident_key: String, note: String) -> Result<Unit, String>
 ```
 
 > **注意（プレースホルダー実装）**: PagerDuty Events API v2（`/v2/enqueue`）はノート追加非対応のため、現実装は note 内容を `summary` に埋め込んだ `trigger` イベントを送信します。`dedup_key` が一致する既存インシデントがある場合は update として処理されますが、`trigger` アクション自体の副作用に注意してください。`Http.patch` primitive 実装後に REST API `/incidents/{id}/notes` へ移行予定です。

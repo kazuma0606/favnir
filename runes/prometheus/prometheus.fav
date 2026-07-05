@@ -1,15 +1,15 @@
 // runes/prometheus/prometheus.fav — Prometheus メトリクス Rune (v28.1.0)
 // Pushgateway 経由でメトリクスを送信する。ローカル開発・ETL パイプライン監視に活用する。
 // v28.1.0 stub — 実際の Pushgateway HTTP 送信は v28.x 以降
-public fn counter(name: String, value: Float, labels: String) -> Result<Unit, String> !Io {
+public fn counter(name: String, value: Float, labels: String) -> Result<Unit, String> {
     Prometheus.counter_raw(name, value, labels)
 }
-public fn gauge(name: String, value: Float) -> Result<Unit, String> !Io {
+public fn gauge(name: String, value: Float) -> Result<Unit, String> {
     Prometheus.gauge_raw(name, value)
 }
-public fn histogram(name: String, value: Float) -> Result<Unit, String> !Io {
+public fn histogram(name: String, value: Float) -> Result<Unit, String> {
     Prometheus.histogram_raw(name, value)
 }
-public fn push(gateway_url: String) -> Result<Unit, String> !Io {
+public fn push(gateway_url: String) -> Result<Unit, String> {
     Prometheus.push_raw(gateway_url)
 }

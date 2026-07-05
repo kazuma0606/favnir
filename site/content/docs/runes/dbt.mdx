@@ -19,7 +19,7 @@ import rune "dbt"
 dbt モデルの出力を読み込む。`manifest.json` を解析して compiled SQL を実行し、型付き結果を返す。
 
 ```favnir
-stage LoadCustomerSummary: Unit -> Result<String, String> !Db = |_| {
+stage LoadCustomerSummary: Unit -> Result<String, String> = |_| {
   Dbt.ref("./dbt_project", "customer_summary")
 }
 ```
@@ -34,7 +34,7 @@ stage LoadCustomerSummary: Unit -> Result<String, String> !Db = |_| {
 dbt の source 定義から SQL を生成して実行する。
 
 ```favnir
-stage LoadRawEvents: Unit -> Result<String, String> !Db = |_| {
+stage LoadRawEvents: Unit -> Result<String, String> = |_| {
   Dbt.source("./dbt_project", "raw", "events")
 }
 ```
@@ -54,11 +54,11 @@ stage LoadRawEvents: Unit -> Result<String, String> !Db = |_| {
 ```favnir
 import rune "dbt"
 
-stage LoadCustomerSummary: Unit -> Result<String, String> !Db = |_| {
+stage LoadCustomerSummary: Unit -> Result<String, String> = |_| {
   Dbt.ref("./dbt_project", "customer_summary")
 }
 
-stage LoadRawEvents: Unit -> Result<String, String> !Db = |_| {
+stage LoadRawEvents: Unit -> Result<String, String> = |_| {
   Dbt.source("./dbt_project", "raw", "events")
 }
 

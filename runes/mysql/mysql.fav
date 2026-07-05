@@ -13,26 +13,26 @@
 
 type MySqlConn(String)
 
-public fn connect(url: String) -> Result<MySqlConn, String> !MySQL {
+public fn connect(url: String) -> Result<MySqlConn, String> {
     MySQL.connect_raw(url)
 }
 
-public fn query(conn: MySqlConn, sql: String, params: String) -> Result<String, String> !MySQL {
+public fn query(conn: MySqlConn, sql: String, params: String) -> Result<String, String> {
     MySQL.query_raw(conn, sql, params)
 }
 
-public fn execute(conn: MySqlConn, sql: String, params: String) -> Result<Int, String> !MySQL {
+public fn execute(conn: MySqlConn, sql: String, params: String) -> Result<Int, String> {
     MySQL.execute_raw(conn, sql, params)
 }
 
-public fn transaction_begin(conn: MySqlConn) -> Result<Unit, String> !MySQL {
+public fn transaction_begin(conn: MySqlConn) -> Result<Unit, String> {
     MySQL.transaction_begin_raw(conn)
 }
 
-public fn transaction_commit(conn: MySqlConn) -> Result<Unit, String> !MySQL {
+public fn transaction_commit(conn: MySqlConn) -> Result<Unit, String> {
     MySQL.transaction_commit_raw(conn)
 }
 
-public fn transaction_rollback(conn: MySqlConn) -> Result<Unit, String> !MySQL {
+public fn transaction_rollback(conn: MySqlConn) -> Result<Unit, String> {
     MySQL.transaction_rollback_raw(conn)
 }

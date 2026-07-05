@@ -1,0 +1,88 @@
+---
+title: "セキュリティ審査 v2"
+description: "Favnir v34.x のセキュリティ状態確認レポート（v24.6 以降の更新）"
+---
+
+# セキュリティ審査 v2
+
+v34.4.0 時点での Favnir セキュリティ状態確認レポート。
+v24.6.0（セキュリティ審査 v1）からの変更点を中心に記述する。
+
+## 1. エフェクトシステム検証（W021）
+
+W021 `pure_fn_calls_effectful` lint は v24.6.0 で導入済みで、引き続き有効。
+
+純粋関数から副作用関数を呼び出す箇所を静的に検出する:
+
+```bash
+fav lint --allow W017 --allow W018 --allow W019 path/to/your-pipeline.fav
+```
+
+検出例:
+
+```favnir
+fn fetch_data(url: String) -> String { ... }
+
+// W021: pure function `process` calls effectful function `fetch_data`
+fn process(url: String) -> String {
+    fetch_data(url)
+}
+```
+
+v34.x でコンパイラの Ctx 移行（v34.5 予定）が完了した後も、
+W021 は ctx ベース関数に対して適用可能な形で更新する予定。
+詳細は `SECURITY_MODEL.md` の v34.x Context 移行セクションを参照。
+
+## 2. 認証情報の扱い
+
+**ガイドライン**: Rune の接続情報はすべて環境変数または `fav.toml [env]` セクション経由で渡す。
+コードへの認証情報の直接埋め込みは型システムレベルで検知できないが、
+Rune API は接続情報を関数引数（`String` 型）として受け取るため、
+環境変数を使う慣習を cookbook / サンプルコードで徹底する。
+
+**確認済み Rune（v34.4.0 時点）**:
+
+| Rune | 認証情報の取得方法 |
+|---|---|
+| `runes/postgres` | `POSTGRES_URL` 環境変数 |
+| `runes/snowflake` | `SNOWFLAKE_ACCOUNT` / `SNOWFLAKE_USER` / `SNOWFLAKE_PASSWORD` 環境変数 |
+| `runes/aws` | AWS SDK 標準の環境変数チェーン（`AWS_ACCESS_KEY_ID` 等） |
+| `runes/redis` | `REDIS_URL` 環境変数 |
+| `runes/kafka` | `KAFKA_BOOTSTRAP_SERVERS` 環境変数 |
+| `runes/mysql` | `MYSQL_URL` 環境変数 |
+
+`fav.toml` の `[env]` セクションでプロジェクト単位の環境変数を管理できる:
+
+```toml
+[env]
+POSTGRES_URL = "${DATABASE_URL}"
+```
+
+## 3. 実行サンドボックス（sandbox）
+
+`fav run` はホスト OS 上の Rust 実行環境で動作し、OS レベルの sandbox は提供しない。
+エフェクトシステムが実行時の境界を定義する:
+
+| エフェクト宣言 | 許可される操作 |
+|---|---|
+| なし（純粋関数） | I/O 不可。計算のみ |
+| `!Io` | 標準入出力・ファイル読み書き |
+| `!Http` | HTTP 通信 |
+| `!Io !Http` | I/O + HTTP |
+| `!DbRead` / `!DbWrite` | データベース読み書き |
+
+**sandbox 境界の保証**: `!Effect` を宣言しない関数は、
+コンパイル時チェック（checker.fav）と W021 lint によりエフェクト呼び出しをブロックされる。
+OS レベルの sandbox（seccomp / WASM サンドボックス等）は v35.x 以降で検討。
+
+## 4. OSS ライセンス
+
+依存ライブラリ一覧は [oss-licenses](./oss-licenses) を参照。
+主要依存はすべて MIT または Apache-2.0 ライセンスであることを確認した。
+GPL・LGPL 依存はゼロ（v34.4.0 確認済み）。
+
+確認コマンド:
+
+```bash
+cargo metadata --format-version 1 | jq '[.packages[] | {name: .name, license: .license}]'
+```

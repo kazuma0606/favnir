@@ -71,13 +71,13 @@ seq Pipeline = Validate |> Enrich |> Normalize
 **悪い例**
 ```favnir
 stage Log: String -> Unit = |msg| {
-  IO.println(msg)   // W011: !Io 宣言がない
+  IO.println(msg)   // W011: 宣言がない
 }
 ```
 
 **良い例**
 ```favnir
-stage Log: String -> Unit !Io = |msg| {
+stage Log: String -> Unit = |msg| {
   IO.println(msg)
 }
 ```

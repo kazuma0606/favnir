@@ -1,0 +1,95 @@
+---
+title: "!Effect から Capability Context への移行ガイド"
+description: "Favnir v34.5 で追加された W022 警告への対応と ctx ベース構文への移行手順"
+---
+
+# `!Effect` から Capability Context への移行ガイド
+
+Favnir v34.5.0 から、`!Effect` アノテーションは非推奨となり W022 警告が発生する。
+本ガイドでは `fav migrate --from-effects` を使った自動移行と手動移行の手順を説明する。
+
+## W022 警告について
+
+```bash
+fav lint src/pipeline.fav
+# W022: function `fetch_data` uses deprecated `!Effect` annotation
+#        — migrate to Capability Context using `fav migrate --from-effects`
+```
+
+`!Effect` アノテーションは Capability Context（`ctx` パラメータ）に移行する。
+`!Effect` は v35.x で削除予定。
+
+## 自動移行: `fav migrate --from-effects`
+
+```bash
+# ドライラン（変更内容を確認）
+fav migrate --from-effects --dry-run src/pipeline.fav
+
+# インプレース変換
+fav migrate --from-effects --in-place src/pipeline.fav
+
+# ディレクトリ全体を変換
+fav migrate --from-effects --dir src/
+```
+
+## Before / After 例
+
+### Before（!Effect 構文）
+
+```favnir
+fn fetch_data(url: String) -> String {
+    Http.get(url)
+}
+
+fn write_result(data: String) -> Unit {
+    IO.println(data)
+}
+```
+
+### After（ctx 構文）
+
+```favnir
+fn fetch_data(ctx: AppCtx, url: String) -> String {
+    bind { http } <- ctx
+    http.get(url)
+}
+
+fn write_result(ctx: AppCtx, data: String) -> Unit {
+    bind { io } <- ctx
+    io.println(data)
+}
+```
+
+## `!Effect` → ctx フィールド 対応表
+
+| 廃止する `!Effect` | 代替 ctx フィールド | 型 |
+|---|---|---|
+| `!Io` | `ctx.io` | `IoCtx` |
+| `!Http` | `ctx.http` | `HttpClient` |
+| `!DbRead` / `!DbWrite` | `ctx.db` | `DbRead` / `DbWrite` |
+| `!Postgres` | `ctx.db` | `PgConn` |
+| `!Redis` | `ctx.redis` | `RedisClient` |
+| `!Llm` | `ctx.llm` | `LlmClient` |
+| `!Snowflake` | `ctx.warehouse` | `SnowflakeConn` |
+| `!Trace` | `ctx.tracer` | `Tracer` |
+
+## W022 の一時抑制
+
+移行が完了するまで W022 を抑制するには:
+
+```bash
+fav lint --allow W022 src/pipeline.fav
+```
+
+## AppCtx を使った完全な例
+
+```favnir
+import runes/ctx
+
+fn run_pipeline(ctx: AppCtx) -> Unit {
+    bind result <- fetch_data(ctx, "https://api.example.com/data")
+    write_result(ctx, result)
+}
+```
+
+`AppCtx` は `IoCtx` / `HttpClient` / `DbRead` / `DbWrite` 等の全フィールドを持つ汎用コンテキスト。

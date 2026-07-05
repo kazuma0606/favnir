@@ -19,7 +19,7 @@ type Summary = {
 }
 
 // postgres から完了済み注文を取得
-stage LoadOrders: Unit -> List<Order> !Db = |_| {
+stage LoadOrders: Unit -> List<Order> = |_| {
   bind conn <- Postgres.connect(config.postgres)
   Postgres.query[Order](conn, "SELECT id, amount, status FROM orders WHERE status = $1", ["completed"])
 }
@@ -32,14 +32,14 @@ stage Summarize: List<Order> -> Summary = |orders| {
 }
 
 // 集計結果を S3 に保存
-stage SaveToS3: Summary -> Summary !Io = |summary| {
+stage SaveToS3: Summary -> Summary = |summary| {
   bind json_str <- Json.encode(summary)
   bind _        <- S3.put_object("my-bucket", "etl/summary.json", Bytes.from_str(json_str))
   Result.ok(summary)
 }
 
 // Kafka に通知を送信
-stage NotifyKafka: Summary -> Unit !Io = |summary| {
+stage NotifyKafka: Summary -> Unit = |summary| {
   bind msg <- Json.encode(summary)
   Kafka.produce("etl-events", "summary", msg)
 }

@@ -6,11 +6,11 @@ type ProfileReport = {
     max_v: Int
 }
 
-fn uniform(min: Int) -> Int -> Int !Random = |max| {
+fn uniform(min: Int) -> Int -> Int = |max| {
     Random.int(min, max)
 }
 
-fn choice_str(xs: List<String>) -> String !Random = {
+fn choice_str(xs: List<String>) -> String = {
     if List.length(xs) == 0 {
         ""
     } else {
@@ -18,7 +18,7 @@ fn choice_str(xs: List<String>) -> String !Random = {
     }
 }
 
-fn choice_int(xs: List<Int>) -> Int !Random = {
+fn choice_int(xs: List<Int>) -> Int = {
     if List.length(xs) == 0 {
         0
     } else {
@@ -26,11 +26,11 @@ fn choice_int(xs: List<Int>) -> Int !Random = {
     }
 }
 
-fn list_int(n: Int) -> List<Int> !Random = {
+fn list_int(n: Int) -> List<Int> = {
     List.map(List.range(0, n), |ignored| Random.int(0, 100))
 }
 
-fn list_float(n: Int) -> List<Float> !Random = {
+fn list_float(n: Int) -> List<Float> = {
     List.map(List.range(0, n), |ignored| Random.float())
 }
 

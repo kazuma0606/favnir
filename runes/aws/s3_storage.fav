@@ -7,11 +7,11 @@ type S3Storage(String)
 // ── StorageRead impl ───────────────────────────────────────────────────────────
 
 impl StorageRead for S3Storage {
-    fn get(s: S3Storage, bucket: String, key: String) -> Result<String, String> !AWS {
+    fn get(s: S3Storage, bucket: String, key: String) -> Result<String, String> {
         AWS.s3_get_object_raw(bucket, key)
     }
 
-    fn list(s: S3Storage, bucket: String, prefix: String) -> Result<List<String>, String> !AWS {
+    fn list(s: S3Storage, bucket: String, prefix: String) -> Result<List<String>, String> {
         AWS.s3_list_objects_raw(bucket, prefix)
     }
 }
@@ -19,11 +19,11 @@ impl StorageRead for S3Storage {
 // ── StorageWrite impl ──────────────────────────────────────────────────────────
 
 impl StorageWrite for S3Storage {
-    fn put(s: S3Storage, bucket: String, key: String, body: String) -> Result<Unit, String> !AWS {
+    fn put(s: S3Storage, bucket: String, key: String, body: String) -> Result<Unit, String> {
         AWS.s3_put_object_raw(bucket, key, body)
     }
 
-    fn delete(s: S3Storage, bucket: String, key: String) -> Result<Unit, String> !AWS {
+    fn delete(s: S3Storage, bucket: String, key: String) -> Result<Unit, String> {
         AWS.s3_delete_object_raw(bucket, key)
     }
 }

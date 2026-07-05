@@ -67,17 +67,17 @@ ALTER USER <USER> SET RSA_PUBLIC_KEY='<公開鍵（ヘッダー/フッター除�
 ### execute
 
 ```favnir
-execute(sql: String) -> Int !Snowflake
+execute(sql: String) -> Int
 ```
 
 DML（INSERT / UPDATE / DELETE / CREATE 等）を実行し、影響行数を返す。
 
 ```favnir
-stage CreateTable: Unit -> Int !Snowflake = |_| {
+stage CreateTable: Unit -> Int = |_| {
   snowflake.execute("CREATE TABLE IF NOT EXISTS orders (id INT, customer STRING, amount FLOAT)")
 }
 
-stage InsertOrders: List<Order> -> Int !Snowflake = |orders| {
+stage InsertOrders: List<Order> -> Int = |orders| {
   bind json_str <- Json.encode_raw(orders)
   snowflake.execute(
     $"INSERT INTO orders SELECT value:id::INT, value:customer::STRING, value:amount::FLOAT FROM TABLE(FLATTEN(PARSE_JSON('{json_str}')))"
@@ -88,7 +88,7 @@ stage InsertOrders: List<Order> -> Int !Snowflake = |orders| {
 ### query
 
 ```favnir
-query<T>(sql: String) -> List<T> !Snowflake
+query<T>(sql: String) -> List<T>
 ```
 
 SELECT クエリを実行し、結果を `List<T>` として返す。
@@ -98,11 +98,11 @@ SELECT クエリを実行し、結果を `List<T>` として返す。
 type Order   = { id: Int  customer: String  amount: Float }
 type Summary = { region: String  total: Float  count: Int }
 
-stage FetchOrders: Unit -> List<Order> !Snowflake = |_| {
+stage FetchOrders: Unit -> List<Order> = |_| {
   snowflake.query<Order>("SELECT id, customer, amount FROM orders ORDER BY id")
 }
 
-stage SumByRegion: Unit -> List<Summary> !Snowflake = |_| {
+stage SumByRegion: Unit -> List<Summary> = |_| {
   snowflake.query<Summary>(
     "SELECT region, SUM(amount) AS total, COUNT(*) AS count FROM orders GROUP BY region"
   )
@@ -188,7 +188,7 @@ import rune "aws"
 type OrderRow   = { order_id: Int  customer: String  amount: Float  region: String }
 type SummaryRow = { region: String  total: Float  count: Int }
 
-stage LoadCsv: String -> List<OrderRow> !IO = |path| {
+stage LoadCsv: String -> List<OrderRow> = |path| {
   csv.read<OrderRow>(path)
 }
 
@@ -196,14 +196,14 @@ stage TransformRows: List<OrderRow> -> List<OrderRow> = |rows| {
   List.filter(rows, |r| r.amount > 0.0)
 }
 
-stage SnowflakeInsert: List<OrderRow> -> Int !Snowflake = |rows| {
+stage SnowflakeInsert: List<OrderRow> -> Int = |rows| {
   bind json_str <- Json.encode_raw(rows)
   snowflake.execute(
     $"INSERT INTO DEMO_DB.PUBLIC.ORDERS SELECT value:order_id::INT, value:customer::STRING, value:amount::FLOAT, value:region::STRING FROM TABLE(FLATTEN(PARSE_JSON('{json_str}')))"
   )
 }
 
-stage QuerySummary: Int -> Unit !Snowflake !AWS = |_| {
+stage QuerySummary: Int -> Unit = |_| {
   bind rows <- snowflake.query<SummaryRow>(
     "SELECT region, SUM(amount) AS total, COUNT(*) AS count FROM DEMO_DB.PUBLIC.ORDERS GROUP BY region ORDER BY region"
   )

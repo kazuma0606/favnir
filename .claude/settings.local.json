@@ -21,7 +21,9 @@
       "Bash(./fav/target/release/fav.exe run:*)",
       "Bash(./fav/target/release/fav.exe bench:*)",
       "Bash(node:*)",
-      "Bash(docker compose:*)"
+      "Bash(docker compose:*)",
+      "Bash(cargo metadata:*)",
+      "Bash(python -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\(d[''''packages''''][0][''''version'''']\\)\")"
     ]
   }
 }

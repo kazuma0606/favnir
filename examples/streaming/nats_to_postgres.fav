@@ -12,13 +12,13 @@ import rune "postgres"
 // 1. NATS の sensors.data サブジェクトからセンサー読み取りを受信
 // Note: NATS.connect("") の空文字列は VM primitive 内で NATS_URL 環境変数に
 //       フォールバックする（backend/vm.rs の NatsConnectRaw 実装参照）。
-stage FetchSensorData: Unit -> Result<String, String> !Stream = |_| {
+stage FetchSensorData: Unit -> Result<String, String> = |_| {
     bind conn <- NATS.connect("")
     NATS.subscribe(conn, "sensors.data")
 }
 
 // 2. 空ペイロードをスキップ（スタブ: 実プロジェクトでは値範囲チェックに拡張可能）
-stage ValidateSensor: String -> Result<String, String> !Pure = |payload| {
+stage ValidateSensor: String -> Result<String, String> = |payload| {
     if String.length(payload) > 0
     then Result.ok(payload)
     else Result.err("empty sensor payload — skipping")
@@ -27,7 +27,7 @@ stage ValidateSensor: String -> Result<String, String> !Pure = |payload| {
 // 3. Postgres の sensor_readings テーブルに INSERT
 // Note: Postgres.execute は Result<Unit, String> を返す。Unit を _ で捨てて Result<String, String> に変換。
 //       params は JSON 配列形式。sensor_json（JSONオブジェクト文字列）を配列で包んで渡す。
-stage InsertToPostgres: String -> Result<String, String> !Postgres = |sensor_json| {
+stage InsertToPostgres: String -> Result<String, String> = |sensor_json| {
     bind _ <- Postgres.execute(
         "INSERT INTO sensor_readings (data, received_at) VALUES ($1::jsonb, NOW())",
         "[" ++ sensor_json ++ "]"

@@ -16,12 +16,12 @@
 // ── Get ───────────────────────────────────────────────────────────────────────
 
 // Look up a key. Returns Some(value) or None.
-public fn get(key: String) -> Option<String> !Cache {
+public fn get(key: String) -> Option<String> {
     Cache.get_raw(key)
 }
 
 // Look up a key, returning default if absent.
-public fn get_or(key: String, default: String) -> String !Cache {
+public fn get_or(key: String, default: String) -> String {
     match Cache.get_raw(key) {
         None    => default
         Some(v) => v
@@ -31,24 +31,24 @@ public fn get_or(key: String, default: String) -> String !Cache {
 // ── Set ───────────────────────────────────────────────────────────────────────
 
 // Store a value with no expiry.
-public fn set(key: String, value: String) -> Unit !Cache {
+public fn set(key: String, value: String) -> Unit {
     Cache.set_raw(key, value, 0)
 }
 
 // Store a value with a TTL in seconds (TTL is advisory in the in-process store).
-public fn set_ttl(key: String, value: String, ttl_secs: Int) -> Unit !Cache {
+public fn set_ttl(key: String, value: String, ttl_secs: Int) -> Unit {
     Cache.set_raw(key, value, ttl_secs)
 }
 
 // ── Delete ────────────────────────────────────────────────────────────────────
 
 // Delete a single key.
-public fn del(key: String) -> Unit !Cache {
+public fn del(key: String) -> Unit {
     Cache.del_raw(key)
 }
 
 // Delete all keys that start with the given prefix.
 // Returns the number of deleted entries.
-public fn invalidate_prefix(prefix: String) -> Int !Cache {
+public fn invalidate_prefix(prefix: String) -> Int {
     Cache.del_prefix_raw(prefix)
 }

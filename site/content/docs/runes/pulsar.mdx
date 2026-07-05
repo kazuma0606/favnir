@@ -30,7 +30,7 @@ docker exec <pulsar-container> bin/pulsar-admin topics create persistent://publi
 ```favnir
 import rune "pulsar"
 
-stage PublishEvent: String -> Result<String, String> !AWS = |payload| {
+stage PublishEvent: String -> Result<String, String> = |payload| {
     Pulsar.produce("persistent://public/default/events", "partition-key", payload)
 }
 ```
@@ -72,11 +72,11 @@ bind _ <- Pulsar.nack(message_id)
 ```favnir
 import rune "pulsar"
 
-stage FetchEvents: Unit -> Result<String, String> !AWS = |_| {
+stage FetchEvents: Unit -> Result<String, String> = |_| {
     Pulsar.consume("persistent://public/default/events", "favnir-sub")
 }
 
-stage ProcessEvent: String -> Result<String, String> !Pure = |payload| {
+stage ProcessEvent: String -> Result<String, String> = |payload| {
     if String.length(payload) > 2
     then Result.ok(payload)
     else Result.err("empty payload")

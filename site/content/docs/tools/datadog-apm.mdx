@@ -22,21 +22,21 @@ Favnir Pipeline
 import runes/datadog
 
 // #[trace(service: "etl-extractor")] — v29.0+ で自動挿入予定
-stage ExtractEvents: Unit -> Result<Unit, String> !Io = |_| {
+stage ExtractEvents: Unit -> Result<Unit, String> = |_| {
     bind _ <- Datadog.metric("etl.extract.rows", 200.0, "pipeline:etl,stage:extract")
     bind _ <- Datadog.trace("etl-extractor", "extract_events")
     Result.ok(unit)
 }
 
 // #[trace(service: "etl-transformer")]
-stage TransformEvents: Unit -> Result<Unit, String> !Io = |_| {
+stage TransformEvents: Unit -> Result<Unit, String> = |_| {
     bind _ <- Datadog.metric("etl.transform.duration_ms", 38.5, "pipeline:etl,stage:transform")
     bind _ <- Datadog.log("info", "Transform complete", "{\"rows\": 200}")
     Result.ok(unit)
 }
 
 // #[trace(service: "etl-loader")]
-stage LoadEvents: Unit -> Result<Unit, String> !Io = |_| {
+stage LoadEvents: Unit -> Result<Unit, String> = |_| {
     bind _ <- Datadog.metric("etl.load.rows", 200.0, "pipeline:etl,stage:load")
     bind _ <- Datadog.event("ETL Complete", "All stages finished successfully", "pipeline:etl")
     bind _ <- Datadog.service_check("etl.pipeline", "OK")

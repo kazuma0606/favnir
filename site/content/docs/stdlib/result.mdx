@@ -26,7 +26,7 @@ description: "Result<T, E> — ok / err / map / and_then / unwrap_or"
 
 ```favnir
 // bind は Err を即座に伝播する（早期リターン）
-public fn pipeline() -> Result<Unit, String> !Db {
+public fn pipeline() -> Result<Unit, String> {
   bind conn <- db.connect("sqlite::memory:")
   bind rows <- db.query(conn, "SELECT * FROM orders")
   Result.ok(())

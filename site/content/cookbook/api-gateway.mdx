@@ -29,7 +29,7 @@ type UserResponse {
   created: String
 }
 
-fn handle_create_user(req: UserRequest) -> UserResponse !Db {
+fn handle_create_user(req: UserRequest) -> UserResponse {
   bind id <- db.execute(
     "INSERT INTO users (name, email) VALUES ($1, $2) RETURNING id",
     [req.name, req.email]
@@ -38,7 +38,7 @@ fn handle_create_user(req: UserRequest) -> UserResponse !Db {
   UserResponse { id: id, name: req.name, created: "2026-06-23" }
 }
 
-stage Server -> Unit !Http !Db {
+stage Server -> Unit {
   http.listen(8080, |request|
     match request.path {
       "/users" if request.method == "POST" =>

@@ -151,7 +151,7 @@ fn rune_meta_entry(n: String, doc: Map<String, String>) -> String {
 }
 
 // Read rune.toml at path and return parsed RuneMeta.
-public fn read_rune_meta(path: String) -> Result<RuneMeta, String> !IO {
+public fn read_rune_meta(path: String) -> Result<RuneMeta, String> {
     match IO.read_file_raw(path) {
         Err(e)      => Result.err(e)
         Ok(content) => {

@@ -20,7 +20,7 @@ import rune "duckdb"
 ```favnir
 type Summary = { customer: String  total: Float }
 
-public fn main() -> Unit !Io !Db {
+public fn main() -> Unit {
   bind conn   <- duckdb.open(":memory:")
   bind result <- duckdb.query<Summary>(conn,
     "SELECT customer, SUM(amount) AS total
@@ -33,7 +33,7 @@ public fn main() -> Unit !Io !Db {
 ## CSV → Parquet 変換
 
 ```favnir
-public fn convert() -> Unit !Io !Db {
+public fn convert() -> Unit {
   bind conn <- duckdb.open(":memory:")
   duckdb.execute(conn,
     "COPY (SELECT * FROM read_csv_auto('input.csv'))
@@ -47,7 +47,7 @@ public fn convert() -> Unit !Io !Db {
 import rune "aws"
 import rune "duckdb"
 
-public fn pipeline() -> Unit !Io !AWS !Db {
+public fn pipeline() -> Unit {
   bind orders <- aws.s3.read_csv<Order>("bucket", "input.csv")
   bind conn   <- duckdb.open(":memory:")
   bind result <- duckdb.query<Summary>(conn,
@@ -59,7 +59,7 @@ public fn pipeline() -> Unit !Io !AWS !Db {
 ## 1 行だけ取得
 
 ```favnir
-public fn main() -> Unit !Io !Db {
+public fn main() -> Unit {
   bind conn <- duckdb.open(":memory:")
   match duckdb.query_one(conn, "SELECT MAX(amount) AS max_amount FROM 'orders.parquet'") {
     Ok(row)  => IO.println($"最大注文額: {Map.get(row, \"max_amount\")}")
@@ -71,7 +71,7 @@ public fn main() -> Unit !Io !Db {
 ## クエリ実行計画
 
 ```favnir
-public fn main() -> Unit !Io !Db {
+public fn main() -> Unit {
   bind conn  <- duckdb.open(":memory:")
   bind plans <- duckdb.explain(conn, "SELECT * FROM 'orders.parquet' WHERE amount > 1000")
   IO.println(plans)
@@ -84,7 +84,7 @@ public fn main() -> Unit !Io !Db {
 `duckdb.write_parquet` / `duckdb.write_csv` で SQL 結果をファイルに書き出します。
 
 ```favnir
-public fn convert() -> Unit !Io !Db {
+public fn convert() -> Unit {
   bind conn <- duckdb.open(":memory:")
 
   // Parquet を読む

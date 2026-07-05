@@ -1,12 +1,12 @@
 // examples/jsonl_etl.fav — JSONL ETL デモ (v27.6.0)
 import rune "jsonl"
 
-stage ReadData: Unit -> Result<String, String> !Io = |_| {
+stage ReadData: Unit -> Result<String, String> = |_| {
     JSONL.read("data/events.jsonl")
 }
 
 // seq pipeline は前ステージの成功値（String）を次ステージの引数として渡す
-stage WriteProcessed: String -> Result<Unit, String> !Io = |rows| {
+stage WriteProcessed: String -> Result<Unit, String> = |rows| {
     JSONL.write("data/processed.jsonl", rows)
 }
 

@@ -2,12 +2,12 @@
 // ログ JSON をインデックスに書き込み、キーワードで検索する E2E デモ。
 import rune "elasticsearch"
 
-stage IndexLog: String -> Result<Unit, String> !Elasticsearch = |log_json| {
+stage IndexLog: String -> Result<Unit, String> = |log_json| {
   bind conn = Elasticsearch.connect("") in
   Elasticsearch.index(conn, "app-logs", log_json)
 }
 
-stage SearchLogs: String -> Result<String, String> !Elasticsearch = |keyword| {
+stage SearchLogs: String -> Result<String, String> = |keyword| {
   bind conn = Elasticsearch.connect("") in
   let query = "{\"query\":{\"match\":{\"message\":\"" ++ keyword ++ "\"}}}" in
   Elasticsearch.search(conn, "app-logs", query)

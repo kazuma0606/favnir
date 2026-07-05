@@ -1239,17 +1239,9 @@ fn has_effect(effects: List<String>, eff: String) -> Bool {
     List.any(effects, |e| str_eq(e, eff))
 }
 
+// v35.5.0: Effect enforcement removed from checker.fav — Effect enum deleted.
 fn check_effects_all(declared: List<String>, inferred: List<String>) -> Option<String> {
-    match List.first(inferred) {
-        None => Option.none()
-        Some(eff) => {
-            if has_effect(declared, eff) {
-                check_effects_all(declared, List.drop(inferred, 1))
-            } else {
-                Option.some(fmt_err("E0003", String.concat("undeclared effect !", eff)))
-            }
-        }
-    }
+    Option.none()
 }
 
 fn is_type_var(s: String) -> Bool {
@@ -1853,19 +1845,12 @@ fn check_body_ty(fname: String, ret: TypeExpr, r: InfResult) -> Result<String, S
     }
 }
 
+// v35.5.0: Effect enforcement removed — infer_expr_effects / check_effects_all calls deleted.
 fn check_fn_def(fd: FnDef, env: List<KVPair>) -> Result<String, String> {
     bind param_env <- build_param_env(fd.params, env);
-    bind inferred_effs <- infer_expr_effects(fd.body);
     bind init_state <- inf_state_new(subst_empty(), 0);
     chain _ok <- check_rebind_ok(fd.body, collect_param_names(fd.params));
-    if has_appctx_param(fd.params) {
-        Result.and_then(infer_hm(fd.body, param_env, init_state), |r| check_body_ty(fd.name, fd.ret, r))
-    } else {
-        match check_effects_all(fd.effects, inferred_effs) {
-            Some(err) => Result.err(err)
-            None => Result.and_then(infer_hm(fd.body, param_env, init_state), |r| check_body_ty(fd.name, fd.ret, r))
-        }
-    }
+    Result.and_then(infer_hm(fd.body, param_env, init_state), |r| check_body_ty(fd.name, fd.ret, r))
 }
 
 fn type_param_env_inner(params: List<String>, args: List<String>, acc: List<KVPair>) -> List<KVPair> {

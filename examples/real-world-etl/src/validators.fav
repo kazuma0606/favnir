@@ -1,0 +1,21 @@
+fn validate_order(row: Int, o: Order) -> Result<Order, ValidationError> {
+    if o.order_id == "" {
+        Result.err({ row, field: "order_id", message: "order_id is required" })
+    } else if o.quantity <= 0 {
+        Result.err({ row, field: "quantity", message: "quantity must be positive" })
+    } else if o.price < 0.0 {
+        Result.err({ row, field: "price", message: "price must be non-negative" })
+    } else {
+        Result.ok(o)
+    }
+}
+
+fn validate_all(orders: List<Order>) -> LoadResult {
+    let pairs   = List.indexed(orders)
+    let results = List.map(pairs, fn (pair) {
+        validate_order(pair.index, pair.value)
+    })
+    let valid_orders = List.filter_map(results, fn (r) { Result.to_option(r) })
+    let errors       = List.filter_map(results, fn (r) { Result.err_to_option(r) })
+    { orders: valid_orders, errors }
+}

@@ -1,0 +1,50 @@
+---
+title: "インクリメンタルロード（差分更新）"
+description: "最終実行時刻を記録し、それ以降に更新されたデータのみを差分ロードする"
+---
+
+# インクリメンタルロード（差分更新）
+
+前回実行時刻以降に更新されたレコードのみを抽出し、宛先テーブルに差分ロードします。
+
+## コード例
+
+```favnir
+import runes/postgres
+
+fn get_last_run(table: String) -> String {
+    bind row <- Postgres.query_one(
+        "SELECT last_run FROM etl_state WHERE table_name = $1",
+        [table]
+    )
+    match row {
+        None    -> "1970-01-01T00:00:00Z"
+        Some(r) -> r["last_run"]
+    }
+}
+
+fn update_last_run(table: String, ts: String) -> Unit {
+    // execute_raw の第二引数は List<List<String>>（行のリスト）
+    // 単一行更新のため [[table, ts]] は 1 行 2 カラムのバッチ呼び出し
+    bind _ <- Postgres.execute_raw(
+        "INSERT INTO etl_state (table_name, last_run) VALUES ($1, $2) ON CONFLICT (table_name) DO UPDATE SET last_run = $2",
+        [[table, ts]]
+    )
+}
+
+fn main() -> Unit {
+    bind last_run <- get_last_run("orders")
+    bind new_rows <- Postgres.query_raw(
+        String.concat(["SELECT * FROM orders_source WHERE updated_at > '", last_run, "'"])
+    )
+    bind n <- Postgres.upsert("orders_dest", new_rows, "id")
+    bind _ <- update_last_run("orders", DateTime.now_utc())
+    IO.println(String.concat(["Incremental load: ", Int.to_string(n), " rows updated."]))
+}
+```
+
+## ポイント
+
+- `etl_state` テーブルに最終実行時刻を記録することで冪等なインクリメンタルロードを実現します。
+- `Postgres.upsert` は重複 ID のレコードを UPDATE し、新規レコードを INSERT します。
+- 初回実行時は `last_run` が `1970-01-01` になるため全件ロードとなります。

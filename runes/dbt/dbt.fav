@@ -4,10 +4,10 @@
 // TODO(v28.x): DbtConfig { project_dir: String, profiles_dir: String, target: String } 型に昇格予定
 // NOTE: ref は将来 Favnir 予約語になる可能性あり。その際は dbt_ref にリネーム（v28.x で検討）
 
-public fn ref(config: String, model_name: String) -> Result<String, String> !Db {
+public fn ref(config: String, model_name: String) -> Result<String, String> {
     Dbt.ref_raw(config, model_name)
 }
 
-public fn source(config: String, source_name: String, table_name: String) -> Result<String, String> !Db {
+public fn source(config: String, source_name: String, table_name: String) -> Result<String, String> {
     Dbt.source_raw(config, source_name, table_name)
 }

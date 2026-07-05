@@ -157,7 +157,7 @@ fav run main.fav
 ```favnir
 import rune "csv"
 
-public fn main() -> Unit !Io {
+public fn main() -> Unit {
   bind rows <- csv.read_file<Row>("data.csv")
   IO.println(rows)
 }

@@ -7,14 +7,14 @@
 // HTTP POST ベース。エフェクトは !Http。
 
 // gql_post — GraphQL リクエストを JSON 形式で HTTP POST する内部ヘルパー
-fn gql_post(url: String, query_str: String) -> Result<String, String> !Http {
+fn gql_post(url: String, query_str: String) -> Result<String, String> {
     Http.post_body_raw(url,
         String.concat("{\"query\":\"", String.concat(query_str, "\"}")),
         "application/json")
 }
 
 // query<T> — GraphQL クエリを実行してレスポンスを型 T に変換
-public fn query<T>(url: String, gql: String) -> Result<T, String> !Http {
+public fn query<T>(url: String, gql: String) -> Result<T, String> {
     match gql_post(url, gql) {
         Err(e) => Result.err(e)
         Ok(body) =>
@@ -30,7 +30,7 @@ public fn query<T>(url: String, gql: String) -> Result<T, String> !Http {
 }
 
 // mutate<T> — GraphQL ミューテーションを実行してレスポンスを型 T に変換
-public fn mutate<T>(url: String, gql: String) -> Result<T, String> !Http {
+public fn mutate<T>(url: String, gql: String) -> Result<T, String> {
     match gql_post(url, gql) {
         Err(e) => Result.err(e)
         Ok(body) =>

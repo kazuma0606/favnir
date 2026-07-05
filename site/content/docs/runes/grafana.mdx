@@ -26,7 +26,7 @@ import runes/grafana
 ```favnir
 import runes/grafana
 
-stage RecordDeploy: Unit -> Result<Unit, String> !Io = |_| {
+stage RecordDeploy: Unit -> Result<Unit, String> = |_| {
     bind _ <- Grafana.create_annotation("main-dashboard", "Deploy v28.6.0", "deploy,favnir")
     bind _ <- Grafana.push_dashboard("{\"title\": \"ETL Pipeline\", \"panels\": []}")
     Result.ok(unit)

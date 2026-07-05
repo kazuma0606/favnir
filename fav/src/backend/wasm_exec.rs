@@ -108,7 +108,7 @@ pub fn wasm_exec_info(bytes: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::{register_host_functions, wasm_exec_info, wasm_exec_main};
-    use crate::ast::{Effect, Lit};
+    use crate::ast::Lit;
     use crate::backend::wasm_codegen::wasm_codegen_program;
     use crate::middle::checker::Type;
     use crate::middle::ir::{IRExpr, IRFnDef, IRGlobal, IRGlobalKind, IRProgram};
@@ -131,7 +131,6 @@ mod tests {
                 param_count: 0,
                 param_tys: vec![],
                 local_count: 0,
-                effects: vec![Effect::Io],
                 return_ty: Type::Unit,
                 body: IRExpr::Call(
                     Box::new(IRExpr::FieldAccess(

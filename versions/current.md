@@ -1,37 +1,43 @@
 # Current — Favnir 進行状況
 
-最終更新: 2026-07-01
+最終更新: 2026-07-05
 
 ---
 
 ## 現行マスターロードマップ
 
-[roadmap/roadmap-v30.1-v35.0.md](roadmap/roadmap-v30.1-v35.0.md)
+[roadmap/roadmap-v34.1-v35.0.md](roadmap/roadmap-v34.1-v35.0.md)
 
 ---
 
 ## 最新安定版
 
-**v30.0.0** — Ecosystem Maturity 宣言（2026-07-01）
+**v35.6.0** — MDX ドキュメント ctx 構文統一 + Production Ready 宣言（v35.0A）（2026-07-05）
 
-- 2372 tests pass
-- `cargo install fav --version "30.0.0"`
+- `cargo install fav --version "35.5.0"`
 
 ---
 
 ## 進行中バージョン
 
-なし（v30.0.0 完了直後）
+なし（v35.6.0 完了）
 
 ---
 
 ## 次に切る版
 
-**v30.1.0** — ビルド軽量化
+**v35.6.0** — サイト MDX 125 件を ctx 構文に統一 + v35.0 Production Ready 宣言（v35.0A）
 
-- spec/plan/tasks: 未作成 → [テンプレート](_templates/version/spec.md) を使用
-- 依存関係: なし
-- 内容: `[profile.dev] debug = 0` + `.cargo/config.toml` でビルド生成物を軽量化
+---
+
+## !Effect 廃止ロードマップ
+
+| バージョン | スプリント | 内容 |
+|---|---|---|
+| v35.3.0 | v34.7A | examples/ + infra/ から !Effect 除去 ✅ |
+| v35.4.0 | v34.8A | parser で !Effect を E0374 ハードエラー化 ✅ |
+| v35.6.0 | v34.9A | Effect enum + effects フィールドの完全削除 ✅ |
+| v35.6.0 | v35.0A | サイト MDX 125 件を ctx 構文に統一 + v35.0 Production Ready 宣言 ✅ |
 
 ---
 
@@ -44,10 +50,10 @@
 | v28.0 — Data Lakehouse | **完了** | Delta Lake / Iceberg / DuckDB |
 | v29.0 — Observability First | **完了** | OTel / Prometheus / Datadog |
 | v30.0 — Ecosystem Maturity | **完了** | Rune Registry / コミュニティ Rune |
-| v31.0 — Real-World Readiness | planned | v30.1〜v30.9 完了後に宣言 |
-| v32.0 — Language Polish | planned | v31.x 完了後 |
-| v33.0 — Language Power | planned | v32.x 完了後（詳細はドッグフード後確定）|
-| v34.0 — Performance & Tooling | planned | v33.x 完了後（同上）|
-| v35.0 — Production Ready | planned | v34.x 完了後（同上）|
+| v31.0 — Real-World Readiness | **完了** | v30.1〜v30.9 完了後に宣言（2026-07-02） |
+| v32.0 — Language Polish | **完了** | v31.1〜v31.9 完了後に宣言（2026-07-03） |
+| v33.0 — Language Power | **完了** | v32.1〜v32.9 完了後に宣言（2026-07-03） |
+| v34.0 — Performance & Tooling | **完了** | v33.x 完了後（2026-07-04）|
+| v35.0 — Production Ready | **完了** | v34.x 完了後（2026-07-04）|
 
-詳細は [INDEX.md](INDEX.md) / [roadmap/roadmap-v30.1-v35.0.md](roadmap/roadmap-v30.1-v35.0.md) を参照。
+詳細は [INDEX.md](INDEX.md) / [roadmap/roadmap-v34.1-v35.0.md](roadmap/roadmap-v34.1-v35.0.md) を参照。

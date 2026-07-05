@@ -1,6 +1,6 @@
-public fn create_annotation(dashboard_id: String, text: String, tags: String) -> Result<Unit, String> !Io =
+public fn create_annotation(dashboard_id: String, text: String, tags: String) -> Result<Unit, String> =
     Grafana.create_annotation_raw(dashboard_id, text, tags)
-public fn push_dashboard(json: String) -> Result<Unit, String> !Io =
+public fn push_dashboard(json: String) -> Result<Unit, String> =
     Grafana.push_dashboard_raw(json)
-public fn snapshot(dashboard_id: String) -> Result<String, String> !Io =
+public fn snapshot(dashboard_id: String) -> Result<String, String> =
     Grafana.snapshot_raw(dashboard_id)

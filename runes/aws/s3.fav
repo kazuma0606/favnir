@@ -1,22 +1,22 @@
 // S3 Rune — object storage operations (v4.11.0, ctx-aware wrappers v14.4.0)
 
-public fn get_object(bucket: String, key: String) -> Result<String, String> !AWS {
+public fn get_object(bucket: String, key: String) -> Result<String, String> {
     AWS.s3_get_object_raw(bucket, key)
 }
 
-public fn put_object(bucket: String, key: String, body: String) -> Result<Unit, String> !AWS {
+public fn put_object(bucket: String, key: String, body: String) -> Result<Unit, String> {
     AWS.s3_put_object_raw(bucket, key, body)
 }
 
-public fn delete_object(bucket: String, key: String) -> Result<Unit, String> !AWS {
+public fn delete_object(bucket: String, key: String) -> Result<Unit, String> {
     AWS.s3_delete_object_raw(bucket, key)
 }
 
-public fn list_objects(bucket: String, prefix: String) -> Result<List<String>, String> !AWS {
+public fn list_objects(bucket: String, prefix: String) -> Result<List<String>, String> {
     AWS.s3_list_objects_raw(bucket, prefix)
 }
 
-public fn bucket_exists(bucket: String) -> Result<Bool, String> !AWS {
+public fn bucket_exists(bucket: String) -> Result<Bool, String> {
     AWS.s3_head_bucket_raw(bucket)
 }
 
@@ -25,22 +25,22 @@ public fn bucket_exists(bucket: String) -> Result<Bool, String> !AWS {
 // 既存の get_object(bucket, key) はそのまま残す（後方互換）。
 
 /// Put an object using the bucket from AwsCtx (ctx: String JSON from Ctx.build_aws_raw).
-public fn s3_put(ctx: String, key: String, body: String) -> Result<Unit, String> !AWS {
+public fn s3_put(ctx: String, key: String, body: String) -> Result<Unit, String> {
     AWS.s3_put_object_raw(Ctx.aws_get_field_raw(ctx, "s3_bucket"), key, body)
 }
 
 /// Get an object using the bucket from AwsCtx (ctx: String JSON from Ctx.build_aws_raw).
-public fn s3_get(ctx: String, key: String) -> Result<String, String> !AWS {
+public fn s3_get(ctx: String, key: String) -> Result<String, String> {
     AWS.s3_get_object_raw(Ctx.aws_get_field_raw(ctx, "s3_bucket"), key)
 }
 
 /// Delete an object using the bucket from AwsCtx (ctx: String JSON from Ctx.build_aws_raw).
-public fn s3_delete(ctx: String, key: String) -> Result<Unit, String> !AWS {
+public fn s3_delete(ctx: String, key: String) -> Result<Unit, String> {
     AWS.s3_delete_object_raw(Ctx.aws_get_field_raw(ctx, "s3_bucket"), key)
 }
 
 /// List objects using the bucket from AwsCtx (ctx: String JSON from Ctx.build_aws_raw).
-public fn s3_list(ctx: String, prefix: String) -> Result<List<String>, String> !AWS {
+public fn s3_list(ctx: String, prefix: String) -> Result<List<String>, String> {
     AWS.s3_list_objects_raw(Ctx.aws_get_field_raw(ctx, "s3_bucket"), prefix)
 }
 
@@ -48,12 +48,12 @@ public fn s3_list(ctx: String, prefix: String) -> Result<List<String>, String> !
 
 // presign_url — 署名付き URL を生成する（GET 操作用。PUT 対応は v25.x 以降）
 // ttl_secs: URL の有効期間（秒）例: 3600 = 1時間
-public fn presign_url(bucket: String, key: String, ttl_secs: Int) -> Result<String, String> !AWS {
+public fn presign_url(bucket: String, key: String, ttl_secs: Int) -> Result<String, String> {
     AWS.s3_presign_url_raw(bucket, key, ttl_secs)
 }
 
 // stream_get — 大容量オブジェクトのストリーミング取得
 // 現バージョンでは get_object と同等の動作（将来 Stream<Bytes> 対応予定）
-public fn stream_get(bucket: String, key: String) -> Result<String, String> !AWS {
+public fn stream_get(bucket: String, key: String) -> Result<String, String> {
     AWS.s3_stream_get_raw(bucket, key)
 }

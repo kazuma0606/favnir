@@ -1,0 +1,9 @@
+[project]
+name    = "csv-to-postgres"
+version = "0.1.0"
+edition = "2026"
+src     = "src"
+
+[postgres]
+# url = "$DATABASE_URL"
+sslmode = "require"

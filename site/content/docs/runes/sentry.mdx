@@ -28,7 +28,7 @@ import runes/sentry
 ```favnir
 import runes/sentry
 
-stage HandleError: Unit -> Result<Unit, String> !Io = |_| {
+stage HandleError: Unit -> Result<Unit, String> = |_| {
     bind _ <- Sentry.set_user("user-001", "ops@example.com")
     bind _ <- Sentry.set_tag("pipeline", "etl")
     bind _ <- Sentry.capture_error("stage failed: timeout")

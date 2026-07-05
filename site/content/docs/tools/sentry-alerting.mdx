@@ -22,19 +22,19 @@ Favnir Pipeline
 import runes/sentry
 
 // #[on_error(report_to: "sentry", level: "critical")] — v29.0+ で自動挿入予定
-stage CriticalLoad: Unit -> Result<Unit, String> !Io = |_| {
+stage CriticalLoad: Unit -> Result<Unit, String> = |_| {
     bind _ <- Sentry.capture_error("critical stage failed: connection timeout")
     bind _ <- Sentry.capture_message("critical", "pipeline critical failure detected")
     Result.ok(unit)
 }
 
-stage ReportError: Unit -> Result<Unit, String> !Io = |_| {
+stage ReportError: Unit -> Result<Unit, String> = |_| {
     bind _ <- Sentry.capture_error("pipeline execution failed: connection timeout")
     bind _ <- Sentry.set_tag("pipeline", "etl")
     Result.ok(unit)
 }
 
-stage SetContext: Unit -> Result<Unit, String> !Io = |_| {
+stage SetContext: Unit -> Result<Unit, String> = |_| {
     bind _ <- Sentry.set_user("user-001", "ops@example.com")
     bind _ <- Sentry.set_extra("pipeline_version", "28.9.0")
     Result.ok(unit)

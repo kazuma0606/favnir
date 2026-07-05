@@ -5,7 +5,7 @@
 ```favnir
 import runes/slack
 
-stage NotifySlackOnComplete: PipelineResult -> Unit !Http = |result| {
+stage NotifySlackOnComplete: PipelineResult -> Unit = |result| {
   Slack.post_message(
     config.slack_webhook_url,
     "#data-pipeline",

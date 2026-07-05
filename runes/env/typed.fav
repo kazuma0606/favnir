@@ -1,7 +1,7 @@
 // typed.fav — Typed environment variable access (v4.7.0)
 
 // get_int: Returns the env var as Int, or `default` if missing or unparseable.
-public fn get_int(key: String, default: Int) -> Int !Env {
+public fn get_int(key: String, default: Int) -> Int {
     match Env.get_int_raw(key) {
         Ok(v)  => v
         Err(_) => default
@@ -9,12 +9,12 @@ public fn get_int(key: String, default: Int) -> Int !Env {
 }
 
 // require_int: Returns Ok(Int) or Err(message).
-public fn require_int(key: String) -> Result<Int, String> !Env {
+public fn require_int(key: String) -> Result<Int, String> {
     Env.get_int_raw(key)
 }
 
 // get_bool: Returns the env var as Bool, or `default` if missing or unparseable.
-public fn get_bool(key: String, default: Bool) -> Bool !Env {
+public fn get_bool(key: String, default: Bool) -> Bool {
     match Env.get_bool_raw(key) {
         Ok(v)  => v
         Err(_) => default
@@ -22,6 +22,6 @@ public fn get_bool(key: String, default: Bool) -> Bool !Env {
 }
 
 // require_bool: Returns Ok(Bool) or Err(message).
-public fn require_bool(key: String) -> Result<Bool, String> !Env {
+public fn require_bool(key: String) -> Result<Bool, String> {
     Env.get_bool_raw(key)
 }

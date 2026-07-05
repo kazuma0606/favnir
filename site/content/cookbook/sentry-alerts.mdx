@@ -5,7 +5,7 @@
 ```favnir
 import runes/sentry
 
-stage LoadWithSentryGuard: String -> List<Row> !Http = |source| {
+stage LoadWithSentryGuard: String -> List<Row> = |source| {
   match load_data(source) {
   | Result.ok(rows)  -> Result.ok(rows)
   | Result.err(msg)  ->

@@ -1,21 +1,21 @@
 // runes/sqlite/sqlite.fav — SQLite Rune (v27.9.0)
 // 依存ゼロ・ローカル動作の組み込み DB。ローカル開発・軽量 ETL・テスト用 DB として活用する。
 // v27.9.0 stub — rusqlite 統合は v28.x 以降
-public fn open(path: String) -> Result<String, String> !Db {
+public fn open(path: String) -> Result<String, String> {
     SQLite.open_raw(path)
 }
-public fn open_memory() -> Result<String, String> !Db {
+public fn open_memory() -> Result<String, String> {
     SQLite.open_memory_raw()
 }
-public fn query(db: String, sql: String, params: String) -> Result<String, String> !Db {
+public fn query(db: String, sql: String, params: String) -> Result<String, String> {
     SQLite.query_raw(db, sql, params)
 }
-public fn execute(db: String, sql: String, params: String) -> Result<Int, String> !Db {
+public fn execute(db: String, sql: String, params: String) -> Result<Int, String> {
     SQLite.execute_raw(db, sql, params)
 }
-public fn execute_many(db: String, sql: String, rows: String) -> Result<Int, String> !Db {
+public fn execute_many(db: String, sql: String, rows: String) -> Result<Int, String> {
     SQLite.execute_many_raw(db, sql, rows)
 }
-public fn close(db: String) -> Result<Unit, String> !Db {
+public fn close(db: String) -> Result<Unit, String> {
     SQLite.close_raw(db)
 }

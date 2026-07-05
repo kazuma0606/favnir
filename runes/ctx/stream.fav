@@ -1,0 +1,9 @@
+// runes/ctx/stream.fav — StreamClient interface（v34.6.0）
+// !Stream エフェクトの Capability Context 移行用インターフェース。
+// `!Stream` を使用している関数は ctx.stream を通じてストリーム操作を行う。
+
+interface StreamClient {
+    fn produce(ctx: StreamClient, topic: String, key: String, value: String) -> Result<Unit, String>
+    fn consume(ctx: StreamClient, topic: String, group: String) -> Result<List<String>, String>
+    fn commit(ctx: StreamClient, topic: String, group: String) -> Result<Unit, String>
+}

@@ -8,7 +8,7 @@
 
 // Send a plain-text email via AWS SES.
 // Returns Ok(()) on success, Err(message) on failure.
-public fn send(from: String, to: String, subject: String, body: String) -> Result<Unit, String> !Email {
+public fn send(from: String, to: String, subject: String, body: String) -> Result<Unit, String> {
     Email.send_raw(from, to, subject, body)
 }
 
@@ -17,7 +17,7 @@ public fn send(from: String, to: String, subject: String, body: String) -> Resul
 // Send the same email to multiple recipients.
 // Returns Ok(count) where count is the number successfully sent.
 // Failures are silently skipped; use send_all_strict for all-or-nothing.
-public fn send_bulk(from: String, recipients: List<String>, subject: String, body: String) -> Result<Int, String> !Email {
+public fn send_bulk(from: String, recipients: List<String>, subject: String, body: String) -> Result<Int, String> {
     bind results <- List.map(recipients, |to| Email.send_raw(from, to, subject, body))
     bind ok_count <- List.fold(results, 0, |acc, r|
         match r {
@@ -30,6 +30,6 @@ public fn send_bulk(from: String, recipients: List<String>, subject: String, bod
 // ── Notify helper ─────────────────────────────────────────────────────────────
 
 // Send a simple notification email. Subject defaults to "[Favnir] Notification".
-public fn notify(from: String, to: String, message: String) -> Result<Unit, String> !Email {
+public fn notify(from: String, to: String, message: String) -> Result<Unit, String> {
     Email.send_raw(from, to, "[Favnir] Notification", message)
 }

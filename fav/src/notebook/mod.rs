@@ -874,7 +874,7 @@ mod tests {
             cells: vec![Cell {
                 id: "c001".to_string(),
                 cell_type: CellType::Code,
-                content: "fn main() -> Unit !Io { IO.println(\"hi\") }".to_string(),
+                content: "fn main() -> Unit { IO.println(\"hi\") }".to_string(),
                 output: None,
             }],
         };

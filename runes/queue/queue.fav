@@ -14,14 +14,14 @@
 // ── Single message ────────────────────────────────────────────────────────────
 
 // Send a single message to the queue.
-public fn send(url: String, body: String) -> Result<Unit, String> !Queue {
+public fn send(url: String, body: String) -> Result<Unit, String> {
     Queue.send_raw(url, body)
 }
 
 // ── Batch send ────────────────────────────────────────────────────────────────
 
 // Helper: send one message and accumulate success count.
-fn send_one(url: String, body: String, acc: Int) -> Result<Int, String> !Queue {
+fn send_one(url: String, body: String, acc: Int) -> Result<Int, String> {
     match Queue.send_raw(url, body) {
         Err(e) => Result.err(e)
         Ok(_)  => Result.ok(Int.add(acc, 1))
@@ -29,7 +29,7 @@ fn send_one(url: String, body: String, acc: Int) -> Result<Int, String> !Queue {
 }
 
 // Helper: iterate over messages and send each one.
-fn send_all(url: String, messages: List<String>, acc: Int) -> Result<Int, String> !Queue {
+fn send_all(url: String, messages: List<String>, acc: Int) -> Result<Int, String> {
     match List.head(messages) {
         None      => Result.ok(acc)
         Some(msg) => match send_one(url, msg, acc) {
@@ -41,26 +41,26 @@ fn send_all(url: String, messages: List<String>, acc: Int) -> Result<Int, String
 
 // Send multiple messages, returning the count of successfully sent messages.
 // Stops on the first error.
-public fn send_batch(url: String, messages: List<String>) -> Result<Int, String> !Queue {
+public fn send_batch(url: String, messages: List<String>) -> Result<Int, String> {
     send_all(url, messages, 0)
 }
 
 // ── Receive ───────────────────────────────────────────────────────────────────
 
 // Receive up to max messages. Returns message bodies as a list of strings.
-public fn recv(url: String, max: Int) -> Result<List<String>, String> !Queue {
+public fn recv(url: String, max: Int) -> Result<List<String>, String> {
     Queue.recv_raw(url, max)
 }
 
 // ── Ack / Nack ────────────────────────────────────────────────────────────────
 
 // Acknowledge a message (deletes it from the queue).
-public fn ack(url: String, receipt: String) -> Result<Unit, String> !Queue {
+public fn ack(url: String, receipt: String) -> Result<Unit, String> {
     Queue.ack_raw(url, receipt)
 }
 
 // Nack a message — makes it immediately visible again for reprocessing.
 // (Calls delete_raw which on SQS resets visibility via a no-op for now.)
-public fn nack(url: String, receipt: String) -> Result<Unit, String> !Queue {
+public fn nack(url: String, receipt: String) -> Result<Unit, String> {
     Queue.delete_raw(url, receipt)
 }

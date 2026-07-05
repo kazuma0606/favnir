@@ -5,7 +5,7 @@
 ```favnir
 import runes/pagerduty
 
-stage AlertOnCriticalFailure: String -> Unit !Http = |error_msg| {
+stage AlertOnCriticalFailure: String -> Unit = |error_msg| {
   bind _ <- PagerDuty.create_incident(
     config.pagerduty_routing_key,
     "[CRITICAL] Pipeline Failure: " ++ error_msg,
@@ -15,7 +15,7 @@ stage AlertOnCriticalFailure: String -> Unit !Http = |error_msg| {
   Result.ok(unit)
 }
 
-stage ResolveAfterRecovery: String -> Unit !Http = |incident_key| {
+stage ResolveAfterRecovery: String -> Unit = |incident_key| {
   PagerDuty.resolve(config.pagerduty_routing_key, incident_key)
 }
 ```

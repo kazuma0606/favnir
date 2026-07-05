@@ -1,0 +1,18 @@
+type RawRow = {
+    id:     String
+    name:   String
+    amount: String
+    date:   String
+}
+
+type ValidRow = {
+    id:     Int
+    name:   String
+    amount: Float
+    date:   String
+}
+
+type RowError = {
+    field:   String
+    message: String
+}

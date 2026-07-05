@@ -22,7 +22,7 @@ mysql://user:password@host:3306/database
 `!MySQL` は外部 MySQL 操作を明示するエフェクトです。`!Postgres` とは独立した別エフェクトです。
 
 ```favnir
-stage FetchRows: Unit -> String !MySQL = |_| {
+stage FetchRows: Unit -> String = |_| {
     bind conn <- MySQL.connect("mysql://root:root@localhost:3306/mydb")
     MySQL.query(conn, "SELECT * FROM users", "[]")
 }
@@ -33,7 +33,7 @@ stage FetchRows: Unit -> String !MySQL = |_| {
 ### `MySQL.connect`
 
 ```favnir
-fn connect(url: String) -> Result<MySqlConn, String> !MySQL
+fn connect(url: String) -> Result<MySqlConn, String>
 ```
 
 URL から接続を確立します。成功時は `MySqlConn` を返します。
@@ -47,7 +47,7 @@ bind conn <- MySQL.connect("mysql://root:root@localhost:3306/mydb")
 ### `MySQL.query`
 
 ```favnir
-fn query(conn: MySqlConn, sql: String, params: String) -> Result<String, String> !MySQL
+fn query(conn: MySqlConn, sql: String, params: String) -> Result<String, String>
 ```
 
 SELECT クエリを実行し、行を JSON 配列文字列として返します。
@@ -64,7 +64,7 @@ bind rows <- MySQL.query(conn, "SELECT id, name FROM users WHERE status = ?", "[
 ### `MySQL.execute`
 
 ```favnir
-fn execute(conn: MySqlConn, sql: String, params: String) -> Result<Int, String> !MySQL
+fn execute(conn: MySqlConn, sql: String, params: String) -> Result<Int, String>
 ```
 
 INSERT / UPDATE / DELETE を実行し、影響行数を返します。
@@ -78,7 +78,7 @@ bind affected <- MySQL.execute(conn, "UPDATE users SET status = ? WHERE id = ?",
 ### `MySQL.transaction_begin`
 
 ```favnir
-fn transaction_begin(conn: MySqlConn) -> Result<Unit, String> !MySQL
+fn transaction_begin(conn: MySqlConn) -> Result<Unit, String>
 ```
 
 `BEGIN` を発行します。
@@ -91,7 +91,7 @@ fn transaction_begin(conn: MySqlConn) -> Result<Unit, String> !MySQL
 ### `MySQL.transaction_commit`
 
 ```favnir
-fn transaction_commit(conn: MySqlConn) -> Result<Unit, String> !MySQL
+fn transaction_commit(conn: MySqlConn) -> Result<Unit, String>
 ```
 
 `COMMIT` を発行します。
@@ -101,7 +101,7 @@ fn transaction_commit(conn: MySqlConn) -> Result<Unit, String> !MySQL
 ### `MySQL.transaction_rollback`
 
 ```favnir
-fn transaction_rollback(conn: MySqlConn) -> Result<Unit, String> !MySQL
+fn transaction_rollback(conn: MySqlConn) -> Result<Unit, String>
 ```
 
 `ROLLBACK` を発行します。
@@ -123,12 +123,12 @@ fn transaction_rollback(conn: MySqlConn) -> Result<Unit, String> !MySQL
 ```favnir
 import rune "mysql"
 
-stage LoadPendingOrders: Unit -> String !MySQL = |_| {
+stage LoadPendingOrders: Unit -> String = |_| {
     bind conn <- MySQL.connect("mysql://root:root@localhost:3306/shop")
     MySQL.query(conn, "SELECT id, amount FROM orders WHERE status = ?", "[\"pending\"]")
 }
 
-stage MarkProcessed: String -> Int !MySQL = |order_id| {
+stage MarkProcessed: String -> Int = |order_id| {
     bind conn <- MySQL.connect("mysql://root:root@localhost:3306/shop")
     MySQL.execute(conn, "UPDATE orders SET status = ? WHERE id = ?", "[\"processed\", " + order_id + "]")
 }

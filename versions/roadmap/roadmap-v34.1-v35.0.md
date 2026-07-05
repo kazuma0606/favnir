@@ -1,7 +1,7 @@
 # Roadmap v34.1.0 〜 v35.0.0 — Production Ready
 
 Date: 2026-07-01
-Status: 骨格確定（詳細は v34.0 完了後に更新）
+Status: 骨格確定 + v34.0 完了後更新（2026-07-04）
 
 ---
 
@@ -21,17 +21,61 @@ v30.1〜v34.9 で積み上げた成果を **「実案件で使える」レベル
 
 ---
 
-## ⚠️ 重要：v34.0 完了後に更新が必要
+## v34.0 完了時に判明した実装変更
 
-このファイルは **骨格のみ** である。
+v34.0.0（Performance & Tooling 宣言、2026-07-04）完了時点での判明事項:
 
-v34.0 完了後に:
-1. v30.1〜v34.9 を通じて積み上がった残課題を洗い出す
-2. ドキュメントサイト v4 のコンテンツ要件を確定する
-3. ベンチマーク比較対象（Python / Spark / dbt）を確定する
-4. v34.5〜v34.9 の具体的な作業を決定する
+### エフェクトシステム統一（コンテキスト構文移行）
 
-**更新担当**: v34.0 リリース時
+v33.7.0 でエフェクトシステム移行ツール（`migrate_effects_in_source` / `resolve_use_effects`）を確認済み。
+v34.x 系で `!Effect` アノテーションを廃止し、Capability Context（ctx パラメータ）に一本化する。
+
+設計は `versions/roadmap/roadmap-v33.1-v34.0.md` のエフェクトシステム統一方針セクションで確定済み：
+
+```favnir
+// 移行前（廃止予定）
+fn fetch(url: String) -> Result<String, String> !Http {
+    HTTP.get(url)
+}
+
+// 移行後（v34.x）
+fn fetch(ctx: AppCtx, url: String) -> Result<String, String> {
+    bind { http } <- ctx
+    http.get(url)
+}
+```
+
+**`!Effect` → ctx 対応表**:
+
+| 廃止する `!Effect` | 代替 ctx フィールド | 型 |
+|---|---|---|
+| `!Io` | `ctx.io` | `IoCtx` |
+| `!DbRead` / `!DbWrite` | `ctx.db` | `DbRead` / `DbWrite` |
+| `!Http` | `ctx.http` | `HttpClient` |
+| `!Postgres` / `!MySQL` | `ctx.db` | `PgConn` / `MySqlConn` |
+| `!Redis` | `ctx.redis` | `RedisClient` |
+| `!Llm` | `ctx.llm` | `LlmClient` |
+| `!Stream` | `ctx.stream` | `StreamClient` |
+| `!Trace` | `ctx.tracer` | `Tracer` |
+| `!Snowflake` | `ctx.warehouse` | `SnowflakeConn` |
+| `!Emit<T>` | `ctx.emitter` | `Emitter<T>` |
+
+**v34.5〜v34.7 で実装予定**（後述）。
+
+### v33.x 確認シリーズの残件
+
+v33.x は「確認・記録」パターンのためコア機能の実装はすべて v19.x 済み。
+v34.x では確認済み機能を **本番品質** に引き上げることが主目的。
+
+---
+
+## ⚠️ 更新済み（v34.0 完了時）
+
+v34.0 完了時点での判断:
+1. エフェクトシステム統一が v34.x の最大実装変更 → v34.5〜v34.7 に割り当て
+2. ドキュメントサイト v4: v34.2 で実装（計画通り）
+3. ベンチマーク比較対象: Python pandas / Apache Spark / dbt（変更なし）
+4. v34.5〜v34.9 の具体的内容は後述セクションで確定
 
 ---
 
@@ -43,7 +87,7 @@ v34.0 完了後に:
 | ベンチマーク比較対象 | Python pandas / Apache Spark / dbt | v34.0 後 |
 | ドキュメントサイト v4 | 既存 Next.js 16 を継続・コンテンツ大幅増強 | v34.0 後 |
 | セキュリティ審査 v2 の範囲 | エフェクトシステム形式検証 + OSS ライセンス | v34.0 後 |
-| 破壊的変更 | なし | 固定 |
+| 破壊的変更 | `!Effect` 廃止（v34.5、`fav migrate --effects` で自動移行） | v34.5 実施 |
 
 ---
 
@@ -158,15 +202,66 @@ benchmarks/real-world/
 
 ---
 
-### v34.5〜v34.9 — 安定化・最終調整
+### v34.5 — `!Effect` 廃止・コンテキスト構文統一
 
-v34.0 完了後のドッグフード・審査結果で以下から選択・実施:
+**テーマ**: `!Effect` アノテーションを廃止し、Capability Context（ctx パラメータ）に一本化する。
 
-- v30.1〜v34.4 で積み上がった残課題の解消
-- パフォーマンスチューニング（実測値に基づく）
-- テストカバレッジの向上
-- CHANGELOG / MIGRATION ガイドの整備
-- `fav upgrade`（古いプロジェクトの移行支援）
+これは **破壊的変更** だが、v33.7.0 実装済みの `migrate_effects_in_source` / `fav migrate --effects` で自動移行できる。
+
+**実装内容**:
+1. `W0XX deprecated_effect_annotation` lint ルール追加（`!Effect` 使用箇所に警告）
+2. `IoCtx` interface 定義（`io.println` / `io.read_file` / `io.env`）を追加
+3. `AppCtx` に `io: IoCtx` フィールドを追加
+4. `fav/src/ast.rs` — `Effect` enum を deprecated 化（lint 警告のみ、削除は v35.x）
+5. `fav/src/middle/checker.rs` — ctx 型チェックを優先、`!Effect` は deprecated 警告
+6. `fav/self/compiler.fav` / `checker.fav` — `!Effect` 宣言を ctx 引数に書き換え
+
+**完了条件**: `fav migrate --effects sample.fav` で `!Http { ... }` → `fn f(ctx: AppCtx, ...)` に自動変換される
+
+---
+
+### v34.6 — Rune ファイル ctx 移行
+
+**テーマ**: `runes/` 配下の全 Rune を ctx ベース構文に移行する。
+
+対象（優先度順）:
+- `runes/postgres/client.fav` — `!Postgres` → `ctx.db: PgConn`
+- `runes/redis/redis.fav` — `!Redis` → `ctx.redis: RedisClient`
+- `runes/kafka/kafka.fav` — `!Kafka` → `ctx.stream: StreamClient`
+- その他全 Rune（50+ ファイル）— `fav migrate --effects --dir runes/` で一括移行
+
+---
+
+### v34.7 — ドキュメント・examples ctx 移行
+
+**テーマ**: サイト / examples / README のコードサンプルをすべて ctx 構文に更新する。
+
+対象:
+- `site/content/docs/` 配下の MDX（`!Effect` コードサンプルを ctx 構文に更新）
+- `site/content/learn/` 入門記事（チュートリアルの `!Effect` 例を ctx 構文に書き換え）
+- `examples/` 配下の全 `.fav` ファイル
+- `README.md` — エフェクトシステム統一の設計思想セクション追記
+
+---
+
+### v34.8A — `!Effect` 構文のパースエラー化（v35.4.0）
+
+`!Effect` アノテーションを書いた場合に E0374 ハードエラーとして返す。
+W022 lint（非推奨警告）を削除し、「書けばエラー」に格上げ。
+`parser.rs` の `parse_effects_acc` をエラー生成コードに置き換える。
+
+### v34.9A — `Effect` enum / `effects` フィールドの完全削除（v35.5.0）
+
+`ast.rs` / `parser.rs` / `checker.rs` / `lineage.rs` / `fmt.rs` / `wasm_codegen.rs` 等
+14 ファイルから `Effect` に関するすべてのコードを物理削除する。
+削除行数は約 380 行。
+
+### v35.0A — ドキュメント ctx 構文統一 + Production Ready 宣言（v35.6.0）
+
+サイト MDX 125 件のコードサンプルを ctx 構文に一括変換。
+`ctx-syntax-guide.mdx` を公式ガイドとして完成させ、
+「副作用のある処理は ctx: AppCtx を渡す」を唯一のパターンとして明示する。
+v35.0 Production Ready マイルストーン宣言。
 
 ---
 

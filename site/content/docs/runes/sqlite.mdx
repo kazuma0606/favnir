@@ -72,7 +72,7 @@ bind _ <- SQLite.close(db)
 ```favnir
 import rune "sqlite"
 
-stage CreateTable: Unit -> Result<Unit, String> !Db = |_| {
+stage CreateTable: Unit -> Result<Unit, String> = |_| {
     bind db <- SQLite.open(":memory:")
     bind _  <- SQLite.execute(db, "CREATE TABLE data (id INT, name TEXT)", "[]")
     Result.ok(unit)

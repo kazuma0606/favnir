@@ -5,7 +5,7 @@ AWS SQS キューからメッセージをポーリングし、処理後に削除
 ```favnir
 import runes/sqs
 
-stage ProcessSQSMessages: Unit -> Int !Http = |_| {
+stage ProcessSQSMessages: Unit -> Int = |_| {
   bind msgs    <- SQS.receive_messages(config.sqs_queue_url, 10)
   bind results <- msgs |> List.map(process_message) |> Result.all
   bind _       <- msgs |> List.map(|m| SQS.delete_message(config.sqs_queue_url, m.receipt_handle)) |> Result.all

@@ -26,12 +26,12 @@ fn process(xs: List[Int]) -> List[Int] {
 fn transform(x: Int) -> Int { x * 2 }
 
 // HTTP エフェクトあり
-fn fetch(url: String) -> String !Http {
+fn fetch(url: String) -> String {
   Http.get(url)
 }
 
 // DB エフェクトあり
-fn save(row: Row) -> Unit !Db {
+fn save(row: Row) -> Unit {
   Db.insert("table", row)
 }
 ```

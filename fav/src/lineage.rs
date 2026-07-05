@@ -43,62 +43,12 @@ pub struct LineageReport {
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
-fn format_effects(effects: &[ast::Effect]) -> String {
-    use ast::Effect::*;
-    if effects.is_empty() {
-        return "Pure".into();
-    }
-    effects
-        .iter()
-        .map(|e| match e {
-            Pure => "!Pure".into(),
-            Io => "!Io".into(),
-            Db => "!Db".into(),
-            DbRead => "!DbRead".into(),
-            DbWrite => "!DbWrite".into(),
-            DbAdmin => "!DbAdmin".into(),
-            Network => "!Network".into(),
-            Http => "!Http".into(),
-            Llm => "!Llm".into(),
-            Snowflake => "!Snowflake".into(),
-            Gcp => "!Gcp".into(),
-            Stream => "!Stream".into(),
-            Postgres => "!Postgres".into(),
-            Redis => "!Redis".into(),
-            MySQL => "!MySQL".into(),
-            MongoDB => "!MongoDB".into(),
-            DynamoDB => "!DynamoDB".into(),
-            Elasticsearch => "!Elasticsearch".into(),
-            AzureDb => "!AzureDb".into(),
-            AzureStorage => "!AzureStorage".into(),
-            Rpc => "!Rpc".into(),
-            File => "!File".into(),
-            Checkpoint => "!Checkpoint".into(),
-            PipelineState => "!PipelineState".into(),
-            Unknown(name) => format!("!{}", name),
-            Emit(ev) => format!("!Emit<{}>", ev),
-            EmitUnion(evs) => format!("!Emit<{}>", evs.join("|")),
-            Trace => "!Trace".into(),
-        })
-        .collect::<Vec<_>>()
-        .join(" ")
-}
-
-fn is_db_read_effect(e: &ast::Effect) -> bool {
-    matches!(e, ast::Effect::Db | ast::Effect::DbRead)
-}
-
-fn is_db_write_effect(e: &ast::Effect) -> bool {
-    matches!(e, ast::Effect::Db | ast::Effect::DbWrite | ast::Effect::DbAdmin)
-}
-
-/// Classify a function/stage by capability kind based on parameter types and effects.
+/// Classify a function/stage by capability kind based on parameter types.
 /// Returns (kind, capability): e.g. ("read", Some("DbRead")), ("transform", None).
 fn classify_capability_kind(
     params: &[ast::Param],
-    effects: &[ast::Effect],
 ) -> (String, Option<String>) {
-    // First: check parameter type names for ctx-based capabilities (v13.x design)
+    // Check parameter type names for ctx-based capabilities (v13.x design)
     for p in params {
         if let ast::TypeExpr::Named(name, _, _) = &p.ty {
             match name.as_str() {
@@ -111,52 +61,6 @@ fn classify_capability_kind(
                 "Io" | "CommonCtx" => return ("io".into(), Some("Io".into())),
                 _ => {}
             }
-        }
-    }
-    // Fallback: classify by legacy effect annotations
-    for e in effects {
-        match e {
-            ast::Effect::DbWrite | ast::Effect::DbAdmin => {
-                return ("write".into(), Some("DbWrite".into()))
-            }
-            ast::Effect::Db | ast::Effect::DbRead => {
-                return ("read".into(), Some("DbRead".into()))
-            }
-            ast::Effect::Postgres | ast::Effect::Snowflake | ast::Effect::Gcp => {
-                return ("read".into(), Some("DbRead".into()))
-            }
-            ast::Effect::Redis => {
-                // Redis は read/write 混在（get/set/incr/lpush/publish）。
-                // DB 読み取りではなく io ノードとして分類する。
-                return ("io".into(), Some("CacheWrite".into()))
-            }
-            ast::Effect::MySQL => {
-                // MySQL は Postgres と同一分類（リネージグラフ上で read ノード）。
-                // SQL の種別（SELECT vs INSERT/UPDATE）はステージレベルでは判断できないため
-                // Postgres / Snowflake と同様に "read"/"DbRead" に統一する。
-                return ("read".into(), Some("DbRead".into()))
-            }
-            ast::Effect::MongoDB => {
-                // MongoDB はドキュメント系 NoSQL。
-                // リレーショナル DB とは異なる io ノードとして分類する。
-                return ("io".into(), Some("DocStore".into()))
-            }
-            ast::Effect::DynamoDB => {
-                // DynamoDB は AWS KV / NoSQL ストア。
-                return ("io".into(), Some("KvStore".into()))
-            }
-            ast::Effect::Elasticsearch => {
-                // Elasticsearch は全文検索・ベクトル検索エンジン。
-                return ("io".into(), Some("Search".into()))
-            }
-            ast::Effect::Stream => {
-                return ("io".into(), Some("StreamWrite".into()))
-            }
-            ast::Effect::Network | ast::Effect::Http | ast::Effect::Llm | ast::Effect::Rpc => {
-                return ("io".into(), Some("HttpClient".into()))
-            }
-            ast::Effect::Io | ast::Effect::File => return ("io".into(), Some("Io".into())),
-            _ => {}
         }
     }
     ("transform".into(), None)
@@ -359,6 +263,95 @@ fn collect_sql_literals_stmt(stmt: &ast::Stmt, out: &mut Vec<String>) {
 }
 
 // ── AzureDb read/write classification (v14.1.0) ───────────────────────────────
+
+fn is_postgres_read_method(name: &str) -> bool {
+    name == "query_raw" || name == "query"
+}
+
+fn is_postgres_write_method(name: &str) -> bool {
+    name == "execute_raw" || name == "execute"
+}
+
+/// Walk an expression tree and return `(has_read, has_write)` for Postgres calls.
+/// - `Postgres.query_raw(...)`   → has_read
+/// - `Postgres.execute_raw(...)` → has_write
+pub fn collect_postgres_call_kinds(expr: &ast::Expr) -> (bool, bool) {
+    let mut has_read = false;
+    let mut has_write = false;
+    collect_pg_kinds_inner(expr, &mut has_read, &mut has_write);
+    (has_read, has_write)
+}
+
+fn collect_pg_kinds_inner(expr: &ast::Expr, r: &mut bool, w: &mut bool) {
+    match expr {
+        ast::Expr::Apply(func, args, _) => {
+            if let ast::Expr::FieldAccess(obj, method, _) = func.as_ref() {
+                let is_pg = matches!(
+                    obj.as_ref(),
+                    ast::Expr::Ident(n, _) if n == "Postgres" || n == "postgres"
+                );
+                if is_pg {
+                    if is_postgres_read_method(method)  { *r = true; }
+                    if is_postgres_write_method(method) { *w = true; }
+                }
+            }
+            for a in args { collect_pg_kinds_inner(a, r, w); }
+            collect_pg_kinds_inner(func, r, w);
+        }
+        ast::Expr::Block(blk) => {
+            for s in &blk.stmts { collect_pg_kinds_stmt(s, r, w); }
+            collect_pg_kinds_inner(&blk.expr, r, w);
+        }
+        ast::Expr::If(cond, then_blk, else_blk, _) => {
+            collect_pg_kinds_inner(cond, r, w);
+            for s in &then_blk.stmts { collect_pg_kinds_stmt(s, r, w); }
+            collect_pg_kinds_inner(&then_blk.expr, r, w);
+            if let Some(b) = else_blk {
+                for s in &b.stmts { collect_pg_kinds_stmt(s, r, w); }
+                collect_pg_kinds_inner(&b.expr, r, w);
+            }
+        }
+        ast::Expr::Match(scrutinee, arms, _) => {
+            collect_pg_kinds_inner(scrutinee, r, w);
+            for arm in arms { collect_pg_kinds_inner(&arm.body, r, w); }
+        }
+        ast::Expr::Pipeline(exprs, _) => {
+            for e in exprs { collect_pg_kinds_inner(e, r, w); }
+        }
+        ast::Expr::Closure(_, body, _) => { collect_pg_kinds_inner(body, r, w); }
+        ast::Expr::Collect(blk, _) => {
+            for s in &blk.stmts { collect_pg_kinds_stmt(s, r, w); }
+            collect_pg_kinds_inner(&blk.expr, r, w);
+        }
+        ast::Expr::BinOp(_, l, r2, _) => {
+            collect_pg_kinds_inner(l, r, w);
+            collect_pg_kinds_inner(r2, r, w);
+        }
+        ast::Expr::FieldAccess(obj, _, _) | ast::Expr::TypeApply(obj, _, _) => {
+            collect_pg_kinds_inner(obj, r, w);
+        }
+        _ => {}
+    }
+}
+
+fn collect_pg_kinds_stmt(stmt: &ast::Stmt, r: &mut bool, w: &mut bool) {
+    match stmt {
+        ast::Stmt::Bind(b)  => collect_pg_kinds_inner(&b.expr, r, w),
+        ast::Stmt::Chain(c) => collect_pg_kinds_inner(&c.expr, r, w),
+        ast::Stmt::Expr(e)  => collect_pg_kinds_inner(e, r, w),
+        ast::Stmt::Yield(y) => collect_pg_kinds_inner(&y.expr, r, w),
+        ast::Stmt::ForIn(f) => {
+            collect_pg_kinds_inner(&f.iter, r, w);
+            for s in &f.body.stmts { collect_pg_kinds_stmt(s, r, w); }
+            collect_pg_kinds_inner(&f.body.expr, r, w);
+        }
+        ast::Stmt::Forall(f) => {
+            if let Some(g) = &f.guard { collect_pg_kinds_inner(g, r, w); }
+            for s in &f.body.stmts { collect_pg_kinds_stmt(s, r, w); }
+            collect_pg_kinds_inner(&f.body.expr, r, w);
+        }
+    }
+}
 
 fn is_azure_db_read_method(name: &str) -> bool {
     name == "query_raw"
@@ -606,30 +599,6 @@ fn collect_azure_blob_kinds_stmt(stmt: &ast::Stmt, r: &mut bool, w: &mut bool) {
     }
 }
 
-/// Replace `!AzureDb` with `!AzureDb(read)` / `!AzureDb(write)` where known.
-fn azure_db_effects(
-    effects: &[ast::Effect],
-    az_read: bool,
-    az_write: bool,
-) -> Vec<String> {
-    effects
-        .iter()
-        .flat_map(|e| {
-            if matches!(e, ast::Effect::AzureDb) && (az_read || az_write) {
-                let mut v = Vec::new();
-                if az_read {
-                    v.push("!AzureDb(read)".to_string());
-                }
-                if az_write {
-                    v.push("!AzureDb(write)".to_string());
-                }
-                v
-            } else {
-                vec![format_effects(std::slice::from_ref(e))]
-            }
-        })
-        .collect()
-}
 
 // ── Snowflake read/write classification ───────────────────────────────────────
 
@@ -769,66 +738,21 @@ fn collect_sf_kinds_stmt(stmt: &ast::Stmt, r: &mut bool, w: &mut bool) {
     }
 }
 
-/// Given a stage/fn effect list and its body, produce the final effects string list,
-/// replacing `!Snowflake` with `!Snowflake(read)` / `!Snowflake(write)` where possible.
-fn snowflake_effects(
-    effects: &[ast::Effect],
-    sf_read: bool,
-    sf_write: bool,
-) -> Vec<String> {
-    effects
-        .iter()
-        .flat_map(|e| {
-            if matches!(e, ast::Effect::Snowflake) && (sf_read || sf_write) {
-                let mut v = Vec::new();
-                if sf_read {
-                    v.push("!Snowflake(read)".to_string());
-                }
-                if sf_write {
-                    v.push("!Snowflake(write)".to_string());
-                }
-                v
-            } else {
-                vec![format_effects(std::slice::from_ref(e))]
-            }
-        })
-        .collect()
-}
-
-/// Combine Snowflake, AzureDb, and AzureStorage read/write classification in one pass.
-fn combined_effects(
-    effects: &[ast::Effect],
+/// Build the inferred effects list for a stage/fn from body call analysis.
+/// v35.4.0: !Effect annotations are gone; effects are inferred from body calls only.
+fn infer_effects_from_calls(
     sf_read: bool, sf_write: bool,
     az_read: bool, az_write: bool,
     az_blob_read: bool, az_blob_write: bool,
 ) -> Vec<String> {
-    effects
-        .iter()
-        .flat_map(|e| {
-            if matches!(e, ast::Effect::Snowflake) && (sf_read || sf_write) {
-                let mut v = Vec::new();
-                if sf_read  { v.push("!Snowflake(read)".to_string()); }
-                if sf_write { v.push("!Snowflake(write)".to_string()); }
-                v
-            } else if matches!(e, ast::Effect::AzureDb) && (az_read || az_write) {
-                let mut v = Vec::new();
-                if az_read  { v.push("!AzureDb(read)".to_string()); }
-                if az_write { v.push("!AzureDb(write)".to_string()); }
-                v
-            } else if matches!(e, ast::Effect::AzureStorage) {
-                let mut v = Vec::new();
-                if az_blob_read || az_blob_write {
-                    if az_blob_read  { v.push("!AzureStorage(read)".to_string()); }
-                    if az_blob_write { v.push("!AzureStorage(write)".to_string()); }
-                } else {
-                    v.push("!AzureStorage".to_string());
-                }
-                v
-            } else {
-                vec![format_effects(std::slice::from_ref(e))]
-            }
-        })
-        .collect()
+    let mut result = Vec::new();
+    if sf_read  { result.push("!Snowflake(read)".to_string()); }
+    if sf_write { result.push("!Snowflake(write)".to_string()); }
+    if az_read  { result.push("!AzureDb(read)".to_string()); }
+    if az_write { result.push("!AzureDb(write)".to_string()); }
+    if az_blob_read  { result.push("!AzureStorage(read)".to_string()); }
+    if az_blob_write { result.push("!AzureStorage(write)".to_string()); }
+    result
 }
 
 // ── public API ────────────────────────────────────────────────────────────────
@@ -855,21 +779,8 @@ pub fn lineage_analysis(program: &ast::Program) -> LineageReport {
                     }
                 }
             }
-            let has_read = trf.effects.iter().any(is_db_read_effect);
-            let has_write = trf.effects.iter().any(is_db_write_effect);
-            if sources.is_empty() && has_read {
-                sources.push(format!("({}:db-read)", trf.name));
-            }
-            if sinks.is_empty() && has_write {
-                sinks.push(format!("({}:db-write)", trf.name));
-            }
-            // Snowflake read/write classification
-            let has_snowflake = trf.effects.iter().any(|e| matches!(e, ast::Effect::Snowflake));
-            let (sf_read, sf_write) = if has_snowflake {
-                collect_snowflake_call_kinds(&ast::Expr::Block(Box::new(trf.body.clone())))
-            } else {
-                (false, false)
-            };
+            // Snowflake read/write classification — inferred from body calls
+            let (sf_read, sf_write) = collect_snowflake_call_kinds(&ast::Expr::Block(Box::new(trf.body.clone())));
             if sf_read {
                 sources.push(format!("({}:snowflake-read)", trf.name));
             }
@@ -877,12 +788,7 @@ pub fn lineage_analysis(program: &ast::Program) -> LineageReport {
                 sinks.push(format!("({}:snowflake-write)", trf.name));
             }
             // AzureDb read/write classification (v14.1.0)
-            let has_azure_db = trf.effects.iter().any(|e| matches!(e, ast::Effect::AzureDb));
-            let (az_read, az_write) = if has_azure_db {
-                collect_azure_call_kinds(&ast::Expr::Block(Box::new(trf.body.clone())))
-            } else {
-                (false, false)
-            };
+            let (az_read, az_write) = collect_azure_call_kinds(&ast::Expr::Block(Box::new(trf.body.clone())));
             if az_read {
                 sources.push(format!("({}:azure-db-read)", trf.name));
             }
@@ -890,24 +796,40 @@ pub fn lineage_analysis(program: &ast::Program) -> LineageReport {
                 sinks.push(format!("({}:azure-db-write)", trf.name));
             }
             // AzureBlob read/write classification (v14.3.0)
-            let has_azure_blob = trf.effects.iter().any(|e| matches!(e, ast::Effect::AzureStorage));
-            let (az_blob_read, az_blob_write) = if has_azure_blob {
-                collect_azure_blob_call_kinds(&ast::Expr::Block(Box::new(trf.body.clone())))
-            } else {
-                (false, false)
-            };
+            let (az_blob_read, az_blob_write) = collect_azure_blob_call_kinds(&ast::Expr::Block(Box::new(trf.body.clone())));
             if az_blob_read {
                 sources.push(format!("({}:azure-blob-read)", trf.name));
             }
             if az_blob_write {
                 sinks.push(format!("({}:azure-blob-write)", trf.name));
             }
-            let (cap_kind, cap_name) = classify_capability_kind(&trf.params, &trf.effects);
+            // Postgres read/write classification (v35.6.0)
+            let (pg_read, pg_write) = collect_postgres_call_kinds(&ast::Expr::Block(Box::new(trf.body.clone())));
+            if pg_read {
+                sources.push(format!("({}:postgres-read)", trf.name));
+            }
+            if pg_write {
+                sinks.push(format!("({}:postgres-write)", trf.name));
+            }
+            let (mut cap_kind, mut cap_name) = classify_capability_kind(&trf.params);
+            // Fallback: if no ctx param matched, infer from Snowflake/Azure/Postgres call kinds
+            if cap_kind == "transform" {
+                if sf_read || az_read || az_blob_read || pg_read {
+                    cap_kind = "read".into();
+                    cap_name = Some("DbRead".into());
+                } else if sf_write || az_write || az_blob_write || pg_write {
+                    cap_kind = "write".into();
+                    cap_name = Some("DbWrite".into());
+                }
+            }
+            let mut effects = infer_effects_from_calls(sf_read, sf_write, az_read, az_write, az_blob_read, az_blob_write);
+            if pg_read  { effects.push("!Postgres(read)".to_string()); }
+            if pg_write { effects.push("!Postgres(write)".to_string()); }
             transformations.push(LineageEntry {
                 name: trf.name.clone(),
                 kind: cap_kind,
                 capability: cap_name,
-                effects: combined_effects(&trf.effects, sf_read, sf_write, az_read, az_write, az_blob_read, az_blob_write),
+                effects,
                 sources,
                 sinks,
             });
@@ -928,21 +850,8 @@ pub fn lineage_analysis(program: &ast::Program) -> LineageReport {
                     }
                 }
             }
-            let has_read = fndef.effects.iter().any(is_db_read_effect);
-            let has_write = fndef.effects.iter().any(is_db_write_effect);
-            if sources.is_empty() && has_read {
-                sources.push(format!("({}:db-read)", fndef.name));
-            }
-            if sinks.is_empty() && has_write {
-                sinks.push(format!("({}:db-write)", fndef.name));
-            }
-            // Snowflake read/write classification
-            let has_snowflake = fndef.effects.iter().any(|e| matches!(e, ast::Effect::Snowflake));
-            let (sf_read, sf_write) = if has_snowflake {
-                collect_snowflake_call_kinds(&ast::Expr::Block(Box::new(fndef.body.clone())))
-            } else {
-                (false, false)
-            };
+            // Snowflake read/write classification — inferred from body calls
+            let (sf_read, sf_write) = collect_snowflake_call_kinds(&ast::Expr::Block(Box::new(fndef.body.clone())));
             if sf_read {
                 sources.push(format!("({}:snowflake-read)", fndef.name));
             }
@@ -950,12 +859,7 @@ pub fn lineage_analysis(program: &ast::Program) -> LineageReport {
                 sinks.push(format!("({}:snowflake-write)", fndef.name));
             }
             // AzureDb read/write classification (v14.1.0)
-            let has_azure_db = fndef.effects.iter().any(|e| matches!(e, ast::Effect::AzureDb));
-            let (az_read, az_write) = if has_azure_db {
-                collect_azure_call_kinds(&ast::Expr::Block(Box::new(fndef.body.clone())))
-            } else {
-                (false, false)
-            };
+            let (az_read, az_write) = collect_azure_call_kinds(&ast::Expr::Block(Box::new(fndef.body.clone())));
             if az_read {
                 sources.push(format!("({}:azure-db-read)", fndef.name));
             }
@@ -963,25 +867,35 @@ pub fn lineage_analysis(program: &ast::Program) -> LineageReport {
                 sinks.push(format!("({}:azure-db-write)", fndef.name));
             }
             // AzureBlob read/write classification (v14.3.0)
-            let has_azure_blob = fndef.effects.iter().any(|e| matches!(e, ast::Effect::AzureStorage));
-            let (az_blob_read, az_blob_write) = if has_azure_blob {
-                collect_azure_blob_call_kinds(&ast::Expr::Block(Box::new(fndef.body.clone())))
-            } else {
-                (false, false)
-            };
+            let (az_blob_read, az_blob_write) = collect_azure_blob_call_kinds(&ast::Expr::Block(Box::new(fndef.body.clone())));
             if az_blob_read {
                 sources.push(format!("({}:azure-blob-read)", fndef.name));
             }
             if az_blob_write {
                 sinks.push(format!("({}:azure-blob-write)", fndef.name));
             }
-            if !fndef.effects.is_empty() {
-                let (cap_kind, cap_name) = classify_capability_kind(&fndef.params, &fndef.effects);
+            // Emit entry for ctx-based functions or functions with inferred effects
+            let has_ctx_param = fndef.params.iter().any(|p| {
+                matches!(&p.ty, ast::TypeExpr::Named(n, _, _) if
+                    matches!(n.as_str(), "AppCtx"|"CommonCtx"|"LoadCtx"|"WriteCtx"|"MigrateCtx"|"MockCtx"|"DbCtx"|"IoCtx"|"HttpCtx"|"StreamCtx"))
+            });
+            let (pg_read, pg_write) = collect_postgres_call_kinds(&ast::Expr::Block(Box::new(fndef.body.clone())));
+            if pg_read {
+                sources.push(format!("({}:postgres-read)", fndef.name));
+            }
+            if pg_write {
+                sinks.push(format!("({}:postgres-write)", fndef.name));
+            }
+            if has_ctx_param || sf_read || sf_write || az_read || az_write || pg_read || pg_write {
+                let (cap_kind, cap_name) = classify_capability_kind(&fndef.params);
+                let mut effects = infer_effects_from_calls(sf_read, sf_write, az_read, az_write, az_blob_read, az_blob_write);
+                if pg_read  { effects.push("!Postgres(read)".to_string()); }
+                if pg_write { effects.push("!Postgres(write)".to_string()); }
                 transformations.push(LineageEntry {
                     name: fndef.name.clone(),
                     kind: cap_kind,
                     capability: cap_name,
-                    effects: combined_effects(&fndef.effects, sf_read, sf_write, az_read, az_write, az_blob_read, az_blob_write),
+                    effects,
                     sources,
                     sinks,
                 });
@@ -1109,7 +1023,7 @@ pub fn render_lineage_text(report: &LineageReport, filename: &str) -> String {
     }
     out.push('\n');
 
-    // CrossCloud Flow: emit when both an AWS-side DB effect and !AzureDb coexist (v14.3.0)
+    // CrossCloud Flow: emit when both an AWS-side DB effect and coexist (v14.3.0)
     let has_aws_db = report.transformations.iter().any(|e| {
         e.effects.iter().any(|eff| {
             eff.contains("!Postgres") || eff.contains("!Db") || eff.contains("!Snowflake")
@@ -1238,7 +1152,7 @@ mod v11000_tests {
     #[test]
     fn lineage_snowflake_write_stage_shows_write_label() {
         let src = r#"
-stage Insert: List<String> -> Int !Snowflake = |rows| {
+stage Insert: List<String> -> Int = |rows| {
   snowflake.execute("INSERT INTO T VALUES (?)")
 }
 "#;
@@ -1251,7 +1165,7 @@ stage Insert: List<String> -> Int !Snowflake = |rows| {
             .expect("Insert not found");
         assert!(
             entry.effects.contains(&"!Snowflake(write)".to_string()),
-            "expected !Snowflake(write) in effects, got: {:?}",
+            "expected(write) in effects, got: {:?}",
             entry.effects
         );
         assert!(
@@ -1263,7 +1177,7 @@ stage Insert: List<String> -> Int !Snowflake = |rows| {
     #[test]
     fn lineage_snowflake_read_stage_shows_read_label() {
         let src = r#"
-stage Query: String -> List<String> !Snowflake = |sql| {
+stage Query: String -> List<String> = |sql| {
   snowflake.query(sql)
 }
 "#;
@@ -1276,7 +1190,7 @@ stage Query: String -> List<String> !Snowflake = |sql| {
             .expect("Query not found");
         assert!(
             entry.effects.contains(&"!Snowflake(read)".to_string()),
-            "expected !Snowflake(read) in effects, got: {:?}",
+            "expected(read) in effects, got: {:?}",
             entry.effects
         );
         assert!(
@@ -1287,8 +1201,10 @@ stage Query: String -> List<String> !Snowflake = |sql| {
 
     #[test]
     fn lineage_snowflake_undistinguished_falls_back() {
+        // v34.8A: !Snowflake annotation removed (E0374); undistinguished fallback is no longer possible.
+        // A stage without snowflake calls has no Snowflake effects in lineage.
         let src = r#"
-stage Sf: String -> String !Snowflake = |x| { x }
+stage Sf: String -> String = |x| { x }
 "#;
         let prog = Parser::parse_str(src, "test.fav").expect("parse failed");
         let report = lineage_analysis(&prog);
@@ -1297,9 +1213,10 @@ stage Sf: String -> String !Snowflake = |x| { x }
             .iter()
             .find(|e| e.name == "Sf")
             .expect("Sf not found");
+        // Without annotation or snowflake calls, effects should be empty
         assert!(
-            entry.effects.contains(&"!Snowflake".to_string()),
-            "expected !Snowflake fallback in effects, got: {:?}",
+            !entry.effects.iter().any(|e| e.contains("Snowflake")),
+            "expected no Snowflake in effects for pure stage, got: {:?}",
             entry.effects
         );
     }

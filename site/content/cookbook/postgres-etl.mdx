@@ -1,0 +1,51 @@
+---
+title: "Postgres フル ETL"
+description: "Postgres からデータを読み込み、変換して別テーブルに書き込む ETL パイプライン"
+---
+
+# Postgres フル ETL
+
+Postgres のソーステーブルからデータを読み込み、変換処理を挟んで宛先テーブルに書き込む
+フル ETL パイプラインです。
+
+## コード例
+
+```favnir
+import runes/postgres
+
+fn transform_row(r: RawOrder) -> CleanOrder {
+    {
+        id:         r.id
+        amount:     Float.round(r.amount, 2)
+        customer:   String.trim(r.customer)
+        created_at: r.created_at
+    }
+}
+
+pipeline PostgresEtl {
+    stage Extract {
+        bind rows <- Postgres.query_raw("SELECT id, amount, customer, created_at FROM raw_orders")
+        rows
+    }
+    |> stage Transform {
+        List.map(input, transform_row)
+    }
+    |> stage Load {
+        bind n <- Postgres.execute_raw(
+            "INSERT INTO clean_orders (id, amount, customer, created_at) VALUES ($1,$2,$3,$4)",
+            List.map(input, fn (r) { [r.id, Float.to_string(r.amount), r.customer, r.created_at] })
+        )
+        n
+    }
+}
+
+fn main() -> Unit {
+    run PostgresEtl
+}
+```
+
+## ポイント
+
+- `Postgres.query_raw` でソーステーブルを全件取得し、`List.map` で変換後に `Postgres.execute_raw` でバルク INSERT します。
+- `!Postgres` エフェクトを宣言することで、型チェッカーが接続設定の存在を検証します。
+- `fav.toml` の `[postgres]` セクションに `url = "$DATABASE_URL"` を設定してください。

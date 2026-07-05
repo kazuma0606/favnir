@@ -9,14 +9,14 @@ public fn EnvImpl.new() -> EnvImpl { EnvImpl("process") }
 // ── Env impl ─────────────────────────────────────────────────────────────────
 
 impl Env for EnvImpl {
-    fn require(e: EnvImpl, key: String) -> Result<String, String> !IO {
+    fn require(e: EnvImpl, key: String) -> Result<String, String> {
         match IO.getenv_raw(key) {
             None => Result.err(String.concat("missing env var: ", key))
             Some(v) => Result.ok(v)
         }
     }
 
-    fn get(e: EnvImpl, key: String) -> Option<String> !IO {
+    fn get(e: EnvImpl, key: String) -> Option<String> {
         IO.getenv_raw(key)
     }
 }

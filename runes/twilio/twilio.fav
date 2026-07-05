@@ -2,13 +2,13 @@
 // 接続: TWILIO_ACCOUNT_SID / TWILIO_BASE_URL 環境変数
 // NOTE: api_key は HTTP Rune の認証ヘッダー機構が有効化されるまでリクエストには付与されない
 
-fn Twilio.send_sms(api_key: String, from: String, to: String, body: String) -> Result<String, String> !Http =
+fn Twilio.send_sms(api_key: String, from: String, to: String, body: String) -> Result<String, String> =
   Http.post_json(
     Env.get_or("TWILIO_BASE_URL", "https://api.twilio.com") ++ "/2010-04-01/Accounts/" ++ Env.get_or("TWILIO_ACCOUNT_SID", api_key) ++ "/Messages.json",
     { "From": from, "To": to, "Body": body }
   )
 
-fn Twilio.send_voice(api_key: String, from: String, to: String, twiml_url: String) -> Result<String, String> !Http =
+fn Twilio.send_voice(api_key: String, from: String, to: String, twiml_url: String) -> Result<String, String> =
   Http.post_json(
     Env.get_or("TWILIO_BASE_URL", "https://api.twilio.com") ++ "/2010-04-01/Accounts/" ++ Env.get_or("TWILIO_ACCOUNT_SID", api_key) ++ "/Calls.json",
     { "From": from, "To": to, "Url": twiml_url }

@@ -25,7 +25,7 @@ public fn exchange_code(
     client_secret: String,
     code: String,
     redirect_uri: String
-) -> Result<Map<String, String>, String> !Auth !Network {
+) -> Result<Map<String, String>, String> {
     Result.err("exchange_code: not implemented in v4.5.0")
 }
 
@@ -35,6 +35,6 @@ public fn refresh_token(
     client_id: String,
     client_secret: String,
     refresh_token_val: String
-) -> Result<Map<String, String>, String> !Auth !Network {
+) -> Result<Map<String, String>, String> {
     Result.err("refresh_token: not implemented in v4.5.0")
 }

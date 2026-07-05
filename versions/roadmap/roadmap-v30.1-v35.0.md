@@ -238,7 +238,7 @@ v30.x〜v35.x（v2.x 相当）では破壊的変更を行わない。
 ```
 v30.0.0  Ecosystem Maturity 宣言（完了）
 │
-├── v30.1  ビルド軽量化（debug=0 / .cargo/config.toml）
+├── v30.1  ビルド軽量化（debug=0 / split-debuginfo=off）
 ├── v30.2  postgres-etl テンプレート v2（4ファイル構成）
 ├── v30.3  マルチファイルプロジェクト E2E 検証
 ├── v30.4  Rune import マルチファイル動作検証

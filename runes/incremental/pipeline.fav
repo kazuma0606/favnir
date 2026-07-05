@@ -3,7 +3,7 @@
 public fn run_since(
     name: String,
     fetch_fn: String -> List<Map<String, String>>
-) -> List<Map<String, String>> !Checkpoint !Io {
+) -> List<Map<String, String>> {
     bind last_value <- Checkpoint.last(name)
     bind since <- Option.unwrap_or(last_value, "1970-01-01T00:00:00Z")
     bind rows <- fetch_fn(since)
@@ -17,6 +17,6 @@ public fn upsert(
     type_name: String,
     row: Map<String, String>,
     key_field: String
-) -> Unit !Db {
+) -> Unit {
     DB.upsert_raw(conn, type_name, row, key_field)
 }

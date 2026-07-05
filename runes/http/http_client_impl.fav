@@ -9,19 +9,19 @@ public fn HttpClientImpl.new() -> HttpClientImpl { HttpClientImpl("default") }
 // ── HttpClient impl ─────────────────────────────────────────────────────────
 
 impl HttpClient for HttpClientImpl {
-    fn get(c: HttpClientImpl, url: String, headers: Map<String, String>) -> Result<String, String> !Http {
+    fn get(c: HttpClientImpl, url: String, headers: Map<String, String>) -> Result<String, String> {
         Http.get_raw(url)
     }
 
-    fn post(c: HttpClientImpl, url: String, body: String, headers: Map<String, String>) -> Result<String, String> !Http {
+    fn post(c: HttpClientImpl, url: String, body: String, headers: Map<String, String>) -> Result<String, String> {
         Http.post_raw(url, body)
     }
 
-    fn put(c: HttpClientImpl, url: String, body: String, headers: Map<String, String>) -> Result<String, String> !Http {
+    fn put(c: HttpClientImpl, url: String, body: String, headers: Map<String, String>) -> Result<String, String> {
         Http.post_raw(url, body)
     }
 
-    fn delete(c: HttpClientImpl, url: String, headers: Map<String, String>) -> Result<String, String> !Http {
+    fn delete(c: HttpClientImpl, url: String, headers: Map<String, String>) -> Result<String, String> {
         Http.get_raw(url)
     }
 }

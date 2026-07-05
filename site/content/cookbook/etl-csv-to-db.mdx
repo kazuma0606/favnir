@@ -35,7 +35,7 @@ type Row {
   value: Float
 }
 
-stage LoadCsv -> List[Row] !Io {
+stage LoadCsv -> List[Row] {
   csv.read_file("data.csv")
     |> List.map(|row| Row {
          id:    Int.parse(row["id"]),
@@ -44,7 +44,7 @@ stage LoadCsv -> List[Row] !Io {
        })
 }
 
-stage InsertRows(rows: List[Row]) -> Int !Db {
+stage InsertRows(rows: List[Row]) -> Int {
   rows |> List.map(|row|
     db.execute(
       "INSERT INTO records (id, name, value) VALUES ($1, $2, $3)",

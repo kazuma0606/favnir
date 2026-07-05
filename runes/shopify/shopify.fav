@@ -2,12 +2,12 @@
 // 接続: SHOPIFY_BASE_URL 環境変数
 // NOTE: api_key は HTTP Rune の認証ヘッダー機構が有効化されるまでリクエストには付与されない
 
-fn Shopify.list_orders(api_key: String, shop: String, status: String) -> Result<String, String> !Http =
+fn Shopify.list_orders(api_key: String, shop: String, status: String) -> Result<String, String> =
   Http.get_json(
     Env.get_or("SHOPIFY_BASE_URL", "https://" ++ shop ++ ".myshopify.com") ++ "/admin/api/2024-01/orders.json?status=" ++ status
   )
 
-fn Shopify.create_order(api_key: String, shop: String, line_items: String, customer_email: String) -> Result<String, String> !Http =
+fn Shopify.create_order(api_key: String, shop: String, line_items: String, customer_email: String) -> Result<String, String> =
   Http.post_json(
     Env.get_or("SHOPIFY_BASE_URL", "https://" ++ shop ++ ".myshopify.com") ++ "/admin/api/2024-01/orders.json",
     { "order": { "line_items": line_items, "email": customer_email } }

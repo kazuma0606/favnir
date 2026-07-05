@@ -1,0 +1,28 @@
+---
+title: "Parquet 変換・再パーティショニング"
+description: "Parquet ファイルを読み込み、変換して別スキーマ・別パーティションで書き出す"
+---
+
+# Parquet 変換・再パーティショニング
+
+Parquet ファイルを読み込み、列の変換・フィルタリングを行い、日付パーティションで書き出します。
+
+## コード例
+
+```favnir
+import runes/arrow
+
+fn main() -> Unit {
+    bind batch  <- Arrow.read_parquet("data/events.parquet")
+    let filtered = ArrowBatch.filter(batch, fn (row) { row["event_type"] != "test" })
+    let renamed  = ArrowBatch.rename_column(filtered, "ts", "event_at")
+    bind _ <- Arrow.write_parquet(renamed, "output/events_clean.parquet")
+    IO.println("Parquet transform complete.")
+}
+```
+
+## ポイント
+
+- `ArrowBatch` はゼロコピー列指向操作をサポートするため、大規模データでも低メモリで処理できます。
+- `Arrow.read_parquet` / `Arrow.write_parquet` は `#[streaming]` と組み合わせることで定常メモリで処理できます。
+- 日付カラムでパーティションする場合は `Arrow.write_parquet_partitioned` を使用してください。

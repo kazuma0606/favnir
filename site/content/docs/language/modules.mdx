@@ -75,7 +75,7 @@ You can give an imported rune a custom alias with `import "path" as Alias`:
 ```favnir
 import "db" as Database
 
-fn fetch_user(id: Int) -> User !Db {
+fn fetch_user(id: Int) -> User {
   Database.query("SELECT * FROM users WHERE id = ?", [id])
 }
 ```

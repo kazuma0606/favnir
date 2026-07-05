@@ -25,7 +25,7 @@ export NATS_URL=nats://localhost:4222
 ```favnir
 import rune "nats"
 
-fn main() -> Result<String, String> !Stream {
+fn main() -> Result<String, String> {
     bind conn <- connect("")
     bind _    <- publish(conn, "orders.new", "{\"id\": 1, \"item\": \"widget\"}")
     bind msg  <- subscribe(conn, "orders.new")
@@ -38,7 +38,7 @@ fn main() -> Result<String, String> !Stream {
 ```favnir
 import rune "nats"
 
-fn main() -> Result<String, String> !Stream {
+fn main() -> Result<String, String> {
     bind conn <- connect("")
     bind seq  <- jetstream_publish(conn, "ORDERS", "{\"id\": 1}")
     bind msgs <- jetstream_consume(conn, "ORDERS", "my-consumer")

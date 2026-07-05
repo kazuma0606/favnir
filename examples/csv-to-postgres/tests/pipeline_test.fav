@@ -1,0 +1,23 @@
+import src/validators
+import src/types
+
+test "validate_row: valid" {
+    assert_eq(
+        Result.is_ok(validators.validate_row(RawRow { id: "1", name: "Alice", amount: "9.99", date: "2026-01-01" })),
+        true
+    )
+}
+
+test "validate_row: bad id" {
+    assert_eq(
+        Result.is_err(validators.validate_row(RawRow { id: "bad", name: "Bob", amount: "5.00", date: "2026-01-02" })),
+        true
+    )
+}
+
+test "validate_row: bad amount" {
+    assert_eq(
+        Result.is_err(validators.validate_row(RawRow { id: "3", name: "Carol", amount: "not_a_float", date: "2026-01-03" })),
+        true
+    )
+}

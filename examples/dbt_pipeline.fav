@@ -3,13 +3,13 @@
 
 import rune "dbt"
 
-stage LoadCustomerSummary: Unit -> Result<String, String> !Db = |_| {
+stage LoadCustomerSummary: Unit -> Result<String, String> = |_| {
     Dbt.ref("./dbt_project", "customer_summary")
 }
 
 // NOTE: LoadRawEvents はデモ用の未接続ステージ（DbtRefPipeline には含まれない）
 // v28.x で複数モデル参照パイプラインに組み込む予定
-stage LoadRawEvents: Unit -> Result<String, String> !Db = |_| {
+stage LoadRawEvents: Unit -> Result<String, String> = |_| {
     Dbt.source("./dbt_project", "raw", "events")
 }
 

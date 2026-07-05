@@ -12,22 +12,22 @@
 type NatsConn(String)
 type NatsMsg = { subject: String, payload: String, reply: String }
 
-public fn connect(url: String) -> Result<NatsConn, String> !Stream {
+public fn connect(url: String) -> Result<NatsConn, String> {
     NATS.connect_raw(url)
 }
 
-public fn publish(conn: NatsConn, subject: String, payload: String) -> Result<Unit, String> !Stream {
+public fn publish(conn: NatsConn, subject: String, payload: String) -> Result<Unit, String> {
     NATS.publish_raw(conn, subject, payload)
 }
 
-public fn subscribe(conn: NatsConn, subject: String) -> Result<String, String> !Stream {
+public fn subscribe(conn: NatsConn, subject: String) -> Result<String, String> {
     NATS.subscribe_raw(conn, subject)
 }
 
-public fn jetstream_publish(conn: NatsConn, stream: String, payload: String) -> Result<String, String> !Stream {
+public fn jetstream_publish(conn: NatsConn, stream: String, payload: String) -> Result<String, String> {
     NATS.jetstream_publish_raw(conn, stream, payload)
 }
 
-public fn jetstream_consume(conn: NatsConn, stream: String, consumer: String) -> Result<String, String> !Stream {
+public fn jetstream_consume(conn: NatsConn, stream: String, consumer: String) -> Result<String, String> {
     NATS.jetstream_consume_raw(conn, stream, consumer)
 }

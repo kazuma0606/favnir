@@ -1,0 +1,6 @@
+import src/types
+import src/validators
+
+public stage Pipeline: List<RawRow> -> Result<List<ValidRow>, RowError> = |rows| {
+    Result.all(List.map(rows, |row| validators.validate_row(row)))
+}

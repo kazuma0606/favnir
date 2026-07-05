@@ -1,0 +1,62 @@
+---
+title: "cron スケジュール実行"
+description: "Favnir パイプラインを cron スケジュールで定期実行する設定"
+---
+
+# cron スケジュール実行
+
+Favnir パイプラインを AWS EventBridge または GitHub Actions で定期実行します。
+
+## fav.toml 設定
+
+```toml
+[project]
+name    = "daily-etl"
+version = "0.1.0"
+edition = "2026"
+src     = "src"
+
+[schedule]
+cron = "0 2 * * *"   # 毎日 UTC 02:00 に実行
+timezone = "UTC"
+```
+
+## AWS Lambda + EventBridge によるスケジュール実行
+
+```bash
+# ネイティブバイナリをビルド
+fav build --target native
+
+# Lambda にデプロイ
+aws lambda update-function-code \
+  --function-name daily-etl \
+  --zip-file fileb://dist/daily-etl.zip
+
+# EventBridge ルールを設定（毎日 02:00 UTC）
+aws events put-rule \
+  --name daily-etl-trigger \
+  --schedule-expression "cron(0 2 * * ? *)"
+```
+
+## GitHub Actions によるスケジュール実行
+
+```yaml
+name: Daily ETL
+on:
+  schedule:
+    - cron: "0 2 * * *"
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run ETL
+        run: fav run src/main.fav
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+```
+
+## ポイント
+
+- Lambda のコールドスタートを最小化するため `fav build --target native` でネイティブバイナリを生成します。
+- エラー時の Slack 通知は `notifications.fav` パターン（`real-world-etl` レシピ参照）と組み合わせてください。

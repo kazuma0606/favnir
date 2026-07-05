@@ -1,10 +1,10 @@
 import runes/grafana
 
-stage RecordDeploy: Unit -> Result<Unit, String> !Io = |_| {
+stage RecordDeploy: Unit -> Result<Unit, String> = |_| {
     bind _ <- Grafana.create_annotation("main-dashboard", "Deploy v28.6.0", "deploy,favnir")
     Result.ok(unit)
 }
-stage UpdateDashboard: Unit -> Result<Unit, String> !Io = |_| {
+stage UpdateDashboard: Unit -> Result<Unit, String> = |_| {
     bind _ <- Grafana.push_dashboard("{\"title\": \"ETL Pipeline\", \"panels\": []}")
     Result.ok(unit)
 }

@@ -1,7 +1,7 @@
 // access.fav — Basic environment variable access (v4.7.0)
 
 // get: Returns the env var value, or `default` if not set.
-public fn get(key: String, default: String) -> String !Env {
+public fn get(key: String, default: String) -> String {
     match Env.get_raw(key) {
         Some(v) => v
         None    => default
@@ -9,11 +9,11 @@ public fn get(key: String, default: String) -> String !Env {
 }
 
 // get_opt: Returns Some(value) or None.
-public fn get_opt(key: String) -> Option<String> !Env {
+public fn get_opt(key: String) -> Option<String> {
     Env.get_raw(key)
 }
 
 // require: Returns Ok(value) or Err("ENV_MISSING: KEY").
-public fn require(key: String) -> Result<String, String> !Env {
+public fn require(key: String) -> Result<String, String> {
     Env.require_raw(key)
 }

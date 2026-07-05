@@ -3,13 +3,13 @@
 // NOTE: api_key は HTTP Rune の認証ヘッダー機構が有効化されるまでリクエストには付与されない
 // NOTE: ZENDESK_BASE_URL を "https://your-domain.zendesk.com" 形式で設定すること
 
-fn Zendesk.create_ticket(api_key: String, subject: String, body: String, requester_email: String) -> Result<String, String> !Http =
+fn Zendesk.create_ticket(api_key: String, subject: String, body: String, requester_email: String) -> Result<String, String> =
   Http.post_json(
     Env.get_or("ZENDESK_BASE_URL", "https://your-domain.zendesk.com") ++ "/api/v2/tickets",
     { "ticket": { "subject": subject, "comment": { "body": body }, "requester": { "email": requester_email } } }
   )
 
-fn Zendesk.update_ticket(api_key: String, ticket_id: String, status: String) -> Result<String, String> !Http =
+fn Zendesk.update_ticket(api_key: String, ticket_id: String, status: String) -> Result<String, String> =
   Http.put_json(
     Env.get_or("ZENDESK_BASE_URL", "https://your-domain.zendesk.com") ++ "/api/v2/tickets/" ++ ticket_id,
     { "ticket": { "status": status } }

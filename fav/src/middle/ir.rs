@@ -41,7 +41,6 @@ pub struct IRFnDef {
     pub param_count: usize,
     pub param_tys: Vec<Type>,
     pub local_count: usize,
-    pub effects: Vec<crate::ast::Effect>,
     pub return_ty: Type,
     pub body: IRExpr,
 }

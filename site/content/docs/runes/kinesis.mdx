@@ -27,7 +27,7 @@ export AWS_DEFAULT_REGION=us-east-1
 ```favnir
 import rune "kinesis"
 
-fn main() -> Result<String, String> !Stream {
+fn main() -> Result<String, String> {
     bind conn     <- connect("")
     bind iter     <- get_shard_iterator(conn, "my-stream", "shardId-000000000000", "LATEST")
     bind _        <- put_record(conn, "my-stream", "partition-key", "hello kinesis")

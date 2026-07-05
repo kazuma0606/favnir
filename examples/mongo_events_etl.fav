@@ -6,12 +6,12 @@ import rune "mongodb"
 // 注意: import rune "mongodb" 後は Mongo.connect / Mongo.find 等 "Mongo" 名前空間で呼び出す
 //       （VM primitive 名前空間は "Mongo"。"MongoDB" でも動作する）
 
-stage LoadActiveEvents: Unit -> Result<String, String> !MongoDB = |_| {
+stage LoadActiveEvents: Unit -> Result<String, String> = |_| {
     bind conn <- Mongo.connect("mongodb://localhost:27017/analytics")
     Mongo.find(conn, "events", "{\"status\": \"active\"}")
 }
 
-stage ArchiveEvent: Result<String, String> -> Result<Int, String> !MongoDB = |event_result| {
+stage ArchiveEvent: Result<String, String> -> Result<Int, String> = |event_result| {
     bind event_json <- event_result
     bind conn       <- Mongo.connect("mongodb://localhost:27017/analytics")
     bind _          <- Mongo.insert_one(conn, "archive", event_json)

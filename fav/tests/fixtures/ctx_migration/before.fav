@@ -1,0 +1,13 @@
+// ctx_migration/before.fav — !Effect 構文（v34.5 以前）
+// 例: fn fetch_orders(url: String) -> Result<List<String>, String> !Http { ... }
+fn fetch_orders(url: String) -> Result<List<String>, String> {
+    HTTP.get(url)
+}
+
+fn save_orders(orders: List<String>) -> Result<Int, String> {
+    DB.write("orders", orders)
+}
+
+fn notify_slack(msg: String) -> Result<Bool, String> {
+    HTTP.post("https://hooks.slack.com/services/XXX", msg)
+}

@@ -58,7 +58,7 @@ bind csv    <- StdList.intersperse(names, ",")
 
 ```favnir
 // nums は外部データ（DuckDB クエリ結果など）から取得した List<Int>
-fn demo(nums: List<Int>) -> Unit !Io {
+fn demo(nums: List<Int>) -> Unit {
   bind doubled    <- List.map(nums, |n| n * 2)
   // 各要素が2倍のリスト
 

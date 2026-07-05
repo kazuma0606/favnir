@@ -30,7 +30,7 @@ BigQuery は DB 接続プロトコル経由の操作のため `!Db` エフェク
 ### `BigQuery.connect`
 
 ```favnir
-fn connect(config: String) -> Result<String, String> !Db
+fn connect(config: String) -> Result<String, String>
 ```
 
 BigQuery への接続を確立し、接続ハンドル文字列を返します。`config` にはプロジェクト ID・データセット等の接続情報を渡します。
@@ -42,7 +42,7 @@ bind conn <- BigQuery.connect("project:my-project,dataset:analytics")
 ### `BigQuery.query`
 
 ```favnir
-fn query(conn: String, sql: String) -> Result<String, String> !Db
+fn query(conn: String, sql: String) -> Result<String, String>
 ```
 
 SELECT クエリを実行し、結果を JSON 配列文字列として返します。
@@ -54,7 +54,7 @@ bind rows <- BigQuery.query(conn, "SELECT count(*) FROM analytics.events")
 ### `BigQuery.insert`
 
 ```favnir
-fn insert(conn: String, table: String, rows: String) -> Result<Unit, String> !Db
+fn insert(conn: String, table: String, rows: String) -> Result<Unit, String>
 ```
 
 streaming insert でデータをテーブルに挿入します（即時反映、小量向き）。
@@ -66,7 +66,7 @@ bind _ <- BigQuery.insert(conn, "events", rows_json)
 ### `BigQuery.load_from_gcs`
 
 ```favnir
-fn load_from_gcs(conn: String, table: String, gcs_uri: String, format: String) -> Result<Unit, String> !Db
+fn load_from_gcs(conn: String, table: String, gcs_uri: String, format: String) -> Result<Unit, String>
 ```
 
 GCS からバルクロードします（大量データ向き）。`format` は `"PARQUET"` / `"CSV"` / `"AVRO"` 等を指定します。
@@ -78,7 +78,7 @@ bind _ <- BigQuery.load_from_gcs(conn, "events", "gs://my-bucket/events/*.parque
 ### `BigQuery.create_table`
 
 ```favnir
-fn create_table(conn: String, table: String, schema: String) -> Result<Unit, String> !Db
+fn create_table(conn: String, table: String, schema: String) -> Result<Unit, String>
 ```
 
 スキーマ定義 JSON を使ってテーブルを作成します。
@@ -93,18 +93,18 @@ bind _ <- BigQuery.create_table(conn, "events", "{\"fields\":[{\"name\":\"id\",\
 // examples/bigquery_analytics.fav
 import rune "bigquery"
 
-stage CreateEventTable: Unit -> Result<Unit, String> !Db = |_| {
+stage CreateEventTable: Unit -> Result<Unit, String> = |_| {
     bind conn <- BigQuery.connect("project:my-project,dataset:analytics")
     BigQuery.create_table(conn, "events", "{\"fields\":[{\"name\":\"id\",\"type\":\"INTEGER\"}]}")
 }
 
 // seq pipeline は前ステージの成功値（Unit）を次ステージの引数として渡す
-stage LoadFromGcs: Unit -> Result<Unit, String> !Db = |_| {
+stage LoadFromGcs: Unit -> Result<Unit, String> = |_| {
     bind conn <- BigQuery.connect("project:my-project,dataset:analytics")
     BigQuery.load_from_gcs(conn, "events", "gs://my-bucket/events/*.parquet", "PARQUET")
 }
 
-stage QueryStats: Unit -> Result<String, String> !Db = |_| {
+stage QueryStats: Unit -> Result<String, String> = |_| {
     bind conn <- BigQuery.connect("project:my-project,dataset:analytics")
     BigQuery.query(conn, "SELECT count(*) FROM analytics.events")
 }

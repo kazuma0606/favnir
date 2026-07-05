@@ -663,7 +663,7 @@ pub fn codegen_program(ir: &IRProgram) -> FvcArtifact {
     for f in &ir.fns {
         writer.intern(&f.name);
         writer.intern(&format!("{:?}", f.return_ty));
-        writer.intern(&format!("{:?}", f.effects));
+        writer.intern("[]");
     }
 
     for global in &ir.globals {
@@ -700,7 +700,7 @@ pub fn codegen_program(ir: &IRProgram) -> FvcArtifact {
 
         let name_idx = writer.intern(&f.name);
         let return_ty_str_idx = writer.intern(&format!("{:?}", f.return_ty));
-        let effect_str_idx = writer.intern(&format!("{:?}", f.effects));
+        let effect_str_idx = writer.intern("[]");
         writer.add_function(FvcFunction {
             name_idx,
             param_count: f.param_count as u32,
@@ -1024,7 +1024,6 @@ mod tests {
                 param_count: 0,
                 param_tys: vec![],
                 local_count: 0,
-                effects: Vec::new(),
                 return_ty: Type::Unit,
                 body: IRExpr::Lit(Lit::Unit, Type::Unit),
             }],
@@ -1054,7 +1053,6 @@ mod tests {
                 param_count: 0,
                 param_tys: vec![],
                 local_count: 0,
-                effects: Vec::new(),
                 return_ty: Type::String,
                 body: IRExpr::FieldAccess(
                     Box::new(IRExpr::RecordConstruct(
@@ -1092,7 +1090,6 @@ mod tests {
                 param_count: 1,
                 param_tys: vec![Type::Unknown],
                 local_count: 1,
-                effects: Vec::new(),
                 return_ty: Type::Int,
                 body: IRExpr::Match(
                     Box::new(IRExpr::Local(0, Type::Unknown)),

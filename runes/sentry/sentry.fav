@@ -1,18 +1,18 @@
 // runes/sentry/sentry.fav — Sentry エラートラッキング Rune (v28.5.0)
 // エラーイベント・メッセージを Sentry API 経由で送信する。
 // v28.5.0 stub — 実際の Sentry SDK 送信は v28.x 以降
-public fn capture_error(err: String) -> Result<Unit, String> !Io {
+public fn capture_error(err: String) -> Result<Unit, String> {
     Sentry.capture_error_raw(err)
 }
-public fn capture_message(level: String, msg: String) -> Result<Unit, String> !Io {
+public fn capture_message(level: String, msg: String) -> Result<Unit, String> {
     Sentry.capture_message_raw(level, msg)
 }
-public fn set_user(id: String, email: String) -> Result<Unit, String> !Io {
+public fn set_user(id: String, email: String) -> Result<Unit, String> {
     Sentry.set_user_raw(id, email)
 }
-public fn set_tag(key: String, value: String) -> Result<Unit, String> !Io {
+public fn set_tag(key: String, value: String) -> Result<Unit, String> {
     Sentry.set_tag_raw(key, value)
 }
-public fn set_extra(key: String, value: String) -> Result<Unit, String> !Io {
+public fn set_extra(key: String, value: String) -> Result<Unit, String> {
     Sentry.set_extra_raw(key, value)
 }

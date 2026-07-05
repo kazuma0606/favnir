@@ -2,18 +2,18 @@
 // v15.2.0 の部分実装（query/execute、!Gcp エフェクト）から connect-based API（!Db エフェクト）に昇格。
 // Google BigQuery クライアントライブラリ統合は v28.x 以降。現バージョンは引数検証 stub。
 // TODO(v28.x): google-cloud-bigquery クレートを使った実接続に移行予定。
-public fn connect(config: String) -> Result<String, String> !Db {
+public fn connect(config: String) -> Result<String, String> {
     BigQuery.connect_raw(config)
 }
-public fn query(conn: String, sql: String) -> Result<String, String> !Db {
+public fn query(conn: String, sql: String) -> Result<String, String> {
     BigQuery.conn_query_raw(conn, sql)
 }
-public fn insert(conn: String, table: String, rows: String) -> Result<Unit, String> !Db {
+public fn insert(conn: String, table: String, rows: String) -> Result<Unit, String> {
     BigQuery.insert_raw(conn, table, rows)
 }
-public fn load_from_gcs(conn: String, table: String, gcs_uri: String, format: String) -> Result<Unit, String> !Db {
+public fn load_from_gcs(conn: String, table: String, gcs_uri: String, format: String) -> Result<Unit, String> {
     BigQuery.load_from_gcs_raw(conn, table, gcs_uri, format)
 }
-public fn create_table(conn: String, table: String, schema: String) -> Result<Unit, String> !Db {
+public fn create_table(conn: String, table: String, schema: String) -> Result<Unit, String> {
     BigQuery.create_table_raw(conn, table, schema)
 }

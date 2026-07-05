@@ -2,7 +2,7 @@
 // Compiled on Machine A, executed on ECS Fargate (no .fav source needed)
 // Uses built-in DB / AWS primitives - no rune modules required
 
-stage CountOrders: String -> Int !Db = |conn_str| {
+stage CountOrders: String -> Int = |conn_str| {
   match DB.connect(conn_str) {
     Err(_) => 0
     Ok(handle) => match DB.query_raw(handle, "SELECT id FROM orders") {
@@ -12,7 +12,7 @@ stage CountOrders: String -> Int !Db = |conn_str| {
   }
 }
 
-stage SaveSummary: Int -> Unit !AWS = |count| {
+stage SaveSummary: Int -> Unit = |count| {
   match AWS.s3_put_object_raw(
     Env.get_or("BUCKET_NAME", "favnir-e2e-demo"),
     "output/summary-latest.json",
@@ -25,6 +25,6 @@ stage SaveSummary: Int -> Unit !AWS = |count| {
 
 seq EtlPipeline = CountOrders |> SaveSummary
 
-fn main() -> Unit !Db !AWS {
+fn main(ctx: AppCtx) -> Unit {
   EtlPipeline(Env.get_or("FAV_DB_URL", ""))
 }

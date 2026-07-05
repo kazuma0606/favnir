@@ -30,13 +30,13 @@ import rune "datadog"
 ```favnir
 import rune "datadog"
 
-stage TraceExtract: Unit -> Result<Unit, String> !Io = |_| {
+stage TraceExtract: Unit -> Result<Unit, String> = |_| {
     bind _ <- Datadog.trace("etl-extractor", "extract")
     bind _ <- Datadog.metric("etl.extract.calls", 1.0, "[]")
     Result.ok(unit)
 }
 
-stage ReportToDatadog: Unit -> Result<Unit, String> !Io = |_| {
+stage ReportToDatadog: Unit -> Result<Unit, String> = |_| {
     bind _ <- Datadog.log("info", "ETL pipeline completed", "{}")
     bind _ <- Datadog.event("ETL Complete", "All stages finished", "[]")
     bind _ <- Datadog.service_check("etl.pipeline", "OK")

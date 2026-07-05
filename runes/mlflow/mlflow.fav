@@ -2,42 +2,42 @@
 // 接続: MLFLOW_TRACKING_URI 環境変数（デフォルト: http://localhost:5000）
 
 // 実験実行を開始し、run_id を返す
-fn MLflow.start_run(experiment_name: String) -> Result<String, String> !Http =
+fn MLflow.start_run(experiment_name: String) -> Result<String, String> =
   Http.post_json(
     Env.get_or("MLFLOW_TRACKING_URI", "http://localhost:5000") ++ "/api/2.0/mlflow/runs/create",
     { "experiment_name": experiment_name }
   )
 
 // メトリクスを記録する（ステップ付き）
-fn MLflow.log_metric(run_id: String, key: String, value: Float, step: Int) -> Result<Unit, String> !Http =
+fn MLflow.log_metric(run_id: String, key: String, value: Float, step: Int) -> Result<Unit, String> =
   Http.post_json(
     Env.get_or("MLFLOW_TRACKING_URI", "http://localhost:5000") ++ "/api/2.0/mlflow/runs/log-metric",
     { "run_id": run_id, "key": key, "value": value, "step": step }
   )
 
 // ハイパーパラメータを記録する
-fn MLflow.log_param(run_id: String, key: String, value: String) -> Result<Unit, String> !Http =
+fn MLflow.log_param(run_id: String, key: String, value: String) -> Result<Unit, String> =
   Http.post_json(
     Env.get_or("MLFLOW_TRACKING_URI", "http://localhost:5000") ++ "/api/2.0/mlflow/runs/log-parameter",
     { "run_id": run_id, "key": key, "value": value }
   )
 
 // 成果物ファイルをアップロードする
-fn MLflow.log_artifact(run_id: String, local_path: String) -> Result<Unit, String> !Http =
+fn MLflow.log_artifact(run_id: String, local_path: String) -> Result<Unit, String> =
   Http.post_json(
     Env.get_or("MLFLOW_TRACKING_URI", "http://localhost:5000") ++ "/api/2.0/mlflow/runs/log-artifact",
     { "run_id": run_id, "local_path": local_path }
   )
 
 // 実験実行を終了する（status: "FINISHED" または "FAILED"）
-fn MLflow.end_run(run_id: String, status: String) -> Result<Unit, String> !Http =
+fn MLflow.end_run(run_id: String, status: String) -> Result<Unit, String> =
   Http.post_json(
     Env.get_or("MLFLOW_TRACKING_URI", "http://localhost:5000") ++ "/api/2.0/mlflow/runs/update",
     { "run_id": run_id, "status": status }
   )
 
 // 学習済みモデルをモデルレジストリに登録し、バージョン ID を返す
-fn MLflow.register_model(run_id: String, name: String) -> Result<String, String> !Http =
+fn MLflow.register_model(run_id: String, name: String) -> Result<String, String> =
   Http.post_json(
     Env.get_or("MLFLOW_TRACKING_URI", "http://localhost:5000") ++ "/api/2.0/mlflow/registered-models/create",
     { "run_id": run_id, "name": name }
@@ -47,14 +47,14 @@ fn MLflow.register_model(run_id: String, name: String) -> Result<String, String>
 // NOTE: MLflow REST API は GET + クエリパラメータだが、URL エンコードが必要なため
 //       POST + JSON body に統一している（HTTP 有効化時に String.url_encode で対応予定）
 //       list_experiments は引数なし GET のため Http.get_json を使用（クエリパラメータ不要）
-fn MLflow.load_model(name: String, version: String) -> Result<String, String> !Http =
+fn MLflow.load_model(name: String, version: String) -> Result<String, String> =
   Http.post_json(
     Env.get_or("MLFLOW_TRACKING_URI", "http://localhost:5000") ++ "/api/2.0/mlflow/model-versions/get",
     { "name": name, "version": version }
   )
 
 // 実験名の一覧を取得する
-fn MLflow.list_experiments() -> Result<List<String>, String> !Http =
+fn MLflow.list_experiments() -> Result<List<String>, String> =
   Http.get_json(
     Env.get_or("MLFLOW_TRACKING_URI", "http://localhost:5000") ++ "/api/2.0/mlflow/experiments/list"
   )

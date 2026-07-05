@@ -47,7 +47,7 @@ public fn build_message(blocks: List<String>) -> String {
 // ── Notification functions (!Network) ────────────────────────────────────────
 
 // Post a simple text notification to a Slack Webhook URL.
-public fn notify(webhook_url: String, text: String) -> Result<Unit, String> !Network {
+public fn notify(webhook_url: String, text: String) -> Result<Unit, String> {
     bind body <- String.concat(
         String.concat("{\"text\":\"", text),
         "\"}")
@@ -58,7 +58,7 @@ public fn notify(webhook_url: String, text: String) -> Result<Unit, String> !Net
 }
 
 // Post a Block Kit message payload to a Slack Webhook URL.
-public fn post_blocks(webhook_url: String, blocks: String) -> Result<Unit, String> !Network {
+public fn post_blocks(webhook_url: String, blocks: String) -> Result<Unit, String> {
     match Http.post_raw(webhook_url, blocks, "application/json") {
         Err(e)   => Result.err(e)
         Ok(resp) => Result.ok(())

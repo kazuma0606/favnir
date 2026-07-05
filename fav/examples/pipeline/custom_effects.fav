@@ -4,10 +4,10 @@
 public effect Payment
 public effect Notification
 
-stage Charge: Int -> Int !Payment = |amount| { amount }
-stage Publish: Int -> Unit !Notification !Emit<Int> = |amount| { emit amount }
+stage Charge: Int -> Int = |amount| { amount }
+stage Publish: Int -> Unit = |amount| { emit amount }
 
-public fn main() -> Unit !Payment !Notification !Emit<Int> {
+public fn main() -> Unit {
     bind charged <- Charge(100)
     Publish(charged)
 }

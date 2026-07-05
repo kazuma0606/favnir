@@ -3,14 +3,14 @@
 // NOTE: GITHUB_TOKEN は HTTP Rune の認証ヘッダー機構が有効化されるまでリクエストには付与されない
 
 // PR にコメントを作成する
-fn GitHub.create_comment(config: String, pr_number: String, body: String) -> Result<Unit, String> !Http =
+fn GitHub.create_comment(config: String, pr_number: String, body: String) -> Result<Unit, String> =
   Http.post_json(
     Env.get_or("GITHUB_BASE_URL", "https://api.github.com") ++ "/repos/" ++ Env.get_or("GITHUB_REPO", config) ++ "/issues/" ++ pr_number ++ "/comments",
     { "body": body }
   )
 
 // Issue を作成し、Issue 番号を返す
-fn GitHub.create_issue(config: String, title: String, body: String, labels: List<String>) -> Result<String, String> !Http =
+fn GitHub.create_issue(config: String, title: String, body: String, labels: List<String>) -> Result<String, String> =
   Http.post_json(
     Env.get_or("GITHUB_BASE_URL", "https://api.github.com") ++ "/repos/" ++ Env.get_or("GITHUB_REPO", config) ++ "/issues",
     { "title": title, "body": body, "labels": labels }
@@ -18,20 +18,20 @@ fn GitHub.create_issue(config: String, title: String, body: String, labels: List
 
 // Issue を更新する（state: "open" または "closed"）
 // NOTE: GitHub REST API は PATCH だが Favnir HTTP Rune は post_json で統一（HTTP 有効化時に patch_json へ移行予定）
-fn GitHub.update_issue(config: String, issue_number: String, state: String) -> Result<Unit, String> !Http =
+fn GitHub.update_issue(config: String, issue_number: String, state: String) -> Result<Unit, String> =
   Http.post_json(
     Env.get_or("GITHUB_BASE_URL", "https://api.github.com") ++ "/repos/" ++ Env.get_or("GITHUB_REPO", config) ++ "/issues/" ++ issue_number,
     { "state": state }
   )
 
 // PR 一覧を取得する（state: "open" / "closed" / "all"）
-fn GitHub.list_prs(config: String, state: String) -> Result<List<String>, String> !Http =
+fn GitHub.list_prs(config: String, state: String) -> Result<List<String>, String> =
   Http.get_json(
     Env.get_or("GITHUB_BASE_URL", "https://api.github.com") ++ "/repos/" ++ Env.get_or("GITHUB_REPO", config) ++ "/pulls?state=" ++ state
   )
 
 // PR の詳細を取得する
-fn GitHub.get_pr(config: String, pr_number: String) -> Result<String, String> !Http =
+fn GitHub.get_pr(config: String, pr_number: String) -> Result<String, String> =
   Http.get_json(
     Env.get_or("GITHUB_BASE_URL", "https://api.github.com") ++ "/repos/" ++ Env.get_or("GITHUB_REPO", config) ++ "/pulls/" ++ pr_number
   )

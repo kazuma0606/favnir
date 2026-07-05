@@ -187,18 +187,16 @@ impl Formatter {
         let vis = fmt_visibility(fd.visibility.as_ref());
         let params = fmt_type_params(&fd.type_params);
         let args = self.params(&fd.params);
-        let effects = fmt_effects(&fd.effects);
         if let Some(ret_ty) = &fd.return_ty {
             let ret = self.type_expr(ret_ty);
             let body = self.block(&fd.body);
             format!(
-                "{}fn {}{}{}{}{} {}",
+                "{}fn {}{}{}{} {}",
                 vis,
                 fd.name,
                 params,
                 args,
                 ret_arrow(&ret),
-                effects,
                 body
             )
         } else {
@@ -208,8 +206,8 @@ impl Formatter {
                 self.block(&fd.body)
             };
             format!(
-                "{}fn {}{}{}{} {}",
-                vis, fd.name, params, args, effects, body
+                "{}fn {}{}{} {}",
+                vis, fd.name, params, args, body
             )
         }
     }
@@ -229,9 +227,8 @@ impl Formatter {
         let type_params = fmt_type_params(&td.type_params);
         let input = self.type_expr(&td.input_ty);
         let output = self.type_expr(&td.output_ty);
-        let effects = fmt_effects(&td.effects);
         let body = self.block(&td.body);
-        // stage syntax: stage Name<T>: Input -> Output !Effects = |params| { body }
+        // stage syntax: stage Name<T>: Input -> Output = |params| { body }
         // params are lambda params (just names, types come from input_ty)
         let lambda = if td.params.is_empty() {
             String::new()
@@ -240,8 +237,8 @@ impl Formatter {
             format!("|{}| ", names.join(", "))
         };
         format!(
-            "{}stage {}{}: {} -> {}{} = {}{}",
-            vis, td.name, type_params, input, output, effects, lambda, body
+            "{}stage {}{}: {} -> {} = {}{}",
+            vis, td.name, type_params, input, output, lambda, body
         )
     }
 
@@ -249,10 +246,9 @@ impl Formatter {
         let vis = fmt_visibility(td.visibility.as_ref());
         let input = self.type_expr(&td.input_ty);
         let output = self.type_expr(&td.output_ty);
-        let effects = fmt_effects(&td.effects);
         format!(
-            "{}abstract stage {}: {} -> {}{}",
-            vis, td.name, input, output, effects
+            "{}abstract stage {}: {} -> {}",
+            vis, td.name, input, output
         )
     }
 
@@ -272,11 +268,10 @@ impl Formatter {
             .iter()
             .map(|slot| {
                 format!(
-                    "    {}: {} -> {}{}",
+                    "    {}: {} -> {}",
                     slot.name,
                     self.type_expr(&slot.input_ty),
                     self.type_expr(&slot.output_ty),
-                    fmt_effects(&slot.effects),
                 )
             })
             .collect();
@@ -715,14 +710,12 @@ impl Formatter {
             TypeExpr::TrfFn {
                 input,
                 output,
-                effects,
                 ..
             } => {
                 format!(
-                    "{} -> {}{}",
+                    "{} -> {}",
                     self.type_expr(input),
                     self.type_expr(output),
-                    fmt_effects(effects),
                 )
             }
             TypeExpr::Intersection(lhs, rhs, _) => {
@@ -823,48 +816,6 @@ fn fmt_fstring_lit(s: &str) -> String {
     out
 }
 
-fn fmt_effects(effects: &[Effect]) -> String {
-    let strs: Vec<String> = effects.iter().filter_map(fmt_effect).collect();
-    if strs.is_empty() {
-        String::new()
-    } else {
-        format!(" {}", strs.join(" "))
-    }
-}
-
-fn fmt_effect(eff: &Effect) -> Option<String> {
-    match eff {
-        Effect::Pure => None,
-        Effect::Io => Some("!Io".to_string()),
-        Effect::Db => Some("!Db".to_string()),
-        Effect::DbRead => Some("!DbRead".to_string()),
-        Effect::DbWrite => Some("!DbWrite".to_string()),
-        Effect::DbAdmin => Some("!DbAdmin".to_string()),
-        Effect::Network => Some("!Network".to_string()),
-        Effect::Http => Some("!Http".to_string()),
-        Effect::Llm => Some("!Llm".to_string()),
-        Effect::Snowflake => Some("!Snowflake".to_string()),
-        Effect::Gcp => Some("!Gcp".to_string()),
-        Effect::Stream => Some("!Stream".to_string()),
-        Effect::Postgres => Some("!Postgres".to_string()),
-        Effect::Redis => Some("!Redis".to_string()),
-        Effect::MySQL => Some("!MySQL".to_string()),
-        Effect::MongoDB => Some("!MongoDB".to_string()),
-        Effect::DynamoDB => Some("!DynamoDB".to_string()),
-        Effect::Elasticsearch => Some("!Elasticsearch".to_string()),
-        Effect::AzureDb => Some("!AzureDb".to_string()),
-        Effect::AzureStorage => Some("!AzureStorage".to_string()),
-        Effect::Rpc => Some("!Rpc".to_string()),
-        Effect::File => Some("!File".to_string()),
-        Effect::Checkpoint => Some("!Checkpoint".to_string()),
-        Effect::Trace => Some("!Trace".to_string()),
-        Effect::PipelineState => Some("!PipelineState".to_string()),
-        Effect::Unknown(name) => Some(format!("!{}", name)),
-        Effect::Emit(t) => Some(format!("!Emit<{}>", t)),
-        Effect::EmitUnion(ts) => Some(format!("!Emit<{}>", ts.join("|"))),
-    }
-}
-
 fn fmt_slot_impl(imp: &SlotImpl) -> &str {
     match imp {
         SlotImpl::Global(name) | SlotImpl::Local(name) => name.as_str(),
@@ -938,7 +889,7 @@ mod tests {
     fn fmt_simple_fn_is_idempotent() {
         assert_idempotent(
             r#"
-public fn main() -> Unit !Io {
+public fn main() -> Unit {
     IO.println("Hello, Favnir!")
 }
 "#,

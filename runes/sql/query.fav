@@ -225,12 +225,12 @@ public fn to_sql(q: SqlQuery) -> String {
 // ── Execution functions (!DbRead / !DbWrite) ──────────────────────────────────
 
 // Execute the query and return raw rows as List<Map<String, String>>.
-public fn run_raw(handle: DbHandle, q: SqlQuery) -> Result<List<Map<String, String>>, DbError> !DbRead {
+public fn run_raw(handle: DbHandle, q: SqlQuery) -> Result<List<Map<String, String>>, DbError> {
     DB.query_raw_params(handle, to_sql(q), q.params)
 }
 
 // Execute a COUNT(*) variant and return the row count.
-public fn count_raw(handle: DbHandle, q: SqlQuery) -> Result<Int, DbError> !DbRead {
+public fn count_raw(handle: DbHandle, q: SqlQuery) -> Result<Int, DbError> {
     bind count_q <- select(q, "COUNT(*) as n")
     match DB.query_raw_params(handle, to_sql(count_q), count_q.params) {
         Err(e)   => Result.err(e)
@@ -270,7 +270,7 @@ public fn insert_into(
     table:  String,
     cols:   List<String>,
     rows:   List<List<String>>
-) -> Result<Int, DbError> !DbWrite {
+) -> Result<Int, DbError> {
     if List.length(rows) == 0 {
         Result.ok(0)
     } else {
@@ -295,7 +295,7 @@ public fn update_where(
     set_clause: String,
     params:     List<String>,
     where_cond: String
-) -> Result<Int, DbError> !DbWrite {
+) -> Result<Int, DbError> {
     bind sql <- String.concat(
         String.concat(
             String.concat(
@@ -312,7 +312,7 @@ public fn delete_where(
     table:      String,
     where_cond: String,
     params:     List<String>
-) -> Result<Int, DbError> !DbWrite {
+) -> Result<Int, DbError> {
     bind sql <- String.concat(
         String.concat("DELETE FROM ", table),
         String.concat(" WHERE ", where_cond))

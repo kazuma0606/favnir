@@ -422,46 +422,9 @@ fn lower_param(p: &ast::Param) -> Value {
 
 // ── FnDef ─────────────────────────────────────────────────────────────────────
 
-fn effect_to_str(e: &ast::Effect) -> String {
-    match e {
-        ast::Effect::Pure => String::new(),
-        ast::Effect::Io => "IO".to_string(),
-        ast::Effect::Db | ast::Effect::DbRead | ast::Effect::DbWrite | ast::Effect::DbAdmin => {
-            "DB".to_string()
-        }
-        ast::Effect::Network => "Network".to_string(),
-        ast::Effect::Http => "Http".to_string(),
-        ast::Effect::Llm => "Llm".to_string(),
-        ast::Effect::Snowflake => "Snowflake".to_string(),
-        ast::Effect::Gcp => "Gcp".to_string(),
-        ast::Effect::Stream => "Stream".to_string(),
-        ast::Effect::Postgres => "Postgres".to_string(),
-        ast::Effect::Redis => "Redis".to_string(),
-        ast::Effect::MySQL => "MySQL".to_string(),
-        ast::Effect::MongoDB => "MongoDB".to_string(),
-        ast::Effect::DynamoDB => "DynamoDB".to_string(),
-        ast::Effect::Elasticsearch => "Elasticsearch".to_string(),
-        ast::Effect::AzureDb => "AzureDb".to_string(),
-        ast::Effect::AzureStorage => "AzureStorage".to_string(),
-        ast::Effect::Rpc => "Rpc".to_string(),
-        ast::Effect::File => "File".to_string(),
-        ast::Effect::Checkpoint => "Checkpoint".to_string(),
-        ast::Effect::Trace => "Trace".to_string(),
-        ast::Effect::PipelineState => "PipelineState".to_string(),
-        ast::Effect::Emit(s) => format!("Emit<{}>", s),
-        ast::Effect::EmitUnion(vs) => format!("Emit<{}>", vs.join("|")),
-        ast::Effect::Unknown(s) => s.clone(),
-    }
-}
-
 fn lower_fn_def(fd: &ast::FnDef) -> Value {
     let is_public = matches!(fd.visibility, Some(ast::Visibility::Public));
-    let effects: Vec<Value> = fd
-        .effects
-        .iter()
-        .filter(|e| !matches!(e, ast::Effect::Pure))
-        .map(|e| sv(&effect_to_str(e)))
-        .collect();
+    let effects: Vec<Value> = vec![];
     let params: Vec<Value> = fd.params.iter().map(lower_param).collect();
     let ret = fd
         .return_ty

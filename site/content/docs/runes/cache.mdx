@@ -24,12 +24,12 @@ fav rune add cache
 ```favnir
 use cache
 
-stage GetUser: Int -> String !Cache = |user_id| {
+stage GetUser: Int -> String = |user_id| {
     bind key <- String.concat("user:", Int.to_string(user_id))
     Cache.get_or(key, "unknown")
 }
 
-stage CacheUser: Int -> Unit !Cache = |user_id| {
+stage CacheUser: Int -> Unit = |user_id| {
     bind key  <- String.concat("user:", Int.to_string(user_id))
     bind name <- fetch_user_name(user_id)
     Cache.set_ttl(key, name, 300)
@@ -41,7 +41,7 @@ stage CacheUser: Int -> Unit !Cache = |user_id| {
 ### `Cache.get`
 
 ```favnir
-public fn get(key: String) -> Option<String> !Cache
+public fn get(key: String) -> Option<String>
 ```
 
 キーを検索します。存在すれば `Some(value)`、なければ `None`。
@@ -56,7 +56,7 @@ match Cache.get("session:abc123") {
 ### `Cache.get_or`
 
 ```favnir
-public fn get_or(key: String, default: String) -> String !Cache
+public fn get_or(key: String, default: String) -> String
 ```
 
 キーが存在しない場合はデフォルト値を返します。
@@ -68,7 +68,7 @@ bind lang <- Cache.get_or("user:42:lang", "ja")
 ### `Cache.set`
 
 ```favnir
-public fn set(key: String, value: String) -> Unit !Cache
+public fn set(key: String, value: String) -> Unit
 ```
 
 TTL なしで保存します。
@@ -76,7 +76,7 @@ TTL なしで保存します。
 ### `Cache.set_ttl`
 
 ```favnir
-public fn set_ttl(key: String, value: String, ttl_secs: Int) -> Unit !Cache
+public fn set_ttl(key: String, value: String, ttl_secs: Int) -> Unit
 ```
 
 TTL（秒）を指定して保存します。インプロセスストアでは TTL は advisory（ヒントのみ）です。
@@ -88,7 +88,7 @@ bind _ <- Cache.set_ttl("rate:user:42", "1", 60)
 ### `Cache.del`
 
 ```favnir
-public fn del(key: String) -> Unit !Cache
+public fn del(key: String) -> Unit
 ```
 
 1つのキーを削除します。
@@ -96,7 +96,7 @@ public fn del(key: String) -> Unit !Cache
 ### `Cache.invalidate_prefix`
 
 ```favnir
-public fn invalidate_prefix(prefix: String) -> Int !Cache
+public fn invalidate_prefix(prefix: String) -> Int
 ```
 
 指定プレフィックスで始まるすべてのキーを削除し、削除件数を返します。
@@ -109,7 +109,7 @@ bind n <- Cache.invalidate_prefix("user:42:")
 ## パターン: キャッシュスルー
 
 ```favnir
-fn get_config(key: String) -> String !Cache = {
+fn get_config(key: String) -> String = {
     match Cache.get(key) {
         Some(v) => v
         None    => {

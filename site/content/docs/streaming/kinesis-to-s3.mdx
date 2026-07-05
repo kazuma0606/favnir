@@ -47,19 +47,19 @@ fav run examples/streaming/kinesis_to_s3.fav
 import rune "kinesis"
 import rune "aws"
 
-stage FetchClickEvents: Unit -> Result<String, String> !Stream = |_| {
+stage FetchClickEvents: Unit -> Result<String, String> = |_| {
     bind conn <- Kinesis.connect("")
     bind iter <- Kinesis.get_shard_iterator(conn, "clickstream", "shardId-000000000000", "TRIM_HORIZON")
     Kinesis.get_records(conn, iter, 1000)
 }
 
-stage SerializeBatch: String -> Result<String, String> !Pure = |records_json| {
+stage SerializeBatch: String -> Result<String, String> = |records_json| {
     if String.length(records_json) > 2
     then Result.ok(records_json)
     else Result.err("empty batch — skipping")
 }
 
-stage UploadToS3: String -> Result<String, String> !AWS = |batch_json| {
+stage UploadToS3: String -> Result<String, String> = |batch_json| {
     bind key <- Result.ok("archive/clickstream-batch.json")
     bind _   <- S3.put_object("clickstream-archive", key, batch_json)
     Result.ok("archived to s3://clickstream-archive/" ++ key)

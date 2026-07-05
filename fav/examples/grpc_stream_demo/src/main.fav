@@ -1,6 +1,6 @@
 import "grpc"
 
-public fn main() -> Int !Rpc {
+public fn main() -> Int {
     bind req <- Map.set((), "cursor", "0")
     bind rows <- grpc.call_stream("127.0.0.1:9", "/EventService/ListEvents", req)
     List.length(rows)

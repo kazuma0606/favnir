@@ -36,7 +36,7 @@ export AWS_ENDPOINT_URL=http://localhost:4566
 ```favnir
 use queue
 
-stage EnqueueOrders: List<String> -> Int !Queue = |queue_url| {
+stage EnqueueOrders: List<String> -> Int = |queue_url| {
     bind orders <- List.map(some_orders, |o| o.id)
     match Queue.send_batch(queue_url, orders) {
         Err(e) => 0
@@ -50,7 +50,7 @@ stage EnqueueOrders: List<String> -> Int !Queue = |queue_url| {
 ### `Queue.send`
 
 ```favnir
-public fn send(url: String, body: String) -> Result<Unit, String> !Queue
+public fn send(url: String, body: String) -> Result<Unit, String>
 ```
 
 1件のメッセージを送信します。
@@ -62,7 +62,7 @@ bind _ <- Queue.send(queue_url, "order:42")
 ### `Queue.send_batch`
 
 ```favnir
-public fn send_batch(url: String, messages: List<String>) -> Result<Int, String> !Queue
+public fn send_batch(url: String, messages: List<String>) -> Result<Int, String>
 ```
 
 複数のメッセージを順次送信し、成功件数を返します。最初のエラーで停止します。
@@ -77,7 +77,7 @@ match Queue.send_batch(queue_url, message_list) {
 ### `Queue.recv`
 
 ```favnir
-public fn recv(url: String, max: Int) -> Result<List<String>, String> !Queue
+public fn recv(url: String, max: Int) -> Result<List<String>, String>
 ```
 
 最大 `max` 件のメッセージを受信し、ボディ文字列のリストを返します。
@@ -92,7 +92,7 @@ match Queue.recv(queue_url, 10) {
 ### `Queue.ack`
 
 ```favnir
-public fn ack(url: String, receipt: String) -> Result<Unit, String> !Queue
+public fn ack(url: String, receipt: String) -> Result<Unit, String>
 ```
 
 メッセージの処理完了を通知し、キューから削除します（SQS: DeleteMessage）。
@@ -100,7 +100,7 @@ public fn ack(url: String, receipt: String) -> Result<Unit, String> !Queue
 ### `Queue.nack`
 
 ```favnir
-public fn nack(url: String, receipt: String) -> Result<Unit, String> !Queue
+public fn nack(url: String, receipt: String) -> Result<Unit, String>
 ```
 
 処理失敗を通知し、メッセージを再処理可能状態に戻します。
@@ -108,14 +108,14 @@ public fn nack(url: String, receipt: String) -> Result<Unit, String> !Queue
 ## パターン: ワーカーループ
 
 ```favnir
-stage ProcessBatch: String -> Int !Queue = |queue_url| {
+stage ProcessBatch: String -> Int = |queue_url| {
     match Queue.recv(queue_url, 10) {
         Err(_)   => 0
         Ok(msgs) => process_messages(queue_url, msgs, 0)
     }
 }
 
-fn process_messages(url: String, msgs: List<String>, count: Int) -> Int !Queue {
+fn process_messages(url: String, msgs: List<String>, count: Int) -> Int {
     match List.head(msgs) {
         None      => count
         Some(msg) => match do_work(msg) {

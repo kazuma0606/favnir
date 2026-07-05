@@ -1,0 +1,10 @@
+// runes/ctx/http.fav — HttpClient interface（v34.6.0）
+// !Http エフェクトの Capability Context 移行用インターフェース。
+// `!Http` を使用している関数は ctx.http を通じて HTTP 操作を行う。
+
+interface HttpClient {
+    fn get(ctx: HttpClient, url: String) -> Result<String, String>
+    fn post(ctx: HttpClient, url: String, body: String) -> Result<String, String>
+    fn put(ctx: HttpClient, url: String, body: String) -> Result<String, String>
+    fn delete(ctx: HttpClient, url: String) -> Result<String, String>
+}

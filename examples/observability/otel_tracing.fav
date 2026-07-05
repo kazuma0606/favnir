@@ -1,13 +1,13 @@
 // examples/observability/otel_tracing.fav — OpenTelemetry Rune デモ (v28.3.0)
 import runes/otel
 
-stage StartTrace: Unit -> Result<Unit, String> !Io = |_| {
+stage StartTrace: Unit -> Result<Unit, String> = |_| {
     bind _ <- OTel.start_span("etl-pipeline", "etl-service")
     bind _ <- OTel.set_attribute("pipeline.version", "28.3.0")
     Result.ok(unit)
 }
 
-stage EndTrace: Unit -> Result<Unit, String> !Io = |_| {
+stage EndTrace: Unit -> Result<Unit, String> = |_| {
     bind _ <- OTel.add_event("pipeline.completed", "{\"rows\": 1000}")
     bind _ <- OTel.end_span("ok")
     Result.ok(unit)

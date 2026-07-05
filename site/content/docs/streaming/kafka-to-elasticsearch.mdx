@@ -45,18 +45,18 @@ fav run examples/streaming/kafka_to_elasticsearch.fav
 import rune "kafka"
 import rune "elasticsearch"
 
-stage FetchLogs: Unit -> Result<String, String> !Stream = |_| {
+stage FetchLogs: Unit -> Result<String, String> = |_| {
     bind conn <- Kafka.connect("")
     Kafka.consume_batch(conn, "app-logs", "favnir-log-consumer", 50)
 }
 
-stage FilterErrors: String -> Result<String, String> !Pure = |batch_json| {
+stage FilterErrors: String -> Result<String, String> = |batch_json| {
     if String.contains(batch_json, "ERROR") || String.contains(batch_json, "WARN")
     then Result.ok(batch_json)
     else Result.err("no error/warn logs in batch — skipping")
 }
 
-stage IndexToES: String -> Result<String, String> !Elasticsearch = |batch_json| {
+stage IndexToES: String -> Result<String, String> = |batch_json| {
     bind conn <- Elasticsearch.connect("")
     bind _    <- Elasticsearch.bulk(conn, "logs-index", batch_json)
     Result.ok("indexed batch to logs-index")

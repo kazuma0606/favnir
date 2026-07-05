@@ -1,0 +1,38 @@
+---
+title: "Redis キャッシュアサイドパターン"
+description: "Redis をキャッシュとして使い、キャッシュミス時だけ DB から取得するパターン"
+---
+
+# Redis キャッシュアサイドパターン
+
+キャッシュアサイドパターンで Redis をキャッシュ層として使用し、Postgres への負荷を軽減します。
+
+## コード例
+
+```favnir
+import runes/redis
+import runes/postgres
+
+fn get_customer(id: String) -> Result<Customer, String> {
+    bind cached <- Redis.get(String.concat(["customer:", id]))
+    match cached {
+        Some(json) -> Result.ok(Json.decode(json, Customer))
+        None -> {
+            bind row <- Postgres.query_one("SELECT * FROM customers WHERE id = $1", [id])
+            match row {
+                None -> Result.err(String.concat(["Customer ", id, " not found"]))
+                Some(c) -> {
+                    bind _ <- Redis.set(String.concat(["customer:", id]), Json.encode(c), 300)
+                    Result.ok(c)
+                }
+            }
+        }
+    }
+}
+```
+
+## ポイント
+
+- `Redis.set` の第三引数は TTL（秒）です。キャッシュの有効期限を設定します。
+- `Redis.get` は `Option<String>` を返すため、`None` でキャッシュミスを検出します。
+- 環境変数 `REDIS_URL` で接続先を設定してください。

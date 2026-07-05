@@ -1,0 +1,35 @@
+---
+title: "JWT 認証付き API 呼び出し"
+description: "JWT トークンを生成・検証して認証済み API エンドポイントを呼び出す"
+---
+
+# JWT 認証付き API 呼び出し
+
+RS256 署名の JWT トークンを生成し、認証が必要な外部 API を呼び出します。
+
+## コード例
+
+```favnir
+import runes/jwt
+
+type Claims = { sub: String, iat: Int, exp: Int, scope: String }
+
+fn call_protected_api(endpoint: String, subject: String) -> Result<String, String> {
+    let now    = DateTime.unix_now()
+    let claims = { sub: subject, iat: now, exp: now + 3600, scope: "read:data" }
+    bind token <- JWT.sign_rs256(claims, Env.get("JWT_PRIVATE_KEY"))
+    bind resp  <- HTTP.get(endpoint, [("Authorization", String.concat(["Bearer ", token]))])
+    Result.ok(resp.body)
+}
+
+fn main() -> Unit {
+    bind body <- call_protected_api("https://api.example.com/data", "service-account")
+    IO.println(body)
+}
+```
+
+## ポイント
+
+- `JWT.sign_rs256` は PEM 形式の秘密鍵で RS256 署名した JWT を生成します。
+- 秘密鍵は環境変数 `JWT_PRIVATE_KEY` で渡し、コードに埋め込まないでください。
+- トークンキャッシュには `redis-cache-aside` レシピを組み合わせて不要な署名を避けられます。

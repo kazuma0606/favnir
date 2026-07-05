@@ -2,22 +2,22 @@
 // NOTE: このファイルは --legacy モード専用のアンビエント API です。
 //       v14.4.0 以降の ctx-aware API は runes/aws/secrets.fav および AWS.dynamo_*_raw を直接使用してください。
 
-public fn get_item(table: String, key: Map<String, String>) -> Result<Option<Map<String, String>>, String> !AWS {
+public fn get_item(table: String, key: Map<String, String>) -> Result<Option<Map<String, String>>, String> {
     AWS.dynamo_get_item_raw(table, key)
 }
 
-public fn put_item(table: String, item: Map<String, String>) -> Result<Unit, String> !AWS {
+public fn put_item(table: String, item: Map<String, String>) -> Result<Unit, String> {
     AWS.dynamo_put_item_raw(table, item)
 }
 
-public fn delete_item(table: String, key: Map<String, String>) -> Result<Unit, String> !AWS {
+public fn delete_item(table: String, key: Map<String, String>) -> Result<Unit, String> {
     AWS.dynamo_delete_item_raw(table, key)
 }
 
-public fn query(table: String, condition: String, values: Map<String, String>) -> Result<List<Map<String, String>>, String> !AWS {
+public fn query(table: String, condition: String, values: Map<String, String>) -> Result<List<Map<String, String>>, String> {
     AWS.dynamo_query_raw(table, condition, values)
 }
 
-public fn scan(table: String) -> Result<List<Map<String, String>>, String> !AWS {
+public fn scan(table: String) -> Result<List<Map<String, String>>, String> {
     AWS.dynamo_scan_raw(table)
 }

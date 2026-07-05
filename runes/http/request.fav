@@ -5,19 +5,19 @@
 //       VM プリミティブを直接ラップする Rune として意図的に設計されています。
 //       ctx-aware 移行は v15.0 以降で計画予定です。
 
-public fn get(url: String) -> Result<HttpResponse, HttpError> !Network {
+public fn get(url: String) -> Result<HttpResponse, HttpError> {
     Http.get_raw(url)
 }
 
-public fn post(url: String, body: String) -> Result<HttpResponse, HttpError> !Network {
+public fn post(url: String, body: String) -> Result<HttpResponse, HttpError> {
     Http.post_raw(url, body, "text/plain")
 }
 
-public fn post_json(url: String, body: String) -> Result<HttpResponse, HttpError> !Network {
+public fn post_json(url: String, body: String) -> Result<HttpResponse, HttpError> {
     Http.post_raw(url, body, "application/json")
 }
 
-public fn get_body(url: String) -> Result<String, HttpError> !Network {
+public fn get_body(url: String) -> Result<String, HttpError> {
     bind result <- Http.get_raw(url)
     Result.map(result, |resp| resp.body)
 }
@@ -25,13 +25,13 @@ public fn get_body(url: String) -> Result<String, HttpError> !Network {
 // ── v9.5.0 additions — !Http エフェクト対応 typed 関数 ────────────────────────
 
 // get_text — HTTP GET してボディを String として返す（エラー型も String）
-public fn get_text(url: String) -> Result<String, String> !Http {
+public fn get_text(url: String) -> Result<String, String> {
     Http.get_body_raw(url)
 }
 
 // get_json<T> — HTTP GET してレスポンスを型 T に変換
 // builtin 直接呼び出し（他ジェネリック関数を呼ぶと Rust pipeline で stack overflow）
-public fn get_json<T>(url: String) -> Result<T, String> !Http {
+public fn get_json<T>(url: String) -> Result<T, String> {
     match Http.get_body_raw(url) {
         Err(e) => Result.err(e)
         Ok(body) =>
@@ -47,7 +47,7 @@ public fn get_json<T>(url: String) -> Result<T, String> !Http {
 }
 
 // post_json_typed<T, R> — 型 T を JSON POST して、レスポンスを型 R に変換
-public fn post_json_typed<T, R>(url: String, body: T) -> Result<R, String> !Http {
+public fn post_json_typed<T, R>(url: String, body: T) -> Result<R, String> {
     match Http.post_body_raw(url, Schema.to_json(body, type_name_of<T>()), "application/json") {
         Err(e) => Result.err(e)
         Ok(resp_body) =>

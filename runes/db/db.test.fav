@@ -35,7 +35,7 @@ fn query_params_raw(handle: DbHandle, sql: String, params: List<String>) -> Resu
 }
 
 // query_one helper: returns first row or NOT_FOUND error (v4.2.0)
-fn query_one(handle: DbHandle, sql: String) -> Result<Map<String, String>, DbError> !Db {
+fn query_one(handle: DbHandle, sql: String) -> Result<Map<String, String>, DbError> {
     match DB.query_raw(handle, sql) {
         Ok(rows) => match List.first(rows) {
             Some(row) => Result.ok(row)
@@ -46,7 +46,7 @@ fn query_one(handle: DbHandle, sql: String) -> Result<Map<String, String>, DbErr
 }
 
 // paginate helper: LIMIT/OFFSET query (v4.2.0)
-fn paginate(handle: DbHandle, sql: String, page: Int, size: Int) -> Result<List<Map<String, String>>, DbError> !Db {
+fn paginate(handle: DbHandle, sql: String, page: Int, size: Int) -> Result<List<Map<String, String>>, DbError> {
     DB.query_raw(handle,
         String.concat(
             String.concat(

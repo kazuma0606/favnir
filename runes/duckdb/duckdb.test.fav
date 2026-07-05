@@ -8,15 +8,15 @@ type DbError = {
 
 // ── helpers ────────────────────────────────────────────────────────────────────
 
-fn duck_open(path: String) -> Result<DbHandle, DbError> !Db {
+fn duck_open(path: String) -> Result<DbHandle, DbError> {
     DuckDb.open_raw(path)
 }
 
-fn duck_execute(conn: DbHandle, sql: String) -> Result<Int, DbError> !Db {
+fn duck_execute(conn: DbHandle, sql: String) -> Result<Int, DbError> {
     DuckDb.execute_raw(conn, sql)
 }
 
-fn duck_query(conn: DbHandle, sql: String) -> Result<List<Map<String, String>>, DbError> !Db {
+fn duck_query(conn: DbHandle, sql: String) -> Result<List<Map<String, String>>, DbError> {
     DuckDb.query_raw(conn, sql)
 }
 

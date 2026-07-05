@@ -1,0 +1,32 @@
+---
+title: "DuckDB インメモリ分析"
+description: "DuckDB を使ってローカルファイルに対してインメモリ SQL 分析を実行する"
+---
+
+# DuckDB インメモリ分析
+
+DuckDB Rune を使い、Parquet / CSV ファイルに対して SQL 分析をインメモリで実行します。
+
+## コード例
+
+```favnir
+import runes/duckdb
+
+fn main() -> Unit {
+    bind db <- DuckDB.open(":memory:")
+    bind _  <- DuckDB.execute(db, "CREATE TABLE sales AS SELECT * FROM 'data/sales.parquet'")
+    bind rows <- DuckDB.query(db,
+        "SELECT region, SUM(amount) AS total FROM sales GROUP BY region ORDER BY total DESC"
+    )
+    let report = List.map(rows, fn (r) {
+        String.concat([r["region"], ": ", r["total"]])
+    })
+    IO.println(String.join(report, "\n"))
+}
+```
+
+## ポイント
+
+- `DuckDB.open(":memory:")` でインメモリデータベースを作成します。
+- Parquet / CSV / JSON を直接 SQL で読み込めるため、スキーマ定義不要で分析できます。
+- 結果を Postgres や S3 に書き出す場合は後続ステージと `|>` で連結してください。

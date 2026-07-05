@@ -25,7 +25,7 @@ public fn parse_with_opts<T>(text: String, opts: CsvOptions) -> Result<List<T>, 
 // ── v9.4.0 additions ───────────────────────────────────────────────────────────
 
 // read<T> — ファイルパスから CSV を読み込んで型付き List に変換する
-public fn read<T>(path: String) -> Result<List<T>, String> !IO {
+public fn read<T>(path: String) -> Result<List<T>, String> {
     match IO.read_file_raw(path) {
         Err(e) => Result.err(String.concat("csv.read: cannot read file: ", e))
         Ok(text) =>
@@ -41,6 +41,6 @@ public fn read<T>(path: String) -> Result<List<T>, String> !IO {
 }
 
 // write_file<T> — List を CSV としてファイルに書き込む
-public fn write_file<T>(path: String, rows: List<T>) -> Result<Unit, String> !IO {
+public fn write_file<T>(path: String, rows: List<T>) -> Result<Unit, String> {
     IO.write_file_raw(path, Schema.to_csv(rows, type_name_of<T>()))
 }

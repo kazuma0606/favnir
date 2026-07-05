@@ -1,0 +1,53 @@
+---
+title: "Rune ctx 移行ステータス"
+description: "Favnir v34.x における !Effect → Capability Context 移行の進捗状況"
+---
+
+# Rune ctx 移行ステータス
+
+v34.5.0〜v34.7.0 シリーズで `!Effect` アノテーションを Capability Context（`ctx` パラメータ）に移行する。
+
+## 追加済み ctx インターフェース
+
+| インターフェース | ファイル | 対応 `!Effect` | 追加バージョン |
+|---|---|---|---|
+| `IoCtx` | `runes/ctx/io.fav` | `!Io` | v34.5.0 |
+| `DbCtx` | `runes/ctx/db.fav` | `!DbRead` / `!DbWrite` | v34.6.0 |
+| `HttpClient` | `runes/ctx/http.fav` | `!Http` | v34.6.0 |
+| `StreamClient` | `runes/ctx/stream.fav` | `!Stream` | v34.6.0 |
+
+## 移行対象 Rune ファイル（v34.7 以降）
+
+| Rune ファイル | 使用エフェクト | 状態 |
+|---|---|---|
+| `runes/postgres/client.fav` | `!Postgres` | 未移行（v34.7 予定） |
+| `runes/redis/redis.fav` | `!Redis` | 未移行（v34.7 予定） |
+| `runes/kafka/kafka.fav` | `!Stream` | 未移行（v34.7 予定） |
+| その他 25+ ファイル | 各種 | 未移行（v34.7 予定） |
+
+## 移行手順
+
+W022 警告が表示されたファイルを移行するには:
+
+```bash
+# ドライラン（変更内容を確認）
+fav migrate --from-effects --dry-run src/pipeline.fav
+
+# インプレース変換
+fav migrate --from-effects --in-place src/pipeline.fav
+
+# ディレクトリ全体
+fav migrate --from-effects --dir runes/
+```
+
+詳細は [migration-effects](../tools/migration-effects) ガイドを参照。
+
+## AppCtx フィールド一覧
+
+```favnir
+// AppCtx は全 ctx フィールドを持つ汎用コンテキスト
+// ctx.io     : IoCtx        — 標準入出力・ファイル操作
+// ctx.db     : DbCtx        — DB 読み書き（Postgres / MySQL 等）
+// ctx.http   : HttpClient   — HTTP 通信
+// ctx.stream : StreamClient — Kafka / Kinesis 等ストリーム
+```

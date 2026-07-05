@@ -3,11 +3,11 @@
 // async fn main() -> Unit !Io is a valid entry point.
 // The runtime unwraps the Task<Unit> transparently.
 
-async fn greet(name: String) -> String !Io {
+async fn greet(name: String) -> String {
     $"Hello, {name}!"
 }
 
-public async fn main() -> Unit !Io {
+public async fn main() -> Unit {
     bind msg <- greet("World")
     IO.println(msg)
 }

@@ -1,0 +1,22 @@
+type OrderStatus = | Pending | Processing | Shipped | Cancelled
+
+type Order = {
+    order_id:   String
+    customer:   String
+    product:    String
+    quantity:   Int
+    price:      Float
+    status:     OrderStatus
+    created_at: String
+}
+
+type ValidationError = {
+    row:     Int
+    field:   String
+    message: String
+}
+
+type LoadResult = {
+    orders: List<Order>
+    errors: List<ValidationError>
+}

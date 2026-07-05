@@ -18,7 +18,7 @@ public fn factorial(n: Int) -> Int {
     }
 }
 
-public fn main() -> Unit !Io {
+public fn main() -> Unit {
     IO.println_int(add(21, 21));
     IO.println_int(abs(-5));
     IO.println_int(factorial(5))

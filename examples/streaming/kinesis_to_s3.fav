@@ -12,14 +12,14 @@ import rune "aws"
 //   AWS_DEFAULT_REGION    — 省略: "us-east-1"
 
 // 1. Kinesis からクリックイベントを取得（TRIM_HORIZON から最大 1000 件）
-stage FetchClickEvents: Unit -> Result<String, String> !Stream = |_| {
+stage FetchClickEvents: Unit -> Result<String, String> = |_| {
     bind conn <- Kinesis.connect("")
     bind iter <- Kinesis.get_shard_iterator(conn, "clickstream", "shardId-000000000000", "TRIM_HORIZON")
     Kinesis.get_records(conn, iter, 1000)
 }
 
 // 2. 空バッチをフィルタリング（スタブ: JSON 長さで判定）
-stage SerializeBatch: String -> Result<String, String> !Pure = |records_json| {
+stage SerializeBatch: String -> Result<String, String> = |records_json| {
     if String.length(records_json) > 2
     then Result.ok(records_json)
     else Result.err("empty batch — skipping")
@@ -27,7 +27,7 @@ stage SerializeBatch: String -> Result<String, String> !Pure = |records_json| {
 
 // 3. S3 の clickstream-archive バケットにアーカイブ
 // Note: `bind key <- Result.ok(...)` は Favnir に let 束縛がないため Result.ok で値を包む慣用パターン
-stage UploadToS3: String -> Result<String, String> !AWS = |batch_json| {
+stage UploadToS3: String -> Result<String, String> = |batch_json| {
     bind key <- Result.ok("archive/clickstream-batch.json")
     bind _   <- S3.put_object("clickstream-archive", key, batch_json)
     Result.ok("archived to s3://clickstream-archive/" ++ key)

@@ -88,47 +88,6 @@ pub enum Visibility {
     Private,
 }
 
-// ── Effect (2-12) ─────────────────────────────────────────────────────────────
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum Effect {
-    Pure,
-    Io,
-    Db,
-    DbRead,   // SELECT 系（v7.0.0）
-    DbWrite,  // INSERT/UPDATE/DELETE 系（v7.0.0）
-    DbAdmin,  // DDL（CREATE/DROP/ALTER）系（v7.0.0）
-    Network,
-    Http,
-    Llm,
-    Snowflake,
-    Gcp,          // v15.2.0
-    Stream,       // v15.4.0 — Kafka / MSK
-    Postgres,
-    /// v25.3.0: Redis Rune effect（外部 Redis 専用。インメモリ !Cache とは独立）
-    Redis,
-    /// v25.4.0: MySQL Rune effect（外部 MySQL 専用。!Postgres とは独立）
-    MySQL,
-    /// v25.5.0: MongoDB Rune effect（ドキュメント系 NoSQL 専用）
-    MongoDB,
-    /// v25.6.0: DynamoDB Rune effect（AWS NoSQL KV）
-    DynamoDB,
-    /// v25.8.0: Elasticsearch Rune effect（全文検索・ベクトル検索）
-    Elasticsearch,
-    AzureDb,
-    AzureStorage,  // Azure Blob Storage (v14.3.0 infra, v14.5.0 primitives)
-    Rpc,
-    File,
-    Checkpoint,
-    Trace,
-    /// v22.3.0: Pipeline distributed state (`!PipelineState`)
-    PipelineState,
-    /// `Emit<EventType>`
-    Emit(String),
-    /// `Emit<A | B>`  Eresult of composing multiple Emit effects
-    EmitUnion(Vec<String>),
-    Unknown(String),
-}
 
 // ── TypeExpr (2-2) ────────────────────────────────────────────────────────────
 
@@ -147,7 +106,6 @@ pub enum TypeExpr {
     TrfFn {
         input: Box<TypeExpr>,
         output: Box<TypeExpr>,
-        effects: Vec<Effect>,
         span: Span,
     },
     /// `R & { field: Type }` — intersection type (v18.2.0)
@@ -654,7 +612,6 @@ pub struct FnDef {
     pub type_params: Vec<GenericParam>, // e.g. ["T", "U"] for fn f<T, U>(...)
     pub params: Vec<Param>,
     pub return_ty: Option<TypeExpr>,
-    pub effects: Vec<Effect>,
     pub body: Block,
     pub span: Span,
     pub api_annotation: Option<ApiAnnotation>, // v18.8.0: #[api(method, path)]
@@ -672,7 +629,6 @@ pub struct TrfDef {
     pub type_params: Vec<GenericParam>, // e.g. ["T", "U"] for trf F<T, U>: ...
     pub input_ty: TypeExpr,
     pub output_ty: TypeExpr,
-    pub effects: Vec<Effect>,
     pub params: Vec<Param>,
     pub body: Block,
     /// v19.1.0: `#[stateful]` annotation — stage maintains state between chunks.
@@ -697,7 +653,6 @@ pub struct AbstractTrfDef {
     pub type_params: Vec<GenericParam>,
     pub input_ty: TypeExpr,
     pub output_ty: TypeExpr,
-    pub effects: Vec<Effect>,
     pub span: Span,
 }
 
@@ -761,7 +716,6 @@ pub struct FlwSlot {
     pub abstract_trf_ty: Option<TypeExpr>,
     pub input_ty: TypeExpr,
     pub output_ty: TypeExpr,
-    pub effects: Vec<Effect>,
     pub span: Span,
 }
 
@@ -868,12 +822,6 @@ pub struct BenchDef {
     pub span: Span,
 }
 
-#[derive(Debug, Clone)]
-pub struct EffectDef {
-    pub visibility: Option<Visibility>,
-    pub name: String,
-    pub span: Span,
-}
 
 // ── RuneUseNames (v4.1.0) ────────────────────────────────────────────────────
 
@@ -886,11 +834,23 @@ pub enum RuneUseNames {
     Wildcard,
 }
 
+// ── EffectDef stub (v1.5.0; Effect enum removed in v35.4.0) ──────────────────
+// Kept as a stub so that `effect Foo` declarations in source still parse
+// without cascading compile errors across the codebase.
+
+#[derive(Debug, Clone)]
+pub struct EffectDef {
+    pub visibility: Option<Visibility>,
+    pub name: String,
+    pub span: Span,
+}
+
 // ── Item (2-1) ────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone)]
 pub enum Item {
     TypeDef(TypeDef),
+    EffectDef(EffectDef),
     FnDef(FnDef),
     TrfDef(TrfDef),
     AbstractTrfDef(AbstractTrfDef),
@@ -917,7 +877,6 @@ pub enum Item {
     InterfaceImplDecl(InterfaceImplDecl),
     CapDef(CapDef),   // cap Eq<T> = { ... }
     ImplDef(ImplDef), // impl Eq<Int> { ... }
-    EffectDef(EffectDef),
     TestDef(TestDef),   // test "description" { ... }
     TestGroup {         // test_group "name" { test ... }  (v16.7.0)
         name: String,
@@ -943,6 +902,7 @@ impl Item {
     pub fn span(&self) -> &Span {
         match self {
             Item::TypeDef(t) => &t.span,
+            Item::EffectDef(e) => &e.span,
             Item::FnDef(f) => &f.span,
             Item::TrfDef(t) => &t.span,
             Item::AbstractTrfDef(t) => &t.span,
@@ -957,7 +917,6 @@ impl Item {
             Item::InterfaceImplDecl(d) => &d.span,
             Item::CapDef(c) => &c.span,
             Item::ImplDef(i) => &i.span,
-            Item::EffectDef(e) => &e.span,
             Item::TestDef(t) => &t.span,
             Item::TestGroup { span, .. } => span,
             Item::BenchDef(b) => &b.span,

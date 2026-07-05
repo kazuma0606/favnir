@@ -1,0 +1,126 @@
+---
+title: "ctx 構文ガイド — Capability Context"
+description: "Favnir の副作用管理パターン：ctx: AppCtx による Capability Context の完全ガイド"
+---
+
+# ctx 構文ガイド — Capability Context
+
+Favnir では副作用（DB・HTTP・IO・ストリームなど）を **`ctx: AppCtx` パラメータ** で表現します。
+`!Effect` アノテーション構文は **v35.4.0 で削除** されました。現在この構文を書くと **コンパイルエラー E0374** になります。
+
+> **一言要約**: 副作用のある処理は `ctx: AppCtx` を第一引数に受け取る。それだけです。
+
+---
+
+## 1. 基本構文
+
+```favnir
+// ❌ 古い構文（v35.4.0 以前 — 現在は E0374 コンパイルエラー）
+fn fetch(url: String) -> Result<String, String> !Http {
+    Http.get_body_raw(url)
+}
+
+// ✅ 現在の構文
+fn fetch(ctx: AppCtx, url: String) -> Result<String, String> {
+    Http.get_body_raw(url)
+}
+```
+
+`ctx: AppCtx` を第一引数に持つ関数はすべての副作用を使用できます。
+ctx を持たない関数は純粋関数として扱われます。
+
+---
+
+## 2. AppCtx フィールド一覧
+
+| フィールド | 型 | 主な用途 |
+|---|---|---|
+| `ctx.io` | `IoCtx` | 標準入出力・ファイルアクセス |
+| `ctx.db` | `DbCtx` | データベース読み書き |
+| `ctx.http` | `HttpClient` | HTTP リクエスト |
+| `ctx.stream` | `StreamClient` | Kafka / Kinesis ストリーム |
+
+---
+
+## 3. ctx から必要フィールドを取り出す
+
+```favnir
+fn run_etl(ctx: AppCtx, url: String) -> Result<Unit, String> {
+    bind data <- Http.get_body_raw(url)
+    chain _   <- Postgres.execute_raw("INSERT INTO log VALUES (?)", data)
+    IO.println("done")
+    Result.ok(())
+}
+```
+
+ctx を受け取るだけで、フィールドの明示的な分解は不要です。
+各 primitive（`Http.*`, `Postgres.*`, `IO.*` など）は直接呼び出せます。
+
+---
+
+## 4. ctx を使ったパイプライン
+
+```favnir
+stage FetchOrders: AppCtx -> List<Order> = |ctx| {
+    match Postgres.query_raw("SELECT * FROM orders", "[]") {
+        Ok(json) => Json.parse_array[Order](json)
+        Err(_)   => List.empty()
+    }
+}
+
+stage SaveSummary: List<Order> -> Result<Unit, String> = |orders| {
+    let count = List.length(orders)
+    IO.println(String.concat("Saved: ", Int.to_string(count)))
+    Result.ok(())
+}
+
+seq OrderPipeline = FetchOrders |> SaveSummary
+```
+
+---
+
+## 5. テスト（モック）
+
+```favnir
+fn test_etl() -> Bool {
+    let result = run_etl_pure("mock-data")
+    result == "processed: mock-data"
+}
+
+fn run_etl_pure(data: String) -> String {
+    String.concat("processed: ", data)
+}
+```
+
+副作用のないロジックを純粋関数に抽出することで、ctx なしでテストできます。
+
+---
+
+## 6. 移行ガイド（!Effect → ctx）
+
+| 旧構文 | 新構文 |
+|---|---|
+| `fn f() -> T !Http { ... }` | `fn f(ctx: AppCtx) -> T { ... }` |
+| `fn f() -> T !Db !Io { ... }` | `fn f(ctx: AppCtx) -> T { ... }` |
+| `fn f() -> T !Pure { ... }` | `fn f() -> T { ... }` （ctx 不要）|
+
+自動移行ツール:
+```bash
+fav migrate --from-effects --in-place src/pipeline.fav
+```
+
+詳細は [migration-effects](/docs/tools/migration-effects) を参照。
+
+---
+
+## 7. E0374 エラーについて
+
+`!Effect` アノテーションを書いた場合、パーサーが即座にエラーを返します:
+
+```
+[E0374] `!Effect` annotation syntax was removed in v35.4.0
+— declare side effects by passing `ctx: AppCtx` as the first parameter
+(e.g. `fn f(ctx: AppCtx, ...) -> T { ... }`)
+```
+
+このエラーは v35.4.0 以降のすべてのバージョンで発生します。

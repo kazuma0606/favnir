@@ -25,7 +25,7 @@ export RABBITMQ_URL=amqp://guest:guest@localhost:5672
 ```favnir
 import rune "rabbitmq"
 
-fn main() -> Result<String, String> !Stream {
+fn main() -> Result<String, String> {
     bind conn <- connect("")
     bind _    <- declare_exchange(conn, "orders", "direct")
     bind _    <- declare_queue(conn, "order-queue")

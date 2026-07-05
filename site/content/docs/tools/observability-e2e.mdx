@@ -23,19 +23,19 @@ import runes/prometheus
 import runes/grafana
 
 // #[track(latency: true, error_rate: true)] — v29.0+ で自動挿入予定
-stage ExtractOrders: Unit -> Result<Unit, String> !Io = |_| {
+stage ExtractOrders: Unit -> Result<Unit, String> = |_| {
     bind _ <- Prometheus.counter("rows_extracted_total", 100.0, "pipeline:etl")
     Result.ok(unit)
 }
 
 // #[track(latency: true)]
-stage TransformOrders: Unit -> Result<Unit, String> !Io = |_| {
+stage TransformOrders: Unit -> Result<Unit, String> = |_| {
     bind _ <- Prometheus.histogram("transform_duration_ms", 42.5)
     Result.ok(unit)
 }
 
 // #[track(latency: true, error_rate: true)]
-stage LoadToWarehouse: Unit -> Result<Unit, String> !Io = |_| {
+stage LoadToWarehouse: Unit -> Result<Unit, String> = |_| {
     bind _ <- Prometheus.gauge("warehouse_rows", 100.0)
     bind _ <- Grafana.create_annotation("etl-dashboard", "ETL cycle complete", "pipeline,favnir")
     Result.ok(unit)

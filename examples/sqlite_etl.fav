@@ -3,14 +3,14 @@
 
 import rune "sqlite"
 
-stage CreateTable: Unit -> Result<Unit, String> !Db = |_| {
+stage CreateTable: Unit -> Result<Unit, String> = |_| {
     bind db <- SQLite.open(":memory:")
     bind _  <- SQLite.execute(db, "CREATE TABLE data (id INT, name TEXT)", "[]")
     Result.ok(unit)
 }
 
 // TODO(v28.x): InsertRows を SqliteEtlPipeline に組み込む（rusqlite 統合後）
-stage InsertRows: Unit -> Result<Int, String> !Db = |_| {
+stage InsertRows: Unit -> Result<Int, String> = |_| {
     bind db <- SQLite.open(":memory:")
     SQLite.execute(db, "INSERT INTO data VALUES (1, 'test')", "[]")
 }

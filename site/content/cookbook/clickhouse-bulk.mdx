@@ -5,7 +5,7 @@ ClickHouse への大量データの高速バルクインサートパイプライ
 ```favnir
 import runes/clickhouse
 
-stage BulkInsertClickHouse: List<Event> -> Unit !Db = |events| {
+stage BulkInsertClickHouse: List<Event> -> Unit = |events| {
   bind conn <- ClickHouse.connect(config.clickhouse_url)
   ClickHouse.insert_batch(conn, config.clickhouse_table, events)
 }

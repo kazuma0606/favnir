@@ -6,7 +6,7 @@ Pinecone ベクトル DB と LLM Rune を組み合わせた RAG（Retrieval-Augm
 import runes/pinecone
 import runes/llm
 
-stage SearchAndGenerate: String -> String !Http = |question| {
+stage SearchAndGenerate: String -> String = |question| {
   // 1. 質問をベクトル化
   bind embedding <- LLM.embed(config.openai, question)
   // 2. Pinecone で近傍ドキュメントを取得

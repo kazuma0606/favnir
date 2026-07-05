@@ -16,7 +16,7 @@ export VERTEX_AI_BASE_URL=https://us-central1-aiplatform.googleapis.com
 ```favnir
 import runes/vertex-ai
 
-stage ScoreWithVertexModel: List<String> -> List<String> !Http = |features| {
+stage ScoreWithVertexModel: List<String> -> List<String> = |features| {
   VertexAI.predict(config.vertex_endpoint, features)
 }
 ```
@@ -26,7 +26,7 @@ stage ScoreWithVertexModel: List<String> -> List<String> !Http = |features| {
 ### `VertexAI.predict`
 
 ```favnir
-fn VertexAI.predict(endpoint: String, instances: List<String>) -> Result<List<String>, String> !Http
+fn VertexAI.predict(endpoint: String, instances: List<String>) -> Result<List<String>, String>
 ```
 
 オンライン推論を実行します。`endpoint` はエンドポイントのリソース名（例: `endpoints/1234567890`）。
@@ -34,7 +34,7 @@ fn VertexAI.predict(endpoint: String, instances: List<String>) -> Result<List<St
 ### `VertexAI.batch_predict`
 
 ```favnir
-fn VertexAI.batch_predict(model: String, gcs_input: String, gcs_output: String) -> Result<String, String> !Http
+fn VertexAI.batch_predict(model: String, gcs_input: String, gcs_output: String) -> Result<String, String>
 ```
 
 GCS 上の入力データに対してバッチ推論を実行し、ジョブ ID を返します。
@@ -42,7 +42,7 @@ GCS 上の入力データに対してバッチ推論を実行し、ジョブ ID 
 ### `VertexAI.deploy_model`
 
 ```favnir
-fn VertexAI.deploy_model(model_id: String, machine_type: String) -> Result<String, String> !Http
+fn VertexAI.deploy_model(model_id: String, machine_type: String) -> Result<String, String>
 ```
 
 モデルをエンドポイントにデプロイし、エンドポイント ID を返します。
@@ -50,7 +50,7 @@ fn VertexAI.deploy_model(model_id: String, machine_type: String) -> Result<Strin
 ### `VertexAI.list_endpoints`
 
 ```favnir
-fn VertexAI.list_endpoints() -> Result<List<String>, String> !Http
+fn VertexAI.list_endpoints() -> Result<List<String>, String>
 ```
 
 プロジェクト内のエンドポイント一覧を取得します。

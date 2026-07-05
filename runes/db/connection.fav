@@ -5,10 +5,10 @@
 //       VM プリミティブを直接ラップする Rune として意図的に設計されています。
 //       ctx-aware 移行は v15.0 以降で計画予定です。
 
-public fn connect(conn_str: String) -> Result<DbHandle, DbError> !Db {
+public fn connect(conn_str: String) -> Result<DbHandle, DbError> {
     DB.connect(conn_str)
 }
 
-public fn close(handle: DbHandle) -> Unit !Db {
+public fn close(handle: DbHandle) -> Unit {
     DB.close(handle)
 }

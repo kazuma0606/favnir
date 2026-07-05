@@ -34,7 +34,7 @@ path = "runes/email"
 ### 単件送信
 
 ```favnir
-stage NotifyUser: Record -> Result<Unit, String> !Email = |event| {
+stage NotifyUser: Record -> Result<Unit, String> = |event| {
     Email.send(
         "noreply@example.com",
         event.user_email,
@@ -47,7 +47,7 @@ stage NotifyUser: Record -> Result<Unit, String> !Email = |event| {
 ### 一括送信
 
 ```favnir
-stage BroadcastAlert: List<String> -> Result<Int, String> !Email = |recipients| {
+stage BroadcastAlert: List<String> -> Result<Int, String> = |recipients| {
     Email.send_bulk(
         "alerts@example.com",
         recipients,
@@ -60,7 +60,7 @@ stage BroadcastAlert: List<String> -> Result<Int, String> !Email = |recipients| 
 ### 通知ヘルパー
 
 ```favnir
-stage Notify: String -> Result<Unit, String> !Email = |msg| {
+stage Notify: String -> Result<Unit, String> = |msg| {
     Email.notify("noreply@example.com", "admin@example.com", msg)
 }
 ```
@@ -78,7 +78,7 @@ stage Notify: String -> Result<Unit, String> !Email = |msg| {
 ## エラーハンドリング
 
 ```favnir
-stage SafeNotify: String -> Unit !Email, Io = |msg| {
+stage SafeNotify: String -> Unit, Io = |msg| {
     bind result <- Email.send(
         "noreply@example.com",
         "ops@example.com",

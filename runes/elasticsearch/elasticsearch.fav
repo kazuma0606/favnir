@@ -4,41 +4,41 @@
 type ESConn(String)
 
 // ES クラスターへの接続確認。成功時は ESConn（内部 String）を返す。
-public fn connect(url: String) -> Result<ESConn, String> !Elasticsearch {
+public fn connect(url: String) -> Result<ESConn, String> {
   ES.connect_raw(url)
 }
 
 // ドキュメントをインデックスに追加（ID は ES が自動採番）。
-public fn index(conn: ESConn, idx: String, doc_json: String) -> Result<Unit, String> !Elasticsearch {
+public fn index(conn: ESConn, idx: String, doc_json: String) -> Result<Unit, String> {
   ES.index_raw(conn, idx, doc_json)
 }
 
 // ドキュメントを指定 ID でインデックスに追加（上書き）。
-public fn index_with_id(conn: ESConn, idx: String, id: String, doc_json: String) -> Result<Unit, String> !Elasticsearch {
+public fn index_with_id(conn: ESConn, idx: String, id: String, doc_json: String) -> Result<Unit, String> {
   ES.index_with_id_raw(conn, idx, id, doc_json)
 }
 
 // クエリ DSL で検索。_source 配列を JSON 文字列で返す。
-public fn search(conn: ESConn, idx: String, query_json: String) -> Result<String, String> !Elasticsearch {
+public fn search(conn: ESConn, idx: String, query_json: String) -> Result<String, String> {
   ES.search_raw(conn, idx, query_json)
 }
 
 // kNN ベクトル検索。_source 配列を JSON 文字列で返す。
-public fn knn_search(conn: ESConn, idx: String, knn_json: String) -> Result<String, String> !Elasticsearch {
+public fn knn_search(conn: ESConn, idx: String, knn_json: String) -> Result<String, String> {
   ES.knn_search_raw(conn, idx, knn_json)
 }
 
 // JSON 配列を NDJSON に変換して _bulk エンドポイントに送信。
-public fn bulk(conn: ESConn, idx: String, docs_json: String) -> Result<Unit, String> !Elasticsearch {
+public fn bulk(conn: ESConn, idx: String, docs_json: String) -> Result<Unit, String> {
   ES.bulk_raw(conn, idx, docs_json)
 }
 
 // ドキュメントを ID で削除。
-public fn delete(conn: ESConn, idx: String, id: String) -> Result<Unit, String> !Elasticsearch {
+public fn delete(conn: ESConn, idx: String, id: String) -> Result<Unit, String> {
   ES.delete_raw(conn, idx, id)
 }
 
 // インデックスを作成。mapping_json が "" のとき {} ボディで PUT する。
-public fn create_index(conn: ESConn, idx: String, mapping_json: String) -> Result<Unit, String> !Elasticsearch {
+public fn create_index(conn: ESConn, idx: String, mapping_json: String) -> Result<Unit, String> {
   ES.create_index_raw(conn, idx, mapping_json)
 }

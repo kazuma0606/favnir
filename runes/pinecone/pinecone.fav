@@ -12,35 +12,35 @@ type PineconeVector = {
 }
 
 // ベクトルを追加・更新する（バッチ対応）
-fn Pinecone.upsert(index: String, vectors: List<PineconeVector>) -> Result<Unit, String> !Http =
+fn Pinecone.upsert(index: String, vectors: List<PineconeVector>) -> Result<Unit, String> =
   Http.post_json(
     Env.get_or("PINECONE_BASE_URL", "https://api.pinecone.io") ++ "/vectors/upsert",
     { "index": index, "vectors": vectors }
   )
 
 // 近傍検索（メタデータフィルタ付き）
-fn Pinecone.query(index: String, vector: List<Float>, k: Int, filter: String) -> Result<List<String>, String> !Http =
+fn Pinecone.query(index: String, vector: List<Float>, k: Int, filter: String) -> Result<List<String>, String> =
   Http.post_json(
     Env.get_or("PINECONE_BASE_URL", "https://api.pinecone.io") ++ "/query",
     { "index": index, "vector": vector, "topK": k, "filter": filter }
   )
 
 // ID 指定でベクトルを削除する
-fn Pinecone.delete(index: String, ids: List<String>) -> Result<Unit, String> !Http =
+fn Pinecone.delete(index: String, ids: List<String>) -> Result<Unit, String> =
   Http.post_json(
     Env.get_or("PINECONE_BASE_URL", "https://api.pinecone.io") ++ "/vectors/delete",
     { "index": index, "ids": ids }
   )
 
 // ID 指定でベクトルを取得する
-fn Pinecone.fetch(index: String, ids: List<String>) -> Result<List<String>, String> !Http =
+fn Pinecone.fetch(index: String, ids: List<String>) -> Result<List<String>, String> =
   Http.post_json(
     Env.get_or("PINECONE_BASE_URL", "https://api.pinecone.io") ++ "/vectors/fetch",
     { "index": index, "ids": ids }
   )
 
 // インデックス統計を取得する
-fn Pinecone.describe_index_stats(index: String) -> Result<String, String> !Http =
+fn Pinecone.describe_index_stats(index: String) -> Result<String, String> =
   Http.post_json(
     Env.get_or("PINECONE_BASE_URL", "https://api.pinecone.io") ++ "/describe_index_stats",
     { "index": index }

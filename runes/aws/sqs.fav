@@ -2,18 +2,18 @@
 // NOTE: このファイルは --legacy モード専用のアンビエント API です。
 //       v14.4.0 以降の ctx-aware API は AWS.sqs_*_raw を直接使用してください。
 
-public fn send_message(queue_url: String, body: String) -> Result<String, String> !AWS {
+public fn send_message(queue_url: String, body: String) -> Result<String, String> {
     AWS.sqs_send_message_raw(queue_url, body)
 }
 
-public fn receive_messages(queue_url: String, max: Int) -> Result<List<Map<String, String>>, String> !AWS {
+public fn receive_messages(queue_url: String, max: Int) -> Result<List<Map<String, String>>, String> {
     AWS.sqs_receive_messages_raw(queue_url, max)
 }
 
-public fn delete_message(queue_url: String, receipt_handle: String) -> Result<Unit, String> !AWS {
+public fn delete_message(queue_url: String, receipt_handle: String) -> Result<Unit, String> {
     AWS.sqs_delete_message_raw(queue_url, receipt_handle)
 }
 
-public fn get_queue_url(queue_name: String) -> Result<String, String> !AWS {
+public fn get_queue_url(queue_name: String) -> Result<String, String> {
     AWS.sqs_get_queue_url_raw(queue_name)
 }

@@ -16,8 +16,8 @@ Favnir の根本原則: **「capability 引数がなければ純粋」**
 // 純粋関数 — 副作用なし、同じ入力で必ず同じ出力
 fn transform(x: Int) -> Int { x * 2 }
 
-// 副作用あり — !Http を宣言
-fn fetch(url: String) -> String !Http { Http.get(url) }
+// 副作用あり — を宣言
+fn fetch(url: String) -> String { Http.get(url) }
 ```
 
 ## W021 lint ルール
@@ -25,7 +25,7 @@ fn fetch(url: String) -> String !Http { Http.get(url) }
 W021 `pure_fn_calls_effectful` — 純粋関数が副作用関数を呼び出す箇所を検出する。
 
 ```favnir
-fn fetch_data(url: String) -> String !Http { ... }
+fn fetch_data(url: String) -> String { ... }
 
 // W021: pure function `process` calls effectful function `fetch_data`
 fn process(url: String) -> String { fetch_data(url) }

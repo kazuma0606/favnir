@@ -7,7 +7,7 @@
 
 use crate::frontend::parser::Parser;
 use crate::ast::{
-    self, BinOp, Block, Effect, Expr, FnDef, FStringPart, Lit, MatchArm, Pattern, Program, Stmt,
+    self, BinOp, Block, Expr, FnDef, FStringPart, Lit, MatchArm, Pattern, Program, Stmt,
     TypeBody, TypeDef, TypeExpr,
 };
 use std::collections::HashMap;
@@ -289,28 +289,6 @@ fn map_type(ty: &TypeExpr) -> String {
     }
 }
 
-fn map_effect(e: &Effect) -> &'static str {
-    match e {
-        Effect::Io => "IO",
-        Effect::Db | Effect::DbRead | Effect::DbWrite | Effect::DbAdmin => "DB",
-        Effect::Network => "Network",
-        Effect::Http => "Http",
-        Effect::Llm => "Llm",
-        Effect::Snowflake => "Snowflake",
-        Effect::Postgres => "Postgres",
-        Effect::Redis => "Redis",
-        Effect::MySQL => "MySQL",
-        Effect::MongoDB => "MongoDB",
-        Effect::DynamoDB => "DynamoDB",
-        Effect::Elasticsearch => "Elasticsearch",
-        Effect::Rpc => "Rpc",
-        Effect::File => "File",
-        Effect::PipelineState => "PipelineState",
-        Effect::Unknown(_) => "Unknown",
-        _ => "Effect",
-    }
-}
-
 // ── FnDef ─────────────────────────────────────────────────────────────────────
 
 impl Emitter {
@@ -318,14 +296,6 @@ impl Emitter {
         // lineage コメント（--lineage 指定時のみ）
         if let Some(comment) = self.lineage_comments.get(&fd.name).cloned() {
             self.line(&comment);
-        }
-        // エフェクトコメント
-        if !fd.effects.is_empty() {
-            let eff_strs: Vec<&str> = fd.effects.iter().map(|e| {
-                if let Effect::Unknown(s) = e { return s.as_str(); }
-                map_effect(e)
-            }).collect();
-            self.line(&format!("# effects: {}", eff_strs.join(", ")));
         }
         // def シグネチャ
         let params: Vec<String> = fd
@@ -1168,14 +1138,6 @@ impl Emitter {
         if let Some(comment) = self.lineage_comments.get(&td.name).cloned() {
             self.line(&comment);
         }
-        // エフェクトコメント
-        if !td.effects.is_empty() {
-            let eff_strs: Vec<&str> = td.effects.iter().map(|e| {
-                if let Effect::Unknown(s) = e { return s.as_str(); }
-                map_effect(e)
-            }).collect();
-            self.line(&format!("# effects: {}", eff_strs.join(", ")));
-        }
         // stage の closure パラメータ名を取得（TrfDef.params: Vec<Param>）
         let param_name = td.params.first()
             .map(|p| p.name.as_str())
@@ -1808,15 +1770,17 @@ mod v11200_tests {
 
     #[test]
     fn transpile_stage_effects_comment() {
-        let src = r#"stage Bar: String -> String !IO = |s| { s }"#;
+        // v34.8A: !IO annotation removed; stage has no effects → no effects comment
+        let src = r#"stage Bar: String -> String = |s| { s }"#;
         let out = emit_python_str(src);
-        assert!(out.contains("# effects: IO"), "effect comment:\n{}", out);
+        // stage without annotation produces no effects comment
+        assert!(!out.contains("# effects: IO"), "unexpected effect comment in output:\n{}", out);
     }
 
     #[test]
     fn transpile_stage_multiline_body() {
         let src = r#"
-stage Validate: List<Int> -> List<Int> !IO = |rows| {
+stage Validate: List<Int> -> List<Int> = |rows| {
   bind valid <- List.filter(rows, |x| x > 0)
   bind _ <- IO.println("done")
   valid
@@ -1869,7 +1833,7 @@ seq AnalyzePipeline = LoadAll |> WriteOutput
 
     #[test]
     fn transpile_main_guard() {
-        let src = r#"fn main() -> Unit !IO { IO.println("hi") }"#;
+        let src = r#"fn main() -> Unit { IO.println("hi") }"#;
         let out = emit_python_str(src);
         assert!(out.contains("def main()"), "main def:\n{}", out);
         assert!(
@@ -1882,7 +1846,7 @@ seq AnalyzePipeline = LoadAll |> WriteOutput
 
     #[test]
     fn transpile_io_argv() {
-        let src = r#"fn f() -> List<String> !IO { IO.argv() }"#;
+        let src = r#"fn f() -> List<String> { IO.argv() }"#;
         let out = emit_python_str(src);
         assert!(out.contains("sys.argv[1:]"), "argv:\n{}", out);
     }
@@ -1975,7 +1939,7 @@ mod v11300_tests {
 
     #[test]
     fn transpile_io_read_file() {
-        let src = r#"fn load(path: String) -> String !IO {
+        let src = r#"fn load(path: String) -> String {
   match IO.read_file_raw(path) {
     Ok(t) => t
     Err(_) => ""
@@ -1991,7 +1955,7 @@ mod v11300_tests {
 
     #[test]
     fn transpile_io_write_file() {
-        let src = r#"fn save(path: String, text: String) -> Unit !IO {
+        let src = r#"fn save(path: String, text: String) -> Unit {
   IO.write_file_raw(path, text)
 }"#;
         let out = emit_python_str(src);
@@ -2002,7 +1966,7 @@ mod v11300_tests {
 
     #[test]
     fn transpile_csv_parse_raw() {
-        let src = r#"fn parse(text: String) -> Unit !IO {
+        let src = r#"fn parse(text: String) -> Unit {
   Csv.parse_raw(text, ",", true)
 }"#;
         let out = emit_python_str(src);
@@ -2024,7 +1988,7 @@ fn dummy() -> Unit { () }"#;
     #[test]
     fn transpile_schema_adapt() {
         let src = r#"type TxnRow = { amount: Float  region: String }
-fn adapt(raw: List<String>) -> Unit !IO {
+fn adapt(raw: List<String>) -> Unit {
   Schema.adapt(raw, "TxnRow")
 }"#;
         let out = emit_python_str(src);
@@ -2036,7 +2000,7 @@ fn adapt(raw: List<String>) -> Unit !IO {
     #[test]
     fn transpile_schema_to_json_array() {
         let src = r#"type TxnRow = { amount: Float }
-fn serialize(rows: List<TxnRow>) -> String !IO {
+fn serialize(rows: List<TxnRow>) -> String {
   Schema.to_json_array(rows, "TxnRow")
 }"#;
         let out = emit_python_str(src);
@@ -2064,7 +2028,7 @@ type TxnRow = {
   region: String
 }
 
-fn read_txn_csv(path: String) -> List<TxnRow> !IO {
+fn read_txn_csv(path: String) -> List<TxnRow> {
   match IO.read_file_raw(path) {
     Err(_) => List.empty()
     Ok(text) =>
@@ -2079,7 +2043,7 @@ fn read_txn_csv(path: String) -> List<TxnRow> !IO {
   }
 }
 
-fn serialize(rows: List<TxnRow>) -> String !IO {
+fn serialize(rows: List<TxnRow>) -> String {
   Schema.to_json_array(rows, "TxnRow")
 }
 "#;
@@ -2104,7 +2068,7 @@ mod v11400_tests {
 
     #[test]
     fn transpile_aws_s3_put() {
-        let src = r#"fn store(bucket: String, key: String, body: String) -> Unit !AWS {
+        let src = r#"fn store(bucket: String, key: String, body: String) -> Unit {
   AWS.s3_put_object_raw(bucket, key, body)
 }"#;
         let out = emit_python_str(src);
@@ -2116,7 +2080,7 @@ mod v11400_tests {
 
     #[test]
     fn transpile_aws_s3_get() {
-        let src = r#"fn load(bucket: String, key: String) -> Unit !AWS {
+        let src = r#"fn load(bucket: String, key: String) -> Unit {
   AWS.s3_get_object_raw(bucket, key)
 }"#;
         let out = emit_python_str(src);
@@ -2128,7 +2092,7 @@ mod v11400_tests {
 
     #[test]
     fn transpile_aws_s3_list() {
-        let src = r#"fn list_keys(bucket: String, prefix: String) -> Unit !AWS {
+        let src = r#"fn list_keys(bucket: String, prefix: String) -> Unit {
   AWS.s3_list_objects_raw(bucket, prefix)
 }"#;
         let out = emit_python_str(src);
@@ -2139,7 +2103,7 @@ mod v11400_tests {
 
     #[test]
     fn transpile_aws_dynamo_scan() {
-        let src = r#"fn scan_table(table: String) -> Unit !AWS {
+        let src = r#"fn scan_table(table: String) -> Unit {
   AWS.dynamo_scan_raw(table)
 }"#;
         let out = emit_python_str(src);
@@ -2151,7 +2115,7 @@ mod v11400_tests {
 
     #[test]
     fn transpile_aws_sqs_send() {
-        let src = r#"fn send(url: String, body: String) -> Unit !AWS {
+        let src = r#"fn send(url: String, body: String) -> Unit {
   AWS.sqs_send_message_raw(url, body)
 }"#;
         let out = emit_python_str(src);
@@ -2169,7 +2133,7 @@ type TxnRow = {
   region: String
 }
 
-fn write_output(bucket: String, key: String, rows: List<TxnRow>) -> Unit !AWS {
+fn write_output(bucket: String, key: String, rows: List<TxnRow>) -> Unit {
   match AWS.s3_put_object_raw(bucket, key, Schema.to_json_array(rows, "TxnRow")) {
     Ok(_) => ()
     Err(_) => ()

@@ -42,6 +42,22 @@ pipeline Main {
 fav run pipeline.fav
 ```
 
+## Capability Context を使う
+
+v34.5.0 以降、副作用は `AppCtx` パラメータで表現します:
+
+```favnir
+import runes/ctx
+
+fn fetch_and_save(ctx: AppCtx, url: String) -> Unit {
+    bind { http, io } <- ctx
+    bind data <- http.get(url)
+    io.println(data)
+}
+```
+
+詳細は [ctx 構文リファレンス](/docs/ctx-syntax-guide) を参照。
+
 ## 次のステップ
 
 - [パイプラインの基礎](/learn/pipeline-basics) — stage / seq / par を学ぶ

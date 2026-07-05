@@ -1,0 +1,58 @@
+---
+title: "OSS ライセンス"
+description: "Favnir が依存する OSS ライブラリのライセンス一覧"
+---
+
+# OSS ライセンス
+
+Favnir（`fav` バイナリ）が依存する主要 OSS ライブラリのライセンス一覧。
+確認バージョン: v34.4.0（2026-07-04）。
+
+すべての依存ライブラリは MIT ライセンスまたは Apache-2.0 ライセンス（またはその両方）の下で
+提供されており、Favnir の MIT ライセンスと互換性があることを確認した。
+GPL・LGPL 依存はゼロ。
+
+## 主要依存ライブラリ
+
+| クレート | バージョン | ライセンス | 用途 |
+|---|---|---|---|
+| serde | 1.x | MIT / Apache-2.0 | シリアライズ・デシリアライズ |
+| serde_json | 1.x | MIT / Apache-2.0 | JSON 処理 |
+| serde_yaml | 0.9.x | MIT / Apache-2.0 | YAML 処理 |
+| regex | 1.x | MIT / Apache-2.0 | 正規表現 |
+| chrono | 0.4.x | MIT / Apache-2.0 | 日時処理 |
+| tokio | 1.x | MIT | 非同期ランタイム |
+| ureq | 2.x | MIT / Apache-2.0 | HTTP クライアント |
+| uuid | 1.x | MIT / Apache-2.0 | UUID 生成 |
+| base64 | 0.22.x | MIT / Apache-2.0 | Base64 エンコード |
+| rand | 0.8.x | MIT / Apache-2.0 | 乱数生成 |
+| csv | 1.x | MIT / Unlicense | CSV パーサ |
+| parquet | 52.x | Apache-2.0 | Parquet ファイル処理 |
+| arrow | 52.x | Apache-2.0 | Apache Arrow データ形式 |
+| duckdb | 1.x | MIT | 組込み OLAP エンジン |
+| rusqlite | 0.31.x | MIT | SQLite バインディング |
+| tokio-postgres | 0.7.x | MIT | PostgreSQL 非同期クライアント |
+| tonic | 0.11.x | MIT | gRPC フレームワーク |
+| rskafka | 0.6.x | MIT / Apache-2.0 | Kafka クライアント |
+| redis | 0.25.x | MIT / BSD-3-Clause | Redis クライアント |
+| mongodb | 3.x | Apache-2.0 | MongoDB クライアント |
+| rayon | 1.x | MIT / Apache-2.0 | 並列処理 |
+| petgraph | 0.6.x | MIT / Apache-2.0 | グラフアルゴリズム（DAG 実行） |
+| wasmtime | 30.x | Apache-2.0 | WASM 実行エンジン |
+| inferno | 0.11.x | MIT | フレームグラフ生成 |
+| mysql | 24.x | MIT | MySQL クライアント |
+| tempfile | 3.x | MIT / Apache-2.0 | 一時ファイル |
+| jsonwebtoken | 9.x | MIT | JWT 処理 |
+
+## ライセンス適合性
+
+Favnir 本体は MIT ライセンス。上記依存ライブラリはすべて MIT または Apache-2.0 と
+互換性があり、再配布・商用利用に問題ない。
+
+GPL・LGPL 依存はゼロ（v34.4.0 確認済み）。
+
+## 確認方法
+
+```bash
+cargo metadata --format-version 1 | jq '[.packages[] | {name: .name, license: .license}]'
+```

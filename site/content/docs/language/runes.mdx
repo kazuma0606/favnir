@@ -16,7 +16,7 @@ Rune は Favnir の外部モジュールシステムです。
 import rune "aws"
 import rune "duckdb"
 
-public fn main() -> Unit !Io !AWS !Db {
+public fn main() -> Unit {
   bind rows <- aws.s3.read_csv<Order>("bucket", "data.csv")
   bind conn <- duckdb.open(":memory:")
   // ...
@@ -40,7 +40,7 @@ runes/
 use internal.{ connect, disconnect }
 use helpers.{ format_result }
 
-public fn query(sql: String) -> Result<List<Row>, String> !Db {
+public fn query(sql: String) -> Result<List<Row>, String> {
   // ...
 }
 ```

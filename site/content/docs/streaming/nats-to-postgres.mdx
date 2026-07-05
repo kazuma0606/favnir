@@ -54,18 +54,18 @@ fav run examples/streaming/nats_to_postgres.fav
 import rune "nats"
 import rune "postgres"
 
-stage FetchSensorData: Unit -> Result<String, String> !Stream = |_| {
+stage FetchSensorData: Unit -> Result<String, String> = |_| {
     bind conn <- NATS.connect("")
     NATS.subscribe(conn, "sensors.data")
 }
 
-stage ValidateSensor: String -> Result<String, String> !Pure = |payload| {
+stage ValidateSensor: String -> Result<String, String> = |payload| {
     if String.length(payload) > 0
     then Result.ok(payload)
     else Result.err("empty sensor payload — skipping")
 }
 
-stage InsertToPostgres: String -> Result<String, String> !Postgres = |sensor_json| {
+stage InsertToPostgres: String -> Result<String, String> = |sensor_json| {
     bind _ <- Postgres.execute(
         "INSERT INTO sensor_readings (data, received_at) VALUES ($1::jsonb, NOW())",
         "[" ++ sensor_json ++ "]"

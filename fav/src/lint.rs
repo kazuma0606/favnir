@@ -11,6 +11,7 @@
 //   L006  trf name is not PascalCase
 //   L007  effect name is not PascalCase
 //   L008  hardcoded db credential in DB.connect string literal
+//   W022  deprecated `!Effect` annotation — migrate to Capability Context
 
 use crate::ast::*;
 use crate::frontend::lexer::Span;
@@ -110,6 +111,7 @@ pub fn lint_program(program: &Program) -> Vec<LintError> {
     check_w020_deprecated_call(program, &mut errors);
     // v24.6.0: W021
     check_w021_pure_fn_calls_effectful(program, &mut errors);
+    // v34.5.0: W022 removed in v34.8A — !Effect is now a parse error (E0374)
     errors
 }
 
@@ -713,6 +715,7 @@ fn has_ctx_param(fd: &crate::ast::FnDef) -> bool {
     fd.params.first().map(|p| p.name == "ctx").unwrap_or(false)
 }
 
+
 fn collect_ambient(program: &Program, code: &'static str) -> Vec<LintError> {
     let mut errors = Vec::new();
     for item in &program.items {
@@ -720,42 +723,49 @@ fn collect_ambient(program: &Program, code: &'static str) -> Vec<LintError> {
             // E0023 exempts functions that receive a ctx parameter — they use capability-context
             // threading instead of ambient effects, and may call Gen/Snowflake builtins internally.
             Item::FnDef(fd) if code == "E0023" && has_ctx_param(fd) => {}
-            Item::FnDef(fd) => collect_ambient_in_block(&fd.body, &mut errors, code),
-            Item::TrfDef(td) => collect_ambient_in_block(&td.body, &mut errors, code),
+            Item::FnDef(fd) => collect_ambient_in_block(&fd.body, &mut errors, code, &[]),
+            // E0023 exempts TrfDef (stage) bodies entirely — stages are the explicit
+            // effect boundary in Favnir and are designed to call ambient namespaces.
+            Item::TrfDef(_) if code == "E0023" => {}
+            // W008: TrfDef bodies are checked for ambient calls as warnings (not errors).
+            // Unlike E0023 (errors), W008 does not suppress TrfDef — informational only.
+            Item::TrfDef(td) => {
+                collect_ambient_in_block(&td.body, &mut errors, code, &[]);
+            }
             Item::FlwDef(_) => {}
             Item::ImplDef(id) => {
                 for m in &id.methods {
-                    collect_ambient_in_block(&m.body, &mut errors, code);
+                    collect_ambient_in_block(&m.body, &mut errors, code, &[]);
                 }
             }
-            Item::TestDef(td) => collect_ambient_in_block(&td.body, &mut errors, code),
+            Item::TestDef(td) => collect_ambient_in_block(&td.body, &mut errors, code, &[]),
             _ => {}
         }
     }
     errors
 }
 
-fn collect_ambient_in_block(block: &Block, errors: &mut Vec<LintError>, code: &'static str) {
+fn collect_ambient_in_block(block: &Block, errors: &mut Vec<LintError>, code: &'static str, allowed: &[&str]) {
     for stmt in &block.stmts {
         match stmt {
-            Stmt::Bind(b) => collect_ambient_in_expr(&b.expr, errors, code),
-            Stmt::Chain(c) => collect_ambient_in_expr(&c.expr, errors, code),
-            Stmt::Expr(e) => collect_ambient_in_expr(e, errors, code),
-            Stmt::Yield(y) => collect_ambient_in_expr(&y.expr, errors, code),
+            Stmt::Bind(b) => collect_ambient_in_expr(&b.expr, errors, code, allowed),
+            Stmt::Chain(c) => collect_ambient_in_expr(&c.expr, errors, code, allowed),
+            Stmt::Expr(e) => collect_ambient_in_expr(e, errors, code, allowed),
+            Stmt::Yield(y) => collect_ambient_in_expr(&y.expr, errors, code, allowed),
             Stmt::ForIn(f) => {
-                collect_ambient_in_expr(&f.iter, errors, code);
-                collect_ambient_in_block(&f.body, errors, code);
+                collect_ambient_in_expr(&f.iter, errors, code, allowed);
+                collect_ambient_in_block(&f.body, errors, code, allowed);
             }
             Stmt::Forall(f) => {
-                if let Some(g) = &f.guard { collect_ambient_in_expr(g, errors, code); }
-                collect_ambient_in_block(&f.body, errors, code);
+                if let Some(g) = &f.guard { collect_ambient_in_expr(g, errors, code, allowed); }
+                collect_ambient_in_block(&f.body, errors, code, allowed);
             }
         }
     }
-    collect_ambient_in_expr(&block.expr, errors, code);
+    collect_ambient_in_expr(&block.expr, errors, code, allowed);
 }
 
-fn collect_ambient_in_expr(expr: &Expr, errors: &mut Vec<LintError>, code: &'static str) {
+fn collect_ambient_in_expr(expr: &Expr, errors: &mut Vec<LintError>, code: &'static str, allowed: &[&str]) {
     match expr {
         // NS.method(args...) — potential ambient call
         Expr::Apply(func, args, span) => {
@@ -763,7 +773,7 @@ fn collect_ambient_in_expr(expr: &Expr, errors: &mut Vec<LintError>, code: &'sta
                 if let Expr::Ident(ns, _) = base.as_ref() {
                     let is_ambient = AMBIENT_NAMESPACES.contains(&ns.as_str())
                         || (ns == "Gen" && AMBIENT_GEN_FNS.contains(&method_name.as_str()));
-                    if is_ambient {
+                    if is_ambient && !allowed.contains(&ns.as_str()) {
                         errors.push(LintError::new(
                             code,
                             format!(
@@ -775,65 +785,65 @@ fn collect_ambient_in_expr(expr: &Expr, errors: &mut Vec<LintError>, code: &'sta
                     }
                 }
             }
-            collect_ambient_in_expr(func, errors, code);
+            collect_ambient_in_expr(func, errors, code, allowed);
             for a in args {
-                collect_ambient_in_expr(a, errors, code);
+                collect_ambient_in_expr(a, errors, code, allowed);
             }
         }
-        Expr::Block(b) => collect_ambient_in_block(b, errors, code),
+        Expr::Block(b) => collect_ambient_in_block(b, errors, code, allowed),
         Expr::If(cond, then, else_, _) => {
-            collect_ambient_in_expr(cond, errors, code);
-            collect_ambient_in_block(then, errors, code);
+            collect_ambient_in_expr(cond, errors, code, allowed);
+            collect_ambient_in_block(then, errors, code, allowed);
             if let Some(eb) = else_ {
-                collect_ambient_in_block(eb, errors, code);
+                collect_ambient_in_block(eb, errors, code, allowed);
             }
         }
         Expr::Match(scrutinee, arms, _) => {
-            collect_ambient_in_expr(scrutinee, errors, code);
+            collect_ambient_in_expr(scrutinee, errors, code, allowed);
             for arm in arms {
-                collect_ambient_in_expr(&arm.body, errors, code);
+                collect_ambient_in_expr(&arm.body, errors, code, allowed);
             }
         }
         Expr::Pipeline(steps, _) => {
             for s in steps {
-                collect_ambient_in_expr(s, errors, code);
+                collect_ambient_in_expr(s, errors, code, allowed);
             }
         }
-        Expr::FieldAccess(obj, _, _) => collect_ambient_in_expr(obj, errors, code),
+        Expr::FieldAccess(obj, _, _) => collect_ambient_in_expr(obj, errors, code, allowed),
         Expr::BinOp(_, l, r, _) => {
-            collect_ambient_in_expr(l, errors, code);
-            collect_ambient_in_expr(r, errors, code);
+            collect_ambient_in_expr(l, errors, code, allowed);
+            collect_ambient_in_expr(r, errors, code, allowed);
         }
-        Expr::Closure(_, body, _) => collect_ambient_in_expr(body, errors, code),
-        Expr::Collect(b, _) => collect_ambient_in_block(b, errors, code),
-        Expr::EmitExpr(inner, _) => collect_ambient_in_expr(inner, errors, code),
-        Expr::Question(inner, _) => collect_ambient_in_expr(inner, errors, code),
-        Expr::AssertMatches(e, _, _) => collect_ambient_in_expr(e, errors, code),
-        Expr::TypeApply(f, _, _) => collect_ambient_in_expr(f, errors, code),
+        Expr::Closure(_, body, _) => collect_ambient_in_expr(body, errors, code, allowed),
+        Expr::Collect(b, _) => collect_ambient_in_block(b, errors, code, allowed),
+        Expr::EmitExpr(inner, _) => collect_ambient_in_expr(inner, errors, code, allowed),
+        Expr::Question(inner, _) => collect_ambient_in_expr(inner, errors, code, allowed),
+        Expr::AssertMatches(e, _, _) => collect_ambient_in_expr(e, errors, code, allowed),
+        Expr::TypeApply(f, _, _) => collect_ambient_in_expr(f, errors, code, allowed),
         Expr::RecordConstruct(_, fields, _) => {
             for (_, v) in fields {
-                collect_ambient_in_expr(v, errors, code);
+                collect_ambient_in_expr(v, errors, code, allowed);
             }
         }
         Expr::RecordSpread(base, updates, _) => {
-            collect_ambient_in_expr(base, errors, code);
+            collect_ambient_in_expr(base, errors, code, allowed);
             for (_, v) in updates {
-                collect_ambient_in_expr(v, errors, code);
+                collect_ambient_in_expr(v, errors, code, allowed);
             }
         }
         Expr::FString(parts, _) => {
             for part in parts {
                 if let FStringPart::Expr(e) = part {
-                    collect_ambient_in_expr(e, errors, code);
+                    collect_ambient_in_expr(e, errors, code, allowed);
                 }
             }
         }
         Expr::ListComp { expr, clauses, .. } | Expr::ResultComp { expr, clauses, .. } => {
-            collect_ambient_in_expr(expr, errors, code);
+            collect_ambient_in_expr(expr, errors, code, allowed);
             for c in clauses {
                 match c {
-                    CompClause::For { src, .. } => collect_ambient_in_expr(src, errors, code),
-                    CompClause::Guard(g) => collect_ambient_in_expr(g, errors, code),
+                    CompClause::For { src, .. } => collect_ambient_in_expr(src, errors, code, allowed),
+                    CompClause::Guard(g) => collect_ambient_in_expr(g, errors, code, allowed),
                 }
             }
         }
@@ -1313,111 +1323,10 @@ fn collect_type_state_in_expr(
 
 // ── E0025: check_bang_notation ────────────────────────────────────────────────
 
-/// Returns a context type hint string for a given set of effects.
-/// Conservative: unknown combos → "AppCtx".
-fn infer_ctx_hint(effects: &[Effect]) -> &'static str {
-    let has_postgres = effects.iter().any(|e| matches!(e, Effect::Postgres | Effect::Db | Effect::DbRead | Effect::DbWrite | Effect::DbAdmin | Effect::Snowflake));
-    let has_aws = effects.iter().any(|e| matches!(e, Effect::Unknown(s) if s == "AWS" || s == "S3"));
-    let has_io = effects.iter().any(|e| matches!(e, Effect::Io));
-    let has_http = effects.iter().any(|e| matches!(e, Effect::Http | Effect::Rpc | Effect::Network));
-    let has_llm = effects.iter().any(|e| matches!(e, Effect::Llm));
-
-    // Single-effect cases → specific ctx hint
-    if !has_aws && !has_http && !has_llm && has_postgres {
-        // Only DB effects
-        let db_write = effects.iter().any(|e| matches!(e, Effect::DbWrite | Effect::DbAdmin));
-        if db_write {
-            return "WriteCtx";
-        }
-        return "LoadCtx";
-    }
-    if !has_postgres && !has_aws && !has_http && !has_llm && has_io {
-        return "CommonCtx";
-    }
-    // Multiple effects or unknown → AppCtx
-    "AppCtx"
-}
-
 /// Returns E0025 errors for functions that still use `!Effect` notation (non-legacy mode).
-pub fn check_bang_notation(program: &Program) -> Vec<LintError> {
-    let mut errors = Vec::new();
-    for item in &program.items {
-        match item {
-            Item::FnDef(fd) => {
-                let meaningful: Vec<&Effect> = fd.effects.iter()
-                    .filter(|e| !matches!(e, Effect::Pure))
-                    .collect();
-                if !meaningful.is_empty() {
-                    let effects_str: Vec<String> = meaningful.iter().map(|e| format!("!{}", effect_name(e))).collect();
-                    let ctx_hint = infer_ctx_hint(&fd.effects);
-                    errors.push(LintError::new(
-                        "E0025",
-                        format!(
-                            "`!` effect notation is no longer supported: {}. Migrate to `fn {}(ctx: {}, ...) -> ...`",
-                            effects_str.join(" "),
-                            fd.name,
-                            ctx_hint
-                        ),
-                        fd.span.clone(),
-                    ));
-                }
-            }
-            Item::TrfDef(td) => {
-                let meaningful: Vec<&Effect> = td.effects.iter()
-                    .filter(|e| !matches!(e, Effect::Pure))
-                    .collect();
-                if !meaningful.is_empty() {
-                    let effects_str: Vec<String> = meaningful.iter().map(|e| format!("!{}", effect_name(e))).collect();
-                    let ctx_hint = infer_ctx_hint(&td.effects);
-                    errors.push(LintError::new(
-                        "E0025",
-                        format!(
-                            "`!` effect notation is no longer supported: {}. Migrate stage `{}` to use capability context `{}`",
-                            effects_str.join(" "),
-                            td.name,
-                            ctx_hint
-                        ),
-                        td.span.clone(),
-                    ));
-                }
-            }
-            _ => {}
-        }
-    }
-    errors
-}
-
-fn effect_name(e: &Effect) -> &str {
-    match e {
-        Effect::Pure => "Pure",
-        Effect::Io => "Io",
-        Effect::Db => "Db",
-        Effect::DbRead => "DbRead",
-        Effect::DbWrite => "DbWrite",
-        Effect::DbAdmin => "DbAdmin",
-        Effect::Network => "Network",
-        Effect::Http => "Http",
-        Effect::Llm => "Llm",
-        Effect::Snowflake => "Snowflake",
-        Effect::Gcp => "Gcp",
-        Effect::Stream => "Stream",
-        Effect::Postgres => "Postgres",
-        Effect::Redis => "Redis",
-        Effect::MySQL => "MySQL",
-        Effect::MongoDB => "MongoDB",
-        Effect::DynamoDB => "DynamoDB",
-        Effect::Elasticsearch => "Elasticsearch",
-        Effect::AzureDb => "AzureDb",
-        Effect::AzureStorage => "AzureStorage",
-        Effect::Rpc => "Rpc",
-        Effect::File => "File",
-        Effect::Checkpoint => "Checkpoint",
-        Effect::Trace => "Trace",
-        Effect::PipelineState => "PipelineState",
-        Effect::Emit(_) => "Emit",
-        Effect::EmitUnion(_) => "EmitUnion",
-        Effect::Unknown(s) => s.as_str(),
-    }
+/// v35.4.0: !Effect is now a parse error (E0374), so this always returns empty.
+pub fn check_bang_notation(_program: &Program) -> Vec<LintError> {
+    vec![]
 }
 
 // ── W010〜W019 (v21.4.0) ──────────────────────────────────────────────────────
@@ -1443,14 +1352,20 @@ fn check_w010_stage_too_large(program: &Program, errors: &mut Vec<LintError>) {
 
 // W011: effectless_io_call — TrfDef with no declared effects calls an ambient namespace
 fn check_w011_effectless_io_call(program: &Program, errors: &mut Vec<LintError>) {
+    // v35.5.0: effects field removed; all stages are considered effectless w.r.t. annotations.
+    // W011 now fires for any stage that calls an ambient namespace without a ctx param.
     for item in &program.items {
         if let Item::TrfDef(td) = item {
-            if td.effects.is_empty() {
+            let has_ctx = td.params.iter().any(|p| {
+                matches!(&p.ty, crate::ast::TypeExpr::Named(n, _, _) if
+                    matches!(n.as_str(), "AppCtx"|"CommonCtx"|"LoadCtx"|"WriteCtx"|"MigrateCtx"|"MockCtx"|"DbCtx"|"IoCtx"|"HttpCtx"|"StreamCtx"))
+            });
+            if !has_ctx {
                 if let Some((ns, method, span)) = find_ambient_call_in_block(&td.body) {
                     errors.push(LintError::new(
                         "W011",
                         format!(
-                            "stage `{}` calls `{}.{}` but declares no effects; add `!Io` or use ctx",
+                            "stage `{}` calls `{}.{}` without a ctx parameter; add `ctx: AppCtx`",
                             td.name, ns, method
                         ),
                         span,
@@ -2225,144 +2140,15 @@ fn check_w020_expr(expr: &Expr, deprecated: &std::collections::HashSet<String>, 
     }
 }
 
-// ── W021: pure_fn_calls_effectful (v24.6.0) ──────────────────────────────────
-fn check_w021_block(
-    block: &Block,
-    caller: &str,
-    effectful: &std::collections::HashSet<String>,
-    errors: &mut Vec<LintError>,
-) {
-    for stmt in &block.stmts {
-        match stmt {
-            Stmt::Bind(b)  => check_w021_expr(&b.expr, caller, effectful, errors),
-            Stmt::Chain(c) => check_w021_expr(&c.expr, caller, effectful, errors),
-            Stmt::Expr(e)  => check_w021_expr(e, caller, effectful, errors),
-            Stmt::Yield(y) => check_w021_expr(&y.expr, caller, effectful, errors),
-            Stmt::ForIn(f) => {
-                check_w021_expr(&f.iter, caller, effectful, errors);
-                check_w021_block(&f.body, caller, effectful, errors);
-            }
-            Stmt::Forall(f) => {
-                // Forall は iter フィールドなし（guard + body のみ）
-                if let Some(g) = &f.guard { check_w021_expr(g, caller, effectful, errors); }
-                check_w021_block(&f.body, caller, effectful, errors);
-            }
-        }
-    }
-    check_w021_expr(&block.expr, caller, effectful, errors);
+// ── W021: pure_fn_calls_effectful (v24.6.0 — dead code removed v35.5.0) ─────────
+// check_w021_block / check_w021_expr removed: W021 is a no-op since Effect enum deletion.
+pub fn check_w021_pure_fn_calls_effectful(_program: &Program, _errors: &mut Vec<LintError>) {
+    // v35.4.0: !Effect annotation removed; effect detection via ast::Effect is no longer possible.
+    // W021 is a no-op.
 }
 
-fn check_w021_expr(
-    expr: &Expr,
-    caller: &str,
-    effectful: &std::collections::HashSet<String>,
-    errors: &mut Vec<LintError>,
-) {
-    match expr {
-        Expr::Apply(func, args, span) => {
-            if let Expr::Ident(name, _) = func.as_ref() {
-                if effectful.contains(name) {
-                    errors.push(LintError::new(
-                        "W021",
-                        format!(
-                            "pure function `{caller}` calls effectful function `{name}` \
-                             — declare the effect or mark `{caller}` as effectful"
-                        ),
-                        span.clone(),
-                    ));
-                }
-            }
-            check_w021_expr(func, caller, effectful, errors);
-            for a in args { check_w021_expr(a, caller, effectful, errors); }
-        }
-        Expr::If(cond, then, else_, _) => {
-            check_w021_expr(cond, caller, effectful, errors);
-            check_w021_block(then, caller, effectful, errors);
-            if let Some(e) = else_ { check_w021_block(e, caller, effectful, errors); }
-        }
-        Expr::Match(subject, arms, _) => {
-            check_w021_expr(subject, caller, effectful, errors);
-            // MatchArm.body は Expr（Block ではない）
-            for arm in arms { check_w021_expr(&arm.body, caller, effectful, errors); }
-        }
-        Expr::Block(b) => check_w021_block(b, caller, effectful, errors),
-        // クロージャ内のエフェクト呼び出しはクロージャの呼び出し元が制御するため走査しない
-        Expr::Closure(_, _, _) => {}
-        Expr::Pipeline(steps, _) => {
-            for s in steps { check_w021_expr(s, caller, effectful, errors); }
-        }
-        Expr::BinOp(_, l, r, _) => {
-            check_w021_expr(l, caller, effectful, errors);
-            check_w021_expr(r, caller, effectful, errors);
-        }
-        Expr::FString(parts, _) => {
-            for part in parts {
-                if let FStringPart::Expr(e) = part {
-                    check_w021_expr(e, caller, effectful, errors);
-                }
-            }
-        }
-        Expr::Question(inner, _) | Expr::EmitExpr(inner, _) => {
-            check_w021_expr(inner, caller, effectful, errors);
-        }
-        Expr::FieldAccess(obj, _, _) => {
-            check_w021_expr(obj, caller, effectful, errors);
-        }
-        Expr::TypeApply(callee, _, _) => {
-            check_w021_expr(callee, caller, effectful, errors);
-        }
-        Expr::AssertMatches(e, _, _) => {
-            check_w021_expr(e, caller, effectful, errors);
-        }
-        Expr::RecordConstruct(_, fields, _) => {
-            for (_, v) in fields { check_w021_expr(v, caller, effectful, errors); }
-        }
-        Expr::RecordSpread(base, updates, _) => {
-            check_w021_expr(base, caller, effectful, errors);
-            for (_, v) in updates { check_w021_expr(v, caller, effectful, errors); }
-        }
-        Expr::Collect(block, _) => check_w021_block(block, caller, effectful, errors),
-        Expr::ListComp { expr, clauses, .. } | Expr::ResultComp { expr, clauses, .. } => {
-            check_w021_expr(expr, caller, effectful, errors);
-            for clause in clauses {
-                match clause {
-                    CompClause::For { src, .. } => check_w021_expr(src, caller, effectful, errors),
-                    CompClause::Guard(g) => check_w021_expr(g, caller, effectful, errors),
-                }
-            }
-        }
-        _ => {}
-    }
-}
-
-/// v24.6.0: W021 — 純粋関数から副作用関数を呼び出す箇所を検出する。
-/// 「capability 引数がなければ純粋」という Favnir エフェクトシステムの公理を lint として実装。
-pub fn check_w021_pure_fn_calls_effectful(program: &Program, errors: &mut Vec<LintError>) {
-    use std::collections::HashSet;
-    // Effect は lint.rs 先頭の `use crate::ast::*;` により既にスコープ内
-    // Step 1: エフェクト宣言のある fn 名のセットを収集（Pure 以外のエフェクトを持つもの）
-    let effectful_fns: HashSet<String> = program.items.iter()
-        .filter_map(|item| {
-            if let Item::FnDef(fd) = item {
-                let is_effectful = fd.effects.iter().any(|e| e != &Effect::Pure);
-                if is_effectful { Some(fd.name.clone()) } else { None }
-            } else {
-                None
-            }
-        })
-        .collect();
-    if effectful_fns.is_empty() { return; }
-    // Step 2: 純粋な FnDef（effects が空、または Pure のみ）の body を走査
-    for item in &program.items {
-        if let Item::FnDef(fd) = item {
-            let is_pure = fd.effects.is_empty()
-                || fd.effects.iter().all(|e| e == &Effect::Pure);
-            if is_pure {
-                check_w021_block(&fd.body, &fd.name, &effectful_fns, errors);
-            }
-        }
-    }
-}
+// ── W022: removed in v34.8A ─────────────────────────────────────────────────
+// !Effect is now a parse error (E0374); W022 is no longer needed.
 
 // ── tests ─────────────────────────────────────────────────────────────────────
 
@@ -2528,19 +2314,7 @@ public fn main() -> Int { ParseCsv("x") }
     }
 
     #[test]
-    fn lint_l007_effect_not_pascal() {
-        let codes = lint(
-            r#"
-effect payment
-public fn main() -> Unit !payment { () }
-"#,
-        );
-        assert!(
-            codes.contains(&"L007".to_string()),
-            "expected L007, got {:?}",
-            codes
-        );
-    }
+    fn lint_l007_effect_not_pascal() { /* Stubbed: L007 effect name lint removed in v35.5.0 — Effect enum deleted. */ }
 
     #[test]
     fn lint_l002_unused_bind() {
@@ -2584,8 +2358,8 @@ fn add(a: Int, b: Int) -> Int {
     a + b
 }
 
-public fn main() -> Unit !Io {
-    IO.println("hello")
+public fn main() -> Unit {
+    ()
 }
 "#,
         );

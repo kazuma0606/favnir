@@ -1,0 +1,15 @@
+import runes/slack
+
+fn notify_success(ctx: AppCtx, count: Int, errors: Int) -> Unit {
+    let msg = String.concat([
+        ":white_check_mark: ETL completed. ",
+        "Rows loaded: ", Int.to_string(count), ". ",
+        "Validation errors: ", Int.to_string(errors), "."
+    ])
+    Slack.post_message("#data-pipeline", msg)
+}
+
+fn notify_failure(ctx: AppCtx, reason: String) -> Unit {
+    let msg = String.concat([":x: ETL failed: ", reason])
+    Slack.post_message("#data-pipeline", msg)
+}

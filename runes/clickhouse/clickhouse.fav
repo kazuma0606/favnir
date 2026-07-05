@@ -1,15 +1,15 @@
 // runes/clickhouse/clickhouse.fav — ClickHouse Rune (v27.3.0)
 // clickhouse-rs 統合は v28.x 以降。現バージョンは引数検証 stub。
 // TODO(v28.x): clickhouse-rs クレートを使った実接続に移行予定。
-public fn connect(config: String) -> Result<String, String> !Db {
+public fn connect(config: String) -> Result<String, String> {
     ClickHouse.connect_raw(config)
 }
-public fn query(conn: String, sql: String) -> Result<String, String> !Db {
+public fn query(conn: String, sql: String) -> Result<String, String> {
     ClickHouse.query_raw(conn, sql)
 }
-public fn insert(conn: String, table: String, rows: String) -> Result<Unit, String> !Db {
+public fn insert(conn: String, table: String, rows: String) -> Result<Unit, String> {
     ClickHouse.insert_raw(conn, table, rows)
 }
-public fn async_insert(conn: String, table: String, rows: String) -> Result<Unit, String> !Db {
+public fn async_insert(conn: String, table: String, rows: String) -> Result<Unit, String> {
     ClickHouse.async_insert_raw(conn, table, rows)
 }

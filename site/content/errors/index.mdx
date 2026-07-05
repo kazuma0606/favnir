@@ -1,0 +1,130 @@
+---
+title: "エラーコードリファレンス"
+description: "Favnir コンパイラ・型チェッカーが発行するエラーコードの一覧と修正方法"
+---
+
+# エラーコードリファレンス
+
+`fav check` や `fav run` が出力するエラーコードの説明と修正方法です。
+ターミナルで `fav explain <CODE>` を実行すると同じ情報を確認できます。
+
+## 使い方
+
+```bash
+fav explain E0101
+fav explain W001
+```
+
+---
+
+## パイプライン エラー（E01xx）
+
+| コード | タイトル | 概要 |
+|---|---|---|
+| E0101 | undefined seq step / stage | seq に存在しないステージが参照されている |
+| E0102 | undefined identifier in seq | seq / pipeline 内の識別子が解決できない |
+| E0103 | type mismatch in seq chain | ステージ間の入出力型が一致しない |
+| E0107 | duplicate type definition | 同スコープ内に同名の型が重複定義されている |
+| E0108 | duplicate function definition | 同スコープ内に同名の関数が重複定義されている |
+| E0109 | duplicate stage definition | 同スコープ内に同名のステージが重複定義されている |
+| E0110 | invalid pipeline composition | パイプライン合成の型制約違反 |
+| E0112 | missing required field | レコード構築に必須フィールドが欠けている |
+| E0136 | invalid rune import | rune の import パスが不正 |
+
+---
+
+## 型エラー（E02xx）
+
+| コード | タイトル | 概要 |
+|---|---|---|
+| E0213 | type mismatch | 期待される型と実際の型が異なる |
+| E0214 | undefined type | 未定義の型を参照している |
+| E0215 | type parameter mismatch | 型パラメータの数または種類が一致しない |
+| E0218 | cannot unify types | 型の単一化に失敗した |
+| E0219 | infinite type | 再帰的な型推論で無限型が生成された |
+| E0220 | missing field | フィールドアクセスで存在しないフィールドを参照 |
+| E0221 | not a record type | レコード操作を非レコード型に適用した |
+| E0222 | not a list type | リスト操作を非リスト型に適用した |
+| E0223 | not a function type | 関数呼び出しを非関数型に適用した |
+| E0224 | return type mismatch | 関数の戻り値の型が宣言と一致しない |
+| E0225 | pattern type mismatch | match パターンの型が一致しない |
+| E0226 | non-exhaustive match | match パターンに網羅性がない |
+| E0227 | duplicate variant | 同名のバリアントが重複定義されている |
+
+---
+
+## チェッカーエラー（E02xx — 継続）
+
+| コード | タイトル | 概要 |
+|---|---|---|
+| E0241 | undefined variable | 未定義変数の参照（`fav explain E0241` または `fav explain E0001`） |
+| E0242 | undefined function | 未定義関数の呼び出し |
+| E0243 | argument count mismatch | 引数の数が一致しない |
+| E0244 | return type mismatch | 戻り型の不一致 |
+| E0245 | where constraint violation | `where` バリデーター違反 |
+| E0251 | interface not implemented | interface が実装されていない |
+| E0253 | effect not declared | エフェクトが関数宣言に含まれていない |
+| E0254 | effect mismatch | エフェクト宣言と実際の使用が一致しない |
+| E0274 | ctx field access error | ctx フィールドへのアクセスエラー |
+
+---
+
+## エフェクト / Rune エラー（E03xx）
+
+| コード | タイトル | 概要 |
+|---|---|---|
+| E0310 | effect not allowed | 宣言されていないエフェクトを使用した |
+| E0311 | unknown effect | 未知のエフェクトアノテーション |
+| E0312 | rune not found | 参照された Rune が見つからない |
+| E0313 | rune version conflict | Rune のバージョン制約が競合している |
+| E0365 | snowflake connection error | Snowflake 接続設定エラー |
+| E0368 | effect pure violation (W021) | 純粋関数からエフェクトを持つ関数を呼び出した |
+| E0369 | bind reassignment | bind で宣言した変数の再束縛を試みた（E0018） |
+| E0370 | seq fail-fast triggered | seq pipeline がエラーで中断した |
+| E0371 | verbose trace error | --verbose / --trace モードで検出されたエラー |
+| E0373 | migration required | `fav migrate --effects` による移行が必要 |
+
+---
+
+## ランタイムエラー（E05xx）
+
+| コード | タイトル | 概要 |
+|---|---|---|
+| E0500 | runtime panic | VM で予期しないパニックが発生した |
+| E0501 | stack overflow | 再帰が深すぎてスタックオーバーフロー |
+| E0502 | integer overflow | 整数演算がオーバーフローした |
+| E0503 | division by zero | ゼロ除算が発生した |
+| E0504 | index out of bounds | リストの範囲外アクセス |
+| E0505 | null pointer dereference | null 値の参照解除 |
+| E0580 | io error | ファイル読み書き・システム IO のエラー |
+| E0581 | network error | HTTP / gRPC / ネットワークエラー |
+
+---
+
+## 外部サービスエラー（E06xx）
+
+| コード | タイトル | 概要 |
+|---|---|---|
+| E0601 | postgres connection error | Postgres 接続エラー |
+| E0602 | postgres query error | Postgres クエリ実行エラー |
+| E0603 | redis connection error | Redis 接続エラー |
+| E0604 | s3 access error | S3 アクセスエラー |
+| E0605 | http request error | HTTP リクエストエラー |
+
+---
+
+## lint 警告（E09xx）
+
+| コード | タイトル | 概要 |
+|---|---|---|
+| E0901 | unused variable | 未使用の変数（W001） |
+| E0902 | unused import | 未使用の import（W002） |
+| E0903 | shadowed binding | 変数のシャドーイング（W003） |
+
+---
+
+## 関連コマンド
+
+- `fav explain <CODE>` — エラーの詳細説明と修正例をターミナルに表示
+- `fav check --json` — エラーを JSON 形式で出力（CI 連携向け）
+- `fav lint --deny-warnings` — 警告をエラーとして扱う

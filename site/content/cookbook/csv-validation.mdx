@@ -1,0 +1,48 @@
+---
+title: "CSV バリデーションパイプライン"
+description: "CSV ファイルのバリデーションを行い、有効行と無効行を分離して処理するパイプライン"
+---
+
+# CSV バリデーションパイプライン
+
+CSV ファイルの各行をバリデーションし、有効行は DB に保存、無効行はエラーレポートに出力します。
+
+## コード例
+
+```favnir
+import runes/csv
+import runes/postgres
+
+type Row = { id: String, amount: Float, email: String }
+type ValidRow = { id: String, amount: Float, email: String }
+type ErrorRow = { row: Int, field: String, message: String }
+
+fn validate(idx: Int, r: Row) -> Result<ValidRow, ErrorRow> {
+    if r.id == "" {
+        Result.err({ row: idx, field: "id", message: "id is required" })
+    } else if r.amount < 0.0 {
+        Result.err({ row: idx, field: "amount", message: "amount must be non-negative" })
+    } else if not(String.contains(r.email, "@")) {
+        Result.err({ row: idx, field: "email", message: "invalid email format" })
+    } else {
+        Result.ok(r)
+    }
+}
+
+fn main() -> Unit {
+    bind rows <- Csv.read_file_typed("data/input.csv", Row)
+    let indexed = List.indexed(rows)
+    let results  = List.map(indexed, fn (p) { validate(p.index, p.value) })
+    let valid    = List.filter_map(results, fn (r) { Result.to_option(r) })
+    let errors   = List.filter_map(results, fn (r) { Result.err_to_option(r) })
+    bind n <- Postgres.insert_many("records", valid)
+    bind _ <- Csv.write_file("output/errors.csv", errors)
+    IO.println(String.concat(["Valid: ", Int.to_string(n), " / Errors: ", Int.to_string(List.length(errors))]))
+}
+```
+
+## ポイント
+
+- `Result.ok` と `Result.err` で有効行と無効行を分離します。
+- エラーレポートは `Csv.write_file` で CSV として出力できます。
+- バリデーションルールは `validate` 関数に集約し、テスト可能な構造を保ちます。

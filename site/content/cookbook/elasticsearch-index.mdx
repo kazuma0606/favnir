@@ -1,0 +1,31 @@
+---
+title: "Elasticsearch インデックス更新"
+description: "Postgres のデータを Elasticsearch にインデックスして全文検索を有効化する"
+---
+
+# Elasticsearch インデックス更新
+
+Postgres の商品データを Elasticsearch にインデックスし、全文検索とファセット検索を有効化します。
+
+## コード例
+
+```favnir
+import runes/postgres
+import runes/elasticsearch
+
+type Product = { id: String, name: String, description: String, price: Float, category: String }
+
+fn main() -> Unit {
+    bind products <- Postgres.query_raw("SELECT id, name, description, price, category FROM products")
+    bind result   <- Elasticsearch.bulk_index("products", products, fn (p) { p.id })
+    IO.println(String.concat([
+        "Indexed ", Int.to_string(result.indexed), " / ", Int.to_string(result.total), " products."
+    ]))
+}
+```
+
+## ポイント
+
+- `Elasticsearch.bulk_index` の第三引数はドキュメント ID を返す関数です。
+- 環境変数 `ELASTICSEARCH_URL` で接続先を設定してください。
+- 増分インデックスには `Elasticsearch.bulk_upsert` を使用し、`updated_at > last_run` でフィルタリングします。

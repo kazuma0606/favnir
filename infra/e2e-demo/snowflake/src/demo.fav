@@ -6,7 +6,7 @@ type OrderRow   = { order_id: Int  customer: String  amount: Float  region: Stri
 type SummaryRow = { region: String  total: Float  count: Int }
 
 // Stage 1: CSV 読み込み
-stage LoadCsv: String -> List<OrderRow> !IO = |path| {
+stage LoadCsv: String -> List<OrderRow> = |path| {
   csv.read<OrderRow>(path)
 }
 
@@ -16,13 +16,13 @@ stage TransformRows: List<OrderRow> -> List<OrderRow> = |rows| {
 }
 
 // Stage 3: Snowflake に INSERT
-stage SnowflakeInsert: List<OrderRow> -> Int !Snowflake = |rows| {
+stage SnowflakeInsert: List<OrderRow> -> Int = |rows| {
   bind json_str <- Json.encode_raw(rows)
   snowflake.execute($"INSERT INTO DEMO_DB.PUBLIC.ORDERS (order_id, customer, amount, region) SELECT value:order_id::INT, value:customer::STRING, value:amount::FLOAT, value:region::STRING FROM TABLE(FLATTEN(PARSE_JSON('{json_str}')))")
 }
 
 // Stage 4: クエリ集計 → S3 証跡保存
-stage QuerySummary: Int -> Unit !Snowflake !AWS = |_| {
+stage QuerySummary: Int -> Unit = |_| {
   bind rows <- snowflake.query<SummaryRow>(
     "SELECT region, SUM(amount) AS total, COUNT(*) AS count FROM DEMO_DB.PUBLIC.ORDERS GROUP BY region ORDER BY region"
   )

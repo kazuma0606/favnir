@@ -2,15 +2,15 @@
 // JSON Lines（1 行 1 JSON オブジェクト）の読み書き・ストリーミング処理。
 // ジェネリック型付き API（JSONL.read[T] / JSONL.stream[T]）は v28.x 以降。
 // TODO(v28.x): JSONL.read[T] / JSONL.stream[T] ジェネリック API + コールバック機構に移行予定。
-public fn read(path: String) -> Result<String, String> !Io {
+public fn read(path: String) -> Result<String, String> {
     JSONL.read_raw(path)
 }
-public fn write(path: String, rows: String) -> Result<Unit, String> !Io {
+public fn write(path: String, rows: String) -> Result<Unit, String> {
     JSONL.write_raw(path, rows)
 }
-public fn stream(path: String) -> Result<String, String> !Io {
+public fn stream(path: String) -> Result<String, String> {
     JSONL.stream_raw(path)
 }
-public fn append(path: String, row: String) -> Result<Unit, String> !Io {
+public fn append(path: String, row: String) -> Result<Unit, String> {
     JSONL.append_raw(path, row)
 }

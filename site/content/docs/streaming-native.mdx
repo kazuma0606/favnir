@@ -24,12 +24,12 @@ v27.0.0 で宣言した **Streaming Native** マイルストーン。
 import rune "stream"
 
 // map: 各要素を変換
-stage Transform: Stream<String> -> Stream<String> !Pure = |stream| {
+stage Transform: Stream<String> -> Stream<String> = |stream| {
     Stream.map(stream, |s| String.to_upper(s))
 }
 
 // filter: 条件を満たす要素のみ通過
-stage FilterErrors: Stream<String> -> Stream<String> !Pure = |stream| {
+stage FilterErrors: Stream<String> -> Stream<String> = |stream| {
     Stream.filter(stream, |s| String.contains(s, "ERROR"))
 }
 

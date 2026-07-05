@@ -18,7 +18,7 @@ import rune "auth"
 ```favnir
 type Claims = { sub: String  role: String  exp: Int }
 
-public fn handle_request(token: String) -> Result<Claims, String> !Auth {
+public fn handle_request(token: String) -> Result<Claims, String> {
   auth.verify_jwt<Claims>(token, Env.get_or("JWT_SECRET", ""))
 }
 ```
@@ -26,11 +26,11 @@ public fn handle_request(token: String) -> Result<Claims, String> !Auth {
 ## RBAC（ロールベースアクセス制御）
 
 ```favnir
-public fn admin_only(claims: Claims) -> Result<Unit, String> !Auth {
+public fn admin_only(claims: Claims) -> Result<Unit, String> {
   auth.require_role(claims, "admin")
 }
 
-public fn any_engineer(claims: Claims) -> Result<Unit, String> !Auth {
+public fn any_engineer(claims: Claims) -> Result<Unit, String> {
   auth.require_any_role(claims, ["admin", "data_engineer"])
 }
 ```

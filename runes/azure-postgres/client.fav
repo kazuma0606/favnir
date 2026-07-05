@@ -25,7 +25,7 @@ public fn new_ctx(conn_str: String) -> AzureDbCtx {
 // execute — DML（INSERT / UPDATE / DELETE / CREATE 等）を実行する
 // params: JSON 配列文字列（例: "[\"val1\", 42]"）
 // 戻り値: Ok(変更行数) または Err(メッセージ)
-public fn execute(ctx: AzureDbCtx, sql: String, params: String) -> Result<Int, String> !AzureDb {
+public fn execute(ctx: AzureDbCtx, sql: String, params: String) -> Result<Int, String> {
     match ctx {
         AzureDbCtx(conn_str) => AzurePostgres.execute_raw(conn_str, sql, params)
     }
@@ -33,7 +33,7 @@ public fn execute(ctx: AzureDbCtx, sql: String, params: String) -> Result<Int, S
 
 // query<T> — SELECT クエリを実行し、行を型 T の List に変換して返す
 // params: JSON 配列文字列（例: "[\"val1\"]"）。引数なしの場合は "[]"。
-public fn query<T>(ctx: AzureDbCtx, sql: String, params: String) -> Result<List<T>, String> !AzureDb {
+public fn query<T>(ctx: AzureDbCtx, sql: String, params: String) -> Result<List<T>, String> {
     match ctx {
         AzureDbCtx(conn_str) =>
             match AzurePostgres.query_raw(conn_str, sql, params) {

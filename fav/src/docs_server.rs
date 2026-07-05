@@ -103,30 +103,30 @@ struct StdlibCatalog<'a> {
 const IO_FUNCTIONS: &[StdlibFunction] = &[
     StdlibFunction {
         name: "println",
-        signature: "String -> Unit !Io",
+        signature: "String -> Unit",
         params: &[StdlibParam {
             name: "s",
             ty: "String",
         }],
         returns: "Unit",
-        effects: &["Io"],
+        effects: &[],
     },
     StdlibFunction {
         name: "print",
-        signature: "String -> Unit !Io",
+        signature: "String -> Unit",
         params: &[StdlibParam {
             name: "s",
             ty: "String",
         }],
         returns: "Unit",
-        effects: &["Io"],
+        effects: &[],
     },
     StdlibFunction {
         name: "read_line",
-        signature: "() -> String !Io",
+        signature: "() -> String",
         params: &[],
         returns: "String",
-        effects: &["Io"],
+        effects: &[],
     },
 ];
 

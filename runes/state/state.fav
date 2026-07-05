@@ -10,18 +10,18 @@
 //   bind b <- State.has("seen:" ++ row.id)          // !PipelineState -> Bool
 //   bind _ <- State.delete("seen:" ++ row.id)       // !PipelineState
 
-public fn get(key: String) -> Option<String> !PipelineState {
+public fn get(key: String) -> Option<String> {
     State.get_raw(key)
 }
 
-public fn set(key: String, value: String) -> Unit !PipelineState {
+public fn set(key: String, value: String) -> Unit {
     State.set_raw(key, value)
 }
 
-public fn has(key: String) -> Bool !PipelineState {
+public fn has(key: String) -> Bool {
     State.has_raw(key)
 }
 
-public fn delete(key: String) -> Unit !PipelineState {
+public fn delete(key: String) -> Unit {
     State.delete_raw(key)
 }

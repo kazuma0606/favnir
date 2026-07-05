@@ -53,16 +53,16 @@ import rune "delta-lake"
 import rune "dbt"
 import rune "sqlite"
 
-stage LoadFromDelta: Unit -> List<OrderRow> !Io = |_| {
+stage LoadFromDelta: Unit -> List<OrderRow> = |_| {
     DeltaLake.read[OrderRow]("s3://my-bucket/orders")
 }
 
-stage EnrichWithDbt: List<OrderRow> -> List<EnrichedOrder> !Db = |orders| {
+stage EnrichWithDbt: List<OrderRow> -> List<EnrichedOrder> = |orders| {
     bind summary <- Dbt.ref(config.dbt, "customer_summary")
     Result.ok(List.map(orders, |o| enrich(o, summary)))
 }
 
-stage SaveToSqlite: List<EnrichedOrder> -> Unit !Db = |rows| {
+stage SaveToSqlite: List<EnrichedOrder> -> Unit = |rows| {
     bind db <- SQLite.open_memory()
     bind _  <- SQLite.execute(db, "CREATE TABLE orders (id INT, amount REAL)", "[]")
     SQLite.execute_many(db, "INSERT INTO orders VALUES (?, ?)", rows)

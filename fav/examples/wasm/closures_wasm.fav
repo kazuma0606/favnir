@@ -1,4 +1,4 @@
-public fn main() -> Unit !Io {
+public fn main() -> Unit {
     bind add1 <- |x| x + 1;
     bind double <- |x| x * 2;
     bind n <- 10;

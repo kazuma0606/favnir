@@ -1,0 +1,10 @@
+// runes/ctx/db.fav — DbCtx interface（v34.6.0）
+// !DbRead / !DbWrite エフェクトの Capability Context 移行用インターフェース。
+// `!DbRead` / `!DbWrite` を使用している関数は ctx.db を通じて DB 操作を行う。
+// DbCtx は PgConn / MySqlConn 等の具体的な DB 接続型の抽象インターフェース。
+
+interface DbCtx {
+    fn execute(ctx: DbCtx, sql: String, params: String) -> Result<Unit, String>
+    fn query_raw(ctx: DbCtx, sql: String, params: String) -> Result<String, String>
+    fn transaction(ctx: DbCtx, action: (DbCtx) -> Result<Unit, String>) -> Result<Unit, String>
+}

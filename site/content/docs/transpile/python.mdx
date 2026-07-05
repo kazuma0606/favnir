@@ -137,7 +137,7 @@ type SummaryRow = {
   total: Float
 }
 
-stage Aggregate: Unit -> List<SummaryRow> !Postgres = |_| {
+stage Aggregate: Unit -> List<SummaryRow> = |_| {
   postgres.query<SummaryRow>(
     "SELECT region, category, SUM(amount) AS total FROM txn GROUP BY region, category",
     "[]"
@@ -202,7 +202,7 @@ def aggregate(_) -> List[SummaryRow]:
 ```favnir
 import rune "aws"
 
-stage SaveResult: String -> Unit !IO !AWS = |body| {
+stage SaveResult: String -> Unit = |body| {
   AWS.s3_put_object_raw("my-bucket", "results/out.json", body)
 }
 ```

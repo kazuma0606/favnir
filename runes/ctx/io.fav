@@ -1,0 +1,11 @@
+// runes/ctx/io.fav — IoCtx interface（v34.5.0）
+// !Io エフェクトの Capability Context 移行用インターフェース。
+// `!Io` を使用している関数は ctx.io を通じて IO 操作を行う。
+
+interface IoCtx {
+    fn println(ctx: IoCtx, msg: String) -> Unit
+    fn read_line(ctx: IoCtx) -> Result<String, String>
+    fn read_file(ctx: IoCtx, path: String) -> Result<String, String>
+    fn write_file(ctx: IoCtx, path: String, content: String) -> Result<Unit, String>
+    fn env(ctx: IoCtx, key: String) -> Option<String>
+}

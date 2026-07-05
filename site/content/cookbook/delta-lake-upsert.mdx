@@ -5,7 +5,7 @@ Delta Lake テーブルへの upsert（merge）操作をパイプラインとし
 ```favnir
 import runes/delta-lake
 
-stage UpsertOrders: List<Order> -> Unit !Http = |orders| {
+stage UpsertOrders: List<Order> -> Unit = |orders| {
   bind table <- DeltaLake.open(config.delta_table_path)
   DeltaLake.merge(table, orders, "target.id = source.id")
 }

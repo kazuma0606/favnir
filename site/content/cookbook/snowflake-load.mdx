@@ -1,0 +1,30 @@
+---
+title: "Snowflake バルクロード"
+description: "CSV データを Snowflake テーブルにバルクロードするパイプライン"
+---
+
+# Snowflake バルクロード
+
+ローカルまたは S3 の CSV を Snowflake テーブルに高速バルクロードします。
+
+## コード例
+
+```favnir
+import runes/csv
+import runes/snowflake
+
+fn main() -> Unit {
+    bind rows <- Csv.read_file("data/orders.csv")
+    bind n <- Snowflake.execute_raw(
+        "INSERT INTO ORDERS (ORDER_ID, CUSTOMER, AMOUNT) VALUES (?, ?, ?)",
+        List.map(rows, fn (r) { [r["order_id"], r["customer"], r["amount"]] })
+    )
+    IO.println(String.concat(["Loaded ", Int.to_string(n), " rows into Snowflake."]))
+}
+```
+
+## ポイント
+
+- `fav.toml` の `[snowflake]` セクションに `account`・`warehouse`・`database`・`schema` を設定します。
+- 認証情報は環境変数（`SNOWFLAKE_USER` / `SNOWFLAKE_PASSWORD`）で渡してください。
+- 大量データは `#[streaming(chunk_size = 10000)]` アノテーションで定常メモリ処理できます。

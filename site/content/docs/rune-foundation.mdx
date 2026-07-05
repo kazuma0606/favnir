@@ -39,7 +39,7 @@ import runes/kafka
 type Order = { id: Int, amount: Float, status: String }
 type Summary = { total_orders: Int, total_amount: Float }
 
-stage LoadOrders: Unit -> List<Order> !Db = |_| {
+stage LoadOrders: Unit -> List<Order> = |_| {
   bind conn <- Postgres.connect(config.postgres)
   Postgres.query[Order](conn, "SELECT id, amount, status FROM orders WHERE status = $1", ["completed"])
 }
@@ -50,13 +50,13 @@ stage Summarize: List<Order> -> Summary = |orders| {
   Result.ok(Summary { total_orders: total, total_amount: amount })
 }
 
-stage SaveToS3: Summary -> Summary !Io = |summary| {
+stage SaveToS3: Summary -> Summary = |summary| {
   bind json_str <- Json.encode(summary)
   bind _        <- S3.put_object("my-bucket", "etl/summary.json", Bytes.from_string(json_str))
   Result.ok(summary)
 }
 
-stage NotifyKafka: Summary -> Unit !Io = |summary| {
+stage NotifyKafka: Summary -> Unit = |summary| {
   bind msg <- Json.encode(summary)
   Kafka.produce("etl-events", "summary", msg)
 }

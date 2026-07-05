@@ -1,0 +1,7 @@
+import src/stages
+
+public stage Main: String -> String = |_args| {
+    bind args  <- IO.argv()
+    bind count <- EtlPipeline(Option.unwrap_or(List.first(args), "data/sample.csv"))
+    Result.ok($"Inserted {count} rows successfully.")
+}

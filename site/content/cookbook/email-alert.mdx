@@ -5,7 +5,7 @@
 ```favnir
 import runes/email
 
-stage SendFailureAlert: PipelineError -> Unit !Http = |error| {
+stage SendFailureAlert: PipelineError -> Unit = |error| {
   Email.send(
     config.email_from,
     config.alert_recipients,

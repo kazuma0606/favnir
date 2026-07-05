@@ -448,12 +448,16 @@ fn parse_fav_toml(content: &str) -> FavToml {
             section = "state";
             continue;
         }
+        if trimmed == "[project]" {
+            section = "project";
+            continue;
+        }
         if trimmed.starts_with('[') {
             section = "";
             continue;
         }
         match section {
-            "rune" => {
+            "rune" | "project" => {
                 if let Some((key, val)) = parse_kv(trimmed) {
                     match key {
                         "name" => name = val.to_string(),

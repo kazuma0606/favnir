@@ -10,7 +10,7 @@ seq KafkaToWarehouse =
   |> TransformEvent
   |> WriteToWarehouse
 
-stage ConsumeKafka: Unit -> List<KafkaMessage> !Stream = |_| {
+stage ConsumeKafka: Unit -> List<KafkaMessage> = |_| {
   bind consumer <- Kafka.consumer(config.kafka_brokers, config.kafka_group_id)
   Kafka.poll(consumer, config.kafka_topic, 100)
 }

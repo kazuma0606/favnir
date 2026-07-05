@@ -11,54 +11,54 @@ type RedisConn(String)
 
 // ── 接続 ─────────────────────────────────────────────────────────────────────
 
-public fn connect(url: String) -> Result<RedisConn, String> !Redis {
+public fn connect(url: String) -> Result<RedisConn, String> {
     Redis.connect_raw(url)
 }
 
 // ── 基本操作 ─────────────────────────────────────────────────────────────────
 
 // get — 値取得（存在しない場合は Result.err("nil")）
-public fn get(conn: RedisConn, key: String) -> Result<String, String> !Redis {
+public fn get(conn: RedisConn, key: String) -> Result<String, String> {
     Redis.get_raw(conn, key)
 }
 
 // set — 値設定（ttl_secs = 0 で無期限）
-public fn set(conn: RedisConn, key: String, value: String, ttl_secs: Int) -> Result<Unit, String> !Redis {
+public fn set(conn: RedisConn, key: String, value: String, ttl_secs: Int) -> Result<Unit, String> {
     Redis.set_raw(conn, key, value, ttl_secs)
 }
 
 // del — 削除（削除件数を返す）
-public fn del(conn: RedisConn, key: String) -> Result<Int, String> !Redis {
+public fn del(conn: RedisConn, key: String) -> Result<Int, String> {
     Redis.del_raw(conn, key)
 }
 
 // incr — インクリメント（カウンタ・レート制限用）
-public fn incr(conn: RedisConn, key: String) -> Result<Int, String> !Redis {
+public fn incr(conn: RedisConn, key: String) -> Result<Int, String> {
     Redis.incr_raw(conn, key)
 }
 
 // ── リスト操作 ────────────────────────────────────────────────────────────────
 
 // lpush — リスト先頭追加（リスト長を返す）
-public fn lpush(conn: RedisConn, key: String, value: String) -> Result<Int, String> !Redis {
+public fn lpush(conn: RedisConn, key: String, value: String) -> Result<Int, String> {
     Redis.lpush_raw(conn, key, value)
 }
 
 // rpop — リスト末尾取得（存在しない場合は Result.err("nil")）
-public fn rpop(conn: RedisConn, key: String) -> Result<String, String> !Redis {
+public fn rpop(conn: RedisConn, key: String) -> Result<String, String> {
     Redis.rpop_raw(conn, key)
 }
 
 // ── Pub/Sub ──────────────────────────────────────────────────────────────────
 
 // publish — チャンネルにメッセージ送信（受信者数を返す）
-public fn publish(conn: RedisConn, channel: String, msg: String) -> Result<Int, String> !Redis {
+public fn publish(conn: RedisConn, channel: String, msg: String) -> Result<Int, String> {
     Redis.publish_raw(conn, channel, msg)
 }
 
 // subscribe_once — チャンネルからメッセージを 1 件受信（ブロッキング、タイムアウト 30 秒）
 // タイムアウト時は Result.err("timeout: no message received within 30s")
 // NOTE: ループ型 subscribe(conn, channel, fn) は将来バージョンで別関数として追加予定
-public fn subscribe_once(conn: RedisConn, channel: String) -> Result<String, String> !Redis {
+public fn subscribe_once(conn: RedisConn, channel: String) -> Result<String, String> {
     Redis.subscribe_once_raw(conn, channel)
 }

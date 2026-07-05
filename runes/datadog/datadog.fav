@@ -1,18 +1,18 @@
 // runes/datadog/datadog.fav — Datadog APM/Metrics/Logs Rune (v28.2.0)
 // APM・ログ・メトリクスを DogStatsD / Datadog API 経由で送信する。
 // v28.2.0 stub — 実際の HTTP 送信は v28.x 以降
-public fn metric(name: String, value: Float, tags: String) -> Result<Unit, String> !Io {
+public fn metric(name: String, value: Float, tags: String) -> Result<Unit, String> {
     Datadog.metric_raw(name, value, tags)
 }
-public fn log(level: String, message: String, attrs: String) -> Result<Unit, String> !Io {
+public fn log(level: String, message: String, attrs: String) -> Result<Unit, String> {
     Datadog.log_raw(level, message, attrs)
 }
-public fn trace(name: String, fn_body: String) -> Result<Unit, String> !Io {
+public fn trace(name: String, fn_body: String) -> Result<Unit, String> {
     Datadog.trace_raw(name, fn_body)
 }
-public fn event(title: String, text: String, tags: String) -> Result<Unit, String> !Io {
+public fn event(title: String, text: String, tags: String) -> Result<Unit, String> {
     Datadog.event_raw(title, text, tags)
 }
-public fn service_check(name: String, status: String) -> Result<Unit, String> !Io {
+public fn service_check(name: String, status: String) -> Result<Unit, String> {
     Datadog.service_check_raw(name, status)
 }

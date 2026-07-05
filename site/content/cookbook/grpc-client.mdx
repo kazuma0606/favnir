@@ -1,0 +1,35 @@
+---
+title: "gRPC クライアント統合"
+description: "Favnir から gRPC サービスを呼び出してデータを取得・送信する"
+---
+
+# gRPC クライアント統合
+
+Proto 定義から生成したスタブを使い、gRPC サービスにリクエストを送信します。
+
+## コード例
+
+```favnir
+import runes/grpc
+
+type OrderRequest  = { order_id: String }
+type OrderResponse = { order_id: String, status: String, total: Float }
+
+fn fetch_order(order_id: String) -> Result<OrderResponse, String> {
+    bind channel <- GRPC.connect("orders.internal:443", { tls: true })
+    bind resp    <- GRPC.call(channel, "orders.OrderService/GetOrder",
+                              { order_id }, OrderResponse)
+    Result.ok(resp)
+}
+
+fn main() -> Unit {
+    bind order <- fetch_order("ORD-12345")
+    IO.println(String.concat(["Order status: ", order.status, " total: ", Float.to_string(order.total)]))
+}
+```
+
+## ポイント
+
+- `GRPC.connect` の `tls: true` オプションで TLS を有効化します。
+- `GRPC.call` はリクエスト型・レスポンス型を型パラメータで指定し、型安全な呼び出しを保証します。
+- サービスディスカバリは環境変数 `GRPC_ENDPOINT` で上書きでき、ローカルテストが容易です。

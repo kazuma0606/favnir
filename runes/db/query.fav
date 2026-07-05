@@ -1,23 +1,23 @@
 // runes/db/query.fav — DB query and execute operations (v4.2.0)
 
-public fn query(handle: DbHandle, sql: String) -> Result<List<Map<String, String>>, DbError> !DbRead {
+public fn query(handle: DbHandle, sql: String) -> Result<List<Map<String, String>>, DbError> {
     DB.query_raw(handle, sql)
 }
 
-public fn query_params(handle: DbHandle, sql: String, params: List<String>) -> Result<List<Map<String, String>>, DbError> !DbRead {
+public fn query_params(handle: DbHandle, sql: String, params: List<String>) -> Result<List<Map<String, String>>, DbError> {
     DB.query_raw_params(handle, sql, params)
 }
 
-public fn execute(handle: DbHandle, sql: String) -> Result<Int, DbError> !DbWrite {
+public fn execute(handle: DbHandle, sql: String) -> Result<Int, DbError> {
     DB.execute_raw(handle, sql)
 }
 
-public fn execute_params(handle: DbHandle, sql: String, params: List<String>) -> Result<Int, DbError> !DbWrite {
+public fn execute_params(handle: DbHandle, sql: String, params: List<String>) -> Result<Int, DbError> {
     DB.execute_raw_params(handle, sql, params)
 }
 
 // query_one: 結果の最初の行だけを返す（0行は DbError）
-public fn query_one(handle: DbHandle, sql: String) -> Result<Map<String, String>, DbError> !DbRead {
+public fn query_one(handle: DbHandle, sql: String) -> Result<Map<String, String>, DbError> {
     match DB.query_raw(handle, sql) {
         Ok(rows) => match List.first(rows) {
             Some(row) => Result.ok(row)
@@ -33,7 +33,7 @@ public fn paginate(
     sql: String,
     page: Int,
     size: Int
-) -> Result<List<Map<String, String>>, DbError> !DbRead {
+) -> Result<List<Map<String, String>>, DbError> {
     DB.query_raw(handle,
         String.concat(
             String.concat(
@@ -47,7 +47,7 @@ public fn batch_insert(
     handle: DbHandle,
     sql_template: String,
     rows: List<List<String>>
-) -> Result<Int, DbError> !DbWrite {
+) -> Result<Int, DbError> {
     List.fold_left(rows, Result.ok(0), |acc, params| {
         match acc {
             Err(e) => Result.err(e)

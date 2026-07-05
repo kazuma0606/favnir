@@ -12,26 +12,26 @@
 type RabbitConn(String)
 type RabbitMsg = { exchange: String, routing_key: String, body: String }
 
-public fn connect(url: String) -> Result<RabbitConn, String> !Stream {
+public fn connect(url: String) -> Result<RabbitConn, String> {
     RabbitMQ.connect_raw(url)
 }
 
-public fn declare_exchange(conn: RabbitConn, name: String, ex_type: String) -> Result<Unit, String> !Stream {
+public fn declare_exchange(conn: RabbitConn, name: String, ex_type: String) -> Result<Unit, String> {
     RabbitMQ.declare_exchange_raw(conn, name, ex_type)
 }
 
-public fn declare_queue(conn: RabbitConn, name: String) -> Result<Unit, String> !Stream {
+public fn declare_queue(conn: RabbitConn, name: String) -> Result<Unit, String> {
     RabbitMQ.declare_queue_raw(conn, name)
 }
 
-public fn bind_queue(conn: RabbitConn, queue: String, exchange: String, routing_key: String) -> Result<Unit, String> !Stream {
+public fn bind_queue(conn: RabbitConn, queue: String, exchange: String, routing_key: String) -> Result<Unit, String> {
     RabbitMQ.bind_queue_raw(conn, queue, exchange, routing_key)
 }
 
-public fn publish(conn: RabbitConn, exchange: String, routing_key: String, msg: String) -> Result<Unit, String> !Stream {
+public fn publish(conn: RabbitConn, exchange: String, routing_key: String, msg: String) -> Result<Unit, String> {
     RabbitMQ.publish_raw(conn, exchange, routing_key, msg)
 }
 
-public fn consume(conn: RabbitConn, queue: String) -> Result<String, String> !Stream {
+public fn consume(conn: RabbitConn, queue: String) -> Result<String, String> {
     RabbitMQ.consume_raw(conn, queue)
 }

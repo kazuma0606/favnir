@@ -31,7 +31,7 @@ aws --endpoint-url=http://localhost:4566 sqs create-queue --queue-name my-queue
 ```favnir
 import rune "sqs"
 
-stage SendAlert: String -> Result<String, String> !AWS = |message| {
+stage SendAlert: String -> Result<String, String> = |message| {
     SQS.send_message("https://sqs.us-east-1.amazonaws.com/123456789/alerts", message)
 }
 ```
@@ -73,7 +73,7 @@ bind _ <- SQS.purge(queue_url)
 メッセージを 1 回ポーリングして JSON 文字列で返す（継続消費スタブ）。
 
 ```favnir
-stage ProcessMessages: Unit -> Result<String, String> !AWS = |_| {
+stage ProcessMessages: Unit -> Result<String, String> = |_| {
     SQS.consume("https://sqs.us-east-1.amazonaws.com/123456789/my-queue")
 }
 ```

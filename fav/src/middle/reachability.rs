@@ -1,6 +1,5 @@
-use crate::ast::Effect;
 use crate::middle::ir::{IRGlobalKind, IRProgram, collect_calls_in_ir};
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{HashMap, HashSet};
 
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
@@ -46,111 +45,11 @@ pub fn reachability_analysis(entry: &str, program: &IRProgram) -> ReachabilityRe
         .cloned()
         .collect::<HashSet<_>>();
 
-    let mut effects_required = BTreeSet::new();
-    let mut emits = BTreeSet::new();
-    for name in &included {
-        let Some(fn_def) = fn_map.get(name) else {
-            continue;
-        };
-        for effect in &fn_def.effects {
-            match effect {
-                Effect::Pure => {
-                    effects_required.insert("Pure".to_string());
-                }
-                Effect::Io => {
-                    effects_required.insert("Io".to_string());
-                }
-                Effect::Db => {
-                    effects_required.insert("Db".to_string());
-                }
-                Effect::DbRead => {
-                    effects_required.insert("DbRead".to_string());
-                }
-                Effect::DbWrite => {
-                    effects_required.insert("DbWrite".to_string());
-                }
-                Effect::DbAdmin => {
-                    effects_required.insert("DbAdmin".to_string());
-                }
-                Effect::Network => {
-                    effects_required.insert("Network".to_string());
-                }
-                Effect::Http => {
-                    effects_required.insert("Http".to_string());
-                }
-                Effect::Llm => {
-                    effects_required.insert("Llm".to_string());
-                }
-                Effect::Snowflake => {
-                    effects_required.insert("Snowflake".to_string());
-                }
-                Effect::Gcp => {
-                    effects_required.insert("Gcp".to_string());
-                }
-                Effect::Stream => {
-                    effects_required.insert("Stream".to_string());
-                }
-                Effect::Postgres => {
-                    effects_required.insert("Postgres".to_string());
-                }
-                Effect::Redis => {
-                    effects_required.insert("Redis".to_string());
-                }
-                Effect::MySQL => {
-                    effects_required.insert("MySQL".to_string());
-                }
-                Effect::MongoDB => {
-                    effects_required.insert("MongoDB".to_string());
-                }
-                Effect::DynamoDB => {
-                    effects_required.insert("DynamoDB".to_string());
-                }
-                Effect::Elasticsearch => {
-                    effects_required.insert("Elasticsearch".to_string());
-                }
-                Effect::AzureDb => {
-                    effects_required.insert("AzureDb".to_string());
-                }
-                Effect::AzureStorage => {
-                    effects_required.insert("AzureStorage".to_string());
-                }
-                Effect::Rpc => {
-                    effects_required.insert("Rpc".to_string());
-                }
-                Effect::File => {
-                    effects_required.insert("File".to_string());
-                }
-                Effect::Checkpoint => {
-                    effects_required.insert("Checkpoint".to_string());
-                }
-                Effect::PipelineState => {
-                    effects_required.insert("PipelineState".to_string());
-                }
-                Effect::Unknown(name) => {
-                    effects_required.insert(name.clone());
-                }
-                Effect::Trace => {
-                    effects_required.insert("Trace".to_string());
-                }
-                Effect::Emit(name) => {
-                    effects_required.insert(format!("Emit<{name}>"));
-                    emits.insert(name.clone());
-                }
-                Effect::EmitUnion(names) => {
-                    effects_required.insert(format!("Emit<{}>", names.join("|")));
-                    for name in names {
-                        emits.insert(name.clone());
-                    }
-                }
-            }
-        }
-    }
-
     ReachabilityResult {
         included,
         excluded,
-        effects_required: effects_required.into_iter().collect(),
-        emits: emits.into_iter().collect(),
+        effects_required: vec![],
+        emits: vec![],
     }
 }
 
@@ -196,9 +95,10 @@ public fn main() -> Int { 0 }
 
     #[test]
     fn test_reachability_effects_required() {
+        // v34.8A: !Db annotation removed (E0374); pure stage has no effect requirements
         let program = Parser::parse_str(
             r#"
-stage Save: Int -> Int !Db = |x| { x }
+stage Save: Int -> Int = |x| { x }
 public fn main() -> Int { Save(1) }
 "#,
             "reachability_effects.fav",
@@ -206,6 +106,10 @@ public fn main() -> Int { Save(1) }
         .expect("parse");
         let ir = compile_program(&program);
         let result = reachability_analysis("main", &ir);
-        assert!(result.effects_required.iter().any(|e| e == "Db"));
+        // Pure stage with no annotation has no Db effect requirement
+        assert!(
+            !result.effects_required.iter().any(|e| e == "Db"),
+            "expected no Db effect for pure stage, got: {:?}", result.effects_required
+        );
     }
 }

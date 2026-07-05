@@ -41,7 +41,7 @@ type ESConn(String)  // 接続先 URL を保持する名目型ラッパー
 ### connect
 
 ```favnir
-fn connect(url: String) -> Result<ESConn, String> !Elasticsearch
+fn connect(url: String) -> Result<ESConn, String>
 ```
 
 クラスターに接続確認し、成功時は `ESConn` を返します。
@@ -53,7 +53,7 @@ bind conn = ES.connect("") in  // ELASTICSEARCH_URL を使用
 ### index
 
 ```favnir
-fn index(conn: ESConn, idx: String, doc_json: String) -> Result<Unit, String> !Elasticsearch
+fn index(conn: ESConn, idx: String, doc_json: String) -> Result<Unit, String>
 ```
 
 ドキュメントを `idx` インデックスに追加します（ID は ES が自動採番）。
@@ -65,7 +65,7 @@ bind _ = ES.index(conn, "app-logs", "{\"message\":\"server started\",\"level\":\
 ### index_with_id
 
 ```favnir
-fn index_with_id(conn: ESConn, idx: String, id: String, doc_json: String) -> Result<Unit, String> !Elasticsearch
+fn index_with_id(conn: ESConn, idx: String, id: String, doc_json: String) -> Result<Unit, String>
 ```
 
 指定した `id` でドキュメントを追加・上書きします。
@@ -73,7 +73,7 @@ fn index_with_id(conn: ESConn, idx: String, id: String, doc_json: String) -> Res
 ### search
 
 ```favnir
-fn search(conn: ESConn, idx: String, query_json: String) -> Result<String, String> !Elasticsearch
+fn search(conn: ESConn, idx: String, query_json: String) -> Result<String, String>
 ```
 
 Elasticsearch Query DSL で検索します。`hits.hits[]._source` を JSON 配列文字列で返します。
@@ -86,7 +86,7 @@ bind results = ES.search(conn, "app-logs", query) in
 ### knn_search
 
 ```favnir
-fn knn_search(conn: ESConn, idx: String, knn_json: String) -> Result<String, String> !Elasticsearch
+fn knn_search(conn: ESConn, idx: String, knn_json: String) -> Result<String, String>
 ```
 
 kNN ベクトル検索を行います。`_source` 配列を JSON 文字列で返します。
@@ -99,7 +99,7 @@ bind results = ES.knn_search(conn, "vectors", knn) in
 ### bulk
 
 ```favnir
-fn bulk(conn: ESConn, idx: String, docs_json: String) -> Result<Unit, String> !Elasticsearch
+fn bulk(conn: ESConn, idx: String, docs_json: String) -> Result<Unit, String>
 ```
 
 JSON 配列を NDJSON に変換して `POST /_bulk` で一括インデックスします。
@@ -112,7 +112,7 @@ bind _ = ES.bulk(conn, "app-logs", docs) in
 ### delete
 
 ```favnir
-fn delete(conn: ESConn, idx: String, id: String) -> Result<Unit, String> !Elasticsearch
+fn delete(conn: ESConn, idx: String, id: String) -> Result<Unit, String>
 ```
 
 指定した `id` のドキュメントを削除します。
@@ -120,7 +120,7 @@ fn delete(conn: ESConn, idx: String, id: String) -> Result<Unit, String> !Elasti
 ### create_index
 
 ```favnir
-fn create_index(conn: ESConn, idx: String, mapping_json: String) -> Result<Unit, String> !Elasticsearch
+fn create_index(conn: ESConn, idx: String, mapping_json: String) -> Result<Unit, String>
 ```
 
 インデックスを作成します。`mapping_json` が `""` のとき `{}` ボディで `PUT /{idx}` を呼びます。
@@ -139,13 +139,13 @@ bind _ = ES.create_index(conn, "app-logs", mapping) in
 `!Elasticsearch` エフェクトを宣言していない関数から ES 操作を呼ぶと **E0324** が発生します。
 
 ```favnir
-// NG: !Elasticsearch なし
+// NG: なし
 fn run(idx: String) -> Result<String, String> {
-  ES.search_raw(url, idx, "{}")  // E0324: !Elasticsearch not declared
+  ES.search_raw(url, idx, "{}")  // E0324: not declared
 }
 
 // OK
-fn run(idx: String) -> Result<String, String> !Elasticsearch {
+fn run(idx: String) -> Result<String, String> {
   bind conn = ES.connect("") in
   ES.search(conn, idx, "{}")
 }

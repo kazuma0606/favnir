@@ -1,0 +1,15 @@
+// ctx_migration/after.fav — AppCtx 構文（v34.5 以降）
+fn fetch_orders(ctx: AppCtx, url: String) -> Result<List<String>, String> {
+    bind { http } <- ctx
+    http.get(url)
+}
+
+fn save_orders(ctx: AppCtx, orders: List<String>) -> Result<Int, String> {
+    bind { db } <- ctx
+    db.write("orders", orders)
+}
+
+fn notify_slack(ctx: AppCtx, msg: String) -> Result<Bool, String> {
+    bind { http } <- ctx
+    http.post("https://hooks.slack.com/services/XXX", msg)
+}

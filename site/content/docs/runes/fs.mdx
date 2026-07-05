@@ -23,7 +23,7 @@ fav rune add fs
 ```favnir
 use fs
 
-stage ReadCsvFiles: String -> List<String> !IO = |dir| {
+stage ReadCsvFiles: String -> List<String> = |dir| {
     match Fs.glob(dir, ".csv") {
         Err(_)    => List.empty()
         Ok(paths) => paths
@@ -36,7 +36,7 @@ stage ReadCsvFiles: String -> List<String> !IO = |dir| {
 ### `Fs.read`
 
 ```favnir
-public fn read(path: String) -> Result<String, String> !IO
+public fn read(path: String) -> Result<String, String>
 ```
 
 ファイルを文字列として読み込みます。
@@ -51,7 +51,7 @@ match Fs.read("data/config.json") {
 ### `Fs.write`
 
 ```favnir
-public fn write(path: String, content: String) -> Result<Unit, String> !IO
+public fn write(path: String, content: String) -> Result<Unit, String>
 ```
 
 ファイルに文字列を書き込みます（上書き）。
@@ -63,7 +63,7 @@ bind _ <- Fs.write("output/result.csv", csv_content)
 ### `Fs.list_dir`
 
 ```favnir
-public fn list_dir(path: String) -> Result<List<String>, String> !IO
+public fn list_dir(path: String) -> Result<List<String>, String>
 ```
 
 ディレクトリのエントリ名一覧を返します（ソート済み、パス含まず）。
@@ -78,7 +78,7 @@ match Fs.list_dir("data/") {
 ### `Fs.exists`
 
 ```favnir
-public fn exists(path: String) -> Bool !IO
+public fn exists(path: String) -> Bool
 ```
 
 ファイルまたはディレクトリが存在すれば `true`。
@@ -86,7 +86,7 @@ public fn exists(path: String) -> Bool !IO
 ### `Fs.is_dir`
 
 ```favnir
-public fn is_dir(path: String) -> Bool !IO
+public fn is_dir(path: String) -> Bool
 ```
 
 パスが存在しディレクトリであれば `true`。
@@ -94,7 +94,7 @@ public fn is_dir(path: String) -> Bool !IO
 ### `Fs.size`
 
 ```favnir
-public fn size(path: String) -> Option<Int> !IO
+public fn size(path: String) -> Option<Int>
 ```
 
 ファイルサイズをバイト単位で返します。パスが存在しない場合は `None`。
@@ -102,7 +102,7 @@ public fn size(path: String) -> Option<Int> !IO
 ### `Fs.glob`
 
 ```favnir
-public fn glob(dir: String, suffix: String) -> Result<List<String>, String> !IO
+public fn glob(dir: String, suffix: String) -> Result<List<String>, String>
 ```
 
 `dir` 内のファイルのうち `suffix` で終わるものをフルパスで返します。
@@ -119,7 +119,7 @@ match Fs.glob("data/", ".csv") {
 ### `Fs.walk`
 
 ```favnir
-public fn walk(dir: String) -> Result<List<String>, String> !IO
+public fn walk(dir: String) -> Result<List<String>, String>
 ```
 
 ディレクトリを再帰的にたどり、すべてのファイルパスを返します。

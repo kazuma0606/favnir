@@ -27,7 +27,7 @@ mongodb://user:password@host:27017/database
 > `MongoDB.connect(...)` も同様に動作します（チェッカーが両方を受け付けます）。
 
 ```favnir
-stage FetchEvents: Unit -> Result<String, String> !MongoDB = |_| {
+stage FetchEvents: Unit -> Result<String, String> = |_| {
     bind conn <- Mongo.connect("mongodb://localhost:27017/analytics")
     Mongo.find(conn, "events", "{\"status\": \"active\"}")
 }
@@ -38,7 +38,7 @@ stage FetchEvents: Unit -> Result<String, String> !MongoDB = |_| {
 ### `Mongo.connect`
 
 ```favnir
-fn connect(url: String) -> Result<MongoConn, String> !MongoDB
+fn connect(url: String) -> Result<MongoConn, String>
 ```
 
 URL から接続を確立します（ping で接続確認）。成功時は `MongoConn` を返します。
@@ -52,7 +52,7 @@ bind conn <- Mongo.connect("mongodb://localhost:27017/mydb")
 ### `Mongo.find`
 
 ```favnir
-fn find(conn: MongoConn, coll: String, filter: String) -> Result<String, String> !MongoDB
+fn find(conn: MongoConn, coll: String, filter: String) -> Result<String, String>
 ```
 
 フィルタに一致する全ドキュメントを JSON 配列文字列で返します。
@@ -69,7 +69,7 @@ bind docs <- Mongo.find(conn, "events", "{\"status\": \"active\"}")
 ### `Mongo.find_one`
 
 ```favnir
-fn find_one(conn: MongoConn, coll: String, filter: String) -> Result<String, String> !MongoDB
+fn find_one(conn: MongoConn, coll: String, filter: String) -> Result<String, String>
 ```
 
 フィルタに一致する最初のドキュメントを JSON オブジェクト文字列で返します。
@@ -85,7 +85,7 @@ bind doc <- Mongo.find_one(conn, "users", "{\"email\": \"alice@example.com\"}")
 ### `Mongo.insert_one`
 
 ```favnir
-fn insert_one(conn: MongoConn, coll: String, doc: String) -> Result<String, String> !MongoDB
+fn insert_one(conn: MongoConn, coll: String, doc: String) -> Result<String, String>
 ```
 
 ドキュメントを挿入します。成功時は挿入された `_id` の文字列を返します。
@@ -99,7 +99,7 @@ bind id <- Mongo.insert_one(conn, "events", "{\"type\": \"click\", \"status\": \
 ### `Mongo.insert_many`
 
 ```favnir
-fn insert_many(conn: MongoConn, coll: String, docs: String) -> Result<Int, String> !MongoDB
+fn insert_many(conn: MongoConn, coll: String, docs: String) -> Result<Int, String>
 ```
 
 複数ドキュメントをバッチ挿入します。成功時は挿入件数を返します。
@@ -115,7 +115,7 @@ bind count <- Mongo.insert_many(conn, "users", "[{\"name\": \"alice\"}, {\"name\
 ### `Mongo.update_one`
 
 ```favnir
-fn update_one(conn: MongoConn, coll: String, filter: String, update: String) -> Result<Int, String> !MongoDB
+fn update_one(conn: MongoConn, coll: String, filter: String, update: String) -> Result<Int, String>
 ```
 
 フィルタに一致する最初のドキュメントを更新します。`$set` / `$inc` 等の演算子に対応。成功時は更新件数を返します。
@@ -129,7 +129,7 @@ bind n <- Mongo.update_one(conn, "events", "{\"_id\": \"...\"}", "{\"$set\": {\"
 ### `Mongo.delete_one`
 
 ```favnir
-fn delete_one(conn: MongoConn, coll: String, filter: String) -> Result<Int, String> !MongoDB
+fn delete_one(conn: MongoConn, coll: String, filter: String) -> Result<Int, String>
 ```
 
 フィルタに一致する最初のドキュメントを削除します。成功時は削除件数を返します。
@@ -143,7 +143,7 @@ bind n <- Mongo.delete_one(conn, "events", "{\"status\": \"archived\"}")
 ### `Mongo.aggregate`
 
 ```favnir
-fn aggregate(conn: MongoConn, coll: String, pipeline: String) -> Result<String, String> !MongoDB
+fn aggregate(conn: MongoConn, coll: String, pipeline: String) -> Result<String, String>
 ```
 
 集計パイプラインを実行します（`$match` / `$group` / `$sort` 等）。結果を JSON 配列文字列で返します。
@@ -182,12 +182,12 @@ bind result <- Mongo.aggregate(conn, "events",
 ```favnir
 import rune "mongodb"
 
-stage LoadActiveEvents: Unit -> Result<String, String> !MongoDB = |_| {
+stage LoadActiveEvents: Unit -> Result<String, String> = |_| {
     bind conn <- Mongo.connect("mongodb://localhost:27017/analytics")
     Mongo.find(conn, "events", "{\"status\": \"active\"}")
 }
 
-stage ArchiveEvent: Result<String, String> -> Result<Int, String> !MongoDB = |event_result| {
+stage ArchiveEvent: Result<String, String> -> Result<Int, String> = |event_result| {
     bind event_json <- event_result
     bind conn       <- Mongo.connect("mongodb://localhost:27017/analytics")
     bind _          <- Mongo.insert_one(conn, "archive", event_json)

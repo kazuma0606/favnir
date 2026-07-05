@@ -11,34 +11,34 @@
 
 // メッセージ送信。戻り値は MessageId 文字列。
 // Note: 遅延配信（DelaySeconds）は v27.x でシグネチャ拡張予定。
-public fn send_message(queue_url: String, body: String) -> Result<String, String> !AWS {
+public fn send_message(queue_url: String, body: String) -> Result<String, String> {
     AWS.sqs_send_message_raw(queue_url, body)
 }
 
 // バッチ送信（最大 10 件）。messages は文字列のリスト。
 // Note: SQS バッチエントリは 1-indexed（SQS API 仕様）。
-public fn send_message_batch(queue_url: String, messages: List<String>) -> Result<String, String> !AWS {
+public fn send_message_batch(queue_url: String, messages: List<String>) -> Result<String, String> {
     SQS.send_message_batch_raw(queue_url, messages)
 }
 
 // メッセージ受信（最大 max 件）。戻り値は受信メッセージの JSON 文字列。
 // Note: 型付きデシリアライズ（receive_messages[T]）は v27.x スコープ外。
-public fn receive_messages(queue_url: String, max: Int) -> Result<String, String> !AWS {
+public fn receive_messages(queue_url: String, max: Int) -> Result<String, String> {
     SQS.receive_messages_raw(queue_url, max)
 }
 
 // 受信確認（メッセージ削除）。receipt_handle は receive_messages で取得した値。
-public fn delete_message(queue_url: String, receipt_handle: String) -> Result<Unit, String> !AWS {
+public fn delete_message(queue_url: String, receipt_handle: String) -> Result<Unit, String> {
     AWS.sqs_delete_message_raw(queue_url, receipt_handle)
 }
 
 // キュー内の全メッセージを削除（テスト用）。
-public fn purge(queue_url: String) -> Result<Unit, String> !AWS {
+public fn purge(queue_url: String) -> Result<Unit, String> {
     SQS.purge_raw(queue_url)
 }
 
 // 継続消費スタブ（1 回ポーリング）。戻り値はメッセージ JSON 文字列。
 // Note: 継続ループ（自動削除オプション）は v27.x スコープ外。
-public fn consume(queue_url: String) -> Result<String, String> !AWS {
+public fn consume(queue_url: String) -> Result<String, String> {
     SQS.consume_raw(queue_url)
 }

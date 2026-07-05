@@ -24,7 +24,7 @@ seq FeatureEngineeringPipeline =
   |> ExtractFeatures
   |> LogExperiment
 
-stage LogExperiment: FeatureSet -> FeatureSet !Http = |features| {
+stage LogExperiment: FeatureSet -> FeatureSet = |features| {
   bind run_id <- MLflow.start_run("feature-engineering-v1")
   bind _      <- MLflow.log_param(run_id, "window_size", "7d")
   bind _      <- MLflow.log_metric(run_id, "null_rate", features.null_rate, 0)
@@ -39,7 +39,7 @@ stage LogExperiment: FeatureSet -> FeatureSet !Http = |features| {
 ### `MLflow.start_run`
 
 ```favnir
-fn MLflow.start_run(experiment_name: String) -> Result<String, String> !Http
+fn MLflow.start_run(experiment_name: String) -> Result<String, String>
 ```
 
 実験実行を開始し、`run_id` を返します。
@@ -47,7 +47,7 @@ fn MLflow.start_run(experiment_name: String) -> Result<String, String> !Http
 ### `MLflow.log_metric`
 
 ```favnir
-fn MLflow.log_metric(run_id: String, key: String, value: Float, step: Int) -> Result<Unit, String> !Http
+fn MLflow.log_metric(run_id: String, key: String, value: Float, step: Int) -> Result<Unit, String>
 ```
 
 メトリクスをステップ付きで記録します。
@@ -55,7 +55,7 @@ fn MLflow.log_metric(run_id: String, key: String, value: Float, step: Int) -> Re
 ### `MLflow.log_param`
 
 ```favnir
-fn MLflow.log_param(run_id: String, key: String, value: String) -> Result<Unit, String> !Http
+fn MLflow.log_param(run_id: String, key: String, value: String) -> Result<Unit, String>
 ```
 
 ハイパーパラメータを記録します。
@@ -63,7 +63,7 @@ fn MLflow.log_param(run_id: String, key: String, value: String) -> Result<Unit, 
 ### `MLflow.log_artifact`
 
 ```favnir
-fn MLflow.log_artifact(run_id: String, local_path: String) -> Result<Unit, String> !Http
+fn MLflow.log_artifact(run_id: String, local_path: String) -> Result<Unit, String>
 ```
 
 成果物ファイル（モデル、データ等）をアップロードします。
@@ -71,7 +71,7 @@ fn MLflow.log_artifact(run_id: String, local_path: String) -> Result<Unit, Strin
 ### `MLflow.end_run`
 
 ```favnir
-fn MLflow.end_run(run_id: String, status: String) -> Result<Unit, String> !Http
+fn MLflow.end_run(run_id: String, status: String) -> Result<Unit, String>
 ```
 
 実験実行を終了します。`status` は `"FINISHED"` または `"FAILED"`。
@@ -79,7 +79,7 @@ fn MLflow.end_run(run_id: String, status: String) -> Result<Unit, String> !Http
 ### `MLflow.register_model`
 
 ```favnir
-fn MLflow.register_model(run_id: String, name: String) -> Result<String, String> !Http
+fn MLflow.register_model(run_id: String, name: String) -> Result<String, String>
 ```
 
 学習済みモデルをモデルレジストリに登録し、バージョン ID を返します。
@@ -87,7 +87,7 @@ fn MLflow.register_model(run_id: String, name: String) -> Result<String, String>
 ### `MLflow.load_model`
 
 ```favnir
-fn MLflow.load_model(name: String, version: String) -> Result<String, String> !Http
+fn MLflow.load_model(name: String, version: String) -> Result<String, String>
 ```
 
 登録済みモデルのアーティファクト URI を取得します。
@@ -95,7 +95,7 @@ fn MLflow.load_model(name: String, version: String) -> Result<String, String> !H
 ### `MLflow.list_experiments`
 
 ```favnir
-fn MLflow.list_experiments() -> Result<List<String>, String> !Http
+fn MLflow.list_experiments() -> Result<List<String>, String>
 ```
 
 実験名の一覧を取得します。
@@ -103,7 +103,7 @@ fn MLflow.list_experiments() -> Result<List<String>, String> !Http
 ## モデルレジストリ
 
 ```favnir
-stage TrainAndRegister: TrainingData -> String !Http = |data| {
+stage TrainAndRegister: TrainingData -> String = |data| {
   bind run_id    <- MLflow.start_run("model-training")
   bind _         <- MLflow.log_param(run_id, "learning_rate", "0.001")
   bind _         <- MLflow.log_metric(run_id, "accuracy", 0.95, 100)

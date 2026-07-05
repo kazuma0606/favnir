@@ -2,13 +2,13 @@
 // 接続: NOTION_BASE_URL 環境変数
 // NOTE: api_key は HTTP Rune の認証ヘッダー機構が有効化されるまでリクエストには付与されない
 
-fn Notion.query_database(api_key: String, database_id: String) -> Result<String, String> !Http =
+fn Notion.query_database(api_key: String, database_id: String) -> Result<String, String> =
   Http.post_json(
     Env.get_or("NOTION_BASE_URL", "https://api.notion.com") ++ "/v1/databases/" ++ database_id ++ "/query",
     {}
   )
 
-fn Notion.create_page(api_key: String, database_id: String, properties: String) -> Result<String, String> !Http =
+fn Notion.create_page(api_key: String, database_id: String, properties: String) -> Result<String, String> =
   Http.post_json(
     Env.get_or("NOTION_BASE_URL", "https://api.notion.com") ++ "/v1/pages",
     { "parent": { "database_id": database_id }, "properties": properties }

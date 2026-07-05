@@ -20172,6 +20172,15 @@ fn vm_call_builtin(
             Ok(VMValue::Str(mock_json))
         }
 
+        // v35.2.0: Test context — returns a pre-populated AppCtx Record usable in test blocks
+        "Ctx.test_ctx_raw" => {
+            let mut fields = std::collections::HashMap::new();
+            for f in &["io", "db", "http", "stream", "llm", "tracer", "warehouse", "redis"] {
+                fields.insert(f.to_string(), VMValue::Unit);
+            }
+            Ok(VMValue::Record(fields))
+        }
+
         // v14.2.0: CrossCloud Ctx primitives ─────────────────────────────────
         "Ctx.build_aws_raw" => {
             // Ctx.build_aws_raw(region: String, s3_bucket: String, db_url: String)

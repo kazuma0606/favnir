@@ -12,12 +12,12 @@ seq MultiCloudETL =
   |> TransformData
   |> WriteToAzureBlob
 
-stage ExtractFromS3: Unit -> List<Row> !Http = |_| {
+stage ExtractFromS3: Unit -> List<Row> = |_| {
   bind data <- S3.get_object(config.aws_bucket, config.source_key)
   CSV.parse[Row](data)
 }
 
-stage WriteToAzureBlob: List<Row> -> Unit !Http = |rows| {
+stage WriteToAzureBlob: List<Row> -> Unit = |rows| {
   AzureBlob.put(config.azure_ctx, config.dest_key, CSV.encode(rows))
 }
 ```

@@ -141,6 +141,7 @@ fn collect_in_stmt(stmt: &Stmt, name: &str, spans: &mut Vec<Span>) {
             if let Some(g) = &f.guard { collect_in_expr(g, name, spans); }
             collect_in_block(&f.body, name, spans);
         }
+        Stmt::Expect(_) => {} // v36.2.0 — 実行は v36.3 以降
     }
 }
 

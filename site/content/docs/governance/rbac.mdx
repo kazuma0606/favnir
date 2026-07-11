@@ -1,0 +1,37 @@
+---
+title: "RBAC — ロールベースアクセス制御"
+description: "auth Rune を使って Favnir パイプラインにロールベースアクセス制御を組み込む"
+---
+
+# RBAC — ロールベースアクセス制御
+
+`runes/auth` が提供する RBAC 関数を使って、パイプラインの実行権限をロールで制御します。
+`auth.require_role` / `auth.check_permission` / `auth.verify_jwt` の 3 関数を組み合わせることで、
+API キーや JWT トークンによる認証から細粒度のパーミッション検証まで対応できます。
+
+## コード例
+
+```favnir
+import runes/auth
+
+fn run_admin_pipeline(ctx: AppCtx) -> Result<Unit, String> {
+    bind _ <- auth.require_role(ctx, "admin")
+    bind _ <- auth.check_permission(ctx, "write:warehouse")
+    IO.println("Admin pipeline: authorized")
+    Result.ok(unit)
+}
+
+fn verify_and_run(ctx: AppCtx, token: String) -> Result<Unit, String> {
+    bind verified_ctx <- auth.verify_jwt(ctx, token)
+    bind _            <- auth.require_role(verified_ctx, "data-engineer")
+    IO.println("Pipeline started by verified user")
+    Result.ok(unit)
+}
+```
+
+## ポイント
+
+- `auth.require_role` はロールが不足している場合に `Result.err` を返します。`bind` で連鎖させることで早期リターンが自動的に行われます。
+- `auth.check_permission` で `"write:warehouse"` のような細粒度のパーミッション文字列を検証できます。
+- `auth.verify_jwt` は JWT トークンを検証して認証済み `AppCtx` を返します。後続の関数はこの ctx を使ってロール/パーミッションを確認します。
+- ロールと パーミッションの定義は `fav.toml` の `[auth]` セクションで管理します（後続バージョンで実装予定）。

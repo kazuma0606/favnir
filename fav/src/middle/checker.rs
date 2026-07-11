@@ -2364,7 +2364,8 @@ impl Checker {
                 | Item::BenchDef(..)
                 | Item::InterfaceImplDecl(..)
                 | Item::PipelineDef(..)
-                | Item::EffectDef(..) => {} // v22.5.0/v35.5.0: スタブ
+                | Item::EffectDef(..)
+                | Item::SchemaDef(..) => {} // v22.5.0/v35.5.0/v36.1.0: スタブ
                 Item::InterfaceDecl(decl) => {
                     self.remember_global_symbol(
                         decl.name.clone(),
@@ -2407,6 +2408,7 @@ impl Checker {
             | Item::ImportDecl { .. } => {}
             Item::PipelineDef(_) => {} // v22.5.0: 型チェック未対応（スタブ）
             Item::EffectDef(_) => {} // v35.5.0: effect declarations are no-ops
+            Item::SchemaDef(_) => {} // v36.1.0: 型チェックは v36.2 以降
         }
     }
 
@@ -2959,6 +2961,7 @@ impl Checker {
                 }
                 self.collect_helpers_in_block(&f.body);
             }
+            Stmt::Expect(_) => {} // v36.2.0 — 実行は v36.3 以降
         }
     }
 
@@ -3267,6 +3270,7 @@ impl Checker {
                     }
                     self.scan_block_for_pipeline_calls(&f.body, ctx_map);
                 }
+                Stmt::Expect(_) => {} // v36.2.0 — 実行は v36.3 以降
             }
         }
         self.scan_expr_for_pipeline_calls(&block.expr, ctx_map);
@@ -3937,6 +3941,7 @@ impl Checker {
                 self.check_block(&f.body);
                 self.env.pop();
             }
+            Stmt::Expect(_) => {} // v36.2.0 — 実行は v36.3 以降
         }
     }
 
@@ -5721,6 +5726,23 @@ impl Checker {
             ("List", "filter") => {
                 let elem = self.expect_list_arg(&arg_tys, 0, span);
                 Some(Type::List(Box::new(elem)))
+            }
+            ("List", "join_on") => {
+                // join_on(left, right, pred) -> List<T> where T = elem type of left
+                // pred の型（arg_tys[2]）は検証しない（Any 扱い）— v37.4 以降で対応
+                let elem = self.expect_list_arg(&arg_tys, 0, span);
+                Some(Type::List(Box::new(elem)))
+            }
+            ("List", "fan_out") => {
+                // fan_out(list, n) -> List<List<A>> where A = elem type of list
+                // n の型（arg_tys[1]）が Int であることの検証は v37.5 以降
+                let elem = self.expect_list_arg(&arg_tys, 0, span);
+                Some(Type::List(Box::new(Type::List(Box::new(elem)))))
+            }
+            ("List", "fan_in") => {
+                // fan_in(lists) -> List<A> — 内部型の推論は v37.5 以降
+                // Type::Unknown は unify で任意の型と一致するため List.length 等は問題なし
+                Some(Type::List(Box::new(Type::Unknown)))
             }
             ("List", "fold") => {
                 // fold(items, init, f) ↁEtype of init
@@ -7591,7 +7613,7 @@ fn eval_const_constraint(expr: &Expr, env: &HashMap<String, i64>) -> bool {
 fn type_implements_bound(ty: &Type, bound: &TypeConstraint, checker: &Checker) -> bool {
     match bound {
         TypeConstraint::Interface(name) => match name.as_str() {
-            "Eq" | "Serialize" | "Clone" => true,
+            "Eq" | "Serialize" | "Deserialize" | "Clone" => true,
             "Ord" => matches!(ty, Type::Int | Type::Float | Type::String),
             "Display" => matches!(ty, Type::String | Type::Int | Type::Float | Type::Bool),
             "Hash" => matches!(ty, Type::Int | Type::String),
@@ -8229,7 +8251,7 @@ mod tests {
 
     #[test]
     fn effect_def_registered() {
-        // v35.5.0: effect_registry removed; effect declarations are no-ops — stubbed
+        // v35.5.0: effect declarations are no-ops — registration stubbed (effect_registry field retained)
     }
 
     #[test]
@@ -10192,6 +10214,7 @@ fn collect_calls_from_block(block: &Block, calls: &mut Vec<String>) {
                 }
                 collect_calls_from_block(&f.body, calls);
             }
+            Stmt::Expect(_) => {} // v36.2.0 — 実行は v36.3 以降
         }
     }
     collect_calls_from_expr(&block.expr, calls);

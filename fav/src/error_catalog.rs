@@ -603,6 +603,47 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
         example: "cap Show { show: Self -> String }  // E0903",
         fix: "Replace `cap` with `interface`. Note: syntax has changed. See migration guide.",
     },
+    // ── E038x: スキーマ不整合 (v36.6.0) ────────────────────────────────────
+    ErrorEntry {
+        code: "E0380",
+        title: "schema_field_missing",
+        category: "schema",
+        description: "A required field defined in the schema is missing from the data. (compile-time schema validation; distinct from E0501 which is a runtime CSV/JSON conversion error)",
+        example: "schema Orders { id: Int, amount: Float }\n// data: { id: 1 }  // E0380: missing `amount`",
+        fix: "Add the missing field to your data source, or remove it from the schema definition.",
+    },
+    ErrorEntry {
+        code: "E0381",
+        title: "schema_type_mismatch",
+        category: "schema",
+        description: "A schema field has a value whose type does not match the declared type. (compile-time schema validation; distinct from E0502 which is a runtime CSV/JSON conversion error)",
+        example: "schema Orders { amount: Float }\n// data: { amount: \"not-a-number\" }  // E0381: expected Float",
+        fix: "Fix the data value to match the declared type, or update the schema field type.",
+    },
+    ErrorEntry {
+        code: "E0382",
+        title: "schema_constraint_violated",
+        category: "schema",
+        description: "A schema field value violates its `where` constraint.",
+        example: "schema Orders { amount: Float where { amount >= 0.0 } }\n// data: { amount: -1.0 }  // E0382",
+        fix: "Fix the data value to satisfy the constraint, or relax the schema constraint.",
+    },
+    ErrorEntry {
+        code: "E0383",
+        title: "schema_duplicate_key",
+        category: "schema",
+        description: "A field name appears more than once in the schema definition. (parse-time schema definition error, not a data validation error)",
+        example: "schema Orders { id: Int, id: String }  // E0383: duplicate field `id`",
+        fix: "Remove or rename the duplicate field in the schema definition.",
+    },
+    ErrorEntry {
+        code: "E0384",
+        title: "schema_extra_field",
+        category: "schema",
+        description: "The data contains a field that is not defined in the schema.",
+        example: "schema Orders { id: Int }\n// data: { id: 1, unknown: \"x\" }  // E0384: extra field `unknown`",
+        fix: "Remove the extra field from your data, or add it to the schema definition.",
+    },
 ];
 
 pub fn lookup(code: &str) -> Option<&'static ErrorEntry> {

@@ -1,0 +1,13 @@
+// Generic Rune — 型パラメータ付き汎用 ETL 関数
+
+fn export_json<T with Serialize>(data: List<T>) -> String {
+  Json.encode(data)
+}
+
+fn import_records<T with Deserialize>(src: String) -> String {
+  src
+}
+
+fn max_record<T with Ord>(a: T, b: T) -> T {
+  if a > b { a } else { b }
+}

@@ -1,0 +1,71 @@
+---
+title: "Multi-Source ETL"
+description: "Favnir v37.x — 複数ソースを型安全につなげる Multi-Source ETL 機能群"
+---
+
+# Multi-Source ETL
+
+Favnir v37.x では **複数ソースを型安全につなげる** 機能群を提供します。
+
+## `List.join_on` — 2 ソース結合
+
+`List.join_on(left, right, pred)` で 2 つのリストを述語関数でマッチングして結合します（left semi-join）。
+
+```favnir
+stage Join(customers: List<String>, orders: List<String>) -> List<String> {
+    List.join_on(customers, orders, |c, o| String.contains(o, c))
+}
+```
+
+## `List.fan_out` / `List.fan_in` — 分散処理
+
+`List.fan_out(list, n)` でリストを n チャンクに分割し、`List.fan_in(chunks)` でマージします。
+
+```favnir
+stage Distribute(records: List<String>) -> List<String> {
+    bind chunks  <- List.fan_out(records, 4)
+    bind results <- List.map(chunks, |chunk| List.map(chunk, process))
+    List.fan_in(results)
+}
+```
+
+## CDC Rune — Debezium イベント処理
+
+Debezium JSON 形式の CDC（Change Data Capture）イベントを処理します。
+
+```favnir
+import runes/cdc
+
+stage FilterInserts(events: List<String>) -> List<String> {
+    CDC.filter_inserts(events)
+}
+```
+
+## `fav explain --lineage` — リネージグラフ出力
+
+```bash
+fav explain --lineage --format dot src/main.fav > lineage.dot
+fav explain --lineage --format svg src/main.fav > lineage.svg
+```
+
+テキスト形式では末尾にサマリーが表示されます:
+
+```
+Total: 3 stage(s), 1 pipeline(s)
+```
+
+## `fav new --template multi-source` — プロジェクトテンプレート
+
+```bash
+fav new --template multi-source my_etl_project
+```
+
+Postgres + CSV の 2 ソース ETL プロジェクトを生成します。
+
+## 関連 Cookbook
+
+- [2 テーブル結合（List.join_on）](/cookbook/join-two-tables)
+- [CDC（Postgres → データウェアハウス）](/cookbook/cdc-postgres-to-warehouse)
+- [地域別 fan_out 処理](/cookbook/fan-out-by-region)
+- [ジェネリック ETL 関数](/cookbook/generic-etl-function)
+- [リネージグラフの可視化](/cookbook/lineage-visualization)

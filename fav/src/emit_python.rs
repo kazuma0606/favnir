@@ -394,6 +394,7 @@ impl Emitter {
                 // forall not directly supported in Python output
                 self.line("# forall (property test) - not emitted");
             }
+            Stmt::Expect(_) => {} // v36.2.0 — 実行は v36.3 以降
         }
     }
 }

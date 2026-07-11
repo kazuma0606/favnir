@@ -1,0 +1,44 @@
+---
+title: "Audit Log — パイプライン実行ログ"
+description: "Audit Rune でパイプライン操作を追跡・記録する"
+---
+
+# Audit Log — パイプライン実行ログ
+
+`runes/audit` が提供する Audit Rune を使って、パイプラインの実行履歴を記録します。
+`Audit.log` でイベントを記録し、`Audit.start_trace` / `Audit.end_trace` でトレーススパンを管理します。
+
+## コード例
+
+```favnir
+import runes/audit
+
+fn etl_with_audit(ctx: AppCtx, source: String) -> Result<Unit, String> {
+    bind trace_id <- Audit.start_trace(ctx, "etl-pipeline")
+    bind _        <- Audit.log(ctx, trace_id, "extract", { source: source })
+    bind rows     <- extract_data(source)
+    bind _        <- Audit.log(ctx, trace_id, "transform", { row_count: List.length(rows) })
+    bind results  <- transform_rows(rows)
+    bind _        <- Audit.log(ctx, trace_id, "load", { loaded: List.length(results) })
+    bind _        <- Audit.end_trace(ctx, trace_id, "success")
+    Result.ok(unit)
+}
+```
+
+## `fav.toml` 設定例
+
+```toml
+[audit]
+enabled = true
+output  = "file"          # "file" | "webhook"
+path    = "logs/audit.jsonl"
+```
+
+`output = "webhook"` に変更すると `webhook_url` に HTTP POST でイベントを送信します。
+
+## ポイント
+
+- `Audit.start_trace` はトレース ID を返します。後続のすべての `Audit.log` 呼び出しにこの ID を渡してスパンをグループ化します。
+- `Audit.log` の第 4 引数はメタデータレコードで、任意のフィールドを追加できます。
+- `Audit.end_trace` の第 4 引数はステータス文字列（`"success"` / `"failure"`）です。
+- `fav.toml` の `[audit] enabled = false` でログ出力を無効にできます（テスト環境向け）。

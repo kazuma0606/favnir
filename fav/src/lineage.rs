@@ -259,6 +259,7 @@ fn collect_sql_literals_stmt(stmt: &ast::Stmt, out: &mut Vec<String>) {
             if let Some(g) = &f.guard { collect_sql_literals_inner(g, out); }
             collect_sql_literals_block(&f.body, out);
         }
+        ast::Stmt::Expect(_) => {} // v36.2.0 — 実行は v36.3 以降
     }
 }
 
@@ -350,6 +351,7 @@ fn collect_pg_kinds_stmt(stmt: &ast::Stmt, r: &mut bool, w: &mut bool) {
             for s in &f.body.stmts { collect_pg_kinds_stmt(s, r, w); }
             collect_pg_kinds_inner(&f.body.expr, r, w);
         }
+        ast::Stmt::Expect(_) => {} // v36.2.0 — 実行は v36.3 以降
     }
 }
 
@@ -486,6 +488,7 @@ fn collect_azure_kinds_stmt(stmt: &ast::Stmt, r: &mut bool, w: &mut bool) {
             for s in &f.body.stmts { collect_azure_kinds_stmt(s, r, w); }
             collect_azure_kinds_inner(&f.body.expr, r, w);
         }
+        ast::Stmt::Expect(_) => {} // v36.2.0 — 実行は v36.3 以降
     }
 }
 
@@ -596,6 +599,7 @@ fn collect_azure_blob_kinds_stmt(stmt: &ast::Stmt, r: &mut bool, w: &mut bool) {
             for s in &f.body.stmts { collect_azure_blob_kinds_stmt(s, r, w); }
             collect_azure_blob_kinds_inner(&f.body.expr, r, w);
         }
+        ast::Stmt::Expect(_) => {} // v36.2.0 — 実行は v36.3 以降
     }
 }
 
@@ -735,6 +739,7 @@ fn collect_sf_kinds_stmt(stmt: &ast::Stmt, r: &mut bool, w: &mut bool) {
             for s in &f.body.stmts { collect_sf_kinds_stmt(s, r, w); }
             collect_sf_kinds_inner(&f.body.expr, r, w);
         }
+        ast::Stmt::Expect(_) => {} // v36.2.0 — 実行は v36.3 以降
     }
 }
 
@@ -1058,6 +1063,14 @@ pub fn render_lineage_text(report: &LineageReport, filename: &str) -> String {
         }
     }
 
+    // v37.9.0: サマリー行
+    out.push('\n');
+    out.push_str(&format!(
+        "Total: {} stage(s), {} pipeline(s)\n",
+        report.transformations.len(),
+        report.pipelines.len(),
+    ));
+
     out
 }
 
@@ -1125,6 +1138,85 @@ pub fn render_lineage_d2(report: &LineageReport) -> String {
         }
     }
 
+    out
+}
+
+/// LineageReport を Graphviz DOT 形式にレンダリングする。
+pub fn render_lineage_dot(report: &LineageReport) -> String {
+    let mut out = String::from("digraph lineage {\n    rankdir=LR;\n    node [shape=box style=filled fillcolor=\"#eef6f9\"];\n");
+
+    for entry in &report.transformations {
+        let id    = sanitize_mermaid_id(&entry.name);
+        let label = format!("{}\\n{}", entry.name, entry.kind);
+        out.push_str(&format!("    {} [label=\"{}\"];\n", id, label));
+    }
+
+    for pipeline in &report.pipelines {
+        let steps = &pipeline.steps;
+        for i in 0..steps.len().saturating_sub(1) {
+            let from = sanitize_mermaid_id(&steps[i]);
+            let to   = sanitize_mermaid_id(&steps[i + 1]);
+            out.push_str(&format!("    {} -> {};\n", from, to));
+        }
+    }
+
+    out.push('}');
+    out
+}
+
+/// LineageReport を外部ツール不要のインライン SVG にレンダリングする。
+/// 各ノードを 160×40px の矩形として横に並べ、矢印で接続する。
+pub fn render_lineage_svg(report: &LineageReport) -> String {
+    let nodes: Vec<&LineageEntry> = report.transformations.iter().collect();
+    let n      = nodes.len();
+    let width  = (n * 200 + 40).max(200);
+    let height = 140_usize;
+
+    let mut out = format!(
+        "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{}\" height=\"{}\">\n",
+        width, height
+    );
+    out.push_str("  <defs><marker id=\"arr\" markerWidth=\"10\" markerHeight=\"7\" refX=\"9\" refY=\"3.5\" orient=\"auto\">\n");
+    out.push_str("    <polygon points=\"0 0, 10 3.5, 0 7\" fill=\"#555\"/>\n");
+    out.push_str("  </marker></defs>\n");
+
+    for (i, entry) in nodes.iter().enumerate() {
+        let x = i * 200 + 20;
+        let y = 60_usize;
+        out.push_str(&format!(
+            "  <rect x=\"{}\" y=\"{}\" width=\"160\" height=\"40\" rx=\"4\" fill=\"#eef6f9\" stroke=\"#555\"/>\n",
+            x, y
+        ));
+        out.push_str(&format!(
+            "  <text x=\"{}\" y=\"{}\" text-anchor=\"middle\" font-size=\"12\" fill=\"#222\">{}</text>\n",
+            x + 80, y + 16, entry.name
+        ));
+        out.push_str(&format!(
+            "  <text x=\"{}\" y=\"{}\" text-anchor=\"middle\" font-size=\"10\" fill=\"#666\">{}</text>\n",
+            x + 80, y + 30, entry.kind
+        ));
+    }
+
+    let name_to_idx: std::collections::HashMap<&str, usize> =
+        nodes.iter().enumerate().map(|(i, e)| (e.name.as_str(), i)).collect();
+
+    for pipeline in &report.pipelines {
+        let steps = &pipeline.steps;
+        for i in 0..steps.len().saturating_sub(1) {
+            let from_name = steps[i].as_str();
+            let to_name   = steps[i + 1].as_str();
+            if let (Some(&fi), Some(&ti)) = (name_to_idx.get(from_name), name_to_idx.get(to_name)) {
+                let x1 = fi * 200 + 180;
+                let x2 = ti * 200 + 20;
+                out.push_str(&format!(
+                    "  <line x1=\"{}\" y1=\"80\" x2=\"{}\" y2=\"80\" stroke=\"#555\" stroke-width=\"1.5\" marker-end=\"url(#arr)\"/>\n",
+                    x1, x2
+                ));
+            }
+        }
+    }
+
+    out.push_str("</svg>");
     out
 }
 

@@ -440,6 +440,8 @@ pub enum Stmt {
     ForIn(ForInStmt),
     /// `forall x: Type [where { guard }] { body }`  property-based test (v17.7.0)
     Forall(ForallStmt),
+    /// `expect rows { not_empty; all(|r| r.amount >= 0.0) }` — データ品質ルール（v36.2.0）
+    Expect(ExpectStmt),
 }
 
 // ── ForallStmt (v17.7.0) ──────────────────────────────────────────────────────
@@ -503,6 +505,7 @@ impl Stmt {
             Stmt::Yield(y) => &y.span,
             Stmt::ForIn(f) => &f.span,
             Stmt::Forall(f) => &f.span,
+            Stmt::Expect(e) => &e.span,
         }
     }
 }
@@ -896,6 +899,28 @@ pub enum Item {
         alias: String,
         span: Span,
     },
+    /// `schema Orders { id: Int, amount: Float }` — インライン schema 定義（v36.1.0）
+    SchemaDef(SchemaDef),
+}
+
+// ── SchemaDef (v36.1.0) ──────────────────────────────────────────────────────
+
+/// インライン schema 定義: `schema Orders { id: Int, amount: Float }` (v36.1.0)
+#[derive(Debug, Clone)]
+pub struct SchemaDef {
+    pub name: String,
+    pub fields: Vec<(String, TypeExpr)>,
+    pub span: Span,
+}
+
+// ── ExpectStmt (v36.2.0) ─────────────────────────────────────────────────────
+
+/// `expect <target> { <rules> }` — データ品質ルール宣言（v36.2.0）
+#[derive(Debug, Clone)]
+pub struct ExpectStmt {
+    pub target: Box<Expr>,
+    pub rules: Vec<Expr>,
+    pub span: Span,
 }
 
 impl Item {
@@ -923,6 +948,7 @@ impl Item {
             Item::AliasDecl { span, .. } => span,
             Item::UseAlias { span, .. } => span,
             Item::PipelineDef(pd) => &pd.span,
+            Item::SchemaDef(s) => &s.span,
         }
     }
 }

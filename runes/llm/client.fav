@@ -32,3 +32,20 @@ public fn extract<T>(prompt: String, data: String) -> Result<T, String> {
             }
     }
 }
+
+// stream — ストリーミングレスポンス（v38.7.0: collect-all 実装）
+public fn stream(prompt: String) -> Result<String, String> {
+    Llm.stream_raw(prompt)
+}
+
+// function_call — ツール呼び出し
+// tools_json は [{"name": "...", "description": "...", "parameters": {...}}] の JSON 文字列
+public fn function_call(prompt: String, tools_json: String) -> Result<String, String> {
+    Llm.function_call_raw(prompt, tools_json)
+}
+
+// embed — テキストをベクトル化（LLM_PROVIDER=openai 専用）
+// 戻り値は JSON 配列文字列 "[0.1, 0.2, ...]"
+public fn embed(text: String) -> Result<String, String> {
+    Llm.embed_raw(text)
+}

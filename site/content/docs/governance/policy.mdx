@@ -1,0 +1,40 @@
+---
+title: "fav policy — 組織ポリシーの宣言的管理"
+description: "fav policy check / fav policy check --ci で組織ルールをコードで管理する"
+---
+
+# fav policy — 組織ポリシーの宣言的管理
+
+`fav policy` コマンドで組織のパイプライン運用ルールを宣言的に定義・検証します。
+`fav policy check --ci` を CI に組み込むことで、ポリシー違反のある PR を自動的にブロックできます。
+
+## コード例
+
+プロジェクトの `.fav` ファイル内に `policy {}` ブロックを記述します:
+
+```favnir
+policy {
+  deny_runes: ["experimental/*"]
+  require_schema: true
+  require_tests: true
+  max_pipeline_stages: 20
+}
+```
+
+## CLI コマンド
+
+```bash
+# ローカルでポリシーチェック（違反内容を表示）
+fav policy check
+
+# CI モード（違反時に stderr 出力 + exit 1）
+fav policy check --ci
+```
+
+## ポイント
+
+- `deny_runes` に glob パターンで禁止 Rune を指定します。`"experimental/*"` はすべての experimental Rune を拒否します。
+- `require_schema: true` はスキーマ型定義のないパイプラインをエラーとします。
+- `require_tests: true` はテストがないパイプラインをエラーとします。
+- `fav policy check --ci` は違反時に `stderr` に詳細を出力して `exit 1` します。CI のステップ失敗として扱われます。
+- `fav ci init` で生成される `.github/workflows/ci.yml` には Policy check ステップが自動で含まれます。

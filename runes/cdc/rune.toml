@@ -1,0 +1,10 @@
+[rune]
+name        = "cdc"
+version     = "1.0.0"
+description = "CDC Rune — Debezium JSON 形式の CDC イベント処理（MySQL / Postgres 対応）"
+entry       = "cdc.fav"
+effects     = []
+license     = "MIT"
+authors     = ["Favnir Team"]
+
+[dependencies]

@@ -1,0 +1,32 @@
+---
+title: "ジェネリック ETL 関数"
+description: "境界付きジェネリクスと行多相を使って型安全な汎用 ETL 関数を書く"
+---
+
+# ジェネリック ETL 関数
+
+v37.1.0 の `T with Serialize/Deserialize` 制約と v37.2.0 の行多相 `R with { id: Int }` を活用します。
+
+## コード例
+
+```favnir
+// T with Serialize: シリアライズ可能な任意の型を受け取る汎用ロード関数
+fn load_and_serialize<T with Serialize>(items: List<T>) -> List<String> {
+    List.map(items, |item| Json.encode(item))
+}
+
+// 行多相: id フィールドを持つ任意のレコード型を受け取る
+fn filter_by_id<R with { id: Int }>(records: List<R>, min_id: Int) -> List<R> {
+    List.filter(records, |r| r.id >= min_id)
+}
+```
+
+## ポイント
+
+- `T with Serialize` は型変数 T に制約を付与します（v37.1.0）。
+- `R with { id: Int, .. }` は `id` フィールドを持つ任意のレコード型にマッチします（v37.2.0）。
+- 制約違反は型チェック時（`fav check`）に型チェックエラーとして検出されます。
+
+## 関連
+
+- [言語リファレンス: 境界付きジェネリクス](/docs/language/generics)

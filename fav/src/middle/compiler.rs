@@ -1990,6 +1990,7 @@ fn collect_free_vars_block(block: &Block, bound: &mut HashSet<String>, free: &mu
                 inner_bound.insert(var_name.clone());
                 collect_free_vars_block(&f.body, &mut inner_bound, free);
             }
+            Stmt::Expect(_) => {} // v36.2.0 — 実行は v36.3 以降
         }
     }
     collect_free_vars_expr(&block.expr, &mut local_bound, free);
@@ -2666,6 +2667,7 @@ fn compile_stmt_into(stmt: &Stmt, ctx: &mut CompileCtx, out: &mut Vec<IRStmt>) {
                 Type::Unit,
             )));
         }
+        Stmt::Expect(_) => {} // v36.2.0 — 実行は v36.3 以降
     }
 }
 

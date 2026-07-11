@@ -1,0 +1,46 @@
+// CDC Rune — Debezium JSON 形式の CDC イベント処理（v37.5.0）
+// MySQL / Postgres 対応
+//
+// Debezium op フィールド: "c"=INSERT, "u"=UPDATE, "d"=DELETE, "r"=READ(snapshot)
+// ※ JSON はコンパクト形式（スペースなし）のみ対応: {"op":"c",...} 形式
+
+// op コード文字列から人間可読な操作名を返す
+fn CDC.op_name(op: String) -> String {
+  if op == "c" { "insert" }
+  else if op == "u" { "update" }
+  else if op == "d" { "delete" }
+  else { "read" }
+}
+
+// INSERT イベント（op == "c"）かどうか
+fn CDC.is_insert(op: String) -> Bool {
+  op == "c"
+}
+
+// UPDATE イベント（op == "u"）かどうか
+fn CDC.is_update(op: String) -> Bool {
+  op == "u"
+}
+
+// DELETE イベント（op == "d"）かどうか
+fn CDC.is_delete(op: String) -> Bool {
+  op == "d"
+}
+
+// Debezium イベント JSON 文字列から op フィールドを抽出する（文字列探索）
+fn CDC.extract_op(json: String) -> String {
+  if String.contains(json, "\"op\":\"c\"") { "c" }
+  else if String.contains(json, "\"op\":\"u\"") { "u" }
+  else if String.contains(json, "\"op\":\"d\"") { "d" }
+  else { "r" }
+}
+
+// イベントリスト（JSON 文字列リスト）から INSERT のみフィルタリング
+fn CDC.filter_inserts(events: List<String>) -> List<String> {
+  List.filter(events, |e| String.contains(e, "\"op\":\"c\""))
+}
+
+// イベントリスト（JSON 文字列リスト）から DELETE のみフィルタリング
+fn CDC.filter_deletes(events: List<String>) -> List<String> {
+  List.filter(events, |e| String.contains(e, "\"op\":\"d\""))
+}

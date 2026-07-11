@@ -1,0 +1,8 @@
+[rune]
+name        = "audit"
+version     = "1.0.0"
+description = "Audit Log Rune for pipeline execution tracking"
+entry       = "audit.fav"
+effects     = ["!Http"]
+
+[dependencies]

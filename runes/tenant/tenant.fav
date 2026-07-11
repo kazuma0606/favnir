@@ -1,0 +1,20 @@
+// runes/tenant/tenant.fav — Multi-tenant Rune v39.5.0
+// ctx.tenant_id を使った DB スキーマ / S3 prefix 分離
+
+fn db_schema(ctx: AppCtx) -> Result<String, String> {
+  // DB スキーマ自動切り替え: "{tenant_id}_schema"
+  // 本実装では ctx.tenant_id を参照する（現在はスタブ）
+  Result.ok("tenant_schema")
+}
+
+fn s3_prefix(ctx: AppCtx) -> Result<String, String> {
+  // S3 prefix 分離: "tenants/{tenant_id}/"
+  // 本実装では ctx.tenant_id を参照する（現在はスタブ）
+  Result.ok("tenants/default/")
+}
+
+fn validate_tenant(ctx: AppCtx, allowed: List<String>) -> Result<Unit, String> {
+  // テナント ID が許可リストに含まれるか検証（スタブ: 常に OK）
+  // 本実装では ctx.tenant_id と allowed を照合する
+  Result.ok(unit)
+}

@@ -809,14 +809,83 @@ impl Parser {
                 }
                 self.parse_alias_decl()
             }
+            // `schema Name { ... }` — inline schema definition (v36.1.0)
+            // Distinguish from `schema "uri"` TypeExpr form (v18.4/v32.4): next token is Ident, not Str
+            TokenKind::Ident(n) if n == "schema" => {
+                if vis.is_some() {
+                    return Err(ParseError::new(
+                        "visibility modifier on `schema` is not allowed",
+                        self.peek_span().clone(),
+                    ));
+                }
+                if matches!(self.peek2(), Some(TokenKind::Ident(_))) {
+                    Ok(Item::SchemaDef(self.parse_schema_def()?))
+                } else {
+                    Err(ParseError::new(
+                        "expected schema name (identifier) after `schema` at top-level",
+                        self.peek_span().clone(),
+                    ))
+                }
+            }
             other => Err(ParseError::new(
                 format!(
-                    "expected item (type/fn/stage/seq/interface/effect/impl/test/alias), got {:?}",
+                    "expected item (type/fn/stage/seq/interface/effect/impl/test/alias/schema), got {:?}",
                     other
                 ),
                 self.peek_span().clone(),
             )),
         }
+    }
+
+    /// Parse `schema Name { field: Type, ... }` as a top-level item (v36.1.0)
+    fn parse_schema_def(&mut self) -> Result<SchemaDef, ParseError> {
+        let start = self.peek_span().clone();
+        self.advance(); // consume `schema`
+        let (name, _) = self.expect_ident()?;
+        self.expect(&TokenKind::LBrace)?;
+        let mut fields = vec![];
+        while self.peek() != &TokenKind::RBrace && self.peek() != &TokenKind::Eof {
+            let (field_name, _) = self.expect_ident()?;
+            self.expect(&TokenKind::Colon)?;
+            let field_ty = self.parse_type_expr()?;
+            fields.push((field_name, field_ty));
+            if self.peek() == &TokenKind::Comma {
+                self.advance();
+            }
+        }
+        self.expect(&TokenKind::RBrace)?;
+        Ok(SchemaDef {
+            name,
+            fields,
+            span: self.span_from(&start),
+        })
+    }
+
+    /// Parse `expect <expr> { <rule_expr>* }` (v36.2.0)
+    fn parse_expect_stmt(&mut self) -> Result<ExpectStmt, ParseError> {
+        let start = self.peek_span().clone();
+        self.advance(); // consume `expect`
+        let target = self.parse_expr()?;
+        self.expect(&TokenKind::LBrace)?;
+        let mut rules = vec![];
+        while self.peek() != &TokenKind::RBrace && self.peek() != &TokenKind::Eof {
+            let pos_before = self.pos;
+            let rule = self.parse_expr()?;
+            rules.push(rule);
+            if self.peek() == &TokenKind::Semicolon {
+                self.advance();
+            }
+            // Guard: if no tokens were consumed, stop to prevent infinite loop
+            if self.pos == pos_before {
+                break;
+            }
+        }
+        self.expect(&TokenKind::RBrace)?;
+        Ok(ExpectStmt {
+            target: Box::new(target),
+            rules,
+            span: self.span_from(&start),
+        })
     }
 
     fn parse_alias_decl(&mut self) -> Result<Item, ParseError> {
@@ -2319,6 +2388,16 @@ impl Parser {
             if self.peek() == &TokenKind::Forall {
                 let f = self.parse_forall_stmt()?;
                 stmts.push(Stmt::Forall(f));
+                if self.peek() == &TokenKind::Semicolon {
+                    self.advance();
+                }
+                continue;
+            }
+
+            // expect <expr> { <rules> }  (v36.2.0)
+            if matches!(self.peek(), TokenKind::Ident(n) if n == "expect") {
+                let e = self.parse_expect_stmt()?;
+                stmts.push(Stmt::Expect(e));
                 if self.peek() == &TokenKind::Semicolon {
                     self.advance();
                 }
@@ -4303,4 +4382,55 @@ mod tests {
         assert_eq!(p.uses, vec![vec!["data".to_string(), "users".to_string()]]);
         assert!(p.items.iter().all(|i| !matches!(i, Item::RuneUse { .. })));
     }
+    // ── SchemaDef (v36.1.0) ──────────────────────────────────────────────────
+
+    #[test]
+    fn parse_schema_def_basic() {
+        let p = parse("schema Orders { id: Int, amount: Float }");
+        assert_eq!(p.items.len(), 1);
+        let Item::SchemaDef(ref sd) = p.items[0] else { panic!("expected SchemaDef") };
+        assert_eq!(sd.name, "Orders");
+        assert_eq!(sd.fields.len(), 2);
+        assert_eq!(sd.fields[0].0, "id");
+        assert_eq!(sd.fields[1].0, "amount");
+    }
+
+    #[test]
+    fn parse_schema_def_single_field() {
+        let p = parse("schema User { name: String }");
+        let Item::SchemaDef(ref sd) = p.items[0] else { panic!("expected SchemaDef") };
+        assert_eq!(sd.name, "User");
+        assert_eq!(sd.fields.len(), 1);
+    }
+
+    #[test]
+    fn parse_schema_uri_not_affected() {
+        // `schema "uri"` form (v18.4/v32.4) must still work as a TypeExpr in fn signatures
+        let p = parse(r#"fn f(x: schema "postgres:users") -> Unit { () }"#);
+        assert_eq!(p.items.len(), 1);
+        assert!(matches!(p.items[0], Item::FnDef(_)));
+    }
+
+    // ── ExpectStmt (v36.2.0) ─────────────────────────────────────────────────
+
+    #[test]
+    fn parse_expect_stmt_basic() {
+        let src = r#"fn validate(rows: List<Row>) -> Bool {
+    expect rows {
+        not_empty
+        all(|r| r.ok)
+    }
+    true
+}"#;
+        let p = parse(src);
+        assert!(!p.items.is_empty(), "expect block should parse without error");
+        let Item::FnDef(ref fd) = p.items[0] else { panic!("expected FnDef") };
+        let stmts = &fd.body.stmts;
+        assert!(!stmts.is_empty(), "fn body should have at least one stmt");
+        assert!(
+            matches!(stmts[0], Stmt::Expect(_)),
+            "first stmt should be Stmt::Expect"
+        );
+    }
+
 }

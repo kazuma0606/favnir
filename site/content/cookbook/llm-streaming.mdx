@@ -1,0 +1,53 @@
+---
+title: "LLM ストリーミングレスポンス"
+description: "`llm.stream` でストリーミング LLM 応答を処理し、リアルタイム出力パイプラインを構築する"
+---
+
+# LLM ストリーミングレスポンス
+
+`llm.stream` を使って LLM のレスポンスをストリーミングで処理するパイプラインを構築します。
+
+## コード例
+
+```favnir
+import llm
+
+stage BuildPrompt -> String {
+    "Favnir を一文で説明してください。"
+}
+
+stage AskLlm(prompt: String) -> String {
+    match llm.stream(prompt) {
+        Ok(response) => response
+        Err(e)       => String.concat("Error: ", e)
+    }
+}
+
+stage FormatOutput(text: String) -> String {
+    String.concat("[LLM] ", text)
+}
+
+pipeline llm_streaming {
+    BuildPrompt |> AskLlm |> FormatOutput
+}
+```
+
+## 実行例
+
+```bash
+ANTHROPIC_API_KEY=sk-... fav run src/main.fav
+# [LLM] Favnir is a type-safe data pipeline language...
+```
+
+## v38.7.0 の制約
+
+v38.7.0 では `llm.stream` は **collect-all 実装**です。
+レスポンス全体を受信してから文字列として返します（真の SSE ストリーミングは v39.x で実装予定）。
+
+パイプライン内でチャンクごとに処理する場合は、現時点では `List.map` + `llm.complete` の分割呼び出しを使用してください。
+
+## ポイント
+
+- `llm.stream` のシグネチャは `(prompt: String) -> Result<String, String>` です。
+- `ANTHROPIC_API_KEY` または `OPENAI_API_KEY` を設定して使用します（`LLM_PROVIDER` 環境変数で切り替え）。
+- 長大なレスポンスを処理する場合は `String.split(response, "\n")` でチャンク分割できます。

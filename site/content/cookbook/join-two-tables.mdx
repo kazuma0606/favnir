@@ -1,0 +1,40 @@
+---
+title: "2 テーブル結合（List.join_on）"
+description: "List.join_on を使って 2 つのリストをキーで結合する"
+---
+
+# 2 テーブル結合（List.join_on）
+
+`List.join_on(left, right, pred)` で 2 つのリストを述語関数でマッチングして結合します（left semi-join）。
+
+## コード例
+
+```favnir
+import runes/postgres as db
+
+stage LoadUsers -> List<String> {
+    db.query(ctx, "SELECT id, name FROM users")
+}
+
+stage LoadOrders -> List<String> {
+    db.query(ctx, "SELECT user_id, amount FROM orders")
+}
+
+stage JoinUsersOrders(users: List<String>, orders: List<String>) -> List<String> {
+    List.join_on(users, orders, |u, o| String.contains(o, u))
+}
+
+pipeline main {
+    LoadUsers, LoadOrders |> JoinUsersOrders
+}
+```
+
+## ポイント
+
+- `List.join_on` は left semi-join: left リストの各要素に対して right リストの要素をマッチング。
+- 述語 `pred` は `(left_elem, right_elem) -> Bool` を返すクロージャ。
+- 大規模リストの場合は `List.fan_out` でチャンク分割してから並列処理することを推奨。
+
+## 関連
+
+- [fan-out-by-region](/cookbook/fan-out-by-region) — 地域別 fan_out と fan_in の組み合わせ

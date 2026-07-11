@@ -1,0 +1,46 @@
+---
+title: "Enterprise Governance — v39 スプリント完了"
+description: "RBAC / Audit / Policy / Secret / マルチテナント / CI ゲートを統合した Enterprise Governance の全体像"
+---
+
+# Enterprise Governance — v39 スプリント完了
+
+v39.1.0〜v39.8.0 の 8 バージョンで Favnir の **Enterprise Governance** フェーズが完了しました。
+チームで安全に Favnir パイプラインを運用するために必要な機能がすべて揃っています。
+
+## v39 スプリント達成機能
+
+| バージョン | 機能 | コマンド / Rune |
+|---|---|---|
+| v39.1.0 | RBAC — ロールベースアクセス制御 | `auth.require_role` / `auth.check_permission` / `auth.verify_jwt` |
+| v39.2.0 | Audit Log — パイプライン実行ログ | `Audit.log` / `Audit.start_trace` / `Audit.end_trace` |
+| v39.3.0 | Policy — 組織ポリシー管理 | `fav policy check` / `fav policy check --ci` |
+| v39.4.0 | Secret — シークレット管理 | `Secret.get_aws` / `Secret.get_vault` / `Secret.get_gcp` / `Secret.get_env` |
+| v39.5.0 | マルチテナント対応 | `tenant.db_schema` / `tenant.s3_prefix` / `tenant.validate_tenant` |
+| v39.6.0 | fav audit — Rune ライセンス検査 | `fav audit` / `fav audit --check` |
+| v39.7.0 | CI/CD ポリシーゲート | `fav ci init`（Policy check ステップ自動含む） |
+| v39.8.0 | ガバナンスドキュメント整備 | `docs/governance/` 3 件 + cookbook 3 件 |
+
+## v40.0 宣言文（暫定）
+
+> 「RBAC で実行権限を制御し、Audit Log でパイプラインを追跡できる。
+>  `fav policy` で組織ポリシーを宣言的に定義し、
+>  `fav policy check --ci` で違反を PR でブロックできる。
+>  Secret Rune は Vault / AWS / GCP に対応し、
+>  マルチテナント対応で複数チームが安全に使える。
+>
+>  これが Favnir v40.0 — Enterprise Governance の姿である。」
+
+## ドキュメント
+
+### ガバナンスリファレンス
+
+- [RBAC — ロールベースアクセス制御](/docs/governance/rbac)
+- [Audit Log — パイプライン実行ログ](/docs/governance/audit-log)
+- [fav policy — 組織ポリシーの宣言的管理](/docs/governance/policy)
+
+### クックブック
+
+- [マルチテナント ETL](/cookbook/multi-tenant-etl)
+- [Secret Manager / Vault 連携](/cookbook/secret-manager-vault)
+- [CI ポリシーゲート](/cookbook/ci-policy-gate)

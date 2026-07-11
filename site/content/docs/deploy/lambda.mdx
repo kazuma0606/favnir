@@ -1,0 +1,22 @@
+---
+title: Lambda Deploy
+---
+
+# Deploying to AWS Lambda
+
+> This page is a stub. Full documentation will be added in v36.0 (Deployment Story milestone).
+
+Use `fav deploy --target lambda` to deploy your pipeline to AWS Lambda.
+
+```bash
+# Build native binary first
+fav build --target native
+
+# Package as bootstrap.zip (no upload)
+fav deploy --target lambda --package-only
+
+# Deploy to Lambda
+fav deploy --target lambda --function my-pipeline --region ap-northeast-1
+```
+
+See `examples/lambda-deploy/` for a complete example.

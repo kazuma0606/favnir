@@ -112,6 +112,8 @@ pub fn lint_program(program: &Program) -> Vec<LintError> {
     // v24.6.0: W021
     check_w021_pure_fn_calls_effectful(program, &mut errors);
     // v34.5.0: W022 removed in v34.8A — !Effect is now a parse error (E0374)
+    // v36.3.0: W025
+    check_w025_schema_mismatch(program, &mut errors);
     errors
 }
 
@@ -153,6 +155,7 @@ fn lint_block_l008(block: &Block, errors: &mut Vec<LintError>) {
                 if let Some(g) = &f.guard { lint_expr_l008(g, errors); }
                 lint_block_l008(&f.body, errors);
             }
+            Stmt::Expect(_) => {} // v36.2.0 — 実行は v36.3 以降
         }
     }
     lint_expr_l008(&block.expr, errors);
@@ -335,6 +338,7 @@ fn collect_block_calls(block: &Block, names: &HashSet<String>, uses: &mut HashSe
                 if let Some(g) = &f.guard { collect_expr_calls(g, names, uses); }
                 collect_block_calls(&f.body, names, uses);
             }
+            Stmt::Expect(_) => {} // v36.2.0 — 実行は v36.3 以降
         }
     }
     collect_expr_calls(&block.expr, names, uses);
@@ -513,6 +517,7 @@ fn lint_stmt_sub_blocks(stmt: &Stmt, errors: &mut Vec<LintError>) {
             if let Some(g) = &f.guard { lint_expr_sub_blocks(g, errors); }
             lint_block_unused_binds(&f.body, errors);
         }
+        Stmt::Expect(_) => {} // v36.2.0 — 実行は v36.3 以降
     }
 }
 
@@ -662,6 +667,7 @@ fn stmt_references(stmt: &Stmt, name: &str) -> bool {
             f.guard.as_ref().map(|g| expr_references(g, name)).unwrap_or(false)
                 || block_references(&f.body, name)
         }
+        Stmt::Expect(_) => false, // v36.2.0 — 実行は v36.3 以降
     }
 }
 
@@ -760,6 +766,7 @@ fn collect_ambient_in_block(block: &Block, errors: &mut Vec<LintError>, code: &'
                 if let Some(g) = &f.guard { collect_ambient_in_expr(g, errors, code, allowed); }
                 collect_ambient_in_block(&f.body, errors, code, allowed);
             }
+            Stmt::Expect(_) => {} // v36.2.0 — 実行は v36.3 以降
         }
     }
     collect_ambient_in_expr(&block.expr, errors, code, allowed);
@@ -905,6 +912,7 @@ fn collect_deprecated_in_block(block: &Block, errors: &mut Vec<LintError>) {
                 if let Some(g) = &f.guard { collect_deprecated_in_expr(g, errors); }
                 collect_deprecated_in_block(&f.body, errors);
             }
+            Stmt::Expect(_) => {} // v36.2.0 — 実行は v36.3 以降
         }
     }
     collect_deprecated_in_expr(&block.expr, errors);
@@ -1166,6 +1174,7 @@ fn collect_type_state_in_block(
                     &f.body, fn_expects, fn_output, type_state_names, env, errors,
                 );
             }
+            Stmt::Expect(_) => {} // v36.2.0 — 実行は v36.3 以降
         }
     }
     collect_type_state_in_expr(
@@ -1391,6 +1400,7 @@ fn find_ambient_call_in_block(block: &Block) -> Option<(String, String, Span)> {
                 f.guard.as_ref().and_then(find_ambient_call_in_expr)
                     .or_else(|| find_ambient_call_in_block(&f.body))
             }
+            Stmt::Expect(_) => None, // v36.2.0 — 実行は v36.3 以降
         };
         if found.is_some() { return found; }
     }
@@ -1562,6 +1572,7 @@ fn check_w013_block(block: &Block, errors: &mut Vec<LintError>) {
                 if let Some(g) = &f.guard { check_w013_expr(g, errors); }
                 check_w013_block(&f.body, errors);
             }
+            Stmt::Expect(_) => {} // v36.2.0 — 実行は v36.3 以降
         }
     }
     check_w013_expr(&block.expr, errors);
@@ -1651,6 +1662,7 @@ fn check_w014_block(block: &Block, errors: &mut Vec<LintError>) {
                 if let Some(g) = &f.guard { check_w014_expr(g, errors); }
                 check_w014_block(&f.body, errors);
             }
+            Stmt::Expect(_) => {} // v36.2.0 — 実行は v36.3 以降
         }
     }
     check_w014_expr(&block.expr, errors);
@@ -1738,6 +1750,7 @@ fn check_w015_block(block: &Block, errors: &mut Vec<LintError>) {
                 if let Some(g) = &f.guard { check_w015_expr(g, errors); }
                 check_w015_block(&f.body, errors);
             }
+            Stmt::Expect(_) => {} // v36.2.0 — 実行は v36.3 以降
         }
     }
     check_w015_expr(&block.expr, errors);
@@ -1789,6 +1802,7 @@ fn check_w016_block(block: &Block, errors: &mut Vec<LintError>) {
                 if let Some(g) = &f.guard { check_w016_expr(g, errors); }
                 check_w016_block(&f.body, errors);
             }
+            Stmt::Expect(_) => {} // v36.2.0 — 実行は v36.3 以降
         }
     }
     check_w016_expr(&block.expr, errors);
@@ -1878,6 +1892,7 @@ fn nesting_depth_stmt(stmt: &Stmt) -> usize {
             let g = f.guard.as_ref().map(|g| nesting_depth_expr(g)).unwrap_or(0);
             g.max(nesting_depth_block(&f.body))
         }
+        Stmt::Expect(_) => 0, // v36.2.0 — 実行は v36.3 以降
     }
 }
 
@@ -1930,6 +1945,7 @@ fn check_w018_block(block: &Block, errors: &mut Vec<LintError>) {
                 if let Some(g) = &f.guard { check_w018_expr(g, errors); }
                 check_w018_block(&f.body, errors);
             }
+            Stmt::Expect(_) => {} // v36.2.0 — 実行は v36.3 以降
         }
     }
     check_w018_expr(&block.expr, errors);
@@ -2014,6 +2030,7 @@ fn check_w019_block(block: &Block, errors: &mut Vec<LintError>) {
                 if let Some(g) = &f.guard { check_w019_expr(g, errors); }
                 check_w019_block(&f.body, errors);
             }
+            Stmt::Expect(_) => {} // v36.2.0 — 実行は v36.3 以降
         }
     }
     check_w019_expr(&block.expr, errors);
@@ -2102,6 +2119,7 @@ fn check_w020_block(block: &Block, deprecated: &std::collections::HashSet<String
                 if let Some(g) = &f.guard { check_w020_expr(g, deprecated, errors); }
                 check_w020_block(&f.body, deprecated, errors);
             }
+            Stmt::Expect(_) => {} // v36.2.0 — 実行は v36.3 以降
         }
     }
     check_w020_expr(&block.expr, deprecated, errors);
@@ -2149,6 +2167,202 @@ pub fn check_w021_pure_fn_calls_effectful(_program: &Program, _errors: &mut Vec<
 
 // ── W022: removed in v34.8A ─────────────────────────────────────────────────
 // !Effect is now a parse error (E0374); W022 is no longer needed.
+
+// ── W025: schema_mismatch (v36.3.0) ──────────────────────────────────────────
+
+/// `Item::SchemaDef` から schema_name → field_names の Map を構築
+fn collect_schema_fields(
+    program: &Program,
+) -> HashMap<String, Vec<String>> {
+    let mut map = HashMap::new();
+    for item in &program.items {
+        if let Item::SchemaDef(sd) = item {
+            let fields: Vec<String> = sd.fields.iter().map(|(n, _)| n.clone()).collect();
+            map.insert(sd.name.clone(), fields);
+        }
+    }
+    map
+}
+
+/// block 内の FieldAccess(Ident(var), field) を収集（var が schema_params に含まれるもの）
+fn collect_field_accesses(
+    block: &Block,
+    schema_params: &HashMap<String, String>,
+    out: &mut Vec<(String, String, Span)>,
+) {
+    for stmt in &block.stmts {
+        collect_field_accesses_stmt(stmt, schema_params, out);
+    }
+    collect_field_accesses_expr(&block.expr, schema_params, out);
+}
+
+fn collect_field_accesses_stmt(
+    stmt: &Stmt,
+    schema_params: &HashMap<String, String>,
+    out: &mut Vec<(String, String, Span)>,
+) {
+    match stmt {
+        Stmt::Bind(b) => collect_field_accesses_expr(&b.expr, schema_params, out),
+        Stmt::Expr(e) => collect_field_accesses_expr(e, schema_params, out),
+        Stmt::Chain(c) => collect_field_accesses_expr(&c.expr, schema_params, out),
+        Stmt::Yield(y) => collect_field_accesses_expr(&y.expr, schema_params, out),
+        Stmt::ForIn(f) => {
+            collect_field_accesses_expr(&f.iter, schema_params, out);
+            collect_field_accesses(&f.body, schema_params, out);
+        }
+        Stmt::Forall(f) => {
+            if let Some(g) = &f.guard {
+                collect_field_accesses_expr(g, schema_params, out);
+            }
+            collect_field_accesses(&f.body, schema_params, out);
+        }
+        Stmt::Expect(e) => {
+            collect_field_accesses_expr(&e.target, schema_params, out);
+            for r in &e.rules {
+                collect_field_accesses_expr(r, schema_params, out);
+            }
+        }
+    }
+}
+
+fn collect_field_accesses_expr(
+    expr: &Expr,
+    schema_params: &HashMap<String, String>,
+    out: &mut Vec<(String, String, Span)>,
+) {
+    match expr {
+        Expr::FieldAccess(obj, field, span) => {
+            if let Expr::Ident(var_name, _) = obj.as_ref() {
+                if schema_params.contains_key(var_name) {
+                    out.push((var_name.clone(), field.clone(), span.clone()));
+                }
+            }
+            // 再帰: ネストしたアクセス (e.g. a.b.c) にも対応
+            collect_field_accesses_expr(obj, schema_params, out);
+        }
+        Expr::Apply(f, args, _) => {
+            collect_field_accesses_expr(f, schema_params, out);
+            for a in args {
+                collect_field_accesses_expr(a, schema_params, out);
+            }
+        }
+        Expr::TypeApply(f, _, _) => {
+            collect_field_accesses_expr(f, schema_params, out);
+        }
+        Expr::Pipeline(steps, _) => {
+            for step in steps {
+                collect_field_accesses_expr(step, schema_params, out);
+            }
+        }
+        Expr::BinOp(_, lhs, rhs, _) => {
+            collect_field_accesses_expr(lhs, schema_params, out);
+            collect_field_accesses_expr(rhs, schema_params, out);
+        }
+        Expr::Closure(_, body, _) => {
+            collect_field_accesses_expr(body, schema_params, out);
+        }
+        Expr::Block(b) => collect_field_accesses(b, schema_params, out),
+        Expr::If(cond, then, else_, _) => {
+            collect_field_accesses_expr(cond, schema_params, out);
+            collect_field_accesses(then, schema_params, out);
+            if let Some(e) = else_ {
+                collect_field_accesses(e, schema_params, out);
+            }
+        }
+        Expr::Match(scrutinee, arms, _) => {
+            collect_field_accesses_expr(scrutinee, schema_params, out);
+            for arm in arms {
+                if let Some(g) = &arm.guard {
+                    collect_field_accesses_expr(g, schema_params, out);
+                }
+                collect_field_accesses_expr(&arm.body, schema_params, out);
+            }
+        }
+        Expr::AssertMatches(inner, _, _) | Expr::Question(inner, _) | Expr::EmitExpr(inner, _) => {
+            collect_field_accesses_expr(inner, schema_params, out);
+        }
+        Expr::Collect(b, _) => collect_field_accesses(b, schema_params, out),
+        Expr::RecordConstruct(_, fields, _) => {
+            for (_, v) in fields {
+                collect_field_accesses_expr(v, schema_params, out);
+            }
+        }
+        Expr::RecordSpread(base, fields, _) => {
+            collect_field_accesses_expr(base, schema_params, out);
+            for (_, v) in fields {
+                collect_field_accesses_expr(v, schema_params, out);
+            }
+        }
+        Expr::FString(parts, _) => {
+            for part in parts {
+                if let crate::ast::FStringPart::Expr(e) = part {
+                    collect_field_accesses_expr(e, schema_params, out);
+                }
+            }
+        }
+        Expr::ListComp { expr, clauses, .. } | Expr::ResultComp { expr, clauses, .. } => {
+            collect_field_accesses_expr(expr, schema_params, out);
+            for clause in clauses {
+                match clause {
+                    crate::ast::CompClause::For { src, .. } => {
+                        collect_field_accesses_expr(src, schema_params, out);
+                    }
+                    crate::ast::CompClause::Guard(g) => {
+                        collect_field_accesses_expr(g, schema_params, out);
+                    }
+                }
+            }
+        }
+        Expr::Lit(_, _) | Expr::Ident(_, _) => {} // 末端ノードはスキップ
+    }
+}
+
+/// W025: フィールドアクセスがスキーマ定義に存在しない場合に警告する
+fn check_w025_schema_mismatch(program: &Program, errors: &mut Vec<LintError>) {
+    let schema_fields = collect_schema_fields(program);
+    if schema_fields.is_empty() {
+        return;
+    }
+
+    // Item::TrfDef（stage 定義）は v36.3.0 スコープ外 — stage のフィールドアクセス検査は将来バージョンで実装
+    for item in &program.items {
+        if let Item::FnDef(fd) = item {
+            // スキーマ型を持つパラメータを収集（param_name → schema_name）
+            let mut schema_params: HashMap<String, String> = HashMap::new();
+            for param in &fd.params {
+                if let TypeExpr::Named(type_name, type_args, _) = &param.ty {
+                    if type_args.is_empty() && schema_fields.contains_key(type_name) {
+                        schema_params.insert(param.name.clone(), type_name.clone());
+                    }
+                }
+            }
+            if schema_params.is_empty() {
+                continue;
+            }
+
+            // 本体からフィールドアクセスを収集して検証
+            let mut accesses: Vec<(String, String, Span)> = vec![];
+            collect_field_accesses(&fd.body, &schema_params, &mut accesses);
+
+            for (var_name, field_name, span) in accesses {
+                let schema_name = &schema_params[&var_name];
+                let fields = &schema_fields[schema_name];
+                if !fields.contains(&field_name) {
+                    errors.push(LintError::new(
+                        "W025",
+                        format!(
+                            "field `{}` not found in schema `{}` (available: {}) [see also: E0380 schema_field_missing]",
+                            field_name,
+                            schema_name,
+                            fields.join(", ")
+                        ),
+                        span,
+                    ));
+                }
+            }
+        }
+    }
+}
 
 // ── tests ─────────────────────────────────────────────────────────────────────
 

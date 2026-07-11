@@ -104,6 +104,7 @@ impl Formatter {
                 format!("use {} as {}", original, alias)
             }
             Item::PipelineDef(pd) => format!("pipeline {} {{ ... }}", pd.name), // v22.5.0: fmt スタブ
+            Item::SchemaDef(sd) => format!("schema {} {{ ... }}", sd.name), // v36.1.0: fmt スタブ
         }
     }
 
@@ -479,6 +480,7 @@ impl Formatter {
                     format!("forall {}: {} {}", var.name, ty, body)
                 }
             }
+            Stmt::Expect(_) => String::new(), // v36.2.0 — fmt は v36.3 以降
         }
     }
 

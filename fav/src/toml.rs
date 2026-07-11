@@ -184,6 +184,10 @@ pub struct DeployConfig {
     pub schedule:  Option<String>,  // K8s CronJob schedule（省略時 "0 0 * * *"）
     pub app:       Option<String>,  // Fly.io app 名（省略時 project_name）
     pub out_dir:   Option<String>,  // 生成ファイル出力先（省略時 ".fav-deploy/"）
+    /// v35.1.0: `--target lambda` の zip 出力先（省略時 "bootstrap.zip"）。`--package-only` 時にも使用される。
+    pub output:    Option<String>,
+    /// v35.2.0: Docker イメージタグ（省略時 "<project-name>:latest"）
+    pub tag:       Option<String>,
 }
 
 impl Default for DeployConfig {
@@ -204,6 +208,8 @@ impl Default for DeployConfig {
             schedule:  None,
             app:       None,
             out_dir:   None,
+            output:    None,
+            tag:       None,
         }
     }
 }
@@ -1177,4 +1183,39 @@ libB = { registry = "local", version = "2.0.0" }
         let result = rune_entry_file(&rune_dir, "mylib");
         assert_eq!(result, rune_dir.join("mylib.fav"));
     }
+}
+
+// ── v38.4.0 — [lsp.ai] 設定解析 ──────────────────────────────────────────────
+
+#[derive(Debug, Clone)]
+pub struct LspAiConfig {
+    pub enabled: bool,
+}
+
+/// `fav.toml` の `[lsp.ai]` セクションを解析して LSP AI 補完設定を返す。
+/// 実際の LLM rerank 結線は v38.7.0 で実施予定。
+pub fn parse_lsp_ai_config(toml: &str) -> LspAiConfig {
+    LspAiConfig { enabled: parse_lsp_ai_enabled(toml) }
+}
+
+fn parse_lsp_ai_enabled(toml: &str) -> bool {
+    // NOTE: `enabled = true` の判定は `trim()` 後の完全一致。
+    // `enabled=true`（スペースなし）や `enabled  =  true`（複数スペース）は非対応（単純実装優先）。
+    let mut in_lsp_ai = false;
+    for line in toml.lines() {
+        let trimmed = line.trim();
+        // 空行・コメント行はスキップ（既存 parse_fav_toml と同パターン）
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+        if trimmed == "[lsp.ai]" {
+            in_lsp_ai = true;
+        } else if trimmed.starts_with('[') && trimmed.ends_with(']') {
+            // 別セクションに入ったらリセット（値行の "[...]" と混同しないよう両端チェック）
+            in_lsp_ai = false;
+        } else if in_lsp_ai && trimmed == "enabled = true" {
+            return true;
+        }
+    }
+    false
 }

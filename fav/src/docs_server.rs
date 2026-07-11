@@ -796,6 +796,8 @@ fn install_ctrlc_handler() {
 }
 
 #[cfg(unix)]
+// SAFETY: `signal()` is an FFI call that registers a C signal handler. The handler
+// only performs an atomic store, which is async-signal-safe.
 unsafe fn install_ctrlc_handler_unix() {
     unsafe extern "C" fn handle_sigint(_signal: i32) {
         CTRL_C_SHUTDOWN.store(true, Ordering::SeqCst);
@@ -810,6 +812,8 @@ unsafe fn install_ctrlc_handler_unix() {
 }
 
 #[cfg(windows)]
+// SAFETY: `SetConsoleCtrlHandler()` is a Win32 FFI call. The handler only performs
+// an atomic store, which is safe across threads.
 unsafe fn install_ctrlc_handler_windows() {
     unsafe extern "system" fn handle_ctrl(ctrl_type: u32) -> i32 {
         const CTRL_C_EVENT: u32 = 0;

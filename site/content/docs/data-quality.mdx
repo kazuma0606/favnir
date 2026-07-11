@@ -1,0 +1,96 @@
+---
+title: "Data Quality"
+order: 60
+category: "ガイド"
+description: "Favnir v36.x — Data Quality First 機能群（schema / expect / fav validate / fav schema diff）"
+---
+
+# Data Quality First
+
+Favnir v36.x では **データ品質を型で保証する** 機能群を提供します。
+
+## `schema` 定義
+
+インライン構造体形式でテーブルスキーマを定義します。
+
+```favnir
+schema Orders {
+  id: Int
+  customer_id: Int
+  amount: Float
+  status: String
+  created_at: DateTime
+}
+```
+
+## `expect` ブロック
+
+ビジネスルールをパイプラインに埋め込みます。
+
+```favnir
+fn validate_orders(rows: List<Orders>) -> Result<List<Orders>, String> {
+  expect rows {
+    not_empty
+    all(|r| r.amount >= 0.0)
+    no_nulls([.customer_id, .amount])
+    unique([.id])
+  }
+}
+```
+
+## `fav validate`
+
+CSV/Parquet ファイルをスキーマ定義と照合して検証します。
+
+```bash
+fav validate --schema orders.fav data.csv
+```
+
+成功時の出力例:
+```
+data.csv: schema `Orders`: ok
+Validated: 1 schema(s), 5 field(s) checked
+```
+
+Great Expectations 形式にエクスポートすることもできます:
+
+```bash
+fav validate --schema orders.fav data.csv --export ge --output suite.json
+```
+
+## `fav schema diff`
+
+2 つのスキーマファイルの差分と後方互換性を表示します。
+
+```bash
+fav schema diff v1/orders.fav v2/orders.fav
+```
+
+出力例:
+```
+schema Orders (v1/orders.fav → v2/orders.fav):
+  + amount: Float         (added, backward-compatible)
+  - status: String        (BREAKING: removed)
+  ~ id: String -> Int     (BREAKING: type changed)
+```
+
+`+` 追加（後方互換）/ `-` 削除（BREAKING）/ `~` 型変更（BREAKING）。
+
+## W025 / E0380〜E0384
+
+`fav lint` と `fav validate` はスキーマ不整合を静的・実行時の両面で検出します。
+
+| コード | 意味 | 検出タイミング |
+|---|---|---|
+| W025 | `schema_mismatch` — フィールドアクセスがスキーマ定義に存在しない | 静的（lint） |
+| E0380 | `schema_field_missing` — 必須フィールドがデータに欠落 | コンパイル時 |
+| E0381 | `schema_type_mismatch` — フィールドの型が一致しない | コンパイル時 |
+| E0382 | `schema_constraint_violated` — `where` 制約に違反 | コンパイル時 |
+| E0383 | `schema_duplicate_key` — スキーマ定義でキーが重複 | コンパイル時 |
+| E0384 | `schema_extra_field` — スキーマに定義されていないフィールドが存在 | コンパイル時 |
+
+W025 は E0380 と連携しており、`fav lint` の警告メッセージにエラーカタログへの参照が含まれます:
+
+```
+W025: field `nonexistent` not found in schema `Orders` (available: id, customer_id) [see also: E0380 schema_field_missing]
+```

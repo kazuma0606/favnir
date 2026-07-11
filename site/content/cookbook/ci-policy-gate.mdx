@@ -1,0 +1,46 @@
+---
+title: "CI ポリシーゲート"
+description: "fav policy check --ci を GitHub Actions に組み込んで PR をブロックする"
+---
+
+# CI ポリシーゲート
+
+`fav policy check --ci` を GitHub Actions ワークフローに組み込んで、ポリシー違反のある PR を自動的にブロックします。
+`fav ci init` で生成される CI YAML には Policy check ステップが自動で含まれます。
+
+## コード例
+
+`fav ci init` が生成する `.github/workflows/ci.yml`:
+
+```yaml
+name: CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install fav
+        run: cargo install fav
+      - name: Check
+        run: fav check
+      - name: Lint
+        run: fav lint
+      - name: Test
+        run: fav test
+      - name: Policy check
+        run: fav policy check --ci
+```
+
+既存の CI に手動で追加する場合は `- name: Policy check` ステップを `fav test` の後に追記します。
+
+## ポイント
+
+- `fav policy check --ci` は違反時に `stderr` に詳細を出力して `exit 1` で終了します。GitHub Actions はこれをステップ失敗として扱い、PR のマージをブロックします。
+- 違反がない場合は `exit 0` で正常終了します。
+- `fav ci init` を使うと Policy check ステップが自動で含まれるため、手動追加は不要です。
+- ポリシールール（`deny_runes` / `require_schema` 等）はリポジトリの `policy {}` ブロックで管理します。詳細は [fav policy ドキュメント](/docs/governance/policy) を参照してください。

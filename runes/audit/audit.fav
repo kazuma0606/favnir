@@ -1,0 +1,38 @@
+// runes/audit/audit.fav — Audit Log Rune v39.2.0
+// パイプライン実行の追跡・監査ログ
+
+fn log(ctx: AppCtx, trace_id: String, message: String) -> Result<Unit, String> !Http {
+  bind cfg <- audit_config(ctx)
+  if cfg.enabled {
+    bind _ <- emit_log(ctx, cfg, trace_id, message)
+    Result.ok(unit)
+  } else {
+    Result.ok(unit)
+  }
+}
+
+fn start_trace(ctx: AppCtx, pipeline_name: String) -> Result<String, String> !Http {
+  bind cfg <- audit_config(ctx)
+  bind trace_id <- gen.nano_id()
+  bind _ <- emit_log(ctx, cfg, trace_id, "trace started: " ++ pipeline_name)
+  Result.ok(trace_id)
+}
+
+fn end_trace(ctx: AppCtx, trace_id: String, status: String) -> Result<Unit, String> !Http {
+  bind cfg <- audit_config(ctx)
+  bind _ <- emit_log(ctx, cfg, trace_id, "trace ended: " ++ status)
+  Result.ok(unit)
+}
+
+fn audit_config(ctx: AppCtx) -> Result<AuditConfig, String> !Http {
+  Result.ok(ctx.audit)
+}
+
+fn emit_log(ctx: AppCtx, cfg: AuditConfig, trace_id: String, message: String) -> Result<Unit, String> !Http {
+  match cfg.output {
+    // ファイル書き込みは fav.toml [audit] parse 実装後に本実装予定（現在スタブ）
+    "file"    -> Result.ok(unit)
+    "webhook" -> Http.post_json(cfg.webhook_url, { trace_id: trace_id, message: message })
+    _         -> Result.ok(unit)
+  }
+}

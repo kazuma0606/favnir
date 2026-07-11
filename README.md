@@ -93,6 +93,16 @@ Rune Registry が本番稼働し、コミュニティ投稿 Rune 10 本（stripe
 AOT ネイティブバイナリ / インクリメンタルコンパイル / ストリーミング評価 / Arrow 統合 / WASM 最適化 / 並列コンパイルが揃い、「本番で速い」データパイプラインが実現しました。
 **v35.0（2026-07-04）で、[Production Ready](./MILESTONE.md) マイルストーンを宣言しました。**
 実案件デモ / cookbook 50 本 / ベンチマーク公開 / セキュリティ審査 v2 / エフェクトシステム統一（`!Effect` → AppCtx）が揃い、実際のデータエンジニアリング案件で Favnir を選択できる状態になりました。
+**v36.0（2026-07-08）で、[Deployment Story](./MILESTONE.md) マイルストーンを宣言しました。**
+`fav deploy --target lambda/docker` / `fav ci init` / ctx 構文統一（`!Effect` 廃止）が揃い、Lambda 本番デプロイと GitHub Actions CI が自動化されました。
+**v37.0（2026-07-09）で、[Data Quality First](./MILESTONE.md) マイルストーンを宣言しました。**
+`schema` 型定義 / `expect` 品質ルール / `fav validate` / W025 lint / E0380〜E0384 / GE エクスポート / `fav schema diff` が揃い、型でデータ品質を保証できる状態になりました。
+**v38.0（2026-07-10）で、[Multi-Source ETL Power](./MILESTONE.md) マイルストーンを宣言しました。**
+`List.join_on` / `List.fan_out` / CDC Rune / lineage DOT/SVG / `fav new --template multi-source` が揃い、複数ソースを型安全につなぐマルチソース ETL が完成しました。
+**v39.0（2026-07-10）で、[Intelligence & Assistance](./MILESTONE.md) マイルストーンを宣言しました。**
+`fav suggest` / `fav generate --from sql` / `fav explain --verbose` / Llm Rune（stream / embed）/ `fav new --template rag-pipeline` が揃い、AI がパイプラインを補助できる状態になりました。
+**v40.0（2026-07-11）で、[Enterprise Governance](./MILESTONE.md) マイルストーンを宣言しました。**
+RBAC Rune / Audit Log / `fav policy check --ci` / Secret Rune（Vault / AWS / GCP）/ マルチテナント対応 が揃い、チームで安全に運用できる Enterprise Governance 基盤が完成しました。
 
 v34.5.0〜v34.7.0 で、`!Effect` アノテーションを廃止し Capability Context（AppCtx）に一本化しました。
 `fav migrate --from-effects` で既存コードを自動移行できます。

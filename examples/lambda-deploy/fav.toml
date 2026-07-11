@@ -1,0 +1,10 @@
+[package]
+name = "lambda-demo"
+version = "0.1.0"
+
+[deploy]
+target = "lambda"
+function = "lambda-demo"
+region = "ap-northeast-1"
+memory = 256
+timeout = 30

@@ -1,0 +1,39 @@
+---
+title: "地域別 fan_out 処理"
+description: "List.fan_out でリストをチャンクに分割し、地域別並列処理後に List.fan_in でマージする"
+---
+
+# 地域別 fan_out 処理
+
+`List.fan_out(list, n)` でリストを n チャンクに分割し、`List.fan_in(chunks)` でフラット化します。
+
+## コード例
+
+```favnir
+stage LoadRecords -> List<String> {
+    // 大量レコードをロード（省略）
+    []
+}
+
+stage ProcessByRegion(records: List<String>) -> List<String> {
+    bind chunks  <- List.fan_out(records, 4)
+    bind results <- List.map(chunks, |chunk|
+        List.map(chunk, |r| String.concat(["processed:", r]))
+    )
+    List.fan_in(results)
+}
+
+pipeline fan_out_pipeline {
+    LoadRecords |> ProcessByRegion
+}
+```
+
+## ポイント
+
+- `List.fan_out(list, n)` はリストを最大 n チャンクに等分割します（余りは先頭チャンクに加算）。
+- `List.fan_in(chunks)` は `List<List<T>>` を 1 レベルフラット化します。
+- `par` ステージと組み合わせることで真の並列処理が可能です。
+
+## 関連
+
+- [join-two-tables](/cookbook/join-two-tables) — チャンク後に join_on を適用するパターン

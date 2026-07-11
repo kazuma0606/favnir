@@ -1,0 +1,43 @@
+---
+title: "リネージグラフの可視化"
+description: "fav explain --lineage --format dot/svg でパイプラインの依存関係をグラフ出力する"
+---
+
+# リネージグラフの可視化
+
+v37.6.0 で追加された `dot` / `svg` 形式を使い、パイプラインのデータフローをビジュアル化します。
+
+## 使い方
+
+```bash
+# DOT 形式（Graphviz）
+fav explain --lineage --format dot src/main.fav > lineage.dot
+dot -Tpng lineage.dot -o lineage.png
+
+# インライン SVG（外部ツール不要）
+fav explain --lineage --format svg src/main.fav > lineage.svg
+```
+
+## 出力例（DOT）
+
+```dot
+digraph lineage {
+    rankdir=LR;
+    node [shape=box style=filled fillcolor="#eef6f9"];
+    LoadUsers [label="LoadUsers\nread"];
+    JoinAndLoad [label="JoinAndLoad\ntransform"];
+    SaveResult [label="SaveResult\nwrite"];
+    LoadUsers -> JoinAndLoad;
+    JoinAndLoad -> SaveResult;
+}
+```
+
+## ポイント
+
+- `--format dot` は Graphviz の `dot` / `neato` / `fdp` コマンドで PNG/SVG に変換できます。
+- `--format svg` は外部ツール不要のインライン SVG を出力します（CI レポートへの埋め込みに最適）。
+- `--format mermaid` / `--format d2` も引き続き利用可能です。
+
+## 関連
+
+- [リネージ解析](/docs/tools/lineage)

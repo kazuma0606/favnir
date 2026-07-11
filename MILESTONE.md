@@ -1,5 +1,143 @@
 # Favnir Milestones
 
+## v40.0.0 — Enterprise Governance（2026-07-11）
+
+> 「RBAC で実行権限を制御し、Audit Log でパイプラインを追跡できる。
+>  `fav policy` で組織ポリシーを宣言的に定義し、
+>  `fav policy check --ci` で違反を PR でブロックできる。
+>  Secret Rune は Vault / AWS / GCP に対応し、
+>  マルチテナント対応で複数チームが安全に使える。
+>
+>  これが Favnir v40.0 — Enterprise Governance の姿である。」
+
+v40.0.0 をもって、Favnir の **Enterprise Governance** を正式に宣言する。
+
+### 達成コンポーネント（v39.1〜v39.9）
+
+| コンポーネント | バージョン | 内容 |
+|---|---|---|
+| RBAC Rune | v39.1 | require_role / check_permission / verify_jwt |
+| Audit Log Rune | v39.2 | Audit.log / start_trace / end_trace |
+| fav policy | v39.3 | fav policy check / fav policy check --ci（exit 1） |
+| Secret Rune 強化 | v39.4 | get_aws / get_vault / get_gcp / get_env |
+| マルチテナント | v39.5 | tenant.db_schema / s3_prefix / validate_tenant |
+| fav audit | v39.6 | ライセンス一覧 / GPL・CVE 検出 |
+| CI/CD ゲート | v39.7 | fav ci init に Policy check ステップ自動含める |
+| Governance docs | v39.8 | docs/governance/ 3 件 + cookbook 3 件 |
+| 安定化 | v39.9 | enterprise-governance.mdx ドキュメント整備 |
+
+**宣言日**: 2026-07-11
+
+---
+
+## v39.0.0 — Intelligence & Assistance（2026-07-10）
+
+> 「`fav suggest` でエラーから修正案を AI が提案し、
+>  `fav generate --from sql` でパイプラインを自動生成し、
+>  `fav explain --verbose` でコンテキスト付き解説を受け取れる。
+>  Llm Rune はストリーミング・function calling・Embeddings に対応し、
+>  RAG パイプラインを `fav new --template rag-pipeline` で即座に生成できる。
+>
+>  これが Favnir v39.0 — Intelligence & Assistance の姿である。」
+
+v39.0.0 をもって、Favnir の **Intelligence & Assistance** を正式に宣言する。
+
+### 達成コンポーネント（v38.1〜v38.9）
+
+| コンポーネント | バージョン | 内容 |
+|---|---|---|
+| fav suggest | v38.1 | エラーコードから修正案を LLM で生成 |
+| fav generate --from sql | v38.2 | SQL → Favnir パイプライン自動変換 |
+| fav generate --from csv 強化 | v38.3 | schema + expect ブロック出力 |
+| LSP AI 補完 | v38.4 | [lsp.ai] enabled = true で LLM rerank |
+| fav explain --verbose | v38.5 | コンテキスト付き LLM 解説・修正例 |
+| RAG テンプレート | v38.6 | fav new --template rag-pipeline |
+| Llm Rune 強化 | v38.7 | stream / function_call / embed 対応 |
+| AI 支援 cookbook | v38.8 | sql-to-favnir / rag-pipeline / llm-streaming |
+| 安定化 | v38.9 | ai-overview.mdx ドキュメント整備 |
+
+**宣言日**: 2026-07-10
+
+---
+
+## v38.0.0 — Multi-Source ETL Power（2026-07-10）
+
+> 「`List.join_on` で 2 つのリストを型安全に結合し、
+>  `List.fan_out` / `List.fan_in` で大規模データを並列処理し、
+>  CDC Rune で Debezium イベントをストリーミング処理できる。
+>  `fav explain --lineage` でデータフローを DOT/SVG グラフとして可視化し、
+>  `fav new --template multi-source` でマルチソース ETL プロジェクトを即座に生成できる。
+>
+>  これが Favnir v38.0 — Multi-Source ETL Power の姿である。」
+
+v38.0.0 をもって、Favnir の **Multi-Source ETL Power** を正式に宣言する。
+
+### 達成コンポーネント（v37.1〜v37.9）
+
+| コンポーネント | バージョン | 内容 |
+|---|---|---|
+| 境界付きジェネリクス | v37.1 | `T with Serialize/Deserialize` 制約 |
+| 行多相実用強化 | v37.2 | ネスト行型 `R with { addr: { city: String, .. } }` |
+| List.join_on | v37.3 | left semi-join VM ビルトイン |
+| List.fan_out / fan_in | v37.4 | チャンク分散・再集約 VM ビルトイン |
+| CDC Rune | v37.5 | Debezium JSON イベント処理 |
+| lineage DOT/SVG | v37.6 | `fav explain --lineage --format dot/svg` |
+| multi-source テンプレート | v37.7 | `fav new --template multi-source` |
+| cookbook 5 本 | v37.8 | join / CDC / fan-out / generics / lineage レシピ |
+| 安定化 | v37.9 | lineage サマリー行・Multi-Source ETL ドキュメント |
+
+**宣言日**: 2026-07-10
+
+---
+
+## v37.0.0 — Data Quality First（2026-07-09）
+
+> 「`schema` でテーブル/列の型と制約を宣言し、
+>  `expect` でビジネスルールをパイプラインに埋め込み、
+>  `fav validate` でデータを検証できる。
+>  スキーマ不整合は W025 lint で静的に検出され、
+>  違反は E0380〜E0384 として報告される。
+>  `fav schema diff` で変更の後方互換性を即座に把握できる。
+>
+>  これが Favnir v37.0 — Data Quality First の姿である。」
+
+v37.0.0 をもって、Favnir の **Data Quality First** を正式に宣言する。
+
+### 達成コンポーネント（v36.1〜v36.9）
+
+| コンポーネント | バージョン | 内容 |
+|---|---|---|
+| schema 定義構文 | v36.1 | `schema Orders { id: Int, ... }` インライン定義 |
+| expect ブロック | v36.2 | `expect rows { not_empty, all(...) }` ビジネスルール宣言 |
+| W025 lint | v36.3 | `schema_mismatch` — 静的フィールドアクセス検証 |
+| fav validate | v36.4 | `fav validate --schema orders.fav data.csv` |
+| Data Contract | v36.5 | `contracts/` 規約 + `fav contract check` |
+| E0380〜E0384 | v36.6 | スキーマ不整合エラーカタログ |
+| GE エクスポート | v36.7 | `--export ge` — Great Expectations 互換出力 |
+| fav schema diff | v36.8 | フィールドレベル差分・後方互換性チェック |
+| 安定化 | v36.9 | W025↔E0380 連携・validate サマリー・docs 統合 |
+
+**宣言日**: 2026-07-09
+**宣言バージョン**: v37.0.0
+
+---
+
+## v36.0.0 — Deployment Story（2026-07-08）
+
+> 「`fav deploy --target lambda` で Lambda に自動デプロイし、
+>  `fav deploy --target docker` で Docker イメージを生成し、
+>  `fav ci init` で GitHub Actions CI を自動設定できる。
+>  `!Effect` 廃止（v35.4〜v35.8）により、すべての API が ctx: AppCtx ベースに統一された。
+>
+>  これが Favnir v36.0 — Deployment Story の姿である。」
+
+v36.0.0 をもって、Favnir の **Deployment Story** を正式に宣言する。
+
+**宣言日**: 2026-07-08
+**宣言バージョン**: v36.0.0
+
+---
+
 ## v35.0.0 — Production Ready（2026-07-04）
 
 > 「`fav new --template postgres-etl my-pipeline` で始め、
@@ -495,35 +633,57 @@ fav run --vm self/vm.fav --compile hello.fav
 
 ---
 
-## v35.0 — Production Ready（2026-07-05）
+<!-- 以下は v35.0.0 宣言（冒頭）への追記事項 — 重複エントリではなく補足記録 -->
+<!-- 正史: このファイル冒頭の "## v35.0.0 — Production Ready（2026-07-04）" が正式宣言 -->
 
-Favnir が **Production Ready** を宣言しました。
+## v35.0.0 追記 — !Effect 廃止完結（2026-07-05〜06）
 
-v34.9A（v35.5.0）にて `!Effect` アノテーション構文が言語から**完全に削除**され、
-副作用管理は `ctx: AppCtx`（Capability Context）パターンに一本化されました。
+v35.6.0〜v35.8.0 にて `!Effect` アノテーション構文が言語から**完全に削除**され、
+v35.0.0 宣言文の「Lambda にデプロイして実データを処理できる」が完全に充足された。
 
-### 達成内容
+| カテゴリ | バージョン | 内容 |
+|---|---|---|
+| E0374 ハードエラー化 | v35.4.0 | `!Effect` を書くとパースエラー |
+| Effect enum 完全削除 | v35.5.0 | `ast.rs` 以降 14 ファイルから物理削除（約 380 行） |
+| ドキュメント統一 | v35.6.0 | サイト MDX 128 ファイル・317 コードブロックを ctx 構文に変換 |
+| LSP / error_catalog / MCP | v35.7.0〜v35.8.0 | 残存 `!Effect` 文字列をすべて除去 |
+| 最終テスト数 | v35.8.0 | 2621 tests pass（0 failures）、cargo clippy clean |
 
-| カテゴリ | 内容 |
-|---|---|
-| 言語クリーンアップ | `Effect` enum / `effects` フィールドを `ast.rs` 以降すべてのレイヤーから削除 |
-| self-hosted コンパイラ | `compiler.fav` / `checker.fav` が Effects なしで完全動作 |
-| ドキュメント統一 | サイト MDX 128 ファイル・317 コードブロックを ctx 構文に変換（v35.6.0） |
-| テストカバレッジ | 2611 tests pass（0 failures）、cargo clippy clean |
-
-### Production Ready の定義
-
-1. **言語仕様が安定** — `!Effect` は完全廃止、ctx 構文が唯一の副作用表現
-2. **セルフホスト完成** — compiler.fav / checker.fav が Favnir 自身でコンパイル
-3. **ドキュメント整合** — 全コードサンプルが現行構文と一致
-4. **エコシステム成熟** — 50+ 公式 Rune、実世界デモ、ベンチマーク公開済み
-
-### コマンド
+**Lambda デプロイの現状**（v35.0 宣言時との差分）:
+- v35.0 宣言文「Lambda にデプロイして実データを処理できる」＝ `fav build --target native` 後に**手動**デプロイ
+- v36.1〜v37.0（次スプリント）で `fav deploy --target lambda` **CLI 自動化** を実装予定
 
 ```bash
-# ctx 構文でのパイプライン
+# ctx 構文でのパイプライン（v35.0 以降の標準）
 fav run examples/postgres_etl.fav
 
-# 旧 !Effect 構文（E0374 エラー）
-fav check --legacy examples/pipeline/custom_effects.fav
+# 旧 !Effect 構文は E0374 でパースエラー
+fav check --legacy examples/pipeline/custom_effects.fav  # E0374
 ```
+
+---
+
+## v36.0 — Deployment Story（2026-07-08）
+
+v35.1〜v35.9 スプリントで実装した機能を統合し、Deployment Story マイルストーンを宣言する。
+
+> 「`fav deploy --target lambda` で Lambda に自動デプロイし、
+>  `fav deploy --target docker` で Docker イメージを生成し、
+>  `fav ci init` で GitHub Actions CI を自動設定できる。
+>  `!Effect` 廃止（v35.4〜v35.8）により、すべての API が ctx: AppCtx ベースに統一された。
+>
+>  これが Favnir v36.0 — Deployment Story の姿である。」
+
+### 達成コンポーネント（v35.1〜v35.9）
+
+| バージョン | 内容 |
+|---|---|
+| v35.1.0 | `fav deploy --target lambda` — Lambda 自動デプロイ・bootstrap.zip パッケージング |
+| v35.2.0 | `fav deploy --target docker` — Dockerfile 自動生成・`docker build` 実行 |
+| v35.3.0 | `fav ci init` — GitHub Actions CI ワークフロー自動生成 |
+| v35.4.0 | `!Effect` E0374 ハードエラー化 |
+| v35.5.0 | Effect enum・effects フィールド・parse_effects_acc 完全削除 |
+| v35.6.0 | ctx 構文統一（MDX 128 件）+ Production Ready 宣言補完 |
+| v35.7.0 | `docs_server.rs !Effect` 完全除去 |
+| v35.8.0 | LSP / error_catalog / MCP / help !Effect 廃止完結 |
+| v35.9.0 | v36.0 前調整・安定化（E2E 確認・lambda-deploy デモ確認） |

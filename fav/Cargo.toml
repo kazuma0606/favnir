@@ -1,6 +1,6 @@
 [package]
 name = "fav"
-version = "35.8.0"
+version = "40.0.0"
 edition = "2024"
 
 [[bin]]

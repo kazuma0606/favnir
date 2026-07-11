@@ -3281,6 +3281,104 @@ impl VM {
                     _ => Err(self.error(artifact, "List.filter requires a List as first argument")),
                 }
             }
+            "List.join_on" => {
+                if args.len() != 3 {
+                    return Err(self.error(artifact, "List.join_on requires 3 arguments: (List, List, Fn)"));
+                }
+                let mut it = args.into_iter();
+                let left  = it.next().expect("left");
+                let right = it.next().expect("right");
+                let pred  = it.next().expect("pred");
+                match (left, right) {
+                    (VMValue::List(ls), VMValue::List(rs)) => {
+                        let mut out = Vec::new();
+                        'outer: for l in ls.iter() {
+                            for r in rs.iter() {
+                                let matched = self.call_value(
+                                    artifact,
+                                    pred.clone(),
+                                    vec![l.clone(), r.clone()],
+                                )?;
+                                match matched {
+                                    VMValue::Bool(true) => {
+                                        out.push(l.clone());
+                                        continue 'outer;
+                                    }
+                                    VMValue::Bool(false) => {}
+                                    other => {
+                                        return Err(self.error(
+                                            artifact,
+                                            &format!(
+                                                "List.join_on predicate must return Bool, got {}",
+                                                vmvalue_type_name(&other)
+                                            ),
+                                        ));
+                                    }
+                                }
+                            }
+                        }
+                        Ok(VMValue::List(FavList::new(out)))
+                    }
+                    _ => Err(self.error(artifact, "List.join_on requires (List, List, Fn)")),
+                }
+            }
+            "List.fan_out" => {
+                if args.len() != 2 {
+                    return Err(self.error(artifact, "List.fan_out requires 2 arguments: (List, Int)"));
+                }
+                let mut it = args.into_iter();
+                let list = it.next().expect("list");
+                let n    = it.next().expect("n");
+                match (list, n) {
+                    (VMValue::List(fl), VMValue::Int(n)) => {
+                        if n <= 0 {
+                            return Err(self.error(artifact, "List.fan_out: n must be >= 1"));
+                        }
+                        let items: Vec<VMValue> = fl.into_iter().collect();
+                        let chunk_size = {
+                            let total = items.len();
+                            if total == 0 { 1 } else { total.div_ceil(n as usize) }
+                        };
+                        let chunks: Vec<VMValue> = items
+                            .chunks(chunk_size)
+                            .map(|c| VMValue::List(FavList::new(c.to_vec())))
+                            .collect();
+                        Ok(VMValue::List(FavList::new(chunks)))
+                    }
+                    _ => Err(self.error(artifact, "List.fan_out requires (List, Int)")),
+                }
+            }
+            "List.fan_in" => {
+                if args.len() != 1 {
+                    return Err(self.error(artifact, "List.fan_in requires 1 argument: (List<List>)"));
+                }
+                let list = args.into_iter().next().expect("list");
+                match list {
+                    VMValue::List(outer) => {
+                        let mut out = Vec::new();
+                        for item in outer.iter() {
+                            match item {
+                                VMValue::List(inner) => {
+                                    for v in inner.iter() {
+                                        out.push(v.clone());
+                                    }
+                                }
+                                other => {
+                                    return Err(self.error(
+                                        artifact,
+                                        &format!(
+                                            "List.fan_in expects List<List>, got inner element {}",
+                                            vmvalue_type_name(&other)
+                                        ),
+                                    ));
+                                }
+                            }
+                        }
+                        Ok(VMValue::List(FavList::new(out)))
+                    }
+                    _ => Err(self.error(artifact, "List.fan_in requires a List<List> argument")),
+                }
+            }
             "List.take_while" => {
                 if args.len() != 2 {
                     return Err(self.error(artifact, "List.take_while requires 2 arguments"));
@@ -6574,6 +6672,53 @@ fn llm_call_chat(messages_json: &str) -> VMValue {
                 Err(ureq::Error::Transport(e)) => err_vm(VMValue::Str(e.to_string())),
             }
         }
+    }
+}
+
+// ── Llm.embed helper (v38.7.0) ───────────────────────────────────────────────
+
+/// テキストをベクトル化して JSON 文字列を返す。
+/// OpenAI provider の場合は /v1/embeddings を呼び出す。
+/// Anthropic provider の場合は Err を返す（Anthropic は embedding API を提供しない）。
+#[cfg(not(target_arch = "wasm32"))]
+fn llm_embed(text: &str) -> VMValue {
+    let provider = std::env::var("LLM_PROVIDER").unwrap_or_else(|_| "anthropic".to_string());
+    match provider.as_str() {
+        "openai" => {
+            let api_key = match std::env::var("OPENAI_API_KEY") {
+                Ok(k) => k,
+                Err(_) => return err_vm(VMValue::Str("OPENAI_API_KEY is not set".to_string())),
+            };
+            let model = std::env::var("LLM_EMBED_MODEL")
+                .unwrap_or_else(|_| "text-embedding-3-small".to_string());
+            let body = serde_json::json!({ "model": model, "input": text });
+            match ureq::post("https://api.openai.com/v1/embeddings")
+                .set("Authorization", &format!("Bearer {}", api_key))
+                .set("Content-Type", "application/json")
+                .send_string(&body.to_string())
+            {
+                Ok(resp) => {
+                    let t = match resp.into_string() {
+                        Ok(s) => s,
+                        Err(e) => return err_vm(VMValue::Str(e.to_string())),
+                    };
+                    match serde_json::from_str::<serde_json::Value>(&t) {
+                        Ok(v) => {
+                            let vec_val = &v["data"][0]["embedding"];
+                            ok_vm(VMValue::Str(vec_val.to_string()))
+                        }
+                        Err(e) => err_vm(VMValue::Str(e.to_string())),
+                    }
+                }
+                Err(ureq::Error::Status(_, resp)) => {
+                    err_vm(VMValue::Str(resp.into_string().unwrap_or_default()))
+                }
+                Err(ureq::Error::Transport(e)) => err_vm(VMValue::Str(e.to_string())),
+            }
+        }
+        _ => err_vm(VMValue::Str(
+            "Llm.embed_raw: embedding not supported for anthropic provider — set LLM_PROVIDER=openai".to_string(),
+        )),
     }
 }
 
@@ -12803,6 +12948,47 @@ fn vm_call_builtin(
                 schema_name, prompt, data
             );
             Ok(llm_call_complete(&full_prompt))
+        }
+
+        // ── Llm.stream_raw / Llm.function_call_raw / Llm.embed_raw (v38.7.0) ─────
+        "Llm.stream_raw" => {
+            let prompt = vm_string(
+                args.into_iter()
+                    .next()
+                    .ok_or_else(|| "Llm.stream_raw requires a prompt argument".to_string())?,
+                "Llm.stream_raw",
+            )?;
+            // v38.7.0: collect-all 実装（ureq 同期）。true SSE streaming は v39.x で実装予定。
+            Ok(llm_call_complete(&prompt))
+        }
+        "Llm.function_call_raw" => {
+            if args.len() != 2 {
+                return Err("Llm.function_call_raw requires 2 arguments (prompt, tools_json)".to_string());
+            }
+            let mut it = args.into_iter();
+            let prompt = vm_string(it.next().unwrap(), "Llm.function_call_raw prompt")?;
+            let tools_json = vm_string(it.next().unwrap(), "Llm.function_call_raw tools_json")?;
+            // `prompt` と `tools_json` は位置引数として展開されるため、
+            // それらの中に `{` / `}` が含まれてもパニックしない。
+            // 末尾の `{{...}}` は format! のエスケープで `{...}` というリテラル文字列になる（意図的）。
+            let full_prompt = format!(
+                "{}\n\nAvailable tools (JSON): {}\n\nRespond with JSON: {{\"name\": \"<tool>\", \"arguments\": {{...}}}}",
+                prompt, tools_json
+            );
+            Ok(llm_call_complete(&full_prompt))
+        }
+        "Llm.embed_raw" => {
+            let text = vm_string(
+                args.into_iter()
+                    .next()
+                    .ok_or_else(|| "Llm.embed_raw requires a text argument".to_string())?,
+                "Llm.embed_raw",
+            )?;
+            // llm_embed は ok_vm(...) か err_vm(...) でラップした VMValue を返す。
+            // Ok(llm_embed(...)) は Result::Ok(VMValue::Variant("ok"|"err", ...)) となる — 既存 Llm primitive と同じ慣習。
+            // Note: backend モジュール全体が lib.rs で #[cfg(not(target_arch = "wasm32"))] ガードされているため
+            // wasm32 ターゲットでこのアームがコンパイルされることはない。
+            Ok(llm_embed(&text))
         }
 
         // ── Snowflake.execute_raw / Snowflake.query_raw (v10.2.0) ────────────────

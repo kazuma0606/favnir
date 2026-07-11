@@ -13,4 +13,4 @@
 //       )
 //   }
 
-use client.{ complete, chat, extract }
+use client.{ complete, chat, extract, stream, function_call, embed }

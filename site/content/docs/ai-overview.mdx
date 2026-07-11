@@ -1,0 +1,96 @@
+---
+title: "AI 支援機能"
+description: "Favnir v38.x — AI がパイプライン開発を補助する機能群（fav suggest / fav generate / llm Rune / cookbook）"
+---
+
+# AI 支援機能
+
+Favnir v38.x では **AI がパイプライン開発を補助する** 機能群を提供します。
+
+## `fav suggest` — LLM によるエラー修正提案
+
+`fav check` が返すエラーコードから修正案を LLM で生成します。
+
+```bash
+fav check main.fav
+# main.fav:12:5: E0001 undefined variable `custmer_id`
+fav suggest E0001 main.fav:12
+# Suggestion: Did you mean `customer_id`? (typo)
+```
+
+## `fav generate --from sql` — SQL → Favnir 変換
+
+PostgreSQL / MySQL の SELECT / JOIN / WHERE / ORDER BY を Favnir パイプラインに自動変換します。
+
+```bash
+fav generate --from sql "SELECT id, name FROM orders WHERE status = 'shipped'"
+```
+
+詳細は [cookbook/sql-to-favnir](/cookbook/sql-to-favnir) を参照。
+
+## `fav generate --from csv` — CSV スキーマ推定
+
+CSV ファイルから `schema` + `expect` ブロックを自動生成します。
+
+```bash
+fav generate --from csv data/orders.csv
+```
+
+## LSP AI 補完
+
+`fav.toml` に `[lsp.ai] enabled = true` を設定すると、LLM による補完候補の rerank が有効になります。
+
+```toml
+[lsp.ai]
+enabled = true
+```
+
+## `fav explain --verbose` — コンテキスト付き説明
+
+LLM がコードの意図とコンテキストに即した説明・修正例を生成します。
+
+```bash
+fav explain --verbose main.fav
+```
+
+## `fav new --template rag-pipeline` — RAG テンプレート
+
+RAG（Retrieval-Augmented Generation）パイプラインのスターターテンプレートを生成します。
+
+```bash
+fav new my-rag --template rag-pipeline
+```
+
+詳細は [cookbook/rag-pipeline](/cookbook/rag-pipeline) を参照。
+
+## `llm.stream` / `llm.embed` — Llm Rune 強化
+
+v38.7.0 で追加された `llm.stream`・`llm.embed` により、ストリーミング応答と埋め込みベクトル生成をパイプライン内で直接扱えます。
+
+```favnir
+import llm
+
+stage AskLlm(prompt: String) -> String {
+    match llm.stream(prompt) {
+        Ok(response) => response
+        Err(e)       => String.concat("Error: ", e)
+    }
+}
+```
+
+詳細は [cookbook/llm-streaming](/cookbook/llm-streaming) を参照。
+
+## 環境変数まとめ
+
+| 変数 | 用途 |
+|---|---|
+| `ANTHROPIC_API_KEY` | `fav suggest` / `llm.complete` / `llm.stream` / `llm.function_call` |
+| `OPENAI_API_KEY` | `llm.embed`（`LLM_PROVIDER=openai` 必須） |
+| `LLM_PROVIDER` | `anthropic`（デフォルト）または `openai` |
+| `LLM_EMBED_MODEL` | Embedding モデル（デフォルト: `text-embedding-3-small`） |
+
+## 関連 Cookbook
+
+- [SQL → Favnir パイプライン自動変換](/cookbook/sql-to-favnir)
+- [RAG パイプライン](/cookbook/rag-pipeline)
+- [LLM ストリーミングレスポンス](/cookbook/llm-streaming)

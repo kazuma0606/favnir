@@ -1,0 +1,72 @@
+---
+title: "RAG パイプライン"
+description: "Retrieval-Augmented Generation パイプラインを Favnir で構築する — llm.embed でベクトル化し、関連チャンクを取得して LLM に渡す"
+---
+
+# RAG パイプライン
+
+Favnir の `llm.embed` と `llm.complete` を使って RAG（Retrieval-Augmented Generation）パイプラインを構築します。
+
+## クイックスタート
+
+```bash
+# テンプレートから RAG プロジェクトを作成
+fav new my-rag --template rag-pipeline
+cd my-rag
+ANTHROPIC_API_KEY=sk-... LLM_PROVIDER=openai OPENAI_API_KEY=sk-... fav run src/main.fav
+```
+
+## コード例
+
+```favnir
+import llm
+import csv
+
+stage Ingest -> List<String> {
+    csv.read_file("data/documents.csv")
+}
+
+stage Embed(docs: List<String>) -> List<String> {
+    docs |> List.map(fn(doc) {
+        match llm.embed(doc) {
+            Ok(vec) => vec
+            Err(_)  => "[]"
+        }
+    })
+}
+
+stage Retrieve(embeddings: List<String>) -> List<String> {
+    // TODO: ベクトル DB から関連チャンクを取得
+    // 例: embeddings |> VectorDB.search(ctx, top_k: 5)
+    embeddings
+}
+
+stage Generate(context: List<String>) -> String {
+    let prompt = String.join(context, "\n")
+    match llm.complete(prompt) {
+        Ok(answer) => answer
+        Err(e)     => String.concat("Error: ", e)
+    }
+}
+
+pipeline my_rag {
+    Ingest |> Embed |> Retrieve |> Generate
+}
+```
+
+## 環境変数
+
+| 変数 | 説明 |
+|---|---|
+| `LLM_PROVIDER` | `openai`（embed 必須）または `anthropic`（generate のみ） |
+| `OPENAI_API_KEY` | OpenAI API キー（`llm.embed` に必要） |
+| `ANTHROPIC_API_KEY` | Anthropic API キー（`llm.complete` に必要） |
+| `LLM_EMBED_MODEL` | Embedding モデル（デフォルト: `text-embedding-3-small`） |
+
+## ポイント
+
+- `fav new my-rag --template rag-pipeline` でスターターテンプレートを生成できます。
+- `llm.embed` は `LLM_PROVIDER=openai` 設定が必要です（Anthropic は embedding API を提供しません）。
+- `llm.embed` のシグネチャは v38.7.0 の新 API `(text: String) -> Result<String, String>` です（`pinecone-rag.mdx` の旧 2 引数 API `LLM.embed(config, text)` とは異なります）。
+- `Result<String, String>` の `Ok` 値は JSON 配列文字列（例: `"[0.12, -0.34, ...]"`）です。
+- Retrieve ステージは Pinecone / Weaviate / pgvector など任意のベクトル DB Rune に置き換え可能です。

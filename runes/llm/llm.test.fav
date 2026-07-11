@@ -16,3 +16,18 @@ test "llm_extract_no_key_is_err" {
     bind result <- llm.extract<String>("Extract the main topic.", "The sky is blue.")
     assert(Result.is_err(result))
 }
+
+test "llm_stream_no_key_is_err" {
+    bind result <- llm.stream("Hello")
+    assert(Result.is_err(result))
+}
+
+test "llm_function_call_no_key_is_err" {
+    bind result <- llm.function_call("Call a tool", "[]")
+    assert(Result.is_err(result))
+}
+
+test "llm_embed_no_provider_is_err" {
+    bind result <- llm.embed("Hello world")
+    assert(Result.is_err(result))
+}

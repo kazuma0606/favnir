@@ -1,0 +1,6 @@
+[rune]
+name        = "generic"
+version     = "0.1.0"
+description = "Generic Rune — 型パラメータ付き汎用 ETL 関数"
+license     = "MIT"
+authors     = ["Favnir Team"]

@@ -4,6 +4,455 @@ Favnir のバージョン履歴。形式は [Keep a Changelog](https://keepachan
 
 ---
 
+## [v40.0.0] — 2026-07-11
+
+### Added
+- Enterprise Governance マイルストーン宣言（v39.1〜v39.9 達成コンポーネント統合）
+- `MILESTONE.md` に v40.0.0 Enterprise Governance セクション追加
+- `README.md` に v40.0 マイルストーン宣言行追加
+- `v40000_tests` 4 テスト追加（version / changelog / milestone / readme）
+
+---
+
+## [v39.9.0] — 2026-07-11
+
+### Added
+- `site/content/docs/enterprise-governance.mdx` — v39 スプリント振り返り + Enterprise Governance 概要ドキュメント追加
+- `v39900_tests` 2 テスト追加（meta 2 件）
+
+---
+
+## [v39.8.0] — 2026-07-11
+
+### Added
+- `site/content/docs/governance/rbac.mdx` — RBAC ガバナンスドキュメント追加
+- `site/content/docs/governance/audit-log.mdx` — Audit Log ガバナンスドキュメント追加
+- `site/content/docs/governance/policy.mdx` — Policy ガバナンスドキュメント追加
+- `site/content/cookbook/multi-tenant-etl.mdx` — マルチテナント ETL クックブック追加
+- `site/content/cookbook/secret-manager-vault.mdx` — Secret Manager クックブック追加
+- `site/content/cookbook/ci-policy-gate.mdx` — CI ポリシーゲートクックブック追加
+- `v39800_tests` 3 テスト追加（meta 2 件 + site_has_governance_docs 1 件）
+
+---
+
+## [v39.7.0] — 2026-07-11
+
+### Changed
+- `driver.rs` `generate_ci_yaml` — `fav policy check --ci` ステップを CI YAML に自動追加
+- `fav ci init` 生成 YAML が Policy check ゲートを含むようになった
+- `v39700_tests` 2 テスト追加（meta 2 件）
+
+---
+
+## [v39.6.0] — 2026-07-11
+
+### Added
+- `fav/src/fav_audit.rs` — `fav audit`（依存 Rune ライセンス一覧）/ `fav audit --check`（GPL・CVE 検出、exit 1）追加
+- `v39600_tests` 2 テスト追加（meta 2 件）
+
+---
+
+## [v39.5.0] — 2026-07-11
+
+### Added
+- `runes/tenant/tenant.fav` — `tenant.db_schema` / `tenant.s3_prefix` / `tenant.validate_tenant` 追加
+- `runes/tenant/rune.toml` — Multi-tenant Rune メタデータ
+- `ctx.tenant_id` ベースの DB スキーマ切り替え・S3 prefix 分離スタブ実装
+- `v39500_tests` 4 テスト追加（meta 2 + テナント分離 E2E 2）
+
+---
+
+## [v39.4.0] — 2026-07-11
+
+### Added
+- `runes/secret/secret.fav` — `Secret.get_aws` / `Secret.get_vault` / `Secret.get_gcp` / `Secret.get_env` 追加
+- `runes/secret/rune.toml` — Secret Rune メタデータ
+- `fav.toml` `[secrets] backend` 宣言スキーマ（"aws"/"vault"/"gcp"/"env"）— 仕様定義のみ、toml.rs パースは後続バージョン
+- `v39400_tests` 3 テスト追加
+
+---
+
+## [v39.3.0] — 2026-07-11
+
+### Added
+- `fav/src/policy.rs` — `fav policy check` / `fav policy check --ci` コマンド追加
+- `policy { deny_runes / require_schema / require_tests / max_pipeline_stages }` ブロック仕様
+- `v39300_tests` 3 テスト追加
+
+---
+
+## [v39.2.0] — 2026-07-10
+
+### Added
+- `runes/audit/audit.fav` — Audit Log Rune（`log` / `start_trace` / `end_trace`）
+- `runes/audit/rune.toml` — Rune 設定ファイル
+- `fav.toml` `[audit]` セクション仕様（`enabled` / `output = "file"/"webhook"`）
+- `v39200_tests` 3 テスト追加
+
+---
+
+## [v39.1.0] — 2026-07-10
+
+### Added
+- `runes/auth/auth.fav` — RBAC Rune（`require_role` / `check_permission` / `verify_jwt`）
+- `runes/auth/rune.toml` — Rune 設定ファイル
+- `v39100_tests` 3 テスト追加
+
+---
+
+## [v39.0.0] — 2026-07-10
+
+### Added
+- Intelligence & Assistance マイルストーン宣言
+- `MILESTONE.md` に v39.0.0 宣言セクション追加
+- `README.md` に v39.0 マイルストーン宣言追加
+- `v39000_tests` 4 テスト追加
+
+---
+
+## [v38.9.0] — 2026-07-10
+
+### Added
+- `site/content/docs/ai-overview.mdx` — v38.x AI 支援機能概要ドキュメント
+- `v38900_tests` 4 テスト追加（`suggest_rs_has_llm_suggest` 品質確認含む）
+
+---
+
+## [v38.8.0] — 2026-07-10
+
+### Added
+- `site/content/cookbook/sql-to-favnir.mdx` — SQL → Favnir 変換 cookbook
+- `site/content/cookbook/rag-pipeline.mdx` — RAG パイプライン cookbook
+- `site/content/cookbook/llm-streaming.mdx` — LLM ストリーミング cookbook
+- `v38800_tests` 3 テスト追加
+
+---
+
+## [v38.7.0] — 2026-07-10
+
+### Added
+- `Llm.stream_raw` VM primitive（collect-all 実装、true SSE は v39.x）
+- `Llm.function_call_raw` VM primitive（ツール呼び出し JSON レスポンス）
+- `Llm.embed_raw` VM primitive（OpenAI Embeddings API、`LLM_PROVIDER=openai` 専用）
+- `llm_embed` ヘルパー関数 in `vm.rs`
+- `stream` / `function_call` / `embed` 公開関数 in `runes/llm/client.fav`
+- `v38700_tests` 3 テスト追加
+
+---
+
+## [v38.6.0] — 2026-07-10
+
+### Added
+- `fav new --template rag-pipeline` テンプレート追加（ingest/embed/retrieve/generate 4 ステージ）
+- `create_rag_pipeline_project` in `driver.rs`
+- `v38600_tests` 4 テスト追加
+
+---
+
+## [v38.5.0] — 2026-07-10
+
+### Added
+- `fav/src/explain_verbose.rs` — `fav explain --verbose <code> [location]` コマンド追加
+- `explain_verbose`: エラーコード概要 + コンテキスト + Fix suggestion を出力（LLM stub）
+- `v38500_tests` 5 テスト追加（code-reviewer 指摘対応: `explain_verbose_unknown_code` 追加、`location` コントロール文字フィルタ追加）
+
+---
+
+## [v38.4.0] — 2026-07-10
+
+### Added
+- `fav/src/toml.rs` — `LspAiConfig` + `parse_lsp_ai_config` 追加
+- `[lsp.ai] enabled = true` で LSP AI 補完を有効化（v38.7.0 で本実装）
+- `v38400_tests` 6 テスト追加（code-reviewer 指摘対応: `lsp_ai_explicit_false` / `lsp_ai_not_leaked_to_other_section` 追加）
+
+---
+
+## [v38.3.0] — 2026-07-10
+
+### Added
+- `fav/src/generate_csv.rs` — `fav generate --from csv <file>` コマンド追加
+- `csv_to_favnir`: CSV ヘッダーから `type Row` + `schema` + `expect` ブロックを生成
+- `v38300_tests` 4 テスト追加
+
+---
+
+## [v38.2.0] — 2026-07-10
+
+### Added
+- `fav/src/generate_sql.rs` — `fav generate --from sql <query>` コマンド追加
+- `sql_to_favnir`: SELECT / JOIN / WHERE パターンを Favnir パイプラインに変換
+- `v38200_tests` 6 テスト追加
+
+---
+
+## [v38.1.0] — 2026-07-10
+
+### Added
+- `fav/src/suggest.rs` — `fav suggest <error-code> <file:line>` コマンド追加
+- `builtin_hint`: E0001 / E0007 / E0008 の組み込みヒント
+- `ANTHROPIC_API_KEY` 設定時は LLM 提案（v38.7.0 で本実装予定、現在スタブ）
+- `v38100_tests` 3 テスト追加
+
+---
+
+## [v38.0.0] — 2026-07-09
+
+### Added
+- Multi-Source ETL Power マイルストーン宣言
+- `MILESTONE.md` に v38.0.0 宣言セクション追加
+- `README.md` に v38.0 マイルストーン宣言追加
+- `v38000_tests` 4 テスト追加
+
+---
+
+## [v37.9.0] — 2026-07-09
+
+### Added
+- `render_lineage_text` にサマリー行追加（`Total: N stage(s), M pipeline(s)`）
+- `site/content/docs/multi-source-etl.mdx` — Multi-Source ETL 機能一覧ドキュメント
+- `v37900_tests` 4 テスト追加
+
+---
+
+## [v37.8.0] — 2026-07-09
+
+### Added
+- `site/content/cookbook/join-two-tables.mdx` — `List.join_on` 2 テーブル結合レシピ
+- `site/content/cookbook/cdc-postgres-to-warehouse.mdx` — CDC Rune レシピ
+- `site/content/cookbook/fan-out-by-region.mdx` — `List.fan_out` / `List.fan_in` レシピ
+- `site/content/cookbook/generic-etl-function.mdx` — ジェネリック ETL レシピ
+- `site/content/cookbook/lineage-visualization.mdx` — リネージグラフ可視化レシピ
+- `v37800_tests` 3 テスト追加
+
+---
+
+## [v37.7.0] — 2026-07-09
+
+### Added
+- `fav new --template multi-source` — マルチソース ETL プロジェクトテンプレート追加
+- `TEMPLATE_GALLERY` に `"multi-source"` エントリ追加（6 エントリ）
+- `cmd_new_list` に `"data-contract"` / `"multi-source"` 行追加
+- `v37700_tests` 3 テスト追加
+
+---
+
+## [v37.6.0] — 2026-07-09
+
+### Added
+- `fav explain --lineage --format dot` — Graphviz DOT 形式のリネージグラフ出力
+- `fav explain --lineage --format svg` — インライン SVG 形式のリネージグラフ出力
+- `render_lineage_dot` / `render_lineage_svg` を `lineage.rs` に追加
+- `v37600_tests` 4 テスト追加
+
+---
+
+## [v37.5.0] — 2026-07-09
+
+### Added
+- `runes/cdc/cdc.fav` — Debezium JSON 形式の CDC イベント処理 Rune（MySQL / Postgres 対応）
+- `CDC.extract_op` / `CDC.op_name` / `CDC.is_insert` / `CDC.is_update` / `CDC.is_delete`
+- `CDC.filter_inserts` / `CDC.filter_deletes` — イベントリストフィルタリング
+- `v37500_tests` 4 テスト追加
+
+---
+
+## [v37.4.0] — 2026-07-09
+
+### Added
+- `List.fan_out(list, n)` VM ビルトイン追加（リストを n チャンクに分割）
+- `List.fan_in(lists)` VM ビルトイン追加（List<List> を 1 レベルフラット化）
+- `checker.rs` に `("List", "fan_out")` / `("List", "fan_in")` 戻り型定義追加
+- `v37400_tests` 4 テスト追加
+
+---
+
+## [v37.3.0] — 2026-07-09
+
+### Added
+- `List.join_on(left, right, pred)` VM ビルトイン追加（left semi-join）
+- `checker.rs` に `("List", "join_on")` 戻り型定義追加
+- `v37300_tests` 3 テスト追加
+
+---
+
+## [v37.2.0] — 2026-07-09
+
+### Added
+- 複数フィールド行制約 `R with { id: Int, name: String }` が call-site 型チェックを通ることをテストで保証
+- ネスト行型 `R with { address: { city: String } }` がパースを通ることを確認
+- `v37200_tests` 4 テスト追加
+
+---
+
+## [v37.1.0] — 2026-07-09
+
+### Added
+- `Deserialize` 型制約を `type_implements_bound` に明示追加（`fav/src/middle/checker.rs`）
+- `T with Deserialize` が型チェックと実行を通ることをテストで保証
+- Generic Rune (`runes/generic/`) — 型パラメータ付き汎用 ETL 関数の参照実装
+
+---
+
+## [v37.0.0] — 2026-07-09
+
+### Added
+- Data Quality First マイルストーン宣言（v37.0.0）
+- `MILESTONE.md` に v37.0.0 / v36.0.0 宣言セクション追加
+- `README.md` に v36.0 Deployment Story / v37.0 Data Quality First マイルストーン宣言追加
+
+---
+
+## [v36.9.0] — 2026-07-09
+
+### Changed
+- W025 `schema_mismatch` エラーメッセージに `[see also: E0380 schema_field_missing]` 参照を追加
+
+### Added
+- `fav validate` 成功時に `Validated: N schema(s), M field(s) checked` サマリー行を出力
+- `site/content/docs/data-quality.mdx` — Data Quality First 機能群統合ドキュメント新規作成
+
+---
+
+## [v36.8.0] — 2026-07-08
+
+### Added
+- `fav schema diff <old.fav> <new.fav>` — フィールドレベルのスキーマ差分と後方互換性チェック
+- `schema_diff` 純粋関数 — 追加フィールド（backward-compatible）/ 削除・型変更フィールド（BREAKING）を検出
+- `type_expr_kind` ヘルパー — Span を除外した型構造文字列生成（クロスファイル型比較に使用）
+
+---
+
+## [v36.7.0] — 2026-07-08
+
+### Added
+- `export_ge_suite(schema_name, field_names)` — Great Expectations 0.18.0 互換 Expectation Suite JSON 生成
+- `fav validate --export ge --output suite.json` — GE 互換エクスポートフラグ追加（`--export ge` 時に suite.json を出力）
+
+---
+
+## [v36.6.0] — 2026-07-08
+
+### Added
+- `error_catalog.rs` に E0380〜E0384（スキーマ不整合エラーコード）を追加
+  - `E0380` `schema_field_missing`: 必須フィールドがデータに存在しない
+  - `E0381` `schema_type_mismatch`: フィールド型がデータ値と一致しない
+  - `E0382` `schema_constraint_violated`: `where` 制約をデータ値が満たさない
+  - `E0383` `schema_duplicate_key`: スキーマ定義にフィールド名が重複している
+  - `E0384` `schema_extra_field`: データにスキーマ未定義のフィールドが含まれている
+
+---
+
+## [v36.5.0] — 2026-07-08
+
+### Added
+- Data Contract 規約 — `contracts/` ディレクトリ規約策定
+- `fav new --template data-contract` テンプレート追加
+- `fav contract check` コマンド — contracts/ ディレクトリのスキーマ定義を検証
+- `cmd_contract_check` / `validate_contract_file` — driver.rs に追加
+
+---
+
+## [v36.4.0] — 2026-07-08
+
+### Added
+- `fav validate --schema <schema.fav> <data.csv>` コマンド — CSV ヘッダーとスキーマフィールドの整合性を検証
+- `cmd_validate` — driver.rs に追加
+- `validate_schema_against_headers` — スキーマ照合の純粋関数（テスト可能）
+
+---
+
+## [v36.3.0] — 2026-07-08
+
+### Added
+- W025 `schema_mismatch` lint ルール — スキーマ定義に存在しないフィールドアクセスを警告
+- `check_w025_schema_mismatch` — `lint.rs` に追加
+- `collect_schema_fields` / `collect_field_accesses_*` ヘルパー関数群
+
+---
+
+## [v36.2.0] — 2026-07-08
+
+### Added
+- `expect <target> { <rules> }` ブロック構文（Data Quality ルール宣言）
+- `ast::ExpectStmt` 構造体・`Stmt::Expect` variant（v36.2.0）
+- `parse_expect_stmt` — expect ブロックパーサー
+
+---
+
+## [v36.1.0] — 2026-07-08
+
+### Added
+- `schema Name { field: Type }` インライン schema 定義構文（Data Quality First スプリント開始）
+- `ast::SchemaDef` 構造体・`Item::SchemaDef` variant（v36.1.0）
+- `parse_schema_def` — トップレベル schema 宣言パーサー（`schema Ident {` 形式）
+- 既存の `schema "uri"` 形式（文字列 URI 参照、v18.4/v32.4）との衝突なし
+
+---
+
+## [v36.0.0] — 2026-07-08
+
+### Milestone: Deployment Story
+
+- `fav deploy --target lambda` で Lambda に自動デプロイ（bootstrap.zip パッケージング）
+- `fav deploy --target docker` で Docker イメージ生成（Dockerfile 自動生成・`docker build` 実行）
+- `fav ci init` で GitHub Actions CI ワークフロー自動生成
+- `!Effect` 廃止完結（v35.4〜v35.8）— すべての API が `ctx: AppCtx` ベースに統一
+- v35.1〜v35.9 スプリント完了、Deployment Story マイルストーン宣言
+- ★ `cargo clean`（x.0.0 クリーンアップ）実施
+
+---
+
+## [35.3.0] — 2026-07-06
+
+### Added
+- `fav ci init` — GitHub Actions CI ワークフロー自動生成コマンド
+- `fav ci init --dry-run` — ファイル書き出しなしのプレビューモード
+- `fav ci init --out-dir <dir>` — 出力先ディレクトリ指定
+- `generate_ci_yaml` — check + lint + test の 3 ステップを含む CI YAML テンプレート生成関数
+- `.github/workflows/ci.yml` の自動生成（親ディレクトリ自動作成）
+
+---
+
+## [35.2.0] — 2026-07-06
+
+### Added
+- `fav deploy --target docker` — Docker イメージ自動ビルドコマンド（`docker build` 実行）
+- `fav deploy --tag <tag>` — Docker イメージタグ指定フラグ（デフォルト: `<project-name>:latest`）
+- `generate_dockerfile_native` — ネイティブバイナリ向け Dockerfile テンプレート（`debian:bookworm-slim` ベース、`fav build --target native` の出力を実行）
+- `fav.toml` `[deploy]` セクションに `tag` フィールドを追加
+- Docker CLI 不在時は警告を出してスキップ（exit 0 のまま）
+
+---
+
+## [35.1.0] — 2026-07-06
+
+### Added
+- `fav deploy --target lambda` — Lambda への自動デプロイコマンド（AWS CLI 経由、SDK 依存なし）
+- `fav deploy --package-only` — bootstrap.zip 生成のみ（アップロードなし）
+- `fav deploy --output <path>` — --package-only 時の zip 出力先指定
+- `fav.toml` の `[deploy]` セクションに `output` フィールドを追加
+- `package_lambda` pub fn — ネイティブバイナリを bootstrap.zip にパッケージング（Lambda provided.al2 規約）
+- `examples/lambda-deploy/` — Lambda デプロイデモプロジェクト（fav.toml + main.fav + README）
+- `site/content/docs/deploy/lambda.mdx` — Lambda デプロイガイドスタブ（v35.8 で充実化予定）
+
+---
+
+## [v35.9.0] — 2026-07-07
+
+### Changed
+- 安定化スプリント — v35.1〜v35.8 の機能統合確認・v36.0 前調整
+
+### Verified
+- `!Effect` 廃止完結（v35.4〜v35.8）: lsp/completion.rs・docs_server.rs・mcp/mod.rs・error_catalog.rs すべてクリーン
+- `examples/lambda-deploy/` — Lambda デプロイデモ（v36.0 前提条件）確認済み
+- `site/content/docs/deploy/lambda.mdx` — Lambda デプロイドキュメント確認済み
+- `versions/roadmap/roadmap-v35.1-v36.0.md` — Deployment Story 計画確認済み
+
+### Added
+- `fav/src/driver.rs` — `v35900_tests`（5 件）追加
+
+---
+
 ## [v35.8.0] — 2026-07-05
 
 ### Changed

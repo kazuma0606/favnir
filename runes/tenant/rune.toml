@@ -1,0 +1,8 @@
+[rune]
+name        = "tenant"
+version     = "1.0.0"
+description = "Multi-tenant Rune for DB schema switching and S3 prefix isolation"
+entry       = "tenant.fav"
+effects     = []
+
+[dependencies]

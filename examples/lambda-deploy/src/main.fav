@@ -1,0 +1,7 @@
+pipeline LambdaDemo {
+  stage Process {
+    let msg = "Hello from Favnir on Lambda!"
+    IO.println(msg)
+    msg
+  }
+}

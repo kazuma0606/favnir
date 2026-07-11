@@ -58,6 +58,12 @@ mod middle;
 mod notebook;
 mod registry;
 mod rune_cmd;
+mod suggest;
+mod policy;
+mod fav_audit;
+pub(crate) mod generate_sql;
+pub(crate) mod generate_csv;
+pub(crate) mod explain_verbose;
 mod schemas;
 mod incremental;
 mod parallel;
@@ -84,11 +90,12 @@ use driver::{
     cmd_doc_builtins, cmd_doc_site, cmd_doc_serve, cmd_docs,
     cmd_exec, cmd_explain, cmd_explain_code, cmd_explain_compiler, cmd_explain_diff, cmd_explain_error,
     cmd_explain_error_list, cmd_explain_error_list_json, cmd_explain_lineage, cmd_explain_sla, cmd_fmt, cmd_graph,
-    cmd_infer, cmd_infer_delta, cmd_infer_iceberg, cmd_infer_postgres, cmd_infer_proto, cmd_infer_snowflake, cmd_install, cmd_lint, cmd_migrate, cmd_upgrade, cmd_new, cmd_new_list,
+    cmd_infer, cmd_infer_delta, cmd_infer_iceberg, cmd_infer_postgres, cmd_infer_proto, cmd_infer_snowflake, cmd_install, cmd_lint, cmd_validate, cmd_contract_check, cmd_schema_diff, cmd_migrate, cmd_upgrade, cmd_new, cmd_new_list,
     cmd_profile, cmd_profile_compare, cmd_scaffold, cmd_transpile,
     cmd_publish, cmd_registry, cmd_repl, cmd_run, cmd_search, cmd_test, cmd_watch,
     cmd_add, cmd_update, cmd_remove, cmd_login, cmd_info,
     cmd_generate_api, cmd_api_serve,
+    cmd_ci_init,
 };
 use rune_cmd::cmd_rune;
 use std::process;
@@ -96,7 +103,7 @@ use std::process;
 // 笏笏 help text (4-6) 笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏
 
 const HELP: &str = "\
-fav - Favnir language toolchain v4.12.0
+fav - Favnir language toolchain v36.8.0
 
 USAGE:
     fav <COMMAND> [OPTIONS] [FILE]
@@ -125,7 +132,7 @@ COMMANDS:
                   With --schema, print SQL CREATE TABLE / CHECK output instead.
                   With --format json, emit structured explain JSON.
                   If <file> is omitted, explains all files in the project.
-    explain --lineage [--format <text|json|mermaid|d2>] [file]
+    explain --lineage [--format <text|json|mermaid|d2|dot|svg>] [file]
                   Static lineage analysis: show Sources / Sinks / Transformations / Pipelines.
                   Extracts DB table names from SQL string literals and DbRead/DbWrite lineage tags.
     docs [file] [--port <n>] [--no-open]
@@ -174,6 +181,20 @@ COMMANDS:
                   Run static lint checks (L001-L008) on a .fav file.
                   With --warn-only, always exit 0 (warnings only).
                   If <file> is omitted, lints all .fav files in the project.
+    validate --schema <schema.fav> <data.csv> [--export ge] [--output suite.json]
+                  Validate CSV data against a schema definition.
+                  Checks that all schema fields are present as CSV headers.
+                  Comparison is case-sensitive. Argument order is flexible.
+                  Exit 0 if valid, exit 1 if any fields are missing.
+                  --export ge: export a Great Expectations 0.18.0 suite JSON on success.
+                  --output <file>: output path for --export (default: suite.json).
+    contract check [dir]
+                  Check that all .fav files in contracts/ (or [dir]) contain
+                  at least one schema definition.
+                  Default directory: ./contracts/
+    schema diff <old.fav> <new.fav>
+                  Show field-level diff between two schema files.
+                  Marks added fields as backward-compatible, removed/type-changed as BREAKING.
     lsp [--port <n>]
                   Run the Favnir Language Server scaffold.
     mcp           Start MCP server (JSON-RPC over stdin/stdout, protocol 2024-11-05).
@@ -197,12 +218,15 @@ COMMANDS:
     explain-error --list [--format <text|json>]
                   List all known error codes with titles.
                   With --format json, emit structured JSON (for site generation).
-    deploy [--target <ecs|k8s|fly|aws-lambda>] [--env <name>] [--function <name>]
-           [--region <r>] [--out-dir <path>] [--dry-run]
+    deploy [--target <lambda|docker|ecs|k8s|fly|aws-lambda>] [--env <name>] [--function <name>]
+           [--region <r>] [--out-dir <path>] [--dry-run] [--package-only] [--output <zip>] [--tag <tag>]
                   Deploy pipeline to a container or serverless platform.
-                  Targets: ecs (AWS ECS Fargate), k8s (Kubernetes CronJob),
-                           fly (Fly.io), aws-lambda (default, packages & uploads to S3/Lambda).
+                  Targets: lambda (AWS Lambda, direct zip upload), docker (Docker image build),
+                           ecs (AWS ECS Fargate), k8s (Kubernetes CronJob),
+                           fly (Fly.io), aws-lambda (legacy, packages & uploads to S3/Lambda).
                   Generates Dockerfile + platform config in --out-dir (default .fav-deploy/).
+    ci init [--out-dir <dir>] [--dry-run]
+                  Generate .github/workflows/ci.yml (check + lint + test steps).
     install [<name>] [--force]
                   Install [dependencies] from fav.toml into ./runes/ (Semver deps)
                   or write fav.lock (path/registry deps). Optionally install a single dep by name.
@@ -716,6 +740,22 @@ fn main_impl() {
         Some("explain") => {
             if args.get(2).map(|s| s.as_str()) == Some("compiler") {
                 cmd_explain_compiler();
+                return;
+            }
+            if args.iter().any(|a| a == "--verbose") {
+                let error_code = args.iter().skip(2)
+                    .find(|a| !a.starts_with('-'))
+                    .map(|s| s.as_str())
+                    .unwrap_or("UNKNOWN");
+                // NOTE: 位置引数は「ハイフン始まりでないトークン」で検出する単純方式。
+                // 将来 `--format json` のような値付きフラグが追加された場合は
+                // 名前付きオプション形式（`--code <CODE> --location <LOC>`）への移行を検討すること。
+                let location = args.iter().skip(2)
+                    .filter(|a| !a.starts_with('-'))
+                    .nth(1)
+                    .map(|s| s.as_str())
+                    .unwrap_or("");
+                println!("{}", explain_verbose::explain_verbose(error_code, location));
                 return;
             }
             if args.iter().any(|a| a == "--sla") {
@@ -1379,6 +1419,83 @@ fn main_impl() {
             cmd_lint(file.as_deref(), warn_only, deny_warnings, cli_allow);
         }
 
+        // fav validate --schema <schema.fav> <data.csv> [--export ge] [--output suite.json]  (v36.4.0, v36.7.0)
+        Some("validate") => {
+            let mut schema_file: Option<String> = None;
+            let mut data_file: Option<String> = None;
+            let mut export_fmt: Option<String> = None;
+            let mut output_file: Option<String> = None;
+            let mut i = 2usize;
+            while i < args.len() {
+                match args[i].as_str() {
+                    "--schema" => {
+                        i += 1;
+                        schema_file = args.get(i).cloned();
+                    }
+                    "--export" => {
+                        i += 1;
+                        export_fmt = Some(args.get(i).cloned().unwrap_or_else(|| {
+                            eprintln!("error: --export requires a value (e.g. --export ge)");
+                            process::exit(1);
+                        }));
+                    }
+                    "--output" => {
+                        i += 1;
+                        output_file = Some(args.get(i).cloned().unwrap_or_else(|| {
+                            eprintln!("error: --output requires a value (e.g. --output suite.json)");
+                            process::exit(1);
+                        }));
+                    }
+                    a if !a.starts_with('-') => {
+                        data_file = Some(a.to_string());
+                    }
+                    _ => {}
+                }
+                i += 1;
+            }
+            cmd_validate(
+                schema_file.as_deref(),
+                data_file.as_deref(),
+                export_fmt.as_deref(),
+                output_file.as_deref(),
+            );
+        }
+
+        // fav contract check [dir]  (v36.5.0)
+        Some("contract") => {
+            match args.get(2).map(|s| s.as_str()) {
+                Some("check") => {
+                    let dir = args.get(3).map(|s| s.as_str());
+                    cmd_contract_check(dir);
+                }
+                sub => {
+                    eprintln!(
+                        "error: unknown contract subcommand `{}`; expected: check",
+                        sub.unwrap_or("(none)")
+                    );
+                    process::exit(1);
+                }
+            }
+        }
+
+        // fav schema diff <old.fav> <new.fav>  (v36.8.0)
+        Some("schema") => {
+            match args.get(2).map(|s| s.as_str()) {
+                Some("diff") => {
+                    let old_file = args.get(3).map(|s| s.as_str());
+                    let new_file = args.get(4).map(|s| s.as_str());
+                    cmd_schema_diff(old_file, new_file);
+                }
+                sub => {
+                    eprintln!(
+                        "error: unknown subcommand `{}` for `fav schema`\n  usage: fav schema diff <old.fav> <new.fav>",
+                        sub.unwrap_or("(none)")
+                    );
+                    process::exit(1);
+                }
+            }
+        }
+
         Some("doc") => {
             // fav doc --builtins [--format json|markdown] [--out <file>]
             if args.iter().any(|a| a == "--builtins") {
@@ -1883,6 +2000,37 @@ fn main_impl() {
             cmd_registry(subcommand, &sub_args);
         }
 
+        Some("suggest") => {
+            let error_code = args.get(2).map(|s| s.as_str()).unwrap_or("E0001");
+            let location   = args.get(3).map(|s| s.as_str()).unwrap_or("");
+            if let Err(e) = suggest::cmd_suggest(error_code, location) {
+                eprintln!("fav suggest error: {}", e);
+                std::process::exit(1);
+            }
+        }
+
+        Some("policy") => {
+            let sub = args.get(2).map(|s| s.as_str()).unwrap_or("check");
+            let ci_mode = args.iter().any(|a| a == "--ci");
+            if sub == "check" {
+                if let Err(e) = policy::cmd_policy_check(ci_mode) {
+                    eprintln!("fav policy error: {}", e);
+                    std::process::exit(1);
+                }
+            } else {
+                eprintln!("fav policy: unknown subcommand: {}", sub);
+                std::process::exit(1);
+            }
+        }
+
+        Some("audit") => {
+            let check_mode = args.iter().any(|a| a == "--check");
+            if let Err(e) = fav_audit::cmd_audit(check_mode) {
+                eprintln!("fav audit error: {}", e);
+                std::process::exit(1);
+            }
+        }
+
         Some("search") => {
             let query = args.get(2).map(|s| s.as_str()).unwrap_or("");
             cmd_search(query);
@@ -1943,6 +2091,9 @@ fn main_impl() {
             let mut trigger_file: Option<String> = None;
             let mut target: Option<String>  = None;  // v22.8.0
             let mut out_dir: Option<String> = None;  // v22.8.0
+            let mut package_only = false;             // v35.1.0
+            let mut output: Option<String>  = None;  // v35.1.0
+            let mut tag_arg: Option<String> = None;  // v35.2.0
             let mut i = 2usize;
             while i < args.len() {
                 match args[i].as_str() {
@@ -1987,7 +2138,7 @@ fn main_impl() {
                         target = Some(
                             args.get(i + 1)
                                 .unwrap_or_else(|| {
-                                    eprintln!("error: --target requires a value (ecs|k8s|fly|aws-lambda)");
+                                    eprintln!("error: --target requires a value (lambda|docker|ecs|k8s|fly|aws-lambda)");
                                     process::exit(1);
                                 })
                                 .clone(),
@@ -2016,6 +2167,32 @@ fn main_impl() {
                         );
                         i += 2;
                     }
+                    "--package-only" => {  // v35.1.0
+                        package_only = true;
+                        i += 1;
+                    }
+                    "--output" => {  // v35.1.0
+                        output = Some(
+                            args.get(i + 1)
+                                .unwrap_or_else(|| {
+                                    eprintln!("error: --output requires a file path");
+                                    process::exit(1);
+                                })
+                                .clone(),
+                        );
+                        i += 2;
+                    }
+                    "--tag" => {  // v35.2.0
+                        tag_arg = Some(
+                            args.get(i + 1)
+                                .unwrap_or_else(|| {
+                                    eprintln!("error: --tag requires a value (e.g. my-pipeline:latest)");
+                                    process::exit(1);
+                                })
+                                .clone(),
+                        );
+                        i += 2;
+                    }
                     other => {
                         eprintln!("error: unexpected deploy argument `{}`", other);
                         process::exit(1);
@@ -2032,7 +2209,52 @@ fn main_impl() {
                     dry_run,
                     target.as_deref(),
                     out_dir.as_deref(),
+                    package_only,
+                    output.as_deref(),
+                    tag_arg.as_deref(),
                 );
+            }
+        }
+
+        Some("ci") => {
+            match args.get(2).map(|s| s.as_str()) {
+                Some("init") => {
+                    let mut ci_out_dir: Option<String> = None;
+                    let mut ci_dry_run = false;
+                    let mut i = 3usize;
+                    while i < args.len() {
+                        match args[i].as_str() {
+                            "--out-dir" => {
+                                let val = args.get(i + 1)
+                                    .unwrap_or_else(|| {
+                                        eprintln!("error: --out-dir requires a directory path");
+                                        process::exit(1);
+                                    })
+                                    .clone();
+                                if val.contains("..") {
+                                    eprintln!("error: --out-dir must not contain '..'");
+                                    process::exit(1);
+                                }
+                                ci_out_dir = Some(val);
+                                i += 2;
+                            }
+                            "--dry-run" => { ci_dry_run = true; i += 1; }
+                            other => {
+                                eprintln!("error: unexpected ci init argument `{}`", other);
+                                process::exit(1);
+                            }
+                        }
+                    }
+                    cmd_ci_init(ci_out_dir.as_deref(), ci_dry_run);
+                }
+                Some(other) => {
+                    eprintln!("error: unknown ci subcommand `{}`", other);
+                    process::exit(1);
+                }
+                None => {
+                    eprintln!("usage: fav ci init [--out-dir <dir>] [--dry-run]");
+                    process::exit(1);
+                }
             }
         }
 
@@ -2245,6 +2467,38 @@ fn main_impl() {
                     process::exit(1);
                 });
                 cmd_generate_api(&src, format, as_json, out.as_deref());
+            }
+            Some("--from") => {
+                let fmt = args.get(3).map(|s| s.as_str()).unwrap_or("");
+                match fmt {
+                    "sql" => {
+                        let sql = args.get(4).map(|s| s.as_str()).unwrap_or_else(|| {
+                            eprintln!("error: `fav generate --from sql` requires a SQL query");
+                            eprintln!("usage: fav generate --from sql \"SELECT id FROM users\"");
+                            process::exit(1)
+                        });
+                        let output = generate_sql::sql_to_favnir(sql);
+                        println!("{}", output);
+                    }
+                    "csv" => {
+                        let csv_path = args.get(4).map(|s| s.as_str()).unwrap_or_else(|| {
+                            eprintln!("error: `fav generate --from csv` requires a CSV file path");
+                            eprintln!("usage: fav generate --from csv <file.csv>");
+                            process::exit(1)
+                        });
+                        match generate_csv::csv_to_favnir(csv_path) {
+                            Ok(output) => println!("{}", output),
+                            Err(e) => {
+                                eprintln!("fav generate error: {}", e);
+                                process::exit(1);
+                            }
+                        }
+                    }
+                    _ => {
+                        eprintln!("error: unsupported --from format {:?}. Supported: sql, csv", fmt);
+                        process::exit(1);
+                    }
+                }
             }
             other => {
                 eprintln!("error: unknown generate subcommand {:?}", other);

@@ -1,0 +1,41 @@
+---
+title: "CDC（Postgres → データウェアハウス）"
+description: "CDC Rune で Debezium イベントをフィルタリングしてデータウェアハウスに書き込む"
+---
+
+# CDC（Postgres → データウェアハウス）
+
+CDC Rune（v37.5.0）と Debezium JSON イベントを使い、INSERT/UPDATE イベントのみをウェアハウスに書き込みます。
+
+## コード例
+
+```favnir
+import runes/cdc
+import runes/postgres as wh
+
+stage ConsumeEvents -> List<String> {
+    // Kafka / Kinesis 等から Debezium JSON イベントを取得（省略）
+    []
+}
+
+stage FilterAndLoad(events: List<String>) -> Int {
+    bind inserts <- CDC.filter_inserts(events)
+    inserts
+        |> List.map(|e| wh.execute(ctx, "INSERT INTO warehouse.events (payload) VALUES ($1)", [e]))
+        |> List.length
+}
+
+pipeline cdc_pipeline {
+    ConsumeEvents |> FilterAndLoad
+}
+```
+
+## ポイント
+
+- `CDC.filter_inserts(events)` は `"op":"c"` を含むイベントのみを返します。
+- `CDC.extract_op(json)` で個別イベントの op コード（"c"/"u"/"d"/"r"）を取得できます。
+- JSON はコンパクト形式（スペースなし）のみ対応: `{"op":"c",...}`
+
+## 関連
+
+- [CDC Rune ドキュメント](/docs/runes/cdc)

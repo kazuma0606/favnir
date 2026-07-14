@@ -1,4 +1,4 @@
-// runes/kafka/kafka.fav — Kafka Rune (v25.7.0)
+// runes/kafka/kafka.fav — Kafka Rune (v40.6.0)
 //
 // 使い方:
 //   import rune "kafka"
@@ -15,7 +15,7 @@
 
 // ブローカーアドレス文字列ラッパー型
 // "" -> KAFKA_BOOTSTRAP_BROKERS 環境変数 -> "localhost:9092"
-type KafkaConn(String)
+public type KafkaConn(String)
 
 // ブローカーへの接続確認（list_topics ping）
 public fn connect(brokers: String) -> Result<KafkaConn, String> {
@@ -43,4 +43,12 @@ public fn consume_batch(conn: KafkaConn, topic: String, group_id: String, max_co
 // トピックを作成する（partition 数指定）
 public fn create_topic(conn: KafkaConn, topic: String, partitions: Int) -> Result<Unit, String> {
     Kafka.create_topic_raw(conn, topic, partitions)
+}
+
+// ウィンドウ単位でメッセージを収集する（v40.6.0 スタブ）
+// window_secs 秒分のメッセージを JSON 配列文字列で返す。
+// 実際のウィンドウ集計ロジックは v40.7 以降で実装。
+// 注意: group_id は内部では使用しない（consume_batch_raw のシグネチャ制約により window_secs を count として渡す）
+public fn consume_windowed(conn: KafkaConn, topic: String, group_id: String, window_secs: Int) -> Result<String, String> {
+    Kafka.consume_batch_raw(conn, topic, window_secs)
 }

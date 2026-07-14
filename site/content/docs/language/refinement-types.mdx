@@ -89,3 +89,36 @@ fn f(x: Int where { x > 0 }) -> Int { x }
 // Type-level where clause (type validation)
 type PositiveInt = Int where { value > 0 }
 ```
+
+## Type Alias Refinement (v41.1.0+)
+
+In addition to parameter refinement (the `where { expr }` form above), you can attach invariants to a `type` alias using the closure form `where |v| pred`. The variable `v` refers to the value of the type:
+
+```fav
+type PositiveInt = Int    where |v| v >= 0
+type Name        = String where |v| String.length(v) > 0
+```
+
+**Comparison with parameter refinement**:
+
+| | Parameter refinement | Type alias refinement |
+|---|---|---|
+| Syntax | `fn f(x: Int where { x > 0 })` | `type P = Int where \|v\| v >= 0` |
+| Scope | Single function parameter | Reusable named type |
+| Variable | Parameter name used directly | Explicit closure variable `\|v\|` |
+
+## W030: Redundant Refinement Guard (v41.7.0+)
+
+If a variable has a refinement alias type and the function body re-checks the same condition in an `if` guard, the W030 lint is emitted:
+
+```fav
+type PositiveInt = Int where |v| v >= 0
+
+fn double(x: PositiveInt) -> Int {
+  if x >= 0 {  // W030: redundant guard — already guaranteed by PositiveInt invariant
+    x * 2
+  } else { 0 }
+}
+```
+
+Remove the redundant guard to fix W030. The refinement type invariant already guarantees the condition holds.

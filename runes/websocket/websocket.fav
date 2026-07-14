@@ -1,0 +1,17 @@
+// runes/websocket/websocket.fav — WebSocket push sink (v42.6.0)
+//
+// Usage:
+//   bind _ <- WebSocket.send(ctx, "ws://host/path", message)
+//   bind _ <- WebSocket.broadcast(ctx, "ws://host/path", messages)
+
+// 単一メッセージを WebSocket で送信する。
+// Returns Ok(()) on success, Err(message) on failure.
+public fn send(ctx: AppCtx, url: String, message: String) -> Result<Unit, String> {
+    WebSocket.send_raw(ctx, url, message)
+}
+
+// 複数メッセージを WebSocket で一斉送信する（broadcast）。
+// Returns Ok(count) — 送信成功数（stub では messages の長さを返す）。
+public fn broadcast(ctx: AppCtx, url: String, messages: List<String>) -> Result<Int, String> {
+    WebSocket.broadcast_raw(ctx, url, messages)
+}

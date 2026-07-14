@@ -203,6 +203,7 @@ pub struct TypeDef {
     pub type_params: Vec<GenericParam>, // e.g. ["T", "U"] for type Pair<T, U>
     pub with_interfaces: Vec<String>,
     pub invariants: Vec<Expr>,
+    pub is_opaque: bool,   // v43.11.0: opaque type キーワード（デフォルト false）
     pub body: TypeBody,
     pub span: Span,
 }
@@ -605,6 +606,14 @@ pub struct CircuitBreakerAnnotation {
     pub span: Span,
 }
 
+/// v42.5.0: `#[max_inflight(n)]` annotation on stage definitions.
+/// n は同時処理上限（正の整数 ≥ 1）。runtime 強制は v44.x 以降。
+#[derive(Debug, Clone)]
+pub struct MaxInflightAnnotation {
+    pub n: u64,
+    pub span: Span,
+}
+
 // ── FnDef (2-5) ───────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone)]
@@ -646,6 +655,8 @@ pub struct TrfDef {
     pub retry_ann: Option<RetryAnnotation>,
     /// v22.6.0: `#[circuit_breaker(threshold = F, window = N)]` annotation.
     pub circuit_breaker: Option<CircuitBreakerAnnotation>,
+    /// v42.5.0: `#[max_inflight(n)]` annotation.
+    pub max_inflight: Option<MaxInflightAnnotation>,
     pub span: Span,
 }
 
@@ -901,6 +912,39 @@ pub enum Item {
     },
     /// `schema Orders { id: Int, amount: Float }` — インライン schema 定義（v36.1.0）
     SchemaDef(SchemaDef),
+    /// `cep pattern Name { ... }` — CEP パターン宣言 (v42.1.0)
+    CepPatternDef(CepPatternDef),
+}
+
+// ── CepPatternDef (v42.1.0) ──────────────────────────────────────────────────
+
+/// CEP パターン式 (v42.2.0)
+#[derive(Debug, Clone)]
+pub enum CepExpr {
+    /// 単純イベント名: `Login`
+    Event(String),
+    /// 順序結合: `seq(Login, Purchase)`
+    Seq(Vec<CepExpr>),
+    /// 選択: `any(DiskFull, OOM, NetworkDown)`
+    Any(Vec<CepExpr>),
+    /// 否定: `not(Login)`
+    Not(Box<CepExpr>),
+}
+
+/// 単一イベント節: `Login within 60` (v42.1.0); expr 拡張 v42.2.0
+#[derive(Debug, Clone)]
+pub struct CepClause {
+    pub expr: CepExpr,          // v42.2.0: event: String → expr: CepExpr
+    pub within_secs: Option<i64>,
+    pub span: Span,
+}
+
+/// `cep pattern Name { clause... }` — CEP パターン宣言 (v42.1.0)
+#[derive(Debug, Clone)]
+pub struct CepPatternDef {
+    pub name: String,
+    pub body: Vec<CepClause>,
+    pub span: Span,
 }
 
 // ── SchemaDef (v36.1.0) ──────────────────────────────────────────────────────
@@ -949,6 +993,7 @@ impl Item {
             Item::UseAlias { span, .. } => span,
             Item::PipelineDef(pd) => &pd.span,
             Item::SchemaDef(s) => &s.span,
+            Item::CepPatternDef(c) => &c.span,
         }
     }
 }

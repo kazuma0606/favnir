@@ -1,0 +1,98 @@
+---
+title: "Type Inference Guide"
+description: "Favnir の型推論を活用して冗長な型注釈を省略する方法"
+---
+
+# Type Inference Guide
+
+Favnir v43 では 6 カテゴリの型推論をサポートしています。このガイドでは、型注釈を省略できるケースと、省略すべきでないケースを実例で解説します。
+
+---
+
+## 1. 戻り値型推論（Return type omission）
+
+ブロック末尾式から戻り値型を推論できる場合、`->` 注釈を省略できます。
+
+```favnir
+// 推論前（v43.1 以前）
+fn double(x: Int) -> Int { x * 2 }
+
+// 推論後（v43.1 以降）
+fn double(x: Int) { x * 2 }
+```
+
+> **W031**: `fn answer() -> Int { 42 }` のようにリテラルだけを返す場合、lint が冗長な戻り値型注釈を警告します。
+
+---
+
+## 2. ジェネリック型引数推論（Call-site generic inference）
+
+関数呼び出しの引数から型変数を確定できる場合、明示的な型引数は不要です。
+
+```favnir
+fn identity<A>(x: A) -> A { x }
+
+// 明示（v43.3 以前）
+bind v <- identity<Int>(42)
+
+// 推論後（v43.3 以降）
+bind v <- identity(42)   // A = Int を引数から確定
+```
+
+> **W032**: `csv.parse<User>(text)` のように型引数が引数から自明な場合、lint が警告します。
+
+---
+
+## 3. ラムダ引数型推論（Contextual lambda inference）
+
+パイプライン上流の型からラムダ引数型を伝播します。
+
+```favnir
+// 明示
+[1, 2, 3] |> List.map(|x: Int| x * 2)
+
+// 推論後（v43.5 以降）— List<Int> から x: Int が伝播
+[1, 2, 3] |> List.map(|x| x * 2)
+```
+
+---
+
+## 4. パイプライン型伝播（Pipeline stage typing）
+
+`stage` 内の中間型を明示せずとも型チェッカーが伝播・確定します。
+
+```favnir
+stage Transform {
+  bind rows  <- Csv.read("data.csv")           // Stream<Row>  — 推論
+  bind nums  <- List.map(rows, |r| r.value)    // List<Float>  — 推論
+  bind valid <- List.filter(nums, |v| v > 0.0) // List<Float>  — 推論
+}
+```
+
+---
+
+## 5. opaque type によるカプセル化
+
+`opaque type` で内部型への直接代入を禁止し、型の境界を守れます。
+
+```favnir
+opaque type Token = String
+
+// E0413: bare String リテラルを Token として返すことを禁止
+// fn bad() -> Token { "secret" }  // コンパイルエラー
+
+// 正しい使い方: 専用コンストラクタを通じて生成
+fn make_token(raw: String) -> Token { raw }
+```
+
+---
+
+## まとめ
+
+| カテゴリ | バージョン | lint |
+|---|---|---|
+| 戻り値型推論 | v43.1 | W031 |
+| ジェネリック型引数推論 | v43.3 | W032 |
+| ラムダ引数型推論 | v43.5 | W033（将来版） |
+| パイプライン型伝播 | v43.6 | — |
+| opaque type | v43.11 | E0413 |

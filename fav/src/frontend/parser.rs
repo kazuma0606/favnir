@@ -589,6 +589,44 @@ impl Parser {
         Ok(Some(crate::ast::CircuitBreakerAnnotation { threshold, window, span: self.span_from(&start) }))
     }
 
+    /// v42.5.0: parse optional `#[max_inflight(n)]` annotation.
+    /// n は位置引数（唯一の引数のため名前省略）、正の整数必須。
+    fn parse_max_inflight_annotation(&mut self) -> Result<Option<crate::ast::MaxInflightAnnotation>, ParseError> {
+        let is_max_inflight = self.peek() == &TokenKind::Hash
+            && matches!(self.tokens.get(self.pos + 1), Some(t) if t.kind == TokenKind::LBracket)
+            && matches!(self.tokens.get(self.pos + 2), Some(t) if matches!(&t.kind, TokenKind::Ident(n) if n == "max_inflight"));
+        if !is_max_inflight {
+            return Ok(None);
+        }
+        let start = self.peek_span().clone();
+        self.advance();                              // #
+        self.expect(&TokenKind::LBracket)?;          // [
+        self.expect_ident_name("max_inflight")?;
+        self.expect(&TokenKind::LParen)?;
+        let n = match self.peek().clone() {
+            TokenKind::Int(raw) => {
+                // raw は i64。負数（-1 等）は Lexer が Minus + Int(1) に分割するため
+                // ここに到達するのは 0 以上の整数のみ。`raw <= 0` は実質 `raw == 0` のガード。
+                let span = self.peek_span().clone();
+                self.advance();
+                if raw <= 0 {
+                    return Err(ParseError::new(
+                        format!("max_inflight value {} must be a positive integer (>= 1)", raw),
+                        span,
+                    ));
+                }
+                raw as u64
+            }
+            other => return Err(ParseError::new(
+                format!("expected positive integer after `max_inflight(`, got {:?}", other),
+                self.peek_span().clone(),
+            )),
+        };
+        self.expect(&TokenKind::RParen)?;
+        self.expect(&TokenKind::RBracket)?;
+        Ok(Some(crate::ast::MaxInflightAnnotation { n, span: self.span_from(&start) }))
+    }
+
     fn parse_item(&mut self) -> Result<Item, ParseError> {
         // Annotation ordering: #[deprecated] must appear before #[api(...)], #[streaming], etc.
         // because each parser tries to consume #[ ... ] and they are mutually exclusive.
@@ -609,6 +647,7 @@ impl Parser {
         let timeout_ann         = self.parse_timeout_annotation()?;
         let retry_ann           = self.parse_retry_annotation()?;
         let circuit_breaker_ann = self.parse_circuit_breaker_annotation()?;
+        let max_inflight_ann    = self.parse_max_inflight_annotation()?;  // v42.5.0
 
         let vis = self.parse_visibility();
 
@@ -626,6 +665,13 @@ impl Parser {
                 };
                 self.parse_import_decl(is_public)
             }
+            // v43.11.0: `opaque type Token = String` — contextual keyword "opaque"
+            TokenKind::Ident(name) if name == "opaque" => {
+                self.advance(); // consume "opaque" identifier
+                let mut td = self.parse_type_def(vis)?;
+                td.is_opaque = true;
+                Ok(Item::TypeDef(td))
+            }
             TokenKind::Type => Ok(Item::TypeDef(self.parse_type_def(vis)?)),
             TokenKind::Fn => {
                 let mut fd = self.parse_fn_def(vis, false)?;
@@ -641,6 +687,7 @@ impl Parser {
                 td.timeout         = timeout_ann;          // v22.6.0
                 td.retry_ann       = retry_ann;           // v22.6.0
                 td.circuit_breaker = circuit_breaker_ann;  // v22.6.0
+                td.max_inflight    = max_inflight_ann;     // v42.5.0
                 Ok(Item::TrfDef(td))
             }
             TokenKind::Trf => {
@@ -668,6 +715,7 @@ impl Parser {
                         td.timeout         = timeout_ann;          // v22.6.0
                         td.retry_ann       = retry_ann;           // v22.6.0
                         td.circuit_breaker = circuit_breaker_ann;  // v22.6.0
+                        td.max_inflight    = max_inflight_ann;     // v42.5.0
                         Ok(Item::TrfDef(td))
                     }
                     TokenKind::Trf => {
@@ -827,9 +875,13 @@ impl Parser {
                     ))
                 }
             }
+            // `cep pattern Name { ... }` — CEP パターン宣言 (v42.1.0)
+            TokenKind::Ident(n) if n == "cep" => {
+                Ok(Item::CepPatternDef(self.parse_cep_pattern_def()?))
+            }
             other => Err(ParseError::new(
                 format!(
-                    "expected item (type/fn/stage/seq/interface/effect/impl/test/alias/schema), got {:?}",
+                    "expected item (type/fn/stage/seq/interface/effect/impl/test/alias/schema/cep), got {:?}",
                     other
                 ),
                 self.peek_span().clone(),
@@ -859,6 +911,105 @@ impl Parser {
             fields,
             span: self.span_from(&start),
         })
+    }
+
+    /// Parse a CEP expression: Event name, seq(...), any(...), or not(...) (v42.2.0)
+    fn parse_cep_expr(&mut self) -> Result<CepExpr, ParseError> {
+        // `seq` is a reserved keyword (TokenKind::Seq), not an ident
+        // `any` / `not` are plain idents (not reserved)
+        if self.peek() == &TokenKind::Seq {
+            self.advance(); // consume `seq`
+            self.expect(&TokenKind::LParen)?;
+            let mut args = Vec::new();
+            while self.peek() != &TokenKind::RParen && self.peek() != &TokenKind::Eof {
+                args.push(self.parse_cep_expr()?);
+                if self.peek() == &TokenKind::Comma {
+                    self.advance();
+                }
+            }
+            self.expect(&TokenKind::RParen)?;
+            if args.is_empty() {
+                return Err(ParseError::new(
+                    "seq() requires at least one argument",
+                    self.peek_span().clone(),
+                ));
+            }
+            return Ok(CepExpr::Seq(args));
+        }
+        if self.peek_ident_text("any") {
+            self.advance(); // consume `any`
+            self.expect(&TokenKind::LParen)?;
+            let mut args = Vec::new();
+            while self.peek() != &TokenKind::RParen && self.peek() != &TokenKind::Eof {
+                args.push(self.parse_cep_expr()?);
+                if self.peek() == &TokenKind::Comma {
+                    self.advance();
+                }
+            }
+            self.expect(&TokenKind::RParen)?;
+            if args.is_empty() {
+                return Err(ParseError::new(
+                    "any() requires at least one argument",
+                    self.peek_span().clone(),
+                ));
+            }
+            return Ok(CepExpr::Any(args));
+        }
+        if self.peek_ident_text("not") {
+            self.advance(); // consume `not`
+            self.expect(&TokenKind::LParen)?;
+            let inner = self.parse_cep_expr()?;
+            if self.peek() != &TokenKind::RParen {
+                return Err(ParseError::new(
+                    "not() takes exactly one argument",
+                    self.peek_span().clone(),
+                ));
+            }
+            self.expect(&TokenKind::RParen)?;
+            return Ok(CepExpr::Not(Box::new(inner)));
+        }
+        // Simple event name
+        let (name, _) = self.expect_ident()?;
+        Ok(CepExpr::Event(name))
+    }
+
+    /// Parse `cep pattern Name { Event within N }` (v42.1.0); expr 拡張 v42.2.0
+    fn parse_cep_pattern_def(&mut self) -> Result<CepPatternDef, ParseError> {
+        let start = self.peek_span().clone();
+        self.advance(); // consume `cep`
+        self.expect_ident_name("pattern")?;
+        let (name, _) = self.expect_ident()?;
+        self.expect(&TokenKind::LBrace)?;
+        let mut body = Vec::new();
+        while self.peek() != &TokenKind::RBrace && self.peek() != &TokenKind::Eof {
+            // clause_start は既存コードの定義位置をそのまま使用
+            let clause_start = self.peek_span().clone();
+            let expr = self.parse_cep_expr()?;
+            let within_secs = if self.peek_ident_text("within") {
+                self.advance(); // consume `within`
+                match self.peek().clone() {
+                    TokenKind::Int(n) => {
+                        self.advance();
+                        Some(n)
+                    }
+                    _ => {
+                        return Err(ParseError::new(
+                            "expected integer after `within`",
+                            self.peek_span().clone(),
+                        ))
+                    }
+                }
+            } else {
+                None
+            };
+            body.push(CepClause {
+                expr,
+                within_secs,
+                span: self.span_from(&clause_start),
+            });
+        }
+        self.expect(&TokenKind::RBrace)?;
+        Ok(CepPatternDef { name, body, span: self.span_from(&start) })
     }
 
     /// Parse `expect <expr> { <rule_expr>* }` (v36.2.0)
@@ -1355,6 +1506,7 @@ impl Parser {
                 type_params: vec![],
                 with_interfaces,
                 invariants,
+                is_opaque: false,
                 body: TypeBody::Wrapper(inner_ty),
                 span: self.span_from(&start),
             });
@@ -1385,6 +1537,7 @@ impl Parser {
                 type_params,
                 with_interfaces,
                 invariants,
+                is_opaque: false,
                 body: TypeBody::Record(fields),
                 span: self.span_from(&start),
             });
@@ -1394,12 +1547,20 @@ impl Parser {
         } else {
             // type alias: type Name = TypeExpr
             let target = self.parse_type_expr()?;
+            // v41.1.0: refinement constraint `where |v| pred` for type aliases
+            let invariants = if self.peek() == &TokenKind::Where {
+                self.advance(); // consume `where`
+                vec![self.parse_expr()?]
+            } else {
+                vec![]
+            };
             return Ok(TypeDef {
                 visibility,
                 name,
                 type_params,
                 with_interfaces,
-                invariants: vec![],
+                invariants,
+                is_opaque: false,
                 body: TypeBody::Alias(target),
                 span: self.span_from(&start),
             });
@@ -1411,6 +1572,7 @@ impl Parser {
             type_params,
             with_interfaces,
             invariants: vec![],
+            is_opaque: false,
             body,
             span: self.span_from(&start),
         })
@@ -1827,12 +1989,6 @@ impl Parser {
                 span: self.span_from(&start),
             }
         } else {
-            if return_ty.is_none() {
-                return Err(ParseError::new(
-                    "function return type can only be omitted with `= expr` syntax",
-                    self.peek_span().clone(),
-                ));
-            }
             self.parse_block()?
         };
 
@@ -1986,6 +2142,7 @@ impl Parser {
             timeout: None,
             retry_ann: None,
             circuit_breaker: None,
+            max_inflight: None,  // v42.5.0
             span: self.span_from(&start),
         })
     }
@@ -2567,11 +2724,37 @@ impl Parser {
                 Ok(Pattern::Lit(Lit::Bool(b), start))
             }
 
-            // unit: ()
+            // unit () or tuple pattern (p1, p2, ...) or grouping (pat) (v41.3.0)
             TokenKind::LParen => {
                 self.advance();
-                self.expect(&TokenKind::RParen)?;
-                Ok(Pattern::Lit(Lit::Unit, self.span_from(&start)))
+                if self.peek() == &TokenKind::RParen {
+                    self.advance();
+                    Ok(Pattern::Lit(Lit::Unit, self.span_from(&start)))
+                } else {
+                    let first = self.parse_pattern()?;
+                    if self.peek() == &TokenKind::Comma {
+                        // v41.3.0: tuple pattern (p1, p2, ...) → Record([Alias("_0", p1), ...])
+                        let mut fields = vec![PatternField::Alias(
+                            "_0".to_string(), Box::new(first), self.span_from(&start),
+                        )];
+                        let mut i = 1usize;
+                        while self.peek() == &TokenKind::Comma {
+                            self.advance();
+                            if self.peek() == &TokenKind::RParen { break; }
+                            fields.push(PatternField::Alias(
+                                format!("_{}", i),
+                                Box::new(self.parse_pattern()?),
+                                self.span_from(&start),
+                            ));
+                            i += 1;
+                        }
+                        self.expect(&TokenKind::RParen)?;
+                        Ok(Pattern::Record(fields, self.span_from(&start)))
+                    } else {
+                        self.expect(&TokenKind::RParen)?;
+                        Ok(first) // grouping parens: (pat) → pat
+                    }
+                }
             }
 
             // identifier: could be Bind or Variant(...)
@@ -2925,16 +3108,30 @@ impl Parser {
                 Ok(Expr::Lit(Lit::Bool(b), start))
             }
 
-            // unit literal () (3-12)
+            // unit literal () or tuple (a, b, ...) or grouping (expr) (3-12, v41.3.0)
             TokenKind::LParen => {
                 self.advance();
                 if self.peek() == &TokenKind::RParen {
                     self.advance();
                     Ok(Expr::Lit(Lit::Unit, self.span_from(&start)))
                 } else {
-                    let inner = self.parse_expr()?;
-                    self.expect(&TokenKind::RParen)?;
-                    Ok(inner)
+                    let first = self.parse_expr()?;
+                    if self.peek() == &TokenKind::Comma {
+                        // v41.3.0: tuple (a, b, ...) → RecordConstruct("__tuple__", [("_0", a), ...])
+                        let mut fields = vec![("_0".to_string(), first)];
+                        let mut i = 1usize;
+                        while self.peek() == &TokenKind::Comma {
+                            self.advance();
+                            if self.peek() == &TokenKind::RParen { break; } // trailing comma
+                            fields.push((format!("_{}", i), self.parse_expr()?));
+                            i += 1;
+                        }
+                        self.expect(&TokenKind::RParen)?;
+                        Ok(Expr::RecordConstruct("__tuple__".to_string(), fields, self.span_from(&start)))
+                    } else {
+                        self.expect(&TokenKind::RParen)?;
+                        Ok(first) // grouping parens: (expr) → expr
+                    }
                 }
             }
 

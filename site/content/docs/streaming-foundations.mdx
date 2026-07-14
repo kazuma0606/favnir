@@ -1,0 +1,133 @@
+---
+title: "Streaming Foundations"
+description: "Favnir のストリーミング基盤 — ウィンドウ集計・Watermark・out-of-order イベント処理"
+---
+
+# Streaming Foundations
+
+Favnir v40.x で整備されたストリーミング機能の概観。
+`tumbling_window` / `sliding_window` / `session_window` でウィンドウ集計を型安全に書ける。
+`Event<T>` の timestamp と Watermark で out-of-order イベントを制御できる。
+
+このページは **streaming-foundations** の全体像を説明するリファレンスドキュメントです。
+
+---
+
+## ウィンドウ関数
+
+Favnir の `stream` Rune は 3 種類のウィンドウ関数を提供します。
+
+### tumbling_window（固定幅）
+
+```fav
+import stream
+
+bind windows <- stream.tumbling_window(events, 60)
+// 60 秒ごとにウィンドウを切る
+```
+
+重複なし・隙間なしの固定幅ウィンドウ。集計の最も基本的な形式（v40.1）。
+
+### sliding_window（スライド）
+
+```fav
+bind windows <- stream.sliding_window(events, size: 120, step: 30)
+// 120 秒幅のウィンドウを 30 秒ずつスライド
+```
+
+ウィンドウ同士が重複するスライドウィンドウ。移動平均・トレンド検出に適する（v40.1）。
+
+### session_window（セッション）
+
+```fav
+bind sessions <- stream.session_window(events, gap: 30)
+// 30 秒アイドルでウィンドウを閉じる
+```
+
+イベント間のアイドル時間でウィンドウを分割する動的サイズウィンドウ（v40.2）。
+
+---
+
+## イベント型と Watermark
+
+### Event\<T\>
+
+```fav
+type Event<T> = {
+    value:     T
+    timestamp: Int   // Unix epoch (ms)
+}
+```
+
+v40.3 で `timestamp` フィールドを追加。ウィンドウ演算の時刻基準として使用する。
+
+### Out-of-order イベント処理
+
+```fav
+bind valid <- stream.with_late_policy(events,
+    tolerance: 5,
+    policy:    "drop")
+```
+
+`late_tolerance`（秒）と `policy`（`"drop"` / `"reprocess"`）で遅延イベントの扱いを制御（v40.4）。
+
+---
+
+## fav.toml \[stream\] セクション
+
+プロジェクト全体のストリーム設定を `fav.toml` で管理できる（v40.5）。
+
+```toml
+[stream]
+watermark_delay = 5      # 秒
+late_policy     = "drop" # drop | reprocess
+```
+
+---
+
+## Rune 連携
+
+### Kafka（v40.6）
+
+```fav
+import kafka
+
+bind conn   <- kafka.connect("localhost:9092")
+bind window <- kafka.consume_windowed(conn, "events-topic", "my-group", 30)
+```
+
+`kafka.consume_windowed` でウィンドウ単位に Kafka メッセージを消費できる。
+
+### Redis Streams（v40.6）
+
+```fav
+import redis
+
+bind conn   <- redis.connect("localhost:6379")
+bind window <- redis.consume_windowed(conn, "events-stream", 30)
+```
+
+---
+
+## ベンチマーク
+
+```bash
+fav bench --stream
+```
+
+ストリームパイプラインのスループット・レイテンシを計測するコマンド（v40.7 スタブ）。
+
+---
+
+## 関連 cookbook
+
+- [ウィンドウ集計パイプライン](/cookbook/window-aggregation) — `tumbling_window` を使ったパイプライン構築例
+- [Kafka Streams ウィンドウ消費](/cookbook/kafka-streaming) — `consume_windowed` を使った Kafka 連携例
+
+---
+
+## 関連 Rune
+
+- [`stream`](/docs/runes/stream) — ウィンドウ関数（tumbling_window / sliding_window / session_window）
+- [`kafka`](/docs/runes/kafka) — Kafka 接続・消費・produce
+- [`redis`](/docs/runes/redis) — Redis 接続・get / set / consume_windowed

@@ -1,0 +1,82 @@
+---
+title: Precision & Flow
+description: 型安全なリアルタイムパイプラインを最小限の注釈で記述するための Favnir 機能群
+---
+
+# Precision & Flow
+
+Favnir v44.x スプリント「Precision & Flow」では、型推論・Refinement type・CEP・Opaque type・Back-pressure を統合し、**最小限の型注釈で安全なリアルタイムパイプラインを記述できる**状態を実現します。
+
+## Refinement type
+
+値の制約を型として表現します。バリデーションを型システムに組み込むことで、不正な値がパイプラインを流れることを防ぎます。
+
+```favnir
+type HighValue = Float where |v| v > 1000.0
+
+stage Validate: List<Float> -> List<HighValue> = |events| {
+  bind valid: List<HighValue> <- events
+  valid
+}
+```
+
+## CEP（Complex Event Processing）
+
+イベントパターンを宣言的に記述します。時間窓内のイベント列を型安全に検出できます。
+
+```favnir
+cep pattern HighValueDetected {
+  HighValue within 300
+}
+```
+
+## Opaque type
+
+内部表現を隠蔽し、型レベルで意味的に異なる値の誤 join を防止します。
+
+```favnir
+opaque type OrderId = String
+opaque type SessionId = String
+// OrderId と SessionId は型システム上で区別される — 誤 join を型エラーで検出
+```
+
+## 型注釈 lineage
+
+型注釈付き `bind` 束縛をリネージ追跡の起点として活用します。`collect_annotated_lineage_bindings` により、どのステージでどの型の値が流れているかを AST レベルで収集できます。
+
+```favnir
+stage Process: List<Float> -> List<Float> = |events| {
+  bind filtered: List<Float> <- events
+  filtered
+}
+```
+
+## Back-pressure（`#[max_inflight]`）
+
+ステージの同時処理上限を宣言します。`collect_stage_max_inflight_annotations` により、ポリシー制約の付いたステージを一覧できます。
+
+```favnir
+#[max_inflight(50)]
+stage PolicyGate: List<Float> -> List<Float> = |events| {
+  bind allowed: List<Float> <- events
+  allowed
+}
+```
+
+## E2E デモ
+
+`infra/e2e-demo/precision-flow/` では、これらすべての機能を統合したパイプラインを確認できます。
+
+Kafka → CEP → Opaque join → Policy gate の完全パイプラインが `src/demo.fav` に実装されています。
+
+## バージョン履歴
+
+| バージョン | 機能 |
+|---|---|
+| v44.1.0 | Refinement type × Streaming 統合 |
+| v44.2.0 | CEP × Refinement type |
+| v44.3.0 | Stream join × Opaque type |
+| v44.4.0 | 型推論 × パイプライン lineage |
+| v44.5.0 | Back-pressure × `fav policy` 統合 |
+| v44.6.0 | Precision & Flow E2E デモ |
+| v44.7.0 | 本ドキュメント |

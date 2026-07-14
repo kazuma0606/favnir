@@ -1,5 +1,148 @@
 # Favnir Milestones
 
+## v45.0.0 — Precision & Flow（2026-07-15）
+
+> 「型推論がジェネリクスと戻り値型を補完し、最小限の注釈で安全なコードが書ける。
+>  ウィンドウ集計・CEP・Stream join が型安全に記述でき、
+>  refinement type と opaque type がデータの意味を型で守る。
+>
+>  これが Favnir v45.0 — Precision & Flow の姿である。」
+
+v45.0.0 をもって、Favnir の **Precision & Flow** を正式に宣言する。
+
+### 達成コンポーネント（v44.1〜v44.9）
+
+| コンポーネント | バージョン | 内容 |
+|---|---|---|
+| Refinement type × Streaming 統合 | v44.1 | collect_refinement_stream_bindings |
+| CEP × Refinement type | v44.2 | collect_cep_refinement_event_refs |
+| Stream join × Opaque type | v44.3 | collect_opaque_alias_groups |
+| 型推論 × パイプライン lineage | v44.4 | collect_annotated_lineage_bindings |
+| Back-pressure × fav policy 統合 | v44.5 | collect_stage_max_inflight_annotations |
+| Precision & Flow E2E デモ | v44.6 | infra/e2e-demo/precision-flow/ |
+| ドキュメントサイト概要ページ | v44.7 | precision-and-flow.mdx |
+| パフォーマンス最終調整 | v44.8 | collect_bench_stream_notes + CHANGELOG |
+| v45.0 前調整・安定化 | v44.9 | precision-and-flow-overview.mdx |
+
+**宣言日**: 2026-07-15
+
+---
+
+## v44.0.0 — Language Expressiveness（2026-07-13）
+
+> 「戻り値型は省略でき、ジェネリクスは呼び出し側から推論される。
+>  ラムダ引数はパイプライン上流の型から確定し、
+>  `opaque type` で型の境界を守れる。
+>
+>  これが Favnir v44.0 — Language Expressiveness の姿である。」
+
+v44.0.0 をもって、Favnir の **Language Expressiveness** を正式に宣言する。
+
+### 達成コンポーネント（v43.1〜v43.13）
+
+| コンポーネント | バージョン | 内容 |
+|---|---|---|
+| 戻り値型推論 | v43.1 | Return type omission |
+| fav check 統合・E0410/E0411 | v43.2 | 推論失敗エラー |
+| ジェネリック型引数推論 | v43.3 | Call-site generic inference |
+| E0412 曖昧型変数検出 | v43.4 | Ambiguous type variable |
+| ラムダ引数型推論 | v43.5 | Contextual lambda inference |
+| パイプライン型伝播 | v43.6 | Pipeline stage typing |
+| 構造体リテラル推論 | v43.7 | Structural inference |
+| 双方向型推論 | v43.8 | Bidirectional / top-down |
+| fav check --show-inference | v43.9 | 推論型の注釈表示 |
+| fav check --explain 統合 | v43.10 | 静的解説テキスト |
+| opaque type 完全化 | v43.11 | opaque keyword + E0413 |
+| W031/W032 lint | v43.12 | 冗長型注釈の警告 |
+| Language Expressiveness cookbook | v43.13 | ドキュメント安定化 |
+
+**宣言日**: 2026-07-13
+
+---
+
+## v43.0.0 — Real-Time Power（2026-07-12）
+
+> 「CEP で `seq(Login, Purchase) within 300` が型安全に書ける。
+>  Stream join で 2 ストリームを time-window で結合できる。
+>  `#[max_inflight]` で Back-pressure を宣言的に制御できる。
+>
+>  これが Favnir v43.0 — Real-Time Power の姿である。」
+
+v43.0.0 をもって、Favnir の **Real-Time Power** を正式に宣言する。
+
+### 達成コンポーネント（v42.1〜v42.9）
+
+| コンポーネント | バージョン | 内容 |
+|---|---|---|
+| CEP DSL 基盤 | v42.1 | `cep pattern` / `within` 構文 |
+| CEP パターン: `seq` / `any` / `not` | v42.2 | 3 パターンコンビネータ |
+| CEP checker.fav 統合 | v42.3 | `within >= 1` 検証・E0420 |
+| Stream join（time-window） | v42.4 | `Stream.join` 2 ストリーム結合 |
+| Back-pressure `#[max_inflight]` | v42.5 | parser + AST 宣言 |
+| WebSocket Rune | v42.6 | `WebSocket.send` / `WebSocket.broadcast` |
+| `fav monitor` | v42.7 | パイプライン監視コマンド stub |
+| Real-Time Power cookbook | v42.8 | `cep-login-purchase.mdx` / `stream-join.mdx` |
+| v43.0 前調整・安定化 | v42.9 | `real-time-power.mdx` 新規作成 |
+
+**宣言日**: 2026-07-12
+
+---
+
+## v42.0.0 — Type Precision（2026-07-12）
+
+> 「`type Age = Int where (>= 0)` で値の意味を型に刻める。
+>  タプルパターンとガード付き match でより精緻な分岐が書ける。
+>  Newtype は内側の型の演算を自動継承する。
+>
+>  これが Favnir v42.0 — Type Precision の姿である。」
+
+v42.0.0 をもって、Favnir の **Type Precision** を正式に宣言する。
+
+### 達成コンポーネント（v41.1〜v41.9）
+
+| コンポーネント | バージョン | 内容 |
+|---|---|---|
+| Refinement type alias | v41.1 | `type Age = Int where \|v\| v >= 0` |
+| Refinement invariant + E0404〜E0406 | v41.2 | fav check 統合 |
+| タプルパターン match | v41.3 | `match (status, count) { ... }` |
+| ガード付き match | v41.4 | `n if n >= 90 => "A"` |
+| Row polymorphism | v41.5 | record spread `{ ..u, active: true }` |
+| Newtype 自動 impl | v41.6 | `type Kg(Float)` — 算術演算子自動委譲 |
+| W030 lint | v41.7 | 冗長 refinement ガード検出 |
+| Type Precision cookbook + docs | v41.8 | refinement-types.mdx 整備 |
+| v42.0 前調整・安定化 | v41.9 | type-precision.mdx 新規作成 |
+
+**宣言日**: 2026-07-12
+
+---
+
+## v41.0.0 — Streaming Foundations（2026-07-11）
+
+> 「`tumbling_window` / `sliding_window` / `session_window` でウィンドウ集計を型安全に書ける。
+>  `Event<T>` の timestamp と Watermark で out-of-order イベントを制御できる。
+>
+>  これが Favnir v41.0 — Streaming Foundations の姿である。」
+
+v41.0.0 をもって、Favnir の **Streaming Foundations** を正式に宣言する。
+
+### 達成コンポーネント（v40.1〜v40.9）
+
+| コンポーネント | バージョン | 内容 |
+|---|---|---|
+| tumbling_window / sliding_window | v40.1 | 固定幅・スライドウィンドウ |
+| session_window | v40.2 | セッションウィンドウ |
+| Event\<T\> + timestamp | v40.3 | イベント型に時刻基準フィールド追加 |
+| Out-of-order 処理 | v40.4 | late_tolerance / drop / reprocess |
+| fav.toml \[stream\] | v40.5 | プロジェクト設定でストリーム設定管理 |
+| Kafka / Redis Streams 対応 | v40.6 | consume_windowed 追加 |
+| fav bench --stream | v40.7 | ストリームパイプライン計測スタブ |
+| Streaming cookbook | v40.8 | window-aggregation / kafka-streaming MDX |
+| 安定化 | v40.9 | streaming-foundations.mdx ドキュメント整備 |
+
+**宣言日**: 2026-07-11
+
+---
+
 ## v40.0.0 — Enterprise Governance（2026-07-11）
 
 > 「RBAC で実行権限を制御し、Audit Log でパイプラインを追跡できる。

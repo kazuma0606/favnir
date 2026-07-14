@@ -1,0 +1,103 @@
+---
+title: "Refinement Type でドメイン制約を型に刻む"
+description: "type alias の where 節で値の不変条件を型レベルで表現する実用パターン"
+---
+
+# Refinement Type でドメイン制約を型に刻む
+
+## 問題
+
+データパイプラインでは「年齢は 0 以上」「金額は正」「名前は空でない」といった制約が
+コード中の if ガードや assert として散在しがちです。これらの制約を型に刻むことで、
+関数シグネチャが仕様書になり、冗長なバリデーションが不要になります。
+
+## Refinement Type Alias
+
+`where |v| pred` 節を使って型レベルの invariant を定義します。
+クロージャ変数 `v` が型の値を表します:
+
+```favnir
+type Age    = Int   where |v| v >= 0 && v <= 150
+type USD    = Float where |v| v >= 0.0
+type Name   = String where |v| String.length(v) > 0
+type UserId = String where |v| String.length(v) == 36
+```
+
+## 実用例: ユーザープロフィール
+
+```favnir
+type Age  = Int    where |v| v >= 0 && v <= 150
+type Name = String where |v| String.length(v) > 0
+
+type UserProfile = {
+    name: Name
+    age:  Age
+    bio:  String
+}
+
+fn greet(user: UserProfile) -> String {
+    String.concat("Hello, ", user.name)
+    // user.name は Name 型 — String.length > 0 が保証済み
+}
+```
+
+## 実用例: 金融ドメイン
+
+```favnir
+type USD       = Float where |v| v >= 0.0
+type Quantity  = Int   where |v| v > 0
+
+fn total_price(unit_price: USD, qty: Quantity) -> USD {
+    unit_price * Float.from_int(qty)
+}
+```
+
+## W030: 冗長ガードを書かない
+
+refinement 型の invariant は型システムが保証しているため、同一条件の if ガードは不要です。
+Favnir の W030 lint が自動的に検出します:
+
+```favnir
+type PositiveInt = Int where |v| v >= 0
+
+// NG: W030 警告が出る
+fn double_ng(x: PositiveInt) -> Int {
+    if x >= 0 {      // W030: redundant guard — PositiveInt invariant が既に保証している
+        x * 2
+    } else { 0 }
+}
+
+// OK: 不要なガードを削除
+fn double_ok(x: PositiveInt) -> Int {
+    x * 2
+}
+```
+
+> **Note**: W030 は `|v| v op literal` 形式（単一の比較演算）の invariant に対して動作します。
+> `|v| v >= 0 && v <= 150` のような複合 invariant の各辺は現時点では検出対象外です（将来バージョンで対応予定）。
+
+## Newtype との使い分け
+
+`type Kg(Float)` の Newtype と refinement type alias は別機能です。
+現時点では同一型に組み合わせることは未対応（将来バージョンで対応予定）。
+用途に応じて使い分けます:
+
+```favnir
+// refinement: 値の不変条件を型に表現
+type Weight = Float where |v| v >= 0.0
+
+// newtype: 型の意味（単位）を区別し算術演算を自動委譲
+type Kg(Float)
+
+fn total(a: Weight, b: Weight) -> Weight {
+    a + b
+}
+```
+
+## まとめ
+
+| パターン | 用途 | バージョン |
+|---|---|---|
+| `type Age = Int where \|v\| v >= 0` | 値の不変条件を型に表現 | v41.1.0+ |
+| W030 lint | 冗長な if ガードを検出 | v41.7.0+ |
+| Newtype `type Kg(Float)` | 型の意味（単位）を区別 | v9.7.0+ |

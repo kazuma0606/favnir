@@ -1528,6 +1528,13 @@ pub(crate) enum VMStream {
     Merge { streams: Vec<VMStream> },
     /// v26.4.0: split — partition into [trues, falses] lists by predicate
     Split { inner: Box<VMStream>, pred_fn: VMValue },
+    /// v42.4.0: time-window join — nested-loop join of two streams by predicate
+    Join {
+        left: Box<VMStream>,
+        right: Box<VMStream>,
+        join_fn: VMValue,
+        window_secs: i64,
+    },
 }
 
 /// Shared list with start offset enabling O(1) `List.drop` from the front.
@@ -4834,6 +4841,37 @@ impl VM {
                     )),
                 }
             }
+            // ── v42.4.0: Stream.join ─────────────────────────────────────────────────
+            "Stream.join" => {
+                if args.len() != 4 {
+                    return Err(self.error(artifact, "Stream.join requires 4 arguments: (stream1, stream2, join_fn, window_secs)"));
+                }
+                let mut it = args.into_iter();
+                let left_val   = it.next().expect("left");
+                let right_val  = it.next().expect("right");
+                let join_fn    = it.next().expect("join_fn");
+                let window_val = it.next().expect("window");
+                match (left_val, right_val, window_val) {
+                    (VMValue::Stream(left), VMValue::Stream(right), VMValue::Int(window_secs)) => {
+                        if window_secs <= 0 {
+                            return Err(self.error(artifact, "Stream.join window_secs must be positive (>= 1)"));
+                        }
+                        Ok(VMValue::Stream(Box::new(VMStream::Join { left, right, join_fn, window_secs })))
+                    }
+                    (VMValue::Stream(_), VMValue::Stream(_), other) => Err(self.error(
+                        artifact,
+                        &format!("Stream.join window argument must be Int, got {}", vmvalue_type_name(&other)),
+                    )),
+                    (VMValue::Stream(_), other, _) => Err(self.error(
+                        artifact,
+                        &format!("Stream.join second argument must be a Stream, got {}", vmvalue_type_name(&other)),
+                    )),
+                    (other, _, _) => Err(self.error(
+                        artifact,
+                        &format!("Stream.join first argument must be a Stream, got {}", vmvalue_type_name(&other)),
+                    )),
+                }
+            }
             // ── end v26.4.0 Stream.* ─────────────────────────────────────────────────
             "Http.serve_raw" => {
                 if args.len() != 3 {
@@ -5603,6 +5641,31 @@ impl VM {
                     VMValue::List(FavList::new(trues)),
                     VMValue::List(FavList::new(falses)),
                 ])
+            }
+            // v42.4.0: nested-loop join; window_secs is validated in the primitive but
+            // not enforced at materialization time (no wall-clock in VM).
+            VMStream::Join { left, right, join_fn, window_secs: _ } => {
+                let lefts  = self.materialize_stream(artifact, *left)?;
+                let rights = self.materialize_stream(artifact, *right)?;
+                let mut out = Vec::new();
+                for l in &lefts {
+                    for r in &rights {
+                        let result = self.call_value(artifact, join_fn.clone(), vec![l.clone(), r.clone()])?;
+                        match result {
+                            VMValue::Bool(true) => {
+                                out.push(VMValue::List(FavList::new(vec![l.clone(), r.clone()])));
+                            }
+                            VMValue::Bool(false) => {}
+                            other => {
+                                return Err(self.error(
+                                    artifact,
+                                    &format!("Stream.join predicate must return Bool, got {}", vmvalue_type_name(&other)),
+                                ));
+                            }
+                        }
+                    }
+                }
+                Ok(out)
             }
         }
     }
@@ -18706,6 +18769,35 @@ fn vm_call_builtin(
                 Ok(_) => ok_vm(VMValue::Unit),
                 Err(e) => err_vm(VMValue::Str(e)),
             })
+        }
+
+        // ── v42.6.0: WebSocket primitives ────────────────────────────────────────────
+        "WebSocket.send_raw" => {
+            if args.len() != 3 {
+                return Ok(err_vm(VMValue::Str(
+                    "WebSocket.send_raw requires 3 arguments: (ctx, url, message)".to_string(),
+                )));
+            }
+            // stub: 実接続は v44.x 以降。ctx/url/message を消費して Ok(Unit) を返す。
+            Ok(ok_vm(VMValue::Unit))
+        }
+        "WebSocket.broadcast_raw" => {
+            if args.len() != 3 {
+                return Ok(err_vm(VMValue::Str(
+                    "WebSocket.broadcast_raw requires 3 arguments: (ctx, url, messages)".to_string(),
+                )));
+            }
+            // stub: messages リストの長さを成功数として返す。
+            // SAFETY: args.len() == 3 is checked above.
+            let mut it = args.into_iter();
+            let _ctx = it.next().expect("ctx");
+            let _url = it.next().expect("url");
+            let msgs = it.next().expect("messages");
+            let count = match msgs {
+                VMValue::List(list) => list.len() as i64,
+                _ => 0,
+            };
+            Ok(ok_vm(VMValue::Int(count)))
         }
 
         // ── Cache primitives (v7.3.0) ─────────────────────────────────────

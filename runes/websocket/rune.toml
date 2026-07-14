@@ -1,0 +1,5 @@
+[rune]
+name = "websocket"
+version = "42.6.0"
+entry = "websocket.fav"
+description = "WebSocket Rune — リアルタイム push sink（WebSocket.send / WebSocket.broadcast）"

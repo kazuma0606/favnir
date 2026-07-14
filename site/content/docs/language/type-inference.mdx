@@ -1,0 +1,93 @@
+---
+title: "Type Inference"
+description: "Favnir の型推論システムの仕組みと 6 カテゴリの解説"
+---
+
+# Type Inference
+
+Favnir v43 では 6 カテゴリの型推論をサポートしています。型注釈を省略してもコンパイラが型を確定できる場面を拡大し、記述量を削減しつつ型安全性を維持します。
+
+---
+
+## カテゴリ一覧
+
+### 1. 戻り値型推論（v43.1）
+
+関数ボディの末尾式から戻り値型を推論します。
+
+```favnir
+fn add(a: Int, b: Int) { a + b }   // -> Int を推論
+fn greet(name: String) { "Hello, " ++ name }   // -> String を推論
+```
+
+推論できない場合は **E0410**（ambiguous return type）を報告します。
+
+### 2. ジェネリック型引数推論（v43.3）
+
+呼び出し側の引数から型変数を単一化します。
+
+```favnir
+fn wrap<A>(x: A) -> List<A> { [x] }
+
+bind xs <- wrap(42)      // A = Int
+bind ys <- wrap("hello") // A = String
+```
+
+複数の型変数が競合する場合は **E0412**（ambiguous type variable）を報告します。
+
+### 3. ラムダ引数型推論（v43.5）
+
+パイプライン上流の型を下流ラムダの引数型に伝播します。
+
+```favnir
+[1, 2, 3] |> List.map(|x| x * 2)   // x: Int は List<Int> から伝播
+```
+
+### 4. パイプライン型伝播（v43.6）
+
+`stage` 内の各 `bind` 束縛に型を自動付与します。
+
+```favnir
+stage Process {
+  bind rows <- Csv.read("input.csv")
+  bind ids  <- List.map(rows, |r| r.id)
+  // rows: Stream<Row>, ids: List<Int> — すべて推論
+}
+```
+
+### 5. 構造体リテラル推論（v43.7）
+
+名前付きレコードリテラルの型を関数戻り値型・引数型と照合します。
+
+```favnir
+type Point = { x: Int  y: Int }
+fn origin() -> Point { Point { x: 0  y: 0 } }
+```
+
+### 6. 双方向型推論（v43.8）
+
+期待型の下向き伝播。関数が `Int -> Bool` を期待すれば `|x| x > 0` の `x: Int` が確定します。
+
+```favnir
+fn filter_positive(xs: List<Int>) -> List<Int> {
+  List.filter(xs, |x| x > 0)   // x: Int は xs の要素型から伝播
+}
+```
+
+---
+
+## Lint ルール
+
+| コード | 説明 |
+|---|---|
+| W031 | 推論可能な戻り値型の明示的注釈（v43.12） |
+| W032 | 推論可能なジェネリック型引数の明示（v43.12） |
+| W033 | 推論可能なラムダ引数型の明示（将来版） |
+
+---
+
+## 制限事項
+
+- **W033 は将来版**: `Expr::Closure` は現在パラメータ型を AST に保持しないため、ラムダ引数型の冗長注釈検出は未実装。
+- **opaque type の checker.fav 統合は将来版**: 現在は AST レベルの E0413 のみ。
+- **再帰関数の戻り値型推論**: 再帰呼び出しがある場合は推論できないため、明示が必要。

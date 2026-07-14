@@ -1,4 +1,4 @@
 [rune]
 name        = "redis"
-version     = "1.0.0"
-description = "Redis キャッシュ・メッセージブローカー"
+version     = "40.6.0"
+description = "Redis Rune — connect / get / set / del / incr / lpush / rpop / publish / subscribe_once / consume_windowed / RedisConn"

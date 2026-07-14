@@ -1,0 +1,32 @@
+---
+title: "Stream join: 2 ストリームの時間窓結合"
+description: "Stream.join を使い、2 つの整数ストリームを time-window で結合する"
+---
+
+# Stream join: 2 ストリームの時間窓結合
+
+`Stream.join`（v42.4.0）を使い、2 つのストリームを 60 秒の時間窓で結合します。
+
+## パイプライン
+
+```fav
+// ctx は不要なため引数から除外（Stream.from / Stream.join は純粋操作）
+stage JoinStreams: Unit -> List<List<Int>> =
+    |_|
+    bind left   <- Stream.from(List.range(1, 10))
+    bind right  <- Stream.from(List.range(1, 10))
+    bind joined <- Stream.join(left, right, |a, b| a == b, 60)
+    Stream.to_list(joined)
+```
+
+## ポイント
+
+- `Stream.join(left, right, predicate, window_secs)` — 4 引数の positional API（v42.4.0）
+- `window_secs` は正の整数（秒）。0 以下はパースエラー
+- 結果は `List<List<Int>>` — 各要素が `[left_item, right_item]` のペア
+- v42.4.0 は nested-loop join（stub）のため大量データには不向き。v44.x で最適化予定
+- `window_secs` の時刻フィルタリングは v44.x 以降で実装（現在は全要素を走査）
+
+## 関連
+
+- [Stream.join API リファレンス](/docs/language/stream)

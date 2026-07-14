@@ -1,7 +1,7 @@
 # Favnir Master Roadmap — v35.1 〜 v40.0
 
 Date: 2026-07-06
-Status: 計画中（v35.0.0 完了時点）
+Status: 完了（v40.0.0 宣言済み 2026-07-11）
 
 ---
 

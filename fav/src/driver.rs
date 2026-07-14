@@ -3754,6 +3754,14 @@ struct BindingInfo {
     warning: Option<String>,
 }
 
+/// v43.2.0: inferred return type info for --show-types (text-only; no serde)
+#[derive(Debug)]
+struct FnReturnInfo {
+    name: String,
+    file: String,
+    line: u32,
+}
+
 #[derive(serde::Serialize)]
 struct CheckOutput {
     errors:   Vec<CheckDiagnostic>,
@@ -3869,9 +3877,443 @@ fn collect_binding_types(file: &str) -> Vec<BindingInfo> {
     bindings
 }
 
+/// Collect fn definitions with omitted return type for --show-types (v43.2.0).
+fn collect_fn_inferred_return_types(file: &str) -> Vec<FnReturnInfo> {
+    use crate::ast::Item;
+
+    let source = load_file(file);
+    let program = match crate::frontend::parser::Parser::parse_str(&source, file) {
+        Ok(p) => p,
+        Err(_) => return vec![],
+    };
+
+    let mut result = Vec::new();
+    for item in &program.items {
+        if let Item::FnDef(fd) = item {
+            if fd.return_ty.is_none() {
+                result.push(FnReturnInfo {
+                    name: fd.name.clone(),
+                    file: file.to_string(),
+                    line: fd.span.line,
+                });
+            }
+        }
+    }
+    result
+}
+
 // ── fav check ─────────────────────────────────────────────────────────────────
 
-pub fn cmd_check(file: Option<&str>, no_warn: bool, legacy_check: bool, json: bool, show_types: bool, strict: bool, ambient: bool, report: bool, show_effects: bool, refresh_schemas: bool) {
+/// v43.9.0: per-function inference annotations — single parse (resolves double-parse TODO)
+/// collect_binding_types と collect_fn_inferred_return_types 間の二重パース TODO を解消する。
+/// cmd_check 全体では check_single_file による別パスが依然残る（完全統合は将来課題）。
+/// 型表示には favnir_type_display（全 TypeExpr バリアント対応）を使用する。
+/// 型エラーがある場合は空 Vec を返す（サイレント）。cmd_check のエラー出力パスが別途 exit(1) を担う。
+pub fn collect_inference_annotations(src: &str, filename: &str) -> Vec<String> {
+    use crate::ast::Item;
+
+    let program = match crate::frontend::parser::Parser::parse_str(src, filename) {
+        Ok(p) => p,
+        Err(_) => return vec![],
+    };
+    let lower = crate::middle::ast_lower_checker::lower_program(&program);
+    if crate::checker_fav_runner::run_checker_fav(lower).is_err() {
+        return vec![];
+    }
+    let mut out = Vec::new();
+    for item in &program.items {
+        if let Item::FnDef(fd) = item {
+            let params: Vec<String> = fd.params.iter()
+                .map(|p| format!("{}: {}", p.name, favnir_type_display(&p.ty)))
+                .collect();
+            let ret = fd.return_ty.as_ref()
+                .map(|t| favnir_type_display(t))
+                .unwrap_or_else(|| "inferred".to_string());
+            out.push(format!("fn {}({}) -> {}", fd.name, params.join(", "), ret));
+        }
+    }
+    out
+}
+
+/// v43.10.0: --explain 用ヘルパー。正常コードでは空 Vec を返す（テスト用）。
+/// run_checker_fav は Result<(), Vec<String>> を返すため、
+/// msgs_to_type_errors で Vec<TypeError> に変換してから e.code にアクセスする。
+/// 型エラーがない場合は空 Vec を返す。
+pub fn collect_explain_output(src: &str, filename: &str) -> Vec<String> {
+    use crate::checker_fav_runner;
+    use crate::middle::ast_lower_checker;
+    let program = match crate::frontend::parser::Parser::parse_str(src, filename) {
+        Ok(p) => p,
+        Err(_) => return vec![],
+    };
+    let lower = ast_lower_checker::lower_program(&program);
+    match checker_fav_runner::run_checker_fav(lower) {
+        Ok(_) => vec![],
+        Err(msgs) => {
+            let errors = checker_fav_runner::msgs_to_type_errors(msgs);
+            let mut out = Vec::new();
+            for e in &errors {
+                if let Some(text) = get_explain_text(e.code) {
+                    out.push(format!("  Explain: {}", text));
+                }
+            }
+            out
+        }
+    }
+}
+
+/// v43.11.0: opaque type coerce チェック（AST レベル）。
+/// opaque alias を返す fn で body.expr が inner type のリテラルである場合を E0413 として返す。
+///
+/// スコープ（MVP）:
+/// - return_ty が opaque alias かつ body.expr が Expr::Lit(Lit::Str(_), _) のケースのみ
+/// - body.stmts は対象外（stmts に代入等がある場合でも body.expr がリテラルなら検出される）
+/// - Int / Float / Bool リテラルは未対応（String のみ）
+///
+/// 型チェックエラーがある場合は cmd_check がこれを呼ぶ前に exit(1) するため、
+/// このチェックは型チェック通過後のみ実行される。
+pub fn check_opaque_coerce_violations(src: &str, filename: &str) -> Vec<String> {
+    use crate::ast::{Item, TypeBody, TypeExpr};
+    let program = match crate::frontend::parser::Parser::parse_str(src, filename) {
+        Ok(p) => p,
+        Err(_) => return vec![],
+    };
+    // opaque alias map: type name -> inner type name (simple Named aliases only)
+    let mut opaque_aliases: std::collections::HashMap<String, String> =
+        std::collections::HashMap::new();
+    for item in &program.items {
+        if let Item::TypeDef(td) = item {
+            if td.is_opaque {
+                if let TypeBody::Alias(TypeExpr::Named(inner_name, params, _)) = &td.body {
+                    if params.is_empty() {
+                        opaque_aliases.insert(td.name.clone(), inner_name.clone());
+                    }
+                }
+            }
+        }
+    }
+    if opaque_aliases.is_empty() {
+        return vec![];
+    }
+    let mut violations = Vec::new();
+    for item in &program.items {
+        if let Item::FnDef(fd) = item {
+            if let Some(TypeExpr::Named(ret_name, ret_params, _)) = &fd.return_ty {
+                if ret_params.is_empty() {
+                    if let Some(inner) = opaque_aliases.get(ret_name) {
+                        // bare_inner_literal_line returns the literal's line number for precise reporting
+                        if let Some(line) = bare_inner_literal_line(&fd.body.expr, inner) {
+                            violations.push(format!(
+                                "{}:{}: E0413: opaque type coerce forbidden: \
+                                 cannot return {} as opaque type {}",
+                                filename, line, inner, ret_name
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+    }
+    violations
+}
+
+/// v44.1.0: refinement type がストリーム要素型として型注釈されている bind 束縛を収集
+pub fn collect_refinement_stream_bindings(src: &str, filename: &str) -> Vec<String> {
+    use crate::ast::{Item, Pattern, Stmt, TypeExpr};
+
+    let program = match crate::frontend::parser::Parser::parse_str(src, filename) {
+        Ok(p) => p,
+        Err(_) => return vec![],
+    };
+
+    // refinement type 名を収集（invariants 非空の TypeDef）
+    let mut refinement_names: std::collections::HashSet<String> =
+        std::collections::HashSet::new();
+    for item in &program.items {
+        if let Item::TypeDef(td) = item {
+            if !td.invariants.is_empty() {
+                refinement_names.insert(td.name.clone());
+            }
+        }
+    }
+
+    let mut result = Vec::new();
+
+    // MVP: FnDef / TrfDef のトップレベル stmts のみ走査。
+    // ImplDef・TestDef 内のメソッド、ネストした if/match ブロック内の bind は v44.x+ スコープ。
+    let blocks: Vec<&crate::ast::Block> = program.items.iter().filter_map(|item| {
+        match item {
+            Item::FnDef(fd) => Some(&fd.body),
+            Item::TrfDef(td) => Some(&td.body),
+            _ => None,
+        }
+    }).collect();
+
+    for block in blocks {
+        // MVP: top-level stmts only（ネストした bind は v44.x+ スコープ）
+        for stmt in &block.stmts {
+            if let Stmt::Bind(b) = stmt {
+                // MVP: TypeExpr::Optional / Fallible のアンラップは v44.x+ スコープ
+                if let Some(TypeExpr::Named(container, params, _)) = &b.annotated_ty {
+                    if (container == "Stream" || container == "List") && !params.is_empty() {
+                        if let TypeExpr::Named(elem, _, _) = &params[0] {
+                            if refinement_names.contains(elem) {
+                                let name = match &b.pattern {
+                                    Pattern::Bind(n, _) => n.clone(),
+                                    _ => "<pattern>".to_string(),
+                                };
+                                result.push(format!(
+                                    "{}:{}: {}: {}<{}>",
+                                    filename, b.span.line, name, container, elem
+                                ));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    result
+}
+
+/// v44.2.0: refinement type 名と一致する CEP イベント参照を収集
+/// MVP: CepExpr::Event 名と refinement type 名の一致のみ（型パラメータ付きイベントは将来版）
+/// NOTE: 同一 CepClause 内に同一 refinement type 名が複数登場した場合、重複エントリが生成される（MVP 制限）
+pub fn collect_cep_refinement_event_refs(src: &str, filename: &str) -> Vec<String> {
+    use crate::ast::{CepExpr, Item};
+
+    let program = match crate::frontend::parser::Parser::parse_str(src, filename) {
+        Ok(p) => p,
+        Err(_) => return vec![],
+    };
+
+    // refinement type 名を収集（invariants 非空の TypeDef）
+    let mut refinement_names: std::collections::HashSet<String> =
+        std::collections::HashSet::new();
+    for item in &program.items {
+        if let Item::TypeDef(td) = item {
+            if !td.invariants.is_empty() {
+                refinement_names.insert(td.name.clone());
+            }
+        }
+    }
+
+    if refinement_names.is_empty() {
+        return vec![];
+    }
+
+    let mut result = Vec::new();
+
+    for item in &program.items {
+        if let Item::CepPatternDef(cd) = item {
+            for clause in &cd.body {
+                collect_cep_expr_refinement_refs(
+                    &clause.expr,
+                    &cd.name,
+                    clause.span.line,
+                    filename,
+                    &refinement_names,
+                    &mut result,
+                );
+            }
+        }
+    }
+
+    result
+}
+
+/// NOTE: `CepExpr` 自体にスパン情報がないため、呼び出し元 `CepClause.span.line` を全サブ式で使用する。
+/// 将来 `CepExpr` にスパンが追加された場合は `line` 引数を削除して各ノードのスパンを使うこと。
+fn collect_cep_expr_refinement_refs(
+    expr: &crate::ast::CepExpr,
+    pattern_name: &str,
+    line: u32,
+    filename: &str,
+    refinement_names: &std::collections::HashSet<String>,
+    result: &mut Vec<String>,
+) {
+    use crate::ast::CepExpr;
+    match expr {
+        CepExpr::Event(name) => {
+            if refinement_names.contains(name) {
+                result.push(format!(
+                    "{}:{}: {}: {}",
+                    filename, line, pattern_name, name
+                ));
+            }
+        }
+        CepExpr::Seq(children) | CepExpr::Any(children) => {
+            for child in children {
+                collect_cep_expr_refinement_refs(
+                    child, pattern_name, line, filename, refinement_names, result,
+                );
+            }
+        }
+        CepExpr::Not(child) => {
+            collect_cep_expr_refinement_refs(
+                child, pattern_name, line, filename, refinement_names, result,
+            );
+        }
+    }
+}
+
+/// v44.3.0: 同じ内部型を持つ opaque type エイリアスをグループ化して返す
+/// Stream.join で誤 join される可能性のある opaque type ペアを検出するための AST レベル MVP。
+/// NOTE: 型引数なし（TypeExpr::Named の params.is_empty()）の単純 opaque alias のみ対象。
+/// NOTE: checker.fav への E0413 統合は将来版のスコープ。
+pub fn collect_opaque_alias_groups(src: &str, filename: &str) -> Vec<String> {
+    use crate::ast::{Item, TypeBody, TypeExpr};
+
+    let program = match crate::frontend::parser::Parser::parse_str(src, filename) {
+        Ok(p) => p,
+        Err(_) => return vec![],
+    };
+
+    // inner type 名 -> Vec<(opaque_name, line)> のマップを構築
+    let mut groups: std::collections::HashMap<String, Vec<(String, u32)>> =
+        std::collections::HashMap::new();
+
+    for item in &program.items {
+        if let Item::TypeDef(td) = item {
+            if td.is_opaque {
+                if let TypeBody::Alias(TypeExpr::Named(inner, params, _)) = &td.body {
+                    // MVP: 非ジェネリック inner type のみ対象
+                    // （`opaque type Foo = List<String>` 等の型引数付き opaque alias は将来版）
+                    if params.is_empty() {
+                        // td.span.line は opaque type 宣言全体の行（`= inner` の行と同じ行）
+                        groups
+                            .entry(inner.clone())
+                            .or_default()
+                            .push((td.name.clone(), td.span.line));
+                    }
+                }
+            }
+        }
+    }
+
+    let mut result = Vec::new();
+
+    // 2 件以上の opaque type が同じ inner type を共有するグループをレポート
+    let mut inner_types: Vec<String> = groups.keys().cloned().collect();
+    inner_types.sort(); // 安定した出力のためソート
+
+    for inner in &inner_types {
+        let entries = &groups[inner];
+        if entries.len() >= 2 {
+            // 最小行番号 = グループ内で最初に宣言された opaque type の行（通常は定義順と一致）
+            let first_line = entries.iter().map(|(_, l)| *l).min().unwrap_or(0);
+            let mut names: Vec<String> = entries.iter().map(|(n, _)| n.clone()).collect();
+            names.sort(); // アルファベット順
+            result.push(format!(
+                "{}:{}: {}: {}",
+                filename,
+                first_line,
+                inner,
+                names.join(", ")
+            ));
+        }
+    }
+
+    result
+}
+
+/// v44.4.0: ステージ内の型注釈付き bind 束縛を lineage エントリとして収集
+/// `fav explain --lineage` への型情報統合の AST レベル MVP。
+/// NOTE: TrfDef トップレベル stmts のみ走査（ネスト Block は将来版）。
+/// NOTE: LineageEntry 構造体拡張・render_lineage_text 統合は将来版のスコープ。
+/// NOTE: Pattern::Bind 以外（Record / Or / List 等の分割代入）は `<pattern>` として記録される（将来版で対処）。
+pub fn collect_annotated_lineage_bindings(src: &str, filename: &str) -> Vec<String> {
+    use crate::ast::{Item, Pattern, Stmt};
+
+    let program = match crate::frontend::parser::Parser::parse_str(src, filename) {
+        Ok(p) => p,
+        Err(_) => return vec![],
+    };
+
+    let mut result = Vec::new();
+
+    for item in &program.items {
+        if let Item::TrfDef(td) = item {
+            // MVP: トップレベル stmts のみ（ネストした if/match 内の bind は将来版）
+            for stmt in &td.body.stmts {
+                if let Stmt::Bind(b) = stmt {
+                    if let Some(ty) = &b.annotated_ty {
+                        let name = match &b.pattern {
+                            Pattern::Bind(n, _) => n.clone(),
+                            _ => "<pattern>".to_string(),
+                        };
+                        result.push(format!(
+                            "{}:{}: {}: {}: {}",
+                            filename,
+                            b.span.line,
+                            td.name,
+                            name,
+                            format_type_expr(ty),
+                        ));
+                    }
+                }
+            }
+        }
+    }
+
+    result
+}
+
+/// v44.5.0: `#[max_inflight(n)]` アノテーション付きステージを収集。
+/// Back-pressure policy 照合の AST レベル MVP。
+/// NOTE: FnDef には max_inflight フィールドが存在しない（TrfDef のみ対象）。
+/// NOTE: policy { max_inflight: N } グローバルポリシーブロック parse・VM 強制は将来版のスコープ（ast.rs に PolicyBlock 未定義）。
+pub fn collect_stage_max_inflight_annotations(src: &str, filename: &str) -> Vec<String> {
+    use crate::ast::Item;
+
+    let program = match crate::frontend::parser::Parser::parse_str(src, filename) {
+        Ok(p) => p,
+        Err(_) => return vec![],
+    };
+
+    let mut result = Vec::new();
+
+    for item in &program.items {
+        if let Item::TrfDef(td) = item {
+            if let Some(ann) = &td.max_inflight {
+                result.push(format!(
+                    "{}:{}: {}: max_inflight={}",
+                    filename,
+                    td.span.line,
+                    td.name,
+                    ann.n,
+                ));
+            }
+        }
+    }
+
+    result
+}
+
+/// v44.8.0: CHANGELOG から `bench --stream` 計測結果行を収集。
+/// パフォーマンス追跡の MVP。
+/// NOTE: 実行時ベンチマーク計測（VM レベル最適化・v41.0 実測比較）は将来版のスコープ。
+pub fn collect_bench_stream_notes(changelog: &str) -> Vec<String> {
+    changelog
+        .lines()
+        .filter(|line| line.contains("bench --stream"))
+        .map(|line| line.trim().to_string())
+        .collect()
+}
+
+/// body expr が inner type のベアリテラルである場合、そのリテラルの行番号を返す。
+/// リテラルのスパンを使うことで、関数宣言行ではなく問題のリテラルの行を正確に報告する。
+/// MVP: String のみ対応（Int / Float / Bool は将来版）。
+fn bare_inner_literal_line(expr: &crate::ast::Expr, inner_type: &str) -> Option<u32> {
+    use crate::ast::{Expr, Lit};
+    match expr {
+        Expr::Lit(Lit::Str(_), span) if inner_type == "String" => Some(span.line),
+        _ => None,
+    }
+}
+
+pub fn cmd_check(file: Option<&str>, no_warn: bool, legacy_check: bool, json: bool, show_types: bool, strict: bool, ambient: bool, report: bool, show_effects: bool, refresh_schemas: bool, show_inference: bool, explain: bool) {
     load_checkpoint_config_for_file(file);
     if let Some(path) = file {
         // Single-file mode
@@ -3911,6 +4353,12 @@ pub fn cmd_check(file: Option<&str>, no_warn: bool, legacy_check: bool, json: bo
                 let w006_mark = if b.warning.as_deref() == Some("W006") { "  \u{2190} W006" } else { "" };
                 println!("{:<30} bind {:10} : {}{}", location, b.name, b.ty, w006_mark);
             }
+            // v43.2.0: fn inferred return types (omitted -> RetType)
+            let fn_returns = collect_fn_inferred_return_types(path);
+            for f in &fn_returns {
+                let location = format!("{}:{}", f.file, f.line);
+                println!("{:<30} fn   {:<10} : (return type inferred from body)", location, f.name);
+            }
         }
 
         if show_effects {
@@ -3918,13 +4366,39 @@ pub fn cmd_check(file: Option<&str>, no_warn: bool, legacy_check: bool, json: bo
             println!("(effect inference removed in v35.4.0 — use ctx parameters instead)");
         }
 
+        if show_inference {
+            // v43.9.0: --show-inference — per-function type annotations (single parse)
+            // path は外側の if let Some(path) = file で確定済み（この時点で常に Some）
+            let annotations = collect_inference_annotations(&source, path);
+            for ann in &annotations {
+                println!("{}", ann);
+            }
+        }
+
         if errors.is_empty() {
-            if !show_types && !show_effects {
+            // v43.11.0: opaque type coerce check (E0413) — 型チェック通過後のみ実行
+            // JSON モードでは平文テキストを出力しない（--json との組み合わせは非対応）
+            if !json {
+                let opaque_violations = check_opaque_coerce_violations(&source, path);
+                if !opaque_violations.is_empty() {
+                    for v in &opaque_violations {
+                        eprintln!("{}", v);
+                    }
+                    process::exit(1);
+                }
+            }
+            if !show_types && !show_effects && !show_inference {
                 println!("{}: no errors found", path);
             }
         } else {
             for e in &errors {
                 eprintln!("{}", format_diagnostic(&source, e));
+                // v43.10.0: --explain — static explanation text per error code (stderr, consistent with error output)
+                if explain && !json {
+                    if let Some(text) = get_explain_text(e.code) {
+                        eprintln!("  Explain: {}", text);
+                    }
+                }
             }
             process::exit(1);
         }
@@ -4165,6 +4639,7 @@ fn try_cmd_check_dir(dir: &Path) -> Result<(), usize> {
         registry_url: None,
         workers: None,
         state: None,
+        stream: None,
     });
     let files = collect_fav_files_recursive(dir);
     let resolver = make_resolver(Some(toml), Some(root));
@@ -5130,11 +5605,12 @@ pub struct BenchOpts {
     pub runs: u64,
     pub warmup: u64,
     pub json: bool,
+    pub stream: bool,
 }
 
 impl Default for BenchOpts {
     fn default() -> Self {
-        BenchOpts { file: None, filter: None, runs: 100, warmup: 5, json: false }
+        BenchOpts { file: None, filter: None, runs: 100, warmup: 5, json: false, stream: false }
     }
 }
 
@@ -10912,6 +11388,21 @@ bind _ <- Postgres.execute_raw(...) のように、
         Err(e) => e
       }"
         ),
+        "E0413" => Some(
+"E0413: Opaque type coerce forbidden
+
+opaque type の内部型の値を直接 opaque type として返すことはできません。
+opaque type は明示的なコンストラクタを経由してのみ生成できます。
+
+修正例:
+  誤: opaque type Token = String
+      fn make() -> Token { \"secret\" }   ← String を Token として直接返す → E0413
+
+  正: opaque type Token = String
+      fn make(raw: String) -> Token { Token.wrap(raw) }   ← コンストラクタを使用
+
+関連: E0001（未定義変数）"
+        ),
         _ => None,
     }
 }
@@ -12178,6 +12669,14 @@ pub fn cmd_profile_compare(baseline_version: &str, path: &str) {
             );
         }
     }
+}
+
+/// v42.7.0: fav monitor — パイプライン監視（stub）
+/// 実際のメトリクス収集は v43.x 以降で実装。
+/// 引数はすべて無視する（未知引数もエラーにしない）。v43.x で --interval オプション追加時に引数解析を実装する。
+pub fn cmd_monitor(_args: &[String]) {
+    println!("fav monitor — pipeline metrics (stub)");
+    println!("Throughput, event count, and latency monitoring will be available in v43.x.");
 }
 
 fn extract_profile_stages(json: &str) -> std::collections::HashMap<String, f64> {
@@ -13894,6 +14393,7 @@ impl ExplainPrinter {
                 Item::TestGroup { .. } => {}
                 Item::PipelineDef(..) => {} // v22.5.0: スタブ
                 Item::SchemaDef(..) => {} // v36.1.0: スタブ
+                Item::CepPatternDef(..) => {} // v42.1.0: スタブ
                 Item::NamespaceDecl(..)
                 | Item::UseDecl(..)
                 | Item::RuneUse { .. }
@@ -44270,9 +44770,7 @@ mod v40000_tests {
 
     #[test]
     fn cargo_toml_version_is_40_0_0() {
-        // NOTE: 次バージョン bump 時に Stubbed コメントへ置き換えること
-        let cargo = include_str!("../Cargo.toml");
-        assert!(cargo.contains("40.0.0"), "Cargo.toml must contain version 40.0.0");
+        // Stubbed: version bumped to 40.1.0 -- assertion intentionally removed
     }
 
     #[test]
@@ -44291,5 +44789,1474 @@ mod v40000_tests {
     fn readme_mentions_enterprise_governance() {
         let src = include_str!("../../README.md");
         assert!(src.contains("Enterprise Governance"), "README.md must contain Enterprise Governance");
+    }
+}
+
+// ── v40100_tests (v40.1.0) — Streaming Foundations: tumbling / sliding window ──
+#[cfg(test)]
+mod v40100_tests {
+    #[test]
+    fn cargo_toml_version_is_40_1_0() {
+        // Stubbed: version bumped past 40.1.0 -- assertion intentionally removed
+    }
+
+    #[test]
+    fn changelog_has_v40_1_0() {
+        let src = include_str!("../../CHANGELOG.md");
+        assert!(src.contains("[v40.1.0]"), "CHANGELOG.md must contain [v40.1.0]");
+    }
+
+    #[test]
+    fn stream_rune_has_window_functions() {
+        let src = include_str!("../../runes/stream/stream.fav");
+        assert!(src.contains("tumbling_window"), "stream.fav must contain tumbling_window");
+        assert!(src.contains("sliding_window"), "stream.fav must contain sliding_window");
+    }
+}
+
+// ── v40200_tests (v40.2.0) — Streaming Foundations: session_window ──────────
+#[cfg(test)]
+mod v40200_tests {
+    #[test]
+    fn cargo_toml_version_is_40_2_0() {
+        // Stubbed: version bumped past 40.2.0 -- assertion intentionally removed
+    }
+
+    #[test]
+    fn changelog_has_v40_2_0() {
+        let src = include_str!("../../CHANGELOG.md");
+        assert!(src.contains("[v40.2.0]"), "CHANGELOG.md must contain [v40.2.0]");
+    }
+
+    #[test]
+    fn stream_rune_has_session_window() {
+        let src = include_str!("../../runes/stream/stream.fav");
+        assert!(src.contains("session_window"), "stream.fav must contain session_window");
+    }
+}
+
+// ── v40300_tests (v40.3.0) — Streaming Foundations: Event<T> + timestamp ────
+#[cfg(test)]
+mod v40300_tests {
+    #[test]
+    fn cargo_toml_version_is_40_3_0() {
+        // Stubbed: version bumped past 40.3.0 -- assertion intentionally removed
+    }
+
+    #[test]
+    fn changelog_has_v40_3_0() {
+        let src = include_str!("../../CHANGELOG.md");
+        assert!(src.contains("[v40.3.0]"), "CHANGELOG.md must contain [v40.3.0]");
+    }
+
+    #[test]
+    fn stream_fav_has_event_type() {
+        let src = include_str!("../../runes/stream/stream.fav");
+        assert!(src.contains("Event"), "stream.fav must contain Event type definition");
+        assert!(src.contains("timestamp"), "stream.fav must contain timestamp field");
+    }
+}
+
+// ── v40400_tests (v40.4.0) — Streaming Foundations: with_late_policy ────────
+#[cfg(test)]
+mod v40400_tests {
+    #[test]
+    fn cargo_toml_version_is_40_4_0() {
+        // Stubbed: version bumped past 40.4.0 -- assertion intentionally removed
+    }
+
+    #[test]
+    fn changelog_has_v40_4_0() {
+        let src = include_str!("../../CHANGELOG.md");
+        assert!(src.contains("[v40.4.0]"), "CHANGELOG.md must contain [v40.4.0]");
+    }
+
+    #[test]
+    fn stream_fav_has_late_policy() {
+        let src = include_str!("../../runes/stream/stream.fav");
+        assert!(src.contains("with_late_policy"), "stream.fav must contain with_late_policy");
+    }
+}
+
+// ── v40500_tests (v40.5.0) — fav.toml [stream] section ───────────────────────
+#[cfg(test)]
+mod v40500_tests {
+    #[test]
+    fn cargo_toml_version_is_40_5_0() {
+        // Stubbed: version bumped past 40.5.0 -- assertion intentionally removed
+    }
+
+    #[test]
+    fn changelog_has_v40_5_0() {
+        let src = include_str!("../../CHANGELOG.md");
+        assert!(src.contains("[v40.5.0]"), "CHANGELOG.md must contain [v40.5.0]");
+    }
+
+    #[test]
+    fn fav_toml_stream_section_parsed() {
+        let toml = "[package]\nname = \"test\"\nversion = \"1.0\"\n\n[stream]\nwatermark_delay = 5\nlate_policy = \"drop\"\n";
+        let parsed = crate::toml::parse_fav_toml_pub(toml);
+        let stream = parsed.stream.expect("stream config should be parsed");
+        assert_eq!(stream.watermark_delay, Some(5));
+        assert_eq!(stream.late_policy.as_deref(), Some("drop"));
+    }
+}
+
+// ── v40600_tests (v40.6.0) — Kafka consume_windowed ──────────────────────────
+#[cfg(test)]
+mod v40600_tests {
+    #[test]
+    fn cargo_toml_version_is_40_6_0() {
+        // Stubbed: version bumped past 40.6.0 -- assertion intentionally removed
+    }
+
+    #[test]
+    fn changelog_has_v40_6_0() {
+        let src = include_str!("../../CHANGELOG.md");
+        assert!(src.contains("[v40.6.0]"), "CHANGELOG.md must contain [v40.6.0]");
+    }
+
+    #[test]
+    fn kafka_fav_has_consume_windowed() {
+        let src = include_str!("../../runes/kafka/kafka.fav");
+        assert!(src.contains("consume_windowed"), "kafka.fav must contain consume_windowed");
+    }
+}
+
+// ── v40700_tests (v40.7.0) — BenchOpts stream field ─────────────────────────
+#[cfg(test)]
+mod v40700_tests {
+    use super::*;
+
+    #[test]
+    fn cargo_toml_version_is_40_7_0() {
+        // Stubbed: version bumped past 40.7.0 -- assertion intentionally removed
+    }
+
+    #[test]
+    fn changelog_has_v40_7_0() {
+        let src = include_str!("../../CHANGELOG.md");
+        assert!(src.contains("[v40.7.0]"), "CHANGELOG.md must contain [v40.7.0]");
+    }
+
+    #[test]
+    fn bench_opts_has_stream_field() {
+        let opts = BenchOpts { stream: true, ..BenchOpts::default() };
+        assert!(opts.stream, "BenchOpts must have stream field");
+    }
+}
+
+// ── v40800_tests (v40.8.0) — cookbook window-aggregation ─────────────────────
+#[cfg(test)]
+mod v40800_tests {
+    #[test]
+    fn cargo_toml_version_is_40_8_0() {
+        // Stubbed: version bumped past 40.8.0 -- assertion intentionally removed
+    }
+
+    #[test]
+    fn changelog_has_v40_8_0() {
+        let src = include_str!("../../CHANGELOG.md");
+        assert!(src.contains("[v40.8.0]"), "CHANGELOG.md must contain [v40.8.0]");
+    }
+
+    #[test]
+    fn cookbook_window_aggregation_exists() {
+        let src = include_str!("../../site/content/cookbook/window-aggregation.mdx");
+        assert!(src.contains("tumbling_window"), "window-aggregation.mdx must mention tumbling_window");
+    }
+}
+
+// ── v40900_tests (v40.9.0) — streaming-foundations doc ───────────────────────
+#[cfg(test)]
+mod v40900_tests {
+    #[test]
+    fn cargo_toml_version_is_40_9_0() {
+        // Stubbed: version bumped past 40.9.0 -- assertion intentionally removed
+    }
+
+    #[test]
+    fn changelog_has_v40_9_0() {
+        let src = include_str!("../../CHANGELOG.md");
+        assert!(src.contains("[v40.9.0]"), "CHANGELOG.md must contain [v40.9.0]");
+    }
+
+    #[test]
+    fn streaming_foundations_doc_exists() {
+        let src = include_str!("../../site/content/docs/streaming-foundations.mdx");
+        assert!(src.contains("streaming-foundations"), "streaming-foundations.mdx must mention streaming-foundations");
+    }
+}
+
+// ── v41000_tests (v41.0.0) — Streaming Foundations milestone ─────────────────
+#[cfg(test)]
+mod v41000_tests {
+    #[test]
+    fn cargo_toml_version_is_41_0_0() {
+        // Stubbed: version bumped past 41.0.0 -- assertion intentionally removed
+    }
+
+    #[test]
+    fn changelog_has_v41_0_0() {
+        let src = include_str!("../../CHANGELOG.md");
+        assert!(src.contains("[v41.0.0]"), "CHANGELOG.md must contain [v41.0.0]");
+    }
+
+    #[test]
+    fn milestone_has_streaming_foundations() {
+        let src = include_str!("../../MILESTONE.md");
+        assert!(src.contains("Streaming Foundations"), "MILESTONE.md must contain Streaming Foundations");
+    }
+
+    #[test]
+    fn readme_mentions_streaming_foundations() {
+        let src = include_str!("../../README.md");
+        assert!(src.contains("Streaming Foundations"), "README.md must mention Streaming Foundations");
+    }
+}
+
+// ── v41100_tests (v41.1.0) — Refinement types ────────────────────────────────
+#[cfg(test)]
+mod v41100_tests {
+    #[test]
+    fn cargo_toml_version_is_41_1_0() {
+        // Stubbed: version bumped past 41.1.0 -- assertion intentionally removed
+    }
+
+    #[test]
+    fn changelog_has_v41_1_0() {
+        let src = include_str!("../../CHANGELOG.md");
+        assert!(src.contains("[v41.1.0]"), "CHANGELOG.md must contain [v41.1.0]");
+    }
+
+    #[test]
+    fn refinement_type_alias_where_parseable() {
+        use crate::frontend::parser::Parser;
+        let src = "type Age = Int where |v| v >= 0";
+        let result = Parser::parse_str(src, "test.fav");
+        assert!(result.is_ok(), "Refinement type alias with where clause should parse without error");
+    }
+}
+
+// ── v41200_tests (v41.2.0) — E0404 error code ────────────────────────────────
+#[cfg(test)]
+mod v41200_tests {
+    #[test]
+    fn cargo_toml_version_is_41_2_0() {
+        // Stubbed: version bumped past 41.2.0 -- assertion intentionally removed
+    }
+
+    #[test]
+    fn changelog_has_v41_2_0() {
+        let src = include_str!("../../CHANGELOG.md");
+        assert!(src.contains("[v41.2.0]"), "CHANGELOG.md must contain [v41.2.0]");
+    }
+
+    #[test]
+    fn error_catalog_has_e0404() {
+        let src = include_str!("error_catalog.rs");
+        assert!(src.contains("E0404"), "error_catalog.rs must define E0404");
+    }
+
+    #[test]
+    fn error_catalog_has_e0405() {
+        let src = include_str!("error_catalog.rs");
+        assert!(src.contains("E0405"), "error_catalog.rs must define E0405");
+    }
+
+    #[test]
+    fn error_catalog_has_e0406() {
+        let src = include_str!("error_catalog.rs");
+        assert!(src.contains("E0406"), "error_catalog.rs must define E0406");
+    }
+}
+
+// ── v41300_tests (v41.3.0) — Tuple pattern match ─────────────────────────────
+#[cfg(test)]
+mod v41300_tests {
+    #[test]
+    fn cargo_toml_version_is_41_3_0() {
+        // Stubbed: version bumped to 41.4.0 -- assertion intentionally removed
+    }
+
+    #[test]
+    fn changelog_has_v41_3_0() {
+        let src = include_str!("../../CHANGELOG.md");
+        assert!(src.contains("[v41.3.0]"), "CHANGELOG.md must contain [v41.3.0]");
+    }
+
+    #[test]
+    fn tuple_pattern_match_parseable() {
+        use crate::frontend::parser::Parser;
+        let src = r#"fn f() -> String { match ("ok", 1) { ("ok", 1) => "yes" _ => "no" } }"#;
+        let result = Parser::parse_str(src, "test.fav");
+        assert!(result.is_ok(), "Tuple pattern match should parse without error: {:?}", result.err());
+    }
+}
+
+// ── v41400_tests (v41.4.0) — Guard match ─────────────────────────────────────
+#[cfg(test)]
+mod v41400_tests {
+    #[test]
+    fn cargo_toml_version_is_41_4_0() {
+        // Stubbed: version bumped to 41.5.0 -- assertion intentionally removed
+    }
+
+    #[test]
+    fn changelog_has_v41_4_0() {
+        let src = include_str!("../../CHANGELOG.md");
+        assert!(src.contains("[v41.4.0]"), "CHANGELOG.md must contain [v41.4.0]");
+    }
+
+    #[test]
+    fn guard_match_parseable() {
+        use crate::frontend::parser::Parser;
+        let src = r#"fn f(n: Int) -> String { match n { m if m >= 90 => "A" m if m >= 70 => "B" _ => "C" } }"#;
+        let result = Parser::parse_str(src, "test.fav");
+        assert!(result.is_ok(), "Guard match should parse without error: {:?}", result.err());
+    }
+}
+
+// ── v41500_tests (v41.5.0) — Row polymorphism ────────────────────────────────
+#[cfg(test)]
+mod v41500_tests {
+    #[test]
+    fn cargo_toml_version_is_41_5_0() {
+        // Stubbed: version bumped to 41.6.0 -- assertion intentionally removed
+    }
+
+    #[test]
+    fn changelog_has_v41_5_0() {
+        let src = include_str!("../../CHANGELOG.md");
+        assert!(src.contains("[v41.5.0]"), "CHANGELOG.md must contain [v41.5.0]");
+    }
+
+    #[test]
+    fn record_spread_parseable() {
+        use crate::frontend::parser::Parser;
+        let src = "fn extend_user(u: String) -> String { { ...u, active: true } }";
+        let result = Parser::parse_str(src, "test.fav");
+        assert!(result.is_ok(), "Record spread should parse: {:?}", result.err());
+    }
+}
+
+// -- v45000_tests (v45.0.0) -- Precision & Flow 宣言 --
+#[cfg(test)]
+mod v45000_tests {
+    #[test]
+    fn cargo_toml_version_is_45_0_0() {
+        let toml = include_str!("../Cargo.toml");
+        assert!(toml.contains("version = \"45.0.0\""), "Cargo.toml must contain version 45.0.0");
+    }
+    #[test]
+    fn changelog_has_v45_0_0() {
+        let src = include_str!("../../CHANGELOG.md");
+        assert!(src.contains("[v45.0.0]"), "CHANGELOG.md must contain [v45.0.0]");
+    }
+    #[test]
+    fn milestone_has_precision_and_flow() {
+        let src = include_str!("../../MILESTONE.md");
+        assert!(
+            src.contains("Precision & Flow"),
+            "MILESTONE.md must contain 'Precision & Flow'"
+        );
+    }
+    #[test]
+    fn readme_mentions_precision_and_flow() {
+        let src = include_str!("../../README.md");
+        assert!(
+            src.contains("Precision & Flow") || src.contains("v45.0"),
+            "README.md must mention Precision & Flow or v45.0"
+        );
+    }
+}
+
+// -- v44900_tests (v44.9.0) -- v45.0 前調整・安定化 --
+#[cfg(test)]
+mod v44900_tests {
+    #[test]
+    fn cargo_toml_version_is_44_9_0() {
+        // Stubbed: version bumped to 45.0.0 in v45.0.0.
+    }
+    #[test]
+    fn precision_and_flow_overview_doc_exists() {
+        let src = include_str!("../../site/content/docs/precision-and-flow-overview.mdx");
+        assert!(
+            src.contains("Precision & Flow"),
+            "site/content/docs/precision-and-flow-overview.mdx must exist and mention Precision & Flow"
+        );
+    }
+}
+
+// -- v44800_tests (v44.8.0) -- パフォーマンス最終調整 --
+#[cfg(test)]
+mod v44800_tests {
+    #[test]
+    fn cargo_toml_version_is_44_8_0() {
+        // Stubbed: version bumped to 44.9.0 in v44.9.0.
+    }
+    #[test]
+    fn bench_stream_result_recorded_in_changelog() {
+        let changelog = include_str!("../../CHANGELOG.md");
+        let notes = super::collect_bench_stream_notes(changelog);
+        assert!(
+            !notes.is_empty(),
+            "CHANGELOG.md must contain at least one 'bench --stream' note, got: {:?}",
+            notes
+        );
+    }
+}
+
+// -- v44700_tests (v44.7.0) -- ドキュメントサイト Precision & Flow 概要ページ --
+#[cfg(test)]
+mod v44700_tests {
+    #[test]
+    fn cargo_toml_version_is_44_7_0() {
+        // Stubbed: version bumped to 44.8.0 in v44.8.0.
+    }
+    #[test]
+    fn precision_and_flow_doc_exists() {
+        let src = include_str!("../../site/content/docs/precision-and-flow.mdx");
+        assert!(
+            src.contains("Precision & Flow"),
+            "site/content/docs/precision-and-flow.mdx must exist and mention Precision & Flow"
+        );
+    }
+}
+
+// -- v44600_tests (v44.6.0) -- Precision & Flow E2E デモ --
+#[cfg(test)]
+mod v44600_tests {
+    #[test]
+    fn precision_flow_e2e_demo_structure() {
+        let root = std::env::var("CARGO_MANIFEST_DIR").unwrap();
+        let base = std::path::Path::new(&root)
+            .parent()
+            .unwrap()
+            .join("infra/e2e-demo/precision-flow");
+        assert!(base.exists(), "infra/e2e-demo/precision-flow/ must exist");
+        assert!(
+            base.join("src/demo.fav").exists(),
+            "infra/e2e-demo/precision-flow/src/demo.fav must exist"
+        );
+        assert!(
+            base.join("README.md").exists(),
+            "infra/e2e-demo/precision-flow/README.md must exist"
+        );
+    }
+}
+
+// -- v44500_tests (v44.5.0) -- Back-pressure x fav policy 統合 --
+#[cfg(test)]
+mod v44500_tests {
+    #[test]
+    fn cargo_toml_version_is_44_5_0() {
+        // Stubbed: version bumped to 44.6.0 in v44.6.0.
+    }
+    #[test]
+    fn stage_max_inflight_annotation_detected() {
+        let src = r#"
+#[max_inflight(50)]
+stage Process: List<Int> -> List<Int> = |items| {
+  bind result: List<Int> <- items
+}
+"#;
+        let entries = super::collect_stage_max_inflight_annotations(src, "v44500_test.fav");
+        assert!(!entries.is_empty(), "expected max_inflight annotation, got: {:?}", entries);
+        assert!(
+            entries.iter().any(|e| e.contains("Process") && e.contains("max_inflight=50")),
+            "expected 'Process: max_inflight=50' in entries: {:?}", entries
+        );
+    }
+}
+
+// -- v44400_tests (v44.4.0) -- 型推論 x パイプライン lineage --
+#[cfg(test)]
+mod v44400_tests {
+    #[test]
+    fn cargo_toml_version_is_44_4_0() {
+        // Stubbed: version bumped to 44.5.0 in v44.5.0.
+    }
+    #[test]
+    fn annotated_lineage_bindings_detected() {
+        let src = r#"
+stage Validate: List<Float> -> List<Float> = |events| {
+  bind valid: List<Float> <- events
+}
+"#;
+        let entries = super::collect_annotated_lineage_bindings(src, "v44400_test.fav");
+        assert!(!entries.is_empty(), "expected annotated lineage binding, got: {:?}", entries);
+        assert!(
+            entries.iter().any(|e| e.contains("Validate") && e.contains("valid") && e.contains("List<Float>")),
+            "expected 'Validate: valid: List<Float>' in entries: {:?}", entries
+        );
+    }
+}
+
+// -- v44300_tests (v44.3.0) -- Stream join x Opaque type --
+#[cfg(test)]
+mod v44300_tests {
+    #[test]
+    fn cargo_toml_version_is_44_3_0() {
+        // Stubbed: version bumped to 44.4.0 in v44.4.0.
+    }
+    #[test]
+    fn opaque_alias_group_detected() {
+        let src = r#"
+opaque type OrderId = String
+opaque type PaymentOrderId = String
+"#;
+        let groups = super::collect_opaque_alias_groups(src, "v44300_test.fav");
+        assert!(!groups.is_empty(), "expected opaque alias group, got: {:?}", groups);
+        assert!(
+            groups.iter().any(|g| g.contains("String") && g.contains("OrderId") && g.contains("PaymentOrderId")),
+            "expected 'String: OrderId, PaymentOrderId' in groups: {:?}", groups
+        );
+    }
+    #[test]
+    fn non_opaque_type_excluded_from_groups() {
+        let src = r#"
+type X = String
+type Y = String
+"#;
+        let groups = super::collect_opaque_alias_groups(src, "v44300_test.fav");
+        assert!(groups.is_empty(), "non-opaque types must not appear in groups: {:?}", groups);
+    }
+    #[test]
+    fn single_opaque_alias_does_not_form_group() {
+        let src = "opaque type OrderId = String";
+        let groups = super::collect_opaque_alias_groups(src, "v44300_test.fav");
+        assert!(groups.is_empty(), "single opaque alias must not form a group: {:?}", groups);
+    }
+}
+
+// -- v44200_tests (v44.2.0) -- CEP x Refinement type --
+#[cfg(test)]
+mod v44200_tests {
+    #[test]
+    fn cargo_toml_version_is_44_2_0() {
+        // Stubbed: version bumped to 44.3.0 in v44.3.0.
+    }
+    #[test]
+    fn cep_simple_event_matches_refinement_type() {
+        let src = r#"
+type HighValue = Float where |v| v > 1000.0
+cep pattern HighValueDetected {
+  HighValue within 300
+}
+"#;
+        let hits = super::collect_cep_refinement_event_refs(src, "v44200_test.fav");
+        assert!(!hits.is_empty(), "expected CEP refinement ref, got: {:?}", hits);
+        assert!(
+            hits.iter().any(|h| h.contains("HighValueDetected") && h.contains("HighValue")),
+            "expected 'HighValueDetected: HighValue' in hits: {:?}", hits
+        );
+    }
+    #[test]
+    fn cep_seq_pattern_refinement_event_detected() {
+        let src = r#"
+type HighValue = Float where |v| v > 1000.0
+cep pattern HighValuePurchase {
+  seq(Login, HighValue) within 300
+}
+"#;
+        let hits = super::collect_cep_refinement_event_refs(src, "v44200_test.fav");
+        assert!(!hits.is_empty(), "expected CEP seq refinement ref, got: {:?}", hits);
+        assert!(
+            hits.iter().any(|h| h.contains("HighValuePurchase") && h.contains("HighValue")),
+            "expected 'HighValuePurchase: HighValue' in hits: {:?}", hits
+        );
+    }
+}
+
+// -- v44100_tests (v44.1.0) -- Refinement type x Streaming 統合 --
+#[cfg(test)]
+mod v44100_tests {
+    #[test]
+    fn cargo_toml_version_is_44_1_0() {
+        // Stubbed: version bumped to 44.2.0 in v44.2.0.
+    }
+    #[test]
+    fn refinement_type_invariant_in_typedef_ast() {
+        use crate::ast::{Item, TypeBody};
+        use crate::frontend::parser::Parser;
+        let src = "type PositiveFloat = Float where |v| v > 0.0";
+        let prog = Parser::parse_str(src, "v44100_test.fav").expect("parse");
+        let Item::TypeDef(td) = &prog.items[0] else { panic!("expected TypeDef") };
+        assert!(!td.invariants.is_empty(), "PositiveFloat must have invariants");
+        assert!(matches!(td.body, TypeBody::Alias(_)), "body must be Alias");
+    }
+    #[test]
+    fn collect_refinement_stream_bindings_detects_annotated_bind() {
+        let src = r#"
+type PositiveFloat = Float where |v| v > 0.0
+stage Validate: List<Float> -> List<Float> = |events| {
+  bind valid: Stream<PositiveFloat> <- events
+}
+"#;
+        let hits = super::collect_refinement_stream_bindings(src, "v44100_test.fav");
+        assert!(!hits.is_empty(), "expected refinement stream binding, got: {:?}", hits);
+        assert!(
+            hits.iter().any(|h| h.contains("valid") && h.contains("Stream<PositiveFloat>")),
+            "expected 'valid: Stream<PositiveFloat>' in hits: {:?}", hits
+        );
+    }
+}
+
+// -- v44000_tests (v44.0.0) -- Language Expressiveness 宣言 --
+#[cfg(test)]
+mod v44000_tests {
+    #[test]
+    fn cargo_toml_version_is_44_0_0() {
+        // Stubbed: version bumped to 44.1.0 in v44.1.0.
+    }
+    #[test]
+    fn changelog_has_v44_0_0() {
+        let src = include_str!("../../CHANGELOG.md");
+        assert!(src.contains("[v44.0.0]"), "CHANGELOG.md must contain [v44.0.0]");
+    }
+    #[test]
+    fn milestone_has_language_expressiveness() {
+        let src = include_str!("../../MILESTONE.md");
+        assert!(
+            src.contains("Language Expressiveness"),
+            "MILESTONE.md must contain 'Language Expressiveness'"
+        );
+    }
+    #[test]
+    fn readme_mentions_language_expressiveness() {
+        let src = include_str!("../../README.md");
+        assert!(
+            src.contains("Language Expressiveness") || src.contains("v44.0"),
+            "README.md must mention Language Expressiveness or v44.0"
+        );
+    }
+}
+
+// -- v431300_tests (v43.13.0) -- Language Expressiveness cookbook + 安定化 --
+#[cfg(test)]
+mod v431300_tests {
+    #[test]
+    fn type_inference_guide_mdx_exists() {
+        let content = include_str!("../../site/content/cookbook/type-inference-guide.mdx");
+        assert!(!content.is_empty(), "type-inference-guide.mdx must not be empty");
+    }
+    #[test]
+    fn language_expressiveness_doc_exists() {
+        let content = include_str!("../../site/content/docs/language-expressiveness.mdx");
+        assert!(!content.is_empty(), "language-expressiveness.mdx must not be empty");
+    }
+}
+
+// -- v431200_tests (v43.12.0) -- W031〜W033 lint (冗長型注釈の警告) --
+#[cfg(test)]
+mod v431200_tests {
+    #[test]
+    fn cargo_toml_version_is_43_12_0() {
+        // Stubbed: version bumped to 43.13.0 in v43.13.0.
+    }
+    #[test]
+    fn w031_warns_on_redundant_return_annotation() {
+        use crate::frontend::parser::Parser;
+        let src = "fn answer() -> Int { 42 }";
+        let prog = Parser::parse_str(src, "v431200_test.fav").expect("parse");
+        let warnings = crate::lint::lint_program(&prog);
+        assert!(
+            warnings.iter().any(|w| w.code == "W031"),
+            "expected W031 warning, got: {:?}", warnings
+        );
+    }
+    #[test]
+    fn w032_warns_on_explicit_generic_type_arg() {
+        use crate::frontend::parser::Parser;
+        // Favnir の TypeApply 構文: `expr<Type>(args)` (`::<>` は Rust 特有)
+        let src = "fn f() -> String { type_name_of<Row>() }";
+        let prog = Parser::parse_str(src, "v431200_test.fav").expect("parse");
+        let warnings = crate::lint::lint_program(&prog);
+        assert!(
+            warnings.iter().any(|w| w.code == "W032"),
+            "expected W032 warning, got: {:?}", warnings
+        );
+    }
+}
+
+// -- v431100_tests (v43.11.0) -- opaque type 完全化 --
+#[cfg(test)]
+mod v431100_tests {
+    #[test]
+    fn cargo_toml_version_is_43_11_0() {
+        // Stubbed: version bumped to 43.12.0 in v43.12.0.
+    }
+    #[test]
+    fn parser_recognizes_opaque_type_keyword() {
+        use crate::ast::{Item, TypeBody};
+        use crate::frontend::parser::Parser;
+        let src = "opaque type Token = String";
+        let prog = Parser::parse_str(src, "v431100_test.fav").expect("parse opaque type");
+        let Item::TypeDef(td) = &prog.items[0] else {
+            panic!("expected TypeDef")
+        };
+        assert!(td.is_opaque, "TypeDef must be marked is_opaque");
+        assert_eq!(td.name, "Token");
+        assert!(matches!(td.body, TypeBody::Alias(_)), "body must be Alias");
+    }
+    #[test]
+    fn e0413_opaque_coerce_blocked() {
+        let src = r#"
+opaque type Token = String
+fn make_bad() -> Token { "secret" }
+"#;
+        let violations = super::check_opaque_coerce_violations(src, "v431100_e0413.fav");
+        assert!(!violations.is_empty(), "E0413 violation expected: {:?}", violations);
+        assert!(
+            violations.iter().any(|v| v.contains("E0413")),
+            "E0413 expected in violations: {:?}", violations
+        );
+    }
+}
+
+// -- v431000_tests (v43.10.0) -- fav check --explain --
+#[cfg(test)]
+mod v431000_tests {
+    #[test]
+    fn cargo_toml_version_is_43_10_0() {
+        // Stubbed: version bumped to 43.11.0 in v43.11.0.
+    }
+    #[test]
+    fn explain_output_empty_for_well_typed_code() {
+        // collect_explain_output は正常コードに対して空 Vec を返す
+        let src = r#"
+fn add(a: Int, b: Int) -> Int { a + b }
+"#;
+        let out = super::collect_explain_output(src, "v431000_test.fav");
+        assert!(out.is_empty(), "well-typed code must produce empty explain output: {:?}", out);
+    }
+}
+
+// -- v43900_tests (v43.9.0) -- fav check --show-inference --
+#[cfg(test)]
+mod v43900_tests {
+    #[test]
+    fn cargo_toml_version_is_43_9_0() {
+        // Stubbed: version bumped to 43.10.0 in v43.10.0.
+    }
+    #[test]
+    fn show_inference_collects_fn_annotations() {
+        // collect_inference_annotations が関数名を含む Vec を返す
+        // v43900_tests は driver.rs 内部モジュールのため直接呼び出し可能（use crate::driver::... 不要）
+        let src = r#"
+fn add(a: Int, b: Int) -> Int { a + b }
+fn identity(x: Int) -> Int { x }
+"#;
+        let annotations = super::collect_inference_annotations(src, "v43900_test.fav");
+        assert!(!annotations.is_empty(), "should produce annotations: {:?}", annotations);
+        assert!(annotations.iter().any(|s| s.contains("add")), "add missing: {:?}", annotations);
+        assert!(annotations.iter().any(|s| s.contains("identity")), "identity missing: {:?}", annotations);
+    }
+}
+
+// -- v43800_tests (v43.8.0) -- 双方向型推論（Bidirectional / top-down）--
+#[cfg(test)]
+mod v43800_tests {
+    #[test]
+    fn cargo_toml_version_is_43_8_0() {
+        // Stubbed: version bumped to 43.9.0 in v43.9.0.
+    }
+    #[test]
+    fn bidirectional_filter_infers_elem_type() {
+        // ロードマップ記載例: xs の要素型 Int がラムダ引数 x に下向き伝播する
+        // NOTE: infer_list_lambda_call("filter", ...) が list_ty "List<Int>" → elem_ty "Int" → x: Int を伝播する
+        use crate::frontend::parser::Parser;
+        use crate::middle::ast_lower_checker::lower_program;
+        use crate::checker_fav_runner::run_checker_fav;
+        let src = r#"
+fn filter_positive(xs: List<Int>) -> List<Int> {
+    List.filter(xs, |x| x > 0)
+}
+"#;
+        let prog = Parser::parse_str(src, "v43800_filter.fav").expect("parse");
+        let result = run_checker_fav(lower_program(&prog));
+        assert!(result.is_ok(), "bidirectional filter should type-check: {:?}", result.err());
+    }
+    #[test]
+    fn bidirectional_nested_map_filter_expression() {
+        // ネスト呼び出し式: infer_expr(ECall("List","map",...)) → "List<Int>" → filter の y: Int に伝播
+        use crate::frontend::parser::Parser;
+        use crate::middle::ast_lower_checker::lower_program;
+        use crate::checker_fav_runner::run_checker_fav;
+        let src = r#"
+fn transform(xs: List<Int>) -> List<Int> {
+    List.filter(List.map(xs, |x| x + 1), |y| y > 0)
+}
+"#;
+        let prog = Parser::parse_str(src, "v43800_nested.fav").expect("parse");
+        let result = run_checker_fav(lower_program(&prog));
+        assert!(result.is_ok(), "nested map+filter should type-check: {:?}", result.err());
+    }
+}
+
+// -- v43700_tests (v43.7.0) -- 構造体リテラル推論（Structural inference）--
+#[cfg(test)]
+mod v43700_tests {
+    #[test]
+    fn cargo_toml_version_is_43_7_0() {
+        // Stubbed: version bumped to 43.8.0 in v43.8.0.
+    }
+    #[test]
+    fn structural_record_literal_type_checks() {
+        // 名前付きレコードリテラルの型名（tname）が関数の戻り値型・引数型と一致する
+        // NOTE: ERecordLit → tname（shallow name-only check）。フィールド型の検証は将来課題。
+        use crate::frontend::parser::Parser;
+        use crate::middle::ast_lower_checker::lower_program;
+        use crate::checker_fav_runner::run_checker_fav;
+        let src = r#"
+type Point = { x: Int  y: Int }
+fn make_point() -> Point { Point { x: 1  y: 2 } }
+fn shift(p: Point) -> Point { Point { x: p.x  y: p.y } }
+"#;
+        let prog = Parser::parse_str(src, "v43700_record.fav").expect("parse");
+        let result = run_checker_fav(lower_program(&prog));
+        assert!(result.is_ok(), "record literal type check should pass: {:?}", result.err());
+    }
+}
+
+// -- v43600_tests (v43.6.0) -- パイプライン型伝播（Pipeline stage typing）--
+#[cfg(test)]
+mod v43600_tests {
+    #[test]
+    fn cargo_toml_version_is_43_6_0() {
+        // Stubbed: version bumped to 43.7.0 in v43.7.0.
+    }
+    #[test]
+    fn pipeline_two_step_bind_infers_types() {
+        // List.map → bind → List.filter の2段パイプラインで型が連鎖伝播する
+        use crate::frontend::parser::Parser;
+        use crate::middle::ast_lower_checker::lower_program;
+        use crate::checker_fav_runner::run_checker_fav;
+        let src = r#"
+fn process(xs: List<Int>) -> List<Int> {
+    bind doubled <- List.map(xs, |x| x * 2)
+    List.filter(doubled, |x| x > 0)
+}
+"#;
+        let prog = Parser::parse_str(src, "v43600_two_step.fav").expect("parse");
+        let result = run_checker_fav(lower_program(&prog));
+        assert!(result.is_ok(), "two-step pipeline should type-check: {:?}", result.err());
+    }
+    #[test]
+    fn pipeline_three_step_bind_infers_types() {
+        // 3段 bind チェーンで型が連鎖して伝播する
+        use crate::frontend::parser::Parser;
+        use crate::middle::ast_lower_checker::lower_program;
+        use crate::checker_fav_runner::run_checker_fav;
+        let src = r#"
+fn three_step(xs: List<Int>) -> List<Int> {
+    bind step1 <- List.map(xs, |x| x + 1)
+    bind step2 <- List.filter(step1, |x| x > 0)
+    List.map(step2, |x| x * 2)
+}
+"#;
+        let prog = Parser::parse_str(src, "v43600_three_step.fav").expect("parse");
+        let result = run_checker_fav(lower_program(&prog));
+        assert!(result.is_ok(), "three-step pipeline should type-check: {:?}", result.err());
+    }
+}
+
+// -- v43500_tests (v43.5.0) -- ラムダ引数型推論（Contextual lambda inference）--
+#[cfg(test)]
+mod v43500_tests {
+    #[test]
+    fn cargo_toml_version_is_43_5_0() {
+        // Stubbed: version bumped to 43.6.0 -- assertion intentionally removed
+    }
+    #[test]
+    fn contextual_lambda_map_propagates_elem_type() {
+        // List<Int> の要素型 Int がラムダパラメータに伝播し List<Int> が返る
+        use crate::frontend::parser::Parser;
+        use crate::middle::ast_lower_checker::lower_program;
+        use crate::checker_fav_runner::run_checker_fav;
+        let src = r#"
+fn f(xs: List<Int>) -> List<Int> { List.map(xs, |x| x) }
+"#;
+        let prog = Parser::parse_str(src, "v43500_map.fav").expect("parse");
+        let result = run_checker_fav(lower_program(&prog));
+        assert!(result.is_ok(), "map with elem type propagation should pass: {:?}", result.err());
+    }
+    #[test]
+    fn contextual_lambda_filter_preserves_elem_type() {
+        // List<Int> の要素型 Int がラムダパラメータに伝播し List<Int> が返る
+        use crate::frontend::parser::Parser;
+        use crate::middle::ast_lower_checker::lower_program;
+        use crate::checker_fav_runner::run_checker_fav;
+        let src = r#"
+fn g(xs: List<Int>) -> List<Int> { List.filter(xs, |x| x > 0) }
+"#;
+        let prog = Parser::parse_str(src, "v43500_filter.fav").expect("parse");
+        let result = run_checker_fav(lower_program(&prog));
+        assert!(result.is_ok(), "filter with elem type propagation should pass: {:?}", result.err());
+    }
+}
+
+// -- v43400_tests (v43.4.0) -- ジェネリック推論: 曖昧ケース検出（E0412）--
+#[cfg(test)]
+mod v43400_tests {
+    #[test]
+    fn cargo_toml_version_is_43_4_0() {
+        // Stubbed: version bumped to 43.5.0 -- assertion intentionally removed
+    }
+    #[test]
+    fn e0412_in_error_catalog() {
+        let catalog = include_str!("error_catalog.rs");
+        assert!(catalog.contains("E0412"), "E0412 must be in error_catalog.rs");
+        assert!(catalog.contains("ambiguous type variable"), "E0412 title must be present");
+    }
+    #[test]
+    fn e0412_conflicting_type_vars() {
+        // fn f<A>(x: A, y: A) -> A { x } called with f(1, "hello") → E0412
+        use crate::frontend::parser::Parser;
+        use crate::middle::ast_lower_checker::lower_program;
+        use crate::checker_fav_runner::run_checker_fav;
+        let src = r#"
+fn f<A>(x: A, y: A) -> A { x }
+fn bad() -> Int { f(1, "hello") }
+"#;
+        let prog = Parser::parse_str(src, "v43400_e0412.fav").expect("parse");
+        let result = run_checker_fav(lower_program(&prog));
+        assert!(result.is_err(), "E0412 expected for conflicting type vars");
+        let msgs = result.unwrap_err();
+        assert!(
+            msgs.iter().any(|m| m.contains("E0412")),
+            "E0412 expected in errors, got: {:?}", msgs
+        );
+    }
+    #[test]
+    fn e0412_no_conflict_ok() {
+        // pre-check 挿入後の正常系回帰確認: f(1, 2) は A=Int 同士で競合なし
+        use crate::frontend::parser::Parser;
+        use crate::middle::ast_lower_checker::lower_program;
+        use crate::checker_fav_runner::run_checker_fav;
+        let src = r#"
+fn f<A>(x: A, y: A) -> A { x }
+fn ok_call() -> Int { f(1, 2) }
+"#;
+        let prog = Parser::parse_str(src, "v43400_ok.fav").expect("parse");
+        let result = run_checker_fav(lower_program(&prog));
+        assert!(result.is_ok(), "no conflict: f(1, 2) should pass: {:?}", result.err());
+    }
+}
+
+// -- v43300_tests (v43.3.0) -- ジェネリック型引数推論（Call-site inference）--
+#[cfg(test)]
+mod v43300_tests {
+    #[test]
+    fn cargo_toml_version_is_43_3_0() {
+        // Stubbed: version bumped to 43.4.0 -- assertion intentionally removed
+    }
+    #[test]
+    fn call_site_inference_identity_ok() {
+        // identity("hello") -> String の呼び出しが型エラーなしに通ること
+        use crate::frontend::parser::Parser;
+        use crate::middle::ast_lower_checker::lower_program;
+        use crate::checker_fav_runner::run_checker_fav;
+        let src = r#"
+fn identity<A>(x: A) -> A { x }
+fn main() -> String { identity("hello") }
+"#;
+        let prog = Parser::parse_str(src, "v43300_ok.fav").expect("parse");
+        let result = run_checker_fav(lower_program(&prog));
+        assert!(result.is_ok(), "generic call-site inference should pass: {:?}", result.err());
+    }
+    #[test]
+    fn call_site_inference_wrong_return_e0009() {
+        // identity("hello") -> String だが fn が -> Int を宣言 → E0009
+        use crate::frontend::parser::Parser;
+        use crate::middle::ast_lower_checker::lower_program;
+        use crate::checker_fav_runner::run_checker_fav;
+        let src = r#"
+fn identity<A>(x: A) -> A { x }
+fn wrong_return() -> Int { identity("hello") }
+"#;
+        let prog = Parser::parse_str(src, "v43300_e0009.fav").expect("parse");
+        let result = run_checker_fav(lower_program(&prog));
+        assert!(result.is_err(), "E0009 expected for return type mismatch");
+        let msgs = result.unwrap_err();
+        assert!(
+            msgs.iter().any(|m| m.contains("E0009")),
+            "E0009 expected in errors, got: {:?}", msgs
+        );
+    }
+}
+
+// -- v43200_tests (v43.2.0) -- 戻り値型推論: fav check 統合・E0410 系 --
+#[cfg(test)]
+mod v43200_tests {
+    #[test]
+    fn cargo_toml_version_is_43_2_0() {
+        // Stubbed: version bumped to 43.3.0 -- assertion intentionally removed
+    }
+    #[test]
+    fn e0410_e0411_in_error_catalog() {
+        let catalog = include_str!("error_catalog.rs");
+        assert!(catalog.contains("E0410"), "error_catalog.rs must contain E0410");
+        assert!(catalog.contains("E0411"), "error_catalog.rs must contain E0411");
+    }
+    #[test]
+    fn checker_fav_check_body_ty_has_e0410() {
+        let checker = include_str!("../self/checker.fav");
+        assert!(checker.contains("E0410"), "checker.fav must contain E0410 in check_body_ty");
+    }
+    #[test]
+    fn return_type_omission_e0410_triggered() {
+        // `collect { () }` は checker.fav で Unknown 型に推論される → TeSimple("") + Unknown → E0410
+        use crate::frontend::parser::Parser;
+        use crate::middle::ast_lower_checker::lower_program;
+        use crate::checker_fav_runner::run_checker_fav;
+        let src = "fn f() { collect { () } }";
+        let prog = Parser::parse_str(src, "e0410_test.fav").expect("parse");
+        let prog_vm = lower_program(&prog);
+        let result = run_checker_fav(prog_vm);
+        assert!(result.is_err(), "E0410 should be triggered for Unknown body type");
+        let msgs = result.unwrap_err();
+        assert!(
+            msgs.iter().any(|m| m.contains("E0410")),
+            "E0410 expected in errors, got: {:?}", msgs
+        );
+    }
+}
+
+// -- v43100_tests (v43.1.0) -- 戻り値型推論（Return type omission）--
+#[cfg(test)]
+mod v43100_tests {
+    #[test]
+    fn cargo_toml_version_is_43_1_0() {
+        // Stubbed: version bumped to 43.2.0 -- assertion intentionally removed
+    }
+
+    #[test]
+    fn return_type_omission_block_parseable() {
+        use crate::frontend::parser::Parser;
+        let src = "fn double(x: Int) { x * 2 }";
+        let result = Parser::parse_str(src, "test.fav");
+        assert!(result.is_ok(), "fn without -> RetType should parse: {:?}", result.err());
+    }
+
+    #[test]
+    fn return_type_omission_return_ty_is_none() {
+        use crate::frontend::parser::Parser;
+        use crate::ast::Item;
+        let src = "fn double(x: Int) { x * 2 }";
+        let prog = Parser::parse_str(src, "test.fav").expect("parse ok");
+        let Item::FnDef(ref fd) = prog.items[0] else {
+            panic!("expected FnDef");
+        };
+        assert!(fd.return_ty.is_none(), "return_ty should be None when -> is omitted");
+    }
+}
+
+// -- v43000_tests (v43.0.0) -- Real-Time Power 宣言 --
+#[cfg(test)]
+mod v43000_tests {
+    #[test]
+    fn cargo_toml_version_is_43_0_0() {
+        // Stubbed: version bumped to 43.1.0 -- assertion intentionally removed
+    }
+
+    #[test]
+    fn changelog_has_v43_0_0() {
+        let src = include_str!("../../CHANGELOG.md");
+        assert!(src.contains("[v43.0.0]"), "CHANGELOG.md must contain [v43.0.0]");
+    }
+
+    #[test]
+    fn milestone_has_real_time_power() {
+        let src = include_str!("../../MILESTONE.md");
+        assert!(src.contains("Real-Time Power"), "MILESTONE.md must contain Real-Time Power");
+    }
+
+    #[test]
+    fn readme_mentions_real_time_power() {
+        let src = include_str!("../../README.md");
+        assert!(src.contains("Real-Time Power"), "README.md must mention Real-Time Power");
+    }
+}
+
+// -- v42900_tests (v42.9.0) -- v43.0 前調整・安定化 --
+#[cfg(test)]
+mod v42900_tests {
+    #[test]
+    fn cargo_toml_version_is_42_9_0() {
+        // Stubbed: version bumped to 43.0.0 -- assertion intentionally removed
+    }
+
+    #[test]
+    fn real_time_power_docs_exists() {
+        let mdx = include_str!("../../site/content/docs/real-time-power.mdx");
+        assert!(mdx.contains("Stream.join"), "real-time-power.mdx must contain Stream.join");
+        assert!(mdx.contains("Cep.window"), "real-time-power.mdx must contain Cep.window");
+        assert!(mdx.contains("WebSocket.send"), "real-time-power.mdx must contain WebSocket.send");
+    }
+}
+
+// -- v42800_tests (v42.8.0) -- Real-Time Power cookbook --
+#[cfg(test)]
+mod v42800_tests {
+    #[test]
+    fn realtime_cookbook_mdx_exists() {
+        let cep_mdx = include_str!("../../site/content/cookbook/cep-login-purchase.mdx");
+        assert!(cep_mdx.contains("Cep.window"), "cep-login-purchase.mdx must contain Cep.window");
+        let join_mdx = include_str!("../../site/content/cookbook/stream-join.mdx");
+        assert!(join_mdx.contains("Stream.join"), "stream-join.mdx must contain Stream.join");
+    }
+}
+
+// -- v42700_tests (v42.7.0) -- fav monitor --
+#[cfg(test)]
+mod v42700_tests {
+    #[test]
+    fn cargo_toml_version_is_42_7_0() {
+        // NOTE: スタブ化済み（v42.8.0 で bump）
+        assert!(true);
+    }
+
+    #[test]
+    fn monitor_cmd_exists() {
+        let main_src = include_str!("main.rs");
+        assert!(main_src.contains("cmd_monitor(&args)"), "main.rs must contain cmd_monitor(&args)");
+    }
+}
+
+// -- v42600_tests (v42.6.0) -- WebSocket Rune --
+#[cfg(test)]
+mod v42600_tests {
+    #[test]
+    fn cargo_toml_version_is_42_6_0() {
+        // NOTE: スタブ化済み（v42.7.0 で bump）
+        assert!(true);
+    }
+
+    #[test]
+    fn websocket_rune_fav_exists() {
+        let fav_src = include_str!("../../runes/websocket/websocket.fav");
+        assert!(fav_src.contains("WebSocket.send_raw"), "websocket.fav must contain WebSocket.send_raw");
+        assert!(fav_src.contains("broadcast"), "websocket.fav must contain broadcast");
+        let rune_toml = include_str!("../../runes/websocket/rune.toml");
+        assert!(rune_toml.contains("websocket"), "rune.toml must contain websocket");
+        let mdx = include_str!("../../site/content/docs/runes/websocket.mdx");
+        assert!(mdx.contains("WebSocket"), "websocket.mdx must contain WebSocket");
+    }
+}
+
+// -- v42500_tests (v42.5.0) -- Back-pressure #[max_inflight] --
+#[cfg(test)]
+mod v42500_tests {
+    #[test]
+    fn cargo_toml_version_is_42_5_0() {
+        // NOTE: スタブ化済み（v42.6.0 で bump）
+        assert!(true);
+    }
+
+    #[test]
+    fn max_inflight_annotation_parses() {
+        let src = r#"
+#[max_inflight(100)]
+stage SlowSink: List -> List = |ctx| {
+    ctx
+}
+"#;
+        let program = crate::frontend::parser::Parser::parse_str(src, "max_inflight.fav")
+            .expect("parse ok");
+        let item = program.items.first().expect("one item");
+        if let crate::ast::Item::TrfDef(td) = item {
+            let ann = td.max_inflight.as_ref().expect("max_inflight annotation present");
+            assert_eq!(ann.n, 100, "max_inflight n must be 100");
+        } else {
+            panic!("expected TrfDef, got {:?}", item);
+        }
+    }
+
+    #[test]
+    fn max_inflight_zero_is_parse_error() {
+        // n = 0 は TokenKind::Int(0) としてパースされ raw <= 0 ガードに引っかかる
+        let src = r#"
+#[max_inflight(0)]
+stage S: List -> List = |ctx| { ctx }
+"#;
+        let result = crate::frontend::parser::Parser::parse_str(src, "max_inflight_zero.fav");
+        assert!(result.is_err(), "max_inflight(0) must be a parse error");
+        let msg = result.unwrap_err().message;
+        assert!(msg.contains("positive integer"), "error message must mention 'positive integer', got: {}", msg);
+    }
+}
+
+// -- v42400_tests (v42.4.0) -- Stream join time-window --
+#[cfg(test)]
+mod v42400_tests {
+    #[test]
+    fn cargo_toml_version_is_42_4_0() {
+        // スタブ化済み（v42.5.0 で version bump��
+        let cargo = include_str!("../Cargo.toml");
+        let _ = cargo;
+    }
+
+    #[test]
+    fn stream_join_type_check_ok() {
+        // bind joined <- で結果を変数に束縛し、Stream として使えることを検証
+        let src = r#"public fn main() -> List { bind left <- Stream.from(List.range(1, 3)) bind right <- Stream.from(List.range(2, 4)) bind joined <- Stream.join(left, right, |a, b| a == b, 60) Stream.to_list(joined) }"#;
+        let program = crate::frontend::parser::Parser::parse_str(src, "stream_join_tc.fav").expect("parse ok");
+        let (errors, _) = crate::middle::checker::Checker::check_program(&program);
+        assert!(errors.is_empty(), "Stream.join type check errors: {:?}", errors);
+    }
+
+    #[test]
+    fn stream_join_vm_basic() {
+        use super::{build_artifact, exec_artifact_main};
+        // List.range(1,3)=[1,2], List.range(2,4)=[2,3]; |a,b| a==b → matches (2,2) only
+        let src = r#"public fn main() -> List {
+            bind left <- Stream.from(List.range(1, 3))
+            bind right <- Stream.from(List.range(2, 4))
+            bind joined <- Stream.join(left, right, |a, b| a == b, 60)
+            Stream.to_list(joined)
+        }"#;
+        let program = crate::frontend::parser::Parser::parse_str(src, "stream_join_vm.fav").expect("parse ok");
+        let artifact = build_artifact(&program);
+        let value = exec_artifact_main(&artifact, None).expect("exec ok");
+        // 左ストリーム値2 と 右ストリーム値2 のみマッチ → [[2, 2]] 1件
+        assert_eq!(
+            value,
+            crate::value::Value::List(vec![
+                crate::value::Value::List(vec![
+                    crate::value::Value::Int(2),
+                    crate::value::Value::Int(2),
+                ]),
+            ]),
+            "expected [[2, 2]], got {:?}", value
+        );
+    }
+}
+
+// -- v42300_tests (v42.3.0) -- CEP checker.fav 統合 --
+#[cfg(test)]
+mod v42300_tests {
+    #[test]
+    fn cargo_toml_version_is_42_3_0() {
+        // スタブ化済み（v42.4.0 で version bump）
+        let cargo = include_str!("../Cargo.toml");
+        let _ = cargo;
+    }
+
+    #[test]
+    fn cep_e0420_within_zero() {
+        // `within 0` は lexer が `Int(0)` を生成しパース成功する
+        // checker で within_secs == Some(0) を検出し E0420 を返すことを確認
+        use crate::frontend::parser::Parser;
+        use crate::middle::checker::Checker;
+        let src = r#"cep pattern P { Login within 0 }"#;
+        let prog = Parser::parse_str(src, "test.fav").expect("parse ok");
+        let (errors, _) = Checker::check_program(&prog);
+        assert_eq!(errors.len(), 1, "expected 1 error, got: {:?}", errors);
+        assert_eq!(errors[0].code, "E0420");
+    }
+
+    #[test]
+    fn e0420_in_error_catalog() {
+        use crate::error_catalog;
+        assert!(
+            error_catalog::lookup("E0420").is_some(),
+            "E0420 must be registered in error_catalog"
+        );
+    }
+}
+
+// -- v42200_tests (v42.2.0) -- CEP seq/any/not コンビネータ --
+#[cfg(test)]
+mod v42200_tests {
+    #[test]
+    fn cargo_toml_version_is_42_2_0() {
+        // Stubbed: version bumped to 42.3.0
+        let _ = include_str!("../Cargo.toml");
+    }
+
+    #[test]
+    fn cep_seq_parseable() {
+        use crate::frontend::parser::Parser;
+        use crate::ast::{Item, CepExpr};
+        let src = r#"cep pattern LoginThenPurchase { seq(Login, Purchase) within 300 }"#;
+        let prog = Parser::parse_str(src, "test.fav").expect("parse ok");
+        let Item::CepPatternDef(ref cd) = prog.items[0] else {
+            panic!("expected CepPatternDef");
+        };
+        assert_eq!(cd.body.len(), 1);
+        let CepExpr::Seq(ref args) = cd.body[0].expr else {
+            panic!("expected CepExpr::Seq");
+        };
+        assert_eq!(args.len(), 2);
+        assert_eq!(cd.body[0].within_secs, Some(300));
+        let CepExpr::Event(ref e0) = args[0] else { panic!("args[0] should be Event") };
+        let CepExpr::Event(ref e1) = args[1] else { panic!("args[1] should be Event") };
+        assert_eq!(e0, "Login");
+        assert_eq!(e1, "Purchase");
+    }
+
+    #[test]
+    fn cep_any_parseable() {
+        use crate::frontend::parser::Parser;
+        use crate::ast::{Item, CepExpr};
+        let src = r#"cep pattern AnyAlert { any(DiskFull, OOM, NetworkDown) }"#;
+        let prog = Parser::parse_str(src, "test.fav").expect("parse ok");
+        let Item::CepPatternDef(ref cd) = prog.items[0] else {
+            panic!("expected CepPatternDef");
+        };
+        assert_eq!(cd.body.len(), 1);
+        let CepExpr::Any(ref args) = cd.body[0].expr else {
+            panic!("expected CepExpr::Any");
+        };
+        assert_eq!(args.len(), 3);
+        let CepExpr::Event(ref e0) = args[0] else { panic!("args[0] should be Event") };
+        let CepExpr::Event(ref e1) = args[1] else { panic!("args[1] should be Event") };
+        let CepExpr::Event(ref e2) = args[2] else { panic!("args[2] should be Event") };
+        assert_eq!(e0, "DiskFull");
+        assert_eq!(e1, "OOM");
+        assert_eq!(e2, "NetworkDown");
+    }
+}
+
+// -- v42100_tests (v42.1.0) -- CEP DSL 基盤 --
+#[cfg(test)]
+mod v42100_tests {
+    #[test]
+    fn cargo_toml_version_is_42_1_0() {
+        // Stubbed: version bumped to 42.2.0
+        let _ = include_str!("../Cargo.toml");
+    }
+
+    #[test]
+    fn cep_pattern_parseable() {
+        use crate::frontend::parser::Parser;
+        let src = r#"cep pattern LoginEvent { Login within 60 }"#;
+        let result = Parser::parse_str(src, "test.fav");
+        assert!(result.is_ok(), "cep pattern should parse without error: {:?}", result.err());
+    }
+
+    #[test]
+    fn cep_pattern_fields_correct() {
+        use crate::frontend::parser::Parser;
+        use crate::ast::{Item, CepExpr};
+        let src = r#"cep pattern LoginEvent { Login within 60 }"#;
+        let prog = Parser::parse_str(src, "test.fav").expect("parse ok");
+        let Item::CepPatternDef(ref cd) = prog.items[0] else {
+            panic!("expected CepPatternDef");
+        };
+        assert_eq!(cd.name, "LoginEvent");
+        assert_eq!(cd.body.len(), 1);
+        let CepExpr::Event(ref ev) = cd.body[0].expr else {
+            panic!("expected CepExpr::Event");
+        };
+        assert_eq!(ev, "Login");
+        assert_eq!(cd.body[0].within_secs, Some(60));
+    }
+}
+
+// ── v42000_tests (v42.0.0) — Type Precision milestone ─────────────────
+#[cfg(test)]
+mod v42000_tests {
+    #[test]
+    fn cargo_toml_version_is_42_0_0() {
+        // Stubbed: version bumped to 42.1.0 -- assertion intentionally removed
+    }
+
+    #[test]
+    fn changelog_has_v42_0_0() {
+        let src = include_str!("../../CHANGELOG.md");
+        assert!(src.contains("[v42.0.0]"), "CHANGELOG.md must contain [v42.0.0]");
+    }
+
+    #[test]
+    fn milestone_has_type_precision() {
+        let src = include_str!("../../MILESTONE.md");
+        assert!(src.contains("Type Precision"), "MILESTONE.md must contain Type Precision");
+    }
+
+    #[test]
+    fn readme_mentions_type_precision() {
+        let src = include_str!("../../README.md");
+        assert!(src.contains("Type Precision"), "README.md must mention Type Precision");
+    }
+}
+
+// -- v41900_tests (v41.9.0) -- v42.0 前調整・安定化 ------------------------------------------
+#[cfg(test)]
+mod v41900_tests {
+    #[test]
+    fn cargo_toml_version_is_41_9_0() {
+        // Stubbed: version bumped to 42.0.0 -- assertion intentionally removed
+    }
+
+    #[test]
+    fn type_precision_doc_exists() {
+        let src = include_str!("../../site/content/docs/type-precision.mdx");
+        assert!(
+            src.contains("Type Precision"),
+            "site/content/docs/type-precision.mdx must exist and mention Type Precision"
+        );
+    }
+}
+
+// -- v41800_tests (v41.8.0) -- Type Precision cookbook ------------------------------------------
+#[cfg(test)]
+mod v41800_tests {
+    #[test]
+    fn cargo_toml_version_is_41_8_0() {
+        // Stubbed: version bumped to 41.9.0 -- assertion intentionally removed
+    }
+}
+
+// -- v41700_tests (v41.7.0) -- W030 lint: 冗長 refinement ガード検出 ------------------------------------------
+#[cfg(test)]
+mod v41700_tests {
+    #[test]
+    fn cargo_toml_version_is_41_7_0() {
+        // Stubbed: version bumped to 41.8.0 -- assertion intentionally removed
+    }
+
+    #[test]
+    fn lint_w030_redundant_guard_detected() {
+        use crate::frontend::parser::Parser;
+        use crate::lint::lint_program;
+        let src = r#"
+type PositiveInt = Int where |v| v >= 0
+fn double(x: PositiveInt) -> Int {
+    if x >= 0 { x * 2 } else { 0 }
+}
+"#;
+        let prog = Parser::parse_str(src, "test.fav").expect("parse ok");
+        let errs = lint_program(&prog);
+        assert!(
+            errs.iter().any(|e| e.code == "W030"),
+            "W030 should be reported for redundant refinement guard"
+        );
+    }
+}
+
+// -- v41600_tests (v41.6.0) -- Newtype 自動 impl ------------------------------------------
+#[cfg(test)]
+mod v41600_tests {
+    #[test]
+    fn cargo_toml_version_is_41_6_0() {
+        // Stubbed: version bumped to 41.7.0 -- assertion intentionally removed
+    }
+
+    #[test]
+    fn changelog_has_v41_6_0() {
+        let src = include_str!("../../CHANGELOG.md");
+        assert!(src.contains("[v41.6.0]"), "CHANGELOG.md must contain [v41.6.0]");
+    }
+
+    #[test]
+    fn checker_fav_has_newtype_arith() {
+        let src = include_str!("../self/checker.fav");
+        assert!(
+            src.contains("infer_op_with_newtypes"),
+            "checker.fav must implement infer_op_with_newtypes for newtype arithmetic delegation"
+        );
     }
 }

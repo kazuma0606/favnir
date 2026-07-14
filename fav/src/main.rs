@@ -91,7 +91,7 @@ use driver::{
     cmd_exec, cmd_explain, cmd_explain_code, cmd_explain_compiler, cmd_explain_diff, cmd_explain_error,
     cmd_explain_error_list, cmd_explain_error_list_json, cmd_explain_lineage, cmd_explain_sla, cmd_fmt, cmd_graph,
     cmd_infer, cmd_infer_delta, cmd_infer_iceberg, cmd_infer_postgres, cmd_infer_proto, cmd_infer_snowflake, cmd_install, cmd_lint, cmd_validate, cmd_contract_check, cmd_schema_diff, cmd_migrate, cmd_upgrade, cmd_new, cmd_new_list,
-    cmd_profile, cmd_profile_compare, cmd_scaffold, cmd_transpile,
+    cmd_monitor, cmd_profile, cmd_profile_compare, cmd_scaffold, cmd_transpile,
     cmd_publish, cmd_registry, cmd_repl, cmd_run, cmd_search, cmd_test, cmd_watch,
     cmd_add, cmd_update, cmd_remove, cmd_login, cmd_info,
     cmd_generate_api, cmd_api_serve,
@@ -153,11 +153,12 @@ COMMANDS:
                   With --coverage, print line coverage after tests complete.
                   With --coverage-report <dir>, write coverage report to <dir>/coverage.txt.
                   If <file> is omitted, runs all tests in the project.
-    bench [--runs <n>] [--iters <n>] [--warmup <n>] [--filter <pattern>] [--json] [file]
+    bench [--runs <n>] [--iters <n>] [--warmup <n>] [--filter <pattern>] [--json] [--stream] [file]
                   Run bench blocks in .fav / .bench.fav files.
                   --runs / --iters sets iteration count (default: 100).
                   --warmup sets warmup iterations (default: 5).
                   --json outputs results in JSON format.
+                  --stream measures stream pipeline throughput/latency.
                   If <file> is omitted, runs all bench blocks in the project.
     new <name> [--template <script|pipeline|lib>]
                   Create a new project scaffold (default template: script).
@@ -641,6 +642,8 @@ fn main_impl() {
             let mut json = false;
             let mut show_types = false;
             let mut show_effects = false;
+            let mut show_inference = false;
+            let mut explain = false;
             let mut refresh_schemas = false;
             let mut strict = false;
             let mut ambient = false;
@@ -670,6 +673,14 @@ fn main_impl() {
                     }
                     "--show-effects" => {
                         show_effects = true;
+                        i += 1;
+                    }
+                    "--show-inference" => {
+                        show_inference = true;
+                        i += 1;
+                    }
+                    "--explain" => {
+                        explain = true;
                         i += 1;
                     }
                     "--refresh-schemas" => {
@@ -733,7 +744,7 @@ fn main_impl() {
             } else if all_mode {
                 driver::cmd_check_all(json);
             } else {
-                cmd_check(file, no_warn, legacy_check, json, show_types, strict, ambient, report, show_effects, refresh_schemas);
+                cmd_check(file, no_warn, legacy_check, json, show_types, strict, ambient, report, show_effects, refresh_schemas, show_inference, explain);
             }
         }
 
@@ -1266,6 +1277,10 @@ fn main_impl() {
                         opts.json = true;
                         i += 1;
                     }
+                    "--stream" => {
+                        opts.stream = true;
+                        i += 1;
+                    }
                     other => {
                         opts.file = Some(other.to_string());
                         i += 1;
@@ -1635,6 +1650,8 @@ fn main_impl() {
                 cmd_profile(&path, &format, runs, stage_filter.as_deref(), out.as_deref());
             }
         }
+
+        Some("monitor") => cmd_monitor(&args),
 
         Some("infer") => {
             let mut proto_path: Option<String> = None;

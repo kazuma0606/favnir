@@ -1,0 +1,45 @@
+---
+title: "ウィンドウ集計パイプライン"
+description: "`stream.tumbling_window` でイベントをウィンドウ単位に集計するパイプラインを構築する"
+---
+
+# ウィンドウ集計パイプライン
+
+`stream.tumbling_window` を使ってイベントストリームをタンブリングウィンドウで集計します。
+
+## コード例
+
+```fav
+import stream
+import kafka
+import db
+
+fn count_events_per_window(events: List<Event>, window_secs: Int) -> List<WindowResult> {
+    stream.tumbling_window(events, window_secs)
+    |> List.map(fn(window) {
+        WindowResult {
+            start_ts: window.start,
+            end_ts:   window.end,
+            count:    List.length(window.items),
+        }
+    })
+}
+
+stage IngestEvents {
+    source: kafka.consume("orders-topic")
+}
+
+stage AggregateWindows {
+    let results = count_events_per_window(IngestEvents.output, 60)
+    sink: db.insert("window_summary", results)
+}
+
+pipeline OrderWindowPipeline {
+    seq [IngestEvents, AggregateWindows]
+}
+```
+
+## 関連 Rune
+
+- [`stream`](/docs/runes/stream) — ウィンドウ関数（tumbling_window / sliding_window / session_window）
+- [`kafka`](/docs/runes/kafka) — Kafka 接続・消費・produce

@@ -1,0 +1,45 @@
+---
+title: "CEP: ログイン→購入セッション検出"
+description: "CEP Rune を使い、ログインの直後に購入が発生したセッションをリアルタイムで検出する"
+---
+
+# CEP: ログイン→購入セッション検出
+
+CEP Rune（v42.1.0）を使い、ログインイベントの直後に購入イベントが発生したセッションを
+5 分ウィンドウでリアルタイム検出します。検出結果は WebSocket で push します。
+
+## パイプライン
+
+```fav
+// ctx: AppCtx — パイプライン共通コンテキスト（DB 接続・設定等）
+// event_stream: Stream<String> — イベント名のストリーム（"login" / "purchase" 等）
+stage DetectLoginPurchase: Stream<String> -> List<String> =
+    |ctx: AppCtx, event_stream: Stream<String>|
+    bind windowed  <- Cep.window(ctx, event_stream, 300)  // Window<String>
+    bind matched   <- Cep.match(ctx, windowed, |w|        // List<String>
+        w.first == "login" && w.last == "purchase"
+    )
+    matched
+
+// sessions: List<String> — 検出されたセッション ID リスト
+stage PushResults: List<String> -> Result<Unit, String> =
+    |ctx: AppCtx, sessions: List<String>|
+    bind _ <- List.map(sessions, |session_id|
+        WebSocket.send(ctx, "ws://localhost:8080/sessions", session_id)
+    )
+    Result.ok(Unit)
+```
+
+## ポイント
+
+- `Cep.window(ctx, stream, seconds)` — 指定秒数のイベントウィンドウを生成（v42.1.0 CEP Rune）
+- `Cep.match(ctx, window, predicate)` — パターン条件に合致するセッションを抽出
+- ステージ引数 `event_stream` / `sessions` を明示して未束縛変数を避ける
+- `WebSocket.send` で検出結果をブラウザへリアルタイム push（v42.6.0 stub）
+
+> **注意**: `Cep.window` / `Cep.match` は v42.1.0 での stub 実装です。
+
+## 関連
+
+- [CEP Rune ドキュメント](/docs/runes/cep)
+- [WebSocket Rune ドキュメント](/docs/runes/websocket)

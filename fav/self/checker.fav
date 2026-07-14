@@ -43,10 +43,12 @@ type Expr =
     | EMatch(Expr, Expr)
     | EBlock(Expr, Expr)
     | ERecordLit(String, Expr)
+    | ERecordSpread(Expr, Expr)  // v41.5.0: (base_expr, field_list)
     | EArgList(Expr, Expr)
     | EArgNil
     | EArm(Pat, Expr, Expr)
     | EArmNil
+    | EArmG(Pat, Expr, Expr, Expr)  // v41.4.0: (pat, guard_expr, body, rest)
     | EBind(String, Expr, Expr)
     | EChain(String, Expr, Expr)
     | EField(String, Expr, Expr)
@@ -60,6 +62,7 @@ type TypeExpr =
     | TeResult(TypeExpr, TypeExpr)
     | TeMap(TypeExpr, TypeExpr)
     | TeFn(TypeExpr, TypeExpr)
+    | TeRecord          // v41.5.0: { field: Type } 型アノテーション
 
 type Param = {
     name: String
@@ -86,6 +89,7 @@ type TypeDef = {
     type_params: List<String>
     variants: List<VariantDef>
     fields: List<Param>
+    invariants: List<String>
 }
 
 type TestDef = {
@@ -262,6 +266,7 @@ fn type_expr_to_str(te: TypeExpr) -> String {
         TeResult({ _0: a, _1: b }) => "Result"
         TeMap({ _0: k, _1: v }) => "Map"
         TeFn({ _0: a, _1: b }) => "Fn"
+        TeRecord => "Any"   // v41.5.0: 互換性維持（将来フィールド追跡実装時に変更予定）
     }
 }
 
@@ -286,6 +291,17 @@ fn is_arith_op(op: Op) -> Bool {
         OpMul => true
         OpDiv => true
         OpMod => true
+        _ => false
+    }
+}
+
+// v41.6.0: Newtype 委譲用—OpMod（%）を除く基本四則のみ
+fn is_basic_arith_op(op: Op) -> Bool {
+    match op {
+        OpAdd => true
+        OpSub => true
+        OpMul => true
+        OpDiv => true
         _ => false
     }
 }
@@ -346,6 +362,22 @@ fn infer_op(op: Op, lty: String, rty: String) -> Result<String, String> {
                 }
             }
         }
+    }
+}
+
+fn infer_op_with_newtypes(op: Op, lty: String, rty: String, env: List<KVPair>) -> Result<String, String> {
+    if (is_basic_arith_op(op) && (lty == rty)) && (lty != "Unknown") {
+        match env_lookup(env, String.concat("__newtype__", lty)) {
+            Some(inner) =>
+                if (inner == "Float") || (inner == "Int") {
+                    Result.ok(lty)
+                } else {
+                    infer_op(op, lty, rty)
+                }
+            None => infer_op(op, lty, rty)
+        }
+    } else {
+        infer_op(op, lty, rty)
     }
 }
 
@@ -1205,6 +1237,8 @@ fn infer_arms_effects(arms: Expr) -> List<String> {
     match arms {
         EArmNil => List.empty()
         EArm({ _0: pat, _1: body, _2: rest }) => List.concat(infer_expr_effects(body), infer_arms_effects(rest))
+        EArmG({ _0: pat, _1: guard, _2: body, _3: rest }) =>
+            List.concat(infer_expr_effects(guard), List.concat(infer_expr_effects(body), infer_arms_effects(rest)))
         _ => List.empty()
     }
 }
@@ -1227,6 +1261,8 @@ fn infer_expr_effects(expr: Expr) -> List<String> {
         EArgList({ _0: h, _1: t }) => List.concat(infer_expr_effects(h), infer_expr_effects(t))
         EQuestion(inner) => infer_expr_effects(inner)
         EBinOp({ _0: op, _1: left, _2: right }) => List.concat(infer_expr_effects(left), infer_expr_effects(right))
+        ERecordSpread({ _0: base, _1: fields }) =>
+            List.concat(infer_expr_effects(base), infer_expr_effects(fields))
         _ => List.empty()
     }
 }
@@ -1483,8 +1519,22 @@ fn check_rebind(expr: Expr, bound: List<String>) -> Option<String> {
                 None => check_rebind(rest, List.empty())
             }
         }
+        EArmG({ _0: pat, _1: guard, _2: body, _3: rest }) => {
+            match check_rebind(guard, List.empty()) {
+                Some(err) => Option.some(err)
+                None => match check_rebind(body, List.empty()) {
+                    Some(err) => Option.some(err)
+                    None => check_rebind(rest, List.empty())
+                }
+            }
+        }
         EArmNil => Option.none()
         ELambda({ _0: param, _1: body }) => check_rebind(body, List.empty())
+        ERecordSpread({ _0: base, _1: fields }) =>
+            match check_rebind(base, bound) {
+                Some(err) => Option.some(err)
+                None => check_rebind(fields, bound)
+            }
         _ => Option.none()
     }
 }
@@ -1524,6 +1574,8 @@ fn check_w006_arms(arms: Expr) -> List<String> {
     match arms {
         EArmNil => List.empty()
         EArm({ _0: pat, _1: body, _2: rest }) => List.concat(check_w006_expr(body), check_w006_arms(rest))
+        EArmG({ _0: pat, _1: guard, _2: body, _3: rest }) =>
+            List.concat(check_w006_expr(guard), List.concat(check_w006_expr(body), check_w006_arms(rest)))
         _ => List.empty()
     }
 }
@@ -1537,6 +1589,8 @@ fn check_w006_expr(expr: Expr) -> List<String> {
         EMatch({ _0: scrut, _1: arms }) => check_w006_arms(arms)
         EArmNil => List.empty()
         ELambda({ _0: param, _1: body }) => check_w006_expr(body)
+        ERecordSpread({ _0: base, _1: fields }) =>
+            List.concat(check_w006_expr(base), check_w006_expr(fields))
         _ => List.empty()
     }
 }
@@ -1599,6 +1653,20 @@ fn infer_arms(arms: Expr, env: List<KVPair>) -> Result<String, String> {
                 })
             })
         }
+        EArmG({ _0: pat, _1: guard, _2: body, _3: rest }) => {
+            bind pat_env <- env_from_pat(pat, env);
+            // guard を pat_env で型推論（未定義変数検出のため）; Bool 強制は v41.5.0+ 以降
+            Result.and_then(infer_expr(guard, pat_env), |_gty|
+                Result.and_then(infer_expr(body, pat_env), |bty| match rest {
+                    EArmNil => Result.ok(bty)
+                    _ => Result.and_then(infer_arms(rest, env), |rty| if ((bty == rty) || (bty == "Unknown")) || (rty == "Unknown") {
+                        Result.ok(bty)
+                    } else {
+                        Result.ok("Unknown")
+                    })
+                })
+            )
+        }
         _ => Result.err("expected arm list in match")
     }
 }
@@ -1619,6 +1687,19 @@ fn collect_arm_ctors(arms: Expr) -> List<String> {
         EArm({ _0: pat, _1: body, _2: rest }) => {
             bind ctor <- pat_ctor_name(pat);
             List.push(collect_arm_ctors(rest), ctor)
+        }
+        EArmG({ _0: pat, _1: guard, _2: body, _3: rest }) => {
+            // v41.4.0: ガード付きアーム — PVar/PWild は catch-all にカウントしない
+            // NOTE: pat_ctor_name は PVar/PWild 両方に "_" を返す（1632行付近）。
+            //       将来 pat_ctor_name の仕様変更時はここも要確認。
+            bind ctor <- pat_ctor_name(pat);
+            if str_eq(ctor, "_") {
+                // ガード付きワイルドカード: 網羅性に寄与しない
+                collect_arm_ctors(rest)
+            } else {
+                // ガード付きコンストラクタ: ctor カバレッジには寄与
+                List.push(collect_arm_ctors(rest), ctor)
+            }
         }
         _ => List.empty()
     }
@@ -1764,28 +1845,83 @@ fn infer_generic_res(fname: String, arg_tys: List<String>) -> String {
     }
 }
 
+// v43.5.0: contextual lambda inference — propagate list element type to lambda param
+fn infer_list_lambda_call(fname: String, args: Expr, env: List<KVPair>) -> Result<String, String> {
+    match args {
+        EArgList({ _0: list_expr, _1: rest_args }) => {
+            match infer_expr(list_expr, env) {
+                Err(e) => Result.err(e)
+                Ok(list_ty) => {
+                    bind elem_ty <- type_str_inner(list_ty);
+                    bind param_ty <- if String.length(elem_ty) == 0 { "Unknown" } else { elem_ty };
+                    match rest_args {
+                        EArgList({ _0: lam_expr, _1: _ }) => {
+                            match lam_expr {
+                                ELambda({ _0: param, _1: body }) => {
+                                    bind lam_env <- env_insert(env, param, param_ty);
+                                    Result.and_then(infer_expr(body, lam_env), |ret_ty|
+                                        if fname == "map" {
+                                            Result.ok(wrap_in("List", ret_ty))
+                                        } else {
+                                            Result.ok(list_ty)
+                                        })
+                                }
+                                _ => {
+                                    bind arg_tys <- infer_arg_tys(args, env);
+                                    Result.ok(infer_generic_list(fname, arg_tys))
+                                }
+                            }
+                        }
+                        _ => {
+                            bind arg_tys <- infer_arg_tys(args, env);
+                            Result.ok(infer_generic_list(fname, arg_tys))
+                        }
+                    }
+                }
+            }
+        }
+        _ => {
+            bind arg_tys <- infer_arg_tys(args, env);
+            Result.ok(infer_generic_list(fname, arg_tys))
+        }
+    }
+}
+
 fn infer_call(ns: String, fname: String, args: Expr, env: List<KVPair>) -> Result<String, String> {
     if ns == "" {
         match env_lookup(env, fname) {
             Some(ty) => if is_fn_scheme_str(ty) {
-                Result.ok(fn_scheme_ret(ty))
+                // v43.3.0: call-site generic instantiation — args drive type var resolution
+                bind arg_tys <- infer_arg_tys(args, env);
+                bind vars_str <- fn_scheme_vars_str(ty);
+                if String.length(vars_str) == 0 {
+                    Result.ok(fn_scheme_ret(ty))
+                } else {
+                    bind state0 <- inf_state_new(subst_empty(), 0);
+                    Result.and_then(instantiate_fn_scheme(ty, arg_tys, state0), |r| Result.ok(r.ty))
+                }
             } else {
                 Result.ok(ty)
             }
             None => Result.ok("Unknown")
         }
     } else {
-        bind arg_tys <- infer_arg_tys(args, env);
-        if ns == "List" {
-            Result.ok(infer_generic_list(fname, arg_tys))
+        if (ns == "List") && ((fname == "map") || (fname == "filter")) {
+            // v43.5.0: contextual lambda inference — propagate list element type to lambda param
+            infer_list_lambda_call(fname, args, env)
         } else {
-            if ns == "Option" {
-                Result.ok(infer_generic_opt(fname, arg_tys))
+            bind arg_tys <- infer_arg_tys(args, env);
+            if ns == "List" {
+                Result.ok(infer_generic_list(fname, arg_tys))
             } else {
-                if ns == "Result" {
-                    Result.ok(infer_generic_res(fname, arg_tys))
+                if ns == "Option" {
+                    Result.ok(infer_generic_opt(fname, arg_tys))
                 } else {
-                    Result.ok(builtin_ret_ty(ns, fname))
+                    if ns == "Result" {
+                        Result.ok(infer_generic_res(fname, arg_tys))
+                    } else {
+                        Result.ok(builtin_ret_ty(ns, fname))
+                    }
                 }
             }
         }
@@ -1801,7 +1937,7 @@ fn infer_expr(expr: Expr, env: List<KVPair>) -> Result<String, String> {
                 None => Result.ok("Unknown")
             }
         }
-        EBinOp({ _0: op, _1: left, _2: right }) => Result.and_then(infer_expr(left, env), |lty| Result.and_then(infer_expr(right, env), |rty| infer_op(op, lty, rty)))
+        EBinOp({ _0: op, _1: left, _2: right }) => Result.and_then(infer_expr(left, env), |lty| Result.and_then(infer_expr(right, env), |rty| infer_op_with_newtypes(op, lty, rty, env)))
         EIf({ _0: cond, _1: then_e, _2: else_e }) => Result.and_then(infer_expr(cond, env), |cty| Result.and_then(infer_expr(then_e, env), |tty| Result.and_then(infer_expr(else_e, env), |ety| if ((tty == ety) || (tty == "Unknown")) || (ety == "Unknown") {
             Result.ok(tty)
         } else {
@@ -1819,6 +1955,11 @@ fn infer_expr(expr: Expr, env: List<KVPair>) -> Result<String, String> {
         EBind({ _0: vname, _1: val_e, _2: cont_e }) => Result.and_then(infer_expr(val_e, env), |vty| infer_expr(cont_e, env_insert(env, vname, vty)))
         EChain({ _0: vname, _1: val_e, _2: cont_e }) => Result.and_then(infer_expr(val_e, env), |vty| infer_expr(cont_e, env_insert(env, vname, vty)))
         ERecordLit({ _0: tname, _1: fields }) => Result.ok(tname)
+        ERecordSpread({ _0: base, _1: fields }) =>
+            // v41.5.0: 型精度は "Unknown" で近似（フィールド追跡は v42.0+ 以降）
+            // NOTE: fields は参照しない（v42.0+ でフィールドセット追跡実装時に使用予定）
+            // base 式を評価して E0001 等を伝撃させる
+            Result.and_then(infer_expr(base, env), |_bty| Result.ok("Unknown"))
         EAccess({ _0: obj_e, _1: field }) => Result.and_then(infer_expr(obj_e, env), |oty| Result.ok("Unknown"))
         EBlock({ _0: a, _1: b }) => Result.and_then(infer_expr(a, env), |aty| infer_expr(b, env))
         EArgList({ _0: head, _1: tail }) => Result.and_then(infer_expr(head, env), |hty| infer_expr(tail, env))
@@ -1837,10 +1978,20 @@ fn infer_expr(expr: Expr, env: List<KVPair>) -> Result<String, String> {
 }
 
 fn check_body_ty(fname: String, ret: TypeExpr, r: InfResult) -> Result<String, String> {
-    if types_compatible(apply_subst(r.subst, r.ty), type_expr_to_str(ret)) {
-        Result.ok(fname)
+    // v43.1.0: ret == TeSimple("") means return type was omitted — infer from body
+    if type_expr_to_str(ret) == "" {
+        // v43.2.0: if body infers Unknown, E0410 (ambiguous return type)
+        if apply_subst(r.subst, r.ty) == "Unknown" {
+            Result.err(fmt_err("E0410", String.concat(fname, ": ambiguous return type — body type cannot be inferred")))
+        } else {
+            Result.ok(fname)
+        }
     } else {
-        Result.err(fmt_err("E0009", String.concat(fname, String.concat(": declared return ", String.concat(type_expr_to_str(ret), String.concat(" but body infers ", apply_subst(r.subst, r.ty)))))))
+        if types_compatible(apply_subst(r.subst, r.ty), type_expr_to_str(ret)) {
+            Result.ok(fname)
+        } else {
+            Result.err(fmt_err("E0009", String.concat(fname, String.concat(": declared return ", String.concat(type_expr_to_str(ret), String.concat(" but body infers ", apply_subst(r.subst, r.ty)))))))
+        }
     }
 }
 
@@ -1973,6 +2124,7 @@ fn collect_type_vars_from_te(te: TypeExpr) -> List<String> {
         TeResult({ _0: a, _1: b }) => List.concat(collect_type_vars_from_te(a), collect_type_vars_from_te(b))
         TeMap({ _0: k, _1: v }) => List.concat(collect_type_vars_from_te(k), collect_type_vars_from_te(v))
         TeFn({ _0: a, _1: b }) => List.concat(collect_type_vars_from_te(a), collect_type_vars_from_te(b))
+        TeRecord => List.empty()  // v41.5.0: フィールドなし
     }
 }
 
@@ -2081,7 +2233,7 @@ fn collect_variant_constructors(items: List<Item>, env: List<KVPair>) -> List<KV
                 } else {
                     wd.name
                 };
-                collect_variant_constructors(List.drop(items, 1), env_insert(env, wd.name, make_fn_scheme_str("", wd.inner, ret_ty)))
+                collect_variant_constructors(List.drop(items, 1), env_insert(env_insert(env, wd.name, make_fn_scheme_str("", wd.inner, ret_ty)), String.concat("__newtype__", wd.name), wd.inner))
             }
             _ => collect_variant_constructors(List.drop(items, 1), env)
         }
@@ -2117,13 +2269,46 @@ fn apply_scheme_subst(ret_ty: String, vars: List<String>, subst: List<KVPair>) -
     apply_scheme_subst_inner(ret_ty, vars, subst)
 }
 
+// v43.4.0: E0412 — detect conflicting type variable bindings at call-site
+fn check_scheme_var_ambiguity_inner(param_tys: List<String>, arg_tys: List<String>, seen: List<KVPair>) -> Result<String, String> {
+    match List.first(param_tys) {
+        None => Result.ok("ok")
+        Some(pt) => {
+            match List.first(arg_tys) {
+                None => Result.ok("ok")
+                Some(at) => {
+                    // use is_type_var_extended to cover single-letter (A-Z) and two-char (A0-Z9) type vars
+                    if is_type_var_extended(pt) {
+                        match subst_lookup(seen, pt) {
+                            None => check_scheme_var_ambiguity_inner(List.drop(param_tys, 1), List.drop(arg_tys, 1), subst_insert(seen, pt, at))
+                            Some(prev) => if prev == at {
+                                check_scheme_var_ambiguity_inner(List.drop(param_tys, 1), List.drop(arg_tys, 1), seen)
+                            } else {
+                                Result.err(fmt_err("E0412", String.concat("ambiguous type variable ", String.concat(pt, String.concat(": bound to both ", String.concat(prev, String.concat(" and ", at)))))))
+                            }
+                        }
+                    } else {
+                        check_scheme_var_ambiguity_inner(List.drop(param_tys, 1), List.drop(arg_tys, 1), seen)
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn check_scheme_var_ambiguity(param_tys: List<String>, arg_tys: List<String>) -> Result<String, String> {
+    check_scheme_var_ambiguity_inner(param_tys, arg_tys, subst_empty())
+}
+
 fn instantiate_fn_scheme(scheme: String, arg_tys: List<String>, state: InfState) -> Result<InfResult, String> {
     bind vars_str <- fn_scheme_vars_str(scheme);
     bind params_str <- fn_scheme_params_str(scheme);
     bind ret_ty <- fn_scheme_ret(scheme);
     bind vars <- String.split(vars_str, ",");
     bind param_tys <- String.split(params_str, ";");
-    Result.and_then(build_scheme_subst_inner(param_tys, arg_tys, state.subst), |subst2| Result.ok(inf_result_of(apply_scheme_subst(ret_ty, vars, subst2), inf_state_new(subst2, state.counter))))
+    // v43.4.0: detect ambiguous type variable conflict before building substitution
+    Result.and_then(check_scheme_var_ambiguity(param_tys, arg_tys), |_ambiguity_ok|
+        Result.and_then(build_scheme_subst_inner(param_tys, arg_tys, state.subst), |subst2| Result.ok(inf_result_of(apply_scheme_subst(ret_ty, vars, subst2), inf_state_new(subst2, state.counter)))))
 }
 
 fn count_scheme_params(s: String) -> Int {
@@ -2268,7 +2453,20 @@ fn check_seq_def(sd: SeqDef, env: List<KVPair>) -> Result<String, String> {
 fn check_item(item: Item, env: List<KVPair>) -> Result<String, String> {
     match item {
         IFn(fd) => check_fn_def(fd, env)
-        IType(td) => Result.ok(td.name)
+        IType(td) => {
+            // v41.2.0: integrate refinement alias check
+            // NOTE: invariants は v41.3.0+ まで常に空リスト（lower_type_def が vm_list(vec![]) を渡すため）
+            // NOTE: check_refinement_alias は stub（常に true を返す）— E0404 発火は v41.3.0+ で実装
+            if List.length(td.invariants) > 0 {
+                if check_refinement_alias(td.name, td.invariants) {
+                    Result.ok(td.name)
+                } else {
+                    Result.err(String.concat("E0404: refinement constraint check failed for type: ", td.name))
+                }
+            } else {
+                Result.ok(td.name)
+            }
+        }
         IWrapper(wd) => Result.ok(wd.name)
         ITest(td) => {
             bind test_env <- env_empty();
@@ -2651,3 +2849,23 @@ test "instantiate nested" {
         Ok(r) => r.ty == "Option<String>"
     }
 }
+
+// v41.1.0: Refinement type alias constraint check (stub — full impl in v41.4.0+)
+fn check_refinement_alias(ty_name: String, invariants: List<String>) -> Bool {
+    // TODO: v41.4.0+ で E0404 違反検出を実装
+    // NOTE: invariants フィールドは v41.2.0 で TypeDef に追加済み（現在は空リスト）
+    true
+}
+
+// v41.3.0: タプルパターン (p1, p2) の処理設計ノート
+// - パーサーで Pattern::Record([Alias("_0", p1), Alias("_1", p2)]) にデシュガーされる
+// - checker.rs の lower_pattern でこれが PWild に変換されるため、checker.fav での
+//   詳細な型チェックは行われない（v41.4.0 以降で PRecord バリアント追加予定）
+// - Rust checker.rs は Pattern::Record を正しく処理する
+
+// ── CEP パターン型チェック（v42.3.0 実装済み）──────────────────────────────
+// v42.3.0 で checker.rs に以下を実装済み（Rust 側 check_cep_pattern_def）:
+//   - within_secs == Some(0) → E0420（within 0 は意味論的に不正）
+// 未実装（v44.x 以降）:
+//   - pattern ブロック内のイベント名が型環境に存在するか検証
+//   - イベント型システム（Event<T>）との連携

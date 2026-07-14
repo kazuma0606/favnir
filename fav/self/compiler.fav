@@ -2030,14 +2030,20 @@ fn parse_fn_def_after_params(is_pub: Bool, fname: String, params_p: ParamsParse)
     match expect_tok(params_p.rest, TkRParen) {
         Err(e) => Result.err(e)
         Ok(rest4) => {
-            match expect_tok(rest4, TkArrow) {
-                Err(e) => Result.err(e)
-                Ok(rest5) => {
-                    match parse_type_expr(rest5) {
+            // v43.1.0: `->` optional — if absent, use TeSimple("") as placeholder (return type inferred from body)
+            match List.first(rest4) {
+                Some(TkArrow) => {
+                    match expect_tok(rest4, TkArrow) {
                         Err(e) => Result.err(e)
-                        Ok(ret_p) => parse_fn_def_after_ret(is_pub, fname, params_p, ret_p)
+                        Ok(rest5) => {
+                            match parse_type_expr(rest5) {
+                                Err(e) => Result.err(e)
+                                Ok(ret_p) => parse_fn_def_after_ret(is_pub, fname, params_p, ret_p)
+                            }
+                        }
                     }
                 }
+                _ => parse_fn_def_after_ret(is_pub, fname, params_p, TypeExprParse { ty: TeSimple("")  rest: rest4 })
             }
         }
     }

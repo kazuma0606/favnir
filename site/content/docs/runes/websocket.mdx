@@ -1,0 +1,42 @@
+---
+title: WebSocket Rune
+description: WebSocket リアルタイム push sink（v42.6.0）
+---
+
+# WebSocket Rune
+
+リアルタイム push sink として WebSocket へメッセージを送信します。
+
+## 関数
+
+### `WebSocket.send`
+
+```favnir
+fn send(ctx: AppCtx, url: String, message: String) -> Result<Unit, String>
+```
+
+単一メッセージを指定 URL の WebSocket エンドポイントへ送信します。
+
+### `WebSocket.broadcast`
+
+```favnir
+fn broadcast(ctx: AppCtx, url: String, messages: List<String>) -> Result<Int, String>
+```
+
+複数メッセージを一斉送信します。返り値は送信成功数です。
+
+## 使用例
+
+```favnir
+bind _ <- WebSocket.send(ctx, "ws://localhost:8080/events", "hello")
+```
+
+```favnir
+bind count <- WebSocket.broadcast(ctx, "ws://localhost:8080/events", ["msg1", "msg2", "msg3"])
+```
+
+## 注意事項
+
+- v42.6.0 では stub 実装です。実際の WebSocket 接続は v44.x 以降で実装されます。
+- `!WebSocket` エフェクトは実接続実装時に追加予定です。
+- stub では `broadcast` は常に messages の全件数を成功数として返します。

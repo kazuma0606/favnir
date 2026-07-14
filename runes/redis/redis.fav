@@ -1,4 +1,4 @@
-// runes/redis/redis.fav — Redis Rune (v25.3.0)
+// runes/redis/redis.fav — Redis Rune (v40.6.0)
 // 使い方: import rune "redis"
 // 前提: docker run -p 6379:6379 redis:7
 //
@@ -61,4 +61,13 @@ public fn publish(conn: RedisConn, channel: String, msg: String) -> Result<Int, 
 // NOTE: ループ型 subscribe(conn, channel, fn) は将来バージョンで別関数として追加予定
 public fn subscribe_once(conn: RedisConn, channel: String) -> Result<String, String> {
     Redis.subscribe_once_raw(conn, channel)
+}
+
+// ── Streams ───────────────────────────────────────────────────────────────────
+
+// consume_windowed — Redis Streams からウィンドウ単位でメッセージを収集する（v40.6.0 スタブ）
+// window_secs 秒分のエントリを JSON 配列文字列で返す。
+// 実際のウィンドウ集計ロジックは v40.7 以降で実装。
+public fn consume_windowed(conn: RedisConn, stream_key: String, group_id: String, window_secs: Int) -> Result<String, String> {
+    Redis.get_raw(conn, stream_key)
 }

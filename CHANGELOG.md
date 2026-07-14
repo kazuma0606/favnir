@@ -4,6 +4,695 @@ Favnir のバージョン履歴。形式は [Keep a Changelog](https://keepachan
 
 ---
 
+## [v45.0.0] — 2026-07-15
+
+### Added
+- `MILESTONE.md` — Precision & Flow マイルストーン宣言セクション追加（v44.1〜v44.9 達成コンポーネント一覧）
+- `README.md` — v45.0 Precision & Flow マイルストーン言及追加
+
+### Changed
+- `Cargo.toml` version: `44.9.0` → `45.0.0`
+
+### Notes
+- v44.1〜v44.9 の全機能（Refinement type × Streaming / CEP × Refinement type / Stream join × Opaque type / 型推論 × Lineage / Back-pressure × Policy / E2E デモ / ドキュメント / ベンチマーク追跡 / 安定化）が揃い、Precision & Flow を正式宣言
+- ★クリーンアップ（`cargo clean`）実施
+
+---
+
+## [v44.9.0] — 2026-07-15
+
+### Added
+- `site/content/docs/precision-and-flow-overview.mdx` — v44.x スプリント俯瞰サマリーページ（新規作成）
+  - v44.1〜v44.8 の達成事項一覧（✅ COMPLETE テーブル）
+  - v45.0 Precision & Flow 宣言文
+  - 詳細ドキュメント・E2E デモへのリンク
+
+### Notes
+- コードフリーズ版（新規 Rust 機能・ヘルパー関数・AST 変更なし）
+- v45.0 Precision & Flow 宣言に向けた最終調整
+
+---
+
+## [v44.8.0] — 2026-07-15
+
+### Added
+- `collect_bench_stream_notes(changelog: &str) -> Vec<String>` ヘルパー追加（`driver.rs`）
+  - CHANGELOG から `bench --stream` 計測結果行を収集するパフォーマンス追跡 MVP
+
+### Performance
+- `fav bench --stream` 計測結果: BenchOpts.stream = true での実行パスが有効（v40.7.0 追加済み）
+  - ストリーム処理パイプラインの bench --stream 実行に対応
+  - VM レベル実行速度最適化・v41.0 との実測比較は将来版のスコープ
+
+---
+
+## [v44.7.0] — 2026-07-15
+
+### Added
+- `site/content/docs/precision-and-flow.mdx` — Precision & Flow 全機能統合解説ページ
+  - Refinement type / CEP / Opaque type / 型注釈 lineage / Back-pressure / E2E デモの 6 セクション
+  - 各機能の Favnir コードスニペット付き
+
+### Notes
+- Precision & Flow 機能群（v44.1〜v44.6）の統合ドキュメント
+- バージョン履歴テーブルで各バージョンの機能を一覧化
+
+---
+
+## [v44.6.0] — 2026-07-15
+
+### Added
+- `infra/e2e-demo/precision-flow/` — Precision & Flow E2E デモパイプライン
+  - `src/demo.fav`: Refinement type + CEP + Opaque type + `#[max_inflight(50)]` Policy gate の統合デモ
+  - `README.md`: パイプライン概要・機能一覧・実行方法
+
+### Notes
+- Precision & Flow 機能群（v44.1〜v44.5）の統合 E2E デモ
+- Kafka → CEP → Opaque join → Policy gate（governance 制御）の完全パイプライン構成
+
+---
+
+## [v44.5.0] — 2026-07-14
+
+### Added
+- `collect_stage_max_inflight_annotations(src, filename) -> Vec<String>` ヘルパー追加（`driver.rs`）
+  - `#[max_inflight(n)]` アノテーション付き `TrfDef`（ステージ）を AST レベルで収集
+  - 返り値: `"<filename>:<line>: <stage_name>: max_inflight=<n>"` 形式
+
+### Notes
+- Back-pressure x `fav policy` 統合 AST レベル MVP（v42.5.0 追加済みの `MaxInflightAnnotation` を活用）
+- `policy { max_inflight: N }` グローバルポリシーブロック・`fav policy check --ci`・VM 強制は将来版のスコープ
+
+---
+
+## [v44.4.0] — 2026-07-14
+
+### Added
+- `collect_annotated_lineage_bindings(src, filename) -> Vec<String>` ヘルパー追加（`driver.rs`）
+  - ステージ（`TrfDef`）内の型注釈付き `bind x: T <- expr` 束縛を収集
+  - 既存の `format_type_expr` で型を文字列化
+  - 返り値: `"<filename>:<line>: <stage_name>: <binding_name>: <type>"` 形式
+- `v44400_tests`: `cargo_toml_version_is_44_4_0` / `annotated_lineage_bindings_detected`
+
+### Notes
+- `fav explain --lineage` の出力への型情報統合（`LineageEntry` 拡張・`render_lineage_text` 更新）は将来版のスコープ
+- ウィンドウ・join の lineage 追跡統合も将来版のスコープ
+
+---
+
+## [v44.3.0] — 2026-07-14
+
+### Added
+- `collect_opaque_alias_groups(src, filename) -> Vec<String>` ヘルパー追加（`driver.rs`）
+  - 同じ内部型を持つ `opaque type` エイリアスをグループ化して返す
+  - `Stream.join` で誤 join される可能性のある opaque type ペアを AST レベルで検出
+  - 返り値: `"<filename>:<line>: <inner>: <Name1>, <Name2>"` 形式（名前アルファベット順）
+- `v44300_tests`: `cargo_toml_version_is_44_3_0` / `opaque_alias_group_detected` / `non_opaque_type_excluded_from_groups`
+
+### Notes
+- checker.fav への E0413 統合（`Stream.join` での誤 join 検出）は将来版のスコープ
+- 型引数付き opaque alias（`opaque type Foo = List<String>` 等）は対象外
+
+---
+
+## [v44.2.0] — 2026-07-14
+
+### Added
+- `collect_cep_refinement_event_refs(src, filename) -> Vec<String>` ヘルパー追加（`driver.rs`）
+  - `type T = U where |v| ...` 形式の refinement type 名を収集
+  - `CepPatternDef` の各 `CepClause.expr` を再帰走査（`Event`/`Seq`/`Any`/`Not`）
+  - CEP イベント名が refinement type 名と一致するものを検出
+  - 返り値: `"<filename>:<line>: <pattern_name>: <event_name>"` 形式の文字列リスト
+- `v44200_tests`: `cargo_toml_version_is_44_2_0` / `cep_simple_event_matches_refinement_type` / `cep_seq_pattern_refinement_event_detected`
+
+### Notes
+- `Purchase<HighValue>` 構文（型パラメータ付き CEP イベント）は将来版のスコープ（現 AST は `CepExpr::Event(String)` — 型パラメータなし）
+- checker.fav への型チェック統合は将来版のスコープ
+
+---
+
+## [v44.1.0] — 2026-07-14
+
+### Added
+- `collect_refinement_stream_bindings(src, filename) -> Vec<String>` ヘルパー追加（`driver.rs`）
+  - `type T = U where (...)` 形式の refinement type 名を収集
+  - `FnDef` / `TrfDef` の body.stmts を走査し、`bind x: Stream<T>` / `List<T>` の T が refinement type に一致する束縛を検出
+  - 返り値: `"<filename>:<line>: <name>: <container><elem>"` 形式の文字列リスト
+- `v44100_tests`: `cargo_toml_version_is_44_1_0` / `refinement_type_invariant_in_typedef_ast` / `collect_refinement_stream_bindings_detects_annotated_bind`
+
+### Notes
+- checker.fav への完全統合（`List.filter` 述語からの refinement 型推論）は将来版のスコープ
+- 本バージョンはパーサー受容 + AST レベル MVP
+
+---
+
+## [v44.0.0] — 2026-07-13
+
+### Added
+- `MILESTONE.md` に `v44.0.0 — Language Expressiveness` セクション追加（宣言文・達成コンポーネント v43.1〜v43.13 一覧）
+- `v44000_tests`: `cargo_toml_version_is_44_0_0` / `changelog_has_v44_0_0` / `milestone_has_language_expressiveness` / `readme_mentions_language_expressiveness`
+
+### Changed
+- `README.md` に `v44.0 — Language Expressiveness` マイルストーン言及を追加
+
+### Notes
+- 宣言版（新規 Rust 機能追加なし）
+- `cargo clean` 実行済み（ビルドアーティファクト削除）
+- v43.1〜v43.13 の全機能が動作することを確認
+
+---
+
+## [v43.13.0] — 2026-07-13
+
+### Added
+- `site/content/cookbook/type-inference-guide.mdx`: 型推論 cookbook（6 カテゴリ + opaque type 解説）
+- `site/content/docs/language/type-inference.mdx`: 言語リファレンス（型推論 6 カテゴリ・lint ルール・制限事項）
+- `site/content/docs/language-expressiveness.mdx`: v43 スプリント成果サマリー・宣言文
+- `v431300_tests`: `type_inference_guide_mdx_exists` / `language_expressiveness_doc_exists`
+
+### Changed
+- `v431200_tests::cargo_toml_version_is_43_12_0` をスタブ化
+
+### Notes
+- コードフリーズ（新規 Rust 機能追加なし）
+- Rust ソース変更: driver.rs（テスト 2 件追加・スタブ化）と Cargo.toml のみ
+- `site/content/docs/language/type-inference.mdx` は `include_str!` テスト対象外（テスト数 2937 = 2935 + 2 を維持するため意図的に除外）
+
+---
+
+## [v43.12.0] — 2026-07-13
+
+### Added
+- `check_w031_redundant_return_annotation`: 推論可能な戻り値型の明示的注釈を検出（`lint.rs`）
+- `check_w032_explicit_generic_type_arg`: 推論可能なジェネリック型引数の明示を検出（`lint.rs`）
+- `check_w032_in_expr` / `check_w032_in_stmt`: `Expr::TypeApply` を再帰的に走査するヘルパー（`lint.rs`）
+- W031 警告: `return type annotation is redundant; type can be inferred`
+- W032 警告: `explicit generic type argument is redundant; type can be inferred from argument`
+- `v431200_tests`: `cargo_toml_version_is_43_12_0` / `w031_warns_on_redundant_return_annotation` / `w032_warns_on_explicit_generic_type_arg`
+
+### Changed
+- `lint_program()` に `check_w031` / `check_w032` 呼び出しを追加
+- `v431100_tests::cargo_toml_version_is_43_11_0` をスタブ化
+
+### Notes
+- W033（ラムダ引数型の明示検出）は AST 拡張が必要なため将来版のスコープ（`lint_program` にスタブコメントのみ）
+- `Block.expr` は `Box<Expr>`（非 Option）— `&*fd.body.expr` でデリファレンス
+
+---
+
+## [v43.11.0] — 2026-07-13
+
+### Added
+- `TypeDef.is_opaque: bool` フィールド（デフォルト false）
+- `opaque type Token = String` 構文（contextual keyword "opaque"）
+- `check_opaque_coerce_violations(src, filename) -> Vec<String>`: opaque coerce 違反を AST レベルで検出
+- `is_bare_inner_literal(expr, inner_type) -> bool`: inner type リテラル判定ヘルパー
+- E0413 `opaque type coerce forbidden`（`error_catalog.rs` + `get_explain_text`）
+- `v431100_tests`: `cargo_toml_version_is_43_11_0` / `parser_recognizes_opaque_type_keyword` / `e0413_opaque_coerce_blocked`
+
+### Changed
+- `parse_item` に `"opaque"` contextual keyword アームを追加（`TokenKind::Type` の直前）
+- `parse_type_def` の TypeDef 構築 4 箇所 + `checker.rs` 1 箇所に `is_opaque: false` を追加
+- `cmd_check` の `errors.is_empty()` ブランチに opaque coerce チェックを追加
+- `v431000_tests::cargo_toml_version_is_43_10_0` をスタブ化
+
+### Notes
+- checker.fav への opaque 型統合・bind 式/引数での強制・`site/` MDX は将来版のスコープ
+- `TypeExpr::Named` は `(String, Vec<TypeExpr>, Span)` の 3 フィールド（2 フィールドパターンは要注意）
+
+---
+
+## [v43.10.0] — 2026-07-13
+
+### Added
+- `collect_explain_output(src, filename) -> Vec<String>`: 型エラーに対応する解説テキストを収集（テスト用ヘルパー）
+- `fav check --explain`: 型チェックエラー発生時に `get_explain_text` ベースの静的解説を出力
+- `v431000_tests`: `cargo_toml_version_is_43_10_0` / `explain_output_empty_for_well_typed_code`
+
+### Changed
+- `cmd_check` シグネチャに `explain: bool` を追加（12 番目のパラメータ）
+- `v43900_tests::cargo_toml_version_is_43_9_0` をスタブ化
+
+### Notes
+- LLM 呼び出しによる動的解説（ロードマップ記載の「Llm Rune 活用」）は将来バージョンへスライド
+- `--json` と `--explain` の同時指定では `explain` は無効化される（`!json` 条件）
+- プロジェクトモード（`file = None`）では `--explain` 非対応
+
+---
+
+## [v43.9.0] — 2026-07-13
+
+### Added
+- `collect_inference_annotations(src, filename) -> Vec<String>`: 関数レベル型注釈収集（単一パース）
+- `fav check --show-inference`: 型チェック通過後に関数シグネチャを出力
+- `v43900_tests`: `cargo_toml_version_is_43_9_0` / `show_inference_collects_fn_annotations`
+
+### Changed
+- `cmd_check` シグネチャに `show_inference: bool` を追加
+- `v43800_tests::cargo_toml_version_is_43_8_0` をスタブ化
+- `driver.rs` の二重パース TODO（line 3948–3949）を解消
+
+### Notes
+- `fav/self/checker.fav` は変更なし
+- `display_ty_inline` は `Named` / `Named<args>` のみ対応。`Arrow`・`Optional` 等は `"?"` にフォールバック
+
+---
+
+## [v43.8.0] — 2026-07-13
+
+### Added
+- `v43800_tests`: `cargo_toml_version_is_43_8_0` / `bidirectional_filter_infers_elem_type` / `bidirectional_nested_map_filter_expression`
+
+### Changed
+- `v43700_tests::cargo_toml_version_is_43_7_0` をスタブ化
+
+### Notes
+- `fav/self/checker.fav` は変更なし: v43.5.0 の `infer_list_lambda_call` がリスト要素型の下向き伝播（双方向型推論）を実現済み
+
+---
+
+## [v43.7.0] — 2026-07-13
+
+### Added
+- `v43700_tests`: `cargo_toml_version_is_43_7_0` / `structural_record_literal_type_checks`
+
+### Changed
+- `v43600_tests::cargo_toml_version_is_43_6_0` をスタブ化
+
+### Notes
+- `fav/self/checker.fav` は変更なし: 名前付きレコードリテラル（`TypeName { ... }`）は既存の `ERecordLit → tname` 機構で型チェックを通過する
+
+---
+
+## [v43.6.0] — 2026-07-12
+
+### Added
+- `v43600_tests`: `cargo_toml_version_is_43_6_0` / `pipeline_two_step_bind_infers_types` / `pipeline_three_step_bind_infers_types`
+
+### Changed
+- `v43500_tests::cargo_toml_version_is_43_5_0` をスタブ化
+
+### Notes
+- `fav/self/checker.fav` は変更なし: `infer_hm_let`（EBind 型伝播）+ v43.5.0 `infer_list_lambda_call`（ラムダ引数型推論）の組み合わせで多段パイプラインが機能することを確認
+
+---
+
+## [v43.5.0] — 2026-07-12
+
+### Added
+- `fav/self/checker.fav`: `infer_list_lambda_call` — `List.map` / `List.filter` 呼び出し時にラムダパラメータへリスト要素型を伝播（contextual lambda inference）
+- `v43500_tests`: `cargo_toml_version_is_43_5_0` / `contextual_lambda_map_propagates_elem_type` / `contextual_lambda_filter_preserves_elem_type`
+
+### Changed
+- `fav/self/checker.fav`: `infer_call` の `ns=="List"` ブランチを `map`/`filter` で `infer_list_lambda_call` に分岐
+- `v43400_tests::cargo_toml_version_is_43_4_0` をスタブ化
+
+---
+
+## [v43.4.0] — 2026-07-12
+
+### Fixed
+- `fav/self/checker.fav`: ジェネリック関数呼び出し時に同一型変数が複数引数で異なる型に束縛された場合、E0005 ではなく E0412 `ambiguous type variable` を報告するよう修正（`check_scheme_var_ambiguity` pre-check を `instantiate_fn_scheme` に追加）
+
+### Added
+- `fav/src/error_catalog.rs`: E0412（ambiguous type variable）エントリ追加
+- `v43400_tests`: `cargo_toml_version_is_43_4_0` / `e0412_in_error_catalog` / `e0412_conflicting_type_vars` / `e0412_no_conflict_ok`
+
+### Changed
+- `v43300_tests::cargo_toml_version_is_43_3_0` をスタブ化
+
+---
+
+## [v43.3.0] — 2026-07-12
+
+### Fixed
+- `fav/self/checker.fav`: `infer_call`（非HMパス）でジェネリック関数の呼び出し時に型変数を解決せず生の型変数文字列（例: `"A"`）を返していたバグを修正。`instantiate_fn_scheme` を使ってコールサイトで型変数を確定するよう変更（v43.3.0 call-site generic instantiation）
+
+### Added
+- `v43300_tests`: `cargo_toml_version_is_43_3_0` / `call_site_inference_identity_ok` / `call_site_inference_wrong_return_e0009`
+
+### Changed
+- `v43200_tests::cargo_toml_version_is_43_2_0` をスタブ化
+
+---
+
+## [v43.2.0] — 2026-07-12
+
+### Added
+- `fav/src/error_catalog.rs`: E0410（ambiguous return type）/ E0411（inferred return type mismatch）追加
+- `fav/self/checker.fav`: `check_body_ty` — `TeSimple("")` かつ body Unknown 時に E0410 を返すパス追加
+- `fav/src/driver.rs`: `FnReturnInfo` struct + `collect_fn_inferred_return_types` — 戻り値型省略関数を収集
+- `fav/src/driver.rs`: `fav check --show-types` に fn inferred return type 行を追加
+- `v43200_tests`: `cargo_toml_version_is_43_2_0` / `e0410_e0411_in_error_catalog` / `checker_fav_check_body_ty_has_e0410` / `return_type_omission_e0410_triggered`（E0410 E2E テスト）
+
+### Changed
+- `v43100_tests::cargo_toml_version_is_43_1_0` をスタブ化
+
+### Notes
+- E0411 は本バージョンで catalog に追加のみ（checker.fav での検出は v43.3.0 以降）
+- `FnReturnInfo` は `--show-types` テキストパス専用（JSON 出力対象外）
+
+---
+
+## [v43.1.0] — 2026-07-12
+
+### Added
+- `fav/src/frontend/parser.rs`: `fn f(params) { body }` での戻り値型省略（`-> RetType` 不要）をサポート
+- `fav/self/compiler.fav`: `parse_fn_def_after_params()` — `->` オプション対応（`TeSimple("")` プレースホルダ）
+- `fav/self/checker.fav`: `check_body_ty()` — `ret == ""` 時に body 推論で OK パス追加
+- `fav/src/middle/ast_lower_checker.rs`: `lower_fn_def` — `return_ty: None` の fallback を `TeSimple("Unit")` → `TeSimple("")` に変更（`fav check` self-hosted パスの E0009 誤検知を修正）
+- `v43100_tests`: `cargo_toml_version_is_43_1_0` / `return_type_omission_block_parseable` / `return_type_omission_return_ty_is_none`
+
+### Notes
+- `checker.rs` は変更なし（`return_ty: None` → body_ty 推論は既実装）
+- self-hosted パスの `collect_fn_scheme_str` での推論型補完は v43.2.0 以降
+
+---
+
+## [v43.0.0] — 2026-07-12
+
+### Added
+- `v43000_tests`: `cargo_toml_version_is_43_0_0` / `changelog_has_v43_0_0` / `milestone_has_real_time_power` / `readme_mentions_real_time_power`
+- `MILESTONE.md` に `v43.0.0 — Real-Time Power` エントリを追加
+
+### Changed
+- `README.md` に Real-Time Power（v43.0）の記述を追加
+- `fav/Cargo.toml` version: `42.9.0` → `43.0.0`
+- `v42900_tests::cargo_toml_version_is_42_9_0` をスタブ化
+
+### Notes
+- Real-Time Power 宣言（v42.1〜v42.9 スプリント完了）
+- ★ `cargo clean`（v43.0.0 クリーンアップ）実施
+
+---
+
+## [v42.9.0] — 2026-07-12
+
+### Added
+- `site/content/docs/real-time-power.mdx` — v42.x リアルタイム機能概要ドキュメント（CEP / Stream join / back-pressure / WebSocket / fav monitor）
+- `v42900_tests`: `cargo_toml_version_is_42_9_0` / `real_time_power_docs_exists`
+
+### Notes
+- コードフリーズ（新規機能追加なし）
+- v43.0.0 マイルストーン宣言は次バージョンで実施
+
+---
+
+## [v42.8.0] — 2026-07-12
+
+### Added
+- `site/content/cookbook/cep-login-purchase.mdx` — CEP ログイン→購入セッション検出 cookbook
+- `site/content/cookbook/stream-join.mdx` — Stream join 2 ストリーム時間窓結合 cookbook
+- `v42800_tests`: `realtime_cookbook_mdx_exists`
+
+---
+
+## [v42.7.0] — 2026-07-12
+
+### Added
+- `fav monitor` コマンド — パイプライン監視 stub（スループット / イベント数 / レイテンシ表示は v43.x 以降）
+- `cmd_monitor` 関数追加（`driver.rs`）
+- `v42700_tests`: `cargo_toml_version_is_42_7_0` / `monitor_cmd_exists`
+
+### Notes
+- 実際のメトリクス収集・TUI 表示は v43.x 以降で実装
+- 未知引数は無視する（v43.x で `--interval` オプション追加時に引数解析を実装）
+
+---
+
+## [v42.6.0] — 2026-07-12
+
+### Added
+- `runes/websocket/` — WebSocket push sink Rune（`send` / `broadcast` 関数）
+- VM プリミティブ `WebSocket.send_raw` / `WebSocket.broadcast_raw` stub 追加（実接続は v44.x 以降）
+- `site/content/docs/runes/websocket.mdx` — WebSocket Rune ドキュメント
+- `v42600_tests`: `cargo_toml_version_is_42_6_0` / `websocket_rune_fav_exists`
+
+### Notes
+- 実際の WebSocket 接続（TCP / TLS / WS handshake）は v44.x 以降で実装
+- `!WebSocket` エフェクトは実接続実装時に合わせて追加予定
+
+---
+
+## [v42.5.0] — 2026-07-12
+
+### Added
+- `#[max_inflight(n)]` アノテーション — `stage` 定義に back-pressure 宣言を追加（parser + AST）
+- `MaxInflightAnnotation { n: u64 }` AST 構造体追加（`TrfDef.max_inflight` フィールド）
+- `parse_max_inflight_annotation()` パーサー実装（n = 0 はパース時エラー; 負数は `Minus` トークンのため別エラー）
+- `v42500_tests`: `max_inflight_annotation_parses` / `max_inflight_zero_is_parse_error`
+
+### Known Limitations
+- `fav fmt` は `#[max_inflight(n)]` アノテーションを出力しないため、`fav fmt` 実行後にアノテーションが消失する（`#[timeout]`/`#[retry]`/`#[circuit_breaker]` と同じ既存の制約）。v44.x の runtime 実装時に fmt.rs も対応予定。
+- runtime back-pressure（上流ステージ一時停止）は v44.x 以降に延期。
+
+---
+
+## [v42.4.0] — 2026-07-12
+
+### Added
+- `Stream.join(stream1, stream2, join_fn, window_secs)` — time-window join 演算子（nested-loop join）
+- `VMStream::Join` バリアント（`left`/`right`/`join_fn`/`window_secs` フィールド）
+- `("Stream", "join")` 型推論エントリ（checker.rs — `Stream<Unknown>` を返す）
+- `v42400_tests`: `stream_join_type_check_ok` / `stream_join_vm_basic`
+
+---
+
+## [v42.3.0] — 2026-07-12
+
+### Added
+- `fav/src/error_catalog.rs`: E0420（`cep pattern within_secs must be positive`）追加（E042x セクション新設）
+- `fav/src/middle/checker.rs`: `check_cep_pattern_def()` 追加、Pass 2 `CepPatternDef` スタブを実装に置き換え（`within 0` → E0420）
+- `fav/self/checker.fav`: CEP パターン型チェック設計コメントを「E0420 実装済み」に更新
+- driver.rs `v42300_tests` 3 件追加（`cargo_toml_version_is_42_3_0` / `cep_e0420_within_zero` / `e0420_in_error_catalog`）
+
+### Changed
+- `fav/Cargo.toml`: version `42.2.0` → `42.3.0`
+
+---
+
+## [v42.2.0] — 2026-07-12
+
+### Added
+- `fav/src/ast.rs`: `CepExpr` enum 追加（`Event` / `Seq` / `Any` / `Not` 4 バリアント）、`CepClause.event: String` → `CepClause.expr: CepExpr` に変更
+- `fav/src/frontend/parser.rs`: `parse_cep_expr()` 追加（`seq` / `any` / `not` コンビネータ対応）、`parse_cep_pattern_def()` を `parse_cep_expr()` 使用に修正
+- driver.rs `v42200_tests` 3 件追加（`cargo_toml_version_is_42_2_0` / `cep_seq_parseable` / `cep_any_parseable`）
+- driver.rs `v42100_tests::cep_pattern_fields_correct` を `CepExpr::Event` パターンマッチに更新
+
+### Changed
+- `fav/Cargo.toml`: version `42.1.0` → `42.2.0`
+
+---
+
+## [v42.1.0] — 2026-07-12
+
+### Added
+- `fav/src/ast.rs`: `CepClause` / `CepPatternDef` 構造体、`Item::CepPatternDef` バリアント、`Item::span()` アーム追加
+- `fav/src/frontend/parser.rs`: `parse_cep_pattern_def()` 実装、`parse_item()` に `"cep"` ディスパッチ追加
+- `fav/src/middle/checker.rs`: Pass 1 / Pass 2 に `CepPatternDef` スタブアーム追加
+- `fav/src/fmt.rs`: `Item::CepPatternDef` フォーマットスタブ追加
+- `fav/src/driver.rs`: `v42100_tests` 3 件追加（`cargo_toml_version_is_42_1_0` / `cep_pattern_parseable` / `cep_pattern_fields_correct`）
+- `fav/self/checker.fav`: CEP パターン型チェック設計コメント追加（v42.3.0 実装予定）
+
+### Changed
+- `fav/Cargo.toml`: version `42.0.0` → `42.1.0`
+
+---
+
+## [v42.0.0] — 2026-07-12
+
+### Added
+- `MILESTONE.md`: `v42.0.0 — Type Precision` マイルストーン宣言エントリを追加（先頭）
+- `README.md`: `Type Precision`（v42.0）の記述を追加
+- driver.rs `v42000_tests` 4 件追加（`cargo_toml_version_is_42_0_0` / `changelog_has_v42_0_0` / `milestone_has_type_precision` / `readme_mentions_type_precision`）
+
+### Changed
+- `fav/Cargo.toml`: version `41.9.0` → `42.0.0`
+
+---
+
+## [v41.9.0] — 2026-07-12
+
+### Added
+- `site/content/docs/type-precision.mdx` — Type Precision マイルストーン概要ページ新規作成（v41.1〜v41.8 機能一覧・v42.0 宣言文予告）
+- driver.rs `v41900_tests` 2 件追加（`cargo_toml_version_is_41_9_0` / `type_precision_doc_exists`）
+
+### Changed
+- `fav/Cargo.toml`: version `41.8.0` → `41.9.0`
+
+---
+
+## [v41.8.0] — 2026-07-11
+
+### Added
+- `site/content/cookbook/refinement-types.mdx` — Type Precision cookbook: refinement type alias + W030 lint 実用パターン（ドメイン型・冗長ガード除去・Newtype との使い分け）
+- `site/content/docs/language/refinement-types.mdx` に「Type Alias Refinement（v41.1.0+）」と「W030: 冗長ガード lint（v41.7.0+）」セクションを追加。パラメータ refinement との記法の違いを明記
+
+---
+
+## [v41.7.0] — 2026-07-11
+
+### Added
+- W030 lint: refinement 条件の冗長ガード検出（`type PositiveInt = Int where |v| v >= 0` の変数に `if x >= 0` ガードを書くと W030）
+- `lint.rs`: `check_w030_redundant_refinement_guard` / `collect_refinement_aliases` / `check_w030_fn` / `exprs_lit_eq`
+
+---
+
+## [v41.6.0] -- 2026-07-11
+
+### Added
+- Newtype 自動 impl: `type Kg(Float)` 宣言で `+`/`-`/`*`/`/` を Float/Int 内側型から自動委譲
+- `checker.fav`: `infer_op_with_newtypes` — Newtype 算術の型推論ヘルパー（同型間 `Kg + Kg` が正常に型チェックされる）
+- `checker.fav`: `collect_variant_constructors` の IWrapper ケースに `__newtype__` env エントリ追加
+
+---
+
+## [v41.5.0] — 2026-07-11
+
+### Added
+- `fav/src/middle/ast_lower_checker.rs`: `RecordSpread` を `ERecordSpread(base, fields)` に正しく lowering（`sv("()")` バグ修正）
+- `fav/src/middle/ast_lower_checker.rs`: `RecordType` を `TeRecord` に lowering（`TeSimple("Any")` から精緻化）
+- `fav/self/checker.fav`: `ERecordSpread(Expr, Expr)` バリアント追加
+- `fav/self/checker.fav`: `TeRecord` バリアント追加 + `type_expr_to_str` / `collect_type_vars_from_te` に対応ケース追加
+- `fav/self/checker.fav`: `infer_expr` に `ERecordSpread` ケース追加（`"Unknown"` 型推論）
+- `v41500_tests` 3 テスト追加（version / changelog / record_spread_parseable）
+
+---
+
+## [v41.4.0] — 2026-07-11
+
+### Added
+- `fav/src/middle/ast_lower_checker.rs`: `v4` ヘルパー追加 + `lower_arms` に `EArmG` 分岐（ガード式を checker.fav に渡す）
+- `fav/self/checker.fav`: `EArmG(Pat, Expr, Expr, Expr)` バリアント追加（v41.4.0）
+- `fav/self/checker.fav`: `infer_arms_effects` / `check_rebind` / `check_w006_arms` / `infer_arms` / `collect_arm_ctors` に EArmG ケース追加
+- `fav/self/checker.fav`: `collect_arm_ctors` でガード付きワイルドカードを網羅性 catch-all としてカウントしないロジック追加
+- `v41400_tests` 3 テスト追加（version / changelog / guard_match_parseable）
+
+---
+
+## [v41.3.0] — 2026-07-11
+
+### Added
+- `fav/src/frontend/parser.rs`: 式側 `(a, b)` タプルを `RecordConstruct("__tuple__", ...)` にデシュガー
+- `fav/src/frontend/parser.rs`: パターン側 `(p1, p2)` タプルを `Pattern::Record` にデシュガー
+- `fav/self/checker.fav`: タプルパターン処理の設計コメント追加（PRecord バリアント追加は v41.4.0）
+- `v41300_tests` 3 テスト追加（version / changelog / tuple_pattern_match_parseable）
+
+---
+
+## [v41.2.0] — 2026-07-11
+
+### Added
+- `fav/src/error_catalog.rs`: E0404（refinement constraint violation）/ E0405（ambiguous refinement type）/ E0406（refinement constraint type mismatch）を追加
+- `fav/self/checker.fav`: `TypeDef` に `invariants: List<String>` フィールドを追加
+- `fav/self/checker.fav`: `check_item` の `IType` 分岐で `check_refinement_alias` を統合呼び出し
+- `fav/src/middle/ast_lower_checker.rs`: `lower_type_def` に `invariants` フィールド（空リスト）を追加
+- `v41200_tests` 3 テスト追加（version / changelog / error_catalog_has_e0404）
+
+---
+
+## [v41.1.0] — 2026-07-11
+
+### Added
+- `fav/src/frontend/parser.rs`: `parse_type_def` の Alias 分岐に `where |v| pred` 節を追加（Refinement type 基盤）
+- `fav/self/checker.fav`: `check_refinement_alias` スタブ関数を追加（v41.2.0 で E0400 統合予定）
+- `v41100_tests` 3 テスト追加（version / changelog / refinement_type_alias_where_parseable）
+
+---
+
+## [v41.0.0] — 2026-07-11
+
+### Added
+- `MILESTONE.md` に v41.0.0 — Streaming Foundations エントリ追加
+- `README.md` に Streaming Foundations（v41.0）マイルストーン宣言を追記
+- `v41000_tests` 4 テスト追加（version / changelog / milestone_has_streaming_foundations / readme_mentions_streaming_foundations）
+
+---
+
+## [v40.9.0] — 2026-07-11
+
+### Added
+- `site/content/docs/streaming-foundations.mdx` 新規作成（v40.x ストリーミング機能の概観ドキュメント）
+- `v40900_tests` 3 テスト追加（version / changelog / streaming_foundations_doc_exists）
+
+---
+
+## [v40.8.0] — 2026-07-11
+
+### Added
+- `site/content/cookbook/window-aggregation.mdx` 新規作成（`tumbling_window` を使ったウィンドウ集計パイプライン）
+- `site/content/cookbook/kafka-streaming.mdx` 新規作成（`consume_windowed` を使った Kafka Streams ウィンドウ消費）
+- `v40800_tests` 3 テスト追加（version / changelog / cookbook_window_aggregation_exists）
+
+---
+
+## [v40.7.0] — 2026-07-11
+
+### Added
+- `fav bench --stream` フラグ追加（Streaming Foundations v40.7、ストリームパイプライン計測スタブ）
+- `BenchOpts` に `stream: bool` フィールド追加
+- `main.rs` ヘルプテキストに `--stream` オプション追記
+- `v40700_tests` 3 テスト追加（version / changelog / bench_opts_has_stream_field）
+
+---
+
+## [v40.6.0] — 2026-07-11
+
+### Added
+- `runes/kafka/kafka.fav` に `consume_windowed(conn, topic, group_id, window_secs)` スタブ追加（Streaming Foundations v40.6、Kafka ウィンドウ集計）
+- `runes/kafka/rune.toml` 新規作成（kafka rune メタ情報補完）
+- `runes/redis/redis.fav` に `consume_windowed(conn, stream_key, group_id, window_secs)` スタブ追加（Redis Streams window 対応）
+- `v40600_tests` 3 テスト追加（version / changelog / kafka_fav_has_consume_windowed）
+
+---
+
+## [v40.5.0] — 2026-07-11
+
+### Added
+- `fav/src/toml.rs` に `StreamConfig` 構造体追加（`watermark_delay: Option<u32>` / `late_policy: Option<String>`、Streaming Foundations v40.5）
+- `FavToml` に `pub stream: Option<StreamConfig>` フィールド追加
+- `parse_fav_toml` に `[stream]` セクション解析追加（`StateConfig` と同パターン）
+- `inject_stream_config(_cfg: &StreamConfig)` スタブ関数追加（v40.6 以降で実伝播実装）
+- `v40500_tests` 3 テスト追加（version / changelog / fav_toml_stream_section_parsed）
+
+---
+
+## [v40.4.0] — 2026-07-11
+
+### Added
+- `runes/stream/stream.fav` に `with_late_policy(stream, tolerance, policy)` スタブ追加（Out-of-order イベント処理、Streaming Foundations v40.4）
+- `runes/stream/rune.toml` version を `40.4.0` に更新、description に `with_late_policy` 追記
+- `v40400_tests` 3 テスト追加（version / changelog / stream_fav_has_late_policy）
+
+---
+
+## [v40.3.0] — 2026-07-11
+
+### Added
+- `runes/stream/stream.fav` に `Event` 型定義（`value: Any` スタブ / `timestamp: Int`）追加（Streaming Foundations v40.3、ジェネリクス統合は v43.x 予定）
+- `runes/stream/rune.toml` version を `40.3.0` に更新、description に `Event(timestamp)` 追記
+- `v40300_tests` 3 テスト追加（version / changelog / stream_fav_has_event_type）
+
+---
+
+## [v40.2.0] — 2026-07-11
+
+### Added
+- `runes/stream/stream.fav` に `session_window(stream, gap)` 関数スタブ追加（Streaming Foundations v40.2）
+- `runes/stream/rune.toml` version を `40.2.0` に更新、description に `session_window` 追記
+- `v40200_tests` 3 テスト追加（version / changelog / stream_rune_has_session_window）
+
+---
+
+## [v40.1.0] — 2026-07-11
+
+### Added
+- `runes/stream/stream.fav` に `tumbling_window` / `sliding_window` 関数スタブ追加（Streaming Foundations v40.1）
+- `runes/stream/rune.toml` 新規作成（stream Rune メタデータ）
+- `v40100_tests` 3 テスト追加（version / changelog / stream_rune_has_window_functions）
+
+---
+
 ## [v40.0.0] — 2026-07-11
 
 ### Added

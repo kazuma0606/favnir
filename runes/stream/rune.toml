@@ -1,0 +1,5 @@
+[rune]
+name = "stream"
+version = "40.4.0"
+entry = "stream.fav"
+description = "Stream windowing utilities — map / filter / flat_map / window / merge / split / tumbling_window / sliding_window / session_window / with_late_policy / Event(value:Any stub, timestamp:Int)"

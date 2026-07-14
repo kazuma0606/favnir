@@ -1,0 +1,37 @@
+---
+title: Precision & Flow Overview
+description: Favnir v44.x スプリント「Precision & Flow」の達成事項と v45.0 への道筋
+---
+
+# Precision & Flow Overview
+
+Favnir v44.x スプリントのゴールは **「型推論・Refinement type・CEP・Opaque type・Back-pressure を統合し、最小限の注釈で安全なリアルタイムパイプラインを記述できる状態を宣言する」** ことです。
+
+## 達成事項（v44.1〜v44.8）
+
+| バージョン | 機能 | 状態 |
+|---|---|---|
+| v44.1.0 | Refinement type × Streaming 統合 | ✅ COMPLETE |
+| v44.2.0 | CEP × Refinement type | ✅ COMPLETE |
+| v44.3.0 | Stream join × Opaque type | ✅ COMPLETE |
+| v44.4.0 | 型推論 × パイプライン lineage | ✅ COMPLETE |
+| v44.5.0 | Back-pressure × `fav policy` 統合 | ✅ COMPLETE |
+| v44.6.0 | Precision & Flow E2E デモ | ✅ COMPLETE |
+| v44.7.0 | ドキュメントサイト Precision & Flow 概要ページ | ✅ COMPLETE |
+| v44.8.0 | パフォーマンス最終調整 | ✅ COMPLETE |
+| v44.9.0 | v45.0 前調整・安定化（本バージョン） | ✅ COMPLETE |
+
+## 詳細ドキュメント
+
+- [Precision & Flow 機能詳細](./precision-and-flow) — 各機能のコードスニペット付き解説
+- [E2E デモ](../../../infra/e2e-demo/precision-flow/) — 統合パイプラインの完全実装例
+
+## v45.0 Precision & Flow 宣言へ
+
+v44.9.0 はコードフリーズ版です。v45.0 で以下を宣言します。
+
+> 「型推論がジェネリクスと戻り値型を補完し、最小限の注釈で安全なコードが書ける。
+> ウィンドウ集計・CEP・Stream join が型安全に記述でき、
+> refinement type と opaque type がデータの意味を型で守る。
+>
+> これが Favnir v45.0 — Precision & Flow の姿である。」

@@ -1,0 +1,37 @@
+// infra/e2e-demo/precision-flow/src/demo.fav
+// Precision & Flow E2E Demo — v44.6.0
+// Kafka → CEP → Opaque join → Policy gate
+
+import rune "kafka"
+
+// ── Refinement type ───────────────────────────────────────────────
+type HighValue = Float where |v| v > 1000.0
+
+// ── Opaque type ───────────────────────────────────────────────────
+opaque type OrderId = String
+opaque type SessionId = String
+
+// ── CEP pattern ───────────────────────────────────────────────────
+cep pattern HighValueDetected {
+  HighValue within 300
+}
+
+// ── Stage 1: Kafka からイベントを受信 ────────────────────────────
+stage IngestEvents: String -> List<Float> = |topic| {
+  bind raw: List<Float> <- kafka.consume(topic)
+  raw
+}
+
+// ── Stage 2: CEP で高額イベントを検出（HighValueDetected パターン適用）────
+stage DetectHighValue: List<Float> -> List<HighValue> = |events| {
+  // applies HighValueDetected pattern: HighValue within 300
+  bind detected: List<HighValue> <- events
+  detected
+}
+
+// ── Stage 3: Policy gate（back-pressure governance 制限付き） ─────
+#[max_inflight(50)]
+stage PolicyGate: List<Float> -> List<Float> = |events| {
+  bind allowed: List<Float> <- events
+  allowed
+}

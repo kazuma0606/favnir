@@ -472,7 +472,81 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
         example: "#[circuit_breaker(threshold = 0.0, window = 0)]  // E0403",
         fix: "`threshold` は 0.0 超〜1.0 以下、`window` は 1 以上の整数を指定してください。",
     },
-    // ── E05xx: モジュール ────────────────────────────────────────────────
+    // ── E04xx: Refinement type (v41.2.0) ────────────────────────────────
+    ErrorEntry {
+        code: "E0404",
+        title: "refinement constraint violation",
+        category: "types",
+        description: "A value was assigned to a refinement type alias but violates the `where` invariant.",
+        example: "type Age = Int where |v| v >= 0\nbind x: Age <- -1  // E0404",
+        fix: "Ensure the assigned value satisfies the refinement invariant.",
+    },
+    ErrorEntry {
+        code: "E0405",
+        title: "ambiguous refinement type",
+        category: "types",
+        description: "A refinement type alias has conflicting or unsatisfiable invariants.",
+        example: "type Never = Int where |v| v > 0 && v < 0  // E0405",
+        fix: "Review the invariant conditions for logical consistency.",
+    },
+    ErrorEntry {
+        code: "E0406",
+        title: "refinement constraint type mismatch",
+        category: "types",
+        description: "The predicate in a refinement `where` clause uses a type inconsistent with the base type.",
+        example: "type Age = Int where |v| String.len(v) > 0  // E0406: len() on Int",
+        fix: "Ensure the predicate operates on the base type of the alias.",
+    },
+    // ── E0407〜E0409: 予約（将来のリファインメント型拡張用） ──────────────────────────
+    // ── E041x: 戻り値型推論 (v43.2.0) ──────────────────────────────────────────────
+    ErrorEntry {
+        code: "E0410",
+        title: "ambiguous return type",
+        category: "types",
+        description: "Return type was omitted but cannot be inferred from the function body (body expression yields `Unknown`).",
+        example: "fn f() { undefined_fn() }  // E0410: body type Unknown",
+        fix: "Add an explicit return type annotation `-> RetType`, or ensure the body has a deterministic type.",
+    },
+    ErrorEntry {
+        code: "E0411",
+        // ロードマップ定義: 「省略型と明示型の不一致」= 戻り値型省略関数の推論結果が明示型宣言と合わない
+        // 検出開始: v43.3.0 以降（本バージョンは catalog 登録のみ）
+        title: "inferred return type mismatch",
+        category: "types",
+        description: "Return type was omitted, but the type inferred from the body does not match the explicitly declared type in the usage context.",
+        example: "fn f() { 42 }  // inferred Int; annotation elsewhere declares String -> E0411",
+        fix: "Add an explicit `-> RetType` annotation to the function, or fix the usage context.",
+    },
+    // ── E0412: 型変数競合 (v43.4.0) ────────────────────────────────────────────
+    ErrorEntry {
+        code: "E0412",
+        title: "ambiguous type variable",
+        category: "types",
+        description: "A type variable in a generic function is bound to conflicting types at the call site. The same type variable appears in multiple parameter positions but the corresponding arguments have different types.",
+        example: "fn f<A>(x: A, y: A) -> A { x }\nfn bad() -> Int { f(1, \"hello\") }  // A = Int AND A = String \u{2192} E0412",
+        fix: "Ensure all arguments corresponding to the same type variable have the same type.",
+    },
+    // ── E0413: opaque type coerce (v43.11.0) ──────────────────────────────────
+    ErrorEntry {
+        code: "E0413",
+        title: "opaque type coerce forbidden",
+        category: "types",
+        description: "A value of the inner type is used directly as an opaque type. \
+                      Opaque types require explicit construction to prevent accidental coercion.",
+        example: "opaque type Token = String\nfn bad() -> Token { \"secret\" }  // E0413",
+        fix: "Use an explicit constructor function instead of a bare inner-type literal.",
+    },
+    // ── E0414〜E0419: 予約（将来拡張用） ─────────────────────────────────────────
+    // ── E042x: CEP パターン (v42.3.0) ─────────────────────────────────────────────
+    ErrorEntry {
+        code: "E0420",
+        title: "cep pattern within_secs must be positive",
+        category: "cep",
+        description: "The `within` value in a `cep pattern` clause must be a positive integer (≥ 1). `within 0` is semantically invalid.",
+        example: "cep pattern P { Login within 0 }  // E0420",
+        fix: "Use `within N` where N ≥ 1 (e.g., `within 60`).",
+    },
+    // ── E05xx: モジュール ────────────────────────────────────────────────────────────
     ErrorEntry {
         code: "E0500",
         title: "generic error",

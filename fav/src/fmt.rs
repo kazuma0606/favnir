@@ -105,6 +105,7 @@ impl Formatter {
             }
             Item::PipelineDef(pd) => format!("pipeline {} {{ ... }}", pd.name), // v22.5.0: fmt スタブ
             Item::SchemaDef(sd) => format!("schema {} {{ ... }}", sd.name), // v36.1.0: fmt スタブ
+            Item::CepPatternDef(cd) => format!("cep pattern {} {{ ... }}", cd.name), // v42.1.0: fmt スタブ
         }
     }
 

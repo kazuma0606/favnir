@@ -114,6 +114,12 @@ pub fn lint_program(program: &Program) -> Vec<LintError> {
     // v34.5.0: W022 removed in v34.8A — !Effect is now a parse error (E0374)
     // v36.3.0: W025
     check_w025_schema_mismatch(program, &mut errors);
+    // v41.7.0: W030
+    check_w030_redundant_refinement_guard(program, &mut errors);
+    // v43.12.0: W031〜W032
+    check_w031_redundant_return_annotation(program, &mut errors);
+    check_w032_explicit_generic_type_arg(program, &mut errors);
+    // W033: 将来版（AST 拡張後に実装 — Expr::Closure はパラメータ型を保持しない）
     errors
 }
 
@@ -2361,6 +2367,250 @@ fn check_w025_schema_mismatch(program: &Program, errors: &mut Vec<LintError>) {
                 }
             }
         }
+    }
+}
+
+// ── W030: redundant_refinement_guard (v41.7.0) ───────────────────────────────
+
+/// type alias refinement 情報: (closure_param_name, op, lhs_expr, rhs_expr)
+type RefinementInfo = (String, BinOp, Box<Expr>, Box<Expr>);
+
+/// type alias で invariant を持つ型を収集する
+/// `type PositiveInt = Int where |v| v >= 0` → "PositiveInt" → ("v", GtEq, Ident("v"), Lit(0))
+fn collect_refinement_aliases(program: &Program) -> HashMap<String, RefinementInfo> {
+    let mut map = HashMap::new();
+    for item in &program.items {
+        if let Item::TypeDef(td) = item {
+            if !matches!(td.body, TypeBody::Alias(_)) {
+                continue;
+            }
+            if td.invariants.is_empty() {
+                continue;
+            }
+            // 複数 invariant がある場合は最初のもののみ対象（将来拡張予定）
+            if let Expr::Closure(params, body, _) = &td.invariants[0] {
+                if params.len() != 1 {
+                    continue;
+                }
+                if let Expr::BinOp(op, lhs, rhs, _) = body.as_ref() {
+                    map.insert(
+                        td.name.clone(),
+                        (params[0].clone(), op.clone(), lhs.clone(), rhs.clone()),
+                    );
+                }
+            }
+        }
+    }
+    map
+}
+
+/// 2 つの式がリテラルとして等しいか（Int/Float/Bool のみ対象）
+/// NOTE: f64 は to_bits() でビット列比較する（NaN/-0.0 の等価性問題を回避しつつソースコード上の同一性を確認）
+fn exprs_lit_eq(a: &Expr, b: &Expr) -> bool {
+    match (a, b) {
+        (Expr::Lit(Lit::Int(x), _), Expr::Lit(Lit::Int(y), _)) => x == y,
+        (Expr::Lit(Lit::Float(x), _), Expr::Lit(Lit::Float(y), _)) => x.to_bits() == y.to_bits(),
+        (Expr::Lit(Lit::Bool(x), _), Expr::Lit(Lit::Bool(y), _)) => x == y,
+        _ => false,
+    }
+}
+
+/// 比較演算子を左右反転させる（`if 0 <= x` を `|v| v >= 0` の invariant と照合するため）
+fn flip_binop(op: &BinOp) -> Option<BinOp> {
+    match op {
+        BinOp::Lt => Some(BinOp::Gt),
+        BinOp::Gt => Some(BinOp::Lt),
+        BinOp::LtEq => Some(BinOp::GtEq),
+        BinOp::GtEq => Some(BinOp::LtEq),
+        BinOp::Eq => Some(BinOp::Eq),
+        BinOp::NotEq => Some(BinOp::NotEq),
+        _ => None,
+    }
+}
+
+fn check_w030_cond(
+    cond: &Expr,
+    param_refinements: &HashMap<String, &RefinementInfo>,
+    span: &Span,
+    errors: &mut Vec<LintError>,
+) {
+    if let Expr::BinOp(if_op, lhs, rhs, _) = cond {
+        // パターン: param op literal
+        if let Expr::Ident(param_name, _) = lhs.as_ref() {
+            if let Some((_, inv_op, inv_lhs, inv_rhs)) = param_refinements.get(param_name) {
+                // invariant が |v| v op literal の形（lhs が Ident）
+                if matches!(inv_lhs.as_ref(), Expr::Ident(_, _)) {
+                    if *if_op == *inv_op && exprs_lit_eq(rhs, inv_rhs) {
+                        errors.push(LintError::new(
+                            "W030",
+                            format!(
+                                "redundant guard: `{}` already has refinement type constraint that guarantees this condition",
+                                param_name
+                            ),
+                            span.clone(),
+                        ));
+                        return;
+                    }
+                }
+            }
+        }
+        // パターン: literal op param（左右逆）— `if 0 <= x` のような書き方
+        // invariant は `|v| v >= 0`（inv_lhs=Ident, inv_rhs=Lit）のため、
+        // flip_binop(if_op) で演算子を反転させて invariant の op と比較する
+        if let Expr::Ident(param_name, _) = rhs.as_ref() {
+            if let Some((_, inv_op, inv_lhs, inv_rhs)) = param_refinements.get(param_name) {
+                // invariant の lhs が Ident（|v| v op literal 形式）かつ演算子が反転一致
+                if matches!(inv_lhs.as_ref(), Expr::Ident(_, _)) {
+                    if flip_binop(if_op) == Some((*inv_op).clone()) && exprs_lit_eq(lhs, inv_rhs) {
+                        errors.push(LintError::new(
+                            "W030",
+                            format!(
+                                "redundant guard: `{}` already has refinement type constraint that guarantees this condition",
+                                param_name
+                            ),
+                            span.clone(),
+                        ));
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn check_w030_fn(
+    fd: &FnDef,
+    refinements: &HashMap<String, RefinementInfo>,
+    errors: &mut Vec<LintError>,
+) {
+    // param_name → refinement_info のマップを構築
+    let mut param_refinements: HashMap<String, &RefinementInfo> = HashMap::new();
+    for param in &fd.params {
+        if let TypeExpr::Named(type_name, _, _) = &param.ty {
+            if let Some(info) = refinements.get(type_name) {
+                param_refinements.insert(param.name.clone(), info);
+            }
+        }
+    }
+    if param_refinements.is_empty() {
+        return;
+    }
+
+    for stmt in &fd.body.stmts {
+        if let Stmt::Expr(Expr::If(cond, _, _, span)) = stmt {
+            check_w030_cond(cond, &param_refinements, span, errors);
+        }
+    }
+    // 末尾式が if の場合も検出（Block.expr は常に存在）
+    if let Expr::If(cond, _, _, span) = fd.body.expr.as_ref() {
+        check_w030_cond(cond, &param_refinements, span, errors);
+    }
+}
+
+pub fn check_w030_redundant_refinement_guard(program: &Program, errors: &mut Vec<LintError>) {
+    let refinements = collect_refinement_aliases(program);
+    for item in &program.items {
+        if let Item::FnDef(fd) = item {
+            check_w030_fn(fd, &refinements, errors);
+        }
+    }
+}
+
+// ── W031: redundant return type annotation (v43.12.0) ─────────────────────────
+
+// NOTE: W031/W032 は top-level FnDef のみを対象とする（ImplDef のメソッドは v43.12.0 スコープ外）。
+fn check_w031_redundant_return_annotation(program: &Program, errors: &mut Vec<LintError>) {
+    for item in &program.items {
+        if let Item::FnDef(fd) = item {
+            if fd.return_ty.is_some() && fd.body.stmts.is_empty() {
+                let is_simple = match &*fd.body.expr {
+                    // Unit リテラル `()` は副作用関数の慣用的注釈なので除外
+                    Expr::Lit(Lit::Unit, _) => false,
+                    // 非 Unit リテラルのみ対象（Ident は可読性のための注釈として除外）
+                    Expr::Lit(_, _) => true,
+                    _ => false,
+                };
+                if is_simple {
+                    errors.push(LintError::new(
+                        "W031",
+                        "return type annotation is redundant; type can be inferred".to_string(),
+                        fd.span.clone(),
+                    ));
+                }
+            }
+        }
+    }
+}
+
+// ── W032: redundant explicit generic type argument (v43.12.0) ─────────────────
+
+fn check_w032_explicit_generic_type_arg(program: &Program, errors: &mut Vec<LintError>) {
+    for item in &program.items {
+        if let Item::FnDef(fd) = item {
+            check_w032_in_block(&fd.body, errors);
+        }
+    }
+}
+
+fn check_w032_in_block(block: &Block, errors: &mut Vec<LintError>) {
+    for stmt in &block.stmts {
+        check_w032_in_stmt(stmt, errors);
+    }
+    check_w032_in_expr(&block.expr, errors);
+}
+
+fn check_w032_in_expr(expr: &Expr, errors: &mut Vec<LintError>) {
+    match expr {
+        Expr::TypeApply(_, _, span) => {
+            errors.push(LintError::new(
+                "W032",
+                "explicit generic type argument is redundant; type can be inferred from argument"
+                    .to_string(),
+                span.clone(),
+            ));
+        }
+        Expr::Apply(f, args, _) => {
+            check_w032_in_expr(f, errors);
+            for arg in args {
+                check_w032_in_expr(arg, errors);
+            }
+        }
+        Expr::Pipeline(steps, _) => {
+            for s in steps { check_w032_in_expr(s, errors); }
+        }
+        Expr::Block(b) => check_w032_in_block(b, errors),
+        Expr::If(cond, then_b, else_b, _) => {
+            check_w032_in_expr(cond, errors);
+            check_w032_in_block(then_b, errors);
+            if let Some(eb) = else_b { check_w032_in_block(eb, errors); }
+        }
+        Expr::Match(scrutinee, arms, _) => {
+            check_w032_in_expr(scrutinee, errors);
+            for arm in arms {
+                if let Some(g) = &arm.guard { check_w032_in_expr(g, errors); }
+                check_w032_in_expr(&arm.body, errors);
+            }
+        }
+        Expr::Closure(_, body, _) => check_w032_in_expr(body, errors),
+        Expr::FieldAccess(inner, _, _) => check_w032_in_expr(inner, errors),
+        _ => {}
+    }
+}
+
+fn check_w032_in_stmt(stmt: &Stmt, errors: &mut Vec<LintError>) {
+    match stmt {
+        Stmt::Bind(b) => check_w032_in_expr(&b.expr, errors),
+        Stmt::Expr(e) => check_w032_in_expr(e, errors),
+        Stmt::Chain(c) => check_w032_in_expr(&c.expr, errors),
+        Stmt::Yield(y) => check_w032_in_expr(&y.expr, errors),
+        Stmt::ForIn(f) => {
+            check_w032_in_expr(&f.iter, errors);
+            check_w032_in_block(&f.body, errors);
+        }
+        Stmt::Forall(f) => {
+            if let Some(g) = &f.guard { check_w032_in_expr(g, errors); }
+            check_w032_in_block(&f.body, errors);
+        }
+        _ => {}
     }
 }
 

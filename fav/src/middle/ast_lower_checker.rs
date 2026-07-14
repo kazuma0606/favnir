@@ -40,6 +40,17 @@ fn v3(tag: &str, a: Value, b: Value, c: Value) -> Value {
     Value::Variant(tag.to_string(), Some(Box::new(Value::Record(map))))
 }
 
+/// 4-arg variant — payload is `{_0, _1, _2, _3}` record (v41.4.0)
+#[inline]
+fn v4(tag: &str, a: Value, b: Value, c: Value, d: Value) -> Value {
+    let mut map = HashMap::new();
+    map.insert("_0".to_string(), a);
+    map.insert("_1".to_string(), b);
+    map.insert("_2".to_string(), c);
+    map.insert("_3".to_string(), d);
+    Value::Variant(tag.to_string(), Some(Box::new(Value::Record(map))))
+}
+
 #[inline]
 fn sv(s: &str) -> Value {
     Value::Str(s.to_string())
@@ -139,7 +150,7 @@ pub fn lower_te(te: &ast::TypeExpr) -> Value {
         ast::TypeExpr::Arrow(a, b, _) => v2("TeFn", lower_te(a), lower_te(b)),
         ast::TypeExpr::TrfFn { input, output, .. } => v2("TeFn", lower_te(input), lower_te(output)),
         ast::TypeExpr::Intersection(lhs, rhs, _) => v2("TeIntersection", lower_te(lhs), lower_te(rhs)),
-        ast::TypeExpr::RecordType(_, _) => v1("TeSimple", sv("Any")),
+        ast::TypeExpr::RecordType(_, _) => v0("TeRecord"), // v41.5.0: TODO v42.0+: v2("TeRecord", lower_fields(...)) に変更しフィールド情報を保持する
         ast::TypeExpr::Schema(uri, _) => v1("TeSimple", sv(uri)),
         ast::TypeExpr::LinearArrow(a, b, _) => v2("TeFn", lower_te(a), lower_te(b)),
         ast::TypeExpr::ConstInt(n, _) => v1("TeConst", Value::Int(*n)),
@@ -237,7 +248,12 @@ fn lower_arms(arms: &[ast::MatchArm]) -> Value {
     arms.iter()
         .rev()
         .fold(v0("EArmNil"), |acc, arm| {
-            v3("EArm", lower_pat(&arm.pattern), lower_expr(&arm.body), acc)
+            if let Some(guard) = &arm.guard {
+                // v41.4.0: EArmG(pat, guard_expr, body, rest)
+                v4("EArmG", lower_pat(&arm.pattern), lower_expr(guard), lower_expr(&arm.body), acc)
+            } else {
+                v3("EArm", lower_pat(&arm.pattern), lower_expr(&arm.body), acc)
+            }
         })
 }
 
@@ -362,9 +378,9 @@ pub fn lower_expr(expr: &ast::Expr) -> Value {
         ast::Expr::RecordConstruct(name, fields, _) => {
             v2("ERecordLit", sv(name), lower_field_list(fields))
         }
-        ast::Expr::RecordSpread(_, _, _) => {
-            // record spread not yet supported in checker.fav path — treat as unit
-            sv("()")
+        ast::Expr::RecordSpread(base, updates, _) => {
+            // v41.5.0: lower to ERecordSpread(base, fields)
+            v2("ERecordSpread", lower_expr(base), lower_field_list(updates))
         }
         ast::Expr::If(cond, then_block, else_opt, _) => {
             let then_val = lower_block(then_block);
@@ -430,7 +446,8 @@ fn lower_fn_def(fd: &ast::FnDef) -> Value {
         .return_ty
         .as_ref()
         .map(lower_te)
-        .unwrap_or_else(|| v1("TeSimple", sv("Unit")));
+        // v43.1.0: return type omitted → TeSimple("") signals "infer from body" in checker.fav
+        .unwrap_or_else(|| v1("TeSimple", sv("")));
     let body = lower_block(&fd.body);
     vm_record(vec![
         ("is_public", Value::Bool(is_public)),
@@ -491,12 +508,14 @@ fn lower_type_def(td: &ast::TypeDef) -> Value {
         }
     };
     let type_params: Vec<Value> = td.type_params.iter().map(|p| sv(&p.name)).collect();
+    // v41.2.0: pass invariants as empty list (full string serialization in future version)
     vm_record(vec![
         ("name", sv(&td.name)),
         ("is_record", Value::Bool(is_record)),
         ("type_params", vm_list(type_params)),
         ("variants", vm_list(variants)),
         ("fields", vm_list(fields)),
+        ("invariants", vm_list(vec![])),
     ])
 }
 

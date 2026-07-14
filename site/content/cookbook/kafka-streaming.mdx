@@ -1,0 +1,41 @@
+---
+title: "Kafka Streams ウィンドウ消費"
+description: "`kafka.consume_windowed` でウィンドウ単位に Kafka メッセージを消費するパイプラインを構築する"
+---
+
+# Kafka Streams ウィンドウ消費
+
+`kafka.consume_windowed` を使って Kafka トピックからウィンドウ単位でメッセージを消費します。
+
+## コード例
+
+```fav
+import kafka
+import db
+
+fn process_window(messages: List<KafkaMessage>) -> List<ProcessedRow> {
+    List.map(messages, fn(msg) {
+        ProcessedRow {
+            key:       msg.key,
+            value:     msg.value,
+            timestamp: msg.timestamp,
+        }
+    })
+}
+
+stage ConsumeWindow {
+    let conn    = kafka.connect("localhost:9092")
+    let window  = kafka.consume_windowed(conn, "events-topic", "my-group", 30)
+    let rows    = process_window(window)
+    sink: db.insert("processed_events", rows)
+}
+
+pipeline KafkaWindowPipeline {
+    seq [ConsumeWindow]
+}
+```
+
+## 関連 Rune
+
+- [`kafka`](/docs/runes/kafka) — Kafka 接続・消費・produce
+- [`stream`](/docs/runes/stream) — ウィンドウ関数（tumbling_window / sliding_window / session_window）

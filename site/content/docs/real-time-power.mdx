@@ -1,0 +1,85 @@
+---
+title: "Real-Time Power — Favnir v42.x リアルタイム機能概要"
+description: "v42.x で整備したリアルタイムパイプライン機能（CEP / Stream join / back-pressure / WebSocket / fav monitor）の概要"
+---
+
+# Real-Time Power — Favnir v42.x リアルタイム機能概要
+
+Favnir v42.x では、リアルタイムデータパイプラインを構築するための機能群を整備しました。
+
+## CEP — Complex Event Processing（v42.1.0〜v42.3.0）
+
+イベントストリームからパターンを検出します。`seq` / `any` / `not` パターンコンビネータと `within` 時間窓をサポートします。
+
+```fav
+bind windowed <- Cep.window(ctx, event_stream, 300)
+bind matched  <- Cep.match(ctx, windowed, |w|
+    w.first == "login" && w.last == "purchase"
+)
+```
+
+または `cep pattern` 構文で宣言的に記述できます（AST 実装済み。イベント型検証は v44.x 予定）:
+
+```fav
+cep pattern LoginThenPurchase {
+  seq(Login, Purchase) within 300
+}
+```
+
+詳細: [CEP cookbook](/cookbook/cep-login-purchase)
+
+## Stream join — 時間窓 2 ストリーム結合（v42.4.0）
+
+2 つのストリームを時間窓で結合します。
+
+```fav
+bind joined <- Stream.join(left, right, |a, b| a == b, 60)
+```
+
+> **注意（stub）**: join キーの型安全チェックはイベント型システム整備後の v43.x 以降に延期。
+> 現バージョンは `Stream<Unknown>` 型推論のみ。
+
+詳細: [Stream join cookbook](/cookbook/stream-join)
+
+## Back-pressure — `#[max_inflight(n)]`（v42.5.0）
+
+stage の最大同時実行数を宣言的に指定します（parser + AST のみ。runtime back-pressure は v44.x で実装）。
+
+```fav
+#[max_inflight(10)]
+stage ProcessEvents: Stream<Event> -> Stream<Result> = ...
+```
+
+## WebSocket Rune — リアルタイム push sink（v42.6.0）
+
+処理結果をブラウザやクライアントへリアルタイムに push します（v42.6.0 は stub。実接続は v44.x）。
+
+```fav
+bind _ <- WebSocket.send(ctx, "ws://localhost:8080/events", message)
+// WebSocket.send は v42.6.0 stub（実接続は v44.x）
+```
+
+複数メッセージの一括 push:
+
+```fav
+bind count <- WebSocket.broadcast(ctx, "ws://localhost:8080/events", messages)
+```
+
+詳細: [WebSocket Rune ドキュメント](/docs/runes/websocket)
+
+## fav monitor — パイプライン監視（v42.7.0）
+
+実行中パイプラインのスループット・イベント数・レイテンシをターミナルに表示します（v42.7.0 は stub。実測は v43.x）。
+
+```sh
+fav monitor
+```
+
+---
+
+## 参照
+
+- [CEP cookbook](/cookbook/cep-login-purchase)
+- [Stream join cookbook](/cookbook/stream-join)
+- [WebSocket Rune](/docs/runes/websocket)
+- [CHANGELOG](/changelog)

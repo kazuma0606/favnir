@@ -464,7 +464,12 @@ impl Emitter {
                     .iter()
                     .map(|(_, v)| self.emit_expr(v))
                     .collect();
-                format!("{}({})", ty_name, args.join(", "))
+                // v41.3.0: __tuple__ desugar → Python tuple literal
+                if ty_name == "__tuple__" {
+                    format!("({})", args.join(", "))
+                } else {
+                    format!("{}({})", ty_name, args.join(", "))
+                }
             }
 
             Expr::FString(parts, _) => {

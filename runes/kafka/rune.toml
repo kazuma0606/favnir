@@ -1,0 +1,5 @@
+[rune]
+name        = "kafka"
+version     = "40.6.0"
+entry       = "kafka.fav"
+description = "Kafka Rune — connect / produce / consume_one / consume_batch / consume_windowed / create_topic / KafkaConn"

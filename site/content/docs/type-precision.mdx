@@ -1,0 +1,79 @@
+---
+title: "Type Precision"
+description: "Favnir v41.x — Refinement type / Newtype / Row polymorphism で型でデータの意味を精緻に表現する"
+---
+
+# Type Precision (v41.x)
+
+> "Encode domain constraints directly into types — not as runtime guards scattered through your code, but as compile-time guarantees that make invalid states unrepresentable."
+
+v41.9.0 marks the completion of the **Type Precision** sprint. Over eight releases (v41.1 through v41.8), Favnir gained a suite of features that let you express the meaning of data precisely at the type level.
+
+## Features
+
+| Version | Feature |
+|---|---|
+| v41.1.0 | **Refinement type alias** — `type Age = Int where \|v\| v >= 0` attaches invariants to named types |
+| v41.2.0 | **Refinement invariant collection** — `fav check` gathers invariants from type aliases; E0404 / E0405 / E0406 error codes |
+| v41.3.0 | **Tuple pattern match** — `match (status, count) { ("ok", 0) => ... }` |
+| v41.4.0 | **Guard match** — `match score { n if n >= 90 => "A" \| _ => "C" }` |
+| v41.5.0 | **Row polymorphism** — record spread `{ ..u, active: true }` with full type-checker integration |
+| v41.6.0 | **Newtype auto-impl** — `type Kg(Float)` automatically delegates arithmetic operators from `Float` |
+| v41.7.0 | **W030 lint** — detects redundant `if` guards that are already guaranteed by a refinement type alias |
+| v41.8.0 | **Type Precision cookbook & docs** — `site/content/cookbook/refinement-types.mdx` and updated `docs/language/refinement-types.mdx` |
+
+## Highlights
+
+### Refinement Type Alias
+
+Attach value-level invariants to a named type once; reuse everywhere:
+
+```fav
+type Age    = Int    where |v| v >= 0 && v <= 150
+type Name   = String where |v| String.length(v) > 0
+type UserId = String where |v| String.length(v) == 36
+```
+
+The type checker verifies these constraints at compile time for literals and injects runtime assertions for dynamic values.
+
+### Newtype Auto-impl
+
+Give numeric types distinct identities without losing arithmetic:
+
+```fav
+type Kg(Float)     // inherits +, -, * from Float
+type Meter(Float)
+
+fn bmi(weight: Kg, height: Meter) -> Float {
+    weight / (height * height)
+}
+```
+
+### W030: No More Redundant Guards
+
+```fav
+type PositiveInt = Int where |v| v >= 0
+
+// W030: the guard `x >= 0` is already guaranteed by PositiveInt
+fn double(x: PositiveInt) -> Int {
+    if x >= 0 { x * 2 } else { 0 }
+}
+
+// Correct: trust the type
+fn double(x: PositiveInt) -> Int { x * 2 }
+```
+
+## v42.0 Preview
+
+> "With `type Age = Int where (>= 0)`, you can encode the meaning of data into its type.
+>  Tuple patterns and guard match enable more precise branching.
+>  Newtype inherits the operations of its inner type automatically.
+>
+>  This is Favnir v42.0 — Type Precision."
+
+The v42.0 milestone declaration will follow after the code-freeze consolidation in v41.9.0.
+
+## Related
+
+- [Refinement Types reference](/docs/language/refinement-types)
+- [Refinement Type cookbook](/cookbook/refinement-types)

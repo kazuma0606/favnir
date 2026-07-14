@@ -1,0 +1,46 @@
+---
+title: "Language Expressiveness"
+description: "Favnir v43 スプリント — 型推論強化・opaque type・冗長注釈 lint の成果"
+---
+
+# Language Expressiveness
+
+Favnir v43（v43.1〜v43.13）は **「型推論を強化し、ジェネリクスや戻り値型を手で書かなくてもコンパイラが補完してくれる」** をテーマとしたスプリントです。
+
+---
+
+## 達成した機能
+
+| バージョン | 機能 |
+|---|---|
+| v43.1 | 戻り値型推論（Return type omission） |
+| v43.2 | `fav check` 統合・E0410/E0411 エラー |
+| v43.3 | ジェネリック型引数推論（Call-site inference） |
+| v43.4 | 曖昧型変数検出（E0412） |
+| v43.5 | ラムダ引数型推論（Contextual lambda inference） |
+| v43.6 | パイプライン型伝播（Pipeline stage typing） |
+| v43.7 | 構造体リテラル推論（Structural inference） |
+| v43.8 | 双方向型推論（Bidirectional / top-down） |
+| v43.9 | `fav check --show-inference` |
+| v43.10 | `fav check --explain` 静的解説統合 |
+| v43.11 | `opaque type` 完全化・E0413 |
+| v43.12 | W031/W032 lint（冗長型注釈の警告） |
+| v43.13 | Language Expressiveness cookbook + 安定化 |
+
+---
+
+## 宣言文
+
+> 「戻り値型は省略でき、ジェネリクスは呼び出し側から推論される。
+>  ラムダ引数はパイプライン上流の型から確定し、
+>  `opaque type` で型の境界を守れる。
+>
+>  これが Favnir v44.0 — Language Expressiveness の姿である。」
+
+---
+
+## 関連ドキュメント
+
+- [Type Inference Reference](/docs/language/type-inference)
+- [Type Inference Guide (Cookbook)](/cookbook/type-inference-guide)
+- [opaque type](/docs/language/types)

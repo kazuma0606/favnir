@@ -137,6 +137,17 @@ pub struct StateConfig {
     pub backend: String,
 }
 
+// ── Stream config (v40.5.0) ──────────────────────────────────────────────────
+
+/// `[stream]` section of fav.toml (v40.5.0).
+#[derive(Debug, Clone, Default)]
+pub struct StreamConfig {
+    /// Watermark 遅延許容秒数（秒）。デフォルト 0。
+    pub watermark_delay: Option<u32>,
+    /// 遅延イベントのポリシー: "drop" | "reprocess"。
+    pub late_policy: Option<String>,
+}
+
 // ── Azure config (v14.2.0) ────────────────────────────────────────────────────
 
 #[derive(Debug, Clone)]
@@ -297,6 +308,8 @@ pub struct FavToml {
     pub workers: Option<WorkersConfig>,
     /// State backend from `[state]` section (v22.3.0).
     pub state: Option<StateConfig>,
+    /// Optional stream configuration (v40.5.0).
+    pub stream: Option<StreamConfig>,
 }
 
 impl FavToml {
@@ -337,6 +350,12 @@ pub fn parse_fav_toml_pub(content: &str) -> FavToml {
     parse_fav_toml(content)
 }
 
+/// パイプライン実行コンテキストに `[stream]` 設定を注入するスタブ（v40.5.0）。
+/// 実際の伝播ロジックは v40.6〜v40.9 で実装。
+pub fn inject_stream_config(_cfg: &StreamConfig) {
+    // TODO: v40.5.0 stub
+}
+
 fn parse_fav_toml(content: &str) -> FavToml {
     let mut name = String::new();
     let mut version = String::new();
@@ -367,6 +386,7 @@ fn parse_fav_toml(content: &str) -> FavToml {
     // v22.2.0: accumulator for multi-line [workers].endpoints array
     let mut workers_endpoints_accum: Option<Vec<String>> = None;
     let mut state_cfg: Option<StateConfig> = None;
+    let mut stream_cfg: Option<StreamConfig> = None;
     let mut section = "";
 
     for line in content.lines() {
@@ -452,6 +472,10 @@ fn parse_fav_toml(content: &str) -> FavToml {
         }
         if trimmed == "[state]" {
             section = "state";
+            continue;
+        }
+        if trimmed == "[stream]" {
+            section = "stream";
             continue;
         }
         if trimmed == "[project]" {
@@ -808,6 +832,22 @@ fn parse_fav_toml(content: &str) -> FavToml {
                     }
                 }
             }
+            "stream" => {
+                if let Some((key, val)) = parse_kv(trimmed) {
+                    let mut current = stream_cfg.take().unwrap_or_default();
+                    match key {
+                        "watermark_delay" => {
+                            // parse_kv は既に trim_matches('"') 済みのため val.parse() で十分
+                            current.watermark_delay = val.trim_matches('"').parse().ok();
+                        }
+                        "late_policy" => {
+                            current.late_policy = Some(val.trim_matches('"').to_string());
+                        }
+                        _ => {}
+                    }
+                    stream_cfg = Some(current);
+                }
+            }
             _ => {}
         }
     }
@@ -840,6 +880,7 @@ fn parse_fav_toml(content: &str) -> FavToml {
         registry_url,
         workers: workers_cfg,
         state: state_cfg,
+        stream: stream_cfg,
     }
 }
 

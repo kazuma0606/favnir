@@ -1,4 +1,4 @@
-// runes/stream/stream.fav — Stream Rune (v26.4.0)
+// runes/stream/stream.fav — Stream Rune (v40.4.0)
 //
 // 使い方:
 //   import rune "stream"
@@ -6,6 +6,20 @@
 // Stream.* primitive（vm.rs 実装）を薄くラップして公開する。
 // Stream.map / Stream.filter は v19.1.0 から実装済み。
 // Stream.flat_map / Stream.window / Stream.merge / Stream.split は v26.4.0 で追加。
+// tumbling_window / sliding_window は v40.1.0 で追加（Streaming Foundations スプリント）。
+// session_window は v40.2.0 で追加（Streaming Foundations スプリント）。
+// Event 型（timestamp フィールド）は v40.3.0 で追加（ウィンドウ演算の時刻基準）。
+// ※ v40.3.0 スタブ: value フィールドは Any 型。ジェネリクス統合は v43.x 型推論スプリントで行う。
+// with_late_policy は v40.4.0 で追加（out-of-order イベント処理ポリシー）。
+
+// v40.3.0 — Event 型定義（ウィンドウ演算の時刻基準）
+// value: Any（スタブ。v43.x で Event<T> に昇格予定）
+// timestamp: Unix epoch (ms)
+// TODO: v40.3.0 stub — ジェネリクス完全統合は v43.x 型推論スプリントで行う
+public type Event = {
+  value:     Any
+  timestamp: Int
+}
 
 public fn map(stream, f) {
     Stream.map(stream, f)
@@ -29,4 +43,33 @@ public fn merge(streams) {
 
 public fn split(stream, pred) {
     Stream.split(stream, pred)
+}
+
+// v40.1.0 — Tumbling / Sliding Window（スタブ実装）
+// 実際の VM 統合は v40.3〜v40.6 で行う
+
+public fn tumbling_window(stream, size) {
+    // TODO: v40.1.0 stub — tumbling window に分割
+    Stream.window(stream, size, fn(w) { w })
+}
+
+public fn sliding_window(stream, size, step) {
+    // TODO: v40.1.0 stub — sliding window に分割（step は将来使用）
+    Stream.window(stream, size, fn(w) { w })
+}
+
+// v40.2.0 — Session Window（スタブ実装）
+// gap 秒間イベントがなければウィンドウを閉じる
+// 実際の gap ベースロジックは v40.3〜v40.6 の Event<T> + timestamp 統合時に具体化
+
+public fn session_window(stream, gap) {
+    // TODO: v40.2.0 stub — session window（gap ベース分割）
+    Stream.window(stream, gap, fn(w) { w })
+}
+
+// v40.4.0 — Out-of-order イベント処理（スタブ実装）
+// tolerance: 許容遅延秒数 / policy: "drop" | "reprocess"
+// TODO: v40.4.0 stub — 実際の遅延検出は v40.5〜v40.6 の Watermark 基盤で実装
+public fn with_late_policy(stream, tolerance, policy) {
+    Stream.filter(stream, fn(e) { true })
 }

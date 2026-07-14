@@ -1,6 +1,6 @@
 # Current — Favnir 進行状況
 
-最終更新: 2026-07-11
+最終更新: 2026-07-15
 
 ---
 
@@ -12,21 +12,21 @@
 
 ## 最新安定版
 
-**v40.0.0** — Enterprise Governance マイルストーン宣言（2026-07-11）
+**v45.0.0** — Precision & Flow 宣言 — 2966 tests（2026-07-15）
 
-- `cargo install fav --version "40.0.0"`
+- `cargo install fav --version "45.0.0"`
 
 ---
 
 ## 進行中バージョン
 
-v40.x スプリント（v40.0.0 完了、次スプリント計画中）
+v44.x スプリント完了 / v45.0.0 COMPLETE（Precision & Flow 宣言）
 
 ---
 
 ## 次に切る版
 
-**v41.0.0**（次マスターロードマップ策定後に確定）
+**TBD**（次スプリント未確定）
 
 ---
 
@@ -61,4 +61,4 @@ v40.x スプリント（v40.0.0 完了、次スプリント計画中）
 | v39.0 — Intelligence & Assistance | **完了** | v38.1〜v38.9 完了後に宣言（2026-07-10） |
 | v40.0 — Enterprise Governance | **完了** | v39.1〜v39.9 完了後に宣言（2026-07-11） |
 
-詳細は [INDEX.md](INDEX.md) / [roadmap/roadmap-v35.1-v40.0.md](roadmap/roadmap-v35.1-v40.0.md) を参照。
+詳細は [INDEX.md](INDEX.md) / [roadmap/roadmap-v40.1-v45.0.md](roadmap/roadmap-v40.1-v45.0.md) を参照。

@@ -2365,7 +2365,8 @@ impl Checker {
                 | Item::InterfaceImplDecl(..)
                 | Item::PipelineDef(..)
                 | Item::EffectDef(..)
-                | Item::SchemaDef(..) => {} // v22.5.0/v35.5.0/v36.1.0: スタブ
+                | Item::SchemaDef(..)
+                | Item::CepPatternDef(..) => {} // v22.5.0/v35.5.0/v36.1.0/v42.1.0: スタブ
                 Item::InterfaceDecl(decl) => {
                     self.remember_global_symbol(
                         decl.name.clone(),
@@ -2409,6 +2410,21 @@ impl Checker {
             Item::PipelineDef(_) => {} // v22.5.0: 型チェック未対応（スタブ）
             Item::EffectDef(_) => {} // v35.5.0: effect declarations are no-ops
             Item::SchemaDef(_) => {} // v36.1.0: 型チェックは v36.2 以降
+            Item::CepPatternDef(cd) => self.check_cep_pattern_def(cd), // v42.3.0
+        }
+    }
+
+    /// CEP パターンのセマンティクス検証 (v42.3.0)
+    /// - within_secs <= 0 → E0420（0 および将来パーサーが許容する負値も検出）
+    fn check_cep_pattern_def(&mut self, cd: &CepPatternDef) {
+        for clause in &cd.body {
+            if matches!(clause.within_secs, Some(n) if n < 1) {
+                self.errors.push(TypeError::new(
+                    "E0420",
+                    "`within` value must be a positive integer (N ≥ 1)",
+                    clause.span.clone(),
+                ));
+            }
         }
     }
 
@@ -2746,6 +2762,7 @@ impl Checker {
             type_params: vec![],
             with_interfaces: vec![],
             invariants: vec![],
+            is_opaque: false,
             body,
             span: span.clone(),
         };
@@ -6727,6 +6744,7 @@ impl Checker {
             ("Stream", "filter") => Some(Type::Stream(Box::new(Type::Unknown))),
             ("Stream", "take") => Some(Type::Stream(Box::new(Type::Unknown))),
             ("Stream", "to_list") => Some(Type::List(Box::new(Type::Unknown))),
+            ("Stream", "join") => Some(Type::Stream(Box::new(Type::Unknown))), // v42.4.0
             ("Stream", _) => Some(Type::Unknown),
 
             // Random.seed (v3.5.0)
@@ -8341,6 +8359,7 @@ abstract seq Pipeline {
             registry_url: None,
             workers: None,
             state: None,
+            stream: None,
         };
         let resolver = Arc::new(Mutex::new(Resolver::new(Some(toml), Some(root))));
         (resolver, dir)
@@ -8436,6 +8455,7 @@ abstract seq Pipeline {
             registry_url: None,
             workers: None,
             state: None,
+            stream: None,
         };
         let mut resolver = Resolver::new(Some(toml), Some(root));
         // Simulate a mid-load state: "cycle" is already in the loading set

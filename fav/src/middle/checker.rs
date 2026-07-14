@@ -670,10 +670,7 @@ impl InterfaceRegistry {
             if let Some(ty) = def.methods.get(method_name) {
                 return Some(ty);
             }
-            match def.super_interface.clone() {
-                Some(sup) => current = sup,
-                None => return None,
-            }
+            current = def.super_interface.clone()?;
         }
         None
     }

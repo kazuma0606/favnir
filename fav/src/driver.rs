@@ -709,9 +709,9 @@ fn create_distributed_etl_project(root: &Path, name: &str) -> Result<(), String>
 }
 
 fn create_data_contract_project(root: &Path, name: &str) -> Result<(), String> {
-    write_text_file(&root.join("contracts/orders.fav"), &format!(
-        "// Data Contract: Orders\nschema Orders {{\n    id:          Int\n    customer_id: Int\n    amount:      Float\n    status:      String\n    created_at:  String\n}}\n"
-    ))?;
+    write_text_file(&root.join("contracts/orders.fav"),
+        "// Data Contract: Orders\nschema Orders {\n    id:          Int\n    customer_id: Int\n    amount:      Float\n    status:      String\n    created_at:  String\n}\n"
+    )?;
     write_text_file(&root.join("fav.toml"), &format!(
         "[project]\nname    = \"{name}\"\nversion = \"0.1.0\"\nedition = \"2026\"\n"
     ))?;
@@ -722,12 +722,12 @@ fn create_data_contract_project(root: &Path, name: &str) -> Result<(), String> {
 }
 
 fn create_multi_source_etl_project(root: &Path, name: &str) -> Result<(), String> {
-    write_text_file(&root.join("src/load_customers.fav"), &format!(
-        "// Source A: Postgres から顧客データをロード\nimport postgres as db\n\nstage LoadCustomers -> List[String] {{\n    db.query(ctx, \"SELECT id,name FROM customers\")\n}}\n"
-    ))?;
-    write_text_file(&root.join("src/load_orders.fav"), &format!(
-        "// Source B: CSV から注文データをロード\nimport csv\n\nstage LoadOrders -> List[String] {{\n    csv.read_file(\"orders.csv\")\n}}\n"
-    ))?;
+    write_text_file(&root.join("src/load_customers.fav"),
+        "// Source A: Postgres から顧客データをロード\nimport postgres as db\n\nstage LoadCustomers -> List[String] {\n    db.query(ctx, \"SELECT id,name FROM customers\")\n}\n"
+    )?;
+    write_text_file(&root.join("src/load_orders.fav"),
+        "// Source B: CSV から注文データをロード\nimport csv\n\nstage LoadOrders -> List[String] {\n    csv.read_file(\"orders.csv\")\n}\n"
+    )?;
     write_text_file(&root.join("src/main.fav"), &format!(
         "// Multi-Source ETL — {name}\n// すべてのステージをこのファイルに定義し、fav run src/main.fav で単独実行可能\nimport postgres as db\nimport csv\n\nstage LoadCustomers -> List[String] {{\n    db.query(ctx, \"SELECT id,name FROM customers\")\n}}\n\nstage LoadOrders -> List[String] {{\n    csv.read_file(\"orders.csv\")\n}}\n\nstage JoinAndLoad(customers: List[String], orders: List[String]) -> Int {{\n    bind joined <- List.join_on(customers, orders, |c, o| String.contains(o, c))\n    joined |> List.map(|row| db.execute(ctx, \"INSERT INTO results (data) VALUES ($1)\", [row]))\n          |> List.length\n}}\n\npipeline {name} {{\n    LoadCustomers, LoadOrders |> JoinAndLoad\n}}\n"
     ))?;
@@ -4081,7 +4081,7 @@ pub fn collect_refinement_stream_bindings(src: &str, filename: &str) -> Vec<Stri
 /// MVP: CepExpr::Event 名と refinement type 名の一致のみ（型パラメータ付きイベントは将来版）
 /// NOTE: 同一 CepClause 内に同一 refinement type 名が複数登場した場合、重複エントリが生成される（MVP 制限）
 pub fn collect_cep_refinement_event_refs(src: &str, filename: &str) -> Vec<String> {
-    use crate::ast::{CepExpr, Item};
+    use crate::ast::Item;
 
     let program = match crate::frontend::parser::Parser::parse_str(src, filename) {
         Ok(p) => p,

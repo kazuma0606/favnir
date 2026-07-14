@@ -862,6 +862,7 @@ pub struct EffectDef {
 // ── Item (2-1) ────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone)]
+#[allow(clippy::large_enum_variant)]
 pub enum Item {
     TypeDef(TypeDef),
     EffectDef(EffectDef),

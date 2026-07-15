@@ -2030,7 +2030,6 @@ fn parse_fn_def_after_params(is_pub: Bool, fname: String, params_p: ParamsParse)
     match expect_tok(params_p.rest, TkRParen) {
         Err(e) => Result.err(e)
         Ok(rest4) => {
-            // v43.1.0: `->` optional — if absent, use TeSimple("") as placeholder (return type inferred from body)
             match List.first(rest4) {
                 Some(TkArrow) => {
                     match expect_tok(rest4, TkArrow) {

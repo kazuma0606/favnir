@@ -2851,7 +2851,7 @@ test "instantiate nested" {
 }
 
 // v41.1.0: Refinement type alias constraint check (stub — full impl in v41.4.0+)
-fn check_refinement_alias(ty_name: String, invariants: List<String>) -> Bool {
+fn check_refinement_alias(ty_name: String, invariants: List<String>) {
     // TODO: v41.4.0+ で E0404 違反検出を実装
     // NOTE: invariants フィールドは v41.2.0 で TypeDef に追加済み（現在は空リスト）
     true

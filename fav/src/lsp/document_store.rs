@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use crate::ast::Program;
 use crate::frontend::lexer::Span;
 use crate::frontend::parser::Parser;
+use crate::lineage::{lineage_analysis, LineageReport};
 use crate::lsp::doc_comment::extract_doc_comments;
 use crate::middle::checker::{Checker, LspSymbol, Type, TypeError};
 
@@ -16,6 +17,7 @@ pub struct CheckedDoc {
     pub def_at: HashMap<Span, Span>,
     pub doc_comments: HashMap<String, String>,
     pub record_fields: HashMap<String, Vec<(String, Type)>>,
+    pub lineage: LineageReport, // v53.1.0: lineage キャッシュ
 }
 
 #[derive(Debug, Default)]
@@ -35,6 +37,7 @@ impl DocumentStore {
                 let mut checker = Checker::new();
                 let (errors, _) = checker.check_with_self(&program);
                 let doc_comments = extract_doc_comments(&source);
+                let lineage = lineage_analysis(&program);
                 CheckedDoc {
                     source,
                     program: Some(program),
@@ -44,6 +47,7 @@ impl DocumentStore {
                     def_at: checker.def_at,
                     doc_comments,
                     record_fields: checker.record_fields,
+                    lineage,
                 }
             }
             Err(err) => CheckedDoc {
@@ -55,6 +59,7 @@ impl DocumentStore {
                 def_at: HashMap::new(),
                 doc_comments: HashMap::new(),
                 record_fields: HashMap::new(),
+                lineage: LineageReport::default(),
             },
         };
         self.docs.insert(uri, checked);

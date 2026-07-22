@@ -22,6 +22,7 @@ pub struct OtelSpan {
     pub input_items:    u64,
     pub output_items:   u64,
     pub status:         OtelStatus,
+    pub attrs:          Vec<(String, String)>,  // v52.7.0: schema / lineage 属性
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -102,6 +103,7 @@ pub fn otel_span_start(name: &str, parent_id: Option<&SpanId>) -> SpanId {
         input_items:    0,
         output_items:   0,
         status:         OtelStatus::Ok,
+        attrs:          Vec::new(),
     };
     PENDING_SPANS.with(|p| p.borrow_mut().insert(span_id.clone(), span));
     PARENT_STACK.with(|s| s.borrow_mut().push(span_id.clone()));
@@ -128,6 +130,31 @@ pub fn otel_span_end(
         let mut stack = s.borrow_mut();
         if stack.last().map(|id| id == span_id).unwrap_or(false) {
             stack.pop();
+        }
+    });
+}
+
+/// v52.7.0: 現在実行中 span に文字列属性を追加する。OTel 有効時のみ呼ぶこと。
+pub fn otel_add_attr(key: &str, val: &str) {
+    let span_id = PARENT_STACK.with(|s| s.borrow().last().cloned());
+    if let Some(sid) = span_id {
+        PENDING_SPANS.with(|p| {
+            if let Some(span) = p.borrow_mut().get_mut(&sid) {
+                span.attrs.push((key.to_string(), val.to_string()));
+            }
+        });
+    }
+}
+
+/// v52.7.0: 完了済み span リストの最後のエントリに属性を後付けする。
+/// lineage.downstream の遡及追加に使用。
+/// `expected_stage_name` と一致しない span には何も書き込まない（誤パッチ防止）。
+pub fn otel_patch_attr_on_last(expected_stage_name: &str, key: &str, val: &str) {
+    OTEL_SPANS.with(|s| {
+        if let Some(span) = s.borrow_mut().last_mut() {
+            if span.name == format!("stage:{}", expected_stage_name) {
+                span.attrs.push((key.to_string(), val.to_string()));
+            }
         }
     });
 }
@@ -203,6 +230,10 @@ pub fn otel_export_stdout() {
             "[OTEL] span {:<35} dur={:>6}ms  status={}  in={} out={}",
             span.name, dur_ms, status, span.input_items, span.output_items,
         );
+        // v52.7.0: extra attrs（schema / lineage）
+        for (k, v) in &span.attrs {
+            eprintln!("       {:<30} = {}", k, v);
+        }
     }
 }
 
@@ -214,9 +245,21 @@ fn build_otlp_json(spans: &[OtelSpan]) -> String {
         let parent      = s.parent_span_id.as_deref().unwrap_or("");
         let status_code = match &s.status { OtelStatus::Ok => 1, OtelStatus::Error(_) => 2 };
         let status_str  = match &s.status { OtelStatus::Ok => "ok", OtelStatus::Error(_) => "error" };
+        // v52.7.0: extra attrs（schema.name / schema.fields / lineage.upstream / lineage.downstream）
+        let extra_attrs: String = s.attrs.iter().map(|(k, v)| {
+            format!(
+                r#"{{"key":"{}","value":{{"stringValue":"{}"}}}}"#,
+                escape_json_str(k), escape_json_str(v)
+            )
+        }).collect::<Vec<_>>().join(",");
+        let extra_part = if extra_attrs.is_empty() {
+            String::new()
+        } else {
+            format!(",{}", extra_attrs)
+        };
         let attrs = format!(
-            r#"[{{"key":"favnir.stage.name","value":{{"stringValue":"{}"}}}},{{"key":"favnir.stage.input_items","value":{{"intValue":"{}"}}}},{{"key":"favnir.stage.output_items","value":{{"intValue":"{}"}}}},{{"key":"favnir.stage.status","value":{{"stringValue":"{}"}}}}]"#,
-            escape_json_str(&s.name), s.input_items, s.output_items, status_str,
+            r#"[{{"key":"favnir.stage.name","value":{{"stringValue":"{}"}}}},{{"key":"favnir.stage.input_items","value":{{"intValue":"{}"}}}},{{"key":"favnir.stage.output_items","value":{{"intValue":"{}"}}}},{{"key":"favnir.stage.status","value":{{"stringValue":"{}"}}}}{}]"#,
+            escape_json_str(&s.name), s.input_items, s.output_items, status_str, extra_part,
         );
         format!(
             r#"{{"traceId":"{}","spanId":"{}","parentSpanId":"{}","name":"{}","kind":2,"startTimeUnixNano":"{}","endTimeUnixNano":"{}","attributes":{},"status":{{"code":{}}}}}"#,

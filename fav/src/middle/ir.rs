@@ -7,6 +7,8 @@ pub struct FieldMeta {
     pub name: String,
     pub ty: String,
     pub col_index: Option<usize>,
+    #[serde(default)]
+    pub optional: bool, // v52.2.0: true if field type is Optional (e.g. String?)
 }
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -68,6 +70,18 @@ pub enum IRExpr {
     RecordConstruct(Vec<(String, IRExpr)>, Type),
     /// record spread: `{ ...base, key: val }` (v16.3.0)
     RecordSpread(Box<IRExpr>, Vec<(String, IRExpr)>, Type),
+    /// par [A, B] 並列 stage 実行 (v51.1.0)
+    Par {
+        stage_names: Vec<String>,
+        input: Box<IRExpr>,
+        ty: Type,
+    },
+    /// assert_schema<T>(value) — runtime schema validation (v52.1.0)
+    AssertSchema {
+        ty_name: String,
+        arg: Box<IRExpr>,
+        ty: Type,
+    },
 }
 
 impl IRExpr {
@@ -88,7 +102,9 @@ impl IRExpr {
             | IRExpr::Collect(_, ty)
             | IRExpr::Emit(_, ty)
             | IRExpr::RecordConstruct(_, ty)
-            | IRExpr::RecordSpread(_, _, ty) => ty,
+            | IRExpr::RecordSpread(_, _, ty)
+            | IRExpr::Par { ty, .. }
+            | IRExpr::AssertSchema { ty, .. } => ty,
         }
     }
 }
@@ -108,6 +124,8 @@ pub enum IRStmt {
         total: u8,
     },
     Yield(IRExpr),
+    /// `return expr` early exit — emits Opcode::Return immediately (v45.3.0)
+    Return(IRExpr),
     Expr(IRExpr),
     /// Coverage tracking: record that line N was executed (v1.7.0).
     TrackLine(u32),
@@ -263,12 +281,20 @@ fn collect_expr_deps(expr: &IRExpr, globals: &[IRGlobal], deps: &mut BTreeSet<St
                 collect_expr_deps(v, globals, deps);
             }
         }
+
+        IRExpr::Par { input, .. } => {
+            collect_expr_deps(input, globals, deps);
+        }
+
+        IRExpr::AssertSchema { arg, .. } => {
+            collect_expr_deps(arg, globals, deps);
+        }
     }
 }
 
 fn collect_stmt_deps(stmt: &IRStmt, globals: &[IRGlobal], deps: &mut BTreeSet<String>) {
     match stmt {
-        IRStmt::Bind(_, e) | IRStmt::LegacyBind(_, e) | IRStmt::Chain(_, e) | IRStmt::Yield(e) | IRStmt::Expr(e) => {
+        IRStmt::Bind(_, e) | IRStmt::LegacyBind(_, e) | IRStmt::Chain(_, e) | IRStmt::Yield(e) | IRStmt::Return(e) | IRStmt::Expr(e) => {
             collect_expr_deps(e, globals, deps);
         }
         IRStmt::SeqChain { expr, .. } => {

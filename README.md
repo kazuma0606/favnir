@@ -116,6 +116,34 @@ CEP（`seq(Login, Purchase) within 300`）/ Stream join / Back-pressure / WebSoc
 **v44.0（2026-07-13）で、[Language Expressiveness](./MILESTONE.md) マイルストーンを宣言しました。**
 型推論 6 カテゴリ（戻り値型・ジェネリクス・ラムダ・パイプライン・構造体・双方向）/ opaque type / W031/W032 lint が揃い、型注釈を最小化しながら型安全性を維持できる Language Expressiveness 基盤が完成しました。
 
+**v54.0（2026-07-22）で、[Integration Sprint](./MILESTONE.md) マイルストーンを宣言しました。**
+エディタはデータの来歴を示し、並列パイプラインの性能は計測可能で、スキーマ違反は即座に修正できる。Favnir の 3 つの柱（DX 3.0 / Performance & Scale / Data Quality 2.0）が一体となった — これが **Integration Sprint** の宣言です。
+v54.1〜v54.5（2026-07-22〜23）で [Production 3.0](./MILESTONE.md) に向けた最終整備を完了しました。全エラーコードへの `fav explain --error` 対応（v54.1）・`fav run --watch-diff/--watch-summary`（v54.2）・パフォーマンスリグレッション CI 統合（v54.3）・`fav dq-report`（v54.4）・`fav doctor`（v54.5）が揃い、開発者が自信を持って本番へ踏み出せるツールチェーンが完成しました。
+
+**v53.0（2026-07-22）で、[Data Quality & Observability 2.0](./MILESTONE.md) マイルストーンを宣言しました。**
+`assert_schema` によるランタイムスキーマ検証・`fav explain --lineage --with-schema` によるリネージ可視化・SLA 監視 Rune・`fav run --audit-log` によるデータアクセスログ・OTel span 属性強化が揃い、Favnir のパイプラインは信頼できるデータを届けます。これが **Data Quality & Observability 2.0** の宣言です。
+
+**v52.0（2026-07-20）で、[Performance & Scale](./MILESTONE.md) マイルストーンを宣言しました。**
+`par` 並列ステージ実行・バックプレッシャー制御・`fav bench --compare` による回帰検出・インクリメンタルコンパイル・WASM サイズ最適化が揃い、Favnir は大規模データに立ち向かえる言語になりました。これが **Performance & Scale** の宣言です。
+
+**v51.0（2026-07-19）で、[Developer Experience 3.0](./MILESTONE.md) マイルストーンを宣言しました。**
+全エラーコードに修正提案が付き、JSON / LSP / CLI で一貫して届く。エディタは型を表示し、trace はパイプラインの流れを可視化する。Favnir の診断は開発者の思考を止めない — これが **DX 3.0** の宣言です。
+
+**v50.0（2026-07-18）で、[Language Maturity / Production 2.0](./MILESTONE.md) マイルストーンを宣言しました。**
+`return` ガード節・成熟した標準ライブラリ・明確なモジュールシステム・インラインテストが揃い、Favnir は迷わず使える実用言語になりました。これが **Language Maturity** — Production 2.0 の宣言です。
+
+**v49.0（2026-07-18）で、[Module & Package 2.0](./MILESTONE.md) マイルストーンを宣言しました。**
+パッケージ import とローカル import が構文で明確に分離され、`fav.toml` が依存関係の唯一の真実となる Module & Package 2.0 が完成しました。
+
+**v48.0（2026-07-18）で、[Standard Library 2.0](./MILESTONE.md) マイルストーンを宣言しました。**
+List / String / Float / Option / Result / Map の主要操作が揃い、外部ライブラリなしに実務的なデータ変換が書ける Standard Library 2.0 が完成しました。
+
+**v47.0（2026-07-17）で、[Developer Experience](./MILESTONE.md) マイルストーンを宣言しました。**
+インラインテスト（`fav test` / `#[test]`）・LSP クイックフィックス（did-you-mean / 引数追加提案）・型情報可視化（`fav explain --types` / `--lineage --show-dead`）が揃い、Favnir の開発体験が実用水準に達しました。
+
+**v46.0（2026-07-16）で、[Language Refinement](./MILESTONE.md) マイルストーンを宣言しました。**
+`return` 構文・`match` 完全網羅・型エイリアスの明確な境界・改善されたエラーメッセージ・数値リテラル `_` が揃い、Favnir の構文が成熟しました。
+
 **v45.0（2026-07-15）で、[Precision & Flow](./MILESTONE.md) マイルストーンを宣言しました。**
 Refinement type × Streaming / CEP × Opaque type / Back-pressure / E2E デモが揃い、最小限の型注釈で安全なリアルタイムパイプラインを記述できる Precision & Flow 基盤が完成しました。
 

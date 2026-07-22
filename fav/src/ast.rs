@@ -347,6 +347,13 @@ pub enum Expr {
     /// `collect { stmt* expr }`
     Collect(Box<Block>, Span),
 
+    /// `assert_schema<T>(value)` — runtime schema validation (v52.1.0)
+    AssertSchema {
+        ty_name: String,
+        arg: Box<Expr>,
+        span: Span,
+    },
+
     /// `if cond { ... } else { ... }`
     If(Box<Expr>, Box<Block>, Option<Box<Block>>, Span),
 
@@ -406,6 +413,7 @@ impl Expr {
             Expr::Question(_, s) => s,
             Expr::ListComp { span, .. } => span,
             Expr::ResultComp { span, .. } => span,
+            Expr::AssertSchema { span, .. } => span,
         }
     }
 }
@@ -437,6 +445,8 @@ pub enum Stmt {
     Chain(ChainStmt),
     /// `yield expr;`  Epush a value into the enclosing collect block (v0.5.0)
     Yield(YieldStmt),
+    /// `return expr`  early exit from fn/stage body (v45.1.0)
+    Return(ReturnStmt),
     /// `for x in list { body }`  Eiteration statement (v1.9.0)
     ForIn(ForInStmt),
     /// `forall x: Type [where { guard }] { body }`  property-based test (v17.7.0)
@@ -497,6 +507,14 @@ pub struct YieldStmt {
     pub span: Span,
 }
 
+// -- ReturnStmt (v45.1.0) --
+
+#[derive(Debug, Clone)]
+pub struct ReturnStmt {
+    pub expr: Expr,
+    pub span: Span,
+}
+
 impl Stmt {
     pub fn span(&self) -> &Span {
         match self {
@@ -504,6 +522,7 @@ impl Stmt {
             Stmt::Expr(e) => e.span(),
             Stmt::Chain(c) => &c.span,
             Stmt::Yield(y) => &y.span,
+            Stmt::Return(r) => &r.span,
             Stmt::ForIn(f) => &f.span,
             Stmt::Forall(f) => &f.span,
             Stmt::Expect(e) => &e.span,
@@ -629,6 +648,8 @@ pub struct FnDef {
     pub api_annotation: Option<ApiAnnotation>, // v18.8.0: #[api(method, path)]
     /// v24.4.0: `#[deprecated]` アノテーション付き関数
     pub deprecated: bool,
+    /// v46.1.0: `#[test]` アノテーション付き関数
+    pub is_test: bool,
 }
 
 // ── TrfDef (2-6) ──────────────────────────────────────────────────────────────
@@ -672,6 +693,15 @@ pub struct AbstractTrfDef {
 
 // ── FlwDef (2-7) ──────────────────────────────────────────────────────────────
 
+/// Merge mode for `par [A, B] |> Merge.ordered` / `Merge.any` (v51.2.0).
+#[derive(Debug, Clone, PartialEq)]
+pub enum MergeMode {
+    /// Collect results in declaration order (default).
+    Ordered,
+    /// Collect results in completion order (intentional separation for future tokio support).
+    Any,
+}
+
 /// A single step in a FlwDef pipeline.
 #[derive(Debug, Clone)]
 pub enum FlwStep {
@@ -685,6 +715,8 @@ pub enum FlwStep {
     Tap(Box<Expr>),
     /// Debug tap: `|> inspect` — prints value via vmvalue_repr and passes through (v16.8.0)
     Inspect,
+    /// Merge par results: `|> Merge.ordered` / `|> Merge.any` (v51.2.0)
+    Merge(MergeMode),
 }
 
 impl FlwStep {
@@ -693,7 +725,7 @@ impl FlwStep {
         match self {
             FlwStep::Stage(s) => vec![s.as_str()],
             FlwStep::Par(names) | FlwStep::ParDistributed(names) => names.iter().map(|s| s.as_str()).collect(),
-            FlwStep::Tap(_) | FlwStep::Inspect => vec![],
+            FlwStep::Tap(_) | FlwStep::Inspect | FlwStep::Merge(_) => vec![],
         }
     }
 
@@ -705,6 +737,8 @@ impl FlwStep {
             FlwStep::ParDistributed(names) => format!("par_distributed [{}]", names.join(", ")),
             FlwStep::Tap(_) => "tap(...)".to_string(),
             FlwStep::Inspect => "inspect".to_string(),
+            FlwStep::Merge(MergeMode::Ordered) => "Merge.ordered".to_string(),
+            FlwStep::Merge(MergeMode::Any) => "Merge.any".to_string(),
         }
     }
 }
@@ -861,6 +895,17 @@ pub struct EffectDef {
 
 // ── Item (2-1) ────────────────────────────────────────────────────────────────
 
+/// import 構文の種別（v48.1.0）
+#[derive(Debug, Clone, PartialEq)]
+pub enum ImportKind {
+    /// fav.toml [runes] に宣言されたパッケージ: `import kafka`
+    Package,
+    /// ./ から始まる相対パス: `import "./src/helpers"` (v48.2.0 以降)
+    Local,
+    /// 従来の文字列パス: `import rune "kafka"` / `import "models/user"`
+    Legacy,
+}
+
 #[derive(Debug, Clone)]
 #[allow(clippy::large_enum_variant)]
 pub enum Item {
@@ -886,6 +931,7 @@ pub enum Item {
         alias: Option<String>,
         is_rune: bool,
         is_public: bool,
+        kind: ImportKind,   // v48.1.0
         span: Span,
     },
     InterfaceDecl(InterfaceDecl),

@@ -1,0 +1,87 @@
+# Production 3.0 — Favnir v55 への道のり
+
+**Production 3.0** は Favnir v51〜v55 で積み上げた全機能を統合し、
+「データエンジニアが現場で選ぶ言語」として Favnir を完成させるマイルストーンです。
+
+---
+
+## v51 — Developer Experience 3.0
+
+全エラーコードに修正提案が付き、JSON / LSP / CLI で一貫して届く。
+エディタは型をインレイヒントで表示し、`fav run --trace` はパイプラインの流れをリアルタイムで可視化する。
+`fav run --watch` による自動再実行と差分表示（`--watch-diff` / `--watch-summary`）が揃い、
+Favnir の診断は開発者の思考を止めない。
+
+**主要機能:**
+- 全エラーコード `fav explain --error` 対応完備（`EXPLAIN_CATALOG`）
+- LSP インレイヒント（変数型・戻り型・パイプライン stage 型）
+- `fav run --trace`（stage 別実行トレース）
+- `fav run --watch` 自動再実行
+
+---
+
+## v52 — Performance & Scale
+
+`par` 並列 stage 実行（Tokio スレッドプール）・バックプレッシャー制御・
+`fav bench --compare` によるパフォーマンス回帰検出が揃い、
+Favnir は大規模データに立ち向かえる言語になった。
+
+**主要機能:**
+- `par [A, B] |> Merge` 並列 stage 実行（VM スレッド並列化）
+- バックプレッシャー制御（`backpressure` オプション）
+- `fav bench --compare baseline.json --fail-on-regression`（CI 統合）
+- インクリメンタルコンパイル・WASM サイズ最適化
+
+---
+
+## v53 — Data Quality & Observability 2.0
+
+`assert_schema` によるランタイムスキーマ検証・`fav explain --lineage --with-schema` によるリネージ可視化・
+`fav run --audit-log` によるデータアクセスログが揃い、
+Favnir のパイプラインは信頼できるデータを届ける。
+
+**主要機能:**
+- `assert_schema(row, OrderRow)` ランタイム型検証
+- `fav explain --lineage --with-schema` リネージ + スキーマ統合表示
+- `fav run --audit-log <path>` JSONL 監査ログ出力
+- OTel span 属性強化・SLA 監視 Rune
+
+---
+
+## v54 — Integration Sprint
+
+エディタはデータの来歴を示し、並列パイプラインの性能は計測可能で、スキーマ違反は即座に修正できる。
+Favnir の 3 つの柱（DX 3.0 / Performance & Scale / Data Quality 2.0）が一体となった。
+
+**v54.1〜v54.5 整備:**
+- `fav explain --error <CODE>` 全コード完備（v54.1）
+- `fav run --watch-diff` / `--watch-summary`（v54.2）
+- パフォーマンスリグレッション CI 統合（v54.3）
+- `fav dq-report --audit-log <path>` データ品質 Markdown レポート（v54.4）
+- `fav doctor` 環境診断コマンド（v54.5）
+
+**v54.6〜v54.9 最終整備:**
+- README / CONTRIBUTING 最終更新（Production 3.0 言及・`fav doctor` / `fav bench` 手順追記）（v54.6）
+- 本ドキュメント（`production3-overview.mdx`）新規作成（v54.7）
+- `MILESTONE.md` に `v55.0.0（予定）— Production 3.0` エントリ追加（v54.8）
+- v55.0 前調整・安定化・コードフリーズ（v54.9）
+
+---
+
+## v55 — Production 3.0 宣言
+
+> 「型安全なガード節、スケールする並列パイプライン、
+>  保証されたデータ品質、そして考えを助ける開発体験。
+>  Favnir はデータエンジニアが現場で選ぶ言語になった。
+>
+>  これが Favnir v55.0 — Production 3.0 の姿である。」
+
+v51〜v54 で積み上げた全機能を検証し、最終調整・安定化を経て **v55.0 Production 3.0** を宣言します。
+
+---
+
+## 関連ドキュメント
+
+- [DX 3.0 overview](./dx3-overview.mdx)
+- [integration-overview](./integration-overview.mdx)
+- [data-quality-overview](./data-quality-overview.mdx)

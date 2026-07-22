@@ -133,6 +133,7 @@ fn collect_in_stmt(stmt: &Stmt, name: &str, spans: &mut Vec<Span>) {
         Stmt::Expr(e) => collect_in_expr(e, name, spans),
         Stmt::Chain(c) => collect_in_expr(&c.expr, name, spans),
         Stmt::Yield(y) => collect_in_expr(&y.expr, name, spans),
+        Stmt::Return(r) => collect_in_expr(&r.expr, name, spans),
         Stmt::ForIn(f) => {
             collect_in_expr(&f.iter, name, spans);
             collect_in_block(&f.body, name, spans);
@@ -190,6 +191,7 @@ fn collect_in_expr(expr: &Expr, name: &str, spans: &mut Vec<Span>) {
         Expr::Question(inner, _) => collect_in_expr(inner, name, spans),
         Expr::EmitExpr(inner, _) => collect_in_expr(inner, name, spans),
         Expr::AssertMatches(scrutinee, _, _) => collect_in_expr(scrutinee, name, spans),
+        Expr::AssertSchema { arg, .. } => collect_in_expr(arg, name, spans),
         Expr::Collect(b, _) => collect_in_block(b, name, spans),
         Expr::FString(parts, _) => {
             for part in parts {

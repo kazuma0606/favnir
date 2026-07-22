@@ -67,6 +67,7 @@ impl Formatter {
                 path,
                 alias,
                 is_public,
+                kind,
                 ..
             } => {
                 let public = if *is_public { "public " } else { "" };
@@ -74,7 +75,11 @@ impl Formatter {
                     .as_ref()
                     .map(|alias| format!(" as {}", alias))
                     .unwrap_or_default();
-                format!(r#"{public}import "{path}"{alias}"#)
+                // v48.2.0: kind に応じて出力形式を切り替える（ラウンドトリップ保証）
+                match kind {
+                    crate::ast::ImportKind::Package => format!("{public}import {path}{alias}"),
+                    _ => format!(r#"{public}import "{path}"{alias}"#),
+                }
             }
             Item::EffectDef(ed) => self.effect_def(ed),
             Item::TypeDef(td) => self.type_def(td),
@@ -186,6 +191,8 @@ impl Formatter {
     // ── FnDef ─────────────────────────────────────────────────────────────────
 
     fn fn_def(&mut self, fd: &FnDef) -> String {
+        // v46.1.0: emit #[test] annotation before fn
+        let test_prefix = if fd.is_test { "#[test]\n" } else { "" };
         let vis = fmt_visibility(fd.visibility.as_ref());
         let params = fmt_type_params(&fd.type_params);
         let args = self.params(&fd.params);
@@ -193,7 +200,8 @@ impl Formatter {
             let ret = self.type_expr(ret_ty);
             let body = self.block(&fd.body);
             format!(
-                "{}fn {}{}{}{} {}",
+                "{}{}fn {}{}{}{} {}",
+                test_prefix,
                 vis,
                 fd.name,
                 params,
@@ -208,8 +216,8 @@ impl Formatter {
                 self.block(&fd.body)
             };
             format!(
-                "{}fn {}{}{} {}",
-                vis, fd.name, params, args, body
+                "{}{}fn {}{}{} {}",
+                test_prefix, vis, fd.name, params, args, body
             )
         }
     }
@@ -465,6 +473,10 @@ impl Formatter {
                 let expr = self.expr(&y.expr);
                 format!("yield {};", expr)
             }
+            Stmt::Return(r) => {
+                let expr = self.expr(&r.expr);
+                format!("return {}", expr)
+            }
             Stmt::ForIn(f) => {
                 let iter = self.expr(&f.iter);
                 let body = self.block(&f.body);
@@ -645,6 +657,10 @@ impl Formatter {
                     .collect::<Vec<_>>()
                     .join(", ");
                 format!("[? {} | {}]", self.expr(expr), clauses_str)
+            }
+
+            Expr::AssertSchema { ty_name, arg, .. } => {
+                format!("assert_schema<{}>({})", ty_name, self.expr(arg))
             }
         }
     }

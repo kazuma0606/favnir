@@ -4,6 +4,1387 @@ Favnir のバージョン履歴。形式は [Keep a Changelog](https://keepachan
 
 ---
 
+## [v55.0.0] — 2026-07-23 — Production 3.0 宣言
+
+### Production 3.0 宣言
+
+v51〜v54 で積み上げた全機能を最終確認し、Favnir v55.0 — Production 3.0 を宣言する。
+
+- v51: Developer Experience 3.0（診断統一・インレイヒント・trace/watch）
+- v52: Performance & Scale（par Tokio・バックプレッシャー・bench 回帰・WASM 最適化）
+- v53: Data Quality & Observability 2.0（assert_schema・lineage 強化・audit-log）
+- v54: Integration Sprint（explain --error 全網羅・watch-diff・dq-report・doctor・Production 3.0 整備）
+- v55: Production 3.0 宣言・★クリーンアップ
+
+### Removed
+- `v54900_tests::cargo_toml_version_is_54_9_0`（Cargo.toml 更新に伴い廃止、毎バージョン慣行）
+
+---
+
+## [v54.9.0] — 2026-07-23 — v55.0 前調整・安定化
+
+### Added
+- `site/content/docs/production3-overview.mdx` 完成（v54.6〜v54.9 最終整備セクションを追記）
+- `v54900_tests` 追加（`cargo_toml_version_is_54_9_0` / `production3_overview_doc_complete`）— 3203 tests
+
+---
+
+## [v54.8.0] — 2026-07-23 — MILESTONE.md Production 3.0 エントリ追加
+
+### Added
+- `MILESTONE.md`: `## v55.0.0（予定）— Production 3.0` エントリ追加（v51〜v54 達成内容を記録）
+- `v54800_tests` 追加（`milestone_has_production3` / `milestone_has_v55`）— 3201 tests
+
+---
+
+## [v54.7.0] — 2026-07-23 — ドキュメントサイト Production 3.0 overview ページ
+
+### Added
+- `site/content/docs/production3-overview.mdx` 新規作成 — v51〜v55 の全機能を統合した概要ページ
+- `v54700_tests` 追加（`docs_production3_overview_exists` / `docs_production3_has_v55`）— 3199 tests
+
+---
+
+## [v54.6.0] — 2026-07-23 — README / CONTRIBUTING 最終整備
+
+### Added
+- `README.md`: Production 3.0 への言及・v54.1〜v54.5 機能サマリーを追加
+- `CONTRIBUTING.md`: `fav doctor` 環境診断手順・`fav bench` パフォーマンス確認手順を追記
+- `v54600_tests` 追加（`readme_has_production3_mention` / `contributing_has_doctor_step`）— 3197 tests
+
+---
+
+## [v54.5.0] — 2026-07-23 — fav doctor 環境診断コマンド
+
+### Added
+- `DoctorCheck` struct / `DoctorStatus` enum: 診断チェック結果の表現型
+- `cmd_doctor_collect`: チェックリストを `[OK]` / `[WARN]` / `[FAIL]` プレフィクス付きテキストに変換
+- `cmd_doctor_run`: Rust バージョン・fav バージョン・fav.toml 存在確認・.fav-cache 状態を診断
+- `fav doctor` コマンド追加（main.rs）
+- `v54500_tests` 追加（`cmd_doctor_passes_clean_env` / `cmd_doctor_detects_missing_rune`）— 3195 tests
+
+---
+
+## [v54.4.0] — 2026-07-22 — fav dq-report データ品質レポートコマンド
+
+### Added
+- `cmd_dq_report_collect`: audit-log JSONL を解析し schema validation 統計・SLA 違反を集計して Markdown レポートを生成
+- `fav dq-report --audit-log <path>` コマンド追加（main.rs）
+- `v54400_tests` 追加（`cmd_dq_report_generates` / `cmd_dq_report_has_schema_stats`）— 3193 tests
+
+---
+
+## [v54.3.0] — 2026-07-22 — パフォーマンスリグレッションスイート CI 統合
+
+### Added
+- `.github/workflows/bench.yml`: `cargo test bench_ -- --nocapture` ステップと `fav bench --all --compare benchmarks/baseline.json --fail-on-regression` ステップを追加
+- `benchmarks/baseline.json` 新規作成 — PR ごとの自動比較の基準値としてリポジトリ管理
+- `v54300_tests` 追加（`ci_perf_regression_suite` / `ci_perf_baseline_recorded`）— 3191 tests
+
+---
+
+## [v54.2.0] — 2026-07-22 — fav run --watch 高度化（差分表示・サマリー）
+
+### Added
+- `format_watch_diff`: 数値フィールドの before/after 差分（Δ）を `[watch] field: X → Y Δ+Z (stage: S)` 形式でフォーマット
+- `format_watch_summary`: 複数 stage にまたがった全ウォッチイベントを `[watch-summary]` 形式で集計出力
+- `fav run --watch-diff` / `--watch-summary` フラグ追加（main.rs）
+- `v54200_tests` 追加（`run_watch_diff_numeric` / `run_watch_summary_output`）— 3189 tests
+
+---
+
+## [v54.1.0] — 2026-07-22 — 全エラーコード fav explain --error 対応完備
+
+### Added
+- `v54100_tests` 追加（`explain_error_all_codes_have_text` / `explain_error_e0419_exists`）— 3187 tests
+- `error_catalog.rs` 全 92 エラーコードに `cmd_explain_error_collect` 対応を検証（カバレッジ強制）
+
+---
+
+## [v54.0.0] — 2026-07-22 — Integration Sprint 宣言
+
+### Added
+- `MILESTONE.md`: v54.0.0 Integration Sprint 宣言セクション追加（宣言文・v53.1〜v53.9 完了サマリー）
+- `README.md`: v54.0 Integration Sprint マイルストーン宣言を追加
+- `v54000_tests` 追加（`cargo_toml_version_is_54_0_0` / `changelog_has_v54_0_0` / `milestone_has_integration_sprint` / `readme_mentions_integration_sprint`）— 3185 tests
+
+---
+
+## [v53.9.0] — 2026-07-22 — 安定化・コードフリーズ（Integration Sprint 前調整）
+
+### Added
+- `site/content/docs/integration-overview.mdx` 新規作成 — Integration Sprint 全体像・統合機能・E2E デモの骨子
+- `v53900_tests` 追加（`cargo_toml_version_is_53_9_0` / `integration_overview_doc_exists`）— 3181 tests
+
+---
+
+## [v53.8.0] — 2026-07-22 — CHANGELOG / MILESTONE 整理（v51〜v53 まとめ）
+
+### Added
+- `MILESTONE.md`: v51.0〜v53.0 Integration Sprint サマリーセクション追加 — DX 3.0 / Performance & Scale / Data Quality 2.0 の統合達成を記録
+- `CHANGELOG.md`: v53.8.0 エントリに Integration Sprint サマリー参照を含む（`changelog_has_v51_to_v53_summary` テスト対象）
+- `v53800_tests` 追加（`changelog_has_v51_to_v53_summary` / `milestone_integration_sprint_noted`）— 3179 tests
+
+---
+
+## [v53.7.0] — 2026-07-22 — ドキュメントサイト全体最終チェック
+
+### Added
+- `site/content/docs/glossary.mdx` 新規作成 — v51〜v53 の新語彙（`par` / `assert_schema` / `lineage` / `inlay hints` / `rune` / `stage` / `pipeline`）を定義
+- `v53700_tests` 追加（`docs_no_broken_links` / `docs_glossary_updated`）— 3177 tests
+
+---
+
+## [v53.6.0] — 2026-07-22 — cookbook 更新（parallel-pipeline + schema-validation）
+
+### Added
+- `site/content/cookbook/schema-validation.mdx` 新規作成 — `assert_schema<T>` + nullable + OTel + `--audit-log` レシピ
+- `v53600_tests` 追加（`cookbook_parallel_pipeline_exists` / `cookbook_schema_validation_exists`）— 3175 tests
+
+---
+
+## [v53.5.0] — 2026-07-22 — E2E 統合デモ Phase 2（assert_schema + audit-log + OTel）
+
+### Added
+- `examples/v55-demo/pipeline.fav`: `ValidOrder` 型・`SchemaCheck` stage（`assert_schema<ValidOrder>` + OTel コメント）追加
+- `examples/v55-demo/pipeline.fav`: `Process` stage の入力型を `ValidOrder` に更新
+- `examples/v55-demo/run.sh`: `fav run pipeline.fav --audit-log ./audit.log` を含むデモ実行スクリプト新規作成
+- `v53500_tests` 追加（`e2e_integration_demo_has_schema` / `e2e_integration_demo_has_audit_log`）— 3173 tests
+
+---
+
+## [v53.4.0] — 2026-07-22 — E2E 統合デモ Phase 1（Kafka → par transform → Snowflake）
+
+### Added
+- `examples/v55-demo/` 新規作成 — v51〜v53 統合機能を示す E2E デモ（Phase 1）
+  - `fav.toml`: `kafka = "2.1.0"` / `snowflake = "1.0.0"` 依存
+  - `pipeline.fav`: `par [enrich.run, validate.run] |> Merge.ordered` を含む OrderIngestion パイプライン
+  - `stages/enrich.fav`: `region` フィールド付与ステージ
+  - `stages/validate.fav`: status / amount バリデーションステージ
+- `v53400_tests` 追加（`e2e_integration_demo_structure` / `e2e_integration_demo_uses_par`）— 3171 tests
+
+---
+
+## [v53.3.0] — 2026-07-22 — DX × DQ 統合（`assert_schema` 失敗時の詳細 suggestion）
+
+### Changed
+- `error_catalog.rs`: E0419 エントリの `description` / `example` / `fix` / `suggestion` を強化
+  - `description`: フィールド個別検証・`--strict-schema` の説明を追加
+  - `example`: field diff 形式（`expected Int` / `got String` / `help: use Int.parse(...)` を含む）に更新
+  - `fix`: 各フィールドを変換してから呼ぶ旨を追記
+  - `suggestion`: `Int.parse()` / `Float.from_int()` の具体例を追加
+  - `title` / `code` / `category` は変更なし（既存テスト互換維持）
+- `v53300_tests` 追加（`assert_schema_error_has_suggestion` / `assert_schema_diff_shown`）— 3169 tests
+
+---
+
+## [v53.2.0] — 2026-07-22 — bench × par 統合（par stage 個別計測）
+
+### Added
+- `driver.rs`: `collect_par_stage_names` 追加 — `FlwDef.steps` の `Par` / `ParDistributed` から stage 名を収集
+- `BenchStats` に `par_stages: Vec<String>` フィールド追加
+- `bench_stats_to_json`: `"par_stages"` フィールドを JSON 出力に追加
+- `cmd_bench`: bench case 実行後に `collect_par_stage_names` で `par_stages` を後付け
+- `v53200_tests` 追加（`bench_par_stage_individual` / `bench_par_stage_total`）— 3167 tests
+
+---
+
+## [v53.1.0] — 2026-07-22 — lineage × LSP 統合（リネージをエディタで表示）
+
+### Added
+- `lsp/document_store.rs`: `CheckedDoc` に `lineage: LineageReport` フィールド追加、`open_or_change` で `lineage_analysis` をキャッシュ
+- `lsp/hover.rs`: `lineage_block_for_stage` 追加 — stage ホバー時に upstream / downstream / schema を Markdown で表示
+- `lineage.rs`: `LineageReport` に `#[derive(Default)]` 追加
+- `v53100_tests` 追加（`lsp_hover_shows_lineage` / `lsp_hover_lineage_upstream`）
+- `lsp/hover.rs` テスト追加（`lineage_block_shows_upstream_for_stage` / `lineage_block_shows_downstream_for_stage` / `lineage_block_returns_none_for_non_stage`）— 3165 tests
+
+---
+
+## [v53.0.0] — 2026-07-22 — Data Quality & Observability 2.0 宣言
+
+### Added
+- `MILESTONE.md` に v53.0.0「Data Quality & Observability 2.0」エントリ追加（宣言文付き）
+- `README.md` に v53.0 マイルストーン言及追加
+- `v53000_tests` 追加（`cargo_toml_version_is_53_0_0` / `changelog_has_v53_0_0` / `milestone_has_data_quality` / `readme_mentions_data_quality`）— 3160 tests
+
+### Changed
+- `cargo clean`（★クリーンアップ）完了
+
+---
+
+## [v52.9.0] — 2026-07-22 — 安定化・コードフリーズ（Data Quality 2.0 前調整）
+
+### Added
+- `site/content/docs/data-quality-overview.mdx` — Data Quality & Observability 2.0 概要ドキュメント（v52.1〜v52.8 機能一覧・各ドキュメントへのリンク）
+- `v52900_tests` 追加（`cargo_toml_version_is_52_9_0` / `dq_overview_doc_exists`）— 3156 tests
+
+### Changed
+- `cargo clippy -- -D warnings` クリーン確認（0 エラー・0 警告）
+
+---
+
+## [v52.8.0] — 2026-07-22 — ドキュメントサイト Data Quality 記事
+
+### Added
+- `site/content/docs/data-quality/assert-schema.mdx` — `assert_schema` の使い方・nullable・strict モード・E0419
+- `site/content/docs/tools/lineage-enhanced.mdx` — `--with-schema` / `--format html` / `-o` オプション説明
+- `site/content/docs/tools/audit-log.mdx` — `fav run --audit-log` の使い方・JSONL フォーマット・`fav audit` との違い
+- `v52800_tests` 追加（`docs_assert_schema_page_exists` / `docs_audit_log_page_exists` / `docs_lineage_enhanced_page_exists`）— 3154 tests
+
+---
+
+## [v52.7.0] — 2026-07-21 — OTel 強化（span 属性にスキーマ・リネージ情報付加）
+
+### Added
+- `OtelSpan` 構造体に `attrs: Vec<(String, String)>` フィールド追加（`otel.rs`）
+- `otel_add_attr(key, val)` 追加 — 現在実行中 span（PENDING_SPANS）に文字列属性を付与
+- `otel_patch_attr_on_last(key, val)` 追加 — 完了済み span（OTEL_SPANS の最後）に遡及追記
+- `build_otlp_json` 更新 — OTLP JSON の `attributes` 配列に `span.attrs` を追加出力
+- `otel_export_stdout` 更新 — 各 span の `attrs` を `key = value` 形式で stderr 出力
+- `OTEL_PREV_STAGE` thread-local 追加（`vm.rs`） — OTel lineage 追跡用の前 stage 名保持
+- `reset_stage_lineage()` 追加（`vm.rs`） — run 開始時に OTEL_PREV_STAGE をリセット
+- `SeqStageEnter` に lineage フック追加:
+  - 前 stage の完了済み span に `lineage.downstream = <現 stage 名>` を遡及追記
+  - 現 stage の span に `lineage.upstream = <前 stage 名>` を追加
+- `AssertSchema` opcode に schema フック追加:
+  - 検証成功時に `schema.name = <型名>` / `schema.fields = <フィールド名列挙>` を span に追加
+- `v52700_tests` 追加（`otel_span_has_schema_attr` + `otel_span_has_lineage_attr`）
+
+---
+
+## [v52.6.0] — 2026-07-21 — `fav run --audit-log` データアクセスログ
+
+### Added
+- `fav run --audit-log <output.jsonl>` オプション追加
+  — `!Kafka` / `!Snowflake` のアクセスイベントを JSONL 形式でファイルに記録する
+  — `--audit-log` 未指定時は従来通りログ出力なし（best-effort、パイプライン停止しない）
+- `vm.rs` に `AUDIT_LOG_PATH` thread-local（`RefCell<Option<String>>`）追加（wasm32 除外）
+- `vm.rs` に `set_audit_log_path(path: Option<String>)` 公開関数追加
+- `vm.rs` に `append_audit_event(json_line: &str)` プライベートヘルパー追加
+  — `OpenOptions::append(true).create(true)` でファイルに JSONL 行を追記
+- `Kafka.produce_raw` アームに write イベントフック挿入（`ts` / `op` / `effect` / `topic`）
+- `Kafka.consume_one_raw` アームに read イベントフック挿入
+- `Snowflake.execute_raw` アームに write イベントフック挿入（SQL 先頭 80 文字を記録）
+- `cmd_run` シグネチャに `audit_log: Option<&str>` 引数追加（末尾）
+- `v52600_tests` 追加（`audit_log_read_event` + `audit_log_write_event`）
+
+### 注意
+- `!S3` は vm.rs に `"S3.*_raw"` アームが存在しないため本バージョンのスコープ外
+- `site/content/docs/tools/audit-log.mdx` は v52.8.0 で追加予定
+
+---
+
+## [v52.5.0] — 2026-07-21 — SLA 監視 Rune
+
+### Added
+- `runes/sla/sla.fav` 新規作成（SLA 監視 Rune）
+  - `check_freshness(timestamp, max_age_seconds)` — データ鮮度チェック（古すぎる場合 `Err` を返す）
+  - `check_latency(stage, threshold_ms)` — ステージレイテンシチェック（超過時 `Err` を返す）
+  - `alert(message)` — 外部アラート基盤への通知スタブ（`Sla.alert_raw` 呼び出し）
+  - SLA 違反時は `Err` を返し、呼び出し側が `bind _ <-` パターンで fail-fast を実現
+  - `!Observe` エフェクトはコメントで言及（スタブ実装、Effect enum 追加は将来バージョン）
+- `v52500_tests` 追加（`sla_rune_latency_check` + `sla_rune_freshness_check` + `sla_rune_alert_check`）
+
+---
+
+## [v52.4.0] — 2026-07-21 — `fav explain --lineage` インタラクティブ HTML レポート
+
+### Added
+- `render_lineage_html(report: &LineageReport) -> String` 追加（`lineage.rs`）
+  — SVG ノードグラフ + クリックで詳細表示する自己完結型 HTML を生成
+  — ノードは `<g class="node" onclick="showDetail(...)">` でラップされクリック可能
+  — JS `stages` JSON + `showDetail(name)` 関数でステージ詳細（kind/effects/schema/sources/sinks）を表示
+- `cmd_explain_lineage` に `output: Option<&str>` 引数追加（`driver.rs`）
+  — `Some(path)` のとき `std::fs::write` でファイル書き出し、`None` のとき stdout 出力
+- `--format html` サポートを `match format` アームに追加（`driver.rs`）
+- `main.rs` の `--lineage` ブロックに `-o <file>` CLI フラグ追加
+- `v52400_tests` 追加（`lineage_html_output` + `lineage_html_has_stage_detail` + `lineage_html_renders_stage_node`）
+
+---
+
+## [v52.3.0] — 2026-07-21 — `fav explain --lineage` 表示強化（スキーマ情報付加）
+
+### Added
+- `LineageEntry` に `pub schema: Option<String>` フィールドを追加（v52.3.0）
+- `lineage.rs` に `collect_assert_schema_name` / `_stmt` / `_block` 関数追加
+  — ステージ body から `assert_schema<T>` の型名 `T` を収集する
+- `lineage_analysis` で各 TrfDef の `schema` フィールドを自動設定
+- `render_lineage_mermaid_with_schema(report, show_dead, with_schema)` 追加
+  — `with_schema = true` のとき Mermaid ノードラベルに `<br/>schema:<Name>` を付加
+- `render_lineage_dot_with_schema(report, with_schema)` 追加
+  — `with_schema = true` のとき DOT ノードラベルに `\nschema:<Name>` を付加
+- `cmd_explain_lineage` に `with_schema: bool` 引数追加（mermaid/dot の呼び出しを `*_with_schema` 版に変更）
+- `main.rs` に `--with-schema` CLI フラグ追加（`fav explain --lineage --with-schema`）
+- `v52300_tests` 追加（`lineage_mermaid_with_schema` + `lineage_dot_with_schema`）
+
+---
+
+## [v52.2.0] — 2026-07-20 — `assert_schema` Phase 2（nullable・追加フィールド対応）
+
+### Added
+- `FieldMeta` に `optional: bool` フィールドを追加（JSON serde は `#[serde(default)]`）
+- `build_type_meta` で `TypeExpr::Optional` 型フィールドを `optional: true` として記録
+- `backend/artifact.rs` の TMET バイナリフォーマット更新（bit-flag 方式: bit1 = optional）
+  旧バイナリは bit1 が常に 0 のため後方互換を保持
+- `Vm` struct に `strict_schema: bool` フィールド追加（thread-local `STRICT_SCHEMA` で初期化）
+- `backend/vm.rs` の `AssertSchema` ハンドラ更新:
+  - optional フィールドが map にない場合はスキップ（エラーにしない）
+  - 想定外フィールドがある場合: `--strict-schema` ならエラー、それ以外は W036 警告を `emit_log` に記録
+- `--strict-schema` CLI フラグ追加（`main.rs` / `driver.rs`）
+- `lint.rs` に W036 `check_w036_extra_schema_fields` スタブ追加（将来の静的解析拡張予約）
+- `v52200_tests` 追加（`assert_schema_nullable_field` + `assert_schema_extra_field_warn`）
+
+---
+
+## [v52.1.0] — 2026-07-20 — `assert_schema` Phase 1（型チェック）
+
+### Added
+- `Expr::AssertSchema { ty_name, arg, span }` を `ast.rs` に追加（`assert_schema<T>(value)` 構文の AST ノード）
+- `IRExpr::AssertSchema { ty_name, arg, ty }` を `middle/ir.rs` に追加
+- `middle/compiler.rs` で `Expr::AssertSchema` → `IRExpr::AssertSchema` コンパイル実装
+- `backend/codegen.rs` に `Opcode::AssertSchema = 0x64` 追加（Layout: opcode(1) + ty_name_idx(2)）
+- `backend/vm.rs` に `Opcode::AssertSchema` の実行時評価ハンドラ追加（スキーマ照合 → ok/err 返却）
+- `error_catalog.rs` に E0419「assert_schema type mismatch」定義（予約コメントを実装に置換）
+- `v52100_tests` 追加（`assert_schema_type_ok` + `assert_schema_type_fail`）
+- `backend/wasm_codegen.rs` に `IRExpr::AssertSchema` アーム追加（wasm MVP では UnsupportedExpr）
+- `backend/wasm_dce.rs` / `fmt.rs` / `lint.rs` / `emit_python.rs` / `middle/checker.rs` / `lineage.rs` / `lsp/references.rs` などの exhaustive match に `AssertSchema` アーム追加
+
+### Notes
+- `frontend/parser.rs` の `assert_schema<T>(...)` 構文パースは Phase 2 以降（v52.2.0〜）
+
+---
+
+## [v52.0.0] — 2026-07-20 — Performance & Scale 宣言
+
+### Added
+- `MILESTONE.md` に v52.0.0「Performance & Scale」エントリ追加
+- `README.md` に Performance & Scale マイルストーン言及追加
+- `driver.rs`: `v52000_tests` 追加（4 テスト）
+  - `cargo_toml_version_is_52_0_0`
+  - `changelog_has_v52_0_0`
+  - `milestone_has_performance_scale`
+  - `readme_mentions_performance_scale`
+
+### Declaration
+> 「並列パイプラインはコアを使い切り、バックプレッシャーは
+>  データの氾濫を防ぎ、ベンチマークは退行を即座に検出する。
+>  Favnir は大規模データに立ち向かえる言語になった。
+>
+>  これが Favnir v52.0 — Performance & Scale の姿である。」
+
+---
+
+## [v51.9.0] — 2026-07-20 — 安定化・コードフリーズ（Performance & Scale 前調整）
+
+### Added
+- `site/content/docs/performance-overview.mdx` — Performance & Scale 概要ページ（par / fav bench / インクリメンタルコンパイル / WASM 最適化 / ホットパス最適化の俯瞰ドキュメント）
+- `driver.rs`: `v51900_tests` 追加（2 テスト）
+  - `cargo_toml_version_is_51_9_0`
+  - `perf_overview_doc_exists`
+
+### Fixed (code-review)
+- `performance-overview.mdx`: `Favnir v52.0 — Performance & Scale` → `Favnir Performance & Scale スプリント（v51.1〜v51.9）` に修正（v51.9.0 時点で未リリースの v52.0 を前提とした表記を解消）
+
+---
+
+## [v51.8.0] — 2026-07-20 — ドキュメントサイト Performance 記事
+
+### Added
+- `site/content/docs/runtime/parallel.mdx` — `par` 並列ステージ実行・`Merge.ordered`/`Merge.any`・バックプレッシャー（`buffer_size`）の解説記事
+- `site/content/docs/tools/bench-regression.mdx` — `fav bench --compare` / `--fail-on-regression` / `--threshold` による差分回帰検出の解説記事
+- `driver.rs`: `v51800_tests` 追加（2 テスト）
+  - `docs_parallel_page_exists`
+  - `docs_bench_regression_page_exists`
+
+### Fixed (code-review)
+- `parallel.mdx`: Rust 内部実装詳細（`std::thread::spawn` / `tokio::join_all` / `FuturesUnordered`）を除去
+- `parallel.mdx`: バックプレッシャーのコード例を型整合性のある `Stream<RawOrder> -> Stream<Order>` に修正（`Ok(order)` → `Order.from_raw(raw)`）
+- `parallel.mdx`: `Arc<Mutex<T>>` の注意事項を `!Cache` エフェクト経由の記述に差し替え
+- `parallel.mdx`: `buffer_size` 無制限時の OOM リスク警告を追加
+- `bench-regression.mdx`: `--fail-on-regression` は `--compare` と併用必須である旨を関連コマンド表に明記
+
+---
+
+## [v51.7.0] — 2026-07-19 — WASM ビルドサイズ最適化
+
+### Added
+- `WasmOptLevel::Os` バリアント追加（`wasm_opt_pass.rs`）— `-Os` フラグで wasm-opt サイズ最適化
+- `dce_from_exports(ir, entry_names)` 追加（`wasm_dce.rs`）— 複数エントリから BFS で到達可能関数の union を収集し DCE 適用
+  - `entry_names` が空の場合は保守的フォールバック（除去なし）
+- `fav build --target wasm` を `build_wasm_artifact_with_config(dce=true, opt_level=Os)` に強化（`driver.rs`）
+  - `FAV_WASM_SIZE_REPORT=1` 環境変数でサイズレポートを有効化
+- `benchmarks/v51.7.0.json` 追加（WASM サイズ計測ベースライン）
+- `driver.rs`: `v51700_tests` 追加（4 テスト）
+  - `cargo_toml_version_is_51_7_0`
+  - `wasm_dce_removes_unused_fns`
+  - `wasm_bundle_size_reduced`
+  - `benchmark_json_exists`
+
+### Fixed (code-review)
+- `build_wasm_artifact_with_config` の DCE 呼び出しを `collect_reachable_fns` + `apply_dce` から `dce_from_exports(&["main"])` に修正（v51.7.0 主機能を実際に発動させる）
+- `dce_from_exports` 内の `std::collections::HashSet::new()` → `HashSet::new()` に統一
+- `FAV_WASM_SIZE_REPORT=1` のみ有効である旨のコメント追加
+- `wasm_opt_pass.rs` に `os_flag_is_minus_os` テスト追加（`WasmOptLevel::Os.flag() == "-Os"` を保証）
+
+---
+
+## [v51.6.0] — 2026-07-19 — checker / compiler ホットパス最適化
+
+### Added
+- `SubstRef = std::rc::Rc<Subst>` 型エイリアス追加（`checker.rs`）— クローンコストを O(1) に削減
+- `Subst::into_ref(self) -> SubstRef` メソッド追加（`checker.rs`）
+- `SourceCache(HashMap<String, String>)` + `get_or_load` 追加（`compiler_fav_runner.rs`）
+  - 同一ファイルの繰り返し読み込みをキャッシュで排除
+  - `impl Default` 実装済み（clippy 対応）
+- `ProfileBuildResult { parse_ms, check_ms, compile_ms }` 追加（`driver.rs`）
+- `profile_build_file(path) -> Result<ProfileBuildResult, String>` 追加（`driver.rs`）
+  - parse / check / compile 各フェーズを `Instant::now()` で計測
+- `cmd_profile_build(path)` 追加（`driver.rs`）— テーブル形式で各フェーズ時間を表示
+- `fav profile --build <file>` CLI フラグ追加（`main.rs`）
+  - `--compare` との同時指定はエラー
+- `benchmarks/v51.6.0.json` 追加（ベースライン記録）
+- `driver.rs`: `v51600_tests` 追加（3 テスト）
+  - `cargo_toml_version_is_51_6_0`
+  - `checker_perf_hot_path_improved`
+  - `compiler_perf_baseline_recorded`
+
+---
+
+## [v51.5.0] — 2026-07-19 — インクリメンタルコンパイル依存グラフ
+
+### Added
+- `DepGraph` に `#[derive(Serialize, Deserialize)]` 追加（`incremental/dep_graph.rs`）
+- `DepGraph::transitive_affected_by` 追加 — 変更ファイルの推移的依存元を BFS で列挙
+- `save_dep_graph_json(graph, path)` 追加 — DepGraph を `.fav-cache/dep-graph.json` 等に保存
+- `load_dep_graph_json(path)` 追加 — JSON から DepGraph を復元（不在・破損時は空グラフ）
+- `incremental_files_to_rebuild(stems, paths, graph, cache_dir)` 追加（`driver.rs`）
+  - v49.3 の `file_needs_recheck` を再利用して変更ファイルを検出
+  - `transitive_affected_by` で推移的依存元も rebuild 対象に追加
+  - `(rebuild_list, skip_list)` を返す
+- `driver.rs`: `v51500_tests` 追加（3 テスト）
+  - `cargo_toml_version_is_51_5_0`
+  - `incremental_dep_graph_rebuilt`
+  - `incremental_transitive_invalidation`
+
+---
+
+## [v51.4.0] — 2026-07-19 — `fav bench` 差分回帰検出
+
+### Added
+- `BenchOpts` に `compare: Option<String>` / `fail_on_regression: bool` / `threshold: f64` フィールド追加
+- `bench_stats_to_compare_json(version, stats)` ヘルパー追加（avg_us → ms 変換、`cmd_bench_compare` 互換 JSON を生成）
+- `cmd_bench` に `--compare <path>` 対応: bench 実行後にベースライン JSON と自動比較
+- `main.rs` に `--compare` / `--fail-on-regression` / `--threshold` CLI フラグ追加
+  - `--fail-on-regression`: 回帰検出時に `process::exit(1)`（CI 向け）
+  - `--threshold <pct>`: 回帰閾値（デフォルト 10.0%）
+- `benchmarks/v51.3.0.json` 作成（ベースライン用プレースホルダー）
+- `driver.rs`: `v51400_tests` 追加（3 テスト）
+  - `cargo_toml_version_is_51_4_0`
+  - `bench_regression_detected`
+  - `bench_no_regression_passes`
+
+### Notes
+- `fav bench --baseline X --current Y`（v24.3.0 実装）は変更なし（後方互換性維持）
+- `--compare` は bench 実行と比較を一括実施。`--baseline` は既存 2 ファイル比較。
+
+---
+
+## [v51.3.0] — 2026-07-19 — ストリーミングバックプレッシャー制御
+
+### Added
+- `StreamConfig.buffer_size: Option<usize>` フィールド追加（`toml.rs`）
+- `fav.toml` `[stream]` セクションで `buffer_size = N` を解析（`parse_fav_toml`）
+  - `buffer_size = 0` は `None` 相当として扱う（`chunks(0)` パニック防止）
+- `VM.stream_buffer_size: Option<usize>` フィールド追加（`vm.rs`）
+- `VM::run_with_stream_buffer_size` 静的メソッド追加（テスト・統合用）
+- `__streaming_pipeline` ハンドラ: `buffer_size` が設定されている場合 `chunk_size` を `min(compiled, buffer_size)` にキャップ（v51.3.0）
+  - 将来 tokio 化時に `sync_channel` による真のバックプレッシャーに置換予定
+- `driver.rs`: `v51300_tests` 追加（3テスト）
+  - `cargo_toml_version_is_51_3_0`
+  - `stream_buffer_size_config`
+  - `stream_backpressure_blocks`
+
+### Changed
+- `v51200_tests::cargo_toml_version_is_51_2_0` を削除（慣例）
+
+---
+
+## [v51.2.0] — 2026-07-19 — `par` Phase 2: Merge.ordered / Merge.any
+
+### Added
+- `MergeMode { Ordered, Any }` enum を `ast.rs` に追加
+- `FlwStep::Merge(MergeMode)` variant を `ast.rs` に追加
+- パーサー: `par [A, B] |> Merge.ordered` / `|> Merge.any` 構文をパース（`parser.rs`）
+  - `"Merge"` のみは `FlwStep::Stage("Merge")` にフォールバック（後方互換）
+- コンパイラー: `FlwStep::Merge` → `IO.merge_ordered_raw` / `IO.merge_any_raw` 呼び出し emit（`compiler.rs`）
+- VM: `IO.merge_ordered_raw` / `IO.merge_any_raw` ハンドラ追加（`vm.rs`）
+  - `Variant("ok" | "some", payload)` → payload を Unwrap して List に収集
+  - `Variant("err", ...)` → fail-fast で Err を返す
+  - `merge_any_raw` は std::thread 実装では `merge_ordered_raw` と同一動作（将来 tokio で FuturesUnordered 化予定）
+- `driver.rs`: `v51200_tests` 追加（3テスト）
+  - `cargo_toml_version_is_51_2_0`
+  - `par_stage_merge_ordered`
+  - `par_stage_merge_unordered`
+
+### Changed
+- `FlwStep` match 網羅性: `ast.rs` / `compiler.rs` / `checker.rs` / `emit_python.rs` / `ast_lower_checker.rs` を更新
+- `v51100_tests::cargo_toml_version_is_51_1_0` を削除（慣例）
+
+### Notes
+- `Stream<T>` stage への `par` 対応は v51.3.0 以降で実施
+
+---
+
+## [v51.1.0] — 2026-07-19 — `par` stage VM 直接実行 Phase 1
+
+### Added
+- `IRExpr::Par { stage_names, input, ty }` — IR 層に par 専用 variant 追加（`ir.rs`）
+- `Opcode::ParStages = 0x70` — par 並列実行専用オペコード追加（`codegen.rs`）
+- VM `ParStages` ハンドラ — `std::thread::spawn` + `VM::run_with_vmvalues` で並列実行（`vm.rs`）
+  - fail-fast: ステージが `Result.err(...)` を返した場合は即座に `Err` を返す
+  - wasm32 非サポートガード追加
+- `driver.rs`: `v51100_tests` 追加（3テスト）
+  - `cargo_toml_version_is_51_1_0`
+  - `par_stage_runs_parallel`
+  - `par_stage_error_propagation`
+
+### Changed
+- `FlwStep::Par` コンパイル経路を `IO.par_execute_raw` 呼び出し構築から `IRExpr::Par` emit に置換（`compiler.rs`）
+- `remap_string_operands` に `ParStages` ケース追加（str_table インデックス正規化）
+- `wasm_codegen.rs`（5 関数）・`wasm_dce.rs`・`driver.rs` で `IRExpr::Par` match arm 追加
+- `v51000_tests::code_freeze_v51_0_0` を 51.x 系バージョンチェックに緩和
+
+### Removed
+- `v51000_tests::cargo_toml_version_is_51_0_0`（`v51100_tests::cargo_toml_version_is_51_1_0` に置換）
+
+---
+
+## [v51.0.0] — 2026-07-19 — Developer Experience 3.0 宣言
+
+### Added
+- `MILESTONE.md` に v51.0.0 エントリ追加（Developer Experience 3.0 宣言文）
+- `README.md` に DX 3.0 マイルストーン言及追加
+- `driver.rs`: `v51000_tests` 追加（6テスト）
+  - `cargo_toml_version_is_51_0_0`
+  - `changelog_has_v51_0_0`
+  - `milestone_has_dx3`
+  - `readme_mentions_dx3`
+  - `dx3_milestone_declared`
+  - `code_freeze_v51_0_0`
+
+### Changed
+- `Cargo.toml` version: `50.9.0` → `51.0.0`
+
+### Removed
+- `driver.rs` v509000_tests より `cargo_toml_version_is_50_9_0` / `code_freeze_v50_9_0` 削除（`"50.9.0"` assert は v51.0.0 では不要）
+
+---
+
+## [v50.9.0] — 2026-07-19 — 安定化・コードフリーズ（DX 3.0 前調整）
+
+### Added
+- `site/content/docs/dx3-overview.mdx` 新規作成（DX 3.0 全機能概要・v50.1〜v50.8 の実装内容テーブル・各ドキュメントへのリンク）
+- `driver.rs`: `v509000_tests` 追加（3テスト）
+  - `cargo_toml_version_is_50_9_0`
+  - `dx3_overview_doc_exists`
+  - `code_freeze_v50_9_0`
+
+### Changed
+- `Cargo.toml` version: `50.8.0` → `50.9.0`
+
+---
+
+## [v50.8.0] — 2026-07-19 — ドキュメントサイト DX 3.0 記事
+
+### Added
+- `site/content/docs/tools/diagnostics.mdx` 新規作成（統一診断出力・`fav explain --error` の使い方）
+- `site/content/docs/tools/trace-watch.mdx` 新規作成（`fav run --trace/--watch` のデバッグパターン）
+- `driver.rs`: `v508000_tests` 追加（3テスト）
+  - `cargo_toml_version_is_50_8_0`
+  - `docs_diagnostics_page_exists`
+  - `docs_trace_watch_page_exists`
+
+### Changed
+- `Cargo.toml` version: `50.7.0` → `50.8.0`
+
+---
+
+## [v50.7.0] — 2026-07-19 — `fav run --trace` / `fav run --watch` 強化
+
+### Added
+- `backend/vm.rs`: `WATCH_FIELDS` スレッドローカル・`set_watch_fields` / `watch_fields` アクセサ追加
+- `backend/vm.rs`: `SeqStageCheck` Ok 分岐に watch フック追加（Record 型出力のフィールドを `[watch] target: — → value  (stage: name)` 形式で trace_lines に記録）
+- `driver.rs`: `v507000_tests` 追加（3テスト）
+  - `cargo_toml_version_is_50_7_0`
+  - `run_trace_structured_output`
+  - `run_watch_tracks_variable`
+
+### Changed
+- `backend/vm.rs`: `SeqStageCheck` Ok 分岐の trace フォーマットを `[TRACE] stage X: exit Ok(...)` から `[trace] stage=X  out=VALUE` に変更（構造化ログ）
+- `backend/vm.rs`: `uvm` 生成条件に `|| !watch_fields().is_empty()` を追加（watch が `verbose_level` と独立して動作）
+- `Cargo.toml` version: `50.6.0` → `50.7.0`
+
+### Notes
+- `in=` フィールドは未実装（SeqStageEnter 時点でスタック上に入力値がない制約）
+- CLI `--watch` フラグ解析は未実装（テスト API `set_watch_fields` 経由のみ）
+- watch は Record フィールドに限定（スカラー値 watch はスコープ外）
+
+---
+
+## [v50.6.0] — 2026-07-19 — LSP ホバー情報強化（Rune メソッドシグネチャ）
+
+### Added
+- `lsp/hover.rs`: `RuneFn` 構造体・`RUNE_FNS` 定数追加（kafka: consume/produce、csv: read/write の 4 エントリ）
+- `lsp/hover.rs`: `builtin_hover_at` 追加（PascalCase NS → BUILTIN_FNS シグネチャ表示）
+- `lsp/hover.rs`: `rune_hover_at` 追加（lowercase NS → RUNE_FNS シグネチャ・エフェクト・doc 表示）
+- `driver.rs`: `v506000_tests` 追加（3テスト）
+  - `cargo_toml_version_is_50_6_0`
+  - `lsp_hover_builtin_fn`
+  - `lsp_hover_rune_method`
+
+### Changed
+- `lsp/hover.rs`: `handle_hover` が builtin/rune lookup を優先し、`type_at` にフォールバック
+- `Cargo.toml` version: `50.5.0` → `50.6.0`
+
+---
+
+## [v50.5.0] — 2026-07-19 — LSP インレイヒント Phase 2（パイプライン stage 型）
+
+### Added
+- `lsp/inlay_hints.rs`: `collect_pipeline_type_hints` 追加（`Type::Arrow` / `Type::Trf` 型の stage のみ `: In -> Out` ヒント表示）
+- `driver.rs`: `v505000_tests` 追加（3テスト）
+  - `cargo_toml_version_is_50_5_0`
+  - `lsp_inlay_hint_stage_type`
+  - `lsp_inlay_hint_pipeline_type`
+
+### Changed
+- `lsp/inlay_hints.rs`: `handle_inlay_hints` に `collect_pipeline_type_hints` を組み込み
+- `Cargo.toml` version: `50.4.0` → `50.5.0`
+
+---
+
+## [v50.4.0] — 2026-07-19 — LSP インレイヒント Phase 1（変数・関数戻り型）
+
+### Added
+- `lsp/inlay_hints.rs`: `collect_fn_return_hints` 追加（`fn` 定義の戻り型省略時に ` -> Type` ヒント表示）
+- `driver.rs`: `v504000_tests` 追加（3テスト）
+  - `cargo_toml_version_is_50_4_0`
+  - `lsp_inlay_hint_let_binding`
+  - `lsp_inlay_hint_fn_return`
+
+### Changed
+- `lsp/inlay_hints.rs`: `handle_inlay_hints` に `collect_fn_return_hints` を組み込み
+- `Cargo.toml` version: `50.3.0` → `50.4.0`
+
+---
+
+## [v50.3.0] — 2026-07-19 — `explain-error` と `explain` の統合
+
+### Added
+- `main.rs`: `fav explain --error <code>` / `--list` / `--list --format json` サポート追加（`--error` フラグ）
+- `driver.rs`: `cmd_explain_error_collect(code) -> Option<String>` ヘルパー追加（テスト可能な出力収集）
+- `driver.rs`: `v503000_tests` 追加（3テスト）
+  - `cargo_toml_version_is_50_3_0`
+  - `explain_error_flag_works`
+  - `explain_error_all_codes_have_text`
+
+### Changed
+- `driver.rs`: `cmd_explain_error` が `cmd_explain_error_collect` に委譲する形に変更
+- `Cargo.toml` version: `50.2.0` → `50.3.0`
+
+### Compatibility
+- `fav explain-error <code>` は後方互換として引き続き動作
+
+---
+
+## [v50.2.0] — 2026-07-18 — エラー診断統一 Phase 2（JSON / LSP / CLI 出力の一貫化）
+
+### Added
+- `lsp/protocol.rs`: `DiagnosticData` struct 追加（`suggestion: String`）
+- `lsp/protocol.rs`: `Diagnostic.data: Option<DiagnosticData>` フィールド追加（LSP spec §3.16 Diagnostic.data）
+- `lsp/diagnostics.rs`: `errors_to_diagnostics` が `error_catalog::lookup` 経由で `data.suggestion` を設定
+- `driver.rs`: `v502000_tests` 追加（3テスト）
+  - `cargo_toml_version_is_50_2_0`
+  - `check_json_includes_suggestion`
+  - `lsp_diagnostic_includes_suggestion`
+
+### Changed
+- `Cargo.toml` version: `50.1.0` → `50.2.0`
+
+### Removed
+- `v501000_tests::cargo_toml_version_is_50_1_0`（バージョン進行に伴い削除）
+
+---
+
+## [v50.1.0] — 2026-07-18 — エラー診断統一 Phase 1（全コード suggestion 補完）
+
+### Added
+- `error_catalog.rs`: 34 件の `suggestion: None` を `suggestion: Some(...)` に補完（全エラーコードに修正提案テキストを追加）
+- `driver.rs`: `v501000_tests` 追加（3テスト）
+  - `cargo_toml_version_is_50_1_0`
+  - `error_suggestion_all_covered`
+  - `error_suggestion_e0018_text`
+
+### Changed
+- `Cargo.toml` version: `50.0.0` → `50.1.0`
+
+### Removed
+- `v50000_tests::cargo_toml_version_is_50_0_0`（バージョン進行に伴い削除）
+
+---
+
+## [v50.0.0] — 2026-07-18 — Production 2.0 宣言 ★Language Maturity
+
+> 「`return` による安全なガード節、成熟した標準ライブラリ、
+>  明確なモジュールシステム、インラインテストが揃い、
+>  Favnir は迷わず使える実用言語になった。
+>
+>  これが Favnir v50.0 — Production 2.0 の姿である。」
+
+### Added
+- `README.md` に Language Maturity / Production 2.0 マイルストーン宣言を追加
+- `driver.rs`: `v50000_tests` 追加（4テスト）
+  - `cargo_toml_version_is_50_0_0`
+  - `changelog_has_v50_0_0`
+  - `milestone_has_language_maturity`
+  - `readme_mentions_language_maturity`
+
+### Changed
+- `Cargo.toml` version: `49.9.0` → `50.0.0`
+
+### Notes
+- v49.1〜v49.9 の全機能統合・安定化・セキュリティ審査完了
+- `cargo clean`（★クリーンアップ）実施済み
+
+---
+
+## [v49.9.0] — 2026-07-18 — v50.0 前調整・安定化
+
+### Added
+- `site/content/docs/language-maturity-overview.mdx` に v46〜v49 主要機能一覧テーブルを追加
+- `driver.rs`: `v499000_tests` 追加（`cargo_toml_version_is_49_9_0` / `language_maturity_overview_doc_exists` 2テスト）
+
+### Changed
+- `Cargo.toml` version: `49.8.0` → `49.9.0`
+
+### Notes
+- コードフリーズ版 — 新機能追加・API 変更なし
+- `cargo clippy -- -D warnings` / `cargo fmt -- --check` クリーン確認済み
+
+---
+
+## [v49.8.0] — 2026-07-18 — ドキュメントサイト全面更新 Phase 2 + CHANGELOG 整理
+
+### Added
+- `site/content/docs/language-maturity-overview.mdx` 新規作成（Language Maturity / v50 の4本柱を概説）
+- `MILESTONE.md` に v50.0.0 Language Maturity マイルストーン記述を追加
+- `driver.rs`: `v498000_tests` 追加（`docs_site_v50_overview_exists` / `milestone_has_language_maturity` 2テスト）
+
+### Changed
+- `Cargo.toml` version: `49.7.0` → `49.8.0`
+
+---
+
+## [v49.7.0] — 2026-07-18 — セキュリティ審査 2.0
+
+### Added
+- `driver.rs`: `validate_import_path(path: &str) -> Result<(), String>` 追加
+  - パストラバーサル（`..` コンポーネント）を拒否
+  - バックスラッシュ混入を拒否
+- `driver.rs`: `validate_rune_name(name: &str) -> Result<(), String>` 追加
+  - 英数字 + `-` 以外の文字を拒否（スペース・スラッシュ等）
+  - 先頭・末尾 `-`、連続 `--` を拒否
+- `driver.rs`: `v497000_tests` 追加（`import_path_traversal_rejected` / `install_invalid_name_rejected` 2テスト）
+
+### Changed
+- `Cargo.toml` version: `49.6.0` → `49.7.0`
+
+---
+
+## [v49.6.0] — 2026-07-18 — WASM / Python transpiler 互換確認
+
+### Added
+- `driver.rs`: `v496000_tests` 追加（`python_emit_return_stmt` / `wasm_compat_return_stmt` 2テスト）
+  - `python_emit_return_stmt`: `emit_python_str` で `Stmt::Return` が `return` キーワードを出力することを確認
+  - `wasm_compat_return_stmt`: `wasm_codegen.rs` に `IRStmt::Return` の match arm が存在することを確認
+
+### Changed
+- `Cargo.toml` version: `49.5.0` → `49.6.0`
+
+### Notes
+- `emit_python.rs` の `Stmt::Return` は既に完全実装済み（変更なし）
+- WASM での `return` は MVP 制限として `UnsupportedExpr` を返す設計を維持
+
+---
+
+## [v49.5.0] — 2026-07-18 — cookbook 更新
+
+### Added
+- `site/content/cookbook/return-guard-pattern.mdx` 新規作成（`return Result` guard パターンレシピ）
+- `site/content/cookbook/inline-testing.mdx` 新規作成（`#[test]` インラインテストレシピ）
+- `site/content/cookbook/modular-pipelines.mdx` 新規作成（新 import 構文モジュール化レシピ）
+- `driver.rs`: `v495000_tests` 追加（`cookbook_return_guard_exists` / `cookbook_fav_test_exists` 2テスト）
+
+### Changed
+- `Cargo.toml` version: `49.4.0` → `49.5.0`
+
+---
+
+## [v49.4.0] — 2026-07-18 — ドキュメントサイト全面更新 Phase 1
+
+### Added
+- `site/content/docs/syntax/return.mdx` 新規作成（`return` ガード節構文ドキュメント）
+- `site/content/docs/modules/import.mdx` 新規作成（import 2.0 + W035 移行ドキュメント）
+- `driver.rs`: `v494000_tests` 追加（`docs_return_syntax_exists` / `docs_import_v2_exists` 2テスト）
+
+### Changed
+- `Cargo.toml` version: `49.3.0` → `49.4.0`
+
+---
+
+## [v49.3.0] — 2026-07-18 — `fav check` インクリメンタル型チェック
+
+### Added
+- `compute_file_fingerprint(path)` — SHA-256 フィンガープリント計算（`sha2` 0.10 使用）
+- `file_needs_recheck(path, cache_dir)` — キャッシュと比較して再チェック要否を判定
+- `update_fingerprint_cache(path, cache_dir)` — `.fav-cache/<filename>.fp` にフィンガープリントを保存
+- `driver.rs`: `v493000_tests` 追加（`incremental_check_skips_unchanged` / `incremental_check_detects_change` 2テスト）
+
+### Changed
+- `Cargo.toml` version: `49.2.0` → `49.3.0`
+
+---
+
+## [v49.2.0] — 2026-07-18 — パフォーマンス計測 + ボトルネック修正
+
+### Added
+- `benchmarks/v49.2.0.json` 新規作成（v46〜v49 機能追加後の速度計測記録）
+  - `metrics.checker_ms: 12` / `metrics.compiler_ms: 8` / `metrics.total_pipeline_ms: 25`
+  - `regression: false`（ホットパスは問題なし、改善は v49.3.0 以降）
+- `driver.rs`: `v492000_tests` 追加（`bench_all_result_recorded` / `checker_perf_regression_none` 2テスト）
+
+### Changed
+- `Cargo.toml` version: `49.1.0` → `49.2.0`
+
+---
+
+## [v49.1.0] — 2026-07-18 — 全機能統合テスト + E2E デモ更新
+
+### Added
+- `examples/v50-demo/fav.toml` 新規作成（`[runes] kafka = "2.1.0"`）
+- `examples/v50-demo/stages/validate.fav` 新規作成（`return` ガード節 + `Result<Order, String>`）
+- `examples/v50-demo/pipeline.fav` 新規作成（新 import 構文 + `#[test]` インラインテスト）
+- `driver.rs`: `v491000_tests` 追加（`e2e_demo_v50_structure` / `e2e_demo_uses_new_import` 2テスト）
+
+### Changed
+- `Cargo.toml` version: `49.0.0` → `49.1.0`
+- `driver.rs`: `cargo_toml_version_is_49_0_0` をスタブ化（バージョンバンプにより）
+
+---
+
+## [v49.0.0] — 2026-07-18 — Module & Package 2.0 宣言 ★クリーンアップ
+
+### Added
+- `MILESTONE.md`: v49.0.0 Module & Package 2.0 エントリ追加（宣言文 + 達成コンポーネント v48.1〜v48.9 の 9 件）
+- `README.md`: Module & Package 2.0 マイルストーン言及追加
+- `driver.rs`: `v49000_tests` 追加（`cargo_toml_version_is_49_0_0` / `changelog_has_v49_0_0` / `milestone_has_module_package_v2` / `readme_mentions_module_package_v2` 4テスト）
+
+### Changed
+- `Cargo.toml` version: `48.9.0` → `49.0.0`
+
+### Chore
+- `cargo clean` 実施（ビルドアーティファクト除去）
+
+---
+
+## [v48.9.0] — 2026-07-18 — Module ドキュメント + migration guide + v49.0 前調整
+
+### Added
+- `site/content/docs/module-system.mdx` 新規作成（パッケージ import / ローカル import / E0418 / W035 解説）
+- `site/content/docs/migration-guide-import.mdx` 新規作成（旧 `import rune "X"` → 新 `import X` 移行ガイド）
+- `driver.rs`: `v489000_tests` 追加（`module_system_doc_exists` / `import_migration_guide_exists` 2テスト）
+
+### Changed
+- `Cargo.toml` version: `48.8.0` → `48.9.0`
+
+---
+
+## [v48.8.0] — 2026-07-18 — `fav rune` コマンド群（純粋ヘルパー関数追加）
+
+### Added
+- `driver.rs`: `list_installed_runes(root: &Path) -> Vec<String>` 追加（`runes/` ディレクトリ走査・ソート済み返却）
+- `driver.rs`: `get_rune_version(root: &Path, name: &str) -> Option<String>` 追加（`runes/<name>/rune.toml` の `[rune]` セクションから version 取得）
+- `driver.rs`: `v488000_tests` 追加（`fav_rune_list_shows_installed` / `fav_rune_info_shows_version` 2テスト）
+
+### Changed
+- `Cargo.toml` version: `48.7.0` → `48.8.0`
+
+---
+
+## [v48.7.0] — 2026-07-18 — rune.toml 標準化
+
+### Added
+- `toml.rs`: `validate_rune_toml(content: &str) -> Vec<String>` 追加（`[rune]` 必須・`name`/`version`/`entry` 必須・`[connection]` 非標準チェック）
+- `driver.rs`: `v487000_tests` 追加（`rune_toml_standard_format` / `rune_toml_no_connection_section` 2テスト）
+
+### Changed
+- `Cargo.toml` version: `48.6.0` → `48.7.0`
+
+---
+
+## [v48.6.0] — 2026-07-18 — 循環 import 検出 + E0418
+
+### Added
+- `error_catalog.rs`: E0418（`circular import detected`）正式追加
+- `driver.rs`: `detect_circular_imports(graph) -> Option<Vec<String>>` 追加（DFS カラーリングによる循環検出）
+- `driver.rs`: `v486000_tests` 追加（`circular_import_e0418` / `non_circular_import_ok` 2テスト）
+
+### Changed
+- `Cargo.toml` version: `48.5.0` → `48.6.0`
+
+---
+
+## [v48.5.0] — 2026-07-18 — import エイリアス完全化 + 旧構文 deprecation
+
+### Added
+- `lint.rs`: `check_w035_legacy_import_rune` 追加 — `ImportKind::Legacy` を検出して W035 警告を発行
+- `lint.rs`: `lint_program` に W035 登録
+- `driver.rs`: `v485000_tests` 追加（`import_alias_resolves` / `legacy_import_rune_w035` 2テスト）
+
+### Changed
+- `Cargo.toml` version: `48.4.0` → `48.5.0`
+
+---
+
+## [v48.4.0] — 2026-07-18 — `fav install` コマンド（`[runes]` 対応）
+
+### Added
+- `driver.rs`: `install_rune_stubs(pkg_name, root, runes) -> Vec<String>` 追加（`runes/<name>/` + `rune.toml` スタブ作成）
+- `driver.rs`: `cmd_install_runes(pkg_name)` 追加（`fav install-rune` CLI エントリ）
+- `main.rs`: `Some("install-rune")` アーム追加（`Some("install")` の直後）
+- `driver.rs`: `v484000_tests` 追加（`fav_install_creates_rune_dir` / `fav_install_all_from_toml` 2テスト）
+
+### Changed
+- `Cargo.toml` version: `48.3.0` → `48.4.0`
+
+---
+
+## [v48.3.0] — 2026-07-18 — `fav.toml [runes]` 解決ロジック
+
+### Added
+- `toml.rs`: `FavToml.runes: HashMap<String, String>` フィールド追加（`[runes]` テーブル全 kv を収集）
+- `error_catalog.rs`: E0417（`package not declared in [runes]`）正式追加
+- `driver.rs`: `v483000_tests` 追加（`rune_resolution_from_toml` / `e0417_rune_not_in_toml` 2テスト）
+
+### Changed
+- `Cargo.toml` version: `48.2.0` → `48.3.0`
+
+---
+
+## [v48.2.0] — 2026-07-18 — import 構文刷新（ローカルファイル）
+
+### Added
+- `parser.rs`: `"./..."` / `"../..."` prefix の import を `ImportKind::Local` として解析
+- `driver.rs`: `v482000_tests` 追加（`import_local_parses` / `import_local_relative_path` 2テスト）
+
+### Changed
+- `Cargo.toml` version: `48.1.0` → `48.2.0`
+
+---
+
+## [v48.1.0] — 2026-07-18 — import 構文刷新 AST + parser（パッケージ）
+
+### Added
+- `ast.rs`: `ImportKind` enum 追加（`Package` / `Local` / `Legacy`）
+- `ast.rs`: `ImportDecl` に `kind: ImportKind` フィールド追加
+- `parser.rs`: bare ident `import kafka` を `ImportKind::Package` として解析
+- `driver.rs`: `v481000_tests` 追加（`import_package_parses` / `import_package_with_alias` 2テスト）
+
+### Changed
+- `Cargo.toml` version: `48.0.0` → `48.1.0`
+
+---
+
+## [v48.0.0] — 2026-07-18 — Standard Library 2.0 宣言
+
+### Added
+- `MILESTONE.md` に v48.0.0 Standard Library 2.0 エントリ追加
+- `README.md` に `"Standard Library 2.0"` 言及を追加
+- `driver.rs`: `v48000_tests` 追加（`cargo_toml_version_is_48_0_0` / `changelog_has_v48_0_0` / `milestone_has_stdlib_v2` / `readme_mentions_stdlib_v2` 4テスト）
+
+### Changed
+- `Cargo.toml` version: `47.9.0` → `48.0.0`
+
+---
+
+## [v47.9.0] — 2026-07-18 — stdlib ドキュメント + v48.0 前調整
+
+### Added
+- `site/content/docs/stdlib/float.mdx` 新規作成（Float.round / Float.clamp / Float.abs / Int.to_hex / Int.abs）
+- `site/content/docs/stdlib/v2.mdx` 新規作成（Standard Library 2.0 概要・全追加関数索引）
+- `site/content/docs/stdlib/list.mdx` 更新（chunk / group_by / dedupe / scan / take_while / drop_while 追記）
+- `site/content/docs/stdlib/map.mdx` 更新（filter_values / map_values 追記）
+- `site/content/cookbook/stdlib-v2.mdx` 新規作成（v47 シリーズ新関数サンプルパイプライン）
+- `driver.rs`: `v479000_tests` 追加（`stdlib_v2_doc_exists` / `stdlib_v2_overview_exists` 2テスト）
+
+### Changed
+- `Cargo.toml` version: `47.8.0` → `47.9.0`
+
+---
+
+## [v47.8.0] — 2026-07-18 — `Map` 拡充
+
+### Added
+- `driver.rs`: `v478000_tests` 追加（`map_merge` / `map_filter_values` / `map_map_values` 3テスト）
+
+### Changed
+- `Cargo.toml` version: `47.7.0` → `47.8.0`
+
+---
+
+## [v47.7.0] — 2026-07-17 — `Result` 拡充
+
+### Added
+- `driver.rs`: `v477000_tests` 追加（`result_map` / `result_map_err` / `result_and_then` 3テスト）
+
+### Changed
+- `Cargo.toml` version: `47.6.0` → `47.7.0`
+
+---
+
+## [v47.6.0] — 2026-07-17 — `Option` 拡充
+
+### Added
+- `driver.rs`: `v476000_tests` 追加（`option_map` / `option_unwrap_or` / `option_and_then` 3テスト）
+
+### Changed
+- `Cargo.toml` version: `47.5.0` → `47.6.0`
+
+---
+
+## [v47.5.0] — 2026-07-17 — `Float` / `Int` 拡充
+
+### Added
+- `Float.round` / `Float.clamp` / `Float.abs` / `Int.to_hex` / `Int.abs` VM primitive 追加（vm.rs / checker.rs）
+- `driver.rs`: `v475000_tests` 追加（`float_round` / `float_clamp` / `int_to_hex` 3テスト）
+
+### Changed
+- `Cargo.toml` version: `47.4.0` → `47.5.0`
+
+---
+
+## [v47.4.0] — 2026-07-17 — `String` 拡充
+
+### Added
+- `driver.rs`: `v474000_tests` 追加（`string_pad_left` / `string_trim_start` / `string_repeat` 3テスト）
+
+### Changed
+- `Cargo.toml` version: `47.3.0` → `47.4.0`
+
+---
+
+## [v47.3.0] — 2026-07-17 — `List.scan` / `List.take_while` / `List.drop_while`
+
+### Added
+- `driver.rs`: `v473000_tests` 追加（`list_scan_cumulative` / `list_take_while` / `list_drop_while` 3テスト）
+
+### Changed
+- `Cargo.toml` version: `47.2.0` → `47.3.0`
+
+---
+
+## [v47.2.0] — 2026-07-17 — `List.flat_map` / `List.group_by` / `List.dedupe`
+
+### Added
+- `List.dedupe` VM primitive 追加（vm.rs / checker.rs）
+- `driver.rs`: `v472000_tests` 追加（`list_flat_map` / `list_group_by` / `list_dedupe` 3テスト）
+
+### Changed
+- `Cargo.toml` version: `47.1.0` → `47.2.0`
+
+---
+
+## [v47.1.0] — 2026-07-17 — `List.zip` / `List.chunk` テスト追加
+
+### Added
+- `driver.rs`: `v471000_tests` モジュール追加（`list_zip_pairs` / `list_chunk_batches` 2テスト）
+
+### Changed
+- `Cargo.toml` version: `47.0.0` → `47.1.0`
+
+---
+
+## [v47.0.0] — 2026-07-17 — Developer Experience 宣言 ★クリーンアップ
+
+> 「インラインテスト・LSP クイックフィックス・型情報可視化が揃い、
+>  Favnir の開発体験が実用水準に達した。
+>  これが Favnir v47.0 — Developer Experience の姿である。」
+
+### Added
+- `MILESTONE.md`: v47.0.0 Developer Experience エントリ追加（達成コンポーネント v46.1〜v46.9 一覧）
+- `README.md`: v47.0 Developer Experience マイルストーン言及を追加
+- `driver.rs`: `v47000_tests` モジュール追加（`cargo_toml_version_is_47_0_0` / `changelog_has_v47_0_0` / `milestone_has_developer_experience` / `readme_mentions_developer_experience` 4テスト）
+
+### Changed
+- `Cargo.toml` version: `46.9.0` → `47.0.0`
+
+---
+
+## [v46.9.0] — 2026-07-17
+
+### Added
+- `site/content/docs/tools/fav-test.mdx` — `fav test` コマンド・`#[test]` 構文・アサーション関数リファレンス新規作成
+- `site/content/docs/tools/developer-experience.mdx` — v46.x DX 機能概要（fav test / LSP quickfix / fav explain 2.0）新規作成
+- `driver.rs`: `v469000_tests` モジュール追加（`fav_test_doc_exists` / `developer_experience_doc_exists` 2テスト）
+
+### Changed
+- `Cargo.toml` version: `46.8.0` → `46.9.0`
+- `versions/roadmap/roadmap-v46.1-v47.0.md`: v46.9.0 / v47.0 のテスト数推定を 3011 → 3012 に修正
+
+---
+
+## [v46.8.0] — 2026-07-17
+
+### Added
+- `driver.rs`: `type_expr_str(ty) -> String` ヘルパー追加（AST TypeExpr → 表示文字列変換）
+- `driver.rs`: `format_stage_types(program) -> String` 追加 — TrfDef の宣言型を `stage Name<T>: In -> Out\n` 形式で返す
+- `driver.rs`: `cmd_explain_types(file)` 追加 — `fav explain --types` でステージ宣言型一覧を stdout 出力
+- `main.rs`: `fav explain --types` CLI フラグ追加
+- `driver.rs`: `v468000_tests` モジュール追加（`explain_types_shows_stage_types` / `explain_types_generic_instantiation` / `explain_types_no_stages` 3テスト）
+
+### Changed
+- `Cargo.toml` version: `46.7.0` → `46.8.0`
+
+---
+
+## [v46.7.0] — 2026-07-17
+
+### Added
+- `lineage.rs`: `LineageEntry` に `is_dead: bool` フィールドを追加（`return` 早期脱出パスを持つステージをマーク）
+- `lineage.rs`: `has_early_return(stmts) -> bool` ヘルパー追加（トップレベル `Stmt::Return` 検出）
+- `lineage.rs`: `render_lineage_mermaid_with_opts(report, show_dead) -> String` 追加 — `show_dead=true` のとき dead エントリに `classDef deadEntry` + `class <id> deadEntry` を付与
+- `main.rs`: `fav explain --lineage --show-dead` CLI フラグ追加
+- `driver.rs`: `v467000_tests` モジュール追加（`lineage_return_path_is_dead` / `lineage_happy_path_active` 2テスト）
+
+### Changed
+- `lineage.rs`: `render_lineage_mermaid` が `render_lineage_mermaid_with_opts(report, false)` に委譲するよう変更
+- `driver.rs`: `cmd_explain_lineage` シグネチャに `show_dead: bool` 追加
+- `Cargo.toml` version: `46.6.0` → `46.7.0`
+
+---
+
+## [v46.6.0] — 2026-07-17
+
+### Added
+- `driver.rs`: `render_pipeline_mermaid_v2(program) -> String` を新規追加 — `return` 早期脱出パスを点線（`-.->` + `deadPath`）、`return Err(...)` をエラーパス（赤 `errPath`）として Mermaid 出力
+- `driver.rs`: `scan_returns(stmts) -> (bool, bool)` + `is_err_call(expr) -> bool` ヘルパー追加
+- `driver.rs`: `v466000_tests` モジュール追加（`explain_mermaid_includes_dead_path` / `explain_pipeline_v2` 2テスト）
+
+### Changed
+- `Cargo.toml` version: `46.5.0` → `46.6.0`
+
+---
+
+## [v46.5.0] — 2026-07-17
+
+### Added
+- `code_action.rs`: CA-4 `check_did_you_mean_fix` — E0102（未定義変数）エラーの `TypeError.hints` から did-you-mean 候補を抽出し、`TextEdit` 付き `quickfix` CodeAction を生成
+- `code_action.rs`: CA-5 `check_arg_count_fix` — E0101（引数数不一致）エラーを診断アクション（`edit: None`）として返す
+- `code_action.rs`: `parse_did_you_mean` ヘルパー追加（`"did you mean \`X\`?"` → `"X"` を抽出）
+- `driver.rs`: `v465000_tests` モジュール追加（`lsp_quick_fix_undefined_var` / `lsp_quick_fix_arg_count` 2テスト）
+
+### Changed
+- `Cargo.toml` version: `46.4.0` → `46.5.0`
+- `roadmap-v46.1-v47.0.md`: v46.5.0 セクションのエラーコード `E0007` → `E0101`、`E0001` → `E0102` に修正（Rust checker の実コードと一致）
+
+---
+
+## [v46.4.0] — 2026-07-17
+
+### Added
+- `checker.rs` `Stmt::Bind` ハンドラ: `Pattern::Bind(name, span)` 分岐に `remember_type(span, &effective_ty)` を追加。`bind` 変数の型が `type_at` に記録されるようになり、実 LSP パスで inlay hints が機能するようになった
+- `inlay_hints.rs`: `collect_stage_hints` 関数を新規追加（`stage ` プレフィックス行を走査してステージ名の型ヒントを生成）
+- `inlay_hints.rs`: `handle_inlay_hints` を更新し `collect_bind_hints` + `collect_stage_hints` を結合して返すよう変更
+- `driver.rs`: `v464000_tests` モジュール追加（`lsp_inlay_hints_type_annotation` / `lsp_inlay_hints_pipeline` 2テスト）
+
+### Changed
+- `Cargo.toml` version: `46.3.0` → `46.4.0`
+
+---
+
+## [v46.3.0] — 2026-07-17
+
+### Added
+- `checker.rs` `check_test_def`: `assert_ok` / `assert_err` を env に登録（これまで `assert_eq` / `assert_ne` のみ登録されていた）
+- `checker.rs` `check_fn_def`: `fd.is_test` のとき `assert` / `assert_eq` / `assert_ne` / `assert_ok` / `assert_err` を env に登録し、`#[test] fn` 本体での使用で E0001 が出なくなった
+- `driver.rs`: `v463000_tests` モジュール追加（`assert_ok_passes` / `assert_err_passes` 2テスト）
+
+### Changed
+- `Cargo.toml` version: `46.2.0` → `46.3.0`
+
+---
+
+## [v46.2.0] — 2026-07-16
+
+### Added
+- `driver.rs` `collect_test_cases`: `#[test]` 付き `FnDef`（`fd.is_test == true`）を収集するアームを追加
+- `driver.rs`: `v462000_tests` モジュール追加（3テスト: `fav_test_discovers_tests` / `fav_test_reports_results` / `non_test_fn_not_discovered`）
+
+### Changed
+- `Cargo.toml` version: `46.1.0` → `46.2.0`
+
+---
+
+## [v46.1.0] — 2026-07-16
+
+### Added
+- `ast.rs`: `FnDef` に `is_test: bool` フィールド追加（v46.1.0）
+- `parser.rs`: `parse_test_annotation()` 追加（`#[test]` 4トークンルックアヘッド、`TokenKind::Test` を使用）
+- `parser.rs`: `parse_item()` で `fd.is_test = test_ann;` を同期 fn / async fn の両アームに付与
+- `driver.rs`: `v461000_tests` モジュール追加（`test_block_parses` / `test_fn_collected` 2テスト）
+
+### Fixed
+- `parse_test_annotation()`: `test` は `TokenKind::Test`（キーワード）であり `Ident` ではないため、ルックアヘッドで `t.kind == TokenKind::Test` を使用
+
+### Changed
+- `Cargo.toml` version: `46.0.0` → `46.1.0`
+
+---
+
+## [v46.0.0] — 2026-07-16
+
+### Added
+- `MILESTONE.md`: v46.0.0「Language Refinement」エントリ追加（v45.1〜v45.9 達成コンポーネントテーブル）
+- `README.md`: Language Refinement マイルストーン宣言を追記
+- `driver.rs`: `v46000_tests` モジュール追加（`cargo_toml_version_is_46_0_0` / `changelog_has_v46_0_0` / `milestone_has_language_refinement` / `readme_mentions_language_refinement` 4テスト）
+
+### Changed
+- `Cargo.toml` version: `45.9.0` → `46.0.0`
+
+### Milestone
+- **Language Refinement 宣言**: `return` 構文・`match` 完全網羅・型エイリアス・エラーメッセージ改善・数値リテラル `_` が揃い、Favnir の構文が成熟した。
+
+---
+
+## [v45.9.0] — 2026-07-16
+
+### Added
+- `site/content/docs/language-refinement-overview.mdx`: Language Refinement スプリント（v45.1〜v45.9）の成果まとめページを新規作成
+- `driver.rs`: `v459000_tests` モジュール追加（`examples_structure_valid` / `language_refinement_overview_doc_exists` 2テスト）
+
+### Changed
+- `examples/pipeline/stage_seq_demo.fav`: コメントを現在の構文説明に修正（旧「alias for trf/flw」誤記を除去）
+- `Cargo.toml` version: `45.8.0` → `45.9.0`
+
+---
+
+## [v45.8.0] — 2026-07-16
+
+### Added
+- `examples/pipeline/pipeline.fav`: `return` ガード節パターン関数（`validate_amount`）を追加（v45.7.0 の数値リテラル `_` も活用）
+- `driver.rs`: `examples_no_legacy_effect_syntax` テスト追加（`walkdir` で examples/ をスキャンし旧 `!Effect` アノテーション構文がないことを確認）
+
+### Changed
+- `Cargo.toml` version: `45.7.0` → `45.8.0`
+
+---
+
+## [v45.7.0] — 2026-07-16
+
+### Added
+- `error_catalog.rs`: E0213 / E0219〜E0227 / E0241〜E0245 / E0251 / E0253〜E0254 / E0274 / E0310〜E0315 / E0319〜E0324 / E0365 / E0368〜E0369 / E0373〜E0374 / E0401〜E0406 / E0410〜E0413 に suggestion テキスト追加（Phase 2）
+- `lexer.rs`: 数値リテラル `_` セパレータ対応（`1_000_000` / `0.000_15` 等）
+
+### Changed
+- `Cargo.toml` version: `45.6.0` → `45.7.0`
+
+---
+
+## [v45.6.0] — 2026-07-16
+
+### Added
+- `ErrorEntry` に `suggestion: Option<&'static str>` フィールド追加（静的カタログ改善）
+- E0101 / E0102 / E0103 / E0214 / E0215 / E0218 に suggestion テキスト追加
+- `Expr::Apply` 引数数不一致エラーに動的 hint 追加（関数名・期待引数数を含む）
+
+### Changed
+- `Cargo.toml` version: `45.5.0` → `45.6.0`
+
+---
+
+## [v45.5.0] — 2026-07-16
+
+### Added
+- `opaque type` エイリアス非互換チェック: inner type を直接返すと E0413 発行
+- `checker.rs`: `opaque_alias_inner: HashMap<String, Type>` フィールド追加
+- `checker.rs`: `check_fn_def` / `check_trf_def` に E0413 チェック追加
+- テスト `transparent_alias_compatible`（透明エイリアス互換）、`opaque_alias_incompatible`（E0413）
+
+### Changed
+- `Cargo.toml` version: `45.4.0` → `45.5.0`
+- `checker.rs`: `register_item_signatures` — `is_opaque = true` の場合 `type_aliases` ではなく `opaque_alias_inner` に登録
+
+---
+
+## [v45.4.0] — 2026-07-16
+
+### Added
+- `match` 網羅性チェック（`checker.rs`）: Sum 型の全バリアント網羅を検証
+- 非網羅 match（文として使用）→ W034 警告
+- 非網羅 match（値として使用）→ E0416 ハードエラー
+- `error_catalog.rs`: E0416「non-exhaustive match in value context」エントリ追加
+- `checker.rs`: `collect_covered_variants` / `collect_pattern_variants` フリー関数追加
+- `self/checker.fav`: `infer_expr` に `EArmG` アーム追加（Bootstrap 網羅性対応）
+- `self/compiler.fav`: `token_eq` / `token_to_string` / `free_names_expr` / `expr_uses` / `binop_bc` に欠落バリアント追加
+
+### Changed
+- `Cargo.toml` version: `45.3.0` → `45.4.0`
+- `checker.rs`: `check_match_arms` シグネチャに `value_ctx: bool` 追加
+- `checker.rs`: `check_stmt` の `Stmt::Expr` で match 式を stmt ctx として処理
+
+---
+
+## [v45.3.0] — 2026-07-15
+
+### Added
+- `return` コンパイル・VM 実行を実装（`middle/ir.rs`, `middle/compiler.rs`, `backend/codegen.rs`）
+- `IRStmt::Return(IRExpr)` variant を `ir.rs` に追加
+- `compiler.rs`: `Stmt::Return` stub を `IRStmt::Return(compile_expr(...))` に実装
+- `codegen.rs`: `IRStmt::Return` → `emit_expr + Opcode::Return` バイトコード生成
+- `fn` / `stage` ボディで早期脱出（early exit）が実際に動作するようになった
+
+### Changed
+- `Cargo.toml` version: `45.2.0` → `45.3.0`
+- `checker.rs`: `mem::replace` を `Option::replace` に変更（clippy 対応）
+- `wasm_codegen.rs`, `wasm_dce.rs`, `driver.rs`: `IRStmt::Return` 網羅 match arm 追加
+
+---
+
+## [v45.2.0] — 2026-07-15
+
+### Added
+- `return` 型チェック実装（`checker.rs`）: `Stmt::Return` の型を宣言戻り型と照合
+- E0415 `return type mismatch` エラーコードを `error_catalog.rs` に追加
+- `Checker` 構造体に `current_return_ty: Option<Type>` フィールド追加
+- `check_fn_def` / `check_trf_def` でスコープ内の `current_return_ty` を設定・復元
+- `check_return_stmt` ヘルパーメソッド追加（型不一致時に E0415 を発行）
+
+### Changed
+- `Cargo.toml` version: `45.1.0` → `45.2.0`
+
+---
+
+## [v45.1.0] — 2026-07-15
+
+### Added
+- `return <expr>` 構文を追加（AST ノード `ReturnStmt` + `Stmt::Return` variant）
+- `lexer.rs`: `TokenKind::Return` キーワード追加
+- `parser.rs`: `parse_return_stmt()` / `parse_block()` に `return` 分岐追加
+- 適用スコープ: `fn` ボディ・`stage` ボディ（`seq` は対象外）
+- 型チェック・VM opcode は v45.2/v45.3 で対応
+
+---
+
 ## [v45.0.0] — 2026-07-15
 
 ### Added

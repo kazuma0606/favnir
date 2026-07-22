@@ -69,6 +69,7 @@ pub enum TokenKind {
     Seq,
     Chain,
     Yield,
+    Return,
     Collect,
     Where,
     Test,
@@ -548,6 +549,7 @@ impl Lexer {
             "seq" => TokenKind::Seq,
             "chain" => TokenKind::Chain,
             "yield" => TokenKind::Yield,
+            "return" => TokenKind::Return,
             "collect" => TokenKind::Collect,
             "where" => TokenKind::Where,
             "test" => TokenKind::Test,
@@ -595,15 +597,21 @@ impl Lexer {
         let mut s = String::new();
         let mut is_float = false;
 
-        while self.peek().map(|c| c.is_ascii_digit()).unwrap_or(false) {
-            s.push(self.advance());
+        // v45.7.0: accept `_` as digit separator (e.g. 1_000_000).
+        // `_` is consumed but not pushed to `s`, so parse::<i64/f64>() works unchanged.
+        // Trailing/consecutive underscores (e.g. `1_`, `1__000`) are silently accepted by
+        // design — Favnir does not enforce strict separator rules.
+        while self.peek().map(|c| c.is_ascii_digit() || c == '_').unwrap_or(false) {
+            let ch = self.advance();
+            if ch != '_' { s.push(ch); }
         }
 
         if self.peek() == Some('.') && self.peek2().map(|c| c.is_ascii_digit()).unwrap_or(false) {
             is_float = true;
             s.push(self.advance()); // '.'
-            while self.peek().map(|c| c.is_ascii_digit()).unwrap_or(false) {
-                s.push(self.advance());
+            while self.peek().map(|c| c.is_ascii_digit() || c == '_').unwrap_or(false) {
+                let ch = self.advance();
+                if ch != '_' { s.push(ch); }
             }
         }
 

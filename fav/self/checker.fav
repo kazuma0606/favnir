@@ -129,6 +129,8 @@ type SeqStageEntry = {
 type SeqStep =
     | SStage(String)
     | SPar(List<String>)
+    | SMergeOrdered(String)
+    | SMergeAny(String)
 
 type SeqDef = {
     name: String
@@ -1946,6 +1948,7 @@ fn infer_expr(expr: Expr, env: List<KVPair>) -> Result<String, String> {
         EArgList({ _0: head, _1: tail }) => Result.and_then(infer_expr(head, env), |hty| infer_expr(tail, env))
         EArgNil => Result.ok("Unit")
         EArm({ _0: pat, _1: body, _2: rest }) => infer_arms(EArm(pat, body, rest), env)
+        EArmG({ _0: pat, _1: guard, _2: body, _3: rest }) => infer_arms(EArmG(pat, guard, body, rest), env)
         EArmNil => Result.ok("Unit")
         EField({ _0: fname, _1: val_e, _2: rest }) => Result.and_then(infer_expr(val_e, env), |vty| infer_expr(rest, env))
         EFieldNil => Result.ok("Unit")
@@ -2416,6 +2419,12 @@ fn check_seq_steps_acc(steps: List<SeqStep>, current_ty: String, env: List<KVPai
                         Ok(_) => check_seq_steps_acc(List.drop(steps, 1), "Unknown", env)
                     }
                 }
+                SMergeOrdered(_) => {
+                    check_seq_steps_acc(List.drop(steps, 1), "Unknown", env)
+                }
+                SMergeAny(_) => {
+                    check_seq_steps_acc(List.drop(steps, 1), "Unknown", env)
+                }
             }
         }
     }
@@ -2822,4 +2831,6 @@ test "instantiate nested" {
     }
 }
 
-fn check_refinement_alias(ty_name: String, invariants: List<String>) = true
+fn check_refinement_alias(ty_name: String, invariants: List<String>) -> Bool {
+    true
+}

@@ -23,6 +23,12 @@ pub struct LineageEntry {
     pub effects: Vec<String>,
     pub sources: Vec<String>, // tables read
     pub sinks: Vec<String>,   // tables written
+    /// v46.7.0: true = トップレベルに Stmt::Return が存在する（早期脱出パスあり）。
+    /// 注意: dead code の厳密な検出ではなく「early-return を持つ」フラグ。
+    /// `if cond { return x } y` のように分岐後にコードがある場合も true になる。
+    pub is_dead: bool,
+    /// v52.3.0: first assert_schema<T> type name found in body, if any.
+    pub schema: Option<String>,
 }
 
 /// A seq pipeline chain.
@@ -35,13 +41,19 @@ pub struct PipelineLineage {
 }
 
 /// Full lineage report for a file.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Default)]
 pub struct LineageReport {
     pub transformations: Vec<LineageEntry>,
     pub pipelines: Vec<PipelineLineage>,
 }
 
 // ── helpers ───────────────────────────────────────────────────────────────────
+
+/// v46.7.0: fn/stage ボディのトップレベル stmts に Stmt::Return が存在するかを判定。
+/// Phase 1 スコープ: ネストした if/match/for 内は対象外。
+fn has_early_return(stmts: &[ast::Stmt]) -> bool {
+    stmts.iter().any(|s| matches!(s, ast::Stmt::Return(_)))
+}
 
 /// Classify a function/stage by capability kind based on parameter types.
 /// Returns (kind, capability): e.g. ("read", Some("DbRead")), ("transform", None).
@@ -215,6 +227,9 @@ fn collect_sql_literals_inner(expr: &ast::Expr, out: &mut Vec<String>) {
         ast::Expr::AssertMatches(e, _, _) => {
             collect_sql_literals_inner(e, out);
         }
+        ast::Expr::AssertSchema { arg, .. } => {
+            collect_sql_literals_inner(arg, out);
+        }
         ast::Expr::Question(e, _) => {
             collect_sql_literals_inner(e, out);
         }
@@ -251,6 +266,7 @@ fn collect_sql_literals_stmt(stmt: &ast::Stmt, out: &mut Vec<String>) {
         ast::Stmt::Expr(e) => collect_sql_literals_inner(e, out),
         ast::Stmt::Chain(c) => collect_sql_literals_inner(&c.expr, out),
         ast::Stmt::Yield(y) => collect_sql_literals_inner(&y.expr, out),
+        ast::Stmt::Return(r) => collect_sql_literals_inner(&r.expr, out),
         ast::Stmt::ForIn(f) => {
             collect_sql_literals_inner(&f.iter, out);
             collect_sql_literals_block(&f.body, out);
@@ -261,6 +277,102 @@ fn collect_sql_literals_stmt(stmt: &ast::Stmt, out: &mut Vec<String>) {
         }
         ast::Stmt::Expect(_) => {} // v36.2.0 — 実行は v36.3 以降
     }
+}
+
+// ── assert_schema name collection (v52.3.0) ──────────────────────────────────
+
+/// Collect the first `assert_schema<T>` type name from an expression tree.
+/// Returns the `ty_name` of the first `Expr::AssertSchema` found, or `None`.
+pub fn collect_assert_schema_name(expr: &ast::Expr) -> Option<String> {
+    match expr {
+        ast::Expr::AssertSchema { ty_name, .. } => Some(ty_name.clone()),
+        ast::Expr::Block(block) => collect_assert_schema_name_block(block),
+        ast::Expr::Collect(block, _) => collect_assert_schema_name_block(block),
+        ast::Expr::Pipeline(exprs, _) => exprs.iter().find_map(collect_assert_schema_name),
+        ast::Expr::Apply(func, args, _) => {
+            // `assert_schema<T>(value)` is parsed as Apply(TypeApply(Ident("assert_schema"), [T]), [value]).
+            // The compiler rewrites this to Expr::AssertSchema, but lineage analysis runs on the
+            // pre-compilation parsed AST, so we detect the call pattern directly here.
+            if let ast::Expr::TypeApply(inner, type_args, _) = func.as_ref() {
+                if let ast::Expr::Ident(name, _) = inner.as_ref() {
+                    if name == "assert_schema" {
+                        if let Some(ast::TypeExpr::Named(ty_name, _, _)) = type_args.first() {
+                            return Some(ty_name.clone());
+                        }
+                    }
+                }
+            }
+            collect_assert_schema_name(func)
+                .or_else(|| args.iter().find_map(collect_assert_schema_name))
+        }
+        ast::Expr::TypeApply(inner, _, _) => collect_assert_schema_name(inner),
+        ast::Expr::FieldAccess(inner, _, _) => collect_assert_schema_name(inner),
+        ast::Expr::If(cond, then_blk, else_blk, _) => {
+            collect_assert_schema_name(cond)
+                .or_else(|| collect_assert_schema_name_block(then_blk))
+                .or_else(|| else_blk.as_ref().and_then(|b| collect_assert_schema_name_block(b)))
+        }
+        ast::Expr::Match(scrutinee, arms, _) => {
+            collect_assert_schema_name(scrutinee)
+                .or_else(|| arms.iter().find_map(|a| collect_assert_schema_name(&a.body)))
+        }
+        ast::Expr::Closure(_, body, _) => collect_assert_schema_name(body),
+        ast::Expr::BinOp(_, lhs, rhs, _) => {
+            collect_assert_schema_name(lhs)
+                .or_else(|| collect_assert_schema_name(rhs))
+        }
+        ast::Expr::RecordConstruct(_, fields, _) => {
+            fields.iter().find_map(|(_, v)| collect_assert_schema_name(v))
+        }
+        ast::Expr::RecordSpread(base, fields, _) => {
+            collect_assert_schema_name(base)
+                .or_else(|| fields.iter().find_map(|(_, v)| collect_assert_schema_name(v)))
+        }
+        ast::Expr::EmitExpr(inner, _) => collect_assert_schema_name(inner),
+        ast::Expr::Question(inner, _) => collect_assert_schema_name(inner),
+        ast::Expr::AssertMatches(inner, _, _) => collect_assert_schema_name(inner),
+        ast::Expr::ListComp { expr, clauses, .. } => {
+            collect_assert_schema_name(expr)
+                .or_else(|| clauses.iter().find_map(collect_assert_schema_name_comp_clause))
+        }
+        ast::Expr::ResultComp { expr, clauses, .. } => {
+            collect_assert_schema_name(expr)
+                .or_else(|| clauses.iter().find_map(collect_assert_schema_name_comp_clause))
+        }
+        // Leaf nodes — no sub-expressions to recurse into
+        ast::Expr::Lit(_, _) | ast::Expr::Ident(_, _) | ast::Expr::FString(_, _) => None,
+    }
+}
+
+fn collect_assert_schema_name_comp_clause(clause: &ast::CompClause) -> Option<String> {
+    match clause {
+        ast::CompClause::For { src, .. } => collect_assert_schema_name(src),
+        ast::CompClause::Guard(expr) => collect_assert_schema_name(expr),
+    }
+}
+
+fn collect_assert_schema_name_stmt(s: &ast::Stmt) -> Option<String> {
+    match s {
+        ast::Stmt::Bind(b) => collect_assert_schema_name(&b.expr),
+        ast::Stmt::Expr(e) => collect_assert_schema_name(e),
+        ast::Stmt::Chain(c) => collect_assert_schema_name(&c.expr),
+        ast::Stmt::Yield(y) => collect_assert_schema_name(&y.expr),
+        ast::Stmt::Return(r) => collect_assert_schema_name(&r.expr),
+        ast::Stmt::ForIn(f) => {
+            collect_assert_schema_name(&f.iter)
+                .or_else(|| collect_assert_schema_name_block(&f.body))
+        }
+        ast::Stmt::Forall(f) => {
+            f.guard.as_ref().and_then(collect_assert_schema_name)
+                .or_else(|| collect_assert_schema_name_block(&f.body))
+        }
+        ast::Stmt::Expect(_) => None,
+    }
+}
+
+fn collect_assert_schema_name_block(b: &ast::Block) -> Option<String> {
+    b.stmts.iter().find_map(collect_assert_schema_name_stmt)
+        .or_else(|| collect_assert_schema_name(&b.expr))
 }
 
 // ── AzureDb read/write classification (v14.1.0) ───────────────────────────────
@@ -341,6 +453,7 @@ fn collect_pg_kinds_stmt(stmt: &ast::Stmt, r: &mut bool, w: &mut bool) {
         ast::Stmt::Chain(c) => collect_pg_kinds_inner(&c.expr, r, w),
         ast::Stmt::Expr(e)  => collect_pg_kinds_inner(e, r, w),
         ast::Stmt::Yield(y) => collect_pg_kinds_inner(&y.expr, r, w),
+        ast::Stmt::Return(r2) => collect_pg_kinds_inner(&r2.expr, r, w),
         ast::Stmt::ForIn(f) => {
             collect_pg_kinds_inner(&f.iter, r, w);
             for s in &f.body.stmts { collect_pg_kinds_stmt(s, r, w); }
@@ -451,6 +564,7 @@ fn collect_azure_kinds_inner(expr: &ast::Expr, r: &mut bool, w: &mut bool) {
         | ast::Expr::Question(e, _) => {
             collect_azure_kinds_inner(e, r, w);
         }
+        ast::Expr::AssertSchema { arg, .. } => collect_azure_kinds_inner(arg, r, w),
         ast::Expr::RecordSpread(base, updates, _) => {
             collect_azure_kinds_inner(base, r, w);
             for (_, v) in updates {
@@ -476,6 +590,7 @@ fn collect_azure_kinds_stmt(stmt: &ast::Stmt, r: &mut bool, w: &mut bool) {
         ast::Stmt::Expr(e) => collect_azure_kinds_inner(e, r, w),
         ast::Stmt::Chain(c) => collect_azure_kinds_inner(&c.expr, r, w),
         ast::Stmt::Yield(y) => collect_azure_kinds_inner(&y.expr, r, w),
+        ast::Stmt::Return(r2) => collect_azure_kinds_inner(&r2.expr, r, w),
         ast::Stmt::ForIn(f) => {
             collect_azure_kinds_inner(&f.iter, r, w);
             for s in &f.body.stmts {
@@ -564,6 +679,7 @@ fn collect_azure_blob_kinds_inner(expr: &ast::Expr, r: &mut bool, w: &mut bool) 
         | ast::Expr::Question(e, _) => {
             collect_azure_blob_kinds_inner(e, r, w);
         }
+        ast::Expr::AssertSchema { arg, .. } => collect_azure_blob_kinds_inner(arg, r, w),
         ast::Expr::RecordSpread(base, updates, _) => {
             collect_azure_blob_kinds_inner(base, r, w);
             for (_, v) in updates {
@@ -589,6 +705,7 @@ fn collect_azure_blob_kinds_stmt(stmt: &ast::Stmt, r: &mut bool, w: &mut bool) {
         ast::Stmt::Expr(e) => collect_azure_blob_kinds_inner(e, r, w),
         ast::Stmt::Chain(c) => collect_azure_blob_kinds_inner(&c.expr, r, w),
         ast::Stmt::Yield(y) => collect_azure_blob_kinds_inner(&y.expr, r, w),
+        ast::Stmt::Return(r2) => collect_azure_blob_kinds_inner(&r2.expr, r, w),
         ast::Stmt::ForIn(f) => {
             collect_azure_blob_kinds_inner(&f.iter, r, w);
             for s in &f.body.stmts { collect_azure_blob_kinds_stmt(s, r, w); }
@@ -702,6 +819,7 @@ fn collect_sf_kinds_inner(expr: &ast::Expr, r: &mut bool, w: &mut bool) {
         | ast::Expr::Question(e, _) => {
             collect_sf_kinds_inner(e, r, w);
         }
+        ast::Expr::AssertSchema { arg, .. } => collect_sf_kinds_inner(arg, r, w),
         ast::Expr::RecordSpread(base, updates, _) => {
             collect_sf_kinds_inner(base, r, w);
             for (_, v) in updates {
@@ -727,6 +845,7 @@ fn collect_sf_kinds_stmt(stmt: &ast::Stmt, r: &mut bool, w: &mut bool) {
         ast::Stmt::Expr(e) => collect_sf_kinds_inner(e, r, w),
         ast::Stmt::Chain(c) => collect_sf_kinds_inner(&c.expr, r, w),
         ast::Stmt::Yield(y) => collect_sf_kinds_inner(&y.expr, r, w),
+        ast::Stmt::Return(r2) => collect_sf_kinds_inner(&r2.expr, r, w),
         ast::Stmt::ForIn(f) => {
             collect_sf_kinds_inner(&f.iter, r, w);
             for s in &f.body.stmts {
@@ -830,6 +949,7 @@ pub fn lineage_analysis(program: &ast::Program) -> LineageReport {
             let mut effects = infer_effects_from_calls(sf_read, sf_write, az_read, az_write, az_blob_read, az_blob_write);
             if pg_read  { effects.push("!Postgres(read)".to_string()); }
             if pg_write { effects.push("!Postgres(write)".to_string()); }
+            let schema = collect_assert_schema_name_block(&trf.body);
             transformations.push(LineageEntry {
                 name: trf.name.clone(),
                 kind: cap_kind,
@@ -837,6 +957,8 @@ pub fn lineage_analysis(program: &ast::Program) -> LineageReport {
                 effects,
                 sources,
                 sinks,
+                is_dead: has_early_return(&trf.body.stmts),
+                schema,
             });
         } else if let ast::Item::FnDef(fndef) = item {
             let sqls = collect_sql_literals(&ast::Expr::Block(Box::new(fndef.body.clone())));
@@ -903,6 +1025,9 @@ pub fn lineage_analysis(program: &ast::Program) -> LineageReport {
                     effects,
                     sources,
                     sinks,
+                    is_dead: has_early_return(&fndef.body.stmts),
+                    // fn は assert_schema<T> の主要な使用場所でないため収集しない（設計上の選択）
+                    schema: None,
                 });
             }
         }
@@ -1081,7 +1206,68 @@ pub fn render_lineage_json(report: &LineageReport) -> String {
 
 /// LineageReport を Mermaid flowchart LR 形式にレンダリングする。
 pub fn render_lineage_mermaid(report: &LineageReport) -> String {
+    render_lineage_mermaid_with_opts(report, false)
+}
+
+/// v52.3.0: `--with-schema` オプション付き mermaid レンダリング。
+/// `with_schema = true` のとき、スキーマ名が存在するノードラベルに `<br/>schema:<Name>` を追加。
+pub fn render_lineage_mermaid_with_schema(
+    report: &LineageReport,
+    show_dead: bool,
+    with_schema: bool,
+) -> String {
     let mut out = String::from("flowchart LR\n");
+    if show_dead && report.transformations.iter().any(|e| e.is_dead) {
+        out.push_str("    classDef deadEntry stroke-dasharray:5 5\n");
+    }
+
+    for entry in &report.transformations {
+        let effects = if entry.effects.is_empty() {
+            "Pure".to_string()
+        } else {
+            entry.effects.iter()
+                .map(|e| format!("!{}", e.trim_start_matches('!')))
+                .collect::<Vec<_>>()
+                .join("+")
+        };
+        let id = sanitize_mermaid_id(&entry.name);
+        let schema_label = if with_schema {
+            entry.schema.as_ref()
+                .map(|s| format!("<br/>schema:{}", s))
+                .unwrap_or_default()
+        } else {
+            String::new()
+        };
+        out.push_str(&format!(
+            "  {}[\"{}<br/>{}{}\"]\n",
+            id, entry.name, effects, schema_label
+        ));
+        if show_dead && entry.is_dead {
+            out.push_str(&format!("  class {} deadEntry\n", id));
+        }
+    }
+
+    for pipeline in &report.pipelines {
+        let steps = &pipeline.steps;
+        for i in 0..steps.len().saturating_sub(1) {
+            let from = sanitize_mermaid_id(&steps[i]);
+            let to   = sanitize_mermaid_id(&steps[i + 1]);
+            out.push_str(&format!("  {} --> {}\n", from, to));
+        }
+    }
+
+    out
+}
+
+/// v46.7.0: `fav explain --lineage --show-dead` 用。
+/// `show_dead = true` のとき dead エントリに `classDef deadEntry` + `class <id> deadEntry` を付与。
+/// dead エントリが存在しない場合は `classDef` を出力しない（Mermaid ノイズ抑制）。
+pub fn render_lineage_mermaid_with_opts(report: &LineageReport, show_dead: bool) -> String {
+    let mut out = String::from("flowchart LR\n");
+    // classDef は dead エントリが 1 件以上ある場合のみ出力する
+    if show_dead && report.transformations.iter().any(|e| e.is_dead) {
+        out.push_str("    classDef deadEntry stroke-dasharray:5 5\n");
+    }
 
     // ノード定義: stage / fn ごとに1ノード
     for entry in &report.transformations {
@@ -1095,6 +1281,9 @@ pub fn render_lineage_mermaid(report: &LineageReport) -> String {
         };
         let id = sanitize_mermaid_id(&entry.name);
         out.push_str(&format!("  {}[\"{}<br/>{}\"]\n", id, entry.name, effects));
+        if show_dead && entry.is_dead {
+            out.push_str(&format!("  class {} deadEntry\n", id));
+        }
     }
 
     // エッジ定義: pipeline の steps を順に接続
@@ -1148,6 +1337,39 @@ pub fn render_lineage_dot(report: &LineageReport) -> String {
     for entry in &report.transformations {
         let id    = sanitize_mermaid_id(&entry.name);
         let label = format!("{}\\n{}", entry.name, entry.kind);
+        out.push_str(&format!("    {} [label=\"{}\"];\n", id, label));
+    }
+
+    for pipeline in &report.pipelines {
+        let steps = &pipeline.steps;
+        for i in 0..steps.len().saturating_sub(1) {
+            let from = sanitize_mermaid_id(&steps[i]);
+            let to   = sanitize_mermaid_id(&steps[i + 1]);
+            out.push_str(&format!("    {} -> {};\n", from, to));
+        }
+    }
+
+    out.push('}');
+    out
+}
+
+/// v52.3.0: `--with-schema` オプション付き DOT レンダリング。
+/// `with_schema = true` のとき、スキーマ名が存在するノードラベルに `\nschema:<Name>` を追加。
+pub fn render_lineage_dot_with_schema(report: &LineageReport, with_schema: bool) -> String {
+    let mut out = String::from(
+        "digraph lineage {\n    rankdir=LR;\n    node [shape=box style=filled fillcolor=\"#eef6f9\"];\n"
+    );
+
+    for entry in &report.transformations {
+        let id = sanitize_mermaid_id(&entry.name);
+        let schema_part = if with_schema {
+            entry.schema.as_ref()
+                .map(|s| format!("\\nschema:{}", s))
+                .unwrap_or_default()
+        } else {
+            String::new()
+        };
+        let label = format!("{}\\n{}{}", entry.name, entry.kind, schema_part);
         out.push_str(&format!("    {} [label=\"{}\"];\n", id, label));
     }
 
@@ -1218,6 +1440,133 @@ pub fn render_lineage_svg(report: &LineageReport) -> String {
 
     out.push_str("</svg>");
     out
+}
+
+/// LineageReport をインタラクティブな自己完結型 HTML にレンダリングする。
+/// クリック可能な SVG ノードと JS による詳細パネルを含む。外部ライブラリ不要。
+pub fn render_lineage_html(report: &LineageReport) -> String {
+    let nodes: Vec<&LineageEntry> = report.transformations.iter().collect();
+    let n = nodes.len();
+    let svg_width = (n * 200 + 40).max(200);
+
+    // ── SVG ──────────────────────────────────────────────────────────────────
+    let mut svg = format!(
+        "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{}\" height=\"160\">\n",
+        svg_width
+    );
+    svg.push_str("  <defs><marker id=\"arr\" markerWidth=\"10\" markerHeight=\"7\" refX=\"9\" refY=\"3.5\" orient=\"auto\">\n");
+    svg.push_str("    <polygon points=\"0 0, 10 3.5, 0 7\" fill=\"#555\"/>\n");
+    svg.push_str("  </marker></defs>\n");
+
+    for (i, entry) in nodes.iter().enumerate() {
+        let x = i * 200 + 20;
+        // For text nodes: escape &, <, > only
+        let safe_text = entry.name.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;");
+        // For attribute values: additionally escape "
+        let safe_attr = safe_text.replace('"', "&quot;");
+        let safe_kind = entry.kind.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;");
+        svg.push_str(&format!(
+            "  <g class=\"node\" onclick=\"showDetail(&quot;{}&quot;)\">\n",
+            safe_attr
+        ));
+        svg.push_str(&format!(
+            "    <rect x=\"{}\" y=\"70\" width=\"160\" height=\"40\" rx=\"4\"/>\n",
+            x
+        ));
+        svg.push_str(&format!(
+            "    <text x=\"{}\" y=\"86\" text-anchor=\"middle\" font-size=\"12\" fill=\"#222\">{}</text>\n",
+            x + 80, safe_text
+        ));
+        svg.push_str(&format!(
+            "    <text x=\"{}\" y=\"100\" text-anchor=\"middle\" font-size=\"10\" fill=\"#666\">{}</text>\n",
+            x + 80, safe_kind
+        ));
+        svg.push_str("  </g>\n");
+    }
+
+    let name_to_idx: std::collections::HashMap<&str, usize> =
+        nodes.iter().enumerate().map(|(i, e)| (e.name.as_str(), i)).collect();
+    for pipeline in &report.pipelines {
+        for i in 0..pipeline.steps.len().saturating_sub(1) {
+            if let (Some(&fi), Some(&ti)) = (
+                name_to_idx.get(pipeline.steps[i].as_str()),
+                name_to_idx.get(pipeline.steps[i + 1].as_str()),
+            ) {
+                let x1 = fi * 200 + 180;
+                let x2 = ti * 200 + 20;
+                svg.push_str(&format!(
+                    "  <line x1=\"{}\" y1=\"90\" x2=\"{}\" y2=\"90\" stroke=\"#555\" stroke-width=\"1.5\" marker-end=\"url(#arr)\"/>\n",
+                    x1, x2
+                ));
+            }
+        }
+    }
+    svg.push_str("</svg>\n");
+
+    // ── JS stages data ─────────────────────────────────────────────────────
+    let mut js_entries = String::new();
+    for entry in &nodes {
+        let effects = if entry.effects.is_empty() {
+            "Pure".to_string()
+        } else {
+            entry
+                .effects
+                .iter()
+                .map(|e| format!("!{}", e.trim_start_matches('!')))
+                .collect::<Vec<_>>()
+                .join("+")
+        };
+        let schema  = entry.schema.as_deref().unwrap_or("").replace('"', "\\\"");
+        let sources = entry.sources.join(", ").replace('"', "\\\"");
+        let sinks   = entry.sinks.join(", ").replace('"', "\\\"");
+        let key     = entry.name.replace('"', "\\\"");
+        js_entries.push_str(&format!(
+            "  \"{}\": {{\"kind\":\"{}\",\"effects\":\"{}\",\"schema\":\"{}\",\"sources\":\"{}\",\"sinks\":\"{}\"}},\n",
+            key, entry.kind, effects, schema, sources, sinks
+        ));
+    }
+
+    // ── HTML 組み立て ──────────────────────────────────────────────────────
+    format!(
+        "<!DOCTYPE html>\n\
+<html lang=\"en\">\n\
+<head>\n\
+<meta charset=\"utf-8\">\n\
+<title>Favnir Lineage Report</title>\n\
+<style>\n\
+body{{font-family:sans-serif;margin:20px;background:#fff}}\n\
+.node rect{{fill:#eef6f9;stroke:#555;cursor:pointer}}\n\
+.node rect:hover{{fill:#d0e8f0}}\n\
+.node text{{pointer-events:none}}\n\
+#detail{{margin-top:20px;padding:12px;background:#f9f9f9;border:1px solid #ddd;border-radius:4px;min-height:60px}}\n\
+table{{border-collapse:collapse}}\n\
+td{{padding:4px 8px;border-bottom:1px solid #eee;vertical-align:top}}\n\
+td:first-child{{font-weight:bold;color:#555;width:100px}}\n\
+</style>\n\
+</head>\n\
+<body>\n\
+<h1>Favnir Lineage Report</h1>\n\
+{}\
+<div id=\"detail\"><em>Click a stage node to see details.</em></div>\n\
+<script>\n\
+var stages={{{}}};\n\
+function showDetail(name){{\n\
+  var s=stages[name];if(!s)return;\n\
+  var h='<table>';\n\
+  h+='<tr><td>Name</td><td>'+name+'</td></tr>';\n\
+  h+='<tr><td>Kind</td><td>'+s.kind+'</td></tr>';\n\
+  h+='<tr><td>Effects</td><td>'+s.effects+'</td></tr>';\n\
+  if(s.schema)h+='<tr><td>Schema</td><td>'+s.schema+'</td></tr>';\n\
+  if(s.sources)h+='<tr><td>Sources</td><td>'+s.sources+'</td></tr>';\n\
+  if(s.sinks)h+='<tr><td>Sinks</td><td>'+s.sinks+'</td></tr>';\n\
+  h+='</table>';\n\
+  document.getElementById('detail').innerHTML=h;\n\
+}}\n\
+</script>\n\
+</body>\n\
+</html>",
+        svg, js_entries
+    )
 }
 
 /// Mermaid / D2 ノード ID として使える文字列に変換する（英数字 + アンダースコアのみ）。

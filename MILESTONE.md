@@ -1,5 +1,203 @@
 # Favnir Milestones
 
+## v55.0.0（2026-07-23）— Production 3.0
+
+> 「型安全なガード節、スケールする並列パイプライン、
+>  保証されたデータ品質、そして考えを助ける開発体験。
+>  Favnir はデータエンジニアが現場で選ぶ言語になった。
+>
+>  これが Favnir v55.0 — Production 3.0 の姿である。」
+
+**Production 3.0** の宣言バージョン。v54.1〜v54.9 の最終整備を経て、
+v51〜v54 で積み上げた全機能（DX 3.0 / Performance & Scale / Data Quality 2.0 / Integration Sprint）を
+統合・安定化する。
+
+**v51〜v54 達成内容:**
+- v51（DX 3.0）: 全エラーコード診断・LSP インレイヒント・trace/watch
+- v52（Performance & Scale）: par 並列実行・バックプレッシャー・bench 回帰検出・WASM 最適化
+- v53（Data Quality 2.0）: assert_schema・lineage 強化・audit-log・OTel 強化
+- v54（Integration Sprint）: fav explain 全コード・watch-diff・CI 統合・dq-report・doctor
+
+---
+
+## v54.0.0（2026-07-22）— Integration Sprint
+
+> 「エディタはデータの来歴を示し、並列パイプラインの性能は
+>  計測可能で、スキーマ違反は即座に修正できる。
+>  Favnir の 3 つの柱が一体となった。
+>
+>  これが Favnir v54.0 — Integration の姿である。」
+
+**Integration Sprint** の宣言バージョン。v53.1〜v53.8 の統合作業（lineage × LSP・par bench・assert_schema 詳細診断・
+E2E デモ・cookbook・用語集・CHANGELOG/MILESTONE 整理・integration-overview ドキュメント）および
+v53.9 のコードフリーズを経て、v51.0〜v53.0 の 3 マイルストーンを一体として機能させた。
+
+---
+
+## v51.0〜v53.0 Integration Sprint サマリー（2026-07-22）
+
+> 「エディタはデータの来歴を示し、並列パイプラインの性能は
+>  計測可能で、スキーマ違反は即座に修正できる。
+>  Favnir の 3 つの柱が一体となった。」
+
+DX 3.0（v51）・Performance & Scale（v52）・Data Quality & Observability 2.0（v53）の 3 マイルストーンを
+**Integration Sprint** として統合。v53.1〜v53.8 の統合作業・v53.9 のコードフリーズを完了し、
+v54.0「Integration Sprint 宣言」を達成した。
+
+---
+
+## v53.0.0（2026-07-22）— Data Quality & Observability 2.0
+
+> 「スキーマはランタイムで検証され、データの来歴はグラフで見え、
+>  SLA 違反は即座に検知され、アクセスはすべて記録される。
+>  Favnir のパイプラインは信頼できるデータを届ける。
+>
+>  これが Favnir v53.0 — Data Quality & Observability 2.0 の姿である。」
+
+**Data Quality & Observability 2.0** の宣言バージョン。v52.1〜v52.9 の全機能統合を経て、
+assert_schema・リネージ可視化・SLA 監視・audit-log・OTel 強化の成熟を宣言する。
+
+---
+
+## v52.0.0（2026-07-20）— Performance & Scale
+
+> 「並列パイプラインはコアを使い切り、バックプレッシャーは
+>  データの氾濫を防ぎ、ベンチマークは退行を即座に検出する。
+>  Favnir は大規模データに立ち向かえる言語になった。
+>
+>  これが Favnir v52.0 — Performance & Scale の姿である。」
+
+**Performance & Scale** の宣言バージョン。v51.1〜v51.9 の全機能統合を経て、
+並列実行・バックプレッシャー・ベンチマーク回帰検出・WASM 最適化の成熟を宣言する。
+
+---
+
+## v51.0.0（2026-07-19）— Developer Experience 3.0
+
+> 「全エラーコードに修正提案が付き、JSON / LSP / CLI で一貫して届く。
+>  エディタは型を表示し、trace はパイプラインの流れを可視化する。
+>  Favnir の診断は開発者の思考を止めない。
+>
+>  これが Favnir v51.0 — Developer Experience 3.0 の姿である。」
+
+**Developer Experience 3.0** の宣言バージョン。v50.1〜v50.9 の全機能統合を経て、
+診断・エディタ統合・デバッグ体験の成熟を宣言する。
+
+---
+
+## v50.0.0（2026-07-18）— Language Maturity / Production 2.0
+
+> 「`return` による安全なガード節、成熟した標準ライブラリ、
+>  明確なモジュールシステム、インラインテストが揃い、
+>  Favnir は迷わず使える実用言語になった。
+>
+>  これが Favnir v50.0 — Production 2.0 の姿である。」
+
+**Language Maturity** の宣言バージョン。v46〜v49 の全機能統合・安定化・セキュリティ審査を経て、
+データエンジニアが迷わず使える実用言語としての成熟を宣言する。
+
+---
+
+## v49.0.0 — Module & Package 2.0（2026-07-18）
+
+> 「パッケージ import とローカル import が構文で明確に分離され、
+>  `fav.toml` が依存関係の唯一の真実となった。
+>
+>  これが Favnir v49.0 — Module & Package 2.0 の姿である。」
+
+v49.0.0 をもって、Favnir の **Module & Package 2.0** を正式に宣言する。
+
+### 達成コンポーネント（v48.1〜v48.9）
+
+| コンポーネント | バージョン | 内容 |
+|---|---|---|
+| `ImportKind::Package` / `ImportKind::Local` AST + parser | v48.1.0 | パッケージ import 構文刷新 |
+| ローカル import `"./"` プレフィックス対応 | v48.2.0 | ローカルファイル import 構文 |
+| `fav.toml [runes]` 解決ロジック + E0417 | v48.3.0 | 依存関係の一元管理 |
+| `fav install`（`runes/` スタブ展開）| v48.4.0 | パッケージインストールコマンド |
+| W035 `legacy_import_rune` lint ルール + E0417 実発行 | v48.5.0 | 旧構文の非推奨化 + E0417 実発行 |
+| 循環 import 検出 + E0418 | v48.6.0 | import グラフ循環検出 |
+| `rune.toml` 標準化（`validate_rune_toml`）| v48.7.0 | Rune 仕様の統一 |
+| `list_installed_runes` / `get_rune_version` ヘルパー | v48.8.0 | runes/ ディレクトリ管理 |
+| Module ドキュメント + migration guide | v48.9.0 | ユーザー向け移行ガイド |
+
+---
+
+## v48.0.0 — Standard Library 2.0（2026-07-18）
+
+> 「List・String・Float・Option・Result・Map の主要操作が揃い、
+>  外部ライブラリなしに実務的なデータ変換が書ける。
+>
+>  これが Favnir v48.0 — Standard Library 2.0 の姿である。」
+
+v48.0.0 をもって、Favnir の **Standard Library 2.0** を正式に宣言する。
+
+### 達成コンポーネント（v47.1〜v47.9）
+
+| コンポーネント | バージョン | 内容 |
+|---|---|---|
+| `List.zip` / `List.chunk` | v47.1.0 | 2 リストのペア化・n 要素分割 |
+| `List.flat_map` / `List.group_by` / `List.dedupe` | v47.2.0 | flatten+map・グループ化・重複除去 |
+| `List.scan` / `List.take_while` / `List.drop_while` | v47.3.0 | 累積値リスト・先頭条件フィルタ |
+| `String.pad_left` / `String.trim_start` / `String.repeat` | v47.4.0 | パディング・トリム・繰り返し |
+| `Float.round` / `Float.clamp` / `Float.abs` / `Int.to_hex` / `Int.abs` | v47.5.0 | 浮動小数点・整数拡張 |
+| `Option.map` / `Option.unwrap_or` / `Option.and_then` / `Option.is_some` / `Option.is_none` | v47.6.0 | Option コンビネータ |
+| `Result.map` / `Result.map_err` / `Result.and_then` / `Result.is_ok` / `Result.is_err` | v47.7.0 | Result コンビネータ |
+| `Map.merge` / `Map.filter_values` / `Map.map_values` / `Map.keys` / `Map.values` | v47.8.0 | Map 拡充 |
+| stdlib ドキュメント（`float.mdx` / `v2.mdx` / 各 MDX 更新） | v47.9.0 | Standard Library 2.0 全関数索引 |
+
+---
+
+## v47.0.0 — Developer Experience（2026-07-17）
+
+> 「インラインテスト・LSP クイックフィックス・型情報可視化が揃い、
+>  Favnir の開発体験が実用水準に達した。
+>
+>  これが Favnir v47.0 — Developer Experience の姿である。」
+
+v47.0.0 をもって、Favnir の **Developer Experience** を正式に宣言する。
+
+### 達成コンポーネント（v46.1〜v46.9）
+
+| コンポーネント | バージョン | 内容 |
+|---|---|---|
+| `#[test]` ブロック AST + parser | v46.1 | `FnDef.is_test = true`、`#[test] fn` 解析 |
+| `fav test` コマンド実装 | v46.2 | `cmd_test`、`#[test]` 収集と VM 実行ループ |
+| assertion 拡充 | v46.3 | `assert_ok` / `assert_err` / `assert_ne` VM primitive |
+| LSP inlay hints 強化 | v46.4 | `textDocument/inlayHint`、パイプライン推論型表示 |
+| LSP クイックフィックス強化 | v46.5 | E0102 did-you-mean / E0101 引数追加提案 |
+| `fav explain` 2.0 Phase 1 | v46.6 | dead path（点線）/ error path（赤）Mermaid 可視化 |
+| `fav explain --lineage` 2.0 | v46.7 | `is_dead` フラグ + `--show-dead` CLI |
+| `fav explain --types` | v46.8 | ステージ宣言型一覧表示 |
+| DX ドキュメント + v47.0 前調整 | v46.9 | `fav-test.mdx` / `developer-experience.mdx` |
+
+---
+
+## v46.0.0 — Language Refinement（2026-07-16）
+
+> 「`return` によるガード節・`match` 完全網羅・型エイリアスの明確な境界・
+>  改善されたエラーメッセージが揃い、Favnir の構文が成熟した。
+>
+>  これが Favnir v46.0 — Language Refinement の姿である。」
+
+v46.0.0 をもって、Favnir の **Language Refinement** を正式に宣言する。
+
+### 達成コンポーネント（v45.1〜v45.9）
+
+| コンポーネント | バージョン | 内容 |
+|---|---|---|
+| `return` 構文 AST + parser | v45.1 | ReturnStmt ノード・parser 解析 |
+| `return` 型チェック + E0415 | v45.2 | 戻り型不一致エラー |
+| `return` compiler + VM | v45.3 | Return opcode・早期脱出実行 |
+| `match` 網羅性 + W034/E0416 | v45.4 | 非網羅 match の警告・エラー |
+| 型エイリアス完全化 | v45.5 | 透過的互換性・opaque 非互換性 |
+| エラーメッセージ改善 Phase 1 | v45.6 | E0101〜E0200 suggestion 追加 |
+| エラーメッセージ改善 Phase 2 + 数値リテラル `_` | v45.7 | E0201〜E0413 suggestion・`1_000_000` |
+| examples 更新 Phase 1 | v45.8 | !Effect 除去確認・return ガード節 |
+| examples 更新 Phase 2 + v46.0 前調整 | v45.9 | stage_seq_demo 修正・overview 作成 |
+
+---
+
 ## v45.0.0 — Precision & Flow（2026-07-15）
 
 > 「型推論がジェネリクスと戻り値型を補完し、最小限の注釈で安全なコードが書ける。

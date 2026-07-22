@@ -146,6 +146,9 @@ pub struct StreamConfig {
     pub watermark_delay: Option<u32>,
     /// 遅延イベントのポリシー: "drop" | "reprocess"。
     pub late_policy: Option<String>,
+    /// chunk_size の上限（バックプレッシャー制御用）。デフォルト None（制約なし）。(v51.3.0)
+    /// 0 は None 相当として扱う（chunks(0) によるパニック防止）。
+    pub buffer_size: Option<usize>,
 }
 
 // ── Azure config (v14.2.0) ────────────────────────────────────────────────────
@@ -310,6 +313,9 @@ pub struct FavToml {
     pub state: Option<StateConfig>,
     /// Optional stream configuration (v40.5.0).
     pub stream: Option<StreamConfig>,
+    /// Package dependencies declared in `[runes]` (v48.3.0).
+    /// Maps rune name → version string (e.g., `"kafka" → "2.1.0"`).
+    pub runes: std::collections::HashMap<String, String>,
 }
 
 impl FavToml {
@@ -387,6 +393,7 @@ fn parse_fav_toml(content: &str) -> FavToml {
     let mut workers_endpoints_accum: Option<Vec<String>> = None;
     let mut state_cfg: Option<StateConfig> = None;
     let mut stream_cfg: Option<StreamConfig> = None;
+    let mut runes_map: std::collections::HashMap<String, String> = std::collections::HashMap::new();
     let mut section = "";
 
     for line in content.lines() {
@@ -506,6 +513,9 @@ fn parse_fav_toml(content: &str) -> FavToml {
                 if let Some((key, val)) = parse_kv(trimmed) {
                     if key == "path" {
                         runes_path = Some(val.to_string());
+                    } else {
+                        // v48.3.0: rune name → version (e.g. kafka = "2.1.0")
+                        runes_map.insert(key.to_string(), val.to_string());
                     }
                 }
             }
@@ -843,6 +853,10 @@ fn parse_fav_toml(content: &str) -> FavToml {
                         "late_policy" => {
                             current.late_policy = Some(val.trim_matches('"').to_string());
                         }
+                        "buffer_size" => {
+                            // 0 は制約なし（None 相当）として扱う（chunks(0) パニック防止）
+                            current.buffer_size = val.trim_matches('"').parse::<usize>().ok().filter(|&n| n > 0);
+                        }
                         _ => {}
                     }
                     stream_cfg = Some(current);
@@ -881,6 +895,7 @@ fn parse_fav_toml(content: &str) -> FavToml {
         workers: workers_cfg,
         state: state_cfg,
         stream: stream_cfg,
+        runes: runes_map,
     }
 }
 
@@ -982,11 +997,77 @@ pub fn expand_env_vars(s: &str) -> String {
 }
 
 /// Parse `key = "value"` or `key = value` (unquoted).
+/// Uses `split_once('=')` — only the first `=` is used as separator.
+/// Values containing `=` (e.g. `url = "a=b"`) are handled correctly for key extraction,
+/// but the value portion will include everything after the first `=`.
 fn parse_kv(line: &str) -> Option<(&str, &str)> {
     let (key, rest) = line.split_once('=')?;
     let key = key.trim();
     let val = rest.trim().trim_matches('"');
     Some((key, val))
+}
+
+// ── v48.7.0: rune.toml 標準化バリデーション ────────────────────────────────────
+
+/// rune.toml の標準フォーマット検証（v48.7.0）。
+/// 必須: `[rune]` セクション + `name` / `version` / `entry` フィールド
+/// 非標準: `[connection]` セクションが存在するとエラー
+/// `description` はオプションフィールドのため必須チェック対象外。
+/// 返り値: バリデーションエラーの Vec（空なら合格）
+pub fn validate_rune_toml(content: &str) -> Vec<String> {
+    let mut errors = Vec::new();
+    let mut has_rune_section = false;
+    let mut has_name = false;
+    let mut has_version = false;
+    let mut has_entry = false;
+    let mut has_connection_section = false;
+    let mut section: &str = ""; // &'static str リテラルのみを代入するため型を明示
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+        if trimmed == "[rune]" {
+            has_rune_section = true;
+            section = "rune";
+            continue;
+        }
+        if trimmed == "[connection]" {
+            has_connection_section = true;
+            section = "connection";
+            continue;
+        }
+        if trimmed.starts_with('[') {
+            section = "other";
+            continue;
+        }
+        if section == "rune" {
+            if let Some((k, _)) = parse_kv(trimmed) {
+                match k {
+                    "name" => has_name = true,
+                    "version" => has_version = true,
+                    "entry" => has_entry = true,
+                    _ => {}
+                }
+            }
+        }
+    }
+    if !has_rune_section {
+        errors.push("missing [rune] section".to_string());
+    }
+    if !has_name {
+        errors.push("missing required field: name".to_string());
+    }
+    if !has_version {
+        errors.push("missing required field: version".to_string());
+    }
+    if !has_entry {
+        errors.push("missing required field: entry".to_string());
+    }
+    if has_connection_section {
+        errors.push("[connection] section is non-standard; remove it".to_string());
+    }
+    errors
 }
 
 // ── rune_modules helpers ──────────────────────────────────────────────────────

@@ -1,32 +1,40 @@
 # Current — Favnir 進行状況
 
-最終更新: 2026-07-15
+最終更新: 2026-07-23 (v55.0.0)
 
 ---
 
 ## 現行マスターロードマップ
 
-[roadmap/roadmap-v40.1-v45.0.md](roadmap/roadmap-v40.1-v45.0.md)
+[roadmap/roadmap-v50.1-v55.0.md](roadmap/roadmap-v50.1-v55.0.md)
+
+サブスプリント（完了）: [roadmap/roadmap-v54.1-v55.0.md](roadmap/roadmap-v54.1-v55.0.md)（v55.0.0 宣言完了）
+
+サブスプリント（完了）: [roadmap/roadmap-v53.1-v54.0.md](roadmap/roadmap-v53.1-v54.0.md)（v54.0.0 宣言完了）
+
+前フェーズ（完了）: [roadmap/roadmap-v45.1-v50.0.md](roadmap/roadmap-v45.1-v50.0.md)
 
 ---
 
 ## 最新安定版
 
-**v45.0.0** — Precision & Flow 宣言 — 2966 tests（2026-07-15）
+**v55.0.0** — Production 3.0 宣言 — 3206 tests（2026-07-23）
 
-- `cargo install fav --version "45.0.0"`
+- `cargo install fav --version "55.0.0"`
+
+前バージョン: v54.9.0 — v55.0 前調整・安定化 — 3203 tests
 
 ---
 
 ## 進行中バージョン
 
-v44.x スプリント完了 / v45.0.0 COMPLETE（Precision & Flow 宣言）
+**なし**（v55.0.0 完了）
 
 ---
 
 ## 次に切る版
 
-**TBD**（次スプリント未確定）
+**未定**（Production 3.0 完成のため）
 
 ---
 

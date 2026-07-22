@@ -1,15 +1,25 @@
+use crate::error_catalog;
 use crate::frontend::lexer::Span;
-use crate::lsp::protocol::{Diagnostic, Position, Range};
+use crate::lsp::protocol::{Diagnostic, DiagnosticData, Position, Range};
 use crate::middle::checker::TypeError;
 
 pub fn errors_to_diagnostics(errors: &[TypeError], source: &str) -> Vec<Diagnostic> {
     errors
         .iter()
-        .map(|err| Diagnostic {
-            range: span_to_range(&err.span, source, err.code),
-            severity: 1,
-            code: err.code.to_string(),
-            message: err.message.clone(),
+        .map(|err| {
+            let suggestion = error_catalog::suggestion_for(err.code).to_string();
+            let data = if suggestion.is_empty() {
+                None
+            } else {
+                Some(DiagnosticData { suggestion })
+            };
+            Diagnostic {
+                range:    span_to_range(&err.span, source, err.code),
+                severity: 1,
+                code:     err.code.to_string(),
+                message:  err.message.clone(),
+                data,
+            }
         })
         .collect()
 }

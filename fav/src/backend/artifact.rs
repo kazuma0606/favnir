@@ -6,7 +6,7 @@ use std::io::{self, Read, Write};
 use super::codegen::Constant;
 
 const MAGIC: &[u8; 4] = b"FVC\x01";
-const VERSION: u8 = 0x20; // format version (META section is additive, no bump needed)
+const VERSION: u8 = 0x21; // v52.2.0: TMET section bit-flag format change (bit1 = optional)
 
 /// Metadata embedded in the META section of a .favc artifact.
 #[derive(Debug, Clone, PartialEq)]
@@ -345,14 +345,17 @@ fn write_type_meta_section(
         for field in &meta.fields {
             write_string(w, &field.name)?;
             write_string(w, &field.ty)?;
-            match field.col_index {
-                Some(idx) => {
-                    w.write_all(&[1])?;
-                    write_u32(w, idx as u32)?;
-                }
-                None => {
-                    w.write_all(&[0])?;
-                }
+            // bit0 (0x01): col_index present; bit1 (0x02): optional (v52.2.0)
+            let mut flag: u8 = 0;
+            if field.col_index.is_some() {
+                flag |= 0x01;
+            }
+            if field.optional {
+                flag |= 0x02;
+            }
+            w.write_all(&[flag])?;
+            if let Some(idx) = field.col_index {
+                write_u32(w, idx as u32)?;
             }
         }
     }
@@ -371,15 +374,18 @@ fn read_type_meta_section(r: &mut impl Read) -> Result<HashMap<String, TypeMeta>
             let ty = read_string(r)?;
             let mut flag = [0u8; 1];
             r.read_exact(&mut flag)?;
-            let col_index = if flag[0] == 1 {
+            // bit0 (0x01): col_index present; bit1 (0x02): optional (v52.2.0)
+            let col_index = if flag[0] & 0x01 != 0 {
                 Some(read_u32(r)? as usize)
             } else {
                 None
             };
+            let optional = flag[0] & 0x02 != 0;
             fields.push(crate::middle::ir::FieldMeta {
                 name,
                 ty,
                 col_index,
+                optional,
             });
         }
         type_metas.insert(type_name.clone(), TypeMeta { type_name, fields });
@@ -515,11 +521,13 @@ mod tests {
                         name: "id".into(),
                         ty: "Int".into(),
                         col_index: Some(0),
+                        optional: false,
                     },
                     FieldMeta {
                         name: "name".into(),
                         ty: "String".into(),
                         col_index: Some(1),
+                        optional: false,
                     },
                 ],
             },

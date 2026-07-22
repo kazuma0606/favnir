@@ -2,12 +2,14 @@
 
 /// Optimization level for wasm-opt (Binaryen).
 /// O0 = DCE only, no external tool.  O1-O3 invoke wasm-opt if installed.
+/// Os = size optimization (-Os), v51.7.0.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WasmOptLevel {
     O0,
     O1,
     O2,
     O3,
+    Os, // v51.7.0: サイズ最適化（-Os）
 }
 
 impl WasmOptLevel {
@@ -17,6 +19,7 @@ impl WasmOptLevel {
             WasmOptLevel::O1 => "-O1",
             WasmOptLevel::O2 => "-O2",
             WasmOptLevel::O3 => "-O3",
+            WasmOptLevel::Os => "-Os",
         }
     }
 }
@@ -153,5 +156,10 @@ mod tests {
         let (out, report) = try_wasm_opt(bytes.clone(), WasmOptLevel::O0, false);
         assert_eq!(out, bytes);
         assert_eq!(report.reduction_pct(), 0.0);
+    }
+
+    #[test]
+    fn os_flag_is_minus_os() {
+        assert_eq!(WasmOptLevel::Os.flag(), "-Os");
     }
 }

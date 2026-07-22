@@ -296,6 +296,24 @@ impl Parser {
         }
     }
 
+    /// v46.1.0: `#[test]` アトリビュートを認識して bool を返す。
+    /// 注: `test` は TokenKind::Test（キーワード）であり Ident ではない。
+    fn parse_test_annotation(&mut self) -> Result<bool, ParseError> {
+        if self.peek() == &TokenKind::Hash
+            && matches!(self.tokens.get(self.pos + 1), Some(t) if t.kind == TokenKind::LBracket)
+            && matches!(self.tokens.get(self.pos + 2), Some(t) if t.kind == TokenKind::Test)
+            && matches!(self.tokens.get(self.pos + 3), Some(t) if t.kind == TokenKind::RBracket)
+        {
+            self.advance(); // #
+            self.advance(); // [
+            self.advance(); // test
+            self.advance(); // ]
+            Ok(true)
+        } else {
+            Ok(false)
+        }
+    }
+
     fn parse_api_annotation(&mut self) -> Result<Option<crate::ast::ApiAnnotation>, ParseError> {
         // Lookahead: #  [  api
         let is_api = self.peek() == &TokenKind::Hash
@@ -632,6 +650,8 @@ impl Parser {
         // because each parser tries to consume #[ ... ] and they are mutually exclusive.
         // v24.4.0: parse optional #[deprecated] annotation before fn
         let deprecated_ann = self.parse_deprecated_annotation()?;
+        // v46.1.0: parse optional #[test] annotation before fn
+        let test_ann = self.parse_test_annotation()?;
         // v18.8.0: parse optional `#[api(...)]` annotation before visibility/fn
         let api_annotation = self.parse_api_annotation()?;
         // v19.1.0: parse optional streaming/stateful annotations
@@ -677,6 +697,7 @@ impl Parser {
                 let mut fd = self.parse_fn_def(vis, false)?;
                 fd.api_annotation = api_annotation;
                 fd.deprecated = deprecated_ann; // v24.4.0
+                fd.is_test = test_ann;          // v46.1.0
                 Ok(Item::FnDef(fd))
             }
             TokenKind::Stage => {
@@ -705,6 +726,7 @@ impl Parser {
                         let mut fd = self.parse_fn_def(vis, true)?;
                         fd.api_annotation = api_annotation;
                         fd.deprecated = deprecated_ann; // v24.4.0
+                        fd.is_test = test_ann;          // v46.1.0
                         Ok(Item::FnDef(fd))
                     }
                     TokenKind::Stage => {
@@ -1060,28 +1082,33 @@ impl Parser {
         } else {
             false
         };
+        // v48.1.0: kind を決定する (Legacy がデフォルト、bare ident のみ Package)
+        let mut kind = crate::ast::ImportKind::Legacy;
         let path = match self.peek().clone() {
             TokenKind::Str(path) => {
                 self.advance();
+                // v48.2.0: ./ or ../ prefix → Local import
+                if path.starts_with("./") || path.starts_with("../") {
+                    kind = crate::ast::ImportKind::Local;
+                }
                 path
             }
-            // Support `import runes/X` path syntax (v28.x+): parse as rune import
+            // Support `import runes/X` path syntax (v28.x+): parse as rune import (Legacy)
             TokenKind::Ident(first_seg) => {
                 self.advance();
                 if self.peek() == &TokenKind::Slash {
                     self.advance(); // consume `/`
                     let (second_seg, _) = self.expect_ident()?;
-                    // `import runes/sentry` → rune name is `sentry`
+                    // `import runes/sentry` → rune name is `sentry` (Legacy)
                     if first_seg == "runes" {
                         second_seg
                     } else {
                         format!("{}/{}", first_seg, second_seg)
                     }
                 } else {
-                    return Err(ParseError::new(
-                        format!("expected string literal import path, got Ident({:?})", first_seg),
-                        self.peek_span().clone(),
-                    ));
+                    // v48.1.0: bare ident = Package import (`import kafka`)
+                    kind = crate::ast::ImportKind::Package;
+                    first_seg
                 }
             }
             other => {
@@ -1106,6 +1133,7 @@ impl Parser {
             alias,
             is_rune,
             is_public,
+            kind,
             span: self.span_from(&start),
         })
     }
@@ -2003,6 +2031,7 @@ impl Parser {
             span: self.span_from(&start),
             api_annotation: None, // set by parse_item if #[api(...)] precedes the fn
             deprecated: false,    // set by parse_item if #[deprecated] precedes the fn
+            is_test: false,       // set by parse_item if #[test] precedes the fn (v46.1.0)
         })
     }
 
@@ -2317,6 +2346,34 @@ impl Parser {
             // inspect — soft keyword (v16.8.0)
             self.advance(); // consume "inspect"
             Ok(FlwStep::Inspect)
+        } else if self.peek_ident_text("Merge") {
+            // Merge.ordered / Merge.any — soft keywords (v51.2.0)
+            // Fallback to FlwStep::Stage("Merge") for backward compat (existing tests).
+            // Peek at pos+1 (Dot) and pos+2 (suffix ident) before consuming anything.
+            let has_dot = self.peek2() == Some(&TokenKind::Dot);
+            // Clone the suffix ident so we don't hold a borrow over the advance() calls.
+            let suffix: Option<String> = if has_dot {
+                self.tokens.get(self.pos + 2).and_then(|t| match &t.kind {
+                    TokenKind::Ident(s) => Some(s.clone()),
+                    _ => None,
+                })
+            } else {
+                None
+            };
+            self.advance(); // consume "Merge"
+            match suffix.as_deref() {
+                Some("ordered") => {
+                    self.advance(); // consume "."
+                    self.advance(); // consume "ordered"
+                    Ok(FlwStep::Merge(crate::ast::MergeMode::Ordered))
+                }
+                Some("any") => {
+                    self.advance(); // consume "."
+                    self.advance(); // consume "any"
+                    Ok(FlwStep::Merge(crate::ast::MergeMode::Any))
+                }
+                _ => Ok(FlwStep::Stage("Merge".to_string())),
+            }
         } else {
             let (name, _) = self.expect_ident()?;
             Ok(FlwStep::Stage(name))
@@ -2531,6 +2588,16 @@ impl Parser {
                 continue;
             }
 
+            // return statement (v45.1.0, trailing ; is optional)
+            if self.peek() == &TokenKind::Return {
+                let r = self.parse_return_stmt()?;
+                stmts.push(Stmt::Return(r));
+                if self.peek() == &TokenKind::Semicolon {
+                    self.advance();
+                }
+                continue;
+            }
+
             // for-in statement (v1.9.0, trailing ; is optional)
             if self.peek() == &TokenKind::For {
                 let f = self.parse_for_in_stmt()?;
@@ -2631,6 +2698,18 @@ impl Parser {
         let expr = self.parse_expr()?;
         self.expect(&TokenKind::Semicolon)?;
         Ok(YieldStmt {
+            expr,
+            span: self.span_from(&start),
+        })
+    }
+
+    // -- parse_return_stmt (v45.1.0) --
+
+    fn parse_return_stmt(&mut self) -> Result<ReturnStmt, ParseError> {
+        let start = self.peek_span().clone();
+        self.expect(&TokenKind::Return)?;
+        let expr = self.parse_expr()?;
+        Ok(ReturnStmt {
             expr,
             span: self.span_from(&start),
         })

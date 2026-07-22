@@ -25,6 +25,9 @@ pub fn handle_code_action(store: &DocumentStore, uri: &str, range: Range) -> Vec
     if let Some(a) = check_inline_binding(&line_text) {
         actions.push(a);
     }
+    // v46.5.0: E0102 did-you-mean + E0101 arg count quickfix
+    actions.extend(check_did_you_mean_fix(doc, uri, range));
+    actions.extend(check_arg_count_fix(uri, doc, range));
     actions
 }
 
@@ -118,4 +121,80 @@ fn check_inline_binding(line_text: &str) -> Option<CodeAction> {
         kind: Some("refactor.inline".to_string()),
         edit: None,
     })
+}
+
+// ── CA-4: didYouMeanFix (E0102 — 未定義変数) ────────────────────────────────
+
+fn check_did_you_mean_fix(
+    doc: &crate::lsp::document_store::CheckedDoc,
+    uri: &str,
+    range: Range,
+) -> Vec<CodeAction> {
+    let line_idx = range.start.line;
+    let mut actions = Vec::new();
+    for err in &doc.errors {
+        if err.code != "E0102" {
+            continue;
+        }
+        if err.span.line == 0 || err.span.col == 0 || err.span.line - 1 != line_idx {
+            continue;
+        }
+        for hint in &err.hints {
+            if let Some(name) = parse_did_you_mean(hint) {
+                // span.col is 1-based → convert to 0-based character offset
+                let start_col = err.span.col - 1;
+                // span.end - span.start = byte length of the identifier.
+                // Favnir identifiers are ASCII-only (alphanumeric + '_'),
+                // so byte count == char count == LSP character width.
+                let len = (err.span.end.saturating_sub(err.span.start)) as u32;
+                let edit_range = Range {
+                    start: Position { line: line_idx, character: start_col },
+                    end:   Position { line: line_idx, character: start_col + len },
+                };
+                let mut changes = HashMap::new();
+                changes.insert(
+                    uri.to_string(),
+                    vec![TextEdit { range: edit_range, new_text: name.to_string() }],
+                );
+                actions.push(CodeAction {
+                    title: format!("Did you mean `{}`?", name),
+                    kind: Some("quickfix".to_string()),
+                    edit: Some(WorkspaceEdit { changes }),
+                });
+            }
+        }
+    }
+    actions
+}
+
+/// "did you mean `foo`?" → Some("foo")
+fn parse_did_you_mean(hint: &str) -> Option<&str> {
+    let start = hint.find('`')? + 1;
+    let end = hint[start..].find('`')? + start;
+    Some(&hint[start..end])
+}
+
+// ── CA-5: argCountFix (E0101 — 引数数不一致) ────────────────────────────────
+
+fn check_arg_count_fix(
+    // _uri: reserved for future TextEdit support (e.g. auto-fill missing arguments)
+    _uri: &str,
+    doc: &crate::lsp::document_store::CheckedDoc,
+    range: Range,
+) -> Vec<CodeAction> {
+    let line_idx = range.start.line;
+    doc.errors
+        .iter()
+        .filter(|e| {
+            e.code == "E0101"
+                && e.message.contains("argument(s)")
+                && e.span.line > 0
+                && e.span.line - 1 == line_idx
+        })
+        .map(|e| CodeAction {
+            title: format!("Fix: {}", e.message),
+            kind: Some("quickfix".to_string()),
+            edit: None,
+        })
+        .collect()
 }

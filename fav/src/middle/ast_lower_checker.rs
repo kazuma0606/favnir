@@ -218,6 +218,9 @@ fn lower_flw_step(step: &ast::FlwStep) -> Value {
         // tap/inspect are Rust-level constructs; lower as no-op stage markers
         ast::FlwStep::Tap(_) => v1("SStage", sv("tap")),
         ast::FlwStep::Inspect => v1("SStage", sv("inspect")),
+        // Merge.ordered / Merge.any are lowered as distinct merge markers (v51.2.0)
+        ast::FlwStep::Merge(ast::MergeMode::Ordered) => v1("SMergeOrdered", sv("merge_ordered")),
+        ast::FlwStep::Merge(ast::MergeMode::Any) => v1("SMergeAny", sv("merge_any")),
     }
 }
 

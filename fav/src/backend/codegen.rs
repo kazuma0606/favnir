@@ -87,6 +87,15 @@ pub enum Opcode {
     /// Pops a bool from the stack; if false, panics with a refinement error message.
     /// The name_str_idx points to the param name in str_table.
     RefinementAssert = 0x63,
+    /// assert_schema<T>(value) — runtime schema validation (v52.1.0).
+    /// Layout: opcode(1) + ty_name_idx(2) = 3 bytes.
+    /// Stack: pops Map<String, Any>; pushes Result<T>.
+    AssertSchema = 0x64,
+    /// par [A, B] 並列 stage 実行 (v51.1.0).
+    /// Layout: opcode(1) + n_names(2) + names_idx(2) = 5 bytes.
+    /// Stack: pops input; pushes List<Any> of results.
+    /// str_table[names_idx]: stage names joined by \x1f.
+    ParStages = 0x70,
     // ── Superinstructions (v20.2.0) — IR-level fused opcodes ────────────────
     /// Layout: opcode(1) + slot_a(u16) + slot_b(u16) = 5 bytes
     /// stack[base+a] + stack[base+b] → push
@@ -391,6 +400,26 @@ pub fn emit_expr(expr: &IRExpr, cg: &mut Codegen) {
             cg.emit_u16(updates.len() as u16);
             cg.emit_u16(names_idx);
         }
+        IRExpr::Par { stage_names, input, .. } => {
+            // 1. emit input (pushed onto stack before opcode reads it)
+            emit_expr(input, cg);
+            // 2. intern stage names joined by \x1f
+            let joined = stage_names.join("\u{1f}");
+            let names_idx = cg.intern_str(&joined);
+            // 3. emit ParStages opcode
+            cg.emit_opcode(Opcode::ParStages);
+            cg.emit_u16(stage_names.len() as u16);
+            cg.emit_u16(names_idx);
+        }
+        IRExpr::AssertSchema { ty_name, arg, .. } => {
+            // 1. emit arg (Map<String, Any> to validate)
+            emit_expr(arg, cg);
+            // 2. intern type name
+            let ty_idx = cg.intern_str(ty_name);
+            // 3. emit AssertSchema opcode
+            cg.emit_opcode(Opcode::AssertSchema);
+            cg.emit_u16(ty_idx);
+        }
     }
 }
 
@@ -437,6 +466,10 @@ pub fn emit_stmt(stmt: &IRStmt, cg: &mut Codegen) {
         IRStmt::Yield(expr) => {
             emit_expr(expr, cg);
             cg.emit_opcode(Opcode::YieldValue);
+        }
+        IRStmt::Return(expr) => {
+            emit_expr(expr, cg);
+            cg.emit_opcode(Opcode::Return);
         }
         IRStmt::Expr(expr) => {
             emit_expr(expr, cg);
@@ -822,6 +855,16 @@ fn remap_string_operands(code: &mut [u8], str_remap: &[u16]) {
                 // Layout: opcode(1) + name_str_idx(2)
                 remap_u16_at(code, ip + 1, str_remap);
                 ip += 3;
+            }
+            x if x == Opcode::AssertSchema as u8 => {
+                // Layout: opcode(1) + ty_name_idx(2)
+                remap_u16_at(code, ip + 1, str_remap);
+                ip += 3;
+            }
+            x if x == Opcode::ParStages as u8 => {
+                // Layout: opcode(1) + n_names(2) + names_idx(2) = 5 bytes
+                remap_u16_at(code, ip + 3, str_remap); // remap names_idx
+                ip += 5;
             }
             // Superinstructions (v20.2.0): opcode(1) + a(2) + b(2) = 5 bytes, no str remap
             x if x == Opcode::AddLL as u8

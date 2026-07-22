@@ -1,7 +1,2 @@
-fn add(a: Int, b: Int) -> Int {
-    a + b
-}
-
-fn main() -> Bool {
-    add(1, 2) == 3
-}
+fn add(a: Int, b: Int) -> Int { a + b }
+fn main() -> Bool { add(1, 2) == 3 }

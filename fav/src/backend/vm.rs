@@ -1272,6 +1272,30 @@ thread_local! {
     static VERBOSE_LEVEL: std::cell::Cell<u8> = const { std::cell::Cell::new(0) };
 }
 
+// v52.2.0: --strict-schema フラグ。
+thread_local! {
+    static STRICT_SCHEMA: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+// v52.6.0: --audit-log 出力先パス。
+#[cfg(not(target_arch = "wasm32"))]
+thread_local! {
+    static AUDIT_LOG_PATH: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
+}
+
+// v52.7.0: OTel lineage 追跡 — 直前の stage 名。
+#[cfg(not(target_arch = "wasm32"))]
+thread_local! {
+    static OTEL_PREV_STAGE: std::cell::RefCell<Option<String>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+// v50.7.0: watch fields for `--watch <var.field>` tracing.
+// Uses RefCell (not Cell) because Vec<String> is not Copy.
+thread_local! {
+    static WATCH_FIELDS: std::cell::RefCell<Vec<String>> = const { std::cell::RefCell::new(vec![]) };
+}
+
 // ── v19.5.0: Arrow RecordBatch スレッドローカルストア ─────────────────────────
 thread_local! {
     static ARROW_BATCHES: std::cell::RefCell<
@@ -1459,6 +1483,49 @@ pub fn set_verbose_level(level: u8) {
     VERBOSE_LEVEL.with(|v| v.set(level));
 }
 
+/// Set the thread-local strict_schema flag for `fav run --strict-schema` (v52.2.0).
+pub fn set_strict_schema(val: bool) {
+    STRICT_SCHEMA.with(|s| s.set(val));
+}
+
+/// v52.6.0: `fav run --audit-log <path>` でアクセスログ出力先を設定する。
+#[cfg(not(target_arch = "wasm32"))]
+pub fn set_audit_log_path(path: Option<String>) {
+    AUDIT_LOG_PATH.with(|p| *p.borrow_mut() = path);
+}
+
+/// v52.6.0: AUDIT_LOG_PATH が設定されている場合に JSONL 行を追記する。
+#[cfg(not(target_arch = "wasm32"))]
+fn append_audit_event(json_line: &str) {
+    AUDIT_LOG_PATH.with(|p| {
+        if let Some(ref path) = *p.borrow() {
+            use std::io::Write;
+            if let Ok(mut f) = std::fs::OpenOptions::new()
+                .append(true)
+                .create(true)
+                .open(path)
+            {
+                let _ = writeln!(f, "{}", json_line);
+            }
+        }
+    });
+}
+
+/// v52.7.0: OTel lineage 追跡をリセットする（各 fav run の先頭で呼ぶ）。
+#[cfg(not(target_arch = "wasm32"))]
+pub fn reset_stage_lineage() {
+    OTEL_PREV_STAGE.with(|p| *p.borrow_mut() = None);
+}
+
+/// Set the thread-local watch fields for `--watch <var.field>` (v50.7.0).
+pub fn set_watch_fields(fields: Vec<String>) {
+    WATCH_FIELDS.with(|f| *f.borrow_mut() = fields);
+}
+
+fn watch_fields() -> Vec<String> {
+    WATCH_FIELDS.with(|f| f.borrow().clone())
+}
+
 #[derive(Debug, Clone)]
 pub struct VM {
     globals: Vec<NanVal>,
@@ -1467,8 +1534,13 @@ pub struct VM {
     collect_frames: Vec<Vec<NanVal>>,
     emit_log: Vec<NanVal>,
     db_path: Option<String>,
+    /// fav.toml [stream].buffer_size から注入される chunk_size 上限 (v51.3.0).
+    /// None = 制約なし（デフォルト）。wasm32 でも使用可能。
+    stream_buffer_size: Option<usize>,
     source_file: String,
     type_metas: HashMap<String, TypeMeta>,
+    /// v52.2.0: --strict-schema フラグ。true のとき assert_schema で想定外フィールドをエラーにする。
+    pub(crate) strict_schema: bool,
     /// Collected trace lines (when verbose > 0). Also written to stderr via eprintln!.
     pub trace_lines: Vec<String>,
     /// v22.7.0: 現在実行中 stage の OTel span ID。SeqStageEnter で設定、SeqStageCheck で消費。
@@ -1684,8 +1756,10 @@ impl VM {
             collect_frames: Vec::new(),
             emit_log: Vec::new(),
             db_path,
+            stream_buffer_size: None,
             source_file: String::new(),
             type_metas: artifact.type_metas.clone(),
+            strict_schema: STRICT_SCHEMA.with(|s| s.get()),
             trace_lines: Vec::new(),
             #[cfg(not(target_arch = "wasm32"))]
             current_otel_span_id: None,
@@ -1758,6 +1832,26 @@ impl VM {
     #[allow(dead_code)]
     pub fn run(artifact: &FvcArtifact, fn_idx: usize, args: Vec<Value>) -> Result<Value, VMError> {
         Self::run_with_db_path(artifact, fn_idx, args, None).map(|(value, _)| value)
+    }
+
+    /// Run a pipeline with a stream buffer_size cap applied to __streaming_pipeline (v51.3.0).
+    /// `buffer_size = None` is equivalent to no cap (same as `run`).
+    ///
+    /// # Panics
+    /// Panics if any element of `args` is a `Value` variant not covered by `impl From<Value> for VMValue`
+    /// (e.g. `Value::Function` or `Value::Bytes`). For streaming pipelines the only expected argument
+    /// is a `Value::List`, which is always safe.
+    pub fn run_with_stream_buffer_size(
+        artifact: &FvcArtifact,
+        fn_idx: usize,
+        args: Vec<Value>,
+        buffer_size: Option<usize>,
+    ) -> Result<Value, VMError> {
+        let mut vm = VM::new_with_db_path(artifact, None);
+        vm.stream_buffer_size = buffer_size;
+        let args_vm: Vec<VMValue> = args.into_iter().map(VMValue::from).collect();
+        let result = vm.invoke_function(artifact, fn_idx, args_vm)?;
+        Ok(Value::from(result))
     }
 
     pub fn run_with_db_path(
@@ -2197,14 +2291,34 @@ impl VM {
                             let needs_otel = vm.current_otel_span_id.is_some();
                             #[cfg(target_arch = "wasm32")]
                             let needs_otel = false;
-                            let uvm = if vlevel > 0 || needs_otel {
+                            // v50.7.0: also compute uvm when watch fields are registered.
+                            // Clone watch_fields() once to avoid a second borrow in the loop.
+                            let wf = watch_fields();
+                            let has_watch = !wf.is_empty();
+                            let uvm = if vlevel > 0 || needs_otel || has_watch {
                                 Some(unwrapped.clone().to_vmvalue())
                             } else {
                                 None
                             };
                             if vlevel > 0 {
                                 let display = truncate_for_trace(uvm.as_ref().unwrap(), vlevel);
-                                trace_emit(&mut vm.trace_lines, format!("[TRACE] stage {}: exit Ok({})", stage_name, display));
+                                // v50.7.0: structured trace format
+                                trace_emit(&mut vm.trace_lines, format!("[trace] stage={}  out={}", stage_name, display));
+                            }
+                            // v50.7.0: watch hook — emit [watch] lines for registered fields
+                            if has_watch {
+                                if let Some(VMValue::Record(ref map)) = uvm {
+                                    for target in wf {
+                                        let field_name = target.rsplit('.').next().unwrap_or(target.as_str());
+                                        if let Some(field_val) = map.get(field_name) {
+                                            let field_display = truncate_for_trace(field_val, 1);
+                                            trace_emit(
+                                                &mut vm.trace_lines,
+                                                format!("[watch] {}: \u{2014} \u{2192} {}   (stage: {})", target, field_display, stage_name),
+                                            );
+                                        }
+                                    }
+                                }
                             }
                             // v22.7.0: OTel span 終了（Ok）
                             #[cfg(not(target_arch = "wasm32"))]
@@ -2288,6 +2402,13 @@ impl VM {
                             &format!("stage:{}", stage_name),
                             parent.as_ref(),
                         );
+                        // v52.7.0: lineage attrs — patch previous span with downstream, add upstream to current
+                        let prev = OTEL_PREV_STAGE.with(|p| p.borrow().clone());
+                        if let Some(ref prev_name) = prev {
+                            crate::otel::otel_patch_attr_on_last(prev_name, "lineage.downstream", stage_name);
+                            crate::otel::otel_add_attr("lineage.upstream", prev_name);
+                        }
+                        OTEL_PREV_STAGE.with(|p| *p.borrow_mut() = Some(stage_name.to_string()));
                         vm.current_otel_span_id = Some(span_id);
                     }
                 }
@@ -2389,6 +2510,196 @@ impl VM {
                                 "refinement_assert expects a Bool",
                             ));
                         }
+                    }
+                }
+                // ─── assert_schema<T>(value) — runtime schema validation (v52.1.0) ──
+                x if x == Opcode::AssertSchema as u8 => {
+                    let ty_name_idx = Self::read_u16(function, frame)? as usize;
+                    let ty_name = artifact
+                        .str_table
+                        .get(ty_name_idx)
+                        .cloned()
+                        .ok_or_else(|| {
+                            vm.error(
+                                artifact,
+                                &format!("assert_schema: bad ty_name_idx {ty_name_idx} (bytecode corrupt?)"),
+                            )
+                        })?;
+                    let val_nan = vm.stack.pop().ok_or_else(|| {
+                        vm.error(artifact, "stack underflow on assert_schema")
+                    })?;
+                    let val = val_nan.to_vmvalue();
+                    let strict = vm.strict_schema;
+                    let result = if let Some(meta) = vm.type_metas.get(&ty_name) {
+                        match &val {
+                            VMValue::Record(map) => {
+                                let mut mismatch: Option<String> = None;
+                                for field in &meta.fields {
+                                    match map.get(&field.name) {
+                                        None => {
+                                            if field.optional {
+                                                // nullable field — absence is OK (v52.2.0)
+                                                continue;
+                                            }
+                                            mismatch = Some(format!(
+                                                "E0419: assert_schema type mismatch — field `{}` missing in map (expected {})",
+                                                field.name, field.ty
+                                            ));
+                                            break;
+                                        }
+                                        Some(v) => {
+                                            // Optional field holding a None variant is valid (v52.2.0).
+                                            let is_none_variant = matches!(v, VMValue::Variant(tag, None) if tag == "none");
+                                            if field.optional && is_none_variant {
+                                                continue;
+                                            }
+                                            let actual = vmvalue_type_name(v);
+                                            if actual != field.ty && field.ty != "Any" {
+                                                mismatch = Some(format!(
+                                                    "E0419: assert_schema type mismatch — field `{}`: expected {} but got {}",
+                                                    field.name, field.ty, actual
+                                                ));
+                                                break;
+                                            }
+                                        }
+                                    }
+                                }
+                                if let Some(msg) = mismatch {
+                                    err_vm(VMValue::Str(msg))
+                                } else {
+                                    // Check for extra fields (v52.2.0)
+                                    let schema_names: std::collections::HashSet<&str> =
+                                        meta.fields.iter().map(|f| f.name.as_str()).collect();
+                                    let mut extra: Vec<String> = map
+                                        .keys()
+                                        .filter(|k| !schema_names.contains(k.as_str()))
+                                        .cloned()
+                                        .collect();
+                                    extra.sort(); // deterministic message order
+                                    if !extra.is_empty() {
+                                        if strict {
+                                            err_vm(VMValue::Str(format!(
+                                                "E0419: assert_schema — unexpected fields: {}",
+                                                extra.join(", ")
+                                            )))
+                                        } else {
+                                            vm.emit_log.push(NanVal::from_vmvalue(VMValue::Str(
+                                                format!(
+                                                    "W036: assert_schema — unexpected fields (use --strict-schema to error): {}",
+                                                    extra.join(", ")
+                                                ),
+                                            )));
+                                            ok_vm(val)
+                                        }
+                                    } else {
+                                        ok_vm(val)
+                                    }
+                                }
+                            }
+                            _ => err_vm(VMValue::Str(format!(
+                                "E0419: assert_schema type mismatch — expected Map but got {}",
+                                vmvalue_type_name(&val)
+                            ))),
+                        }
+                    } else {
+                        err_vm(VMValue::Str(format!(
+                            "E0419: assert_schema type mismatch — unknown schema type `{}`",
+                            ty_name
+                        )))
+                    };
+                    // v52.7.0: OTel schema attrs — assert_schema 成功時に schema.name / schema.fields を付与
+                    #[cfg(not(target_arch = "wasm32"))]
+                    if crate::otel::otel_is_enabled() {
+                        if let VMValue::Variant(ref tag, _) = result {
+                            if tag == "ok" {
+                                if let Some(meta) = vm.type_metas.get(&ty_name) {
+                                    let fields_str: String = meta.fields.iter()
+                                        .map(|f| f.name.as_str())
+                                        .collect::<Vec<_>>()
+                                        .join(",");
+                                    crate::otel::otel_add_attr("schema.name", &ty_name);
+                                    crate::otel::otel_add_attr("schema.fields", &fields_str);
+                                }
+                            }
+                        }
+                    }
+                    vm.stack.push(NanVal::from_vmvalue(result));
+                }
+                // ─── par stage 並列実行 (v51.1.0) ────────────────────────────────
+                x if x == Opcode::ParStages as u8 => {
+                    // Layout: n_names(2) + names_idx(2)
+                    let n_names = Self::read_u16(function, frame)? as usize;
+                    let names_idx = Self::read_u16(function, frame)? as usize;
+                    let input_nan = vm.stack.pop().ok_or_else(|| {
+                        vm.error(artifact, "stack underflow on par_stages")
+                    })?;
+
+                    #[cfg(target_arch = "wasm32")]
+                    {
+                        let _ = (n_names, names_idx, input_nan);
+                        return Err(vm.error(artifact, "par_stages is not supported on wasm32"));
+                    }
+
+                    #[cfg(not(target_arch = "wasm32"))]
+                    {
+                        let names_str = artifact.str_table.get(names_idx).cloned().unwrap_or_default();
+                        let stage_names: Vec<String> = if n_names == 0 || names_str.is_empty() {
+                            Vec::new()
+                        } else {
+                            names_str.split('\u{1f}').map(|s| s.to_string()).collect()
+                        };
+                        if stage_names.len() != n_names {
+                            return Err(vm.error(artifact, &format!(
+                                "par_stages: opcode says {} stages but names_str has {}",
+                                n_names, stage_names.len()
+                            )));
+                        }
+                        let input_vmval = input_nan.to_vmvalue();
+                        let artifact_clone = artifact.clone();
+                        let db_str = vm.db_path.clone();
+                        let handles: Vec<std::thread::JoinHandle<Result<VMValue, String>>> = stage_names
+                            .into_iter()
+                            .map(|fn_name| {
+                                let artifact_c = artifact_clone.clone();
+                                let input_c = input_vmval.clone();
+                                let db_c = db_str.clone();
+                                std::thread::spawn(move || {
+                                    let fn_idx = artifact_c.fn_idx_by_name(&fn_name).ok_or_else(|| {
+                                        format!("par: stage '{}' not found", fn_name)
+                                    })?;
+                                    VM::run_with_vmvalues(&artifact_c, fn_idx, vec![input_c], db_c, None)
+                                        .map(|(v, _)| v)
+                                        .map_err(|e| e.message)
+                                })
+                            })
+                            .collect();
+                        let mut results = Vec::with_capacity(handles.len());
+                        // Note: on early return (fail-fast), remaining JoinHandles are dropped.
+                        // Detached threads continue running but results are discarded.
+                        // This matches IO.par_execute_raw behavior and is intentional for Phase 1.
+                        for handle in handles {
+                            match handle.join() {
+                                Ok(Ok(v)) => {
+                                    // fail-fast on Result.err(...) variant
+                                    if let VMValue::Variant(ref tag, ref payload) = v {
+                                        if tag == "err" {
+                                            let msg = match payload {
+                                                Some(boxed) => match boxed.as_ref() {
+                                                    VMValue::Str(s) => format!("par: stage returned err: {}", s),
+                                                    p => format!("par: stage returned err: {:?}", p),
+                                                },
+                                                None => "par: stage returned err".to_string(),
+                                            };
+                                            return Err(vm.error(artifact, &msg));
+                                        }
+                                    }
+                                    results.push(v);
+                                }
+                                Ok(Err(e)) => return Err(vm.error(artifact, &e)),
+                                Err(_) => return Err(vm.error(artifact, "par_stages: a parallel stage panicked")),
+                            }
+                        }
+                        vm.stack.push(NanVal::from_list(FavList::new(results)));
                     }
                 }
                 // ─── Superinstructions (v20.2.0) ─────────────────────────────────
@@ -5265,6 +5576,78 @@ impl VM {
                 Ok(VMValue::List(FavList::new(results)))
             }
 
+            // v51.2.0: Merge par results — unwrap Result<T> list → List<T>
+            // merge_ordered_raw: collect in declaration order (fail-fast on err).
+            "IO.merge_ordered_raw" => {
+                if args.len() != 1 {
+                    return Err(self.error(artifact, "IO.merge_ordered_raw requires 1 argument"));
+                }
+                let list = match args.into_iter().next().unwrap() {
+                    VMValue::List(l) => l,
+                    other => return Err(self.error(artifact, &format!("IO.merge_ordered_raw: expected List, got {:?}", other))),
+                };
+                let mut results = Vec::with_capacity(list.len());
+                for item in list.iter() {
+                    match item {
+                        VMValue::Variant(tag, payload) if tag == "ok" || tag == "some" => {
+                            let v = match payload {
+                                Some(b) => *b.clone(),
+                                None => VMValue::Unit,
+                            };
+                            results.push(v);
+                        }
+                        VMValue::Variant(tag, payload) if tag == "err" => {
+                            let msg = match payload {
+                                Some(b) => match b.as_ref() {
+                                    VMValue::Str(s) => format!("merge: stage returned err: {}", s),
+                                    p => format!("merge: stage returned err: {:?}", p),
+                                },
+                                None => "merge: stage returned err".to_string(),
+                            };
+                            return Err(self.error(artifact, &msg));
+                        }
+                        other => results.push(other.clone()),
+                    }
+                }
+                Ok(VMValue::List(FavList::new(results)))
+            }
+
+            // v51.2.0: merge_any_raw — same as merge_ordered_raw for std::thread impl.
+            // Will use FuturesUnordered semantics when upgraded to tokio (v51.3+).
+            "IO.merge_any_raw" => {
+                if args.len() != 1 {
+                    return Err(self.error(artifact, "IO.merge_any_raw requires 1 argument"));
+                }
+                let list = match args.into_iter().next().unwrap() {
+                    VMValue::List(l) => l,
+                    other => return Err(self.error(artifact, &format!("IO.merge_any_raw: expected List, got {:?}", other))),
+                };
+                let mut results = Vec::with_capacity(list.len());
+                for item in list.iter() {
+                    match item {
+                        VMValue::Variant(tag, payload) if tag == "ok" || tag == "some" => {
+                            let v = match payload {
+                                Some(b) => *b.clone(),
+                                None => VMValue::Unit,
+                            };
+                            results.push(v);
+                        }
+                        VMValue::Variant(tag, payload) if tag == "err" => {
+                            let msg = match payload {
+                                Some(b) => match b.as_ref() {
+                                    VMValue::Str(s) => format!("merge: stage returned err: {}", s),
+                                    p => format!("merge: stage returned err: {:?}", p),
+                                },
+                                None => "merge: stage returned err".to_string(),
+                            };
+                            return Err(self.error(artifact, &msg));
+                        }
+                        other => results.push(other.clone()),
+                    }
+                }
+                Ok(VMValue::List(FavList::new(results)))
+            }
+
             // v22.2.0: Distributed parallel execution (stub — logs endpoints, falls back to local par)
             // NOTE: Uses std::thread::spawn; not supported on wasm32 (same as IO.par_execute_raw).
             "IO.par_distributed_raw" => {
@@ -5354,9 +5737,16 @@ impl VM {
                 let mut args_iter = args.into_iter();
                 let source = args_iter.next().unwrap_or(VMValue::Unit);
                 let stages = args_iter.next().unwrap_or(VMValue::Unit);
-                let chunk_size = match args_iter.next() {
+                let compiled_chunk_size = match args_iter.next() {
                     Some(VMValue::Int(n)) if n > 0 => n as usize,
                     _ => 512,
+                };
+                // fav.toml [stream].buffer_size が設定されている場合 chunk_size の上限として適用 (v51.3.0)
+                // 将来 tokio 化時に sync_channel による真のバックプレッシャーに置換予定
+                let chunk_size = if let Some(buf) = self.stream_buffer_size {
+                    compiled_chunk_size.min(buf)
+                } else {
+                    compiled_chunk_size
                 };
                 let items = match source {
                     VMValue::List(fl) => fl.to_vec(),
@@ -9560,6 +9950,67 @@ fn vm_call_builtin(
             [_] => Err("Math.round requires a Float argument".to_string()),
             _ => Err("Math.round requires 1 argument".to_string()),
         },
+        // -- v47.5.0: Float.round / Float.clamp / Float.abs / Int.to_hex / Int.abs --
+        "Float.round" => {
+            let mut it = args.into_iter();
+            let v = it.next().ok_or_else(|| "Float.round requires 2 arguments".to_string())?;
+            let n = it.next().ok_or_else(|| "Float.round requires 2 arguments".to_string())?;
+            match (v, n) {
+                (VMValue::Float(f), VMValue::Int(n)) => {
+                    // Guard against i64 values that don't fit in i32 (powi takes i32).
+                    // Practical precision is 0..=15 for f64, but we accept any i32 range.
+                    if !(i32::MIN as i64..=i32::MAX as i64).contains(&n) {
+                        return Err("Float.round: n is out of i32 range".to_string());
+                    }
+                    let factor = 10_f64.powi(n as i32);
+                    Ok(VMValue::Float((f * factor).round() / factor))
+                }
+                _ => Err("Float.round requires (Float, Int) arguments".to_string()),
+            }
+        }
+        "Float.clamp" => {
+            let mut it = args.into_iter();
+            let v  = it.next().ok_or_else(|| "Float.clamp requires 3 arguments".to_string())?;
+            let lo = it.next().ok_or_else(|| "Float.clamp requires 3 arguments".to_string())?;
+            let hi = it.next().ok_or_else(|| "Float.clamp requires 3 arguments".to_string())?;
+            match (v, lo, hi) {
+                (VMValue::Float(f), VMValue::Float(lo), VMValue::Float(hi)) => {
+                    // Use max/min instead of clamp to avoid panic when lo > hi.
+                    Ok(VMValue::Float(f.max(lo).min(hi)))
+                }
+                _ => Err("Float.clamp requires (Float, Float, Float) arguments".to_string()),
+            }
+        }
+        "Float.abs" => {
+            let v = args.into_iter().next()
+                .ok_or_else(|| "Float.abs requires 1 argument".to_string())?;
+            match v {
+                VMValue::Float(f) => Ok(VMValue::Float(f.abs())),
+                _ => Err("Float.abs requires a Float argument".to_string()),
+            }
+        }
+        "Int.to_hex" => {
+            let v = args.into_iter().next()
+                .ok_or_else(|| "Int.to_hex requires 1 argument".to_string())?;
+            match v {
+                // Negative integers produce two's-complement hex (e.g. -1 → "ffffffffffffffff").
+                // This matches Rust format!("{:x}", n) semantics, as documented in spec.
+                VMValue::Int(n) => Ok(VMValue::Str(format!("{:x}", n))),
+                _ => Err("Int.to_hex requires an Int argument".to_string()),
+            }
+        }
+        "Int.abs" => {
+            let v = args.into_iter().next()
+                .ok_or_else(|| "Int.abs requires 1 argument".to_string())?;
+            match v {
+                // checked_abs guards against i64::MIN overflow (no representable positive value).
+                VMValue::Int(n) => n
+                    .checked_abs()
+                    .map(VMValue::Int)
+                    .ok_or_else(|| "Int.abs: overflow on i64::MIN".to_string()),
+                _ => Err("Int.abs requires an Int argument".to_string()),
+            }
+        }
         "Float.to_bits" => match args.as_slice() {
             [VMValue::Float(v)] => Ok(VMValue::Int(v.to_bits() as i64)),
             [_] => Err("Float.to_bits requires a Float argument".to_string()),
@@ -11466,6 +11917,28 @@ fn vm_call_builtin(
                 _ => Err("List.distinct requires a List argument".to_string()),
             }
         }
+        // dedupe uses hash-based dedup (O(n)) via vmvalue_repr string keys,
+        // same as List.unique. List.distinct uses Vec::contains (O(n²)) instead.
+        "List.dedupe" => {
+            let v = args
+                .into_iter()
+                .next()
+                .ok_or_else(|| "List.dedupe requires 1 argument".to_string())?;
+            match v {
+                VMValue::List(fl) => {
+                    let mut seen = HashSet::new();
+                    let mut out = Vec::with_capacity(fl.len());
+                    for item in fl {
+                        let key = vmvalue_repr(&item);
+                        if seen.insert(key) {
+                            out.push(item);
+                        }
+                    }
+                    Ok(VMValue::List(FavList::new(out)))
+                }
+                _ => Err("List.dedupe requires a List argument".to_string()),
+            }
+        }
         "List.unzip" => {
             let v = args
                 .into_iter()
@@ -13062,6 +13535,15 @@ fn vm_call_builtin(
                     .ok_or_else(|| "Snowflake.execute_raw requires a sql argument".to_string())?,
                 "Snowflake.execute_raw",
             )?;
+            #[cfg(not(target_arch = "wasm32"))]
+            {
+                let ts = Utc::now().format("%Y-%m-%dT%H:%M:%SZ");
+                let sql_preview: String = sql.chars().take(80).collect();
+                append_audit_event(&format!(
+                    "{{\"ts\":\"{}\",\"op\":\"write\",\"effect\":\"Snowflake\",\"sql\":\"{}\"}}",
+                    ts, sql_preview.replace('"', "\\\"")
+                ));
+            }
             let account   = match snowflake_read_env("SNOWFLAKE_ACCOUNT")      { Ok(v) => v, Err(e) => return Ok(err_vm(VMValue::Str(e))) };
             let user      = match snowflake_read_env("SNOWFLAKE_USER")         { Ok(v) => v, Err(e) => return Ok(err_vm(VMValue::Str(e))) };
             let privkey   = match snowflake_read_env("SNOWFLAKE_PRIVATE_KEY")  { Ok(v) => v, Err(e) => return Ok(err_vm(VMValue::Str(e))) };
@@ -13087,6 +13569,15 @@ fn vm_call_builtin(
                     .ok_or_else(|| "Snowflake.query_raw requires a sql argument".to_string())?,
                 "Snowflake.query_raw",
             )?;
+            #[cfg(not(target_arch = "wasm32"))]
+            {
+                let ts = Utc::now().format("%Y-%m-%dT%H:%M:%SZ");
+                let sql_preview: String = sql.chars().take(80).collect();
+                append_audit_event(&format!(
+                    "{{\"ts\":\"{}\",\"op\":\"read\",\"effect\":\"Snowflake\",\"sql\":\"{}\"}}",
+                    ts, sql_preview.replace('"', "\\\"")
+                ));
+            }
             let account   = match snowflake_read_env("SNOWFLAKE_ACCOUNT")      { Ok(v) => v, Err(e) => return Ok(err_vm(VMValue::Str(e))) };
             let user      = match snowflake_read_env("SNOWFLAKE_USER")         { Ok(v) => v, Err(e) => return Ok(err_vm(VMValue::Str(e))) };
             let privkey   = match snowflake_read_env("SNOWFLAKE_PRIVATE_KEY")  { Ok(v) => v, Err(e) => return Ok(err_vm(VMValue::Str(e))) };
@@ -17557,6 +18048,15 @@ fn vm_call_builtin(
             let key_str     = vm_string(it.next().ok_or("Kafka.produce_raw: missing key")?,      "Kafka.produce_raw")?;
             let value_str   = vm_string(it.next().ok_or("Kafka.produce_raw: missing value")?,    "Kafka.produce_raw")?;
 
+            #[cfg(not(target_arch = "wasm32"))]
+            {
+                let ts = Utc::now().format("%Y-%m-%dT%H:%M:%SZ");
+                append_audit_event(&format!(
+                    "{{\"ts\":\"{}\",\"op\":\"write\",\"effect\":\"Kafka\",\"topic\":\"{}\"}}",
+                    ts, topic.replace('"', "\\\"")
+                ));
+            }
+
             let brokers = kafka_resolve_brokers(&brokers_arg);
             match kafka_produce_sync(&brokers, &topic, &key_str, &value_str) {
                 Ok(()) => Ok(ok_vm(VMValue::Unit)),
@@ -17574,6 +18074,15 @@ fn vm_call_builtin(
             let brokers_arg = vm_string(it.next().ok_or("Kafka.consume_one_raw: missing brokers")?,  "Kafka.consume_one_raw")?;
             let topic       = vm_string(it.next().ok_or("Kafka.consume_one_raw: missing topic")?,    "Kafka.consume_one_raw")?;
             let _group_id   = vm_string(it.next().ok_or("Kafka.consume_one_raw: missing group_id")?, "Kafka.consume_one_raw")?;
+
+            #[cfg(not(target_arch = "wasm32"))]
+            {
+                let ts = Utc::now().format("%Y-%m-%dT%H:%M:%SZ");
+                append_audit_event(&format!(
+                    "{{\"ts\":\"{}\",\"op\":\"read\",\"effect\":\"Kafka\",\"topic\":\"{}\"}}",
+                    ts, topic.replace('"', "\\\"")
+                ));
+            }
 
             let brokers = kafka_resolve_brokers(&brokers_arg);
             match kafka_consume_one_sync(&brokers, &topic) {

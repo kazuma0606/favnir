@@ -8,7 +8,19 @@ stage Lower: String -> String = |s| {
 
 seq Normalize = Trim |> Lower
 
+// return guard pattern (v45.8.0) — validates amount using early return
+// also demonstrates numeric literal _ separator (v45.7.0)
+fn validate_amount(amount: Float) -> Result<Float, String> {
+    if amount <= 0.0 { return Result.err("amount must be positive") }
+    if amount > 1_000_000.0 { return Result.err("amount exceeds maximum") }
+    Result.ok(amount)
+}
+
 public fn main(ctx: AppCtx) -> Unit {
     bind result <- "  Hello, World!  " |> Normalize
     ctx.io.println(result);
+    match validate_amount(500.0) {
+        Ok(_)    -> ctx.io.println("amount valid")
+        Err(msg) -> ctx.io.println(msg)
+    };
 }

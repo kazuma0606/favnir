@@ -277,6 +277,7 @@ fn walk_closures_in_expr(expr: &IRExpr, ir: &IRProgram, map: &mut HashMap<u16, (
                     | IRStmt::LegacyBind(_, e)
                     | IRStmt::Chain(_, e)
                     | IRStmt::Yield(e)
+                    | IRStmt::Return(e)
                     | IRStmt::Expr(e) => walk_closures_in_expr(e, ir, map),
                     IRStmt::SeqChain { expr: e, .. } => walk_closures_in_expr(e, ir, map),
                     IRStmt::TrackLine(_) => {}
@@ -314,6 +315,12 @@ fn walk_closures_in_expr(expr: &IRExpr, ir: &IRProgram, map: &mut HashMap<u16, (
                 walk_closures_in_expr(v, ir, map);
             }
         }
+        IRExpr::Par { input, .. } => {
+            walk_closures_in_expr(input, ir, map);
+        }
+        IRExpr::AssertSchema { arg, .. } => {
+            walk_closures_in_expr(arg, ir, map);
+        }
     }
 }
 
@@ -337,6 +344,7 @@ fn scan_closure_bound_slots_walk(expr: &IRExpr, map: &mut HashMap<u16, u16>) {
                     | IRStmt::LegacyBind(_, e)
                     | IRStmt::Chain(_, e)
                     | IRStmt::Yield(e)
+                    | IRStmt::Return(e)
                     | IRStmt::Expr(e) => scan_closure_bound_slots_walk(e, map),
                     IRStmt::SeqChain { expr: e, .. } => scan_closure_bound_slots_walk(e, map),
                     IRStmt::TrackLine(_) => {}
@@ -650,6 +658,12 @@ pub fn collect_local_types(expr: &IRExpr, map: &mut HashMap<u16, Type>) {
                 collect_local_types(v, map);
             }
         }
+        IRExpr::Par { input, .. } => {
+            collect_local_types(input, map);
+        }
+        IRExpr::AssertSchema { arg, .. } => {
+            collect_local_types(arg, map);
+        }
     }
 }
 
@@ -663,7 +677,7 @@ pub fn collect_local_types_stmt(stmt: &IRStmt, map: &mut HashMap<u16, Type>) {
             map.entry(*slot).or_insert_with(|| expr.ty().clone());
             collect_local_types(expr, map);
         }
-        IRStmt::Yield(expr) | IRStmt::Expr(expr) => collect_local_types(expr, map),
+        IRStmt::Yield(expr) | IRStmt::Return(expr) | IRStmt::Expr(expr) => collect_local_types(expr, map),
         IRStmt::TrackLine(_) => {}
         IRStmt::RefinementAssert { expr, .. } => collect_local_types(expr, map),
     }
@@ -760,6 +774,15 @@ fn collect_expr_string_literals(expr: &IRExpr, ordered: &mut Vec<String>) {
                 collect_expr_string_literals(v, ordered);
             }
         }
+        IRExpr::Par { input, .. } => {
+            collect_expr_string_literals(input, ordered);
+        }
+        IRExpr::AssertSchema { arg, ty_name, .. } => {
+            collect_expr_string_literals(arg, ordered);
+            if !ordered.iter().any(|s| s == ty_name) {
+                ordered.push(ty_name.clone());
+            }
+        }
     }
 }
 
@@ -769,6 +792,7 @@ fn collect_stmt_string_literals(stmt: &IRStmt, ordered: &mut Vec<String>) {
         | IRStmt::LegacyBind(_, expr)
         | IRStmt::Chain(_, expr)
         | IRStmt::Yield(expr)
+        | IRStmt::Return(expr)
         | IRStmt::Expr(expr) => {
             collect_expr_string_literals(expr, ordered);
         }
@@ -830,6 +854,7 @@ pub fn collect_used_builtins(ir: &IRProgram) -> std::collections::HashSet<String
                         | IRStmt::LegacyBind(_, expr)
                         | IRStmt::Chain(_, expr)
                         | IRStmt::Yield(expr)
+                        | IRStmt::Return(expr)
                         | IRStmt::Expr(expr) => walk_expr(expr, globals, used),
                         IRStmt::SeqChain { expr, .. } => walk_expr(expr, globals, used),
                         IRStmt::TrackLine(_) => {}
@@ -871,6 +896,12 @@ pub fn collect_used_builtins(ir: &IRProgram) -> std::collections::HashSet<String
                 for (_, v) in updates {
                     walk_expr(v, globals, used);
                 }
+            }
+            IRExpr::Par { input, .. } => {
+                walk_expr(input, globals, used);
+            }
+            IRExpr::AssertSchema { arg, .. } => {
+                walk_expr(arg, globals, used);
             }
         }
     }
@@ -1005,6 +1036,9 @@ fn emit_stmt(
         )),
         IRStmt::Yield(_) => Err(WasmCodegenError::UnsupportedExpr(
             "yield statement in wasm MVP".into(),
+        )),
+        IRStmt::Return(_) => Err(WasmCodegenError::UnsupportedExpr(
+            "return statement in wasm MVP".into(),
         )),
         IRStmt::TrackLine(_) => Ok(()), // no-op in WASM
         IRStmt::RefinementAssert { .. } => Ok(()), // no-op in WASM MVP (runtime checks not supported)
@@ -1236,6 +1270,12 @@ fn emit_expr(
         )),
         IRExpr::RecordSpread(_, _, _) => Err(WasmCodegenError::UnsupportedExpr(
             "record spread in wasm MVP".into(),
+        )),
+        IRExpr::Par { .. } => Err(WasmCodegenError::UnsupportedExpr(
+            "par is not supported in wasm MVP".into(),
+        )),
+        IRExpr::AssertSchema { .. } => Err(WasmCodegenError::UnsupportedExpr(
+            "assert_schema is not supported in wasm MVP".into(),
         )),
     }
 }

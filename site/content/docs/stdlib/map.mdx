@@ -2,7 +2,7 @@
 title: "Map"
 order: 3
 category: "標準ライブラリ"
-description: "Map<K, V> — get / set / keys / values / contains"
+description: "Map<K, V> — get / set / merge / filter_values / map_values / keys / values"
 ---
 
 # Map
@@ -18,7 +18,9 @@ description: "Map<K, V> — get / set / keys / values / contains"
 | `Map.values` | `Map(K,V) -> List(V)` | 値一覧 |
 | `Map.remove` | `Map(K,V), K -> Map(K,V)` | キーの削除 |
 | `Map.len` | `Map(K,V) -> Int` | 要素数 |
-| `Map.merge` | `Map(K,V), Map(K,V) -> Map(K,V)` | 2 つのマップを結合 |
+| `Map.merge` | `Map(K,V), Map(K,V) -> Map(K,V)` | 2 つのマップを結合（右辺優先） |
+| `Map.filter_values` | `Map(K,V), (V -> Bool) -> Map(K,V)` | 値でフィルタリング |
+| `Map.map_values` | `Map(K,V), (V -> W) -> Map(K,W)` | 全値を変換 |
 
 ## 使用例
 

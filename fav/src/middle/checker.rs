@@ -256,6 +256,12 @@ impl Type {
 
 // ── Subst (v0.4.0) ────────────────────────────────────────────────────────────
 
+/// `Subst` を参照カウントでラップした型エイリアス（v51.6.0）。
+/// クローンは Rc のインクリメントのみ（HashMap のヒープコピーなし）。
+/// NOTE: 本バージョンは型エイリアスと変換メソッドの追加のみ。
+///       Subst → SubstRef への段階的移行は今後のホットパス最適化スプリントで実施予定。
+pub type SubstRef = std::rc::Rc<Subst>;
+
 /// Type variable substitution map.  `apply` replaces `Var(name)` with the
 /// mapped type, recursing transitively.
 #[derive(Debug, Clone)]
@@ -330,6 +336,12 @@ impl Subst {
             result.entry(k).or_insert(v);
         }
         Subst { map: result }
+    }
+
+    /// Consume `self` and wrap in `SubstRef` (`Rc<Subst>`).
+    /// Clone cost is O(1) — only the reference count is incremented（v51.6.0）.
+    pub fn into_ref(self) -> SubstRef {
+        std::rc::Rc::new(self)
     }
 }
 
@@ -935,6 +947,8 @@ pub struct Checker {
     type_arity: HashMap<String, usize>,
     /// Chain context: the return type of the enclosing fn when it is Result/Option (v0.5.0).
     chain_context: Option<Type>,
+    /// Declared return type of the enclosing fn/stage body (None = forbidden context). (v45.2.0)
+    current_return_ty: Option<Type>,
     /// Whether we are inside a collect { } block (v0.5.0).
     in_collect: bool,
     /// Functions directly invoked as collect helpers: collect { helper(...) }.
@@ -966,6 +980,8 @@ pub struct Checker {
     /// v34.8A: true when the current fn/trf has a ctx: AppCtx parameter.
     /// ctx-based functions bypass !Effect annotation checks (effect = via ctx).
     current_fn_has_ctx: bool,
+    /// v45.5.0: inner types of opaque aliases — coercing the inner type to the opaque type is E0413.
+    opaque_alias_inner: HashMap<String, Type>,
 }
 
 impl Checker {
@@ -998,6 +1014,7 @@ impl Checker {
             impls: HashMap::new(),
             type_arity: HashMap::new(),
             chain_context: None,
+            current_return_ty: None,
             in_collect: false,
             collect_helpers: HashSet::new(),
             type_aliases: HashMap::new(),
@@ -1013,6 +1030,7 @@ impl Checker {
             linear_env: HashMap::new(),
             const_generics_registry: HashMap::new(),
             current_fn_has_ctx: false,
+            opaque_alias_inner: HashMap::new(),
         }
     }
 
@@ -1048,6 +1066,7 @@ impl Checker {
             impls: HashMap::new(),
             type_arity: HashMap::new(),
             chain_context: None,
+            current_return_ty: None,
             in_collect: false,
             collect_helpers: HashSet::new(),
             type_aliases: HashMap::new(),
@@ -1063,6 +1082,7 @@ impl Checker {
             linear_env: HashMap::new(),
             const_generics_registry: HashMap::new(),
             current_fn_has_ctx: false,
+            opaque_alias_inner: HashMap::new(),
         }
     }
 
@@ -1261,6 +1281,7 @@ impl Checker {
                 alias,
                 is_rune,
                 is_public,
+                kind: _,
                 span,
             } = item
             else {
@@ -1452,6 +1473,36 @@ impl Checker {
                             name
                         ),
                         span,
+                    );
+                }
+            }
+        }
+    }
+
+    /// v45.2.0: check a `return expr` statement against the enclosing fn/stage return type.
+    ///
+    /// `current_return_ty` meanings:
+    ///   None              — forbidden context (closure, seq body, top-level) → E0415
+    ///   Some(Unknown)     — fn with no explicit return annotation; type is inferred
+    ///                       from body tail; `return` is allowed but type not verified
+    ///                       (the body-level mismatch check in check_fn_def handles it)
+    ///   Some(concrete_ty) — fn/stage with explicit return type; verify against it
+    fn check_return_stmt(&mut self, ret: &ReturnStmt) {
+        match self.current_return_ty.clone() {
+            None => {
+                self.type_error("E0415", "'return' is not allowed outside a fn or stage body", &ret.span);
+            }
+            Some(expected_ty) => {
+                let actual_ty = self.check_expr(&ret.expr);
+                if !actual_ty.is_compatible(&expected_ty) {
+                    self.type_error(
+                        "E0415",
+                        format!(
+                            "return type mismatch: expected `{}`, got `{}`",
+                            expected_ty.display(),
+                            actual_ty.display()
+                        ),
+                        &ret.span,
                     );
                 }
             }
@@ -2130,7 +2181,14 @@ impl Checker {
                     );
                     // Type aliases: store the target TypeExpr for later resolution.
                     if let TypeBody::Alias(target) = &td.body {
-                        self.type_aliases.insert(td.name.clone(), target.clone());
+                        if td.is_opaque {
+                            // v45.5.0: opaque alias — do NOT add to type_aliases so the name
+                            // does not resolve transparently. Store the inner type for E0413.
+                            let inner_ty = self.resolve_type_expr(target);
+                            self.opaque_alias_inner.insert(td.name.clone(), inner_ty);
+                        } else {
+                            self.type_aliases.insert(td.name.clone(), target.clone());
+                        }
                         if !td.type_params.is_empty() {
                             self.type_arity
                                 .insert(td.name.clone(), td.type_params.len());
@@ -2932,6 +2990,9 @@ impl Checker {
         );
         self.env.define("assert_eq".to_string(), Type::Unknown);
         self.env.define("assert_ne".to_string(), Type::Unknown);
+        // v46.3.0: assert_ok / assert_err を追加
+        self.env.define("assert_ok".to_string(), Type::Unknown);
+        self.env.define("assert_err".to_string(), Type::Unknown);
         self.check_block(&td.body);
         self.env.pop();
     }
@@ -2965,6 +3026,7 @@ impl Checker {
             Stmt::Expr(expr) => self.collect_helpers_in_expr(expr),
             Stmt::Chain(c) => self.collect_helpers_in_expr(&c.expr),
             Stmt::Yield(y) => self.collect_helpers_in_expr(&y.expr),
+            Stmt::Return(r) => self.collect_helpers_in_expr(&r.expr),
             Stmt::ForIn(f) => {
                 self.collect_helpers_in_expr(&f.iter);
                 self.collect_helpers_in_block(&f.body);
@@ -3006,6 +3068,7 @@ impl Checker {
                 }
             }
             Expr::AssertMatches(expr, _, _) => self.collect_helpers_in_expr(expr),
+            Expr::AssertSchema { arg, .. } => self.collect_helpers_in_expr(arg),
             Expr::Collect(block, _) => {
                 if let Expr::Apply(callee, _, _) = block.expr.as_ref() {
                     if let Expr::Ident(name, _) = callee.as_ref() {
@@ -3072,6 +3135,18 @@ impl Checker {
         );
         self.env.push();
 
+        // v46.3.0: #[test] fn の本体で assert 系 primitive を利用可能にする
+        if fd.is_test {
+            self.env.define(
+                "assert".to_string(),
+                Type::Fn(vec![Type::Bool], Box::new(Type::Unit)),
+            );
+            self.env.define("assert_eq".to_string(), Type::Unknown);
+            self.env.define("assert_ne".to_string(), Type::Unknown);
+            self.env.define("assert_ok".to_string(), Type::Unknown);
+            self.env.define("assert_err".to_string(), Type::Unknown);
+        }
+
         // Validate type arity (E023) for param and return type annotations.
         for p in &fd.params {
             self.validate_type_expr_arity(&p.ty);
@@ -3102,7 +3177,10 @@ impl Checker {
 
         let saved_in_collect = self.in_collect;
         self.in_collect = saved_in_collect || self.collect_helpers.contains(&fd.name);
+        // v45.2.0: set return type context so Stmt::Return can verify type
+        let saved_return_ty = self.current_return_ty.replace(ret_resolved.clone());
         let body_ty = self.check_block(&fd.body);
+        self.current_return_ty = saved_return_ty;
         self.in_collect = saved_in_collect;
         let return_ty = if let Some(return_ty) = &fd.return_ty {
             self.resolve_type_expr(return_ty)
@@ -3120,7 +3198,28 @@ impl Checker {
             body_ty.clone()
         };
 
-        if !body_ty.is_compatible(&return_ty) {
+        // v45.5.0: E0413 — opaque alias coerce forbidden.
+        // Use a flag so E0101 is suppressed when E0413 fires, while env/linear cleanup
+        // still runs (avoids scope-stack corruption from early return).
+        let mut e0413_fired = false;
+        if let Type::Named(ref opaque_name, _) = return_ty {
+            if let Some(inner_ty) = self.opaque_alias_inner.get(opaque_name.as_str()).cloned() {
+                if body_ty.is_compatible(&inner_ty) {
+                    self.type_error(
+                        "E0413",
+                        format!(
+                            "fn `{}`: cannot coerce `{}` to opaque type `{}`; declare a dedicated constructor function for this opaque type",
+                            fd.name,
+                            body_ty.display(),
+                            opaque_name
+                        ),
+                        &fd.body.span,
+                    );
+                    e0413_fired = true;
+                }
+            }
+        }
+        if !e0413_fired && !body_ty.is_compatible(&return_ty) {
             self.type_error(
                 "E0101",
                 format!(
@@ -3180,10 +3279,33 @@ impl Checker {
             self.env.define(p.name.clone(), ty);
         }
 
-        let body_ty = self.check_block(&td.body);
+        // v45.2.0: resolve output type before body so Stmt::Return can verify type
         let output_ty = self.resolve_type_expr(&td.output_ty);
+        let saved_return_ty = self.current_return_ty.replace(output_ty.clone());
+        let body_ty = self.check_block(&td.body);
+        self.current_return_ty = saved_return_ty;
 
-        if !body_ty.is_compatible(&output_ty) {
+        // v45.5.0: E0413 — opaque alias coerce forbidden.
+        // Flag suppresses E0101 when E0413 fires (prevents double error on same span).
+        let mut e0413_fired = false;
+        if let Type::Named(ref opaque_name, _) = output_ty {
+            if let Some(inner_ty) = self.opaque_alias_inner.get(opaque_name.as_str()).cloned() {
+                if body_ty.is_compatible(&inner_ty) {
+                    self.type_error(
+                        "E0413",
+                        format!(
+                            "trf `{}`: cannot coerce `{}` to opaque type `{}`; declare a dedicated constructor function for this opaque type",
+                            td.name,
+                            body_ty.display(),
+                            opaque_name
+                        ),
+                        &td.body.span,
+                    );
+                    e0413_fired = true;
+                }
+            }
+        }
+        if !e0413_fired && !body_ty.is_compatible(&output_ty) {
             self.type_error(
                 "E0101",
                 format!(
@@ -3274,6 +3396,7 @@ impl Checker {
                 Stmt::Chain(c) => self.scan_expr_for_pipeline_calls(&c.expr, ctx_map),
                 Stmt::Expr(e) => self.scan_expr_for_pipeline_calls(e, ctx_map),
                 Stmt::Yield(y) => self.scan_expr_for_pipeline_calls(&y.expr, ctx_map),
+                Stmt::Return(r) => self.scan_expr_for_pipeline_calls(&r.expr, ctx_map),
                 Stmt::ForIn(f) => {
                     self.scan_expr_for_pipeline_calls(&f.iter, ctx_map);
                     self.scan_block_for_pipeline_calls(&f.body, ctx_map);
@@ -3506,6 +3629,10 @@ impl Checker {
                 FlwStep::Tap(_) | FlwStep::Inspect => {
                     // tap/inspect pass the value through unchanged — no type change
                 }
+                FlwStep::Merge(_) => {
+                    // Merge.ordered / Merge.any: unwrap par result list — pass through as Unknown
+                    current_output = Some(Type::Unknown);
+                }
             }
         }
 
@@ -3513,12 +3640,12 @@ impl Checker {
         let first_stage = fd.steps.first().and_then(|s| match s {
             FlwStep::Stage(n) => Some(n.as_str()),
             FlwStep::Par(names) | FlwStep::ParDistributed(names) => names.first().map(|s| s.as_str()),
-            FlwStep::Tap(_) | FlwStep::Inspect => None,
+            FlwStep::Tap(_) | FlwStep::Inspect | FlwStep::Merge(_) => None,
         });
         let last_stage = fd.steps.last().and_then(|s| match s {
             FlwStep::Stage(n) => Some(n.as_str()),
             FlwStep::Par(names) | FlwStep::ParDistributed(names) => names.last().map(|s| s.as_str()),
-            FlwStep::Tap(_) | FlwStep::Inspect => None,
+            FlwStep::Tap(_) | FlwStep::Inspect | FlwStep::Merge(_) => None,
         });
         if let (Some(first_name), Some(last_name)) = (first_stage, last_stage) {
             if let (Some(first_ty), Some(last_ty)) = (
@@ -3858,6 +3985,8 @@ impl Checker {
                     other => other,
                 };
                 if let Pattern::Bind(name, span) = &b.pattern {
+                    // v46.4.0: bind 変数の型を type_at に記録（LSP inlay hints 用）
+                    self.remember_type(span, &effective_ty);
                     if effective_ty == Type::Unknown {
                         self.type_warning(
                             "W001",
@@ -3890,7 +4019,15 @@ impl Checker {
                 }
             }
             Stmt::Expr(e) => {
-                self.check_expr(e);
+                // For match statements, call check_match_arms directly with stmt ctx (W034).
+                // Do NOT call check_expr(e) first — that would invoke the value-ctx path
+                // (E0416) from check_expr's Expr::Match arm and cause duplicate diagnostics.
+                if let Expr::Match(scrutinee, arms, span) = e {
+                    let scrutinee_ty = self.check_expr(scrutinee);
+                    self.check_match_arms(arms, &scrutinee_ty, span, false); // stmt ctx → W034
+                } else {
+                    self.check_expr(e);
+                }
             }
             // chain x <- expr  (v0.5.0)
             Stmt::Chain(c) => {
@@ -3914,6 +4051,10 @@ impl Checker {
                     self.type_error("E0226", "yield used outside a collect block", &y.span);
                 }
                 self.check_expr(&y.expr);
+            }
+            // return expr  (v45.1.0; type check in v45.2)
+            Stmt::Return(r) => {
+                self.check_return_stmt(r); // v45.2: verify against fn/stage return type
             }
             // for x in list { body }  (v1.9.0; collect-inside supported since v2.9.0)
             Stmt::ForIn(f) => {
@@ -4616,7 +4757,22 @@ impl Checker {
                         let inst_ret = inst.apply(ret);
 
                         if inst_params.len() != arg_tys.len() {
-                            self.type_error(
+                            // v45.6.0: include function name in hint when available
+                            let hint = if let Expr::Ident(fn_name, _) = func.as_ref() {
+                                format!(
+                                    "function `{}` expects {} argument(s), but {} were provided",
+                                    fn_name,
+                                    inst_params.len(),
+                                    arg_tys.len()
+                                )
+                            } else {
+                                format!(
+                                    "this function expects {} argument(s), but {} were provided",
+                                    inst_params.len(),
+                                    arg_tys.len()
+                                )
+                            };
+                            self.type_error_h(
                                 "E0101",
                                 format!(
                                     "expected {} argument(s), got {}",
@@ -4624,6 +4780,7 @@ impl Checker {
                                     arg_tys.len()
                                 ),
                                 span,
+                                vec![hint],
                             );
                             Type::Error
                         } else {
@@ -4843,7 +5000,7 @@ impl Checker {
             // match (4-12)
             Expr::Match(scrutinee, arms, span) => {
                 let scrutinee_ty = self.check_expr(scrutinee);
-                self.check_match_arms(arms, &scrutinee_ty, span)
+                self.check_match_arms(arms, &scrutinee_ty, span, true) // value ctx
             }
 
             Expr::AssertMatches(expr, pattern, _span) => {
@@ -4852,6 +5009,16 @@ impl Checker {
                 self.check_pattern_bindings(pattern, &expr_ty);
                 self.env.pop();
                 Type::Unit
+            }
+
+            Expr::AssertSchema { ty_name, arg, .. } => {
+                // Phase 1: check arg for inner type errors only.
+                // Phase 2 (v52.2.0+): validate arg type is Map<String, Any>.
+                self.check_expr(arg);
+                Type::Result(
+                    Box::new(Type::Named(ty_name.clone(), vec![])),
+                    Box::new(Type::String),
+                )
             }
 
             // if (4-13)
@@ -4896,7 +5063,12 @@ impl Checker {
                 // task 3-10: yield inside a closure is invalid (E026) even within collect
                 let saved_in_collect = self.in_collect;
                 self.in_collect = false;
+                // v45.2.0: closures have no declared return type of their own; clear the
+                // enclosing fn/stage context so `return` inside a closure does not
+                // incorrectly validate against the outer return type.
+                let saved_return_ty = self.current_return_ty.take();
                 let body_ty = self.check_expr(body);
+                self.current_return_ty = saved_return_ty;
                 self.in_collect = saved_in_collect;
                 self.env.pop();
                 // Represent as Arrow(Unknown, body_ty) for single-param closures
@@ -5082,7 +5254,13 @@ impl Checker {
 
     // ── match arm consistency (4-12) ─────────────────────────────────────────
 
-    fn check_match_arms(&mut self, arms: &[MatchArm], scrutinee_ty: &Type, span: &Span) -> Type {
+    fn check_match_arms(
+        &mut self,
+        arms: &[MatchArm],
+        scrutinee_ty: &Type,
+        span: &Span,
+        value_ctx: bool,
+    ) -> Type {
         if arms.is_empty() {
             return Type::Unit;
         }
@@ -5120,6 +5298,32 @@ impl Checker {
                             span,
                         );
                         result_ty = Some(Type::Error);
+                    }
+                }
+            }
+        }
+        // exhaustiveness check for Sum types (v45.4.0)
+        if let Type::Named(type_name, _) = scrutinee_ty {
+            if let Some(TypeBody::Sum(variants)) = self.type_defs.get(type_name.as_str()) {
+                let all_variants: Vec<String> =
+                    variants.iter().map(|v| v.name().to_string()).collect();
+                let (covered, has_catch_all) = collect_covered_variants(arms);
+                if !has_catch_all {
+                    let missing: Vec<&str> = all_variants
+                        .iter()
+                        .filter(|v| !covered.contains(v))
+                        .map(|s| s.as_str())
+                        .collect();
+                    if !missing.is_empty() {
+                        let msg = format!(
+                            "non-exhaustive match: {} not covered",
+                            missing.join(", ")
+                        );
+                        if value_ctx {
+                            self.type_error("E0416", msg, span);
+                        } else {
+                            self.type_warning("W034", msg, span);
+                        }
                     }
                 }
             }
@@ -5654,6 +5858,12 @@ impl Checker {
             | ("Int", "shift_left")
             | ("Int", "shift_right") => Some(Type::Int),
 
+            // Float/Int 拡充 v47.5.0
+            ("Float", "round") => Some(Type::Float),
+            ("Float", "clamp") | ("Float", "abs") => Some(Type::Float),
+            ("Int", "to_hex") => Some(Type::String),
+            ("Int", "abs") => Some(Type::Int),
+
             // Mut コレクション v23.3.0
             // Type::Unknown: MutList/MutMap は opaque handle（ArrowBatch 等と同パターン）。
             // 型チェックをスキップするため、引数型の検証は vm_call_builtin に委ねる。
@@ -5853,6 +6063,10 @@ impl Checker {
                 Some(Type::List(Box::new(elem)))
             }
             ("List", "distinct") => {
+                let elem = self.expect_list_arg(&arg_tys, 0, span);
+                Some(Type::List(Box::new(elem)))
+            }
+            ("List", "dedupe") => {
                 let elem = self.expect_list_arg(&arg_tys, 0, span);
                 Some(Type::List(Box::new(elem)))
             }
@@ -8357,6 +8571,7 @@ abstract seq Pipeline {
             workers: None,
             state: None,
             stream: None,
+            runes: std::collections::HashMap::new(),
         };
         let resolver = Arc::new(Mutex::new(Resolver::new(Some(toml), Some(root))));
         (resolver, dir)
@@ -8453,6 +8668,7 @@ abstract seq Pipeline {
             workers: None,
             state: None,
             stream: None,
+            runes: std::collections::HashMap::new(),
         };
         let mut resolver = Resolver::new(Some(toml), Some(root));
         // Simulate a mid-load state: "cycle" is already in the loading set
@@ -10098,6 +10314,43 @@ public fn main() -> Order {
 
 // ── Module export extraction ───────────────────────────────────────────────────
 
+// ── match exhaustiveness helpers (v45.4.0) ────────────────────────────────────
+
+/// Returns (covered_variant_names, has_catch_all) from a set of match arms.
+/// Arms with guards are excluded — a guard can fail, so it doesn't guarantee coverage.
+fn collect_covered_variants(arms: &[MatchArm]) -> (Vec<String>, bool) {
+    let mut covered: Vec<String> = vec![];
+    let mut has_catch_all = false;
+    for arm in arms {
+        if arm.guard.is_some() {
+            continue;
+        }
+        collect_pattern_variants(&arm.pattern, &mut covered, &mut has_catch_all);
+    }
+    (covered, has_catch_all)
+}
+
+fn collect_pattern_variants(
+    pat: &Pattern,
+    covered: &mut Vec<String>,
+    has_catch_all: &mut bool,
+) {
+    match pat {
+        Pattern::Wildcard(_) | Pattern::Bind(_, _) => {
+            *has_catch_all = true;
+        }
+        Pattern::Variant(name, _, _) => {
+            covered.push(name.clone());
+        }
+        Pattern::Or(pats, _) => {
+            for p in pats {
+                collect_pattern_variants(p, covered, has_catch_all);
+            }
+        }
+        _ => {}
+    }
+}
+
 /// Extract the publicly-visible symbols from a program after type-checking.
 /// Returns a map of symbol name ↁE(resolved Type, Visibility).
 pub fn collect_exports(program: &Program, env: &TyEnv) -> HashMap<String, (Type, Visibility)> {
@@ -10200,6 +10453,7 @@ fn collect_calls_from_expr(expr: &Expr, calls: &mut Vec<String>) {
         }
         Expr::Collect(b, _) => collect_calls_from_block(b, calls),
         Expr::AssertMatches(e, _, _) => collect_calls_from_expr(e, calls),
+        Expr::AssertSchema { arg, .. } => collect_calls_from_expr(arg, calls),
         Expr::ListComp { expr, clauses, .. } | Expr::ResultComp { expr, clauses, .. } => {
             collect_calls_from_expr(expr, calls);
             for clause in clauses {
@@ -10221,6 +10475,7 @@ fn collect_calls_from_block(block: &Block, calls: &mut Vec<String>) {
             Stmt::Expr(e) => collect_calls_from_expr(e, calls),
             Stmt::Chain(c) => collect_calls_from_expr(&c.expr, calls),
             Stmt::Yield(y) => collect_calls_from_expr(&y.expr, calls),
+            Stmt::Return(r) => collect_calls_from_expr(&r.expr, calls),
             Stmt::ForIn(f) => {
                 collect_calls_from_expr(&f.iter, calls);
                 collect_calls_from_block(&f.body, calls);

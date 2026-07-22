@@ -1162,6 +1162,18 @@ fn token_eq(a: Token, b: Token) -> Bool {
                 _ => false
             }
         }
+        TkQuestion => {
+            match b {
+                TkQuestion => true
+                _ => false
+            }
+        }
+        TkQuestionQuestion => {
+            match b {
+                TkQuestionQuestion => true
+                _ => false
+            }
+        }
     }
 }
 
@@ -1226,6 +1238,10 @@ fn token_to_string(t: Token) -> String {
         TkImpl => "impl"
         TkDocComment(s) => String.concat("///", s)
         TkEof => "EOF"
+        TkCollect => "collect"
+        TkYield => "yield"
+        TkQuestion => "?"
+        TkQuestionQuestion => "??"
     }
 }
 
@@ -3120,6 +3136,7 @@ fn free_names_expr(expr: Expr, bound: List<String>, acc: List<String>) -> List<S
             free_names_expr(rest, bound, acc1)
         }
         EFieldNil => acc
+        EQuestion(inner) => free_names_expr(inner, bound, acc)
     }
 }
 
@@ -3269,6 +3286,8 @@ fn binop_bc(op: Op) -> Bc {
         OpGtEq => BcGe
         OpAnd => BcAnd
         OpOr => BcOr
+        // unreachable: OpNullCoalesce は compile_expr で EMatch desugar される
+        OpNullCoalesce => BcOr
     }
 }
 
@@ -4063,7 +4082,7 @@ fn serialize_artifact(artifact: Artifact) -> List<Int> {
     bind str_count <- List.length(state.str_table.strs);
     bind str_bytes <- write_str_table(state.str_table.strs, empty_ints());
     bind magic <- List.push(List.push(List.push(List.singleton(70), 86), 67), 1);
-    bind ver <- List.push(List.push(List.push(List.singleton(32), 0), 0), 0);
+    bind ver <- List.push(List.push(List.push(List.singleton(33), 0), 0), 0); // v52.2.0: 0x21
     bind header <- List.concat(List.concat(magic, ver), List.concat(List.concat(write_u32_le(str_count), write_u32_le(fn_count)), write_u32_le(state.global_count)));
     List.concat(header, List.concat(str_bytes, List.concat(state.type_bytes, List.concat(state.global_bytes, state.fn_bytes))))
 }
@@ -4269,6 +4288,7 @@ fn pretty_expr(expr: Expr, indent: Int) -> String {
         EArmNil => ""
         EField(parts) => String.concat(parts._0, String.concat(": ", pretty_expr(parts._1, indent)))
         EFieldNil => ""
+        EQuestion(inner) => String.concat(pretty_expr(inner, indent), "?")
     }
 }
 
@@ -4813,6 +4833,7 @@ fn expr_uses(name: String, expr: Expr) -> Bool {
         ECollect(inner) => expr_uses(name, inner)
         EYield(inner) => expr_uses(name, inner)
         EField(parts) => expr_uses(name, parts._1) || expr_uses(name, parts._2)
+        EQuestion(inner) => expr_uses(name, inner)
     }
 }
 

@@ -33,12 +33,26 @@ npm run build
 
 ---
 
+## 環境診断
+
+PR を開く前に `fav doctor` で環境が正常かを確認してください:
+
+```bash
+./target/debug/fav doctor
+# [OK]   fav version: 54.6.0
+# [OK]   Rust toolchain: stable
+# [OK]   fav.toml: valid
+# [OK]   .fav-cache: intact
+```
+
+---
+
 ## テスト手順
 
 ```bash
-# Rust テスト（全 1260 件）
+# Rust テスト（全 3197 件）
 cd fav
-cargo test
+cargo test -j 8 -- --test-threads=8
 
 # 特定テストのみ
 cargo test bootstrap           # Bootstrap 検証（bytecode_A == bytecode_B）
@@ -52,6 +66,20 @@ cargo test checker_fav         # checker.fav セルフチェック
 # Lint・フォーマット確認
 ./target/debug/fav lint self/compiler.fav
 ./target/debug/fav fmt --check self/compiler.fav
+```
+
+## ベンチマーク・パフォーマンス確認
+
+パフォーマンスに影響する変更（VM・コンパイラ最適化等）を行った場合は、
+`fav bench` でリグレッションがないことを確認してください:
+
+```bash
+cd fav
+# ベンチマーク実行（全 bench_ テスト）
+cargo test bench_ -- --nocapture
+
+# ベースラインとの比較（benchmarks/baseline.json が基準値）
+./target/debug/fav bench --compare ../benchmarks/baseline.json --fail-on-regression
 ```
 
 ---

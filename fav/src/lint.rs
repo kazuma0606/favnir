@@ -120,6 +120,11 @@ pub fn lint_program(program: &Program) -> Vec<LintError> {
     check_w031_redundant_return_annotation(program, &mut errors);
     check_w032_explicit_generic_type_arg(program, &mut errors);
     // W033: 将来版（AST 拡張後に実装 — Expr::Closure はパラメータ型を保持しない）
+    // v45.4.0: W034 non-exhaustive match in stmt context — checker.rs の type_warning で発行（lint パスとは別チャネル）
+    // v48.5.0: W035
+    check_w035_legacy_import_rune(program, &mut errors);
+    // v52.2.0: W036 (runtime-only stub; actual warning emitted in VM AssertSchema handler)
+    check_w036_extra_schema_fields(program, &mut errors);
     errors
 }
 
@@ -153,6 +158,7 @@ fn lint_block_l008(block: &Block, errors: &mut Vec<LintError>) {
             Stmt::Expr(e) => lint_expr_l008(e, errors),
             Stmt::Chain(c) => lint_expr_l008(&c.expr, errors),
             Stmt::Yield(y) => lint_expr_l008(&y.expr, errors),
+            Stmt::Return(r) => lint_expr_l008(&r.expr, errors),
             Stmt::ForIn(f) => {
                 lint_expr_l008(&f.iter, errors);
                 lint_block_l008(&f.body, errors);
@@ -235,6 +241,7 @@ fn lint_expr_l008(expr: &Expr, errors: &mut Vec<LintError>) {
             }
         }
         Expr::AssertMatches(e, _, _) => lint_expr_l008(e, errors),
+        Expr::AssertSchema { arg, .. } => lint_expr_l008(arg, errors),
         Expr::RecordSpread(base, updates, _) => {
             lint_expr_l008(base, errors);
             for (_, v) in updates {
@@ -336,6 +343,7 @@ fn collect_block_calls(block: &Block, names: &HashSet<String>, uses: &mut HashSe
             Stmt::Expr(e) => collect_expr_calls(e, names, uses),
             Stmt::Chain(c) => collect_expr_calls(&c.expr, names, uses),
             Stmt::Yield(y) => collect_expr_calls(&y.expr, names, uses),
+            Stmt::Return(r) => collect_expr_calls(&r.expr, names, uses),
             Stmt::ForIn(f) => {
                 collect_expr_calls(&f.iter, names, uses);
                 collect_block_calls(&f.body, names, uses);
@@ -385,6 +393,7 @@ fn collect_expr_calls(expr: &Expr, names: &HashSet<String>, uses: &mut HashSet<S
             }
         }
         Expr::AssertMatches(expr, _, _) => collect_expr_calls(expr, names, uses),
+        Expr::AssertSchema { arg, .. } => collect_expr_calls(arg, names, uses),
         Expr::If(cond, then_block, else_block, _) => {
             collect_expr_calls(cond, names, uses);
             collect_block_calls(then_block, names, uses);
@@ -515,6 +524,7 @@ fn lint_stmt_sub_blocks(stmt: &Stmt, errors: &mut Vec<LintError>) {
         Stmt::Expr(e) => lint_expr_sub_blocks(e, errors),
         Stmt::Chain(c) => lint_expr_sub_blocks(&c.expr, errors),
         Stmt::Yield(y) => lint_expr_sub_blocks(&y.expr, errors),
+        Stmt::Return(r) => lint_expr_sub_blocks(&r.expr, errors),
         Stmt::ForIn(f) => {
             lint_expr_sub_blocks(&f.iter, errors);
             lint_block_unused_binds(&f.body, errors);
@@ -543,6 +553,7 @@ fn lint_expr_sub_blocks(expr: &Expr, errors: &mut Vec<LintError>) {
             }
         }
         Expr::AssertMatches(expr, _, _) => lint_expr_sub_blocks(expr, errors),
+        Expr::AssertSchema { arg, .. } => lint_expr_sub_blocks(arg, errors),
         Expr::Apply(f, args, _) => {
             lint_expr_sub_blocks(f, errors);
             for a in args {
@@ -618,6 +629,7 @@ fn expr_references(expr: &Expr, name: &str) -> bool {
                 })
         }
         Expr::AssertMatches(expr, _, _) => expr_references(expr, name),
+        Expr::AssertSchema { arg, .. } => expr_references(arg, name),
         Expr::If(c, t, e, _) => {
             expr_references(c, name)
                 || block_references(t, name)
@@ -668,6 +680,7 @@ fn stmt_references(stmt: &Stmt, name: &str) -> bool {
         Stmt::Expr(e) => expr_references(e, name),
         Stmt::Chain(c) => expr_references(&c.expr, name),
         Stmt::Yield(y) => expr_references(&y.expr, name),
+        Stmt::Return(r) => expr_references(&r.expr, name),
         Stmt::ForIn(f) => expr_references(&f.iter, name) || block_references(&f.body, name),
         Stmt::Forall(f) => {
             f.guard.as_ref().map(|g| expr_references(g, name)).unwrap_or(false)
@@ -764,6 +777,7 @@ fn collect_ambient_in_block(block: &Block, errors: &mut Vec<LintError>, code: &'
             Stmt::Chain(c) => collect_ambient_in_expr(&c.expr, errors, code, allowed),
             Stmt::Expr(e) => collect_ambient_in_expr(e, errors, code, allowed),
             Stmt::Yield(y) => collect_ambient_in_expr(&y.expr, errors, code, allowed),
+            Stmt::Return(r) => collect_ambient_in_expr(&r.expr, errors, code, allowed),
             Stmt::ForIn(f) => {
                 collect_ambient_in_expr(&f.iter, errors, code, allowed);
                 collect_ambient_in_block(&f.body, errors, code, allowed);
@@ -832,6 +846,7 @@ fn collect_ambient_in_expr(expr: &Expr, errors: &mut Vec<LintError>, code: &'sta
         Expr::EmitExpr(inner, _) => collect_ambient_in_expr(inner, errors, code, allowed),
         Expr::Question(inner, _) => collect_ambient_in_expr(inner, errors, code, allowed),
         Expr::AssertMatches(e, _, _) => collect_ambient_in_expr(e, errors, code, allowed),
+        Expr::AssertSchema { arg, .. } => collect_ambient_in_expr(arg, errors, code, allowed),
         Expr::TypeApply(f, _, _) => collect_ambient_in_expr(f, errors, code, allowed),
         Expr::RecordConstruct(_, fields, _) => {
             for (_, v) in fields {
@@ -910,6 +925,7 @@ fn collect_deprecated_in_block(block: &Block, errors: &mut Vec<LintError>) {
             Stmt::Chain(c) => collect_deprecated_in_expr(&c.expr, errors),
             Stmt::Expr(e)  => collect_deprecated_in_expr(e, errors),
             Stmt::Yield(y) => collect_deprecated_in_expr(&y.expr, errors),
+            Stmt::Return(r) => collect_deprecated_in_expr(&r.expr, errors),
             Stmt::ForIn(f) => {
                 collect_deprecated_in_expr(&f.iter, errors);
                 collect_deprecated_in_block(&f.body, errors);
@@ -977,6 +993,7 @@ fn collect_deprecated_in_expr(expr: &Expr, errors: &mut Vec<LintError>) {
         Expr::EmitExpr(inner, _) => collect_deprecated_in_expr(inner, errors),
         Expr::Question(inner, _) => collect_deprecated_in_expr(inner, errors),
         Expr::AssertMatches(e, _, _) => collect_deprecated_in_expr(e, errors),
+        Expr::AssertSchema { arg, .. } => collect_deprecated_in_expr(arg, errors),
         Expr::TypeApply(f, _, _) => collect_deprecated_in_expr(f, errors),
         Expr::RecordConstruct(_, fields, _) => {
             for (_, v) in fields {
@@ -1162,6 +1179,9 @@ fn collect_type_state_in_block(
             Stmt::Yield(y) => collect_type_state_in_expr(
                 &y.expr, fn_expects, fn_output, type_state_names, env, errors,
             ),
+            Stmt::Return(r) => collect_type_state_in_expr(
+                &r.expr, fn_expects, fn_output, type_state_names, env, errors,
+            ),
             Stmt::ForIn(f) => {
                 collect_type_state_in_expr(
                     &f.iter, fn_expects, fn_output, type_state_names, env, errors,
@@ -1295,6 +1315,9 @@ fn collect_type_state_in_expr(
         Expr::AssertMatches(e, _, _) => {
             collect_type_state_in_expr(e, fn_expects, fn_output, type_state_names, env, errors)
         }
+        Expr::AssertSchema { arg, .. } => {
+            collect_type_state_in_expr(arg, fn_expects, fn_output, type_state_names, env, errors)
+        }
         Expr::TypeApply(f, _, _) => {
             collect_type_state_in_expr(f, fn_expects, fn_output, type_state_names, env, errors)
         }
@@ -1398,6 +1421,7 @@ fn find_ambient_call_in_block(block: &Block) -> Option<(String, String, Span)> {
             Stmt::Expr(e) => find_ambient_call_in_expr(e),
             Stmt::Chain(c) => find_ambient_call_in_expr(&c.expr),
             Stmt::Yield(y) => find_ambient_call_in_expr(&y.expr),
+            Stmt::Return(r) => find_ambient_call_in_expr(&r.expr),
             Stmt::ForIn(f) => {
                 find_ambient_call_in_expr(&f.iter)
                     .or_else(|| find_ambient_call_in_block(&f.body))
@@ -1573,6 +1597,7 @@ fn check_w013_block(block: &Block, errors: &mut Vec<LintError>) {
             Stmt::Expr(e) => check_w013_expr(e, errors),
             Stmt::Chain(c) => check_w013_expr(&c.expr, errors),
             Stmt::Yield(y) => check_w013_expr(&y.expr, errors),
+            Stmt::Return(r) => check_w013_expr(&r.expr, errors),
             Stmt::ForIn(f) => { check_w013_expr(&f.iter, errors); check_w013_block(&f.body, errors); }
             Stmt::Forall(f) => {
                 if let Some(g) = &f.guard { check_w013_expr(g, errors); }
@@ -1663,6 +1688,7 @@ fn check_w014_block(block: &Block, errors: &mut Vec<LintError>) {
             Stmt::Expr(e) => check_w014_expr(e, errors),
             Stmt::Chain(c) => check_w014_expr(&c.expr, errors),
             Stmt::Yield(y) => check_w014_expr(&y.expr, errors),
+            Stmt::Return(r) => check_w014_expr(&r.expr, errors),
             Stmt::ForIn(f) => { check_w014_expr(&f.iter, errors); check_w014_block(&f.body, errors); }
             Stmt::Forall(f) => {
                 if let Some(g) = &f.guard { check_w014_expr(g, errors); }
@@ -1748,6 +1774,7 @@ fn check_w015_block(block: &Block, errors: &mut Vec<LintError>) {
             Stmt::Expr(e) => check_w015_expr(e, errors),
             Stmt::Chain(c) => check_w015_expr(&c.expr, errors),
             Stmt::Yield(y) => check_w015_expr(&y.expr, errors),
+            Stmt::Return(r) => check_w015_expr(&r.expr, errors),
             Stmt::ForIn(f) => {
                 check_w015_expr(&f.iter, errors);
                 check_w015_block(&f.body, errors);
@@ -1803,6 +1830,7 @@ fn check_w016_block(block: &Block, errors: &mut Vec<LintError>) {
             Stmt::Expr(e) => check_w016_expr(e, errors),
             Stmt::Chain(c) => check_w016_expr(&c.expr, errors),
             Stmt::Yield(y) => check_w016_expr(&y.expr, errors),
+            Stmt::Return(r) => check_w016_expr(&r.expr, errors),
             Stmt::ForIn(f) => { check_w016_expr(&f.iter, errors); check_w016_block(&f.body, errors); }
             Stmt::Forall(f) => {
                 if let Some(g) = &f.guard { check_w016_expr(g, errors); }
@@ -1893,6 +1921,7 @@ fn nesting_depth_stmt(stmt: &Stmt) -> usize {
         Stmt::Expr(e) => nesting_depth_expr(e),
         Stmt::Chain(c) => nesting_depth_expr(&c.expr),
         Stmt::Yield(y) => nesting_depth_expr(&y.expr),
+        Stmt::Return(r) => nesting_depth_expr(&r.expr),
         Stmt::ForIn(f) => nesting_depth_expr(&f.iter).max(nesting_depth_block(&f.body)),
         Stmt::Forall(f) => {
             let g = f.guard.as_ref().map(|g| nesting_depth_expr(g)).unwrap_or(0);
@@ -1946,6 +1975,7 @@ fn check_w018_block(block: &Block, errors: &mut Vec<LintError>) {
             Stmt::Expr(e) => check_w018_expr(e, errors),
             Stmt::Chain(c) => check_w018_expr(&c.expr, errors),
             Stmt::Yield(y) => check_w018_expr(&y.expr, errors),
+            Stmt::Return(r) => check_w018_expr(&r.expr, errors),
             Stmt::ForIn(f) => { check_w018_expr(&f.iter, errors); check_w018_block(&f.body, errors); }
             Stmt::Forall(f) => {
                 if let Some(g) = &f.guard { check_w018_expr(g, errors); }
@@ -2031,6 +2061,7 @@ fn check_w019_block(block: &Block, errors: &mut Vec<LintError>) {
             Stmt::Expr(e) => check_w019_expr(e, errors),
             Stmt::Chain(c) => check_w019_expr(&c.expr, errors),
             Stmt::Yield(y) => check_w019_expr(&y.expr, errors),
+            Stmt::Return(r) => check_w019_expr(&r.expr, errors),
             Stmt::ForIn(f) => { check_w019_expr(&f.iter, errors); check_w019_block(&f.body, errors); }
             Stmt::Forall(f) => {
                 if let Some(g) = &f.guard { check_w019_expr(g, errors); }
@@ -2117,6 +2148,7 @@ fn check_w020_block(block: &Block, deprecated: &std::collections::HashSet<String
             Stmt::Chain(c) => check_w020_expr(&c.expr, deprecated, errors),
             Stmt::Expr(e)  => check_w020_expr(e, deprecated, errors),
             Stmt::Yield(y) => check_w020_expr(&y.expr, deprecated, errors),
+            Stmt::Return(r) => check_w020_expr(&r.expr, deprecated, errors),
             Stmt::ForIn(f) => {
                 check_w020_expr(&f.iter, deprecated, errors);
                 check_w020_block(&f.body, deprecated, errors);
@@ -2212,6 +2244,7 @@ fn collect_field_accesses_stmt(
         Stmt::Expr(e) => collect_field_accesses_expr(e, schema_params, out),
         Stmt::Chain(c) => collect_field_accesses_expr(&c.expr, schema_params, out),
         Stmt::Yield(y) => collect_field_accesses_expr(&y.expr, schema_params, out),
+        Stmt::Return(r) => collect_field_accesses_expr(&r.expr, schema_params, out),
         Stmt::ForIn(f) => {
             collect_field_accesses_expr(&f.iter, schema_params, out);
             collect_field_accesses(&f.body, schema_params, out);
@@ -2287,6 +2320,7 @@ fn collect_field_accesses_expr(
         Expr::AssertMatches(inner, _, _) | Expr::Question(inner, _) | Expr::EmitExpr(inner, _) => {
             collect_field_accesses_expr(inner, schema_params, out);
         }
+        Expr::AssertSchema { arg, .. } => collect_field_accesses_expr(arg, schema_params, out),
         Expr::Collect(b, _) => collect_field_accesses(b, schema_params, out),
         Expr::RecordConstruct(_, fields, _) => {
             for (_, v) in fields {
@@ -2602,6 +2636,7 @@ fn check_w032_in_stmt(stmt: &Stmt, errors: &mut Vec<LintError>) {
         Stmt::Expr(e) => check_w032_in_expr(e, errors),
         Stmt::Chain(c) => check_w032_in_expr(&c.expr, errors),
         Stmt::Yield(y) => check_w032_in_expr(&y.expr, errors),
+        Stmt::Return(r) => check_w032_in_expr(&r.expr, errors),
         Stmt::ForIn(f) => {
             check_w032_in_expr(&f.iter, errors);
             check_w032_in_block(&f.body, errors);
@@ -2860,5 +2895,33 @@ public fn main() -> Unit {
             "unexpected L008: {:?}",
             codes
         );
+    }
+}
+
+// ── W035: legacy_import_rune (v48.5.0) ────────────────────────────────────────
+// v52.2.0: W036 extra_schema_fields
+
+/// W035: 旧 `import rune "kafka"` / `import "kafka"` 構文は非推奨。
+/// `import kafka`（Package）または `import "./path"`（Local）を使用すること。
+fn check_w036_extra_schema_fields(_program: &Program, _errors: &mut Vec<LintError>) {
+    // Runtime-only warning: W036 is emitted in the VM AssertSchema handler (v52.2.0).
+    // This stub reserves the lint entry for future static analysis.
+}
+
+fn check_w035_legacy_import_rune(program: &Program, errors: &mut Vec<LintError>) {
+    for item in &program.items {
+        if let Item::ImportDecl { kind, path, span, .. } = item {
+            if *kind == ImportKind::Legacy {
+                errors.push(LintError::new(
+                    "W035",
+                    format!(
+                        "legacy import syntax `import rune \"{}\"` is deprecated; \
+                         use `import {}` (package) or `import \"./path\"` (local) instead",
+                        path, path
+                    ),
+                    span.clone(),
+                ));
+            }
+        }
     }
 }

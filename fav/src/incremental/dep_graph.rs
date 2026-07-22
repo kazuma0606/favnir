@@ -1,10 +1,11 @@
 //! v19.3.0: ファイル依存グラフの構築・追跡
 
-use std::collections::HashMap;
+use serde::{Deserialize, Serialize};
+use std::collections::{HashMap, HashSet};
 
 /// ファイル間の依存グラフ。
 /// `edges["pipeline"] = ["utils"]` は pipeline が utils に依存することを表す。
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct DepGraph {
     /// from → Vec<to>
     edges: HashMap<String, Vec<String>>,
@@ -54,6 +55,53 @@ impl DepGraph {
             .map(|(from, _)| from.clone())
             .collect()
     }
+
+    /// `changed` が変更されたとき推移的に影響を受けるすべてのファイルを BFS で返す（v51.5.0）。
+    /// 例: a→b→c（a は b に依存、b は c に依存）の場合、
+    /// c の変更に対して [b, a] が返る。
+    ///
+    /// NOTE: 戻り値に `changed` 自身は含まれない。
+    /// 呼び出し側（`incremental_files_to_rebuild`）が `changed` を別途 `to_rebuild` に追加して補完する。
+    pub fn transitive_affected_by(&self, changed: &str) -> Vec<String> {
+        let mut seen: HashSet<String> = HashSet::new();
+        let mut result: Vec<String> = Vec::new();
+        let mut queue = std::collections::VecDeque::new();
+        queue.push_back(changed.to_string());
+        while let Some(cur) = queue.pop_front() {
+            for from in self.affected_by(&cur) {
+                if seen.insert(from.clone()) {
+                    result.push(from.clone());
+                    queue.push_back(from);
+                }
+            }
+        }
+        result
+    }
+}
+
+/// DepGraph を JSON ファイルに保存する（`.fav-cache/dep-graph.json` 等）（v51.5.0）。
+/// NOTE: `std::fs` を使用するため WASM ターゲットでは動作しない。
+#[cfg(not(target_arch = "wasm32"))]
+pub fn save_dep_graph_json(graph: &DepGraph, path: &std::path::Path) -> Result<(), String> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| format!("create_dir_all error: {e}"))?;
+    }
+    let json = serde_json::to_string(graph)
+        .map_err(|e| format!("dep_graph serialize error: {e}"))?;
+    std::fs::write(path, json).map_err(|e| format!("dep_graph write error: {e}"))
+}
+
+/// JSON ファイルから DepGraph を読み込む（v51.5.0）。
+/// ファイルが存在しない場合・JSON パースに失敗した場合も空の DepGraph を返す（サイレント）。
+/// NOTE: パース失敗（スキーマ変更・ファイル破損）も黙殺されるため、毎回フルリビルドが発生する。
+/// NOTE: `std::fs` を使用するため WASM ターゲットでは動作しない。
+#[cfg(not(target_arch = "wasm32"))]
+pub fn load_dep_graph_json(path: &std::path::Path) -> DepGraph {
+    std::fs::read_to_string(path)
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_default()
 }
 
 /// AST の `use` 宣言（`Program.uses`）からソースファイルの依存グラフを構築する。

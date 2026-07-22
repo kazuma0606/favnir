@@ -140,6 +140,15 @@ fn collect_expr_fns(
                 collect_expr_fns(val, globals, global_to_fn, queue);
             }
         }
+        IRExpr::Par { input, .. } => {
+            // Note: stage_names are resolved at runtime via fn_idx_by_name; DCE cannot
+            // statically track them here. Par is unsupported in wasm MVP so this is safe,
+            // but future wasm Par support would need explicit stage_names tracking.
+            collect_expr_fns(input, globals, global_to_fn, queue);
+        }
+        IRExpr::AssertSchema { arg, .. } => {
+            collect_expr_fns(arg, globals, global_to_fn, queue);
+        }
         IRExpr::Lit(_, _) | IRExpr::Local(_, _) => {}
     }
 }
@@ -155,6 +164,7 @@ fn collect_stmt_fns(
         | IRStmt::LegacyBind(_, expr)
         | IRStmt::Chain(_, expr)
         | IRStmt::Yield(expr)
+        | IRStmt::Return(expr)
         | IRStmt::Expr(expr) => collect_expr_fns(expr, globals, global_to_fn, queue),
         IRStmt::SeqChain { expr, .. } => {
             collect_expr_fns(expr, globals, global_to_fn, queue)
@@ -204,6 +214,21 @@ pub fn apply_dce(ir: &mut IRProgram, reachable: &HashSet<usize>) -> DceReport {
         removed: original_count - ir.fns.len(),
         remaining: ir.fns.len(),
     }
+}
+
+/// 複数エントリポイントから到達可能な関数の union を BFS で収集し DCE を適用する（v51.7.0）。
+///
+/// `entry_names` が空の場合は全関数を reachable とみなし何も除去しない（保守的フォールバック）。
+/// 単一エントリ（例: `&["main"]`）の場合は `collect_reachable_fns` + `apply_dce` と等価。
+pub fn dce_from_exports(ir: &mut IRProgram, entry_names: &[&str]) -> DceReport {
+    if entry_names.is_empty() {
+        return DceReport { removed: 0, remaining: ir.fns.len() };
+    }
+    let mut reachable = HashSet::new();
+    for &entry in entry_names {
+        reachable.extend(collect_reachable_fns(ir, entry));
+    }
+    apply_dce(ir, &reachable)
 }
 
 #[cfg(test)]

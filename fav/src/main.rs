@@ -89,9 +89,9 @@ use driver::{
     cmd_db_migrate, cmd_db_migrate_rollback, cmd_db_migrate_status, cmd_deploy, cmd_doc,
     cmd_doc_builtins, cmd_doc_site, cmd_doc_serve, cmd_docs,
     cmd_exec, cmd_explain, cmd_explain_code, cmd_explain_compiler, cmd_explain_diff, cmd_explain_error,
-    cmd_explain_error_list, cmd_explain_error_list_json, cmd_explain_lineage, cmd_explain_sla, cmd_fmt, cmd_graph,
-    cmd_infer, cmd_infer_delta, cmd_infer_iceberg, cmd_infer_postgres, cmd_infer_proto, cmd_infer_snowflake, cmd_install, cmd_lint, cmd_validate, cmd_contract_check, cmd_schema_diff, cmd_migrate, cmd_upgrade, cmd_new, cmd_new_list,
-    cmd_monitor, cmd_profile, cmd_profile_compare, cmd_scaffold, cmd_transpile,
+    cmd_explain_error_list, cmd_explain_error_list_json, cmd_explain_lineage, cmd_explain_sla, cmd_explain_types, cmd_fmt, cmd_graph,
+    cmd_infer, cmd_infer_delta, cmd_infer_iceberg, cmd_infer_postgres, cmd_infer_proto, cmd_infer_snowflake, cmd_install, cmd_install_runes, cmd_lint, cmd_validate, cmd_contract_check, cmd_schema_diff, cmd_migrate, cmd_upgrade, cmd_new, cmd_new_list,
+    cmd_monitor, cmd_profile, cmd_profile_build, cmd_profile_compare, cmd_scaffold, cmd_transpile,
     cmd_publish, cmd_registry, cmd_repl, cmd_run, cmd_search, cmd_test, cmd_watch,
     cmd_add, cmd_update, cmd_remove, cmd_login, cmd_info,
     cmd_generate_api, cmd_api_serve,
@@ -447,16 +447,21 @@ fn main_impl() {
                 return;
             }
             // ─────────────────────────────────────────────────────────────────
-            // Parse --db / --legacy / --self-host / --verbose / --trace flags
+            // Parse --db / --legacy / --self-host / --verbose / --trace / --strict-schema flags
             let mut db_path: Option<String> = None;
             let mut legacy = false;
             let mut verbose = false;
             let mut trace = false;
+            let mut strict_schema = false;
+            let mut audit_log: Option<String> = None;
             let mut no_tap = false;
             let mut legacy_value_repr = false;
             let mut explain_pushdown = false;
             let mut checkpoint_dir: Option<String> = None;
             let mut resume_dir: Option<String> = None;
+            // v54.2.0: --watch-diff / --watch-summary
+            let mut watch_diff = false;
+            let mut watch_summary = false;
             let mut file_idx = 2usize;
             let mut i = 2usize;
             while i < args.len() {
@@ -493,6 +498,23 @@ fn main_impl() {
                     "--trace" => {
                         trace = true;
                         i += 1;
+                        file_idx = i;
+                    }
+                    "--strict-schema" => {
+                        strict_schema = true;
+                        i += 1;
+                        file_idx = i;
+                    }
+                    "--audit-log" => {
+                        audit_log = Some(
+                            args.get(i + 1)
+                                .unwrap_or_else(|| {
+                                    eprintln!("error: --audit-log requires a file path");
+                                    process::exit(1);
+                                })
+                                .clone(),
+                        );
+                        i += 2;
                         file_idx = i;
                     }
                     "--no-color" => {
@@ -544,11 +566,29 @@ fn main_impl() {
                         i += 2;
                         file_idx = i;
                     }
+                    "--watch-diff" => {
+                        // v54.2.0: show numeric diff between stage outputs
+                        watch_diff = true;
+                        i += 1;
+                        file_idx = i;
+                    }
+                    "--watch-summary" => {
+                        // v54.2.0: print summary of all watched field changes at end
+                        watch_summary = true;
+                        i += 1;
+                        file_idx = i;
+                    }
                     _ => break,
                 }
             }
+            if watch_diff {
+                eprintln!("warning: --watch-diff is not yet fully implemented; flag accepted but field-level diff tracking requires runtime VM hooks (v54.2+)");
+            }
+            if watch_summary {
+                eprintln!("warning: --watch-summary is not yet fully implemented; flag accepted but summary output requires runtime VM hooks (v54.2+)");
+            }
             let file = args.get(file_idx).map(|s| s.as_str());
-            cmd_run(file, db_path.as_deref(), legacy, verbose, trace, no_tap, legacy_value_repr, explain_pushdown, checkpoint_dir.as_deref(), resume_dir.as_deref());
+            cmd_run(file, db_path.as_deref(), legacy, verbose, trace, no_tap, legacy_value_repr, explain_pushdown, checkpoint_dir.as_deref(), resume_dir.as_deref(), strict_schema, audit_log.as_deref());
         }
 
         Some("build") => {
@@ -753,6 +793,43 @@ fn main_impl() {
                 cmd_explain_compiler();
                 return;
             }
+            // v50.3.0: fav explain --error <code> / --list / --list --format json
+            if args.iter().any(|a| a == "--error") {
+                let mut list   = false;
+                let mut format = "text";
+                let mut code: Option<&str> = None;
+                let mut i = 2usize;
+                while i < args.len() {
+                    match args[i].as_str() {
+                        "--error"  => { i += 1; }
+                        "--list"   => { list = true; i += 1; }
+                        "--format" => {
+                            if i + 1 < args.len() {
+                                format = args[i + 1].as_str();
+                                i += 2;
+                            } else {
+                                eprintln!("error: --format requires a value (text|json)");
+                                process::exit(1);
+                            }
+                        }
+                        other => { code = Some(other); i += 1; }
+                    }
+                }
+                if format != "text" && format != "json" {
+                    eprintln!("error: unknown format `{}` — expected text or json", format);
+                    process::exit(1);
+                }
+                if list {
+                    if format == "json" { cmd_explain_error_list_json(); }
+                    else                { cmd_explain_error_list(); }
+                } else if let Some(c) = code {
+                    cmd_explain_error(c);
+                } else {
+                    eprintln!("error: fav explain --error requires a code (e.g. E0213) or --list");
+                    process::exit(1);
+                }
+                return;
+            }
             if args.iter().any(|a| a == "--verbose") {
                 let error_code = args.iter().skip(2)
                     .find(|a| !a.starts_with('-'))
@@ -774,13 +851,23 @@ fn main_impl() {
                 cmd_explain_sla(file);
                 return;
             }
+            if args.iter().any(|a| a == "--types") {
+                let file = args.iter().skip(2).find(|a| !a.starts_with('-')).map(|s| s.as_str());
+                cmd_explain_types(file);
+                return;
+            }
             if args.iter().any(|a| a == "--lineage") {
                 let mut format = String::from("text");
                 let mut file: Option<&str> = None;
+                let mut show_dead = false;
+                let mut with_schema = false;
+                let mut output_file: Option<String> = None;
                 let mut i = 2usize;
                 while i < args.len() {
                     match args[i].as_str() {
                         "--lineage" => { i += 1; }
+                        "--show-dead" => { show_dead = true; i += 1; }
+                        "--with-schema" => { with_schema = true; i += 1; }
                         "--format" => {
                             format = args
                                 .get(i + 1)
@@ -791,13 +878,24 @@ fn main_impl() {
                                 .clone();
                             i += 2;
                         }
+                        "-o" => {
+                            output_file = Some(
+                                args.get(i + 1)
+                                    .unwrap_or_else(|| {
+                                        eprintln!("error: -o requires a file path");
+                                        process::exit(1);
+                                    })
+                                    .clone(),
+                            );
+                            i += 2;
+                        }
                         other => {
                             file = Some(other);
                             i += 1;
                         }
                     }
                 }
-                cmd_explain_lineage(file, &format);
+                cmd_explain_lineage(file, &format, show_dead, with_schema, output_file.as_deref());
                 return;
             }
             if args.get(2).map(|s| s.as_str()) == Some("diff") {
@@ -1281,13 +1379,71 @@ fn main_impl() {
                         opts.stream = true;
                         i += 1;
                     }
+                    "--compare" => {
+                        opts.compare = Some(args.get(i + 1).cloned().unwrap_or_else(|| {
+                            eprintln!("error: --compare requires a path argument");
+                            process::exit(1);
+                        }));
+                        i += 2;
+                    }
+                    "--fail-on-regression" => {
+                        opts.fail_on_regression = true;
+                        i += 1;
+                    }
+                    "--all" => {
+                        // v54.3.0: --all は file 省略と等価（プロジェクト全体を走査）
+                        i += 1;
+                    }
+                    "--threshold" => {
+                        let raw = args.get(i + 1).unwrap_or_else(|| {
+                            eprintln!("error: --threshold requires a number");
+                            process::exit(1);
+                        });
+                        let t = raw.parse::<f64>().unwrap_or_else(|_| {
+                            eprintln!("error: --threshold must be a number");
+                            process::exit(1);
+                        });
+                        if t < 0.0 {
+                            eprintln!("error: --threshold must be >= 0");
+                            process::exit(1);
+                        }
+                        opts.threshold = t;
+                        i += 2;
+                    }
                     other => {
                         opts.file = Some(other.to_string());
                         i += 1;
                     }
                 }
             }
-            cmd_bench(&opts);
+            let ok = cmd_bench(&opts);
+            if !ok && opts.fail_on_regression {
+                process::exit(1);
+            }
+        }
+
+        // ── v54.5.0: fav doctor ──────────────────────────────────────────────
+        Some("doctor") => {
+            let checks = driver::cmd_doctor_run();
+            let report = driver::cmd_doctor_collect(&checks);
+            println!("{report}");
+        }
+
+        // ── v54.4.0: fav dq-report ───────────────────────────────────────────
+        Some("dq-report") => {
+            let audit_log_path = args.iter().position(|a| a == "--audit-log")
+                .and_then(|i| args.get(i + 1))
+                .map(|s| s.as_str())
+                .unwrap_or_else(|| {
+                    eprintln!("error: fav dq-report requires --audit-log <path>");
+                    process::exit(1);
+                });
+            let audit_log_content = std::fs::read_to_string(audit_log_path).unwrap_or_else(|e| {
+                eprintln!("error: cannot read {audit_log_path}: {e}");
+                process::exit(1);
+            });
+            let report = driver::cmd_dq_report_collect(&audit_log_content);
+            println!("{report}");
         }
 
         Some("watch") => {
@@ -1609,6 +1765,7 @@ fn main_impl() {
             let mut stage_filter: Option<String> = None;
             let mut out: Option<String> = None;
             let mut compare: Option<String> = None;
+            let mut build = false;
             let mut i = 2usize;
             while i < args.len() {
                 let arg = args[i].as_str();
@@ -1632,6 +1789,8 @@ fn main_impl() {
                     compare = Some(v.to_string()); i += 1;
                 } else if arg == "--compare" {
                     compare = args.get(i + 1).cloned(); i += 2;
+                } else if arg == "--build" {
+                    build = true; i += 1;
                 } else {
                     path = arg.to_string(); i += 1;
                 }
@@ -1639,13 +1798,21 @@ fn main_impl() {
             if path.is_empty() {
                 if compare.is_some() {
                     eprintln!("error: profile --compare requires a .fav file path");
+                } else if build {
+                    eprintln!("error: profile --build requires a .fav file path");
                 } else {
                     eprintln!("error: profile requires a .fav file");
                 }
                 process::exit(1);
             }
             if let Some(ref v) = compare {
+                if build {
+                    eprintln!("error: --compare and --build cannot be used together");
+                    process::exit(1);
+                }
                 cmd_profile_compare(v, &path);
+            } else if build {
+                cmd_profile_build(&path);
             } else {
                 cmd_profile(&path, &format, runs, stage_filter.as_deref(), out.as_deref());
             }
@@ -1971,6 +2138,11 @@ fn main_impl() {
                 }
             }
             cmd_install(pkg_name.as_deref(), force);
+        }
+
+        Some("install-rune") => {
+            let pkg_name = args.get(2).map(|s| s.as_str());
+            cmd_install_runes(pkg_name);
         }
 
         Some("publish") => {

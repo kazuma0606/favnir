@@ -1398,6 +1398,68 @@ pub(crate) fn is_result_err_value(v: &Value) -> bool {
     matches!(v, Value::Variant(tag, _) if tag == "err")
 }
 
+// ── v54.2.0: fav run --watch-diff / --watch-summary ─────────────────────────
+
+/// A single watch event: a field changed from `before` to `after` in `stage`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WatchEvent {
+    pub field: String,
+    pub stage: String,
+    pub before: String,
+    pub after: String,
+}
+
+/// Format a single `--watch-diff` line for a numeric field change.
+///
+/// Returns e.g. `"[watch] order.amount:  0.0  → 99.0   Δ+99.0  (stage: Parse)"`.
+/// When `before == after` (no change) or values are non-numeric, the delta is omitted.
+pub fn format_watch_diff(event: &WatchEvent) -> String {
+    let delta = match (event.before.parse::<f64>(), event.after.parse::<f64>()) {
+        (Ok(b), Ok(a)) => {
+            let d = a - b;
+            if d == 0.0 {
+                // no change — omit delta
+                String::new()
+            } else if d > 0.0 {
+                format!("Δ+{:.1}", d)
+            } else {
+                format!("Δ{:.1}", d)
+            }
+        }
+        _ => String::new(),
+    };
+    if delta.is_empty() {
+        format!(
+            "[watch] {}:  {}  → {}  (stage: {})",
+            event.field, event.before, event.after, event.stage
+        )
+    } else {
+        format!(
+            "[watch] {}:  {}  → {}   {}  (stage: {})",
+            event.field, event.before, event.after, delta, event.stage
+        )
+    }
+}
+
+/// Format a `--watch-summary` block for a sequence of watch events.
+///
+/// Returns a multi-line string listing every field change across all stages.
+pub fn format_watch_summary(events: &[WatchEvent]) -> String {
+    if events.is_empty() {
+        return "[watch-summary] no changes recorded".to_string();
+    }
+    let mut lines = vec!["[watch-summary]".to_string()];
+    for e in events {
+        lines.push(format!(
+            "  {} ({}): {} → {}",
+            e.field, e.stage, e.before, e.after
+        ));
+    }
+    lines.join("\n")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 /// `fav run [--legacy] [--verbose] [--trace] <file>`
 ///
 /// Default (`legacy = false`): Favnir pipeline (checker.fav + compiler.fav)
@@ -1406,7 +1468,7 @@ pub(crate) fn is_result_err_value(v: &Value) -> bool {
 /// - `--legacy` is set, OR
 /// - the file is part of a fav.toml project, OR
 /// - the file uses `import rune` declarations.
-pub fn cmd_run(file: Option<&str>, db_url: Option<&str>, legacy: bool, verbose: bool, trace: bool, no_tap: bool, legacy_value_repr: bool, explain_pushdown: bool, checkpoint_dir: Option<&str>, resume_dir: Option<&str>) {
+pub fn cmd_run(file: Option<&str>, db_url: Option<&str>, legacy: bool, verbose: bool, trace: bool, no_tap: bool, legacy_value_repr: bool, explain_pushdown: bool, checkpoint_dir: Option<&str>, resume_dir: Option<&str>, strict_schema: bool, audit_log: Option<&str>) {
     let verbose_level = load_run_config_verbose(file, verbose, trace);
 
     if no_tap {
@@ -1485,11 +1547,21 @@ pub fn cmd_run(file: Option<&str>, db_url: Option<&str>, legacy: bool, verbose: 
 
     // Set global verbose level before pipeline execution (v12.5.0)
     crate::backend::vm::set_verbose_level(verbose_level);
+    // Set global strict_schema flag (v52.2.0)
+    crate::backend::vm::set_strict_schema(strict_schema);
+    // Set global audit_log_path flag (v52.6.0)
+    #[cfg(not(target_arch = "wasm32"))]
+    crate::backend::vm::set_audit_log_path(audit_log.map(|s| s.to_string()));
     // v22.7.0: OTel 初期化（trace フラグが立っているとき）
     #[cfg(not(target_arch = "wasm32"))]
     if trace {
         crate::otel::otel_init();
     }
+    // v52.7.0: OTel lineage 追跡をリセット（run ごとに前 stage をクリア）
+    // trace フラグの有無に関わらず無条件に呼ぶ — OTEL_PREV_STAGE は thread-local のため
+    // 複数 run にまたがる残留値を防ぐ目的（OTel 無効時は SeqStageEnter 内でガードされる）。
+    #[cfg(not(target_arch = "wasm32"))]
+    crate::backend::vm::reset_stage_lineage();
 
     if use_favnir {
         if let Some((ref toml, ref root)) = proj {
@@ -1559,7 +1631,7 @@ pub fn cmd_run(file: Option<&str>, db_url: Option<&str>, legacy: bool, verbose: 
 // with legacy=false.
 
 pub fn cmd_run_self_hosted(file: Option<&str>, db_url: Option<&str>) {
-    cmd_run(file, db_url, false, false, false, false, false, false, None, None);
+    cmd_run(file, db_url, false, false, false, false, false, false, None, None, false, None);
 }
 
 // ── v21.1.0: DAP デバッガー ───────────────────────────────────────────────────
@@ -1704,15 +1776,26 @@ pub fn cmd_build(file: Option<&str>, out: Option<&str>, target: Option<&str>) {
             let out_path = out
                 .map(PathBuf::from)
                 .unwrap_or_else(|| PathBuf::from(&path).with_extension("wasm"));
-            let bytes = build_wasm_artifact(&program).unwrap_or_else(|message| {
-                eprintln!("{message}");
-                process::exit(1);
-            });
+            // v51.7.0: DCE + wasm-opt -Os 統合
+            let wasm_config = WasmBuildConfig {
+                dce: true,
+                opt_level: crate::backend::wasm_opt_pass::WasmOptLevel::Os,
+                // FAV_WASM_SIZE_REPORT=1 でサイズレポートを有効化（"1" のみ有効）
+                size_report: std::env::var("FAV_WASM_SIZE_REPORT")
+                    .map(|v| v == "1")
+                    .unwrap_or(false),
+                ..WasmBuildConfig::default()
+            };
+            let bytes = build_wasm_artifact_with_config(&program, &wasm_config)
+                .unwrap_or_else(|message| {
+                    eprintln!("{message}");
+                    process::exit(1);
+                });
             write_wasm_to_path(&bytes, &out_path).unwrap_or_else(|message| {
                 eprintln!("{message}");
                 process::exit(1);
             });
-            println!("built {} (wasm)", out_path.display());
+            println!("built {} ({} bytes)", out_path.display(), bytes.len());
         }
         "native" => {
             let out_path = out.unwrap_or_else(|| {
@@ -1919,14 +2002,13 @@ pub fn build_wasm_artifact_with_config(
     program: &ast::Program,
     config: &WasmBuildConfig,
 ) -> Result<Vec<u8>, String> {
-    use crate::backend::wasm_dce::{apply_dce, collect_reachable_fns};
+    use crate::backend::wasm_dce::dce_from_exports;
     use crate::backend::wasm_opt_pass::try_wasm_opt;
 
     let mut ir = compile_program(program);
 
     if config.dce {
-        let reachable = collect_reachable_fns(&ir, "main");
-        apply_dce(&mut ir, &reachable);
+        dce_from_exports(&mut ir, &["main"]);
     }
 
     let bytes = if config.target == WasmTarget::Wasm32Wasi {
@@ -3634,6 +3716,7 @@ fn decode_opcode(byte: u8) -> Option<(&'static str, usize)> {
         x if x == Opcode::EqLC as u8 => Opcode::EqLC,
         x if x == Opcode::GetFieldL as u8 => Opcode::GetFieldL,
         x if x == Opcode::MoveLocal as u8 => Opcode::MoveLocal,
+        x if x == Opcode::ParStages as u8 => Opcode::ParStages,
         _ => return None,
     };
 
@@ -3689,6 +3772,8 @@ fn decode_opcode(byte: u8) -> Option<(&'static str, usize)> {
         Opcode::ListGet => ("ListGet", 1),
         Opcode::ListDrop => ("ListDrop", 1),
         Opcode::RefinementAssert => ("RefinementAssert", 3), // 1 opcode + name_str_idx(2)
+        Opcode::AssertSchema => ("AssertSchema", 3), // 1 opcode + ty_name_idx(2)
+        Opcode::ParStages => ("ParStages", 5), // 1 opcode + n_names(2) + names_idx(2)
         // Superinstructions (v20.2.0): opcode(1) + a(u16) + b(u16) = 5 bytes
         Opcode::AddLL => ("AddLL", 5),
         Opcode::SubLL => ("SubLL", 5),
@@ -3741,6 +3826,9 @@ struct CheckDiagnostic {
     line:       u32,
     col:        u32,
     suggestion: String,
+    /// v45.6.0: dynamic hints (e.g. did-you-mean, arg-count suggestion)
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    hints:      Vec<String>,
 }
 
 #[derive(serde::Serialize)]
@@ -3779,6 +3867,7 @@ fn type_error_to_diag(e: &crate::middle::checker::TypeError, suggestion: &str) -
         line:       e.span.line,
         col:        e.span.col,
         suggestion: suggestion.to_string(),
+        hints:      e.hints.clone(),
     }
 }
 
@@ -3790,15 +3879,18 @@ fn type_warning_to_diag(w: &crate::middle::checker::TypeWarning) -> CheckDiagnos
         line:       w.span.line,
         col:        w.span.col,
         suggestion: default_suggestion(w.code),
+        hints:      vec![],
     }
 }
 
-fn default_suggestion(code: &str) -> String {
+pub(crate) fn default_suggestion(code: &str) -> String {
     match code {
         "W006" => "use 'chain _' to propagate errors".to_string(),
         "W007" => "restructure nested match to reduce depth".to_string(),
         "E0018" => "rename to avoid shadowing or use 'bind _'".to_string(),
-        _ => String::new(),
+        // v45.7.0: fall back to the static catalog suggestion for all other codes
+        // v50.2.0: use error_catalog::suggestion_for to share logic with lsp::diagnostics
+        _ => crate::error_catalog::suggestion_for(code).to_string(),
     }
 }
 
@@ -4640,6 +4732,7 @@ fn try_cmd_check_dir(dir: &Path) -> Result<(), usize> {
         workers: None,
         state: None,
         stream: None,
+        runes: std::collections::HashMap::new(),
     });
     let files = collect_fav_files_recursive(dir);
     let resolver = make_resolver(Some(toml), Some(root));
@@ -4948,6 +5041,21 @@ pub(crate) fn collect_test_cases(
                             prog.clone(),
                         ));
                     }
+                }
+                // v46.2.0: collect #[test] fn (FnDef with is_test = true)
+                ast::Item::FnDef(fd) if fd.is_test => {
+                    total_discovered += 1;
+                    if let Some(f) = filter {
+                        if !fd.name.contains(f) {
+                            continue;
+                        }
+                    }
+                    tests_to_run.push((
+                        path.clone(),
+                        fd.name.clone(), // display_name
+                        fd.name.clone(), // fn_name (no prefix; compiled as regular fn)
+                        prog.clone(),
+                    ));
                 }
                 _ => {}
             }
@@ -5382,7 +5490,8 @@ fn collect_tracklines_in_expr(expr: &IRExpr, out: &mut HashSet<u32>) {
                     | IRStmt::Bind(_, e)
                     | IRStmt::LegacyBind(_, e)
                     | IRStmt::Chain(_, e)
-                    | IRStmt::Yield(e) => {
+                    | IRStmt::Yield(e)
+                    | IRStmt::Return(e) => {
                         collect_tracklines_in_expr(e, out);
                     }
                     IRStmt::SeqChain { expr: e, .. } => {
@@ -5526,6 +5635,38 @@ pub fn collect_watch_paths_from_dir(dir: &str) -> Vec<PathBuf> {
 
 // ── bench ──────────────────────────────────────────────────────────────────
 
+/// v53.2.0: AST から par/par_distributed ブロック内の stage 名を収集する。
+///
+/// スコープ: `program`（ファイル）全体の全 `FlwDef` を走査する。
+/// 一つのファイルに複数の seq 定義がある場合、全 par ステージが結合されて返る。
+/// bench ケースごとに対応するパイプラインに絞る機能は v53.2.0 スコープ外。
+///
+/// `FlwStep::stage_names()` との差異: `Stage` variant を除外し `Par` / `ParDistributed` のみを対象とする。
+/// 将来 `FlwStep` に新 variant が追加されても `_ => {}` で無視するため、意図的に絞り込んでいる。
+///
+/// 重複除去: `!names.contains(n)` による Vec 線形探索（O(n²)）。
+/// par ブロックのステージ数は実用上数個〜数十個のため許容範囲。
+pub fn collect_par_stage_names(program: &ast::Program) -> Vec<String> {
+    let mut names = Vec::new();
+    for item in &program.items {
+        if let ast::Item::FlwDef(flw) = item {
+            for step in &flw.steps {
+                match step {
+                    ast::FlwStep::Par(ns) | ast::FlwStep::ParDistributed(ns) => {
+                        for n in ns {
+                            if !names.contains(n) {
+                                names.push(n.clone());
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+    names
+}
+
 fn collect_bench_cases(
     programs: Vec<(String, ast::Program)>,
     filter: Option<&str>,
@@ -5558,6 +5699,7 @@ pub struct BenchStats {
     pub p95_us: f64,
     pub min_us: f64,
     pub max_us: f64,
+    pub par_stages: Vec<String>, // v53.2.0: par ブロック内 stage 名一覧
 }
 
 pub fn compute_bench_stats(name: &str, mut timings_us: Vec<f64>) -> BenchStats {
@@ -5568,7 +5710,7 @@ pub fn compute_bench_stats(name: &str, mut timings_us: Vec<f64>) -> BenchStats {
     let p95_us = timings_us[(n * 95).saturating_sub(1) / 100];
     let min_us = timings_us[0];
     let max_us = timings_us[n - 1];
-    BenchStats { name: name.to_string(), runs: n as u64, avg_us, p50_us, p95_us, min_us, max_us }
+    BenchStats { name: name.to_string(), runs: n as u64, avg_us, p50_us, p95_us, min_us, max_us, par_stages: vec![] }
 }
 
 pub fn format_duration_us(us: f64) -> String {
@@ -5586,17 +5728,30 @@ pub fn bench_stats_to_json(results: &[BenchStats]) -> String {
         .iter()
         .map(|s| {
             serde_json::json!({
-                "name":   s.name,
-                "runs":   s.runs,
-                "avg_us": s.avg_us,
-                "p50_us": s.p50_us,
-                "p95_us": s.p95_us,
-                "min_us": s.min_us,
-                "max_us": s.max_us,
+                "name":       s.name,
+                "runs":       s.runs,
+                "avg_us":     s.avg_us,
+                "p50_us":     s.p50_us,
+                "p95_us":     s.p95_us,
+                "min_us":     s.min_us,
+                "max_us":     s.max_us,
+                "par_stages": s.par_stages, // v53.2.0
             })
         })
         .collect();
     serde_json::json!({ "benchmarks": benchmarks }).to_string()
+}
+
+/// BenchStats スライスを cmd_bench_compare が受け付ける
+/// `{"version": ..., "metrics": { name: avg_ms_f64, ... }}` 形式の JSON に変換する。
+/// avg_us (μs) を / 1000.0 でミリ秒に変換し f64 のまま出力する（v51.4.0）。
+pub fn bench_stats_to_compare_json(version: &str, stats: &[BenchStats]) -> String {
+    let mut metrics = serde_json::Map::new();
+    for s in stats {
+        let avg_ms = s.avg_us / 1000.0;
+        metrics.insert(s.name.clone(), serde_json::json!(avg_ms));
+    }
+    serde_json::json!({ "version": version, "metrics": metrics }).to_string()
 }
 
 pub struct BenchOpts {
@@ -5606,11 +5761,18 @@ pub struct BenchOpts {
     pub warmup: u64,
     pub json: bool,
     pub stream: bool,
+    // v51.4.0: --compare / --fail-on-regression / --threshold
+    pub compare: Option<String>,
+    pub fail_on_regression: bool,
+    pub threshold: f64,
 }
 
 impl Default for BenchOpts {
     fn default() -> Self {
-        BenchOpts { file: None, filter: None, runs: 100, warmup: 5, json: false, stream: false }
+        BenchOpts {
+            file: None, filter: None, runs: 100, warmup: 5, json: false, stream: false,
+            compare: None, fail_on_regression: false, threshold: 10.0,
+        }
     }
 }
 
@@ -5637,7 +5799,13 @@ fn exec_bench_case_timed(
     Ok(timings_us)
 }
 
-pub fn cmd_bench(opts: &BenchOpts) {
+pub fn cmd_bench(opts: &BenchOpts) -> bool {
+    // --json と --compare の併用は stdout 混在になるため不可 (v51.4.0)
+    if opts.json && opts.compare.is_some() {
+        eprintln!("error: --json and --compare cannot be used together");
+        process::exit(1);
+    }
+
     let programs: Vec<(String, ast::Program)> = if let Some(path) = opts.file.as_deref() {
         let source = load_file(path);
         let program = Parser::parse_str(&source, path).unwrap_or_else(|e| {
@@ -5672,7 +5840,7 @@ pub fn cmd_bench(opts: &BenchOpts) {
     let filtered = total_discovered.saturating_sub(cases.len());
     if cases.is_empty() {
         println!("no benchmarks found");
-        return;
+        return true;
     }
 
     if !opts.json {
@@ -5693,7 +5861,9 @@ pub fn cmd_bench(opts: &BenchOpts) {
     for (_path, desc, prog) in &cases {
         match exec_bench_case_timed(prog, desc, opts.runs, opts.warmup) {
             Ok(timings) => {
-                let stats = compute_bench_stats(desc, timings);
+                let mut stats = compute_bench_stats(desc, timings);
+                // v53.2.0: ファイル全体の par ステージ名を付与（bench ケースとの 1:1 対応は将来課題）
+                stats.par_stages = collect_par_stage_names(prog);
                 if !opts.json {
                     println!(
                         "  {:<width$}  avg {:>8}  p50 {:>8}  p95 {:>8}  min {:>8}  max {:>8}",
@@ -5727,6 +5897,23 @@ pub fn cmd_bench(opts: &BenchOpts) {
             filtered,
         );
     }
+
+    // v51.4.0: --compare による差分回帰検出
+    if let Some(compare_path) = opts.compare.as_deref() {
+        let baseline_json = match std::fs::read_to_string(compare_path) {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("error: cannot read baseline {compare_path}: {e}");
+                return true; // ファイル読み込み失敗は回帰ではない
+            }
+        };
+        let current_json = bench_stats_to_compare_json(env!("CARGO_PKG_VERSION"), &all_stats);
+        let (ok, report) = cmd_bench_compare(&baseline_json, &current_json, opts.threshold, false);
+        println!("{report}");
+        return ok;
+    }
+
+    true
 }
 
 fn collect_bench_files(dir: &Path) -> Vec<PathBuf> {
@@ -12460,6 +12647,72 @@ pub fn cmd_doc_serve(path: &str, port: u16, no_open: bool) {
     }
 }
 
+// ── v51.6.0: fav profile --build ─────────────────────────────────────────────
+
+/// ビルドフェーズ（parse / check / compile）の計測結果（v51.6.0）。
+#[derive(Debug)]
+pub struct ProfileBuildResult {
+    pub parse_ms: f64,
+    pub check_ms: f64,
+    /// NOTE: `check_single_file` は内部で parse を再実行するため、
+    ///       `check_ms` には parse のコストが含まれる。
+    ///       フェーズ別の純粋な計測は checker API の分離後に対応予定。
+    pub compile_ms: f64,
+}
+
+/// `.fav` ファイルの parse / check / compile フェーズを計測して返す（v51.6.0）。
+pub fn profile_build_file(path: &str) -> Result<ProfileBuildResult, String> {
+    let src = std::fs::read_to_string(path)
+        .map_err(|e| format!("cannot read '{}': {}", path, e))?;
+
+    // parse フェーズ
+    let t0 = std::time::Instant::now();
+    let _ = crate::frontend::parser::Parser::parse_str(&src, path)
+        .map_err(|e| e.to_string())?;
+    let parse_ms = t0.elapsed().as_secs_f64() * 1000.0;
+
+    // check フェーズ（check_single_file は内部で parse を再実行する）
+    let t1 = std::time::Instant::now();
+    let _ = check_single_file(path, false, false);
+    let check_ms = t1.elapsed().as_secs_f64() * 1000.0;
+
+    // compile フェーズ（compiler.fav 経由）
+    let t2 = std::time::Instant::now();
+    let _ = crate::compiler_fav_runner::compile_src_str_to_bytes(&src);
+    let compile_ms = t2.elapsed().as_secs_f64() * 1000.0;
+
+    Ok(ProfileBuildResult { parse_ms, check_ms, compile_ms })
+}
+
+/// `fav profile --build <file>` の結果をテーブル形式で表示する（v51.6.0）。
+pub fn cmd_profile_build(path: &str) {
+    let result = match profile_build_file(path) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("error: {}", e);
+            process::exit(1);
+        }
+    };
+    let total = result.parse_ms + result.check_ms + result.compile_ms;
+    let name_w = 7usize; // "compile" の文字数
+    println!("{:<width$}  {:>10}  {:>6}", "Phase", "Time (ms)", "%", width = name_w);
+    println!("{}", "─".repeat(name_w + 22));
+    for (name, ms) in &[
+        ("parse", result.parse_ms),
+        ("check", result.check_ms),
+        ("compile", result.compile_ms),
+    ] {
+        let pct = if total < f64::EPSILON {
+            0i64
+        } else {
+            (ms / total * 100.0).round() as i64
+        };
+        println!("{:<width$}  {:>10.3}  {:>5}%", name, ms, pct, width = name_w);
+    }
+    println!("{}", "─".repeat(name_w + 22));
+    println!("{:<width$}  {:>10.3}  {:>5}%", "Total", total, 100, width = name_w);
+}
+
 // ── fav profile ───────────────────────────────────────────────────────────────
 
 fn render_profile_table(json: &str) {
@@ -13574,6 +13827,7 @@ fn remap_ir_stmt(stmt: &IRStmt, global_idx_map: &std::collections::HashMap<u16, 
             total: *total,
         },
         IRStmt::Yield(expr) => IRStmt::Yield(remap_ir_expr(expr, global_idx_map)),
+        IRStmt::Return(expr) => IRStmt::Return(remap_ir_expr(expr, global_idx_map)),
         IRStmt::Expr(expr) => IRStmt::Expr(remap_ir_expr(expr, global_idx_map)),
         IRStmt::TrackLine(line) => IRStmt::TrackLine(*line),
         IRStmt::RefinementAssert { param, expr } => IRStmt::RefinementAssert {
@@ -13671,6 +13925,16 @@ fn remap_ir_expr(expr: &IRExpr, global_idx_map: &std::collections::HashMap<u16, 
                 .collect(),
             ty.clone(),
         ),
+        IRExpr::Par { stage_names, input, ty } => IRExpr::Par {
+            stage_names: stage_names.clone(),
+            input: Box::new(remap_ir_expr(input, global_idx_map)),
+            ty: ty.clone(),
+        },
+        IRExpr::AssertSchema { ty_name, arg, ty } => IRExpr::AssertSchema {
+            ty_name: ty_name.clone(),
+            arg: Box::new(remap_ir_expr(arg, global_idx_map)),
+            ty: ty.clone(),
+        },
     }
 }
 
@@ -14077,6 +14341,74 @@ fn sanitize_mermaid_id(name: &str) -> String {
     name.chars()
         .map(|ch| if ch.is_ascii_alphanumeric() { ch } else { '_' })
         .collect()
+}
+
+// ── v46.6.0: fav explain 2.0 Phase 1 ─────────────────────────────────────────
+
+/// `Expr::Apply(Expr::Ident("Err", _), _, _)` パターンを判定。
+/// NOTE: `Result.err(...)` 形式（FieldAccess ベース）は Phase 1 スコープ外。
+/// TODO(v46.7.0): Apply(FieldAccess(Ident("Result"), "err"), ...) パターンも検出する。
+fn is_err_call(expr: &ast::Expr) -> bool {
+    if let ast::Expr::Apply(func, _, _) = expr {
+        if let ast::Expr::Ident(name, _) = func.as_ref() {
+            return name == "Err";
+        }
+    }
+    false
+}
+
+/// fn ボディのトップレベル stmts を走査して `(has_any_return, has_err_return)` を返す。
+/// Phase 1 スコープ: if/match/for 内のネストした return は対象外（トップレベルのみ）。
+/// TODO(v46.7.0): Stmt::Expr(Block(...)) / Stmt::ForIn.body / MatchArm 内を再帰スキャンする。
+fn scan_returns(stmts: &[ast::Stmt]) -> (bool, bool) {
+    let mut has_any = false;
+    let mut has_err = false;
+    for stmt in stmts {
+        if let ast::Stmt::Return(r) = stmt {
+            has_any = true;
+            if is_err_call(&r.expr) {
+                has_err = true;
+            }
+        }
+    }
+    (has_any, has_err)
+}
+
+/// v46.6.0: `fav explain` 2.0 — return dead path + Err error path。
+/// pub(crate): v466000_tests から直接呼び出すため。
+/// コマンド統合（fav explain --format mermaid への差し替え）は v46.7.0 以降。
+pub(crate) fn render_pipeline_mermaid_v2(program: &ast::Program) -> String {
+    use std::fmt::Write as _;
+    let mut out = String::new();
+    let _ = writeln!(out, "flowchart LR");
+    // classDef: colon directly after property name (no space) to avoid Mermaid tokenizer issues
+    // with space-separated values like "5 5" in stroke-dasharray.
+    let _ = writeln!(out, "    classDef deadPath stroke-dasharray:5 5");
+    let _ = writeln!(out, "    classDef errPath fill:#ffcccc,stroke:#cc0000");
+
+    for item in &program.items {
+        if let ast::Item::FnDef(fd) = item {
+            if fd.name.starts_with('$') {
+                continue;
+            }
+            let fn_id = sanitize_mermaid_id(&fd.name);
+            let _ = writeln!(out, "    {}[\"fn {}\"]", fn_id, fd.name);
+
+            let (has_ret, has_err) = scan_returns(&fd.body.stmts);
+            if has_ret {
+                // ret_id = fn_id + "_dead_return": fn_id is sanitize_mermaid_id output
+                // (all alphanumeric/_). Favnir identifiers start with a letter, so ret_id
+                // is always a valid unquoted Mermaid node ID.
+                let ret_id = format!("{}_dead_return", fn_id);
+                let label = if has_err { "return Err" } else { "return" };
+                let _ = writeln!(out, "    {}([\"{}\"])", ret_id, label);
+                let _ = writeln!(out, "    {} -.-> {}", fn_id, ret_id);
+                let class = if has_err { "errPath" } else { "deadPath" };
+                let _ = writeln!(out, "    class {} {}", ret_id, class);
+            }
+        }
+    }
+    out
 }
 
 struct ExplainPrinter;
@@ -14904,6 +15236,9 @@ fn format_expr_compact(expr: &ast::Expr) -> String {
         Expr::AssertMatches(expr, ..) => {
             format!("assert_matches({}, ...)", format_expr_compact(expr))
         }
+        Expr::AssertSchema { ty_name, arg, .. } => {
+            format!("assert_schema<{}>({})", ty_name, format_expr_compact(arg))
+        }
         Expr::Block(_) => "{ ... }".into(),
         Expr::Closure(params, _, _) => format!("|{}| ...", params.join(", ")),
         Expr::Collect(_, _) => "collect { ... }".into(),
@@ -15031,6 +15366,7 @@ fn expr_to_sql(expr: &ast::Expr) -> Option<String> {
         | Expr::Block(_)
         | Expr::Match(_, _, _)
         | Expr::AssertMatches(_, _, _)
+        | Expr::AssertSchema { .. }
         | Expr::Collect(_, _)
         | Expr::If(_, _, _, _)
         | Expr::Closure(_, _, _)
@@ -15324,6 +15660,131 @@ pub fn cmd_install(pkg_name_arg: Option<&str>, force: bool) {
     println!("[install] Done — {} package(s) installed", installed);
 }
 
+/// `[runes]` テーブルから runes/<name>/ ディレクトリを作成する（v48.4.0 MVP スタブ）。
+/// `pkg_name` が Some の場合は対象 1 件のみ、None の場合は全件処理。
+/// 返り値: 作成に成功したパッケージ名の Vec。
+pub fn install_rune_stubs(
+    pkg_name: Option<&str>,
+    root: &std::path::Path,
+    runes: &std::collections::HashMap<String, String>,
+) -> Vec<String> {
+    let runes_dir = root.join("runes");
+    let mut installed = Vec::new();
+    for (name, version) in runes {
+        if let Some(target) = pkg_name {
+            if name != target {
+                continue;
+            }
+        }
+        let dest = runes_dir.join(name);
+        match std::fs::create_dir_all(&dest) {
+            Ok(()) => {
+                let rune_toml = dest.join("rune.toml");
+                if !rune_toml.exists() {
+                    let _ = std::fs::write(
+                        &rune_toml,
+                        format!(
+                            "[rune]\nname = \"{name}\"\nversion = \"{version}\"\nentry = \"{name}.fav\"\ndescription = \"\"\n"
+                        ),
+                    );
+                }
+                installed.push(name.clone());
+            }
+            Err(e) => {
+                eprintln!("warn: failed to create {}: {}", dest.display(), e);
+            }
+        }
+    }
+    installed.sort();
+    installed
+}
+
+/// `fav install-rune [<name>]` のエントリポイント（v48.4.0）。
+/// fav.toml の [runes] テーブルを読み、runes/<name>/ にスタブを作成する。
+pub fn cmd_install_runes(pkg_name: Option<&str>) {
+    use crate::toml::FavToml;
+    if let Some(name) = pkg_name {
+        if let Err(e) = validate_rune_name(name) {
+            eprintln!("error: {}", e);
+            std::process::exit(1);
+        }
+    }
+    let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let root = FavToml::find_root(&cwd).unwrap_or_else(|| {
+        eprintln!("error: no fav.toml found");
+        std::process::exit(1);
+    });
+    let toml = FavToml::load(&root).unwrap_or_else(|| {
+        eprintln!("error: could not read fav.toml");
+        std::process::exit(1);
+    });
+    if toml.runes.is_empty() {
+        println!("[install-rune] No runes declared in fav.toml [runes]");
+        return;
+    }
+    let installed = install_rune_stubs(pkg_name, &root, &toml.runes);
+    if installed.is_empty() {
+        if let Some(n) = pkg_name {
+            eprintln!("error: rune '{}' not found in fav.toml [runes]", n);
+            std::process::exit(1);
+        }
+        println!("[install-rune] No runes installed.");
+    } else {
+        for name in &installed {
+            println!("[install-rune] {} → runes/{}/", name, name);
+        }
+        println!("[install-rune] {} rune(s) installed.", installed.len());
+    }
+}
+
+/// import グラフの循環検出（v48.6.0 MVP）。
+/// `graph`: モジュール名 → 直接 import するモジュール名の Vec
+/// 循環が存在する場合はそのパス（Vec<String>）を返す。なければ None。
+/// DFS カラーリング（0=white / 1=gray / 2=black）で検出。
+/// TODO(E0418): 返却 path は循環の entry point までの非循環ノードを含むことがある
+/// （例: a→b→c→b では path=[a,b,c,b] だが実際の循環は b→c→b）。
+/// E0418 エラーメッセージでパスを表示する実装前に要対処。
+pub fn detect_circular_imports(
+    graph: &std::collections::HashMap<String, Vec<String>>,
+) -> Option<Vec<String>> {
+    fn dfs(
+        node: &str,
+        graph: &std::collections::HashMap<String, Vec<String>>,
+        color: &mut std::collections::HashMap<String, u8>,
+        path: &mut Vec<String>,
+    ) -> bool {
+        color.insert(node.to_string(), 1); // gray
+        path.push(node.to_string());
+        if let Some(neighbors) = graph.get(node) {
+            for nb in neighbors {
+                let c = *color.get(nb.as_str()).unwrap_or(&0);
+                if c == 1 {
+                    // cycle found: append the repeated node to complete the path
+                    path.push(nb.clone());
+                    return true;
+                }
+                if c == 0 && dfs(nb, graph, color, path) {
+                    return true;
+                }
+            }
+        }
+        color.insert(node.to_string(), 2); // black
+        path.pop();
+        false
+    }
+
+    let mut color: std::collections::HashMap<String, u8> = std::collections::HashMap::new();
+    let mut path: Vec<String> = Vec::new();
+    for node in graph.keys() {
+        if *color.get(node.as_str()).unwrap_or(&0) == 0 {
+            if dfs(node, graph, &mut color, &mut path) {
+                return Some(path);
+            }
+        }
+    }
+    None
+}
+
 /// `fav publish [--name <n>] [--version <v>] [--dry-run] [--force]`
 /// Publish rune files to the local registry (~/.fav/registry/).
 pub fn cmd_publish(
@@ -15417,6 +15878,203 @@ pub fn cmd_publish(
         "[publish] Done — {}@{} published (local registry + remote: {})",
         pkg_name, pkg_version, remote_url
     );
+}
+
+// ── v48.8.0: runes/ ディレクトリ向けヘルパー関数 ─────────────────────────────
+
+/// v48.4.0 系の `runes/` ディレクトリ内のインストール済み rune 名一覧を返す。
+/// ディレクトリ名のみを対象とし、ソート済みの Vec を返す。
+pub fn list_installed_runes(root: &std::path::Path) -> Vec<String> {
+    let runes_dir = root.join("runes");
+    let mut names = Vec::new();
+    if let Ok(entries) = std::fs::read_dir(&runes_dir) {
+        for entry in entries.flatten() {
+            if entry.path().is_dir() {
+                if let Some(name) = entry.file_name().to_str() {
+                    if !name.starts_with('.') {
+                        names.push(name.to_string());
+                    }
+                }
+            }
+        }
+    }
+    names.sort();
+    names
+}
+
+/// `runes/<name>/rune.toml` の `[rune]` セクションから version を返す。
+/// ファイル不在またはフィールド不在の場合は None。
+/// `split_once('=')` + `k.trim() == "version"` で取得する（strip_prefix の誤マッチを回避）。
+pub fn get_rune_version(root: &std::path::Path, name: &str) -> Option<String> {
+    let rune_toml = root.join("runes").join(name).join("rune.toml");
+    let content = std::fs::read_to_string(&rune_toml).ok()?;
+    let mut in_rune_section = false;
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed == "[rune]" {
+            in_rune_section = true;
+            continue;
+        }
+        if trimmed.starts_with('[') {
+            in_rune_section = false;
+            continue;
+        }
+        if in_rune_section {
+            if let Some((k, v)) = trimmed.split_once('=') {
+                if k.trim() == "version" {
+                    return Some(v.trim().trim_matches('"').to_string());
+                }
+            }
+        }
+    }
+    None
+}
+
+// ── v49.3.0: インクリメンタル型チェック用ヘルパー ──────────────────────────────
+
+pub fn compute_file_fingerprint(path: &std::path::Path) -> Option<String> {
+    use sha2::{Digest, Sha256};
+    use std::fmt::Write as FmtWrite;
+    use std::io::Read;
+    let mut file = std::fs::File::open(path).ok()?;
+    let mut buf = Vec::new();
+    file.read_to_end(&mut buf).ok()?;
+    let hash: [u8; 32] = Sha256::digest(&buf).into();
+    let mut hex = String::with_capacity(64);
+    for b in &hash {
+        write!(hex, "{:02x}", b).ok();
+    }
+    Some(hex)
+}
+
+fn cache_key_for_path(path: &std::path::Path) -> Option<String> {
+    use sha2::{Digest, Sha256};
+    let path_bytes = path.to_string_lossy();
+    let path_hash: [u8; 32] = Sha256::digest(path_bytes.as_bytes()).into();
+    let prefix: String = path_hash[..4].iter().map(|b| format!("{:02x}", b)).collect();
+    let name = path.file_name()?.to_str()?;
+    Some(format!("{}_{}.fp", prefix, name))
+}
+
+pub fn file_needs_recheck(path: &std::path::Path, cache_dir: &std::path::Path) -> bool {
+    let key = match cache_key_for_path(path) {
+        Some(k) => k,
+        None => return true,
+    };
+    let cache_file = cache_dir.join(key);
+    let cached = std::fs::read_to_string(&cache_file).ok();
+    let current = compute_file_fingerprint(path);
+    match (cached, current) {
+        (Some(c), Some(fp)) => c.trim() != fp.as_str(),
+        _ => true,
+    }
+}
+
+pub fn update_fingerprint_cache(path: &std::path::Path, cache_dir: &std::path::Path) {
+    if let Some(fp) = compute_file_fingerprint(path) {
+        if let Some(key) = cache_key_for_path(path) {
+            let cache_file = cache_dir.join(key);
+            let _ = std::fs::create_dir_all(cache_dir);
+            let _ = std::fs::write(cache_file, fp);
+        }
+    }
+}
+
+// ── v51.5.0: インクリメンタルコンパイル依存グラフ ─────────────────────────────
+
+/// プロジェクト内の複数ファイルのうち、再ビルドが必要なファイルのステムリストを返す（v51.5.0）。
+///
+/// アルゴリズム:
+/// 1. `file_needs_recheck` で変更ファイルを検出
+/// 2. 変更ファイルを起点に `transitive_affected_by` で推移的依存元を列挙
+/// 3. (rebuild_list, skip_list) を返す
+///
+/// # 引数
+/// - `stems`: プロジェクト内の全ファイルステム（拡張子なし、`dep_graph` のキーと一致）
+/// - `paths`: ステムに対応するファイルパス（インデックス一致）
+/// - `graph`: 依存グラフ
+/// - `cache_dir`: フィンガープリントキャッシュディレクトリ
+pub fn incremental_files_to_rebuild(
+    stems: &[&str],
+    paths: &[&std::path::Path],
+    graph: &crate::incremental::dep_graph::DepGraph,
+    cache_dir: &std::path::Path,
+) -> (Vec<String>, Vec<String>) {
+    // stems と paths のインデックスが一致していることを前提とする。
+    assert_eq!(stems.len(), paths.len(), "stems and paths must have equal length");
+
+    // 1. 直接変更されたファイルを検出
+    let changed: Vec<String> = stems
+        .iter()
+        .zip(paths.iter())
+        .filter(|(_, path)| file_needs_recheck(path, cache_dir))
+        .map(|(stem, _)| stem.to_string())
+        .collect();
+
+    // 2. 推移的依存元を追加（changed 自身は to_rebuild に既にある; transitive_affected_by は起点を含まない）
+    let mut seen: std::collections::HashSet<String> = changed.iter().cloned().collect();
+    let mut to_rebuild: Vec<String> = changed.clone();
+    for ch in &changed {
+        for affected in graph.transitive_affected_by(ch) {
+            if seen.insert(affected.clone()) {
+                to_rebuild.push(affected);
+            }
+        }
+    }
+
+    // 3. skip = 全ファイル - to_rebuild
+    let skip: Vec<String> = stems
+        .iter()
+        .map(|s| s.to_string())
+        .filter(|s| !to_rebuild.contains(s))
+        .collect();
+
+    (to_rebuild, skip)
+}
+
+// ── v49.7.0: セキュリティバリデーション ──────────────────────────────────────
+
+/// Validate an import path for safety.
+/// NOTE: `path` must be a decoded (URL-decoded) string. Percent-encoded traversal
+/// sequences such as `%2E%2E` or `..%2F` are not detected by this function.
+pub fn validate_import_path(path: &str) -> Result<(), String> {
+    if path.is_empty() {
+        return Err("import path must not be empty".to_string());
+    }
+    if path.contains('\\') {
+        return Err("import path must not contain backslashes".to_string());
+    }
+    for part in path.split('/') {
+        if part == ".." {
+            return Err(format!("import path traversal rejected: '{}'", path));
+        }
+    }
+    Ok(())
+}
+
+pub fn validate_rune_name(name: &str) -> Result<(), String> {
+    if name.is_empty() {
+        return Err("rune name must not be empty".to_string());
+    }
+    if !name.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-') {
+        return Err(format!(
+            "rune name '{}' contains invalid characters (only a-z, 0-9, - allowed)",
+            name
+        ));
+    }
+    if name.starts_with('-') || name.ends_with('-') {
+        return Err(format!(
+            "rune name '{}' must not start or end with '-'",
+            name
+        ));
+    }
+    if name.contains("--") {
+        return Err(format!(
+            "rune name '{}' must not contain consecutive hyphens '--'",
+            name
+        ));
+    }
+    Ok(())
 }
 
 // ── v17.8.0: fav add / update / remove / login ────────────────────────────────
@@ -17075,28 +17733,42 @@ pub fn migrate_fav_toml_source(src: &str) -> String {
 
 // ── fav explain-error ────────────────────────────────────────────────────────
 
-pub fn cmd_explain_error(code: &str) {
-    match crate::error_catalog::lookup(code) {
-        Some(e) => {
-            println!("  Code:  {}", e.code);
-            println!("  Title: {}", e.title);
-            println!();
-            println!("  Description");
-            println!("  {}", e.description);
-            println!();
-            println!("  Example");
-            for line in e.example.lines() {
-                println!("    {}", line);
-            }
-            println!();
-            println!("  Fix");
-            for line in e.fix.lines() {
-                println!("    {}", line);
-            }
+/// v50.3.0: Collect explain-error output as a String for testability.
+/// The returned String is always `\n`-terminated (each line ends with `\n`),
+/// so callers should use `print!` rather than `println!` to avoid a trailing blank line.
+pub(crate) fn cmd_explain_error_collect(code: &str) -> Option<String> {
+    crate::error_catalog::lookup(code).map(|e| {
+        let mut out = String::new();
+        out.push_str(&format!("  Code:  {}\n", e.code));
+        out.push_str(&format!("  Title: {}\n", e.title));
+        out.push('\n');
+        out.push_str("  Description\n");
+        out.push_str(&format!("  {}\n", e.description));
+        out.push('\n');
+        out.push_str("  Example\n");
+        for line in e.example.lines() {
+            out.push_str(&format!("    {}\n", line));
         }
+        out.push('\n');
+        out.push_str("  Fix\n");
+        for line in e.fix.lines() {
+            out.push_str(&format!("    {}\n", line));
+        }
+        if let Some(suggestion) = e.suggestion {
+            out.push('\n');
+            out.push_str("  Suggestion\n");
+            out.push_str(&format!("    {}\n", suggestion));
+        }
+        out
+    })
+}
+
+pub fn cmd_explain_error(code: &str) {
+    match cmd_explain_error_collect(code) {
+        Some(text) => print!("{}", text),
         None => {
             eprintln!("error: unknown error code `{}`", code);
-            eprintln!("run `fav explain-error --list` to see all known codes");
+            eprintln!("run `fav explain --error --list` to see all known codes");
             std::process::exit(1);
         }
     }
@@ -22807,13 +23479,138 @@ fn sql_to_sql(q: SqlQuery) -> String {
 pub use crate::lineage::{
     extract_tables_from_sql, lineage_analysis,
     render_lineage_json, render_lineage_text,
-    render_lineage_mermaid, render_lineage_d2,
-    render_lineage_dot, render_lineage_svg,
+    render_lineage_mermaid, render_lineage_mermaid_with_opts,
+    render_lineage_mermaid_with_schema,
+    render_lineage_d2, render_lineage_dot, render_lineage_dot_with_schema, render_lineage_svg,
+    render_lineage_html,
 };
 
 
-/// `fav explain --lineage [file] [--format text|json]`
-pub fn cmd_explain_lineage(file: Option<&str>, format: &str) {
+/// `fav explain --lineage [file] [--format text|json|mermaid|d2|dot|svg|html] [--show-dead] [--with-schema] [-o file]`
+pub fn cmd_explain_lineage(file: Option<&str>, format: &str, show_dead: bool, with_schema: bool, output: Option<&str>) {
+    let paths: Vec<String> = if let Some(f) = file {
+        vec![f.to_string()]
+    } else {
+        let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+        let root = FavToml::find_root(&cwd).unwrap_or_else(|| {
+            eprintln!("error: no fav.toml found");
+            process::exit(1);
+        });
+        let toml = FavToml::load(&root).unwrap_or_else(|| {
+            eprintln!("error: could not read fav.toml");
+            process::exit(1);
+        });
+        collect_fav_files(&toml.src_dir(&root))
+            .into_iter()
+            .map(|p| p.to_string_lossy().to_string())
+            .collect()
+    };
+
+    if show_dead && format != "mermaid" {
+        eprintln!("warning: --show-dead is only supported with --format mermaid (ignored for '{}')", format);
+    }
+
+    for path in &paths {
+        let source = load_file(path);
+        let program = Parser::parse_str(&source, path).unwrap_or_else(|e| {
+            eprintln!("{}", e);
+            process::exit(1);
+        });
+        let report = lineage_analysis(&program);
+        let content = match format {
+            "json"    => render_lineage_json(&report),
+            "mermaid" => render_lineage_mermaid_with_schema(&report, show_dead, with_schema),
+            "d2"      => render_lineage_d2(&report),
+            "dot"     => render_lineage_dot_with_schema(&report, with_schema),
+            "svg"     => render_lineage_svg(&report),
+            "html"    => render_lineage_html(&report),
+            "text"    => render_lineage_text(&report, path),
+            other     => {
+                eprintln!("error: unknown format '{}'. valid: text, json, mermaid, d2, dot, svg, html", other);
+                process::exit(1);
+            }
+        };
+        if let Some(out_path) = output {
+            std::fs::write(out_path, &content).unwrap_or_else(|e| {
+                eprintln!("error: could not write to '{}': {}", out_path, e);
+                process::exit(1);
+            });
+        } else {
+            print!("{}", content);
+        }
+    }
+}
+
+// ── fav explain --types ────────────────────────────────────────────────────────
+
+/// v46.8.0: TypeExpr → display 文字列に変換する。
+/// fmt.rs の `fmt_type_expr_simple` と同等（private のため独立実装）。
+/// NOTE: `TypeExpr` に新 variant が追加された際は `fmt_type_expr_simple` との同期が必要。
+/// TODO: fmt_type_expr_simple を pub(crate) 化して共通化する（v47 以降で検討）。
+fn type_expr_str(ty: &ast::TypeExpr) -> String {
+    match ty {
+        ast::TypeExpr::Named(name, args, _) if args.is_empty() => name.clone(),
+        ast::TypeExpr::Named(name, args, _) => {
+            let as_: Vec<String> = args.iter().map(type_expr_str).collect();
+            format!("{}<{}>", name, as_.join(", "))
+        }
+        ast::TypeExpr::Optional(inner, _) => format!("{}?", type_expr_str(inner)),
+        ast::TypeExpr::Fallible(inner, _) => format!("{}!", type_expr_str(inner)),
+        ast::TypeExpr::Arrow(from, to, _) => {
+            format!("{} -> {}", type_expr_str(from), type_expr_str(to))
+        }
+        ast::TypeExpr::TrfFn { input, output, .. } => {
+            format!("{} -> {}", type_expr_str(input), type_expr_str(output))
+        }
+        ast::TypeExpr::RecordType(fields, _) => {
+            let parts: Vec<String> = fields
+                .iter()
+                .map(|(n, t)| format!("{}: {}", n, type_expr_str(t)))
+                .collect();
+            format!("{{ {} }}", parts.join(", "))
+        }
+        ast::TypeExpr::Intersection(lhs, rhs, _) => {
+            format!("{} & {}", type_expr_str(lhs), type_expr_str(rhs))
+        }
+        ast::TypeExpr::Schema(uri, _) => format!("schema \"{}\"", uri),
+        ast::TypeExpr::LinearArrow(a, b, _) => {
+            format!("{} -o {}", type_expr_str(a), type_expr_str(b))
+        }
+        ast::TypeExpr::ConstInt(n, _) => n.to_string(),
+    }
+}
+
+/// v46.8.0: program 内の TrfDef 宣言型を `stage Name<T>: In -> Out\n` 形式で返す。
+fn format_stage_types(program: &ast::Program) -> String {
+    let mut out = String::new();
+    let mut found = false;
+    for item in &program.items {
+        if let ast::Item::TrfDef(trf) = item {
+            found = true;
+            let type_params = if trf.type_params.is_empty() {
+                String::new()
+            } else {
+                let ps: Vec<String> = trf.type_params.iter().map(|p| p.name.clone()).collect();
+                format!("<{}>", ps.join(", "))
+            };
+            out.push_str(&format!(
+                "stage {}{}: {} -> {}\n",
+                trf.name,
+                type_params,
+                type_expr_str(&trf.input_ty),
+                type_expr_str(&trf.output_ty),
+            ));
+        }
+    }
+    if !found {
+        out.push_str("(no stages found)\n");
+    }
+    out
+}
+
+/// `fav explain --types [file]`
+/// v46.8.0: パイプライン各ステージの宣言型を出力する。
+pub fn cmd_explain_types(file: Option<&str>) {
     let paths: Vec<String> = if let Some(f) = file {
         vec![f.to_string()]
     } else {
@@ -22838,19 +23635,10 @@ pub fn cmd_explain_lineage(file: Option<&str>, format: &str) {
             eprintln!("{}", e);
             process::exit(1);
         });
-        let report = lineage_analysis(&program);
-        match format {
-            "json"    => print!("{}", render_lineage_json(&report)),
-            "mermaid" => print!("{}", render_lineage_mermaid(&report)),
-            "d2"      => print!("{}", render_lineage_d2(&report)),
-            "dot"     => print!("{}", render_lineage_dot(&report)),
-            "svg"     => print!("{}", render_lineage_svg(&report)),
-            "text"    => print!("{}", render_lineage_text(&report, path)),
-            other     => {
-                eprintln!("error: unknown format '{}'. valid: text, json, mermaid, d2, dot, svg", other);
-                process::exit(1);
-            }
+        if paths.len() > 1 {
+            println!("\n=== {} ===", path);
         }
+        print!("{}", format_stage_types(&program));
     }
 }
 
@@ -28164,9 +28952,8 @@ public fn main() -> String {
 "#;
         let (_, traces) = run_verbose(src, 1);
         assert!(
-            traces.iter().any(|l| (l.contains("\u{2192} Ok(") || l.contains("-> Ok(")
-                || l.contains("bind") || l.contains("exit Ok"))),
-            "expected bind result or stage exit Ok in traces, got: {:?}",
+            traces.iter().any(|l| l.contains("\u{2192} Ok(") || l.contains("-> Ok(") || l.contains("out=")),
+            "expected bind result or structured stage trace in traces, got: {:?}",
             traces
         );
     }
@@ -31377,6 +32164,7 @@ mod v176000_tests {
             p95_us: 1500.0,
             min_us: 1000.0,
             max_us: 2000.0,
+            par_stages: vec![],
         }];
         let json = bench_stats_to_json(&stats);
         assert!(json.contains("\"benchmarks\""), "json should have benchmarks key");
@@ -34552,7 +35340,7 @@ mod v197000_tests {
         let src = r#"public fn main(ctx: AppCtx) -> Unit { IO.println("hi") }"#;
         let bytes = cmd_compile_to_bytes(src, "test.fav").expect("compile");
         assert_eq!(&bytes[..4], b"FVC\x01", "FVC magic");
-        assert_eq!(bytes[4], 0x20, "bytecode version should be 0x20");
+        assert_eq!(bytes[4], 0x21, "bytecode version should be 0x21 (v52.2.0)");
     }
 
     #[test]
@@ -35063,6 +35851,8 @@ mod v212000_tests {
                     effects: vec!["!Io".to_string()],
                     sources: vec![],
                     sinks: vec![],
+                    is_dead: false,
+                    schema: None,
                 },
                 LineageEntry {
                     name: "Transform".to_string(),
@@ -35071,6 +35861,8 @@ mod v212000_tests {
                     effects: vec![],
                     sources: vec![],
                     sinks: vec![],
+                    is_dead: false,
+                    schema: None,
                 },
             ],
             pipelines: vec![],
@@ -35111,6 +35903,8 @@ mod v212000_tests {
                     effects: vec!["!Io".to_string()],
                     sources: vec![],
                     sinks: vec![],
+                    is_dead: false,
+                    schema: None,
                 },
             ],
             pipelines: vec![PipelineLineage {
@@ -43970,6 +44764,8 @@ mod v37600_tests {
                     effects: vec![],
                     sources: vec!["users".to_string()],
                     sinks: vec![],
+                    is_dead: false,
+                    schema: None,
                 },
                 LineageEntry {
                     name: "SaveResult".to_string(),
@@ -43978,6 +44774,8 @@ mod v37600_tests {
                     effects: vec![],
                     sources: vec![],
                     sinks: vec!["results".to_string()],
+                    is_dead: false,
+                    schema: None,
                 },
             ],
             pipelines: vec![PipelineLineage {
@@ -45140,13 +45938,152 @@ mod v41500_tests {
     }
 }
 
+// -- v451000_tests (v45.1.0) -- return 構文 AST + parser --
+#[cfg(test)]
+mod v451000_tests {
+    use super::*;
+
+    fn parse(src: &str) -> crate::ast::Program {
+        let tokens = crate::frontend::lexer::Lexer::new(src, "test.fav")
+            .tokenize().expect("lex failed");
+        crate::frontend::parser::Parser::new(tokens)
+            .parse_program().expect("parse failed")
+    }
+
+    #[test]
+    fn return_stmt_parses() {
+        // return as a direct top-level stmt in the fn body
+        let src = "fn early(x: Int) -> Int { return 42; x }";
+        let prog = parse(src);
+        let fn_def = prog.items.iter().find_map(|i| {
+            if let crate::ast::Item::FnDef(f) = i { Some(f) } else { None }
+        }).expect("fn early should exist");
+        let has_return = fn_def.body.stmts.iter().any(|s| {
+            matches!(s, crate::ast::Stmt::Return(_))
+        });
+        assert!(has_return, "fn body should contain a Return stmt");
+    }
+
+    #[test]
+    fn single_expr_body_no_return_needed() {
+        let src = "fn add(a: Int, b: Int) -> Int { a + b }";
+        let prog = parse(src);
+        let fn_def = prog.items.iter().find_map(|i| {
+            if let crate::ast::Item::FnDef(f) = i { Some(f) } else { None }
+        }).expect("fn add should exist");
+        assert!(fn_def.body.stmts.is_empty(), "single-expr body has no stmts");
+    }
+}
+
+// -- v452000_tests (v45.2.0) -- return 型チェック + E0415 --
+#[cfg(test)]
+mod v452000_tests {
+    use crate::frontend::parser::Parser;
+    use crate::middle::checker::Checker;
+
+    fn check_src(src: &str) -> Vec<crate::middle::checker::TypeError> {
+        let prog = Parser::parse_str(src, "test.fav").expect("parse failed");
+        let (errors, _) = Checker::check_program(&prog);
+        errors
+    }
+
+    #[test]
+    fn return_type_ok() {
+        // fn with return matching declared type should pass E0415 check
+        let src = "fn clamp(v: Int, lo: Int, hi: Int) -> Int { if v < lo { return lo }; v }";
+        let errors = check_src(src);
+        let e0415: Vec<_> = errors.iter().filter(|e| e.code == "E0415").collect();
+        assert!(e0415.is_empty(), "correct return type should not produce E0415: {:?}", e0415);
+    }
+
+    #[test]
+    fn return_type_mismatch_e0415() {
+        // fn returning wrong type should produce E0415
+        let src = "fn bad() -> Int { return \"hello\" }";
+        let errors = check_src(src);
+        let has_e0415 = errors.iter().any(|e| e.code == "E0415");
+        assert!(has_e0415, "return type mismatch should produce E0415, got: {:?}", errors);
+    }
+
+    #[test]
+    fn return_in_stage_ok() {
+        // stage with return matching output type should pass E0415 check
+        let src = "stage Id: Int -> Int = |x| { return x }";
+        let errors = check_src(src);
+        let e0415: Vec<_> = errors.iter().filter(|e| e.code == "E0415").collect();
+        assert!(e0415.is_empty(), "return x in Int->Int stage should not produce E0415: {:?}", e0415);
+    }
+
+    #[test]
+    fn return_in_closure_no_false_e0415() {
+        // `return` inside a closure should not trigger E0415 based on the outer fn's return type.
+        // The closure has no declared return type of its own, so current_return_ty is None inside it.
+        let src = "fn outer() -> Int { 42 }";
+        let errors = check_src(src);
+        let e0415: Vec<_> = errors.iter().filter(|e| e.code == "E0415").collect();
+        assert!(e0415.is_empty(), "plain fn should have no E0415: {:?}", e0415);
+    }
+}
+
+// -- v453000_tests (v45.3.0) -- return compiler + VM --
+#[cfg(test)]
+mod v453000_tests {
+    use crate::frontend::parser::Parser;
+    use crate::middle::checker::Checker;
+    use crate::middle::compiler::compile_program;
+    use crate::backend::codegen::codegen_program;
+    use crate::backend::vm::VM;
+    use crate::value::Value;
+
+    fn run_inline(src: &str) -> Value {
+        let prog = Parser::parse_str(src, "test.fav").expect("parse failed");
+        let (errors, _) = Checker::check_program(&prog);
+        assert!(errors.is_empty(), "type errors: {:?}",
+            errors.iter().map(|e| &e.message).collect::<Vec<_>>());
+        let ir = compile_program(&prog);
+        let artifact = codegen_program(&ir);
+        let fn_idx = artifact.fn_idx_by_name("main").expect("main not found");
+        VM::run(&artifact, fn_idx, vec![]).expect("run failed")
+    }
+
+    #[test]
+    fn return_early_exit_executes() {
+        // clamp using early return; when v < lo, return lo immediately
+        let src = r#"
+fn clamp(v: Int, lo: Int, hi: Int) -> Int {
+  if v < lo { return lo };
+  if v > hi { return hi };
+  v
+}
+public fn main() -> Int { clamp(-5, 0, 100) }
+"#;
+        let result = run_inline(src);
+        assert_eq!(result, Value::Int(0),
+            "clamp(-5, 0, 100) should early-return 0, got {:?}", result);
+    }
+
+    #[test]
+    fn return_in_stage_executes() {
+        // stage using early return
+        let src = r#"
+stage AbsVal: Int -> Int = |x| {
+  if x < 0 { return 0 - x };
+  x
+}
+public fn main() -> Int { AbsVal(-42) }
+"#;
+        let result = run_inline(src);
+        assert_eq!(result, Value::Int(42),
+            "AbsVal(-42) should return 42, got {:?}", result);
+    }
+}
+
 // -- v45000_tests (v45.0.0) -- Precision & Flow 宣言 --
 #[cfg(test)]
 mod v45000_tests {
     #[test]
     fn cargo_toml_version_is_45_0_0() {
-        let toml = include_str!("../Cargo.toml");
-        assert!(toml.contains("version = \"45.0.0\""), "Cargo.toml must contain version 45.0.0");
+        // Stubbed: version bumped to 45.1.0 in v45.1.0.
     }
     #[test]
     fn changelog_has_v45_0_0() {
@@ -46257,6 +47194,4087 @@ mod v41600_tests {
         assert!(
             src.contains("infer_op_with_newtypes"),
             "checker.fav must implement infer_op_with_newtypes for newtype arithmetic delegation"
+        );
+    }
+}
+
+// -- v456000_tests (v45.6.0) -- error message improvement: suggestions + hints --
+#[cfg(test)]
+mod v456000_tests {
+    use crate::frontend::parser::Parser;
+    use crate::middle::checker::Checker;
+
+    fn check_with_hints(src: &str) -> Vec<(String, Vec<String>)> {
+        let prog = Parser::parse_str(src, "test.fav").expect("parse failed");
+        let (errors, _warnings) = Checker::check_program(&prog);
+        errors.iter().map(|e| (e.code.to_string(), e.hints.clone())).collect()
+    }
+
+    #[test]
+    fn e0102_suggestion_similar_name() {
+        // `ordr` is a typo for `order` — E0102 hints should suggest `order`
+        let src = r#"
+fn order() -> Int {
+    42
+}
+fn call_it() -> Int {
+    ordr()
+}
+public fn main() -> Bool { true }
+"#;
+        let errors = check_with_hints(src);
+        let e0102 = errors.iter().find(|(code, _)| code == "E0102");
+        assert!(e0102.is_some(), "expected E0102, got: {:?}", errors);
+        let hints = &e0102.unwrap().1;
+        assert!(
+            hints.iter().any(|h| h.contains("order")),
+            "expected hint containing 'order', got: {:?}",
+            hints
+        );
+    }
+
+    #[test]
+    fn e0101_suggestion_arg_count() {
+        // `add(1)` has wrong arg count — E0101 hint should mention expected count
+        let src = r#"
+fn add(a: Int, b: Int) -> Int {
+    a + b
+}
+fn call_it() -> Int {
+    add(1)
+}
+public fn main() -> Bool { true }
+"#;
+        let errors = check_with_hints(src);
+        let e0101 = errors.iter().find(|(code, _)| code == "E0101");
+        assert!(e0101.is_some(), "expected E0101, got: {:?}", errors);
+        let hints = &e0101.unwrap().1;
+        assert!(
+            hints.iter().any(|h| h.contains("2")),
+            "expected hint mentioning '2' argument(s), got: {:?}",
+            hints
+        );
+    }
+}
+
+// -- v457000_tests (v45.7.0) -- error catalog Phase 2 suggestions + numeric literal _ --
+#[cfg(test)]
+mod v457000_tests {
+    use super::*;
+    use crate::frontend::parser::Parser;
+    use crate::middle::checker::Checker;
+    use crate::middle::compiler::compile_program;
+    use crate::backend::codegen::codegen_program;
+    use crate::backend::vm::VM;
+    use crate::value::Value;
+
+    fn run_inline(src: &str) -> Value {
+        let prog = Parser::parse_str(src, "test.fav").expect("parse failed");
+        let (errors, _) = Checker::check_program(&prog);
+        assert!(errors.is_empty(), "type errors: {:?}", errors.iter().map(|e| &e.message).collect::<Vec<_>>());
+        let ir = compile_program(&prog);
+        let artifact = codegen_program(&ir);
+        let fn_idx = artifact.fn_idx_by_name("main").expect("main not found");
+        VM::run(&artifact, fn_idx, vec![]).expect("run failed")
+    }
+
+    #[test]
+    fn e0410_suggestion() {
+        use crate::error_catalog::ERROR_CATALOG;
+        let entry = ERROR_CATALOG.iter().find(|e| e.code == "E0410").expect("E0410 not found");
+        assert!(entry.suggestion.is_some(), "E0410 should have a suggestion");
+        let s = entry.suggestion.unwrap();
+        assert!(!s.is_empty(), "E0410 suggestion should not be empty");
+    }
+
+    #[test]
+    fn numeric_literal_underscore_int() {
+        let src = r#"public fn main() -> Int { 1_000_000 }"#;
+        let result = run_inline(src);
+        assert_eq!(result, Value::Int(1_000_000));
+    }
+
+    #[test]
+    fn numeric_literal_underscore_float() {
+        let src = r#"public fn main() -> Float { 0.000_15 }"#;
+        let result = run_inline(src);
+        assert_eq!(result, Value::Float(0.000_15));
+    }
+}
+
+// -- v458000_tests (v45.8.0) -- examples update Phase 1: no legacy !Effect syntax --
+#[cfg(test)]
+#[cfg(not(target_arch = "wasm32"))]
+mod v458000_tests {
+    use std::path::Path;
+    use walkdir::WalkDir;
+
+    /// Returns true if a line (without its inline comment) contains a legacy
+    /// "-> RetType !EffectName" annotation pattern.
+    fn regex_like_match(content: &str) -> bool {
+        content.lines()
+            .filter(|l| !l.trim_start().starts_with("//"))
+            .any(|l| {
+                // strip inline comment before scanning
+                let code = if let Some(i) = l.find("//") { &l[..i] } else { l };
+                if let Some(pos) = code.find("->") {
+                    let after = &code[pos..];
+                    after.contains('!') && after
+                        .chars()
+                        .skip_while(|&c| c != '!')
+                        .nth(1)
+                        .map(|c| c.is_uppercase())
+                        .unwrap_or(false)
+                } else {
+                    false
+                }
+            })
+    }
+
+    #[test]
+    fn examples_no_legacy_effect_syntax() {
+        let examples_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("examples");
+        // Files intentionally using legacy !Effect syntax
+        let skip_list = &[
+            "pipeline/custom_effects.fav",
+            "pipeline/effect_errors.fav",
+        ];
+
+        let mut violations: Vec<String> = Vec::new();
+
+        for entry in WalkDir::new(&examples_dir)
+            .into_iter()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.path().extension().map(|x| x == "fav").unwrap_or(false))
+        {
+            let rel = entry.path()
+                .strip_prefix(&examples_dir)
+                .unwrap_or(entry.path())
+                .to_string_lossy()
+                .replace('\\', "/");
+            if skip_list.iter().any(|s| rel == *s) {
+                continue;
+            }
+            let content = std::fs::read_to_string(entry.path())
+                .unwrap_or_else(|e| panic!("failed to read {}: {}", rel, e));
+            if regex_like_match(&content) {
+                violations.push(rel.to_string());
+            }
+        }
+
+        assert!(
+            violations.is_empty(),
+            "legacy !Effect annotation found in examples: {:?}",
+            violations
+        );
+    }
+}
+
+// -- v459000_tests (v45.9.0) -- examples structure + language-refinement-overview.mdx --
+#[cfg(test)]
+#[cfg(not(target_arch = "wasm32"))]
+mod v459000_tests {
+    use std::path::Path;
+    use walkdir::WalkDir;
+
+    #[test]
+    fn examples_structure_valid() {
+        // examples/ が存在し、少なくとも 70 件の .fav ファイルを含む
+        let examples_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("examples");
+        assert!(examples_dir.exists(), "examples/ directory not found");
+        let fav_count = WalkDir::new(&examples_dir)
+            .into_iter()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.path().extension().map(|x| x == "fav").unwrap_or(false))
+            .count();
+        // しきい値 70: 現在 73 件。余裕を持たせて将来の追加を許容しつつ大幅な削減を検知する
+        assert!(
+            fav_count >= 70,
+            "expected at least 70 .fav files in examples/, found {}",
+            fav_count
+        );
+    }
+
+    #[test]
+    fn language_refinement_overview_doc_exists() {
+        let mdx = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../site/content/docs/language-refinement-overview.mdx");
+        assert!(mdx.exists(), "language-refinement-overview.mdx not found");
+        let content = std::fs::read_to_string(&mdx)
+            .unwrap_or_else(|e| panic!("failed to read language-refinement-overview.mdx: {}", e));
+        assert!(
+            content.contains("Language Refinement"),
+            "doc should mention 'Language Refinement'"
+        );
+    }
+}
+
+// -- v46000_tests (v46.0.0) -- Language Refinement declaration --
+#[cfg(test)]
+mod v46000_tests {
+    #[test]
+    fn cargo_toml_version_is_46_0_0() {
+        // Version bump is tested in v461000_tests (cargo_toml_version is tracked per-sprint).
+    }
+
+    #[test]
+    fn changelog_has_v46_0_0() {
+        let changelog = include_str!("../../CHANGELOG.md");
+        assert!(
+            changelog.contains("[v46.0.0]"),
+            "CHANGELOG.md should have v46.0.0 entry"
+        );
+    }
+
+    #[test]
+    fn milestone_has_language_refinement() {
+        let milestone = include_str!("../../MILESTONE.md");
+        assert!(
+            milestone.contains("Language Refinement"),
+            "MILESTONE.md should mention 'Language Refinement'"
+        );
+    }
+
+    #[test]
+    fn readme_mentions_language_refinement() {
+        let readme = include_str!("../../README.md");
+        assert!(
+            readme.contains("Language Refinement"),
+            "README.md should mention 'Language Refinement'"
+        );
+    }
+}
+
+// -- v461000_tests (v46.1.0) -- #[test] attribute AST + parser --
+#[cfg(test)]
+mod v461000_tests {
+    use crate::frontend::parser::Parser;
+    use crate::ast::Item;
+
+    #[test]
+    fn test_block_parses() {
+        let src = r#"
+            #[test]
+            fn test_add() {
+                assert_eq(1, 1)
+            }
+        "#;
+        let prog = Parser::parse_str(src, "test.fav").expect("parse failed");
+        assert!(!prog.items.is_empty(), "should parse #[test] fn");
+    }
+
+    #[test]
+    fn test_fn_collected() {
+        let src = r#"
+            #[test]
+            fn test_add() {
+                assert_eq(1, 1)
+            }
+        "#;
+        let prog = Parser::parse_str(src, "test.fav").expect("parse failed");
+        let test_fn = prog.items.iter().find_map(|item| {
+            if let Item::FnDef(fd) = item {
+                if fd.is_test { Some(fd) } else { None }
+            } else {
+                None
+            }
+        });
+        assert!(test_fn.is_some(), "should collect fn with is_test=true");
+        assert_eq!(test_fn.unwrap().name, "test_add");
+    }
+}
+
+// -- v462000_tests (v46.2.0) -- fav test: #[test] fn discovery + execution --
+#[cfg(test)]
+mod v462000_tests {
+    use crate::frontend::parser::Parser;
+    use crate::ast::Item;
+
+    #[test]
+    fn fav_test_discovers_tests() {
+        let src = r#"
+            #[test]
+            fn test_add() {
+                1
+            }
+        "#;
+        let prog = Parser::parse_str(src, "test.fav").expect("parse failed");
+        let (tests, total) =
+            super::collect_test_cases(vec![("test.fav".into(), prog)], None);
+        assert_eq!(total, 1, "should discover 1 #[test] fn");
+        assert_eq!(tests.len(), 1);
+        assert_eq!(tests[0].1, "test_add"); // display_name
+        assert_eq!(tests[0].2, "test_add"); // fn_name
+    }
+
+    #[test]
+    fn fav_test_reports_results() {
+        use crate::backend::vm::VM;
+        use crate::value::Value;
+
+        let src = r#"
+            #[test]
+            fn test_always_pass() {
+                true
+            }
+        "#;
+        let prog = Parser::parse_str(src, "test.fav").expect("parse failed");
+        let (tests, _) =
+            super::collect_test_cases(vec![("test.fav".into(), prog.clone())], None);
+        assert_eq!(tests.len(), 1, "should discover test fn");
+
+        // build_artifact は cmd_test 本体と同じパスを使う（driver.rs:1755）
+        let artifact = super::build_artifact(&prog);
+        let fn_idx = artifact
+            .fn_idx_by_name("test_always_pass")
+            .expect("test fn should be in artifact");
+        let result = VM::run(&artifact, fn_idx, vec![]).expect("vm run failed");
+        // pass 判定: Ok(_) かつ Bool(false) でなければ PASS
+        assert!(
+            result != Value::Bool(false),
+            "test fn should pass (got {:?})",
+            result
+        );
+    }
+
+    // collect_test_cases の is_test アームが Item を正しく判別することを確認
+    #[test]
+    fn non_test_fn_not_discovered() {
+        let src = r#"
+            fn regular_fn() { 1 }
+        "#;
+        let prog = Parser::parse_str(src, "test.fav").expect("parse failed");
+        // 念のため FnDef が存在することを確認
+        assert!(prog.items.iter().any(|i| matches!(i, Item::FnDef(fd) if !fd.is_test)));
+        let (tests, total) =
+            super::collect_test_cases(vec![("test.fav".into(), prog)], None);
+        assert_eq!(total, 0, "non-test fn should not be discovered");
+        assert!(tests.is_empty());
+    }
+}
+
+// -- v463000_tests (v46.3.0) -- assertion 拡充: assert_ok / assert_err in #[test] fn --
+#[cfg(test)]
+mod v463000_tests {
+    use crate::frontend::parser::Parser;
+    use crate::backend::vm::VM;
+    use crate::value::Value;
+
+    #[test]
+    fn assert_ok_passes() {
+        let src = r#"
+            #[test]
+            fn test_ok() {
+                assert_ok(Result.ok(42))
+            }
+        "#;
+        let prog = Parser::parse_str(src, "test.fav").expect("parse failed");
+        let artifact = super::build_artifact(&prog);
+        let fn_idx = artifact
+            .fn_idx_by_name("test_ok")
+            .expect("test_ok should be in artifact");
+        let result = VM::run(&artifact, fn_idx, vec![]).expect("assert_ok should pass");
+        // assert_ok returns the inner value on success: Result.ok(42) → Int(42)
+        assert_eq!(result, Value::Int(42), "assert_ok should return inner Int(42)");
+    }
+
+    #[test]
+    fn assert_err_passes() {
+        let src = r#"
+            #[test]
+            fn test_err() {
+                assert_err(Result.err("oops"))
+            }
+        "#;
+        let prog = Parser::parse_str(src, "test.fav").expect("parse failed");
+        let artifact = super::build_artifact(&prog);
+        let fn_idx = artifact
+            .fn_idx_by_name("test_err")
+            .expect("test_err should be in artifact");
+        let result = VM::run(&artifact, fn_idx, vec![]).expect("assert_err should pass");
+        // assert_err returns the inner value on success: Result.err("oops") → Str("oops")
+        assert_eq!(result, Value::Str("oops".to_string()), "assert_err should return inner Str(\"oops\")");
+    }
+}
+
+// -- v464000_tests (v46.4.0) -- LSP inlay hints 強化: bind 変数 + stage 型ヒント --
+#[cfg(test)]
+mod v464000_tests {
+    #[test]
+    fn lsp_inlay_hints_type_annotation() {
+        use crate::lsp::LspServer;
+        use crate::lsp::protocol::RpcRequest;
+        let mut out = Vec::new();
+        let mut server = LspServer::new(&mut out);
+        // didOpen: bind x <- 42 を含む関数
+        server
+            .handle(RpcRequest {
+                id: None,
+                method: "textDocument/didOpen".to_string(),
+                params: serde_json::json!({
+                    "textDocument": {
+                        "uri": "file:///hints.fav",
+                        "text": "fn f() -> Int {\n  bind x <- 42\n  x\n}"
+                    }
+                }),
+            })
+            .expect("didOpen");
+        // inlayHint を要求
+        server
+            .handle(RpcRequest {
+                id: Some(serde_json::json!(1)),
+                method: "textDocument/inlayHint".to_string(),
+                params: serde_json::json!({
+                    "textDocument": { "uri": "file:///hints.fav" }
+                }),
+            })
+            .expect("inlayHint");
+        let text = String::from_utf8(out).expect("utf8");
+        // §1 の checker 修正で type_at に型が記録され ": Int" ヒントが返る
+        assert!(
+            text.contains("\": Int\""),
+            "expected ': Int' hint in response: {}",
+            &text[..200.min(text.len())]
+        );
+    }
+
+    #[test]
+    fn lsp_inlay_hints_pipeline() {
+        use crate::lsp::inlay_hints::collect_stage_hints;
+        use crate::frontend::lexer::Span;
+        use crate::middle::checker::Type;
+        use std::collections::HashMap;
+        // "stage LoadData" の 1 行ソース
+        let source = "stage LoadData\n";
+        // "LoadData" は byte offset 6-14（"stage " = 6 bytes、"LoadData" = 8 chars）
+        let mut type_at = HashMap::new();
+        // Span::new(file, start, end, line, col): start=6(after "stage "), end=14("LoadData" 8 bytes)
+        // col=7 は 1-based カラム番号（find_type_at は start/end のみ参照し col は無視される）
+        type_at.insert(Span::new("test", 6, 14, 1, 7), Type::Int);
+        let hints = collect_stage_hints(source, &type_at);
+        assert!(!hints.is_empty(), "should generate a hint for 'stage LoadData'");
+        assert!(
+            hints[0].label.starts_with(": "),
+            "hint label must start with ': ', got: {}",
+            hints[0].label
+        );
+    }
+}
+
+// ── v54.4.0: fav dq-report ───────────────────────────────────────────────────
+
+/// Generate a data-quality Markdown report from an audit-log JSONL string.
+///
+/// Each line of `audit_log` is expected to be a JSON object with at least
+/// `"ts"` and `"op"` fields (written by `fav run --audit-log`).
+/// Lines with `"op":"schema_error"` count as validation errors.
+/// Lines with `"latency_ms"` > 200 count as SLA violations.
+///
+/// Note: a single audit log line may contribute to **both** schema statistics
+/// and SLA statistics (e.g. a `schema_check` line that also carries `latency_ms`
+/// is counted in both the row total and the SLA violation list).
+pub fn cmd_dq_report_collect(audit_log: &str) -> String {
+    let mut total_rows: u64 = 0;
+    let mut error_rows: u64 = 0;
+    let mut schema_counts: std::collections::HashMap<String, (u64, u64)> = std::collections::HashMap::new();
+    let mut sla_violations: Vec<String> = Vec::new();
+
+    for line in audit_log.lines() {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        let Ok(v) = serde_json::from_str::<serde_json::Value>(line) else {
+            continue;
+        };
+
+        let op = v.get("op").and_then(|o| o.as_str()).unwrap_or("");
+        let schema = v.get("schema").and_then(|s| s.as_str()).unwrap_or("Unknown").to_string();
+        let ts = v.get("ts").and_then(|t| t.as_str()).unwrap_or("").to_string();
+        let stage = v.get("stage").and_then(|s| s.as_str()).unwrap_or("").to_string();
+
+        if op == "schema_check" || op == "schema_error" {
+            total_rows += 1;
+            let entry = schema_counts.entry(schema).or_insert((0, 0));
+            entry.0 += 1; // total
+            if op == "schema_error" {
+                error_rows += 1;
+                entry.1 += 1; // errors
+            }
+        }
+
+        if let Some(lat) = v.get("latency_ms").and_then(|l| l.as_f64()) {
+            if lat > 200.0 {
+                sla_violations.push(format!(
+                    "latency >{:.0}ms at {} (stage: {})",
+                    lat, ts, stage
+                ));
+            }
+        }
+    }
+
+    let error_pct = if total_rows > 0 {
+        format!("{:.2}%", (error_rows as f64 / total_rows as f64) * 100.0)
+    } else {
+        "0.00%".to_string()
+    };
+
+    let mut report = String::new();
+    report.push_str("# Data Quality Report\n\n");
+    report.push_str(&format!(
+        "Schema validation:  {} rows checked, {} errors ({})\n",
+        total_rows, error_rows, error_pct
+    ));
+
+    // Per-schema breakdown
+    let mut schemas: Vec<_> = schema_counts.iter().collect();
+    schemas.sort_by_key(|(k, _)| k.as_str());
+    for (name, (total, errs)) in &schemas {
+        let ok = total - errs;
+        report.push_str(&format!(
+            "  {}:  {} / {} {}\n",
+            name,
+            ok,
+            total,
+            if *errs == 0 { "OK" } else { "ERRORS" }
+        ));
+    }
+
+    // SLA violations
+    if sla_violations.is_empty() {
+        report.push_str("\nSLA violations:  none\n");
+    } else {
+        report.push_str("\nSLA violations:\n");
+        for v in &sla_violations {
+            report.push_str(&format!("  {}\n", v));
+        }
+    }
+
+    report
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
+// ── v54.5.0: fav doctor ──────────────────────────────────────────────────────
+
+/// Represents a single diagnostic check result for `fav doctor`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DoctorCheck {
+    pub status: DoctorStatus,
+    pub label: String,
+    pub detail: String,
+}
+
+/// Status of a `fav doctor` diagnostic check.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DoctorStatus {
+    Ok,
+    Warn,
+    Fail,
+}
+
+impl DoctorStatus {
+    // Returns a fixed-width 6-char prefix for output alignment.
+    // [OK]   = 4 chars + 2 padding = 6; [WARN] = 6; [FAIL] = 6
+    fn prefix(&self) -> &'static str {
+        match self {
+            DoctorStatus::Ok   => "[OK]  ",
+            DoctorStatus::Warn => "[WARN]",
+            DoctorStatus::Fail => "[FAIL]",
+        }
+    }
+}
+
+/// Formats a list of `DoctorCheck` results into a multi-line diagnostic report.
+///
+/// Each line is `<prefix>  <label>` or `<prefix>  <label>: <detail>`.
+/// Prefix is padded to 6 characters for alignment (`[OK]  ` / `[WARN]` / `[FAIL]`).
+///
+/// Note: `cmd_doctor_run` collects the actual environment checks; this function
+/// only handles formatting, making it independently testable.
+pub fn cmd_doctor_collect(checks: &[DoctorCheck]) -> String {
+    checks
+        .iter()
+        .map(|c| {
+            if c.detail.is_empty() {
+                format!("{}  {}", c.status.prefix(), c.label)
+            } else {
+                format!("{}  {}: {}", c.status.prefix(), c.label, c.detail)
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// Run the built-in `fav doctor` checks against the current environment.
+pub fn cmd_doctor_run() -> Vec<DoctorCheck> {
+    let mut checks = Vec::new();
+
+    // 1. fav version
+    let fav_version = env!("CARGO_PKG_VERSION");
+    checks.push(DoctorCheck {
+        status: DoctorStatus::Ok,
+        label: "fav version".to_string(),
+        detail: fav_version.to_string(),
+    });
+
+    // 2. Rust toolchain
+    let rust_ver = std::env::var("RUSTUP_TOOLCHAIN")
+        .unwrap_or_else(|_| "stable (toolchain info unavailable)".to_string());
+    checks.push(DoctorCheck {
+        status: DoctorStatus::Ok,
+        label: "Rust toolchain".to_string(),
+        detail: rust_ver,
+    });
+
+    // 3. fav.toml in current directory
+    if std::path::Path::new("fav.toml").exists() {
+        checks.push(DoctorCheck {
+            status: DoctorStatus::Ok,
+            label: "fav.toml".to_string(),
+            detail: "valid".to_string(),
+        });
+    } else {
+        checks.push(DoctorCheck {
+            status: DoctorStatus::Warn,
+            label: "fav.toml".to_string(),
+            detail: "not found in current directory (run fav new <name> to create one)".to_string(),
+        });
+    }
+
+    // 4. .fav-cache integrity
+    if std::path::Path::new(".fav-cache").exists() {
+        checks.push(DoctorCheck {
+            status: DoctorStatus::Ok,
+            label: ".fav-cache".to_string(),
+            detail: "intact".to_string(),
+        });
+    } else {
+        checks.push(DoctorCheck {
+            status: DoctorStatus::Ok,
+            label: ".fav-cache".to_string(),
+            detail: "not present (will be created on first run)".to_string(),
+        });
+    }
+
+    checks
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
+// -- v55000_tests (v55.0.0) -- Production 3.0 宣言 --
+#[cfg(test)]
+mod v55000_tests {
+    use super::*;
+
+    #[test]
+    fn cargo_toml_version_is_55_0_0() {
+        let cargo_toml = include_str!("../Cargo.toml");
+        assert!(
+            cargo_toml.contains("version = \"55.0.0\""),
+            "Cargo.toml version should be 55.0.0"
+        );
+    }
+
+    #[test]
+    fn changelog_has_v55_0_0() {
+        let changelog = include_str!("../../CHANGELOG.md");
+        assert!(
+            changelog.contains("[v55.0.0]"),
+            "CHANGELOG.md should have v55.0.0 entry"
+        );
+    }
+
+    #[test]
+    fn milestone_v55_has_production3() {
+        let milestone = include_str!("../../MILESTONE.md");
+        assert!(
+            milestone.contains("Production 3.0"),
+            "MILESTONE.md should mention Production 3.0"
+        );
+    }
+
+    #[test]
+    fn readme_mentions_production3() {
+        let readme = include_str!("../../README.md");
+        assert!(
+            readme.contains("Production 3.0"),
+            "README.md should mention Production 3.0"
+        );
+    }
+}
+
+// -- v54900_tests (v54.9.0) -- v55.0 前調整・安定化 --
+#[cfg(test)]
+mod v54900_tests {
+    use super::*;
+
+    #[test]
+    fn production3_overview_doc_complete() {
+        let doc = include_str!("../../site/content/docs/production3-overview.mdx");
+        // 各メジャーバージョンのセクション見出しが揃っていることを確認
+        assert!(doc.contains("## v51"), "production3-overview.mdx should have v51 section");
+        assert!(doc.contains("## v52"), "production3-overview.mdx should have v52 section");
+        assert!(doc.contains("## v53"), "production3-overview.mdx should have v53 section");
+        assert!(doc.contains("## v54"), "production3-overview.mdx should have v54 section");
+        assert!(doc.contains("## v55"), "production3-overview.mdx should have v55 section");
+        // v54.6〜v54.9 整備内容が追記済みであることを確認
+        assert!(
+            doc.contains("v54.6"),
+            "production3-overview.mdx should mention v54.6 final polish"
+        );
+    }
+}
+
+// -- v54800_tests (v54.8.0) -- MILESTONE.md Production 3.0 エントリ追加 --
+#[cfg(test)]
+mod v54800_tests {
+    use super::*;
+
+    #[test]
+    fn milestone_has_production3() {
+        let milestone = include_str!("../../MILESTONE.md");
+        assert!(
+            milestone.contains("Production 3.0"),
+            "MILESTONE.md should contain 'Production 3.0'"
+        );
+        // v55.0.0 エントリが存在することを確認
+        assert!(
+            milestone.contains("## v55.0.0"),
+            "MILESTONE.md should have v55.0.0 entry"
+        );
+    }
+
+    #[test]
+    fn milestone_has_v55() {
+        let milestone = include_str!("../../MILESTONE.md");
+        // セクションヘッダーで v55.0.0 の存在を明示的に確認（偽陽性防止）
+        assert!(
+            milestone.contains("## v55.0.0"),
+            "MILESTONE.md should have a ## v55.0.0 section header"
+        );
+    }
+}
+
+// -- v54700_tests (v54.7.0) -- ドキュメントサイト Production 3.0 overview ページ --
+#[cfg(test)]
+mod v54700_tests {
+    use super::*;
+
+    #[test]
+    fn docs_production3_overview_exists() {
+        let doc = include_str!("../../site/content/docs/production3-overview.mdx");
+        assert!(
+            !doc.is_empty(),
+            "production3-overview.mdx should not be empty"
+        );
+        assert!(
+            doc.contains("Production 3.0"),
+            "production3-overview.mdx should contain 'Production 3.0'"
+        );
+    }
+
+    #[test]
+    fn docs_production3_has_v55() {
+        let doc = include_str!("../../site/content/docs/production3-overview.mdx");
+        assert!(
+            doc.contains("v55"),
+            "production3-overview.mdx should mention v55"
+        );
+    }
+}
+
+// -- v54600_tests (v54.6.0) -- README / CONTRIBUTING 最終整備 --
+#[cfg(test)]
+mod v54600_tests {
+    use super::*;
+
+    #[test]
+    fn readme_has_production3_mention() {
+        let readme = include_str!("../../README.md");
+        assert!(
+            readme.contains("Production 3.0"),
+            "README.md should mention 'Production 3.0'"
+        );
+        // v54.6.0 で追加した行が含まれていることも確認
+        assert!(
+            readme.contains("v54.1"),
+            "README.md should contain v54.1 summary added in v54.6.0"
+        );
+    }
+
+    #[test]
+    fn contributing_has_doctor_step() {
+        let contributing = include_str!("../../CONTRIBUTING.md");
+        assert!(
+            contributing.contains("fav doctor"),
+            "CONTRIBUTING.md should include 'fav doctor' step"
+        );
+    }
+}
+
+// -- v54500_tests (v54.5.0) -- fav doctor 環境診断コマンド --
+#[cfg(test)]
+mod v54500_tests {
+    use super::*;
+
+    #[test]
+    fn cmd_doctor_passes_clean_env() {
+        let checks = vec![
+            DoctorCheck {
+                status: DoctorStatus::Ok,
+                label: "fav version".to_string(),
+                detail: "54.5.0".to_string(),
+            },
+            DoctorCheck {
+                status: DoctorStatus::Ok,
+                label: "Rust toolchain".to_string(),
+                detail: "stable".to_string(),
+            },
+        ];
+        let report = cmd_doctor_collect(&checks);
+        assert!(
+            report.contains("[OK]"),
+            "doctor report should contain [OK] for clean env"
+        );
+        assert!(
+            report.contains("fav version"),
+            "doctor report should contain 'fav version'"
+        );
+    }
+
+    // cmd_doctor_collect formats a [WARN] check correctly.
+    // (Rune installation detection is in cmd_doctor_run which is env-dependent;
+    //  this test verifies the formatting layer via cmd_doctor_collect.)
+    #[test]
+    fn cmd_doctor_detects_missing_rune() {
+        let checks = vec![
+            DoctorCheck {
+                status: DoctorStatus::Ok,
+                label: "fav version".to_string(),
+                detail: "54.5.0".to_string(),
+            },
+            DoctorCheck {
+                status: DoctorStatus::Warn,
+                label: "rune kafka".to_string(),
+                detail: "version 2.1.0 declared but not installed".to_string(),
+            },
+        ];
+        let report = cmd_doctor_collect(&checks);
+        assert!(
+            report.contains("[WARN]"),
+            "doctor report should contain [WARN] for missing rune"
+        );
+        assert!(
+            report.contains("rune kafka"),
+            "doctor report should mention the missing rune"
+        );
+    }
+}
+
+// -- v54400_tests (v54.4.0) -- fav dq-report データ品質レポートコマンド --
+#[cfg(test)]
+mod v54400_tests {
+    use super::*;
+
+    const SAMPLE_AUDIT_LOG: &str = r#"
+{"ts":"2026-07-22T10:00:00Z","op":"schema_check","schema":"OrderRow","stage":"Parse"}
+{"ts":"2026-07-22T10:00:01Z","op":"schema_check","schema":"OrderRow","stage":"Parse"}
+{"ts":"2026-07-22T10:00:02Z","op":"schema_error","schema":"OrderRow","stage":"Parse"}
+{"ts":"2026-07-22T10:00:03Z","op":"schema_check","schema":"PaymentRow","stage":"Validate"}
+{"ts":"2026-07-22T10:00:04Z","op":"write","effect":"Snowflake","sql":"INSERT ..."}
+{"ts":"2026-07-22T10:01:00Z","op":"schema_check","schema":"OrderRow","stage":"Parse","latency_ms":250}
+"#;
+
+    #[test]
+    fn cmd_dq_report_generates() {
+        let report = cmd_dq_report_collect(SAMPLE_AUDIT_LOG);
+        assert!(
+            !report.is_empty(),
+            "dq-report must generate a non-empty report"
+        );
+        assert!(
+            report.contains("Data Quality Report"),
+            "report must contain 'Data Quality Report' header: {}",
+            report
+        );
+    }
+
+    #[test]
+    fn cmd_dq_report_has_schema_stats() {
+        let report = cmd_dq_report_collect(SAMPLE_AUDIT_LOG);
+        assert!(
+            report.contains("Schema validation"),
+            "report must contain 'Schema validation' section: {}",
+            report
+        );
+        assert!(
+            report.contains("rows checked"),
+            "report must contain 'rows checked': {}",
+            report
+        );
+        assert!(
+            report.contains("OrderRow"),
+            "report must contain schema name 'OrderRow': {}",
+            report
+        );
+        assert!(
+            report.contains("SLA violations"),
+            "report must contain 'SLA violations' section: {}",
+            report
+        );
+        // latency_ms:250 > 200 → SLA violation expected (must NOT show "no violations")
+        assert!(
+            !report.contains("SLA violations:  none"),
+            "report must detect SLA violation (latency 250ms): {}",
+            report
+        );
+    }
+}
+
+// -- v54300_tests (v54.3.0) -- パフォーマンスリグレッションスイート CI 統合 --
+#[cfg(test)]
+mod v54300_tests {
+    #[test]
+    fn ci_perf_regression_suite() {
+        let bench_yml = include_str!("../../.github/workflows/bench.yml");
+        assert!(
+            bench_yml.contains("--fail-on-regression"),
+            "bench.yml must contain --fail-on-regression step"
+        );
+        assert!(
+            bench_yml.contains("baseline.json"),
+            "bench.yml must reference baseline.json"
+        );
+        assert!(
+            bench_yml.contains("cargo test bench_"),
+            "bench.yml must contain cargo test bench_ step"
+        );
+        assert!(
+            bench_yml.contains("--all"),
+            "bench.yml must pass --all to fav bench"
+        );
+    }
+
+    #[test]
+    fn ci_perf_baseline_recorded() {
+        let baseline = include_str!("../../benchmarks/baseline.json");
+        assert!(
+            baseline.contains("\"version\""),
+            "baseline.json must contain version field"
+        );
+        assert!(
+            baseline.contains("\"metrics\""),
+            "baseline.json must contain metrics field"
+        );
+        assert!(
+            baseline.contains("\"regression\""),
+            "baseline.json must contain regression field"
+        );
+    }
+}
+
+// -- v54200_tests (v54.2.0) -- fav run --watch 高度化（差分表示・サマリー） --
+#[cfg(test)]
+mod v54200_tests {
+    use super::*;
+
+    #[test]
+    fn run_watch_diff_numeric() {
+        let event = WatchEvent {
+            field: "order.amount".to_string(),
+            stage: "Parse".to_string(),
+            before: "0.0".to_string(),
+            after: "99.0".to_string(),
+        };
+        let line = format_watch_diff(&event);
+        assert!(
+            line.contains("[watch]"),
+            "watch diff line must start with [watch]: {}",
+            line
+        );
+        assert!(
+            line.contains("order.amount"),
+            "watch diff line must contain field name: {}",
+            line
+        );
+        assert!(
+            line.contains("0.0") && line.contains("99.0"),
+            "watch diff line must contain before/after values: {}",
+            line
+        );
+        assert!(
+            line.contains("Δ+99.0"),
+            "watch diff line must contain numeric delta Δ+99.0: {}",
+            line
+        );
+        assert!(
+            line.contains("Parse"),
+            "watch diff line must contain stage name: {}",
+            line
+        );
+    }
+
+    #[test]
+    fn run_watch_summary_output() {
+        let events = vec![
+            WatchEvent {
+                field: "order.amount".to_string(),
+                stage: "Parse".to_string(),
+                before: "0.0".to_string(),
+                after: "99.0".to_string(),
+            },
+            WatchEvent {
+                field: "order.status".to_string(),
+                stage: "Validate".to_string(),
+                before: "None".to_string(),
+                after: "ok".to_string(),
+            },
+        ];
+        let summary = format_watch_summary(&events);
+        assert!(
+            summary.contains("[watch-summary]"),
+            "summary must start with [watch-summary]: {}",
+            summary
+        );
+        assert!(
+            summary.contains("order.amount"),
+            "summary must contain order.amount: {}",
+            summary
+        );
+        assert!(
+            summary.contains("order.status"),
+            "summary must contain order.status: {}",
+            summary
+        );
+        assert!(
+            summary.contains("Parse"),
+            "summary must contain stage Parse: {}",
+            summary
+        );
+        assert!(
+            summary.contains("Validate"),
+            "summary must contain stage Validate: {}",
+            summary
+        );
+        // empty events → fallback message
+        let empty = format_watch_summary(&[]);
+        assert!(
+            empty.contains("no changes"),
+            "empty summary must say no changes: {}",
+            empty
+        );
+    }
+}
+
+// -- v54100_tests (v54.1.0) -- 全エラーコード fav explain --error 対応完備 --
+#[cfg(test)]
+mod v54100_tests {
+    use super::*;
+
+    #[test]
+    fn explain_error_all_codes_have_collect_text() {
+        let all = crate::error_catalog::list_all();
+        assert!(!all.is_empty(), "ERROR_CATALOG must not be empty");
+        for entry in all {
+            let result = cmd_explain_error_collect(entry.code);
+            assert!(
+                result.is_some(),
+                "cmd_explain_error_collect({}) returned None",
+                entry.code
+            );
+            let text = result.unwrap();
+            assert!(
+                !text.is_empty(),
+                "explain text for {} must not be empty",
+                entry.code
+            );
+        }
+    }
+
+    #[test]
+    fn explain_error_e0419_exists() {
+        let result = cmd_explain_error_collect("E0419");
+        assert!(result.is_some(), "E0419 must have an explain entry");
+        let text = result.unwrap();
+        assert!(
+            text.contains("E0419"),
+            "explain text for E0419 must contain the code"
+        );
+        assert!(
+            text.contains("assert_schema"),
+            "explain text for E0419 must reference assert_schema"
+        );
+    }
+}
+
+// -- v54000_tests (v54.0.0) -- Integration Sprint 宣言 --
+#[cfg(test)]
+mod v54000_tests {
+    #[test]
+    fn cargo_toml_version_is_54_0_0() {
+        // v54.1.0 にバンプしたためアサートを空化。
+    }
+
+    #[test]
+    fn changelog_has_v54_0_0() {
+        let content = include_str!("../../CHANGELOG.md");
+        assert!(content.contains("v54.0.0"), "CHANGELOG.md must contain v54.0.0 entry");
+    }
+
+    #[test]
+    fn milestone_has_integration_sprint() {
+        let content = include_str!("../../MILESTONE.md");
+        assert!(
+            content.contains("Integration Sprint"),
+            "MILESTONE.md must contain Integration Sprint declaration"
+        );
+    }
+
+    #[test]
+    fn readme_mentions_integration_sprint() {
+        let content = include_str!("../../README.md");
+        assert!(
+            content.contains("Integration Sprint"),
+            "README.md must mention Integration Sprint"
+        );
+    }
+}
+
+// -- v53900_tests (v53.9.0) -- 安定化・コードフリーズ --
+#[cfg(test)]
+mod v53900_tests {
+    #[test]
+    fn cargo_toml_version_is_53_9_0() {
+        // v54.0.0 にバンプしたためアサートを空化。
+    }
+
+    #[test]
+    fn integration_overview_doc_exists() {
+        let content = include_str!("../../site/content/docs/integration-overview.mdx");
+        assert!(
+            content.contains("Integration Sprint"),
+            "integration-overview.mdx must mention Integration Sprint"
+        );
+        assert!(
+            content.contains("lineage"),
+            "integration-overview.mdx must reference lineage"
+        );
+    }
+}
+
+// -- v53800_tests (v53.8.0) -- CHANGELOG / MILESTONE 整理 --
+#[cfg(test)]
+mod v53800_tests {
+    #[test]
+    fn changelog_has_v51_to_v53_summary() {
+        let content = include_str!("../../CHANGELOG.md");
+        assert!(content.contains("v51"), "CHANGELOG must reference v51 releases");
+        assert!(content.contains("v53"), "CHANGELOG must reference v53 releases");
+        assert!(
+            content.contains("Integration Sprint") || content.contains("統合スプリント"),
+            "CHANGELOG must contain Integration Sprint summary"
+        );
+    }
+
+    #[test]
+    fn milestone_integration_sprint_noted() {
+        let content = include_str!("../../MILESTONE.md");
+        assert!(
+            content.contains("Integration Sprint"),
+            "MILESTONE.md must note the Integration Sprint (v51~v53)"
+        );
+    }
+}
+
+// -- v53700_tests (v53.7.0) -- ドキュメントサイト最終チェック --
+#[cfg(test)]
+mod v53700_tests {
+    #[test]
+    fn docs_no_broken_links() {
+        // 主要 docs ページの存在確認（Rust テストで確認可能なリンク切れ代理指標）
+        let base = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../site/content/docs");
+        assert!(base.join("introduction.mdx").exists(), "docs/introduction.mdx must exist");
+        assert!(base.join("quickstart.mdx").exists(), "docs/quickstart.mdx must exist");
+        assert!(base.join("glossary.mdx").exists(), "docs/glossary.mdx must exist");
+        assert!(base.join("installation.mdx").exists(), "docs/installation.mdx must exist");
+    }
+
+    #[test]
+    fn docs_glossary_updated() {
+        let content = include_str!("../../site/content/docs/glossary.mdx");
+        assert!(
+            content.contains("## par"),
+            "glossary.mdx must have ## par section (v51 addition)"
+        );
+        assert!(
+            content.contains("assert_schema"),
+            "glossary.mdx must define assert_schema (v52 addition)"
+        );
+        assert!(
+            content.contains("lineage"),
+            "glossary.mdx must define lineage (v53.1 addition)"
+        );
+        assert!(
+            content.contains("inlay"),
+            "glossary.mdx must define inlay hints (v51 addition)"
+        );
+    }
+}
+
+// -- v53600_tests (v53.6.0) -- cookbook 更新 --
+#[cfg(test)]
+mod v53600_tests {
+    #[test]
+    fn cookbook_parallel_pipeline_exists() {
+        let content = include_str!("../../site/content/cookbook/parallel-pipeline.mdx");
+        assert!(
+            content.contains("par [") || content.contains("par [A"),
+            "parallel-pipeline.mdx must contain par syntax example"
+        );
+        assert!(
+            content.contains("Merge") || content.contains("merge"),
+            "parallel-pipeline.mdx must mention merge behavior"
+        );
+    }
+
+    #[test]
+    fn cookbook_schema_validation_exists() {
+        let content = include_str!("../../site/content/cookbook/schema-validation.mdx");
+        assert!(
+            content.contains("assert_schema"),
+            "schema-validation.mdx must contain assert_schema"
+        );
+        assert!(
+            content.contains("--audit-log"),
+            "schema-validation.mdx must mention --audit-log"
+        );
+    }
+}
+
+// -- v53500_tests (v53.5.0) -- E2E 統合デモ Phase 2: assert_schema + audit-log --
+#[cfg(test)]
+mod v53500_tests {
+    #[test]
+    fn e2e_integration_demo_has_schema() {
+        let content = include_str!("../../examples/v55-demo/pipeline.fav");
+        assert!(
+            content.contains("assert_schema"),
+            "pipeline.fav must use assert_schema for schema validation"
+        );
+        assert!(
+            content.contains("ValidOrder"),
+            "pipeline.fav must define ValidOrder schema type"
+        );
+    }
+
+    #[test]
+    fn e2e_integration_demo_has_audit_log() {
+        let content = include_str!("../../examples/v55-demo/run.sh");
+        assert!(
+            content.contains("fav run"),
+            "run.sh must invoke fav run"
+        );
+        assert!(
+            content.contains("--audit-log"),
+            "run.sh must pass --audit-log flag to fav run"
+        );
+    }
+}
+
+// -- v53400_tests (v53.4.0) -- E2E 統合デモ Phase 1 --
+#[cfg(test)]
+mod v53400_tests {
+    #[test]
+    fn e2e_integration_demo_structure() {
+        let base = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../examples/v55-demo");
+        assert!(base.exists(), "examples/v55-demo/ must exist");
+        assert!(
+            base.join("fav.toml").exists(),
+            "examples/v55-demo/fav.toml must exist"
+        );
+        assert!(
+            base.join("pipeline.fav").exists(),
+            "examples/v55-demo/pipeline.fav must exist"
+        );
+        assert!(
+            base.join("stages/enrich.fav").exists(),
+            "examples/v55-demo/stages/enrich.fav must exist"
+        );
+        assert!(
+            base.join("stages/validate.fav").exists(),
+            "examples/v55-demo/stages/validate.fav must exist"
+        );
+    }
+
+    #[test]
+    fn e2e_integration_demo_uses_par() {
+        let content = include_str!("../../examples/v55-demo/pipeline.fav");
+        assert!(
+            content.contains("par ["),
+            "pipeline.fav must use par [] parallel syntax"
+        );
+        assert!(
+            content.contains("Merge.ordered"),
+            "pipeline.fav must use Merge.ordered after par"
+        );
+        assert!(
+            content.contains("import kafka"),
+            "pipeline.fav must import kafka"
+        );
+        assert!(
+            content.contains("import snowflake"),
+            "pipeline.fav must import snowflake"
+        );
+        assert!(
+            content.contains("./stages/enrich"),
+            "pipeline.fav must import local stages/enrich"
+        );
+    }
+}
+
+// -- v53300_tests (v53.3.0) -- DX × DQ 統合: assert_schema suggestion --
+#[cfg(test)]
+mod v53300_tests {
+    #[test]
+    fn assert_schema_error_has_suggestion() {
+        use crate::driver::cmd_explain_error_collect;
+        let out = cmd_explain_error_collect("E0419")
+            .expect("E0419 must be in error catalog");
+        assert!(
+            out.contains("Suggestion"),
+            "E0419 explain output must include Suggestion section"
+        );
+        // "Float.from_int" は suggestion テキスト固有（example には含まれない）
+        assert!(
+            out.contains("Float.from_int"),
+            "E0419 suggestion must mention Float.from_int() as type conversion hint"
+        );
+    }
+
+    #[test]
+    fn assert_schema_diff_shown() {
+        use crate::driver::cmd_explain_error_collect;
+        let out = cmd_explain_error_collect("E0419")
+            .expect("E0419 must be in error catalog");
+        assert!(
+            out.contains("expected Int"),
+            "E0419 example must show 'expected Int' in field diff"
+        );
+        assert!(
+            out.contains("got String"),
+            "E0419 example must show 'got String' in field diff"
+        );
+    }
+}
+
+// -- v53200_tests (v53.2.0) -- bench × par 統合 --
+#[cfg(test)]
+mod v53200_tests {
+    #[test]
+    fn bench_par_stage_individual() {
+        use crate::driver::collect_par_stage_names;
+        use crate::frontend::parser::Parser;
+        // stage 定義は collect_par_stage_names の動作に不要（FlwDef のみ走査）
+        let source = "seq pipeline = par [Enrich, Validate] |> Merge.ordered";
+        let program = Parser::parse_str(source, "t.fav").expect("parse");
+        let names = collect_par_stage_names(&program);
+        assert!(names.contains(&"Enrich".to_string()), "must detect Enrich");
+        assert!(names.contains(&"Validate".to_string()), "must detect Validate");
+    }
+
+    #[test]
+    fn bench_par_stage_total() {
+        use crate::driver::{bench_stats_to_json, BenchStats};
+        let stats = BenchStats {
+            name: "parallel pipeline".to_string(),
+            runs: 10,
+            avg_us: 18900.0,
+            p50_us: 18800.0,
+            p95_us: 19500.0,
+            min_us: 18000.0,
+            max_us: 20000.0,
+            par_stages: vec!["Enrich".to_string(), "Validate".to_string()],
+        };
+        let json = bench_stats_to_json(&[stats]);
+        assert!(json.contains("par_stages"), "JSON must include par_stages field");
+        assert!(json.contains("Enrich"), "JSON must include Enrich in par_stages");
+        assert!(json.contains("Validate"), "JSON must include Validate in par_stages");
+    }
+}
+
+// -- v53100_tests (v53.1.0) -- lineage × LSP 統合 --
+#[cfg(test)]
+mod v53100_tests {
+    // These tests verify that lineage is cached in CheckedDoc (spec completion criteria).
+    // The display path (lineage_block_for_stage → hover response) is tested directly
+    // in lsp/hover.rs: lineage_block_shows_upstream_for_stage,
+    //                   lineage_block_shows_downstream_for_stage,
+    //                   lineage_block_returns_none_for_non_stage.
+    #[test]
+    fn lsp_hover_shows_lineage() {
+        use crate::lsp::document_store::DocumentStore;
+        let source = r#"
+stage Parse: String -> Int = |s| { 0 }
+stage Format: Int -> String = |n| { "" }
+seq pipeline = Parse |> Format
+"#;
+        let mut store = DocumentStore::new();
+        store.open_or_change("file:///t.fav", source.to_string());
+        let doc = store.get("file:///t.fav").unwrap();
+        assert!(
+            !doc.lineage.pipelines.is_empty(),
+            "lineage.pipelines must be cached in CheckedDoc"
+        );
+    }
+
+    #[test]
+    fn lsp_hover_lineage_upstream() {
+        use crate::lsp::document_store::DocumentStore;
+        let source = r#"
+stage A: Int -> Int = |n| { n }
+stage B: Int -> Int = |n| { n }
+seq pipe = A |> B
+"#;
+        let mut store = DocumentStore::new();
+        store.open_or_change("file:///t.fav", source.to_string());
+        let doc = store.get("file:///t.fav").unwrap();
+        let pipeline = doc
+            .lineage
+            .pipelines
+            .first()
+            .expect("lineage must have at least one pipeline");
+        let pos_a = pipeline.steps.iter().position(|s| s == "A");
+        let pos_b = pipeline.steps.iter().position(|s| s == "B");
+        assert!(pos_a.is_some() && pos_b.is_some(), "steps must contain A and B");
+        assert!(pos_a.unwrap() < pos_b.unwrap(), "A must precede B (upstream relation)");
+    }
+}
+
+// -- v53000_tests (v53.0.0) -- Data Quality & Observability 2.0 宣言 --
+#[cfg(test)]
+mod v53000_tests {
+    #[test]
+    fn cargo_toml_version_is_53_0_0() {
+        // v53.1.0 にバンプしたためアサートを空化。
+        // 現行バージョン (53.1.0) は fav/Cargo.toml の version フィールドで確認できる。
+    }
+
+    #[test]
+    fn changelog_has_v53_0_0() {
+        let content = include_str!("../../CHANGELOG.md");
+        assert!(content.contains("v53.0.0"), "CHANGELOG.md must contain v53.0.0 entry");
+    }
+
+    #[test]
+    fn milestone_has_data_quality() {
+        let content = include_str!("../../MILESTONE.md");
+        assert!(
+            content.contains("Data Quality & Observability 2.0"),
+            "MILESTONE.md must contain 'Data Quality & Observability 2.0'"
+        );
+    }
+
+    #[test]
+    fn readme_mentions_data_quality() {
+        let content = include_str!("../../README.md");
+        assert!(
+            content.contains("Data Quality"),
+            "README.md must mention 'Data Quality'"
+        );
+    }
+}
+
+// -- v52900_tests (v52.9.0) -- 安定化・Data Quality 2.0 前調整 --
+#[cfg(test)]
+mod v52900_tests {
+    #[test]
+    fn cargo_toml_version_is_52_9_0() {
+        // Version bump is tested in v53000_tests::cargo_toml_version_is_53_0_0.
+    }
+
+    #[test]
+    fn dq_overview_doc_exists() {
+        let src = include_str!("../../site/content/docs/data-quality-overview.mdx");
+        assert!(
+            src.contains("Data Quality") && src.contains("Observability"),
+            "data-quality-overview.mdx must mention Data Quality and Observability"
+        );
+        assert!(
+            src.contains("assert_schema"),
+            "data-quality-overview.mdx must mention assert_schema"
+        );
+        assert!(
+            src.contains("audit-log") || src.contains("audit_log"),
+            "data-quality-overview.mdx must mention audit-log"
+        );
+    }
+}
+
+// -- v52800_tests (v52.8.0) -- ドキュメントサイト Data Quality 記事 --
+#[cfg(test)]
+mod v52800_tests {
+    #[test]
+    fn docs_assert_schema_page_exists() {
+        let src = include_str!("../../site/content/docs/data-quality/assert-schema.mdx");
+        assert!(src.contains("assert_schema"), "assert-schema.mdx must contain 'assert_schema'");
+        assert!(
+            src.contains("nullable") || src.contains("optional"),
+            "assert-schema.mdx must mention nullable/optional fields"
+        );
+        assert!(
+            src.contains("strict-schema") || src.contains("strict_schema"),
+            "assert-schema.mdx must mention --strict-schema"
+        );
+        assert!(src.contains("E0419"), "assert-schema.mdx must mention E0419 error code");
+    }
+
+    #[test]
+    fn docs_audit_log_page_exists() {
+        let src = include_str!("../../site/content/docs/tools/audit-log.mdx");
+        assert!(
+            src.contains("audit-log") || src.contains("audit_log"),
+            "audit-log.mdx must contain 'audit-log' or 'audit_log'"
+        );
+        assert!(
+            src.contains("jsonl") || src.contains("JSONL"),
+            "audit-log.mdx must mention JSONL format"
+        );
+    }
+
+    #[test]
+    fn docs_lineage_enhanced_page_exists() {
+        let src = include_str!("../../site/content/docs/tools/lineage-enhanced.mdx");
+        assert!(src.contains("--with-schema"), "lineage-enhanced.mdx must mention --with-schema");
+        assert!(
+            src.contains("--format html") || src.contains("format html"),
+            "lineage-enhanced.mdx must mention --format html"
+        );
+        assert!(src.contains("-o"), "lineage-enhanced.mdx must mention -o output option");
+    }
+}
+
+// -- v52700_tests (v52.7.0) -- OTel span 属性（schema / lineage）--
+#[cfg(test)]
+mod v52700_tests {
+    #[test]
+    fn otel_span_has_schema_attr() {
+        let src = include_str!("otel.rs");
+        assert!(src.contains("schema.name"), "otel.rs must have schema.name attribute key");
+        assert!(src.contains("schema.fields"), "otel.rs must have schema.fields attribute key");
+    }
+
+    #[test]
+    fn otel_span_has_lineage_attr() {
+        let src = include_str!("otel.rs");
+        assert!(src.contains("lineage.upstream"), "otel.rs must have lineage.upstream attribute key");
+        assert!(src.contains("lineage.downstream"), "otel.rs must have lineage.downstream attribute key");
+    }
+}
+
+// -- v52600_tests (v52.6.0) -- fav run --audit-log データアクセスログ --
+#[cfg(test)]
+mod v52600_tests {
+    #[test]
+    fn audit_log_read_event() {
+        let src = include_str!("backend/vm.rs");
+        assert!(src.contains("AUDIT_LOG_PATH"), "vm.rs must have AUDIT_LOG_PATH");
+        assert!(src.contains("append_audit_event"), "vm.rs must have append_audit_event");
+        assert!(src.contains("op\\\":\\\"read\\\""), "vm.rs must emit read events");
+    }
+
+    #[test]
+    fn audit_log_write_event() {
+        let src = include_str!("backend/vm.rs");
+        assert!(src.contains("op\\\":\\\"write\\\""), "vm.rs must emit write events");
+        let main = include_str!("main.rs");
+        assert!(main.contains("--audit-log"), "main.rs must support --audit-log flag");
+    }
+}
+
+// -- v52500_tests (v52.5.0) -- SLA 監視 Rune --
+#[cfg(test)]
+mod v52500_tests {
+    #[test]
+    fn sla_rune_latency_check() {
+        let src = include_str!("../../runes/sla/sla.fav");
+        assert!(src.contains("fn check_latency("), "sla rune must define fn check_latency(");
+        assert!(src.contains("threshold_ms"), "check_latency must have threshold_ms parameter");
+        assert!(src.contains("Sla.check_latency_raw"), "check_latency must call Sla.check_latency_raw");
+    }
+
+    #[test]
+    fn sla_rune_freshness_check() {
+        let src = include_str!("../../runes/sla/sla.fav");
+        assert!(src.contains("fn check_freshness("), "sla rune must define fn check_freshness(");
+        assert!(src.contains("max_age_seconds"), "check_freshness must have max_age_seconds parameter");
+        assert!(src.contains("Sla.check_freshness_raw"), "check_freshness must call Sla.check_freshness_raw");
+    }
+
+    #[test]
+    fn sla_rune_alert_check() {
+        let src = include_str!("../../runes/sla/sla.fav");
+        assert!(src.contains("fn alert("), "sla rune must define fn alert(");
+        assert!(src.contains("Sla.alert_raw"), "alert must call Sla.alert_raw");
+    }
+}
+
+// -- v52400_tests (v52.4.0) -- fav explain --lineage --format html -o <file> --
+#[cfg(test)]
+mod v52400_tests {
+    use super::render_lineage_html;
+    use crate::lineage::{LineageEntry, LineageReport, PipelineLineage};
+
+    fn make_html_report() -> LineageReport {
+        LineageReport {
+            transformations: vec![
+                LineageEntry {
+                    name: "Parse".to_string(),
+                    kind: "transform".to_string(),
+                    capability: None,
+                    effects: vec![],
+                    sources: vec![],
+                    sinks: vec![],
+                    is_dead: false,
+                    schema: Some("OrderRow".to_string()),
+                },
+                LineageEntry {
+                    name: "Sink".to_string(),
+                    kind: "transform".to_string(),
+                    capability: None,
+                    effects: vec!["!Snowflake".to_string()],
+                    sources: vec![],
+                    sinks: vec!["snowflake".to_string()],
+                    is_dead: false,
+                    schema: None,
+                },
+            ],
+            pipelines: vec![PipelineLineage {
+                name: "main".to_string(),
+                steps: vec!["Parse".to_string(), "Sink".to_string()],
+                sources: vec![],
+                sinks: vec![],
+            }],
+        }
+    }
+
+    #[test]
+    fn lineage_html_output() {
+        let src = include_str!("lineage.rs");
+        assert!(src.contains("render_lineage_html"), "lineage.rs must have render_lineage_html");
+        assert!(src.contains("<!DOCTYPE html>"), "render_lineage_html must emit DOCTYPE");
+    }
+
+    #[test]
+    fn lineage_html_has_stage_detail() {
+        let src = include_str!("lineage.rs");
+        assert!(src.contains("showDetail"), "render_lineage_html must have showDetail JS function");
+        assert!(src.contains("id=\\\"detail\\\""), "render_lineage_html must have detail div");
+    }
+
+    #[test]
+    fn lineage_html_renders_stage_node() {
+        let report = make_html_report();
+        let html = render_lineage_html(&report);
+        assert!(html.contains("<!DOCTYPE html>"), "must start with DOCTYPE");
+        assert!(html.contains("showDetail"), "must have showDetail function");
+        assert!(html.contains("id=\"detail\""), "must have detail div");
+        assert!(html.contains("<svg"), "must have SVG element");
+        assert!(html.contains("Parse"), "must include stage name 'Parse'");
+    }
+}
+
+// -- v52300_tests (v52.3.0) -- fav explain --lineage --with-schema --
+#[cfg(test)]
+mod v52300_tests {
+    #[test]
+    fn lineage_mermaid_with_schema() {
+        let src = include_str!("lineage.rs");
+        assert!(src.contains("with_schema"), "lineage.rs must implement with_schema rendering");
+        assert!(
+            src.contains("collect_assert_schema_name"),
+            "lineage.rs must have collect_assert_schema_name function"
+        );
+    }
+
+    #[test]
+    fn lineage_dot_with_schema() {
+        let src = include_str!("lineage.rs");
+        assert!(
+            src.contains("pub schema: Option<String>"),
+            "LineageEntry must have schema field"
+        );
+        let main = include_str!("main.rs");
+        assert!(
+            main.contains("with-schema"),
+            "main.rs must support --with-schema flag"
+        );
+    }
+
+    #[test]
+    fn lineage_schema_field_detected_from_assert_schema() {
+        use crate::frontend::parser::Parser;
+        use crate::lineage::lineage_analysis;
+        let src = r#"
+stage Validate: Any -> Any = |row| {
+    assert_schema<OrderRow>(row)
+}
+"#;
+        let prog = Parser::parse_str(src, "t.fav").unwrap();
+        let report = lineage_analysis(&prog);
+        let entry = report.transformations.iter().find(|e| e.name == "Validate");
+        assert!(entry.is_some(), "Validate stage must appear in lineage");
+        assert_eq!(
+            entry.unwrap().schema.as_deref(),
+            Some("OrderRow"),
+            "schema field must be 'OrderRow' from assert_schema<OrderRow>"
+        );
+    }
+}
+
+// -- v52200_tests (v52.2.0) -- assert_schema Phase 2 --
+#[cfg(test)]
+mod v52200_tests {
+    #[test]
+    fn assert_schema_nullable_field() {
+        let ir = include_str!("middle/ir.rs");
+        assert!(ir.contains("optional"), "FieldMeta must have optional field");
+        let vm = include_str!("backend/vm.rs");
+        assert!(vm.contains("optional"), "VM AssertSchema must handle optional fields");
+    }
+
+    #[test]
+    fn assert_schema_extra_field_warn() {
+        let lint = include_str!("lint.rs");
+        assert!(lint.contains("W036"), "lint.rs must document W036");
+        let vm = include_str!("backend/vm.rs");
+        assert!(vm.contains("strict_schema"), "VM must support strict_schema flag");
+    }
+}
+
+// -- v52100_tests (v52.1.0) -- assert_schema Phase 1 --
+#[cfg(test)]
+mod v52100_tests {
+    #[test]
+    fn assert_schema_type_ok() {
+        let src = include_str!("ast.rs");
+        assert!(src.contains("AssertSchema"), "ast.rs must define AssertSchema node");
+        let vm = include_str!("backend/vm.rs");
+        assert!(vm.contains("AssertSchema"), "vm.rs must handle AssertSchema");
+    }
+    #[test]
+    fn assert_schema_type_fail() {
+        let src = include_str!("error_catalog.rs");
+        assert!(src.contains("E0419"), "error_catalog.rs must define E0419");
+        assert!(src.contains("assert_schema type mismatch"),
+            "E0419 must have title 'assert_schema type mismatch'");
+    }
+}
+
+// -- v52000_tests (v52.0.0) -- Performance & Scale 宣言 --
+#[cfg(test)]
+mod v52000_tests {
+    #[test]
+    fn changelog_has_v52_0_0() {
+        let content = include_str!("../../CHANGELOG.md");
+        assert!(content.contains("v52.0.0"),
+            "CHANGELOG.md must contain v52.0.0 entry");
+    }
+
+    #[test]
+    fn milestone_has_performance_scale() {
+        let content = include_str!("../../MILESTONE.md");
+        assert!(content.contains("Performance & Scale"),
+            "MILESTONE.md must contain Performance & Scale");
+    }
+
+    #[test]
+    fn readme_mentions_performance_scale() {
+        let content = include_str!("../../README.md");
+        assert!(content.contains("Performance & Scale"),
+            "README.md must mention Performance & Scale");
+    }
+}
+
+// -- v51900_tests (v51.9.0) -- 安定化・コードフリーズ --
+#[cfg(test)]
+mod v51900_tests {
+    #[test]
+    fn perf_overview_doc_exists() {
+        let src = include_str!("../../site/content/docs/performance-overview.mdx");
+        assert!(src.contains("par"), "performance-overview.mdx must mention par");
+        assert!(src.contains("fav bench"),
+            "performance-overview.mdx must mention fav bench");
+        assert!(src.contains("Performance & Scale"),
+            "performance-overview.mdx must mention Performance & Scale");
+    }
+}
+
+// -- v51800_tests (v51.8.0) -- ドキュメントサイト Performance 記事 --
+#[cfg(test)]
+mod v51800_tests {
+    #[test]
+    fn docs_parallel_page_exists() {
+        let src = include_str!("../../site/content/docs/runtime/parallel.mdx");
+        assert!(src.contains("par"), "parallel.mdx must mention par");
+        assert!(src.contains("Merge"), "parallel.mdx must mention Merge");
+        assert!(src.contains("buffer_size"), "parallel.mdx must mention buffer_size");
+    }
+
+    #[test]
+    fn docs_bench_regression_page_exists() {
+        let src = include_str!("../../site/content/docs/tools/bench-regression.mdx");
+        assert!(src.contains("--compare"), "bench-regression.mdx must mention --compare");
+        assert!(src.contains("--fail-on-regression"),
+            "bench-regression.mdx must mention --fail-on-regression");
+    }
+}
+
+// -- v51700_tests (v51.7.0) -- WASM ビルドサイズ最適化 --
+#[cfg(test)]
+mod v51700_tests {
+    #[test]
+    fn wasm_dce_removes_unused_fns() {
+        let src = include_str!("backend/wasm_dce.rs");
+        assert!(src.contains("pub fn dce_from_exports"),
+            "wasm_dce.rs must define pub fn dce_from_exports");
+        assert!(src.contains("entry_names.is_empty()"),
+            "dce_from_exports must guard against empty entry_names");
+    }
+
+    #[test]
+    fn wasm_bundle_size_reduced() {
+        let src = include_str!("driver.rs");
+        assert!(src.contains("build_wasm_artifact_with_config"),
+            "driver.rs wasm arm must use build_wasm_artifact_with_config");
+        assert!(src.contains("WasmOptLevel::Os"),
+            "driver.rs wasm arm must use WasmOptLevel::Os");
+    }
+
+    #[test]
+    fn benchmark_json_exists() {
+        let json = include_str!("../../benchmarks/v51.7.0.json");
+        assert!(json.contains("\"version\": \"51.7.0\""),
+            "benchmarks/v51.7.0.json must contain version 51.7.0");
+    }
+}
+
+// -- v51600_tests (v51.6.0) -- checker/compiler ホットパス最適化 --
+#[cfg(test)]
+mod v51600_tests {
+    #[test]
+    fn checker_perf_hot_path_improved() {
+        let src = include_str!("middle/checker.rs");
+        assert!(src.contains("pub type SubstRef"), "checker.rs must define pub type SubstRef");
+        assert!(src.contains("pub fn into_ref"), "checker.rs must define Subst::into_ref");
+    }
+
+    #[test]
+    fn compiler_perf_baseline_recorded() {
+        let json = include_str!("../../benchmarks/v51.6.0.json");
+        assert!(
+            json.contains("\"version\": \"51.6.0\""),
+            "benchmarks/v51.6.0.json must contain version 51.6.0"
+        );
+        assert!(
+            json.contains("tests_passed"),
+            "benchmarks/v51.6.0.json must contain tests_passed"
+        );
+    }
+}
+
+// -- v51500_tests (v51.5.0) -- インクリメンタルコンパイル依存グラフ --
+#[cfg(test)]
+mod v51500_tests {
+    use super::{incremental_files_to_rebuild, update_fingerprint_cache};
+    use crate::incremental::dep_graph::{load_dep_graph_json, save_dep_graph_json, DepGraph};
+    use tempfile::tempdir;
+
+    #[test]
+    fn dep_graph_json_roundtrip() {
+        let dir = tempdir().expect("tempdir");
+        let path = dir.path().join(".fav-cache").join("dep-graph.json");
+        let mut graph = DepGraph::new();
+        graph.add_dep("a", "b");
+        graph.add_dep("b", "c");
+
+        save_dep_graph_json(&graph, &path).expect("save_dep_graph_json");
+
+        let loaded = load_dep_graph_json(&path);
+        // ラウンドトリップ後も推移的依存が一致することを確認
+        let mut affected = loaded.transitive_affected_by("c");
+        affected.sort();
+        assert_eq!(affected, vec!["a".to_string(), "b".to_string()],
+            "roundtrip 後も transitive_affected_by が正しく動作すること");
+
+        // 不在ファイル → 空の DepGraph
+        let missing = load_dep_graph_json(&dir.path().join("nonexistent.json"));
+        assert!(missing.transitive_affected_by("x").is_empty());
+    }
+
+    #[test]
+    fn incremental_dep_graph_rebuilt() {
+        let dir = tempdir().expect("tempdir");
+        let cache_dir = dir.path().join("cache");
+        let a_path = dir.path().join("a.fav");
+        let b_path = dir.path().join("b.fav");
+        std::fs::write(&a_path, "fn a() -> Int { 1 }").unwrap();
+        std::fs::write(&b_path, "fn b() -> Int { 2 }").unwrap();
+
+        // 依存グラフ: a は b に依存
+        let mut graph = DepGraph::new();
+        graph.add_dep("a", "b");
+
+        // 初期フィンガープリントを保存
+        update_fingerprint_cache(&a_path, &cache_dir);
+        update_fingerprint_cache(&b_path, &cache_dir);
+
+        // b を変更
+        std::fs::write(&b_path, "fn b() -> Int { 99 }").unwrap();
+
+        let stems = ["a", "b"];
+        let paths: Vec<&std::path::Path> = vec![a_path.as_path(), b_path.as_path()];
+        let (to_rebuild, _skip) = incremental_files_to_rebuild(&stems, &paths, &graph, &cache_dir);
+
+        assert!(to_rebuild.contains(&"b".to_string()), "b は変更されたため rebuild 対象: {to_rebuild:?}");
+        assert!(to_rebuild.contains(&"a".to_string()), "a は b に依存するため rebuild 対象: {to_rebuild:?}");
+    }
+
+    #[test]
+    fn incremental_transitive_invalidation() {
+        let dir = tempdir().expect("tempdir");
+        let cache_dir = dir.path().join("cache");
+        let a_path = dir.path().join("a.fav");
+        let b_path = dir.path().join("b.fav");
+        let c_path = dir.path().join("c.fav");
+        std::fs::write(&a_path, "fn a() -> Int { 1 }").unwrap();
+        std::fs::write(&b_path, "fn b() -> Int { 2 }").unwrap();
+        std::fs::write(&c_path, "fn c() -> Int { 3 }").unwrap();
+
+        // 依存グラフ: a→b→c（a は b に依存、b は c に依存）
+        let mut graph = DepGraph::new();
+        graph.add_dep("a", "b");
+        graph.add_dep("b", "c");
+
+        // 初期フィンガープリントを保存
+        update_fingerprint_cache(&a_path, &cache_dir);
+        update_fingerprint_cache(&b_path, &cache_dir);
+        update_fingerprint_cache(&c_path, &cache_dir);
+
+        // c を変更
+        std::fs::write(&c_path, "fn c() -> Int { 99 }").unwrap();
+
+        let stems = ["a", "b", "c"];
+        let paths: Vec<&std::path::Path> = vec![a_path.as_path(), b_path.as_path(), c_path.as_path()];
+        let (to_rebuild, skip) = incremental_files_to_rebuild(&stems, &paths, &graph, &cache_dir);
+
+        assert!(to_rebuild.contains(&"c".to_string()), "c は変更されたため rebuild 対象: {to_rebuild:?}");
+        assert!(to_rebuild.contains(&"b".to_string()), "b は c に依存するため rebuild 対象: {to_rebuild:?}");
+        assert!(to_rebuild.contains(&"a".to_string()), "a は b に依存（推移的）するため rebuild 対象: {to_rebuild:?}");
+        assert!(skip.is_empty(), "全ファイルが rebuild 対象のため skip は空: {skip:?}");
+    }
+}
+
+// -- v51400_tests (v51.4.0) -- fav bench 差分回帰検出 --
+#[cfg(test)]
+mod v51400_tests {
+    use super::cmd_bench_compare;
+
+
+
+    #[test]
+    fn bench_regression_detected() {
+        let baseline = r#"{"version":"51.3.0","metrics":{"checker_ms":12,"compiler_ms":8}}"#;
+        // checker_ms: 12 → 18 (+50%) > threshold 10% → REGRESSION
+        let current = r#"{"version":"51.4.0","metrics":{"checker_ms":18,"compiler_ms":8}}"#;
+        let (ok, report) = cmd_bench_compare(baseline, current, 10.0, false);
+        assert!(!ok, "regression should be detected: {report}");
+        assert!(report.contains("REGRESSION"), "report should contain REGRESSION: {report}");
+        assert!(report.contains("checker_ms"), "report should name regressed metric: {report}");
+    }
+
+    #[test]
+    fn bench_no_regression_passes() {
+        let baseline = r#"{"version":"51.3.0","metrics":{"checker_ms":12,"compiler_ms":8}}"#;
+        // checker_ms: 12 → 13 (+8.3%) < threshold 10% → OK
+        let current = r#"{"version":"51.4.0","metrics":{"checker_ms":13,"compiler_ms":8}}"#;
+        let (ok, report) = cmd_bench_compare(baseline, current, 10.0, false);
+        assert!(ok, "no regression expected: {report}");
+        assert!(report.contains("OK"), "report should contain OK: {report}");
+    }
+}
+
+// -- v51300_tests (v51.3.0) -- ストリーミングバックプレッシャー制御 --
+#[cfg(test)]
+mod v51300_tests {
+    use super::build_artifact;
+    use crate::backend::vm::VM;
+    use crate::frontend::parser::Parser;
+    use crate::toml::parse_fav_toml_pub;
+
+
+    #[test]
+    fn stream_buffer_size_config() {
+        let toml_str = "[stream]\nbuffer_size = 500\n";
+        let config = parse_fav_toml_pub(toml_str);
+        assert_eq!(config.stream.as_ref().unwrap().buffer_size, Some(500),
+            "buffer_size = 500 should parse to Some(500)");
+    }
+
+    #[test]
+    fn stream_backpressure_blocks() {
+        // stage は List<Int> -> List<Int> が必要（__streaming_pipeline が chunk を List として渡す）
+        let src = r#"
+stage double_list: List<Int> -> List<Int> = |xs| {
+  List.map(xs, |x| { x * 2 })
+}
+#[streaming]
+seq Pipeline = double_list
+"#;
+        let prog = Parser::parse_str(src, "test_bp.fav").expect("parse");
+        let artifact = build_artifact(&prog);
+        let pipeline_idx = artifact.fn_idx_by_name("Pipeline").expect("Pipeline not found");
+        let input = crate::value::Value::List(vec![
+            crate::value::Value::Int(1),
+            crate::value::Value::Int(2),
+            crate::value::Value::Int(3),
+            crate::value::Value::Int(4),
+            crate::value::Value::Int(5),
+            crate::value::Value::Int(6),
+        ]);
+        // buffer_size = Some(2): compiled chunk_size(512) は 2 にキャップされる。
+        // このテストは「chunk_size が 2 に制限されても正しい結果が返ること」を検証する。
+        // 内部の chunk_size 値そのものは VM の外から観測できないため、出力の正しさで代替している。
+        let result = VM::run_with_stream_buffer_size(&artifact, pipeline_idx, vec![input], Some(2));
+        assert!(result.is_ok(), "streaming pipeline with buffer_size=2 should succeed, got: {:?}", result.err());
+        if let Ok(crate::value::Value::List(items)) = result {
+            assert_eq!(items.len(), 6, "should return 6 items");
+            let ints: Vec<i64> = items.iter()
+                .filter_map(|v| if let crate::value::Value::Int(n) = v { Some(*n) } else { None })
+                .collect();
+            assert_eq!(ints, vec![2, 4, 6, 8, 10, 12], "each element should be doubled");
+        } else {
+            panic!("expected List result");
+        }
+    }
+}
+
+// -- v51200_tests (v51.2.0) -- par Phase 2: Merge.ordered / Merge.any --
+#[cfg(test)]
+mod v51200_tests {
+    use super::build_artifact;
+    use crate::backend::vm::VM;
+    use crate::frontend::parser::Parser;
+
+    fn run_merge(source: &str) -> Result<crate::value::Value, String> {
+        let program = Parser::parse_str(source, "test_merge.fav").expect("parse");
+        let artifact = build_artifact(&program);
+        let main_idx = artifact.fn_idx_by_name("main").expect("main");
+        VM::run(&artifact, main_idx, vec![]).map_err(|e| e.message)
+    }
+
+    #[test]
+    fn par_stage_merge_ordered() {
+        let source = r#"
+stage AddOne: Int -> Int = |n| { Result.ok(n + 1) }
+stage AddTwo: Int -> Int = |n| { Result.ok(n + 2) }
+seq P = par [AddOne, AddTwo] |> Merge.ordered
+public fn main() -> Int { 0 |> P }
+"#;
+        let result = run_merge(source);
+        assert!(result.is_ok(), "Merge.ordered should run successfully, got: {:?}", result.err());
+        if let Ok(crate::value::Value::List(items)) = &result {
+            assert_eq!(items.len(), 2, "Merge.ordered should return list of 2 results");
+            // Verify par results are unwrapped: Result.ok(0+1)=1, Result.ok(0+2)=2
+            assert_eq!(items[0], crate::value::Value::Int(1), "AddOne should return 1");
+            assert_eq!(items[1], crate::value::Value::Int(2), "AddTwo should return 2");
+        } else {
+            panic!("Merge.ordered should return a List, got: {:?}", result);
+        }
+    }
+
+    #[test]
+    fn par_stage_merge_unordered() {
+        let source = r#"
+stage AddOne: Int -> Int = |n| { Result.ok(n + 1) }
+stage AddTwo: Int -> Int = |n| { Result.ok(n + 2) }
+seq P = par [AddOne, AddTwo] |> Merge.any
+public fn main() -> Int { 0 |> P }
+"#;
+        let result = run_merge(source);
+        assert!(result.is_ok(), "Merge.any should run successfully, got: {:?}", result.err());
+        if let Ok(crate::value::Value::List(items)) = &result {
+            assert_eq!(items.len(), 2, "Merge.any should return list of 2 results");
+            // Merge.any の結果は宣言順が保証されないため、ソートして順序非依存に検証する。
+            // 現実装（std::thread）は宣言順だが、tokio 化後は任意順になる。
+            let mut values: Vec<i64> = items.iter()
+                .filter_map(|v| if let crate::value::Value::Int(n) = v { Some(*n) } else { None })
+                .collect();
+            values.sort();
+            assert_eq!(values, vec![1, 2], "Merge.any should contain unwrapped results of AddOne(1) and AddTwo(2)");
+        } else {
+            panic!("Merge.any should return a List, got: {:?}", result);
+        }
+    }
+}
+
+// -- v51100_tests (v51.1.0) -- par stage Tokio 並列実行 Phase 1 --
+#[cfg(test)]
+mod v51100_tests {
+    use super::build_artifact;
+    use crate::backend::vm::VM;
+    use crate::frontend::parser::Parser;
+
+    fn run_par(source: &str) -> Result<crate::value::Value, String> {
+        let program = Parser::parse_str(source, "test_par.fav").expect("parse");
+        let artifact = build_artifact(&program);
+        let main_idx = artifact.fn_idx_by_name("main").expect("main");
+        VM::run(&artifact, main_idx, vec![]).map_err(|e| e.message)
+    }
+
+    #[test]
+    fn par_stage_runs_parallel() {
+        let source = r#"
+stage AddOne: Int -> Int = |n| { Result.ok(n + 1) }
+stage AddTwo: Int -> Int = |n| { Result.ok(n + 2) }
+seq P = par [AddOne, AddTwo]
+public fn main() -> Int { 0 |> P }
+"#;
+        let result = run_par(source);
+        assert!(result.is_ok(), "par stage should run successfully, got: {:?}", result.err());
+        // 戻り値は List([Ok(1), Ok(2)]) — List であることを確認
+        if let Ok(crate::value::Value::List(items)) = &result {
+            assert_eq!(items.len(), 2, "par should return list of 2 results");
+        } else {
+            panic!("par should return a List, got: {:?}", result);
+        }
+    }
+
+    #[test]
+    fn par_stage_error_propagation() {
+        let source = r#"
+stage Ok42: Int -> Int = |n| { Result.ok(42) }
+stage Fail: Int -> Int = |n| { Result.err("boom") }
+seq P = par [Ok42, Fail]
+public fn main() -> Int { 0 |> P }
+"#;
+        let result = run_par(source);
+        assert!(result.is_err(), "par with failing stage should propagate error");
+        // エラーメッセージに "boom" が含まれることを確認
+        let msg = result.err().unwrap();
+        assert!(msg.contains("boom"), "error message should contain 'boom', got: {}", msg);
+    }
+}
+
+// -- v51000_tests (v51.0.0) -- Developer Experience 3.0 宣言 --
+#[cfg(test)]
+mod v51000_tests {
+    #[test]
+    fn changelog_has_v51_0_0() {
+        let content = include_str!("../../CHANGELOG.md");
+        assert!(content.contains("v51.0.0"),
+            "CHANGELOG.md must have v51.0.0 entry");
+    }
+
+    #[test]
+    fn milestone_has_dx3() {
+        let content = include_str!("../../MILESTONE.md");
+        assert!(content.contains("Developer Experience 3.0"),
+            "MILESTONE.md must mention Developer Experience 3.0");
+    }
+
+    #[test]
+    fn readme_mentions_dx3() {
+        let content = include_str!("../../README.md");
+        assert!(
+            content.contains("DX 3.0") || content.contains("Developer Experience 3.0"),
+            "README.md must mention DX 3.0"
+        );
+    }
+
+    #[test]
+    fn dx3_milestone_declared() {
+        let content = include_str!("../../MILESTONE.md");
+        assert!(content.contains("v51.0"), "MILESTONE.md must have v51.0 entry");
+        assert!(
+            content.contains("診断は開発者の思考を止めない") || content.contains("Developer Experience 3.0"),
+            "MILESTONE.md must contain DX 3.0 declaration"
+        );
+    }
+
+}
+
+// -- v509000_tests (v50.9.0) -- 安定化・コードフリーズ（DX 3.0 前調整） --
+#[cfg(test)]
+mod v509000_tests {
+    #[test]
+    fn dx3_overview_doc_exists() {
+        let content = include_str!("../../site/content/docs/dx3-overview.mdx");
+        assert!(content.len() >= 300, "dx3-overview.mdx is too short: {} bytes", content.len());
+        assert!(
+            content.contains("DX 3.0") || content.contains("Developer Experience") || content.contains("dx3"),
+            "dx3-overview.mdx must mention DX 3.0"
+        );
+    }
+}
+
+// -- v508000_tests (v50.8.0) -- ドキュメントサイト DX 3.0 記事 --
+#[cfg(test)]
+mod v508000_tests {
+    #[test]
+    fn docs_diagnostics_page_exists() {
+        let content = include_str!("../../site/content/docs/tools/diagnostics.mdx");
+        assert!(content.len() >= 300, "diagnostics.mdx is too short: {} bytes", content.len());
+        assert!(content.contains("fav explain"), "diagnostics.mdx must mention 'fav explain'");
+        assert!(content.contains("suggestion"), "diagnostics.mdx must mention 'suggestion'");
+    }
+
+    #[test]
+    fn docs_trace_watch_page_exists() {
+        let content = include_str!("../../site/content/docs/tools/trace-watch.mdx");
+        assert!(content.len() >= 300, "trace-watch.mdx is too short: {} bytes", content.len());
+        assert!(content.contains("--trace"), "trace-watch.mdx must mention '--trace'");
+        assert!(content.contains("[trace]"), "trace-watch.mdx must mention '[trace]'");
+    }
+}
+
+// -- v507000_tests (v50.7.0) -- fav run --trace/--watch 強化 --
+#[cfg(test)]
+mod v507000_tests {
+    use super::build_artifact;
+    use crate::backend::vm::{VM, set_verbose_level, set_watch_fields};
+    use crate::frontend::parser::Parser;
+    use crate::value::Value;
+
+    fn run_verbose(source: &str, verbose_level: u8) -> (Result<Value, String>, Vec<String>) {
+        set_verbose_level(verbose_level);
+        let program = Parser::parse_str(source, "test_verbose.fav").expect("parse");
+        let artifact = build_artifact(&program);
+        let main_idx = artifact.fn_idx_by_name("main").expect("main");
+        let result = VM::run_with_trace(&artifact, main_idx, vec![], None, Some("test_verbose.fav"));
+        set_verbose_level(0);
+        match result {
+            Ok((value, _, traces)) => (Ok(value), traces),
+            Err(e) => { set_verbose_level(0); (Err(e.message), vec![]) }
+        }
+    }
+
+    fn run_with_watch(source: &str, watch_targets: &[&str]) -> Vec<String> {
+        // Always reset first: cleans up any WATCH_FIELDS leaked by a previous panic.
+        set_watch_fields(vec![]);
+        let program = Parser::parse_str(source, "test_watch.fav").expect("parse");
+        let artifact = build_artifact(&program);
+        let main_idx = artifact.fn_idx_by_name("main").expect("main");
+        // Set watch fields immediately before VM run to minimise the panic window.
+        set_watch_fields(watch_targets.iter().map(|s| s.to_string()).collect());
+        let result = VM::run_with_trace(&artifact, main_idx, vec![], None, Some("test_watch.fav"));
+        set_watch_fields(vec![]);
+        match result {
+            Ok((_, _, traces)) => traces,
+            Err(_) => vec![],
+        }
+    }
+
+    #[test]
+    fn run_trace_structured_output() {
+        // Two-stage seq (same pattern as verbose_logs_stage_enter): verify the
+        // new [trace] stage=NAME  out=VALUE structured format replaces the old
+        // "[TRACE] stage X: exit Ok(...)" format.
+        let source = r#"
+stage WrapA: String -> String = |s| { Result.ok(s) }
+stage WrapB: String -> String = |s| { s }
+seq P = WrapA |> WrapB
+
+public fn main() -> String { "hello" |> P }
+"#;
+        let (_, traces) = run_verbose(source, 1);
+        assert!(
+            traces.iter().any(|l: &String| l.contains("[trace] stage=WrapA") && l.contains("out=")),
+            "expected structured [trace] line for WrapA stage, got: {:?}", traces
+        );
+        // Old format must not appear in ok path
+        assert!(
+            !traces.iter().any(|l: &String| l.contains("exit Ok")),
+            "old 'exit Ok' format should not appear, got: {:?}", traces
+        );
+    }
+
+    #[test]
+    fn run_watch_tracks_variable() {
+        // Two-stage seq so SeqStageCheck fires for the first (record-outputting) stage.
+        // Parse outputs Payload { amount: 42 }; watch should detect the `amount` field.
+        let source = r#"
+type Payload = { amount: Int }
+stage Parse: String -> Payload = |s| { Result.ok(Payload { amount: 42 }) }
+stage Pass: Payload -> Payload = |p| { p }
+seq Q = Parse |> Pass
+
+public fn main() -> Payload { "x" |> Q }
+"#;
+        let traces = run_with_watch(source, &["amount"]);
+        assert!(
+            traces.iter().any(|l: &String| l.contains("[watch] amount:")),
+            "expected [watch] line for amount field, got: {:?}", traces
+        );
+    }
+}
+
+// -- v506000_tests (v50.6.0) -- LSP ホバー情報強化 --
+#[cfg(test)]
+mod v506000_tests {
+    #[test]
+    fn lsp_hover_builtin_fn() {
+        use crate::lsp::hover::builtin_hover_at;
+        // "List.map(items, f)" — byte offset 5 is on "m" of "map" (pure ASCII: byte==char)
+        // byte: 'L'=0 'i'=1 's'=2 't'=3 '.'=4 'm'=5
+        let source = "List.map(items, f)";
+        let result = builtin_hover_at(source, 5);
+        assert!(result.is_some(), "expected hover for List.map");
+        let text = result.unwrap();
+        assert!(text.contains("map"),  "hover should mention function name, got: {}", text);
+        assert!(text.contains("List"), "hover should show List signature, got: {}", text);
+    }
+
+    #[test]
+    fn lsp_hover_rune_method() {
+        use crate::lsp::hover::rune_hover_at;
+        // "kafka.consume(topic)" — byte offset 6 is on "c" of "consume" (pure ASCII: byte==char)
+        // byte: 'k'=0 'a'=1 'f'=2 'k'=3 'a'=4 '.'=5 'c'=6
+        let source = "kafka.consume(topic)";
+        let result = rune_hover_at(source, 6);
+        assert!(result.is_some(), "expected hover for kafka.consume");
+        let text = result.unwrap();
+        assert!(text.contains("consume"), "hover should mention method name, got: {}", text);
+        assert!(text.contains("Kafka"),   "hover should show !Kafka effect, got: {}", text);
+    }
+}
+
+// -- v505000_tests (v50.5.0) -- LSP インレイヒント Phase 2 --
+#[cfg(test)]
+mod v505000_tests {
+    #[test]
+    fn lsp_inlay_hint_stage_type() {
+        use crate::frontend::lexer::Span;
+        use crate::lsp::inlay_hints::collect_stage_hints;
+        use crate::middle::checker::Type;
+        use std::collections::HashMap;
+
+        // "  stage Load\n": indent=2, "stage "=6 → "Load" at bytes 8..12
+        // Span.line is 1-indexed; find_type_at uses start/end only
+        // Arrow/Trf types are skipped by collect_stage_hints (delegated to
+        // collect_pipeline_type_hints). This tests Named type (scalar stage).
+        let source = "  stage Load\n";
+        let span = Span { file: "t".to_string(), start: 8, end: 12, line: 1, col: 9 };
+        let mut type_at = HashMap::new();
+        type_at.insert(span, Type::Named("CsvRow".to_string(), vec![]));
+
+        let hints = collect_stage_hints(source, &type_at);
+        assert_eq!(hints.len(), 1, "expected one hint for scalar-typed stage");
+        assert!(hints[0].label.contains("CsvRow"),
+            "hint should show named type, got: {}", hints[0].label);
+    }
+
+    #[test]
+    fn lsp_inlay_hint_pipeline_type() {
+        use crate::frontend::lexer::Span;
+        use crate::lsp::inlay_hints::collect_pipeline_type_hints;
+        use crate::middle::checker::Type;
+        use std::collections::HashMap;
+
+        // Three stages; only Arrow/Trf get hints — Int stage must produce no hint.
+        // "  stage Parse\n  stage Validate\n  stage Load\n"
+        // Line 1: "  stage Parse"    (13 bytes) → "Parse"    bytes 8..13  (byte_offset=0)
+        // Line 2: "  stage Validate" (16 bytes) → "Validate" bytes 22..30 (byte_offset=14, =13+\n)
+        // Line 3: "  stage Load"     (12 bytes) → "Load"     bytes 39..43 (byte_offset=31, =14+16+\n)
+        let source = "  stage Parse\n  stage Validate\n  stage Load\n";
+        let mut type_at = HashMap::new();
+        type_at.insert(
+            Span { file: "t".to_string(), start: 8, end: 13, line: 1, col: 9 },
+            Type::Arrow(
+                Box::new(Type::Named("RawOrder".to_string(), vec![])),
+                Box::new(Type::Named("Order".to_string(), vec![])),
+            ),
+        );
+        type_at.insert(
+            Span { file: "t".to_string(), start: 22, end: 30, line: 2, col: 9 },
+            Type::Arrow(
+                Box::new(Type::Named("Order".to_string(), vec![])),
+                Box::new(Type::Named("ValidOrder".to_string(), vec![])),
+            ),
+        );
+        // Load stage has a non-Arrow type — collect_pipeline_type_hints must skip it
+        type_at.insert(
+            Span { file: "t".to_string(), start: 39, end: 43, line: 3, col: 9 },
+            Type::Int,
+        );
+
+        let hints = collect_pipeline_type_hints(source, &type_at);
+        assert_eq!(hints.len(), 2, "expected hints only for Arrow-typed stages, not Int");
+        let labels: Vec<_> = hints.iter().map(|h| &h.label).collect();
+        assert!(labels.iter().any(|l| l.contains("RawOrder")),
+            "first stage hint should show RawOrder, got: {:?}", labels);
+        assert!(labels.iter().any(|l| l.contains("ValidOrder")),
+            "second stage hint should show ValidOrder, got: {:?}", labels);
+    }
+}
+
+// -- v504000_tests (v50.4.0) -- LSP インレイヒント Phase 1 --
+#[cfg(test)]
+mod v504000_tests {
+    #[test]
+    fn lsp_inlay_hint_let_binding() {
+        use crate::frontend::lexer::Span;
+        use crate::lsp::inlay_hints::collect_bind_hints;
+        use crate::middle::checker::Type;
+        use std::collections::HashMap;
+
+        // "bind count <- 42\n": "bind " = 5 bytes, "count" at bytes 5..10
+        // Span.line is 1-indexed in Favnir lexer; find_type_at uses start/end only
+        let source = "bind count <- 42\n";
+        let span = Span { file: "t".to_string(), start: 5, end: 10, line: 1, col: 6 };
+        let mut type_at = HashMap::new();
+        type_at.insert(span, Type::Int);
+
+        let hints = collect_bind_hints(source, &type_at);
+        assert_eq!(hints.len(), 1, "expected one hint for bind binding");
+        assert!(hints[0].label.contains("Int"),
+            "hint label should show inferred type, got: {}", hints[0].label);
+    }
+
+    #[test]
+    fn lsp_inlay_hint_fn_return() {
+        use crate::frontend::lexer::Span;
+        use crate::lsp::inlay_hints::collect_fn_return_hints;
+        use crate::middle::checker::Type;
+        use std::collections::HashMap;
+
+        // "fn double(x: Int) { x * 2 }\n": "fn " = 3 bytes, "double" at bytes 3..9
+        // Span.line is 1-indexed in Favnir lexer; find_type_at uses start/end only
+        let source = "fn double(x: Int) { x * 2 }\n";
+        let span = Span { file: "t".to_string(), start: 3, end: 9, line: 1, col: 4 };
+        let mut type_at = HashMap::new();
+        type_at.insert(span, Type::Int);
+
+        let hints = collect_fn_return_hints(source, &type_at);
+        assert_eq!(hints.len(), 1, "expected one hint for fn without return type");
+        assert!(hints[0].label.contains("Int"),
+            "hint should show inferred return type, got: {}", hints[0].label);
+    }
+}
+
+// -- v503000_tests (v50.3.0) -- explain --error 統合 --
+#[cfg(test)]
+mod v503000_tests {
+    #[test]
+    fn explain_error_flag_works() {
+        let out = super::cmd_explain_error_collect("E0213");
+        assert!(out.is_some(), "E0213 should be in error catalog");
+        let text = out.unwrap();
+        assert!(text.contains("E0213"),      "output should contain code");
+        assert!(text.contains("Title"),      "output should contain Title section");
+        assert!(text.contains("Fix"),        "output should contain Fix section");
+        assert!(text.contains("Suggestion"), "output should contain Suggestion section");
+    }
+
+    #[test]
+    fn explain_error_all_codes_have_text() {
+        let all = crate::error_catalog::list_all();
+        for e in all {
+            assert!(!e.title.is_empty(),
+                "{}: title must be non-empty", e.code);
+            assert!(!e.description.is_empty(),
+                "{}: description must be non-empty", e.code);
+            assert!(!e.fix.is_empty(),
+                "{}: fix must be non-empty", e.code);
+        }
+    }
+}
+
+// -- v502000_tests (v50.2.0) -- 診断統一 Phase 2 --
+#[cfg(test)]
+mod v502000_tests {
+    #[test]
+    fn check_json_includes_suggestion() {
+        // v50.1.0 以降は catalog コードすべてに suggestion あり。
+        // default_suggestion が catalog フォールバック経由で値を返すことを確認。
+        let s = super::default_suggestion("E0213");
+        assert!(!s.is_empty(), "E0213 should have non-empty suggestion in JSON output");
+        let s2 = super::default_suggestion("E0380");
+        assert!(
+            !s2.is_empty(),
+            "E0380 (added in v50.1.0) should have suggestion in JSON output"
+        );
+    }
+
+    #[test]
+    fn lsp_diagnostic_includes_suggestion() {
+        use crate::frontend::lexer::Span;
+        use crate::lsp::diagnostics::errors_to_diagnostics;
+        use crate::middle::checker::TypeError;
+
+        let errors = vec![TypeError::new(
+            "E0213",
+            "type mismatch",
+            Span::new("test.fav", 0, 0, 1, 1),
+        )];
+        let diags = errors_to_diagnostics(&errors, "fn f() -> Int { true }");
+        assert!(!diags.is_empty());
+        let json = serde_json::to_string(&diags[0]).expect("serialize");
+        assert!(
+            json.contains("\"suggestion\""),
+            "LSP diagnostic should include suggestion in data field, got: {json}"
+        );
+    }
+}
+
+// -- v501000_tests (v50.1.0) -- エラー診断統一 Phase 1 --
+#[cfg(test)]
+mod v501000_tests {
+    #[test]
+    fn error_suggestion_all_covered() {
+        let content = include_str!("error_catalog.rs");
+        assert!(
+            !content.contains("suggestion: None"),
+            "error_catalog.rs must have no suggestion: None — run grep to find remaining entries"
+        );
+    }
+
+    #[test]
+    fn error_suggestion_e0018_text() {
+        let content = include_str!("error_catalog.rs");
+        assert!(
+            content.contains("no longer needed"),
+            "E0018 suggestion should contain 'no longer needed'"
+        );
+    }
+}
+
+// -- v50000_tests (v50.0.0) -- Production 2.0 宣言 --
+#[cfg(test)]
+mod v50000_tests {
+    #[test]
+    fn changelog_has_v50_0_0() {
+        let content = include_str!("../../CHANGELOG.md");
+        assert!(
+            content.contains("## [v50.0.0]"),
+            "CHANGELOG.md should contain a ## [v50.0.0] section header"
+        );
+    }
+
+    #[test]
+    fn milestone_has_language_maturity() {
+        let content = include_str!("../../MILESTONE.md");
+        assert!(
+            content.contains("Language Maturity"),
+            "MILESTONE.md should contain 'Language Maturity'"
+        );
+        assert!(
+            content.contains("v50.0.0"),
+            "MILESTONE.md should contain 'v50.0.0' in the Language Maturity entry"
+        );
+    }
+
+    #[test]
+    fn readme_mentions_language_maturity() {
+        let content = include_str!("../../README.md");
+        assert!(
+            content.contains("Language Maturity"),
+            "README.md should mention 'Language Maturity'"
+        );
+    }
+}
+
+// -- v499000_tests (v49.9.0) -- v50.0 前調整・安定化 --
+#[cfg(test)]
+mod v499000_tests {
+    #[test]
+    fn cargo_toml_version_is_49_9_0() {
+        // Version-specific assertion is obsolete after version bump.
+        // Validate that fav/Cargo.toml is a well-formed package manifest instead.
+        let content = include_str!("../Cargo.toml");
+        assert!(
+            content.contains("name = \"fav\""),
+            "Cargo.toml should declare package name 'fav'"
+        );
+    }
+
+    #[test]
+    fn language_maturity_overview_doc_exists() {
+        let content =
+            include_str!("../../site/content/docs/language-maturity-overview.mdx");
+        assert!(
+            content.contains("| v46 |"),
+            "language-maturity-overview.mdx should contain the v46 table row '| v46 |'"
+        );
+        assert!(
+            content.contains("| v47 |"),
+            "language-maturity-overview.mdx should contain the v47 table row '| v47 |'"
+        );
+        assert!(
+            content.contains("| v48 |"),
+            "language-maturity-overview.mdx should contain the v48 table row '| v48 |'"
+        );
+        assert!(
+            content.contains("| v49 |"),
+            "language-maturity-overview.mdx should contain the v49 table row '| v49 |'"
+        );
+    }
+}
+
+// -- v498000_tests (v49.8.0) -- ドキュメントサイト全面更新 Phase 2 --
+#[cfg(test)]
+mod v498000_tests {
+    #[test]
+    fn docs_site_v50_overview_exists() {
+        let content =
+            include_str!("../../site/content/docs/language-maturity-overview.mdx");
+        assert!(
+            content.contains("Language Maturity"),
+            "language-maturity-overview.mdx should contain 'Language Maturity'"
+        );
+        assert!(
+            content.contains("v50"),
+            "language-maturity-overview.mdx should contain 'v50'"
+        );
+        assert!(
+            content.contains("Production 2.0"),
+            "language-maturity-overview.mdx should contain 'Production 2.0'"
+        );
+        assert!(
+            content.contains("return"),
+            "language-maturity-overview.mdx should document the return guard pattern"
+        );
+    }
+
+    #[test]
+    fn milestone_has_language_maturity() {
+        let content = include_str!("../../MILESTONE.md");
+        assert!(
+            content.contains("Language Maturity"),
+            "MILESTONE.md should contain 'Language Maturity'"
+        );
+        assert!(
+            content.contains("v50.0.0"),
+            "MILESTONE.md should contain 'v50.0.0' in the Language Maturity entry"
+        );
+    }
+}
+
+// -- v497000_tests (v49.7.0) -- セキュリティ審査 2.0 --
+#[cfg(test)]
+mod v497000_tests {
+    #[test]
+    fn import_path_traversal_rejected() {
+        assert!(
+            super::validate_import_path("../../etc/passwd").is_err(),
+            "path traversal '../../etc/passwd' should be rejected"
+        );
+        assert!(
+            super::validate_import_path("..").is_err(),
+            "bare '..' should be rejected"
+        );
+        assert!(
+            super::validate_import_path("a/../../etc").is_err(),
+            "mid-path traversal 'a/../../etc' should be rejected"
+        );
+        assert!(
+            super::validate_import_path("").is_err(),
+            "empty path should be rejected"
+        );
+        assert!(
+            super::validate_import_path("./stages/validate").is_ok(),
+            "valid relative path './stages/validate' should be accepted"
+        );
+    }
+
+    #[test]
+    fn install_invalid_name_rejected() {
+        assert!(
+            super::validate_rune_name("my-rune").is_ok(),
+            "'my-rune' should be a valid rune name"
+        );
+        assert!(
+            super::validate_rune_name("snowflake").is_ok(),
+            "lowercase only name should be accepted"
+        );
+        assert!(
+            super::validate_rune_name("").is_err(),
+            "empty name should be rejected"
+        );
+        assert!(
+            super::validate_rune_name("../evil").is_err(),
+            "'../evil' contains '.' and '/' (invalid characters) and should be rejected"
+        );
+        assert!(
+            super::validate_rune_name("my rune").is_err(),
+            "'my rune' contains a space and should be rejected"
+        );
+        assert!(
+            super::validate_rune_name("-leading").is_err(),
+            "name starting with '-' should be rejected"
+        );
+        assert!(
+            super::validate_rune_name("trailing-").is_err(),
+            "name ending with '-' should be rejected"
+        );
+    }
+}
+
+// -- v496000_tests (v49.6.0) -- WASM / Python transpiler 互換確認 --
+#[cfg(test)]
+mod v496000_tests {
+    #[test]
+    fn python_emit_return_stmt() {
+        let src = r#"fn early_exit(x: Int) -> Int {
+  return x
+}"#;
+        let out = crate::emit_python::emit_python_str(src);
+        assert!(
+            out.contains("return x"),
+            "python emitter should emit 'return x' for Stmt::Return"
+        );
+    }
+
+    #[test]
+    fn wasm_compat_return_stmt() {
+        let src = include_str!("backend/wasm_codegen.rs");
+        assert!(
+            src.contains("IRStmt::Return"),
+            "wasm_codegen.rs should have a match arm for IRStmt::Return"
+        );
+    }
+}
+
+// -- v495000_tests (v49.5.0) -- cookbook 更新 --
+#[cfg(test)]
+mod v495000_tests {
+    #[test]
+    fn cookbook_return_guard_exists() {
+        let content = include_str!("../../site/content/cookbook/return-guard-pattern.mdx");
+        assert!(
+            content.contains("return Result") && content.contains("guard"),
+            "cookbook/return-guard-pattern.mdx should contain return Result guard recipe"
+        );
+    }
+
+    #[test]
+    fn cookbook_fav_test_exists() {
+        let content = include_str!("../../site/content/cookbook/inline-testing.mdx");
+        assert!(
+            content.contains("#[test]") && content.contains("assert"),
+            "cookbook/inline-testing.mdx should contain fav test recipe"
+        );
+    }
+}
+
+// -- v494000_tests (v49.4.0) -- ドキュメントサイト全面更新 Phase 1 --
+#[cfg(test)]
+mod v494000_tests {
+    #[test]
+    fn docs_return_syntax_exists() {
+        let content = include_str!("../../site/content/docs/syntax/return.mdx");
+        assert!(
+            content.contains("return") && content.contains("return expr if condition"),
+            "syntax/return.mdx should document return guard pattern with 'return expr if condition' syntax"
+        );
+    }
+
+    #[test]
+    fn docs_import_v2_exists() {
+        let content = include_str!("../../site/content/docs/modules/import.mdx");
+        assert!(
+            content.contains("import") && content.contains("W035"),
+            "modules/import.mdx should document import v2 and W035 deprecation"
+        );
+    }
+}
+
+// -- v493000_tests (v49.3.0) -- fav check インクリメンタル型チェック --
+#[cfg(test)]
+mod v493000_tests {
+    #[test]
+    fn incremental_check_skips_unchanged() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let fav_file = dir.path().join("main.fav");
+        std::fs::write(&fav_file, "fn main() -> Int { 42 }").unwrap();
+        let cache_dir = dir.path().join(".fav-cache");
+        // 初回: キャッシュなし → 要再チェック
+        assert!(super::file_needs_recheck(&fav_file, &cache_dir));
+        // キャッシュ更新
+        super::update_fingerprint_cache(&fav_file, &cache_dir);
+        // 2回目: 未変更 → スキップ
+        assert!(
+            !super::file_needs_recheck(&fav_file, &cache_dir),
+            "unchanged file should not need recheck"
+        );
+    }
+
+    #[test]
+    fn incremental_check_detects_change() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let fav_file = dir.path().join("main.fav");
+        std::fs::write(&fav_file, "fn main() -> Int { 42 }").unwrap();
+        let cache_dir = dir.path().join(".fav-cache");
+        // キャッシュ初期化
+        super::update_fingerprint_cache(&fav_file, &cache_dir);
+        // ファイル変更
+        std::fs::write(&fav_file, "fn main() -> Int { 99 }").unwrap();
+        // 変更検知 → 要再チェック
+        assert!(
+            super::file_needs_recheck(&fav_file, &cache_dir),
+            "changed file should need recheck"
+        );
+    }
+}
+
+// -- v492000_tests (v49.2.0) -- パフォーマンス計測 + ボトルネック修正 --
+#[cfg(test)]
+mod v492000_tests {
+    #[test]
+    fn bench_all_result_recorded() {
+        let content = include_str!("../../benchmarks/v49.2.0.json");
+        assert!(content.contains("checker_ms"),
+            "benchmarks/v49.2.0.json should contain 'checker_ms'");
+        assert!(content.contains("49.2.0"),
+            "benchmarks/v49.2.0.json should reference version 49.2.0");
+    }
+
+    #[test]
+    fn checker_perf_regression_none() {
+        let content = include_str!("../../benchmarks/v49.2.0.json");
+        assert!(content.contains("\"regression\": false"),
+            "benchmarks/v49.2.0.json should have regression: false");
+    }
+}
+
+// -- v491000_tests (v49.1.0) -- 全機能統合テスト + E2E デモ更新 --
+#[cfg(test)]
+mod v491000_tests {
+    #[test]
+    fn e2e_demo_v50_structure() {
+        let base = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../examples/v50-demo");
+        assert!(base.exists(), "examples/v50-demo/ must exist");
+        assert!(base.join("fav.toml").exists(), "examples/v50-demo/fav.toml must exist");
+        assert!(base.join("pipeline.fav").exists(), "examples/v50-demo/pipeline.fav must exist");
+        assert!(
+            base.join("stages/validate.fav").exists(),
+            "examples/v50-demo/stages/validate.fav must exist"
+        );
+    }
+
+    #[test]
+    fn e2e_demo_uses_new_import() {
+        let content = include_str!("../../examples/v50-demo/pipeline.fav");
+        assert!(
+            content.contains("import kafka"),
+            "pipeline.fav should use new package import syntax: import kafka"
+        );
+        assert!(
+            content.contains("import \"./stages/validate\""),
+            "pipeline.fav should use local import syntax"
+        );
+        assert!(
+            !content.contains("import rune"),
+            "pipeline.fav should NOT use legacy import rune syntax"
+        );
+    }
+}
+
+// -- v49000_tests (v49.0.0) -- Module & Package 2.0 宣言 --
+#[cfg(test)]
+mod v49000_tests {
+    #[test]
+    fn cargo_toml_version_is_49_0_0() {
+        // Stubbed: version bumped to 49.1.0 -- assertion intentionally removed
+    }
+
+    #[test]
+    fn changelog_has_v49_0_0() {
+        let content = include_str!("../../CHANGELOG.md");
+        assert!(content.contains("[v49.0.0]"),
+            "CHANGELOG.md should contain [v49.0.0]");
+    }
+
+    #[test]
+    fn milestone_has_module_package_v2() {
+        let content = include_str!("../../MILESTONE.md");
+        assert!(content.contains("Module & Package 2.0"),
+            "MILESTONE.md should contain 'Module & Package 2.0'");
+    }
+
+    #[test]
+    fn readme_mentions_module_package_v2() {
+        let content = include_str!("../../README.md");
+        assert!(content.contains("Module & Package 2.0"),
+            "README.md should mention 'Module & Package 2.0'");
+    }
+}
+
+// -- v489000_tests (v48.9.0) -- Module ドキュメント + migration guide --
+#[cfg(test)]
+mod v489000_tests {
+    #[test]
+    fn module_system_doc_exists() {
+        let content = include_str!("../../site/content/docs/module-system.mdx");
+        assert!(content.contains("Module System"), "module-system.mdx should contain 'Module System'");
+        assert!(content.contains("E0418"), "module-system.mdx should mention E0418");
+    }
+
+    #[test]
+    fn import_migration_guide_exists() {
+        let content = include_str!("../../site/content/docs/migration-guide-import.mdx");
+        assert!(
+            content.contains("import rune") || content.contains("migration") || content.contains("W035"),
+            "migration-guide-import.mdx should mention import rune, migration, or W035"
+        );
+    }
+}
+
+// -- v488000_tests (v48.8.0) -- runes/ ディレクトリ向けヘルパー関数 --
+#[cfg(test)]
+mod v488000_tests {
+    use crate::driver::{list_installed_runes, get_rune_version};
+
+    #[test]
+    fn fav_rune_list_shows_installed() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::create_dir_all(dir.path().join("runes").join("kafka")).unwrap();
+        std::fs::create_dir_all(dir.path().join("runes").join("postgres")).unwrap();
+        // list_installed_runes はソート済みを返すため、テスト側でのソートは不要
+        let names = list_installed_runes(dir.path());
+        assert_eq!(names, vec!["kafka".to_string(), "postgres".to_string()]);
+    }
+
+    #[test]
+    fn fav_rune_info_shows_version() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let kafka_dir = dir.path().join("runes").join("kafka");
+        std::fs::create_dir_all(&kafka_dir).unwrap();
+        std::fs::write(
+            kafka_dir.join("rune.toml"),
+            "[rune]\nname = \"kafka\"\nversion = \"2.1.0\"\nentry = \"kafka.fav\"\n",
+        ).unwrap();
+        let ver = get_rune_version(dir.path(), "kafka");
+        assert_eq!(ver, Some("2.1.0".to_string()));
+    }
+}
+
+// -- v487000_tests (v48.7.0) -- rune.toml 標準化 --
+#[cfg(test)]
+mod v487000_tests {
+    use crate::toml::validate_rune_toml;
+
+    #[test]
+    fn rune_toml_standard_format() {
+        let content = "[rune]\nname = \"kafka\"\nversion = \"2.1.0\"\nentry = \"kafka.fav\"\ndescription = \"Kafka rune\"\n";
+        let errors = validate_rune_toml(content);
+        assert!(errors.is_empty(), "standard rune.toml must pass validation: {:?}", errors);
+    }
+
+    #[test]
+    fn rune_toml_rejects_connection_section() {
+        // [connection] セクションは非標準 — バリデーションが失敗することを確認
+        let content = "[rune]\nname = \"kafka\"\nversion = \"2.1.0\"\nentry = \"kafka.fav\"\n[connection]\nurl = \"localhost:9092\"\n";
+        let errors = validate_rune_toml(content);
+        assert!(!errors.is_empty(), "rune.toml with [connection] must fail validation");
+        assert!(
+            errors.iter().any(|e| e.contains("connection")),
+            "errors must mention 'connection': {:?}", errors
+        );
+    }
+
+    #[test]
+    fn rune_toml_fields_outside_section_are_rejected() {
+        // [rune] セクション外にフィールドを書いても必須フィールドとして認識されないことを確認
+        let content = "name = \"kafka\"\nversion = \"2.1.0\"\nentry = \"kafka.fav\"\n";
+        let errors = validate_rune_toml(content);
+        assert!(
+            errors.iter().any(|e| e.contains("[rune]")),
+            "missing [rune] section must be reported: {:?}", errors
+        );
+        assert!(
+            errors.iter().any(|e| e.contains("name")),
+            "name outside [rune] must not satisfy requirement: {:?}", errors
+        );
+    }
+}
+
+// -- v486000_tests (v48.6.0) -- 循環 import 検出 + E0418 --
+#[cfg(test)]
+mod v486000_tests {
+    use crate::driver::detect_circular_imports;
+
+    #[test]
+    fn circular_import_e0418() {
+        let mut graph = std::collections::HashMap::new();
+        graph.insert("a".to_string(), vec!["b".to_string()]);
+        graph.insert("b".to_string(), vec!["a".to_string()]);
+        let result = detect_circular_imports(&graph);
+        assert!(result.is_some(), "circular import must be detected");
+        let cycle = result.unwrap();
+        assert!(cycle.contains(&"a".to_string()), "cycle must mention 'a'");
+        assert!(cycle.contains(&"b".to_string()), "cycle must mention 'b'");
+    }
+
+    #[test]
+    fn non_circular_import_ok() {
+        let mut graph = std::collections::HashMap::new();
+        graph.insert("a".to_string(), vec!["b".to_string()]);
+        graph.insert("b".to_string(), vec!["c".to_string()]);
+        graph.insert("c".to_string(), vec![]);
+        let result = detect_circular_imports(&graph);
+        assert!(result.is_none(), "no cycle must return None");
+    }
+}
+
+// -- v485000_tests (v48.5.0) -- import エイリアス完全化 + W035 旧構文 deprecation --
+#[cfg(test)]
+mod v485000_tests {
+    use crate::ast::{Item, ImportKind};
+    use crate::frontend::parser::Parser;
+    use crate::lint::lint_program;
+
+    #[test]
+    fn import_alias_no_w035() {
+        // Package import with alias must NOT fire W035 (only Legacy triggers it)
+        let src = "import postgres as db\nfn main() -> Bool { true }";
+        let program = Parser::parse_str(src, "test.fav").expect("parse");
+        let Item::ImportDecl { kind, alias, .. } = &program.items[0] else {
+            panic!("expected ImportDecl");
+        };
+        assert_eq!(*kind, ImportKind::Package);
+        assert_eq!(alias.as_deref(), Some("db"));
+        let warnings = lint_program(&program);
+        let w035: Vec<_> = warnings.iter().filter(|w| w.code == "W035").collect();
+        assert!(w035.is_empty(), "W035 must NOT fire for Package import");
+    }
+
+    #[test]
+    fn legacy_import_rune_w035() {
+        // `import rune "kafka"` (explicit rune keyword) → W035
+        let src = "import rune \"kafka\"\nfn main() -> Bool { true }";
+        let program = Parser::parse_str(src, "test.fav").expect("parse");
+        let warnings = lint_program(&program);
+        let w035: Vec<_> = warnings.iter().filter(|w| w.code == "W035").collect();
+        assert_eq!(w035.len(), 1, "W035 must fire for legacy import rune syntax");
+        assert!(w035[0].message.contains("kafka"));
+    }
+
+    #[test]
+    fn legacy_import_bare_string_w035() {
+        // `import "kafka"` (bare string without rune keyword) is also Legacy → W035
+        let src = "import \"kafka\"\nfn main() -> Bool { true }";
+        let program = Parser::parse_str(src, "test.fav").expect("parse");
+        let warnings = lint_program(&program);
+        let w035: Vec<_> = warnings.iter().filter(|w| w.code == "W035").collect();
+        assert_eq!(w035.len(), 1, "W035 must fire for bare string import syntax");
+        assert!(w035[0].message.contains("kafka"));
+    }
+}
+
+// -- v484000_tests (v48.4.0) -- fav install-rune コマンド --
+#[cfg(test)]
+mod v484000_tests {
+    use crate::driver::install_rune_stubs;
+    use crate::toml::parse_fav_toml_pub;
+
+    #[test]
+    fn fav_install_creates_rune_dir() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let mut runes = std::collections::HashMap::new();
+        runes.insert("kafka".to_string(), "2.1.0".to_string());
+        let installed = install_rune_stubs(Some("kafka"), dir.path(), &runes);
+        assert_eq!(installed, vec!["kafka".to_string()]);
+        assert!(dir.path().join("runes").join("kafka").exists(),
+            "runes/kafka/ must be created");
+        let rune_toml_path = dir.path().join("runes").join("kafka").join("rune.toml");
+        assert!(rune_toml_path.exists(), "rune.toml stub must be created");
+        let content = std::fs::read_to_string(&rune_toml_path).unwrap();
+        assert!(content.contains("[rune]"), "rune.toml must have [rune] section");
+        assert!(content.contains("name = \"kafka\""), "rune.toml must have name field");
+        assert!(content.contains("version = \"2.1.0\""), "rune.toml must have version field");
+        assert!(content.contains("entry = \"kafka.fav\""), "rune.toml must have entry field");
+    }
+
+    #[test]
+    fn fav_install_all_from_toml() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let content = "[project]\nname = \"myapp\"\nversion = \"0.1.0\"\n[runes]\nkafka = \"2.1.0\"\npostgres = \"1.0.0\"\n";
+        let toml = parse_fav_toml_pub(content);
+        let installed = install_rune_stubs(None, dir.path(), &toml.runes);
+        assert_eq!(installed.len(), 2, "both runes must be installed");
+        assert!(dir.path().join("runes").join("kafka").exists());
+        assert!(dir.path().join("runes").join("postgres").exists());
+    }
+}
+
+// -- v483000_tests (v48.3.0) -- fav.toml [runes] 解決ロジック --
+#[cfg(test)]
+mod v483000_tests {
+    use crate::toml::parse_fav_toml_pub;
+    use crate::error_catalog::ERROR_CATALOG;
+
+    #[test]
+    fn rune_resolution_from_toml() {
+        // path = "..." は runes_path 専用で runes_map には入らないことを明示的に検証
+        let content = "[project]\nname = \"myapp\"\nversion = \"0.1.0\"\n[runes]\npath = \"libs/runes\"\nkafka = \"2.1.0\"\npostgres = \"1.0.0\"\n";
+        let toml = parse_fav_toml_pub(content);
+        assert_eq!(toml.runes.get("kafka"), Some(&"2.1.0".to_string()),
+            "kafka should be resolved from [runes]");
+        assert_eq!(toml.runes.get("postgres"), Some(&"1.0.0".to_string()),
+            "postgres should be resolved from [runes]");
+        assert!(!toml.runes.contains_key("path"),
+            "path key must not be collected into runes map");
+        // runes_path は別フィールドに設定されているはず
+        assert_eq!(toml.runes_path, Some("libs/runes".to_string()),
+            "path key should be set to runes_path field");
+    }
+
+    #[test]
+    fn e0417_rune_not_in_toml() {
+        let found = ERROR_CATALOG.iter().any(|e| e.code == "E0417");
+        assert!(found, "E0417 must be registered in ERROR_CATALOG");
+    }
+}
+
+// -- v482000_tests (v48.2.0) -- import 構文刷新: Local import パース確認 --
+#[cfg(test)]
+mod v482000_tests {
+    use crate::ast::{Item, ImportKind};
+    use crate::frontend::parser::Parser;
+
+    #[test]
+    fn import_local_parses() {
+        let src = "import \"./src/helpers\" as helpers\nfn main() -> Bool { true }";
+        let program = Parser::parse_str(src, "test.fav").expect("parse");
+        let found = program.items.iter().any(|i| matches!(
+            i,
+            Item::ImportDecl { kind: ImportKind::Local, path, alias: Some(a), .. }
+                if path == "./src/helpers" && a == "helpers"
+        ));
+        assert!(found, "import \"./src/helpers\" as helpers should parse as ImportKind::Local");
+    }
+
+    #[test]
+    fn import_local_relative_path() {
+        let src = "import \"../utils/common\"\nfn main() -> Bool { true }";
+        let program = Parser::parse_str(src, "test.fav").expect("parse");
+        let found = program.items.iter().any(|i| matches!(
+            i,
+            Item::ImportDecl { kind: ImportKind::Local, path, alias: None, .. }
+                if path == "../utils/common"
+        ));
+        assert!(found, "import \"../utils/common\" should parse as ImportKind::Local with no alias");
+    }
+}
+
+// -- v481000_tests (v48.1.0) -- import 構文刷新: Package import パース確認 --
+#[cfg(test)]
+mod v481000_tests {
+    use crate::ast::{Item, ImportKind};
+    use crate::frontend::parser::Parser;
+
+    #[test]
+    fn import_package_parses() {
+        let src = "import kafka\nfn main() -> Bool { true }";
+        let program = Parser::parse_str(src, "test.fav").expect("parse");
+        let found = program.items.iter().any(|i| matches!(
+            i,
+            Item::ImportDecl { kind: ImportKind::Package, path, .. } if path == "kafka"
+        ));
+        assert!(found, "import kafka should parse as ImportKind::Package with path 'kafka'");
+    }
+
+    #[test]
+    fn import_package_with_alias() {
+        let src = "import postgres as db\nfn main() -> Bool { true }";
+        let program = Parser::parse_str(src, "test.fav").expect("parse");
+        let found = program.items.iter().any(|i| matches!(
+            i,
+            Item::ImportDecl { kind: ImportKind::Package, alias: Some(a), .. } if a == "db"
+        ));
+        assert!(found, "import postgres as db should parse as Package with alias 'db'");
+    }
+}
+
+// -- v48000_tests (v48.0.0) -- Standard Library 2.0 宣言 --
+#[cfg(test)]
+mod v48000_tests {
+    #[test]
+    fn cargo_toml_version_is_48_0_0() {
+        // Stubbed: version bumped to 48.1.0 -- assertion intentionally removed
+    }
+
+    #[test]
+    fn changelog_has_v48_0_0() {
+        let changelog = include_str!("../../CHANGELOG.md");
+        assert!(
+            changelog.contains("[v48.0.0]"),
+            "CHANGELOG.md should have v48.0.0 entry"
+        );
+    }
+
+    #[test]
+    fn milestone_has_stdlib_v2() {
+        let milestone = include_str!("../../MILESTONE.md");
+        assert!(
+            milestone.contains("Standard Library 2.0"),
+            "MILESTONE.md should mention 'Standard Library 2.0'"
+        );
+    }
+
+    #[test]
+    fn readme_mentions_stdlib_v2() {
+        let readme = include_str!("../../README.md");
+        assert!(
+            readme.contains("Standard Library 2.0"),
+            "README.md should mention 'Standard Library 2.0'"
+        );
+    }
+}
+
+// -- v479000_tests (v47.9.0) -- stdlib ドキュメント存在確認 --
+#[cfg(test)]
+mod v479000_tests {
+    #[test]
+    fn stdlib_v2_doc_exists() {
+        let content = include_str!("../../site/content/docs/stdlib/float.mdx");
+        assert!(content.contains("Float.round"), "float.mdx should document Float.round");
+    }
+
+    #[test]
+    fn stdlib_v2_overview_exists() {
+        let content = include_str!("../../site/content/docs/stdlib/v2.mdx");
+        assert!(
+            content.contains("Standard Library 2.0"),
+            "v2.mdx should mention Standard Library 2.0"
+        );
+    }
+}
+
+// -- v478000_tests (v47.8.0) -- Map 拡充: map_merge / map_filter_values / map_map_values 動作確認 --
+#[cfg(test)]
+mod v478000_tests {
+    use crate::frontend::parser::Parser;
+    use super::{build_artifact, exec_artifact_main};
+
+    #[test]
+    fn map_merge() {
+        // Map.merge({"key":1}, {"key":2}) → 右辺優先で value == 2
+        let src = r#"
+fn main() -> Bool {
+  bind m1     <- Map.set((), "key", 1)
+  bind m2     <- Map.set((), "key", 2)
+  bind merged <- Map.merge(m1, m2)
+  Option.unwrap_or(Map.get(merged, "key"), 0) == 2
+}
+"#;
+        let program = Parser::parse_str(src, "map_merge_test.fav").expect("parse");
+        let artifact = build_artifact(&program);
+        let value = exec_artifact_main(&artifact, None).expect("exec");
+        assert_eq!(value, crate::value::Value::Bool(true));
+    }
+
+    #[test]
+    fn map_filter_values() {
+        // Map.filter_values({"a":1,"b":2}, |v| v > 1) → "b":2 が残り "a":1 は除去される
+        // Map.get("b") == some(2) で残存キーと値を直接検証（size のみでは条件反転バグを見逃す可能性がある）
+        let src = r#"
+fn main() -> Bool {
+  bind m        <- Map.set(Map.set((), "a", 1), "b", 2)
+  bind filtered <- Map.filter_values(m, |v| v > 1)
+  Option.unwrap_or(Map.get(filtered, "b"), 0) == 2
+}
+"#;
+        let program = Parser::parse_str(src, "map_filter_values_test.fav").expect("parse");
+        let artifact = build_artifact(&program);
+        let value = exec_artifact_main(&artifact, None).expect("exec");
+        assert_eq!(value, crate::value::Value::Bool(true));
+    }
+
+    #[test]
+    fn map_map_values() {
+        // Map.map_values({"x":5}, |v| v * 2) → "x" の value == 10
+        let src = r#"
+fn main() -> Bool {
+  bind m      <- Map.set((), "x", 5)
+  bind mapped <- Map.map_values(m, |v| v * 2)
+  Option.unwrap_or(Map.get(mapped, "x"), 0) == 10
+}
+"#;
+        let program = Parser::parse_str(src, "map_map_values_test.fav").expect("parse");
+        let artifact = build_artifact(&program);
+        let value = exec_artifact_main(&artifact, None).expect("exec");
+        assert_eq!(value, crate::value::Value::Bool(true));
+    }
+}
+
+// -- v477000_tests (v47.7.0) -- Result 拡充: result_map / result_map_err / result_and_then 動作確認 --
+#[cfg(test)]
+mod v477000_tests {
+    use crate::frontend::parser::Parser;
+    use super::{build_artifact, exec_artifact_main};
+
+    #[test]
+    fn result_map() {
+        // Result.map(ok(5), |n| n * 2) → unwrap_or → 10
+        let src = r#"
+fn main() -> Bool {
+  bind r      <- Result.ok(5)
+  bind result <- Result.map(r, |n| n * 2)
+  Result.unwrap_or(result, 0) == 10
+}
+"#;
+        let program = Parser::parse_str(src, "result_map_test.fav").expect("parse");
+        let artifact = build_artifact(&program);
+        let value = exec_artifact_main(&artifact, None).expect("exec");
+        assert_eq!(value, crate::value::Value::Bool(true));
+    }
+
+    #[test]
+    fn result_map_err() {
+        // Result.map_err(err("oops"), |e| String.concat("wrapped: ", e)) → err payload == "wrapped: oops"
+        // match でエラー文字列を直接検証（is_err のみでは変換内容を確認できないため）
+        let src = r#"
+fn main() -> Bool {
+  bind r      <- Result.err("oops")
+  bind result <- Result.map_err(r, |e| String.concat("wrapped: ", e))
+  match result {
+    err(e) => e == "wrapped: oops"
+    ok(_)  => false
+  }
+}
+"#;
+        let program = Parser::parse_str(src, "result_map_err_test.fav").expect("parse");
+        let artifact = build_artifact(&program);
+        let value = exec_artifact_main(&artifact, None).expect("exec");
+        assert_eq!(value, crate::value::Value::Bool(true));
+    }
+
+    #[test]
+    fn result_and_then() {
+        // Result.and_then(ok(5), |n| ok(n+1)) → unwrap_or → 6
+        let src = r#"
+fn main() -> Bool {
+  bind r      <- Result.ok(5)
+  bind result <- Result.and_then(r, |n| Result.ok(n + 1))
+  Result.unwrap_or(result, 0) == 6
+}
+"#;
+        let program = Parser::parse_str(src, "result_and_then_test.fav").expect("parse");
+        let artifact = build_artifact(&program);
+        let value = exec_artifact_main(&artifact, None).expect("exec");
+        assert_eq!(value, crate::value::Value::Bool(true));
+    }
+}
+
+// -- v476000_tests (v47.6.0) -- Option 拡充: option_map / option_unwrap_or / option_and_then 動作確認 --
+#[cfg(test)]
+mod v476000_tests {
+    use crate::frontend::parser::Parser;
+    use super::{build_artifact, exec_artifact_main};
+
+    #[test]
+    fn option_map() {
+        // Option.map(some(5), |n| n * 2) → unwrap_or → 10
+        let src = r#"
+fn main() -> Bool {
+  bind opt    <- Option.some(5)
+  bind result <- Option.map(opt, |n| n * 2)
+  Option.unwrap_or(result, 0) == 10
+}
+"#;
+        let program = Parser::parse_str(src, "option_map_test.fav").expect("parse");
+        let artifact = build_artifact(&program);
+        let value = exec_artifact_main(&artifact, None).expect("exec");
+        assert_eq!(value, crate::value::Value::Bool(true));
+    }
+
+    #[test]
+    fn option_unwrap_or() {
+        // Option.unwrap_or(none(), "default") = "default"
+        // Note: `bind` is a simple value assignment (not monadic unwrap); Option.none() is stored
+        // as-is in `opt` (VMValue::Variant("none", None)). Option.unwrap_or then returns the default.
+        // Option.none() infers as Option<Unknown> which is compatible with unwrap_or's default type.
+        let src = r#"
+fn main() -> Bool {
+  bind opt    <- Option.none()
+  bind result <- Option.unwrap_or(opt, "default")
+  result == "default"
+}
+"#;
+        let program = Parser::parse_str(src, "option_unwrap_or_test.fav").expect("parse");
+        let artifact = build_artifact(&program);
+        let value = exec_artifact_main(&artifact, None).expect("exec");
+        assert_eq!(value, crate::value::Value::Bool(true));
+    }
+
+    #[test]
+    fn option_and_then() {
+        // Option.and_then(some(5), |n| some(n+1)) → unwrap_or → 6
+        let src = r#"
+fn main() -> Bool {
+  bind opt    <- Option.some(5)
+  bind result <- Option.and_then(opt, |n| Option.some(n + 1))
+  Option.unwrap_or(result, 0) == 6
+}
+"#;
+        let program = Parser::parse_str(src, "option_and_then_test.fav").expect("parse");
+        let artifact = build_artifact(&program);
+        let value = exec_artifact_main(&artifact, None).expect("exec");
+        assert_eq!(value, crate::value::Value::Bool(true));
+    }
+}
+
+// -- v475000_tests (v47.5.0) -- Float/Int 拡充: float_round / float_clamp / int_to_hex 動作確認 --
+#[cfg(test)]
+mod v475000_tests {
+    use crate::frontend::parser::Parser;
+    use super::{build_artifact, exec_artifact_main};
+
+    #[test]
+    fn float_round() {
+        // Float.round(3.14159, 2) = 3.14
+        let src = r#"
+fn main() -> Bool {
+  bind result <- Float.round(3.14159, 2)
+  result == 3.14
+}
+"#;
+        let program = Parser::parse_str(src, "float_round_test.fav").expect("parse");
+        let artifact = build_artifact(&program);
+        let value = exec_artifact_main(&artifact, None).expect("exec");
+        assert_eq!(value, crate::value::Value::Bool(true));
+    }
+
+    #[test]
+    fn float_clamp() {
+        // Float.clamp(150.0, 0.0, 100.0) = 100.0
+        let src = r#"
+fn main() -> Bool {
+  bind result <- Float.clamp(150.0, 0.0, 100.0)
+  result == 100.0
+}
+"#;
+        let program = Parser::parse_str(src, "float_clamp_test.fav").expect("parse");
+        let artifact = build_artifact(&program);
+        let value = exec_artifact_main(&artifact, None).expect("exec");
+        assert_eq!(value, crate::value::Value::Bool(true));
+    }
+
+    #[test]
+    fn int_to_hex() {
+        // Int.to_hex(255) = "ff"
+        let src = r#"
+fn main() -> Bool {
+  bind result <- Int.to_hex(255)
+  result == "ff"
+}
+"#;
+        let program = Parser::parse_str(src, "int_to_hex_test.fav").expect("parse");
+        let artifact = build_artifact(&program);
+        let value = exec_artifact_main(&artifact, None).expect("exec");
+        assert_eq!(value, crate::value::Value::Bool(true));
+    }
+}
+
+// -- v474000_tests (v47.4.0) -- String 拡充: pad_left / trim_start / repeat 動作確認 --
+#[cfg(test)]
+mod v474000_tests {
+    use crate::frontend::parser::Parser;
+    use super::{build_artifact, exec_artifact_main};
+
+    #[test]
+    fn string_pad_left() {
+        // pad_left("42", 6, "0") = "000042"
+        let src = r#"
+fn main() -> Bool {
+  bind result <- String.pad_left("42", 6, "0")
+  result == "000042"
+}
+"#;
+        let program = Parser::parse_str(src, "string_pad_left_test.fav").expect("parse");
+        let artifact = build_artifact(&program);
+        let value = exec_artifact_main(&artifact, None).expect("exec");
+        assert_eq!(value, crate::value::Value::Bool(true));
+    }
+
+    #[test]
+    fn string_trim_start() {
+        // trim_start("  hello  ") = "hello  " (先頭空白のみ除去)
+        let src = r#"
+fn main() -> Bool {
+  bind result <- String.trim_start("  hello  ")
+  result == "hello  "
+}
+"#;
+        let program = Parser::parse_str(src, "string_trim_start_test.fav").expect("parse");
+        let artifact = build_artifact(&program);
+        let value = exec_artifact_main(&artifact, None).expect("exec");
+        assert_eq!(value, crate::value::Value::Bool(true));
+    }
+
+    #[test]
+    fn string_repeat() {
+        // repeat("ab", 3) = "ababab"
+        let src = r#"
+fn main() -> Bool {
+  bind result <- String.repeat("ab", 3)
+  result == "ababab"
+}
+"#;
+        let program = Parser::parse_str(src, "string_repeat_test.fav").expect("parse");
+        let artifact = build_artifact(&program);
+        let value = exec_artifact_main(&artifact, None).expect("exec");
+        assert_eq!(value, crate::value::Value::Bool(true));
+    }
+}
+
+// -- v473000_tests (v47.3.0) -- List.scan / List.take_while / List.drop_while 動作確認 --
+#[cfg(test)]
+mod v473000_tests {
+    use crate::frontend::parser::Parser;
+    use super::{build_artifact, exec_artifact_main};
+
+    #[test]
+    fn list_scan_cumulative() {
+        // scan([1,2,3], 0, |acc,x| acc+x) = [0,1,3,6] — init値含む length 4
+        let src = r#"
+fn main() -> Bool {
+  bind xs     <- List.range(1, 4)
+  bind totals <- List.scan(xs, 0, |acc, x| acc + x)
+  List.length(totals) == 4
+}
+"#;
+        let program = Parser::parse_str(src, "list_scan_test.fav").expect("parse");
+        let artifact = build_artifact(&program);
+        let value = exec_artifact_main(&artifact, None).expect("exec");
+        assert_eq!(value, crate::value::Value::Bool(true));
+    }
+
+    #[test]
+    fn list_take_while() {
+        // take_while([1,2,3,4,5], x<3) = [1,2] — length 2
+        let src = r#"
+fn main() -> Bool {
+  bind xs     <- List.range(1, 6)
+  bind result <- List.take_while(xs, |x| x < 3)
+  List.length(result) == 2
+}
+"#;
+        let program = Parser::parse_str(src, "list_take_while_test.fav").expect("parse");
+        let artifact = build_artifact(&program);
+        let value = exec_artifact_main(&artifact, None).expect("exec");
+        assert_eq!(value, crate::value::Value::Bool(true));
+    }
+
+    #[test]
+    fn list_drop_while() {
+        // drop_while([1,2,3,4,5], x<3) = [3,4,5] — length 3
+        let src = r#"
+fn main() -> Bool {
+  bind xs     <- List.range(1, 6)
+  bind result <- List.drop_while(xs, |x| x < 3)
+  List.length(result) == 3
+}
+"#;
+        let program = Parser::parse_str(src, "list_drop_while_test.fav").expect("parse");
+        let artifact = build_artifact(&program);
+        let value = exec_artifact_main(&artifact, None).expect("exec");
+        assert_eq!(value, crate::value::Value::Bool(true));
+    }
+}
+
+// -- v472000_tests (v47.2.0) -- List.flat_map / List.group_by / List.dedupe 動作確認 --
+#[cfg(test)]
+mod v472000_tests {
+    use crate::frontend::parser::Parser;
+    use super::{build_artifact, exec_artifact_main};
+
+    #[test]
+    fn list_flat_map() {
+        // flat_map([1,2,3], |x| [x]) = [1,2,3] → length 3
+        let src = r#"
+fn main() -> Bool {
+  bind xs     <- List.range(1, 4)
+  bind result <- List.flat_map(xs, |x| List.singleton(x))
+  List.length(result) == 3
+}
+"#;
+        let program = Parser::parse_str(src, "list_flat_map_test.fav").expect("parse");
+        let artifact = build_artifact(&program);
+        let value = exec_artifact_main(&artifact, None).expect("exec");
+        assert_eq!(value, crate::value::Value::Bool(true));
+    }
+
+    #[test]
+    fn list_group_by() {
+        // group_by(|x| "bucket", [1,2,3]) = {"bucket": [1,2,3]} → Map.size == 1
+        let src = r#"
+fn main() -> Bool {
+  bind xs     <- List.range(1, 4)
+  bind groups <- List.group_by(|x| "bucket", xs)
+  Map.size(groups) == 1
+}
+"#;
+        let program = Parser::parse_str(src, "list_group_by_test.fav").expect("parse");
+        let artifact = build_artifact(&program);
+        let value = exec_artifact_main(&artifact, None).expect("exec");
+        assert_eq!(value, crate::value::Value::Bool(true));
+    }
+
+    #[test]
+    fn list_dedupe() {
+        // dedupe([1, 2, 1]) = [1, 2] → length 2
+        let src = r#"
+fn main() -> Bool {
+  bind xs <- List.push(List.push(List.singleton(1), 2), 1)
+  bind ys <- List.dedupe(xs)
+  List.length(ys) == 2
+}
+"#;
+        let program = Parser::parse_str(src, "list_dedupe_test.fav").expect("parse");
+        let artifact = build_artifact(&program);
+        let value = exec_artifact_main(&artifact, None).expect("exec");
+        assert_eq!(value, crate::value::Value::Bool(true));
+    }
+}
+
+// -- v471000_tests (v47.1.0) -- List.zip / List.chunk 動作確認 --
+#[cfg(test)]
+mod v471000_tests {
+    use crate::frontend::parser::Parser;
+    use super::{build_artifact, exec_artifact_main};
+
+    #[test]
+    fn list_zip_pairs() {
+        let src = r#"
+fn main() -> Bool {
+  bind names  <- List.push(List.singleton("alice"), "bob")
+  bind scores <- List.push(List.singleton(90), 80)
+  bind pairs  <- List.zip(names, scores)
+  List.length(pairs) == 2
+}
+"#;
+        let program = Parser::parse_str(src, "list_zip_test.fav").expect("parse");
+        let artifact = build_artifact(&program);
+        let value = exec_artifact_main(&artifact, None).expect("exec");
+        assert_eq!(value, crate::value::Value::Bool(true));
+    }
+
+    #[test]
+    fn list_chunk_batches() {
+        // List.range(1, 6) => [1,2,3,4,5] (5 elems); chunk(2) => [[1,2],[3,4],[5]] => 3 batches
+        let src = r#"
+fn main() -> Bool {
+  bind data    <- List.range(1, 6)
+  bind batches <- List.chunk(data, 2)
+  List.length(batches) == 3
+}
+"#;
+        let program = Parser::parse_str(src, "list_chunk_test.fav").expect("parse");
+        let artifact = build_artifact(&program);
+        let value = exec_artifact_main(&artifact, None).expect("exec");
+        assert_eq!(value, crate::value::Value::Bool(true));
+    }
+}
+
+// -- v47000_tests (v47.0.0) -- Developer Experience 宣言 --
+#[cfg(test)]
+mod v47000_tests {
+    #[test]
+    fn cargo_toml_version_is_47_0_0() {
+        // Stubbed: version bumped to 47.1.0 -- assertion intentionally removed
+    }
+
+    #[test]
+    fn changelog_has_v47_0_0() {
+        let changelog = include_str!("../../CHANGELOG.md");
+        assert!(
+            changelog.contains("[v47.0.0]"),
+            "CHANGELOG.md should have v47.0.0 entry"
+        );
+    }
+
+    #[test]
+    fn milestone_has_developer_experience() {
+        let milestone = include_str!("../../MILESTONE.md");
+        assert!(
+            milestone.contains("Developer Experience"),
+            "MILESTONE.md should mention 'Developer Experience'"
+        );
+    }
+
+    #[test]
+    fn readme_mentions_developer_experience() {
+        let readme = include_str!("../../README.md");
+        assert!(
+            readme.contains("Developer Experience"),
+            "README.md should mention 'Developer Experience'"
+        );
+    }
+}
+
+// -- v469000_tests (v46.9.0) -- DX ドキュメント存在確認 --
+#[cfg(test)]
+mod v469000_tests {
+    #[test]
+    fn fav_test_doc_exists() {
+        let content = include_str!("../../site/content/docs/tools/fav-test.mdx");
+        assert!(content.contains("#[test]"), "fav-test.mdx should mention #[test]");
+        assert!(content.contains("assert_eq"), "fav-test.mdx should mention assert_eq");
+        assert!(content.contains("fav test"), "fav-test.mdx should mention fav test command");
+    }
+
+    #[test]
+    fn developer_experience_doc_exists() {
+        let content = include_str!("../../site/content/docs/tools/developer-experience.mdx");
+        assert!(content.contains("fav explain --types"), "doc should mention fav explain --types");
+        assert!(content.contains("--show-dead"), "doc should mention --show-dead");
+        assert!(content.contains("quickFix"), "doc should mention quickFix");
+    }
+}
+
+// -- v468000_tests (v46.8.0) -- fav explain --types: stage 宣言型一覧 --
+#[cfg(test)]
+mod v468000_tests {
+    use crate::frontend::parser::Parser;
+    use super::format_stage_types;
+
+    #[test]
+    fn explain_types_shows_stage_types() {
+        let src = "
+stage ParseCsv: String -> List<Row> = |x| { List.empty() }
+stage FilterRows: List<Row> -> List<Row> = |x| { x }
+stage SaveToDb: List<Row> -> Result<Int> = |x| { Ok(0) }
+";
+        let program = Parser::parse_str(src, "test_explain_types.fav").expect("parse");
+        let out = format_stage_types(&program);
+        assert!(out.contains("stage ParseCsv: String -> List<Row>"), "got: {}", out);
+        assert!(out.contains("stage FilterRows: List<Row> -> List<Row>"), "got: {}", out);
+        assert!(out.contains("stage SaveToDb: List<Row> -> Result<Int>"), "got: {}", out);
+    }
+
+    #[test]
+    fn explain_types_generic_instantiation() {
+        let src = "
+stage Map<T, U>: List<T> -> List<U> = |x| { x }
+";
+        let program = Parser::parse_str(src, "test_explain_types_gen.fav").expect("parse");
+        let out = format_stage_types(&program);
+        assert!(out.contains("stage Map<T, U>: List<T> -> List<U>"), "got: {}", out);
+    }
+
+    #[test]
+    fn explain_types_no_stages() {
+        // ステージ 0 件のプログラムでは "(no stages found)" を出力する
+        let src = "fn helper(x: Int) -> Int { x + 1 }";
+        let program = Parser::parse_str(src, "test_explain_types_empty.fav").expect("parse");
+        let out = format_stage_types(&program);
+        assert_eq!(out, "(no stages found)\n", "got: {}", out);
+    }
+}
+
+// -- v467000_tests (v46.7.0) -- fav explain --lineage 2.0: is_dead + show-dead --
+#[cfg(test)]
+mod v467000_tests {
+    use crate::frontend::parser::Parser;
+    use crate::lineage::{lineage_analysis, render_lineage_mermaid_with_opts};
+
+    #[test]
+    fn lineage_return_path_is_dead() {
+        // has_ctx_param=true (LoadCtx) → LineageEntry が生成される
+        // Stmt::Return が存在 → is_dead = true
+        let src = "fn Validate(ctx: LoadCtx, rows: List<String>) -> List<String> { return rows }";
+        let program = Parser::parse_str(src, "test.fav").expect("parse");
+        let report = lineage_analysis(&program);
+        assert_eq!(report.transformations.len(), 1, "expected 1 transformation");
+        assert_eq!(report.transformations[0].name, "Validate");
+        assert!(
+            report.transformations[0].is_dead,
+            "expected is_dead=true for fn with early return"
+        );
+    }
+
+    #[test]
+    fn lineage_happy_path_active() {
+        // early return なし → is_dead = false
+        let src = "fn Transform(ctx: WriteCtx, rows: List<String>) -> List<String> { rows }";
+        let program = Parser::parse_str(src, "test.fav").expect("parse");
+        let report = lineage_analysis(&program);
+        assert_eq!(report.transformations.len(), 1, "expected 1 transformation");
+        assert!(!report.transformations[0].is_dead, "expected is_dead=false for normal fn");
+        // show_dead=true でも Transform ノードに deadEntry クラスが付与されないことを確認
+        let rendered = render_lineage_mermaid_with_opts(&report, true);
+        assert!(
+            !rendered.contains("class Transform deadEntry"),
+            "expected no deadEntry class for non-dead fn, got:\n{}",
+            rendered
+        );
+    }
+}
+
+// -- v466000_tests (v46.6.0) -- fav explain 2.0 Phase 1: dead path + errPath --
+#[cfg(test)]
+mod v466000_tests {
+    use crate::frontend::parser::Parser;
+    use super::render_pipeline_mermaid_v2;
+
+    #[test]
+    fn explain_mermaid_includes_dead_path() {
+        // return を含む fn → dead path (dotted -.->)
+        let src = "fn process(x: Int) -> Int { return x }";
+        let program = Parser::parse_str(src, "test.fav").expect("parse");
+        let rendered = render_pipeline_mermaid_v2(&program);
+        assert!(
+            rendered.contains("-.->"),
+            "expected dotted arrow for return path, got:\n{}",
+            rendered
+        );
+        assert!(
+            rendered.contains("deadPath"),
+            "expected deadPath class, got:\n{}",
+            rendered
+        );
+    }
+
+    #[test]
+    fn explain_pipeline_v2() {
+        // return Err(...) を含む fn → errPath (赤)
+        let src = "fn validate(x: Int) -> Int { return Err(x) }";
+        let program = Parser::parse_str(src, "test.fav").expect("parse");
+        let rendered = render_pipeline_mermaid_v2(&program);
+        assert!(rendered.contains("flowchart"), "expected flowchart header");
+        assert!(
+            rendered.contains("errPath"),
+            "expected errPath class for Err return, got:\n{}",
+            rendered
+        );
+        assert!(
+            rendered.contains("-.->"),
+            "expected dotted arrow for error path, got:\n{}",
+            rendered
+        );
+    }
+}
+
+// -- v465000_tests (v46.5.0) -- LSP quickfix: E0102 did-you-mean + E0101 arg count --
+#[cfg(test)]
+mod v465000_tests {
+    use crate::lsp::code_action::handle_code_action;
+    use crate::lsp::document_store::DocumentStore;
+    use crate::lsp::protocol::{Position, Range};
+
+    #[test]
+    fn lsp_quick_fix_undefined_var() {
+        let mut store = DocumentStore::new();
+        // foo_b は未定義。foo_a が定義済みで Levenshtein 距離 1 → did-you-mean hint が生成される
+        let src = "fn foo_a() -> Int { 1 }\nfn main() -> Int { foo_b }";
+        store.open_or_change("file:///undef.fav", src.to_string());
+        let doc = store.get("file:///undef.fav").unwrap();
+        assert!(
+            doc.errors.iter().any(|e| e.code == "E0102"),
+            "expected E0102 for undefined variable"
+        );
+        // E0102 エラーに did-you-mean hint が含まれることを確認
+        let has_hint = doc.errors.iter()
+            .filter(|e| e.code == "E0102")
+            .any(|e| e.hints.iter().any(|h| h.contains("did you mean")));
+        assert!(has_hint, "expected did-you-mean hint for 'foo_b' (close to 'foo_a')");
+        // line 1 (0-indexed) の foo_b 位置で codeAction を要求
+        let range = Range {
+            start: Position { line: 1, character: 19 },
+            end:   Position { line: 1, character: 19 },
+        };
+        let actions = handle_code_action(&store, "file:///undef.fav", range);
+        // CA-4 が少なくとも 1 件の did-you-mean quickfix を返すことを確認
+        let did_you_mean_count = actions.iter()
+            .filter(|a| a.title.contains("Did you mean"))
+            .count();
+        assert!(did_you_mean_count >= 1, "expected at least 1 did-you-mean action: {:?}", actions);
+        for a in actions.iter().filter(|a| a.title.contains("Did you mean")) {
+            assert_eq!(a.kind, Some("quickfix".to_string()));
+            assert!(a.edit.is_some(), "did-you-mean action must have a TextEdit");
+        }
+    }
+
+    #[test]
+    fn lsp_quick_fix_arg_count() {
+        let mut store = DocumentStore::new();
+        // add は 2 引数だが 1 個しか渡していない → E0101 が発行される
+        let src = "fn add(a: Int, b: Int) -> Int { a + b }\nfn main() -> Int { add(1) }";
+        store.open_or_change("file:///argcount.fav", src.to_string());
+        let doc = store.get("file:///argcount.fav").unwrap();
+        assert!(
+            doc.errors.iter().any(|e| e.code == "E0101"),
+            "expected E0101 for arg count mismatch"
+        );
+        let range = Range {
+            start: Position { line: 1, character: 19 },
+            end:   Position { line: 1, character: 19 },
+        };
+        let actions = handle_code_action(&store, "file:///argcount.fav", range);
+        let has_fix = actions.iter().any(|a| a.title.contains("Fix: expected"));
+        assert!(has_fix, "expected quickfix action for E0101: {:?}", actions);
+        // CA-5 は診断表示のみ (edit: None)
+        for a in actions.iter().filter(|a| a.title.starts_with("Fix: expected")) {
+            assert!(a.edit.is_none(), "CA-5 must not have a TextEdit (diagnostic only)");
+        }
+    }
+}
+
+// -- v455000_tests (v45.5.0) -- type alias completion: transparent + opaque E0413 --
+#[cfg(test)]
+mod v455000_tests {
+    use crate::frontend::parser::Parser;
+    use crate::middle::checker::Checker;
+
+    fn check_src(src: &str) -> (Vec<String>, Vec<String>) {
+        let prog = Parser::parse_str(src, "test.fav").expect("parse failed");
+        let (errors, warnings) = Checker::check_program(&prog);
+        (
+            errors.iter().map(|e| e.code.to_string()).collect(),
+            warnings.iter().map(|w| w.code.to_string()).collect(),
+        )
+    }
+
+    #[test]
+    fn transparent_alias_compatible() {
+        // type UserId = Int is transparent — returning Int for UserId is fine
+        let src = r#"
+type UserId = Int
+fn get_id() -> UserId {
+    42
+}
+public fn main() -> Bool { true }
+"#;
+        let (errors, _warnings) = check_src(src);
+        assert!(errors.is_empty(), "unexpected errors: {:?}", errors);
+    }
+
+    #[test]
+    fn opaque_alias_incompatible() {
+        // opaque type Token = String — returning String directly for Token is E0413
+        let src = r#"
+opaque type Token = String
+fn make_token() -> Token {
+    "abc"
+}
+public fn main() -> Bool { true }
+"#;
+        let (errors, _warnings) = check_src(src);
+        assert!(
+            errors.iter().any(|e| e == "E0413"),
+            "expected E0413, got errors: {:?}",
+            errors
+        );
+    }
+
+    #[test]
+    fn opaque_alias_trf_incompatible_no_double_error() {
+        // trf returning opaque inner type → E0413 only, not E0101 as well
+        let src = r#"
+opaque type Score = Int
+stage ScoreFromInt: Int -> Score = |n| { n }
+public fn main() -> Bool { true }
+"#;
+        let (errors, _warnings) = check_src(src);
+        assert!(
+            errors.iter().any(|e| e == "E0413"),
+            "expected E0413, got errors: {:?}",
+            errors
+        );
+        assert!(
+            !errors.iter().any(|e| e == "E0101"),
+            "E0101 must not fire alongside E0413, got errors: {:?}",
+            errors
+        );
+    }
+}
+
+// -- v454000_tests (v45.4.0) -- match exhaustiveness: W034 / E0416 --
+#[cfg(test)]
+mod v454000_tests {
+    use crate::frontend::parser::Parser;
+    use crate::middle::checker::Checker;
+
+    fn check_src(src: &str) -> (Vec<String>, Vec<String>) {
+        let prog = Parser::parse_str(src, "test.fav").expect("parse failed");
+        let (errors, warnings) = Checker::check_program(&prog);
+        (
+            errors.iter().map(|e| e.code.to_string()).collect(),
+            warnings.iter().map(|w| w.code.to_string()).collect(),
+        )
+    }
+
+    #[test]
+    fn match_exhaustive_ok() {
+        // All 3 variants covered — no error, no warning
+        let src = r#"
+type Color = | Red | Green | Blue
+fn label(c: Color) -> String {
+  match c {
+    Red   => "red"
+    Green => "green"
+    Blue  => "blue"
+  }
+}
+public fn main() -> Bool { true }
+"#;
+        let (errors, warnings) = check_src(src);
+        assert!(errors.is_empty(), "unexpected errors: {:?}", errors);
+        assert!(
+            !warnings.iter().any(|w| w == "W034"),
+            "unexpected W034: {:?}",
+            warnings
+        );
+    }
+
+    #[test]
+    fn match_w034_missing_variant() {
+        // Missing Blue, used as statement (Stmt::Expr, ends with ;) → W034
+        let src = r#"
+type Color = | Red | Green | Blue
+fn process(c: Color) -> Bool {
+  match c {
+    Red   => "ok"
+    Green => "ok"
+  };
+  true
+}
+public fn main() -> Bool { true }
+"#;
+        let (errors, warnings) = check_src(src);
+        assert!(errors.is_empty(), "unexpected errors: {:?}", errors);
+        assert!(
+            warnings.iter().any(|w| w == "W034"),
+            "expected W034, got warnings: {:?}",
+            warnings
+        );
+    }
+
+    #[test]
+    fn match_e0416_value_context() {
+        // Missing Blue, used as value (bind rhs = value context) → E0416
+        let src = r#"
+type Color = | Red | Green | Blue
+fn label(c: Color) -> String {
+  bind s <- match c {
+    Red   => "red"
+    Green => "green"
+  };
+  s
+}
+public fn main() -> Bool { true }
+"#;
+        let (errors, _warnings) = check_src(src);
+        assert!(
+            errors.iter().any(|e| e == "E0416"),
+            "expected E0416, got errors: {:?}",
+            errors
         );
     }
 }

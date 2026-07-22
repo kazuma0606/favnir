@@ -383,6 +383,10 @@ impl Emitter {
                 let val = self.emit_expr(&y.expr);
                 self.line(&format!("yield {}", val));
             }
+            Stmt::Return(r) => {
+                let val = self.emit_expr(&r.expr);
+                self.line(&format!("return {}", val));
+            }
             Stmt::ForIn(f) => {
                 let iter = self.emit_expr(&f.iter);
                 self.line(&format!("for {} in {}:", f.var, iter));
@@ -558,6 +562,11 @@ impl Emitter {
 
             Expr::AssertMatches(_, _, _) | Expr::EmitExpr(_, _) => {
                 "None  # assert/emit not supported in transpile".to_string()
+            }
+
+            // TODO(v52.x): emit a Python runtime validation equivalent for assert_schema
+            Expr::AssertSchema { .. } => {
+                "None  # assert_schema not supported in Python transpile".to_string()
             }
 
             Expr::ListComp { expr, clauses, .. } => {
@@ -1209,6 +1218,9 @@ impl Emitter {
                 ast::FlwStep::Tap(_) | ast::FlwStep::Inspect => {
                     // tap/inspect: pass through unchanged in Python emit
                 }
+                ast::FlwStep::Merge(_) => {
+                    // Merge.ordered / Merge.any: skip in Python emit (par result passthrough)
+                }
             }
         }
         expr
@@ -1250,6 +1262,9 @@ impl Emitter {
                 }
                 ast::FlwStep::Tap(_) | ast::FlwStep::Inspect => {
                     // tap/inspect: pass through unchanged in Python emit
+                }
+                ast::FlwStep::Merge(_) => {
+                    // Merge.ordered / Merge.any: skip in Python emit (par result passthrough)
                 }
             }
         }

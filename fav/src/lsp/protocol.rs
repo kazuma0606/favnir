@@ -27,12 +27,21 @@ pub struct Range {
     pub end: Position,
 }
 
+/// v50.2.0: suggestion payload for LSP Diagnostic.data (LSP spec §3.16)
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct DiagnosticData {
+    pub suggestion: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Diagnostic {
-    pub range: Range,
+    pub range:    Range,
     pub severity: u32,
-    pub code: String,
-    pub message: String,
+    pub code:     String,
+    pub message:  String,
+    /// v50.2.0: suggestion for LSP clients (Diagnostic.data in LSP spec §3.16)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub data: Option<DiagnosticData>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

@@ -47,6 +47,43 @@ pub fn compile_file_to_bytes(path: &str) -> Result<Vec<u8>, String> {
     compile_src_str_to_bytes(&src)
 }
 
+// ── v51.6.0: SourceCache — 重複ファイル読み込みキャッシュ ─────────────────────
+
+/// ソースファイルコンテンツキャッシュ（パス文字列 → 内容）（v51.6.0）。
+/// 同一ファイルの繰り返し読み込み（fav watch / fav test 等）をメモリキャッシュで排除する。
+///
+/// NOTE: キャッシュキーはパス文字列をそのまま使用する。
+///       `"foo.fav"` と `"./foo.fav"` は同一ファイルでもキャッシュミスになる。
+///       呼び出し元は一貫したパス形式（推奨: `canonicalize` 後の絶対パス）を使うこと。
+///
+/// NOTE: 本バージョンは API 追加のみ。fav watch / fav test への統合は今後のスプリントで実施予定。
+#[allow(dead_code)]
+pub struct SourceCache(pub std::collections::HashMap<String, String>);
+
+impl SourceCache {
+    pub fn new() -> Self {
+        SourceCache(std::collections::HashMap::new())
+    }
+
+    /// キャッシュから取得。未キャッシュならディスクから読み込んでキャッシュに格納する。
+    /// `path` は呼び出し元で正規化すること（NOTE 参照）。
+    pub fn get_or_load(&mut self, path: &str) -> Result<String, String> {
+        if let Some(s) = self.0.get(path) {
+            return Ok(s.clone());
+        }
+        let s = std::fs::read_to_string(path)
+            .map_err(|e| format!("cannot read `{}`: {}", path, e))?;
+        self.0.insert(path.to_string(), s.clone());
+        Ok(s)
+    }
+}
+
+impl Default for SourceCache {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 // ── rune-import-aware compilation ─────────────────────────────────────────────
 
 /// Recursively collect source texts for `path` and all its rune dependencies

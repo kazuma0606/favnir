@@ -722,15 +722,24 @@ fn build_type_meta(td: &crate::ast::TypeDef) -> Option<TypeMeta> {
         type_name: td.name.clone(),
         fields: fields
             .iter()
-            .map(|field| FieldMeta {
-                name: field.name.clone(),
-                ty: lower_type_expr(&field.ty).display(),
-                col_index: field
-                    .attrs
-                    .iter()
-                    .find(|attr| attr.name == "col")
-                    .and_then(|attr| attr.arg.as_ref())
-                    .and_then(|arg| arg.parse::<usize>().ok()),
+            .map(|field| {
+                let (ty_str, optional) = match &field.ty {
+                    crate::ast::TypeExpr::Optional(inner, _) => {
+                        (lower_type_expr(inner).display(), true)
+                    }
+                    other => (lower_type_expr(other).display(), false),
+                };
+                FieldMeta {
+                    name: field.name.clone(),
+                    ty: ty_str,
+                    col_index: field
+                        .attrs
+                        .iter()
+                        .find(|attr| attr.name == "col")
+                        .and_then(|attr| attr.arg.as_ref())
+                        .and_then(|arg| arg.parse::<usize>().ok()),
+                    optional,
+                }
             })
             .collect(),
     })
@@ -744,6 +753,8 @@ fn flw_step_name(step: &FlwStep) -> String {
         FlwStep::ParDistributed(names) => format!("par_distributed[{}]", names.join(",")),
         FlwStep::Tap(_) => "tap".to_string(),
         FlwStep::Inspect => "inspect".to_string(),
+        FlwStep::Merge(crate::ast::MergeMode::Ordered) => "merge.ordered".to_string(),
+        FlwStep::Merge(crate::ast::MergeMode::Any) => "merge.any".to_string(),
     }
 }
 
@@ -759,34 +770,12 @@ fn build_step_call(step: &FlwStep, input: IRExpr, ctx: &mut CompileCtx) -> IRExp
             IRExpr::Call(Box::new(callee), vec![input], Type::Unknown)
         }
         FlwStep::Par(names) => {
-            // par [A, B] → IO.par_execute_raw(["A", "B"], input)
-            let list_ns_idx = ctx.resolve_global("List").unwrap_or(u16::MAX);
-            let io_ns_idx = ctx.resolve_global("IO").unwrap_or(u16::MAX);
-            let list_ns = || IRExpr::Global(list_ns_idx, Type::Unknown);
-            let list_empty = IRExpr::FieldAccess(
-                Box::new(list_ns()),
-                "empty".to_string(),
-                Type::Unknown,
-            );
-            let mut names_expr = IRExpr::Call(Box::new(list_empty), vec![], Type::Unknown);
-            for n in names {
-                let list_push = IRExpr::FieldAccess(
-                    Box::new(list_ns()),
-                    "push".to_string(),
-                    Type::Unknown,
-                );
-                names_expr = IRExpr::Call(
-                    Box::new(list_push),
-                    vec![names_expr, IRExpr::Lit(Lit::Str(n.clone()), Type::Unknown)],
-                    Type::Unknown,
-                );
+            // par [A, B] → IRExpr::Par (v51.1.0: VM 直接実行)
+            IRExpr::Par {
+                stage_names: names.clone(),
+                input: Box::new(input),
+                ty: Type::Unknown,
             }
-            let par_callee = IRExpr::FieldAccess(
-                Box::new(IRExpr::Global(io_ns_idx, Type::Unknown)),
-                "par_execute_raw".to_string(),
-                Type::Unknown,
-            );
-            IRExpr::Call(Box::new(par_callee), vec![names_expr, input], Type::Unknown)
         }
         FlwStep::ParDistributed(names) => {
             // par_distributed [A, B] → IO.par_distributed_raw(["A", "B"], input)
@@ -864,6 +853,20 @@ fn build_step_call(step: &FlwStep, input: IRExpr, ctx: &mut CompileCtx) -> IRExp
                 )
             }
         }
+        FlwStep::Merge(mode) => {
+            // par [A, B] |> Merge.ordered / Merge.any — unwrap Result list (v51.2.0)
+            let io_idx = ctx.resolve_global("IO").unwrap_or(u16::MAX);
+            let method = match mode {
+                crate::ast::MergeMode::Ordered => "merge_ordered_raw",
+                crate::ast::MergeMode::Any => "merge_any_raw",
+            };
+            let callee = IRExpr::FieldAccess(
+                Box::new(IRExpr::Global(io_idx, Type::Unknown)),
+                method.to_string(),
+                Type::Unknown,
+            );
+            IRExpr::Call(Box::new(callee), vec![input], Type::Unknown)
+        }
     }
 }
 
@@ -882,6 +885,20 @@ fn build_step_call_ctx(step: &FlwStep, ctx_slot: u16, input: IRExpr, ctx: &mut C
         FlwStep::Par(_) | FlwStep::ParDistributed(_) => {
             // par / par_distributed with ctx threading is not supported
             IRExpr::Global(u16::MAX, Type::Unknown)
+        }
+        FlwStep::Merge(mode) => {
+            // Merge.ordered / Merge.any with ctx threading — delegate to non-ctx variant
+            let io_idx = ctx.resolve_global("IO").unwrap_or(u16::MAX);
+            let method = match mode {
+                crate::ast::MergeMode::Ordered => "merge_ordered_raw",
+                crate::ast::MergeMode::Any => "merge_any_raw",
+            };
+            let callee = IRExpr::FieldAccess(
+                Box::new(IRExpr::Global(io_idx, Type::Unknown)),
+                method.to_string(),
+                Type::Unknown,
+            );
+            IRExpr::Call(Box::new(callee), vec![input], Type::Unknown)
         }
         FlwStep::Tap(observer_expr) => {
             if ctx.no_tap {
@@ -1929,6 +1946,7 @@ fn collect_free_vars_expr(expr: &Expr, bound: &mut HashSet<String>, free: &mut H
             }
         }
         Expr::AssertMatches(expr, _, _) => collect_free_vars_expr(expr, bound, free),
+        Expr::AssertSchema { arg, .. } => collect_free_vars_expr(arg, bound, free),
         Expr::RecordSpread(base, updates, _) => {
             collect_free_vars_expr(base, bound, free);
             for (_, v) in updates {
@@ -1971,6 +1989,9 @@ fn collect_free_vars_block(block: &Block, bound: &mut HashSet<String>, free: &mu
             }
             Stmt::Yield(yield_stmt) => {
                 collect_free_vars_expr(&yield_stmt.expr, &mut local_bound, free);
+            }
+            Stmt::Return(ret) => {
+                collect_free_vars_expr(&ret.expr, &mut local_bound, free);
             }
             Stmt::Expr(expr) => collect_free_vars_expr(expr, &mut local_bound, free),
             Stmt::ForIn(f) => {
@@ -2129,6 +2150,17 @@ pub fn compile_expr(expr: &Expr, ctx: &mut CompileCtx) -> IRExpr {
                 ),
             };
             IRExpr::Match(Box::new(subject), vec![ok_arm, fail_arm], Type::Unit)
+        }
+        Expr::AssertSchema { ty_name, arg, .. } => {
+            let compiled_arg = compile_expr(arg, ctx);
+            IRExpr::AssertSchema {
+                ty_name: ty_name.clone(),
+                arg: Box::new(compiled_arg),
+                ty: Type::Result(
+                    Box::new(Type::Named(ty_name.clone(), vec![])),
+                    Box::new(Type::String),
+                ),
+            }
         }
         Expr::Collect(block, _) => {
             let inner = compile_block(block, ctx);
@@ -2501,6 +2533,7 @@ fn compile_stmt_into(stmt: &Stmt, ctx: &mut CompileCtx, out: &mut Vec<IRStmt>) {
             out.push(IRStmt::Chain(slot, expr_ir));
         }
         Stmt::Yield(yield_stmt) => out.push(IRStmt::Yield(compile_expr(&yield_stmt.expr, ctx))),
+        Stmt::Return(r) => out.push(IRStmt::Return(compile_expr(&r.expr, ctx))),
         Stmt::Expr(expr) => out.push(IRStmt::Expr(compile_expr(expr, ctx))),
         Stmt::Forall(f) => {
             // Desugar forall x: Type [where { guard }] { body }

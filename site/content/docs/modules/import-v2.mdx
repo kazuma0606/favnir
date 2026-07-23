@@ -14,19 +14,11 @@ v48.1.0 で導入された新しい import 構文（import 2.0）を説明しま
 
 `fav.toml` の `[runes]` に宣言したパッケージを直接 import できます。
 
-```favnir
-import kafka
-import postgres
-```
+パッケージ名をそのまま指定します（例: `kafka`、`postgres`）。
 
 ## ローカル import
 
-相対パスで同プロジェクト内の `.fav` ファイルを import できます。
-
-```favnir
-import "./stages/validate" as validate
-import "./lib/utils" as utils
-```
+相対パスで同プロジェクト内の `.fav` ファイルを参照できます（例: `"./stages/validate"` を `as validate` で使用）。
 
 ## fav.toml との連携
 
@@ -43,12 +35,7 @@ postgres = "1.0.0"
 
 旧構文を使い続けると W035 警告が出ます。
 
-```favnir
-// 旧構文（W035 警告）
-import rune "kafka"
-
-// 新構文（推奨）
-import kafka
-```
+旧構文（`import rune "kafka"` 形式）は **W035** 警告が出ます。
+新構文（`import kafka` 形式）への移行を推奨します。
 
 詳細な移行手順は [Import Migration Guide](/docs/migration-guide-import) を参照してください。

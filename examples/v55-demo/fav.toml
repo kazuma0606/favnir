@@ -1,0 +1,7 @@
+[package]
+name    = "v55-demo"
+version = "0.1.0"
+
+[runes]
+kafka     = "2.1.0"
+snowflake = "1.0.0"

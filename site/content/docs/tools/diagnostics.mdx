@@ -1,0 +1,122 @@
+# 診断出力 (Diagnostics)
+
+Favnir の診断システムは、エラーコード・修正提案（suggestion）・スパン情報を
+CLI / JSON / LSP の 3 経路すべてで一貫して提供します。
+
+---
+
+## エラーコードと修正提案
+
+すべてのエラーコード（E0001〜E0374）には `suggestion` フィールドが付与されており、
+コンパイルエラーの原因と修正方法が一目でわかります。
+
+```
+error[E0001]: undefined variable `orderId`
+  --> src/pipeline.fav:5:12
+   |
+ 5 |   bind x <- orderId
+   |              ^^^^^^^ not found in scope
+   |
+   = suggestion: did you mean `order_id`? Check the binding name or import the variable.
+```
+
+---
+
+## fav check --json
+
+`fav check --json` を使うと、エラー情報を機械可読な JSON 形式で取得できます。
+`code`・`message`・`suggestion`・`file`・`line`・`col` フィールドがフラット構造で一貫して含まれます。
+
+```bash
+fav check --json src/pipeline.fav
+```
+
+```json
+{
+  "errors": [
+    {
+      "code": "E0001",
+      "message": "undefined variable `orderId`",
+      "file": "src/pipeline.fav",
+      "line": 5,
+      "col": 12,
+      "suggestion": "did you mean `order_id`?"
+    }
+  ],
+  "warnings": [],
+  "ok": false
+}
+```
+
+---
+
+## LSP 診断 (textDocument/publishDiagnostics)
+
+LSP 経由では、エディタの波線表示と同時に `suggestion` テキストが `data` フィールドで届きます。
+
+```json
+{
+  "code": "E0001",
+  "message": "undefined variable `orderId`",
+  "data": { "suggestion": "did you mean `order_id`?" }
+}
+```
+
+VS Code では「クイックフィックス」として修正提案を直接適用できます。
+
+---
+
+## fav explain --error
+
+特定のエラーコードの詳細説明を表示します。
+
+```bash
+# エラーコードの詳細説明を表示（正式導線）
+fav explain --error E0001
+
+# 後方互換エイリアス（v9.3.0 から）— 引き続き使用可
+fav explain-error E0001
+```
+
+```
+E0001: Undefined variable
+
+  A variable was used before it was defined or is out of scope.
+
+  Examples:
+    bind x <- unknown_var   # E0001: `unknown_var` is not defined
+
+  Fix: Check spelling, add an import, or define the variable with `bind`.
+```
+
+---
+
+## fav explain --error --list
+
+登録されているすべてのエラーコードを一覧表示します。
+
+```bash
+fav explain --error --list
+fav explain --error --list --format json
+```
+
+---
+
+## 主要エラーコード
+
+| コード | 説明 | suggestion 例 |
+|---|---|---|
+| E0001 | 未定義変数 | `did you mean \`order_id\`?` |
+| E0007 | 未定義関数 | `check imports or define the function` |
+| E0008 | 引数数不一致 | `expected N arguments, got M` |
+| E0018 | `bind` 再束縛禁止 | `use a different name or remove the first binding` |
+
+全コード一覧は `fav explain --error --list` で確認できます。
+
+---
+
+## 関連ドキュメント
+
+- [エラーリファレンス](../errors/index.mdx)
+- [LSP サポート](./lsp.mdx)
+- [トレース & ウォッチ](./trace-watch.mdx)

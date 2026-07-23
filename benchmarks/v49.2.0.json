@@ -1,0 +1,14 @@
+{
+  "version": "49.2.0",
+  "date": "2026-07-18",
+  "milestone": "Production 2.0",
+  "tests_passed": 3073,
+  "tests_failed": 0,
+  "metrics": {
+    "checker_ms": 12,
+    "compiler_ms": 8,
+    "total_pipeline_ms": 25
+  },
+  "regression": false,
+  "notes": "v49.2.0: v46〜v49 機能追加後の速度計測。checker.rs / compiler.rs のホットパスを確認。regression なし。ホットパス改善コードは v49.3.0 以降に持ち越し。"
+}

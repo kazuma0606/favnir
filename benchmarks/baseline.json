@@ -1,0 +1,14 @@
+{
+  "version": "54.3.0",
+  "date": "2026-07-22",
+  "milestone": "Production 3.0 Sprint",
+  "tests_passed": 3191,
+  "tests_failed": 0,
+  "metrics": {
+    "checker_ms": 12,
+    "compiler_ms": 8,
+    "total_pipeline_ms": 25
+  },
+  "regression": false,
+  "notes": "v54.3.0 CI リグレッションスイート統合後の baseline。PR ごとに fav bench --compare benchmarks/baseline.json --fail-on-regression で自動比較される。metrics の値はプレースホルダー — 初回 CI 実行後に `fav bench --json` の実測値で更新すること（CONTRIBUTING.md 参照）。"
+}

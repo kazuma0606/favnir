@@ -1,0 +1,81 @@
+---
+title: fav test — Inline Testing
+description: fav test コマンドと #[test] アノテーションによるインラインテストの使い方
+---
+
+# fav test — Inline Testing
+
+Favnir では `#[test]` アノテーションを使ってソースファイル内にテストを記述できます。
+テストはパイプラインのステージや関数と同じファイルに置けるため、
+実装とテストを常に近い場所に保つことができます。
+
+## 基本構文
+
+```favnir
+stage Double: Int -> Int = |x| { x * 2 }
+
+#[test]
+fn test_double() {
+  assert_eq(Double(3), 6)
+  assert_eq(Double(0), 0)
+}
+```
+
+## コマンド
+
+```bash
+# すべての #[test] fn を実行
+fav test main.fav
+
+# 名前でフィルタ（部分一致）
+fav test main.fav --filter test_double
+```
+
+## アサーション関数
+
+| 関数 | 説明 |
+|---|---|
+| `assert_eq(actual, expected)` | 値が等しいことを確認。失敗時に両値を表示 |
+| `assert_ne(a, b)` | 値が異なることを確認 |
+| `assert_ok(result)` | `Ok(...)` であることを確認 |
+| `assert_err(result)` | `Err(...)` であることを確認 |
+
+## 使用例
+
+```favnir
+stage ValidateOrder: Order -> Result<Order> = |order| {
+  if order.amount <= 0 {
+    Err("invalid amount")
+  } else {
+    Ok(order)
+  }
+}
+
+#[test]
+fn test_validate_order() {
+  bind good_order <- Ok(Order { amount: 100 })
+  bind bad_order  <- Ok(Order { amount: 0 })
+
+  assert_ok(ValidateOrder(good_order))
+  assert_err(ValidateOrder(bad_order))
+  assert_eq(ValidateOrder(bad_order), Err("invalid amount"))
+}
+```
+
+## 出力フォーマット
+
+```
+PASS test_double (2ms)
+PASS test_validate_order (5ms)
+FAIL test_edge_case
+  assert_eq failed: expected 0, got -1
+
+2 passed, 1 failed
+```
+
+## 注意事項
+
+- `#[test]` アノテーションは `fn` にのみ適用できます（`stage` には適用不可）
+- テスト関数は引数なし・戻り値なしで記述してください
+- `fav test` は `fav run` とは独立した実行パスを使用するため、
+  通常のパイプライン実行には影響しません

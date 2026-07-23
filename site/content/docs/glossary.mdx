@@ -1,0 +1,40 @@
+---
+title: "用語集"
+description: "Favnir の主要な用語・概念の定義一覧"
+---
+
+# 用語集
+
+## par
+
+`par [A, B] |> Merge.ordered` — 複数の stage を並列実行するキーワード。
+v51.x で導入。各 stage はスレッド分離で並列実行され、結果は `Merge` で結合される。
+
+## assert_schema
+
+`assert_schema<T>(map)` — 実行時にマップのフィールドが型 `T` に一致するか検証する組み込み関数。
+v52.x で導入。型不一致は E0419 エラーを発生させる。`--strict-schema` フラグで未知フィールドもエラーにできる。
+
+## lineage
+
+データリネージ — stage 間のデータの流れ（upstream / downstream）とスキーマ変換を追跡する機能。
+v53.1.0 で LSP ホバーへの統合が完了し、エディタ上でリネージを確認できるようになった。
+
+## inlay hints
+
+LSP インレイヒント — エディタに型情報・stage 名・推論結果をインラインで表示する機能。
+v51.x で導入。`fav` の LSP サーバーが VS Code 等に対して hint を送信する。
+
+## rune
+
+外部サービスとの接続を担う Favnir のプラグイン単位。`import kafka` のように参照する。
+`runes/` ディレクトリに配置される。
+
+## stage
+
+パイプラインの処理単位。`stage Name: InputType -> OutputType = |arg| { ... }` の形式で定義する。
+
+## pipeline
+
+`pipeline Name { stage ... }` ブロックで定義される stage の連鎖。
+`seq` / `par` / `|>` でデータフローを記述する。

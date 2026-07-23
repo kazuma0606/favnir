@@ -1,0 +1,92 @@
+---
+title: Language Refinement Overview
+description: Favnir v45.x スプリント「Language Refinement」の達成事項と v46.0 への道筋
+---
+
+# Language Refinement Overview
+
+Favnir v45.1〜v45.9 スプリント「Language Refinement」では、`return` 構文・`match` 完全網羅・型エイリアス・エラーメッセージ改善・数値リテラル・examples 更新を実施し、Favnir の構文を成熟させました。
+
+---
+
+## 達成事項
+
+| バージョン | タイトル | 主な変更 |
+|---|---|---|
+| v45.1.0 | `return` 構文 AST + parser | `ReturnStmt` ノード追加、`return <expr>` を `fn`/`stage` ボディで解析 |
+| v45.2.0 | `return` 型チェック + E0415 | `checker.rs` で戻り型不一致を E0415 として検出 |
+| v45.3.0 | `return` compiler + VM | `Return` opcode emit・VM での早期脱出実行 |
+| v45.4.0 | `match` 網羅性改善 + W034 / E0416 | 非網羅 match を文脈に応じて警告（W034）またはエラー（E0416）として報告 |
+| v45.5.0 | 型エイリアス完全化 | 透過的エイリアス互換性・`opaque type` 非互換性の型推論対応 |
+| v45.6.0 | エラーメッセージ改善 Phase 1 | E0101〜E0200 に `suggestion` フィールド追加・did-you-mean 提案 |
+| v45.7.0 | エラーメッセージ改善 Phase 2 + 数値リテラル `_` | E0201〜E0413 に提案追加・`1_000_000` 形式の数値リテラル対応 |
+| v45.8.0 | examples 更新 Phase 1 | 旧 `!Effect` 記法の完全除去確認・`return` ガード節パターン追加 |
+| v45.9.0 | examples 更新 Phase 2 + v46.0 前調整 | `stage_seq_demo.fav` コメント修正・本ドキュメント新規作成 |
+
+---
+
+## 主要機能
+
+### `return` 構文
+
+複数行ボディでの途中脱出専用構文です。単一式の暗黙 return は変更ありません。
+
+```favnir
+stage ValidateOrder: Order -> Result<Order> = |order| {
+  if order.amount <= 0.0 { return Result.err("invalid amount") }
+  Result.ok(order)
+}
+```
+
+### `match` 完全網羅
+
+- **W034**: 非網羅 match を文（statement）として使う場合の警告
+- **E0416**: 非網羅 match を式（value context）として使う場合のハードエラー
+
+```favnir
+type Color = Red | Green | Blue
+
+// E0416: non-exhaustive match in value context — Blue is not covered
+bind label <- match color {
+  Red   => "red"
+  Green => "green"
+}
+```
+
+### 型エイリアス
+
+```favnir
+// 透過的エイリアス — UserId と Int は互換
+type UserId = Int
+fn process(id: UserId) -> Int { id + 1 }
+
+// 不透過型 — OrderId と String は非互換
+opaque type OrderId = String
+```
+
+### 数値リテラル `_`
+
+可読性向上のため、数値リテラル中に `_` をセパレーターとして使用できます。
+
+```favnir
+stage FilterLarge: List<Int> -> List<Int> = |nums| {
+  nums |> List.filter(|n| n > 1_000_000)
+}
+
+stage CalcRate: Float -> Float = |v| {
+  v * 0.000_15
+}
+```
+
+---
+
+## v46.0 への展望
+
+Language Refinement スプリント完了後、v46.0「Language Refinement 宣言」では以下を実施します:
+
+- v45.1〜v45.9 の全機能の統合確認
+- `MILESTONE.md` に Language Refinement 達成を記録
+- `cargo clean` によるクリーンアップ
+- README・ドキュメントサイトへの v46.0 反映
+
+> 「`return` によるガード節・`match` 完全網羅・型エイリアスの明確な境界・改善されたエラーメッセージが揃い、Favnir の構文が成熟した。これが Favnir v46.0 — Language Refinement の姿である。」

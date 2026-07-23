@@ -1,0 +1,50 @@
+---
+title: "Return Statement"
+order: 1
+category: "Syntax"
+description: "Favnir の return 文とガード節パターン"
+---
+
+# Return Statement
+
+v46.1.0 で導入された `return` 文により、関数の早期リターンとガード節パターンが利用できます。
+
+## 基本構文
+
+```favnir
+fn divide(a: Float, b: Float) -> Result<Float, String> {
+  return Result.err("division by zero") if b == 0.0
+  Result.ok(a / b)
+}
+```
+
+## Guard Pattern（ガード節パターン）
+
+`return expr if condition` 形式（guard pattern）で条件付き早期リターンを簡潔に書けます。
+
+```favnir
+fn validate_age(age: Int) -> Result<Int, String> {
+  return Result.err("too young") if age < 0
+  return Result.err("too old") if age > 150
+  Result.ok(age)
+}
+```
+
+## ネストを減らす
+
+`return` ガード節は深いネストを避け、ハッピーパスを明確にします。
+複数のバリデーション条件を先頭に並べることで、関数の主ロジックが際立ちます。
+
+```favnir
+fn process_order(order: Order) -> Result<Receipt, String> {
+  return Result.err("invalid id") if order.id <= 0
+  return Result.err("negative amount") if order.amount < 0.0
+  return Result.err("unknown status") if order.status != "pending"
+  Result.ok({ order_id: order.id, total: order.amount })
+}
+```
+
+## 注意事項
+
+- `return expr if condition` は `if condition { return expr }` の糖衣構文です
+- `return` は関数の中でのみ使用できます。pipeline stage ブロック内では構文エラーになるため、`Result.ok` / `Result.err` を使用してください

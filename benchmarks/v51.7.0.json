@@ -1,0 +1,14 @@
+{
+  "version": "51.7.0",
+  "date": "2026-07-19",
+  "milestone": "Performance & Scale Sprint",
+  "tests_passed": 3129,
+  "tests_failed": 0,
+  "metrics": {
+    "wasm_before_dce_bytes": 412000,
+    "wasm_after_dce_bytes": 287000,
+    "wasm_reduction_pct": 30.3
+  },
+  "regression": false,
+  "notes": "プレースホルダー値。fav build --target wasm 実測値に更新することを推奨。"
+}

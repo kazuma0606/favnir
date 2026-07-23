@@ -1,0 +1,62 @@
+---
+title: "assert_schema でスキーマ検証"
+description: "assert_schema<T> を使って実行時にフィールド型を検証し、OTel span と audit-log に記録するレシピ"
+---
+
+# assert_schema でスキーマ検証
+
+`assert_schema<T>` は実行時にマップのフィールドが型 `T` に一致するか検証します。
+失敗時は E0419 エラーを発生させ、`fav run --audit-log` 実行時はアクセスログに記録されます。
+
+## コード例
+
+```favnir
+type OrderRow = { id: Int, amount: Float, status: String }
+
+stage ValidateSchema: Map -> Result<OrderRow> = |row| {
+  bind checked <- assert_schema<OrderRow>(row)
+  // OTel span に schema.name = "OrderRow" が自動付与
+  Ok(checked)
+}
+```
+
+## nullable フィールド
+
+フィールドが省略可能な場合は `?` を付与します。
+
+```favnir
+type NullableRow = { id: Int, amount: Float, note: String? }
+```
+
+`assert_schema<NullableRow>` は `note` フィールドが欠落していても成功します。
+
+## audit-log との統合
+
+`fav run --audit-log ./audit.log` で実行すると、`assert_schema` の成否が監査ログに記録されます。
+
+```bash
+fav run pipeline.fav --audit-log ./audit.log
+```
+
+ログには検証したスキーマ名・フィールド数・失敗フィールドが記録されます。
+
+## OTel span
+
+`fav run` に OTel エクスポーターが設定されている場合、各 `assert_schema` 呼び出しに
+`schema.name` / `schema.result` アトリビュートが付与されます。
+
+## エラー確認
+
+型不一致が発生した場合は E0419 が報告されます。詳細な差分とヒントを確認するには:
+
+```bash
+fav explain --error E0419
+# フィールド差分と型変換ヒントを表示
+```
+
+`fav explain --error E0419` の出力例:
+
+```
+field `id`: expected Int but got String
+help: use Int.parse(row["id"]) to convert
+```

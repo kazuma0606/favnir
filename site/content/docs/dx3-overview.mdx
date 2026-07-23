@@ -1,0 +1,103 @@
+# Developer Experience 3.0 — 概要
+
+Favnir v50.1〜v50.8 で実装した **DX 3.0** の全機能を紹介します。
+
+> 「全エラーコードに修正提案が付き、JSON / LSP / CLI で一貫して届く。
+>  エディタは型を表示し、trace はパイプラインの流れを可視化する。
+>  Favnir の診断は開発者の思考を止めない。」
+
+---
+
+## 何が変わったか
+
+| バージョン | 機能 | 詳細 |
+|---|---|---|
+| v50.1.0 | 全エラーコードに `suggestion` 追加 | [診断出力](./tools/diagnostics.mdx) |
+| v50.2.0 | JSON / LSP / CLI で `suggestion` 一貫出力 | [診断出力](./tools/diagnostics.mdx) |
+| v50.3.0 | `fav explain --error` 正式導線 | [診断出力](./tools/diagnostics.mdx) |
+| v50.4.0 | LSP インレイヒント — 変数・関数戻り型 | [LSP サポート](./tools/lsp.mdx) |
+| v50.5.0 | LSP インレイヒント — pipeline stage 型 | [LSP サポート](./tools/lsp.mdx) |
+| v50.6.0 | LSP ホバー — Rune メソッドシグネチャ | [LSP サポート](./tools/lsp.mdx) |
+| v50.7.0 | `fav run --trace` 構造化ログ / `--watch` | [Trace & Watch](./tools/trace-watch.mdx) |
+| v50.8.0 | ドキュメントサイト DX 3.0 記事 | このページ |
+
+---
+
+## 診断の統一（v50.1〜v50.3）
+
+すべてのエラーコード（E0001〜E0374）に `suggestion` フィールドを追加しました。
+エラーの原因と修正方法が CLI・JSON・LSP の 3 経路で一貫して届きます。
+
+```
+error[E0001]: undefined variable `orderId`
+  --> src/pipeline.fav:5:12
+   |
+ 5 |   bind x <- orderId
+   |              ^^^^^^^ not found in scope
+   |
+   = suggestion: did you mean `order_id`?
+```
+
+`fav explain --error <code>` でエラーコードの詳細説明を表示できます。
+
+詳細: [診断出力 (Diagnostics)](./tools/diagnostics.mdx)
+
+---
+
+## LSP インレイヒント（v50.4〜v50.5）
+
+エディタ上で型注釈をインラインに表示します。コードを変更せずに型を確認できます。
+
+```favnir
+// エディタ表示イメージ
+bind count /*: Int*/ <- List.length(items)
+fn process(x: Int) /*-> Int*/ { x * 2 }
+
+pipeline OrderPipeline {
+  stage Parse     /*: RawOrder -> Order*/      = |raw| { ... }
+  stage Validate  /*: Order -> Result<Order>*/ = |order| { ... }
+}
+```
+
+詳細: [LSP サポート](./tools/lsp.mdx)
+
+---
+
+## LSP ホバー強化（v50.6）
+
+Rune メソッドにホバーすると、シグネチャ・エフェクト・ドキュメントコメントが表示されます。
+
+```
+kafka.consume
+  fn consume(topic: String) -> Stream<RawMessage>  !Kafka
+
+  Consumes messages from the given Kafka topic.
+```
+
+詳細: [LSP サポート](./tools/lsp.mdx)
+
+---
+
+## Trace & Watch（v50.7〜v50.8）
+
+`fav run --trace` でパイプラインの各 stage の出力を構造化ログで記録します。
+
+```bash
+fav run pipeline.fav --trace
+```
+
+```
+[trace] stage=Parse    out=Order{id:1,amount:99.0}
+[trace] stage=Validate out=Ok(Order{id:1})
+[trace] stage=Enrich   out=EnrichedOrder{id:1,tax:9.9}
+```
+
+詳細: [Trace & Watch](./tools/trace-watch.mdx)
+
+---
+
+## 関連ドキュメント
+
+- [診断出力 (Diagnostics)](./tools/diagnostics.mdx)
+- [Trace & Watch](./tools/trace-watch.mdx)
+- [LSP サポート](./tools/lsp.mdx)

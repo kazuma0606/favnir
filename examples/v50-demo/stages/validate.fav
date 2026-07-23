@@ -1,0 +1,8 @@
+type RawOrder = { id: Int, amount: Float, status: String }
+type Order    = { id: Int, amount: Float, status: String }
+
+fn run(raw: RawOrder) -> Result<Order, String> {
+  return Result.err("invalid status") if raw.status != "pending"
+  return Result.err("negative amount") if raw.amount < 0.0
+  Result.ok({ id: raw.id, amount: raw.amount, status: raw.status })
+}

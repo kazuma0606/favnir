@@ -1,0 +1,106 @@
+# Data Quality & Observability 2.0 — 概要
+
+Favnir v52.x では **Data Quality & Observability 2.0** として、
+スキーマ検証・リネージ可視化・SLA 監視・データアクセスログ・OTel 強化を実装しました。
+
+> v36.x の「Data Quality First」（`assert_schema` 前身機能・`fav validate` 等）とは別の機能群です。
+> v52.x は `assert_schema` の**ランタイム実装**と**可観測性（Observability）統合**が中心です。
+
+---
+
+## 機能一覧
+
+### assert_schema — ランタイムスキーマ検証（v52.1〜v52.2）
+
+`assert_schema<T>(value)` primitive により、実行時に値のフィールド名・型を検証します。
+nullable フィールド（`field?: Type`）、`--strict-schema` フラグ（W036 をエラー化）をサポート。
+
+```favnir
+type OrderRow = { id: Int, amount: Float, status: String }
+
+stage Validate: Map<String, Any> -> Result<OrderRow> = |row| {
+  bind validated <- assert_schema<OrderRow>(row)
+  Ok(validated)
+}
+```
+
+詳細: [assert_schema ドキュメント](./data-quality/assert-schema)
+
+---
+
+### fav explain --lineage 拡張（v52.3〜v52.4）
+
+`--with-schema` オプションでスキーマ情報をリネージグラフに付加。
+`--format html` でクリッカブルな HTML レポートを生成。
+
+```bash
+$ fav explain --lineage pipeline.fav --format html -o lineage.html
+```
+
+詳細: [lineage 拡張オプション](./tools/lineage-enhanced)
+
+---
+
+### SLA 監視 Rune（v52.5）
+
+`runes/sla/sla.fav` に `check_freshness` / `check_latency` / `alert` 関数を追加。
+SLA 違反時は `Err` を返してパイプラインを停止します。
+
+```favnir
+import sla
+
+stage CheckSLA: DataBatch -> Result<DataBatch> = |batch| {
+  bind _ <- sla.check_freshness(batch.timestamp, max_age_seconds: 3600)
+  bind _ <- sla.check_latency(stage: "Parse", threshold_ms: 200)
+  Ok(batch)
+}
+```
+
+---
+
+### fav run --audit-log — データアクセスログ（v52.6）
+
+`!Kafka` / `!Snowflake` のアクセスイベントを JSONL 形式で記録します。
+
+```bash
+$ fav run pipeline.fav --audit-log audit.jsonl
+```
+
+```json
+{"ts":"2026-07-18T10:00:00Z","op":"read","effect":"Kafka","topic":"orders"}
+{"ts":"2026-07-18T10:00:01Z","op":"write","effect":"Snowflake","table":"orders_v2"}
+```
+
+詳細: [audit-log ドキュメント](./tools/audit-log)
+
+---
+
+### OTel span 属性強化（v52.7）
+
+OTel span に `schema.name` / `schema.fields` / `lineage.upstream` / `lineage.downstream` 属性を付与。
+`fav run --trace` で可視化できます。
+
+```
+span: stage.Validate
+  schema.name        = "OrderRow"
+  schema.fields      = "id,amount,status"
+  lineage.upstream   = "Parse"
+  lineage.downstream = "snowflake.insert"
+```
+
+---
+
+### ドキュメントサイト整備（v52.8）
+
+v52.8 では上記の各機能を説明する公式ドキュメントを追加しました。
+本ページ（`data-quality-overview.mdx`）自体も v52.8 の成果物の一部です。
+
+---
+
+## 関連ドキュメント
+
+| 機能 | ドキュメント |
+|---|---|
+| assert_schema | [data-quality/assert-schema](./data-quality/assert-schema) |
+| lineage 拡張 | [tools/lineage-enhanced](./tools/lineage-enhanced) |
+| audit-log | [tools/audit-log](./tools/audit-log) |

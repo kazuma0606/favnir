@@ -1,0 +1,9 @@
+// ValidOrder: assert_schema<ValidOrder> を通過した注文（名目型による安全保証）
+type ValidOrder    = { id: Int, amount: Float, status: String }
+type EnrichedOrder = { id: Int, amount: Float, status: String, region: String }
+
+fn run(order: ValidOrder) -> Result<EnrichedOrder, String> {
+  return Result.err("invalid status") if order.status != "pending"
+  return Result.err("negative amount") if order.amount < 0.0
+  Result.ok({ id: order.id, amount: order.amount, status: order.status, region: "validated" })
+}

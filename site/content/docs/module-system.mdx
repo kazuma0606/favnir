@@ -1,0 +1,129 @@
+---
+title: Module System
+order: 1
+category: "Language"
+description: Favnir のモジュールシステム — パッケージ import とローカル import の使い方
+---
+
+# Module System
+
+Favnir v48.x では、モジュールシステムが刷新されました。
+**パッケージ import** と**ローカル import** が構文で明確に区別され、
+`fav.toml` が依存関係の唯一の真実となっています。
+
+---
+
+## パッケージ import
+
+`fav.toml` の `[runes]` セクションで宣言したパッケージは、引用符なしでインポートします。
+
+```favnir
+// fav.toml [runes] に宣言されたパッケージ
+import kafka
+import postgres as db
+import redis as cache
+```
+
+`fav.toml` への宣言:
+
+```toml
+[runes]
+kafka    = "2.1.0"
+postgres = "1.0.0"
+redis    = "3.2.0"
+```
+
+### エイリアス
+
+`as` キーワードで短縮名を付けられます。
+
+```favnir
+import postgres as db
+
+stage Load: List<Row> -> Bool = |rows| {
+  bind result <- db.insert(rows)
+  result
+}
+```
+
+---
+
+## ローカル import
+
+同じプロジェクト内の `.fav` ファイルは `"./"` プレフィックスで指定します。
+
+```favnir
+import "./src/helpers" as helpers
+import "./stages/validate" as validate
+import "./stages/transform" as transform
+```
+
+ローカル import は相対パスで解決されます。`fav.toml` の `[runes]` 宣言は不要です。
+
+---
+
+## `fav.toml [runes]` 宣言
+
+パッケージ import を使うには、事前に `fav.toml` の `[runes]` テーブルで宣言が必要です。
+
+```toml
+[package]
+name    = "my-pipeline"
+version = "0.1.0"
+
+[runes]
+kafka    = "2.1.0"
+postgres = "1.0.0"
+```
+
+未宣言のパッケージを import しようとすると **E0417** エラーが発生します。
+
+```
+E0417: package not declared in [runes]
+```
+
+---
+
+## 循環 import の検出（E0418）
+
+import グラフに循環がある場合、コンパイル時に **E0418** エラーが報告されます。
+
+```
+E0418: circular import detected
+  a.fav -> b.fav -> a.fav
+```
+
+循環を解消するには、共通の定義を第三のモジュールに切り出してください。
+
+```
+// 修正前: a.fav ↔ b.fav が循環
+// 修正後: a.fav → shared.fav ← b.fav
+import "./shared" as shared
+```
+
+---
+
+## 旧構文（非推奨 — W035）
+
+v48.5.0 以降、`import rune "X"` 構文は **W035** 警告（非推奨）が出ます。
+
+```favnir
+// 非推奨（W035: legacy_import_rune）
+import rune "kafka"
+
+// 推奨（パッケージ import）
+import kafka
+```
+
+移行手順は [Import Migration Guide](./migration-guide-import) を参照してください。
+
+---
+
+## まとめ
+
+| 種別 | 構文例 | 必要な宣言 |
+|---|---|---|
+| パッケージ import | `import kafka` | `fav.toml [runes]` |
+| パッケージ import（エイリアス）| `import kafka as k` | `fav.toml [runes]` |
+| ローカル import | `import "./src/helpers" as h` | 不要 |
+| 旧構文（非推奨）| `import rune "kafka"` | — |

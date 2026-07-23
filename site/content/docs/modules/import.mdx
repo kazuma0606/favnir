@@ -1,0 +1,54 @@
+---
+title: "Import Syntax 2.0"
+order: 1
+category: "Modules"
+description: "Favnir import 2.0 — パッケージ import とローカル import"
+---
+
+# Import Syntax 2.0
+
+v48.1.0 で導入された新しい import 構文（import 2.0）を説明します。
+旧構文（`import rune "X"`）は v48.5.0 から W035 警告対象となっています。
+
+## パッケージ import
+
+`fav.toml` の `[runes]` に宣言したパッケージを直接 import できます。
+
+```favnir
+import kafka
+import postgres
+```
+
+## ローカル import
+
+相対パスで同プロジェクト内の `.fav` ファイルを import できます。
+
+```favnir
+import "./stages/validate" as validate
+import "./lib/utils" as utils
+```
+
+## fav.toml との連携
+
+import するパッケージは `fav.toml` の `[runes]` セクションに宣言が必要です。
+宣言のない import は E0418 エラーになります。
+
+```toml
+[runes]
+kafka   = "2.1.0"
+postgres = "1.0.0"
+```
+
+## 旧構文からの移行（W035）
+
+旧構文を使い続けると W035 警告が出ます。
+
+```favnir
+// 旧構文（W035 警告）
+import rune "kafka"
+
+// 新構文（推奨）
+import kafka
+```
+
+詳細な移行手順は [Import Migration Guide](/docs/migration-guide-import) を参照してください。

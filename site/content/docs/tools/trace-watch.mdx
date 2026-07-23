@@ -1,0 +1,101 @@
+# トレース & ウォッチ (Trace & Watch)
+
+`fav run --trace` はパイプラインの各 stage の入出力を構造化ログで記録します。
+`--watch` はフィールドレベルの変化を追跡する軽量なデバッグ手段です。
+
+どちらもエディタ接続が不要な CLI ツールであり、
+[DAP デバッガー](./dap.mdx)（ステップ実行・ブレークポイント）とは独立した軽量導線です。
+
+---
+
+## fav run --trace
+
+`--trace` フラグを付けると、各 stage の実行結果が構造化ログとして出力されます。
+
+```bash
+fav run src/pipeline.fav --trace
+```
+
+**出力例:**
+
+```
+[trace] stage=Parse    out=Order{id:1,amount:99.0}
+[trace] stage=Validate out=Ok(Order{id:1})
+[trace] stage=Enrich   out=EnrichedOrder{id:1,tax:9.9}
+```
+
+### 出力フォーマット
+
+| フィールド | 内容 |
+|---|---|
+| `stage=NAME` | stage の名前 |
+| `out=VALUE` | stage の出力値（200 文字超は省略） |
+
+> **Note**: `in=` フィールド（stage 入力値）は現バージョンでは出力されません。
+
+---
+
+## DAP デバッガーとの違い
+
+| 機能 | `--trace` | DAP (`fav run --debug`) |
+|---|---|---|
+| 目的 | 軽量な出力ログ確認 | ステップ実行・ブレークポイント |
+| エディタ不要 | はい | VS Code / Neovim などが必要 |
+| WASM 対応 | はい | いいえ（ネイティブのみ） |
+| セットアップ | 不要 | `launch.json` の設定が必要 |
+
+詳細は [DAP デバッガー](./dap.mdx) を参照してください。
+
+---
+
+## --watch フィールド追跡（CLI 未公開）
+
+`--watch <var.field>` フラグは、指定したレコードフィールドの変化を stage ごとに追跡します。
+
+> **Note**: CLI `--watch` フラグは現バージョン（v50.7.0）では未実装です。
+> 内部 API（`set_watch_fields`）として実装済みであり、将来のバージョンで CLI から利用可能になる予定です。
+
+実装後の想定出力:
+
+```bash
+fav run src/pipeline.fav --watch order.amount --watch order.status
+```
+
+```
+[watch] order.amount: — → 99.0   (stage: Parse)
+[watch] order.status: — → "ok"   (stage: Validate)
+```
+
+---
+
+## ユースケース: パイプラインデバッグ
+
+### 本番データの流れを確認する
+
+```bash
+# ステージごとの出力を確認
+fav run pipeline.fav --trace 2>&1 | grep "\[trace\]"
+
+# エラー時の停止箇所を確認
+fav run pipeline.fav --trace 2>&1 | grep -E "\[trace\]|\[TRACE\]"
+```
+
+### Profiling と組み合わせる
+
+パフォーマンスのボトルネックを特定したい場合は [プロファイリング](./profiling.mdx) と組み合わせてください。
+
+```bash
+# 処理時間を計測
+fav profile pipeline.fav
+
+# 出力内容を確認
+fav run pipeline.fav --trace
+```
+
+---
+
+## 関連ドキュメント
+
+- [DAP デバッガー](./dap.mdx)
+- [プロファイリング](./profiling.mdx)
+- [診断出力](./diagnostics.mdx)

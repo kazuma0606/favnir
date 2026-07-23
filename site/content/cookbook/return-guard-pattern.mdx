@@ -1,0 +1,39 @@
+---
+title: "Return Guard Pattern"
+category: "クックブック"
+description: "return ガード節で早期リターンを使ったバリデーションパターン"
+---
+
+# Return Guard Pattern
+
+`return expr if condition` 構文（guard pattern）を使ってネストを減らし、
+ハッピーパスを明確にするレシピです。
+
+## バリデーション関数の例
+
+```favnir
+fn validate_order(order: Order) -> Result<Order, String> {
+  return Result.err("invalid id") if order.id <= 0
+  return Result.err("negative amount") if order.amount < 0.0
+  return Result.err("unknown status") if order.status != "pending"
+  Result.ok(order)
+}
+```
+
+## パイプラインでの活用
+
+```favnir
+pipeline ValidateAndLoad {
+  stage Validate: Stream<RawOrder> -> Stream<Order> = |raw| {
+    bind order <- parse(raw)
+    bind valid <- validate_order(order)
+    Result.ok(valid)
+  }
+}
+```
+
+## ポイント
+
+- guard 節は上から順に評価される（最初に一致した条件で即時リターン）
+- ガード節を先頭に集めることで、主ロジックの見通しが良くなる
+- `return Result.err(...)` を使って早期にエラーを返すパターンが基本形

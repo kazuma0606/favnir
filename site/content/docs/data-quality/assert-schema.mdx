@@ -1,0 +1,83 @@
+# assert_schema — スキーマ検証
+
+`assert_schema<T>(value)` は、実行時に値のフィールド名と型を検証する VM primitive です。
+型 `T` で定義されたスキーマと一致しない場合は `Err` を返します。
+
+## 基本的な使い方
+
+```favnir
+type OrderRow = { id: Int, amount: Float, status: String }
+
+stage ValidateSchema: Map<String, Any> -> Result<OrderRow> = |row| {
+  bind validated <- assert_schema<OrderRow>(row)
+  Ok(validated)
+}
+```
+
+`assert_schema<OrderRow>(row)` は `row` の各フィールドが `OrderRow` の型定義と一致するかを検証し、
+成功時は `Ok(validated)`、失敗時は `Err` を返します。
+
+## nullable フィールド（optional フィールド）
+
+フィールド名の後に `?` を付けると nullable（省略可能）フィールドになります。
+
+```favnir
+type FlexRow = { id: Int, name: String, note?: String }
+
+stage ValidateFlex: Map<String, Any> -> Result<FlexRow> = |row| {
+  // note フィールドが存在しなくても OK
+  bind validated <- assert_schema<FlexRow>(row)
+  Ok(validated)
+}
+```
+
+`note?` は存在しなくても検証を通過します。存在する場合は `String` 型である必要があります。
+
+## 想定外フィールドの扱い（W036）
+
+定義にないフィールドがある場合、デフォルトでは W036 警告が発生します。
+
+```bash
+$ fav run pipeline.fav
+[W036] unexpected field "extra_col" in OrderRow (assert_schema)
+```
+
+### --strict-schema フラグ
+
+`--strict-schema` フラグを付けると W036 警告をエラー（E0419）として扱います。
+
+```bash
+$ fav run pipeline.fav --strict-schema
+[E0419] assert_schema type mismatch: unexpected field "extra_col" in OrderRow
+```
+
+## エラーコード
+
+| コード | 説明 |
+|---|---|
+| E0419 | `assert_schema` 型不一致（フィールド名・型・必須フィールド欠落） |
+| W036 | `assert_schema` 想定外フィールド（`--strict-schema` でエラー化） |
+
+## エラーハンドリングパターン
+
+```favnir
+stage SafeValidate: Map<String, Any> -> Result<OrderRow> = |row| {
+  bind validated <- assert_schema<OrderRow>(row)
+  Ok(validated)
+}
+
+seq pipeline = LoadRaw |> SafeValidate |> Process
+```
+
+`bind` が `Err` を受け取った場合、`seq` pipeline は即座に失敗します（fail-fast）。
+
+## OTel トレース連携
+
+`assert_schema` が成功すると、OTel span に以下の属性が自動付与されます（v52.7.0+）:
+
+```
+schema.name   = "OrderRow"
+schema.fields = "id,amount,status"
+```
+
+`fav run --trace` 実行時に `[OTEL]` 行として確認できます。

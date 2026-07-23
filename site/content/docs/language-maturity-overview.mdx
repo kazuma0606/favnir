@@ -1,0 +1,82 @@
+---
+title: "Language Maturity Overview"
+category: "Docs"
+description: "Favnir v50 Language Maturity — return guard / stdlib / modules / inline tests が揃った Production 2.0。"
+---
+
+# Language Maturity Overview
+
+Favnir v50 は **Language Maturity** の宣言バージョンです。
+v46 から v49 で積み重ねてきた機能が統合され、データ処理言語として成熟しました。
+
+---
+
+## 4 本柱（Four Pillars）
+
+### 1. `return` ガード節
+
+```favnir
+fn process(order: Order) -> Result<Output, String> {
+  return Result.err("invalid id") if order.id <= 0
+  bind validated <- validate(order)
+  Ok(transform(validated))
+}
+```
+
+早期 return によるガード節パターンで、ネストを排除したフラットなコードが書けます。
+
+### 2. 成熟した標準ライブラリ（Mature stdlib）
+
+`List.*` / `Map.*` / `String.*` / `DateTime.*` が完備しています。
+外部ライブラリなしに典型的なデータ変換処理を記述できます。
+
+### 3. 明確なモジュールシステム（Clear Module System）
+
+```favnir
+import "./stages/validate" as validate
+import kafka
+```
+
+ローカル import と Rune import が統一された構文で利用できます。
+
+### 4. インラインテスト（Inline Testing）
+
+```favnir
+#[test]
+fn test_process() {
+  assert_ok(process(good_order))
+  assert_err(process(bad_order))
+}
+```
+
+本番コードと同じファイルにテストを記述でき、`fav test` で実行できます。
+
+---
+
+## v50 Production 2.0 宣言文
+
+> `return` による安全なガード節、成熟した標準ライブラリ、
+> 明確なモジュールシステム、インラインテストが揃い、
+> Favnir は迷わず使える実用言語になった。
+>
+> これが Favnir v50 — Production 2.0 の姿である。
+
+---
+
+## v46〜v49 主要機能一覧
+
+| バージョン | 機能 |
+|---|---|
+| v46 | `return` ガード節 |
+| v47 | stdlib 2.0 拡充 |
+| v48 | import 2.0 / `fav install` |
+| v49 | `fav test` インラインテスト / セキュリティ審査 |
+
+---
+
+## 関連ドキュメント
+
+- [Return Statement](/docs/syntax/return)
+- [Import Syntax 2.0](/docs/modules/import)
+- [Return Guard Pattern](/cookbook/return-guard-pattern)
+- [Inline Testing](/cookbook/inline-testing)

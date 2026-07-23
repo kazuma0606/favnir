@@ -1,0 +1,49 @@
+---
+title: "Integration Sprint 概要"
+description: "v51〜v53 の 3 スプリントを統合する Integration Sprint の全体像"
+---
+
+# Integration Sprint 概要
+
+v51.0（Developer Experience 3.0）・v52.0（Performance & Scale）・v53.0（Data Quality & Observability 2.0）の
+3 マイルストーンを統合し、Favnir の核となる 3 つの柱を連携させるスプリントです。
+
+## 統合される機能
+
+### lineage × LSP（v53.1）
+
+`fav` の LSP サーバーがリネージ情報（upstream / downstream stage・スキーマ名）をホバー時に表示します。
+エディタ上でデータの流れを確認できます。
+
+### par bench（v53.2）
+
+`fav bench` が `par` ブロック内の各 stage を個別計測し、ボトルネックを明示します。
+
+### assert_schema 詳細診断（v53.3）
+
+`assert_schema` 失敗時に E0419 のフィールド差分・変換 suggestion を表示します。
+
+## E2E デモ（examples/v55-demo）
+
+`examples/v55-demo/` に Integration Sprint の全機能を組み合わせた E2E パイプラインデモがあります。
+（ディレクトリ名 `v55-demo` は v54.0「Integration Sprint 宣言」に向けた先行デモとして v53.4.0 で作成されたものです。）
+
+```favnir
+pipeline OrderIngestion {
+  stage Consume: Stream<RawOrder> -> Stream<Order> = |_raw| { ... }
+  stage SchemaCheck: Order -> Result<ValidOrder> = |order| {
+    bind checked <- assert_schema<ValidOrder>(order)
+    Result.ok(checked)
+  }
+  stage Process: ValidOrder -> Result<EnrichedOrder> = |valid_order| {
+    par [enrich.run(valid_order), validate.run(valid_order)] |> Merge.ordered
+  }
+  stage Store: EnrichedOrder -> Unit = |enriched| { ... }
+}
+```
+
+## 関連ドキュメント
+
+- [用語集](/docs/glossary) — par / assert_schema / lineage / inlay hints の定義
+- [cookbook: parallel-pipeline](/cookbook/parallel-pipeline) — par stage の使い方
+- [cookbook: schema-validation](/cookbook/schema-validation) — assert_schema + audit-log レシピ

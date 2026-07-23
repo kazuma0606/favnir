@@ -1,0 +1,93 @@
+---
+title: Performance & Scale — 概要
+description: "Favnir v52.0 Performance & Scale の機能群: 並列実行・バックプレッシャー・ベンチマーク回帰検出・インクリメンタルコンパイル・WASM サイズ最適化"
+---
+
+# Performance & Scale
+
+Favnir Performance & Scale スプリント（v51.1〜v51.9）は、データパイプラインを**大規模・本番環境で使い続けられる**基盤とするリリース系列です。
+v51 系で実装した機能群を本ページで俯瞰します。
+
+---
+
+## 並列ステージ実行（par）
+
+`par [A, B] |> Merge` で複数の stage を並列実行し、結果を結合できます。
+
+```favnir
+pipeline IngestPipeline {
+  stage Process: Order -> EnrichedOrder = |order| {
+    par [Enrich(order), Validate(order)] |> Merge.ordered
+  }
+}
+```
+
+- `Merge.ordered` — 全完了後に順序を保って結合
+- `Merge.any` — 完了した順に結合（ストリーミングフレンドリー）
+- バックプレッシャーは `fav.toml` の `[stream] buffer_size` で制御
+
+詳細: [並列ステージ実行（par）](/docs/runtime/parallel)
+
+---
+
+## ベンチマーク回帰検出（fav bench --compare）
+
+`fav bench --compare` で前回結果と比較し、しきい値を超えた退行を自動検出します。
+
+```bash
+$ fav bench --all --compare benchmarks/v51.7.0.json --fail-on-regression
+checker_run_time:  1.2ms → 1.8ms  (+50%)  [WARN: exceeds 10% threshold]
+error: regression detected — exiting with code 1
+```
+
+CI パイプラインに組み込むことで、マージ前にパフォーマンス退行を自動ブロックできます。
+
+詳細: [ベンチマーク回帰検出](/docs/tools/bench-regression)
+
+---
+
+## インクリメンタルコンパイル
+
+ファイル間の import 依存グラフを構築し、変更ファイルの推移的依存のみ再コンパイルします。
+フィンガープリント（SHA-256）と依存グラフを `.fav-cache/dep-graph.json` に保存します。
+
+```bash
+$ fav build
+[skip]    b.fav — unchanged
+[rebuild] a.fav — changed
+[rebuild] d.fav — depends on a.fav
+```
+
+---
+
+## WASM ビルドサイズ最適化
+
+`fav build --target wasm` に DCE（Dead Code Elimination）と `wasm-opt -Os` を統合し、
+未参照の関数を除去してバイナリサイズを削減します。
+
+```bash
+$ fav build --target wasm
+before: 412 KB
+after:  287 KB  (-30%)
+```
+
+---
+
+## ホットパス最適化
+
+- `SubstRef = Rc<Subst>` による型代入クローンコスト削減（checker.rs）
+- `SourceCache` による同一ファイルの重複読み込み排除（compiler_fav_runner.rs）
+- `fav profile --build <file>` で parse / check / compile フェーズ別の処理時間を計測可能
+
+---
+
+## 関連ページ
+
+| 機能 | ページ |
+|---|---|
+| 並列ステージ実行 | [runtime/parallel](/docs/runtime/parallel) |
+| ベンチマーク回帰検出 | [tools/bench-regression](/docs/tools/bench-regression) |
+| ベンチマーク基本 | [tools/bench](/docs/tools/bench) |
+| プロファイリング | [tools/profiling](/docs/tools/profiling) |
+| インクリメンタルビルド | [tools/incremental](/docs/tools/incremental) |
+| WASM 最適化 | [tools/wasm-opt](/docs/tools/wasm-opt) |

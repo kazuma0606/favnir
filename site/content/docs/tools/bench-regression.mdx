@@ -1,0 +1,103 @@
+---
+title: ベンチマーク回帰検出（fav bench --compare）
+description: "fav bench --compare による差分回帰検出と CI 統合"
+---
+
+# ベンチマーク回帰検出
+
+`fav bench --compare` を使うと、前回のベンチマーク結果と現在の結果を比較し、
+パフォーマンスの退行（regression）を自動検出できます。
+
+---
+
+## 基本的な使い方
+
+```bash
+# まずベースラインを取得して保存
+$ fav bench --all --json > benchmarks/v51.7.0.json
+
+# 次のリリースで比較
+$ fav bench --all --compare benchmarks/v51.7.0.json
+checker_run_time:  1.2ms → 1.8ms  (+50%)  [WARN: exceeds 10% threshold]
+compiler_run_time: 0.8ms → 0.9ms  (+12%)  [WARN]
+vm_run_time:       2.1ms → 2.0ms  (-5%)   [OK]
+```
+
+しきい値（デフォルト 10%）を超えた場合に `[WARN]` が表示されます。
+
+---
+
+## CI 統合 — `--fail-on-regression`
+
+`--fail-on-regression` フラグを指定すると、回帰が検出された場合に非ゼロ終了コードで終了します。
+GitHub Actions 等の CI パイプラインで退行を自動ブロックできます。
+
+```yaml
+# .github/workflows/bench.yml
+- name: Benchmark regression check
+  run: |
+    fav bench --all \
+      --compare benchmarks/v51.7.0.json \
+      --fail-on-regression
+```
+
+```bash
+$ fav bench --all --compare benchmarks/v51.7.0.json --fail-on-regression
+checker_run_time: +50%  [WARN: exceeds 10% threshold]
+error: regression detected — exiting with code 1
+```
+
+---
+
+## しきい値のカスタマイズ — `--threshold`
+
+デフォルトのしきい値（10%）は `--threshold` で変更できます。
+
+```bash
+# 20% 以上の退行のみ警告
+$ fav bench --all --compare benchmarks/baseline.json --threshold 20
+
+# 厳格モード: 5% 以上で CI 失敗
+$ fav bench --all --compare benchmarks/baseline.json --threshold 5 --fail-on-regression
+```
+
+---
+
+## `benchmarks/` ディレクトリの管理
+
+バージョンごとにベースラインを `benchmarks/` ディレクトリに保存することを推奨します。
+
+```
+favnir/
+  benchmarks/
+    v51.5.0.json   # インクリメンタルコンパイル実装時
+    v51.6.0.json   # ホットパス最適化実装時
+    v51.7.0.json   # WASM サイズ最適化実装時
+```
+
+各 JSON ファイルには `version` / `date` / `tests_passed` / `metrics` が含まれます。
+
+```json
+{
+  "version": "51.7.0",
+  "date": "2026-07-20",
+  "tests_passed": 3130,
+  "metrics": {
+    "wasm_before_dce_bytes": 412000,
+    "wasm_after_dce_bytes": 287000,
+    "wasm_reduction_pct": 30.3
+  }
+}
+```
+
+---
+
+## 関連コマンド
+
+| コマンド | 説明 |
+|---|---|
+| `fav bench --all` | すべてのベンチマークを実行 |
+| `fav bench --compare <file>` | 前回結果と比較 |
+| `fav bench --compare <file> --fail-on-regression` | 回帰時に非ゼロ終了（`--compare` と併用必須） |
+| `fav bench --threshold <N>` | しきい値を N% に変更（デフォルト: 10） |
+| `fav profile --build <file>` | parse / check / compile フェーズ別の処理時間計測 |

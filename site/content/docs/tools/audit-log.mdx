@@ -1,0 +1,65 @@
+# fav run --audit-log — データアクセスログ
+
+`fav run --audit-log <output.jsonl>` は、パイプライン実行中の外部システムアクセスを
+JSONL 形式で記録します（v52.6.0+）。
+
+> **注意**: `fav audit`（Enterprise Governance コマンド）とは別機能です。
+> `fav audit` はコードの静的監査レポートを生成しますが、
+> `--audit-log` は実行時の動的アクセスログを記録します。
+> また、`site/content/docs/governance/audit-log.mdx`（Audit Rune の説明）とも別物です。
+
+## 使い方
+
+```bash
+$ fav run pipeline.fav --audit-log audit.jsonl
+```
+
+実行が完了すると `audit.jsonl` に各アクセスイベントが記録されます。
+
+## JSONL 出力例
+
+```json
+{"ts":"2026-07-18T10:00:00Z","op":"read","effect":"Kafka","topic":"orders"}
+{"ts":"2026-07-18T10:00:01Z","op":"write","effect":"Snowflake","table":"orders_v2"}
+{"ts":"2026-07-18T10:00:02Z","op":"read","effect":"Kafka","topic":"orders"}
+{"ts":"2026-07-18T10:00:03Z","op":"write","effect":"Snowflake","table":"orders_v2"}
+```
+
+## フィールド説明
+
+| フィールド | 型 | 説明 |
+|---|---|---|
+| `ts` | String (ISO 8601) | アクセス発生時刻（UTC） |
+| `op` | `"read"` \| `"write"` | アクセス種別 |
+| `effect` | String | エフェクト名（`Kafka`、`Snowflake` 等） |
+| `topic` | String | Kafka トピック名（Kafka アクセス時のみ） |
+| `table` | String | テーブル名（Snowflake アクセス時のみ） |
+
+## 対応エフェクト
+
+| エフェクト | op=read | op=write |
+|---|---|---|
+| `!Kafka` | `consume_one_raw`（`topic` フィールド付き） | `produce_raw`（`topic` フィールド付き） |
+| `!Snowflake` | `query_raw`（`table` フィールド付き） | `execute_raw`（`table` フィールド付き） |
+
+## 活用例
+
+### コンプライアンス確認
+
+```bash
+$ fav run pipeline.fav --audit-log audit.jsonl
+$ jq 'select(.effect == "Snowflake" and .op == "write")' audit.jsonl
+```
+
+### アクセス集計
+
+```bash
+$ jq -r '.effect' audit.jsonl | sort | uniq -c
+```
+
+## fav audit との違い
+
+| コマンド | 種別 | 用途 |
+|---|---|---|
+| `fav run --audit-log` | 実行時ログ | 動的アクセス記録・コンプライアンス |
+| `fav audit` | 静的解析 | Enterprise Governance・コード監査 |

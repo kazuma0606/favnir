@@ -1,0 +1,34 @@
+// runes/sla/sla.fav — SLA 監視 Rune (v52.5.0)
+//
+// 使い方:
+//   import rune "sla"
+//
+// SLA 違反時は Err を返す（呼び出し側が bind で fail-fast を実現）。
+// アラート発火は !Observe エフェクト経由を想定（v52.5.0 はスタブ実装）。
+// 注意: !Observe は現時点で Effect enum 未登録のため関数シグネチャには付かない。
+//       将来バージョンで Effect enum への追加と型注釈を追加する予定。
+//
+// 例:
+//   stage CheckFreshness: DataBatch -> Result<DataBatch> = |batch| {
+//     bind _ <- sla.check_freshness(batch.timestamp, max_age_seconds: 3600)
+//     bind _ <- sla.check_latency(stage: "Parse", threshold_ms: 200)
+//     Ok(batch)
+//   }
+
+// データの鮮度を確認する。
+// timestamp（Unix 秒）が現在時刻 - max_age_seconds より古い場合 Err を返す。
+public fn check_freshness(timestamp: Int, max_age_seconds: Int) -> Result<Unit, String> {
+    Sla.check_freshness_raw(timestamp, max_age_seconds)
+}
+
+// ステージの実行レイテンシが threshold_ms ミリ秒以内か確認する。
+// 超過した場合は Err を返す。
+public fn check_latency(stage: String, threshold_ms: Int) -> Result<Unit, String> {
+    Sla.check_latency_raw(stage, threshold_ms)
+}
+
+// SLA 違反アラートを送信する。
+// 外部アラート基盤（Prometheus / Datadog 等）へ転送するスタブ（v52.5.0）。
+public fn alert(message: String) -> Result<Unit, String> {
+    Sla.alert_raw(message)
+}

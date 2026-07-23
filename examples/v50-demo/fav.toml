@@ -1,0 +1,6 @@
+[package]
+name    = "v50-demo"
+version = "0.1.0"
+
+[runes]
+kafka = "2.1.0"

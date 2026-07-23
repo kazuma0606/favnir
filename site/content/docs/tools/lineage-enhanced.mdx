@@ -1,0 +1,64 @@
+# fav explain --lineage 拡張オプション
+
+`fav explain --lineage` コマンドは v52.3.0 以降、スキーマ情報付加と HTML レポート生成をサポートしています。
+
+## --with-schema（スキーマ情報付き lineage）
+
+`--with-schema` を追加すると、`assert_schema` で検証されたスキーマ名がノードラベルに表示されます。
+
+```bash
+$ fav explain --lineage pipeline.fav --format mermaid --with-schema
+```
+
+出力例（mermaid）:
+
+```
+flowchart LR
+  kafka.consume["kafka.consume\nStream<RawOrder>"] --> Parse["Parse\nRawOrder -> Order"]
+  Parse --> Validate["Validate\nOrder -> Result<OrderRow>"]
+  Validate --> snowflake.insert["snowflake.insert\n!Snowflake(write)"]
+```
+
+dot 形式でも同様に使用できます:
+
+```bash
+$ fav explain --lineage pipeline.fav --format dot --with-schema
+```
+
+## --format html（インタラクティブ HTML レポート）
+
+`--format html` を指定すると、依存グラフを SVG でレンダリングし、
+stage をクリックすると型・エフェクト・スキーマの詳細を表示できる自己完結型 HTML を生成します。
+
+```bash
+$ fav explain --lineage pipeline.fav --format html -o lineage.html
+```
+
+生成された `lineage.html` はブラウザで直接開けます。外部ライブラリへの依存はありません。
+
+### HTML レポートの機能
+
+- SVG による依存グラフ可視化
+- stage ノードをクリックすると詳細パネルを表示（型・エフェクト・スキーマ名）
+- 自己完結型（単一 HTML ファイル、サーバー不要）
+
+## -o \<file\>（出力ファイル指定）
+
+`-o` オプションで出力先ファイルを指定します。省略時は標準出力に出力されます。
+
+```bash
+$ fav explain --lineage pipeline.fav --format mermaid --with-schema -o lineage.mmd
+$ fav explain --lineage pipeline.fav --format dot --with-schema -o lineage.dot
+$ fav explain --lineage pipeline.fav --format html -o lineage.html
+```
+
+## オプション一覧
+
+| オプション | 説明 |
+|---|---|
+| `--format mermaid` | Mermaid 形式で出力（デフォルト） |
+| `--format dot` | Graphviz DOT 形式で出力 |
+| `--format svg` | SVG 形式で出力 |
+| `--format html` | インタラクティブ HTML レポート出力（v52.4.0+） |
+| `--with-schema` | スキーマ情報をノードラベルに付加（v52.3.0+） |
+| `-o <file>` | 出力ファイルを指定（省略時: stdout） |

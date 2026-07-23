@@ -1,0 +1,14 @@
+{
+  "version": "51.3.0",
+  "date": "2026-07-19",
+  "milestone": "Performance & Scale Sprint",
+  "tests_passed": 3119,
+  "tests_failed": 0,
+  "metrics": {
+    "checker_ms": 12,
+    "compiler_ms": 8,
+    "total_pipeline_ms": 25
+  },
+  "regression": false,
+  "notes": "v51.3.0 ストリーミングバックプレッシャー実装後の計測。値はプレースホルダー（実環境で fav bench --json 実測値に更新すること）。"
+}

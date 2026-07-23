@@ -1,0 +1,65 @@
+---
+title: "Inline Testing"
+category: "クックブック"
+description: "#[test] インラインテストで fav test を活用するレシピ"
+---
+
+# Inline Testing
+
+`#[test]` アノテーションで `.fav` ファイル内にテストを直接記述し、`fav test` で実行します。
+
+## 基本パターン
+
+```favnir
+fn add(a: Int, b: Int) -> Int { a + b }
+
+#[test]
+fn test_add() {
+  assert_eq(add(1, 2), 3)
+  assert_eq(add(-1, 1), 0)
+}
+```
+
+## Result 型のテスト
+
+`validate_order` の定義は [Return Guard Pattern](/cookbook/return-guard-pattern) を参照。
+
+```favnir
+#[test]
+fn test_validate_ok() {
+  let good = { id: 1, amount: 100.0, status: "pending" }
+  assert_eq(validate_order(good), Result.ok(good))
+}
+
+#[test]
+fn test_validate_err() {
+  let bad = { id: -1, amount: 100.0, status: "pending" }
+  assert_eq(validate_order(bad), Result.err("invalid id"))
+}
+```
+
+`assert_ok` / `assert_err` を使うとより簡潔に書けます。
+
+```favnir
+#[test]
+fn test_validate_ok_shorthand() {
+  assert_ok(validate_order({ id: 1, amount: 10.0, status: "pending" }))
+}
+
+#[test]
+fn test_validate_err_shorthand() {
+  assert_err(validate_order({ id: -1, amount: 10.0, status: "pending" }))
+}
+```
+
+## 実行方法
+
+```sh
+fav test ./pipeline.fav
+```
+
+## ポイント
+
+- `#[test]` ブロックはコンパイル時に除外され、本番ビルドに影響しない
+- `assert_eq` / `assert_ok` / `assert_err` が利用可能
+- `fav test` はプロジェクト内の全 `#[test]` を自動収集して実行する

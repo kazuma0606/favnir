@@ -1,0 +1,99 @@
+---
+title: Developer Experience — v46.x
+description: fav test / LSP クイックフィックス / fav explain 2.0 による開発体験の改善
+---
+
+# Developer Experience — v46.x
+
+v46.x シリーズでは Favnir の開発体験を大幅に改善する機能を追加しました。
+インラインテスト・LSP クイックフィックス・型情報可視化の 3 本柱で構成されています。
+
+---
+
+## fav test — インラインテスト
+
+`#[test]` アノテーションでソースファイル内にテストを記述できます。
+詳細は [fav test](/docs/tools/fav-test) を参照してください。
+
+```bash
+fav test main.fav
+fav test main.fav --filter test_validate
+```
+
+---
+
+## LSP クイックフィックス
+
+エディタ上でエラーに対して自動修正アクション（`quickFix`）を提供します。
+VSCode では `Ctrl+.`（Mac: `Cmd+.`）で適用できます。
+
+### E0102 — 未定義変数（did-you-mean）
+
+スペルミスのある変数名に対して、最も近い定義済み変数名を提案します。
+
+```favnir
+let foo_value = 42
+let result = foo_val   -- E0102: did you mean `foo_value`?
+```
+
+クイックフィックスを適用すると `foo_val` が `foo_value` に自動修正されます。
+
+### E0101 — 引数数不一致
+
+呼び出し時の引数数が関数定義と異なる場合に、引数追加・削除の提案を行います。
+
+---
+
+## fav explain 2.0
+
+`fav explain` コマンドに複数の強化が加わりました。
+
+### fav explain --types
+
+パイプライン各ステージの宣言型を一覧表示します。
+
+```bash
+fav explain --types main.fav
+```
+
+出力例:
+
+```
+stage ParseCsv:   String -> List<Row>
+stage FilterRows: List<Row> -> List<Row>
+stage SaveToDb:   List<Row> -> Result<Int>
+```
+
+ジェネリックステージの場合は型パラメーターごと表示されます:
+
+```
+stage Map<T, U>: List<T> -> List<U>
+```
+
+### fav explain --lineage --show-dead
+
+リネージグラフで `return` 早期脱出パスを持つステージを dead path としてマークします。
+
+```bash
+fav explain --lineage --show-dead --format mermaid main.fav
+```
+
+`--show-dead` オプションは `--format mermaid` と組み合わせた場合のみ有効です。
+
+### fav explain --format mermaid（dead path 可視化）
+
+パイプライン図で早期脱出パスを点線（`-.->`)、`Err(...)` 返却パスを赤線として区別して表示します。
+
+```bash
+fav explain --format mermaid main.fav
+```
+
+---
+
+## v47.0 Developer Experience 宣言に向けて
+
+v46.1〜v46.9 の全機能が揃った段階で、v47.0 にて
+「Developer Experience」マイルストーンを宣言します。
+
+> 「インラインテスト・LSP クイックフィックス・型情報可視化が揃い、
+>  Favnir の開発体験が実用水準に達した。」

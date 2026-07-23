@@ -1,0 +1,115 @@
+---
+title: Import Migration Guide
+order: 2
+category: "Guides"
+description: 旧 import rune "X" 構文から新しいパッケージ import 構文への移行ガイド
+---
+
+# Import Migration Guide
+
+Favnir v48.5.0 で `import rune "X"` 構文が **W035** 警告（非推奨）となりました。
+新しい `import X` 構文への移行を推奨します。
+
+---
+
+## なぜ構文が変わったか
+
+旧構文の課題:
+
+1. `import rune "kafka"` と `import "./helpers"` の区別が引用符の有無だけで不明確だった
+2. パッケージの依存関係が import 文のみに分散しており、`fav.toml` に集約されていなかった
+3. エイリアスのサポートが限定的だった
+
+新構文の利点:
+
+- **明確な区別**: パッケージ（引用符なし）とローカルファイル（`"./"` プレフィックス）を構文で識別
+- **`fav.toml` 一元管理**: `[runes]` テーブルが依存関係の唯一の真実
+- **エイリアス完全サポート**: `import postgres as db` が自然に書ける
+
+---
+
+## 移行手順
+
+### ステップ 1: `fav.toml` に `[runes]` を宣言する
+
+使用しているパッケージをバージョン付きで宣言します。
+
+```toml
+[runes]
+kafka    = "2.1.0"
+postgres = "1.0.0"
+redis    = "3.2.0"
+```
+
+### ステップ 2: import 文を書き換える
+
+```favnir
+// 変更前（W035 警告が出る旧構文）
+import rune "kafka"
+import rune "postgres"
+
+// 変更後（推奨する新構文）
+import kafka
+import postgres as db
+```
+
+### ステップ 3: `fav install` を実行する
+
+```bash
+fav install
+```
+
+`fav.toml [runes]` に宣言したパッケージが `runes/` ディレクトリに展開されます。
+
+---
+
+## 変換対応表
+
+| 旧構文 | 新構文 |
+|---|---|
+| `import rune "kafka"` | `import kafka` |
+| `import rune "postgres"` | `import postgres` |
+| `import rune "kafka" as k` | `import kafka as k` |
+| `import rune "redis" as cache` | `import redis as cache` |
+| `import "./helpers"` | `import "./helpers" as helpers`（ローカルは変更なし）|
+
+---
+
+## よくある質問
+
+### W035 警告が出たら
+
+```
+W035: legacy import syntax `import rune "kafka"` is deprecated;
+      use `import kafka` (package) or `import "./path"` (local) instead
+```
+
+上記の「移行手順」に従って import 文を書き換えてください。`--allow W035` フラグで一時的に警告を抑制することもできますが、将来のバージョンで旧構文は削除される予定です。
+
+### `fav.toml` がない場合
+
+プロジェクトルートに `fav.toml` を作成し、`[runes]` セクションを追加してください。
+
+```toml
+[package]
+name    = "my-pipeline"
+version = "0.1.0"
+
+[runes]
+kafka = "2.1.0"
+```
+
+### E0417 が出る場合
+
+```
+E0417: package not declared in [runes]
+```
+
+`fav.toml` の `[runes]` に該当パッケージの宣言が不足しています。ステップ 1 を確認してください。
+
+---
+
+## 関連リンク
+
+- [Module System](./module-system) — モジュールシステムの全体像
+- [fav.toml リファレンス](./language/fav-toml) — `fav.toml` の全フィールド説明

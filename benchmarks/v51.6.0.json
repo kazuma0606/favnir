@@ -1,0 +1,17 @@
+{
+  "version": "51.6.0",
+  "date": "2026-07-19",
+  "milestone": "Performance & Scale Sprint",
+  "tests_passed": 3126,
+  "tests_failed": 0,
+  "metrics": {
+    "checker_ms": 12,
+    "compiler_ms": 8,
+    "total_pipeline_ms": 25,
+    "profile_build_parse_ms": 0.3,
+    "profile_build_check_ms": 1.8,
+    "profile_build_compile_ms": 0.4
+  },
+  "regression": false,
+  "notes": "プレースホルダー値。fav profile --build 実測値に更新することを推奨。"
+}

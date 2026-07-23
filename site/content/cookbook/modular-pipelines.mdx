@@ -1,0 +1,56 @@
+---
+title: "Modular Pipelines"
+category: "クックブック"
+description: "新 import 構文でパイプラインをモジュール化するレシピ"
+---
+
+# Modular Pipelines
+
+import 2.0 構文を使ってパイプラインをモジュールに分割するレシピです。
+
+## ディレクトリ構成
+
+```
+my-pipeline/
+  fav.toml
+  pipeline.fav
+  stages/
+    validate.fav
+    transform.fav
+```
+
+## ローカル import
+
+```favnir
+import "./stages/validate" as validate
+import "./stages/transform" as transform
+
+pipeline MainPipeline {
+  stage Run: Stream<Raw> -> Stream<Result<Output, String>> = |raw| {
+    bind v <- validate.run(raw)
+    bind t <- transform.apply(v)
+    Result.ok(t)
+  }
+}
+```
+
+## パッケージ import
+
+```favnir
+import kafka
+import postgres
+```
+
+fav.toml の `[runes]` セクションへの宣言も忘れずに。
+
+```toml
+[runes]
+kafka    = "2.1.0"
+postgres = "1.0.0"
+```
+
+## ポイント
+
+- ローカル import は相対パス（`"./path"`）で指定する
+- パッケージ import は `fav.toml [runes]` 宣言が必須（未宣言は E0418 エラー）
+- 旧構文（`import rune "X"`）は W035 警告が出るため新構文に移行すること

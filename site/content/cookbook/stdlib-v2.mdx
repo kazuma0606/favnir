@@ -1,0 +1,71 @@
+---
+title: "Standard Library 2.0 サンプル"
+category: "クックブック"
+description: "v47 シリーズで追加した標準ライブラリ関数を使ったサンプルパイプライン"
+---
+
+# Standard Library 2.0 サンプル
+
+v47.1〜v47.8 で追加された関数を使ったパイプラインサンプルです。
+
+## List パイプライン
+
+```favnir
+// データをチャンクに分割してバッチ処理
+bind rows    <- DB.query_raw("SELECT id, score FROM results")
+bind batches <- List.chunk(rows, 100)
+
+// スコアの累積和を計算
+bind scores  <- List.map(rows, |r| r.score)
+bind running <- List.scan(scores, 0, |acc, s| acc + s)
+
+// 合格スコアが続く先頭部分を取り出す
+bind passing <- List.take_while(scores, |s| s >= 60)
+
+// 重複 ID を除去
+bind ids     <- List.map(rows, |r| r.id)
+bind unique  <- List.dedupe(ids)
+```
+
+## Map パイプライン
+
+```favnir
+// 2 つの設定マップを結合（右辺優先）
+bind defaults <- Map.set(Map.set((), "timeout", 30), "retry", 3)
+bind overrides <- Map.set((), "timeout", 60)
+bind config   <- Map.merge(defaults, overrides)
+
+// 値でフィルタリング・変換（Float 値のマップ）
+bind scores_map  <- Map.set(Map.set(Map.set((), "alice", 85.0), "bob", 42.0), "carol", 91.0)
+bind high_scores <- Map.filter_values(scores_map, |v| v >= 80.0)
+bind normalized  <- Map.map_values(high_scores, |v| Float.round(v / 100.0, 2))
+```
+
+## Float / Int パイプライン
+
+```favnir
+// 数値の正規化
+bind raw    <- 3.14159
+bind rounded <- Float.round(raw, 2)        // 3.14
+bind clamped <- Float.clamp(raw, 0.0, 3.0) // 3.0
+
+// 16 進数変換
+bind color_r <- Int.to_hex(255)   // "ff"
+bind color_g <- Int.to_hex(128)   // "80"
+bind color_b <- Int.to_hex(0)     // "0"
+```
+
+## Option / Result チェーン
+
+```favnir
+// Option チェーン
+bind m       <- Map.set(Map.set((), "alice", 85), "bob", 42)
+bind opt_val <- Map.get(m, "alice")              // Option.some(85)
+bind doubled <- Option.map(opt_val, |s| s * 2)  // Option.some(170)
+bind result  <- Option.unwrap_or(doubled, 0)     // 170
+
+// Result チェーン
+bind r       <- Result.ok(42)
+bind scaled  <- Result.map(r, |n| n * 10)        // Result.ok(420)
+bind checked <- Result.and_then(scaled, |n| if n > 0 { Result.ok(n) } else { Result.err("negative") })
+```

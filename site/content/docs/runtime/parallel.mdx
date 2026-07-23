@@ -1,0 +1,92 @@
+---
+title: 並列ステージ実行（par）
+description: "par stage の並列実行・Merge.ordered / Merge.any・バックプレッシャー制御"
+---
+
+# 並列ステージ実行（par）
+
+`par` を使うと複数の stage を並列実行し、結果を `Merge` で結合できます。
+各ステージは独立したスレッドで実行されます。
+
+---
+
+## 基本構文
+
+```favnir
+pipeline IngestPipeline {
+  stage Process: Order -> EnrichedOrder = |order| {
+    par [Enrich(order), Validate(order)] |> Merge
+  }
+}
+```
+
+`par [A, B, ...]` は各要素を並列実行し、すべて完了後に結果をリストとして返します。
+`|> Merge` で結果リストを後続処理に渡します。
+
+---
+
+## Merge モード
+
+### Merge.ordered — 全完了後に順序を保って結合
+
+```favnir
+par [StageA(item), StageB(item), StageC(item)] |> Merge.ordered
+```
+
+- すべてのスレッドが完了するまで待機
+- 入力の順番通りに結果を返す
+- 結果の順序が重要な場合に使用
+
+### Merge.any — 完了した順に結合（streaming フレンドリー）
+
+```favnir
+par [StageA(item), StageB(item), StageC(item)] |> Merge.any
+```
+
+- 完了したステージの結果から順に下流へ流す
+- ストリーミングパイプラインで低レイテンシが必要な場合に使用
+- 結果の順序は保証されない
+
+---
+
+## バックプレッシャー制御
+
+大量データを扱う場合、producer が consumer より速いと無限にメモリが膨らむ可能性があります。
+`fav.toml` の `[stream]` セクションで `buffer_size` を指定してプロデューサーをブロック制御できます。
+
+```toml
+# fav.toml
+[stream]
+buffer_size = 1000   # キューが 1000 件を超えたら producer をブロック
+```
+
+```favnir
+stage Normalize: Stream<RawOrder> -> Stream<Order> = |raw| {
+  Order.from_raw(raw)
+  // buffer_size 満杯時は producer が自動的にブロック
+}
+```
+
+`buffer_size` を省略するとデフォルト（無制限）が使用されます。
+大量データを扱う場合は必ず `buffer_size` を設定することを推奨します（無制限の場合 OOM のリスクがあります）。
+
+---
+
+## エラー処理
+
+`par` の各ステージのいずれかが `Err` を返した場合、**fail-fast** で即座に全体が中断されます。
+
+```favnir
+stage SafeProcess: Item -> Result<Output> = |item| {
+  par [Validate(item), Enrich(item)] |> Merge.ordered
+  // Validate か Enrich が Err を返した時点で中断
+}
+```
+
+---
+
+## 注意事項
+
+- `par` は現在 WASM ターゲット（`fav build --target wasm`）では非対応
+- `par` 内のステージ間でデータを共有する場合は `!Cache` エフェクト経由のキャッシュを使用すること
+- ステージ数が多い場合はスレッドプールの上限に注意（デフォルト: CPU コア数）

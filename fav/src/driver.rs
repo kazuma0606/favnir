@@ -49983,7 +49983,7 @@ mod v494000_tests {
 
     #[test]
     fn docs_import_v2_exists() {
-        let content = include_str!("../../site/content/docs/modules/import.mdx");
+        let content = include_str!("../../site/content/docs/modules/import-v2.mdx");
         assert!(
             content.contains("import") && content.contains("W035"),
             "modules/import.mdx should document import v2 and W035 deprecation"

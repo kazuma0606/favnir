@@ -14031,7 +14031,7 @@ pub fn cmd_docs(file: Option<&str>, port: u16, no_open: bool) {
 
 // ── fav repl (v9.10.0) ───────────────────────────────────────────────────────
 
-struct ReplSession {
+pub(crate) struct ReplSession {
     definitions: String,
     def_names: Vec<String>,
     history: Vec<String>, // v17.5.0

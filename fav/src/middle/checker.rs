@@ -4316,10 +4316,7 @@ impl Checker {
                             let span = guard_expr.span();
                             self.type_error(
                                 "E0395",
-                                &format!(
-                                    "or-pattern guard must be Bool, got {:?}",
-                                    guard_ty
-                                ),
+                                format!("or-pattern guard must be Bool, got {:?}", guard_ty),
                                 span,
                             );
                         }
@@ -5358,16 +5355,13 @@ impl Checker {
                             // base が Named 型だがフィールドが型定義に存在しない
                             self.type_error(
                                 "E0397",
-                                &format!(
-                                    "record update: type has no field `{}`",
-                                    fname
-                                ),
+                                format!("record update: type has no field `{}`", fname),
                                 span,
                             );
                         } else if unify(&val_ty, &expected_ty).is_err() {
                             self.type_error(
                                 "E0396",
-                                &format!(
+                                format!(
                                     "record update: field `{}` expects {:?}, got {:?}",
                                     fname, expected_ty, val_ty
                                 ),

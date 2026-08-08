@@ -109,7 +109,7 @@ fn reinsert_comments(original: &str, formatted: &str) -> String {
         } else if !pending.is_empty() {
             let anchor = make_anchor(trimmed);
             if !anchor.is_empty() {
-                comment_blocks.push((anchor, pending.drain(..).collect()));
+                comment_blocks.push((anchor, std::mem::take(&mut pending)));
             } else {
                 // anchor が短すぎる（`}` 等）→ trailing として末尾に追記
                 pending.clear();

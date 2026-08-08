@@ -107,7 +107,7 @@ use driver::{
     cmd_explain_error_list, cmd_explain_error_list_json, cmd_explain_lineage, cmd_explain_sla, cmd_explain_types, cmd_fmt, cmd_graph,
     cmd_infer, cmd_infer_delta, cmd_infer_iceberg, cmd_infer_postgres, cmd_infer_proto, cmd_infer_snowflake, cmd_install, cmd_install_runes, cmd_lint, cmd_validate, cmd_contract_check, cmd_schema_diff, cmd_schema_migrate, cmd_catalog_push, cmd_catalog_search, cmd_policy_check_file, cmd_policy_list, inject_env_config, cmd_ha_run, cmd_migrate, cmd_upgrade, cmd_new, cmd_new_list,
     cmd_monitor, cmd_profile, cmd_profile_build, cmd_profile_compare, cmd_scaffold, cmd_transpile,
-    cmd_certify, generate_enterprise_cert, cmd_cost_estimate, cmd_marketplace_list, cmd_marketplace_publish, cmd_migrate_dry_run, cmd_migrate_ai, migrate_enterprise_import, cmd_publish, cmd_registry, cmd_repl, cmd_run, cmd_search, cmd_sla_report, cmd_test, cmd_test_enterprise, cmd_watch,
+    cmd_certify, generate_enterprise_cert, cmd_marketplace_list, cmd_marketplace_publish, cmd_migrate_dry_run, cmd_migrate_ai, migrate_enterprise_import, cmd_publish, cmd_registry, cmd_repl, cmd_run, cmd_search, cmd_sla_report, cmd_test, cmd_test_enterprise, cmd_watch,
     cmd_add, cmd_update, cmd_remove, cmd_login, cmd_info,
     cmd_generate_api, cmd_api_serve,
     cmd_ci_init,

@@ -1,12 +1,14 @@
 # Current — Favnir 進行状況
 
-最終更新: 2026-08-05 (v66.0.0)
+最終更新: 2026-08-08 (v70.0.0)
 
 ---
 
 ## 現行マスターロードマップ
 
-[roadmap/roadmap-v65.1-v70.0.md](roadmap/roadmap-v65.1-v70.0.md)
+[roadmap/roadmap-v70.1-v75.0.md](roadmap/roadmap-v70.1-v75.0.md)
+
+前フェーズ（完了）: [roadmap/roadmap-v65.1-v70.0.md](roadmap/roadmap-v65.1-v70.0.md)
 
 前フェーズ（完了）: [roadmap/roadmap-v60.1-v65.0.md](roadmap/roadmap-v60.1-v65.0.md)
 
@@ -30,13 +32,13 @@
 
 ## 進行中バージョン
 
-（次スプリント計画中）
+**v70.1.0**（Backlog Blitz — Language Complete 1.0 スプリント開始、`roadmap-v70.1-v75.0.md` に従う）
 
 ---
 
 ## 次に切る版
 
-**v66.9.0**（AI-Native Stage Layer スプリント中、`roadmap-v66.1-v67.0.md` に従う）
+**v70.1.0**（Backlog Blitz、`roadmap-v70.1-v75.0.md` Phase 1 参照）
 
 ---
 
@@ -70,5 +72,12 @@
 | v38.0 — Multi-Source ETL Power | **完了** | v37.1〜v37.9 完了後に宣言（2026-07-10） |
 | v39.0 — Intelligence & Assistance | **完了** | v38.1〜v38.9 完了後に宣言（2026-07-10） |
 | v40.0 — Enterprise Governance | **完了** | v39.1〜v39.9 完了後に宣言（2026-07-11） |
+| v65.0 — Performance 1.0 | **完了** | v60.1〜v64.9 完了後（2026-08-04） |
+| v70.0 — Intelligent ETL 1.0 | **完了** | v65.1〜v69.9 完了後（2026-08-08） |
+| v71.0 — Language Complete 1.0 | 計画中 | v70.1〜v70.9（積み残し解消 + compiler.fav 完全化） |
+| v72.0 — Type System 2.0 | 計画中 | v71.1〜v71.9（依存型・refined type・AOT） |
+| v73.0 — Developer Exp 2.0 | 計画中 | v72.1〜v72.9（VS Code・AI アシスタント・REPL） |
+| v74.0 — Production Proven | 計画中 | v73.1〜v73.9（データ品質・ドッグフーディング） |
+| v75.0 — Favnir 2.0 | 計画中 | v74.1〜v74.9（統合・Rune マーケット・宣言） |
 
-詳細は [INDEX.md](INDEX.md) / [roadmap/roadmap-v40.1-v45.0.md](roadmap/roadmap-v40.1-v45.0.md) を参照。
+詳細は [INDEX.md](INDEX.md) / [roadmap/roadmap-v70.1-v75.0.md](roadmap/roadmap-v70.1-v75.0.md) を参照。

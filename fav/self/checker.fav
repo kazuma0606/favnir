@@ -2831,6 +2831,6 @@ test "instantiate nested" {
     }
 }
 
-fn check_refinement_alias(ty_name: String, invariants: List<String>) -> Bool {
+fn check_refinement_alias(ty_name: String, invariants: List<String>) {
     true
 }

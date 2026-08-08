@@ -230,26 +230,41 @@ match row.amount {
 
 ---
 
-### v70.6.0 — Let 分割束縛 / Named Destructuring
+### v70.6.0 — `bind` 分割束縛拡張 / Named Destructuring
 
-レコード・リストの分解束縛を `let` 構文で簡潔に書けるようにする。
+既存の `bind x <- expr` 構文を拡張し、レコード・リストの分解束縛を
+`bind` で直接書けるようにする。`let` は Favnir では使用しない。
 
 ```favnir
-// レコード分割束縛
-let {order_id, amount, status} = row
-// 等価: bind order_id <- row.order_id; bind amount <- row.amount; ...
+// レコード分割束縛（bind の左辺にパターン）
+bind {order_id, amount, status} <- row
+// 等価: bind order_id <- row.order_id
+//        bind amount   <- row.amount
+//        bind status   <- row.status
 
 // リスト分割束縛
-let [head, second, ...tail] = items
+bind [head, second, ...tail] <- items
 // head: items[0], second: items[1], tail: items[2..]
 
 // ネスト分割束縛
-let {customer: {name, email}, total} = order
+bind {customer: {name, email}, total} <- order
+
+// 既存の bind と同一式内で混在可能
+fn process_order(ctx: AppCtx, row: OrderRow) -> Result<Unit, String> {
+    bind {order_id, amount} <- row
+    bind result             <- Postgres.insert(ctx, order_id, amount)
+    ctx.io.println(f"Inserted {order_id}: {result} rows")
+}
 ```
 
+**実装内容:**
+- parser: `bind` の左辺にレコードパターン `{field, ...}` / リストパターン `[h, ...t]` を受け付ける
+- checker: 分割束縛の各フィールドに型を伝播
+- compiler.fav: `parse_bind_lhs` にパターン分岐を追加
+
 **完了条件**: Rust テスト 2 件（3569 + 2 = 3571）
-- `let_destructure_record`
-- `let_destructure_list_spread`
+- `bind_destructure_record`
+- `bind_destructure_list_spread`
 
 ---
 
@@ -261,7 +276,7 @@ compiler.fav / checker.fav が処理できる Favnir 構文の網羅率を定量
 ```bash
 $ fav self-coverage
 compiler.fav coverage: 94.2% (48/51 syntax forms)
-  Missing: let-destructure, or-pattern, dependent-type-annotation
+  Missing: bind-destructure, or-pattern, dependent-type-annotation
 checker.fav coverage: 91.3% (42/46 error codes)
   Missing: E0411, E0412, E0413, E0414
 
@@ -272,7 +287,7 @@ $ fav self-coverage --fix-missing
 **実装内容:**
 - `cmd_self_coverage` — AST の全ノード種別をリストアップし、compiler.fav の処理対象と照合
 - Missing 構文を一覧表示・優先度付け
-- v70.5・v70.6 で追加した let / or-pattern を compiler.fav に反映
+- v70.5・v70.6 で追加した bind-destructure / or-pattern を compiler.fav に反映
 
 **完了条件**: Rust テスト 2 件（3571 + 2 = 3573）
 - `self_coverage_compiler_fav_above_95pct`

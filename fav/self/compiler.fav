@@ -4082,7 +4082,7 @@ fn serialize_artifact(artifact: Artifact) -> List<Int> {
     bind str_count <- List.length(state.str_table.strs);
     bind str_bytes <- write_str_table(state.str_table.strs, empty_ints());
     bind magic <- List.push(List.push(List.push(List.singleton(70), 86), 67), 1);
-    bind ver <- List.push(List.push(List.push(List.singleton(33), 0), 0), 0); // v52.2.0: 0x21
+    bind ver <- List.push(List.push(List.push(List.singleton(33), 0), 0), 0);
     bind header <- List.concat(List.concat(magic, ver), List.concat(List.concat(write_u32_le(str_count), write_u32_le(fn_count)), write_u32_le(state.global_count)));
     List.concat(header, List.concat(str_bytes, List.concat(state.type_bytes, List.concat(state.global_bytes, state.fn_bytes))))
 }

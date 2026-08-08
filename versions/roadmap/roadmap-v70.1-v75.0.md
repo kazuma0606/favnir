@@ -8,6 +8,9 @@ Status: 計画中（v70.0.0 完了、v70.1.0 から開始）
 ## 前提
 
 - 直前完了: v70.0.0「Intelligent ETL 1.0」（tests = 3559）
+  - ※前ロードマップ（roadmap-v65.1-v70.0.md）の推移表末尾は 3549 だったが、
+    v69.1〜v69.9 の Integration Sprint で +10（各 +2 × 5件）が加算され
+    実際の v70.0.0 は 3559 tests となった（CHANGELOG.md で確認済み）
 - 本文書は v70.1〜v75.0 の**マスターロードマップ**
 - 各マイルストーン開始時に対応するサブスプリントロードマップを作成する
 
@@ -91,7 +94,10 @@ v65〜v70 スプリントで積み上がったまま放置された技術的負�
 
 ---
 
-### v70.2.0 — `fav migrate`（構文自動移行ツール）
+### v70.2.0 — `fav migrate` 完成（構文自動移行ツール）
+
+> `cmd_migrate` は driver.rs に既に存在するが、`!Effect` → `ctx: AppCtx` への
+> 完全な変換ロジックが未実装。本バージョンで実用水準に完成させる。
 
 旧構文（`!Effect` アノテーション）を新構文（`ctx: AppCtx`）へ自動変換する。
 v35.4.0 の E0374 導入以降、手動移行が必要だったユーザーコードを一括救済する。
@@ -121,7 +127,11 @@ $ fav migrate --from v35 --in-place pipeline.fav
 
 ---
 
-### v70.3.0 — `fav bench` サブコマンド実装
+### v70.3.0 — `fav bench` サブコマンド完成
+
+> `cmd_bench` は driver.rs に既に存在し、`Some("bench")` も main.rs に登録済み。
+> しかし `--all` / `--compare` / `--fail-on-regression` の実装が不完全で
+> bench.yml が `continue-on-error` に頼っている。本バージョンで完全動作させる。
 
 `bench.yml` で長期間 `|| exit 1` を書きながら参照されてきた `$FAV bench` を
 実際に動作させる。
@@ -130,7 +140,7 @@ $ fav migrate --from v35 --in-place pipeline.fav
 # 全ベンチマークを実行して JSON 出力
 $ fav bench --all
 {
-  "version": "71.0.0",
+  "version": "70.3.0",
   "timestamp": "2026-08-08T10:00:00Z",
   "metrics": {
     "compile_hello_fav_ms": 12,
@@ -295,9 +305,13 @@ $ fav self-coverage --fix-missing
 
 ---
 
-### v70.8.0 — `fav doctor`（プロジェクト健全性チェック）
+### v70.8.0 — `fav doctor` 強化（プロジェクト健全性チェック）
 
-プロジェクト全体を静的に診断し、問題・改善点を一覧表示するコマンド。
+> `cmd_doctor_run` は driver.rs に既に存在し、`Some("doctor")` も main.rs に登録済み。
+> 本バージョンでは Paper Rune 検出・CHANGELOG 整合性・self-hosting coverage
+> など v70 スプリントで追加された検査項目を実装として追加する。
+
+プロジェクト全体を静的に診断し、問題・改善点を一覧表示するコマンドを強化する。
 
 ```bash
 $ fav doctor
@@ -306,8 +320,8 @@ Favnir v71.0.0 — project health check
 ✓ fav.toml           valid
 ✓ Cargo.toml         version = "71.0.0"
 ✓ self/compiler.fav  coverage 95.1%
-⚠ runes/linalg/      rune.toml あり、実装 .fav が空（paper rune）
-⚠ runes/autodiff/    同上
+⚠ runes/linalg/      VM primitive 未接続（スタブ実装）
+⚠ runes/autodiff/    VM primitive 未接続（スタブ実装）
 ✗ CHANGELOG.md       v70.9.0 エントリが存在しない
 ✗ benchmarks/        baseline.json が 90日以上古い
 
@@ -693,7 +707,7 @@ Open in editor? [y/N]: y
 
 ```bash
 $ fav repl
-Favnir v73.0.0 REPL — :help でヘルプ
+Favnir v72.4.0 REPL — :help でヘルプ
 
 fav> :import rune "json"
 rune "json" loaded.
@@ -744,7 +758,11 @@ fav> :load session.fav # セッションを再現
 
 ---
 
-### v72.6.0 — `fav init` テンプレート拡充
+### v72.6.0 — `fav init` テンプレートギャラリー拡充
+
+> `fav init` コマンドおよび `cmd_new` は driver.rs / main.rs に既に存在する。
+> 本バージョンでは v73 以降の新機能（AI ETL / distributed / data-quality）に
+> 対応したテンプレートを追加する（コマンド自体の新規実装ではなく拡充）。
 
 ```bash
 $ fav init --template ai-etl          # LLM 抽出 → VectorDB
@@ -988,21 +1006,24 @@ All SLA conditions met.
 
 ---
 
-### v73.6.0 — Rune 品質パス（Paper Rune → 実装昇格）
+### v73.6.0 — Rune 品質パス（スタブ実装 → VM primitive 接続）
 
-`runes/` ディレクトリに存在するが実装が空の "paper Rune" を実装に昇格させる。
+`runes/` ディレクトリ内の各 Rune は `.fav` 実装ファイルが存在するものの、
+関数本体が VM primitive (`Rune.linalg.dot(...)` 等) を呼び出していない
+**スタブ実装**の状態にある。本バージョンで VM primitive を接続し、
+実際にデータを処理できる本番品質の実装に昇格させる。
 
-**対象 Paper Rune（優先順）:**
+**対象 Rune（優先順）:**
 
-| Rune | 実装内容 |
-|---|---|
-| `runes/linalg/` | `dot`, `matmul`, `transpose`, `svd` の VM primitive 追加 |
-| `runes/autodiff/` | `grad`, `jacobian` の VM primitive 追加 |
-| `runes/stats/` | `mean`, `std`, `median`, `t_test` の VM primitive 追加 |
-| `runes/timeseries/` | `rolling_mean`, `ewm`, `decompose` の VM primitive 追加 |
-| `runes/ml/` | `knn_predict`, `random_forest_fit` の VM primitive 追加 |
+| Rune | 現状 | 実装内容 |
+|---|---|---|
+| `runes/linalg/` | .fav スタブあり、VM primitive 未接続 | `dot`, `matmul`, `transpose`, `svd` の vm.rs primitive 追加 + .fav 接続 |
+| `runes/autodiff/` | .fav スタブあり、VM primitive 未接続 | `grad`, `jacobian` の vm.rs primitive 追加 + .fav 接続 |
+| `runes/stats/` | .fav スタブあり、VM primitive 未接続 | `mean`, `std`, `median`, `t_test` の vm.rs primitive 追加 + .fav 接続 |
+| `runes/timeseries/` | .fav スタブあり、VM primitive 未接続 | `rolling_mean`, `ewm`, `decompose` の vm.rs primitive 追加 + .fav 接続 |
+| `runes/ml/` | .fav スタブあり、VM primitive 未接続 | `knn_predict`, `random_forest_fit` の vm.rs primitive 追加 + .fav 接続 |
 
-各 Rune に `.fav` 実装ファイル・`rune.toml`・統合テストを追加。
+各 Rune に統合テストを追加する。
 
 **完了条件**: Rust テスト 2 件（3635 + 2 = 3637）
 - `rune_linalg_matmul_runs`
@@ -1209,17 +1230,26 @@ $ fav schedule run daily-report  # 即時実行
 
 ---
 
-### v74.6.0 — `fav audit`（依存関係セキュリティ）
+### v74.6.0 — `fav audit` 拡張（依存関係セキュリティ機能追加）
+
+> 現行の `fav audit`（`cmd_audit`）は Favnir ソースコードレベルの監査（
+> `runes/audit/` ディレクトリ対象）を提供している。本バージョンでは
+> `fav audit --deps` サブフラグとして **Cargo 依存関係のセキュリティスキャン**
+> を追加する。既存の `fav audit`（コードレベル）との衝突はない。
 
 ```bash
-$ fav audit
-Auditing 47 dependencies...
+# 既存: ソースコード監査（変更なし）
+$ fav audit pipeline.fav
+
+# 新規追加: Cargo 依存関係のセキュリティスキャン
+$ fav audit --deps
+Auditing 47 Cargo dependencies...
 
 CRITICAL  libduckdb-sys 1.2.2  CVE-2026-XXXX  Update to 1.3.0
 HIGH      tokio 1.38.0         CVE-2026-YYYY  Update to 1.38.1
 OK        45 dependencies clean
 
-$ fav audit --fix
+$ fav audit --deps --fix
 Updated: libduckdb-sys 1.2.2 → 1.3.0
 Updated: tokio 1.38.0 → 1.38.1
 ```

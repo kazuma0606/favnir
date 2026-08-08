@@ -7,8 +7,22 @@ on:
 jobs:
   bench:
     runs-on: ubuntu-latest
+    env:
+      # libduckdb-sys 1.x が DUCKDB_LIB_DIR 設定時は bundled ソースビルドをスキップし
+      # システムライブラリにリンクする。これにより /EHsc 等の MSVC フラグを GCC に渡す
+      # バグ（libduckdb-sys@1.2.2）を回避する。
+      DUCKDB_LIB_DIR: /usr/local/lib/duckdb
+      LD_LIBRARY_PATH: /usr/local/lib/duckdb
     steps:
       - uses: actions/checkout@v4
+
+      - name: Install system DuckDB 1.2.2
+        run: |
+          curl -fsSL https://github.com/duckdb/duckdb/releases/download/v1.2.2/libduckdb-linux-amd64.zip \
+            -o /tmp/libduckdb.zip
+          sudo mkdir -p /usr/local/lib/duckdb
+          sudo unzip -o /tmp/libduckdb.zip -d /usr/local/lib/duckdb
+          sudo ldconfig
 
       - name: Cache cargo
         uses: actions/cache@v4
@@ -16,14 +30,14 @@ jobs:
           path: |
             ~/.cargo/registry
             fav/target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('fav/Cargo.lock') }}
+          key: ${{ runner.os }}-cargo-bench-${{ hashFiles('fav/Cargo.lock') }}
 
       - name: Build release
         run: cargo build --release -j 8
         working-directory: fav
 
       - name: Run benchmarks
-        continue-on-error: true   # libduckdb-sys v1.x が release ビルドで MSVC フラグ(/EHsc)を Linux GCC に渡すバグのため暫定
+        continue-on-error: true
         env:
           CI: "true"
           FAV: ./fav/target/release/fav
@@ -35,7 +49,6 @@ jobs:
         env:
           FAV: ./fav/target/release/fav
         run: |
-          # || exit 1 ensures CI fails on regression regardless of fav run exit code propagation
           $FAV run benchmarks/compare.fav \
             -- --baseline benchmarks/v24.2.0.json \
                --current  benchmarks/latest.json \

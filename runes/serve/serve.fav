@@ -1,0 +1,26 @@
+// serve Rune — モデルサービングエンドポイント
+// serve_stage, serve_pipeline, with_rate_limit, openapi_schema
+//
+// NOTE: 実際の HTTP サーバー起動・JSON シリアライズは将来フェーズ。
+//       ModelServingInterface — モデルサービング統一インターフェース（将来フェーズ）
+//       include_str! テストのみ（型チェックエラーは無視する）。
+
+// 単一ステージを HTTP エンドポイントとして公開する
+public fn serve_stage(stage_name: String, port: Int) -> String {
+    ""
+}
+
+// パイプライン全体を HTTP エンドポイントとして公開する
+public fn serve_pipeline(pipeline_name: String, port: Int) -> String {
+    ""
+}
+
+// レート制限を設定する（rps: requests per second）
+public fn with_rate_limit(rps: Int) -> String {
+    ""
+}
+
+// OpenAPI スキーマを生成する
+public fn openapi_schema(stage_name: String) -> String {
+    ""
+}

@@ -1,0 +1,8 @@
+[rune]
+name        = "numeric"
+version     = "0.1.0"
+description = "Numerical methods Rune for Favnir — integration, ODE solvers, interpolation, FFT, root finding"
+entry       = "numeric.fav"
+effects     = []
+
+[dependencies]

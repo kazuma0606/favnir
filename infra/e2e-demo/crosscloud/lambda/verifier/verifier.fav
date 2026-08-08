@@ -1,5 +1,5 @@
 // verifier.fav — CrossCloud 認証 + 移行トリガー (v15.1.0)
-// Lambda コンテナ内で実行: fav run --legacy /var/task/verifier.fav
+// Lambda コンテナ内で実行: fav run /var/task/verifier.fav
 //
 // bootstrap スクリプトが API GW イベントを解析して env var に設定:
 //   VERIFY_METHOD, VERIFY_PATH, VERIFY_TIMESTAMP, VERIFY_NONCE,
@@ -94,22 +94,22 @@ public fn main(ctx: AppCtx) -> Result<Unit, String> {
 
   // Step 2: HMAC シークレット取得
   bind _log <- ctx.io.println("[1/5] HMAC シークレット取得中...")
-  chain hmac_secret <- get_secret(region, secret_arn)
+  chain hmac_secret <- get_secret(ctx, region, secret_arn)
 
   // Step 3: HMAC 署名検証
-  bind sts <- build_sts(method, path, ts, nonce, body)
-  chain _hmac_ok <- verify_hmac(hmac_secret, sts, sig)
+  bind sts <- build_sts(ctx, method, path, ts, nonce, body)
+  chain _hmac_ok <- verify_hmac(ctx, hmac_secret, sts, sig)
   bind _log <- ctx.io.println("[2/5] HMAC 検証 OK")
 
   // Step 4: Nonce チェック（リプレイ攻撃防止）
   bind _log <- ctx.io.println("[3/5] Nonce チェック中...")
-  chain _nonce_ok <- put_nonce(nonce_tbl, nonce, nonce_ttl)
+  chain _nonce_ok <- put_nonce(ctx, nonce_tbl, nonce, nonce_ttl)
   bind _log <- ctx.io.println("[3/5] Nonce OK")
 
   // Step 5: ECS Fargate 移行タスク起動
   bind _log <- ctx.io.println("[4/5] ECS 移行タスク起動中...")
   bind overrides <- build_overrides(stg_acct, stg_key)
-  chain task_arn <- run_migration(cluster, task_def, subnets, sg, overrides)
+  chain task_arn <- run_migration(ctx, cluster, task_def, subnets, sg, overrides)
   bind _log <- ctx.io.println(String.concat("[4/5] ECS タスク起動 OK: ", task_arn))
 
   // Step 6: 証跡を S3 に保存
@@ -119,7 +119,7 @@ public fn main(ctx: AppCtx) -> Result<Unit, String> {
     String.concat("{\"status\":\"ok\",\"request_id\":\"", req_id),
     String.concat("\",\"task_arn\":\"", String.concat(task_arn, "\"}"))
   )
-  chain _proof_ok <- save_proof(proof_bkt, proof_key, proof_body)
+  chain _proof_ok <- save_proof(ctx, proof_bkt, proof_key, proof_body)
   bind _log <- ctx.io.println("[5/5] OK — verification complete")
 
   Result.ok(())

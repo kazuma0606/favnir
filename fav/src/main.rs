@@ -66,6 +66,8 @@ pub(crate) mod generate_csv;
 pub(crate) mod explain_verbose;
 mod schemas;
 mod incremental;
+#[cfg(not(target_arch = "wasm32"))]
+mod cache;
 mod parallel;
 mod profiler;
 #[cfg(not(target_arch = "wasm32"))]
@@ -81,6 +83,19 @@ mod coverage;
 mod std_states;
 mod toml;
 mod value;
+mod debug;
+mod doc_math;
+mod cluster;
+mod checkpoint;
+mod k8s;
+mod retry;
+mod dist_cache;
+mod cost_estimate;
+mod ai_routing;
+mod dist_otel;
+mod viz;
+mod simulate;
+mod proptest;
 
 use driver::{
     cmd_bench, cmd_build, cmd_build_schema, cmd_bundle, cmd_check, cmd_check_with_sample,
@@ -90,12 +105,13 @@ use driver::{
     cmd_doc_builtins, cmd_doc_site, cmd_doc_serve, cmd_docs,
     cmd_exec, cmd_explain, cmd_explain_code, cmd_explain_compiler, cmd_explain_diff, cmd_explain_error,
     cmd_explain_error_list, cmd_explain_error_list_json, cmd_explain_lineage, cmd_explain_sla, cmd_explain_types, cmd_fmt, cmd_graph,
-    cmd_infer, cmd_infer_delta, cmd_infer_iceberg, cmd_infer_postgres, cmd_infer_proto, cmd_infer_snowflake, cmd_install, cmd_install_runes, cmd_lint, cmd_validate, cmd_contract_check, cmd_schema_diff, cmd_migrate, cmd_upgrade, cmd_new, cmd_new_list,
+    cmd_infer, cmd_infer_delta, cmd_infer_iceberg, cmd_infer_postgres, cmd_infer_proto, cmd_infer_snowflake, cmd_install, cmd_install_runes, cmd_lint, cmd_validate, cmd_contract_check, cmd_schema_diff, cmd_schema_migrate, cmd_catalog_push, cmd_catalog_search, cmd_policy_check_file, cmd_policy_list, inject_env_config, cmd_ha_run, cmd_migrate, cmd_upgrade, cmd_new, cmd_new_list,
     cmd_monitor, cmd_profile, cmd_profile_build, cmd_profile_compare, cmd_scaffold, cmd_transpile,
-    cmd_publish, cmd_registry, cmd_repl, cmd_run, cmd_search, cmd_test, cmd_watch,
+    cmd_certify, generate_enterprise_cert, cmd_cost_estimate, cmd_marketplace_list, cmd_marketplace_publish, cmd_migrate_dry_run, cmd_migrate_ai, migrate_enterprise_import, cmd_publish, cmd_registry, cmd_repl, cmd_run, cmd_search, cmd_sla_report, cmd_test, cmd_test_enterprise, cmd_watch,
     cmd_add, cmd_update, cmd_remove, cmd_login, cmd_info,
     cmd_generate_api, cmd_api_serve,
     cmd_ci_init,
+    cmd_generate_error_docs,
 };
 use rune_cmd::cmd_rune;
 use std::process;
@@ -219,7 +235,7 @@ COMMANDS:
     explain-error --list [--format <text|json>]
                   List all known error codes with titles.
                   With --format json, emit structured JSON (for site generation).
-    deploy [--target <lambda|docker|ecs|k8s|fly|aws-lambda>] [--env <name>] [--function <name>]
+    deploy [--target <lambda|docker|ecs|k8s|kubernetes|fly|aws-lambda>] [--env <name>] [--function <name>]
            [--region <r>] [--out-dir <path>] [--dry-run] [--package-only] [--output <zip>] [--tag <tag>]
                   Deploy pipeline to a container or serverless platform.
                   Targets: lambda (AWS Lambda, direct zip upload), docker (Docker image build),
@@ -235,6 +251,13 @@ COMMANDS:
                   Publish runes to the local registry (~/.fav/registry/).
     registry [list|search <q>|info <name>]
                   Manage the local Rune registry.
+    marketplace list|search <q>|publish --rune <n>
+                  Browse, search, and publish Runes on the Favnir Marketplace (v59.4.0+).
+    sla report    Generate a SLA compliance report (v59.2.0+).
+    certify --level enterprise
+                  Check Enterprise 1.0 requirements and generate enterprise-cert.json (v59.6.0+).
+    cost-estimate [--provider <name>]
+                  Estimate pipeline cost by stage (default provider: aws) (v59.3.0+).
     help          Show this help message
 
 OPTIONS (run / exec):
@@ -355,6 +378,121 @@ fn main_impl() {
         }
 
         Some("run") => {
+            // ── v68.2.0: fav run --checkpoint / --resume ──────────────────────
+            if args.iter().any(|a| a == "--checkpoint" || a == "--resume") {
+                let checkpoint_dir = args.iter().position(|a| a == "--checkpoint")
+                    .and_then(|i| args.get(i + 1).map(|s| s.as_str()))
+                    .unwrap_or("./checkpoints/");
+                let resume_file = args.iter().position(|a| a == "--resume")
+                    .and_then(|i| args.get(i + 1).map(|s| s.as_str()))
+                    .unwrap_or("");
+                let src = args.iter().skip(2)
+                    .find(|a| !a.starts_with('-') && a.as_str() != checkpoint_dir && a.as_str() != resume_file)
+                    .map(|s| s.as_str())
+                    .unwrap_or("pipeline.fav");
+                println!("{}", checkpoint::cmd_checkpoint_run(src, checkpoint_dir, resume_file));
+                return;
+            }
+            // ── v68.4.0: fav run --retry-policy ──────────────────────────────
+            // 注意: --checkpoint/--resume との同時指定は非サポート（--checkpoint が優先）。
+            // --retry-policy は値なしフラグのため src 除外は不要だが、
+            // 他の値付きフラグ（例: --checkpoint ./dir）が先行する場合はその値が src に誤検出される可能性がある。
+            // スタブ実装段階では単独使用を前提とする。
+            if args.iter().any(|a| a == "--retry-policy") {
+                let src = args.iter().skip(2)
+                    .find(|a| !a.starts_with('-'))
+                    .map(|s| s.as_str())
+                    .unwrap_or("pipeline.fav");
+                println!("{}", retry::cmd_retry_policy(src));
+                return;
+            }
+            // ── v68.5.0: fav run --distributed-cache <url> ───────────────────
+            // 注意: --checkpoint/--resume / --retry-policy と同時指定した場合は先行ブランチが優先される。
+            // cache_url は redis://... 等 '-' で始まらないため src 除外フィルターに明示的に追加する。
+            if args.iter().any(|a| a == "--distributed-cache") {
+                let cache_url = match args.iter().position(|a| a == "--distributed-cache")
+                    .and_then(|i| args.get(i + 1).map(|s| s.as_str()))
+                    .filter(|v| !v.starts_with('-'))
+                {
+                    Some(v) => v,
+                    None => {
+                        eprintln!("error: --distributed-cache requires a Redis URL (e.g. redis://localhost:6379)");
+                        std::process::exit(1);
+                    }
+                };
+                let src = args.iter().skip(2)
+                    .find(|a| !a.starts_with('-') && a.as_str() != cache_url)
+                    .map(|s| s.as_str())
+                    .unwrap_or("pipeline.fav");
+                println!("{}", dist_cache::cmd_distributed_cache(src, cache_url));
+                return;
+            }
+            // ── v68.8.0: fav run --otel-endpoint <url> ───────────────────────
+            // 注意: --checkpoint/--retry-policy/--distributed-cache と同時指定した場合は先行ブランチが優先される。
+            // otel_endpoint は http://... 等 '-' で始まらないためインデックスベースで除外する。
+            if let Some(otel_idx) = args.iter().position(|a| a == "--otel-endpoint") {
+                let otel_endpoint = match args.get(otel_idx + 1)
+                    .map(|s| s.as_str())
+                    .filter(|v| !v.starts_with('-'))
+                {
+                    Some(v) => v,
+                    None => {
+                        eprintln!("error: --otel-endpoint requires a URL (e.g. http://tempo:4317)");
+                        std::process::exit(1);
+                    }
+                };
+                let mut skip_indices = std::collections::HashSet::new();
+                skip_indices.insert(otel_idx + 1);
+                let src = args.iter().enumerate().skip(2)
+                    .find(|(i, a)| !a.starts_with('-') && !skip_indices.contains(i))
+                    .map(|(_, s)| s.as_str())
+                    .unwrap_or("pipeline.fav");
+                println!("{}", dist_otel::cmd_dist_otel(src, otel_endpoint));
+                return;
+            }
+            // ── v58.6.0: fav run --env <name> ────────────────────────────────
+            if let Some(env_idx) = args.iter().position(|a| a == "--env") {
+                let env_name = match args.get(env_idx + 1) {
+                    Some(v) => v.as_str(),
+                    None => {
+                        eprintln!("fav run: --env requires a value");
+                        std::process::exit(1);
+                    }
+                };
+                // --env と その値（env_idx / env_idx+1）を除いた positional 引数からファイルを取得
+                let pipeline_file = args.iter()
+                    .enumerate()
+                    .skip(2)
+                    .filter(|(i, a)| *i != env_idx && *i != env_idx + 1 && !a.starts_with("--"))
+                    .map(|(_, a)| a.as_str())
+                    .next()
+                    .unwrap_or("pipeline.fav");
+                let code = inject_env_config(env_name, pipeline_file);
+                if code != 0 {
+                    std::process::exit(code);
+                }
+                // v58.x stub: 環境設定の出力のみ行い、実際のパイプライン実行は将来バージョンで統合
+                return;
+            }
+            // ── v58.7.0: fav run --ha --replica <n> ──────────────────────────
+            if args.iter().any(|a| a == "--ha") {
+                // --ha と --env の同時指定は未サポート（stub 期間中）
+                if args.iter().any(|a| a == "--env") {
+                    eprintln!("fav run: --ha and --env cannot be combined (use separate commands)");
+                    std::process::exit(1);
+                }
+                let replica_count: u32 = args.iter()
+                    .position(|a| a == "--replica")
+                    .and_then(|i| args.get(i + 1))
+                    .and_then(|v| v.parse::<u32>().ok())
+                    .unwrap_or(1);
+                let code = cmd_ha_run(replica_count);
+                if code != 0 {
+                    std::process::exit(code);
+                }
+                // v58.x stub: HA 設定の出力のみ行い、実際のレプリカ起動は将来バージョンで統合
+                return;
+            }
             // ── v21.1.0: fav run --debug <file> ──────────────────────────────
             #[cfg(not(target_arch = "wasm32"))]
             if args.iter().any(|a| a == "--debug") {
@@ -462,6 +600,7 @@ fn main_impl() {
             // v54.2.0: --watch-diff / --watch-summary
             let mut watch_diff = false;
             let mut watch_summary = false;
+            let mut sla_enforce = false;
             let mut file_idx = 2usize;
             let mut i = 2usize;
             while i < args.len() {
@@ -578,9 +717,15 @@ fn main_impl() {
                         i += 1;
                         file_idx = i;
                     }
+                    "--sla-enforce" => {
+                        sla_enforce = true;
+                        i += 1;
+                        file_idx = i;
+                    }
                     _ => break,
                 }
             }
+            let _ = sla_enforce;
             if watch_diff {
                 eprintln!("warning: --watch-diff is not yet fully implemented; flag accepted but field-level diff tracking requires runtime VM hooks (v54.2+)");
             }
@@ -595,9 +740,37 @@ fn main_impl() {
             let mut out: Option<&str> = None;
             let mut target: Option<&str> = None;
             let mut file: Option<&str> = None;
+            let mut link = false;
+            let mut aot_stats = false;
+            let mut docker = false;
+            let mut dry_run_docker = false; // dry_run_docker: 他アームの dry_run と名前衝突を避けるため独自名
+            let mut tag: Option<&str> = None;
             let mut i = 2usize;
             while i < args.len() {
                 match args[i].as_str() {
+                    "--link" => {
+                        link = true;
+                        i += 1;
+                    }
+                    "--aot-stats" => {
+                        aot_stats = true;
+                        i += 1;
+                    }
+                    "--docker" => {
+                        docker = true;
+                        i += 1;
+                    }
+                    "--dry-run" => {
+                        dry_run_docker = true;
+                        i += 1;
+                    }
+                    "--tag" => {
+                        tag = Some(args.get(i + 1).unwrap_or_else(|| {
+                            eprintln!("error: --tag requires a value");
+                            process::exit(1);
+                        }));
+                        i += 2;
+                    }
                     "--graphql" => {
                         target = Some("graphql");
                         i += 1;
@@ -630,7 +803,71 @@ fn main_impl() {
                     }
                 }
             }
-            if matches!(target, Some("schema")) {
+            // v62.7.0: fav.toml の [build] セクションを読み込んで設定を解決する。
+            let toml_build = crate::toml::FavToml::load(std::path::Path::new("."))
+                .and_then(|t| t.build);
+            // v62.7.0: fav.toml [build] を読み込んで設定を解決する。
+            // _resolved は将来 cmd_build_basic / cmd_build_link 等に渡す予定（v62.9.0 以降）。
+            // --opt-level / --inline-pure-stages CLI フラグは v62.9.0 で追加。
+            let _resolved = driver::resolve_build_config(
+                target,
+                None,
+                None,
+                out,
+                toml_build.as_ref(),
+            );
+            if dry_run_docker && !docker {
+                eprintln!("error: --dry-run requires --docker flag");
+                process::exit(1);
+            }
+            if docker {
+                let f = file.unwrap_or_else(|| {
+                    eprintln!("error: build --docker requires a source file");
+                    process::exit(1);
+                });
+                let tag_val = tag.unwrap_or("app:latest");
+                let src = std::fs::read_to_string(f).unwrap_or_else(|e| {
+                    eprintln!("error: cannot read {f}: {e}");
+                    process::exit(1);
+                });
+                if dry_run_docker {
+                    println!("{}", driver::cmd_build_docker_dry_run(&src, tag_val));
+                } else {
+                    println!("{}", driver::cmd_build_docker(&src, tag_val));
+                }
+            } else if aot_stats {
+                let f = file.unwrap_or_else(|| {
+                    eprintln!("error: build --aot-stats requires a source file");
+                    process::exit(1);
+                });
+                let src = std::fs::read_to_string(f).unwrap_or_else(|e| {
+                    eprintln!("error: cannot read {f}: {e}");
+                    process::exit(1);
+                });
+                let result = driver::cmd_build_aot_stats(&src);
+                if result.starts_with("parse error:") {
+                    eprintln!("{result}");
+                    process::exit(1);
+                }
+                println!("{result}");
+            } else if link {
+                let f = file.unwrap_or_else(|| {
+                    eprintln!("error: build --link requires a source file");
+                    process::exit(1);
+                });
+                let out_path = out.unwrap_or("a.out");
+                let src = std::fs::read_to_string(f).unwrap_or_else(|e| {
+                    eprintln!("error: cannot read {f}: {e}");
+                    process::exit(1);
+                });
+                // triple 形式（"-" を含む）の場合に AOT target として使用する。
+                // graphql/proto/schema は "-" を含まないため衝突しない。
+                let aot_target = match target {
+                    Some(t) if t.contains('-') => Some(t),
+                    _ => None,
+                };
+                println!("{}", driver::cmd_build_link_target(&src, out_path, aot_target));
+            } else if matches!(target, Some("schema")) {
                 let f = file.unwrap_or_else(|| {
                     eprintln!("error: build --schema requires a source file");
                     process::exit(1);
@@ -1249,6 +1486,20 @@ fn main_impl() {
                         cases = Some(n);
                         i += 2;
                     }
+                    "--suite" => {
+                        // NOTE: すべての分岐で process::exit() するため i += 2 は不要（到達不能）
+                        let suite = args.get(i + 1).map(|s| s.as_str()).unwrap_or_else(|| {
+                            eprintln!("error: --suite requires a value (e.g. --suite enterprise)");
+                            process::exit(1);
+                        });
+                        if suite == "enterprise" {
+                            let code = cmd_test_enterprise();
+                            process::exit(code);
+                        } else {
+                            eprintln!("error: unknown suite '{}' (available: enterprise)", suite);
+                            process::exit(1);
+                        }
+                    }
                     "--watch" => {
                         watch_mode = true;
                         i += 1;
@@ -1297,6 +1548,29 @@ fn main_impl() {
         }
 
         Some("bench") => {
+            // ── v62.5.0: --aot flag → AOT vs VM 比較モード ────────────────────
+            if args.iter().any(|a| a == "--aot") {
+                let file = args.iter()
+                    .skip(2) // args[0]=プログラム名, args[1]="bench" をスキップ
+                    .find(|a| !a.starts_with('-'))
+                    .map(|s| s.as_str())
+                    .unwrap_or_else(|| {
+                        eprintln!("error: fav bench --aot requires a source file");
+                        process::exit(1);
+                    });
+                let runs: usize = args.iter()
+                    .position(|a| a == "--runs")
+                    .and_then(|i| args.get(i + 1))
+                    .and_then(|s| s.parse().ok())
+                    .unwrap_or(5);
+                let src = std::fs::read_to_string(file).unwrap_or_else(|e| {
+                    eprintln!("error: cannot read {file}: {e}");
+                    process::exit(1);
+                });
+                let result = driver::cmd_bench_aot_vm(&src, runs, "bench-results.json");
+                println!("{result}");
+                return;
+            }
             // ── v24.3.0: --baseline flag → compare mode ───────────────────────
             if args.iter().any(|a| a == "--baseline") {
                 let baseline_path = args.iter().position(|a| a == "--baseline")
@@ -1562,6 +1836,7 @@ fn main_impl() {
             let mut deny_warnings = false;
             let mut file: Option<String> = None;
             let mut cli_allow: Vec<String> = Vec::new();
+            let mut strict = false; // v61.8.0
             let mut i = 2usize;
             while i < args.len() {
                 match args[i].as_str() {
@@ -1581,13 +1856,17 @@ fn main_impl() {
                             i += 1;
                         }
                     }
+                    "--strict" => { // v61.8.0
+                        strict = true;
+                        i += 1;
+                    }
                     other => {
                         file = Some(other.to_string());
                         i += 1;
                     }
                 }
             }
-            cmd_lint(file.as_deref(), warn_only, deny_warnings, cli_allow);
+            cmd_lint(file.as_deref(), warn_only, deny_warnings, cli_allow, strict);
         }
 
         // fav validate --schema <schema.fav> <data.csv> [--export ge] [--output suite.json]  (v36.4.0, v36.7.0)
@@ -1657,9 +1936,38 @@ fn main_impl() {
                     let new_file = args.get(4).map(|s| s.as_str());
                     cmd_schema_diff(old_file, new_file);
                 }
+                Some("migrate") => {
+                    // --from / --to / --data フラグのパース（値欠落は明示エラー）
+                    let has_from = args.iter().any(|a| a == "--from");
+                    let from = args.windows(2).find(|w| w[0] == "--from")
+                        .map(|w| w[1].as_str());
+                    if has_from && from.is_none() {
+                        eprintln!("error: --from requires a value (e.g., --from v1)");
+                        process::exit(1);
+                    }
+                    let has_to = args.iter().any(|a| a == "--to");
+                    let to = args.windows(2).find(|w| w[0] == "--to")
+                        .map(|w| w[1].as_str());
+                    if has_to && to.is_none() {
+                        eprintln!("error: --to requires a value (e.g., --to v2)");
+                        process::exit(1);
+                    }
+                    let has_data = args.iter().any(|a| a == "--data");
+                    let data = args.windows(2).find(|w| w[0] == "--data")
+                        .map(|w| w[1].as_str());
+                    if has_data && data.is_none() {
+                        eprintln!("error: --data requires a value (e.g., --data orders.jsonl)");
+                        process::exit(1);
+                    }
+                    std::process::exit(cmd_schema_migrate(
+                        from.unwrap_or("v1"),
+                        to.unwrap_or("v2"),
+                        data.unwrap_or("data.jsonl"),
+                    ));
+                }
                 sub => {
                     eprintln!(
-                        "error: unknown subcommand `{}` for `fav schema`\n  usage: fav schema diff <old.fav> <new.fav>",
+                        "error: unknown subcommand `{}` for `fav schema`\n  usage: fav schema diff <old.fav> <new.fav>\n         fav schema migrate --from <ver> --to <ver> --data <file>",
                         sub.unwrap_or("(none)")
                     );
                     process::exit(1);
@@ -1667,9 +1975,76 @@ fn main_impl() {
             }
         }
 
+        // fav catalog push / search (v58.4.0)
+        Some("catalog") => {
+            match args.get(2).map(|s| s.as_str()) {
+                Some("push") => {
+                    let has_catalog = args.iter().any(|a| a == "--catalog");
+                    let catalog_url = args.windows(2).find(|w| w[0] == "--catalog")
+                        .map(|w| w[1].as_str());
+                    // --catalog フラグあり・値なしはエラー。フラグ自体の省略は
+                    // 意図的にデフォルト URL (datahub://localhost:8080) へフォールバックする。
+                    if has_catalog && catalog_url.is_none() {
+                        eprintln!("error: --catalog requires a value (e.g., --catalog datahub://localhost:8080)");
+                        process::exit(1);
+                    }
+                    std::process::exit(cmd_catalog_push(
+                        catalog_url.unwrap_or("datahub://localhost:8080"),
+                    ));
+                }
+                Some("search") => {
+                    let query = args.get(3).map(|s| s.as_str()).unwrap_or("");
+                    std::process::exit(cmd_catalog_search(query));
+                }
+                sub => {
+                    eprintln!(
+                        "error: unknown subcommand `{}` for `fav catalog`\n  usage: fav catalog push --catalog <url>\n         fav catalog search <query>",
+                        sub.unwrap_or("(none)")
+                    );
+                    process::exit(1);
+                }
+            }
+        }
+
+        Some("cluster") => {
+            if args.iter().any(|a| a == "--help" || a == "-h") {
+                print!("{}", cluster::CLUSTER_HELP);
+                return;
+            }
+            let cluster_file = match args.iter().position(|a| a == "--cluster") {
+                Some(i) => match args.get(i + 1).map(|s| s.as_str()) {
+                    Some(v) if !v.starts_with('-') => v,
+                    _ => {
+                        eprintln!("error: --cluster requires a workers.yaml path");
+                        process::exit(1);
+                    }
+                },
+                None => {
+                    eprintln!("error: fav cluster requires --cluster <workers.yaml>");
+                    process::exit(1);
+                }
+            };
+            let partition_by = args.iter().position(|a| a == "--partition-by")
+                .and_then(|i| args.get(i + 1).map(|s| s.as_str()))
+                .unwrap_or("default");
+            let src = args.iter().skip(2)
+                .find(|a| !a.starts_with('-') && a.as_str() != cluster_file && a.as_str() != partition_by)
+                .map(|s| s.as_str())
+                .unwrap_or("");
+            if src.is_empty() {
+                eprintln!("error: fav cluster requires a <pipeline.fav> argument");
+                process::exit(1);
+            }
+            println!("{}", cluster::cmd_cluster_run(src, cluster_file, partition_by));
+        }
+
         Some("doc") => {
             // fav doc --builtins [--format json|markdown] [--out <file>]
             if args.iter().any(|a| a == "--builtins") {
+                if args.iter().any(|a| a == "--math") {
+                    eprintln!("error: --math cannot be combined with --builtins");
+                    process::exit(1);
+                }
                 let format = args.windows(2)
                     .find(|w| w[0] == "--format")
                     .map(|w| w[1].as_str())
@@ -1678,6 +2053,26 @@ fn main_impl() {
                     .find(|w| w[0] == "--out")
                     .map(|w| w[1].as_str());
                 cmd_doc_builtins(format, out);
+                return;
+            }
+            // fav doc --math [--format md|html|mdx] [path]
+            if args.iter().any(|a| a == "--math") {
+                if args.iter().any(|a| a == "--help" || a == "-h") {
+                    print!("{}", doc_math::DOC_MATH_HELP);
+                    return;
+                }
+                let format = args.windows(2)
+                    .find(|w| w[0] == "--format")
+                    .map(|w| w[1].as_str())
+                    .unwrap_or("markdown");
+                let path = match args.iter().skip(2).find(|a| !a.starts_with('-')).map(|s| s.as_str()) {
+                    Some(p) => p,
+                    None => {
+                        eprintln!("error: fav doc --math requires a <file> argument");
+                        process::exit(1);
+                    }
+                };
+                println!("{}", doc_math::cmd_doc_math(path, format));
                 return;
             }
             // fav doc --serve [path] [--port N] [--no-open]
@@ -1731,7 +2126,7 @@ fn main_impl() {
                 }
             }
             match format.as_str() {
-                "site" => cmd_doc_site(&path, &out_dir),
+                "site" | "html" => cmd_doc_site(&path, &out_dir),
                 _ => cmd_doc(&path, &out_dir),
             }
         }
@@ -1766,6 +2161,7 @@ fn main_impl() {
             let mut out: Option<String> = None;
             let mut compare: Option<String> = None;
             let mut build = false;
+            let mut interactive = false;
             let mut i = 2usize;
             while i < args.len() {
                 let arg = args[i].as_str();
@@ -1791,9 +2187,15 @@ fn main_impl() {
                     compare = args.get(i + 1).cloned(); i += 2;
                 } else if arg == "--build" {
                     build = true; i += 1;
+                } else if arg == "--interactive" {
+                    interactive = true; i += 1;
                 } else {
                     path = arg.to_string(); i += 1;
                 }
+            }
+            if interactive && args.iter().any(|a| a == "--help" || a == "-h") {
+                print!("{}", profiler::interactive::INTERACTIVE_HELP);
+                return;
             }
             if path.is_empty() {
                 if compare.is_some() {
@@ -1805,7 +2207,9 @@ fn main_impl() {
                 }
                 process::exit(1);
             }
-            if let Some(ref v) = compare {
+            if interactive {
+                println!("{}", profiler::interactive::cmd_profile_interactive(&path));
+            } else if let Some(ref v) = compare {
                 if build {
                     eprintln!("error: --compare and --build cannot be used together");
                     process::exit(1);
@@ -1986,6 +2390,9 @@ fn main_impl() {
             let mut dry_run = false;
             let mut check = false;
             let mut from_effects = false;
+            let mut ai_mode = false;
+            let mut interactive = false;
+            let mut output_path: Option<String> = None;
             let mut dir: Option<String> = None;
             let mut file: Option<String> = None;
             let mut from_version: Option<String> = None;
@@ -1994,6 +2401,25 @@ fn main_impl() {
             let mut i = 2usize;
             while i < args.len() {
                 match args[i].as_str() {
+                    "--ai" => {
+                        ai_mode = true;
+                        i += 1;
+                    }
+                    "--interactive" => {
+                        interactive = true;
+                        i += 1;
+                    }
+                    "--output" => {
+                        output_path = Some(
+                            args.get(i + 1)
+                                .unwrap_or_else(|| {
+                                    eprintln!("error: --output requires a file path");
+                                    process::exit(1);
+                                })
+                                .clone(),
+                        );
+                        i += 2;
+                    }
                     "--in-place" => {
                         in_place = true;
                         i += 1;
@@ -2060,10 +2486,83 @@ fn main_impl() {
                     }
                 }
             }
+            if ai_mode {
+                let src_path = file.as_deref().unwrap_or("src/pipeline.fav");
+                let src = std::fs::read_to_string(src_path).unwrap_or_else(|e| {
+                    eprintln!("error: cannot read {}: {}", src_path, e);
+                    process::exit(1);
+                });
+                cmd_migrate_ai(&src, output_path.as_deref(), dry_run, interactive);
+                return;
+            }
+            if to_version.as_deref() == Some("enterprise") {
+                if dry_run {
+                    print!("{}", cmd_migrate_dry_run());
+                    return;
+                } else if in_place {
+                    if let Some(path) = &file {
+                        match std::fs::read_to_string(path) {
+                            Ok(src) => {
+                                let fixed = migrate_enterprise_import(&src);
+                                if let Err(e) = std::fs::write(path, &fixed) {
+                                    eprintln!("error: {e}");
+                                    process::exit(1);
+                                }
+                                println!("[fixed] {path}");
+                            }
+                            Err(e) => {
+                                eprintln!("error: {e}");
+                                process::exit(1);
+                            }
+                        }
+                        return;
+                    }
+                }
+            }
             cmd_migrate(
                 file.as_deref(), in_place, dry_run, check, dir.as_deref(), from_effects,
                 from_version.as_deref(), to_version.as_deref(), config_file.as_deref(),
             );
+        }
+
+        Some("certify") => {
+            let mut level: Option<String> = None;
+            let mut i = 2usize;
+            while i < args.len() {
+                match args[i].as_str() {
+                    "--level" => {
+                        level = Some(
+                            args.get(i + 1)
+                                .unwrap_or_else(|| {
+                                    eprintln!("error: --level requires an argument");
+                                    process::exit(1);
+                                })
+                                .clone(),
+                        );
+                        i += 2;
+                    }
+                    _ => { i += 1; }
+                }
+            }
+            match level.as_deref() {
+                Some("enterprise") => {
+                    print!("{}", cmd_certify());
+                    let cert = generate_enterprise_cert();
+                    if let Err(e) = std::fs::write("enterprise-cert.json", &cert) {
+                        eprintln!("warning: could not write enterprise-cert.json: {e}");
+                    } else {
+                        println!("Certificate written to enterprise-cert.json");
+                    }
+                }
+                None => {
+                    eprintln!("error: --level is required. Use: fav certify --level enterprise");
+                    process::exit(1);
+                }
+                Some(other) => {
+                    eprintln!("error: unknown --level '{other}'. Use: --level enterprise");
+                    process::exit(1);
+                }
+            }
         }
 
         Some("upgrade") => {
@@ -2115,6 +2614,11 @@ fn main_impl() {
                 eprintln!("error: explain-error requires a code (e.g. E0213) or --list");
                 process::exit(1);
             }
+        }
+
+        Some("generate-error-docs") => {
+            let out_dir = args.get(2).map(|s| s.as_str()).unwrap_or("site/content/docs/errors");
+            cmd_generate_error_docs(out_dir);
         }
 
         Some("install") => {
@@ -2189,12 +2693,66 @@ fn main_impl() {
             cmd_registry(subcommand, &sub_args);
         }
 
+        Some("debug") => {
+            if args.iter().any(|a| a == "--replay") {
+                let trace = args.iter().skip(2).find(|a| !a.starts_with('-')).map(|s| s.as_str()).unwrap_or("");
+                println!("{}", debug::cmd_debug_replay(trace, &args));
+            } else {
+                let file = args.get(2).map(|s| s.as_str()).unwrap_or("");
+                let rest: Vec<String> = args.iter().skip(3).cloned().collect();
+                println!("{}", debug::cmd_debug(file, &rest));
+            }
+        }
+
+        Some("viz") => {
+            let file = args.get(2).map(|s| s.as_str()).unwrap_or("");
+            let rest: Vec<String> = args.iter().skip(3).cloned().collect();
+            println!("{}", viz::cmd_viz(file, &rest));
+        }
+
+        Some("simulate") => {
+            if args.iter().any(|a| a == "--help" || a == "-h") {
+                print!("{}", simulate::SIMULATE_HELP);
+            } else {
+                let file = args.get(2).map(|s| s.as_str()).unwrap_or("");
+                let rest: Vec<String> = args.iter().skip(3).cloned().collect();
+                println!("{}", simulate::cmd_simulate(file, &rest));
+            }
+        }
+
+        Some("proptest") => {
+            if args.iter().any(|a| a == "--help" || a == "-h") {
+                print!("{}", proptest::PROPTEST_HELP);
+            } else {
+                let file = args.get(2).map(|s| s.as_str()).unwrap_or("");
+                let rest: Vec<String> = args.iter().skip(3).cloned().collect();
+                println!("{}", proptest::cmd_proptest(file, &rest));
+            }
+        }
+
         Some("suggest") => {
-            let error_code = args.get(2).map(|s| s.as_str()).unwrap_or("E0001");
-            let location   = args.get(3).map(|s| s.as_str()).unwrap_or("");
-            if let Err(e) = suggest::cmd_suggest(error_code, location) {
-                eprintln!("fav suggest error: {}", e);
-                std::process::exit(1);
+            if args.iter().any(|a| a == "--help" || a == "-h") {
+                print!("{}", suggest::SUGGEST_PROFILE_HELP);
+            } else if let Some(pos) = args.iter().position(|a| a == "--from-profile") {
+                let profile_path = match args.get(pos + 1).map(|s| s.as_str()) {
+                    Some(p) if !p.starts_with('-') => p,
+                    _ => {
+                        eprintln!("fav suggest error: --from-profile requires a path argument");
+                        std::process::exit(1);
+                    }
+                };
+                let src = args.iter().skip(2)
+                    .find(|a| !a.starts_with('-'))
+                    .map(|s| s.as_str())
+                    .unwrap_or("");
+                println!("{}", suggest::cmd_suggest_profile(src, profile_path));
+            } else {
+                let error_code = args.get(2).map(|s| s.as_str()).unwrap_or("E0001");
+                let location   = args.get(3).map(|s| s.as_str()).unwrap_or("");
+                if let Err(e) = suggest::cmd_suggest(error_code, location) {
+                    eprintln!("fav suggest error: {}", e);
+                    std::process::exit(1);
+                }
             }
         }
 
@@ -2202,9 +2760,51 @@ fn main_impl() {
             let sub = args.get(2).map(|s| s.as_str()).unwrap_or("check");
             let ci_mode = args.iter().any(|a| a == "--ci");
             if sub == "check" {
-                if let Err(e) = policy::cmd_policy_check(ci_mode) {
-                    eprintln!("fav policy error: {}", e);
-                    std::process::exit(1);
+                // v58.5.0: --policy-dir フラグがあれば拡張チェックを呼ぶ
+                let policy_dir_idx = args.iter().position(|a| a == "--policy-dir");
+                if let Some(idx) = policy_dir_idx {
+                    let policy_dir = match args.get(idx + 1) {
+                        Some(v) => v.as_str(),
+                        None => {
+                            eprintln!("fav policy check: --policy-dir requires a value");
+                            std::process::exit(1);
+                        }
+                    };
+                    // --policy-dir より前後どちらにあっても正しく取得するため
+                    // "--" で始まらない最初の positional 引数を探す
+                    let pipeline_file = args.iter()
+                        .skip(3) // fav, policy, check をスキップ
+                        .find(|a| !a.starts_with("--"))
+                        .map(|s| s.as_str())
+                        .unwrap_or("pipeline.fav");
+                    let code = cmd_policy_check_file(pipeline_file, policy_dir);
+                    if code != 0 {
+                        std::process::exit(code);
+                    }
+                } else {
+                    // --policy-dir なし → 既存の policy::cmd_policy_check にフォールバック
+                    if let Err(e) = policy::cmd_policy_check(ci_mode) {
+                        eprintln!("fav policy error: {}", e);
+                        std::process::exit(1);
+                    }
+                }
+            } else if sub == "list" {
+                // v58.5.0: fav policy list --policy-dir <dir>
+                let policy_dir_idx = args.iter().position(|a| a == "--policy-dir");
+                let policy_dir = if let Some(idx) = policy_dir_idx {
+                    match args.get(idx + 1) {
+                        Some(v) => v.as_str(),
+                        None => {
+                            eprintln!("fav policy list: --policy-dir requires a value");
+                            std::process::exit(1);
+                        }
+                    }
+                } else {
+                    "policy/"
+                };
+                let code = cmd_policy_list(policy_dir);
+                if code != 0 {
+                    std::process::exit(code);
                 }
             } else {
                 eprintln!("fav policy: unknown subcommand: {}", sub);
@@ -2273,6 +2873,18 @@ fn main_impl() {
         }
 
         Some("deploy") => {
+            // v58.1.0: blue-green strategy / rollback dispatch
+            {
+                let sub = args.get(2).map(|s| s.as_str()).unwrap_or("");
+                // --strategy または --canary-weight フラグ、もしくは named subcommand
+                // (rollback/promote/abort/status) があれば cmd_deploy_strategy に委譲
+                let has_strategy = args.iter().any(|a| a == "--strategy" || a == "--canary-weight");
+                let is_deploy_sub = matches!(sub, "rollback" | "promote" | "abort" | "status");
+                if is_deploy_sub || has_strategy {
+                    let deploy_args: Vec<String> = args.get(2..).unwrap_or(&[]).to_vec();
+                    std::process::exit(driver::cmd_deploy_strategy(&deploy_args));
+                }
+            }
             let mut env: Option<String> = None;
             let mut function_name: Option<String> = None;
             let mut region: Option<String> = None;
@@ -2387,6 +2999,22 @@ fn main_impl() {
                         process::exit(1);
                     }
                 }
+            }
+            // ── v68.3.0: fav deploy --target kubernetes ───────────────────────
+            // 注意: --trigger と同時指定された場合は kubernetes ターゲットが優先される（--trigger は無視）
+            if target.as_deref() == Some("kubernetes") {
+                // パース済みのフラグ値を収集し、src 候補から除外する（誤検出防止）
+                let known_flag_values: Vec<&str> = [
+                    target.as_deref(), tag_arg.as_deref(), output.as_deref(),
+                    out_dir.as_deref(), env.as_deref(), function_name.as_deref(),
+                    region.as_deref(),
+                ].iter().filter_map(|v| *v).collect();
+                let src = args.iter().skip(2)
+                    .find(|a| !a.starts_with('-') && !known_flag_values.contains(&a.as_str()))
+                    .map(|s| s.as_str())
+                    .unwrap_or("pipeline.fav");
+                println!("{}", k8s::cmd_deploy_k8s(src));
+                return;
             }
             if let Some(ref tfile) = trigger_file {
                 crate::driver::cmd_deploy_trigger(tfile, None);
@@ -2737,6 +3365,103 @@ fn main_impl() {
             if let Err(e) = driver::cmd_dap(port) {
                 eprintln!("error: {e}");
                 process::exit(1);
+            }
+        }
+
+        Some("marketplace") => {
+            let sub = args.get(2).map(|s| s.as_str()).unwrap_or("");
+            match sub {
+                "list" => {
+                    let code = cmd_marketplace_list();
+                    process::exit(code);
+                }
+                "search" => {
+                    let query = args.get(3).map(|s| s.as_str()).unwrap_or("");
+                    println!("Searching marketplace for '{}'...", query);
+                    println!("kafka         favnir-official  12,450    MIT");
+                    process::exit(0);
+                }
+                "publish" => {
+                    let mut rune_name: &str = "";
+                    let mut i = 3usize;
+                    while i < args.len() {
+                        match args[i].as_str() {
+                            "--rune" => {
+                                rune_name = args.get(i + 1).map(|s| s.as_str()).unwrap_or_else(|| {
+                                    eprintln!("error: --rune requires a value");
+                                    process::exit(1);
+                                });
+                                i += 2;
+                            }
+                            _ => { i += 1; }
+                        }
+                    }
+                    if rune_name.is_empty() {
+                        eprintln!("error: marketplace publish requires --rune <name>");
+                        process::exit(1);
+                    }
+                    let code = cmd_marketplace_publish(rune_name);
+                    process::exit(code);
+                }
+                _ => {
+                    eprintln!("error: unknown marketplace subcommand '{}' (available: list, search, publish)", sub);
+                    process::exit(1);
+                }
+            }
+        }
+
+        Some("ai-routing") => {
+            // ── v68.7.0: fav ai-routing <src> --env <dev|prod|test> ──
+            // args[0]="fav", args[1]="ai-routing" を skip(2) でスキップ
+            // env 値（"dev"/"test"/"prod" 等）は "-" で始まらないためインデックスベースで除外する
+            // Some("run") 内の既存 --env ブランチとは別アーム（競合なし）
+            let env_idx = args.iter().position(|a| a == "--env");
+            let env = env_idx
+                .and_then(|i| args.get(i + 1).map(|s| s.as_str()))
+                .unwrap_or("dev"); // 省略時は dev（本番誤適用防止）
+            let mut skip_indices = std::collections::HashSet::new();
+            if let Some(i) = env_idx { skip_indices.insert(i + 1); }
+            let src = args.iter().enumerate().skip(2)
+                .find(|(i, a)| !a.starts_with('-') && !skip_indices.contains(i))
+                .map(|(_, s)| s.as_str())
+                .unwrap_or("pipeline.fav");
+            println!("{}", ai_routing::cmd_ai_routing(src, env));
+        }
+
+        Some("cost-estimate") => {
+            // ── v68.6.0: fav cost-estimate <src> --provider <aws|gcp|azure> --scale <N>-rows ──
+            // args[0]="fav", args[1]="cost-estimate" を skip(2) でスキップ
+            // フラグ値インデックスを収集して除外（値比較では src ファイル名と偶然一致する恐れがある）
+            let provider_idx = args.iter().position(|a| a == "--provider");
+            let scale_idx = args.iter().position(|a| a == "--scale");
+            let provider = provider_idx
+                .and_then(|i| args.get(i + 1).map(|s| s.as_str()))
+                .unwrap_or("aws");
+            let scale = scale_idx
+                .and_then(|i| args.get(i + 1).map(|s| s.as_str()))
+                .unwrap_or("1M-rows");
+            // フラグ値が置かれるインデックス（i+1）を skip_indices に収集して src 候補から除外
+            let mut skip_indices = std::collections::HashSet::new();
+            if let Some(i) = provider_idx { skip_indices.insert(i + 1); }
+            if let Some(i) = scale_idx    { skip_indices.insert(i + 1); }
+            let src = args.iter().enumerate().skip(2)
+                .find(|(i, a)| !a.starts_with('-') && !skip_indices.contains(i))
+                .map(|(_, s)| s.as_str())
+                .unwrap_or("pipeline.fav");
+            println!("{}", cost_estimate::cmd_cost_estimate(src, provider, scale));
+        }
+
+        Some("sla") => {
+            let sub = args.get(2).map(|s| s.as_str()).unwrap_or("");
+            match sub {
+                "report" => {
+                    let code = cmd_sla_report();
+                    process::exit(code);
+                }
+                _ => {
+                    eprintln!("error: unknown sla subcommand '{}' (available: report)", sub);
+                    process::exit(1);
+                }
             }
         }
 

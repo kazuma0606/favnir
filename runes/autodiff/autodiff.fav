@@ -1,0 +1,61 @@
+// Autodiff Rune — Rune.autodiff
+// Reverse-mode automatic differentiation for Favnir
+//
+// NOTE: Tensor<Float>, Tape 等の型は将来フェーズで型システムに登録する。
+//       今バージョンは include_str! テストのみ（型チェックエラーは無視する）。
+
+// --- 計算テープ（reverse-mode AD の中核） ---
+
+public fn tape() -> Tape {
+    Tape { nodes: [], ops: [] }
+}
+
+// --- 微分演算 ---
+
+// スカラー値関数の勾配 — f: Tensor<Float> -> Float の ∂f/∂x（戻り型は入力と同型）
+public fn grad(f: Tensor<Float> -> Float, x: Tensor<Float>) -> Tensor<Float> {
+    x
+}
+
+// ベクトル値関数のヤコビアン行列
+public fn jacobian(f: Tensor<Float> -> Tensor<Float>, x: Tensor<Float>) -> Tensor<Float> {
+    x
+}
+
+// 二階微分行列（ヘッシアン）
+public fn hessian(f: Tensor<Float> -> Float, x: Tensor<Float>) -> Tensor<Float> {
+    x
+}
+
+// --- 勾配追跡制御 ---
+
+// 勾配追跡を無効化するコンテキスト（推論・評価時に使用）
+public fn no_grad(f: () -> Tensor<Float>) -> Tensor<Float> {
+    f()
+}
+
+// --- プリミティブ（チェーンルール対応） ---
+
+public fn prim_exp(x: Tensor<Float>) -> Tensor<Float> {
+    x
+}
+
+public fn prim_log(x: Tensor<Float>) -> Tensor<Float> {
+    x
+}
+
+public fn prim_sin(x: Tensor<Float>) -> Tensor<Float> {
+    x
+}
+
+public fn prim_cos(x: Tensor<Float>) -> Tensor<Float> {
+    x
+}
+
+public fn prim_tanh(x: Tensor<Float>) -> Tensor<Float> {
+    x
+}
+
+public fn relu(x: Tensor<Float>) -> Tensor<Float> {
+    x
+}

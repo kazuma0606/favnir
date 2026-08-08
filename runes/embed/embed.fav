@@ -1,0 +1,41 @@
+// Embedding Pipeline Rune — Rune.embed
+// OpenAI / Cohere / local (Ollama) unified embedding interface
+//
+// NOTE: Vec<Float>[N]（次元型パラメータ: 1536 / 1024 / 768）は将来フェーズで型システムに登録する。
+//       今バージョンは List<Float> をプレースホルダーとして使用。
+//       include_str! テストのみ（型チェックエラーは無視する）。
+// TODO: openai / cohere は実際の API 呼び出しを行うため、本番実装時に
+//       rune.toml の effects に "!Http" または "!Llm" を追加すること。
+
+// --- プロバイダー別埋め込み ---
+
+// OpenAI 埋め込み（text-embedding-3-small: 1536 次元）
+public fn openai(text: String, model: String) -> List<Float> {
+    []
+}
+
+// Cohere 埋め込み（embed-english-v3.0: 1024 次元）
+public fn cohere(text: String, model: String) -> List<Float> {
+    []
+}
+
+// ローカルモデル埋め込み（Ollama 経由: nomic-embed-text: 768 次元）
+// EmbedLocalProvider — Ollama を使ったローカル推論
+public fn local(text: String, model: String) -> List<Float> {
+    []
+}
+
+// --- バッチ処理 ---
+
+// バッチ埋め込み: テキストのリスト → 埋め込みベクトルのリスト
+public fn embed_batch(texts: List<String>, model: String) -> List<List<Float>> {
+    []
+}
+
+// --- キャッシュ付き埋め込み ---
+
+// キャッシュ付き埋め込み（同一入力の再計算を防ぐ）
+// embed_cached — cache_key でキャッシュを識別する
+public fn embed_cached(text: String, model: String, cache_key: String) -> List<Float> {
+    []
+}

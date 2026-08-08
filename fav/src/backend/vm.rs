@@ -1427,6 +1427,14 @@ thread_local! {
         = std::cell::RefCell::new("memory".to_string());
 }
 
+// v55.5.0: 型付き State ストア（String key → VMValue）
+// State.get / State.set / State.get_or_default で使用する。
+// State.get_raw / State.set_raw は引き続き STATE_STORE（String→String）を使用。
+thread_local! {
+    static STATE_VALUE_STORE: std::cell::RefCell<std::collections::HashMap<String, VMValue>>
+        = std::cell::RefCell::new(std::collections::HashMap::new());
+}
+
 pub fn set_state_backend(backend: &str) {
     if backend != "memory" {
         // v22.3.0: only "memory" backend is implemented.
@@ -1448,6 +1456,32 @@ pub(crate) fn get_state_value(key: &str) -> Option<String> {
 /// テスト用: STATE_STORE にキーを直接書き込む（クレート内のみ）
 pub(crate) fn set_state_value(key: &str, val: &str) {
     STATE_STORE.with(|c| c.borrow_mut().insert(key.to_string(), val.to_string()));
+}
+
+/// v55.5.0: テスト用: STATE_VALUE_STORE と STATE_STORE の両方をクリアする（同一スレッドのテスト間汚染を防止）
+pub(crate) fn clear_state_value_store() {
+    STATE_VALUE_STORE.with(|c| c.borrow_mut().clear());
+    STATE_STORE.with(|c| c.borrow_mut().clear());
+}
+
+// v55.7.0: Checkpoint / Replay API — resume-from 再開ポイント格納
+thread_local! {
+    static RESUME_FROM_CHECKPOINT: std::cell::RefCell<Option<String>>
+        = std::cell::RefCell::new(None);
+}
+
+pub fn set_resume_from_checkpoint(name: &str) {
+    RESUME_FROM_CHECKPOINT.with(|c| {
+        *c.borrow_mut() = Some(name.to_string());
+    });
+}
+
+pub fn get_resume_from_checkpoint() -> Option<String> {
+    RESUME_FROM_CHECKPOINT.with(|c| c.borrow().clone())
+}
+
+pub fn clear_resume_from_checkpoint() {
+    RESUME_FROM_CHECKPOINT.with(|c| *c.borrow_mut() = None);
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -1537,6 +1571,18 @@ pub struct VM {
     /// fav.toml [stream].buffer_size から注入される chunk_size 上限 (v51.3.0).
     /// None = 制約なし（デフォルト）。wasm32 でも使用可能。
     stream_buffer_size: Option<usize>,
+    /// v55.1: ウィンドウチェックポイント保存先（v55.3 でフル実装）
+    pub(crate) checkpoint_store: Option<String>,
+    /// v55.2: 遅延イベントドロップ回数カウンター（観測フック用）
+    pub(crate) late_event_drops: u64,
+    /// v55.2: --stream-stats フラグ有効時に true（v55.9 でフル実装）
+    pub(crate) show_stream_stats: bool,
+    /// v55.3: delivery セマンティクス（"exactly-once" | "at-least-once"）。
+    /// run_with_stream_buffer_size 等で fav.toml の stream.delivery から注入する。
+    pub(crate) checkpoint_delivery: Option<String>,
+    /// v55.3: 処理済みウィンドウオフセットの in-memory セット（冪等重複排除用）。
+    /// 永続化は v55.7 で実装。
+    pub(crate) processed_offsets: HashSet<u64>,
     source_file: String,
     type_metas: HashMap<String, TypeMeta>,
     /// v52.2.0: --strict-schema フラグ。true のとき assert_schema で想定外フィールドをエラーにする。
@@ -1602,6 +1648,13 @@ pub(crate) enum VMStream {
     Split { inner: Box<VMStream>, pred_fn: VMValue },
     /// v42.4.0: time-window join — nested-loop join of two streams by predicate
     Join {
+        left: Box<VMStream>,
+        right: Box<VMStream>,
+        join_fn: VMValue,
+        window_secs: i64,
+    },
+    /// v55.4.0: left outer join — all left items preserved; unmatched right side = Unit
+    JoinLeft {
         left: Box<VMStream>,
         right: Box<VMStream>,
         join_fn: VMValue,
@@ -1757,6 +1810,11 @@ impl VM {
             emit_log: Vec::new(),
             db_path,
             stream_buffer_size: None,
+            checkpoint_store: None,
+            late_event_drops: 0,
+            show_stream_stats: false,
+            checkpoint_delivery: None,
+            processed_offsets: HashSet::new(),
             source_file: String::new(),
             type_metas: artifact.type_metas.clone(),
             strict_schema: STRICT_SCHEMA.with(|s| s.get()),
@@ -1774,6 +1832,37 @@ impl VM {
 
     pub fn set_source_file(&mut self, source_file: &str) {
         self.source_file = source_file.to_string();
+    }
+
+    /// ウィンドウ境界でのチェックポイント保存フック（v55.3: in-memory 追跡、v55.7 で永続化）
+    /// `offset` = これまでに処理したウィンドウ数（`out.len()` の値）。
+    fn checkpoint_hook(&mut self, offset: u64) {
+        // v55.3: exactly-once の場合、処理済みオフセットを in-memory で記録する
+        // （永続化は v55.7 Checkpoint / Replay API で実装）
+        // is_some() を使うことで v55.7 の永続化拡張時に borrow 競合が生じない構造にする
+        if self.checkpoint_store.is_some()
+            && self.checkpoint_delivery.as_deref() == Some("exactly-once")
+        {
+            self.processed_offsets.insert(offset);
+        }
+    }
+
+    /// 指定オフセットが処理済みかどうかを検証する（Exactly-once 重複排除クエリ）
+    pub(crate) fn is_duplicate_offset(&self, offset: u64) -> bool {
+        self.processed_offsets.contains(&offset)
+    }
+
+    /// ウォーターマーク超過イベントのドロップ記録フック（v55.9 でフル実装）
+    pub(crate) fn observe_late_drop(&mut self) {
+        self.late_event_drops += 1;
+    }
+
+    /// ストリーム統計を標準出力に表示（v55.9 でフル実装）
+    pub(crate) fn print_stream_stats(&self) {
+        if self.show_stream_stats {
+            // TODO(v55.9): ウィンドウ / ウォーターマーク統計を表示する
+            let _ = self.late_event_drops;
+        }
     }
 
     // ── DAP デバッガー ヘルパー (v21.1.0) ────────────────────────────────────
@@ -1849,6 +1938,7 @@ impl VM {
     ) -> Result<Value, VMError> {
         let mut vm = VM::new_with_db_path(artifact, None);
         vm.stream_buffer_size = buffer_size;
+        // TODO(v55.3): vm.checkpoint_store を fav.toml の stream.checkpoint_store から注入する
         let args_vm: Vec<VMValue> = args.into_iter().map(VMValue::from).collect();
         let result = vm.invoke_function(artifact, fn_idx, args_vm)?;
         Ok(Value::from(result))
@@ -5183,7 +5273,154 @@ impl VM {
                     )),
                 }
             }
-            // ── end v26.4.0 Stream.* ─────────────────────────────────────────────────
+            // ── v55.4.0 Stream.join_inner / Stream.join_left ─────────────────────────
+            // Stream.join_inner は Stream.join と意味論的に等価（明示的な inner join 名称）。
+            // 内部では同一の VMStream::Join バリアントを生成する（実装を共有）。
+            // 将来 Stream.join の意味論を変更する場合は JoinInner バリアントを分離すること。
+            "Stream.join_inner" => {
+                if args.len() != 4 {
+                    return Err(self.error(artifact, "Stream.join_inner requires 4 arguments: (stream1, stream2, join_fn, window_secs)"));
+                }
+                let mut it = args.into_iter();
+                let left_val   = it.next().expect("left");
+                let right_val  = it.next().expect("right");
+                let join_fn    = it.next().expect("join_fn");
+                let window_val = it.next().expect("window");
+                match (left_val, right_val, window_val) {
+                    (VMValue::Stream(left), VMValue::Stream(right), VMValue::Int(window_secs)) => {
+                        if window_secs <= 0 {
+                            return Err(self.error(artifact, "Stream.join_inner window_secs must be positive (>= 1)"));
+                        }
+                        Ok(VMValue::Stream(Box::new(VMStream::Join { left, right, join_fn, window_secs })))
+                    }
+                    (VMValue::Stream(_), VMValue::Stream(_), other) => Err(self.error(
+                        artifact,
+                        &format!("Stream.join_inner window argument must be Int, got {}", vmvalue_type_name(&other)),
+                    )),
+                    (VMValue::Stream(_), other, _) => Err(self.error(
+                        artifact,
+                        &format!("Stream.join_inner second argument must be a Stream, got {}", vmvalue_type_name(&other)),
+                    )),
+                    (other, _, _) => Err(self.error(
+                        artifact,
+                        &format!("Stream.join_inner first argument must be a Stream, got {}", vmvalue_type_name(&other)),
+                    )),
+                }
+            }
+            "Stream.join_left" => {
+                if args.len() != 4 {
+                    return Err(self.error(artifact, "Stream.join_left requires 4 arguments: (stream1, stream2, join_fn, window_secs)"));
+                }
+                let mut it = args.into_iter();
+                let left_val   = it.next().expect("left");
+                let right_val  = it.next().expect("right");
+                let join_fn    = it.next().expect("join_fn");
+                let window_val = it.next().expect("window");
+                match (left_val, right_val, window_val) {
+                    (VMValue::Stream(left), VMValue::Stream(right), VMValue::Int(window_secs)) => {
+                        if window_secs <= 0 {
+                            return Err(self.error(artifact, "Stream.join_left window_secs must be positive (>= 1)"));
+                        }
+                        Ok(VMValue::Stream(Box::new(VMStream::JoinLeft { left, right, join_fn, window_secs })))
+                    }
+                    (VMValue::Stream(_), VMValue::Stream(_), other) => Err(self.error(
+                        artifact,
+                        &format!("Stream.join_left window argument must be Int, got {}", vmvalue_type_name(&other)),
+                    )),
+                    (VMValue::Stream(_), other, _) => Err(self.error(
+                        artifact,
+                        &format!("Stream.join_left second argument must be a Stream, got {}", vmvalue_type_name(&other)),
+                    )),
+                    (other, _, _) => Err(self.error(
+                        artifact,
+                        &format!("Stream.join_left first argument must be a Stream, got {}", vmvalue_type_name(&other)),
+                    )),
+                }
+            }
+            // ── end v26.4.0 / v55.4.0 Stream.* ──────────────────────────────────────
+
+            // ── v55.6.0: CEP 複合イベント処理 ────────────────────────────────────────────
+            // CEP.sequence / CEP.skip_until は述語クロージャ呼び出しに &mut self が必要なため
+            // vm_call_builtin ではなく call_builtin（&mut self メソッド）に実装する。
+            //
+            // 境界条件:
+            //   events が空 → 外側ループ 0 回 → 空リストを返す（正常）
+            //   preds が空  → is_empty() ガードで即座に空リストを返す
+            //   preds 内に非関数値 → call_value の末尾 arm が VMError を返す（パニックなし）
+            "CEP.sequence" => {
+                if args.len() != 2 {
+                    return Err(self.error(artifact, "CEP.sequence requires 2 arguments: (events: List, preds: List<Fn>)"));
+                }
+                let mut it = args.into_iter();
+                let events = match it.next().unwrap() {
+                    VMValue::List(l) => l.to_vec(),
+                    other => return Err(self.error(artifact, &format!(
+                        "CEP.sequence: first argument must be a List, got {}", vmvalue_type_name(&other)
+                    ))),
+                };
+                let preds = match it.next().unwrap() {
+                    VMValue::List(l) => l.to_vec(),
+                    other => return Err(self.error(artifact, &format!(
+                        "CEP.sequence: second argument must be a List of predicates, got {}", vmvalue_type_name(&other)
+                    ))),
+                };
+                if preds.is_empty() {
+                    return Ok(VMValue::List(FavList::new(vec![])));
+                }
+                let mut results = Vec::new();
+                for start in 0..events.len() {
+                    let first_ok = self.call_value(artifact, preds[0].clone(), vec![events[start].clone()])?;
+                    if !matches!(first_ok, VMValue::Bool(true)) {
+                        continue;
+                    }
+                    let mut current = vec![events[start].clone()];
+                    let mut pos = start + 1;
+                    let mut pred_i = 1;
+                    while pred_i < preds.len() && pos < events.len() {
+                        let m = self.call_value(artifact, preds[pred_i].clone(), vec![events[pos].clone()])?;
+                        if matches!(m, VMValue::Bool(true)) {
+                            current.push(events[pos].clone());
+                            pred_i += 1;
+                        }
+                        pos += 1;
+                    }
+                    if pred_i == preds.len() {
+                        results.push(VMValue::List(FavList::new(current)));
+                    }
+                }
+                Ok(VMValue::List(FavList::new(results)))
+            }
+            "CEP.skip_until" => {
+                // inclusive セマンティクス: pred が最初に true になった要素を含むサフィックスを返す。
+                // pred が一度も true にならない場合は空リストを返す。
+                if args.len() != 2 {
+                    return Err(self.error(artifact, "CEP.skip_until requires 2 arguments: (events: List, pred: Fn)"));
+                }
+                let mut it = args.into_iter();
+                let events = match it.next().unwrap() {
+                    VMValue::List(l) => l.to_vec(),
+                    other => return Err(self.error(artifact, &format!(
+                        "CEP.skip_until: first argument must be a List, got {}", vmvalue_type_name(&other)
+                    ))),
+                };
+                let pred = it.next().unwrap();
+                let mut result = Vec::new();
+                let mut found = false;
+                for event in events {
+                    if !found {
+                        let m = self.call_value(artifact, pred.clone(), vec![event.clone()])?;
+                        if matches!(m, VMValue::Bool(true)) {
+                            found = true;
+                            result.push(event);
+                        }
+                    } else {
+                        result.push(event);
+                    }
+                }
+                Ok(VMValue::List(FavList::new(result)))
+            }
+            // ── end v55.6.0 CEP.* ────────────────────────────────────────────────────
+
             "Http.serve_raw" => {
                 if args.len() != 3 {
                     return Err(self.error(artifact, "Http.serve_raw requires 3 arguments"));
@@ -5991,6 +6228,8 @@ impl VM {
                     let batch = VMValue::List(FavList::new(chunk.to_vec()));
                     let result = self.call_value(artifact, window_fn.clone(), vec![batch])?;
                     out.push(result);
+                    // v55.1: チェックポイントフック（stub — v55.3 でフル実装）
+                    self.checkpoint_hook(out.len() as u64);
                 }
                 Ok(out)
             }
@@ -6053,6 +6292,36 @@ impl VM {
                                 ));
                             }
                         }
+                    }
+                }
+                Ok(out)
+            }
+            // v55.4.0: left outer join — unmatched left rows emitted as [left, Unit]
+            VMStream::JoinLeft { left, right, join_fn, window_secs: _ } => {
+                let lefts  = self.materialize_stream(artifact, *left)?;
+                let rights = self.materialize_stream(artifact, *right)?;
+                let mut out = Vec::new();
+                for l in &lefts {
+                    let mut matched = false;
+                    for r in &rights {
+                        let result = self.call_value(artifact, join_fn.clone(), vec![l.clone(), r.clone()])?;
+                        match result {
+                            VMValue::Bool(true) => {
+                                out.push(VMValue::List(FavList::new(vec![l.clone(), r.clone()])));
+                                matched = true;
+                            }
+                            VMValue::Bool(false) => {}
+                            other => {
+                                return Err(self.error(
+                                    artifact,
+                                    &format!("Stream.join_left predicate must return Bool, got {}", vmvalue_type_name(&other)),
+                                ));
+                            }
+                        }
+                    }
+                    if !matched {
+                        // 右側にマッチなし: Unit プレースホルダーで左側要素を保持
+                        out.push(VMValue::List(FavList::new(vec![l.clone(), VMValue::Unit])));
                     }
                 }
                 Ok(out)
@@ -8669,6 +8938,7 @@ fn is_known_builtin_namespace(name: &str) -> bool {
             | "__duckdb_push"
             | "Arena"
             | "State"   // v22.3.0
+            | "CEP"     // v55.6.0
             | "Bytes"   // v23.1.0
             | "Mut"     // v23.3.0
     )
@@ -20456,6 +20726,48 @@ fn vm_call_builtin(
             };
             STATE_STORE.with(|c| c.borrow_mut().remove(&key));
             Ok(VMValue::Unit)
+        }
+
+        // ── v55.5.0: State.get / State.set / State.get_or_default（型付き VMValue State API）──
+        // bind パターンは let 束縛であり、モナディックアンラップではない。
+        // そのため ok_vm() でラップせず生の値を返す（State.get_raw と同様のパターン）。
+        "State.get" => {
+            let key = match args.into_iter().next() {
+                Some(VMValue::Str(s)) => s,
+                _ => return Err("State.get requires a String key".to_string()),
+            };
+            let val = STATE_VALUE_STORE.with(|c| c.borrow().get(&key).cloned());
+            Ok(match val {
+                Some(v) => VMValue::Variant("some".to_string(), Some(Box::new(v))),
+                None    => VMValue::Variant("none".to_string(), None),
+            })
+        }
+        "State.set" => {
+            let mut it = args.into_iter();
+            let key = match it.next() {
+                Some(VMValue::Str(s)) => s,
+                _ => return Err("State.set: key must be a String".to_string()),
+            };
+            let value = match it.next() {
+                Some(v) => v,
+                None => return Err("State.set: missing value argument".to_string()),
+            };
+            STATE_VALUE_STORE.with(|c| c.borrow_mut().insert(key, value));
+            Ok(VMValue::Unit)
+        }
+        "State.get_or_default" => {
+            let mut it = args.into_iter();
+            let key = match it.next() {
+                Some(VMValue::Str(s)) => s,
+                _ => return Err("State.get_or_default: key must be a String".to_string()),
+            };
+            let default_val = match it.next() {
+                Some(v) => v,
+                None => return Err("State.get_or_default: missing default argument".to_string()),
+            };
+            let val = STATE_VALUE_STORE.with(|c| c.borrow().get(&key).cloned())
+                .unwrap_or(default_val);
+            Ok(val)
         }
 
         // ── v23.1.0: Bytes 型 ─────────────────────────────────────────────

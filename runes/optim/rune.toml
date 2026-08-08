@@ -1,0 +1,8 @@
+[rune]
+name        = "optim"
+version     = "0.1.0"
+description = "Optimization Rune for Favnir — gradient-based optimizers, schedulers, constrained optimization"
+entry       = "optim.fav"
+effects     = []
+
+[dependencies]

@@ -118,15 +118,18 @@ pub fn lower_pat(pat: &ast::Pattern) -> Value {
             v2("PVariantP", sv(name), lower_pat(inner))
         }
         ast::Pattern::Record(_, _) => v0("PWild"),
-        ast::Pattern::Or(pats, _) => {
-            // lower as first alternative (all alternatives bind same vars)
-            if let Some(first) = pats.first() {
+        ast::Pattern::Or(arms, _) => {
+            // Known limitation: 先頭アームのみを lower している（variant coverage の近似）。
+            // 全アームを lower すると coverage が向上するが、既存の限界として許容している。
+            if let Some((first, _)) = arms.first() {
                 lower_pat(first)
             } else {
                 v0("PWild")
             }
         }
         ast::Pattern::List { .. } => v0("PWild"),
+        // as-pattern: lower sub-pattern for variant coverage (v56.6.0)
+        ast::Pattern::As(_, inner, _) => lower_pat(inner),
     }
 }
 
@@ -150,10 +153,11 @@ pub fn lower_te(te: &ast::TypeExpr) -> Value {
         ast::TypeExpr::Arrow(a, b, _) => v2("TeFn", lower_te(a), lower_te(b)),
         ast::TypeExpr::TrfFn { input, output, .. } => v2("TeFn", lower_te(input), lower_te(output)),
         ast::TypeExpr::Intersection(lhs, rhs, _) => v2("TeIntersection", lower_te(lhs), lower_te(rhs)),
-        ast::TypeExpr::RecordType(_, _) => v0("TeRecord"), // v41.5.0: TODO v42.0+: v2("TeRecord", lower_fields(...)) に変更しフィールド情報を保持する
+        ast::TypeExpr::RecordType(_, _, _) => v0("TeRecord"), // v41.5.0: TODO v42.0+: v2("TeRecord", lower_fields(...)) に変更しフィールド情報を保持する（v56.3.0 追加の row_var も現状は捨てる）
         ast::TypeExpr::Schema(uri, _) => v1("TeSimple", sv(uri)),
         ast::TypeExpr::LinearArrow(a, b, _) => v2("TeFn", lower_te(a), lower_te(b)),
         ast::TypeExpr::ConstInt(n, _) => v1("TeConst", Value::Int(*n)),
+        ast::TypeExpr::Hole(_) => v0("TeHole"),
     }
 }
 
@@ -181,10 +185,11 @@ fn te_to_string(te: &ast::TypeExpr) -> String {
         ast::TypeExpr::Intersection(lhs, rhs, _) => {
             format!("{} & {}", te_to_string(lhs), te_to_string(rhs))
         }
-        ast::TypeExpr::RecordType(_, _) => "Any".to_string(),
+        ast::TypeExpr::RecordType(_, _, _) => "Any".to_string(),
         ast::TypeExpr::Schema(uri, _) => format!("schema(\"{}\")", uri),
         ast::TypeExpr::LinearArrow(a, b, _) => format!("{} -o {}", te_to_string(a), te_to_string(b)),
         ast::TypeExpr::ConstInt(n, _) => format!("{}", n),
+        ast::TypeExpr::Hole(_) => "_".to_string(),
     }
 }
 
@@ -385,6 +390,9 @@ pub fn lower_expr(expr: &ast::Expr) -> Value {
             // v41.5.0: lower to ERecordSpread(base, fields)
             v2("ERecordSpread", lower_expr(base), lower_field_list(updates))
         }
+        ast::Expr::RecordUpdate { base, fields, .. } => {
+            v2("ERecordSpread", lower_expr(base), lower_field_list(fields))
+        }
         ast::Expr::If(cond, then_block, else_opt, _) => {
             let then_val = lower_block(then_block);
             let else_val = match else_opt {
@@ -402,7 +410,7 @@ pub fn lower_expr(expr: &ast::Expr) -> Value {
         ast::Expr::Question(inner, _) => v1("EQuestion", lower_expr(inner)),
         // v13.3.0: collect { body } → ECollect(body); infer_hm returns "Unknown"
         ast::Expr::Collect(block, _) => v1("ECollect", lower_block(block)),
-        ast::Expr::FString(parts, _) => lower_fstring(parts),
+        ast::Expr::FString(parts, _, _) => lower_fstring(parts),
         // Fallbacks for TypeApply, AssertMatches, EmitExpr
         _ => v1("EVar", sv("_unsupported_")),
     }

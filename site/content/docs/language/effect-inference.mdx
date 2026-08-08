@@ -95,3 +95,39 @@ fn wrap                        inferred: !Postgres
 - エフェクトが宣言されている場合は、推論結果との整合性が検査されます。
 - 明示宣言のスーパーセットになっている場合は W010 警告が出ます。
 - 宣言が推論結果を下回る場合は E0336 エラーになります（将来バージョンで有効化予定）。
+
+---
+
+## エディタ統合（v56.4.0）
+
+v56.4.0 以降、LSP 対応エディタでエフェクト注釈を省略した関数定義に推論エフェクトを
+**inlay hints** としてインライン表示する。
+
+```favnir
+// エフェクト注釈を省略
+fn load_data() -> Result<List<Row>, String> {
+  bind rows <- Kafka.consume("orders")
+  bind _ <- Snowflake.insert(rows)
+  Result.ok(rows)
+}
+// エディタ inlay hint: fn load_data() -> Result<List<Row>, String> /*!Kafka !Snowflake*/
+```
+
+inlay hints は関数シグネチャの末尾にグレーアウト表示され、コード自体には含まれない。
+エフェクトを意識せずに書いたコードが実際に何のエフェクトを持つかをリアルタイムで確認できる。
+
+### `fav check --show-types`
+
+`fav check --show-types` を使うと、推論されたエフェクトセットを型情報として確認できる。
+
+```sh
+fav check src/pipeline.fav --show-types
+```
+
+出力例:
+
+```
+fn load_data   inferred: !Kafka !Snowflake
+fn pure_fn     inferred: (none)
+fn wrap        inferred: !Kafka !Snowflake
+```

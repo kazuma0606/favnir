@@ -111,13 +111,16 @@ pub enum TypeExpr {
     /// `R & { field: Type }` — intersection type (v18.2.0)
     Intersection(Box<TypeExpr>, Box<TypeExpr>, Span),
     /// `{ field: Type, ... }` — inline anonymous record type (v18.2.0)
-    RecordType(Vec<(String, TypeExpr)>, Span),
+    /// v56.3.0: optional row variable `{ field: Type | r }`
+    RecordType(Vec<(String, TypeExpr)>, Option<String>, Span),
     /// `schema "source:identifier"` — schema type import (v18.4.0)
     Schema(String, Span),
     /// `T -o U` — linear function type (v18.5.0)
     LinearArrow(Box<TypeExpr>, Box<TypeExpr>, Span),
     /// `100` — integer constant in type argument position, e.g. `f::<100>(...)` (v18.7.0)
     ConstInt(i64, Span),
+    /// `_` — type placeholder inferred by the type checker (v61.7.0)
+    Hole(Span),
 }
 
 impl TypeExpr {
@@ -129,10 +132,37 @@ impl TypeExpr {
             TypeExpr::Arrow(_, _, s) => s,
             TypeExpr::TrfFn { span, .. } => span,
             TypeExpr::Intersection(_, _, s) => s,
-            TypeExpr::RecordType(_, s) => s,
+            TypeExpr::RecordType(_, _, s) => s,
             TypeExpr::Schema(_, s) => s,
             TypeExpr::LinearArrow(_, _, s) => s,
             TypeExpr::ConstInt(_, s) => s,
+            TypeExpr::Hole(s) => s,
+        }
+    }
+
+    /// v56.3.0: human-readable display string (used in LSP hover / tests).
+    pub fn display(&self) -> String {
+        match self {
+            TypeExpr::Named(name, args, _) if args.is_empty() => name.clone(),
+            TypeExpr::Named(name, args, _) => {
+                let s: Vec<_> = args.iter().map(|a| a.display()).collect();
+                format!("{}<{}>", name, s.join(", "))
+            }
+            TypeExpr::RecordType(fields, row_var, _) => {
+                let field_strs: Vec<_> = fields
+                    .iter()
+                    .map(|(n, t)| format!("{}: {}", n, t.display()))
+                    .collect();
+                match row_var {
+                    Some(r) => format!("{{ {} | {} }}", field_strs.join(", "), r),
+                    None => format!("{{ {} }}", field_strs.join(", ")),
+                }
+            }
+            TypeExpr::Arrow(a, b, _) => format!("{} -> {}", a.display(), b.display()),
+            TypeExpr::Optional(inner, _) => format!("{}?", inner.display()),
+            TypeExpr::Fallible(inner, _) => format!("{}!", inner.display()),
+            TypeExpr::Hole(_) => "_".to_string(), // v61.7.0
+            _ => "...".to_string(),
         }
     }
 }
@@ -269,13 +299,17 @@ pub enum Pattern {
     /// `{ name, email }` or `{ name: p }`
     Record(Vec<PatternField>, Span),
     /// `"a" | "b" | "c"` — or-pattern (v17.2.0)
-    Or(Vec<Pattern>, Span),
+    /// v61.3.0: per-arm guard 付き OR パターン。guard = None は従来通り。
+    Or(Vec<(Pattern, Option<Expr>)>, Span),
     /// `[]` / `[x]` / `[head, ..tail]` / `[a, b, ..rest]` — list-pattern (v17.2.0)
     List {
         head: Vec<Pattern>,
         tail: Option<String>,
         span: Span,
     },
+    /// `name @ sub_pattern` — as-pattern (v56.6.0)
+    /// 値全体を `name` に束縛しつつ `sub_pattern` でマッチする。
+    As(String, Box<Pattern>, Span),
 }
 
 impl Pattern {
@@ -288,6 +322,7 @@ impl Pattern {
             Pattern::Record(_, s) => s,
             Pattern::Or(_, s) => s,
             Pattern::List { span, .. } => span,
+            Pattern::As(_, _, s) => s,
         }
     }
 }
@@ -367,7 +402,16 @@ pub enum Expr {
     RecordConstruct(String, Vec<(String, Expr)>, Span),
     /// record spread: `{ ...base, key: expr }` (v16.3.0)
     RecordSpread(Box<Expr>, Vec<(String, Expr)>, Span),
-    FString(Vec<FStringPart>, Span),
+    /// `{ base | field: val, ... }` — record update 式 (v61.4.0)
+    /// base の型の全フィールドを継承し、fields で指定したフィールドを上書きする。
+    RecordUpdate {
+        base: Box<Expr>,
+        fields: Vec<(String, Expr)>,
+        span: Span,
+    },
+    /// String interpolation (f"..." or f"""...""").
+    /// multiline = true if the source used triple-quote syntax. (v61.5.0)
+    FString(Vec<FStringPart>, bool /* multiline */, Span),
 
     /// `emit expr`  Epublish an event
     EmitExpr(Box<Expr>, Span),
@@ -407,7 +451,8 @@ impl Expr {
             Expr::BinOp(_, _, _, s) => s,
             Expr::RecordConstruct(_, _, s) => s,
             Expr::RecordSpread(_, _, s) => s,
-            Expr::FString(_, s) => s,
+            Expr::RecordUpdate { span, .. } => span,
+            Expr::FString(_, _, s) => s,
             Expr::EmitExpr(_, s) => s,
             Expr::Collect(_, s) => s,
             Expr::Question(_, s) => s,
@@ -932,6 +977,7 @@ pub enum Item {
         is_rune: bool,
         is_public: bool,
         kind: ImportKind,   // v48.1.0
+        is_wildcard: bool,  // v56.7.0: `import "path" as alias.*`
         span: Span,
     },
     InterfaceDecl(InterfaceDecl),

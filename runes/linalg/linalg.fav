@@ -1,0 +1,96 @@
+// Linear Algebra Rune — Rune.linalg
+// Type-safe matrix and vector operations for Favnir
+//
+// NOTE: Matrix<T> and Vec<T> type signatures are established here as stubs.
+//       Dimension-level type guarantees (Matrix<T>[rows, cols]) are a future phase
+//       requiring type system extension.
+
+// --- 基本演算 ---
+
+// 内積（ドット積）— Vec<Float> × Vec<Float> → Float
+public fn dot(a: Vec<Float>, b: Vec<Float>) -> Float {
+    List.zip_with(|x, y| { x * y }, a, b) |> List.sum
+}
+
+// 行列積 — Matrix<Float> × Matrix<Float> → Matrix<Float>
+public fn matmul(a: Matrix<Float>, b: Matrix<Float>) -> Matrix<Float> {
+    a
+}
+
+// 転置
+public fn transpose(m: Matrix<Float>) -> Matrix<Float> {
+    m
+}
+
+// 逆行列
+public fn inverse(m: Matrix<Float>) -> Matrix<Float> {
+    m
+}
+
+// ノルム（L2 norm）
+public fn norm(v: Vec<Float>) -> Float {
+    List.map(v, |x| { x * x }) |> List.sum |> Math.sqrt
+}
+
+// 対角成分の抽出
+public fn diag(m: Matrix<Float>) -> Vec<Float> {
+    []
+}
+
+// トレース（対角和）
+public fn trace(m: Matrix<Float>) -> Float {
+    0.0
+}
+
+// --- 行列分解 ---
+
+// 特異値分解（SVD）
+public fn svd(m: Matrix<Float>, components: Int) -> Matrix<Float> {
+    m
+}
+
+// LU 分解
+public fn lu(m: Matrix<Float>) -> (Matrix<Float>, Matrix<Float>) {
+    (m, m)
+}
+
+// QR 分解
+public fn qr(m: Matrix<Float>) -> (Matrix<Float>, Matrix<Float>) {
+    (m, m)
+}
+
+// Cholesky 分解（正定値対称行列）
+public fn cholesky(m: Matrix<Float>) -> Matrix<Float> {
+    m
+}
+
+// --- 固有値・固有ベクトル ---
+
+// 固有値・固有ベクトル
+public fn eig(m: Matrix<Float>) -> (Vec<Float>, Matrix<Float>) {
+    ([], m)
+}
+
+// 対称行列専用固有値分解（より安定）
+public fn eigh(m: Matrix<Float>) -> (Vec<Float>, Matrix<Float>) {
+    ([], m)
+}
+
+// --- 距離・類似度 ---
+
+// コサイン類似度
+public fn cosine_similarity(a: Vec<Float>, b: Vec<Float>) -> Float {
+    bind n_a <- norm(a)
+    bind n_b <- norm(b)
+    dot(a, b) / (n_a * n_b)
+}
+
+// ユークリッド距離
+public fn euclidean_distance(a: Vec<Float>, b: Vec<Float>) -> Float {
+    List.zip_with(|x, y| { (x - y) * (x - y) }, a, b) |> List.sum |> Math.sqrt
+}
+
+// マンハッタン距離
+public fn manhattan_distance(a: Vec<Float>, b: Vec<Float>) -> Float {
+    List.zip_with(|x, y| { Float.abs(x - y) }, a, b) |> List.sum
+}

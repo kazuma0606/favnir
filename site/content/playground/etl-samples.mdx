@@ -1,0 +1,65 @@
+# Playground — ETL パイプライン サンプル
+
+Favnir の [Playground](https://favnir.dev/playground) で試せる ETL パイプラインサンプル集です。
+CSV の読み込み・フィルタリング・集計・出力などの典型的な ETL 処理を体験できます。
+
+---
+
+## サンプル一覧
+
+### 1. CSV フィルタリング
+
+```favnir
+schema Order {
+    id:     String,
+    amount: Float,
+    status: String
+}
+
+public stage FilterActive: List<Order> -> List<Order> = |orders| {
+    List.filter(orders, |o| { o.status == "active" })
+}
+```
+
+### 2. 集計パイプライン
+
+```favnir
+public stage SumAmounts: List<Order> -> Float = |orders| {
+    bind amounts <- List.map(orders, |o| { o.amount })
+    List.fold(amounts, 0.0, |acc, x| { acc + x })
+}
+```
+
+### 3. Full ETL Pipeline（CSV → フィルタ → 変換 → 出力）
+
+```favnir
+public stage LoadOrders: String -> List<Order> = |path| {
+    Rune.csv.read(path, schema: Order)
+}
+
+public stage Transform: List<Order> -> List<Order> = |orders| {
+    bind active <- List.filter(orders, |o| { o.status == "active" })
+    List.map(active, |o| { Order { id: o.id, amount: o.amount * 1.1, status: o.status } })
+}
+
+pipeline ETLPipeline {
+    step "load"      = seq LoadOrders
+    step "transform" = seq Transform after "load"
+}
+```
+
+`Rune.csv.read` は Playground では mock データを返します（ブラウザ環境のため）。
+本番コードでは実際の CSV ファイルパスを指定してください。
+
+---
+
+## bind 構文について
+
+ETL サンプルでは `bind x <- expr` 構文を使用します:
+
+```favnir
+bind result <- some_computation(input)
+```
+
+`<-` は monadic bind です。`= expr` は不正構文です。
+`List.map` / `List.filter` などの pure 関数への bind 使用も有効です。

@@ -1,0 +1,10 @@
+// Kafka Rune — demo local variant (broker from KAFKA_BOOTSTRAP_BROKERS env)
+// API: produce(topic, key, value), consume_one(topic, group_id)
+
+public fn produce(topic: String, key: String, value: String) -> Result<Unit, String> {
+    Kafka.produce_raw("", topic, key, value)
+}
+
+public fn consume_one(topic: String, group_id: String) -> Result<String, String> {
+    Kafka.consume_one_raw("", topic, group_id)
+}

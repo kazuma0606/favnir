@@ -1128,12 +1128,24 @@ impl Parser {
         } else {
             None
         };
+        // v56.7.0: wildcard suffix `.*` — `import "path" as alias.*`
+        let is_wildcard = if alias.is_some()
+            && self.peek() == &TokenKind::Dot
+            && self.peek2() == Some(&TokenKind::Star)
+        {
+            self.advance(); // consume '.'
+            self.advance(); // consume '*'
+            true
+        } else {
+            false
+        };
         Ok(Item::ImportDecl {
             path,
             alias,
             is_rune,
             is_public,
             kind,
+            is_wildcard,
             span: self.span_from(&start),
         })
     }
@@ -1915,10 +1927,19 @@ impl Parser {
             ));
         }
         // Inline record type: `{ field: Type, ... }` (v18.2.0)
+        // v56.3.0: supports row variable `{ field: Type | r }`
         if self.peek() == &TokenKind::LBrace {
             self.advance(); // consume `{`
             let mut fields = vec![];
-            while self.peek() != &TokenKind::RBrace {
+            let mut row_var: Option<String> = None;
+            while self.peek() != &TokenKind::RBrace && !self.at_end() {
+                // `| ident` → row variable (v56.3.0)
+                if self.peek() == &TokenKind::Pipe {
+                    self.advance(); // consume `|`
+                    let (name, _) = self.expect_ident()?;
+                    row_var = Some(name);
+                    break;
+                }
                 let (field_name, _) = self.expect_ident()?;
                 self.expect(&TokenKind::Colon)?;
                 let field_ty = self.parse_type_expr()?;
@@ -1929,13 +1950,20 @@ impl Parser {
             }
             self.expect(&TokenKind::RBrace)?;
             let span = self.span_from(&start);
-            return Ok(TypeExpr::RecordType(fields, span));
+            return Ok(TypeExpr::RecordType(fields, row_var, span));
         }
         // Integer literal in type position (const generic argument): `Array<100>`
         if let TokenKind::Int(n) = self.peek().clone() {
             self.advance();
             let span = self.span_from(&start);
             return Ok(TypeExpr::ConstInt(n, span));
+        }
+
+        // v61.7.0: `_` in type position → TypeExpr::Hole (type placeholder)
+        if self.peek() == &TokenKind::Underscore {
+            self.advance();
+            let span = self.span_from(&start);
+            return Ok(TypeExpr::Hole(span));
         }
 
         let name = match self.peek().clone() {
@@ -2895,6 +2923,14 @@ impl Parser {
                 {
                     // uppercase with no payload → unit variant (e.g., Guest)
                     Ok(Pattern::Variant(name, None, self.span_from(&start)))
+                } else if self.peek() == &TokenKind::At {
+                    // as-pattern: name @ sub_pattern (v56.6.0)
+                    // Note: only lowercase identifiers reach here — uppercase names are
+                    // already returned as Pattern::Variant above, so `Foo @ Bar` never parses
+                    // as an as-pattern (it would be a parse error on the dangling `@`).
+                    self.advance(); // consume '@'
+                    let sub_pattern = self.parse_pattern()?;
+                    Ok(Pattern::As(name, Box::new(sub_pattern), self.span_from(&start)))
                 } else {
                     // lowercase → bind
                     Ok(Pattern::Bind(name, self.span_from(&start)))
@@ -3178,7 +3214,13 @@ impl Parser {
 
             TokenKind::FStringRaw(raw) => {
                 self.advance();
-                self.parse_fstring_parts(&raw, start)
+                self.parse_fstring_parts(&raw, start, false)
+            }
+
+            // v61.5.0: triple-quote f-string (multiline)
+            TokenKind::FStringTripleRaw(raw) => {
+                self.advance();
+                self.parse_fstring_parts(&raw, start, true)
             }
 
             // bool literal (3-12)
@@ -3306,11 +3348,22 @@ impl Parser {
             }
 
             // block (3-17) or record spread { ...base, key: val } (v16.3.0)
+            // or record update { ident | field: val, ... } (v61.4.0)
             TokenKind::LBrace => {
                 if self.peek2() == Some(&TokenKind::DotDotDot) {
                     let start_spread = self.peek_span().clone();
                     self.advance(); // consume '{'
                     self.parse_record_spread(start_spread)
+                } else if matches!(self.peek2(), Some(TokenKind::Ident(_)))
+                    && self.tokens.get(self.pos + 2).map(|t| &t.kind) == Some(&TokenKind::Pipe)
+                {
+                    // v61.4.0: RecordUpdate: { ident | field: val, ... }
+                    // 判別: `{` の直後が Ident かつその次が Pipe (`|`)。
+                    // base は単純識別子のみ対応（複合式 base は未サポート、仕様上の意図的制限）。
+                    // `|` は中置演算子でないため parse_expr() が消費することはない。
+                    let start = self.peek_span().clone();
+                    self.advance(); // consume '{'
+                    self.parse_record_update(start)
                 } else {
                     Ok(Expr::Block(Box::new(self.parse_block()?)))
                 }
@@ -3384,6 +3437,37 @@ impl Parser {
         Ok(Expr::RecordSpread(Box::new(base), updates, self.span_from(&start)))
     }
 
+    /// `{ base | field: val, ... }` — record update 式パーサー (v61.4.0)
+    /// `{` を消費済みの状態で呼ばれる。
+    /// ディスパッチ条件: `{` の直後が `Ident` かつその次が `Pipe`。
+    /// base は単純識別子に限定（`{ get_row() | ... }` 等の複合式は v61.4.0 では非対応）。
+    fn parse_record_update(&mut self, start: Span) -> Result<Expr, ParseError> {
+        let base = self.parse_expr()?;
+        self.expect(&TokenKind::Pipe)?; // consume '|'
+        let mut fields: Vec<(String, Expr)> = Vec::new();
+        while self.peek() != &TokenKind::RBrace {
+            let (field_name, _) = self.expect_ident()?;
+            self.expect(&TokenKind::Colon)?;
+            let val = self.parse_expr()?;
+            fields.push((field_name, val));
+            if self.peek() == &TokenKind::Comma {
+                self.advance(); // trailing comma 許容
+            }
+        }
+        self.expect(&TokenKind::RBrace)?;
+        if fields.is_empty() {
+            return Err(ParseError::new(
+                "record update must specify at least one field (`{ base | field: val }`)".to_string(),
+                self.span_from(&start),
+            ));
+        }
+        Ok(Expr::RecordUpdate {
+            base: Box::new(base),
+            fields,
+            span: self.span_from(&start),
+        })
+    }
+
         fn parse_record_field_patterns(&mut self) -> Result<Vec<PatternField>, ParseError> {
         self.expect(&TokenKind::LBrace)?;
         let mut fields = Vec::new();
@@ -3410,7 +3494,7 @@ impl Parser {
         Ok(fields)
     }
 
-    fn parse_fstring_parts(&mut self, raw: &str, base_span: Span) -> Result<Expr, ParseError> {
+    fn parse_fstring_parts(&mut self, raw: &str, base_span: Span, multiline: bool) -> Result<Expr, ParseError> {
         let mut parts = Vec::new();
         let chars: Vec<char> = raw.chars().collect();
         let mut i = 0usize;
@@ -3482,7 +3566,7 @@ impl Parser {
             parts.push(FStringPart::Lit(lit));
         }
 
-        Ok(Expr::FString(parts, base_span))
+        Ok(Expr::FString(parts, multiline, base_span))
     }
 
     // closure params: untyped  |x, y|  (3-16)
@@ -3555,20 +3639,73 @@ impl Parser {
         ))
     }
 
+    /// OR パターンの 1 アームを解析する（v61.3.0: per-arm guard 対応）。
+    /// `(pat if guard)` 形式 → (pat, Some(guard))
+    /// `(pat)` 形式（grouping）/ `pat` 形式（ガードなし）→ (pat, None)
+    fn parse_or_alternative(&mut self) -> Result<(Pattern, Option<Expr>), ParseError> {
+        if self.peek() == &TokenKind::LParen {
+            let start = self.peek_span().clone();
+            self.advance(); // consume '('
+            if self.peek() == &TokenKind::RParen {
+                // unit ()
+                self.advance();
+                return Ok((Pattern::Lit(Lit::Unit, self.span_from(&start)), None));
+            }
+            let pat = self.parse_pattern()?;
+            if self.peek() == &TokenKind::If {
+                // (pat if guard) — guarded OR alternative (v61.3.0)
+                self.advance(); // consume 'if'
+                let guard = self.parse_expr()?;
+                self.expect(&TokenKind::RParen)?;
+                Ok((pat, Some(guard)))
+            } else if self.peek() == &TokenKind::Comma {
+                // tuple pattern: (p1, p2, ...) → Record([Alias("_0", p1), ...])
+                let mut fields = vec![PatternField::Alias(
+                    "_0".to_string(), Box::new(pat), self.span_from(&start),
+                )];
+                let mut i = 1usize;
+                while self.peek() == &TokenKind::Comma {
+                    self.advance();
+                    if self.peek() == &TokenKind::RParen { break; }
+                    fields.push(PatternField::Alias(
+                        format!("_{}", i),
+                        Box::new(self.parse_pattern()?),
+                        self.span_from(&start),
+                    ));
+                    i += 1;
+                }
+                self.expect(&TokenKind::RParen)?;
+                Ok((Pattern::Record(fields, self.span_from(&start)), None))
+            } else {
+                // grouping (pat)
+                self.expect(&TokenKind::RParen)?;
+                Ok((pat, None))
+            }
+        } else {
+            let pat = self.parse_pattern()?;
+            Ok((pat, None))
+        }
+    }
+
     fn parse_match_arm(&mut self) -> Result<MatchArm, ParseError> {
         let start = self.peek_span().clone();
-        let first_pat = self.parse_pattern()?;
+        let first_alt = self.parse_or_alternative()?;
         // or-pattern: collect additional alternatives separated by `|` (v17.2.0)
+        // v61.3.0: each alternative may carry a per-arm guard via `(pat if guard)` syntax
         let pattern = if self.peek() == &TokenKind::Pipe {
-            let or_start = first_pat.span().clone();
-            let mut pats = vec![first_pat];
+            let or_start = first_alt.0.span().clone();
+            let mut alts = vec![first_alt];
             while self.peek() == &TokenKind::Pipe {
                 self.advance(); // consume '|'
-                pats.push(self.parse_pattern()?);
+                alts.push(self.parse_or_alternative()?);
             }
-            Pattern::Or(pats, self.span_from(&or_start))
+            Pattern::Or(alts, self.span_from(&or_start))
+        } else if first_alt.1.is_some() {
+            // single alt with guard: wrap in Or
+            let or_start = first_alt.0.span().clone();
+            Pattern::Or(vec![first_alt], self.span_from(&or_start))
         } else {
-            first_pat
+            first_alt.0
         };
         // optional guard: `if expr` (v17.2.0) or legacy `where expr` (v0.5.0)
         let guard = if self.peek() == &TokenKind::If {
@@ -3834,7 +3971,7 @@ mod tests {
     fn test_parse_fstring_simple() {
         let expr = parse_expr_ok(r#"$"Hello {name}!""#);
         match expr {
-            Expr::FString(parts, _) => {
+            Expr::FString(parts, _, _) => {
                 assert_eq!(parts.len(), 3);
                 assert!(matches!(&parts[0], FStringPart::Lit(s) if s == "Hello "));
                 assert!(matches!(&parts[1], FStringPart::Expr(_)));
@@ -3847,14 +3984,14 @@ mod tests {
     #[test]
     fn test_parse_fstring_literal_only() {
         let expr = parse_expr_ok(r#"$"literal only""#);
-        assert!(matches!(expr, Expr::FString(_, _)));
+        assert!(matches!(expr, Expr::FString(_, _, _)));
     }
 
     #[test]
     fn test_parse_fstring_escape_brace() {
         let expr = parse_expr_ok(r#"$"\{value\}""#);
         match expr {
-            Expr::FString(parts, _) => {
+            Expr::FString(parts, _, _) => {
                 assert_eq!(parts.len(), 1);
                 assert!(matches!(&parts[0], FStringPart::Lit(s) if s == "{value}"));
             }

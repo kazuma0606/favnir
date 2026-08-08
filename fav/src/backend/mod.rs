@@ -12,6 +12,7 @@ pub mod wasm_dce;
 pub mod wasm_opt_pass;
 
 pub mod cranelift_aot;
+pub mod fav_rt;
 
 #[cfg(not(target_arch = "wasm32"))]
 pub mod pg_pool;

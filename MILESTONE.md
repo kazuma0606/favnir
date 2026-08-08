@@ -1,5 +1,410 @@
 # Favnir Milestones
 
+## v70.0.0（2026-08-08）— Intelligent ETL 1.0
+
+> 「型チェックが、LLM の出力を安全にする。
+>  ベクトルの次元は型で保証され、スキーマ違反は推論の前に止まる。
+>  自動微分は数値安定性を型レベルで保ち、
+>  デバッガがパイプラインを時間遡行し、AI が次の最適化を提案する。
+>  型安全な並列処理が、AI パイプラインをクラスタ規模で動かす。
+>
+>  Favnir は「AI データエンジニアリングのための型安全言語」になった。
+>
+>  これが Favnir v70.0 — Intelligent ETL 1.0 の姿である。」
+
+**Intelligent ETL 1.0** の宣言バージョン。v65.1〜v69.9 で実装した
+Math Rune 群（linalg/stats/autodiff/optim/numeric/timeseries/ml）・
+AI Rune 群（embed/llm/VectorDB/serve/featurestore）・
+Playground 拡張・E2E AI ETL デモ・パフォーマンスベースラインの統合を宣言した。
+
+**v65.1〜v69.9 達成内容:**
+- v65.1〜v65.8（Math Rune 群）: 型付き行列・ベクトル演算・統計・自動微分・最適化
+- v66.1〜v66.8（AI-Native Stage Layer）: LLM 型安全抽出・埋め込み・VectorDB・モデルサービング
+- v67.1〜v67.9（Developer Intelligence）: デバッガ・タイムトラベル・DAG 可視化・AI アドバイザー
+- v68.1〜v68.9（Distributed Favnir）: マルチノード par・チェックポイント・K8s・コスト見積もり
+- v69.1〜v69.9（Intelligent ETL 統合）: E2E デモ・Playground・ドキュメント整備・コードフリーズ
+
+---
+
+## v69.0.0（2026-08-07）— Distributed Favnir
+
+> 「`par` がクラスタを越え、チェックポイントが失敗を無効にする。
+>  Kubernetes が AI ステージのスケールを決め、
+>  コスト見積もりが LLM 呼び出しの予算を守る。
+>  型安全な AI パイプラインが、大規模でも壊れない。
+>
+>  これが Favnir v69.0 — Distributed Favnir の姿である。」
+
+**Distributed Favnir** の宣言バージョン。v68.1〜v68.9 で実装した
+分散実行・チェックポイント・K8s・リトライ・分散キャッシュ・コスト見積もり・
+AI ルーティング・分散トレーシングの統合を宣言した。
+
+**v68.1〜v68.9 達成内容:**
+- v68.1（Multi-Node `par`）: --cluster workers.yaml / --partition-by による分散並列実行
+- v68.2（Pipeline Checkpointing）: --checkpoint / --resume による耐障害性・再開
+- v68.3（Kubernetes-Native Orchestration）: fav deploy --target kubernetes / Pipeline CRD
+- v68.4（Stage Retry Policies）: ExponentialBackoff / LinearBackoff / DeadLetterQueue
+- v68.5（Distributed Incremental Cache）: --distributed-cache redis:// / L1/L2 キャッシュ
+- v68.6（Cost-Aware Scheduling）: fav cost-estimate --provider --scale / 最適化提案
+- v68.7（Multi-Cloud AI Routing）: fav.toml [ai] セクション / --env dev/prod/test
+- v68.8（Distributed Observability）: --otel-endpoint / OpenTelemetry / Grafana ダッシュボード
+- v68.9（安定化・コードフリーズ）: distributed.mdx 作成・全機能統合確認
+
+**テスト数**: 3541
+
+---
+
+## v68.0.0（2026-08-07）— Developer Intelligence
+
+> 「ステップ実行デバッガが、AI パイプラインの内部を露わにする。
+>  時間を遡って本番障害を再現し、DAG 可視化が依存関係を一目で示す。
+>  AI アドバイザーがプロファイリングデータを読み、次の最適化を提案する。
+>
+>  これが Favnir v68.0 — Developer Intelligence の姿である。」
+
+**Developer Intelligence** の宣言バージョン。v67.1〜v67.9 で実装した
+デバッグ・可視化・AI 提案・テストツール群の統合を宣言した。
+
+**v67.1〜v67.9 達成内容:**
+- v67.1（`fav debug`）: ステップ実行デバッガ（inspect / breakpoint / diff）
+- v67.2（Time-Travel Debugging）: --record / --replay / rewind / forward
+- v67.3（`fav viz`）: パイプライン DAG 可視化（ascii / svg / mermaid）
+- v67.4（`fav suggest`）: AI 最適化アドバイザー（--from-profile）
+- v67.5（`fav simulate`）: 合成データパイプラインテスト（--seed）
+- v67.6（`Rune.proptest`）: Pipeline Property Testing（forall / shrink / --proptest-runs）
+- v67.7（`fav profile --interactive`）: インタラクティブプロファイリング（drill / Suggestion）
+- v67.8（`fav doc --math`）: 数式対応ドキュメント生成（MathJax / $$...$$）
+- v67.9（安定化）: developer-intelligence.mdx / コードフリーズ
+
+**テスト数**: 3519
+
+---
+
+## v67.0.0（2026-08-06）— AI-Native Stage Layer
+
+> 「LLM の出力にスキーマが付き、ベクトルの次元が型で保証される。
+>  埋め込みモデルの選択が型エラーを生まず、
+>  リアルタイム推論パイプラインがバックプレッシャー制御下で動く。
+>
+>  これが Favnir v67.0 — AI-Native Stage Layer の姿である。」
+
+**AI-Native Stage Layer** の宣言バージョン。v66.1〜v66.9 で実装した
+9 AI Rune 群と AI Pipeline Lint Rules W055〜W059 の統合を宣言した。
+
+**v66.1〜v66.9 達成内容:**
+- v66.1（Rune.vec）: ベクトル演算（normalize / dot / cosine_similarity / euclidean_distance）
+- v66.2（LLM Extraction）: 型安全 JSON 抽出ステージ
+- v66.3（Rune.embed）: 統一埋め込みインターフェース（OpenAI / Cohere / ローカル）
+- v66.4（Vector DB Runes）: Pinecone / pgvector / Weaviate / Qdrant
+- v66.5（Rune.inference）: ストリーミング ML 推論（backpressure / SLA / stateful）
+- v66.6（Rune.serve）: モデルサービングエンドポイント（rate limit / OpenAPI）
+- v66.7（Rune.featurestore）: 型安全フィーチャーストア
+- v66.8（AI Lint Rules）: W055〜W059 AI パイプラインアンチパターン検出スタブ
+- v66.9（安定化）: ai-runes-overview.mdx / 全 AI Rune 存在確認
+
+**テスト数**: 3497
+
+---
+
+## v66.0.0（2026-08-05）— Math & Science Foundation
+
+> 「行列の次元は型で保証され、勾配は自動的に伝播する。
+>  統計的検定は型安全に呼び出せ、時系列の周期は型パラメータに刻まれる。
+>  数学的正確性が、AI パイプラインの信頼性を支える土台になった。
+>
+>  これが Favnir v66.0 — Math & Science Foundation の姿である。」
+
+**Math & Science Foundation** の宣言バージョン。v65.1〜v65.9 で実装した
+線形代数・統計・自動微分・最適化・数値計算・時系列・ML Primitives の 7 Rune 群と
+Math Lint Rules W050〜W054 の統合を宣言した。
+
+**v65.1〜v65.9 達成内容:**
+- v65.1（Rune.linalg）: 線形代数（matmul / svd / eig / solve）
+- v65.2（Rune.stats）: 統計解析（describe / t_test / linear_regression）
+- v65.3（Rune.autodiff）: 自動微分（grad / jacobian / hessian / tape）
+- v65.4（Rune.optim）: 最適化（adam / sgd / l_bfgs / scheduler）
+- v65.5（Rune.numeric）: 数値計算（integrate / fft / ode_solve / bisection）
+- v65.6（Rune.timeseries）: 時系列（arima / sarima / decompose / adf_test）
+- v65.7（Rune.ml）: ML Primitives（knn / random_forest / cross_validate）
+- v65.8（Math Lint Rules）: W050〜W054 静的解析ルール
+- v65.9（安定化）: math-runes-overview.mdx / 全 Rune 存在確認
+
+**テスト数**: 3475
+
+---
+
+## v65.0.0（2026-08-02）— Performance 1.0
+
+> 「型安全なパイプラインがネイティブコードに変わる。
+>  変更差分だけが再コンパイルされ、エラーはソースを指す。
+>  ベンチマークは pandas を超え、flamegraph はボトルネックを露わにする。
+>
+>  Favnir は「型安全」と「高速」を両立したデータパイプライン言語になった。
+>
+>  これが Favnir v65.0 — Performance 1.0 の姿である。」
+
+**Performance 1.0** の宣言バージョン。v64.1〜v64.9 で実装した全機能を統合し、
+AOT ネイティブコンパイル・差分ビルド・flamegraph プロファイリング・外部ベンチマーク比較・
+パフォーマンス lint・WASM ビルドの完成を宣言した。
+
+**v64.1〜v64.9 達成内容:**
+- v64.1（CI 統合）: `cmd_build_ci` / GitHub Actions テンプレート
+- v64.2（リグレッション検出）: `BenchTomlConfig` / `[bench] regression_threshold_pct`
+- v64.3（パフォーマンスガイド）: `site/content/docs/runtime/performance.mdx`
+- v64.4（flamegraph AOT）: `cmd_profile_flamegraph_aot` / IR fns → SVG
+- v64.5（外部ベンチ比較）: `site/content/docs/runtime/benchmarks.mdx` / `run_comparison.sh`
+- v64.6（lint --perf）: `LintTomlConfig.perf` / `[lint] perf = true`
+- v64.7（WASM ビルド）: `cmd_build_wasm` / `wasm_codegen_program`
+- v64.8（総括記事）: `site/content/docs/performance/performance1-overview.mdx`
+- v64.9（安定化）: `scale_all_v64_features_stable` / `performance1_overview_doc_complete`
+
+**テスト数**: 3453
+
+---
+
+## v64.0.0（2026-08-02）— Incremental & Scale
+
+> 「変更されたステージだけが再コンパイルされ、未使用のステージは除去される。
+>  スレッドはコアの数だけ走り、キューはバックプレッシャーで制御される。
+>  ベンチマークは数字で真実を語る。
+>
+>  Favnir は大規模 ETL を安心して任せられるエンジンになった。
+>
+>  これが Favnir v64.0 — Incremental & Scale の姿である。」
+
+**Incremental & Scale** の宣言バージョン。v63.1〜v63.9 で実装した全機能を統合し、
+差分コンパイル・DAG 最適化・並列実行・バックプレッシャー制御・ETL ベンチマークの完成を宣言した。
+
+**v63.1〜v63.9 達成内容:**
+- v63.1（差分キャッシュ）: `cmd_run_with_cache` / `IncrementalCache` / E0428
+- v63.2（fav watch 改善）: ポーリング最適化・変更ファイルのみ再コンパイル
+- v63.3（E0428）: キャッシュ無効化エラー
+- v63.4（par 動的スレッドプール）: `cmd_parallel_stats` / `[parallel]` 設定
+- v63.5（メモリプロファイリング）: `cmd_profile_memory`
+- v63.6（バックプレッシャー・W041）: `BackpressureConfig` / `[backpressure]` / W041 lint
+- v63.7（DAG 最適化）: `cmd_opt_stats` / dead stage elimination / pure stage fusion
+- v63.8（ETL ベンチスイート）: `cmd_bench_suite` / "etl-standard" スイート
+- v63.9（安定化）: `scale_e2e_incremental_par` / `scale_dag_opt_dead_and_fused`
+
+**テスト数**: 3431
+
+---
+
+## v63.0.0（2026-08-02）— AOT Native
+
+> 「パイプラインはネイティブバイナリにコンパイルされ、VM オーバーヘッドを超える速度で動く。
+>  クロスコンパイルで ARM にも届き、Docker イメージは最小限のサイズに収まる。
+>
+>  Favnir は型安全なコンパイル言語として新たな段階に達した。
+>
+>  これが Favnir v63.0 — AOT Native の姿である。」
+
+**AOT Native** の宣言バージョン。v62.1〜v62.9 で実装した AOT 全機能を統合し、
+ネイティブバイナリ生成・クロスコンパイル・Docker イメージ化・AOT 互換性チェックの完成を宣言した。
+
+**v62.1〜v62.9 達成内容:**
+- v62.1（`fav build` 基盤）: `cmd_build_basic` / `cmd_build_link` / `cmd_build_docker` API 基盤
+- v62.2（native binary 生成）: Cranelift AOT コンパイル → `.o` ファイル生成
+- v62.3（クロスコンパイル）: x86_64 / aarch64 クロスコンパイル対応
+- v62.4（Pure stage インライン化）: `analyze_for_inlining` / `is_aot_pure` による最適化
+- v62.5（`fav bench`）: ステージ別ベンチマーク計測
+- v62.6（Docker 出力）: `fav build --docker` OCI イメージ生成
+- v62.7（`fav.toml [build]`）: `BuildConfig` / `ResolvedBuildConfig` AOT 設定
+- v62.8（E0427）: AOT 未サポート機能検出バリデーター・エラーカタログ登録
+- v62.9（E2E デモ）: `infra/e2e-demo/aot/` + `site/content/docs/runtime/aot.mdx`
+
+**テスト数**: 3406
+
+---
+
+## v62.0.0（2026-08-01）— Language Polish
+
+> 「パターンは OR で分岐し、as で束縛される。
+>  レコードは `{ base | field: value }` で一部だけ書き換えられる。
+>  型注釈に `_` を置けば推論が答えを返す。
+>  エラーは期待値と実際値の差分を語り、修正の道筋を示す。
+>
+>  Favnir の型システムはデータエンジニアの思考を助ける存在になった。
+>
+>  これが Favnir v62.0 — Language Polish の姿である。」
+
+**Language Polish** の宣言バージョン。v61.1〜v61.9 で実装した全 Language Polish 機能を統合し、
+「型システムがデータエンジニアの思考を助ける」言語としての完成を宣言した。
+
+**v61.1〜v61.9 達成内容:**
+- v61.1（OR パターン強化）: 全アーム型チェック・W037 重複リテラル検出
+- v61.2（as-pattern 拡張）: ネスト対応・LSP inlay hints・W039 束縛衝突警告
+- v61.3（OR パターン個別ガード）: 各アームに独立ガード・E0395 非 Bool ガードエラー
+- v61.4（record update 式）: `{ base | field: val }` 構文・E0396 型不一致・E0397 未定義フィールド
+- v61.5（f-string 強化）: ネスト関数呼び出し・フィールドアクセス・マルチライン `f"""`
+- v61.6（型エラー差分表示）: E0103 に構造的差分 hint・`fav explain` 拡充
+- v61.7（`_` 型プレースホルダー）: `TypeExpr::Hole`・W040 lint・LSP inlay hints
+- v61.8（`fav check --strict`）: `LintConfig`・W040 `[strict]` タグ・`[lint] strict = true`
+- v61.9（安定化）: v61.1〜v61.8 全機能の統合テスト確認
+
+**Tests: 3382 passed, 0 failed**
+
+---
+
+## v61.0.0（2026-07-31）— Developer Experience 2.0
+
+> 「エラーはソース位置を指し、修正候補は即座に現れる。
+>  エディタは意図を理解し、フォーマッタはコメントを守る。
+>  REPL でパイプラインを対話的に探索でき、ドキュメントは自動生成される。
+>
+>  Favnir のエラーメッセージはデータエンジニアの道標になった。
+>
+>  これが Favnir v61.0 — Developer Experience 2.0 の姿である。」
+
+**Developer Experience 2.0** の宣言バージョン。v60.1〜v60.9 で実装した全 DX 機能を統合し、
+「エラーメッセージから修正まで一気通貫」の開発体験を確立した。
+
+**v60.1〜v60.9 達成内容:**
+- v60.1（エラー span 表示）: `-->` / `|` / `^` アンダーライン形式
+- v60.2（`fav check --fix`）: 自動修正提案・dry-run モード
+- v60.3（LSP Code Action）: `fav check --fix` と LSP の Code Action 統合
+- v60.4（LSP Diagnostic 統合）: span 情報を LSP Diagnostic に反映
+- v60.5（REPL 強化）: `:load` / `:debug` / マルチライン入力
+- v60.6（`fav explain-error` 全コード）: `long_description` 全エラーコード補完
+- v60.7（`fav fmt` 拡張）: コメント保持・`.favfmt` 設定ファイル対応
+- v60.8（`fav doc` 強化）: HTML 出力・Rune ドキュメント統合・`@param`/`@returns` タグ
+- v60.9（安定化）: v60.1〜v60.8 全機能の統合テスト確認
+
+---
+
+## v60.0.0（2026-07-30）— Enterprise 1.0
+
+> 「ストリームはウィンドウで区切られ、型システムは制約で守られる。
+>  アクセスはロールで制御され、シークレットはコードに現れない。
+>  デプロイは無停止で切り替わり、ポリシーはコードで記述される。
+>  コストは可視化され、SLA は保証され、コンプライアンスは証明される。
+>
+>  Favnir はデータエンジニアリングのエンタープライズ標準になった。
+>
+>  これが Favnir v60.0 — Enterprise 1.0 の姿である。」
+
+**Enterprise 1.0** の宣言バージョン。v56〜v59 で実装した全エンタープライズ機能を統合し、
+「企業で安心して選ばれるデータパイプライン言語」として完成した。
+
+**v56〜v59 達成内容:**
+- v57.1（RBAC）: `fav run --rbac`・ロールベースアクセス制御
+- v57.2（Secret 管理）: AWS SM / Vault / GCP SM 統合
+- v57.3（mTLS）: `fav run --mtls`・相互 TLS 接続
+- v57.5（監査ログ）: 署名付き監査ログ
+- v57.6（コンプライアンス）: GDPR / SOC2 / HIPAA レポート
+- v58.1（Blue-Green Deploy）: `fav deploy --strategy blue-green`・無停止デプロイ
+- v59.2（SLA Guarantee）: `fav sla report`・SLA 監視・アラート統合
+- v59.3（Cost Visibility）: `fav cost estimate`・パイプラインコスト見積もり
+- v59.5（Migration Toolkit）: `fav migrate`・v1 → Enterprise 自動移行
+- v59.6（Enterprise Certify）: `fav certify --level enterprise`・Enterprise 1.0 認定
+
+---
+
+## v59.0.0（2026-07-29）— Governance & Deployment 2.0
+
+> 「パイプラインは Blue/Green で無停止デプロイされ、
+>  カナリアは段階的にトラフィックを引き受ける。
+>  スキーマはバージョン管理され、データはカタログで検索できる。
+>  ポリシーはコードで記述され、コンプライアンスは自動で証明される。
+>  Favnir のパイプラインは運用チームに信頼される。
+>
+>  これが Favnir v59.0 — Governance & Deployment 2.0 の姿である。」
+
+**Governance & Deployment 2.0** の宣言バージョン。v58.1〜v58.9 の全機能統合を経て、
+Blue/Green デプロイ・カナリア・HA・Schema Migration・Data Catalog・Policy-as-Code・
+マルチ環境設定の成熟を宣言する。
+
+**v58.1〜v58.9 達成内容:**
+- v58.1（Blue/Green デプロイ）: `fav deploy --strategy blue-green`・無停止デプロイ
+- v58.2（カナリアデプロイ）: `--canary-weight` によるトラフィック段階移行
+- v58.3（Schema Migration）: `fav schema migrate`・バージョン管理マイグレーション
+- v58.4（Data Catalog）: `fav catalog push/search`・データアセット登録・検索
+- v58.5（Policy-as-Code・E0426）: `fav policy check`・コンプライアンス自動証明
+- v58.6（マルチ環境設定）: `--env dev/staging/prod`・`fav.toml [env]` セクション
+- v58.7（HA / DR）: `fav run --ha --replica <n>`・フェイルオーバー・`/healthz`
+- v58.8（ドキュメントサイト記事）: deployment.mdx / governance.mdx / multi-env-pipeline.mdx 作成
+- v58.9（安定化・コードフリーズ）: governance-overview.mdx・全テスト通過確認
+
+---
+
+## v58.0.0（2026-07-28）— Enterprise Security
+
+> 「アクセスはロールで制御され、シークレットはコードに現れず、
+>  通信は mTLS で守られ、監査ログは改ざんできない。
+>  コンプライアンスレポートはボタン一つで生成される。
+>  Favnir は企業のセキュリティ要件を満たす言語になった。
+>
+>  これが Favnir v58.0 — Enterprise Security の姿である。」
+
+**Enterprise Security** の宣言バージョン。v57.1〜v57.9 の全機能統合を経て、
+RBAC・シークレット管理・TLS/mTLS・監査ログ署名・コンプライアンスレポート・
+マルチテナント分離の成熟を宣言する。
+
+**v57.1〜v57.9 達成内容:**
+- v57.1（RBAC）: ロールベースアクセス制御・E0424 エラーコード
+- v57.2（Secrets 管理）: AWS SM / Vault 連携・実行時シークレット注入
+- v57.3（TLS / mTLS）: HTTP / gRPC Rune 証明書設定・`is_mtls()` メソッド
+- v57.4（依存関係スキャン）: CVE スキャン・`--fail-on-high`
+- v57.5（監査ログ署名）: HMAC-SHA256 署名・tamper-proof audit
+- v57.6（コンプライアンスレポート）: GDPR / SOC2 フレームワーク対応
+- v57.7（マルチテナント分離）: `TenancyConfig` / strict モード・`is_strict()`
+- v57.8（ドキュメント）: Enterprise Security 記事群（rbac / secrets / compliance）
+- v57.9（安定化）: コードフリーズ・enterprise-security-overview.mdx
+
+---
+
+## v57.0.0（2026-07-26）— Language Power 2.0
+
+> 「ジェネリクスは制約で安全に縛られ、レコードは行変数で柔軟に合成され、
+>  エフェクトは推論によって自然に表れる。
+>  パターンはガード節と OR 構文で表現力を増し、モジュールは名前空間で整理される。
+>  Favnir の型システムは開発者の意図を正確に表現できる。
+>
+>  これが Favnir v57.0 — Language Power 2.0 の姿である。」
+
+**Language Power 2.0** の宣言バージョン。v56.1〜v56.9 の全機能統合を経て、
+境界付きジェネリクス・行多相レコード・エフェクト推論 LSP・OR パターン・
+as-パターン・モジュール名前空間の成熟を宣言する。
+
+**v56.1〜v56.9 達成内容:**
+- v56.1（境界付きジェネリクス本番品質化）: `where T: Interface` 正式化・E0422
+- v56.2（複数 constraint・coherence 強化）: `T with Ord with Serialize`・E0423
+- v56.3（行多相レコード活用拡張）: `{ field: Type | r }` 行変数明示・LSP ホバー
+- v56.4（エフェクト推論 LSP 統合）: inlay hints・`fav check --show-types`
+- v56.5（OR パターン + パターンガード強化）: `Ok(x) | Err(x)`・W037
+- v56.6（パターンエイリアス）: `head @ { id, amount }` as-パターン
+- v56.7（モジュール名前空間）: `import "path" as alias.*`・W038
+- v56.8（ドキュメント）: bounded-generics / row-polymorphism / effect-inference MDX
+- v56.9（安定化）: language-power2-overview.mdx 骨子・コードフリーズ
+
+---
+
+## v56.0.0（2026-07-24）— Streaming Native 2.0
+
+> 「ウィンドウはイベントを時間で区切り、ウォーターマークは遅延を許容し、
+>  チェックポイントは障害から瞬時に回復する。
+>  CEP はイベントの流れからパターンを検出する。
+>  Favnir はリアルタイムデータの言語になった。
+>
+>  これが Favnir v56.0 — Streaming Native 2.0 の姿である。」
+
+**Streaming Native 2.0** の宣言バージョン。v55.1〜v55.9 の全機能統合を経て、
+ウィンドウ・ウォーターマーク・Exactly-once チェックポイント・CEP・Stateful stage・
+Checkpoint / Replay API の成熟を宣言する。
+
+**v55.1〜v55.9 達成内容:**
+- v55.1（ウィンドウ + Exactly-once 統合）: Tumbling/Sliding ウィンドウとチェックポイント統合
+- v55.2（セッションウィンドウ + ウォーターマーク）: 遅延イベント許容・`--stream-stats`
+- v55.3（Exactly-once チェックポイント）: 冪等リトライ・処理済みオフセット永続化
+- v55.4（ストリーム結合）: `Stream.join_inner` / `Stream.join_left`
+- v55.5（Stateful stage）: `State.get` / `State.set` / `State.get_or_default`
+- v55.6（CEP 統合）: `CEP.sequence` / `CEP.skip_until`
+- v55.7（Checkpoint / Replay API）: `set/get/clear_resume_from_checkpoint`
+- v55.8（ドキュメント）: streaming-v2 / stateful-pipeline / cep-patterns MDX
+- v55.9（安定化）: streaming-native2-overview.mdx 骨子・コードフリーズ
+
+---
+
 ## v55.0.0（2026-07-23）— Production 3.0
 
 > 「型安全なガード節、スケールする並列パイプライン、

@@ -1,0 +1,8 @@
+[rune]
+name        = "timeseries"
+version     = "0.1.0"
+description = "Time Series Rune for Favnir — ARIMA/SARIMA, STL decomposition, change point detection, forecasting"
+entry       = "timeseries.fav"
+effects     = []
+
+[dependencies]

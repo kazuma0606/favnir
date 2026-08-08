@@ -191,7 +191,7 @@ resource "aws_ecs_cluster" "fav2py" {
 }
 
 locals {
-  db_url = "postgresql://favnir:${var.db_password}@${aws_db_instance.postgres.address}/fav2py"
+  db_url = "postgresql://favnir:${var.db_password}@${aws_db_instance.postgres.address}/fav2py?sslmode=disable"
   common_env = [
     { name = "DATABASE_URL", value = local.db_url },
     { name = "AWS_DEFAULT_REGION", value = var.aws_region },

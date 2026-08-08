@@ -1,0 +1,29 @@
+// LLM Extraction Stage — Rune.llm.extract
+// Schema-typed extraction from LLM output
+//
+// NOTE: ジェネリック型 T / Option<T> は将来フェーズで型システムに登録する。
+//       今バージョンは String をプレースホルダーとして使用。
+//       include_str! テストのみ（型チェックエラーは無視する）。
+
+// スキーマ付き単一レコード抽出
+// text: LLM への入力テキスト, schema: スキーマ名（文字列）, model: モデル名
+public fn extract(text: String, schema: String, model: String) -> String {
+    ""
+}
+
+// スキーマ付き複数レコード抽出（リスト返し）
+public fn extract_list(text: String, schema: String, model: String) -> List<String> {
+    []
+}
+
+// デフォルト値付き抽出（抽出失敗時は default_val を返す）
+// LLMExtractionFallback — extract_or_default が失敗した場合のフォールバック
+public fn extract_or_default(text: String, schema: String, model: String, default_val: String) -> String {
+    default_val
+}
+
+// Option 型抽出（抽出失敗時は "" を返すスタブ）
+// extract_maybe — 失敗時に Option<T> を返す（スタブでは "" で代替）
+public fn extract_maybe(text: String, schema: String, model: String) -> String {
+    ""
+}

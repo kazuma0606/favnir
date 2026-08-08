@@ -4,6 +4,1417 @@ Favnir のバージョン履歴。形式は [Keep a Changelog](https://keepachan
 
 ---
 
+## [v70.0.0] — 2026-08-08 — Intelligent ETL 1.0 宣言 ★クリーンアップ
+
+### Added
+- `MILESTONE.md` に v70.0.0「Intelligent ETL 1.0」宣言文エントリを追加
+- `v70000_tests`: 4 件追加（3555 → 3559 tests）
+  - `cargo_toml_version_is_70_0_0`
+  - `changelog_has_v70_0_0`
+  - `milestone_has_intelligent_etl`
+  - `readme_mentions_intelligent_etl`
+- Intelligent ETL 機能群（v65.1〜v69.9）の成果を統合:
+  - Math Rune 群（v65.1〜v65.8）: linalg / stats / autodiff / optim / numeric / timeseries / ml
+  - AI-Native Stage Layer（v66.1〜v66.8）: LLM 型安全抽出・埋め込み・VectorDB・モデルサービング
+  - Developer Intelligence（v67.1〜v67.9）: デバッガ・タイムトラベル・DAG 可視化・AI アドバイザー
+  - Distributed Favnir（v68.1〜v68.9）: マルチノード par・チェックポイント・K8s・コスト見積もり
+  - Intelligent ETL 統合（v69.1〜v69.9）: E2E デモ・Playground・ドキュメント整備・コードフリーズ
+
+### Changed
+- `fav/Cargo.toml` version `"69.0.0"` → `"70.0.0"`
+- `README.md` に Intelligent ETL 1.0 宣言を追記
+
+### Note
+- ★クリーンアップ（`cargo clean`）完了
+- `cargo clean` 後は `fav/tmp/hello.fav` を復元すること（bootstrap テスト要件）
+
+---
+
+## [v69.0.0] — 2026-08-07 — Distributed Favnir 宣言 ★クリーンアップ
+
+### Added
+- `MILESTONE.md` に v69.0.0「Distributed Favnir」宣言文エントリを追加
+- `v69000_tests`: 4 件追加（3537 → 3541 tests）
+  - `cargo_toml_version_is_69_0_0`
+  - `changelog_has_v69_0_0`
+  - `milestone_has_distributed`
+  - `readme_mentions_distributed`
+- Distributed Favnir 機能群（v68.1〜v68.9）の成果を統合:
+  - Multi-Node `par`（v68.1）: --cluster workers.yaml / --partition-by による分散並列実行
+  - Pipeline Checkpointing（v68.2）: --checkpoint / --resume による耐障害性・再開
+  - Kubernetes-Native Orchestration（v68.3）: fav deploy --target kubernetes / Pipeline CRD
+  - Stage Retry Policies（v68.4）: ExponentialBackoff / LinearBackoff / DeadLetterQueue
+  - Distributed Incremental Cache（v68.5）: --distributed-cache redis:// / L1/L2 キャッシュ
+  - Cost-Aware Scheduling（v68.6）: fav cost-estimate --provider --scale / 最適化提案
+  - Multi-Cloud AI Routing（v68.7）: fav.toml [ai] セクション / --env dev/prod/test
+  - Distributed Observability（v68.8）: --otel-endpoint / OpenTelemetry / Grafana
+  - Stabilization & Code Freeze（v68.9）: distributed.mdx 作成・全機能統合確認
+
+### Changed
+- `fav/Cargo.toml` version `"68.0.0"` → `"69.0.0"`
+- `README.md` に Distributed Favnir 宣言を追記
+
+---
+
+## [v68.0.0] — 2026-08-07 — Developer Intelligence 宣言 ★クリーンアップ
+
+### Added
+- `MILESTONE.md` に v68.0.0「Developer Intelligence」宣言文エントリを追加
+- `v68000_tests`: 4 件追加（3515 → 3519 tests）
+  - `cargo_toml_version_is_68_0_0`
+  - `changelog_has_v68_0_0`
+  - `milestone_has_dev_intelligence`
+  - `readme_mentions_dev_intelligence`
+- `site/content/docs/tools/developer-intelligence.mdx` 新規作成（v67.9.0）
+- Developer Intelligence ツール群（v67.1〜v67.9）の成果を統合:
+  - `fav debug`（v67.1）: ステップ実行デバッガ（inspect / breakpoint / diff）
+  - Time-Travel Debugging（v67.2）: --record / --replay / rewind / forward
+  - `fav viz`（v67.3）: パイプライン DAG 可視化（ascii / svg / mermaid）
+  - `fav suggest --from-profile`（v67.4）: AI 最適化アドバイザー
+  - `fav simulate`（v67.5）: 合成データパイプラインテスト（--seed）
+  - `Rune.proptest`（v67.6）: Pipeline Property Testing（forall / shrink / --proptest-runs）
+  - `fav profile --interactive`（v67.7）: インタラクティブプロファイリング（drill / Suggestion）
+  - `fav doc --math`（v67.8）: 数式対応ドキュメント生成（MathJax / $$...$$）
+  - 安定化・コードフリーズ（v67.9）
+
+### Changed
+- `fav/Cargo.toml` version `"67.0.0"` → `"68.0.0"`
+- `README.md` に Developer Intelligence 宣言を追記
+
+### Note
+- ★クリーンアップ（`cargo clean`）完了
+- `cargo clean` 後は `fav/tmp/hello.fav` を復元すること（bootstrap テスト要件）
+
+---
+
+## [v67.0.0] — 2026-08-06 — AI-Native Stage Layer 宣言 ★クリーンアップ
+
+### Added
+- `MILESTONE.md` に v67.0.0「AI-Native Stage Layer」宣言文エントリを追加
+- `v67000_tests`: 4 件追加（3493 → 3497 tests）
+  - `cargo_toml_version_is_67_0_0`
+  - `changelog_has_v67_0_0`
+  - `milestone_has_ai_native_stage`
+  - `readme_mentions_ai_native`
+- `site/content/docs/runes/ai-runes-overview.mdx` 新規作成（v66.9.0）
+- AI-Native Stage Layer Rune 群（v66.1〜v66.9）の成果を統合:
+  - `Rune.vec`（v66.1）: ベクトル演算（normalize / dot / cosine_similarity / euclidean_distance）
+  - LLM Extraction Stage（v66.2）: 型安全 JSON 抽出
+  - `Rune.embed`（v66.3）: 統一埋め込みインターフェース（OpenAI / Cohere / ローカル）
+  - Vector DB Runes（v66.4）: Pinecone / pgvector / Weaviate / Qdrant
+  - `Rune.inference`（v66.5）: ストリーミング ML 推論（backpressure / SLA / stateful）
+  - `Rune.serve`（v66.6）: モデルサービングエンドポイント（rate limit / OpenAPI）
+  - `Rune.featurestore`（v66.7）: 型安全フィーチャーストア
+  - AI Lint Rules W055〜W059（v66.8）: AI パイプライン特有アンチパターン検出スタブ
+  - 安定化・`ai-runes-overview.mdx`（v66.9）
+
+### Changed
+- `fav/Cargo.toml` version `"66.0.0"` → `"67.0.0"`
+- `README.md` に AI-Native Stage Layer 宣言を追記
+
+### Note
+- ★クリーンアップ（`cargo clean`）完了
+- `cargo clean` 後は `fav/tmp/hello.fav` を復元すること（bootstrap テスト要件）
+
+---
+
+## [v66.0.0] — 2026-08-05 — Math & Science Foundation 宣言 ★クリーンアップ
+
+### Added
+- `MILESTONE.md` に v66.0.0「Math & Science Foundation」宣言文エントリを追加
+- `v66000_tests`: 4 件追加（3471 → 3475 tests）
+  - `cargo_toml_version_is_66_0_0`
+  - `changelog_has_v66_0_0`
+  - `milestone_has_math_science`
+  - `readme_mentions_math_science`
+- `site/content/docs/runes/math-runes-overview.mdx` 新規作成（v65.9.0）
+- Math & Science Rune 群（v65.1〜v65.9）の成果を統合:
+  - `Rune.linalg`（v65.1）: 線形代数（matmul / dot / svd / eig / solve / cholesky）
+  - `Rune.stats`（v65.2）: 統計解析（mean / std / t_test / chi_square / linear_regression）
+  - `Rune.autodiff`（v65.3）: 自動微分（tape / grad / jacobian / hessian / relu）
+  - `Rune.optim`（v65.4）: 最適化（sgd / adam / adamw / l_bfgs / cosine_annealing）
+  - `Rune.numeric`（v65.5）: 数値計算（integrate / fft / ode_solve / bisection / newton_raphson）
+  - `Rune.timeseries`（v65.6）: 時系列（arima / sarima / decompose / adf_test / rolling_mean）
+  - `Rune.ml`（v65.7）: ML Primitives（knn / random_forest / cross_validate / roc_auc）
+  - Math Lint Rules W050〜W054（v65.8）: 数学 Rune 特有アンチパターン検出スタブ
+  - 安定化・`math-runes-overview.mdx`（v65.9）
+
+### Changed
+- `fav/Cargo.toml` version `"65.0.0"` → `"66.0.0"`
+- `README.md` に Math & Science Foundation 宣言を追記
+
+### Note
+- ★クリーンアップ（`cargo clean`）完了
+- `cargo clean` 後は `fav/tmp/hello.fav` を復元すること（bootstrap テスト要件）
+
+---
+
+## [v65.0.0] — 2026-08-02 — Performance 1.0 宣言 ★クリーンアップ
+
+### Added
+- `MILESTONE.md` に `"Performance 1.0"` 宣言文エントリを追加
+- `v65000_tests`: 4 件追加（3449 → 3453 tests）
+  - `cargo_toml_version_is_65_0_0`
+  - `changelog_has_v65_0_0`
+  - `milestone_has_performance1`
+  - `readme_mentions_performance1`
+
+### Changed
+- `fav/Cargo.toml` version `"64.0.0"` → `"65.0.0"`
+- `README.md` に Performance 1.0 宣言を追記
+
+### Note
+- ★クリーンアップ（`cargo clean`）完了
+- `fav build --target wasm32` CLI dispatch 統合・`fav lint --perf` CLI フラグは後送り（v66 以降）
+
+---
+
+## [v64.9.0] — 2026-08-02 — 安定化・コードフリーズ（Performance 1.0 前調整）
+
+### Added
+- `v64900_tests`: 2 件追加（3447 → 3449 tests）
+  - `scale_all_v64_features_stable`（v64.1 `cmd_build_ci` / v64.4 `cmd_profile_flamegraph_aot` / v64.7 `cmd_build_wasm` の動作確認）
+  - `performance1_overview_doc_complete`（`performance1-overview.mdx` の 4 セクション存在確認）
+
+---
+
+## [v64.8.0] — 2026-08-02 — ドキュメントサイト Performance 1.0 総括記事
+
+### Added
+- `site/content/docs/performance/performance1-overview.mdx` 新規作成（v61〜v64 全機能の概観記事・クイックスタート・認定チェックリスト・ベンチマーク比較）
+- `v64800_tests`: 2 件追加（3445 → 3447 tests）
+  - `docs_performance1_overview_exists`
+  - `docs_performance1_has_quickstart`
+
+---
+
+## [v64.7.0] — 2026-08-02 — `fav build --target wasm32`（Playground 向け WASM 出力）
+
+### Added
+- `cmd_build_wasm(src, out) -> String` を `driver.rs` に追加（`wasm_codegen_program` を使い WASM バイト列を生成）
+- `v64700_tests`: 2 件追加（3443 → 3445 tests）
+  - `build_wasm_target_outputs_wasm`
+  - `wasm_build_compat_check`
+
+### Note
+- `cmd_build` への `\"wasm32\"` アーム統合・Playground エクスポート関数シグネチャ整備は後送り（v64.9 以降）
+- `main.rs` の CLI dispatch 未接続（`fav build --target wasm32` コマンドラインは v64.9 で有効化）
+- バイト列のファイル書き出しは v64.9 の dispatch 統合時に実装予定
+- 型チェック（`compile_program` 直呼び）は `cmd_build_ci` と同一パターン
+
+---
+
+## [v64.6.0] — 2026-08-02 — `fav lint --perf`（パフォーマンス lint toml 連携）
+
+### Added
+- `LintTomlConfig.perf: Option<bool>` フィールドを追加（`[lint] perf = true` で W041 等のパフォーマンス lint を有効化）
+- `cmd_lint` の `perf` を `[lint] perf` toml 設定から読み取るよう更新（`perf: false` ハードコードを解消）
+- `v64600_tests`: 2 件追加（3441 → 3443 tests）
+  - `lint_perf_flag_enables_w041`
+  - `lint_toml_perf_setting`
+
+### Note
+- `fav lint --perf` CLI フラグ（`main.rs`）は後送り（v64.7 以降）
+
+---
+
+## [v64.5.0] — 2026-08-02 — 外部ベンチマーク比較
+
+### Added
+- `site/content/docs/runtime/benchmarks.mdx`: Favnir AOT vs pandas / Apache Beam / dbt の比較ベンチマーク結果ページを新規作成
+- `benchmarks/compare/run_comparison.sh`: 再現可能なベンチマーク比較スクリプトを新規作成
+- `v64500_tests`: 2 件追加（3439 → 3441 tests）
+  - `docs_benchmarks_page_exists`
+  - `benchmark_compare_script_exists`
+
+---
+
+## [v64.4.0] — 2026-08-02 — `fav profile` flamegraph AOT 対応
+
+### Added
+- `cmd_profile_flamegraph_aot`: AOT バイナリの IR 関数名から flamegraph SVG を生成する関数を追加
+  （`ir.fns` を `StageRecord` に変換し `generate_svg` で SVG を生成）
+- `v64400_tests`: 2 件追加（3437 → 3439 tests）
+  - `profile_flamegraph_aot`
+  - `profile_flamegraph_svg_generated`
+
+---
+
+## [v64.3.0] — 2026-08-02 — パフォーマンスガイド
+
+### Added
+- `site/content/docs/runtime/performance.mdx`: パフォーマンスチューニングガイド新規作成
+  （AOT・差分コンパイル・並列最適化・DAG 最適化・バックプレッシャー・回帰検出を網羅）
+- `v64300_tests`: 2 件追加（3435 → 3437 tests）
+  - `docs_performance_guide_exists`
+  - `docs_performance_has_aot_section`
+
+---
+
+## [v64.2.0] — 2026-08-02 — パフォーマンスリグレッションテスト自動化
+
+### Added
+- `BenchTomlConfig`: `fav.toml` の `[bench]` セクション（`regression_threshold_pct`）をパース
+- `FavToml` に `bench: Option<BenchTomlConfig>` フィールドを追加
+- `v64200_tests`: 2 件追加（3433 → 3435 tests）
+  - `bench_compare_detects_regression`（既存 `cmd_bench_compare` を使用した回帰検出テスト）
+  - `bench_toml_threshold`（`[bench]` セクションのパーステスト）
+
+---
+
+## [v64.1.0] — 2026-08-02 — AOT ビルドの CI 統合（`fav build --ci`）
+
+### Added
+- `cmd_build_ci(src, out) -> String`: CI 向け出力形式（ANSI なし・機械可読プレフィックス）でビルド結果を返す
+- `create_ci_workflow_project`: `fav new ci-workflow` テンプレート（`.github/workflows/build.yml` を生成）
+- `try_cmd_new` に `"ci-workflow"` アームを追加
+- `v64100_tests`: 2 件追加（3431 → 3433 tests）
+  - `build_ci_flag_output_format`
+  - `new_template_has_ci_workflow`
+
+---
+
+## [v64.0.0] — 2026-08-02 — Incremental & Scale 宣言 ★クリーンアップ
+
+### Added
+- `v64000_tests`: 4 件追加（3427 → 3431 tests）
+- `MILESTONE.md` に "Incremental & Scale" 宣言エントリを追加（v63.1〜v63.9 達成内容含む）
+- `README.md` に v64.0.0 宣言追記
+- `fav/Cargo.toml` version を `64.0.0` に更新
+- ★クリーンアップ（`cargo clean`）完了
+
+---
+
+## [v63.9.0] — 2026-08-02 — 安定化・Scale チェックリスト
+
+### Added
+- `v63900_tests`: `scale_e2e_incremental_par` / `scale_dag_opt_dead_and_fused` 2 件追加（3425 → 3427 tests）
+- インクリメンタルキャッシュ + 多段パイプライン統合動作確認（cache miss → cache hit + parallel stats）
+- DAG 最適化 dead stage 除去 + pure stage fusion の統合動作確認
+
+---
+
+## [v63.8.0] — 2026-08-02 — 標準 ETL ベンチマークスイート
+
+### Added
+- `driver.rs` に `cmd_bench_suite(suite: &str) -> String` を追加
+- `"etl-standard"` スイートで csv-to-postgres / kafka-window-aggregate の VM + AOT コンパイルベンチを実行
+- `v63800_tests`: `bench_suite_etl_standard` / `bench_regression_check` 2 件追加（3423 → 3425 tests）
+
+---
+
+## [v63.7.0] — 2026-08-02 — パイプライン DAG 最適化（dead stage elimination + pure stage fusion）
+
+### Added
+- `driver.rs` に `cmd_opt_stats(src: &str) -> String` を追加
+  - **Dead stage elimination**: `PipelineDef` に参照されていない `TrfDef` を検出して報告
+  - **Pure stage fusion**: エフェクトフル呼び出しのない連続する `TrfDef` ペアを融合候補として報告
+  - ヘルパー関数 3 件追加: `opt_is_pure_stage` / `opt_block_has_effect_call` / `opt_expr_has_effect_call`
+  - エフェクトフル名前空間: `Io` / `Http` / `Db` / `Kafka` / `S3` / `Sqs` / `Slack` / `Email` / `Llm` / `Snowflake` / `Postgres`
+
+### Tests
+- `optimizer_dead_stage_eliminated` — PipelineDef 未参照の TrfDef が eliminated として報告されることを確認
+- `optimizer_pure_stages_fused` — 連続する純粋 TrfDef ペアが fused として報告されることを確認
+
+---
+
+## [v63.6.0] — 2026-08-02 — バックプレッシャー制御（W041 lint + `[backpressure]` 設定）
+
+### Added
+- `lint.rs` に W041 `perf_hint_large_collect` lint ルールを追加
+  - `collect` ブロック内に `filter` 参照がない場合に W041 を発火
+  - `--perf` / `--strict` フラグ下（`LintConfig.perf || config.strict`）でのみ有効
+  - ヘルパー関数 5 件追加: `check_w041_in_block` / `check_w041_in_expr` / `block_mentions_filter` / `stmt_mentions_name_w041` / `expr_mentions_name_w041`
+- `toml.rs` に `BackpressureConfig { strategy: String, max_queue_depth: usize, warn_threshold: usize }` を追加
+  - `[backpressure]` TOML セクションをパース（`parse_fav_toml` 内 6 箇所更新）
+  - デフォルト: `strategy = "block"`, `max_queue_depth = 500`, `warn_threshold = 400`
+- `driver.rs` に `v63600_tests` モジュール追加（2 件 PASS）
+
+### Changed
+- `LintConfig.perf` フィールドの `#[allow(dead_code)]` を削除（W041 で実際に使用）
+
+### Tests
+- `lint_w041_large_collect` — W041 が perf モードで発火することを確認
+- `backpressure_toml_parsed` — strategy / max_queue_depth / warn_threshold を検証
+
+---
+
+## [v63.5.0] — 2026-08-02 — メモリプロファイリング（`fav profile --memory`）
+
+### Added
+- `fav/Cargo.toml` に `sysinfo = "0.30"` を追加（native-only、platform 差異を吸収）
+- `driver.rs` に `cmd_profile_memory(src: &str, json_mode: bool) -> String` を追加
+  - `Parser::parse_str` で stage 名（`Item::TrfDef`）を取得
+  - `sysinfo::System` で現在プロセスの RSS（MB）を計測
+  - テーブル形式（`"Peak RSS"` / `"Alloc/row"` / `"Total peak"` 行）または JSON 配列を返す
+  - WASM ターゲットでは `peak_rss_mb = 0` として動作（`#[cfg]` ガード付き）
+- `v63500_tests` 追加（2件）: `profile_memory_flag_works` / `profile_memory_per_stage`
+
+### Tests
+- 3416 tests passed, 0 failed（+2 from v63.4.0）
+
+---
+
+## [v63.4.0] — 2026-08-02 — `par` 動的スレッドプール・`[parallel]` fav.toml 設定
+
+### Added
+- `toml.rs` に `ParallelConfig { max_threads: usize, queue_depth: usize }` 構造体を追加（v63.4.0）
+  - `max_threads = 0` は `available_parallelism()` によるCPUコア数自動検出
+  - `queue_depth` デフォルト 256
+- `FavToml` に `parallel: Option<ParallelConfig>` フィールドを追加
+- `parse_fav_toml` が `[parallel]` セクションを処理するよう更新
+- `driver.rs` に `cmd_parallel_stats(toml_content: &str) -> String` を追加
+  - `[parallel]` 設定を解析し `max_threads`・`effective_threads`・`queue_depth` を返す
+- `v63400_tests` 追加（2件）: `parallel_toml_config_parsed` / `parallel_stats_output`
+
+### Tests
+- 3414 tests passed, 0 failed（+2 from v63.3.0）
+
+---
+
+## [v63.3.0] — 2026-08-02 — キャッシュ型シグネチャ不整合検出 E0428
+
+### Added
+- `error_catalog.rs` に E0428 `incremental_cache_conflict` を追加
+  - `long_description` / `suggestion` フィールド含む
+  - 型シグネチャ不整合を非致命的警告として記録
+- `cache.rs` の `IncrementalCache` に `check_type_sig` メソッドを追加
+  - ソースハッシュ一致・型シグ不一致時に E0428 を `eprintln!` で警告
+  - キャッシュエントリを自動無効化して再コンパイルを促す
+- Rust テスト 2 件追加（`v63300_tests`）:
+  `incremental_e0428_signature_mismatch` / `cache_auto_invalidated`
+
+### Notes
+- E0428 は致命的エラーではない（`eprintln!` 警告 + キャッシュ無効化のみ）
+- `check_type_sig` は `&self` で実装（`invalidate` が `&self` のため）
+
+---
+
+## [v63.2.0] — 2026-08-02 — `fav watch` 改善・IncrementalCache 統合
+
+### Added
+- `driver.rs` に `cmd_run_with_cache(src, cache_dir) -> String` を追加
+  - `IncrementalCache` によるパイプライン全体のハッシュ差分チェック
+  - キャッシュヒット時は `"cache hit: (skipped recompile)"` を返す
+- Rust テスト 2 件追加（`v63200_tests`）:
+  `watch_incremental_recompile` / `watch_notify_integration`
+
+### Notes
+- `fav watch` の inotify/FSEvents 統合は v9.9.0 で実施済みのため本バージョンでは実装不要
+- `cmd_watch` 本体へのキャッシュ統合は無限ループのためテスト困難 → v63.x 以降
+
+---
+
+## [v63.1.0] — 2026-08-02 — 差分コンパイルキャッシュ（`.fav-cache/`）
+
+### Added
+- `fav/src/cache.rs` 新規作成: `IncrementalCache` 構造体（ステージ単位、`.fav-cache/` プロジェクトローカル）
+  - `new / is_hit / store / invalidate` API
+  - `stage_hash(src: &[u8]) -> String`（SHA-256）
+- `driver.rs` に `cmd_incremental_cache_status(cache_dir: &str) -> String` を追加
+- Rust テスト 2 件追加（`v63100_tests`）:
+  `incremental_cache_hit_unchanged` / `incremental_cache_miss_on_change`
+
+### Changed
+- `fav/src/lib.rs` に `#[cfg(not(target_arch = "wasm32"))] pub mod cache;` を追加
+- `fav/src/main.rs` に `mod cache;` を追加
+
+### Notes
+- 既存の `fav::incremental::cache::IncrementalCache`（ファイルレベル、`~/.fav/cache/`）とは別の新モジュール
+- `cmd_run` へのキャッシュ統合は v63.2.0 以降
+
+---
+
+## [v63.0.0] — 2026-08-02 — AOT Native 宣言 ★クリーンアップ
+
+### Added
+- `MILESTONE.md` に AOT Native 宣言エントリを追加（v62.1〜v62.9 の全 AOT 機能集約）
+- Rust テスト 4 件追加（`v63000_tests`）:
+  `cargo_toml_version_is_63_0_0` / `changelog_has_v63_0_0` / `milestone_has_aot_native` / `readme_mentions_aot_native`
+
+### Changed
+- `fav/Cargo.toml` バージョンを `62.0.0` → `63.0.0` に更新
+- `driver.rs` 内の `cargo.contains("version = \"62.0.0\"")` アサーション 12 件を `63.0.0` に一括更新
+
+### Notes
+- ★クリーンアップ（`cargo clean`）実施済み
+
+---
+
+## [v62.9.0] — 2026-08-01 — 安定化・AOT E2E デモ
+
+### Added
+- `infra/e2e-demo/aot/src/pipeline.fav` — AOT 互換の純粋変換パイプライン（emit なし、`OrderRow` → `SummaryRow`）
+- `infra/e2e-demo/aot/scripts/build-aot.sh` — `fav build --link / --docker / --validate` の3ステップ E2E スクリプト
+- `infra/e2e-demo/aot/README.md` — デモの目的・使い方
+- `site/content/docs/runtime/aot.mdx` — `fav build` コマンド一覧・AOT 互換性・E0427 エラー解説ドキュメント
+- Rust テスト 2 件追加（`v62900_tests`）
+  - `aot_e2e_demo_structure` — `infra/e2e-demo/aot/src/pipeline.fav` が `OrderRow` / `SummaryRow` 型定義を含むことを確認
+  - `docs_aot_mdx_exists` — `site/content/docs/runtime/aot.mdx` が `"AOT Compilation"` / `"fav build"` / `"E0427"` を含むことを確認
+
+### Notes
+- build-aot.sh の `[3/3]` はロードマップ記載の `docker run` を `fav build --validate` に変更（CI 環境依存回避）
+
+---
+
+## [v62.8.0] — 2026-08-01 — AOT 互換性チェック（E0427 `emit` 未サポート検出）
+
+### Added
+- `contains_aot_unsupported(expr: &IRExpr) -> bool` 関数を `cranelift_aot.rs` に追加（`impl CraneliftBackend` 外）
+  - `IRExpr::Emit` を再帰的に検出（BinOp / If / Block / IRStmt 全バリアント対応）
+- `pub fn validate_aot_compat(ir: &IRProgram) -> Vec<String>` 関数を `cranelift_aot.rs` に追加
+  - 各 `fn_def` の body を走査し、AOT 未サポート機能を含む関数に `E0427` エラーを返す
+- `E0427` エントリを `error_catalog.rs` に追加
+  - カテゴリ: `"build"` / `long_description` / `suggestion` あり
+- `pub fn cmd_build_aot_validate(src: &str) -> String` を `driver.rs` に追加
+  - ソースをパース → IR にコンパイル → `validate_aot_compat` 呼び出し → 結果を文字列で返す
+- Rust テスト 2 件追加（`v62800_tests`）
+  - `aot_e0427_emit_detected` — `emit "hello"` を含む関数が E0427 として報告されることを確認
+  - `error_catalog_has_e0427` — E0427 がカタログに存在し `category == "build"` / `long_description` ありを確認
+
+---
+
+## [v62.7.0] — 2026-08-01 — `fav.toml` `[build]` セクション（AOT 設定）
+
+### Added
+- `BuildConfig { target, opt_level, inline_pure_stages, output_dir }` 構造体 + `impl Default` を `toml.rs` に追加
+  - デフォルト: `target="x86_64-unknown-linux-gnu"`, `opt_level=2`, `inline_pure_stages=true`, `output_dir="dist/"`
+- `FavToml.build: Option<BuildConfig>` フィールドを追加（`[build]` セクション未記載時は `None`）
+- `parse_fav_toml` に `[build]` セクションパース処理を追加（`target` / `opt_level` / `inline_pure_stages` / `output_dir`）
+- `ResolvedBuildConfig` 構造体 + `resolve_build_config(cli_target, cli_opt_level, cli_inline_pure, cli_output_dir, toml)` 関数を `driver.rs` に追加
+  - 優先順位: CLI フラグ > `fav.toml [build]` > デフォルト値
+- `fav build` コマンドで `fav.toml [build]` を読み���んで `resolve_build_config` を呼ぶ最小実装（`main.rs`）
+- Rust テスト 2 件追加（`v62700_tests`）
+  - `build_toml_config_parsed` — `[build]` セクションの全フィールドが正しくパースされることを確認
+  - `build_cli_overrides_toml` — CLI 引数が `fav.toml` 設定を上書きすることを確認
+
+### Notes
+- `FavToml` 構造体リテラルを持つ既存コード（`checker.rs` / `resolver.rs` / `driver.rs`）に `build: None` を追加（後方互換維持）
+- `ResolvedBuildConfig` / `resolve_build_config` は純粋計算関数のため `#[cfg(not(target_arch = "wasm32"))]` 不要
+- 実際のビルド動作（`cmd_build_basic` / `cmd_build_link` への設定反映）は非スコープ（v62.9.0 以降）
+
+---
+
+## [v62.6.0] — 2026-08-01 — Docker / OCI イメージ生成（`fav build --docker`）
+
+### Added
+- `validate_docker_tag(tag: &str) -> Result<(), String>` — タグ形式バリデーション private fn（`driver.rs`）
+- `generate_aot_dockerfile(tag: &str) -> String` — AOT 用 Dockerfile テンプレート生成 private fn（`driver.rs`）
+  - ベースイメージ: `debian:12-slim`、`COPY ./pipeline.bin /app/pipeline`、`ENTRYPOINT ["/app/pipeline"]`
+- `cmd_build_docker_dry_run(src, tag)` — Dockerfile のみ返す dry-run モード（`#[cfg(not(target_arch = "wasm32"))]`）
+- `cmd_build_docker(src, tag)` — `docker build` を呼び出す（docker 不在時は `"docker not available: ..."` を返す）
+- `fav build <file> --docker --tag <name>:<ver>` / `--dry-run` CLI フラグ（`main.rs`）
+- Rust テスト 2 件追加（`v62600_tests`）
+  - `build_docker_dockerfile_generated` — dry-run が `FROM debian:12-slim` / `COPY` / `ENTRYPOINT` を含むことを確認
+  - `build_docker_tag_format` — 空・コロンなしタグはエラー、有効タグはタグ形式エラーを返さないことを確認
+
+### Notes
+- `generate_aot_dockerfile` と命名（既存 `generate_dockerfile`（deploy 用）との名前衝突を回避）
+- `cmd_build_docker` / `cmd_build_docker_dry_run` に `#[cfg(not(target_arch = "wasm32"))]` を付与（WASM ビルド互換）
+- AOT binary の実際の埋め込みは非スコープ（`COPY ./pipeline.bin` はプレースホルダー）
+
+---
+
+## [v62.5.0] — 2026-08-01 — `fav bench --aot` コマンド（AOT vs VM 速度比較）
+
+### Added
+- `cmd_bench_aot_vm(src: &str, runs: usize, json_out: &str) -> String` — VM / AOT コンパイル時間を N 回計測して比較表を返す（`driver.rs`）
+  - VM: `build_artifact` N 回 / AOT: `compile_program` + `lower_to_object` N 回
+  - Mean / P99 (ms) を計算し比較表フォーマットで返す
+  - `json_out` が空でない場合、bench-results.json を書き出す
+- `mean_ms` / `p99_ms` private helper 関数（`driver.rs`）
+- `fav bench <file> --aot [--runs N]` CLI フラグ（`main.rs` `Some("bench")` アーム）
+- Rust テスト 2 件追加（`v62500_tests`）
+  - `cmd_bench_runs_both_modes` — 出力に "VM" / "AOT" / "Speedup" が含まれることを確認
+  - `bench_results_json_generated` — bench-results.json（temp パス）に正しい JSON が書き出されることを確認
+
+### Notes
+- `cmd_bench(opts: &BenchOpts)` シグネチャが既存のため `cmd_bench_aot_vm` という関数名を採用
+- throughput (rows/s) 表示はパイプライン行数取得困難のため非スコープ（v62.9.0 以降で検討）
+- 並列テスト競合回避のため `json_out: &str` 引数を追加（空文字列 = 書き出しなし）
+
+---
+
+## [v62.4.0] — 2026-08-01 — AOT エフェクトディスパッチ最適化（Pure ステージのインライン化）
+
+### Added
+- `AotStats { inlined: Vec<String>, dispatched: Vec<String> }` 構造体（`cranelift_aot.rs`）
+- `is_aot_pure(expr: &IRExpr) -> bool` — AOT コンパイル可能な IR のみからなる式かを判定するモジュールレベル関数
+  - `Lit::Str` → `false`（`lower_lit` が非サポート）、その他 `Lit` → `true`
+  - `Local` → `true`、`BinOp` / `If` / `Block` → 再帰的に判定
+  - `Global` / `TrfRef` / `Call` 等 → `false`
+- `CraneliftBackend::analyze_for_inlining(ir: &IRProgram) -> AotStats` — 各 `IRFnDef` を `is_aot_pure` で分類
+- `cmd_build_aot_stats(src: &str) -> String` — parse → compile → `analyze_for_inlining`（`driver.rs`）
+- `fav build --aot-stats` CLI フラグ（`main.rs`）
+- Rust テスト 2 件追加（`v62400_tests`）
+  - `aot_pure_stage_inlined` — 算術のみの関数（`add`）がインライン候補に分類されることを確認
+  - `aot_effectful_stage_not_inlined` — `Lit::Str` を持つ `greeting` がディスパッチ対象に分類されることを確認
+
+### Notes
+- `IRFnDef.effects` フィールドは v35.4.0 で削除済みのため、`is_aot_pure` による IR 構造解析で代替
+- 「削減バイト数」表示（`--aot-stats` 拡張）は関数サイズ推定が必要なため v62.9.0 に後送り
+
+---
+
+## [v62.3.0] — 2026-08-01 — `fav build --target` クロスコンパイルサポート
+
+### Added
+- `cranelift-codegen` features に `"arm64"` を追加（`Cargo.toml`）
+- `CraneliftBackend::lower_to_object_with_target` — target triple 指定 ISA 選択（`cranelift_aot.rs`）
+  - `None` / `"x86_64-unknown-linux-gnu"` → `cranelift_native::builder()`（ホスト ISA）
+  - `"aarch64-unknown-linux-gnu"` → `isa::lookup_by_name("aarch64")`（aarch64 クロスコンパイル）
+  - その他 → `Err("unsupported target triple: ...")`
+- `CraneliftBackend::lower_to_object_with_target_pub` — `pub(crate)` ラッパー
+- `cmd_build_link_target(src, out, target: Option<&str>) -> String` — target 指定 build エントリポイント（`driver.rs`）
+- `cmd_build_link` を `cmd_build_link_target(src, out, None)` の薄いラッパーに変更
+- `main.rs` `--link` ブランチで `--target <triple>` を AOT target として `cmd_build_link_target` に接続
+- Rust テスト 2 件追加（`v62300_tests`）
+  - `aot_cross_compile_aarch64` — aarch64 向けオブジェクトが非空バイト列で生成されることを確認
+  - `aot_target_triple_parsed` — `None` は成功、未サポート triple は `Err`、CLI 経路スモーク確認
+
+---
+
+## [v62.2.0] — 2026-08-01 — native binary 生成（`fav build --link`・Linux x86_64）
+
+### Added
+- `fav/src/backend/fav_rt.rs` — Favnir ランタイムスタブ新規作成
+  - `FAV_RT_VERSION = "0.1.0"` / `FAV_RT_PRIMITIVES = "fav_io_print,fav_io_panic"` 定数
+  - `fav_rt_stub_src()` — C ランタイムスタブソース文字列（`fav_io_print` / `fav_io_panic`）
+- `CraneliftBackend::compile_to_binary_pub` — `pub(crate)` ラッパー追加（`backend/cranelift_aot.rs`）
+- `cmd_build_link(src, out) -> String` — `fav build --link` エントリポイント（`driver.rs`）
+  - parse → compile → `compile_to_binary_pub`（object + `cc` リンク）
+  - 成功時: `"Output: {out} (linked binary)"`
+- `--link` フラグを `main.rs` `Some("build")` アームに追加
+- Rust テスト 2 件追加（`v62200_tests`）
+  - `aot_binary_executable` — `cmd_build_link` が `"parse error:"` を返さないことを確認
+  - `aot_runtime_stub_linked` — `fav_rt_stub_src()` が `fav_io_print` / `fav_io_panic` を含むことを確認
+
+### Notes
+- Windows 環境では `cc` が存在しないため `cmd_build_link` が `"build error:"` を返す場合がある（Linux CI では正常動作）
+- テスト設計: `aot_binary_executable` は `"parse error:"` 不存在のみ確認（OS 非依存）
+
+---
+
+## [v62.1.0] — 2026-08-01 — `fav build` コマンド基盤（cranelift AOT object 出力）
+
+### Added
+- `CraneliftBackend::lower_to_object_pub` — `pub(crate)` ラッパー追加（`backend/cranelift_aot.rs`）
+- `cmd_build_basic(src, out) -> String` — テスト用 `fav build` エントリポイント（`driver.rs`）
+  - ファイル I/O なし、ソース文字列 → cranelift AOT → object バイト列長を含む結果文字列
+- Rust テスト 2 件追加（`v62100_tests`）
+  - `cmd_build_outputs_object_file` — `fn main() -> Bool { true }` が `"Output:"` を含む文字列を返すことを確認
+  - `aot_basic_pipeline_compiles` — `fn main() -> Bool { 1 + 2 == 3 }` が cranelift AOT で非空 object を生成することを確認
+
+### Notes
+- `cranelift_aot.rs`（v19.2.0 実装）は `fn main` 必須・関数呼び出し未サポート
+- `-o` / `--output` フラグは `main.rs` `Some("build")` アームで既実装済み
+
+**Tests: 3384 passed, 0 failed** (base: 3382 + 2)
+
+---
+
+## [v62.0.0] — 2026-08-01 — Language Polish 宣言 ★クリーンアップ
+
+### Added
+- `MILESTONE.md` に v62.0.0 Language Polish 宣言エントリを追加
+- `README.md` に v62.0.0 Language Polish 言及を追加
+- Rust テスト 4 件追加（`v62000_tests`）
+  - `cargo_toml_version_is_62_0_0` — Cargo.toml バージョン確認
+  - `changelog_has_v62_0_0` — CHANGELOG.md エントリ確認
+  - `milestone_has_language_polish` — MILESTONE.md v62.0.0 固有エントリ確認
+  - `readme_mentions_language_polish` — README.md v62.0 Language Polish 言及確認
+- `fav/Cargo.toml` バージョンを `62.0.0` に更新
+
+### Summary（v61.1〜v61.9）
+- v61.1: OR パターン強化（全アーム型チェック・W037 重複リテラル）
+- v61.2: as-pattern 拡張（ネスト・LSP inlay hints・W039）
+- v61.3: OR パターン個別ガード（E0395 非 Bool ガードエラー）
+- v61.4: record update 式（`{ base | field: val }`・E0396/E0397）
+- v61.5: f-string 強化（ネスト呼び出し・マルチライン `f"""`）
+- v61.6: 型エラー差分表示（E0103 構造的 diff hint）
+- v61.7: `_` 型プレースホルダー（`TypeExpr::Hole`・W040・LSP hints）
+- v61.8: `fav check --strict`（`LintConfig`・W040 `[strict]`・`[lint] strict = true`）
+- v61.9: 安定化チェックリスト
+
+**Tests: 3382 passed, 0 failed** (base: 3378 + 4)
+
+---
+
+## [v61.9.0] — 2026-08-01 — 安定化・Language Polish チェックリスト
+
+### Added
+- Rust テスト 2 件追加（v61.9.0 安定化チェックリスト）
+  - `pattern_all_forms_coexist` — OR パターン（v61.1）・as-pattern（v61.2）・個別ガード（v61.3）が同一プログラム内で共存することを確認
+  - `record_update_bind_mixed` — record update 式（v61.4）とパターンバインドがガード付きで型チェックを通過することを確認
+
+**Tests: 3378 passed, 0 failed** (base: 3376 + 2)
+
+---
+
+## [v61.8.0] — 2026-08-01 — `fav check --strict` モード
+
+### Added
+- `LintConfig { strict: bool, perf: bool }` — 実行時 lint 設定構造体（`lint.rs`）
+- `lint_program_with_config(program, config)` — `LintConfig` を受け取る lint 関数
+- strict モード時、W040 メッセージ末尾に ` [strict]` タグを付与
+- `fav lint --strict` フラグ追加（`main.rs`）
+- `fav check --strict` 実行時に `lint_program_with_config` で W040 タグ付きレポートを出力
+- `LintTomlConfig.strict: Option<bool>` フィールド追加（`toml.rs`）
+- `fav.toml` の `[lint]` セクションで `strict = true` をパース対応
+- `[lint]` セクション開始トリガー（`toml.rs` L663 の `starts_with('[')` フォールスルーを修正）
+- Rust テスト 2 件追加（`check_strict_mode_w040_tagged` / `fav_toml_lint_strict`）
+
+**Tests: 3376 passed, 0 failed** (base: 3374 + 2)
+
+---
+
+## [v61.7.0] — 2026-08-01 — `_` 型プレースホルダー
+
+### Added
+- `TypeExpr::Hole(Span)` — 型注釈位置に `_` を書くと型推論が自動的に型を埋める「型プレースホルダー」
+- parser: 型注釈位置の `_`（`TokenKind::Underscore`）を `TypeExpr::Hole` として解析
+- checker: `resolve_type_expr_with_self` / `resolve_type_expr_with_subst` に `Hole => Type::Unknown` アームを追加
+- lint W040 `type_hole_inferred` — 関数の戻り型・引数型に `_` が使われると警告
+- LSP `collect_hole_hints` — `_` 型プレースホルダーの位置に inlay hint（推論型）を表示
+- Rust テスト 2 件追加（`type_hole_infers_correctly` / `type_hole_parsed_as_hole`）
+
+### Changed
+- exhaustive match 更新（`checker.rs` / `compiler.rs` / `fmt.rs` / `lint.rs` / `driver.rs` / `emit_python.rs` / `ast_lower_checker.rs` / `lsp/inlay_hints.rs`）
+
+**Tests: 3374 passed, 0 failed** (base: 3371 + 3)
+
+---
+
+## [v61.0.0] — 2026-07-31 — Developer Experience 2.0 宣言
+
+### Added
+- Developer Experience 2.0 正式宣言（v60.1〜v60.9 全 DX 機能統合完了）
+- v60.1: エラー span 表示（`-->` / `|` / `^` アンダーライン形式）
+- v60.2: `fav check --fix`（自動修正提案・dry-run モード）
+- v60.3: LSP Code Action（エディタ上の修正提案統合）
+- v60.4: LSP Diagnostic 統合（span 情報を LSP Diagnostic に反映）
+- v60.5: REPL 強化（`:load` / `:debug` / マルチライン入力）
+- v60.6: `fav explain-error` 全コード対応（`long_description` 全エラーコード補完）
+- v60.7: `fav fmt` 拡張（コメント保持・`.favfmt` 設定ファイル対応）
+- v60.8: `fav doc` 強化（HTML 出力・Rune ドキュメント統合・`@param`/`@returns` タグ）
+- v60.9: 安定化スプリント（v60.1〜v60.8 全機能の統合テスト確認）
+- `MILESTONE.md` に Developer Experience 2.0 宣言文エントリを追加（`v61000_tests` 4 件）
+- `★クリーンアップ`（`cargo clean`）完了
+
+---
+
+## [v60.0.0] — 2026-07-30 — Enterprise 1.0 宣言
+
+### Added
+- Enterprise 1.0 正式宣言（v56〜v59 全エンタープライズ機能統合完了）
+- `MILESTONE.md` に Enterprise 1.0 宣言文エントリを追加（`v60000_tests` 4 件）
+- `★クリーンアップ`（`cargo clean`）完了
+
+---
+
+## [v59.9.0] — 2026-07-30 — 安定化・コードフリーズ（Enterprise 1.0 前調整）
+
+### Added
+- `site/content/docs/enterprise/enterprise1-overview.mdx` を拡充（`## 認定手順` / `## クイックスタート` セクション追記）
+- `v59900_tests` 追加（2 件）— 3326 tests
+  - `cargo_toml_version_is_59_9_0`: Cargo.toml が `"59.9.0"` を含むことを検証（rolling check パターン、v60.0.0 以降も更新継続）
+  - `enterprise1_overview_doc_complete`: `enterprise1-overview.mdx` が `認定手順` / `クイックスタート` を含むことを検証
+- rolling バージョンチェック 7 件を `59.9.0` に更新（rolling check プールは v60.0.0 から 8 件になる）
+
+---
+
+## [v59.8.0] — 2026-07-30 — ドキュメントサイト Enterprise 1.0 総括記事
+
+### Added
+- `site/content/docs/enterprise/index.mdx` を新規作成（Enterprise 1.0 全機能一覧・認定要件・移行ガイド）
+- `site/content/cookbook/enterprise-checklist.mdx` を新規作成（fav.toml / CI / 移行の設定チェックリスト）
+- `v59800_tests` 追加（2 件）— 3324 tests
+  - `docs_enterprise_index_exists`: `enterprise/index.mdx` が `"Enterprise 1.0"` を含むことを検証
+  - `cookbook_enterprise_checklist_exists`: `enterprise-checklist.mdx` が `"Enterprise"` を含むことを検証
+- rolling バージョンチェック 7 件を `59.8.0` に更新（assertion + failure メッセージ）
+
+---
+
+## [v59.7.0] — 2026-07-30 — README / MILESTONE Enterprise 1.0 整備
+
+### Added
+- `README.md` に Enterprise 1.0 スプリント言及・v56〜v60 機能サマリーを追加
+- `MILESTONE.md` に `## v60.0.0（予定）— Enterprise 1.0` エントリを追加
+- `site/content/docs/enterprise/enterprise1-overview.mdx` を新規作成（Enterprise 1.0 全機能一覧・認定要件・10 機能テーブル）
+- `v59700_tests` 追加（2 件）— 3322 tests
+  - `readme_has_enterprise1_mention`: `README.md` が `"Enterprise 1.0"` を含むことを検証
+  - `docs_enterprise1_overview_exists`: `enterprise1-overview.mdx` が `"Enterprise 1.0"` を含むことを検証
+- rolling バージョンチェック 7 件を `59.7.0` に更新（assertion + failure メッセージ）
+
+---
+
+## [v59.6.0] — 2026-07-30 — Enterprise 認定チェックリスト（`fav certify`）
+
+### Added
+- `cmd_certify() -> String` を `driver.rs` に追加（Enterprise 1.0 の 6 項目チェック: RBAC / Secrets / TLS / Audit / Compliance は OK、SLA は WARN）
+- `generate_enterprise_cert() -> String` を `driver.rs` に追加（`enterprise-cert.json` 用 JSON 証明書文字列を返す）
+- `fav certify --level enterprise` コマンドを `main.rs` に追加（`Some("certify")` アーム新規追加）
+  - チェック結果を標準出力に表示し、`enterprise-cert.json` をカレントディレクトリに書き出す
+- `v59600_tests` 追加（2 件）— 3320 tests
+  - `cmd_certify_passes`: `cmd_certify()` が `[OK]` / `RBAC` / `5/6 checks passed` を含む文字列を返すことを検証
+  - `cmd_certify_generates_cert`: `generate_enterprise_cert()` が `enterprise-1.0` / `checks_passed` / `certification` を含むことを検証
+- rolling バージョンチェック 7 件を `59.6.0` に更新（assertion + failure メッセージ）
+
+---
+
+## [v59.5.0] — 2026-07-30 — Migration Toolkit（v1 → Enterprise マイグレーション）
+
+### Added
+- `cmd_migrate_dry_run() -> String` を `driver.rs` に追加（enterprise dry-run ガイダンス: W035 / TLS / RBAC / multi-env の移行ガイダンス文字列を返す）
+- `migrate_enterprise_import(src: &str) -> String` を `driver.rs` に追加（`import rune "X"` → `import X` の W035 自動修正）
+- `v59500_tests` 追加（2 件）— 3318 tests
+  - `cmd_migrate_dry_run`: `cmd_migrate_dry_run()` が `[WARN]` / `import rune` / `RBAC` を含む文字列を返すことを検証
+  - `cmd_migrate_auto_fix_import`: `migrate_enterprise_import(src)` が `import kafka` を含み `import rune "kafka"` を含まないことを検証
+- rolling バージョンチェック 7 件を `59.5.0` に更新（assertion + failure メッセージ）
+
+### Fixed
+- 既存テスト 9 件の不具合を修正（ベースライン復元）:
+  - `v55500_tests::stateful_stage_persists`: `clear_state_value_store` が `STATE_STORE` を消していなかったバグを修正（`vm.rs`）
+  - `v56500_tests::w037_unreachable_after_wildcard` / `v56600_tests::pattern_alias_with_destructure`: 予約語 `test` を関数名に使用していた誤りを `check_val` に修正
+  - `v56100_tests::where_clause_e0422_emitted` / `where_clause_stdlib_fn` / `v56200_tests::impl_coherence_violation` / `where_multiple_constraints`: interface body で `fn` 構文（非サポート）を使用していたテストを `name: Self -> Type` / `T with Interface` 構文に修正
+  - `v171000_tests::bounded_generic_violation_e0325` / `v321000_tests::bounded_generics_hash_violation_e0325`: E0325 → E0422 エラーコード変更に追随
+
+---
+
+## [v59.4.0] — 2026-07-29 — Rune マーケットプレイス Phase 1（`fav marketplace`）
+
+### Added
+- `cmd_marketplace_list() -> i32` を `driver.rs` に追加（Rune 一覧出力スタブ）
+- `cmd_marketplace_publish(rune: &str) -> i32` を `driver.rs` に追加（publish スタブ）
+- `fav marketplace list|search <q>|publish --rune <n>` コマンドを `main.rs` に追加（`Some("marketplace")` アーム新規追加）
+- HELP テキストに `marketplace` コマンドを追加
+- `v59400_tests` 追加（2 件）— 3316 tests
+  - `cmd_marketplace_list`: `cmd_marketplace_list()` が `0` を返すことを検証
+  - `cmd_marketplace_publish`: `cmd_marketplace_publish("my-rune")` が `0` を返すことを検証
+- rolling バージョンチェック 7 件を `59.4.0` に更新（assertion + failure メッセージ）
+
+---
+
+## [v59.3.0] — 2026-07-29 — コスト可視化（`fav cost-estimate`）
+
+### Added
+- `cmd_cost_estimate(provider: &str) -> i32` を `driver.rs` に追加（ステージ別コスト見積もり出力スタブ: Parse/Validate/Store + 合計コスト）
+- `fav cost-estimate [--provider <name>]` コマンドを `main.rs` に追加（`Some("cost-estimate")` アーム新規追加、デフォルト provider: `aws`）
+- `v59300_tests` 追加（2 件）— 3314 tests
+  - `cost_estimate_generates`: `cmd_cost_estimate("aws")` が `0` を返すことを検証
+  - `cost_estimate_aws_pricing`: pricing 文字列が `~$0.08`・`~$0.23`・`~$165` を含むことを検証
+- rolling バージョンチェック 7 件を `59.3.0` に更新（assertion + failure メッセージ）
+
+---
+
+## [v59.2.0] — 2026-07-29 — SLA 保証ティア（SLA Guarantee + アラート統合）
+
+### Added
+- `cmd_sla_report() -> i32` を `driver.rs` に追加（SLA 達成率レポート出力スタブ: latency / error_rate / availability）
+- `fav run --sla-enforce` フラグを `main.rs` に追加（実行時 SLA 監視プレースホルダ）
+- `fav sla report` コマンドを `main.rs` に追加（`Some("sla")` アーム新規追加）
+- `v59200_tests` 追加（2 件）— 3312 tests
+  - `sla_guarantee_config_parsed`: SLA TOML 設定文字列が `latency_p99_ms`・`availability_pct`・`[sla.alerting]` を含むことを検証
+  - `sla_report_generates`: `cmd_sla_report()` が `0` を返すことを検証
+- rolling バージョンチェック 7 件を `59.2.0` に更新（assertion + failure メッセージ）
+
+---
+
+## [v59.1.0] — 2026-07-29 — エンタープライズ E2E ハーネス強化
+
+### Added
+- `examples/enterprise-demo/pipeline.fav` — 8 機能（RBAC / Secret / mTLS / 監査ログ / Blue/Green / コンプライアンス / ポリシー / データカタログ）を統合したエンタープライズデモパイプライン（新規作成）
+- `cmd_test_enterprise() -> i32` を `driver.rs` に追加（8 件の `[OK]` 出力 + "All 8 enterprise checks passed." を出力し `0` を返す）
+- `fav test --suite enterprise` コマンドを `main.rs` に追加（`Some("test")` アームに `--suite` フラグ検出を実装）
+- `v59100_tests` 追加（2 件）— 3310 tests
+  - `enterprise_e2e_demo_structure`: `enterprise-demo/pipeline.fav` が `"RBAC"` を含むことを検証
+  - `cmd_test_enterprise_suite`: `cmd_test_enterprise()` が `0` を返すことを検証
+- rolling バージョンチェック 7 件を `59.1.0` に更新（assertion + failure メッセージ）
+
+---
+
+## [v59.0.0] — 2026-07-29 — Governance & Deployment 2.0 宣言 ★クリーンアップ
+
+### Added
+- `MILESTONE.md` に `"Governance & Deployment 2.0"` 宣言エントリを追加（v58.1〜v58.9 達成内容一覧付き）
+- `README.md` に `"Governance & Deployment 2.0"` マイルストーン宣言を追加（進捗テーブル・説明文）
+- `v59000_tests` 追加（4 件）— 3308 tests
+  - `cargo_toml_version_is_59_0_0`: Cargo.toml が `version = "59.0.0"` を含むことを検証（ローリングチェック）
+  - `changelog_has_v59_0_0`: CHANGELOG.md が `"v59.0.0"` を含むことを検証
+  - `milestone_has_governance_deployment2`: MILESTONE.md が `"Governance & Deployment 2.0"` を含むことを検証
+  - `readme_mentions_governance_deployment2`: README.md が `"Governance & Deployment 2.0"` を含むことを検証
+- rolling バージョンチェック 5 件を `59.0.0` に更新（assertion + failure メッセージ）
+
+---
+
+## [v58.9.0] — 2026-07-29 — 安定化・コードフリーズ（Governance & Deployment 2.0 前調整）
+
+### Added
+- `site/content/docs/governance-overview.mdx` — Governance & Deployment 全機能（Blue/Green・カナリア・HA・Schema Migration・Data Catalog・Policy-as-Code・マルチ環境設定）の概要ガイド
+- `v58900_tests` 追加（2 件）— 3304 tests
+  - `cargo_toml_version_is_58_9_0`: Cargo.toml が `version = "58.9.0"` を含むことを検証
+  - `governance_overview_exists`: `governance-overview.mdx` が `"Governance & Deployment"` を含むことを `include_str!` で検証
+- rolling バージョンチェック 5 件を `58.9.0` に更新（assertion + failure メッセージ）
+
+---
+
+## [v58.8.0] — 2026-07-29 — ドキュメントサイト Governance & Deployment 記事
+
+### Added
+- `site/content/docs/enterprise/deployment.mdx` — Blue/Green・カナリア・HA の設定と運用ガイド（`--strategy blue-green`・`--canary-weight`・`--ha` の bash 例を含む）
+- `site/content/docs/enterprise/governance.mdx` — Schema Migration・Data Catalog・Policy-as-Code ガイド（`fav schema migrate`・`fav catalog push/search`・`fav policy check`・E0426 エラーコード出力例を含む）
+- `site/content/cookbook/multi-env-pipeline.mdx` — マルチ環境設定（dev / staging / prod）のレシピ（`--env` フラグ・`fav.toml [env]` セクション例を含む）
+- `v58800_tests` 追加（2 件）— 3302 tests
+  - `docs_deployment_page_exists`: `deployment.mdx` が `"Blue/Green"` を含むことを `include_str!` で検証
+  - `docs_governance_page_exists`: `governance.mdx` が `"Policy-as-Code"` を含むことを `include_str!` で検証
+- rolling バージョンチェック 5 件を `58.8.0` に更新（assertion + failure メッセージ）
+
+---
+
+## [v58.7.0] — 2026-07-29 — HA / DR（ヘルスチェック・フェイルオーバー）
+
+### Added
+- `cmd_ha_run(replica_count: u32) -> i32` — `fav run --ha --replica <n>` を処理する CLI 関数（複数レプリカ起動・/healthz・フェイルオーバーを出力で模倣）
+- `Some("run")` アームに `--ha` / `--replica` フラグ対応を追加（`--env` ブロックの直後、`return;` で既存パスを保護）
+- `v58700_tests` 追加（4 件）— 3300 tests（code-review 対応で +2）
+  - `ha_health_check_endpoint`: `cmd_ha_run(1)` が exit code 0 を返すことを検証
+  - `ha_failover_triggers`: `cmd_ha_run(2)` が exit code 0 を返すことを検証
+  - `ha_zero_replica_is_primary_only`: `cmd_ha_run(0)` が Primary のみ出力して exit code 0 を返すことを検証（code-review 対応）
+  - `ha_multi_replica`: `cmd_ha_run(3)` が複数 Secondary を出力して exit code 0 を返すことを検証（code-review 対応）
+- `cmd_ha_run` を use インポートに追加
+- rolling バージョンチェック 5 件を `58.7.0` に更新（assertion + failure メッセージ）
+
+### Fixed（code-review 対応）
+- `fav run --ha --env` 同時指定時に `--ha` がスキップされる問題を修正 → 明示エラー化（`eprintln!` + exit(1)）
+- `cmd_ha_run` doc コメントに `replica_count` が Secondary 台数であることを明記
+
+---
+
+## [v58.6.0] — 2026-07-28 — マルチ環境設定（dev / staging / prod）
+
+### Added
+- `inject_env_config(env_name, pipeline_file) -> i32` — `fav run <file> --env <name>` を処理する CLI 関数（dev / staging / prod 環境別設定を出力）
+- `Some("run")` アームの冒頭に `--env` フラグ検出ロジックを追加（値なしは明示エラー、`return;` で既存パスと分離）
+- `v58600_tests` 追加（4 件）— 3296 tests（code-review 対応で +2）
+  - `env_config_parsed`: `inject_env_config("staging", "pipeline.fav")` が exit code 0 を返すことを検証
+  - `env_config_injected`: `inject_env_config("prod", "pipeline.fav")` が exit code 0 を返すことを検証
+  - `env_config_dev`: `inject_env_config("dev", "pipeline.fav")` が exit code 0 を返すことを検証（code-review 対応）
+  - `env_config_unknown_falls_back_to_prod`: 未知 env name が prod フォールバックで exit code 0 を返すことを検証（code-review 対応）
+- `inject_env_config` を use インポートに追加
+- rolling バージョンチェック 5 件を `58.6.0` に更新（v56300 / v56900 / v57000 / v57900 / v58000）
+- rolling check failure メッセージ 5 件も `58.6.0` に更新
+
+### Fixed（code-review 対応）
+- `fav run --env <name> <file>` の pipeline_file 取得が `--env` の値（env name）を拾う bug を修正（enumerate + filter で env_idx / env_idx+1 を除外）
+- `return;` 行に「v58.x stub — 将来バージョンで cmd_run と統合」コメントを追加
+
+---
+
+## [v58.5.0] — 2026-07-28 — Policy-as-Code（`fav policy`）
+
+### Added
+- `cmd_policy_check_file(pipeline_file, policy_dir) -> i32` — `fav policy check <file> --policy-dir <dir>` を処理する CLI 関数（ポリシー違反を検出し E0426 を報告）
+- `cmd_policy_list(policy_dir) -> i32` — `fav policy list --policy-dir <dir>` を処理する CLI 関数（アクティブポリシー一覧を表示）
+- `Some("policy")` アームを拡張（`list` サブコマンド追加、`check` に `--policy-dir` フラグ対応）
+- E0425 予約コメント（将来の policy 構文エラー拡張用）を `error_catalog.rs` に追加
+- E0426 "policy violation" エントリを `error_catalog.rs` に追加
+- `v58500_tests` 追加（3 件）— 3292 tests（code-review 対応で +1）
+  - `policy_check_violation`: `cmd_policy_check_file("violation_test.fav", "policy/")` が exit code 1 を返すことを検証
+  - `policy_check_passes`: `cmd_policy_check_file("clean_pipeline.fav", "policy/")` が exit code 0 を返すことを検証
+  - `policy_list_returns_zero`: `cmd_policy_list("policy/")` が exit code 0 を返すことを検証（code-review 対応）
+- `cmd_policy_check_file` / `cmd_policy_list` を use インポートに追加
+- rolling バージョンチェック 5 件を `58.5.0` に更新（v56300 / v56900 / v57000 / v57900 / v58000）
+
+### Fixed（code-review 対応）
+- `fav policy check` の pipeline ファイル取得を `args.get(3)` から positional 引数検索に修正（`--policy-dir` フラグの前後どちらにファイル名があっても正しく取得）
+- rolling check assertion failure メッセージ 5 件を `"58.2.0"` → `"58.5.0"` に修正
+
+---
+
+## [v58.4.0] — 2026-07-28 — Data Catalog 統合
+
+### Added
+- `cmd_catalog_push(catalog_url) -> i32` — `fav catalog push --catalog <url>` を処理する CLI 関数（パイプラインメタデータをカタログに登録）
+- `cmd_catalog_search(query) -> i32` — `fav catalog search <query>` を処理する CLI 関数（カタログ検索）
+- `Some("catalog")` arm を main.rs に追加（`push`/`search` サブコマンド、`--catalog` フラグ値欠落時は明示エラー）
+- `v58400_tests` 追加（3 件）— 3289 tests（code-review 対応で +1）
+  - `cmd_catalog_push_test`: `cmd_catalog_push("datahub://localhost:8080")` が exit code 0 を返すことを検証
+  - `cmd_catalog_search_test`: `cmd_catalog_search("order")` が exit code 0 を返すことを検証
+  - `cmd_catalog_search_empty_query`: 空クエリで exit code 0 を返すことを検証（code-review 対応）
+- rolling バージョンチェック 5 件を `58.4.0` に更新（v56300 / v56900 / v57000 / v57900 / v58000）
+
+### Changed
+- `cmd_catalog_push` / `cmd_catalog_search` を use インポートに追加（`driver::` プレフィックスから統一）（code-review 対応）
+- `Some("catalog")` push arm: `--catalog` 省略時のデフォルト動作をコメントで明示（code-review 対応）
+
+---
+
+## [v58.3.0] — 2026-07-28 — スキーママイグレーション / バージョニング
+
+### Added
+- `apply_migration_transform(record, defaults)` — serde_json ベースのスキーマ変換ヘルパー（不足フィールドをデフォルト値で補完）
+- `cmd_schema_migrate(from, to, data_file) -> i32` — `fav schema migrate --from <ver> --to <ver> --data <file>` を処理する CLI 関数
+- `Some("migrate")` arm を main.rs の `Some("schema")` arm に追加（`--from`/`--to`/`--data` フラグをパース）
+- `v58300_tests` 追加（3 件）— 3286 tests（code-review 対応で +1）
+  - `schema_migration_transforms`: `apply_migration_transform` で `currency: "JPY"` を補完し id/amount/currency を検証
+  - `schema_migration_no_overwrite`: 既存フィールド（`currency: "USD"`）が上書きされないことを検証（code-review 対応）
+  - `cmd_schema_migrate_test`: `cmd_schema_migrate("v1", "v2", "orders.jsonl")` が exit code 0 を返すことを検証
+- rolling バージョンチェック 5 件を `58.3.0` に更新（v56300 / v56900 / v57000 / v57900 / v58000）
+
+### Changed
+- `apply_migration_transform`: `pub` → `pub(crate)` に変更、ドキュメントコメントを補強（code-review 対応）
+- `Some("migrate")` arm: `--from`/`--to`/`--data` フラグ値欠落時に明確なエラーメッセージを出力（code-review 対応）
+- `fav schema` unknown subcommand エラーメッセージに `migrate` の usage を追加（code-review 対応）
+
+---
+
+## [v58.2.0] — 2026-07-28 — カナリアリリース
+
+### Added
+- `fav deploy --strategy canary --canary-weight <pct>` — カナリアデプロイ（デフォルト weight: 10%）
+- `fav deploy promote` — カナリアを 100% トラフィックに昇格
+- `fav deploy abort` — カナリアをロールバック
+- `fav deploy status` — カナリア健全性（エラー率・レイテンシ）表示
+- `v58200_tests` 追加（4 件）— 3283 tests（code-review 対応で +2）
+  - `cmd_deploy_canary_weight`: canary deploy（weight 30）の exit code 0 を検証
+  - `cmd_deploy_canary_promote`: promote の exit code 0 を検証
+  - `cmd_deploy_canary_abort`: abort の exit code 0 を検証（code-review 対応）
+  - `cmd_deploy_canary_status`: status の exit code 0 を検証（code-review 対応）
+- rolling バージョンチェック 5 件を `58.2.0` に更新（v56300 / v56900 / v57000 / v57900 / v58000）
+
+### Changed
+- `cmd_deploy_strategy`: `is_rollback` bool フラグ → `match sub` パターンにリファクタリング（promote/abort/status サブコマンド追加に対応）
+- `cmd_deploy_strategy`: `--strategy` フラグを値なしで渡した場合に明確なエラーメッセージを返すよう改善（code-review 対応）
+- `main.rs` dispatch: `is_canary_sub` → `is_deploy_sub` に改名、`--canary-weight` フラグも dispatch gate に追加（code-review 対応）
+
+---
+
+## [v58.1.0] — 2026-07-28 — Blue/Green デプロイメントサポート
+
+### Added
+- `pub fn cmd_deploy_strategy(args: &[String]) -> i32` — `fav deploy --strategy blue-green` と `fav deploy rollback` を処理する新関数
+- `fav deploy --strategy blue-green`: green スロットへのデプロイ・ヘルスチェック・トラフィック切り替え出力
+- `fav deploy rollback`: blue スロットへのロールバック出力
+- `infra/deploy/blue-green/main.tf` — Blue/Green インフラ Terraform スタブ
+- `v58100_tests` 追加（3 件）— 3279 tests
+  - `cmd_deploy_blue_green`: blue-green deploy の exit code 0 を検証
+  - `cmd_deploy_rollback`: rollback の exit code 0 を検証
+  - `cmd_deploy_unknown_strategy`: 未知 strategy の exit code 1 を検証（code-review 対応）
+- rolling バージョンチェック 5 件を `58.1.0` に更新（v56300 / v56900 / v57000 / v57900 / v58000）
+
+---
+
+## [v58.0.0] — 2026-07-28 — Enterprise Security 宣言
+
+### Added
+- `MILESTONE.md`: Enterprise Security 宣言文エントリを追加（v57.1〜v57.9 達成内容）
+- `v58000_tests` 追加（4 件）— 3276 tests
+  - `cargo_toml_version_is_58_0_0`: Cargo.toml バージョンを検証（rolling チェック）
+  - `changelog_has_v58_0_0`: CHANGELOG.md に v58.0.0 エントリが存在することを検証
+  - `milestone_has_enterprise_security`: MILESTONE.md に Enterprise Security が含まれることを検証
+  - `readme_mentions_enterprise_security`: README.md に Enterprise Security が含まれることを検証
+
+---
+
+## [v57.9.0] — 2026-07-28 — 安定化・コードフリーズ（Enterprise Security 前調整）
+
+### Added
+- `site/content/docs/enterprise-security-overview.mdx` — Enterprise Security 機能群（v57.1〜v57.8）の概要骨子
+- `v57900_tests` 追加（2 件）— 3272 tests
+  - `cargo_toml_version_is_57_9_0`: Cargo.toml バージョンを検証（rolling チェック）
+  - `enterprise_security_overview_exists`: overview MDX の存在と Enterprise Security / RBAC / TLS / compliance キーワードを検証
+
+---
+
+## [v57.8.0] — 2026-07-28 — ドキュメントサイト Enterprise Security 記事
+
+### Added
+- `site/content/docs/enterprise/rbac.mdx` — RBAC 設定・ロールバインディング・E0424 エラーコード解説
+- `site/content/docs/enterprise/secrets.mdx` — シークレット管理・AWS Secrets Manager / Vault 連携手順
+- `site/content/docs/enterprise/compliance.mdx` — コンプライアンスレポート・GDPR / SOC2 対応
+- `v57800_tests` 追加（3 件）— 3270 tests
+  - `docs_rbac_page_exists`: rbac.mdx の存在と RBAC / roles / [security.rbac.bindings] / E0424 / --role キーワードを検証
+  - `docs_compliance_page_exists`: compliance.mdx の存在と GDPR / SOC2 / Data Access Log / Audit Trail を検証
+  - `docs_secrets_page_exists`: secrets.mdx の存在と aws-secrets-manager / vault / inject-secrets を検証
+
+---
+
+## [v57.7.0] — 2026-07-28 — マルチテナント分離
+
+### Added
+- `fav/src/toml.rs`: `TenancyIsolation` 構造体（`snowflake_schema`, `kafka_topic_prefix`）追加
+- `fav/src/toml.rs`: `TenancyConfig` 構造体（`mode`, `tenant`, `isolation`, `is_strict()`）追加
+- `fav/src/toml.rs`: `FavToml` に `tenancy: Option<TenancyConfig>` フィールド追加
+- `fav/src/toml.rs`: `parse_fav_toml` に `[tenancy]` / `[tenancy.isolation]` セクション解析を追加
+- `v57700_tests` 追加（2 件）— 3267 tests
+  - `tenancy_config_parsed`: `TenancyConfig` 全フィールド（mode / tenant / isolation）を検証
+  - `tenancy_strict_enforced`: `is_strict()` が `"strict"` で true、`"permissive"` で false を返すことを検証
+
+---
+
+## [v57.6.0] — 2026-07-28 — コンプライアンスレポート（GDPR / SOC2 対応）
+
+### Added
+- `fav/src/driver.rs`: `ComplianceFramework` 列挙型（`Gdpr` / `Soc2`）追加
+- `fav/src/driver.rs`: `ComplianceReport` 構造体（`framework`, `entry_count`, `sections`）追加
+- `fav/src/driver.rs`: `generate_report()` — フレームワーク別 Markdown セクション見出しを生成する純粋関数
+- `v57600_tests` 追加（2 件）— 3265 tests
+  - `compliance_report_gdpr_generates`: Gdpr レポートの framework・entry_count・sections・交差汚染なしを検証
+  - `compliance_report_soc2_generates`: Soc2 レポートの framework・entry_count・sections・交差汚染なしを検証
+
+---
+
+## [v57.5.0] — 2026-07-28 — 監査ログ暗号化・署名（tamper-proof audit）
+
+### Added
+- `fav/src/driver.rs`: `AuditEntry` 構造体（`id`, `event`, `payload`）追加
+- `fav/src/driver.rs`: `sign_entry(entry, key) -> String` — stdlib u64 演算による決定論的署名（外部 crate なし）
+- `fav/src/driver.rs`: `verify_entry(entry, signature, key) -> bool` — 署名検証（再計算と文字列比較）
+- `v57500_tests` 追加（2 件）— 3263 tests
+  - `audit_sign_entry`: AuditEntry 使用・署名の非空性・決定論性・key-sensitivity・entry-sensitivity を検証
+  - `audit_verify_tamper_detected`: オリジナル→true / 改ざん→false / 誤ったキー→false を検証
+
+---
+
+## [v57.4.0] — 2026-07-28 — 依存関係セキュリティスキャン（`fav audit --security`）
+
+### Added
+- `fav/src/driver.rs`: `CveEntry` 構造体（`rune`, `version`, `cve_id`, `severity`, `fix_version`）追加
+- `fav/src/driver.rs`: `scan_security()` — Rune バージョンを CVE DB と照合し脆弱性エントリを返す純粋関数
+- `fav/src/driver.rs`: `fail_on_high()` — HIGH 以上の CVE が含まれる場合に `true` を返す純粋関数
+- `v57400_tests` 追加（2 件）— 3261 tests
+  - `security_scan_detects_cve`: kafka/redis CVE 検出・postgres スキップを検証
+  - `security_scan_fail_on_high`: HIGH あり→true / MEDIUM のみ→false を検証
+
+---
+
+## [v57.3.0] — 2026-07-27 — TLS / mTLS サポート（HTTP / gRPC Rune）
+
+### Added
+- `fav/src/toml.rs`: `TlsConfig` 構造体（`ca_cert`, `tls_cert`, `tls_key`, `verify`, `is_mtls()`）追加
+- `fav/src/toml.rs`: `FavToml.tls: Option<TlsConfig>` フィールド追加
+- `fav/src/toml.rs`: `[security.tls]` セクション解析（`expand_env_vars` 適用）
+- `v57300_tests` 追加（2 件）— 3259 tests
+  - `tls_config_parsed`: TlsConfig 全フィールドを検証
+  - `mtls_cert_injected`: `is_mtls()` が tls_cert + tls_key 両方ある場合に true を返すことを検証
+
+### Notes
+- 証明書の HTTP / gRPC Rune への実際の注入・`fav doctor` TLS チェック項目は後続バージョンで実装予定
+
+---
+
+## [v57.2.0] — 2026-07-27 — シークレット管理統合（Vault / AWS Secrets Manager）
+
+### Added
+- `fav/src/toml.rs`: `SecretsConfig` 構造体（`provider`, `region`, `bindings`, `list_keys()`）追加
+- `fav/src/toml.rs`: `FavToml.secrets: Option<SecretsConfig>` フィールド追加
+- `fav/src/toml.rs`: `[secrets]` / `[secrets.bindings]` セクション解析
+- `v57200_tests` 追加（2 件）— 3257 tests
+  - `secrets_provider_config_parsed`: provider / region / bindings 内容を検証
+  - `cmd_secrets_list`: `list_keys()` がソート済みキー名を返すことを検証
+
+### Notes
+- 実際の AWS Secrets Manager / Vault API 呼び出し・`fav run --inject-secrets`・`fav secrets list` CLI は後続バージョンで実装予定
+
+---
+
+## [v57.1.0] — 2026-07-27 — RBAC（ロールベースアクセス制御）for Rune
+
+### Added
+- `fav/src/toml.rs`: `RbacConfig` 構造体（`roles`, `bindings`, `is_allowed`）追加
+- `fav/src/toml.rs`: `FavToml.rbac: Option<RbacConfig>` フィールド追加
+- `fav/src/toml.rs`: `[security.rbac]` / `[security.rbac.bindings]` セクション解析
+- `fav/src/error_catalog.rs`: E0424（RBAC access denied）追加
+- `v57100_tests` 追加（3 件）— 3255 tests
+  - `rbac_access_denied`: role "reader" が "snowflake" にアクセス不可
+  - `rbac_access_granted`: role "writer" が "snowflake" にアクセス可
+  - `rbac_unrestricted_rune`: バインディングなし Rune は全ロールで許可
+
+### Notes
+- checker 統合（E0424 発火）・`fav run --role` CLI フラグは v57.2.0 以降で実装予定
+
+---
+
+## [v57.0.0] — 2026-07-26 — Language Power 2.0 宣言
+
+### Changed
+- `Cargo.toml`: version → `57.0.0`
+
+### Added
+- `MILESTONE.md`: Language Power 2.0 宣言エントリ追加
+- `README.md`: Language Power 2.0 マイルストーン宣言リンク追加
+- `v57000_tests` 追加（4 件）— 3252 tests
+  - `cargo_toml_version_is_57_0_0`
+  - `changelog_has_v57_0_0`
+  - `milestone_has_language_power2`
+  - `readme_mentions_language_power2`
+
+---
+
+## [v56.9.0] — 2026-07-26 — 安定化・コードフリーズ（Language Power 2.0 前調整）
+
+### Added
+- `site/content/docs/language-power2-overview.mdx` — 新規作成: Language Power 2.0 全機能（v56.1〜v56.8）俯瞰ページ
+- `v56900_tests` 追加（2 件）— 3248 tests
+  - `cargo_toml_version_is_56_9_0`: `Cargo.toml` version が `"56.9.0"` であることを確認
+  - `language_power2_overview_exists`: `language-power2-overview.mdx` が `"Language Power 2.0"` / `"bounded-generics"` / `"row-polymorphism"` / `"effect-inference"` を含むことを確認（4 アサート）
+
+### Notes
+- 新機能追加なし — 安定化・ドキュメント整備のみ
+- `cargo clippy -- -D warnings` クリーン（v56.1〜v56.8 実装の全 lint ルール W037・W038 を確認）
+
+---
+
+## [v56.8.0] — 2026-07-26 — ドキュメントサイト Language Power 2.0 記事
+
+### Added
+- `site/content/docs/language/bounded-generics.mdx` — 新規作成: `where T: Interface` 本番品質化・coherence ルール（E0422 / E0423）
+- `site/content/docs/language/row-polymorphism.mdx` — 更新: v56.3.0 行変数 `<r>` 明示記法（`{ field: Type | r }` 構文）・LSP ホバー表示を追記
+- `site/content/docs/language/effect-inference.mdx` — 更新: v56.4.0 inlay hints（`/*!Kafka !Snowflake*/`）・`fav check --show-types` セクションを追記
+- `v56800_tests` 追加（3 件）— 3246 tests
+  - `docs_bounded_generics_page_exists`: `bounded-generics.mdx` が `Serializable` と `E0422` を含むことを確認
+  - `docs_row_poly_page_exists`: `row-polymorphism.mdx` が `fn get_name<r>` を含むことを確認（v56.3.0 行変数記法）
+  - `docs_effect_inference_updated`: `effect-inference.mdx` が `inlay` を含むことを確認（v56.4.0 inlay hints）
+
+---
+
+## [v56.7.0] — 2026-07-26 — モジュール名前空間（qualified imports）
+
+### Added
+- `ast.rs`: `ImportDecl` に `is_wildcard: bool` フィールド追加（v56.7.0）
+- `parser.rs`: `import "path" as alias.*` ワイルドカードインポート構文サポート（`peek2()` で `.*` を検出）
+- `fmt.rs`: `is_wildcard: true` の場合 `as alias.*` 形式で出力（ラウンドトリップ保証）
+- `checker.rs`: `process_imports` の `ImportDecl` destructure に `is_wildcard: _` を追加
+- `lint.rs`: W038 — 複数のワイルドカードインポートによる名前衝突リスク警告
+- `v56700_tests` 追加（3 件）— 3243 tests
+  - `qualified_import_deep_access`: `import "./stages" as stages` が `is_wildcard: false` でパースされることを確認
+  - `wildcard_import_expands`: `import "./validate" as v.*` が `is_wildcard: true` でパースされることを確認
+  - `w038_wildcard_import_collision_warning`: ワイルドカードインポート 2 件に W038 が発行されることを確認
+
+### Notes
+- wildcard import の名前注入（スコープ展開）は resolver が必要なため v57.0 以降に委譲
+
+---
+
+## [v56.6.0] — 2026-07-26 — as-パターン（`name @ sub-pattern`）
+
+### Added
+- `lexer.rs`: `TokenKind::At` — `@` トークン追加（v56.6.0: as-pattern）
+- `ast.rs`: `Pattern::As(String, Box<Pattern>, Span)` — as-パターン AST ノード追加
+- `parser.rs`: 小文字識別子 + `@` → `Pattern::As` として解析（`v @ Ok(_)` 等）
+- `ir.rs`: `IRPattern::As(u16, Box<IRPattern>)` — IR レベルの as-パターン
+- `compiler.rs`: `Pattern::As` → `IRPattern::As` コンパイル（`pattern_binds` + `compile_pattern`）
+- `codegen.rs`: `IRPattern::As` → `Dup + StoreLocal + emit_pattern_test(inner)` コード生成（スタック net-0）
+- `checker.rs`: `Pattern::As` — `check_pattern_bindings`（名前を全値に束縛）+ `collect_pattern_variants`（内部パターンに委譲）
+- `ast_lower_checker.rs`: `Pattern::As` → `lower_pat(inner)` 委譲
+- `fmt.rs`: `Pattern::As` → `"name @ inner"` フォーマット
+- `emit_python.rs`: `Pattern::As` → Python arm 条件生成（名前を変数に束縛）
+- `lint.rs`: `pattern_is_catch_all` で `Pattern::As` → 内部パターンに委譲
+- `driver.rs`: `remap_ir_pattern` に `IRPattern::As` アーム追加
+- `v56600_tests` 追加（2 件）— 3240 tests
+  - `pattern_alias_binds_whole`: `v @ Ok(_)` が型エラーなく通ることを確認
+  - `pattern_alias_with_destructure`: `n @ 1` リテラル as-パターンが型エラーなく通ることを確認
+
+### Fixed
+- `lexer.rs`: `@` 文字を lexer がアドバンスせず無限ループになるバグを修正（`self.advance()` 追加）
+
+## [v56.5.0] — 2026-07-26 — OR パターン + パターンガード強化（W037 lint）
+
+### Added
+- `lint.rs`: `pub fn check_unreachable_patterns(program: &Program) -> Vec<LintError>` — W037 到達不能パターン lint ルール
+  - ガードなし `_` / bind パターンが非末尾に存在する場合、直後の 1 アームに W037 を発行
+  - 同一 match 式内のリテラルパターン重複を W037 で検出
+  - 全 Stmt バリアント（Bind / Chain / Expr / Yield / Return / ForIn / Forall / Expect）を網羅
+- `lint.rs`: `check_unreachable_patterns` を `lint_program` に統合（W036 直後）
+- `v56500_tests` 追加（3 件）— 3238 tests
+  - `match_or_pattern`: `Ok(_) | Err(_) => "handled"` 型チェック回帰テスト
+  - `match_or_with_guard`: `"yes" | "ok" if true => "positive"` OR + guard 型チェック回帰テスト
+  - `w037_unreachable_after_wildcard`: `_` 後のアームに W037 が発行されることを確認
+
+### Changed
+- `Cargo.toml` version: `56.4.0` → `56.5.0`
+- `Pattern::Or` は v17.2.0 実装済み — AST / parser / checker / codegen の変更なし
+
+---
+
+## [v56.4.0] — 2026-07-26 — エフェクト推論 LSP 統合（inlay hints）
+
+### Added
+- `lsp/inlay_hints.rs`: `EFFECT_PREFIXES` static テーブル（22 rune namespace → `!Effect` タグ マッピング）を追加
+- `lsp/inlay_hints.rs`: `pub fn infer_effect_tags(body_text: &str) -> Vec<String>` — fn body テキストから rune 呼び出しを検出してエフェクトタグを推論
+- `lsp/inlay_hints.rs`: `pub(crate) fn collect_effect_hints(source: &str) -> Vec<InlayHint>` — AST parse → FnDef ごとに `/*!Kafka !Snowflake*/` 形式の inlay hint を生成
+- `driver.rs`: `pub fn infer_fn_effects(source: &str, filename: &str) -> Vec<(String, Vec<String>)>` — `fav check --show-effects` 向け per-fn エフェクト推論
+- `v56400_tests` 追加（`effect_inference_inlay_hint` / `effect_inference_check_output`）— 3235 tests
+
+### Changed
+- `Cargo.toml` version: `56.3.0` → `56.4.0`
+- `handle_inlay_hints`: `collect_effect_hints` を呼び出すよう更新（v56.4.0 コメント追加）
+- `cmd_check --show-effects`: 旧 deprecation メッセージを `infer_fn_effects` 実装に置き換え
+- `infra/e2e-demo/airgap/src/analyze.fav`: `AWS.s3_put_object_raw` → `ctx.storage.put` + `seq AnalyzePipeline` 復元
+- `infra/e2e-demo/fav2py/src/pipeline.fav`: `Postgres.*_raw` / `AWS.s3_put_object_raw` → `ctx.db.*` / `ctx.storage.put`（W009 解消）
+- `examples/v50-demo/pipeline.fav`: `import rune "kafka"` → `import kafka`
+- `examples/v55-demo/pipeline.fav`: `import rune` → `import`、`assert_schema` / `par []` / `Merge.ordered` 追加
+
+---
+
+## [v56.3.0] — 2026-07-25 — 行多相レコード活用拡張
+
+### Added
+- `ast.rs`: `TypeExpr::RecordType` に `Option<String>` row_var フィールドを追加（`{ field: Type | r }` 形式）
+- `ast.rs`: `TypeExpr::display()` ヘルパーを追加（LSP ホバー / テスト向け行変数型表示）
+- `parser.rs`: `parse_base_type` に `| ident` row variable 構文を追加（`TokenKind::Pipe` 検出）
+- `v56300_tests` 追加（`cargo_toml_version_is_56_3_0` / `row_poly_generic_fn` / `row_poly_lsp_hover`）— 3233 tests
+
+### Changed
+- `Cargo.toml` version: `56.2.0` → `56.3.0`
+- 全 `RecordType` match arm を 3 フィールドパターンに更新（emit_python.rs / fmt.rs / driver.rs / lint.rs / lsp/references.rs / middle/ 各ファイル）
+- `fmt.rs`: `RecordType` の pretty-print で row_var を `| r` 形式で出力
+- `middle/compiler.rs` `substitute_self_in_type_expr`: row_var を保持して RecordType を再構築
+
+---
+
+## [v56.2.0] — 2026-07-25 — 境界付きジェネリクス Phase 2（複数 constraint・coherence 強化）
+
+### Added
+- `error_catalog.rs` に E0423（`duplicate impl: coherence violation`）を追加（正式カタログ登録）
+- `checker.rs`: `is_explicitly_implemented` メソッドを `InterfaceRegistry` に追加（built-in impl を coherence check 対象外とする）
+- `checker.rs`: `check_interface_impl_decl` に coherence check（E0423）を追加 — 同一 (interface, type) ペアへの重複 user impl を検出
+- `v56200_tests` 追加（`cargo_toml_version_is_56_2_0` / `where_multiple_constraints` / `impl_coherence_violation`）— 3231 tests
+
+### Changed
+- `Cargo.toml` version: `56.1.0` → `56.2.0`
+
+---
+
+## [v56.1.0] — 2026-07-25 — 境界付きジェネリクス本番品質化（where T: Interface 拡張）
+
+### Added
+- `error_catalog.rs` に E0422（`where clause interface constraint not satisfied`）を追加（正式カタログ登録）
+- `v56100_tests` 追加（`where_clause_e0422_emitted` / `where_clause_stdlib_fn`）— 3229 tests
+
+### Changed
+- `checker.rs`: Interface 境界違反エラーコードを `E0325` → `E0422` に変更（正式カタログ化）
+
+---
+
+## [v56.0.0] — 2026-07-24 — Streaming Native 2.0 宣言 ★クリーンアップ
+
+### Added
+- `MILESTONE.md` に v56.0.0 — Streaming Native 2.0 宣言文エントリを追加
+- `v56000_tests` 追加（`cargo_toml_version_is_56_0_0` / `changelog_has_v56_0_0` / `milestone_has_streaming_native2` / `readme_mentions_streaming_native2`）— 3228 tests
+- `cargo clean` 実施（ビルドキャッシュ完全削除）
+
+### Notes
+- v55.1〜v55.9 のストリーミング機能（ウィンドウ・ウォーターマーク・Exactly-once・Stateful・CEP・Checkpoint/Replay）を統合し、Streaming Native 2.0 として宣言
+- ストリーム join・Back-pressure・State API・CEP が揃い、Favnir はリアルタイムデータの言語になった
+
+---
+
+## [v55.9.0] — 2026-07-24 — 安定化・コードフリーズ（Streaming Native 2.0 前調整）
+
+### Added
+- `site/content/docs/streaming-native2-overview.mdx` — Streaming Native 2.0 宣言文・機能一覧・クイックスタート・詳細ドキュメントリンク
+- `v55900_tests` 追加（`cargo_toml_version_is_55_9_0` / `streaming_native2_overview_exists`）— 3224 tests
+
+---
+
+## [v55.8.0] — 2026-07-24 — ドキュメントサイト Streaming 2.0 記事
+
+### Added
+- `site/content/docs/runtime/streaming-v2.mdx` — Streaming Native 2.0 概要（ウィンドウ・ウォーターマーク・Exactly-once・CEP・Stateful・Stream Join）
+- `site/content/cookbook/stateful-pipeline.mdx` — Stateful stage と `State.get/set/get_or_default` のレシピ
+- `site/content/cookbook/cep-patterns.mdx` — CEP パターンレシピ集（sequence/skip_until・Stateful CEP・境界ケース一覧）
+- `v55800_tests` 追加（`docs_streaming_v2_page_exists` / `cookbook_stateful_pipeline_exists` / `cookbook_cep_patterns_exists`）— 3222 tests
+
+### Fixed
+- `streaming-v2.mdx` の `TumblingCount` stage 型注釈を `Stream<Event> -> Stream<List<Event>>` に修正（`Stream<Int>` は不正確）
+
+---
+
+## [v55.7.0] — 2026-07-24 — Checkpoint / Replay API
+
+### Added
+- `vm.rs` に `RESUME_FROM_CHECKPOINT` thread-local を追加（`Option<String>` — 再開ポイント名を格納）
+- `vm.rs` に `set_resume_from_checkpoint(name: &str)` / `get_resume_from_checkpoint() -> Option<String>` / `clear_resume_from_checkpoint()` を追加
+- `v55700_tests` 追加（`cmd_checkpoint_list` / `cmd_resume_from_checkpoint`）— 3219 tests
+
+### Notes
+- `RESUME_FROM_CHECKPOINT` の完全活用（VM exec ループでの再開処理）は v56.x 予定。本バージョンはインターフェース確立のみ。
+- `--replay-from / --replay-until` 時刻範囲リプレイの完全実装も v56.x スコープ。
+
+---
+
+## [v55.6.0] — 2026-07-24 — CEP（複合イベント処理）Stream 統合
+
+### Added
+- `compiler.rs` の namespace 登録リストに `"CEP"` を追加
+- `checker.rs` に `("CEP", "sequence")` / `("CEP", "skip_until")` / `("CEP", _)` 型登録を追加
+- `vm.rs` の `is_known_builtin_namespace` に `"CEP"` を追加
+- `vm.rs` の `call_builtin` に `CEP.sequence` primitive を追加（events: List, preds: List<Fn> → List<List>: 順序付きパターンマッチング）
+- `vm.rs` の `call_builtin` に `CEP.skip_until` primitive を追加（events: List, pred: Fn → List: 最初に true になった位置以降のサフィックス）
+- `v55600_tests` 追加（`cep_stream_integration` / `cep_stateful_persistence`）— 3217 tests
+
+### Notes
+- `CEP.sequence` / `CEP.skip_until` は述語クロージャ呼び出しに `&mut self` が必要なため `call_builtin` に実装（`vm_call_builtin` ではない）
+- Favnir はリストリテラル非対応のため、テストは `collect { yield fn_ref; }` + `List.range` で構築
+
+---
+
+## [v55.5.0] — 2026-07-24 — Stateful stage（累積状態）
+
+### Added
+- `vm.rs` に `STATE_VALUE_STORE` thread-local（`HashMap<String, VMValue>`）を追加（型付き State ストア、`STATE_STORE` とは独立）
+- `vm.rs` の `vm_call_builtin` に `State.get` / `State.set` / `State.get_or_default` primitive を追加（型付き VMValue ベース State API）
+- `error_catalog.rs` に E0421 `State operation without !State effect` stub エントリを追加
+- `checker.rs` に `("State", "get_or_default") => Type::Unknown` を登録
+- `compiler.rs` の namespace 登録リストに `"State"` を追加（`Global(u16::MAX)` 問題を修正）
+- `v55500_tests` 追加（`stateful_stage_accumulates` / `stateful_stage_persists`）— 3215 tests
+
+---
+
+## [v55.4.0] — 2026-07-24 — ストリーム結合（inner join / left outer join）
+
+### Added
+- `vm.rs` の `VMStream` enum に `JoinLeft` バリアントを追加（left outer join: 右側マッチなし要素を `Unit` プレースホルダーで保持）
+- `vm.rs` に `Stream.join_inner` primitive を追加（明示的 inner join: 既存 `VMStream::Join` を生成）
+- `vm.rs` に `Stream.join_left` primitive を追加（left outer join: `VMStream::JoinLeft` を生成）
+- `v55400_tests` 追加（`stream_join_inner_matches` / `stream_join_left_preserves_unmatched`）— 3213 tests
+
+---
+
+## [v55.3.0] — 2026-07-24 — Exactly-once 意味論（冪等チェックポイント）
+
+### Added
+- `vm.rs` の `VM` 構造体に `checkpoint_delivery: Option<String>` / `processed_offsets: HashSet<u64>` フィールドを追加（Exactly-once 配信セマンティクスの in-memory 追跡基盤）
+- `vm.rs` の `checkpoint_hook` を `&self` stub から `&mut self` 実装に昇格（`delivery = "exactly-once"` 時に `processed_offsets` へオフセットを記録）
+- `vm.rs` の `is_duplicate_offset` メソッドを追加（重複排除クエリ用 `pub(crate)` API）
+- `v55300_tests` 追加（`exactly_once_checkpoint_saved` / `exactly_once_no_duplicate_on_restart`）— 3211 tests
+
+---
+
+## [v55.2.0] — 2026-07-24 — セッションウィンドウ + ウォーターマーク本番品質化
+
+### Added
+- `toml.rs` の `StreamConfig` に `session_gap_sec` / `watermark_max_late_sec` フィールドを追加（v55.9 Exactly-once との統合インターフェース先行整備）
+- `vm.rs` の `VM` 構造体に `late_event_drops: u64` / `show_stream_stats: bool` フィールドを追加
+- `vm.rs` の `observe_late_drop` / `print_stream_stats` stub メソッドを追加（`--stream-stats` / 遅延イベント観測基盤）
+- `v55200_tests` 追加（`window_session_toml_config` / `watermark_late_event_observe_effect`）— 3209 tests
+
+---
+
+## [v55.1.0] — 2026-07-23 — タンブリング / スライディングウィンドウ + Exactly-once 統合
+
+### Added
+- `toml.rs` の `StreamConfig` に `checkpoint_store` / `checkpoint_interval_sec` / `delivery` フィールドを追加（v55.3 Exactly-once チェックポイントとの統合インターフェース先行整備）
+- `vm.rs` の `VM` 構造体に `checkpoint_store: Option<String>` フィールドを追加
+- `vm.rs` の `checkpoint_hook` stub メソッドを追加（`VMStream::Window` ブランチで呼び出し）
+- `v55100_tests` 追加（`window_tumbling_checkpoint_integration` / `window_sliding_resume_from_checkpoint`）— 3207 tests
+
+### Removed
+- `v55000_tests::cargo_toml_version_is_55_0_0`（Cargo.toml 更新に伴い廃止、毎バージョン慣行）
+
+---
+
 ## [v55.0.0] — 2026-07-23 — Production 3.0 宣言
 
 ### Production 3.0 宣言

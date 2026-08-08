@@ -1,0 +1,8 @@
+[rune]
+name        = "linalg"
+version     = "0.1.0"
+description = "Linear algebra Rune for Favnir — type-safe matrix and vector operations"
+entry       = "linalg.fav"
+effects     = []
+
+[dependencies]

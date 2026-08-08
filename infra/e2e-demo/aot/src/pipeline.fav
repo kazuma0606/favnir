@@ -1,0 +1,28 @@
+// AOT E2E Demo — Pure Transformation Pipeline (v62.9.0)
+// Compatible with `fav build --link -o dist/pipeline`
+
+type OrderRow = {
+  id: Int
+  amount: Float
+  region: String
+}
+
+type SummaryRow = {
+  region: String
+  total: Float
+  count: Int
+}
+
+fn parse_order(raw: String) -> OrderRow {
+  { id: 1, amount: 99.9, region: raw }
+}
+
+fn summarize(orders: List<OrderRow>) -> SummaryRow {
+  { region: "ALL", total: 999.0, count: List.length(orders) }
+}
+
+fn main() -> Bool {
+  let order = parse_order("us-east")
+  let summary = summarize([order])
+  summary.count == 1
+}

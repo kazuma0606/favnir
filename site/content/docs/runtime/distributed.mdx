@@ -1,0 +1,43 @@
+# Distributed Favnir
+
+Favnir v68.x では、AI パイプラインを複数ノードに分散実行するための機能を提供します。
+
+## 分散実行（v68.1）
+
+`--cluster workers.yaml` フラグでワーカーノードを定義し、`par` ステージを複数マシンに分散します。
+
+```sh
+fav run pipeline.fav --cluster workers.yaml --partition-by "row_id % 4"
+```
+
+## チェックポイント（v68.2）
+
+`--checkpoint <dir>` フラグでステージ完了後に状態を保存し、失敗時は `--resume` で再開します。
+
+```sh
+fav run pipeline.fav --checkpoint ./checkpoints/
+```
+
+## Kubernetes 対応（v68.3）
+
+`fav deploy --target kubernetes` で Pipeline CRD マニフェストを生成します。
+
+## リトライポリシー（v68.4）
+
+`--retry-policy` フラグで ExponentialBackoff / LinearBackoff / フォールバック戦略を設定します。
+
+## 分散キャッシュ（v68.5）
+
+`--distributed-cache <redis_url>` フラグで Redis バックエンドの分散キャッシュを有効化します。
+
+## コスト見積もり（v68.6）
+
+`fav cost-estimate pipeline.fav --provider aws --scale 1M-rows` でパイプライン実行コストを見積もります。
+
+## AI ルーティング（v68.7）
+
+`fav ai-routing pipeline.fav --env dev` で環境別 LLM / VectorDB プロバイダーを確認します。
+
+## 分散トレーシング（v68.8）
+
+`--otel-endpoint <url>` フラグで OpenTelemetry Collector にトレースを送信します。

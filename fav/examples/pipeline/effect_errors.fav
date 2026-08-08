@@ -1,17 +1,19 @@
-// effect_errors.fav — demonstrates E007/E008/E009 effect violations
-// Run: fav check examples/effect_errors.fav  (should report 3 errors)
+// effect_errors.fav — demonstrates E0023 ambient effect violations
+// Run: fav check examples/pipeline/effect_errors.fav  (should report E0023 errors)
+// Note: !Db / !Network / !Emit<T> syntax was removed in v35.4.0.
+//       Ambient calls without ctx: AppCtx now trigger E0023.
 
-// E007: Db.* without !Db
+// E0023: Postgres.* called without ctx argument
 fn bad_db(name: String) -> Int {
-    Db.execute("INSERT INTO users (name) VALUES (?)", name)
+    Postgres.execute("INSERT INTO users (name) VALUES (?)", name)
 }
 
-// E008: Http.* without !Network
-fn bad_http() -> String! {
+// E0023: Http.* called without ctx argument
+fn bad_http() -> String {
     Http.get("https://api.example.com/users")
 }
 
-// E009: emit without !Emit<T>
-fn bad_emit(msg: String) -> Unit {
-    emit msg
+// E0023: IO.* called without ctx argument
+fn bad_io(msg: String) -> Unit {
+    IO.println(msg)
 }

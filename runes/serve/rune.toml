@@ -1,0 +1,8 @@
+[rune]
+name        = "serve"
+version     = "0.1.0"
+description = "Model Serving Rune for Favnir — expose stages and pipelines as HTTP endpoints with rate limiting and OpenAPI schema generation"
+entry       = "serve.fav"
+effects     = []
+
+[dependencies]

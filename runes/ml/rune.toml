@@ -1,0 +1,8 @@
+[rune]
+name        = "ml"
+version     = "0.1.0"
+description = "ML Primitives Rune for Favnir — classification, regression, clustering, dimensionality reduction, evaluation, pipeline"
+entry       = "ml.fav"
+effects     = []
+
+[dependencies]

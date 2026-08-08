@@ -1,0 +1,90 @@
+# Developer Intelligence — v67.x ツール群
+
+Favnir v67.x では、AI パイプライン開発者向けのデバッグ・可視化・テスト・ドキュメント生成ツールを整備しました。
+
+---
+
+## fav debug — ステップ実行デバッガ（v67.1.0）
+
+パイプラインをステージ単位で停止し、各ステップの入出力を確認できます。
+
+```bash
+fav debug pipeline.fav
+```
+
+`inspect`・`breakpoint`・`continue`・`diff` コマンドで、LLM 呼び出しやベクトル変換の内部状態を追跡します。
+
+---
+
+## fav debug --replay — Time-Travel Debugging（v67.2.0）
+
+`--record` で実行トレースを `.fav-trace` に保存し、`--replay` で任意のステップに巻き戻します。
+
+```bash
+fav run pipeline.fav --record session.fav-trace
+fav debug --replay session.fav-trace
+```
+
+---
+
+## fav viz — パイプライン DAG 可視化（v67.3.0）
+
+パイプラインの依存関係を DAG として出力します。CI では `--ascii`、ブラウザでは `--format svg`。
+
+```bash
+fav viz pipeline.fav --ascii
+fav viz pipeline.fav --format mermaid
+```
+
+---
+
+## fav suggest --from-profile — AI 最適化アドバイザー（v67.4.0）
+
+プロファイリング結果を読んで、ボトルネックへの最適化提案を生成します。
+
+```bash
+fav suggest pipeline.fav --from-profile fav-profile.json
+```
+
+---
+
+## fav simulate — 合成データパイプラインテスト（v67.5.0）
+
+`Rune.gen` で生成した合成データを使い、本番データなしにパイプラインを検証します。
+
+```bash
+fav simulate pipeline.test.fav
+fav simulate pipeline.test.fav --seed 42
+```
+
+---
+
+## Rune.proptest — Pipeline Property Testing（v67.6.0）
+
+`proptest` 構文でパイプラインの不変条件をランダム入力で検証し、最小反例を自動縮小します。
+
+```bash
+fav proptest pipeline.fav
+fav proptest pipeline.fav --proptest-runs 200
+```
+
+---
+
+## fav profile --interactive — インタラクティブプロファイリング（v67.7.0）
+
+ホットスポットをドリルダウンしてコード行レベルで特定し、最適化提案をインタラクティブに確認します。
+
+```bash
+fav profile --interactive pipeline.fav
+```
+
+---
+
+## fav doc --math — 数式対応ドキュメント生成（v67.8.0）
+
+`///` コメントに記述した LaTeX 数式を MathJax 形式で出力します。数学 Rune のドキュメントに最適です。
+
+```bash
+fav doc --math runes/autodiff/autodiff.fav
+fav doc --math runes/linalg/linalg.fav --format html
+```

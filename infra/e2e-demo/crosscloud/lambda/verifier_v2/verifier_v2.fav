@@ -95,22 +95,22 @@ public fn main(ctx: AppCtx) -> Result<Unit, String> {
 
   // Step 2: KMS から公開鍵（PEM）を取得
   bind _log <- ctx.io.println("[1/5] KMS 公開鍵取得中...")
-  chain pub_key_pem <- get_kms_public_key(region, kms_key_id)
+  chain pub_key_pem <- get_kms_public_key(ctx, region, kms_key_id)
 
   // Step 3: ECDSA 署名検証
-  bind sts <- build_sts(method, path, ts, nonce, body)
-  chain _ecdsa_ok <- verify_ecdsa(pub_key_pem, sts, sig)
+  bind sts <- build_sts(ctx, method, path, ts, nonce, body)
+  chain _ecdsa_ok <- verify_ecdsa(ctx, pub_key_pem, sts, sig)
   bind _log <- ctx.io.println("[2/5] ECDSA 検証 OK")
 
   // Step 4: Nonce チェック（リプレイ攻撃防止）
   bind _log <- ctx.io.println("[3/5] Nonce チェック中...")
-  chain _nonce_ok <- put_nonce(nonce_tbl, nonce, nonce_ttl)
+  chain _nonce_ok <- put_nonce(ctx, nonce_tbl, nonce, nonce_ttl)
   bind _log <- ctx.io.println("[3/5] Nonce OK")
 
   // Step 5: ECS Fargate 移行タスク起動
   bind _log <- ctx.io.println("[4/5] ECS 移行タスク起動中...")
   bind overrides <- build_overrides(stg_acct, stg_key)
-  chain task_arn <- run_migration(cluster, task_def, subnets, sg, overrides)
+  chain task_arn <- run_migration(ctx, cluster, task_def, subnets, sg, overrides)
   bind _log <- ctx.io.println(String.concat("[4/5] ECS タスク起動 OK: ", task_arn))
 
   // Step 6: 証跡を S3 に保存
@@ -120,7 +120,7 @@ public fn main(ctx: AppCtx) -> Result<Unit, String> {
     String.concat("{\"status\":\"ok\",\"request_id\":\"", req_id),
     String.concat("\",\"task_arn\":\"", String.concat(task_arn, "\"}"))
   )
-  chain _proof_ok <- save_proof(proof_bkt, proof_key, proof_body)
+  chain _proof_ok <- save_proof(ctx, proof_bkt, proof_key, proof_body)
   bind _log <- ctx.io.println("[5/5] OK — KMS verification complete")
 
   Result.ok(())

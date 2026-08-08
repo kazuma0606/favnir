@@ -65,6 +65,8 @@ pub mod value;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod incremental;
 #[cfg(not(target_arch = "wasm32"))]
+pub mod cache;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod parallel;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod profiler;

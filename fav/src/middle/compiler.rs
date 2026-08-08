@@ -243,6 +243,10 @@ pub fn compile_program(program: &Program) -> IRProgram {
         "Arena.stats",
         // v23.1.0 Bytes 型（namespace として登録）
         "Bytes",
+        // v55.5.0 State（型付き VMValue State API — State.get/set/get_or_default namespace として登録）
+        "State",
+        // v55.6.0 CEP（複合イベント処理 — CEP.sequence/skip_until namespace として登録）
+        "CEP",
         // v23.3.0 Mut コレクション（namespace として登録）
         "Mut",
         // v20.8.0 Postgres Pool
@@ -1282,13 +1286,14 @@ fn lower_type_expr_with_subst(ty: &TypeExpr, subst: &HashMap<String, Type>) -> T
             Box::new(lower_type_expr_with_subst(lhs, subst)),
             Box::new(lower_type_expr_with_subst(rhs, subst)),
         ),
-        TypeExpr::RecordType(_, _) => Type::Unknown,
+        TypeExpr::RecordType(_, _, _) => Type::Unknown,
         TypeExpr::Schema(_, _) => Type::Unknown,
         TypeExpr::LinearArrow(a, b, _) => Type::Arrow(
             Box::new(lower_type_expr_with_subst(a, subst)),
             Box::new(lower_type_expr_with_subst(b, subst)),
         ),
         TypeExpr::ConstInt(_, _) => Type::Int,
+        TypeExpr::Hole(_) => Type::Unknown, // v61.7.0
     }
 }
 
@@ -1673,8 +1678,9 @@ fn substitute_self_in_type_expr(ty: &TypeExpr, type_name: &str) -> TypeExpr {
             Box::new(substitute_self_in_type_expr(rhs, type_name)),
             span.clone(),
         ),
-        TypeExpr::RecordType(fields, span) => TypeExpr::RecordType(
+        TypeExpr::RecordType(fields, row_var, span) => TypeExpr::RecordType(
             fields.iter().map(|(n, t)| (n.clone(), substitute_self_in_type_expr(t, type_name))).collect(),
+            row_var.clone(),
             span.clone(),
         ),
         TypeExpr::Schema(uri, span) => TypeExpr::Schema(uri.clone(), span.clone()),
@@ -1684,6 +1690,7 @@ fn substitute_self_in_type_expr(ty: &TypeExpr, type_name: &str) -> TypeExpr {
             span.clone(),
         ),
         TypeExpr::ConstInt(n, span) => TypeExpr::ConstInt(*n, span.clone()),
+        TypeExpr::Hole(span) => TypeExpr::Hole(span.clone()), // v61.7.0
     }
 }
 
@@ -1864,8 +1871,8 @@ fn pattern_binds(pattern: &Pattern, out: &mut HashSet<String>) {
             }
         }
         // or-pattern: all alternatives bind same vars; use first (v17.2.0)
-        Pattern::Or(pats, _) => {
-            if let Some(first) = pats.first() {
+        Pattern::Or(arms, _) => {
+            if let Some((first, _)) = arms.first() {
                 pattern_binds(first, out);
             }
         }
@@ -1877,6 +1884,11 @@ fn pattern_binds(pattern: &Pattern, out: &mut HashSet<String>) {
             if let Some(name) = tail {
                 out.insert(name.clone());
             }
+        }
+        // as-pattern: bind name + sub-pattern binds (v56.6.0)
+        Pattern::As(name, inner, _) => {
+            out.insert(name.clone());
+            pattern_binds(inner, out);
         }
     }
 }
@@ -1908,6 +1920,16 @@ fn collect_free_vars_expr(expr: &Expr, bound: &mut HashSet<String>, free: &mut H
             for arm in arms {
                 let mut arm_bound = bound.clone();
                 pattern_binds(&arm.pattern, &mut arm_bound);
+                // v61.3.0: OR パターンの per-arm guard 内の自由変数も収集する
+                if let Pattern::Or(or_arms, _) = &arm.pattern {
+                    for (or_pat, or_guard) in or_arms {
+                        if let Some(g) = or_guard {
+                            let mut inner_bound = bound.clone();
+                            pattern_binds(or_pat, &mut inner_bound);
+                            collect_free_vars_expr(g, &mut inner_bound, free);
+                        }
+                    }
+                }
                 if let Some(guard) = &arm.guard {
                     collect_free_vars_expr(guard, &mut arm_bound, free);
                 }
@@ -1938,7 +1960,7 @@ fn collect_free_vars_expr(expr: &Expr, bound: &mut HashSet<String>, free: &mut H
                 collect_free_vars_expr(expr, bound, free);
             }
         }
-        Expr::FString(parts, _) => {
+        Expr::FString(parts, _, _) => {
             for part in parts {
                 if let FStringPart::Expr(expr) = part {
                     collect_free_vars_expr(expr, bound, free);
@@ -1950,6 +1972,12 @@ fn collect_free_vars_expr(expr: &Expr, bound: &mut HashSet<String>, free: &mut H
         Expr::RecordSpread(base, updates, _) => {
             collect_free_vars_expr(base, bound, free);
             for (_, v) in updates {
+                collect_free_vars_expr(v, bound, free);
+            }
+        }
+        Expr::RecordUpdate { base, fields, .. } => {
+            collect_free_vars_expr(base, bound, free);
+            for (_, v) in fields {
                 collect_free_vars_expr(v, bound, free);
             }
         }
@@ -2283,7 +2311,16 @@ pub fn compile_expr(expr: &Expr, ctx: &mut CompileCtx) -> IRExpr {
                 .collect();
             IRExpr::RecordSpread(Box::new(base_ir), updates_ir, Type::Unknown)
         }
-        Expr::FString(parts, _) => compile_fstring(parts, ctx),
+        // v61.4.0: { base | field: val } → IRExpr::RecordSpread（デシュガー）
+        Expr::RecordUpdate { base, fields, .. } => {
+            let base_ir = compile_expr(base, ctx);
+            let updates_ir: Vec<(String, IRExpr)> = fields
+                .iter()
+                .map(|(k, v)| (k.clone(), compile_expr(v, ctx)))
+                .collect();
+            IRExpr::RecordSpread(Box::new(base_ir), updates_ir, Type::Unknown)
+        }
+        Expr::FString(parts, _, _) => compile_fstring(parts, ctx),
         Expr::EmitExpr(inner, _) => IRExpr::Emit(Box::new(compile_expr(inner, ctx)), Type::Unit),
         // expr? — desugared by compiler.fav; not supported in Rust compiler path
         Expr::Question(inner, _) => compile_expr(inner, ctx),
@@ -2750,9 +2787,13 @@ pub fn compile_pattern(pat: &Pattern, ctx: &mut CompileCtx) -> IRPattern {
                 })
                 .collect(),
         ),
-        // or-pattern (v17.2.0)
-        Pattern::Or(pats, _) => {
-            IRPattern::Or(pats.iter().map(|p| compile_pattern(p, ctx)).collect())
+        // or-pattern (v17.2.0) — v61.3.0: ガード式も IR にコンパイルして伝播
+        Pattern::Or(arms, _) => {
+            IRPattern::Or(arms.iter().map(|(p, guard)| {
+                let ir_pat = compile_pattern(p, ctx);
+                let ir_guard = guard.as_ref().map(|g| compile_expr(g, ctx));
+                (ir_pat, ir_guard)
+            }).collect())
         }
         // list-pattern (v17.2.0)
         Pattern::List { head, tail, .. } => {
@@ -2762,6 +2803,11 @@ pub fn compile_pattern(pat: &Pattern, ctx: &mut CompileCtx) -> IRPattern {
                 head: compiled_head,
                 tail: tail_slot,
             }
+        }
+        // as-pattern (v56.6.0)
+        Pattern::As(name, inner, _) => {
+            let slot = ctx.define_local(name.clone());
+            IRPattern::As(slot, Box::new(compile_pattern(inner, ctx)))
         }
     }
 }
@@ -2830,13 +2876,14 @@ fn lower_type_expr(ty: &TypeExpr) -> Type {
             Box::new(lower_type_expr(lhs)),
             Box::new(lower_type_expr(rhs)),
         ),
-        TypeExpr::RecordType(_, _) => Type::Unknown,
+        TypeExpr::RecordType(_, _, _) => Type::Unknown,
         TypeExpr::Schema(_, _) => Type::Unknown,
         TypeExpr::LinearArrow(a, b, _) => Type::Arrow(
             Box::new(lower_type_expr(a)),
             Box::new(lower_type_expr(b)),
         ),
         TypeExpr::ConstInt(_, _) => Type::Int,
+        TypeExpr::Hole(_) => Type::Unknown, // v61.7.0
     }
 }
 

@@ -1,0 +1,93 @@
+---
+title: "CEP パターン集"
+description: "CEP.sequence / CEP.skip_until を使った複合イベント処理パターンのレシピ集"
+---
+
+# CEP パターン集
+
+`CEP.sequence` と `CEP.skip_until` を使った複合イベント処理（Complex Event Processing）のレシピ集です。
+
+---
+
+## 注文→決済の連続検出（CEP.sequence）
+
+2 つの述語が順序通りに現れるイベント列を検出します。
+
+```favnir
+fn is_order(e: Event) -> Bool { e.type == "order_placed" }
+fn is_payment(e: Event) -> Bool { e.type == "payment_confirmed" }
+
+stage DetectOrderPayment: Stream<Event> -> Stream<List<Event>> = |events| {
+  bind preds <- collect {
+    yield is_order;
+    yield is_payment;
+  }
+  Ok(CEP.sequence(events, preds))
+}
+```
+
+`CEP.sequence` は各開始位置から greedy 前向き探索を行い、全述語が順にマッチする部分列をすべて収集します。
+
+---
+
+## エラーイベント以降を抽出（CEP.skip_until）
+
+最初に条件を満たすイベントから末尾までのサフィックスを返します。
+
+```favnir
+fn is_error(e: Event) -> Bool { e.severity == "error" }
+
+stage ExtractErrorTail: Stream<Event> -> Stream<Event> = |events| {
+  Ok(CEP.skip_until(events, is_error))
+}
+```
+
+`CEP.skip_until` は inclusive セマンティクス（最初に true になったイベント自体を含む）です。
+
+---
+
+## 3 ステップシーケンス検出
+
+```favnir
+fn is_login(e: Event) -> Bool { e.type == "login" }
+fn is_search(e: Event) -> Bool { e.type == "search" }
+fn is_purchase(e: Event) -> Bool { e.type == "purchase" }
+
+stage DetectFunnel: Stream<Event> -> Stream<List<Event>> = |events| {
+  bind preds <- collect {
+    yield is_login;
+    yield is_search;
+    yield is_purchase;
+  }
+  Ok(CEP.sequence(events, preds))
+}
+```
+
+---
+
+## Stateful CEP（状態永続化）
+
+CEP の結果をカウントし State に累積します。
+
+```favnir
+stage CountFunnels: Stream<Event> -> Stream<Int> = |events| {
+  bind preds <- collect {
+    yield is_login;
+    yield is_purchase;
+  }
+  bind matches <- Ok(CEP.sequence(events, preds))
+  bind prev <- State.get_or_default("funnel_count", 0)
+  bind _ <- State.set("funnel_count", prev + List.length(matches))
+  Ok(prev + List.length(matches))
+}
+```
+
+---
+
+## 境界ケース
+
+| ケース | `CEP.sequence` | `CEP.skip_until` |
+|---|---|---|
+| events が空 | 空リストを返す | 空リストを返す |
+| preds が空 | 空リストを返す | — |
+| pred が一度も true にならない | マッチなし（空リスト） | 空リストを返す |

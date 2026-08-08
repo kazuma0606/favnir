@@ -1,0 +1,129 @@
+# クイックスタート — 15 分で動かす
+
+このガイドでは CSV を読み込み、LLM で要約し、ベクトル DB に保存する AI パイプラインをゼロから構築します。
+
+## 前提条件
+
+```sh
+cargo install fav
+export ANTHROPIC_API_KEY=sk-ant-...
+export OPENAI_API_KEY=sk-...
+export PINECONE_API_KEY=...
+```
+
+## プロジェクト作成
+
+```sh
+fav new my-ai-etl --template ai-etl
+cd my-ai-etl
+```
+
+生成されるファイル:
+
+```
+my-ai-etl/
+├── fav.toml
+├── src/
+│   └── pipeline.fav
+└── data/
+    └── articles.csv
+```
+
+## fav.toml の設定
+
+```toml
+[project]
+name    = "my-ai-etl"
+version = "0.1.0"
+
+[ai]
+llm_provider   = "anthropic"
+embed_provider = "openai"
+embed_model    = "text-embedding-3-small"
+
+[vectordb]
+provider  = "pinecone"
+index     = "my-index"
+namespace = "articles"
+```
+
+## スキーマ定義
+
+```favnir
+schema Article {
+    id:    String,
+    title: String,
+    body:  String
+}
+
+schema Indexed {
+    id:        String,
+    embedding: List<Float>,
+    summary:   String
+}
+```
+
+## ステージ定義
+
+```favnir
+public stage Load: String -> List<Article> = |path| {
+    Rune.csv.read(path, schema: Article)
+}
+
+public stage Embed: Article -> Indexed = |a| {
+    bind summary   <- Rune.llm.extract(a.body, schema: String, model: "claude-haiku-4-5-20251001")
+    bind embedding <- Rune.embed.openai(a.title + " " + summary, model: "text-embedding-3-small")
+    Indexed { id: a.id, embedding: embedding, summary: summary }
+}
+
+public stage Store: List<Indexed> -> Unit = |items| {
+    bind pairs <- List.map(items, |i| { (i.id, i.embedding) })
+    Rune.pinecone.upsert(pairs, namespace: "articles", index: "my-index")
+}
+```
+
+## パイプライン定義
+
+```favnir
+pipeline IndexPipeline {
+    step "load"  = seq Load
+    step "embed" = par [Embed, Embed, Embed, Embed] after "load"
+    step "store" = seq Store after "embed"
+}
+```
+
+`par` で 4 ワーカーが並列に `Embed` を実行します。`seq` は入出力を直列で処理します。
+
+## 実行
+
+```sh
+fav run src/pipeline.fav -- data/articles.csv
+```
+
+出力例:
+
+```
+[step load]  100 articles loaded (3ms)
+[step embed] 4 workers × 25 articles each (avg 890ms)
+[step store] 100 embeddings → Pinecone (22ms)
+[done] Pipeline completed. Cost: $0.02
+```
+
+## 型エラーの例
+
+スキーマ不一致は実行前に検出されます:
+
+```
+error[E0401]: type mismatch in stage Store
+  --> src/pipeline.fav:18:5
+   |
+18 |     Rune.pinecone.upsert(pairs, ...)
+   |     expected List<(String, List<Float>)>
+   |     found    List<(String, String)>
+```
+
+## 次のステップ
+
+- [Math Foundation](./math-foundation) — 統計・行列演算を追加する
+- [AI Stages](./ai-stages) — より高度な AI ステージパターン
+- [分散実行](./distributed) — 大規模データへのスケールアウト

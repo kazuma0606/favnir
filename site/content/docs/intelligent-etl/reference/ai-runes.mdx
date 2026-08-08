@@ -1,0 +1,205 @@
+# AI Rune API リファレンス
+
+## Rune.embed
+
+テキストを埋め込みベクトル（`List<Float>`）に変換します。
+
+### OpenAI
+
+```favnir
+Rune.embed.openai(text: String, model: String) -> List<Float>
+```
+
+対応モデル:
+
+| model | 次元数 | コスト（1M tokens） |
+|---|---|---|
+| `text-embedding-3-small` | 1536 | $0.02 |
+| `text-embedding-3-large` | 3072 | $0.13 |
+| `text-embedding-ada-002` | 1536 | $0.10 |
+
+### Cohere
+
+```favnir
+Rune.embed.cohere(text: String, model: String, input_type: String) -> List<Float>
+```
+
+`input_type`: `"search_document"` または `"search_query"`
+
+### モック（テスト用）
+
+```favnir
+Rune.embed.mock(text: String) -> List<Float>
+```
+
+ランダム正規化ベクトルを返します。API 呼び出しなし・コストゼロ。WASM Playground で使用。
+
+---
+
+## Rune.llm
+
+LLM を使ったテキスト処理を提供します。
+
+### extract — 型安全なデータ抽出
+
+```favnir
+Rune.llm.extract(text: String, schema: T, model: String) -> T
+```
+
+スキーマに沿って LLM の出力をパースします。例:
+
+```favnir
+schema Product {
+    name:     String,
+    price:    Float,
+    category: String
+}
+
+public stage ParseProduct: String -> Product = |text| {
+    bind result <- Rune.llm.extract(text, schema: Product, model: "claude-haiku-4-5-20251001")
+    result
+}
+```
+
+### summarize — テキスト要約
+
+```favnir
+Rune.llm.summarize(text: String, model: String) -> String
+```
+
+### classify — テキスト分類
+
+```favnir
+Rune.llm.classify(text: String, labels: List<String>, model: String) -> (String, Float)
+```
+
+戻り値は `(label, confidence)`。
+
+### generate — テキスト生成
+
+```favnir
+Rune.llm.generate(prompt: String, model: String, max_tokens: Int, temperature: Float) -> String
+```
+
+### モック（テスト用）
+
+```favnir
+Rune.llm.mock(text: String, schema: T) -> T
+```
+
+`T` のデフォルト値を返します。API 呼び出しなし。
+
+対応モデル:
+
+| model | プロバイダー | 特徴 |
+|---|---|---|
+| `claude-opus-4-6` | Anthropic | 最高品質 |
+| `claude-sonnet-4-6` | Anthropic | バランス |
+| `claude-haiku-4-5-20251001` | Anthropic | 高速・低コスト |
+| `gpt-4o` | OpenAI | 汎用 |
+| `gpt-4o-mini` | OpenAI | 低コスト |
+
+---
+
+## Rune.pinecone
+
+Pinecone VectorDB との統合。
+
+```favnir
+Rune.pinecone.upsert(
+    pairs:     List<(String, List<Float>)>,
+    namespace: String,
+    index:     String
+) -> Unit
+```
+
+```favnir
+Rune.pinecone.query(
+    vector:    List<Float>,
+    top_k:     Int,
+    namespace: String
+) -> List<PineconeResult>
+```
+
+`PineconeResult` スキーマ:
+
+```favnir
+schema PineconeResult {
+    id:     String,
+    score:  Float,
+    values: List<Float>
+}
+```
+
+```favnir
+Rune.pinecone.delete(ids: List<String>, namespace: String, index: String) -> Unit
+```
+
+---
+
+## Rune.qdrant
+
+Qdrant VectorDB との統合。
+
+```favnir
+Rune.qdrant.upsert(
+    collection: String,
+    id:         String,
+    vector:     List<Float>,
+    payload:    Map<String, String>
+) -> Unit
+```
+
+```favnir
+Rune.qdrant.search(
+    collection: String,
+    vector:     List<Float>,
+    top_k:      Int,
+    filter:     Option<Map<String, String>>
+) -> List<QdrantResult>
+```
+
+---
+
+## Rune.pgvector
+
+PostgreSQL + pgvector との統合。
+
+```favnir
+Rune.pgvector.insert(
+    table:     String,
+    id:        String,
+    embedding: List<Float>,
+    metadata:  Map<String, String>
+) -> Unit
+```
+
+```favnir
+Rune.pgvector.search(
+    table:  String,
+    query:  List<Float>,
+    top_k:  Int
+) -> List<PgVectorResult>
+```
+
+---
+
+## Rune.weaviate
+
+Weaviate VectorDB との統合。
+
+```favnir
+Rune.weaviate.add(class_name: String, id: String, properties: Map<String, String>, vector: List<Float>) -> Unit
+Rune.weaviate.search(class_name: String, query_vec: List<Float>, top_k: Int) -> List<WeaviateResult>
+```
+
+---
+
+## Rune.featurestore
+
+フィーチャーストアとの統合。
+
+```favnir
+Rune.featurestore.get(entity_id: String, features: List<String>) -> Map<String, Float>
+Rune.featurestore.push(entity_id: String, features: Map<String, Float>) -> Unit
+```

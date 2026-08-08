@@ -605,10 +605,14 @@ fn emit_pattern_test(
             d
         }
         // ── or-pattern (v17.2.0) ──────────────────────────────────────────────
-        IRPattern::Or(pats) => {
+        // v61.3.0: per-arm guard 対応。JumpIfFalse は Bool をスタックから pop して評価。
+        // 設計注: OR アームの Bind(slot) は全アームで同じ slot を使う（compile_pattern/pattern_binds
+        // が「先頭アームの束縛を使用」する設計）。ガード失敗後に次アームの StoreLocal が同 slot を
+        // 上書きするため、前アームの値が残っても最終的に正しい値が slot に書かれる。
+        IRPattern::Or(arms) => {
             let mut or_success_jumps: Vec<usize> = Vec::new();
-            for (i, pat) in pats.iter().enumerate() {
-                let is_last = i == pats.len() - 1;
+            for (i, (pat, guard)) in arms.iter().enumerate() {
+                let is_last = i == arms.len() - 1;
                 // Dup the arm_copy for this sub-pattern test
                 cg.emit_opcode(Opcode::Dup);
                 let mut inner_fail: Vec<(usize, usize)> = Vec::new();
@@ -616,6 +620,12 @@ fn emit_pattern_test(
                 // SUCCESS PATH: pop extras back to depth
                 for _ in (depth + 1)..=inner_depth {
                     cg.emit_opcode(Opcode::Pop);
+                }
+                // v61.3.0: ガード評価（guard が Some の場合、Bool が false なら次アームへ）
+                if let Some(guard_expr) = guard {
+                    emit_expr(guard_expr, cg);
+                    // JumpIfFalse consumes the Bool from stack; on failure jump to next alt
+                    inner_fail.push((cg.emit_jump(Opcode::JumpIfFalse), 0));
                 }
                 if is_last {
                     // Fall through to or_success; propagate fails to outer
@@ -682,6 +692,15 @@ fn emit_pattern_test(
                 cg.emit_u16(*tail_slot);
             }
             depth
+        }
+        // ── as-pattern (v56.6.0) ──────────────────────────────────────────────
+        IRPattern::As(slot, inner) => {
+            // Bind whole value to slot (Dup + StoreLocal is net 0 on stack)
+            cg.emit_opcode(Opcode::Dup);
+            cg.emit_opcode(Opcode::StoreLocal);
+            cg.emit_u16(*slot);
+            // Then test sub-pattern against same value; return its depth
+            emit_pattern_test(inner, fail_jumps, cg, depth)
         }
     }
 }

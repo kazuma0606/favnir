@@ -1,6 +1,6 @@
 [package]
 name = "fav"
-version = "55.0.0"
+version = "70.0.0"
 edition = "2024"
 
 [[bin]]
@@ -29,7 +29,7 @@ wasm-encoder = "0.219"
 # ── Native-only dependencies (not available on wasm32) ────────────────────────
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 wasmtime = { version = "30", default-features = false, features = ["cranelift", "runtime"] }
-cranelift-codegen = { version = "0.117", features = ["x86"] }
+cranelift-codegen = { version = "0.117", features = ["x86", "arm64"] }
 cranelift-frontend = { version = "0.117" }
 cranelift-module = { version = "0.117" }
 cranelift-object = { version = "0.117" }
@@ -76,6 +76,7 @@ petgraph = "0.6"
 inferno = "0.11"
 futures = "0.3"
 bumpalo = "3"
+sysinfo = "0.30"
 
 # ── Linux-only dependencies ───────────────────────────────────────────────────
 [target.'cfg(target_os = "linux")'.dependencies]

@@ -1,0 +1,32 @@
+# Enterprise Security — 概要
+
+Favnir v57 スプリントで実装した Enterprise Security 機能群の概要。
+アクセス制御・シークレット管理・TLS・監査・コンプライアンスを統合した
+企業向けセキュリティ基盤を提供します。
+
+## 機能一覧
+
+| 機能 | バージョン | 説明 |
+|---|---|---|
+| RBAC | v57.1.0 | ロールベースアクセス制御（E0424） |
+| Secrets 管理 | v57.2.0 | AWS SM / Vault 連携・実行時注入 |
+| TLS / mTLS | v57.3.0 | HTTP / gRPC Rune 証明書設定 |
+| 依存関係スキャン | v57.4.0 | CVE スキャン・--fail-on-high |
+| 監査ログ署名 | v57.5.0 | HMAC-SHA256 署名・tamper-proof |
+| compliance レポート | v57.6.0 | GDPR / SOC2 対応 |
+| マルチテナント | v57.7.0 | テナント識別子・strict モード |
+| ドキュメント | v57.8.0 | Enterprise Security 記事群 |
+
+## 詳細ドキュメント
+
+- [RBAC — ロールベースアクセス制御](./enterprise/rbac)
+- [シークレット管理](./enterprise/secrets)
+- [コンプライアンスレポート](./enterprise/compliance)
+
+## 設計方針
+
+- **最小権限**: RBAC により各 Rune へのアクセスをロールで制限
+- **シークレット分離**: ソースコードにシークレットを埋め込まず Vault / AWS SM から実行時注入
+- **通信保護**: TLS / mTLS でエンドポイント間通信を暗号化
+- **改ざん検知**: 監査ログに署名を付与し tamper-proof を実現
+- **コンプライアンス**: GDPR・SOC2 フレームワークに対応したレポート自動生成

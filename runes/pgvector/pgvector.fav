@@ -1,0 +1,22 @@
+// pgvector Rune — PostgreSQL ベクトル拡張
+// upsert, similarity query, index management
+//
+// NOTE: List<Float> は Vec<Float>[N] の将来フェーズ登録までのプレースホルダー。
+//       VectorDBInterface — VectorDB 統一インターフェース（将来フェーズで切り替え可能）
+//       include_str! テストのみ（型チェックエラーは無視する）。
+
+// ベクトルエントリを追加・更新する
+public fn upsert(table: String, id: String, vector: List<Float>, metadata: String) -> String {
+    ""
+}
+
+// 近傍ベクトルを検索する
+public fn query(table: String, vector: List<Float>, top_k: Int) -> List<String> {
+    []
+}
+
+// ベクトルインデックスを作成する（IVFFLAT / HNSW）
+// IndexTypeVec — IVFFLAT または HNSW インデックス種別
+public fn create_index(table: String, index_type: String) -> String {
+    ""
+}

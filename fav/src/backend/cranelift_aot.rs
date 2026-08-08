@@ -6,7 +6,7 @@
 
 use cranelift_codegen::ir::{condcodes::IntCC, types, AbiParam, InstBuilder};
 use cranelift_codegen::settings::Configurable;
-use cranelift_codegen::{settings, Context};
+use cranelift_codegen::{isa, settings, Context};
 use cranelift_frontend::{FunctionBuilder, FunctionBuilderContext, Variable};
 use cranelift_module::{default_libcall_names, Linkage, Module};
 use cranelift_object::{ObjectBuilder, ObjectModule};
@@ -14,6 +14,12 @@ use cranelift_object::{ObjectBuilder, ObjectModule};
 use crate::ast::{BinOp, Lit};
 use crate::middle::ir::{IRExpr, IRProgram, IRStmt};
 use std::collections::HashMap;
+
+/// v62.4.0: AOT インライン化分析結果。
+pub struct AotStats {
+    pub inlined: Vec<String>,
+    pub dispatched: Vec<String>,
+}
 
 pub struct CraneliftBackend;
 
@@ -26,40 +32,10 @@ impl CraneliftBackend {
         Self::link_binary(&obj_bytes, &wrapper_src, out_path)
     }
 
-    /// Lower IRProgram → Cranelift object bytes (.o).
+    /// Lower IRProgram → Cranelift object bytes (.o) using host ISA.
+    /// v62.3.0 以降は `lower_to_object_with_target(ir, None)` に委譲。
     fn lower_to_object(ir: &IRProgram) -> Result<Vec<u8>, String> {
-        let mut flag_builder = settings::builder();
-        flag_builder
-            .set("use_colocated_libcalls", "false")
-            .unwrap();
-        flag_builder.set("is_pic", "false").unwrap();
-        flag_builder.set("opt_level", "none").unwrap();
-        let flags = settings::Flags::new(flag_builder);
-
-        let isa_builder = cranelift_native::builder()
-            .map_err(|e| format!("cranelift_native::builder error: {e}"))?;
-        let isa = isa_builder
-            .finish(flags)
-            .map_err(|e| format!("ISA finish error: {e}"))?;
-
-        let obj_builder =
-            ObjectBuilder::new(isa, "favnir_aot", default_libcall_names())
-                .map_err(|e| format!("ObjectBuilder error: {e}"))?;
-        let mut module = ObjectModule::new(obj_builder);
-
-        // Find and lower `main` function
-        let main_fn = ir
-            .fns
-            .iter()
-            .find(|f| f.name == "main")
-            .ok_or_else(|| "no `fn main` found in IRProgram".to_string())?;
-
-        Self::lower_fn_def(&mut module, main_fn, "fav_main")?;
-
-        let product = module.finish();
-        product
-            .emit()
-            .map_err(|e| format!("object emit error: {e}"))
+        Self::lower_to_object_with_target(ir, None)
     }
 
     /// Lower a single IRFnDef to a Cranelift function exported under `export_name`.
@@ -149,6 +125,196 @@ impl CraneliftBackend {
         }
         Ok(())
     }
+
+    /// v62.1.0: テスト・driver.rs から呼び出すための pub(crate) ラッパー。
+    /// `lower_to_object` の結果をそのまま返す。
+    pub(crate) fn lower_to_object_pub(ir: &IRProgram) -> Result<Vec<u8>, String> {
+        Self::lower_to_object(ir)
+    }
+
+    /// Cranelift の aarch64 ISA 内部登録名。
+    const CRANELIFT_AARCH64_NAME: &'static str = "aarch64";
+
+    /// v62.3.0: target triple を指定して object bytes を生成する。
+    /// - `None` / `"x86_64-unknown-linux-gnu"` → `cranelift_native::builder()`（ホスト ISA）
+    /// - `"aarch64-unknown-linux-gnu"` → cranelift aarch64 ISA
+    /// - その他 → `Err("unsupported target triple: ...")`
+    fn lower_to_object_with_target(
+        ir: &IRProgram,
+        target: Option<&str>,
+    ) -> Result<Vec<u8>, String> {
+        let mut flag_builder = settings::builder();
+        flag_builder
+            .set("use_colocated_libcalls", "false")
+            .map_err(|e| format!("flag set error: {e}"))?;
+        flag_builder
+            .set("is_pic", "false")
+            .map_err(|e| format!("flag set error: {e}"))?;
+        flag_builder
+            .set("opt_level", "none")
+            .map_err(|e| format!("flag set error: {e}"))?;
+        let flags = settings::Flags::new(flag_builder);
+
+        let isa: std::sync::Arc<dyn cranelift_codegen::isa::TargetIsa> = match target {
+            None | Some("x86_64-unknown-linux-gnu") => {
+                let isa_builder = cranelift_native::builder()
+                    .map_err(|e| format!("cranelift_native::builder error: {e}"))?;
+                isa_builder
+                    .finish(flags)
+                    .map_err(|e| format!("ISA finish error: {e}"))?
+            }
+            Some("aarch64-unknown-linux-gnu") => {
+                let isa_builder = isa::lookup_by_name(Self::CRANELIFT_AARCH64_NAME)
+                    .map_err(|e| format!("aarch64 ISA lookup error: {e:?}"))?;
+                isa_builder
+                    .finish(flags)
+                    .map_err(|e| format!("ISA finish error: {e}"))?
+            }
+            Some(t) => return Err(format!("unsupported target triple: {t}")),
+        };
+
+        let obj_builder =
+            ObjectBuilder::new(isa, "favnir_aot", default_libcall_names())
+                .map_err(|e| format!("ObjectBuilder error: {e}"))?;
+        let mut module = ObjectModule::new(obj_builder);
+
+        let main_fn = ir
+            .fns
+            .iter()
+            .find(|f| f.name == "main")
+            .ok_or_else(|| "no `fn main` found in IRProgram".to_string())?;
+
+        Self::lower_fn_def(&mut module, main_fn, "fav_main")?;
+
+        let product = module.finish();
+        product
+            .emit()
+            .map_err(|e| format!("object emit error: {e}"))
+    }
+
+    /// v62.3.0: `lower_to_object_with_target` の pub(crate) ラッパー。
+    pub(crate) fn lower_to_object_with_target_pub(
+        ir: &IRProgram,
+        target: Option<&str>,
+    ) -> Result<Vec<u8>, String> {
+        Self::lower_to_object_with_target(ir, target)
+    }
+
+    /// v62.2.0: `compile_to_binary` の pub(crate) ラッパー。
+    /// `fav build --link` の driver.rs テストエントリポイント。
+    pub(crate) fn compile_to_binary_pub(ir: &IRProgram, out_path: &str) -> Result<(), String> {
+        Self::compile_to_binary(ir, out_path)
+    }
+
+    /// v62.4.0: 各関数の AOT 純粋性を分析し、インライン候補とディスパッチ対象に分類する。
+    pub(crate) fn analyze_for_inlining(ir: &IRProgram) -> AotStats {
+        let mut inlined = Vec::new();
+        let mut dispatched = Vec::new();
+        for fn_def in &ir.fns {
+            if is_aot_pure(&fn_def.body) {
+                inlined.push(fn_def.name.clone());
+            } else {
+                dispatched.push(fn_def.name.clone());
+            }
+        }
+        AotStats { inlined, dispatched }
+    }
+}
+
+/// v62.4.0: AOT コンパイル可能な IR のみからなる式かを判定する。
+/// `Lit::Str` は `lower_lit` が非サポートのため false。その他 Lit / Local / BinOp / If / Block は pure。
+/// Global / TrfRef / Call 等は false。
+fn is_aot_pure(expr: &IRExpr) -> bool {
+    match expr {
+        IRExpr::Lit(Lit::Str(_), _) => false,
+        IRExpr::Lit(_, _) => true,
+        IRExpr::Local(_, _) => true,
+        IRExpr::BinOp(_, lhs, rhs, _) => is_aot_pure(lhs) && is_aot_pure(rhs),
+        IRExpr::If(cond, then_e, else_e, _) => {
+            is_aot_pure(cond) && is_aot_pure(then_e) && is_aot_pure(else_e)
+        }
+        IRExpr::Block(stmts, final_expr, _) => {
+            stmts.iter().all(|s| match s {
+                IRStmt::Bind(_, e) | IRStmt::LegacyBind(_, e) | IRStmt::Expr(e) => is_aot_pure(e),
+                IRStmt::TrackLine(_) => true, // 行番号マーカー — 副作用なし
+                IRStmt::RefinementAssert { expr, .. } => is_aot_pure(expr),
+                _ => false,
+            }) && is_aot_pure(final_expr)
+        }
+        _ => false,
+    }
+}
+
+/// v62.8.0: IR 式が AOT 未サポート機能を含むか再帰的に検出する。
+fn contains_aot_unsupported(expr: &IRExpr) -> bool {
+    match expr {
+        IRExpr::Emit(_, _) => true,
+        IRExpr::BinOp(_, lhs, rhs, _) => {
+            contains_aot_unsupported(lhs) || contains_aot_unsupported(rhs)
+        }
+        IRExpr::If(cond, then_e, else_e, _) => {
+            contains_aot_unsupported(cond)
+                || contains_aot_unsupported(then_e)
+                || contains_aot_unsupported(else_e)
+        }
+        IRExpr::Block(stmts, final_expr, _) => {
+            stmts.iter().any(|s| match s {
+                IRStmt::Bind(_, e)
+                | IRStmt::LegacyBind(_, e)
+                | IRStmt::Chain(_, e)
+                | IRStmt::Yield(e)
+                | IRStmt::Return(e)
+                | IRStmt::Expr(e) => contains_aot_unsupported(e),
+                IRStmt::SeqChain { expr, .. } => contains_aot_unsupported(expr),
+                IRStmt::TrackLine(_) => false,
+                IRStmt::RefinementAssert { expr, .. } => contains_aot_unsupported(expr),
+            }) || contains_aot_unsupported(final_expr)
+        }
+        // v62.8.0 code-review fix: recurse into all compound expression variants
+        IRExpr::Call(f, args, _) => {
+            contains_aot_unsupported(f) || args.iter().any(contains_aot_unsupported)
+        }
+        IRExpr::CallTrfLocal { arg, .. } => contains_aot_unsupported(arg),
+        IRExpr::Match(scrutinee, arms, _) => {
+            contains_aot_unsupported(scrutinee)
+                || arms.iter().any(|arm| {
+                    arm.guard
+                        .as_ref()
+                        .map_or(false, contains_aot_unsupported)
+                        || contains_aot_unsupported(&arm.body)
+                })
+        }
+        IRExpr::Closure(_, captures, _) => captures.iter().any(contains_aot_unsupported),
+        IRExpr::Collect(inner, _) => contains_aot_unsupported(inner),
+        IRExpr::FieldAccess(obj, _, _) => contains_aot_unsupported(obj),
+        IRExpr::RecordConstruct(fields, _) => {
+            fields.iter().any(|(_, v)| contains_aot_unsupported(v))
+        }
+        IRExpr::RecordSpread(base, updates, _) => {
+            contains_aot_unsupported(base)
+                || updates.iter().any(|(_, v)| contains_aot_unsupported(v))
+        }
+        IRExpr::Par { input, .. } => contains_aot_unsupported(input),
+        IRExpr::AssertSchema { arg, .. } => contains_aot_unsupported(arg),
+        // Leaf variants: Lit / Local / Global / TrfRef
+        IRExpr::Lit(_, _) | IRExpr::Local(_, _) | IRExpr::Global(_, _) | IRExpr::TrfRef(_, _) => {
+            false
+        }
+    }
+}
+
+/// v62.8.0: AOT 互換性バリデーション — E0427 エラーメッセージリストを返す。
+pub fn validate_aot_compat(ir: &IRProgram) -> Vec<String> {
+    let mut errors = Vec::new();
+    for fn_def in &ir.fns {
+        if contains_aot_unsupported(&fn_def.body) {
+            errors.push(format!(
+                "E0427: unsupported feature in AOT mode in function `{}`",
+                fn_def.name
+            ));
+        }
+    }
+    errors
 }
 
 /// Recursively lower an IRExpr to a Cranelift Value (i64).

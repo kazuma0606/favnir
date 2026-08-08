@@ -1,0 +1,31 @@
+# Enterprise 1.0 ドキュメント
+
+Favnir v60.0 — Enterprise 1.0 の全機能ドキュメント一覧です。
+
+## 機能一覧
+
+| 機能 | ドキュメント | 実装バージョン |
+|---|---|---|
+| RBAC | [rbac.mdx](./rbac) | v57.1 |
+| Secret 管理 | [secrets.mdx](./secrets) | v57.2 |
+| mTLS | [deployment.mdx](./deployment) | v57.3 |
+| 監査ログ | [compliance.mdx](./compliance) | v57.5 |
+| コンプライアンス | [compliance.mdx](./compliance) | v57.6 |
+| Blue-Green Deploy | [deployment.mdx](./deployment) | v58.1 |
+| Enterprise Certify | [enterprise1-overview.mdx](./enterprise1-overview) | v59.6 |
+
+## 認定要件
+
+Enterprise 1.0 の認定を受けるには以下を満たす必要があります:
+
+- `[security.rbac]` の設定（RBAC）
+- `[secrets]` の設定（Secrets 管理）
+- `[security.tls]` の設定（mTLS）
+- CI での `--audit-sign` 有効化（監査ログ）
+- コンプライアンスレポートの生成（GDPR 等）
+
+`fav certify --level enterprise` で全要件を自動チェックできます。
+
+## 移行ガイド
+
+v1 から Enterprise 1.0 へ移行するには `fav migrate --from v1 --to enterprise --dry-run` を実行してください。

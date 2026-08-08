@@ -1,0 +1,8 @@
+[rune]
+name        = "inference"
+version     = "0.1.0"
+description = "Inference Rune for Favnir — streaming ML inference: batch inference, backpressure control, SLA monitoring, stateful scoring"
+entry       = "inference.fav"
+effects     = []
+
+[dependencies]

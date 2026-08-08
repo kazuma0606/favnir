@@ -1,0 +1,25 @@
+---
+title: "Enterprise 1.0 設定チェックリスト"
+description: "Favnir Enterprise 1.0 認定に必要な fav.toml / CI 設定の確認リスト"
+---
+
+# Enterprise 1.0 設定チェックリスト
+
+## fav.toml チェックリスト
+
+- [ ] `[security.rbac]` セクションを追加（RBAC 設定）
+- [ ] `[secrets]` セクションを追加（Secrets 管理）
+- [ ] `[security.tls]` セクションを追加（mTLS 設定）
+- [ ] `[sla]` セクションを追加して `fav run --sla-enforce` を有効化（SLA 保証）
+- [ ] `[env.production]` セクションでマルチ環境設定を追加
+
+## CI チェックリスト
+
+- [ ] `fav run --audit-sign` を CI パイプラインに追加
+- [ ] `fav compliance report --framework gdpr` を定期実行に追加
+- [ ] `fav certify --level enterprise` を CD に組み込む
+
+## 移行チェックリスト
+
+- [ ] `fav migrate --from v1 --to enterprise --dry-run` で変更内容を確認
+- [ ] `fav migrate --from v1 --to enterprise --in-place <file>` で自動修正を適用

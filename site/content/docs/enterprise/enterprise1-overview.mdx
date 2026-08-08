@@ -1,0 +1,51 @@
+# Enterprise 1.0 Overview
+
+Favnir v60.0 — Enterprise 1.0 は、v56〜v59 で実装した全エンタープライズ機能を統合し、
+企業で安心して選ばれるデータパイプライン言語として完成する。
+
+## Enterprise 1.0 機能一覧
+
+| 機能 | 実装バージョン | 概要 |
+|---|---|---|
+| RBAC | v57.1 | ロールベースアクセス制御 |
+| Secret 管理 | v57.2 | AWS SM / Vault / GCP SM 統合 |
+| mTLS | v57.3 | 相互 TLS 接続 |
+| 監査ログ | v57.5 | 署名付き監査ログ |
+| コンプライアンス | v57.6 | GDPR / SOC2 / HIPAA レポート |
+| Blue-Green Deploy | v58.1 | 無停止デプロイ |
+| Cost Visibility | v59.3 | パイプラインコスト見積もり |
+| SLA Guarantee | v59.2 | SLA 監視・アラート統合 |
+| Migration Toolkit | v59.5 | v1 → Enterprise 自動移行 |
+| Enterprise Certify | v59.6 | Enterprise 1.0 認定チェック |
+
+## 認定要件
+
+`fav certify --level enterprise` で全要件を確認できます。
+
+証明書は `enterprise-cert.json` として生成されます。
+
+## 認定手順
+
+1. `fav.toml` に必要なセクションを追加する（[設定チェックリスト](../cookbook/enterprise-checklist)参照）
+2. `fav certify --level enterprise` を実行して全要件を確認する
+3. 生成された `enterprise-cert.json` を CI アーティファクトとして保存する
+4. `fav migrate --from v1 --to enterprise --dry-run` で既存コードを確認する
+5. `fav migrate --from v1 --to enterprise --in-place <file>` で自動修正を適用する
+
+## クイックスタート
+
+```toml
+# fav.toml — Enterprise 1.0 最小構成
+[security.rbac]
+enabled = true
+
+[security.tls]
+enabled = true
+
+[secrets]
+provider = "aws-secrets-manager"
+
+[sla]
+latency_p99_ms   = 200
+availability_pct = 99.9
+```

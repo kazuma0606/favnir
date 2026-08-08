@@ -117,3 +117,33 @@ fn process<R with { id: Int } with Ord>(row: R) -> Int {
 |---|---|
 | `with Ord` | `R` must implement the `Ord` interface |
 | `with { id: Int }` | `R` must have a field `id: Int` |
+
+## Explicit Row Variables (v56.3.0)
+
+Since v56.3.0, you can declare a row variable `<r>` explicitly as a type parameter and use
+the `{ field: Type | r }` syntax to represent "the remaining fields" of a record.
+
+```fav
+fn get_name<r>(record: { name: String | r }) -> String {
+  record.name
+}
+
+fn main() -> String {
+  bind user_name    <- get_name({ name: "Alice", age: 30 })
+  bind product_name <- get_name({ name: "Widget", price: 9.99 })
+  user_name
+}
+```
+
+`{ name: String | r }` means "any record that has a `name: String` field, with `r` representing
+any additional fields". Both calls work despite the records having different shapes.
+
+## LSP Hover Display
+
+In LSP-enabled editors, the type of a function with a row variable is shown as `{ name: String | ... }`:
+
+```
+get_name : { name: String | ... } -> String
+```
+
+The row variable `r` is displayed as `...`, visually indicating that the function accepts any additional fields.

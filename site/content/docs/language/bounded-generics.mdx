@@ -1,0 +1,183 @@
+# Bounded Generics — 本番品質化
+
+Favnir v56.1.0 で `where T: Interface` 構文を正式化し、v56.2.0 で複数 constraint・coherence ルールを強化した。
+このドキュメントでは、境界付きジェネリクスの本番用途での使い方をまとめる。
+
+基礎的なジェネリクスの構文については [generics.mdx](./generics.mdx) を参照。
+
+---
+
+## `where T: Interface` 構文
+
+`T with Interface` 形式（v17.1.0 から利用可能）と等価な `where` 節形式を正式サポートした。
+長い型引数リストや複数の constraint がある場合に可読性が上がる。
+
+```favnir
+interface Serializable {
+  fn to_json(self: Self) -> String
+}
+
+// `where` 節形式（v56.1.0 で正式化）
+fn serialize_all<T>(items: List<T>) -> List<String>
+  where T: Serializable
+{
+  List.map(items, |x| x.to_json())
+}
+
+// 等価な `with` 形式（引き続き使用可能）
+fn serialize_all2<T with Serializable>(items: List<T>) -> List<String> {
+  List.map(items, |x| x.to_json())
+}
+```
+
+---
+
+## 複数 constraint（v56.2.0）
+
+複数の interface bound を `with` で連鎖させる。
+
+```favnir
+fn pick<T with Ord with Serialize>(a: T, b: T) -> T {
+  if a > b { a } else { b }
+}
+```
+
+`where` 節では `,` で区切る（いずれの形式も等価）:
+
+```favnir
+fn pick2<T>(a: T, b: T) -> T
+  where T: Ord, T: Serialize
+{
+  if a > b { a } else { b }
+}
+```
+
+複数型パラメータに異なる bound を付与する場合:
+
+```favnir
+fn zip_sorted<A with Ord, B with Serialize>(keys: List<A>, vals: List<B>) -> List<String> {
+  List.map(List.zip(List.sort(keys), vals), |(k, v)| f"{k}: {v.to_json()}")
+}
+```
+
+---
+
+## カスタム interface との組み合わせ
+
+`interface` キーワードで定義した独自 interface を bound として使用できる。
+
+```favnir
+interface Printable {
+  fn print(self: Self) -> String
+}
+
+type Invoice = { id: Int, amount: Float, customer: String }
+
+impl Printable for Invoice {
+  fn print(self: Invoice) -> String {
+    f"Invoice #{self.id}: {self.customer} {self.amount}"
+  }
+}
+
+fn display_all<T with Printable>(items: List<T>) -> List<String> {
+  List.map(items, |x| Printable.print(x))
+}
+```
+
+---
+
+## stdlib での使用例
+
+標準ライブラリの各関数には `where` 節が適切に付与されており、型安全性を保証する。
+
+```favnir
+// List.sort — 要素が Ord を実装している必要がある
+fn sort<T with Ord>(xs: List<T>) -> List<T>
+
+// List.max — 空リストの場合は Option.none を返す
+fn max<T with Ord>(xs: List<T>) -> Option<T>
+
+// List.dedup — 重複除去には Eq が必要
+fn dedup<T with Eq>(xs: List<T>) -> List<T>
+```
+
+実際のパイプラインでの使用例:
+
+```favnir
+stage SortOrders(orders: List<Order>) -> List<Order> {
+  // Order が Ord を実装していない場合、ここでコンパイルエラー（E0422）
+  Result.ok(List.sort(orders))
+}
+```
+
+---
+
+## エラー: E0422 — constraint 違反
+
+渡した型が要求された interface を実装していない場合、型チェッカーが **E0422** を報告する。
+
+```favnir
+type Color = { r: Int, g: Int, b: Int }
+
+fn max_color<T with Ord>(a: T, b: T) -> T {
+  if a > b { a } else { b }
+}
+
+fn main() -> Color {
+  max_color({ r: 0, g: 0, b: 0 }, { r: 255, g: 0, b: 0 })
+  // E0422: type `Color` does not satisfy bound `Ord`
+  // hint: implement `Ord` for `Color` or remove the bound
+}
+```
+
+**修正方法**: `Color` に `Ord` の `impl` を追加するか、bound を緩める。
+
+---
+
+## エラー: E0423 — coherence 違反（重複 `impl`）
+
+同一型に対する `impl` が複数定義されている場合、coherence ルール違反として **E0423** を報告する（v56.2.0）。
+
+```favnir
+interface Greet {
+  fn hello(self: Self) -> String
+}
+
+type User = { name: String }
+
+impl Greet for User {
+  fn hello(self: User) -> String { f"Hello, {self.name}!" }
+}
+
+// E0423: duplicate impl of `Greet` for `User`
+impl Greet for User {
+  fn hello(self: User) -> String { f"Hi, {self.name}!" }
+}
+```
+
+coherence ルールにより、同一型・同一 interface の `impl` は 1 つのみ許可される。
+これにより「どの実装が使われるか」が常に一意に決まる。
+
+---
+
+## 組み込み interface 一覧
+
+型チェッカーが bound 検証に使用する組み込み interface:
+
+| Interface | 満たす型 |
+|---|---|
+| `Ord` | `Int`, `Float`, `String` |
+| `Eq` | すべての型 |
+| `Serialize` | すべての型 |
+| `Display` | `String`, `Int`, `Float`, `Bool` |
+| `Hash` | `Int`, `String` |
+| `Clone` | すべての型 |
+
+---
+
+## `generics.mdx` との役割分担
+
+| ドキュメント | 内容 |
+|---|---|
+| [generics.mdx](./generics.mdx) | 基礎的なジェネリクス・bounded generics の概要・E0325 |
+| このドキュメント | `where` 節・複数 constraint・coherence・stdlib 使用例・E0422・E0423 |

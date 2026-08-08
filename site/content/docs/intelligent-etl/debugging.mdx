@@ -1,0 +1,133 @@
+# デバッグガイド — fav debug / fav viz / fav suggest
+
+## fav debug — ステップ実行デバッガ
+
+パイプラインをステージごとに実行し、各ステージの入出力を確認します。
+
+```sh
+fav debug src/pipeline.fav -- data/articles.csv
+```
+
+```
+Favnir Debugger v69.0
+[breakpoint] step "load" — before execution
+> n
+[step load]  executing...
+[step load]  100 articles loaded
+[breakpoint] step "embed" — before execution
+> p articles
+articles: List<Article>[100]
+  [0]: Article { id: "1", title: "...", body: "..." }
+  ...
+> n
+[step embed] executing... (worker 1/4)
+```
+
+デバッガコマンド:
+
+| コマンド | 説明 |
+|---|---|
+| `n` | 次のステップへ進む |
+| `c` | ブレークポイントまで続行 |
+| `p <var>` | 変数の値を表示 |
+| `t` | 型情報を表示 |
+| `cost` | ここまでの API コストを表示 |
+| `q` | 終了 |
+
+ブレークポイントの指定:
+
+```sh
+fav debug src/pipeline.fav --break "embed" --break "store" -- data/articles.csv
+```
+
+## タイムトラベルデバッグ
+
+`--record` フラグで実行を記録し、後から任意の時点を再生できます。
+
+```sh
+# 記録
+fav run src/pipeline.fav --record ./debug-session/ -- data/articles.csv
+
+# 再生（step 2 から）
+fav debug --replay ./debug-session/ --from-step 2
+```
+
+API コストを再発生させることなくバグを再現できます。
+
+## fav viz — DAG 可視化
+
+パイプラインの有向グラフを可視化します。
+
+```sh
+fav viz src/pipeline.fav --output pipeline.svg
+```
+
+出力例（ASCII）:
+
+```
+[LoadArticles]
+      |
+      v
+[EmbedAndSummarize ×4]  ←── par（4並列）
+      |
+      v
+[StoreToVectorDB]
+```
+
+出力フォーマット:
+
+```sh
+fav viz src/pipeline.fav --format dot      # Graphviz DOT
+fav viz src/pipeline.fav --format mermaid  # Mermaid.js
+fav viz src/pipeline.fav --format json     # JSON（プログラム処理用）
+```
+
+## fav suggest — AI 最適化アドバイザー
+
+プロファイル結果を分析し、最適化の提案を出します。
+
+```sh
+fav suggest src/pipeline.fav -- data/articles.csv
+```
+
+```
+Analyzing pipeline performance...
+
+Suggestions:
+[1] PERF: step "embed" は全処理時間の 94% を占めています。
+    → par の並列数を 4 から 8 に増やすことを検討してください
+
+[2] COST: Rune.llm.summarize を claude-haiku-4-5-20251001 から
+    claude-haiku-4-5 に変更するとコストを約 40% 削減できます
+
+[3] TYPE: 埋め込みを次元削減（Rune.linalg.pca）すると
+    VectorDB ストレージコストを削減できます
+```
+
+## fav profile — ステージ別実行時間
+
+```sh
+fav profile src/pipeline.fav -- data/articles.csv
+```
+
+```
+Stage Profile:
+  load   ──   5ms  ( 0.3%)
+  embed  ── 1840ms (94.2%)
+  store  ──  108ms  ( 5.5%)
+  ──────────────────────────
+  total  ── 1953ms
+```
+
+## lint との連携
+
+AI ステージ特有の問題を静的に検出します:
+
+```sh
+fav lint src/pipeline.fav
+```
+
+```
+warning[W055]: LLM 出力スキーマに confidence フィールドがありません
+warning[W057]: embed_dim が fav.toml の設定と一致しません
+```

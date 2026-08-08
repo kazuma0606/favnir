@@ -1,0 +1,133 @@
+# AI Stages — embed / llm / vectordb
+
+AI ステージは機械学習・LLM 推論・ベクトル検索をパイプラインに組み込む仕組みです。
+すべての AI Rune 呼び出しは `bind x <- expr` 構文で記述します。
+
+## 埋め込みステージ（embed）
+
+テキストをベクトルに変換します。結果は `List<Float>` 型になります。
+
+```favnir
+public stage EmbedText: String -> List<Float> = |text| {
+    bind vec <- Rune.embed.openai(text, model: "text-embedding-3-small")
+    vec
+}
+```
+
+対応プロバイダー:
+
+| 関数 | モデル |
+|---|---|
+| `Rune.embed.openai(text, model)` | text-embedding-3-small |
+| `Rune.embed.openai(text, model)` | text-embedding-3-large |
+| `Rune.embed.cohere(text, model)` | embed-english-v3.0 |
+| `Rune.embed.mock(text)` | モック（テスト用、API 呼び出しなし） |
+
+## LLM 抽出ステージ（llm）
+
+非構造化テキストから型安全にデータを抽出します。
+
+```favnir
+schema SentimentResult {
+    label:      String,
+    score:      Float,
+    confidence: Float
+}
+
+public stage AnalyzeSentiment: String -> SentimentResult = |text| {
+    bind result <- Rune.llm.extract(text, schema: SentimentResult, model: "claude-haiku-4-5-20251001")
+    result
+}
+```
+
+LLM の出力は `schema` で指定した型に自動パースされます。パースに失敗した場合はステージがエラーを返します。
+
+対応関数:
+
+| 関数 | 説明 |
+|---|---|
+| `Rune.llm.extract(text, schema, model)` | スキーマに沿ってデータ抽出 |
+| `Rune.llm.summarize(text, model)` | テキスト要約 |
+| `Rune.llm.classify(text, labels, model)` | テキスト分類 |
+| `Rune.llm.mock(text, schema)` | モック（テスト用、API 呼び出しなし） |
+
+## VectorDB ステージ
+
+```favnir
+// 保存
+public stage StoreEmbeddings: List<(String, List<Float>)> -> Unit = |pairs| {
+    Rune.pinecone.upsert(pairs, namespace: "docs", index: "main-index")
+}
+
+// 検索
+public stage SearchSimilar: List<Float> -> List<SearchResult> = |query_vec| {
+    bind results <- Rune.pinecone.query(query_vec, top_k: 10, namespace: "docs")
+    results
+}
+```
+
+対応 VectorDB:
+
+| Rune | 説明 |
+|---|---|
+| `Rune.pinecone.*` | Pinecone |
+| `Rune.qdrant.*` | Qdrant |
+| `Rune.pgvector.*` | PostgreSQL + pgvector |
+| `Rune.weaviate.*` | Weaviate |
+
+## 複合 AI パイプライン
+
+LLM 抽出 → 埋め込み → VectorDB を一つのステージにまとめる例:
+
+```favnir
+schema Article {
+    id:   String,
+    body: String
+}
+
+schema IndexedDoc {
+    id:        String,
+    summary:   String,
+    tags:      List<String>,
+    embedding: List<Float>
+}
+
+public stage IndexDocument: Article -> IndexedDoc = |doc| {
+    bind summary   <- Rune.llm.summarize(doc.body, model: "claude-haiku-4-5-20251001")
+    bind tags      <- Rune.llm.extract(doc.body, schema: List<String>, model: "claude-haiku-4-5-20251001")
+    bind embedding <- Rune.embed.openai(summary, model: "text-embedding-3-small")
+    IndexedDoc {
+        id:        doc.id,
+        summary:   summary,
+        tags:      tags,
+        embedding: embedding
+    }
+}
+```
+
+## コスト見積もり
+
+```sh
+fav run src/pipeline.fav --cost-estimate -- data/articles.csv
+```
+
+```
+Cost estimate for 1000 articles:
+  embed (OpenAI text-embedding-3-small): $0.02
+  llm   (claude-haiku-4-5-20251001 × 1000): $0.10
+  pinecone (upsert 1000 vectors): $0.00
+  ─────────────────────────────────────────
+  Total estimate: $0.12
+```
+
+## par による並列実行
+
+```favnir
+pipeline FastIndexPipeline {
+    step "load"  = seq LoadArticles
+    step "index" = par [IndexDocument, IndexDocument, IndexDocument, IndexDocument] after "load"
+    step "store" = seq StoreEmbeddings after "index"
+}
+```
+
+4 並列で約 4× のスループットが得られます（API レート制限に依存）。

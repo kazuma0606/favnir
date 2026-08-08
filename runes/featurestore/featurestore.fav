@@ -1,0 +1,31 @@
+// featurestore Rune — 型安全フィーチャーストア
+// define_feature, get, get_batch, get_version, get_at
+//
+// NOTE: スキーマ型定義・compute_fn 実行は将来フェーズ。
+//       FeatureStoreInterface — フィーチャーストア統一インターフェース（将来フェーズ）
+//       include_str! テストのみ（型チェックエラーは無視する）。
+
+// フィーチャーを定義・登録する
+public fn define_feature(name: String, version: String, schema: String, compute_fn: String) -> String {
+    ""
+}
+
+// フィーチャーをオンライン推論向けに取得する（低レイテンシ）
+public fn get(feature_name: String, entity_key: String) -> String {
+    ""
+}
+
+// フィーチャーをバッチ取得する（訓練データ生成向け）
+public fn get_batch(feature_name: String, keys: List<String>) -> List<String> {
+    []
+}
+
+// バージョン指定でフィーチャーを取得する（再現性保証）
+public fn get_version(feature_name: String, version: String) -> String {
+    ""
+}
+
+// Point-in-time フィーチャー取得（訓練データリークを防ぐ）
+public fn get_at(feature_name: String, key: String, timestamp: String) -> String {
+    ""
+}

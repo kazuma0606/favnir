@@ -149,6 +149,18 @@ pub struct StreamConfig {
     /// chunk_size の上限（バックプレッシャー制御用）。デフォルト None（制約なし）。(v51.3.0)
     /// 0 は None 相当として扱う（chunks(0) によるパニック防止）。
     pub buffer_size: Option<usize>,
+    // --- v55.1.0 追加 ---
+    /// チェックポイント保存先 URI。"file://..." | "s3://..." 等。(v55.1.0)
+    pub checkpoint_store: Option<String>,
+    /// チェックポイント保存間隔（秒）。デフォルト None（v55.3 で 10 秒相当を設定）。(v55.1.0)
+    pub checkpoint_interval_sec: Option<u32>,
+    /// デリバリーセマンティクス: "at-least-once" | "exactly-once"。(v55.1.0)
+    pub delivery: Option<String>,
+    // --- v55.2.0 追加 ---
+    /// セッションウィンドウのギャップ秒数。(v55.2.0)
+    pub session_gap_sec: Option<u32>,
+    /// ウォーターマーク最大遅延許容秒数。遅延がこれを超えたイベントをドロップ対象とする。(v55.2.0)
+    pub watermark_max_late_sec: Option<u32>,
 }
 
 // ── Azure config (v14.2.0) ────────────────────────────────────────────────────
@@ -228,13 +240,17 @@ impl Default for DeployConfig {
     }
 }
 
-/// `[lint]` section of fav.toml (v12.10.0).
+/// `[lint]` section of fav.toml (v12.10.0, updated v61.8.0, v64.6.0).
 #[derive(Debug, Clone)]
 pub struct LintTomlConfig {
     /// Lint codes to treat as errors (exit 1 even with `--warn-only`).
     pub warn_as_error: Option<Vec<String>>,
     /// Lint codes to suppress entirely.
     pub allow: Option<Vec<String>>,
+    /// v61.8.0: `strict = true` で LintConfig::strict を有効化。
+    pub strict: Option<bool>,
+    /// v64.6.0: `perf = true` で W041 等のパフォーマンス lint を有効化。
+    pub perf: Option<bool>,
 }
 
 /// `[context]` section of fav.toml (v13.5.0).
@@ -255,6 +271,196 @@ pub struct RunTomlConfig {
     pub verbose: bool,
     /// Enable unlimited verbose trace (equivalent to `fav run --trace`).
     pub trace: bool,
+}
+
+/// RBAC configuration from `[security.rbac]` in fav.toml (v57.1.0).
+#[derive(Debug, Clone, Default)]
+pub struct RbacConfig {
+    /// Declared roles (e.g. ["reader", "writer", "admin"]).
+    pub roles: Vec<String>,
+    /// Rune name → allowed roles mapping.
+    /// If a rune is not listed, access is unrestricted.
+    pub bindings: std::collections::HashMap<String, Vec<String>>,
+}
+
+impl RbacConfig {
+    /// Returns `true` if `role` is in the declared `roles` list.
+    /// Callers should check this before calling `is_allowed` to catch typos
+    /// or undeclared role names passed via `fav run --role`.
+    pub fn is_valid_role(&self, role: &str) -> bool {
+        self.roles.iter().any(|r| r == role)
+    }
+
+    /// Returns `true` if `role` is allowed to access `rune`.
+    /// If `rune` has no binding, access is unrestricted (returns `true`).
+    ///
+    /// # Note
+    /// This method does NOT validate that `role` is in `self.roles`.
+    /// Callers must call `is_valid_role` first if they need to enforce
+    /// that only declared roles are accepted (e.g., `fav run --role`).
+    pub fn is_allowed(&self, rune: &str, role: &str) -> bool {
+        match self.bindings.get(rune) {
+            Some(allowed) => allowed.iter().any(|r| r == role),
+            None => true,
+        }
+    }
+}
+
+/// Secrets management configuration from `[secrets]` in fav.toml (v57.2.0).
+#[derive(Debug, Clone, Default)]
+pub struct SecretsConfig {
+    /// Provider name: "aws-secrets-manager" or "vault".
+    pub provider: String,
+    /// AWS region (or Vault address) for the provider.
+    pub region: String,
+    /// ENV_VAR_NAME -> provider secret path mapping.
+    pub bindings: std::collections::HashMap<String, String>,
+}
+
+impl SecretsConfig {
+    /// Returns a sorted list of registered secret key names (env var names).
+    pub fn list_keys(&self) -> Vec<&str> {
+        let mut keys: Vec<&str> = self.bindings.keys().map(|k| k.as_str()).collect();
+        keys.sort();
+        keys
+    }
+}
+
+/// TLS / mTLS configuration from `[security.tls]` in fav.toml (v57.3.0).
+#[derive(Debug, Clone)]
+pub struct TlsConfig {
+    /// Path to the CA certificate file.
+    pub ca_cert: Option<String>,
+    /// Path to the client certificate file (required for mTLS).
+    pub tls_cert: Option<String>,
+    /// Path to the client private key file (required for mTLS).
+    pub tls_key: Option<String>,
+    /// Whether to verify the server's certificate. Defaults to `true` (secure by default).
+    pub verify: bool,
+}
+
+impl Default for TlsConfig {
+    fn default() -> Self {
+        TlsConfig {
+            ca_cert: None,
+            tls_cert: None,
+            tls_key: None,
+            verify: true, // secure by default
+        }
+    }
+}
+
+impl TlsConfig {
+    /// Returns `true` when both `tls_cert` and `tls_key` are set (mTLS mode).
+    pub fn is_mtls(&self) -> bool {
+        self.tls_cert.is_some() && self.tls_key.is_some()
+    }
+}
+
+/// Per-rune isolation settings from `[tenancy.isolation]` (v57.7.0).
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct TenancyIsolation {
+    /// Snowflake schema prefix pattern (e.g. `"tenant_${TENANT_ID}"`).
+    pub snowflake_schema: Option<String>,
+    /// Kafka topic prefix pattern (e.g. `"${TENANT_ID}."`).
+    pub kafka_topic_prefix: Option<String>,
+}
+
+/// Multi-tenant configuration from `[tenancy]` in fav.toml (v57.7.0).
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct TenancyConfig {
+    /// Tenancy mode: `"strict"` enforces tenant ID on all Rune access.
+    /// Default (when `[tenancy]` section is absent or `mode` is unset): `""` (empty string = permissive-equivalent).
+    pub mode: String,
+    /// Tenant identifier (supports `${ENV_VAR}` expansion).
+    pub tenant: Option<String>,
+    /// Optional per-rune isolation settings.
+    pub isolation: Option<TenancyIsolation>,
+}
+
+impl TenancyConfig {
+    /// Returns `true` when mode is `"strict"`.
+    pub fn is_strict(&self) -> bool {
+        self.mode == "strict"
+    }
+}
+
+// ── Parallel config (v63.4.0) ─────────────────────────────────────────────────
+
+/// `[parallel]` section of fav.toml (v63.4.0).
+#[derive(Debug, Clone)]
+pub struct ParallelConfig {
+    /// 最大並列スレッド数。0 = CPU コア数（`available_parallelism()`）。デフォルト: 0。
+    pub max_threads: usize,
+    /// ステージ間キューの最大深度。デフォルト: 256。
+    pub queue_depth: usize,
+}
+
+impl Default for ParallelConfig {
+    fn default() -> Self {
+        ParallelConfig {
+            max_threads: 0,
+            queue_depth: 256,
+        }
+    }
+}
+
+// ── Backpressure config (v63.6.0) ─────────────────────────────────────────────
+
+/// `[backpressure]` section of fav.toml (v63.6.0).
+#[derive(Debug, Clone)]
+pub struct BackpressureConfig {
+    /// バックプレッシャー戦略: "drop" | "block" | "sample"。デフォルト: "block"。
+    pub strategy: String,
+    /// stage 間キューの最大深度。デフォルト: 500。
+    pub max_queue_depth: usize,
+    /// キュー深度がこの値を超えると W042 警告を出す。デフォルト: 400。
+    pub warn_threshold: usize,
+}
+
+impl Default for BackpressureConfig {
+    fn default() -> Self {
+        BackpressureConfig {
+            strategy: "block".to_string(),
+            max_queue_depth: 500,
+            warn_threshold: 400,
+        }
+    }
+}
+
+// ── Bench config (v64.2.0) ────────────────────────────────────────────────────
+
+/// `[bench]` section of fav.toml (v64.2.0).
+#[derive(Debug, Clone, Default)]
+pub struct BenchTomlConfig {
+    /// リグレッション判定しきい値（%）。未設定時は呼び出し側で 10 をデフォルトとして使用する。
+    pub regression_threshold_pct: Option<u32>,
+}
+
+// ── Build config (v62.7.0) ────────────────────────────────────────────────────
+
+/// `[build]` section of fav.toml (v62.7.0).
+#[derive(Debug, Clone)]
+pub struct BuildConfig {
+    /// ターゲットトリプル。デフォルト: "x86_64-unknown-linux-gnu"。
+    pub target: String,
+    /// 最適化レベル (0–3)。デフォルト: 2。
+    pub opt_level: u8,
+    /// `!Pure` ステージをインライン展開するか。デフォルト: true。
+    pub inline_pure_stages: bool,
+    /// 生成物の出力ディレクトリ。デフォルト: "dist/"。
+    pub output_dir: String,
+}
+
+impl Default for BuildConfig {
+    fn default() -> Self {
+        BuildConfig {
+            target: "x86_64-unknown-linux-gnu".to_string(),
+            opt_level: 2,
+            inline_pure_stages: true,
+            output_dir: "dist/".to_string(),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -316,6 +522,22 @@ pub struct FavToml {
     /// Package dependencies declared in `[runes]` (v48.3.0).
     /// Maps rune name → version string (e.g., `"kafka" → "2.1.0"`).
     pub runes: std::collections::HashMap<String, String>,
+    /// Optional RBAC configuration (v57.1.0).
+    pub rbac: Option<RbacConfig>,
+    /// Optional secrets management configuration (v57.2.0).
+    pub secrets: Option<SecretsConfig>,
+    /// Optional TLS / mTLS configuration (v57.3.0).
+    pub tls: Option<TlsConfig>,
+    /// Optional multi-tenant configuration (v57.7.0).
+    pub tenancy: Option<TenancyConfig>,
+    /// Optional build configuration (v62.7.0).
+    pub build: Option<BuildConfig>,
+    /// Optional parallel execution configuration (v63.4.0).
+    pub parallel: Option<ParallelConfig>,
+    /// Optional backpressure configuration (v63.6.0).
+    pub backpressure: Option<BackpressureConfig>,
+    /// Optional bench configuration (v64.2.0).
+    pub bench: Option<BenchTomlConfig>,
 }
 
 impl FavToml {
@@ -394,6 +616,14 @@ fn parse_fav_toml(content: &str) -> FavToml {
     let mut state_cfg: Option<StateConfig> = None;
     let mut stream_cfg: Option<StreamConfig> = None;
     let mut runes_map: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+    let mut rbac_cfg: Option<RbacConfig> = None;
+    let mut secrets_cfg = SecretsConfig::default();
+    let mut tls_cfg: Option<TlsConfig> = None;
+    let mut tenancy_cfg: Option<TenancyConfig> = None;
+    let mut build_cfg: Option<BuildConfig> = None;
+    let mut parallel_cfg: Option<ParallelConfig> = None;
+    let mut backpressure_cfg: Option<BackpressureConfig> = None;
+    let mut bench_cfg: Option<BenchTomlConfig> = None;
     let mut section = "";
 
     for line in content.lines() {
@@ -487,6 +717,62 @@ fn parse_fav_toml(content: &str) -> FavToml {
         }
         if trimmed == "[project]" {
             section = "project";
+            continue;
+        }
+        if trimmed == "[security.rbac]" {
+            section = "security.rbac";
+            continue;
+        }
+        if trimmed == "[security.rbac.bindings]" {
+            section = "security.rbac.bindings";
+            continue;
+        }
+        if trimmed == "[secrets]" {
+            // Note: only single-line key = "value" syntax is supported.
+            section = "secrets";
+            continue;
+        }
+        if trimmed == "[secrets.bindings]" {
+            // Note: only single-line KEY = "path" syntax is supported.
+            section = "secrets.bindings";
+            continue;
+        }
+        if trimmed == "[security.tls]" {
+            section = "security.tls";
+            continue;
+        }
+        if trimmed == "[tenancy]" {
+            section = "tenancy";
+            continue;
+        }
+        if trimmed == "[tenancy.isolation]" {
+            // Note: [tenancy.isolation] may appear without a prior [tenancy] header.
+            // In that case tenancy_cfg is initialised via get_or_insert_with below,
+            // resulting in mode = "" (permissive-equivalent) and tenant = None.
+            section = "tenancy.isolation";
+            continue;
+        }
+        if trimmed == "[build]" {
+            section = "build";
+            continue;
+        }
+        if trimmed == "[parallel]" {
+            section = "parallel";
+            continue;
+        }
+        if trimmed == "[backpressure]" {
+            section = "backpressure";
+            continue;
+        }
+        if trimmed == "[bench]" {
+            section = "bench";
+            continue;
+        }
+        if trimmed == "[lint]" {
+            // v61.8.0: `[lint]` セクション開始トリガーを補完。
+            // v12.10.0 で `"lint"` アームは追加済みだったが、
+            // セクション開始を検出する `if trimmed == "[lint]"` ブロックが欠落していた。
+            section = "lint";
             continue;
         }
         if trimmed.starts_with('[') {
@@ -693,20 +979,30 @@ fn parse_fav_toml(content: &str) -> FavToml {
                 let mut current = lint_cfg.take().unwrap_or(LintTomlConfig {
                     warn_as_error: None,
                     allow: None,
+                    strict: None,
+                    perf: None,
                 });
                 if let Some((key, val)) = parse_kv(trimmed) {
-                    // Parse comma-separated list: warn_as_error = ["W006", "W007"]
-                    let codes: Vec<String> = val
-                        .trim_start_matches('[')
-                        .trim_end_matches(']')
-                        .split(',')
-                        .map(|s| s.trim().trim_matches('"').to_string())
-                        .filter(|s| !s.is_empty())
-                        .collect();
-                    match key {
-                        "warn_as_error" => current.warn_as_error = Some(codes),
-                        "allow"         => current.allow         = Some(codes),
-                        _ => {}
+                    // v61.8.0: `strict = true/false` をブール値としてパース
+                    if key == "strict" {
+                        current.strict = Some(val.trim() == "true");
+                    } else if key == "perf" {
+                        // v64.6.0: `perf = true/false` をブール値としてパース
+                        current.perf = Some(val.trim() == "true");
+                    } else {
+                        // Parse comma-separated list: warn_as_error = ["W006", "W007"]
+                        let codes: Vec<String> = val
+                            .trim_start_matches('[')
+                            .trim_end_matches(']')
+                            .split(',')
+                            .map(|s| s.trim().trim_matches('"').to_string())
+                            .filter(|s| !s.is_empty())
+                            .collect();
+                        match key {
+                            "warn_as_error" => current.warn_as_error = Some(codes),
+                            "allow"         => current.allow         = Some(codes),
+                            _ => {}
+                        }
                     }
                 }
                 lint_cfg = Some(current);
@@ -857,12 +1153,170 @@ fn parse_fav_toml(content: &str) -> FavToml {
                             // 0 は制約なし（None 相当）として扱う（chunks(0) パニック防止）
                             current.buffer_size = val.trim_matches('"').parse::<usize>().ok().filter(|&n| n > 0);
                         }
+                        "checkpoint_store" => {
+                            current.checkpoint_store = Some(val.trim_matches('"').to_string());
+                        }
+                        "checkpoint_interval_sec" => {
+                            current.checkpoint_interval_sec = val.trim_matches('"').parse().ok();
+                        }
+                        "delivery" => {
+                            current.delivery = Some(val.trim_matches('"').to_string());
+                        }
+                        "session_gap_sec" => {
+                            current.session_gap_sec = val.trim_matches('"').parse().ok();
+                        }
+                        "watermark_max_late_sec" => {
+                            current.watermark_max_late_sec = val.trim_matches('"').parse().ok();
+                        }
                         _ => {}
                     }
                     stream_cfg = Some(current);
                 }
             }
+            "security.rbac" => {
+                // Note: only single-line array syntax is supported.
+                // Multi-line arrays (roles = [\n  "reader",\n]) are silently ignored.
+                if let Some((key, val)) = parse_kv(trimmed) {
+                    if key == "roles" {
+                        let current = rbac_cfg.get_or_insert_with(RbacConfig::default);
+                        let val_t = val.trim();
+                        current.roles = val_t
+                            .trim_start_matches('[')
+                            .trim_end_matches(']')
+                            .split(',')
+                            .map(|s| s.trim().trim_matches('"').to_string())
+                            .filter(|s| !s.is_empty())
+                            .collect();
+                    }
+                }
+            }
+            "security.rbac.bindings" => {
+                // Note: only single-line array syntax is supported for binding values.
+                if let Some((key, val)) = parse_kv(trimmed) {
+                    let current = rbac_cfg.get_or_insert_with(RbacConfig::default);
+                    let rune_name = key.trim_matches('"').to_string();
+                    let val_t = val.trim();
+                    let roles: Vec<String> = val_t
+                        .trim_start_matches('[')
+                        .trim_end_matches(']')
+                        .split(',')
+                        .map(|s| s.trim().trim_matches('"').to_string())
+                        .filter(|s| !s.is_empty())
+                        .collect();
+                    current.bindings.insert(rune_name, roles);
+                }
+            }
+            "secrets" => {
+                if let Some((key, val)) = parse_kv(trimmed) {
+                    let v = expand_env_vars(val);
+                    match key {
+                        "provider" => secrets_cfg.provider = v,
+                        "region" => secrets_cfg.region = v,
+                        _ => {}
+                    }
+                }
+            }
+            "secrets.bindings" => {
+                // Note: only single-line KEY = "path" syntax is supported.
+                if let Some((key, val)) = parse_kv(trimmed) {
+                    let path = expand_env_vars(val);
+                    secrets_cfg.bindings.insert(key.to_string(), path);
+                }
+            }
+            "security.tls" => {
+                if let Some((key, val)) = parse_kv(trimmed) {
+                    let current = tls_cfg.get_or_insert_with(TlsConfig::default);
+                    match key {
+                        "ca_cert"  => current.ca_cert  = Some(expand_env_vars(val)),
+                        "tls_cert" => current.tls_cert = Some(expand_env_vars(val)),
+                        "tls_key"  => current.tls_key  = Some(expand_env_vars(val)),
+                        "verify"   => current.verify   = val == "true", // TOML spec: lowercase only; "True"/"TRUE" intentionally rejected
+                        _ => {}
+                    }
+                }
+            }
+            "tenancy" => {
+                if let Some((key, val)) = parse_kv(trimmed) {
+                    let current = tenancy_cfg.get_or_insert_with(TenancyConfig::default);
+                    match key {
+                        "mode"   => current.mode   = expand_env_vars(val),
+                        "tenant" => current.tenant = Some(expand_env_vars(val)),
+                        _ => {}
+                    }
+                }
+            }
+            "tenancy.isolation" => {
+                if let Some((key, val)) = parse_kv(trimmed) {
+                    let tc = tenancy_cfg.get_or_insert_with(TenancyConfig::default);
+                    let iso = tc.isolation.get_or_insert_with(TenancyIsolation::default);
+                    match key {
+                        "snowflake_schema"   => iso.snowflake_schema   = Some(expand_env_vars(val)),
+                        "kafka_topic_prefix" => iso.kafka_topic_prefix = Some(expand_env_vars(val)),
+                        _ => {}
+                    }
+                }
+            }
+            "build" => {
+                let mut current = build_cfg.take().unwrap_or_default();
+                if let Some((key, val)) = parse_kv(trimmed) {
+                    match key {
+                        "target"             => current.target             = val.to_string(),
+                        "opt_level"          => current.opt_level          = val.parse::<u8>().unwrap_or(2).min(3),
+                        "inline_pure_stages" => current.inline_pure_stages = val == "true", // "true" 完全一致のみ受け入れる
+                        "output_dir"         => current.output_dir         = val.to_string(),
+                        _ => {}
+                    }
+                }
+                build_cfg = Some(current);
+            }
+            "parallel" => {
+                let mut current = parallel_cfg.take().unwrap_or_default();
+                if let Some((key, val)) = parse_kv(trimmed) {
+                    match key {
+                        "max_threads" => current.max_threads = val.parse::<usize>().unwrap_or(0),
+                        "queue_depth" => current.queue_depth = val.parse::<usize>().unwrap_or(256),
+                        _ => {}
+                    }
+                }
+                parallel_cfg = Some(current);
+            }
+            "backpressure" => {
+                let mut current = backpressure_cfg.take().unwrap_or_default();
+                if let Some((key, val)) = parse_kv(trimmed) {
+                    match key {
+                        "strategy" => {
+                            if matches!(val, "drop" | "block" | "sample") {
+                                current.strategy = val.to_string();
+                            }
+                            // 無効値はデフォルト ("block") を維持
+                        }
+                        "max_queue_depth" => current.max_queue_depth = val.parse::<usize>().unwrap_or(500),
+                        "warn_threshold"  => current.warn_threshold  = val.parse::<usize>().unwrap_or(400),
+                        _ => {}
+                    }
+                }
+                backpressure_cfg = Some(current);
+            }
+            "bench" => {
+                let mut current = bench_cfg.take().unwrap_or_default();
+                if let Some((key, val)) = parse_kv(trimmed) {
+                    match key {
+                        "regression_threshold_pct" => {
+                            current.regression_threshold_pct = val.parse::<u32>().ok();
+                        }
+                        _ => {}
+                    }
+                }
+                bench_cfg = Some(current);
+            }
             _ => {}
+        }
+    }
+
+    // warn_threshold は max_queue_depth を超えてはならない（超えると警告が永遠に発火しない）
+    if let Some(ref mut bp) = backpressure_cfg {
+        if bp.warn_threshold > bp.max_queue_depth {
+            bp.warn_threshold = bp.max_queue_depth;
         }
     }
 
@@ -896,6 +1350,14 @@ fn parse_fav_toml(content: &str) -> FavToml {
         state: state_cfg,
         stream: stream_cfg,
         runes: runes_map,
+        rbac: rbac_cfg,
+        secrets: if secrets_cfg.provider.is_empty() { None } else { Some(secrets_cfg) },
+        tls: tls_cfg,
+        tenancy: tenancy_cfg,
+        build: build_cfg,
+        parallel: parallel_cfg,
+        backpressure: backpressure_cfg,
+        bench: bench_cfg,
     }
 }
 

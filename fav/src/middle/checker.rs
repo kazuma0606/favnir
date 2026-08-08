@@ -365,6 +365,79 @@ pub fn occurs(var: &str, ty: &Type) -> bool {
     }
 }
 
+/// Compute a human-readable structural diff between two types for error hints.
+/// Returns `Some(hint)` when a useful structural difference can be described.
+fn diff_types(
+    expected: &Type,
+    found: &Type,
+    record_fields: &HashMap<String, Vec<(String, Type)>>,
+) -> Option<String> {
+    // Named type (likely a record) vs a primitive scalar
+    if let Type::Named(exp_name, _) = expected {
+        let is_found_scalar = matches!(
+            found,
+            Type::Bool | Type::Int | Type::Float | Type::String | Type::Unit
+        );
+        if is_found_scalar {
+            return Some(
+                record_fields
+                    .get(exp_name.as_str())
+                    .map(|fields| {
+                        let list = fields
+                            .iter()
+                            .map(|(n, t)| format!("{}: {}", n, t.display()))
+                            .collect::<Vec<_>>()
+                            .join(", ");
+                        format!(
+                            "{} has fields {{ {} }}, but {} is a scalar type",
+                            exp_name,
+                            list,
+                            found.display()
+                        )
+                    })
+                    .unwrap_or_else(|| {
+                        format!(
+                            "{} is a named type, but {} is a scalar",
+                            exp_name,
+                            found.display()
+                        )
+                    }),
+            );
+        }
+        // Both Named but different — show missing field diff
+        if let Type::Named(found_name, _) = found {
+            if exp_name != found_name {
+                if let (Some(exp_f), Some(found_f)) = (
+                    record_fields.get(exp_name.as_str()),
+                    record_fields.get(found_name.as_str()),
+                ) {
+                    let found_names: Vec<&str> =
+                        found_f.iter().map(|(n, _)| n.as_str()).collect();
+                    let missing: Vec<&str> = exp_f
+                        .iter()
+                        .map(|(n, _)| n.as_str())
+                        .filter(|n| !found_names.contains(n))
+                        .collect();
+                    if !missing.is_empty() {
+                        return Some(format!(
+                            "{} is missing fields present in {}: {}",
+                            found_name,
+                            exp_name,
+                            missing.join(", ")
+                        ));
+                    }
+                }
+            }
+        }
+    }
+    // List<A> vs List<B>: recurse on element types
+    if let (Type::List(exp_inner), Type::List(found_inner)) = (expected, found) {
+        return diff_types(exp_inner, found_inner, record_fields)
+            .map(|msg| format!("element type mismatch — {}", msg));
+    }
+    None
+}
+
 /// Robinson's unification algorithm.
 /// Returns a `Subst` that makes `t1` and `t2` equal, or an error string.
 pub fn unify(t1: &Type, t2: &Type) -> Result<Subst, String> {
@@ -671,6 +744,15 @@ impl InterfaceRegistry {
     pub fn is_implemented(&self, interface_name: &str, type_name: &str) -> bool {
         self.impls
             .contains_key(&(interface_name.to_string(), type_name.to_string()))
+    }
+
+    /// Returns true only when the existing impl is user-declared (is_auto = false).
+    /// Used for coherence checking (E0423, v56.2.0) — built-in impls must not trigger duplicates.
+    pub fn is_explicitly_implemented(&self, interface_name: &str, type_name: &str) -> bool {
+        self.impls
+            .get(&(interface_name.to_string(), type_name.to_string()))
+            .map(|e| !e.is_auto)
+            .unwrap_or(false)
     }
 
     /// Look up the method type from the interface *declaration* (canonical type, not impl body).
@@ -1282,6 +1364,10 @@ impl Checker {
                 is_rune,
                 is_public,
                 kind: _,
+                is_wildcard: _, // v56.7.0: parsing only — scope injection (name expansion) is deferred to resolver.
+                                // Until then, `import "lib" as lib.*` is accepted syntactically but
+                                // names from `lib.*` are NOT added to the type scope; callers will see
+                                // E0001/E0007 if they use expanded names. This is intentional.
                 span,
             } = item
             else {
@@ -2709,6 +2795,27 @@ impl Checker {
                 }
             }
 
+            // Coherence check (E0423, v56.2.0): detect duplicate impl for same (interface, type) pair.
+            // Only fires when the existing impl is also user-declared (!is_auto) to avoid
+            // flagging built-in stdlib impls as coherence violations.
+            // Ordering assumption: auto-synthesized impls are registered via a separate route
+            // and never appear here as `id.is_auto = false`. If that invariant changes, revisit.
+            if !id.is_auto
+                && self
+                    .interface_registry
+                    .is_explicitly_implemented(interface_name, &id.type_name)
+            {
+                self.type_error(
+                    "E0423",
+                    format!(
+                        "duplicate impl of `{}` for `{}`: coherence violation",
+                        interface_name, id.type_name
+                    ),
+                    &id.span,
+                );
+                continue; // skip registration — duplicate impl rejected
+            }
+
             if id.is_auto {
                 self.synthesize_interface_impl_for_type_name(
                     &id.type_name,
@@ -3100,7 +3207,13 @@ impl Checker {
                     self.collect_helpers_in_expr(expr);
                 }
             }
-            Expr::FString(parts, _) => {
+            Expr::RecordUpdate { base, fields, .. } => {
+                self.collect_helpers_in_expr(base);
+                for (_, expr) in fields {
+                    self.collect_helpers_in_expr(expr);
+                }
+            }
+            Expr::FString(parts, _, _) => {
                 for part in parts {
                     if let FStringPart::Expr(expr) = part {
                         self.collect_helpers_in_expr(expr);
@@ -3514,7 +3627,11 @@ impl Checker {
                             if let Some(prev_out) = &current_output {
                                 if let Some((input, _output)) = data_callable {
                                     if !prev_out.is_compatible(input) {
-                                        self.type_error(
+                                        let hints =
+                                            diff_types(prev_out, input, &self.record_fields)
+                                                .map(|d| vec![d])
+                                                .unwrap_or_default();
+                                        self.type_error_h(
                                             "E0103",
                                             format!(
                                                 "flw `{}`: stage `{}` expects `{}` but got `{}`",
@@ -3524,6 +3641,7 @@ impl Checker {
                                                 prev_out.display(),
                                             ),
                                             &fd.span,
+                                            hints,
                                         );
                                     }
                                 } else {
@@ -3845,7 +3963,7 @@ impl Checker {
                 Box::new(self.resolve_type_expr_with_subst(lhs, subst)),
                 Box::new(self.resolve_type_expr_with_subst(rhs, subst)),
             ),
-            TypeExpr::RecordType(_, _) => Type::Unknown,
+            TypeExpr::RecordType(_, _row_var, _) => Type::Unknown,
             TypeExpr::Schema(uri, _) => self.resolve_schema(uri),
             TypeExpr::LinearArrow(a, b, _) => Type::LinearFn(
                 Box::new(self.resolve_type_expr_with_subst(a, subst)),
@@ -3918,6 +4036,7 @@ impl Checker {
                 }
             }
             TypeExpr::ConstInt(_, _) => Type::Int,
+            TypeExpr::Hole(_) => Type::Unknown, // v61.7.0
         }
     }
 
@@ -4172,10 +4291,39 @@ impl Checker {
                     }
                 }
             }
-            // or-pattern: all alternatives must bind the same variables; use first (v17.2.0)
-            Pattern::Or(pats, _) => {
-                if let Some(first) = pats.first() {
-                    self.check_pattern_bindings(first, ty);
+            // or-pattern: v61.1.0: all arms are type-checked (was first-only in v17.2.0).
+            // Bind deduplication: OR arms must bind the same variables, so we skip
+            // re-defining top-level Bind names that were already defined by a prior arm.
+            // v61.3.0: per-arm guard 対応。ガード式の型が Bool であることを検証。
+            // 注: ガード型チェックは bindings の重複 skip に関わらず常に実行する。
+            Pattern::Or(arms, _) => {
+                let mut bound: std::collections::HashSet<String> =
+                    std::collections::HashSet::new();
+                for (pat, guard) in arms {
+                    let skip_bindings = if let Pattern::Bind(name, _) = pat {
+                        !bound.insert(name.clone()) // true if already defined
+                    } else {
+                        false
+                    };
+                    if !skip_bindings {
+                        self.check_pattern_bindings(pat, ty);
+                    }
+                    // v61.3.0: ガード式の型を検証（Bool であること）
+                    // — bindings の skip に関わらず全アームのガードを検証する
+                    if let Some(guard_expr) = guard {
+                        let guard_ty = self.check_expr(guard_expr);
+                        if !matches!(guard_ty, Type::Bool | Type::Unknown) {
+                            let span = guard_expr.span();
+                            self.type_error(
+                                "E0395",
+                                &format!(
+                                    "or-pattern guard must be Bool, got {:?}",
+                                    guard_ty
+                                ),
+                                span,
+                            );
+                        }
+                    }
                 }
             }
             // list-pattern: bind head elements and optional tail (v17.2.0)
@@ -4190,6 +4338,11 @@ impl Checker {
                 if let Some(name) = tail {
                     self.env.define(name.clone(), ty.clone());
                 }
+            }
+            // as-pattern: bind name to whole value + recurse into sub-pattern (v56.6.0)
+            Pattern::As(name, inner, _) => {
+                self.env.define(name.clone(), ty.clone());
+                self.check_pattern_bindings(inner, ty);
             }
         }
     }
@@ -4809,7 +4962,7 @@ impl Checker {
                                 }
                             }
                             let resolved = subst.apply(&inst_ret);
-                            // Bounded generics call-site check (E0325).
+                            // Bounded generics call-site check (E0422 for Interface, E0337 for HasField).
                             if let Some(fn_name) = expr_fn_name(func) {
                                 if let Some(bparams) = self.fn_bounds_registry.get(&fn_name).cloned() {
                                     for bp in &bparams {
@@ -4819,7 +4972,7 @@ impl Checker {
                                             if !type_implements_bound(&concrete, bound, self) {
                                                 let (err_code, err_msg) = match bound {
                                                     TypeConstraint::Interface(name) => (
-                                                        "E0325",
+                                                        "E0422",
                                                         format!(
                                                             "type `{}` does not implement `{}`",
                                                             concrete.display(),
@@ -4974,15 +5127,20 @@ impl Checker {
                         }
                         Some((input, output)) => {
                             if !current.is_compatible(input) {
-                                self.type_error(
+                                let hints =
+                                    diff_types(&current, input, &self.record_fields)
+                                        .map(|d| vec![d])
+                                        .unwrap_or_default();
+                                self.type_error_h(
                                     "E0103",
                                     format!(
-                                        "pipeline type mismatch: `{}` ↁE`{}` (expected `{}`)",
+                                        "pipeline type mismatch: `{}` → `{}` (expected `{}`)",
                                         current.display(),
                                         step_ty.display(),
                                         input.display()
                                     ),
                                     span,
+                                    hints,
                                 );
                                 current = Type::Error;
                             } else {
@@ -5107,12 +5265,12 @@ impl Checker {
                 }
             }
 
-            Expr::FString(parts, span) => {
+            Expr::FString(parts, _, span) => {
                 for part in parts {
                     let FStringPart::Expr(inner) = part else {
                         continue;
                     };
-                    if matches!(inner.as_ref(), Expr::FString(_, _)) {
+                    if matches!(inner.as_ref(), Expr::FString(_, _, _)) {
                         self.type_error(
                             "E0253",
                             "nested string interpolation is not supported",
@@ -5184,6 +5342,41 @@ impl Checker {
                     self.check_expr(v);
                 }
                 Type::Unknown
+            }
+
+            // v61.4.0: record update 式
+            // base と同じ型を返す（更新後も型は変わらない）。
+            // RecordSpread が Type::Unknown を返すのと意図的に異なる — 明示的型継承を表現する。
+            Expr::RecordUpdate { base, fields, span } => {
+                let base_ty = self.check_expr(base);
+                let base_is_named = matches!(&base_ty, Type::Named(_, _));
+                for (fname, fexpr) in fields {
+                    let val_ty = self.check_expr(fexpr);
+                    let expected_ty = self.lookup_field_type(&base_ty, fname);
+                    if base_is_named {
+                        if matches!(expected_ty, Type::Unknown) {
+                            // base が Named 型だがフィールドが型定義に存在しない
+                            self.type_error(
+                                "E0397",
+                                &format!(
+                                    "record update: type has no field `{}`",
+                                    fname
+                                ),
+                                span,
+                            );
+                        } else if unify(&val_ty, &expected_ty).is_err() {
+                            self.type_error(
+                                "E0396",
+                                &format!(
+                                    "record update: field `{}` expects {:?}, got {:?}",
+                                    fname, expected_ty, val_ty
+                                ),
+                                span,
+                            );
+                        }
+                    }
+                }
+                base_ty
             }
 
             // expr? — error propagation (v9.7.0)
@@ -6445,7 +6638,11 @@ impl Checker {
             // State (v22.3.0): require !PipelineState effect
             ("State", "get") => {
                 self.require_state_effect(span);
-                Some(Type::Option(Box::new(Type::String)))
+                Some(Type::Option(Box::new(Type::Unknown))) // v55.5.0: 型付き VMValue（String 限定は State.get_raw）
+            }
+            ("State", "get_or_default") => {
+                self.require_state_effect(span);
+                Some(Type::Unknown) // v55.5.0
             }
             ("State", "set") | ("State", "delete") => {
                 self.require_state_effect(span);
@@ -6956,7 +7153,14 @@ impl Checker {
             ("Stream", "take") => Some(Type::Stream(Box::new(Type::Unknown))),
             ("Stream", "to_list") => Some(Type::List(Box::new(Type::Unknown))),
             ("Stream", "join") => Some(Type::Stream(Box::new(Type::Unknown))), // v42.4.0
+            ("Stream", "join_inner") => Some(Type::Stream(Box::new(Type::Unknown))), // v55.4.0
+            ("Stream", "join_left")  => Some(Type::Stream(Box::new(Type::Unknown))), // v55.4.0
             ("Stream", _) => Some(Type::Unknown),
+
+            // CEP (v55.6.0): 複合イベント処理 VM primitive
+            ("CEP", "sequence")   => Some(Type::List(Box::new(Type::Unknown))), // v55.6.0
+            ("CEP", "skip_until") => Some(Type::List(Box::new(Type::Unknown))), // v55.6.0
+            ("CEP", _)            => Some(Type::Unknown),
 
             // Random.seed (v3.5.0)
             ("Random", "seed") => Some(Type::Unit),
@@ -7451,7 +7655,7 @@ impl Checker {
                 Box::new(self.resolve_type_expr_with_self(lhs, self_ty)),
                 Box::new(self.resolve_type_expr_with_self(rhs, self_ty)),
             ),
-            TypeExpr::RecordType(_, _) => Type::Unknown,
+            TypeExpr::RecordType(_, _row_var, _) => Type::Unknown,
             TypeExpr::Schema(uri, _) => self.resolve_schema(uri),
             TypeExpr::LinearArrow(a, b, _) => Type::LinearFn(
                 Box::new(self.resolve_type_expr_with_self(a, self_ty)),
@@ -7542,6 +7746,7 @@ impl Checker {
                 }
             }
             TypeExpr::ConstInt(_, _) => Type::Int,
+            TypeExpr::Hole(_) => Type::Unknown, // v61.7.0
         }
     }
 
@@ -7632,7 +7837,7 @@ impl Checker {
                 self.validate_type_expr_arity(lhs);
                 self.validate_type_expr_arity(rhs);
             }
-            TypeExpr::RecordType(fields, _) => {
+            TypeExpr::RecordType(fields, _row_var, _) => {
                 for (_, ty) in fields {
                     self.validate_type_expr_arity(ty);
                 }
@@ -7640,6 +7845,7 @@ impl Checker {
             TypeExpr::Schema(_, _) => {} // no arity to validate
             TypeExpr::LinearArrow(_, _, _) => {}
             TypeExpr::ConstInt(_, _) => {} // integer constant, no arity
+            TypeExpr::Hole(_) => {} // v61.7.0
         }
     }
 
@@ -7838,7 +8044,7 @@ fn eval_const_constraint(expr: &Expr, env: &HashMap<String, i64>) -> bool {
 }
 
 /// Returns true if the given type satisfies the given type constraint.
-/// Used for bounded generics call-site checking (E0325, E0337).
+/// Used for bounded generics call-site checking (E0422 for Interface, E0337 for HasField).
 fn type_implements_bound(ty: &Type, bound: &TypeConstraint, checker: &Checker) -> bool {
     match bound {
         TypeConstraint::Interface(name) => match name.as_str() {
@@ -8572,6 +8778,14 @@ abstract seq Pipeline {
             state: None,
             stream: None,
             runes: std::collections::HashMap::new(),
+            rbac: None,
+            secrets: None,
+            tls: None,
+            tenancy: None,
+            build: None,
+            parallel: None,
+            backpressure: None,
+            bench: None,
         };
         let resolver = Arc::new(Mutex::new(Resolver::new(Some(toml), Some(root))));
         (resolver, dir)
@@ -8669,6 +8883,14 @@ abstract seq Pipeline {
             state: None,
             stream: None,
             runes: std::collections::HashMap::new(),
+            rbac: None,
+            secrets: None,
+            tls: None,
+            tenancy: None,
+            build: None,
+            parallel: None,
+            backpressure: None,
+            bench: None,
         };
         let mut resolver = Resolver::new(Some(toml), Some(root));
         // Simulate a mid-load state: "cycle" is already in the loading set
@@ -10342,11 +10564,13 @@ fn collect_pattern_variants(
         Pattern::Variant(name, _, _) => {
             covered.push(name.clone());
         }
-        Pattern::Or(pats, _) => {
-            for p in pats {
+        Pattern::Or(arms, _) => {
+            for (p, _) in arms {
                 collect_pattern_variants(p, covered, has_catch_all);
             }
         }
+        // as-pattern: delegate to sub-pattern for variant coverage (v56.6.0)
+        Pattern::As(_, inner, _) => collect_pattern_variants(inner, covered, has_catch_all),
         _ => {}
     }
 }
@@ -10442,9 +10666,13 @@ fn collect_calls_from_expr(expr: &Expr, calls: &mut Vec<String>) {
             collect_calls_from_expr(base, calls);
             for (_, e) in fields { collect_calls_from_expr(e, calls); }
         }
+        Expr::RecordUpdate { base, fields, .. } => {
+            collect_calls_from_expr(base, calls);
+            for (_, e) in fields { collect_calls_from_expr(e, calls); }
+        }
         Expr::Closure(_, body, _) => collect_calls_from_expr(body, calls),
         Expr::EmitExpr(e, _) | Expr::Question(e, _) => collect_calls_from_expr(e, calls),
-        Expr::FString(parts, _) => {
+        Expr::FString(parts, _, _) => {
             for part in parts {
                 if let FStringPart::Expr(e) = part {
                     collect_calls_from_expr(e, calls);
@@ -10542,8 +10770,8 @@ fn type_expr_contains(te: &TypeExpr, name: &str) -> bool {
         }
         TypeExpr::Optional(inner, _) | TypeExpr::Fallible(inner, _) => type_expr_contains(inner, name),
         TypeExpr::TrfFn { input, output, .. } => type_expr_contains(input, name) || type_expr_contains(output, name),
-        TypeExpr::RecordType(fields, _) => fields.iter().any(|(_, t)| type_expr_contains(t, name)),
-        TypeExpr::Schema(_, _) | TypeExpr::ConstInt(_, _) => false,
+        TypeExpr::RecordType(fields, row_var, _) => fields.iter().any(|(_, t)| type_expr_contains(t, name)) || row_var.as_deref() == Some(name),
+        TypeExpr::Schema(_, _) | TypeExpr::ConstInt(_, _) | TypeExpr::Hole(_) => false, // v61.7.0
     }
 }
 

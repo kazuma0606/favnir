@@ -1,0 +1,143 @@
+# Playground — AI パイプライン サンプル
+
+Favnir の [Playground](https://favnir.dev/playground) では、ブラウザ上で AI パイプラインを試すことができます。
+Math Rune（`Rune.linalg` / `Rune.stats` / `Rune.autodiff`）は pure 関数のため WASM 上で実際に動作します。
+AI Rune（`Rune.embed` / `Rune.llm` / `Rune.pinecone`）はブラウザ用の mock 実装を使用します。
+
+---
+
+## WASM 動作モード
+
+Playground は `@favnir/wasm` を通じてブラウザで動作します。
+
+| Rune | Playground 動作 | 説明 |
+|---|---|---|
+| `Rune.linalg` | **実動作**（WASM） | 行列演算は pure 関数のため WASM で完全動作 |
+| `Rune.stats` | **実動作**（WASM） | 統計計算は pure 関数のため WASM で完全動作 |
+| `Rune.autodiff` | **実動作**（WASM） | 自動微分は pure 関数のため WASM で完全動作 |
+| `Rune.embed` | **mock**（ランダムベクトル） | 実 API 呼び出しなし |
+| `Rune.llm` | **mock**（デフォルト値） | 実 API 呼び出しなし |
+| `Rune.pinecone` | **mock**（インメモリ） | 実 API 呼び出しなし |
+
+---
+
+## プリセットサンプル
+
+### 1. Linear Algebra Demo
+
+`Rune.linalg` を使った行列演算と正規化のサンプル。
+
+```favnir
+public stage Normalize: List<Float> -> List<Float> = |vec| {
+    bind norm <- Rune.linalg.norm(vec)
+    Rune.linalg.scale(vec, 1.0 / norm)
+}
+
+public stage MatMul: (List<List<Float>>, List<Float>) -> List<Float> = |(matrix, vec)| {
+    Rune.linalg.matvec(matrix, vec)
+}
+```
+
+WASM 上でリアルタイムに計算結果を確認できます。
+
+---
+
+### 2. Statistics Pipeline
+
+`Rune.stats` を使ったデータ記述統計のサンプル。
+
+```favnir
+public stage Describe: List<Float> -> String = |data| {
+    bind stats <- Rune.stats.describe(data)
+    f"mean={stats.mean}, std={stats.std}, min={stats.min}, max={stats.max}"
+}
+
+public stage Normalize: List<Float> -> List<Float> = |data| {
+    bind stats <- Rune.stats.describe(data)
+    List.map(data, |x| { (x - stats.mean) / stats.std })
+}
+```
+
+`Rune.stats.describe` は pure 関数として WASM で完全動作します。
+
+---
+
+### 3. LLM Extraction（mock）
+
+`Rune.llm` の mock を使った構造化データ抽出のサンプル。
+
+```favnir
+schema Article {
+    title:   String,
+    summary: String,
+    tags:    List<String>
+}
+
+public stage ExtractArticle: String -> Article = |text| {
+    bind result <- Rune.llm.mock(text, schema: Article)
+    result
+}
+```
+
+`Rune.llm.mock(text, schema)` は schema のデフォルト値を返します（API 呼び出しなし）。
+本番コードでは `Rune.llm.extract(text, schema: Article, model: "claude-haiku-4-5-20251001")` を使用してください。
+
+---
+
+### 4. Semantic Search（mock）
+
+`Rune.embed.mock` と `Rune.pinecone` の mock を使ったセマンティック検索のサンプル。
+
+```favnir
+public stage SearchDocs: String -> List<String> = |query| {
+    bind query_vec <- Rune.embed.mock(query)
+    bind results   <- Rune.pinecone.mock_query(query_vec, top_k: 3)
+    List.map(results, |r| { r.id })
+}
+```
+
+`Rune.embed.mock(text)` はランダム正規化ベクトルを返します。
+`Rune.pinecone.mock_query` はインメモリの mock ストアを使用します。
+
+本番コードでは以下に置き換えてください:
+- `Rune.embed.mock` → `Rune.embed.openai(text, model: "text-embedding-3-small")`
+- `Rune.pinecone.mock_query` → `Rune.pinecone.query(vec, top_k: 3)`
+
+---
+
+### 5. Autodiff Demo（WASM）
+
+`Rune.autodiff` を使った自動微分・勾配計算のサンプル。WASM 上で実際に動作します。
+
+```favnir
+// 勾配降下法: f(x) = x^2 の最小値を探す（各ステップを計算）
+public stage GradientStep: Float -> Float = |x| {
+    bind grad <- Rune.autodiff.gradient(|v| { v * v }, x)
+    x - 0.1 * grad
+}
+
+// ヤコビアン: R^n -> R^m の微分行列
+public stage ComputeJacobian: List<Float> -> List<List<Float>> = |inputs| {
+    Rune.autodiff.jacobian(|xs| { List.map(xs, |x| { x * x }) }, inputs)
+}
+```
+
+`Rune.autodiff.gradient` / `Rune.autodiff.jacobian` は pure 関数のため WASM で完全動作します。
+
+---
+
+## コスト見積もり
+
+Playground では本番 API 使用時の推定コストをリアルタイム表示します。
+mock モードではコスト $0 と表示されますが、本番切り替え後の見積もりを確認できます。
+
+```
+[ Run ]  mode: mock           Cost estimate: $0.000 (mock)
+[ Run ]  mode: prod (preview) Cost estimate: $0.003 per run
+```
+
+`fav cost-estimate` CLI でも同等の見積もりが可能です:
+
+```sh
+fav cost-estimate src/pipeline.fav --provider aws --scale 1M-rows
+```

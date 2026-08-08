@@ -1,0 +1,8 @@
+[rune]
+name        = "weaviate"
+version     = "0.1.0"
+description = "Weaviate Rune for Favnir — vector database: upsert, query, schema management"
+entry       = "weaviate.fav"
+effects     = []
+
+[dependencies]

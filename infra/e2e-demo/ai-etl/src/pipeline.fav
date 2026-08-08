@@ -1,0 +1,65 @@
+// infra/e2e-demo/ai-etl/src/pipeline.fav
+// Favnir v69 — Intelligent ETL E2E Demo
+// CSV → Embed → VectorDB → Semantic Search
+
+// fav.toml の [ai] セクションでプロバイダーを切り替え可能
+// [ai]
+// llm_provider   = "anthropic"
+// embed_provider = "openai"
+// vector_db      = "pinecone"
+//
+// [ai.dev]
+// llm_provider   = "ollama-local"
+// embed_provider = "ollama-local"
+// vector_db      = "qdrant-local"
+
+schema Article {
+    id:   String,
+    title: String,
+    body:  String,
+    tags:  List<String>
+}
+
+schema IndexedArticle {
+    id:        String,
+    title:     String,
+    embedding: List<Float>,  // 1536 次元の埋め込みベクトル（text-embedding-3-small）
+    summary:   String
+}
+
+// Stage 1: CSV → Article レコード
+public stage LoadArticles: String -> List<Article> = |csv_path| {
+    Rune.csv.read(csv_path, schema: Article)
+}
+
+// Stage 2: 記事を要約 + 埋め込みベクトル生成
+public stage EmbedAndSummarize: Article -> IndexedArticle = |article| {
+    bind summary   <- Rune.llm.extract(article.body, schema: String, model: "claude-haiku-4-5-20251001")
+    bind embedding <- Rune.embed.openai(article.title + " " + summary, model: "text-embedding-3-small")
+    IndexedArticle {
+        id:        article.id,
+        title:     article.title,
+        embedding: embedding,
+        summary:   summary
+    }
+}
+
+// Stage 3: ベクトル DB に保存
+public stage StoreToVectorDB: List<IndexedArticle> -> Unit = |articles| {
+    bind pairs <- List.map(articles, |a| { (a.id, a.embedding) })
+    Rune.pinecone.upsert(pairs, namespace: "articles", index: "demo-index")
+}
+
+// Stage 4: セマンティック検索（スタンドアロン — fav run --stage SemanticSearch で単体実行）
+public stage SemanticSearch: String -> List<IndexedArticle> = |query| {
+    bind query_vec <- Rune.embed.openai(query, model: "text-embedding-3-small")
+    bind results   <- Rune.pinecone.query(query_vec, top_k: 5)
+    results
+}
+
+// インデックスパイプライン（LoadArticles → EmbedAndSummarize(par) → StoreToVectorDB）
+pipeline IndexPipeline {
+    step "load"   = seq LoadArticles
+    step "embed"  = par [EmbedAndSummarize, EmbedAndSummarize, EmbedAndSummarize, EmbedAndSummarize] after "load"
+    step "store"  = seq StoreToVectorDB after "embed"
+}

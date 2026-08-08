@@ -213,3 +213,14 @@ resource "aws_vpc_endpoint" "ecr_api" {
   private_dns_enabled = true
   tags                = { Name = "favnir-ecr-api-endpoint" }
 }
+
+# Secrets Manager (ECS タスクがシークレット取得に必要)
+resource "aws_vpc_endpoint" "secretsmanager" {
+  vpc_id              = aws_vpc.main.id
+  service_name        = "com.amazonaws.${var.aws_region}.secretsmanager"
+  vpc_endpoint_type   = "Interface"
+  subnet_ids          = [aws_subnet.private.id]
+  security_group_ids  = [aws_security_group.endpoints.id]
+  private_dns_enabled = true
+  tags                = { Name = "favnir-secretsmanager-endpoint" }
+}

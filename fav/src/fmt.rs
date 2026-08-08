@@ -7,9 +7,145 @@ use crate::ast::*;
 
 // ── public API ────────────────────────────────────────────────────────────────
 
+/// v60.7.0: フォーマット設定（.favfmt ファイルから読み込む）
+pub struct FmtConfig {
+    /// 行長制限（将来バージョンで折り返しに使用予定、現在は保持のみ）
+    pub max_line_length: usize,
+    /// インデント幅（将来バージョンで Formatter に注入予定、現在は保持のみ）
+    pub indent_width: usize,
+    /// `//` コメント行を保持するか（v60.7.0 で有効）
+    pub preserve_comments: bool,
+    /// 末尾カンマポリシー（将来バージョンで使用予定、現在は保持のみ）
+    pub trailing_comma: String,
+}
+
+impl Default for FmtConfig {
+    fn default() -> Self {
+        FmtConfig {
+            max_line_length: 100,
+            indent_width: 4,
+            preserve_comments: true,
+            trailing_comma: "always".to_string(),
+        }
+    }
+}
+
+impl FmtConfig {
+    /// `.favfmt` TOML 文字列をパースして FmtConfig を生成する
+    pub fn from_toml_str(s: &str) -> Self {
+        let mut cfg = FmtConfig::default();
+        for line in s.lines() {
+            let line = line.trim();
+            if line.starts_with('#') || line.is_empty() {
+                continue;
+            }
+            if let Some((k, v)) = line.split_once('=') {
+                match k.trim() {
+                    "max_line_length" => {
+                        if let Ok(n) = v.trim().parse::<usize>() {
+                            cfg.max_line_length = n;
+                        }
+                    }
+                    "indent_width" => {
+                        if let Ok(n) = v.trim().parse::<usize>() {
+                            cfg.indent_width = n;
+                        }
+                    }
+                    "preserve_comments" => {
+                        cfg.preserve_comments = v.trim() == "true";
+                    }
+                    "trailing_comma" => {
+                        cfg.trailing_comma =
+                            v.trim().trim_matches('"').to_string();
+                    }
+                    _ => {}
+                }
+            }
+        }
+        cfg
+    }
+}
+
 pub fn format_program(prog: &Program) -> String {
     let mut f = Formatter::new();
     f.program(prog)
+}
+
+/// v60.7.0: コメント保持・設定適用付きフォーマット
+pub fn format_with_config(prog: &Program, source: &str, config: &FmtConfig) -> String {
+    let formatted = format_program(prog);
+    if config.preserve_comments {
+        reinsert_comments(source, &formatted)
+    } else {
+        formatted
+    }
+}
+
+/// オリジナルソース中の `//` コメント行をフォーマット済みソースに再挿入する
+fn reinsert_comments(original: &str, formatted: &str) -> String {
+    // フォーマッタが式を複数行に展開することがあるため、行全体の完全一致ではなく
+    // 「ブレース前のプレフィックス」を anchor として前方一致マッチを行う。
+    fn make_anchor(s: &str) -> String {
+        let t = s.trim();
+        // `{` より前の部分をアンカーとして使用する（フォーマッタが展開した場合でも先頭行が一致する）
+        let pos = t.find('{').unwrap_or(t.len());
+        let prefix = t[..pos].trim_end();
+        if prefix.len() >= 4 {
+            prefix.to_string()
+        } else {
+            // `}` のような短い行はアンカーとして使用しない（誤マッチを防ぐ）
+            String::new()
+        }
+    }
+
+    // (anchor, コメント行リスト) の順序付きリストを構築
+    let mut comment_blocks: Vec<(String, Vec<String>)> = Vec::new();
+    let mut pending: Vec<String> = Vec::new();
+
+    for line in original.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with("//") {
+            pending.push(line.to_string());
+        } else if !pending.is_empty() {
+            let anchor = make_anchor(trimmed);
+            if !anchor.is_empty() {
+                comment_blocks.push((anchor, pending.drain(..).collect()));
+            } else {
+                // anchor が短すぎる（`}` 等）→ trailing として末尾に追記
+                pending.clear();
+            }
+        }
+    }
+    // ファイル末尾のコメント（次の非コメント行なし）
+    let trailing: Vec<String> = pending;
+
+    // フォーマット済みソースにコメントを挿入
+    let mut result: Vec<String> = Vec::new();
+    let mut used = vec![false; comment_blocks.len()];
+
+    for line in formatted.lines() {
+        let key = make_anchor(line.trim());
+        // 未使用のコメントブロックのうち、anchor が key のプレフィックスと一致する最初のものを挿入
+        for (i, (anchor, comments)) in comment_blocks.iter().enumerate() {
+            if !used[i] && !anchor.is_empty() && key.starts_with(anchor.as_str()) {
+                for c in comments {
+                    result.push(c.clone());
+                }
+                used[i] = true;
+                break;
+            }
+        }
+        result.push(line.to_string());
+    }
+    for c in &trailing {
+        result.push(c.clone());
+    }
+
+    let mut out = result.join("\n");
+    if !out.ends_with('\n') {
+        out.push('\n');
+    }
+    out
 }
 
 // ── Formatter ─────────────────────────────────────────────────────────────────
@@ -67,14 +203,17 @@ impl Formatter {
                 path,
                 alias,
                 is_public,
+                is_wildcard,
                 kind,
                 ..
             } => {
                 let public = if *is_public { "public " } else { "" };
-                let alias = alias
-                    .as_ref()
-                    .map(|alias| format!(" as {}", alias))
-                    .unwrap_or_default();
+                // v56.7.0: wildcard imports format as `as alias.*`
+                let alias = match alias {
+                    Some(a) if *is_wildcard => format!(" as {}.*", a),
+                    Some(a) => format!(" as {}", a),
+                    None => String::new(),
+                };
                 // v48.2.0: kind に応じて出力形式を切り替える（ラウンドトリップ保証）
                 match kind {
                     crate::ast::ImportKind::Package => format!("{public}import {path}{alias}"),
@@ -595,20 +734,38 @@ impl Formatter {
                 format!("{} {{ {} }}", name, fs.join("  "))
             }
 
-            Expr::FString(parts, _) => {
-                let mut out = String::from("$\"");
-                for part in parts {
-                    match part {
-                        FStringPart::Lit(s) => out.push_str(&fmt_fstring_lit(s)),
-                        FStringPart::Expr(expr) => {
-                            out.push('{');
-                            out.push_str(&self.expr(expr));
-                            out.push('}');
+            Expr::FString(parts, multiline, _) => {
+                if *multiline {
+                    // f"""...""" 形式：インデントを保持。`"""` のみエスケープ
+                    let mut out = String::from("f\"\"\"");
+                    for part in parts {
+                        match part {
+                            FStringPart::Lit(s) => out.push_str(&fmt_fstring_triple_lit(s)),
+                            FStringPart::Expr(expr) => {
+                                out.push('{');
+                                out.push_str(&self.expr(expr));
+                                out.push('}');
+                            }
                         }
                     }
+                    out.push_str("\"\"\"");
+                    out
+                } else {
+                    // f"..." 形式（正規化）
+                    let mut out = String::from("f\"");
+                    for part in parts {
+                        match part {
+                            FStringPart::Lit(s) => out.push_str(&fmt_fstring_lit(s)),
+                            FStringPart::Expr(expr) => {
+                                out.push('{');
+                                out.push_str(&self.expr(expr));
+                                out.push('}');
+                            }
+                        }
+                    }
+                    out.push('"');
+                    out
                 }
-                out.push('"');
-                out
             }
 
             Expr::RecordSpread(base, updates, _) => {
@@ -620,6 +777,18 @@ impl Formatter {
                     format!("{{ ...{} }}", self.expr(base))
                 } else {
                     format!("{{ ...{}, {} }}", self.expr(base), fields.join(", "))
+                }
+            }
+
+            Expr::RecordUpdate { base, fields, .. } => {
+                let field_strs: Vec<String> = fields
+                    .iter()
+                    .map(|(k, v)| format!("{}: {}", k, self.expr(v)))
+                    .collect();
+                if field_strs.is_empty() {
+                    format!("{{ {} | }}", self.expr(base))
+                } else {
+                    format!("{{ {} | {} }}", self.expr(base), field_strs.join(", "))
                 }
             }
 
@@ -696,8 +865,15 @@ impl Formatter {
                     .collect();
                 format!("{{ {} }}", fs.join(", "))
             }
-            Pattern::Or(pats, _) => {
-                pats.iter().map(|p| self.pattern(p)).collect::<Vec<_>>().join(" | ")
+            Pattern::Or(arms, _) => {
+                arms.iter().map(|(p, guard)| {
+                    let s = self.pattern(p);
+                    if let Some(g) = guard {
+                        format!("({} if {})", s, self.expr(g))
+                    } else {
+                        s
+                    }
+                }).collect::<Vec<_>>().join(" | ")
             }
             Pattern::List { head, tail, .. } => {
                 let mut parts: Vec<String> = head.iter().map(|p| self.pattern(p)).collect();
@@ -706,6 +882,8 @@ impl Formatter {
                 }
                 format!("[{}]", parts.join(", "))
             }
+            // as-pattern (v56.6.0)
+            Pattern::As(name, inner, _) => format!("{} @ {}", name, self.pattern(inner)),
         }
     }
 
@@ -740,16 +918,20 @@ impl Formatter {
             TypeExpr::Intersection(lhs, rhs, _) => {
                 format!("{} & {}", self.type_expr(lhs), self.type_expr(rhs))
             }
-            TypeExpr::RecordType(fields, _) => {
+            TypeExpr::RecordType(fields, row_var, _) => {
                 let parts: Vec<String> = fields
                     .iter()
                     .map(|(n, t)| format!("{}: {}", n, self.type_expr(t)))
                     .collect();
-                format!("{{ {} }}", parts.join(", "))
+                match row_var {
+                    Some(r) => format!("{{ {} | {} }}", parts.join(", "), r),
+                    None => format!("{{ {} }}", parts.join(", ")),
+                }
             }
             TypeExpr::Schema(uri, _) => format!("schema \"{}\"", uri),
             TypeExpr::LinearArrow(a, b, _) => format!("{} -o {}", self.type_expr(a), self.type_expr(b)),
             TypeExpr::ConstInt(n, _) => format!("{}", n),
+            TypeExpr::Hole(_) => "_".to_string(), // v61.7.0
         }
     }
 }
@@ -781,9 +963,12 @@ fn fmt_type_expr_simple(ty: &TypeExpr) -> String {
         TypeExpr::Intersection(lhs, rhs, _) => {
             format!("{} & {}", fmt_type_expr_simple(lhs), fmt_type_expr_simple(rhs))
         }
-        TypeExpr::RecordType(fields, _) => {
+        TypeExpr::RecordType(fields, row_var, _) => {
             let parts: Vec<String> = fields.iter().map(|(n, t)| format!("{}: {}", n, fmt_type_expr_simple(t))).collect();
-            format!("{{ {} }}", parts.join(", "))
+            match row_var {
+                Some(r) => format!("{{ {} | {} }}", parts.join(", "), r),
+                None => format!("{{ {} }}", parts.join(", ")),
+            }
         }
         TypeExpr::TrfFn { input, output, .. } => {
             format!("{} -> {}", fmt_type_expr_simple(input), fmt_type_expr_simple(output))
@@ -791,6 +976,7 @@ fn fmt_type_expr_simple(ty: &TypeExpr) -> String {
         TypeExpr::Schema(uri, _) => format!("schema \"{}\"", uri),
         TypeExpr::LinearArrow(a, b, _) => format!("{} -o {}", fmt_type_expr_simple(a), fmt_type_expr_simple(b)),
         TypeExpr::ConstInt(n, _) => format!("{}", n),
+        TypeExpr::Hole(_) => "_".to_string(), // v61.7.0
     }
 }
 
@@ -833,6 +1019,13 @@ fn fmt_fstring_lit(s: &str) -> String {
         }
     }
     out
+}
+
+/// f"""...""" 内の Lit エスケープ（v61.5.0）
+/// 改行はそのまま保持し、`"""` のみ `\"\"\"` にエスケープしてラウンドトリップを保証する。
+fn fmt_fstring_triple_lit(s: &str) -> String {
+    // `"""` を `\"\"\"` に置換してトリプルクォート終端の誤認識を防ぐ
+    s.replace("\"\"\"", "\\\"\\\"\\\"")
 }
 
 fn fmt_slot_impl(imp: &SlotImpl) -> &str {

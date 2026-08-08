@@ -148,12 +148,15 @@ pub enum IRPattern {
     Variant(String, Option<Box<IRPattern>>),
     Record(Vec<(String, IRPattern)>),
     /// `"a" | "b"` — or-pattern (v17.2.0)
-    Or(Vec<IRPattern>),
+    /// v61.3.0: per-arm guard 付き OR パターン。guard = None は従来通り。
+    Or(Vec<(IRPattern, Option<IRExpr>)>),
     /// `[head, ..tail]` — list-pattern (v17.2.0)
     List {
         head: Vec<IRPattern>,
         tail: Option<u16>,
     },
+    /// `name @ sub_pattern` — as-pattern (v56.6.0)
+    As(u16, Box<IRPattern>),
 }
 
 // ── dep collection ────────────────────────────────────────────────────────────

@@ -4,7 +4,7 @@ resource "aws_rds_cluster" "demo" {
   cluster_identifier      = "favnir-lambda-demo"
   engine                  = "aurora-postgresql"
   engine_mode             = "provisioned"
-  engine_version          = "16.6"
+  engine_version          = "16.13"
   database_name           = "favnirdb"
   master_username         = var.db_user
   master_password         = var.db_password

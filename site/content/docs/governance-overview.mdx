@@ -1,0 +1,52 @@
+---
+title: Governance & Deployment — Overview
+---
+
+# Governance & Deployment Overview
+
+This guide provides an overview of Favnir's enterprise Governance & Deployment capabilities, covering all features introduced in v58.1–v58.8.
+
+## Feature Summary
+
+| Feature | Command | Guide |
+|---|---|---|
+| Blue/Green Deployment | `fav deploy --strategy blue-green` | [Deployment Guide](/docs/enterprise/deployment) |
+| Canary Deployment | `fav deploy --strategy canary` | [Deployment Guide](/docs/enterprise/deployment) |
+| High Availability (HA) | `fav run --ha --replica <n>` | [Deployment Guide](/docs/enterprise/deployment) |
+| Schema Migration | `fav schema migrate` | [Governance Guide](/docs/enterprise/governance) |
+| Data Catalog | `fav catalog push` / `fav catalog search` | [Governance Guide](/docs/enterprise/governance) |
+| Policy-as-Code | `fav policy check` | [Governance Guide](/docs/enterprise/governance) |
+| Multi-Environment Config | `fav run --env <name>` | [Multi-Env Cookbook](/cookbook/multi-env-pipeline) |
+
+## Governance & Deployment at a Glance
+
+Favnir's Governance & Deployment suite gives enterprise teams full control over how pipelines are deployed, monitored, and governed:
+
+- **Blue/Green & Canary**: Deploy new pipeline versions without downtime. Route traffic gradually and roll back instantly.
+- **HA**: Run multiple replicas with automatic failover. Health checks via `/healthz` ensure reliability.
+- **Schema Migration**: Version-controlled schema changes applied safely across dev, staging, and prod.
+- **Data Catalog**: Discover and register pipeline outputs across your organization.
+- **Policy-as-Code**: Define governance rules as Favnir code. Violations surface as compiler errors (`E0426`).
+- **Multi-Environment**: A single pipeline runs across environments via `--env` and `fav.toml [env]` sections.
+
+## Quick Start
+
+```bash
+# Deploy with Blue/Green strategy
+fav deploy pipeline.fav --strategy blue-green --env prod
+
+# Run with High Availability
+fav run pipeline.fav --ha --replica 3
+
+# Check policy compliance
+fav policy check pipeline.fav --policy-dir ./policies/
+
+# Publish outputs to Data Catalog
+fav catalog push pipeline.fav --env prod
+```
+
+## Next Steps
+
+- Read the [Deployment Guide](/docs/enterprise/deployment) for Blue/Green, Canary, and HA setup.
+- Read the [Governance Guide](/docs/enterprise/governance) for Schema Migration, Data Catalog, and Policy-as-Code.
+- Follow the [Multi-Environment Pipeline Cookbook](/cookbook/multi-env-pipeline) to configure dev / staging / prod environments.

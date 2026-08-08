@@ -2,3 +2,4 @@
 pub mod collector;
 pub mod flamegraph;
 pub mod report;
+pub mod interactive;

@@ -1,22 +1,31 @@
-import "./stages/validate" as validate
 import kafka
+import "./stages/validate" as validate
 
-pipeline OrderIngestion {
-  stage Consume: Stream<RawOrder> -> Stream<Order> = |_raw| {
-    bind order <- kafka.consume("orders")
-    bind valid <- validate.run(order)
-    Result.ok(valid)
-  }
+type RawOrder = { id: Int, amount: Float, status: String }
+type Order    = { id: Int, amount: Float, status: String }
+
+// Kafka から注文を受信
+stage Consume: Unit -> Result<RawOrder, String> = |_| {
+    kafka.consume("orders")
 }
+
+// バリデーション
+stage Validate: RawOrder -> Result<Order, String> = |raw| {
+    validate.run(raw)
+}
+
+seq OrderIngestion = Consume |> Validate
 
 #[test]
 fn test_validate_ok() {
-  let good = { id: 1, amount: 100.0, status: "pending" }
-  assert_eq(validate.run(good), Result.ok({ id: 1, amount: 100.0, status: "pending" }))
+    bind order <- validate.run({ id: 1, amount: 100.0, status: "pending" })
+    assert_eq(order.status, "pending")
 }
 
 #[test]
 fn test_validate_err_status() {
-  let bad = { id: 2, amount: 50.0, status: "shipped" }
-  assert_eq(validate.run(bad), Result.err("invalid status"))
+    match validate.run({ id: 2, amount: 50.0, status: "shipped" }) {
+        Ok(_)    -> assert_eq(true, false)
+        Err(msg) -> assert_eq(msg, "invalid status")
+    }
 }

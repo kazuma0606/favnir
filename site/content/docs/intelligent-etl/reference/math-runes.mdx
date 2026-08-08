@@ -1,0 +1,234 @@
+# Math Rune API リファレンス
+
+## Rune.linalg
+
+線形代数演算を提供します。すべて pure 関数です。
+
+### ベクトル演算
+
+```favnir
+Rune.linalg.dot(a: List<Float>, b: List<Float>) -> Float
+```
+内積を返します。
+
+```favnir
+Rune.linalg.norm(v: List<Float>) -> Float
+```
+L2 ノルム（ユークリッドノルム）を返します。
+
+```favnir
+Rune.linalg.normalize(v: List<Float>) -> List<Float>
+```
+L2 正規化します。コサイン類似度の前処理に使います。
+
+```favnir
+Rune.linalg.scale(v: List<Float>, s: Float) -> List<Float>
+```
+スカラー倍を返します。
+
+```favnir
+Rune.linalg.add(a: List<Float>, b: List<Float>) -> List<Float>
+Rune.linalg.sub(a: List<Float>, b: List<Float>) -> List<Float>
+```
+要素ごとの加算・減算。
+
+```favnir
+Rune.linalg.cosine_similarity(a: List<Float>, b: List<Float>) -> Float
+```
+コサイン類似度（-1.0〜1.0）を返します。
+
+### 行列演算
+
+```favnir
+Rune.linalg.matmul(A: List<List<Float>>, B: List<List<Float>>) -> List<List<Float>>
+```
+行列積。
+
+```favnir
+Rune.linalg.transpose(A: List<List<Float>>) -> List<List<Float>>
+```
+転置行列。
+
+```favnir
+Rune.linalg.svd(A: List<List<Float>>) -> (List<List<Float>>, List<Float>, List<List<Float>>)
+```
+特異値分解。戻り値は `(U, S, V)`。
+
+```favnir
+Rune.linalg.pca(data: List<List<Float>>, k: Int) -> List<List<Float>>
+```
+主成分分析で次元削減。埋め込みベクトルの圧縮に使います。
+
+---
+
+## Rune.stats
+
+統計解析関数を提供します。すべて pure 関数です。
+
+```favnir
+Rune.stats.describe(data: List<Float>) -> StatsResult
+```
+
+`StatsResult` スキーマ:
+
+```favnir
+schema StatsResult {
+    count:  Int,
+    mean:   Float,
+    std:    Float,
+    min:    Float,
+    max:    Float,
+    median: Float,
+    p25:    Float,
+    p75:    Float,
+    p95:    Float,
+    p99:    Float
+}
+```
+
+```favnir
+Rune.stats.correlation(a: List<Float>, b: List<Float>) -> Float
+```
+ピアソン相関係数（-1.0〜1.0）。
+
+```favnir
+Rune.stats.histogram(data: List<Float>, bins: Int) -> List<(Float, Float, Int)>
+```
+ヒストグラム。各要素は `(bin_start, bin_end, count)`。
+
+```favnir
+Rune.stats.zscore(data: List<Float>) -> List<Float>
+```
+Z スコア正規化（平均 0、標準偏差 1）。
+
+```favnir
+Rune.stats.outliers(data: List<Float>, threshold: Float) -> List<Int>
+```
+外れ値のインデックスを返します（|z-score| > threshold）。
+
+---
+
+## Rune.autodiff
+
+自動微分（Reverse-mode AD）を提供します。
+
+```favnir
+Rune.autodiff.grad(f: (List<Float>) -> Float, x: List<Float>) -> List<Float>
+```
+スカラー関数 `f` の `x` における勾配を返します。
+
+```favnir
+Rune.autodiff.jacobian(f: (List<Float>) -> List<Float>, x: List<Float>) -> List<List<Float>>
+```
+ベクトル関数のヤコビアン行列。
+
+```favnir
+Rune.autodiff.hessian(f: (List<Float>) -> Float, x: List<Float>) -> List<List<Float>>
+```
+スカラー関数のヘッセ行列。
+
+---
+
+## Rune.optim
+
+最適化アルゴリズムを提供します。
+
+```favnir
+Rune.optim.sgd(params: List<Float>, grad: List<Float>, lr: Float) -> List<Float>
+```
+SGD の 1 ステップ。
+
+```favnir
+Rune.optim.adam(
+    params: List<Float>,
+    grad:   List<Float>,
+    m:      List<Float>,
+    v:      List<Float>,
+    lr:     Float,
+    step:   Int
+) -> (List<Float>, List<Float>, List<Float>)
+```
+Adam オプティマイザの 1 ステップ。戻り値は `(new_params, new_m, new_v)`。
+
+---
+
+## Rune.numeric
+
+数値解析関数を提供します。
+
+```favnir
+Rune.numeric.solve(A: List<List<Float>>, b: List<Float>) -> List<Float>
+```
+連立方程式 Ax = b を解きます。
+
+```favnir
+Rune.numeric.integrate(f: (Float) -> Float, a: Float, b: Float, eps: Float) -> Float
+```
+数値積分（適応シンプソン法）。
+
+```favnir
+Rune.numeric.root(f: (Float) -> Float, a: Float, b: Float, eps: Float) -> Float
+```
+方程式の根（二分法）。
+
+---
+
+## Rune.timeseries
+
+時系列解析関数を提供します。すべて pure 関数です。
+
+```favnir
+Rune.timeseries.rolling_mean(data: List<Float>, window: Int) -> List<Float>
+```
+移動平均を返します。
+
+```favnir
+Rune.timeseries.rolling_std(data: List<Float>, window: Int) -> List<Float>
+```
+移動標準偏差を返します。
+
+```favnir
+Rune.timeseries.diff(data: List<Float>, lag: Int) -> List<Float>
+```
+差分系列（lag 階差）を返します。
+
+```favnir
+Rune.timeseries.arima(data: List<Float>, p: Int, d: Int, q: Int) -> List<Float>
+```
+ARIMA モデルによる予測値を返します。
+
+```favnir
+Rune.timeseries.seasonal_decompose(data: List<Float>, period: Int) -> (List<Float>, List<Float>, List<Float>)
+```
+季節分解。戻り値は `(trend, seasonal, residual)`。
+
+---
+
+## Rune.ml
+
+古典 ML アルゴリズムを提供します。すべて pure 関数です。
+
+```favnir
+Rune.ml.linear_regression(X: List<List<Float>>, y: List<Float>) -> (List<Float>, Float)
+```
+線形回帰。戻り値は `(coefficients, intercept)`。
+
+```favnir
+Rune.ml.predict(model: (List<Float>, Float), x: List<Float>) -> Float
+```
+線形モデルで予測値を返します。
+
+```favnir
+Rune.ml.kmeans(data: List<List<Float>>, k: Int, max_iter: Int) -> (List<Int>, List<List<Float>>)
+```
+K-means クラスタリング。戻り値は `(labels, centroids)`。
+
+```favnir
+Rune.ml.normalize(data: List<List<Float>>) -> List<List<Float>>
+```
+行ごとに L2 正規化します。
+
+```favnir
+Rune.ml.train_test_split(data: List<List<Float>>, ratio: Float, seed: Int) -> (List<List<Float>>, List<List<Float>>)
+```
+データを train / test に分割します。`ratio` は train の割合（例: 0.8）。

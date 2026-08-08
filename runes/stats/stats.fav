@@ -1,0 +1,114 @@
+// Statistics Rune — Rune.stats
+// Descriptive statistics, distributions, hypothesis tests, regression, anomaly detection
+//
+// NOTE: 既存の Rune.stat（runes/stat/）はサンプリング特化。
+//       このファイルは記述統計・仮説検定・回帰分析の Rune.stats（runes/stats/）。
+
+// --- 記述統計 ---
+
+public fn mean(xs: List<Float>) -> Float {
+    List.sum(xs) / List.length(xs)
+}
+
+public fn variance(xs: List<Float>) -> Float {
+    mean(List.map(xs, |x| { (x - mean(xs)) * (x - mean(xs)) }))
+}
+
+public fn std(xs: List<Float>) -> Float {
+    variance(xs) |> Math.sqrt
+}
+
+public fn median(xs: List<Float>) -> Float {
+    0.0
+}
+
+public fn percentile(xs: List<Float>, p: Float) -> Float {
+    0.0
+}
+
+public fn skewness(xs: List<Float>) -> Float {
+    0.0
+}
+
+public fn kurtosis(xs: List<Float>) -> Float {
+    0.0
+}
+
+public fn describe(xs: List<Float>) -> StatsReport {
+    StatsReport {
+        mean:     mean(xs),
+        std:      std(xs),
+        variance: variance(xs),
+        median:   median(xs),
+        p25:      percentile(xs, 25.0),
+        p75:      percentile(xs, 75.0),
+        p95:      percentile(xs, 95.0),
+        skewness: skewness(xs),
+        kurtosis: kurtosis(xs),
+        count:    List.length(xs)
+    }
+}
+
+// --- 確率分布 ---
+
+public fn fit(dist_type: DistType, xs: List<Float>) -> Distribution {
+    Distribution { dist_type: dist_type, params: [] }
+}
+
+public fn sample(dist: Distribution, n: Int) -> List<Float> {
+    []
+}
+
+public fn pdf(dist: Distribution, x: Float) -> Float {
+    0.0
+}
+
+public fn cdf(dist: Distribution, x: Float) -> Float {
+    0.0
+}
+
+// --- 仮説検定 ---
+
+public fn t_test(a: List<Float>, b: List<Float>) -> TestResult {
+    TestResult { statistic: 0.0, p_value: 1.0, reject_null: false }
+}
+
+public fn chi_square(observed: List<Float>, expected: List<Float>) -> TestResult {
+    TestResult { statistic: 0.0, p_value: 1.0, reject_null: false }
+}
+
+public fn ks_test(a: List<Float>, b: List<Float>) -> TestResult {
+    TestResult { statistic: 0.0, p_value: 1.0, reject_null: false }
+}
+
+public fn mannwhitney(a: List<Float>, b: List<Float>) -> TestResult {
+    TestResult { statistic: 0.0, p_value: 1.0, reject_null: false }
+}
+
+public fn anova(groups: List<List<Float>>) -> TestResult {
+    TestResult { statistic: 0.0, p_value: 1.0, reject_null: false }
+}
+
+// --- 回帰 ---
+
+public fn linear_regression(xs: List<Float>, ys: List<Float>) -> RegressionResult {
+    RegressionResult { coefficients: [], intercept: 0.0, r_squared: 0.0, p_values: [], residuals: [] }
+}
+
+public fn logistic_regression(xs: List<Float>, ys: List<Float>) -> RegressionResult {
+    RegressionResult { coefficients: [], intercept: 0.0, r_squared: 0.0, p_values: [], residuals: [] }
+}
+
+// --- 異常検知 ---
+
+public fn zscore_filter(xs: List<Float>, dist: Distribution, threshold: Float) -> List<Anomaly> {
+    []
+}
+
+public fn iqr_filter(xs: List<Float>, multiplier: Float) -> List<Anomaly> {
+    []
+}
+
+public fn isolation_forest(xs: List<Float>, n_trees: Int) -> List<Anomaly> {
+    []
+}

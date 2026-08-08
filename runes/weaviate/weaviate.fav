@@ -1,0 +1,21 @@
+// Weaviate Rune — ベクトルデータベース
+// upsert, query, schema management
+//
+// NOTE: List<Float> は Vec<Float>[N] の将来フェーズ登録までのプレースホルダー。
+//       VectorDBInterface — VectorDB 統一インターフェース（将来フェーズで pgvector と統合予定）
+//       include_str! テストのみ（型チェックエラーは無視する）。
+
+// ベクトルオブジェクトを追加・更新する
+public fn upsert(class_name: String, id: String, vector: List<Float>, properties: String) -> String {
+    ""
+}
+
+// 近傍ベクトルを検索する
+public fn query(class_name: String, vector: List<Float>, top_k: Int) -> List<String> {
+    []
+}
+
+// スキーマ（クラス定義）を作成する
+public fn schema_create(class_name: String, description: String) -> String {
+    ""
+}

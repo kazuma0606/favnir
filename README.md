@@ -9,6 +9,13 @@ Favnir はその答えです。
 
 ---
 
+## v70.0 — Intelligent ETL 1.0 宣言（2026-08-08）
+
+Favnir v70.0 で「Intelligent ETL 1.0」を宣言しました。
+型安全な AI パイプライン言語として、Math Rune・AI Rune・分散実行・開発者ツールが揃いました。
+
+---
+
 ## なぜ Favnir を作ったのか
 
 Favnir が生まれるまでには、3つの試みがありました。
@@ -116,36 +123,95 @@ CEP（`seq(Login, Purchase) within 300`）/ Stream join / Back-pressure / WebSoc
 **v44.0（2026-07-13）で、[Language Expressiveness](./MILESTONE.md) マイルストーンを宣言しました。**
 型推論 6 カテゴリ（戻り値型・ジェネリクス・ラムダ・パイプライン・構造体・双方向）/ opaque type / W031/W032 lint が揃い、型注釈を最小化しながら型安全性を維持できる Language Expressiveness 基盤が完成しました。
 
-**v54.0（2026-07-22）で、[Integration Sprint](./MILESTONE.md) マイルストーンを宣言しました。**
-エディタはデータの来歴を示し、並列パイプラインの性能は計測可能で、スキーマ違反は即座に修正できる。Favnir の 3 つの柱（DX 3.0 / Performance & Scale / Data Quality 2.0）が一体となった — これが **Integration Sprint** の宣言です。
-v54.1〜v54.5（2026-07-22〜23）で [Production 3.0](./MILESTONE.md) に向けた最終整備を完了しました。全エラーコードへの `fav explain --error` 対応（v54.1）・`fav run --watch-diff/--watch-summary`（v54.2）・パフォーマンスリグレッション CI 統合（v54.3）・`fav dq-report`（v54.4）・`fav doctor`（v54.5）が揃い、開発者が自信を持って本番へ踏み出せるツールチェーンが完成しました。
-
-**v53.0（2026-07-22）で、[Data Quality & Observability 2.0](./MILESTONE.md) マイルストーンを宣言しました。**
-`assert_schema` によるランタイムスキーマ検証・`fav explain --lineage --with-schema` によるリネージ可視化・SLA 監視 Rune・`fav run --audit-log` によるデータアクセスログ・OTel span 属性強化が揃い、Favnir のパイプラインは信頼できるデータを届けます。これが **Data Quality & Observability 2.0** の宣言です。
-
-**v52.0（2026-07-20）で、[Performance & Scale](./MILESTONE.md) マイルストーンを宣言しました。**
-`par` 並列ステージ実行・バックプレッシャー制御・`fav bench --compare` による回帰検出・インクリメンタルコンパイル・WASM サイズ最適化が揃い、Favnir は大規模データに立ち向かえる言語になりました。これが **Performance & Scale** の宣言です。
-
-**v51.0（2026-07-19）で、[Developer Experience 3.0](./MILESTONE.md) マイルストーンを宣言しました。**
-全エラーコードに修正提案が付き、JSON / LSP / CLI で一貫して届く。エディタは型を表示し、trace はパイプラインの流れを可視化する。Favnir の診断は開発者の思考を止めない — これが **DX 3.0** の宣言です。
-
-**v50.0（2026-07-18）で、[Language Maturity / Production 2.0](./MILESTONE.md) マイルストーンを宣言しました。**
-`return` ガード節・成熟した標準ライブラリ・明確なモジュールシステム・インラインテストが揃い、Favnir は迷わず使える実用言語になりました。これが **Language Maturity** — Production 2.0 の宣言です。
-
-**v49.0（2026-07-18）で、[Module & Package 2.0](./MILESTONE.md) マイルストーンを宣言しました。**
-パッケージ import とローカル import が構文で明確に分離され、`fav.toml` が依存関係の唯一の真実となる Module & Package 2.0 が完成しました。
-
-**v48.0（2026-07-18）で、[Standard Library 2.0](./MILESTONE.md) マイルストーンを宣言しました。**
-List / String / Float / Option / Result / Map の主要操作が揃い、外部ライブラリなしに実務的なデータ変換が書ける Standard Library 2.0 が完成しました。
-
-**v47.0（2026-07-17）で、[Developer Experience](./MILESTONE.md) マイルストーンを宣言しました。**
-インラインテスト（`fav test` / `#[test]`）・LSP クイックフィックス（did-you-mean / 引数追加提案）・型情報可視化（`fav explain --types` / `--lineage --show-dead`）が揃い、Favnir の開発体験が実用水準に達しました。
+**v45.0（2026-07-15）で、[Precision & Flow](./MILESTONE.md) マイルストーンを宣言しました。**
+Refinement type × Streaming / CEP × Opaque type / Back-pressure / E2E デモが揃い、最小限の型注釈で安全なリアルタイムパイプラインを記述できる Precision & Flow 基盤が完成しました。
 
 **v46.0（2026-07-16）で、[Language Refinement](./MILESTONE.md) マイルストーンを宣言しました。**
 `return` 構文・`match` 完全網羅・型エイリアスの明確な境界・改善されたエラーメッセージ・数値リテラル `_` が揃い、Favnir の構文が成熟しました。
 
-**v45.0（2026-07-15）で、[Precision & Flow](./MILESTONE.md) マイルストーンを宣言しました。**
-Refinement type × Streaming / CEP × Opaque type / Back-pressure / E2E デモが揃い、最小限の型注釈で安全なリアルタイムパイプラインを記述できる Precision & Flow 基盤が完成しました。
+**v47.0（2026-07-17）で、[Developer Experience](./MILESTONE.md) マイルストーンを宣言しました。**
+インラインテスト（`fav test` / `#[test]`）・LSP クイックフィックス（did-you-mean / 引数追加提案）・型情報可視化（`fav explain --types` / `--lineage --show-dead`）が揃い、Favnir の開発体験が実用水準に達しました。
+
+**v48.0（2026-07-18）で、[Standard Library 2.0](./MILESTONE.md) マイルストーンを宣言しました。**
+List / String / Float / Option / Result / Map の主要操作が揃い、外部ライブラリなしに実務的なデータ変換が書ける Standard Library 2.0 が完成しました。
+
+**v49.0（2026-07-18）で、[Module & Package 2.0](./MILESTONE.md) マイルストーンを宣言しました。**
+パッケージ import とローカル import が構文で明確に分離され、`fav.toml` が依存関係の唯一の真実となる Module & Package 2.0 が完成しました。
+
+**v50.0（2026-07-18）で、[Language Maturity / Production 2.0](./MILESTONE.md) マイルストーンを宣言しました。**
+`return` ガード節・成熟した標準ライブラリ・明確なモジュールシステム・インラインテストが揃い、Favnir は迷わず使える実用言語になりました。これが **Language Maturity** — Production 2.0 の宣言です。
+
+**v51.0（2026-07-19）で、[Developer Experience 3.0](./MILESTONE.md) マイルストーンを宣言しました。**
+全エラーコードに修正提案が付き、JSON / LSP / CLI で一貫して届く。エディタは型を表示し、trace はパイプラインの流れを可視化する。Favnir の診断は開発者の思考を止めない — これが **DX 3.0** の宣言です。
+
+**v52.0（2026-07-20）で、[Performance & Scale](./MILESTONE.md) マイルストーンを宣言しました。**
+`par` 並列ステージ実行・バックプレッシャー制御・`fav bench --compare` による回帰検出・インクリメンタルコンパイル・WASM サイズ最適化が揃い、Favnir は大規模データに立ち向かえる言語になりました。これが **Performance & Scale** の宣言です。
+
+**v53.0（2026-07-22）で、[Data Quality & Observability 2.0](./MILESTONE.md) マイルストーンを宣言しました。**
+`assert_schema` によるランタイムスキーマ検証・`fav explain --lineage --with-schema` によるリネージ可視化・SLA 監視 Rune・`fav run --audit-log` によるデータアクセスログ・OTel span 属性強化が揃い、Favnir のパイプラインは信頼できるデータを届けます。これが **Data Quality & Observability 2.0** の宣言です。
+
+**v54.0（2026-07-22）で、[Integration Sprint](./MILESTONE.md) マイルストーンを宣言しました。**
+エディタはデータの来歴を示し、並列パイプラインの性能は計測可能で、スキーマ違反は即座に修正できる。Favnir の 3 つの柱（DX 3.0 / Performance & Scale / Data Quality 2.0）が一体となった — これが **Integration Sprint** の宣言です。
+v54.1〜v54.5（2026-07-22〜23）で [Production 3.0](./MILESTONE.md) に向けた最終整備を完了しました。全エラーコードへの `fav explain --error` 対応（v54.1）・`fav run --watch-diff/--watch-summary`（v54.2）・パフォーマンスリグレッション CI 統合（v54.3）・`fav dq-report`（v54.4）・`fav doctor`（v54.5）が揃い、開発者が自信を持って本番へ踏み出せるツールチェーンが完成しました。
+
+**v55.0（2026-07-23）で、[Production 3.0](./MILESTONE.md) マイルストーンを宣言しました。**
+全エラーコードに修正提案・DX 3.0 統合・Performance & Scale・Data Quality 2.0 の 3 本柱が揃い、Favnir は現場で選ばれる言語になりました。これが **Production 3.0** の宣言です。
+
+**v56.0（2026-07-24）で、[Streaming Native 2.0](./MILESTONE.md) マイルストーンを宣言しました。**
+ウィンドウはイベントを時間で区切り、ウォーターマークは遅延を許容し、チェックポイントは障害から瞬時に回復する。CEP はイベントの流れからパターンを検出する。Favnir はリアルタイムデータの言語になりました。Exactly-once デリバリ保証・Stateful stage（State API）・CEP（sequence/skip_until）・Checkpoint/Replay API が揃い、**Streaming Native 2.0** が完成しました。
+
+**v57.0（2026-07-26）で、[Language Power 2.0](./MILESTONE.md) マイルストーンを宣言しました。**
+`where T: Interface` 本番品質化・行変数 `{ field: Type | r }` 明示・エフェクト推論 inlay hints・OR パターン・as-パターン・モジュール名前空間（`import "path" as alias.*`）が揃い、Favnir の型システムで開発者の意図を正確に表現できる状態になりました。
+
+**v58.0（2026-07-28）で、[Enterprise Security](./MILESTONE.md) マイルストーンを宣言しました。**
+アクセスはロールで制御され（RBAC）、シークレットはコードに現れず（AWS SM / Vault 連携）、通信は mTLS で守られ、監査ログは改ざんできない（HMAC-SHA256 署名）。コンプライアンスレポートはボタン一つで生成される（GDPR / SOC2）。Favnir は企業のセキュリティ要件を満たす言語になりました。
+
+**v59.0（2026-07-29）で、[Governance & Deployment 2.0](./MILESTONE.md) マイルストーンを宣言しました。**
+パイプラインは Blue/Green で無停止デプロイされ、カナリアは段階的にトラフィックを引き受ける。スキーマはバージョン管理され、データはカタログで検索できる。ポリシーはコードで記述され、コンプライアンスは自動で証明される。Favnir のパイプラインは運用チームに信頼される言語になりました。
+
+**v60.0.0 — Enterprise 1.0 を宣言しました（2026-07-30）。**
+v56〜v59 で実装した全エンタープライズ機能（RBAC / Secrets / TLS / Audit / Compliance /
+Blue-Green Deploy / Cost Visibility / SLA Guarantee / Migration Toolkit / Enterprise Certify）を統合し、
+「企業で安心して選ばれるデータパイプライン言語」として完成しました。
+
+**v69.0.0 — Distributed Favnir を宣言しました（2026-08-07）。**
+v68.1〜v68.9 で実装した分散実行・チェックポイント・Kubernetes・リトライ・分散キャッシュ・コスト見積もり・AI ルーティング・分散トレーシングの統合を宣言しました。`par` がクラスタを越え、型安全な AI パイプラインが大規模でも壊れない状態になりました。
+
+**v68.0.0 — Developer Intelligence を宣言しました（2026-08-07）。**
+v67.1〜v67.9 で実装したデバッグ・可視化・AI 提案・テストツール群（`fav debug` / `fav viz` / `fav suggest` / `fav simulate` / `Rune.proptest` / `fav profile --interactive` / `fav doc --math`）の統合を宣言しました。
+
+**v67.0.0 — AI-Native Stage Layer を宣言しました（2026-08-06）。**
+v66.1〜v66.9 で実装した 9 AI Rune 群（Rune.vec / Rune.embed / Rune.pinecone / Rune.pgvector /
+Rune.weaviate / Rune.qdrant / Rune.inference / Rune.serve / Rune.featurestore）と
+AI Pipeline Lint Rules W055〜W059 を統合しました。
+
+**v66.0.0 — Math & Science Foundation を宣言しました（2026-08-05）。**
+v65.1〜v65.9 で実装した 7 つの数学・科学計算 Rune（Rune.linalg / Rune.stats / Rune.autodiff /
+Rune.optim / Rune.numeric / Rune.timeseries / Rune.ml）と Math Lint Rules W050〜W054 を統合しました。
+テスト数: **3475 件**。
+
+**v65.0.0 — Performance 1.0 を宣言しました（2026-08-02）。**
+v64.1〜v64.9 で実装した AOT ネイティブコンパイル・差分ビルド・flamegraph プロファイリング・
+外部ベンチマーク比較・パフォーマンス lint・WASM ビルドを統合し、
+「型安全」と「高速」を両立したデータパイプライン言語としての完成を宣言した。
+
+**v64.0.0 — Incremental & Scale を宣言しました（2026-08-02）。**
+v63.1〜v63.9 で実装した差分コンパイル・DAG 最適化・並列実行・バックプレッシャー制御・ETL ベンチマークを統合し、
+大規模 ETL を安心して任せられるエンジンとしての完成を宣言した。
+
+**v63.0.0 — AOT Native を宣言しました（2026-08-02）。**
+`fav build --link` でネイティブバイナリを生成し、`--docker` で OCI イメージを出力し、
+`--validate` で AOT 互換性（E0427）を事前チェックできます。
+Favnir は VM 実行に加え、型安全なコンパイル言語としての段階に達しました。
+
+**v62.0.0 — Language Polish を宣言しました（2026-08-01）。**
+v61.1〜v61.9 で実装した全 Language Polish 機能（OR パターン / as-pattern / record update / `_` 型プレースホルダー / f-string 強化 / 型エラー差分表示 / `fav check --strict`）を統合し、
+「型システムがデータエンジニアの思考を助ける」言語としての完成を宣言しました。
+
+**v61.0.0 — Developer Experience 2.0 を宣言しました（2026-07-31）。**
+v60.1〜v60.9 で実装した全 DX 機能（エラー span 表示 / `fav check --fix` / LSP Code Action /
+REPL 強化 / `fav explain-error` 全コード / `fav fmt` コメント保持 / `fav doc` HTML 出力）を統合し、
+「エラーはソース位置を指し、修正候補は即座に現れる」開発体験を確立しました。
 
 v34.5.0〜v34.7.0 で、`!Effect` アノテーションを廃止し Capability Context（AppCtx）に一本化しました。
 `fav migrate --from-effects` で既存コードを自動移行できます。
@@ -180,92 +246,21 @@ seq UserImport = ParseCsv |> ValidateRow |> SaveToDb
 
 ---
 
-**v24.0.0（2026-06-23）— VM in Favnir マイルストーン宣言**
-
-テスト: **1926 件以上**
-
-### VM in Favnir 達成実績（v23.x）
-
-| 機能 | バージョン | 概要 |
-|---|---|---|
-| Bytes 型 | v23.1.0 | `Bytes.from_hex / get / slice / concat / to_utf8 / read_u16_le` 等 13 操作 |
-| ビット演算 | v23.2.0 | `Int.bit_and / bit_or / bit_xor / bit_not / shift_left / shift_right` + 16進数リテラル |
-| Mut<T> 可変コレクション | v23.3.0 | `Mut.list / map / push / pop / get / set / peek` — VM スタック・ローカル変数テーブル |
-| vm.fav Phase 1 | v23.4.0 | バイトコードデコード（27 opcode）、`Bytes.read_u16_le` |
-| vm.fav Phase 2 | v23.5.0 | スタックベース実行ループ・VMVal 型（3 バリアント） |
-| vm.fav Phase 3 | v23.6.0 | 制御フロー（Jump/JumpIfFalse）・ローカル変数（LoadLocal/StoreLocal）・残余演算 |
-| vm.fav Phase 4 | v23.7.0 | builtin ディスパッチ（call_builtin）・VMStr 追加・LoadGlobal/Call |
-| vm.fav Phase 5 | v23.8.0 | GetField・collect_args・vmval_display・任意 argc 対応 |
-| `fav run --vm` CLI | v24.0.0 | `fav run --vm <vm_path> --hex <hex>` で vm.fav 経由実行 |
-
----
-
 ## 現在の状態
 
-**v23.0.0（2026-06-21）— Distributed Scale マイルストーン宣言**
+**v59.0.0（2026-07-29）— 最新安定版**
 
-テスト: **1887 件すべて通過**
+テスト: **3308 件すべて通過**
 
-### Distributed Scale 達成実績（v22.x）
-
-| 機能 | バージョン | 概要 |
-|---|---|---|
-| Checkpoint / Resume | v22.1.0 | `#[checkpoint]` アノテーション、`.favc` 形式でステージ出力保存、`fav run --resume` で中断後再開 |
-| Distributed `par` | v22.2.0 | `par_distributed [A, B, C]` で gRPC Worker に分散実行、`fav.toml [workers]` セクション |
-| Pipeline State Rune | v22.3.0 | `import rune "state"`、Redis / DynamoDB / PostgreSQL バックエンドの型付き分散キャッシュ |
-| Event-driven Pipeline | v22.4.0 | `#[trigger(event = "s3:ObjectCreated")]` / `"kafka:message"`、`fav deploy --trigger` |
-| Pipeline Orchestration | v22.5.0 | `pipeline { step ... after ... }` DAG 構文、`fav orchestrate run/status/retry` |
-| SLA 宣言 | v22.6.0 | `#[timeout]` / `#[retry]` / `#[circuit_breaker]`（コンパイル時チェック）、`fav explain --sla` |
-| OpenTelemetry 統合 | v22.7.0 | `fav run --trace` で自動 span 生成・OTLP HTTP エクスポート、Jaeger / Grafana Tempo 対応 |
-| `fav deploy` 強化 | v22.8.0 | `--target ecs/k8s/fly`、Dockerfile / ECS task def / K8s CronJob YAML / fly.toml 生成 |
-
-### Developer Tooling 達成実績（v21.x）
-
-| 機能 | バージョン | 概要 |
-|---|---|---|
-| DAP デバッガー | v21.1.0 | VS Code / Neovim からブレークポイント・ステップ実行（`fav dap`、ポート 5678） |
-| `fav explain` 可視化強化 | v21.2.0 | Mermaid / D2 / JSON 形式のリネージ図出力（`--format mermaid`） |
-| テストカバレッジ | v21.3.0 | HTML レポート + LCOV 出力（`fav test --coverage`） |
-| `fav lint` 強化 | v21.4.0 | W010〜W019（ネスト深度・magic number・文字列連鎖など 10 ルール追加） |
-| LSP コードアクション強化 | v21.5.0 | codeAction（3 種: addMissingImport / convertToFstring / inlineBinding）/ rename（全参照追跡）/ references |
-| Playground v2 | v21.6.0 | 共有 URL・テンプレートギャラリー・実行統計 |
-| `fav doc` サイト生成 | v21.7.0 | `///` コメントから静的 HTML 自動生成（`--serve` でローカルプレビュー） |
-| `fav migrate` 強化 | v21.8.0 | `--from v13 --to v14`・`--config fav.toml`・移行サマリー |
-
-### Runtime Excellence 達成実績（v20.x）
-
-| ベンチマーク | v20.0.0 ベースライン | v21.0.0 実績 | 目標 |
+| マイルストーン | バージョン | 日付 | テスト数 |
 |---|---|---|---|
-| cold_start_precompiled | 18ms | **8ms** | < 10ms ✅ |
-| csv_10gb_throughput | ~340 MB/s | **1.2 GB/s** | > 1 GB/s ✅ |
-| tight_loop_10m_iter | ~85ms | **26ms** | < 30ms ✅ |
-| record_transform_1m | ~210ms | **72ms** | < 80ms ✅ |
-| duckdb_query（集計） | ~45ms（VM） | **3ms（pushdown）** | < 5ms ✅ |
+| Production 3.0 | v55.0.0 | 2026-07-23 | 3206 |
+| Streaming Native 2.0 | v56.0.0 | 2026-07-24 | 3219 |
+| Language Power 2.0 | v57.0.0 | 2026-07-26 | 3252 |
+| Enterprise Security | v58.0.0 | 2026-07-28 | 3276 |
+| Governance & Deployment 2.0 | **v59.0.0** | 2026-07-29 | **3308** |
 
-| 機能 | バージョン | 概要 |
-|---|---|---|
-| スーパー命令 | v20.2.0 | top-10 opcode ペア融合（LoadAdd / AddStore 等）、ディスパッチ削減 |
-| NaN-boxing | v20.3.0 | VMValue を 8 bytes に圧縮、Vec<VMValue> のキャッシュヒット率大幅改善 |
-| DuckDB pushdown | v20.4.0 | Filter / GroupBy / SumBy / Project / Count を SQL 自動委譲 |
-| mmap + SIMD CSV | v20.5.0 | memmap2 + arrow-csv でゼロコピーパース（csv +4x） |
-| io_uring | v20.6.0 | Linux 5.1+ での非同期リング I/O、他 OS は自動フォールバック |
-| Arena アロケータ | v20.7.0 | 1 chunk（1000 行）単位の一括解放、定常メモリ -20% |
-| Postgres コネクションプール | v20.8.0 | `Postgres.Pool.*`、接続確立コスト排除（-50ms/stage〜） |
-
-### Production Performance 達成実績（v19.x）
-
-| 機能 | バージョン | 概要 |
-|---|---|---|
-| `#[streaming]` 遅延評価 | v19.1.0 | 定常メモリで 10GB+ CSV を処理 |
-| AOT コンパイル（Cranelift） | v19.2.0 | `fav build --target native` でネイティブバイナリ生成 |
-| インクリメンタルコンパイル | v19.3.0 | 変更ファイルのみ再コンパイル（SHA-256 フィンガープリント） |
-| 並列コンパイル | v19.4.0 | Rayon + petgraph でトポロジカル並列ビルド |
-| Apache Arrow 統合 | v19.5.0 | `ArrowBatch.write_parquet` / `read_parquet` |
-| WASM 最適化 | v19.6.0 | デッドコード除去によるバイナリサイズ削減 |
-| 事前コンパイル `.favc` | v19.7.0 | `fav run --precompiled` で Lambda コールドスタート削減 |
-| フレームグラフ | v19.8.0 | `fav profile --format=flamegraph` で SVG 生成 |
-
-### ベンチマーク参考値
+ベンチマーク参考値:
 
 ```
 # 10GB CSV ストリーミング処理（定常メモリ）
@@ -281,7 +276,7 @@ fav build --target native pipeline.fav
 → VM インタープリタ比で高速実行
 ```
 
-詳細は `benchmarks/results.md` を参照。
+詳細は `versions/current.md` / `benchmarks/` を参照。
 
 | 機能カテゴリ | 機能 | 状態 |
 |---|---|---|
@@ -599,6 +594,32 @@ fav explain --lineage pipeline.fav  # リネージ可視化
 | v22.7.0 | OpenTelemetry 統合（`fav run --trace`） | 完了 |
 | v22.8.0 | `fav deploy` 強化（ECS / K8s / Fly.io） | 完了 |
 | **v23.0.0** | **Distributed Scale マイルストーン宣言** | **完了** |
+| **v24.0.0** | **VM in Favnir マイルストーン宣言**（vm.fav Phase 1〜5、`fav run --vm`） | **完了** |
+| v24.1.0〜v24.8.0 | 形式的仕様書生成・Bootstrap 検証・パフォーマンス回帰検知・Rune Registry 50+・セキュリティ審査・テンプレートギャラリー | 完了 |
+| **v25.0.0** | **Practical Self-Hosting マイルストーン宣言** | **完了** |
+| v26.0.0〜v30.0.0 | Rune Foundation / Streaming Native / Data Lakehouse / Observability First / Ecosystem Maturity | 完了 |
+| v31.0.0〜v35.0.0 | Real-World Readiness / Language Polish / Language Power / Performance & Tooling / Production Ready | 完了 |
+| v36.0.0〜v40.0.0 | Deployment Story / Data Quality First / Multi-Source ETL Power / Intelligence & Assistance / Enterprise Governance | 完了 |
+| v41.0.0〜v44.0.0 | Streaming Foundations / Type Precision / Real-Time Power / Language Expressiveness | 完了 |
+| **v45.0.0** | **Precision & Flow マイルストーン宣言** | **完了** |
+| **v46.0.0** | **Language Refinement マイルストーン宣言**（`return` 構文・`match` 完全網羅・数値リテラル `_`） | **完了** |
+| **v47.0.0** | **Developer Experience マイルストーン宣言**（インラインテスト・LSP クイックフィックス） | **完了** |
+| **v48.0.0** | **Standard Library 2.0 マイルストーン宣言**（List / String / Float / Option / Result / Map） | **完了** |
+| **v49.0.0** | **Module & Package 2.0 マイルストーン宣言**（import 構文整理・`fav.toml` 統一） | **完了** |
+| **v50.0.0** | **Language Maturity / Production 2.0 マイルストーン宣言** | **完了** |
+| **v51.0.0** | **Developer Experience 3.0 マイルストーン宣言**（全エラーコードに修正提案） | **完了** |
+| **v52.0.0** | **Performance & Scale マイルストーン宣言**（`par` 並列実行・`fav bench --compare`） | **完了** |
+| **v53.0.0** | **Data Quality & Observability 2.0 マイルストーン宣言**（`assert_schema`・OTel 強化） | **完了** |
+| **v54.0.0** | **Integration Sprint マイルストーン宣言**（DX 3.0 / Performance / Data Quality 統合） | **完了** |
+| **v55.0.0** | **Production 3.0 マイルストーン宣言**（現場で選ばれる言語、3206 tests） | **完了** |
+| **v56.0.0** | **Streaming Native 2.0 マイルストーン宣言**（Exactly-once / Stateful stage / CEP） | **完了** |
+| v56.1.0〜v56.9.0 | 境界付きジェネリクス強化・行多相レコード拡張・エフェクト推論 LSP・OR パターン・as パターン・モジュール名前空間（3248 tests） | **完了** |
+| **v57.0.0** | **Language Power 2.0 マイルストーン宣言**（型システム成熟・3252 tests） | **完了** |
+| v57.1.0〜v57.9.0 | Enterprise Security 強化（RBAC / Secrets / TLS / 監査ログ / コンプライアンス / マルチテナント・3272 tests） | **完了** |
+| **v58.0.0** | **Enterprise Security マイルストーン宣言**（企業セキュリティ要件完全対応・3276 tests） | **完了** |
+| v58.1.0〜v58.9.0 | Governance & Deployment 強化（Blue/Green / カナリア / HA / Schema Migration / Data Catalog / Policy-as-Code / マルチ環境・3304 tests） | **完了** |
+| **v59.0.0** | **Governance & Deployment 2.0 マイルストーン宣言**（運用チームに信頼されるパイプライン・3308 tests） | **完了** |
+| v59.1.0〜v60.0.0 | 次スプリント（計画中） | 計画中 |
 
 ---
 

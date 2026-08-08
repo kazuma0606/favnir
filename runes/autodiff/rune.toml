@@ -1,0 +1,8 @@
+[rune]
+name        = "autodiff"
+version     = "0.1.0"
+description = "Automatic differentiation Rune for Favnir — reverse-mode AD, grad, jacobian, hessian"
+entry       = "autodiff.fav"
+effects     = []
+
+[dependencies]

@@ -48,6 +48,34 @@ impl std::fmt::Display for LintError {
 
 // ── public API ────────────────────────────────────────────────────────────────
 
+/// v61.8.0: 実行時 lint 設定。`--strict` フラグまたは `[lint] strict = true` で有効化。
+#[derive(Debug, Clone, Default)]
+pub struct LintConfig {
+    /// strict モード: W040 等の型ヒント系警告に `[strict]` タグを付与する。
+    pub strict: bool,
+    /// `--perf` フラグまたは `[lint] perf = true` 有効時 true。W041 等のパフォーマンス系 lint を有効化する（v63.6.0 / v64.6.0）。
+    /// なお `strict = true` 時も W041 が有効になる（lint.rs 実装上の設計: perf || strict でゲート）。
+    pub perf: bool,
+}
+
+/// v61.8.0: `LintConfig` を受け取る lint 実行関数。
+/// strict=true の場合、W040 のメッセージ末尾に ` [strict]` を付与する。
+pub fn lint_program_with_config(program: &Program, config: &LintConfig) -> Vec<LintError> {
+    let mut errors = lint_program(program);
+    if config.strict {
+        for e in &mut errors {
+            if e.code == "W040" {
+                e.message = format!("{} [strict]", e.message);
+            }
+        }
+    }
+    // v63.6.0: W041 は perf/strict モード下でのみ有効
+    if config.perf || config.strict {
+        check_w041_perf_hint_large_collect(program, &mut errors);
+    }
+    errors
+}
+
 pub fn lint_program(program: &Program) -> Vec<LintError> {
     let mut errors = Vec::new();
     let uses = collect_trf_flw_uses(program);
@@ -125,6 +153,26 @@ pub fn lint_program(program: &Program) -> Vec<LintError> {
     check_w035_legacy_import_rune(program, &mut errors);
     // v52.2.0: W036 (runtime-only stub; actual warning emitted in VM AssertSchema handler)
     check_w036_extra_schema_fields(program, &mut errors);
+    // v56.5.0: W037
+    errors.extend(check_unreachable_patterns(program));
+    // v56.7.0: W038
+    check_w038_wildcard_import_collision(program, &mut errors);
+    // v61.2.0: W039
+    check_w039_as_name_shadows_inner(program, &mut errors);
+    // v61.7.0: W040
+    check_w040_type_holes(program, &mut errors);
+    // v65.8.0: W050〜W054 Math Lint Rules
+    check_w050_matrix_dim_mismatch(program, &mut errors);
+    check_w051_numeric_instability(program, &mut errors);
+    check_w052_small_sample_test(program, &mut errors);
+    check_w053_inplace_in_autodiff(program, &mut errors);
+    check_w054_missing_convergence(program, &mut errors);
+    // v66.8.0: W055〜W059 AI Pipeline Lint Rules
+    check_w055_untyped_llm_output(program, &mut errors);
+    check_w056_dim_implicit_cast(program, &mut errors);
+    check_w057_query_without_upsert(program, &mut errors);
+    check_w058_unbuffered_stream_inference(program, &mut errors);
+    check_w059_llm_no_retry(program, &mut errors);
     errors
 }
 
@@ -233,7 +281,7 @@ fn lint_expr_l008(expr: &Expr, errors: &mut Vec<LintError>) {
                 lint_expr_l008(e, errors);
             }
         }
-        Expr::FString(parts, _) => {
+        Expr::FString(parts, _, _) => {
             for part in parts {
                 if let FStringPart::Expr(e) = part {
                     lint_expr_l008(e, errors);
@@ -245,6 +293,12 @@ fn lint_expr_l008(expr: &Expr, errors: &mut Vec<LintError>) {
         Expr::RecordSpread(base, updates, _) => {
             lint_expr_l008(base, errors);
             for (_, v) in updates {
+                lint_expr_l008(v, errors);
+            }
+        }
+        Expr::RecordUpdate { base, fields, .. } => {
+            lint_expr_l008(base, errors);
+            for (_, v) in fields {
                 lint_expr_l008(v, errors);
             }
         }
@@ -410,7 +464,7 @@ fn collect_expr_calls(expr: &Expr, names: &HashSet<String>, uses: &mut HashSet<S
                 collect_expr_calls(expr, names, uses);
             }
         }
-        Expr::FString(parts, _) => {
+        Expr::FString(parts, _, _) => {
             for part in parts {
                 if let FStringPart::Expr(expr) = part {
                     collect_expr_calls(expr, names, uses);
@@ -420,6 +474,12 @@ fn collect_expr_calls(expr: &Expr, names: &HashSet<String>, uses: &mut HashSet<S
         Expr::RecordSpread(base, updates, _) => {
             collect_expr_calls(base, names, uses);
             for (_, v) in updates {
+                collect_expr_calls(v, names, uses);
+            }
+        }
+        Expr::RecordUpdate { base, fields, .. } => {
+            collect_expr_calls(base, names, uses);
+            for (_, v) in fields {
                 collect_expr_calls(v, names, uses);
             }
         }
@@ -586,7 +646,13 @@ fn lint_expr_sub_blocks(expr: &Expr, errors: &mut Vec<LintError>) {
                 lint_expr_sub_blocks(v, errors);
             }
         }
-        Expr::FString(parts, _) => {
+        Expr::RecordUpdate { base, fields, .. } => {
+            lint_expr_sub_blocks(base, errors);
+            for (_, v) in fields {
+                lint_expr_sub_blocks(v, errors);
+            }
+        }
+        Expr::FString(parts, _, _) => {
             for part in parts {
                 if let FStringPart::Expr(expr) = part {
                     lint_expr_sub_blocks(expr, errors);
@@ -651,7 +717,11 @@ fn expr_references(expr: &Expr, name: &str) -> bool {
             expr_references(base, name)
                 || updates.iter().any(|(_, v)| expr_references(v, name))
         }
-        Expr::FString(parts, _) => parts.iter().any(|part| match part {
+        Expr::RecordUpdate { base, fields, .. } => {
+            expr_references(base, name)
+                || fields.iter().any(|(_, v)| expr_references(v, name))
+        }
+        Expr::FString(parts, _, _) => parts.iter().any(|part| match part {
             FStringPart::Lit(_) => false,
             FStringPart::Expr(expr) => expr_references(expr, name),
         }),
@@ -859,7 +929,13 @@ fn collect_ambient_in_expr(expr: &Expr, errors: &mut Vec<LintError>, code: &'sta
                 collect_ambient_in_expr(v, errors, code, allowed);
             }
         }
-        Expr::FString(parts, _) => {
+        Expr::RecordUpdate { base, fields, .. } => {
+            collect_ambient_in_expr(base, errors, code, allowed);
+            for (_, v) in fields {
+                collect_ambient_in_expr(v, errors, code, allowed);
+            }
+        }
+        Expr::FString(parts, _, _) => {
             for part in parts {
                 if let FStringPart::Expr(e) = part {
                     collect_ambient_in_expr(e, errors, code, allowed);
@@ -1006,7 +1082,13 @@ fn collect_deprecated_in_expr(expr: &Expr, errors: &mut Vec<LintError>) {
                 collect_deprecated_in_expr(v, errors);
             }
         }
-        Expr::FString(parts, _) => {
+        Expr::RecordUpdate { base, fields, .. } => {
+            collect_deprecated_in_expr(base, errors);
+            for (_, v) in fields {
+                collect_deprecated_in_expr(v, errors);
+            }
+        }
+        Expr::FString(parts, _, _) => {
             for part in parts {
                 if let FStringPart::Expr(e) = part {
                     collect_deprecated_in_expr(e, errors);
@@ -1336,7 +1418,15 @@ fn collect_type_state_in_expr(
                 );
             }
         }
-        Expr::FString(parts, _) => {
+        Expr::RecordUpdate { base, fields, .. } => {
+            collect_type_state_in_expr(base, fn_expects, fn_output, type_state_names, env, errors);
+            for (_, v) in fields {
+                collect_type_state_in_expr(
+                    v, fn_expects, fn_output, type_state_names, env, errors,
+                );
+            }
+        }
+        Expr::FString(parts, _, _) => {
             for part in parts {
                 if let FStringPart::Expr(e) = part {
                     collect_type_state_in_expr(
@@ -1571,10 +1661,10 @@ fn collect_used_in_type_expr(ty: &TypeExpr, used: &mut HashSet<String>) {
             collect_used_in_type_expr(a, used);
             collect_used_in_type_expr(b, used);
         }
-        TypeExpr::RecordType(fields, _) => {
+        TypeExpr::RecordType(fields, _, _) => {
             for (_, ty) in fields { collect_used_in_type_expr(ty, used); }
         }
-        TypeExpr::Schema(..) | TypeExpr::ConstInt(..) => {}
+        TypeExpr::Schema(..) | TypeExpr::ConstInt(..) | TypeExpr::Hole(_) => {} // v61.7.0
     }
 }
 
@@ -2333,7 +2423,13 @@ fn collect_field_accesses_expr(
                 collect_field_accesses_expr(v, schema_params, out);
             }
         }
-        Expr::FString(parts, _) => {
+        Expr::RecordUpdate { base, fields, .. } => {
+            collect_field_accesses_expr(base, schema_params, out);
+            for (_, v) in fields {
+                collect_field_accesses_expr(v, schema_params, out);
+            }
+        }
+        Expr::FString(parts, _, _) => {
             for part in parts {
                 if let crate::ast::FStringPart::Expr(e) = part {
                     collect_field_accesses_expr(e, schema_params, out);
@@ -2908,6 +3004,313 @@ fn check_w036_extra_schema_fields(_program: &Program, _errors: &mut Vec<LintErro
     // This stub reserves the lint entry for future static analysis.
 }
 
+// ── W037: unreachable_pattern (v56.5.0) ──────────────────────────────────────
+
+/// W037: match 式内の到達不能パターンを検出する。
+///
+/// 検出ケース:
+/// 1. ワイルドカード (`_`) またはバインドパターン（変数名）がガードなしで
+///    非末尾のアームに存在し、直後のアームが隠される場合（直後の 1 件のみ報告）。
+/// 2. 同一 match 式内に同じリテラルパターンが 2 回以上現れる場合。
+///
+/// Known limitation: OR パターン内部の重複や型情報が必要なケースは対象外。
+/// Known limitation: catch-all 後の 2 件目以降の到達不能アームは報告しない（最初の 1 件のみ）。
+pub fn check_unreachable_patterns(program: &Program) -> Vec<LintError> {
+    let mut errors = Vec::new();
+    for item in &program.items {
+        match item {
+            Item::FnDef(fd) => check_block_for_unreachable(&fd.body, &mut errors),
+            Item::TrfDef(td) => check_block_for_unreachable(&td.body, &mut errors),
+            Item::ImplDef(id) => {
+                for m in &id.methods {
+                    check_block_for_unreachable(&m.body, &mut errors);
+                }
+            }
+            _ => {}
+        }
+    }
+    errors
+}
+
+fn check_block_for_unreachable(block: &Block, errors: &mut Vec<LintError>) {
+    for stmt in &block.stmts {
+        check_stmt_for_unreachable(stmt, errors);
+    }
+    check_expr_for_unreachable(&block.expr, errors);
+}
+
+fn check_stmt_for_unreachable(stmt: &Stmt, errors: &mut Vec<LintError>) {
+    match stmt {
+        Stmt::Bind(b)   => check_expr_for_unreachable(&b.expr, errors),
+        Stmt::Chain(c)  => check_expr_for_unreachable(&c.expr, errors),
+        Stmt::Expr(e)   => check_expr_for_unreachable(e, errors),
+        Stmt::Yield(y)  => check_expr_for_unreachable(&y.expr, errors),
+        Stmt::Return(r) => check_expr_for_unreachable(&r.expr, errors),
+        Stmt::ForIn(f) => {
+            check_expr_for_unreachable(&f.iter, errors);
+            check_block_for_unreachable(&f.body, errors);
+        }
+        Stmt::Forall(f) => check_block_for_unreachable(&f.body, errors),
+        Stmt::Expect(e) => {
+            check_expr_for_unreachable(&e.target, errors);
+            for rule in &e.rules { check_expr_for_unreachable(rule, errors); }
+        }
+    }
+}
+
+fn check_expr_for_unreachable(expr: &Expr, errors: &mut Vec<LintError>) {
+    match expr {
+        Expr::Match(scrutinee, arms, _) => {
+            check_expr_for_unreachable(scrutinee, errors);
+            let mut catch_all_seen = false;
+            let mut seen_lits: std::collections::HashSet<String> = std::collections::HashSet::new();
+            for arm in arms {
+                if catch_all_seen {
+                    errors.push(LintError::new(
+                        "W037",
+                        "unreachable pattern: previous arm catches all values".to_string(),
+                        arm.pattern.span().clone(),
+                    ));
+                    break; // 最初の到達不能アームのみ報告
+                }
+                // v61.1.0: OR パターン内リテラルも重複チェック対象に拡張。
+                // arm_lits で同一アーム内の重複（"a" | "a"）を除去してから
+                // seen_lits でアーム間の重複（W037）を検出する。
+                let mut arm_lits: std::collections::HashSet<String> =
+                    std::collections::HashSet::new();
+                for lit_key in pattern_lit_keys_all(&arm.pattern) {
+                    if !arm_lits.insert(lit_key.clone()) {
+                        continue; // intra-arm duplicate — skip (不要な偽陽性を防ぐ)
+                    }
+                    if !seen_lits.insert(lit_key.clone()) {
+                        errors.push(LintError::new(
+                            "W037",
+                            format!(
+                                "unreachable pattern: literal `{}` already matched above",
+                                lit_key
+                            ),
+                            arm.pattern.span().clone(),
+                        ));
+                        break; // 1 アームにつき最初の重複のみ報告
+                    }
+                }
+                // ガードなしのワイルドカード / バインドパターン検出
+                if pattern_is_catch_all(&arm.pattern) && arm.guard.is_none() {
+                    catch_all_seen = true;
+                }
+                check_expr_for_unreachable(&arm.body, errors);
+            }
+        }
+        Expr::Block(b) => check_block_for_unreachable(b, errors),
+        Expr::If(cond, then, else_, _) => {
+            check_expr_for_unreachable(cond, errors);
+            check_block_for_unreachable(then, errors);
+            if let Some(eb) = else_ {
+                check_block_for_unreachable(eb, errors);
+            }
+        }
+        Expr::Apply(func, args, _) => {
+            check_expr_for_unreachable(func, errors);
+            for a in args { check_expr_for_unreachable(a, errors); }
+        }
+        Expr::BinOp(_, l, r, _) => {
+            check_expr_for_unreachable(l, errors);
+            check_expr_for_unreachable(r, errors);
+        }
+        Expr::FieldAccess(obj, _, _) => check_expr_for_unreachable(obj, errors),
+        Expr::Closure(_, body, _) => check_expr_for_unreachable(body, errors),
+        Expr::Pipeline(steps, _) => {
+            for s in steps { check_expr_for_unreachable(s, errors); }
+        }
+        Expr::Collect(b, _) => check_block_for_unreachable(b, errors),
+        Expr::EmitExpr(inner, _) | Expr::Question(inner, _) => {
+            check_expr_for_unreachable(inner, errors);
+        }
+        Expr::RecordConstruct(_, fields, _) => {
+            for (_, v) in fields { check_expr_for_unreachable(v, errors); }
+        }
+        Expr::RecordSpread(base, updates, _) => {
+            check_expr_for_unreachable(base, errors);
+            for (_, v) in updates { check_expr_for_unreachable(v, errors); }
+        }
+        Expr::RecordUpdate { base, fields, .. } => {
+            check_expr_for_unreachable(base, errors);
+            for (_, v) in fields { check_expr_for_unreachable(v, errors); }
+        }
+        Expr::TypeApply(f, _, _) => check_expr_for_unreachable(f, errors),
+        Expr::AssertMatches(e, _, _) => check_expr_for_unreachable(e, errors),
+        Expr::AssertSchema { arg, .. } => check_expr_for_unreachable(arg, errors),
+        Expr::FString(parts, _, _) => {
+            for part in parts {
+                if let FStringPart::Expr(e) = part { check_expr_for_unreachable(e, errors); }
+            }
+        }
+        Expr::ListComp { expr, clauses, .. } | Expr::ResultComp { expr, clauses, .. } => {
+            check_expr_for_unreachable(expr, errors);
+            for c in clauses {
+                match c {
+                    CompClause::For { src, .. } => check_expr_for_unreachable(src, errors),
+                    CompClause::Guard(g) => check_expr_for_unreachable(g, errors),
+                }
+            }
+        }
+        Expr::Lit(..) | Expr::Ident(..) => {}
+    }
+}
+
+/// パターンがキャッチオール（すべての値にマッチする）か判定する。
+/// ガードなしの `_` またはバインドパターンがキャッチオール。
+/// 呼び出し元で `arm.guard.is_none()` と組み合わせて使用する。
+///
+/// Known limitation: `Pattern::Or` のトップレベルは `Or(...)` として扱われるため、
+/// `Ok(_) | _` のような OR パターン内部に `_` が含まれる場合は catch-all と見なさない（偽陰性）。
+/// OR パターン内部の catch-all 解析は v56.5.0 スコープ外。
+fn pattern_is_catch_all(pat: &Pattern) -> bool {
+    match pat {
+        Pattern::Wildcard(_) | Pattern::Bind(_, _) => true,
+        // as-pattern: catch-all iff sub-pattern is catch-all (e.g. `v @ _`) (v56.6.0)
+        Pattern::As(_, inner, _) => pattern_is_catch_all(inner),
+        _ => false,
+    }
+}
+
+/// v61.1.0: パターン内の全リテラルキーを再帰的に収集（OR パターン対応）。
+fn pattern_lit_keys_all(pat: &Pattern) -> Vec<String> {
+    match pat {
+        Pattern::Lit(lit, _) => vec![format!("{:?}", lit)],
+        Pattern::Or(arms, _) => arms.iter().flat_map(|(p, _)| pattern_lit_keys_all(p)).collect(),
+        _ => vec![],
+    }
+}
+
+/// リテラルパターンの一意キーを返す（重複検出用）。
+/// リテラル以外（OR パターン含む）は None を返す。
+/// v61.1.0 以降は pattern_lit_keys_all で代替。将来削除予定。
+#[allow(dead_code)]
+fn pattern_lit_key(pat: &Pattern) -> Option<String> {
+    if let Pattern::Lit(lit, _) = pat {
+        Some(format!("{:?}", lit))
+    } else {
+        None
+    }
+}
+
+// ── W038: wildcard import collision (v56.7.0) ────────────────────────────────
+
+fn check_w038_wildcard_import_collision(program: &Program, errors: &mut Vec<LintError>) {
+    let wildcards: Vec<(&String, &Option<String>, &Span)> = program.items.iter().filter_map(|item| {
+        if let Item::ImportDecl { is_wildcard: true, path, alias, span, .. } = item {
+            Some((path, alias, span))
+        } else {
+            None
+        }
+    }).collect();
+
+    if wildcards.len() >= 2 {
+        for (path, alias, span) in &wildcards[1..] {
+            let name = alias.as_deref().unwrap_or(path.as_str());
+            errors.push(LintError::new(
+                "W038",
+                format!(
+                    "wildcard import `as {}.*` may cause name collisions with other wildcard imports; consider using qualified access instead",
+                    name
+                ),
+                (*span).clone(),
+            ));
+        }
+    }
+}
+
+// ── W039: as-name shadows inner binding (v61.2.0) ────────────────────────────
+
+/// as-pattern の内側パターンが束縛する変数名を再帰的に収集する。
+/// Pattern::Record のフィールドは PatternField enum で表現される
+/// （Pun(String,Span) / Alias(String,Box<Pattern>,Span) / Wildcard(Span)）。
+fn collect_pattern_bound_names(pat: &Pattern) -> Vec<String> {
+    match pat {
+        Pattern::Bind(name, _) => vec![name.clone()],
+        Pattern::Record(fields, _) => fields.iter().filter_map(|f| match f {
+            PatternField::Pun(name, _) => Some(name.clone()),
+            PatternField::Alias(name, _, _) => Some(name.clone()),
+            PatternField::Wildcard(_) => None,
+        }).collect(),
+        Pattern::Or(arms, _) => arms.iter().flat_map(|(p, _)| collect_pattern_bound_names(p)).collect(),
+        Pattern::As(name, inner, _) => {
+            let mut names = collect_pattern_bound_names(inner);
+            names.push(name.clone());
+            names
+        }
+        // Variant ペイロード内の束縛も収集（例: x @ ok(x) で内側の x を検出）
+        Pattern::Variant(_, Some(inner), _) => collect_pattern_bound_names(inner),
+        Pattern::Variant(_, None, _) => vec![],
+        // List パターン内の束縛も収集（例: h @ [h, ..t] で内側の h/t を検出）
+        Pattern::List { head, tail, .. } => {
+            let mut names: Vec<String> = head.iter().flat_map(|p| collect_pattern_bound_names(p)).collect();
+            if let Some(t) = tail {
+                names.push(t.clone());
+            }
+            names
+        }
+        _ => vec![],
+    }
+}
+
+fn check_w039_as_name_shadows_inner(program: &Program, errors: &mut Vec<LintError>) {
+    for item in &program.items {
+        if let Item::FnDef(fd) = item {
+            check_w039_in_stmts(&fd.body.stmts, errors);
+            // Block の最終 expr（block.expr）も検査（match が返り値式として置かれるケース）
+            check_w039_in_expr(&fd.body.expr, errors);
+        }
+    }
+}
+
+fn check_w039_in_stmts(stmts: &[Stmt], errors: &mut Vec<LintError>) {
+    for stmt in stmts {
+        check_w039_in_stmt(stmt, errors);
+    }
+}
+
+fn check_w039_in_stmt(stmt: &Stmt, errors: &mut Vec<LintError>) {
+    match stmt {
+        Stmt::Expr(expr) => check_w039_in_expr(expr, errors),
+        Stmt::Bind(b) => check_w039_in_expr(&b.expr, errors),
+        // intentional: Return/ForAll/Pipeline 等はスキップ（浅い探索方針）
+        _ => {}
+    }
+}
+
+fn check_w039_in_expr(expr: &Expr, errors: &mut Vec<LintError>) {
+    match expr {
+        Expr::Match(_, arms, _) => {
+            for arm in arms {
+                check_w039_in_pattern(&arm.pattern, errors);
+                check_w039_in_expr(&arm.body, errors);
+            }
+        }
+        // intentional: FnDef 本体の直接 match のみを対象とする（他の W03x と同一の浅い探索方針）
+        _ => {}
+    }
+}
+
+fn check_w039_in_pattern(pat: &Pattern, errors: &mut Vec<LintError>) {
+    if let Pattern::As(name, inner, span) = pat {
+        let inner_names = collect_pattern_bound_names(inner);
+        if inner_names.iter().any(|n| n == name) {
+            errors.push(LintError::new(
+                "W039",
+                format!(
+                    "as-name `{}` shadows a binding introduced by the inner pattern; \
+                     consider renaming the as-binding",
+                    name
+                ),
+                span.clone(),
+            ));
+        }
+        check_w039_in_pattern(inner, errors);
+    }
+}
+
 fn check_w035_legacy_import_rune(program: &Program, errors: &mut Vec<LintError>) {
     for item in &program.items {
         if let Item::ImportDecl { kind, path, span, .. } = item {
@@ -2925,3 +3328,216 @@ fn check_w035_legacy_import_rune(program: &Program, errors: &mut Vec<LintError>)
         }
     }
 }
+
+// ── W040: type hole `_` inferred (v61.7.0) ───────────────────────────────────
+fn check_w040_type_holes(program: &Program, errors: &mut Vec<LintError>) {
+    for item in &program.items {
+        match item {
+            Item::FnDef(fd) => {
+                if let Some(ret_ty) = &fd.return_ty {
+                    if matches!(ret_ty, TypeExpr::Hole(_)) {
+                        errors.push(LintError::new(
+                            "W040",
+                            format!(
+                                "type hole `_` in return type of `{}` — consider making explicit",
+                                fd.name
+                            ),
+                            fd.span.clone(),
+                        ));
+                    }
+                }
+                for param in &fd.params {
+                    if matches!(param.ty, TypeExpr::Hole(_)) {
+                        errors.push(LintError::new(
+                            "W040",
+                            format!(
+                                "type hole `_` in parameter `{}` of `{}` — consider making explicit",
+                                param.name, fd.name
+                            ),
+                            param.span.clone(),
+                        ));
+                    }
+                }
+            }
+            Item::TrfDef(td) => {
+                if matches!(td.input_ty, TypeExpr::Hole(_)) {
+                    errors.push(LintError::new(
+                        "W040",
+                        format!(
+                            "type hole `_` in input type of stage `{}` — consider making explicit",
+                            td.name
+                        ),
+                        td.span.clone(),
+                    ));
+                }
+                if matches!(td.output_ty, TypeExpr::Hole(_)) {
+                    errors.push(LintError::new(
+                        "W040",
+                        format!(
+                            "type hole `_` in output type of stage `{}` — consider making explicit",
+                            td.name
+                        ),
+                        td.span.clone(),
+                    ));
+                }
+                for param in &td.params {
+                    if matches!(param.ty, TypeExpr::Hole(_)) {
+                        errors.push(LintError::new(
+                            "W040",
+                            format!(
+                                "type hole `_` in parameter `{}` of stage `{}` — consider making explicit",
+                                param.name, td.name
+                            ),
+                            param.span.clone(),
+                        ));
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+// ── W041: perf hint — large collect without filter (v63.6.0) ──────────────────
+
+fn check_w041_perf_hint_large_collect(program: &Program, errors: &mut Vec<LintError>) {
+    for item in &program.items {
+        match item {
+            Item::FnDef(fd) => check_w041_in_block(&fd.body, errors),
+            Item::TrfDef(td) => check_w041_in_block(&td.body, errors),
+            Item::ImplDef(id) => {
+                for method in &id.methods {
+                    check_w041_in_block(&method.body, errors);
+                }
+            }
+            // TestDef / BenchDef は意図的に除外（テスト・ベンチコードはパフォーマンス警告の対象外）
+            _ => {}
+        }
+    }
+}
+
+fn check_w041_in_block(block: &Block, errors: &mut Vec<LintError>) {
+    check_w041_in_expr(&block.expr, errors);
+    for stmt in &block.stmts {
+        match stmt {
+            Stmt::Expr(e) => check_w041_in_expr(e, errors),
+            Stmt::Bind(b) => check_w041_in_expr(&b.expr, errors),
+            _ => {}
+        }
+    }
+}
+
+fn check_w041_in_expr(expr: &Expr, errors: &mut Vec<LintError>) {
+    match expr {
+        Expr::Collect(block, span) => {
+            if !block_mentions_filter(block) {
+                errors.push(LintError::new(
+                    "W041",
+                    "collect block without a filter may accumulate all rows — \
+                     consider adding a filter condition to reduce memory pressure [perf]",
+                    span.clone(),
+                ));
+            }
+            check_w041_in_block(block, errors);
+        }
+        Expr::Pipeline(steps, _) => {
+            for step in steps {
+                check_w041_in_expr(step, errors);
+            }
+        }
+        Expr::If(cond, then_block, else_block_opt, _) => {
+            check_w041_in_expr(cond, errors);
+            check_w041_in_block(then_block, errors);
+            if let Some(else_block) = else_block_opt {
+                check_w041_in_block(else_block, errors);
+            }
+        }
+        Expr::Match(scrutinee, arms, _) => {
+            check_w041_in_expr(scrutinee, errors);
+            for arm in arms {
+                check_w041_in_expr(&arm.body, errors);
+            }
+        }
+        Expr::Apply(callee, args, _) => {
+            check_w041_in_expr(callee, errors);
+            for arg in args {
+                check_w041_in_expr(arg, errors);
+            }
+        }
+        Expr::BinOp(_, lhs, rhs, _) => {
+            check_w041_in_expr(lhs, errors);
+            check_w041_in_expr(rhs, errors);
+        }
+        _ => {}
+    }
+}
+
+fn block_mentions_filter(block: &Block) -> bool {
+    block.stmts.iter().any(|s| stmt_mentions_name_w041(s, "filter"))
+        || expr_mentions_name_w041(&block.expr, "filter")
+}
+
+fn stmt_mentions_name_w041(stmt: &Stmt, name: &str) -> bool {
+    match stmt {
+        Stmt::Expr(e) => expr_mentions_name_w041(e, name),
+        Stmt::Bind(b) => expr_mentions_name_w041(&b.expr, name),
+        _ => false,
+    }
+}
+
+fn expr_mentions_name_w041(expr: &Expr, name: &str) -> bool {
+    match expr {
+        Expr::Ident(n, _) => n == name,
+        Expr::FieldAccess(_, field, _) => field == name,
+        Expr::Apply(callee, args, _) => {
+            expr_mentions_name_w041(callee, name)
+                || args.iter().any(|a| expr_mentions_name_w041(a, name))
+        }
+        Expr::Pipeline(steps, _) => steps.iter().any(|s| expr_mentions_name_w041(s, name)),
+        _ => false,
+    }
+}
+
+// ── W050〜W054: Math Lint Rules (v65.8.0) ─────────────────────────────────────
+
+// W050: 行列次元の不一致が型推論で検出できない動的パス
+// 今バージョンはスタブ（将来フェーズで Rune.linalg 型情報と連携して実装）
+fn check_w050_matrix_dim_mismatch(_program: &Program, _errors: &mut Vec<LintError>) {}
+
+// W051: 数値不安定な演算（ゼロ除算リスク、log(x) で x ≤ 0 の可能性）
+// 今バージョンはスタブ（将来フェーズで Rune.numeric 呼び出しパターン検出を実装）
+fn check_w051_numeric_instability(_program: &Program, _errors: &mut Vec<LintError>) {}
+
+// W052: 統計的有意性なしの比較（サンプルサイズ < 30 の t 検定）
+// 今バージョンはスタブ（将来フェーズで Rune.stats.t_test 引数チェックを実装）
+fn check_w052_small_sample_test(_program: &Program, _errors: &mut Vec<LintError>) {}
+
+// W053: 自動微分ループでの in-place 変更（テープ破壊の危険）
+// 今バージョンはスタブ（将来フェーズで Rune.autodiff.grad 内部の Tensor.set 検出を実装）
+fn check_w053_inplace_in_autodiff(_program: &Program, _errors: &mut Vec<LintError>) {}
+
+// W054: 最適化ループの収束条件未設定（max_iter も tol も未指定）
+// 今バージョンはスタブ（将来フェーズで Rune.optim.minimize 引数チェックを実装）
+fn check_w054_missing_convergence(_program: &Program, _errors: &mut Vec<LintError>) {}
+
+// ── W055〜W059: AI Pipeline Lint Rules (v66.8.0) ─────────────────────────────
+
+// W055: 型なし LLM 出力をそのまま下流に流す（Rune.llm.call の結果を String のまま使用）
+// 今バージョンはスタブ（将来フェーズで Rune.llm.call 戻り値の型チェックを実装）
+fn check_w055_untyped_llm_output(_program: &Program, _errors: &mut Vec<LintError>) {}
+
+// W056: 埋め込み次元の暗黙的キャスト（Vec<Float>[768] → Vec<Float>[1536] の代入）
+// 今バージョンはスタブ（将来フェーズで Vec<Float>[N] 次元型の代入互換チェックを実装）
+fn check_w056_dim_implicit_cast(_program: &Program, _errors: &mut Vec<LintError>) {}
+
+// W057: ベクトル DB への upsert なしの query（空インデックスへの問い合わせリスク）
+// 今バージョンはスタブ（将来フェーズで Rune.pinecone / pgvector の呼び出し順序を検出）
+fn check_w057_query_without_upsert(_program: &Program, _errors: &mut Vec<LintError>) {}
+
+// W058: ストリーミング推論ステージでのバッファなし直接処理（メモリ溢れのリスク）
+// 今バージョンはスタブ（将来フェーズで Rune.inference.stream_with_backpressure の欠如を検出）
+fn check_w058_unbuffered_stream_inference(_program: &Program, _errors: &mut Vec<LintError>) {}
+
+// W059: LLM 呼び出しのリトライなし（外部 API 一時障害への無対策）
+// 今バージョンはスタブ（将来フェーズで Rune.llm / Rune.embed の呼び出しに retry 設定がないことを検出）
+fn check_w059_llm_no_retry(_program: &Program, _errors: &mut Vec<LintError>) {}

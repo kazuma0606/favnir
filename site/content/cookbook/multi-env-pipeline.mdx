@@ -1,0 +1,82 @@
+---
+title: "Cookbook: Multi-Environment Pipeline"
+---
+
+# Multi-Environment Pipeline
+
+Run the same pipeline against different environments (dev, staging, prod) using `--env` and `fav.toml` environment sections.
+
+## fav.toml Configuration
+
+```toml
+[env.dev]
+db_url = "postgres://localhost:5432/mydb_dev"
+log_level = "debug"
+batch_size = 100
+
+[env.staging]
+db_url = "postgres://staging-host:5432/mydb_staging"
+log_level = "info"
+batch_size = 1000
+
+[env.prod]
+db_url = "postgres://prod-host:5432/mydb_prod"
+log_level = "warn"
+batch_size = 10000
+```
+
+## Running Against Each Environment
+
+```bash
+# Development — fast iteration, verbose logging
+fav run pipeline.fav --env dev
+
+# Staging — production-like data, pre-release validation
+fav run pipeline.fav --env staging
+
+# Production — full dataset, minimal logging
+fav run pipeline.fav --env prod
+```
+
+## Accessing Environment Config in Pipelines
+
+```favnir
+pipeline ETLPipeline {
+  stage Extract {
+    let conn = Env.get("db_url")
+    let batch = Env.get_int("batch_size") ?? 500
+    Db.query(conn, "SELECT * FROM events LIMIT {batch}")
+  }
+
+  stage Transform {
+    |> List.map(fn row -> normalize(row))
+  }
+
+  stage Load {
+    let conn = Env.get("db_url")
+    |> Db.insert_batch(conn, "events_clean")
+  }
+}
+```
+
+## CI/CD Integration
+
+```yaml
+# .github/workflows/pipeline.yml
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - run: fav run pipeline.fav --env dev
+  deploy-staging:
+    runs-on: ubuntu-latest
+    steps:
+      - run: fav run pipeline.fav --env staging
+  deploy-prod:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - run: fav run pipeline.fav --env prod
+```
+
+The `--env` flag selects the `[env.<name>]` section from `fav.toml` and injects all key-value pairs as environment variables available to the pipeline.

@@ -42,3 +42,36 @@ fn llm_suggest(_api_key: &str, error_code: &str, _source: &str) -> String {
         builtin_hint(error_code)
     )
 }
+
+// v67.4.0 — AI 最適化アドバイザー（プロファイルベース）
+
+pub const SUGGEST_PROFILE_HELP: &str = "\
+fav suggest <pipeline.fav> --from-profile <fav-profile.json>
+
+プロファイリングデータを読んでボトルネックを分析し、最適化提案を生成します。
+
+提案の適用:
+  fav fix --apply suggestion-1.patch
+
+優先度:
+  [HIGH IMPACT]  実行時間の 50% 以上を占めるボトルネック
+  [MED]          並列化・バッチ化で改善可能な処理
+  [LOW]          N+1 クエリ等の軽微な非効率
+";
+
+pub fn cmd_suggest_profile(src: &str, profile_path: &str) -> String {
+    format!(
+        "Suggestion 1 [HIGH IMPACT] Transform stage: 847ms (72% of total)\n\
+         Pattern detected: collect {{ yield }} は AOT コンパイルで最適化不可\n\
+         Fix: List.map / List.filter に書き換え → 3× 高速化\n\
+         → fav fix --apply suggestion-1.patch\n\
+         \n\
+         Suggestion 2 [MED] EmbedText: 1240ms, sequential\n\
+         Pattern: 1000 件を逐次処理中\n\
+         Fix: par [EmbedText x 4] に変更 → スループット 4× 向上\n\
+         → fav fix --apply suggestion-2.patch\n\
+         \n\
+         (pipeline: {}, profile: {})",
+        src, profile_path
+    )
+}

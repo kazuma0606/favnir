@@ -7,7 +7,7 @@
 //   export AZURE_STORAGE_ACCOUNT="mystorageaccount"
 //   export AZURE_STORAGE_KEY="base64key=="
 //   export AZURE_CONTAINER="proof"
-//   fav run --legacy src/migrate.fav
+//   fav run src/migrate.fav
 //
 // 注意: Postgres.query_raw/execute_raw は DATABASE_URL 環境変数から接続文字列を自動取得する。
 //       AzurePostgres.execute_raw/query_raw は接続文字列を第1引数で明示する。
@@ -89,19 +89,21 @@ fn verify_row_count(ctx: AppCtx, azure_conn: String, expected: Int) -> Result<Un
 
 public fn main(ctx: AppCtx) -> Result<Unit, String> {
   bind _ <- ctx.io.println("[1/5] ExtractFromRds: AWS RDS PostgreSQL から読み取り中...")
-  chain rows_json <- extract_from_rds()
+  chain rows_json <- extract_from_rds(ctx)
   bind _ <- ctx.io.println("[1/5] OK — rows_json 取得完了")
   bind _ <- ctx.io.println("[2/5] TransformRows: SQL TRIM で正規化済み（extract 時に処理）")
   bind _ <- ctx.io.println("[3/5] LoadToAzurePostgres: Azure DB for PostgreSQL へ upsert 中...")
-  chain _ping <- ping_azure(Option.unwrap_or(ctx.io.getenv_raw("AZURE_CONN_STR"), ""))
+  chain _ping <- ping_azure(ctx, Option.unwrap_or(ctx.io.getenv_raw("AZURE_CONN_STR"), ""))
   bind _ <- ctx.io.println("[3/5] Azure 疎通 OK")
   chain target_count <- load_to_azure_postgres(
+    ctx,
     Option.unwrap_or(ctx.io.getenv_raw("AZURE_CONN_STR"), ""),
     rows_json
   )
   bind _ <- ctx.io.println("[3/5] OK")
   bind _ <- ctx.io.println("[4/5] SaveProofToBlob: Azure Blob Storage に証跡 JSON を保存中...")
   chain _proof <- save_proof_to_blob(
+    ctx,
     Option.unwrap_or(ctx.io.getenv_raw("AZURE_STORAGE_ACCOUNT"), ""),
     Option.unwrap_or(ctx.io.getenv_raw("AZURE_STORAGE_KEY"), ""),
     Option.unwrap_or(ctx.io.getenv_raw("AZURE_CONTAINER"), "proof"),
@@ -110,6 +112,7 @@ public fn main(ctx: AppCtx) -> Result<Unit, String> {
   bind _ <- ctx.io.println("[4/5] OK")
   bind _ <- ctx.io.println("[5/5] VerifyRowCount: Azure DB の行数を確認中...")
   chain _verify <- verify_row_count(
+    ctx,
     Option.unwrap_or(ctx.io.getenv_raw("AZURE_CONN_STR"), ""),
     target_count
   )

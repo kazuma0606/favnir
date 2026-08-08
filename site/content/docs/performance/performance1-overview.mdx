@@ -1,0 +1,69 @@
+---
+title: Performance 1.0 Overview
+description: Favnir Performance 1.0 — AOT native compilation, incremental builds, flamegraph profiling, and benchmark comparison in one guide.
+---
+
+# Performance 1.0 Overview
+
+Favnir v65.0 achieves **Performance 1.0**: type-safe pipelines that compile to native code,
+incremental rebuilds that skip unchanged stages, and benchmarks that outperform pandas by 7×.
+
+## What's in Performance 1.0
+
+| Feature | Version | Command |
+|---|---|---|
+| AOT native compilation | v62.1 | `fav build --link` |
+| CI-ready build output | v64.1 | `fav build --ci` |
+| Benchmark regression detection | v64.2 | `fav bench --compare` |
+| Performance tuning guide | v64.3 | — |
+| Flamegraph (AOT) | v64.4 | `fav profile --flamegraph` |
+| External benchmark comparison | v64.5 | `benchmarks/compare/run_comparison.sh` |
+| Performance lint | v64.6 | `fav lint --perf` |
+| WASM build | v64.7 | `cmd_build_wasm` |
+
+## Quick Start
+
+Get started with Performance 1.0 in four steps:
+
+```bash
+# 1. AOT ビルド — ネイティブバイナリ生成
+fav build pipeline.fav --link -o dist/pipeline
+
+# 2. ベンチマーク確認
+fav bench pipeline.fav --runs 10
+
+# 3. メモリ・CPU プロファイル
+fav profile --memory pipeline.fav
+
+# 4. パフォーマンス lint
+fav lint --perf pipeline.fav
+```
+
+## Performance Certification Checklist
+
+Before declaring a pipeline "Performance 1.0 certified", verify:
+
+- `fav build pipeline.fav --link --ci -o dist/pipeline` exits 0
+- `fav bench pipeline.fav --runs 10` shows AOT speedup ≥ 3×
+- `fav profile --memory pipeline.fav` shows no stage exceeds budget
+- `fav lint --perf pipeline.fav` reports 0 warnings
+
+## Benchmark Results
+
+Favnir AOT vs industry tools (1M row CSV → Postgres transform):
+
+```
+Favnir AOT:   1,180 ms  (847k rows/s)  ✓
+pandas:       8,340 ms  (120k rows/s)  7.1× slower
+Apache Beam:  5,210 ms  (192k rows/s)  4.4× slower
+dbt (SQL):    3,210 ms  (312k rows/s)  2.7× slower
+```
+
+See [benchmarks](./benchmarks) for full methodology and reproduction scripts.
+
+## Further Reading
+
+- [AOT Compilation](../runtime/aot) — compile to native binary
+- [Performance Tuning Guide](../runtime/performance) — bottleneck identification workflow
+- [Benchmark Comparison](../runtime/benchmarks) — external tool comparison
+- [Profiling](./profiling) — flamegraph and memory profiling

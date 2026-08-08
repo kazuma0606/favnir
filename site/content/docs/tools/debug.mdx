@@ -1,0 +1,43 @@
+# fav debug — ステップ実行デバッガ
+
+パイプラインをステップ単位で実行し、各ステージの入出力を確認できるデバッガ。
+AI パイプラインの LLM 呼び出し・ベクトル変換を「見える化」する。
+
+## 基本的な使い方
+
+```bash
+$ fav debug pipeline.fav
+[fav debug] v67.1.0 — ステップ実行モード
+> run
+[step 1/4] LoadCsv       → 1000 rows  (2ms)
+> inspect row[0]
+# { id: 1, text: "...", amount: 42.0 }
+> continue
+[step 2/4] EmbedText     → Vec[1536] x 1000  (1240ms)
+> breakpoint "Validate"
+> continue
+[step 3/4] Validate      → 998 rows   (8ms)
+> diff row[0]
+> continue
+[step 4/4] InsertDB      → 998 rows   (120ms)
+[done] Pipeline completed successfully.
+```
+
+## コマンド一覧
+
+| コマンド | 説明 |
+|---|---|
+| `run` | パイプラインを実行（各ステージ後に自動停止） |
+| `step` | 1 ステージ進む |
+| `continue` | 次のブレークポイントまで実行 |
+| `inspect <expr>` | レコード / ベクトルの内容を確認 |
+| `breakpoint <stage>` | 特定ステージで停止 |
+| `diff <row>` | ステージ前後のレコード差分を表示 |
+| `quit` | デバッガを終了 |
+
+## オプション
+
+```bash
+fav debug pipeline.fav            # インタラクティブモード
+fav debug pipeline.fav --ascii    # ASCII 表示モード
+```

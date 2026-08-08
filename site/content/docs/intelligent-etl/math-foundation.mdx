@@ -1,0 +1,94 @@
+# Math Foundation — linalg / stats / autodiff
+
+Favnir の Math Rune 群は数値計算をパイプラインに統合するための基盤です。すべて pure 関数として実装されており、`par` ステップ内で安全に並列実行できます。
+
+## linalg — 線形代数
+
+```favnir
+schema VectorPair {
+    a: List<Float>,
+    b: List<Float>
+}
+
+public stage ComputeSimilarity: VectorPair -> Float = |pair| {
+    bind dot <- Rune.linalg.dot(pair.a, pair.b)
+    bind na  <- Rune.linalg.norm(pair.a)
+    bind nb  <- Rune.linalg.norm(pair.b)
+    dot / (na * nb)
+}
+```
+
+主な関数:
+
+| 関数 | 説明 |
+|---|---|
+| `Rune.linalg.dot(a, b)` | 内積 |
+| `Rune.linalg.norm(v)` | L2 ノルム |
+| `Rune.linalg.normalize(v)` | L2 正規化（コサイン類似度の前処理） |
+| `Rune.linalg.matmul(A, B)` | 行列積 |
+| `Rune.linalg.pca(data, k)` | 主成分分析（次元削減） |
+| `Rune.linalg.cosine_similarity(a, b)` | コサイン類似度（-1.0〜1.0） |
+
+## stats — 統計解析
+
+```favnir
+schema StatsResult {
+    count:  Int,
+    mean:   Float,
+    std:    Float,
+    min:    Float,
+    max:    Float,
+    median: Float,
+    p25:    Float,
+    p75:    Float,
+    p95:    Float,
+    p99:    Float
+}
+
+public stage AnalyzeScores: List<Float> -> StatsResult = |scores| {
+    Rune.stats.describe(scores)
+}
+```
+
+主な関数:
+
+| 関数 | 説明 |
+|---|---|
+| `Rune.stats.describe(data)` | 記述統計（mean / std / min / max / median / p95 / p99） |
+| `Rune.stats.correlation(a, b)` | ピアソン相関係数 |
+| `Rune.stats.histogram(data, bins)` | ヒストグラム |
+| `Rune.stats.zscore(data)` | Z スコア正規化 |
+| `Rune.stats.outliers(data, threshold)` | 外れ値インデックス（\|z-score\| > threshold） |
+
+## autodiff — 自動微分
+
+勾配計算をパイプラインに組み込みます。モデルの最適化や数値計算に使います。
+
+```favnir
+public stage GradientStep: (List<Float>, Float) -> List<Float> = |weights, lr| {
+    bind grad     <- Rune.autodiff.grad(|w| { loss_fn(w) }, weights)
+    bind scaled   <- Rune.linalg.scale(grad, lr)
+    Rune.linalg.sub(weights, scaled)
+}
+```
+
+主な関数:
+
+| 関数 | 説明 |
+|---|---|
+| `Rune.autodiff.grad(f, x)` | スカラー関数の勾配 |
+| `Rune.autodiff.jacobian(f, x)` | ヤコビアン行列 |
+| `Rune.autodiff.hessian(f, x)` | ヘッセ行列 |
+
+## パイプラインへの統合例
+
+```favnir
+pipeline AnalyzePipeline {
+    step "load"    = seq LoadArticles
+    step "embed"   = par [EmbedAndSummarize, EmbedAndSummarize] after "load"
+    step "analyze" = seq AnalyzeScores after "embed"
+    step "store"   = seq StoreToVectorDB after "embed"
+}
+```
+
+`par` 内の `EmbedAndSummarize` と `AnalyzeScores` はどちらも pure 関数として扱われるため安全に並列実行できます。

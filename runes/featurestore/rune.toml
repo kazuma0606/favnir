@@ -1,0 +1,8 @@
+[rune]
+name        = "featurestore"
+version     = "0.1.0"
+description = "Feature Store Rune for Favnir — type-safe feature engineering: define, get, get_batch, get_version, get_at with point-in-time lookup"
+entry       = "featurestore.fav"
+effects     = []
+
+[dependencies]

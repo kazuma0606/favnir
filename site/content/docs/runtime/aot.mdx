@@ -1,0 +1,46 @@
+---
+title: AOT Compilation
+description: Compile Favnir pipelines to native binaries with fav build.
+---
+
+# AOT Compilation
+
+Favnir supports **Ahead-of-Time (AOT) compilation** via `fav build`, producing native binaries
+that run without the VM interpreter.
+
+## Commands
+
+| Command | Description |
+|---|---|
+| `fav build pipeline.fav --link -o dist/pipeline` | Compile to native binary |
+| `fav build pipeline.fav --docker --tag myapp:latest` | Build Docker image |
+| `fav build pipeline.fav --validate` | Check AOT compatibility (E0427) |
+
+## AOT Compatibility
+
+Not all Favnir features are supported in AOT mode. The `--validate` flag checks your pipeline
+before compilation.
+
+### E0427 — Unsupported Feature in AOT Mode
+
+`emit` expressions require VM runtime dispatch and cannot be lowered to native code.
+
+```
+E0427: unsupported feature in AOT mode in function `notify`
+  help: Use `fav run` instead of `fav build`, or remove emit expressions.
+```
+
+## Example
+
+```favnir
+fn transform(row: OrderRow) -> SummaryRow {
+  { region: row.region, total: row.amount, count: 1 }
+}
+
+fn main() -> Bool { true }
+```
+
+```bash
+fav build pipeline.fav --link -o dist/pipeline
+./dist/pipeline
+```

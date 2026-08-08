@@ -1,0 +1,8 @@
+[rune]
+name        = "embed"
+version     = "0.1.0"
+description = "Embedding Pipeline Rune for Favnir — OpenAI / Cohere / local (Ollama) unified embedding interface with batch and cache support"
+entry       = "embed.fav"
+effects     = []
+
+[dependencies]

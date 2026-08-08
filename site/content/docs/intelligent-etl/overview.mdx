@@ -1,0 +1,63 @@
+# Intelligent ETL とは
+
+Favnir v65〜v69 で実装した AI データパイプライン機能の総称が **Intelligent ETL** です。
+
+## なぜ Intelligent ETL か
+
+従来の ETL は「決まったルールでデータを変換する」ものでした。しかし現代のデータパイプラインは次の課題を抱えています。
+
+- **非構造化データの増加** — テキスト・画像・音声が扱えない
+- **LLM 出力の型安全性** — モデルの出力スキーマを実行時まで検証できない
+- **ベクトル次元の不整合** — 埋め込みモデルを変えると型の保証がない
+- **推論コストの不透明性** — どのステージがいくらかかるかわからない
+
+Intelligent ETL はこれらを**型システムと `bind` モナド**で解決します。
+
+## 主要コンポーネント
+
+| コンポーネント | バージョン | 説明 |
+|---|---|---|
+| Math Rune（linalg / stats / autodiff） | v65.1〜v65.3 | 型付き行列・統計・自動微分 |
+| AI Stage Layer（embed / llm / vectordb） | v66.1〜v66.4 | 型安全な AI ステージ |
+| Developer Intelligence（debug / viz） | v67.1〜v67.8 | ステップ実行・DAG 可視化 |
+| Distributed Favnir（cluster / k8s） | v68.1〜v68.8 | クラスタ実行・チェックポイント |
+| Intelligent ETL 統合（e2e / playground） | v69.1〜v69.4 | E2E デモ・Playground |
+
+## アーキテクチャ
+
+```
+[CSV / API / Stream]
+        |
+   LoadArticles          ← 型安全な入力ステージ
+        |
+   EmbedAndSummarize     ← AI ステージ（LLM + 埋め込み）
+        |                   par で並列実行可能
+   StoreToVectorDB       ← VectorDB 書き込み
+        |
+   SemanticSearch        ← セマンティック検索
+```
+
+型チェックはパイプライン全体に及びます。`List<Float>` という型が埋め込みベクトルを表し、スキーマが LLM の出力構造を静的に保証します。
+
+## 設計思想
+
+Favnir の Intelligent ETL は 3 つの原則で設計されています。
+
+**1. 型が AI の出力を安全にする**
+LLM の出力を `schema` で型付けすることで、スキーマ違反を推論の前に止めます。
+
+**2. `bind` が副作用を明示する**
+`bind x <- Rune.llm.extract(...)` の構文は、LLM 呼び出しという副作用を型レベルで可視化します。
+
+**3. `par` が AI パイプラインをスケールさせる**
+複数のワーカーで AI ステージを並列実行し、大規模データでもスループットを維持します。
+
+## 次のステップ
+
+- [クイックスタート](./quickstart) — 15 分で動かす
+- [Math Foundation](./math-foundation) — linalg / stats / autodiff の使い方
+- [AI Stages](./ai-stages) — embed / llm / vectordb ステージの構築
+- [デバッグガイド](./debugging) — fav debug / fav viz の使い方
+- [分散実行](./distributed) — クラスタ・K8s でのスケールアウト
+- [Math Rune リファレンス](./reference/math-runes) — linalg / stats / autodiff / optim / numeric / timeseries / ml API
+- [AI Rune リファレンス](./reference/ai-runes) — embed / llm / pinecone / qdrant / pgvector / weaviate / featurestore API

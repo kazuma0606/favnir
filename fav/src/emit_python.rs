@@ -284,8 +284,9 @@ fn map_type(ty: &TypeExpr) -> String {
         TypeExpr::Optional(inner, _) => format!("Optional[{}]", map_type(inner)),
         TypeExpr::Fallible(inner, _) => format!("Any  # fallible {}", map_type(inner)),
         TypeExpr::Arrow(_, _, _) | TypeExpr::TrfFn { .. } => "Any".to_string(),
-        TypeExpr::Intersection(_, _, _) | TypeExpr::RecordType(_, _) | TypeExpr::Schema(_, _) | TypeExpr::LinearArrow(_, _, _) => "Any".to_string(),
+        TypeExpr::Intersection(_, _, _) | TypeExpr::RecordType(_, _, _) | TypeExpr::Schema(_, _) | TypeExpr::LinearArrow(_, _, _) => "Any".to_string(),
         TypeExpr::ConstInt(_, _) => "int".to_string(),
+        TypeExpr::Hole(_) => "Any".to_string(),
     }
 }
 
@@ -476,7 +477,7 @@ impl Emitter {
                 }
             }
 
-            Expr::FString(parts, _) => {
+            Expr::FString(parts, _, _) => {
                 let mut segments: Vec<String> = Vec::new();
                 let mut has_expr = false;
                 for part in parts {
@@ -554,6 +555,17 @@ impl Emitter {
                 let b = self.emit_expr(base);
                 let mut parts = vec![format!("**{}", b)];
                 for (k, v) in updates {
+                    let val = self.emit_expr(v);
+                    parts.push(format!("\"{}\": {}", k, val));
+                }
+                format!("{{{}}}", parts.join(", "))
+            }
+
+            Expr::RecordUpdate { base, fields, .. } => {
+                // { base | field: val } → {**base, "field": val}
+                let b = self.emit_expr(base);
+                let mut parts = vec![format!("**{}", b)];
+                for (k, v) in fields {
                     let val = self.emit_expr(v);
                     parts.push(format!("\"{}\": {}", k, val));
                 }
@@ -1089,15 +1101,23 @@ impl Emitter {
             Pattern::Record(_, _) => {
                 ("True  # record pattern".to_string(), vec![])
             }
-            Pattern::Or(pats, _) => {
-                // emit as first matching alternative
-                if let Some(first) = pats.first() {
+            Pattern::Or(arms, _) => {
+                // Known limitation: fav2py は OR パターンの per-arm guard を無視する（v61.3.0）。
+                // guard を含む OR パターンを Python に変換すると意味論が変わるため、
+                // fav2py ユーザーは guard 付き OR パターンを避けるか手動で変換すること。
+                if let Some((first, _)) = arms.first() {
                     self.arm_condition(first, var)
                 } else {
                     ("False".to_string(), vec![])
                 }
             }
             Pattern::List { .. } => ("True  # list pattern".to_string(), vec![]),
+            // as-pattern: apply inner condition, add name binding (v56.6.0)
+            Pattern::As(name, inner, _) => {
+                let (cond, mut binds) = self.arm_condition(inner, var);
+                binds.push(format!("{} = {}", name, var));
+                (cond, binds)
+            }
         }
     }
 

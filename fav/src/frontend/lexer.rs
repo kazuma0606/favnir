@@ -125,12 +125,15 @@ pub enum TokenKind {
     DotDotDot,    // ... (record spread, v16.3.0)
     DotDot,       // .. (list-pattern rest, v17.2.0)
     LinearArrow,  // -o (linear function type, v18.5.0)
+    At,           // @  (v56.6.0: as-pattern)
 
     // Literals
     Int(i64),
     Float(f64),
     Str(String),
     FStringRaw(String),
+    /// Triple-quote f-string raw content: f"""...""" (v61.5.0)
+    FStringTripleRaw(String),
     Bool(bool),
 
     // Identifier
@@ -281,14 +284,23 @@ impl Lexer {
         let c = self.peek().unwrap();
 
         let kind = match c {
-            'f' if self.peek2() == Some('"') && self.peek3() == Some('"') => {
+            // v61.5.0: f"""...""" — pos+1/+2/+3 すべてが '"' であることを確認
+            'f' if self.peek2() == Some('"')
+                && self.peek3() == Some('"')
+                && self.source.get(self.pos + 3).copied() == Some('"') =>
+            {
                 self.advance(); // 'f'
                 self.advance(); // '"' (1st)
                 self.advance(); // '"' (2nd)
                 self.advance(); // '"' (3rd)
-                TokenKind::FStringRaw(self.lex_fstring_triple(sp, sl, sc)?)
+                TokenKind::FStringTripleRaw(self.lex_fstring_triple(sp, sl, sc)?)
             }
-            'f' if self.peek2() == Some('"') && self.peek3() != Some('"') => {
+            // f"..." （single-quote） — triple-quote 条件に該当しない場合すべて
+            // f"" (空), f"hello", f""x 等も含む
+            'f' if self.peek2() == Some('"')
+                && !(self.peek3() == Some('"')
+                    && self.source.get(self.pos + 3).copied() == Some('"')) =>
+            {
                 self.advance(); // 'f'
                 self.advance(); // '"'
                 TokenKind::FStringRaw(self.lex_fstring_raw(sp, sl, sc)?)
@@ -494,6 +506,11 @@ impl Lexer {
             }
 
             c if c.is_alphabetic() => self.lex_ident_or_keyword(),
+
+            '@' => {
+                self.advance();
+                TokenKind::At // v56.6.0: as-pattern
+            }
 
             other => {
                 self.advance();
@@ -984,6 +1001,31 @@ mod tests {
         );
     }
 
+    /// v61.5.0: f"""...""" が FStringTripleRaw トークンを生成することを確認
+    #[test]
+    fn test_fstring_triple_raw_token() {
+        let kinds = lex("f\"\"\"Hello {name}!\"\"\"");
+        assert_eq!(
+            kinds,
+            vec![
+                TokenKind::FStringTripleRaw("Hello {name}!".into()),
+                TokenKind::Eof,
+            ]
+        );
+    }
+
+    /// v61.5.0: f"hello" は単一クォート FStringRaw であり FStringTripleRaw ではない
+    #[test]
+    fn test_fstring_double_quote_is_not_triple() {
+        let kinds = lex(r#"f"hello""#);
+        assert!(
+            matches!(kinds.first(), Some(TokenKind::FStringRaw(s)) if s == "hello"),
+            "f\"hello\" should produce FStringRaw, got {:?}",
+            kinds
+        );
+        assert!(!matches!(kinds.first(), Some(TokenKind::FStringTripleRaw(_))));
+    }
+
     // bool literals
     #[test]
     fn test_bool_literal() {
@@ -1053,8 +1095,9 @@ mod tests {
     // error: unexpected character
     #[test]
     fn test_unexpected_char() {
-        let msg = lex_err("foo @ bar");
-        assert!(msg.contains("unexpected character '@'"));
+        // @ is now a valid token (v56.6.0); use $ instead
+        let msg = lex_err("foo $ bar");
+        assert!(msg.contains("unexpected character '$'"));
     }
 
     // error: unterminated string

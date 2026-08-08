@@ -1,0 +1,8 @@
+[rune]
+name        = "qdrant"
+version     = "0.1.0"
+description = "Qdrant Rune for Favnir — high-performance vector database: upsert, query, collection management"
+entry       = "qdrant.fav"
+effects     = []
+
+[dependencies]

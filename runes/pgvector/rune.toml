@@ -1,0 +1,8 @@
+[rune]
+name        = "pgvector"
+version     = "0.1.0"
+description = "pgvector Rune for Favnir — PostgreSQL vector extension: upsert, query, create_index (IVFFLAT/HNSW)"
+entry       = "pgvector.fav"
+effects     = []
+
+[dependencies]

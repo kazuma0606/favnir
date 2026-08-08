@@ -1,0 +1,95 @@
+---
+title: "Streaming Native 2.0 — 宣言と概要"
+description: "Favnir v55.x Streaming Native 2.0 の全機能概要 — ウィンドウ・Exactly-once・CEP・Stateful・Checkpoint"
+---
+
+# Streaming Native 2.0
+
+> 「ウィンドウはイベントを時間で区切り、ウォーターマークは遅延を許容し、
+>  チェックポイントは障害から瞬時に回復する。
+>  CEP はイベントの流れからパターンを検出する。
+>  Favnir はリアルタイムデータの言語になった。」
+
+v55.x Streaming Native 2.0 は、v41〜v52 で積み上げたウィンドウ・CEP・並列基盤を統合し、
+**Exactly-once・Stateful・Replay を備えた本番品質のストリーム処理基盤**を完成させたマイルストーンです。
+
+---
+
+## 機能一覧
+
+| 機能 | バージョン | 概要 |
+|------|-----------|------|
+| ウィンドウ + Exactly-once 統合 | v55.1 | Tumbling/Sliding ウィンドウとチェックポイントの統合 |
+| セッションウィンドウ + ウォーターマーク | v55.2 | 遅延イベント許容、`--stream-stats` フラグ |
+| Exactly-once チェックポイント | v55.3 | 冪等リトライ、処理済みオフセット永続化 |
+| ストリーム結合 | v55.4 | `Stream.join_inner` / `Stream.join_left` |
+| Stateful stage | v55.5 | `State.get` / `State.set` / `State.get_or_default` |
+| CEP 統合 | v55.6 | `CEP.sequence` / `CEP.skip_until` |
+| Checkpoint / Replay API | v55.7 | `set/get/clear_resume_from_checkpoint` |
+| ドキュメント公開 | v55.8 | streaming-v2.mdx / stateful-pipeline.mdx / cep-patterns.mdx |
+
+---
+
+## クイックスタート
+
+### fav.toml 設定
+
+```toml
+[stream]
+buffer_size = 1000
+delivery = "exactly-once"
+checkpoint_interval_sec = 10
+checkpoint_store = "s3://my-bucket/checkpoints"
+session_gap_sec = 30
+watermark_max_late_sec = 5
+```
+
+### Stateful パイプライン例
+
+```favnir
+stage CountEvents: Stream<Event> -> Stream<Int> = |event| {
+  bind count <- State.get_or_default("total", 0)
+  bind _ <- State.set("total", count + 1)
+  Ok(count + 1)
+}
+```
+
+### CEP パターン例
+
+```favnir
+fn is_start(e: Event) -> Bool { e.type == "start" }
+fn is_end(e: Event) -> Bool { e.type == "end" }
+
+stage DetectPattern: Stream<Event> -> Stream<List<Event>> = |events| {
+  bind preds <- collect {
+    yield is_start;
+    yield is_end;
+  }
+  Ok(CEP.sequence(events, preds))
+}
+```
+
+### チェックポイント操作
+
+```bash
+# チェックポイント一覧
+fav checkpoint list
+
+# 再開
+fav run pipeline.fav --resume-from 2026-07-23T09:10:00Z
+```
+
+---
+
+## 詳細ドキュメント
+
+- [Streaming Native 2.0 詳細](/docs/runtime/streaming-v2) — ウィンドウ・ウォーターマーク・Join の詳細
+- [Stateful パイプライン](/cookbook/stateful-pipeline) — State API レシピ集
+- [CEP パターン集](/cookbook/cep-patterns) — 複合イベント処理レシピ
+
+---
+
+## 次のステップ: v56.0
+
+v56.0 では本格的な `--replay-from / --replay-until` 時刻範囲リプレイと、
+VM exec ループでのチェックポイントロード・状態復元を実装します。

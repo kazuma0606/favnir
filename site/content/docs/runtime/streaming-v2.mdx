@@ -1,0 +1,108 @@
+---
+title: "Streaming Native 2.0 — 概要"
+description: "ウィンドウ・ウォーターマーク・Exactly-once・CEP・Stateful の概要（v55.x Streaming Native 2.0）"
+---
+
+# Streaming Native 2.0
+
+v55.x では Favnir のストリーム処理基盤を大幅強化しました。
+ウィンドウ集計・ウォーターマーク・Exactly-once チェックポイント・複合イベント処理（CEP）・Stateful stage が統合されたリアルタイムデータパイプラインを構築できます。
+
+---
+
+## ウィンドウ（Tumbling / Sliding / Session）
+
+イベントを時間単位で区切り、ウィンドウごとに集計します。
+`fav.toml` の `[stream]` セクションで設定します。
+
+```toml
+[stream]
+buffer_size = 1000
+checkpoint_store = "s3://my-bucket/checkpoints"
+```
+
+```favnir
+stage TumblingCount: Stream<Event> -> Stream<List<Event>> = |events| {
+  Ok(Window.tumbling(events, 60))
+}
+```
+
+---
+
+## ウォーターマーク（遅延許容）
+
+遅延イベントを許容する最大秒数を設定します。許容範囲を超えたイベントは記録されドロップされます。
+
+```toml
+[stream]
+session_gap_sec = 30
+watermark_max_late_sec = 5
+```
+
+---
+
+## Exactly-once チェックポイント
+
+`delivery = "exactly-once"` を設定すると、再起動時に重複処理を排除します。
+処理済みオフセットを永続化し、冪等リトライを保証します。
+
+```toml
+[stream]
+delivery = "exactly-once"
+checkpoint_interval_sec = 10
+```
+
+チェックポイント一覧の確認:
+
+```bash
+fav checkpoint list
+# 2026-07-23T09:00:00Z  offset=1000  size=42KB
+# 2026-07-23T09:10:00Z  offset=2300  size=44KB
+```
+
+再開:
+
+```bash
+fav run pipeline.fav --resume-from 2026-07-23T09:10:00Z
+```
+
+---
+
+## Stateful Stage
+
+`State.get` / `State.set` / `State.get_or_default` でストリーム処理中に状態を累積します。
+状態は Exactly-once チェックポイントストアに自動永続化されます。
+
+```favnir
+stage CountPerUser: Stream<Event> -> Stream<Int> = |events| {
+  bind count <- State.get_or_default("user_count", 0)
+  bind _ <- State.set("user_count", count + 1)
+  Ok(count + 1)
+}
+```
+
+---
+
+## 複合イベント処理（CEP）
+
+`CEP.sequence` でイベントの連続パターンを検出します。
+`CEP.skip_until` で条件を満たすまでイベントをスキップします。
+
+```favnir
+bind result <- CEP.sequence(events, preds)
+bind tail   <- CEP.skip_until(events, is_error)
+```
+
+詳細は [CEP パターンレシピ](/cookbook/cep-patterns) を参照してください。
+
+---
+
+## ストリーム結合（Join）
+
+`Stream.join_inner` / `Stream.join_left` で時間ウィンドウ内のキーマッチング結合を行います。
+
+```favnir
+stage Join: (Stream<Order>, Stream<Customer>) -> Stream<EnrichedOrder> = |(orders, customers)| {
+  Stream.join_inner(orders, customers, |o, c| o.customer_id == c.id, 60)
+}
+```

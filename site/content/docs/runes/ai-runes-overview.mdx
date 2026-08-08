@@ -1,0 +1,36 @@
+# AI Runes Overview
+
+Favnir の AI-Native Stage Layer を構成する 9 つの Rune 群の概要。
+
+## Embedding
+
+- **`Rune.embed`** — 統一埋め込みインターフェース（OpenAI / Cohere / ローカルモデル）
+- **`Rune.vec`** — ベクトル演算（normalize / dot / cosine_similarity / euclidean_distance）
+
+## Vector Databases
+
+- **`Rune.pinecone`** — Pinecone ベクトルDB（upsert / query / delete / fetch / list_indexes）
+- **`Rune.pgvector`** — PostgreSQL ベクトル拡張（upsert / query / create_index）
+- **`Rune.weaviate`** — Weaviate ベクトルDB（upsert / query / schema_create）
+- **`Rune.qdrant`** — Qdrant ベクトルDB（upsert / query / collection_create）
+
+## Inference & Serving
+
+- **`Rune.inference`** — ストリーミング ML 推論（inference_batch / stream_with_backpressure / stream_with_sla / stateful_score）
+- **`Rune.serve`** — モデルサービングエンドポイント（serve_stage / serve_pipeline / with_rate_limit / openapi_schema）
+
+## Feature Engineering
+
+- **`Rune.featurestore`** — 型安全フィーチャーストア（define_feature / get / get_batch / get_version / get_at）
+
+## Lint Rules（W055〜W059）
+
+AI パイプライン特有のアンチパターンを静的解析で検出する:
+
+| コード | 検出内容 |
+|---|---|
+| W055 | 型なし LLM 出力をそのまま下流に流す |
+| W056 | 埋め込み次元の暗黙的キャスト |
+| W057 | ベクトル DB への upsert なしの query |
+| W058 | ストリーミング推論ステージでのバッファなし直接処理 |
+| W059 | LLM 呼び出しのリトライなし |

@@ -45,3 +45,11 @@ fn Pinecone.describe_index_stats(index: String) -> Result<String, String> =
     Env.get_or("PINECONE_BASE_URL", "https://api.pinecone.io") ++ "/describe_index_stats",
     { "index": index }
   )
+
+// インデックス一覧を取得する（list_indexes）
+// NOTE: Pinecone /indexes は GET だが Http.get_with_body 実装まで post_json で代替
+fn Pinecone.list_indexes() -> Result<List<String>, String> =
+  Http.post_json(
+    Env.get_or("PINECONE_BASE_URL", "https://api.pinecone.io") ++ "/indexes",
+    {}
+  )

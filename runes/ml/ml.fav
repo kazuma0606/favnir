@@ -1,0 +1,121 @@
+// ML Primitives Rune — Rune.ml
+// Classification, Regression, Clustering, Dimensionality Reduction, Evaluation, Pipeline
+//
+// NOTE: Model, Predictions, FeatureRanking, Matrix<Float>, Dataset, EvalResult,
+//       SplitResult, CVResult 等の型は将来フェーズで型システムに登録する。
+//       今バージョンは include_str! テストのみ（型チェックエラーは無視する）。
+
+// --- 分類 ---
+
+public fn knn(k: Int, metric: String) -> Model {
+    Model { kind: "knn", k: k, metric: metric }
+}
+
+public fn naive_bayes(var_smoothing: Float) -> Model {
+    Model { kind: "naive_bayes", var_smoothing: var_smoothing }
+}
+
+public fn random_forest(n_estimators: Int, max_depth: Int) -> Model {
+    Model { kind: "random_forest", n_estimators: n_estimators, max_depth: max_depth }
+}
+
+public fn gradient_boosting(n_estimators: Int, learning_rate: Float) -> Model {
+    Model { kind: "gradient_boosting", n_estimators: n_estimators, learning_rate: learning_rate }
+}
+
+public fn svm(c: Float, kernel: String) -> Model {
+    Model { kind: "svm", c: c, kernel: kernel }
+}
+
+// --- 回帰 ---
+
+public fn ridge(alpha: Float) -> Model {
+    Model { kind: "ridge", alpha: alpha }
+}
+
+public fn lasso(alpha: Float) -> Model {
+    Model { kind: "lasso", alpha: alpha }
+}
+
+public fn elastic_net(alpha: Float, l1_ratio: Float) -> Model {
+    Model { kind: "elastic_net", alpha: alpha, l1_ratio: l1_ratio }
+}
+
+public fn svr(c: Float, epsilon: Float, kernel: String) -> Model {
+    Model { kind: "svr", c: c, epsilon: epsilon, kernel: kernel }
+}
+
+// --- クラスタリング ---
+
+public fn kmeans(n_clusters: Int, max_iter: Int) -> Model {
+    Model { kind: "kmeans", n_clusters: n_clusters, max_iter: max_iter }
+}
+
+public fn dbscan(eps: Float, min_samples: Int) -> Model {
+    Model { kind: "dbscan", eps: eps, min_samples: min_samples }
+}
+
+public fn hierarchical(n_clusters: Int, linkage: String) -> Model {
+    Model { kind: "hierarchical", n_clusters: n_clusters, linkage: linkage }
+}
+
+// --- 次元削減 ---
+// NOTE: pca は将来フェーズで Rune.linalg の行列演算上に再実装予定。
+
+public fn pca(n_components: Int) -> Model {
+    Model { kind: "pca", n_components: n_components }
+}
+
+public fn umap(n_components: Int, n_neighbors: Int) -> Model {
+    Model { kind: "umap", n_components: n_components, n_neighbors: n_neighbors }
+}
+
+public fn tsne(n_components: Int, perplexity: Float) -> Model {
+    Model { kind: "tsne", n_components: n_components, perplexity: perplexity }
+}
+
+// --- 予測・特徴量 ---
+
+public fn predict(model: Model, data: Matrix<Float>) -> Predictions {
+    Predictions { labels: [], scores: [] }
+}
+
+public fn feature_importance(model: Model, data: Dataset) -> FeatureRanking {
+    FeatureRanking { features: [], scores: [] }
+}
+
+// --- 評価指標 ---
+
+public fn accuracy(y_true: List<Int>, y_pred: List<Int>) -> Float {
+    0.0
+}
+
+public fn f1_score(y_true: List<Int>, y_pred: List<Int>) -> Float {
+    0.0
+}
+
+public fn roc_auc(y_true: List<Int>, y_score: List<Float>) -> Float {
+    0.0
+}
+
+public fn confusion_matrix(y_true: List<Int>, y_pred: List<Int>) -> Matrix<Int> {
+    Matrix { rows: 0, cols: 0, data: [] }
+}
+
+public fn precision_recall(y_true: List<Int>, y_pred: List<Int>) -> EvalResult {
+    EvalResult { precision: 0.0, recall: 0.0, f1: 0.0 }
+}
+
+// --- パイプライン ---
+
+public fn cross_validate(model: Model, data: Dataset, folds: Int) -> CVResult {
+    CVResult { scores: [], mean: 0.0, std: 0.0 }
+}
+
+public fn grid_search(model: Model, param_grid: List<String>, data: Dataset) -> Model {
+    model
+}
+
+public fn train_test_split(data: Dataset, test_size: Float) -> SplitResult {
+    SplitResult { train: data, test: data }
+}

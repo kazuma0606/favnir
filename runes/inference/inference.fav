@@ -1,0 +1,26 @@
+// inference Rune — ストリーミング ML 推論
+// inference_batch, stream_with_backpressure, stream_with_sla, stateful_score
+//
+// NOTE: List<Float> は Vec<Float>[N] の将来フェーズ登録までのプレースホルダー。
+//       StreamingInferenceInterface — ストリーミング推論統一インターフェース（将来フェーズ）
+//       include_str! テストのみ（型チェックエラーは無視する）。
+
+// バッチ推論を実行する
+public fn inference_batch(embeddings: List<List<Float>>, model: String, batch_size: Int) -> List<String> {
+    []
+}
+
+// バックプレッシャー制御付きストリーミング推論
+public fn stream_with_backpressure(stream: String, model: String, buffer_size: Int) -> List<String> {
+    []
+}
+
+// レイテンシ SLA 付きストリーミング推論
+public fn stream_with_sla(stream: String, model: String, max_latency_ms: Int) -> List<String> {
+    []
+}
+
+// セッション単位の状態を保持するスコアリング
+public fn stateful_score(session_id: String, embedding: List<Float>, model: String) -> String {
+    ""
+}

@@ -1,0 +1,68 @@
+---
+title: Enterprise Deployment — Blue/Green, Canary, HA
+---
+
+# Enterprise Deployment
+
+Favnir supports multiple enterprise deployment strategies for zero-downtime releases and high availability.
+
+## Blue/Green Deployment
+
+Blue/Green deployment maintains two identical environments (Blue and Green). Traffic is switched from one to the other after validation.
+
+```bash
+fav deploy pipeline.fav --strategy blue-green --env prod
+```
+
+Steps:
+1. Deploy new version to the inactive (Green) environment
+2. Run smoke tests against Green
+3. Switch router to Green — Blue becomes standby
+4. Roll back instantly by switching back to Blue if issues arise
+
+## Canary Deployment
+
+Canary releases gradually shift traffic to the new version, reducing blast radius.
+
+```bash
+fav deploy pipeline.fav --strategy canary --canary-weight 10 --env prod
+```
+
+- `--canary-weight 10` routes 10% of traffic to the new version
+- Increment weight incrementally: 10 → 25 → 50 → 100
+- Monitor error rates and latency before each step
+
+```bash
+# Promote canary to full traffic after validation
+fav deploy pipeline.fav --strategy canary --canary-weight 100 --env prod
+```
+
+## HA (High Availability)
+
+Run multiple replicas with automatic failover and health checks.
+
+```bash
+fav run pipeline.fav --ha --replica 3
+```
+
+- Primary replica starts on port 8080
+- Secondary replicas start on ports 8081, 8082, ...
+- `/healthz` endpoint returns `200 OK` when all replicas are healthy
+- Automatic failover triggers when primary becomes unresponsive
+
+```bash
+# Check health status
+curl http://localhost:8080/healthz
+```
+
+Expected response: `{"status": "ok", "replicas": 3}`
+
+## Combining Strategies
+
+Blue/Green and canary can be combined with HA for maximum reliability:
+
+```bash
+fav deploy pipeline.fav --strategy blue-green --ha --replica 2 --env prod
+```
+
+This runs 2 HA replicas per environment slot, giving 4 total instances during the cutover window.

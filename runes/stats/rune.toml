@@ -1,0 +1,8 @@
+[rune]
+name        = "stats"
+version     = "0.1.0"
+description = "Statistics Rune for Favnir — descriptive stats, hypothesis tests, regression, anomaly detection"
+entry       = "stats.fav"
+effects     = []
+
+[dependencies]

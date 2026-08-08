@@ -13,10 +13,11 @@ infra/snowflake/.terraform.lock.hcl
 infra/snowflake/terraform.tfvars
 infra/snowflake/*.p8
 infra/snowflake/*.pub
-# e2e-demo terraform state / provider binaries
+# e2e-demo terraform state / provider binaries / secrets
 infra/e2e-demo/**/.terraform/
 infra/e2e-demo/**/*.tfstate
 infra/e2e-demo/**/*.tfstate.backup
+infra/e2e-demo/**/*.tfvars
 # fav binary build artifacts (Linux / AL2023)
 fav/fav-linux
 fav/fav-al2023

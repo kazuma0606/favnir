@@ -1,0 +1,80 @@
+---
+title: Enterprise Governance — Schema, Catalog, Policy
+---
+
+# Enterprise Governance
+
+Favnir provides built-in governance tooling for enterprise data pipelines: Schema Migration, Data Catalog integration, and Policy-as-Code enforcement.
+
+## Schema Migration
+
+Track and apply schema changes safely across environments.
+
+```bash
+# Apply pending schema migrations
+fav schema migrate --env prod
+
+# Preview migrations without applying
+fav schema migrate --dry-run --env staging
+```
+
+Schema migrations are versioned and applied in order. Each migration is idempotent and recorded in the `_fav_migrations` table.
+
+## Data Catalog
+
+Register pipeline outputs and search across your organization's data assets.
+
+```bash
+# Publish pipeline outputs to the catalog
+fav catalog push pipeline.fav --env prod
+
+# Search for datasets by name or tag
+fav catalog search "customer_events"
+```
+
+The Data Catalog stores schema, lineage, and ownership metadata for every pipeline output. Teams can discover datasets without reading source code.
+
+## Policy-as-Code
+
+Define and enforce data governance policies as code. Policies are checked at compile time and CI.
+
+```favnir
+policy no_pii_in_logs {
+  deny stage if stage.outputs_contain_field("email")
+  deny stage if stage.outputs_contain_field("ssn")
+  message: "PII fields must not appear in log outputs (E0426)"
+}
+```
+
+```bash
+# Check pipeline against all policies
+fav policy check pipeline.fav --policy-dir ./policies/
+
+# List active policies
+fav policy list --policy-dir ./policies/
+```
+
+Policy violations are reported as structured errors:
+
+```
+error[E0426]: policy violation — no_pii_in_logs
+  --> pipeline.fav:12:5
+   |
+12 |   log(row.email)
+   |   ^^^^^^^^^^^^^^ field 'email' is classified as PII
+   |
+   = policy: no_pii_in_logs
+   = help: remove PII from log outputs or apply data masking
+```
+
+`E0426` is the canonical error code for Policy-as-Code violations in Favnir.
+
+## Governance Dashboard
+
+All three systems integrate with the Favnir governance dashboard:
+
+```bash
+fav governance status --env prod
+```
+
+This shows active schema version, catalog sync status, and policy compliance score.

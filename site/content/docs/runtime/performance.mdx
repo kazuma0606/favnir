@@ -1,0 +1,98 @@
+---
+title: Performance Tuning Guide
+description: Optimize Favnir pipelines with AOT compilation, incremental builds, parallel execution, DAG optimization, and backpressure control.
+---
+
+# Performance Tuning Guide
+
+This guide covers the key techniques for maximizing Favnir pipeline performance.
+
+## AOT Compilation
+
+Compile pipelines to native binaries for maximum throughput.
+
+```bash
+fav build pipeline.fav --link -o dist/pipeline
+
+fav build pipeline.fav --link --ci -o dist/pipeline
+```
+
+Use `fav bench` to compare VM vs AOT performance:
+
+```bash
+fav bench pipeline.fav --runs 10
+```
+
+Output:
+
+```
+Mode     | Mean (ms) | P99 (ms)
+---------|-----------|----------
+VM       |     8.200 |    9.100
+AOT      |     1.400 |    1.600
+Speedup  |    5.86x  |
+```
+
+## Incremental Compilation
+
+Favnir caches compilation artifacts in `.fav-cache/`. Only changed stages are recompiled.
+
+```bash
+fav run pipeline.fav
+fav run pipeline.fav
+```
+
+The second run returns `cache hit: (skipped recompile)` for unchanged sources.
+
+## Parallel Execution
+
+Use `par` to run independent stages concurrently:
+
+```
+pipeline P {
+    par [StageA, StageB]
+}
+```
+
+## DAG Optimization
+
+Favnir automatically eliminates dead stages and fuses consecutive pure stages.
+Use `fav bench` to verify the speedup after optimization:
+
+```bash
+fav bench pipeline.fav --runs 5
+```
+
+## Backpressure Control
+
+Configure `[backpressure]` in `fav.toml` to prevent queue overflow:
+
+```toml
+[backpressure]
+strategy = "block"
+max_queue_depth = 500
+warn_threshold = 400
+```
+
+## Bottleneck Identification Workflow
+
+```bash
+fav profile pipeline.fav
+
+fav build pipeline.fav --link -o dist/pipeline
+
+fav bench pipeline.fav --runs 10
+```
+
+## Regression Detection
+
+Track performance over time with benchmark comparison:
+
+```toml
+[bench]
+regression_threshold_pct = 10
+```
+
+```bash
+fav bench pipeline.fav --runs 10
+```

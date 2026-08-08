@@ -1,0 +1,8 @@
+[rune]
+name        = "vec"
+version     = "0.1.0"
+description = "Vector Stage Primitives for Favnir — normalize, dot product, cosine similarity, euclidean distance, batch operations, dimension projection"
+entry       = "vec.fav"
+effects     = []
+
+[dependencies]

@@ -11,11 +11,11 @@ fn validate_order(row: Int, o: Order) -> Result<Order, ValidationError> {
 }
 
 fn validate_all(orders: List<Order>) -> LoadResult {
-    let pairs   = List.indexed(orders)
-    let results = List.map(pairs, fn (pair) {
+    bind pairs        <- List.indexed(orders)
+    bind results      <- List.map(pairs, fn (pair) {
         validate_order(pair.index, pair.value)
     })
-    let valid_orders = List.filter_map(results, fn (r) { Result.to_option(r) })
-    let errors       = List.filter_map(results, fn (r) { Result.err_to_option(r) })
+    bind valid_orders <- List.filter_map(results, fn (r) { Result.to_option(r) })
+    bind errors       <- List.filter_map(results, fn (r) { Result.err_to_option(r) })
     { orders: valid_orders, errors }
 }

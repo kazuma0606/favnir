@@ -1,0 +1,56 @@
+---
+title: "Math & Science Runes — 概要"
+description: "Favnir の数学・科学計算 Rune 群（v65.1〜v65.8）の概要"
+---
+
+# Math & Science Runes
+
+Favnir v65.x では、科学計算・機械学習のための Rune 群を追加しました。
+型安全に数学的操作を記述できる「Math & Science Foundation」の基盤です。
+
+## Rune 一覧
+
+| Rune | バージョン | 概要 |
+|---|---|---|
+| `Rune.linalg` | v65.1.0 | 線形代数（行列演算・固有値分解・LU/QR/SVD）|
+| `Rune.stats` | v65.2.0 | 統計解析（記述統計・仮説検定・回帰分析）|
+| `Rune.autodiff` | v65.3.0 | 自動微分（逆伝播・Jacobian・Hessian）|
+| `Rune.optim` | v65.4.0 | 最適化（SGD・Adam・L-BFGS・スケジューラ）|
+| `Rune.numeric` | v65.5.0 | 数値計算（積分・ODE・FFT・補間・根探索）|
+| `Rune.timeseries` | v65.6.0 | 時系列（ARIMA・SARIMA・STL・変化点検出）|
+| `Rune.ml` | v65.7.0 | ML Primitives（分類・回帰・クラスタリング・次元削減）|
+
+## Math Lint Rules（v65.8.0）
+
+W050〜W054 により、数学 Rune 特有のアンチパターンを静的解析で検出できます。
+
+| コード | 検出内容 |
+|---|---|
+| W050 | 行列次元の不一致（動的パス） |
+| W051 | 数値不安定な演算（ゼロ除算リスク）|
+| W052 | 統計的有意性なしの比較 |
+| W053 | 自動微分ループでの in-place 変更 |
+| W054 | 最適化ループの収束条件未設定 |
+
+## 利用例
+
+```favnir
+// Rune.linalg — 行列演算
+public stage MatMulStage: (Matrix<Float>, Matrix<Float>) -> Matrix<Float> = |(a, b)| {
+    Rune.linalg.matmul(a, b)
+}
+
+// Rune.stats — 記述統計
+public stage DescribeData: List<Float> -> Stats = |xs| {
+    Rune.stats.describe(xs)
+}
+
+// Rune.ml — 分類パイプライン
+public stage Classify: Matrix<Float> -> Predictions = |features| {
+    Rune.ml.predict(Rune.ml.random_forest(100, 10), features)
+}
+```
+
+## 次のマイルストーン
+
+v66.0.0「Math & Science Foundation」宣言で、本スプリントの成果を正式リリースします。

@@ -1,0 +1,21 @@
+// Qdrant Rune — 高性能ベクトルデータベース
+// upsert, query, collection management
+//
+// NOTE: List<Float> は Vec<Float>[N] の将来フェーズ登録までのプレースホルダー。
+//       VectorDBInterface — VectorDB 統一インターフェース（将来フェーズで pgvector と統合予定）
+//       include_str! テストのみ（型チェックエラーは無視する）。
+
+// ベクトルポイントを追加・更新する
+public fn upsert(collection: String, id: String, vector: List<Float>, payload: String) -> String {
+    ""
+}
+
+// 近傍ベクトルを検索する
+public fn query(collection: String, vector: List<Float>, top_k: Int) -> List<String> {
+    []
+}
+
+// コレクションを作成する
+public fn collection_create(collection: String, vector_size: Int) -> String {
+    ""
+}

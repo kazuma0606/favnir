@@ -1,6 +1,6 @@
-import runes/csv
-import runes/postgres
-import runes/bigquery
+import rune "csv"
+import rune "postgres"
+import rune "bigquery"
 
 fn load_csv(ctx: AppCtx, path: String) -> List<Order> {
     bind raw <- Csv.read_file(path)
@@ -18,7 +18,7 @@ fn load_csv(ctx: AppCtx, path: String) -> List<Order> {
 }
 
 fn write_postgres(ctx: AppCtx, orders: List<Order>) -> Int {
-    let rows = List.map(orders, fn (o) {
+    bind rows <- List.map(orders, fn (o) {
         [o.order_id, o.customer, o.product, Int.to_string(o.quantity), Float.to_string(o.price)]
     })
     Postgres.execute_raw(
@@ -28,7 +28,7 @@ fn write_postgres(ctx: AppCtx, orders: List<Order>) -> Int {
 }
 
 fn sync_bigquery(ctx: AppCtx, orders: List<Order>) -> Int {
-    let payload = List.map(orders, fn (o) {
+    bind payload <- List.map(orders, fn (o) {
         { order_id: o.order_id, customer: o.customer, quantity: o.quantity, price: o.price }
     })
     BigQuery.insert("orders_dataset", "orders_table", payload)

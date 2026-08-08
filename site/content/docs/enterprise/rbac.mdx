@@ -1,0 +1,41 @@
+# RBAC — ロールベースアクセス制御
+
+Favnir は `fav.toml` の `[security.rbac]` セクションでロールベースアクセス制御（RBAC）を設定できます。
+Rune へのアクセスをロールで制限し、最小権限の原則を実現します。
+
+## 設定例
+
+```toml
+[security.rbac]
+roles = ["reader", "writer", "admin"]
+
+[security.rbac.bindings]
+"kafka"     = ["reader", "writer", "admin"]
+"snowflake" = ["writer", "admin"]
+"admin_db"  = ["admin"]
+```
+
+## ロールバインディング
+
+`bindings` セクションでは Rune 名とアクセス可能なロールの一覧を指定します。
+`roles` に列挙されていないロールからのアクセスは `E0424`（RBAC アクセス拒否）エラーになります。
+
+バインディングに記載のない Rune は制限なし（全ロールがアクセス可能）です。
+
+## 実行時ロール指定
+
+```bash
+fav run pipeline.fav --role reader
+```
+
+## エラーコード
+
+| コード | 内容 |
+|---|---|
+| E0424 | RBAC アクセス拒否 — 現在のロールに Rune へのアクセス権がありません |
+
+## 関連ドキュメント
+
+- [シークレット管理](./secrets)
+- [コンプライアンスレポート](./compliance)
+- [Enterprise Security 概要](../enterprise-security-overview)

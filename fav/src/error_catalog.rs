@@ -7,6 +7,8 @@ pub struct ErrorEntry {
     pub description: &'static str,
     pub example: &'static str,
     pub fix: &'static str,
+    /// v60.6.0: Markdown 形式の詳細説明
+    pub long_description: Option<&'static str>,
     /// v45.6.0: static suggestion text shown with `fav explain <code>`.
     pub suggestion: Option<&'static str>,
 }
@@ -20,6 +22,7 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
         description: "A stage referenced in a seq definition does not exist.",
         example: "seq Bad = NonExistentStage |> OtherStage  // E0101: NonExistentStage undefined",
         fix: "Check the stage name for typos, or define the stage before using it in a seq.",
+        long_description: Some("See `fix` field for remediation details."),
         suggestion: Some("Check stage names for typos, or verify the return type matches the declared type."),
     },
     ErrorEntry {
@@ -29,6 +32,7 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
         description: "An identifier used in a seq or pipeline could not be resolved.",
         example: "seq S = Unknown |> Transform  // E0102: Unknown is not defined",
         fix: "Define the missing stage or function, or fix the typo.",
+        long_description: Some("See `fix` field for remediation details."),
         suggestion: Some("Use `bind x <- expr` to introduce a variable, or check for typos in the name."),
     },
     ErrorEntry {
@@ -38,6 +42,12 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
         description: "The output type of one stage does not match the input type of the next.",
         example: "stage A: Int -> String = ...\nstage B: Int -> Int = ...\nseq Bad = A |> B  // E0103: String -> Int mismatch",
         fix: "Make sure the output type of each stage matches the input type of the next stage.",
+        long_description: Some(
+            "The output type of a pipeline stage does not match what the next stage expects.\n\
+             When the types are records or named types, the compiler shows a structural diff hint\n\
+             listing missing fields or scalar vs. record mismatches.\n\
+             Common causes: missing record fields, List element type mismatch, scalar vs. record type."
+        ),
         suggestion: Some("Add a transformation stage between them, or change one stage's type to match."),
     },
     ErrorEntry {
@@ -47,6 +57,7 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
         description: "A type with this name was already defined in the same scope.",
         example: "type Point = { x: Int }\ntype Point = { y: Int }  // E0107",
         fix: "Remove or rename the duplicate type definition.",
+        long_description: Some("See `fix` field for remediation details."),
         suggestion: Some("Rename one of the type definitions, or remove the earlier one if it is no longer needed."),
     },
     ErrorEntry {
@@ -56,6 +67,7 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
         description: "A function with this name was already defined.",
         example: "fn foo() -> Int { 1 }\nfn foo() -> Int { 2 }  // E0108",
         fix: "Remove or rename the duplicate function.",
+        long_description: Some("See `fix` field for remediation details."),
         suggestion: Some("Rename one of the functions, or remove the earlier definition if it is redundant."),
     },
     ErrorEntry {
@@ -65,6 +77,7 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
         description: "A stage with this name was already defined.",
         example: "stage Double: Int -> Int = |x| x * 2\nstage Double: Int -> Int = |x| x + x  // E0109",
         fix: "Remove or rename the duplicate stage.",
+        long_description: Some("See `fix` field for remediation details."),
         suggestion: Some("Rename one of the stages, or remove the duplicate stage definition."),
     },
     ErrorEntry {
@@ -74,6 +87,7 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
         description: "A seq with this name was already defined.",
         example: "seq Pipeline = A |> B\nseq Pipeline = C |> D  // E0110",
         fix: "Remove or rename the duplicate seq.",
+        long_description: Some("See `fix` field for remediation details."),
         suggestion: Some("Rename one of the seq definitions, or remove the duplicate."),
     },
     ErrorEntry {
@@ -83,6 +97,7 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
         description: "An abstract seq requires a field that was not provided in the implementation.",
         example: "interface I { process: Int -> Int }\n// impl missing `process` field → E0112",
         fix: "Provide all required fields in the interface implementation.",
+        long_description: Some("See `fix` field for remediation details."),
         suggestion: Some("Add the missing field to the implementation block, matching the signature declared in the interface."),
     },
     ErrorEntry {
@@ -92,6 +107,7 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
         description: "A variant was constructed with the wrong number of fields.",
         example: "type Color = | Red | Green\nbind c <- Red(42)  // E0136: Red takes no payload",
         fix: "Check the variant definition and use the correct number of arguments.",
+        long_description: Some("See `fix` field for remediation details."),
         suggestion: Some("Check the variant definition and provide exactly the number of fields it expects. No-payload variants take no arguments."),
     },
     // ── E001x: bind / 変数束縛エラー ────────────────────────────────────
@@ -102,6 +118,7 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
         description: "A variable name was bound more than once in the same scope. Favnir bindings are immutable — `bind x` can only be introduced once.",
         example: "fn bad(n: Int) -> Int {\n    bind x <- n\n    bind x <- n  // E0018: x already bound\n    x\n}",
         fix: "Use a different name for the second binding (e.g. `bind x2 <- ...`), or discard the value with `bind _ <- ...`.",
+        long_description: Some("See `fix` field for remediation details."),
         suggestion: Some("Use a different variable name, or remove the earlier binding if it is no longer needed."),
     },
     // ── E02xx: 型エラー ──────────────────────────────────────────────────
@@ -112,6 +129,7 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
         description: "A method was called on a capability interface that does not define it.",
         example: "fn run(ctx: DbRead) { ctx.execute(\"INSERT ...\", List.empty()) }  // E0020: DbRead has no method `execute`",
         fix: "Use the correct interface (e.g. DbWrite for execute). Available implementations: PostgresDb, SnowflakeDb.",
+        long_description: Some("See `fix` field for remediation details."),
         suggestion: Some("Switch to the interface that provides this method, or check the interface definition for the correct method name."),
     },
     ErrorEntry {
@@ -121,6 +139,7 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
         description: "A capability field was accessed on a context interface that does not include it.",
         example: "fn run(ctx: LoadCtx) { ctx.storage.put(...) }  // E0021: LoadCtx has no field `storage`",
         fix: "Switch to a context that includes this capability. WriteCtx provides storage; LoadCtx provides db, io, env.",
+        long_description: Some("See `fix` field for remediation details."),
         suggestion: Some("Switch to a context type that includes this capability, or thread the required capability through the function signature."),
     },
     ErrorEntry {
@@ -130,6 +149,7 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
         description: "A ctx-aware seq pipeline (seq P(ctx) = ...) was called with 1 argument instead of 2, or a plain seq pipeline was called with 2 arguments.",
         example: "seq Pipeline(ctx) = A |> B\nPipeline(data)  // E0022: missing ctx argument",
         fix: "Call ctx-aware pipelines as `Pipeline(ctx, data)`. Define plain pipelines as `seq P = A |> B` if ctx threading is not needed.",
+        long_description: Some("See `fix` field for remediation details."),
         suggestion: Some("Pass both ctx and data to ctx-aware pipelines: Pipeline(ctx, data). Use seq P = A |> B without (ctx) if ctx threading is not needed."),
     },
     ErrorEntry {
@@ -139,6 +159,7 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
         description: "A function calls a side-effecting namespace (IO, Postgres, AWS, etc.) without threading a capability context (ctx) argument. In non-legacy mode all side effects must be explicit capability arguments.",
         example: "fn run() -> Unit {\n    bind _ <- IO.println(\"hi\")  // E0023: ambient IO call\n    ()\n}",
         fix: "Pass an io capability through the function signature and call `ctx.io.println(\"hi\")` instead. Use `--legacy` flag to allow ambient calls during migration.",
+        long_description: Some("See `fix` field for remediation details."),
         suggestion: Some("Thread a capability context through the function signature (e.g. ctx: LoadCtx) and call ctx.io.println(...) instead of ambient IO calls."),
     },
     ErrorEntry {
@@ -148,6 +169,7 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
         description: "A value was passed to a function that expects a different stage in a type state sequence. The compiler inferred a type state sequence (e.g. Loaded → Validated → Transformed) from function signatures in this file, and detected a skipped phase.",
         example: "fn validate(d: Loaded) -> Result<Validated, String>\nfn transform(d: Validated) -> Result<Transformed, String>\n\ntransform(rows)  // E0024: got Loaded, expected Validated",
         fix: "Call the intermediate transformation function first. Check the type state sequence inferred from this file's function signatures.",
+        long_description: Some("See `fix` field for remediation details."),
         suggestion: Some("Call the intermediate transformation function first to advance the value to the expected type state."),
     },
     ErrorEntry {
@@ -157,6 +179,7 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
         description: "The `!Effect` notation is no longer supported in standard mode. All side effects must be expressed as capability context arguments (e.g. `ctx: LoadCtx`) rather than `!Postgres` annotations.",
         example: "fn load() -> Result<Loaded, String> !Postgres  // E0025",
         fix: "Migrate to capability-context style: `fn load(ctx: LoadCtx) -> Result<Loaded, String>`.\nRun `fav migrate --from-effects <file>` to auto-migrate.\nUse `--legacy` flag to suppress this error during migration.",
+        long_description: Some("See `fix` field for remediation details."),
         suggestion: Some("Migrate to capability-context style: fn load(ctx: LoadCtx) -> .... Run fav migrate --from-effects <file> to auto-migrate."),
     },
     ErrorEntry {
@@ -166,6 +189,7 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
         description: "A value of one type was used where a different type was expected.",
         example: "fn double(n: Int) -> Int {\n    \"not a number\"  // E0213: expected Int, got String\n}",
         fix: "Make sure the expression type matches the expected type. Use `fav check` for full context.",
+        long_description: Some("See `fix` field for remediation details."),
         suggestion: Some("Ensure the value type matches the expected type. Add a type annotation or use a conversion function."),
     },
     ErrorEntry {
@@ -175,6 +199,7 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
         description: "A type name was used that has not been defined.",
         example: "fn f(x: UnknownType) -> Int { 0 }  // E0214: UnknownType is not defined",
         fix: "Define the type, import it, or fix the typo.",
+        long_description: Some("See `fix` field for remediation details."),
         suggestion: Some("Check that the type is defined before it is used."),
     },
     ErrorEntry {
@@ -184,6 +209,7 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
         description: "A function was called with the wrong number of arguments.",
         example: "fn add(a: Int, b: Int) -> Int { a + b }\nadd(1)  // E0215: expected 2 args, got 1",
         fix: "Pass the correct number of arguments to the function.",
+        long_description: Some("See `fix` field for remediation details."),
         suggestion: Some("Check the number of arguments against the function signature."),
     },
     ErrorEntry {
@@ -193,6 +219,7 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
         description: "A field was accessed on a record type that does not have that field.",
         example: "type Point = { x: Int }\nbind p <- Point { x: 1 }\np.y  // E0218: no field `y` on Point",
         fix: "Check the field name for typos, or add the field to the type definition.",
+        long_description: Some("See `fix` field for remediation details."),
         suggestion: Some("Use `record.field_name` with a field that exists on the type."),
     },
     ErrorEntry {
@@ -202,6 +229,7 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
         description: "A field was accessed on a value that is not a record type.",
         example: "bind n <- 42\nn.value  // E0219: Int is not a record",
         fix: "Only record types support field access. Check that the value is a record.",
+        long_description: Some("See `fix` field for remediation details."),
         suggestion: Some("Check that the value is a record type before accessing its fields."),
     },
     ErrorEntry {
@@ -211,6 +239,7 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
         description: "An interface name used in `impl` or type constraint was not found.",
         example: "impl Printable for MyType { ... }  // E0220: Printable not defined",
         fix: "Define the interface with `interface Printable { ... }` or fix the typo.",
+        long_description: Some("See `fix` field for remediation details."),
         suggestion: Some("Define the interface with `interface Name { ... }` or check for typos."),
     },
     ErrorEntry {
@@ -220,6 +249,7 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
         description: "A type was used where an interface implementation is required, but the impl is missing.",
         example: "interface Show { show: Self -> String }\nfn print<T with Show>(v: T) -> Unit !Io { ... }\nprint(42)  // E0221: Int does not implement Show",
         fix: "Add `impl Show for Int { show = |n| String.from_int(n) }`.",
+        long_description: Some("See `fix` field for remediation details."),
         suggestion: Some("Add `impl InterfaceName for TypeName { ... }` to implement the interface."),
     },
     ErrorEntry {
@@ -229,6 +259,7 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
         description: "A name was referenced that has not been defined in scope.",
         example: "fn f() -> Int { undeclared_var }  // E0222",
         fix: "Define the variable with `bind`, or declare the function before using it.",
+        long_description: Some("See `fix` field for remediation details."),
         suggestion: Some("Define the variable with `bind`, or declare the function before using it."),
     },
     ErrorEntry {
@@ -238,6 +269,7 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
         description: "Different arms of a match expression return different types.",
         example: "match x {\n    1 => \"one\"  // String\n    _ => 0      // Int — E0223\n}",
         fix: "Make all match arms return the same type.",
+        long_description: Some("See `fix` field for remediation details."),
         suggestion: Some("Make all match arms return the same type."),
     },
     ErrorEntry {
@@ -247,6 +279,7 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
         description: "A match expression does not cover all possible cases.",
         example: "type Dir = | North | South\nmatch d {\n    North => 1\n    // missing South → E0224\n}",
         fix: "Add the missing case(s) or add a wildcard arm `_ => ...`.",
+        long_description: Some("See `fix` field for remediation details."),
         suggestion: Some("Add the missing variant cases or add a wildcard arm `_ => ...`."),
     },
     ErrorEntry {
@@ -256,6 +289,7 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
         description: "A binary operator was applied to incompatible types.",
         example: "\"hello\" + 42  // E0225: cannot add String and Int",
         fix: "Make sure both operands have the correct type for the operator.",
+        long_description: Some("See `fix` field for remediation details."),
         suggestion: Some("Ensure both operands have the correct type for the operator."),
     },
     ErrorEntry {
@@ -265,6 +299,7 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
         description: "The then and else branches of an if expression return different types.",
         example: "if cond { 1 } else { \"one\" }  // E0226: Int vs String",
         fix: "Make both branches return the same type.",
+        long_description: Some("See `fix` field for remediation details."),
         suggestion: Some("Make both branches of the if expression return the same type."),
     },
     ErrorEntry {
@@ -274,6 +309,7 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
         description: "An invariant expression in a type definition has a non-Bool type.",
         example: "type PosInt = { value: Int  invariant value  // E0227: invariant must be Bool }",
         fix: "Invariant expressions must evaluate to Bool. Use a comparison: `invariant value > 0`.",
+        long_description: Some("See `fix` field for remediation details."),
         suggestion: Some("Invariant expressions must evaluate to Bool. Use a comparison like `value > 0`."),
     },
     ErrorEntry {
@@ -283,6 +319,7 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
         description: "An interface implementation provides a method with a wrong return type.",
         example: "interface Eq { eq: (Self, Self) -> Bool }\nimpl Eq for Foo { eq = |a, b| 0  // E0241: expected Bool, got Int }",
         fix: "Make the method return the type declared in the interface.",
+        long_description: Some("See `fix` field for remediation details."),
         suggestion: Some("Make the method return the type declared in the interface."),
     },
     ErrorEntry {
@@ -292,6 +329,7 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
         description: "An interface implementation provides a method with wrong parameter types.",
         example: "interface Map { map: (Self, Int -> Int) -> Self }\nimpl Map for Foo { map = |x| x  // E0242: wrong param types }",
         fix: "Make the method parameters match the types declared in the interface.",
+        long_description: Some("See `fix` field for remediation details."),
         suggestion: Some("Make the method parameters match the types declared in the interface."),
     },
     ErrorEntry {
@@ -301,6 +339,7 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
         description: "An interface method was referenced but not defined in the impl block.",
         example: "interface Show { show: Self -> String }\nimpl Show for Foo { /* missing `show` */ }  // E0243",
         fix: "Provide all required methods in the impl block.",
+        long_description: Some("See `fix` field for remediation details."),
         suggestion: Some("Provide all required methods in the impl block."),
     },
     ErrorEntry {
@@ -310,6 +349,7 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
         description: "The type named in an `impl ... for TypeName` block does not exist.",
         example: "impl Show for Ghost { ... }  // E0244: Ghost is not defined",
         fix: "Define the type before implementing an interface for it, or fix the typo.",
+        long_description: Some("See `fix` field for remediation details."),
         suggestion: Some("Define the type before implementing an interface for it, or fix the typo."),
     },
     ErrorEntry {
@@ -319,6 +359,7 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
         description: "An interface is already implemented for this type.",
         example: "impl Show for Foo { ... }\nimpl Show for Foo { ... }  // E0245",
         fix: "Remove the duplicate impl block.",
+        long_description: Some("See `fix` field for remediation details."),
         suggestion: Some("Remove the duplicate impl block."),
     },
     ErrorEntry {
@@ -328,6 +369,7 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
         description: "A type references itself without a pointer or Option wrapper, creating infinite size.",
         example: "type Tree = { left: Tree  right: Tree }  // E0251: infinite size",
         fix: "Wrap recursive fields in Option<T>: `left: Option<Tree>`.",
+        long_description: Some("See `fix` field for remediation details."),
         suggestion: Some("Wrap recursive fields in Option<T>: `field: Option<SelfType>`."),
     },
     ErrorEntry {
@@ -337,6 +379,7 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
         description: "An f-string interpolation contains a syntax error.",
         example: "bind s <- $\"Hello {  }!\"  // E0253: empty interpolation",
         fix: "Place a valid expression inside `{...}` in the f-string.",
+        long_description: Some("See `fix` field for remediation details."),
         suggestion: Some("Place a valid expression inside `{...}` in the f-string."),
     },
     ErrorEntry {
@@ -346,6 +389,7 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
         description: "An expression inside an f-string cannot be converted to a string.",
         example: "type T = { x: Int }\nbind t <- T { x: 1 }\n$\"value: {t}\"  // E0254: T does not implement Show",
         fix: "Use `Debug.show(t)` or implement Show for the type.",
+        long_description: Some("See `fix` field for remediation details."),
         suggestion: Some("Use `Debug.show(v)` or implement Show for the type."),
     },
     ErrorEntry {
@@ -355,6 +399,7 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
         description: "A stage was used as a value in a non-pipeline expression.",
         example: "stage Double: Int -> Int = |x| x * 2\nbind x <- Double  // E0274: stage used as value",
         fix: "Stages can only be used in seq definitions or with `|>`. Use a plain function instead.",
+        long_description: Some("See `fix` field for remediation details."),
         suggestion: Some("Stages can only be used in seq definitions or with `|>`. Use a plain function instead."),
     },
     // ── E03xx: エフェクト ────────────────────────────────────────────────
@@ -365,6 +410,7 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
         description: "A database operation was used in a function that does not declare `!Db`.",
         example: "fn query() -> String {\n    DB.query_raw(conn, \"SELECT 1\")  // E0310: !Db not declared\n}",
         fix: "Pass a capability context parameter: `fn query(ctx: AppCtx) -> String`.",
+        long_description: Some("See `fix` field for remediation details."),
         suggestion: Some("Pass a capability context parameter (e.g., `ctx: AppCtx`) to the function."),
     },
     ErrorEntry {
@@ -374,6 +420,7 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
         description: "An auth operation was used in a function that does not declare `!Auth`.",
         example: "fn verify(token: String) -> Bool {\n    auth.verify_jwt(token, secret)  // E0311: !Auth not declared\n}",
         fix: "Pass a capability context parameter: `fn verify(ctx: AppCtx, token: String) -> Bool`.",
+        long_description: Some("See `fix` field for remediation details."),
         suggestion: Some("Pass a capability context parameter (e.g., `ctx: AppCtx`) to the function."),
     },
     ErrorEntry {
@@ -383,6 +430,7 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
         description: "An environment variable operation was used without declaring `!Env`.",
         example: "fn cfg() -> String {\n    Env.require_raw(\"API_KEY\")  // E0312: !Env not declared\n}",
         fix: "Pass a capability context parameter: `fn cfg(ctx: AppCtx) -> String`.",
+        long_description: Some("See `fix` field for remediation details."),
         suggestion: Some("Pass a capability context parameter (e.g., `ctx: AppCtx`) to the function."),
     },
     ErrorEntry {
@@ -392,6 +440,7 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
         description: "An AWS SDK operation was used in a function that does not declare `!AWS`.",
         example: "fn upload(key: String) -> Unit {\n    AWS.s3_put_object_raw(...)  // E0313: !AWS not declared\n}",
         fix: "Pass a capability context parameter: `fn upload(ctx: AppCtx, key: String) -> Unit`.",
+        long_description: Some("See `fix` field for remediation details."),
         suggestion: Some("Pass a capability context parameter (e.g., `ctx: AppCtx`) to the function."),
     },
     ErrorEntry {
@@ -401,6 +450,7 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
         description: "A Snowflake operation was used in a function that does not declare `!Snowflake`.",
         example: "fn run(sql: String) -> Result<String, String> {\n    Snowflake.execute_raw(sql)  // E0314: !Snowflake not declared\n}",
         fix: "Pass a capability context parameter: `fn run(ctx: AppCtx, sql: String) -> Result<String, String>`.",
+        long_description: Some("See `fix` field for remediation details."),
         suggestion: Some("Pass a capability context parameter (e.g., `ctx: AppCtx`) to the function."),
     },
     ErrorEntry {
@@ -410,6 +460,7 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
         description: "A Postgres operation was used in a function that does not declare `!Postgres`.",
         example: "fn run(sql: String) -> Result<String, String> {\n    Postgres.query_raw(sql, \"[]\")  // E0315: !Postgres not declared\n}",
         fix: "Pass a capability context parameter: `fn run(ctx: AppCtx, sql: String) -> Result<String, String>`.",
+        long_description: Some("See `fix` field for remediation details."),
         suggestion: Some("Pass a capability context parameter (e.g., `ctx: AppCtx`) to the function."),
     },
     ErrorEntry {
@@ -419,6 +470,7 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
         description: "A Kafka/stream operation was used in a function that does not declare `!Stream`.",
         example: "fn run(topic: String) -> Result<Unit, String> {\n    Kafka.produce_raw(brokers, topic, \"k\", \"v\")  // E0319: !Stream not declared\n}",
         fix: "Pass a capability context parameter: `fn run(ctx: AppCtx, topic: String) -> Result<Unit, String>`.",
+        long_description: Some("See `fix` field for remediation details."),
         suggestion: Some("Pass a capability context parameter (e.g., `ctx: AppCtx`) to the function."),
     },
     ErrorEntry {
@@ -428,6 +480,7 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
         description: "A Redis operation was used in a function that does not declare `!Redis`.",
         example: "fn run(key: String) -> Result<String, String> {\n    Redis.get_raw(conn, key)  // E0320: !Redis not declared\n}",
         fix: "Pass a capability context parameter: `fn run(ctx: AppCtx, key: String) -> Result<String, String>`.",
+        long_description: Some("See `fix` field for remediation details."),
         suggestion: Some("Pass a capability context parameter (e.g., `ctx: AppCtx`) to the function."),
     },
     ErrorEntry {
@@ -437,6 +490,7 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
         description: "A MySQL operation was used in a function that does not declare `!MySQL`.",
         example: "fn run(sql: String) -> Result<String, String> {\n    MySQL.query_raw(conn, sql, \"[]\")  // E0321: !MySQL not declared\n}",
         fix: "Pass a capability context parameter: `fn run(ctx: AppCtx, sql: String) -> Result<String, String>`.",
+        long_description: Some("See `fix` field for remediation details."),
         suggestion: Some("Pass a capability context parameter (e.g., `ctx: AppCtx`) to the function."),
     },
     ErrorEntry {
@@ -446,6 +500,7 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
         description: "A MongoDB operation was used in a function that does not declare `!MongoDB`.",
         example: "fn run(coll: String) -> Result<String, String> {\n    Mongo.find_raw(conn, coll, \"{}\")  // E0322: !MongoDB not declared\n}",
         fix: "Pass a capability context parameter: `fn run(ctx: AppCtx, coll: String) -> Result<String, String>`.",
+        long_description: Some("See `fix` field for remediation details."),
         suggestion: Some("Pass a capability context parameter (e.g., `ctx: AppCtx`) to the function."),
     },
     ErrorEntry {
@@ -455,6 +510,7 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
         description: "A DynamoDB operation was used in a function that does not declare `!DynamoDB`.",
         example: "fn run(table: String) -> Result<String, String> {\n    DynamoDB.get_item_raw(conn, table, \"{}\")  // E0323: !DynamoDB not declared\n}",
         fix: "Pass a capability context parameter: `fn run(ctx: AppCtx, table: String) -> Result<String, String>`.",
+        long_description: Some("See `fix` field for remediation details."),
         suggestion: Some("Pass a capability context parameter (e.g., `ctx: AppCtx`) to the function."),
     },
     ErrorEntry {
@@ -464,6 +520,7 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
         description: "An Elasticsearch operation was used in a function that does not declare `!Elasticsearch`.",
         example: "fn run(idx: String) -> Result<String, String> {\n    ES.search_raw(url, idx, \"{}\")  // E0324: !Elasticsearch not declared\n}",
         fix: "Pass a capability context parameter: `fn run(ctx: AppCtx, idx: String) -> Result<String, String>`.",
+        long_description: Some("See `fix` field for remediation details."),
         suggestion: Some("Pass a capability context parameter (e.g., `ctx: AppCtx`) to the function."),
     },
     ErrorEntry {
@@ -473,6 +530,7 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
         description: "The expression in `for x in expr` is not a List<T>.",
         example: "for x in 42 { ... }  // E0365: 42 is not iterable",
         fix: "The right-hand side of `for ... in` must be a List<T>.",
+        long_description: Some("See `fix` field for remediation details."),
         suggestion: Some("The right-hand side of `for ... in` must be a List<T>."),
     },
     ErrorEntry {
@@ -482,6 +540,7 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
         description: "The left side of `??` is not an Option<T>.",
         example: "42 ?? 0  // E0368: Int is not Option",
         fix: "The left operand of `??` must be Option<T>. Wrap it in `some(...)` if needed.",
+        long_description: Some("See `fix` field for remediation details."),
         suggestion: Some("Wrap the value in `some(...)` if it should be an Option, or remove the `??`."),
     },
     ErrorEntry {
@@ -491,6 +550,7 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
         description: "The default value in `??` has a different type than the unwrapped Option value.",
         example: "some(1) ?? \"default\"  // E0369: Int vs String",
         fix: "Make sure the default value has the same type as the Option's inner type.",
+        long_description: Some("See `fix` field for remediation details."),
         suggestion: Some("Make sure the default value has the same type as the Option's inner type."),
     },
     ErrorEntry {
@@ -500,6 +560,7 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
         description: "An async function or Task<T> was used incorrectly.",
         example: "async fn f() -> Int { 42 }  // used where Task<Int> not expected",
         fix: "Use `bind` to unwrap a Task<T>, or adjust the return type annotation.",
+        long_description: Some("See `fix` field for remediation details."),
         suggestion: Some("Use `bind` to unwrap a Task<T>, or adjust the return type annotation."),
     },
     ErrorEntry {
@@ -511,6 +572,7 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
         example: "// Error: fn fetch(url: String) -> String !Http { ... }\n\
                   // Fix:   fn fetch(ctx: AppCtx, url: String) -> String { ... }",
         fix: "Add `ctx: AppCtx` as the first parameter and remove the `!Effect` annotation.",
+        long_description: Some("See `fix` field for remediation details."),
         suggestion: Some("The `!Effect` syntax has been removed. Use capability context (`ctx: AppCtx`) instead."),
     },
     // ── E04xx: SLA アノテーション (v22.6.0) ──────────────────────────
@@ -521,6 +583,7 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
         description: "`#[timeout(seconds = N)]` の `seconds` が 0 以下です。",
         example: "#[timeout(seconds = 0)] stage F: A -> B = |x| { x }  // E0401",
         fix: "`seconds` に正の値（例: `seconds = 30`）を指定してください。",
+        long_description: Some("See `fix` field for remediation details."),
         suggestion: Some("Use `#[timeout(seconds = N)]` where N is a positive integer (e.g., `seconds = 30`)."),
     },
     ErrorEntry {
@@ -530,6 +593,7 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
         description: "`#[retry(max = N, backoff = \"...\")]` の `max` が 0 以下、または `backoff` が不正な値です。",
         example: "#[retry(max = 0, backoff = \"fast\")]  // E0402",
         fix: "`max` は 1 以上にし、`backoff` は \"exponential\" / \"linear\" / \"none\" のいずれかを指定してください。",
+        long_description: Some("See `fix` field for remediation details."),
         suggestion: Some("Use `#[retry(max = N, backoff = \"exponential\")]` with max >= 1 and a valid backoff value."),
     },
     ErrorEntry {
@@ -539,6 +603,7 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
         description: "`#[circuit_breaker(threshold = F, window = N)]` の `threshold` が (0.0, 1.0] の範囲外、または `window` が 0 以下です。",
         example: "#[circuit_breaker(threshold = 0.0, window = 0)]  // E0403",
         fix: "`threshold` は 0.0 超〜1.0 以下、`window` は 1 以上の整数を指定してください。",
+        long_description: Some("See `fix` field for remediation details."),
         suggestion: Some("Use `#[circuit_breaker(threshold = F, window = N)]` with threshold in (0.0, 1.0] and window >= 1."),
     },
     // ── E04xx: Refinement type (v41.2.0) ────────────────────────────────
@@ -549,6 +614,7 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
         description: "A value was assigned to a refinement type alias but violates the `where` invariant.",
         example: "type Age = Int where |v| v >= 0\nbind x: Age <- -1  // E0404",
         fix: "Ensure the assigned value satisfies the refinement invariant.",
+        long_description: Some("See `fix` field for remediation details."),
         suggestion: Some("Ensure the assigned value satisfies the refinement invariant."),
     },
     ErrorEntry {
@@ -558,6 +624,7 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
         description: "A refinement type alias has conflicting or unsatisfiable invariants.",
         example: "type Never = Int where |v| v > 0 && v < 0  // E0405",
         fix: "Review the invariant conditions for logical consistency.",
+        long_description: Some("See `fix` field for remediation details."),
         suggestion: Some("Review the invariant conditions for logical consistency."),
     },
     ErrorEntry {
@@ -567,6 +634,7 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
         description: "The predicate in a refinement `where` clause uses a type inconsistent with the base type.",
         example: "type Age = Int where |v| String.len(v) > 0  // E0406: len() on Int",
         fix: "Ensure the predicate operates on the base type of the alias.",
+        long_description: Some("See `fix` field for remediation details."),
         suggestion: Some("Ensure the predicate operates on the base type of the alias."),
     },
     // ── E0407〜E0409: 予約（将来のリファインメント型拡張用） ──────────────────────────
@@ -578,6 +646,7 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
         description: "Return type was omitted but cannot be inferred from the function body (body expression yields `Unknown`).",
         example: "fn f() { undefined_fn() }  // E0410: body type Unknown",
         fix: "Add an explicit return type annotation `-> RetType`, or ensure the body has a deterministic type.",
+        long_description: Some("See `fix` field for remediation details."),
         suggestion: Some("Add an explicit return type annotation `-> RetType`, or ensure the body has a deterministic type."),
     },
     ErrorEntry {
@@ -589,6 +658,7 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
         description: "Return type was omitted, but the type inferred from the body does not match the explicitly declared type in the usage context.",
         example: "fn f() { 42 }  // inferred Int; annotation elsewhere declares String -> E0411",
         fix: "Add an explicit `-> RetType` annotation to the function, or fix the usage context.",
+        long_description: Some("See `fix` field for remediation details."),
         suggestion: Some("Add an explicit `-> RetType` annotation to the function, or fix the usage context."),
     },
     // ── E0412: 型変数競合 (v43.4.0) ────────────────────────────────────────────
@@ -599,6 +669,7 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
         description: "A type variable in a generic function is bound to conflicting types at the call site. The same type variable appears in multiple parameter positions but the corresponding arguments have different types.",
         example: "fn f<A>(x: A, y: A) -> A { x }\nfn bad() -> Int { f(1, \"hello\") }  // A = Int AND A = String \u{2192} E0412",
         fix: "Ensure all arguments corresponding to the same type variable have the same type.",
+        long_description: Some("See `fix` field for remediation details."),
         suggestion: Some("Ensure all arguments corresponding to the same type variable have the same type."),
     },
     // ── E0413: opaque type coerce (v43.11.0) ──────────────────────────────────
@@ -610,6 +681,7 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
                       Opaque types require explicit construction to prevent accidental coercion.",
         example: "opaque type Token = String\nfn bad() -> Token { \"secret\" }  // E0413",
         fix: "Use an explicit constructor function instead of a bare inner-type literal.",
+        long_description: Some("See `fix` field for remediation details."),
         suggestion: Some("Use a dedicated constructor function to create this opaque type value."),
     },
     // ── E0414: 予約（将来拡張用） ─────────────────────────────────────────────────
@@ -624,6 +696,7 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
         example: "fn bad() -> Int { return \"hello\" }  // E0415: expected Int, got String",
         fix: "Ensure the returned expression has the same type as the declared return type, \
               or fix the return type annotation.",
+        long_description: Some("See `fix` field for remediation details."),
         suggestion: Some("Ensure the returned expression has the same type as the declared return type."),
     },
     // ── E0416: non-exhaustive match in value context (v45.4.0) ──────────────────
@@ -636,6 +709,7 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
                       produces a value.",
         example: "type C = A | B\nbind x <- match c { A -> 1 }  // E0416: B not covered",
         fix: "Add arms for missing variants, or add a wildcard `_ -> ...` arm.",
+        long_description: Some("See `fix` field for remediation details."),
         suggestion: Some("Add arms for the missing variants, or add a wildcard `_ -> ...` arm."),
     },
     ErrorEntry {
@@ -647,6 +721,7 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
                       with their version.",
         example: "// fav.toml has no [runes] entry for \"unknown\"\nimport unknown  // E0417",
         fix: "Add `unknown = \"<version>\"` to the `[runes]` table in `fav.toml`.",
+        long_description: Some("See `fix` field for remediation details."),
         suggestion: Some("Add `<name> = \"<version>\"` to `[runes]` in fav.toml."),
     },
     // ── E0418: 循環 import 検出 (v48.6.0) ────────────────────────────────────────
@@ -659,6 +734,7 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
         example: "// a.fav imports b.fav, b.fav imports a.fav\nimport b  // E0418: circular import detected",
         fix: "Break the cycle by extracting shared definitions into a separate module \
               that neither a.fav nor b.fav imports.",
+        long_description: Some("See `fix` field for remediation details."),
         suggestion: Some("Extract shared definitions into a third module to break the import cycle."),
     },
     // ── E0419: assert_schema 型不一致 (v52.1.0) — suggestion 強化 (v53.3.0) ──────
@@ -679,6 +755,7 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
                   //   help: use Int.parse(row[\"id\"]) to convert",
         fix: "Ensure the input map contains fields matching the schema T. \
               Check each mismatched field and convert to the expected type before calling assert_schema.",
+        long_description: Some("See `fix` field for remediation details."),
         suggestion: Some("For field type mismatches, use type conversion functions: \
                           Int.parse() for String to Int, Float.from_int() for Int to Float. \
                           Run `fav explain --error E0419` for field-level diff examples."),
@@ -691,7 +768,96 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
         description: "The `within` value in a `cep pattern` clause must be a positive integer (≥ 1). `within 0` is semantically invalid.",
         example: "cep pattern P { Login within 0 }  // E0420",
         fix: "Use `within N` where N ≥ 1 (e.g., `within 60`).",
+        long_description: Some("See `fix` field for remediation details."),
         suggestion: Some("Set the within value to a positive integer (≥ 1), for example within 60."),
+    },
+    // v55.5.0: Stateful stage — !State エフェクト enforcement stub
+    ErrorEntry {
+        code: "E0421",
+        title: "State operation without !State effect",
+        category: "streaming",
+        description: "A `State.get` / `State.set` / `State.get_or_default` call was used in a stage \
+                      that does not declare the `!State` effect. Declare `!State` in the stage signature \
+                      to enable stateful accumulation.",
+        example: "stage Count: Stream<Int> -> Stream<Int> = |s| {\n  bind n <- State.get_or_default(\"c\", 0)\n  Ok(n)  // E0421: missing !State\n}",
+        fix: "Add `!State` to the stage effect list: `stage Count: Stream<Int> -> Stream<Int> = |s| !State { ... }`",
+        long_description: Some("See `fix` field for remediation details."),
+        suggestion: Some("Declare `!State` in the stage signature to enable stateful accumulation."),
+    },
+    // v56.1.0: where clause interface constraint (正式カタログ登録)
+    ErrorEntry {
+        code: "E0422",
+        title: "where clause interface constraint not satisfied",
+        category: "types",
+        description: "A generic function was called with a type argument that does not satisfy \
+                      the required `where T: Interface` constraint. The type must implement \
+                      the specified interface to be used in this position.",
+        example: "fn pick<T with Ord>(a: T, b: T) -> T { if a > b { a } else { b } }\nfn main() -> Bool { pick(true, false) }  // E0422: Bool does not implement Ord",
+        fix: "Use a type that implements the required interface, or add an `impl` for the interface on your type.",
+        long_description: Some("See `fix` field for remediation details."),
+        suggestion: Some("Ensure the type argument implements the required interface bound."),
+    },
+    // v56.2.0: impl coherence violation
+    ErrorEntry {
+        code: "E0423",
+        title: "duplicate impl: coherence violation",
+        category: "types",
+        description: "An interface is implemented more than once for the same type. \
+                      Favnir enforces coherence: each (interface, type) pair may have at most one `impl` block.",
+        example: "interface Greet { hello: Self -> String }\ntype Foo = { x: Int }\nimpl Greet for Foo { hello = |s| \"hello\" }\nimpl Greet for Foo { hello = |s| \"world\" }  // E0423: duplicate impl",
+        fix: "Remove the duplicate `impl` block, or merge the methods into a single `impl Greet for Foo`.",
+        long_description: Some("See `fix` field for remediation details."),
+        suggestion: Some("Ensure each interface is implemented at most once per type."),
+    },
+    // v57.1.0: RBAC access denied
+    ErrorEntry {
+        code: "E0424",
+        title: "RBAC access denied",
+        category: "security",
+        description: "The `[security.rbac.bindings]` configuration restricts access to this Rune \
+                      to specific roles. The current role is not in the allowed list.",
+        example: "# fav.toml: [security.rbac.bindings]\n# \"snowflake\" = [\"writer\", \"admin\"]\nfav run pipeline.fav --role reader  // E0424: reader cannot access snowflake",
+        fix: "Use an allowed role (`fav run --role writer`) or update the RBAC bindings \
+              in `fav.toml` to include your role.",
+        long_description: Some("See `fix` field for remediation details."),
+        suggestion: Some("Check `[security.rbac.bindings]` in your `fav.toml` for the allowed roles."),
+    },
+    // E0425: reserved（将来の policy 構文エラー拡張用）
+    // ── E0426: ポリシー違反 (v58.5.0) ───────────────────────────────────────────────
+
+    ErrorEntry {
+        code: "E0426",
+        title: "policy violation",
+        category: "security",
+        description: "A pipeline violates a declared policy rule. \
+                      The specified stage or field access conflicts with an active policy.",
+        example: "stage AuditLog writes email to logs  // E0426: DataRetention.NoPersonalDataInLogs violated",
+        fix: "Remove personal-data field access in the violating stage, or update the policy rule.",
+        long_description: Some("See `fix` field for remediation details."),
+        suggestion: Some("Run `fav policy list` to see active policies and `fav policy check --policy-dir <dir>` to identify violations."),
+    },
+    // ── E0427: AOT 未サポート機能 (v62.8.0) ──────────────────────────────────────────
+    ErrorEntry {
+        code: "E0427",
+        title: "unsupported feature in AOT mode",
+        category: "build",
+        description: "The pipeline contains a feature that is not supported in AOT compilation mode. \
+                      Detected features: effect emission (emit expression).",
+        example: "fn f() -> Unit { emit \"order_placed\" }  // E0427: emit is not supported in AOT mode",
+        fix: "Use `fav run` instead of `fav build`, or remove the unsupported feature from the pipeline.",
+        long_description: Some(
+            "AOT (Ahead-of-Time) compilation generates a native binary from the pipeline IR.\n\
+             Some Favnir features rely on VM-level dynamic dispatch and cannot be lowered to \
+             native code in the current AOT backend.\n\
+             \n\
+             Unsupported features in AOT mode (v62.8.0):\n\
+             - `emit expr` — effect emission requires VM runtime dispatch.\n\
+             \n\
+             To use effect-emitting stages, run the pipeline with `fav run` which uses \
+             the full VM runtime. If AOT output is required, refactor the pipeline to \
+             remove emit expressions and use pure data transformations only."
+        ),
+        suggestion: Some("Run `fav explain E0427` for details on which features are AOT-incompatible."),
     },
     // ── E05xx: モジュール ────────────────────────────────────────────────────────────
     ErrorEntry {
@@ -701,6 +867,7 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
         description: "An unclassified error occurred during compilation.",
         example: "(varies)",
         fix: "Check the error message and source location for details.",
+        long_description: Some("See `fix` field for remediation details."),
         suggestion: Some("Check the error message and source location for details, then fix the reported issue."),
     },
     ErrorEntry {
@@ -710,6 +877,7 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
         description: "A CSV or JSON field required by the target schema was not present.",
         example: "type User = { id: Int  name: String }\n// input row missing `name`  // E0501",
         fix: "Ensure the input includes the required field, or make the field optional with Option<T>.",
+        long_description: Some("See `fix` field for remediation details."),
         suggestion: Some("Add the missing field to the input data, or mark the schema field as optional with Option<T>."),
     },
     ErrorEntry {
@@ -719,6 +887,7 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
         description: "A CSV or JSON field could not be converted to the target schema field type.",
         example: "type User = { age: Int }\n// row has age = \"abc\"  // E0502",
         fix: "Provide a value that matches the field type, or change the schema to match the input.",
+        long_description: Some("See `fix` field for remediation details."),
         suggestion: Some("Provide a value that matches the expected field type, or update the schema field type to accept the input."),
     },
     ErrorEntry {
@@ -728,6 +897,7 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
         description: "A `#[col(n)]` field attribute used an invalid column index.",
         example: "type Row = { #[col(\"x\")] id: Int }  // E0503",
         fix: "Use a non-negative integer column index such as `#[col(0)]`.",
+        long_description: Some("See `fix` field for remediation details."),
         suggestion: Some("Use a non-negative integer column index such as #[col(0)] or #[col(1)]."),
     },
     ErrorEntry {
@@ -737,6 +907,7 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
         description: "JSON input could not be parsed into the expected raw object or array form.",
         example: "json.parse<User>(\"{ bad json }\")  // E0504",
         fix: "Pass valid flat JSON object/array input.",
+        long_description: Some("See `fix` field for remediation details."),
         suggestion: Some("Validate the JSON input with a linter, then pass a well-formed flat JSON object or array."),
     },
     ErrorEntry {
@@ -746,6 +917,7 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
         description: "CSV input could not be parsed into the expected row structure.",
         example: "csv.parse<User>(\"id,name\\n1,\\\"unterminated\")  // E0505",
         fix: "Pass valid CSV input with a consistent delimiter and row shape.",
+        long_description: Some("See `fix` field for remediation details."),
         suggestion: Some("Check that the CSV has a consistent delimiter, properly quoted fields, and the same number of columns per row."),
     },
     // ── E06xx: データベース / ランタイム ─────────────────────────────────
@@ -756,6 +928,7 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
         description: "The connection string is invalid or the database cannot be reached.",
         example: "db.connect(\"sqlite:/bad/path\")  // E0601",
         fix: "Check the connection string format. SQLite: `sqlite:path/to/db` or `sqlite::memory:`. PostgreSQL: `postgres://user:pass@host/db`.",
+        long_description: Some("See `fix` field for remediation details."),
         suggestion: Some("Verify the connection string format and ensure the database server is reachable. Check host, port, and credentials."),
     },
     ErrorEntry {
@@ -765,6 +938,7 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
         description: "An SQL statement caused a runtime error (syntax error, constraint violation, etc.).",
         example: "db.execute(conn, \"INSERT INTO missing_table VALUES (1)\")  // E0602",
         fix: "Check the SQL statement for syntax errors and ensure the referenced table/column exists.",
+        long_description: Some("See `fix` field for remediation details."),
         suggestion: Some("Check the SQL statement for syntax errors and verify that the referenced table and column names exist."),
     },
     ErrorEntry {
@@ -774,6 +948,7 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
         description: "A transaction could not be started, committed, or rolled back.",
         example: "DB.begin_tx(handle)  // E0603 — already in transaction",
         fix: "Ensure only one transaction is active per connection at a time.",
+        long_description: Some("See `fix` field for remediation details."),
         suggestion: Some("Commit or roll back the current transaction before starting a new one. Only one transaction may be active per connection."),
     },
     ErrorEntry {
@@ -783,6 +958,7 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
         description: "A database column could not be mapped to the target Favnir field type.",
         example: "type User = { age: Int }\n// DB column `age` returns `\"abc\"`  // E0604",
         fix: "Ensure the DB column type matches the Favnir field type, or use Option<T> for nullable columns.",
+        long_description: Some("See `fix` field for remediation details."),
         suggestion: Some("Match the DB column type to the Favnir field type, or use Option<T> for nullable columns."),
     },
     ErrorEntry {
@@ -792,6 +968,7 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
         description: "The connection string uses a database driver that is not compiled in.",
         example: "db.connect(\"mysql://...\")  // E0605",
         fix: "Use `sqlite:` or `postgres://` connection strings. Enable the `postgres_integration` feature for PostgreSQL.",
+        long_description: Some("See `fix` field for remediation details."),
         suggestion: Some("Use sqlite: or postgres:// connection strings. Enable the postgres_integration feature flag for PostgreSQL support."),
     },
     ErrorEntry {
@@ -801,6 +978,7 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
         description: "Two or more files import each other, creating a cycle.",
         example: "// a.fav: import \"b\"\n// b.fav: import \"a\"  → E0580",
         fix: "Refactor to break the cycle. Move shared types to a third file.",
+        long_description: Some("See `fix` field for remediation details."),
         suggestion: Some("Move shared types to a third file that both modules can import without creating a cycle."),
     },
     ErrorEntry {
@@ -810,6 +988,7 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
         description: "Two imports produce the same namespace, making names ambiguous.",
         example: "import \"models/user\"\nimport \"auth/user\"  // E0581: both become `user`",
         fix: "Use `as` to give one import a different alias:\n  import \"auth/user\" as auth_user",
+        long_description: Some("See `fix` field for remediation details."),
         suggestion: Some("Use as to give one import a distinct alias, for example: import \"auth/user\" as auth_user."),
     },
     // ── E09xx: 廃止キーワード ────────────────────────────────────────────
@@ -820,6 +999,7 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
         description: "`trf` was renamed to `stage` in v2.0.0.",
         example: "trf Double: Int -> Int = |x| x * 2  // E0901",
         fix: "Replace `trf` with `stage`. Run `fav migrate` to do this automatically.",
+        long_description: Some("See `fix` field for remediation details."),
         suggestion: Some("Replace trf with stage throughout the file. Run fav migrate to do this automatically."),
     },
     ErrorEntry {
@@ -829,6 +1009,7 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
         description: "`flw` was renamed to `seq` in v2.0.0.",
         example: "flw Pipeline = A |> B  // E0902",
         fix: "Replace `flw` with `seq`. Run `fav migrate` to do this automatically.",
+        long_description: Some("See `fix` field for remediation details."),
         suggestion: Some("Replace flw with seq throughout the file. Run fav migrate to do this automatically."),
     },
     ErrorEntry {
@@ -838,6 +1019,7 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
         description: "`cap` was renamed to `interface` in v2.0.0.",
         example: "cap Show { show: Self -> String }  // E0903",
         fix: "Replace `cap` with `interface`. Note: syntax has changed. See migration guide.",
+        long_description: Some("See `fix` field for remediation details."),
         suggestion: Some("Replace cap with interface. Syntax has changed — see the migration guide for updated examples."),
     },
     // ── E038x: スキーマ不整合 (v36.6.0) ────────────────────────────────────
@@ -848,6 +1030,7 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
         description: "A required field defined in the schema is missing from the data. (compile-time schema validation; distinct from E0501 which is a runtime CSV/JSON conversion error)",
         example: "schema Orders { id: Int, amount: Float }\n// data: { id: 1 }  // E0380: missing `amount`",
         fix: "Add the missing field to your data source, or remove it from the schema definition.",
+        long_description: Some("See `fix` field for remediation details."),
         suggestion: Some("Add the missing field to the data source, or remove it from the schema definition if it is optional."),
     },
     ErrorEntry {
@@ -857,6 +1040,7 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
         description: "A schema field has a value whose type does not match the declared type. (compile-time schema validation; distinct from E0502 which is a runtime CSV/JSON conversion error)",
         example: "schema Orders { amount: Float }\n// data: { amount: \"not-a-number\" }  // E0381: expected Float",
         fix: "Fix the data value to match the declared type, or update the schema field type.",
+        long_description: Some("See `fix` field for remediation details."),
         suggestion: Some("Fix the data value to match the declared schema type, or update the schema field type to match the input."),
     },
     ErrorEntry {
@@ -866,6 +1050,7 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
         description: "A schema field value violates its `where` constraint.",
         example: "schema Orders { amount: Float where { amount >= 0.0 } }\n// data: { amount: -1.0 }  // E0382",
         fix: "Fix the data value to satisfy the constraint, or relax the schema constraint.",
+        long_description: Some("See `fix` field for remediation details."),
         suggestion: Some("Fix the data value to satisfy the where constraint, or relax the constraint in the schema definition."),
     },
     ErrorEntry {
@@ -875,6 +1060,7 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
         description: "A field name appears more than once in the schema definition. (parse-time schema definition error, not a data validation error)",
         example: "schema Orders { id: Int, id: String }  // E0383: duplicate field `id`",
         fix: "Remove or rename the duplicate field in the schema definition.",
+        long_description: Some("See `fix` field for remediation details."),
         suggestion: Some("Remove or rename the duplicate field in the schema definition."),
     },
     ErrorEntry {
@@ -884,7 +1070,52 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
         description: "The data contains a field that is not defined in the schema.",
         example: "schema Orders { id: Int }\n// data: { id: 1, unknown: \"x\" }  // E0384: extra field `unknown`",
         fix: "Remove the extra field from your data, or add it to the schema definition.",
+        long_description: Some("See `fix` field for remediation details."),
         suggestion: Some("Remove the extra field from the data source, or add it to the schema definition."),
+    },
+    // ── E0395: OR パターンガード型不一致 (v61.3.0) ──────────────────────────
+    ErrorEntry {
+        code: "E0395",
+        title: "or_pattern_guard_not_bool",
+        category: "type",
+        description: "The guard expression in a per-arm OR pattern must have type Bool.",
+        example: "(x if x + 1) | _ => ...",
+        fix: "Ensure the guard expression evaluates to Bool.",
+        long_description: Some("OR pattern per-arm guards (v61.3.0) are evaluated after the sub-pattern matches. The guard must be a Bool expression. Common causes: arithmetic expression instead of comparison (e.g., `x + 1` instead of `x + 1 > 0`)."),
+        suggestion: Some("Use a comparison or logical expression (e.g., `x > 0`) as the guard."),
+    },
+    // ── E0396: record update フィールド型不一致 (v61.4.0) ────────────────────
+    ErrorEntry {
+        code: "E0396",
+        title: "record_update_field_type_mismatch",
+        category: "type",
+        description: "A field value in a record update expression has an incompatible type.",
+        example: "type Row = { status: String }\n{ row | status: 42 }  // E0396: expected String, got Int",
+        fix: "Ensure the value matches the field's declared type.",
+        long_description: Some("Record update expressions (`{ base | field: val }`) inherit the base type. Each updated field must have a value compatible with the field's declared type in the type definition. Common cause: passing an Int where a String is expected, or vice versa."),
+        suggestion: Some("Check the type definition and ensure the value matches the field type."),
+    },
+    // ── E0397: record update で存在しないフィールド (v61.4.0) ─────────────────
+    ErrorEntry {
+        code: "E0397",
+        title: "record_update_unknown_field",
+        category: "type",
+        description: "A record update expression references a field that does not exist in the base type.",
+        example: "type Row = { status: String }\n{ row | nonexistent: 1 }  // E0397",
+        fix: "Use only fields that are declared in the base type.",
+        long_description: Some("Record update expressions (`{ base | field: val }`) can only update fields that exist in the declared type of the base expression. Referencing a field not present in the type definition is an error. Check the type definition and use a valid field name."),
+        suggestion: Some("Check the type definition for valid field names."),
+    },
+    // ── E0428: キャッシュ型シグネチャ不整合 (v63.3.0) ───────────────────────────
+    ErrorEntry {
+        code: "E0428",
+        title: "incremental_cache_conflict",
+        category: "build",
+        description: "The cached type signature for a stage does not match the current compilation result.",
+        example: "// stage Transform: cached Row -> Row, now Row -> EnrichedRow\n// E0428: incremental cache signature mismatch",
+        fix: "The cache entry has been automatically invalidated. Re-run to recompile.",
+        long_description: Some("Favnir's incremental cache stores the type signature of each stage alongside its source hash. If the source hash matches but the type signature has changed (e.g., after refactoring a return type), E0428 is emitted as a warning. The cache entry is automatically invalidated and the stage will be recompiled on the next run."),
+        suggestion: Some("This is a non-fatal warning. The cache has been cleared for the affected stage."),
     },
 ];
 

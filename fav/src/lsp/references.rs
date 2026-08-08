@@ -188,12 +188,16 @@ fn collect_in_expr(expr: &Expr, name: &str, spans: &mut Vec<Span>) {
             collect_in_expr(base, name, spans);
             for (_, e) in fields { collect_in_expr(e, name, spans); }
         }
+        Expr::RecordUpdate { base, fields, .. } => {
+            collect_in_expr(base, name, spans);
+            for (_, e) in fields { collect_in_expr(e, name, spans); }
+        }
         Expr::Question(inner, _) => collect_in_expr(inner, name, spans),
         Expr::EmitExpr(inner, _) => collect_in_expr(inner, name, spans),
         Expr::AssertMatches(scrutinee, _, _) => collect_in_expr(scrutinee, name, spans),
         Expr::AssertSchema { arg, .. } => collect_in_expr(arg, name, spans),
         Expr::Collect(b, _) => collect_in_block(b, name, spans),
-        Expr::FString(parts, _) => {
+        Expr::FString(parts, _, _) => {
             for part in parts {
                 if let crate::ast::FStringPart::Expr(e) = part {
                     collect_in_expr(e, name, spans);
@@ -229,7 +233,7 @@ fn collect_in_type_expr(ty: &TypeExpr, name: &str, spans: &mut Vec<Span>) {
             collect_in_type_expr(input, name, spans);
             collect_in_type_expr(output, name, spans);
         }
-        TypeExpr::RecordType(fields, _) => {
+        TypeExpr::RecordType(fields, _, _) => {
             for (_, ty) in fields { collect_in_type_expr(ty, name, spans); }
         }
         _ => {}

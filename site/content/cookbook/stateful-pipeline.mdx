@@ -1,0 +1,66 @@
+---
+title: "Stateful パイプライン"
+description: "State.get / State.set / State.get_or_default を使った累積状態付きストリームパイプラインのレシピ"
+---
+
+# Stateful パイプライン
+
+`State` API を使うと、ストリーム処理中に状態を累積し、チェックポイントストアに永続化できます。
+
+---
+
+## ユーザーごとのイベントカウント
+
+```favnir
+stage CountPerUser: Stream<Event> -> Stream<(String, Int)> = |event| {
+  bind count <- State.get_or_default("cnt_" + event.user_id, 0)
+  bind _ <- State.set("cnt_" + event.user_id, count + 1)
+  Ok((event.user_id, count + 1))
+}
+```
+
+---
+
+## 累積合計（running sum）
+
+```favnir
+stage RunningSum: Stream<Int> -> Stream<Int> = |n| {
+  bind total <- State.get_or_default("running_total", 0)
+  bind _ <- State.set("running_total", total + n)
+  Ok(total + n)
+}
+```
+
+---
+
+## セッション状態（最後のアクティブ時刻）
+
+```favnir
+stage TrackSession: Stream<Event> -> Stream<String> = |event| {
+  bind _ <- State.set("last_active_" + event.user_id, event.ts)
+  bind ts <- State.get_or_default("last_active_" + event.user_id, "")
+  Ok(ts)
+}
+```
+
+---
+
+## fav.toml 設定
+
+Stateful stage はチェックポイントストアと組み合わせて使います。
+
+```toml
+[stream]
+delivery = "exactly-once"
+checkpoint_interval_sec = 10
+checkpoint_store = "s3://my-bucket/state"
+```
+
+---
+
+## 注意事項
+
+- `State.get` は `Option<T>` を返します（値がない場合は `none`）
+- `State.get_or_default` はデフォルト値を指定して `T` を返します
+- `State.set` は `Unit` を返します
+- 状態キーはアプリケーション全体でユニークになるよう命名してください

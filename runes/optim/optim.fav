@@ -1,0 +1,64 @@
+// Optimization Rune — Rune.optim
+// Gradient-based optimizers, learning rate schedulers, constrained optimization
+//
+// NOTE: Optimizer, Scheduler, Tensor<Float>, Constraint 等の型は将来フェーズで型システムに登録する。
+//       今バージョンは include_str! テストのみ（型チェックエラーは無視する）。
+
+// --- ファーストオーダー最適化 ---
+
+public fn sgd(lr: Float) -> Optimizer {
+    Optimizer { kind: "sgd", lr: lr, state: [] }
+}
+
+public fn adam(lr: Float, beta1: Float, beta2: Float) -> Optimizer {
+    Optimizer { kind: "adam", lr: lr, beta1: beta1, beta2: beta2, state: [] }
+}
+
+public fn adamw(lr: Float, beta1: Float, beta2: Float, weight_decay: Float) -> Optimizer {
+    Optimizer { kind: "adamw", lr: lr, beta1: beta1, beta2: beta2, weight_decay: weight_decay, state: [] }
+}
+
+public fn adagrad(lr: Float) -> Optimizer {
+    Optimizer { kind: "adagrad", lr: lr, state: [] }
+}
+
+public fn rmsprop(lr: Float) -> Optimizer {
+    Optimizer { kind: "rmsprop", lr: lr, state: [] }
+}
+
+// --- 二次法 ---
+
+public fn l_bfgs(max_iter: Int) -> Optimizer {
+    Optimizer { kind: "l_bfgs", max_iter: max_iter, state: [] }
+}
+
+public fn conjugate_gradient(tol: Float) -> Optimizer {
+    Optimizer { kind: "conjugate_gradient", tol: tol, state: [] }
+}
+
+// --- 汎用最適化 ---
+
+// 損失関数を最小化する汎用エントリポイント（収束判定・早期終了付き）
+public fn minimize(loss_fn: Tensor<Float> -> Float, initial: Tensor<Float>, optimizer: Optimizer, max_iter: Int, tol: Float) -> Tensor<Float> {
+    initial
+}
+
+// --- 学習率スケジューラ ---
+
+public fn step_decay(initial_lr: Float, drop: Float, epochs_drop: Int) -> Scheduler {
+    Scheduler { kind: "step_decay", initial_lr: initial_lr, drop: drop, epochs_drop: epochs_drop }
+}
+
+public fn cosine_annealing(t_max: Int, eta_min: Float) -> Scheduler {
+    Scheduler { kind: "cosine_annealing", t_max: t_max, eta_min: eta_min }
+}
+
+public fn warmup_cosine(warmup_steps: Int, total_steps: Int) -> Scheduler {
+    Scheduler { kind: "warmup_cosine", warmup_steps: warmup_steps, total_steps: total_steps }
+}
+
+// --- 制約付き最適化 ---
+
+public fn minimize_constrained(loss_fn: Tensor<Float> -> Float, initial: Tensor<Float>, constraints: List<Constraint>, max_iter: Int) -> Tensor<Float> {
+    initial
+}

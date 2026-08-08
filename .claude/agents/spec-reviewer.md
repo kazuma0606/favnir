@@ -17,8 +17,16 @@ versions/v9-v20/<version>/
 versions/v20-v25/<version>/
 versions/v25-v30/<version>/
 versions/v30-v35/<version>/
+versions/v35-v40/<version>/
+versions/v40-v45/<version>/
+versions/v45-v50/<version>/
+versions/v50-v55/<version>/
+versions/v55-v60/<version>/
+versions/v60-v65/<version>/
+versions/v65-v70/<version>/
 ```
-例: `v35.0B` なら `versions/v30-v35/v35.0B/` を探す。
+例: `v35.0B` なら `versions/v30-v35/v35.0B/` を、`v69.3.0` なら `versions/v65-v70/v69.3.0/` を探す。
+見つからない場合は `versions/` 配下を Glob で広く検索すること。
 
 以下をすべて読む:
 - `spec.md` — 機能仕様

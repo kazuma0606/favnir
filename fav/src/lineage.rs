@@ -239,7 +239,13 @@ fn collect_sql_literals_inner(expr: &ast::Expr, out: &mut Vec<String>) {
                 collect_sql_literals_inner(v, out);
             }
         }
-        ast::Expr::Lit(_, _) | ast::Expr::Ident(_, _) | ast::Expr::FString(_, _) => {}
+        ast::Expr::RecordUpdate { base, fields, .. } => {
+            collect_sql_literals_inner(base, out);
+            for (_, v) in fields {
+                collect_sql_literals_inner(v, out);
+            }
+        }
+        ast::Expr::Lit(_, _) | ast::Expr::Ident(_, _) | ast::Expr::FString(_, _, _) => {}
         ast::Expr::ListComp { expr, clauses, .. }
         | ast::Expr::ResultComp { expr, clauses, .. } => {
             collect_sql_literals_inner(expr, out);
@@ -328,6 +334,10 @@ pub fn collect_assert_schema_name(expr: &ast::Expr) -> Option<String> {
             collect_assert_schema_name(base)
                 .or_else(|| fields.iter().find_map(|(_, v)| collect_assert_schema_name(v)))
         }
+        ast::Expr::RecordUpdate { base, fields, .. } => {
+            collect_assert_schema_name(base)
+                .or_else(|| fields.iter().find_map(|(_, v)| collect_assert_schema_name(v)))
+        }
         ast::Expr::EmitExpr(inner, _) => collect_assert_schema_name(inner),
         ast::Expr::Question(inner, _) => collect_assert_schema_name(inner),
         ast::Expr::AssertMatches(inner, _, _) => collect_assert_schema_name(inner),
@@ -340,7 +350,7 @@ pub fn collect_assert_schema_name(expr: &ast::Expr) -> Option<String> {
                 .or_else(|| clauses.iter().find_map(collect_assert_schema_name_comp_clause))
         }
         // Leaf nodes — no sub-expressions to recurse into
-        ast::Expr::Lit(_, _) | ast::Expr::Ident(_, _) | ast::Expr::FString(_, _) => None,
+        ast::Expr::Lit(_, _) | ast::Expr::Ident(_, _) | ast::Expr::FString(_, _, _) => None,
     }
 }
 
@@ -571,7 +581,13 @@ fn collect_azure_kinds_inner(expr: &ast::Expr, r: &mut bool, w: &mut bool) {
                 collect_azure_kinds_inner(v, r, w);
             }
         }
-        ast::Expr::Lit(_, _) | ast::Expr::Ident(_, _) | ast::Expr::FString(_, _) => {}
+        ast::Expr::RecordUpdate { base, fields, .. } => {
+            collect_azure_kinds_inner(base, r, w);
+            for (_, v) in fields {
+                collect_azure_kinds_inner(v, r, w);
+            }
+        }
+        ast::Expr::Lit(_, _) | ast::Expr::Ident(_, _) | ast::Expr::FString(_, _, _) => {}
         ast::Expr::ListComp { expr, clauses, .. }
         | ast::Expr::ResultComp { expr, clauses, .. } => {
             collect_azure_kinds_inner(expr, r, w);
@@ -686,7 +702,13 @@ fn collect_azure_blob_kinds_inner(expr: &ast::Expr, r: &mut bool, w: &mut bool) 
                 collect_azure_blob_kinds_inner(v, r, w);
             }
         }
-        ast::Expr::Lit(_, _) | ast::Expr::Ident(_, _) | ast::Expr::FString(_, _) => {}
+        ast::Expr::RecordUpdate { base, fields, .. } => {
+            collect_azure_blob_kinds_inner(base, r, w);
+            for (_, v) in fields {
+                collect_azure_blob_kinds_inner(v, r, w);
+            }
+        }
+        ast::Expr::Lit(_, _) | ast::Expr::Ident(_, _) | ast::Expr::FString(_, _, _) => {}
         ast::Expr::ListComp { expr, clauses, .. }
         | ast::Expr::ResultComp { expr, clauses, .. } => {
             collect_azure_blob_kinds_inner(expr, r, w);
@@ -826,7 +848,13 @@ fn collect_sf_kinds_inner(expr: &ast::Expr, r: &mut bool, w: &mut bool) {
                 collect_sf_kinds_inner(v, r, w);
             }
         }
-        ast::Expr::Lit(_, _) | ast::Expr::Ident(_, _) | ast::Expr::FString(_, _) => {}
+        ast::Expr::RecordUpdate { base, fields, .. } => {
+            collect_sf_kinds_inner(base, r, w);
+            for (_, v) in fields {
+                collect_sf_kinds_inner(v, r, w);
+            }
+        }
+        ast::Expr::Lit(_, _) | ast::Expr::Ident(_, _) | ast::Expr::FString(_, _, _) => {}
         ast::Expr::ListComp { expr, clauses, .. }
         | ast::Expr::ResultComp { expr, clauses, .. } => {
             collect_sf_kinds_inner(expr, r, w);

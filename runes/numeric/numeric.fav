@@ -1,0 +1,95 @@
+// Numeric Rune — Rune.numeric
+// Numerical integration, ODE solvers, interpolation, FFT, root finding
+//
+// NOTE: IntegMethod, OdeMethod, Spectrum 等の型は将来フェーズで型システムに登録する。
+//       今バージョンは include_str! テストのみ（型チェックエラーは無視する）。
+
+// --- 数値積分 ---
+
+// 汎用数値積分（method パラメータで手法を切り替え）
+public fn integrate(samples: List<Float>, method: IntegMethod, dx: Float) -> Float {
+    0.0
+}
+
+public fn trapezoid(xs: List<Float>, ys: List<Float>) -> Float {
+    0.0
+}
+
+public fn simpson(xs: List<Float>, ys: List<Float>) -> Float {
+    0.0
+}
+
+public fn gauss_quadrature(f: Float -> Float, a: Float, b: Float, n: Int) -> Float {
+    0.0
+}
+
+// --- ODE ソルバー ---
+
+// 汎用 ODE ソルバー（method パラメータで手法を切り替え）
+public fn ode_solve(f: Float -> Float, y0: Float, t_end: Float, method: OdeMethod, dt: Float) -> List<Float> {
+    []
+}
+
+public fn euler(f: Float -> Float, y0: Float, dt: Float, steps: Int) -> List<Float> {
+    []
+}
+
+public fn runge_kutta4(f: Float -> Float, y0: Float, dt: Float, steps: Int) -> List<Float> {
+    []
+}
+
+public fn dormand_prince(f: Float -> Float, y0: Float, t_end: Float, tol: Float) -> List<Float> {
+    []
+}
+
+// --- 補間 ---
+
+public fn linear_interp(xs: List<Float>, ys: List<Float>, x: Float) -> Float {
+    0.0
+}
+
+public fn cubic_spline(xs: List<Float>, ys: List<Float>, x: Float) -> Float {
+    0.0
+}
+
+public fn polynomial_interp(xs: List<Float>, ys: List<Float>, x: Float) -> Float {
+    0.0
+}
+
+// --- フーリエ変換 ---
+
+public fn fft(signal: List<Float>) -> Spectrum {
+    Spectrum { frequencies: [], amplitudes: [], phase: [] }
+}
+
+public fn ifft(spectrum: Spectrum) -> List<Float> {
+    []
+}
+
+public fn power_spectrum(signal: List<Float>) -> List<Float> {
+    []
+}
+
+public fn spectrogram(signal: List<Float>, window_size: Int, hop: Int) -> List<List<Float>> {
+    []
+}
+
+// --- 根探索 ---
+
+public fn bisection(f: Float -> Float, a: Float, b: Float, tol: Float) -> Float {
+    0.0
+}
+
+public fn newton_raphson(f: Float -> Float, df: Float -> Float, x0: Float, tol: Float) -> Float {
+    0.0
+}
+
+public fn brent(f: Float -> Float, a: Float, b: Float, tol: Float) -> Float {
+    0.0
+}
+
+// --- 線形方程式系 ---
+
+public fn conjugate_gradient_solver(a: List<List<Float>>, b: List<Float>, tol: Float) -> List<Float> {
+    []
+}

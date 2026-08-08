@@ -1,4 +1,4 @@
-import runes/postgres
+import rune "postgres"
 import src/types
 import src/validators
 

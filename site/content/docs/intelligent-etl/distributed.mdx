@@ -1,0 +1,136 @@
+# 分散実行 — クラスタ・チェックポイント・K8s
+
+## --cluster による分散実行
+
+`workers.yaml` でワーカーを設定します:
+
+```yaml
+cluster:
+  workers:
+    - host: localhost
+      port: 7001
+      cores: 4
+    - host: worker2.internal
+      port: 7001
+      cores: 8
+```
+
+```sh
+fav run src/pipeline.fav --cluster workers.yaml -- data/articles.csv
+```
+
+## --checkpoint による耐障害性
+
+長時間実行パイプラインの途中状態を保存します。中断後に途中から再開できます。
+
+```sh
+# チェックポイント付きで実行
+fav run src/pipeline.fav \
+    --cluster workers.yaml \
+    --checkpoint ./checkpoints/ \
+    -- data/articles.csv
+
+# 中断後の再開
+fav run src/pipeline.fav \
+    --cluster workers.yaml \
+    --checkpoint ./checkpoints/ \
+    --resume \
+    -- data/articles.csv
+```
+
+チェックポイントはステージ単位で保存されます:
+
+```
+checkpoints/
+├── load.checkpoint       ← LoadArticles 完了後
+├── embed.checkpoint      ← EmbedAndSummarize 完了後（途中保存あり）
+└── store.checkpoint      ← StoreToVectorDB 完了後
+```
+
+## fav deploy --target kubernetes
+
+K8s マニフェストを生成してデプロイします:
+
+```sh
+fav deploy --target kubernetes \
+    --namespace favnir \
+    --workers 8 \
+    src/pipeline.fav
+```
+
+生成されるマニフェスト:
+
+```
+k8s/
+├── namespace.yaml
+├── configmap.yaml
+├── worker-deployment.yaml
+├── coordinator.yaml
+└── service.yaml
+```
+
+## リトライポリシー
+
+```toml
+[retry]
+max_attempts = 3
+backoff      = "exponential"
+base_ms      = 1000
+max_ms       = 30000
+jitter       = true
+```
+
+## --distributed-cache
+
+同じ入力への計算結果をキャッシュして API コストを削減します:
+
+```sh
+fav run src/pipeline.fav \
+    --distributed-cache redis://localhost:6379 \
+    -- data/articles.csv
+```
+
+`fav.toml` に記述することも可能です:
+
+```toml
+[cache]
+provider = "redis"
+url      = "redis://localhost:6379"
+ttl_secs = 86400
+```
+
+## --otel-endpoint による分散トレーシング
+
+OpenTelemetry でトレースをエクスポートします:
+
+```sh
+fav run src/pipeline.fav \
+    --otel-endpoint http://localhost:4318 \
+    -- data/articles.csv
+```
+
+`fav.toml` での設定:
+
+```toml
+[otel]
+endpoint = "http://localhost:4318"
+service  = "my-ai-etl"
+```
+
+Grafana でステージ別スループット・コスト・エラー率をリアルタイム確認できます。
+
+## マルチクラウドルーティング
+
+```toml
+[ai]
+strategy = "cost"   # cost / latency / round-robin
+
+[[ai.rules]]
+stage    = "embed"
+primary  = "openai"
+fallback = "cohere"
+
+[[ai.rules]]
+stage   = "llm"
+primary = "anthropic"
+```

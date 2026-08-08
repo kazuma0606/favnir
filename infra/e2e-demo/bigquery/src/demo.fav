@@ -51,12 +51,12 @@ public fn main(ctx: AppCtx) -> Result<Unit, String> {
   bind _log2ok <- ctx.io.println("[2/4] OK")
 
   bind _log3    <- ctx.io.println("[3/4] BigQueryInsert...")
-  bind _trunc   <- truncate_table()
-  bind _rows    <- insert_rows()
+  bind _trunc   <- truncate_table(ctx)
+  bind _rows    <- insert_rows(ctx)
   bind _log3ok  <- ctx.io.println("[3/4] OK — 3 rows inserted")
 
   bind _log4   <- ctx.io.println("[4/4] QuerySummary...")
-  bind summary <- query_summary()
+  bind summary <- query_summary(ctx)
   bind _log4ok <- ctx.io.println(String.concat("[4/4] OK — ", summary))
 
   Result.ok(())

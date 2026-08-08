@@ -1,12 +1,14 @@
 # Current — Favnir 進行状況
 
-最終更新: 2026-07-23 (v55.0.0)
+最終更新: 2026-08-05 (v66.0.0)
 
 ---
 
 ## 現行マスターロードマップ
 
-[roadmap/roadmap-v50.1-v55.0.md](roadmap/roadmap-v50.1-v55.0.md)
+[roadmap/roadmap-v65.1-v70.0.md](roadmap/roadmap-v65.1-v70.0.md)
+
+前フェーズ（完了）: [roadmap/roadmap-v60.1-v65.0.md](roadmap/roadmap-v60.1-v65.0.md)
 
 サブスプリント（完了）: [roadmap/roadmap-v54.1-v55.0.md](roadmap/roadmap-v54.1-v55.0.md)（v55.0.0 宣言完了）
 
@@ -18,23 +20,23 @@
 
 ## 最新安定版
 
-**v55.0.0** — Production 3.0 宣言 — 3206 tests（2026-07-23）
+**v70.0.0** — Intelligent ETL 1.0 宣言 ★クリーンアップ — 3559 tests（2026-08-08）
 
-- `cargo install fav --version "55.0.0"`
+- `cargo install fav --version "70.0.0"`
 
-前バージョン: v54.9.0 — v55.0 前調整・安定化 — 3203 tests
+前バージョン: v69.0.0 — Distributed Favnir 宣言 — 3541 tests
 
 ---
 
 ## 進行中バージョン
 
-**なし**（v55.0.0 完了）
+（次スプリント計画中）
 
 ---
 
 ## 次に切る版
 
-**未定**（Production 3.0 完成のため）
+**v66.9.0**（AI-Native Stage Layer スプリント中、`roadmap-v66.1-v67.0.md` に従う）
 
 ---
 

@@ -5,27 +5,48 @@ import "./stages/validate" as validate
 
 type RawOrder      = { id: Int, amount: Float, status: String, raw_ts: String }
 type Order         = { id: Int, amount: Float, status: String }
-// ValidOrder: Order と同フィールドだが assert_schema を通過した名目型。型安全性のためのラッパー。
+// ValidOrder: Order と同フィールドだが validate.run を通過した注文。型安全性のためのラッパー。
 type ValidOrder    = { id: Int, amount: Float, status: String }
 type EnrichedOrder = { id: Int, amount: Float, status: String, region: String }
 
-pipeline OrderIngestion {
-  stage Consume: Stream<RawOrder> -> Stream<Order> = |_raw| {
-    bind order <- kafka.consume("orders")
-    Ok(order)
-  }
-  // pipeline stage 接続: Result<ValidOrder> は次 stage に渡る前に自動アンラップ（fail-fast）
-  stage SchemaCheck: Order -> Result<ValidOrder> = |order| {
-    bind checked <- assert_schema<ValidOrder>(order)
-    Ok(checked)
-    // fav run --audit-log 実行時: アクセスログに自動記録
-    // OTel span に schema.name = "ValidOrder" が付与
-  }
-  stage Process: ValidOrder -> Result<EnrichedOrder> = |valid_order| {
-    par [enrich.run(valid_order), validate.run(valid_order)] |> Merge.ordered
-  }
-  stage Store: EnrichedOrder -> Unit = |enriched| {
-    bind _ <- snowflake.insert("orders_v2", enriched)
-    Ok(Unit)
-  }
+// Kafka から注文を受信
+stage Consume: Unit -> Result<Order, String> = |_| {
+    kafka.consume("orders")
 }
+
+// スキーマ検証 — assert_schema で ValidOrder を強制
+// fav run --audit-log 実行時: アクセスログに自動記録
+// OTel span に schema.name = "ValidOrder" が付与
+stage SchemaCheck: Order -> Result<ValidOrder, String> = |order| {
+    assert_schema(order, "ValidOrder")
+    if order.amount < 0.0 {
+        Result.err("negative amount")
+    } else {
+        Result.ok({ id: order.id, amount: order.amount, status: order.status })
+    }
+}
+
+// バリデーション（AP + EU の並列エンリッチ）
+stage EnrichAP: ValidOrder -> Result<EnrichedOrder, String> = |valid_order| {
+    validate.run(valid_order)
+}
+
+stage EnrichEU: ValidOrder -> Result<EnrichedOrder, String> = |valid_order| {
+    enrich.run(valid_order)
+}
+
+// 並列エンリッチ結果をマージ
+stage MergeEnriched: List<EnrichedOrder> -> Result<EnrichedOrder, String> = |results| {
+    match Merge.ordered(results) {
+        Some(r) => Result.ok(r)
+        None    => Result.err("merge failed")
+    }
+}
+
+// Snowflake に書き込み
+stage Store: EnrichedOrder -> Result<Unit, String> = |enriched| {
+    snowflake.insert("orders_v2", enriched)
+}
+
+// パイプライン定義: Consume |> SchemaCheck |> par[EnrichAP, EnrichEU] |> MergeEnriched |> Store
+seq OrderIngestion = Consume |> SchemaCheck |> par [EnrichAP, EnrichEU] |> MergeEnriched |> Store

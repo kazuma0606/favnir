@@ -1,0 +1,158 @@
+# Language Power 2.0 — Overview
+
+Favnir v56 series (v56.1–v56.8) completes the **Language Power 2.0** milestone:
+a set of type system enhancements that let developers express intent precisely,
+building on the foundations laid in v33.0 (Language Power).
+
+---
+
+## What's in Language Power 2.0
+
+| Version | Feature | Key Addition |
+|---|---|---|
+| v56.1–56.2 | [Bounded Generics](./language/bounded-generics.mdx) | `where T: Interface`, multiple constraints, coherence E0422/E0423 |
+| v56.3 | [Row Polymorphism](./language/row-polymorphism.mdx) | `{ field: Type \| r }` row variable syntax, LSP hover |
+| v56.4 | [Effect Inference LSP](./language/effect-inference.mdx) | inlay hints, `fav check --show-types` |
+| v56.5 | OR Patterns + Guards | `Ok(x) \| Err("retry")`, W037 unreachable pattern warning |
+| v56.6 | as-Patterns | `head @ { id, amount }` binding syntax |
+| v56.7 | Module Namespaces | `import "path" as alias.*`, W038 collision warning |
+| v56.8 | Documentation | bounded-generics, row-polymorphism, effect-inference docs |
+
+---
+
+## Bounded Generics — Production Quality (v56.1–56.2)
+
+The `where T: Interface` clause form was formally standardized in v56.1,
+making constraint declarations more readable for complex type signatures.
+v56.2 added multiple constraint chaining and coherence enforcement.
+
+```favnir
+interface Serializable {
+  fn to_json(self: Self) -> String
+}
+
+fn serialize_all<T>(items: List<T>) -> List<String>
+  where T: Serializable
+{
+  List.map(items, |x| x.to_json())
+}
+
+fn pick<T>(a: T, b: T) -> T
+  where T: Ord, T: Serializable
+{
+  if a > b { a } else { b }
+}
+```
+
+- **E0422** — type does not satisfy bound
+- **E0423** — duplicate `impl` (coherence violation)
+
+See [bounded-generics.mdx](./language/bounded-generics.mdx) for full details.
+
+---
+
+## Row Polymorphism — Explicit Row Variables (v56.3)
+
+The `{ field: Type | r }` syntax allows functions to accept any record that has
+specific fields, with `r` representing remaining fields as a type parameter.
+
+```favnir
+fn get_name<r>(record: { name: String | r }) -> String {
+  record.name
+}
+```
+
+LSP hover displays row variables as `{ name: String | ... }`.
+
+See [row-polymorphism.mdx](./language/row-polymorphism.mdx) for full details.
+
+---
+
+## Effect Inference — LSP Integration (v56.4)
+
+Inferred effects are now displayed as inlay hints in LSP-enabled editors,
+and exposed via `fav check --show-types`.
+
+```favnir
+fn load_data() -> Result<List<Row>, String> {
+  bind rows <- Kafka.consume("orders")
+  bind _ <- Snowflake.insert(rows)
+  Result.ok(rows)
+}
+// inlay hint: fn load_data() -> Result<List<Row>, String> /*!Kafka !Snowflake*/
+```
+
+See [effect-inference.mdx](./language/effect-inference.mdx) for full details.
+
+---
+
+## OR Patterns + Pattern Guards (v56.5)
+
+Pattern branches can now match multiple alternatives with `|`,
+and the W037 lint catches unreachable patterns after a wildcard.
+
+```favnir
+match result {
+  Ok(x) | Err(x) -> retry(x)
+  Err(e) -> fail(e)
+}
+
+match order.status {
+  "pending" if order.amount > 1000.0 -> process_large(order)
+  "pending" -> process_small(order)
+  _ -> ignore(order)
+}
+```
+
+---
+
+## as-Patterns (v56.6)
+
+The `@` operator binds the entire matched value to a name while still
+destructuring it with a sub-pattern.
+
+```favnir
+match orders {
+  [head @ { id, amount } | tail] -> {
+    log("Processing order: " + id)
+    process(head)
+  }
+  [] -> done()
+}
+```
+
+---
+
+## Module Namespaces (v56.7)
+
+Wildcard imports allow expanding a module's names into the current scope.
+W038 warns when multiple wildcard imports risk name collisions.
+
+```favnir
+import "./stages" as stages
+
+stages.validate.run(order)
+stages.transform.apply(data)
+
+import "./stages/validate" as validate.*
+run(order)   // validate.run directly in scope
+```
+
+---
+
+## Documentation (v56.8)
+
+Three language reference pages were updated or created to document
+the Language Power 2.0 features:
+
+- [`bounded-generics.mdx`](./language/bounded-generics.mdx) — new
+- [`row-polymorphism.mdx`](./language/row-polymorphism.mdx) — updated
+- [`effect-inference.mdx`](./language/effect-inference.mdx) — updated
+
+---
+
+## Next: v57.0 — Language Power 2.0 Declaration
+
+v57.0 will formally declare the Language Power 2.0 milestone complete,
+adding the declaration to `MILESTONE.md` and confirming that all
+v56.1–v56.9 features are working together.

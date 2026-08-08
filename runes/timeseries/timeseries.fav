@@ -1,0 +1,99 @@
+// Time Series Rune — Rune.timeseries
+// ARIMA/SARIMA modeling, STL decomposition, change point detection, forecasting
+//
+// NOTE: TimeSeries<Float>, ModelSpec, FittedModel, Forecast, SeasonalComponents,
+//       DecompMethod, CpdMethod, TestResult 等の型は将来フェーズで型システムに登録する。
+//       今バージョンは include_str! テストのみ（型チェックエラーは無視する）。
+
+// --- モデル仕様コンストラクタ ---
+
+// ARIMA (AutoRegressive Integrated Moving Average) モデル仕様
+public fn arima(p: Int, d: Int, q: Int) -> ModelSpec {
+    ModelSpec { kind: "ARIMA", p: p, d: d, q: q }
+}
+
+// SARIMA (Seasonal ARIMA) モデル仕様
+public fn sarima(p: Int, d: Int, q: Int, cap_p: Int, cap_d: Int, cap_q: Int, s: Int) -> ModelSpec {
+    ModelSpec { kind: "SARIMA", p: p, d: d, q: q, cap_p: cap_p, cap_d: cap_d, cap_q: cap_q, s: s }
+}
+
+// Exponential Smoothing (Holt-Winters) モデル仕様
+public fn exponential_smoothing(alpha: Float, beta: Float, gamma: Float) -> ModelSpec {
+    ModelSpec { kind: "ExponentialSmoothing", alpha: alpha, beta: beta, gamma: gamma }
+}
+
+// --- 学習・予測 ---
+
+public fn fit(model_spec: ModelSpec, data: TimeSeries<Float>) -> FittedModel {
+    FittedModel { spec: model_spec, params: [] }
+}
+
+public fn predict(model: FittedModel, horizon: Int) -> Forecast {
+    Forecast { values: [], lower: [], upper: [] }
+}
+
+// --- 季節分解 ---
+
+// STL (Seasonal-Trend decomposition using LOESS) 等による季節分解
+public fn decompose(ts: TimeSeries<Float>, method: DecompMethod, period: Int) -> SeasonalComponents {
+    SeasonalComponents { trend: [], seasonal: [], residual: [] }
+}
+
+// --- 変化点検出 ---
+
+// ChangePointDetection — PELT / BOCPD アルゴリズムによる変化点検出
+public fn detect_changepoints(ts: TimeSeries<Float>, method: CpdMethod) -> List<Int> {
+    []
+}
+
+// --- 特徴量 ---
+
+public fn autocorrelation(ts: TimeSeries<Float>, lags: Int) -> List<Float> {
+    []
+}
+
+public fn partial_autocorrelation(ts: TimeSeries<Float>, lags: Int) -> List<Float> {
+    []
+}
+
+// ADF 検定（単位根検定 — Augmented Dickey-Fuller Test）
+public fn adf_test(ts: TimeSeries<Float>) -> TestResult {
+    TestResult { statistic: 0.0, p_value: 1.0, reject_null: false }
+}
+
+// --- 前処理 ---
+
+public fn resample(ts: TimeSeries<Float>, freq: Int) -> TimeSeries<Float> {
+    ts
+}
+
+public fn rolling_mean(ts: TimeSeries<Float>, window: Int) -> TimeSeries<Float> {
+    ts
+}
+
+// EWM (Exponentially Weighted Moving average — 指数加重平均)
+public fn ewm(ts: TimeSeries<Float>, alpha: Float) -> TimeSeries<Float> {
+    ts
+}
+
+public fn lag_features(ts: TimeSeries<Float>, lags: List<Int>) -> List<TimeSeries<Float>> {
+    []
+}
+
+// --- 評価指標 ---
+
+public fn mae(actual: List<Float>, predicted: List<Float>) -> Float {
+    0.0
+}
+
+public fn rmse(actual: List<Float>, predicted: List<Float>) -> Float {
+    0.0
+}
+
+public fn mape(actual: List<Float>, predicted: List<Float>) -> Float {
+    0.0
+}
+
+public fn smape(actual: List<Float>, predicted: List<Float>) -> Float {
+    0.0
+}

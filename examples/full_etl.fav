@@ -2,10 +2,10 @@
 // postgres → 集計 → s3 保存 → kafka 通知
 // `fav run examples/full_etl.fav`（ローカル Docker 環境必須）
 
-import runes/postgres
-import runes/s3
-import runes/kafka
-import runes/json
+import rune "postgres"
+import rune "s3"
+import rune "kafka"
+import rune "json"
 
 type Order = {
   id:     Int
@@ -21,7 +21,7 @@ type Summary = {
 // postgres から完了済み注文を取得
 stage LoadOrders: Unit -> List<Order> = |_| {
   bind conn <- Postgres.connect(config.postgres)
-  Postgres.query[Order](conn, "SELECT id, amount, status FROM orders WHERE status = $1", ["completed"])
+  Postgres.query<Order>(conn, "SELECT id, amount, status FROM orders WHERE status = $1", ["completed"])
 }
 
 // 注文リストを集計して Summary に変換

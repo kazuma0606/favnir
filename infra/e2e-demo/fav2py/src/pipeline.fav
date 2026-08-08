@@ -57,20 +57,17 @@ fn aggregate(ctx: AppCtx, n: Int) -> Result<String, String> {
 
 // Stage 3: Save result to S3
 fn save_result(ctx: AppCtx, result_json: String) -> Result<Unit, String> {
+  bind bucket <- Option.unwrap_or(ctx.io.getenv_raw("S3_BUCKET"), "favnir-e2e-demo")
   ctx.storage.put(
-    "favnir-e2e-demo",
+    bucket,
     String.concat("proof/fav2py/", String.concat(Gen.uuid_raw(), ".json")),
     result_json
   )
 }
 
-seq Pipeline(ctx) = load_and_insert |> aggregate |> save_result
-
 public fn main(ctx: AppCtx) -> Result<Unit, String> {
-  chain real_ctx <- Ctx.build_raw(
-    Option.unwrap_or(ctx.io.getenv_raw("DATABASE_URL"), ""),
-    Option.unwrap_or(ctx.io.getenv_raw("AWS_REGION"),   "ap-northeast-1"),
-    Option.unwrap_or(ctx.io.getenv_raw("S3_BUCKET"),    "favnir-e2e-demo")
-  )
-  Pipeline(real_ctx, get_csv_path(ctx.io.argv()))
+  bind path         <- get_csv_path(ctx.io.argv())
+  chain n           <- load_and_insert(ctx, path)
+  chain result_json <- aggregate(ctx, n)
+  save_result(ctx, result_json)
 }

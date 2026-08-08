@@ -1,0 +1,33 @@
+# コンプライアンスレポート
+
+Favnir は GDPR・SOC2 フレームワークに対応したコンプライアンスレポートを生成できます。
+監査ログ（JSONL）を解析し、各フレームワークのセクション見出しを含む Markdown レポートを出力します。
+
+## 対応フレームワーク
+
+### GDPR
+
+GDPR（一般データ保護規則）レポートには以下のセクションが含まれます。
+
+- `## Data Access Log` — データアクセス記録
+- `## Deletion Records` — 削除記録
+
+### SOC2
+
+SOC2（Service Organization Control 2）レポートには以下のセクションが含まれます。
+
+- `## Access Control` — アクセス制御記録
+- `## Audit Trail` — 監査証跡
+
+## 使用例
+
+```bash
+fav compliance-report --framework gdpr --audit-log audit.jsonl -o report.md
+fav compliance-report --framework soc2  --audit-log audit.jsonl -o report.md
+```
+
+## 関連ドキュメント
+
+- [RBAC](./rbac)
+- [シークレット管理](./secrets)
+- [監査ログ署名](../tools/fav-test)

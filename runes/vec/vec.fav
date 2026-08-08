@@ -1,0 +1,48 @@
+// Vector Stage Primitives — Rune.vec
+// normalize, dot product, cosine similarity, euclidean distance, batch ops, projection
+//
+// NOTE: Vec<Float>[N]（次元型パラメータ）は将来フェーズで型システムに登録する。
+//       今バージョンは List<Float> をプレースホルダーとして使用。
+//       include_str! テストのみ（型チェックエラーは無視する）。
+
+// --- 基本ベクトル演算 ---
+
+// L2 正規化（ノルム = 1 に変換）
+public fn normalize(v: List<Float>) -> List<Float> {
+    v
+}
+
+// 内積（ドット積）
+public fn dot(a: List<Float>, b: List<Float>) -> Float {
+    0.0
+}
+
+// コサイン類似度（-1.0 〜 1.0）
+public fn cosine_similarity(a: List<Float>, b: List<Float>) -> Float {
+    0.0
+}
+
+// ユークリッド距離
+public fn euclidean_distance(a: List<Float>, b: List<Float>) -> Float {
+    0.0
+}
+
+// --- バッチ処理 ---
+
+// バッチ埋め込み: テキストのリスト → 埋め込みベクトルのリスト
+public fn batch_embed(texts: List<String>, model: String) -> List<List<Float>> {
+    []
+}
+
+// コサイン類似度行列（N×N）
+public fn batch_cosine_matrix(vecs: List<List<Float>>) -> List<List<Float>> {
+    []
+}
+
+// --- 次元変換 ---
+
+// 次元投影（次元削減 / 拡張）
+// VecDimProjection — PCA などによる線形変換
+public fn project(v: List<Float>, target_dim: Int) -> List<Float> {
+    []
+}

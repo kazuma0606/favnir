@@ -8,21 +8,12 @@ jobs:
   bench:
     runs-on: ubuntu-latest
     env:
-      # libduckdb-sys 1.x が DUCKDB_LIB_DIR 設定時は bundled ソースビルドをスキップし
-      # システムライブラリにリンクする。これにより /EHsc 等の MSVC フラグを GCC に渡す
-      # バグ（libduckdb-sys@1.2.2）を回避する。
-      DUCKDB_LIB_DIR: /usr/local/lib/duckdb
-      LD_LIBRARY_PATH: /usr/local/lib/duckdb
+      # fav/.cargo/config.toml sets CXXFLAGS="/EHsc /utf-8" for Windows MSVC.
+      # On Linux GCC, these flags are invalid and break the libduckdb-sys bundled build.
+      # Clear CXXFLAGS here (force = false in config.toml so this takes priority).
+      CXXFLAGS: ""
     steps:
       - uses: actions/checkout@v4
-
-      - name: Install system DuckDB 1.2.2
-        run: |
-          curl -fsSL https://github.com/duckdb/duckdb/releases/download/v1.2.2/libduckdb-linux-amd64.zip \
-            -o /tmp/libduckdb.zip
-          sudo mkdir -p /usr/local/lib/duckdb
-          sudo unzip -o /tmp/libduckdb.zip -d /usr/local/lib/duckdb
-          sudo ldconfig
 
       - name: Cache cargo
         uses: actions/cache@v4

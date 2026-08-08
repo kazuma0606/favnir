@@ -1,5 +1,4 @@
 import rune "json"
-import rune "io"
 
 fn parse_flag(args: List<String>, flag: String) -> Result<String, String> {
   bind idx <- List.find_index(args, |a| a == flag)
@@ -40,30 +39,30 @@ fn check_regressions(
   })
 }
 
-fn write_results_md(data: JsonValue) -> Result<Unit, String> !IO {
+fn write_results_md(ctx: AppCtx, data: JsonValue) -> Result<Unit, String> {
   bind version <- Json.get_string(data, "version")
   bind ts      <- Json.get_string(data, "timestamp")
   bind metrics <- Json.get_object(data, "metrics")
   bind entries <- Map.entries(metrics)
   bind lines   <- List.map(entries, |kv| f"| {kv.key} | {kv.value} |")
   bind body    <- String.join(lines, "\n")
-  IO.write_file("benchmarks/results.md", f"# Benchmark Results\n\nVersion: {version} / {ts}\n\n| Metric | Value |\n|---|---|\n{body}\n")
+  ctx.io.write_file_raw("benchmarks/results.md", f"# Benchmark Results\n\nVersion: {version} / {ts}\n\n| Metric | Value |\n|---|---|\n{body}\n")
 }
 
-fn main() -> Result<Unit, String> !IO {
-  bind args      <- IO.args()
+fn main(ctx: AppCtx) -> Result<Unit, String> {
+  bind args      <- ctx.io.argv()
   bind baseline  <- parse_flag(args, "--baseline")
   bind current   <- parse_flag(args, "--current")
   bind thr_str   <- parse_flag(args, "--threshold")
   bind threshold <- Int.parse(thr_str)
   bind emit_md   <- Result.ok(has_flag(args, "--emit-md"))
 
-  bind b_json  <- IO.read_file(baseline)
-  bind c_json  <- IO.read_file(current)
+  bind b_json  <- ctx.io.read_file_raw(baseline)
+  bind c_json  <- ctx.io.read_file_raw(current)
   bind b_data  <- Json.parse(b_json)
   bind c_data  <- Json.parse(c_json)
 
-  bind _ <- if emit_md { write_results_md(c_data) } else { Result.ok(()) }
+  bind _ <- if emit_md { write_results_md(ctx, c_data) } else { Result.ok(()) }
 
   bind b_metrics <- Json.get_object(b_data, "metrics")
   bind c_metrics <- Json.get_object(c_data, "metrics")
@@ -71,10 +70,10 @@ fn main() -> Result<Unit, String> !IO {
 
   if List.length(regressions) > 0 {
     bind report <- Result.ok(String.join(regressions, "\n  "))
-    bind _ <- IO.println(f"REGRESSION: {List.length(regressions)} metric(s) exceeded {threshold}% threshold:\n  {report}")
+    bind _ <- ctx.io.println(f"REGRESSION: {List.length(regressions)} metric(s) exceeded {threshold}% threshold:\n  {report}")
     Result.err("benchmark regression detected")
   } else {
-    bind _ <- IO.println(f"OK: all metrics within {threshold}% of baseline.")
+    bind _ <- ctx.io.println(f"OK: all metrics within {threshold}% of baseline.")
     Result.ok(())
   }
 }

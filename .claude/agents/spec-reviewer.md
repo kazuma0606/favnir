@@ -82,6 +82,11 @@ Step 2 で抽出した各ロードマップ項目について:
 - [ ] spec.md の完了条件が tasks.md のチェック項目として1対1対応しているか
 - [ ] 「ドキュメント作成」「CHANGELOG 更新」「site/ MDX 追加」が漏れていないか
 - [ ] 前バージョンの tasks.md を参照して形式が統一されているか
+- [ ] 最終確認タスク（T-last / T6 / T9 等）に以下の **CI チェック 3 件**が含まれているか（なければ [MED] 指摘）:
+  - `cargo clippy --locked -- -D warnings` が pass することを確認
+  - `./target/debug/fav fmt --check self/compiler.fav` が pass することを確認
+  - `./target/debug/fav fmt --check self/checker.fav` が pass することを確認
+  （これらは CI の Clippy / Self-fmt ステップと同一。ローカルで事前に通過させることで CI 失敗ループを防ぐ）
 
 ## 出力形式
 

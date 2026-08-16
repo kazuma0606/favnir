@@ -4,6 +4,1385 @@ Favnir のバージョン履歴。形式は [Keep a Changelog](https://keepachan
 
 ---
 
+## [v80.0.0] — 2026-08-16 — Favnir 3.0 宣言 ★クリーンアップ
+
+### Declaration
+- Favnir 3.0 宣言: 時間・来歴・正しさ・実行戦略がすべて型で語れる言語へ
+- v75.1〜v79.9 の全スプリント（Temporal / Provenance / Verifiable / Execution Effects）完了
+
+### Cleanup
+- `cargo clean` 実施（ビルドキャッシュ完全クリア）
+- MILESTONE.md に Favnir 3.0 宣言を追記
+- README.md に v80.0 達成を追記
+
+### Tests
+- `cargo_toml_version_is_80_0_0`: バージョン 80.0.0 を確認
+- `changelog_has_v80_0_0`: CHANGELOG エントリを確認
+- `milestone_has_favnir_3`: MILESTONE.md の Favnir 3.0 宣言を確認
+- `readme_mentions_favnir_3`: README.md の Favnir 3.0 記述を確認
+
+---
+
+## [v79.9.0] — 2026-08-16 — 安定化・コードフリーズ（Favnir 3.0 前最終調整）
+
+### Stability
+- v79.1〜v79.8 の全スプリント統合動作確認（Temporal / Provenance / Verifiable / Execution Effects）
+
+### Tests
+- `favnir3_full_sprint_all_stable`: 全 4 ステージ（Temporal / Provenance / Verifiable / Execution Effects）が揃っていることを統合検証
+- `favnir3_e2e_showcase_runs`: E2E ショーケースの実行可能構造を検証
+
+---
+
+## [v79.8.0] — 2026-08-16 — ドキュメント完全化（v3 リファレンス）
+
+### Added
+- `site/content/docs/v3/temporal.mdx`: Temporal 機能リファレンス（FreshnessPolicy / AsOfQuery / SCD2）
+- `site/content/docs/v3/migration-v2-v3.mdx`: v2 → v3 移行ガイド
+
+### Tests
+- `docs_v3_temporal_exists`: temporal.mdx に FreshnessPolicy / AsOfQuery / SCD が含まれることを検証
+- `docs_v3_migration_guide_exists`: migration-v2-v3.mdx に v2 / v3 / Temporal が含まれることを検証
+
+---
+
+## [v79.7.0] — 2026-08-16 — OSS 公開強化・コミュニティ整備
+
+### Added
+- `CONTRIBUTING.md`: v3 対応更新（Execution Effects 追加手順・invariant 追加手順・fav verify の使い方）
+- `COMMUNITY.md`: 新規作成（RFC プロセス・ディスカッション場所）
+
+### Tests
+- `oss_contributing_v2_exists`: CONTRIBUTING.md に Execution Effects / fav verify / invariant が含まれることを検証
+- `oss_community_md_exists`: COMMUNITY.md に RFC / GitHub が含まれることを検証
+
+---
+
+## [v79.6.0] — 2026-08-16 — ドッグフーディング強化
+
+### Added
+- `fav/pipelines/release.fav`: リリースパイプライン（bump_version / prepend_changelog / release_pipeline）
+- `fav/pipelines/health-check.fav`: ヘルスチェックパイプライン（run_tests / run_verify / health_check_pipeline）
+
+### Tests
+- `dogfood_release_pipeline_exists`: release.fav に release_pipeline / bump_version / prepend_changelog が含まれることを検証
+- `dogfood_health_check_pipeline_exists`: health-check.fav に health_check_pipeline / fav verify が含まれることを検証
+
+---
+
+## [v79.5.0] — 2026-08-16 — Execution Effects showcase パイプライン
+
+### Added
+- `infra/e2e-demo/favnir3-showcase/pipeline.fav`: Execution Effects ステージ追加（join_stage / !Adaptive / !Cached）
+
+### Tests
+- `showcase_execution_cached_effect`: pipeline.fav に join_stage / !Cached が含まれることを検証
+- `showcase_execution_adaptive_effect`: pipeline.fav に !Adaptive / join with on: が含まれることを検証
+
+---
+
+## [v79.4.0] — 2026-08-16 — Verifiable showcase パイプライン
+
+### Added
+- `infra/e2e-demo/favnir3-showcase/contract.fav`: Verifiable 不変条件追加（Favnir3ShowcaseContract / invariant / probabilistic_invariant）
+
+### Tests
+- `showcase_verifiable_invariants_declared`: contract.fav に Favnir3ShowcaseContract / invariant / row_count が含まれることを検証
+- `showcase_verifiable_probabilistic_contract`: contract.fav に probabilistic_invariant / confidence / sample_size が含まれることを検証
+
+---
+
+## [v79.3.0] — 2026-08-16 — Provenance showcase パイプライン
+
+### Added
+- `infra/e2e-demo/favnir3-showcase/pipeline.fav`: Provenance ステージ追加（load_with_provenance / TracedData / DataSource / OpenLineage）
+
+### Tests
+- `showcase_provenance_traced`: pipeline.fav に TracedData / DataSource / mask_pii が含まれることを検証
+- `showcase_provenance_openlineage_generated`: pipeline.fav に OpenLineage / masked.provenance が含まれることを検証
+
+---
+
+## [v79.2.0] — 2026-08-16 — Temporal showcase パイプライン
+
+### Added
+- `infra/e2e-demo/favnir3-showcase/pipeline.fav`: Temporal ステージ追加（load_with_freshness / AsOfQuery / FreshnessPolicy / apply_scd2_update）
+
+### Tests
+- `showcase_temporal_freshness_check`: pipeline.fav に FreshnessPolicy / AsOfQuery が含まれることを検証
+- `showcase_temporal_scd2_applied`: pipeline.fav に apply_scd2_update / ctx.run_ts が含まれることを検証
+
+---
+
+## [v79.1.0] — 2026-08-16 — 統合ショーケース基盤
+
+### Added
+- `infra/e2e-demo/favnir3-showcase/pipeline.fav`: 4 スプリント全機能統合パイプライン骨格（showcase_pipeline）
+- `infra/e2e-demo/favnir3-showcase/fav.toml`: `[effects.cached]` / `[effects.adaptive]` 設定
+- `infra/e2e-demo/favnir3-showcase/contract.fav`: `ShowcaseContract3` 宣言（validate_showcase_contract）
+- `infra/e2e-demo/favnir3-showcase/README.md`: 概要・実行手順
+
+### Tests
+- `favnir3_showcase_structure_exists`: 4 ファイルの存在と内容を検証
+- `favnir3_showcase_contract_valid`: ShowcaseContract3 / validate_showcase_contract を検証
+
+---
+
+## [v79.0.0] — 2026-08-16 — Execution Effects 1.0 宣言 ★クリーンアップ
+
+### Added
+- Execution Effects 1.0 宣言（v78.1〜v78.9 の全 Execution Effects 基盤の完成を宣言）
+
+### Tests
+- `cargo_toml_version_is_79_0_0`: Cargo.toml のバージョンが 79.0.0 であることを検証
+- `changelog_has_v79_0_0`: CHANGELOG.md に v79.0.0 エントリが存在することを検証
+- `milestone_has_execution_effects`: MILESTONE.md に「Execution Effects 1.0」が存在することを検証
+- `readme_mentions_execution_effects`: README.md に「Execution Effects」が存在することを検証
+
+---
+
+## [v78.9.0] — 2026-08-16 — 安定化・コードフリーズ
+
+### Added
+
+なし（新機能追加なし。バグ修正のみ受け入れ）
+
+### Tests
+- `execution_effects_full_sprint_all_stable`: v78.1〜v78.8 全型・関数の横断統合テスト（CacheEntry / CacheStats / ExecutionStrategy / CostEstimate / ExecutionPlan / ParallelConfig / ExecutionModeSelector / PlanCache が連携して正しく動作することを検証）
+- `execution_effects_e2e_pipeline_runs`: パイプライン全体（モード選択 → コスト推定 → 戦略選択 → 計画構築 → 可視化 → キャッシュ挿入 → 取得）の E2E 動作確認
+
+---
+
+## [v78.8.0] — 2026-08-16 — 実行計画キャッシュ
+
+### Added
+- `PlanCacheEntry` 構造体（pipeline_hash: String, plan: ExecutionPlan, created_at: i64、Debug / Clone / PartialEq 付き、Eq/Hash は f64 含む ExecutionPlan を内包するため付与しない）: キャッシュの 1 エントリ型
+- `PlanCache` 構造体（entries: Vec<PlanCacheEntry>, max_size: usize、Debug / Clone / PartialEq 付き、Eq/Hash なし）: 実行計画キャッシュ型
+- `lookup_plan<'a>(cache: &'a PlanCache, hash: &str) -> Option<&'a ExecutionPlan>`: ハッシュから実行計画を取得（ライフタイム付き返値）
+- `insert_plan(cache: &mut PlanCache, hash: &str, plan: ExecutionPlan)`: キャッシュに挿入（既存 hash は上書き、max_size 到達時は created_at 最小エントリを oldest-first エビクション）
+
+### Tests
+- `plan_cache_hit`: 挿入後に lookup が Some を返し、未登録 hash が None を返すことを検証
+- `plan_cache_evicts_oldest_on_full`: max_size=2 で 3 件挿入時に created_at 最小（io_ops=10）のエントリがエビクションされることを検証
+
+---
+
+## [v78.7.0] — 2026-08-16 — Stream / Batch 統合実行モード
+
+### Added
+- `ExecutionMode` enum（Batch / Streaming / Adaptive、Debug / Clone / PartialEq / Eq / Hash 付き）: 実行モードの選択肢型
+- `ExecutionModeSelector` 構造体（row_threshold: u64, latency_target_ms: u64、Debug / Clone / PartialEq / Eq 付き、Hash なし）: モード選択閾値設定型
+- `select_execution_mode(est_rows: u64, latency_target_ms_req: u64, selector: &ExecutionModeSelector) -> ExecutionMode`: データ量・レイテンシ要件から最適モードを選択（latency 判定 → row 判定 → Adaptive の優先順位）
+
+### Tests
+- `mode_batch_for_large_data`: est_rows が row_threshold を超え latency 要件が緩い場合に Batch を返すことを検証（latency 境界値も確認）
+- `mode_streaming_for_low_latency`: latency 要件が selector 閾値より厳しい場合に Streaming を返すことを検証（大量データでも latency 優先であることも確認）
+
+---
+
+## [v78.6.0] — 2026-08-16 — !Parallel エフェクト統合
+
+### Added
+- `ParallelConfig` 構造体（threads: usize, partition_count: usize, partition_key: String、Debug / Clone / PartialEq / Eq 付き）: 並列実行スレッド数・パーティション数・パーティションキーを保持する設定型
+- `PartitionPlan` 構造体（partition_id: usize, rows_estimate: u64, thread_id: usize、Debug / Clone / PartialEq / Eq 付き）: 1 パーティションの実行計画型
+- `plan_parallel_execution(total_rows: u64, config: &ParallelConfig) -> Vec<PartitionPlan>`: パーティション分割計画を生成（端数は最終パーティションに加算、threads==0 はゼロ除算ガード）
+- `format_parallel_plan(plans: &[PartitionPlan]) -> String`: 並列計画をテキスト形式で可視化（空スライス時は "No partitions." を返す）
+
+### Tests
+- `parallel_plan_creates_correct_partitions`: partition 数・thread 割り当て・format 出力（ヘッダー / パーティション行 / フッター）を検証
+- `parallel_plan_distributes_evenly`: 均等分散・合計行数一致・端数最終パーティション加算（101行/4パーティション → last=26）を検証
+
+---
+
+## [v78.5.0] — 2026-08-16 — fav explain plan 可視化
+
+### Added
+- `PlanStage` 構造体（name: String, operation: String, cost: CostEstimate, strategy: Option<ExecutionStrategy>、Debug / Clone / PartialEq 付き、Eq/Hash なし）: 実行計画の 1 ステージ型
+- `ExecutionPlan` 構造体（pipeline: String, stages: Vec<PlanStage>, total_cost: CostEstimate、Debug / Clone / PartialEq 付き、Eq/Hash なし）: パイプライン全体の実行計画型
+- `format_execution_plan(plan: &ExecutionPlan) -> String`: 実行計画をテキスト形式で可視化（ヘッダー・ステージ行・セパレーター・トータル行）
+
+### Tests
+- `explain_plan_format_output`: 3 ステージ OrderPipeline の出力が "Execution Plan:" / "Stage 1〜3:" / "BroadcastJoin" / "Total:" を含むことを検証
+- `explain_plan_total_cost_summed`: ステージ合計 cpu_units（1.2+2.1+0.3=3.6）と total_cost の一致を検証、format 出力が "3.6" と "128MB" を含むことも確認
+
+---
+
+## [v78.4.0] — 2026-08-16 — コスト推定モデル
+
+### Added
+- `CostEstimate` 構造体（cpu_units: f64, memory_mb: f64, io_ops: u64、Debug / Clone / PartialEq 付き、Eq/Hash は f64 のため付与しない）: 実行戦略ごとの推定コスト型（v78.5.0 の `fav explain plan` で参照される基盤型）
+- `estimate_broadcast_cost(right_rows: u64) -> CostEstimate`: BroadcastJoin コスト推定（cpu = rows*0.01, mem = rows*0.1, io = rows）
+- `estimate_hash_cost(left_rows: u64, right_rows: u64) -> CostEstimate`: HashJoin コスト推定（cpu = 5.0 + total*0.0001, mem = total*0.01, io = total/2）
+- `select_min_cost_strategy(estimates: &[(ExecutionStrategy, CostEstimate)]) -> ExecutionStrategy`: cpu_units 最小のストラテジーを返す（空スライスは Auto フォールバック）
+
+### Tests
+- `cost_estimate_broadcast_cheaper_for_small`: right=100 / left=10_000 → BroadcastJoin（cpu 1.0 vs 6.01）を検証
+- `cost_estimate_hash_wins_for_large`: right=50_000 / left=10_000 → HashJoin（cpu 500.0 vs 11.0）を検証
+
+---
+
+## [v78.3.0] — 2026-08-16 — !Adaptive エフェクト基盤
+
+### Added
+- `ExecutionStrategy` enum（BroadcastJoin / HashJoin / SortMergeJoin / Auto、Debug / Clone / PartialEq / Eq / Hash 付き）: 実行戦略の選択肢型（v78.3.0 では BroadcastJoin / HashJoin のみ自動選択、SortMergeJoin / Auto は v78.4.0 以降）
+- `AdaptiveConfig` 構造体（broadcast_threshold_rows: u64, default_parallelism: usize、Debug / Clone / PartialEq / Eq 付き）: Adaptive 実行設定（broadcast_threshold_rows 以下の小テーブルを BroadcastJoin で処理）
+- `select_join_strategy(left_rows: u64, right_rows: u64, config: &AdaptiveConfig) -> ExecutionStrategy`: 行数から最適 join ストラテジーを選択（min(left,right) <= threshold → BroadcastJoin、それ以外 → HashJoin）
+- `format_strategy_selected(strategy: &ExecutionStrategy) -> String`: 選択されたストラテジーの可読文字列表現（4 variant 対応）
+
+### Tests
+- `adaptive_selects_broadcast_for_small_table`: right=500 <= threshold=1000 → BroadcastJoin を検証、format_strategy_selected が "BroadcastJoin" を含むことも確認
+- `adaptive_selects_hash_for_large_table`: min(50_000, 80_000)=50_000 > threshold=1000 → HashJoin を検証、format_strategy_selected が "HashJoin" を含むことも確認
+
+---
+
+## [v78.2.0] — 2026-08-16 — キャッシュ戦略型
+
+### Added
+- `CacheStats` 構造体（hits: u64, misses: u64, evictions: u64、Debug / Clone / PartialEq / Eq 付き）: LRU / FIFO / LFU 各戦略の動作統計型（v78.2.0 では LRU シミュレーションのみ、FIFO/LFU は将来バージョン）
+- `simulate_lru_cache(accesses: &[&str], max_entries: usize) -> CacheStats`: LRU キャッシュのアクセスパターンをシミュレートし hits / misses / evictions を集計（max_entries==0 は常にミス）
+- `format_cache_stats_report(stats: &CacheStats) -> String`: ヒット率（{:.1}%）付きの統計レポート文字列を生成
+- `hit_rate(stats: &CacheStats) -> f64`: ヒット率（0.0〜100.0）を計算（total==0 の場合は 0.0）
+
+### Tests
+- `lru_evicts_least_recently_used`: accesses=[A,B,C,A] / max=2 → evictions=2 / misses=4 を検証
+- `cache_hit_rate_calculated`: accesses=[A,B,C,A,B] / max=3 → hits=2 / misses=3 / rate=40.0% を検証、`format_cache_stats_report` が "Cache Stats:" と "40.0%" を含むことも確認
+
+---
+
+## [v78.1.0] — 2026-08-16 — !Cached エフェクト基盤
+
+### Added
+- `CacheStrategy` enum（Lru / Fifo / Lfu、Debug / Clone / PartialEq / Eq 付き）: キャッシュ戦略型（v78.1.0 ではメタデータ保持のみ、エビクションへの利用は v78.2.0 以降）
+- `CacheConfig` 構造体（ttl_secs: u64, strategy: CacheStrategy, max_entries: usize、Debug / Clone / PartialEq / Eq 付き）: `fav.toml` の `[effects.cached]` セクションと 1:1 対応する設計（TOML 解析統合は将来バージョン）
+- `CacheEntry` 構造体（key: String, inserted_at: i64, hits: u64、Debug / Clone / PartialEq / Eq 付き）: キャッシュエントリ型（hits は LFU 戦略等で利用予定）
+- `check_cache_valid(entry: &CacheEntry, now: i64, config: &CacheConfig) -> bool`: elapsed が TTL 以内かを判定（`now - inserted_at <= ttl_secs`）
+
+### Tests
+- `cache_entry_valid_within_ttl`: elapsed=200 <= ttl=300 → `true` を検証
+- `cache_entry_expired`: elapsed=400 > ttl=300 → `false` を検証
+
+---
+
+## [v78.0.0] — 2026-08-16 — Verifiable Pipelines 宣言 ★クリーンアップ
+
+### Milestone
+> 「不変条件が型となり、反例がコンパイラから届く。
+>  Favnir のパイプラインは今、その正しさを証明できる。」
+- Verifiable Pipelines 宣言（v77.1〜v77.9 スプリント完成）
+- cargo clean 実施（30.3 GiB 削除）
+- MILESTONE.md / README.md 更新
+
+### Tests
+- `cargo_toml_version_is_78_0_0`: Cargo.toml バージョンが `78.0.0` であることを確認
+- `changelog_has_v78_0_0`: CHANGELOG.md に `[v78.0.0]` が存在することを確認
+- `milestone_has_verifiable_pipelines`: MILESTONE.md に `Verifiable Pipelines` が存在することを確認
+- `readme_mentions_verifiable_pipelines`: README.md に `Verifiable Pipelines` / `v78.0` が存在することを確認
+
+---
+
+## [v77.9.0] — 2026-08-16 — 安定化・コードフリーズ
+
+### Tests
+- `verifiable_full_sprint_all_stable`: v77.1〜v77.8 の全主要型（InvariantViolation / AggregateInvariant / FilterInvariant / JoinInvariant / cmd_verify / run_ci_verification / generate_counter_example_values / check_probabilistic_invariant）を instantiate し基本動作を確認するスモークテスト
+- `verifiable_e2e_pipeline_verified`: aggregate → filter → probabilistic → verify → ci の各レイヤーを組み合わせた E2E 合成テスト
+
+---
+
+## [v77.8.0] — 2026-08-16 — 確率的契約
+
+### Added
+- `ProbabilisticContract` 構造体（name: String, confidence: f64, sample_size: usize、Debug / Clone / PartialEq 付き、Eq は付与しない）: サンプリングベース不変条件検証の契約型（confidence は v77.8.0 ではメタデータとして保持のみ、統計的検定は v78.x 以降）
+- `check_probabilistic_invariant(samples: &[f64], target_min: f64, target_max: f64, contract: &ProbabilisticContract) -> Result<(), String>`: サンプル平均が [target_min, target_max] 内かを検証（空スライス → Err、範囲内 → Ok、範囲外 → Err with detail）
+
+### Tests
+- `probabilistic_contract_passes`: mean=50.0 → [40.0, 60.0] 内 → `Ok(())` を検証
+- `probabilistic_contract_low_confidence_fails`: mean=15.0 → [40.0, 60.0] 外 → `Err` / "violated" / "score_distribution" を検証
+
+---
+
+## [v77.7.0] — 2026-08-16 — 反例自動生成
+
+### Added
+- `CounterExampleResult` 構造体（invariant_name: String, example: Vec<f64>, violates: bool、Debug / Clone 付き）: 反例生成結果型（`f64` フィールドのため `PartialEq`/`Eq` は付与しない）
+- `generate_counter_example_values(inv: &AggregateInvariant, seed: u64) -> CounterExampleResult`: 境界値付近の候補を生成して `check_aggregate_invariant` で検証（偶数シード: adversarial 候補で違反を検出、奇数シード: 安全候補で違反なし。v77.7.0 は擬似ランダムのみ、本格 PRNG は v78.x 以降）
+
+### Tests
+- `counter_example_finds_violation`: `NonNegative` + seed=0（偶数）→ 負値候補を含む → `violates=true` を検証
+- `counter_example_none_for_trivially_valid`: `NonNegative` + seed=1（奇数）→ 正値候補のみ → `violates=false` を検証
+
+---
+
+## [v77.6.0] — 2026-08-16 — 証明付き CI 統合
+
+### Added
+- `CiVerificationConfig` 構造体（pipeline: String, fail_fast: bool, data_path: String、Debug / Clone / PartialEq 付き）: CI 検証設定型（fail_fast / data_path は将来の CLI 統合で利用）
+- `CiResult` 構造体（passed: bool, report: VerificationReport, exit_code: i32、Debug / Clone / PartialEq 付き）: CI 実行結果型（exit_code: passed=true → 0、passed=false → 1）
+- `run_ci_verification(config, invariants) -> CiResult`: `cmd_verify` を呼び出して CI 検証レポートを生成し `CiResult` を返す（v77.6.0 では passed 常に true、実データ評価は v78.x 以降）
+- `format_ci_result_summary(result) -> String`: `CiResult` を CI 向け 1 行サマリーに変換（passed → "[CI] ✓ All invariants passed."、failed → "[CI] ✗ Invariant violations detected."）
+
+### Tests
+- `ci_verification_passes`: `CiVerificationConfig` + `PipelineInvariant` 2 件から `run_ci_verification` を実行し `passed=true`、`exit_code=0`、フォーマット出力を検証
+- `ci_verification_fails_on_violation`: `CiResult` を直接構築（passed=false、exit_code=1）し `format_ci_result_summary` の違反フォーマット（"violations"、"Exit code: 1"）を検証
+
+---
+
+## [v77.5.0] — 2026-08-15 — fav verify コマンド基盤
+
+### Added
+- `InvariantResult` 構造体（name: String, passed: bool, detail: String、Debug / Clone 付き）: 個別不変条件の検証結果型
+- `VerificationReport` 構造体（pipeline: String, results: Vec<InvariantResult>, all_passed: bool、Debug / Clone 付き）: パイプライン全体の検証レポート型
+- `cmd_verify(pipeline_name, invariants) -> VerificationReport`: PipelineInvariant の宣言から検証レポートを生成（v77.5.0 では全 passed=true、実データ検証は将来の CLI 統合で対応）
+- `format_verification_report(report) -> String`: VerificationReport を人間可読テキストに変換（passed → "Verification passed. N/N invariants checked."、failed → "Verification FAILED. M of N invariants violated."）
+
+### Tests
+- `verify_cmd_all_pass`: PipelineInvariant 2 件（filter_reduces_rows / total_amount_non_negative）から cmd_verify を実行し全 passed + フォーマット出力を検証
+- `verify_cmd_violation_reported`: VerificationReport を直接構築（ok_inv=true + fail_inv=false）し format_verification_report の違反フォーマットを検証
+
+---
+
+## [v77.4.0] — 2026-08-15 — Join 系不変条件
+
+### Added
+- `JoinType` enum（Inner / Left / Right / Full、Debug / Clone / PartialEq 付き）: Join 種別を型として表現
+- `JoinNullPolicy` enum（Fail / Warn / Allow、Debug / Clone / PartialEq 付き）: NULL 発生に対するポリシー型
+- `JoinInvariant` 構造体（join_type: JoinType, null_policy: JoinNullPolicy）: Join 不変条件の宣言型
+- `check_join_invariant(left_count, result_count, null_count, inv) -> Result<(), InvariantViolation>`: JoinType 行数チェック → NullPolicy NULL チェックの 2 段階検証
+
+### Tests
+- `join_invariant_inner_no_nulls`: Inner + Fail policy の正常系（null=0 → Ok）と違反系（null=5 → Err）
+- `join_invariant_left_preserves_rows`: Left join の行数保持正常系（result >= left → Ok）と違反系（result < left → Err）
+
+---
+
+## [v77.3.0] — 2026-08-15 — 集約系不変条件
+
+### Added
+- `AggregateProperty` enum（NonNegative / NonPositive / Bounded { min: f64, max: f64 } / NonNull、Debug / Clone / PartialEq 付き）: 集約値の数学的性質を型として表現
+- `AggregateInvariant` 構造体（column: String, property: AggregateProperty）: 集約不変条件の宣言型
+- `check_aggregate_invariant(values: &[f64], inv: &AggregateInvariant) -> Result<(), InvariantViolation>`: 全バリアントの match による集約値検証、`InvariantViolation` を再利用
+
+### Tests
+- `aggregate_invariant_non_negative_passes`: NonNegative / NonPositive / NonNull / Bounded の正常系（4 パターン Ok）
+- `aggregate_invariant_bounded_violated`: Bounded 違反（150.0 > 100.0）+ NonNull 空スライス違反の Err 検証
+
+---
+
+## [v77.2.0] — 2026-08-15 — フィルター系不変条件
+
+### Added
+- `FilterInvariant` 構造体（expected_ratio_min: f64, expected_ratio_max: f64）: フィルター比率不変条件の宣言型
+- `check_filter_invariant(input_count, output_count, inv) -> Result<(), InvariantViolation>`: ratio チェック（ゼロ除算ガード付き）、`InvariantViolation` を再利用
+- `format_filter_invariant_report(inv, result) -> String`: OK / VIOLATED 形式のレポート文字列生成
+
+### Tests
+- `filter_invariant_ratio_valid`: ratio が許容範囲内（境界値・ゼロ除算ガード含む）+ format_filter_invariant_report の "OK" 検証
+- `filter_invariant_ratio_violated`: ratio が許容範囲外 → InvariantViolation フィールド検証 + format_filter_invariant_report の "VIOLATED" 検証
+
+---
+
+## [v77.1.0] — 2026-08-15 — PipelineInvariant 型基盤
+
+### Added
+- `InvariantCheckPoint` enum（Pre / Post / Both、PartialEq 付き）: パイプライン不変条件の検査タイミングを型として表現
+- `PipelineInvariant` 構造体（name: String, expression: String, check_point: InvariantCheckPoint）: 不変条件の宣言型
+- `InvariantViolation` 構造体（invariant_name: String, expected: String, actual: String）: 不変条件違反の詳細
+- `check_count_invariant(expected_max, actual, name) -> Result<(), InvariantViolation>`: カウント不変条件のランタイム検証関数
+
+### Tests
+- `invariant_count_passes`: actual <= expected_max のケース（境界値含む）+ PipelineInvariant 構造体構築確認
+- `invariant_count_violated`: actual > expected_max のケース、InvariantViolation フィールド検証
+
+---
+
+## [v77.0.0] — 2026-08-15 — Data Provenance 1.0 宣言 ★クリーンアップ
+
+### Declaration
+- **Data Provenance 1.0 宣言**: データの来歴が型となった。`ProvenanceTag` から `PiiPolicy`・`ProvenanceContract` まで、来歴追跡のフルスタックが Favnir の型システムとして確立された
+- `cargo clean` 実施（24.2GiB 削除）
+
+### Tests
+- `cargo_toml_version_is_77_0_0` — Cargo.toml バージョン検証
+- `changelog_has_v77_0_0` — CHANGELOG エントリ検証
+- `milestone_has_data_provenance` — MILESTONE.md 宣言エントリ検証
+- `readme_mentions_provenance` — README.md Provenance 言及検証（3736 tests）
+
+---
+
+## [v76.9.0] — 2026-08-15 — 安定化・コードフリーズ
+
+### Tests
+- `provenance_full_sprint_all_stable` — Data Provenance スプリント全型（TracedData・chain_provenance・OpenLineageFacet・LineageGraph）の連鎖動作検証
+- `provenance_e2e_pipeline_valid` — Snowflake→S3 E2E シナリオ（ErasurePlan・DataProduct・ProvenanceContract・OpenLineage JSON）全検証（3732 tests）
+
+---
+
+## [v76.8.0] — 2026-08-15 — Provenance contracts
+
+### Added
+- `PiiPolicy` enum（MustBeMasked / AllowRaw / MustBeAbsent）— PII ポリシー種別型
+- `ProvenanceContract` 構造体（allowed_sources: Vec<DataSourceType>, pii_policy: PiiPolicy）— 来歴コントラクト型
+- `validate_provenance_contract(contract: &ProvenanceContract, tag: &ProvenanceTag) -> Result<(), String>` — ソース種別・PII ポリシーの整合性検証
+
+### Tests
+- `provenance_contract_source_violation` — 許可外ソース種別で Err、allowed_sources 空で Ok のケース検証
+- `provenance_contract_pii_violation` — MustBeMasked/MustBeAbsent で pii=true を拒否、AllowRaw で許可するケース検証（3730 tests）
+
+---
+
+## [v76.7.0] — 2026-08-15 — Data product 型
+
+### Added
+- `DataProductSla` 構造体（freshness_minutes: u64）— データ製品 SLA 型
+- `ProvenancePolicy` 構造体（require_source_declared: bool, pii_must_be_masked: bool）— 来歴ポリシー型
+- `DataProduct` 構造体（name: String, owner: String, sla: DataProductSla, provenance_policy: ProvenancePolicy）— データ製品ファーストクラス型
+- `validate_data_product(product: &DataProduct, tag: &ProvenanceTag) -> Result<(), String>` — 来歴タグとポリシーの整合性検証
+
+### Tests
+- `data_product_validated` — source 宣言済み・pii=false で両ポリシーを満たすケース検証
+- `data_product_pii_policy_violated` — pii=true かつ pii_must_be_masked=true で Err を返すケース検証（3728 tests）
+
+---
+
+## [v76.6.0] — 2026-08-15 — Cross-pipeline provenance
+
+### Added
+- `PipelineProvenanceChain` 構造体（pipelines: Vec<String>, merged_tag: ProvenanceTag）— パイプライン来歴連鎖型
+- `chain_provenance(upstream: &ProvenanceTag, pipeline_name: &str) -> ProvenanceTag` — 上流来歴を引き継ぎ pipeline_name を transforms に追加
+- `format_chain_report(chain: &PipelineProvenanceChain) -> String` — `pipelines=[...] source=<name> pii=<bool>` 形式のレポート生成
+
+### Tests
+- `cross_pipeline_provenance_chained` — source・pii 引き継ぎと transforms への pipeline_name 追加検証
+- `cross_pipeline_pii_propagated` — pii=true の伝播と format_chain_report 出力検証（3726 tests）
+
+---
+
+## [v76.5.0] — 2026-08-15 — `fav lineage graph` 可視化
+
+### Added
+- `LineageNodeType` enum（Source / Transform / Sink）— リネージノード種別型
+- `LineageNode` 構造体（id: String, node_type: LineageNodeType, label: String）— リネージグラフノード
+- `LineageEdge` 構造体（from: String, to: String）— リネージグラフエッジ（from/to はラベル文字列）
+- `LineageGraph` 構造体（nodes: Vec<LineageNode>, edges: Vec<LineageEdge>）— リネージグラフ
+- `format_lineage_dot(graph: &LineageGraph) -> String` — Graphviz DOT 形式出力（外部依存なし）
+
+### Tests
+- `lineage_graph_built` — ノード 3 件・エッジ 2 件のグラフ構築と型検証
+- `lineage_dot_format` — DOT 出力フォーマットと空グラフ exact match 検証（3724 tests）
+
+---
+
+## [v76.4.0] — 2026-08-15 — OpenLineage 統合強化
+
+### Added
+- `OpenLineageFacet` 構造体（producer: String, data_source_uri: String, transforms: Vec<String>）— OpenLineage ファセット型
+- `provenance_to_openlineage(tag: &ProvenanceTag) -> OpenLineageFacet` — ProvenanceTag を OpenLineageFacet に変換（producer="favnir/v76" 固定）
+- `format_openlineage_json(facet: &OpenLineageFacet) -> String` — 外部依存なしの手書き JSON 出力
+
+### Tests
+- `openlineage_facet_from_provenance` — producer・URI・transforms のマッピング検証
+- `openlineage_json_format` — JSON 出力と空 transforms 検証（3722 tests）
+
+---
+
+## [v76.3.0] — 2026-08-15 — PII 来歴追跡・GDPR 消去計画
+
+### Added
+- `PiiProvenanceReport` 構造体（fields: Vec<String>, source_uri: String, masked: bool）— PII フィールド報告型（将来の CLI 統合向け準備型）
+- `detect_pii_in_tag(tag: &ProvenanceTag) -> Vec<String>` — pii=true → `["pii_detected"]`、pii=false → `[]`
+- `ErasurePlan` 構造体（target_uri: String, fields: Vec<String>, reason: String）— GDPR 消去計画型
+- `generate_erasure_plan(tag: &ProvenanceTag) -> Option<ErasurePlan>` — pii=true なら消去計画生成、pii=false なら None
+
+### Tests
+- `pii_detected_in_provenance` — pii フラグによる PII 検出の確認
+- `gdpr_erasure_plan_generated` — pii=true で消去計画生成・pii=false で None の確認
+
+---
+
+## [v76.2.0] — 2026-08-15 — `TracedData` 型
+
+### Added
+- `TracedData` 構造体（data: String, provenance: ProvenanceTag）— 来歴付きデータラッパー
+- `map_traced(t: TracedData, transform_label: &str) -> TracedData` — 変換ラベルを provenance.transforms に FIFO 追記
+- `merge_provenance(a: &ProvenanceTag, b: &ProvenanceTag) -> ProvenanceTag` — join 時の来歴マージ（pii は OR、source は左辺優先）
+
+### Tests
+- `traced_map_appends_transform` — 変換ラベル追記・data 不変・FIFO 順の確認
+- `traced_merge_propagates_pii` — pii OR 伝播・transforms 連結・左辺ソース優先の確認
+
+---
+
+## [v76.1.0] — 2026-08-15 — `DataSource` / `ProvenanceTag` 型基盤
+
+### Added
+- `DataSourceType` enum（Snowflake / S3 / Api / Manual / Pipeline）— データソース種別型
+- `DataSource` 構造体（name: String, uri: String, source_type: DataSourceType）— ソースメタデータ
+- `ProvenanceTag` 構造体（source: DataSource, transforms: Vec<String>, pii: bool）— 変換履歴・PII フラグ付き来歴タグ
+- `format_provenance_tag(tag: &ProvenanceTag) -> String` — `source=<name> type=<variant> transforms=[...] pii=<bool>` 形式のレポート生成
+
+### Tests
+- `provenance_tag_created` — DataSource（Snowflake）+ transforms 2 件 + pii=false の基本ケース
+- `provenance_pii_flagged` — pii=true（S3）・空 transforms / pii=false（Api）の確認
+
+---
+
+## [v76.0.0] — 2026-08-15 — Temporal Data Native 宣言
+
+Temporal Data Native スプリント（v75.1〜v75.9）の完成を宣言。
+鮮度が型となり、SCD が構造となり、タイムトラベルが API となった。
+Favnir のパイプラインは今、時間軸を型で保証する。
+
+### Milestone
+- Temporal Data Native 宣言（v75.1〜v75.9 完成）
+- `FreshnessPolicy` / `TemporalRange` / `AsOfQuery` / `ScdRow` / `TemporalJoinConfig` / `RetentionPolicy` / `StreamFreshnessMonitor` / `TemporalContract` / `TimeTravelQuery` が揃った
+
+### Tests
+- `cargo_toml_version_is_76_0_0`
+- `changelog_has_v76_0_0`
+- `milestone_has_temporal_data_native`
+- `readme_mentions_temporal`
+
+---
+
+## [v75.9.0] — 2026-08-15 — 安定化・コードフリーズ
+
+### Tests
+- `temporal_full_sprint_all_stable` — v75.1〜v75.8 の全 Temporal 型を網羅的に呼び出す統合確認テスト
+- `temporal_e2e_pipeline_valid` — 鮮度チェック → タイムトラベルSQL → 保持チェック → ストリーム遅延 → コントラクト検証の E2E テスト
+
+---
+
+## [v75.8.0] — 2026-08-15 — `fav time-travel` コマンド
+
+### Added
+- `TimeTravelFormat` enum（Snowflake / Delta / Generic）— SQL 方言切り替え
+- `TimeTravelQuery` 構造体（table: String, as_of_ts: i64, format: TimeTravelFormat）— タイムトラベルクエリ設定
+- `cmd_time_travel(query: &TimeTravelQuery) -> String` — 方言別 SQL 文字列生成（Snowflake: `AS OF TIMESTAMP`、Delta: `VERSION AS OF`、Generic: `WHERE _timestamp =`）
+- `parse_time_travel_timestamp(s: &str) -> Result<i64, String>` — `"YYYY-MM-DDTHH:MM:SSZ"` → Unix epoch 秒変換（UTC のみ、year >= 1970、月/日範囲検証付き）
+
+### Tests
+- `time_travel_snowflake_format` — Snowflake フォーマット SQL 生成・timestamp パース確認
+- `time_travel_delta_format` — Delta / Generic フォーマット SQL 生成確認
+
+---
+
+## [v75.7.0] — 2026-08-15 — Temporal contracts
+
+### Added
+- `TemporalContract` 構造体（name: String, freshness: Option<FreshnessPolicy>, retention: Option<RetentionPolicy>）— 鮮度・保持ポリシーを統合したコントラクト型
+- `validate_temporal_contract(contract, data_ts, now) -> Result<(), String>` — 鮮度・保持チェック統合検証（`FreshnessStrategy::Warn` は Ok(()) を返す）
+- `format_temporal_contract_report(contract, result) -> String` — `[OK]`/`[VIOLATION]` コントラクトレポート生成
+
+### Tests
+- `temporal_contract_freshness_violation` — 鮮度超過・境界値 Ok の確認
+- `temporal_contract_retention_exceeded` — 保持期限超過・境界値 Ok の確認
+
+---
+
+## [v75.6.0] — 2026-08-15 — Stream freshness monitoring
+
+### Added
+- `StreamFreshnessMonitor` 構造体（source: String, max_lag_secs: u64）— ストリーム遅延監視設定
+- `StreamLagResult` 構造体（lag_secs: u64, exceeded: bool, source: String）— 遅延判定結果
+- `check_stream_lag(last_event_ts: i64, now: i64, monitor: &StreamFreshnessMonitor) -> StreamLagResult` — ストリーム遅延判定（未来タイムスタンプは lag=0）
+- `format_stream_lag_report(result: &StreamLagResult) -> String` — `[OK]`/`[EXCEEDED]` レポート生成
+
+### Tests
+- `stream_lag_within_threshold` — 閾値内遅延・境界値・source 転写の確認
+- `stream_lag_exceeded_detected` — 閾値超過・未来タイムスタンプ Keep の確認
+
+---
+
+## [v75.5.0] — 2026-08-15 — `RetentionPolicy` 型
+
+### Added
+- `RetentionAction` enum（Delete, Archive, Anonymize）— 保持期限超過時のアクション
+- `RetentionResult` enum（Keep, Delete, Archive, Anonymize）— 保持判定結果
+- `RetentionPolicy` 構造体（max_age_days: u64, action: RetentionAction）— データ保持ポリシー
+- `apply_retention_check(row_ts: i64, now: i64, policy: &RetentionPolicy) -> RetentionResult` — 行の保持期限判定（GDPR 対応）
+
+### Tests
+- `retention_delete_old_rows` — 365 日超過レコードの削除判定・境界値確認
+- `retention_anonymize_action` — 匿名化アクション・未来行の Keep 確認
+
+---
+
+## [v75.4.0] — 2026-08-14 — Temporal join（時点結合）
+
+### Added
+- `TemporalJoinConfig` 構造体（left_key, right_key, as_of_field: String）— 時点結合設定
+- `validate_temporal_join_config(config: &TemporalJoinConfig) -> Result<(), String>` — フィールド名検証（空文字・英数字アンダースコア以外を拒否）
+- `format_temporal_join_sql(left_table, right_table, config) -> String` — Snowflake SCD Type 2 向け時点結合 SQL フラグメント生成
+
+### Tests
+- `temporal_join_sql_generated` — JOIN フラグメントの正確性確認
+- `temporal_join_invalid_config_rejected` — 無効フィールド名の拒否確認
+
+---
+
+## [v75.3.0] — 2026-08-14 — SCD Type 1 / Type 2 ネイティブ型
+
+### Added
+- `ScdType` enum（Type1, Type2）— Slowly Changing Dimension 種別
+- `ScdRow` 構造体（valid_from: i64, valid_to: Option<i64>, is_current: bool, data: String）
+- `apply_scd1_update(row: &mut ScdRow, new_data: &str)` — SCD Type 1 上書き更新
+- `apply_scd2_update(existing: &[ScdRow], new_data: &str, new_ts: i64) -> Result<Vec<ScdRow>, String>`
+  — `new_ts <= 0` / 複数 `is_current=true` を入力バリデーションで拒否
+  — 旧レコードを `valid_to = new_ts - 1` で閉じ、新レコードを追加
+  — no-op（data 同一）/ 初回 upsert / 全行 expired からの復帰をすべて正しく処理
+
+### Tests
+- `v753000_tests` 2 件追加（合計テスト数: 3698, +2）
+  - `scd2_creates_history_row` — 変更時に新レコードが追加され 2 件になることを確認
+  - `scd2_marks_previous_expired` — 旧レコードの `valid_to` 閉じ処理・no-op ケースを確認
+
+---
+
+## [v75.2.0] — 2026-08-14 — `TemporalRange` / `AsOfQuery` 型
+
+### Added
+- `is_leap(year: i32) -> bool` — うるう年判定（内部ヘルパー）
+- `days_to_ymd(days: i64) -> (i32, u32, u32)` — epoch 日数 → 年月日変換（内部ヘルパー）
+- `validate_table_name(name: &str) -> Result<(), String>` — SQL インジェクション対策テーブル名検証
+- `unix_secs_to_utc(epoch_secs: i64) -> (i32, u32, u32, u32, u32, u32)` — epoch 秒 → UTC 日時変換（`div_euclid`/`rem_euclid` で負の epoch も正確に処理）
+- `TemporalRange` 構造体（from_ts: i64, to_ts: i64）— 閉区間期間フィルター型
+- `AsOfQuery` 構造体（table: String, as_of_ts: i64）— 時点クエリ型
+- `is_in_range(ts: i64, range: &TemporalRange) -> bool` — 閉区間判定
+- `format_as_of_query(q: &AsOfQuery) -> Result<String, String>` — Snowflake AS OF TIMESTAMP SQL 生成（テーブル名検証付き）
+
+### Tests
+- `v752000_tests` 2 件追加（合計テスト数: 3696, +2）
+  - `temporal_range_filters_correctly` — 境界値を含む閉区間フィルター判定
+  - `as_of_query_generates_sql` — SQL 生成・SQL インジェクション拒否・負の epoch デコードを確認
+
+---
+
+## [v75.1.0] — 2026-08-14 — `FreshnessPolicy` 型基盤
+
+### Added
+- `FreshnessStrategy` enum（Warn / Fail）
+- `FreshnessPolicy` 構造体（max_age_secs: u64, strategy: FreshnessStrategy）
+- `check_freshness(data_ts: i64, now: i64, policy: &FreshnessPolicy) -> bool`
+- `format_freshness_warning(policy: &FreshnessPolicy, age_secs: u64) -> String`
+
+### Tests
+- `v751000_tests` 2 件追加（合計テスト数: 3694, +2）
+  - `freshness_policy_enforced` — TTL 内のデータが鮮度 OK と判定される
+  - `freshness_stale_detected` — TTL 超過のデータが鮮度違反と判定される（`format_freshness_warning` の検証も含む）
+
+---
+
+## [v75.0.0] — 2026-08-14 — Favnir 2.0 宣言 ★クリーンアップ
+
+### Changed
+- `fav/Cargo.toml` バージョンを `75.0.0` に更新
+- `MILESTONE.md` に「Favnir 2.0 宣言」セクションを追記
+- `README.md` に v75.0 達成（Favnir 2.0）を追記
+- `cargo clean` クリーンアップ実施
+
+### Tests
+- `v75000_tests` 4 件追加（合計テスト数: 3692, +4）
+  - `cargo_toml_version_is_75_0_0` — Cargo.toml が `version = "75.0.0"` を持つことを確認
+  - `changelog_has_v75_0_0` — CHANGELOG.md に `[v75.0.0]` エントリが存在することを確認
+  - `milestone_has_favnir_2` — MILESTONE.md に「Favnir 2.0」が記載されることを確認
+  - `readme_mentions_favnir_2` — README.md に `v75.0` または「Favnir 2.0」が記載されることを確認
+
+---
+
+## [v74.9.0] — 2026-08-14 — 安定化・コードフリーズ（Favnir 2.0 前最終調整）
+
+### Tests
+- `v749000_tests` 2 件追加（合計テスト数: 3688, +2）
+  - `favnir2_full_sprint_all_stable` — v74.1〜v74.8 の全 8 バージョンが CHANGELOG に存在することを確認
+  - `favnir2_e2e_showcase_runs` — ショーケースデモの主要ファイルが構造的に完走可能であることを確認
+
+---
+
+## [v74.8.0] — 2026-08-14 — 統合デモ（v70〜v74 の全機能を使ったショーケース）
+
+### Added
+- `infra/e2e-demo/favnir2-showcase/pipeline.fav` — v71〜v74 全機能を網羅するメインパイプライン
+- `infra/e2e-demo/favnir2-showcase/fav.toml` — マルチテナント + SLA + スケジュール設定
+- `infra/e2e-demo/favnir2-showcase/rune.toml` — カスタム Rune 依存定義（privacy / linalg）
+- `infra/e2e-demo/favnir2-showcase/contract.fav` — データコントラクト定義
+- `infra/e2e-demo/favnir2-showcase/quality.fav` — 品質スコアリングパイプライン
+- `infra/e2e-demo/favnir2-showcase/README.md` — ショーケース概要・実行手順
+
+### Tests
+- `v748000_tests` 2 件追加（合計テスト数: 3686, +2）
+
+---
+
+## [v74.7.0] — 2026-08-14 — コミュニティ Rune 品質基準
+
+### Added
+- `RuneValidationItem` 構造体（name / passed / message フィールド）
+- `RuneValidationReport` 構造体（rune_name / items / score フィールド）
+- `validate_rune_score(report: &RuneValidationReport) -> bool` — score >= 80 なら true（公開要件チェック）
+- `format_rune_validation_report(report: &RuneValidationReport) -> String` — ✓/⚠ プレフィックス付きレポートフォーマット
+
+### Tests
+- `v747000_tests` 2 件追加（合計テスト数: 3684, +2）
+
+---
+
+## [v74.6.0] — 2026-08-14 — `fav audit` 拡張（依存関係セキュリティ機能追加）
+
+### Added
+- `DepVulnerability` 構造体（name / version / cve / severity / fix_version フィールド）
+- `format_audit_deps_report(vulns: &[DepVulnerability]) -> String` — 脆弱性レポートのテキストフォーマット（空→ "OK  0 vulnerabilities found"）
+- `apply_audit_fix(cargo_toml: &str, name: &str, fix_version: &str) -> String` — Cargo.toml 文字列中の依存バージョン置換（単純形式のみ）
+
+### Tests
+- `v746000_tests` 2 件追加（合計テスト数: 3682, +2）
+
+---
+
+## [v74.5.0] — 2026-08-14 — Pipeline Scheduling（fav schedule）
+
+### Added
+- `ScheduleEntry` 構造体（name / cron / pipeline / notify フィールド）
+- `validate_cron_expr(expr: &str) -> bool` — cron 式の基本バリデーション（スペース区切り 5 フィールド）
+- `cmd_schedule_list(entries: &[ScheduleEntry]) -> String` — スケジュール一覧をテキスト形式で返す
+
+### Tests
+- `v745000_tests` 2 件追加（合計テスト数: 3680, +2）
+
+---
+
+## [v74.4.0] — 2026-08-14 — OSS Hardening
+
+### Added
+- `CONTRIBUTING.md` — 開発環境セットアップ・PR フロー・コーディング規約
+- `SECURITY.md` — 脆弱性報告手順（既存ファイルを活用）
+- `CODE_OF_CONDUCT.md` — Contributor Covenant v2.1 ベース
+- `.github/ISSUE_TEMPLATE/bug_report.md` — バグ報告テンプレート
+- `.github/ISSUE_TEMPLATE/feature_request.md` — 機能要望テンプレート
+
+### Tests
+- `v744000_tests` 2 件追加（合計テスト数: 3678, +2）
+
+---
+
+## [v74.3.0] — 2026-08-14 — Documentation Site 2.0
+
+### Added
+- `site/content/docs/v2/getting-started.mdx` — 5 分チュートリアル（インストール・Hello World パイプライン）
+- `site/content/docs/v2/migration-v35-v75.mdx` — v35→v75 移行ガイド（`!Effect` 廃止・`ctx` 構文・`bind` 制限）
+- `site/content/docs/v2/language-reference.mdx` — 全構文一覧（bind / stage / par / interface / ctx / Rune）
+
+### Tests
+- `v743000_tests` 3 件追加（合計テスト数: 3676, +3）
+
+---
+
+## [v74.2.0] — 2026-08-13 — Multi-tenant Runtime
+
+### Added
+- `TenantQuota` 構造体（max_memory_mb / max_cpu_pct / max_rows）
+- `TenantTeamConfig` 構造体（db_url / s3_bucket）
+- `TenantConfig` 構造体（isolation / quota / teams）
+- `check_tenant_quota_exceeded` — rows / memory_mb のクォータ超過チェック
+- `format_tenant_isolation_report` — テナント設定サマリー文字列生成
+
+### Tests
+- `v742000_tests` 2 件追加（合計テスト数: 3673, +2）
+
+---
+
+## [v74.1.0] — 2026-08-13 — Rune マーケットプレイス（バージョン管理・依存解決）
+
+### Added
+- `RunePackage` 構造体（name / version / description / author）
+- `format_rune_publish_manifest` — パッケージ公開メタデータを JSON 形式で生成（`json_escape` で安全化）
+- `parse_rune_dep_entry` — `"name@version"` 形式を `(name, version)` にパース
+
+### Tests
+- `v741000_tests` 2 件追加（合計テスト数: 3671, +2）
+
+---
+
+## [v74.0.0] — 2026-08-13 — Production Proven 宣言 ★クリーンアップ
+
+### Declared
+- **Production Proven** マイルストーン到達宣言
+- v73.1〜v73.9 の全機能（データコントラクト / 品質スコア / PII 保護 / 監査ログ / SLA 監視 / Rune 品質パス / ドッグフーディング / GitHub Action / 安定化）が本番運用レベルに達した
+
+### Changed
+- `cargo clean` 実施（ビルドキャッシュクリーンアップ）
+- `fav/Cargo.toml` バージョンを `74.0.0` に更新
+- `MILESTONE.md` に「Production Proven」を追記
+- `README.md` に v74.0 Production Proven 達成を追記
+
+### Tests
+- `v74000_tests` — `cargo_toml_version_is_74_0_0` / `changelog_has_v74_0_0` / `milestone_has_production_proven` / `readme_mentions_production_proven`
+- 合計テスト数: 3669（+4）
+
+---
+
+## [v73.9.0] — 2026-08-13 — 安定化・コードフリーズ（Production Proven 前調整）
+
+### Added
+- `v739000_tests` モジュール — v73.1〜v73.8 の全主要機能を統合テストで安定性確認
+
+### Tests
+- `production_proven_all_stable` — v73.1〜v73.8 の各関数（DataContract / QualityReport / PII / AuditLog / SLA / Linalg / Dogfooding / GitHub Action）が呼び出し可能であることを確認
+- `dogfooding_all_5_pipelines_pass` — 5 本のドッグフーディングパイプラインが全て存在・正しい path 形式・非空 description を持つことを確認
+- 合計テスト数: 3665（+2）
+
+---
+
+## [v73.8.0] — 2026-08-13 — GitHub Actions 公式 Action
+
+### Added
+- `.github/actions/setup-fav/action.yml` — composite action（`uses: favnir/setup-fav@v1`、OS/ARCH 自動判別・バイナリダウンロード・`$GITHUB_PATH` 追加）
+- `.github/actions/setup-fav/README.md` — 使用例・バッジ・マトリックスビルドサンプル・コマンド例
+- `GithubActionConfig` 構造体（version / os / arch）
+- `format_github_action_url` — GitHub Releases バイナリ URL を生成
+
+### Tests
+- `github_action_setup_fav_action_yml_valid` — action.yml の存在と必須フィールドを確認
+- `github_action_fav_binary_url_format` — URL フォーマットの正確性を確認
+- 合計テスト数: 3663（+2）
+
+---
+
+## [v73.7.0] — 2026-08-13 — ドッグフーディング Sprint
+
+### Added
+- `pipelines/benchmark_analytics.fav` — ベンチマーク集計パイプラインスタブ
+- `pipelines/coverage_report.fav` — テストカバレッジパイプラインスタブ
+- `pipelines/changelog_lint.fav` — CHANGELOG 形式検証パイプラインスタブ
+- `pipelines/rune_catalog_sync.fav` — Rune カタログ同期パイプラインスタブ
+- `pipelines/doc_link_check.fav` — MDX リンク検証パイプラインスタブ
+- `DogfoodingPipeline` 構造体 + `list_dogfooding_pipelines()` — 5 本のパイプライン情報を返す
+
+### Tests
+- `dogfooding_benchmark_pipeline_runs` — パイプライン一覧・ファイル存在・path 形式を確認
+- `dogfooding_doc_link_check_runs` — 全 5 ファイルの存在と path 形式を確認
+- 合計テスト数: 3661（+2）
+
+---
+
+## [v73.6.0] — 2026-08-13 — Rune 品質パス（VM primitive 接続）
+
+### Added
+- `RuneLinalgMatrix` 構造体（rows / cols / data）+ `rune_linalg_matmul` — 行列積計算（次元不一致は `Err`）
+- `RuneStatsResult` 構造体（mean / std / count）+ `rune_stats_mean_std` — 母平均・母標準偏差計算（空は `Err`）
+
+### Tests
+- `rune_linalg_matmul_runs` — 2×2 行列積の数値検証・次元不一致 Err を確認
+- `rune_stats_mean_std_runs` — mean/std の数値検証・1要素・空リスト Err を確認
+- 合計テスト数: 3659（+2）
+
+---
+
+## [v73.5.0] — 2026-08-13 — SLA 監視 + アラート統合
+
+### Added
+- `SlaConfig` 構造体（max_latency_ms / min_throughput / max_error_rate）
+- `SlaAlertConfig` 構造体（slack / pagerduty の通知先）
+- `parse_sla_config(toml_str)` — TOML 文字列から `[sla]` セクションを行パース
+- `check_sla(config, latency, throughput, error_rate)` — SLA 違反を検出して `Vec<String>` を返す
+- `format_sla_alert(violations)` — 違反リストを `[SLA ALERT]` 形式またはOKメッセージに整形
+
+### Tests
+- `sla_violation_triggers_alert` — 全条件違反・全条件 OK・アラートフォーマットを確認
+- `sla_toml_config_parsed` — `[sla]` セクションパース・必須フィールド欠落時 Err を確認
+- 合計テスト数: 3657（+2）
+
+---
+
+## [v73.4.0] — 2026-08-13 — 監査ログ + OpenLineage エクスポート
+
+### Added
+- `AuditLogEntry` 構造体（runId / parentRunId / pipeline_name / status / started_at / ended_at / row_count）
+- `format_audit_log_entry` — JSONL 形式の監査ログ文字列を生成
+- `OpenLineageEvent` 構造体（eventType / runId / jobName / namespace / inputs / outputs / eventTime）
+- `format_openlineage_event` — OpenLineage JSON 形式のリネージイベント文字列を生成
+- runId / parentRunId によるパイプライン系譜追跡をサポート
+
+### Tests
+- `audit_log_records_run_start_end` — JSONL フォーマット・parentRunId null/Some・ended_at null を確認
+- `lineage_export_openlineage_format` — OpenLineage フォーマット・空 inputs/outputs `[]` を確認
+- 合計テスト数: 3655（+2）
+
+---
+
+## [v73.3.0] — 2026-08-13 — PII 検出・マスキング Rune
+
+### Added
+- `PiiMaskStrategy` 列挙型（Hash / Redact / Truncate）
+- `mask_pii_fields(fields, strategy)` — PII フィールドのマスキング
+- `scan_pii_patterns(text)` — メールアドレス・電話番号パターンの検出（7桁以上の数字）
+- `gdpr_erase_record(fields_to_erase)` — GDPR 削除フィールドカウント
+- `runes/privacy/privacy.fav` + `rune.toml` — スタブ Rune ファイル
+
+### Tests
+- `privacy_rune_mask_pii_fields` — Hash/Redact マスク + メールスキャンを確認
+- `privacy_rune_gdpr_erase` — GDPR 削除カウント + rune.toml 存在を確認
+- `truncate_boundary_values` — Truncate の空文字・1文字・マルチバイト境界値を確認
+- 合計テスト数: 3653（+3）
+
+---
+
+## [v73.2.0] — 2026-08-13 — データ品質スコアリング
+
+### Added
+- `QualityDimension` 構造体（name / score / detail）
+- `QualityReport` 構造体（overall_score / dimensions / recommendations）
+- `compute_quality_report(rows)` — 5 次元品質スコアリング（Completeness / Validity / Consistency / Freshness / Referential）
+- `format_quality_report(report)` — レポート文字列生成
+- `cmd_quality_report(path)` — CLI エントリポイントスタブ
+
+### Tests
+- `quality_report_completeness_score` — 1000 行中 58 件 null で Completeness >= 90 を確認
+- `quality_report_recommendations` — null 多めデータで推奨アクション生成を確認
+- 合計テスト数: 3650（+2）
+
+---
+
+## [v73.1.0] — 2026-08-13 — データコントラクト
+
+### Added
+- `DataContractField` 構造体（name / ty / nullable）
+- `DataContractSla` 構造体（max_latency_ms / min_throughput / max_error_rate）
+- `DataContract` 構造体（name / input_fields / output_fields / sla）
+- `validate_contract_schema(contract, actual_input)` — 入力フィールドの型整合性チェック
+- `check_sla_compliance(sla, latency, throughput, error_rate)` — SLA 監視フック
+
+### Tests
+- `data_contract_schema_mismatch_error` — 型不一致・フィールド欠落を Err として検出することを確認
+- `data_contract_sla_monitoring` — レイテンシ超過を Err として検出することを確認
+- 合計テスト数: 3648（+2）
+
+---
+
+## [v73.0.0] — 2026-08-13 — Developer Experience 2.0 宣言 ★クリーンアップ
+
+### Milestone
+- **Developer Experience 2.0** 宣言
+  VS Code 拡張・AI アシスタント・REPL 2.0・Playground 2.0・`fav learn` が揃い、
+  データエンジニアが Favnir を選ぶ開発体験が整った。
+
+### Changed
+- `cargo clean` によるビルドキャッシュリセット実施（27013 files / 27.6 GiB 削除）
+- `Cargo.toml` バージョンを `73.0.0` に更新
+
+### Docs
+- `MILESTONE.md` に Developer Experience 2.0 マイルストーンを追記
+- `README.md` に v73.0 達成を追記
+
+### Tests
+- `cargo_toml_version_is_73_0_0`
+- `changelog_has_v73_0_0`
+- `milestone_has_dev_exp2`
+- `readme_mentions_dev_exp2`
+- 合計テスト数: 3646（+4）
+
+---
+
+## [v72.9.0] — 2026-08-13 — 安定化・コードフリーズ（Developer Experience 2.0 前調整）
+
+### Fixed
+- `cmd_learn` 内で `BufRead` トレイトが未インポートだったビルドエラーを修正
+
+### Added
+- `dev_exp2_all_stable` — v72.1〜v72.8 の代表テスト 9 件が driver.rs に存在することを確認
+- `vscode_repl2_playground2_e2e` — VS Code 拡張・REPL 2.0・Playground 2.0 の主要シンボル 3 件が存在することを確認
+
+### Tests
+- `dev_exp2_all_stable` — Developer Experience 2.0 全機能の安定性を横断確認
+- `vscode_repl2_playground2_e2e` — VS Code / REPL 2.0 / Playground 2.0 E2E 確認
+- 合計テスト数: 3642（+2）
+
+---
+
+## [v72.7.0] — 2026-08-12 — Hot Reload 改善（`fav watch` 2.0）
+
+### Added
+- `WatchSession` 構造体（`file` / `on_change_cmd` / `debounce_ms` フィールド）
+- `watch_session_on_change_label(session)` — 変更時のコンソールラベル生成（fs 非依存）
+- `cmd_watch2(file, on_change, debounce_ms)` — `--on-change` 対応の新ウォッチ関数
+  - 変更検知時に Windows では `cmd /C <cmd>`、Unix では `sh -c <cmd>` で実行
+- `main.rs` に `--on-change` フラグ対応を追加（`fav watch pipeline.fav --on-change "fav check"` が動作）
+
+### Tests
+- `watch2_session_field_defaults` — WatchSession フィールドの正確な設定を確認
+- `watch2_runs_custom_command` — `watch_session_on_change_label` が on_change_cmd を含むラベルを返すことを確認
+- `watch2_on_change_label_format` — ラベルの prefix（`[watch]`）と on_change_cmd 含有を確認
+- 合計テスト数: 3638（+3）
+
+---
+
+## [v72.6.0] — 2026-08-12 — `fav init` テンプレートギャラリー拡充
+
+### Added
+- `fav init --template ai-etl` — LLM 抽出 → VectorDB パイプライン雛形
+- `fav init --template streaming` — Kafka + ML スコアリング パイプライン雛形
+- `fav init --template enterprise` — マルチテナント + 監査ログ パイプライン雛形
+- `fav init --template data-quality` — データ品質検証（`Schema.validate_all`）パイプライン雛形
+- `fav init --template distributed` — マルチノード `par` パイプライン雛形
+- `make_*_main_fav` ヘルパー関数群（fs 非依存のコード文字列生成）
+- `TEMPLATE_GALLERY` に 5 エントリを追加（計 17 テンプレート）
+
+### Tests
+- `init_template_ai_etl_valid` — ai-etl テンプレートが LLM rune と AppCtx を含むことを確認
+- `init_template_data_quality_valid` — data-quality テンプレートが Schema.validate_all を含むことを確認
+- 合計テスト数: 3632（+2）
+
+---
+
+## [v72.5.0] — 2026-08-12 — Playground 2.0（テンプレートギャラリー + 共有リンク生成）
+
+### Added
+- `PlaygroundTemplate` 構造体（`name` / `description` / `code` フィールド）
+- `PLAYGROUND_TEMPLATES` — 5 エントリの静的テンプレートギャラリー（Hello World / CSV ETL / AI Generate / Distributed Par / Data Quality）
+- `playground_share_url(code)` — コードを hex エンコードして `/playground?code=<hex>` 形式の URL を生成
+- `v725000_tests`: `playground2_template_gallery_has_5_entries` / `playground2_share_url_format`（2 テスト）
+
+### Changed
+- `fav/Cargo.toml`: version `72.4.0` → `72.5.0`
+
+---
+
+## [v72.4.0] — 2026-08-12 — REPL 2.0（`:timing` + TAB 補完ヘルパー）
+
+### Added
+- `repl_tab_complete(prefix, scope)` — スコープ配列から前方一致補完候補を返すヘルパー関数
+- `ReplSession.timing_enabled` フィールド
+- `:timing on` / `:timing off` REPL コマンド（式評価時間を ms 表示）
+- `handle_expression` にタイミング計測（`std::time::Instant`）を追加
+- `v724000_tests`: `repl2_tab_completion` / `repl2_multiline_input`（2 テスト）
+
+### Changed
+- `fav/Cargo.toml`: version `72.3.0` → `72.4.0`
+
+---
+
+## [v72.3.0] — 2026-08-12 — `fav ai generate`（自然言語 → Favnir パイプライン）
+
+### Added
+- `infer_schema_from_description(description)` — 説明文からスキーマフィールド（field_name, field_type）を推論
+- `cmd_ai_generate(description)` — キーワードベースで Favnir パイプライン雛形を生成（import rune ブロック + schema ブロック + fn main）
+- `fav ai generate <description>` CLI サブコマンド
+- `v723000_tests`: `ai_generate_returns_valid_fav_code` / `ai_generate_schema_inferred_from_description`（2 テスト）
+
+### Changed
+- `fav/Cargo.toml`: version `72.2.0` → `72.3.0`
+
+---
+
+## [v72.2.0] — 2026-08-12 — AI エラーアシスタント（`fav ai explain` / `fav ai fix`）
+
+### Added
+- `get_ai_hint(error_code)` — 既知エラーコードの静的ヒントマップ（E0374: `!IO` → `ctx: AppCtx` 移行ガイド、E0001: 未定義変数）
+- `apply_ctx_migration(src)` — `IO.println/write_file/read_file` → `ctx.io.*` / `!IO` → `/* ctx: AppCtx */` テキスト変換
+- `cmd_ai_explain(path, error_code)` — エラーコードの AI ヒントを表示
+- `cmd_ai_fix(path)` — `!IO` 構文をファイルに自動適用
+- `fav ai explain <path> [--error-code <code>]` CLI サブコマンド
+- `fav ai fix <path>` CLI サブコマンド
+- `fav check <path> --ai-explain` フラグ（check 後に AI ヒントを表示）
+- `v722000_tests`: `ai_explain_e0374_returns_hint` / `ai_fix_applies_ctx_migration`（2 テスト）
+
+### Changed
+- `fav/Cargo.toml`: version `72.1.0` → `72.2.0`
+
+---
+
+## [v72.1.0] — 2026-08-12 — VS Code 拡張（本格実装）
+
+### Added
+- `editors/vscode/package.json` — VS Code 拡張マニフェスト（publisher: favnir、`.fav` 拡張子登録、TextMate 文法登録）
+- `editors/vscode/extension.ts` — LSP クライアント実装（`fav lsp` サーバーに接続、`LanguageClient` + `TransportKind.stdio`）
+- `editors/vscode/syntaxes/favnir.tmGrammar.json` — TextMate 文法定義（キーワード・型・演算子・コメント・文字列・数値をハイライト）
+- `v721000_tests`: `vscode_extension_package_json_valid` / `vscode_extension_lsp_integration`（2 テスト）
+
+### Changed
+- `fav/Cargo.toml`: version `72.0.0` → `72.1.0`
+
+---
+
+## [v72.0.0] — 2026-08-11 — Type System 2.0 宣言 ★クリーンアップ
+
+### Added
+- `v72000_tests`: `cargo_toml_version_is_72_0_0` / `changelog_has_v72_0_0` / `milestone_has_type_system_2` / `readme_mentions_type_system_2`（4 テスト）
+- `MILESTONE.md` に Type System 2.0 マイルストーンエントリを追加
+- `README.md` に v72.0 達成セクションを追加
+
+### Changed
+- `fav/Cargo.toml`: version `71.9.0` → `72.0.0`
+- `cargo clean` でビルドアーティファクトをクリーンアップ
+
+---
+
+## [v71.9.0] — 2026-08-11 — 安定化・コードフリーズ（Type System 2.0 前調整）
+
+### Added
+- `v719000_tests`: 2 件追加（3606 → 3608 tests）
+  - `type_system_2_all_stable` — v71.1〜v71.8 の全機能（依存型・refined type・phantom type・const・generic constraints・bind 推論）が共存してエラーなしであることを確認
+  - `dependent_refined_phantom_e2e` — 依存型 `Vec<Float>[384]` + refined type `Score = Float where self >= 0.0` + phantom type `UserId = phantom String` の組み合わせ E2E テスト
+
+---
+
+## [v71.8.0] — 2026-08-11 — 型推論強化（型注釈省略可能範囲の拡大）
+
+### Added
+- `v718000_tests`: 2 件追加（3604 → 3606 tests）
+  - `type_infer_local_var_omit_annotation` — `bind items <- get_values()` 型注釈省略が `Checker::check_program` でエラーなし（RHS 戻り型から推論）
+  - `type_infer_closure_arg_omit` — `|acc, x|` 引数型注釈省略のクロージャが `Checker::check_program` でエラーなし（`Type::Unknown` → `unify` 互換）
+
+---
+
+## [v71.7.0] — 2026-08-11 — WebAssembly ターゲット テストカバレッジ確立
+
+### Added
+- `v717000_tests`: 2 件追加（3602 → 3604 tests）
+  - `wasm_target_compiles` — `build_wasm_artifact_with_config` が有効な WASM バイナリ（`\0asm` マジック）を生成することを確認
+  - `wasm_target_runs_simple_pipeline` — `build_wasm_artifact` + `wasm_exec_main` でパイプラインが実際に実行されることを確認
+
+---
+
+## [v71.6.0] — 2026-08-10 — AOT Native Compilation 本番品質化
+
+### Added
+- `v716000_tests`: 3 件追加（3599 → 3602 tests）
+  - `arch_to_triple_known_arches` — `arch_to_triple` 変換ロジック検証（arm64/aarch64/未知値）
+  - `aot_native_binary_compiles` — Cranelift が `fn main() -> Int { 42 }` をオブジェクトバイト列に変換できることを確認（cc 不要）
+  - `aot_native_binary_runs_hello` — cc 利用可能環境でバイナリを実行し `"42"` が出力されることを確認（非 Windows のみ実行）
+- `cranelift_aot.rs`: `compile_to_binary_for_arch(ir, out_path, arch)` 追加（`arm64`/`aarch64` → `aarch64-unknown-linux-gnu`）
+- `cranelift_aot.rs`: `arch_to_triple` 関連関数追加
+- `cranelift_aot.rs`: `link_binary` に `strip` 自動実行を追加（バイナリサイズ最適化、strip 非対応環境では無視）
+- `driver.rs`: `cmd_build_native_with_arch(src, out, arch)` 追加
+- `driver.rs`: `cmd_build` に `arch: Option<&str>` 引数追加
+- `main.rs`: `fav build --arch <arm64|aarch64>` フラグ追加（`--target native` との組み合わせ）
+- `cranelift_aot.rs`: 未知 arch 指定時に stderr へ警告メッセージを出力（サイレントフォールバックを廃止）
+- `main.rs`: `--arch` を `--target native` 以外で指定した場合に警告を出力
+
+---
+
+## [v71.5.0] — 2026-08-10 — Generic Constraints（`impl Trait` 風の境界）
+
+### Added
+- `v715000_tests`: 5 件追加（3594 → 3599 tests）
+  - `generic_constraint_multi_interface`
+  - `generic_constraint_impl_trait`
+  - `generic_constraint_bounds_content` — AST 内容検証（bounds 数・名称）
+  - `generic_constraint_colon_then_with` — 混在記法 `<T: A with B>` の union 確認
+  - `generic_constraint_variance_colon` — バリアンス + コロン記法 `<+T: Ord>`
+- パーサー: `<T: A & B>` 型パラメータ境界記法を追加（既存 `<T with A with B>` の代替）
+- パーサー: `<T: impl A>` 糖衣構文を追加（`impl` キーワードをスキップ）
+- パーサー: `<T: A with B>` 混在記法のサポート（コロン後の `with` 境界も union）
+- エラーメッセージ強化: `<T:>` / `<T: impl>` / `&&` の使用に対して明確なメッセージを追加
+- 既存 `<T with A>` 構文との後方互換性を維持
+- 境界違反は既存 E0422 で検出（新規エラーコードなし）
+- `fav fmt` は `:` 記法を `with` 記法に正規化（round-trip）
+
+---
+
+## [v71.4.0] — 2026-08-09 — Const / Compile-Time Evaluation
+
+### Added
+- `v714000_tests`: 2 件追加（3592 → 3594 tests）
+  - `const_eval_int_expr`: `const EMBED_DIM: Int = 1536` + `const HALF_DIM: Int = EMBED_DIM / 2` のコンパイル時評価が pass
+  - `const_used_in_dependent_type`: `Vec<Float>[EMBED_DIM]` の次元位置で定数名が解決される
+- AST: `ConstDef` 構造体・`Item::ConstDef` バリアント追加
+- パーサー: `const NAME: Type = expr` 構文サポート（文脈キーワード `const`）
+- チェッカー: `const_env: HashMap<String, StaticValue>` — 宣言順コンパイル時評価
+- チェッカー: E0247（未定義定数参照）・E0250（定数型不一致）エラー追加
+- `error_catalog.rs`: E0247・E0250 エントリ追加
+- `fmt.rs`: `Item::ConstDef` フォーマット対応（`const N: Int = 1536`）
+
+---
+
+## [v71.3.0] — 2026-08-09 — Phantom Types（型タグによる誤使用防止）
+
+### Added
+- `v713000_tests`: 3 件追加（3589 → 3592 tests）
+  - `phantom_type_explicit_cast`: `UserId("u-123")` が typecheck で通ることを確認
+  - `phantom_type_prevents_id_confusion`: `OrderId` を `UserId` 引数に渡すとコンパイルエラーになることを確認
+  - `fmt_phantom_and_opaque_types`: phantom / opaque 型の round-trip フォーマット確認
+- パーサー: `type Name = phantom InnerType` 構文を追加（`is_phantom: bool` を `TypeDef` に追加）
+- チェッカー: phantom 型コンストラクタ登録（`register_item_signatures` に `is_phantom` ブランチ追加）
+- チェッカー: E0246（opaque と phantom の同時指定を禁止）を追加
+- `error_catalog.rs`: E0246 エントリ追加
+- `fmt.rs`: phantom 型（および opaque 型）の round-trip フォーマット修正
+
+---
+
+## [v71.2.0] — 2026-08-09 — Refined Types（型レベル制約 where self）
+
+### Added
+- `v712000_tests`: 3 件追加（3586 → 3589 tests）
+  - `refined_type_positive_float`: `type PositiveFloat = Float where self > 0.0` の型定義 + 関数定義が typecheck で通ることを確認
+  - `refined_type_violation_compile_error`: 制約違反リテラルで E0425 が発生することを確認
+  - `refined_type_violation_fndef_before_typedef`: FnDef が TypeDef より前の場合もコンパイルエラーになることを確認
+- チェッカー: E0425（Refined type 制約違反）を追加
+  - リテラル引数が `where` 制約を満たさない場合にコンパイルエラー
+- チェッカー: `fn_alias_refinements` フィールド追加（関数パラメータの alias 制約伝播）
+- チェッカー: `check_type_def` に `TypeBody::Alias` ブランチ追加（where 制約の型チェック）
+- `error_catalog.rs`: E0425 エントリ追加
+
+---
+
+## [v71.1.0] — 2026-08-09 — 依存型の基礎 Vec<T>[N]
+
+### Added
+- `v711000_tests`: 2 件追加（3584 → 3586 tests）
+  - `dependent_type_vec_dim_param`: `Vec<Float>[1536]` 型注釈のパース + 型チェックが通ることを確認
+  - `dependent_type_dim_mismatch_error`: 次元不一致で E0421 が発生することを確認
+- パーサー: `Vec<T>[N]` 次元注釈サポートを追加（`parse_base_type` に `[N]` サフィックス対応）
+- チェッカー: E0421（依存型次元不一致）を追加（`Vec<T>[1536]` と `Vec<T>[768]` の unify ミスマッチ検出）
+
+---
+
+## [v71.0.0] — 2026-08-09 — Language Complete 1.0 宣言
+
+### Added
+- `v71000_tests`: 4 件追加（3580 → 3584 tests）
+  - `cargo_toml_version_is_71_0_0`
+  - `changelog_has_v71_0_0`
+  - `milestone_has_language_complete`
+  - `readme_mentions_language_complete`
+- `MILESTONE.md` v71.0.0 Language Complete 1.0 エントリ追加（宣言文・v70.1〜v70.9 達成内容）
+- `README.md` v71.0 Language Complete 1.0 宣言セクション追加
+
+---
+
+## [v70.9.0] — 2026-08-09 — 安定化・コードフリーズ
+
+### Added
+- `v709000_tests`: 2 件追加（3578 → 3580 tests）
+  - `language_complete_all_stable` — v70.1〜v70.8 の代表テスト名 8 件が driver.rs に存在することを確認
+  - `bench_ci_no_continue_on_error` — bench.yml Compare ステップに `|| true` が残存しないことを確認
+
+### Fixed
+- `.github/workflows/bench.yml` の `Compare with baseline` ステップの `|| true` を除去（strict mode 化）
+
+---
+
+## [v70.8.0] — 2026-08-09 — `fav doctor` 強化
+
+### Added
+- `v708000_tests`: 2 件追加（3576 → 3578 tests）
+  - `doctor_detects_paper_rune` — Paper Rune（rune.toml あり・実装空）の検出
+  - `doctor_detects_missing_changelog_entry` — CHANGELOG 整合性チェック（存在 Ok / 欠如 Fail）
+- `doctor_check_paper_rune(rune_dir: &str) -> DoctorCheck` — rune.toml 存在かつ実装 .fav が空の場合 `DoctorStatus::Fail`
+- `doctor_check_changelog_entry(changelog_content: &str, version: &str) -> DoctorCheck` — バージョンエントリ存在確認
+
+---
+
+## [v70.7.0] — 2026-08-09 — Self-Hosting Coverage Report
+
+### Added
+- `v707000_tests`: 2 件追加（3572 → 3574 tests）
+  - `self_coverage_compiler_fav_above_95pct` — compiler.fav が 95% 以上の構文形式を処理することを確認
+  - `self_coverage_checker_fav_above_90pct` — checker.fav が 90% 以上のエラーコードを処理することを確認
+- `SelfCoverageReport` 構造体 + `compiler_pct` / `checker_pct` メソッド
+- `compute_self_coverage()` — compiler.fav 49/51（96.1%）・checker.fav 17/18（94.4%）を算出
+- `format_self_coverage()` — Missing 構文形式・エラーコードを整形表示
+- `fav self-coverage` コマンド（main.rs に登録）
+
+---
+
+## [v70.6.0] — 2026-08-09 — `bind` 分割束縛拡張
+
+### Added
+- `v706000_tests`: 2 件追加（3570 → 3572 tests）
+  - `bind_destructure_record` — Record 分割束縛（`bind {name, score} <- u`）の parse + typecheck + compile
+  - `bind_destructure_list_spread` — List スプレッド束縛（`bind [head, ..tail] <- items`）の parse + typecheck + compile
+
+### Fixed
+- `compiler.fav` `TkBind` ハンドラ: `TkLBrace` 対応追加（`bind {field} <- expr` を `EBind` チェーンにデシュガー）
+  - `parse_destr_fields` ヘルパー追加（`{` 後のフィールドリストを再帰的にパース）
+  - `make_destr_binds` ヘルパー追加（`List.first` / `List.drop` で `EBind` チェーンを生成）
+  - 空リスト `[]` の代わりに `List.empty()` を使用（Favnir 構文制約対応）
+
+### Verified
+- Rust パイプライン（parser / checker.rs / codegen.rs）における Record/List 分割束縛の E2E コンパイル動作を確認
+
+---
+
+## [v70.5.0] — 2026-08-09 — パターンマッチ強化
+
+### Added
+- `v705000_tests`: 3 件追加（3567 → 3570 tests）
+  - `pattern_match_nested_record` — Record フィールドパターンの parse + typecheck + compile
+  - `pattern_match_or_pattern` — Or-パターンの parse + typecheck + compile
+  - `pattern_match_if_guard` — `if` キーワードガードの parse + typecheck + compile（code-reviewer 指摘対応）
+
+### Fixed
+- `compiler.fav` `parse_arm_guard`: `TkIf` ガード構文（`x if cond`）を追加（従来は `TkWhere` のみ対応）
+
+### Verified
+- Rust パイプライン（parser / compiler.rs / codegen.rs）における Or-パターン・ガード・Record パターンの E2E コンパイル動作を確認
+
+---
+
+## [v70.4.0] — 2026-08-09 — 構造化エラー診断
+
+### Added
+- `ErrorReport` 構造体（code / file / line / col / source_line / span_len / message / hint / suggestion / doc_url）
+- `suggest_similar_name(name, candidates)` — `strsim::levenshtein` で距離 ≤ 3 の最近傍候補を返す
+- `format_error_report(report)` — rustc スタイルのエラー診断テキスト生成
+- `build_e0374_report` — E0374（`!Effect` 廃止）専用ビルダー（`ctx: AppCtx` 移行ヒント + `fav migrate` 案内 + doc_url）
+- `build_e0001_report` — E0001（未定義変数）専用ビルダー（タイポ候補提示）
+- `v704000_tests`: 2 件追加（3565 → 3567 tests）
+  - `diagnostic_e0374_shows_migration_hint`
+  - `diagnostic_e0001_suggests_similar_name`
+
+---
+
+## [v70.3.0] — 2026-08-09 — fav bench サブコマンド完成
+
+### Added
+- `cmd_bench_all()`: 組み込みベンチマーク 3 件を計測して JSON 出力
+  - `compile_hello_fav_ms`: Parser::parse_str + build_artifact でのコンパイル時間
+  - `run_csv_1k_rows_ms`: csv::Reader による 1000 行 CSV パース時間
+  - `type_check_checker_fav_ms`: checker.fav（3000+ 行）のパース時間
+- `fav bench --all`: built-in intrinsic metrics を `version`/`timestamp`/`metrics` JSON で出力
+  - `--compare <path>` / `--fail-on-regression` / `--threshold` と組み合わせ可能
+- `BenchOpts` に `all: bool` フィールドを追加（v70.3.0）
+- `v703000_tests`: 2 件追加（3563 → 3565 tests）
+  - `bench_subcommand_all_outputs_json`
+  - `bench_subcommand_regression_fail`
+
+### Changed
+- `fav bench --all` が no-op から built-in intrinsic benchmarks の実行に変更
+
+---
+
+## [v70.2.0] — 2026-08-09 — fav migrate 完成（構文自動移行ツール）
+
+### Added
+- `migrate_io_calls_in_source`: `IO.*` stdlib コールを `ctx.io.*` 形式に自動変換
+  - `IO.write_file(p, d)` → `ctx.io.write_file_raw(p, d)`
+  - `IO.read_file(p)` → `ctx.io.read_file_raw(p)`
+  - `IO.println(x)` → `ctx.io.println(x)`
+  - `IO.args()` → `ctx.io.argv()`
+- `resolve_use_effects` に `"v35"` / `"35"` を追加（`--from v35` で ctx スタイル移行が有効化）
+- `v702000_tests`: 2 件追加（3561 → 3563 tests）
+  - `migrate_effect_annotation_to_ctx`
+  - `migrate_io_stdlib_to_ctx_io`
+
+### Changed
+- `cmd_migrate --from v35`: エフェクトアノテーション除去と IO stdlib 変換を同時適用
+
+---
+
+## [v70.1.0] — 2026-08-08 — Backlog Blitz（積み残し一掃）
+
+### Fixed
+- `compiler.fav` の `parse_postfix` を修正 — `ctx.io.println(data)` など 2 段チェーンメソッド呼び出しが `non-exhaustive match` で失敗していたバグを解消（`bind x <- Result.ok(...)` → `bind x <- expr` への修正）
+- `.github/workflows/bench.yml` の "Compare with baseline" / "Regression check against baseline" ステップから `continue-on-error: true` を除去 — CI が完全グリーンになった
+- `versions/current.md` を v70.0.0 完了・v70.1.0 進行中に更新
+
+### Added
+- `v701000_tests`: 2 件追加（3559 → 3561 tests）
+  - `backlog_compiler_fav_ctx_multiparams`
+  - `backlog_bench_yml_compare_strict`
+
+---
+
 ## [v70.0.0] — 2026-08-08 — Intelligent ETL 1.0 宣言 ★クリーンアップ
 
 ### Added

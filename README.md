@@ -9,6 +9,102 @@ Favnir はその答えです。
 
 ---
 
+## v80.0 — Favnir 3.0 宣言（2026-08-16）
+
+Favnir v80.0 で **Favnir 3.0** を宣言しました。
+
+時間・来歴・正しさ・実行戦略がすべて型で語れる言語になりました。
+`FreshnessPolicy` がデータの鮮度を保証し、`ProvenanceTag` が来歴を追い、
+`PipelineInvariant` が不変条件を証明し、`!Adaptive` がコストを最適化します。
+v75.1〜v79.9 の全スプリント（Temporal / Provenance / Verifiable / Execution Effects）が完了し、
+Favnir 3.0 は「何を・どこから・どう正しく・どう速く」処理するかをすべて型で語れる言語です。
+
+---
+
+## v79.0 — Execution Effects 1.0 宣言（2026-08-16）
+
+Favnir v79.0 で **Execution Effects 1.0** を宣言しました。
+
+実行戦略（キャッシュ・並列・バッチ/ストリーミング判断）が Favnir の型システムに組み込まれ、
+パイプラインが最適な実行戦略を自ら選択できるようになりました。
+
+## v78.0 — Verifiable Pipelines 宣言（2026-08-16）
+
+Favnir v78.0 で **Verifiable Pipelines** を宣言しました。
+不変条件が型となり、反例がコンパイラから届きます。
+`PipelineInvariant` がパイプラインの不変条件をファーストクラス型として表現し、
+`check_aggregate_invariant` / `check_filter_invariant` / `check_join_invariant` が
+集約・フィルター・Join の各レイヤーで型安全な検証を行います。
+`generate_counter_example_values` が違反を引き起こす反例を自動生成し、
+`check_probabilistic_invariant` がサンプリングベースの確率的契約を検証します。
+`run_ci_verification` が CI パイプラインに組み込み可能な検証レポートを生成します。
+
+---
+
+## v77.0 — Data Provenance 1.0 宣言（2026-08-15）
+
+Favnir v77.0 で **Data Provenance 1.0** を宣言しました。
+データの来歴が型となり、どこから来て、何を経て、PII がどこで消えたかを
+Favnir が型で追跡します。
+`ProvenanceTag` が来歴をファーストクラス型として表現し、
+`validate_provenance_contract` が入力ソースと PII ポリシーをコンパイル時に検証します。
+`format_openlineage_json` が OpenLineage 標準ファセットを生成し、
+`format_lineage_dot` が Graphviz DOT 形式でデータフローを可視化します。
+
+---
+
+## v76.0 — Temporal Data Native 宣言（2026-08-15）
+
+Favnir v76.0 で **Temporal Data Native** を宣言しました。
+鮮度が型となり、SCD が構造となり、タイムトラベルが API となりました。
+`FreshnessPolicy` がデータの陳腐化をコンパイル時に検出し、
+`TemporalContract` がパイプライン全体の時間的整合性を保証します。
+`cmd_time_travel` が Snowflake・Delta・Generic の SQL 方言を型安全に生成します。
+
+---
+
+## v75.0 — Favnir 2.0 宣言（2026-08-14）
+
+Favnir v75.0 で **Favnir 2.0** を宣言しました。
+compiler.fav が Favnir を完全に記述し、依存型・refined type・phantom type が型安全性を保証します。
+VS Code がパイプラインを補完し、AI がエラーを修正し、Rune マーケットプレイスが
+コミュニティの知恵を型安全なピースとして流通させます。
+
+---
+
+## v74.0 — Production Proven 宣言（2026-08-13）
+
+Favnir v74.0 で **Production Proven** を宣言しました。
+データコントラクトがスキーマ境界を守り、品質スコアが劣化を警告し、PII が型で保護され、
+監査ログが法的要件を満たします。Favnir が Favnir 自身を運用し、
+GitHub Action が CI に溶け込みます。
+
+---
+
+## v73.0 — Developer Experience 2.0 宣言（2026-08-13）
+
+Favnir v73.0 で「Developer Experience 2.0」を宣言しました。
+VS Code 拡張・AI アシスタント・REPL 2.0・Playground 2.0・`fav learn` が揃い、
+データエンジニアが Favnir を選ぶ開発体験が整いました。
+
+---
+
+## v72.0 — Type System 2.0 宣言（2026-08-11）
+
+Favnir v72.0 で「Type System 2.0」を宣言しました。
+依存型・refined type・phantom type・const eval・generic constraints が揃い、
+AOT バイナリと WASM により型安全なパイプラインがどこでも動きます。
+
+---
+
+## v71.0 — Language Complete 1.0 宣言（2026-08-09）
+
+Favnir v71.0 で「Language Complete 1.0」を宣言しました。
+compiler.fav が全構文を処理し、積み残しのない CI が毎回グリーンで終わります。
+エラーメッセージは修正方法を即座に示し、fav migrate が旧コードを自動変換します。
+
+---
+
 ## v70.0 — Intelligent ETL 1.0 宣言（2026-08-08）
 
 Favnir v70.0 で「Intelligent ETL 1.0」を宣言しました。

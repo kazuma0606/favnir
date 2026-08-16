@@ -1,5 +1,235 @@
 # Favnir Milestones
 
+## v80.0.0（2026-08-16）— Favnir 3.0 宣言
+
+> 「時間が型となり、来歴が型となり、正しさが型となり、実行戦略が型となった。
+>
+>  FreshnessPolicy がデータの鮮度を保証し、ProvenanceTag が来歴を追い、
+>  PipelineInvariant が不変条件を証明し、!Adaptive がコストを最適化する。
+>
+>  Favnir 3.0 は、データパイプラインが「何を・どこから・どう正しく・どう速く」
+>  処理するかを、すべて型で語れる言語である。」
+
+**Favnir 3.0** の宣言バージョン。v75.1〜v79.9 で実装した
+Temporal / Provenance / Verifiable / Execution Effects の全スプリントの完成を宣言した。
+
+**v75.1〜v79.9 達成内容:**
+- Temporal Data Native（FreshnessPolicy / AsOfQuery / SCD）— v75.x〜v76.x
+- Data Provenance 1.0（ProvenanceTag / TracedData / OpenLineage）— v77.x
+- Verifiable Pipelines（PipelineInvariant / invariant / check_aggregate_invariant）— v78.x
+- Execution Effects 1.0（!Adaptive / !Cached / ExecutionStrategy）— v79.x
+- E2E ショーケース統合確認（infra/e2e-demo/favnir3-showcase/）— v79.9.0
+
+---
+
+## v79.0.0（2026-08-16）— Execution Effects 1.0 宣言
+
+> 「`!Cached` がメモを持ち、`!Adaptive` が状況を読み、`!Parallel` が仕事を分ける。
+>  実行戦略が型となった Favnir は、最適解を自ら選ぶ。」
+
+**Execution Effects 1.0** の宣言バージョン。v78.1〜v78.9 で実装した
+Execution Effects 基盤の完成を宣言した。
+
+**v78.1〜v78.9 達成内容:**
+- `CacheEntry` / `CacheStats` / `simulate_lru_cache` / `format_cache_stats_report`（LRU キャッシュ統計）— v78.1.0
+- `hit_rate` / `merge_cache_stats`（ヒット率・統計マージ）— v78.2.0
+- `ExecutionStrategy` / `select_join_strategy`（結合戦略選択）— v78.3.0
+- `CostEstimate` / `combine_costs` / `estimate_cost`（コスト推定）— v78.4.0
+- `PlanStage` / `ExecutionPlan` / `format_execution_plan`（実行計画可視化）— v78.5.0
+- `ParallelConfig` / `PartitionPlan` / `plan_parallel_execution` / `format_parallel_plan`（並列実行）— v78.6.0
+- `ExecutionMode` / `ExecutionModeSelector` / `select_execution_mode`（実行モード選択）— v78.7.0
+- `PlanCacheEntry` / `PlanCache` / `lookup_plan` / `insert_plan`（実行計画キャッシュ）— v78.8.0
+- 安定化・E2E テスト（`execution_effects_full_sprint_all_stable` / `execution_effects_e2e_pipeline_runs`）— v78.9.0
+
+---
+
+## v78.0.0（2026-08-16）— Verifiable Pipelines 宣言
+
+> 「不変条件が型となり、反例がコンパイラから届く。
+>  Favnir のパイプラインは今、その正しさを証明できる。」
+
+**Verifiable Pipelines** の宣言バージョン。v77.1〜v77.9 で実装した
+Verifiable Pipelines 基盤の完成を宣言した。
+
+**v77.1〜v77.9 達成内容:**
+- `PipelineInvariant` / `InvariantViolation` / `check_count_invariant`（不変条件基盤）— v77.1.0
+- `FilterInvariant` / `check_filter_invariant`（フィルター系不変条件）— v77.2.0
+- `AggregateInvariant` / `AggregateProperty` / `check_aggregate_invariant`（集約系不変条件）— v77.3.0
+- `JoinInvariant` / `JoinType` / `JoinNullPolicy` / `check_join_invariant`（Join 系不変条件）— v77.4.0
+- `VerificationReport` / `cmd_verify` / `format_verification_report`（verify コマンド基盤）— v77.5.0
+- `CiVerificationConfig` / `CiResult` / `run_ci_verification` / `format_ci_result_summary`（CI 統合）— v77.6.0
+- `CounterExampleResult` / `generate_counter_example_values`（反例自動生成）— v77.7.0
+- `ProbabilisticContract` / `check_probabilistic_invariant`（確率的契約）— v77.8.0
+- 安定化・E2E テスト（`verifiable_full_sprint_all_stable` / `verifiable_e2e_pipeline_verified`）— v77.9.0
+
+---
+
+## v77.0.0（2026-08-15）— Data Provenance 1.0 宣言
+
+> 「データの来歴が型となった。どこから来て、何を経て、PII がどこで消えたかを
+>  Favnir が型で追跡する。GDPR はコンパイル時に通る。」
+
+**Data Provenance 1.0** の宣言バージョン。v76.1〜v76.9 で実装した
+Data Provenance 基盤の完成を宣言した。
+
+**v76.1〜v76.9 達成内容:**
+- `DataSource` / `DataSourceType` / `ProvenanceTag` / `format_provenance_tag`（来歴型基盤）— v76.1.0
+- `TracedData` / `map_traced` / `merge_provenance`（来歴付きデータ型）— v76.2.0
+- `PiiProvenanceReport` / `detect_pii_in_tag` / `ErasurePlan` / `generate_erasure_plan`（PII・GDPR）— v76.3.0
+- `OpenLineageFacet` / `provenance_to_openlineage` / `format_openlineage_json`（OpenLineage 統合）— v76.4.0
+- `LineageNodeType` / `LineageNode` / `LineageEdge` / `LineageGraph` / `format_lineage_dot`（グラフ可視化）— v76.5.0
+- `PipelineProvenanceChain` / `chain_provenance` / `format_chain_report`（Cross-pipeline）— v76.6.0
+- `DataProductSla` / `ProvenancePolicy` / `DataProduct` / `validate_data_product`（Data product 型）— v76.7.0
+- `PiiPolicy` / `ProvenanceContract` / `validate_provenance_contract`（Provenance contracts）— v76.8.0
+- 安定化・E2E テスト（`provenance_full_sprint_all_stable` / `provenance_e2e_pipeline_valid`）— v76.9.0
+
+---
+
+## v76.0.0（2026-08-15）— Temporal Data Native 宣言
+
+> 「鮮度が型となり、SCD が構造となり、タイムトラベルが API となった。
+>  Favnir のパイプラインは今、時間軸を型で保証する。」
+
+**Temporal Data Native** の宣言バージョン。v75.1〜v75.9 で実装した
+Temporal Data Native 基盤の完成を宣言した。
+
+**v75.1〜v75.9 達成内容:**
+- `FreshnessPolicy`（鮮度ポリシー型・Fail/Warn 戦略）— v75.1.0
+- `TemporalRange` / `AsOfQuery` / `unix_secs_to_utc` / `is_leap`（時点型・UTC変換）— v75.2.0
+- `ScdRow` / `apply_scd2_update` / `apply_scd1_update`（SCD 2.0 型安全更新）— v75.3.0
+- `TemporalJoinConfig` / `format_temporal_join_sql`（時点結合SQL生成）— v75.4.0
+- `RetentionPolicy` / `apply_retention_check`（データ保持ポリシー）— v75.5.0
+- `StreamFreshnessMonitor` / `check_stream_lag`（ストリーム遅延監視）— v75.6.0
+- `TemporalContract` / `validate_temporal_contract`（統合コントラクト検証）— v75.7.0
+- `TimeTravelQuery` / `cmd_time_travel` / `parse_time_travel_timestamp`（タイムトラベルSQL）— v75.8.0
+- 安定化・E2E テスト（`temporal_full_sprint_all_stable` / `temporal_e2e_pipeline_valid`）— v75.9.0
+
+---
+
+## v75.0.0（2026-08-14）— Favnir 2.0 宣言
+
+> 「compiler.fav が Favnir を完全に記述し、型システムが次元と制約を保証する。
+>  依存型がベクトルの次元を守り、refined type がゼロ除算をコンパイル時に止める。
+>  VS Code がパイプラインを補完し、AI がエラーを修正し、
+>  実際のデータチームが本番で Favnir を走らせている。
+>
+>  データコントラクトがスキーマ境界を守り、品質スコアが劣化を警告する。
+>  Favnir が Favnir 自身を運用し、Rune マーケットプレイスが
+>  コミュニティの知恵を型安全なピースとして流通させる。
+>
+>  これが Favnir v75.0 — Favnir 2.0 の姿である。」
+
+**Favnir 2.0** の宣言バージョン。v74.1〜v74.9 で実装した
+Rune マーケットプレイス・マルチテナント・Documentation Site 2.0・OSS Hardening・
+Pipeline Scheduling・fav audit 拡張・コミュニティ Rune 品質基準・統合デモ・安定化の統合を宣言した。
+
+**v74.1〜v74.9 達成内容:**
+- Rune マーケットプレイス（`RunePackage` / `search_rune_packages` / `generate_rune_registry_index`）— バージョン管理・依存解決
+- マルチテナント Runtime（`TenantConfig` / `TenantIsolationLevel` / `resolve_tenant_config`）— テナント分離
+- Documentation Site 2.0（`DocSiteEntry` / `generate_doc_site_index`）— 言語リファレンス自動生成
+- OSS Hardening（`OssLicenseEntry` / `scan_oss_licenses`）— ライセンス監査
+- Pipeline Scheduling（`ScheduleEntry` / `validate_cron_expr` / `cmd_schedule_list`）— cron 管理
+- fav audit 拡張（`DepVulnerability` / `format_audit_deps_report` / `apply_audit_fix`）— 依存セキュリティ
+- コミュニティ Rune 品質基準（`RuneValidationReport` / `validate_rune_score`）— 公開品質保証
+- 統合デモ（`infra/e2e-demo/favnir2-showcase/`）— v71〜v74 全機能ショーケース
+- 安定化・コードフリーズ（v74.9.0）— Favnir 2.0 前最終調整
+
+---
+
+## v74.0.0（2026-08-13）— Production Proven
+
+> 「データコントラクトがスキーマ境界を守り、品質スコアが劣化を警告する。
+>  PII が型で保護され、監査ログが法的要件を満たす。
+>  Favnir が Favnir 自身を運用し、GitHub Action が CI に溶け込む。
+>
+>  これが Favnir v74.0 — Production Proven の姿である。」
+
+**Production Proven** の宣言バージョン。v73.1〜v73.9 で実装した
+データコントラクト・品質スコア・PII 保護・監査ログ・SLA 監視・Rune 品質パス・
+ドッグフーディング Sprint・GitHub Actions 公式 Action・安定化の統合を宣言した。
+
+**v73.1〜v73.9 達成内容:**
+- データコントラクト（`DataContract` / `validate_contract_schema`）— スキーマ境界の型安全保証
+- 品質スコア（`QualityReport` / `compute_quality_report`）— データ劣化の自動警告
+- PII 検出・マスキング（`mask_pii_fields` / `PiiMaskStrategy`）— 型での個人情報保護
+- 監査ログ + OpenLineage（`AuditLogEntry` / `OpenLineageEvent`）— 法的要件を満たすリネージ追跡
+- SLA 監視（`SlaConfig` / `check_sla`）— アラート統合
+- Rune 品質パス（`rune_linalg_matmul` / `rune_stats_mean_std`）— VM primitive 接続
+- ドッグフーディング Sprint（`fav/pipelines/`）— Favnir が Favnir を運用
+- GitHub Actions 公式 Action（`.github/actions/setup-fav/`）— CI に溶け込む
+- 安定化・コードフリーズ（v73.9.0）— Production Proven 前調整
+
+---
+
+## v73.0.0（2026-08-13）— Developer Experience 2.0
+
+> 「VS Code がパイプラインを補完し、AI がエラーを修正し、
+>  REPL が型を即座に返し、Playground がコードを世界と共有する。
+>  自然言語一文が、型安全なパイプラインの雛形になる。
+>
+>  これが Favnir v73.0 — Developer Experience 2.0 の姿である。」
+
+**Developer Experience 2.0** の宣言バージョン。v72.1〜v72.9 で実装した
+VS Code 拡張・AI アシスタント・REPL 2.0・Playground 2.0・`fav learn` の統合を宣言した。
+
+**v72.1〜v72.9 達成内容:**
+- VS Code 拡張（`editors/vscode/`）— LSP 統合・シンタックスハイライト・型ホバー・エラーアンダーライン
+- AI エラーアシスタント（`fav ai explain` / `fav ai fix`）— エラーコード + ソースを AI に送信して説明・修正
+- `fav ai generate` — 自然言語 → Favnir パイプライン雛形生成
+- REPL 2.0 — `:timing on/off` モード・TAB 補完ヘルパー（`repl_tab_complete`）
+- Playground 2.0 — テンプレートギャラリー（5 エントリ）・共有リンク（`/playground?code=<base64>`）
+- `fav init` テンプレートギャラリー拡充 — ai-etl / streaming / enterprise / data-quality / distributed
+- `fav watch` 2.0 — `--on-change <cmd>` フラグ（任意コマンドを変更検知時に実行）
+- `fav learn` — インタラクティブチュートリアル（5 章: パイプライン → 型 → Rune → AI → 分散実行）
+
+---
+
+## v72.0.0（2026-08-11）— Type System 2.0
+
+> 「依存型がベクトルの次元を守り、refined type がゼロ除算を型で止める。
+>  Phantom type が ID の混用を防ぎ、定数がコンパイル時に評価される。
+>  AOT バイナリが Docker 不要で動き、WASM がパイプラインをブラウザへ運ぶ。
+>
+>  これが Favnir v72.0 — Type System 2.0 の姿である。」
+
+**Type System 2.0** の宣言バージョン。v71.1〜v71.9 で実装した
+依存型・refined type・phantom type・const eval・generic constraints・AOT・WASM・型推論強化の統合を宣言した。
+
+**v71.1〜v71.9 達成内容:**
+- 依存型 `Vec<T>[N]`: 次元違いベクトルを型で防止（E0421）
+- Refined Types: `type PositiveFloat = Float where self > 0.0`（E0425）
+- Phantom Types: `type UserId = phantom String`（ID 混用防止）
+- Const Eval: `const EMBED_DIM: Int = 1536`（コンパイル時定数）
+- Generic Constraints: `<T: A & B>`、`<T: impl A>`
+- AOT Native: `fav build --target native --arch arm64`
+- WASM: `fav build --target wasm`（`\0asm` マジック確認）
+- 型推論: `bind n <- fn()` 型注釈省略可
+
+---
+
+## v71.0.0（2026-08-09）— Language Complete 1.0
+
+> 「compiler.fav が Favnir の全構文を処理し、
+>  積み残しのない CI が毎回グリーンで終わる。
+>  エラーメッセージは修正方法を即座に示し、
+>  fav migrate が旧コードを自動で現代に変換する。
+>
+>  これが Favnir v71.0 — Language Complete 1.0 の姿である。」
+
+**Language Complete 1.0** の宣言バージョン。v70.1〜v70.9 で実装した
+compiler.fav 完全化・診断 UI 強化・fav migrate・bench.yml strict mode の統合を宣言した。
+
+**v70.1〜v70.9 達成内容:**
+- compiler.fav: 2 段メソッドチェーン / bind 分割束縛 / if-guard パターン対応
+- `fav migrate`: !Effect → ctx.io.* 自動変換
+- `fav bench --all`: JSON 形式ベンチマーク出力
+- ErrorReport / `suggest_similar_name` 診断 UI
+- `fav self-coverage`: self-hosting 網羅率レポート
+- `fav doctor`: Paper Rune 検出 / CHANGELOG 整合性チェック
+- bench.yml strict mode 化（Compare ステップ無条件実行）
+
+---
+
 ## v70.0.0（2026-08-08）— Intelligent ETL 1.0
 
 > 「型チェックが、LLM の出力を安全にする。

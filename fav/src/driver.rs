@@ -59733,11 +59733,9 @@ pub fn compute_quality_report(rows: &[Vec<Option<String>>]) -> QualityReport {
 
     // Validity: rows where all cells are Some
     let valid_rows = rows.iter().filter(|r| r.iter().all(|c| c.is_some())).count();
-    let validity_score = if total_rows == 0 {
-        100u32
-    } else {
-        (valid_rows * 100 / total_rows) as u32
-    };
+    let validity_score = (valid_rows * 100)
+        .checked_div(total_rows)
+        .unwrap_or(100) as u32;
     let validity_detail = format!("{}/{} rows fully valid", valid_rows, total_rows);
 
     // Consistency / Freshness / Referential: stub（将来実装）

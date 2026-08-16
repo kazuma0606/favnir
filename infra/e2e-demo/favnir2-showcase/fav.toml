@@ -1,0 +1,9 @@
+[project]
+name = "favnir2-showcase"
+version = "1.0.0"
+
+[schedule]
+daily-report = { cron = "0 9 * * *", pipeline = "pipeline.fav" }
+
+[tenant]
+isolation = "strict"

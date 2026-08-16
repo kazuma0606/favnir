@@ -1,6 +1,6 @@
 # Favnir Security Policy
 
-## 脆弱性の報告
+## Vulnerability Reporting（脆弱性の報告）
 
 セキュリティ上の問題を発見した場合は、**公開 Issue は作成しないでください**。
 代わりに以下のメールアドレスへ報告してください:
@@ -29,4 +29,4 @@ CVE 番号は NVD（National Vulnerability Database）経由で公開します�
 ## 連絡先
 
 - Email: security@favnir.dev
-- PGP: 公開鍵は https://favnir.dev/security/pgp.txt で公開予定（v25.0）。PGP 鍵が利用可能になるまでは平文メールでの報告も受け付けます。
+- PGP: 公開鍵は準備中です。現時点では平文メール（security@favnir.dev）での報告を受け付けます。

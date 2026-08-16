@@ -1,0 +1,19 @@
+// fav/pipelines/release.fav
+// Favnir リリースパイプライン — バージョンバンプ・CHANGELOG 更新
+
+fn bump_version(ctx: AppCtx, source: String, old_ver: String, new_ver: String) -> Result<String, String> {
+    bind updated <- String.replace(source, old_ver, new_ver)
+    Result.ok(updated)
+}
+
+fn prepend_changelog(ctx: AppCtx, entry: String, changelog: String) -> Result<String, String> {
+    bind header  <- String.concat("---\n\n", entry)
+    bind content <- String.concat(header, changelog)
+    Result.ok(content)
+}
+
+fn release_pipeline(ctx: AppCtx, source: String, old_ver: String, new_ver: String, entry: String, changelog: String) -> Result<String, String> {
+    bind bumped <- bump_version(ctx, source, old_ver, new_ver)
+    bind msg    <- prepend_changelog(ctx, entry, changelog)
+    Result.ok(msg)
+}

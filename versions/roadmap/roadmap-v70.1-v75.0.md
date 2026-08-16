@@ -16,11 +16,11 @@ Status: 計画中（v70.0.0 完了、v70.1.0 から開始）
 
 | サブスプリント文書 | カバー範囲 | 状態 |
 |---|---|---|
-| `roadmap-v70.1-v71.0.md` | v70.1〜v70.9 + v71.0 | 未作成 |
-| `roadmap-v71.1-v72.0.md` | v71.1〜v71.9 + v72.0 | 未作成 |
-| `roadmap-v72.1-v73.0.md` | v72.1〜v72.9 + v73.0 | 未作成 |
-| `roadmap-v73.1-v74.0.md` | v73.1〜v73.9 + v74.0 | 未作成 |
-| `roadmap-v74.1-v75.0.md` | v74.1〜v74.9 + v75.0 | 未作成 |
+| `roadmap-v70.1-v71.0.md` | v70.1〜v70.9 + v71.0 | 作成済み |
+| `roadmap-v71.1-v72.0.md` | v71.1〜v71.9 + v72.0 | 作成済み |
+| `roadmap-v72.1-v73.0.md` | v72.1〜v72.9 + v73.0 | 作成済み |
+| `roadmap-v73.1-v74.0.md` | v73.1〜v73.9 + v74.0 | 作成済み |
+| `roadmap-v74.1-v75.0.md` | v74.1〜v74.9 + v75.0 | 作成済み |
 
 ---
 
@@ -334,7 +334,7 @@ Hint: fav doctor --fix で自動修正を試みます
 - `--fix` フラグ — 自動修正可能な項目を修正
 - Paper Rune 検出（rune.toml あり・実装ファイル空）
 
-**完了条件**: Rust テスト 2 件（3573 + 2 = 3575）
+**完了条件**: Rust テスト 2 件（3576 + 2 = 3578）
 - `doctor_detects_paper_rune`
 - `doctor_detects_missing_changelog_entry`
 
@@ -345,7 +345,7 @@ Hint: fav doctor --fix で自動修正を試みます
 v70.1〜v70.8 の全機能が正常動作することを確認する安定化バージョン。
 bench.yml の `continue-on-error` を外し、CI が全グリーンであることを確認する。
 
-**完了条件**: Rust テスト 2 件（3575 + 2 = 3577）
+**完了条件**: Rust テスト 2 件（3578 + 2 = 3580）
 - `language_complete_all_stable`（v70.1〜v70.8 の代表テストが全 pass）
 - `bench_ci_no_continue_on_error`（bench.yml の Compare ステップが strict mode で通る）
 
@@ -362,7 +362,7 @@ bench.yml の `continue-on-error` を外し、CI が全グリーンであるこ�
 >
 >  これが Favnir v71.0 — Language Complete 1.0 の姿である。」
 
-**完了条件**: `v71000_tests` 4 件（3577 + 4 = 3581）
+**完了条件**: `v71000_tests` 4 件（3580 + 4 = 3584）
 - `cargo_toml_version_is_71_0_0`
 - `changelog_has_v71_0_0`
 - `milestone_has_language_complete`
@@ -454,8 +454,8 @@ type OrderId = phantom String
 fn get_user(id: UserId) -> User { ... }
 fn get_order(id: OrderId) -> Order { ... }
 
-bind uid = UserId("u-123")
-bind oid = OrderId("o-456")
+bind uid <- UserId("u-123")
+bind oid <- OrderId("o-456")
 get_user(uid)   // OK
 get_user(oid)   // コンパイルエラー: OrderId ≠ UserId
 ```
@@ -592,7 +592,7 @@ bind total <- List.fold(items, 0.0, |acc, o| acc + o.amount)  // Float を推論
 >
 >  これが Favnir v72.0 — Type System 2.0 の姿である。」
 
-**完了条件**: `v72000_tests` 4 件（3599 + 4 = 3603）
+**完了条件**: `v72000_tests` 4 件（3608 + 4 = 3612）
 - `cargo_toml_version_is_72_0_0`
 - `changelog_has_v72_0_0`
 - `milestone_has_type_system_2`
@@ -628,7 +628,7 @@ C（実証・UX）を中心に、AI コード生成などの先端機能も取�
 ✓ fav run / fav check をエディタから実行（Run Task）
 ```
 
-**完了条件**: Rust テスト 2 件（3603 + 2 = 3605）
+**完了条件**: Rust テスト 2 件（3612 + 2 = 3614）
 - `vscode_extension_package_json_valid`
 - `vscode_extension_lsp_integration`
 
@@ -692,10 +692,11 @@ fn main(ctx: AppCtx) -> Result<Unit, String> {
     ctx.io.println("Done.")
 }
 
-Open in editor? [y/N]: y
 ```
 
-**完了条件**: Rust テスト 2 件（3607 + 2 = 3609）
+※ エディタ起動・`fav check` 自動検証は v72.4.0 以降に実装。
+
+**完了条件**: Rust テスト 2 件（3616 + 2 = 3618）
 - `ai_generate_returns_valid_fav_code`
 - `ai_generate_schema_inferred_from_description`
 
@@ -727,13 +728,14 @@ fav> :save session.fav # セッションをファイルに保存
 fav> :load session.fav # セッションを再現
 ```
 
-**新機能:**
-- 入力履歴（↑↓キー）+ 永続化（`~/.fav_history`）
-- TAB 補完（変数名・関数名・Rune メソッド）
-- 複数行入力（`{` で開始、`}` で確定）
-- `:timing` モード・`:save` / `:load`
+**新機能（v72.4.0 実装範囲）:**
+- `:timing on/off` モード（式評価時間を ms 表示）
+- TAB 補完ヘルパー（`repl_tab_complete` — rustyline 統合は v72.5.0 以降）
+- `needs_continuation` pub 化（マルチライン継続は v60.5.0 で実装済み）
 
-**完了条件**: Rust テスト 2 件（3609 + 2 = 3611）
+※ `rustyline` 統合・`~/.fav_history` 永続化・Rune メソッド補完は依存クレート追加コストを考慮し v72.5.0 以降に延期。
+
+**完了条件**: Rust テスト 2 件（3620 + 2 = 3622）
 - `repl2_multiline_input`
 - `repl2_tab_completion`
 
@@ -752,7 +754,7 @@ fav> :load session.fav # セッションを再現
 - WASM ビルド対応（ブラウザ内で完全実行）
 ```
 
-**完了条件**: Rust テスト 2 件（3611 + 2 = 3613）
+**完了条件**: Rust テスト 2 件（3625 + 2 = 3627）→ 実測 3630（code-reviewer 対応で +3 追加）
 - `playground2_template_gallery_has_5_entries`
 - `playground2_share_url_format`
 
@@ -774,7 +776,7 @@ $ fav init --template distributed     # マルチノード par
 
 各テンプレートに `README.md`・動作確認コマンド・`fav.toml` を同梱。
 
-**完了条件**: Rust テスト 2 件（3613 + 2 = 3615）
+**完了条件**: Rust テスト 2 件（3630 + 2 = 3632）
 - `init_template_ai_etl_valid`
 - `init_template_data_quality_valid`
 
@@ -895,7 +897,7 @@ stage ProcessOrders: OrderPipelineContract.Input -> OrderPipelineContract.Output
 }
 ```
 
-**完了条件**: Rust テスト 2 件（3625 + 2 = 3627）
+**完了条件**: Rust テスト 2 件（3646 + 2 = 3648）
 - `data_contract_schema_mismatch_error`
 - `data_contract_sla_monitoring`
 
@@ -1344,11 +1346,11 @@ v70.1〜v74.8 の全機能を通しで確認する最終安定化スプリント
 | v71.1〜v71.9 | 3,581 + 18 = 3,599 | +18 | 各 +2 |
 | v72.0.0 | 3,599 + 4 = 3,603 | +4 | Type System 2.0 宣言 |
 | v72.1〜v72.9 | 3,603 + 18 = 3,621 | +18 | 各 +2 |
-| v73.0.0 | 3,621 + 4 = 3,625 | +4 | Developer Exp 2.0 宣言 |
-| v73.1〜v73.9 | 3,625 + 18 = 3,643 | +18 | 各 +2 |
-| v74.0.0 | 3,643 + 4 = 3,647 | +4 | Production Proven 宣言 |
-| v74.1〜v74.9 | 3,647 + 18 = 3,665 | +18 | 各 +2 |
-| v75.0.0 | 3,665 + 4 = 3,669 | +4 | Favnir 2.0 宣言 |
+| v73.0.0 | 3,642 + 4 = 3,646 | +4 | Developer Exp 2.0 宣言 |
+| v73.1〜v73.9 | 3,646 + 18 = 3,664 | +18 | 各 +2 |
+| v74.0.0 | 3,664 + 4 = 3,668 | +4 | Production Proven 宣言 |
+| v74.1〜v74.9 | 3,668 + 18 = 3,686 | +18 | 各 +2 |
+| v75.0.0 | 3,686 + 4 = 3,690 | +4 | Favnir 2.0 宣言 |
 
 **合計増加**: +110 tests（3,559 → 3,669）
 

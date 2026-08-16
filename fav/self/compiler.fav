@@ -1397,7 +1397,48 @@ fn parse_arm_guard(toks: List<Token>) -> Result<ExprParse, String> {
                 Ok(guard_p) => Result.ok(ExprParse { expr: guard_p.expr  rest: guard_p.rest })
             }
         }
+        Some(TkIf) => {
+            bind rest1 <- advance(toks);
+            match parse_expr(rest1) {
+                Err(e) => Result.err(e)
+                Ok(guard_p) => Result.ok(ExprParse { expr: guard_p.expr  rest: guard_p.rest })
+            }
+        }
         _ => Result.ok(ExprParse { expr: ELit(LBool(true))  rest: toks })
+    }
+}
+
+// ── bind 分割束縛ヘルパー（v70.6.0）──────────────────────────────────────────
+
+type FieldsParse = { fields: List<String>  rest: List<Token> }
+
+fn parse_destr_fields(toks: List<Token>, acc: List<String>) -> Result<FieldsParse, String> {
+    match peek(toks) {
+        Some(TkRBrace) => {
+            bind rest <- advance(toks);
+            Result.ok(FieldsParse { fields: List.reverse(acc)  rest: rest })
+        }
+        Some(TkIdent(fname)) => {
+            bind rest1 <- advance(toks);
+            match peek(rest1) {
+                Some(TkComma) => {
+                    bind rest2 <- advance(rest1);
+                    parse_destr_fields(rest2, List.cons(fname, acc))
+                }
+                _ => parse_destr_fields(rest1, List.cons(fname, acc))
+            }
+        }
+        _ => Result.err("expected field name or } in bind destructure")
+    }
+}
+
+fn make_destr_binds(tmp: String, fields: List<String>, cont: Expr) -> Expr {
+    match List.first(fields) {
+        None => cont
+        Some(fname) => {
+            bind rest <- List.drop(fields, 1);
+            EBind(fname, EAccess(EVar(tmp), fname), make_destr_binds(tmp, rest, cont))
+        }
     }
 }
 
@@ -1487,6 +1528,33 @@ fn parse_block_inner(toks: List<Token>) -> Result<ExprParse, String> {
         Some(TkBind) => {
             bind rest1 <- advance(toks);
             match peek(rest1) {
+                Some(TkLBrace) => {
+                    match parse_destr_fields(rest1, List.empty()) {
+                        Err(e) => Result.err(e)
+                        Ok(fields_p) => {
+                            match expect_tok(fields_p.rest, TkBackArrow) {
+                                Err(e) => Result.err(e)
+                                Ok(rest2) => {
+                                    match parse_expr(rest2) {
+                                        Err(e) => Result.err(e)
+                                        Ok(val_p) => {
+                                            match parse_block_inner(match peek(val_p.rest) {
+                                                Some(TkSemicolon) => advance(val_p.rest)
+                                                _ => val_p.rest
+                                            }) {
+                                                Err(e) => Result.err(e)
+                                                Ok(cont_p) => {
+                                                    bind inner <- make_destr_binds("$_d", fields_p.fields, cont_p.expr);
+                                                    Result.ok(ExprParse { expr: EBind("$_d", val_p.expr, inner)  rest: cont_p.rest })
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
                 Some(TkIdent(vname)) => {
                     bind rest2 <- advance(rest1);
                     match expect_tok(rest2, TkBackArrow) {
@@ -1572,6 +1640,28 @@ fn parse_block_inner(toks: List<Token>) -> Result<ExprParse, String> {
     }
 }
 
+// ctx.cap.method(args) → ECall(ns, method, args)
+// cap mapping: io→IO, db→Postgres, storage→AWS, env→Env
+fn ctx_access_ns(expr: Expr) -> String {
+    match expr {
+        EAccess(parts) => {
+            match parts._0 {
+                EVar(vname) => {
+                    if vname == "ctx" {
+                        if parts._1 == "io" { "IO" }
+                        else { if parts._1 == "db" { "Postgres" }
+                        else { if parts._1 == "storage" { "AWS" }
+                        else { if parts._1 == "env" { "Env" }
+                        else { "" } } } }
+                    } else { "" }
+                }
+                _ => ""
+            }
+        }
+        _ => ""
+    }
+}
+
 fn parse_postfix(expr: Expr, toks: List<Token>) -> Result<ExprParse, String> {
     match peek(toks) {
         Some(TkDot) => {
@@ -1579,7 +1669,29 @@ fn parse_postfix(expr: Expr, toks: List<Token>) -> Result<ExprParse, String> {
             match peek(rest1) {
                 Some(TkIdent(field)) => {
                     bind rest2 <- advance(rest1);
-                    parse_postfix(EAccess(expr, field), rest2)
+                    match peek(rest2) {
+                        Some(TkLParen) => {
+                            bind rest3 <- advance(rest2);
+                            match parse_args(rest3, EArgNil) {
+                                Err(e) => Result.err(e)
+                                Ok(args_p) => {
+                                    match expect_tok(args_p.rest, TkRParen) {
+                                        Err(e) => Result.err(e)
+                                        Ok(rest4) => {
+                                            bind ns <- ctx_access_ns(expr);
+                                            bind call_e <- if ns == "" {
+                                                ECall("", field, EArgList(expr, args_p.expr))
+                                            } else {
+                                                ECall(ns, field, args_p.expr)
+                                            };
+                                            parse_postfix(call_e, rest4)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        _ => parse_postfix(EAccess(expr, field), rest2)
+                    }
                 }
                 _ => Result.err("expected field name after dot")
             }

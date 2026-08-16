@@ -1,0 +1,15 @@
+[project]
+name = "favnir3-showcase"
+version = "1.0.0"
+
+[schedule]
+daily-report = { cron = "0 9 * * *", pipeline = "pipeline.fav" }
+
+[effects.cached]
+ttl_seconds = 300
+max_entries = 1000
+
+[effects.adaptive]
+row_threshold = 100000
+latency_target_ms = 500
+# [effects.parallel] は v79.5.0 以降で追加予定のため本バージョンでは含まない

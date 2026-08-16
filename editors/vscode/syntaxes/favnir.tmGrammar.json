@@ -1,0 +1,78 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "Favnir",
+  "scopeName": "source.fav",
+  "patterns": [
+    { "include": "#comments" },
+    { "include": "#strings" },
+    { "include": "#keywords" },
+    { "include": "#types" },
+    { "include": "#numbers" },
+    { "include": "#operators" }
+  ],
+  "repository": {
+    "comments": {
+      "patterns": [
+        {
+          "name": "comment.line.triple-slash.fav",
+          "match": "///.*$"
+        },
+        {
+          "name": "comment.line.double-slash.fav",
+          "match": "//.*$"
+        }
+      ]
+    },
+    "strings": {
+      "name": "string.quoted.double.fav",
+      "begin": "\"",
+      "end": "\"",
+      "patterns": [
+        {
+          "name": "constant.character.escape.fav",
+          "match": "\\\\."
+        }
+      ]
+    },
+    "keywords": {
+      "patterns": [
+        {
+          "name": "keyword.control.fav",
+          "match": "\\b(if|else|match|return)\\b"
+        },
+        {
+          "name": "keyword.declaration.fav",
+          "match": "\\b(fn|type|interface|impl|const|stage|pipeline|par|seq)\\b"
+        },
+        {
+          "name": "keyword.other.fav",
+          "match": "\\b(bind|import|pub|public|where|phantom|in)\\b"
+        },
+        {
+          "name": "constant.language.fav",
+          "match": "\\b(true|false)\\b"
+        }
+      ]
+    },
+    "types": {
+      "name": "support.type.fav",
+      "match": "\\b(Int|Float|Bool|String|Unit|List|Map|Option|Result|Vec|Self)\\b"
+    },
+    "numbers": {
+      "patterns": [
+        {
+          "name": "constant.numeric.float.fav",
+          "match": "\\b[0-9]+\\.[0-9]+\\b"
+        },
+        {
+          "name": "constant.numeric.integer.fav",
+          "match": "\\b[0-9]+\\b"
+        }
+      ]
+    },
+    "operators": {
+      "name": "keyword.operator.fav",
+      "match": "(\\|>|->|<-|==|!=|<=|>=|&&|\\|\\||[+\\-*/<>!])"
+    }
+  }
+}

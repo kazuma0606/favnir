@@ -1,0 +1,4 @@
+// Dogfooding pipeline: validate CHANGELOG.md format and entry consistency
+fn main() -> String {
+    "changelog_lint"
+}

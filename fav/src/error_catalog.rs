@@ -363,6 +363,36 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
         suggestion: Some("Remove the duplicate impl block."),
     },
     ErrorEntry {
+        code: "E0246",
+        title: "conflicting type modifiers",
+        category: "types",
+        description: "A type declaration uses conflicting modifiers (`opaque` and `phantom` cannot be combined).",
+        example: "opaque type Foo = phantom String  // E0246: opaque and phantom are mutually exclusive",
+        fix: "Use either `opaque type Foo = String` or `type Foo = phantom String`, not both.",
+        long_description: Some("See `fix` field for remediation details."),
+        suggestion: Some("Choose either `opaque` or `phantom`, not both."),
+    },
+    ErrorEntry {
+        code: "E0247",
+        title: "undefined const reference",
+        category: "types",
+        description: "A dimension annotation or expression references an undefined compile-time constant.",
+        example: "fn f(v: Vec<Float>[EMBED_DIM]) -> Int { 0 }  // E0247: EMBED_DIM is not defined",
+        fix: "Declare the constant before use: `const EMBED_DIM: Int = 1536`.",
+        long_description: Some("See `fix` field for remediation details."),
+        suggestion: Some("Add `const EMBED_DIM: Int = <value>` before this declaration."),
+    },
+    ErrorEntry {
+        code: "E0250",
+        title: "const type mismatch",
+        category: "types",
+        description: "A `const` declaration's value has a different type than its declared type, or the value cannot be evaluated at compile time.",
+        example: "const N: Int = \"hello\"  // E0250: String is not Int",
+        fix: "Ensure the value matches the declared type, and uses only literals or previously declared constants.",
+        long_description: Some("See `fix` field for remediation details."),
+        suggestion: Some("Check that the const value type matches the declared type."),
+    },
+    ErrorEntry {
         code: "E0251",
         title: "recursive type without indirection",
         category: "types",
@@ -822,7 +852,17 @@ pub const ERROR_CATALOG: &[ErrorEntry] = &[
         long_description: Some("See `fix` field for remediation details."),
         suggestion: Some("Check `[security.rbac.bindings]` in your `fav.toml` for the allowed roles."),
     },
-    // E0425: reserved（将来の policy 構文エラー拡張用）
+    // ── E0425: Refined type 制約違反 (v71.2.0) ─────────────────────────────────────
+    ErrorEntry {
+        code: "E0425",
+        title: "Refined type constraint violation",
+        category: "type",
+        description: "A literal value passed to a function does not satisfy the `where` constraint of the refined type alias.",
+        example: "type PositiveFloat = Float where self > 0.0\nfn safe_log(x: PositiveFloat) -> Float { 1.0 }\nfn bad() -> Float { safe_log(0.0) }  // E0425: 0.0 > 0.0 is false",
+        fix: "Ensure the value satisfies the constraint defined by `type X = T where self <expr>`.",
+        long_description: Some("Refined types add value-level constraints to type aliases. The constraint is evaluated at compile time for literal arguments."),
+        suggestion: Some("Check the `where` constraint in the type definition and ensure the passed literal satisfies it."),
+    },
     // ── E0426: ポリシー違反 (v58.5.0) ───────────────────────────────────────────────
 
     ErrorEntry {

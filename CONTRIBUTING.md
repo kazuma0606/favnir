@@ -39,7 +39,7 @@ PR を開く前に `fav doctor` で環境が正常かを確認してください
 
 ```bash
 ./target/debug/fav doctor
-# [OK]   fav version: 54.6.0
+# [OK]   fav version: 74.4.0
 # [OK]   Rust toolchain: stable
 # [OK]   fav.toml: valid
 # [OK]   .fav-cache: intact
@@ -50,7 +50,7 @@ PR を開く前に `fav doctor` で環境が正常かを確認してください
 ## テスト手順
 
 ```bash
-# Rust テスト（全 3197 件）
+# Rust テスト（全 3678 件）
 cd fav
 cargo test -j 8 -- --test-threads=8
 
@@ -211,9 +211,9 @@ license = "MIT"
 2. `rune.toml` と `<rune-name>.fav` を追加（5 条件を満たすこと）
 3. PR を開く — レビュー後 `runes/` にマージされます
 
-### 第 1 回 Favnir Rune コンテスト（2026-07）
+### Favnir Rune コンテスト
 
-優秀な Rune には公式 README への掲載・グッズ等の特典あり。
+優秀な Rune には公式 README への掲載・グッズ等の特典あり（次回開催日は公式アナウンスをご確認ください）。
 詳細は [/community](/community) ページを参照。
 
 ---
@@ -221,3 +221,34 @@ license = "MIT"
 ## ライセンス
 
 コントリビューションは MIT ライセンスに同意したものとみなします。
+
+---
+
+## Execution Effects の追加手順（v3 対応）
+
+新しいエフェクト（`!MyEffect`）を追加する場合は以下の手順に従ってください:
+
+1. `fav/src/ast.rs` に `Effect::MyEffect` バリアントを追加
+2. `fav/src/middle/checker.rs` の `ns_to_effect` / `builtin_ret_ty` を更新
+3. `fav/src/backend/cranelift_aot.rs` のマッチアームを更新
+4. `fav/pipelines/health-check.fav` を使ってヘルスチェックを実行
+
+---
+
+## PipelineInvariant（invariant）の追加手順
+
+`contract` ブロックに新しい不変条件（invariant）を追加する場合:
+
+1. `infra/e2e-demo/` の `contract.fav` に `invariant:` 節を追記する
+2. `fav verify <contract.fav>` で静的検証を確認する
+
+---
+
+## fav verify の使い方
+
+```bash
+fav verify <pipeline.fav>
+```
+
+`fav verify` はパイプラインの不変条件（`contract` ブロック）を静的検証します。
+CI での使用を推奨します。

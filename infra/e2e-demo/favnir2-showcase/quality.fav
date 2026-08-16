@@ -1,0 +1,4 @@
+// 品質スコアリングパイプライン
+fn quality_score(data: List<String>) -> Int {
+    data.len()
+}

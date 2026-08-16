@@ -1,0 +1,62 @@
+{
+  "name": "favnir",
+  "displayName": "Favnir",
+  "description": "Favnir language support for VS Code — type-safe data pipeline language",
+  "version": "0.1.0",
+  "publisher": "favnir",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/favnir/favnir"
+  },
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Linters",
+    "Formatters"
+  ],
+  "keywords": ["favnir", "fav", "pipeline", "data engineering", "type-safe"],
+  "activationEvents": [],
+  "main": "./out/extension.js",
+  "contributes": {
+    "languages": [
+      {
+        "id": "favnir",
+        "aliases": ["Favnir", "fav"],
+        "extensions": [".fav"]
+      }
+    ],
+    "grammars": [
+      {
+        "language": "favnir",
+        "scopeName": "source.fav",
+        "path": "./syntaxes/favnir.tmGrammar.json"
+      }
+    ],
+    "commands": [
+      {
+        "command": "favnir.run",
+        "title": "Favnir: Run"
+      },
+      {
+        "command": "favnir.check",
+        "title": "Favnir: Check"
+      }
+    ]
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "package": "vsce package"
+  },
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.85.0",
+    "typescript": "^5.3.0",
+    "@vscode/vsce": "^2.22.0"
+  }
+}

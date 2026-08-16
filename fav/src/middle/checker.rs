@@ -211,14 +211,41 @@ impl Type {
                     unbound_slots.join(", ")
                 )
             }
-            Type::Named(n, args) if args.is_empty() => n.clone(),
-            // Named("Option", [T]) ↁEdisplay as T? to match Type::Option(T)
+            Type::Named(n, args) if args.is_empty() => {
+                // v71.1.0: decode dimension-encoded names (e.g. `Vec#1536` → `Vec[1536]`)
+                if let Some(idx) = n.find('#') {
+                    let base = &n[..idx];
+                    let dim_raw = &n[idx + 1..];
+                    let dim = if let Some(var) = dim_raw.strip_prefix('?') {
+                        format!("[{}]", var)
+                    } else {
+                        format!("[{}]", dim_raw)
+                    };
+                    format!("{}{}", base, dim)
+                } else {
+                    n.clone()
+                }
+            }
+            // Named("Option", [T]) — display as T? to match Type::Option(T)
             Type::Named(n, args) if n == "Option" && args.len() == 1 => {
                 format!("{}?", args[0].display())
             }
             Type::Named(n, args) => {
+                // v71.1.0: decode dimension-encoded names with type args
+                let (base, dim_suffix) = if let Some(idx) = n.find('#') {
+                    let base = &n[..idx];
+                    let dim_raw = &n[idx + 1..];
+                    let dim = if let Some(var) = dim_raw.strip_prefix('?') {
+                        format!("[{}]", var)
+                    } else {
+                        format!("[{}]", dim_raw)
+                    };
+                    (base.to_string(), dim)
+                } else {
+                    (n.clone(), String::new())
+                };
                 let s: Vec<_> = args.iter().map(|a| a.display()).collect();
-                format!("{}<{}>", n, s.join(", "))
+                format!("{}<{}>{}", base, s.join(", "), dim_suffix)
             }
             Type::Var(name) => name.clone(),
             Type::Cap(name, args) if args.is_empty() => name.clone(),
@@ -543,6 +570,18 @@ pub fn unify(t1: &Type, t2: &Type) -> Result<Subst, String> {
             t2.display()
         )),
     }
+}
+
+// v71.1.0: Check if two Named types differ only in dimension annotation (e.g. Vec#1536 vs Vec#768).
+fn is_dim_annotated_name_mismatch(t1: &Type, t2: &Type) -> bool {
+    if let (Type::Named(n1, _), Type::Named(n2, _)) = (t1, t2) {
+        if n1.contains('#') && n2.contains('#') {
+            let base1 = n1.split_once('#').map(|(l, _)| l).unwrap_or("");
+            let base2 = n2.split_once('#').map(|(l, _)| l).unwrap_or("");
+            return base1 == base2 && n1 != n2;
+        }
+    }
+    false
 }
 
 // ── CapScope / ImplScope (v0.4.0) ─────────────────────────────────────────────
@@ -1064,6 +1103,10 @@ pub struct Checker {
     current_fn_has_ctx: bool,
     /// v45.5.0: inner types of opaque aliases — coercing the inner type to the opaque type is E0413.
     opaque_alias_inner: HashMap<String, Type>,
+    /// v71.2.0: refined alias constraints per function parameter: fn_name → [(param_idx, invariants)].
+    fn_alias_refinements: HashMap<String, Vec<(usize, Vec<Expr>)>>,
+    /// v71.4.0: compile-time constant values evaluated in the const pre-pass.
+    const_env: HashMap<String, StaticValue>,
 }
 
 impl Checker {
@@ -1113,6 +1156,8 @@ impl Checker {
             const_generics_registry: HashMap::new(),
             current_fn_has_ctx: false,
             opaque_alias_inner: HashMap::new(),
+            fn_alias_refinements: HashMap::new(),
+            const_env: HashMap::new(),
         }
     }
 
@@ -1165,6 +1210,8 @@ impl Checker {
             const_generics_registry: HashMap::new(),
             current_fn_has_ctx: false,
             opaque_alias_inner: HashMap::new(),
+            fn_alias_refinements: HashMap::new(),
+            const_env: HashMap::new(),
         }
     }
 
@@ -2256,6 +2303,93 @@ impl Checker {
     // ── first-pass: register top-level names (4-6..4-9) ─────────────────────
 
     fn register_item_signatures(&mut self, program: &Program) {
+        // v71.2.0: pre-pass — register refined alias invariants before processing FnDef items,
+        // so fn_alias_refinements is populated correctly regardless of declaration order.
+        for item in &program.items {
+            if let Item::TypeDef(td) = item {
+                if let TypeBody::Alias(_) = &td.body {
+                    if !td.is_opaque && !td.is_phantom && !td.invariants.is_empty() {
+                        self.type_invariants.insert(td.name.clone(), td.invariants.clone());
+                    }
+                }
+            }
+        }
+
+        // v71.4.0: const pre-pass — evaluate compile-time constants in declaration order.
+        // Uses a growing Lit map so that later consts can reference earlier ones
+        // (e.g. `const HALF_DIM: Int = EMBED_DIM / 2`).
+        {
+            let mut const_lit_values: HashMap<String, crate::ast::Lit> = HashMap::new();
+            for item in &program.items {
+                if let Item::ConstDef(cd) = item {
+                    let expected_ty = self.resolve_type_expr(&cd.ty);
+                    match self.eval_static_expr(&cd.value, &const_lit_values) {
+                        Some(val) => {
+                            let actual_ty = match &val {
+                                StaticValue::Int(_)    => Type::Int,
+                                StaticValue::Float(_)  => Type::Float,
+                                StaticValue::Bool(_)   => Type::Bool,
+                                StaticValue::String(_) => Type::String,
+                                StaticValue::Unit      => Type::Unit,
+                            };
+                            if !actual_ty.is_compatible(&expected_ty) {
+                                self.type_error(
+                                    "E0250",
+                                    format!(
+                                        "const `{}`: declared as `{}` but value has type `{}`",
+                                        cd.name,
+                                        expected_ty.display(),
+                                        actual_ty.display()
+                                    ),
+                                    &cd.span,
+                                );
+                            } else {
+                                // Convert to Lit for subsequent const references.
+                                let as_lit = match &val {
+                                    StaticValue::Int(n)    => crate::ast::Lit::Int(*n),
+                                    StaticValue::Float(f)  => crate::ast::Lit::Float(*f),
+                                    StaticValue::Bool(b)   => crate::ast::Lit::Bool(*b),
+                                    StaticValue::String(s) => crate::ast::Lit::Str(s.clone()),
+                                    StaticValue::Unit      => crate::ast::Lit::Unit,
+                                };
+                                const_lit_values.insert(cd.name.clone(), as_lit);
+                                self.const_env.insert(cd.name.clone(), val);
+                                self.env.define(cd.name.clone(), actual_ty);
+                            }
+                        }
+                        None => {
+                            // v71.4.0: distinguish undefined-const reference (E0247)
+                            // from non-static expression (E0250) for better diagnostics.
+                            let undefined_idents =
+                                Self::collect_undefined_idents(&cd.value, &const_lit_values);
+                            if !undefined_idents.is_empty() {
+                                for uname in &undefined_idents {
+                                    self.type_error(
+                                        "E0247",
+                                        format!(
+                                            "undefined const `{}` referenced in const `{}`",
+                                            uname, cd.name
+                                        ),
+                                        &cd.span,
+                                    );
+                                }
+                            } else {
+                                self.type_error(
+                                    "E0250",
+                                    format!(
+                                        "const `{}` cannot be evaluated at compile time \
+                                         (only literals and references to earlier constants are supported)",
+                                        cd.name
+                                    ),
+                                    &cd.span,
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         for item in &program.items {
             match item {
                 Item::TypeDef(td) => {
@@ -2267,11 +2401,36 @@ impl Checker {
                     );
                     // Type aliases: store the target TypeExpr for later resolution.
                     if let TypeBody::Alias(target) = &td.body {
+                        // v71.3.0: opaque and phantom are mutually exclusive (E0246).
+                        if td.is_opaque && td.is_phantom {
+                            self.type_error(
+                                "E0246",
+                                format!(
+                                    "type `{}` cannot be both `opaque` and `phantom`",
+                                    td.name
+                                ),
+                                &td.span,
+                            );
+                            continue;
+                        }
                         if td.is_opaque {
                             // v45.5.0: opaque alias — do NOT add to type_aliases so the name
                             // does not resolve transparently. Store the inner type for E0413.
                             let inner_ty = self.resolve_type_expr(target);
                             self.opaque_alias_inner.insert(td.name.clone(), inner_ty);
+                        } else if td.is_phantom {
+                            // v71.3.0: phantom type — register constructor Fn([inner], Named(name))
+                            // Do NOT add to type_aliases (phantom types are NOT transparent).
+                            let inner_ty = self.resolve_type_expr(target);
+                            let parent = Type::Named(td.name.clone(), vec![]);
+                            self.env.define(
+                                td.name.clone(),
+                                Type::Fn(vec![inner_ty], Box::new(parent)),
+                            );
+                            if !td.type_params.is_empty() {
+                                self.type_arity.insert(td.name.clone(), td.type_params.len());
+                            }
+                            continue;
                         } else {
                             self.type_aliases.insert(td.name.clone(), target.clone());
                         }
@@ -2388,6 +2547,22 @@ impl Checker {
                         .collect();
                     if !refinements.is_empty() {
                         self.fn_refinement_registry.insert(fd.name.clone(), refinements);
+                    }
+                    // v71.2.0: propagate alias refined type constraints for call-site checking.
+                    let alias_refs: Vec<(usize, Vec<Expr>)> = fd.params.iter().enumerate()
+                        .filter_map(|(idx, p)| {
+                            if let TypeExpr::Named(type_name, args, _) = &p.ty {
+                                if args.is_empty() {
+                                    if let Some(invariants) = self.type_invariants.get(type_name) {
+                                        return Some((idx, invariants.clone()));
+                                    }
+                                }
+                            }
+                            None
+                        })
+                        .collect();
+                    if !alias_refs.is_empty() {
+                        self.fn_alias_refinements.insert(fd.name.clone(), alias_refs);
                     }
                     // Infer call graph from fn body for transitive analysis.
                     let called_fns = infer_called_fns(fd);
@@ -2507,7 +2682,8 @@ impl Checker {
                 | Item::PipelineDef(..)
                 | Item::EffectDef(..)
                 | Item::SchemaDef(..)
-                | Item::CepPatternDef(..) => {} // v22.5.0/v35.5.0/v36.1.0/v42.1.0: スタブ
+                | Item::CepPatternDef(..)
+                | Item::ConstDef(..) => {} // v22.5.0/v35.5.0/v36.1.0/v42.1.0/v71.4.0: スタブ / pre-pass 済み
                 Item::InterfaceDecl(decl) => {
                     self.remember_global_symbol(
                         decl.name.clone(),
@@ -2552,6 +2728,7 @@ impl Checker {
             Item::EffectDef(_) => {} // v35.5.0: effect declarations are no-ops
             Item::SchemaDef(_) => {} // v36.1.0: 型チェックは v36.2 以降
             Item::CepPatternDef(cd) => self.check_cep_pattern_def(cd), // v42.3.0
+            Item::ConstDef(_) => {} // v71.4.0: already handled in const pre-pass of register_item_signatures
         }
     }
 
@@ -2611,6 +2788,30 @@ impl Checker {
                 }
             }
             self.env.pop();
+        }
+
+        // v71.2.0: alias type where-constraint type-check (non-opaque, non-phantom only)
+        if let TypeBody::Alias(target) = &td.body {
+            if !td.is_opaque && !td.is_phantom && !td.invariants.is_empty() {
+                self.env.push();
+                let target_ty = self.resolve_type_expr(target);
+                self.env.define("self".to_string(), target_ty);
+                for invariant in &td.invariants {
+                    let inv_ty = self.check_expr(invariant);
+                    if !inv_ty.is_compatible(&Type::Bool) {
+                        self.type_error(
+                            "E0245",
+                            format!(
+                                "`where` constraint for type `{}` must be of type Bool, got `{}`",
+                                td.name,
+                                inv_ty.display()
+                            ),
+                            invariant.span(),
+                        );
+                    }
+                }
+                self.env.pop();
+            }
         }
 
         // Type definitions are structurally valid if they parsed correctly.
@@ -2925,6 +3126,7 @@ impl Checker {
             with_interfaces: vec![],
             invariants: vec![],
             is_opaque: false,
+            is_phantom: false,
             body,
             span: span.clone(),
         };
@@ -4490,6 +4692,31 @@ impl Checker {
         Some(true)
     }
 
+    /// v71.4.0: Collect identifiers in `expr` that are not in `known_consts`.
+    /// Used to distinguish E0247 (undefined const) from E0250 (non-static expr).
+    fn collect_undefined_idents(expr: &Expr, known_consts: &HashMap<String, Lit>) -> Vec<String> {
+        let mut undefined = Vec::new();
+        Self::walk_expr_idents(expr, known_consts, &mut undefined);
+        undefined.dedup();
+        undefined
+    }
+
+    fn walk_expr_idents(expr: &Expr, known: &HashMap<String, Lit>, out: &mut Vec<String>) {
+        match expr {
+            Expr::Ident(name, _) => {
+                if !known.contains_key(name) {
+                    out.push(name.clone());
+                }
+            }
+            Expr::BinOp(_, lhs, rhs, _) => {
+                Self::walk_expr_idents(lhs, known, out);
+                Self::walk_expr_idents(rhs, known, out);
+            }
+            Expr::Lit(_, _) => {}
+            _ => {} // non-static sub-expressions: not an undefined ident, fall through to E0250
+        }
+    }
+
     fn eval_static_expr(&self, expr: &Expr, values: &HashMap<String, Lit>) -> Option<StaticValue> {
         match expr {
             Expr::Lit(lit, _) => Some(StaticValue::from_lit(lit.clone())),
@@ -4948,7 +5175,10 @@ impl Checker {
                                 match unify(&ap, &aa) {
                                     Ok(s) => subst = s.compose(subst),
                                     Err(msg) => {
-                                        let code = if msg.contains("infinite type") {
+                                        // v71.1.0: E0421 — dependent type dimension mismatch
+                                        let code = if is_dim_annotated_name_mismatch(&ap, &aa) {
+                                            "E0421"
+                                        } else if msg.contains("infinite type") {
                                             "E0219"
                                         } else {
                                             "E0218"
@@ -5017,6 +5247,34 @@ impl Checker {
                                                             span,
                                                         );
                                                     }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                                // v71.2.0: alias refined type constraint check (E0425).
+                                if let Some(alias_refinements) = self.fn_alias_refinements.get(&fn_name).cloned() {
+                                    for (param_idx, invariants) in &alias_refinements {
+                                        if let Some(arg_expr) = args.get(*param_idx) {
+                                            if let Some(static_val) = self.eval_static_expr(arg_expr, &HashMap::new()) {
+                                                let lit = match static_val {
+                                                    StaticValue::Int(v) => Lit::Int(v),
+                                                    StaticValue::Float(v) => Lit::Float(v),
+                                                    StaticValue::Bool(v) => Lit::Bool(v),
+                                                    StaticValue::String(v) => Lit::Str(v),
+                                                    StaticValue::Unit => Lit::Unit,
+                                                };
+                                                let mut values = HashMap::new();
+                                                values.insert("self".to_string(), lit);
+                                                let violated = invariants.iter().any(|inv| {
+                                                    matches!(self.eval_static_expr(inv, &values), Some(StaticValue::Bool(false)))
+                                                });
+                                                if violated {
+                                                    self.type_error(
+                                                        "E0425",
+                                                        "literal does not satisfy refined type constraint".to_string(),
+                                                        arg_expr.span(),
+                                                    );
                                                 }
                                             }
                                         }

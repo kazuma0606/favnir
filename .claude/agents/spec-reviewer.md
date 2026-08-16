@@ -24,6 +24,7 @@ versions/v50-v55/<version>/
 versions/v55-v60/<version>/
 versions/v60-v65/<version>/
 versions/v65-v70/<version>/
+versions/v70-v75/<version>/
 ```
 例: `v35.0B` なら `versions/v30-v35/v35.0B/` を、`v69.3.0` なら `versions/v65-v70/v69.3.0/` を探す。
 見つからない場合は `versions/` 配下を Glob で広く検索すること。

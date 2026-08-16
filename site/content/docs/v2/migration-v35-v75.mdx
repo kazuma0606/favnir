@@ -1,0 +1,39 @@
+---
+title: Migration Guide v35 to v75
+---
+
+# Migration Guide — v35 → v75
+
+v35 から v75 への移行手順。
+
+## 主な変更点
+
+### `!Effect` 構文の廃止（v35.4.0〜）
+
+`!IO` / `!Http` 等の `!Effect` 構文は v35.4.0 でハードエラー（E0374）化された。
+`ctx.field.method()` 構文に移行すること。
+
+```favnir
+# 旧: v35 以前
+fn fetch() -> String !Http { ... }
+
+# 新: v75
+fn fetch(ctx: AppCtx) -> String { ctx.http.get("...") }
+```
+
+### `bind` 再束縛禁止（v12.1.0〜、E0018）
+
+同一スコープで同じ変数名への再代入は E0018 エラーになる。
+
+### `ctx.field.method()` 構文（v13.6.0〜）
+
+コンテキスト依存の副作用は `ctx` 経由でアクセスする。
+
+## バージョン対応表
+
+| 機能 | 対応バージョン |
+|---|---|
+| `!Effect` 廃止 | v35.4.0 |
+| `ctx` 構文 | v13.6.0〜 |
+| `bind` 制限 | v12.1.0〜 |
+| Self-hosted 完成 | v9.0.0 |

@@ -112,7 +112,28 @@
       "Bash(git -C \"C:\\\\Users\\\\yoshi\\\\favnir\" status fav/src/main.rs)",
       "Bash(git -C \"C:\\\\Users\\\\yoshi\\\\favnir\" diff HEAD -- fav/src/main.rs)",
       "Bash(./target/debug/fav migrate:*)",
-      "Bash(grep:*)"
+      "Bash(grep:*)",
+      "Bash(printf 'fn main\\(ctx: AppCtx\\) -> Result<Unit, String> {\\\\n    ctx.io\\\\n}')",
+      "Bash(./target/debug/fav.exe run:*)",
+      "Bash(printf 'fn main\\(ctx: AppCtx\\) -> Result<Unit, String> {\\\\n    ctx.io.println\\(\"\"hello\"\"\\)\\\\n}')",
+      "Bash(printf 'fn myf\\(x: String\\) -> String {\\\\n    x.len\\\\n}')",
+      "Bash(printf 'fn myf\\(x: String\\) -> String {\\\\n    x.trim\\(\\)\\\\n}\\\\nfn main\\(\\) -> Bool { true }')",
+      "Bash(printf 'fn myf\\(x: String\\) -> String {\\\\n    x.foo.bar\\(\\)\\\\n}\\\\nfn main\\(\\) -> Bool { true }')",
+      "Bash(printf 'fn myf\\(x: String\\) -> String {\\\\n    x.foo.bar\\\\n}\\\\nfn main\\(\\) -> Bool { true }')",
+      "Bash(printf 'fn myf\\(x: String\\) -> String {\\\\n    x.bar\\(\\)\\\\n}\\\\nfn main\\(\\) -> Bool { true }')",
+      "Bash(printf 'fn myf\\(x: String, y: String\\) -> String {\\\\n    x\\\\n}\\\\nfn main\\(\\) -> Bool {\\\\n    myf\\(String.concat\\(\"\"a\"\", \"\"b\"\"\\), \"\"c\"\"\\) == \"\"a\"\"\\\\n}')",
+      "Bash(printf 'fn myf\\(x: String, y: String\\) -> String {\\\\n    x\\\\n}\\\\nfn main\\(\\) -> Bool {\\\\n    myf\\(\"\"a\"\".concat\\(\"\"b\"\"\\), \"\"c\"\"\\) == \"\"a\"\"\\\\n}')",
+      "Bash(printf 'fn test\\(r: AppCtx\\) -> String {\\\\n    r.foo.bar\\(\"\"x\"\"\\)\\\\n}\\\\nfn main\\(\\) -> Bool { true }')",
+      "Bash(printf 'type MyR = { foo: String }\\\\nfn test\\(r: MyR\\) -> String {\\\\n    r.foo.concat\\(\"\"x\"\"\\)\\\\n}\\\\nfn main\\(\\) -> Bool { true }')",
+      "Bash(printf 'fn myf\\(x: String, n: Int\\) -> String {\\\\n    x.slice.concat\\(\"\"!\"\"\\)\\\\n}\\\\nfn main\\(\\) -> Bool { true }')",
+      "Bash(printf 'fn helper\\(ctx: AppCtx, data: String\\) -> Result<Unit, String> {\\\\n    ctx.io.println\\(data\\)\\\\n}\\\\nfn main\\(ctx: AppCtx\\) -> Result<Unit, String> {\\\\n    helper\\(ctx, \"\"hello\"\"\\)\\\\n}')",
+      "Bash(grep -n \"\"\"E0423\"\"\" src/error_catalog.rs)",
+      "Bash(do echo:*)",
+      "Bash(cat:*)",
+      "Bash(grep -c '\"\"78\\\\.9\\\\.0\"\"' /c/Users/yoshi/favnir/fav/src/driver.rs)",
+      "Bash(grep -c '\"\"79\\\\.0\\\\.0\"\"' /c/Users/yoshi/favnir/fav/src/driver.rs)",
+      "Bash(python3:*)",
+      "Bash(python3 -c \":*)"
     ]
   }
 }

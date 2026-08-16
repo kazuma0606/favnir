@@ -1,0 +1,24 @@
+# v2 → v3 移行ガイド
+
+Favnir v2（v75.0）から v3（v80.0）への移行手順を説明します。
+
+## 主な変更点
+
+| 機能 | v2 | v3 |
+|---|---|---|
+| 時間処理 | 手動 | Temporal（FreshnessPolicy / AsOfQuery）|
+| データ来歴 | なし | Provenance（TracedData / DataSource）|
+| 不変条件 | なし | Verifiable（contract / invariant）|
+| 実行戦略 | 固定 | Execution Effects（!Adaptive / !Cached）|
+
+## 移行手順
+
+1. `ctx.run_ts` を使って時刻依存処理を Temporal に移行する
+2. `TracedData.wrap` でデータ来歴を記録する
+3. `contract` ブロックで不変条件を定義する
+4. `!Adaptive !Cached` エフェクトで実行戦略を指定する
+
+## 参考
+
+- [Temporal リファレンス](temporal.mdx)
+- [Favnir 3.0 ショーケース](../../infra/e2e-demo/favnir3-showcase/)

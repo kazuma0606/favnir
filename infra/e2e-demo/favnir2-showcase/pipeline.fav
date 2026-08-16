@@ -1,0 +1,20 @@
+// v74.8.0 Showcase: Favnir 2.0 統合デモ
+// 使用機能: v71 依存型 / v72 データコントラクト・SLA / v73 AI / v74 マルチテナント
+
+import rune "privacy"
+import rune "linalg"
+import "contract.fav"
+
+contract ShowcaseContract {
+    input:  { text: NonEmptyStr, tenant_id: String }
+    output: { vector: Vec<Float>[1536], score: Float where self >= 0.0 }
+    sla:    { max_latency_ms: 3000 }
+}
+
+fn main(ctx: AppCtx) -> Result<Unit, String> {
+    bind rows  <- ctx.io.read_file_raw("data/input.csv")
+    bind clean <- Rune.privacy.mask(rows, fields: ["email"])
+    bind embed <- OpenAI.embed_batch(clean)
+    bind score <- Rune.linalg.cosine_sim(embed, ctx.tenant.ref_vector)
+    Result.ok(ctx.io.println(f"Done. mean_score={Float.mean(score)}"))
+}

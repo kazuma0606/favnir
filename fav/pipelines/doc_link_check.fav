@@ -1,0 +1,4 @@
+// Dogfooding pipeline: detect broken links in MDX documentation files
+fn main() -> String {
+    "doc_link_check"
+}

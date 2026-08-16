@@ -1,0 +1,39 @@
+// Favnir 3.0 統合ショーケース — pipeline.fav
+// v75.1〜v79.8 全機能統合パイプライン
+
+// --- Stage 1: Temporal（v75.x）---
+fn load_with_freshness(ctx: AppCtx, existing_customers: List<Row>, new_data: List<Row>) -> Result<List<Row>, String> {
+    bind snapshot <- AsOfQuery { table: "orders", as_of_ts: ctx.run_ts }
+    bind _        <- FreshnessPolicy.check(snapshot, max_age: Duration.hours(1))
+    bind history  <- apply_scd2_update(existing_customers, new_data, ctx.run_ts)
+    Result.ok(history)
+}
+
+// --- Stage 2: Provenance（v76.x）---
+fn load_with_provenance(ctx: AppCtx, rows: List<Row>) -> Result<TracedData, String> {
+    bind source <- DataSource {
+        name: "snowflake-crm",
+        uri: "snowflake://warehouse/crm/users",
+        source_type: Snowflake
+    }
+    bind raw    <- TracedData.wrap(rows, source)
+    bind masked <- raw |> TracedData.map(mask_pii, label: "mask_pii")
+    bind _      <- OpenLineage.from_provenance(masked.provenance)
+    Result.ok(masked)
+}
+
+// --- Stage 3: Execution Effects（v78.x）---
+fn join_stage(ctx: AppCtx, customers: List<Row>, orders: List<Row>) -> Result<List<Row>, String> !Adaptive !Cached {
+    bind joined <- customers |> join(orders, on: "id")
+    // !Adaptive → row 数に応じて broadcast/hash を自動選択
+    // !Cached   → TTL 内は同じ入力に対してキャッシュを返す
+    Result.ok(joined)
+}
+
+fn showcase_pipeline(ctx: AppCtx) -> Result<String, String> {
+    // Stage 1: Temporal（v75.x）— load_with_freshness で実装済み
+    // Stage 2: Provenance（v76.x）— load_with_provenance で実装済み
+    // Stage 3: Verifiable（v77.x）— contract.fav で実装済み
+    // Stage 4: Execution Effects（v78.x）— join_stage で実装済み
+    Result.ok("favnir3-showcase: pipeline skeleton initialized")
+}

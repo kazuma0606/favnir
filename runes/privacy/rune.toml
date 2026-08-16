@@ -1,0 +1,4 @@
+[rune]
+name = "privacy"
+version = "0.1.0"
+description = "PII detection and masking for Favnir pipelines"

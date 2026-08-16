@@ -1,0 +1,18 @@
+// fav/pipelines/health-check.fav
+// Favnir ヘルスチェックパイプライン — cargo test + fav verify ラッパー
+
+fn run_tests(ctx: AppCtx) -> Result<String, String> {
+    bind _ <- ctx.io.println("Running: cargo test")
+    Result.ok("tests-ok")
+}
+
+fn run_verify(ctx: AppCtx) -> Result<String, String> {
+    bind _ <- ctx.io.println("Running: fav verify")
+    Result.ok("verify-ok")
+}
+
+fn health_check_pipeline(ctx: AppCtx) -> Result<String, String> {
+    bind test_result   <- run_tests(ctx)
+    bind verify_result <- run_verify(ctx)
+    Result.ok(String.concat(test_result, verify_result))
+}

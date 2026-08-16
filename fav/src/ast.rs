@@ -143,10 +143,26 @@ impl TypeExpr {
     /// v56.3.0: human-readable display string (used in LSP hover / tests).
     pub fn display(&self) -> String {
         match self {
-            TypeExpr::Named(name, args, _) if args.is_empty() => name.clone(),
             TypeExpr::Named(name, args, _) => {
-                let s: Vec<_> = args.iter().map(|a| a.display()).collect();
-                format!("{}<{}>", name, s.join(", "))
+                // v71.1.0: decode dimension-encoded names (e.g. `Vec#1536` → `Vec[1536]`)
+                let (base, dim_suffix) = if let Some(idx) = name.find('#') {
+                    let base = &name[..idx];
+                    let dim_raw = &name[idx + 1..];
+                    let dim = if let Some(var) = dim_raw.strip_prefix('?') {
+                        format!("[{}]", var)
+                    } else {
+                        format!("[{}]", dim_raw)
+                    };
+                    (base.to_string(), dim)
+                } else {
+                    (name.clone(), String::new())
+                };
+                if args.is_empty() {
+                    format!("{}{}", base, dim_suffix)
+                } else {
+                    let s: Vec<_> = args.iter().map(|a| a.display()).collect();
+                    format!("{}<{}>{}", base, s.join(", "), dim_suffix)
+                }
             }
             TypeExpr::RecordType(fields, row_var, _) => {
                 let field_strs: Vec<_> = fields
@@ -234,6 +250,7 @@ pub struct TypeDef {
     pub with_interfaces: Vec<String>,
     pub invariants: Vec<Expr>,
     pub is_opaque: bool,   // v43.11.0: opaque type キーワード（デフォルト false）
+    pub is_phantom: bool,  // v71.3.0: phantom type キーワード（デフォルト false）
     pub body: TypeBody,
     pub span: Span,
 }
@@ -1007,6 +1024,8 @@ pub enum Item {
     SchemaDef(SchemaDef),
     /// `cep pattern Name { ... }` — CEP パターン宣言 (v42.1.0)
     CepPatternDef(CepPatternDef),
+    /// `const NAME: Type = expr` — コンパイル時定数宣言（v71.4.0）
+    ConstDef(ConstDef),
 }
 
 // ── CepPatternDef (v42.1.0) ──────────────────────────────────────────────────
@@ -1037,6 +1056,17 @@ pub struct CepClause {
 pub struct CepPatternDef {
     pub name: String,
     pub body: Vec<CepClause>,
+    pub span: Span,
+}
+
+// ── ConstDef (v71.4.0) ───────────────────────────────────────────────────────
+
+/// `const NAME: Type = expr` — コンパイル時定数宣言（v71.4.0）
+#[derive(Debug, Clone)]
+pub struct ConstDef {
+    pub name: String,
+    pub ty: TypeExpr,
+    pub value: Expr,
     pub span: Span,
 }
 
@@ -1087,6 +1117,7 @@ impl Item {
             Item::PipelineDef(pd) => &pd.span,
             Item::SchemaDef(s) => &s.span,
             Item::CepPatternDef(c) => &c.span,
+            Item::ConstDef(c) => &c.span,  // v71.4.0
         }
     }
 }

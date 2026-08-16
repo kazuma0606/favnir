@@ -107,7 +107,7 @@ use driver::{
     cmd_explain_error_list, cmd_explain_error_list_json, cmd_explain_lineage, cmd_explain_sla, cmd_explain_types, cmd_fmt, cmd_graph,
     cmd_infer, cmd_infer_delta, cmd_infer_iceberg, cmd_infer_postgres, cmd_infer_proto, cmd_infer_snowflake, cmd_install, cmd_install_runes, cmd_lint, cmd_validate, cmd_contract_check, cmd_schema_diff, cmd_schema_migrate, cmd_catalog_push, cmd_catalog_search, cmd_policy_check_file, cmd_policy_list, inject_env_config, cmd_ha_run, cmd_migrate, cmd_upgrade, cmd_new, cmd_new_list,
     cmd_monitor, cmd_profile, cmd_profile_build, cmd_profile_compare, cmd_scaffold, cmd_transpile,
-    cmd_certify, generate_enterprise_cert, cmd_marketplace_list, cmd_marketplace_publish, cmd_migrate_dry_run, cmd_migrate_ai, migrate_enterprise_import, cmd_publish, cmd_registry, cmd_repl, cmd_run, cmd_search, cmd_sla_report, cmd_test, cmd_test_enterprise, cmd_watch,
+    cmd_certify, generate_enterprise_cert, cmd_marketplace_list, cmd_marketplace_publish, cmd_migrate_dry_run, cmd_migrate_ai, migrate_enterprise_import, cmd_publish, cmd_registry, cmd_repl, cmd_run, cmd_search, cmd_sla_report, cmd_test, cmd_test_enterprise, cmd_watch, cmd_watch2, cmd_learn,
     cmd_add, cmd_update, cmd_remove, cmd_login, cmd_info,
     cmd_generate_api, cmd_api_serve,
     cmd_ci_init,
@@ -739,6 +739,7 @@ fn main_impl() {
         Some("build") => {
             let mut out: Option<&str> = None;
             let mut target: Option<&str> = None;
+            let mut arch: Option<&str> = None; // v71.6.0: --arch <arm64|aarch64>
             let mut file: Option<&str> = None;
             let mut link = false;
             let mut aot_stats = false;
@@ -793,6 +794,14 @@ fn main_impl() {
                     "--target" => {
                         target = Some(args.get(i + 1).unwrap_or_else(|| {
                             eprintln!("error: --target requires a value");
+                            process::exit(1);
+                        }));
+                        i += 2;
+                    }
+                    "--arch" => {
+                        // v71.6.0: cross-compile target architecture for --target native
+                        arch = Some(args.get(i + 1).unwrap_or_else(|| {
+                            eprintln!("error: --arch requires a value (e.g. arm64, aarch64)");
                             process::exit(1);
                         }));
                         i += 2;
@@ -874,7 +883,15 @@ fn main_impl() {
                 });
                 cmd_build_schema(f, out);
             } else {
-                cmd_build(file, out, target);
+                // v71.6.0: --arch は --target native 専用。他ターゲットで指定された場合に警告する。
+                if arch.is_some() && !matches!(target, Some("native")) {
+                    eprintln!(
+                        "warning: --arch is only effective with --target native; \
+                         it will be ignored for target `{}`",
+                        target.unwrap_or("fvc")
+                    );
+                }
+                cmd_build(file, out, target, arch);
             }
         }
 
@@ -921,6 +938,7 @@ fn main_impl() {
             let mut show_effects = false;
             let mut show_inference = false;
             let mut explain = false;
+            let mut ai_explain = false;
             let mut refresh_schemas = false;
             let mut strict = false;
             let mut ambient = false;
@@ -958,6 +976,10 @@ fn main_impl() {
                     }
                     "--explain" => {
                         explain = true;
+                        i += 1;
+                    }
+                    "--ai-explain" => {
+                        ai_explain = true;
                         i += 1;
                     }
                     "--refresh-schemas" => {
@@ -1022,6 +1044,12 @@ fn main_impl() {
                 driver::cmd_check_all(json);
             } else {
                 cmd_check(file, no_warn, legacy_check, json, show_types, strict, ambient, report, show_effects, refresh_schemas, show_inference, explain);
+                if ai_explain {
+                    let path = file.unwrap_or("pipeline.fav");
+                    // v72.2.0: 静的ヒントマップのみ（エラーコード自動検出は v72.3.0 以降）
+                    eprintln!("note: --ai-explain currently shows E0374 hint regardless of check result");
+                    driver::cmd_ai_explain(path, "E0374");
+                }
             }
         }
 
@@ -1665,7 +1693,12 @@ fn main_impl() {
                         i += 1;
                     }
                     "--all" => {
-                        // v54.3.0: --all は file 省略と等価（プロジェクト全体を走査）
+                        // v70.3.0: --all → built-in intrinsic benchmarks
+                        opts.all = true;
+                        i += 1;
+                    }
+                    "--emit-md" => {
+                        opts.emit_md = true;
                         i += 1;
                     }
                     "--threshold" => {
@@ -1690,10 +1723,34 @@ fn main_impl() {
                     }
                 }
             }
-            let ok = cmd_bench(&opts);
-            if !ok && opts.fail_on_regression {
-                process::exit(1);
+            // v70.3.0: --all → built-in intrinsic benchmarks
+            if opts.all {
+                let all_json = driver::cmd_bench_all();
+                if let Some(cp) = opts.compare.as_deref() {
+                    let baseline = std::fs::read_to_string(cp).unwrap_or_else(|e| {
+                        eprintln!("error: cannot read baseline {cp}: {e}");
+                        process::exit(1);
+                    });
+                    let (ok, report) = driver::cmd_bench_compare(&baseline, &all_json, opts.threshold, opts.emit_md);
+                    println!("{report}");
+                    if !ok && opts.fail_on_regression {
+                        process::exit(1);
+                    }
+                } else {
+                    println!("{all_json}");
+                }
+            } else {
+                let ok = cmd_bench(&opts);
+                if !ok && opts.fail_on_regression {
+                    process::exit(1);
+                }
             }
+        }
+
+        // ── v70.7.0: fav self-coverage ───────────────────────────────────────
+        Some("self-coverage") => {
+            let report = driver::compute_self_coverage();
+            println!("{}", driver::format_self_coverage(&report));
         }
 
         // ── v54.5.0: fav doctor ──────────────────────────────────────────────
@@ -1721,6 +1778,24 @@ fn main_impl() {
         }
 
         Some("watch") => {
+            // v72.7.0: --on-change フラグがある場合は cmd_watch2 を使用
+            // 使用例: fav watch pipeline.fav --on-change "fav check && fav run --dry-run"
+            // 注意: --on-change はファイルパスの後に置くこと
+            if let Some(pos) = args.iter().position(|a| a == "--on-change") {
+                let on_change = match args.get(pos + 1).map(|s| s.as_str()) {
+                    Some(v) if !v.is_empty() && !v.starts_with("--") => v,
+                    _ => {
+                        eprintln!("error: --on-change requires a non-empty command string");
+                        process::exit(1);
+                    }
+                };
+                // ファイルパスは args[2] から取得（--on-change より前の位置を想定）
+                let file = args.get(2).and_then(|s| {
+                    if s.starts_with("--") { None } else { Some(s.as_str()) }
+                });
+                cmd_watch2(file, on_change, 500);
+                return;
+            }
             let mut cmd = String::from("check");
             let mut file: Option<String> = None;
             let mut dirs: Vec<String> = Vec::new();
@@ -2151,6 +2226,10 @@ fn main_impl() {
 
         Some("repl") => {
             cmd_repl();
+        }
+
+        Some("learn") => {
+            cmd_learn();
         }
 
         Some("profile") => {
@@ -3460,6 +3539,50 @@ fn main_impl() {
                 }
                 _ => {
                     eprintln!("error: unknown sla subcommand '{}' (available: report)", sub);
+                    process::exit(1);
+                }
+            }
+        }
+
+        // ── v72.2.0: fav ai explain / fav ai fix ─────────────────────────────
+        Some("ai") => {
+            let sub = args.get(2).map(|s| s.as_str()).unwrap_or("");
+            match sub {
+                "explain" => {
+                    // path はハイフンで始まらない最初の引数（フラグ順序に依存しない）
+                    let path = args.iter().skip(3)
+                        .find(|a| !a.starts_with('-'))
+                        .map(|s| s.as_str())
+                        .unwrap_or("pipeline.fav");
+                    let error_code = args.iter()
+                        .position(|a| a == "--error-code")
+                        .and_then(|i| args.get(i + 1))
+                        .map(|s| s.as_str())
+                        .unwrap_or("E0374");
+                    driver::cmd_ai_explain(path, error_code);
+                }
+                "fix" => {
+                    let path = args.get(3).map(|s| s.as_str()).unwrap_or_else(|| {
+                        eprintln!("error: fav ai fix requires <path>");
+                        process::exit(1);
+                    });
+                    if let Err(e) = driver::cmd_ai_fix(path) {
+                        eprintln!("Error: {e}");
+                        process::exit(1);
+                    }
+                }
+                "generate" => {
+                    let description: String = args.iter().skip(3).cloned().collect::<Vec<_>>().join(" ");
+                    let desc = if description.is_empty() { "default pipeline" } else { &description };
+                    println!("Generating pipeline...\n");
+                    let code = driver::cmd_ai_generate(desc);
+                    println!("{code}");
+                }
+                _ => {
+                    eprintln!("error: fav ai requires 'explain', 'fix', or 'generate'");
+                    eprintln!("  fav ai explain <path> [--error-code <code>]");
+                    eprintln!("  fav ai fix <path>");
+                    eprintln!("  fav ai generate <description>");
                     process::exit(1);
                 }
             }

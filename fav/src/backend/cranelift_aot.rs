@@ -123,6 +123,9 @@ impl CraneliftBackend {
             let stderr = String::from_utf8_lossy(&output.stderr);
             return Err(format!("linker error:\n{stderr}"));
         }
+        // v71.6.0: strip でデバッグシンボルを除去してバイナリサイズを削減。
+        // strip が存在しない環境（Windows 等）では Result を無視して続行する。
+        let _ = std::process::Command::new("strip").arg(out_path).output();
         Ok(())
     }
 
@@ -204,6 +207,40 @@ impl CraneliftBackend {
     /// `fav build --link` の driver.rs テストエントリポイント。
     pub(crate) fn compile_to_binary_pub(ir: &IRProgram, out_path: &str) -> Result<(), String> {
         Self::compile_to_binary(ir, out_path)
+    }
+
+    /// v71.6.0: アーキテクチャ文字列を Cranelift target triple に変換する。
+    /// サポート対象: `"arm64"` / `"aarch64"` のみ（→ `"aarch64-unknown-linux-gnu"`）。
+    /// 未知のアーキテクチャは `None` を返す。呼び出し側が警告を出すこと。
+    pub(crate) fn arch_to_triple(arch: &str) -> Option<&'static str> {
+        match arch {
+            "arm64" | "aarch64" => Some("aarch64-unknown-linux-gnu"),
+            _ => None,
+        }
+    }
+
+    /// v71.6.0: arch 指定付き compile_to_binary。
+    /// - `arch = None` → ホスト ISA（既存の `compile_to_binary` と同等）
+    /// - `arch = Some("arm64")` | `Some("aarch64")` → `aarch64-unknown-linux-gnu`
+    /// - `arch = Some(unknown)` → stderr に警告を出しホスト ISA にフォールバック
+    pub(crate) fn compile_to_binary_for_arch(
+        ir: &IRProgram,
+        out_path: &str,
+        arch: Option<&str>,
+    ) -> Result<(), String> {
+        let triple = arch.and_then(|a| {
+            let t = Self::arch_to_triple(a);
+            if t.is_none() {
+                eprintln!(
+                    "warning: unsupported --arch `{a}`; supported: arm64, aarch64. \
+                     Falling back to host ISA."
+                );
+            }
+            t
+        });
+        let obj_bytes = Self::lower_to_object_with_target(ir, triple)?;
+        let wrapper_src = Self::c_wrapper_src();
+        Self::link_binary(&obj_bytes, &wrapper_src, out_path)
     }
 
     /// v62.4.0: 各関数の AOT 純粋性を分析し、インライン候補とディスパッチ対象に分類する。

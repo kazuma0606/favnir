@@ -1,0 +1,47 @@
+name: Setup Favnir
+description: Install the fav compiler from GitHub Releases
+inputs:
+  version:
+    description: Favnir version to install (e.g. "75.0.0") or "latest"
+    required: true
+    default: latest
+runs:
+  using: composite
+  steps:
+    - name: Download fav binary
+      shell: bash
+      run: |
+        VERSION="${{ inputs.version }}"
+
+        # Validate version to prevent shell injection
+        if [ "$VERSION" != "latest" ]; then
+          if ! echo "$VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "Error: invalid version format '$VERSION'. Expected X.Y.Z or 'latest'." >&2
+            exit 1
+          fi
+        fi
+
+        # Detect OS
+        UNAME_OS=$(uname -s)
+        case "$UNAME_OS" in
+          Linux*)   OS="linux" ;;
+          Darwin*)  OS="darwin" ;;
+          MINGW*|MSYS*|CYGWIN*) OS="windows" ;;
+          *)        echo "Unsupported OS: $UNAME_OS" >&2; exit 1 ;;
+        esac
+
+        # Detect arch
+        ARCH=$(uname -m)
+
+        # Build download URL
+        if [ "$VERSION" = "latest" ]; then
+          BASE="https://github.com/favnir/favnir/releases/latest/download"
+        else
+          BASE="https://github.com/favnir/favnir/releases/download/v${VERSION}"
+        fi
+
+        BIN_NAME="fav-${OS}-${ARCH}"
+        URL="${BASE}/${BIN_NAME}"
+
+        curl -fsSL "$URL" -o fav && chmod +x fav
+        echo "$(pwd)" >> "$GITHUB_PATH"

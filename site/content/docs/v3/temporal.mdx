@@ -1,0 +1,33 @@
+# Temporal（時間型データ処理）
+
+Favnir 3.0 の Temporal 機能は、時刻・鮮度・履歴を型として表現します。
+
+## FreshnessPolicy
+
+データの鮮度を `max_age` で制約します:
+
+```favnir
+bind _ <- FreshnessPolicy.check(snapshot, max_age: Duration.hours(1))
+```
+
+鮮度が `max_age` を超えた場合は `Result.err` が返り、パイプラインは停止します。
+
+## AsOfQuery
+
+特定時刻時点のスナップショットを取得します:
+
+```favnir
+bind snapshot <- AsOfQuery { table: "orders", as_of_ts: ctx.run_ts }
+```
+
+`ctx.run_ts` には実行時刻が自動的に設定されます。
+
+## SCD2（緩やかに変化するディメンジョン）
+
+履歴を保持しながらレコードを更新します:
+
+```favnir
+bind history <- apply_scd2_update(existing_customers, new_data, ctx.run_ts)
+```
+
+SCD2 は有効期間（`valid_from` / `valid_to`）を自動管理し、過去の状態を参照可能にします。

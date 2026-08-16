@@ -1,0 +1,4 @@
+// Dogfooding pipeline: generate test coverage report and notify via Slack
+fn main() -> String {
+    "coverage_report"
+}

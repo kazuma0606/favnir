@@ -1,0 +1,4 @@
+// Dogfooding pipeline: aggregate benchmark results and visualize trends
+fn main() -> String {
+    "benchmark_analytics"
+}

@@ -1,0 +1,61 @@
+---
+title: Language Reference
+---
+
+# Language Reference
+
+Favnir の全構文一覧。
+
+## bind
+
+変数束縛。同一スコープでの再束縛は禁止（E0018）。
+
+```favnir
+bind x <- expr
+```
+
+## stage
+
+パイプラインのステージ定義。
+
+```favnir
+stage Name {
+  bind result <- compute()
+  result
+}
+```
+
+## par
+
+並列ステージ実行。
+
+```favnir
+par [StageA, StageB] |> Merge
+```
+
+## interface / impl
+
+インターフェース定義と実装。
+
+```favnir
+interface Readable {
+  fn read(ctx: AppCtx) -> List<Row>
+}
+```
+
+## ctx
+
+コンテキスト経由の副作用アクセス。
+
+```favnir
+ctx.io.println("hello")
+ctx.http.get("https://example.com")
+ctx.db.query("SELECT ...")
+```
+
+## Rune インポート
+
+```favnir
+use rune json
+use rune csv
+```

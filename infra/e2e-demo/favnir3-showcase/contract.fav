@@ -1,0 +1,28 @@
+// Favnir 3.0 統合ショーケース — contract.fav
+// 全スプリント（Temporal + Provenance + Verifiable + Execution Effects）の統合コントラクト
+
+type ShowcaseContract3 {
+    pipeline_name: String,
+    temporal_enabled: Bool,
+    provenance_enabled: Bool,
+    verifiable_enabled: Bool,
+    execution_effects_enabled: Bool
+}
+
+fn validate_showcase_contract(c: ShowcaseContract3) -> Bool {
+    c.temporal_enabled &&
+    c.provenance_enabled &&
+    c.verifiable_enabled &&
+    c.execution_effects_enabled
+}
+
+// --- Verifiable セクション（v77.x）---
+contract Favnir3ShowcaseContract {
+    input:     { rows: List<Row> }
+    output:    { processed: List<Row> }
+    invariant: output.row_count <= input.row_count
+    invariant: SUM(output.amount) >= 0.0
+    probabilistic_invariant score_dist:
+        confidence: 0.95, sample_size: 1000,
+        property: AVG(score) BETWEEN 40.0 AND 60.0
+}

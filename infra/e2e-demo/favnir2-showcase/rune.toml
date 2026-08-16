@@ -1,0 +1,7 @@
+[rune]
+name = "showcase"
+version = "1.0.0"
+
+[dependencies]
+privacy = "1.0.0"
+linalg = "1.0.0"

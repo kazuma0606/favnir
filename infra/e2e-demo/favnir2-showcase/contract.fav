@@ -1,0 +1,5 @@
+// データコントラクト定義
+contract ShowcaseInputContract {
+    input:  { text: String, tenant_id: String }
+    output: { validated: Bool }
+}

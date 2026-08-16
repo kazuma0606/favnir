@@ -901,6 +901,22 @@ impl Parser {
             TokenKind::Ident(n) if n == "cep" => {
                 Ok(Item::CepPatternDef(self.parse_cep_pattern_def()?))
             }
+            // v71.4.0: `const NAME: Type = expr` — compile-time constant declaration
+            TokenKind::Ident(n) if n == "const" => {
+                let start = self.peek_span().clone(); // span starts at `const` keyword
+                self.advance(); // consume "const"
+                let (name, _) = self.expect_ident()?;
+                self.expect(&TokenKind::Colon)?;
+                let ty = self.parse_type_expr()?;
+                self.expect(&TokenKind::Eq)?;
+                let value = self.parse_expr()?;
+                Ok(Item::ConstDef(crate::ast::ConstDef {
+                    name,
+                    ty,
+                    value,
+                    span: self.span_from(&start),
+                }))
+            }
             other => Err(ParseError::new(
                 format!(
                     "expected item (type/fn/stage/seq/interface/effect/impl/test/alias/schema/cep), got {:?}",
@@ -1547,6 +1563,7 @@ impl Parser {
                 with_interfaces,
                 invariants,
                 is_opaque: false,
+                is_phantom: false,
                 body: TypeBody::Wrapper(inner_ty),
                 span: self.span_from(&start),
             });
@@ -1578,6 +1595,7 @@ impl Parser {
                 with_interfaces,
                 invariants,
                 is_opaque: false,
+                is_phantom: false,
                 body: TypeBody::Record(fields),
                 span: self.span_from(&start),
             });
@@ -1585,6 +1603,22 @@ impl Parser {
             // sum body
             TypeBody::Sum(self.parse_sum_variants()?)
         } else {
+            // v71.3.0: phantom type: `type Name = phantom InnerType`
+            if matches!(self.peek(), TokenKind::Ident(n) if n == "phantom") {
+                self.advance(); // consume "phantom"
+                let inner = self.parse_type_expr()?;
+                return Ok(TypeDef {
+                    visibility,
+                    name,
+                    type_params,
+                    with_interfaces,
+                    invariants: vec![],
+                    is_opaque: false,
+                    is_phantom: true,
+                    body: TypeBody::Alias(inner),
+                    span: self.span_from(&start),
+                });
+            }
             // type alias: type Name = TypeExpr
             let target = self.parse_type_expr()?;
             // v41.1.0: refinement constraint `where |v| pred` for type aliases
@@ -1601,6 +1635,7 @@ impl Parser {
                 with_interfaces,
                 invariants,
                 is_opaque: false,
+                is_phantom: false,
                 body: TypeBody::Alias(target),
                 span: self.span_from(&start),
             });
@@ -1613,6 +1648,7 @@ impl Parser {
             with_interfaces,
             invariants: vec![],
             is_opaque: false,
+            is_phantom: false,
             body,
             span: self.span_from(&start),
         })
@@ -1669,6 +1705,7 @@ impl Parser {
     }
 
     /// Parse zero or more `with InterfaceName` or `with { field: Type, ... }` bounds.
+    /// v71.5.0: also accepts `:` colon notation: `<T: A & B>` and `<T: impl A>`.
     fn parse_type_bounds(&mut self) -> Result<Vec<crate::ast::TypeConstraint>, ParseError> {
         use crate::ast::TypeConstraint;
         let mut bounds = vec![];
@@ -1692,6 +1729,53 @@ impl Parser {
                 self.expect(&TokenKind::RBrace)?;
             } else {
                 // Interface bound: `with Ord`
+                let (bound_name, _) = self.expect_ident()?;
+                bounds.push(TypeConstraint::Interface(bound_name));
+            }
+        }
+        // v71.5.0: colon-style bounds `<T: A & B>` and `<T: impl A>` (sugar for `with` syntax).
+        // `impl` keyword is skipped (syntactic sugar only).
+        // Mixing with `with` bounds on the same param is allowed (bounds are unioned).
+        if self.peek() == &TokenKind::Colon {
+            let colon_span = self.peek_span().clone();
+            self.advance(); // consume `:`
+            // Ensure at least one bound follows the colon
+            if !matches!(self.peek(), TokenKind::Ident(_) | TokenKind::Impl) {
+                return Err(ParseError::new(
+                    format!("expected bound name after `:`, got {:?}", self.peek()),
+                    colon_span,
+                ));
+            }
+            loop {
+                if self.peek() == &TokenKind::Impl {
+                    let impl_span = self.peek_span().clone();
+                    self.advance(); // skip `impl` keyword — it's just sugar
+                    // Ensure an interface name follows `impl`
+                    if !matches!(self.peek(), TokenKind::Ident(_)) {
+                        return Err(ParseError::new(
+                            format!("expected interface name after `impl`, got {:?}", self.peek()),
+                            impl_span,
+                        ));
+                    }
+                }
+                // Detect `&&` (logical-and) mistakenly used instead of `&`
+                if self.peek() == &TokenKind::AmpAmp {
+                    return Err(ParseError::new(
+                        "use `&` not `&&` to separate type bounds",
+                        self.peek_span().clone(),
+                    ));
+                }
+                let (bound_name, _) = self.expect_ident()?;
+                bounds.push(TypeConstraint::Interface(bound_name));
+                if self.peek() == &TokenKind::Amp {
+                    self.advance(); // consume `&`, continue to next bound
+                } else {
+                    break;
+                }
+            }
+            // Allow trailing `with` bounds after colon bounds: `<T: A & B with C>` → [A, B, C]
+            while self.peek() == &TokenKind::With || self.peek_ident_text("with") {
+                self.advance(); // consume `with`
                 let (bound_name, _) = self.expect_ident()?;
                 bounds.push(TypeConstraint::Interface(bound_name));
             }
@@ -2005,6 +2089,33 @@ impl Parser {
             args
         } else {
             vec![]
+        };
+
+        // v71.1.0: optional dimension annotation `[N]` — e.g. `Vec<Float>[1536]`
+        // Encodes the dimension into the type name as `Vec#1536` so the existing
+        // Named type machinery catches mismatches via unify (E0421).
+        let name = if self.peek() == &TokenKind::LBracket {
+            self.advance(); // consume `[`
+            let dim_name = match self.peek().clone() {
+                TokenKind::Int(n) => {
+                    self.advance();
+                    format!("{}#{}", name, n)
+                }
+                TokenKind::Ident(var) => {
+                    self.advance();
+                    format!("{}#?{}", name, var)
+                }
+                _ => {
+                    return Err(ParseError::new(
+                        "expected integer or identifier in dimension annotation `[N]`".to_string(),
+                        self.peek_span().clone(),
+                    ));
+                }
+            };
+            self.expect(&TokenKind::RBracket)?; // consume `]`
+            dim_name
+        } else {
+            name
         };
 
         Ok(TypeExpr::Named(name, args, self.span_from(&start)))

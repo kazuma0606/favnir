@@ -1,0 +1,29 @@
+---
+title: Getting Started
+---
+
+# Getting Started
+
+Favnir を 5 分で試す。
+
+## インストール
+
+```bash
+cargo install fav
+```
+
+## Hello World パイプライン
+
+```favnir
+stage Hello {
+  bind msg <- "Hello, Favnir!"
+  ctx.io.println(msg)
+}
+```
+
+`fav run hello.fav` で実行する。
+
+## 次のステップ
+
+- [Language Reference](/docs/v2/language-reference) — 全構文一覧
+- [Migration Guide](/docs/v2/migration-v35-v75) — 旧バージョンからの移行

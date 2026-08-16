@@ -1,0 +1,4 @@
+// Dogfooding pipeline: sync runes/ directory to catalog.mdx
+fn main() -> String {
+    "rune_catalog_sync"
+}

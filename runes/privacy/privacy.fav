@@ -1,0 +1,13 @@
+// Rune.privacy — PII 保護 Rune（将来 VM primitive に接続）
+
+fn mask(fields: List<String>, strategy: String) -> List<String> {
+    fields
+}
+
+fn scan(text: String) -> List<String> {
+    []
+}
+
+fn gdpr_erase(user_id: String, tables: List<String>) -> Int {
+    0
+}

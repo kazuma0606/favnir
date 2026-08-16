@@ -250,6 +250,7 @@ impl Formatter {
             Item::PipelineDef(pd) => format!("pipeline {} {{ ... }}", pd.name), // v22.5.0: fmt スタブ
             Item::SchemaDef(sd) => format!("schema {} {{ ... }}", sd.name), // v36.1.0: fmt スタブ
             Item::CepPatternDef(cd) => format!("cep pattern {} {{ ... }}", cd.name), // v42.1.0: fmt スタブ
+            Item::ConstDef(cd) => format!("const {}: {} = {}", cd.name, self.type_expr(&cd.ty), self.expr(&cd.value)), // v71.4.0
         }
     }
 
@@ -291,11 +292,19 @@ impl Formatter {
                 )
             }
             TypeBody::Alias(target) => {
+                let prefix = if td.is_phantom {
+                    "phantom "
+                } else if td.is_opaque {
+                    "opaque "
+                } else {
+                    ""
+                };
                 format!(
-                    "{}type {}{} = {}",
+                    "{}type {}{} = {}{}",
                     vis,
                     td.name,
                     params,
+                    prefix,
                     self.type_expr(target)
                 )
             }
@@ -892,11 +901,26 @@ impl Formatter {
     fn type_expr(&self, ty: &TypeExpr) -> String {
         match ty {
             TypeExpr::Named(name, args, _) => {
+                // v71.1.0: decode dimension-encoded names back to human-readable form.
+                // `Vec#1536` with args [Float] → `Vec<Float>[1536]`
+                // `Vec#?N`  with args [Float] → `Vec<Float>[N]`
+                let (base_name, dim_suffix) = if let Some(idx) = name.find('#') {
+                    let base = &name[..idx];
+                    let dim_raw = &name[idx + 1..];
+                    let dim = if let Some(var) = dim_raw.strip_prefix('?') {
+                        format!("[{}]", var)
+                    } else {
+                        format!("[{}]", dim_raw)
+                    };
+                    (base.to_string(), dim)
+                } else {
+                    (name.clone(), String::new())
+                };
                 if args.is_empty() {
-                    name.clone()
+                    format!("{}{}", base_name, dim_suffix)
                 } else {
                     let as_: Vec<String> = args.iter().map(|a| self.type_expr(a)).collect();
-                    format!("{}<{}>", name, as_.join(", "))
+                    format!("{}<{}>{}", base_name, as_.join(", "), dim_suffix)
                 }
             }
             TypeExpr::Optional(inner, _) => format!("{}?", self.type_expr(inner)),

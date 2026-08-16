@@ -1408,9 +1408,10 @@ fn parse_arm_guard(toks: List<Token>) -> Result<ExprParse, String> {
     }
 }
 
-// ── bind 分割束縛ヘルパー（v70.6.0）──────────────────────────────────────────
-
-type FieldsParse = { fields: List<String>  rest: List<Token> }
+type FieldsParse = {
+    fields: List<String>
+    rest: List<Token>
+}
 
 fn parse_destr_fields(toks: List<Token>, acc: List<String>) -> Result<FieldsParse, String> {
     match peek(toks) {
@@ -1648,12 +1649,26 @@ fn ctx_access_ns(expr: Expr) -> String {
             match parts._0 {
                 EVar(vname) => {
                     if vname == "ctx" {
-                        if parts._1 == "io" { "IO" }
-                        else { if parts._1 == "db" { "Postgres" }
-                        else { if parts._1 == "storage" { "AWS" }
-                        else { if parts._1 == "env" { "Env" }
-                        else { "" } } } }
-                    } else { "" }
+                        if parts._1 == "io" {
+                            "IO"
+                        } else {
+                            if parts._1 == "db" {
+                                "Postgres"
+                            } else {
+                                if parts._1 == "storage" {
+                                    "AWS"
+                                } else {
+                                    if parts._1 == "env" {
+                                        "Env"
+                                    } else {
+                                        ""
+                                    }
+                                }
+                            }
+                        }
+                    } else {
+                        ""
+                    }
                 }
                 _ => ""
             }

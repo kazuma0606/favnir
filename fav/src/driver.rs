@@ -62133,7 +62133,7 @@ pub fn parse_time_travel_timestamp(s: &str) -> Result<i64, String> {
     if year < 1970 {
         return Err(format!("year must be >= 1970: {year}"));
     }
-    if month < 1 || month > 12 {
+    if !(1..=12).contains(&month) {
         return Err(format!("invalid month: {month}"));
     }
     if hour > 23 {
@@ -63770,7 +63770,7 @@ pub fn generate_counter_example_values(inv: &AggregateInvariant, seed: u64) -> C
     // 奇数シード: 各 property バリアントに対して安全な候補を生成（違反しない）
     // 本格的な乱数生成（PRNG 等）は将来の v78.x 以降で実装する。
     // ロードマップの f64::MIN は算術演算時のアンダーフロー懸念のため -1.0 で代替する。
-    let candidates: Vec<f64> = if seed % 2 == 0 {
+    let candidates: Vec<f64> = if seed.is_multiple_of(2) {
         match &inv.property {
             AggregateProperty::NonNegative          => vec![0.0, -0.001, -1.0, 1.0],
             AggregateProperty::NonPositive          => vec![0.0, 0.001, 1.0, -1.0],

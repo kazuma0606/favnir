@@ -4207,6 +4207,42 @@ impl VM {
                     }
                 }
             }
+            "List.find_index" => {
+                if args.len() != 2 {
+                    return Err(self.error(artifact, "List.find_index requires 2 arguments"));
+                }
+                let mut it = args.into_iter();
+                let list = it.next().expect("list");
+                let pred = it.next().expect("pred");
+                match list {
+                    VMValue::List(fl) => {
+                        for (i, x) in fl.into_iter().enumerate() {
+                            match self.call_value(artifact, pred.clone(), vec![x])? {
+                                VMValue::Bool(true) => {
+                                    return Ok(VMValue::Variant(
+                                        "some".into(),
+                                        Some(Box::new(VMValue::Int(i as i64))),
+                                    ));
+                                }
+                                VMValue::Bool(false) => {}
+                                other => {
+                                    return Err(self.error(
+                                        artifact,
+                                        &format!(
+                                            "List.find_index predicate must return Bool, got {}",
+                                            vmvalue_type_name(&other)
+                                        ),
+                                    ));
+                                }
+                            }
+                        }
+                        Ok(VMValue::Variant("none".into(), None))
+                    }
+                    _ => {
+                        Err(self.error(artifact, "List.find_index requires a List as first argument"))
+                    }
+                }
+            }
             "Map.map_values" => {
                 if args.len() != 2 {
                     return Err(self.error(artifact, "Map.map_values requires 2 arguments"));

@@ -4220,7 +4220,7 @@ impl VM {
                             match self.call_value(artifact, pred.clone(), vec![x])? {
                                 VMValue::Bool(true) => {
                                     return Ok(VMValue::Variant(
-                                        "some".into(),
+                                        "ok".into(),
                                         Some(Box::new(VMValue::Int(i as i64))),
                                     ));
                                 }
@@ -4236,7 +4236,10 @@ impl VM {
                                 }
                             }
                         }
-                        Ok(VMValue::Variant("none".into(), None))
+                        Ok(VMValue::Variant(
+                            "err".into(),
+                            Some(Box::new(VMValue::Str("List.find_index: not found".into()))),
+                        ))
                     }
                     _ => {
                         Err(self.error(artifact, "List.find_index requires a List as first argument"))

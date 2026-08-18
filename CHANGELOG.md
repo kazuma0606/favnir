@@ -4,6 +4,20 @@ Favnir のバージョン履歴。形式は [Keep a Changelog](https://keepachan
 
 ---
 
+## [v80.3.0] — 2026-08-19 — `TestFixture` / `DataFactory` モックデータ生成
+
+### Added
+- `FieldSpec` enum（`#[derive(Debug, Clone)]`）: `Str(String)` / `Int(i64)` / `Float(f64)` / `Bool(bool)` / `Null`
+- `RowSpec` 型エイリアス: `Vec<(String, FieldSpec)>`
+- `TestFixture` 構造体（`name: String`, `schema: Vec<String>`, `rows: Vec<RowSpec>`）: スキーマとテンプレート行を宣言
+- `DataFactory` 構造体（`seed: u64`）: `from_seed(seed) -> DataFactory` / `generate_rows(&self, spec, count) -> Vec<Vec<String>>`
+
+### Tests
+- `data_factory_generates_rows`: `from_seed(1)` で 2 行生成 → 列数 2、値 `["alice", "30"]`
+- `test_fixture_schema_matches_rows`: `from_seed(0)` で 3 行生成 → 全行列数 2、先頭行値確認
+
+---
+
 ## [v80.2.0] — 2026-08-19 — `GoldenDataset` / ゴールデンデータセット比較
 
 ### Added

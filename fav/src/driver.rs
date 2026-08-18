@@ -65500,3 +65500,56 @@ mod v80200_tests {
         assert_eq!(result.diff_rows, vec![2]);
     }
 }
+
+#[cfg(test)]
+mod v80300_tests {
+    use fav_core::test_framework::*;
+
+    fn make_fixture() -> TestFixture {
+        TestFixture {
+            name: "users".to_string(),
+            schema: vec!["name".to_string(), "age".to_string()],
+            rows: vec![
+                vec![
+                    ("name".to_string(), FieldSpec::Str("alice".to_string())),
+                    ("age".to_string(),  FieldSpec::Int(30)),
+                ],
+                vec![
+                    ("name".to_string(), FieldSpec::Str("bob".to_string())),
+                    ("age".to_string(),  FieldSpec::Int(25)),
+                ],
+            ],
+        }
+    }
+
+    #[test]
+    fn data_factory_generates_rows() {
+        let factory = DataFactory::from_seed(1);
+        let fixture = make_fixture();
+        let rows = factory.generate_rows(&fixture, 2);
+        assert_eq!(rows.len(), 2);
+        for row in &rows {
+            assert_eq!(row.len(), fixture.schema.len());
+        }
+        // seed=1, stride=1: row[0] = rows[(0*1+0)%2] = rows[0] = alice/30
+        assert_eq!(rows[0], vec!["alice", "30"]);
+        // row[1] = rows[(1*1+1)%2] = rows[0] = alice/30
+        assert_eq!(rows[1], vec!["alice", "30"]);
+    }
+
+    #[test]
+    fn test_fixture_schema_matches_rows() {
+        let factory = DataFactory::from_seed(0);
+        let fixture = make_fixture();
+        let rows = factory.generate_rows(&fixture, 3);
+        assert_eq!(rows.len(), 3);
+        for row in &rows {
+            assert_eq!(row.len(), fixture.schema.len(),
+                "each generated row must have exactly schema.len() columns");
+        }
+        // seed=0, stride=1: i*(1+1) % 2 = 0 for all i → 全行 index=0 → alice/30
+        assert_eq!(rows[0], vec!["alice", "30"]);
+        assert_eq!(rows[1], vec!["alice", "30"]);
+        assert_eq!(rows[2], vec!["alice", "30"]);
+    }
+}

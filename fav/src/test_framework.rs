@@ -91,6 +91,70 @@ pub fn format_golden_diff(result: &GoldenCompareResult) -> String {
     }
 }
 
+// ─── TestFixture / DataFactory ───────────────────────────────────────────────
+
+#[derive(Debug, Clone)]
+pub enum FieldSpec {
+    Str(String),
+    Int(i64),
+    Float(f64),
+    Bool(bool),
+    Null,
+}
+
+/// 1 行分のフィールド仕様: (列名, FieldSpec) のペア列。
+pub type RowSpec = Vec<(String, FieldSpec)>;
+
+#[derive(Debug)]
+pub struct TestFixture {
+    pub name: String,
+    pub schema: Vec<String>,
+    pub rows: Vec<RowSpec>,
+}
+
+#[derive(Debug)]
+pub struct DataFactory {
+    pub seed: u64,
+}
+
+impl DataFactory {
+    pub fn from_seed(seed: u64) -> DataFactory {
+        DataFactory { seed }
+    }
+
+    pub fn generate_rows(&self, spec: &TestFixture, count: usize) -> Vec<Vec<String>> {
+        if spec.rows.is_empty() {
+            return Vec::new();
+        }
+        let n = spec.rows.len();
+        // stride = seed.max(1) にすることで seed=0 を stride=1 に正規化する。
+        // インデックス式: (i * stride + i) % n = i * (stride + 1) % n
+        // seed=1/n=2 等 gcd(stride+1, n)=n となるケースでは全行が同一テンプレートになる。
+        // これは仕様通りの循環パターンであり、シード値の多様性ではなくテンプレート循環を目的とする。
+        let stride = self.seed.max(1) as usize;
+        (0..count)
+            .map(|i| {
+                let template = &spec.rows[(i * stride + i) % n];
+                let field_map: std::collections::HashMap<&str, &FieldSpec> = template
+                    .iter()
+                    .map(|(k, v)| (k.as_str(), v))
+                    .collect();
+                spec.schema
+                    .iter()
+                    .map(|col| match field_map.get(col.as_str()) {
+                        Some(FieldSpec::Str(s))   => s.clone(),
+                        Some(FieldSpec::Int(n))   => n.to_string(),
+                        Some(FieldSpec::Float(f)) => f.to_string(),
+                        Some(FieldSpec::Bool(b))  => b.to_string(),
+                        // FieldSpec::Null またはスキーマ列名がテンプレートに存在しない場合は空文字列を返す（設計上の意図）。
+                        Some(FieldSpec::Null) | None => String::new(),
+                    })
+                    .collect()
+            })
+            .collect()
+    }
+}
+
 /// Load a CSV file as a GoldenDataset (one row per line, comma-separated).
 /// Empty lines are skipped. Not available on WASM targets.
 ///

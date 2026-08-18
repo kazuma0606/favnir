@@ -88,10 +88,10 @@ A（新機能）70% + B（統合）30% の構成。
 - `RowSpec` 型（`Vec<(String, FieldSpec)>`）
 - `TestFixture` 構造体（`name: String`, `schema: Vec<String>`, `rows: Vec<RowSpec>`）
 - `DataFactory` 構造体（`seed: u64`）
-- `DataFactory::generate_rows(spec: &TestFixture, count: usize) -> Vec<Vec<String>>`
+- `DataFactory::generate_rows(&self, spec: &TestFixture, count: usize) -> Vec<Vec<String>>`
 - `DataFactory::from_seed(seed: u64) -> DataFactory`
 
-**完了条件**: Rust テスト 2 件（3813 + 2 = 3815）
+**完了条件**: Rust テスト 2 件（3814 + 2 = 3816）
 - `data_factory_generates_rows`
 - `test_fixture_schema_matches_rows`
 

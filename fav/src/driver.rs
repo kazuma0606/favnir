@@ -65838,3 +65838,46 @@ mod v80700_tests {
         assert_eq!(format_schema_diff(&diff), "added=[note], removed=[], changed=[]");
     }
 }
+
+#[cfg(test)]
+mod v80800_tests {
+    use fav_core::test_framework::*;
+
+    fn make_report() -> TestReport {
+        TestReport {
+            suite: TestSuite {
+                name: "pipeline_tests".to_string(),
+                cases: vec![
+                    TestCase { name: "load".to_string(), status: TestStatus::Pass, message: None },
+                    TestCase {
+                        name: "fail_case".to_string(),
+                        status: TestStatus::Fail,
+                        message: Some("expected 1 got 2".to_string()),
+                    },
+                ],
+            },
+            duration_ms: 42,
+            timestamp: "2026-08-19T00:00:00Z".to_string(),
+        }
+    }
+
+    #[test]
+    fn junit_xml_output_has_testsuite_tag() {
+        let report = make_report();
+        let xml = format_junit_xml(&report);
+        assert!(xml.contains("<testsuite"),       "should contain <testsuite: {xml}");
+        assert!(xml.contains("<testcase"),         "should contain <testcase: {xml}");
+        assert!(xml.contains("<failure"),          "should contain <failure for fail case: {xml}");
+        assert!(xml.contains("expected 1 got 2"), "failure message should appear: {xml}");
+    }
+
+    #[test]
+    fn test_report_summary_shows_pass_count() {
+        let report = make_report();
+        let summary = format_test_summary(&report);
+        assert_eq!(
+            summary,
+            "pipeline_tests: 1 passed, 1 failed, 0 skipped (42ms) [2026-08-19T00:00:00Z]"
+        );
+    }
+}

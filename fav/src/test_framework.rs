@@ -454,3 +454,66 @@ pub fn format_schema_diff(diff: &SchemaSnapshotDiff) -> String {
 pub fn schema_diff_is_breaking(diff: &SchemaSnapshotDiff) -> bool {
     !diff.removed.is_empty() || !diff.changed.is_empty()
 }
+
+// ─── TestReport ───────────────────────────────────────────────────────────────
+
+#[derive(Debug)]
+pub struct TestReport {
+    pub suite: TestSuite,
+    /// テスト実行にかかった時間（ミリ秒）。
+    pub duration_ms: u64,
+    /// ISO 8601 形式のタイムスタンプ文字列（例: "2026-08-19T00:00:00Z"）。
+    pub timestamp: String,
+}
+
+/// JUnit XML 形式のテストレポートを生成する。
+///
+/// - `time` は `duration_ms / 1000.0`（小数点以下 3 桁）。
+/// - Pass / Skip ケースは `<testcase ... />` のみ。Fail は `<failure>` 子要素を持つ。
+/// - XML エスケープは本バージョンではスコープ外（テストデータに特殊文字を含まない前提）。
+/// - 出力末尾に改行は付かない。
+pub fn format_junit_xml(report: &TestReport) -> String {
+    let result = run_test_suite(&report.suite);
+    let total = result.passed + result.failed + result.skipped;
+    let duration_s = report.duration_ms as f64 / 1000.0;
+
+    let mut cases = String::new();
+    for case in &report.suite.cases {
+        match case.status {
+            TestStatus::Fail => {
+                let msg = case.message.as_deref().unwrap_or("");
+                cases.push_str(&format!(
+                    "  <testcase name=\"{}\" classname=\"{}\">\n    <failure message=\"{}\"/>\n  </testcase>\n",
+                    case.name, report.suite.name, msg
+                ));
+            }
+            _ => {
+                cases.push_str(&format!(
+                    "  <testcase name=\"{}\" classname=\"{}\"/>\n",
+                    case.name, report.suite.name
+                ));
+            }
+        }
+    }
+
+    format!(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<testsuite name=\"{}\" tests=\"{}\" failures=\"{}\" skipped=\"{}\" time=\"{:.3}\">\n{}",
+        report.suite.name, total, result.failed, result.skipped, duration_s, cases
+    ) + "</testsuite>"
+}
+
+/// 人間向けサマリー形式のレポートを生成する。
+///
+/// 出力形式: "{suite.name}: N passed, M failed, K skipped ({duration_ms}ms) [{timestamp}]"
+pub fn format_test_summary(report: &TestReport) -> String {
+    let result = run_test_suite(&report.suite);
+    format!(
+        "{}: {} passed, {} failed, {} skipped ({}ms) [{}]",
+        report.suite.name,
+        result.passed,
+        result.failed,
+        result.skipped,
+        report.duration_ms,
+        report.timestamp,
+    )
+}

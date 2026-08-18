@@ -4,6 +4,19 @@ Favnir のバージョン履歴。形式は [Keep a Changelog](https://keepachan
 
 ---
 
+## [v80.8.0] — 2026-08-19 — CI 統合レポート（`TestReport` / JUnit XML）
+
+### Added
+- `TestReport` 構造体（`suite: TestSuite`, `duration_ms: u64`, `timestamp: String`）
+- `format_junit_xml(report: &TestReport) -> String`: JUnit XML 形式出力（`<testsuite>` / `<testcase>` / `<failure>` タグ）
+- `format_test_summary(report: &TestReport) -> String`: `"{suite.name}: N passed, M failed, K skipped ({ms}ms) [{timestamp}]"` 形式
+
+### Tests
+- `junit_xml_output_has_testsuite_tag`: `<testsuite>` / `<testcase>` / `<failure>` タグおよび failure message が出力に含まれることを確認
+- `test_report_summary_shows_pass_count`: サマリー文字列の完全一致確認
+
+---
+
 ## [v80.7.0] — 2026-08-19 — スキーマスナップショットテスト（`SchemaSnapshot`）
 
 ### Added

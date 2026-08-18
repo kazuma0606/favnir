@@ -65621,3 +65621,55 @@ mod v80400_tests {
         assert!(results[1].passed); // 0.0 <= 0 ✓
     }
 }
+
+#[cfg(test)]
+mod v80500_tests {
+    use fav_core::test_framework::*;
+
+    fn make_stage_test() -> StageTestCase {
+        let input = StageInput {
+            name: "load".to_string(),
+            rows: vec![vec!["alice".to_string(), "30".to_string()]],
+        };
+        let expected = StageOutput {
+            name: "transform".to_string(),
+            rows: vec![vec!["alice".to_string(), "30".to_string()]],
+        };
+        StageTestCase {
+            stage_name: "transform".to_string(),
+            input,
+            expected,
+        }
+    }
+
+    #[test]
+    fn stage_test_pass_when_output_matches() {
+        let test = make_stage_test();
+        let actual = StageOutput {
+            name: "transform".to_string(),
+            rows: vec![vec!["alice".to_string(), "30".to_string()]],
+        };
+        let result = run_stage_test(&test, &actual);
+        assert!(matches!(result.status, TestStatus::Pass));
+        assert!(result.message.is_none());
+        assert_eq!(format_stage_test_result(&result), "PASS: transform");
+    }
+
+    #[test]
+    fn stage_test_fail_when_output_differs() {
+        let test = make_stage_test();
+        let actual = StageOutput {
+            name: "transform".to_string(),
+            rows: vec![vec!["bob".to_string(), "25".to_string()]],
+        };
+        let result = run_stage_test(&test, &actual);
+        assert!(matches!(result.status, TestStatus::Fail));
+        assert!(result.message.is_some());
+        let msg = result.message.as_deref().unwrap();
+        assert!(msg.contains("row 0 differs"), "message should mention row 0: {msg}");
+        assert!(msg.contains("alice"), "message should mention expected value: {msg}");
+        assert!(msg.contains("bob"), "message should mention actual value: {msg}");
+        let formatted = format_stage_test_result(&result);
+        assert!(formatted.starts_with("FAIL: transform"));
+    }
+}

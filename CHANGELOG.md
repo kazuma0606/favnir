@@ -4,6 +4,21 @@ Favnir のバージョン履歴。形式は [Keep a Changelog](https://keepachan
 
 ---
 
+## [v80.5.0] — 2026-08-19 — ステージ単体テスト（`StageTestCase`）
+
+### Added
+- `StageInput` 構造体（`#[derive(Debug, Clone)]`、`name: String`, `rows: Vec<Vec<String>>`）
+- `StageOutput` 構造体（`#[derive(Debug, Clone)]`、`name: String`, `rows: Vec<Vec<String>>`）
+- `StageTestCase` 構造体（`stage_name: String`, `input: StageInput`, `expected: StageOutput`）
+- `run_stage_test(test: &StageTestCase, actual: &StageOutput) -> TestCase`: 行単位比較、超過行も diff として記録
+- `format_stage_test_result(result: &TestCase) -> String`: `"PASS: <name>"` / `"FAIL: <name> — <message>"` / `"SKIP: <name>"`
+
+### Tests
+- `stage_test_pass_when_output_matches`: 同一行 → Pass、message == None
+- `stage_test_fail_when_output_differs`: 行 0 が異なる → Fail、message に差分情報を含む
+
+---
+
 ## [v80.4.0] — 2026-08-19 — `PropertyTest` / プロパティベーステスト
 
 ### Added

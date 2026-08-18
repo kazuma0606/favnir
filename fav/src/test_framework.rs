@@ -246,3 +246,71 @@ pub struct PropertyTestSuite {
 pub fn run_property_test_suite(suite: &PropertyTestSuite, data: &[f64]) -> Vec<PropertyTestResult> {
     suite.tests.iter().map(|t| run_property_test(t, data)).collect()
 }
+
+// ─── StageTestCase ────────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone)]
+pub struct StageInput {
+    pub name: String,
+    pub rows: Vec<Vec<String>>,
+}
+
+#[derive(Debug, Clone)]
+pub struct StageOutput {
+    pub name: String,
+    pub rows: Vec<Vec<String>>,
+}
+
+#[derive(Debug)]
+pub struct StageTestCase {
+    pub stage_name: String,
+    pub input: StageInput,
+    pub expected: StageOutput,
+}
+
+/// `test.expected` と `actual` の rows を行単位で比較する。
+/// - 全行一致: `TestCase { status: Pass, message: None }`
+/// - 不一致: `TestCase { status: Fail, message: Some("row N differs: ...") }`
+/// - 行数不一致は超過行も "row N differs" として記録する。
+pub fn run_stage_test(test: &StageTestCase, actual: &StageOutput) -> TestCase {
+    let expected = &test.expected.rows;
+    let actual_rows = &actual.rows;
+    let max_len = expected.len().max(actual_rows.len());
+    for i in 0..max_len {
+        let exp_row = expected.get(i);
+        let act_row = actual_rows.get(i);
+        if exp_row != act_row {
+            let msg = format!(
+                "row {} differs: expected {:?}, got {:?}",
+                i,
+                exp_row.map(|r| r.as_slice()).unwrap_or(&[]),
+                act_row.map(|r| r.as_slice()).unwrap_or(&[]),
+            );
+            return TestCase {
+                name: test.stage_name.clone(),
+                status: TestStatus::Fail,
+                message: Some(msg),
+            };
+        }
+    }
+    TestCase {
+        name: test.stage_name.clone(),
+        status: TestStatus::Pass,
+        message: None,
+    }
+}
+
+/// `TestCase` を人間が読める文字列に変換する。
+/// - Pass: "PASS: <name>"
+/// - Fail: "FAIL: <name> — <message>"
+/// - Skip: "SKIP: <name>"
+pub fn format_stage_test_result(result: &TestCase) -> String {
+    match result.status {
+        TestStatus::Pass => format!("PASS: {}", result.name),
+        TestStatus::Fail => {
+            let msg = result.message.as_deref().unwrap_or("");
+            format!("FAIL: {} \u{2014} {}", result.name, msg)
+        }
+        TestStatus::Skip => format!("SKIP: {}", result.name),
+    }
+}

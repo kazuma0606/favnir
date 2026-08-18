@@ -4,6 +4,22 @@ Favnir のバージョン履歴。形式は [Keep a Changelog](https://keepachan
 
 ---
 
+## [v80.4.0] — 2026-08-19 — `PropertyTest` / プロパティベーステスト
+
+### Added
+- `InvariantKind` enum（`NonNegative` / `NonPositive` / `NonNull`）: データ列に対する不変条件の種類
+- `PropertyTest` 構造体（`name: String`, `kind: InvariantKind`, `samples: usize`）
+- `PropertyTestResult` 構造体（`passed: bool`, `counter_example: Option<Vec<f64>>`）
+- `run_property_test(test: &PropertyTest, data: &[f64]) -> PropertyTestResult`: 不変条件違反の最初の値を記録
+- `format_property_test_result(result: &PropertyTestResult) -> String`: `"PASS: invariant holds"` / `"FAIL: counter_example=[...]"`
+- `PropertyTestSuite` 構造体（`tests: Vec<PropertyTest>`）
+
+### Tests
+- `property_test_pass_when_invariant_holds`: 全値 >= 0.0 → PASS
+- `property_test_fail_shows_counter_example`: 負値あり → counter_example = [-2.5]
+
+---
+
 ## [v80.3.0] — 2026-08-19 — `TestFixture` / `DataFactory` モックデータ生成
 
 ### Added

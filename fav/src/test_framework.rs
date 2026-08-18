@@ -176,3 +176,65 @@ pub fn load_golden_dataset(path: &str) -> Result<GoldenDataset, String> {
         .to_string();
     Ok(GoldenDataset { name, rows })
 }
+
+// ─── PropertyTest / PropertyTestResult / PropertyTestSuite ───────────────────
+
+/// データ列に対して検証する不変条件の種類。
+#[derive(Debug, Clone)]
+pub enum InvariantKind {
+    /// 全値 >= 0.0 であること。
+    NonNegative,
+    /// 全値 <= 0.0 であること。
+    NonPositive,
+    /// NaN/Inf を含まないこと。
+    NonNull,
+}
+
+/// プロパティベーステストの定義。
+#[derive(Debug)]
+pub struct PropertyTest {
+    pub name: String,
+    pub kind: InvariantKind,
+    pub samples: usize,
+}
+
+/// プロパティベーステストの実行結果。
+#[derive(Debug)]
+pub struct PropertyTestResult {
+    pub passed: bool,
+    /// 不変条件に違反した最初の値（違反がなければ None）。
+    pub counter_example: Option<Vec<f64>>,
+}
+
+/// `PropertyTest` を `data` に対して実行する。
+///
+/// data 内の各値が `kind` の不変条件を満たすか検証する。
+/// 違反する最初の値を `counter_example` に記録する。
+pub fn run_property_test(test: &PropertyTest, data: &[f64]) -> PropertyTestResult {
+    let violation = match test.kind {
+        InvariantKind::NonNegative => data.iter().find(|&&v| v < 0.0).copied(),
+        InvariantKind::NonPositive => data.iter().find(|&&v| v > 0.0).copied(),
+        InvariantKind::NonNull => data.iter().find(|&&v| v.is_nan() || v.is_infinite()).copied(),
+    };
+    match violation {
+        None => PropertyTestResult { passed: true, counter_example: None },
+        Some(v) => PropertyTestResult { passed: false, counter_example: Some(vec![v]) },
+    }
+}
+
+/// プロパティテスト結果を人間が読める文字列に変換する。
+pub fn format_property_test_result(result: &PropertyTestResult) -> String {
+    if result.passed {
+        "PASS: invariant holds".to_string()
+    } else {
+        let ce = result.counter_example.as_deref().unwrap_or(&[]);
+        let vals: Vec<String> = ce.iter().map(|v| v.to_string()).collect();
+        format!("FAIL: counter_example=[{}]", vals.join(", "))
+    }
+}
+
+/// 複数の `PropertyTest` をまとめるスイート。
+#[derive(Debug)]
+pub struct PropertyTestSuite {
+    pub tests: Vec<PropertyTest>,
+}

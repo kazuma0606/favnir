@@ -65553,3 +65553,36 @@ mod v80300_tests {
         assert_eq!(rows[2], vec!["alice", "30"]);
     }
 }
+
+#[cfg(test)]
+mod v80400_tests {
+    use fav_core::test_framework::*;
+
+    #[test]
+    fn property_test_pass_when_invariant_holds() {
+        let test = PropertyTest {
+            name: "all_non_negative".to_string(),
+            kind: InvariantKind::NonNegative,
+            samples: 3,
+        };
+        let data = vec![0.0_f64, 1.5, 42.0];
+        let result = run_property_test(&test, &data);
+        assert!(result.passed);
+        assert!(result.counter_example.is_none());
+        assert_eq!(format_property_test_result(&result), "PASS: invariant holds");
+    }
+
+    #[test]
+    fn property_test_fail_shows_counter_example() {
+        let test = PropertyTest {
+            name: "all_non_negative".to_string(),
+            kind: InvariantKind::NonNegative,
+            samples: 3,
+        };
+        let data = vec![1.0_f64, -2.5, 3.0];
+        let result = run_property_test(&test, &data);
+        assert!(!result.passed);
+        assert_eq!(result.counter_example, Some(vec![-2.5]));
+        assert_eq!(format_property_test_result(&result), "FAIL: counter_example=[-2.5]");
+    }
+}

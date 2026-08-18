@@ -4,6 +4,22 @@ Favnir のバージョン履歴。形式は [Keep a Changelog](https://keepachan
 
 ---
 
+## [v80.7.0] — 2026-08-19 — スキーマスナップショットテスト（`SchemaSnapshot`）
+
+### Added
+- `ColumnSnapshot` 構造体（`#[derive(Debug, Clone, PartialEq)]`、`name: String`, `type_name: String`, `nullable: bool`）
+- `SchemaSnapshot` 構造体（`pipeline_name: String`, `columns: Vec<ColumnSnapshot>`）
+- `SchemaSnapshotDiff` 構造体（`added: Vec<String>`, `removed: Vec<String>`, `changed: Vec<String>`）
+- `compare_schema_snapshots(current, baseline) -> SchemaSnapshotDiff`: 名前で列を突き合わせ（順序不問）、added / removed / changed をソート済みで返す
+- `format_schema_diff(diff) -> String`: 差分なし → `"OK: schema unchanged"`、差分あり → `"added=[...], removed=[...], changed=[...]"`
+- `schema_diff_is_breaking(diff) -> bool`: `removed` または `changed` が非空なら `true`（列追加のみは後方互換）
+
+### Tests
+- `schema_snapshot_no_diff_when_equal`: 同一スキーマ → 全フィールドが空、`"OK: schema unchanged"`
+- `schema_snapshot_detects_removed_column`: baseline 2 列 / current 1 列追加 1 列削除 → removed=[amount], added=[note], is_breaking=true
+
+---
+
 ## [v80.6.0] — 2026-08-19 — テストカバレッジレポート（`TestCoverageReport`）
 
 ### Added

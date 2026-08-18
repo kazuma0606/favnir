@@ -369,3 +369,87 @@ pub fn coverage_pct(report: &TestCoverageReport) -> f64 {
         report.covered as f64 / report.total as f64 * 100.0
     }
 }
+
+// ─── SchemaSnapshot ───────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ColumnSnapshot {
+    pub name: String,
+    pub type_name: String,
+    pub nullable: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct SchemaSnapshot {
+    pub pipeline_name: String,
+    pub columns: Vec<ColumnSnapshot>,
+}
+
+#[derive(Debug)]
+pub struct SchemaSnapshotDiff {
+    /// current にあって baseline にない列名。
+    pub added: Vec<String>,
+    /// baseline にあって current にない列名。
+    pub removed: Vec<String>,
+    /// 両方に存在するが type_name または nullable が異なる列名。
+    pub changed: Vec<String>,
+}
+
+/// current と baseline を比較してスキーマ差分を返す。
+/// 列の突き合わせは名前（`name` フィールド）で行い、列順は問わない。
+pub fn compare_schema_snapshots(
+    current: &SchemaSnapshot,
+    baseline: &SchemaSnapshot,
+) -> SchemaSnapshotDiff {
+    use std::collections::HashMap;
+
+    let current_map: HashMap<&str, &ColumnSnapshot> =
+        current.columns.iter().map(|c| (c.name.as_str(), c)).collect();
+    let baseline_map: HashMap<&str, &ColumnSnapshot> =
+        baseline.columns.iter().map(|c| (c.name.as_str(), c)).collect();
+
+    let mut added = Vec::new();
+    let mut removed = Vec::new();
+    let mut changed = Vec::new();
+
+    for (name, base_col) in &baseline_map {
+        match current_map.get(name) {
+            None => removed.push((*name).to_string()),
+            Some(cur_col) => {
+                if cur_col.type_name != base_col.type_name || cur_col.nullable != base_col.nullable {
+                    changed.push((*name).to_string());
+                }
+            }
+        }
+    }
+
+    for name in current_map.keys() {
+        if !baseline_map.contains_key(name) {
+            added.push((*name).to_string());
+        }
+    }
+
+    added.sort();
+    removed.sort();
+    changed.sort();
+
+    SchemaSnapshotDiff { added, removed, changed }
+}
+
+/// diff を "OK: schema unchanged" または "added=[...], removed=[...], changed=[...]" に変換する。
+pub fn format_schema_diff(diff: &SchemaSnapshotDiff) -> String {
+    if diff.added.is_empty() && diff.removed.is_empty() && diff.changed.is_empty() {
+        return "OK: schema unchanged".to_string();
+    }
+    format!(
+        "added=[{}], removed=[{}], changed=[{}]",
+        diff.added.join(", "),
+        diff.removed.join(", "),
+        diff.changed.join(", "),
+    )
+}
+
+/// removed または changed が 1 件以上あれば破壊的変更（true）。added のみなら後方互換（false）。
+pub fn schema_diff_is_breaking(diff: &SchemaSnapshotDiff) -> bool {
+    !diff.removed.is_empty() || !diff.changed.is_empty()
+}

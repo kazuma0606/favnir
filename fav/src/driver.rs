@@ -65756,3 +65756,47 @@ mod v80600_tests {
         assert_eq!(format_coverage_report(&report), "coverage: 0/0 (0.0pct)");
     }
 }
+
+#[cfg(test)]
+mod v80700_tests {
+    use fav_core::test_framework::*;
+
+    fn baseline() -> SchemaSnapshot {
+        SchemaSnapshot {
+            pipeline_name: "orders".to_string(),
+            columns: vec![
+                ColumnSnapshot { name: "id".to_string(),     type_name: "Int".to_string(),   nullable: false },
+                ColumnSnapshot { name: "amount".to_string(), type_name: "Float".to_string(), nullable: false },
+            ],
+        }
+    }
+
+    #[test]
+    fn schema_snapshot_no_diff_when_equal() {
+        let b = baseline();
+        let diff = compare_schema_snapshots(&b, &b);
+        assert!(diff.added.is_empty());
+        assert!(diff.removed.is_empty());
+        assert!(diff.changed.is_empty());
+        assert_eq!(format_schema_diff(&diff), "OK: schema unchanged");
+        assert!(!schema_diff_is_breaking(&diff));
+    }
+
+    #[test]
+    fn schema_snapshot_detects_removed_column() {
+        let b = baseline();
+        let current = SchemaSnapshot {
+            pipeline_name: "orders".to_string(),
+            columns: vec![
+                ColumnSnapshot { name: "id".to_string(),   type_name: "Int".to_string(),    nullable: false },
+                ColumnSnapshot { name: "note".to_string(), type_name: "String".to_string(), nullable: true },
+            ],
+        };
+        let diff = compare_schema_snapshots(&current, &b);
+        assert_eq!(diff.removed, vec!["amount"]);
+        assert_eq!(diff.added,   vec!["note"]);
+        assert!(diff.changed.is_empty());
+        assert!(schema_diff_is_breaking(&diff));
+        assert_eq!(format_schema_diff(&diff), "added=[note], removed=[amount], changed=[]");
+    }
+}

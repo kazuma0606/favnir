@@ -264,6 +264,8 @@ pub struct StageOutput {
 #[derive(Debug)]
 pub struct StageTestCase {
     pub stage_name: String,
+    /// 呼び出し元が実際の stage 関数を呼び出す際に渡すフィールド。
+    /// `run_stage_test` 自身は `input` を参照しない（expected と actual の比較のみを行う）。
     pub input: StageInput,
     pub expected: StageOutput,
 }

@@ -65672,4 +65672,35 @@ mod v80500_tests {
         let formatted = format_stage_test_result(&result);
         assert!(formatted.starts_with("FAIL: transform"));
     }
+
+    #[test]
+    fn stage_test_fail_when_actual_has_extra_rows() {
+        // actual が expected より多い → 超過行（row 1）が Fail になる
+        let test = make_stage_test(); // expected: 1 行
+        let actual = StageOutput {
+            name: "transform".to_string(),
+            rows: vec![
+                vec!["alice".to_string(), "30".to_string()],
+                vec!["extra".to_string(), "99".to_string()],
+            ],
+        };
+        let result = run_stage_test(&test, &actual);
+        assert!(matches!(result.status, TestStatus::Fail));
+        let msg = result.message.as_deref().unwrap();
+        assert!(msg.contains("row 1 differs"), "extra row should be row 1: {msg}");
+    }
+
+    #[test]
+    fn stage_test_fail_when_actual_has_fewer_rows() {
+        // actual が expected より少ない → 不足行（row 0）が Fail になる
+        let test = make_stage_test(); // expected: 1 行
+        let actual = StageOutput {
+            name: "transform".to_string(),
+            rows: vec![],
+        };
+        let result = run_stage_test(&test, &actual);
+        assert!(matches!(result.status, TestStatus::Fail));
+        let msg = result.message.as_deref().unwrap();
+        assert!(msg.contains("row 0 differs"), "missing row should be row 0: {msg}");
+    }
 }

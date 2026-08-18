@@ -316,3 +316,56 @@ pub fn format_stage_test_result(result: &TestCase) -> String {
         TestStatus::Skip => format!("SKIP: {}", result.name),
     }
 }
+
+// ─── TestCoverageReport ───────────────────────────────────────────────────────
+
+#[derive(Debug, Clone)]
+pub struct CoverageEntry {
+    pub name: String,
+    pub tested: bool,
+}
+
+#[derive(Debug)]
+pub struct TestCoverageReport {
+    pub entries: Vec<CoverageEntry>,
+    pub total: usize,
+    pub covered: usize,
+}
+
+/// `suite` のケース名と `known_stages` を突き合わせてカバレッジレポートを生成する。
+///
+/// - ステージ名が `suite.cases` に 1 件以上あれば `tested: true`（status は問わない）。
+/// - `total = known_stages.len()`、`covered = tested が true のエントリ数`。
+pub fn compute_test_coverage(suite: &TestSuite, known_stages: &[String]) -> TestCoverageReport {
+    let tested_names: std::collections::HashSet<&str> =
+        suite.cases.iter().map(|c| c.name.as_str()).collect();
+    let entries: Vec<CoverageEntry> = known_stages
+        .iter()
+        .map(|s| CoverageEntry {
+            name: s.clone(),
+            tested: tested_names.contains(s.as_str()),
+        })
+        .collect();
+    let covered = entries.iter().filter(|e| e.tested).count();
+    let total = entries.len();
+    TestCoverageReport { entries, total, covered }
+}
+
+/// カバレッジレポートを "coverage: X/Y (Z.Zpct)" 形式の文字列に変換する。
+pub fn format_coverage_report(report: &TestCoverageReport) -> String {
+    format!(
+        "coverage: {}/{} ({:.1}pct)",
+        report.covered,
+        report.total,
+        coverage_pct(report)
+    )
+}
+
+/// カバレッジ率を 0.0〜100.0 の f64 で返す。total が 0 の場合は 0.0（ゼロ除算ガード）。
+pub fn coverage_pct(report: &TestCoverageReport) -> f64 {
+    if report.total == 0 {
+        0.0
+    } else {
+        report.covered as f64 / report.total as f64 * 100.0
+    }
+}

@@ -65704,3 +65704,44 @@ mod v80500_tests {
         assert!(msg.contains("row 0 differs"), "missing row should be row 0: {msg}");
     }
 }
+
+#[cfg(test)]
+mod v80600_tests {
+    use fav_core::test_framework::*;
+
+    #[test]
+    fn coverage_report_counts_correctly() {
+        let suite = TestSuite {
+            name: "pipeline".to_string(),
+            cases: vec![
+                TestCase { name: "load".to_string(),      status: TestStatus::Pass, message: None },
+                TestCase { name: "transform".to_string(), status: TestStatus::Pass, message: None },
+            ],
+        };
+        let known = vec![
+            "load".to_string(),
+            "transform".to_string(),
+            "export".to_string(),
+        ];
+        let report = compute_test_coverage(&suite, &known);
+        assert_eq!(report.total,   3);
+        assert_eq!(report.covered, 2);
+        assert_eq!(report.entries[0].tested, true);
+        assert_eq!(report.entries[1].tested, true);
+        assert_eq!(report.entries[2].tested, false);
+        let pct = coverage_pct(&report);
+        assert!(pct > 66.0 && pct < 67.0, "expected ~66.7, got {pct}");
+        assert_eq!(format_coverage_report(&report), "coverage: 2/3 (66.7pct)");
+    }
+
+    #[test]
+    fn coverage_pct_is_zero_when_nothing_tested() {
+        let suite = TestSuite { name: "empty".to_string(), cases: vec![] };
+        let known = vec!["stage_a".to_string()];
+        let report = compute_test_coverage(&suite, &known);
+        assert_eq!(report.total,   1);
+        assert_eq!(report.covered, 0);
+        assert_eq!(coverage_pct(&report), 0.0);
+        assert_eq!(format_coverage_report(&report), "coverage: 0/1 (0.0pct)");
+    }
+}

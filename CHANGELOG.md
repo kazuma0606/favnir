@@ -4,6 +4,21 @@ Favnir のバージョン履歴。形式は [Keep a Changelog](https://keepachan
 
 ---
 
+## [v80.6.0] — 2026-08-19 — テストカバレッジレポート（`TestCoverageReport`）
+
+### Added
+- `CoverageEntry` 構造体（`#[derive(Debug, Clone)]`、`name: String`, `tested: bool`）
+- `TestCoverageReport` 構造体（`entries: Vec<CoverageEntry>`, `total: usize`, `covered: usize`）
+- `compute_test_coverage(suite: &TestSuite, known_stages: &[String]) -> TestCoverageReport`: ケース名と known_stages を突き合わせ、status を問わず名前一致で `tested: true`
+- `format_coverage_report(report: &TestCoverageReport) -> String`: `"coverage: X/Y (Z.Zpct)"` 形式（小数点以下 1 桁）
+- `coverage_pct(report: &TestCoverageReport) -> f64`: 0.0〜100.0、total=0 のときゼロ除算ガードで 0.0
+
+### Tests
+- `coverage_report_counts_correctly`: suite 2 ケース / known 3 件 → covered=2, total=3, pct≈66.7%
+- `coverage_pct_is_zero_when_nothing_tested`: 空 suite → covered=0, pct=0.0
+
+---
+
 ## [v80.5.0] — 2026-08-19 — ステージ単体テスト（`StageTestCase`）
 
 ### Added

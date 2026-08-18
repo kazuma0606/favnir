@@ -4,6 +4,19 @@ Favnir のバージョン履歴。形式は [Keep a Changelog](https://keepachan
 
 ---
 
+## [v80.1.0] — 2026-08-19 — `TestCase` / `TestSuite` 型基盤
+
+### Added
+- `fav/src/test_framework.rs`: `TestStatus` / `TestCase` / `TestSuite` / `TestSuiteResult` 型定義
+- `run_test_suite(suite: &TestSuite) -> TestSuiteResult`: Pass/Fail/Skip をカウント
+- `format_test_suite_result(result: &TestSuiteResult) -> String`: `"N passed, M failed, K skipped"` 形式
+
+### Tests
+- `test_suite_type_exists`: `TestSuite` / `TestCase` / `TestStatus` の構築とフィールド検証
+- `test_case_run_formats_result`: `run_test_suite` + `format_test_suite_result` の結果検証
+
+---
+
 ## [v80.0.0] — 2026-08-16 — Favnir 3.0 宣言 ★クリーンアップ
 
 ### Declaration

@@ -65399,3 +65399,41 @@ mod v80000_tests {
         assert!(README.contains("Favnir 3.0"), "README.md must mention Favnir 3.0");
     }
 }
+
+#[cfg(test)]
+mod v80100_tests {
+    use fav_core::test_framework::*;
+
+    #[test]
+    fn test_suite_type_exists() {
+        let suite = TestSuite {
+            name: "my_suite".to_string(),
+            cases: vec![
+                TestCase { name: "t1".to_string(), status: TestStatus::Pass, message: None },
+                TestCase { name: "t2".to_string(), status: TestStatus::Fail, message: Some("err".to_string()) },
+                TestCase { name: "t3".to_string(), status: TestStatus::Skip, message: None },
+            ],
+        };
+        assert_eq!(suite.name, "my_suite");
+        assert_eq!(suite.cases.len(), 3);
+    }
+
+    #[test]
+    fn test_case_run_formats_result() {
+        let suite = TestSuite {
+            name: "suite".to_string(),
+            cases: vec![
+                TestCase { name: "a".to_string(), status: TestStatus::Pass, message: None },
+                TestCase { name: "b".to_string(), status: TestStatus::Fail, message: None },
+            ],
+        };
+        let result = run_test_suite(&suite);
+        assert_eq!(result.passed, 1);
+        assert_eq!(result.failed, 1);
+        assert_eq!(result.skipped, 0);
+        let formatted = format_test_suite_result(&result);
+        assert!(formatted.contains("passed"));
+        assert!(formatted.contains("failed"));
+        assert!(formatted.contains("skipped"));
+    }
+}

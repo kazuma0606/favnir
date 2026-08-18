@@ -65585,4 +65585,39 @@ mod v80400_tests {
         assert_eq!(result.counter_example, Some(vec![-2.5]));
         assert_eq!(format_property_test_result(&result), "FAIL: counter_example=[-2.5]");
     }
+
+    #[test]
+    fn property_test_non_positive_pass_and_fail() {
+        let t = PropertyTest { name: "np".to_string(), kind: InvariantKind::NonPositive, samples: 2 };
+        let pass = run_property_test(&t, &[-1.0_f64, 0.0]);
+        assert!(pass.passed);
+        let fail = run_property_test(&t, &[-1.0_f64, 3.0]);
+        assert!(!fail.passed);
+        assert_eq!(fail.counter_example, Some(vec![3.0]));
+    }
+
+    #[test]
+    fn property_test_finite_detects_nan_and_inf() {
+        let t = PropertyTest { name: "finite".to_string(), kind: InvariantKind::Finite, samples: 2 };
+        let pass = run_property_test(&t, &[1.0_f64, 2.0]);
+        assert!(pass.passed);
+        let fail_nan = run_property_test(&t, &[f64::NAN, 1.0]);
+        assert!(!fail_nan.passed);
+        let fail_inf = run_property_test(&t, &[f64::INFINITY]);
+        assert!(!fail_inf.passed);
+    }
+
+    #[test]
+    fn property_test_suite_runs_all() {
+        let suite = PropertyTestSuite {
+            tests: vec![
+                PropertyTest { name: "a".to_string(), kind: InvariantKind::NonNegative, samples: 1 },
+                PropertyTest { name: "b".to_string(), kind: InvariantKind::NonPositive, samples: 1 },
+            ],
+        };
+        let results = run_property_test_suite(&suite, &[0.0_f64]);
+        assert_eq!(results.len(), 2);
+        assert!(results[0].passed); // 0.0 >= 0 ✓
+        assert!(results[1].passed); // 0.0 <= 0 ✓
+    }
 }

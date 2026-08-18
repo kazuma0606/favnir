@@ -186,8 +186,8 @@ pub enum InvariantKind {
     NonNegative,
     /// 全値 <= 0.0 であること。
     NonPositive,
-    /// NaN/Inf を含まないこと。
-    NonNull,
+    /// NaN / Inf を含まない有限値であること（f64::is_finite()）。
+    Finite,
 }
 
 /// プロパティベーステストの定義。
@@ -195,6 +195,9 @@ pub enum InvariantKind {
 pub struct PropertyTest {
     pub name: String,
     pub kind: InvariantKind,
+    /// 呼び出し元が管理するサンプル数のメタデータ。
+    /// `run_property_test` は `data` を直接受け取るため、このフィールドは
+    /// 実行ロジックには影響しない（外部ジェネレータへのヒントとして使用する）。
     pub samples: usize,
 }
 
@@ -202,7 +205,7 @@ pub struct PropertyTest {
 #[derive(Debug)]
 pub struct PropertyTestResult {
     pub passed: bool,
-    /// 不変条件に違反した最初の値（違反がなければ None）。
+    /// 不変条件に違反した最初の値（1 要素のみ）。違反がなければ None。
     pub counter_example: Option<Vec<f64>>,
 }
 
@@ -214,7 +217,7 @@ pub fn run_property_test(test: &PropertyTest, data: &[f64]) -> PropertyTestResul
     let violation = match test.kind {
         InvariantKind::NonNegative => data.iter().find(|&&v| v < 0.0).copied(),
         InvariantKind::NonPositive => data.iter().find(|&&v| v > 0.0).copied(),
-        InvariantKind::NonNull => data.iter().find(|&&v| v.is_nan() || v.is_infinite()).copied(),
+        InvariantKind::Finite => data.iter().find(|&&v| !v.is_finite()).copied(),
     };
     match violation {
         None => PropertyTestResult { passed: true, counter_example: None },
@@ -237,4 +240,9 @@ pub fn format_property_test_result(result: &PropertyTestResult) -> String {
 #[derive(Debug)]
 pub struct PropertyTestSuite {
     pub tests: Vec<PropertyTest>,
+}
+
+/// スイート内の全テストを `data` に対して実行し、結果一覧を返す。
+pub fn run_property_test_suite(suite: &PropertyTestSuite, data: &[f64]) -> Vec<PropertyTestResult> {
+    suite.tests.iter().map(|t| run_property_test(t, data)).collect()
 }

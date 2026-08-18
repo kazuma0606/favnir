@@ -379,8 +379,9 @@ pub struct ColumnSnapshot {
     pub nullable: bool,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct SchemaSnapshot {
+    /// パイプラインの識別子。compare_schema_snapshots では比較対象外（メタデータ）。
     pub pipeline_name: String,
     pub columns: Vec<ColumnSnapshot>,
 }

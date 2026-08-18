@@ -65799,4 +65799,42 @@ mod v80700_tests {
         assert!(schema_diff_is_breaking(&diff));
         assert_eq!(format_schema_diff(&diff), "added=[note], removed=[amount], changed=[]");
     }
+
+    #[test]
+    fn schema_snapshot_detects_changed_column() {
+        // type_name 変更 → changed に記録、is_breaking = true
+        let b = baseline();
+        let current = SchemaSnapshot {
+            pipeline_name: "orders".to_string(),
+            columns: vec![
+                ColumnSnapshot { name: "id".to_string(),     type_name: "String".to_string(), nullable: false }, // Int → String
+                ColumnSnapshot { name: "amount".to_string(), type_name: "Float".to_string(),  nullable: true  }, // nullable 変更
+            ],
+        };
+        let diff = compare_schema_snapshots(&current, &b);
+        assert!(diff.added.is_empty());
+        assert!(diff.removed.is_empty());
+        assert_eq!(diff.changed, vec!["amount", "id"]); // ソート済み
+        assert!(schema_diff_is_breaking(&diff));
+    }
+
+    #[test]
+    fn schema_snapshot_added_only_is_not_breaking() {
+        // 列追加のみ → added に記録、is_breaking = false（後方互換）
+        let b = baseline();
+        let current = SchemaSnapshot {
+            pipeline_name: "orders".to_string(),
+            columns: vec![
+                ColumnSnapshot { name: "id".to_string(),     type_name: "Int".to_string(),    nullable: false },
+                ColumnSnapshot { name: "amount".to_string(), type_name: "Float".to_string(),  nullable: false },
+                ColumnSnapshot { name: "note".to_string(),   type_name: "String".to_string(), nullable: true  },
+            ],
+        };
+        let diff = compare_schema_snapshots(&current, &b);
+        assert_eq!(diff.added, vec!["note"]);
+        assert!(diff.removed.is_empty());
+        assert!(diff.changed.is_empty());
+        assert!(!schema_diff_is_breaking(&diff));
+        assert_eq!(format_schema_diff(&diff), "added=[note], removed=[], changed=[]");
+    }
 }

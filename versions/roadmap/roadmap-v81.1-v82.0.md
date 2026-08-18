@@ -12,6 +12,7 @@ Status: 未着手（v81.0.0 完了後に開始）
 - 直前完了: v81.0.0「Test-Driven Data 1.0 宣言」（tests = 3,831）
 - 本スプリントは Quality-First Era の第 2 スプリント
 - 目標: v82.0.0「Data Quality 2.0 宣言」（tests = 3,853）
+- **依存**: v80.7.0 で `SchemaSnapshot` / `SchemaSnapshotDiff` / `ColumnSnapshot` が導入済みであること（v81.3.0 の `SchemaDriftDetector` が参照する）
 
 ### スプリントの性格
 
@@ -116,7 +117,7 @@ Favnir 3.0 の `ProvenanceTag` と品質スコアを統合し、
 「どのソースから来たデータがどの品質スコアを持つか」を追跡する。
 
 **実装内容:**
-- `ProvenanceQualityEntry` 構造体（`source_name: String`, `provenance_hash: String`, `quality_score: f64`）
+- `ProvenanceQualityEntry` 構造体（`source_name: String`, `provenance_hash: String`, `quality_score: f64`）（`provenance_hash` は本バージョンでは `String` スタブとして扱う）
 - `ProvenanceQualityReport` 構造体（`entries: Vec<ProvenanceQualityEntry>`, `pipeline_name: String`）
 - `build_provenance_quality_report(entries: Vec<ProvenanceQualityEntry>, pipeline: &str) -> ProvenanceQualityReport`
 - `format_provenance_quality_report(report: &ProvenanceQualityReport) -> String`
@@ -167,7 +168,7 @@ Favnir 3.0 の `ProvenanceTag` と品質スコアを統合し、
 時系列・バッチ間の異常値を Z スコアで検出する型を追加する。
 
 **実装内容:**
-- `AnomalyDetector` 構造体（`baseline_stats: DistributionStats`, `z_threshold: f64`）
+- `AnomalyDetector` 構造体（`baseline_stats: DistributionStats`, `z_threshold: f64`）（依存: v81.2.0 の `DistributionStats` / `compute_distribution_stats`）
 - `AnomalyResult` 構造体（`is_anomaly: bool`, `z_score: f64`, `value: f64`）
 - `AnomalyDetector::from_baseline(values: &[f64], z_threshold: f64) -> AnomalyDetector`
 - `detect_anomaly(detector: &AnomalyDetector, value: f64) -> AnomalyResult`
@@ -186,7 +187,7 @@ v81.1〜v81.8 の全スプリント統合確認。バグ修正のみ。
 
 **実装内容:**
 - v81.1〜v81.8 の全テスト通過確認（`cargo test` 全 pass）
-- `fav quality report` コマンド E2E 動作確認
+- `fav quality report` コマンド E2E 動作確認（サンプル CSV 入力 → `QualityViolation` / `QualityScore` 出力テキスト検証）
 - `QualityGate` + `SchemaDriftDetector` 連携確認
 - バグ修正のみ受け入れ（新機能追加なし）
 
@@ -207,8 +208,8 @@ v81.1〜v81.8 の全スプリント統合確認。バグ修正のみ。
 - `cargo clean` 実施
 - `Cargo.toml` バージョンを `82.0.0` に更新
 - `CHANGELOG.md` / `MILESTONE.md` / `README.md` 更新
-- `versions/current.md` 更新
-- マスターロードマップの本スプリントを「完了」に更新
+- `versions/current.md` の現行マスターロードマップが `roadmap-v80.1-v85.0.md` を指していることを確認してから更新
+- `roadmap-v80.1-v85.0.md` の Sprint 2 バージョン一覧テーブルを全行「完了」に更新
 
 **完了条件**: `v82000_tests` 4 件（3849 + 4 = 3853）
 - `cargo_toml_version_is_82_0_0`

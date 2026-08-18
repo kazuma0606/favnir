@@ -91,7 +91,7 @@ v85.0 — Favnir 4.0 宣言       : 「Quality-First 言語の完成」
 - `run_test_suite(suite: &TestSuite) -> TestSuiteResult`
 - `TestSuiteResult` 構造体（`passed: usize`, `failed: usize`, `skipped: usize`）
 - `format_test_suite_result(result: &TestSuiteResult) -> String`
-- `cmd_test` スタブ（`fav test` コマンド骨格）
+- `cmd_test(args: &[String]) -> i32` スタブ（`fav test` コマンド骨格、`main.rs` の match アームに追加）
 
 **完了条件**: Rust テスト 2 件（3809 + 2 = 3811）
 - `test_suite_type_exists`
@@ -241,6 +241,7 @@ v80.1〜v80.8 の全スプリント統合確認。バグ修正のみ。
 - `Cargo.toml` バージョンを `81.0.0` に更新
 - `CHANGELOG.md` / `MILESTONE.md` / `README.md` 更新
 - `versions/current.md` 更新
+- 本ファイル（`roadmap-v80.1-v85.0.md`）の Sprint 1 バージョン一覧テーブルを全行「完了」に更新
 
 **完了条件**: `v81000_tests` 4 件（3827 + 4 = 3831）
 - `cargo_toml_version_is_81_0_0`
@@ -280,6 +281,7 @@ v80.1〜v80.8 の全スプリント統合確認。バグ修正のみ。
 - `Cargo.toml` バージョンを `82.0.0` に更新
 - `CHANGELOG.md` / `MILESTONE.md` / `README.md` 更新
 - `versions/current.md` 更新
+- 本ファイル（`roadmap-v80.1-v85.0.md`）の Sprint 2 バージョン一覧テーブルを全行「完了」に更新
 
 **宣言文**:
 > 「品質が型になった。外れ値はコンパイル時に検出され、
@@ -324,6 +326,7 @@ v80.1〜v80.8 の全スプリント統合確認。バグ修正のみ。
 - `Cargo.toml` バージョンを `83.0.0` に更新
 - `CHANGELOG.md` / `MILESTONE.md` / `README.md` 更新
 - `versions/current.md` 更新
+- 本ファイル（`roadmap-v80.1-v85.0.md`）の Sprint 3 バージョン一覧テーブルを全行「完了」に更新
 
 **宣言文**:
 > 「パイプライン間の約束が型になった。
@@ -369,6 +372,7 @@ v80.1〜v80.8 の全スプリント統合確認。バグ修正のみ。
 - `Cargo.toml` バージョンを `84.0.0` に更新
 - `CHANGELOG.md` / `MILESTONE.md` / `README.md` 更新
 - `versions/current.md` 更新
+- 本ファイル（`roadmap-v80.1-v85.0.md`）の Sprint 4 バージョン一覧テーブルを全行「完了」に更新
 
 **宣言文**:
 > 「メトリクスが型になり、アラートが型になり、SLO が型になった。
@@ -406,6 +410,13 @@ v80.1〜v80.8 の全スプリント統合確認。バグ修正のみ。
 ---
 
 ### v85.0.0 — Favnir 4.0 宣言
+
+**クリーンアップ作業:**
+- `cargo clean` 実施
+- `Cargo.toml` バージョンを `85.0.0` に更新
+- `CHANGELOG.md` / `MILESTONE.md` / `README.md` 更新
+- `versions/current.md` 更新
+- 本ファイル（`roadmap-v80.1-v85.0.md`）の Sprint 5 バージョン一覧テーブルを全行「完了」に更新
 
 **宣言文**:
 > 「テストが型となり、品質が型となり、契約が型となり、観測が型となった。

@@ -101,7 +101,7 @@ Favnir 3.0 の `!Adaptive` / `!Cached` エフェクトと連携させる。
 - `ContractViolation` 構造体（`field: String`, `kind: ViolationKind`, `row_index: Option<usize>`）
 - `ContractViolationReport` 構造体（`contract_name: String`, `violations: Vec<ContractViolation>`）
 - `format_violation_report(report: &ContractViolationReport) -> String`
-- `violation_severity(violation: &ContractViolation) -> RuleSeverity`
+- `violation_severity(violation: &ContractViolation) -> RuleSeverity`（`RuleSeverity` は v81.1.0 定義、`quality.rs` 相当から参照）
 
 **完了条件**: Rust テスト 2 件（3859 + 2 = 3861）
 - `violation_report_shows_type_mismatch`
@@ -114,7 +114,7 @@ Favnir 3.0 の `!Adaptive` / `!Cached` エフェクトと連携させる。
 実際のデータスキーマから `IoContract` を自動生成する。
 
 **実装内容:**
-- `infer_contract_from_schema(schema: &SchemaSnapshot, name: &str, version: &str) -> IoContract`
+- `infer_contract_from_schema(schema: &SchemaSnapshot, name: &str, version: &str) -> IoContract`（`SchemaSnapshot` は v80.7.0 定義、`test_framework.rs` 相当から参照）
 - `infer_field_type_from_str(type_name: &str) -> ContractFieldType`
 - `merge_contracts(base: &IoContract, override_: &IoContract) -> IoContract`
 - `format_contract_as_toml(contract: &IoContract) -> String`
@@ -154,7 +154,7 @@ Favnir 3.0 の `!Adaptive` / `!Cached` エフェクトと連携させる。
 
 **完了条件**: Rust テスト 2 件（3865 + 2 = 3867）
 - `verify_contract_cmd_passes_valid_contract`
-- `verify_contract_cmd_fails_breaking_change`
+- `verify_contract_cmd_fails_breaking_change`（v82.6.0 の後方互換チェックを `fav verify --contract` 経由で呼び出す統合テスト）
 
 ---
 
@@ -186,9 +186,9 @@ v82.1〜v82.8 の全スプリント統合確認。バグ修正のみ。
 - `fav verify --contract` E2E 動作確認
 - バグ修正のみ受け入れ（新機能追加なし）
 
-**完了条件**: Rust テスト 2 件（3869 + 2 = 3871）
-- `contracts_full_sprint_all_stable`
-- `registry_and_sla_integrated`
+**完了条件**: Rust テスト 2 件（3869 + 2 = 3871）（統合確認テスト — 新規実装なし）
+- `contracts_full_sprint_all_stable`（v82.1〜v82.8 の全テストが pass することを確認）
+- `registry_and_sla_integrated`（`ContractRegistry` + `SlaContract` + `DependencyGraph` の連携シナリオが通ることを確認）
 
 ---
 
@@ -204,8 +204,8 @@ v82.1〜v82.8 の全スプリント統合確認。バグ修正のみ。
 - `cargo clean` 実施
 - `Cargo.toml` バージョンを `83.0.0` に更新
 - `CHANGELOG.md` / `MILESTONE.md` / `README.md` 更新
-- `versions/current.md` 更新
-- マスターロードマップの本スプリントを「完了」に更新
+- `versions/current.md` の現行マスターロードマップが `roadmap-v80.1-v85.0.md` を指していることを確認してから更新
+- `roadmap-v80.1-v85.0.md` の Sprint 3 バージョン一覧テーブルを全行「完了」に更新
 
 **完了条件**: `v83000_tests` 4 件（3871 + 4 = 3875）
 - `cargo_toml_version_is_83_0_0`

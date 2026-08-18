@@ -1,12 +1,14 @@
 # Current — Favnir 進行状況
 
-最終更新: 2026-08-16 (v80.0.0)
+最終更新: 2026-08-18 (v83.0.0)
 
 ---
 
 ## 現行マスターロードマップ
 
-[roadmap/roadmap-v75.1-v80.0.md](roadmap/roadmap-v75.1-v80.0.md)
+[roadmap/roadmap-v80.1-v85.0.md](roadmap/roadmap-v80.1-v85.0.md)
+
+前フェーズ（完了）: [roadmap/roadmap-v75.1-v80.0.md](roadmap/roadmap-v75.1-v80.0.md)
 
 前フェーズ（完了）: [roadmap/roadmap-v70.1-v75.0.md](roadmap/roadmap-v70.1-v75.0.md)
 
@@ -24,23 +26,23 @@
 
 ## 最新安定版
 
-**v80.0.0** — Favnir 3.0 宣言 ★クリーンアップ — 3809 tests（2026-08-16）
+**v83.0.0** — Pipeline Contracts 1.0 宣言 — 3875 tests（2026-08-18）
 
-- `cargo install fav --version "80.0.0"`
+- `cargo install fav --version "83.0.0"`
 
-前バージョン: v75.0.0 — Favnir 2.0 宣言 — 3787 tests
+前バージョン: v80.0.0 — Favnir 3.0 宣言 — 3809 tests
 
 ---
 
 ## 進行中バージョン
 
-**v80.0.0**（Favnir 3.0 宣言 ★クリーンアップ — 完了）
+**v83.1.0〜v84.0.0**（Observability 2.0 スプリント — Quality-First Era Sprint 4）
 
 ---
 
 ## 次に切る版
 
-**v80.1.0**（次フェーズ）
+**v84.1.0**（Favnir 4.0 宣言スプリント開始）
 
 ---
 
@@ -81,5 +83,9 @@
 | v73.0 — Developer Exp 2.0 | **完了** | v72.1〜v72.9（VS Code・AI アシスタント・REPL・Playground・fav learn）（2026-08-13） |
 | v74.0 — Production Proven | **完了** | v73.1〜v73.9 完了後（2026-08-13） |
 | v75.0 — Favnir 2.0 | **完了** | v74.1〜v74.9（統合・Rune マーケット・宣言）（2026-08-14） |
+| v80.0 — Favnir 3.0 | **完了** | v75.1〜v79.9（時間型・来歴型・証明可能型・実行戦略）（2026-08-16） |
+| v81.0 — Test-Driven Data 1.0 | **完了** | v80.1〜v80.9（fav test・GoldenDataset・SchemaSnapshot）（2026-08-16） |
+| v82.0 — Data Quality 2.0 | **完了** | v81.1〜v81.9（QualityRule・QualityGate・AnomalyDetector）（2026-08-16） |
+| v83.0 — Pipeline Contracts 1.0 | **完了** | v82.1〜v82.9（IoContract・SlaContract・ContractRegistry）（2026-08-18） |
 
 詳細は [INDEX.md](INDEX.md) / [roadmap/roadmap-v70.1-v75.0.md](roadmap/roadmap-v70.1-v75.0.md) を参照。

@@ -12,6 +12,7 @@ Status: 未着手（v84.0.0 完了後に開始）
 - 直前完了: v84.0.0「Observability 2.0 宣言」（tests = 3,897）
 - 本スプリントは Quality-First Era の最終スプリント（Sprint 5）
 - 目標: v85.0.0「Favnir 4.0 宣言」（tests = 3,919）
+- **着手前確認**: `versions/current.md` の現行マスターロードマップが `roadmap-v80.1-v85.0.md` を指していること、最新安定版が v84.0.0 になっていることを確認してから開始する
 
 ### スプリントの性格
 
@@ -52,7 +53,13 @@ infra/e2e-demo/favnir4-showcase/
 ```
 
 **実装内容:**
-- `infra/e2e-demo/favnir4-showcase/pipeline.fav` — 骨格（各ステージのプレースホルダ）
+- `infra/e2e-demo/favnir4-showcase/pipeline.fav` — 骨格（各ステージのプレースホルダ）。Favnir 構文サンプル:
+  ```favnir
+  fn load_stage(ctx: AppCtx) -> Result<List<Row>, String> {
+      bind rows <- ctx.io.read_csv("data/input.csv")
+      Result.ok(rows)
+  }
+  ```
 - `infra/e2e-demo/favnir4-showcase/fav.toml` — `[quality]` / `[contract]` / `[observe]` 設定
 - `infra/e2e-demo/favnir4-showcase/contract.fav` — `Favnir4ShowcaseContract` 宣言
 - `infra/e2e-demo/favnir4-showcase/README.md` — 実行手順
@@ -138,9 +145,12 @@ site/content/docs/v4/
 ```
 
 **実装内容:**
-- `site/content/docs/v4/test-driven-data.mdx`
-- `site/content/docs/v4/migration-v3-v4.mdx`
-- （他 3 ファイルは後続コミットで追加）
+- `site/content/docs/v4/test-driven-data.mdx`（`fav test` / `TestSuite` / `GoldenDataset` / `SchemaSnapshot` の解説）
+- `site/content/docs/v4/data-quality.mdx`（`QualityRule` / `QualityGate` / `AnomalyDetector` の解説）
+- `site/content/docs/v4/pipeline-contracts.mdx`（`IoContract` / `SlaContract` / `ContractRegistry` の解説）
+- `site/content/docs/v4/observability.mdx`（`PipelineMetrics` / `AlertRule` / `SloStatus` / `HealthDashboard` の解説）
+- `site/content/docs/v4/migration-v3-v4.mdx`（v3（v80.0）→ v4（v85.0）移行ガイド）
+- 注: test-driven-data.mdx と migration-v3-v4.mdx は初回コミットで追加、残り 3 ファイルは同スプリント内の後続コミットで追加
 
 **完了条件**: Rust テスト 2 件（3907 + 2 = 3909）
 - `docs_v4_test_driven_data_exists`
@@ -171,11 +181,11 @@ Quality-First 機能に対応した OSS コントリビュートガイドと RFC
 **実装内容:**
 - `cargo test --release` で全テスト通過確認
 - `PipelineMetrics` / `QualityCheck` / `ContractRegistry` の実行パス最適化（不要な Clone 削減）
-- `fav bench --all` でベースラインとの乖離確認
+- `fav bench --all` でベースラインとの乖離確認（`benchmarks/compare.fav` を使用）
 
 **完了条件**: Rust テスト 2 件（3911 + 2 = 3913）
-- `perf_cargo_test_release_passes`
-- `perf_no_regression_from_v80_baseline`
+- `perf_cargo_test_release_passes`（`cargo test --release` がゼロ失敗で完了することを確認するテスト）
+- `perf_no_regression_from_v80_baseline`（`benchmarks/v80.0.0.json` のベースラインと現在の `duration_ms` を比較し、+20% 以内であることを確認するテスト）
 
 ---
 
@@ -212,14 +222,14 @@ v84.1〜v84.8 の全機能・v80.1〜v84.8 の全スプリントを通しで確�
 - `cargo clean` 実施
 - `Cargo.toml` バージョンを `85.0.0` に更新
 - `CHANGELOG.md` / `MILESTONE.md` / `README.md` 更新
-- `versions/current.md` 更新
-- マスターロードマップの本スプリントを「完了」に更新
+- `versions/current.md` の現行マスターロードマップが `roadmap-v80.1-v85.0.md` を指していることを確認してから更新
+- `roadmap-v80.1-v85.0.md` の Sprint 5 バージョン一覧テーブルを全行「完了」に更新
 
 **完了条件**: `v85000_tests` 4 件（3915 + 4 = 3919）
 - `cargo_toml_version_is_85_0_0`
 - `changelog_has_v85_0_0`
 - `milestone_has_favnir_4`
-- `readme_mentions_favnir_4`
+- `readme_mentions_favnir_4`（`README.md` に `"Favnir 4.0"` という文字列が含まれていることを確認）
 
 ---
 

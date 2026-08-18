@@ -13,6 +13,11 @@ Status: 未着手（v80.0.0 完了後に開始）
 - 本スプリントは Quality-First Era の第 1 スプリント
 - 目標: v81.0.0「Test-Driven Data 1.0 宣言」（tests = 3,831）
 
+### 着手前チェックリスト
+
+- `versions/current.md` の現行マスターロードマップが `roadmap-v80.1-v85.0.md` を指していることを確認する
+- `versions/v80-v85/v80.1.0/` ディレクトリを作成し、spec.md / plan.md / tasks.md を準備すること
+
 ### スプリントの性格
 
 `fav test` コマンドとテストフレームワーク型基盤を新規構築する。
@@ -49,7 +54,7 @@ A（新機能）70% + B（統合）30% の構成。
 - `run_test_suite(suite: &TestSuite) -> TestSuiteResult`
 - `TestSuiteResult` 構造体（`passed: usize`, `failed: usize`, `skipped: usize`）
 - `format_test_suite_result(result: &TestSuiteResult) -> String`
-- `cmd_test` スタブ（`fav test` コマンド骨格）
+- `cmd_test(args: &[String]) -> i32` スタブ（`fav test` コマンド骨格、`main.rs` の match アームに追加）
 
 **完了条件**: Rust テスト 2 件（3809 + 2 = 3811）
 - `test_suite_type_exists`
@@ -94,8 +99,8 @@ A（新機能）70% + B（統合）30% の構成。
 
 ## v80.4.0 — プロパティベーステスト（`PipelineInvariant` 連携）
 
-Favnir 3.0 の `PipelineInvariant` / `generate_counter_example_values` を
-テストフレームワークに統合する。
+Favnir 3.0 の `AggregateInvariant` / `generate_counter_example_values` を
+テストフレームワークに統合する（概念名: `PipelineInvariant`）。
 
 **実装内容:**
 - `PropertyTest` 構造体（`name: String`, `invariant: AggregateInvariant`, `samples: usize`）
@@ -187,9 +192,9 @@ v80.1〜v80.8 の全スプリント統合確認。バグ修正のみ。
 - `fav test` コマンド E2E 動作確認
 - バグ修正のみ受け入れ（新機能追加なし）
 
-**完了条件**: Rust テスト 2 件（3825 + 2 = 3827）
+**完了条件**: Rust テスト 2 件（3825 + 2 = 3827）（統合確認テスト — 新規実装なし）
 - `test_framework_full_sprint_all_stable`
-- `test_framework_e2e_pipeline_tested`
+- `test_framework_e2e_pipeline_tested`（既存 E2E パイプラインが `fav test` で通ることを確認）
 
 ---
 
@@ -204,7 +209,7 @@ v80.1〜v80.8 の全スプリント統合確認。バグ修正のみ。
 - `Cargo.toml` バージョンを `81.0.0` に更新
 - `CHANGELOG.md` / `MILESTONE.md` / `README.md` 更新
 - `versions/current.md` 更新
-- マスターロードマップの本スプリントを「完了」に更新
+- `roadmap-v80.1-v85.0.md` の Sprint 1 バージョン一覧テーブルを全行「完了」に更新
 
 **完了条件**: `v81000_tests` 4 件（3827 + 4 = 3831）
 - `cargo_toml_version_is_81_0_0`

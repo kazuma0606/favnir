@@ -312,6 +312,6 @@ v79.1〜v79.8 の全機能・v75.1〜v79.8 の全スプリントを通しで確�
 
 - マスターロードマップ: [roadmap-v75.1-v80.0.md](roadmap-v75.1-v80.0.md)
 - 前スプリント: [roadmap-v78.1-v79.0.md](roadmap-v78.1-v79.0.md)
-- 次フェーズ: （未計画 — v80.0.0 宣言後に策定）
+- 次フェーズ: [roadmap-v80.1-v81.0.md](roadmap-v80.1-v81.0.md)（Quality-First Era Sprint 1）
 - 達成宣言: `MILESTONE.md`
 - 進行状況: `versions/current.md`

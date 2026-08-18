@@ -12,6 +12,7 @@ Status: 未着手（v83.0.0 完了後に開始）
 - 直前完了: v83.0.0「Pipeline Contracts 1.0 宣言」（tests = 3,875）
 - 本スプリントは Quality-First Era の第 4 スプリント
 - 目標: v84.0.0「Observability 2.0 宣言」（tests = 3,897）
+- **着手前確認**: `versions/current.md` の現行マスターロードマップが `roadmap-v80.1-v85.0.md` を指していること、最新安定版が v83.0.0 になっていることを確認してから開始する
 
 ### スプリントの性格
 
@@ -63,7 +64,7 @@ A（新機能）50% + B（統合）50% の構成。
 
 **実装内容:**
 - `AlertSeverity` enum（`Critical` / `Warning` / `Info`）
-- `AlertThreshold` 構造体（`metric: String`, `operator: ThresholdOp`, `value: f64`）
+- `AlertThreshold` 構造体（`metric: String`, `operator: ThresholdOp`, `value: f64`）（`metric` は `"total_duration_ms"` / `"rows_failed"` / `"rows_processed"` 等、`PipelineMetrics` のフィールド名に対応する文字列）
 - `ThresholdOp` enum（`GreaterThan` / `LessThan` / `EqualTo`）
 - `AlertRule` 構造体（`name: String`, `threshold: AlertThreshold`, `severity: AlertSeverity`, `message: String`）
 - `AlertFiring` 構造体（`rule: AlertRule`, `current_value: f64`, `fired_at: String`）
@@ -137,7 +138,7 @@ v29.0 の OTel 統合を強化し、スパン伝播を型で扱う。
 - `PerfRegression` 構造体（`pipeline_name: String`, `baseline: PerfBaseline`, `current_ms: u64`, `regression_pct: f64`）
 - `detect_perf_regression(baseline: &PerfBaseline, current_ms: u64, threshold_pct: f64) -> Option<PerfRegression>`
 - `format_regression_report(regression: &PerfRegression) -> String`
-- `PerfBaseline::from_samples(pipeline_name: &str, samples_ms: &[u64]) -> PerfBaseline`
+- `PerfBaseline::from_samples(pipeline_name: &str, samples_ms: &[u64]) -> PerfBaseline`（サンプルをソートして百分位数インデックス `samples[n * pct / 100]` で p50/p95/p99 を算出）
 
 **完了条件**: Rust テスト 2 件（3885 + 2 = 3887）
 - `perf_regression_detected_above_threshold`
@@ -153,7 +154,7 @@ v29.0 の OTel 統合を強化し、スパン伝播を型で扱う。
 - `ObserveOptions` 構造体（`pipeline_name: String`, `format: ObserveFormat`, `show_alerts: bool`, `show_slo: bool`）
 - `ObserveFormat` enum（`Text` / `Json`）
 - `ObserveReport` 構造体（`metrics: PipelineMetrics`, `alerts: Vec<AlertFiring>`, `slo_statuses: Vec<SloStatus>`）
-- `cmd_observe` 関数（`fav observe` コマンドハンドラ）
+- `cmd_observe` 関数（`fav observe` コマンドハンドラ、CLI フラグ: `--pipeline <name>` / `--format text|json` / `--alerts` / `--slo`）
 - `format_observe_report(report: &ObserveReport, format: &ObserveFormat) -> String`
 
 **完了条件**: Rust テスト 2 件（3887 + 2 = 3889）
@@ -189,9 +190,9 @@ v83.1〜v83.8 の全スプリント統合確認。バグ修正のみ。
 - `HealthDashboard` + `AlertRule` + `SloStatus` 連携確認
 - バグ修正のみ受け入れ（新機能追加なし）
 
-**完了条件**: Rust テスト 2 件（3891 + 2 = 3893）
-- `observability_full_sprint_all_stable`
-- `health_dashboard_and_alerts_integrated`
+**完了条件**: Rust テスト 2 件（3891 + 2 = 3893）（統合確認テスト — 新規実装なし）
+- `observability_full_sprint_all_stable`（v83.1〜v83.8 の全テストが pass することを確認）
+- `health_dashboard_and_alerts_integrated`（`HealthDashboard` + `AlertRule` + `SloStatus` の連携シナリオが通ることを確認）
 
 ---
 
@@ -205,14 +206,14 @@ v83.1〜v83.8 の全スプリント統合確認。バグ修正のみ。
 - `cargo clean` 実施
 - `Cargo.toml` バージョンを `84.0.0` に更新
 - `CHANGELOG.md` / `MILESTONE.md` / `README.md` 更新
-- `versions/current.md` 更新
-- マスターロードマップの本スプリントを「完了」に更新
+- `versions/current.md` の現行マスターロードマップが `roadmap-v80.1-v85.0.md` を指していることを確認してから更新
+- `roadmap-v80.1-v85.0.md` の Sprint 4 バージョン一覧テーブルを全行「完了」に更新
 
 **完了条件**: `v84000_tests` 4 件（3893 + 4 = 3897）
 - `cargo_toml_version_is_84_0_0`
 - `changelog_has_v84_0_0`
 - `milestone_has_observability_2`
-- `readme_mentions_fav_observe`
+- `readme_mentions_fav_observe`（`README.md` に `"fav observe"` という文字列が含まれていることを確認）
 
 ---
 

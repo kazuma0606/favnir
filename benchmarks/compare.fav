@@ -1,10 +1,10 @@
 import rune "json"
 
-fn parse_flag(args: List<String>, flag: String) -> Result<String, String> {
-  bind idx <- List.find_index(args, |a| a == flag)
-  match List.get(args, idx + 1) {
-    ok(v)  => Result.ok(v)
-    err(_) => Result.err(f"missing value for {flag}")
+// parse_flag: List から --flag value を探して value を返す（Option）
+fn parse_flag(args: List<String>, flag: String) -> Option<String> {
+  match List.find_index(args, |a| a == flag) {
+    err(_)  => Option.none()
+    ok(idx) => List.get(args, idx + 1)
   }
 }
 
@@ -17,63 +17,110 @@ fn pct_change(baseline: Float, current: Float) -> Float {
   else { (current - baseline) / baseline * 100.0 }
 }
 
+// check_regressions: b_metrics / c_metrics は Map<String, Float>
 fn check_regressions(
   b_metrics: Map<String, Float>,
   c_metrics: Map<String, Float>,
   threshold: Int
 ) -> List<String> {
-  bind pairs <- Map.entries(c_metrics)
-  // filter_map: ok(v) で keep、err(()) で除外
+  bind pairs <- Map.to_list(c_metrics)
   List.filter_map(pairs, |kv| {
-    bind key <- kv.key
-    bind cur <- kv.value
+    bind key <- kv.first
+    bind cur <- kv.second
     match Map.get(b_metrics, key) {
-      err(_)   => err(())  // ベースラインにないキーはスキップ
-      ok(base) => {
+      None       => Option.none()
+      Some(base) => {
         bind pct <- pct_change(base, cur)
-        if pct > Float.from_int(threshold) {
-          ok(f"{key}: +{pct}% (baseline={base}, current={cur})")
-        } else { err(()) }  // 閾値内 → スキップ
+        if pct > threshold * 1.0 {
+          Option.some(String.concat(key, String.concat(": +", String.concat(Float.to_string(pct), String.concat("% (baseline=", String.concat(Float.to_string(base), String.concat(", current=", String.concat(Float.to_string(cur), ")"))))))))
+        } else { Option.none() }
       }
     }
   })
 }
 
-fn write_results_md(ctx: AppCtx, data: JsonValue) -> Result<Unit, String> {
-  bind version <- Json.get_string(data, "version")
-  bind ts      <- Json.get_string(data, "timestamp")
-  bind metrics <- Json.get_object(data, "metrics")
-  bind entries <- Map.entries(metrics)
-  bind lines   <- List.map(entries, |kv| f"| {kv.key} | {kv.value} |")
-  bind body    <- String.join(lines, "\n")
-  ctx.io.write_file_raw("benchmarks/results.md", f"# Benchmark Results\n\nVersion: {version} / {ts}\n\n| Metric | Value |\n|---|---|\n{body}\n")
+fn write_results_md(ctx: AppCtx, data: JsonValue, version: String, ts: String) -> Result<Unit, String> {
+  match Json.get_float_map(data, "metrics") {
+    None => Result.err("metrics field not found in JSON")
+    Some(metrics) => {
+      bind entries <- Map.to_list(metrics)
+      bind lines   <- List.map(entries, |kv| String.concat("| ", String.concat(kv.first, String.concat(" | ", String.concat(Float.to_string(kv.second), " |")))))
+      bind body    <- String.join(lines, "\n")
+      ctx.io.write_file_raw("benchmarks/results.md", String.concat("# Benchmark Results\n\nVersion: ", String.concat(version, String.concat(" / ", String.concat(ts, String.concat("\n\n| Metric | Value |\n|---|---|\n", String.concat(body, "\n")))))))
+    }
+  }
+}
+
+fn report_result(ctx: AppCtx, regressions: List<String>, threshold: Int) -> Result<Unit, String> {
+  if List.length(regressions) > 0 {
+    bind report <- String.join(regressions, "\n  ")
+    bind _ <- ctx.io.println(String.concat("REGRESSION: ", String.concat(Int.to_string(List.length(regressions)), String.concat(" metric(s) exceeded ", String.concat(Int.to_string(threshold), String.concat("% threshold:\n  ", report))))))
+    Result.err("benchmark regression detected")
+  } else {
+    bind _ <- ctx.io.println(String.concat("OK: all metrics within ", String.concat(Int.to_string(threshold), "% of baseline.")))
+    Result.ok(())
+  }
 }
 
 fn main(ctx: AppCtx) -> Result<Unit, String> {
-  bind args      <- ctx.io.argv()
-  bind baseline  <- parse_flag(args, "--baseline")
-  bind current   <- parse_flag(args, "--current")
-  bind thr_str   <- parse_flag(args, "--threshold")
-  bind threshold <- Int.parse(thr_str)
-  bind emit_md   <- Result.ok(has_flag(args, "--emit-md"))
-
-  bind b_json  <- ctx.io.read_file_raw(baseline)
-  bind c_json  <- ctx.io.read_file_raw(current)
-  bind b_data  <- Json.parse(b_json)
-  bind c_data  <- Json.parse(c_json)
-
-  bind _ <- if emit_md { write_results_md(ctx, c_data) } else { Result.ok(()) }
-
-  bind b_metrics <- Json.get_object(b_data, "metrics")
-  bind c_metrics <- Json.get_object(c_data, "metrics")
-  bind regressions <- Result.ok(check_regressions(b_metrics, c_metrics, threshold))
-
-  if List.length(regressions) > 0 {
-    bind report <- Result.ok(String.join(regressions, "\n  "))
-    bind _ <- ctx.io.println(f"REGRESSION: {List.length(regressions)} metric(s) exceeded {threshold}% threshold:\n  {report}")
-    Result.err("benchmark regression detected")
-  } else {
-    bind _ <- ctx.io.println(f"OK: all metrics within {threshold}% of baseline.")
-    Result.ok(())
+  bind args    <- ctx.io.argv()
+  bind emit_md <- has_flag(args, "--emit-md")
+  match parse_flag(args, "--baseline") {
+    None => Result.err("--baseline flag required")
+    Some(baseline) => {
+      match parse_flag(args, "--current") {
+        None => Result.err("--current flag required")
+        Some(current) => {
+          match parse_flag(args, "--threshold") {
+            None => Result.err("--threshold flag required")
+            Some(thr_str) => {
+              match Int.parse(thr_str) {
+                None => Result.err(String.concat("invalid threshold: ", thr_str))
+                Some(threshold) => {
+                  Result.and_then(ctx.io.read_file_raw(baseline), |b_json|
+                  Result.and_then(ctx.io.read_file_raw(current), |c_json|
+                  match Json.parse(b_json) {
+                    None => Result.err("failed to parse baseline JSON")
+                    Some(b_data) => {
+                      match Json.parse(c_json) {
+                        None => Result.err("failed to parse current JSON")
+                        Some(c_data) => {
+                          bind version_str <- match Json.get_string(c_data, "version") {
+                            None => "unknown"
+                            Some(v) => v
+                          }
+                          bind ts_str <- match Json.get_string(c_data, "timestamp") {
+                            None => "unknown"
+                            Some(t) => t
+                          }
+                          Result.and_then(
+                            if emit_md { write_results_md(ctx, c_data, version_str, ts_str) }
+                            else { Result.ok(()) },
+                            |_|
+                            match Json.get_float_map(b_data, "metrics") {
+                              None => Result.err("baseline: metrics not found")
+                              Some(b_metrics) => {
+                                match Json.get_float_map(c_data, "metrics") {
+                                  None => Result.err("current: metrics not found")
+                                  Some(c_metrics) => {
+                                    bind regressions <- check_regressions(b_metrics, c_metrics, threshold)
+                                    report_result(ctx, regressions, threshold)
+                                  }
+                                }
+                              }
+                            }
+                          )
+                        }
+                      }
+                    }
+                  }
+                  ))
+                }
+              }
+            }
+          }
+        }
+      }
+    }
   }
 }

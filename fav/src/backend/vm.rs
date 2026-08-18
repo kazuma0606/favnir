@@ -4246,6 +4246,180 @@ impl VM {
                     }
                 }
             }
+            // ── List.get(list, idx) -> some(v) / none ────────────────────────
+            "List.get" => {
+                if args.len() != 2 {
+                    return Err(self.error(artifact, "List.get requires 2 arguments"));
+                }
+                let mut it = args.into_iter();
+                let list = it.next().expect("list");
+                let idx_val = it.next().expect("idx");
+                match (list, idx_val) {
+                    (VMValue::List(fl), VMValue::Int(i)) => {
+                        if i < 0 {
+                            Ok(VMValue::Variant("none".into(), None))
+                        } else {
+                            Ok(fl
+                                .get(i as usize)
+                                .cloned()
+                                .map(|v| {
+                                    VMValue::Variant("some".into(), Some(Box::new(v)))
+                                })
+                                .unwrap_or(VMValue::Variant("none".into(), None)))
+                        }
+                    }
+                    _ => Err(self.error(artifact, "List.get requires (List, Int)")),
+                }
+            }
+            // ── List.filter_map(list, f) -> List ─────────────────────────────
+            // f must return some(v) to keep or none to discard
+            "List.filter_map" => {
+                if args.len() != 2 {
+                    return Err(self.error(artifact, "List.filter_map requires 2 arguments"));
+                }
+                let mut it = args.into_iter();
+                let list = it.next().expect("list");
+                let f = it.next().expect("f");
+                match list {
+                    VMValue::List(fl) => {
+                        let mut out: Vec<VMValue> = Vec::new();
+                        for item in fl.into_iter() {
+                            match self.call_value(artifact, f.clone(), vec![item])? {
+                                VMValue::Variant(tag, Some(payload)) if tag == "some" || tag == "ok" => {
+                                    out.push(*payload);
+                                }
+                                VMValue::Variant(tag, _) if tag == "none" || tag == "err" => {}
+                                other => {
+                                    return Err(self.error(
+                                        artifact,
+                                        &format!(
+                                            "List.filter_map predicate must return some/none, got {}",
+                                            vmvalue_type_name(&other)
+                                        ),
+                                    ));
+                                }
+                            }
+                        }
+                        Ok(VMValue::List(FavList::new(out)))
+                    }
+                    _ => Err(self.error(artifact, "List.filter_map requires a List as first argument")),
+                }
+            }
+            // ── Int.parse(str) -> some(n) / none ─────────────────────────────
+            "Int.parse" => {
+                let v = args
+                    .into_iter()
+                    .next()
+                    .ok_or_else(|| self.error(artifact, "Int.parse requires 1 argument"))?;
+                match v {
+                    VMValue::Str(s) => match s.trim().parse::<i64>() {
+                        Ok(n) => Ok(VMValue::Variant("some".into(), Some(Box::new(VMValue::Int(n))))),
+                        Err(_) => Ok(VMValue::Variant("none".into(), None)),
+                    },
+                    _ => Err(self.error(artifact, "Int.parse requires a String argument")),
+                }
+            }
+            // ── Json.get_string(json_object, key) -> some(str) / none ────────
+            "Json.get_string" => {
+                if args.len() != 2 {
+                    return Err(self.error(artifact, "Json.get_string requires 2 arguments"));
+                }
+                let mut it = args.into_iter();
+                let json = it.next().expect("json");
+                let key = it.next().expect("key");
+                let k = match key {
+                    VMValue::Str(s) => s,
+                    _ => return Err(self.error(artifact, "Json.get_string: key must be a String")),
+                };
+                let result = match json {
+                    VMValue::Variant(tag, Some(payload)) if tag == "json_object" => {
+                        match *payload {
+                            VMValue::Record(map) => map.get(&k).and_then(|v| match v {
+                                VMValue::Variant(vtag, Some(vp)) if vtag == "json_string" => {
+                                    match vp.as_ref() {
+                                        VMValue::Str(s) => Some(VMValue::Str(s.clone())),
+                                        _ => None,
+                                    }
+                                }
+                                _ => None,
+                            }),
+                            _ => None,
+                        }
+                    }
+                    _ => None,
+                };
+                Ok(result
+                    .map(|v| VMValue::Variant("some".into(), Some(Box::new(v))))
+                    .unwrap_or(VMValue::Variant("none".into(), None)))
+            }
+            // ── Json.get_float_map(json_object, key) -> some(Map<String,Float>) / none
+            // Gets a nested JSON object and converts all numeric values to Float
+            "Json.get_float_map" => {
+                if args.len() != 2 {
+                    return Err(self.error(artifact, "Json.get_float_map requires 2 arguments"));
+                }
+                let mut it = args.into_iter();
+                let json = it.next().expect("json");
+                let key = it.next().expect("key");
+                let k = match key {
+                    VMValue::Str(s) => s,
+                    _ => return Err(self.error(artifact, "Json.get_float_map: key must be a String")),
+                };
+                let result = match json {
+                    VMValue::Variant(tag, Some(outer)) if tag == "json_object" => {
+                        match *outer {
+                            VMValue::Record(outer_map) => {
+                                outer_map.get(&k).and_then(|nested| match nested {
+                                    VMValue::Variant(ntag, Some(npayload))
+                                        if ntag == "json_object" =>
+                                    {
+                                        match npayload.as_ref() {
+                                            VMValue::Record(inner_map) => {
+                                                let mut float_map = std::collections::HashMap::new();
+                                                for (field, val) in inner_map {
+                                                    let f = match val {
+                                                        VMValue::Variant(vtag, Some(vp))
+                                                            if vtag == "json_int" =>
+                                                        {
+                                                            match vp.as_ref() {
+                                                                VMValue::Int(n) => Some(*n as f64),
+                                                                _ => None,
+                                                            }
+                                                        }
+                                                        VMValue::Variant(vtag, Some(vp))
+                                                            if vtag == "json_float" =>
+                                                        {
+                                                            match vp.as_ref() {
+                                                                VMValue::Float(f) => Some(*f),
+                                                                _ => None,
+                                                            }
+                                                        }
+                                                        _ => None,
+                                                    };
+                                                    if let Some(fv) = f {
+                                                        float_map.insert(
+                                                            field.clone(),
+                                                            VMValue::Float(fv),
+                                                        );
+                                                    }
+                                                }
+                                                Some(VMValue::Record(float_map))
+                                            }
+                                            _ => None,
+                                        }
+                                    }
+                                    _ => None,
+                                })
+                            }
+                            _ => None,
+                        }
+                    }
+                    _ => None,
+                };
+                Ok(result
+                    .map(|v| VMValue::Variant("some".into(), Some(Box::new(v))))
+                    .unwrap_or(VMValue::Variant("none".into(), None)))
+            }
             "Map.map_values" => {
                 if args.len() != 2 {
                     return Err(self.error(artifact, "Map.map_values requires 2 arguments"));

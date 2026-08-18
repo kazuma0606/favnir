@@ -65432,8 +65432,6 @@ mod v80100_tests {
         assert_eq!(result.failed, 1);
         assert_eq!(result.skipped, 0);
         let formatted = format_test_suite_result(&result);
-        assert!(formatted.contains("passed"));
-        assert!(formatted.contains("failed"));
-        assert!(formatted.contains("skipped"));
+        assert_eq!(formatted, "1 passed, 1 failed, 0 skipped");
     }
 }

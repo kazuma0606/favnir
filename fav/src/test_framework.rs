@@ -1,23 +1,31 @@
 /// Test framework types for typed pipeline testing.
 /// Introduced in v80.1.0 as part of the Test-Driven Data 1.0 sprint.
 
+#[derive(Debug)]
 pub enum TestStatus {
     Pass,
     Fail,
     Skip,
 }
 
+#[derive(Debug)]
 pub struct TestCase {
     pub name: String,
     pub status: TestStatus,
     pub message: Option<String>,
 }
 
+#[derive(Debug)]
 pub struct TestSuite {
     pub name: String,
     pub cases: Vec<TestCase>,
 }
 
+/// Summary counts from running a test suite.
+/// Suite name is not included here by design — callers combine name and result
+/// as needed (e.g. `format!("{}: {}", suite.name, format_test_suite_result(&r))`).
+/// Failed case names are not yet collected; that is planned for a future version.
+#[derive(Debug)]
 pub struct TestSuiteResult {
     pub passed: usize,
     pub failed: usize,

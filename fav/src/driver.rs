@@ -65744,4 +65744,15 @@ mod v80600_tests {
         assert_eq!(coverage_pct(&report), 0.0);
         assert_eq!(format_coverage_report(&report), "coverage: 0/1 (0.0pct)");
     }
+
+    #[test]
+    fn coverage_pct_is_zero_when_known_stages_empty() {
+        // total=0 のとき coverage_pct がゼロ除算ガードで 0.0 を返すことを確認する
+        let suite = TestSuite { name: "s".to_string(), cases: vec![] };
+        let report = compute_test_coverage(&suite, &[]);
+        assert_eq!(report.total,   0);
+        assert_eq!(report.covered, 0);
+        assert_eq!(coverage_pct(&report), 0.0);
+        assert_eq!(format_coverage_report(&report), "coverage: 0/0 (0.0pct)");
+    }
 }

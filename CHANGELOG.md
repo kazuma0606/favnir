@@ -4,6 +4,21 @@ Favnir のバージョン履歴。形式は [Keep a Changelog](https://keepachan
 
 ---
 
+## [v80.2.0] — 2026-08-19 — `GoldenDataset` / ゴールデンデータセット比較
+
+### Added
+- `GoldenDataset` 構造体（`name: String`, `rows: Vec<Vec<String>>`）
+- `GoldenCompareResult` 構造体（`matches: bool`, `diff_rows: Vec<usize>`）
+- `compare_golden(actual, expected) -> GoldenCompareResult`: 行単位比較、超過行もdiffとして記録
+- `format_golden_diff(result) -> String`: `"OK: datasets match"` / `"DIFF: N row(s) differ: [...]"`
+- `load_golden_dataset(path) -> Result<GoldenDataset, String>`: CSV ファイルから構築（非 WASM）
+
+### Tests
+- `golden_dataset_compare_pass`: 同一内容 → `matches = true`、`"OK: datasets match"`
+- `golden_dataset_compare_fail_shows_diff`: 行 1 が異なる → `diff_rows = [1]`、`"DIFF: 1 row(s) differ: [1]"`
+
+---
+
 ## [v80.1.0] — 2026-08-19 — `TestCase` / `TestSuite` 型基盤
 
 ### Added

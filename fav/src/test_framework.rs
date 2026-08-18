@@ -52,3 +52,60 @@ pub fn format_test_suite_result(result: &TestSuiteResult) -> String {
     format!("{} passed, {} failed, {} skipped",
         result.passed, result.failed, result.skipped)
 }
+
+// ─── GoldenDataset ───────────────────────────────────────────────────────────
+
+#[derive(Debug)]
+pub struct GoldenDataset {
+    pub name: String,
+    pub rows: Vec<Vec<String>>,
+}
+
+#[derive(Debug)]
+pub struct GoldenCompareResult {
+    pub matches: bool,
+    pub diff_rows: Vec<usize>,
+}
+
+/// Compare actual output against expected row by row.
+/// Rows beyond the shorter dataset are also counted as diffs.
+pub fn compare_golden(actual: &GoldenDataset, expected: &GoldenDataset) -> GoldenCompareResult {
+    let mut diff_rows = Vec::new();
+    let max_len = actual.rows.len().max(expected.rows.len());
+    for i in 0..max_len {
+        if actual.rows.get(i) != expected.rows.get(i) {
+            diff_rows.push(i);
+        }
+    }
+    let matches = diff_rows.is_empty();
+    GoldenCompareResult { matches, diff_rows }
+}
+
+/// Format diff result as "OK: datasets match" or "DIFF: N row(s) differ: [0, 2, ...]".
+pub fn format_golden_diff(result: &GoldenCompareResult) -> String {
+    if result.matches {
+        "OK: datasets match".to_string()
+    } else {
+        let indices: Vec<String> = result.diff_rows.iter().map(|i| i.to_string()).collect();
+        format!("DIFF: {} row(s) differ: [{}]", result.diff_rows.len(), indices.join(", "))
+    }
+}
+
+/// Load a CSV file as a GoldenDataset (one row per line, comma-separated).
+/// Empty lines are skipped. Not available on WASM targets.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn load_golden_dataset(path: &str) -> Result<GoldenDataset, String> {
+    let content = std::fs::read_to_string(path)
+        .map_err(|e| format!("failed to load golden dataset '{}': {}", path, e))?;
+    let rows: Vec<Vec<String>> = content
+        .lines()
+        .filter(|l| !l.trim().is_empty())
+        .map(|l| l.split(',').map(|s| s.to_string()).collect())
+        .collect();
+    let name = std::path::Path::new(path)
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or(path)
+        .to_string();
+    Ok(GoldenDataset { name, rows })
+}

@@ -65435,3 +65435,45 @@ mod v80100_tests {
         assert_eq!(formatted, "1 passed, 1 failed, 0 skipped");
     }
 }
+
+#[cfg(test)]
+mod v80200_tests {
+    use fav_core::test_framework::*;
+
+    #[test]
+    fn golden_dataset_compare_pass() {
+        let rows = vec![
+            vec!["alice".to_string(), "30".to_string()],
+            vec!["bob".to_string(), "25".to_string()],
+        ];
+        let actual = GoldenDataset { name: "actual".to_string(), rows: rows.clone() };
+        let expected = GoldenDataset { name: "expected".to_string(), rows };
+        let result = compare_golden(&actual, &expected);
+        assert!(result.matches);
+        assert!(result.diff_rows.is_empty());
+        assert_eq!(format_golden_diff(&result), "OK: datasets match");
+    }
+
+    #[test]
+    fn golden_dataset_compare_fail_shows_diff() {
+        let actual = GoldenDataset {
+            name: "actual".to_string(),
+            rows: vec![
+                vec!["alice".to_string(), "30".to_string()],
+                vec!["bob".to_string(), "99".to_string()],
+            ],
+        };
+        let expected = GoldenDataset {
+            name: "expected".to_string(),
+            rows: vec![
+                vec!["alice".to_string(), "30".to_string()],
+                vec!["bob".to_string(), "25".to_string()],
+            ],
+        };
+        let result = compare_golden(&actual, &expected);
+        assert!(!result.matches);
+        assert_eq!(result.diff_rows, vec![1]);
+        let diff_str = format_golden_diff(&result);
+        assert_eq!(diff_str, "DIFF: 1 row(s) differ: [1]");
+    }
+}

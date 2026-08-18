@@ -65476,4 +65476,27 @@ mod v80200_tests {
         let diff_str = format_golden_diff(&result);
         assert_eq!(diff_str, "DIFF: 1 row(s) differ: [1]");
     }
+
+    #[test]
+    fn golden_dataset_compare_row_count_mismatch() {
+        // actual が 3 行、expected が 2 行 → 超過行（index 2）も diff として記録される
+        let actual = GoldenDataset {
+            name: "actual".to_string(),
+            rows: vec![
+                vec!["a".to_string()],
+                vec!["b".to_string()],
+                vec!["c".to_string()],
+            ],
+        };
+        let expected = GoldenDataset {
+            name: "expected".to_string(),
+            rows: vec![
+                vec!["a".to_string()],
+                vec!["b".to_string()],
+            ],
+        };
+        let result = compare_golden(&actual, &expected);
+        assert!(!result.matches);
+        assert_eq!(result.diff_rows, vec![2]);
+    }
 }

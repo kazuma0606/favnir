@@ -93,6 +93,9 @@ pub fn format_golden_diff(result: &GoldenCompareResult) -> String {
 
 /// Load a CSV file as a GoldenDataset (one row per line, comma-separated).
 /// Empty lines are skipped. Not available on WASM targets.
+///
+/// **Limitation**: fields containing commas or quotes are not supported.
+/// Use only simple string/number columns without embedded commas.
 #[cfg(not(target_arch = "wasm32"))]
 pub fn load_golden_dataset(path: &str) -> Result<GoldenDataset, String> {
     let content = std::fs::read_to_string(path)

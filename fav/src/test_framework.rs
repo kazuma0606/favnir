@@ -470,7 +470,9 @@ pub struct TestReport {
 ///
 /// - `time` は `duration_ms / 1000.0`（小数点以下 3 桁）。
 /// - Pass / Skip ケースは `<testcase ... />` のみ。Fail は `<failure>` 子要素を持つ。
-/// - XML エスケープは本バージョンではスコープ外（テストデータに特殊文字を含まない前提）。
+/// - XML エスケープは本バージョンではスコープ外。
+///   **注意**: `name` / `message` フィールドに `<`, `>`, `&`, `"` を含む場合、
+///   不正な XML が生成される。これらの文字を含まないテストデータのみを渡すこと。
 /// - 出力末尾に改行は付かない。
 pub fn format_junit_xml(report: &TestReport) -> String {
     let result = run_test_suite(&report.suite);

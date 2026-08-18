@@ -65869,6 +65869,26 @@ mod v80800_tests {
         assert!(xml.contains("<testcase"),         "should contain <testcase: {xml}");
         assert!(xml.contains("<failure"),          "should contain <failure for fail case: {xml}");
         assert!(xml.contains("expected 1 got 2"), "failure message should appear: {xml}");
+        assert!(xml.contains("time=\"0.042\""),    "time attribute should be 0.042: {xml}");
+    }
+
+    #[test]
+    fn junit_xml_skip_does_not_emit_failure() {
+        let report = TestReport {
+            suite: TestSuite {
+                name: "s".to_string(),
+                cases: vec![TestCase {
+                    name: "sk".to_string(),
+                    status: TestStatus::Skip,
+                    message: None,
+                }],
+            },
+            duration_ms: 0,
+            timestamp: "T".to_string(),
+        };
+        let xml = format_junit_xml(&report);
+        assert!(!xml.contains("<failure"), "Skip should not emit <failure>: {xml}");
+        assert!(xml.contains("<testcase"),  "Skip should emit <testcase>: {xml}");
     }
 
     #[test]

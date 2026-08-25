@@ -1,0 +1,86 @@
+-- BusinessPartner 型定義（v86.1.0）
+
+use sap_odata.types
+
+public type BusinessPartnerCategory = Person | Organization | Group
+
+public type BusinessPartnerAddress = {
+    address_id:  String,
+    street:      String,
+    city:        String,
+    postal_code: String,
+    country:     String,
+    region:      Option<String>
+}
+
+public type BusinessPartner = {
+    partner_id:   String,
+    name:         String,
+    category:     BusinessPartnerCategory,
+    country:      String,
+    language:     String,
+    currency:     String,
+    created_at:   String,
+    addresses:    Option<List<BusinessPartnerAddress>>
+}
+
+-- BusinessPartner クエリ（v86.2.0）
+
+public type BusinessPartnerFilter = {
+    country:       Option<String>,
+    category:      Option<BusinessPartnerCategory>,
+    changed_after: Option<String>,
+    top:           Option<Int>
+}
+
+public fn business_partners(
+    cfg:    SapConfig,
+    filter: BusinessPartnerFilter
+) -> Result<List<BusinessPartner>, String> {
+    Result.err("not implemented")
+}
+
+-- 単一 BusinessPartner 取得（v86.3.0）
+-- expand_address = true の場合 $expand=to_BusinessPartnerAddress を付与する
+
+public fn business_partner_by_id(
+    cfg:            SapConfig,
+    partner_id:     String,
+    expand_address: Bool
+) -> Result<BusinessPartner, String> {
+    Result.err("not implemented")
+}
+
+-- BusinessPartner 新規作成（v86.4.0）
+-- POST 前に x-csrf-token を取得しリクエストヘッダーに付与する
+
+public type NewBusinessPartner = {
+    name:     String,
+    category: BusinessPartnerCategory,
+    country:  String,
+    currency: String
+}
+
+public fn create_business_partner(
+    cfg:  SapConfig,
+    body: NewBusinessPartner
+) -> Result<BusinessPartner, String> {
+    Result.err("not implemented")
+}
+
+-- BusinessPartner 部分更新（v86.5.0）
+-- PATCH リクエストで変更したいフィールドのみを指定する
+
+public type BusinessPartnerPatch = {
+    name:     Option<String>,
+    currency: Option<String>,
+    language: Option<String>
+}
+
+public fn update_business_partner(
+    cfg:        SapConfig,
+    partner_id: String,
+    patch:      BusinessPartnerPatch
+) -> Result<Unit, String> {
+    Result.err("not implemented")
+}

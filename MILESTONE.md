@@ -1,5 +1,221 @@
 # Favnir Milestones
 
+## v90.0.0（2026-08-25）— SAP Integration 1.0 宣言
+
+> 「SAP が、Favnir の型になった。
+>  `business_partners()` で得意先を取得し、
+>  `sales_orders()` で受注を集計し、
+>  `materials()` で在庫を確認し、
+>  `journal_entries()` で支払を照合する。
+>  世界最大の ERP データが、型安全なパイプラインとして流れる。
+>  それが、Favnir SAP Integration 1.0 である。」
+
+**SAP Integration 1.0** の宣言バージョン。v89.1.0〜v89.9.0 で実装した
+SAP Integration Era の第 5 スプリント（最終スプリント）の完成を宣言した。テスト数: 4,041。
+
+**SAP Integration 1.0（v89.1〜v89.9）達成内容:**
+- **型定義**: `JournalEntry` / `JournalEntryItem` / `JournalFilter` / `DebitCredit`
+- **型定義**: `OutstandingPayable` + `match_unposted_orders()`
+- **E2E デモ**: 全 4 業務シナリオ（BusinessPartner / Sales / Procurement / Payment）
+- **CLI**: `fav infer --from sap --entity <name>` — エンティティ型テンプレート生成
+- **ドキュメント**: `site/content/docs/runes/sap-odata.mdx`
+- **OSS 整備**: CONTRIBUTING SAP セクション + `.github/ISSUE_TEMPLATE/sap-integration-feedback.md`
+- **パフォーマンス計測**: `benchmarks/sap-odata-v89.8.0.json`（Lambda cold start / ページネーション）
+
+---
+
+## v89.0.0（2026-08-24）— SAP Procurement 1.0 宣言
+
+> 「在庫と発注が型になった。
+>  Material と PurchaseOrder を並べれば、不足が見える。」
+
+**SAP Procurement 1.0** の宣言バージョン。v88.1.0〜v88.9.0 で実装した
+SAP Integration Era の第 4 スプリントの完成を宣言した。テスト数: 4,019。
+
+**SAP Procurement 1.0（v88.1〜v88.9）達成内容:**
+- **型定義**: `Material` / `MaterialType` / `MaterialFilter`
+- **型定義**: `PurchaseOrder` / `PurchaseOrderItem` / `PurchaseOrderStatus` / `PurchaseOrderFilter`
+- **型定義**: `NewPurchaseOrder` / `NewPurchaseOrderItem`
+- **型定義**: `StockSeverity` / `StockAlert`
+- **品目マスタ**: `material_by_id(cfg, material_id)` — 単一品目取得
+- **品目リスト**: `materials(cfg, MaterialFilter)` — 品目絞り込み検索
+- **発注検索**: `purchase_orders(cfg, PurchaseOrderFilter)` — フィルタ検索
+- **発注取得**: `purchase_order_by_id(cfg, po_number, expand_items)` — 明細展開対応
+- **発注作成**: `create_purchase_order(cfg, NewPurchaseOrder)` — 発注伝票作成
+- **在庫チェック**: `detect_stock_shortage(orders, materials)` — 受注 × 品目クロスチェック
+- **E2E パイプライン**: Scenario 3（`check_stock_vs_orders`）
+- **Lambda 基盤**: `infra/e2e-demo/sap-odata/terraform/`（main.tf / ssm.tf / variables.tf）
+- **実行スクリプト**: `infra/e2e-demo/sap-odata/scripts/run.sh`
+
+---
+
+## v88.0.0（2026-08-23）— SAP Sales 1.0 宣言
+
+> 「受注が型になった。
+>  `sales_orders()` で絞り込み、`sales_order_by_id()` で明細まで取得できる。
+>  日次売上レポートが、Favnir の 10 行で書ける。」
+
+**SAP Sales 1.0** の宣言バージョン。v87.1.0〜v87.9.0 で実装した
+SAP Integration Era の第 3 スプリントの完成を宣言した。テスト数: 3,997。
+
+**SAP Sales 1.0（v87.1〜v87.9）達成内容:**
+- **型定義**: `SalesOrder` / `SalesOrderItem` / `SalesOrderStatus` / `SalesOrderFilter`
+- **フィルタ検索**: `sales_orders(cfg, SalesOrderFilter)` — 顧客・ステータス・期間・販売組織でフィルタ
+- **単件取得**: `sales_order_by_id(cfg, order_id, expand_items)` — 明細展開対応
+- **作成**: `create_sales_order(cfg, NewSalesOrder)` — 明細リスト込みで受注作成
+- **集計型**: `CurrencyTotal` / `SalesReport` + `build_sales_report()` / `format_sales_report()`
+- **ページネーション**: `odata_list_paged()` / `odata_collect_all()`
+- **E2E パイプライン**: `infra/e2e-demo/sap-odata/pipeline.fav`（日次売上レポート → S3 JSON）
+- **テスト**: `sap_odata.test.fav` に SalesOrder CRUD + ページネーションテスト追加
+
+---
+
+## v87.0.0（2026-08-23）— SAP Master Data 1.0 宣言
+
+> 「SAP の BusinessPartner が、Favnir の型になった。
+>  得意先も仕入先も、`business_partners()` で型安全に取得できる。」
+
+**SAP Master Data 1.0** の宣言バージョン。v86.1.0〜v86.9.0 で実装した
+SAP Integration Era の第 2 スプリントの完成を宣言した。テスト数: 3,975。
+
+**SAP Master Data 1.0（v86.1〜v86.9）達成内容:**
+- **型定義**: `BusinessPartner` / `BusinessPartnerAddress` / `BusinessPartnerCategory`
+- **フィルタ検索**: `business_partners(cfg, BusinessPartnerFilter)` — 国・カテゴリ・更新日・件数でフィルタ
+- **単件取得**: `business_partner_by_id(cfg, partner_id, expand_address)`
+- **作成**: `create_business_partner(cfg, NewBusinessPartner)`
+- **更新**: `update_business_partner(cfg, partner_id, BusinessPartnerPatch)`
+- **E2E パイプライン**: `infra/e2e-demo/sap-odata/pipeline.fav`（BusinessPartner → S3 JSON 同期）
+- **Rune Registry**: `sap-odata` v86.8.0 をデプロイ・登録
+
+---
+
+## v86.0.0（2026-08-23）— SAP Foundation 1.0 宣言
+
+> 「SAP に、型安全に接続できるようになった。
+>  `fav.toml [sap]` を書けば、Favnir が SAP OData v4 と話せる。」
+
+**SAP Foundation 1.0** の宣言バージョン。v85.1.0〜v85.9.0 で実装した
+SAP Integration Era の第 1 スプリントの完成を宣言した。テスト数: 3,953。
+
+**SAP Foundation 1.0（v85.1〜v85.9）達成内容:**
+- **Rust 基盤**: `SapTomlConfig` / `inject_sap_config()` / `fav.toml [sap]` 解析・env 注入
+- **Favnir 型**: `SapConfig` / `SapError` / `SapErrorCode` / `ODataParams`（`runes/sap-odata/types.fav`）
+- **Rune**: `sap-odata`（`odata_get` / `odata_list` / `sap_config_from_env` / `basic_auth_header`）
+- **インフラ**: Docker Compose モックサーバー（`infra/e2e-demo/sap-odata/`）+ SSM Parameter Store Terraform（`infra/sap/`）
+- **テンプレート**: `fav new` が `[sap]` コメントブロックを生成（`default_fav_toml()`）
+
+---
+
+## v85.0.0（2026-08-22）— Favnir 4.0 宣言
+
+> 「テストが型となり、品質が型となり、契約が型となり、観測が型となった。
+>
+>  `fav test` がパイプラインの正しさを証明し、
+>  `QualityGate` が品質基準を守り、
+>  `IoContract` がチームを安全に繋ぎ、
+>  `AlertRule` が壊れる前に教えてくれる。
+>
+>  Favnir 4.0 は、データパイプラインの品質を
+>  コードと同じ言語で語れる、唯一の言語である。」
+
+**Favnir 4.0** の宣言バージョン。v80.1.0〜v84.9.0 で実装した
+Quality-First Era（Test-Driven Data / Data Quality 2.0 / Pipeline Contracts / Observability 2.0）の完成を宣言した。テスト数: 3,931。
+
+**Quality-First Era（v80.1〜v84.9）達成内容:**
+- **Sprint 1: Test-Driven Data** — `TestSuite` / `StageTestCase` / `GoldenDataset` / `SchemaSnapshot` / `fav test`（v80.1〜v81.0）
+- **Sprint 2: Data Quality 2.0** — `QualityRule` / `QualityCheck` / `QualityGate` / `AnomalyDetector` / `fav quality`（v81.1〜v82.0）
+- **Sprint 3: Pipeline Contracts 1.0** — `IoContract` / `SlaContract` / `ContractRegistry` / `fav verify --contract`（v82.1〜v83.0）
+- **Sprint 4: Observability 2.0** — `PipelineMetrics` / `AlertRule` / `SloTarget` / `HealthDashboard` / `fav observe`（v83.1〜v84.0）
+- **Sprint 5: Favnir 4.0 宣言** — E2E ショーケース統合・ドキュメント完全化・OSS 公開強化（v84.1〜v85.0）
+
+---
+
+## v84.0.0（2026-08-21）— Observability 2.0 宣言
+
+> 「メトリクスが型になり、アラートが型になり、SLO が型になった。
+>  Favnir のパイプラインは壊れる前に教えてくれる。」
+
+**Observability 2.0** の宣言バージョン。v83.1.0〜v83.9.0 で実装した
+パイプライン観測性型基盤の完成を宣言した。テスト数: 3,909。
+
+**v83.1.0〜v83.9.0 達成内容:**
+- `PipelineMetrics` / `StageMetrics` / `compute_pipeline_metrics` / `format_metrics_summary` / `slowest_stage`（実行統計）— v83.1.0
+- `AlertSeverity` / `AlertThreshold` / `AlertRule` / `AlertFiring` / `evaluate_alert_rules`（アラート型）— v83.2.0
+- `SloTarget` / `SloMeasurement` / `SloStatus` / `compute_slo_status` / `format_slo_status`（SLO 型）— v83.3.0
+- `ResourceUsage` / `ExecutionCost` / `CostBudget` / `BudgetStatus` / `evaluate_cost_budget` / `format_cost_report`（コスト追跡）— v83.4.0
+- `TraceContext` / `TraceSpan` / `format_trace_span` / `compute_span_duration`（分散トレーシング）— v83.5.0
+- `PerfBaseline` / `PerfRegression` / `detect_perf_regression` / `format_regression_report`（パフォーマンス回帰検知）— v83.6.0
+- `ObserveFormat` / `ObserveOptions` / `ObserveReport` / `format_observe_report` / `cmd_observe`（`fav observe` コマンド）— v83.7.0
+- `HealthStatus` / `PipelineHealth` / `HealthDashboard` / `compute_pipeline_health` / `format_health_dashboard`（健全性ダッシュボード）— v83.8.0
+- スプリント統合確認・コードフリーズ — v83.9.0
+
+---
+
+## v83.0.0（2026-08-21）— Pipeline Contracts 1.0 宣言
+
+> 「パイプライン間の約束が型になった。
+>  `IoContract` がインターフェースを定義し、`SlaContract` が応答時間を保証し、
+>  `ContractRegistry` がチームを繋ぐ。
+>  Favnir のパイプラインは今、契約で安全に接続できる。」
+
+**Pipeline Contracts 1.0** の宣言バージョン。v82.1.0〜v82.9.0 で実装した
+パイプライン間の入出力契約型基盤の完成を宣言した。テスト数: 3,887。
+
+**v82.1.0〜v82.9.0 達成内容:**
+- `ContractField` / `ContractFieldType` / `IoContract` / `validate_io_contract`（IoContract 型基盤）— v82.1.0
+- `SlaTarget` / `SlaContract` / `SlaStatus` / `evaluate_sla` / `format_sla_status`（SLA 遵守型）— v82.2.0
+- `ContractDependency` / `DependencyGraph` / `build_dependency_graph` / `detect_circular_dependencies`（パイプライン間契約依存）— v82.3.0
+- `ViolationKind` / `ContractViolation` / `ContractViolationReport` / `format_violation_report`（契約違反詳細レポート）— v82.4.0
+- `infer_contract_from_schema` / `merge_contracts` / `format_contract_as_toml`（スキーマから契約自動生成）— v82.5.0
+- `ContractVersion` / `CompatibilityResult` / `check_contract_compatibility`（契約バージョニング・後方互換チェック）— v82.6.0
+- `VerifyContractOptions` / `ContractVerifyResult` / `cmd_verify_contract` / `format_verify_result`（`fav verify --contract` 強化）— v82.7.0
+- `ContractRegistryEntry` / `ContractRegistry` / `format_registry_listing`（契約レジストリ）— v82.8.0
+- 統合テスト・コードフリーズ — v82.9.0
+
+---
+
+## v82.0.0（2026-08-20）— Data Quality 2.0 宣言
+
+> 「品質が型になった。外れ値はコンパイル時に検出され、
+>  スキーマドリフトはパイプライン起動前に止まる。
+>  Favnir のデータは今、品質を型で保証する。」
+
+**Data Quality 2.0** の宣言バージョン。v81.1.0〜v81.9.0 で実装した
+データ品質ルールの型化を完成させ宣言した。
+
+**v81.1.0〜v81.9.0 達成内容:**
+- `QualityRule` / `QualityCheck` / `run_quality_check` / `QualityViolation`（品質ルール基盤）— v81.1.0
+- `DistributionStats` / `StatisticalCheck` / `detect_outliers`（統計的品質チェック）— v81.2.0
+- `SchemaDriftDetector` / `DriftTolerance` / `DriftResult` / `detect_schema_drift`（スキーマドリフト検出）— v81.3.0
+- `QualityDimension` / `DimensionScore` / `QualityScore` / `compute_quality_score`（品質スコアリング）— v81.4.0
+- `ProvenanceQualityEntry` / `ProvenanceQualityReport` / `worst_quality_source`（来歴付き品質レポート）— v81.5.0
+- `QualityGate` / `GateDecision` / `evaluate_quality_gate`（品質ゲート）— v81.6.0
+- `ReportFormat` / `QualityReportOptions` / `build_quality_report` / `cmd_quality_report`（`fav quality report`）— v81.7.0
+- `AnomalyDetector` / `AnomalyResult` / `detect_anomaly` / `scan_for_anomalies`（異常検知）— v81.8.0
+- 統合テスト・コードフリーズ — v81.9.0
+
+---
+
+## v81.0.0（2026-08-19）— Test-Driven Data 1.0 宣言
+
+> 「テストが型になり、カバレッジが数値になり、スキーマ変更が検出される。
+>  Favnir のパイプラインは今、その正しさを `fav test` で証明できる。」
+
+**Test-Driven Data 1.0** の宣言バージョン。v80.1.0〜v80.9.0 で実装した
+テスト駆動データパイプライン基盤の完成を宣言した。
+
+**v80.1.0〜v80.9.0 達成内容:**
+- `TestSuite` / `TestCase` / `TestStatus` / `run_test_suite`（テスト実行基盤）— v80.1.0
+- `TestFixture` / `DataFactory` / `FieldSpec`（テストデータ生成）— v80.3.0
+- `PropertyTest` / `InvariantKind` / `run_property_test`（プロパティベーステスト）— v80.4.0
+- `StageTestCase` / `run_stage_test`（ステージ単体テスト）— v80.5.0
+- `TestCoverageReport` / `compute_test_coverage`（テストカバレッジ計測）— v80.6.0
+- `SchemaSnapshot` / `compare_schema_snapshots`（スキーマスナップショットテスト）— v80.7.0
+- `TestReport` / `format_junit_xml` / `format_test_summary`（CI 統合レポート）— v80.8.0
+- 統合確認・コードフリーズ — v80.9.0
+
+---
+
 ## v80.0.0（2026-08-16）— Favnir 3.0 宣言
 
 > 「時間が型となり、来歴が型となり、正しさが型となり、実行戦略が型となった。

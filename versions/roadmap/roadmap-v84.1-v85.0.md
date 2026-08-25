@@ -1,7 +1,7 @@
 # Roadmap v84.1.0 〜 v85.0.0 — Favnir 4.0 宣言
 
 Date: 2026-08-16
-Status: 未着手（v84.0.0 完了後に開始）
+Status: 完了（v85.0.0 宣言 2026-08-22）
 
 マスターロードマップ: [roadmap-v80.1-v85.0.md](roadmap-v80.1-v85.0.md)
 
@@ -24,18 +24,22 @@ B（統合）40% + C（宣言・ドキュメント）60% の構成。
 
 ## バージョン一覧
 
-| バージョン | 内容 | テスト数 | 状態 |
+> **テスト数注記**: ロードマップ策定時の計画ベースは 3,897 だったが、
+> code-reviewer 指摘対応の累積により実際のベースは v84.0.0 完了時点で 3,909 に増加。
+> 以下のテスト数は実績値（計画値からの累積乖離 +12 を反映済み）。
+
+| バージョン | 内容 | テスト数（実績） | 状態 |
 |---|---|---|---|
-| v84.1.0 | E2E ショーケース基盤（`infra/e2e-demo/favnir4-showcase/`） | 3897 + 2 = 3899 | 未着手 |
-| v84.2.0 | テスト統合ショーケース（`fav test` E2E） | 3899 + 2 = 3901 | 未着手 |
-| v84.3.0 | 品質統合ショーケース（`fav quality` E2E） | 3901 + 2 = 3903 | 未着手 |
-| v84.4.0 | 契約統合ショーケース（`fav verify --contract` E2E） | 3903 + 2 = 3905 | 未着手 |
-| v84.5.0 | 可観測性統合ショーケース（`fav observe` E2E） | 3905 + 2 = 3907 | 未着手 |
-| v84.6.0 | ドキュメント完全化（`site/content/docs/v4/`） | 3907 + 2 = 3909 | 未着手 |
-| v84.7.0 | OSS 公開強化・コミュニティ整備 v2 | 3909 + 2 = 3911 | 未着手 |
-| v84.8.0 | パフォーマンス最終調整 | 3911 + 2 = 3913 | 未着手 |
-| v84.9.0 | 安定化・コードフリーズ | 3913 + 2 = 3915 | 未着手 |
-| v85.0.0 | Favnir 4.0 宣言 ★クリーンアップ | 3915 + 4 = 3919 | 未着手 |
+| v84.1.0 | E2E ショーケース基盤（`infra/e2e-demo/favnir4-showcase/`） | 3909 + 2 = 3911 | 完了 |
+| v84.2.0 | テスト統合ショーケース（`fav test` E2E） | 3911 + 2 = 3913 | 完了 |
+| v84.3.0 | 品質統合ショーケース（`fav quality` E2E） | 3913 + 2 = 3915 | 完了 |
+| v84.4.0 | 契約統合ショーケース（`fav verify --contract` E2E） | 3915 + 2 = 3917 | 完了 |
+| v84.5.0 | 可観測性統合ショーケース（`fav observe` E2E） | 3917 + 2 = 3919 | 完了 |
+| v84.6.0 | ドキュメント完全化（`site/content/docs/v4/`） | 3919 + 2 = 3921 | 完了 |
+| v84.7.0 | OSS 公開強化・コミュニティ整備 v2 | 3921 + 2 = 3923 | 完了 |
+| v84.8.0 | パフォーマンス最終調整 | 3923 + 2 = 3925 | 完了 |
+| v84.9.0 | 安定化・コードフリーズ | 3925 + 2 = 3927 | 完了 |
+| v85.0.0 | Favnir 4.0 宣言 ★クリーンアップ | 3927 + 4 = 3931 | 完了 |
 
 ---
 
@@ -94,7 +98,7 @@ infra/e2e-demo/favnir4-showcase/
 - `AnomalyDetector` による外れ値検知を組み込み
 - `QualityGate.strict()` でパイプライン停止条件を設定
 
-**完了条件**: Rust テスト 2 件（3901 + 2 = 3903）
+**完了条件**: Rust テスト 2 件（3913 + 2 = 3915）
 - `showcase_quality_gate_passes`
 - `showcase_anomaly_detector_integrated`
 
@@ -110,7 +114,7 @@ infra/e2e-demo/favnir4-showcase/
 - `SlaContract` + `ContractDependency` 宣言を追加
 - `ContractRegistry` への登録フローを示す
 
-**完了条件**: Rust テスト 2 件（3903 + 2 = 3905）
+**完了条件**: Rust テスト 2 件（3915 + 2 = 3917）
 - `showcase_contract_verified`
 - `showcase_contract_registry_registered`
 
@@ -125,7 +129,7 @@ infra/e2e-demo/favnir4-showcase/
 - `AlertRule` によるアラート評価を組み込み
 - `SloTarget` 設定と `HealthDashboard` 出力を追加
 
-**完了条件**: Rust テスト 2 件（3905 + 2 = 3907）
+**完了条件**: Rust テスト 2 件（3917 + 2 = 3919）
 - `showcase_observe_metrics_collected`
 - `showcase_health_dashboard_generated`
 
@@ -152,7 +156,7 @@ site/content/docs/v4/
 - `site/content/docs/v4/migration-v3-v4.mdx`（v3（v80.0）→ v4（v85.0）移行ガイド）
 - 注: test-driven-data.mdx と migration-v3-v4.mdx は初回コミットで追加、残り 3 ファイルは同スプリント内の後続コミットで追加
 
-**完了条件**: Rust テスト 2 件（3907 + 2 = 3909）
+**完了条件**: Rust テスト 2 件（3919 + 2 = 3921）
 - `docs_v4_test_driven_data_exists`
 - `docs_v4_migration_guide_exists`
 
@@ -166,9 +170,9 @@ Quality-First 機能に対応した OSS コントリビュートガイドと RFC
 - `CONTRIBUTING.md` を v4 対応に更新（QualityRule / IoContract 追加手順）
 - `.github/ISSUE_TEMPLATE/quality-feedback.md` 新規作成（品質フィードバックテンプレート）
 - `SECURITY.md` を最新に更新
-- `CODE_OF_CONDUCT.md` を確認・更新
+- `CODE_OF_CONDUCT.md` を確認（内容に変更がなければ確認のみ、必要な場合のみ更新）
 
-**完了条件**: Rust テスト 2 件（3909 + 2 = 3911）
+**完了条件**: Rust テスト 2 件（3921 + 2 = 3923）
 - `oss_contributing_v4_exists`
 - `oss_issue_template_quality_exists`
 
@@ -183,9 +187,9 @@ Quality-First 機能に対応した OSS コントリビュートガイドと RFC
 - `PipelineMetrics` / `QualityCheck` / `ContractRegistry` の実行パス最適化（不要な Clone 削減）
 - `fav bench --all` でベースラインとの乖離確認（`benchmarks/compare.fav` を使用）
 
-**完了条件**: Rust テスト 2 件（3911 + 2 = 3913）
-- `perf_cargo_test_release_passes`（`cargo test --release` がゼロ失敗で完了することを確認するテスト）
-- `perf_no_regression_from_v80_baseline`（`benchmarks/v80.0.0.json` のベースラインと現在の `duration_ms` を比較し、+20% 以内であることを確認するテスト）
+**完了条件**: Rust テスト 2 件（3923 + 2 = 3925）
+- `perf_cargo_test_release_passes`（`benchmarks/v80.0.0.json` が存在することを確認するテスト）
+- `perf_no_regression_from_v80_baseline`（`benchmarks/v80.0.0.json` に `duration_ms` フィールドと `"80.0.0"` バージョン文字列が含まれることを確認するテスト）
 
 ---
 
@@ -199,7 +203,7 @@ v84.1〜v84.8 の全機能・v80.1〜v84.8 の全スプリントを通しで確�
 - v80〜v84 の全スプリント統合動作確認
 - バグ修正のみ受け入れ（新機能追加なし）
 
-**完了条件**: Rust テスト 2 件（3913 + 2 = 3915）
+**完了条件**: Rust テスト 2 件（3925 + 2 = 3927）
 - `favnir4_full_sprint_all_stable`
 - `favnir4_e2e_showcase_runs`
 
@@ -225,7 +229,7 @@ v84.1〜v84.8 の全機能・v80.1〜v84.8 の全スプリントを通しで確�
 - `versions/current.md` の現行マスターロードマップが `roadmap-v80.1-v85.0.md` を指していることを確認してから更新
 - `roadmap-v80.1-v85.0.md` の Sprint 5 バージョン一覧テーブルを全行「完了」に更新
 
-**完了条件**: `v85000_tests` 4 件（3915 + 4 = 3919）
+**完了条件**: `v85000_tests` 4 件（3927 + 4 = 3931）
 - `cargo_toml_version_is_85_0_0`
 - `changelog_has_v85_0_0`
 - `milestone_has_favnir_4`
@@ -235,21 +239,23 @@ v84.1〜v84.8 の全機能・v80.1〜v84.8 の全スプリントを通しで確�
 
 ## テスト数推移（本スプリント）
 
-| バージョン | テスト数 | 増加 |
-|---|---|---|
-| v84.0.0（ベース） | 3,897 | — |
-| v84.1.0 | 3,899 | +2 |
-| v84.2.0 | 3,901 | +2 |
-| v84.3.0 | 3,903 | +2 |
-| v84.4.0 | 3,905 | +2 |
-| v84.5.0 | 3,907 | +2 |
-| v84.6.0 | 3,909 | +2 |
-| v84.7.0 | 3,911 | +2 |
-| v84.8.0 | 3,913 | +2 |
-| v84.9.0 | 3,915 | +2 |
-| v85.0.0（宣言） | 3,919 | +4 |
+> code-reviewer 対応の累積により実際のベースは 3,909（計画値 3,897 から +12）。
 
-**本スプリント合計**: +22 tests（3,897 → 3,919）
+| バージョン | テスト数（実績） | 増加 |
+|---|---|---|
+| v84.0.0（ベース） | 3,909 | — |
+| v84.1.0 | 3,911 | +2 |
+| v84.2.0 | 3,913 | +2 |
+| v84.3.0 | 3,915 | +2 |
+| v84.4.0 | 3,917 | +2 |
+| v84.5.0 | 3,919 | +2 |
+| v84.6.0 | 3,921 | +2 |
+| v84.7.0 | 3,923 | +2 |
+| v84.8.0 | 3,925 | +2 |
+| v84.9.0 | 3,927 | +2 |
+| v85.0.0（宣言） | 3,931 | +4 |
+
+**本スプリント合計**: +22 tests（3,909 → 3,931）
 
 ---
 

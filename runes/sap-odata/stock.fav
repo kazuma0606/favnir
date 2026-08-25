@@ -1,0 +1,30 @@
+-- 在庫不足アラート型定義 + クロスチェック関数（v88.6.0〜v88.7.0）
+-- detect_stock_shortage() はスタブ（API 完全化済み）。アルゴリズム本実装は将来バージョンで行う。
+use sap_odata.sales_order
+use sap_odata.material
+
+-- 在庫不足の深刻度
+public type StockSeverity = Critical | Warning | Info
+
+-- 在庫不足アラート型
+-- open_quantity: 単位は品目の base_unit（Float は小数個数・重量を含む SAP 数量表現に対応）
+public type StockAlert = {
+    material_id:   String,
+    description:   String,
+    severity:      StockSeverity,
+    open_quantity: Float,
+    message:       String
+}
+
+-- 在庫 × 受注クロスチェック（v88.6.0 — スタブ）
+-- cfg: SapConfig は取らない（純粋な計算関数のため）
+-- TODO: implement — オープン受注 × 品目マスタを突き合わせて不足アラートを生成
+public fn detect_stock_shortage(orders: List<SalesOrder>, materials: List<Material>) -> Result<List<StockAlert>, String> {
+    Result.err("not implemented")
+}
+
+-- 在庫不足アラートを人間可読な文字列にフォーマットする（v88.7.0）
+-- Note: public なし（モジュール内ヘルパー。外部公開は pipeline.fav 経由のみ想定）
+fn format_stock_alerts(alerts: List<StockAlert>) -> String {
+    String.concat(["Stock Alerts: ", Int.to_string(List.length(alerts)), " items"])
+}

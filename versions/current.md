@@ -1,12 +1,14 @@
 # Current — Favnir 進行状況
 
-最終更新: 2026-08-18 (v83.0.0)
+最終更新: 2026-08-25 (v90.0.0)
 
 ---
 
 ## 現行マスターロードマップ
 
-[roadmap/roadmap-v80.1-v85.0.md](roadmap/roadmap-v80.1-v85.0.md)
+[roadmap/roadmap-v85.1-v90.0.md](roadmap/roadmap-v85.1-v90.0.md)
+
+前フェーズ（完了）: [roadmap/roadmap-v80.1-v85.0.md](roadmap/roadmap-v80.1-v85.0.md)
 
 前フェーズ（完了）: [roadmap/roadmap-v75.1-v80.0.md](roadmap/roadmap-v75.1-v80.0.md)
 
@@ -26,23 +28,23 @@
 
 ## 最新安定版
 
-**v83.0.0** — Pipeline Contracts 1.0 宣言 — 3875 tests（2026-08-18）
+**v89.0.0** — SAP Procurement 1.0 宣言 — 4019 tests（2026-08-24）
 
-- `cargo install fav --version "83.0.0"`
+- `cargo install fav --version "89.0.0"`
 
-前バージョン: v80.0.0 — Favnir 3.0 宣言 — 3809 tests
+前バージョン: v88.0.0 — SAP Sales 1.0 宣言 — 3997 tests
 
 ---
 
 ## 進行中バージョン
 
-**v83.1.0〜v84.0.0**（Observability 2.0 スプリント — Quality-First Era Sprint 4）
+**v87.1.0〜v90.0.0**（SAP Integration Era — SAP Integration 1.0 宣言スプリント）
 
 ---
 
 ## 次に切る版
 
-**v84.1.0**（Favnir 4.0 宣言スプリント開始）
+**v88.1.0**（SAP Integration Era 次スプリント開始）
 
 ---
 
@@ -85,7 +87,12 @@
 | v75.0 — Favnir 2.0 | **完了** | v74.1〜v74.9（統合・Rune マーケット・宣言）（2026-08-14） |
 | v80.0 — Favnir 3.0 | **完了** | v75.1〜v79.9（時間型・来歴型・証明可能型・実行戦略）（2026-08-16） |
 | v81.0 — Test-Driven Data 1.0 | **完了** | v80.1〜v80.9（fav test・GoldenDataset・SchemaSnapshot）（2026-08-16） |
-| v82.0 — Data Quality 2.0 | **完了** | v81.1〜v81.9（QualityRule・QualityGate・AnomalyDetector）（2026-08-16） |
+| v82.0 — Data Quality 2.0 | **完了** | v81.1〜v81.9（QualityRule・QualityGate・AnomalyDetector）（2026-08-20） |
 | v83.0 — Pipeline Contracts 1.0 | **完了** | v82.1〜v82.9（IoContract・SlaContract・ContractRegistry）（2026-08-18） |
+| v84.0 — Observability 2.0 | **完了** | v83.1〜v83.9（PipelineMetrics・AlertRule・SloStatus・fav observe）（2026-08-21） |
+| v85.0 — Favnir 4.0 | **完了** | v84.1〜v84.9（E2E ショーケース・ドキュメント完全化・OSS 強化・宣言）（2026-08-22） |
+| v86.0 — SAP Foundation 1.0 | **完了** | v85.1〜v85.9（SapTomlConfig・sap-odata Rune・Docker Compose・SSM Terraform）（2026-08-23） |
+| v87.0 — SAP Master Data 1.0 | **完了** | v86.1〜v86.9（BusinessPartner CRUD・E2E パイプライン・Rune Registry 登録）（2026-08-23） |
+| v88.0 — SAP Sales 1.0 | **完了** | v87.1〜v87.9（SalesOrder CRUD・ページネーション・売上レポート・E2E パイプライン）（2026-08-23） |
 
 詳細は [INDEX.md](INDEX.md) / [roadmap/roadmap-v70.1-v75.0.md](roadmap/roadmap-v70.1-v75.0.md) を参照。

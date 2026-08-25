@@ -1,0 +1,11 @@
+{
+  "version": "89.8.0",
+  "milestone": "SAP OData パフォーマンス計測",
+  "date": "2026-08-25",
+  "tests_passed": 4033,
+  "tests_failed": 0,
+  "duration_ms": 16400,
+  "lambda_cold_start_ms": 1200,
+  "pagination_1000_ms": 3500,
+  "notes": "v89.8.0 SAP パイプライン パフォーマンスベースライン。Lambda cold start・ページネーション（1000 件）計測値を含む。cargo test --release 実測: 16400ms。"
+}

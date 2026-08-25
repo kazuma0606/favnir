@@ -1,0 +1,3 @@
+# This file is a placeholder for lambda/bootstrap.zip.
+# The actual Lambda binary will be built and packaged in the v88.9.0 stabilization sprint.
+# Do NOT commit a real bootstrap.zip here.

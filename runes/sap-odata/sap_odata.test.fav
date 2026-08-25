@@ -1,0 +1,47 @@
+-- runes/sap-odata/sap_odata.test.fav — sap-odata Rune テスト（v85.4.0 骨格 / v86.7.0 CRUD 追加）
+-- v87.0.0 以降で Docker Compose モックサーバーへの実際の HTTP リクエスト検証を追加する予定。
+import "sap-odata"
+
+test "sap_config_fields_exist" {
+    -- SapConfig のフィールドが定義されていることを確認する（骨格テスト）
+}
+
+-- v86.7.0: BusinessPartner CRUD テスト（Delete は将来バージョンで追加）
+test "business_partner_create" {
+    -- create_business_partner のシグネチャが存在することを確認する（スタブテスト）
+}
+
+test "business_partner_read" {
+    -- business_partner_by_id のシグネチャが存在することを確認する（スタブテスト）
+}
+
+test "business_partner_update" {
+    -- update_business_partner のシグネチャが存在することを確認する（スタブテスト）
+}
+
+test "business_partner_list" {
+    -- business_partners のシグネチャが存在することを確認する（スタブテスト）
+}
+
+-- v87.8.0: SalesOrder CRUD テスト
+test "sales_order_create" {
+    -- create_sales_order のシグネチャが存在することを確認する（スタブテスト）
+}
+
+test "sales_order_read" {
+    -- sales_order_by_id のシグネチャが存在することを確認する（スタブテスト）
+}
+
+test "sales_order_filter" {
+    -- sales_orders のフィルタシグネチャが存在することを確認する（スタブテスト）
+}
+
+-- v87.8.0: ページネーションテスト
+test "pagination_over_100_items" {
+    -- odata_list_paged のシグネチャが存在することを確認する（スタブテスト）
+}
+
+-- v87.8.0: 日次売上レポートテスト
+test "daily_sales_report_pipeline" {
+    -- build_sales_report のシグネチャが存在することを確認する（スタブテスト）
+}

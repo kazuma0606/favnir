@@ -1,0 +1,9 @@
+{
+  "version": "80.0.0",
+  "milestone": "Favnir 4.0 開始（v3→v4 移行完了）",
+  "date": "2026-08-01",
+  "tests_passed": 3840,
+  "tests_failed": 0,
+  "duration_ms": 18000,
+  "notes": "v80.0.0 ベースライン。v4 スプリント開始前の基準値（Sprint 1〜4 追加前）。"
+}

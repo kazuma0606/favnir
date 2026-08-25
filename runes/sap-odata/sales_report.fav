@@ -1,0 +1,25 @@
+-- 売上レポート集計ヘルパー（v87.7.0）
+-- SalesOrder リストから SalesReport を生成する関数群
+
+use sap_odata.sales_order
+
+-- 通貨別に受注を集計する（内部ヘルパー）
+-- v87.9.0 で本実装予定のため、本バージョンでは空リストを返す
+fn group_by_currency(orders: List<SalesOrder>) -> List<CurrencyTotal> {
+    List.empty()
+}
+
+-- 日次売上レポートを生成する
+public fn build_sales_report(date: String, orders: List<SalesOrder>) -> Result<SalesReport, String> {
+    Result.ok(SalesReport {
+        report_date:  date,
+        total_orders: List.length(orders),
+        total_amount: 0.0,
+        by_currency:  group_by_currency(orders)
+    })
+}
+
+-- レポートをテキスト形式にフォーマットする（public fn: sap_odata.fav re-export のため）
+public fn format_sales_report(report: SalesReport) -> String {
+    String.concat(["Sales Report ", report.report_date, ": ", Int.to_string(report.total_orders), " orders"])
+}

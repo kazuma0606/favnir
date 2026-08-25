@@ -430,6 +430,17 @@ impl Default for BackpressureConfig {
 
 // ── Bench config (v64.2.0) ────────────────────────────────────────────────────
 
+// ── SAP config (v85.1.0) ─────────────────────────────────────────────────────
+
+#[derive(Debug, Clone)]
+pub struct SapTomlConfig {
+    pub base_url: Option<String>,
+    pub client:   Option<String>,
+    pub username: Option<String>,
+    pub password: Option<String>,
+    pub auth:     Option<String>,
+}
+
 /// `[bench]` section of fav.toml (v64.2.0).
 #[derive(Debug, Clone, Default)]
 pub struct BenchTomlConfig {
@@ -538,6 +549,8 @@ pub struct FavToml {
     pub backpressure: Option<BackpressureConfig>,
     /// Optional bench configuration (v64.2.0).
     pub bench: Option<BenchTomlConfig>,
+    /// Optional SAP configuration (v85.1.0).
+    pub sap: Option<SapTomlConfig>,
 }
 
 impl FavToml {
@@ -624,6 +637,7 @@ fn parse_fav_toml(content: &str) -> FavToml {
     let mut parallel_cfg: Option<ParallelConfig> = None;
     let mut backpressure_cfg: Option<BackpressureConfig> = None;
     let mut bench_cfg: Option<BenchTomlConfig> = None;
+    let mut sap_cfg: Option<SapTomlConfig> = None;
     let mut section = "";
 
     for line in content.lines() {
@@ -766,6 +780,10 @@ fn parse_fav_toml(content: &str) -> FavToml {
         }
         if trimmed == "[bench]" {
             section = "bench";
+            continue;
+        }
+        if trimmed == "[sap]" {
+            section = "sap";
             continue;
         }
         if trimmed == "[lint]" {
@@ -1297,6 +1315,27 @@ fn parse_fav_toml(content: &str) -> FavToml {
                 }
                 backpressure_cfg = Some(current);
             }
+            "sap" => {
+                // 注: 値の ${VAR} 展開は inject_sap_config() 内で行う（Snowflake と同方式）
+                let mut current = sap_cfg.take().unwrap_or(SapTomlConfig {
+                    base_url: None,
+                    client:   None,
+                    username: None,
+                    password: None,
+                    auth:     None,
+                });
+                if let Some((key, val)) = parse_kv(trimmed) {
+                    match key {
+                        "base_url" => current.base_url = Some(val.to_string()),
+                        "client"   => current.client   = Some(val.to_string()),
+                        "username" => current.username  = Some(val.to_string()),
+                        "password" => current.password  = Some(val.to_string()),
+                        "auth"     => current.auth      = Some(val.to_string()),
+                        _ => {}
+                    }
+                }
+                sap_cfg = Some(current);
+            }
             "bench" => {
                 let mut current = bench_cfg.take().unwrap_or_default();
                 if let Some((key, val)) = parse_kv(trimmed) {
@@ -1358,6 +1397,7 @@ fn parse_fav_toml(content: &str) -> FavToml {
         parallel: parallel_cfg,
         backpressure: backpressure_cfg,
         bench: bench_cfg,
+        sap: sap_cfg,
     }
 }
 

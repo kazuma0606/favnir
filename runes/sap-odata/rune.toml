@@ -1,0 +1,6 @@
+[rune]
+name        = "sap-odata"
+version     = "86.8.0"
+entry       = "sap_odata.fav"
+description = "SAP S/4HANA OData v4 クライアント — ctx パターンで型安全な SAP データアクセスを提供"
+effects     = ["!Http"]

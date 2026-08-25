@@ -9,6 +9,115 @@ Favnir はその答えです。
 
 ---
 
+## v90.0 — SAP Integration 1.0 宣言（2026-08-25）
+
+Favnir v90.0 で **SAP Integration 1.0** を宣言しました。
+
+SAP が、Favnir の型になりました。
+`business_partners()` で得意先を取得し、`sales_orders()` で受注を集計し、
+`materials()` で在庫を確認し、`journal_entries()` で支払を照合する。
+世界最大の ERP データが、型安全なパイプラインとして流れます。
+
+**SAP Integration 1.0（v89.1〜v89.9）で追加した主要機能:**
+`JournalEntry` / `OutstandingPayable` / 全 4 業務シナリオ E2E デモ /
+`fav infer --from sap` / `sap-odata.mdx` ドキュメント / パフォーマンス計測
+
+---
+
+## v89.0 — SAP Procurement 1.0 宣言（2026-08-24）
+
+Favnir v89.0 で **SAP Procurement 1.0** を宣言しました。
+
+在庫と発注が型になりました。
+`purchase_orders()` でフィルタ検索、`create_purchase_order()` で発注作成、
+`detect_stock_shortage()` で受注 × 品目クロスチェックが型安全に実行できます。
+
+**Material と PurchaseOrder を並べれば、不足が見える。**
+
+SAP Procurement 1.0（v88.1〜v88.9）で追加した主要型:
+`Material` / `PurchaseOrder` / `PurchaseOrderItem` / `StockAlert` / `NewPurchaseOrder`
+
+---
+
+## v88.0 — SAP Sales 1.0 宣言（2026-08-23）
+
+Favnir v88.0 で **SAP Sales 1.0** を宣言しました。
+
+受注が型になりました。
+`sales_orders()` で絞り込み、`sales_order_by_id()` で明細まで取得できます。
+`SalesOrder` / `SalesOrderFilter` / `NewSalesOrder` / `SalesReport` —
+SAP 受注の CRUD 全操作・ページネーション・売上集計が Favnir の型システムで保護されます。
+
+**日次売上レポートが、Favnir の 10 行で書ける。**
+
+SAP Sales 1.0（v87.1〜v87.9）で追加した主要型:
+`SalesOrder` / `SalesOrderItem` / `SalesReport` / `CurrencyTotal` / `PagedResult`
+
+---
+
+## v87.0 — SAP Master Data 1.0 宣言（2026-08-23）
+
+Favnir v87.0 で **SAP Master Data 1.0** を宣言しました。
+
+SAP の BusinessPartner が、Favnir の型になりました。
+得意先も仕入先も、`business_partners()` で型安全に取得できます。
+`BusinessPartner` / `BusinessPartnerFilter` / `NewBusinessPartner` / `BusinessPartnerPatch` —
+SAP Master Data の CRUD 全操作が Favnir の型システムで保護されます。
+
+**`business_partners()` で SAP BusinessPartner を型安全に取得できる。**
+
+SAP Foundation 1.0（v85.1〜v85.9）で追加した主要型:
+`SapConfig` / `SapError` / `SapErrorCode` / `ODataParams`
+
+---
+
+## v85.0 — Favnir 4.0 宣言（2026-08-22）
+
+Favnir v85.0 で **Favnir 4.0** を宣言しました。
+
+テストが型となり、品質が型となり、契約が型となり、観測が型となりました。
+`fav test` がパイプラインの正しさを証明し、`QualityGate` が品質基準を守り、
+`IoContract` がチームを安全に繋ぎ、`AlertRule` が壊れる前に教えてくれます。
+
+**Favnir 4.0 は、データパイプラインの品質をコードと同じ言語で語れる、唯一の言語です。**
+
+Quality-First Era（v80.1〜v85.0）で追加した主要型:
+`TestSuite` / `QualityCheck` / `ContractRegistry` / `PipelineMetrics` / `HealthDashboard`
+
+---
+
+## v83.0 — Pipeline Contracts 1.0 宣言（2026-08-21）
+
+Favnir v83.0 で **Pipeline Contracts 1.0** を宣言しました。
+
+パイプライン間の約束が型になりました。`IoContract` がインターフェースを定義し、`SlaContract` が応答時間を保証します。
+`ContractRegistry` でチーム間の契約を共有・検索・バージョン管理でき、`fav verify --contract` で型安全な検証が実行できます。
+`check_contract_compatibility` が後方互換性を自動チェックし、`ContractViolation` が破壊的変更の詳細を報告します。
+
+---
+
+## v82.0 — Data Quality 2.0 宣言（2026-08-20）
+
+Favnir v82.0 で **Data Quality 2.0** を宣言しました。
+
+品質が型になりました。`QualityRule` でルールを宣言し、`QualityGate` でパイプラインの停止条件を型で定義できます。
+`SchemaDriftDetector` がスキーマ変更を検出し、`AnomalyDetector` が Z スコアベースで外れ値を捕捉します。
+`QualityScore` が複数の品質次元（Completeness / Accuracy / Timeliness 等）を加重平均し、
+`fav quality report` が人間・CI の両方が読めるレポートを生成します。
+
+---
+
+## v81.0 — Test-Driven Data 1.0 宣言（2026-08-19）
+
+Favnir v81.0 で **Test-Driven Data 1.0** を宣言しました。
+
+`fav test` でパイプラインの正しさを証明できる時代になりました。
+テストが型になり（`TestSuite`）、カバレッジが数値になり（`TestCoverageReport`）、
+スキーマ変更が検出される（`SchemaSnapshot`）。
+JUnit XML 出力（`format_junit_xml`）により CI パイプラインとのシームレスな統合が実現しました。
+
+---
+
 ## v80.0 — Favnir 3.0 宣言（2026-08-16）
 
 Favnir v80.0 で **Favnir 3.0** を宣言しました。
@@ -404,6 +513,7 @@ fav build --target native pipeline.fav
 | | `Math.round_to` / `Math.log` / `Math.log2` / `Math.log10`（v16.4.0） | ✓ |
 | **CLI ツール** | `fav run` / `fav check` / `fav test` / `fav bench`（avg / p50 / p95 / min / max、v17.6.0） | ✓ |
 | | `fav fmt`（冪等コードフォーマッタ） | ✓ |
+| | `fav observe`（メトリクス・アラート・SLO・HealthDashboard 統合観測、v83.7.0） | ✓ |
 | | `fav lint`（W001〜W005 静的解析） | ✓ |
 | | `fav doc`（`///` コメント → Markdown 生成） | ✓ |
 | | `fav profile`（stage 別実行時間計測） | ✓ |

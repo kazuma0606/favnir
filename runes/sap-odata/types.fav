@@ -1,0 +1,86 @@
+-- SAP OData v4 接続設定型（v85.2.0）
+
+type SapConfig = {
+    base_url: String,
+    client:   String,
+    username: String,
+    password: String,
+    auth:     String
+}
+
+-- SAP 接続設定を環境変数から読み取る。
+-- fav.toml [sap] の設定は inject_sap_config() によって
+-- SAP_BASE_URL / SAP_USER / SAP_PASS / SAP_CLIENT / SAP_AUTH として注入済み。
+-- Env.require は Result<String, String> を返す → bind を使う。
+-- Env.get_or はデフォルト値付きで String を直接返す → bind 不要。
+public fn sap_config_from_env() -> Result<SapConfig, String> {
+    bind base_url <- Env.require("SAP_BASE_URL")
+    bind username <- Env.require("SAP_USER")
+    bind password <- Env.require("SAP_PASS")
+    Result.ok(SapConfig {
+        base_url,
+        username,
+        password,
+        client: Env.get_or("SAP_CLIENT", "100"),
+        auth:   Env.get_or("SAP_AUTH", "basic")
+    })
+}
+
+-- OData v4 クエリパラメータ（v85.5.0）
+type ODataParams = {
+    filter:  Option<String>,
+    select:  Option<String>,
+    expand:  Option<String>,
+    top:     Option<Int>,
+    skip:    Option<Int>,
+    orderby: Option<String>
+}
+
+-- ページネーション結果（v87.6.0）
+-- items: JSON 行のリスト（各エンティティの JSON 文字列）
+-- next_token: @odata.nextLink から抽出した次ページ URL
+type PagedResult = {
+    items:      List<String>,
+    next_token: Option<String>
+}
+
+-- 発注伝票ステータス（v88.3.0）
+public type PurchaseOrderStatus = Open | PartiallyDelivered | Completed | Cancelled
+
+-- 発注明細型（v88.3.0）
+public type PurchaseOrderItem = {
+    item_number: Int,
+    material_id: String,
+    quantity:    Float,
+    unit:        String,
+    net_price:   Float,
+    currency:    String,
+    plant:       String
+}
+
+-- 発注伝票型（v88.3.0）
+-- created_at は SAP OData の CreationDate（ISO 8601 文字列）をそのまま保持する（パース失敗回避のため String）
+-- items は $expand=Items 指定時のみ展開される（未指定時は None）
+public type PurchaseOrder = {
+    po_number:    String,
+    vendor_id:    String,
+    status:       PurchaseOrderStatus,
+    total_amount: Float,
+    currency:     String,
+    created_at:   String,
+    items:        Option<List<PurchaseOrderItem>>
+}
+
+-- SAP OData エラーコード列挙型（v85.6.0）
+-- HTTP ステータスコードとのマッピング:
+--   400 → BadRequest / 401 → Unauthorized / 403 → Forbidden
+--   404 → NotFound / 5xx → ServerError / 接続失敗 → NetworkError
+type SapErrorCode = NotFound | Unauthorized | Forbidden | BadRequest | ServerError | NetworkError
+
+-- SAP OData エラー型（v85.6.0）
+-- OData v4 エラーレスポンス（{"error": {"code": "...", "message": "..."}}）に対応
+type SapError = {
+    code:    SapErrorCode,
+    message: String,
+    detail:  Option<String>   -- innererror を単一文字列に簡略化（OData v4 details 配列は v85.9.0 で対応）
+}

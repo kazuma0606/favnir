@@ -9,9 +9,10 @@ Status: 未着手（v81.0.0 完了後に開始）
 
 ## 前提
 
-- 直前完了: v81.0.0「Test-Driven Data 1.0 宣言」（tests = 3,831）
+- 直前完了: v81.0.0「Test-Driven Data 1.0 宣言」（tests = 3,841）
+  （ロードマップ初期想定 3,831 から v80.x code-reviewer 累積 drift +10 件分増加）
 - 本スプリントは Quality-First Era の第 2 スプリント
-- 目標: v82.0.0「Data Quality 2.0 宣言」（tests = 3,853）
+- 目標: v82.0.0「Data Quality 2.0 宣言」（tests = 3,863）（drift 補正後）
 - **依存**: v80.7.0 で `SchemaSnapshot` / `SchemaSnapshotDiff` / `ColumnSnapshot` が導入済みであること（v81.3.0 の `SchemaDriftDetector` が参照する）
 
 ### スプリントの性格
@@ -28,16 +29,16 @@ A（新機能）60% + B（統合）40% の構成。
 
 | バージョン | 内容 | テスト数 | 状態 |
 |---|---|---|---|
-| v81.1.0 | `QualityRule` / `QualityCheck` 型基盤 | 3831 + 2 = 3833 | 未着手 |
-| v81.2.0 | 統計的品質チェック（`StatisticalCheck` / 分布・外れ値） | 3833 + 2 = 3835 | 未着手 |
-| v81.3.0 | スキーマドリフト検出（`SchemaDriftDetector`） | 3835 + 2 = 3837 | 未着手 |
-| v81.4.0 | 品質スコアリング（`QualityScore` / `QualityDimension`） | 3837 + 2 = 3839 | 未着手 |
-| v81.5.0 | 来歴付き品質レポート（Provenance + Quality 統合） | 3839 + 2 = 3841 | 未着手 |
-| v81.6.0 | 品質ゲート（`QualityGate` / パイプライン停止条件） | 3841 + 2 = 3843 | 未着手 |
-| v81.7.0 | `fav quality report` コマンド | 3843 + 2 = 3845 | 未着手 |
-| v81.8.0 | 異常検知（`AnomalyDetector` / Z スコアベース） | 3845 + 2 = 3847 | 未着手 |
-| v81.9.0 | 安定化・コードフリーズ | 3847 + 2 = 3849 | 未着手 |
-| v82.0.0 | Data Quality 2.0 宣言 ★クリーンアップ | 3849 + 4 = 3853 | 未着手 |
+| v81.1.0 | `QualityRule` / `QualityCheck` 型基盤 | 3841 + 4 = 3845 | 完了 |
+| v81.2.0 | 統計的品質チェック（`StatisticalCheck` / 分布・外れ値） | 3845 + 2 = 3847 | 完了 |
+| v81.3.0 | スキーマドリフト検出（`SchemaDriftDetector`） | 3847 + 2 = 3849 | 完了 |
+| v81.4.0 | 品質スコアリング（`QualityScore` / `QualityDimension`） | 3849 + 2 = 3851 | 完了 |
+| v81.5.0 | 来歴付き品質レポート（Provenance + Quality 統合） | 3851 + 2 = 3853 | 完了 |
+| v81.6.0 | 品質ゲート（`QualityGate` / パイプライン停止条件） | 3853 + 2 = 3855 | 未着手 |
+| v81.7.0 | `fav quality report` コマンド | 3855 + 2 = 3857 | 未着手 |
+| v81.8.0 | 異常検知（`AnomalyDetector` / Z スコアベース） | 3857 + 2 = 3859 | 未着手 |
+| v81.9.0 | 安定化・コードフリーズ | 3859 + 2 = 3861 | 未着手 |
+| v82.0.0 | Data Quality 2.0 宣言 ★クリーンアップ | 3861 + 4 = 3865 | 完了 |
 
 ---
 
@@ -70,7 +71,7 @@ A（新機能）60% + B（統合）40% の構成。
 - `detect_outliers(check: &StatisticalCheck, values: &[f64]) -> Vec<usize>`
 - `format_distribution_report(stats: &DistributionStats) -> String`
 
-**完了条件**: Rust テスト 2 件（3833 + 2 = 3835）
+**完了条件**: Rust テスト 2 件（3845 + 2 = 3847）（drift 補正後）
 - `distribution_stats_computed_correctly`
 - `outlier_detection_finds_extreme_values`
 
@@ -82,12 +83,12 @@ A（新機能）60% + B（統合）40% の構成。
 
 **実装内容:**
 - `SchemaDriftDetector` 構造体（`baseline: SchemaSnapshot`, `tolerance: DriftTolerance`）
-- `DriftTolerance` enum（`Strict`（追加も禁止）/ `Additive`（追加のみ許可）/ `Permissive`）
+- `DriftTolerance` enum（`Strict`（追加・削除・変更すべて禁止）/ `Additive` / `Permissive`（削除・変更のみ禁止、追加は許容。現バージョンは両者同一動作））
 - `detect_schema_drift(detector: &SchemaDriftDetector, current: &SchemaSnapshot) -> DriftResult`
 - `DriftResult` 構造体（`has_drift: bool`, `severity: RuleSeverity`, `diff: SchemaSnapshotDiff`）
 - `format_drift_report(result: &DriftResult) -> String`
 
-**完了条件**: Rust テスト 2 件（3835 + 2 = 3837）
+**完了条件**: Rust テスト 2 件（3847 + 2 = 3849）
 - `drift_detector_strict_mode_catches_addition`
 - `drift_detector_additive_mode_allows_new_column`
 
@@ -105,7 +106,7 @@ A（新機能）60% + B（統合）40% の構成。
 - `format_quality_score(score: &QualityScore) -> String`
 - `quality_grade(score: &QualityScore) -> &'static str`（A/B/C/D/F）
 
-**完了条件**: Rust テスト 2 件（3837 + 2 = 3839）
+**完了条件**: Rust テスト 2 件（3849 + 2 = 3851）
 - `quality_score_weighted_average`
 - `quality_grade_a_when_perfect`
 
@@ -123,7 +124,7 @@ Favnir 3.0 の `ProvenanceTag` と品質スコアを統合し、
 - `format_provenance_quality_report(report: &ProvenanceQualityReport) -> String`
 - `worst_quality_source(report: &ProvenanceQualityReport) -> Option<&ProvenanceQualityEntry>`
 
-**完了条件**: Rust テスト 2 件（3839 + 2 = 3841）
+**完了条件**: Rust テスト 2 件（3851 + 2 = 3853）
 - `provenance_quality_report_built`
 - `worst_source_identified`
 
@@ -141,7 +142,7 @@ Favnir 3.0 の `ProvenanceTag` と品質スコアを統合し、
 - `QualityGate::strict() -> QualityGate`（全ディメンション 0.9 以上）
 - `QualityGate::permissive() -> QualityGate`（overall 0.6 以上）
 
-**完了条件**: Rust テスト 2 件（3841 + 2 = 3843）
+**完了条件**: Rust テスト 2 件（3853 + 2 = 3855）
 - `quality_gate_fails_below_threshold`
 - `quality_gate_passes_above_threshold`
 
@@ -157,7 +158,7 @@ Favnir 3.0 の `ProvenanceTag` と品質スコアを統合し、
 - `build_quality_report(check: &QualityCheck, rows: &[Vec<String>], opts: &QualityReportOptions) -> String`
 - `cmd_quality_report` 関数（`fav quality report` コマンドハンドラ）
 
-**完了条件**: Rust テスト 2 件（3843 + 2 = 3845）
+**完了条件**: Rust テスト 2 件（3855 + 2 = 3857）
 - `quality_report_text_format`
 - `quality_report_json_format`
 
@@ -175,7 +176,7 @@ Favnir 3.0 の `ProvenanceTag` と品質スコアを統合し、
 - `scan_for_anomalies(detector: &AnomalyDetector, values: &[f64]) -> Vec<AnomalyResult>`
 - `format_anomaly_report(results: &[AnomalyResult]) -> String`
 
-**完了条件**: Rust テスト 2 件（3845 + 2 = 3847）
+**完了条件**: Rust テスト 2 件（3857 + 2 = 3859）
 - `anomaly_detector_catches_outlier`
 - `anomaly_scan_returns_all_results`
 
@@ -191,7 +192,7 @@ v81.1〜v81.8 の全スプリント統合確認。バグ修正のみ。
 - `QualityGate` + `SchemaDriftDetector` 連携確認
 - バグ修正のみ受け入れ（新機能追加なし）
 
-**完了条件**: Rust テスト 2 件（3847 + 2 = 3849）
+**完了条件**: Rust テスト 2 件（3859 + 2 = 3861）
 - `data_quality_full_sprint_all_stable`
 - `quality_gate_and_drift_detector_integrated`
 
@@ -211,7 +212,7 @@ v81.1〜v81.8 の全スプリント統合確認。バグ修正のみ。
 - `versions/current.md` の現行マスターロードマップが `roadmap-v80.1-v85.0.md` を指していることを確認してから更新
 - `roadmap-v80.1-v85.0.md` の Sprint 2 バージョン一覧テーブルを全行「完了」に更新
 
-**完了条件**: `v82000_tests` 4 件（3849 + 4 = 3853）
+**完了条件**: `v82000_tests` 4 件（3861 + 4 = 3865）
 - `cargo_toml_version_is_82_0_0`
 - `changelog_has_v82_0_0`
 - `milestone_has_data_quality_2`
@@ -223,19 +224,19 @@ v81.1〜v81.8 の全スプリント統合確認。バグ修正のみ。
 
 | バージョン | テスト数 | 増加 |
 |---|---|---|
-| v81.0.0（ベース） | 3,831 | — |
-| v81.1.0 | 3,833 | +2 |
-| v81.2.0 | 3,835 | +2 |
-| v81.3.0 | 3,837 | +2 |
-| v81.4.0 | 3,839 | +2 |
-| v81.5.0 | 3,841 | +2 |
-| v81.6.0 | 3,843 | +2 |
-| v81.7.0 | 3,845 | +2 |
-| v81.8.0 | 3,847 | +2 |
-| v81.9.0 | 3,849 | +2 |
-| v82.0.0（宣言） | 3,853 | +4 |
+| v81.0.0（ベース） | 3,841 | — |
+| v81.1.0 | 3,845 | +4（code-reviewer drift +2 含む） |
+| v81.2.0 | 3,847 | +2 |
+| v81.3.0 | 3,849 | +2 |
+| v81.4.0 | 3,851 | +2 |
+| v81.5.0 | 3,853 | +2 |
+| v81.6.0 | 3,855 | +2 |
+| v81.7.0 | 3,857 | +2 |
+| v81.8.0 | 3,859 | +2 |
+| v81.9.0 | 3,861 | +2 |
+| v82.0.0（宣言） | 3,865 | +4 |
 
-**本スプリント合計**: +22 tests（3,831 → 3,853）
+**本スプリント合計**: +24 tests（3,841 → 3,865）
 
 ---
 

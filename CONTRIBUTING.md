@@ -252,3 +252,86 @@ fav verify <pipeline.fav>
 
 `fav verify` はパイプラインの不変条件（`contract` ブロック）を静的検証します。
 CI での使用を推奨します。
+
+---
+
+## Favnir 4.0 機能の追加手順
+
+### QualityRule を追加する
+
+1. `fav/src/test_framework.rs` に `QualityRule` 構造体を追加する
+2. `fav/src/driver.rs` に `#[cfg(test)]` テストモジュールを追加して動作確認する
+3. `site/content/docs/v4/data-quality.mdx` にドキュメントを追加する
+
+### IoContract を追加する
+
+1. `fav/src/test_framework.rs` に `IoContract` 構造体を追加する
+2. `fav/src/driver.rs` に `#[cfg(test)]` テストモジュールを追加して動作確認する
+3. `infra/e2e-demo/favnir4-showcase/pipeline.fav` にショーケース用コードを追加する
+4. `site/content/docs/v4/pipeline-contracts.mdx` にドキュメントを追加する
+
+---
+
+## SAP Rune — 新エンティティの追加手順
+
+sap-odata Rune に新しい SAP OData エンティティを追加する場合の手順:
+
+### 手順 1: 型定義ファイルの作成
+
+`runes/sap-odata/<entity>.fav` を新規作成する:
+
+```favnir
+-- <EntityName> 型定義
+use sap_odata.types
+
+public type <EntityName> = {
+    key_field: String
+}
+
+public type <EntityName>Filter = {
+    top: Option<Int>
+}
+
+public fn <entity_name>s(cfg: SapConfig, filter: <EntityName>Filter) -> Result<List<<EntityName>>, String> {
+    Result.err("not implemented")
+}
+```
+
+### 手順 2: 関数実装（スタブから実装へ）
+
+型定義ファイル内のスタブ（`Result.err("not implemented")`）を実際の OData 呼び出しに置き換える:
+
+```favnir
+public fn <entity_name>s(cfg: SapConfig, filter: <EntityName>Filter) -> Result<List<<EntityName>>, String> {
+    -- OData エンドポイント呼び出し実装
+    Result.err("not implemented")
+}
+```
+
+### 手順 3: `sap_odata.fav` への re-export 追加
+
+`runes/sap-odata/sap_odata.fav` に追加する:
+
+```favnir
+use sap_odata.<entity>
+
+public type <EntityName>       = <entity>.<EntityName>
+public type <EntityName>Filter = <entity>.<EntityName>Filter
+public fn <entity_name>s(cfg: SapConfig, filter: <EntityName>Filter) -> Result<List<<EntityName>>, String> {
+    <entity>.<entity_name>s(cfg, filter)
+}
+```
+
+### 手順 4: `fav/src/driver.rs` テスト追加
+
+`mod v<version>_tests` に 2 件のテストを追加する:
+- `<entity_name>_type_defined_in_rune`: 型定義の存在確認
+- `<entity_name>_function_exists`: 関数の存在確認
+
+### 手順 5: Registry デプロイ
+
+```bash
+/deploy-registry
+```
+
+詳細は `site/content/docs/runes/sap-odata.mdx` を参照。

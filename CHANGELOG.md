@@ -4,6 +4,823 @@ Favnir のバージョン履歴。形式は [Keep a Changelog](https://keepachan
 
 ---
 
+## [v90.0.0] — 2026-08-25 — SAP Integration 1.0 宣言
+
+> 「SAP が、Favnir の型になった。
+>  `business_partners()` で得意先を取得し、
+>  `sales_orders()` で受注を集計し、
+>  `materials()` で在庫を確認し、
+>  `journal_entries()` で支払を照合する。
+>  世界最大の ERP データが、型安全なパイプラインとして流れる。
+>  それが、Favnir SAP Integration 1.0 である。」
+
+### Added
+- `fav/src/driver.rs` — `mod v90000_tests`（テスト 4 件）を追加
+- `MILESTONE.md` — SAP Integration 1.0 マイルストーンを追加
+- 合計テスト数: **4,041**（+4）
+
+### Changed
+- `fav/Cargo.toml` — version を `89.0.0` → `90.0.0` に更新
+- `versions/current.md` — v90.0.0 に更新
+
+---
+
+## [v89.0.0] — 2026-08-24 — SAP Procurement 1.0 宣言
+
+> 「在庫と発注が型になった。
+>  Material と PurchaseOrder を並べれば、不足が見える。」
+
+### Added
+- `fav/src/driver.rs` — `mod v89000_tests`（テスト 4 件）を追加
+- `MILESTONE.md` — SAP Procurement 1.0 マイルストーンを追加
+- 合計テスト数: **4,019**（+4）
+
+### Changed
+- `fav/Cargo.toml` — version を `88.0.0` → `89.0.0` に更新
+- `versions/current.md` — v89.0.0 に更新
+
+---
+
+## [v88.0.0] — 2026-08-23 — SAP Sales 1.0 宣言
+
+> 「受注が型になった。
+>  `sales_orders()` で絞り込み、`sales_order_by_id()` で明細まで取得できる。
+>  日次売上レポートが、Favnir の 10 行で書ける。」
+
+### Added
+- `fav/src/driver.rs` — `mod v88000_tests`（テスト 4 件）を追加
+- `MILESTONE.md` — SAP Sales 1.0 マイルストーンを追加
+- 合計テスト数: **3,997**（+4）
+
+### Changed
+- `fav/Cargo.toml` — version を `87.0.0` → `88.0.0` に更新
+- `versions/current.md` — v88.0.0 に更新
+
+---
+
+## [v87.0.0] — 2026-08-23 — SAP Master Data 1.0 宣言
+
+> 「SAP の BusinessPartner が、Favnir の型になった。
+>  得意先も仕入先も、`business_partners()` で型安全に取得できる。」
+
+### Added
+- `fav/src/driver.rs` — `mod v87000_tests`（テスト 4 件）を追加
+- `MILESTONE.md` — SAP Master Data 1.0 マイルストーンを追加
+- 合計テスト数: **3,975**（+4）
+
+### Changed
+- `fav/Cargo.toml` — version を `86.0.0` → `87.0.0` に更新
+- `versions/current.md` — v87.0.0 に更新
+
+---
+
+## [v86.9.0] — 2026-08-23 — 安定化・コードフリーズ
+
+### Added
+- `fav/src/driver.rs` — `mod v86900_tests`（テスト 2 件）を追加
+- 合計テスト数: **3,971**（+2）
+
+### Fixed
+- `rune-registry/src/main.fav` — `!Effect` 注釈構文（E0374）を全 11 箇所から削除（`fav run --legacy` が正常動作するよう修正）
+
+---
+
+## [v86.8.0] — 2026-08-23 — Rune Registry デプロイ（sap-odata）
+
+### Added
+- `runes/sap-odata/rune.toml` — version を `85.4.0` → `86.8.0` に更新
+- `fav/src/driver.rs` — `mod v86800_tests`（テスト 2 件）を追加
+- 合計テスト数: **3,969**（+2）
+
+---
+
+## [v86.7.0] — 2026-08-23 — SAP OData テスト拡充（BusinessPartner CRUD テスト）
+
+### Added
+- `runes/sap-odata/sap_odata.test.fav` — BusinessPartner CRUD テスト関数 4 件追加（Create / Read / Update / List）
+- `scripts/test-with-mock.sh` — モックサーバー起動確認スクリプト（スタブ）を新規作成
+- `fav/src/driver.rs` — `mod v86700_tests`（テスト 2 件）を追加
+- 合計テスト数: **3,967**（+2）
+
+---
+
+## [v86.6.0] — 2026-08-23 — シナリオ 1: マスタデータ同期（BusinessPartner → S3）
+
+### Added
+- `infra/e2e-demo/sap-odata/pipeline.fav` — `sync_business_partners()` E2E パイプライン（SAP → S3 JSON 同期）を新規作成
+- `fav/src/driver.rs` — `mod v86600_tests`（テスト 2 件）を追加
+- 合計テスト数: **3,965**（+2）
+
+---
+
+## [v86.5.0] — 2026-08-23 — update_business_partner() PATCH
+
+### Added
+- `runes/sap-odata/business_partner.fav` — `BusinessPartnerPatch` 型（3 フィールド、すべて Optional）+ `update_business_partner()` 関数を追記
+- `runes/sap-odata/sap_odata.fav` — `BusinessPartnerPatch` 再エクスポート + `update_business_partner()` ラッパーを追加
+- `fav/src/driver.rs` — `mod v86500_tests`（テスト 2 件）を追加
+- 合計テスト数: **3,963**（+2）
+
+---
+
+## [v86.4.0] — 2026-08-23 — create_business_partner() POST
+
+### Added
+- `runes/sap-odata/business_partner.fav` — `NewBusinessPartner` 型（4 フィールド）+ `create_business_partner()` 関数（x-csrf-token 取得設計）を追記
+- `runes/sap-odata/sap_odata.fav` — `NewBusinessPartner` 再エクスポート + `create_business_partner()` ラッパーを追加
+- `fav/src/driver.rs` — `mod v86400_tests`（テスト 2 件）を追加
+- 合計テスト数: **3,961**（+2）
+
+---
+
+## [v86.3.0] — 2026-08-23 — business_partner_by_id() + $expand
+
+### Added
+- `runes/sap-odata/business_partner.fav` — `business_partner_by_id()` 関数（`expand_address: Bool` で `$expand=to_BusinessPartnerAddress` 対応）を追記
+- `runes/sap-odata/sap_odata.fav` — `business_partner_by_id()` 再エクスポートを追加
+- `fav/src/driver.rs` — `mod v86300_tests`（テスト 2 件）を追加
+- 合計テスト数: **3,959**（+2）
+
+---
+
+## [v86.2.0] — 2026-08-23 — BusinessPartnerFilter + business_partners() クエリ
+
+### Added
+- `runes/sap-odata/business_partner.fav` — `BusinessPartnerFilter` 型（4 フィールド）+ `business_partners()` 関数シグネチャを追記
+- `fav/src/driver.rs` — `mod v86200_tests`（テスト 2 件）を追加
+- 合計テスト数: **3,957**（+2）
+
+---
+
+## [v86.1.0] — 2026-08-23 — BusinessPartner / BusinessPartnerAddress 型定義
+
+### Added
+- `runes/sap-odata/business_partner.fav` — `BusinessPartnerCategory`（Person | Organization | Group）/ `BusinessPartner` / `BusinessPartnerAddress` 型定義
+- `fav/src/driver.rs` — `mod v86100_tests`（テスト 2 件）を追加
+- 合計テスト数: **3,955**（+2）
+
+---
+
+## [v86.0.0] — 2026-08-23 — SAP Foundation 1.0 宣言 ★クリーンアップ
+
+### Added
+- SAP Foundation 1.0 を宣言:「SAP に、型安全に接続できるようになった。`fav.toml [sap]` を書けば、Favnir が SAP OData v4 と話せる。」
+- `fav/src/driver.rs` — `mod v86000_tests`（テスト 4 件）を追加
+- 合計テスト数: **3,953**（+4）
+
+### Changed
+- `fav/Cargo.toml` — バージョンを `86.0.0` に更新
+- `MILESTONE.md` — SAP Foundation 1.0 エントリを追加
+- `README.md` — v86.0 SAP Foundation 1.0 セクションを追加
+- `versions/current.md` — v86.0.0 に更新
+
+---
+
+## [v85.9.0] — 2026-08-23 — 安定化・コードフリーズ
+
+### Added
+- `fav/src/driver.rs` — `mod v85900_tests`（テスト 2 件）を追加
+  - `sap_foundation_rune_toml_has_correct_name`: `runes/sap-odata/rune.toml` に `sap-odata` が含まれることを確認
+  - `sap_foundation_docker_compose_has_sap_mock_service`: `infra/e2e-demo/sap-odata/docker-compose.yml` に `sap-mock` が含まれることを確認
+- 合計テスト数: **3,949**（+2）
+
+### Notes
+- v85.1〜v85.8 の全コンポーネントを安定化テストで確認（新機能追加なし）
+- v85.6.0 で延期されていた OData v4 エラーレスポンスパース処理は v86.x 以降に計画
+
+---
+
+## [v85.8.0] — 2026-08-23 — SSM Parameter Store 設定（`infra/sap/`）
+
+### Added
+- `infra/sap/ssm.tf` — SAP 接続情報（`base_url` / `client` / `auth` / `username` / `password`）の SSM Parameter Store リソース定義
+- `infra/sap/variables.tf` — Terraform 変数定義（`sap_username` / `sap_password` は `sensitive = true`）
+- `infra/sap/providers.tf` — AWS provider（`~> 5.0`）+ S3 backend（`sap/terraform.tfstate`）
+- `infra/sap/outputs.tf` — SSM パス prefix 出力
+- `infra/sap/README.md` — セットアップ手順・変数一覧・SSM パス一覧
+- `fav/src/driver.rs` — `mod v85800_tests`（テスト 2 件）を追加
+- 合計テスト数: **3,947**（+2）
+
+---
+
+## [v85.7.0] — 2026-08-22 — `fav new` テンプレート + `fav.toml [sap]` セクション追加
+
+### Added
+- `fav/src/driver.rs` — `default_fav_toml()` に `[sap]` コメントブロックを追加（`base_url` / `client` / `username` / `password` / `auth`）
+- `fav/src/driver.rs` — `mod v85700_tests`（テスト 2 件）を追加
+- 合計テスト数: **3,945**（+2）
+
+---
+
+## [v85.6.0] — 2026-08-22 — `SapError` 型 + エラーハンドリング（4xx / 5xx / ネットワーク）
+
+### Added
+- `runes/sap-odata/types.fav` — `SapErrorCode` 列挙型（`NotFound | Unauthorized | Forbidden | BadRequest | ServerError | NetworkError`）を追加
+- `runes/sap-odata/types.fav` — `SapError` レコード型（`code: SapErrorCode` / `message: String` / `detail: Option<String>`）を追加
+- `fav/src/driver.rs` — `mod v85600_tests`（テスト 2 件）を追加
+- 合計テスト数: **3,943**（+2）
+
+---
+
+## [v85.5.0] — 2026-08-22 — OData v4 HTTP クライアント基盤（`odata_get` / `odata_list`）
+
+### Added
+- `runes/sap-odata/types.fav` — `ODataParams` 型（filter / select / expand / top / skip / orderby）を追加
+- `runes/sap-odata/client.fav` — `odata_get` / `odata_list` / `basic_auth_header` / `build_query_string` を実装
+- `runes/sap-odata/sap_odata.fav` — `odata_get` / `odata_list` / `ODataParams` を re-export するよう更新
+- `fav/src/driver.rs` — `mod v85500_tests`（テスト 2 件）を追加
+- 合計テスト数: **3,941**（+2）
+
+---
+
+## [v85.4.0] — 2026-08-22 — `runes/sap-odata/` 骨格 + `rune.toml`
+
+### Added
+- `runes/sap-odata/rune.toml` — Rune メタデータ（name / version / entry / description）を作成
+- `runes/sap-odata/sap_odata.fav` — エントリポイント（`types.fav` を use して `SapConfig` / `sap_config_from_env` を re-export）
+- `runes/sap-odata/sap_odata.test.fav` — テストファイル骨格
+- `fav/src/driver.rs` — `mod v85400_tests`（テスト 2 件）を追加
+- 合計テスト数: **3,939**（+2）
+
+---
+
+## [v85.3.0] — 2026-08-22 — Docker Compose — SAP OData モックサーバー構築
+
+### Added
+- `infra/e2e-demo/sap-odata/docker-compose.yml` — `sap-mock`（node:20-alpine + `@sap-ux/mockserver-main`）+ `favnir-runner` サービス
+- `infra/e2e-demo/sap-odata/mock/BusinessPartnerCollection.json` — サンプル BusinessPartner 10 件（OData v4 形式）
+- `infra/e2e-demo/sap-odata/mock/SalesOrderCollection.json` — サンプル SalesOrder 10 件（OData v4 形式）
+- `infra/e2e-demo/sap-odata/README.md` — 起動手順・前提条件・エンドポイント一覧
+- `scripts/start-sap-mock.sh` — Docker Compose 起動スクリプト
+- `fav/src/driver.rs` — `mod v85300_tests`（テスト 2 件）を追加
+- 合計テスト数: **3,937**（+2）
+
+---
+
+## [v85.2.0] — 2026-08-22 — `SapConfig` Favnir 型 + `sap_config_from_env()`
+
+### Added
+- `runes/sap-odata/` — ディレクトリを新規作成（骨格）
+- `runes/sap-odata/types.fav` — `SapConfig` レコード型（`base_url` / `client` / `username` / `password` / `auth`）を定義
+- `runes/sap-odata/types.fav` — `sap_config_from_env() -> Result<SapConfig, String>` を実装（`Env.require` / `Env.get_or` 使用）
+- `fav/src/driver.rs` — `mod v85200_tests`（テスト 2 件）を追加
+- 合計テスト数: **3,935**（+2）
+
+---
+
+## [v85.1.0] — 2026-08-22 — `SapTomlConfig` + `inject_sap_config()`（SAP Integration Era 開始）
+
+### Added
+- `fav/src/toml.rs` — `SapTomlConfig` 構造体（`base_url` / `client` / `username` / `password` / `auth`）を追加
+- `FavToml` に `sap: Option<SapTomlConfig>` フィールドを追加（`fav.toml [sap]` セクション対応）
+- `fav/src/driver.rs` — `inject_sap_config()` 関数を追加（`SAP_BASE_URL` 等の env vars に注入）
+- `cmd_run` / `cmd_check` の設定読み込み箇所で `inject_sap_config` を呼び出す
+- `v85100_tests` — SAP Foundation テスト 2 件（3,931 → 3,933）
+  - `sap_toml_config_parses_base_url`
+  - `inject_sap_config_sets_env_vars`
+
+---
+
+## [v85.0.0] — 2026-08-22 — Favnir 4.0 宣言 ★クリーンアップ
+
+### Changed
+- `fav/Cargo.toml` version を `84.0.0` → `85.0.0` に更新
+
+### Added
+- `v85000_tests` — Favnir 4.0 宣言検証テスト 4 件（3,927 → 3,931）
+  - `cargo_toml_version_is_85_0_0`
+  - `changelog_has_v85_0_0`
+  - `milestone_has_favnir_4`
+  - `readme_mentions_favnir_4`
+
+### Cleanup
+- `cargo clean` でビルドキャッシュを削除（12.5 GiB 解放）
+- `MILESTONE.md` / `README.md` に Favnir 4.0 宣言を追記
+- `versions/current.md` を v85.0.0 に更新
+- `roadmap-v84.1-v85.0.md` / `roadmap-v80.1-v85.0.md` の Sprint 5 テーブルを全行「完了」に更新
+
+---
+
+## [v84.9.0] — 2026-08-22 — 安定化・コードフリーズ
+
+### Added
+- `v84900_tests` — Favnir 4.0 E2E 統合安定性検証テスト 2 件（3,925 → 3,927）
+
+### Verified
+- `pipeline.fav` に Sprint 1〜4 全識別子（TestSuite / QualityCheck / ContractRegistry / PipelineMetrics）の存在を確認
+- `fav.toml` に `[quality]`・`[contract]`・`[observe]` の 3 セクションが存在することを確認
+- v84100〜v84800 全 8 テストモジュールが driver.rs に存在することを確認
+- バグなし（修正対象なし）、コードフリーズ
+
+---
+
+## [v84.8.0] — 2026-08-22 — パフォーマンス最終調整
+
+### Added
+- `benchmarks/v80.0.0.json` 新規作成（Favnir 4.0 開始前 v80.0.0 ベースライン: `tests_passed: 3840`, `duration_ms: 18000`）
+- `v84800_tests` — パフォーマンスベースライン検証テスト 2 件（3,923 → 3,925）
+
+### Verified
+- `cargo test --release` 3,923 tests, 0 failures（リリースビルド全テスト通過）
+- `fav bench --all` 実行: `parse_checker_fav_ms: 11ms`（v80 ベースライン比で回帰なし）
+- `PipelineMetrics` / `QualityCheck` / `ContractRegistry` の clone はすべて必要なもの（最適化対象なし）
+
+---
+
+## [v84.7.0] — 2026-08-22 — OSS 公開強化・コミュニティ整備 v2
+
+### Added
+- `.github/ISSUE_TEMPLATE/quality-feedback.md` 新規作成（QualityRule / QualityGate / AnomalyDetector 品質フィードバック専用テンプレート）
+- `v84700_tests` — OSS コミュニティファイル検証テスト 2 件（3,921 → 3,923）
+
+### Updated
+- `CONTRIBUTING.md` — Favnir 4.0 機能の追加手順セクションを追記（QualityRule 追加手順・IoContract 追加手順）
+- `SECURITY.md` — サポートバージョンテーブルを追加（v4: サポート中 / v3: 限定サポート / v2 以前: 終了）
+
+---
+
+## [v84.6.0] — 2026-08-22 — ドキュメント完全化（`site/content/docs/v4/`）
+
+### Added
+- `site/content/docs/v4/` ディレクトリを新規作成し、Favnir 4.0 の 4 スプリント全機能ドキュメントを追加
+  - `test-driven-data.mdx` — `TestSuite` / `StageTestCase` / `GoldenDataset` / `SchemaSnapshot` / `compare_golden` / `compare_schema_snapshots`（Sprint 1）
+  - `data-quality.mdx` — `QualityRule` / `QualityCheck` / `run_quality_check` / `QualityGate` / `evaluate_quality_gate` / `AnomalyDetector` / `detect_anomaly`（Sprint 2）
+  - `pipeline-contracts.mdx` — `IoContract` / `SlaContract` / `ContractRegistry` / `ContractRegistryEntry` / `registered_at`（Sprint 3）
+  - `observability.mdx` — `PipelineMetrics` / `StageMetrics` / `AlertRule` / `evaluate_alert_rules` / `SloTarget` / `SloMeasurement` / `compute_slo_status` / `HealthDashboard` / `format_health_dashboard`（Sprint 4）
+  - `migration-v3-v4.mdx` — v3（v80.0）→ v4（v85.0）移行ガイド（機能比較表・移行手順・fav.toml 更新例）
+- `v84600_tests` — v4 ドキュメント存在確認テスト 2 件（3,919 → 3,921）
+
+---
+
+## [v84.5.0] — 2026-08-22 — 可観測性統合ショーケース（`fav observe` E2E）
+
+### Added
+- `infra/e2e-demo/favnir4-showcase/pipeline.fav` に可観測性統合セクションを追加
+  - `showcase_pipeline_metrics` — `StageMetrics` + `PipelineMetrics` によるステージ単位実行統計収集（Sprint 4）
+  - `showcase_health_dashboard` — `AlertRule` + `evaluate_alert_rules` + `SloTarget` + `SloMeasurement` + `compute_slo_status` + `compute_pipeline_health` + `HealthDashboard` + `format_health_dashboard` による統合ダッシュボード出力
+- `v84500_tests` — 可観測性統合内容検証テスト 2 件（3,917 → 3,919）
+
+---
+
+## [v84.4.0] — 2026-08-22 — 契約統合ショーケース（`fav verify --contract` E2E）
+
+### Added
+- `infra/e2e-demo/favnir4-showcase/contract.fav` を完成版に更新
+  - `SlaContract` 型宣言（SLA 目標値・adaptive_strategy・cache_ttl_secs）
+  - `ContractDependency` 型宣言（upstream / downstream / output_contract）
+- `infra/e2e-demo/favnir4-showcase/pipeline.fav` に契約統合セクションを追加
+  - `showcase_contract_registry` — `ContractRegistry` に `IoContract` を登録するフロー（Sprint 3）
+- `v84400_tests` — 契約統合内容検証テスト 2 件（3,915 → 3,917）
+
+---
+
+## [v84.3.0] — 2026-08-22 — 品質統合ショーケース（`fav quality` E2E）
+
+### Added
+- `infra/e2e-demo/favnir4-showcase/pipeline.fav` に Quality 統合セクションを追加
+  - `showcase_quality_check` — `QualityCheck` + `run_quality_check` による行単位品質チェック（Sprint 2）
+  - `showcase_quality_gate` — `QualityGate` + `evaluate_quality_gate` によるパイプライン停止条件
+  - `showcase_anomaly_detection` — `AnomalyDetector` + `detect_anomaly` による Z スコア外れ値検知
+- `v84300_tests` — 品質統合内容検証テスト 2 件（3,913 → 3,915）
+
+---
+
+## [v84.2.0] — 2026-08-22 — テスト統合ショーケース（`fav test` E2E）
+
+### Added
+- `infra/e2e-demo/favnir4-showcase/pipeline.fav` にテスト統合セクションを追加
+  - `showcase_stage_test` — `TestSuite` + `StageTestCase` 単体テスト関数（Sprint 1）
+  - `showcase_golden_dataset` — `GoldenDataset` + `compare_golden_dataset` 比較関数
+  - `showcase_schema_snapshot` — `SchemaSnapshot` 比較関数
+- `v84200_tests` — ショーケーステスト内容検証テスト 2 件（3,911 → 3,913）
+
+---
+
+## [v84.1.0] — 2026-08-22 — E2E ショーケース基盤
+
+### Added
+- `infra/e2e-demo/favnir4-showcase/` — Favnir 4.0 の 4 Quality 柱を統合するデモパイプライン骨格
+  - `pipeline.fav` — load/transform/quality/observe の 4 ステージ（Favnir 構文・bind 使用）
+  - `fav.toml` — `[quality]`・`[contract]`・`[observe]` セクションの設定例
+  - `contract.fav` — `Favnir4ShowcaseContract` 型宣言（input_fields / output_fields / sla_ms）
+  - `README.md` — ショーケース概要・前提・実行手順
+- `v84100_tests` — ショーケース構造検証テスト 2 件（3,909 → 3,911）
+
+---
+
+## [v84.0.0] — 2026-08-21 — Observability 2.0 宣言
+
+> 「メトリクスが型になり、アラートが型になり、SLO が型になった。
+>  Favnir のパイプラインは壊れる前に教えてくれる。」
+
+### Changed
+- Bump version to 84.0.0
+
+### Summary: Observability 2.0 スプリント（v83.1〜v83.9）達成内容
+- `PipelineMetrics` / `StageMetrics` / `format_metrics_summary` / `slowest_stage`（v83.1）
+- `AlertSeverity` / `AlertThreshold` / `AlertRule` / `AlertFiring` / `evaluate_alert_rules`（v83.2）
+- `SloTarget` / `SloMeasurement` / `SloStatus` / `compute_slo_status` / `format_slo_status`（v83.3）
+- `ResourceUsage` / `ExecutionCost` / `CostBudget` / `BudgetStatus` / `evaluate_cost_budget`（v83.4）
+- `TraceContext` / `TraceSpan` / `format_trace_span` / `compute_span_duration`（v83.5）
+- `PerfBaseline` / `PerfRegression` / `detect_perf_regression` / `format_regression_report`（v83.6）
+- `ObserveFormat` / `ObserveOptions` / `ObserveReport` / `format_observe_report` / `cmd_observe`（v83.7）
+- `HealthStatus` / `PipelineHealth` / `HealthDashboard` / `compute_pipeline_health` / `format_health_dashboard`（v83.8）
+- スプリント統合確認テスト（v83.9）
+
+---
+
+## [v83.9.0] — 2026-08-21 — 安定化・コードフリーズ（Observability 2.0 スプリント統合確認）
+
+### Added
+- `observability_full_sprint_all_stable` — v83.1〜v83.8 主要型（StageMetrics/AlertRule/SloStatus/HealthDashboard/ObserveReport/PerfBaseline）連携統合テスト、`cmd_observe` E2E 確認含む
+- `health_dashboard_and_alerts_integrated` — HealthDashboard + evaluate_alert_rules + compute_slo_status 連携シナリオ
+
+---
+
+## [v83.8.0] — 2026-08-21 — 健全性ダッシュボード（HealthDashboard / テキスト形式）
+
+### Added
+- `HealthStatus` enum（`Healthy` / `Degraded(String)` / `Critical(String)`）
+- `PipelineHealth` 構造体（`pipeline_name`, `status`, `alerts_firing`, `slo_breached`, `quality_score`）
+- `HealthDashboard` 構造体（`pipelines: Vec<PipelineHealth>`, `generated_at: String`）
+- `compute_pipeline_health` — SLO超過→Critical、アラートあり→Degraded、正常→Healthy
+- `format_health_dashboard` — テキスト形式ダッシュボード（空pipelines時 "No pipelines."）
+
+---
+
+## [v83.7.0] — 2026-08-21 — `fav observe` コマンド（メトリクス・アラート統合）
+
+### Added
+- `ObserveFormat` enum（`Text` / `Json`）
+- `ObserveOptions` 構造体（`pipeline_name`, `format`, `show_alerts`, `show_slo`）
+- `ObserveReport` 構造体（`metrics: PipelineMetrics`, `alerts: Vec<AlertFiring>`, `slo_statuses: Vec<SloStatus>`）
+- `format_observe_report` — Text/JSON 形式でメトリクス・アラート・SLO を統合出力
+- `cmd_observe` — `fav observe` コマンドハンドラ（`format_observe_report` に委譲）
+
+---
+
+## [v83.6.0] — 2026-08-21 — パフォーマンス回帰検知（PerfBaseline / PerfRegression）
+
+### Added
+- `PerfBaseline` 構造体（`pipeline_name`, `p50_ms`, `p95_ms`, `p99_ms`）
+- `PerfBaseline::from_samples` — sort_unstable + インデックスベース百分位数（p50/p95/p99）
+- `PerfRegression` 構造体（`pipeline_name`, `baseline`, `current_ms`, `regression_pct`）
+- `detect_perf_regression` — p95_ms 比較、閾値超過で `Some`、ゼロ除算ガード付き
+- `format_regression_report` — "PerfRegression:" / "Baseline p95:" / "Current:" / "Regression: +{:.2}%" 形式
+
+---
+
+## [v83.5.0] — 2026-08-21 — 分散トレーシング強化（TraceContext）
+
+### Added
+- `TraceContext` 構造体（`trace_id`, `span_id`, `parent_span_id`）
+- `TraceContext::new_root()` — ルートコンテキスト生成（uuid v4）
+- `TraceContext::child_span(parent)` — 子スパンコンテキスト生成（trace_id 引き継ぎ）
+- `TraceSpan` 構造体（`context`, `name`, `start_ms`, `end_ms`, `attributes`）
+- `format_trace_span(span)` — スパン情報テキスト出力
+- `compute_span_duration(span)` — スパン実行時間計算（`saturating_sub`）
+
+### Tests
+- `trace_context_child_span_created`: 子スパンが親の trace_id を引き継ぎ異なる span_id を持つことを確認
+- `span_duration_computed`: 150ms の duration 計算・format スモークテスト・inverted span のゼロ返却確認
+
+---
+
+## [v83.0.0] — 2026-08-21 — Pipeline Contracts 1.0 宣言 ★クリーンアップ
+
+### Changed
+- `Cargo.toml` バージョンを `83.0.0` に更新
+
+### Added
+- `MILESTONE.md` に Pipeline Contracts 1.0 達成宣言を追加
+- `README.md` に `ContractRegistry` への言及を追加
+
+### Tests
+- `cargo_toml_version_is_83_0_0`: Cargo.toml に `"version = \"83.0.0\""` が含まれることを確認
+- `changelog_has_v83_0_0`: CHANGELOG.md に `"v83.0.0"` が含まれることを確認
+- `milestone_has_pipeline_contracts`: MILESTONE.md に `"Pipeline Contracts"` が含まれることを確認
+- `readme_mentions_contract_registry`: README.md に `"ContractRegistry"` が含まれることを確認
+
+### Declaration
+> 「パイプライン間の約束が型になった。
+>  `IoContract` がインターフェースを定義し、`SlaContract` が応答時間を保証し、
+>  `ContractRegistry` がチームを繋ぐ。
+>  Favnir のパイプラインは今、契約で安全に接続できる。」
+
+---
+
+## [v82.9.0] — 2026-08-20 — 安定化・コードフリーズ
+
+### Tests
+- `contracts_full_sprint_all_stable`: v82.1〜v82.8 の各主要型・関数（`validate_io_contract` / `evaluate_sla` / `build_dependency_graph` / `format_violation_report` / `infer_field_type_from_str` / `format_contract_as_toml` / `ContractVersion::parse` / `cmd_verify_contract` / `format_verify_result` / `ContractRegistry::new`）を順に呼び出し、全スプリントが安定して動作することを確認
+- `registry_and_sla_integrated`: `ContractRegistry` + `SlaContract` + `DependencyGraph` + `cmd_verify_contract` + `check_contract_compatibility` の連携シナリオが通ることを確認
+
+---
+
+## [v82.8.0] — 2026-08-20 — 契約レジストリ（`ContractRegistry` / ローカルキャッシュ）
+
+### Added
+- `ContractRegistryEntry` 構造体（`name: String`, `version: ContractVersion`, `contract: IoContract`, `registered_at: String`）: レジストリの 1 エントリ
+- `ContractRegistry` 構造体（`entries: Vec<ContractRegistryEntry>`）: チーム間で契約を共有するローカルレジストリ
+- `ContractRegistry::new() -> ContractRegistry`: 空レジストリを作成
+- `ContractRegistry::register(&self, entry) -> ContractRegistry`: エントリを追加した新レジストリを返す（不変更新スタイル）
+- `ContractRegistry::lookup(&self, name, version) -> Option<&ContractRegistryEntry>`: 名前・バージョンで検索（version=None は最後に登録されたものを返す）
+- `ContractRegistry::list_all(&self) -> Vec<&ContractRegistryEntry>`: 全エントリを登録順に返す
+- `format_registry_listing(registry) -> String`: 全エントリを `"Registry (N entries):"` 形式で一覧表示
+
+### Tests
+- `contract_registry_register_and_lookup`: `register` / `lookup`（バージョン指定あり・なし・存在しない名前）/ `format_registry_listing` を確認
+- `contract_registry_list_all`: 2 件登録して `list_all` が 2 件・順序が正しいことを確認
+
+---
+
+## [v82.7.0] — 2026-08-20 — `fav verify --contract` コマンド強化
+
+### Added
+- `VerifyContractOptions` 構造体（`contract_path: String`, `input_schema: Option<String>`, `strict: bool`）: `fav verify --contract` コマンドオプション
+- `ContractVerifyResult` 構造体（`io_result: ContractValidationResult`, `sla_result: Option<SlaStatus>`）: 検証結果の統合型
+- `cmd_verify_contract(options, contract, actual_input, sla_check) -> ContractVerifyResult`: IoContract 検証・SLA 評価の統合ハンドラ
+- `format_verify_result(result) -> String`: 検証結果を "Contract: PASS/FAIL" 形式に変換
+
+### Tests
+- `verify_contract_cmd_passes_valid_contract`: 全必須フィールド存在で PASS を確認
+- `verify_contract_cmd_fails_breaking_change`: 必須フィールド欠損で FAIL・`check_contract_compatibility` でも Breaking と判定されることを確認（統合テスト）
+
+---
+
+## [v82.6.0] — 2026-08-20 — 契約バージョニング（`ContractVersion` / 後方互換チェック）
+
+### Added
+- `ContractVersion` 構造体（`major: u32`, `minor: u32`, `patch: u32`）: セマンティックバージョニング形式の契約バージョン
+- `ContractVersion::parse(s: &str) -> Result<ContractVersion, String>`: `"1.2.3"` 形式をパース
+- `CompatibilityResult` enum（`Compatible` / `BackwardsCompatible(Vec<String>)` / `Breaking(Vec<String>)`）: 後方互換性チェック結果
+- `check_contract_compatibility(old, new_) -> CompatibilityResult`: input フィールドの削除・型変更・追加を検出
+- `format_compatibility_result(result) -> String`: 結果を人間が読める文字列に変換
+
+### Tests
+- `contract_version_parsed`: バージョン文字列のパース成功・失敗（要素数不正・数値変換失敗）を確認
+- `breaking_change_detected_on_field_removal`: 必須フィールド削除で Breaking が返ることを確認
+
+---
+
+## [v82.5.0] — 2026-08-20 — スキーマから契約自動生成（`infer_contract`）
+
+### Added
+- `infer_field_type_from_str(type_name: &str) -> ContractFieldType`: 型名文字列から ContractFieldType を推論（Int/Float/Bool/Str）
+- `infer_contract_from_schema(schema, name, version) -> IoContract`: SchemaSnapshot から IoContract を自動生成
+- `merge_contracts(base, override_) -> IoContract`: 2 契約をマージ（同名フィールドは override_ 優先、name/version も override_ 使用）
+- `format_contract_as_toml(contract) -> String`: IoContract を TOML ライクな文字列に変換
+
+### Tests
+- `contract_inferred_from_schema`: SchemaSnapshot → IoContract の型変換・required・nullable が正しいことを確認（merge_contracts 動作確認含む）
+- `contract_formatted_as_toml`: TOML 文字列にコントラクト名・フィールド名・型名が含まれることを確認
+
+---
+
+## [v82.4.0] — 2026-08-20 — 契約違反の詳細レポート（`ContractViolation`）
+
+### Added
+- `ViolationKind` enum（`TypeMismatch { expected, actual }` / `MissingField(String)` / `ExtraField(String)` / `NullNotAllowed(String)`）: 契約違反の種別
+- `ContractViolation` 構造体（`field: String`, `kind: ViolationKind`, `row_index: Option<usize>`）: 単一フィールドの契約違反
+- `ContractViolationReport` 構造体（`contract_name: String`, `violations: Vec<ContractViolation>`）: 契約検証の違反レポート
+- `violation_severity(violation: &ContractViolation) -> RuleSeverity`: TypeMismatch/MissingField/NullNotAllowed→Error、ExtraField→Warning
+- `format_violation_report(report: &ContractViolationReport) -> String`: 違反レポートをテキスト形式に変換
+
+### Tests
+- `violation_report_shows_type_mismatch`: TypeMismatch 違反で severity=Error・フォーマットに "type mismatch" が含まれることを確認
+- `violation_report_shows_missing_field`: MissingField 違反で severity=Error・フォーマットに "missing" が含まれることを確認
+
+---
+
+## [v82.3.0] — 2026-08-20 — パイプライン間契約依存（`ContractDependency`）
+
+### Added
+- `ContractDependency` 構造体（`upstream: String`, `downstream: String`, `output_contract: String`）: パイプライン間の単一契約依存エッジ
+- `DependencyGraph` 構造体（`dependencies: Vec<ContractDependency>`）: 契約間の有向依存グラフ
+- `build_dependency_graph(contracts: &[IoContract]) -> DependencyGraph`: output/input フィールド名の一致でエッジを自動生成
+- `detect_circular_dependencies(graph: &DependencyGraph) -> Vec<Vec<String>>`: 2 ノードサイクル（A→B かつ B→A）を検出
+- `format_dependency_graph(graph: &DependencyGraph) -> String`: グラフをテキスト形式に変換
+
+### Tests
+- `dependency_graph_built_from_contracts`: output/input フィールド名の一致でエッジが生成されることを確認
+- `circular_dependency_detected`: A→B, B→A のグラフでサイクルが検出されることを確認
+
+---
+
+## [v82.2.0] — 2026-08-20 — `SlaContract`（SLA 遵守型）
+
+### Added
+- `SlaTarget` 構造体（`max_latency_ms: u64`, `min_throughput_rps: f64`, `min_availability_pct: f64`）: SLA 目標値の型定義
+- `SlaContract` 構造体（`name: String`, `target: SlaTarget`, `adaptive_strategy: Option<String>`, `cache_ttl_secs: Option<u64>`）: SLA をパイプライン契約として宣言
+- `SlaStatus` enum（`Met` / `AtRisk(String)` / `Breached(String)`）: SLA 評価結果
+- `evaluate_sla(contract, actual_latency_ms, actual_rps) -> SlaStatus`: レイテンシ・スループットと SLA 目標を照合して評価
+- `format_sla_status(status) -> String`: `SlaStatus` を人間が読める文字列に変換
+
+### Tests
+- `sla_contract_met_within_target`: レイテンシ・スループット共に目標内 → `Met`・`"SLA: Met"` を確認
+- `sla_contract_breached_over_latency`: レイテンシが `max_latency_ms` を超過 → `Breached`・メッセージに数値が含まれることを確認
+
+---
+
+## [v82.1.0] — 2026-08-20 — `IoContract` / `ContractField` 型基盤
+
+### Added
+- `ContractFieldType` enum（`Str` / `Int` / `Float` / `Bool` / `Nullable(Box<ContractFieldType>)` / `List(Box<ContractFieldType>)`）: パイプライン契約フィールドの再帰型
+- `ContractField` 構造体（`name: String`, `field_type: ContractFieldType`, `required: bool`）: IoContract の個々のフィールド定義
+- `IoContract` 構造体（`name: String`, `version: String`, `input: Vec<ContractField>`, `output: Vec<ContractField>`）: パイプラインの入出力インターフェース契約
+- `ContractValidationResult` 構造体（`valid: bool`, `errors: Vec<String>`）: IoContract 検証結果
+- `validate_io_contract(contract, actual_input) -> ContractValidationResult`: required フィールドの存在チェック（フィールド名照合）
+
+### Tests
+- `io_contract_validates_matching_fields`: 全必須フィールドが存在する場合 `valid=true`・`errors.is_empty()` を確認
+- `io_contract_fails_on_missing_required_field`: 必須フィールド欠損の場合 `valid=false`・errors にフィールド名が含まれることを確認
+
+---
+
+## [v82.0.0] — 2026-08-20 — Data Quality 2.0 宣言
+
+> 「品質が型になった。外れ値はコンパイル時に検出され、
+>  スキーマドリフトはパイプライン起動前に止まる。
+>  Favnir のデータは今、品質を型で保証する。」
+
+### Milestone
+- **Data Quality 2.0 宣言** — v81.1〜v81.9 の全スプリント完了を宣言
+
+### Sprint Summary（v81.1〜v81.9）
+- v81.1.0: `QualityRule` / `QualityCheck` / `run_quality_check` / `QualityViolation`
+- v81.2.0: `DistributionStats` / `StatisticalCheck` / `detect_outliers` / `compute_distribution_stats`
+- v81.3.0: `SchemaDriftDetector` / `DriftTolerance` / `DriftResult` / `detect_schema_drift`
+- v81.4.0: `QualityDimension` / `DimensionScore` / `QualityScore` / `compute_quality_score`
+- v81.5.0: `ProvenanceQualityEntry` / `ProvenanceQualityReport` / `worst_quality_source`
+- v81.6.0: `QualityGate` / `GateDecision` / `evaluate_quality_gate`
+- v81.7.0: `ReportFormat` / `QualityReportOptions` / `build_quality_report` / `cmd_quality_report`
+- v81.8.0: `AnomalyDetector` / `AnomalyResult` / `detect_anomaly` / `scan_for_anomalies`
+- v81.9.0: 統合テスト（`data_quality_full_sprint_all_stable` / `quality_gate_and_drift_detector_integrated`）
+
+### Tests
+- `cargo_toml_version_is_82_0_0`
+- `changelog_has_v82_0_0`
+- `milestone_has_data_quality_2`
+- `readme_mentions_quality_gate`
+
+---
+
+## [v81.9.0] — 2026-08-20 — 安定化・コードフリーズ
+
+### Tests
+- `data_quality_full_sprint_all_stable`: v81.1〜v81.8 の主要機能（`QualityRule` / `run_quality_check` / `compute_quality_score` / `build_quality_report` / `evaluate_quality_gate`）を一気通貫で呼び出す統合テスト
+- `quality_gate_and_drift_detector_integrated`: `SchemaDriftDetector`（Strict）でカラム削除ドリフトを検出し、低品質スコア（Completeness=0.5）と組み合わせて `QualityGate::strict()` が `Fail` を返すことを確認する連携テスト
+
+---
+
+## [v81.8.0] — 2026-08-19 — 異常検知（`AnomalyDetector` / Z スコアベース）
+
+### Added
+- `AnomalyDetector` 構造体（`baseline_stats: DistributionStats`, `z_threshold: f64`）: v81.2.0 の `DistributionStats` に依存
+- `AnomalyResult` 構造体（`is_anomaly: bool`, `z_score: f64`, `value: f64`）
+- `AnomalyDetector::from_baseline(values, z_threshold) -> AnomalyDetector`: `compute_distribution_stats` でベースラインを構築
+- `detect_anomaly(detector, value) -> AnomalyResult`: Z スコア = `|value - mean| / std_dev`、std_dev=0 のとき z_score=0.0（ゼロ除算ガード）
+- `scan_for_anomalies(detector, values) -> Vec<AnomalyResult>`: 全要素に `detect_anomaly` を適用
+- `format_anomaly_report(results) -> String`: `"anomaly_report total={n} anomalies={k}"` 形式
+
+### Tests
+- `anomaly_detector_catches_outlier`: 外れ値 10.0 が `is_anomaly=true`・正常値 2.0 が `is_anomaly=false`・全同値ベースラインで `z_score=0.0` を検証
+- `anomaly_scan_returns_all_results`: 3値スキャンで全結果返却・外れ値のみ `is_anomaly=true`・`format_anomaly_report` 出力を検証
+
+---
+
+## [v81.7.0] — 2026-08-19 — `fav quality report` コマンド
+
+### Added
+- `ReportFormat` enum（`Text` / `Json` / `Markdown`）: 品質レポートの出力フォーマット
+- `QualityReportOptions` 構造体（`format: ReportFormat`, `include_violations: bool`, `include_stats: bool`）: `include_stats` は将来拡張用スタブ
+- `build_quality_report(check, rows, opts) -> String`: `run_quality_check` を内部で呼び出し、フォーマット別にレポートを生成
+  - Text: `"quality_report format=text violations={n}"`
+  - Json: `{"format":"json","violations":{n}}`
+  - Markdown: `"## Quality Report\nformat: markdown\nviolations: {n}"`
+- `cmd_quality_report(check, rows, opts) -> String`: `build_quality_report` の薄いラッパー（CLI コマンドハンドラ相当）
+
+### Tests
+- `quality_report_text_format`: Text フォーマット出力に `"text"` / `"violations"` が含まれること、`cmd_quality_report` と同一結果を返すことを検証
+- `quality_report_json_format`: Json フォーマット出力に `"json"` / `"violations"` が含まれること、Markdown フォーマットの smoke test を検証
+
+---
+
+## [v81.6.0] — 2026-08-19 — 品質ゲート（`QualityGate` / パイプライン停止条件）
+
+### Added
+- `GateDecision` enum（`Pass` / `Fail(String)` / `Warn(String)`）: `Warn` は将来拡張用
+- `QualityGate` 構造体（`min_overall_score: f64`, `required_dimensions: Vec<QualityDimension>`, `min_dimension_score: f64`）
+- `QualityGate::strict()`: 全 5 次元 0.9 以上を要求する厳格ゲート
+- `QualityGate::permissive()`: overall 0.6 以上のみを要求する緩やかなゲート
+- `evaluate_quality_gate(gate, score) -> GateDecision`: overall → required 次元の順で評価
+- `format_gate_decision(decision) -> String`: `"PASS"` / `"FAIL: {msg}"` / `"WARN: {msg}"`
+
+### Tests
+- `quality_gate_fails_below_threshold`: `permissive` ゲートに overall=0.5 を渡すと Fail を返し、メッセージにスコア値が含まれることを検証
+- `quality_gate_passes_above_threshold`: `permissive` に overall=0.8 → Pass、`strict` に全次元 0.95 → Pass を検証
+
+---
+
+## [v81.5.0] — 2026-08-19 — 来歴付き品質レポート（Provenance + Quality 統合）
+
+### Added
+- `ProvenanceQualityEntry` 構造体（`source_name: String`, `provenance_hash: String`, `quality_score: f64`）: `provenance_hash` は Favnir 3.0 連携向けの String スタブ
+- `ProvenanceQualityReport` 構造体（`entries: Vec<ProvenanceQualityEntry>`, `pipeline_name: String`）
+- `build_provenance_quality_report(entries, pipeline) -> ProvenanceQualityReport`
+- `format_provenance_quality_report(report) -> String`: `"pipeline={name} sources={count}\n- {source}: score={:.3} hash={hash}"` 形式
+- `worst_quality_source(report) -> Option<&ProvenanceQualityEntry>`: 最低スコアのエントリを返す（空のとき None、同値は先頭優先）
+
+### Tests
+- `provenance_quality_report_built`: `build_provenance_quality_report` と `format_provenance_quality_report` の出力内容を検証
+- `worst_source_identified`: 最低スコア検出・同値の先頭優先・空 entries → None を検証
+
+---
+
+## [v81.4.0] — 2026-08-19 — 品質スコアリング（`QualityScore` / `QualityDimension`）
+
+### Added
+- `QualityDimension` enum（`Completeness` / `Consistency` / `Timeliness` / `Accuracy` / `Validity`）
+- `DimensionScore` 構造体（`dimension: QualityDimension`, `score: f64`, `weight: f64`）
+- `QualityScore` 構造体（`dimensions: Vec<DimensionScore>`, `overall: f64`）
+- `compute_quality_score(dimensions: &[DimensionScore]) -> QualityScore`: 加重平均（`Σ(score*weight)/Σ(weight)`、ゼロ除算回避）
+- `format_quality_score(score: &QualityScore) -> String`: `"overall={:.3} grade={} dimensions={}"` 形式
+- `quality_grade(score: &QualityScore) -> &'static str`: A(≥0.90) / B(≥0.80) / C(≥0.70) / D(≥0.60) / F(<0.60)
+
+### Tests
+- `quality_score_weighted_average`: Completeness(0.9×2.0) + Accuracy(0.8×1.0) の加重平均と `format_quality_score` 出力を検証
+- `quality_grade_a_when_perfect`: overall 1.0/0.90/0.89/0.0 の境界値グレードを検証
+
+---
+
+## [v81.3.0] — 2026-08-19 — スキーマドリフト検出（`SchemaDriftDetector`）
+
+### Added
+- `DriftTolerance` enum（`Strict` / `Additive` / `Permissive`）: スキーマ変更の許容レベル
+- `SchemaDriftDetector` 構造体（`baseline: SchemaSnapshot`, `tolerance: DriftTolerance`）
+- `DriftResult` 構造体（`has_drift: bool`, `severity: RuleSeverity`, `diff: SchemaSnapshotDiff`）
+- `detect_schema_drift(detector: &SchemaDriftDetector, current: &SchemaSnapshot) -> DriftResult`: `compare_schema_snapshots` を内部で呼び出し、tolerance に応じてドリフト判定
+- `format_drift_report(result: &DriftResult) -> String`: ドリフトなし `"OK: no schema drift detected"` / あり `"DRIFT: added=... removed=... changed=..."`
+
+### Tests
+- `drift_detector_strict_mode_catches_addition`: Strict モードでは列追加もドリフトとして検出されることを検証
+- `drift_detector_additive_mode_allows_new_column`: Additive モードでは列追加を許容し、列削除はドリフトとして検出されることを検証
+
+---
+
+## [v81.2.0] — 2026-08-19 — 統計的品質チェック（`StatisticalCheck`）
+
+### Added
+- `DistributionStats` 構造体（`mean: f64`, `std_dev: f64`, `min: f64`, `max: f64`, `count: usize`）
+- `compute_distribution_stats(values: &[f64]) -> DistributionStats`: 母標準偏差（n 割り）で統計量を計算
+- `StatisticalCheck` 構造体（`column: String`, `z_score_threshold: f64`）
+- `detect_outliers(check: &StatisticalCheck, values: &[f64]) -> Vec<usize>`: Z スコアベースの外れ値検出（`std_dev == 0.0` のとき空 Vec）
+- `format_distribution_report(stats: &DistributionStats) -> String`: `"count={} mean={:.3} std={:.3} min={:.3} max={:.3}"` 形式のレポート
+
+### Tests
+- `distribution_stats_computed_correctly`: `[1.0, 2.0, 3.0]` の統計量（count/mean/min/max/std_dev）と `format_distribution_report` 出力を検証
+- `outlier_detection_finds_extreme_values`: 明らかな外れ値を含むデータでインデックス検出、均一データで空 Vec を返すことを検証
+
+---
+
+## [v81.1.0] — 2026-08-19 — `QualityRule` / `QualityCheck` 型基盤
+
+### Added
+- `QualityRuleKind` enum（`NotNull` / `Unique` / `Range { min, max }` / `Regex(String)` / `Custom(String)`）
+- `RuleSeverity` enum（`Error` / `Warning`）
+- `QualityRule` 構造体（`column: String`, `kind: QualityRuleKind`, `severity: RuleSeverity`）
+- `QualityCheck` 構造体（`rules: Vec<QualityRule>`）
+- `QualityViolation` 構造体（`rule: QualityRule`, `row_index: usize`, `actual: String`）
+- `run_quality_check(check: &QualityCheck, rows: &[Vec<String>]) -> Vec<QualityViolation>`: カラムインデックス方式でルールを全行適用
+
+### Tests
+- `quality_rule_not_null_catches_violation`: 空値に NotNull ルールを適用すると 1 件の違反が返される
+- `quality_check_returns_all_violations`: NotNull + Range の 2 ルールで 2 件の違反が返され、違反なし行は含まれない
+
+---
+
+## [v81.0.0] — 2026-08-19 — Test-Driven Data 1.0 宣言 ★クリーンアップ
+
+### Milestone
+- Test-Driven Data 1.0 完成宣言: `TestSuite` / `DataFactory` / `PropertyTest` / `StageTestCase` / `TestCoverageReport` / `SchemaSnapshot` / `TestReport` の全型が `fav test` で動作する
+- Cargo.toml バージョンを 81.0.0 に更新
+
+### Tests
+- `cargo_toml_version_is_81_0_0`: Cargo.toml の version が `"81.0.0"` であることを確認
+- `changelog_has_v81_0_0`: CHANGELOG.md に `v81.0.0` が含まれることを確認
+- `milestone_has_test_driven_data`: MILESTONE.md に `Test-Driven Data` が含まれることを確認
+- `readme_mentions_fav_test`: README.md に `fav test` が含まれることを確認
+
+---
+
+## [v80.9.0] — 2026-08-19 — 安定化・コードフリーズ（Test-Driven Data 1.0 完成宣言）
+
+### Tests
+- `test_framework_full_sprint_all_stable`: v80.1〜v80.8 の全型（TestSuite / DataFactory / PropertyTest / StageTestCase / TestCoverageReport / SchemaSnapshot / TestReport）の統合確認
+- `test_framework_e2e_pipeline_tested`: DataFactory → StageTestCase → TestSuite → TestReport → format_test_summary の E2E フロー確認
+
+---
+
 ## [v80.8.0] — 2026-08-19 — CI 統合レポート（`TestReport` / JUnit XML）
 
 ### Added

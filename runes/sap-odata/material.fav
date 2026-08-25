@@ -1,0 +1,36 @@
+-- 品目マスタ型定義 + 一覧取得関数（v88.1.0）
+-- SAP S/4HANA OData v4 の品目マスタ（Material）を型安全に扱う。
+
+use sap_odata.types
+
+-- 品目タイプ列挙型
+public type MaterialType = FinishedProduct | RawMaterial | SemiFinished | Trading | Service
+
+-- 品目マスタ型
+public type Material = {
+    material_id:   String,
+    description:   String,
+    material_type: MaterialType,
+    base_unit:     String,
+    weight:        Option<Float>,
+    weight_unit:   Option<String>,
+    plant:         Option<String>
+}
+
+-- 品目フィルタ型
+public type MaterialFilter = {
+    material_type: Option<MaterialType>,
+    plant:         Option<String>,
+    top:           Option<Int>
+}
+
+-- 品目一覧取得（v88.1.0）
+-- v88.2.0 以降で本実装予定のため、本バージョンではスタブを返す
+public fn materials(cfg: SapConfig, filter: MaterialFilter) -> Result<List<Material>, String> {
+    Result.err("not implemented")
+}
+
+-- 単一品目取得（v88.2.0）
+public fn material_by_id(cfg: SapConfig, material_id: String) -> Result<Material, String> {
+    Result.err("not implemented")
+}

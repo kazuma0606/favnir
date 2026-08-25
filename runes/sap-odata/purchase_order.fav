@@ -1,0 +1,48 @@
+-- 発注伝票クエリ関数（v88.4.0）
+-- SAP S/4HANA OData v4 の発注伝票（PurchaseOrder）を型安全に扱う。
+use sap_odata.types
+
+-- 発注伝票フィルタ型
+public type PurchaseOrderFilter = {
+    vendor_id:     Option<String>,
+    status:        Option<PurchaseOrderStatus>,
+    created_after: Option<String>,
+    plant:         Option<String>,
+    top:           Option<Int>
+}
+
+-- 発注伝票一覧取得（v88.4.0）
+-- TODO: implement — OData /PurchaseOrders クエリ + フィルタ適用
+public fn purchase_orders(cfg: SapConfig, filter: PurchaseOrderFilter) -> Result<List<PurchaseOrder>, String> {
+    Result.err("not implemented")
+}
+
+-- 発注伝票単件取得（v88.4.0）
+-- expand_items: true のとき $expand=Items を付与し PurchaseOrder.items を展開する
+-- TODO: implement — OData /PurchaseOrders('<po_number>') クエリ
+public fn purchase_order_by_id(cfg: SapConfig, po_number: String, expand_items: Bool) -> Result<PurchaseOrder, String> {
+    Result.err("not implemented")
+}
+
+-- 発注明細作成用入力型（v88.5.0）
+-- net_price は SAP が pricing condition（情報レコード/契約）から自動算出するため入力不要
+public type NewPurchaseOrderItem = {
+    material_id: String,
+    quantity:    Float,
+    unit:        String,
+    plant:       String
+}
+
+-- 発注伝票作成用入力型（v88.5.0）
+-- purchasing_org / purchasing_group は fav.toml [sap] の設定から注入する想定（本実装時に追加）
+public type NewPurchaseOrder = {
+    vendor_id: String,
+    currency:  String,
+    items:     List<NewPurchaseOrderItem>
+}
+
+-- 発注伝票新規作成（v88.5.0）
+-- TODO: implement — OData POST /PurchaseOrders
+public fn create_purchase_order(cfg: SapConfig, order: NewPurchaseOrder) -> Result<PurchaseOrder, String> {
+    Result.err("not implemented")
+}

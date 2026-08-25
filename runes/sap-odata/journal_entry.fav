@@ -1,0 +1,68 @@
+-- 会計伝票型定義 + 一覧取得関数（v89.1.0）
+-- journal_entries() はスタブ（API 完全化済み）。アルゴリズム本実装は将来バージョンで行う。
+use sap_odata.types
+use sap_odata.purchase_order
+
+-- 借方/貸方区分
+public type DebitCredit = Debit | Credit
+
+-- 会計伝票明細型
+-- item_number: SAP の伝票明細番号（001, 002 ... ）
+-- cost_center: 原価センタ（任意）
+public type JournalEntryItem = {
+    item_number:  Int,
+    gl_account:   String,
+    amount:       Float,
+    currency:     String,
+    debit_credit: DebitCredit,
+    cost_center:  Option<String>
+}
+
+-- 会計伝票ヘッダ型
+-- posting_date: ISO 8601 文字列（SAP OData の PostingDate をそのまま保持）
+-- items: $expand=Items 指定時のみ展開される（未指定時は None）
+public type JournalEntry = {
+    document_number: String,
+    fiscal_year:     Int,
+    posting_date:    String,
+    document_type:   String,
+    company_code:    String,
+    reference:       Option<String>,
+    items:           Option<List<JournalEntryItem>>
+}
+
+-- 会計伝票フィルタ型
+public type JournalFilter = {
+    fiscal_year:       Option<Int>,
+    posting_date_from: Option<String>,
+    company_code:      Option<String>,
+    reference:         Option<String>,
+    top:               Option<Int>
+}
+
+-- 会計伝票一覧取得（v89.1.0 — スタブ）
+-- TODO: implement — OData /JournalEntries クエリ + フィルタ適用
+public fn journal_entries(cfg: SapConfig, filter: JournalFilter) -> Result<List<JournalEntry>, String> {
+    Result.err("not implemented")
+}
+
+-- 未照合発注（支払い未計上の発注伝票）型（v89.2.0）
+-- days_overdue: 発注日からの経過日数（負値は未来の予定）
+-- status: "Open" / "PartiallyDelivered" 等、SAP の未決済ステータスをそのまま保持
+public type OutstandingPayable = {
+    po_number:    String,
+    vendor_id:    String,
+    total_amount: Float,
+    currency:     String,
+    days_overdue: Int,
+    status:       String
+}
+
+-- 発注 × 会計伝票の突き合わせ（v89.2.0 — スタブ）
+-- TODO: implement — 一部納品済み発注と会計伝票を突き合わせて未払いを検出する
+public fn match_unposted_orders(
+    pos:      List<PurchaseOrder>,
+    journals: List<JournalEntry>
+) -> Result<List<OutstandingPayable>, String> {
+    Result.err("not implemented")
+}

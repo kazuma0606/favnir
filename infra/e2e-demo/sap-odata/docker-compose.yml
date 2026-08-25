@@ -1,0 +1,25 @@
+version: "3.9"
+services:
+  sap-mock:
+    image: node:20-alpine
+    working_dir: /app
+    command: >
+      sh -c "npm install -g @sap-ux/mockserver-main &&
+             mockserver --config /app/config.json"
+    ports:
+      - "4004:4004"
+    volumes:
+      - ./mock:/app/data
+    environment:
+      - PORT=4004
+
+  favnir-runner:
+    image: ghcr.io/favnir/fav:latest
+    depends_on:
+      - sap-mock
+    environment:
+      - SAP_BASE_URL=http://sap-mock:4004
+      - SAP_CLIENT=100
+      - SAP_USER=demo
+      - SAP_PASS=demo
+      - SAP_AUTH=basic

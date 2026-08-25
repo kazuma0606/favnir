@@ -23,15 +23,15 @@ fn resp_text(status: Int, body: String) -> Map<String, String> {
 fn db_table() -> String { "favnir-rune-registry" }
 fn pkg_bucket() -> String { "favnir-rune-packages" }
 
-fn list_runes() -> Result<List<Map<String, String>>, String> !AWS {
+fn list_runes() -> Result<List<Map<String, String>>, String> {
   AWS.dynamo_scan_raw(db_table())
 }
 
-fn get_rune_db(name: String) -> Result<Option<Map<String, String>>, String> !AWS {
+fn get_rune_db(name: String) -> Result<Option<Map<String, String>>, String> {
   AWS.dynamo_get_item_raw(db_table(), Map.set((), "name", name))
 }
 
-fn save_rune(name: String, version: String, description: String, zip_b64: String) -> Result<Unit, String> !AWS {
+fn save_rune(name: String, version: String, description: String, zip_b64: String) -> Result<Unit, String> {
   match String.base64_decode(zip_b64) {
     Err(e) => Result.err(e)
     Ok(bytes) => {
@@ -51,7 +51,7 @@ fn save_rune(name: String, version: String, description: String, zip_b64: String
 
 // ── Auth helpers ────────────────────────────────────────────────────────────
 
-fn check_client_token(token_opt: Option<String>) -> Bool !Env {
+fn check_client_token(token_opt: Option<String>) -> Bool {
   bind expected <- match Env.require_raw("FAV_CLIENT_TOKEN") { Err(_) => ""  Ok(v) => v };
   match token_opt {
     None    => false
@@ -61,14 +61,14 @@ fn check_client_token(token_opt: Option<String>) -> Bool !Env {
 
 // ── Handlers ────────────────────────────────────────────────────────────────
 
-fn handle_list() -> Map<String, String> !AWS {
+fn handle_list() -> Map<String, String> {
   match list_runes() {
     Err(e)    => resp_text(500, e)
     Ok(items) => resp_json(Json.write_array_raw(items))
   }
 }
 
-fn handle_get(name: String) -> Map<String, String> !AWS {
+fn handle_get(name: String) -> Map<String, String> {
   match get_rune_db(name) {
     Err(e)  => resp_text(500, e)
     Ok(opt) => match opt {
@@ -78,7 +78,7 @@ fn handle_get(name: String) -> Map<String, String> !AWS {
   }
 }
 
-fn handle_publish(name: String, body: String, auth: String) -> Map<String, String> !AWS !Env {
+fn handle_publish(name: String, body: String, auth: String) -> Map<String, String> {
   bind expected <- match Env.require_raw("FAV_ADMIN_TOKEN") { Err(_) => ""  Ok(v) => v };
   bind bearer <- if String.starts_with(auth, "Bearer ") {
     String.slice(auth, 7, String.length(auth))
@@ -105,7 +105,7 @@ fn handle_publish(name: String, body: String, auth: String) -> Map<String, Strin
   }
 }
 
-fn handle_versions(name: String) -> Map<String, String> !AWS {
+fn handle_versions(name: String) -> Map<String, String> {
   bind prefix <- String.concat(name, "/");
   match AWS.s3_list_objects_raw(pkg_bucket(), prefix) {
     Err(e)   => resp_text(500, e)
@@ -122,7 +122,7 @@ fn handle_versions(name: String) -> Map<String, String> !AWS {
   }
 }
 
-fn handle_download(name: String, version: String) -> Map<String, String> !AWS {
+fn handle_download(name: String, version: String) -> Map<String, String> {
   bind s3_key <- String.concat(String.concat(name, "/"), String.concat(version, ".zip"));
   match AWS.s3_get_object_base64_raw(pkg_bucket(), s3_key) {
     Err(_)  => resp_text(404, "version not found")
@@ -133,7 +133,7 @@ fn handle_download(name: String, version: String) -> Map<String, String> !AWS {
 
 // ── Router ──────────────────────────────────────────────────────────────────
 
-fn route(req: Map<String, String>) -> Map<String, String> !AWS !Env {
+fn route(req: Map<String, String>) -> Map<String, String> {
   bind valid <- check_client_token(Map.get(req, "fav_token"));
   if valid {
   bind method    <- match Map.get(req, "method")        { None => "GET"  Some(m) => m };
@@ -204,8 +204,12 @@ fn route(req: Map<String, String>) -> Map<String, String> !AWS !Env {
 // ── Main — Lambda custom runtime ────────────────────────────────────────────
 // Reads request fields from env vars set by bootstrap, calls route(),
 // prints the response map as JSON to stdout (bootstrap transforms to Lambda format).
+//
+// Side effects: !Env (Env.require_raw), !AWS (DynamoDB/S3), !Io (IO.println)
+// Note: `!Effect` annotation syntax was removed in v35.4.0 (E0374).
+//       Effects are documented here as comments instead.
 
-public fn main() -> Unit !Io !Env !AWS {
+public fn main() -> Unit {
   bind method    <- match Env.require_raw("FAV_METHOD")        { Err(_) => "GET"  Ok(m) => m };
   bind path      <- match Env.require_raw("FAV_PATH")          { Err(_) => "/"    Ok(p) => p };
   bind body      <- match Env.require_raw("FAV_BODY")          { Err(_) => ""     Ok(b) => b };

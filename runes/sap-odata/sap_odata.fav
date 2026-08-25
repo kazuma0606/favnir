@@ -1,0 +1,112 @@
+-- sap-odata Rune エントリポイント（v85.5.0〜）
+-- 各スプリントで use / re-export を追加していく（SalesOrder: v87.2.0、JournalEntry: v89.1.0）
+
+use sap_odata.types
+use sap_odata.client
+use sap_odata.business_partner
+use sap_odata.sales_order
+use sap_odata.sales_report
+use sap_odata.material
+use sap_odata.purchase_order
+use sap_odata.stock
+use sap_odata.journal_entry
+
+public type SapConfig                 = types.SapConfig
+public type ODataParams               = types.ODataParams
+public type BusinessPartnerCategory   = business_partner.BusinessPartnerCategory
+public type BusinessPartnerAddress    = business_partner.BusinessPartnerAddress
+public type BusinessPartner           = business_partner.BusinessPartner
+public type BusinessPartnerFilter     = business_partner.BusinessPartnerFilter
+public type NewBusinessPartner        = business_partner.NewBusinessPartner
+public type BusinessPartnerPatch      = business_partner.BusinessPartnerPatch
+public fn sap_config_from_env() -> Result<SapConfig, String> {
+    types.sap_config_from_env()
+}
+public fn odata_get(cfg: SapConfig, entity_set: String, key: String) -> Result<String, String> {
+    client.odata_get(cfg, entity_set, key)
+}
+public fn odata_list(cfg: SapConfig, entity_set: String, params: ODataParams) -> Result<String, String> {
+    client.odata_list(cfg, entity_set, params)
+}
+public type PagedResult = types.PagedResult
+public fn odata_list_paged(cfg: SapConfig, entity_set: String, params: ODataParams, page_size: Int) -> Result<PagedResult, String> {
+    client.odata_list_paged(cfg, entity_set, params, page_size)
+}
+public fn odata_collect_all(cfg: SapConfig, entity_set: String, params: ODataParams, max_pages: Int) -> Result<List<String>, String> {
+    client.odata_collect_all(cfg, entity_set, params, max_pages)
+}
+public fn business_partners(cfg: SapConfig, filter: BusinessPartnerFilter) -> Result<List<BusinessPartner>, String> {
+    business_partner.business_partners(cfg, filter)
+}
+public fn business_partner_by_id(cfg: SapConfig, partner_id: String, expand_address: Bool) -> Result<BusinessPartner, String> {
+    business_partner.business_partner_by_id(cfg, partner_id, expand_address)
+}
+public fn create_business_partner(cfg: SapConfig, body: NewBusinessPartner) -> Result<BusinessPartner, String> {
+    business_partner.create_business_partner(cfg, body)
+}
+public fn update_business_partner(cfg: SapConfig, partner_id: String, patch: BusinessPartnerPatch) -> Result<Unit, String> {
+    business_partner.update_business_partner(cfg, partner_id, patch)
+}
+public type SalesOrderStatus  = sales_order.SalesOrderStatus
+public type SalesOrderItem    = sales_order.SalesOrderItem
+public type SalesOrder        = sales_order.SalesOrder
+public type SalesOrderFilter  = sales_order.SalesOrderFilter
+public fn sales_orders(cfg: SapConfig, filter: SalesOrderFilter) -> Result<List<SalesOrder>, String> {
+    sales_order.sales_orders(cfg, filter)
+}
+public fn sales_order_by_id(cfg: SapConfig, order_id: String, expand_items: Bool) -> Result<SalesOrder, String> {
+    sales_order.sales_order_by_id(cfg, order_id, expand_items)
+}
+public type NewSalesOrderItem = sales_order.NewSalesOrderItem
+public type NewSalesOrder     = sales_order.NewSalesOrder
+public fn create_sales_order(cfg: SapConfig, order: NewSalesOrder) -> Result<SalesOrder, String> {
+    sales_order.create_sales_order(cfg, order)
+}
+public type CurrencyTotal = sales_order.CurrencyTotal
+public type SalesReport   = sales_order.SalesReport
+public fn build_sales_report(date: String, orders: List<SalesOrder>) -> Result<SalesReport, String> {
+    sales_report.build_sales_report(date, orders)
+}
+public fn format_sales_report(report: SalesReport) -> String {
+    sales_report.format_sales_report(report)
+}
+public type MaterialType   = material.MaterialType
+public type Material       = material.Material
+public type MaterialFilter = material.MaterialFilter
+public fn materials(cfg: SapConfig, filter: MaterialFilter) -> Result<List<Material>, String> {
+    material.materials(cfg, filter)
+}
+public fn material_by_id(cfg: SapConfig, material_id: String) -> Result<Material, String> {
+    material.material_by_id(cfg, material_id)
+}
+public type PurchaseOrderStatus = types.PurchaseOrderStatus
+public type PurchaseOrderItem   = types.PurchaseOrderItem
+public type PurchaseOrder       = types.PurchaseOrder
+public type PurchaseOrderFilter = purchase_order.PurchaseOrderFilter
+public fn purchase_orders(cfg: SapConfig, filter: PurchaseOrderFilter) -> Result<List<PurchaseOrder>, String> {
+    purchase_order.purchase_orders(cfg, filter)
+}
+public fn purchase_order_by_id(cfg: SapConfig, po_number: String, expand_items: Bool) -> Result<PurchaseOrder, String> {
+    purchase_order.purchase_order_by_id(cfg, po_number, expand_items)
+}
+public type NewPurchaseOrderItem = purchase_order.NewPurchaseOrderItem
+public type NewPurchaseOrder     = purchase_order.NewPurchaseOrder
+public fn create_purchase_order(cfg: SapConfig, order: NewPurchaseOrder) -> Result<PurchaseOrder, String> {
+    purchase_order.create_purchase_order(cfg, order)
+}
+public type StockSeverity = stock.StockSeverity
+public type StockAlert    = stock.StockAlert
+public fn detect_stock_shortage(orders: List<SalesOrder>, materials: List<Material>) -> Result<List<StockAlert>, String> {
+    stock.detect_stock_shortage(orders, materials)
+}
+public type DebitCredit      = journal_entry.DebitCredit
+public type JournalEntryItem = journal_entry.JournalEntryItem
+public type JournalEntry     = journal_entry.JournalEntry
+public type JournalFilter    = journal_entry.JournalFilter
+public fn journal_entries(cfg: SapConfig, filter: JournalFilter) -> Result<List<JournalEntry>, String> {
+    journal_entry.journal_entries(cfg, filter)
+}
+public type OutstandingPayable = journal_entry.OutstandingPayable
+public fn match_unposted_orders(pos: List<PurchaseOrder>, journals: List<JournalEntry>) -> Result<List<OutstandingPayable>, String> {
+    journal_entry.match_unposted_orders(pos, journals)
+}

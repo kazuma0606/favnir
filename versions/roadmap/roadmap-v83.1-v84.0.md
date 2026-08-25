@@ -11,7 +11,7 @@ Status: 未着手（v83.0.0 完了後に開始）
 
 - 直前完了: v83.0.0「Pipeline Contracts 1.0 宣言」（tests = 3,875）
 - 本スプリントは Quality-First Era の第 4 スプリント
-- 目標: v84.0.0「Observability 2.0 宣言」（tests = 3,897）
+- 目標: v84.0.0「Observability 2.0 宣言」（tests = 3,909 ※ drift 補正後）
 - **着手前確認**: `versions/current.md` の現行マスターロードマップが `roadmap-v80.1-v85.0.md` を指していること、最新安定版が v83.0.0 になっていることを確認してから開始する
 
 ### スプリントの性格
@@ -28,16 +28,16 @@ A（新機能）50% + B（統合）50% の構成。
 
 | バージョン | 内容 | テスト数 | 状態 |
 |---|---|---|---|
-| v83.1.0 | `PipelineMetrics` 型（実行統計・レイテンシ） | 3875 + 2 = 3877 | 未着手 |
-| v83.2.0 | `AlertRule` / `AlertThreshold`（アラート型） | 3877 + 2 = 3879 | 未着手 |
-| v83.3.0 | `SloTarget` / `SloStatus`（SLO 型） | 3879 + 2 = 3881 | 未着手 |
-| v83.4.0 | コスト追跡（`ExecutionCost` / `CostBudget`） | 3881 + 2 = 3883 | 未着手 |
-| v83.5.0 | 分散トレーシング強化（OpenTelemetry `TraceContext`） | 3883 + 2 = 3885 | 未着手 |
-| v83.6.0 | パフォーマンス回帰検知（`PerfBaseline` / `PerfRegression`） | 3885 + 2 = 3887 | 未着手 |
-| v83.7.0 | `fav observe` コマンド（メトリクス・アラート統合） | 3887 + 2 = 3889 | 未着手 |
-| v83.8.0 | 健全性ダッシュボード（`HealthDashboard` / テキスト形式） | 3889 + 2 = 3891 | 未着手 |
-| v83.9.0 | 安定化・コードフリーズ | 3891 + 2 = 3893 | 未着手 |
-| v84.0.0 | Observability 2.0 宣言 ★クリーンアップ | 3893 + 4 = 3897 | 未着手 |
+| v83.1.0 | `PipelineMetrics` 型（実行統計・レイテンシ） | 3887 + 2 = 3889 ※ drift 補正後 | 未着手 |
+| v83.2.0 | `AlertRule` / `AlertThreshold`（アラート型） | 3889 + 2 = 3891 ※ drift 補正後 | 未着手 |
+| v83.3.0 | `SloTarget` / `SloStatus`（SLO 型） | 3891 + 2 = 3893 ※ drift 補正後 | 未着手 |
+| v83.4.0 | コスト追跡（`ExecutionCost` / `CostBudget`） | 3893 + 2 = 3895 ※ drift 補正後 | 未着手 |
+| v83.5.0 | 分散トレーシング強化（OpenTelemetry `TraceContext`） | 3895 + 2 = 3897 ※ drift 補正後 | 未着手 |
+| v83.6.0 | パフォーマンス回帰検知（`PerfBaseline` / `PerfRegression`） | 3897 + 2 = 3899 ※ drift 補正後 | 未着手 |
+| v83.7.0 | `fav observe` コマンド（メトリクス・アラート統合） | 3899 + 2 = 3901 ※ drift 補正後 | 未着手 |
+| v83.8.0 | 健全性ダッシュボード（`HealthDashboard` / テキスト形式） | 3901 + 2 = 3903 ※ drift 補正後 | 未着手 |
+| v83.9.0 | 安定化・コードフリーズ | 3903 + 2 = 3905 ※ drift 補正後 | 未着手 |
+| v84.0.0 | Observability 2.0 宣言 ★クリーンアップ | 3905 + 4 = 3909 ※ drift 補正後 | 未着手 |
 
 ---
 
@@ -48,11 +48,11 @@ A（新機能）50% + B（統合）50% の構成。
 **実装内容:**
 - `StageMetrics` 構造体（`stage_name: String`, `duration_ms: u64`, `rows_processed: usize`, `rows_failed: usize`）
 - `PipelineMetrics` 構造体（`pipeline_name: String`, `stages: Vec<StageMetrics>`, `total_duration_ms: u64`, `started_at: String`）
-- `compute_pipeline_metrics(stages: Vec<StageMetrics>, started_at: &str) -> PipelineMetrics`
+- `compute_pipeline_metrics(pipeline_name: &str, stages: Vec<StageMetrics>, started_at: &str) -> PipelineMetrics`
 - `format_metrics_summary(metrics: &PipelineMetrics) -> String`
 - `slowest_stage(metrics: &PipelineMetrics) -> Option<&StageMetrics>`
 
-**完了条件**: Rust テスト 2 件（3875 + 2 = 3877）
+**完了条件**: Rust テスト 2 件（3887 + 2 = 3889 ※ drift 補正後）
 - `pipeline_metrics_computed`
 - `slowest_stage_identified`
 
@@ -68,9 +68,9 @@ A（新機能）50% + B（統合）50% の構成。
 - `ThresholdOp` enum（`GreaterThan` / `LessThan` / `EqualTo`）
 - `AlertRule` 構造体（`name: String`, `threshold: AlertThreshold`, `severity: AlertSeverity`, `message: String`）
 - `AlertFiring` 構造体（`rule: AlertRule`, `current_value: f64`, `fired_at: String`）
-- `evaluate_alert_rules(rules: &[AlertRule], metrics: &PipelineMetrics) -> Vec<AlertFiring>`
+- `evaluate_alert_rules(rules: &[AlertRule], metrics: &PipelineMetrics, fired_at: &str) -> Vec<AlertFiring>`
 
-**完了条件**: Rust テスト 2 件（3877 + 2 = 3879）
+**完了条件**: Rust テスト 2 件（3889 + 2 = 3891 ※ drift 補正後）
 - `alert_fires_when_threshold_exceeded`
 - `alert_silent_when_within_threshold`
 
@@ -87,7 +87,7 @@ A（新機能）50% + B（統合）50% の構成。
 - `compute_slo_status(target: &SloTarget, measurement: &SloMeasurement) -> SloStatus`
 - `format_slo_status(status: &SloStatus) -> String`
 
-**完了条件**: Rust テスト 2 件（3879 + 2 = 3881）
+**完了条件**: Rust テスト 2 件（3891 + 2 = 3893 ※ drift 補正後）
 - `slo_status_within_budget`
 - `slo_status_breached`
 
@@ -105,7 +105,7 @@ A（新機能）50% + B（統合）50% の構成。
 - `evaluate_cost_budget(cost: &ExecutionCost, budget: &CostBudget) -> BudgetStatus`
 - `format_cost_report(cost: &ExecutionCost, status: &BudgetStatus) -> String`
 
-**完了条件**: Rust テスト 2 件（3881 + 2 = 3883）
+**完了条件**: Rust テスト 2 件（3893 + 2 = 3895 ※ drift 補正後）
 - `cost_budget_under_limit`
 - `cost_budget_over_limit`
 
@@ -123,7 +123,7 @@ v29.0 の OTel 統合を強化し、スパン伝播を型で扱う。
 - `format_trace_span(span: &TraceSpan) -> String`
 - `compute_span_duration(span: &TraceSpan) -> u64`
 
-**完了条件**: Rust テスト 2 件（3883 + 2 = 3885）
+**完了条件**: Rust テスト 2 件（3895 + 2 = 3897 ※ drift 補正後）
 - `trace_context_child_span_created`
 - `span_duration_computed`
 
@@ -140,7 +140,7 @@ v29.0 の OTel 統合を強化し、スパン伝播を型で扱う。
 - `format_regression_report(regression: &PerfRegression) -> String`
 - `PerfBaseline::from_samples(pipeline_name: &str, samples_ms: &[u64]) -> PerfBaseline`（サンプルをソートして百分位数インデックス `samples[n * pct / 100]` で p50/p95/p99 を算出）
 
-**完了条件**: Rust テスト 2 件（3885 + 2 = 3887）
+**完了条件**: Rust テスト 2 件（3897 + 2 = 3899 ※ drift 補正後）
 - `perf_regression_detected_above_threshold`
 - `perf_no_regression_within_threshold`
 
@@ -157,7 +157,7 @@ v29.0 の OTel 統合を強化し、スパン伝播を型で扱う。
 - `cmd_observe` 関数（`fav observe` コマンドハンドラ、CLI フラグ: `--pipeline <name>` / `--format text|json` / `--alerts` / `--slo`）
 - `format_observe_report(report: &ObserveReport, format: &ObserveFormat) -> String`
 
-**完了条件**: Rust テスト 2 件（3887 + 2 = 3889）
+**完了条件**: Rust テスト 2 件（3899 + 2 = 3901 ※ drift 補正後）
 - `observe_report_built`
 - `observe_report_text_format`
 
@@ -174,7 +174,7 @@ v29.0 の OTel 統合を強化し、スパン伝播を型で扱う。
 - `compute_pipeline_health(metrics: &PipelineMetrics, alerts: &[AlertFiring], slo: &SloStatus, quality: f64) -> PipelineHealth`
 - `format_health_dashboard(dashboard: &HealthDashboard) -> String`
 
-**完了条件**: Rust テスト 2 件（3889 + 2 = 3891）
+**完了条件**: Rust テスト 2 件（3901 + 2 = 3903 ※ drift 補正後）
 - `health_dashboard_healthy_pipeline`
 - `health_dashboard_critical_pipeline`
 
@@ -190,7 +190,7 @@ v83.1〜v83.8 の全スプリント統合確認。バグ修正のみ。
 - `HealthDashboard` + `AlertRule` + `SloStatus` 連携確認
 - バグ修正のみ受け入れ（新機能追加なし）
 
-**完了条件**: Rust テスト 2 件（3891 + 2 = 3893）（統合確認テスト — 新規実装なし）
+**完了条件**: Rust テスト 2 件（3903 + 2 = 3905 ※ drift 補正後）（統合確認テスト — 新規実装なし）
 - `observability_full_sprint_all_stable`（v83.1〜v83.8 の全テストが pass することを確認）
 - `health_dashboard_and_alerts_integrated`（`HealthDashboard` + `AlertRule` + `SloStatus` の連携シナリオが通ることを確認）
 
@@ -209,7 +209,7 @@ v83.1〜v83.8 の全スプリント統合確認。バグ修正のみ。
 - `versions/current.md` の現行マスターロードマップが `roadmap-v80.1-v85.0.md` を指していることを確認してから更新
 - `roadmap-v80.1-v85.0.md` の Sprint 4 バージョン一覧テーブルを全行「完了」に更新
 
-**完了条件**: `v84000_tests` 4 件（3893 + 4 = 3897）
+**完了条件**: `v84000_tests` 4 件（3905 + 4 = 3909 ※ drift 補正後）
 - `cargo_toml_version_is_84_0_0`
 - `changelog_has_v84_0_0`
 - `milestone_has_observability_2`
@@ -221,19 +221,19 @@ v83.1〜v83.8 の全スプリント統合確認。バグ修正のみ。
 
 | バージョン | テスト数 | 増加 |
 |---|---|---|
-| v83.0.0（ベース） | 3,875 | — |
-| v83.1.0 | 3,877 | +2 |
-| v83.2.0 | 3,879 | +2 |
-| v83.3.0 | 3,881 | +2 |
-| v83.4.0 | 3,883 | +2 |
-| v83.5.0 | 3,885 | +2 |
-| v83.6.0 | 3,887 | +2 |
-| v83.7.0 | 3,889 | +2 |
-| v83.8.0 | 3,891 | +2 |
-| v83.9.0 | 3,893 | +2 |
-| v84.0.0（宣言） | 3,897 | +4 |
+| v83.0.0（ベース） | 3,887 ※ drift 補正後 | — |
+| v83.1.0 | 3,889 | +2 |
+| v83.2.0 | 3,891 | +2 |
+| v83.3.0 | 3,893 | +2 |
+| v83.4.0 | 3,895 | +2 |
+| v83.5.0 | 3,897 | +2 |
+| v83.6.0 | 3,899 | +2 |
+| v83.7.0 | 3,901 | +2 |
+| v83.8.0 | 3,903 | +2 |
+| v83.9.0 | 3,905 | +2 |
+| v84.0.0（宣言） | 3,909 | +4 |
 
-**本スプリント合計**: +22 tests（3,875 → 3,897）
+**本スプリント合計**: +22 tests（3,887 → 3,909）
 
 ---
 

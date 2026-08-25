@@ -1,0 +1,60 @@
+-- SAP OData v4 HTTP クライアント基盤（v85.5.0）
+-- Basic 認証ヘッダーで SAP S/4HANA OData v4 エンドポイントに接続する。
+
+use sap_odata.types
+
+-- 単一エンティティ取得（GET /EntitySet('key')）
+-- 戻り値は JSON 文字列（後続バージョンで型パース関数を追加する）
+public fn odata_get(cfg: SapConfig, entity_set: String, key: String) -> Result<String, String> {
+    bind url <- Result.ok(String.concat([cfg.base_url, "/", entity_set, "('", key, "')"]))
+    Http.get_with_headers(url, [
+        ("Authorization", basic_auth_header(cfg.username, cfg.password)),
+        ("sap-client", cfg.client),
+        ("Accept", "application/json")
+    ])
+}
+
+-- コレクション取得（GET /EntitySet?$filter=...&$top=...）
+-- 戻り値は JSON 文字列（OData v4 レスポンス形式）
+public fn odata_list(cfg: SapConfig, entity_set: String, params: ODataParams) -> Result<String, String> {
+    bind url <- Result.ok(String.concat([cfg.base_url, "/", entity_set, build_query_string(params)]))
+    Http.get_with_headers(url, [
+        ("Authorization", basic_auth_header(cfg.username, cfg.password)),
+        ("sap-client", cfg.client),
+        ("Accept", "application/json")
+    ])
+}
+
+-- Basic 認証ヘッダー値を生成する（内部ヘルパー）
+-- String.concat は String を直接返す（Result ではない）ため bind 不要
+fn basic_auth_header(username: String, password: String) -> String {
+    String.concat(["Basic ", Base64.encode(String.concat([username, ":", password]))])
+}
+
+-- ページ単位取得（v87.6.0）
+-- page_size 件ずつ取得し PagedResult（items + next_token）を返す
+public fn odata_list_paged(
+    cfg:        SapConfig,
+    entity_set: String,
+    params:     ODataParams,
+    page_size:  Int
+) -> Result<PagedResult, String> {
+    Result.err("not implemented")
+}
+
+-- 全件収集（v87.6.0）
+-- @odata.nextLink を再帰的にたどり max_pages ページまで収集する
+public fn odata_collect_all(
+    cfg:        SapConfig,
+    entity_set: String,
+    params:     ODataParams,
+    max_pages:  Int
+) -> Result<List<String>, String> {
+    Result.err("not implemented")
+}
+
+-- ODataParams からクエリ文字列を組み立てる（内部ヘルパー）
+-- v85.9.0 安定化バージョンで本実装予定のため、本バージョンでは骨格のみ（空文字列返し）
+fn build_query_string(params: ODataParams) -> String {
+    ""
+}

@@ -1297,16 +1297,15 @@ impl Parser {
     fn parse_variance_type_params(&mut self) -> Result<Vec<crate::ast::GenericParam>, ParseError> {
         use crate::ast::{GenericParam, Variance};
         // Determine whether the angle bracket opened with `<` or `<-`.
-        let first_is_contravariant;
-        if self.peek() == &TokenKind::LAngle {
+        let first_is_contravariant = if self.peek() == &TokenKind::LAngle {
             self.advance(); // consume `<`
-            first_is_contravariant = false;
+            false
         } else if self.peek() == &TokenKind::LArrow {
             self.advance(); // consume `<-` — first param is contravariant
-            first_is_contravariant = true;
+            true
         } else {
             return Ok(vec![]);
-        }
+        };
         let mut params = vec![];
         let mut is_first = true;
         loop {

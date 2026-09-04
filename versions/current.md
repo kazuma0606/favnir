@@ -1,10 +1,14 @@
 # Current — Favnir 進行状況
 
-最終更新: 2026-09-04 (v100.0.0)
+最終更新: 2026-09-05 (v100.0.0)
 
 ---
 
 ## 現行マスターロードマップ
+
+**進行中**: [roadmap/roadmap-v100.1-v105.0.md](roadmap/roadmap-v100.1-v105.0.md)（SAP Real-World Platform Era）
+
+前フェーズ（完了）: [roadmap/roadmap-v95.1-v100.0.md](roadmap/roadmap-v95.1-v100.0.md)（v100.0.0 宣言完了）
 
 前フェーズ（完了）: [roadmap/roadmap-v97.1-v98.0.md](roadmap/roadmap-v97.1-v98.0.md)（v98.0.0 宣言完了）
 
@@ -42,7 +46,7 @@
 
 ## 進行中バージョン
 
-**次スプリント計画中**（v99.x.x〜）
+**v100.1.0〜** — SAP E2E Foundation（Http.get_with_headers 修正・Docker E2E 実証）
 
 ---
 

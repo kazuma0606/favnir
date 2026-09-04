@@ -80,6 +80,7 @@ pub mod dap;
 pub mod coverage;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod otel;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod test_framework;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod bench;

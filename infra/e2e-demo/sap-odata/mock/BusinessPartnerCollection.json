@@ -1,0 +1,85 @@
+{
+  "@odata.context": "$metadata#BusinessPartnerCollection",
+  "value": [
+    {
+      "BusinessPartner": "1000001",
+      "BusinessPartnerName": "SAP SE",
+      "BusinessPartnerCategory": "2",
+      "Country": "DE",
+      "Region": "BW",
+      "CityName": "Walldorf"
+    },
+    {
+      "BusinessPartner": "1000002",
+      "BusinessPartnerName": "Acme Corporation",
+      "BusinessPartnerCategory": "2",
+      "Country": "US",
+      "Region": "CA",
+      "CityName": "San Francisco"
+    },
+    {
+      "BusinessPartner": "1000003",
+      "BusinessPartnerName": "Global Trade GmbH",
+      "BusinessPartnerCategory": "2",
+      "Country": "DE",
+      "Region": "BY",
+      "CityName": "Munich"
+    },
+    {
+      "BusinessPartner": "1000004",
+      "BusinessPartnerName": "Tokyo Industries Ltd",
+      "BusinessPartnerCategory": "2",
+      "Country": "JP",
+      "Region": "13",
+      "CityName": "Tokyo"
+    },
+    {
+      "BusinessPartner": "1000005",
+      "BusinessPartnerName": "Paris Exports SAS",
+      "BusinessPartnerCategory": "2",
+      "Country": "FR",
+      "Region": "IDF",
+      "CityName": "Paris"
+    },
+    {
+      "BusinessPartner": "1000006",
+      "BusinessPartnerName": "Nordic Supply AB",
+      "BusinessPartnerCategory": "2",
+      "Country": "SE",
+      "Region": "AB",
+      "CityName": "Stockholm"
+    },
+    {
+      "BusinessPartner": "1000007",
+      "BusinessPartnerName": "Iberia Logistics SL",
+      "BusinessPartnerCategory": "2",
+      "Country": "ES",
+      "Region": "MD",
+      "CityName": "Madrid"
+    },
+    {
+      "BusinessPartner": "1000008",
+      "BusinessPartnerName": "Asia Pacific Pte Ltd",
+      "BusinessPartnerCategory": "2",
+      "Country": "SG",
+      "Region": "SG",
+      "CityName": "Singapore"
+    },
+    {
+      "BusinessPartner": "1000009",
+      "BusinessPartnerName": "Brazilian Commodities SA",
+      "BusinessPartnerCategory": "2",
+      "Country": "BR",
+      "Region": "SP",
+      "CityName": "São Paulo"
+    },
+    {
+      "BusinessPartner": "1000010",
+      "BusinessPartnerName": "Australian Resources Pty Ltd",
+      "BusinessPartnerCategory": "2",
+      "Country": "AU",
+      "Region": "NSW",
+      "CityName": "Sydney"
+    }
+  ]
+}

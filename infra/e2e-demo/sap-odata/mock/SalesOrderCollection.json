@@ -1,0 +1,85 @@
+{
+  "@odata.context": "$metadata#SalesOrderCollection",
+  "value": [
+    {
+      "SalesOrder": "0000000001",
+      "SalesOrderType": "OR",
+      "SoldToParty": "1000001",
+      "TotalNetAmount": "10000.00",
+      "TransactionCurrency": "EUR",
+      "CreationDate": "2026-01-15"
+    },
+    {
+      "SalesOrder": "0000000002",
+      "SalesOrderType": "OR",
+      "SoldToParty": "1000002",
+      "TotalNetAmount": "25000.00",
+      "TransactionCurrency": "USD",
+      "CreationDate": "2026-01-20"
+    },
+    {
+      "SalesOrder": "0000000003",
+      "SalesOrderType": "OR",
+      "SoldToParty": "1000003",
+      "TotalNetAmount": "8500.00",
+      "TransactionCurrency": "EUR",
+      "CreationDate": "2026-02-01"
+    },
+    {
+      "SalesOrder": "0000000004",
+      "SalesOrderType": "OR",
+      "SoldToParty": "1000004",
+      "TotalNetAmount": "1500000.00",
+      "TransactionCurrency": "JPY",
+      "CreationDate": "2026-02-10"
+    },
+    {
+      "SalesOrder": "0000000005",
+      "SalesOrderType": "OR",
+      "SoldToParty": "1000005",
+      "TotalNetAmount": "32000.00",
+      "TransactionCurrency": "EUR",
+      "CreationDate": "2026-02-15"
+    },
+    {
+      "SalesOrder": "0000000006",
+      "SalesOrderType": "OR",
+      "SoldToParty": "1000006",
+      "TotalNetAmount": "18000.00",
+      "TransactionCurrency": "SEK",
+      "CreationDate": "2026-03-01"
+    },
+    {
+      "SalesOrder": "0000000007",
+      "SalesOrderType": "OR",
+      "SoldToParty": "1000007",
+      "TotalNetAmount": "12000.00",
+      "TransactionCurrency": "EUR",
+      "CreationDate": "2026-03-10"
+    },
+    {
+      "SalesOrder": "0000000008",
+      "SalesOrderType": "OR",
+      "SoldToParty": "1000008",
+      "TotalNetAmount": "45000.00",
+      "TransactionCurrency": "SGD",
+      "CreationDate": "2026-03-15"
+    },
+    {
+      "SalesOrder": "0000000009",
+      "SalesOrderType": "OR",
+      "SoldToParty": "1000009",
+      "TotalNetAmount": "200000.00",
+      "TransactionCurrency": "BRL",
+      "CreationDate": "2026-04-01"
+    },
+    {
+      "SalesOrder": "0000000010",
+      "SalesOrderType": "OR",
+      "SoldToParty": "1000010",
+      "TotalNetAmount": "55000.00",
+      "TransactionCurrency": "AUD",
+      "CreationDate": "2026-04-10"
+    }
+  ]
+}

@@ -1,6 +1,7 @@
 fav/target/
 fav/users.sqlite
 mock/
+!infra/e2e-demo/sap-odata/mock/
 # Terraform
 infra/site/.terraform/
 infra/site/*.tfstate

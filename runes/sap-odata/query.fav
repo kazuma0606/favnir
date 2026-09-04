@@ -1,0 +1,198 @@
+-- SAP OData クエリ型定義（v91.1.0〜）
+-- $select / $expand / $filter を型で表現するモジュール。
+-- 各スプリントでここに型を積み上げていく。
+
+use sap_odata.sales_order
+use sap_odata.business_partner
+use sap_odata.material
+use sap_odata.purchase_order
+use sap_odata.journal_entry
+
+-- フィールド選択を表す型（OData $select に対応）
+-- T はファントム型パラメータ: 対象エンティティ型をコンパイル時に特定するために使う（フィールドには現れない）
+-- fields: T のフィールド名リスト（例: ["BusinessPartner", "Country"]）
+public type SelectClause<T> = {
+    fields: List<String>
+}
+
+-- フィールドリストから SelectClause を生成するヘルパー
+-- 使用例: bind q <- select_fields<BusinessPartner>(["BusinessPartner", "BusinessPartnerName", "Country"])
+public fn select_fields<T>(fields: List<String>) -> SelectClause<T> {
+    SelectClause { fields: fields }
+}
+
+-- ナビゲーション展開を表す型（OData $expand に対応）（v91.2.0）
+-- T はファントム型パラメータ: 対象エンティティ型をコンパイル時に特定するために使う（フィールドには現れない）
+-- navigation_properties: 展開するナビゲーションプロパティ名のリスト（例: ["to_Item", "to_Partner"]）
+public type ExpandClause<T> = {
+    navigation_properties: List<String>
+}
+
+-- ナビゲーションプロパティリストから ExpandClause を生成するヘルパー
+-- 使用例: bind expand <- expand_nav<SalesOrder>(["to_Item", "to_Partner"])
+public fn expand_nav<T>(navigation_properties: List<String>) -> ExpandClause<T> {
+    ExpandClause { navigation_properties: navigation_properties }
+}
+
+-- フィルタ条件を表す ADT（OData $filter に対応）（v91.3.0）
+-- T はファントム型パラメータ: 対象エンティティ型をコンパイル時に特定するために使う（フィールドには現れない）
+-- クォーティング規約:
+--   Eq  → 値をシングルクォートで囲む（文字列比較用）  例: Country eq 'JP'
+--   Gt/Lt → 値をクォートしない（数値比較用）          例: CreditLimit gt 1000
+-- 文字列値の大小比較が必要な場合は Eq の組み合わせで表現するか、将来追加予定の EqStr/GtStr variant を使う。
+-- Not variant は将来バージョン（v91.x.x 以降）で追加予定。
+public type FilterExpr<T> =
+    | Eq(String, String)                      -- field eq 'value'  （文字列: クォートあり）
+    | Gt(String, String)                      -- field gt value    （数値: クォートなし）
+    | Lt(String, String)                      -- field lt value    （数値: クォートなし）
+    | And(FilterExpr<T>, FilterExpr<T>)       -- (left and right)
+    | Or(FilterExpr<T>, FilterExpr<T>)        -- (left or right)
+
+-- FilterExpr を OData $filter 文字列に変換する
+-- クォーティング: Eq は値をシングルクォートで囲む（文字列）、Gt/Lt はそのまま出力（数値）
+-- 使用例: bind f <- filter_to_odata_string<BusinessPartner>(And(Eq("Country", "JP"), Gt("CreditLimit", "1000")))
+--         => "(Country eq 'JP' and CreditLimit gt 1000)"
+public fn filter_to_odata_string<T>(expr: FilterExpr<T>) -> String {
+    match expr {
+        | Eq(field, value) -> field ++ " eq '" ++ value ++ "'"
+        | Gt(field, value) -> field ++ " gt " ++ value
+        | Lt(field, value) -> field ++ " lt " ++ value
+        | And(l, r) -> "(" ++ filter_to_odata_string<T>(l) ++ " and " ++ filter_to_odata_string<T>(r) ++ ")"
+        | Or(l, r)  -> "(" ++ filter_to_odata_string<T>(l) ++ " or "  ++ filter_to_odata_string<T>(r) ++ ")"
+    }
+}
+
+-- 受注クエリオプション（$filter / $select / $expand / $top / $skip の統合）（v91.4.0）
+-- 各フィールドは Option 型; none() は「指定なし（デフォルト）」を意味する
+-- SapClient.sales_orders_query への統合は v91.8.0 で実装（循環 dep のため延期）
+public type SalesOrderQuery = {
+    filter: Option<FilterExpr<SalesOrder>>,
+    select: Option<SelectClause<SalesOrder>>,
+    expand: Option<ExpandClause<SalesOrder>>,
+    top:    Option<Int>,
+    skip:   Option<Int>
+}
+
+-- 全フィールドを none() で初期化したデフォルトクエリを生成するビルダー
+-- 使用例: bind q <- sales_order_query()
+--         bind q <- { q | filter: Option.some(Eq("SoldToParty", "CUST-001")), top: Option.some(50) }
+public fn sales_order_query() -> SalesOrderQuery {
+    SalesOrderQuery {
+        filter: Option.none(),
+        select: Option.none(),
+        expand: Option.none(),
+        top:    Option.none(),
+        skip:   Option.none()
+    }
+}
+
+-- 取引先クエリオプション（$filter / $select / $expand / $top / $skip の統合）（v91.5.0）
+-- 各フィールドは Option 型; none() は「指定なし（デフォルト）」を意味する
+-- SapClient.business_partners_query への統合は v91.8.0 で実装（循環 dep のため延期）
+public type BusinessPartnerQuery = {
+    filter: Option<FilterExpr<BusinessPartner>>,
+    select: Option<SelectClause<BusinessPartner>>,
+    expand: Option<ExpandClause<BusinessPartner>>,
+    top:    Option<Int>,
+    skip:   Option<Int>
+}
+
+-- 取引先クエリオプションを全フィールド none() で初期化するビルダー
+-- 使用例: bind q <- business_partner_query()
+--         bind q <- { q | filter: Option.some(Eq("Country", "JP")), expand: Option.some(expand_nav<BusinessPartner>(["to_BusinessPartnerAddress"])) }
+public fn business_partner_query() -> BusinessPartnerQuery {
+    BusinessPartnerQuery {
+        filter: Option.none(),
+        select: Option.none(),
+        expand: Option.none(),
+        top:    Option.none(),
+        skip:   Option.none()
+    }
+}
+
+-- 品目クエリオプション（$filter / $select / $top / $skip）（v91.6.0）
+-- expand は現スプリントではスコープ外（将来バージョンで追加予定）
+-- SapClient.materials_query への統合は v91.8.0 で実装（循環 dep のため延期）
+public type MaterialQuery = {
+    filter: Option<FilterExpr<Material>>,
+    select: Option<SelectClause<Material>>,
+    top:    Option<Int>,
+    skip:   Option<Int>
+}
+
+-- 品目クエリオプションを全フィールド none() で初期化するビルダー
+-- 使用例: bind q <- material_query()
+--         bind q <- { q | filter: Option.some(Eq("MaterialType", "FERT")), top: Option.some(100) }
+public fn material_query() -> MaterialQuery {
+    MaterialQuery {
+        filter: Option.none(),
+        select: Option.none(),
+        top:    Option.none(),
+        skip:   Option.none()
+    }
+}
+
+-- 購買発注クエリオプション（$filter / $select / $expand / $top / $skip）（v91.6.0）
+-- SapClient.purchase_orders_query への統合は v91.8.0 で実装（循環 dep のため延期）
+public type PurchaseOrderQuery = {
+    filter: Option<FilterExpr<PurchaseOrder>>,
+    select: Option<SelectClause<PurchaseOrder>>,
+    expand: Option<ExpandClause<PurchaseOrder>>,
+    top:    Option<Int>,
+    skip:   Option<Int>
+}
+
+-- 購買発注クエリオプションを全フィールド none() で初期化するビルダー
+-- 使用例: bind q <- purchase_order_query()
+--         bind q <- { q | filter: Option.some(Eq("Supplier", "VEND-001")), expand: Option.some(expand_nav<PurchaseOrder>(["to_PurchaseOrderItem"])) }
+public fn purchase_order_query() -> PurchaseOrderQuery {
+    PurchaseOrderQuery {
+        filter: Option.none(),
+        select: Option.none(),
+        expand: Option.none(),
+        top:    Option.none(),
+        skip:   Option.none()
+    }
+}
+
+-- 会計伝票クエリオプション（$filter / $select / $top / $skip + 会計年度専用フィールド）（v91.7.0）
+-- fiscal_year: SAP 会計年度（Int型。例: 2024）。JournalEntry.fiscal_year / JournalFilter.fiscal_year と型を統一。
+--              Option.none() の場合は全年度対象（パフォーマンス注意）。
+-- expand: 現スプリントではスコープ外（ExpandClause のナビゲーションプロパティ名マッピングが未実装）。将来追加予定。
+-- SapClient.journal_entries_query への統合は v91.8.0 で実装（循環 dep のため延期）
+public type JournalEntryQuery = {
+    filter:      Option<FilterExpr<JournalEntry>>,
+    select:      Option<SelectClause<JournalEntry>>,
+    fiscal_year: Option<Int>,
+    top:         Option<Int>,
+    skip:        Option<Int>
+}
+
+-- 会計伝票クエリオプションを全フィールド none() で初期化するビルダー
+-- 使用例: bind q <- journal_entry_query()
+--         bind q <- { q | fiscal_year: Option.some(2024), filter: Option.some(Gt("AmountInTransactionCurrency", "1000")) }
+public fn journal_entry_query() -> JournalEntryQuery {
+    JournalEntryQuery {
+        filter:      Option.none(),
+        select:      Option.none(),
+        fiscal_year: Option.none(),
+        top:         Option.none(),
+        skip:        Option.none()
+    }
+}
+
+-- OData クエリ型の共通ラッパー（v91.8.0）
+-- entity: SAP エンティティセット名（例: "A_BusinessPartner", "A_SalesOrder"）
+-- T: エンティティ型（ファントム）、Q: クエリオプション型
+public type ODataQueryBuilder<T, Q> = {
+    query:  Q,
+    entity: String
+}
+
+-- クエリを OData ベース URL に結合するヘルパー（簡易実装）
+-- NOTE: builder.query（$filter/$select/$expand/$top/$skip）は本バージョンでは使用しない。
+--       エンティティパスの結合のみ行う（例: "https://host/sap/opu/odata/sap/API_BP/A_BusinessPartner"）。
+--       フル OData URL 生成（$filter/$select/$expand 展開）は将来バージョンで対応予定。
+public fn build_url<T, Q>(builder: ODataQueryBuilder<T, Q>, base_url: String) -> String {
+    String.concat([base_url, "/", builder.entity])
+}

@@ -1,0 +1,117 @@
+---
+title: SAP Platform 1.0 ガイド
+description: Favnir SAP Platform 1.0 の全体像と主要コンポーネントの解説
+---
+
+# SAP Platform 1.0 ガイド
+
+Favnir SAP Platform 1.0 は v86.0〜v99.0 にわたって構築された、SAP 連携のための型安全なデータパイプライン基盤です。
+OData 通信・マスターデータ管理・ワークフロー統合・ガードレール（CircuitBreaker・マスキング・SLA 監視）を一貫した Favnir 構文で記述できます。
+
+---
+
+## 主要コンポーネント
+
+### sap-odata Rune
+
+SAP OData v4 に対応した型安全なクライアント Rune です。
+
+| 型 / 関数 | 説明 |
+|---|---|
+| `SapTomlConfig` | `fav.toml` の `[sap]` セクションをマッピングする設定型 |
+| `SapEnvironment` | `Prd / Qas / Dev / Custom(String)` 環境切り替え enum |
+| `SapClient` | OData エンドポイントへの接続インターフェース |
+| `QueryBuilder<T>` | `$select / $expand / $filter / $top / $skip` 型付きクエリビルダー |
+| `CircuitBreaker` | 障害遮断・自動復旧ガードレール |
+| `TenantContext` | マルチテナント分離型（tenant_id・sap_env・schema） |
+| `Masked<T>` | GDPR データマスキング型 |
+| `SlaDefinition` | SLA 定義型（endpoint・max_latency_ms・availability） |
+
+### ctx Rune 統合
+
+`AppCtx` に SAP クライアントと GDPR アンマスク機能が統合されています。
+
+```favnir
+-- AppCtx を使った SAP 接続
+bind client <- ctx.sap.connect("BusinessPartner")
+
+-- QueryBuilder による型付きクエリ
+bind result <- client.query_builder<BusinessPartner>()
+    |> QueryBuilder.select(["BpId", "FullName", "Country"])
+    |> QueryBuilder.filter("Country eq 'JP'")
+    |> QueryBuilder.page(100, 0)
+    |> client.execute
+
+-- GDPR マスキング
+bind masked_name <- mask(partner.FullName)
+bind name         <- ctx.unmask.unmask(masked_name)
+```
+
+### マルチテナント対応
+
+```favnir
+-- テナント別コンテキスト生成
+bind tenant_ctx <- Ctx.for_tenant_mock("tenant_acme")
+
+-- テナント ID で分岐
+bind schema <- tenant_ctx.schema
+```
+
+### SAP Workflow 統合（v98.0〜）
+
+`!Approval` 型と `IFlowClient` で SAP Integration Suite のワークフローを型安全に呼び出せます。
+
+```favnir
+-- 承認フロー起動
+bind approval <- ctx.workflow.start_approval(request)
+```
+
+---
+
+## ガードレール
+
+### CircuitBreaker
+
+SAP OData エンドポイントへの連続障害時に自動遮断します。
+
+```favnir
+-- CircuitBreaker を通じたコール
+bind result <- CircuitBreaker.call(cb, fn() -> fetch_partners(client))
+```
+
+### SLA 監視（fav sla-check）
+
+```sh
+fav sla-check --config sla.toml --from 2026-09-01 --to 2026-09-04
+```
+
+SLA 定義ファイル（`sla.toml`）に `max_latency_ms` と `availability` を記述し、違反を検出します。
+
+---
+
+## バージョン履歴
+
+| バージョン | 機能 |
+|---|---|
+| v86.0 | SAP Foundation 1.0（SapTomlConfig・sap-odata Rune）|
+| v87.0 | SAP Master Data 1.0（BusinessPartner CRUD）|
+| v88.0 | SAP Sales 1.0（SalesOrder・ページネーション）|
+| v89.0 | SAP Procurement 1.0（Material・PurchaseOrder）|
+| v90.0 | SAP Integration 1.0（JournalEntry・4 シナリオ E2E）|
+| v91.0 | SAP Ctx 統合 1.0（AppCtx.sap・MockSapClient）|
+| v92.0 | SAP OData Query 1.0（$select/$expand/$filter 型表現）|
+| v93.0 | SAP QueryBuilder 1.0（QueryBuilder&lt;T&gt;・Page&lt;T&gt;）|
+| v94.0 | SAP Metadata Infer 1.0（$metadata XML → Favnir 型自動生成）|
+| v95.0 | SAP Advanced 1.0（$batch・Lambda SnapStart・ベンチマーク）|
+| v96.0 | SAP Real-time 1.0（$delta・Event Mesh・Deep Insert）|
+| v97.0 | SAP Multi-system 1.0（SapEnvironment・Snowflake 同期・CrossSystem JOIN）|
+| v98.0 | SAP Workflow 1.0（!Approval 型・IFlowClient）|
+| v99.x | SAP Resilience & Privacy（CircuitBreaker・TenantContext・Masked&lt;T&gt;・SLA 監視）|
+
+---
+
+## 関連ドキュメント
+
+- [SAP 移行ガイド](./sap-migration) — v95.0 から v99.x への移行手順
+- [本番投入チェックリスト](./sap-enterprise-checklist) — 本番環境投入前の確認事項
+- [sap-odata Rune リファレンス](/docs/runes/sap-odata) — API 詳細

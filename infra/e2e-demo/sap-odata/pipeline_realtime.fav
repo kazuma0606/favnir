@@ -1,0 +1,26 @@
+-- リアルタイムイベント駆動 pipeline デモ（v95.4.0）
+-- SAP Event Mesh（AMQP 1.0）からビジネスパートナー変更イベントを受信し、S3 に書き込む。
+--
+-- !SapEvent: ctx.sap_event.* を使用することを示すエフェクトマーカー（ctx interface 方式）
+-- !S3:       ctx.s3.* を使用することを示すエフェクトマーカー
+--
+-- 前提:
+--   - fav.toml に [sap] / [s3] / [sap_event] セクションが設定済みであること
+--   - SapEventClient の実装（本番用 AmqpSapEventClient）が vm.rs から注入済みであること
+
+import rune "sap-odata"
+import rune "s3"
+
+pipeline sync_on_event !SapEvent !S3 {
+    stage Subscribe {
+        -- SAP Event Mesh のトピックを購読する
+        bind _ <- ctx.sap_event.subscribe("sap/s4/BusinessPartner/Changed")
+    }
+    |> stage Process {
+        -- イベントメッセージを受信し、ビジネスパートナーとしてデコードして S3 に保存する
+        bind msg  <- ctx.sap_event.receive()
+        bind bp   <- Json.decode<BusinessPartner>(msg.payload)
+        bind json <- Json.encode(bp)
+        bind _    <- ctx.s3.put_object("favnir-sap-sync", bp.partner_id, json)
+    }
+}

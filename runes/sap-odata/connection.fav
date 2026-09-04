@@ -1,0 +1,14 @@
+-- runes/sap-odata/connection.fav
+-- SAP 接続プール / キャッシュ / リトライ設定（v96.8.0）
+
+public type RetryPolicy = {
+    max_attempts:    Int,
+    backoff_ms:      Int,
+    retry_on_status: List<Int>
+}
+
+public type SapConnectionPool = {
+    pool_size:    Int,
+    timeout_ms:   Int,
+    retry_policy: RetryPolicy
+}

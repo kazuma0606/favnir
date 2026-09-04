@@ -1,0 +1,21 @@
+-- runes/sap-odata/cross_system.fav
+-- SAP × Snowflake クロスシステム型安全 JOIN（v96.7.0）
+
+public type SapSnowflakeJoin<A, B> = {
+    sap_entity:       A,
+    snowflake_record: B,
+    join_key:         String
+}
+
+-- SAP エンティティリストと Snowflake レコードリストをキー関数で JOIN する（v96.7.0 スタブ）
+-- left_key:  SAP エンティティからキー文字列を取り出す関数
+-- right_key: Snowflake レコードからキー文字列を取り出す関数
+-- 戻り値: キーが一致したペアのリスト（完全実装は将来バージョン）
+public fn CrossSystem.join<A, B>(
+    left:      List<A>,
+    right:     List<B>,
+    left_key:  fn(A) -> String,
+    right_key: fn(B) -> String
+) -> List<SapSnowflakeJoin<A, B>> {
+    List.empty()
+}

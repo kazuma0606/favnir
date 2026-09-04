@@ -1,0 +1,11 @@
+// runes/ctx/storage.fav — StorageCtx interface（v90.2.0）
+// !Storage エフェクトの Capability Context 移行用インターフェース。
+// `ctx.s3` を通じてオブジェクトストレージ（S3 等）の操作を行う。
+// StorageCtx は S3Ctx / AzureBlobCtx 等の具体的なストレージ接続型の抽象インターフェース。
+
+interface StorageCtx {
+    fn put_object(ctx: StorageCtx, bucket: String, key: String, body: String) -> Result<Unit, String>
+    fn get_object(ctx: StorageCtx, bucket: String, key: String) -> Result<String, String>
+    fn delete_object(ctx: StorageCtx, bucket: String, key: String) -> Result<Unit, String>
+    fn list_objects(ctx: StorageCtx, bucket: String, prefix: String) -> Result<List<String>, String>
+}

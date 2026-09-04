@@ -1,0 +1,38 @@
+-- runes/sap-odata/resilience.fav
+-- SAP API Rate Limiting / Circuit Breaker 型定義（v99.3.0）
+
+-- Circuit Breaker の状態
+public type CircuitState =
+    | Closed     -- 通常動作
+    | Open       -- トリップ中（リクエストを遮断）
+    | HalfOpen   -- 復旧試行中
+
+-- Circuit Breaker 設定
+-- T は Circuit Breaker が保護する値の型（ファントム型パラメータ）
+public type CircuitBreaker<T> = {
+    state:            CircuitState,
+    failure_count:    Int,
+    threshold:        Int,
+    reset_timeout_ms: Int,
+    tag:              String
+}
+
+-- デフォルト設定の CircuitBreaker を生成する
+public fn circuit_breaker_default<T>(tag: String) -> CircuitBreaker<T> {
+    CircuitBreaker {
+        state:            Closed,
+        failure_count:    0,
+        threshold:        5,
+        reset_timeout_ms: 30000,
+        tag:              tag
+    }
+}
+
+-- テスト用モック: Closed 状態なら value を返す、Open なら Result.err を返す
+public fn circuit_breaker_call_mock<T>(cb: CircuitBreaker<T>, value: T) -> Result<T, String> {
+    match cb.state {
+        Closed   -> Result.ok(value)
+        HalfOpen -> Result.ok(value)
+        Open     -> Result.err(String.concat(["circuit open: ", cb.tag]))
+    }
+}

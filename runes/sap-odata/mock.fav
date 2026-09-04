@@ -1,0 +1,77 @@
+-- runes/sap-odata/mock.fav — MockSapClient（v90.3.0）
+-- SapClient interface のすべてのメソッドを固定レスポンスで返すテスト用スタブ。
+-- テストパイプラインで ctx.sap の代替として使用する。
+-- business_partner_by_id は固定フィールドを持たず Result.err("not implemented") を返す（フィールドなし）。
+
+use sap_odata.query_client
+use sap_odata.workflow
+
+-- TODO: purchase_orders_result フィールドは未追加（v91.8.0 スコープ外）。
+--       purchase_orders_query は Result.err("not implemented") を返す固定スタブ。
+--       将来バージョンで purchase_orders_result: Result<List<PurchaseOrder>, String> を追加する。
+public type MockSapClient = {
+    business_partners_result: Result<List<BusinessPartner>, String>,
+    sales_orders_result:      Result<List<SalesOrder>, String>,
+    materials_result:         Result<List<Material>, String>,
+    journal_entries_result:   Result<List<JournalEntry>, String>
+}
+
+impl SapQueryClient for MockSapClient {
+    fn sales_orders_query(ctx: MockSapClient, q: SalesOrderQuery)
+        -> Result<List<SalesOrder>, String> { ctx.sales_orders_result }
+    fn business_partners_query(ctx: MockSapClient, q: BusinessPartnerQuery)
+        -> Result<List<BusinessPartner>, String> { ctx.business_partners_result }
+    fn materials_query(ctx: MockSapClient, q: MaterialQuery)
+        -> Result<List<Material>, String> { ctx.materials_result }
+    fn purchase_orders_query(ctx: MockSapClient, q: PurchaseOrderQuery)
+        -> Result<List<PurchaseOrder>, String> { Result.err("not implemented") }
+    fn journal_entries_query(ctx: MockSapClient, q: JournalEntryQuery)
+        -> Result<List<JournalEntry>, String> { ctx.journal_entries_result }
+}
+
+impl SapClient for MockSapClient {
+    fn business_partners(ctx: MockSapClient, filter: BusinessPartnerFilter)
+        -> Result<List<BusinessPartner>, String> { ctx.business_partners_result }
+    fn business_partner_by_id(ctx: MockSapClient, id: String)
+        -> Result<BusinessPartner, String> { Result.err("not implemented") }
+    fn sales_orders(ctx: MockSapClient, filter: SalesOrderFilter)
+        -> Result<List<SalesOrder>, String> { ctx.sales_orders_result }
+    fn materials(ctx: MockSapClient, filter: MaterialFilter)
+        -> Result<List<Material>, String> { ctx.materials_result }
+    fn journal_entries(ctx: MockSapClient, filter: JournalFilter)
+        -> Result<List<JournalEntry>, String> { ctx.journal_entries_result }
+    fn batch(ctx: MockSapClient, req: BatchRequest<String>)
+        -> Result<BatchResponse<String>, String> { Result.err("not implemented") }
+    fn delta_fetch<T>(ctx: MockSapClient, entity_set: String, delta_link: Option<String>)
+        -> Result<DeltaResult<T>, String> { Result.err("not implemented") }
+}
+
+-- MockSapClient のデフォルト値コンストラクタ（v90.7.0）
+-- 全フィールドを Result.err("not implemented") で初期化する。
+-- テスト側で必要なフィールドのみ上書きして使用する。
+public fn MockSapClient.default() -> MockSapClient {
+    MockSapClient {
+        business_partners_result: Result.err("not implemented"),
+        sales_orders_result:      Result.err("not implemented"),
+        materials_result:         Result.err("not implemented"),
+        journal_entries_result:   Result.err("not implemented")
+    }
+}
+
+-- MockWorkflowClient（v97.7.0）
+-- ApprovalClient interface のモック実装。承認フローのオフラインテストに使用する。
+public type MockWorkflowClient = {
+    auto_approve:  Bool,
+    reject_reason: Option<String>    -- Reject 時の理由（auto_approve = false の場合に使用）
+}
+
+impl ApprovalClient for MockWorkflowClient {
+    -- subject / context は v97.x で実際の承認 API に使用予定（現在はスタブ）
+    fn request_approval(client: MockWorkflowClient, subject: String, context: String)
+        -> TaskDecision {
+        match client.auto_approve {
+            true  -> Approve
+            false -> Reject(Option.get_or(client.reject_reason, "rejected"))
+        }
+    }
+}

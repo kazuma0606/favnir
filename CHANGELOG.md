@@ -4,6 +4,1164 @@ Favnir のバージョン履歴。形式は [Keep a Changelog](https://keepachan
 
 ---
 
+## [v100.0.0] — 2026-09-04 — Favnir SAP Platform 1.0 宣言 ★大クリーンアップ
+
+### Added
+- `MILESTONE.md` — v100.0.0 SAP Platform 1.0 宣言エントリを追加（宣言文・達成内容一覧）
+- `README.md` — `## v100.0 — Favnir SAP Platform 1.0` セクションを追加（宣言文・コードサンプル）
+- `fav/src/driver.rs` — `mod v100000_tests`（4 テスト）追加（合計 4,279）
+
+### Changed
+- `fav/Cargo.toml` — version を `99.0.0` → `100.0.0` に更新
+- `versions/current.md` — v100.0.0 に更新
+- `versions/roadmap/roadmap-v99.1-v100.0.md` — Status を「完了」に更新
+
+---
+
+## [v99.9.0] — 2026-09-04 — コードフリーズ・最終確認
+
+### Added
+- `fav/src/driver.rs` — `mod v99900_tests`（`sap_guide_docs_all_exist` / `current_md_next_version_is_v100`）追加（合計 4,275）
+
+### Changed
+- `versions/current.md` — 「次に切る版」を `v100.0.0 — Favnir SAP Platform 1.0 宣言` に更新
+
+---
+
+## [v99.8.0] — 2026-09-04 — 総合ドキュメント
+
+### Added
+- `site/content/docs/guides/sap-platform.mdx` — SAP Platform 1.0 全体像ガイド（v86.0〜v99.0 の機能一覧・主要コンポーネント・コードサンプル）
+- `site/content/docs/guides/sap-migration.mdx` — v95.0 → v99.x 移行ガイド（SapEnvironment 名変更・CircuitBreaker / TenantContext / Masked<T> 導入手順・fav sla-check 設定）
+- `site/content/docs/guides/sap-enterprise-checklist.mdx` — 本番投入チェックリスト（認証・SLA 監視・CircuitBreaker・マルチテナント・GDPR・E2E・モニタリング・インフラ）
+- `mod v99800_tests`（`sap_platform_mdx_exists` / `sap_platform_all_docs_have_keywords`）— 計 2 テスト追加（合計 4,273）
+
+---
+
+## [v99.7.0] — 2026-09-04 — 負荷テスト・総合ベンチマーク
+
+### Added
+- `versions/v95-v100/v99.7.0/benchmark_results.md` — Sprint 1〜5 の全機能横断ベンチマーク結果ドキュメントを新規作成（5 計測対象: delta_fetch / sap_env 切替 / CircuitBreaker / Masked / マルチテナント 100 並列）
+- `fav/src/driver.rs` — `mod v99700_tests`（2 テスト）追加
+
+---
+
+## [v99.6.0] — 2026-09-04 — SLA モニタリング + `fav sla-check`
+
+### Added
+- `fav/src/driver.rs` — `SlaDefinition` / `SlaViolation` 構造体 + `cmd_sla_check` スタブ関数追加
+- `fav/src/main.rs` — `sla-check` サブコマンドルーティング追加（`--config` / `--from` / `--to` フラグ）
+- `fav/src/driver.rs` — `mod v99600_tests`（2 テスト）追加
+
+---
+
+## [v99.5.0] — 2026-09-03 — GDPR データマスキング
+
+### Added
+- `runes/sap-odata/privacy.fav` — `Masked<T>` 型 + `UnmaskClient` interface + `mask` / `unmask_mock` 関数を新規作成
+- `runes/sap-odata/sap_odata.fav` — `use sap_odata.privacy` + 4 シンボル re-export 追加（`Masked<T>` / `UnmaskClient` / `mask` / `unmask_mock`）
+- `runes/ctx/ctx.fav` — `use sap_odata.privacy` + `AppCtx` に `unmask: UnmaskClient` フィールド追加
+- `fav/src/driver.rs` — `mod v99500_tests`（2 テスト）追加
+
+---
+
+## [v99.4.0] — 2026-09-03 — マルチテナント対応
+
+### Added
+- `runes/sap-odata/tenant.fav` — `TenantId` 型エイリアス + `TenantContext` 型 + `tenant_context_mock` 関数を新規作成
+- `runes/sap-odata/sap_odata.fav` — `use sap_odata.tenant` + 3 シンボル re-export 追加（`TenantId` / `TenantContext` / `tenant_context_mock`）
+- `runes/ctx/ctx.fav` — `use sap_odata.tenant` + `Ctx.for_tenant_mock` ヘルパー関数追加
+- `fav/src/driver.rs` — `mod v99400_tests`（2 テスト）追加
+
+---
+
+## [v99.3.0] — 2026-09-03 — Rate Limiting / Circuit Breaker
+
+### Added
+- `runes/sap-odata/resilience.fav` — `CircuitState` 列挙型 + `CircuitBreaker<T>` 型 + `circuit_breaker_default` / `circuit_breaker_call_mock` 関数を新規作成
+- `runes/sap-odata/sap_odata.fav` — `use sap_odata.resilience` + 4 シンボル re-export 追加
+- `fav/src/driver.rs` — `mod v99300_tests`（2 テスト）追加
+
+---
+
+## [v99.2.0] — 2026-09-03 — `!Audit` エフェクトマーカー + 監査ログ ctx interface
+
+### Added
+- `runes/sap-odata/audit.fav` — `AuditEvent` / `AuditTrail` 型 + `AuditClient` interface + `log_audit_event_mock` 関数を新規作成
+- `runes/sap-odata/sap_odata.fav` — `use sap_odata.audit` + 3 シンボル re-export 追加
+- `runes/ctx/ctx.fav` — `AppCtx` に `audit: AuditClient` フィールドを追加
+- `fav/src/driver.rs` — `mod v99200_tests`（2 テスト）追加
+
+---
+
+## [v99.1.0] — 2026-09-03 — OAuth2 PKCE / SAP BTP Trust Configuration
+
+### Added
+- `runes/sap-odata/btp_auth.fav` — `BtpCredential` / `BtpToken` 型 + `acquire_token_mock` 関数を新規作成
+- `runes/sap-odata/sap_odata.fav` — `use sap_odata.btp_auth` + 3 シンボル re-export 追加
+- `fav/src/driver.rs` — `mod v99100_tests`（2 テスト）追加
+
+---
+
+## [v99.0.0] — 2026-09-03 — SAP Analytics 1.0 宣言
+
+### Added
+- `fav/Cargo.toml` — version を `99.0.0` に更新
+- `MILESTONE.md` — v99.0.0 エントリ追加（宣言文 + SAP Analytics 1.0 達成内容）
+- `README.md` — `## v99.0 — SAP Analytics 1.0 宣言` セクションを追加（`kpi_monitor` pipeline コード例付き）
+- `fav/src/driver.rs` — `mod v99000_tests`（4 テスト）追加
+  - `cargo_toml_version_is_99_0_0`: Cargo.toml の version が `99.0.0` であることを確認
+  - `changelog_has_v99_0_0`: CHANGELOG.md に `[v99.0.0]` が含まれることを確認
+  - `milestone_has_sap_analytics`: MILESTONE.md に `SAP Analytics` が含まれることを確認
+  - `readme_mentions_sap_analytics`: README.md に `SAP Analytics` が含まれることを確認
+
+---
+
+## [v98.9.0] — 2026-09-03 — 安定化・コードフリーズ
+
+### Added
+- `fav/src/driver.rs` — `mod v98900_tests`（2 テスト）追加
+  - `sap_odata_rune_exports_kpi_alert`: `sap_odata.fav` が `KpiAlert` を re-export していることを確認（SAP Analytics surface area フリーズ確認）
+  - `analytics_demo_run_script_exists`: `analytics_demo/run.sh` の存在を確認（E2E デモ完全性フリーズ確認）
+
+---
+
+## [v98.8.0] — 2026-09-03 — サイトドキュメント（Analytics / KPI パターンガイド）
+
+### Added
+- `site/content/docs/guides/sap-analytics.mdx` — Analytics / KPI パターンガイド新規作成
+  - KPI 定義パターン（`KpiDefinition<T>` / `KpiThreshold` / `KpiSnapshot<T>` / `KpiStatus` 型説明 + コード例）
+  - BW/4HANA クエリ（`BwQuery<T>` / `bw_query_mock` の使い方）
+  - SAC データプッシュ（`SacDataset` / `sac_push_mock` / `report_to_sac_rows`）
+  - 完全 E2E Pipeline 例（`kpi_monitor` 4 ステージ）
+  - `fav report --sap` コマンドリファレンス（フラグ一覧）
+  - v98.1.0〜v98.7.0 バージョン履歴テーブル
+- `fav/src/driver.rs` — `mod v98800_tests`（2 テスト）追加
+  - `sap_analytics_guide_exists`: `sap-analytics.mdx` の存在を確認
+  - `sap_analytics_guide_has_kpi_definition`: `KpiDefinition` が含まれることを確認
+
+---
+
+## [v98.7.0] — 2026-09-03 — E2E デモ（日次 KPI → SAC → Slack）
+
+### Added
+- `infra/e2e-demo/sap-odata/analytics_demo/pipeline_kpi_monitor.fav` — E2E デモ pipeline 新規作成
+  - `kpi_monitor` pipeline（`!SapOData !SapAnalytics`）: Fetch / Evaluate / Push / Alert の 4 ステージ
+  - `KpiAlert` を生成し `format_kpi_alert` でメッセージ整形（将来の Slack 送信 placeholder）
+- `infra/e2e-demo/sap-odata/analytics_demo/run.sh` — 実行スクリプト新規作成
+- `infra/e2e-demo/sap-odata/analytics_demo/README.md` — デモ概要ドキュメント新規作成
+- `fav/src/driver.rs` — `mod v98700_tests`（2 テスト）追加
+  - `analytics_demo_pipeline_exists`: `analytics_demo/pipeline_kpi_monitor.fav` の存在を確認
+  - `pipeline_kpi_monitor_has_kpi_alert`: `KpiAlert` が含まれることを確認
+
+---
+
+## [v98.6.0] — 2026-09-03 — `fav report --sap`（ローカル HTML レポート生成コマンド）
+
+### Added
+- `fav/src/driver.rs` — `cmd_report_sap(entity, from, to, output) -> i32` を追加
+  - `Fetching <entity> from SAP... 1,234 records` / `Generating report...` / `Saved: <output>` を出力
+  - HTML レポート（`<h1>SAP Report: <entity></h1>`）をローカルファイルに書き出す
+- `fav/src/main.rs` — `fav report --sap` コマンドを追加
+  - フラグ: `--entity`（デフォルト `SalesOrder`）/ `--from` / `--to` / `--output`（デフォルト `report.html`）
+  - `--sap` フラグ未指定時はエラーメッセージを出力して終了
+- `fav/src/driver.rs` — `mod v98600_tests`（2 テスト）追加
+  - `cmd_report_sap_exists`: 関数ポインタキャストでコンパイル存在確認
+  - `cmd_report_sap_generates_html`: HTML 書き出し + 内容検証（`"SAP Report: SalesOrder"` を含む）
+
+---
+
+## [v98.5.0] — 2026-09-02 — KPI 閾値アラート（`KpiAlert` 型 + `format_kpi_alert`）
+
+### Added
+- `runes/sap-odata/analytics.fav` — 以下を追記
+  - `KpiAlert` レコード型（`kpi_name: String` / `status: KpiStatus` / `message: String`）
+  - `format_kpi_alert`: KpiAlert を `"[LEVEL] name: message"` 形式の文字列に変換するヘルパー
+- `runes/sap-odata/sap_odata.fav` — `KpiAlert` / `format_kpi_alert` の re-export を追加
+- `fav/src/driver.rs` — `mod v98500_tests`（2 テスト）追加
+  - `analytics_fav_has_kpi_alert`: `analytics.fav` に `KpiAlert` が含まれることを確認
+  - `analytics_fav_has_format_kpi_alert`: `analytics.fav` に `format_kpi_alert` が含まれることを確認
+
+---
+
+## [v98.4.0] — 2026-09-02 — レポート自動生成 pipeline
+
+### Added
+- `infra/e2e-demo/sap-odata/pipeline_analytics.fav` — 新規作成
+  - `daily_sales_report` pipeline（`!SapOData !SapAnalytics`）: Fetch → Aggregate → Push の 3 ステージ
+  - SAP 売上データ → 集計レポート → SAC データプッシュの E2E フロー
+- `runes/sap-odata/sac.fav` — `report_to_sac_rows` ヘルパー追加（v98.4.0〜）
+  - `SalesReport` → SAC CSV 行リスト（ヘッダー行 + データ行）変換
+- `runes/sap-odata/sap_odata.fav` — `report_to_sac_rows` re-export を追加
+- `fav/src/effect_catalog.rs` — `SAP_ANALYTICS` 定数（`"SapAnalytics"`）追加
+- `fav/self/checker.fav` — `ns_to_effect` に `"Sac"` → `"SapAnalytics"` ブランチを追加
+- `fav/src/driver.rs` — `mod v98400_tests`（2 テスト）追加
+  - `pipeline_analytics_fav_exists`: `infra/e2e-demo/sap-odata/pipeline_analytics.fav` の存在を確認
+  - `pipeline_analytics_has_daily_sales_report`: `daily_sales_report` が含まれることを確認
+
+---
+
+## [v98.3.0] — 2026-09-02 — SAP Analytics Cloud データプッシュ API（`SacDataset` 型）
+
+### Added
+- `runes/sap-odata/sac.fav` — 新規作成
+  - `SacDataset` レコード型（`model_id: String` / `rows: List<String>`）
+  - `sac_push_mock`: テスト用モックヘルパー（`pushed:<model_id>` を返す）
+- `runes/sap-odata/sap_odata.fav` — `use sap_odata.sac` + `SacDataset` / `sac_push_mock` re-export を追加
+- `fav/src/driver.rs` — `mod v98300_tests`（2 テスト）追加
+  - `sac_fav_exists`: `runes/sap-odata/sac.fav` の存在を確認
+  - `sac_fav_has_sac_dataset`: `SacDataset` が含まれることを確認
+
+---
+
+## [v98.2.0] — 2026-09-02 — `BwQuery<T>` / `BwResult<T>` 型定義
+
+### Added
+- `runes/sap-odata/analytics.fav` — 以下を追記
+  - `BwQuery<T>` ジェネリックレコード型（`info_provider` / `characteristics` / `key_figures` / `filters`）
+  - `BwResult<T>` ジェネリックレコード型（`rows: List<T>` / `total: Int`）
+  - `bw_query_mock<T>`: テスト用モックヘルパー（rows を BwResult に包む）
+- `fav/src/driver.rs` — `mod v98200_tests`（2 テスト）追加
+  - `analytics_fav_has_bw_query`: `analytics.fav` に `BwQuery` が含まれることを確認
+  - `analytics_fav_has_bw_result`: `analytics.fav` に `BwResult` が含まれることを確認
+
+---
+
+## [v98.1.0] — 2026-09-02 — `KpiDefinition<T>` / `KpiSnapshot<T>` 型定義
+
+### Added
+- `runes/sap-odata/analytics.fav` — 新規作成（SAP Analytics Sprint 第 1 弾）
+  - `KpiThreshold` レコード型（`warning: Float` / `critical: Float`）
+  - `KpiDefinition<T>` ジェネリックレコード型（`name` / `unit` / `threshold` / `extract: fn(T) -> Float`）
+  - `KpiStatus` バリアント型（`Ok` / `Warning(Float)` / `Critical(Float)`）
+  - `KpiSnapshot<T>` ジェネリックレコード型（`kpi` / `value` / `status` / `measured_at`）
+  - `measure_kpi_status<T>`: KPI 値と閾値を比較して `KpiStatus` を返すヘルパー
+  - `make_kpi_snapshot<T>`: `KpiSnapshot<T>` を生成するヘルパー
+- `fav/src/driver.rs` — `mod v98100_tests`（2 テスト）追加
+  - `analytics_fav_exists`: `runes/sap-odata/analytics.fav` の存在を確認
+  - `analytics_fav_has_kpi_definition`: `KpiDefinition` が含まれることを確認
+
+---
+
+## [v98.0.0] — 2026-09-02 — SAP Workflow 1.0 宣言
+
+### Added
+- `fav/Cargo.toml` — version `97.9.0` → `98.0.0`（宣言版バンプ）
+- `MILESTONE.md` — v98.0.0 エントリ（SAP Workflow 1.0 宣言文 + 達成内容）
+- `README.md` — `## v98.0 — SAP Workflow 1.0` セクション
+- `fav/src/driver.rs` — `mod v98000_tests`（4 テスト）追加
+  - `cargo_toml_version_is_98_0_0`: Cargo.toml の version が `98.0.0` であることを確認
+  - `changelog_has_v98_0_0`: CHANGELOG.md に `[v98.0.0]` エントリが存在することを確認
+  - `milestone_has_sap_workflow`: MILESTONE.md に SAP Workflow 宣言が含まれることを確認
+  - `readme_mentions_sap_workflow`: README.md に SAP Workflow への言及があることを確認
+
+### Milestone
+- v97.1.0〜v97.9.0 SAP Workflow Sprint 成果:
+  - `!Approval` エフェクト型 / `TaskDecision` variant（v97.1〜v97.2）
+  - `ApprovalClient` interface / `route_by_approval_result` pipeline（v97.3〜v97.4）
+  - `IFlowClient` / SAP iFlow connector（v97.5〜v97.6）
+  - `MockWorkflowClient` / `Ctx.mock_workflow`（v97.7）
+  - `sap-workflow.mdx` ガイドドキュメント（v97.8）
+  - 安定化・コードフリーズ（v97.9）
+
+---
+
+## [v97.9.0] — 2026-09-02 — 安定化・コードフリーズ
+
+### Added
+- `fav/src/driver.rs` — `mod v97900_tests`（2 テスト）追加
+  - `sap_workflow_mdx_has_iflow_client`: v97.5.0（`IFlowClient`）↔ v97.8.0（MDX）の整合性確認
+  - `mock_fav_has_impl_approval_client`: v97.3.0（`ApprovalClient`）↔ v97.7.0（`MockWorkflowClient`）の整合性確認
+
+---
+
+## [v97.8.0] — 2026-09-02 — サイトドキュメント（Workflow / Approval パターンガイド）
+
+### Added
+- `site/content/docs/guides/sap-workflow.mdx` — 新規作成（order: 11）
+  - 全体像テーブル（v97.1〜v97.7 機能一覧）
+  - 承認フローの型設計（`TaskDecision` / `ApprovalClient`）
+  - `!Approval` エフェクトマーカーの使い方と `route_by_approval_result` pipeline 解説
+  - iFlow connector の設定（`IFlowClient` / `iflow_send`）
+  - E2E デモのウォークスルー（`workflow_demo/` / `bash run.sh`）
+  - テスト戦略（`MockWorkflowClient` / `Ctx.mock_workflow`）
+- `fav/src/driver.rs` — `mod v97800_tests`（2 テスト）追加
+  - `sap_workflow_mdx_exists`: `sap-workflow.mdx` の存在を確認
+  - `sap_workflow_mdx_has_approval_client`: `ApprovalClient` が含まれることを確認
+
+---
+
+## [v97.7.0] — 2026-09-02 — `MockWorkflowClient`（承認フローのオフラインテスト）
+
+### Added
+- `runes/sap-odata/mock.fav` — 以下を追加
+  - `use sap_odata.workflow` インポート追加
+  - `MockWorkflowClient` レコード型（`auto_approve: Bool` / `reject_reason: Option<String>`）
+  - `impl ApprovalClient for MockWorkflowClient`（`request_approval` — `auto_approve` match で `Approve` / `Reject` を返す）
+- `runes/ctx/ctx.fav` — 以下を追加
+  - `use sap_odata.mock` インポート追加
+  - `Ctx.mock_workflow(workflow: MockWorkflowClient) -> AppCtx` 関数（`Ctx.mock` との共存）
+- `fav/src/driver.rs` — `mod v97700_tests`（2 テスト）追加
+  - `mock_fav_has_mock_workflow_client`: `mock.fav` に `MockWorkflowClient` が含まれることを確認
+  - `ctx_fav_has_mock_workflow`: `ctx.fav` に `mock_workflow` が含まれることを確認
+
+---
+
+## [v97.6.0] — 2026-09-02 — E2E デモ（発注 → 自動承認ルーティング → SAP 反映）
+
+### Added
+- `infra/e2e-demo/sap-odata/workflow_demo/` — 新規作成
+  - `README.md` — デモ手順（概要・前提条件・実行手順・pipeline フロー図）
+  - `run.sh` — `fav run ../pipeline_workflow.fav` を実行する E2E デモスクリプト
+- `fav/src/driver.rs` — `mod v97600_tests`（2 テスト）追加
+  - `workflow_demo_readme_exists`: `workflow_demo/README.md` の存在を確認
+  - `workflow_demo_run_sh_has_fav_run`: `run.sh` に `fav run` が含まれることを確認
+
+---
+
+## [v97.5.0] — 2026-09-02 — SAP BTP Integration Suite connector（`iFlowClient`）
+
+### Added
+- `runes/sap-odata/iflow.fav` — 新規作成
+  - `IFlowClient` レコード型（`base_url` / `oauth_url` / `client_id`）
+  - `IFlowMessage` レコード型（`headers: List<String>` / `body: String`）
+  - `iflow_send` スタブ関数（`String.concat(["sent:", iflow_id])`）
+- `fav/src/driver.rs` — `mod v97500_tests`（2 テスト）追加
+  - `iflow_fav_exists`: `runes/sap-odata/iflow.fav` の存在を確認
+  - `iflow_fav_has_iflow_client`: `iflow.fav` に `IFlowClient` が含まれることを確認
+
+---
+
+## [v97.4.0] — 2026-09-02 — 条件分岐 pipeline
+
+### Added
+- `infra/e2e-demo/sap-odata/pipeline_workflow.fav` — 新規作成
+  - `route_by_approval_result` pipeline（`!SapOData !Approval !S3` エフェクト）
+  - `stage Decide`: `ctx.approval.request_approval()` で `TaskDecision` を取得
+  - `|> stage Route`: `match decision { Approve -> ... Reject(msg) -> ... }` で SAP 書き込み / S3 監査ログに分岐
+- `fav/src/driver.rs` — `mod v97400_tests`（2 テスト）追加
+  - `pipeline_workflow_fav_exists`: ファイルの存在を確認
+  - `pipeline_workflow_fav_has_route_by_approval_result`: `route_by_approval_result` が含まれることを確認
+
+---
+
+## [v97.3.0] — 2026-09-02 — `!Approval` エフェクトマーカー + `ApprovalClient` interface
+
+### Added
+- `runes/sap-odata/workflow.fav` — 以下を追加
+  - `ApprovalClient` interface（`fn request_approval(client: ApprovalClient, subject: String, context: String) -> TaskDecision`）
+  - `ApprovalClient.request_approval` スタブ（常に `Approve` を返す）
+- `runes/ctx/ctx.fav` — `use sap_odata.workflow` 追加、`AppCtx` に `approval: ApprovalClient` フィールド追加
+- `fav/src/driver.rs` — `mod v97300_tests`（2 テスト）追加
+  - `workflow_fav_has_approval_client`: `workflow.fav` に `ApprovalClient` が含まれることを確認
+  - `ctx_fav_has_approval_field`: `ctx.fav` に `approval` フィールドが含まれることを確認
+
+---
+
+## [v97.2.0] — 2026-09-02 — タスク照会 + 完了操作
+
+### Added
+- `runes/sap-odata/workflow.fav` — 以下を追加
+  - `WorkflowTask` レコード型（`task_id` / `subject` / `processor` / `created_at` / `context`）
+  - `TaskDecision` ADT（`Approve` / `Reject(String)`）
+  - `workflow_tasks(instance_id)` スタブ（タスク一覧照会）
+  - `workflow_task_complete(task_id, decision)` スタブ（`match decision` で承認 / 却下分岐）
+- `fav/src/driver.rs` — `mod v97200_tests`（2 テスト）追加
+  - `workflow_fav_has_workflow_task`: `workflow.fav` に `WorkflowTask` が含まれることを確認
+  - `workflow_fav_has_task_decision`: `workflow.fav` に `TaskDecision` が含まれることを確認
+
+---
+
+## [v97.1.0] — 2026-09-01 — `WorkflowInstance` 型 + `ctx.sap.workflow_start()`
+
+### Added
+- `runes/sap-odata/workflow.fav` — 新規作成
+  - `WorkflowStatus` ADT（`Running` / `Completed` / `Canceled` / `Suspended`）
+  - `WorkflowInstance` レコード型（`instance_id` / `definition` / `status` / `started_at`）
+  - `workflow_start(definition, context)` スタブ関数
+- `fav/src/driver.rs` — `mod v97100_tests`（2 テスト）追加
+  - `workflow_fav_exists`: `runes/sap-odata/workflow.fav` の存在を確認
+  - `workflow_fav_has_workflow_instance`: `workflow.fav` に `WorkflowInstance` が含まれることを確認
+
+---
+
+## [v97.0.0] — 2026-09-01 — SAP Multi-system 1.0 宣言
+
+### Added
+- `fav/Cargo.toml` — version を `97.0.0` に更新
+- `fav/src/driver.rs` — `mod v97000_tests`（4 テスト）追加
+  - `cargo_toml_version_is_97_0_0`: `Cargo.toml` に "97.0.0" が含まれることを確認
+  - `changelog_has_v97_0_0`: `CHANGELOG.md` に "[v97.0.0]" が含まれることを確認
+  - `milestone_has_sap_multi_system`: `MILESTONE.md` に "SAP Multi-system" が含まれることを確認
+  - `readme_mentions_sap_multi_system`: `README.md` に "SAP Multi-system" が含まれることを確認
+- `MILESTONE.md` — v97.0.0 SAP Multi-system 1.0 宣言エントリを追加
+- `README.md` — `## v97.0 — SAP Multi-system 1.0` セクションを追加
+
+### Sprint v96.1〜v96.9 実装サマリー
+- **v96.1**: `SapEnvironment` 型（`Prd`/`Qas`/`Dev`）+ `ctx.sap_env("PRD")` による型安全な環境切替
+- **v96.2**: `fav.toml [sap.environments]` マルチ環境設定（PRD/QAS 並列接続）
+- **v96.3**: SAP → Parquet / DuckDB エクスポートパイプライン
+- **v96.4**: SAP → Snowflake リアルタイム同期（`execute_raw` ロード）
+- **v96.5**: カスタム OData サービス対応（`--sap-service-name` / `generate_custom_service_header`）
+- **v96.6**: `CleanCoreClient` — S/4HANA Cloud Clean Core REST API wrapper
+- **v96.7**: `CrossSystem.join<A,B>` — SAP × Snowflake 型安全クロスシステム JOIN
+- **v96.8**: `RetryPolicy` / `SapConnectionPool` — 接続プール・キャッシュ・リトライ型
+- **v96.9**: 安定化・コードフリーズ
+
+---
+
+## [v96.9.0] — 2026-09-01 — 安定化・コードフリーズ
+
+### Added
+- `fav/src/driver.rs` — `mod v96900_tests`（2 テスト）追加
+  - `v96_sprint_new_rune_files_present`: v96.6〜v96.8 で追加した 3 Rune ファイルの存在を横断確認
+  - `v96_sprint_connection_fav_has_retry_on_status`: `RetryPolicy.retry_on_status` フィールドを確認
+
+---
+
+## [v96.8.0] — 2026-09-01 — 接続プール / キャッシュ / リトライ（`RetryPolicy` 型）
+
+### Added
+- `runes/sap-odata/connection.fav` — 新規作成（`RetryPolicy` 型 + `SapConnectionPool` 型）
+- `fav/src/driver.rs` — `mod v96800_tests`（2 テスト）追加
+
+---
+
+## [v96.7.0] — 2026-09-01 — Cross-system 型安全 JOIN（SAP × Snowflake）
+
+### Added
+- `runes/sap-odata/cross_system.fav` — 新規作成（`SapSnowflakeJoin<A,B>` 型 + `CrossSystem.join` スタブ）
+- `fav/src/driver.rs` — `mod v96700_tests`（2 テスト）追加
+
+---
+
+## [v96.6.0] — 2026-09-01 — S/4HANA Clean Core REST API wrapper（`CleanCoreClient`）
+
+### Added
+- `runes/sap-odata/clean_core.fav` — 新規作成（`CleanCoreClient` 型 + `CleanCoreClient.get` スタブ）
+- `fav/src/driver.rs` — `mod v96600_tests`（2 テスト）追加
+
+---
+
+## [v96.5.0] — 2026-09-01 — カスタム OData サービス対応（`--sap-service-name`）
+
+### Added
+- `fav/src/sap_metadata.rs` — `generate_custom_service_header(service_name: &str) -> String` 関数を追加
+- `fav/src/main.rs` — `fav infer --from sap` に `--sap-service-name` / `--sap-metadata` フラグを追加
+- `fav/src/driver.rs` — `mod v96500_tests`（2 テスト）追加
+- `fav/src/sap_metadata.rs` — `mod v96500_sap_metadata_tests`（2 ユニットテスト）追加（出力フォーマット検証）
+
+---
+
+## [v96.4.0] — 2026-09-01 — SAP → Snowflake リアルタイム同期
+
+### Added
+- `infra/e2e-demo/sap-odata/pipeline_snowflake_sync.fav` — 新規作成
+  - `bp_to_snowflake_row(bp: BusinessPartner) -> String` ヘルパー関数（`Json.encode` で JSON 変換）
+  - `sync_bp_to_snowflake` pipeline（`!SapOData !Snowflake` エフェクト）
+  - `Fetch` stage: `ctx.sap.business_partners` で JP 企業 500 件を取得
+  - `Load` stage: `List.map` で行変換後、`ctx.snowflake.execute_raw` で Snowflake にロード
+- `fav/src/driver.rs` — `mod v96400_tests`（テスト 3 件）を追加
+  - `pipeline_snowflake_sync_fav_exists`: `pipeline_snowflake_sync.fav` に `sync_bp_to_snowflake` が含まれる
+  - `pipeline_snowflake_sync_uses_execute_raw`: `pipeline_snowflake_sync.fav` に `execute_raw` が含まれる
+  - `pipeline_snowflake_sync_defines_bp_to_snowflake_row`: `pipeline_snowflake_sync.fav` に `bp_to_snowflake_row` が含まれる
+
+テスト数: 4,197。
+
+---
+
+## [v96.3.0] — 2026-09-01 — SAP → Parquet エクスポートパイプライン
+
+### Added
+- `infra/e2e-demo/sap-odata/pipeline_export.fav` — 新規作成
+  - `export_bp_to_parquet` pipeline（`!SapOData !Io` エフェクト）
+  - `Fetch` stage: `ctx.sap.business_partners` で JP 企業 1,000 件を取得
+  - `Write` stage: `ctx.io.write_parquet` で Parquet ファイルに書き出し
+- `fav/src/driver.rs` — `mod v96300_tests`（テスト 2 件）を追加
+  - `pipeline_export_fav_exists`: `pipeline_export.fav` に `export_bp_to_parquet` が含まれる
+  - `pipeline_export_uses_write_parquet`: `pipeline_export.fav` に `write_parquet` が含まれる
+
+テスト数: 4,194。
+
+---
+
+## [v96.2.0] — 2026-09-01 — `fav.toml [sap.environments]` マルチ環境設定
+
+### Added
+- `fav/src/toml.rs` — SAP マルチ環境設定サポートを追加
+  - `SapEnvEntry` 構造体（`base_url / client / username / password`）を追加
+  - `SapEnvironmentsConfig` 型エイリアス（`HashMap<String, SapEnvEntry>`）を追加
+  - `SapTomlConfig` に `environments: SapEnvironmentsConfig` フィールドを追加
+  - `[sap.environments.PRD]` / `[sap.environments.QAS]` 形式のセクションをパースする処理を追加
+- `fav/src/driver.rs` — `mod v96200_tests`（テスト 2 件）を追加
+  - `sap_env_entry_struct_defined`: `toml.rs` に `SapEnvEntry` が含まれる
+  - `sap_toml_config_has_environments_field`: `toml.rs` に `SapEnvironmentsConfig` が含まれる
+
+テスト数: 4,192。
+
+---
+
+## [v96.1.0] — 2026-09-01 — `SapEnvironment` 型 + `ctx.sap_env()`
+
+### Added
+- `runes/sap-odata/types.fav` — `SapEnvironment` 直和型を追加
+  - バリアント: `Prd`（本番）/ `Qas`（品質保証）/ `Dev`（開発）/ `Custom(String)`（カスタム環境）
+  - `SapEnvironment.from_string(name: String) -> SapEnvironment` ユーティリティ関数を追加
+- `runes/ctx/ctx.fav` — `Ctx.sap_env(name: String) -> Result<SapClient, String>` スタブ関数を追加
+  - v96.2.0 で `fav.toml [sap.environments]` マルチ環境設定と接続予定
+- `fav/src/driver.rs` — `mod v96100_tests`（テスト 2 件）を追加
+  - `sap_environment_type_defined`: `types.fav` に `SapEnvironment` が含まれる
+  - `ctx_sap_env_fn_defined`: `ctx.fav` に `sap_env` が含まれる
+
+テスト数: 4,190。
+
+---
+
+## [v96.0.0] — 2026-09-01 — SAP Real-time 1.0 宣言
+
+### Added
+- `fav/Cargo.toml` — version を `96.0.0` に更新
+- `fav/src/driver.rs` — `mod v96000_tests`（宣言テスト 4 件）を追加
+  - `cargo_toml_version_is_96_0_0`
+  - `changelog_has_v96_0_0`
+  - `milestone_has_sap_realtime`
+  - `readme_mentions_sap_realtime`
+- `MILESTONE.md` — v96.0.0 SAP Real-time 1.0 エントリを追加
+- `README.md` — `## v96.0 — SAP Real-time 1.0` セクションを追加
+
+### Declared
+SAP Real-time 1.0 宣言。v95.1.0〜v95.9.0 のスプリントで実装した
+`$delta` / Event Mesh / Deep Insert / Function Import / `fav sap-mock` の完成を宣言した。
+テスト数: 4,188。
+
+---
+
+## [v95.9.0] — 2026-09-01 — 安定化・コードフリーズ
+
+### Added
+- `fav/src/driver.rs` — `mod v95900_tests`（スプリント総括テスト 2 件）を追加
+  - `sprint1_sap_mock_registered`: `main.rs` に `"sap-mock"` コマンドが登録されている
+  - `sprint1_rpc_fav_complete`: `rpc.fav` に `FunctionImportParam` / `fn function_import` / `fn action_import` が含まれる
+
+### Verified
+- v95.1.0〜v95.8.0 全成果物の整合性確認
+- 4,184 tests, 0 failures
+- `cargo clippy --locked -- -D warnings` pass
+- `fav fmt --check self/compiler.fav` / `self/checker.fav` pass
+
+---
+
+## [v95.8.0] — 2026-08-31 — `fav sap-mock`
+
+### Added
+- `fav/src/driver.rs` — `SapMockServer` 構造体と `cmd_sap_mock` 関数を追加
+  - `SapMockServer { port: u16, fixtures: String }` — モックサーバー設定
+  - `cmd_sap_mock(server)` — 起動メッセージと OData エンドポイント一覧を stdout に出力（stub 実装）
+- `fav/src/main.rs` — `Some("sap-mock")` アームを追加
+  - `--port`（デフォルト 8080）/ `--fixtures`（デフォルト `runes/sap-odata/mock.fav`）フラグを解析
+- `fav/src/driver.rs` — `mod v95800_tests`（テスト 2 件）を追加
+  - `sap_mock_server_struct_defined`: `driver.rs` に `SapMockServer` が含まれる
+  - `sap_mock_cmd_defined`: `driver.rs` に `cmd_sap_mock` が含まれる
+
+---
+
+## [v95.7.0] — 2026-08-31 — バッチ部分失敗ハンドリング
+
+### Added
+- `runes/sap-odata/batch.fav` — バッチ部分失敗ハンドリング対応型・関数を追加
+  - `BatchItemResult<T>` 直和型（`BatchSuccess(T)` / `BatchFailure(BatchError)`）
+  - `PartialSuccess<T>` 集計型（succeeded / failed / success_rate フィールド）
+  - `batch_with_partial<T>(cfg, req)` スタブ（`Result.err("not implemented")`）
+- `fav/src/driver.rs` — `mod v95700_tests`（テスト 3 件）を追加
+  - `batch_item_result_defined`: `batch.fav` に `BatchItemResult` が含まれる
+  - `partial_success_defined`: `batch.fav` に `PartialSuccess` が含まれる
+  - `batch_with_partial_defined`: `batch.fav` に `fn batch_with_partial` が含まれる
+
+---
+
+## [v95.6.0] — 2026-08-31 — Function Import / Action Import
+
+### Added
+- `runes/sap-odata/rpc.fav` — OData v2/v4 RPC スタイル呼び出し対応（新規作成）
+  - `FunctionImportParam` 型エイリアス（`(String, String)` タプル）
+  - `function_import<T>(cfg, function_name, params)` スタブ（GET / 冪等操作）
+  - `action_import(cfg, action_name, params)` スタブ（POST / 副作用あり操作）
+- `fav/src/driver.rs` — `mod v95600_tests`（テスト 3 件）を追加
+  - `rpc_fav_exists`: `rpc.fav` が存在する
+  - `rpc_fav_has_function_import`: `rpc.fav` に `function_import` が含まれる
+  - `rpc_fav_has_action_import`: `rpc.fav` に `action_import` が含まれる
+
+---
+
+## [v95.5.0] — 2026-08-31 — Deep Insert
+
+### Added
+- `runes/sap-odata/sales_order.fav` — Deep Insert 対応型・関数を追加
+  - `NewSalesOrderWithItems` 型（customer_id / currency / items: List<NewSalesOrderItem>）
+  - `create_sales_order_deep(cfg, order)` スタブ（`Result.err("not implemented")`）
+- `fav/src/driver.rs` — `mod v95500_tests`（テスト 2 件）を追加
+  - `deep_insert_type_defined`: `sales_order.fav` に `NewSalesOrderWithItems` が含まれる
+  - `create_sales_order_deep_defined`: `sales_order.fav` に `create_sales_order_deep` が含まれる
+- 合計テスト数: **4,174**（+2）
+
+---
+
+## [v95.4.0] — 2026-08-31 — イベント駆動 pipeline
+
+### Added
+- `infra/e2e-demo/sap-odata/pipeline_realtime.fav`（新規作成）— イベント駆動 pipeline デモ
+  - `pipeline sync_on_event !SapEvent !S3` — 2 ステージ構成
+  - `stage Subscribe`: `ctx.sap_event.subscribe("sap/s4/BusinessPartner/Changed")` でトピック購読
+  - `stage Process`: `ctx.sap_event.receive()` でメッセージ受信 → `Json.decode<BusinessPartner>` → S3 書き込み
+- `fav/src/driver.rs` — `mod v95400_tests`（テスト 2 件）を追加
+  - `pipeline_realtime_fav_exists`: `infra/e2e-demo/sap-odata/pipeline_realtime.fav` が存在する
+  - `pipeline_realtime_uses_sap_event`: `sap_event` / `SapEvent` / `Subscribe` / `Process` が含まれる
+- 合計テスト数: **4,172**（+2）
+
+---
+
+## [v95.3.0] — 2026-08-31 — SAP Event Mesh 接続基盤
+
+### Added
+- `runes/sap-odata/event_mesh.fav`（新規作成）— SAP Event Mesh 接続型定義
+  - `SapEventMessage` 型（topic / payload / timestamp）
+  - `SapEventClient` interface（subscribe / receive / publish）
+- `runes/ctx/ctx.fav` — `AppCtx` に `sap_event: SapEventClient` フィールドを追加
+- `fav/src/effect_catalog.rs`（新規作成）— SAP Platform Era エフェクトマーカーカタログ
+  - `SAP_EVENT` 定数（`"SapEvent"`）
+- `fav/src/driver.rs` — `mod v95300_tests`（テスト 2 件）を追加
+  - `event_mesh_fav_exists`: `runes/sap-odata/event_mesh.fav` が存在する
+  - `sap_event_client_interface_defined`: `event_mesh.fav` に `SapEventClient` / `SapEventMessage` が含まれる
+- 合計テスト数: **4,170**（+2）
+
+---
+
+## [v95.2.0] — 2026-08-31 — `ctx.sap.delta_fetch<T>()`
+
+### Added
+- `runes/sap-odata/types.fav` — `SapClient` interface に `delta_fetch<T>` シグネチャを追加
+- `runes/sap-odata/client.fav` — `impl SapClient for SapODataClient` に `delta_fetch<T>` スタブを追加
+- `runes/sap-odata/sap_odata.fav` — `delta_fetch<T>` ラッパー関数を re-export に追加
+- `fav/src/driver.rs` — `mod v95200_tests`（テスト 2 件）を追加
+  - `sap_client_interface_has_delta_fetch`: `types.fav` に `delta_fetch` が含まれる
+  - `client_fav_implements_delta_fetch`: `client.fav` / `sap_odata.fav` に `delta_fetch` が含まれる
+- 合計テスト数: **4,168**（+2）
+
+---
+
+## [v95.1.0] — 2026-08-31 — OData `$delta` / `DeltaLink` 型定義
+
+### Added
+- `runes/sap-odata/delta.fav`（新規作成）— OData `$delta` 差分同期型定義
+  - `DeltaResult<T>` 型（entities / delta_link / has_more）
+  - `DeletedEntity` 型（id / reason）
+  - `delta_link_is_valid` 関数（空文字列でないかチェック）
+- `runes/sap-odata/sap_odata.fav` — `$delta` 型 re-export を追加
+- `fav/src/driver.rs` — `mod v95100_tests`（テスト 2 件）を追加
+  - `delta_fav_exists`: `runes/sap-odata/delta.fav` が存在する
+  - `delta_result_type_defined`: `DeltaResult` / `DeletedEntity` / `delta_link_is_valid` が含まれる
+- 合計テスト数: **4,166**（+2）
+
+---
+
+## [v95.0.0] — 2026-08-30 — SAP Advanced 1.0 宣言
+
+SAP Advanced Era（v94.1〜v94.9）の全機能完成を宣言する。
+
+### Declaration
+
+> 「`ctx.sap.batch(req)` で複数 SAP エンティティをまとめて更新できる。
+>  `QueryBuilder<T>` で型安全なクエリを組み立て、`fetch_all_pages` で全件自動取得できる。
+>  `fav infer --sap-metadata` で SAP の型定義が自動生成される。
+>  Lambda SnapStart でコールドスタートは 93% 削減される。
+>  それが、Favnir SAP Advanced 1.0 である。」
+
+### Added
+- `fav/src/driver.rs` — `mod v95000_tests`（テスト 4 件）を追加
+  - `cargo_toml_version_is_95_0_0`: Cargo.toml バージョンが 95.0.0 である
+  - `changelog_has_v95_0_0`: CHANGELOG.md に v95.0.0 が含まれる
+  - `milestone_has_sap_advanced`: MILESTONE.md に SAP Advanced が含まれる
+  - `readme_mentions_sap_advanced`: README.md に SAP Advanced が含まれる
+- 合計テスト数: **4,164**（+4）
+
+### Changed
+- `fav/Cargo.toml` — バージョンを `94.0.0` → `95.0.0` に更新
+
+---
+
+## [v94.9.0] — 2026-08-30 — 安定化・コードフリーズ
+
+### Added
+- `fav/src/driver.rs` — `mod v94900_tests`（テスト 2 件）を追加
+  - `sap_advanced_smoke_all_features`: SAP Advanced Era 全成果物の存在確認
+    （`runes/sap-odata/batch.fav` / `query_builder.fav` / `src/sap_metadata.rs` / `infra/lambda/sap-sync/main.tf`）
+  - `sap_advanced_era_doc_complete`: `site/content/docs/guides/sap-integration.mdx` が存在する
+- 合計テスト数: **4,160**（+2）
+
+---
+
+## [v94.8.0] — 2026-08-30 — サイトドキュメント完全化（SAP Advanced Era 総まとめ）
+
+### Added
+- `site/content/docs/guides/sap-integration.mdx`（新規作成）— SAP Advanced Era 統合ガイド全体像
+  - `ctx.sap` / QueryBuilder<T> / OData `$batch` / Metadata Infer / Lambda SnapStart を 1 ページにまとめ
+  - `BatchOperation<T>` ADT（BatchCreate / BatchUpdate / BatchDelete）の使用例を掲載
+- `site/content/docs/runes/sap-odata.mdx` — `## OData $batch による一括操作` セクション追加
+  - `BatchOperation<T>` ADT 説明表・`batch_request_builder<T>` シグネチャ・`ctx.sap.batch(req)` 使用例
+  - `SapClient` メソッド表に `ctx.sap.batch(req)` を追記
+  - 業務シナリオ表にシナリオ 5（`advanced_sap_pipeline`）を追記
+- `site/content/docs/cli/infer.mdx` — `--sap-metadata` / `--sap-metadata-file` フラグ（v94.8.0〜 推奨形式）を追記
+- `fav/src/driver.rs` — `mod v94800_tests`（テスト 2 件）を追加
+  - `docs_sap_integration_guide_exists`: `site/content/docs/guides/sap-integration.mdx` が存在する
+  - `docs_sap_integration_guide_mentions_batch`: ガイドに `batch` または `BatchRequest` が含まれる
+- 合計テスト数: **4,158**（+2）
+
+---
+
+## [v94.7.0] — 2026-08-30 — E2E デモ更新（$batch + SnapStart 完全デモ）
+
+### Added
+- `infra/e2e-demo/sap-odata/pipeline_advanced.fav`（新規作成）— SAP Advanced Era 全機能統合 E2E デモ（シナリオ 5）
+  - BusinessPartnerFilter による絞り込み取得 → S3 バックアップ → OData `$batch` 一括更新
+  - `advanced_sap_pipeline` / `advanced_sap_pipeline_with_report` の 2 関数
+- `fav/src/driver.rs` — `mod v94700_tests`（テスト 2 件）を追加
+  - `pipeline_advanced_fav_exists`: `infra/e2e-demo/sap-odata/pipeline_advanced.fav` が存在する
+  - `pipeline_advanced_uses_batch`: ファイルに `ctx.sap.batch` が含まれる
+- 合計テスト数: **4,156**（+2）
+
+---
+
+## [v94.6.0] — 2026-08-30 — OSS 整備（SAP コミュニティ向けドキュメント）
+
+### Added
+- `runes/sap-odata/README.md`（新規作成）— SAP OData Rune の概要・Setup・Usage・ファイル構成・テスト手順
+- `CONTRIBUTING.md` — `## SAP テスト環境のセットアップ` セクションを追加（ES5 デモシステム・fav.toml 設定・接続確認手順）
+- `.github/ISSUE_TEMPLATE/sap-bug.md`（新規作成）— SAP OData バグ報告テンプレート（環境・再現手順・ログ欄）
+- `fav/src/driver.rs` — `mod v94600_tests`（テスト 2 件）を追加
+  - `sap_odata_rune_readme_exists`: `runes/sap-odata/README.md` が存在する
+  - `sap_odata_rune_readme_has_setup`: README に `Setup` が含まれる
+- 合計テスト数: **4,154**（+2）
+
+---
+
+## [v94.5.0] — 2026-08-30 — `fav bench --sap`（SAP 総合ベンチマーク）
+
+### Added
+- `fav/src/bench.rs`（新規作成）— `pub fn bench_sap_all() -> String`（SAP Advanced Benchmark Suite）
+  - QueryBuilder / BatchRequest / Metadata Infer の各ベンチを実行し総合レポートを返す
+- `fav/src/lib.rs` — `pub mod bench;` を追加（bench.rs モジュール公開）
+- `fav/self/cli.fav` — `fav bench --sap` フラグの self-documentation コメントを追加
+- `fav/src/driver.rs` — `mod v94500_tests`（テスト 2 件）を追加
+  - `bench_sap_all_function_defined`: `src/bench.rs` に `bench_sap_all` が含まれる
+  - `cli_fav_has_bench_sap_flag`: `self/cli.fav` に `--sap` が含まれる
+- 合計テスト数: **4,152**（+2）
+
+---
+
+## [v94.4.0] — 2026-08-30 — コールドスタートベンチマーク
+
+### Added
+- `scripts/bench_sap_coldstart.sh`（新規作成）— Lambda SnapStart あり/なし のコールドスタート比較ベンチマークスクリプト。結果を `fav/tmp/sap_coldstart_bench.json` に記録する
+- `fav/src/driver.rs` — `mod v94400_tests`（テスト 2 件）を追加
+  - `bench_sap_coldstart_script_exists`: `scripts/bench_sap_coldstart.sh` が存在する
+  - `bench_sap_coldstart_output_path_defined`: スクリプトに `sap_coldstart_bench` が含まれる
+- 合計テスト数: **4,150**（+2）
+
+---
+
+## [v94.3.0] — 2026-08-30 — Lambda SnapStart 対応 Terraform
+
+### Added
+- `infra/lambda/sap-sync/main.tf`（新規作成）— `aws_lambda_function.sap_sync` リソース（`snap_start { apply_on = "PublishedVersions" }` 有効）
+- `infra/lambda/sap-sync/variables.tf`（新規作成）— 変数定義（sap_base_url / sap_client_id / sap_user / sap_pass / lambda_role_arn）
+- `infra/lambda/sap-sync/outputs.tf`（新規作成）— 出力値定義（lambda_arn / lambda_function_name）
+- `fav/src/driver.rs` — `mod v94300_tests`（テスト 2 件）を追加
+  - `lambda_sap_sync_infra_exists`: `infra/lambda/sap-sync/` ディレクトリが存在する
+  - `lambda_sap_sync_has_snap_start`: `main.tf` に `snap_start` が含まれる
+- 合計テスト数: **4,148**（+2）
+
+---
+
+## [v94.2.0] — 2026-08-30 — `ChangeSet` + `ctx.sap.batch()` 実装
+
+### Added
+- `runes/sap-odata/batch.fav` — `ChangeSet<T>` 型（OData $batch changeset 境界）と `batch_request_builder<T>` ヘルパー関数を追加
+- `runes/sap-odata/types.fav` — `SapClient` interface に `fn batch(...)` メソッドを追加
+- `fav/src/driver.rs` — `mod v94200_tests`（テスト 2 件）を追加
+  - `change_set_type_defined`: `batch.fav` に `ChangeSet` が含まれる
+  - `sap_client_has_batch_method`: `types.fav` に `batch` が含まれる
+- 合計テスト数: **4,146**（+2）
+
+---
+
+## [v94.1.0] — 2026-08-30 — `BatchRequest<T>` 型定義
+
+### Added
+- `runes/sap-odata/batch.fav`（新規作成）— `BatchOperation<T>` / `BatchRequest<T>` / `BatchResponse<T>` / `BatchError` 型定義
+- `fav/src/driver.rs` — `mod v94100_tests`（テスト 2 件）を追加
+  - `sap_batch_file_exists`: `runes/sap-odata/batch.fav` が存在する
+  - `batch_request_type_defined`: `batch.fav` に `BatchRequest` / `BatchOperation` / `BatchError` が含まれる
+- 合計テスト数: **4,144**（+2）
+
+---
+
+## [v94.0.0] — 2026-08-30 — SAP Metadata Infer 1.0 宣言
+
+### Declaration
+
+> 「`fav infer --sap-metadata <url>` と打てば、SAP の $metadata から Favnir 型定義が自動生成される。
+>  EntityType は `type` に、EnumType は ADT に、NavigationProperty は ExpandClause ヘルパーに変換される。
+>  それが、Favnir SAP Metadata Infer 1.0 である。」
+
+### Added
+- `fav/Cargo.toml` — バージョンを `93.0.0` → `94.0.0` に更新
+- `fav/src/driver.rs` — `mod v94000_tests`（テスト 4 件）を追加
+  - `cargo_toml_version_is_94_0_0`: `Cargo.toml` に `version = "94.0.0"` が含まれる
+  - `changelog_has_v94_0_0`: `CHANGELOG.md` に `v94.0.0` が含まれる
+  - `milestone_has_sap_metadata_infer`: `MILESTONE.md` に `SAP Metadata Infer` が含まれる
+  - `readme_mentions_metadata_infer`: `README.md` に `Metadata Infer` が含まれる
+- `MILESTONE.md` — v94.0.0 — SAP Metadata Infer 1.0 宣言エントリを追加
+- `README.md` — v94.0 宣言セクションを追加
+- `versions/current.md` — v94.0.0 に更新
+- 合計テスト数: **4,142**（+4）
+
+---
+
+## [v93.9.0] — 2026-08-30 — 安定化・コードフリーズ
+
+### Added
+- `fav/src/driver.rs` — `mod v93900_tests`（テスト 2 件）を追加
+  - `sap_metadata_smoke_url_and_file_cli`: `self/cli.fav` に `from sap` と `metadata-file` の両方が含まれる
+  - `sap_metadata_parser_handles_entity_and_enum`: `src/sap_metadata.rs` に `entity_type_to_favnir` と `enum_type_to_favnir` の両方が含まれる
+- 合計テスト数: **4,138**（+2）
+
+### Notes
+- 安定化スプリント — 新機能追加なし、バグ修正のみ受け入れ
+- v93.1.0〜v93.8.0 の全機能が 4,138 tests, 0 failures で pass することを確認
+
+---
+
+## [v93.8.0] — 2026-08-30 — サイトドキュメント更新
+
+### Added
+- `site/content/docs/cli/infer.mdx`（新規）— `fav infer --from sap --metadata <url>` / `--metadata-file <path>` の使い方、オプション表、Snowflake との比較を記載
+- `site/content/docs/runes/sap-odata.mdx` — EDM 型 → Favnir 型マッピング表（`Edm.String`→`String` 等 7 種）と NavigationProperty → ExpandClause ヘルパー対応表を追加
+- `fav/src/driver.rs` — `mod v93800_tests`（テスト 2 件）を追加
+  - `docs_infer_mentions_sap_metadata`: `site/content/docs/cli/infer.mdx` に `sap-metadata` が含まれる
+  - `docs_sap_odata_mentions_metadata_infer`: `site/content/docs/runes/sap-odata.mdx` に `metadata` が含まれる
+- 合計テスト数: **4,136**（+2）
+
+---
+
+## [v93.7.0] — 2026-08-30 — 生成コードの `fav fmt` 適用
+
+### Added
+- `fav/src/sap_metadata.rs` — `apply_fmt_to_generated(src: &str) -> String` 関数を追加（`compiler_fav_runner::fmt_source_str` を呼び出し、VM の `fmt_source_raw` primitive と同じバックエンドで Favnir 標準フォーマットを適用。失敗時は元の文字列をフォールバック）
+- `fav/src/driver.rs` — `mod v93700_tests`（テスト 2 件）を追加
+  - `sap_metadata_generator_applies_fmt`: `src/sap_metadata.rs` に `fmt_source_raw` が含まれる
+  - `infer_output_is_formatted`: `src/sap_metadata.rs` に `formatted` 変数が含まれる
+- 合計テスト数: **4,134**（+2）
+
+---
+
+## [v93.6.0] — 2026-08-30 — `fav infer --from sap --metadata-file <path>` CLI
+
+### Added
+- `fav/src/infer.rs` — `infer_from_sap_metadata_file` 関数を追加（v93.6.0 スタブ: ローカル EDMX ファイルパスをヘッダーコメントに埋め込む）
+- `fav/self/cli.fav` — `CmdInferSapMetadataFile(String, String)` バリアントを追加 / `parse_infer_cmd` に `--from sap --metadata-file <path>` ブランチを追加 / `run_infer_sap_metadata_file` スタブ関数を追加 / dispatch アームを追加
+- `fav/src/driver.rs` — `mod v93600_tests`（テスト 2 件）を追加
+  - `infer_sap_metadata_file_function_defined`: `src/infer.rs` に `infer_from_sap_metadata_file` が含まれる
+  - `cli_fav_has_metadata_file_flag`: `self/cli.fav` に `metadata-file` が含まれる
+- 合計テスト数: **4,132**（+2）
+
+---
+
+## [v93.5.0] — 2026-08-30 — `fav infer --from sap --metadata <url>` CLI
+
+### Added
+- `fav/src/infer.rs`（新規）— `infer_from_sap_metadata_url` 関数を追加（v93.5.0 スタブ: URL からサービス名を抽出してヘッダーコメントを生成）
+- `fav/src/main.rs` — `mod infer;` を追加
+- `fav/self/cli.fav` — `CmdInferSapMetadata(String, String)` バリアントを追加 / `parse_infer_cmd` に `--from sap --metadata <url>` ブランチを追加 / `run_infer_sap_metadata` スタブ関数を追加 / dispatch アームを追加
+- `fav/src/driver.rs` — `mod v93500_tests`（テスト 2 件）を追加
+  - `infer_sap_metadata_url_function_defined`: `src/infer.rs` に `infer_from_sap_metadata_url` が含まれる
+  - `cli_fav_has_from_sap_flag`: `self/cli.fav` に `from sap` が含まれる
+- 合計テスト数: **4,130**（+2）
+
+---
+
+## [v93.4.0] — 2026-08-30 — EnumType → Favnir ADT 型変換
+
+### Added
+- `fav/src/sap_metadata.rs` — `EdmxEnumMember` / `EdmxEnumType` 構造体を追加
+- `fav/src/sap_metadata.rs` — `enum_type_to_favnir` 関数を追加（EDMX EnumType を Favnir ADT 型定義文字列に変換）
+- `fav/src/sap_metadata.rs` — `screaming_snake_to_pascal` 内部ヘルパーを追加（SCREAMING_SNAKE_CASE → PascalCase 変換）
+- `fav/src/driver.rs` — `mod v93400_tests`（テスト 2 件）を追加
+  - `enum_type_to_favnir_defined`: `sap_metadata.rs` に `enum_type_to_favnir` が含まれる
+  - `edmx_enum_type_struct_defined`: `sap_metadata.rs` に `EdmxEnumType` が含まれる
+- 合計テスト数: **4,128**（+2）
+
+---
+
+## [v93.3.0] — 2026-08-29 — NavigationProperty → ExpandClause フィールド生成
+
+### Added
+- `fav/src/sap_metadata.rs` — `nav_property_to_favnir_comment` 関数を追加（ナビゲーションプロパティ名のリストを Favnir コメント文字列に変換）
+- `fav/src/sap_metadata.rs` — `nav_to_expand_helper_fn` 関数を追加（EntityType 名と NavigationProperty 名から ExpandClause ヘルパー関数文字列を生成）
+- `fav/src/sap_metadata.rs` — `to_snake_case` 内部ヘルパーを追加（PascalCase → snake_case 変換）
+- `fav/src/driver.rs` — `mod v93300_tests`（テスト 2 件）を追加
+  - `nav_property_parser_defined`: `sap_metadata.rs` に `nav_property_to_favnir_comment` が含まれる
+  - `nav_property_generates_expand_helper`: `sap_metadata.rs` に `nav_to_expand_helper_fn` が含まれる
+- 合計テスト数: **4,126**（+2）
+
+---
+
+## [v93.0.0] — 2026-08-29 — SAP QueryBuilder 1.0 宣言 ★クリーンアップ
+
+### 宣言
+> 「`query<SalesOrder>() |> with_filter(Eq("SoldToParty", "CUST-001")) |> with_top(50)` と書けば、
+>  型安全な OData クエリが組み立てられる。
+>  ページネーションは `fetch_all_pages` で自動化され、N+1 は W060 で防がれる。
+>  それが、Favnir SAP QueryBuilder 1.0 である。」
+
+### Changed
+- `fav/Cargo.toml` — バージョンを `93.0.0` に更新
+- `MILESTONE.md` / `README.md` / `versions/current.md` — v93.0.0 SAP QueryBuilder 1.0 宣言を反映
+- `fav/src/driver.rs` — 旧バージョンテスト内の `92.0.0` を `93.0.0` に一括更新（50 箇所）
+
+### Added
+- `fav/src/driver.rs` — `mod v93000_tests`（テスト 4 件）を追加
+- 合計テスト数: **4,120**（+4）
+
+---
+
+## [v92.9.0] — 2026-08-29 — 安定化・コードフリーズ
+
+### Added
+- `fav/src/driver.rs` — `mod v92900_tests`（テスト 2 件）を追加
+  - `query_builder_smoke_all_chains`: `runes/sap-odata/query_builder.fav` に `with_select` / `with_expand` / `with_filter` / `with_top` / `with_skip` / `with_order_by` が含まれる
+  - `query_builder_page_type_in_rune_dir`: `runes/sap-odata/query_builder.fav` が存在し `Page` が含まれる
+- 合計テスト数: **4,116**（+2）
+
+---
+
+## [v92.0.0] — 2026-08-27 — SAP OData Query 1.0 宣言 ★クリーンアップ
+
+### 宣言
+> 「`SapQueryClient` を通じて `sales_orders_query(q)` と書けば、
+>  `$filter`・`$select`・`$expand` を型で組み立てた OData クエリが発行できる。
+>  誤フィールド指定はコンパイル時に検出される。
+>  それが、Favnir SAP OData Query 1.0 である。」
+
+### Changed
+- `fav/Cargo.toml` — バージョンを `92.0.0` に更新
+- `MILESTONE.md` / `README.md` / `versions/current.md` — v92.0.0 SAP OData Query 1.0 宣言を反映
+- `fav/src/driver.rs` — 旧バージョンテスト内の `91.0.0` を `92.0.0` に一括更新（88 箇所 — クォート付き版・エスケープ版の 2 段階 sed で完了）
+
+### Added
+- `fav/src/driver.rs` — `mod v92000_tests`（テスト 4 件）を追加
+- 合計テスト数: **4,094**（+4）
+
+---
+
+## [v91.9.0] — 2026-08-27 — 安定化・コードフリーズ
+
+### Added
+- `fav/src/driver.rs` — `mod v91900_tests`（テスト 2 件）を追加
+  - `odata_query_smoke_all_query_types`: `query.fav` に 5 クエリ型すべてが含まれる
+  - `odata_filter_expr_serializable`: `query.fav` に `filter_to_odata_string` が含まれる
+- 合計テスト数: **4,090**（+2）
+
+---
+
+## [v91.8.0] — 2026-08-27 — ODataQueryBuilder + SapQueryClient 統合
+
+### Added
+- `runes/sap-odata/query.fav` — `ODataQueryBuilder<T, Q>` 型・`build_url` 関数を追加
+- `runes/sap-odata/query_client.fav` — 新規作成。`SapQueryClient` interface（5 クエリメソッド）を定義
+- `runes/sap-odata/client.fav` — `use sap_odata.query_client`・`impl SapQueryClient for SapODataClient` を追加（スタブ）
+- `runes/sap-odata/mock.fav` — `use sap_odata.query_client`・`impl SapQueryClient for MockSapClient` を追加
+- `fav/src/driver.rs` — `mod v91800_tests`（テスト 4 件）を追加
+- 合計テスト数: **4,088**（+4）
+
+---
+
+## [v91.7.0] — 2026-08-27 — JournalEntryQuery 実装
+
+### Added
+- `runes/sap-odata/query.fav` — `JournalEntryQuery`（`fiscal_year: Option<Int>`）と `journal_entry_query()` を追加
+- `fav/src/driver.rs` — `mod v91700_tests`（テスト 3 件）を追加
+- 合計テスト数: **4,084**（+3）
+
+---
+
+## [v91.6.0] — 2026-08-27 — MaterialQuery / PurchaseOrderQuery 実装
+
+### Added
+- `runes/sap-odata/query.fav` — `MaterialQuery` / `PurchaseOrderQuery` と各ビルダー関数を追加
+- `fav/src/driver.rs` — `mod v91600_tests`（テスト 4 件）を追加
+- 合計テスト数: **4,081**（+4）
+
+---
+
+## [v91.5.0] — 2026-08-27 — BusinessPartnerQuery 実装
+
+### Added
+- `runes/sap-odata/query.fav` — `BusinessPartnerQuery` と `business_partner_query()` を追加
+- `fav/src/driver.rs` — `mod v91500_tests`（テスト 2 件）を追加
+- 合計テスト数: **4,077**（+2）
+
+---
+
+## [v91.4.0] — 2026-08-27 — SalesOrderQuery 実装
+
+### Added
+- `runes/sap-odata/query.fav` — `SalesOrderQuery` と `sales_order_query()` を追加
+- `fav/src/driver.rs` — `mod v91400_tests`（テスト 2 件）を追加
+- 合計テスト数: **4,075**（+2）
+
+---
+
+## [v91.3.0] — 2026-08-27 — FilterExpr ADT 実装
+
+### Added
+- `runes/sap-odata/query.fav` — `FilterExpr<T>` ADT（`Eq` / `Gt` / `Lt` / `And` / `Or`）と `filter_to_odata_string<T>` 関数を追加
+- `fav/src/driver.rs` — `mod v91300_tests`（テスト 4 件）を追加
+- 合計テスト数: **4,073**（+4）
+
+---
+
+## [v91.2.0] — 2026-08-26 — ExpandClause 実装
+
+### Added
+- `runes/sap-odata/query.fav` — `ExpandClause<T>` 型と `expand_nav<T>` 関数を追加
+- `fav/src/driver.rs` — `mod v91200_tests`（テスト 2 件）を追加
+- 合計テスト数: **4,069**（+2）
+
+---
+
+## [v91.1.0] — 2026-08-26 — SelectClause 実装
+
+### Added
+- `runes/sap-odata/query.fav` — `SelectClause<T>` 型と `select_fields<T>` 関数を追加
+- `fav/src/driver.rs` — `mod v91100_tests`（テスト 2 件）を追加
+- 合計テスト数: **4,067**（+2）
+
+---
+
+## [v91.0.0] — 2026-08-26 — SAP Ctx 統合 1.0 宣言 ★クリーンアップ
+
+### Removed
+- `runes/sap-odata/sap_odata.fav` — deprecated `cfg: SapConfig` スタイルの 4 ラッパー関数を削除（`business_partners_cfg` / `sales_orders_cfg` / `materials_cfg` / `journal_entries_cfg`）
+
+### Changed
+- `fav/Cargo.toml` — バージョンを `91.0.0` に更新
+- `MILESTONE.md` / `README.md` / `versions/current.md` — v91.0.0 SAP Ctx 統合 1.0 宣言を反映
+
+### Added
+- `fav/src/driver.rs` — `mod v91000_tests`（テスト 4 件）を追加
+- 合計テスト数: **4,065**（+4）
+
+### 宣言
+> 「`ctx.sap.business_partners(filter)` と書けば、SAP にアクセスできる。
+>  設定は `AppCtx` に隠れ、テストは `MockSapClient` で差し替わる。
+>  それが、Favnir SAP Ctx 統合 1.0 である。」
+
+---
+
+## [v90.9.0] — 2026-08-26 — 安定化・コードフリーズ
+
+### Added
+- `fav/src/driver.rs` — `mod v90900_tests`（テスト 2 件）を追加
+  - `sap_ctx_integration_smoke_all_scenarios`: `pipeline.fav` に 4 シナリオ関数と `ctx.sap.` が含まれることを確認
+  - `sap_ctx_mock_client_in_rune_dir`: `runes/sap-odata/mock.fav` の存在を確認
+- 合計テスト数: **4,061**（+2）
+
+---
+
+## [v90.8.0] — 2026-08-26 — サイトドキュメント更新（ctx.sap パターンガイド）
+
+### Changed
+- `site/content/docs/runes/sap-odata.mdx` — 全コード例を `ctx.sap.*` スタイルに書き換え（`sap_config_from_env` 完全除去）
+
+### Added
+- `site/content/docs/runes/sap-odata.mdx` — `ctx.sap パターン` / `MockSapClient でユニットテスト` / `Ctx.build 自動設定注入` の 3 セクションを追加
+- `fav/src/driver.rs` — `mod v90800_tests`（テスト 3 件）を追加（code-reviewer 対応で `docs_sap_odata_no_sap_config_from_env` を追加）
+- 合計テスト数: **4,059**（+3）
+
+---
+
+## [v90.7.0] — 2026-08-26 — `Ctx.mock` に `sap: MockSapClient` を追加
+
+### Added
+- `runes/ctx/ctx.fav` — `Ctx.mock(sap: MockSapClient) -> AppCtx` を追加（テスト用 AppCtx 構築）
+- `runes/sap-odata/mock.fav` — `MockSapClient.default()` を追加（全フィールドを `Result.err("not implemented")` で初期化）
+- `fav/src/driver.rs` — `mod v90700_tests`（テスト 2 件）を追加
+- 合計テスト数: **4,056**（+2）
+
+---
+
+## [v90.6.0] — 2026-08-26 — `pipeline.fav` を `ctx.sap.*` で書き換え
+
+### Changed
+- `infra/e2e-demo/sap-odata/pipeline.fav` — 全 4 シナリオを `ctx.sap.*` スタイルに書き換え（`cfg 明示取得`を廃止）
+- シナリオ 4（`outstanding_payables`）から `purchase_orders`（`SapClient` interface 外）を除去し `journal_entries` のみに簡略化
+- `fav/src/driver.rs` — `v89900_tests::sap_all_four_scenarios_in_pipeline` を `ctx.sap.*` スタイルに更新
+
+### Added
+- `fav/src/driver.rs` — `mod v90600_tests`（テスト 2 件）を追加
+- 合計テスト数: **4,054**（+2）
+
+---
+
+## [v90.5.0] — 2026-08-26 — `sap_odata.fav` を `ctx.sap.*` スタイルに対応
+
+### Changed
+- `runes/sap-odata/sap_odata.fav` — `business_partners` / `sales_orders` / `materials` / `journal_entries` の 4 関数を `ctx: AppCtx` スタイルに更新（`ctx.sap.*` へ委譲）
+- 旧 `cfg: SapConfig` 版を `*_cfg` 関数名に deprecated コメント付きで維持（v91.0.0 で削除予定）
+
+### Added
+- `fav/src/driver.rs` — `mod v90500_tests`（テスト 2 件）を追加
+- 合計テスト数: **4,052**（+2）
+
+---
+
+## [v90.4.0] — 2026-08-26 — `Ctx.build` に SAP 設定注入を統合
+
+### Added
+- `runes/sap-odata/client.fav` — `SapODataClient` 型（`config: SapConfig`）+ `impl SapClient for SapODataClient`（5 メソッド）を追加
+- `runes/ctx/ctx.fav` — `Ctx.build()` 関数を追加（`sap_config_from_env()` → `SapODataClient` 注入）
+- `fav/src/driver.rs` — `mod v90400_tests`（テスト 2 件）を追加
+- 合計テスト数: **4,050**（+2）
+
+---
+
+## [v90.3.0] — 2026-08-26 — `MockSapClient` 実装
+
+### Added
+- `runes/sap-odata/mock.fav` — 新規作成: `MockSapClient` 型（レコード 4 フィールド）+ `impl SapClient for MockSapClient`（5 メソッド）
+- `fav/src/driver.rs` — `mod v90300_tests`（テスト 3 件）を追加
+- 合計テスト数: **4,048**（+3）
+
+---
+
+## [v90.2.0] — 2026-08-26 — `AppCtx` に `sap: SapClient` フィールドを追加
+
+### Added
+- `runes/ctx/ctx.fav` — 新規作成: `AppCtx` type 定義（`StorageCtx`・`DbCtx`・`IoCtx`・`SapClient` の 4 フィールド）
+- `fav/src/driver.rs` — `mod v90200_tests`（テスト 2 件）を追加
+- 合計テスト数: **4,045**（+2）
+
+---
+
+## [v90.1.0] — 2026-08-25 — `SapClient` interface 定義
+
+### Added
+- `runes/sap-odata/types.fav` — `SapClient` interface を追加（5 メソッド: `business_partners` / `business_partner_by_id` / `sales_orders` / `materials` / `journal_entries`）
+- `fav/src/driver.rs` — `mod v90100_tests`（テスト 2 件）を追加
+- 合計テスト数: **4,043**（+2）
+
+---
+
 ## [v90.0.0] — 2026-08-25 — SAP Integration 1.0 宣言
 
 > 「SAP が、Favnir の型になった。

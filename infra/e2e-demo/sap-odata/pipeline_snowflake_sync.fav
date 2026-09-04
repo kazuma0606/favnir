@@ -1,0 +1,32 @@
+-- SAP → Snowflake リアルタイム同期パイプライン（v96.4.0）
+-- BusinessPartner エンティティを SAP OData から取得し、Snowflake テーブルにロードする。
+-- v11.0 Snowflake 統合（ctx.snowflake.execute_raw）と接続する。
+import rune "sap-odata"
+import rune "snowflake"
+
+-- BusinessPartner を Snowflake 行形式（JSON 文字列）に変換するヘルパー
+fn bp_to_snowflake_row(bp: BusinessPartner) -> String {
+    Json.encode(bp)
+}
+
+pipeline sync_bp_to_snowflake !SapOData !Snowflake {
+    stage Fetch {
+        bind bps <- ctx.sap.business_partners(BusinessPartnerFilter {
+            country:       Option.some("JP"),
+            category:      Option.none(),
+            changed_after: Option.none(),
+            top:           Option.some(500)
+        })
+    }
+    |> stage Load {
+        bind rows <- List.map(bps, fn(bp) { bp_to_snowflake_row(bp) })
+        -- execute_raw は sql: String の単一引数（v11.0 Snowflake Rune API）
+        -- rows を VALUES (...),(...) 形式に組み立ててから渡す
+        bind sql  <- String.concat([
+            "INSERT INTO SAP_BUSINESS_PARTNERS(data) VALUES (",
+            String.join(rows, "),("),
+            ")"
+        ])
+        bind _    <- ctx.snowflake.execute_raw(sql)
+    }
+}

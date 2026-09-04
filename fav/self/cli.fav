@@ -1,55 +1,45 @@
-// fav/self/cli.fav — Favnir CLI dispatcher (v9.9.0)
-//
-// Handles: check / fmt / lint / explain --lineage / rune list|info / version / help / doc / profile / watch
-//
-// Usage:
-//   fav run fav/self/cli.fav -- check <file>
-//   fav run fav/self/cli.fav -- fmt <file>
-//   fav run fav/self/cli.fav -- fmt --check <file>
-//   fav run fav/self/cli.fav -- lint <file>
-//   fav run fav/self/cli.fav -- lint --warn-as-error <file>
-//   fav run fav/self/cli.fav -- explain --lineage <file>
-//   fav run fav/self/cli.fav -- rune list
-//   fav run fav/self/cli.fav -- rune info <name>
-//   fav run fav/self/cli.fav -- doc <file> [--out <dir>]
-//   fav run fav/self/cli.fav -- profile <file> [--out table|json]
-//   fav run fav/self/cli.fav -- watch [--check|--test] <file>
-//   fav run fav/self/cli.fav -- version
-//   fav run fav/self/cli.fav -- help
-
-// ── Types ──────────────────────────────────────────────────────────────────────
+// fav bench flags - handled by main.rs Rust code:
+//   --all       : run all intrinsic benchmarks (v70.3.0)
+//   --sap-query : run SAP QueryBuilder benchmark (v92.7.0)
+//   --sap       : run SAP Advanced Benchmark Suite (v94.5.0)
 
 type CliCmd =
-  | CmdCheck(String)
-  | CmdVersion
-  | CmdHelp
-  | CmdLineage(String)
-  | CmdRuneList
-  | CmdRuneInfo(String)
-  | CmdFmt(String, Bool)
-  | CmdLint(String, Bool)
-  | CmdDoc(String, String)
-  | CmdProfile(String, String)
-  | CmdWatch(String, String)
-  | CmdRepl
-  | CmdNew(String)
-  | CmdInferSnowflake(String, String)
-  | CmdUnknown(String)
-
-// ── Utilities ──────────────────────────────────────────────────────────────────
+    | CmdCheck(String)
+    | CmdVersion
+    | CmdHelp
+    | CmdLineage(String)
+    | CmdRuneList
+    | CmdRuneInfo(String)
+    | CmdFmt(String, Bool)
+    | CmdLint(String, Bool)
+    | CmdDoc(String, String)
+    | CmdProfile(String, String)
+    | CmdWatch(String, String)
+    | CmdRepl
+    | CmdNew(String)
+    | CmdInferSnowflake(String, String)
+    | CmdInferSapMetadata(String, String)
+    | CmdInferSapMetadataFile(String, String)
+    | CmdUnknown(String)
 
 // String equality helper — used inside closures (bind inside closure is not allowed)
-fn eq_str(a: String, b: String) -> Bool { a == b }
+fn eq_str(a: String, b: String) -> Bool {
+    a == b
+}
 
 // Returns false if s starts with "--", true otherwise
 fn not_flag(s: String) -> Bool {
-    if String.starts_with(s, "--") { false } else { true }
+    if String.starts_with(s, "--") {
+        false
+    } else {
+        true
+    }
 }
 
 // Returns true if flag is present in args
 fn find_flag(args: List<String>, flag: String) -> Bool {
     match List.find(args, |a| eq_str(a, flag)) {
-        None    => false
+        None => false
         Some(_) => true
     }
 }
@@ -59,116 +49,174 @@ fn find_positional(args: List<String>) -> Option<String> {
     List.find(args, |a| not_flag(a))
 }
 
-// ── Argument parsing ───────────────────────────────────────────────────────────
-
 fn parse_cmd(args: List<String>) -> CliCmd {
     match List.first(args) {
-        None      => CmdHelp
+        None => CmdHelp
         Some(cmd) => parse_named_cmd(cmd, args)
     }
 }
 
 fn parse_named_cmd(cmd: String, args: List<String>) -> CliCmd {
-    if cmd == "check"    { parse_check_cmd(args) }
-    else { if cmd == "version"   { CmdVersion }
-    else { if cmd == "--version" { CmdVersion }
-    else { if cmd == "help"      { CmdHelp }
-    else { if cmd == "--help"    { CmdHelp }
-    else { if cmd == "explain"   { parse_explain_cmd(args) }
-    else { if cmd == "rune"      { parse_rune_cmd(args) }
-    else { if cmd == "fmt"       { parse_fmt_cmd(args) }
-    else { if cmd == "lint"      { parse_lint_cmd(args) }
-    else { if cmd == "doc"       { parse_doc_cmd(args) }
-    else { if cmd == "profile"   { parse_profile_cmd(args) }
-    else { if cmd == "watch"     { parse_watch_cmd(args) }
-    else { if cmd == "repl"      { CmdRepl }
-    else { if cmd == "new"       { parse_new_cmd(args) }
-    else { if cmd == "infer"     { parse_infer_cmd(args) }
-    else { CmdUnknown(String.concat("unknown command: ", cmd)) }
-    } } } } } } } } } } } } } }
+    if cmd == "check" {
+        parse_check_cmd(args)
+    } else {
+        if cmd == "version" {
+            CmdVersion
+        } else {
+            if cmd == "--version" {
+                CmdVersion
+            } else {
+                if cmd == "help" {
+                    CmdHelp
+                } else {
+                    if cmd == "--help" {
+                        CmdHelp
+                    } else {
+                        if cmd == "explain" {
+                            parse_explain_cmd(args)
+                        } else {
+                            if cmd == "rune" {
+                                parse_rune_cmd(args)
+                            } else {
+                                if cmd == "fmt" {
+                                    parse_fmt_cmd(args)
+                                } else {
+                                    if cmd == "lint" {
+                                        parse_lint_cmd(args)
+                                    } else {
+                                        if cmd == "doc" {
+                                            parse_doc_cmd(args)
+                                        } else {
+                                            if cmd == "profile" {
+                                                parse_profile_cmd(args)
+                                            } else {
+                                                if cmd == "watch" {
+                                                    parse_watch_cmd(args)
+                                                } else {
+                                                    if cmd == "repl" {
+                                                        CmdRepl
+                                                    } else {
+                                                        if cmd == "new" {
+                                                            parse_new_cmd(args)
+                                                        } else {
+                                                            if cmd == "infer" {
+                                                                parse_infer_cmd(args)
+                                                            } else {
+                                                                CmdUnknown(String.concat("unknown command: ", cmd))
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
 fn parse_fmt_cmd(args: List<String>) -> CliCmd {
-    bind rest <- List.drop(args, 1)
-    bind check_flag <- find_flag(rest, "--check")
+    bind rest <- List.drop(args, 1);
+    bind check_flag <- find_flag(rest, "--check");
     match find_positional(rest) {
-        None    => CmdUnknown("fmt requires a file argument")
+        None => CmdUnknown("fmt requires a file argument")
         Some(f) => CmdFmt(f, check_flag)
     }
 }
 
 fn parse_lint_cmd(args: List<String>) -> CliCmd {
-    bind rest <- List.drop(args, 1)
-    bind wae_flag <- find_flag(rest, "--warn-as-error")
+    bind rest <- List.drop(args, 1);
+    bind wae_flag <- find_flag(rest, "--warn-as-error");
     match find_positional(rest) {
-        None    => CmdUnknown("lint requires a file argument")
+        None => CmdUnknown("lint requires a file argument")
         Some(f) => CmdLint(f, wae_flag)
     }
 }
 
 fn not_eq_str(a: String, b: String) -> Bool {
-    if eq_str(a, b) { false } else { true }
+    if eq_str(a, b) {
+        false
+    } else {
+        true
+    }
 }
 
 fn find_flag_value(args: List<String>, flag: String, default: String) -> String {
     match List.find(args, |a| eq_str(a, flag)) {
-        None    => default
+        None => default
         Some(_) => {
-            bind at_flag  <- List.drop_while(args, |a| not_eq_str(a, flag))
-            bind after    <- List.drop(at_flag, 1)
+            bind at_flag <- List.drop_while(args, |a| not_eq_str(a, flag));
+            bind after <- List.drop(at_flag, 1);
             match List.first(after) {
-                None    => default
-                Some(v) => if not_flag(v) { v } else { default }
+                None => default
+                Some(v) => if not_flag(v) {
+                    v
+                } else {
+                    default
+                }
             }
         }
     }
 }
 
 fn parse_doc_cmd(args: List<String>) -> CliCmd {
-    bind rest <- List.drop(args, 1)
-    bind out  <- find_flag_value(rest, "--out", "docs")
+    bind rest <- List.drop(args, 1);
+    bind out <- find_flag_value(rest, "--out", "docs");
     match find_positional(rest) {
-        None    => CmdDoc(".", out)
+        None => CmdDoc(".", out)
         Some(p) => CmdDoc(p, out)
     }
 }
 
 fn parse_profile_cmd(args: List<String>) -> CliCmd {
-    bind rest <- List.drop(args, 1)
-    bind out  <- find_flag_value(rest, "--out", "table")
+    bind rest <- List.drop(args, 1);
+    bind out <- find_flag_value(rest, "--out", "table");
     match find_positional(rest) {
-        None    => CmdUnknown("profile requires a file argument")
+        None => CmdUnknown("profile requires a file argument")
         Some(p) => CmdProfile(p, out)
     }
 }
 
 fn parse_watch_mode(args: List<String>) -> String {
-    if find_flag(args, "--check") { "check" }
-    else { if find_flag(args, "--test") { "test" }
-    else { "run" } }
+    if find_flag(args, "--check") {
+        "check"
+    } else {
+        if find_flag(args, "--test") {
+            "test"
+        } else {
+            "run"
+        }
+    }
 }
 
 fn parse_watch_cmd(args: List<String>) -> CliCmd {
-    bind rest <- List.drop(args, 1)
-    bind mode <- parse_watch_mode(rest)
+    bind rest <- List.drop(args, 1);
+    bind mode <- parse_watch_mode(rest);
     match find_positional(rest) {
-        None    => CmdUnknown("watch requires a file argument")
+        None => CmdUnknown("watch requires a file argument")
         Some(p) => CmdWatch(p, mode)
     }
 }
 
 fn parse_new_cmd(args: List<String>) -> CliCmd {
     match List.first(List.drop(args, 1)) {
-        None    => CmdUnknown("new requires a project name argument")
+        None => CmdUnknown("new requires a project name argument")
         Some(n) => CmdNew(n)
     }
 }
 
 fn parse_infer_cmd(args: List<String>) -> CliCmd {
-    bind rest  <- List.drop(args, 1)
-    bind from  <- find_flag_value(rest, "--from", "")
-    bind table <- find_flag_value(rest, "--table", "")
-    bind out   <- find_flag_value(rest, "--out", "")
+    bind rest <- List.drop(args, 1);
+    bind from <- find_flag_value(rest, "--from", "");
+    bind table <- find_flag_value(rest, "--table", "");
+    bind metadata <- find_flag_value(rest, "--metadata", "");
+    bind out <- find_flag_value(rest, "--out", "");
+    bind metadata_file <- find_flag_value(rest, "--metadata-file", "");
     if from == "snowflake" {
         if table == "" {
             CmdUnknown("infer --from snowflake requires --table <name>")
@@ -176,23 +224,35 @@ fn parse_infer_cmd(args: List<String>) -> CliCmd {
             CmdInferSnowflake(table, out)
         }
     } else {
-        CmdUnknown("infer: use --from snowflake --table <name>")
+        if from == "sap" {
+            if metadata_file != "" {
+                CmdInferSapMetadataFile(metadata_file, out)
+            } else {
+                if metadata == "" {
+                    CmdUnknown("infer --from sap requires --metadata <url> or --metadata-file <path>")
+                } else {
+                    CmdInferSapMetadata(metadata, out)
+                }
+            }
+        } else {
+            CmdUnknown("infer: use --from snowflake --table <name> or --from sap --metadata <url>")
+        }
     }
 }
 
 fn parse_check_cmd(args: List<String>) -> CliCmd {
     match List.first(List.drop(args, 1)) {
-        None    => CmdUnknown("check requires a file argument")
+        None => CmdUnknown("check requires a file argument")
         Some(f) => CmdCheck(f)
     }
 }
 
 fn parse_explain_cmd(args: List<String>) -> CliCmd {
-    bind rest        <- List.drop(args, 1)
-    bind has_lineage <- find_flag(rest, "--lineage")
+    bind rest <- List.drop(args, 1);
+    bind has_lineage <- find_flag(rest, "--lineage");
     if has_lineage {
         match find_positional(rest) {
-            None    => CmdUnknown("explain --lineage requires a file")
+            None => CmdUnknown("explain --lineage requires a file")
             Some(f) => CmdLineage(f)
         }
     } else {
@@ -202,59 +262,60 @@ fn parse_explain_cmd(args: List<String>) -> CliCmd {
 
 fn parse_rune_cmd(args: List<String>) -> CliCmd {
     match List.first(List.drop(args, 1)) {
-        None      => CmdRuneList
+        None => CmdRuneList
         Some(sub) => parse_rune_sub(sub, args)
     }
 }
 
 fn parse_rune_sub(sub: String, args: List<String>) -> CliCmd {
-    if sub == "list" { CmdRuneList }
-    else { if sub == "info" {
-        match List.first(List.drop(args, 2)) {
-            None       => CmdUnknown("rune info requires a name")
-            Some(name) => CmdRuneInfo(name)
-        }
+    if sub == "list" {
+        CmdRuneList
     } else {
-        CmdUnknown(String.concat("unknown rune subcommand: ", sub))
-    } }
+        if sub == "info" {
+            match List.first(List.drop(args, 2)) {
+                None => CmdUnknown("rune info requires a name")
+                Some(name) => CmdRuneInfo(name)
+            }
+        } else {
+            CmdUnknown(String.concat("unknown rune subcommand: ", sub))
+        }
+    }
 }
-
-// ── Action handlers ────────────────────────────────────────────────────────────
 
 fn run_version(ctx: AppCtx) -> Unit {
     ctx.io.println("favnir 11.2.0 (self-host CLI)")
 }
 
 fn run_help(ctx: AppCtx) -> Unit {
-    bind _ <- ctx.io.println("fav - Favnir CLI (self-hosted)")
-    bind _ <- ctx.io.println("COMMANDS:")
-    bind _ <- ctx.io.println("  check <file>                  Type-check a .fav file")
-    bind _ <- ctx.io.println("  fmt <file>                    Format a .fav file")
-    bind _ <- ctx.io.println("  fmt --check <file>            Check formatting (exit 1 if diff)")
-    bind _ <- ctx.io.println("  lint <file>                   Lint a .fav file")
-    bind _ <- ctx.io.println("  lint --warn-as-error <file>   Lint (exit 1 if warnings)")
-    bind _ <- ctx.io.println("  explain --lineage <file>      Static lineage analysis")
-    bind _ <- ctx.io.println("  rune list                     List installed runes")
-    bind _ <- ctx.io.println("  rune info <name>              Show rune location")
-    bind _ <- ctx.io.println("  doc <file> [--out <dir>]       Generate Markdown docs from /// comments")
-    bind _ <- ctx.io.println("  profile <file> [--out table|json]  Profile stage execution times")
-    bind _ <- ctx.io.println("  watch [--check|--test] <file>  Watch file and auto re-run on change")
-    bind _ <- ctx.io.println("  repl                          Start interactive REPL")
-    bind _ <- ctx.io.println("  infer --from snowflake --table <name> [--out <file>]  Infer Favnir type from Snowflake table")
-    bind _ <- ctx.io.println("  version                       Show version")
+    bind _ <- ctx.io.println("fav - Favnir CLI (self-hosted)");
+    bind _ <- ctx.io.println("COMMANDS:");
+    bind _ <- ctx.io.println("  check <file>                  Type-check a .fav file");
+    bind _ <- ctx.io.println("  fmt <file>                    Format a .fav file");
+    bind _ <- ctx.io.println("  fmt --check <file>            Check formatting (exit 1 if diff)");
+    bind _ <- ctx.io.println("  lint <file>                   Lint a .fav file");
+    bind _ <- ctx.io.println("  lint --warn-as-error <file>   Lint (exit 1 if warnings)");
+    bind _ <- ctx.io.println("  explain --lineage <file>      Static lineage analysis");
+    bind _ <- ctx.io.println("  rune list                     List installed runes");
+    bind _ <- ctx.io.println("  rune info <name>              Show rune location");
+    bind _ <- ctx.io.println("  doc <file> [--out <dir>]       Generate Markdown docs from /// comments");
+    bind _ <- ctx.io.println("  profile <file> [--out table|json]  Profile stage execution times");
+    bind _ <- ctx.io.println("  watch [--check|--test] <file>  Watch file and auto re-run on change");
+    bind _ <- ctx.io.println("  repl                          Start interactive REPL");
+    bind _ <- ctx.io.println("  infer --from snowflake --table <name> [--out <file>]  Infer Favnir type from Snowflake table");
+    bind _ <- ctx.io.println("  version                       Show version");
     ctx.io.println("  help                          Show this help")
 }
 
 fn run_lint(ctx: AppCtx, path: String, warn_as_error: Bool) -> Unit {
     match ctx.io.read_file_raw(path) {
         Err(e) => {
-            bind _ <- ctx.io.write_stderr_raw(String.concat("error: cannot read file: ", e))
+            bind _ <- ctx.io.write_stderr_raw(String.concat("error: cannot read file: ", e));
             ctx.io.exit_raw(1)
         }
         Ok(src) => {
             match Compiler.lint_source_raw(src) {
                 Err(e) => {
-                    bind _ <- ctx.io.write_stderr_raw(String.concat("error: ", e))
+                    bind _ <- ctx.io.write_stderr_raw(String.concat("error: ", e));
                     ctx.io.exit_raw(1)
                 }
                 Ok(warnings) => {
@@ -262,7 +323,7 @@ fn run_lint(ctx: AppCtx, path: String, warn_as_error: Bool) -> Unit {
                         ctx.io.println(String.concat("ok (no warnings): ", path))
                     } else {
                         if warn_as_error {
-                            bind _ <- ctx.io.write_stderr_raw(warnings)
+                            bind _ <- ctx.io.write_stderr_raw(warnings);
                             ctx.io.exit_raw(1)
                         } else {
                             ctx.io.println(warnings)
@@ -277,13 +338,13 @@ fn run_lint(ctx: AppCtx, path: String, warn_as_error: Bool) -> Unit {
 fn run_fmt(ctx: AppCtx, path: String, check: Bool) -> Unit {
     match ctx.io.read_file_raw(path) {
         Err(e) => {
-            bind _ <- ctx.io.write_stderr_raw(String.concat("error: cannot read file: ", e))
+            bind _ <- ctx.io.write_stderr_raw(String.concat("error: cannot read file: ", e));
             ctx.io.exit_raw(1)
         }
         Ok(src) => {
             match Compiler.fmt_source_raw(src) {
                 Err(e) => {
-                    bind _ <- ctx.io.write_stderr_raw(String.concat("error: ", e))
+                    bind _ <- ctx.io.write_stderr_raw(String.concat("error: ", e));
                     ctx.io.exit_raw(1)
                 }
                 Ok(formatted) => {
@@ -291,13 +352,13 @@ fn run_fmt(ctx: AppCtx, path: String, check: Bool) -> Unit {
                         if src == formatted {
                             ctx.io.println(String.concat("ok: ", path))
                         } else {
-                            bind _ <- ctx.io.write_stderr_raw(String.concat("not formatted: ", path))
+                            bind _ <- ctx.io.write_stderr_raw(String.concat("not formatted: ", path));
                             ctx.io.exit_raw(1)
                         }
                     } else {
                         match ctx.io.write_file_raw(path, formatted) {
                             Err(e) => {
-                                bind _ <- ctx.io.write_stderr_raw(String.concat("error: cannot write: ", e))
+                                bind _ <- ctx.io.write_stderr_raw(String.concat("error: cannot write: ", e));
                                 ctx.io.exit_raw(1)
                             }
                             Ok(_) => ctx.io.println(String.concat("formatted: ", path))
@@ -312,19 +373,19 @@ fn run_fmt(ctx: AppCtx, path: String, check: Bool) -> Unit {
 fn run_doc(ctx: AppCtx, path: String, out: String) -> Unit {
     match ctx.io.read_file_raw(path) {
         Err(e) => {
-            bind _ <- ctx.io.write_stderr_raw(String.concat("error: cannot read file: ", e))
+            bind _ <- ctx.io.write_stderr_raw(String.concat("error: cannot read file: ", e));
             ctx.io.exit_raw(1)
         }
         Ok(src) => {
             match Compiler.doc_source_raw(src) {
                 Err(e) => {
-                    bind _ <- ctx.io.write_stderr_raw(String.concat("error: ", e))
+                    bind _ <- ctx.io.write_stderr_raw(String.concat("error: ", e));
                     ctx.io.exit_raw(1)
                 }
                 Ok(md) => {
                     match ctx.io.write_file_raw(out, md) {
                         Err(e) => {
-                            bind _ <- ctx.io.write_stderr_raw(String.concat("error: cannot write: ", e))
+                            bind _ <- ctx.io.write_stderr_raw(String.concat("error: cannot write: ", e));
                             ctx.io.exit_raw(1)
                         }
                         Ok(_) => ctx.io.println(String.concat("doc: ", path))
@@ -338,17 +399,17 @@ fn run_doc(ctx: AppCtx, path: String, out: String) -> Unit {
 fn run_profile(ctx: AppCtx, path: String, out_fmt: String) -> Unit {
     match ctx.io.read_file_raw(path) {
         Err(e) => {
-            bind _ <- ctx.io.write_stderr_raw(String.concat("error: cannot read file: ", e))
+            bind _ <- ctx.io.write_stderr_raw(String.concat("error: cannot read file: ", e));
             ctx.io.exit_raw(1)
         }
         Ok(src) => {
             match Compiler.compile_source_profiled_raw(src) {
                 Err(e) => {
-                    bind _ <- ctx.io.write_stderr_raw(String.concat("error: ", e))
+                    bind _ <- ctx.io.write_stderr_raw(String.concat("error: ", e));
                     ctx.io.exit_raw(1)
                 }
                 Ok(_bytes) => {
-                    bind json <- Env.profile_dump_raw()
+                    bind json <- Env.profile_dump_raw();
                     if out_fmt == "json" {
                         ctx.io.println(json)
                     } else {
@@ -364,7 +425,7 @@ fn run_watch_action(ctx: AppCtx, path: String, mode: String) -> Unit {
     if mode == "check" {
         match Compiler.check_raw(path) {
             Ok(msg) => ctx.io.println(String.concat("ok: ", msg))
-            Err(e)  => ctx.io.write_stderr_raw(String.concat("error: ", e))
+            Err(e) => ctx.io.write_stderr_raw(String.concat("error: ", e))
         }
     } else {
         match ctx.io.read_file_raw(path) {
@@ -372,7 +433,7 @@ fn run_watch_action(ctx: AppCtx, path: String, mode: String) -> Unit {
             Ok(src) => {
                 match Compiler.compile_source_raw(src) {
                     Err(e) => ctx.io.write_stderr_raw(String.concat("error: ", e))
-                    Ok(_)  => ctx.io.println(String.concat("ok: ", path))
+                    Ok(_) => ctx.io.println(String.concat("ok: ", path))
                 }
             }
         }
@@ -380,13 +441,13 @@ fn run_watch_action(ctx: AppCtx, path: String, mode: String) -> Unit {
 }
 
 fn watch_loop(ctx: AppCtx, path: String, mode: String, last_mtime: Int) -> Unit {
-    bind _ <- ctx.io.sleep_ms_raw(500)
+    bind _ <- ctx.io.sleep_ms_raw(500);
     match ctx.io.file_mtime_raw(path) {
         Err(_) => watch_loop(ctx, path, mode, last_mtime)
         Ok(mtime) => {
             if mtime != last_mtime {
-                bind _ <- ctx.io.println(String.concat("File changed, re-running: ", path))
-                bind _ <- run_watch_action(ctx, path, mode)
+                bind _ <- ctx.io.println(String.concat("File changed, re-running: ", path));
+                bind _ <- run_watch_action(ctx, path, mode);
                 watch_loop(ctx, path, mode, mtime)
             } else {
                 watch_loop(ctx, path, mode, last_mtime)
@@ -396,45 +457,45 @@ fn watch_loop(ctx: AppCtx, path: String, mode: String, last_mtime: Int) -> Unit 
 }
 
 fn run_watch(ctx: AppCtx, path: String, mode: String) -> Unit {
-    bind _ <- ctx.io.println(String.concat("Watching ", String.concat(path, " (Ctrl+C to stop)")))
-    bind _ <- run_watch_action(ctx, path, mode)
+    bind _ <- ctx.io.println(String.concat("Watching ", String.concat(path, " (Ctrl+C to stop)")));
+    bind _ <- run_watch_action(ctx, path, mode);
     match ctx.io.file_mtime_raw(path) {
-        Err(_)      => watch_loop(ctx, path, mode, 0)
-        Ok(mtime0)  => watch_loop(ctx, path, mode, mtime0)
+        Err(_) => watch_loop(ctx, path, mode, 0)
+        Ok(mtime0) => watch_loop(ctx, path, mode, mtime0)
     }
 }
 
 fn run_check(ctx: AppCtx, path: String) -> Unit {
     match Compiler.check_raw(path) {
         Ok(msg) => ctx.io.println(String.concat("ok: ", msg))
-        Err(e)  => {
-            bind _ <- ctx.io.write_stderr_raw(String.concat("error: ", e))
+        Err(e) => {
+            bind _ <- ctx.io.write_stderr_raw(String.concat("error: ", e));
             ctx.io.exit_raw(1)
         }
     }
 }
 
 fn run_lineage(ctx: AppCtx, path: String) -> Unit {
-    bind text <- Compiler.lineage_text_raw(path)
+    bind text <- Compiler.lineage_text_raw(path);
     ctx.io.println(text)
 }
 
 fn print_list(ctx: AppCtx, items: List<String>) -> Unit {
     match List.first(items) {
-        None       => ctx.io.println("")
+        None => ctx.io.println("")
         Some(item) => {
-            bind _ <- ctx.io.println(String.concat("  ", item))
+            bind _ <- ctx.io.println(String.concat("  ", item));
             print_list(ctx, List.drop(items, 1))
         }
     }
 }
 
 fn run_rune_list(ctx: AppCtx) -> Unit {
-    bind cwd      <- ctx.io.cwd_raw()
-    bind rune_dir <- ctx.io.path_join_raw(cwd, "rune_modules")
+    bind cwd <- ctx.io.cwd_raw();
+    bind rune_dir <- ctx.io.path_join_raw(cwd, "rune_modules");
     if ctx.io.is_dir_raw(rune_dir) {
         match ctx.io.list_dir_raw(rune_dir) {
-            Err(_)    => ctx.io.println("(no rune_modules directory)")
+            Err(_) => ctx.io.println("(no rune_modules directory)")
             Ok(names) => print_list(ctx, names)
         }
     } else {
@@ -443,17 +504,17 @@ fn run_rune_list(ctx: AppCtx) -> Unit {
 }
 
 fn run_rune_info(ctx: AppCtx, name: String) -> Unit {
-    bind cwd    <- ctx.io.cwd_raw()
-    bind rm_dir <- ctx.io.path_join_raw(ctx.io.path_join_raw(cwd, "rune_modules"), name)
+    bind cwd <- ctx.io.cwd_raw();
+    bind rm_dir <- ctx.io.path_join_raw(ctx.io.path_join_raw(cwd, "rune_modules"), name);
     if ctx.io.is_dir_raw(rm_dir) {
-        bind _ <- ctx.io.println(String.concat("rune:   ", name))
-        bind _ <- ctx.io.println(String.concat("path:   ", rm_dir))
+        bind _ <- ctx.io.println(String.concat("rune:   ", name));
+        bind _ <- ctx.io.println(String.concat("path:   ", rm_dir));
         ctx.io.println("source: rune_modules")
     } else {
-        bind local_dir <- ctx.io.path_join_raw(ctx.io.path_join_raw(cwd, "runes"), name)
+        bind local_dir <- ctx.io.path_join_raw(ctx.io.path_join_raw(cwd, "runes"), name);
         if ctx.io.is_dir_raw(local_dir) {
-            bind _ <- ctx.io.println(String.concat("rune:   ", name))
-            bind _ <- ctx.io.println(String.concat("path:   ", local_dir))
+            bind _ <- ctx.io.println(String.concat("rune:   ", name));
+            bind _ <- ctx.io.println(String.concat("path:   ", local_dir));
             ctx.io.println("source: runes (local)")
         } else {
             ctx.io.println(String.concat("rune not found: ", name))
@@ -461,42 +522,38 @@ fn run_rune_info(ctx: AppCtx, name: String) -> Unit {
     }
 }
 
-// ── fav new ───────────────────────────────────────────────────────────────────
+fn new_fav_toml(name: String) -> String {
+    ("[project]\nname = \"" + name) + "\"\nversion = \"0.1.0\"\nsrc = \"src\"\n"
+}
 
-fn new_fav_toml(name: String) -> String =
-    "[project]\nname = \"" + name + "\"\nversion = \"0.1.0\"\nsrc = \"src\"\n"
+fn new_main_fav() -> String {
+    (((((("type Order = { id: Int  item: String  amount: Float }\n\n" + "stage ParseOrder: String -> Order = |s| {\n") + "  Order { id: 1  item: s  amount: 0.0 }\n") + "}\n\n") + "stage FormatOrder: Order -> String = |o| {\n") + "  \"Order#\" + Int.to_string(o.id) + \": \" + o.item\n") + "}\n\n") + "seq ProcessOrder = ParseOrder |> FormatOrder\n"
+}
 
-fn new_main_fav() -> String =
-    "type Order = { id: Int  item: String  amount: Float }\n\n" +
-    "stage ParseOrder: String -> Order = |s| {\n" +
-    "  Order { id: 1  item: s  amount: 0.0 }\n" +
-    "}\n\n" +
-    "stage FormatOrder: Order -> String = |o| {\n" +
-    "  \"Order#\" + Int.to_string(o.id) + \": \" + o.item\n" +
-    "}\n\n" +
-    "seq ProcessOrder = ParseOrder |> FormatOrder\n"
-
-fn new_gitignore() -> String =
+fn new_gitignore() -> String {
     "*.fvc\n.fav_cache/\n"
+}
 
-fn run_new(ctx: AppCtx, name: String) -> Unit = {
-    bind src_dir <- name + "/src"
-    bind r1      <- ctx.io.make_dir_raw(src_dir)
-    match r1 {
-        Err(e) => ctx.io.println("error: " + e)
-        Ok(_)  => {
-            bind r2 <- ctx.io.write_file_raw(name + "/fav.toml",    new_fav_toml(name))
-            bind r3 <- ctx.io.write_file_raw(src_dir + "/main.fav", new_main_fav())
-            bind r4 <- ctx.io.write_file_raw(name + "/.gitignore",  new_gitignore())
-            match r2 {
-                Err(e) => ctx.io.println("error: " + e)
-                Ok(_)  => {
-                    match r3 {
-                        Err(e) => ctx.io.println("error: " + e)
-                        Ok(_)  => {
-                            match r4 {
-                                Err(e) => ctx.io.println("error: " + e)
-                                Ok(_)  => ctx.io.println("Created project: " + name)
+fn run_new(ctx: AppCtx, name: String) -> Unit {
+    {
+        bind src_dir <- name + "/src";
+        bind r1 <- ctx.io.make_dir_raw(src_dir);
+        match r1 {
+            Err(e) => ctx.io.println("error: " + e)
+            Ok(_) => {
+                bind r2 <- ctx.io.write_file_raw(name + "/fav.toml", new_fav_toml(name));
+                bind r3 <- ctx.io.write_file_raw(src_dir + "/main.fav", new_main_fav());
+                bind r4 <- ctx.io.write_file_raw(name + "/.gitignore", new_gitignore());
+                match r2 {
+                    Err(e) => ctx.io.println("error: " + e)
+                    Ok(_) => {
+                        match r3 {
+                            Err(e) => ctx.io.println("error: " + e)
+                            Ok(_) => {
+                                match r4 {
+                                    Err(e) => ctx.io.println("error: " + e)
+                                    Ok(_) => ctx.io.println("Created project: " + name)
+                                }
                             }
                         }
                     }
@@ -506,49 +563,57 @@ fn run_new(ctx: AppCtx, name: String) -> Unit = {
     }
 }
 
+fn run_infer_sap_metadata(ctx: AppCtx, url: String, _out: String) -> Unit {
+    ctx.io.println(String.concat("-- SAP infer: ", url))
+}
+
+// TODO(v93.8.0): call SapMetadata.infer_file_raw(path) primitive once parse_edmx is implemented
+fn run_infer_sap_metadata_file(ctx: AppCtx, path: String, _out: String) -> Unit {
+    ctx.io.println(String.concat("-- SAP infer file: ", path))
+}
+
 fn run_infer_snowflake(ctx: AppCtx, table: String, out: String) -> Unit {
     match Snowflake.infer_table_raw(table) {
         Err(e) => {
-            bind _ <- ctx.io.write_stderr_raw(String.concat("error: ", e))
+            bind _ <- ctx.io.write_stderr_raw(String.concat("error: ", e));
             ctx.io.exit_raw(1)
         }
-        Ok(typedef) =>
-            if out == "" {
-                ctx.io.println(typedef)
-            } else {
-                match ctx.io.write_file_raw(out, typedef) {
-                    Err(e) => {
-                        bind _ <- ctx.io.write_stderr_raw(String.concat("error: cannot write: ", e))
-                        ctx.io.exit_raw(1)
-                    }
-                    Ok(_) => ctx.io.println(String.concat("written: ", out))
+        Ok(typedef) => if out == "" {
+            ctx.io.println(typedef)
+        } else {
+            match ctx.io.write_file_raw(out, typedef) {
+                Err(e) => {
+                    bind _ <- ctx.io.write_stderr_raw(String.concat("error: cannot write: ", e));
+                    ctx.io.exit_raw(1)
                 }
+                Ok(_) => ctx.io.println(String.concat("written: ", out))
             }
+        }
     }
 }
 
-// ── Entry point ────────────────────────────────────────────────────────────────
-
 public fn main(ctx: AppCtx) -> Unit {
-    bind args <- ctx.io.argv()
-    bind cmd  <- parse_cmd(args)
+    bind args <- ctx.io.argv();
+    bind cmd <- parse_cmd(args);
     match cmd {
-        CmdCheck(path)         => run_check(ctx, path)
-        CmdVersion             => run_version(ctx)
-        CmdHelp                => run_help(ctx)
-        CmdLineage(path)       => run_lineage(ctx, path)
-        CmdRuneList            => run_rune_list(ctx)
-        CmdRuneInfo(name)      => run_rune_info(ctx, name)
-        CmdFmt(parts)          => run_fmt(ctx, parts._0, parts._1)
-        CmdLint(parts)         => run_lint(ctx, parts._0, parts._1)
-        CmdDoc(parts)          => run_doc(ctx, parts._0, parts._1)
-        CmdProfile(parts)      => run_profile(ctx, parts._0, parts._1)
-        CmdWatch(parts)        => run_watch(ctx, parts._0, parts._1)
-        CmdRepl                => ctx.io.println("Use 'fav repl' to start the REPL.")
-        CmdNew(name)           => run_new(ctx, name)
+        CmdCheck(path) => run_check(ctx, path)
+        CmdVersion => run_version(ctx)
+        CmdHelp => run_help(ctx)
+        CmdLineage(path) => run_lineage(ctx, path)
+        CmdRuneList => run_rune_list(ctx)
+        CmdRuneInfo(name) => run_rune_info(ctx, name)
+        CmdFmt(parts) => run_fmt(ctx, parts._0, parts._1)
+        CmdLint(parts) => run_lint(ctx, parts._0, parts._1)
+        CmdDoc(parts) => run_doc(ctx, parts._0, parts._1)
+        CmdProfile(parts) => run_profile(ctx, parts._0, parts._1)
+        CmdWatch(parts) => run_watch(ctx, parts._0, parts._1)
+        CmdRepl => ctx.io.println("Use 'fav repl' to start the REPL.")
+        CmdNew(name) => run_new(ctx, name)
         CmdInferSnowflake(parts) => run_infer_snowflake(ctx, parts._0, parts._1)
-        CmdUnknown(msg)        => {
-            bind _ <- ctx.io.write_stderr_raw(String.concat("error: ", msg))
+        CmdInferSapMetadata(parts) => run_infer_sap_metadata(ctx, parts._0, parts._1)
+        CmdInferSapMetadataFile(parts) => run_infer_sap_metadata_file(ctx, parts._0, parts._1)
+        CmdUnknown(msg) => {
+            bind _ <- ctx.io.write_stderr_raw(String.concat("error: ", msg));
             ctx.io.exit_raw(1)
         }
     }

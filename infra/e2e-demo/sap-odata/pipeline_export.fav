@@ -1,0 +1,19 @@
+-- SAP → Parquet エクスポートパイプライン（v96.3.0）
+-- BusinessPartner エンティティを SAP OData から取得し、Parquet ファイルに書き出す。
+-- v96.3.0: ctx.sap.* / ctx.io.write_parquet スタイル（cfg 明示取得なし）
+-- NOTE: DuckDB でのクエリ（SELECT * FROM read_parquet(...)）は将来バージョンのスコープ。
+import rune "sap-odata"
+
+pipeline export_bp_to_parquet !SapOData !Io {
+    stage Fetch {
+        bind bps <- ctx.sap.business_partners(BusinessPartnerFilter {
+            country:       Option.some("JP"),
+            category:      Option.none(),
+            changed_after: Option.none(),
+            top:           Option.some(1000)
+        })
+    }
+    |> stage Write {
+        bind _ <- ctx.io.write_parquet("output/business_partners.parquet", bps)
+    }
+}

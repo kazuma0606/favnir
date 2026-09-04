@@ -1,0 +1,23 @@
+-- Favnir 4.0 Showcase Contract
+
+type Favnir4ShowcaseContract {
+    input_fields: List<String>,
+    output_fields: List<String>,
+    sla_ms: Int,
+}
+
+-- SlaContract: SLA 目標値を型として宣言（Sprint 3 v82.2.0）
+-- cache_ttl_secs は Rust 側 Option<u64>（符号なし整数）に対応。Favnir では Int で表現するため負値は不可。
+type SlaContract {
+    name: String,
+    target: SlaTarget,
+    adaptive_strategy: Option<String>,
+    cache_ttl_secs: Option<Int>,
+}
+
+-- ContractDependency: パイプライン間の依存エッジ（Sprint 3 v82.3.0）
+type ContractDependency {
+    upstream: String,
+    downstream: String,
+    output_contract: String,
+}

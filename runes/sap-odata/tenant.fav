@@ -1,0 +1,24 @@
+-- runes/sap-odata/tenant.fav
+-- SAP マルチテナント型定義（v99.4.0）
+
+use sap_odata.types
+
+-- テナント識別子
+public type TenantId = String
+
+-- テナントコンテキスト（テナントごとの SAP 接続設定）
+-- SapEnvironment は v96.1.0 で定義済み（Prd / Qas / Dev / Custom(String)）
+public type TenantContext = {
+    tenant_id: TenantId,
+    sap_env:   types.SapEnvironment,
+    schema:    String
+}
+
+-- テスト用モック: TenantId から TenantContext を生成する
+public fn tenant_context_mock(tenant_id: TenantId) -> TenantContext {
+    TenantContext {
+        tenant_id: tenant_id,
+        sap_env:   types.SapEnvironment.Dev,
+        schema:    String.concat(["schema_", tenant_id])
+    }
+}

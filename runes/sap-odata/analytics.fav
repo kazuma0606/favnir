@@ -1,0 +1,98 @@
+-- runes/sap-odata/analytics.fav
+-- SAP Analytics 1.0 — KPI 型定義とスナップショット（v98.1.0）
+
+-- KPI 閾値定義
+public type KpiThreshold = {
+    warning:  Float,
+    critical: Float
+}
+
+-- KPI 定義（ジェネリック: T はデータソース型）
+public type KpiDefinition<T> = {
+    name:      String,
+    unit:      String,
+    threshold: KpiThreshold,
+    extract:   fn(T) -> Float
+}
+
+-- KPI 評価結果
+public type KpiStatus =
+    | Ok
+    | Warning(Float)
+    | Critical(Float)
+
+-- KPI スナップショット（計測結果）
+public type KpiSnapshot<T> = {
+    kpi:         KpiDefinition<T>,
+    value:       Float,
+    status:      KpiStatus,
+    measured_at: String
+}
+
+-- KPI 値から KpiStatus を判定するヘルパー
+public fn measure_kpi_status<T>(kpi: KpiDefinition<T>, value: Float) -> KpiStatus {
+    match value {
+        v if v >= kpi.threshold.critical -> Critical(v)
+        v if v >= kpi.threshold.warning  -> Warning(v)
+        _                                -> Ok
+    }
+}
+
+-- KpiSnapshot を生成するヘルパー
+public fn make_kpi_snapshot<T>(
+    kpi:         KpiDefinition<T>,
+    value:       Float,
+    measured_at: String
+) -> KpiSnapshot<T> {
+    KpiSnapshot {
+        kpi:         kpi,
+        value:       value,
+        status:      measure_kpi_status(kpi, value),
+        measured_at: measured_at
+    }
+}
+
+-- BW/4HANA クエリ定義（v98.2.0）
+-- T はクエリ結果の行型（ファントム型パラメータ: フィールドには T を使用しないが、
+-- BwResult<T> との型レベルの整合性を保つために宣言する）。
+-- ctx.sap.bw_query() の実 API は v98.x 以降で実装予定。
+public type BwQuery<T> = {
+    info_provider:   String,
+    characteristics: List<String>,
+    key_figures:     List<String>,
+    filters:         List<String>
+}
+
+-- BW クエリ結果
+public type BwResult<T> = {
+    rows:  List<T>,
+    total: Int
+}
+
+-- テスト用モックヘルパー（rows をそのまま BwResult に包む）
+public fn bw_query_mock<T>(query: BwQuery<T>, rows: List<T>) -> BwResult<T> {
+    BwResult {
+        rows:  rows,
+        total: List.length(rows)
+    }
+}
+
+-- KPI 閾値超えアラート型（v98.5.0〜）
+public type KpiAlert = {
+    kpi_name: String,
+    status:   KpiStatus,
+    message:  String
+}
+
+-- KpiAlert を人間が読める文字列にフォーマットする（v98.5.0〜）
+-- 出力形式: "[LEVEL] kpi_name: message"
+-- 例: "[CRITICAL] Revenue: 15000.0"
+-- 例: "[WARNING] OrderCount: 450.0"
+public fn format_kpi_alert(alert: KpiAlert) -> String {
+    bind level <- match alert.status {
+        Ok          -> "OK"
+        Warning(_)  -> "WARNING"
+        Critical(_) -> "CRITICAL"
+    }
+    String.concat(["[", level, "] ", alert.kpi_name, ": ", alert.message])
+}

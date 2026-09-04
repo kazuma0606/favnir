@@ -1,0 +1,54 @@
+# Data Quality 2.0（Favnir 4.0）
+
+Sprint 2 で導入したデータ品質チェック機能を解説します。
+
+## QualityRule / QualityCheck
+
+`QualityRule` は品質評価ルール。`run_quality_check` で行単位に評価します。
+
+```favnir
+bind rule <- QualityRule {
+    name: "not_null_check",
+    dimension: QualityDimension.Completeness,
+    severity: QualitySeverity.Critical,
+    expression: "id IS NOT NULL",
+}
+bind check <- QualityCheck {
+    rules: List.of(rule),
+    threshold: 0.95,
+}
+bind result <- run_quality_check(check, rows)
+```
+
+## QualityGate
+
+`QualityGate` はパイプライン停止条件を定義します。`evaluate_quality_gate` で
+品質スコアが閾値を下回った場合にパイプラインを停止します。
+
+```favnir
+bind gate <- QualityGate {
+    name: "pipeline_gate",
+    min_quality_score: 0.95,
+    required_dimensions: List.of(
+        QualityDimension.Completeness,
+        QualityDimension.Validity
+    ),
+}
+bind gate_result <- evaluate_quality_gate(gate, score)
+```
+
+## AnomalyDetector
+
+`AnomalyDetector` は Z スコアに基づく外れ値検知を行います。`detect_anomaly`
+で単一値の外れ値判定を返します。
+
+```favnir
+bind stats    <- DistributionStats { mean: 50.0, std_dev: 10.0, min: 0.0, max: 100.0, count: 100 }
+bind detector <- AnomalyDetector { baseline_stats: stats, z_threshold: 2.0 }
+bind anomaly  <- detect_anomaly(detector, value)
+```
+
+## 参考
+
+- [Favnir 4.0 ショーケース](../../infra/e2e-demo/favnir4-showcase/)
+- [Pipeline Contracts](pipeline-contracts.mdx)

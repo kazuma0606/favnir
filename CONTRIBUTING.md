@@ -272,6 +272,55 @@ CI での使用を推奨します。
 
 ---
 
+## SAP テスト環境のセットアップ
+
+SAP OData Rune に関連する変更をテストするには、SAP S/4HANA のテスト環境（またはデモシステム）が必要です。
+
+### SAP Gateway デモシステム
+
+SAP は公開デモシステムを提供しています:
+
+- **ES5 デモシステム**: https://sapes5.sapdevcenter.com/
+  - 登録: https://developers.sap.com/trials-downloads.html から SAP Developer Center アカウントを取得
+  - `base_url`: `https://sapes5.sapdevcenter.com/sap/opu/odata/sap/`
+
+### `fav.toml` の設定
+
+```toml
+[sap]
+base_url  = "https://sapes5.sapdevcenter.com/sap/opu/odata/sap/"
+client_id = "100"
+username  = "${SAP_USER}"
+password  = "${SAP_PASS}"
+```
+
+### 環境変数の設定
+
+```bash
+export SAP_USER="your-es5-user"
+export SAP_PASS="your-es5-password"
+```
+
+### 接続確認
+
+```bash
+cd fav
+./target/debug/fav infer --from sap --entity A_BusinessPartner
+```
+
+エンティティの型定義が出力されれば接続成功です。
+
+### SAP 接続なしのユニットテスト
+
+SAP 接続が不要なテスト（型定義・ベンチマーク等）は通常の `cargo test` で実行できます:
+
+```bash
+cargo test sap
+./target/debug/fav bench --sap
+```
+
+---
+
 ## SAP Rune — 新エンティティの追加手順
 
 sap-odata Rune に新しい SAP OData エンティティを追加する場合の手順:

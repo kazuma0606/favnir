@@ -1203,10 +1203,14 @@ fn ns_to_effect(ns: String) -> String {
                                                                                             if ns == "Sentry" {
                                                                                                 "IO"
                                                                                             } else {
-                                                                                                if ns == "Grafana" {
-                                                                                                    "IO"
+                                                                                                if ns == "Sac" {
+                                                                                                    "SapAnalytics"
                                                                                                 } else {
-                                                                                                    ""
+                                                                                                    if ns == "Grafana" {
+                                                                                                        "IO"
+                                                                                                    } else {
+                                                                                                        ""
+                                                                                                    }
                                                                                                 }
                                                                                             }
                                                                                         }

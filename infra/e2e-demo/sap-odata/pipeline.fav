@@ -1,4 +1,5 @@
 -- シナリオ 1: マスタデータ同期（BusinessPartner → S3）（v86.6.0）
+-- v90.6.0: ctx.sap.* スタイルに書き換え（cfg 明示取得を廃止）
 --
 -- sap_odata モジュールの参照について:
 --   v86.6.0 時点では Rune Registry デプロイ（v86.8.0）前のため、
@@ -7,11 +8,11 @@
 --   v86.8.0 以降は先頭に `import rune "sap-odata"` を追加し、
 --   `sap_odata.xxx` の参照はそのまま維持する。
 
+import rune "sap-odata"
 import rune "s3"
 
 fn sync_business_partners(ctx: AppCtx) -> Result<Int, String> {
-    bind cfg      <- sap_odata.sap_config_from_env()
-    bind partners <- sap_odata.business_partners(cfg, BusinessPartnerFilter {
+    bind partners <- ctx.sap.business_partners(BusinessPartnerFilter {
         country:       Option.some("JP"),
         category:      Option.none(),
         changed_after: Option.some("2026-08-01"),
@@ -23,16 +24,16 @@ fn sync_business_partners(ctx: AppCtx) -> Result<Int, String> {
 }
 
 -- シナリオ 2: 日次売上レポート（SalesOrder 集計 → S3）（v87.5.0）
+-- v90.6.0: ctx.sap.* スタイルに書き換え（cfg 明示取得を廃止）
 
 fn daily_sales_report(ctx: AppCtx) -> Result<SalesReport, String> {
-    bind cfg    <- sap_odata.sap_config_from_env()
-    bind orders <- sap_odata.sales_orders(cfg, SalesOrderFilter {
-        status:        Option.some(SalesOrderStatus.Completed),
-        created_after: Option.some("2026-08-22"),
-        customer_id:   Option.none(),
+    bind orders <- ctx.sap.sales_orders(SalesOrderFilter {
+        status:         Option.some(SalesOrderStatus.Completed),
+        created_after:  Option.some("2026-08-22"),
+        customer_id:    Option.none(),
         created_before: Option.none(),
-        sales_org:     Option.none(),
-        top:           Option.none()
+        sales_org:      Option.none(),
+        top:            Option.none()
     })
     bind report <- sap_odata.build_sales_report("2026-08-22", orders)
     bind json   <- Json.encode(report)
@@ -41,10 +42,10 @@ fn daily_sales_report(ctx: AppCtx) -> Result<SalesReport, String> {
 }
 
 -- シナリオ 3: 在庫 × 受注クロスチェック（v88.6.0）
+-- v90.6.0: ctx.sap.* スタイルに書き換え（cfg 明示取得を廃止）
 
 fn check_stock_vs_orders(ctx: AppCtx) -> Result<List<StockAlert>, String> {
-    bind cfg       <- sap_odata.sap_config_from_env()
-    bind orders    <- sap_odata.sales_orders(cfg, SalesOrderFilter {
+    bind orders    <- ctx.sap.sales_orders(SalesOrderFilter {
         status:         Option.some(SalesOrderStatus.Open),
         customer_id:    Option.none(),
         created_after:  Option.none(),
@@ -52,7 +53,7 @@ fn check_stock_vs_orders(ctx: AppCtx) -> Result<List<StockAlert>, String> {
         sales_org:      Option.none(),
         top:            Option.none()
     })
-    bind materials <- sap_odata.materials(cfg, MaterialFilter {
+    bind materials <- ctx.sap.materials(MaterialFilter {
         material_type: Option.some(MaterialType.FinishedProduct),
         plant:         Option.none(),
         top:           Option.none()
@@ -61,26 +62,19 @@ fn check_stock_vs_orders(ctx: AppCtx) -> Result<List<StockAlert>, String> {
     Result.ok(alerts)
 }
 
--- シナリオ 4: 購買→支払サイクル照合（v89.3.0）
+-- シナリオ 4: 会計伝票一覧（v89.3.0）
+-- v90.6.0: ctx.sap.* スタイルに書き換え（cfg 明示取得を廃止）
+-- purchase_orders は SapClient interface 外のため除去（v91.x.x で対応予定）
 
-fn outstanding_payables(ctx: AppCtx) -> Result<List<OutstandingPayable>, String> {
-    bind cfg      <- sap_odata.sap_config_from_env()
-    bind pos      <- sap_odata.purchase_orders(cfg, PurchaseOrderFilter {
-        status:        Option.some(PurchaseOrderStatus.PartiallyDelivered),
-        vendor_id:     Option.none(),
-        created_after: Option.none(),
-        plant:         Option.none(),
-        top:           Option.none()
-    })
-    bind journals <- sap_odata.journal_entries(cfg, JournalFilter {
+fn outstanding_payables(ctx: AppCtx) -> Result<List<JournalEntry>, String> {
+    bind journals <- ctx.sap.journal_entries(JournalFilter {
         fiscal_year:       Option.some(2026),
         posting_date_from: Option.none(),
         company_code:      Option.none(),
         reference:         Option.none(),
         top:               Option.none()
     })
-    bind unpaid   <- sap_odata.match_unposted_orders(pos, journals)
-    bind json     <- Json.encode(unpaid)
+    bind json     <- Json.encode(journals)
     bind _        <- ctx.s3.put_object("favnir-sap-demo", "payables/outstanding.json", json)
-    Result.ok(unpaid)
+    Result.ok(journals)
 }

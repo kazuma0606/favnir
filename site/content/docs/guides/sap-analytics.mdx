@@ -1,0 +1,218 @@
+---
+title: "SAP Analytics Guide"
+order: 12
+category: "Guide"
+description: "KPI 定義・BW/4HANA クエリ・SAC データプッシュの完全ガイド（v98.1〜v98.7）"
+---
+
+# SAP Analytics Guide
+
+Favnir SAP Analytics Era（v98.1〜v98.7）の全機能を使った KPI 監視・SAC データプッシュ・アラート送信の完全ガイド。
+
+---
+
+## 全体像
+
+KPI 監視 pipeline は 4 ステージで構成される。
+
+```
+Fetch → Evaluate → Push → Alert
+```
+
+| Stage    | 処理内容                                           | 主な型 / 関数 |
+|----------|----------------------------------------------------|---|
+| Fetch    | `ctx.sap.sales_orders()` で売上データ取得          | `SalesOrderFilter` |
+| Evaluate | KPI 定義 → スナップショット生成                    | `KpiDefinition` / `make_kpi_snapshot` |
+| Push     | SAC へデータプッシュ                               | `SacDataset` / `sac_push_mock` |
+| Alert    | 閾値超え検出 → アラートメッセージ生成              | `KpiAlert` / `format_kpi_alert` |
+
+---
+
+## KPI 定義パターン
+
+### 型一覧
+
+| 型 | 説明 | 導入 |
+|---|---|---|
+| `KpiThreshold` | `warning` / `critical` 閾値（Float） | v98.1.0 |
+| `KpiDefinition<T>` | KPI 名・単位・閾値・値抽出関数 | v98.1.0 |
+| `KpiStatus` | `Ok` / `Warning(Float)` / `Critical(Float)` ADT | v98.1.0 |
+| `KpiSnapshot<T>` | 計測値・評価結果・計測日時 | v98.1.0 |
+| `KpiAlert` | アラート通知型（`kpi_name` / `status` / `message`） | v98.5.0 |
+
+### KpiDefinition の定義例
+
+```favnir
+import rune "sap-odata"
+
+-- 日次売上 KPI を定義する（JPY 単位）
+bind kpi <- Result.ok(KpiDefinition {
+    name:      "DailyRevenue",
+    unit:      "JPY",
+    threshold: KpiThreshold { warning: 500000.0, critical: 1000000.0 },
+    extract:   |_| 0.0
+})
+```
+
+`threshold.warning` を超えると `KpiStatus::Warning(value)`、`threshold.critical` を超えると `KpiStatus::Critical(value)` に評価される。
+
+### スナップショット生成
+
+```favnir
+-- make_kpi_snapshot: KPI 定義 + 計測値 + 計測日時 → KpiSnapshot
+bind snap <- Result.ok(make_kpi_snapshot(kpi, report.total_amount, "2026-09-03"))
+```
+
+`snap.status` で `Ok` / `Warning` / `Critical` を判定できる。`snap.kpi.name` のような 2 段フィールドアクセスも有効。
+
+### KpiAlert とフォーマット
+
+```favnir
+-- KpiAlert を生成してメッセージ化する
+bind alert <- Result.ok(KpiAlert {
+    kpi_name: snap.kpi.name,
+    status:   snap.status,
+    message:  Float.to_string(snap.value)
+})
+bind msg <- Result.ok(format_kpi_alert(alert))
+-- 出力例: "[CRITICAL] DailyRevenue: 1200000.0"
+```
+
+---
+
+## BW/4HANA クエリ
+
+`BwQuery<T>` / `BwResult<T>` を使って BW/4HANA のクエリを定義できる。
+
+```favnir
+import rune "sap-odata"
+
+-- BW クエリ定義（T は結果行型）
+bind query <- Result.ok(BwQuery {
+    info_provider:   "0SD_C03",
+    characteristics: ["0CALMONTH", "0SOLD_TO"],
+    key_figures:     ["0NET_VAL_S"],
+    filters:         ["0CALMONTH EQ 202609"]
+})
+```
+
+テスト環境では `bw_query_mock` でモックデータを返せる。
+
+```favnir
+-- モックデータで BW クエリ結果を生成する
+bind result <- Result.ok(bw_query_mock(query, rows))
+```
+
+---
+
+## SAC データプッシュ
+
+`SacDataset` に CSV 行リストを詰めて `sac_push_mock` でプッシュする。
+
+```favnir
+import rune "sap-odata"
+
+-- SalesReport を SAC 行リストに変換する
+bind rows <- report_to_sac_rows(report)
+
+-- SAC へプッシュ（本番では sac_push を使用）
+bind _ <- Result.ok(sac_push_mock(SacDataset {
+    model_id: "FAVNIR_DAILY_KPI",
+    rows:     rows
+}))
+```
+
+`report_to_sac_rows` の出力形式: `"Date,Currency,Amount"` ヘッダー行 + データ行のリスト。
+
+---
+
+## 完全な E2E Pipeline 例
+
+```favnir
+import rune "sap-odata"
+
+-- 日次売上 KPI 監視 pipeline（v98.7.0）
+pipeline kpi_monitor !SapOData !SapAnalytics {
+    stage Fetch {
+        bind orders <- ctx.sap.sales_orders(SalesOrderFilter {
+            date_from: Option.some("2026-09-03"),
+            date_to:   Option.none(),
+            top:       Option.some(5000)
+        })
+    }
+    |> stage Evaluate {
+        bind report  <- build_sales_report("2026-09-03", orders)
+        bind kpi_def <- Result.ok(KpiDefinition {
+            name:      "DailyRevenue",
+            unit:      "JPY",
+            threshold: KpiThreshold { warning: 500000.0, critical: 1000000.0 },
+            extract:   |_| 0.0
+        })
+        bind snap    <- Result.ok(make_kpi_snapshot(kpi_def, report.total_amount, "2026-09-03"))
+    }
+    |> stage Push {
+        bind rows <- report_to_sac_rows(report)
+        bind _    <- Result.ok(sac_push_mock(SacDataset {
+            model_id: "FAVNIR_DAILY_KPI",
+            rows:     rows
+        }))
+    }
+    |> stage Alert {
+        bind alert <- Result.ok(KpiAlert {
+            kpi_name: snap.kpi.name,
+            status:   snap.status,
+            message:  Float.to_string(snap.value)
+        })
+        bind msg   <- Result.ok(format_kpi_alert(alert))
+        -- msg を束縛することで将来の Slack 送信（ctx.slack.post(msg)）への拡張点を示す
+        bind _     <- Result.ok(msg)
+    }
+}
+```
+
+> **Note**: `|>` pipeline では前 stage の `bind` 変数を後続 stage から参照できる（環境が継承される）。
+
+実行:
+
+```bash
+bash infra/e2e-demo/sap-odata/analytics_demo/run.sh
+```
+
+---
+
+## `fav report --sap` コマンドリファレンス
+
+SAP エンティティのデータを取得し、ローカル HTML レポートを生成するコマンド。
+
+```bash
+fav report --sap [--entity <name>] [--from <date>] [--to <date>] [--output <file>]
+```
+
+| フラグ | デフォルト | 説明 |
+|---|---|---|
+| `--entity` | `SalesOrder` | 対象エンティティ名 |
+| `--from` | （空） | 期間開始日（例: `2026-09-01`） |
+| `--to` | （空） | 期間終了日（例: `2026-09-30`） |
+| `--output` | `report.html` | 出力ファイルパス |
+
+使用例:
+
+```bash
+fav report --sap --entity SalesOrder --from 2026-09-01 --to 2026-09-30 --output sept_report.html
+```
+
+生成される HTML には `<h1>SAP Report: SalesOrder</h1>` と期間・レコード数が含まれる。
+
+---
+
+## バージョン履歴
+
+| バージョン | 追加内容 |
+|---|---|
+| v98.1.0 | `KpiDefinition<T>` / `KpiThreshold` / `KpiStatus` / `KpiSnapshot<T>` 型 |
+| v98.2.0 | `BwQuery<T>` / `BwResult<T>` / `bw_query_mock` |
+| v98.3.0 | `SacDataset` / `sac_push_mock` |
+| v98.4.0 | `report_to_sac_rows` / `pipeline_analytics.fav` / `!SapAnalytics` エフェクト |
+| v98.5.0 | `KpiAlert` / `format_kpi_alert` |
+| v98.6.0 | `fav report --sap` CLI コマンド |
+| v98.7.0 | `analytics_demo/` E2E デモ（`pipeline_kpi_monitor.fav`） |

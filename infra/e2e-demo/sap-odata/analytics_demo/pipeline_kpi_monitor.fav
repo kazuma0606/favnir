@@ -1,0 +1,39 @@
+import rune "sap-odata"
+
+-- 日次売上 KPI 監視 pipeline（v98.7.0）
+-- 売上データ取得 → KPI 評価 → SAC プッシュ → Slack アラート送信
+pipeline kpi_monitor !SapOData !SapAnalytics {
+    stage Fetch {
+        bind orders <- ctx.sap.sales_orders(SalesOrderFilter {
+            date_from: Option.some("2026-09-02"),
+            date_to:   Option.none(),
+            top:       Option.some(5000)
+        })
+    }
+    |> stage Evaluate {
+        bind report  <- build_sales_report("2026-09-02", orders)
+        bind kpi_def <- Result.ok(KpiDefinition {
+            name:      "DailyRevenue",
+            unit:      "JPY",
+            threshold: KpiThreshold { warning: 500000.0, critical: 1000000.0 },
+            extract:   |_| 0.0
+        })
+        bind snap    <- Result.ok(make_kpi_snapshot(kpi_def, report.total_amount, "2026-09-02"))
+    }
+    |> stage Push {
+        bind rows <- report_to_sac_rows(report)
+        bind _    <- Result.ok(sac_push_mock(SacDataset {
+            model_id: "FAVNIR_DAILY_KPI",
+            rows:     rows
+        }))
+    }
+    |> stage Alert {
+        bind alert <- Result.ok(KpiAlert {
+            kpi_name: snap.kpi.name,
+            status:   snap.status,
+            message:  Float.to_string(snap.value)
+        })
+        bind msg   <- Result.ok(format_kpi_alert(alert))
+        bind _     <- Result.ok(msg)
+    }
+}

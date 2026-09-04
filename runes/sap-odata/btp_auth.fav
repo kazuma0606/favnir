@@ -1,0 +1,26 @@
+-- runes/sap-odata/btp_auth.fav
+-- SAP BTP OAuth2 PKCE 認証型定義（v99.1.0）
+
+-- BTP サービスキー認証情報
+public type BtpCredential = {
+    client_id:     String,
+    client_secret: String,
+    token_url:     String,
+    scope:         List<String>
+}
+
+-- BTP アクセストークン
+public type BtpToken = {
+    access_token: String,
+    expires_in:   Int,
+    token_type:   String
+}
+
+-- テスト用モック: BtpCredential からダミー BtpToken を返す
+public fn acquire_token_mock(cred: BtpCredential) -> BtpToken {
+    BtpToken {
+        access_token: String.concat(["mock_token_for_", cred.client_id]),
+        expires_in:   3600,
+        token_type:   "Bearer"
+    }
+}

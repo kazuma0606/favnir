@@ -1,0 +1,67 @@
+-- runes/ctx/ctx.fav — AppCtx 型定義（v90.2.0）
+-- AppCtx は Favnir パイプライン関数の依存注入コンテナ。
+-- Ctx.build で本番インスタンスを、Ctx.mock でテスト用インスタンスを生成する。
+-- 実行時は vm.rs の AppCtx プリミティブが実体を提供する。
+use sap_odata.event_mesh
+use sap_odata.mock
+use sap_odata.workflow
+use sap_odata.audit
+use sap_odata.tenant
+use sap_odata.privacy
+
+type AppCtx = {
+    s3:  StorageCtx,            -- S3 等のオブジェクトストレージアクセス（v13.5.0）
+    db:  DbCtx,                 -- DB アクセス（runes/ctx/db.fav: DbCtx）（v13.5.0）
+    io:  IoCtx,                 -- 標準 IO / ファイル IO（runes/ctx/io.fav: IoCtx）（v13.5.0）
+    sap: SapClient,             -- SAP S/4HANA OData アクセス（runes/sap-odata/types.fav: SapClient）（v90.2.0 追加）
+    sap_event: SapEventClient,  -- SAP Event Mesh アクセス（runes/sap-odata/event_mesh.fav: SapEventClient）（v95.3.0 追加）
+    approval: ApprovalClient,   -- 承認フロークライアント（runes/sap-odata/workflow.fav: ApprovalClient）（v97.3.0 追加）
+    audit: AuditClient,         -- 監査ログクライアント（runes/sap-odata/audit.fav: AuditClient）（v99.2.0 追加）
+    unmask: UnmaskClient,       -- GDPR アンマスク（runes/sap-odata/privacy.fav: UnmaskClient）（v99.5.0 追加）
+}
+
+-- AppCtx を本番設定で構築する（v90.4.0）
+-- 環境変数から SAP / DB / IO / Storage 設定を読み込み AppCtx を初期化する。
+-- SAP: sap_config_from_env() → SapODataClient に注入し sap フィールドに設定する。
+-- sap_event フィールドは vm.rs の AppCtx プリミティブがデフォルト値（NoopSapEventClient）を注入する（v95.3.0）。
+-- 実行時は vm.rs の AppCtx プリミティブが設定注入を行う。
+public fn Ctx.build() -> Result<AppCtx, String> {
+    bind sap_cfg <- sap_config_from_env()
+    Result.ok(AppCtx {
+        sap: SapODataClient { config: sap_cfg }
+    })
+}
+
+-- AppCtx をテスト用設定で構築する（v90.7.0）
+-- sap: MockSapClient を受け取り AppCtx を返す。
+-- 他フィールド（db / s3 / io / sap_event）は vm.rs のプリミティブが提供するデフォルト値を使用する。
+public fn Ctx.mock(sap: MockSapClient) -> AppCtx {
+    AppCtx {
+        sap: sap
+    }
+}
+
+-- テスト用 AppCtx を MockWorkflowClient で構築する（v97.7.0）
+-- Ctx.mock(sap: MockSapClient) との共存のため別関数として提供する。
+-- sap / db / s3 / io / sap_event フィールドは vm.rs のプリミティブが
+-- 提供するデフォルト値を使用する（Ctx.mock と同様）。
+-- TODO: sap と workflow の両方をモックしたいケースは AppCtx { sap: ..., approval: ... }
+--       を直接構築するか、将来バージョンで Ctx.mock_full を追加して対応する。
+public fn Ctx.mock_workflow(workflow: MockWorkflowClient) -> AppCtx {
+    AppCtx {
+        approval: workflow
+    }
+}
+
+-- 環境名から SapClient を取得する（v96.1.0 スタブ）
+-- NOTE: v96.2.0 で fav.toml [sap.environments] と接続する。現バージョンはスタブ。
+-- NOTE: v96.2.0 の本実装時に ctx: AppCtx レシーバー引数を追加する予定。
+--       現時点では standalone 関数として定義し、Result.err を返すのみ。
+public fn Ctx.sap_env(name: String) -> Result<SapClient, String> {
+    Result.err("sap_env not implemented: use Ctx.build() for now")
+}
+
+-- テスト用 TenantContext を生成する（v99.4.0）
+public fn Ctx.for_tenant_mock(tenant_id: String) -> tenant.TenantContext {
+    tenant.tenant_context_mock(tenant_id)
+}

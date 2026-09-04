@@ -1,0 +1,19 @@
+-- infra/e2e-demo/sap-odata/pipeline_query.fav — QueryBuilder<T> パターン E2E デモ（v92.6.0）
+-- query_builder.fav の公開 API（query / with_filter / with_select / fetch_all_pages）を使用する。
+-- fetch_all_pages は v92.4.0 スタブ（Result.err）のため、本デモはパターン検証を目的とする。
+
+import rune "sap-odata"
+
+-- シナリオ 5: QueryBuilder<T> を使ったページネーション取得（v92.6.0）
+-- with_filter / with_select チェーンで型安全に OData クエリを組み立て、
+-- fetch_all_pages で全ページを自動取得するパターンを示す。
+-- NOTE: fetch_all_pages は現在スタブ（v92.4.0）。実装完了後に本デモが実際に動作する。
+fn sync_business_partners_paged(ctx: AppCtx) -> Result<String, String> {
+    bind q1  <- Result.ok(query<BusinessPartner>())
+    bind q2  <- Result.ok(with_filter(q1, Eq("Country", "JP")))
+    bind q3  <- Result.ok(with_select(q2, ["BusinessPartner", "BusinessPartnerName"]))
+    bind bps <- fetch_all_pages(ctx, q3, 20, fn(c, b) { Result.err("fetcher: not yet wired") })
+    bind enc <- Json.encode(bps)
+    bind _   <- ctx.s3.put_object("sap-sync", "business_partners_jp.json", enc)
+    Result.ok("synced " ++ Int.to_string(List.length(bps)) ++ " business partners")
+}

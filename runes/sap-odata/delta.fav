@@ -1,0 +1,23 @@
+-- OData $delta 差分同期型定義（v95.1.0〜）
+-- $delta プロトコル: 初回全件取得 + deltaLink 保存 → 以降は差分のみ取得
+
+-- OData $delta レスポンスの結果型
+-- T はエンティティ型（BusinessPartner / SalesOrder 等）
+public type DeltaResult<T> = {
+    entities:   List<T>,
+    delta_link: String,     -- 次回呼び出し用 @odata.deltaLink
+    has_more:   Bool        -- @odata.nextLink が存在するかどうか
+}
+
+-- 削除されたエンティティを表すトゥームストーン
+-- OData $delta レスポンスの @removed アノテーション付きオブジェクトに対応
+public type DeletedEntity = {
+    id:     String,
+    reason: String          -- "deleted" | "changed"
+}
+
+-- deltaLink の簡易バリデーション（空文字列でないかチェック）
+-- ctx.sap.delta_fetch<T>() の呼び出し前に delta_link の有効性を確認するために使用する
+public fn delta_link_is_valid(link: String) -> Bool {
+    String.length(link) > 0
+}

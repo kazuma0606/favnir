@@ -1,0 +1,148 @@
+---
+title: SAP Platform 移行ガイド（v95.0 → v99.x）
+description: Favnir SAP Platform v95.0 から v99.x への migration 手順と変更点の解説
+---
+
+# SAP Platform 移行ガイド（v95.0 → v99.x）
+
+このガイドは Favnir SAP Platform v95.0 以降を使用しているプロジェクトを v99.x に migration するための手順を説明します。
+
+---
+
+## 変更概要
+
+| バージョン | 追加機能 | 移行対応の要否 |
+|---|---|---|
+| v96.0 | `$delta` トークン・Event Mesh・`fav sap-mock` | 任意 |
+| v97.0 | `SapEnvironment` enum・RetryPolicy | 環境名変更あり（要対応） |
+| v98.0 | `!Approval` 型・IFlowClient | 任意 |
+| v99.1 | `CircuitBreaker` | 任意（推奨） |
+| v99.4 | `TenantContext` | マルチテナント利用者は必須 |
+| v99.5 | `Masked<T>` / GDPR マスキング | GDPR 対象データは必須 |
+| v99.6 | `SlaDefinition` / `fav sla-check` | 任意（推奨） |
+
+---
+
+## Step 1: SapEnvironment 定数名変更
+
+v97.0 で `SapEnvironment` のバリアント名が変更されました。
+
+**変更前（v95.x）:**
+
+```favnir
+-- 旧: 文字列リテラルまたは未定義
+bind env <- "PRD"
+```
+
+**変更後（v97.0〜）:**
+
+```favnir
+-- 新: SapEnvironment enum を使用
+bind env <- SapEnvironment.Prd
+-- Qas / Dev / Custom("sandbox") も使用可能
+```
+
+`ctx.sap_env("PRD")` のような文字列引数は `SapEnvironment.Prd` に置き換えてください。
+
+---
+
+## Step 2: CircuitBreaker 導入（v99.1〜）
+
+SAP OData の連続障害に対する耐性を持たせるため、`CircuitBreaker` の導入を推奨します。
+
+```favnir
+use sap_odata.CircuitBreaker
+use sap_odata.CircuitBreakerConfig
+
+-- CircuitBreaker の初期化
+bind cb_config <- CircuitBreakerConfig {
+    failure_threshold: 5,
+    recovery_timeout_ms: 30000
+}
+bind cb <- CircuitBreaker.new(cb_config)
+
+-- 既存のフェッチ処理を CircuitBreaker でラップ
+bind result <- CircuitBreaker.call(cb, fn() -> fetch_partners(client))
+```
+
+---
+
+## Step 3: TenantContext 導入（v99.4〜）
+
+マルチテナントアーキテクチャを採用している場合は `TenantContext` への移行が必要です。
+
+```favnir
+use sap_odata.TenantContext
+use sap_odata.TenantId
+
+-- テナントコンテキストの生成（本番）
+bind tenant_ctx <- TenantContext {
+    tenant_id: "acme",
+    sap_env:   SapEnvironment.Prd,
+    schema:    "schema_acme"
+}
+
+-- モック（テスト用）
+bind tenant_ctx <- Ctx.for_tenant_mock("acme")
+```
+
+---
+
+## Step 4: Masked&lt;T&gt; によるデータマスキング（v99.5〜）
+
+GDPR 対象フィールド（氏名・メールアドレス等）は `Masked<T>` でラップしてください。
+
+```favnir
+use sap_odata.Masked
+use sap_odata.mask
+use sap_odata.unmask_mock
+
+-- マスキング
+bind masked_name <- mask(partner.FullName)
+
+-- アンマスク（本番: ctx.unmask.unmask / テスト: unmask_mock）
+bind name <- unmask_mock(masked_name)
+```
+
+---
+
+## Step 5: fav sla-check の設定（v99.6〜）
+
+`sla.toml` を作成し、SLA 監視を有効化します。
+
+```toml
+[[sla]]
+endpoint = "/sap/opu/odata/sap/API_BUSINESS_PARTNER"
+max_latency_ms = 500
+availability = 0.999
+
+[[sla]]
+endpoint = "/sap/opu/odata/sap/API_SALES_ORDER_SRV"
+max_latency_ms = 800
+availability = 0.995
+```
+
+実行:
+
+```sh
+fav sla-check --config sla.toml --from 2026-09-01 --to 2026-09-04
+```
+
+---
+
+## よくある問題
+
+### `SapEnvironment` バリアント名エラー
+
+`PRD` / `QAS` / `DEV` は旧名称です。`Prd` / `Qas` / `Dev` に変更してください。
+
+### `TenantContext` フィールド不足
+
+`TenantContext` には `tenant_id`・`sap_env`・`schema` の 3 フィールドがすべて必要です。
+
+---
+
+## 関連ドキュメント
+
+- [SAP Platform 1.0 ガイド](./sap-platform)
+- [本番投入チェックリスト](./sap-enterprise-checklist)

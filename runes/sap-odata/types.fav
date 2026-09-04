@@ -1,4 +1,5 @@
 -- SAP OData v4 接続設定型（v85.2.0）
+use sap_odata.delta
 
 type SapConfig = {
     base_url: String,
@@ -83,4 +84,40 @@ type SapError = {
     code:    SapErrorCode,
     message: String,
     detail:  Option<String>   -- innererror を単一文字列に簡略化（OData v4 details 配列は v85.9.0 で対応）
+}
+
+-- SAP アクセスの統一インターフェース（v90.1.0）
+-- ctx.sap フィールドの型として使用する。
+-- impl: SapODataClient（本番）/ MockSapClient（テスト・v90.3.0 で実装）
+-- NOTE: Favnir の型チェッカーは interface の全メソッド実装を強制しないため、
+--       impl ブロックに未実装メソッドがあってもコンパイルエラーにならない。
+--       ただし呼び出し時に Result.err スタブが返る。MockSapClient は必要に応じてスタブを追加すること。
+public interface SapClient {
+    fn business_partners(ctx: SapClient, filter: BusinessPartnerFilter) -> Result<List<BusinessPartner>, String>
+    fn business_partner_by_id(ctx: SapClient, id: String) -> Result<BusinessPartner, String>
+    fn sales_orders(ctx: SapClient, filter: SalesOrderFilter) -> Result<List<SalesOrder>, String>
+    fn materials(ctx: SapClient, filter: MaterialFilter) -> Result<List<Material>, String>
+    fn journal_entries(ctx: SapClient, filter: JournalFilter) -> Result<List<JournalEntry>, String>
+    fn batch(ctx: SapClient, req: BatchRequest<String>) -> Result<BatchResponse<String>, String>
+    fn delta_fetch<T>(ctx: SapClient, entity_set: String, delta_link: Option<String>) -> Result<DeltaResult<T>, String>
+}
+
+-- SAP 環境を型安全に表現する直和型（v96.1.0）
+-- PRD: 本番環境 / QAS: 品質保証環境 / DEV: 開発・サンドボックス環境
+-- Custom(String): 上記以外のカスタム環境（環境名を文字列で保持）
+public type SapEnvironment =
+    | Prd
+    | Qas
+    | Dev
+    | Custom(String)
+
+-- 環境名文字列から SapEnvironment を生成するユーティリティ（v96.1.0）
+-- "PRD" → Prd, "QAS" → Qas, "DEV" → Dev, それ以外 → Custom(name)
+public fn SapEnvironment.from_string(name: String) -> SapEnvironment {
+    match name {
+        "PRD" -> Prd
+        "QAS" -> Qas
+        "DEV" -> Dev
+        _     -> Custom(name)
+    }
 }

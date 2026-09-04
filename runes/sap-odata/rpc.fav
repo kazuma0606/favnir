@@ -1,0 +1,31 @@
+-- SAP OData Function Import / Action Import（v95.6.0）
+-- NOTE: v95.6.0 は cfg スタイルのスタブ。ctx.sap.function_import<T>() への移行は後続バージョン。
+
+use sap_odata.types
+
+-- Function Import パラメータ型（キー・値タプル）
+public type FunctionImportParam = (String, String)
+
+-- Function Import: 冪等な操作（GET）
+-- OData v2/v4 の FunctionImport を呼び出し、型 T のレスポンスを返す
+public fn function_import<T>(
+    cfg:           SapConfig,
+    function_name: String,
+    params:        List<FunctionImportParam>
+) -> Result<T, String> {
+    Result.err("not implemented")
+}
+
+-- Action Import: 副作用あり操作（POST）
+-- OData v2/v4 の ActionImport を呼び出す。
+-- 戻り型を Result<Unit, String> としている理由:
+--   Action Import は副作用のみを目的とした操作（状態変更・承認・ブロック等）であり、
+--   レスポンスボディを返さない操作を主なユースケースとして想定している。
+--   レスポンスエンティティが必要な場合は後続バージョンで Result<T, String> 版を追加する。
+public fn action_import(
+    cfg:         SapConfig,
+    action_name: String,
+    params:      List<FunctionImportParam>
+) -> Result<Unit, String> {
+    Result.err("not implemented")
+}

@@ -1,0 +1,271 @@
+---
+title: "SAP Integration Guide"
+order: 10
+category: "Guide"
+description: "Favnir で SAP S/4HANA を統合する完全ガイド（ctx.sap / QueryBuilder / $batch / Metadata Infer / SnapStart）"
+---
+
+# SAP Integration Guide
+
+Favnir SAP Advanced Era（v90.1〜v94.x）の全機能を使った SAP S/4HANA 統合の完全ガイド。
+
+---
+
+## 全体像
+
+Favnir の SAP 統合は 4 つの柱で構成される。
+
+| 機能 | 概要 | 導入バージョン |
+|---|---|---|
+| `ctx.sap.*` | AppCtx 経由の型安全なエンティティ取得 | v90.1.0 |
+| `QueryBuilder<T>` | Fluent API による型安全なクエリ組み立て | v92.1.0 |
+| `$batch` | `BatchRequest<T>` による一括 CRUD | v94.1.0 |
+| Metadata Infer | EDMX から Favnir 型定義を自動生成 | v93.1.0 |
+
+Lambda SnapStart（v94.3.0）と組み合わせることでコールドスタートを約 93% 削減できる。
+
+---
+
+## 前提条件
+
+`fav.toml` に `[sap]` セクションを追加する。
+
+```toml
+[sap]
+base_url = "${SAP_BASE_URL}"
+username = "${SAP_USERNAME}"
+client   = "${SAP_CLIENT}"
+```
+
+必要な環境変数:
+
+| 変数名 | 説明 | 必須 |
+|---|---|---|
+| `SAP_BASE_URL` | SAP OData エンドポイント | ✓ |
+| `SAP_USERNAME` | 認証ユーザー名 | ✓ |
+| `SAP_PASSWORD` | 認証パスワード | ✓ |
+| `SAP_CLIENT` | SAP クライアント番号（例: `100`） | |
+
+---
+
+## ctx.sap パターン
+
+v90.1.0 以降、SAP へのアクセスは `AppCtx` 経由で行う。`Ctx.build()` が設定を自動注入する。
+
+```favnir
+import rune "sap-odata"
+
+fn sync_business_partners(ctx: AppCtx) -> Result<Int, String> {
+    bind partners <- ctx.sap.business_partners(BusinessPartnerFilter {
+        country:       Option.some("JP"),
+        category:      Option.none(),
+        changed_after: Option.some("2026-08-01"),
+        top:           Option.some(500)
+    })
+    bind json <- Json.encode(partners)
+    bind _    <- ctx.s3.put_object("favnir-sap-demo", "partners/latest.json", json)
+    Result.ok(List.length(partners))
+}
+```
+
+`SapClient` interface のメソッド一覧:
+
+| メソッド | 戻り型 | 説明 |
+|---|---|---|
+| `ctx.sap.business_partners(filter)` | `Result<List<BusinessPartner>, String>` | 得意先・仕入先マスタ取得 |
+| `ctx.sap.business_partner_by_id(id)` | `Result<BusinessPartner, String>` | 得意先 1 件取得 |
+| `ctx.sap.sales_orders(filter)` | `Result<List<SalesOrder>, String>` | 受注データ取得 |
+| `ctx.sap.materials(filter)` | `Result<List<Material>, String>` | 品目マスタ取得 |
+| `ctx.sap.journal_entries(filter)` | `Result<List<JournalEntry>, String>` | 会計伝票取得 |
+| `ctx.sap.batch(req)` | `Result<BatchResponse<String>, String>` | `$batch` 一括操作 |
+
+---
+
+## QueryBuilder\<T\> 型安全クエリ
+
+`query<T>()` でビルダーを生成し、チェーン関数で OData クエリを型安全に組み立てる（v92.1.0〜）。
+
+```favnir
+fn list_jp_partners(ctx: AppCtx) -> Result<List<BusinessPartner>, String> {
+    bind q1 <- Result.ok(query<BusinessPartner>())
+    bind q2 <- Result.ok(with_filter(q1, Eq("Country", "JP")))
+    bind q3 <- Result.ok(with_select(q2, ["BusinessPartner", "BusinessPartnerName"]))
+    bind q4 <- Result.ok(with_top(q3, 100))
+    ctx.sap.business_partners_query(q4)
+}
+```
+
+> **E0018 注意**: `bind q <- ...` の再束縛は禁止。`q1` / `q2` / `q3` のように別名を使うこと。
+
+`fetch_all_pages` で全ページを自動取得できる（v92.4.0〜）:
+
+```favnir
+fn sync_all_partners(ctx: AppCtx) -> Result<String, String> {
+    bind q1  <- Result.ok(query<BusinessPartner>())
+    bind q2  <- Result.ok(with_filter(q1, Eq("Country", "JP")))
+    bind bps <- fetch_all_pages(ctx, q2, 20, fn(c, b) { Result.err("fetcher: not yet wired") })
+    bind enc <- Json.encode(bps)
+    bind _   <- ctx.s3.put_object("sap-sync", "partners_jp_all.json", enc)
+    Result.ok(String.concat("synced ", Int.to_string(List.length(bps))))
+}
+```
+
+---
+
+## OData \$batch 一括操作
+
+`BatchRequest<T>` / `BatchOperation<T>` / `ctx.sap.batch` を使うと、複数の CRUD 操作を 1 回の HTTP リクエストで送信できる（v94.1.0〜）。
+
+### BatchOperation\<T\> ADT
+
+| バリアント | シグネチャ | 説明 |
+|---|---|---|
+| `BatchCreate(T)` | `BatchCreate(body: T)` | エンティティ新規作成 |
+| `BatchUpdate(String, T)` | `BatchUpdate(key, body: T)` | 既存エンティティ更新 |
+| `BatchDelete(String)` | `BatchDelete(key)` | エンティティ削除 |
+
+### 使用例: 一括削除パイプライン
+
+```favnir
+import rune "sap-odata"
+
+fn cleanup_partners(ctx: AppCtx) -> Result<String, String> {
+    -- 1. 日本の取引先を最大 200 件取得
+    bind bps  <- ctx.sap.business_partners(BusinessPartnerFilter {
+        country:       Option.some("JP"),
+        category:      Option.none(),
+        changed_after: Option.none(),
+        top:           Option.some(200)
+    })
+
+    -- 2. S3 に削除前スナップショットを保存
+    bind json <- Json.encode(bps)
+    bind _    <- ctx.s3.put_object("favnir-sap-sync", "bps_jp_snapshot.json", json)
+
+    -- 3. $batch で一括削除（BatchDelete × List.length(bps) 件）
+    bind ops  <- List.map(bps, fn(bp) { BatchDelete(bp.partner_id) })
+    bind req  <- batch_request_builder("A_BusinessPartner", ops)
+    bind resp <- ctx.sap.batch(req)
+
+    -- 4. 結果を返す
+    Result.ok(String.concat("deleted ", Int.to_string(List.length(resp.succeeded))))
+}
+```
+
+### BatchRequest\<T\> / BatchResponse\<T\> 型
+
+```favnir
+-- BatchRequest: entity_set + operations のリスト
+public type BatchRequest<T> = {
+    entity_set: String,
+    operations: List<BatchOperation<T>>
+}
+
+-- BatchResponse: succeeded + failed のリスト
+public type BatchResponse<T> = {
+    succeeded: List<T>,
+    failed:    List<BatchError>
+}
+```
+
+`ctx.sap.batch` は `BatchRequest<String>` を受け取る。エンティティを JSON 文字列化して渡すか、`BatchDelete(key)` のようにキーのみの操作を使う。
+
+---
+
+## Metadata Infer — 型定義自動生成
+
+`fav infer --from sap` で SAP の `$metadata` EDMX から Favnir 型定義を自動生成できる（v93.1.0〜）。
+
+```bash
+-- リモート URL から生成
+fav infer --from sap --sap-metadata https://my.sap.example.com/odata/v4/$metadata \
+          --out ./runes/sap-odata/generated_types.fav
+
+-- ローカルファイルから生成（CI/オフライン向け）
+fav infer --from sap --sap-metadata-file ./metadata/API_BUSINESS_PARTNER.xml \
+          --out ./runes/sap-odata/generated_types.fav
+```
+
+EDM 型 → Favnir 型マッピング:
+
+| EDM 型 | Favnir 型 |
+|---|---|
+| `Edm.String` | `String` |
+| `Edm.Int16` / `Edm.Int32` / `Edm.Int64` | `Int` |
+| `Edm.Decimal` / `Edm.Double` / `Edm.Single` | `Float` |
+| `Edm.Boolean` | `Bool` |
+| `Edm.DateTime` / `Edm.DateTimeOffset` | `String` |
+| `Edm.Guid` | `String` |
+
+詳細は [fav infer ドキュメント](/docs/cli/infer) を参照。
+
+---
+
+## Lambda SnapStart によるコールドスタート削減
+
+`infra/lambda/sap-sync/main.tf` の Terraform 設定で AWS Lambda SnapStart を有効化すると、コールドスタートを約 93% 削減できる（v94.3.0〜）。
+
+```hcl
+resource "aws_lambda_function" "sap_sync" {
+  function_name = "favnir-sap-sync"
+  runtime       = "java21"
+  snap_start {
+    apply_on = "PublishedVersions"
+  }
+}
+```
+
+SnapStart あり / なしの比較ベンチマーク:
+
+```bash
+bash scripts/bench_sap_coldstart.sh
+```
+
+結果は `fav/tmp/sap_coldstart_bench.json` に記録される。
+
+---
+
+## E2E デモ
+
+`infra/e2e-demo/sap-odata/` に完全な E2E デモがある。
+
+| ファイル | 説明 |
+|---|---|
+| `pipeline.fav` | シナリオ 1〜4（マスタ同期・売上レポート・在庫チェック・会計伝票） |
+| `pipeline_query.fav` | シナリオ（QueryBuilder + fetch_all_pages） |
+| `pipeline_advanced.fav` | シナリオ 5（$batch + SnapStart 完全デモ） |
+
+---
+
+## テスト — MockSapClient
+
+`MockSapClient` と `Ctx.mock` を使うと、SAP への実際の HTTP 接続なしにパイプラインをテストできる。
+
+```favnir
+bind ctx <- Ctx.mock(MockSapClient {
+    business_partners_result: Result.ok([]),
+    sales_orders_result:      Result.err("not implemented"),
+    materials_result:         Result.err("not implemented"),
+    journal_entries_result:   Result.err("not implemented")
+})
+bind partners <- ctx.sap.business_partners(BusinessPartnerFilter {
+    country:       Option.none(),
+    category:      Option.none(),
+    changed_after: Option.none(),
+    top:           Option.none()
+})
+```
+
+デフォルトインスタンス（全フィールド `Result.err("not implemented")`）:
+
+```favnir
+bind ctx <- Ctx.mock(MockSapClient.default())
+```
+
+---
+
+## 関連ドキュメント
+
+- [SAP OData Rune](/docs/runes/sap-odata) — エンティティ別 API リファレンス
+- [fav infer](/docs/cli/infer) — Metadata Infer の詳細
+- [AppCtx / Ctx.build](/docs/runes/ctx) — コンテキスト注入の仕組み

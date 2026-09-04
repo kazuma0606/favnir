@@ -40,6 +40,7 @@
 
 mod ast;
 mod backend;
+mod bench;
 mod checker_fav_runner;
 mod compiler_fav_runner;
 mod emit_python;
@@ -47,6 +48,7 @@ mod docs_server;
 mod driver;
 mod lineage;
 mod stdlib_fav_runner;
+mod effect_catalog;
 mod error_catalog;
 mod fmt;
 mod frontend;
@@ -58,6 +60,8 @@ mod middle;
 mod notebook;
 mod registry;
 mod rune_cmd;
+mod sap_metadata;
+mod infer;
 mod suggest;
 mod policy;
 mod fav_audit;
@@ -1701,6 +1705,16 @@ fn main_impl() {
                         opts.emit_md = true;
                         i += 1;
                     }
+                    "--sap-query" => {
+                        // v92.7.0: --sap-query → SAP QueryBuilder ベンチマーク
+                        opts.sap_query = true;
+                        i += 1;
+                    }
+                    "--sap" => {
+                        // v94.5.0: --sap → SAP Advanced Benchmark Suite
+                        opts.sap = true;
+                        i += 1;
+                    }
                     "--threshold" => {
                         let raw = args.get(i + 1).unwrap_or_else(|| {
                             eprintln!("error: --threshold requires a number");
@@ -2313,6 +2327,8 @@ fn main_impl() {
             let mut from_source: Option<String> = None;
             let mut path_arg: Option<String> = None;
             let mut catalog_arg: Option<String> = None;
+            let mut sap_metadata_url: Option<String> = None;
+            let mut sap_service_name: Option<String> = None;
             let mut i = 2usize;
             while i < args.len() {
                 match args[i].as_str() {
@@ -2404,6 +2420,28 @@ fn main_impl() {
                         );
                         i += 2;
                     }
+                    "--sap-metadata" => {
+                        sap_metadata_url = Some(
+                            args.get(i + 1)
+                                .unwrap_or_else(|| {
+                                    eprintln!("error: --sap-metadata requires a URL");
+                                    process::exit(1);
+                                })
+                                .clone(),
+                        );
+                        i += 2;
+                    }
+                    "--sap-service-name" => {
+                        sap_service_name = Some(
+                            args.get(i + 1)
+                                .unwrap_or_else(|| {
+                                    eprintln!("error: --sap-service-name requires a service name");
+                                    process::exit(1);
+                                })
+                                .clone(),
+                        );
+                        i += 2;
+                    }
                     other => {
                         // First positional: csv_path (or table if --db already set)
                         if db_conn.is_some() && csv_path.is_none() {
@@ -2453,6 +2491,21 @@ fn main_impl() {
                     process::exit(1);
                 });
                 cmd_infer_iceberg(catalog, table, out_path.as_deref());
+                return;
+            }
+            if from_source.as_deref() == Some("sap") {
+                // NOTE: _url は v96.5.0 時点ではスタブ。将来 $metadata XML 取得に使用する。
+                let _url = sap_metadata_url.as_deref().unwrap_or("");
+                let service = sap_service_name.as_deref().unwrap_or("");
+                let header = crate::sap_metadata::generate_custom_service_header(service);
+                if let Some(out) = out_path.as_deref() {
+                    std::fs::write(out, header).unwrap_or_else(|e| {
+                        eprintln!("error: failed to write output file '{}': {}", out, e);
+                        process::exit(1);
+                    });
+                } else {
+                    print!("{}", header);
+                }
                 return;
             }
             cmd_infer(
@@ -3542,6 +3595,74 @@ fn main_impl() {
                     process::exit(1);
                 }
             }
+        }
+
+        // ── v99.6.0: fav sla-check ───────────────────────────────────────────
+        Some("sla-check") => {
+            let config = args.iter()
+                .position(|a| a == "--config")
+                .and_then(|i| args.get(i + 1))
+                .map(|s| s.as_str())
+                .unwrap_or("sla.toml");
+            let from = args.iter()
+                .position(|a| a == "--from")
+                .and_then(|i| args.get(i + 1))
+                .map(|s| s.as_str())
+                .unwrap_or("");
+            let to = args.iter()
+                .position(|a| a == "--to")
+                .and_then(|i| args.get(i + 1))
+                .map(|s| s.as_str())
+                .unwrap_or("");
+            println!("{}", driver::cmd_sla_check(config, from, to));
+        }
+
+        // ── v95.8.0: fav sap-mock ────────────────────────────────────────────
+        Some("sap-mock") => {
+            let port: u16 = args.iter()
+                .position(|a| a == "--port")
+                .and_then(|i| args.get(i + 1))
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(8080);
+            let fixtures = args.iter()
+                .position(|a| a == "--fixtures")
+                .and_then(|i| args.get(i + 1))
+                .map(|s| s.as_str())
+                .unwrap_or("runes/sap-odata/mock.fav")
+                .to_string();
+            driver::cmd_sap_mock(&driver::SapMockServer { port, fixtures });
+        }
+
+        // ── v98.6.0: fav report ──────────────────────────────────────────────
+        Some("report") => {
+            let sap = args.iter().any(|a| a == "--sap");
+            if !sap {
+                eprintln!("error: fav report requires --sap flag");
+                eprintln!("  fav report --sap [--entity <name>] [--from <date>] [--to <date>] [--output <file>]");
+                process::exit(1);
+            }
+            let entity = args.iter()
+                .position(|a| a == "--entity")
+                .and_then(|i| args.get(i + 1))
+                .map(|s| s.as_str())
+                .unwrap_or("SalesOrder");
+            let from = args.iter()
+                .position(|a| a == "--from")
+                .and_then(|i| args.get(i + 1))
+                .map(|s| s.as_str())
+                .unwrap_or("");
+            let to = args.iter()
+                .position(|a| a == "--to")
+                .and_then(|i| args.get(i + 1))
+                .map(|s| s.as_str())
+                .unwrap_or("");
+            let output = args.iter()
+                .position(|a| a == "--output")
+                .and_then(|i| args.get(i + 1))
+                .map(|s| s.as_str())
+                .unwrap_or("report.html");
+            let code = driver::cmd_report_sap(entity, from, to, output);
+            process::exit(code);
         }
 
         // ── v72.2.0: fav ai explain / fav ai fix ─────────────────────────────

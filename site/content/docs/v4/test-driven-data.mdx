@@ -1,0 +1,75 @@
+# Test-Driven Data（Favnir 4.0）
+
+Sprint 1 で導入したテスト駆動データパイプラインの機能を解説します。
+
+## TestSuite
+
+`TestSuite` はパイプラインステージのテストケースをまとめる型です。
+
+```favnir
+bind suite <- TestSuite {
+    name: "load_stage_tests",
+    cases: List.of(
+        StageTestCase {
+            stage_name: "load_stage",
+            input: List.empty(),
+            expected: List.empty(),
+        }
+    ),
+}
+```
+
+## StageTestCase
+
+`StageTestCase` は単一ステージのテストケースを表します。`stage_name`・`input`・`expected`
+の 3 フィールドが必須です。
+
+```favnir
+bind case <- StageTestCase {
+    stage_name: "transform_stage",
+    input: List.of(Row.from("id", "1")),
+    expected: List.of(Row.from("result", "processed")),
+}
+```
+
+## GoldenDataset
+
+`GoldenDataset` は期待値データセットを管理する型です。`compare_golden` 関数で
+実行結果と比較します。
+
+```favnir
+bind dataset <- GoldenDataset {
+    name: "expected_output",
+    rows: List.empty(),
+    created_at: "2026-08-22T00:00:00Z",
+}
+bind result <- compare_golden(dataset, actual_rows)
+```
+
+## SchemaSnapshot
+
+`SchemaSnapshot` はスキーマの期待定義を保持します。`compare_schema_snapshots`
+で現在のスキーマと差異を検出します。
+
+```favnir
+bind baseline <- SchemaSnapshot {
+    name: "load_stage_schema",
+    fields: List.of(
+        SchemaField { name: "id", field_type: "Int", nullable: false }
+    ),
+    captured_at: "2026-08-22T00:00:00Z",
+}
+bind current <- SchemaSnapshot {
+    name: "load_stage_schema_current",
+    fields: List.of(
+        SchemaField { name: "id", field_type: "Int", nullable: false }
+    ),
+    captured_at: "2026-08-22T00:01:00Z",
+}
+bind diff <- compare_schema_snapshots(baseline, current)
+```
+
+## 参考
+
+- [Favnir 4.0 ショーケース](../../infra/e2e-demo/favnir4-showcase/)
+- [Data Quality 2.0](data-quality.mdx)

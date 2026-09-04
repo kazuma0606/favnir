@@ -1,0 +1,20 @@
+-- runes/sap-odata/iflow.fav
+-- SAP BTP Integration Suite connector 型 + スタブ関数（v97.5.0）
+
+public type IFlowClient = {
+    base_url:  String,
+    oauth_url: String,
+    client_id: String
+}
+
+public type IFlowMessage = {
+    headers: List<String>,
+    body:    String
+}
+
+-- iFlow にメッセージを送信するスタブ
+-- client は v97.x で BTP OAuth トークン取得 + HTTP 送信に使用予定（現在はスタブ）
+-- message は v97.x で実際のリクエストボディとして使用予定（現在はスタブ）
+public fn iflow_send(client: IFlowClient, iflow_id: String, message: IFlowMessage) -> String {
+    String.concat(["sent:", iflow_id])
+}

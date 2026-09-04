@@ -1,0 +1,150 @@
+---
+title: "SAP Workflow & Approval Guide"
+order: 11
+category: "Guide"
+description: "Favnir で SAP Workflow Management と BTP Integration Suite を統合する — ApprovalClient / !Approval / iFlowClient の完全ガイド（v97.1〜v97.7）"
+---
+
+# SAP Workflow & Approval Guide
+
+Favnir SAP Workflow Era（v97.1〜v97.7）の全機能を使った SAP Workflow Management / BTP Integration Suite 統合の完全ガイド。
+
+---
+
+## 全体像
+
+| バージョン | 型 / API | 概要 |
+|---|---|---|
+| v97.1.0 | `WorkflowInstance` / `workflow_start` | SAP Workflow Management 起動スタブ |
+| v97.2.0 | `WorkflowTask` / `TaskDecision` / `workflow_tasks` | タスク照会 + 承認 / 却下操作 |
+| v97.3.0 | `ApprovalClient` / `ctx.approval.*` | 承認フロークライアント interface |
+| v97.4.0 | `route_by_approval_result` pipeline | 承認結果による自動ルーティング |
+| v97.5.0 | `IFlowClient` / `IFlowMessage` / `iflow_send` | SAP BTP Integration Suite connector |
+| v97.6.0 | `workflow_demo/` E2E デモ | 発注 → 承認 → SAP 反映の完全デモ |
+| v97.7.0 | `MockWorkflowClient` / `Ctx.mock_workflow` | 承認フローのオフラインテスト |
+
+---
+
+## 承認フローの型設計
+
+### TaskDecision ADT
+
+承認結果を型で表現する ADT。`match` で全バリアントを網羅する。
+
+```favnir
+type TaskDecision =
+    | Approve
+    | Reject(String)    -- 却下理由
+```
+
+### ApprovalClient interface
+
+承認サービスを抽象化する interface。本番実装とモック実装を同一型として扱える。
+
+```favnir
+interface ApprovalClient {
+    fn request_approval(client: ApprovalClient, subject: String, context: String) -> TaskDecision
+}
+```
+
+---
+
+## `!Approval` エフェクト型の使い方
+
+`!Approval` は pipeline が「人間の承認を必要とする」ことを示すエフェクト**マーカー**。
+実体は `ctx.approval.*()` メソッドで提供される（ctx パターン）。
+`effect Approval { ... }` による独立エフェクト宣言は行わない。
+
+```favnir
+-- !Approval マーカーを持つ pipeline の宣言
+pipeline route_by_approval_result !SapOData !Approval !S3 {
+    stage Decide {
+        bind decision <- ctx.approval.request_approval("発注承認", context)
+    }
+    |> stage Route {
+        bind _ <- match decision {
+            Approve     -> pipeline {
+                bind _ <- ctx.sap.workflow_start("POApproval", po_id)
+                bind _ <- ctx.s3.put_object("audit", po_id ++ "_approved.json", context)
+            }
+            Reject(msg) -> pipeline {
+                bind _ <- ctx.io.println("却下理由: " ++ msg)
+                bind _ <- ctx.s3.put_object("audit", po_id ++ "_rejected.json", msg)
+            }
+        }
+    }
+}
+```
+
+pipeline シグネチャに `!Approval` が現れた時、それはコードが「ここで人間の承認が必要」と語っている。
+
+---
+
+## iFlow connector の設定
+
+SAP BTP Integration Suite の iFlow（統合フロー）を Favnir から呼び出す。
+
+```favnir
+type IFlowClient = {
+    base_url:  String,
+    oauth_url: String,
+    client_id: String
+}
+
+type IFlowMessage = {
+    headers: List<String>,
+    body:    String
+}
+
+-- iFlow にメッセージを送信（スタブ — v97.x で BTP API と接続予定）
+bind resp <- iflow_send(client, "OrderSync_iFlow", IFlowMessage {
+    headers: ["Content-Type: application/json"],
+    body:    Json.encode(order)
+})
+```
+
+---
+
+## E2E デモのウォークスルー
+
+`infra/e2e-demo/sap-odata/workflow_demo/` に完全な E2E デモが含まれている。
+
+```
+infra/e2e-demo/sap-odata/
+  pipeline_workflow.fav    -- route_by_approval_result pipeline 定義
+  workflow_demo/
+    README.md              -- デモ手順
+    run.sh                 -- 実行スクリプト
+```
+
+### 実行手順
+
+```sh
+cd infra/e2e-demo/sap-odata/workflow_demo
+bash run.sh
+```
+
+`run.sh` は `fav run ../pipeline_workflow.fav` を実行し、承認フロー pipeline を起動する。
+
+---
+
+## テスト戦略
+
+`MockWorkflowClient` で承認フローをオフラインテストできる。
+
+```favnir
+-- 常に承認するモック
+bind ctx <- Ctx.mock_workflow(MockWorkflowClient {
+    auto_approve:  true,
+    reject_reason: Option.none()
+})
+
+-- 特定理由で却下するモック
+bind ctx <- Ctx.mock_workflow(MockWorkflowClient {
+    auto_approve:  false,
+    reject_reason: Option.some("予算超過")
+})
+```
+
+`Ctx.mock_workflow` は `Ctx.mock(sap: MockSapClient)` と独立して使用できる。
+sap と approval の両方をモックしたい場合は `AppCtx { sap: ..., approval: ... }` を直接構築する。

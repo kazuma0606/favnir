@@ -1,0 +1,144 @@
+-- Favnir 4.0 Showcase Pipeline
+-- 4 Quality 柱（Test / Quality / Contract / Observe）を統合するデモパイプライン
+
+fn load_stage(ctx: AppCtx) -> Result<List<Row>, String> {
+    bind rows <- ctx.io.read_csv("data/input.csv")
+    Result.ok(rows)
+}
+
+fn transform_stage(rows: List<Row>) -> Result<List<Row>, String> {
+    -- 変換ロジックのプレースホルダ
+    Result.ok(rows)
+}
+
+fn quality_stage(rows: List<Row>) -> Result<List<Row>, String> {
+    -- QualityCheck を適用する（Sprint 2）
+    Result.ok(rows)
+}
+
+fn observe_stage(rows: List<Row>) -> Result<List<Row>, String> {
+    -- PipelineMetrics を収集する（Sprint 4）
+    Result.ok(rows)
+}
+
+-- ── テスト統合セクション（Sprint 1: Test-Driven Data 1.0）────────────
+
+fn showcase_stage_test(ctx: AppCtx) -> Result<List<TestResult>, String> {
+    bind suite <- TestSuite.new("showcase")
+    bind tc    <- StageTestCase {
+        stage_name: "load_stage_returns_rows",
+        input: StageInput { name: "empty", rows: List.empty() },
+        expected: StageOutput { name: "empty", rows: List.empty() },
+    }
+    Result.ok(TestSuite.run(suite))
+}
+
+fn showcase_golden_dataset(ctx: AppCtx) -> Result<Bool, String> {
+    -- GoldenDataset 比較: load_golden_dataset で CSV をロードし compare_golden で照合（Sprint 1 v80.2.0）
+    bind expected <- load_golden_dataset("data/golden.csv")
+    bind actual   <- load_stage(ctx)
+    bind result   <- compare_golden(expected, actual)
+    Result.ok(result.passed)
+}
+
+fn showcase_schema_snapshot(ctx: AppCtx) -> Result<Bool, String> {
+    -- SchemaSnapshot 比較: compare_schema_snapshots でスキーマ変更を検出（Sprint 1 v80.7.0）
+    bind baseline <- SchemaSnapshot { pipeline_name: "showcase_baseline", columns: List.empty() }
+    bind current  <- SchemaSnapshot { pipeline_name: "showcase_current",  columns: List.empty() }
+    bind diff     <- compare_schema_snapshots(current, baseline)
+    Result.ok(schema_diff_is_breaking(diff))
+}
+
+-- ── 品質統合セクション（Sprint 2: Data Quality 2.0）────────────────────
+
+fn showcase_quality_check(rows: List<Row>) -> Result<List<QualityViolation>, String> {
+    -- QualityCheck: run_quality_check で行単位に品質ルールを適用
+    bind check <- QualityCheck {
+        rules: List.of(QualityRule {
+            column: "0",
+            kind: QualityRuleKind.NotNull,
+            severity: RuleSeverity.Error,
+        }),
+    }
+    Result.ok(run_quality_check(check, rows))
+}
+
+fn showcase_quality_gate(score: QualityScore) -> Result<GateDecision, String> {
+    -- QualityGate: evaluate_quality_gate でパイプライン停止条件を判定
+    bind gate <- QualityGate {
+        min_overall_score: 0.9,
+        required_dimensions: List.of(QualityDimension.Completeness, QualityDimension.Validity),
+        min_dimension_score: 0.8,
+    }
+    Result.ok(evaluate_quality_gate(gate, score))
+}
+
+fn showcase_anomaly_detection(value: Float) -> Result<AnomalyResult, String> {
+    -- AnomalyDetector: detect_anomaly で Z スコア外れ値検知（Sprint 2 v81.2.0）
+    bind stats    <- DistributionStats { mean: 50.0, std_dev: 10.0, min: 0.0, max: 100.0, count: 100 }
+    bind detector <- AnomalyDetector { baseline_stats: stats, z_threshold: 2.0 }
+    Result.ok(detect_anomaly(detector, value))
+}
+
+-- ── 契約統合セクション（Sprint 3: Pipeline Contracts 1.0）──────────────
+
+fn showcase_contract_registry(ctx: AppCtx) -> Result<ContractRegistry, String> {
+    -- ContractRegistry: IoContract を登録して共有レジストリを構築
+    bind registry <- ContractRegistry { entries: List.empty() }
+    bind contract <- IoContract {
+        name: "Favnir4ShowcaseContract",
+        version: "1.0.0",
+        input: List.empty(),
+        output: List.empty(),
+    }
+    bind entry <- ContractRegistryEntry {
+        name: "showcase",
+        version: ContractVersion { major: 1, minor: 0, patch: 0 },
+        contract: contract,
+        registered_at: "2026-08-22T00:00:00Z",
+    }
+    Result.ok(registry.register(entry))
+}
+
+-- ── 可観測性統合セクション（Sprint 4: Observability 2.0）──────────────────
+
+fn showcase_pipeline_metrics(ctx: AppCtx) -> PipelineMetrics {
+    -- PipelineMetrics: ステージ単位の実行統計を収集（Sprint 4 v83.1.0）
+    bind stage <- StageMetrics {
+        stage_name: "load_stage",
+        duration_ms: 42,
+        rows_processed: 1000,
+        rows_failed: 0,
+    }
+    PipelineMetrics {
+        pipeline_name: "favnir4-showcase",
+        stages: List.of(stage),
+        total_duration_ms: 42,
+        started_at: "2026-08-22T00:00:00Z",
+    }
+}
+
+fn showcase_health_dashboard(ctx: AppCtx) -> Result<String, String> {
+    -- HealthDashboard: AlertRule + SloTarget + format_health_dashboard で統合出力
+    bind rule <- AlertRule {
+        name: "latency_alert",
+        threshold: AlertThreshold {
+            metric: "total_duration_ms",
+            operator: ThresholdOp.GreaterThan,
+            value: 5000.0,
+        },
+        severity: AlertSeverity.Warning,
+        message: "Pipeline latency exceeded threshold",
+    }
+    bind metrics  <- showcase_pipeline_metrics(ctx)
+    bind alerts   <- evaluate_alert_rules(List.of(rule), metrics, "2026-08-22T00:00:00Z")
+    bind slo_tgt  <- SloTarget { name: "showcase-slo", objective_pct: 99.0, window_hours: 24 }
+    bind slo_meas <- SloMeasurement { good_events: 990, total_events: 1000, window_hours: 24 }
+    bind slo      <- compute_slo_status(slo_tgt, slo_meas)
+    bind health   <- compute_pipeline_health(metrics, alerts, slo, 0.95)
+    bind dashboard <- HealthDashboard {
+        pipelines: List.of(health),
+        generated_at: "2026-08-22T00:00:00Z",
+    }
+    Result.ok(format_health_dashboard(dashboard))
+}

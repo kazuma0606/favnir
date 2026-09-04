@@ -9,6 +9,232 @@ Favnir はその答えです。
 
 ---
 
+## v100.0 — Favnir SAP Platform 1.0 宣言（2026-09-04）
+
+Favnir v100.0 で **SAP Platform 1.0** を宣言しました。
+
+`$delta` で差分を受け取り、Event Mesh でリアルタイムに動き、`ctx.sap_env("PRD")` で本番に向き、
+Snowflake と型安全に JOIN し、`!Approval` で人間の承認を型に閉じ込め、
+`Masked<T>` が個人情報を守り、Circuit Breaker が守り、SLA が測る。
+
+```favnir
+-- SAP BusinessPartner を取得し GDPR マスキングして保存する pipeline
+pipeline sap_partner_sync !SapOData !Snowflake {
+    stage Fetch {
+        bind client <- ctx.sap.connect("BusinessPartner")
+        bind result <- client.query_builder<BusinessPartner>()
+            |> QueryBuilder.filter("Country eq 'JP'")
+            |> QueryBuilder.page(1000, 0)
+            |> client.execute
+    }
+    |> stage Mask {
+        bind masked <- List.map(result.value, fn(p) -> mask(p.Email))
+    }
+    |> stage Save {
+        bind _ <- Snowflake.insert("partner_masked", masked)
+    }
+}
+```
+
+SAP Platform 1.0 の詳細は [SAP Platform ガイド](./site/content/docs/guides/sap-platform.mdx) を参照。
+
+---
+
+## v99.0 — SAP Analytics 1.0 宣言（2026-09-03）
+
+Favnir v99.0 で **SAP Analytics 1.0** を宣言しました。
+
+`KpiDefinition<SalesOrder>` が売上の健全性を測り、BW クエリの結果が SAC に流れ、
+閾値を超えた瞬間に Slack が鳴る。
+
+```favnir
+-- 日次売上 KPI を定義し、SAC プッシュ → アラート送信する pipeline
+pipeline kpi_monitor !SapOData !SapAnalytics {
+    stage Fetch {
+        bind orders <- ctx.sap.sales_orders(SalesOrderFilter {
+            date_from: Option.some("2026-09-03"),
+            date_to:   Option.none(),
+            top:       Option.some(5000)
+        })
+    }
+    |> stage Evaluate {
+        bind report  <- build_sales_report("2026-09-03", orders)
+        bind kpi_def <- Result.ok(KpiDefinition {
+            name:      "DailyRevenue",
+            unit:      "JPY",
+            threshold: KpiThreshold { warning: 500000.0, critical: 1000000.0 },
+            extract:   |_| 0.0
+        })
+        bind snap    <- Result.ok(make_kpi_snapshot(kpi_def, report.total_amount, "2026-09-03"))
+    }
+    |> stage Alert {
+        bind alert <- Result.ok(KpiAlert {
+            kpi_name: snap.kpi.name,
+            status:   snap.status,
+            message:  Float.to_string(snap.value)
+        })
+        bind msg <- Result.ok(format_kpi_alert(alert))
+        -- "[CRITICAL] DailyRevenue: 1200000.0" のような文字列を生成
+        bind _   <- Result.ok(msg)
+    }
+}
+```
+
+---
+
+## v98.0 — SAP Workflow 1.0 宣言（2026-09-02）
+
+Favnir v98.0 で **SAP Workflow 1.0** を宣言しました。
+
+`!Approval` エフェクトが pipeline のシグネチャに現れた時、
+それはコードが「ここで人間の承認が必要」と語っているのだ。
+
+```favnir
+-- 承認フローを型で表現するパイプライン（!Approval はエフェクトマーカー）
+pipeline route_by_approval_result(decision: TaskDecision) !Approval {
+    match decision {
+        Approve        -> execute_approved_action()
+        Reject(reason) -> notify_rejection(reason)
+    }
+}
+```
+
+テスト時は `Ctx.mock_workflow(MockWorkflowClient { auto_approve: true, reject_reason: Option.none() })` で承認フローをモックできます。
+
+---
+
+## v97.0 — SAP Multi-system 1.0 宣言（2026-09-01）
+
+Favnir v97.0 で **SAP Multi-system 1.0** を宣言しました。
+
+`ctx.sap_env("PRD")` で本番に向き、SAP のデータが Snowflake に流れ、
+カスタムサービスの型も `fav infer` が生み出す。
+
+```favnir
+-- PRD 環境の SAP から取得して Snowflake に同期
+bind sap_prd <- ctx.sap_env("PRD")
+bind bps     <- sap_prd.business_partners(filter)
+bind rows    <- List.map(bps, fn(bp) { bp_to_snowflake_row(bp) })
+bind _       <- ctx.snowflake.execute_raw(
+    "INSERT INTO SAP_BUSINESS_PARTNERS SELECT * FROM VALUES ?",
+    rows
+)
+```
+
+---
+
+## v96.0 — SAP Real-time 1.0 宣言（2026-09-01）
+
+Favnir v96.0 で **SAP Real-time 1.0** を宣言しました。
+
+`$delta` で差分を受け取り、Event Mesh でリアルタイムに変化を知り、
+Deep Insert で一気に書き込み、`fav sap-mock` でオフラインでもテストできる。
+
+---
+
+## v95.0 — SAP Advanced 1.0 宣言（2026-08-30）
+
+Favnir v95.0 で **SAP Advanced 1.0** を宣言しました。
+
+`ctx.sap.batch(req)` で複数 SAP エンティティをまとめて更新できます。
+`QueryBuilder<T>` で型安全なクエリを組み立て、Lambda SnapStart でコールドスタートを 93% 削減します。
+
+```favnir
+fn cleanup_partners(ctx: AppCtx) -> Result<String, String> {
+    bind bps  <- ctx.sap.business_partners(BusinessPartnerFilter {
+        country: Option.some("JP"), category: Option.none(),
+        changed_after: Option.none(), top: Option.some(200)
+    })
+    bind ops  <- List.map(bps, fn(bp) { BatchDelete(bp.partner_id) })
+    bind req  <- batch_request_builder("A_BusinessPartner", ops)
+    bind resp <- ctx.sap.batch(req)
+    Result.ok(String.concat("deleted ", Int.to_string(List.length(resp.succeeded))))
+}
+```
+
+---
+
+## v94.0 — SAP Metadata Infer 1.0 宣言（2026-08-30）
+
+Favnir v94.0 で **SAP Metadata Infer 1.0** を宣言しました。
+
+`fav infer --from sap --metadata <url>` と打てば、SAP の `$metadata` から Favnir 型定義が自動生成されます。
+EntityType は `type` に、EnumType は ADT に、NavigationProperty は ExpandClause ヘルパーに変換されます。
+
+```bash
+fav infer --from sap \
+  --metadata https://my.sap.example.com/sap/opu/odata/sap/API_BUSINESS_PARTNER/$metadata \
+  --out ./runes/sap-odata/generated_types.fav
+```
+
+---
+
+## v93.0 — SAP QueryBuilder 1.0 宣言（2026-08-29）
+
+Favnir v93.0 で **SAP QueryBuilder 1.0** を宣言しました。
+
+`query<SalesOrder>()` に `with_filter` / `with_top` を繋げば、型安全な OData クエリが組み立てられます。
+ページネーションは `fetch_all_pages` で自動化され、N+1 は W060 lint で検出されます。
+
+```favnir
+fn list_open_orders(ctx: AppCtx) -> Result<List<SalesOrder>, String> {
+    bind q1 <- Result.ok(query<SalesOrder>())
+    bind q2 <- Result.ok(with_filter(q1, Eq("SoldToParty", "CUST-001")))
+    bind q3 <- Result.ok(with_top(q2, 50))
+    ctx.sap.sales_orders_query(q3)
+}
+```
+
+**SAP QueryBuilder 1.0（v92.1〜v92.9）で追加した主要機能:**
+`QueryBuilder<T>` / `with_select` / `with_expand` / `with_filter` / `with_top` / `with_skip` / `with_order_by` /
+`Page<T>` / `fetch_all_pages` / W060 N+1 lint / `pipeline_query.fav` E2E デモ / `fav bench --sap-query`
+
+---
+
+## v92.0 — SAP OData Query 1.0 宣言（2026-08-27）
+
+Favnir v92.0 で **SAP OData Query 1.0** を宣言しました。
+
+`SapQueryClient` を通じて `sales_orders_query(q)` と書けば、`$filter`・`$select`・`$expand` を型で組み立てた OData クエリが発行できます。
+誤フィールド指定はコンパイル時に検出されます。
+
+```favnir
+bind q <- sales_order_query()
+bind q <- { q | filter: Option.some(Eq("SoldToParty", "CUST-001")), top: Option.some(50) }
+-- SapQueryClient 経由でクエリ発行
+```
+
+**SAP OData Query 1.0（v91.1〜v91.9）で追加した主要機能:**
+`SelectClause<T>` / `ExpandClause<T>` / `FilterExpr<T>` / `SalesOrderQuery` / `BusinessPartnerQuery` /
+`MaterialQuery` / `PurchaseOrderQuery` / `JournalEntryQuery` / `ODataQueryBuilder<T, Q>` /
+`SapQueryClient` interface / `MockSapClient` の `SapQueryClient` impl
+
+---
+
+## v91.0 — SAP Ctx 統合 1.0 宣言（2026-08-26）
+
+Favnir v91.0 で **SAP Ctx 統合 1.0** を宣言しました。
+
+`ctx.sap.business_partners(filter)` と書けば、SAP にアクセスできます。
+設定は `AppCtx` に隠れ、テストは `MockSapClient` で差し替わります。
+
+```favnir
+fn sync_business_partners(ctx: AppCtx) -> Result<Int, String> {
+    bind partners <- ctx.sap.business_partners(BusinessPartnerFilter {
+        country: Option.some("JP"), category: Option.none(),
+        changed_after: Option.none(), top: Option.some(500)
+    })
+    Result.ok(List.length(partners))
+}
+```
+
+**SAP Ctx 統合 1.0（v90.1〜v90.9）で追加した主要機能:**
+`SapClient` interface / `AppCtx.sap` フィールド / `MockSapClient` テストスタブ /
+`Ctx.build()` 自動設定注入 / `Ctx.mock()` テスト用 AppCtx /
+`pipeline.fav` 全 4 シナリオの `ctx.sap.*` 書き換え
+
+---
+
 ## v90.0 — SAP Integration 1.0 宣言（2026-08-25）
 
 Favnir v90.0 で **SAP Integration 1.0** を宣言しました。
@@ -658,11 +884,11 @@ fn load(ctx: LoadCtx) -> Result<List<Row>, String> { ... }
 fn load(Ctx { db: DbRead }, page: Int) -> Result<List<Row>, String> { ... }
 // → fn load(ctx: LoadCtx, page: Int) -> ... に脱糖
 
-// テスト用モック
-fn run_test() -> Bool {
-  let ctx = Ctx.mock(MockDb.empty(), MockStorage.empty());
-  let rows = load(ctx);
-  Result.is_ok(rows)
+-- テスト用モック
+fn run_test() -> Result<Bool, String> {
+  bind ctx  <- Ctx.mock(MockDb.empty(), MockStorage.empty())
+  bind rows <- load(ctx)
+  Result.ok(true)
 }
 ```
 

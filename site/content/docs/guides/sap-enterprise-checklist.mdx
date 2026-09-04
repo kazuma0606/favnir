@@ -1,0 +1,88 @@
+---
+title: SAP 本番投入チェックリスト（enterprise checklist）
+description: Favnir SAP Platform を本番環境に投入する前の確認事項（enterprise checklist）
+---
+
+# SAP 本番投入チェックリスト
+
+SAP Platform を本番環境に投入する前に、以下の checklist を確認してください。
+
+---
+
+## 1. 認証・認可
+
+- [ ] SAP OData エンドポイントの認証情報が AWS SSM Parameter Store に格納されている
+- [ ] Terraform IAM ポリシーで Parameter Store への最小権限アクセスが設定されている
+- [ ] `fav.toml` の `[sap]` セクションが `${SSM_PARAM}` 形式の環境変数参照になっている（平文シークレットは含まない）
+- [ ] Lambda 実行ロールに SAP エンドポイントへの送信を許可するセキュリティグループが設定されている
+
+## 2. SLA 定義と監視
+
+- [ ] `sla.toml` に全 SAP エンドポイントの `max_latency_ms` と `availability` が定義されている
+- [ ] `fav sla-check --config sla.toml` が 0 violations で通過する
+- [ ] CloudWatch / Datadog アラートが SLA 閾値で設定されている
+
+```sh
+fav sla-check --config sla.toml --from 2026-09-01 --to 2026-09-04
+# 期待出力: No violations detected.
+```
+
+## 3. CircuitBreaker 設定
+
+- [ ] 全 SAP OData 呼び出しが `CircuitBreaker.call()` でラップされている
+- [ ] `failure_threshold` と `recovery_timeout_ms` が本番 SLA に合わせて設定されている
+- [ ] CircuitBreaker が Open 状態になった際のフォールバック処理が実装されている
+
+## 4. マルチテナント分離
+
+- [ ] 全テナントが独立した `TenantContext`（tenant_id・sap_env・schema）を持っている
+- [ ] テナント間でデータが混在しないことを E2E テストで確認している
+- [ ] テナント ID の命名規則が決定・文書化されている
+
+## 5. GDPR データマスキング
+
+- [ ] GDPR 対象フィールド（氏名・メールアドレス・住所等）がすべて `Masked<T>` でラップされている
+- [ ] `unmask_mock` はテスト環境のみで使用し、本番では `ctx.unmask.unmask()` を使用している
+- [ ] アンマスクログが監査ログ（AuditClient）に記録されている
+
+## 6. E2E テスト
+
+- [ ] `cargo test -- --test-threads=1` が 0 failures で完了する
+- [ ] 全 SAP エンドポイントに対する E2E パイプラインテストが存在する
+- [ ] モックと本番で同一のパイプライン定義が動作することを確認している
+
+## 7. モニタリング・可観測性
+
+- [ ] OTel トレーシングが SAP OData 呼び出しをカバーしている
+- [ ] メトリクス（リクエスト数・レイテンシ・エラー率）がダッシュボードに表示されている
+- [ ] アラートが on-call チームに通知される設定になっている
+
+## 8. インフラ・デプロイ
+
+- [ ] Terraform が最新状態で `terraform plan` に差分がない
+- [ ] Lambda SnapStart が有効化されている（v95.0〜）
+- [ ] ECR イメージが最新ビルドを指している
+- [ ] ロールバック手順が文書化されている
+
+---
+
+## チェックリスト完了後
+
+すべての項目にチェックが入ったら、プロダクションデプロイを実行してください。
+
+```sh
+# Terraform デプロイ
+cd infra && terraform apply
+
+# Lambda デプロイ
+fav deploy --env prd
+```
+
+デプロイ後は `fav sla-check` を再実行し、本番環境での SLA 準拠を確認してください。
+
+---
+
+## 関連ドキュメント
+
+- [SAP Platform 1.0 ガイド](./sap-platform)
+- [SAP 移行ガイド](./sap-migration)

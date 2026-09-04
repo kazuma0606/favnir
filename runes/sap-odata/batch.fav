@@ -1,0 +1,80 @@
+-- SAP OData $batch 型定義（v94.1.0〜v94.2.0）
+-- OData $batch プロトコルで複数 CRUD 操作を 1 回の HTTP リクエストで送信する型。
+
+-- バッチ操作の種類
+-- BatchCreate(T)            — エンティティ新規作成
+-- BatchUpdate(String, T)   — 既存エンティティ更新（第1引数はエンティティキー）
+-- BatchDelete(String)      — エンティティ削除（引数はエンティティキー）
+public type BatchOperation<T> =
+    | BatchCreate(T)
+    | BatchUpdate(String, T)
+    | BatchDelete(String)
+
+-- バッチリクエスト型
+-- entity_set:  OData エンティティセット名（例: "A_BusinessPartner"）
+-- operations:  送信する操作のリスト
+public type BatchRequest<T> = {
+    entity_set: String,
+    operations: List<BatchOperation<T>>
+}
+
+-- バッチレスポンス型
+-- succeeded: 成功したエンティティのリスト
+-- failed:    失敗した操作の情報リスト
+public type BatchResponse<T> = {
+    succeeded: List<T>,
+    failed:    List<BatchError>
+}
+
+-- バッチ操作の個別失敗情報
+-- index:   operations リスト内のインデックス（0 始まり）
+-- message: SAP OData が返したエラーメッセージ
+public type BatchError = {
+    index:   Int,
+    message: String
+}
+
+-- ChangeSet: OData $batch 内でアトミックに実行される操作グループ（v94.2.0）
+-- OData マルチパート body の --changeset_<id> 境界に対応する。
+-- operations 内の全操作が成功するか、全て失敗するかのいずれかとなる。
+public type ChangeSet<T> = {
+    operations: List<BatchOperation<T>>
+}
+
+-- BatchRequest を組み立てるヘルパー関数（v94.2.0）
+-- entity_set: OData エンティティセット名（例: "A_BusinessPartner"）
+-- ops:        送信する操作のリスト
+public fn batch_request_builder<T>(entity_set: String, ops: List<BatchOperation<T>>) -> Result<BatchRequest<T>, String> {
+    Result.ok(BatchRequest {
+        entity_set: entity_set,
+        operations: ops
+    })
+}
+
+-- バッチ操作の個別結果型（v95.7.0）
+-- BatchSuccess(T)       — 操作成功（エンティティ T を保持）
+-- BatchFailure(BatchError) — 操作失敗（エラー情報を保持）
+public type BatchItemResult<T> =
+    | BatchSuccess(T)
+    | BatchFailure(BatchError)
+
+-- 部分成功レスポンス集計型（v95.7.0）
+-- succeeded / failed のフィールド型は型の統一のため List<BatchItemResult<T>> を使用するが、
+-- ランタイムの契約として succeeded には BatchSuccess(T) のみ、failed には BatchFailure(BatchError) のみが格納される。
+-- 呼び出し元は match で variant を取り出すことができる。
+-- success_rate: 成功率（0.0〜1.0）。operations が空リストの場合は 1.0 とする（ゼロ除算回避）。
+public type PartialSuccess<T> = {
+    succeeded:    List<BatchItemResult<T>>,
+    failed:       List<BatchItemResult<T>>,
+    success_rate: Float
+}
+
+-- バッチ部分失敗ハンドリング（v95.7.0）
+-- PartialSuccess<T> を返すことで成功・失敗の両方を呼び出し元が処理できる。
+-- NOTE: v95.7.0 は cfg スタイルのスタブ。ctx.sap.batch_with_partial() への移行は後続バージョン。
+public fn batch_with_partial<T>(
+    cfg: SapConfig,
+    req: BatchRequest<T>
+) -> Result<PartialSuccess<T>, String> {
+    Result.err("not implemented")
+}

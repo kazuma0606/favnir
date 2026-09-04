@@ -1,0 +1,47 @@
+-- シナリオ 5: $batch + BusinessPartnerFilter による取引先一括削除（v94.7.0）
+--
+-- SAP Advanced Era の全機能を統合した完全 E2E デモ:
+--   - BusinessPartnerFilter による絞り込み取得
+--   - S3 への JSON バックアップ（削除前スナップショット）
+--   - OData $batch によるバルク削除（BatchDelete × N 件）
+--
+-- 前提:
+--   - fav.toml に [sap] / [s3] セクションが設定済みであること
+--   - Lambda SnapStart（infra/lambda/sap-sync/main.tf）で実行される想定
+
+import rune "sap-odata"
+import rune "s3"
+
+fn advanced_sap_pipeline(ctx: AppCtx) -> Result<String, String> {
+    -- 1. 日本の取引先（カテゴリ指定なし）を最大 200 件取得
+    bind bps  <- ctx.sap.business_partners(BusinessPartnerFilter {
+        country:       Option.some("JP"),
+        category:      Option.none(),
+        changed_after: Option.none(),
+        top:           Option.some(200)
+    })
+
+    -- 2. S3 に JSON バックアップ保存（削除前スナップショット）
+    bind json <- Json.encode(bps)
+    bind _    <- ctx.s3.put_object("favnir-sap-sync", "bps_jp_latest.json", json)
+
+    -- 3. $batch で一括削除（BatchDelete × List.length(bps) 件）
+    bind ops  <- List.map(bps, fn(bp) { BatchDelete(bp.partner_id) })
+    bind req  <- batch_request_builder("A_BusinessPartner", ops)
+    bind resp <- ctx.sap.batch(req)
+
+    -- 4. 削除結果を返す
+    Result.ok(String.concat(
+        "deleted ",
+        String.concat(
+            Int.to_string(List.length(resp.succeeded)),
+            " business partners"
+        )
+    ))
+}
+
+fn advanced_sap_pipeline_with_report(ctx: AppCtx) -> Result<String, String> {
+    -- advanced_sap_pipeline を実行し、サービス名プレフィックスを付けたレポートを返す
+    bind result <- advanced_sap_pipeline(ctx)
+    Result.ok(String.concat("[SAP Advanced Pipeline] ", result))
+}

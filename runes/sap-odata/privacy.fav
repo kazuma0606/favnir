@@ -1,0 +1,20 @@
+-- runes/sap-odata/privacy.fav
+-- GDPR データマスキング型定義（v99.5.0）
+
+-- PII フィールドをラップする型（effect Unmask 宣言なし）
+public type Masked<T> = { inner: T }
+
+-- アンマスク操作を提供する interface
+public interface UnmaskClient {
+    fn unmask<T>(masked: Masked<T>) -> Result<T, String>
+}
+
+-- T を Masked<T> にラップする
+public fn mask<T>(value: T) -> Masked<T> {
+    Masked { inner: value }
+}
+
+-- テスト用モック: Masked<T> をアンマスクして T を返す
+public fn unmask_mock<T>(masked: Masked<T>) -> Result<T, String> {
+    Result.ok(masked.inner)
+}

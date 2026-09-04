@@ -1,0 +1,28 @@
+-- runes/sap-odata/audit.fav
+-- SAP 監査ログ型定義（v99.2.0）
+
+-- 監査イベント（SAP データアクセス 1 件につき 1 レコード）
+public type AuditEvent = {
+    actor:     String,
+    action:    String,
+    resource:  String,
+    timestamp: String,
+    result:    String
+}
+
+-- 監査証跡（複数 AuditEvent のコレクション）
+public type AuditTrail = {
+    events:     List<AuditEvent>,
+    pipeline:   String,
+    started_at: String
+}
+
+-- 監査ログクライアント interface（本番: CloudWatch / Splunk 等）
+public interface AuditClient {
+    fn log(event: AuditEvent) -> Result<Unit, String>
+}
+
+-- テスト用モック: 受け取った AuditEvent を受理して Result.ok を返す
+public fn log_audit_event_mock(event: AuditEvent) -> Result<Unit, String> {
+    Result.ok(Unit)
+}

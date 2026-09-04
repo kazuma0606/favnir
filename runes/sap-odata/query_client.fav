@@ -1,0 +1,18 @@
+-- SAP OData クエリメソッド interface（v91.8.0）
+-- 循環 dep 解消策: SapClient（types.fav）とは別インターフェースとして定義。
+-- query.fav → entity.fav → types.fav の依存チェーンに乗っており循環なし。
+
+use sap_odata.query
+use sap_odata.sales_order
+use sap_odata.business_partner
+use sap_odata.material
+use sap_odata.purchase_order
+use sap_odata.journal_entry
+
+public interface SapQueryClient {
+    fn sales_orders_query(ctx: SapQueryClient, q: SalesOrderQuery) -> Result<List<SalesOrder>, String>
+    fn business_partners_query(ctx: SapQueryClient, q: BusinessPartnerQuery) -> Result<List<BusinessPartner>, String>
+    fn materials_query(ctx: SapQueryClient, q: MaterialQuery) -> Result<List<Material>, String>
+    fn purchase_orders_query(ctx: SapQueryClient, q: PurchaseOrderQuery) -> Result<List<PurchaseOrder>, String>
+    fn journal_entries_query(ctx: SapQueryClient, q: JournalEntryQuery) -> Result<List<JournalEntry>, String>
+}

@@ -1,0 +1,23 @@
+-- infra/e2e-demo/sap-odata/pipeline_workflow.fav
+-- 承認フロー結果による条件分岐 pipeline デモ（v97.4.0）
+--
+-- po_id / context は pipeline パラメータとして宣言するか、
+-- 前段 stage で bind して使用する（デモ目的のため省略）。
+
+pipeline route_by_approval_result !SapOData !Approval !S3 {
+    stage Decide {
+        bind decision <- ctx.approval.request_approval("発注承認", context)
+    }
+    |> stage Route {
+        bind _ <- match decision {
+            Approve     -> pipeline {
+                bind _ <- ctx.sap.workflow_start("POApproval", po_id)
+                bind _ <- ctx.s3.put_object("audit", po_id ++ "_approved.json", context)
+            }
+            Reject(msg) -> pipeline {
+                bind _ <- ctx.io.println("却下理由: " ++ msg)
+                bind _ <- ctx.s3.put_object("audit", po_id ++ "_rejected.json", msg)
+            }
+        }
+    }
+}

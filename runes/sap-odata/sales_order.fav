@@ -1,4 +1,4 @@
--- SalesOrder 型定義（v87.1.0）+ クエリ関数（v87.2.0）+ 単一取得（v87.3.0）+ 新規作成（v87.4.0）+ 集計型（v87.5.0）
+-- SalesOrder 型定義（v87.1.0）+ クエリ関数（v87.2.0）+ 単一取得（v87.3.0）+ 新規作成（v87.4.0）+ 集計型（v87.5.0）+ Deep Insert（v95.5.0）
 
 use sap_odata.types
 
@@ -90,4 +90,26 @@ public type SalesReport = {
     total_orders: Int,
     total_amount: Float,
     by_currency:  List<CurrencyTotal>
+}
+
+-- Deep Insert 型（v95.5.0）
+-- SalesOrder と Items を 1 リクエストで作成する OData Deep Insert 専用の入力型
+-- NewSalesOrder（v87.4.0）と異なり sales_org を持たない。
+-- 省略理由: Deep Insert は既存 SalesOrganization コンテキスト内で実行される想定であり、
+-- sales_org は呼び出し元の SapConfig またはセッション設定から OData レイヤーで付与される。
+-- 本実装時（後続バージョン）に要件が確定すれば sales_org フィールドを追加すること。
+public type NewSalesOrderWithItems = {
+    customer_id: String,
+    currency:    String,
+    items:       List<NewSalesOrderItem>
+}
+
+-- SalesOrder Deep Insert（v95.5.0）
+-- OData v4 のネスト構造を使い SalesOrder + Items を 1 リクエストで作成する
+-- @internal: 未実装スタブ。本実装は後続バージョンで予定。
+public fn create_sales_order_deep(
+    cfg:   SapConfig,
+    order: NewSalesOrderWithItems
+) -> Result<SalesOrder, String> {
+    Result.err("not implemented")
 }

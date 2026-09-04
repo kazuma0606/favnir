@@ -1,8 +1,12 @@
 -- sap-odata Rune エントリポイント（v85.5.0〜）
 -- 各スプリントで use / re-export を追加していく（SalesOrder: v87.2.0、JournalEntry: v89.1.0）
+-- NOTE: QueryBuilder<T> / with_select / with_expand / with_filter は `use sap_odata.query_builder` で直接利用可能。
+--       sap_odata.fav への re-export は v93.0.0 以降で追加予定。
 
 use sap_odata.types
 use sap_odata.client
+use sap_odata.query
+use sap_odata.batch
 use sap_odata.business_partner
 use sap_odata.sales_order
 use sap_odata.sales_report
@@ -10,6 +14,15 @@ use sap_odata.material
 use sap_odata.purchase_order
 use sap_odata.stock
 use sap_odata.journal_entry
+use sap_odata.delta
+use sap_odata.analytics
+use sap_odata.sac
+use sap_odata.btp_auth
+use sap_odata.audit
+use sap_odata.resilience
+use sap_odata.tenant
+use sap_odata.privacy
+-- TODO(v95.x): use sap_odata.rpc および FunctionImportParam / function_import / action_import の re-export を追加する
 
 public type SapConfig                 = types.SapConfig
 public type ODataParams               = types.ODataParams
@@ -29,15 +42,28 @@ public fn odata_list(cfg: SapConfig, entity_set: String, params: ODataParams) ->
     client.odata_list(cfg, entity_set, params)
 }
 public type PagedResult = types.PagedResult
+-- OData クエリ型（v91.1.0〜）SelectClause<T> / ExpandClause<T> は query モジュール経由で公開
+-- 使用例: bind q <- select_fields<BusinessPartner>(["BusinessPartner", "Country"])
+public fn select_fields<T>(fields: List<String>) -> query.SelectClause<T> {
+    query.select_fields(fields)
+}
+-- 使用例: bind expand <- expand_nav<SalesOrder>(["to_Item", "to_Partner"])
+public fn expand_nav<T>(navigation_properties: List<String>) -> query.ExpandClause<T> {
+    query.expand_nav(navigation_properties)
+}
+-- odata_list_paged / odata_collect_all は未実装スタブ（v91.x.x で本実装予定）
 public fn odata_list_paged(cfg: SapConfig, entity_set: String, params: ODataParams, page_size: Int) -> Result<PagedResult, String> {
     client.odata_list_paged(cfg, entity_set, params, page_size)
 }
 public fn odata_collect_all(cfg: SapConfig, entity_set: String, params: ODataParams, max_pages: Int) -> Result<List<String>, String> {
     client.odata_collect_all(cfg, entity_set, params, max_pages)
 }
-public fn business_partners(cfg: SapConfig, filter: BusinessPartnerFilter) -> Result<List<BusinessPartner>, String> {
-    business_partner.business_partners(cfg, filter)
+public fn business_partners(ctx: AppCtx, filter: BusinessPartnerFilter) -> Result<List<BusinessPartner>, String> {
+    ctx.sap.business_partners(filter)
 }
+-- business_partner_by_id は expand_address: Bool 引数を持ち SapClient interface と異なるシグネチャのため
+-- v90.5.0 では AppCtx 化の対象外とする。
+-- TODO(v91.3.0): AppCtx スタイルに統一する（SapClient interface と一致させる）
 public fn business_partner_by_id(cfg: SapConfig, partner_id: String, expand_address: Bool) -> Result<BusinessPartner, String> {
     business_partner.business_partner_by_id(cfg, partner_id, expand_address)
 }
@@ -51,8 +77,8 @@ public type SalesOrderStatus  = sales_order.SalesOrderStatus
 public type SalesOrderItem    = sales_order.SalesOrderItem
 public type SalesOrder        = sales_order.SalesOrder
 public type SalesOrderFilter  = sales_order.SalesOrderFilter
-public fn sales_orders(cfg: SapConfig, filter: SalesOrderFilter) -> Result<List<SalesOrder>, String> {
-    sales_order.sales_orders(cfg, filter)
+public fn sales_orders(ctx: AppCtx, filter: SalesOrderFilter) -> Result<List<SalesOrder>, String> {
+    ctx.sap.sales_orders(filter)
 }
 public fn sales_order_by_id(cfg: SapConfig, order_id: String, expand_items: Bool) -> Result<SalesOrder, String> {
     sales_order.sales_order_by_id(cfg, order_id, expand_items)
@@ -73,8 +99,8 @@ public fn format_sales_report(report: SalesReport) -> String {
 public type MaterialType   = material.MaterialType
 public type Material       = material.Material
 public type MaterialFilter = material.MaterialFilter
-public fn materials(cfg: SapConfig, filter: MaterialFilter) -> Result<List<Material>, String> {
-    material.materials(cfg, filter)
+public fn materials(ctx: AppCtx, filter: MaterialFilter) -> Result<List<Material>, String> {
+    ctx.sap.materials(filter)
 }
 public fn material_by_id(cfg: SapConfig, material_id: String) -> Result<Material, String> {
     material.material_by_id(cfg, material_id)
@@ -103,10 +129,95 @@ public type DebitCredit      = journal_entry.DebitCredit
 public type JournalEntryItem = journal_entry.JournalEntryItem
 public type JournalEntry     = journal_entry.JournalEntry
 public type JournalFilter    = journal_entry.JournalFilter
-public fn journal_entries(cfg: SapConfig, filter: JournalFilter) -> Result<List<JournalEntry>, String> {
-    journal_entry.journal_entries(cfg, filter)
+public fn journal_entries(ctx: AppCtx, filter: JournalFilter) -> Result<List<JournalEntry>, String> {
+    ctx.sap.journal_entries(filter)
 }
 public type OutstandingPayable = journal_entry.OutstandingPayable
 public fn match_unposted_orders(pos: List<PurchaseOrder>, journals: List<JournalEntry>) -> Result<List<OutstandingPayable>, String> {
     journal_entry.match_unposted_orders(pos, journals)
+}
+-- $delta 型 re-export（v95.1.0〜）
+public type DeltaResult<T>  = delta.DeltaResult<T>
+public type DeletedEntity   = delta.DeletedEntity
+public fn delta_link_is_valid(link: String) -> Bool {
+    delta.delta_link_is_valid(link)
+}
+public fn delta_fetch<T>(ctx: AppCtx, entity_set: String, delta_link: Option<String>) -> Result<DeltaResult<T>, String> {
+    ctx.sap.delta_fetch<T>(entity_set, delta_link)
+}
+-- Analytics 型 re-export（v98.1.0〜）
+public type KpiThreshold          = analytics.KpiThreshold
+public type KpiDefinition<T>      = analytics.KpiDefinition<T>
+public type KpiStatus             = analytics.KpiStatus
+public type KpiSnapshot<T>        = analytics.KpiSnapshot<T>
+public fn measure_kpi_status<T>(kpi: analytics.KpiDefinition<T>, value: Float) -> analytics.KpiStatus {
+    analytics.measure_kpi_status(kpi, value)
+}
+public fn make_kpi_snapshot<T>(kpi: analytics.KpiDefinition<T>, value: Float, measured_at: String) -> analytics.KpiSnapshot<T> {
+    analytics.make_kpi_snapshot(kpi, value, measured_at)
+}
+-- BW/4HANA クエリ型 re-export（v98.2.0〜）
+public type BwQuery<T>  = analytics.BwQuery<T>
+public type BwResult<T> = analytics.BwResult<T>
+public fn bw_query_mock<T>(query: analytics.BwQuery<T>, rows: List<T>) -> analytics.BwResult<T> {
+    analytics.bw_query_mock(query, rows)
+}
+-- KPI アラート型 re-export（v98.5.0〜）
+public type KpiAlert = analytics.KpiAlert
+public fn format_kpi_alert(alert: analytics.KpiAlert) -> String {
+    analytics.format_kpi_alert(alert)
+}
+-- $batch 型 re-export（v94.8.0〜）
+-- BatchOperation<T> / BatchRequest<T> / BatchResponse<T> / BatchError / batch_request_builder<T>
+public type BatchOperation<T>  = batch.BatchOperation<T>
+public type BatchRequest<T>    = batch.BatchRequest<T>
+public type BatchResponse<T>   = batch.BatchResponse<T>
+public type BatchError         = batch.BatchError
+public fn batch_request_builder<T>(entity_set: String, ops: List<BatchOperation<T>>) -> Result<BatchRequest<T>, String> {
+    batch.batch_request_builder(entity_set, ops)
+}
+-- SAC 型 re-export（v98.3.0〜）
+public type SacDataset = sac.SacDataset
+public fn sac_push_mock(dataset: sac.SacDataset) -> String {
+    sac.sac_push_mock(dataset)
+}
+public fn report_to_sac_rows(report: sales_order.SalesReport) -> Result<List<String>, String> {
+    sac.report_to_sac_rows(report)
+}
+-- BTP 認証型 re-export（v99.1.0〜）
+public type BtpCredential = btp_auth.BtpCredential
+public type BtpToken      = btp_auth.BtpToken
+public fn acquire_token_mock(cred: btp_auth.BtpCredential) -> BtpToken {
+    btp_auth.acquire_token_mock(cred)
+}
+-- 監査ログ型 re-export（v99.2.0〜）
+public type AuditEvent  = audit.AuditEvent
+public type AuditTrail  = audit.AuditTrail
+public type AuditClient = audit.AuditClient
+public fn log_audit_event_mock(event: audit.AuditEvent) -> Result<Unit, String> {
+    audit.log_audit_event_mock(event)
+}
+-- Circuit Breaker 型 re-export（v99.3.0〜）
+public type CircuitState       = resilience.CircuitState
+public type CircuitBreaker<T>  = resilience.CircuitBreaker<T>
+public fn circuit_breaker_default<T>(tag: String) -> CircuitBreaker<T> {
+    resilience.circuit_breaker_default(tag)
+}
+public fn circuit_breaker_call_mock<T>(cb: resilience.CircuitBreaker<T>, value: T) -> Result<T, String> {
+    resilience.circuit_breaker_call_mock(cb, value)
+}
+-- マルチテナント型 re-export（v99.4.0〜）
+public type TenantId      = tenant.TenantId
+public type TenantContext = tenant.TenantContext
+public fn tenant_context_mock(tenant_id: TenantId) -> TenantContext {
+    tenant.tenant_context_mock(tenant_id)
+}
+-- GDPR データマスキング型 re-export（v99.5.0〜）
+public type Masked<T>    = privacy.Masked<T>
+public type UnmaskClient = privacy.UnmaskClient
+public fn mask<T>(value: T) -> Masked<T> {
+    privacy.mask(value)
+}
+public fn unmask_mock<T>(masked: Masked<T>) -> Result<T, String> {
+    privacy.unmask_mock(masked)
 }

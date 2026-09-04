@@ -1,0 +1,109 @@
+-- runes/sap-odata/query_builder.fav — QueryBuilder<T> 汎用クエリビルダー型（v92.1.0〜）
+-- T: クエリ対象エンティティ型（ファントム型パラメータ）
+-- SelectClause / ExpandClause / FilterExpr は query.fav からインポート
+--
+-- 設計メモ:
+--   ODataQueryBuilder<T, Q>（query.fav）はエンティティパスと個別クエリ型（Q）を束ねるラッパー。
+--   QueryBuilder<T> はそれとは独立した抽象レイヤーで、エンティティ型 T に対するすべての
+--   クエリオプション（select/expand/filter/top/skip/order_by）を統一的に保持する汎用型。
+--   v92.2.0 で with_select / with_expand / with_filter を追加。with_top / with_skip / with_order_by は v92.3.0 予定。
+--
+-- import スタイル: query.fav の型（SelectClause<T> 等）を修飾なしで使用する。
+--   これは query_client.fav と同じパターン（sap_odata.fav の修飾あり参照とは別スタイル）。
+
+use sap_odata.query
+
+-- 汎用クエリビルダー型
+-- 全フィールドは Option; Option.none() は「指定なし（デフォルト）」を意味する
+-- top_n / skip_n: 個別クエリ型（SalesOrderQuery 等）の top / skip と区別するため _n サフィックスを付与
+-- order_by: 現バージョンは String（"FieldName asc" 形式）。型安全な OrderByClause<T> は将来バージョンで追加予定
+public type QueryBuilder<T> = {
+    select_clause: Option<SelectClause<T>>,
+    expand_clause: Option<ExpandClause<T>>,
+    filter_expr:   Option<FilterExpr<T>>,
+    top_n:         Option<Int>,
+    skip_n:        Option<Int>,
+    order_by:      Option<String>
+}
+
+-- 全フィールドを none() で初期化した QueryBuilder を生成するコンストラクタ
+-- 使用例: bind q  <- query<SalesOrder>()
+--         bind q2 <- { q | top_n: Option.some(50) }   -- q2 は別名のため合法（E0018: 同名への再束縛が禁止）
+public fn query<T>() -> QueryBuilder<T> {
+    QueryBuilder {
+        select_clause: Option.none(),
+        expand_clause: Option.none(),
+        filter_expr:   Option.none(),
+        top_n:         Option.none(),
+        skip_n:        Option.none(),
+        order_by:      Option.none()
+    }
+}
+
+-- select チェーン: フィールドリストを SelectClause に変換して select_clause を更新する（v92.2.0）
+-- SelectClause<T> フィールド: fields: List<String>
+public fn with_select<T>(builder: QueryBuilder<T>, fields: List<String>) -> QueryBuilder<T> {
+    { builder | select_clause: Option.some(SelectClause { fields: fields }) }
+}
+
+-- expand チェーン: ナビゲーションプロパティを ExpandClause に変換して expand_clause を更新する（v92.2.0）
+-- ExpandClause<T> フィールド: navigation_properties: List<String>
+public fn with_expand<T>(builder: QueryBuilder<T>, nav_props: List<String>) -> QueryBuilder<T> {
+    { builder | expand_clause: Option.some(ExpandClause { navigation_properties: nav_props }) }
+}
+
+-- filter チェーン: FilterExpr をそのまま filter_expr に set する（v92.2.0）
+-- 使用例: bind f  <- Eq("Country", "JP")
+--         bind q2 <- with_filter(q, f)   -- FilterExpr<BusinessPartner> 等、T を文脈から推論
+public fn with_filter<T>(builder: QueryBuilder<T>, expr: FilterExpr<T>) -> QueryBuilder<T> {
+    { builder | filter_expr: Option.some(expr) }
+}
+
+-- top チェーン: 取得件数上限を set する（v92.3.0）
+-- 使用例: bind q2 <- with_top(q, 50)
+public fn with_top<T>(builder: QueryBuilder<T>, n: Int) -> QueryBuilder<T> {
+    { builder | top_n: Option.some(n) }
+}
+
+-- skip チェーン: 先頭 n 件をスキップする（ページネーション用）（v92.3.0）
+-- 使用例: bind q3 <- with_skip(q2, 100)   -- 3ページ目（page_size=50）
+public fn with_skip<T>(builder: QueryBuilder<T>, n: Int) -> QueryBuilder<T> {
+    { builder | skip_n: Option.some(n) }
+}
+
+-- order_by チェーン: ソートフィールドを set する（"FieldName asc" / "FieldName desc" 形式）（v92.3.0）
+-- 使用例: bind q4 <- with_order_by(q3, "SalesOrder desc")   -- q3 はチェーン前の QueryBuilder
+public fn with_order_by<T>(builder: QueryBuilder<T>, field: String) -> QueryBuilder<T> {
+    { builder | order_by: Option.some(field) }
+}
+
+-- ページ結果型（v92.4.0）
+-- items:     取得した 1 ページ分のエンティティリスト
+-- next_link: 次ページの OData URL（@odata.nextLink）。最終ページでは none()
+-- total:     総件数（@odata.count）。サーバーが返さない場合は none()
+--            ※ Favnir の Int は i64。OData の @odata.count は実用上 i64 の範囲に収まる。
+-- 設計メモ: v92.x の types.fav に PagedResult 型が存在するが、Page<T> はジェネリック版として独立して定義する。
+--   PagedResult（非ジェネリック）は後方互換のため残存する。将来的には Page<T> に統一予定。
+public type Page<T> = {
+    items:     List<T>,
+    next_link: Option<String>,
+    total:     Option<Int>
+}
+
+-- 全ページを自動取得する関数（v92.4.0 — スタブ実装）
+-- max_pages: 最大ページ数（無限ループ防止）
+-- fetcher:   1 ページ分のデータを取得する関数（AppCtx + QueryBuilder を受け取り Page を返す）
+-- NOTE: AppCtx は Rune ローダーによって暗黙的に解決される（sap_odata.fav と同パターン。明示的 import は不要）
+-- NOTE: 再帰ヘルパー（fetch_pages_acc）の完全実装は v92.5.0 以降
+-- NOTE: fetcher が返す Page<T>.next_link（OData の $skiptoken URL）は QueryBuilder<T> と直交する概念。
+--       v92.5.0 では fetcher のシグネチャを `fn(AppCtx, String) -> Result<Page<T>, String>` に
+--       変更し nextLink URL を直接受け取る方式を検討する。
+-- 使用例: bind bps <- fetch_all_pages(ctx, q2, 10, ctx.sap.business_partners_page)
+public fn fetch_all_pages<T>(
+    ctx:       AppCtx,
+    builder:   QueryBuilder<T>,
+    max_pages: Int,
+    fetcher:   fn(AppCtx, QueryBuilder<T>) -> Result<Page<T>, String>
+) -> Result<List<T>, String> {
+    Result.err("fetch_all_pages: not yet implemented (v92.4.0 stub)")
+}

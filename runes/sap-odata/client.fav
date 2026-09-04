@@ -2,6 +2,13 @@
 -- Basic 認証ヘッダーで SAP S/4HANA OData v4 エンドポイントに接続する。
 
 use sap_odata.types
+use sap_odata.delta
+use sap_odata.business_partner
+use sap_odata.sales_order
+use sap_odata.material
+use sap_odata.purchase_order
+use sap_odata.journal_entry
+use sap_odata.query_client
 
 -- 単一エンティティ取得（GET /EntitySet('key')）
 -- 戻り値は JSON 文字列（後続バージョンで型パース関数を追加する）
@@ -33,6 +40,7 @@ fn basic_auth_header(username: String, password: String) -> String {
 
 -- ページ単位取得（v87.6.0）
 -- page_size 件ずつ取得し PagedResult（items + next_token）を返す
+-- @internal: 未実装スタブ。v91.x.x で本実装予定。
 public fn odata_list_paged(
     cfg:        SapConfig,
     entity_set: String,
@@ -44,6 +52,7 @@ public fn odata_list_paged(
 
 -- 全件収集（v87.6.0）
 -- @odata.nextLink を再帰的にたどり max_pages ページまで収集する
+-- @internal: 未実装スタブ。v91.x.x で本実装予定。
 public fn odata_collect_all(
     cfg:        SapConfig,
     entity_set: String,
@@ -54,7 +63,69 @@ public fn odata_collect_all(
 }
 
 -- ODataParams からクエリ文字列を組み立てる（内部ヘルパー）
+-- @internal: 未実装スタブ。v91.x.x で本実装予定。
 -- v85.9.0 安定化バージョンで本実装予定のため、本バージョンでは骨格のみ（空文字列返し）
 fn build_query_string(params: ODataParams) -> String {
     ""
+}
+
+-- 本番用 SAP OData クライアント型（v90.4.0）
+-- SapClient interface の本番実装。SapConfig を保持し HTTP 経由で SAP S/4HANA にアクセスする。
+-- 各メソッドは対応する Rune モジュールの実装関数に cfg を渡して委譲する。
+public type SapODataClient = {
+    config: SapConfig
+}
+
+impl SapQueryClient for SapODataClient {
+    fn sales_orders_query(ctx: SapODataClient, q: SalesOrderQuery)
+        -> Result<List<SalesOrder>, String> {
+        Result.err("sales_orders_query: not yet implemented")
+    }
+    fn business_partners_query(ctx: SapODataClient, q: BusinessPartnerQuery)
+        -> Result<List<BusinessPartner>, String> {
+        Result.err("business_partners_query: not yet implemented")
+    }
+    fn materials_query(ctx: SapODataClient, q: MaterialQuery)
+        -> Result<List<Material>, String> {
+        Result.err("materials_query: not yet implemented")
+    }
+    fn purchase_orders_query(ctx: SapODataClient, q: PurchaseOrderQuery)
+        -> Result<List<PurchaseOrder>, String> {
+        Result.err("purchase_orders_query: not yet implemented")
+    }
+    fn journal_entries_query(ctx: SapODataClient, q: JournalEntryQuery)
+        -> Result<List<JournalEntry>, String> {
+        Result.err("journal_entries_query: not yet implemented")
+    }
+}
+
+impl SapClient for SapODataClient {
+    fn business_partners(ctx: SapODataClient, filter: BusinessPartnerFilter)
+        -> Result<List<BusinessPartner>, String> {
+        business_partner.business_partners(ctx.config, filter)
+    }
+    fn business_partner_by_id(ctx: SapODataClient, id: String)
+        -> Result<BusinessPartner, String> {
+        business_partner.business_partner_by_id(ctx.config, id, false)
+    }
+    fn sales_orders(ctx: SapODataClient, filter: SalesOrderFilter)
+        -> Result<List<SalesOrder>, String> {
+        sales_order.sales_orders(ctx.config, filter)
+    }
+    fn materials(ctx: SapODataClient, filter: MaterialFilter)
+        -> Result<List<Material>, String> {
+        material.materials(ctx.config, filter)
+    }
+    fn journal_entries(ctx: SapODataClient, filter: JournalFilter)
+        -> Result<List<JournalEntry>, String> {
+        journal_entry.journal_entries(ctx.config, filter)
+    }
+    fn batch(ctx: SapODataClient, req: BatchRequest<String>)
+        -> Result<BatchResponse<String>, String> {
+        Result.err("batch: not yet implemented")
+    }
+    fn delta_fetch<T>(ctx: SapODataClient, entity_set: String, delta_link: Option<String>)
+        -> Result<DeltaResult<T>, String> {
+        Result.err("delta_fetch: not yet implemented")
+    }
 }

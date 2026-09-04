@@ -430,15 +430,31 @@ impl Default for BackpressureConfig {
 
 // ── Bench config (v64.2.0) ────────────────────────────────────────────────────
 
-// ── SAP config (v85.1.0) ─────────────────────────────────────────────────────
+// ── SAP environments config (v96.2.0) ────────────────────────────────────────
 
-#[derive(Debug, Clone)]
-pub struct SapTomlConfig {
+/// `[sap.environments.<NAME>]` 単一環境エントリ（v96.2.0）
+#[derive(Debug, Clone, Default)]
+pub struct SapEnvEntry {
     pub base_url: Option<String>,
     pub client:   Option<String>,
     pub username: Option<String>,
     pub password: Option<String>,
-    pub auth:     Option<String>,
+}
+
+/// `[sap.environments]` セクション全体（v96.2.0）
+/// key: 環境名（"PRD" / "QAS" / "DEV" 等）、value: 接続設定
+pub type SapEnvironmentsConfig = std::collections::HashMap<String, SapEnvEntry>;
+
+// ── SAP config (v85.1.0) ─────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Default)]
+pub struct SapTomlConfig {
+    pub base_url:     Option<String>,
+    pub client:       Option<String>,
+    pub username:     Option<String>,
+    pub password:     Option<String>,
+    pub auth:         Option<String>,
+    pub environments: SapEnvironmentsConfig,  // v96.2.0
 }
 
 /// `[bench]` section of fav.toml (v64.2.0).
@@ -638,6 +654,7 @@ fn parse_fav_toml(content: &str) -> FavToml {
     let mut backpressure_cfg: Option<BackpressureConfig> = None;
     let mut bench_cfg: Option<BenchTomlConfig> = None;
     let mut sap_cfg: Option<SapTomlConfig> = None;
+    let mut current_sap_env = String::new(); // v96.2.0: [sap.environments.<NAME>] 用
     let mut section = "";
 
     for line in content.lines() {
@@ -780,6 +797,13 @@ fn parse_fav_toml(content: &str) -> FavToml {
         }
         if trimmed == "[bench]" {
             section = "bench";
+            continue;
+        }
+        if trimmed.starts_with("[sap.environments.") && trimmed.ends_with(']') {
+            // v96.2.0: [sap.environments.PRD] / [sap.environments.QAS] 等を検出
+            let env_name = &trimmed["[sap.environments.".len()..trimmed.len() - 1];
+            current_sap_env = env_name.to_string();
+            section = "sap_env";
             continue;
         }
         if trimmed == "[sap]" {
@@ -1317,13 +1341,7 @@ fn parse_fav_toml(content: &str) -> FavToml {
             }
             "sap" => {
                 // 注: 値の ${VAR} 展開は inject_sap_config() 内で行う（Snowflake と同方式）
-                let mut current = sap_cfg.take().unwrap_or(SapTomlConfig {
-                    base_url: None,
-                    client:   None,
-                    username: None,
-                    password: None,
-                    auth:     None,
-                });
+                let mut current = sap_cfg.take().unwrap_or_default();
                 if let Some((key, val)) = parse_kv(trimmed) {
                     match key {
                         "base_url" => current.base_url = Some(val.to_string()),
@@ -1331,6 +1349,23 @@ fn parse_fav_toml(content: &str) -> FavToml {
                         "username" => current.username  = Some(val.to_string()),
                         "password" => current.password  = Some(val.to_string()),
                         "auth"     => current.auth      = Some(val.to_string()),
+                        _ => {}
+                    }
+                }
+                sap_cfg = Some(current);
+            }
+            "sap_env" => {
+                // v96.2.0: [sap.environments.<NAME>] セクション内の KV をパース
+                let mut current = sap_cfg.take().unwrap_or_default();
+                if let Some((key, val)) = parse_kv(trimmed) {
+                    let entry = current.environments
+                        .entry(current_sap_env.clone())
+                        .or_default();
+                    match key {
+                        "base_url" => entry.base_url = Some(val.to_string()),
+                        "client"   => entry.client   = Some(val.to_string()),
+                        "username" => entry.username  = Some(val.to_string()),
+                        "password" => entry.password  = Some(val.to_string()),
                         _ => {}
                     }
                 }

@@ -1,0 +1,15 @@
+[package]
+name = "favnir4-showcase"
+version = "1.0.0"
+
+[quality]
+gate = "permissive"
+rules = ["not_null:0", "range:1:0:100"]
+
+[contract]
+input = "Favnir4ShowcaseContract"
+sla_target_ms = 500
+
+[observe]
+alert_threshold_ms = 1000
+slo_objective_pct = 99.0

@@ -1,12 +1,16 @@
 # Current — Favnir 進行状況
 
-最終更新: 2026-08-25 (v90.0.0)
+最終更新: 2026-09-04 (v100.0.0)
 
 ---
 
 ## 現行マスターロードマップ
 
-[roadmap/roadmap-v85.1-v90.0.md](roadmap/roadmap-v85.1-v90.0.md)
+前フェーズ（完了）: [roadmap/roadmap-v97.1-v98.0.md](roadmap/roadmap-v97.1-v98.0.md)（v98.0.0 宣言完了）
+
+前フェーズ（完了）: [roadmap/roadmap-v90.1-v95.0.md](roadmap/roadmap-v90.1-v95.0.md)
+
+前フェーズ（完了）: [roadmap/roadmap-v85.1-v90.0.md](roadmap/roadmap-v85.1-v90.0.md)
 
 前フェーズ（完了）: [roadmap/roadmap-v80.1-v85.0.md](roadmap/roadmap-v80.1-v85.0.md)
 
@@ -28,23 +32,23 @@
 
 ## 最新安定版
 
-**v89.0.0** — SAP Procurement 1.0 宣言 — 4019 tests（2026-08-24）
+**v100.0.0** — Favnir SAP Platform 1.0 宣言 — 4,279 tests（2026-09-04）
 
-- `cargo install fav --version "89.0.0"`
+- `cargo install fav --version "100.0.0"`
 
-前バージョン: v88.0.0 — SAP Sales 1.0 宣言 — 3997 tests
+前バージョン: v99.9.0 — コードフリーズ・最終確認 — 4,275 tests（2026-09-04）
 
 ---
 
 ## 進行中バージョン
 
-**v87.1.0〜v90.0.0**（SAP Integration Era — SAP Integration 1.0 宣言スプリント）
+**次スプリント計画中**（v99.x.x〜）
 
 ---
 
 ## 次に切る版
 
-**v88.1.0**（SAP Integration Era 次スプリント開始）
+**v100.0.0** — Favnir SAP Platform 1.0 宣言（v99.9.0 コードフリーズ完了後に実施）
 
 ---
 
@@ -94,5 +98,15 @@
 | v86.0 — SAP Foundation 1.0 | **完了** | v85.1〜v85.9（SapTomlConfig・sap-odata Rune・Docker Compose・SSM Terraform）（2026-08-23） |
 | v87.0 — SAP Master Data 1.0 | **完了** | v86.1〜v86.9（BusinessPartner CRUD・E2E パイプライン・Rune Registry 登録）（2026-08-23） |
 | v88.0 — SAP Sales 1.0 | **完了** | v87.1〜v87.9（SalesOrder CRUD・ページネーション・売上レポート・E2E パイプライン）（2026-08-23） |
+| v89.0 — SAP Procurement 1.0 | **完了** | v88.1〜v88.9（Material・PurchaseOrder・在庫×受注クロスチェック）（2026-08-24） |
+| v90.0 — SAP Integration 1.0 | **完了** | v89.1〜v89.9（JournalEntry・4 シナリオ E2E・fav infer・ドキュメント）（2026-08-25） |
+| v91.0 — SAP Ctx 統合 1.0 | **完了** | v90.1〜v90.9（SapClient interface・AppCtx.sap・MockSapClient）（2026-08-26） |
+| v92.0 — SAP OData Query 1.0 | **完了** | v91.1〜v91.9（$select/$expand/$filter 型表現・SapQueryClient）（2026-08-27） |
+| v93.0 — SAP QueryBuilder 1.0 | **完了** | v92.1〜v92.9（QueryBuilder<T>・Page<T>・W060 N+1 lint） |
+| v94.0 — SAP Metadata Infer 1.0 | **完了** | v93.1〜v93.9（$metadata XML → Favnir 型自動生成）（2026-08-30） |
+| v95.0 — SAP Advanced 1.0 | **完了** | v94.1〜v94.9（$batch・Lambda SnapStart・総合ベンチマーク）（2026-08-30） |
+| v96.0 — SAP Real-time 1.0 | **完了** | v95.1〜v95.9（$delta・Event Mesh・Deep Insert・fav sap-mock）（2026-09-01） |
+| v97.0 — SAP Multi-system 1.0 | **完了** | v96.1〜v96.9（SapEnvironment・Snowflake 同期・CleanCore・CrossSystem JOIN・RetryPolicy）（2026-09-01） |
+| v98.0 — SAP Workflow 1.0 | **完了** | v97.1〜v97.9（!Approval 型・IFlowClient・MockWorkflowClient・Ctx.mock_workflow・ガイド）（2026-09-02） |
 
 詳細は [INDEX.md](INDEX.md) / [roadmap/roadmap-v70.1-v75.0.md](roadmap/roadmap-v70.1-v75.0.md) を参照。

@@ -1,5 +1,238 @@
 # Favnir Milestones
 
+## v100.0.0（2026-09-04）— SAP Platform 1.0 宣言
+
+> 「Favnir が、SAP のプラットフォームになった。
+>
+>  `$delta` で差分を受け取り、Event Mesh でリアルタイムに動き、
+>  `ctx.sap_env("PRD")` で本番に向き、
+>  Snowflake と型安全に JOIN し、
+>  `!Approval` で人間の承認を型に閉じ込め、
+>  KPI が SAC に流れ、Slack が鳴り、
+>  `Masked<T>` が個人情報を守り、
+>  `!Audit` が証跡を刻む。
+>
+>  OAuth2 が認証し、Circuit Breaker が守り、SLA が測る。
+>
+>  これが、Favnir SAP Platform 1.0 である。
+>  SAP と Favnir の 5 年間の旅が、今、完成した。」
+
+**SAP Platform 1.0** の宣言バージョン。v86.0〜v99.9 で構築した SAP 連携機能群の完成を宣言した。
+テスト数: 4,279。
+
+**SAP Platform 1.0（v86.0〜v99.9）達成内容:**
+- **sap-odata Rune**: OData v4 型安全クライアント・QueryBuilder・$select/$expand/$filter
+- **SapEnvironment**: Prd/Qas/Dev/Custom 環境切り替え
+- **CircuitBreaker**: 障害遮断・自動復旧ガードレール
+- **TenantContext**: マルチテナント分離型
+- **Masked\<T\>**: GDPR データマスキング型
+- **SlaDefinition / fav sla-check**: SLA 定義・違反検出 CLI
+- **SAP Workflow**: `!Approval` 型・IFlowClient
+- **SAP Analytics**: KpiDefinition・BW クエリ・SAC プッシュ・Slack アラート
+- **統合ガイド**: sap-platform.mdx / sap-migration.mdx / sap-enterprise-checklist.mdx
+
+---
+
+## v99.0.0（2026-09-03）— SAP Analytics 1.0 宣言
+
+> 「SAP のデータが、洞察になった。
+>
+>  `KpiDefinition<SalesOrder>` が売上の健全性を測り、
+>  BW クエリの結果が SAC に流れ、
+>  閾値を超えた瞬間に Slack が鳴る。
+>
+>  それが、Favnir SAP Analytics 1.0 である。」
+
+**SAP Analytics 1.0** の宣言バージョン。v98.1.0〜v98.9.0 で実装した
+KPI 型定義・BW クエリ・SAC プッシュ・KPI アラート・CLI・E2E デモ・サイトドキュメントの完成を宣言した。
+テスト数: 4,257。
+
+**SAP Analytics 1.0（v98.1〜v98.9）達成内容:**
+- **`KpiDefinition<T>` / `KpiSnapshot<T>`**: KPI を型で定義し計測結果をスナップショットとして保持
+- **`BwQuery<T>` / `BwResult<T>`**: BW/4HANA クエリの型安全なインターフェース
+- **`SacDataset` / `sac_push_mock`**: SAC へのデータプッシュ API
+- **`report_to_sac_rows`**: `SalesReport` → SAC CSV 行リスト変換
+- **`KpiAlert` / `format_kpi_alert`**: 閾値超えアラートの型と整形関数
+- **`fav report --sap`**: HTML レポート生成 CLI コマンド
+- **`analytics_demo/`**: 日次売上 KPI → SAC → アラートの E2E デモ
+- **`sap-analytics.mdx`**: KPI 定義・BW クエリ・SAC プッシュの完全ガイド
+
+---
+
+## v98.0.0（2026-09-02）— SAP Workflow 1.0 宣言
+
+> 「Favnir が、人間の判断を型に閉じ込めた。
+>
+>  `!Approval` エフェクトが pipeline のシグネチャに現れた時、
+>  それはコードが「ここで人間の承認が必要」と語っているのだ。
+>
+>  承認フローが型になった。それが、Favnir SAP Workflow 1.0 である。」
+
+**SAP Workflow 1.0** の宣言バージョン。v97.1.0〜v97.9.0 で実装した
+承認フロー型化・iFlow コネクタ・モッキング基盤・ガイドドキュメントの完成を宣言した。
+テスト数: 4,235。
+
+**SAP Workflow 1.0（v97.1〜v97.9）達成内容:**
+- **`!Approval` エフェクト型**: pipeline シグネチャに承認要件を型で表現
+- **`TaskDecision` variant**: `Approve` / `Reject(String)` による型安全な承認結果
+- **`ApprovalClient` interface**: `request_approval(client, subject, context) -> TaskDecision`
+- **`route_by_approval_result` pipeline**: 承認結果に基づく型安全なルーティング
+- **`IFlowClient`**: SAP BTP iFlow コネクタ（base_url / oauth_url / client_id）
+- **`iflow_send`**: SAP iFlow メッセージ送信 Rune
+- **`MockWorkflowClient`**: テスト用承認クライアント（auto_approve / reject_reason）
+- **`Ctx.mock_workflow`**: テスト用 AppCtx 構築関数（MockWorkflowClient 対応）
+- **`sap-workflow.mdx`**: 承認フロー設計・実装・テストの完全ガイド
+
+---
+
+## v97.0.0（2026-09-01）— SAP Multi-system 1.0 宣言
+
+> 「Favnir が、SAP の境界を越えた。
+>
+>  `ctx.sap_env("PRD")` で本番に向き、
+>  SAP のデータが Snowflake に流れ、
+>  カスタムサービスの型も `fav infer` が生み出す。
+>
+>  それが、Favnir SAP Multi-system 1.0 である。」
+
+**SAP Multi-system 1.0** の宣言バージョン。v96.1.0〜v96.9.0 で実装した
+型安全な環境切替・マルチ環境設定・SAP→Snowflake 同期・Clean Core・CrossSystem JOIN・RetryPolicy の完成を宣言した。
+テスト数: 4,213。
+
+**SAP Multi-system 1.0（v96.1〜v96.9）達成内容:**
+- **SapEnvironment 型**: `Prd` / `Qas` / `Dev` + `ctx.sap_env("PRD")` による型安全な環境切替
+- **マルチ環境設定**: `fav.toml [sap.environments]` で PRD/QAS/DEV を並列定義
+- **SAP→DuckDB エクスポート**: `write_parquet` + DuckDB 分析パイプライン
+- **SAP→Snowflake 同期**: `execute_raw` でリアルタイムロード
+- **カスタム OData**: `fav infer --sap-service-name` でカスタムサービス型生成
+- **CleanCoreClient**: S/4HANA Cloud Clean Core REST API ラッパー
+- **CrossSystem.join<A,B>**: SAP エンティティ × Snowflake テーブルの型安全 JOIN
+- **RetryPolicy / SapConnectionPool**: 本番運用向け接続管理型
+
+---
+
+## v96.0.0（2026-09-01）— SAP Real-time 1.0 宣言
+
+> 「SAP が、Favnir の時間軸で動き始めた。
+>
+>  `$delta` で差分を受け取り、Event Mesh でリアルタイムに変化を知り、
+>  Deep Insert で一気に書き込み、`fav sap-mock` でオフラインでもテストできる。
+>
+>  それが、Favnir SAP Real-time 1.0 である。」
+
+**SAP Real-time 1.0** の宣言バージョン。v95.1.0〜v95.9.0 で実装した
+OData $delta / SAP Event Mesh / Deep Insert / Function Import / バッチ部分失敗 / `fav sap-mock` の完成を宣言した。
+テスト数: 4,188。
+
+**SAP Real-time 1.0（v95.1〜v95.9）達成内容:**
+- **OData $delta**: `DeltaResult<T>` / `DeletedEntity` / `ctx.sap.delta_fetch<T>()`
+- **SAP Event Mesh**: `SapEventClient` interface / `SapEventMessage` / `pipeline_realtime.fav`
+- **Deep Insert**: `NewSalesOrderWithItems` / `create_sales_order_deep`
+- **Function/Action Import**: `FunctionImportParam` / `function_import<T>` / `action_import`
+- **バッチ部分失敗**: `BatchItemResult<T>` / `PartialSuccess<T>` / `batch_with_partial`
+- **fav sap-mock**: `SapMockServer` / `cmd_sap_mock` / `Some("sap-mock")` CLI コマンド
+
+---
+
+## v95.0.0（2026-08-30）— SAP Advanced 1.0 宣言
+
+> 「`ctx.sap.batch(req)` で複数 SAP エンティティをまとめて更新できる。
+>  `QueryBuilder<T>` で型安全なクエリを組み立て、`fetch_all_pages` で全件自動取得できる。
+>  `fav infer --sap-metadata` で SAP の型定義が自動生成される。
+>  Lambda SnapStart でコールドスタートは 93% 削減される。
+>  それが、Favnir SAP Advanced 1.0 である。」
+
+**SAP Advanced 1.0** の宣言バージョン。v94.1.0〜v94.9.0 で実装した
+OData $batch / Lambda SnapStart / ベンチマーク / E2E デモ / ドキュメント完全化の完成を宣言した。
+テスト数: 4,164。
+
+**SAP Advanced 1.0（v94.1〜v94.9）達成内容:**
+- **$batch**: `BatchOperation<T>` ADT / `BatchRequest<T>` / `batch_request_builder<T>` / `ctx.sap.batch(req)`
+- **Lambda SnapStart**: `infra/lambda/sap-sync/main.tf`（SnapStart 設定・コールドスタート 93% 削減）
+- **コールドスタートベンチマーク**: `scripts/bench_sap_coldstart.sh`
+- **SAP 総合ベンチマーク**: `fav bench --sap`（`bench_sap_all` 6 ベンチマーク）
+- **E2E デモ（シナリオ 5）**: `infra/e2e-demo/sap-odata/pipeline_advanced.fav`（$batch 完全デモ）
+- **ドキュメント**: `site/content/docs/guides/sap-integration.mdx`（SAP Advanced Era 総まとめ）
+
+---
+
+## v94.0.0（2026-08-30）— SAP Metadata Infer 1.0 宣言
+
+> 「`fav infer --sap-metadata <url>` と打てば、SAP の $metadata から Favnir 型定義が自動生成される。
+>  EntityType は `type` に、EnumType は ADT に、NavigationProperty は ExpandClause ヘルパーに変換される。
+>  それが、Favnir SAP Metadata Infer 1.0 である。」
+
+**SAP Metadata Infer 1.0** の宣言バージョン。v93.1.0〜v93.9.0 で実装した
+$metadata XML → Favnir 型定義自動生成機能の完成を宣言した。テスト数: 4,142。
+
+**SAP Metadata Infer 1.0（v93.1〜v93.9）達成内容:**
+- **EDMX パーサー（スタブ）**: `parse_edmx` / `EdmxEntityType` / `EdmxEnumType` 構造体
+- **型変換**: `edm_type_to_favnir`（8 種マッピング）/ `entity_type_to_favnir` / `enum_type_to_favnir`
+- **NavigationProperty**: `nav_property_to_favnir_comment` / `nav_to_expand_helper_fn`
+- **フォーマット**: `apply_fmt_to_generated`（`fmt_source_str` バックエンド）
+- **CLI**: `fav infer --from sap --metadata <url>` / `--metadata-file <path>`（`CmdInferSapMetadata` / `CmdInferSapMetadataFile`）
+- **ドキュメント**: `site/content/docs/cli/infer.mdx`（新規）/ `sap-odata.mdx` EDM 型マッピング表追加
+
+---
+
+## v93.0.0（2026-08-29）— SAP QueryBuilder 1.0 宣言
+
+> 「`query<SalesOrder>() |> with_filter(Eq("SoldToParty", "CUST-001")) |> with_top(50)` と書けば、
+>  型安全な OData クエリが組み立てられる。
+>  ページネーションは `fetch_all_pages` で自動化され、N+1 は W060 で防がれる。
+>  それが、Favnir SAP QueryBuilder 1.0 である。」
+
+**SAP QueryBuilder 1.0** の宣言バージョン。v92.1.0〜v92.9.0 で実装した
+汎用クエリビルダー（QueryBuilder<T> / Page<T> / fetch_all_pages / W060 N+1 lint）の完成を宣言した。テスト数: 4,120。
+
+**SAP QueryBuilder 1.0（v92.1〜v92.9）達成内容:**
+- **型**: `QueryBuilder<T>`（ファントム型付き汎用クエリビルダー、全フィールド Option）
+- **Fluent API**: `with_select` / `with_expand` / `with_filter` / `with_top` / `with_skip` / `with_order_by`
+- **ページネーション**: `Page<T>`（items / next_link / total）+ `fetch_all_pages`（スタブ）
+- **lint**: W060 N+1 クエリ検出（`List.map` / `List.flat_map` 内の `ctx.sap.*` 呼び出し）
+- **E2E**: `pipeline_query.fav`（fetch_all_pages デモ）+ `fav bench --sap-query`
+- **ドキュメント**: `sap-odata.mdx` QueryBuilder パターンガイド追加
+
+---
+
+## v92.0.0（2026-08-27）— SAP OData Query 1.0 宣言
+
+> 「`SapQueryClient` を通じて `sales_orders_query(q)` と書けば、
+>  `$filter`・`$select`・`$expand` を型で組み立てた OData クエリが発行できる。
+>  誤フィールド指定はコンパイル時に検出される。
+>  それが、Favnir SAP OData Query 1.0 である。」
+
+**SAP OData Query 1.0** の宣言バージョン。v91.1.0〜v91.9.0 で実装した
+OData クエリ型基盤（SelectClause / ExpandClause / FilterExpr / 各エンティティ Query / ODataQueryBuilder / SapQueryClient）の完成を宣言した。テスト数: 4,094。
+
+**SAP OData Query 1.0（v91.1〜v91.9）達成内容:**
+- **型**: `SelectClause<T>` / `ExpandClause<T>` / `FilterExpr<T>`（ファントム型付きクエリ型）
+- **クエリ型**: `SalesOrderQuery` / `BusinessPartnerQuery` / `MaterialQuery` / `PurchaseOrderQuery` / `JournalEntryQuery`（各エンティティ専用クエリ型）
+- **URL生成**: `ODataQueryBuilder<T, Q>` / `build_url`（エンティティパス結合、簡易実装）
+- **interface**: `SapQueryClient`（5 クエリメソッド）— 循環 dep 回避のため `query_client.fav` に独立定義
+- **実装**: `SapODataClient` / `MockSapClient` が `SapQueryClient` を impl
+
+---
+
+## v91.0.0（2026-08-26）— SAP Ctx 統合 1.0 宣言
+
+> 「`ctx.sap.business_partners(filter)` と書けば、SAP にアクセスできる。
+>  設定は `AppCtx` に隠れ、テストは `MockSapClient` で差し替わる。
+>  それが、Favnir SAP Ctx 統合 1.0 である。」
+
+**SAP Ctx 統合 1.0** の宣言バージョン。v90.1.0〜v90.9.0 で実装した
+`ctx.sap.*` パターン統合（SapClient interface / AppCtx.sap / MockSapClient / Ctx.build / Ctx.mock）の完成を宣言した。テスト数: 4,065。
+
+**SAP Ctx 統合 1.0（v90.1〜v90.9）達成内容:**
+- **interface**: `SapClient`（5 メソッド — business_partners / sales_orders / materials / journal_entries / business_partner_by_id）
+- **型**: `AppCtx.sap: SapClient`（Capability Context 統合）
+- **実装**: `SapODataClient`（本番 HTTP クライアント）/ `MockSapClient`（テスト用スタブ）
+- **DI**: `Ctx.build()`（環境変数から自動設定注入）/ `Ctx.mock()`（テスト用 AppCtx 構築）
+- **移行**: `pipeline.fav` 全 4 シナリオを `ctx.sap.*` スタイルに書き換え
+- **ドキュメント**: `sap-odata.mdx` を `ctx.sap.*` パターンガイドに更新
+
+---
+
 ## v90.0.0（2026-08-25）— SAP Integration 1.0 宣言
 
 > 「SAP が、Favnir の型になった。

@@ -173,6 +173,8 @@ pub fn lint_program(program: &Program) -> Vec<LintError> {
     check_w057_query_without_upsert(program, &mut errors);
     check_w058_unbuffered_stream_inference(program, &mut errors);
     check_w059_llm_no_retry(program, &mut errors);
+    // v92.5.0: W060 SAP N+1 クエリ検出
+    check_w060_sap_n_plus_1(program, &mut errors);
     errors
 }
 
@@ -3541,3 +3543,236 @@ fn check_w058_unbuffered_stream_inference(_program: &Program, _errors: &mut Vec<
 // W059: LLM 呼び出しのリトライなし（外部 API 一時障害への無対策）
 // 今バージョンはスタブ（将来フェーズで Rune.llm / Rune.embed の呼び出しに retry 設定がないことを検出）
 fn check_w059_llm_no_retry(_program: &Program, _errors: &mut Vec<LintError>) {}
+
+// ── W060: SAP N+1 クエリ検出 (v92.5.0) ──────────────────────────────────────
+//
+// W060: N+1 クエリを検出しました。
+//   List.map / List.flat_map のコールバック内で `ctx.sap.*` を呼び出しています。
+//   `fetch_all_pages` または一括取得を使用することを検討してください。
+//
+// 検出対象: List.map(_, fn(_) { ctx.sap.* }) / List.flat_map(_, fn(_) { ctx.sap.* })
+
+fn check_w060_sap_n_plus_1(program: &Program, errors: &mut Vec<LintError>) {
+    for item in &program.items {
+        match item {
+            Item::FnDef(fd) => check_w060_in_block(&fd.body, errors),
+            Item::TrfDef(td) => check_w060_in_block(&td.body, errors),
+            Item::ImplDef(id) => {
+                for method in &id.methods {
+                    check_w060_in_block(&method.body, errors);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+fn check_w060_in_block(block: &Block, errors: &mut Vec<LintError>) {
+    check_w060_in_expr(&block.expr, errors);
+    for stmt in &block.stmts {
+        match stmt {
+            Stmt::Expr(e) => check_w060_in_expr(e, errors),
+            Stmt::Bind(b) => check_w060_in_expr(&b.expr, errors),
+            Stmt::Chain(c) => check_w060_in_expr(&c.expr, errors),
+            Stmt::Return(r) => check_w060_in_expr(&r.expr, errors),
+            Stmt::Yield(y) => check_w060_in_expr(&y.expr, errors),
+            Stmt::ForIn(f) => {
+                check_w060_in_expr(&f.iter, errors);
+                check_w060_in_block(&f.body, errors);
+            }
+            _ => {}
+        }
+    }
+}
+
+fn check_w060_in_expr(expr: &Expr, errors: &mut Vec<LintError>) {
+    match expr {
+        Expr::Apply(callee, args, span) => {
+            // List.map / List.flat_map のコールバック内 ctx.sap.* を検出
+            if w060_is_list_map_or_flat_map(callee) {
+                for arg in args.iter() {
+                    if let Expr::Closure(_, body, _) = arg {
+                        if w060_expr_mentions_ctx_sap(body) {
+                            errors.push(LintError::new(
+                                "W060",
+                                "W060: N+1 クエリを検出しました。\
+                                 List.map / List.flat_map のコールバック内で `ctx.sap.*` を呼び出しています。\
+                                 `fetch_all_pages` または一括取得を使用することを検討してください。",
+                                span.clone(),
+                            ));
+                        }
+                    }
+                }
+            }
+            check_w060_in_expr(callee, errors);
+            for arg in args {
+                check_w060_in_expr(arg, errors);
+            }
+        }
+        Expr::Block(block) => check_w060_in_block(block, errors),
+        Expr::Closure(_, body, _) => check_w060_in_expr(body, errors),
+        Expr::Pipeline(steps, _) => {
+            for step in steps {
+                check_w060_in_expr(step, errors);
+            }
+        }
+        Expr::If(cond, then_block, else_block_opt, _) => {
+            check_w060_in_expr(cond, errors);
+            check_w060_in_block(then_block, errors);
+            if let Some(else_block) = else_block_opt {
+                check_w060_in_block(else_block, errors);
+            }
+        }
+        Expr::Match(scrutinee, arms, _) => {
+            check_w060_in_expr(scrutinee, errors);
+            for arm in arms {
+                check_w060_in_expr(&arm.body, errors);
+            }
+        }
+        Expr::BinOp(_, lhs, rhs, _) => {
+            check_w060_in_expr(lhs, errors);
+            check_w060_in_expr(rhs, errors);
+        }
+        Expr::FieldAccess(obj, _, _) => check_w060_in_expr(obj, errors),
+        Expr::TypeApply(callee, _, _) => check_w060_in_expr(callee, errors),
+        Expr::Question(inner, _) => check_w060_in_expr(inner, errors),
+        Expr::EmitExpr(inner, _) => check_w060_in_expr(inner, errors),
+        Expr::AssertMatches(inner, _, _) => check_w060_in_expr(inner, errors),
+        Expr::AssertSchema { arg, .. } => check_w060_in_expr(arg, errors),
+        Expr::Collect(block, _) => check_w060_in_block(block, errors),
+        Expr::RecordConstruct(_, fields, _) => {
+            for (_, e) in fields {
+                check_w060_in_expr(e, errors);
+            }
+        }
+        Expr::RecordSpread(base, fields, _) => {
+            check_w060_in_expr(base, errors);
+            for (_, e) in fields {
+                check_w060_in_expr(e, errors);
+            }
+        }
+        Expr::RecordUpdate { base, fields, .. } => {
+            check_w060_in_expr(base, errors);
+            for (_, e) in fields {
+                check_w060_in_expr(e, errors);
+            }
+        }
+        Expr::FString(parts, _, _) => {
+            for part in parts {
+                if let FStringPart::Expr(e) = part {
+                    check_w060_in_expr(e, errors);
+                }
+            }
+        }
+        Expr::ListComp { expr, clauses, .. } | Expr::ResultComp { expr, clauses, .. } => {
+            check_w060_in_expr(expr, errors);
+            for clause in clauses {
+                match clause {
+                    CompClause::For { src, .. } => check_w060_in_expr(src, errors),
+                    CompClause::Guard(g) => check_w060_in_expr(g, errors),
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+fn w060_is_list_map_or_flat_map(expr: &Expr) -> bool {
+    // List.map<T>(...) の場合 callee は TypeApply(FieldAccess(...), ...) になる
+    let inner = if let Expr::TypeApply(callee, _, _) = expr {
+        callee.as_ref()
+    } else {
+        expr
+    };
+    if let Expr::FieldAccess(obj, method, _) = inner {
+        if let Expr::Ident(ns, _) = obj.as_ref() {
+            return ns == "List" && (method == "map" || method == "flat_map");
+        }
+    }
+    false
+}
+
+fn w060_expr_mentions_ctx_sap(expr: &Expr) -> bool {
+    match expr {
+        Expr::FieldAccess(obj, _, _) => {
+            // ctx.sap.something — obj は ctx.sap（FieldAccess(Ident("ctx"), "sap")）
+            if let Expr::FieldAccess(inner, field, _) = obj.as_ref() {
+                if let Expr::Ident(name, _) = inner.as_ref() {
+                    if name == "ctx" && field == "sap" {
+                        return true;
+                    }
+                }
+            }
+            w060_expr_mentions_ctx_sap(obj)
+        }
+        Expr::Apply(callee, args, _) => {
+            w060_expr_mentions_ctx_sap(callee)
+                || args.iter().any(|a| w060_expr_mentions_ctx_sap(a))
+        }
+        Expr::Block(block) => {
+            w060_expr_mentions_ctx_sap(&block.expr)
+                || block.stmts.iter().any(|s| match s {
+                    Stmt::Expr(e) => w060_expr_mentions_ctx_sap(e),
+                    Stmt::Bind(b) => w060_expr_mentions_ctx_sap(&b.expr),
+                    Stmt::Chain(c) => w060_expr_mentions_ctx_sap(&c.expr),
+                    _ => false,
+                })
+        }
+        Expr::Pipeline(steps, _) => steps.iter().any(|s| w060_expr_mentions_ctx_sap(s)),
+        Expr::BinOp(_, lhs, rhs, _) => {
+            w060_expr_mentions_ctx_sap(lhs) || w060_expr_mentions_ctx_sap(rhs)
+        }
+        Expr::If(cond, then_block, else_block_opt, _) => {
+            w060_expr_mentions_ctx_sap(cond)
+                || w060_block_mentions_ctx_sap(then_block)
+                || else_block_opt
+                    .as_ref()
+                    .map_or(false, |b| w060_block_mentions_ctx_sap(b))
+        }
+        Expr::Closure(_, body, _) => w060_expr_mentions_ctx_sap(body),
+        Expr::TypeApply(callee, _, _) => w060_expr_mentions_ctx_sap(callee),
+        Expr::Question(inner, _) => w060_expr_mentions_ctx_sap(inner),
+        Expr::EmitExpr(inner, _) => w060_expr_mentions_ctx_sap(inner),
+        Expr::AssertMatches(inner, _, _) => w060_expr_mentions_ctx_sap(inner),
+        Expr::AssertSchema { arg, .. } => w060_expr_mentions_ctx_sap(arg),
+        Expr::Collect(block, _) => w060_block_mentions_ctx_sap(block),
+        Expr::RecordConstruct(_, fields, _) => {
+            fields.iter().any(|(_, e)| w060_expr_mentions_ctx_sap(e))
+        }
+        Expr::RecordSpread(base, fields, _) => {
+            w060_expr_mentions_ctx_sap(base)
+                || fields.iter().any(|(_, e)| w060_expr_mentions_ctx_sap(e))
+        }
+        Expr::RecordUpdate { base, fields, .. } => {
+            w060_expr_mentions_ctx_sap(base)
+                || fields.iter().any(|(_, e)| w060_expr_mentions_ctx_sap(e))
+        }
+        Expr::FString(parts, _, _) => parts.iter().any(|p| match p {
+            FStringPart::Expr(e) => w060_expr_mentions_ctx_sap(e),
+            FStringPart::Lit(_) => false,
+        }),
+        Expr::ListComp { expr, clauses, .. } | Expr::ResultComp { expr, clauses, .. } => {
+            w060_expr_mentions_ctx_sap(expr)
+                || clauses.iter().any(|c| match c {
+                    CompClause::For { src, .. } => w060_expr_mentions_ctx_sap(src),
+                    CompClause::Guard(g) => w060_expr_mentions_ctx_sap(g),
+                })
+        }
+        _ => false,
+    }
+}
+
+fn w060_block_mentions_ctx_sap(block: &Block) -> bool {
+    w060_expr_mentions_ctx_sap(&block.expr)
+        || block.stmts.iter().any(|s| match s {
+            Stmt::Expr(e) => w060_expr_mentions_ctx_sap(e),
+            Stmt::Bind(b) => w060_expr_mentions_ctx_sap(&b.expr),
+            Stmt::Chain(c) => w060_expr_mentions_ctx_sap(&c.expr),
+            Stmt::Return(r) => w060_expr_mentions_ctx_sap(&r.expr),
+            Stmt::Yield(y) => w060_expr_mentions_ctx_sap(&y.expr),
+            Stmt::ForIn(f) => {
+                w060_expr_mentions_ctx_sap(&f.iter) || w060_block_mentions_ctx_sap(&f.body)
+            }
+            _ => false,
+        })
+}

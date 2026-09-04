@@ -1,0 +1,70 @@
+-- runes/sap-odata/workflow.fav
+-- SAP Workflow Management 型 + スタブ関数（v97.1.0〜v97.3.0）
+
+public type WorkflowStatus =
+    | Running
+    | Completed
+    | Canceled
+    | Suspended
+
+public type WorkflowInstance = {
+    instance_id: String,
+    definition:  String,
+    status:      WorkflowStatus,
+    started_at:  String
+}
+
+-- ワークフロー起動スタブ
+-- context は v97.x で SAP Workflow API ペイロードとして使用予定（現在はスタブ）
+public fn workflow_start(definition: String, context: String) -> WorkflowInstance {
+    WorkflowInstance {
+        instance_id: String.concat(["wf-", definition]),
+        definition:  definition,
+        status:      Running,
+        started_at:  "2026-09-01T00:00:00Z"  -- スタブ: 実際の値は SAP API レスポンスから取得
+    }
+}
+
+-- v97.2.0: タスク照会 + 完了操作
+
+
+public type WorkflowTask = {
+    task_id:    String,
+    subject:    String,
+    processor:  String,
+    created_at: String,
+    context:    String      -- JSON ペイロード
+}
+
+public type TaskDecision =
+    | Approve
+    | Reject(String)         -- 却下理由
+
+-- タスク照会スタブ
+-- instance_id は v97.x で SAP Workflow API クエリに使用予定（現在はスタブ）
+public fn workflow_tasks(instance_id: String) -> List<WorkflowTask> {
+    List.empty()
+}
+
+-- タスク完了スタブ（承認 / 却下）
+-- task_id は v97.x で SAP Workflow API 呼び出しに使用予定（現在はスタブ）
+public fn workflow_task_complete(task_id: String, decision: TaskDecision) -> String {
+    match decision {
+        Approve      -> String.concat(["completed:", task_id])
+        Reject(msg)  -> String.concat(["rejected:", task_id, ":", msg])
+    }
+}
+
+-- v97.3.0: ApprovalClient interface（!Approval エフェクトマーカー）
+
+-- 承認フロークライアント interface
+-- ctx.approval.request_approval() でアクセスする（SapClient と同様のパターン）
+public interface ApprovalClient {
+    fn request_approval(client: ApprovalClient, subject: String, context: String) -> TaskDecision
+}
+
+-- スタブ実装: 常に Approve を返す（テスト・オフライン実行用）
+-- subject / context は v97.x で実際の承認フロー API に使用予定（現在はスタブ）
+public fn ApprovalClient.request_approval(client: ApprovalClient, subject: String, context: String) -> TaskDecision {
+    Approve
+}

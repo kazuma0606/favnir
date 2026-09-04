@@ -1,0 +1,126 @@
+# v3 → v4 移行ガイド
+
+Favnir v3（v80.0）から v4（v85.0）への移行手順を説明します。
+
+## 主な変更点
+
+| 機能 | v3 | v4 |
+|---|---|---|
+| テスト | なし | Test-Driven Data（TestSuite / GoldenDataset / SchemaSnapshot）|
+| 品質 | 基本 QualityRule | Data Quality 2.0（QualityGate / AnomalyDetector）|
+| 契約 | なし | Pipeline Contracts（IoContract / SlaContract / ContractRegistry）|
+| 可観測性 | なし | Observability 2.0（PipelineMetrics / AlertRule / HealthDashboard）|
+
+## 移行手順
+
+### 1. `TestSuite` でテストを定義する
+
+**v3（テストなし）**
+```favnir
+-- テストの仕組みなし。手動で実行して確認していた。
+fn load_stage(ctx: AppCtx) -> Result<List<Row>, String> {
+    ctx.io.read_csv("data/input.csv")
+}
+```
+
+**v4**
+```favnir
+bind suite <- TestSuite {
+    name: "load_stage_tests",
+    cases: List.of(
+        StageTestCase {
+            stage_name: "load_stage",
+            input: List.empty(),
+            expected: List.empty(),
+        }
+    ),
+}
+```
+
+### 2. `QualityGate` で停止条件を設定する
+
+**v3**
+```favnir
+-- QualityRule のみ。ゲートなし。
+bind rule <- QualityRule {
+    name: "not_null",
+    dimension: QualityDimension.Completeness,
+    severity: QualitySeverity.Critical,
+    expression: "id IS NOT NULL",
+}
+```
+
+**v4**
+```favnir
+bind gate <- QualityGate {
+    name: "pipeline_gate",
+    min_quality_score: 0.95,
+    required_dimensions: List.of(QualityDimension.Completeness),
+}
+bind result <- evaluate_quality_gate(gate, score)
+```
+
+### 3. `IoContract` で入出力スキーマを宣言する
+
+**v3（契約なし）**
+```favnir
+-- スキーマは暗黙的。契約型なし。
+```
+
+**v4**
+```favnir
+bind contract <- IoContract {
+    name: "LoadStageContract",
+    version: "1.0.0",
+    input: List.of("id", "name"),
+    output: List.of("result"),
+}
+```
+
+### 4. `PipelineMetrics` で実行統計を収集する
+
+**v3（可観測性なし）**
+```favnir
+-- 実行時間やエラー数を収集する手段なし。
+```
+
+**v4**
+```favnir
+bind stage <- StageMetrics {
+    stage_name: "load_stage",
+    duration_ms: 42,
+    rows_processed: 1000,
+    rows_failed: 0,
+}
+bind metrics <- PipelineMetrics {
+    pipeline_name: "my-pipeline",
+    stages: List.of(stage),
+    total_duration_ms: 42,
+    started_at: "2026-08-22T00:00:00Z",
+}
+```
+
+## fav.toml の更新
+
+v4 機能を有効にするには `fav.toml` に以下のセクションを追加します。
+
+```toml
+[quality]
+enabled = true
+threshold = 0.95
+
+[contract]
+enabled = true
+registry = "contracts/"
+
+[observe]
+enabled = true
+metrics_format = "json"
+```
+
+## 参考
+
+- [Test-Driven Data](test-driven-data.mdx)
+- [Data Quality 2.0](data-quality.mdx)
+- [Pipeline Contracts](pipeline-contracts.mdx)
+- [Observability 2.0](observability.mdx)

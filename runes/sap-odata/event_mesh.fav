@@ -1,0 +1,19 @@
+-- SAP Event Mesh 接続型定義（v95.3.0〜）
+-- AMQP 1.0 プロトコル経由で SAP Event Mesh に接続するための interface 定義
+-- ctx パターンに従い AppCtx.sap_event フィールドとして注入される
+
+-- SAP Event Mesh から受信したメッセージ
+public type SapEventMessage = {
+    topic:     String,
+    payload:   String,
+    timestamp: String
+}
+
+-- SAP Event Mesh クライアント interface
+-- SapClient と同様に AppCtx のフィールドとして注入される
+-- ctx.sap_event.subscribe(topic) / ctx.sap_event.receive() / ctx.sap_event.publish(topic, payload) でアクセス
+public interface SapEventClient {
+    fn subscribe(ctx: SapEventClient, topic: String) -> Result<Unit, String>
+    fn receive(ctx: SapEventClient) -> Result<SapEventMessage, String>
+    fn publish(ctx: SapEventClient, topic: String, payload: String) -> Result<Unit, String>
+}

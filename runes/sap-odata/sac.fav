@@ -1,0 +1,29 @@
+-- runes/sap-odata/sac.fav
+-- SAP Analytics Cloud データプッシュ型（v98.3.0〜）
+
+use sap_odata.sales_order
+
+-- SAC Data Import Service 向けデータセット
+-- model_id: SAC モデル ID
+-- rows: CSV 形式の行データ（ヘッダー行 + データ行）
+public type SacDataset = {
+    model_id: String,
+    rows:     List<String>
+}
+
+-- テスト用モックヘルパー（実際の HTTP 通信は行わない）
+-- ctx.sap.sac_push() の実 API は v98.5.0 以降で実装予定
+public fn sac_push_mock(dataset: SacDataset) -> String {
+    String.concat(["pushed:", dataset.model_id])
+}
+
+-- SalesReport を SAC CSV 行リストに変換するヘルパー（v98.4.0〜）
+-- 先頭行はヘッダー行（"Date,Currency,Amount"）、以降がデータ行
+-- 形式: "YYYY-MM-DD,USD,12345.0"
+public fn report_to_sac_rows(report: sales_order.SalesReport) -> Result<List<String>, String> {
+    bind header <- Result.ok("Date,Currency,Amount")
+    bind rows   <- Result.ok(List.map(report.by_currency, |t|
+        String.concat([report.report_date, ",", t.currency, ",", Float.to_string(t.amount)])
+    ))
+    Result.ok(List.concat([header], rows))
+}

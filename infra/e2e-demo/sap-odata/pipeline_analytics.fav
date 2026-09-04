@@ -1,0 +1,27 @@
+-- infra/e2e-demo/sap-odata/pipeline_analytics.fav
+-- 日次売上レポート自動生成 pipeline（v98.4.0〜）
+-- SAP 売上データを集計し、SAC ダッシュボード向けデータとしてプッシュする
+
+import rune "sap-odata"
+
+-- !SapOData: ctx.sap.sales_orders() アクセスのマーカー
+-- !SapAnalytics: ctx.sap.sac_push() アクセスのマーカー
+pipeline daily_sales_report !SapOData !SapAnalytics {
+    stage Fetch {
+        bind orders <- ctx.sap.sales_orders(SalesOrderFilter {
+            date_from: Option.some("2026-09-02"),
+            date_to:   Option.none(),
+            top:       Option.some(5000)
+        })
+    }
+    |> stage Aggregate {
+        bind report <- build_sales_report("2026-09-02", orders)
+    }
+    |> stage Push {
+        bind rows <- report_to_sac_rows(report)
+        bind _    <- Result.ok(sac_push_mock(SacDataset {
+            model_id: "FAVNIR_DAILY_SALES",
+            rows:     rows
+        }))
+    }
+}

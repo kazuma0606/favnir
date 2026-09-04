@@ -1,0 +1,15 @@
+-- runes/sap-odata/clean_core.fav
+-- SAP S/4HANA Clean Core REST API wrapper（v96.6.0）
+-- 注: get 関数は v96.6.0 時点でのスタブ実装。将来バージョンでジェネリック形式に拡張予定。
+
+public type CleanCoreClient = {
+    base_url: String,
+    token:    String
+}
+
+-- Clean Core REST API への GET リクエスト（v96.6.0 スタブ）
+-- path 例: "/API_BUSINESS_PARTNER/A_BusinessPartner('BP001')"
+-- 戻り値は JSON 文字列（完全実装は将来バージョンで行う）
+public fn CleanCoreClient.get(client: CleanCoreClient, path: String) -> String {
+    String.concat(["GET ", client.base_url, path])
+}
